@@ -64,6 +64,19 @@ not the external gate. Run individually:
   gcd-tightening, strict-vs-nonstrict via δ, unbounded, near-max_int overflow, and
   run-twice determinism. The solver additionally self-checks every Farkas
   certificate at production (`Simplex.Farkas_error`), independent of these tests.
+- `make lia-adapter-test` — `smt/theories/lia` `Lia_adapter`, the frozen
+  `Theory.THEORY` binding (ADR-0005 M4). Exercises the adapter layer the engine
+  test does not: `Atom`/`Lit` ⇄ `Term` currency + idempotent register; `check`
+  verdict mapping (rational `Conflict`/`Lia_farkas` vs bound
+  `Propagations`/`Lia_bound`; `Final` `Sat`/`Split`/`Conflict`); the CONTRACT-SPLIT
+  requirement that a B&B `Split` is ≥2 distinct, genuinely-constraining atoms, plus
+  a `Split`→`Sat` drive; lazy `explain` from a push/pop-frame-scoped premise cache,
+  checked precedence-valid; `recheck-after-backtrack` (a root conflict survives an
+  unrelated push/pop); CONTRACT-POISON (an engine overflow surfaces as unknown via a
+  propagated exception + `overflows_to_unknown`, never a verdict; a bricked instance
+  raises `Lia.Poisoned` on reuse; a fresh adapter is unaffected); and run-twice
+  determinism. Its Farkas check runs from the adapter's PUBLIC premise literals
+  alone (the multipliers stay engine-internal, ADR-0005 D7).
 
 ## The harness (M0-harness)
 

@@ -60,7 +60,7 @@ OXCAML_LIBS := smt/core/oxsmt_core smt/interface/oxsmt_interface \
                smt/smtlib/oxsmt_smtlib smt/smtlib/parser/oxsmt_smtlib_parser \
                smt/theories/euf/oxsmt_euf smt/theories/lia/oxsmt_lia
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -173,6 +173,16 @@ euf-test:
 ##   run-twice determinism check (pivot count logged). Nonzero exit on any failed check.
 lia-test:
 	$(DUNE) exec smt/theories/lia/test/lia_test.exe
+
+## lia-adapter-test — smt/theories/lia THEORY-adapter (ADR-0005 M4) unit + property
+##   self-test (stdlib-only, deterministic). Currency round-trip (Atom/Lit <-> Term),
+##   conflict rule tags with a PUBLIC-OUTPUT Farkas verifier, bound propagation + lazy
+##   precedence-valid explain, Final Sat/Split/Conflict incl. a CONTRACT-SPLIT
+##   distinct-constraining-atoms check and Split->Sat drive, push/pop restoration +
+##   recheck-after-backtrack (E5), CONTRACT-POISON overflow->unknown with bricked reuse,
+##   idempotent register, and run-twice determinism. Nonzero exit on any failed check.
+lia-adapter-test:
+	$(DUNE) exec smt/theories/lia/test/lia_adapter_test.exe
 
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse

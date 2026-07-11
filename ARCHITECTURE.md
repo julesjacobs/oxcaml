@@ -100,10 +100,17 @@ atoms, parameterized by an opaque `'tok` premise token: `assert_atom` with the
 exact ℤ complement of a negated `Le`, `check` for rational feasibility,
 `solve_integer` branch-and-bound with a split budget → `Int_unknown`,
 `suggest_branch` mirroring the ADR-0005 Split, `register_atom`/`propagate` for
-bound propagation, and integer model extraction). The THEORY-functor adapter
-binding `'tok` to `Lit.t` is deferred to M4 (ADR-0005 freezes at M1-end).
-Determinism (I6): variables numbered in atom-arrival order, Bland's rule, branch
-by lowest `Term` tag. An escaped overflow leaves the tableau mid-pivot, so the
+bound propagation, and integer model extraction). `Lia_adapter` (M4) binds `Lia`
+to the frozen `Theory.THEORY`: `'tok = Lit.t`; `check Propagate` → rational
+`Conflict` (`Lia_farkas`) / bound `Propagations` (`Lia_bound`); `check Final` →
+`Sat` (integral) / `Split [x≤⌊v⌋; x≥⌊v⌋+1]` (delegating integer branching to
+CDCL(T), CONTRACT-SPLIT) / `Conflict`; lazy `explain` from a push/pop-frame-scoped
+premise cache (precedence-valid, CONTRACT-EX); `model` reads `Lia.model` as
+`Model.Int` bindings. CONTRACT-POISON: an engine `Rational.Overflow` propagates out
+of the THEORY op (engine degrades to `unknown`, I8), counted by
+`overflows_to_unknown`; reuse of a bricked instance raises `Lia.Poisoned` — never a
+verdict. Determinism (I6): variables numbered in atom-arrival order, Bland's rule,
+branch by lowest `Term` tag. An escaped overflow leaves the tableau mid-pivot, so the
 instance is bricked (`is_poisoned`): every later public entry raises
 `Lia.Poisoned` rather than return a verdict from corrupt state (review item 10) —
 discard and rebuild. All atom/equality/branch integer arithmetic routes through
@@ -112,8 +119,8 @@ codex L2/L4/L5); `new_slack` sums duplicate-var coefficients (codex L1); `check`
 detects an empty bound interval (asserted lower > upper) structurally rather than
 via a cached conflict, so an earlier-scope contradiction can't be lost to a later
 assert + pop (codex L3/R1). Unit + property tests under `smt/theories/lia/test/`
-(`make lia-test`); the codex L1/L3-R1/poison faults are guarded by registry
-mutants. Owner: TASKS.md M3-lia.
+(`make lia-test`, `make lia-adapter-test`); the codex L1/L3-R1/poison faults are
+guarded by registry mutants. Owner: TASKS.md M3-lia / M4-adapters.
 
 ## smt/interface (`oxsmt_interface`)
 Session API (`Session`): the sole client entry point — declare sorts/funs/consts,

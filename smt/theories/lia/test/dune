@@ -10,3 +10,12 @@
  (name lia_test)
  (modules lia_test)
  (libraries oxsmt_core oxsmt_lia))
+
+; The THEORY-adapter test (ADR-0005 M4). Same firewall: oxsmt_core + oxsmt_lia only. Its
+; independent Farkas verifier reconstructs half-planes from the adapter's PUBLIC premise
+; literals (no engine internals), per DESIGN §10.
+
+(executable
+ (name lia_adapter_test)
+ (modules lia_adapter_test)
+ (libraries oxsmt_core oxsmt_lia))
