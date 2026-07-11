@@ -108,10 +108,12 @@ instance is bricked (`is_poisoned`): every later public entry raises
 `Lia.Poisoned` rather than return a verdict from corrupt state (review item 10) —
 discard and rebuild. All atom/equality/branch integer arithmetic routes through
 the guarded `Rational` ops (raise → poison → unknown, never a silent wrap —
-codex L2/L4/L5); `new_slack` sums duplicate-var coefficients (codex L1); `pop`
-clears a pending conflict only when its triggering bound is undone (codex L3).
-Unit + property tests under `smt/theories/lia/test/` (`make lia-test`); the
-codex L1/L3 faults are guarded by registry mutants. Owner: TASKS.md M3-lia.
+codex L2/L4/L5); `new_slack` sums duplicate-var coefficients (codex L1); `check`
+detects an empty bound interval (asserted lower > upper) structurally rather than
+via a cached conflict, so an earlier-scope contradiction can't be lost to a later
+assert + pop (codex L3/R1). Unit + property tests under `smt/theories/lia/test/`
+(`make lia-test`); the codex L1/L3-R1/poison faults are guarded by registry
+mutants. Owner: TASKS.md M3-lia.
 
 ## smt/interface (`oxsmt_interface`)
 Session API (`Session`): the sole client entry point — declare sorts/funs/consts,
