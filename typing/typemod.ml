@@ -4184,12 +4184,22 @@ and normalize_signature_item = function
 
 let type_module_type_of env smod =
   let remove_aliases = has_remove_aliases_attribute smod.pmod_attributes in
+  (* When [module type of P] refers to a module [P] whose path is rooted entirely at
+     global (persistent, i.e. separately-compiled) units, its signature was loaded from
+     [.cmi] files and therefore cannot contain non-generalizable ("weak") type variables:
+     such variables cannot be written to a [.cmi]. In that case the PR#5036 check below is
+     provably vacuous, so we skip the full signature walk it would otherwise perform. This
+     is the common shape of large generated re-export aggregators
+     ([include module type of Dep.Params]). *)
+  let nongen_check_vacuous = ref false in
   let tmty =
     match smod.pmod_desc with
     | Pmod_ident lid -> (* turn off strengthening in this case *)
         let path, md, (mode, locks) =
           Env.lookup_module ~loc:smod.pmod_loc lid.txt env
         in
+          if List.for_all Ident.is_global (Path.heads path) then
+            nongen_check_vacuous := true;
           { mod_desc = Tmod_ident (path, lid);
             mod_type = md.md_type;
             mod_mode = mode, Some (locks, lid.txt, lid.loc);
@@ -4202,7 +4212,7 @@ let type_module_type_of env smod =
   in
   let mty = Mtype.scrape_for_type_of ~remove_aliases env tmty.mod_type in
   (* PR#5036: must not contain non-generalized type variables *)
-  check_nongen_modtype env smod.pmod_loc mty;
+  if not !nongen_check_vacuous then check_nongen_modtype env smod.pmod_loc mty;
   let zap_modality = Ctype.zap_modalities_to_floor_if_modes_enabled_at Stable in
   let mty =
     remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty
