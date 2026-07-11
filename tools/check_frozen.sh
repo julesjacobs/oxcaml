@@ -25,8 +25,10 @@ SPINE=SPINE.md
 # Frozen at the M0-core merge (ADR-0003): sort/symbol/term/context/iarr.
 # Frozen at the M1 THEORY freeze (ADR-0005 Tranche A): env/rank/theory_view (the
 # scheduled three) + the new THEORY vocabulary atom/lit/explanation/theory.
-# model.mli (Tranche B, M2) and sat.mli (Tranche C, M4) freeze later — see
-# decisions/adr-0005-freeze-plan.md.
+# Frozen at the M2 EUF-adapter merge (ADR-0005 Tranche B): model.mli — its [value]
+# variant's Uninterp witness (open q3) is now pinned by the EUF adapter's first real
+# model (Uninterp = congruence-class representative id). sat.mli (Tranche C, M4)
+# freezes later — see decisions/adr-0005-freeze-plan.md.
 FROZEN_FILES=(
   smt/core/sort.mli
   smt/core/symbol.mli
@@ -40,6 +42,7 @@ FROZEN_FILES=(
   smt/core/lit.mli
   smt/core/explanation.mli
   smt/core/theory.mli
+  smt/core/model.mli
 )
 
 case "${1:-check}" in
