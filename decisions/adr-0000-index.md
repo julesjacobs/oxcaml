@@ -23,3 +23,22 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   cache-key code); a codex (gpt-5.6) pass in addition to same-model adversarial
   review, after a cross-model retrospective caught four gate-reader holes
   same-model review had cleared. [accepted]
+- ADR-0008 — Shared SMT-LIB lexer (`smt/lexical`): one boundary-correct lexer
+  (SMT-LIB §3.1, headline invariant "token kind is never lost") replacing three
+  divergent hand-rolled lexers; the shipped printer, the smtlib parser, and the
+  gate reader all link it. Breaks the gate's zero-`smt/`-deps posture at the
+  lexical layer only (encoder + Lean kernel independence intact), backstopped by
+  the fuzzer cross-impl differential, Lean elaboration, and pre-labeled
+  benchmarks. [accepted]
+- ADR-0009 — Async review pipelining: PR-branch model; reviews and test runs run
+  independently against pinned shas, parallel and speculative; the integrator
+  pre-rebases/pre-tests queued branches; trivial-rebase exception (formatting-only
+  or disjoint hunks → carry verdicts forward + fast suite; semantic overlap /
+  touched reviewed hunks / conflict resolutions → full re-test + scoped
+  re-review). The DESIGN §11 linear-trunk / every-commit-green-at-its-landed-sha
+  invariant is unchanged. [accepted]
+<!-- ADR-0010 (internalization-based theory combination — each boundary node is
+     its own proxy; supersedes the explicit-purification drafts) is drafted
+     (logs/adr-purification-draft.md, v4) but NOT yet promoted; it promotes with
+     the stage-2 combination-rebuild landing. -->
+
