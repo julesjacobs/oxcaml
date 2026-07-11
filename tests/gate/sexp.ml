@@ -26,7 +26,17 @@
    layer below, which has no source position, so their message drops the [line N, col M]
    prefix the old lexer carried. The OUTCOME is unchanged (still {!Malformed}); only the
    diagnostic string differs. Lexical errors (unterminated quote/string, etc.) still carry
-   line/col via the shared lexer. *)
+   line/col via the shared lexer.
+
+   A second, TOKEN-level delta: the shared §3.1 lexer recognizes a [:keyword] as its own
+   token, so a name abutting a colon splits where the old hand-rolled lexer (which treated
+   [:] as an ordinary symbol byte) produced one atom — e.g. bare [set-info:status] now
+   lexes as [set-info] + [:status] (2 tokens) rather than the single atom
+   [set-info:status], and likewise any [foo:bar]. This only bites the no-separator form;
+   real SMT-LIB always writes the keyword space-separated ([(set-info :status …)]), where
+   both lexers agree, so no corpus query is affected — but the delta is real and
+   fail-closed (a spuriously split head just fails to match a known command →
+   {!Malformed}, never a mis-accept). *)
 
 module Lexer = Oxsmt_lexical.Lexer
 

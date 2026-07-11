@@ -702,6 +702,22 @@ let cmd_certify ~cache_dir ~logs_root ~timeout ~allow_cache file =
   Outcome.exit_code o
 ;;
 
+(* The [dump-canonical] diagnostic for one query: the canonical assertions PREFIXED with
+   the claim ([:status]). The claim is load-bearing for verdict ROUTING — it picks the
+   certify direction (sat vs unsat) and is folded into the cache key — yet
+   {!Canonical.canonical_query} covers only the assertions, so two files differing solely
+   in [:status sat] vs [unsat] would otherwise dump identically and the
+   reader-preservation differential would be BLIND to a status-parsing regression (review
+   HIGH gate.ml:1030). Including it makes the dump distinguish them. *)
+let dump_canonical (q : Ast.query) =
+  let status =
+    match q.status with
+    | None -> "none"
+    | Some v -> Ast.verdict_to_string v
+  in
+  Printf.sprintf "(status %s)\n%s" status (Canonical.canonical_query q)
+;;
+
 (* ---- selftest ---- *)
 
 let cmd_selftest () =
@@ -1029,6 +1045,27 @@ let cmd_selftest () =
      else (
        ok := false;
        print_endline "model quoted-name: FAIL (name not decoded)"));
+  (* dump-canonical must reflect the claim: two files identical but for [:status] route to
+     opposite certify directions, so the reader-preservation diff MUST see them as
+     different (review HIGH gate.ml:1030). *)
+  let dump s =
+    match Reader.of_string s with
+    | q -> Some (dump_canonical q)
+    | exception _ -> None
+  in
+  let base = "(set-logic QF_UFLIA)(declare-const x Int)(assert (= x 0))" in
+  (match
+     ( dump (base ^ "(set-info :status sat)(check-sat)")
+     , dump (base ^ "(set-info :status unsat)(check-sat)") )
+   with
+   | Some a, Some b when not (String.equal a b) ->
+     print_endline "dump-canonical status: OK (sat vs unsat dump differently)"
+   | Some _, Some _ ->
+     ok := false;
+     print_endline "dump-canonical status: FAIL (status-variant files dump identically)"
+   | _ ->
+     ok := false;
+     print_endline "dump-canonical status: FAIL (parse)");
   if !ok then 0 else 1
 ;;
 
@@ -1110,7 +1147,7 @@ let () =
       let src = In_channel.with_open_bin file In_channel.input_all in
       (match Reader.of_string src with
        | q ->
-         print_endline (Canonical.canonical_query q);
+         print_endline (dump_canonical q);
          0
        | exception Reader.Malformed m ->
          Printf.printf "MALFORMED %s\n" m;
