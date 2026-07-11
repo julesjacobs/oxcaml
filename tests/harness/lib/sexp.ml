@@ -6,7 +6,9 @@
    [(set-info :status ...)] and [(check-sat)] commands in a .smt2 file, and (b) parse the
    solver's machine-readable output blocks. *)
 
-type t = Atom of string | List of t list
+type t =
+  | Atom of string
+  | List of t list
 
 exception Parse_error of string
 
@@ -15,10 +17,12 @@ exception Parse_error of string
 let rec to_string = function
   | Atom a -> a
   | List l -> "(" ^ String.concat " " (List.map to_string l) ^ ")"
+;;
 
 let is_delim = function
   | ' ' | '\t' | '\n' | '\r' | '(' | ')' | ';' | '"' | '|' -> true
   | _ -> false
+;;
 
 (* Parse every top-level s-expression in [s], in order. Comments (';' to end-of-line),
    double-quoted strings (with "" escaping, per SMT-LIB 2.6), and |quoted symbols| are all
@@ -33,20 +37,20 @@ let parse_all (s : string) : t list =
   let rec skip_ws () =
     match peek () with
     | Some (' ' | '\t' | '\n' | '\r') ->
-        adv ();
-        skip_ws ()
+      adv ();
+      skip_ws ()
     | Some ';' ->
-        adv ();
-        let rec to_eol () =
-          match peek () with
-          | Some '\n' -> adv ()
-          | Some _ ->
-              adv ();
-              to_eol ()
-          | None -> ()
-        in
-        to_eol ();
-        skip_ws ()
+      adv ();
+      let rec to_eol () =
+        match peek () with
+        | Some '\n' -> adv ()
+        | Some _ ->
+          adv ();
+          to_eol ()
+        | None -> ()
+      in
+      to_eol ();
+      skip_ws ()
     | _ -> ()
   in
   let read_string () =
@@ -56,18 +60,18 @@ let parse_all (s : string) : t list =
     let rec loop () =
       match peek () with
       | None -> raise (Parse_error "unterminated string literal")
-      | Some '"' -> (
-          adv ();
-          match peek () with
-          | Some '"' ->
-              Buffer.add_char b '"';
-              adv ();
-              loop ()
-          | _ -> ())
+      | Some '"' ->
+        adv ();
+        (match peek () with
+         | Some '"' ->
+           Buffer.add_char b '"';
+           adv ();
+           loop ()
+         | _ -> ())
       | Some c ->
-          Buffer.add_char b c;
-          adv ();
-          loop ()
+        Buffer.add_char b c;
+        adv ();
+        loop ()
     in
     loop ();
     Atom (Buffer.contents b)
@@ -81,9 +85,9 @@ let parse_all (s : string) : t list =
       | None -> raise (Parse_error "unterminated |quoted symbol|")
       | Some '|' -> adv ()
       | Some c ->
-          Buffer.add_char b c;
-          adv ();
-          loop ()
+        Buffer.add_char b c;
+        adv ();
+        loop ()
     in
     loop ();
     Atom (Buffer.contents b)
@@ -93,9 +97,9 @@ let parse_all (s : string) : t list =
     let rec loop () =
       match peek () with
       | Some c when not (is_delim c) ->
-          Buffer.add_char b c;
-          adv ();
-          loop ()
+        Buffer.add_char b c;
+        adv ();
+        loop ()
       | _ -> ()
     in
     loop ();
@@ -106,8 +110,8 @@ let parse_all (s : string) : t list =
     match peek () with
     | None -> None
     | Some '(' ->
-        adv ();
-        Some (read_list [])
+      adv ();
+      Some (read_list [])
     | Some ')' -> raise (Parse_error "unexpected ')'")
     | Some '"' -> Some (read_string ())
     | Some '|' -> Some (read_pipe ())
@@ -117,14 +121,17 @@ let parse_all (s : string) : t list =
     match peek () with
     | None -> raise (Parse_error "unterminated list")
     | Some ')' ->
-        adv ();
-        List (List.rev acc)
-    | Some _ -> (
-        match read_sexp () with
-        | Some e -> read_list (e :: acc)
-        | None -> raise (Parse_error "end of input inside list"))
+      adv ();
+      List (List.rev acc)
+    | Some _ ->
+      (match read_sexp () with
+       | Some e -> read_list (e :: acc)
+       | None -> raise (Parse_error "end of input inside list"))
   in
   let rec all acc =
-    match read_sexp () with Some e -> all (e :: acc) | None -> List.rev acc
+    match read_sexp () with
+    | Some e -> all (e :: acc)
+    | None -> List.rev acc
   in
   all []
+;;

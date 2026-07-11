@@ -9,3 +9,5 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   features yet); Lean 4.31.0 via nix is the oracle. [accepted]
 - ADR-0003 — Term/sort representation: field layout + constructor set for the
   frozen core. [in progress]
+- ADR-0004 — Task branch naming: `oxsmt/task/<name>` collides with the `oxsmt`
+  trunk ref in git; amended to `task/<name>`. [accepted]

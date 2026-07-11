@@ -11,7 +11,8 @@ open Harness_lib
 
 let () =
   let file =
-    if Array.length Sys.argv >= 2 then Sys.argv.(1)
+    if Array.length Sys.argv >= 2
+    then Sys.argv.(1)
     else (
       prerr_endline "stub_solver: expected a .smt2 file argument";
       exit 2)
@@ -26,16 +27,16 @@ let () =
     match Sexp.parse_all text with
     | exception Sexp.Parse_error _ -> 0
     | sexps ->
-        List.fold_left
-          (fun acc sx ->
-            match sx with
-            | Sexp.List (Sexp.Atom ("check-sat" | "check-sat-assuming") :: _) ->
-                acc + 1
-            | _ -> acc)
-          0 sexps
+      List.fold_left
+        (fun acc sx ->
+           match sx with
+           | Sexp.List (Sexp.Atom ("check-sat" | "check-sat-assuming") :: _) -> acc + 1
+           | _ -> acc)
+        0
+        sexps
   in
   for _ = 1 to n_checks do
     print_string
-      "(result (verdict unknown) (counters (conflicts 0) (decisions 0) \
-       (propagations 0)))\n"
+      "(result (verdict unknown) (counters (conflicts 0) (decisions 0) (propagations 0)))\n"
   done
+;;

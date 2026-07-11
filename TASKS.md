@@ -15,6 +15,7 @@ criteria are the contract. Specs live in the task dispatch, not paraphrased here
 | M0-gate | Lean encoder + certification CI job + content-addressed cache | todo (master-only) | — | unsat→Lean theorem, sat→`decide`; cache keyed by hash+encoding+toolchain+grind cfg |
 | M0-honeypots | Nightly known-wrong verdicts + seeded mutants must turn the gate red | todo (master-only) | — | gate goes red on injected faults; validates the encoder during M0 |
 | M0-corpora | Fetch public SMT-LIB sets (QF_UF, QF_LIA, QF_UFLIA) into `../corpora` | in progress | (separate agent) | sets present, pre-labeled, not tracked in git |
+| M0-harness-hygiene | Harness follow-ups from review (LOW/NIT, none blocking; see `../logs/harness-review.md`) | todo | — | (1) parameterize Makefile's absolute opam path before off-box CI; (2) default `LOGS=../logs` resolves to `worktrees/logs` from a worktree, only correct from `main/`; (3) doc caveat that no-`:status` files have regression protection only, not a soundness gate; (4) `.err` temp file / pipe FDs leak on mid-function exception in `run_solver_raw`; (5) counter > `max_int` yields `Fail_error` instead of clamping to `>=10k` |
 
 ## Later milestones (see DESIGN.md §9)
 
