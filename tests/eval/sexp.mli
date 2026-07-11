@@ -1,5 +1,5 @@
 (** Minimal s-expression reader (N-version: written fresh from the SMT-LIB lexical
-    grammar, shared by the {!Reader} .smt2 front end and the {!Model} sidecar reader).
+    grammar, shared by the {!Reader} .smt2 front end and the {!Eval_model} sidecar reader).
     Deliberately tiny and independent of every other reader in the tree.
 
     Lexical rules covered (the QF_UFLIA subset + the model sidecar): parentheses,

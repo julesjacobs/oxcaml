@@ -19,6 +19,16 @@ module Term = Term
 module Context = Context
 module Theory_view = Theory_view
 
+(* ADR-0005 THEORY vocabulary, re-exported so the M4 theory adapters (the first consumers
+   of the seam) can name them as [Oxsmt_core.Atom] etc. Tranche-A froze
+   atom/lit/explanation/theory; [Model] is Tranche-B (M2). The frozen .mlis are unchanged
+   — this only widens the library's public surface. *)
+module Atom = Atom
+module Lit = Lit
+module Explanation = Explanation
+module Theory = Theory
+module Model = Model
+
 (** Test-only whitebox hook into the hash-cons bucket primitives (R1). NOT part of the
     frozen public surface and NOT for solver code — it exists so the core test suite can
     exercise [Node.equal_node] / [Node.hash_node] in isolation, i.e. detect a scalar

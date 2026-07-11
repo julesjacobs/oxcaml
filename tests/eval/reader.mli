@@ -4,7 +4,7 @@ open Oxsmt_core
     redundancy, task #74 — deliberately NOT the shipped [oxsmt_smtlib] parser nor the
     gate's reader; it shares no code with them). It builds frozen-API {!Term.t}s through
     {!Context}'s smart constructors, so every term it returns is well-sorted and
-    hash-consed by construction, and records enough declaration info for {!Model} to type
+    hash-consed by construction, and records enough declaration info for {!Eval_model} to type
     the sidecar tokens.
 
     Reject-don't-guess: any construct outside the subset raises {!Unsupported}; any
@@ -26,7 +26,7 @@ type status =
   | Unknown
   | No_status
 
-(** The declaration table, consumed by {!Model} to interpret sidecar tokens against each
+(** The declaration table, consumed by {!Eval_model} to interpret sidecar tokens against each
     symbol's declared sort. *)
 module Decls : sig
   type t

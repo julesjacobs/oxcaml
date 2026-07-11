@@ -23,7 +23,7 @@ let () =
   in
   match
     let query = Reader.read_file smt2 in
-    let model = Model.of_file query.Reader.decls model_path in
+    let model = Eval_model.of_file query.Reader.decls model_path in
     Eval.check model query.Reader.assertions
   with
   | Eval.Satisfies ->
@@ -36,7 +36,7 @@ let () =
   | exception Reader.Unsupported msg -> fail_2 "UNSUPPORTED" msg
   | exception Term.Unsupported msg -> fail_2 "UNSUPPORTED" ("term: " ^ msg)
   | exception Reader.Malformed msg -> fail_2 "MALFORMED" msg
-  | exception Model.Malformed msg -> fail_2 "MALFORMED" ("model: " ^ msg)
+  | exception Eval_model.Malformed msg -> fail_2 "MALFORMED" ("model: " ^ msg)
   | exception Sexp.Parse_error msg -> fail_2 "MALFORMED" ("syntax: " ^ msg)
   | exception Term.Sort_error msg -> fail_2 "MALFORMED" ("sort: " ^ msg)
   | exception Term.Overflow ->

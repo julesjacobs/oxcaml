@@ -60,7 +60,7 @@ OXCAML_LIBS := smt/core/oxsmt_core smt/interface/oxsmt_interface \
                smt/smtlib/oxsmt_smtlib smt/smtlib/parser/oxsmt_smtlib_parser \
                smt/theories/euf/oxsmt_euf smt/theories/lia/oxsmt_lia
 
-.PHONY: build build-oxcaml fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -96,6 +96,13 @@ build-oxcaml:
 ##   the term layer (ADR-0003). Nonzero exit on any failed check.
 core-test:
 	$(DUNE) exec smt/core/test/core_test.exe
+
+## core-prelude-test — external-consumer test for the M4 core prelude (task/core-prelude):
+##   an oxsmt_core-only lib names the ADR-0005 THEORY vocabulary (Atom/Lit/Explanation/
+##   Theory/Model) re-exported from Oxsmt_core and builds a Model via Model.of_alist,
+##   including its raise-on-duplicate-term contract. Nonzero exit on any failed check.
+core-prelude-test:
+	$(DUNE) exec tests/core_prelude/prelude_test.exe
 
 ## sat-test — CDCL SAT core (smt/solver) unit + property self-test (stdlib-only,
 ##   deterministic). Exact learned-clause/backjump/antecedent checks on textbook

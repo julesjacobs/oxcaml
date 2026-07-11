@@ -6,7 +6,7 @@
 (library
  (name oxsmt_eval)
  (libraries oxsmt_core)
- (modules sexp value reader model eval))
+ (modules sexp value reader eval_model eval))
 
 (executable
  (name eval_cli)

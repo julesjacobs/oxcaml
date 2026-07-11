@@ -26,7 +26,7 @@ open Oxsmt_core
 exception Eval_error of string
 
 (** [eval model t] evaluates [t] under [model]. *)
-val eval : Model.t -> Term.t -> Value.t
+val eval : Eval_model.t -> Term.t -> Value.t
 
 (** The spec-shaped entry (task #74): [env] resolves nullary symbols to values. This
     covers the constant + arithmetic + boolean + div/mod fragment; an applied (arity ≥ 1)
@@ -45,8 +45,8 @@ type outcome =
 (** [check model assertions] evaluates the assertions in order; [Satisfies] iff every one
     evaluates to [Bool true]. A non-Bool assertion is an {!Eval_error} (well-sorted
     assertions are Bool, so this signals a malformed query). *)
-val check : Model.t -> Term.t list -> outcome
+val check : Eval_model.t -> Term.t list -> outcome
 
 (** A bounded, indented dump of a term with each visited subterm's value — the
     failing-path detail printed to stderr on [MODEL-FAILS]. *)
-val explain : Model.t -> Term.t -> string
+val explain : Eval_model.t -> Term.t -> string

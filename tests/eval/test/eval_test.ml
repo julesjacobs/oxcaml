@@ -24,7 +24,7 @@ let report name ok detail =
 
 let outcome_of smt2 model_src =
   let q = Reader.read_string smt2 in
-  let m = Model.of_string q.Reader.decls model_src in
+  let m = Eval_model.of_string q.Reader.decls model_src in
   Eval.check m q.Reader.assertions
 ;;
 

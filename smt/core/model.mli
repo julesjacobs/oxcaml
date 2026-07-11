@@ -25,3 +25,14 @@ type t
     constrain. Total over asserted terms once [m] is produced after [Final]→[Sat]
     (CONTRACT-MODEL). *)
 val value : t -> Term.t -> value option
+
+(** [of_alist bindings] builds a model from term→value bindings — the first-consumer
+    construction path shared by the M4 theory adapters (ADR-0005 Tranche B). Additive and
+    encoding-agnostic: it does not pin the [Uninterp] witness encoding (open q3, the EUF
+    adapter's M2-freeze decision).
+
+    Raises [Invalid_argument] on a {b duplicate term}: a model binds each term exactly
+    once, so a repeat is a caller construction bug. This is a deliberate choice over a
+    silent last-wins, which would let two conflicting assignments coexist with one masking
+    the other (an L1-class fault). *)
+val of_alist : (Term.t * value) list -> t

@@ -120,7 +120,7 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
     | _, _ ->
       (match funs sym with
        | None -> raise (Eval_error ("model does not define function " ^ name))
-       | Some (table : Model.fun_table) ->
+       | Some (table : Eval_model.fun_table) ->
          let argv = List.map go (Iarr.to_list args) in
          let matches (case_args, _) =
            List.length case_args = List.length argv
@@ -133,8 +133,11 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
   go root
 ;;
 
-let eval (model : Model.t) (t : Term.t) : Value.t =
-  eval_general ~consts:(Model.lookup_const model) ~funs:(Model.lookup_fun model) t
+let eval (model : Eval_model.t) (t : Term.t) : Value.t =
+  eval_general
+    ~consts:(Eval_model.lookup_const model)
+    ~funs:(Eval_model.lookup_fun model)
+    t
 ;;
 
 let eval_term ~env (t : Term.t) : Value.t =
@@ -161,7 +164,7 @@ let head_and_children (t : Term.t) : string * Term.t list =
     , Iarr.to_list args )
 ;;
 
-let explain (model : Model.t) (t : Term.t) : string =
+let explain (model : Eval_model.t) (t : Term.t) : string =
   let buf = Buffer.create 256 in
   let rec go depth indent (node : Term.t) =
     let head, children = head_and_children node in
@@ -184,7 +187,7 @@ type outcome =
       ; trace : string
       }
 
-let check (model : Model.t) (assertions : Term.t list) : outcome =
+let check (model : Eval_model.t) (assertions : Term.t list) : outcome =
   let rec loop i = function
     | [] -> Satisfies
     | t :: tl ->
