@@ -45,6 +45,11 @@ not the external gate. Run individually:
   on outputs, determinism, and the `Unsupported` boundary. This evaluator is
   *not* the project's N-version model evaluator (that is a separate, later
   agent's work); it shares no code with the gate.
+- `make euf-test` — `smt/theories/euf` proof-producing congruence closure. Its
+  oracle is an independent **naive quadratic congruence closure** (a from-scratch
+  union-find + brute-force O(n²) congruence rule over a fixed term universe),
+  sharing no code with the engine's union-find / explanation forest / congruence
+  table. See the dedicated section below.
 
 ## The harness (M0-harness)
 
@@ -346,6 +351,42 @@ from scratch in the same test lib, plus model self-evaluation.
   reject rather than a silently-shorter formula that can flip unsat→sat
   undetected (sat-review item 11, the dubois100 corruption shape). The SATLIB
   `%`-footer early-stop is preserved.
+
+## EUF self-test (`smt/theories/euf/test/`, `make euf-test`)
+
+The proof-producing congruence closure (M2, `smt/theories/euf`) carries its own
+stdlib-only suite, co-located with the code. Its oracle is a **naive quadratic
+congruence closure** written from the EUF spec alone in the same test lib (a
+from-scratch union-find plus a brute-force O(n²) congruence rule iterated to a
+fixpoint over a fixed, subterm-closed term universe). It shares no code with the
+engine's union-find / explanation forest / congruence table, so agreement is a real
+cross-check. This is separate from the `.smt2` harness and the Lean gate: EUF is
+engine-independent and the ADR-0005 adapter does not exist yet.
+
+- **`make euf-test`** — `smt/theories/euf/test/euf_test.ml`. Deterministic
+  (fixed-seed xorshift), nonzero exit on any failed check. Covers:
+  - the textbook refutation `(f x)=a, x=y, (f y)≠a` with the **exact** conflict
+    premise set traced;
+  - deep congruence chains — `a=f(a)` collapsing every `fᵏ(a)`, and
+    `f³(x)=x ∧ f⁵(x)=x ⇒ f(x)=x` (pure congruence + transitivity, cross-checked);
+  - (dis)equality **propagation** of watched equality atoms with lazy explanations
+    (positive, congruence-positive, and disequality-negative cases);
+  - **randomized cross-check** (~4.7k assert-cases): random eq/neq sequences over a
+    10-node universe, comparing the full equivalence relation and the consistency
+    verdict against the naive oracle;
+  - **explanation soundness**: for implied equalities, the returned premises replayed
+    into a fresh naive closure suffice to re-derive the equality (the engine also
+    self-checks this internally on every explanation, DESIGN §7; here it is re-checked
+    from the test side);
+  - **push/pop**: randomized interleaved assert/push/pop/check vs a
+    recomputation-from-scratch oracle, including registration inside a frame being
+    undone on pop (e-node truncation + use-list restore);
+  - **determinism**: identical input sequence twice → identical propagation stream and
+    explanation.
+
+  Explanation *minimality* is deliberately **not** asserted: Nieuwenhuis-Oliveras gives
+  small (path-based) explanations, not minimal ones. A throwaway congruence-drop mutant
+  in `merge` is caught by the textbook, chain, and cross-check tests.
 
 ## SMT-LIB printer + parser tests (`smt/smtlib/test/`, M0-smtlib)
 

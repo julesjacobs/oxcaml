@@ -33,7 +33,7 @@ SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
 # (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
 SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
 
-.PHONY: build fmt test core-test sat-test sat-bench preprocess-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build fmt test core-test sat-test sat-bench preprocess-test euf-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -76,6 +76,17 @@ preprocess-test:
 ##   under tests/solver (links the test-only parser). Nonzero exit on any failed check.
 wiring-test:
 	$(DUNE) exec tests/solver/wiring_test.exe
+
+## euf-test — smt/theories/euf proof-producing congruence closure (Nieuwenhuis-
+##   Oliveras) unit + property self-test (stdlib-only, deterministic). The textbook
+##   refutation with exact conflict premises, deep congruence chains, (dis)equality
+##   propagation, thousands of randomized assert sequences cross-checked against an
+##   INDEPENDENT naive quadratic congruence closure (equivalence classes +
+##   consistency verdict), explanation-soundness replay, interleaved
+##   assert/push/pop/check vs scratch recomputation, and run-twice determinism.
+##   Nonzero exit on any failed check (TASKS.md M2-euf).
+euf-test:
+	$(DUNE) exec smt/theories/euf/test/euf_test.exe
 
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse

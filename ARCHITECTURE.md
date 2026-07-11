@@ -61,9 +61,18 @@ runner under `smt/solver/test/` (`make sat-test`, `make sat-bench`). Owner:
 TASKS.md M1-cdcl (SAT core); the clausifier is the separate M1 preprocess task.
 
 ## smt/theories/euf (`oxsmt_euf`)
-EUF congruence closure over a proof-producing union-find (Nieuwenhuis-Oliveras):
-e-graph, congruence table, merge queue; every merge explainable (I4). Implements
-THEORY. Owner: M2-euf.
+Proof-producing congruence closure (Nieuwenhuis-Oliveras): union-find over e-node
+ids (union-by-size, no path compression on the proof forest) + a separate
+explanation forest (original union edges, never rewritten) + a flat congruence
+table keyed on (symbol, argument-class ids) + a pending merge queue; every merge is
+explainable as a premise subset (I4), self-checked in debug/test by replay into a
+fresh independent naive closure (DESIGN §7). Only `App` is congruence-closed; every
+non-`App` subterm is an opaque leaf (the LIA/Nelson-Oppen sharing seam, ADR-0003
+dispatch split). Backtracking is a trail with level-granular push/pop (registration
+truncated on pop). The public `euf.mli` (`module Euf`) is the ENGINE, parametric
+over an opaque premise token `'p`; it is adapter-facing but freeze-agnostic (depends
+on `core` only, NOT on `solver`). The ADR-0005 THEORY adapter (mapping `Atom`/`Lit`
+→ `'p`) is a thin later layer, not yet built. Tests: `make euf-test`. Owner: M2-euf.
 
 ## smt/theories/lia (`oxsmt_lia`)
 LIA via incremental simplex over rationals + branch-and-bound for integrality

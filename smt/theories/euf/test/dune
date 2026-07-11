@@ -1,0 +1,12 @@
+; In-tree unit + property tests for smt/theories/euf. Depends only on oxsmt_core
+; and oxsmt_euf, so it honors the dependency firewall (I3) even though it lives
+; under smt/. Run via `make euf-test`; also built by `make build`.
+;
+; The naive quadratic congruence closure here is deliberately test-only and written
+; from the EUF spec alone (DESIGN §10): it shares no code with the engine's
+; union-find / explanation forest / congruence table.
+
+(executable
+ (name euf_test)
+ (modules euf_test)
+ (libraries oxsmt_core oxsmt_euf))
