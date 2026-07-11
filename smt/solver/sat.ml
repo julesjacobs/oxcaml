@@ -165,19 +165,24 @@ let create () =
 let set_trace t tr = t.trace <- tr
 
 (* Pristine-attach (seam lifecycle contract): a theory may be attached/detached only when
-   the solver has no clauses and an empty trail. This makes both misuse shapes
-   unrepresentable — attaching after clauses/units exist would leave the theory unaware of
-   trail literals it never heard (a wrong-[Sat] risk on theory-unsat instances), and
-   detaching mid-lifecycle would strand theory-propagated literals whose lazy reasons can
-   no longer be reconstructed. The driver installs the theory first, before asserting. *)
+   the solver is pristine — [ok], no clauses, empty trail. This makes the lifecycle safe
+   as a MECHANISM: attaching after clauses/units exist would leave the theory unaware of
+   trail literals it never heard (a wrong-[Sat] risk on theory-unsat instances); detaching
+   mid-lifecycle would strand theory-propagated literals whose lazy reasons can no longer
+   be reconstructed; and [ok] guards the subtle case where a theory returned an
+   unconditional [T_conflict []] — which sets [ok := false] with NOTHING stored, so the
+   solver *looks* clause/trail-pristine yet a reattach-then-solve would return wrong-unsat
+   off the leftover flag. A poisoned solver is not pristine; rebuild it. The driver
+   installs the theory first, before asserting. *)
 let set_theory t th =
   if
-    Dynarray.length t.clauses <> 0
+    (not t.ok)
+    || Dynarray.length t.clauses <> 0
     || Dynarray.length t.learnts <> 0
     || Dynarray.length t.trail <> 0
   then
     invalid_arg
-      "Sat.set_theory: a theory may only be (de)attached on a pristine solver (no \
+      "Sat.set_theory: a theory may only be (de)attached on a pristine solver (ok, no \
        clauses, empty trail)";
   t.theory <- th
 ;;
@@ -479,26 +484,23 @@ let transient_clause t lits =
   { id = fresh_id t; lits; activity = 0.0; learnt = false; deleted = false }
 ;;
 
-(* The lazy reason clause of a theory-propagated literal [lit] that is currently TRUE (the
-   case where 1UIP analysis resolves it): [lit ∨ ¬p₁ ∨ … ∨ ¬pₖ] where [p₁..pₖ] =
-   [theory.explain lit]. Every premise is currently true, so every [¬pᵢ] is false and the
-   clause forces [lit] — a genuine implication, valid at [lit]'s propagation time. *)
-let theory_reason_clause t lit =
+(* [theory.explain lit], validated against CONTRACT-EX: every premise must be an asserted
+   (true) literal that appears STRICTLY earlier on the trail than [lit] — the reason valid
+   at [lit]'s propagation time. A violation would make a malformed 1UIP back-edge (and can
+   close an unsound cycle) or a wrong failed-assumption core, so we raise (not assert, so
+   it survives -noassert) rather than trust it. Shared by both consumers of a theory
+   reason: the 1UIP path ({!theory_reason_clause}) and the assumption-core path
+   ({!analyze_final}). *)
+let theory_explain_checked t lit =
   let th =
     match t.theory with
     | Some th -> th
     | None -> assert false
   in
   let premises = th.explain lit in
-  let lits = Array.make (List.length premises + 1) lit in
   let lit_pos = Dynarray.get t.trail_pos (var_of_lit lit) in
-  List.iteri
-    (fun i p ->
-       (* CONTRACT-EX guard (raised, not asserted, so it survives -noassert): a reason
-         premise must be an asserted (true) literal that appears STRICTLY earlier on the
-         trail than the literal it explains — the reason valid at propagation time. A
-         violation would make a malformed 1UIP back-edge and can close an unsound cycle,
-         so we refuse to learn from it. *)
+  List.iter
+    (fun p ->
        if
          not
            (lit_val t p = 1
@@ -508,9 +510,19 @@ let theory_reason_clause t lit =
          raise
            (Theory_contract_violation
               "explain: premise not asserted strictly before the explained literal \
-               (CONTRACT-EX)");
-       lits.(i + 1) <- neg_lit p)
+               (CONTRACT-EX)"))
     premises;
+  premises
+;;
+
+(* The lazy reason clause of a theory-propagated literal [lit] that is currently TRUE (the
+   case where 1UIP analysis resolves it): [lit ∨ ¬p₁ ∨ … ∨ ¬pₖ] where [p₁..pₖ] are the
+   (validated) premises. Every premise is currently true, so every [¬pᵢ] is false and the
+   clause forces [lit] — a genuine implication, valid at [lit]'s propagation time. *)
+let theory_reason_clause t lit =
+  let premises = theory_explain_checked t lit in
+  let lits = Array.make (List.length premises + 1) lit in
+  List.iteri (fun i p -> lits.(i + 1) <- neg_lit p) premises;
   transient_clause t lits
 ;;
 
@@ -698,14 +710,13 @@ let analyze_final t p =
           done
         | Theory_prop ->
           (* a theory-propagated literal's premises are its reason; mark them (mirrors the
-             [Implied_by] clause body, whose slot 0 is [l] itself and is skipped) *)
-          (match t.theory with
-           | None -> ()
-           | Some th ->
-             List.iter
-               (fun q ->
-                  if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
-               (th.explain l)))
+             [Implied_by] clause body, whose slot 0 is [l] itself and is skipped). Same
+             strict CONTRACT-EX validation as the 1UIP path — a precedence-violating
+             reason here would silently produce a wrong failed-assumption core, so it must
+             raise. *)
+          List.iter
+            (fun q -> if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
+            (theory_explain_checked t l))
     done;
     Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked);
   List.map neg_lit (Array.to_list (Dynarray.to_array out))

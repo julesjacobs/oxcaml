@@ -74,12 +74,20 @@ type mock_config =
   ; final_conflicts :
       Sat.lit list list (* extra conflicts recognized only at Final effort *)
   ; final_splits : Sat.lit list list
-    (* clauses emitted one-at-a-time at Final effort (CONTRACT-SPLIT disjunctions) until all
-     are exhausted *)
+    (* clauses emitted one-at-a-time at Final effort (CONTRACT-SPLIT disjunctions) until
+         all are exhausted *)
+  ; explain_override : (Sat.lit -> Sat.lit list) option
+    (* if set, [explain] returns this instead of the rule antecedents — used to inject a
+     CONTRACT-EX-violating reason and confirm the core raises rather than trusts it *)
   }
 
 let empty_config =
-  { conflicts = []; implications = []; final_conflicts = []; final_splits = [] }
+  { conflicts = []
+  ; implications = []
+  ; final_conflicts = []
+  ; final_splits = []
+  ; explain_override = None
+  }
 ;;
 
 type mock =
@@ -146,10 +154,13 @@ let make_mock st config =
   in
   let explain l =
     incr explain_calls;
-    (* the reason for a propagated literal is the antecedents of the rule that fired it *)
-    match List.find_opt (fun (_, cons) -> cons = l) config.implications with
-    | Some (ants, _) -> ants
-    | None -> []
+    match config.explain_override with
+    | Some f -> f l
+    | None ->
+      (* the reason for a propagated literal is the antecedents of the rule that fired it *)
+      (match List.find_opt (fun (_, cons) -> cons = l) config.implications with
+       | Some (ants, _) -> ants
+       | None -> [])
   in
   ignore is_false;
   { theory = { Sat.on_assign; on_backtrack; check; explain }
@@ -390,6 +401,94 @@ let test_set_theory_after_assert_raises () =
   check "attach-after-assert: raises" raised
 ;;
 
+(* Lifecycle, subtle case: an unconditional theory conflict (T_conflict []) sets the
+   solver's ok flag false with NOTHING stored — no clauses, empty trail — so it LOOKS
+   pristine. Re-(de)attaching a theory on it must still raise: a poisoned solver is not
+   pristine, and reusing it would return wrong-unsat off the leftover flag. *)
+let test_poisoned_not_pristine () =
+  let s = Sat.create () in
+  (* conflict set [] is vacuously "all asserted" ⇒ the theory reports T_conflict [] on the
+     first check, an unconditional contradiction *)
+  let mock = make_mock s { empty_config with conflicts = [ [] ] } in
+  Sat.set_theory s (Some mock.theory);
+  let r = Sat.solve s in
+  check "poison: unconditional T_conflict [] → unsat" (r = Sat.Unsat);
+  let raised =
+    match Sat.set_theory s None with
+    | () -> false
+    | exception Invalid_argument _ -> true
+  in
+  check "poison: (de)attach on a poisoned (looks-pristine) solver raises" raised
+;;
+
+(* Negative test for the strict CONTRACT-EX guard on BOTH paths that reconstruct a theory
+   reason. A theory that propagates c (from a) but then EXPLAINS c with an unasserted
+   premise d (trail_pos -1, precedence-violating) must make the core RAISE
+   Theory_contract_violation, not silently learn a bogus clause / core. *)
+let solve_raises_contract_violation s assumptions =
+  match Sat.solve ~assumptions s with
+  | _ -> false
+  | exception Sat.Theory_contract_violation _ -> true
+;;
+
+let test_bad_explain_1uip () =
+  (* test_lazy_explain_called shape: c is resolved during 1UIP, so theory_reason_clause
+     runs the guard on explain(c). *)
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s
+  and d = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b
+  and lc = Sat.pos c
+  and ld = Sat.pos d in
+  let mock =
+    make_mock
+      s
+      { empty_config with
+        implications = [ [ la ], lc ]
+      ; explain_override = Some (fun _ -> [ ld ]) (* d is never asserted ⇒ violation *)
+      }
+  in
+  Sat.set_theory s (Some mock.theory);
+  Sat.add_clause s [ Sat.neg a; lb ];
+  Sat.add_clause s [ Sat.neg b; Sat.neg c ];
+  check
+    "bad-explain-1uip: raises Theory_contract_violation"
+    (solve_raises_contract_violation s [ la ])
+;;
+
+let test_bad_explain_final () =
+  (* test_explain_after_backjump shape: explain(c) is consulted by analyze_final; the same
+     guard must fire there too. *)
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s
+  and e = Sat.new_var s
+  and d = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b
+  and lc = Sat.pos c
+  and le = Sat.pos e
+  and ld = Sat.pos d in
+  let mock =
+    make_mock
+      s
+      { empty_config with
+        implications = [ [ la ], lc ]
+      ; explain_override = Some (fun _ -> [ ld ])
+      }
+  in
+  Sat.set_theory s (Some mock.theory);
+  Sat.add_clause s [ Sat.neg c; Sat.neg b; le ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg b; Sat.neg e ];
+  check
+    "bad-explain-final: raises Theory_contract_violation"
+    (solve_raises_contract_violation s [ la; lb ])
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Final-check split (T_lemma). With no clauses and phase-saving deciding false-first, the
    solver reaches the all-false model; the theory then splits on (b ∨ c), forcing more
@@ -597,7 +696,10 @@ let () =
   test_lazy_explain_not_called ();
   test_propagate_into_false ();
   test_explain_after_backjump ();
+  test_bad_explain_1uip ();
+  test_bad_explain_final ();
   test_set_theory_after_assert_raises ();
+  test_poisoned_not_pristine ();
   test_final_split ();
   test_final_split_empty_unsat ();
   test_final_conflict ();
