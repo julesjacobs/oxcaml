@@ -20,6 +20,15 @@ ADR rather than comply. Read DESIGN.md for the full plan (start with §1, §3, �
   first. The Makefile already pins it.
 - Lean 4.31.0 oracle: `~/.dispatch/bin/lean` (nix via `dispatch add-nix`;
   `by grind` verified working). Alternative: `sysdep-run -attr-path lean4 -- lean`.
+- OxCaml compiler (`5.4.0+ox`, flambda2): present in the local nix store, resolved
+  with no network via the boot sysdep `oxcaml.r5`
+  (`sysdep-run -source boot -attr-path oxcaml.r5 -print-bin-dir`). `make build-oxcaml`
+  uses it to compile the shipped `smt/` libraries (keeps "pure OxCaml" true by test).
+  It is NOT dispatch-registered for `-source latest` (no `oxcaml.v1.sexp`), so
+  `sysdep-run -source latest -attr-path oxcaml` / `dispatch add-nix oxcaml` 404 — use
+  `-source boot`. Caveat: the nix OxCaml runtime targets a newer glibc than this el8
+  box, so linking a native `.exe` fails (`__isoc23_strtol`/`dlopen` undefined refs);
+  `build-oxcaml` therefore compiles libraries + type-checks only, never links exes.
 - No Z3/cvc5. No network in the dev loop.
 - Siblings of `main/`, never in git: `../cache` (Lean oracle cache),
   `../corpora` (benchmark sets), `../logs` (full tool output), `../worktrees`

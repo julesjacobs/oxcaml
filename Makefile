@@ -36,11 +36,43 @@ PERF_CASES ?= tests/perf/cases
 # (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
 SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
 
-.PHONY: build fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
+# OxCaml compile check (task oxcaml-check). The shipped smt/ libraries must compile
+# under Jane Street's OxCaml compiler too, not just stock OCaml — "pure OxCaml" kept
+# true by test, not intention. The compiler is resolved from the boot sysdeps with no
+# network (`sysdep-run -source boot -attr-path oxcaml.r5`); override OXCAML_BIN to pin a
+# different install. Built in an isolated dir so it never clobbers the stock _build.
+OXCAML_BIN       ?= $(shell sysdep-run -source boot -attr-path oxcaml.r5 -print-bin-dir 2>/dev/null)
+OXCAML_BUILD_DIR ?= _build-oxcaml
+# The shipped libraries (archive stem = dir/libname); excludes tests/ and tools/.
+OXCAML_LIBS := smt/core/oxsmt_core smt/interface/oxsmt_interface \
+               smt/preprocess/oxsmt_preprocess smt/solver/oxsmt_solver \
+               smt/smtlib/oxsmt_smtlib smt/smtlib/parser/oxsmt_smtlib_parser \
+               smt/theories/euf/oxsmt_euf smt/theories/lia/oxsmt_lia
+
+.PHONY: build build-oxcaml fmt test core-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test euf-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
 	$(DUNE) build @@default
+
+## build-oxcaml — compile the shipped smt/ libraries with the OxCaml toolchain
+##   (task oxcaml-check). Keeps "pure OxCaml" TRUE BY TEST: type-checks all of smt/
+##   then compiles every shipped library to native (.cmxa) + bytecode (.cma) with
+##   OxCaml's flambda2 compiler, in an isolated build dir. This is NOT compiler
+##   integration (DESIGN §1 non-goal) — same dune project, a different compiler on
+##   PATH. The inline PATH puts OxCaml's ocamlopt first and drops opam's ocamlfind,
+##   so dune's context compiler is OxCaml. Deliberately builds NO native executables:
+##   the nix OxCaml runtime targets a newer glibc than this el8 box's system linker,
+##   so linking an .exe fails on __isoc23_strtol / dlopen undefined refs — a
+##   C-toolchain plumbing mismatch, not a source incompatibility (library compilation
+##   is unaffected). Nightly-intent, alongside status-fresh and mutants.
+build-oxcaml:
+	@test -n "$(OXCAML_BIN)" || { echo "build-oxcaml: OxCaml toolchain not found (sysdep-run -source boot -attr-path oxcaml.r5); set OXCAML_BIN=" >&2; exit 1; }
+	@echo "build-oxcaml: using $$($(OXCAML_BIN)/ocamlopt.opt -version) at $(OXCAML_BIN)"
+	PATH="$(OXCAML_BIN):/usr/bin:/bin" $(DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) @smt/check
+	PATH="$(OXCAML_BIN):/usr/bin:/bin" $(DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) \
+	  $(foreach l,$(OXCAML_LIBS),$(l).cmxa $(l).cma)
+	@echo "build-oxcaml: OK — smt/ type-checks and all shipped libraries compile (native + bytecode) under OxCaml"
 
 ## core-test — smt/core unit + property self-test (stdlib-only, deterministic).
 ##   Separate from `test` (the .smt2 harness): this is the in-tree TCB check for
