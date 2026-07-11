@@ -3,8 +3,10 @@
 ; oxsmt_lexical (ADR-0008) — so the token-boundary bug family is fixed once rather than in
 ; three divergent lexers. This narrows the DESIGN §10 N-version isolation at the LEXICAL
 ; layer only; the encoder and the Lean kernel (where oracle independence actually lives)
-; link nothing else from smt/. Uncorrelated backstops: the fuzzer's cross-impl differential,
-; Lean elaboration, and pre-labeled benchmarks (ADR-0008).
+; link nothing else from smt/. Uncorrelated backstops that DO exist: Lean elaboration and
+; the pre-labeled benchmarks (ADR-0008), plus the `dump-canonical` tool for reader-preservation
+; diffs over the corpus. A true cross-impl differential (this reader vs oxsmt_smtlib_parser
+; over shared input) is NOT yet built — it remains a deferred obligation (F4), not a live target.
 
 (executable
  (name gate)

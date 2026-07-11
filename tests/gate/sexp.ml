@@ -14,10 +14,12 @@
 
    {b Trust-topology note (ADR-0008):} the gate now links a module under [smt/], narrowing
    the DESIGN §10 N-version isolation at the LEXICAL layer only. The uncorrelated
-   backstops remain: the cross-implementation differential (gate reader vs the smtlib
-   parser over the same input, in the round-trip fuzzer), Lean elaboration, and
-   pre-labeled benchmarks. The encoder and the Lean kernel — where oracle independence
-   actually lives — are untouched.
+   backstops that actually exist are Lean elaboration and the pre-labeled benchmarks, plus
+   the [dump-canonical] tool for reader-preservation diffs over the corpus. A true
+   cross-implementation differential (this reader vs the [Oxsmt_smtlib] parser over the
+   same input) is NOT yet implemented — it is a deferred obligation (review F4), not a
+   live target. The encoder and the Lean kernel — where oracle independence actually lives
+   — are untouched.
 
    {b Behavior delta vs the previous hand-rolled lexer (documented, adjudicated):}
    structural errors ("unexpected ')'", "unbalanced '('") come from the token-nesting

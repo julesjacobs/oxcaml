@@ -71,6 +71,16 @@ let parse_fun name rest =
   | Some default -> { default; cases = List.rev !cases }
 ;;
 
+(* Model sidecars are read with the SMT-LIB {!Sexp} reader by DESIGN, not by oversight
+   (contrast the cache-entry format, which was decoupled from it — see cache.ml). A model
+   names the query's symbols ([(const x …)], [(sort S …)], [(fun f …)]), so it MUST
+   tokenize symbols exactly as the query did — same shared §3.1 lexer — or a symbol like
+   [|1x|] would fail to match its declaration. Its value payloads cannot hit the lexer's
+   digit-leading numeral trap (review F2): a value is a signed integer literal, a Fin
+   index (both pure digit runs), or [true]/[false] — never a digit-leading token with a
+   non-digit char; a digit-leading symbol NAME must be [|quoted|] in both query and model,
+   which the lexer handles. And unlike the cache's swallowed lookup, any lexer error here
+   surfaces LOUD as {!Bad_model} (→ the gate quarantines the case), never a silent miss. *)
 let of_string (src : string) : t =
   let sexps =
     try Sexp.parse_many src with

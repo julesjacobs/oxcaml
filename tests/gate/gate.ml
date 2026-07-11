@@ -133,6 +133,7 @@ let should_cache = function
 type disposition =
   [ `Hit
   | `Miss
+  | `Read_error (* entry file present but unreadable — went to Lean; counted, fail-safe *)
   | `Uncached
   ]
 
@@ -174,11 +175,23 @@ let certify_file ctx ~cache_dir ~allow_cache smt2 : Outcome.t * disposition * bo
                     ~lean_version:ctx.lean_version
                 in
                 let cached =
-                  if allow_cache then Cache.lookup ~dir:cache_dir key else None
+                  if allow_cache then Cache.lookup ~dir:cache_dir key else Cache.Absent
                 in
                 (match cached with
-                 | Some o -> o, `Hit, dm
-                 | None ->
+                 | Cache.Hit o -> o, `Hit, dm
+                 | (Cache.Absent | Cache.Unreadable _) as miss ->
+                   (* A present-but-unreadable entry is a broken-cache signal, not a
+                      normal miss: log it and count it distinctly (digest
+                      [cache-read-errors]) so a corrupted / format-incompatible cache
+                      cannot hide behind a green gate. Either way we fall through to a
+                      real certification — fail-safe. *)
+                   let miss_disp =
+                     match miss with
+                     | Cache.Unreadable m ->
+                       logf ctx "  cache-read-error %s: %s" (Filename.basename smt2) m;
+                       `Read_error
+                     | _ -> `Miss
+                   in
                    let o =
                      match claim with
                      | Ast.Unsat -> certify_unsat ctx q model_opt
@@ -187,7 +200,7 @@ let certify_file ctx ~cache_dir ~allow_cache smt2 : Outcome.t * disposition * bo
                    in
                    if allow_cache && should_cache o
                    then Cache.store ~dir:cache_dir key ~claim:claim_str o;
-                   o, (if allow_cache then `Miss else `Uncached), dm)))))
+                   o, (if allow_cache then miss_disp else `Uncached), dm)))))
 ;;
 
 (* ---- corpus listing ---- *)
@@ -211,8 +224,7 @@ let print_line ctx label file (o : Outcome.t) disp =
   let d =
     match disp with
     | `Hit -> "cache"
-    | `Miss -> "lean"
-    | `Uncached -> "lean"
+    | `Miss | `Read_error | `Uncached -> "lean"
   in
   let det = Outcome.detail o in
   let det = if String.length det > 80 then String.sub det 0 77 ^ "..." else det in
@@ -504,7 +516,8 @@ let cases_phase ctx ~cache_dir dir =
     Hashtbl.replace tally t (1 + Option.value (Hashtbl.find_opt tally t) ~default:0)
   in
   let hits = ref 0
-  and misses = ref 0 in
+  and misses = ref 0
+  and read_errors = ref 0 in
   let ship_stoppers = ref []
   and encode_errors = ref []
   and quarantined = ref []
@@ -515,6 +528,7 @@ let cases_phase ctx ~cache_dir dir =
        (match disp with
         | `Hit -> incr hits
         | `Miss -> incr misses
+        | `Read_error -> incr read_errors
         | `Uncached -> ());
        bump (Outcome.tag o);
        (* A div/mod case that now CERTIFIES is one the pre-elimination gate would have
@@ -533,6 +547,7 @@ let cases_phase ctx ~cache_dir dir =
   , List.length files
   , !hits
   , !misses
+  , !read_errors
   , List.rev !ship_stoppers
   , List.rev !encode_errors
   , List.rev !quarantined
@@ -564,6 +579,7 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
       , n_cases
       , hits
       , misses
+      , read_errors
       , ship_stoppers
       , encode_errors
       , quarantined
@@ -571,7 +587,7 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
     =
     if honeypots_ok
     then cases_phase ctx ~cache_dir cases_dir
-    else Hashtbl.create 1, 0, 0, 0, [], [], [], 0
+    else Hashtbl.create 1, 0, 0, 0, 0, [], [], [], 0
   in
   logf ctx "";
   (* Write full log. *)
@@ -641,7 +657,11 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout ~allow_cach
          Printf.printf "    %s [%s]: %s" (short f) (Outcome.tag o) (Outcome.detail o);
          print_newline ())
       quarantined);
-  Printf.printf "  cache: %d hit, %d miss\n" hits misses;
+  (* [read-error] counts EXISTING entries that could not be parsed (e.g. a stale format) —
+     distinct from a cold [miss]. It stays visible even at 0 so a cache that silently
+     stops warming (review R1) cannot hide behind a green gate; it never turns the gate
+     red (lookup is fail-safe — a read error re-certifies via Lean). *)
+  Printf.printf "  cache: %d hit, %d miss, %d read-error\n" hits misses read_errors;
   if ship_stoppers <> []
   then (
     Printf.printf "  SHIP-STOPPERS (REFUTED):\n";
@@ -671,6 +691,7 @@ let cmd_certify ~cache_dir ~logs_root ~timeout ~allow_cache file =
     match disp with
     | `Hit -> "cache hit"
     | `Miss -> "lean (cached)"
+    | `Read_error -> "lean (cache entry unreadable)"
     | `Uncached -> "lean"
   in
   Printf.printf "%s: %s [%s]\n" (short file) (Outcome.tag o) d;
@@ -868,6 +889,63 @@ let cmd_selftest () =
     "reserved-name reject"
     "(set-logic QF_LIA)(declare-const |.oxsmt.q.0| Int)(assert (>= |.oxsmt.q.0| \
      0))(set-info :status unsat)(check-sat)";
+  (* Cache store -> lookup round-trip regression (review R1). The migrated SMT-LIB reader
+     rejected a digit-leading hex hash as a "malformed numeral", so [lookup] swallowed the
+     error and reported a perpetual MISS for ~86% of entries. A key whose hash AND
+     query-hash are both digit-leading-with-a-hex-letter (the exact break) must now
+     round-trip to a [Hit]; a genuinely corrupt entry must read as [Unreadable] (counted,
+     fail-safe), and an absent key as [Absent]. *)
+  let cache_dir =
+    Filename.concat (Filename.get_temp_dir_name ())
+    @@ Printf.sprintf "oxsmt-gate-cache-selftest-%d" (Unix.getpid ())
+  in
+  let key : Cache.key =
+    { Cache.hash = "2f5d4447deadbeefcafef00d1234567890abcdefabcdef0123456789abcdef01"
+    ; query_hash = "3a0b1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+    }
+  in
+  Cache.store
+    ~dir:cache_dir
+    key
+    ~claim:"unsat"
+    (Outcome.Refuted "boundary (needs quoting)");
+  (match Cache.lookup ~dir:cache_dir key with
+   | Cache.Hit (Outcome.Refuted "boundary (needs quoting)") ->
+     print_endline "cache round-trip: OK (digit-leading-hex key hits; detail preserved)"
+   | other ->
+     ok := false;
+     Printf.printf
+       "cache round-trip: FAIL (expected Hit Refuted, got %s)\n"
+       (match other with
+        | Cache.Hit o -> "Hit " ^ Outcome.tag o
+        | Cache.Absent -> "Absent"
+        | Cache.Unreadable m -> "Unreadable " ^ m));
+  (* An absent key is a clean [Absent], not an error. *)
+  let absent_key : Cache.key = { Cache.hash = "0000nope"; query_hash = "x" } in
+  (match Cache.lookup ~dir:cache_dir absent_key with
+   | Cache.Absent -> print_endline "cache absent-key: OK (clean miss, not a read-error)"
+   | _ ->
+     ok := false;
+     print_endline "cache absent-key: FAIL (expected Absent)");
+  (* A present-but-corrupt entry reads as [Unreadable] — surfaced/counted, never a Hit. *)
+  let corrupt_key : Cache.key = { Cache.hash = "deadbeefcorrupt"; query_hash = "y" } in
+  Lean_runner.write_file (Cache.path cache_dir corrupt_key) "(entry (outcome CERTIFIED";
+  (match Cache.lookup ~dir:cache_dir corrupt_key with
+   | Cache.Unreadable _ ->
+     print_endline "cache corrupt-entry: OK (Unreadable, fail-safe, not a false Hit)"
+   | _ ->
+     ok := false;
+     print_endline "cache corrupt-entry: FAIL (expected Unreadable)");
+  (* Best-effort cleanup of the throwaway cache dir. *)
+  (try
+     Array.iter
+       (fun f ->
+          try Sys.remove (Filename.concat cache_dir f) with
+          | _ -> ())
+       (Sys.readdir cache_dir);
+     Unix.rmdir cache_dir
+   with
+   | _ -> ());
   if !ok then 0 else 1
 ;;
 

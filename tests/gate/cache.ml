@@ -103,29 +103,103 @@ let outcome_of tag detail : Outcome.t =
 
 let path dir (k : key) = Filename.concat dir (k.hash ^ ".sexp")
 
-let lookup ~dir (k : key) : Outcome.t option =
+(* Cache-entry reader — deliberately INDEPENDENT of the SMT-LIB reader ({!Sexp}, now on
+   the shared §3.1 lexer). The entry file format is not SMT-LIB: a 64-hex
+   [key]/[query-hash] is a digit-leading token with hex letters (e.g. [2f5d…]) that the
+   shared lexer's numeral rule rejects ("malformed numeral"), which — via a swallowed
+   lookup — turned ~86% of entries into perpetual cache misses (review R1). This restores
+   the N-version separation the migration incidentally removed for the cache format, and
+   matches the trivial grammar {!store} actually writes: whitespace separates tokens;
+   [(]/[)] nest; a bare atom runs to the next whitespace/[(]/[)]/[|]; a [|…|] atom is
+   verbatim up to the next [|] ({!store}'s {!atom} maps any inner [|] to [/], so the
+   closing delimiter is unambiguous). No numeral rule, so a digit-leading hash is just an
+   atom. *)
+exception Parse_error of string
+
+type tok =
+  | LP
+  | RP
+  | ATOM of string
+
+let tokenize src : tok list =
+  let n = String.length src in
+  let is_ws c = c = ' ' || c = '\t' || c = '\n' || c = '\r' in
+  let is_break c = is_ws c || c = '(' || c = ')' || c = '|' in
+  let out = ref [] in
+  let i = ref 0 in
+  while !i < n do
+    let c = src.[!i] in
+    if is_ws c
+    then incr i
+    else if c = '('
+    then (
+      out := LP :: !out;
+      incr i)
+    else if c = ')'
+    then (
+      out := RP :: !out;
+      incr i)
+    else if c = '|'
+    then (
+      incr i;
+      let b = Buffer.create 16 in
+      while !i < n && src.[!i] <> '|' do
+        Buffer.add_char b src.[!i];
+        incr i
+      done;
+      if !i >= n then raise (Parse_error "unterminated |quoted| atom");
+      incr i;
+      out := ATOM (Buffer.contents b) :: !out)
+    else (
+      let b = Buffer.create 16 in
+      while !i < n && not (is_break src.[!i]) do
+        Buffer.add_char b src.[!i];
+        incr i
+      done;
+      out := ATOM (Buffer.contents b) :: !out)
+  done;
+  List.rev !out
+;;
+
+(* Parse the [(entry (name value) …)] shape into its (name, value) pairs. Each field is
+   exactly [(] name value [)] with an atom value ({!store} only ever writes atoms). *)
+let read_fields src : (string * string) list =
+  match tokenize src with
+  | LP :: ATOM "entry" :: rest ->
+    let rec fields acc = function
+      | RP :: _ -> List.rev acc (* the entry's closing paren; ignore any trailing bytes *)
+      | LP :: ATOM name :: ATOM value :: RP :: tl -> fields ((name, value) :: acc) tl
+      | [] -> raise (Parse_error "missing closing ')' for (entry ...)")
+      | _ -> raise (Parse_error "malformed (name value) field")
+    in
+    fields [] rest
+  | _ -> raise (Parse_error "expected (entry ...)")
+;;
+
+(* The three outcomes of a lookup, kept DISTINCT so the driver can count a corrupted /
+   unreadable EXISTING entry separately from a genuine cold miss: the former is a broken
+   mechanism (review's "green gate masking a broken cache"), the latter is normal. Lookup
+   stays fail-safe either way — neither returns a certification the file did not contain. *)
+type lookup_result =
+  | Hit of Outcome.t
+  | Absent (* no entry file present — a genuine cold/absent key *)
+  | Unreadable of
+      string (* entry file present but unparseable — corruption / format break *)
+
+let lookup ~dir (k : key) : lookup_result =
   let file = path dir k in
   if not (Sys.file_exists file)
-  then None
+  then Absent
   else (
-    try
+    match
       let src = Lean_runner.read_file file in
-      let sexps = Sexp.parse_many src in
-      let field name =
-        let rec find = function
-          | Sexp.List [ Sexp.Atom n; Sexp.Atom v ] :: _ when String.equal n name -> Some v
-          | _ :: tl -> find tl
-          | [] -> None
-        in
-        match sexps with
-        | [ Sexp.List (Sexp.Atom "entry" :: fields) ] -> find fields
-        | _ -> None
-      in
-      match field "outcome", field "detail" with
-      | Some tag, detail -> Some (outcome_of tag (Option.value detail ~default:""))
-      | None, _ -> None
+      let fields = read_fields src in
+      List.assoc_opt "outcome" fields, List.assoc_opt "detail" fields
     with
-    | _ -> None)
+    | Some tag, detail -> Hit (outcome_of tag (Option.value detail ~default:""))
+    | None, _ -> Unreadable "entry has no (outcome ...) field"
+    | exception Parse_error m -> Unreadable m
+    | exception e -> Unreadable (Printexc.to_string e))
 ;;
 
 let store ~dir (k : key) ~claim (outcome : Outcome.t) : unit =
