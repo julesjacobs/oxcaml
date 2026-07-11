@@ -154,12 +154,12 @@ let expected_statuses (sexps : Sexp.t list) : verdict option list =
   let acc = ref [] in
   List.iter
     (fun sx ->
-      match sx with
-      | Sexp.List [ Sexp.Atom "set-info"; Sexp.Atom ":status"; Sexp.Atom v ] ->
-        cur := verdict_of_string v
-      | Sexp.List (Sexp.Atom ("check-sat" | "check-sat-assuming") :: _) ->
-        acc := !cur :: !acc
-      | _ -> ())
+       match sx with
+       | Sexp.List [ Sexp.Atom "set-info"; Sexp.Atom ":status"; Sexp.Atom v ] ->
+         cur := verdict_of_string v
+       | Sexp.List (Sexp.Atom ("check-sat" | "check-sat-assuming") :: _) ->
+         acc := !cur :: !acc
+       | _ -> ())
     sexps;
   List.rev !acc
 ;;
@@ -244,9 +244,9 @@ let contradicts expected verdict =
 let first_issue f xs =
   List.fold_left
     (fun acc x ->
-      match acc with
-      | Some _ -> acc
-      | None -> f x)
+       match acc with
+       | Some _ -> acc
+       | None -> f x)
     None
     xs
 ;;
@@ -256,12 +256,12 @@ let first_issue f xs =
    don't self-check still work). The runner fills it in by running the eval CLI on every
    sat model; the self-test supplies canned values. *)
 let evaluate
-  ~path
-  ~(expected_statuses : verdict option list)
-  ~(golden : string option)
-  ~(solver_result : (solver_output, string) result)
-  ?(eval_outcomes : eval_outcome list = [])
-  ()
+      ~path
+      ~(expected_statuses : verdict option list)
+      ~(golden : string option)
+      ~(solver_result : (solver_output, string) result)
+      ?(eval_outcomes : eval_outcome list = [])
+      ()
   : file_eval
   =
   match solver_result with
@@ -288,24 +288,24 @@ let evaluate
       let label_issue =
         first_issue
           (fun (expected, g) ->
-            if contradicts expected g.verdict
-            then
-              Some
-                (Printf.sprintf
-                   "declared status %s but solver said %s"
-                   (match expected with
-                    | Some v -> verdict_to_string v
-                    | None -> "?")
-                   (verdict_to_string g.verdict))
-            else None)
+             if contradicts expected g.verdict
+             then
+               Some
+                 (Printf.sprintf
+                    "declared status %s but solver said %s"
+                    (match expected with
+                     | Some v -> verdict_to_string v
+                     | None -> "?")
+                    (verdict_to_string g.verdict))
+             else None)
           (List.combine expected_statuses out)
       in
       (* Layer-1 eval self-check over each goal's model (pad missing with skipped). *)
       let evals =
         List.mapi
           (fun i _ ->
-            try List.nth eval_outcomes i with
-            | _ -> Eval_skipped)
+             try List.nth eval_outcomes i with
+             | _ -> Eval_skipped)
           out
       in
       let model_unsound =
@@ -394,20 +394,20 @@ let spawn_capture argv =
       try Sys.remove err_path with
       | _ -> ())
     (fun () ->
-      let pid = Unix.create_process argv.(0) argv Unix.stdin w err_fd in
-      close_guarded w;
-      (* parent no longer writes; reader sees EOF *)
-      close_guarded err_fd;
-      (* child holds its own dup *)
-      let out = read_all_fd r in
-      let _, status = Unix.waitpid [] pid in
-      let errs =
-        let ic = open_in_bin err_path in
-        Fun.protect
-          ~finally:(fun () -> close_in_noerr ic)
-          (fun () -> really_input_string ic (in_channel_length ic))
-      in
-      out, errs, status)
+       let pid = Unix.create_process argv.(0) argv Unix.stdin w err_fd in
+       close_guarded w;
+       (* parent no longer writes; reader sees EOF *)
+       close_guarded err_fd;
+       (* child holds its own dup *)
+       let out = read_all_fd r in
+       let _, status = Unix.waitpid [] pid in
+       let errs =
+         let ic = open_in_bin err_path in
+         Fun.protect
+           ~finally:(fun () -> close_in_noerr ic)
+           (fun () -> really_input_string ic (in_channel_length ic))
+       in
+       out, errs, status)
 ;;
 
 let run_solver solver file : (solver_output, string) result * string =
@@ -436,7 +436,7 @@ let model_to_sidecar (model : (string * string) list) : string =
   Buffer.add_string b "(model\n";
   List.iter
     (fun (name, value) ->
-      Printf.bprintf b "  (const %s %s)\n" (Sexp.quote_symbol name) value)
+       Printf.bprintf b "  (const %s %s)\n" (Sexp.quote_symbol name) value)
     model;
   Buffer.add_string b ")\n";
   Buffer.contents b
@@ -458,10 +458,10 @@ let run_eval ~eval_bin ~smt2 ~(model : (string * string) list) : eval_outcome =
         try Sys.remove model_path with
         | _ -> ())
       (fun () ->
-        let oc = open_out_bin model_path in
-        output_string oc (model_to_sidecar model);
-        close_out oc;
-        spawn_capture [| eval_bin; smt2; model_path |])
+         let oc = open_out_bin model_path in
+         output_string oc (model_to_sidecar model);
+         close_out oc;
+         spawn_capture [| eval_bin; smt2; model_path |])
   with
   | exception e ->
     Eval_unusable (Printf.sprintf "failed to run eval: %s" (Printexc.to_string e))
