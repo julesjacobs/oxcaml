@@ -304,3 +304,62 @@ from scratch in the same test lib, plus model self-evaluation.
 - **`smt/solver/test/dimacs.ml`** — the DIMACS parser is a **test-only** dune
   library (`oxsmt_dimacs`), never linked into shipped solver code, the same split
   discipline the SMT-LIB parser follows (DESIGN.md §3).
+
+## SMT-LIB printer + parser tests (`smt/smtlib/test/`, M0-smtlib)
+
+These live under `smt/` (not here) because they exercise the `oxsmt_smtlib` printer
+and the test-only `oxsmt_smtlib_parser`, but they follow the same digest-first,
+deterministic discipline. Two entry points:
+
+- `make smtlib-test` — the committed, corpus-independent round-trip suite.
+  - **Round-trip A (print → parse):** ~30 programmatic sessions cover every one of
+    the 9 term nodes, symbol-quoting edge cases (a symbol named `a b(c)`, one named
+    `Int`, the empty name, digit-leading names, and simple symbols that must *not*
+    be quoted), negative constants, `div`/`mod`, `distinct`/`abs` desugaring, and
+    deep nesting. Each session is built in a `Context`, printed, and parsed back
+    **into the same `Context`**, so equality is `Term.equal` (hash-cons tag
+    identity) — the strongest check that print;parse is the identity on our subset
+    (ADR-0003's single-`Context` contract makes the strong check the simple one).
+  - **Round-trip B (parse → print → parse):** over `tests/cases/*.smt2`, the harness
+    fixtures, and the gate honeypots — parse, print, re-parse into the same
+    `Context`, assert the assertion lists are `Term.equal` and the `:status` label
+    survives. Files outside our subset are reported as *skipped* (expected: the
+    `push`/`pop` multi-check fixture; the deliberately malformed honeypot), not
+    failed.
+- `make smtlib-corpus` — a parse-only smoke over a public corpus (default
+  `../corpora/QF_UFLIA`, never in git, hence separate from `smtlib-test`). Reports
+  ok / unsupported / malformed / skipped-large / crashed; a crash fails the run,
+  unsupported constructs are expected diversity. Full per-file results to
+  `../logs/smtlib-corpus-smoke.log`, digest to stdout. A 20 MB per-file size cap
+  (`--max-bytes`) guards the box from pathological multi-MB instances the eager
+  parser would otherwise blow up on.
+
+### Printer rendering choices (kept parseable by standard tools)
+
+Full detail in `smt/smtlib/printer.mli`. In brief: integer constants print as the
+numeral, negatives as `(- N)` (so `min_int` needs no negation); `Arith` linear
+forms print as a sum of `(* c t)` products (coefficient 1 → bare term, nonzero
+constant last, a lone product without a unary `+`); order atoms as `(<= arg 0)`;
+`Eq`/`Not`/`And`/`Or`/`Ite` directly; reserved `div`/`mod` as `(div a b)`/`(mod a
+b)` and never declared; `distinct`/`abs` never appear (they desugar at construction
+to `Not`/`Eq` and `Ite`).
+
+### Parser subset
+
+Commands: `set-logic` (QF_UF/QF_LIA/QF_UFLIA/QF_IDL/QF_RDL), `set-info :status`,
+`declare-sort` (arity 0), `declare-fun`, `declare-const`, `assert`, `check-sat`,
+`exit`. Terms: `true`/`false`, numerals, `and`/`or`/`not`/`=>`, `ite`,
+`=`/`distinct`, chainable `<=`/`<`/`>=`/`>`/`=`, `+`/`-`/`*` (multiplication must be
+linear — ≥2 non-constant factors is `Unsupported`), `div`/`mod`/`abs`, `let`
+(parallel binding), `(! t …)` annotations (attributes dropped), `|quoted symbols|`,
+`;` comments, and declared symbols. `define-fun` macros, quantifiers, `push`/`pop`,
+compound sorts, and arithmetic exceeding native `int` are `Unsupported`;
+ill-sorted / undeclared / wrong-arity input is `Malformed`.
+
+### Bool-`=` / gate interaction (tracked M0-gate-iff)
+
+A Bool-sorted `Eq` is an iff. The printer emits it faithfully as `(= a b)` and the
+parser reads it back. The Lean gate's *reader* separately tracks whether it accepts
+Bool-sorted `=` (the M0-gate-iff item); that is the gate's concern, not the
+printer's — the printer must render the frozen term type completely, and a dump
+containing an iff is valid SMT-LIB regardless.

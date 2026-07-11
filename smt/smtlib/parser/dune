@@ -1,0 +1,12 @@
+; TEST-ONLY SMT-LIB2 parser. A SEPARATE library from the shipped printer (../dune) so it
+; can NEVER be linked into the compiler artifact (DESIGN.md §3, AGENTS.md): shipped code
+; depends on oxsmt_smtlib, never on oxsmt_smtlib_parser. The boundary is mechanical — the
+; printer library does not list this library, and nothing under smt/ (besides the smtlib
+; tests) may depend on it.
+;
+; Stdlib-only over oxsmt_core + oxsmt_smtlib (both stdlib-only), so it still honors the
+; dependency firewall (I3) even though it is test-only.
+
+(library
+ (name oxsmt_smtlib_parser)
+ (libraries oxsmt_core oxsmt_smtlib))

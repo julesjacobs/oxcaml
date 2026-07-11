@@ -1,7 +1,11 @@
-; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall).
-; The printer ships; the parser is test-only and must never be linked into the
-; compiler (DESIGN.md §3). Keep the parser behind its own module so that
-; boundary stays mechanically checkable.
+; The SHIPPED SMT-LIB2 printer. Stdlib-only over oxsmt_core (AGENTS.md dependency
+; firewall, I3): oxsmt_core is itself stdlib-only, and no other library is linked.
+;
+; The printer is the only thing that ships. The test-only PARSER is a separate library
+; (parser/), never listed here and never depended on by shipped code, so it cannot be
+; linked into the compiler artifact (DESIGN.md §3). Keeping the parser out of this
+; directory's library makes that boundary mechanically checkable.
 
 (library
- (name oxsmt_smtlib))
+ (name oxsmt_smtlib)
+ (libraries oxsmt_core))

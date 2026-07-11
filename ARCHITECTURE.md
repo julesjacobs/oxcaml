@@ -75,10 +75,22 @@ Session API: declare, assert, check, push/pop, unsat cores, reasons. Sole client
 entry point and the SMT-LIB2 serialization seam; solver never exposes internals
 (DESIGN.md §3 boundary 1). Owner: M4-interface.
 
-## smt/smtlib (`oxsmt_smtlib`)
-SMT-LIB2 printer (shipped) and parser (test-only, never linked into the
-compiler). The interchange format for the oracle and public benchmarks. Owner:
-M0-smtlib.
+## smt/smtlib (`oxsmt_smtlib` printer; `oxsmt_smtlib_parser` test-only)
+SMT-LIB2 interchange, the format for the oracle and public benchmarks. **Status:
+implemented** (was skeleton). Split into two libraries so the parser can never be
+linked into the compiler (DESIGN.md §3):
+- `oxsmt_smtlib` (`smt/smtlib/`, SHIPS) — the printer over `Oxsmt_core`
+  (stdlib-only, I3). `Printer.print_session` renders an `Env` + ordered assertions
+  (+ optional `:status`) as a complete `QF_UFLIA` script: declarations in first-use
+  order (all sorts before all funs), one `(assert …)` per assertion, `(check-sat)`.
+  Deterministic (I6). Rendering choices + SMT-LIB symbol quoting (`|…|`, refusing
+  names with `|`/`\`) are in `printer.mli`.
+- `oxsmt_smtlib_parser` (`smt/smtlib/parser/`, TEST-ONLY) — a SEPARATE library
+  reading the subset back into frozen-API terms through a `Context`; distinguishes
+  `Malformed` from `Unsupported`. Shipped code depends on `oxsmt_smtlib`, never on
+  this library — the mechanical boundary DESIGN.md §3 mandates.
+Tests (`smt/smtlib/test/`, `make smtlib-test` / `make smtlib-corpus`): print↔parse
+round-trips + a parse-only corpus smoke. Owner: M0-smtlib.
 
 ## tests/ (outside smt/)
 `tests/harness` runner (.smt2 golden/expect + promote), `tests/gate` Lean encoder

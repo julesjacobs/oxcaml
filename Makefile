@@ -25,7 +25,12 @@ HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
 # tree (which includes intentionally-hard families like pigeon-hole).
 SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
 
-.PHONY: build fmt test core-test sat-test sat-bench preprocess-test bench gate promote check-frozen spine status status-fresh
+# smtlib-corpus knob: which public corpus to smoke-parse. Default is QF_UFLIA (the target
+# logic). Corpora are a sibling of main/, never in git, so ../corpora resolves from main/
+# (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
+SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
+
+.PHONY: build fmt test core-test sat-test sat-bench preprocess-test smtlib-test smtlib-corpus bench gate promote check-frozen spine status status-fresh
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -61,6 +66,25 @@ sat-bench:
 ##   exit on any failed check.
 preprocess-test:
 	$(DUNE) exec smt/preprocess/test/preprocess_test.exe
+
+## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
+##   Deterministic and corpus-independent (committed test): round-trip A (print->parse
+##   over ~30 programmatic sessions covering every node, quoting, negatives, div/mod, deep
+##   nesting) and round-trip B (parse->print->parse over tests/cases + harness fixtures +
+##   gate honeypots). Nonzero exit on any round-trip mismatch or lost :status.
+smtlib-test:
+	$(DUNE) build smt/smtlib/test/roundtrip_test.exe
+	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
+	  tests/cases tests/harness/fixtures tests/gate/honeypots
+
+## smtlib-corpus — parse-only smoke over a public corpus (default $(SMTLIB_CORPUS)).
+##   Corpora are never in git, so this is SEPARATE from smtlib-test. Reports
+##   ok/unsupported/malformed/crashed counts; digest to stdout, full per-file log to
+##   $(LOGS). Crashes fail the run; unsupported constructs are expected diversity.
+smtlib-corpus:
+	$(DUNE) build smt/smtlib/test/corpus_smoke.exe
+	$(DUNE) exec smt/smtlib/test/corpus_smoke.exe -- \
+	  $(SMTLIB_CORPUS) --log $(LOGS)/smtlib-corpus-smoke.log
 
 ## fmt — format all sources in place with ocamlformat.
 fmt:

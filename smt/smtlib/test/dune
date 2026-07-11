@@ -1,0 +1,17 @@
+; smtlib tests. Test-only, but stdlib-only over the smtlib libraries + oxsmt_core, so they
+; honor the dependency firewall (I3). Linking oxsmt_smtlib_parser here (and NOWHERE in
+; shipped code) is exactly the intended boundary.
+;
+; roundtrip_test: the committed round-trip suite (make smtlib-test). Corpus-independent;
+;   directories to sweep for direction B are passed as argv by the Makefile.
+; corpus_smoke: parse-only over ../corpora (make smtlib-corpus), not in git.
+
+(executable
+ (name roundtrip_test)
+ (modules roundtrip_test)
+ (libraries oxsmt_core oxsmt_smtlib oxsmt_smtlib_parser))
+
+(executable
+ (name corpus_smoke)
+ (modules corpus_smoke)
+ (libraries oxsmt_core oxsmt_smtlib oxsmt_smtlib_parser))
