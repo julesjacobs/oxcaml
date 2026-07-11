@@ -210,6 +210,46 @@ let div_mod_matrix () =
     combos
 ;;
 
+(* --- min_int boundary: div wraps must abstain, representable mod must not (codex E1) - *)
+
+let div_mod_boundary () =
+  let env = Env.create () in
+  let ctx = Context.create env in
+  let no_model _ = None in
+  let evi t =
+    match Eval.eval_term ~env:no_model t with
+    | Value.Int n -> n
+    | _ -> failwith "expected Int"
+  in
+  let dt d = Context.int_const ctx d in
+  let xmin = Context.int_const ctx min_int in
+  (* E1: min_int / -1 is non-representable — must RAISE (abstain), never wrap to min_int. *)
+  expect_raises "min_int div -1 raises" (fun () -> evi (Context.div ctx xmin (dt (-1))));
+  (* the exact codex E1 trigger, through the full reader -> model -> eval pipeline: with
+     the old wrap this MODEL-SATISFIES (wrong); now it must raise/abstain. *)
+  expect_raises "E1 trigger abstains" (fun () ->
+    outcome_of
+      "(declare-const x Int)(assert (= (div x (- 1)) x))"
+      (Printf.sprintf "(model (const x %d))" min_int));
+  (* mod min_int -1 IS representable (0) and must NOT raise (the MEDIUM finding: mod must
+     not compute the quotient). *)
+  report "min_int mod -1 = 0" (evi (Context.mod_ ctx xmin (dt (-1))) = 0) "expected 0";
+  (* div/mod min_int by +1: exact, quotient representable. *)
+  report "min_int div 1 = min_int" (evi (Context.div ctx xmin (dt 1)) = min_int) "q";
+  report "min_int mod 1 = 0" (evi (Context.mod_ ctx xmin (dt 1)) = 0) "r";
+  (* div/mod min_int by 2: exact (min_int even). *)
+  report "min_int div 2" (evi (Context.div ctx xmin (dt 2)) = min_int / 2) "q";
+  report "min_int mod 2 = 0" (evi (Context.mod_ ctx xmin (dt 2)) = 0) "r";
+  (* div/mod min_int by 3: the representable-remainder case (MEDIUM). Hand-computed: q =
+     -1537228672809129302, r = 2 (identity 3*q+r overflows native int, so it is NOT
+     asserted here — that intermediate is exactly why the old x-r formula was wrong). *)
+  report "min_int div 3" (evi (Context.div ctx xmin (dt 3)) = -1537228672809129302) "q";
+  report "min_int mod 3 = 2" (evi (Context.mod_ ctx xmin (dt 3)) = 2) "r";
+  (* divisor min_int abstains (abs min_int unrepresentable). *)
+  expect_raises "div by min_int abstains" (fun () -> evi (Context.div ctx (dt 5) xmin));
+  expect_raises "mod by min_int abstains" (fun () -> evi (Context.mod_ ctx (dt 5) xmin))
+;;
+
 (* --- overflow raises (never wraps) ------------------------------------------------ *)
 
 let overflow_cases () =
@@ -273,6 +313,7 @@ let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/cases" in
   node_cases ();
   div_mod_matrix ();
+  div_mod_boundary ();
   overflow_cases ();
   rejection_cases ();
   gate_cases dir;

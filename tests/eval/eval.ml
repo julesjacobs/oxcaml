@@ -27,14 +27,36 @@ let mul_ovf a b =
     p)
 ;;
 
-(* Euclidean division/remainder (ADR-0003 Decision 5): 0 <= r < |d|, x = d*q + r. *)
-let euclid x d =
+(* Euclidean division/remainder (ADR-0003 Decision 5): 0 <= r < |d|, x = d*q + r. Derived
+   from OCaml's truncated [/]/[mod] (remainder carries the dividend's sign) to avoid any
+   overflowing intermediate: no [x - r] and no explicit [q] in the [mod] path. The one
+   genuinely non-representable case, [min_int / -1] (whose true quotient -min_int
+   overflows), raises rather than wrapping — an abstain (exit 2), never a wrong accept
+   (codex E1). [d = min_int] also abstains: [abs min_int] is unrepresentable. *)
+
+let guard_divisor d =
   if d = 0 then raise (Eval_error "division by zero");
-  if d = min_int then raise (Eval_error "integer overflow (divisor = min_int)");
-  let ad = abs d in
-  let r = ((x mod ad) + ad) mod ad in
-  let q = sub_ovf x r / d in
-  q, r
+  if d = min_int then raise (Eval_error "integer overflow (divisor = min_int)")
+;;
+
+(* Euclidean remainder alone — total for every representable [d <> 0, min_int]; [r] is
+   always in [0, |d|) and its computation cannot overflow (we only ever add |d| to a
+   strictly-negative truncated remainder, landing in (0, |d|)). *)
+let euclid_rem x d =
+  guard_divisor d;
+  let tr = x mod d in
+  if tr >= 0 then tr else tr + abs d
+;;
+
+(* Euclidean quotient. Guards [min_int / -1] before the hardware-overflowing [x / d]; the
+   +/-1 truncated-to-euclidean adjustment is itself overflow-checked (abstain, never
+   wrap). *)
+let euclid_quot x d =
+  guard_divisor d;
+  if x = min_int && d = -1 then raise (Eval_error "integer overflow (min_int / -1)");
+  let tq = x / d in
+  let tr = x mod d in
+  if tr >= 0 then tq else if d > 0 then sub_ovf tq 1 else add_ovf tq 1
 ;;
 
 let as_int = function
@@ -86,11 +108,11 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
     let name = Symbol.name sym in
     match name, Iarr.length args with
     | "div", 2 ->
-      let q, _ = euclid (as_int (go (Iarr.get args 0))) (as_int (go (Iarr.get args 1))) in
-      Value.Int q
+      Value.Int
+        (euclid_quot (as_int (go (Iarr.get args 0))) (as_int (go (Iarr.get args 1))))
     | "mod", 2 ->
-      let _, r = euclid (as_int (go (Iarr.get args 0))) (as_int (go (Iarr.get args 1))) in
-      Value.Int r
+      Value.Int
+        (euclid_rem (as_int (go (Iarr.get args 0))) (as_int (go (Iarr.get args 1))))
     | _, 0 ->
       (match consts sym with
        | Some v -> v
