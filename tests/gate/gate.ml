@@ -175,7 +175,9 @@ let certify_file ctx ~cache_dir ~allow_cache smt2 : Outcome.t * disposition * bo
                     ~lean_version:ctx.lean_version
                 in
                 let cached =
-                  if allow_cache then Cache.lookup ~dir:cache_dir key else Cache.Absent
+                  if allow_cache
+                  then Cache.lookup ~dir:cache_dir ~claim:claim_str key
+                  else Cache.Absent
                 in
                 (match cached with
                  | Cache.Hit o -> o, `Hit, dm
@@ -889,29 +891,58 @@ let cmd_selftest () =
     "reserved-name reject"
     "(set-logic QF_LIA)(declare-const |.oxsmt.q.0| Int)(assert (>= |.oxsmt.q.0| \
      0))(set-info :status unsat)(check-sat)";
-  (* Cache store -> lookup round-trip regression (review R1). The migrated SMT-LIB reader
-     rejected a digit-leading hex hash as a "malformed numeral", so [lookup] swallowed the
-     error and reported a perpetual MISS for ~86% of entries. A key whose hash AND
-     query-hash are both digit-leading-with-a-hex-letter (the exact break) must now
-     round-trip to a [Hit]; a genuinely corrupt entry must read as [Unreadable] (counted,
-     fail-safe), and an absent key as [Absent]. *)
+  (* Cache store -> lookup soundness. Round-trip (review R1): a key whose hash AND
+     query-hash are both digit-leading-with-a-hex-letter must Hit, with an exact detail
+     round-trip. Every CORRUPT / hand-crafted / mismatched entry must read as [Unreadable]
+     (counted, re-certified via Lean) — NEVER a Hit of any class (review CRITICALs
+     cache.ml:101 corrupt tag, cache.ml:170 crafted/trailing/mismatched). *)
   let cache_dir =
     Filename.concat (Filename.get_temp_dir_name ())
     @@ Printf.sprintf "oxsmt-gate-cache-selftest-%d" (Unix.getpid ())
   in
-  let key : Cache.key =
-    { Cache.hash = "2f5d4447deadbeefcafef00d1234567890abcdefabcdef0123456789abcdef01"
-    ; query_hash = "3a0b1c2d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
-    }
+  Cache.mkdir_p cache_dir;
+  let dummy name : Cache.key = { Cache.hash = name; query_hash = name ^ "-qh" } in
+  (* A full, schema-valid entry for [k] mirroring what [Cache.store] writes (so identity
+     checks pass); callers override individual fields to build each corruption shape. *)
+  let full_fields (k : Cache.key) ~claim ~tag ~detail =
+    [ "key", k.Cache.hash
+    ; "query-hash", k.Cache.query_hash
+    ; "claim", claim
+    ; "outcome", tag
+    ; "detail", detail
+    ; "encoding-version", Encoder.encoding_version
+    ; "grind-config", Encoder.grind_config
+    ; "timestamp", "0"
+    ]
   in
-  Cache.store
-    ~dir:cache_dir
-    key
-    ~claim:"unsat"
-    (Outcome.Refuted "boundary (needs quoting)");
-  (match Cache.lookup ~dir:cache_dir key with
-   | Cache.Hit (Outcome.Refuted "boundary (needs quoting)") ->
-     print_endline "cache round-trip: OK (digit-leading-hex key hits; detail preserved)"
+  let entry_str fields ~trailing =
+    let b = Buffer.create 128 in
+    Buffer.add_string b "(entry\n";
+    List.iter
+      (fun (n, v) -> Buffer.add_string b (Printf.sprintf "  (%s %s)\n" n (Cache.atom v)))
+      fields;
+    Buffer.add_string b ")\n";
+    Buffer.add_string b trailing;
+    Buffer.contents b
+  in
+  let write_raw (k : Cache.key) s = Lean_runner.write_file (Cache.path cache_dir k) s in
+  let expect_unreadable label ~claim (k : Cache.key) =
+    match Cache.lookup ~dir:cache_dir ~claim k with
+    | Cache.Unreadable _ -> print_endline (label ^ ": OK (Unreadable, never a Hit)")
+    | Cache.Hit o ->
+      ok := false;
+      Printf.printf "%s: FAIL (FALSE HIT %s — soundness)\n" label (Outcome.tag o)
+    | Cache.Absent ->
+      ok := false;
+      Printf.printf "%s: FAIL (Absent — test file missing)\n" label
+  in
+  (* (1) round-trip Hit, exact detail (incl. a tab, exercising the store/read escaping
+         fix). *)
+  let key = dummy "2f5d4447deadbeefcafef00d1234567890abcdef0123456789abcdef012345" in
+  Cache.store ~dir:cache_dir key ~claim:"unsat" (Outcome.Refuted "boundary\twith tab");
+  (match Cache.lookup ~dir:cache_dir ~claim:"unsat" key with
+   | Cache.Hit (Outcome.Refuted "boundary\twith tab") ->
+     print_endline "cache round-trip: OK (digit-leading-hex key hits; detail exact)"
    | other ->
      ok := false;
      Printf.printf
@@ -920,22 +951,47 @@ let cmd_selftest () =
         | Cache.Hit o -> "Hit " ^ Outcome.tag o
         | Cache.Absent -> "Absent"
         | Cache.Unreadable m -> "Unreadable " ^ m));
-  (* An absent key is a clean [Absent], not an error. *)
-  let absent_key : Cache.key = { Cache.hash = "0000nope"; query_hash = "x" } in
-  (match Cache.lookup ~dir:cache_dir absent_key with
+  (* (2) absent key -> clean Absent, not a read-error. *)
+  (match Cache.lookup ~dir:cache_dir ~claim:"unsat" (dummy "0000nope") with
    | Cache.Absent -> print_endline "cache absent-key: OK (clean miss, not a read-error)"
    | _ ->
      ok := false;
      print_endline "cache absent-key: FAIL (expected Absent)");
-  (* A present-but-corrupt entry reads as [Unreadable] — surfaced/counted, never a Hit. *)
-  let corrupt_key : Cache.key = { Cache.hash = "deadbeefcorrupt"; query_hash = "y" } in
-  Lean_runner.write_file (Cache.path cache_dir corrupt_key) "(entry (outcome CERTIFIED";
-  (match Cache.lookup ~dir:cache_dir corrupt_key with
-   | Cache.Unreadable _ ->
-     print_endline "cache corrupt-entry: OK (Unreadable, fail-safe, not a false Hit)"
-   | _ ->
-     ok := false;
-     print_endline "cache corrupt-entry: FAIL (expected Unreadable)");
+  (* (3) corrupt outcome tag (one-byte flip of REFUTED), otherwise a valid entry: the
+     ship-stopper must NOT decay into a benign Hit (CRITICAL cache.ml:101). *)
+  let k = dummy "corrupt_tag" in
+  write_raw
+    k
+    (entry_str (full_fields k ~claim:"unsat" ~tag:"REFUTEX" ~detail:"cex") ~trailing:"");
+  expect_unreadable "cache corrupt-tag" ~claim:"unsat" k;
+  (* (4) trailing garbage after the first entry's ')': a truncated-then-reappended file. *)
+  let k = dummy "trailing" in
+  write_raw
+    k
+    (entry_str
+       (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:"")
+       ~trailing:"(entry (outcome REFUTED) (detail x))\n");
+  expect_unreadable "cache trailing-garbage" ~claim:"unsat" k;
+  (* (5) the exact CRITICAL cache.ml:170 trigger: a hand-crafted minimal entry that names
+     only an outcome — missing every identity field. *)
+  let k = dummy "crafted" in
+  write_raw k "(entry (outcome CERTIFIED))\n";
+  expect_unreadable "cache crafted-minimal (missing fields)" ~claim:"unsat" k;
+  (* (6) identity mismatch: a full 8-field entry whose [key] field is someone else's hash. *)
+  let k = dummy "wrongkey" in
+  write_raw
+    k
+    (entry_str
+       (("key", "SOMEONE-ELSE")
+        :: List.tl (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:""))
+       ~trailing:"");
+  expect_unreadable "cache wrong-key identity mismatch" ~claim:"unsat" k;
+  (* (7) claim mismatch: a valid entry stored for unsat, looked up for a sat claim. *)
+  let k = dummy "claimx" in
+  write_raw
+    k
+    (entry_str (full_fields k ~claim:"unsat" ~tag:"CERTIFIED" ~detail:"") ~trailing:"");
+  expect_unreadable "cache claim mismatch" ~claim:"sat" k;
   (* Best-effort cleanup of the throwaway cache dir. *)
   (try
      Array.iter
@@ -946,6 +1002,33 @@ let cmd_selftest () =
      Unix.rmdir cache_dir
    with
    | _ -> ());
+  (* Model sidecar hardening. (a) An oversized Fin index (all-digits but > native int)
+     must be a controlled [Bad_model] (→ ENCODE_ERROR), never a crash (HIGH model.ml:128). *)
+  let big = "999999999999999999999999999999999" in
+  (match Model.of_string (Printf.sprintf "(model (sort S 1) (const x %s))" big) with
+   | exception Model.Bad_model _ ->
+     print_endline "model oversized-Fin: OK (rejected at parse)"
+   | m ->
+     (match Model.coerce m (Ast.Usort "S") (List.assoc "x" m.Model.consts) with
+      | exception Model.Bad_model _ ->
+        print_endline "model oversized-Fin: OK (Bad_model, not a crash)"
+      | exception e ->
+        ok := false;
+        Printf.printf "model oversized-Fin: FAIL (uncaught %s)\n" (Printexc.to_string e)
+      | _ ->
+        ok := false;
+        print_endline "model oversized-Fin: FAIL (coerced an unrepresentable index)"));
+  (* (b) A |quoted| model symbol name must be accepted (MEDIUM model.ml:107). *)
+  (match Model.of_string "(model (const |1x| 0))" with
+   | exception e ->
+     ok := false;
+     Printf.printf "model quoted-name: FAIL (raised %s)\n" (Printexc.to_string e)
+   | m ->
+     if List.mem_assoc "1x" m.Model.consts
+     then print_endline "model quoted-name: OK (|1x| accepted as \"1x\")"
+     else (
+       ok := false;
+       print_endline "model quoted-name: FAIL (name not decoded)"));
   if !ok then 0 else 1
 ;;
 

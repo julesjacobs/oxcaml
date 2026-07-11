@@ -94,19 +94,24 @@ let of_string (src : string) : t =
   let sort_card = ref [] in
   let consts = ref [] in
   let funs = ref [] in
+  (* A symbol NAME may be an unquoted [Atom] or a [|quoted|] symbol ([Quoted]) — the
+     shared lexer produces the latter for names like [|1x|] (digit-leading) or [|a b|].
+     Accept both (review MEDIUM model.ml:107); the F2 justification above depends on it.
+     Values stay [Atom] (numerals / [true] / [false]); a sort's cardinality [n] is
+     likewise a numeral. *)
   List.iter
     (fun item ->
        match item with
-       | Sexp.List [ Sexp.Atom "sort"; Sexp.Atom s; Sexp.Atom n ] ->
+       | Sexp.List [ Sexp.Atom "sort"; (Sexp.Atom s | Sexp.Quoted s); Sexp.Atom n ] ->
          let n =
            try int_of_string n with
            | _ -> badf "bad cardinality for %s: %s" s n
          in
          if n < 1 then badf "sort %s cardinality must be >= 1" s;
          sort_card := (s, n) :: !sort_card
-       | Sexp.List [ Sexp.Atom "const"; Sexp.Atom c; v ] ->
+       | Sexp.List [ Sexp.Atom "const"; (Sexp.Atom c | Sexp.Quoted c); v ] ->
          consts := (c, raw_of_sexp v) :: !consts
-       | Sexp.List (Sexp.Atom "fun" :: Sexp.Atom f :: rest) ->
+       | Sexp.List (Sexp.Atom "fun" :: (Sexp.Atom f | Sexp.Quoted f) :: rest) ->
          funs := (f, parse_fun f rest) :: !funs
        | _ -> badf "bad model item: %s" (Sexp.to_string item))
     body;
@@ -125,7 +130,14 @@ let coerce t (sort : Ast.sort) (r : raw) : value =
   | Ast.Int, Rnum s -> Vint s
   | Ast.Bool, Rbool b -> Vbool b
   | Ast.Usort s, Rnum idx ->
-    let i = int_of_string idx in
+    (* [idx] passed [parse_int_lit] (all digits) but may exceed native int; an unchecked
+       [int_of_string] would raise [Failure] and CRASH the gate (review HIGH model.ml:128,
+       reachable from a solver-emitted sidecar). Route it through the loud, caught
+       [Bad_model] path instead → controlled ENCODE_ERROR, never a crash, never a pass. *)
+    let i =
+      try int_of_string idx with
+      | Failure _ -> badf "index %s out of representable range for sort %s" idx s
+    in
     let card = sort_card_of t s in
     if i < 0 || i >= card then badf "index %d out of range for sort %s (card %d)" i s card;
     Vidx i

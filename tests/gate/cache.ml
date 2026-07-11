@@ -76,29 +76,40 @@ let compose ~canonical ~claim ~model ~lean_version : key =
   { hash = Sha256.hex_digest composite; query_hash = Sha256.hex_digest canonical }
 ;;
 
-(* Quote an atom for the entry file if it is empty or contains delimiters. *)
+(* Quote an atom for the entry file if it is empty or contains a byte the reader treats as
+   a delimiter. The trigger covers ALL whitespace/control bytes ([c <= ' ']: space, tab,
+   CR, LF, …) plus [( ) ; |] — so a value with an interior tab/CR round-trips as one
+   quoted atom instead of being silently split (review MEDIUM cache.ml:84). The one
+   residual lossiness is INTENTIONAL: an interior [|] is normalized to [/] because [|…|]
+   has no escape grammar and [/] keeps the closing delimiter unambiguous. This only ever
+   touches a [detail] string (a human diagnostic, not part of any verdict), so a proper
+   escape scheme would be over-engineering; the classification (the [outcome] tag) is
+   always delimiter-free and round-trips exactly. *)
 let atom s =
   let needs_quote =
     String.length s = 0
-    || String.exists
-         (fun c -> c = ' ' || c = '(' || c = ')' || c = '\n' || c = ';' || c = '|')
-         s
+    || String.exists (fun c -> c <= ' ' || c = '(' || c = ')' || c = ';' || c = '|') s
   in
   if needs_quote
   then "|" ^ String.map (fun c -> if c = '|' then '/' else c) s ^ "|"
   else s
 ;;
 
-let outcome_of tag detail : Outcome.t =
+(* Decode an outcome tag. [None] on an UNRECOGNIZED tag — a corrupted/garbled tag (e.g.
+   [REFUTEX], a one-byte flip of [REFUTED]) MUST NOT be silently reclassified: the old
+   [_ -> Inconclusive …] default turned a corrupted ship-stopper into a benign cache Hit
+   that a GREEN run permits (review CRITICAL cache.ml:101). The caller ([lookup]) maps
+   [None] to [Unreadable] (counted, re-certified via Lean) — never a Hit of any class. *)
+let outcome_of tag detail : Outcome.t option =
   match tag with
-  | "CERTIFIED" -> Certified
-  | "REFUTED" -> Refuted detail
-  | "INCONCLUSIVE" -> Inconclusive detail
-  | "ENCODE_ERROR" -> Encode_error detail
-  | "MALFORMED" -> Malformed detail
-  | "UNSUPPORTED" -> Unsupported detail
-  | "NO_STATUS" -> No_status
-  | other -> Inconclusive ("unknown cached tag: " ^ other)
+  | "CERTIFIED" -> Some Certified
+  | "REFUTED" -> Some (Refuted detail)
+  | "INCONCLUSIVE" -> Some (Inconclusive detail)
+  | "ENCODE_ERROR" -> Some (Encode_error detail)
+  | "MALFORMED" -> Some (Malformed detail)
+  | "UNSUPPORTED" -> Some (Unsupported detail)
+  | "NO_STATUS" -> Some No_status
+  | _ -> None
 ;;
 
 let path dir (k : key) = Filename.concat dir (k.hash ^ ".sexp")
@@ -161,19 +172,38 @@ let tokenize src : tok list =
   List.rev !out
 ;;
 
-(* Parse the [(entry (name value) …)] shape into its (name, value) pairs. Each field is
-   exactly [(] name value [)] with an atom value ({!store} only ever writes atoms). *)
+(* Parse the WHOLE input as exactly one [(entry (name value) …)] form and return its
+   (name, value) pairs. STRICT (review CRITICAL cache.ml:170): the entry's closing [)]
+   must be the LAST token — any trailing form (e.g. a second [(entry …)] appended after a
+   truncated first one) is rejected, not silently ignored. Each field is exactly [(] name
+   value [)] with an atom value ({!store} only ever writes atoms); anything else raises.
+   Schema/field-value validation is the caller's job ({!lookup}). *)
 let read_fields src : (string * string) list =
   match tokenize src with
   | LP :: ATOM "entry" :: rest ->
     let rec fields acc = function
-      | RP :: _ -> List.rev acc (* the entry's closing paren; ignore any trailing bytes *)
+      | [ RP ] -> List.rev acc (* the entry's closing paren AND end of input *)
       | LP :: ATOM name :: ATOM value :: RP :: tl -> fields ((name, value) :: acc) tl
       | [] -> raise (Parse_error "missing closing ')' for (entry ...)")
+      | RP :: _ -> raise (Parse_error "trailing content after (entry ...)")
       | _ -> raise (Parse_error "malformed (name value) field")
     in
     fields [] rest
-  | _ -> raise (Parse_error "expected (entry ...)")
+  | _ -> raise (Parse_error "expected a single (entry ...)")
+;;
+
+(* The exact field set {!store} writes, each required exactly once (no missing, extra, or
+   duplicate). Used by {!lookup} to reject a corrupt / hand-crafted / stale-format entry. *)
+let expected_fields =
+  [ "key"
+  ; "query-hash"
+  ; "claim"
+  ; "outcome"
+  ; "detail"
+  ; "encoding-version"
+  ; "grind-config"
+  ; "timestamp"
+  ]
 ;;
 
 (* The three outcomes of a lookup, kept DISTINCT so the driver can count a corrupted /
@@ -186,20 +216,49 @@ type lookup_result =
   | Unreadable of
       string (* entry file present but unparseable — corruption / format break *)
 
-let lookup ~dir (k : key) : lookup_result =
+(* Look up the entry for [k] and the requested [claim], VALIDATING it before trusting its
+   outcome. A file existing at [<k.hash>.sexp] is necessary but NOT sufficient: the entry
+   must carry exactly {!expected_fields} (each once) and its identity fields must match
+   what we are asking for — [key]=[k.hash], [query-hash]=[k.query_hash], [claim], and the
+   current [encoding-version]/[grind-config]. This closes the false-GREEN hole (review
+   CRITICAL cache.ml:170) where a hand-crafted [(entry (outcome CERTIFIED))] at the
+   computed path was trusted. Any schema/identity mismatch, or an unrecognized outcome
+   tag, → [Unreadable] (counted, re-certified via Lean) — never a [Hit]. [key]=[k.hash]
+   already binds the full composite cryptographically
+   (canonical‖claim‖model‖enc‖lean‖grind, cache.ml:76); the explicit per-field checks are
+   defense in depth against corruption/tampering. *)
+let lookup ~dir ~claim (k : key) : lookup_result =
   let file = path dir k in
   if not (Sys.file_exists file)
   then Absent
   else (
-    match
-      let src = Lean_runner.read_file file in
-      let fields = read_fields src in
-      List.assoc_opt "outcome" fields, List.assoc_opt "detail" fields
-    with
-    | Some tag, detail -> Hit (outcome_of tag (Option.value detail ~default:""))
-    | None, _ -> Unreadable "entry has no (outcome ...) field"
+    match read_fields (Lean_runner.read_file file) with
     | exception Parse_error m -> Unreadable m
-    | exception e -> Unreadable (Printexc.to_string e))
+    | exception e -> Unreadable (Printexc.to_string e)
+    | fields ->
+      let names = List.map fst fields in
+      let schema_ok =
+        List.sort String.compare names = List.sort String.compare expected_fields
+      in
+      let field_is n v = List.assoc_opt n fields = Some v in
+      if not schema_ok
+      then Unreadable "cache entry schema mismatch (missing/extra/duplicate field)"
+      else if not (field_is "key" k.hash)
+      then Unreadable "cache entry key does not match the requested key"
+      else if not (field_is "query-hash" k.query_hash)
+      then Unreadable "cache entry query-hash mismatch"
+      else if not (field_is "claim" claim)
+      then Unreadable "cache entry claim mismatch"
+      else if not (field_is "encoding-version" Encoder.encoding_version)
+      then Unreadable "cache entry encoding-version mismatch"
+      else if not (field_is "grind-config" Encoder.grind_config)
+      then Unreadable "cache entry grind-config mismatch"
+      else (
+        let tag = List.assoc "outcome" fields in
+        let detail = List.assoc "detail" fields in
+        match outcome_of tag detail with
+        | Some o -> Hit o
+        | None -> Unreadable (Printf.sprintf "unrecognized outcome tag %S" tag)))
 ;;
 
 let store ~dir (k : key) ~claim (outcome : Outcome.t) : unit =
