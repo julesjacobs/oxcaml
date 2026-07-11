@@ -586,3 +586,34 @@ corrupted models that must `MODEL-FAIL`; the euclidean div/mod sign matrix (4 co
 hand-computed `q`/`r` plus the `x = d·q + r` identity); an integer-overflow case that
 must raise; and reject-don't-guess probes (unsupported logic, quantifier, nonlinear
 `*`, undeclared symbol, ill-typed model value).
+
+## Adversarial perf corpus (`tests/perf/`, `make perf-bench`)
+
+DESIGN.md §8.4's deliberately-grown adversarial perf corpus, "so cliffs surface in
+CI rather than in the first real codebase." A small committed OCaml generator
+(`tests/perf/gen_perf.ml`, `make perf-gen`) emits deterministic `.smt2` families into
+`tests/perf/cases/` (committed, so the corpus is fixed and reviewable). `make
+perf-bench` runs the solver CLI over them and prints a per-case `{ verdict, counters,
+wall_ms }` table, full log under `../logs/perf/`.
+
+**This is a visibility tool, not a gate** (DESIGN §8: performance is surfaced, not
+gated). Its stdout is *not* a committed golden — wall-clock is allowed here, unlike
+the §I5/§I6 regression goldens — and a clean run always exits 0. It is not part of
+`make test`.
+
+Families: (a) `euf_diamond_d*` — equality diamonds; (b) `dense_simplex_c*` —
+overlapping linear bounds; (c) `ite_tree_d*` — balanced Int ite trees (depth 8/10/12);
+(d) `wide_sum_flat_n*` and `wide_sum_nested_n*` — flat vs left-nested sums; (e)
+`pushpop_n*` — deep push/pop stacks; (f) `pigeonhole_n*` — PHP(n+1,n) pure-Boolean.
+
+**What bites today vs. later.** The theory families (EUF, LIA — diamonds, dense
+simplex, wide sums, Int ite trees) currently answer `unknown` *fast*: v1 degrades
+theory atoms to `unknown` under the soundness rule, so their solve cost is near-zero
+and their real perf value activates when combination lands (M4). What bites **today**
+is (1) **term-construction / parse cost** — most sharply the `wide_sum_nested_*`
+family, which reproduces the O(n²) construction cliff (#49): re-expanding the growing
+`Arith` node (`terms_of`) at each nesting level. The `wide_sum_flat_*` family is the
+mitigated contrast — the parser routes flat n-ary `+` through a single
+`linear_combination` pass (O(n log n)); and (2) the **pure-Boolean pigeonhole** search,
+a real `unsat` verdict from the SAT core. Sizes are chosen so the worst case today is
+sub-second, not minutes.

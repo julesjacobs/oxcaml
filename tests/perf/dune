@@ -1,0 +1,14 @@
+; Adversarial performance corpus (DESIGN.md §8.4). Test-only, outside the smt/
+; firewall (I3); stdlib + Unix only. gen_perf regenerates the committed cases in
+; tests/perf/cases; perf_bench runs the solver CLI over them and prints a
+; { verdict, counters, wall_ms } table (a visibility tool, not a gate).
+
+(executable
+ (name gen_perf)
+ (modules gen_perf)
+ (libraries unix))
+
+(executable
+ (name perf_bench)
+ (modules perf_bench)
+ (libraries harness_lib unix))
