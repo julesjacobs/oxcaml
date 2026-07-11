@@ -43,9 +43,13 @@ test:
 bench:
 	@echo "not yet implemented (see TASKS.md: M0-harness)" && exit 1
 
-## gate — Lean 4 certification of cache misses (external oracle).
+## gate — Lean 4 certification (external oracle). Runs honeypots first (aborts
+## red if any is certified), then the tests/cases corpus, using the
+## content-addressed cache in ../cache. Digest to stdout; full log to ../logs.
 gate:
-	@echo "not yet implemented (see TASKS.md: M0-gate)" && exit 1
+	$(DUNE) build tests/gate/gate.exe
+	_build/default/tests/gate/gate.exe selftest
+	_build/default/tests/gate/gate.exe run
 
 ## promote — accept current solver output as golden (the promote workflow).
 ##   Rewrites the .smt2.expected sidecars for missing/mismatched goldens and
