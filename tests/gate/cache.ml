@@ -224,12 +224,13 @@ let expected_fields = content_fields @ [ "integrity" ]
 
 (* LENGTH-PREFIX each value ([<byte-len>:<value>], netstring-style) before hashing, so the
    preimage is injective over the field tuple (codex round-3 LOW cache.ml:225). A plain
-   [String.concat "\x00"] is NOT injective: a value containing the separator byte can
-   shift bytes across a field boundary for an identical preimage (e.g. [detail="x\x00y"],
-   [encoding-version=""] vs [detail="x"], [encoding-version="y"]). With each value read by
-   its length the boundaries are unambiguous, so distinct tuples always get distinct
-   digests. (This cannot forge a false GREEN — identity fields are fixed-format and
-   outcome tags are distinct — but it makes the "binds each field" claim actually true.) *)
+   [String.concat "\x00"] is NOT injective: a value containing the separator byte shifts
+   bytes across a field boundary for an identical preimage — e.g. adjacent
+   [detail]/[encoding-version] values [("x", "y\x00z")] and [("x\x00y", "z")] both flatten
+   to [x\x00y\x00z] between the surrounding separators. With each value read by its length
+   the boundaries are unambiguous, so distinct tuples always get distinct digests. (This
+   cannot forge a false GREEN — identity fields are fixed-format and outcome tags are
+   distinct — but it makes the "binds each field" claim actually true.) *)
 let content_digest fields =
   Sha256.hex_digest
     (String.concat

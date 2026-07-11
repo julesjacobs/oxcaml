@@ -1056,12 +1056,15 @@ let cmd_selftest () =
     ~needle:"(outcome CERTIFIED)"
     ~repl:"(outcome REFUTED)";
   (* (10) integrity-preimage injectivity (codex round-3 LOW): two content tuples that
-     collide under a plain NUL-join — a byte shifted across the detail/next-field boundary
-     via a value containing the separator — MUST get DIFFERENT length-prefixed digests. *)
+     genuinely COLLIDE under a plain NUL-join — the detail/encoding-version pair
+     [("x", "y\0z")] vs [("x\0y", "z")], both of which flatten to [x\0y\0z] between the
+     surrounding separators — MUST get DIFFERENT length-prefixed digests. (A shift that
+     leaves a value EMPTY does not collide: the empty value still contributes its own
+     separator; the collision needs the separator byte to appear INSIDE a value.) *)
   let base = full_fields (dummy "inj") ~claim:"unsat" ~tag:"CERTIFIED" ~detail:"" in
   let set n v a = (n, v) :: List.remove_assoc n a in
-  let a = base |> set "detail" "x" |> set "encoding-version" "y" in
-  let b = base |> set "detail" "x\000y" |> set "encoding-version" "" in
+  let a = base |> set "detail" "x" |> set "encoding-version" "y\000z" in
+  let b = base |> set "detail" "x\000y" |> set "encoding-version" "z" in
   if not (String.equal (Cache.content_digest a) (Cache.content_digest b))
   then print_endline "integrity preimage: OK (injective across field boundary)"
   else (
