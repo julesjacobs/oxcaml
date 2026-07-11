@@ -1,0 +1,161 @@
+(** Nelson–Oppen model-based theory combination (DESIGN.md §6; ADR-0005 D4/D5).
+
+    [Combine (R) (A) (B)] packages two child {!Oxsmt_core.Theory.THEORY} plugins as ONE
+    THEORY the CDCL(T) engine drives — the multiplexer of DESIGN §6. The engine sees a
+    single theory; this module routes each atom/literal to its owning child, merges their
+    propagations and conflicts, forwards [push]/[pop] in lockstep, and — at [Final] —
+    performs Z3-style {b model-based} combination: it reads the children's candidate
+    models and, only when they {e disagree} on a shared-variable equality, emits a
+    genuinely-constraining {!Oxsmt_core.Theory.Split} through the SAT core rather than
+    eagerly propagating the equality (LIA over ℤ is non-convex, so eager arrangement
+    propagation is unsound/incomplete; DESIGN §6).
+
+    {b Two distinct cross-theory paths.} (1) An equality a child ENTAILS (EUF's congruence
+    deriving [f a = f b] after [a = b], or LIA a bound-implied equality) is returned by
+    that child's {!Oxsmt_core.Theory.check} as a propagation; [Combine] forwards it, the
+    SAT core puts it on the trail, and it is re-asserted to its owner(s) — a shared
+    equality thereby reaches both children through NORMAL propagation forwarding, no split
+    involved. (2) The {!Oxsmt_core.Theory.Split} is the mechanism for the other case:
+    resolving a MODEL DISAGREEMENT, where neither child entails the equality but their
+    candidate models pick incompatible arrangements — the split forces the SAT core to
+    decide the shared equality atom. {b Termination} of the split loop rests on the seam's
+    full-assignment-at-[Final] contract: at a full boolean model every registered atom —
+    including each split's equality atom — is assigned, so a pair we split on is decided
+    the next [Final]; either polarity removes the disagreement (equal ⇒ both models agree
+    on it; unequal ⇒ the [<]/[>] disjunct constrains the arithmetic child to match), and a
+    decided pair never re-disagrees. Finitely many shared pairs ⇒ finitely many splits.
+
+    {b Why a functor with a [ROUTER], not a fixed EUF+LIA pair.} The frozen THEORY
+    signature deliberately carries no ownership predicate (per-assertion traffic is a
+    packed {!Oxsmt_core.Atom.t}, ADR-0005 D2). Routing — which child owns an atom, and how
+    to build the equality split for a given sort — is structural knowledge the combinator
+    needs but the engine must not. A generic functor takes it as the {!ROUTER} parameter,
+    so [Combine] depends only on [core] (I3) and is tested against hand-rolled child
+    theories, independent of the real EUF/LIA engines. (The shared-variable comparison
+    domain is derived from the children's candidate models directly — see the disagreement
+    search — not from a router hint, so the router needs no [interface_terms].)
+
+    {b Soundness backbone (INVARIANTS.md I4/I8; DESIGN §6, Session SOUNDNESS RULE).} The
+    combinator NEVER fabricates an assertion: it only ever forwards literals the engine
+    placed on the trail. A shared equality becomes asserted to both theories exactly when
+    the SAT core decides one of the [Split] disjuncts, so every conflict a child later
+    derives from that equality lists the split literal in its premises — provenance is by
+    construction, never "from thin air". Explanations pass through unchanged: premises are
+    already the global {!Oxsmt_core.Lit.t} currency (one engine allocator, ADR-0005 D2),
+    so a child's premise set is valid combined currency with no translation. When the
+    combinator cannot certify a state (a child returns [Sat] with a model that violates an
+    already-decided shared equality — a child bug), it raises {!Combination_unsound},
+    which the engine's CONTRACT-POISON handling turns into verdict [unknown] (never a
+    verdict from unsound state).
+
+    {b Determinism (I6, ADR-0005 C1–C8).} Every observable output is a deterministic
+    function of the register/assert/check/push/pop sequence: children are consulted A then
+    B; shared terms are iterated in {!Oxsmt_core.Term} tag order; the split pair chosen is
+    the tag-least disagreeing pair.
+
+    N children compose by nesting ([Combine (R2) (Combine (R1) (A) (B)) (C)]); binary
+    matches the frozen [Combine (A) (B)] shape in {!Oxsmt_core.Theory}. *)
+
+open Oxsmt_core
+
+(** Which child(ren) an atom belongs to, and the material for the shared-equality split.
+    Instantiated per theory pair (QF_UFLIA: [A] = EUF, [B] = LIA). *)
+module type ROUTER = sig
+  (** [A]/[B] = owned by exactly one child. [Both] = a shared interface equality,
+      registered into A {e and} B alike, so an equality the SAT core settles via a
+      {!Oxsmt_core.Theory.Split} reaches both theories.
+
+      {b NB — there is no purification pass in this pipeline} (smt/preprocess does
+      ite/divmod/simplify only; purification was deferred, ADR-0005), so atoms are NOT
+      guaranteed pure. The combinator's robustness on mixed atoms comes not from purity
+      but from (a) [owner]'s structural dispatch classifying by head/sort, (b)
+      [interface_terms]' OVER-approximation of shared variables — a mixed atom is routed
+      to one theory and its Int-sorted foreign subterms still surface as shared
+      candidates, never silently dropped — and (c) the combinator EVALUATING (folding) a
+      compound term like [x + 1] through a child's leaf-only model rather than requiring
+      the child to key it (so a pinned equality over a compound is verified, not degraded
+      — see [check_pins]/[model]). A future maintainer must not reintroduce a purity
+      assumption. *)
+  type owner =
+    | A
+    | B
+    | Both
+
+  (** [owner term] is the register-time classification: the UNION of children that may
+      receive this atom at {e any} polarity. Drives [register_atom] fan-out. A pure,
+      deterministic function of the term (idempotent across [register_atom]; I6). *)
+  val owner : Term.t -> owner
+
+  (** [assert_to term ~positive] is the assert-time routing of the SIGNED literal — a
+      subset of [owner term]'s children. It lets a router withhold a polarity a child
+      cannot accept: e.g. LIA raises [Unsupported] on a disequality, so a NEGATIVE shared
+      equality routes to the congruence child ([A]) ONLY. Soundness is preserved (the
+      congruence child handles diseq natively) and completeness via the split mechanism —
+      if the arithmetic child's candidate model later equates the pair while the
+      congruence child holds them apart, that is a shared-pair disagreement whose
+      ℤ-trichotomy split carries the ordering to the arithmetic child. MUST agree with
+      [owner] on the positive polarity for a shared equality (so registration and
+      assertion match). *)
+  val assert_to : Term.t -> positive:bool -> owner
+
+  (** [equality_split ctx x y] is the disjunction the combinator emits as a
+      {!Oxsmt_core.Theory.Split} when the two candidate models disagree on [x = y]: a
+      clausified, genuinely-constraining set of {b ≥2 DISTINCT} atoms whose disjunction is
+      valid (ADR-0005 CONTRACT-SPLIT). For Int this MUST be the ℤ-trichotomy
+      [x = y ∨ x < y ∨ x > y] — NOT [x = y ∨ x ≠ y], which is [A ∨ ¬A] and is silently
+      dropped by the SAT core's level-0 tautology removal (ADR-0005 §1a; freeze-package
+      finding B1), leaving the split with no constraining power. Terms are built through
+      [ctx] so they share the session tag stream / hash-consing (D6). *)
+  val equality_split : Context.t -> Term.t -> Term.t -> Term.t list
+end
+
+(** Raised (→ engine CONTRACT-POISON → verdict [unknown], soundness bias I8) whenever the
+    combinator cannot soundly certify a state — a SOUNDNESS degrade; never raised by
+    correct children. The cases:
+    - a child certifies [Final]→[Sat] over a model that violates an asserted shared
+      equality it was routed (codex C2 pin check);
+    - a child returns a consistent-but-non-[Sat] result at a full model (empty
+      propagations is not a [Sat] certificate, codex C4);
+    - the merged model cannot give an Int-sorted asserted term an integer value (codex
+      C3);
+    - [assert_lit]/[explain] names an atom [register_atom] never saw (engine contract). *)
+exception Combination_unsound of string
+
+(** Raised (→ verdict [unknown]) when the combinator meets a shape it handles SOUNDLY but
+    INCOMPLETELY — a deliberate completeness degrade, {b distinct from}
+    {!Combination_unsound} so a caller/log can tell "we chose not to decide this" from "a
+    child violated its contract". The sole case in v1: a STRUCTURED Boolean compound (an
+    [And]/[Or]/[Not]/[Ite] or a Bool-[Eq]/iff) occurring as an argument of an
+    uninterpreted function, e.g. [h (b ∧ c)] (internalization ADR §3.6, case (ii)). The
+    leaf bridge names a nullary [K_bool] leaf, so a compound argument would decouple from
+    its operands and wrong-SAT; rather than encode a Tseitin coupling (deferred, ADR §9
+    [bool-compound-uf-args]) the walk detects the shape at assert time and degrades. A
+    Bool LEAF ([h p], [p] a variable) and a Bool CONSTANT ([h true]/[h false]) do NOT
+    raise — they are native (§3.6 cases (i)/(i')). *)
+exception Incomplete of string
+
+(** The congruence child [A]. It is an ordinary {!Oxsmt_core.Theory.THEORY} plus
+    {!CONGRUENCE_CHILD.internalize_term}: the combinator internalizes a boundary term that
+    surfaces only inside the OTHER child's atom (a LIA order atom's [App] subterms) so the
+    congruence engine's model values it and closes congruence over it — the W1/R1 fix. The
+    asymmetry (only [A] needs it) is intrinsic: LIA reaches a shared Int term through its
+    own leaf/fold machinery, while EUF has no channel to a term it never saw as an atom. *)
+module type CONGRUENCE_CHILD = sig
+  include Theory.THEORY
+
+  (** [internalize_term t term] internalizes [term] and its subterm closure into the child
+      with NO atom binding — never asserted, watched, propagated, or explained; only made
+      visible to the child's model + congruence. Idempotent; undone by [pop] of the
+      introducing frame. *)
+  val internalize_term : t -> Oxsmt_core.Term.t -> unit
+end
+
+(** [Combine (R) (A) (B)] is the combined theory ([A] = the congruence child, [B] =
+    arithmetic). Its [model] (valid after [Final]→[Sat]) is the sort-directed merge of the
+    children's models: each term takes the child value whose variant matches the term's
+    sort (Int from the arithmetic child, [Uninterp] from the congruence child), so the
+    single witness respects the arrangement both children agreed on (CONTRACT-MODEL). *)
+module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : Theory.THEORY
+[@@warning "-67"]
+(* -67: the result signature [Theory.THEORY] (abstract [t]) does not mention the functor
+   parameters, so they read as "unused" in the declaration; they are used in the body. *)

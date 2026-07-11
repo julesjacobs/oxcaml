@@ -84,6 +84,16 @@ let register_atom t atom term =
     | K_bool | K_foreign -> ())
 ;;
 
+(* Internalise [term] (+ closure) into the e-graph with no atom binding — the combinator's
+   boundary-term visibility hook (internalization ADR §3). Same engine call as
+   [register_atom]'s internalisation (so idempotent / undone-by-pop identically); records
+   [term] for [model] enumeration so a boundary term reachable via no owned atom is still
+   valued. Never watched, asserted, propagated, or explained. *)
+let internalize_term t term =
+  Euf.register_term t.engine term;
+  if not (List.memq term t.atom_terms) then t.atom_terms <- term :: t.atom_terms
+;;
+
 let assert_lit t lit =
   let atom = Lit.atom lit in
   let positive = Lit.sign lit in

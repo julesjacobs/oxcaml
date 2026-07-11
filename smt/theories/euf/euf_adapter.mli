@@ -29,3 +29,14 @@
     (EUF). *)
 
 include Oxsmt_core.Theory.THEORY
+
+(** [internalize_term t term] internalises [term] and its full subterm closure into the
+    e-graph WITHOUT binding it to any atom — no watch, no assertion, no propagation
+    target, only e-nodes so congruence closes over it and [model] values it. The
+    Nelson–Oppen combinator (internalization ADR §3) uses this to make EUF see a boundary
+    term that surfaces only inside the OTHER theory's atom (e.g. [f x] occurring only in a
+    LIA order atom). Additive to the child-facing interface; the frozen
+    {!Oxsmt_core.Theory.THEORY} seam the engine drives is unchanged. Idempotent (C7);
+    undone by [pop] of the frame that introduced it, exactly like {!register_atom}'s
+    internalisation. *)
+val internalize_term : t -> Oxsmt_core.Term.t -> unit

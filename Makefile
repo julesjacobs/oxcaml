@@ -69,7 +69,7 @@ CORPUS_TIMEOUT ?= 2
 CORPUS_JOBS ?= 48
 CORPUS_MAX_BYTES ?= 20971520
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -231,6 +231,18 @@ lia-test:
 lia-adapter-test:
 	$(DUNE) exec smt/theories/lia/test/lia_adapter_test.exe
 
+## combine-test — smt/combine Nelson-Oppen model-based combination by INTERNALIZATION
+##   (internalization ADR). Three layers, all stdlib-only + deterministic: (1) MECHANICS
+##   over a programmable mock theory (routing incl. internalize-into-A fan-out, push/pop
+##   lockstep, propagation/explain provenance, pin poison, sort-directed model merge);
+##   (2) INTEGRATION over a toy EUF + toy LIA + mini DPLL(T) driver; (3) the ADR §6 corpus
+##   through the REAL Euf_adapter + Lia_adapter (W1/R1/tower, f(x+1)<f(y+1), numeral corner,
+##   k(x+1)≠k(1) buried-LIA, p(x+1), Bool leaf UNSAT + compound degrade-to-unknown,
+##   mixed-equality totality, deep tower, pure-QF_LIA zero-split, use-history transition,
+##   push/pop-reassert). Nonzero exit on any failed check.
+combine-test:
+	$(DUNE) exec smt/combine/test/combine_test.exe
+
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse
 ##   over ~30 programmatic sessions covering every node, quoting, negatives, div/mod, deep
@@ -300,6 +312,7 @@ test: check-frozen
 	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
 	$(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
+	$(MAKE) combine-test
 	$(MAKE) smtlib-test
 
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
