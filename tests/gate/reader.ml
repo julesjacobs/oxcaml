@@ -11,7 +11,13 @@
    declare-const, assert, check-sat, exit. Supported terms: true false, and or not =>,
    ite, = distinct, <= < >= >, + - *, integer numerals, let, plus declared symbols. [=]
    over Bool operands is iff: [normalize] rewrites it to the [Iff] node (chains desugar
-   pairwise); [distinct] over Bool is pairwise [<>]. *)
+   pairwise); [distinct] over Bool is pairwise [<>].
+
+   TCB hardening (codex G1-G4, see NOTES.md): token KIND from [Sexp] is honoured — a
+   [Quoted] |sym| is ALWAYS a plain symbol (never a numeral/keyword/operator), a [Str]
+   "..." is inert data (never a command/term). A single [check-sat] bounds the query:
+   asserts after it, or a second check-sat, are UNSUPPORTED (no silent union). [div]/[mod]
+   are recognised but UNSUPPORTED (loud) — grind can't do Euclidean ediv/emod (M4). *)
 
 open Ast
 
@@ -35,11 +41,29 @@ let sort_of_sexp env (s : Sexp.t) : sort =
   | Sexp.Atom "Int" -> Int
   | Sexp.Atom name ->
     if List.mem name env.sorts then Usort name else malformedf "unknown sort: %s" name
+  | Sexp.Quoted name ->
+    (* A |quoted| sort name is a literal symbol — even |Int|/|Bool| are user sorts, not
+       the builtins (codex G1). *)
+    if List.mem name env.sorts then Usort name else malformedf "unknown sort: |%s|" name
+  | Sexp.Str _ -> malformedf "string literal is not a sort"
   | Sexp.List _ ->
     unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
 ;;
 
 let lookup_fun env name = List.find_opt (fun (n, _, _) -> String.equal n name) env.funs
+
+(* A symbol reference by name (declared 0-ary const or function head): reused by both
+   [Atom] (unquoted) and [Quoted] paths. A [Quoted] token reaches here ONLY as a symbol,
+   never as a numeral/keyword/operator. *)
+let read_symbol env name =
+  match List.assoc_opt name env.scope with
+  | Some t -> t
+  | None ->
+    (match lookup_fun env name with
+     | Some (_, [], _) -> Const name
+     | Some (_, _ :: _, _) -> malformedf "function %s used without arguments" name
+     | None -> malformedf "undeclared symbol: %s" name)
+;;
 
 (* ---- numerals ---- *)
 
@@ -52,29 +76,42 @@ let rec read_term env (s : Sexp.t) : term =
   | Sexp.Atom "true" -> True
   | Sexp.Atom "false" -> False
   | Sexp.Atom a when is_numeral a -> Int_lit a
-  | Sexp.Atom a ->
-    (* let-bound? then declared symbol? *)
-    (match List.assoc_opt a env.scope with
-     | Some t -> t
-     | None ->
-       (match lookup_fun env a with
-        | Some (_, [], _) -> Const a
-        | Some (_, _ :: _, _) -> malformedf "function %s used without arguments" a
-        | None -> malformedf "undeclared symbol: %s" a))
+  | Sexp.Atom a -> read_symbol env a
+  (* A |quoted| token is a symbol ONLY — never a numeral/keyword/operator (codex G1). *)
+  | Sexp.Quoted a -> read_symbol env a
+  | Sexp.Str _ -> malformedf "string literal in term position"
   | Sexp.List (Sexp.Atom "let" :: rest) -> read_let env rest
   | Sexp.List (Sexp.Atom op :: args) -> read_app env op args s
+  (* A quoted head is a symbol, so it can only be an uninterpreted-function application —
+     never a built-in operator (codex G1: |ite|/|+| are symbols, not operators). *)
+  | Sexp.List (Sexp.Quoted f :: args) -> read_fun_app env f args
+  | Sexp.List (Sexp.Str _ :: _) -> malformedf "string literal in operator position"
   | Sexp.List [] -> malformedf "empty application ()"
   | Sexp.List (hd :: _) ->
     unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string hd)
 
+and read_fun_app env name args =
+  match lookup_fun env name with
+  | Some (_, params, _) ->
+    let n_expect = List.length params
+    and n_got = List.length args in
+    if n_expect <> n_got
+    then malformedf "%s applied to %d args, expected %d" name n_got n_expect;
+    App (name, List.map (read_term env) args)
+  | None -> malformedf "undeclared function or unknown operator: %s" name
+
 and read_let env rest =
   match rest with
   | [ Sexp.List bindings; body ] ->
+    let binding_name = function
+      | Sexp.Atom name | Sexp.Quoted name -> name
+      | b -> malformedf "malformed let binding variable: %s" (Sexp.to_string b)
+    in
     let new_scope =
       List.map
         (fun b ->
            match b with
-           | Sexp.List [ Sexp.Atom name; def ] -> name, read_term env def
+           | Sexp.List [ nm; def ] -> binding_name nm, read_term env def
            | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
@@ -82,7 +119,7 @@ and read_let env rest =
     read_term { env with scope = new_scope @ env.scope } body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
-and read_app env op args orig =
+and read_app env op args _orig =
   let t () = List.map (read_term env) args in
   match op, args with
   | "not", [ a ] -> Not (read_term env a)
@@ -104,17 +141,19 @@ and read_app env op args orig =
   | "-", [ a ] -> Neg (read_term env a)
   | "-", _ :: _ :: _ -> Sub (t ())
   | ("forall" | "exists"), _ -> unsupportedf "quantifiers are not supported (QF only)"
+  | ("div" | "mod"), _ ->
+    (* Recognised LIA operators the gate cannot certify TODAY (codex G4): grind does not
+       reason about Lean's Euclidean [Int.ediv]/[Int.emod] (verified by experiment — it
+       treats them as opaque), so emitting them would only ever yield INCONCLUSIVE. Real
+       support needs euclidean elimination (fresh q,r + side constraints), a separate TCB
+       feature tracked for M4 LIA. Classify LOUD + distinct (UNSUPPORTED, not MALFORMED)
+       so the coverage gap is visible in the digest rather than a silent MALFORMED-green. *)
+    unsupportedf
+      "div/mod not yet certifiable by the gate (grind lacks Euclidean ediv/emod \
+       reasoning); needs euclidean elimination — tracked for M4 LIA"
   | _ ->
-    (* uninterpreted function application *)
-    (match lookup_fun env op with
-     | Some (_, params, _) ->
-       let n_expect = List.length params
-       and n_got = List.length args in
-       if n_expect <> n_got
-       then malformedf "%s applied to %d args, expected %d" op n_got n_expect;
-       App (op, t ())
-     | None ->
-       malformedf "undeclared function or unknown operator: %s" (Sexp.to_string orig))
+    (* uninterpreted function application (unquoted non-operator head) *)
+    read_fun_app env op args
 
 (* [(=> a b c)] desugars to [a => (b => c)] (right associative). *)
 and read_implies env args =
@@ -313,6 +352,16 @@ let of_string (src : string) : query =
   let logic = ref None in
   let asserts = ref [] in
   let status = ref None in
+  (* Single-query model (codex G3): the gate certifies ONE theorem — the conjunction of
+     the asserts up to a single [check-sat]. Asserts after a check-sat, or a second
+     check-sat, are rejected LOUDLY (Unsupported) rather than silently unioned into the
+     theorem. *)
+  let checked = ref false in
+  (* A declared name may be an unquoted [Atom] or a [Quoted] symbol (e.g. |0|). *)
+  let decl_name = function
+    | Sexp.Atom name | Sexp.Quoted name -> name
+    | other -> malformedf "expected a symbol name, got %s" (Sexp.to_string other)
+  in
   let declare_fun name params ret =
     if Option.is_some (lookup_fun env name)
     then malformedf "redeclaration of symbol %s" name;
@@ -321,31 +370,40 @@ let of_string (src : string) : query =
   List.iter
     (fun cmd ->
        match cmd with
-       | Sexp.List (Sexp.Atom "set-logic" :: [ Sexp.Atom l ]) ->
+       | Sexp.List [ Sexp.Atom "set-logic"; Sexp.Atom l ] ->
          (match l with
           | "QF_UFLIA" | "QF_UF" | "QF_LIA" | "QF_IDL" | "QF_RDL" -> logic := Some l
           | _ -> unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l)
        | Sexp.List (Sexp.Atom "set-info" :: rest) ->
          (match rest with
           | [ Sexp.Atom ":status"; Sexp.Atom v ] -> status := read_status v
-          | _ -> () (* ignore other :info *))
-       | Sexp.List [ Sexp.Atom "declare-sort"; Sexp.Atom name; arity ] ->
-         let name = arity_zero_sort_decl name [ arity ] in
+          | _ -> () (* ignore other :info (values, incl. "strings", are inert) *))
+       | Sexp.List [ Sexp.Atom "declare-sort"; nm; arity ] ->
+         let name = arity_zero_sort_decl (decl_name nm) [ arity ] in
          if List.mem name env.sorts then malformedf "redeclaration of sort %s" name;
          env.sorts <- name :: env.sorts
-       | Sexp.List [ Sexp.Atom "declare-const"; Sexp.Atom name; ret ] ->
-         declare_fun name [] (sort_of_sexp env ret)
-       | Sexp.List [ Sexp.Atom "declare-fun"; Sexp.Atom name; params; ret ] ->
+       | Sexp.List [ Sexp.Atom "declare-const"; nm; ret ] ->
+         declare_fun (decl_name nm) [] (sort_of_sexp env ret)
+       | Sexp.List [ Sexp.Atom "declare-fun"; nm; params; ret ] ->
          let params, ret = read_signature env params ret in
-         declare_fun name params ret
+         declare_fun (decl_name nm) params ret
        | Sexp.List [ Sexp.Atom "assert"; body ] ->
+         if !checked
+         then
+           unsupportedf
+             "assert after check-sat: the gate certifies a single query (no incremental \
+              asserts)";
          let term = normalize env (read_term env body) in
          (* sort-check: assertions must be Bool *)
          (match sort_of env term with
           | Bool -> ()
           | other -> malformedf "assertion is not Bool (got %s)" (sort_to_string other));
          asserts := term :: !asserts
-       | Sexp.List (Sexp.Atom "check-sat" :: _) -> ()
+       | Sexp.List (Sexp.Atom "check-sat" :: _) ->
+         if !checked
+         then
+           unsupportedf "multiple check-sat commands: the gate certifies a single query";
+         checked := true
        | Sexp.List (Sexp.Atom "exit" :: _) -> ()
        | Sexp.List (Sexp.Atom "push" :: _) | Sexp.List (Sexp.Atom "pop" :: _) ->
          unsupportedf "incremental push/pop not supported by the gate reader"
@@ -354,7 +412,11 @@ let of_string (src : string) : query =
        | Sexp.List (Sexp.Atom "define-fun" :: _) ->
          unsupportedf "define-fun (macros) not supported by the gate reader"
        | Sexp.Atom a -> malformedf "unexpected top-level atom: %s" a
+       | Sexp.Quoted a -> malformedf "unexpected top-level |quoted| token: %s" a
+       | Sexp.Str _ -> malformedf "unexpected top-level string literal"
        | Sexp.List (Sexp.Atom other :: _) -> unsupportedf "unsupported command: %s" other
+       | Sexp.List (Sexp.Quoted _ :: _) | Sexp.List (Sexp.Str _ :: _) ->
+         malformedf "command head must be a bare keyword, not a quoted symbol or string"
        | Sexp.List _ -> malformedf "malformed command: %s" (Sexp.to_string cmd))
     sexps;
   { logic = !logic

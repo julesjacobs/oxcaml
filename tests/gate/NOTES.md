@@ -117,3 +117,36 @@ query contains no Bool `=`, so `normalize` leaves it unchanged and the encoder
 and canonical form emit byte-identical output (only an `Iff` branch was added
 alongside the untouched `Eq` branch). Hence old cache entries remain valid and a
 bump would needlessly discard them.
+
+## Reader hardening (codex G1–G4, enc-v2)
+
+A cross-model (gpt-5.6) review found four holes in the gate's own SMT-LIB
+reader/lexer — the TCB — that the same-model reviews had cleared. Fixed on
+task/gate3; details + retroactive re-certification in logs/gate3-recertification.md.
+
+- **G1 (quoted tokens):** `sexp.ml` now distinguishes token KIND — `Atom`
+  (unquoted: may be numeral/keyword/operator), `Quoted` (`|...|`: ALWAYS a plain
+  symbol), `Str` (`"..."`: inert data). Previously a quoted `|0|` lexed as the
+  numeral 0, so `(distinct |0| 0)` collapsed to `(distinct 0 0)` → grind certified
+  `0≠0`=False (a false unsat). Now `|0|` is the symbol "0"; the reader never
+  numeral-/keyword-interprets a `Quoted`.
+- **G2 (string literals):** the lexer reads `"..."` (with `""`→`"`) as one inert
+  `Str` token; its bytes are never re-tokenized as commands, so a
+  `:source "(assert false)"` cannot inject `false` into the theorem.
+- **G3 (single-query model):** `check-sat` was a no-op, so asserts anywhere in the
+  file accumulated into one theorem. The reader now rejects a second `check-sat`
+  and any `assert` after a `check-sat` as UNSUPPORTED (loud) — no silent union.
+- **G4 (div/mod):** grind does NOT reason about Lean's Euclidean `Int.ediv`/
+  `Int.emod` — verified by experiment (exp10): it treats them as opaque and cutsat
+  ignores the div/mod ↔ dividend link, so `(mod x 3)=5` etc. are NOT closed.
+  Emitting `ediv`/`emod` would only ever yield INCONCLUSIVE. So the reader
+  recognises `div`/`mod` and classifies them a distinct, LOUD UNSUPPORTED (not a
+  silent MALFORMED-green bypass). Real support needs euclidean elimination (fresh
+  q,r + `x = c·q+r ∧ 0≤r<|c|` side constraints, as smt/preprocess does) — a
+  separate TCB feature RECOMMENDED before M4 LIA, when div/mod cases arrive.
+
+**encoding_version enc-v1 → enc-v2 (unconditional):** the emitted Lean is
+unchanged, but every verdict cached under enc-v1 was computed through the broken
+reader, so the bump forcibly invalidates the whole certified cache and forces
+re-certification through the fixed reader. Re-cert found zero regressions (our
+printer-emitted corpus never exercised the holes).

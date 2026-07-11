@@ -224,7 +224,7 @@ let run_dir_now logs_root =
 (* A green gate that hasn't proven it can go red is unaudited (DESIGN.md §10), so the
    honeypot phase is not vacuously satisfiable: it enforces a hard floor and an exact
    expected outcome per honeypot. *)
-let min_honeypots = 4
+let min_honeypots = 8
 let expect_path smt2 = Filename.remove_extension smt2 ^ ".expect"
 
 (* A honeypot's declared expectation must be a non-certifying outcome. CERTIFIED is

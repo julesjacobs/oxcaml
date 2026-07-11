@@ -13,8 +13,14 @@ exception Encode_error of string
 let errf fmt = Printf.ksprintf (fun s -> raise (Encode_error s)) fmt
 
 (* Bump on ANY change to the emitted Lean (preamble, tactic, term mapping). The cache is
-   keyed on this, so a bump invalidates every prior certification. *)
-let encoding_version = "enc-v1"
+   keyed on this, so a bump invalidates every prior certification.
+
+   enc-v2 (gate reader hardening, codex G1-G4): bumped UNCONDITIONALLY even though the
+   Lean emission is unchanged — every verdict cached under enc-v1 was computed through a
+   reader with known soundness holes (quoted-token/string-injection/multi-check-sat), so
+   the whole enc-v1 certified cache is suspect and must be force-invalidated and
+   re-certified through the fixed reader (see logs/gate3-recertification.md). *)
+let encoding_version = "enc-v2"
 
 (* Centralised grind invocation; part of the cache key via [grind_config]. *)
 let grind_tactic = "grind"
