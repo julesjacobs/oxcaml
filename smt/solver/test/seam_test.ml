@@ -335,6 +335,61 @@ let test_propagate_into_false () =
   check "prop-false: push/pop invariant held" !(mock.invariant_ok)
 ;;
 
+(* Lazy explain of a LOW-level theory literal AFTER a backjump popped the higher levels
+   that surrounded the conflict. Level 1: assume a ⇒ rule [{a}] ⇒ c propagates c (theory).
+   Level 2: assume b; clauses (¬c∨¬b∨e) and (¬c∨¬b∨¬e) conflict on e. 1UIP learns (¬b∨¬c)
+   and backjumps to level 1 (popping e and b), keeping a and c. ¬c then forces ¬b, the
+   assumption b fails, and the failed-core trace resolves c's Theory_prop reason — calling
+   [explain c] after the higher levels are gone. c and its premise a survived at level 1,
+   so the reconstruction is valid. *)
+let test_explain_after_backjump () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s
+  and e = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b
+  and lc = Sat.pos c
+  and le = Sat.pos e in
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock.theory);
+  Sat.add_clause s [ Sat.neg c; Sat.neg b; le ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg b; Sat.neg e ];
+  let learned = with_collector s in
+  let r = Sat.solve ~assumptions:[ la; lb ] s in
+  let ls = learned () in
+  check "explain-bj: unsat" (r = Sat.Unsat);
+  let failed = List.sort compare (List.map dimacs_of_lit (Sat.failed_assumptions s)) in
+  check
+    (Printf.sprintf "explain-bj: failed core = [1;2] (got %s)" (show_ints failed))
+    (failed = [ 1; 2 ]);
+  check
+    "explain-bj: a partial backjump to level 1 occurred (higher level popped)"
+    (List.exists (fun (_, _, bt) -> bt = 1) ls);
+  check
+    (Printf.sprintf
+       "explain-bj: explain called after backjump (%d)"
+       !(mock.explain_calls))
+    (!(mock.explain_calls) >= 1);
+  check "explain-bj: push/pop invariant held" !(mock.invariant_ok)
+;;
+
+(* Lifecycle: attaching a theory after a clause has been asserted must raise (pristine-
+   attach). The reordered tests above show pristine attach succeeds; this pins the guard. *)
+let test_set_theory_after_assert_raises () =
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  Sat.add_clause s [ Sat.pos a ];
+  let mock = make_mock s empty_config in
+  let raised =
+    match Sat.set_theory s (Some mock.theory) with
+    | () -> false
+    | exception Invalid_argument _ -> true
+  in
+  check "attach-after-assert: raises" raised
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Final-check split (T_lemma). With no clauses and phase-saving deciding false-first, the
    solver reaches the all-false model; the theory then splits on (b ∨ c), forcing more
@@ -541,6 +596,8 @@ let () =
   test_lazy_explain_called ();
   test_lazy_explain_not_called ();
   test_propagate_into_false ();
+  test_explain_after_backjump ();
+  test_set_theory_after_assert_raises ();
   test_final_split ();
   test_final_split_empty_unsat ();
   test_final_conflict ();
