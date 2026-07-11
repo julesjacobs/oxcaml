@@ -52,6 +52,11 @@ ADR rather than comply. Read DESIGN.md for the full plan (start with §1, §3, �
 - **Digest-first tool output.** Every tool writes full detail to `../logs` and
   prints a digest: counts, top-k outliers, first few failures with log paths.
   Flooding an agent's context is a defect of the same severity as a slow suite.
+- **Gate-log provenance (#133).** `make gate` writes a provenance-stamped log dir
+  `gate-<stamp>-<pid>-<HEAD>`; `make status` reads only a log whose `<HEAD>` matches
+  the tree's HEAD, else prints a loud `n/a` — never a stale or cross-worktree number.
+  (So a fresh `make gate` at the current HEAD is required for `make status` to show a
+  live gate line; this is why post-merge STATUS regen runs the gate first.)
 - **Determinism.** Fixed seeds; no wall-clock in search heuristics or goldens.
 
 ## Merge requirements
