@@ -209,15 +209,29 @@ stale one.
 
 `STATUS.md` is the master's empirical view of the world (DESIGN.md §8.4, §11):
 **outcome metrics first** (goal-displacement defense), process metrics after. It
-is **generated, never hand-edited** — the banner says so, and `make status`
-overwrites it. There is no CI/nightly scheduler yet; the `make status` target IS
-the deliverable, and a scheduler wires it later.
+is **generated, never hand-edited** — the banner says so. There is no CI/nightly
+scheduler yet; the make targets ARE the deliverable, and a scheduler wires them
+later.
+
+Two targets, deliberately split:
+
+- **`make status`** — pure aggregation of artifacts already on disk. Runs
+  **nothing** (no harness, no Lean), writes no stats. This is what keeps the
+  committed `STATUS.md` **byte-stable**: back-to-back `make status` produce
+  identical output given the same `(repo, logs)`. Run this from `main/` (paths
+  like `../logs`, `../cache` resolve as siblings of `main/`, per
+  M0-harness-hygiene — from a worktree they'd point at `worktrees/`).
+- **`make status-fresh`** — the nightly path. Runs the fast harness once (writing
+  a new stats JSONL and capturing its pass/fail digest to
+  `../logs/harness/last-digest.txt`), then calls `make status`. Kept separate
+  precisely because it *mutates* inputs; folding it into `make status` would make
+  the committed file's diff perpetually dirty and train readers to ignore it.
 
 The generator (`tools/status_gen/status_gen.ml`, stdlib+Unix, standalone — it
 lives under `tools/` alongside `check_frozen.sh` rather than in `tests/`, so it
-does not couple to the harness build) **aggregates existing artifacts**; it does
-not run Lean or re-derive product state. Inputs, each optional (a missing one
-degrades to `n/a`, never a crash):
+does not couple to the harness build) **only aggregates existing artifacts**;
+it runs nothing and re-derives no product state. Inputs, each optional (a missing
+one degrades to `n/a`, never a crash):
 
 - **TASKS.md** → per-milestone done/total and the current milestone (first
   `M<n>-` row group with any non-`done` row);
@@ -225,20 +239,22 @@ degrades to `n/a`, never a crash):
   wall-clock**, so the committed file stays reproducible), worktree/branch
   hygiene, and days-since-last-outcome-improvement (commits touching `smt/` or
   `tests/cases/`, measured to HEAD's commit timestamp — a documented heuristic);
-- **the harness digest** → live pass/fail (`make status` runs the fast harness
-  once and captures its stdout; a red harness does not abort generation);
-- **the latest `../logs/gate-*/gate.log`** → gate outcome counts, honeypot floor,
-  cache hit-rate, Lean/encoding versions;
-- **the stats JSONL** (the sidecar above) → search-counter bucket distributions,
-  top-k slowest goals by `wall_ms`, and the corpus solved-rate over `tests/cases`
-  (fraction of goals with a definite `sat`/`unsat` verdict — **0% while the
-  solver is a stub; this is the number that must move**);
+- **the last captured harness digest** (`../logs/harness/last-digest.txt`, written
+  by `make status-fresh`) → live pass/fail;
+- **the latest full `../logs/gate-*/gate.log`** → gate outcome counts, honeypot
+  floor, cache hit-rate, Lean/encoding versions (prefers a full `gate run` over an
+  honeypot-only `gate selftest`; honeypot health = none `CERTIFIED` and count ≥
+  floor);
+- **the most recent stats JSONL** (the sidecar above) → search-counter **bucket**
+  distributions (log-scale, deterministic) and the corpus solved-rate over
+  `tests/cases` (fraction of goals with a definite `sat`/`unsat` verdict — **0%
+  while the solver is a stub; this is the number that must move**). Per-goal
+  `wall_ms` is deliberately **not** emitted into `STATUS.md` — it is
+  nondeterministic and stays only in the uncommitted stats sidecar/logs;
 - **`tools/line_budgets.txt`** (committed, master-owned) → per-module `.ml`+`.mli`
   line counts vs budget, flagged `OVER` past budget (a tripwire, not a gate —
   DESIGN.md §10).
 
-Determinism: given the same inputs the output is identical except the
-`generated at` line. Note that `make status` writes a fresh stats file each run
-(it runs the harness), so the process-metrics perf table naturally reflects
-recent runs; the outcome metrics are stable given repo + logs. Digest-first: the
-target prints ~5 summary lines and writes the full document to `STATUS.md`.
+Determinism: given the same `(repo, logs)` the output is byte-identical except
+the `generated at <HEAD>` line. Digest-first: the target prints ~5 summary lines
+and writes the full document to `STATUS.md`.

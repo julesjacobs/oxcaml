@@ -19,7 +19,7 @@ FIXTURES ?= tests/harness/fixtures
 HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
                 --logs $(LOGS) --stats $(STATS)
 
-.PHONY: build fmt test core-test bench gate promote check-frozen spine status
+.PHONY: build fmt test core-test bench gate promote check-frozen spine status status-fresh
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -69,21 +69,32 @@ gate:
 	_build/default/tests/gate/gate.exe selftest
 	_build/default/tests/gate/gate.exe run
 
-## status — regenerate STATUS.md from repo state + latest logs (DESIGN §8.4, §11).
-##   Aggregates artifacts (TASKS.md, git, the latest gate log, stats JSONL,
-##   committed line budgets) and runs the fast harness once for live pass/fail.
-##   Deterministic given the same inputs; the only varying line is "generated at
-##   <HEAD>" (git HEAD, never wall-clock). Prints a ~5-line digest; overwrites
-##   STATUS.md. A red harness does not abort generation (status must still report).
-##   This IS the deliverable; a scheduler wires it to nightly later (no CI yet).
+## status — regenerate STATUS.md by AGGREGATING existing artifacts (DESIGN §8.4, §11).
+##   Reads TASKS.md, git, the latest gate log, the most recent existing stats
+##   JSONL, committed line budgets, and the last captured harness digest. Does
+##   NOT run the harness — so the committed STATUS.md is byte-stable given the
+##   same (repo, logs): back-to-back `make status` produce identical output. The
+##   only per-run-varying line is "generated at <HEAD>" (git HEAD, never
+##   wall-clock); per-goal wall_ms lives only in the uncommitted stats sidecar,
+##   never in the committed file. Prints a ~5-line digest; overwrites STATUS.md.
 status:
-	$(DUNE) build tools/status_gen/status_gen.exe tests/harness/run_harness.exe tests/harness/stub_solver.exe
-	@mkdir -p $(LOGS)/harness
-	-$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) > $(LOGS)/harness/status-digest.txt 2>&1
+	$(DUNE) build tools/status_gen/status_gen.exe
 	$(DUNE) exec tools/status_gen/status_gen.exe -- \
 	  --repo . --logs $(LOGS) --stats $(STATS) --tasks TASKS.md \
 	  --budgets tools/line_budgets.txt \
-	  --harness-digest $(LOGS)/harness/status-digest.txt --out STATUS.md
+	  --harness-digest $(LOGS)/harness/last-digest.txt --out STATUS.md
+
+## status-fresh — refresh inputs, then regenerate (the nightly path). Runs the
+##   fast harness once (writing a new stats JSONL + capturing its digest) so the
+##   pass/fail line and stats reflect the current tree, then aggregates via
+##   `status`. Not on the plain-`make status` path precisely because it mutates
+##   inputs (new stats file) — keeping generation and refresh separate is what
+##   makes the committed artifact's diff meaningful.
+status-fresh:
+	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe
+	@mkdir -p $(LOGS)/harness
+	-$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) > $(LOGS)/harness/last-digest.txt 2>&1
+	$(MAKE) status LOGS=$(LOGS) STATS=$(STATS)
 
 ## promote — accept current solver output as golden (the promote workflow).
 ##   Rewrites the .smt2.expected sidecars for missing/mismatched goldens and

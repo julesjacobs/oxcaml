@@ -1,22 +1,27 @@
 (* STATUS.md generator (DESIGN.md §8.4, §11).
 
    STATUS.md is the master's empirical view of the world: outcome metrics first
-   (goal-displacement defense — §11), process metrics after. This tool AGGREGATES existing
-   artifacts; it does not itself run Lean or re-derive product state:
+   (goal-displacement defense — §11), process metrics after. This tool ONLY AGGREGATES
+   existing artifacts; it runs nothing (no harness, no Lean) and re-derives no product
+   state, so its output is a pure function of the inputs on disk:
 
    - TASKS.md -> milestone completion (parse the M-rows)
    - git -> generated-at HEAD, days-since-last-outcome-improvement, worktree/branch
      hygiene
-   - the harness digest -> live pass/fail (the fast suite is run once by `make status`;
-     this reads its captured stdout)
+   - the last captured harness digest -> live pass/fail (written by `make status-fresh` /
+     the fast suite; this reads that file, it does not run the harness)
    - latest gate log -> gate outcome counts, honeypot floor, cache hit-rate
-   - stats JSONL -> counter distributions, top-k slowest goals, solved-rate
+   - most recent stats JSONL -> counter-bucket distribution + solved-rate (buckets and
+     verdicts are deterministic; per-goal wall_ms is deliberately NOT emitted — it is
+     nondeterministic and stays in the uncommitted sidecar)
    - tools/line_budgets.txt + smt/ -> per-module line counts vs budget
 
-   Deterministic given the same inputs, save the one "generated at <HEAD>" line (git HEAD,
-   never wall-clock — keeps the committed artifact reproducible and respects the
-   I5-adjacent no-wall-clock-in-committed-files hygiene). Every input is optional: a
-   missing one degrades to "n/a", never a crash. Digest-first: a ~5-line summary to
+   Byte-stable given the same (repo, logs): the only per-run-varying line is "generated at
+   <HEAD>" (git HEAD, never wall-clock). This is what lets the committed STATUS.md have a
+   meaningful diff (a dashboard that is always dirty trains readers to ignore its diffs —
+   I5's spirit applied to every committed artifact). `make status` never writes a stats
+   file; `make status-fresh` refreshes inputs first, for nightly. Every input is optional:
+   a missing one degrades to "n/a", never a crash. Digest-first: a ~5-line summary to
    stdout, full document to --out. *)
 
 (* ------------------------------------------------------------------ *)
@@ -238,6 +243,8 @@ let parse_json_object line : (string * string) list =
   List.rev !res
 ;;
 
+(* Only the deterministic fields are kept; wall_ms is intentionally ignored (it is
+   nondeterministic and never enters the committed STATUS.md). *)
 type stat_row =
   { file : string
   ; goal : int
@@ -245,7 +252,6 @@ type stat_row =
   ; conflicts : int
   ; decisions : int
   ; propagations : int
-  ; wall_ms : float
   }
 
 let stat_row_of_line line : stat_row option =
@@ -270,10 +276,6 @@ let stat_row_of_line line : stat_row option =
          ; conflicts = Option.value ~default:0 (geti "conflicts")
          ; decisions = Option.value ~default:0 (geti "decisions")
          ; propagations = Option.value ~default:0 (geti "propagations")
-         ; wall_ms =
-             (match get "wall_ms" with
-              | Some v -> Option.value ~default:0.0 (float_of_string_opt v)
-              | None -> 0.0)
          }
      | _ -> None)
 ;;
@@ -635,8 +637,11 @@ let () =
        g.honeypots
        g.honeypot_floor
        (if g.honeypots_ok then "(all matched)" else "(CHECK: no match-confirmation line)"));
-  (* Corpus solved-rate from stats over tests/cases *)
-  let stat_files = recent_stats_files cfg.stats 5 in
+  (* Corpus solved-rate from stats over tests/cases. Use only the single most recent stats
+     file: `make status` never writes a new one, so this is stable between back-to-back
+     runs, and it reflects one coherent run rather than a mix. `make status-fresh`
+     refreshes it before generating. *)
+  let stat_files = recent_stats_files cfg.stats 1 in
   let all_rows =
     List.concat_map
       (fun f ->
@@ -718,10 +723,13 @@ let () =
             | _ -> ()))
        (lines s));
   out "\n";
-  (* Stats aggregates *)
+  (* Search-counter distribution (log-scale buckets — deterministic, so safe in the
+     committed file). Exact per-goal wall_ms is intentionally NOT reported here: it is
+     nondeterministic and lives only in the uncommitted stats sidecar (I5's spirit — no
+     nondeterministic values in a committed artifact). *)
   out
-    "### Search-counter distribution & slowest goals (last %d stats run(s))\n\n"
-    (List.length stat_files);
+    "### Search-counter distribution (most recent stats run, %d goal(s))\n\n"
+    (List.length all_rows);
   if all_rows = []
   then out "n/a (no stats JSONL under %s)\n" cfg.stats
   else (
@@ -743,13 +751,11 @@ let () =
     show "conflicts" (fun r -> r.conflicts);
     show "decisions" (fun r -> r.decisions);
     show "propagations" (fun r -> r.propagations);
-    out "\nTop goals by wall_ms (perf outliers, informational — not a gate):\n\n";
-    let top =
-      List.sort (fun a b -> compare b.wall_ms a.wall_ms) all_rows
-      |> List.filteri (fun i _ -> i < 5)
-    in
-    out "| file | goal | wall_ms |\n|---|---|---|\n";
-    List.iter (fun r -> out "| %s | %d | %.3f |\n" r.file r.goal r.wall_ms) top);
+    out
+      "\n\
+       _Per-goal wall_ms and exact counts: uncommitted stats sidecar under `%s` (nightly \
+       aggregation)._\n"
+      cfg.stats);
   out "\n";
   (* Gate cache *)
   out "### Oracle cache & triage\n\n";
