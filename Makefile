@@ -19,7 +19,7 @@ FIXTURES ?= tests/harness/fixtures
 HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
                 --logs $(LOGS) --stats $(STATS)
 
-.PHONY: build fmt test core-test bench gate promote check-frozen spine
+.PHONY: build fmt test core-test bench gate promote check-frozen spine status
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -68,6 +68,22 @@ gate:
 	$(DUNE) build tests/gate/gate.exe
 	_build/default/tests/gate/gate.exe selftest
 	_build/default/tests/gate/gate.exe run
+
+## status — regenerate STATUS.md from repo state + latest logs (DESIGN §8.4, §11).
+##   Aggregates artifacts (TASKS.md, git, the latest gate log, stats JSONL,
+##   committed line budgets) and runs the fast harness once for live pass/fail.
+##   Deterministic given the same inputs; the only varying line is "generated at
+##   <HEAD>" (git HEAD, never wall-clock). Prints a ~5-line digest; overwrites
+##   STATUS.md. A red harness does not abort generation (status must still report).
+##   This IS the deliverable; a scheduler wires it to nightly later (no CI yet).
+status:
+	$(DUNE) build tools/status_gen/status_gen.exe tests/harness/run_harness.exe tests/harness/stub_solver.exe
+	@mkdir -p $(LOGS)/harness
+	-$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) > $(LOGS)/harness/status-digest.txt 2>&1
+	$(DUNE) exec tools/status_gen/status_gen.exe -- \
+	  --repo . --logs $(LOGS) --stats $(STATS) --tasks TASKS.md \
+	  --budgets tools/line_budgets.txt \
+	  --harness-digest $(LOGS)/harness/status-digest.txt --out STATUS.md
 
 ## promote — accept current solver output as golden (the promote workflow).
 ##   Rewrites the .smt2.expected sidecars for missing/mismatched goldens and

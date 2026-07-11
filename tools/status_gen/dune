@@ -1,0 +1,9 @@
+; STATUS.md generator (DESIGN.md §8.4, §11). Repo tooling, outside the smt/
+; firewall (I3); stdlib + Unix only (no opam packages). Standalone by design —
+; mirrors tools/check_frozen.sh and avoids coupling to the merged test harness;
+; the stats-JSONL schema it reads is the harness's committed contract
+; (tests/README.md), kept in sync by hand.
+
+(executable
+ (name status_gen)
+ (libraries unix))
