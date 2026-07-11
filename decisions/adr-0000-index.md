@@ -15,3 +15,6 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   `Atom`/`Lit`/`Explanation` currency, `check(effort)`/lazy `explain`, `Split`
   disjunctions, engine `CONTRACT-POISON`. [accepted (Tranche-A frozen)];
   freeze schedule in `adr-0005-freeze-plan.md`.
+- ADR-0006 — Unsat certificates + Lean replay (M5 pulled forward): off-core
+  `smt/certificate/` module, payload-free `Rule_tag`, `sat.mli` DRAT hooks bundled
+  into the ADR-0005 Tranche-C freeze. [accepted (design; implementation post-M4)]
