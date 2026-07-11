@@ -73,6 +73,23 @@ runner still imposes a wall-clock cap (default 30s) by spawning lean under its o
 watchdog (`Unix.create_process` + polled `waitpid` + `kill`). The `/usr/bin/timeout`
 binary exists but the runner does not depend on it.
 
+## Cache-key injectivity (a review REJECT — fixed)
+
+The cache is a soundness component: if two semantically-different queries hash to
+the same key, one query silently inherits the other's kernel-checked verdict. The
+first canonical form concatenated raw symbol names with space/newline/paren
+separators; because a `|quoted symbol|` may contain any byte except `|`
+(including those separators), an unsat query and a satisfiable query were made to
+produce identical canonical bytes → same key → the sat query got CERTIFIED off
+the unsat query's proof (exhibits in `tests/gate/collision/qA,qB.smt2`). Fix:
+`canonical.ml` now serialises a tagged tree with a self-delimiting netstring
+encoding — each node is `A<len>:<bytes>` (atom) or `L<count>:<subnodes>` (list),
+so payload bytes are read by length and no separator can be forged; the encoding
+is invertible, hence injective (argument in the file header). `gate selftest`
+embeds qA/qB and asserts their canonical strings and cache keys differ, plus a
+`ser` self-delimiting unit. Bump `encoding_version` on any canonical-form change
+too — old keys are otherwise stale (it is folded into the key).
+
 ## Open questions / deferred
 
 - **Cache canonicalization does not rename symbols in v1** (see `canonical.ml`).

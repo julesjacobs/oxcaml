@@ -112,4 +112,10 @@ let store ~dir (k : key) ~claim (outcome : Outcome.t) : unit =
       Buffer.add_string buf (Printf.sprintf "  (%s %s)\n" n (atom v)))
     fields;
   Buffer.add_string buf ")\n";
-  Lean_runner.write_file (path dir k) (Buffer.contents buf)
+  (* Atomic publish: write a private temp file in the same dir, then rename over the final
+     path. rename(2) within a directory is atomic, so a concurrent reader (or a racing
+     writer for the same key) never observes a torn entry. *)
+  let final = path dir k in
+  let tmp = Printf.sprintf "%s.tmp.%d" final (Unix.getpid ()) in
+  Lean_runner.write_file tmp (Buffer.contents buf);
+  Unix.rename tmp final

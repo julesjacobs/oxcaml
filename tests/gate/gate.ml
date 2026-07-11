@@ -199,27 +199,60 @@ let run_dir_now logs_root =
   in
   Filename.concat logs_root ("gate-" ^ stamp)
 
-let honeypots_phase ctx ~cache_dir dir : bool * (string * Outcome.t) list =
-  (* Honeypots run with the cache DISABLED and are never cached (DESIGN.md §10). Any
-     honeypot that gets CERTIFIED means the gate is broken -> red. *)
+(* A green gate that hasn't proven it can go red is unaudited (DESIGN.md §10), so the
+   honeypot phase is not vacuously satisfiable: it enforces a hard floor and an exact
+   expected outcome per honeypot. *)
+let min_honeypots = 4
+let expect_path smt2 = Filename.remove_extension smt2 ^ ".expect"
+
+let load_expect smt2 : string option =
+  let p = expect_path smt2 in
+  if Sys.file_exists p then Some (String.trim (Lean_runner.read_file p))
+  else None
+
+(* Returns (ok, breach messages). Honeypots run with the cache DISABLED and are never
+   cached (DESIGN.md §10). A breach is any of: too few honeypots present, a honeypot with
+   no declared expected outcome, a honeypot that got CERTIFIED, or a honeypot whose
+   outcome differs from its .expect (so REFUTED degrading to INCONCLUSIVE turns the gate
+   red rather than passing silently). *)
+let honeypots_phase ctx ~cache_dir dir : bool * string list =
   let files = smt2_files dir in
-  logf ctx "HONEYPOTS (%d) — must NOT certify:" (List.length files);
-  let results =
-    List.map
-      (fun f ->
-        let o, disp = certify_file ctx ~cache_dir ~allow_cache:false f in
-        print_line ctx "honeypot" f o disp;
-        (f, o))
-      files
+  logf ctx
+    "HONEYPOTS (%d; floor %d) — each must match its .expect and never CERTIFY:"
+    (List.length files) min_honeypots;
+  let breaches = ref [] in
+  let add f msg =
+    breaches := Printf.sprintf "%s: %s" (short f) msg :: !breaches
   in
-  let breached = List.filter (fun (_, o) -> Outcome.is_certified o) results in
-  (match breached with
-  | [] -> logf ctx "  -> all honeypots correctly refused certification"
+  if List.length files < min_honeypots then
+    breaches :=
+      [
+        Printf.sprintf
+          "gate unaudited — only %d honeypot(s) present, need >= %d"
+          (List.length files) min_honeypots;
+      ];
+  List.iter
+    (fun f ->
+      let o, disp = certify_file ctx ~cache_dir ~allow_cache:false f in
+      print_line ctx "honeypot" f o disp;
+      if Outcome.is_certified o then add f "CERTIFIED (gate is broken)";
+      match load_expect f with
+      | None -> add f "missing .expect sidecar (expected outcome undeclared)"
+      | Some exp ->
+          let got = Outcome.tag o in
+          if not (String.equal got exp) then
+            add f (Printf.sprintf "expected %s but got %s" exp got))
+    files;
+  let breaches = List.rev !breaches in
+  (match breaches with
+  | [] ->
+      logf ctx
+        "  -> all %d honeypots matched their expected outcome; none certified"
+        (List.length files)
   | bs ->
-      logf ctx "  -> BREACH: %d honeypot(s) were CERTIFIED (gate is broken):"
-        (List.length bs);
-      List.iter (fun (f, _) -> logf ctx "       %s" (short f)) bs);
-  (breached = [], results)
+      logf ctx "  -> BREACH (%d):" (List.length bs);
+      List.iter (fun b -> logf ctx "       %s" b) bs);
+  (breaches = [], breaches)
 
 let cases_phase ctx ~cache_dir dir =
   let files = smt2_files dir in
@@ -264,7 +297,9 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout
     (if allow_cache then "enabled" else "disabled");
   logf ctx "  logdir: %s" logdir;
   logf ctx "";
-  let honeypots_ok, _hres = honeypots_phase ctx ~cache_dir honeypots_dir in
+  let honeypots_ok, hp_breaches =
+    honeypots_phase ctx ~cache_dir honeypots_dir
+  in
   logf ctx "";
   (* If a honeypot certified, abort red BEFORE trusting any case result. *)
   let tally, hits, misses, ship_stoppers, encode_errors =
@@ -279,9 +314,9 @@ let cmd_run ~cases_dir ~honeypots_dir ~cache_dir ~logs_root ~timeout
   let get t = Option.value (Hashtbl.find_opt tally t) ~default:0 in
   let green = honeypots_ok && ship_stoppers = [] && encode_errors = [] in
   Printf.printf "oxsmt gate: %s\n" (if green then "GREEN" else "RED");
-  if not honeypots_ok then
-    Printf.printf
-      "  HONEYPOT BREACH — a known-wrong verdict was CERTIFIED (see log)\n";
+  if not honeypots_ok then (
+    Printf.printf "  HONEYPOT BREACH (gate unaudited or broken):\n";
+    List.iter (fun b -> Printf.printf "    %s\n" b) hp_breaches);
   Printf.printf
     "  cases: %d CERTIFIED, %d REFUTED, %d INCONCLUSIVE, %d ENCODE_ERROR, %d \
      UNSUPPORTED, %d MALFORMED, %d NO_STATUS\n"
@@ -365,6 +400,59 @@ let cmd_selftest () =
           else (
             ok := false;
             print_endline "encoder: FAIL (unexpected output)")));
+  (* Canonical-key injectivity regression. The exploit a review found: a |quoted symbol|
+     may contain spaces/newlines/parens, which the old space/paren-concatenated canonical
+     form let forge token boundaries, so an unsat query (qA) and a satisfiable query (qB)
+     collapsed to the same cache key and qB inherited qA's CERTIFIED verdict. These are
+     the exact exhibits (mirrored in tests/gate/collision/); their canonical strings and
+     cache keys MUST differ. See canonical.ml for the injectivity argument. *)
+  let qa =
+    "(set-logic QF_UFLIA)(declare-const a Bool)(declare-const |a\n\
+     (not $a)| Bool)(set-info :status unsat)(assert a)(assert (not \
+     a))(check-sat)"
+  in
+  let qb =
+    "(set-logic QF_UFLIA)(declare-const a Bool)(declare-const |a\n\
+     (not $a)| Bool)(set-info :status unsat)(assert |a\n\
+     (not $a)|)(check-sat)"
+  in
+  (match (Reader.of_string qa, Reader.of_string qb) with
+  | exception e ->
+      ok := false;
+      Printf.printf "injectivity: FAIL to parse exhibits (%s)\n"
+        (Printexc.to_string e)
+  | qA, qB ->
+      let ca = Canonical.canonical_query qA
+      and cb = Canonical.canonical_query qB in
+      let ka =
+        Cache.compose ~canonical:ca ~claim:"unsat" ~model:"" ~lean_version:"t"
+      in
+      let kb =
+        Cache.compose ~canonical:cb ~claim:"unsat" ~model:"" ~lean_version:"t"
+      in
+      if String.equal ca cb || String.equal ka.hash kb.hash then (
+        ok := false;
+        print_endline
+          "injectivity: FAIL — qA and qB collide (cache-key non-injective)")
+      else print_endline "injectivity: OK (qA/qB distinct canonical + keys)");
+  (* ser must be self-delimiting: a symbol whose bytes mimic the framing or contain
+     separators cannot collide with a different structure. *)
+  let inj_pairs =
+    [
+      (Canonical.A "A1:x", Canonical.L [ Canonical.A "x" ]);
+      (Canonical.A "a b", Canonical.L [ Canonical.A "a"; Canonical.A "b" ]);
+      (Canonical.A "x)(y", Canonical.A "x) (y");
+      (Canonical.A "p\nq", Canonical.L [ Canonical.A "p"; Canonical.A "q" ]);
+    ]
+  in
+  if
+    List.for_all
+      (fun (x, y) -> not (String.equal (Canonical.ser x) (Canonical.ser y)))
+      inj_pairs
+  then print_endline "ser injectivity: OK (separators/framing bytes stay data)"
+  else (
+    ok := false;
+    print_endline "ser injectivity: FAIL");
   if !ok then 0 else 1
 
 (* ---- argument parsing ---- *)

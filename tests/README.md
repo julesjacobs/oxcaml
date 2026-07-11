@@ -122,10 +122,11 @@ that before touching `encoder.ml`.
 
 ### Running
 
-- `make gate` — build, run `gate selftest` (sha256 FIPS vectors + sexp), then
-  `gate run`: honeypots first (abort red if any is CERTIFIED), then the
-  `tests/cases` corpus, using the cache in `../cache`. Digest to stdout; full log
-  (and every generated `.lean` / Lean output) under `../logs/gate-<timestamp>/`.
+- `make gate` — build, run `gate selftest` (sha256 FIPS vectors + sexp + cache-key
+  injectivity), then `gate run`: honeypots first (abort red unless the floor is
+  met and every honeypot matches its expected outcome), then the `tests/cases`
+  corpus, using the cache in `../cache`. Digest to stdout; full log (and every
+  generated `.lean` / Lean output) under `../logs/gate-<timestamp>/`.
 - `gate certify FILE.smt2 [--no-cache] [--timeout SECS]` — certify one file. Exit
   codes: 0 CERTIFIED, 1 REFUTED/ENCODE_ERROR, 2 INCONCLUSIVE, 3 MALFORMED,
   4 UNSUPPORTED, 5 NO_STATUS.
@@ -159,6 +160,23 @@ symbol's declared sort (Int literal, `Fin n` index for an uninterpreted sort, or
 `true`/`false`). Every function needs a `(default …)`. Format details in
 `tests/gate/model.ml`.
 
+### Honeypots (`tests/gate/honeypots/`)
+
+Known-wrong inputs the gate must catch — a green gate that hasn't proven it can
+go red is unaudited (DESIGN.md §10). They run first, with the cache disabled, and
+are never cached. The phase is not vacuously satisfiable:
+
+- a hard floor (`min_honeypots`, currently 4) — fewer present ⇒ RED "gate
+  unaudited" (so an empty/missing glob cannot pass);
+- each honeypot declares its expected outcome in a sidecar `foo.expect` (one tag:
+  `REFUTED` / `MALFORMED` / `UNSUPPORTED` / `INCONCLUSIVE`). The gate asserts the
+  actual outcome equals it, so a honeypot degrading from REFUTED to INCONCLUSIVE
+  turns the gate RED rather than passing silently; a missing `.expect` is a breach.
+
+A honeypot that gets CERTIFIED is always a breach. Current set: two sat-claimed-
+unsat (LIA + EUF, each REFUTED via a kernel-checked witness model), one unsat-
+claimed-sat with a wrong model (REFUTED via grind), one malformed (rejected).
+
 ### Cache format (`../cache`, never in git)
 
 One s-expression file per entry, named `<key>.sexp`. The key is
@@ -166,8 +184,14 @@ One s-expression file per entry, named `<key>.sexp`. The key is
 grind-config)`; folding the toolchain identifiers into the key keeps the cache
 monotonic (a new encoder or Lean version yields new keys; nothing is overwritten
 or silently re-certified). Canonicalization (`canonical.ml`) sorts assertions and
-commutative operands and canonically prints terms; it does **not** rename symbols
-in v1 (see NOTES.md). Timeouts and honeypots are never cached.
+commutative operands and serialises the query with an **injective netstring
+encoding** (each atom `A<len>:<bytes>`, each list `L<count>:<subnodes>`) so that
+bytes inside a `|quoted symbol|` cannot forge token boundaries — two different
+queries can never collide onto one key (the injectivity argument is in the file
+header; the qA/qB exploit that motivated it lives in `tests/gate/collision/` and
+is asserted distinct by `gate selftest`). It does **not** rename symbols in v1
+(see NOTES.md). Entries are published by atomic temp-file + `rename`. Timeouts and
+honeypots are never cached.
 
 ### Encoding-version bump rule
 
