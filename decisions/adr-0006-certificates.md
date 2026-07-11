@@ -9,6 +9,39 @@ per-compile trust from all search code (DESIGN §10 endgame), and replaying
 certificates as Lean proof scripts converts the oracle from a `grind` **searcher**
 into a **checker** (fast, deterministic, immune to grind incompleteness).
 
+**Revision 4 (2026-07-11) — L6 erratum (docs-only clarification; no code, no
+interface, no design change; master-approved):** the `Lia_farkas` leaf's multiplier
+convention, disambiguated for **equality premises** (codex cross-model finding L6,
+`../logs/codex-review/3086f73-lia.md`). The `{premises; farkas}` vector's
+`Σ farkasᵢ · rowᵢ = k > 0` is well-defined for inequality premises but ambiguous for
+an equality premise: LIA asserts `a = b` as *two* opposite-signed simplex bounds that
+carry the **same** premise `Lit`, so `(token, multiplier ≥ 0)` alone does not say which
+half-plane the multiplier scales, and a downstream checker cannot reconstruct the row.
+Resolution (textbook Farkas-with-equalities):
+- **`Le` premise:** nonnegative multiplier applied to the fixed `Le`-normal row
+  `expr ≤ 0` (unchanged).
+- **`Eq` premise:** a **free (signed) rational** multiplier applied to the canonical
+  oriented row `(lhs − rhs)`; the sign selects orientation (positive → the `≤`-side,
+  negative → the `≥`-side). The checker disambiguates by classifying the atom behind
+  each premise `Lit` (`Eq` vs `Le`) via the engine's `Atom ⇄ Term` map; `Σᵢ farkasᵢ ·
+  rowᵢ` must still cancel every variable to a strictly positive constant.
+
+No frozen-type change: `Lia.conflict`'s `farkas : Rational.t list` already permits
+negatives; `Simplex.build_conflict`'s nonneg-multiplier self-check is correct for its
+internal oriented representation and stays; the **M5 cert-emitter** (not the M1
+conflict struct) owns the translation from `(use_lower, |a|)` to the signed
+externalized multiplier. `Explanation`/`Rule_tag`/`THEORY` seam unchanged and still
+frozen. (Rejected alternative, equivalent in power but more verbose: an explicit
+per-premise `Upper`/`Lower` orientation tag with all-nonneg multipliers.)
+
+**M5 acceptance criterion (added by this erratum):** the LIA cert emitter emits, for a
+conflict using one side of an equality, the signed multiplier matching the `use_lower`
+bound actually used (contributions from both sides of one equality combine into a
+single signed multiplier for that premise, or two entries); the OCaml checker and the
+Lean replay classify equality-vs-inequality premises via the `Atom ⇄ Term` map and
+verify the signed-row sum cancels to `k > 0`. Fold in **before** the LIA cert emitter
+is implemented so the format is right the first time.
+
 **Revision 3 (2026-07-11):** three format-spec precision fixes from the final review
 section (DESIGN-APPROVED). **(1)** level-0 simplification resolution steps write
 their hint chain as **`[units…, original]`** (synthesized outside 1UIP order;
