@@ -233,87 +233,139 @@ let is_head s =
   && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) s
 ;;
 
-(* Read all of [fd] to a string (fd is closed on exit). *)
-let read_all_fd fd =
-  let ic = Unix.in_channel_of_descr fd in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-       let b = Buffer.create 64 in
-       let chunk = Bytes.create 4096 in
-       let rec loop () =
-         let n = input ic chunk 0 (Bytes.length chunk) in
-         if n > 0
-         then (
-           Buffer.add_subbytes b chunk 0 n;
-           loop ())
-       in
-       loop ();
-       Buffer.contents b)
+(* Restart a syscall interrupted by EINTR (codex Scope B B4: an EINTR must not be mistaken
+   for a result). *)
+let rec eintr_restart f =
+  try f () with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> eintr_restart f
+;;
+
+(* Read from [fd] until EOF or [deadline], whichever first, capped at [cap] bytes. Returns
+   [`Eof raw] only if EOF is reached within budget (the child fully closed its stdout — a
+   complete, trustworthy output); [`Timeout] if the deadline passes first. B2: the read is
+   itself deadlined, so a git that exits 0 yet leaves a descendant holding the write end
+   open (EOF never arrives) yields `Timeout rather than wedging the gate. select is
+   EINTR-restarted; a well-behaved git reaches EOF in microseconds. *)
+let read_deadlined fd ~deadline ~cap =
+  let buf = Buffer.create 64 in
+  let chunk = Bytes.create 4096 in
+  let rec loop () =
+    let remaining = deadline -. Unix.gettimeofday () in
+    if remaining <= 0.0
+    then `Timeout
+    else (
+      let ready =
+        try
+          let rl, _, _ = Unix.select [ fd ] [] [] remaining in
+          rl <> []
+        with
+        | Unix.Unix_error (Unix.EINTR, _, _) -> false
+      in
+      if not ready
+      then if Unix.gettimeofday () > deadline then `Timeout else loop ()
+      else (
+        match eintr_restart (fun () -> Unix.read fd chunk 0 (Bytes.length chunk)) with
+        | 0 -> `Eof (Buffer.contents buf)
+        | n ->
+          Buffer.add_subbytes buf chunk 0 n;
+          (* An output that never EOFs but keeps dribbling can't grow unbounded: cap it,
+             and the oversized buffer fails the exact-match validation below. *)
+          if Buffer.length buf > cap then `Eof (Buffer.contents buf) else loop ()))
+  in
+  loop ()
+;;
+
+(* Exactly "<40-hex>" or "<40-hex>\n" — validated on the RAW bytes (B3: NO trim; leading
+   space, interior/trailing whitespace, or any extra line must be rejected). *)
+let head_of_raw raw =
+  let ok h = is_head h in
+  if String.length raw = 40 && ok raw
+  then raw
+  else if String.length raw = 41 && raw.[40] = '\n' && ok (String.sub raw 0 40)
+  then String.sub raw 0 40
+  else "nohead"
 ;;
 
 (* [git rev-parse HEAD], hardened (codex Scope B, task #133):
-   - HARD TIMEOUT via a WNOHANG poll loop (a hung/never-exiting git must not wedge the
-     gate before any honeypot/certification runs; a bare input_line/waitpid could block
-     forever and try/with cannot catch a block). Timeout -> kill + reap -> "nohead".
-   - STRICT acceptance: stamp a HEAD only if git EXITED 0 AND its output is exactly one
-     line AND that line is 40 hex (so a nonzero exit, or a 40-hex first line with garbage
-     after it, does NOT stamp provenance).
-   - fds closed and the child reaped on every path (normal, timeout, exception). This is
-     logging-side only — the result just names the log dir, never a verdict. *)
+   - HARD TIMEOUT on BOTH the wait-for-exit AND the read, sharing one ~5s deadline, so
+     neither a hung git nor a git that exits 0 while a descendant keeps stdout open can
+     wedge the gate before any honeypot/certification runs (B2). Timeout -> "nohead".
+   - STRICT raw acceptance: stamp a HEAD only if git EXITED 0 AND its stdout is EOF-closed
+     within budget AND the raw bytes are exactly <40-hex>(\n)? — no trim (B3).
+   - All fds are opened INSIDE the protected region and closed on every path; the child is
+     reaped on every path incl. timeout and EINTR (B4). Logging-side only — the result
+     just names the log dir, never a verdict. *)
 let provenance_head () =
-  let timeout = 5.0 in
+  let deadline = Unix.gettimeofday () +. 5.0 in
+  let r = ref None
+  and w = ref None
+  and dn = ref None
+  and pid = ref None in
+  let close_opt rf =
+    match !rf with
+    | Some fd ->
+      (try Unix.close fd with
+       | _ -> ());
+      rf := None
+    | None -> ()
+  in
+  let reap_opt () =
+    match !pid with
+    | Some p ->
+      (try Unix.kill p Sys.sigkill with
+       | _ -> ());
+      (try ignore (eintr_restart (fun () -> Unix.waitpid [] p)) with
+       | _ -> ());
+      pid := None
+    | None -> ()
+  in
   match
-    let r, w = Unix.pipe () in
-    let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
-    let close_guarded fd =
-      try Unix.close fd with
-      | _ -> ()
-    in
     Fun.protect
       ~finally:(fun () ->
-        close_guarded r;
-        close_guarded w;
-        close_guarded devnull)
+        (* Reap a still-live child (timeout/exception paths) and close every fd. A child
+           already reaped on the clean path has pid := None, so this is a no-op there. *)
+        reap_opt ();
+        close_opt r;
+        close_opt w;
+        close_opt dn)
       (fun () ->
-         let pid =
-           Unix.create_process "git" [| "git"; "rev-parse"; "HEAD" |] Unix.stdin w devnull
+         let rr, ww = Unix.pipe () in
+         r := Some rr;
+         w := Some ww;
+         let d = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+         dn := Some d;
+         let p =
+           Unix.create_process "git" [| "git"; "rev-parse"; "HEAD" |] Unix.stdin ww d
          in
-         close_guarded w;
-         (* parent end; child holds its own *)
-         close_guarded devnull;
-         let deadline = Unix.gettimeofday () +. timeout in
-         (* Poll for exit; kill+reap if the deadline passes. git's output (one 41-byte
-           line) is far smaller than the pipe buffer, so the child never blocks on write
-           and we can safely read only after it has exited/been killed. *)
-         let rec wait () =
-           match Unix.waitpid [ Unix.WNOHANG ] pid with
+         pid := Some p;
+         close_opt w;
+         (* parent's write end; child holds its own *)
+         close_opt dn;
+         let rec wait_exit () =
+           match eintr_restart (fun () -> Unix.waitpid [ Unix.WNOHANG ] p) with
            | 0, _ ->
              if Unix.gettimeofday () > deadline
-             then (
-               (try Unix.kill pid Sys.sigkill with
-                | _ -> ());
-               (try ignore (Unix.waitpid [] pid) with
-                | _ -> ());
-               `Timeout)
+             then `Timeout
              else (
-               Unix.sleepf 0.01;
-               wait ())
-           | _, status -> `Exited status
+               (try Unix.sleepf 0.01 with
+                | Unix.Unix_error (Unix.EINTR, _, _) -> ());
+               wait_exit ())
+           | _, status ->
+             pid := None;
+             (* reaped *)
+             `Exited status
          in
-         let result = wait () in
-         (* Read the pipe ONLY on a clean exit. On timeout we must NOT read: a killed git
-           may have spawned a child (e.g. a shell wrapper's `sleep`) that inherited the
-           write end and keeps it open, so reading to EOF would block forever — defeating
-           the very timeout we just enforced. A non-clean exit's output is untrusted
-           anyway. *)
-         match result with
-         | `Timeout -> "nohead"
+         match wait_exit () with
+         | `Timeout -> "nohead" (* finally kills + reaps the still-live child *)
          | `Exited (Unix.WEXITED 0) ->
-           let out = read_all_fd r in
-           (match String.split_on_char '\n' (String.trim out) with
-            | [ h ] when is_head h -> h
-            | _ -> "nohead")
+           let fd =
+             match !r with
+             | Some fd -> fd
+             | None -> assert false
+           in
+           (match read_deadlined fd ~deadline ~cap:4096 with
+            | `Timeout -> "nohead"
+            | `Eof raw -> head_of_raw raw)
          | `Exited _ -> "nohead")
   with
   | h -> h
