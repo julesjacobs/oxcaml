@@ -1,0 +1,6 @@
+module=core
+suite=core-test
+target=smt/core/node.ml
+description=ceil_div computes floor (drop q+1): unsound LIA order-atom (mk_le) constant tightening
+review=ADR-0003 required #5 (ceil-tighten); core node.ml comment
+expected=KILLED

@@ -1,0 +1,6 @@
+module=smtlib
+suite=smtlib-test
+target=smt/smtlib/printer.ml
+description=printer stops quoting reserved words (let/as/...): renders an ambiguous keyword bare
+review=M0-smtlib R1 (reserved words RENDER as |quoted|)
+expected=KILLED

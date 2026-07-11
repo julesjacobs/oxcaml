@@ -1,0 +1,6 @@
+module=gate
+suite=gate
+target=tests/gate/encoder.ml
+description=Lean encoder emits >= for SMT <= : mis-encodes LIA; gate honeypots must catch
+review=gate-review encoder trust; DESIGN §10 honeypots
+expected=KILLED

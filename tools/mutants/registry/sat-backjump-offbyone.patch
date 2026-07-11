@@ -1,0 +1,13 @@
+diff --git a/smt/solver/sat.ml b/smt/solver/sat.ml
+index abc3216..3d28f7e 100644
+--- a/smt/solver/sat.ml
++++ b/smt/solver/sat.ml
+@@ -643,7 +643,7 @@ let search t assumps conflict_limit =
+         result := Some R_unsat)
+       else (
+         let learnt, bt, ants = analyze t confl in
+-        cancel_until t bt;
++        cancel_until t (bt + 1);
+         record_learnt t learnt bt ants;
+         var_decay_bump t;
+         cla_decay_bump t;

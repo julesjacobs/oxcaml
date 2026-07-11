@@ -1,0 +1,14 @@
+diff --git a/smt/solver/sat.ml b/smt/solver/sat.ml
+index abc3216..a3943bf 100644
+--- a/smt/solver/sat.ml
++++ b/smt/solver/sat.ml
+@@ -466,8 +466,7 @@ let analyze t confl =
+         let k = ref 1 in
+         while !ok && !k < Array.length rlits do
+           let vk = var_of_lit rlits.(!k) in
+-          if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
+-          then ok := false;
++          if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0 then ok := true;
+           incr k
+         done;
+         !ok

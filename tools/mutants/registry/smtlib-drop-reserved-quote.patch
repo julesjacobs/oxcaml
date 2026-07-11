@@ -1,0 +1,17 @@
+diff --git a/smt/smtlib/printer.ml b/smt/smtlib/printer.ml
+index 780b151..fb27ac5 100644
+--- a/smt/smtlib/printer.ml
++++ b/smt/smtlib/printer.ml
+@@ -111,11 +111,7 @@ let check_representable name =
+     name
+ ;;
+ 
+-let quote_lexical name =
+-  if is_simple_symbol name && not (List.mem name reserved_words)
+-  then name
+-  else "|" ^ name ^ "|"
+-;;
++let quote_lexical name = if is_simple_symbol name then name else "|" ^ name ^ "|"
+ 
+ let quote_symbol name =
+   check_representable name;

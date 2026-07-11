@@ -30,7 +30,7 @@ SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
 # (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
 SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
 
-.PHONY: build fmt test core-test sat-test sat-bench preprocess-test smtlib-test smtlib-corpus bench gate promote check-frozen spine status status-fresh
+.PHONY: build fmt test core-test sat-test sat-bench preprocess-test smtlib-test smtlib-corpus bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -115,6 +115,15 @@ test: check-frozen
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
 bench:
 	@echo "not yet implemented (see TASKS.md: M0-harness)" && exit 1
+
+## mutants — seeded-fault mutation testing (DESIGN.md §10). Applies each registry
+##   patch in a throwaway worktree off HEAD, runs the mutant's declared suite, and
+##   requires it goes red. Full registry by default; `make mutants MODULE=core`
+##   filters by module. SURVIVORS exit 1 (an oracle gap — halt feature work on
+##   that module); PATCH-FAILED/LINT-REJECT exit 2. Digest to stdout, full log to
+##   ../logs/mutants-<stamp>.log. See tools/mutants/registry/README.md.
+mutants:
+	tools/mutants/run.sh $(MODULE)
 
 ## gate — Lean 4 certification (external oracle). Runs honeypots first (aborts
 ## red if any is certified), then the tests/cases corpus, using the

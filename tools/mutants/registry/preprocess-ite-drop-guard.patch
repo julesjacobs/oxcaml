@@ -1,0 +1,13 @@
+diff --git a/smt/preprocess/preprocess.ml b/smt/preprocess/preprocess.ml
+index 2cb5b09..62ff485 100644
+--- a/smt/preprocess/preprocess.ml
++++ b/smt/preprocess/preprocess.ml
+@@ -87,7 +87,7 @@ let ite_removal t root =
+           Context.and_
+             ctx
+             [ Context.implies ctx c' (Context.eq ctx v a')
+-            ; Context.implies ctx (Context.not_ ctx c') (Context.eq ctx v b')
++            ; Context.implies ctx c' (Context.eq ctx v b')
+             ]
+         in
+         constraints := guard :: !constraints;
