@@ -104,11 +104,12 @@ causes (the **insurance bar**, may lag).
 Hash-checked in CI; changing one requires an explicit unfreeze + adversarial
 review by a fresh agent (DESIGN.md §10).
 
-**Twelve interfaces are frozen** by content hash in `FROZEN.sha256` (repo root):
+**Thirteen interfaces are frozen** by content hash in `FROZEN.sha256` (repo root):
 
 - M0-core (ADR-0003): `sort.mli`, `symbol.mli`, `term.mli`, `context.mli`, `iarr.mli`
 - M1 THEORY freeze (ADR-0005 Tranche A): `env.mli`, `rank.mli`, `theory_view.mli`,
   `atom.mli`, `lit.mli`, `explanation.mli`, `theory.mli` (all under `smt/core/`)
+- M2 Tranche B (ADR-0005, at the EUF-adapter merge = its first consumer): `model.mli`
 
 `make check-frozen` (run first inside `make test`, via `tools/check_frozen.sh`)
 recomputes their sha256 and diffs the manifest, going **red** on any drift.
@@ -122,9 +123,9 @@ goes red.
 
 **Remaining ADR-0005 freeze tranches** (schedule in
 `decisions/adr-0005-freeze-plan.md`):
-- Tranche B (M2, with the EUF adapter): `smt/core/model.mli` — its `value` variant's
-  `Uninterp` encoding is pinned by EUF (open q3); `model.mli`/`model.ml` exist now
-  but are deliberately **not** frozen until M2.
+- ~~Tranche B (M2, with the EUF adapter): `smt/core/model.mli`~~ — **DONE**: frozen at
+  the `task/euf-adapter` merge (its first consumer), 12→13 interfaces, live red/green
+  demo recorded.
 - Tranche C (M4, with CDCL(T) integration): `smt/solver/sat.mli`, frozen with the
   theory-callback seam (trail-extension notify, theory-literal enqueue w/ lazy
   reason, conflict injection, backtrack notify) + ADR-0006's `trace.on_input`/
