@@ -3,4 +3,4 @@ suite=sat-test
 target=smt/solver/sat.ml
 description=cancel_until (bt+1): backtracks one level too few after conflict analysis
 review=sat-review backjump-level
-expected=KILLED
+expected=KILLED-TEST

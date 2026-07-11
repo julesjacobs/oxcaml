@@ -3,4 +3,4 @@ suite=preprocess-test
 target=smt/preprocess/preprocess.ml
 description=div/mod witness uses x = d*q - r (sign flip): breaks euclidean identity
 review=preprocess-review euclidean remainder
-expected=KILLED
+expected=KILLED-TEST

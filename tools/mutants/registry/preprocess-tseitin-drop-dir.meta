@@ -3,4 +3,4 @@ suite=preprocess-test
 target=smt/preprocess/cnf.ml
 description=Tseitin And drops the (g \/ ~l1 .. ~ln) direction: g under-constrained
 review=preprocess-review Tseitin biconditional
-expected=KILLED
+expected=KILLED-TEST

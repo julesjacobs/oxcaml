@@ -46,7 +46,7 @@ echo "" | tee -a "$LOG"
 meta_get() { sed -n "s/^$2=//p" "$1" | head -1; }
 
 declare -a ROWS=()
-n_killed=0 n_survived=0 n_patchfail=0 n_lint=0
+n_kbuild=0 n_ktest=0 n_survived=0 n_patchfail=0 n_lint=0
 
 for patch in "$REGISTRY"/*.patch; do
   [ -e "$patch" ] || continue
@@ -96,21 +96,38 @@ for patch in "$REGISTRY"/*.patch; do
     continue
   fi
 
-  # Run the declared suite in the scratch worktree with a private cache/logs so
-  # the run is hermetic and never pollutes the shared ../cache.
-  echo "--- running: make $suite" >>"$LOG"
-  ( cd "$scratch" \
-      && OXSMT_CACHE="$scratch/.mutant-cache" OXSMT_LOGS="$scratch/.mutant-logs" \
-         make "$suite" ) >>"$LOG" 2>&1
-  rc=$?
-  echo "--- make $suite exit=$rc" >>"$LOG"
-
-  if [ "$rc" -ne 0 ]; then
-    ROWS+=("$name|$suite|suite went red (exit $rc)|KILLED")
-    n_killed=$((n_killed + 1))
+  # Build FIRST, then run the suite — so a mutant caught by the compiler
+  # (KILLED-BUILD) is distinguished from one caught by a suite oracle on a clean
+  # build (KILLED-TEST). Both are kills, but only KILLED-TEST exercises a test
+  # oracle; a KILLED-BUILD certifies the type-checker, not the registry's oracle,
+  # so the table surfaces the difference for registry-quality auditing. `make
+  # build` is `dune build @@default`, which compiles the mutated library AND every
+  # suite executable, so the subsequent `make <suite>` build step is a cache hit
+  # and any nonzero there is a genuine test failure.
+  echo "--- building: make build (dune @@default)" >>"$LOG"
+  ( cd "$scratch" && make build ) >>"$LOG" 2>&1
+  build_rc=$?
+  if [ "$build_rc" -ne 0 ]
+  then
+    echo "--- build failed (exit $build_rc): KILLED-BUILD" >>"$LOG"
+    ROWS+=("$name|$suite|mutant does not compile (exit $build_rc)|KILLED-BUILD")
+    n_kbuild=$((n_kbuild + 1))
   else
-    ROWS+=("$name|$suite|suite stayed GREEN — oracle gap|SURVIVED")
-    n_survived=$((n_survived + 1))
+    # Hermetic: private cache/logs so the run never touches the shared ../cache.
+    echo "--- running: make $suite" >>"$LOG"
+    ( cd "$scratch" \
+        && OXSMT_CACHE="$scratch/.mutant-cache" OXSMT_LOGS="$scratch/.mutant-logs" \
+           make "$suite" ) >>"$LOG" 2>&1
+    rc=$?
+    echo "--- make $suite exit=$rc" >>"$LOG"
+    if [ "$rc" -ne 0 ]
+    then
+      ROWS+=("$name|$suite|suite red on clean build (exit $rc)|KILLED-TEST")
+      n_ktest=$((n_ktest + 1))
+    else
+      ROWS+=("$name|$suite|suite stayed GREEN — oracle gap|SURVIVED")
+      n_survived=$((n_survived + 1))
+    fi
   fi
 
   git -C "$REPO" worktree remove --force "$scratch" >/dev/null 2>&1 || true
@@ -119,15 +136,16 @@ done
 # ---- digest ----
 {
   echo ""
-  printf '%-32s %-16s %-10s %s\n' MUTANT SUITE RESULT DETAIL
-  printf '%-32s %-16s %-10s %s\n' "------" "-----" "------" "------"
+  printf '%-32s %-16s %-13s %s\n' MUTANT SUITE RESULT DETAIL
+  printf '%-32s %-16s %-13s %s\n' "------" "-----" "------" "------"
   for row in "${ROWS[@]:-}"; do
     [ -n "$row" ] || continue
     IFS='|' read -r m s d r <<<"$row"
-    printf '%-32s %-16s %-10s %s\n' "$m" "$s" "$r" "$d"
+    printf '%-32s %-16s %-13s %s\n' "$m" "$s" "$r" "$d"
   done
   echo ""
-  echo "totals: $n_killed KILLED, $n_survived SURVIVED, $n_patchfail PATCH-FAILED, $n_lint LINT-REJECT"
+  echo "totals: $n_ktest KILLED-TEST, $n_kbuild KILLED-BUILD, $n_survived SURVIVED, \
+$n_patchfail PATCH-FAILED, $n_lint LINT-REJECT"
 } | tee -a "$LOG"
 
 if [ "$n_survived" -gt 0 ]; then
@@ -137,6 +155,10 @@ elif [ "$((n_patchfail + n_lint))" -gt 0 ]; then
   echo "registry needs attention (PATCH-FAILED/LINT-REJECT). full log: $LOG"
   exit 2
 else
-  echo "all mutants KILLED. full log: $LOG"
+  if [ "$n_kbuild" -gt 0 ]; then
+    echo "note: $n_kbuild mutant(s) killed at BUILD, not TEST — these certify the compiler, \
+not a test oracle; prefer a compiling variant so an oracle is exercised."
+  fi
+  echo "all mutants killed ($n_ktest KILLED-TEST, $n_kbuild KILLED-BUILD). full log: $LOG"
   exit 0
 fi

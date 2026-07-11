@@ -3,4 +3,4 @@ suite=core-test
 target=smt/core/node.ml
 description=le constructor drops require_int on 2nd operand: ill-sorted term becomes constructible
 review=INVARIANTS I1/I2 (unconstructible ill-sorted); core-review
-expected=KILLED
+expected=KILLED-TEST

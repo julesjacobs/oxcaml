@@ -1,6 +1,6 @@
 module=smtlib
 suite=smtlib-test
 target=smt/smtlib/printer.ml
-description=printer stops quoting reserved words (let/as/...): renders an ambiguous keyword bare
+description=printer's reserved_words list emptied (compiling variant): reserved words render bare instead of |quoted|. Compiles clean (binding still referenced), so the render assertions — not the compiler — must catch it (KILLED-TEST)
 review=M0-smtlib R1 (reserved words RENDER as |quoted|)
-expected=KILLED
+expected=KILLED-TEST

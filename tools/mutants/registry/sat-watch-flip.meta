@@ -3,4 +3,4 @@ suite=sat-test
 target=smt/solver/sat.ml
 description=propagate watches a FALSE literal (flip <> -1 to = -1): unsound BCP
 review=sat-review watched-literal invariant
-expected=KILLED
+expected=KILLED-TEST

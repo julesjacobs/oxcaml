@@ -3,4 +3,4 @@ suite=core-test
 target=smt/core/node.ml
 description=equal_node ignores Arith coefficients: collapses 2x with 3x (silent unsoundness)
 review=node.ml equal_node comment (required #8); core-review
-expected=KILLED
+expected=KILLED-TEST

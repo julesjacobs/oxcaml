@@ -3,4 +3,4 @@ suite=core-test
 target=smt/core/node.ml
 description=equal_node swaps Eq operands (a1=b2 && a2=b1): breaks hash-cons dedup / O(1) equality
 review=ADR-0003 Decision 4 hash-consing; core-review
-expected=KILLED
+expected=KILLED-TEST
