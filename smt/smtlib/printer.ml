@@ -7,9 +7,16 @@ open Oxsmt_core
 exception Unsupported of string
 
 (* ------------------------------------------------------------------ *)
-(* Symbol quoting. A "simple symbol" per SMT-LIB 2.6: nonempty, every char in the reserved
-   set, not starting with a digit. Anything else is |...|-quoted; a name containing | or \
-   cannot be represented at all (|...| has no escape mechanism) and is refused. *)
+(* Symbol quoting (SMT-LIB 2.6 §3.1). A "simple symbol" is nonempty, every char in the
+   reserved set, and not starting with a digit. Three refusal classes exist because quoting
+   is purely LEXICAL — [|s|] and [s] denote the SAME symbol — so quoting cannot rescue a
+   name whose denotation is already fixed:
+   - a name containing [|]/[\\] has no [|...|] escape → refuse;
+   - a name equal to a predefined function/operator (or, in sort position, a predefined
+     sort) → refuse: [|+|] is still the operator [+], so faithful printing is impossible;
+   - the empty name → refuse ([||] is the degenerate empty symbol, rejected by tools).
+   A RESERVED WORD (a token that only *looks* like a symbol, e.g. [let]) is representable —
+   [|let|] is a legal symbol distinct from the keyword — so it is quoted, not refused. *)
 
 let is_simple_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
@@ -41,22 +48,92 @@ let is_simple_symbol name =
   && String.for_all is_simple_char name
 ;;
 
-let quote_symbol name =
-  if is_simple_symbol name
+(* SMT-LIB 2.6 §3.1 reserved words: match the symbol syntax but are keywords; quoting
+   turns them into legal, distinct symbols. *)
+let reserved_words =
+  [ "_"
+  ; "!"
+  ; "as"
+  ; "let"
+  ; "exists"
+  ; "forall"
+  ; "match"
+  ; "par"
+  ; "BINARY"
+  ; "DECIMAL"
+  ; "HEXADECIMAL"
+  ; "NUMERAL"
+  ; "STRING"
+  ]
+;;
+
+(* Predefined Core + Ints (QF_UFLIA) function/operator symbols. A user symbol with one of
+   these names is unrepresentable (see header). [div]/[mod] are deliberately absent: they
+   are the reserved built-ins (Env forbids user-declaring them, ADR-0003 Decision 5), so
+   an [App] head named [div]/[mod] is always the built-in operator and legitimately prints
+   bare. *)
+let predefined_funs =
+  [ "+"
+  ; "-"
+  ; "*"
+  ; "abs"
+  ; "<="
+  ; "<"
+  ; ">="
+  ; ">"
+  ; "="
+  ; "distinct"
+  ; "=>"
+  ; "and"
+  ; "or"
+  ; "not"
+  ; "xor"
+  ; "ite"
+  ; "true"
+  ; "false"
+  ]
+;;
+
+(* Predefined sorts: a user sort so named would redeclare a built-in sort. (Distinct from
+   the function namespace — a *function* named [Int] is legal and not refused.) *)
+let predefined_sorts = [ "Int"; "Bool" ]
+
+let refuse name why =
+  raise (Unsupported (Printf.sprintf "symbol %S cannot be printed: %s" name why))
+;;
+
+let check_representable name =
+  if String.length name = 0 then refuse name "the empty symbol is not representable";
+  String.iter
+    (fun c ->
+       if Char.equal c '|' || Char.equal c '\\'
+       then refuse name (Printf.sprintf "contains %c, which |...| cannot escape" c))
+    name
+;;
+
+let quote_lexical name =
+  if is_simple_symbol name && not (List.mem name reserved_words)
   then name
-  else (
-    String.iter
-      (fun c ->
-         if Char.equal c '|' || Char.equal c '\\'
-         then
-           raise
-             (Unsupported
-                (Printf.sprintf
-                   "symbol %S cannot be represented in SMT-LIB (contains %c)"
-                   name
-                   c)))
-      name;
-    "|" ^ name ^ "|")
+  else "|" ^ name ^ "|"
+;;
+
+let quote_symbol name =
+  check_representable name;
+  if List.mem name predefined_funs
+  then
+    refuse
+      name
+      "collides with a predefined SMT-LIB operator (quoting is lexical, so it cannot be \
+       disambiguated)";
+  quote_lexical name
+;;
+
+(* Uninterpreted-sort name: same rules, but the refused set is the predefined SORTS. *)
+let quote_sort_symbol name =
+  check_representable name;
+  if List.mem name predefined_sorts
+  then refuse name "collides with a predefined SMT-LIB sort";
+  quote_lexical name
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -250,7 +327,7 @@ let sort_string (s : Sort.t) =
   match s with
   | Sort.Bool -> "Bool"
   | Sort.Int _ -> "Int"
-  | Sort.Uninterpreted sym -> quote_symbol (Symbol.name sym)
+  | Sort.Uninterpreted sym -> quote_sort_symbol (Symbol.name sym)
 ;;
 
 let print_session ?status env assertions =
@@ -266,7 +343,7 @@ let print_session ?status env assertions =
   let { sorts; funs } = collect_decls env assertions in
   List.iter
     (fun sym ->
-       line (Printf.sprintf "(declare-sort %s 0)" (quote_symbol (Symbol.name sym))))
+       line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))
     sorts;
   List.iter
     (fun sym ->

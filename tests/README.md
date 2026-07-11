@@ -311,15 +311,24 @@ These live under `smt/` (not here) because they exercise the `oxsmt_smtlib` prin
 and the test-only `oxsmt_smtlib_parser`, but they follow the same digest-first,
 deterministic discipline. Two entry points:
 
-- `make smtlib-test` — the committed, corpus-independent round-trip suite.
+- `make smtlib-test` — the committed, corpus-independent round-trip suite (96
+  checks).
   - **Round-trip A (print → parse):** ~30 programmatic sessions cover every one of
-    the 9 term nodes, symbol-quoting edge cases (a symbol named `a b(c)`, one named
-    `Int`, the empty name, digit-leading names, and simple symbols that must *not*
-    be quoted), negative constants, `div`/`mod`, `distinct`/`abs` desugaring, and
-    deep nesting. Each session is built in a `Context`, printed, and parsed back
-    **into the same `Context`**, so equality is `Term.equal` (hash-cons tag
-    identity) — the strongest check that print;parse is the identity on our subset
-    (ADR-0003's single-`Context` contract makes the strong check the simple one).
+    the 9 term nodes, symbol-quoting edge cases (a symbol named `a b(c)`, a function
+    named `Int`, digit-leading names, and simple symbols that must *not* be quoted),
+    negative constants, `div`/`mod`, `distinct`/`abs` desugaring, and deep nesting.
+    Each session is built in a `Context`, printed, and parsed back **into the same
+    `Context`**, so equality is `Term.equal` (hash-cons tag identity) — the strongest
+    check that print;parse is the identity on our subset (ADR-0003's single-`Context`
+    contract makes the strong check the simple one).
+  - **Naming classes (R1):** class-driven tables assert that reserved *words*
+    (`let`, `as`, `forall`, `_`, `!`, …) round-trip via `|quoting|`, while names
+    equal to predefined *operators* (`+ - * = <= and or not => ite …`), predefined
+    *sorts* (`Int`/`Bool`, in sort position), and the empty name are **refused** by
+    the printer (`Printer.Unsupported`) — quoting is lexical, so `|+|` is still the
+    operator `+` and cannot disambiguate a user symbol. The tables are the spec:
+    adding a name to a class is a one-line change, so a regression cannot slip past
+    (as the original operator-name gap did past 46 green checks).
   - **Round-trip B (parse → print → parse):** over `tests/cases/*.smt2`, the harness
     fixtures, and the gate honeypots — parse, print, re-parse into the same
     `Context`, assert the assertion lists are `Term.equal` and the `:status` label
@@ -343,6 +352,15 @@ constant last, a lone product without a unary `+`); order atoms as `(<= arg 0)`;
 `Eq`/`Not`/`And`/`Or`/`Ite` directly; reserved `div`/`mod` as `(div a b)`/`(mod a
 b)` and never declared; `distinct`/`abs` never appear (they desugar at construction
 to `Not`/`Eq` and `Ite`).
+
+**Symbol quoting is a TCB concern** (the printer feeds the Lean oracle). Because
+quoting is purely lexical (`|s|` and `s` are the same symbol), the printer *refuses*
+(`Printer.Unsupported`) names it cannot render faithfully: names containing `|`/`\`,
+the empty name, names equal to a predefined operator (function position) or
+predefined sort (sort position). Reserved *words* are representable and are
+`|quoted|`. This closes a gap where a function literally named `+` would have
+printed `(+ a b)` — read by any standard tool (and our own parser) as integer
+addition, silently certifying a different formula. See `printer.mli`.
 
 ### Parser subset
 

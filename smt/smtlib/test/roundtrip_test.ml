@@ -97,6 +97,22 @@ let check_print ~name ?status ~expect build =
   if not (contains text expect) then fail "print/%s: expected %S in\n%s" name expect text
 ;;
 
+(* Refusal check: printing the session MUST raise [Printer.Unsupported] (a name the
+   printer cannot faithfully render — a predefined-operator/sort name or the empty name). *)
+let check_refused ~name build =
+  incr checks;
+  let env = Env.create () in
+  let ctx = Context.create env in
+  match
+    let asserts = build env ctx in
+    Printer.print_session env asserts
+  with
+  | _ -> fail "refuse/%s: expected Printer.Unsupported, but printing succeeded" name
+  | exception Printer.Unsupported _ -> ()
+  | exception e ->
+    fail "refuse/%s: expected Printer.Unsupported, got %s" name (Printexc.to_string e)
+;;
+
 (* declaration helpers *)
 let const env ctx name sort =
   Context.const ctx (Env.declare_fun env name (Rank.create [] sort))
@@ -236,7 +252,9 @@ let sessions () =
   check_a ~name:"quote-space-parens" (fun env ctx ->
     let a = const env ctx "a b(c)" i in
     [ Context.eq ctx a (Context.int_const ctx 0) ]);
-  check_a ~name:"quote-reserved-Int" (fun env ctx ->
+  check_a ~name:"fun-named-Int-ok" (fun env ctx ->
+    (* [Int] as a FUNCTION name is legal (distinct namespace from the sort Int) — printed
+       bare, must round-trip. (A *sort* named Int is refused; see naming_classes.) *)
     let a = const env ctx "Int" i in
     [ Context.eq ctx a (Context.int_const ctx 0) ]);
   check_a ~name:"quote-uninterpreted-sort-name" (fun env ctx ->
@@ -244,10 +262,9 @@ let sessions () =
     let a = const env ctx "the a" s
     and c = const env ctx "the c" s in
     [ Context.eq ctx a c ]);
-  check_a ~name:"quote-empty-and-digits" (fun env ctx ->
-    let a = const env ctx "" i
-    and c = const env ctx "3x" i in
-    [ Context.eq ctx a c ]);
+  check_a ~name:"quote-digit-leading" (fun env ctx ->
+    let c = const env ctx "3x" i in
+    [ Context.eq ctx c (Context.int_const ctx 0) ]);
   check_a ~name:"quote-simple-symbols" (fun env ctx ->
     (* these are all valid simple symbols and must NOT be quoted *)
     let a = const env ctx "a.b" i
@@ -275,6 +292,81 @@ let sessions () =
             [ Context.gt ctx x y; Context.not_ ctx (Context.eq ctx inner x) ]
         ]
     ])
+;;
+
+(* Class-driven naming coverage (R1). The driving tables ARE the spec: extending them is a
+   one-line change, so a newly-guarded/allowed name class cannot silently escape the suite
+   (which is exactly how R1 slipped past the original 46 checks).
+   - reserved WORDS: representable via |quoting|, must round-trip;
+   - predefined OPERATOR names as functions: unrepresentable, printer must REFUSE;
+   - the empty name: REFUSED;
+   - predefined SORT names as an uninterpreted sort: REFUSED;
+   - a reserved word as a sort name: representable, must round-trip. *)
+let reserved_word_class =
+  [ "let"; "as"; "forall"; "exists"; "_"; "!"; "par"; "match"; "NUMERAL"; "STRING" ]
+;;
+
+let operator_class =
+  [ "+"
+  ; "-"
+  ; "*"
+  ; "abs"
+  ; "<="
+  ; "<"
+  ; ">="
+  ; ">"
+  ; "="
+  ; "distinct"
+  ; "=>"
+  ; "and"
+  ; "or"
+  ; "not"
+  ; "xor"
+  ; "ite"
+  ; "true"
+  ; "false"
+  ]
+;;
+
+let naming_classes () =
+  let i = Sort.int in
+  (* reserved words as function names: |quoted|, round-trip *)
+  List.iter
+    (fun w ->
+       check_a ~name:("reserved-word:" ^ w) (fun env ctx ->
+         let c = const env ctx w i in
+         [ Context.eq ctx c (Context.int_const ctx 0) ]))
+    reserved_word_class;
+  (* predefined operators as function names (const and applied): REFUSED *)
+  List.iter
+    (fun op ->
+       check_refused ~name:("operator-const:" ^ op) (fun env ctx ->
+         let c = const env ctx op i in
+         [ Context.eq ctx c (Context.int_const ctx 0) ]);
+       check_refused ~name:("operator-app:" ^ op) (fun env ctx ->
+         let f = fn env op [ i ] i in
+         let x = const env ctx "x" i in
+         [ Context.eq ctx (Context.app ctx f [ x ]) (Context.int_const ctx 0) ]))
+    operator_class;
+  (* empty name: REFUSED *)
+  check_refused ~name:"empty-name" (fun env ctx ->
+    let c = const env ctx "" i in
+    [ Context.eq ctx c (Context.int_const ctx 0) ]);
+  (* predefined SORT names as an uninterpreted sort: REFUSED *)
+  List.iter
+    (fun s ->
+       check_refused ~name:("sort-name:" ^ s) (fun env ctx ->
+         let so = usort env s in
+         let a = const env ctx "a" so
+         and c = const env ctx "c" so in
+         [ Context.eq ctx a c ]))
+    [ "Int"; "Bool" ];
+  (* reserved word as a sort name: |quoted|, round-trip *)
+  check_a ~name:"sort-reserved-word" (fun env ctx ->
+    let so = usort env "forall" in
+    let a = const env ctx "a" so
+    and c = const env ctx "c" so in
+    [ Context.eq ctx a c ])
 ;;
 
 (* ---- direction B: parse -> print -> parse over committed files ---- *)
@@ -331,6 +423,9 @@ let check_b path =
 let () =
   print_endline "== round-trip A (print -> parse), programmatic sessions ==";
   sessions ();
+  print_endline
+    "== naming classes (reserved words quoted; operators/sorts/empty refused) ==";
+  naming_classes ();
   let dirs = List.tl (Array.to_list Sys.argv) in
   if dirs <> []
   then (

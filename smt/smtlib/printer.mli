@@ -25,14 +25,24 @@
     - [distinct]/[abs] never appear: they desugar at construction to [Not]/[Eq] and [Ite],
       which is what gets printed. *)
 
-(** Raised when a symbol name cannot be represented as an SMT-LIB symbol — it contains a
-    [|] or [\\], which [|...|] quoting cannot escape. We refuse rather than emit
-    unparseable text. *)
+(** Raised when a symbol name cannot be faithfully rendered as an SMT-LIB symbol. Because
+    quoting is purely lexical ([|s|] and [s] denote the {e same} symbol), three classes are
+    unrepresentable and are refused rather than mis-rendered:
+    - names containing [|] or [\\] ([|...|] has no escape);
+    - names equal to a predefined function/operator symbol ([+ - * abs <= < >= > = distinct
+      => and or not xor ite true false]) — [|+|] is still the operator [+]; and, in sort
+      position, names equal to a predefined sort ([Int]/[Bool]);
+    - the empty name.
+    A name that is merely a reserved {e word} ([let], [as], [forall], [_], [!], …) is
+    representable and is emitted [|quoted|], not refused. *)
 exception Unsupported of string
 
-(** [quote_symbol name] returns [name] unchanged when it is a simple SMT-LIB symbol
-    (nonempty, every char in [\[a-zA-Z0-9~!@$%^&*_+=<>.?/-\]], not starting with a digit),
-    otherwise [|name|]. Raises {!Unsupported} if [name] contains [|] or [\\]. *)
+(** [quote_symbol name] renders a function/constant symbol name: returns [name] unchanged
+    when it is a simple SMT-LIB symbol (nonempty, every char in
+    [\[a-zA-Z0-9~!@$%^&*_+=<>.?/-\]], not starting with a digit) and not a reserved word,
+    otherwise [|name|]. Raises {!Unsupported} for the unrepresentable classes above (a
+    predefined operator name, [|]/[\\], or empty). [div]/[mod] are {e not} refused: they
+    are the reserved built-ins and print bare as operator applications. *)
 val quote_symbol : string -> string
 
 (** [print_term t] renders a single term as an SMT-LIB2 s-expression (no trailing
