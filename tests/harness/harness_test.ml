@@ -119,6 +119,30 @@ let () =
   check
     "unsat core-size present"
     (contains (produced_text [ unsat_goal ]) "(core-size 3)");
+  (* Quoted-symbol round-trip (the eval-model bridge): a model name that is not a simple
+     SMT-LIB symbol must be re-quoted on output, in both the golden text and the eval
+     sidecar, or a name like [p q] re-lexes as two tokens and eval rejects the model. *)
+  check
+    "quote_symbol: simple symbol unchanged"
+    (String.equal (Sexp.quote_symbol "x0") "x0");
+  check "quote_symbol: space wrapped" (String.equal (Sexp.quote_symbol "p q") "|p q|");
+  check "quote_symbol: empty wrapped" (String.equal (Sexp.quote_symbol "") "||");
+  check
+    "quote_symbol: leading digit wrapped"
+    (String.equal (Sexp.quote_symbol "1a") "|1a|");
+  let quoted_goal =
+    { verdict = Sat
+    ; core_size = None
+    ; model = Some [ "p q", "true" ]
+    ; counters = { conflicts = 0; decisions = 0; propagations = 0 }
+    }
+  in
+  check
+    "golden re-quotes a non-simple model name"
+    (contains (produced_text [ quoted_goal ]) "(model ((|p q| true)))");
+  check
+    "sidecar bridge re-quotes a non-simple model name"
+    (contains (model_to_sidecar [ "p q", "true" ]) "(const |p q| true)");
   (* Pass: golden matches produced. *)
   let g = produced_text [ unknown_goal ] in
   check

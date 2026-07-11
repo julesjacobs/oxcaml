@@ -4,7 +4,13 @@
    under smt/smtlib and is owned by M0-smtlib); the harness must not depend on smt/ code.
    This reader handles just enough SMT-LIB2 lexical syntax to (a) locate
    [(set-info :status ...)] and [(check-sat)] commands in a .smt2 file, and (b) parse the
-   solver's machine-readable output blocks. *)
+   solver's machine-readable output blocks.
+
+   Quoted symbols and strings collapse to plain atoms on the way in (the bars/quotes are
+   dropped, the content is kept). That loss is harmless for the harness's *reading* — it
+   only inspects bare atoms — but a symbol name read here and later re-emitted (model
+   bindings in golden text and in the eval sidecar) must be re-quoted with [quote_symbol],
+   or a name like [a b] would re-lex as two tokens. *)
 
 type t =
   | Atom of string
@@ -22,6 +28,48 @@ let rec to_string = function
 let is_delim = function
   | ' ' | '\t' | '\n' | '\r' | '(' | ')' | ';' | '"' | '|' -> true
   | _ -> false
+;;
+
+(* Re-quote a symbol for output — the inverse of [read_pipe]. Our [t] does not record
+   whether an atom arrived bare or |quoted| (read_pipe keeps the content, drops the bars),
+   so on output we re-derive the need for quoting from the characters: a symbol that is
+   not a valid SMT-LIB 2.6 *simple* symbol (§3.1) is wrapped in |...|, otherwise it would
+   re-lex as several tokens (e.g. [a b] as two atoms, breaking the [(const NAME VALUE)]
+   grammar the eval bridge emits). We hand-roll the rule rather than reuse smt/smtlib's
+   printer or smt/lexical because the harness must not depend on smt/ code (see header).
+   Reserved words are not specially quoted: the sidecar/golden grammars are positional, so
+   only tokenization matters here. *)
+let is_simple_symbol_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+  | '~'
+  | '!'
+  | '@'
+  | '$'
+  | '%'
+  | '^'
+  | '&'
+  | '*'
+  | '_'
+  | '-'
+  | '+'
+  | '='
+  | '<'
+  | '>'
+  | '.'
+  | '?'
+  | '/' -> true
+  | _ -> false
+;;
+
+let quote_symbol s =
+  let simple =
+    s <> ""
+    && (match s.[0] with
+        | '0' .. '9' -> false (* a simple symbol may not start with a digit *)
+        | _ -> true)
+    && String.for_all is_simple_symbol_char s
+  in
+  if simple then s else "|" ^ s ^ "|"
 ;;
 
 (* Parse every top-level s-expression in [s], in order. Comments (';' to end-of-line),

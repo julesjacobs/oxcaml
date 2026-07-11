@@ -49,8 +49,12 @@ let print_block b =
      Buffer.add_string buf " (model (";
      List.iteri
        (fun i (name, v) ->
-          if i > 0 then Buffer.add_char buf ' ';
-          Printf.bprintf buf "(%s %b)" name v)
+         if i > 0 then Buffer.add_char buf ' ';
+         (* Re-quote the symbol name: [Session.get_model] returns the bare content of a
+            |quoted| declared const, so a name like [p q] must print as [|p q|] to survive
+            the harness/eval round-trip. Reuse the shipped printer's SMT-LIB 2.6 quoting
+            (the CLI already links smt/; only the firewalled harness lib hand-rolls it). *)
+         Printf.bprintf buf "(%s %b)" (Oxsmt_smtlib.Printer.quote_symbol name) v)
        m;
      Buffer.add_string buf "))"
    | None -> ());
@@ -69,13 +73,13 @@ let print_block b =
 let scan_commands sexps =
   List.fold_left
     (fun (n_checks, incr) sx ->
-       match sx with
-       | Sexp.List (head :: _) ->
-         (match Sexp.simple head with
-          | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
-          | Some ("push" | "pop") -> n_checks, true
-          | _ -> n_checks, incr)
-       | _ -> n_checks, incr)
+      match sx with
+      | Sexp.List (head :: _) ->
+        (match Sexp.simple head with
+         | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
+         | Some ("push" | "pop") -> n_checks, true
+         | _ -> n_checks, incr)
+      | _ -> n_checks, incr)
     (0, false)
     sexps
 ;;
