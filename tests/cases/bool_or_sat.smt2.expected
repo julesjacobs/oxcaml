@@ -1,3 +1,4 @@
 (goal 1
-  (verdict unsat)
+  (verdict sat)
+  (model ((p true) (q false)))
   (counters (conflicts <10) (decisions <10) (propagations <10)))

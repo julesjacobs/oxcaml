@@ -71,9 +71,19 @@ order (so push/pop / multi-check-sat files yield one block per check), each:
 `verdict` and `counters` (all three keys) are required; field order is not
 significant; extra fields are ignored. A non-zero exit, unparseable output, or a
 block count that disagrees with the number of `check-sat`s in the file is a
-harness failure. Until the real solver exists, `SOLVER` defaults to the built
-`stub_solver` (`_build/default/tests/harness/stub_solver.exe`), which reports
-`unknown` with zero counters for every check-sat.
+harness failure.
+
+Since **M1-wiring**, `SOLVER` defaults to the real solver CLI
+(`_build/default/tests/solver/oxsmt_cli.exe`): it parses `.smt2` via the test-only
+SMT-LIB parser and drives the shipped `Session` (`smt/interface`). A batch file
+(one check-sat, no push/pop) is solved for real; an incremental file (push/pop or
+multiple check-sats) degrades to one `unknown` block per check-sat (always sound —
+see THE SOUNDNESS RULE in `session.mli`). Pure-Boolean sat prints a Boolean model
+(`(model ((p true) (q false)))`). The `stub_solver`
+(`_build/default/tests/harness/stub_solver.exe`, `unknown`/zero for every
+check-sat) stays buildable as a fallback and for harness-plumbing tests — override
+`SOLVER=` to use it. The session's own semantics (push/pop, model, guards) are unit
+tested by `make wiring-test` (`tests/solver/wiring_test`).
 
 ### Golden format
 

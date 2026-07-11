@@ -71,9 +71,20 @@ LIA via incremental simplex over rationals + branch-and-bound for integrality
 (I4). Implements THEORY. Owner: M3-lia.
 
 ## smt/interface (`oxsmt_interface`)
-Session API: declare, assert, check, push/pop, unsat cores, reasons. Sole client
-entry point and the SMT-LIB2 serialization seam; solver never exposes internals
-(DESIGN.md §3 boundary 1). Owner: M4-interface.
+Session API (`Session`): the sole client entry point — declare sorts/funs/consts,
+`assert_term`, `check_sat`, `push`/`pop`, `get_model`, `stats`; solver never
+exposes internals (DESIGN.md §3 boundary 1). **Status: M1-wiring landed** (was
+skeleton). Shipped, stdlib-only over `oxsmt_core` + `oxsmt_preprocess` +
+`oxsmt_solver` (I3) — it never links the test-only SMT-LIB parser. Bundles one
+Env+Context, threads every asserted term through preprocessing → clausification →
+the CDCL core, sharing one SAT variable per hash-consed atom; push/pop is
+selector-literal retraction (frame clauses guarded by a selector `check_sat`
+assumes). **THE SOUNDNESS RULE** (documented in `session.mli`, a code comment, and
+`wiring_test`): with any theory atom present (`Le`, non-Bool `Eq`, applied
+predicate) a propositional `Sat` downgrades to `Unknown` (the SAT core cannot see
+theory inconsistency); propositional `Unsat` stays sound; pure-Boolean formulas get
+real sat/unsat; `Overflow`/`Unsupported` → `Unknown` (I8). Unsat cores / reasons and
+the SMT-LIB serialization seam arrive with M4. Owner: M1-wiring (was M4-interface).
 
 ## smt/smtlib (`oxsmt_smtlib` printer; `oxsmt_smtlib_parser` test-only)
 SMT-LIB2 interchange, the format for the oracle and public benchmarks. **Status:
@@ -96,8 +107,13 @@ round-trips + a parse-only corpus smoke. Owner: M0-smtlib.
 
 ## tests/ (outside smt/)
 `tests/harness` runner (.smt2 golden/expect + promote), `tests/gate` Lean encoder
-+ certification + content-addressed cache, `tests/cases/*.smt2` corpus. Gate
-paths are master-only (AGENTS.md). See `tests/README.md`.
-Status: **landed** — harness (M0-harness) and gate (M0-gate) both merged;
-`tests/cases/` seeded with 11 cases (harness goldens are `unknown` under the stub
-solver until the real solver lands). Not skeleton; the rest of the DAG still is.
++ certification + content-addressed cache, `tests/cases/*.smt2` corpus, and
+`tests/solver` — the real-solver CLI (`oxsmt_cli`) + wiring unit tests
+(`wiring_test`, `make wiring-test`). The CLI drives `Session` from a `.smt2` file
+via the test-only parser (so it lives here, not in shipped `smt/`); it is the
+default harness `SOLVER` (M1-wiring). Gate paths are master-only (AGENTS.md). See
+`tests/README.md`.
+Status: **landed** — harness (M0-harness) and gate (M0-gate) merged; the real
+solver is wired (M1-wiring), so pure-Boolean goldens are now real sat/unsat and
+cases with theory atoms are `unknown` under THE SOUNDNESS RULE. `tests/cases/`
+holds 18 cases, all gate-certified.

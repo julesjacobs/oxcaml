@@ -8,10 +8,13 @@ OPAM_BIN := /usr/local/home/jujacobs/.opam/5.4.0/bin
 DUNE := $(OPAM_BIN)/dune
 export PATH := $(OPAM_BIN):$(PATH)
 
-# Harness knobs (override on the command line, e.g. `make test SOLVER=path/to/real`).
-# SOLVER defaults to the built stub until the real solver lands (DESIGN.md §8).
+# Harness knobs (override on the command line, e.g. `make test SOLVER=path/to/other`).
+# SOLVER defaults to the real solver CLI (tests/solver, M1-wiring): it drives the shipped
+# session layer and implements the harness contract. The stub (unknown for every
+# check-sat) stays buildable as a fallback / for harness plumbing tests — override
+# `SOLVER=_build/default/tests/harness/stub_solver.exe` to use it.
 # LOGS/STATS resolve relative to the make invocation dir (the project root).
-SOLVER   ?= _build/default/tests/harness/stub_solver.exe
+SOLVER   ?= _build/default/tests/solver/oxsmt_cli.exe
 LOGS     ?= ../logs
 STATS    ?= $(LOGS)/stats
 CASES    ?= tests/cases
@@ -30,7 +33,7 @@ SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
 # (from a worktree, override SMTLIB_CORPUS to ../../corpora/... — same caveat as LOGS).
 SMTLIB_CORPUS ?= ../corpora/QF_UFLIA
 
-.PHONY: build fmt test core-test sat-test sat-bench preprocess-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build fmt test core-test sat-test sat-bench preprocess-test wiring-test smtlib-test smtlib-corpus eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -66,6 +69,13 @@ sat-bench:
 ##   exit on any failed check.
 preprocess-test:
 	$(DUNE) exec smt/preprocess/test/preprocess_test.exe
+
+## wiring-test — session layer (smt/interface) semantics + namespace guards. Push/pop
+##   retraction, assert-after-check, THE SOUNDNESS RULE (theory atom -> unknown), model
+##   extraction, and the reserved-namespace guard on both the session and the parser. Lives
+##   under tests/solver (links the test-only parser). Nonzero exit on any failed check.
+wiring-test:
+	$(DUNE) exec tests/solver/wiring_test.exe
 
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse
@@ -118,7 +128,8 @@ spine:
 ##   full detail under $(LOGS)/harness, exact stats under $(STATS). Nonzero on
 ##   any diff or missing golden. Override SOLVER to test the real solver.
 test: check-frozen
-	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe
+	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
+	  tests/solver/oxsmt_cli.exe
 	$(DUNE) exec tests/harness/harness_test.exe
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 
@@ -165,7 +176,8 @@ status:
 ##   inputs (new stats file) — keeping generation and refresh separate is what
 ##   makes the committed artifact's diff meaningful.
 status-fresh:
-	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe
+	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
+	  tests/solver/oxsmt_cli.exe
 	@mkdir -p $(LOGS)/harness
 	-$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) > $(LOGS)/harness/last-digest.txt 2>&1
 	$(MAKE) status LOGS=$(LOGS) STATS=$(STATS)
@@ -175,5 +187,6 @@ status-fresh:
 ##   prints a per-file diffstat so the promoting agent sees what it accepts.
 ##   Label mismatches and solver errors are never masked — they still fail.
 promote:
-	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe
+	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
+	  tests/solver/oxsmt_cli.exe
 	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS) --promote
