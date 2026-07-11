@@ -40,6 +40,11 @@ type pstate =
   ; defines : (string, definition) Hashtbl.t
   ; expanding :
       (string, unit) Hashtbl.t (* define names currently mid-expansion (cycle guard) *)
+  ; memo : (string * int list, Term.t) Hashtbl.t
+    (* expansion cache keyed by (define name, argument-term tags). A define with the same
+     arguments always expands to the same hash-consed term, so this turns the exponential
+     body re-read on nested chains (e.g. [f_{i+1}(x) = f_i(x) + f_i(x)]) into linear work.
+     Tags are the [Context] hash-cons identity, so the key is exact and cheap. *)
   }
 
 (* ---- sorts ---- *)
@@ -188,12 +193,19 @@ and expand st scope name (def : definition) arg_sexps =
       def.params
       arg_sexps
   in
-  Hashtbl.replace st.expanding name ();
-  let body = read_term st bindings def.body in
-  Hashtbl.remove st.expanding name;
-  if not (Sort.equal body.Term.sort def.ret)
-  then malformedf "define-fun %s body sort differs from declared result sort" name;
-  body
+  let key = name, List.map (fun (_, (t : Term.t)) -> t.tag) bindings in
+  match Hashtbl.find_opt st.memo key with
+  | Some cached -> cached
+  | None ->
+    (* Cycle guard stays live across the body read: recursion re-enters [expand] with the
+       same [name] before this key is cached, so it is caught here, not memoized. *)
+    Hashtbl.replace st.expanding name ();
+    let body = read_term st bindings def.body in
+    Hashtbl.remove st.expanding name;
+    if not (Sort.equal body.Term.sort def.ret)
+    then malformedf "define-fun %s body sort differs from declared result sort" name;
+    Hashtbl.replace st.memo key body;
+    body
 
 (* [(=> a b c)] is right-associative: [a => (b => c)]. *)
 and read_implies st scope args =
@@ -371,6 +383,7 @@ let parse_into env ctx src =
     ; funs = Hashtbl.create 64
     ; defines = Hashtbl.create 16
     ; expanding = Hashtbl.create 8
+    ; memo = Hashtbl.create 64
     }
   in
   let sexps =

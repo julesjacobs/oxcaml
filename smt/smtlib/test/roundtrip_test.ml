@@ -540,6 +540,53 @@ let define_fun_cases () =
     (hdr ^ "(declare-fun f (Int) Int)\n(define-fun f ((x Int)) Int x)\n(assert true)\n")
 ;;
 
+(* Exponential-re-read guard (reviewer-identified test-only DoS): a doubling chain
+   [f_{i+1}(x) = f_i(x) + f_i(x)] makes an unmemoized expander read [f_0]'s body 2^depth
+   times. Memoization on (define, arg-tags) collapses that to one expansion per (define,
+   arg), i.e. linear. Every [f_i] here is called with the same argument [a], so a
+   correctly-memoized parse does [depth+1] expansions and finishes instantly; an
+   unmemoized one does 2^depth reads and cannot finish at depth 40. We assert BOTH the
+   result is right (the chain equals [2^depth * a]) and a coarse wall-bound, so a memo
+   regression fails loudly rather than merely hanging. *)
+let define_fun_perf () =
+  incr checks;
+  let depth = 40 in
+  let buf = Buffer.create 4096 in
+  Buffer.add_string buf "(set-logic QF_UFLIA)\n(declare-const a Int)\n";
+  Buffer.add_string buf "(define-fun f0 ((x Int)) Int x)\n";
+  for i = 1 to depth do
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "(define-fun f%d ((x Int)) Int (+ (f%d x) (f%d x)))\n"
+         i
+         (i - 1)
+         (i - 1))
+  done;
+  Buffer.add_string buf (Printf.sprintf "(assert (<= (f%d a) 0))\n" depth);
+  let env = Env.create () in
+  let ctx = Context.create env in
+  let t0 = Sys.time () in
+  match Parser.parse_into env ctx (Buffer.contents buf) with
+  | p ->
+    let dt = Sys.time () -. t0 in
+    (* f_depth(a) = 2^depth * a; 2^40 fits native int (< 2^62). *)
+    let coeff = 1 lsl depth in
+    let expanded =
+      Parser.parse_into
+        env
+        ctx
+        (Printf.sprintf
+           "(set-logic QF_UFLIA)\n(declare-const a Int)\n(assert (<= (* %d a) 0))\n"
+           coeff)
+    in
+    if not (terms_equal p.assertions expanded.assertions)
+    then fail "df-perf: depth-%d doubling chain expanded to the wrong term" depth
+    else if dt > 5.0
+    then fail "df-perf: depth-%d parse took %.2fs cpu — memoization regressed?" depth dt
+  | exception e -> fail "df-perf: parse raised %s" (Printexc.to_string e)
+;;
+
 (* ---- direction B: parse -> print -> parse over committed files ---- *)
 
 let smt2_files dir =
@@ -599,6 +646,7 @@ let () =
   naming_classes ();
   print_endline "== define-fun macro expansion ==";
   define_fun_cases ();
+  define_fun_perf ();
   let dirs = List.tl (Array.to_list Sys.argv) in
   if dirs <> []
   then (

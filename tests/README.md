@@ -476,6 +476,10 @@ sort disagrees with the declared result sort fails `Malformed`, never silently.
 **define-fun is erased by expansion**, so round-tripping prints the *expanded*
 terms (no `define-fun` in the output) and re-parsing still fixpoints — the
 `define_fun_cases` tests cover both the expansion equalities and this round-trip.
+Expansion is **memoized** on `(define name, argument-term tags)`, so a nested
+doubling chain (`f_{i+1}(x) = f_i(x) + f_i(x)`) expands in linear rather than
+exponential time — a `define_fun_perf` test parses a depth-40 chain (2^40 body
+reads unmemoized) and asserts it both completes fast and equals `2^40 * a`.
 
 ### Bool-`=` / gate interaction (tracked M0-gate-iff)
 
