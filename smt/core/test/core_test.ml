@@ -401,14 +401,28 @@ let test_overflow_unsupported () =
   let before = Context.term_count c in
   check_raises "coeff merge overflow" (fun () -> Context.add c t1 x);
   check "table unchanged after coeff overflow" (Context.term_count c = before);
-  (* neg min_int overflows. *)
+  (* neg min_int overflows — and leaves the table untouched (I8). *)
+  let mn = Context.int_const c min_int in
   let before = Context.term_count c in
-  check_raises "neg min_int overflows" (fun () ->
-    Context.neg c (Context.int_const c min_int));
-  ignore before;
+  check_raises "neg min_int overflows" (fun () -> Context.neg c mn);
+  check "table unchanged after neg overflow" (Context.term_count c = before);
+  (* sub overflow leaves the table untouched (sweep: sub is atomic — its negation is
+     evaluated as a build_linear argument, before any hash-cons). *)
+  let before = Context.term_count c in
+  check_raises "sub min_int overflows" (fun () -> Context.sub c x mn);
+  check "table unchanged after sub overflow" (Context.term_count c = before);
   (* mul_const overflow. *)
-  check_raises "mul_const overflow" (fun () ->
-    Context.mul_const c max_int (Context.add c x x))
+  let wide = Context.add c x x in
+  let before = Context.term_count c in
+  check_raises "mul_const overflow" (fun () -> Context.mul_const c max_int wide);
+  check "table unchanged after mul_const overflow" (Context.term_count c = before);
+  (* abs(min_int) overflows via its desugared [neg]; it must NOT intern the desugared [0]
+     / comparison atom before raising (codex C3 / I8 raise-before- mutation). The
+     term_count-unchanged assertion is the C3 regression guard: the old abs (ge/int_const
+     0 before neg) bumped the table from 1 to 2. *)
+  let before = Context.term_count c in
+  check_raises "abs min_int overflows" (fun () -> Context.abs c mn);
+  check "table unchanged after abs overflow (C3)" (Context.term_count c = before)
 ;;
 
 (* ================================================================== *)

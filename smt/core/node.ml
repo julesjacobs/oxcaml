@@ -375,8 +375,16 @@ let distinct st ts =
 
 let abs st a =
   require_int "abs" a;
+  (* Compute the overflow-prone negation FIRST. [neg] raises [Overflow] BEFORE interning
+     anything (its arithmetic is evaluated as [build_linear] arguments, ahead of the
+     hash-cons), so on a min_int-magnitude operand [abs] raises with the intern table
+     untouched (I8: raise before any mutation). The old order interned [int_const 0] and
+     the [ge] atom first, leaking them on the raise (codex C3). [ge] negates exactly the
+     same coefficients/constant as [neg], so once [neg] has succeeded [ge] cannot overflow
+     — abs is now all-or-nothing. *)
+  let neg_a = neg st a in
   let nonneg = ge st a (int_const st 0) in
-  ite st nonneg a (neg st a)
+  ite st nonneg a neg_a
 ;;
 
 (* App: caller ([Context]) has already checked the rank; we intern with the codomain
