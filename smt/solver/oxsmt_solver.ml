@@ -1,9 +1,9 @@
-(** CDCL(T) engine: trail, boolean propagation, conflict analysis, clause
-    learning, restarts.
+(** CDCL(T) engine (DESIGN.md §5). Owning task: TASKS.md M1-cdcl.
 
-    Responsibility: the propositional CDCL core (two-watched literals, 1UIP,
-    activity branching) plus online theory integration — it sees theories only
-    through the THEORY callback interface and stays novelty-free (DESIGN.md §5).
-    Incrementality (push/pop, assert-after-check) falls out of the trail.
+    M1 landed the propositional CDCL SAT core ({!Sat}) — two-watched-literal propagation,
+    1UIP clause learning, VSIDS branching, phase saving, Luby restarts, activity-based
+    clause deletion — following the MiniSat design and deliberately novelty-free. Online
+    theory integration via the THEORY callback interface arrives with the theory
+    milestones (M2+); until then the core is propositional only and sees no terms. *)
 
-    Status: skeleton. Owning task: TASKS.md M1-cdcl. *)
+module Sat = Sat

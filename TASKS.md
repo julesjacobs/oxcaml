@@ -27,7 +27,8 @@ criteria are the contract. Specs live in the task dispatch, not paraphrased here
 
 | id | title | status | acceptance |
 |----|-------|--------|-----------|
-| M1-cdcl | Clausifier + CDCL SAT core | todo | passes public SAT benchmarks; `THEORY` frozen at end of M1 |
+| M1-sat | CDCL SAT core (`smt/solver`, propositional, MiniSat design) | done (branch `task/sat`) | 2-watched-literal propagation, 1UIP + clause learning + local minimization, VSIDS, phase saving, Luby restarts, activity-based deletion; `sat.mli` public API (int vars/lits, assumptions, model, failed-assumption core, stats trio, proof-readiness `trace` hook). 37 self-checks (`make sat-test`): exact learned-clause/backjump/antecedent on textbook conflicts, assumption semantics, incremental, 20k random CNFs cross-checked vs an independent DPLL oracle (all sat models self-evaluated), pigeonhole, determinism. Bench (`make sat-bench`): **100% verdict agreement on uf50 (1000 sat) + uuf50 (1000 unsat) in ~1s**, uf100/uuf100/aim/dubois clean. ~855 lines, stdlib-only. `sat.mli` freezes at the M1 `THEORY` freeze |
+| M1-clausify | Preprocessing + Tseitin clausifier (`smt/preprocess`) | todo | separate parallel task; emits clauses into the `Sat` API |
 | M1-brand-checkpoint | Per-Context brand on `Term.t` decision at the `THEORY` freeze | todo | evaluate a debug-only (or phantom) per-Context id — R3 from core review: the single-Context contract is convention-only, so mixing terms across Contexts silently corrupts `Term.equal`/`Set`/`Map`. See `../logs/core-review.md` R3 |
 | M2-euf | EUF congruence closure | todo | QF_UF passes |
 | M3-lia | LIA simplex + branch-and-bound | todo | QF_LIA passes |

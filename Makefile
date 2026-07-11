@@ -19,7 +19,13 @@ FIXTURES ?= tests/harness/fixtures
 HARNESS_ARGS := --solver $(SOLVER) --dir $(CASES) --dir $(FIXTURES) \
                 --logs $(LOGS) --stats $(STATS)
 
-.PHONY: build fmt test core-test bench gate promote check-frozen spine status status-fresh
+# SAT bench corpus. Defaults to the uf50/uuf50 families (the M1 verdict-agreement
+# target, solved in seconds); GLOBs at runtime and tolerates absence. Override to
+# run elsewhere, e.g. `make sat-bench SAT_CORPUS=../corpora/SAT` for the whole
+# tree (which includes intentionally-hard families like pigeon-hole).
+SAT_CORPUS ?= ../corpora/SAT/uf50-218 ../corpora/SAT/uuf50-218
+
+.PHONY: build fmt test core-test sat-test sat-bench bench gate promote check-frozen spine status status-fresh
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -30,6 +36,23 @@ build:
 ##   the term layer (ADR-0003). Nonzero exit on any failed check.
 core-test:
 	$(DUNE) exec smt/core/test/core_test.exe
+
+## sat-test — CDCL SAT core (smt/solver) unit + property self-test (stdlib-only,
+##   deterministic). Exact learned-clause/backjump/antecedent checks on textbook
+##   conflicts, assumption semantics, incremental add-after-solve, every sat model
+##   self-checked by evaluation, and thousands of random CNFs cross-checked against
+##   an independent DPLL oracle. Nonzero exit on any failed check (TASKS.md M1-sat).
+sat-test:
+	$(DUNE) exec smt/solver/test/sat_test.exe
+
+## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
+##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat
+##   model, and tolerates an absent corpus with a clear message. Digest to stdout,
+##   full per-file log under $(LOGS). Deterministic (slowest ranking by conflicts).
+sat-bench:
+	@mkdir -p $(LOGS)
+	$(DUNE) build smt/solver/test/sat_bench.exe
+	_build/default/smt/solver/test/sat_bench.exe $(SAT_CORPUS) --log $(LOGS)/sat-bench.log
 
 ## fmt — format all sources in place with ocamlformat.
 fmt:

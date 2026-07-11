@@ -31,9 +31,19 @@ Unit + property tests under `smt/core/test/` (`make core-test`). Owner: TASKS.md
 M0-core.
 
 ## smt/solver (`oxsmt_solver`)
-CDCL(T) engine: trail, two-watched-literal propagation, 1UIP conflict analysis,
-clause learning, restarts; online theory integration via the THEORY callback.
-Propositional only — sees theories through the callback interface. Owner: M1-cdcl.
+CDCL(T) engine (MiniSat design, novelty-free): trail, two-watched-literal
+propagation, 1UIP conflict analysis with clause learning + local minimization,
+VSIDS activity branching, phase saving, Luby restarts, activity-based learned-
+clause deletion. Online theory integration via the THEORY callback arrives with
+M2+; **the M1 SAT core is propositional only and sees no terms**. Public surface:
+`Sat` (int vars/lits, `add_clause`, `solve ?assumptions`, model + failed-
+assumption core, stats trio, a zero-cost proof-readiness `trace` hook per learned
+clause — I4/§7). Every derived fact is justified (I4); deterministic (I6): no
+wall-clock/randomness, count-based schedules. **Status: implemented** (~855 lines
+shipped, stdlib-only via `Dynarray`; well under the 1.5k budget). `sat.mli`
+freezes at the M1 THEORY freeze. Test-only DIMACS parser + DPLL oracle + bench
+runner under `smt/solver/test/` (`make sat-test`, `make sat-bench`). Owner:
+TASKS.md M1-cdcl (SAT core); the clausifier is the separate M1 preprocess task.
 
 ## smt/theories/euf (`oxsmt_euf`)
 EUF congruence closure over a proof-producing union-find (Nieuwenhuis-Oliveras):

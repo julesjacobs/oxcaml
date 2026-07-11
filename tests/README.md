@@ -258,3 +258,32 @@ one degrades to `n/a`, never a crash):
 Determinism: given the same `(repo, logs)` the output is byte-identical except
 the `generated at <HEAD>` line. Digest-first: the target prints ~5 summary lines
 and writes the full document to `STATUS.md`.
+
+## SAT core self-test + bench (`smt/solver/test/`, `make sat-test` / `make sat-bench`)
+
+The propositional CDCL SAT core (M1, `smt/solver`) carries its own test suite,
+co-located with the module (like `smt/core/test/`, not under `tests/`) and
+stdlib-only. It is independent of the `.smt2` harness and the Lean gate: the SAT
+core sees no terms, so its oracle is a naive **DPLL reference solver** written
+from scratch in the same test lib, plus model self-evaluation.
+
+- **`make sat-test`** — `smt/solver/test/sat_test.ml`. Deterministic (fixed-seed
+  xorshift), nonzero exit on any failed check. Covers: exact learned clause +
+  backjump level + antecedent chain on textbook conflicts (observed through the
+  proof-readiness `trace` hook), assumption semantics + failed-assumption core,
+  incremental add-after-solve, pigeonhole unsat, determinism (same formula twice
+  → identical stats + model), and ~20k random small CNFs (≤12 vars) whose
+  verdicts must all agree with the DPLL oracle. Every `sat` verdict is
+  self-checked by evaluating all clauses under the model (cheap, always on).
+
+- **`make sat-bench`** — `smt/solver/test/sat_bench.ml`. Runs the core over a
+  DIMACS corpus (`SAT_CORPUS`, default the uf50/uuf50 families under
+  `../corpora/SAT`). GLOBs `**/*.cnf` at runtime and tolerates an absent corpus
+  with a clear message (exit 0). Label-checks families whose name encodes the
+  verdict (SATLIB `uf*` = sat, `uuf*` = unsat), self-checks every sat model, and
+  fails on any mismatch. Digest to stdout; full per-file log under `../logs`.
+  Deterministic: the "slowest" ranking is by conflict count, never wall-clock.
+
+- **`smt/solver/test/dimacs.ml`** — the DIMACS parser is a **test-only** dune
+  library (`oxsmt_dimacs`), never linked into shipped solver code, the same split
+  discipline the SMT-LIB parser follows (DESIGN.md §3).
