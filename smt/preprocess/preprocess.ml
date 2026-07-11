@@ -27,9 +27,18 @@ type definition =
   }
 
 (* Reserved fresh-symbol namespace: [".oxsmt.<kind>.<n>"], deterministic in the session
-   counter. Front ends must keep user names out of this namespace (see .mli). *)
+   counter. Front ends must keep user names out of this namespace (see .mli);
+   [reserved_prefix] / [is_reserved_name] are the single source of truth the parser and
+   session guards share. *)
+let reserved_prefix = ".oxsmt."
+
+let is_reserved_name name =
+  let p = reserved_prefix in
+  String.length name >= String.length p && String.sub name 0 (String.length p) = p
+;;
+
 let fresh_symbol t ~kind sort =
-  let name = Printf.sprintf ".oxsmt.%s.%d" kind t.counter in
+  let name = Printf.sprintf "%s%s.%d" reserved_prefix kind t.counter in
   t.counter <- t.counter + 1;
   Env.declare_fun t.env name (Rank.create [] sort)
 ;;

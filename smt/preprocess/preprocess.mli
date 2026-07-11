@@ -29,6 +29,15 @@
 
 open Oxsmt_core
 
+(** The reserved name prefix ([".oxsmt."]) that all fresh preprocessing symbols use, and
+    the predicate that recognizes it. Front ends (the SMT-LIB parser, the session's
+    declaration path) must reject {e user} declarations in this namespace so a user symbol
+    can never collide with a fresh one (INVARIANTS.md I6 freshness; board #48). This is
+    the single source of truth for that guard. *)
+val reserved_prefix : string
+
+val is_reserved_name : string -> bool
+
 type t
 
 (** [create env ctx] makes a preprocessing handle over a session. [env] must be the same
