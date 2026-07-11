@@ -601,6 +601,11 @@ gated). Its stdout is *not* a committed golden — wall-clock is allowed here, u
 the §I5/§I6 regression goldens — and a clean run always exits 0. It is not part of
 `make test`.
 
+**Do NOT move these cases into `tests/cases/`.** They are deliberately large and mostly
+`unknown` under the current solver; `tests/cases/` is globbed by both the harness
+(`make test`) and the gate (`make gate`), which would try to run and Lean-certify each
+one — slow, and not what those suites are for. Perf cases stay under `tests/perf/cases/`.
+
 Families: (a) `euf_diamond_d*` — equality diamonds; (b) `dense_simplex_c*` —
 overlapping linear bounds; (c) `ite_tree_d*` — balanced Int ite trees (depth 8/10/12);
 (d) `wide_sum_flat_n*` and `wide_sum_nested_n*` — flat vs left-nested sums; (e)
