@@ -224,7 +224,7 @@ let run_dir_now logs_root =
 (* A green gate that hasn't proven it can go red is unaudited (DESIGN.md §10), so the
    honeypot phase is not vacuously satisfiable: it enforces a hard floor and an exact
    expected outcome per honeypot. *)
-let min_honeypots = 9
+let min_honeypots = 11
 let expect_path smt2 = Filename.remove_extension smt2 ^ ".expect"
 
 (* A honeypot's declared expectation must be a non-certifying outcome. CERTIFIED is
@@ -575,6 +575,30 @@ let cmd_selftest () =
    | _ ->
      ok := false;
      print_endline "iff canonical: FAIL (parse)");
+  (* Reader reject regressions (codex round-3). SMT-LIB (check-sat) takes no arguments and
+     execution terminates at (exit); a reader that accepts (check-sat X) or folds commands
+     after (exit) assembles a query the file never asked, CERTIFYING a false unsat. These
+     are codex's two verbatim triggers; each MUST be rejected (Malformed), never read into
+     a certifiable query. *)
+  let rejects_malformed label src =
+    match Reader.of_string src with
+    | exception Reader.Malformed _ -> print_endline (label ^ ": OK (rejected MALFORMED)")
+    | exception e ->
+      ok := false;
+      Printf.printf
+        "%s: FAIL (raised %s, expected Malformed)\n"
+        label
+        (Printexc.to_string e)
+    | _ ->
+      ok := false;
+      Printf.printf "%s: FAIL (read a query; must reject)\n" label
+  in
+  rejects_malformed
+    "check-sat-args reject"
+    "(set-logic QF_LIA) (set-info :status unsat) (assert false) (check-sat X)";
+  rejects_malformed
+    "post-exit reject"
+    "(set-logic QF_LIA) (set-info :status unsat) (exit) (assert false) (check-sat)";
   if !ok then 0 else 1
 ;;
 

@@ -181,3 +181,41 @@ euclidean/ite elimination that turns those quarantines into CERTIFIED/REFUTED.
 Coverage-metric flow: quarantine counts appear in the gate digest today; they
 should also flow to STATUS.md as a coverage metric. If `status_gen` does not yet
 pick them up, that is the `status_gen` task's concern (#133), NOT fixed here.
+
+## Reader-vs-execution divergence (codex round-3, MERGE-BLOCKING)
+
+Round-2's exactly-one-check-sat guard was incomplete. Two commands the reader
+matched-and-ignored diverged from SMT-LIB *execution* semantics, and both let a
+file assemble a query a conformant solver would never execute — the G1 laundering
+class (effective query ≠ what the file states):
+
+- **`(check-sat X)` junk args.** `(check-sat)` takes NO arguments. The old arm
+  `List (Atom "check-sat" :: _)` matched a junk-arg check-sat and set `checked`,
+  so `(set-logic QF_LIA)(set-info :status unsat)(assert false)(check-sat X)` —
+  which contains ZERO valid check-sat commands — folded `false` into a theorem and
+  the gate CERTIFIED a false unsat. Fix: match exactly `List [Atom "check-sat"]`;
+  `(check-sat ...)` is a hard REJECT (MALFORMED), flowing into the accounting
+  quarantine bucket like any other malformed input.
+
+- **Commands after `(exit)`.** SMT-LIB execution TERMINATES at `(exit)`. The old
+  arm ignored exit and kept folding, so
+  `(set-logic QF_LIA)(set-info :status unsat)(exit)(assert false)(check-sat)`
+  assembled a query AFTER the query had ended and the gate CERTIFIED a false
+  unsat. Fix: `(exit)` arms an `exited` flag; any later command is a hard REJECT
+  (MALFORMED) — NOT a silent truncation of the ignored tail, which is the same
+  divergence class. `(exit)` as the final command is fine. `(exit ...)` with args
+  is likewise rejected (exit takes no args).
+
+Both fixes fail closed. Discrimination is empirically verified: built the gate at
+the pre-round-3 reader (gate3 `eb3350e`) in a scratch worktree — it CERTIFIES both
+inputs (false unsat); the fixed reader rejects both MALFORMED. Permanent
+regressions: `honeypot_checksat_args_trap` and `honeypot_post_exit_trap` (both
+`.expect MALFORMED`, floor 9→11) plus two Lean-free reader-reject assertions in
+`gate selftest` (`check-sat-args reject`, `post-exit reject`), all on codex's
+verbatim triggers. The 5-term accounting identity still closes (21 = 21 certified).
+
+Calibration (ADR-0007 §3, appended to logs/gate-review.md): round-2's "no-op
+audit" checked classification OUTCOMES but not COMMAND HANDLERS. Extended checklist
+item — every command the reader matches-and-ignores must be justified against
+SMT-LIB *execution* semantics: what would a conformant solver DO here, and does
+ignoring it change the effective query the gate certifies?

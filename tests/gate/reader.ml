@@ -18,7 +18,13 @@
    "..." is inert data (never a command/term). A single [check-sat] bounds the query:
    asserts after it, or a second check-sat, are UNSUPPORTED (no silent union).
    [div]/[mod]/ [abs] are recognised but UNSUPPORTED (loud) — need encoder elimination
-   (M4). *)
+   (M4).
+
+   Reader-vs-execution divergence is fatal (codex round-3): [(check-sat)] and [(exit)]
+   take NO arguments, and execution TERMINATES at [(exit)]. So [(check-sat ...)] and
+   [(exit ...)] are rejected MALFORMED, and any command after [(exit)] is a hard REJECT —
+   never counted, never silently truncated — so the theorem the reader assembles is
+   exactly the query a conformant solver would execute. *)
 
 open Ast
 
@@ -360,6 +366,13 @@ let of_string (src : string) : query =
      check-sat, are rejected LOUDLY (Unsupported) rather than silently unioned into the
      theorem. *)
   let checked = ref false in
+  (* SMT-LIB execution terminates at [(exit)]; a conformant solver never runs a command
+     that follows it. Folding such a command would let a file assemble a query that
+     EXECUTES DIFFERENTLY THAN IT READS (codex round-3: [(exit)(assert false)(check-sat)]
+     smuggled a false-unsat query past a spec-compliant solver's exit). So [exit] arms
+     [exited] and any later command is a hard REJECT — never a silent truncation of the
+     ignored tail, which is the same laundering class. *)
+  let exited = ref false in
   (* A declared name may be an unquoted [Atom] or a [Quoted] symbol (e.g. |0|). *)
   let decl_name = function
     | Sexp.Atom name | Sexp.Quoted name -> name
@@ -372,6 +385,12 @@ let of_string (src : string) : query =
   in
   List.iter
     (fun cmd ->
+       if !exited
+       then
+         malformedf
+           "command after (exit): a conformant solver terminates at (exit) and never \
+            executes it (%s)"
+           (Sexp.to_string cmd);
        match cmd with
        | Sexp.List [ Sexp.Atom "set-logic"; Sexp.Atom l ] ->
          (match l with
@@ -402,12 +421,21 @@ let of_string (src : string) : query =
           | Bool -> ()
           | other -> malformedf "assertion is not Bool (got %s)" (sort_to_string other));
          asserts := term :: !asserts
-       | Sexp.List (Sexp.Atom "check-sat" :: _) ->
+       | Sexp.List [ Sexp.Atom "check-sat" ] ->
          if !checked
          then
            unsupportedf "multiple check-sat commands: the gate certifies a single query";
          checked := true
-       | Sexp.List (Sexp.Atom "exit" :: _) -> ()
+       (* SMT-LIB [(check-sat)] takes NO arguments (codex round-3): a [(check-sat X)] is
+         not a valid command, so it must not satisfy the exactly-one-check-sat guard. Fail
+         closed — reject it rather than counting it as a query. *)
+       | Sexp.List (Sexp.Atom "check-sat" :: _) ->
+         malformedf
+           "check-sat takes no arguments (SMT-LIB); a (check-sat ...) is rejected"
+       | Sexp.List [ Sexp.Atom "exit" ] -> exited := true
+       (* [(exit)] takes no arguments; fail closed on a malformed exit as well. *)
+       | Sexp.List (Sexp.Atom "exit" :: _) ->
+         malformedf "exit takes no arguments (SMT-LIB); a (exit ...) is rejected"
        | Sexp.List (Sexp.Atom "push" :: _) | Sexp.List (Sexp.Atom "pop" :: _) ->
          unsupportedf "incremental push/pop not supported by the gate reader"
        | Sexp.List (Sexp.Atom ("get-model" | "get-value" | "get-unsat-core") :: _) -> ()
