@@ -46,6 +46,10 @@ in the one component where a miss is unaffordable.
    attack-brief item would have caught it; what to probe differently), appended
    to the relevant review log. This is DESIGN §10's reviewer-calibration
    honeypot loop running on real data instead of seeded data.
+4. **Mechanical data-only changes to TCB-path files** (e.g. adding entries to
+   the freeze manifest with unchanged checking logic) require the standard
+   reviews plus a live enforcement demonstration recorded in the integration
+   report; the blocking cross-model pass applies to logic changes.
 
 ## Consequences
 
