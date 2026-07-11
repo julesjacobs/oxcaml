@@ -466,3 +466,5 @@ degrade to `unknown` rather than propagating.
 - **N2** — one sentence: gcd tightening is new TCB, checked by pre-labeled
   benchmarks (labels on the original atom) + targeted tests, not the Lean-dump
   path. ✔
+
+**Erratum (2026-07-11, master-approved):** invariant citations in the body above were written against a draft numbering. Map to INVARIANTS.md as follows: where the body says I1/I2 (unconstructibility / no in-place corruption) read I2/I7; where it says I3 (well-sorted & hash-consed) read I1; I6 (determinism) is unchanged. The body text is frozen; this erratum is the authoritative mapping.
