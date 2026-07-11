@@ -233,7 +233,10 @@ that before touching `encoder.ml`.
   injectivity), then `gate run`: honeypots first (abort red unless the floor is
   met and every honeypot matches its expected outcome), then the `tests/cases`
   corpus, using the cache in `../cache`. Digest to stdout; full log (and every
-  generated `.lean` / Lean output) under `../logs/gate-<timestamp>/`.
+  generated `.lean` / Lean output) under `../logs/gate-<timestamp>-<HEAD>/`, where
+  `<HEAD>` is the git HEAD of the checkout that ran the gate — provenance so a shared
+  `../logs` cannot let one tree's gate result be read as another's (task #133; the
+  trailing component is `nohead` if git is unavailable).
 - `gate certify FILE.smt2 [--no-cache] [--timeout SECS]` — certify one file. Exit
   codes: 0 CERTIFIED, 1 REFUTED/ENCODE_ERROR, 2 INCONCLUSIVE, 3 MALFORMED,
   4 UNSUPPORTED, 5 NO_STATUS.
@@ -396,12 +399,17 @@ one degrades to `n/a`, never a crash):
   `tests/cases/`, measured to HEAD's commit timestamp — a documented heuristic);
 - **the last captured harness digest** (`../logs/harness/last-digest.txt`, written
   by `make status-fresh`) → live pass/fail;
-- **the latest full `../logs/gate-*/gate.log`** → gate outcome counts, honeypot
-  floor, cache hit-rate, Lean/encoding versions (prefers a full `gate run` over an
-  honeypot-only `gate selftest`; honeypot health = none `CERTIFIED` and count ≥
+- **the latest full gate log _produced by this tree's HEAD_** → gate outcome counts,
+  honeypot floor, cache hit-rate, Lean/encoding versions (prefers a full `gate run` over
+  an honeypot-only `gate selftest`; honeypot health = none `CERTIFIED` and count ≥
   floor). A **REFUTED** case (Lean proved our verdict wrong) or a honeypot breach
   emits a **loud leading `‼ GATE RED — SOUNDNESS BREACH`** line so a soundness
-  failure screams from the outcome metrics rather than hiding in a count;
+  failure screams from the outcome metrics rather than hiding in a count.
+  **Provenance guard (task #133):** all worktrees share `../logs`, so the gate stamps its
+  HEAD into the log-dir name (`gate-<stamp>-<HEAD>`) and status_gen reads **only** logs
+  whose HEAD equals the tree it is summarizing. No matching log ⇒ the gate/cache lines
+  say **"no gate run at this HEAD"** (loud absence) — a concurrent worktree's gate run can
+  never surface a foreign or stale verdict as trunk's state (the b30b6e2 contamination);
 - **the most recent stats JSONL** (the sidecar above) → search-counter **bucket**
   distributions (log-scale, deterministic) and the corpus solved-rate over
   `tests/cases` (fraction of goals with a definite `sat`/`unsat` verdict — **0%

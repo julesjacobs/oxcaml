@@ -10,7 +10,10 @@
      hygiene
    - the last captured harness digest -> live pass/fail (written by `make status-fresh` /
      the fast suite; this reads that file, it does not run the harness)
-   - latest gate log -> gate outcome counts, honeypot floor, cache hit-rate
+   - the latest gate log WHOSE PROVENANCE HEAD MATCHES the summarized tree (task #133):
+     all worktrees share ../logs, so a log is trusted only if the gate dir name
+     (gate-<stamp>-<HEAD>) records the same HEAD we are summarizing — otherwise loud
+     absence, never a foreign/stale verdict -> gate outcome counts, honeypot floor, cache
    - most recent stats JSONL -> counter-bucket distribution + solved-rate (buckets and
      verdicts are deterministic; per-goal wall_ms is deliberately NOT emitted — it is
      nondeterministic and stays in the uncommitted sidecar)
@@ -306,34 +309,70 @@ let recent_stats_files stats_dir k =
     |> List.map fst
 ;;
 
-(* Gate logs, most-recent first. Prefer a full `gate run` (has case results) over an
-   honeypot-only `gate selftest`: concurrent gate agents may leave a selftest as the
-   newest log, and reporting "0 cases" off that would be misleading. Falls back to the
-   newest overall when no full run is present. *)
-let latest_gate_log logs_dir =
+(* Provenance HEAD embedded in a gate log dir name by the gate runner (task #133): dir
+   names are "gate-<stamp>-<HEAD>", where HEAD is 40 hex chars. Returns the HEAD, or None
+   for a legacy "gate-<stamp>" dir or a "nohead" run (both treated as unmatched). *)
+let provenance_of_dirname f =
+  match List.rev (String.split_on_char '-' f) with
+  | last :: _ ->
+    if
+      String.length last = 40
+      && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) last
+    then Some last
+    else None
+  | [] -> None
+;;
+
+type gate_pick =
+  | Matched of string (* path to the chosen gate.log produced by THIS tree's HEAD *)
+  | No_match_foreign of
+      int (* no log for this HEAD; N gate logs exist for other checkouts *)
+  | No_logs
+
+(* Pick the gate log to summarize, GUARDED BY PROVENANCE (task #133): all worktrees share
+   ../logs, so status_gen must read only a log produced by the very tree it is summarizing
+   — otherwise a concurrent worktree's gate run contaminates trunk's STATUS. Among logs
+   whose embedded HEAD equals [head], prefer a full `gate run` (has case results) over an
+   honeypot-only selftest, newest first. A log with no matching provenance is never used:
+   the result is loud absence, never a foreign or stale number. *)
+let pick_gate_log logs_dir ~(head : string option) : gate_pick =
   if not (Sys.file_exists logs_dir)
-  then None
+  then No_logs
   else (
-    let by_recency =
+    let all =
       dir_entries logs_dir
       |> List.filter (fun f -> starts_with ~prefix:"gate-" f)
-      |> List.map (fun f -> Filename.concat (Filename.concat logs_dir f) "gate.log")
-      |> List.filter Sys.file_exists
-      |> List.map (fun p -> p, (Unix.stat p).Unix.st_mtime)
-      |> List.sort (fun (_, a) (_, b) -> compare b a)
-      |> List.map fst
+      |> List.filter_map (fun f ->
+        let p = Filename.concat (Filename.concat logs_dir f) "gate.log" in
+        if Sys.file_exists p
+        then Some (provenance_of_dirname f, p, (Unix.stat p).Unix.st_mtime)
+        else None)
     in
-    let has_cases p =
-      match read_file_opt p with
-      | Some s -> contains_sub s "[case]"
-      | None -> false
-    in
-    match List.find_opt has_cases by_recency with
-    | Some p -> Some p
-    | None ->
-      (match by_recency with
-       | [] -> None
-       | p :: _ -> Some p))
+    if all = []
+    then No_logs
+    else (
+      let matches_head prov =
+        match head, prov with
+        | Some h, Some p -> String.equal h p
+        | _ -> false
+      in
+      let matching =
+        all
+        |> List.filter (fun (prov, _, _) -> matches_head prov)
+        |> List.sort (fun (_, _, a) (_, _, b) -> compare b a)
+        |> List.map (fun (_, p, _) -> p)
+      in
+      match matching with
+      | [] -> No_match_foreign (List.length all)
+      | _ ->
+        let has_cases p =
+          match read_file_opt p with
+          | Some s -> contains_sub s "[case]"
+          | None -> false
+        in
+        (match List.find_opt has_cases matching with
+         | Some p -> Matched p
+         | None -> Matched (List.hd matching))))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -568,6 +607,9 @@ let () =
     | Some h -> h
     | None -> "unknown"
   in
+  (* Full 40-char HEAD of the tree being summarized, for gate-log provenance matching
+     (task #133). None if not a git repo — then no gate log can be trusted as this tree's. *)
+  let full_head = git cfg.repo [ "rev-parse"; "HEAD" ] in
   let head_time =
     match git cfg.repo [ "log"; "-1"; "--format=%ct" ] with
     | Some s -> int_of_string_opt (trim s)
@@ -634,10 +676,27 @@ let () =
     (match harness_line with
      | Some l -> trim l
      | None -> "n/a (no digest captured this run)");
-  (* Gate outcomes from the latest gate log *)
-  let gate = Option.bind (latest_gate_log cfg.logs) parse_gate_log in
+  (* Gate outcomes from the latest gate log PRODUCED BY THIS TREE'S HEAD (task #133). *)
+  let gate_pick = pick_gate_log cfg.logs ~head:full_head in
+  let gate =
+    match gate_pick with
+    | Matched p -> parse_gate_log p
+    | No_match_foreign _ | No_logs -> None
+  in
+  (* Loud-absence message shared by the gate and cache lines when there is no gate run at
+     this HEAD — never a foreign/stale number. *)
+  let gate_absence () =
+    match gate_pick with
+    | No_logs -> Printf.sprintf "n/a (no gate log found under %s)" cfg.logs
+    | No_match_foreign n ->
+      Printf.sprintf
+        "no gate run at this HEAD (%d gate log(s) exist for other checkouts; run `make \
+         gate` in this tree)"
+        n
+    | Matched _ -> "n/a (gate log present but unreadable)"
+  in
   (match gate with
-   | None -> out "- **Gate (Lean oracle):** n/a (no gate log found under %s)\n" cfg.logs
+   | None -> out "- **Gate (Lean oracle):** %s\n" (gate_absence ())
    | Some g ->
      let outc =
        String.concat
@@ -801,7 +860,7 @@ let () =
   (* Gate cache *)
   out "### Oracle cache & triage\n\n";
   (match gate with
-   | None -> out "- Cache hit-rate: n/a (no gate log)\n"
+   | None -> out "- Cache hit-rate: %s\n" (gate_absence ())
    | Some g ->
      out
        "- Cache hit-rate (last gate run): %s (%d/%d cases from cache)\n"

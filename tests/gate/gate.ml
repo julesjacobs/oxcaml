@@ -221,6 +221,42 @@ let print_line ctx label file (o : Outcome.t) disp =
 
 (* ---- run subcommand ---- *)
 
+(* Provenance (task #133): the git HEAD of the checkout that runs the gate. All worktrees
+   share ../logs, so without this a `make status` in one tree could read a gate log
+   another tree produced and report a foreign/stale verdict as its own. Recording HEAD in
+   the log-dir name lets status_gen match a log to the exact tree that produced it (and
+   makes concurrent-worktree dirs distinct). Logging-side only — it never influences any
+   certification decision. Best-effort: a missing/failed git yields "nohead", which
+   status_gen treats as unmatched (loud absence), never a false match. *)
+let provenance_head () =
+  try
+    let r, w = Unix.pipe () in
+    let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+    let pid =
+      Unix.create_process "git" [| "git"; "rev-parse"; "HEAD" |] Unix.stdin w devnull
+    in
+    Unix.close w;
+    Unix.close devnull;
+    let ic = Unix.in_channel_of_descr r in
+    let line =
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+           try input_line ic with
+           | End_of_file -> "")
+    in
+    ignore (Unix.waitpid [] pid);
+    let h = String.trim line in
+    (* a HEAD is 40 hex chars; anything else (empty, error text) -> nohead *)
+    if
+      String.length h = 40
+      && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) h
+    then h
+    else "nohead"
+  with
+  | _ -> "nohead"
+;;
+
 let run_dir_now logs_root =
   let t = Unix.localtime (Unix.time ()) in
   let stamp =
@@ -233,7 +269,9 @@ let run_dir_now logs_root =
       t.tm_min
       t.tm_sec
   in
-  Filename.concat logs_root ("gate-" ^ stamp)
+  (* gate-<stamp>-<HEAD>: stamp keeps human/mtime ordering, trailing HEAD is the
+     provenance component status_gen matches on. *)
+  Filename.concat logs_root (Printf.sprintf "gate-%s-%s" stamp (provenance_head ()))
 ;;
 
 (* A green gate that hasn't proven it can go red is unaudited (DESIGN.md §10), so the
