@@ -207,30 +207,151 @@ let random_clause num_vars =
     if rand_n 2 = 0 then v else -v)
 ;;
 
-let test_property n =
+(* Learned-clause entailment (§10 oracle strengthening, mutant sat-minimize-unsound):
+   every learned clause L must be entailed by the original formula F, i.e. F ∧ ¬L is
+   UNSAT. We check with the independent DPLL oracle (not the solver under test — that
+   would be circular): assert the original clauses plus a unit [-l] per literal l of L,
+   and require UNSAT. A too-strong learned clause (over-minimization dropping a needed
+   literal) makes F ∧ ¬L SAT and is caught here even when the final verdict is unaffected
+   — which is precisely the gap the mutant slipped through. *)
+let learned_clause_entailed clauses num_vars learned_dimacs =
+  let neg_units = List.map (fun l -> [ -l ]) learned_dimacs in
+  not (Dpll.solve num_vars (List.rev_append neg_units clauses))
+;;
+
+(* Sparse mixed-width formulas: broad structural coverage. *)
+let gen_sparse () =
+  let num_vars = 3 + rand_n 10 in
+  let num_clauses = 1 + rand_n (num_vars * 4) in
+  num_vars, List.init num_clauses (fun _ -> random_clause num_vars)
+;;
+
+(* Dense 3-CNF near the 3-SAT phase transition (clause/var ratio ~4.3): mostly hard,
+   conflict-heavy instances, so the solver actually learns (and minimizes) many clauses —
+   this is what gives the entailment check real volume. *)
+let gen_dense () =
+  let num_vars = 6 + rand_n 7 in
+  let num_clauses = (num_vars * 4) + rand_n num_vars in
+  let clause () =
+    List.init 3 (fun _ ->
+      let v = 1 + rand_n num_vars in
+      if rand_n 2 = 0 then v else -v)
+  in
+  num_vars, List.init num_clauses (fun _ -> clause ())
+;;
+
+let test_property label gen n =
   let disagreements = ref 0 in
   let bad_models = ref 0 in
+  let n_learned = ref 0 in
+  let unentailed = ref 0 in
   for _ = 1 to n do
-    let num_vars = 3 + rand_n 10 in
-    let num_clauses = 1 + rand_n (num_vars * 4) in
-    let clauses = List.init num_clauses (fun _ -> random_clause num_vars) in
+    let num_vars, clauses = gen () in
     let expected = Dpll.solve num_vars clauses in
     let s = build num_vars clauses in
-    match Sat.solve s with
-    | Sat.Sat ->
-      if not expected then incr disagreements;
-      if not (model_satisfies clauses (Sat.model s)) then incr bad_models
-    | Sat.Unsat -> if expected then incr disagreements
+    (* Collect every learned clause (as DIMACS ints) for entailment checking. *)
+    let learned = ref [] in
+    Sat.set_trace
+      s
+      (Some
+         { Sat.on_learned =
+             (fun ~id ~clause ~antecedents ~btlevel ->
+               ignore id;
+               ignore antecedents;
+               ignore btlevel;
+               learned := List.map dimacs_of_lit (Array.to_list clause) :: !learned)
+         });
+    let verdict = Sat.solve s in
+    (match verdict with
+     | Sat.Sat ->
+       if not expected then incr disagreements;
+       if not (model_satisfies clauses (Sat.model s)) then incr bad_models
+     | Sat.Unsat -> if expected then incr disagreements);
+    List.iter
+      (fun l ->
+         incr n_learned;
+         if not (learned_clause_entailed clauses num_vars l) then incr unentailed)
+      !learned
   done;
   check
     (Printf.sprintf
-       "property: %d formulas agree with DPLL (%d disagreements)"
+       "property[%s]: %d formulas agree with DPLL (%d disagreements)"
+       label
        n
        !disagreements)
     (!disagreements = 0);
   check
-    (Printf.sprintf "property: all sat models valid (%d bad)" !bad_models)
-    (!bad_models = 0)
+    (Printf.sprintf "property[%s]: all sat models valid (%d bad)" label !bad_models)
+    (!bad_models = 0);
+  check
+    (Printf.sprintf
+       "property[%s]: all %d learned clauses entailed (%d unentailed)"
+       label
+       !n_learned
+       !unentailed)
+    (!unentailed = 0);
+  Printf.printf
+    "  (property[%s]: entailment-checked %d learned clauses across %d formulas)\n"
+    label
+    !n_learned
+    n
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Crafted conflicts that exercise 1UIP local (self-subsumption) minimization, the code
+   the sat-minimize-unsound mutant corrupts. One case where minimization must NOT fire (a
+   reasoned literal whose reason carries an out-of-clause, level>0 literal — correct keeps
+   it, the mutant wrongly drops it) and one where it legitimately DOES fire (the reason is
+   subsumed by clause literals). Each pins the exact learned clause and independently
+   checks entailment. *)
+
+let single_learned s assumptions =
+  let learned = with_collector s in
+  let r = Sat.solve ~assumptions s in
+  r, learned ()
+;;
+
+let test_minimize_must_not_fire () =
+  (* c0 a->e, c1 e->b, c2 c∧b->d, c3 c∧a->¬d (conflict). Decide a then c. 1UIP analysis
+     yields [{¬c,¬a,¬b}]; ¬b is a reasoned literal whose reason (¬e ∨ b) carries ¬e —
+     level 1, NOT in the clause — so ¬b is NOT redundant and must be kept. The mutant
+     drops it, giving [{¬c,¬a}]. *)
+  let clauses = [ [ -1; 5 ]; [ -5; 2 ]; [ -3; -2; 4 ]; [ -3; -1; -4 ] ] in
+  let s = build 5 clauses in
+  let r, ls = single_learned s [ lit 1; lit 3 ] in
+  check "min-keep: unsat under assumptions" (r = Sat.Unsat);
+  check "min-keep: one learned clause" (List.length ls = 1);
+  match ls with
+  | [ (clause, _ants, bt) ] ->
+    check
+      (Printf.sprintf "min-keep: learned = [-3;-2;-1] (got %s)" (show_ints clause))
+      (clause = [ -3; -2; -1 ]);
+    check "min-keep: backjump level = 1" (bt = 1);
+    check "min-keep: learned clause entailed" (learned_clause_entailed clauses 5 clause)
+  | _ -> ()
+;;
+
+let test_minimize_fires () =
+  (* c0 a->b, c2 c∧a->d, c3 c∧b->¬d (conflict). Decide a then c. 1UIP analysis yields
+     [{¬c,¬a,¬b}] before minimization; ¬b's reason (¬a ∨ b) carries only ¬a, which IS in
+     the clause, so ¬b is genuinely redundant and correctly removed, giving [{¬c,¬a}].
+     (The mutant also removes it here — this case documents legitimate firing and pins it;
+     the discriminating case is min-keep above.) *)
+  let clauses = [ [ -1; 2 ]; [ -3; -1; 4 ]; [ -3; -2; -4 ] ] in
+  let s = build 4 clauses in
+  let r, ls = single_learned s [ lit 1; lit 3 ] in
+  check "min-fire: unsat under assumptions" (r = Sat.Unsat);
+  check "min-fire: one learned clause" (List.length ls = 1);
+  match ls with
+  | [ (clause, _ants, bt) ] ->
+    check
+      (Printf.sprintf
+         "min-fire: learned = [-3;-1] (minimized; got %s)"
+         (show_ints clause))
+      (clause = [ -3; -1 ]);
+    check "min-fire: backjump level = 1" (bt = 1);
+    check "min-fire: learned clause entailed" (learned_clause_entailed clauses 4 clause)
+  | _ -> ()
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -340,6 +461,8 @@ let () =
   test_dimacs_strict ();
   test_analyze_multi ();
   test_analyze_unit ();
+  test_minimize_must_not_fire ();
+  test_minimize_fires ();
   test_propagation ();
   test_level0_contradiction ();
   test_empty_clause ();
@@ -348,7 +471,8 @@ let () =
   test_incremental ();
   test_determinism ();
   test_pigeonhole 5;
-  test_property 20000;
+  test_property "sparse" gen_sparse 20000;
+  test_property "dense" gen_dense 20000;
   Printf.printf "sat_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
