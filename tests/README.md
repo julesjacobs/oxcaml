@@ -127,6 +127,16 @@ than a silent golden diff. The same three are asserted directly in
 `tests/solver/wiring_test.ml`. When EUF/LIA/combination land (M2–M4) these become
 real `unsat` and the goldens flip.
 
+The `degrade_*` files are the dedicated, minimal traps, but they are not the only
+ones: **several pre-existing theory cases already have this exact shape** — labeled
+`unsat`, yet the wired v1 solver returns `unknown` because their skeleton is
+propositionally satisfiable — so their label check equally guards against a
+degradation-to-`sat` regression. As of M1-wiring those are `euf_congruence`,
+`euf_transitivity`, `lia_bounds`, `lia_farkas`, `lia_mul_const`, `mixed_euf_lia`,
+`ite_case`, and `let_case`. (By contrast an `unsat`-labeled case whose skeleton is
+*propositionally* unsat — e.g. `distinct_case`, `iff_chain_unsat` — verdicts a real
+`unsat` and does not exercise the degradation path.)
+
 ### Workflow
 
 - `make test` — runs the pure harness self-test (which proves red-detection
