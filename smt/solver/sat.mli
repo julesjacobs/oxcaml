@@ -143,10 +143,25 @@ type theory =
       [T_consistent []] here means the theory accepts the model (the query is SAT). *)
   ; explain : lit -> lit list
     (** the lazy, precedence-valid reason for a literal this theory propagated via
-      [T_consistent] (CONTRACT-EX: every returned lit was asserted no later than [lit],
-      and is currently true). Called only during conflict analysis. *)
+      [T_consistent] (CONTRACT-EX: every returned lit must be currently true and asserted
+      STRICTLY before [lit] on the trail). Called only during conflict analysis; a
+      violation raises {!Theory_contract_violation} rather than corrupting 1UIP. *)
   }
 
+(** Raised when a plugged theory violates a seam soundness contract the core cannot
+    otherwise uphold: a [T_conflict]/propagation whose premise set is not all currently
+    true, or an [explain] premise not asserted strictly before the literal it explains
+    (CONTRACT-EX). Unconditional (not an [assert] the runtime could drop) — learning from
+    a corrupt explanation is a soundness break. The engine's CONTRACT-POISON handling
+    catches it and degrades the query to [unknown]. *)
+exception Theory_contract_violation of string
+
+(** Attach (or, with [None], detach) a theory. Must be called on a PRISTINE solver — no
+    clauses added and an empty trail — else it raises [Invalid_argument]. Lifecycle
+    contract: attaching after clauses/units exist would leave the theory unaware of trail
+    literals it never heard (a wrong-[Sat] risk on theory-unsat instances), and detaching
+    mid-lifecycle would strand theory-propagated literals whose lazy reasons can no longer
+    be reconstructed. The driver installs the theory first, before asserting. *)
 val set_theory : t -> theory option -> unit
 
 (** The current decision level (0 at the base, before any decision). Exposed so a theory

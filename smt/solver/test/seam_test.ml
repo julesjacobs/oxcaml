@@ -269,12 +269,13 @@ let test_lazy_explain_called () =
   let la = Sat.pos a
   and lb = Sat.pos b
   and lc = Sat.pos c in
+  (* pristine-attach: install the theory before any clause *)
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock.theory);
   Sat.add_clause s [ Sat.neg a; lb ];
   (* ¬a ∨ b *)
   Sat.add_clause s [ Sat.neg b; Sat.neg c ];
   (* ¬b ∨ ¬c *)
-  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
-  Sat.set_theory s (Some mock.theory);
   let learned = with_collector s in
   let r = Sat.solve ~assumptions:[ la ] s in
   let ls = learned () in
@@ -312,6 +313,28 @@ let test_lazy_explain_not_called () =
   check "lazy-not: push/pop invariant held" !(mock.invariant_ok)
 ;;
 
+(* Propagation INTO an already-false literal. c is fixed false by a level-0 unit (¬c);
+   under assumption a the rule [{a}] ⇒ c fires, but c is false ⇒ the seam turns it into an
+   immediate theory conflict (clause [c ∨ ¬a], all-false) rather than enqueuing a false
+   literal. Exercises the theory_prop_conflict_clause path. *)
+let test_propagate_into_false () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and c = Sat.new_var s in
+  let la = Sat.pos a
+  and lc = Sat.pos c in
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock.theory);
+  Sat.add_clause s [ Sat.neg c ];
+  (* ¬c: c false at level 0 *)
+  let r = Sat.solve ~assumptions:[ la ] s in
+  check "prop-false: unsat under a" (r = Sat.Unsat);
+  check
+    (Printf.sprintf "prop-false: explain called (%d)" !(mock.explain_calls))
+    (!(mock.explain_calls) >= 1);
+  check "prop-false: push/pop invariant held" !(mock.invariant_ok)
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Final-check split (T_lemma). With no clauses and phase-saving deciding false-first, the
    solver reaches the all-false model; the theory then splits on (b ∨ c), forcing more
@@ -333,6 +356,26 @@ let test_final_split () =
   check "split: emitted exactly once" (!(mock.splits_emitted) = 1);
   check "split: model satisfies b ∨ c" (Sat.value s b || Sat.value s c);
   check "split: push/pop invariant held" !(mock.invariant_ok)
+;;
+
+(* A Final split that simplifies to the empty clause at level 0 ⇒ unsat (merge-blocker
+   regression). Units ¬p, ¬q; the theory splits on (p ∨ q), which is falsified at level 0
+   → add_clause derives the empty clause (t.ok := false). The solver MUST conclude unsat,
+   not run on to a full model and report a spurious Sat. *)
+let test_final_split_empty_unsat () =
+  let s = Sat.create () in
+  let p = Sat.new_var s
+  and q = Sat.new_var s in
+  let lp = Sat.pos p
+  and lq = Sat.pos q in
+  let mock = make_mock s { empty_config with final_splits = [ [ lp; lq ] ] } in
+  Sat.set_theory s (Some mock.theory);
+  Sat.add_clause s [ Sat.neg p ];
+  Sat.add_clause s [ Sat.neg q ];
+  let r = Sat.solve s in
+  check "split-empty: unsat (not spurious sat)" (r = Sat.Unsat);
+  check "split-empty: split emitted once" (!(mock.splits_emitted) = 1);
+  check "split-empty: push/pop invariant held" !(mock.invariant_ok)
 ;;
 
 (* A Final-effort conflict rejects a full model. With unit (a) forcing a at level 0, the
@@ -385,11 +428,11 @@ let test_pushpop_stress () =
   build_php s0 n;
   let r0 = Sat.solve s0 in
   let st0 = Sat.stats s0 in
-  (* same instance with an inert recorder theory plugged *)
+  (* same instance with an inert recorder theory plugged (pristine-attach: before clauses) *)
   let s1 = Sat.create () in
-  build_php s1 n;
   let mock = make_mock s1 empty_config in
   Sat.set_theory s1 (Some mock.theory);
+  build_php s1 n;
   let r1 = Sat.solve s1 in
   let st1 = Sat.stats s1 in
   check "stress: php unsat (baseline)" (r0 = Sat.Unsat);
@@ -460,9 +503,14 @@ let test_no_theory_regression () =
     let r0 = Sat.solve plain in
     let st0 = Sat.stats plain in
     let m0 = Sat.model plain in
-    let withth = build_random num_vars clauses in
+    (* pristine-attach: create, allocate vars, install the theory, THEN add clauses *)
+    let withth = Sat.create () in
+    for _ = 0 to num_vars - 1 do
+      ignore (Sat.new_var withth : Sat.var)
+    done;
     let mock = make_mock withth empty_config in
     Sat.set_theory withth (Some mock.theory);
+    List.iter (fun cl -> Sat.add_clause withth cl) clauses;
     let r1 = Sat.solve withth in
     let st1 = Sat.stats withth in
     let m1 = Sat.model withth in
@@ -492,7 +540,9 @@ let () =
   test_propagate_then_conflict ();
   test_lazy_explain_called ();
   test_lazy_explain_not_called ();
+  test_propagate_into_false ();
   test_final_split ();
+  test_final_split_empty_unsat ();
   test_final_conflict ();
   test_pushpop_stress ();
   test_no_theory_regression ();

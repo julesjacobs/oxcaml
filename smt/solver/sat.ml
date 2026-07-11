@@ -74,12 +74,23 @@ type theory =
   ; explain : lit -> lit list
   }
 
+(* Raised when a plugged theory violates a seam soundness contract the core cannot
+   otherwise uphold — a non-falsified conflict clause, or an [explain] premise that is not
+   asserted strictly before the literal it explains (CONTRACT-EX). Unconditional (not an
+   [assert], which -noassert would drop): learning from a corrupt explanation is a
+   soundness break, so we fail loudly. The engine's CONTRACT-POISON catch degrades the
+   query to [unknown]. *)
+exception Theory_contract_violation of string
+
 type t =
   { mutable nvars : int
   ; mutable ok : bool (* false once an empty clause is derived: permanently unsat *)
   ; (* Per-variable state, indexed by var. *)
     assigns : int Dynarray.t (* 0 unknown, 1 true, -1 false *)
   ; level : int Dynarray.t (* decision level at which the var was assigned *)
+  ; trail_pos : int Dynarray.t
+    (* var -> its index in [trail] while assigned, else -1. Read only for the theory
+         seam's strict CONTRACT-EX precedence check; write-only otherwise. *)
   ; reason :
       reason Dynarray.t (* why the var was assigned (Decision/Implied_by/Theory_prop) *)
   ; polarity : bool Dynarray.t (* saved phase: true => decide negative first *)
@@ -123,6 +134,7 @@ let create () =
   ; ok = true
   ; assigns = Dynarray.create ()
   ; level = Dynarray.create ()
+  ; trail_pos = Dynarray.create ()
   ; reason = Dynarray.create ()
   ; polarity = Dynarray.create ()
   ; seen = Dynarray.create ()
@@ -151,7 +163,25 @@ let create () =
 ;;
 
 let set_trace t tr = t.trace <- tr
-let set_theory t th = t.theory <- th
+
+(* Pristine-attach (seam lifecycle contract): a theory may be attached/detached only when
+   the solver has no clauses and an empty trail. This makes both misuse shapes
+   unrepresentable — attaching after clauses/units exist would leave the theory unaware of
+   trail literals it never heard (a wrong-[Sat] risk on theory-unsat instances), and
+   detaching mid-lifecycle would strand theory-propagated literals whose lazy reasons can
+   no longer be reconstructed. The driver installs the theory first, before asserting. *)
+let set_theory t th =
+  if
+    Dynarray.length t.clauses <> 0
+    || Dynarray.length t.learnts <> 0
+    || Dynarray.length t.trail <> 0
+  then
+    invalid_arg
+      "Sat.set_theory: a theory may only be (de)attached on a pristine solver (no \
+       clauses, empty trail)";
+  t.theory <- th
+;;
+
 let num_vars t = t.nvars
 let decision_level t = Dynarray.length t.trail_lim
 
@@ -273,6 +303,7 @@ let ensure_var t v =
   while t.nvars <= v do
     Dynarray.add_last t.assigns 0;
     Dynarray.add_last t.level 0;
+    Dynarray.add_last t.trail_pos (-1);
     Dynarray.add_last t.reason Decision;
     Dynarray.add_last t.polarity true;
     Dynarray.add_last t.seen false;
@@ -322,6 +353,7 @@ let unchecked_enqueue t lit reason =
   let v = var_of_lit lit in
   Dynarray.set t.assigns v (if sign_of_lit lit then 1 else -1);
   Dynarray.set t.level v (decision_level t);
+  Dynarray.set t.trail_pos v (Dynarray.length t.trail);
   Dynarray.set t.reason v reason;
   Dynarray.add_last t.trail lit;
   (* Trail-extension notify (ADR-0005 §3 on_assign): every literal placed on the trail —
@@ -343,6 +375,7 @@ let cancel_until t level =
       let v = var_of_lit l in
       Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
       Dynarray.set t.assigns v 0;
+      Dynarray.set t.trail_pos v (-1);
       Dynarray.set t.reason v Decision;
       heap_insert t v
     done;
@@ -446,10 +479,10 @@ let transient_clause t lits =
   { id = fresh_id t; lits; activity = 0.0; learnt = false; deleted = false }
 ;;
 
-(* The lazy reason clause of a theory-propagated literal [lit]: [lit ∨ ¬p₁ ∨ … ∨ ¬pₖ]
-   where [p₁..pₖ] = [theory.explain lit] are the (asserted, precedence-valid) premises.
-   Every premise is currently true, so every [¬pᵢ] is false and the clause forces [lit] —
-   a genuine implication, valid at [lit]'s propagation time (CONTRACT-EX). *)
+(* The lazy reason clause of a theory-propagated literal [lit] that is currently TRUE (the
+   case where 1UIP analysis resolves it): [lit ∨ ¬p₁ ∨ … ∨ ¬pₖ] where [p₁..pₖ] =
+   [theory.explain lit]. Every premise is currently true, so every [¬pᵢ] is false and the
+   clause forces [lit] — a genuine implication, valid at [lit]'s propagation time. *)
 let theory_reason_clause t lit =
   let th =
     match t.theory with
@@ -458,24 +491,67 @@ let theory_reason_clause t lit =
   in
   let premises = th.explain lit in
   let lits = Array.make (List.length premises + 1) lit in
+  let lit_pos = Dynarray.get t.trail_pos (var_of_lit lit) in
   List.iteri
     (fun i p ->
-      (* CONTRACT-EX guard: a reason premise must be an asserted (true) literal, assigned
-         no later than the literal it explains. A violation is a theory bug that would
-         corrupt 1UIP; fail loudly rather than learn an invalid clause. *)
-      assert (lit_val t p = 1);
-      assert (Dynarray.get t.level (var_of_lit p) <= Dynarray.get t.level (var_of_lit lit));
-      lits.(i + 1) <- neg_lit p)
+       (* CONTRACT-EX guard (raised, not asserted, so it survives -noassert): a reason
+         premise must be an asserted (true) literal that appears STRICTLY earlier on the
+         trail than the literal it explains — the reason valid at propagation time. A
+         violation would make a malformed 1UIP back-edge and can close an unsound cycle,
+         so we refuse to learn from it. *)
+       if
+         not
+           (lit_val t p = 1
+            && Dynarray.get t.trail_pos (var_of_lit p) >= 0
+            && Dynarray.get t.trail_pos (var_of_lit p) < lit_pos)
+       then
+         raise
+           (Theory_contract_violation
+              "explain: premise not asserted strictly before the explained literal \
+               (CONTRACT-EX)");
+       lits.(i + 1) <- neg_lit p)
     premises;
   transient_clause t lits
 ;;
 
 (* A theory conflict, given the asserted premise set whose conjunction is T-inconsistent:
    the falsified clause [¬p₁ ∨ … ∨ ¬pₙ] (each premise true ⇒ each literal false). An empty
-   premise set is an unconditional theory contradiction — an empty (always-false) clause. *)
+   premise set is an unconditional theory contradiction — an empty (always-false) clause.
+   The falsification is verified and raised on (not asserted): an ill-formed conflict fed
+   to [analyze] would be a soundness break. *)
 let theory_conflict_clause t premises =
   let lits = Array.of_list (List.map neg_lit premises) in
-  Array.iter (fun l -> assert (lit_val t l = -1)) lits;
+  Array.iter
+    (fun l ->
+       if lit_val t l <> -1
+       then
+         raise (Theory_contract_violation "conflict premise set is not all asserted-true"))
+    lits;
+  transient_clause t lits
+;;
+
+(* The theory implied [lit] but its negation is already asserted (a propagation into a
+   falsified literal): the clause [lit ∨ ¬p₁ ∨ … ∨ ¬pₖ] is then all-false, an immediate
+   conflict. Unlike {!theory_reason_clause} there is no precedence relation to check —
+   [lit] was never theory-propagated here — only that the resulting clause is falsified. *)
+let theory_prop_conflict_clause t lit =
+  let th =
+    match t.theory with
+    | Some th -> th
+    | None -> assert false
+  in
+  let premises = th.explain lit in
+  let lits = Array.make (List.length premises + 1) lit in
+  List.iteri (fun i p -> lits.(i + 1) <- neg_lit p) premises;
+  Array.iter
+    (fun l ->
+       if lit_val t l <> -1
+       then
+         raise
+           (Theory_contract_violation
+              "theory propagated a literal whose negation is asserted, but its \
+               explanation is not falsified"))
+    lits;
   transient_clause t lits
 ;;
 
@@ -577,8 +653,9 @@ let analyze t confl =
     else (
       let maxi = ref 1 in
       for i = 2 to Array.length learnt - 1 do
-        if Dynarray.get t.level (var_of_lit learnt.(i))
-           > Dynarray.get t.level (var_of_lit learnt.(!maxi))
+        if
+          Dynarray.get t.level (var_of_lit learnt.(i))
+          > Dynarray.get t.level (var_of_lit learnt.(!maxi))
         then maxi := i
       done;
       let tmp = learnt.(1) in
@@ -627,7 +704,7 @@ let analyze_final t p =
            | Some th ->
              List.iter
                (fun q ->
-                 if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
+                  if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
                (th.explain l)))
     done;
     Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked);
@@ -737,7 +814,7 @@ let enqueue_theory_lits t lits =
        | 0 ->
          unchecked_enqueue t l Theory_prop;
          go true rest
-       | _ -> `Confl (theory_reason_clause t l) (* forced true but already false *))
+       | _ -> `Confl (theory_prop_conflict_clause t l) (* forced true but already false *))
   in
   go false lits
 ;;
@@ -746,9 +823,15 @@ let enqueue_theory_lits t lits =
    internalized to existing vars by the adapter). Each becomes a permanent clause. Adding
    a clause during search is only well-defined at level 0 (level-0 simplification assumes
    it), so we first unwind all decisions — a split is a case-split that restarts the
-   Boolean search over the refined clause set; the permanent lemma prevents re-reaching
-   the same total assignment, so progress is monotone (termination is the engine's split
-   budget, CONTRACT-SPLIT-TERM). *)
+   Boolean search over the refined clause set. A lemma may simplify to the empty clause at
+   level 0 (all literals already false), which sets [t.ok <- false]; callers MUST recheck
+   [t.ok] and conclude unsat (see uses below).
+
+   Termination note: the [split → re-search] loop has no intrinsic bound (LIA branch-and-
+   bound can diverge, CONTRACT-SPLIT-TERM). No split budget exists in this core today; a
+   deterministic budget that routes to [unknown] on exhaustion is the driver's obligation
+   at M4. A well-behaved theory makes monotone progress (the permanent lemma prevents
+   re-reaching the same total assignment). *)
 let add_theory_lemmas t clauses =
   cancel_until t 0;
   List.iter (fun ls -> add_clause t ls) clauses
@@ -780,7 +863,10 @@ let propagate_theory t =
             (* D3: Split is a Final-effort result; a Propagate-effort lemma is a contract
                deviation but still sound to add, so we accept it and re-propagate. *)
             add_theory_lemmas t clauses;
-            again := true))
+            (* a lemma that simplified to the empty clause at level 0 makes the instance
+               unsat; surface it as an (empty, always-false) conflict so [handle_confl]
+               concludes unsat rather than letting search run on to a spurious model *)
+            if t.ok then again := true else confl := Some (transient_clause t [||])))
   done;
   !confl
 ;;
@@ -808,8 +894,8 @@ let search t assumps conflict_limit =
       let maxl = ref 0 in
       Array.iter
         (fun l ->
-          let lv = Dynarray.get t.level (var_of_lit l) in
-          if lv > !maxl then maxl := lv)
+           let lv = Dynarray.get t.level (var_of_lit l) in
+           if lv > !maxl then maxl := lv)
         confl.lits;
       if !maxl < decision_level t then cancel_until t !maxl);
     if decision_level t = 0
@@ -822,8 +908,9 @@ let search t assumps conflict_limit =
       record_learnt t learnt bt ants;
       var_decay_bump t;
       cla_decay_bump t;
-      if float_of_int (Dynarray.length t.learnts - Dynarray.length t.trail)
-         >= t.max_learnts
+      if
+        float_of_int (Dynarray.length t.learnts - Dynarray.length t.trail)
+        >= t.max_learnts
       then reduce_db t)
   in
   while !result = None do
@@ -879,7 +966,11 @@ let search t assumps conflict_limit =
                        result := Some R_sat)
                   | T_conflict premises ->
                     handle_confl (theory_conflict_clause t premises)
-                  | T_lemma clauses -> add_theory_lemmas t clauses)))
+                  | T_lemma clauses ->
+                    add_theory_lemmas t clauses;
+                    (* an empty-at-level-0 lemma makes the instance unsat (blocker: search
+                       must not run on to a spurious model) *)
+                    if not t.ok then result := Some R_unsat)))
           else (
             t.decisions <- t.decisions + 1;
             new_decision_level t;
