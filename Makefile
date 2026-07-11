@@ -69,7 +69,7 @@ CORPUS_TIMEOUT ?= 2
 CORPUS_JOBS ?= 48
 CORPUS_MAX_BYTES ?= 20971520
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -120,6 +120,14 @@ core-prelude-test:
 ##   an independent DPLL oracle. Nonzero exit on any failed check (TASKS.md M1-sat).
 sat-test:
 	$(DUNE) exec smt/solver/test/sat_test.exe
+
+## seam-test — CDCL(T) theory-callback seam (smt/solver, ADR-0005 §3) self-test via a
+##   scripted MOCK theory: theory conflict at various trail depths, propagation-then-
+##   conflict, lazy explain (called iff analysis resolves a theory literal), push/pop
+##   synchronization under backjumps + Luby restarts, a final-check split, and a
+##   no-theory regression (inert theory bit-identical to no theory).
+seam-test:
+	$(DUNE) exec smt/solver/test/seam_test.exe
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
 ##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat

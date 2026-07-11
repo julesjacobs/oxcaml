@@ -15,6 +15,11 @@
  (libraries oxsmt_solver oxsmt_dimacs))
 
 (executable
+ (name seam_test)
+ (modules seam_test)
+ (libraries oxsmt_solver))
+
+(executable
  (name sat_bench)
  (modules sat_bench)
  (libraries oxsmt_solver oxsmt_dimacs))

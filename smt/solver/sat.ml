@@ -44,8 +44,34 @@ type watch =
   ; blocker : lit
   }
 
+(* Why a variable is assigned. [Decision] is a branch choice or a level-0 unit (reason
+   [None] in the pre-seam core). [Implied_by c] is Boolean unit propagation on clause [c].
+   [Theory_prop] marks a literal enqueued by a plugged theory (ADR-0005 §3 T_consistent):
+   its reason clause is NOT stored — it is reconstructed lazily via [theory.explain] only
+   if conflict analysis resolves on it (CONTRACT-EX). With no theory plugged, only
+   [Decision]/[Implied_by] occur, isomorphic to the original [clause option]. *)
+type reason =
+  | Decision
+  | Implied_by of clause
+  | Theory_prop
+
 type trace =
   { on_learned : id:int -> clause:lit array -> antecedents:int list -> btlevel:int -> unit
+  }
+
+(* ADR-0005 §3 CDCL(T) theory-callback seam. Modeled on {!trace}: a settable record,
+   [None] by default (pure propositional core; one branch of overhead when unset). See
+   sat.mli for the contract. *)
+type theory_result =
+  | T_consistent of lit list
+  | T_conflict of lit list
+  | T_lemma of lit list list
+
+type theory =
+  { on_assign : lit -> unit
+  ; on_backtrack : level:int -> unit
+  ; check : final:bool -> theory_result
+  ; explain : lit -> lit list
   }
 
 type t =
@@ -54,7 +80,8 @@ type t =
   ; (* Per-variable state, indexed by var. *)
     assigns : int Dynarray.t (* 0 unknown, 1 true, -1 false *)
   ; level : int Dynarray.t (* decision level at which the var was assigned *)
-  ; reason : clause option Dynarray.t (* implying clause, or None for a decision *)
+  ; reason :
+      reason Dynarray.t (* why the var was assigned (Decision/Implied_by/Theory_prop) *)
   ; polarity : bool Dynarray.t (* saved phase: true => decide negative first *)
   ; seen : bool Dynarray.t (* scratch flag for conflict analysis *)
   ; (* Per-variable VSIDS activity and its max-heap (top = highest activity). *)
@@ -85,6 +112,7 @@ type t =
   ; mutable propagations : int
   ; restart_base : int
   ; mutable trace : trace option
+  ; mutable theory : theory option
   }
 
 let var_decay = 0.95
@@ -118,10 +146,12 @@ let create () =
   ; propagations = 0
   ; restart_base = 100
   ; trace = None
+  ; theory = None
   }
 ;;
 
 let set_trace t tr = t.trace <- tr
+let set_theory t th = t.theory <- th
 let num_vars t = t.nvars
 let decision_level t = Dynarray.length t.trail_lim
 
@@ -243,7 +273,7 @@ let ensure_var t v =
   while t.nvars <= v do
     Dynarray.add_last t.assigns 0;
     Dynarray.add_last t.level 0;
-    Dynarray.add_last t.reason None;
+    Dynarray.add_last t.reason Decision;
     Dynarray.add_last t.polarity true;
     Dynarray.add_last t.seen false;
     Dynarray.add_last t.var_act 0.0;
@@ -293,7 +323,13 @@ let unchecked_enqueue t lit reason =
   Dynarray.set t.assigns v (if sign_of_lit lit then 1 else -1);
   Dynarray.set t.level v (decision_level t);
   Dynarray.set t.reason v reason;
-  Dynarray.add_last t.trail lit
+  Dynarray.add_last t.trail lit;
+  (* Trail-extension notify (ADR-0005 §3 on_assign): every literal placed on the trail —
+     decision, propagation, assumption, learned unit — streams to the theory, which
+     filters for its own atoms. Fires in trail order. *)
+  match t.theory with
+  | None -> ()
+  | Some th -> th.on_assign lit
 ;;
 
 (* Undo assignments back to [level] (0-based decision level to keep). Saves the phase of
@@ -307,12 +343,18 @@ let cancel_until t level =
       let v = var_of_lit l in
       Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
       Dynarray.set t.assigns v 0;
-      Dynarray.set t.reason v None;
+      Dynarray.set t.reason v Decision;
       heap_insert t v
     done;
     Dynarray.truncate t.trail target;
     Dynarray.truncate t.trail_lim level;
-    t.qhead <- target)
+    t.qhead <- target;
+    (* Backjump notify (ADR-0005 §3 on_backtrack): the trail is now unwound to decision
+       [level]; the adapter pops the theory state asserted above it. Fires only on a real
+       unwind, after the Boolean trail is truncated. *)
+    match t.theory with
+    | None -> ()
+    | Some th -> th.on_backtrack ~level)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -385,11 +427,56 @@ let propagate t =
                   incr i;
                   incr j
                 done)
-              else unchecked_enqueue t first (Some c)))))
+              else unchecked_enqueue t first (Implied_by c)))))
     done;
     Dynarray.truncate ws !j
   done;
   !confl
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Theory seam (ADR-0005 §3). A theory conflict/reason is turned into an ordinary clause
+   so 1UIP analysis treats it exactly like a propositional one — the seam is
+   soundness-preserving by construction (learn ¬premises; propagate with a lazy reason).
+   These reason/conflict clauses are TRANSIENT: minted with an id (for trace antecedents)
+   but never attached to a watch list or stored in the arena — they exist only to be read
+   by [analyze]. *)
+
+let transient_clause t lits =
+  { id = fresh_id t; lits; activity = 0.0; learnt = false; deleted = false }
+;;
+
+(* The lazy reason clause of a theory-propagated literal [lit]: [lit ∨ ¬p₁ ∨ … ∨ ¬pₖ]
+   where [p₁..pₖ] = [theory.explain lit] are the (asserted, precedence-valid) premises.
+   Every premise is currently true, so every [¬pᵢ] is false and the clause forces [lit] —
+   a genuine implication, valid at [lit]'s propagation time (CONTRACT-EX). *)
+let theory_reason_clause t lit =
+  let th =
+    match t.theory with
+    | Some th -> th
+    | None -> assert false
+  in
+  let premises = th.explain lit in
+  let lits = Array.make (List.length premises + 1) lit in
+  List.iteri
+    (fun i p ->
+      (* CONTRACT-EX guard: a reason premise must be an asserted (true) literal, assigned
+         no later than the literal it explains. A violation is a theory bug that would
+         corrupt 1UIP; fail loudly rather than learn an invalid clause. *)
+      assert (lit_val t p = 1);
+      assert (Dynarray.get t.level (var_of_lit p) <= Dynarray.get t.level (var_of_lit lit));
+      lits.(i + 1) <- neg_lit p)
+    premises;
+  transient_clause t lits
+;;
+
+(* A theory conflict, given the asserted premise set whose conjunction is T-inconsistent:
+   the falsified clause [¬p₁ ∨ … ∨ ¬pₙ] (each premise true ⇒ each literal false). An empty
+   premise set is an unconditional theory contradiction — an empty (always-false) clause. *)
+let theory_conflict_clause t premises =
+  let lits = Array.of_list (List.map neg_lit premises) in
+  Array.iter (fun l -> assert (lit_val t l = -1)) lits;
+  transient_clause t lits
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -445,8 +532,9 @@ let analyze t confl =
     else (
       (c
        := match Dynarray.get t.reason vp with
-          | Some cc -> cc
-          | None -> assert false);
+          | Implied_by cc -> cc
+          | Theory_prop -> theory_reason_clause t pl (* materialize the lazy reason *)
+          | Decision -> assert false);
       if track then ants := !c.id :: !ants)
   done;
   Dynarray.set out 0 (neg_lit !p);
@@ -459,8 +547,10 @@ let analyze t confl =
     let v = var_of_lit l in
     let redundant =
       match Dynarray.get t.reason v with
-      | None -> false (* a decision literal is never redundant *)
-      | Some rc ->
+      | Decision -> false (* a decision literal is never redundant *)
+      | Theory_prop ->
+        false (* keep theory-propagated literals (sound: never over-drop) *)
+      | Implied_by rc ->
         let rlits = rc.lits in
         let ok = ref true in
         let k = ref 1 in
@@ -487,9 +577,8 @@ let analyze t confl =
     else (
       let maxi = ref 1 in
       for i = 2 to Array.length learnt - 1 do
-        if
-          Dynarray.get t.level (var_of_lit learnt.(i))
-          > Dynarray.get t.level (var_of_lit learnt.(!maxi))
+        if Dynarray.get t.level (var_of_lit learnt.(i))
+           > Dynarray.get t.level (var_of_lit learnt.(!maxi))
         then maxi := i
       done;
       let tmp = learnt.(1) in
@@ -523,13 +612,23 @@ let analyze_final t p =
       if Dynarray.get t.seen v
       then (
         match Dynarray.get t.reason v with
-        | None -> Dynarray.add_last out (neg_lit l)
-        | Some c ->
+        | Decision -> Dynarray.add_last out (neg_lit l)
+        | Implied_by c ->
           let lits = c.lits in
           for j = 1 to Array.length lits - 1 do
             let vj = var_of_lit lits.(j) in
             if Dynarray.get t.level vj > 0 then mark vj
-          done)
+          done
+        | Theory_prop ->
+          (* a theory-propagated literal's premises are its reason; mark them (mirrors the
+             [Implied_by] clause body, whose slot 0 is [l] itself and is skipped) *)
+          (match t.theory with
+           | None -> ()
+           | Some th ->
+             List.iter
+               (fun q ->
+                 if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
+               (th.explain l)))
     done;
     Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked);
   List.map neg_lit (Array.to_list (Dynarray.to_array out))
@@ -546,8 +645,8 @@ let locked t c =
   lit_val t l0 = 1
   &&
   match Dynarray.get t.reason (var_of_lit l0) with
-  | Some rc -> rc == c
-  | None -> false
+  | Implied_by rc -> rc == c
+  | Decision | Theory_prop -> false
 ;;
 
 let reduce_db t =
@@ -580,7 +679,7 @@ let add_clause t lits =
         let ls = List.filter (fun l -> lit_val t l <> -1) ls in
         match ls with
         | [] -> t.ok <- false
-        | [ l ] -> if lit_val t l = 0 then unchecked_enqueue t l None
+        | [ l ] -> if lit_val t l = 0 then unchecked_enqueue t l Decision
         | _ ->
           let c = mk_clause t (Array.of_list ls) false in
           attach t c)))
@@ -608,7 +707,7 @@ let save_model t =
 let record_learnt t learnt bt ants =
   if Array.length learnt = 1
   then (
-    unchecked_enqueue t learnt.(0) None;
+    unchecked_enqueue t learnt.(0) Decision;
     match t.trace with
     | Some tr ->
       tr.on_learned ~id:(fresh_id t) ~clause:learnt ~antecedents:ants ~btlevel:bt
@@ -617,10 +716,73 @@ let record_learnt t learnt bt ants =
     let c = mk_clause t learnt true in
     attach t c;
     cla_bump t c;
-    unchecked_enqueue t learnt.(0) (Some c);
+    unchecked_enqueue t learnt.(0) (Implied_by c);
     match t.trace with
     | Some tr -> tr.on_learned ~id:c.id ~clause:learnt ~antecedents:ants ~btlevel:bt
     | None -> ())
+;;
+
+(* Enqueue theory-implied literals (ADR-0005 §3 T_consistent) at the current decision
+   level, each with a lazy [Theory_prop] reason. Returns [`Progress true] if any new
+   literal was enqueued (re-propagate), [`Progress false] if all were already satisfied
+   (fixpoint), or [`Confl c] if an implied literal is already false — its lazy reason
+   clause is then falsified, an immediate theory conflict (a well-behaved theory reports
+   this via T_conflict; handled here for robustness). *)
+let enqueue_theory_lits t lits =
+  let rec go progressed = function
+    | [] -> `Progress progressed
+    | l :: rest ->
+      (match lit_val t l with
+       | 1 -> go progressed rest (* already implied; skip *)
+       | 0 ->
+         unchecked_enqueue t l Theory_prop;
+         go true rest
+       | _ -> `Confl (theory_reason_clause t l) (* forced true but already false *))
+  in
+  go false lits
+;;
+
+(* Add mid-solve theory lemmas (ADR-0005 §3 T_lemma: CONTRACT-SPLIT disjunctions, already
+   internalized to existing vars by the adapter). Each becomes a permanent clause. Adding
+   a clause during search is only well-defined at level 0 (level-0 simplification assumes
+   it), so we first unwind all decisions — a split is a case-split that restarts the
+   Boolean search over the refined clause set; the permanent lemma prevents re-reaching
+   the same total assignment, so progress is monotone (termination is the engine's split
+   budget, CONTRACT-SPLIT-TERM). *)
+let add_theory_lemmas t clauses =
+  cancel_until t 0;
+  List.iter (fun ls -> add_clause t ls) clauses
+;;
+
+(* Boolean BCP interleaved with cheap Propagate-effort theory checks to a combined
+   fixpoint (the Final-effort check is a distinct step, run once at a full model in
+   [search]). Returns [Some conflict] (Boolean or theory) or [None] (consistent fixpoint).
+   With no theory plugged this is exactly {!propagate}. *)
+let propagate_theory t =
+  let confl = ref None in
+  let again = ref true in
+  while !again do
+    again := false;
+    match propagate t with
+    | Some _ as c -> confl := c
+    | None ->
+      (match t.theory with
+       | None -> ()
+       | Some th ->
+         (match th.check ~final:false with
+          | T_consistent [] -> ()
+          | T_consistent lits ->
+            (match enqueue_theory_lits t lits with
+             | `Confl c -> confl := Some c
+             | `Progress p -> again := p)
+          | T_conflict premises -> confl := Some (theory_conflict_clause t premises)
+          | T_lemma clauses ->
+            (* D3: Split is a Final-effort result; a Propagate-effort lemma is a contract
+               deviation but still sound to add, so we accept it and re-propagate. *)
+            add_theory_lemmas t clauses;
+            again := true))
+  done;
+  !confl
 ;;
 
 type search_result =
@@ -632,25 +794,41 @@ type search_result =
 let search t assumps conflict_limit =
   let result = ref None in
   let conflicts_here = ref 0 in
+  (* Handle a conflict clause — Boolean (from BCP) or theory (T_conflict / a falsified
+     theory reason). A theory conflict can be falsified below the current decision level;
+     realign first by unwinding to the highest level present in the clause, so 1UIP
+     analysis sees a literal at the current level (its precondition). For a Boolean BCP
+     conflict the highest level is always the current one, so the realignment is a no-op —
+     and it is only computed when a theory is plugged, keeping the pure core untouched. *)
+  let handle_confl confl =
+    t.conflicts <- t.conflicts + 1;
+    incr conflicts_here;
+    if t.theory <> None
+    then (
+      let maxl = ref 0 in
+      Array.iter
+        (fun l ->
+          let lv = Dynarray.get t.level (var_of_lit l) in
+          if lv > !maxl then maxl := lv)
+        confl.lits;
+      if !maxl < decision_level t then cancel_until t !maxl);
+    if decision_level t = 0
+    then (
+      t.ok <- false;
+      result := Some R_unsat)
+    else (
+      let learnt, bt, ants = analyze t confl in
+      cancel_until t bt;
+      record_learnt t learnt bt ants;
+      var_decay_bump t;
+      cla_decay_bump t;
+      if float_of_int (Dynarray.length t.learnts - Dynarray.length t.trail)
+         >= t.max_learnts
+      then reduce_db t)
+  in
   while !result = None do
-    match propagate t with
-    | Some confl ->
-      t.conflicts <- t.conflicts + 1;
-      incr conflicts_here;
-      if decision_level t = 0
-      then (
-        t.ok <- false;
-        result := Some R_unsat)
-      else (
-        let learnt, bt, ants = analyze t confl in
-        cancel_until t bt;
-        record_learnt t learnt bt ants;
-        var_decay_bump t;
-        cla_decay_bump t;
-        if
-          float_of_int (Dynarray.length t.learnts - Dynarray.length t.trail)
-          >= t.max_learnts
-        then reduce_db t)
+    match propagate_theory t with
+    | Some confl -> handle_confl confl
     | None ->
       if conflict_limit > 0 && !conflicts_here >= conflict_limit
       then (
@@ -677,17 +855,35 @@ let search t assumps conflict_limit =
           if !next = -1
           then (
             match pick_branch t with
-            | None ->
-              save_model t;
-              result := Some R_sat
             | Some l ->
               t.decisions <- t.decisions + 1;
               new_decision_level t;
-              unchecked_enqueue t l None)
+              unchecked_enqueue t l Decision
+            | None ->
+              (* Full Boolean assignment consistent under Propagate-effort. A plugged
+                 theory gets a complete (Final) check: it may accept the model (Sat),
+                 refute it (T_conflict), or refine the search (T_lemma split / propagate,
+                 e.g. B&B or model-based N-O). *)
+              (match t.theory with
+               | None ->
+                 save_model t;
+                 result := Some R_sat
+               | Some th ->
+                 (match th.check ~final:true with
+                  | T_consistent lits ->
+                    (match enqueue_theory_lits t lits with
+                     | `Confl c -> handle_confl c
+                     | `Progress true -> () (* re-check at the new fixpoint *)
+                     | `Progress false ->
+                       save_model t;
+                       result := Some R_sat)
+                  | T_conflict premises ->
+                    handle_confl (theory_conflict_clause t premises)
+                  | T_lemma clauses -> add_theory_lemmas t clauses)))
           else (
             t.decisions <- t.decisions + 1;
             new_decision_level t;
-            unchecked_enqueue t !next None))
+            unchecked_enqueue t !next Decision))
   done;
   match !result with
   | Some r -> r

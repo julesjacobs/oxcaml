@@ -96,3 +96,61 @@ type trace =
   }
 
 val set_trace : t -> trace option -> unit
+
+(** {2 Theory seam — CDCL(T) (ADR-0005 §3; the seam for the M4 EUF/LIA adapters)}
+
+    The same style of event interface as {!trace}: a settable record, [None] by default,
+    so the pure propositional core is unchanged (one [None] branch of overhead when unset,
+    and — crucially — bit-identical verdicts, models, and counters). When set, [solve]'s
+    propagation loop and its full-model checkpoint consult it, which is why this is not an
+    additive edit to [solve]/propagate (and why [sat.mli] freezes at M4).
+
+    The seam is soundness-preserving by construction: a theory conflict is learned exactly
+    like a propositional one (1UIP over the negated premise set), and a theory propagation
+    carries a lazy reason retrieved only if conflict analysis needs it. Every [lit]
+    crossing the seam names a SAT var the adapter registered 1:1 with a theory atom
+    (ADR-0005 CONTRACT-ATOM); the core never inspects which vars are theory atoms — the
+    adapter filters. *)
+
+type theory_result =
+  | T_consistent of lit list
+  (** consistent; theory-implied literals to enqueue as true. The reason is LAZY: the core
+      calls {!field-explain} only if the literal enters 1UIP analysis (ADR-0005 D3). An
+      empty list is the plain "consistent, nothing implied". *)
+  | T_conflict of lit list
+  (** inconsistent: the asserted premise set whose conjunction is T-unsat
+      (precedence-valid, CONTRACT-EX). The core injects its negation [¬l₁ ∨ … ∨ ¬lₙ] as
+      the falsified conflict clause and drives backjumping. The empty set is an
+      unconditional theory contradiction. *)
+  | T_lemma of lit list list
+  (** clauses to add mid-solve: CONTRACT-SPLIT disjunctions (a B&B branch or an N-O
+      ℤ-trichotomy). Each inner list is one clause over atoms the adapter has already
+      internalized via {!new_var}. Returned at [~final:true] (a Final-effort Split). *)
+
+type theory =
+  { on_assign : lit -> unit
+    (** trail-extension notify: [lit] was just placed on the trail (decision, propagation,
+      assumption, or learned unit). Fires in trail order. The adapter forwards its own
+      atoms to [THEORY.assert_lit] and ignores the rest. *)
+  ; on_backtrack : level:int -> unit
+    (** backjump notify: the trail has just been unwound to decision [level]. The adapter
+      forwards to [THEORY.pop], discarding theory state asserted above [level]. Fires on
+      every real unwind (backjump, restart, split, end of solve). *)
+  ; check : final:bool -> theory_result
+    (** [~final:false]: cheap in-search check (ADR-0005 [Propagate] effort), driven to a
+      fixpoint interleaved with Boolean propagation. [~final:true]: a complete check at a
+      full Boolean model (ADR-0005 [Final]: B&B integrality, model-based N-O) —
+      [T_consistent []] here means the theory accepts the model (the query is SAT). *)
+  ; explain : lit -> lit list
+    (** the lazy, precedence-valid reason for a literal this theory propagated via
+      [T_consistent] (CONTRACT-EX: every returned lit was asserted no later than [lit],
+      and is currently true). Called only during conflict analysis. *)
+  }
+
+val set_theory : t -> theory option -> unit
+
+(** The current decision level (0 at the base, before any decision). Exposed so a theory
+    adapter can tag each {!field-on_assign}ed literal with the level at which it was
+    asserted — the level {!field-on_backtrack} later references to undo trail-synchronized
+    theory state. Reading it inside [on_assign] is a pure query (no re-entrancy). *)
+val decision_level : t -> int
