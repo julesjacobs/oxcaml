@@ -20,3 +20,11 @@ if load-bearing for a frozen interface, in an ADR.
 - **I6 — Determinism.** Search uses fixed seeds and no wall-clock-dependent
   heuristics; a given input yields the same decisions, verdict, and counters
   every run.
+- **I7 — No `Iarr` aliasing.** `Iarr` exposes no aliasing constructor on its
+  public surface (abstract type, copying constructors only); the no-copy
+  `Iarr_unsafe` cast is a dune `private_modules`, build-invisible outside `core/`
+  (ADR-0003).
+- **I8 — State-safe overflow/unsupported.** `Term.Overflow` and
+  `Term.Unsupported` are raised before any intern-table mutation and caught at the
+  session boundary, degrading to verdict `unknown`; never a crash, never partial
+  state (ADR-0003).

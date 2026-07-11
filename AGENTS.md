@@ -56,6 +56,10 @@ ADR rather than comply. Read DESIGN.md for the full plan (start with §1, §3, �
 ## Frozen interfaces
 
 Hash-checked in CI; changing one requires an explicit unfreeze + adversarial
-review by a fresh agent (DESIGN.md §10). Currently frozen: **(none yet)**.
-`Term` / `Sort` / `THEORY` freeze after ADR-0003 and M1 respectively — this
-list is updated when they do.
+review by a fresh agent (DESIGN.md §10).
+
+- **ADR-0003 accepted:** `Sort` / `Symbol` / `Term` / `Context` / the public
+  `Iarr` surface are design-frozen per `decisions/adr-0003-term-representation.md`;
+  the corresponding `.mli`s become hash-frozen when M0-core merges; changes
+  require the unfreeze ritual (DESIGN §10).
+- `THEORY` freezes after M1 — this list is updated when it does.
