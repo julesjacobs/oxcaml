@@ -1,0 +1,183 @@
+(* ADR-0005 THEORY adapter over the EUF engine. See euf_adapter.mli for the contract. This
+   is a thin relabeling layer: the engine does all the reasoning and self-checks its
+   explanations; the adapter maps Atom/Lit <-> the engine's opaque premise token and
+   translates results into the frozen Explanation/Model currency. *)
+
+open Oxsmt_core
+
+(* The engine's ['p] is instantiated to [prem]. A real assertion carries [P_lit lit]; the
+   standing [true <> false] disequality carries [P_axiom]. The engine never inspects a
+   token — it only stores and returns it — so [P_axiom] rides along and is dropped when we
+   build an [Explanation], leaving only literals the CDCL(T) engine actually asserted. *)
+type prem =
+  | P_lit of Lit.t
+  | P_axiom
+
+(* How an atom's term is encoded into the engine. A non-Bool [Eq(a,b)] atom asserts a
+   (dis)equality on its two sides. A Bool-codomain predicate / bool constant is encoded
+   against [true_const]/[false_const]. *)
+type kind =
+  | K_eq of Term.t * Term.t
+  | K_bool
+
+type info =
+  { term : Term.t
+  ; kind : kind
+  }
+
+type t =
+  { engine : prem Euf.t
+  ; true_const : Term.t
+  ; false_const : Term.t
+  ; atoms : info Atom.Table.t (* Atom -> its term + encoding; persists across pop *)
+  ; watched : Atom.t Term.Table.t (* watched Eq-atom term -> Atom, for propagation *)
+  ; mutable atom_terms : Term.t list (* registration order; model enumeration only *)
+  }
+
+let create ctx _env =
+  let engine = Euf.create ctx in
+  let true_const = Context.bool_const ctx true in
+  let false_const = Context.bool_const ctx false in
+  (* Registered + asserted at level 0 (before any [push]), so the axiom can never be
+     popped away and re-registration after a pop cannot lose it. *)
+  Euf.register_term engine true_const;
+  Euf.register_term engine false_const;
+  Euf.assert_neq engine ~premise:P_axiom true_const false_const;
+  { engine
+  ; true_const
+  ; false_const
+  ; atoms = Atom.Table.create 64
+  ; watched = Term.Table.create 64
+  ; atom_terms = []
+  }
+;;
+
+let classify (term : Term.t) : kind =
+  if not (Theory_view.is_atom term)
+  then invalid_arg "Euf_adapter.register_atom: term is not a theory atom";
+  match Theory_view.atom term with
+  | Theory_view.Equality (a, b) -> K_eq (a, b)
+  | Theory_view.Predicate (_, _) | Theory_view.Bool_lit _ -> K_bool
+  | Theory_view.Le_zero _ ->
+    invalid_arg "Euf_adapter.register_atom: Le atom belongs to LIA, not EUF"
+;;
+
+let register_atom t atom term =
+  (* Always (re)internalize: [register_term] is idempotent (C7), and a [pop] may have
+     truncated this atom's e-nodes — re-registering here rederives them. The [atoms] map
+     is NOT trailed: the Atom<->term binding is permanent (CONTRACT-ATOM ids are stable),
+     so keeping it across pops is what lets a later [assert_lit] recover the encoding. *)
+  Euf.register_term t.engine term;
+  if not (Atom.Table.mem t.atoms atom)
+  then (
+    let kind = classify term in
+    Atom.Table.replace t.atoms atom { term; kind };
+    t.atom_terms <- term :: t.atom_terms;
+    match kind with
+    | K_eq _ -> Term.Table.replace t.watched term atom
+    | K_bool -> ())
+;;
+
+let assert_lit t lit =
+  let atom = Lit.atom lit in
+  let positive = Lit.sign lit in
+  match Atom.Table.find_opt t.atoms atom with
+  | None -> invalid_arg "Euf_adapter.assert_lit: atom was not registered"
+  | Some { kind = K_eq (a, b); _ } ->
+    if positive
+    then Euf.assert_eq t.engine ~premise:(P_lit lit) a b
+    else Euf.assert_neq t.engine ~premise:(P_lit lit) a b
+  | Some { kind = K_bool; term } ->
+    let target = if positive then t.true_const else t.false_const in
+    Euf.assert_eq t.engine ~premise:(P_lit lit) term target
+;;
+
+(* Drop the axiom token; keep only genuinely-asserted literals. Sound because the dropped
+   fact ([true <> false]) is a theory tautology, not a hypothesis. *)
+let lits_of_prems prems =
+  List.filter_map
+    (function
+      | P_lit l -> Some l
+      | P_axiom -> None)
+    prems
+;;
+
+let check t effort =
+  match Euf.check t.engine with
+  | Euf.Conflict prems ->
+    Theory.Conflict { Explanation.premises = lits_of_prems prems; rule = Euf_congruence }
+  | Euf.Consistent ->
+    (* A watched Eq atom whose entailed truth just changed becomes a theory propagation —
+       but only for atoms this adapter registered (C6); a watched Eq that is merely a
+       subterm of some other atom has no [Atom] and is skipped. *)
+    let lits =
+      List.filter_map
+        (fun (imp : Euf.implied) ->
+           match Term.Table.find_opt t.watched imp.Euf.atom with
+           | None -> None
+           | Some atom -> Some (Lit.make atom imp.Euf.value))
+        (Euf.propagate t.engine)
+    in
+    (match lits, effort with
+     | [], Theory.Final -> Theory.Sat
+     | [], Theory.Propagate -> Theory.Propagations []
+     | _ :: _, _ -> Theory.Propagations lits)
+;;
+
+let explain t lit =
+  let atom = Lit.atom lit in
+  match Atom.Table.find_opt t.atoms atom with
+  | Some { kind = K_eq _; term } ->
+    (* Reconstruct the [implied] we propagated: its term is the Eq atom, its value is the
+       literal's sign. [explain_implied] returns a precedence-valid premise set
+       (CONTRACT-EX), self-checked by the engine. *)
+    let imp = { Euf.atom = term; value = Lit.sign lit } in
+    { Explanation.premises = lits_of_prems (Euf.explain_implied t.engine imp)
+    ; rule = Euf_congruence
+    }
+  | _ -> invalid_arg "Euf_adapter.explain: literal was not propagated by this theory"
+;;
+
+let push t = Euf.push t.engine
+let pop t n = Euf.pop t.engine n
+
+(* Subterm children (same split as the engine's registration walk): used only to build a
+   model total over every term reachable from a registered atom. *)
+let children (term : Term.t) : Term.t list =
+  match term.node with
+  | Bool_const _ | Int_const _ -> []
+  | App (_, args) -> Iarr.to_list args
+  | Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+  | Le a -> [ a ]
+  | Eq (a, b) -> [ a; b ]
+  | Not a -> [ a ]
+  | And a | Or a -> Iarr.to_list a
+  | Ite (c, a, b) -> [ c; a; b ]
+;;
+
+let model t =
+  (* Assign every registered term (atoms + subterm closure) a witness by its congruence
+     class: a Bool term provably [= true]/[= false] gets that boolean; otherwise the
+     opaque class-representative id (open q3 encoding). Equal terms share a witness. *)
+  let seen = Term.Table.create 64 in
+  let acc = ref [] in
+  let rec walk (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.replace seen term ();
+      let v =
+        if Sort.equal term.sort Sort.bool
+        then
+          if Euf.are_equal t.engine term t.true_const
+          then Model.Bool true
+          else if Euf.are_equal t.engine term t.false_const
+          then Model.Bool false
+          else Model.Uninterp (Euf.class_of t.engine term)
+        else Model.Uninterp (Euf.class_of t.engine term)
+      in
+      acc := (term, v) :: !acc;
+      List.iter walk (children term))
+  in
+  List.iter walk (List.rev t.atom_terms);
+  Model.of_alist !acc
+;;

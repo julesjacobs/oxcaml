@@ -10,3 +10,12 @@
  (name euf_test)
  (modules euf_test)
  (libraries oxsmt_core oxsmt_euf))
+
+; Adversarial tests for the ADR-0005 THEORY adapter (Euf_adapter): drives the frozen
+; THEORY surface and cross-checks against the same kind of independent naive closure.
+; Same firewall (oxsmt_core + oxsmt_euf only). Run via `make euf-adapter-test`.
+
+(executable
+ (name euf_adapter_test)
+ (modules euf_adapter_test)
+ (libraries oxsmt_core oxsmt_euf))

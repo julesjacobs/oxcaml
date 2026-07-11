@@ -10,3 +10,8 @@
     Owning task: TASKS.md M2-euf. *)
 
 module Euf = Euf
+
+(** The ADR-0005 [THEORY] adapter over {!Euf} — presents the engine to the CDCL(T) solver
+    (M4) as one frozen {!Oxsmt_core.Theory.THEORY} plugin. Owning task: TASKS.md
+    M4-adapters (EUF). *)
+module Euf_adapter = Euf_adapter

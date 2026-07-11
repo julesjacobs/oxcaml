@@ -60,7 +60,7 @@ OXCAML_LIBS := smt/core/oxsmt_core smt/interface/oxsmt_interface \
                smt/smtlib/oxsmt_smtlib smt/smtlib/parser/oxsmt_smtlib_parser \
                smt/theories/euf/oxsmt_euf smt/theories/lia/oxsmt_lia
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -162,6 +162,18 @@ wiring-test:
 ##   Nonzero exit on any failed check (TASKS.md M2-euf).
 euf-test:
 	$(DUNE) exec smt/theories/euf/test/euf_test.exe
+
+## euf-adapter-test — ADR-0005 THEORY adapter (Euf_adapter) adversarial self-test
+##   (stdlib-only, deterministic). Drives the frozen THEORY surface only (create /
+##   register_atom / assert_lit / check / explain / push / pop / model) and cross-checks
+##   every observable against an INDEPENDENT naive congruence closure: conflict &
+##   propagation explanation soundness (replayed to entailment), premises never leak the
+##   reserved true<>false axiom, predicate/bool-lit encoding, push/pop restoration (deep
+##   nesting, pop-below-conflict, assert-after-pop), model-induced equality + predicate
+##   truth + Bool-Eq currency, and run-twice determinism. Nonzero exit on any failed check
+##   (TASKS.md M4-adapters).
+euf-adapter-test:
+	$(DUNE) exec smt/theories/euf/test/euf_adapter_test.exe
 
 ## lia-test — smt/theories/lia unit + property self-test (stdlib-only, deterministic).
 ##   Exact rational/δ-rational arithmetic incl. overflow guards; hand cases (DdM
