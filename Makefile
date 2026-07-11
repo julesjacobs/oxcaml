@@ -68,10 +68,16 @@ build:
 ##   is unaffected). Nightly-intent, alongside status-fresh and mutants.
 build-oxcaml:
 	@test -n "$(OXCAML_BIN)" || { echo "build-oxcaml: OxCaml toolchain not found (sysdep-run -source boot -attr-path oxcaml.r5); set OXCAML_BIN=" >&2; exit 1; }
-	@echo "build-oxcaml: using $$($(OXCAML_BIN)/ocamlopt.opt -version) at $(OXCAML_BIN)"
+	@ver=$$($(OXCAML_BIN)/ocamlopt.opt -version); \
+	  case "$$ver" in \
+	    *+ox*) echo "build-oxcaml: using $$ver at $(OXCAML_BIN)" ;; \
+	    *) echo "build-oxcaml: resolved compiler '$$ver' at $(OXCAML_BIN) is not OxCaml (no '+ox' in version); refusing" >&2; exit 1 ;; \
+	  esac
 	PATH="$(OXCAML_BIN):/usr/bin:/bin" $(DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) @smt/check
 	PATH="$(OXCAML_BIN):/usr/bin:/bin" $(DUNE) build --root . --build-dir=$(OXCAML_BUILD_DIR) \
 	  $(foreach l,$(OXCAML_LIBS),$(l).cmxa $(l).cma)
+	@mkdir -p $(LOGS)
+	@echo "oxcaml library build: OK $$($(OXCAML_BIN)/ocamlopt.opt -version)" | tee $(LOGS)/oxcaml-build.log
 	@echo "build-oxcaml: OK — smt/ type-checks and all shipped libraries compile (native + bytecode) under OxCaml"
 
 ## core-test — smt/core unit + property self-test (stdlib-only, deterministic).
