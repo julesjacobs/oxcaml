@@ -489,6 +489,57 @@ let clause_sat var_val (cl : Cnf.Clause.t) =
     cl
 ;;
 
+(* Converse direction, which the deterministic-extension check above is structurally BLIND
+   to: EVERY model of the clause set must project (on the atoms) to a model of the
+   original formula. The check above only ever evaluates the ONE canonical extension (each
+   aux var := the truth of its defining subterm), which satisfies whatever clauses remain
+   — so a *dropped* biconditional direction (an aux var no longer pinned to its subterm)
+   is invisible to it. Here we instead search over ALL variables (atoms + aux) and require
+   that any full assignment satisfying every clause has an atom projection on which the
+   original is true. The Tseitin root unit forces the root literal true, and the
+   biconditional clauses force each aux var to equal its subterm, so on a correct
+   clausifier this holds; a missing direction admits a clause-model (e.g. a
+   negatively-occurring [And] whose var is false while its children are all true) whose
+   projection falsifies the original. Exhaustive over [2^num_vars], guarded by a size
+   bound (small after hash-consing). *)
+let converse_rows_checked = ref 0
+let converse_var_bound = 16
+
+let check_cnf_converse label (phi : Term.t) (cnf : Cnf.t) =
+  let n = Cnf.num_vars cnf in
+  if n <= converse_var_bound
+  then (
+    let bits = Array.make (n + 1) false in
+    let var_val v = bits.(v) in
+    (* eval_skeleton only queries atom subterms, each of which is a variable. *)
+    let atomval a =
+      match Cnf.var_of_atom cnf a with
+      | Some v -> bits.(v)
+      | None -> false
+    in
+    let rec loop v =
+      if v > n
+      then (
+        let all_sat = ref true in
+        Cnf.iter_clauses
+          (fun cl -> if not (clause_sat var_val cl) then all_sat := false)
+          cnf;
+        incr converse_rows_checked;
+        if !all_sat && not (eval_skeleton atomval phi)
+        then
+          check
+            (Printf.sprintf "clausify converse %s (CNF-model => original)" label)
+            false)
+      else
+        List.iter
+          (fun b ->
+             bits.(v) <- b;
+             loop (v + 1))
+          [ false; true ]
+    in
+    loop 1)
+;;
+
 let n_clausify_formulas = 400
 let clausify_depth = 3
 let clauses_emitted = ref 0
@@ -503,6 +554,7 @@ let test_clausifier () =
     let phi = Preprocess.run s.pp (gen_bool s clausify_depth) in
     let cnf = Cnf.clausify phi in
     clauses_emitted := !clauses_emitted + List.length (Cnf.clauses cnf);
+    check_cnf_converse "random" phi cnf;
     let atoms = collect_atoms phi in
     let k = List.length atoms in
     if k <= 14
@@ -537,6 +589,36 @@ let test_clausifier () =
       in
       loop 0)
   done
+;;
+
+(* Hand-built formulas where an [And]/[Or]/iff node occurs UNDER A NEGATION, so both
+   directions of its Tseitin biconditional are load-bearing. These are the shapes that
+   expose a dropped clause direction (which random depth-3 generation may or may not cover
+   within the converse size bound), verified exhaustively by [check_cnf_converse]. Each
+   stays tiny (few vars), so the converse search is exhaustive. *)
+let test_clausifier_negpol () =
+  let s = make_session () in
+  let ctx = s.ctx in
+  let p0 = Context.const ctx s.p.(0) in
+  let p1 = Context.const ctx s.p.(1) in
+  let x0 = Context.const ctx s.x.(0) in
+  let k n = Context.int_const ctx n in
+  let le0 = Context.le ctx x0 (k 0) in
+  let na = Context.not_ ctx (Context.and_ ctx [ p0; p1 ]) in
+  let cases =
+    [ "neg-and", na
+    ; "neg-and-or", Context.or_ ctx [ na; p0 ]
+    ; "neg-and-mixed", Context.not_ ctx (Context.and_ ctx [ p0; le0 ])
+    ; "neg-or", Context.not_ ctx (Context.or_ ctx [ p0; p1 ])
+    ; "neg-iff", Context.not_ ctx (Context.iff ctx p0 p1)
+    ; "ite-neg-and", Context.ite ctx p0 na p1
+    ]
+  in
+  List.iter
+    (fun (label, phi) ->
+       let phi = Preprocess.run s.pp phi in
+       check_cnf_converse label phi (Cnf.clausify phi))
+    cases
 ;;
 
 (* Check the atom map is a faithful bijection on atom variables, and that atom vs
@@ -693,6 +775,7 @@ let () =
   test_pass_equivalence ();
   test_adversarial_nests ();
   test_clausifier ();
+  test_clausifier_negpol ();
   test_atom_map ();
   test_determinism ();
   test_unsupported ();
@@ -700,10 +783,11 @@ let () =
   test_pinned_divmod ();
   Printf.printf "preprocess_test: %d checks, %d failures\n" !checks !failures;
   Printf.printf
-    "  brute-force: %d pass-equivalence assignments, %d clausifier bool-rows, %d clauses \
-     emitted\n"
+    "  brute-force: %d pass-equivalence assignments, %d clausifier bool-rows, %d \
+     clausifier converse rows, %d clauses emitted\n"
     !assignments_checked
     !bool_rows_checked
+    !converse_rows_checked
     !clauses_emitted;
   if !failures > 0 then exit 1
 ;;
