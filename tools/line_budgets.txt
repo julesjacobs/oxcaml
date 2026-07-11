@@ -14,3 +14,4 @@ smt/theories/euf    1500
 smt/theories/lia    2000
 smt/interface       1000
 smt/smtlib          1500
+smt/preprocess      1000
