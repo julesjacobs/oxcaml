@@ -5,7 +5,7 @@ let make a positive =
   (a lsl 1) lor if positive then 0 else 1
 ;;
 
-let atom l = Atom.of_int (l lsr 1)
+let atom l = Atom_unsafe.of_int (l lsr 1)
 let sign l = l land 1 = 0
 let negate l = l lxor 1
 let equal = Int.equal

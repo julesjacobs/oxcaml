@@ -7,11 +7,14 @@
 ;   (I2: smart constructors via [Context] are the sole public construction path).
 ; [iarr_unsafe] holds the optional no-copy [Iarr] cast, private for the same
 ;   reason (ADR-0003 fixes B1).
+; [atom_unsafe] holds the no-copy [int -> Atom.t] cast (same B1 pattern), private
+;   so [Lit] can unpack a packed literal but no consumer can forge an atom id —
+;   [Atom.fresh] is the only public minter (ADR-0005).
 
 ; [explanation] and [theory] are pure signatures (types + a module type, no
 ;   values) — the ADR-0005 THEORY vocabulary; they have no [.ml].
 
 (library
  (name oxsmt_core)
- (private_modules node iarr_unsafe)
+ (private_modules node iarr_unsafe atom_unsafe)
  (modules_without_implementation explanation theory))

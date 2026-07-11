@@ -1,6 +1,17 @@
 type t = int
 
-let of_int v = v
+(* A dense monotonic counter: [fresh] hands out 0, 1, 2, … — deterministic (I6), never an
+   id chosen by the caller (ADR-0005 CONTRACT-ATOM). *)
+type allocator = { mutable next : int }
+
+let create_allocator () = { next = 0 }
+
+let fresh a =
+  let id = a.next in
+  a.next <- id + 1;
+  id
+;;
+
 let equal = Int.equal
 let compare = Int.compare
 let hash = Hashtbl.hash

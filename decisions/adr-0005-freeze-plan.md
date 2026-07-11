@@ -264,7 +264,8 @@ builds to a fixed spec and cannot drift.
 - `smt/core/env.mli`, `smt/core/rank.mli` — exist on trunk (already scheduled).
 - `smt/core/atom.mli`, `smt/core/lit.mli`, `smt/core/explanation.mli`,
   `smt/core/theory.mli` — **created from the ADR's verbatim `.mli`** (small concrete
-  modules: `Atom`/`Lit` = packed `private int` + O(1) ops + Set/Map/Table;
+  modules: `Atom`/`Lit` = packed `private int` + O(1) ops + Set/Map/Table, `Atom`
+  minted only by `create_allocator`/`fresh` — no public `of_int` (Rev 6);
   `Explanation` = record + `Rule_tag` enum; `theory.mli` = `effort` + `check_result`
   + `module type THEORY`). These are pure types / a module type, validated by the
   EUF and LIA adapter-fitness reviews (§1b), and locking them is what gives M4 a

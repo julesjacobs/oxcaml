@@ -5,6 +5,19 @@ in `logs/adr-0005-adversarial-review.md` (FREEZE-APPROVED for Tranche A). The sa
 pass + freeze plan (tranche schedule) is the companion `adr-0005-freeze-plan.md`.
 Every decision is tagged **FIRM** or **PROVISIONAL**.
 
+**Revision 6 (2026-07-11, freeze ruling — supersedes Rev 5's `of_int`):** the
+adversarial ruling (`logs/adr-0005-adversarial-review.md`) rejected a **public**
+`of_int` as the Iarr-B1 mistake on a frozen file, with concrete harm traced: a
+forged id misses the engine's atom⇄var map (or aliases a slot), a forged premise
+`Lit` malforms 1UIP, and a hand-chosen id breaks the dense/monotonic invariant that
+guarantees I6. Root cause: open-q1's "bare id type" conclusion was **incomplete** —
+a bare id type cannot mint ids, so *something* must, and the safe minter is the
+fix. `atom.mli` now exposes `type allocator` + `create_allocator` + `fresh`
+(the CONTRACT-ATOM minter: "the next id", dense/monotonic/deterministic), **no**
+`of_int`. `Lit.atom` unpacks its packed literal through a core-private
+`Atom_unsafe.of_int` (dune `private_modules`; compile error outside `core` — the
+Iarr_unsafe/B1 pattern). `FROZEN.sha256` re-hashed, `SPINE.md` regenerated.
+
 **Revision 5 (2026-07-11, Tranche-A materialization):** building the freeze branch
 surfaced that the approved `atom.mli` sketch exposed **no constructor**, so
 `lit.ml` cannot implement `Lit.atom : t -> Atom.t` (it must rebuild an `Atom.t`
@@ -300,13 +313,15 @@ hash-consing (I6). The engine owns `Atom` allocation and the `Atom ⇄ Term` map
 id type — §Freeze plan). The model evaluator / printer / Lean encoder need no
 `Context` (ADR-0003 D6).
 
-> **CONTRACT-ATOM (engine obligation — review minor e).** Moving allocation
-> engine-side dropped the uniqueness/determinism guarantee the old `Atom.fresh`
-> comment carried; restate it here: the engine allocates `Atom.t` **1:1 with SAT
-> variables via a deterministic monotonic counter** (I6). Distinct theory atoms
-> get distinct ids; a fixed clausification order yields identical ids across runs.
-> No soundness hole (it follows from clausifier determinism), but the interface
-> must name the obligation now that `atom.mli` is a bare id type.
+> **CONTRACT-ATOM (engine obligation).** The engine holds one `Atom.allocator`
+> and calls `Atom.fresh` once per theory atom, pairing each result **1:1 with the
+> atom's SAT variable** (I6). `fresh` is the sole minter (Rev 6): it hands out the
+> next dense id (0, 1, 2, …), so distinct atoms get distinct ids and a fixed
+> clausification order yields identical ids across runs. There is no public
+> id-forging constructor — a forged id would miss the atom⇄var map, and a
+> hand-chosen id would break the dense/monotonic invariant. `Lit` unpacks its
+> packed literal through the core-private `Atom_unsafe.of_int` (Iarr_unsafe/B1
+> pattern; invisible outside `core`).
 
 **Push/pop: a unified frame stack, both frame kinds — FIRM (review #5).** A
 *frame* is a backtrack checkpoint. `push` opens one; `pop n` undoes the last `n`,
@@ -398,10 +413,14 @@ separate additive enum unfreeze, orthogonal to the no-payload decision.)
 
 ```ocaml
 (* ─── core/atom.mli ─── engine-assigned theory-atom id; the assertion currency.
-   Allocation is engine-side (D6); this module is just the id type + O(1) ops. *)
+   Minted ONLY by [fresh] (Rev 6): no public id-forging constructor. A core-private
+   [Atom_unsafe.of_int] (dune private_modules) lets [Lit] unpack a packed literal
+   inside core — the Iarr_unsafe/B1 pattern. *)
 module Atom : sig
   type t = private int                       (* dense; 1:1 with the atom's SAT var *)
-  val of_int  : int -> t                     (* engine allocator only (CONTRACT-ATOM): wraps a SAT-var id *)
+  type allocator                             (* the engine holds one per session *)
+  val create_allocator : unit -> allocator
+  val fresh   : allocator -> t               (* the NEXT id (dense, monotonic, deterministic — CONTRACT-ATOM/I6); sole minter *)
   val equal   : t -> t -> bool
   val compare : t -> t -> int                (* by id; total, deterministic *)
   val hash    : t -> int
@@ -588,7 +607,7 @@ concrete modules / a module type; validated by the EUF+LIA adapter-fitness revie
 plus the three already-scheduled existing files:
 | file | frozen content | later |
 |---|---|---|
-| `smt/core/atom.mli` | id type + O(1) ops (no allocator — engine-side, CONTRACT-ATOM) | — |
+| `smt/core/atom.mli` | id type + `allocator`/`create_allocator`/`fresh` minter (CONTRACT-ATOM) + O(1) ops; no public `of_int` (Rev 6) | — |
 | `smt/core/lit.mli` | packed signed literal | — |
 | `smt/core/theory.mli` | `THEORY` sig, `effort`, `check_result` (Split general → no `Lemma`) | — |
 | `smt/core/explanation.mli` | `Explanation.t` record + `Rule_tag` enum (payload-free) | **no payload unfreeze** (ADR-0006): M5 certs via off-core `smt/certificate/`; only future new tag constructors are additive |
@@ -719,8 +738,10 @@ Tranche-A freeze.
 
 ## Open questions (for the freeze checkpoint)
 
-1. ~~`Atom.allocator` in `core` vs engine~~ — **resolved: engine-side** (D6);
-   `atom.mli` is a bare id type.
+1. ~~`Atom.allocator` in `core` vs engine~~ — **resolved (Rev 6): the `allocator`
+   type + `fresh` minter live in `core`'s `atom.mli`; the engine holds one
+   allocator instance.** (The earlier "bare id type" answer was incomplete — a bare
+   id type cannot mint ids safely; see Rev 6 / CONTRACT-ATOM.)
 2. `push`/`pop` as relative `pop n` vs absolute `backtrack_to level` — absolute is
    harder to desync; pin against the SAT core's actual backtrack call site (M1).
 3. `Uninterp` witness encoding: opaque class ids vs caller-assigned distinct
