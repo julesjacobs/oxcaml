@@ -54,6 +54,24 @@ ADR rather than comply. Read DESIGN.md for the full plan (start with §1, §3, �
   Flooding an agent's context is a defect of the same severity as a slow suite.
 - **Determinism.** Fixed seeds; no wall-clock in search heuristics or goldens.
 
+## Merge requirements
+
+Every merge to `oxsmt` (rebase → test → ff-only, DESIGN §11) requires: green
+suites + a recorded same-model soundness review + a recorded simplicity review
+(`logs/simplicity-review.md`) + — for any diff touching a **TCB path** — a
+recorded cross-model (codex) review (ADR-0007). TCB paths: `tests/gate/**`,
+`smt/smtlib/printer*`, `tools/check_frozen*` / `FROZEN.sha256` mechanics, and any
+canonicalization / cache-key code. "No findings" is a valid recorded verdict; a
+content-filter refusal that exits 0 with zero findings is not — validate per
+`logs/codex-review-runbook.md`.
+
+## Acceptance thresholds (milestone-done, author policy)
+
+Milestone-done is defined by `STATUS.md` numbers, two tiers: the VC-shaped corpus
+solves ~100% at low-ms (the **user bar**); SMT-LIB solves **≥95%** within the
+per-goal timeout with **zero soundness mismatches**, remainder triaged with named
+causes (the **insurance bar**, may lag).
+
 ## Maps (the master's working set — cite, don't paraphrase)
 
 - `ARCHITECTURE.md` — module DAG, one paragraph each.

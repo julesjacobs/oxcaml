@@ -18,3 +18,8 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
 - ADR-0006 — Unsat certificates + Lean replay (M5 pulled forward): off-core
   `smt/certificate/` module, payload-free `Rule_tag`, `sat.mli` DRAT hooks bundled
   into the ADR-0005 Tranche-C freeze. [accepted (design; implementation post-M4)]
+- ADR-0007 — Cross-model review is blocking for TCB-path merges (gate reader,
+  shipped printer, `check_frozen`/`FROZEN.sha256` mechanics, canonicalization/
+  cache-key code); a codex (gpt-5.6) pass in addition to same-model adversarial
+  review, after a cross-model retrospective caught four gate-reader holes
+  same-model review had cleared. [accepted]
