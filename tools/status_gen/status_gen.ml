@@ -12,7 +12,7 @@
      the fast suite; this reads that file, it does not run the harness)
    - the latest gate log WHOSE PROVENANCE HEAD MATCHES the summarized tree (task #133):
      all worktrees share ../logs, so a log is trusted only if the gate dir name
-     (gate-<stamp>-<HEAD>) records the same HEAD we are summarizing — otherwise loud
+     (gate-<stamp>-<pid>-<HEAD>) records the same HEAD we are summarizing — otherwise loud
      absence, never a foreign/stale verdict -> gate outcome counts, honeypot floor, cache
    - most recent stats JSONL -> counter-bucket distribution + solved-rate (buckets and
      verdicts are deterministic; per-goal wall_ms is deliberately NOT emitted — it is
@@ -310,8 +310,10 @@ let recent_stats_files stats_dir k =
 ;;
 
 (* Provenance HEAD embedded in a gate log dir name by the gate runner (task #133): dir
-   names are "gate-<stamp>-<HEAD>", where HEAD is 40 hex chars. Returns the HEAD, or None
-   for a legacy "gate-<stamp>" dir or a "nohead" run (both treated as unmatched). *)
+   names are "gate-<stamp>-<pid>-<HEAD>", where HEAD is the FINAL '-'-component and 40 hex
+   chars. Returns the HEAD, or None for a legacy "gate-<stamp>" dir or a "nohead" run
+   (both treated as unmatched). Taking the last component keeps this robust to the extra
+   <pid> field the gate fix round added. *)
 let provenance_of_dirname f =
   match List.rev (String.split_on_char '-' f) with
   | last :: _ ->
@@ -594,10 +596,66 @@ let parse_args () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Self-test: the gate-log provenance parse (task #133). *)
+(* Guards the CRITICAL invariant that the provenance HEAD is the FINAL *)
+(* '-'-component of the dir name, so the `gate-<stamp>-<pid>-<HEAD>` *)
+(* naming introduced by the gate fix round still parses. *)
+(* ------------------------------------------------------------------ *)
+
+let selftest () =
+  let failures = ref 0 in
+  let check name got expected =
+    if got = expected
+    then Printf.printf "  ok   %s\n" name
+    else (
+      incr failures;
+      Printf.printf "  FAIL %s\n" name)
+  in
+  let h = String.make 40 'a' in
+  (* legacy pre-provenance dir: no HEAD component *)
+  check "legacy gate-<stamp> -> None" (provenance_of_dirname "gate-20260101-000000") None;
+  (* nohead sentinel (git unavailable) -> unmatched *)
+  check "nohead -> None" (provenance_of_dirname "gate-20260101-000000-nohead") None;
+  (* pre-fix head form (still valid: HEAD is last) *)
+  check
+    "gate-<stamp>-<HEAD> -> Some head"
+    (provenance_of_dirname ("gate-20260101-000000-" ^ h))
+    (Some h);
+  (* NEW pid form from the fix round: HEAD is STILL the final component *)
+  check
+    "gate-<stamp>-<pid>-<HEAD> -> Some head"
+    (provenance_of_dirname ("gate-20260101-000000-12345-" ^ h))
+    (Some h);
+  (* degenerate: wrong-length / non-hex final component -> None *)
+  check
+    "39-char final -> None"
+    (provenance_of_dirname ("gate-20260101-000000-" ^ String.make 39 'a'))
+    None;
+  check
+    "41-char final -> None"
+    (provenance_of_dirname ("gate-20260101-000000-" ^ String.make 41 'a'))
+    None;
+  check
+    "non-hex final -> None"
+    (provenance_of_dirname ("gate-20260101-000000-" ^ String.make 40 'g'))
+    None;
+  if !failures = 0
+  then print_endline "status_gen selftest: all checks passed"
+  else (
+    Printf.printf "status_gen selftest: %d check(s) FAILED\n" !failures;
+    exit 1)
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Main *)
 (* ------------------------------------------------------------------ *)
 
 let () =
+  (match Array.to_list Sys.argv with
+   | _ :: "selftest" :: _ ->
+     selftest ();
+     exit 0
+   | _ -> ());
   let cfg = parse_args () in
   let b = Buffer.create 8192 in
   let out fmt = Printf.ksprintf (fun s -> Buffer.add_string b s) fmt in

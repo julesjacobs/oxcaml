@@ -69,7 +69,7 @@ CORPUS_TIMEOUT ?= 2
 CORPUS_JOBS ?= 48
 CORPUS_MAX_BYTES ?= 20971520
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -325,6 +325,11 @@ status:
 	  --repo . --logs $(LOGS) --stats $(STATS) --tasks TASKS.md \
 	  --budgets tools/line_budgets.txt \
 	  --harness-digest $(LOGS)/harness/last-digest.txt --out STATUS.md
+
+## status-test — status_gen self-test: the gate-log provenance parse (task #133),
+##   incl. the pid-form dir name from the gate fix round. Nonzero exit on any failure.
+status-test:
+	$(DUNE) exec tools/status_gen/status_gen.exe -- selftest
 
 ## status-fresh — refresh inputs, then regenerate (the nightly path). Runs the
 ##   fast harness once (writing a new stats JSONL + capturing its digest) so the

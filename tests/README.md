@@ -233,7 +233,7 @@ that before touching `encoder.ml`.
   injectivity), then `gate run`: honeypots first (abort red unless the floor is
   met and every honeypot matches its expected outcome), then the `tests/cases`
   corpus, using the cache in `../cache`. Digest to stdout; full log (and every
-  generated `.lean` / Lean output) under `../logs/gate-<timestamp>-<HEAD>/`, where
+  generated `.lean` / Lean output) under `../logs/gate-<timestamp>-<pid>-<HEAD>/`, where
   `<HEAD>` is the git HEAD of the checkout that ran the gate — provenance so a shared
   `../logs` cannot let one tree's gate result be read as another's (task #133; the
   trailing component is `nohead` if git is unavailable).
@@ -406,7 +406,7 @@ one degrades to `n/a`, never a crash):
   emits a **loud leading `‼ GATE RED — SOUNDNESS BREACH`** line so a soundness
   failure screams from the outcome metrics rather than hiding in a count.
   **Provenance guard (task #133):** all worktrees share `../logs`, so the gate stamps its
-  HEAD into the log-dir name (`gate-<stamp>-<HEAD>`) and status_gen reads **only** logs
+  HEAD into the log-dir name (`gate-<stamp>-<pid>-<HEAD>`) and status_gen reads **only** logs
   whose HEAD equals the tree it is summarizing. No matching log ⇒ the gate/cache lines
   say **"no gate run at this HEAD"** (loud absence) — a concurrent worktree's gate run can
   never surface a foreign or stale verdict as trunk's state (the b30b6e2 contamination);

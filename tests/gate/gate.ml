@@ -228,33 +228,96 @@ let print_line ctx label file (o : Outcome.t) disp =
    makes concurrent-worktree dirs distinct). Logging-side only — it never influences any
    certification decision. Best-effort: a missing/failed git yields "nohead", which
    status_gen treats as unmatched (loud absence), never a false match. *)
+let is_head s =
+  String.length s = 40
+  && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) s
+;;
+
+(* Read all of [fd] to a string (fd is closed on exit). *)
+let read_all_fd fd =
+  let ic = Unix.in_channel_of_descr fd in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let b = Buffer.create 64 in
+       let chunk = Bytes.create 4096 in
+       let rec loop () =
+         let n = input ic chunk 0 (Bytes.length chunk) in
+         if n > 0
+         then (
+           Buffer.add_subbytes b chunk 0 n;
+           loop ())
+       in
+       loop ();
+       Buffer.contents b)
+;;
+
+(* [git rev-parse HEAD], hardened (codex Scope B, task #133):
+   - HARD TIMEOUT via a WNOHANG poll loop (a hung/never-exiting git must not wedge the
+     gate before any honeypot/certification runs; a bare input_line/waitpid could block
+     forever and try/with cannot catch a block). Timeout -> kill + reap -> "nohead".
+   - STRICT acceptance: stamp a HEAD only if git EXITED 0 AND its output is exactly one
+     line AND that line is 40 hex (so a nonzero exit, or a 40-hex first line with garbage
+     after it, does NOT stamp provenance).
+   - fds closed and the child reaped on every path (normal, timeout, exception). This is
+     logging-side only — the result just names the log dir, never a verdict. *)
 let provenance_head () =
-  try
+  let timeout = 5.0 in
+  match
     let r, w = Unix.pipe () in
     let devnull = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
-    let pid =
-      Unix.create_process "git" [| "git"; "rev-parse"; "HEAD" |] Unix.stdin w devnull
+    let close_guarded fd =
+      try Unix.close fd with
+      | _ -> ()
     in
-    Unix.close w;
-    Unix.close devnull;
-    let ic = Unix.in_channel_of_descr r in
-    let line =
-      Fun.protect
-        ~finally:(fun () -> close_in_noerr ic)
-        (fun () ->
-           try input_line ic with
-           | End_of_file -> "")
-    in
-    ignore (Unix.waitpid [] pid);
-    let h = String.trim line in
-    (* a HEAD is 40 hex chars; anything else (empty, error text) -> nohead *)
-    if
-      String.length h = 40
-      && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) h
-    then h
-    else "nohead"
+    Fun.protect
+      ~finally:(fun () ->
+        close_guarded r;
+        close_guarded w;
+        close_guarded devnull)
+      (fun () ->
+         let pid =
+           Unix.create_process "git" [| "git"; "rev-parse"; "HEAD" |] Unix.stdin w devnull
+         in
+         close_guarded w;
+         (* parent end; child holds its own *)
+         close_guarded devnull;
+         let deadline = Unix.gettimeofday () +. timeout in
+         (* Poll for exit; kill+reap if the deadline passes. git's output (one 41-byte
+           line) is far smaller than the pipe buffer, so the child never blocks on write
+           and we can safely read only after it has exited/been killed. *)
+         let rec wait () =
+           match Unix.waitpid [ Unix.WNOHANG ] pid with
+           | 0, _ ->
+             if Unix.gettimeofday () > deadline
+             then (
+               (try Unix.kill pid Sys.sigkill with
+                | _ -> ());
+               (try ignore (Unix.waitpid [] pid) with
+                | _ -> ());
+               `Timeout)
+             else (
+               Unix.sleepf 0.01;
+               wait ())
+           | _, status -> `Exited status
+         in
+         let result = wait () in
+         (* Read the pipe ONLY on a clean exit. On timeout we must NOT read: a killed git
+           may have spawned a child (e.g. a shell wrapper's `sleep`) that inherited the
+           write end and keeps it open, so reading to EOF would block forever — defeating
+           the very timeout we just enforced. A non-clean exit's output is untrusted
+           anyway. *)
+         match result with
+         | `Timeout -> "nohead"
+         | `Exited (Unix.WEXITED 0) ->
+           let out = read_all_fd r in
+           (match String.split_on_char '\n' (String.trim out) with
+            | [ h ] when is_head h -> h
+            | _ -> "nohead")
+         | `Exited _ -> "nohead")
   with
-  | _ -> "nohead"
+  | h -> h
+  | exception _ -> "nohead"
 ;;
 
 let run_dir_now logs_root =
@@ -269,9 +332,14 @@ let run_dir_now logs_root =
       t.tm_min
       t.tm_sec
   in
-  (* gate-<stamp>-<HEAD>: stamp keeps human/mtime ordering, trailing HEAD is the
-     provenance component status_gen matches on. *)
-  Filename.concat logs_root (Printf.sprintf "gate-%s-%s" stamp (provenance_head ()))
+  (* gate-<stamp>-<pid>-<HEAD>: the pid makes two runs in the SAME wall-second with the
+     same HEAD (or both "nohead") land in DISTINCT dirs — otherwise they'd share a log dir
+     and per-query %03d .lean files, so one run's Lean child could read the other's
+     overwritten file and certify a different query (codex Scope B, CRITICAL). HEAD stays
+     the FINAL '-'-component so status_gen's provenance parse is unchanged. *)
+  Filename.concat
+    logs_root
+    (Printf.sprintf "gate-%s-%d-%s" stamp (Unix.getpid ()) (provenance_head ()))
 ;;
 
 (* A green gate that hasn't proven it can go red is unaudited (DESIGN.md §10), so the
