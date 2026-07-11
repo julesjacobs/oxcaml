@@ -222,9 +222,23 @@ let content_fields =
    cache-audit intent (re-certify N random hits, alarm on mismatch). *)
 let expected_fields = content_fields @ [ "integrity" ]
 
+(* LENGTH-PREFIX each value ([<byte-len>:<value>], netstring-style) before hashing, so the
+   preimage is injective over the field tuple (codex round-3 LOW cache.ml:225). A plain
+   [String.concat "\x00"] is NOT injective: a value containing the separator byte can
+   shift bytes across a field boundary for an identical preimage (e.g. [detail="x\x00y"],
+   [encoding-version=""] vs [detail="x"], [encoding-version="y"]). With each value read by
+   its length the boundaries are unambiguous, so distinct tuples always get distinct
+   digests. (This cannot forge a false GREEN — identity fields are fixed-format and
+   outcome tags are distinct — but it makes the "binds each field" claim actually true.) *)
 let content_digest fields =
   Sha256.hex_digest
-    (String.concat "\x00" (List.map (fun n -> List.assoc n fields) content_fields))
+    (String.concat
+       ""
+       (List.map
+          (fun n ->
+             let v = List.assoc n fields in
+             Printf.sprintf "%d:%s" (String.length v) v)
+          content_fields))
 ;;
 
 (* The three outcomes of a lookup, kept DISTINCT so the driver can count a corrupted /

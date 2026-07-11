@@ -1055,6 +1055,18 @@ let cmd_selftest () =
     ~stored:Outcome.Certified
     ~needle:"(outcome CERTIFIED)"
     ~repl:"(outcome REFUTED)";
+  (* (10) integrity-preimage injectivity (codex round-3 LOW): two content tuples that
+     collide under a plain NUL-join — a byte shifted across the detail/next-field boundary
+     via a value containing the separator — MUST get DIFFERENT length-prefixed digests. *)
+  let base = full_fields (dummy "inj") ~claim:"unsat" ~tag:"CERTIFIED" ~detail:"" in
+  let set n v a = (n, v) :: List.remove_assoc n a in
+  let a = base |> set "detail" "x" |> set "encoding-version" "y" in
+  let b = base |> set "detail" "x\000y" |> set "encoding-version" "" in
+  if not (String.equal (Cache.content_digest a) (Cache.content_digest b))
+  then print_endline "integrity preimage: OK (injective across field boundary)"
+  else (
+    ok := false;
+    print_endline "integrity preimage: FAIL (boundary-shift tuples collide)");
   (* Best-effort cleanup of the throwaway cache dir. *)
   (try
      Array.iter
