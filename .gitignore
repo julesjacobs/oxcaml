@@ -1,0 +1,9 @@
+_build/
+*.install
+*.merlin
+
+# The following live OUTSIDE this repo, as siblings of main/, and are NEVER
+# tracked here (see AGENTS.md / DESIGN.md §11):
+#   ../cache/    content-addressed Lean oracle cache
+#   ../corpora/  public benchmark sets, fetched once
+#   ../logs/     full tool output (agents read digests, detail lands here)

@@ -1,0 +1,7 @@
+; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall).
+; The printer ships; the parser is test-only and must never be linked into the
+; compiler (DESIGN.md §3). Keep the parser behind its own module so that
+; boundary stays mechanically checkable.
+
+(library
+ (name oxsmt_smtlib))
