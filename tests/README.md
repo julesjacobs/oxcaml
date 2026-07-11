@@ -204,3 +204,41 @@ honeypots are never cached.
 emitted Lean — preamble, tactic, or term mapping. The cache is keyed on it, so a
 bump cleanly invalidates every prior certification rather than silently trusting a
 stale one.
+
+## STATUS.md generation (`make status`, `tools/status_gen/`)
+
+`STATUS.md` is the master's empirical view of the world (DESIGN.md §8.4, §11):
+**outcome metrics first** (goal-displacement defense), process metrics after. It
+is **generated, never hand-edited** — the banner says so, and `make status`
+overwrites it. There is no CI/nightly scheduler yet; the `make status` target IS
+the deliverable, and a scheduler wires it later.
+
+The generator (`tools/status_gen/status_gen.ml`, stdlib+Unix, standalone — it
+lives under `tools/` alongside `check_frozen.sh` rather than in `tests/`, so it
+does not couple to the harness build) **aggregates existing artifacts**; it does
+not run Lean or re-derive product state. Inputs, each optional (a missing one
+degrades to `n/a`, never a crash):
+
+- **TASKS.md** → per-milestone done/total and the current milestone (first
+  `M<n>-` row group with any non-`done` row);
+- **git** → the `generated at <HEAD>` line (git HEAD short hash, **never
+  wall-clock**, so the committed file stays reproducible), worktree/branch
+  hygiene, and days-since-last-outcome-improvement (commits touching `smt/` or
+  `tests/cases/`, measured to HEAD's commit timestamp — a documented heuristic);
+- **the harness digest** → live pass/fail (`make status` runs the fast harness
+  once and captures its stdout; a red harness does not abort generation);
+- **the latest `../logs/gate-*/gate.log`** → gate outcome counts, honeypot floor,
+  cache hit-rate, Lean/encoding versions;
+- **the stats JSONL** (the sidecar above) → search-counter bucket distributions,
+  top-k slowest goals by `wall_ms`, and the corpus solved-rate over `tests/cases`
+  (fraction of goals with a definite `sat`/`unsat` verdict — **0% while the
+  solver is a stub; this is the number that must move**);
+- **`tools/line_budgets.txt`** (committed, master-owned) → per-module `.ml`+`.mli`
+  line counts vs budget, flagged `OVER` past budget (a tripwire, not a gate —
+  DESIGN.md §10).
+
+Determinism: given the same inputs the output is identical except the
+`generated at` line. Note that `make status` writes a fresh stats file each run
+(it runs the harness), so the process-metrics perf table naturally reflects
+recent runs; the outcome metrics are stable given repo + logs. Digest-first: the
+target prints ~5 summary lines and writes the full document to `STATUS.md`.
