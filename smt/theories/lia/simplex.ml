@@ -56,6 +56,11 @@ type 'a t =
   ; trail : 'a undo Dynarray.t
   ; scopes : int Dynarray.t (* trail length at each open frame *)
   ; mutable pending : 'a conflict option
+  ; mutable pending_pos : int
+    (* trail length at the moment [pending] was set, i.e. its triggering bound's undo
+         entry is at index [pending_pos - 1]. [pop] uses this to clear [pending] only when
+         that bound is actually undone (codex L3), never for a conflict rooted below the
+         popped scope. Meaningless when [pending = None]. *)
   ; mutable pivots : int
   ; mutable poisoned : bool
     (* set the instant a Rational.Overflow escapes a state-mutating op: the tableau may be
@@ -73,12 +78,18 @@ let create () =
   ; trail = Dynarray.create ()
   ; scopes = Dynarray.create ()
   ; pending = None
+  ; pending_pos = 0
   ; pivots = 0
   ; poisoned = false
   }
 ;;
 
 let is_poisoned t = t.poisoned
+
+(* Brick the instance explicitly. The [Lia] layer calls this when a [Rational.Overflow]
+   escapes its OWN arithmetic (atom translation, B&B branch bounds) — outside a {!guarded}
+   simplex op — so reuse is refused there too. *)
+let poison t = t.poisoned <- true
 
 (* Run [f] (a state-mutating body that does exact arithmetic); if it raises
    [Rational.Overflow] the tableau may be left mid-pivot, so brick the instance before
@@ -147,7 +158,19 @@ let expand t (def : linexp) : linexp =
 
 let new_slack t (pairs : (int * Rational.t) list) =
   guarded t (fun () ->
-    let def = List.fold_left (fun m (j, c) -> IntMap.add j c m) IntMap.empty pairs in
+    (* SUM coefficients on a repeated variable — do NOT overwrite (codex L1). A caller
+       that passes e.g. [(x,1);(x,-1)] means s = 1·x + (-1)·x = 0·x, not s = -x;
+       overwriting with IntMap.add would build the wrong def and Farkas-certify a false
+       conflict. A resulting zero coefficient is dropped so [def] keeps its "no explicit
+       zero" invariant. *)
+    let def =
+      List.fold_left
+        (fun m (j, c) ->
+           let c' = Rational.add (coeff m j) c in
+           if Rational.is_zero c' then IntMap.remove j m else IntMap.add j c' m)
+        IntMap.empty
+        pairs
+    in
     let id = Dynarray.length t.vars in
     let v =
       { id
@@ -250,6 +273,7 @@ let assert_lower t vid (d : Delta.t) reason =
              ]
          in
          t.pending <- Some c;
+         t.pending_pos <- Dynarray.length t.trail;
          Some c
        | _ ->
          let old = v.lower in
@@ -278,6 +302,7 @@ let assert_upper t vid (d : Delta.t) reason =
              ]
          in
          t.pending <- Some c;
+         t.pending_pos <- Dynarray.length t.trail;
          Some c
        | _ ->
          let old = v.upper in
@@ -438,5 +463,9 @@ let pop t n =
       | Undo_upper (vid, old) -> (get t vid).upper <- old
     done
   done;
-  t.pending <- None
+  (* Clear [pending] ONLY if its triggering bound was undone by this pop (codex L3). A
+     conflict rooted BELOW the popped scope (its trigger still on the trail) survives: its
+     bounds are still asserted, so the contradiction is still real and must not be
+     silently dropped (which would let the next check return a false Sat). *)
+  if t.pending <> None && t.pending_pos > Dynarray.length t.trail then t.pending <- None
 ;;

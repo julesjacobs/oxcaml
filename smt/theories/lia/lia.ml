@@ -66,6 +66,26 @@ let create ctx =
    could read or extend solver state calls this first. *)
 let ensure_live t = if Simplex.is_poisoned t.simplex then raise Poisoned
 
+(* Run [f]; if its arithmetic overflows, brick the instance before re-raising, so a caught
+   [Rational.Overflow] can't be followed by reuse of a translation-corrupted instance.
+   This is the [Lia]-side analogue of [Simplex.guarded] for arithmetic done OUTSIDE a
+   simplex op (atom/equality translation, B&B branch bounds — codex L2/L4/L5). *)
+let guard_overflow t f =
+  try f () with
+  | Rational.Overflow ->
+    Simplex.poison t.simplex;
+    raise Rational.Overflow
+;;
+
+(* Overflow-guarded native-int arithmetic on user-derived constants/coefficients: routed
+   through the guarded {!Rational} ops (which raise {!Rational.Overflow} rather than
+   wrap), so an atom constant or coefficient at the int boundary degrades to [unknown]
+   instead of silently producing a WRONG bound (codex L2/L4/L5). All are integer-valued
+   in, out. *)
+let ineg n = Rational.num (Rational.neg (Rational.of_int n))
+let isub a b = Rational.num (Rational.sub (Rational.of_int a) (Rational.of_int b))
+let iadd a b = Rational.num (Rational.add (Rational.of_int a) (Rational.of_int b))
+
 (* Get or create the problem variable for a term leaf. *)
 let problem_var t (term : Term.t) =
   match Term.Table.find_opt t.var_of_term term with
@@ -127,57 +147,48 @@ let constraints_of_atom t (atom : Term.t) ~polarity
     let var = var_for_combo t pairs in
     if polarity
     then
-      (* Σ coeff·x + const <= 0 ==> var <= -const *)
-      [ var, `Upper, Delta.of_rat (Rational.of_int (-const)) ]
+      (* Σ coeff·x + const <= 0 ==> var <= -const (guarded: const=min_int must not wrap) *)
+      [ var, `Upper, Delta.of_rat (Rational.of_int (ineg const)) ]
     else
-      (* ¬(inner <= 0) ≡ inner >= 1 (exact ℤ complement) ==> var >= 1 - const *)
-      [ var, `Lower, Delta.of_rat (Rational.of_int (1 - const)) ]
+      (* ¬(inner <= 0) ≡ inner >= 1 (exact ℤ complement) ==> var >= 1 - const (guarded) *)
+      [ var, `Lower, Delta.of_rat (Rational.of_int (isub 1 const)) ]
   | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
     if not polarity then raise (Unsupported "LIA: disequality needs a trichotomy split");
     (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
     let pa, ca = combo_of_term t a in
     let pb, cb = combo_of_term t b in
+    (* coeff merges guarded (iadd/isub): a coefficient sum at the int boundary must raise,
+       not wrap to a wrong merged constraint (codex L5). *)
     let merged =
       let tbl = Hashtbl.create 16 in
-      List.iter
-        (fun (x, c) ->
-           Hashtbl.replace
-             tbl
-             x
-             (c
-              +
-              try Hashtbl.find tbl x with
-              | Not_found -> 0))
-        pa;
-      List.iter
-        (fun (x, c) ->
-           Hashtbl.replace
-             tbl
-             x
-             ((try Hashtbl.find tbl x with
-               | Not_found -> 0)
-              - c))
-        pb;
+      let cur x =
+        try Hashtbl.find tbl x with
+        | Not_found -> 0
+      in
+      List.iter (fun (x, c) -> Hashtbl.replace tbl x (iadd (cur x) c)) pa;
+      List.iter (fun (x, c) -> Hashtbl.replace tbl x (isub (cur x) c)) pb;
       Hashtbl.fold (fun x c acc -> if c = 0 then acc else (x, c) :: acc) tbl []
     in
     if merged = [] then raise (Unsupported "LIA: trivial equality (should be folded)");
     let var = var_for_combo t merged in
-    let rhs = Delta.of_rat (Rational.of_int (-(ca - cb))) in
+    (* rhs = -(ca - cb) = cb - ca, guarded *)
+    let rhs = Delta.of_rat (Rational.of_int (isub cb ca)) in
     [ var, `Upper, rhs; var, `Lower, rhs ]
   | _ -> raise (Unsupported "LIA: atom is neither Le nor an Int equality")
 ;;
 
 let assert_atom t atom ~polarity ~premise =
   ensure_live t;
-  List.iter
-    (fun (var, sense, rhs) ->
-       let _ : _ Simplex.conflict option =
-         match sense with
-         | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
-         | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
-       in
-       ())
-    (constraints_of_atom t atom ~polarity)
+  guard_overflow t (fun () ->
+    List.iter
+      (fun (var, sense, rhs) ->
+         let _ : _ Simplex.conflict option =
+           match sense with
+           | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
+           | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
+         in
+         ())
+      (constraints_of_atom t atom ~polarity))
 ;;
 
 let register_atom t (atom : Term.t) =
@@ -187,13 +198,14 @@ let register_atom t (atom : Term.t) =
   match atom.node with
   | Le _ ->
     if not (Dynarray.exists (fun r -> Term.equal r.atom atom) t.registered)
-    then (
-      match constraints_of_atom t atom ~polarity:true with
-      | [ (var, `Upper, rhs) ] ->
-        Dynarray.add_last t.registered { atom; var; is_upper = true; rhs }
-      | [ (var, `Lower, rhs) ] ->
-        Dynarray.add_last t.registered { atom; var; is_upper = false; rhs }
-      | _ -> ())
+    then
+      guard_overflow t (fun () ->
+        match constraints_of_atom t atom ~polarity:true with
+        | [ (var, `Upper, rhs) ] ->
+          Dynarray.add_last t.registered { atom; var; is_upper = true; rhs }
+        | [ (var, `Lower, rhs) ] ->
+          Dynarray.add_last t.registered { atom; var; is_upper = false; rhs }
+        | _ -> ())
   | _ -> ()
 ;;
 
@@ -254,8 +266,9 @@ let suggest_branch t =
   | None -> None
   | Some (term, _, d) ->
     let f = Rational.floor (Delta.c_part d) in
+    let fp1 = guard_overflow t (fun () -> iadd f 1) in
     let le_atom = Context.le t.ctx term (Context.int_const t.ctx f) in
-    let ge_atom = Context.ge t.ctx term (Context.int_const t.ctx (f + 1)) in
+    let ge_atom = Context.ge t.ctx term (Context.int_const t.ctx fp1) in
     Some (le_atom, ge_atom)
 ;;
 
@@ -297,7 +310,9 @@ let solve_integer ?(budget = default_budget) t =
            incr splits;
            let f = Rational.floor (Delta.c_part d) in
            let lo = Delta.of_rat (Rational.of_int f) in
-           let hi = Delta.of_rat (Rational.of_int (f + 1)) in
+           (* f+1 guarded: a branch point at the int boundary must raise (→ Int_unknown
+              below), not wrap to a bogus bound (codex L2/L4/L5 class). *)
+           let hi = Delta.of_rat (Rational.of_int (iadd f 1)) in
            Simplex.push t.simplex;
            let _ = Simplex.assert_upper t.simplex id lo (Branch id) in
            let r1 = dfs ~depth0:false in
@@ -322,6 +337,9 @@ let solve_integer ?(budget = default_budget) t =
   | `Unknown -> Int_unknown
   | `Unsat -> Int_unsat !root_conflict
   | exception Rational.Overflow ->
+    (* Poison regardless of where the overflow arose (mid-pivot via Simplex.guarded, or a
+       branch-point iadd here): the instance is not safe to reuse. *)
+    Simplex.poison t.simplex;
     t.overflows <- t.overflows + 1;
     Int_unknown
 ;;

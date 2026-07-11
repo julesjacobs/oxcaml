@@ -86,5 +86,10 @@ val pivot_count : 'a t -> int
     cleared. *)
 val is_poisoned : 'a t -> bool
 
+(** Brick the instance explicitly (sets {!is_poisoned}). For the {!Lia} layer to poison on
+    a {!Rational.Overflow} that escapes its own arithmetic — atom translation, B&B branch
+    bounds — which happens outside a guarded simplex op. *)
+val poison : 'a t -> unit
+
 (** Number of variables allocated. *)
 val num_vars : 'a t -> int

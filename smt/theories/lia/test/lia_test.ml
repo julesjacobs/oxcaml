@@ -647,6 +647,113 @@ let test_push_pop () =
 ;;
 
 (* ================================================================== *)
+(* Cross-model (codex) review findings L1-L5: each test encodes the exact reproduction. *)
+
+let test_codex_findings () =
+  print_endline "codex L1-L5:";
+  (* L1 (false-unsat): new_slack must SUM a repeated var's coeffs, not overwrite. s =
+     1·x + (-1)·x is identically 0, so s>=1 is UNSAT. The overwrite bug builds s=-x, which
+     is feasible (x=-1) => a Farkas-"certified" false verdict. *)
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let sl = Simplex.new_slack s [ x, Rational.of_int 1; x, Rational.of_int (-1) ] in
+   let _ = Simplex.assert_lower s sl (Delta.of_rat (Rational.of_int 1)) "sl>=1" in
+   check "L1: [(x,1);(x,-1)] slack = 0, so sl>=1 is UNSAT" (Simplex.check s <> None));
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let sl = Simplex.new_slack s [ x, Rational.of_int 1; x, Rational.of_int (-1) ] in
+   let _ = Simplex.assert_upper s sl (Delta.of_rat Rational.zero) "sl<=0" in
+   let _ = Simplex.assert_lower s sl (Delta.of_rat Rational.zero) "sl>=0" in
+   check "L1: sl=0 is feasible with no x-dependence" (Simplex.check s = None));
+  (* L3 (false-sat): a conflict recorded at root must SURVIVE a push/pop that does not
+     undo its triggering bound. x<=0 ∧ x>=1 (same var => pending), then push, pop. *)
+  (let fx = make_fixture 1 in
+   ignore (assert_le fx [ 0, 1 ] 0 ~polarity:true);
+   (* x <= 0 *)
+   ignore (assert_le fx [ 0, 1 ] 0 ~polarity:false);
+   (* ¬(x<=0) => x >= 1, same var => pending conflict at root *)
+   (match Lia.check fx.solver with
+    | Lia.Conflict _ -> ()
+    | Lia.Sat_candidate -> check "L3 precondition: root conflict present" false);
+   Lia.push fx.solver;
+   Lia.pop fx.solver 1;
+   (match Lia.check fx.solver with
+    | Lia.Conflict _ -> check "L3: root conflict survives a push/pop above it" true
+    | Lia.Sat_candidate -> check "L3: root conflict survives a push/pop above it" false);
+   match Lia.solve_integer fx.solver with
+   | Lia.Int_unsat _ -> check "L3: solve_integer still UNSAT after push/pop" true
+   | _ -> check "L3: solve_integer still UNSAT after push/pop" false);
+  (* L3 control: a conflict raised INSIDE a pushed scope IS cleared when that scope pops
+     (its triggering bound is undone) — the fix must not over-retain. *)
+  (let fx = make_fixture 1 in
+   ignore (assert_le fx [ 0, 1 ] 0 ~polarity:true);
+   (* x <= 0 at root *)
+   Lia.push fx.solver;
+   ignore (assert_le fx [ 0, 1 ] 0 ~polarity:false);
+   (* x >= 1 inside scope => pending here *)
+   (match Lia.check fx.solver with
+    | Lia.Conflict _ -> ()
+    | Lia.Sat_candidate -> check "L3 control precondition: conflict in scope" false);
+   Lia.pop fx.solver 1;
+   expect_sat fx "L3 control: in-scope conflict clears on pop");
+  (* L2/L4/L5 (false-sat via silent wrap): min_int atom constants must overflow in
+     translation (=> Rational.Overflow => poison => unknown), not wrap to a bogus bound. *)
+  let raises_overflow name f =
+    incr checks;
+    match f () with
+    | _ ->
+      incr failures;
+      Printf.printf "  FAIL %s (expected Rational.Overflow)\n" name
+    | exception Rational.Overflow -> ()
+    | exception e ->
+      incr failures;
+      Printf.printf
+        "  FAIL %s (expected Rational.Overflow, got %s)\n"
+        name
+        (Printexc.to_string e)
+  in
+  (* L2: positive Le, var <= -const, const=min_int => -const wraps. *)
+  (let fx = make_fixture 1 in
+   let atom = mk_le fx [ 0, 1 ] min_int in
+   raises_overflow "L2: x+min_int<=0 (pos) raises on -const" (fun () ->
+     Lia.assert_atom fx.solver atom ~polarity:true ~premise:0);
+   check "L2: instance poisoned after translation overflow" (Lia.is_poisoned fx.solver);
+   incr checks;
+   match Lia.check fx.solver with
+   | exception Lia.Poisoned -> ()
+   | _ ->
+     incr failures;
+     Printf.printf "  FAIL L2: reuse after translation overflow must raise Poisoned\n");
+  (* L4: negated Le, var >= 1-const, const=min_int => 1-const wraps. *)
+  (let fx = make_fixture 1 in
+   let atom = mk_le fx [ 0, 1 ] min_int in
+   raises_overflow "L4: ¬(x+min_int<=0) (neg) raises on 1-const" (fun () ->
+     Lia.assert_atom fx.solver atom ~polarity:false ~premise:0);
+   check
+     "L4: instance poisoned after neg translation overflow"
+     (Lia.is_poisoned fx.solver));
+  (* L5: equality coeff/const merge, cb-ca with a min_int const, and a coeff sum at
+     max_int. *)
+  (let fx = make_fixture 2 in
+   let a = Context.linear_combination fx.ctx [ 1, fx.vars.(0) ] min_int in
+   (* x0 + min_int *)
+   let b = fx.vars.(1) in
+   let eq = Context.eq fx.ctx a b in
+   raises_overflow "L5: (x0+min_int = x1) raises on the guarded rhs merge" (fun () ->
+     Lia.assert_atom fx.solver eq ~polarity:true ~premise:0);
+   check "L5: instance poisoned after equality-merge overflow" (Lia.is_poisoned fx.solver));
+  let fx = make_fixture 1 in
+  let a = Context.mul_const fx.ctx max_int fx.vars.(0) in
+  (* max_int·x0 *)
+  let b = Context.neg fx.ctx fx.vars.(0) in
+  (* -x0 *)
+  let eq = Context.eq fx.ctx a b in
+  raises_overflow "L5: (max_int·x0 = -x0) raises on the guarded coeff merge" (fun () ->
+    Lia.assert_atom fx.solver eq ~polarity:true ~premise:0);
+  check "L5: instance poisoned after coeff-merge overflow" (Lia.is_poisoned fx.solver)
+;;
+
+(* ================================================================== *)
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -656,6 +763,7 @@ let () =
   test_farkas_mutant ();
   test_propagation ();
   test_push_pop ();
+  test_codex_findings ();
   test_bruteforce ();
   test_overflow ();
   test_determinism ();
