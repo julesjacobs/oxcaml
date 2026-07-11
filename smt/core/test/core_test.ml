@@ -49,6 +49,24 @@ let check_sort_error name f =
     Printf.printf "  FAIL %s (no exception, expected Sort_error)\n" name
 ;;
 
+(* Like check_sort_error, for the [Term.Unsupported] contract (out-of-fragment inputs).
+   Kills a mutant that drops a div/mod_ trigger guard: without it the constructor returns
+   a term instead of raising Unsupported. *)
+let check_unsupported name f =
+  incr checks;
+  match f () with
+  | exception Term.Unsupported _ -> ()
+  | exception e ->
+    incr failures;
+    Printf.printf
+      "  FAIL %s (raised %s, expected Unsupported)\n"
+      name
+      (Printexc.to_string e)
+  | _ ->
+    incr failures;
+    Printf.printf "  FAIL %s (no exception, expected Unsupported)\n" name
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Deterministic PRNG: xorshift64*, fixed seed. *)
 
@@ -369,7 +387,7 @@ let test_sort_errors () =
 
 (* ================================================================== *)
 let test_overflow_unsupported () =
-  print_endline "overflow / unsupported (pre-mutation contract):";
+  print_endline "overflow (pre-mutation contract):";
   let c = Context.create env in
   let x = Context.const c int_vars.(0) in
   (* Direct constant fold overflow: raise BEFORE any interning. *)
@@ -390,20 +408,51 @@ let test_overflow_unsupported () =
   ignore before;
   (* mul_const overflow. *)
   check_raises "mul_const overflow" (fun () ->
-    Context.mul_const c max_int (Context.add c x x));
-  (* Unsupported: div/mod by non-constant or zero. *)
-  check_raises "div by zero -> Unsupported" (fun () ->
-    Context.div c x (Context.int_const c 0));
-  check_raises "div by non-constant -> Unsupported" (fun () -> Context.div c x x);
-  let before = Context.term_count c in
-  (match Context.div c x x with
-   | _ -> ()
-   | exception _ -> ());
-  check "table unchanged after Unsupported" (Context.term_count c = before);
-  (* div by nonzero constant is fine and is an App on the reserved symbol. *)
+    Context.mul_const c max_int (Context.add c x x))
+;;
+
+(* ================================================================== *)
+(* Unsupported matrix (div/mod_ out-of-fragment triggers). Each trigger asserts
+   [Term.Unsupported] specifically, and (matching the I8 state-safety contract) that the
+   intern table is unchanged after the catch — the error is raised before any App is
+   interned. A valid nonzero-constant divisor is the positive control (it DOES build an
+   App). Kills mutants that drop a trigger guard. *)
+let test_unsupported_matrix () =
+  print_endline "unsupported (div/mod_ triggers, Term.Unsupported + I8 state-safety):";
+  let c = Context.create env in
+  let x = Context.const c int_vars.(0) in
+  let y = Context.const c int_vars.(1) in
+  let zero = Context.int_const c 0 in
+  let three = Context.int_const c 3 in
+  (* Trigger 1: non-constant divisor. Trigger 2: zero divisor. Both div and mod_. *)
+  check_unsupported "div by non-constant" (fun () -> Context.div c x y);
+  check_unsupported "mod_ by non-constant" (fun () -> Context.mod_ c x y);
+  check_unsupported "div by zero" (fun () -> Context.div c x zero);
+  check_unsupported "mod_ by zero" (fun () -> Context.mod_ c x zero);
+  (* I8: table unchanged after the catch, per trigger (raised pre-interning). *)
+  let unchanged name f =
+    let before = Context.term_count c in
+    (try ignore (f ()) with
+     | Term.Unsupported _ -> ());
+    check name (Context.term_count c = before)
+  in
+  unchanged "term_count unchanged after div-non-constant catch" (fun () ->
+    Context.div c x y);
+  unchanged "term_count unchanged after mod_-non-constant catch" (fun () ->
+    Context.mod_ c x y);
+  unchanged "term_count unchanged after div-by-zero catch" (fun () ->
+    Context.div c x zero);
+  unchanged "term_count unchanged after mod_-by-zero catch" (fun () ->
+    Context.mod_ c x zero);
+  (* Positive control: a nonzero constant divisor is supported and builds an App. *)
   check
-    "div by 2 builds App"
-    (match (Context.div c x (Context.int_const c 2)).Term.node with
+    "div by nonzero constant builds App"
+    (match (Context.div c x three).Term.node with
+     | Term.App _ -> true
+     | _ -> false);
+  check
+    "mod_ by nonzero constant builds App"
+    (match (Context.mod_ c x three).Term.node with
      | Term.App _ -> true
      | _ -> false)
 ;;
@@ -796,6 +845,7 @@ let () =
   test_normalization ();
   test_sort_errors ();
   test_overflow_unsupported ();
+  test_unsupported_matrix ();
   test_hashcons_sharing ();
   test_scalar_distinctness ();
   test_bucket_primitives_whitebox ();
