@@ -966,6 +966,8 @@ let test_ovf_guard_parity () =
     (Oxsmt_interface.Cdclt.add_ovf min_int min_int = None);
   check "mul_ovf 6*7 = 42" (Oxsmt_interface.Cdclt.mul_ovf 6 7 = Some 42);
   check "add_ovf 6+7 = 13" (Oxsmt_interface.Cdclt.add_ovf 6 7 = Some 13)
+;;
+
 (* ------------------------------------------------------------------ *)
 (* W1b equality-elimination presolve (logs/w1b-design.md). The batch [assert_presolved]
    path: verdict soundness in both directions, first-wins / cycle / conditional guards,

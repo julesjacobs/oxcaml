@@ -23,6 +23,7 @@ module Model_check = Model_check
     {!Model_check} guards (task #117). Not part of the client-facing session flow, which
     drives it internally via {!Session}. *)
 module Cdclt = Cdclt
+
 (** The W1b unconditional equality-elimination presolve (logs/w1b-design.md), exposed so
     the test suite can unit-test the transform directly (the reduced set / eliminated defs
     / interface-variable no-op). {!Session.assert_presolved} drives it internally on the
