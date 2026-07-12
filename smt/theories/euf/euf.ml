@@ -51,7 +51,7 @@ type watched =
   ; w_a : int
   ; w_b : int
   ; mutable w_reported : int
-  (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
+    (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
   }
 
 type 'p diseq =
@@ -91,6 +91,8 @@ type level =
   ; l_enodes : int
   ; l_watched : int
   ; l_diseqs : int
+  ; l_touched : int (* {!t.touched} length at push (restored on pop) *)
+  ; l_prop_mark : int (* {!t.prop_mark} at push (restored on pop) *)
   }
 
 type 'p t =
@@ -102,8 +104,21 @@ type 'p t =
   ; diseqs : 'p diseq Dynarray.t
   ; trail : 'p undo Dynarray.t
   ; levels : level Dynarray.t
+  ; (* {!propagate} delta log (C1). Every union's surviving root, every asserted
+       disequality's endpoints, and every freshly-watched atom's endpoints are appended
+       here; {!propagate} re-evaluates only watched atoms touching a class in
+       [touched.(prop_mark ..)], then advances [prop_mark]. Truncated to [l_touched] on
+       [pop] and [prop_mark] restored to [l_prop_mark], so a union propagated at a deeper
+       level and then popped is re-evaluated at the shallower level (the watermark trap).
+       A stale (no-longer-root) id in [touched] is harmless: [find] never returns it, so
+       it matches no watched endpoint. *)
+    touched : int Dynarray.t
+  ; mutable prop_mark : int
   ; mutable stamp : int
   }
+
+(* Note a class root as dirty for the next {!propagate} (see [touched]). *)
+let mark_touched t root = Dynarray.add_last t.touched root
 
 let create ctx =
   { ctx
@@ -114,6 +129,8 @@ let create ctx =
   ; diseqs = Dynarray.create ()
   ; trail = Dynarray.create ()
   ; levels = Dynarray.create ()
+  ; touched = Dynarray.create ()
+  ; prop_mark = 0
   ; stamp = 0
   }
 ;;
@@ -154,11 +171,11 @@ let dedup_int lst =
   let seen = Hashtbl.create 16 in
   List.filter
     (fun x ->
-      if Hashtbl.mem seen x
-      then false
-      else (
-        Hashtbl.add seen x ();
-        true))
+       if Hashtbl.mem seen x
+       then false
+       else (
+         Hashtbl.add seen x ();
+         true))
     lst
 ;;
 
@@ -280,6 +297,10 @@ let merge t a0 b0 reason0 =
       let sa = (get t ra).size
       and sb = (get t rb).size in
       let child, root = if sa <= sb then ra, rb else rb, ra in
+      (* the surviving root is the only class whose membership changed — dirty it for the
+         incremental {!propagate} (a watched atom's status can only flip because one of
+         its endpoints now finds to [root]; see [touched]). *)
+      mark_touched t root;
       (* forest edge between the ORIGINAL endpoints, carrying [reason] *)
       add_forest_edge t a b reason;
       let parents = dedup_int (get t child).uses in
@@ -292,11 +313,11 @@ let merge t a0 b0 reason0 =
       (* recompute parent signatures; schedule congruences *)
       List.iter
         (fun p ->
-          let key = sig_key t p in
-          match Sig.find_opt t.sigtbl key with
-          | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
-          | Some _ -> ()
-          | None -> sig_add t key p)
+           let key = sig_key t p in
+           match Sig.find_opt t.sigtbl key with
+           | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
+           | Some _ -> ()
+           | None -> sig_add t key p)
         parents)
   done
 ;;
@@ -360,7 +381,11 @@ let rec register t (term : Term.t) : int =
      | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
        let ia = register t a
        and ib = register t b in
-       Dynarray.add_last t.watched { w_atom = term; w_a = ia; w_b = ib; w_reported = -1 }
+       Dynarray.add_last t.watched { w_atom = term; w_a = ia; w_b = ib; w_reported = -1 };
+       (* a freshly-watched atom must be evaluated by the next {!propagate} even if no
+          merge follows (its sides may already be (dis)equal) — dirty its endpoints. *)
+       mark_touched t (find t ia);
+       mark_touched t (find t ib)
      | _ -> ());
     id
 ;;
@@ -376,7 +401,11 @@ let assert_eq t ~premise a b =
 let assert_neq t ~premise a b =
   let ia = register t a
   and ib = register t b in
-  Dynarray.add_last t.diseqs { d_a = ia; d_b = ib; d_prem = premise }
+  Dynarray.add_last t.diseqs { d_a = ia; d_b = ib; d_prem = premise };
+  (* a new disequality can newly-separate a watched pair whose classes match its
+     endpoints' — dirty both endpoint classes so {!propagate} re-checks them. *)
+  mark_touched t (find t ia);
+  mark_touched t (find t ib)
 ;;
 
 (* --- explanation --------------------------------------------------------- *)
@@ -515,15 +544,15 @@ let check t =
   (try
      Dynarray.iteri
        (fun _ d ->
-         if find t d.d_a = find t d.d_b
-         then (
-           let edges = explain_core t d.d_a d.d_b in
-           if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
-           then
-             failwith
-               "Euf self-check: conflict explanation does not connect the disequal terms";
-           result := Conflict (premises edges @ [ d.d_prem ]);
-           raise Exit))
+          if find t d.d_a = find t d.d_b
+          then (
+            let edges = explain_core t d.d_a d.d_b in
+            if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
+            then
+              failwith
+                "Euf self-check: conflict explanation does not connect the disequal terms";
+            result := Conflict (premises edges @ [ d.d_prem ]);
+            raise Exit))
        t.diseqs
    with
    | Exit -> ());
@@ -541,12 +570,12 @@ let distinct_witness t a b =
   (try
      Dynarray.iter
        (fun d ->
-         let du = find t d.d_a
-         and dv = find t d.d_b in
-         if (du = ra && dv = rb) || (du = rb && dv = ra)
-         then (
-           w := Some d;
-           raise Exit))
+          let du = find t d.d_a
+          and dv = find t d.d_b in
+          if (du = ra && dv = rb) || (du = rb && dv = ra)
+          then (
+            w := Some d;
+            raise Exit))
        t.diseqs
    with
    | Exit -> ());
@@ -558,22 +587,43 @@ type implied =
   ; value : bool
   }
 
+(* Incremental delta-driven propagation (C1). A watched atom's entailed truth can flip
+   only if one of its endpoints now belongs to a class touched since the last [propagate]:
+   a merge (the surviving root), a new disequality (its endpoints), or the atom's own
+   fresh registration (its endpoints) — all recorded in [touched]. So we build the dirty
+   root set from [touched.(prop_mark ..)] and re-evaluate ONLY watched atoms with a dirty
+   endpoint, skipping the O(#diseqs) [distinct_witness] rescan for the unchanged majority.
+   The output is IDENTICAL to a full rescan: a skipped atom's status is provably unchanged
+   since it was last reported (its [w_reported] already matches), so a full rescan would
+   report nothing for it either. Iteration stays in watched-index (registration) order, so
+   the reported list is byte-identical run to run. Empty dirty set ⇒ no work. *)
 let propagate t =
+  let dirty = Hashtbl.create 64 in
+  for i = t.prop_mark to Dynarray.length t.touched - 1 do
+    Hashtbl.replace dirty (Dynarray.get t.touched i) ()
+  done;
+  t.prop_mark <- Dynarray.length t.touched;
   let acc = ref [] in
-  Dynarray.iteri
-    (fun idx w ->
-      let cur =
-        if find t w.w_a = find t w.w_b
-        then 1
-        else if distinct_witness t w.w_a w.w_b <> None
-        then 0
-        else -1
-      in
-      if cur <> -1 && cur <> w.w_reported
-      then (
-        set_reported t idx cur;
-        acc := { atom = w.w_atom; value = cur = 1 } :: !acc))
-    t.watched;
+  if Hashtbl.length dirty > 0
+  then
+    Dynarray.iteri
+      (fun idx w ->
+         let ra = find t w.w_a
+         and rb = find t w.w_b in
+         if Hashtbl.mem dirty ra || Hashtbl.mem dirty rb
+         then (
+           let cur =
+             if ra = rb
+             then 1
+             else if distinct_witness t w.w_a w.w_b <> None
+             then 0
+             else -1
+           in
+           if cur <> -1 && cur <> w.w_reported
+           then (
+             set_reported t idx cur;
+             acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
+      t.watched;
   List.rev !acc
 ;;
 
@@ -624,6 +674,8 @@ let push t =
     ; l_enodes = Dynarray.length t.enodes
     ; l_watched = Dynarray.length t.watched
     ; l_diseqs = Dynarray.length t.diseqs
+    ; l_touched = Dynarray.length t.touched
+    ; l_prop_mark = t.prop_mark
     }
 ;;
 
@@ -639,6 +691,12 @@ let pop t n =
     done;
     Dynarray.truncate t.diseqs lv.l_diseqs;
     Dynarray.truncate t.watched lv.l_watched;
+    (* restore the propagate delta log to its push-time snapshot: drop touched-roots
+       logged in the popped frames and rewind [prop_mark], so a union that was propagated
+       at a deeper level (its [set_reported] now undone by the trail) is re-evaluated
+       here. *)
+    Dynarray.truncate t.touched lv.l_touched;
+    t.prop_mark <- lv.l_prop_mark;
     for i = Dynarray.length t.enodes - 1 downto lv.l_enodes do
       Term.Table.remove t.index (get t i).term
     done;
