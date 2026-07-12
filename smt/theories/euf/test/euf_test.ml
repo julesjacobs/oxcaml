@@ -776,7 +776,16 @@ let test_errors () =
    accessors [are_equal]/[class_of] DO grow num_terms, so if the read-only accessors ever
    start registering (e.g. someone wires them to [register], or adds path compression that
    grows state), the invariance below breaks. This is the test the team-lead required (req
-   A). *)
+   A).
+
+   RESIDUAL (documented, accepted by review): this snapshot (num_terms + are_equal
+   matrix + check verdict) would NOT catch a BENIGN path compression added to [find] — one
+   that rewrites parent pointers WITHOUT changing class roots or growing state. Such a
+   rewrite is invisible to every observable here (roots and are_equal are preserved by
+   definition). The guard against that is the engine's own push/pop/backtracking
+   crosschecks ([test_pushpop]/[test_register_in_frame]/[test_propagate_pushpop_vs_full]):
+   an untrailed pointer rewrite corrupts backtracking and breaks those. This test pins the
+   REGISTRATION hazard (the R6 concern); the backtracking suite pins mutation-under-find. *)
 let test_query_api_nonmutating () =
   let env, _u, unary, konst = make_env () in
   let ctx = Context.create env in

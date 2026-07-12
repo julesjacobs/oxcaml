@@ -111,6 +111,12 @@ let round t view =
      entry must only outlive the round if its instance is actually handed to the session
      to assert. *)
   let added = ref [] in
+  (* Manual seeds popped this round, newest-first — restored to the queue on abort so a
+     seed consumed by an aborted round is NOT lost (codex: the popped-seeds sibling of the
+     dedup-pollution path). The whole round is transactional: on [Budget_exhausted] the
+     session discards the batch, so both the dedup entries AND the consumed seeds roll
+     back to their pre-round state. *)
+  let consumed_seeds = ref [] in
   (* Turn a (lemma, sigma) into a deduped, budget-debited instance. Dedup is keyed
      (owning-frame selector, instance body tag): a duplicate (already-active clause) costs
      no budget and emits nothing (redundancy filter, §L5). *)
@@ -134,9 +140,12 @@ let round t view =
        (fun (lemma : Lemma.t) ->
           List.iter (process lemma) (Matcher.substitutions view lemma ~budget))
        (List.rev t.lemmas);
-     (* Drain the manual seed queue (tranche-1 scaffold). *)
+     (* Drain the manual seed queue (tranche-1 scaffold). Record each popped seed BEFORE
+        processing so an abort mid-drain can restore the ones this round consumed. *)
      while not (Queue.is_empty t.seeds) do
-       let lemma, sigma = Queue.pop t.seeds in
+       let seed = Queue.pop t.seeds in
+       consumed_seeds := seed :: !consumed_seeds;
+       let lemma, sigma = seed in
        process lemma sigma
      done
    with
@@ -146,7 +155,17 @@ let round t view =
         aborted batch, so none of these instances become active clauses. *)
      List.iter (Hashtbl.remove t.dedup) !added;
      t.total_instances <- t.total_instances - List.length !added;
-     out := []);
+     out := [];
+     (* Restore the seeds this aborted round consumed, at the FRONT of the queue in
+        original FIFO order (the not-yet-consumed remainder stays after them), so no
+        manual seed is dropped by an aborted round. *)
+     (match !consumed_seeds with
+      | [] -> ()
+      | _ :: _ ->
+        let restored = Queue.create () in
+        List.iter (fun s -> Queue.add s restored) (List.rev !consumed_seeds);
+        Queue.transfer t.seeds restored;
+        Queue.transfer restored t.seeds));
   t.budget_remaining <- !budget;
   List.rev !out
 ;;

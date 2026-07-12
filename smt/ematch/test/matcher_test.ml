@@ -484,18 +484,25 @@ let e_det () =
   check "E-DET: two runs identical" (run () = run ())
 ;;
 
-(* E-STALE-POP (staleness across backtracking, team-lead req B): the matcher must not emit
-   an instance of a POPPED lemma, nor carry class data across a pop. A lemma L is asserted
-   in a PUSHED frame with trigger f(x); ground f(a)>0 registers f(a). First check: the
-   matcher generates f(a)=5 under L's frame, L is live -> unknown. Then pop (L retracted;
-   the manager drops it from the live store). Then assert f(a)=7. The registered term f(a)
-   SURVIVES the session pop (the e-graph is grow-only across session frames), so a matcher
-   that cached L, or matched against the popped lemma, would regenerate f(a)=5 and
-   wrong-unsat [f(a)=5 & f(a)=7]. Because the matcher iterates the LIVE store fresh each
-   round over a view rebuilt each round and holds nothing between rounds, no stale
-   instance is emitted -> the final check is NOT unsat. Matcher-driven analogue of
-   H-PUSHPOP; the wrong-lemma-instance path is soundness-adjacent, so this is its own
-   discriminating test. *)
+(* E-STALE-POP (staleness across backtracking, team-lead req B; assertion tightened per
+   the reviewer's delta pass, item 6). A lemma L is asserted in a PUSHED frame with
+   trigger f(x); ground f(a)>0 registers f(a). First check: the matcher generates f(a)=5
+   under L's frame, L is live -> unknown. Then pop, then assert f(a)=7 — [f(a)=7] alone is
+   SAT.
+
+   THE REAL SOUNDNESS GUARD is that instances are asserted guarded by the LEMMA's frame
+   selector, which the pop UNASSUMES — so f(a)=5 deactivates with L's frame regardless of
+   any store bookkeeping. (L's store retraction in [Manager.on_pop] is
+   completeness/hygiene, not the soundness guard: even if the store kept L, the
+   deactivated selector makes its clauses inert.) The registered term f(a) survives the
+   pop (the e-graph is grow-only), so a regression that guarded the instance by the WRONG
+   (base) selector would strand f(a)=5 past the pop and wrong-UNSAT [f(a)=5 & f(a)=7].
+
+   ASSERTION: [v2 = Sat] (NOT the weaker [v2 <> Unsat]). The reviewer proved [<> Unsat] is
+   a non-discriminator: disabling the store retraction flips the verdict sat->unknown (L
+   stays live -> THE SOUNDNESS RULE degrades), which [<> Unsat] cannot see; the
+   wrong-frame mutation instead flips sat->unsat. [= Sat] catches BOTH (unknown != Sat and
+   unsat != Sat). Matcher-driven analogue of H-PUSHPOP. *)
 let e_stale_pop () =
   let s = Session.create () in
   let ctx = Session.context s in
@@ -524,10 +531,9 @@ let e_stale_pop () =
   let v2 = Session.check_sat s in
   check
     (Printf.sprintf
-       "E-STALE-POP: matcher must NOT emit a popped lemma's instance -> not unsat (got \
-        %s)"
+       "E-STALE-POP: after pop, popped lemma's instance is inert -> sat (got %s)"
        (verdict_str v2))
-    (v2 <> Session.Unsat)
+    (v2 = Session.Sat)
 ;;
 
 (* U-DEDUP-ROLLBACK (codex MED, dedup pollution): a budget-aborted round must NOT leave
@@ -576,6 +582,39 @@ let u_dedup_rollback () =
     (List.length r2 = 1)
 ;;
 
+(* U-SEED-ROLLBACK (codex, popped-seeds sibling of dedup pollution): a manual seed
+   consumed by a budget-aborted round must NOT be dropped from the queue. Five distinct
+   seeds, gen_budget 3: round 1 pops 4 seeds (emits 3, aborts on the 4th) → all consumed
+   seeds are restored to the queue. Discrimination via round 2's abort signal: WITH the
+   seed-restore all 5 seeds are back, so round 2 re-aborts (budget_exhausted); WITHOUT it
+   round 1 dropped the 4 popped seeds, leaving only 1, and round 2 drains it cleanly (no
+   abort). The abort flag is observable where the returned batch is not (an aborted round
+   returns []). *)
+let u_seed_rollback () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "f" int_to_int in
+  let mk name =
+    Context.const sc.ctx (Env.declare_fun sc.env name (Rank.create [] Sort.int))
+  in
+  let lemma =
+    make_lemma sc ~id:0 ~arity:1 (fun q ->
+      Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0), [])
+  in
+  let mgr = Manager.create ~gen_budget:3 sc.ctx sc.env in
+  Manager.add_lemma mgr lemma;
+  List.iter
+    (fun i -> Manager.seed_instance mgr lemma [| mk (Printf.sprintf "a%d" i) |])
+    [ 0; 1; 2; 3; 4 ];
+  Manager.begin_check mgr;
+  let _ = Manager.round mgr Egraph_view.empty in
+  check "U-SEED-ROLLBACK: round 1 aborted" (Manager.budget_exhausted mgr);
+  Manager.begin_check mgr;
+  let _ = Manager.round mgr Egraph_view.empty in
+  check
+    "U-SEED-ROLLBACK: consumed seeds restored (round 2 re-aborts on the full set)"
+    (Manager.budget_exhausted mgr)
+;;
+
 (* E-ZERO-QVAR (codex MED, matcher.ml zero-qvar contract): a [forall (). body] lemma is a
    ground fact and must instantiate ONCE. Body p(a) contradicts the ground ¬p(a): the
    empty substitution must be emitted → p(a) asserted → unsat. Discrimination: the pre-fix
@@ -606,7 +645,10 @@ let e_zero_qvar () =
    pop, the lemma AND its instance retract, so f(a)<0 alone no longer refutes (not unsat).
    DISCRIMINATION: a regression that asserted the instance at the BASE frame instead of
    the lemma's frame would leave f(a)>0 alive after the pop and wrong-UNSAT the final
-   check — every other e2e uses the base frame and would miss it. *)
+   check — every other e2e uses the base frame and would miss it. The v2 assertion is the
+   strong [= Sat] (not [<> Unsat]): [f(a)<0] alone is SAT, so [= Sat] catches both the
+   wrong-frame mutation (-> unsat) and any mutation that instead degrades to unknown
+   (reviewer's item-6 lesson: [<> Unsat] cannot see a sat->unknown flip). *)
 let e_frame () =
   let s = Session.create () in
   let ctx = Session.context s in
@@ -636,9 +678,9 @@ let e_frame () =
   let v2 = Session.check_sat s in
   check
     (Printf.sprintf
-       "E-FRAME: after pop, instance retracts with its frame -> not unsat (got %s)"
+       "E-FRAME: after pop, instance retracts with its frame -> sat (got %s)"
        (verdict_str v2))
-    (v2 <> Session.Unsat)
+    (v2 = Session.Sat)
 ;;
 
 (* E-ARITH-TRIGGER-REJECT (codex MED, ADR-0012 L3): assert_lemma must REJECT an
@@ -677,6 +719,7 @@ let () =
   u_det ();
   u_manager_cap ();
   u_dedup_rollback ();
+  u_seed_rollback ();
   e_find ();
   e_nested ();
   e_multi ();
