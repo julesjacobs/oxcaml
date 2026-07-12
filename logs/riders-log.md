@@ -78,3 +78,22 @@ Batch of four small independent board rows, one commit each.
 - Discrimination VERIFIED: disable ONLY the dedup rollback (manager.ml:156) → round 2 skips
   the still-suppressed s0,s1,s2 and drains s3,s4 within budget → does NOT abort; both round-2
   checks flip RED (24/3). With the rollback: 27/0. (Test-only change; no source touched.)
+
+## Item 5 — Board #152 item 5 / issue5144: reset/reset-assertions fail-closed (was silent no-op)
+
+- Bug: parser.ml:422 treated `set-option | reset | reset-assertions` as a SILENT no-op.
+  reset/reset-assertions clear the assertion set mid-script, but this batch reader folds
+  every `assert` into ONE set for a single check-sat, so ignoring them leaves the pre-reset
+  assertions live → verdict flip. Confirmed end-to-end: `(assert (= 0 1)) (reset-assertions)
+  (check-sat)` yields `unsat` pre-fix (WRONG; should be sat/unknown), `unknown` post-fix.
+- Fix: split the arm — `reset`/`reset-assertions` now `unsupportedf` (fail-closed →
+  Parser.Unsupported → CLI solve_batch catches at oxsmt_cli.ml:169 → unknown_block, I8).
+  Audit of the same match arm: `set-option` and `get-model|get-value|get-unsat-core` are
+  output-only/non-stateful (can't change the assertion set) → kept as no-ops; `push`/`pop`
+  already unsupported. So reset* were the only verdict-flipping silent no-ops.
+- Test: `command_gate_cases` in roundtrip_test.ml — the exact issue5144 shape via
+  `check_unsupported` (reset-assertions + reset) + a positive control `check_parses_ok`
+  proving set-option/get-* still parse (not spuriously degraded).
+- Discrimination VERIFIED: neuter the reset arm back to a no-op (`ignore c`) → both reset
+  check_unsupported checks go RED ("parsed OK"), positive control stays green (163→2 fail);
+  and the CLI yields `unsat` (concrete verdict flip). Restored → 163/0.

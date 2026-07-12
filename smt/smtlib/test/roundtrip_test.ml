@@ -667,12 +667,51 @@ let check_b path =
           fail "B/%s: reparse Unsupported: %s\n%s" path m out))
 ;;
 
+(* Stateful-command gate (board #152 item 5 / issue5144): [reset] / [reset-assertions]
+   clear the assertion set mid-script, which the batch single-check reader cannot honour,
+   so they must FAIL CLOSED (raise [Unsupported] -> the CLI degrades to [unknown]) rather
+   than be silently ignored. Discrimination: the exact issue5144 shape below is SAT (the
+   contradiction is reset away before the check), but with the pre-fix silent no-op the
+   parser returned [(= 0 1)] as a live assertion -> the CLI answered [unsat]. The pre-fix
+   code PARSED this OK, so [check_unsupported] was RED before the fix. Non-stateful
+   directives ([set-option], [get-*]) stay no-ops — ignoring them cannot flip a verdict. *)
+let command_gate_cases () =
+  let hdr = "(set-logic QF_LIA)\n" in
+  (* the verdict-flipping repro: assert-false, reset-assertions, check-sat *)
+  check_unsupported
+    ~name:"reset-assertions-fail-closed"
+    (hdr ^ "(assert (= 0 1))\n(reset-assertions)\n(check-sat)\n");
+  check_unsupported
+    ~name:"reset-fail-closed"
+    (hdr ^ "(assert (= 0 1))\n(reset)\n(check-sat)\n");
+  (* positive controls: non-stateful directives must still parse (kept as no-ops), so a
+     file using them is NOT spuriously degraded to unknown. *)
+  let check_parses_ok ~name text =
+    incr checks;
+    match Parser.parse text with
+    | _ -> ()
+    | exception e ->
+      fail "parses-ok/%s: expected parse OK, got %s" name (Printexc.to_string e)
+  in
+  check_parses_ok
+    ~name:"set-option-and-get-still-parse"
+    (hdr
+     ^ "(set-option :produce-models true)\n\
+        (declare-const a Int)\n\
+        (assert (<= a 0))\n\
+        (get-value (a))\n\
+        (check-sat)\n\
+        (get-model)\n")
+;;
+
 let () =
   print_endline "== round-trip A (print -> parse), programmatic sessions ==";
   sessions ();
   print_endline
     "== naming classes (reserved words quoted; operators/sorts/empty refused) ==";
   naming_classes ();
+  print_endline "== stateful-command gate (reset/reset-assertions fail closed) ==";
+  command_gate_cases ();
   print_endline "== define-fun macro expansion ==";
   define_fun_cases ();
   define_fun_perf ();

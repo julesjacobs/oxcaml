@@ -419,7 +419,19 @@ let run st sexps =
           | Some ("push" | "pop"), _ ->
             unsupportedf "incremental push/pop is not supported"
           | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()
-          | Some ("set-option" | "reset" | "reset-assertions"), _ -> ()
+          (* Output-only / non-stateful directives: ignoring them cannot change the
+            assertion set, hence cannot flip a verdict. *)
+          | Some "set-option", _ -> ()
+          | Some (("reset" | "reset-assertions") as c), _ ->
+            (* Fail CLOSED — NOT a silent no-op. This reader folds every [assert] into ONE
+              assertion set for a single [check-sat], so it cannot honour [reset] /
+              [reset-assertions] clearing that set mid-script. Silently ignoring them left
+              the pre-reset assertions live and FLIPPED the verdict (e.g.
+              [(assert (= 0 1)) (reset-assertions) (check-sat)] is [sat] but came out
+              [unsat]). Raising degrades the query to [unknown] (I8), never a wrong
+              verdict; incremental support is a documented follow-up (see the CLI's
+              push/pop degrade). *)
+            unsupportedf "%s is not supported by the batch (single-check) reader" c
           | Some other, _ -> unsupportedf "unsupported command: %s" other
           | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
