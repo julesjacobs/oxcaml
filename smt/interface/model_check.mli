@@ -19,3 +19,10 @@ val check : Cdclt.sort_card list * Cdclt.binding list -> Term.t list -> bool
 val add_ovf : int -> int -> int
 
 val mul_ovf : int -> int -> int
+(** [eval_value model t] evaluates [t] under [model] with the SAME fail-closed /
+    overflow-guarded evaluator as {!check}: [Some v] on success, [None] on any missing
+    binding / type error / overflow. Exposed for the W1b equality-elimination presolve
+    ({!Session}), which re-derives each eliminated variable's value from its definition at
+    model-build time; a [None] leaves the variable unbound so R1 ({!check}) fails closed
+    to [unknown] rather than admitting a wrong value. *)
+val eval_value : Cdclt.sort_card list * Cdclt.binding list -> Term.t -> Cdclt.value option

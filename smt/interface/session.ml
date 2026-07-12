@@ -101,8 +101,14 @@ type t =
   ; mutable last_effort : int
     (* effort consumed by the most recent check_sat (board #60) *)
   ; mutable effort_exhausted : bool
-    (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check, poison-free:
-     distinct from [degraded]/[budget_exhausted], NOT sticky. *)
+    (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
+         poison-free: distinct from [degraded]/[budget_exhausted], NOT sticky. *)
+  ; mutable elim_defs : Presolve.def list
+    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated, in
+     elimination order. [build_model] re-derives each one's value from its definition and
+     splices it into the model so the R1 checker (which evaluates the ORIGINAL assertions
+     in [asserted]) and [get_model] both bind it. Empty unless the batch
+     {!assert_presolved} path eliminated something. *)
   }
 
 let create ?(split_budget = default_split_budget) ?max_effort () =
@@ -139,6 +145,7 @@ let create ?(split_budget = default_split_budget) ?max_effort () =
   ; budget_exhausted = false
   ; last_effort = 0
   ; effort_exhausted = false
+  ; elim_defs = []
   }
 ;;
 
@@ -298,6 +305,40 @@ let assert_term t term =
     | pterm -> assert_bool_at t pterm)
 ;;
 
+(* Internalize a single (already-presolved) term WITHOUT recording it in [t.asserted]:
+   preprocess -> clausify -> register, with the same I8/CONTRACT-POISON assert-time
+   discipline as [assert_term]. Used by [assert_presolved] for the REDUCED conjuncts —
+   [t.asserted] holds the ORIGINAL assertions (for R1), not the reduced ones. *)
+let internalize_reduced t term =
+  match Preprocess.run t.pp term with
+  | exception Term.Overflow -> t.degraded <- true
+  | exception Term.Unsupported _ -> t.degraded <- true
+  | pterm -> assert_bool_at t pterm
+;;
+
+(* W1b equality-elimination presolve (logs/w1b-design.md). The BATCH entry point: given
+   the whole asserted set at once (the CLI's parse result), run the {!Presolve} pass, then
+   internalize the REDUCED set while keeping the ORIGINAL terms in [t.asserted] for the R1
+   self-check and re-deriving the eliminated variables at model-build ([build_model]).
+
+   Distinct from {!assert_term} (which internalizes one term eagerly): the pass needs the
+   full set to collect aliases, so it cannot run term-by-term. Only the batch CLI path
+   uses it; the incremental API ({!assert_term}/{!push}/{!pop}/lemmas) is unchanged. The
+   reserved-symbol gate (R1 / codex C1) applies per term exactly as in {!assert_term}. On
+   a zero-alias input the pass is a no-op ([reduced = originals], [defs = []]) and this is
+   byte-identical to asserting each original with {!assert_term}. *)
+let assert_presolved t terms =
+  if List.exists term_has_reserved terms
+  then t.degraded <- true
+  else (
+    (* Record the ORIGINALS for R1 (order-insensitive; [Model_check.check] folds over
+       all). The pre-preprocessing terms are exactly what the R1 checker must satisfy. *)
+    List.iter (fun term -> t.asserted <- term :: t.asserted) terms;
+    let { Presolve.reduced; defs } = Presolve.run t.ctx terms in
+    t.elim_defs <- defs;
+    List.iter (internalize_reduced t) reduced)
+;;
+
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
    OWNING lemma's frame selector [frame], NOT the current innermost selector — so
    [Session.pop] of the lemma's frame retracts the lemma AND every instance drawn from it
@@ -432,6 +473,73 @@ let name_of = function
   | Fun (n, _) -> n
 ;;
 
+(* Names of the nullary Int-variable leaves of [term] (a W1b def value, which is UF-free —
+   so every leaf variable is a nullary Int [App]). Used to default any surviving-but-
+   unconstrained variable that a def references. *)
+let free_int_var_names (term : Term.t) =
+  let seen = Hashtbl.create 16 in
+  let acc = ref [] in
+  let rec go (u : Term.t) =
+    match u.node with
+    | App (sym, args) when Iarr.length args = 0 ->
+      if Sort.equal u.sort Sort.int
+      then (
+        let n = Symbol.name sym in
+        if not (Hashtbl.mem seen n)
+        then (
+          Hashtbl.add seen n ();
+          acc := n :: !acc))
+    | App (_, args) -> Iarr.iter go args
+    | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+    | Le a | Not a -> go a
+    | Eq (a, b) ->
+      go a;
+      go b
+    | And xs | Or xs -> Iarr.iter go xs
+    | Ite (c, a, b) ->
+      go c;
+      go a;
+      go b
+    | Bool_const _ | Int_const _ -> ()
+  in
+  go term;
+  !acc
+;;
+
+(* W1b model reconstruction (logs/w1b-design.md, constraint 4). Splice the eliminated
+   variables back into the reduced model: for each [def] (processed in REVERSE elimination
+   order, matching the design note — harmless here since each [def.value] is already
+   resolved over surviving variables only), evaluate [def.value] under the model built so
+   far and bind [def.name] to it. Both re-derivation and R1 share [Model_check]'s
+   evaluator (identical overflow guards). A variable that [def.value] references but that
+   the theory left UNCONSTRAINED (its only constraints were dropped defs) is bound to a
+   canonical [0] FIRST and that binding is kept, so R1 evaluates the original assertions
+   under the same value (any value satisfies an otherwise-free variable). If [eval_value]
+   returns [None] the variable is left unbound and R1 will fail closed to [unknown] —
+   never a wrong value. No-op when nothing was eliminated. *)
+let splice_elim_defs t (sort_cards, bindings) =
+  match t.elim_defs with
+  | [] -> sort_cards, bindings
+  | _ :: _ ->
+    let bound = Hashtbl.create 64 in
+    List.iter (fun b -> Hashtbl.replace bound (name_of b) ()) bindings;
+    let acc = ref bindings in
+    let add b =
+      acc := b :: !acc;
+      Hashtbl.replace bound (name_of b) ()
+    in
+    List.iter
+      (fun (d : Presolve.def) ->
+         List.iter
+           (fun name -> if not (Hashtbl.mem bound name) then add (Const (name, VInt 0)))
+           (free_int_var_names d.Presolve.value);
+         match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
+         | Some v -> add (Const (d.Presolve.name, v))
+         | None -> ())
+      (List.rev t.elim_defs);
+    sort_cards, !acc
+;;
+
 let build_model t =
   let keep name = not (Preprocess.is_reserved_name name) in
   let by_name a b = String.compare (name_of a) (name_of b) in
@@ -450,11 +558,18 @@ let build_model t =
     in
     sort_cards, List.sort by_name (theory_bindings @ bool_bindings)
   in
+  (* W1b: splice the eliminated variables (and any defaulted free variable) into the
+     assembled model, then re-sort so the external model stays name-sorted. A no-op when
+     nothing was eliminated (byte-identical to the pre-W1b model). *)
+  let finalize m =
+    let sort_cards, bindings = splice_elim_defs t m in
+    Some (sort_cards, List.sort by_name bindings)
+  in
   if t.has_theory
   then (
     match Cdclt.model t.cdclt with
     | None -> None
-    | Some (sort_cards, theory_bindings) -> Some (assemble sort_cards theory_bindings)
+    | Some (sort_cards, theory_bindings) -> finalize (assemble sort_cards theory_bindings)
     | exception Rational.Overflow ->
       (* core-bignum R1 output-boundary: a [Big] LIA model value is integral but exceeds
          int63, so it cannot be projected to the native-int [Model.Int] sink without
@@ -469,7 +584,7 @@ let build_model t =
          (then [build_model] would run unprotected). Either way: degrade to no-model ->
          [Unknown], never a truncated model, no [Model.t] unfreeze. *)
       None)
-  else Some (assemble [] [])
+  else finalize (assemble [] [])
 ;;
 
 (* One ground CDCL(T) decision under the CONTRACT-POISON firewall — the RAW verdict only,
@@ -583,6 +698,7 @@ let get_model t =
   | Sat -> t.last_model
 ;;
 
+let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.elim_defs
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let budget_exhausted t = t.budget_exhausted

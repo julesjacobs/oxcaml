@@ -58,16 +58,14 @@ let as_int = function
   | _ -> raise Bad
 ;;
 
-(* [check (sorts, bindings) assertions] is [true] iff every assertion evaluates to
-   [VBool true] under the candidate model. Fail-closed: [false] on any evaluation fault. *)
-let check ((_sorts : Cdclt.sort_card list), (bindings : Cdclt.binding list)) assertions =
-  let consts : (string, Cdclt.value) Hashtbl.t = Hashtbl.create 64 in
-  let funs : (string, Cdclt.fun_table) Hashtbl.t = Hashtbl.create 64 in
-  List.iter
-    (function
-      | Cdclt.Const (n, v) -> Hashtbl.replace consts n v
-      | Cdclt.Fun (n, tbl) -> Hashtbl.replace funs n tbl)
-    bindings;
+(* Evaluate [t] under the model tables ([consts]/[funs]); raises {!Bad} on any fault
+   (missing binding, type error, arithmetic overflow). Shared by {!check} (over the
+   original assertions) and {!eval_value} (W1b eliminated-variable re-derivation) so both
+   use the identical fail-closed / overflow-guarded semantics. *)
+let ev_with
+      (consts : (string, Cdclt.value) Hashtbl.t)
+      (funs : (string, Cdclt.fun_table) Hashtbl.t)
+  =
   let rec ev (t : Term.t) : Cdclt.value =
     match t.Term.node with
     | Term.Bool_const b -> VBool b
@@ -106,6 +104,37 @@ let check ((_sorts : Cdclt.sort_card list), (bindings : Cdclt.binding list)) ass
     | Term.Or xs -> VBool (Iarr.fold (fun acc x -> acc || as_bool (ev x)) false xs)
     | Term.Ite (c, a, b) -> if as_bool (ev c) then ev a else ev b
   in
+  ev
+;;
+
+let build_tables (bindings : Cdclt.binding list) =
+  let consts : (string, Cdclt.value) Hashtbl.t = Hashtbl.create 64 in
+  let funs : (string, Cdclt.fun_table) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (function
+      | Cdclt.Const (n, v) -> Hashtbl.replace consts n v
+      | Cdclt.Fun (n, tbl) -> Hashtbl.replace funs n tbl)
+    bindings;
+  consts, funs
+;;
+
+(* [check (sorts, bindings) assertions] is [true] iff every assertion evaluates to
+   [VBool true] under the candidate model. Fail-closed: [false] on any evaluation fault. *)
+let check ((_sorts : Cdclt.sort_card list), (bindings : Cdclt.binding list)) assertions =
+  let consts, funs = build_tables bindings in
+  let ev = ev_with consts funs in
   try List.for_all (fun a -> as_bool (ev a)) assertions with
   | Bad -> false
+;;
+
+(* [eval_value model t] is [Some v] when [t] evaluates to [v] under [model], else [None]
+   (any missing binding / type error / overflow). Same fail-closed / overflow-guarded
+   evaluator as {!check}, exposed for the W1b presolve's eliminated-variable re-derivation
+   (session.ml): a value it cannot compute leaves the variable unbound, so R1 then rejects
+   the model — never a wrong value. *)
+let eval_value ((_sorts : Cdclt.sort_card list), (bindings : Cdclt.binding list)) t =
+  let consts, funs = build_tables bindings in
+  match ev_with consts funs t with
+  | v -> Some v
+  | exception Bad -> None
 ;;

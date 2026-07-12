@@ -156,6 +156,26 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     before or after {!check_sat} (assert-after-check). *)
 val assert_term : t -> Oxsmt_core.Term.t -> unit
 
+(** [assert_presolved t terms] asserts a WHOLE batch of terms through the W1b
+    equality-elimination presolve (logs/w1b-design.md): it runs the {!Oxsmt_interface}
+    presolve over [terms] to drop top-level unconditional Int-variable aliases [(= x t)]
+    and substitute [x ↦ t] into the rest, internalizes the reduced (equisatisfiable) set,
+    and keeps the ORIGINAL [terms] for the R1 self-check. Eliminated variables are
+    re-derived into the model at {!get_model} / R1 time. Semantically equivalent to
+    [List.iter (assert_term t) terms] — on a zero-alias input it is byte-identical — but
+    solves a smaller problem when aliases are present.
+
+    Unlike {!assert_term}, this needs the full set at once (aliases are collected across
+    all terms), so it is the BATCH entry point (the .smt2 CLI); the incremental
+    {!assert_term}/{!push}/{!pop}/lemma API is unchanged. Legal once per base frame before
+    {!check_sat}; the reserved-symbol gate applies exactly as in {!assert_term}. *)
+val assert_presolved : t -> Oxsmt_core.Term.t list -> unit
+
+(** The names of the variables the most recent {!assert_presolved} eliminated, in
+    elimination order (empty after a zero-alias batch or when {!assert_term} was used).
+    Introspection for tests / metrics — NOT part of the client verdict flow. *)
+val eliminated_vars : t -> string list
+
 (** An opaque handle to a lemma stored by {!assert_lemma}, for the tranche-1 manual
     instantiation scaffold {!instantiate}. *)
 type lemma

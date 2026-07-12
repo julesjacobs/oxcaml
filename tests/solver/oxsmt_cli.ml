@@ -163,14 +163,19 @@ let render_model (sort_cards, bindings) =
    never emit a [sat] the harness cannot transport or the evaluator cannot self-certify.
    [max_effort] threads the board #60 counted cutoff (a cut-off goal is a plain [unknown]
    block, so the output format is unchanged). *)
-let solve_batch ?max_effort src =
+let solve_batch ?max_effort ?(presolve = true) src =
   let s = Session.create ?max_effort () in
   match Parser.parse_into (Session.env s) (Session.context s) src with
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
     unknown_block
   | parsed ->
-    List.iter (Session.assert_term s) parsed.Parser.assertions;
+    (* W1b: the batch path runs the equality-elimination presolve over the whole assertion
+       set (a no-op on zero-alias files). [--no-presolve] restores the per-term
+       [assert_term] path for A/B measurement; both are sound. *)
+    if presolve
+    then Session.assert_presolved s parsed.Parser.assertions
+    else List.iter (Session.assert_term s) parsed.Parser.assertions;
     let v = Session.check_sat s in
     let st = Session.stats s in
     let block verdict model =
@@ -214,10 +219,14 @@ let () =
      ever downgrades a would-be answer), so the harness goldens are unaffected. *)
   let file = ref None in
   let max_effort = ref None in
+  let presolve = ref true in
   let rec parse = function
     | [] -> ()
     | "--max-effort" :: n :: rest ->
       max_effort := Some (int_of_string n);
+      parse rest
+    | "--no-presolve" :: rest ->
+      presolve := false;
       parse rest
     | f :: rest when !file = None ->
       file := Some f;
@@ -242,7 +251,7 @@ let () =
   let blocks =
     if incremental || n_checks <> 1
     then List.init n_checks (fun _ -> unknown_block)
-    else [ solve_batch ?max_effort:!max_effort src ]
+    else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve src ]
   in
   List.iter print_block blocks
 ;;

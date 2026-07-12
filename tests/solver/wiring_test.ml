@@ -966,6 +966,231 @@ let test_ovf_guard_parity () =
     (Oxsmt_interface.Cdclt.add_ovf min_int min_int = None);
   check "mul_ovf 6*7 = 42" (Oxsmt_interface.Cdclt.mul_ovf 6 7 = Some 42);
   check "add_ovf 6+7 = 13" (Oxsmt_interface.Cdclt.add_ovf 6 7 = Some 13)
+(* ------------------------------------------------------------------ *)
+(* W1b equality-elimination presolve (logs/w1b-design.md). The batch [assert_presolved]
+   path: verdict soundness in both directions, first-wins / cycle / conditional guards,
+   the interface-variable no-op, model reconstruction of eliminated variables (R1),
+   neutrality, and determinism. These are also the ORACLES the registry presolve mutants
+   (tools/mutants/registry, module=presolve) go red against. *)
+
+let find_int_in_model m n =
+  List.find_map
+    (function
+      | Session.Const (k, Session.VInt v) when k = n -> Some v
+      | _ -> None)
+    m
+;;
+
+(* Alias CHAIN: x = y, y = 5, x >= 3. Both x and y are eliminated (x resolves through y to
+   5); the retained bound becomes 5 >= 3 = true. Sat, and the reconstructed model must
+   bind BOTH eliminated variables to 5 (R1 evaluates the ORIGINAL assertions). *)
+let test_presolve_alias_chain () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x y
+    ; Context.eq ctx y (Context.int_const ctx 5)
+    ; Context.ge ctx x (Context.int_const ctx 3)
+    ];
+  (match Session.check_sat s, Session.get_model s with
+   | Session.Sat, Some (_, m) ->
+     check "chain: x re-derived to 5" (find_int_in_model m "x" = Some 5);
+     check "chain: y re-derived to 5" (find_int_in_model m "y" = Some 5)
+   | v, _ -> check ("chain: expected sat+model, got " ^ verdict_str v) false);
+  check
+    "chain: both x and y eliminated"
+    (List.sort compare (Session.eliminated_vars s) = [ "x"; "y" ])
+;;
+
+(* CYCLE guard: x = y, y = x, x <= 0. The first alias eliminates x -> y; the second closes
+   a cycle, so it is NOT eliminated (kept as an ordinary — trivially true — constraint).
+   Sound Sat; only x eliminated. A missing cycle guard would add y -> x and loop. *)
+let test_presolve_cycle_guard () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x y; Context.eq ctx y x; Context.le ctx x (Context.int_const ctx 0) ];
+  check_verdict "cycle: sat" Session.Sat (Session.check_sat s);
+  check "cycle: only x eliminated (no loop)" (Session.eliminated_vars s = [ "x" ]);
+  match Session.get_model s with
+  | Some (_, m) ->
+    check "cycle: model binds x" (find_int_in_model m "x" <> None);
+    check "cycle: model binds y" (find_int_in_model m "y" <> None)
+  | None -> check "cycle: expected a model" false
+;;
+
+(* SHADOWED alias (first-wins): x = 5 then x = 6. The first defines x; the second is
+   retained and rewritten to 5 = 6 = false -> Unsat. A last-wins bug would keep x = 6. *)
+let test_presolve_shadowed_alias () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x (Context.int_const ctx 5)
+    ; Context.eq ctx x (Context.int_const ctx 6)
+    ];
+  check_verdict "shadowed: first-wins -> unsat" Session.Unsat (Session.check_sat s);
+  check "shadowed: x eliminated once" (Session.eliminated_vars s = [ "x" ])
+;;
+
+(* MODEL RECONSTRUCTION / R1: x = 5, x <= 10. x is eliminated; the reduced set is 5 <= 10
+   = true. The reported Sat REQUIRES the model to bind x = 5 or R1 (which evaluates the
+   original (= x 5)) rejects it -> the wrong-re-derivation mutant surfaces here as a sat
+   -> unknown flip. *)
+let test_presolve_model_r1 () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x (Context.int_const ctx 5)
+    ; Context.le ctx x (Context.int_const ctx 10)
+    ];
+  match Session.check_sat s, Session.get_model s with
+  | Session.Sat, Some (_, m) ->
+    check "R1: eliminated x present in model as 5" (find_int_in_model m "x" = Some 5)
+  | v, _ -> check ("R1: expected sat+model (re-derivation), got " ^ verdict_str v) false
+;;
+
+(* CONDITIONAL equality is NOT a definition: (or (= x 5) (= x 6)) /\ x >= 6. The
+   equalities live under Or, so nothing is eliminated; the answer is Sat (x = 6). A mutant
+   that descended into Or would eliminate x -> 5, drop the disjunction, and flip to Unsat
+   (5 >= 6). Both the verdict and the empty elimination set are oracles. *)
+let test_presolve_conditional_no_elim () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.or_
+        ctx
+        [ Context.eq ctx x (Context.int_const ctx 5)
+        ; Context.eq ctx x (Context.int_const ctx 6)
+        ]
+    ; Context.ge ctx x (Context.int_const ctx 6)
+    ];
+  check "conditional: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "conditional: sat (x=6)" Session.Sat (Session.check_sat s)
+;;
+
+(* A non-definition assert is NEVER dropped: x = 5 /\ x >= 10. x is eliminated but the
+   retained bound rewrites to 5 >= 10 = false -> Unsat. A mutant that dropped the retained
+   conjunct would flip to Sat. *)
+let test_presolve_dropped_nondef () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x (Context.int_const ctx 5)
+    ; Context.ge ctx x (Context.int_const ctx 10)
+    ];
+  check_verdict
+    "dropped-nondef: retained bound kept -> unsat"
+    Session.Unsat
+    (Session.check_sat s)
+;;
+
+(* INTERFACE-VARIABLE no-op (ADR-0010 §3.1). QF_UFLIA: x = 5 /\ (g x) <> (g 5). x occurs
+   UNDER the uninterpreted function g, so it must NOT be eliminated — leaving x = 5 for
+   the theory, congruence gives (g x) = (g 5), contradicting the disequality -> Unsat. The
+   guard is the oracle: a mutant that eliminated the interface variable would report x in
+   [eliminated_vars]. (The verdict stays Unsat either way — constant propagation is sound
+   — so the STRUCTURAL check is what discriminates.) *)
+let test_presolve_interface_noop () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let g = Session.declare_fun s "g" (Rank.create [ Sort.int ] Sort.int) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x (Context.int_const ctx 5)
+    ; Context.distinct
+        ctx
+        [ Context.app ctx g [ x ]; Context.app ctx g [ Context.int_const ctx 5 ] ]
+    ];
+  check "interface: under-UF variable NOT eliminated" (Session.eliminated_vars s = []);
+  check_verdict "interface: unsat (congruence)" Session.Unsat (Session.check_sat s)
+;;
+
+(* NEUTRALITY: a zero-alias input eliminates nothing and returns Sat, identical to the
+   per-term [assert_term] path. *)
+let test_presolve_neutral () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ge ctx x (Context.int_const ctx 0)
+    ; Context.le ctx x (Context.int_const ctx 10)
+    ];
+  check "neutral: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "neutral: sat" Session.Sat (Session.check_sat s)
+;;
+
+(* DETERMINISM (I6): the same batch presolved twice yields the same verdict, the same
+   elimination order, and the same effort count. *)
+let test_presolve_determinism () =
+  let run () =
+    let s = Session.create () in
+    let ctx = Session.context s in
+    let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+    let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+    Session.assert_presolved
+      s
+      [ Context.eq ctx x y
+      ; Context.eq ctx y (Context.int_const ctx 5)
+      ; Context.ge ctx x (Context.int_const ctx 3)
+      ];
+    let v = Session.check_sat s in
+    v, Session.eliminated_vars s, Session.effort s
+  in
+  let a = run () in
+  let b = run () in
+  check "presolve determinism: identical (verdict, order, effort)" (a = b)
+;;
+
+(* Direct {!Presolve.run} structural oracles (the transform in isolation): a conditional
+   equality yields no defs; an under-UF variable is skipped; a plain top-level alias is
+   taken. *)
+let test_presolve_run_direct () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let g = Session.declare_fun s "g" (Rank.create [ Sort.int ] Sort.int) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let names r =
+    List.map (fun (d : Oxsmt_interface.Presolve.def) -> d.Oxsmt_interface.Presolve.name) r
+  in
+  let r_plain =
+    Oxsmt_interface.Presolve.run ctx [ Context.eq ctx x (Context.int_const ctx 5) ]
+  in
+  check "run: plain alias taken" (names r_plain.Oxsmt_interface.Presolve.defs = [ "x" ]);
+  let r_cond =
+    Oxsmt_interface.Presolve.run
+      ctx
+      [ Context.or_
+          ctx
+          [ Context.eq ctx x (Context.int_const ctx 5)
+          ; Context.eq ctx x (Context.int_const ctx 6)
+          ]
+      ]
+  in
+  check "run: conditional equality not a def" (r_cond.Oxsmt_interface.Presolve.defs = []);
+  let r_uf =
+    Oxsmt_interface.Presolve.run
+      ctx
+      [ Context.eq ctx x (Context.int_const ctx 5)
+      ; Context.le ctx (Context.app ctx g [ x ]) (Context.int_const ctx 0)
+      ]
+  in
+  check "run: under-UF variable skipped" (r_uf.Oxsmt_interface.Presolve.defs = [])
 ;;
 
 let () =
@@ -998,6 +1223,16 @@ let () =
   test_cli_negative_int_token ();
   test_model_check_min_int_guard ();
   test_ovf_guard_parity ();
+  test_presolve_alias_chain ();
+  test_presolve_cycle_guard ();
+  test_presolve_shadowed_alias ();
+  test_presolve_model_r1 ();
+  test_presolve_conditional_no_elim ();
+  test_presolve_dropped_nondef ();
+  test_presolve_interface_noop ();
+  test_presolve_neutral ();
+  test_presolve_determinism ();
+  test_presolve_run_direct ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
