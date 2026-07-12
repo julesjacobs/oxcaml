@@ -310,15 +310,21 @@ let value_compare (a : value) (b : value) =
 
 (* Reconstruct the FINITE FUNCTION MODEL — uninterpreted-sort universes + const bindings +
    per-symbol function/predicate tables — from the snapshot taken at the accepting
-   Final->Sat (ADR-UF-models §1). Reads only [Model.value] over the registered subterms;
-   the snapshot is the liveness filter (a term whose e-nodes were popped is unvalued ->
-   [None] -> skipped; for QF_UF base-frame atoms are never popped, so every used term is
-   live — rider 2: NO e-graph mutation, NO euf.mli surface). Element ids are the e-graph
-   class ids remapped to dense 0-based per-sort indices. Returns [None] (=> [unknown],
-   fail-closed) when a needed value is missing or a Bool-codomain (predicate) cell is
-   unbound (buried H2 class; the combinator usually degrades that earlier via
-   [Incomplete], guarded here too). Deterministic (R10): ascending class-id numbering,
-   then canonical sort of sorts, bindings, and case tuples. *)
+   Final->Sat (ADR-UF-models §1). Reads only [Model.value] over the registered subterms. A
+   [None] from [Model.value] skips a term the theory never valued; it is NOT a push/pop
+   "liveness filter" (review F2, corrected): user push/pop is assumption-literal-based
+   ([session.ml] guards frame clauses by a selector), NOT theory push/pop, so a popped
+   frame's terms stay REGISTERED in the combinator and [Model.value] still returns their
+   last value — a stale row is not filtered here. Post-pop soundness comes instead from
+   the incremental query degrading to [unknown] (P6), not from this read. For the
+   first-cut single-check-sat QF_UF corpus there is no pop, so every used term is live and
+   the distinction is moot. Rider 2 holds regardless: NO e-graph mutation, NO euf.mli
+   surface — the read is [Model.value] only. Element ids are the e-graph class ids
+   remapped to dense 0-based per-sort indices. Returns [None] (=> [unknown], fail-closed)
+   when a needed value is missing or a Bool-codomain (predicate) cell is unbound (buried
+   H2 class; the combinator usually degrades that earlier via [Incomplete], guarded here
+   too). Deterministic (R10): ascending class-id numbering, then canonical sort of sorts,
+   bindings, and case tuples. *)
 let model t =
   match t.last_model with
   | None -> None
