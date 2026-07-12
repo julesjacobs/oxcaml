@@ -1,8 +1,8 @@
 diff --git a/smt/theories/euf/euf.ml b/smt/theories/euf/euf.ml
-index c163fbb229..b907192d2e 100644
+index 7b6e44121b..8562660537 100644
 --- a/smt/theories/euf/euf.ml
 +++ b/smt/theories/euf/euf.ml
-@@ -659,8 +659,8 @@ let propagate t =
+@@ -663,8 +663,8 @@ let propagate t =
      let pack lo hi = (lo * m) + hi in
      Dynarray.iter
        (fun d ->
