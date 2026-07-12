@@ -385,12 +385,32 @@ let lscensus_peak cfg_with_infos =
     ~init:();
   !peak
 
-(* Full-jane census: emit one compact stderr line per HIGH-PRESSURE function
-   (peak > 64 OR num_regs > 2000); ordinary functions emit nothing. peak <=
-   num_regs always, so functions with num_regs <= 64 are below the floor and
-   skip the (only) expensive step, the liveness scan. Unconditional (no env),
-   so it fires on the remote bench build. Output only; does not change codegen
-   or exit codes. *)
+(* Full-jane census: APPEND one compact line per HIGH-PRESSURE function
+   (peak > 64 OR num_regs > 2000) to a per-process FILE, never to stdout/stderr.
+   The jane build enforces strict-stderr (stray compiler output fails the
+   action), so a stderr channel would fail exactly the monster compiles we want
+   to measure; a file channel is invisible to the build. File path =
+   $OXCAML_LSCENSUS_DIR (else a fixed NFS default) / <host>.<nonce>.lscensus,
+   opened append+create. On ANY failure (perms, missing mount) we silently
+   no-op: never print, never raise, never change exit codes. peak <= num_regs,
+   so num_regs <= 64 is below the floor and skips the liveness scan. *)
+let lscensus_oc =
+  lazy
+    (try
+       let dir =
+         match Sys.getenv_opt "OXCAML_LSCENSUS_DIR" with
+         | Some d -> d
+         | None -> "/j/igm/user/jujacobs/pub/lscensus"
+       in
+       let host =
+         match Sys.getenv_opt "HOSTNAME" with Some h -> h | None -> "h"
+       in
+       Random.self_init ();
+       let nonce = (Random.bits () lsl 30) lor Random.bits () in
+       let path = Printf.sprintf "%s/%s.%d.lscensus" dir host nonce in
+       Some (open_out_gen [ Open_append; Open_creat ] 0o644 path)
+     with _ -> None)
+
 let lscensus_run fd alloc cfg_with_infos =
   let num_regs = List.length (Reg.all_relocatable_regs ()) in
   if num_regs <= 64
@@ -402,8 +422,16 @@ let lscensus_run fd alloc cfg_with_infos =
       let t0 = Sys.time () in
       let r = alloc cfg_with_infos in
       let t1 = Sys.time () in
-      Printf.eprintf "LSCENSUS %s nr=%d pk=%d ms=%.1f\n%!" fd.fun_name.sym_name
-        num_regs peak ((t1 -. t0) *. 1000.);
+      (* Force the lazy file-open ONLY here, at first emission: ordinary
+         processes (no above-floor function) must not create files -- the
+         fleet build is ~731k processes and would litter NFS otherwise. *)
+      (match Lazy.force lscensus_oc with
+      | None -> ()
+      | Some oc -> (
+        try
+          Printf.fprintf oc "LSCENSUS %s nr=%d pk=%d ms=%.1f\n%!"
+            fd.fun_name.sym_name num_regs peak ((t1 -. t0) *. 1000.)
+        with _ -> ()));
       r)
     else alloc cfg_with_infos
 
