@@ -153,7 +153,12 @@ module Degree = struct
 end
 
 let bit_matrix_threshold : int Lazy.t =
-  Regalloc_utils.int_of_param ~default:0 "BIT_MATRIX_THRESHOLD"
+  (* Enable the bit-matrix interference graph by default. The previous
+     default of 0 meant [num_registers < 0], i.e. the bit matrix (PR #5296) was
+     never used and IRC always fell back to the edge Hashtbl. num_registers is
+     per-function (stamps reset per function), so this bounds the matrix at
+     ~threshold^2/16 bytes for the single largest function. *)
+  Regalloc_utils.int_of_param ~default:50_000 "BIT_MATRIX_THRESHOLD"
 
 (** Interference graph representation.
 
