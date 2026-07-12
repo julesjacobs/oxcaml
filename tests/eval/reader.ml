@@ -373,17 +373,29 @@ let read_string (src : string) : query =
        | "declare-sort", [ name_s; Sexp.Atom arity ] ->
          if arity <> "0" then raise (Unsupported "declare-sort with nonzero arity");
          let name = sym_name name_s in
+         (* No redeclaration (§4.2.1). Sorts have their own namespace, distinct from term
+            symbols, so this guards [sorts] only — a sort and a function may legally share
+            a name. *)
+         if Hashtbl.mem decls.Decls.sorts name
+         then raise (Malformed ("declare-sort redeclares an existing sort: " ^ name));
          let sym = Env.declare_sort env name in
          Hashtbl.replace decls.Decls.sorts name (Sort.uninterpreted sym)
        | "declare-sort", _ -> raise (Malformed "declare-sort expects (name arity)")
        | "declare-const", [ name_s; sort_s ] ->
          let name = sym_name name_s in
+         (* No redeclaration/redefinition of a term symbol (§4.2.1): reject a name already
+            a const, function, or define-fun macro (mirrors the [define-fun] guard, so
+            define-then-declare rejects symmetrically). *)
+         if Decls.is_defined decls name
+         then raise (Malformed ("declare-const redeclares an existing symbol: " ^ name));
          let sort = parse_sort decls sort_s in
          let sym = Env.declare_fun env name (Rank.create [] sort) in
          Hashtbl.replace decls.Decls.consts name (sym, sort)
        | "declare-const", _ -> raise (Malformed "declare-const expects (name sort)")
        | "declare-fun", [ name_s; Sexp.List dom_s; cod_s ] ->
          let name = sym_name name_s in
+         if Decls.is_defined decls name
+         then raise (Malformed ("declare-fun redeclares an existing symbol: " ^ name));
          let dom = List.map (parse_sort decls) dom_s in
          let cod = parse_sort decls cod_s in
          let rank = Rank.create dom cod in

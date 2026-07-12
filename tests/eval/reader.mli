@@ -17,7 +17,13 @@ open Oxsmt_core
     [define-fun] is supported as a non-recursive macro (SMT-LIB 2.6 §4.2.2): its body is
     stored unexpanded and substituted at each use site (zero parameters = a named
     constant). Recursion is rejected — a macro referring to itself is {!Unsupported}, as
-    are [define-fun-rec] / [define-funs-rec].
+    are [define-fun-rec] / [define-funs-rec]. Body validation is LAZY (a documented
+    deviation from §4.2.2, which elaborates the body at definition time): the body is
+    sort-checked and its symbols resolved only when the macro is USED, so an UNUSED macro
+    with an ill-formed body, or a body forward-referencing a symbol declared after the
+    definition, is accepted. Both are fail-closed on use (an unresolved symbol / sort
+    mismatch raises {!Malformed}) and arise only on ill-formed input, so a well-formed
+    model is never mis-satisfied.
 
     Terms: [true]/[false], numerals, [and]/[or]/[not]/[=>], [ite], [=]/[distinct],
     chainable [<=]/[<]/[>=]/[>], [+]/[-]/[*] (linear only), [div]/[mod]/[abs], parallel

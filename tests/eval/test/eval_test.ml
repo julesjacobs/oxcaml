@@ -566,18 +566,49 @@ let define_fun_cases () =
   expect_reader_malformed
     "df/body-result-sort-mismatch"
     "(declare-const x Int)(define-fun f ((n Int)) Bool (+ n 1))(assert (f x))";
-  (* wrong arity at the use site. *)
+  (* wrong arity at the use site — too many AND too few arguments. *)
   expect_reader_malformed
-    "df/arity-mismatch"
+    "df/arity-mismatch-too-many"
     "(declare-const x Int)(define-fun f ((n Int)) Int n)(assert (= (f x x) 0))";
-  (* redefinition (name already declared / defined). *)
   expect_reader_malformed
-    "df/redefinition"
+    "df/arity-mismatch-too-few"
+    "(declare-const x Int)(define-fun g ((a Int) (b Int)) Int (+ a b))\n\
+     (assert (= (g x) 0))";
+  (* redefinition, both orders (§4.2.1 — a signature symbol may not be re-declared or
+     re-defined). declare-then-define and define-then-declare both reject; a repeated
+     declare rejects; a repeated sort rejects (its own namespace). *)
+  expect_reader_malformed
+    "df/redefinition-declare-then-define"
     "(declare-const x Int)(define-fun x () Int 0)(assert (= x 0))";
+  expect_reader_malformed
+    "df/redefinition-define-then-declare"
+    "(define-fun k () Int 5)(declare-const k Int)(assert (= k 0))";
+  expect_reader_malformed
+    "df/redeclare-const"
+    "(declare-const x Int)(declare-const x Int)(assert (= x 0))";
+  expect_reader_malformed
+    "df/redeclare-sort"
+    "(declare-sort S 0)(declare-sort S 0)(declare-const a S)(assert (= a a))";
   (* duplicate parameter names. *)
   expect_reader_malformed
     "df/duplicate-params"
-    "(declare-const x Int)(define-fun f ((n Int) (n Int)) Int n)(assert (= (f x x) 0))"
+    "(declare-const x Int)(define-fun f ((n Int) (n Int)) Int n)(assert (= (f x x) 0))";
+  (* F2 lazy body validation (documented lenience): a USED macro with an ill-formed body
+     is fail-closed on use (undeclared symbol → Malformed) ... *)
+  expect_reader_malformed
+    "df/lazy-illformed-body-used"
+    "(declare-const x Int)(define-fun f () Int nonexistent)(assert (= (f) x))";
+  (* ... while an UNUSED ill-formed macro is accepted (lazy: never expanded, never
+     validated) — read succeeds. *)
+  report
+    "df/lazy-illformed-body-unused-accepted"
+    (match
+       Reader.read_string
+         "(declare-const x Int)(define-fun f () Int nonexistent)(assert (= x 0))"
+     with
+     | _ -> true
+     | exception _ -> false)
+    "an unused ill-formed macro should be accepted (lazy validation)"
 ;;
 
 (* --- the gate's real sat cases: every .model sidecar must MODEL-SATISFIES ---------- *)
