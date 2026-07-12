@@ -333,6 +333,73 @@ let test_propagation () =
   | _ -> check "prop-: exactly one implied" false
 ;;
 
+(* 3b. ⊤/⊥ bridge: a Bool-codomain predicate application is watched against [true_const],
+   so a predicate truth entailed by congruence ([p(a), a = b |- p(b)]) surfaces as a
+   {!propagate} flip — not merely as a reactive [true <> false] conflict on a wrong guess.
+   DISCRIMINATION: before predicate watching, [register_term] watched only non-Bool [Eq]
+   atoms, so [propagate] here returned [[]] and every check below failed. *)
+
+let test_predicate_propagation () =
+  let env, usort, _unary, konst = make_env () in
+  let p = Env.declare_fun env "p" (Rank.create [ usort ] Sort.bool) in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let pa = Context.app ctx p [ a ]
+  and pb = Context.app ctx p [ b ] in
+  let tt = Context.bool_const ctx true
+  and ff = Context.bool_const ctx false in
+  (* positive: p(a)=true and a=b => p(b) entailed true by congruence. *)
+  let e = Euf.create ctx in
+  Euf.register_term e pa;
+  Euf.register_term e pb;
+  check "pred-prop: nothing implied initially" (Euf.propagate e = []);
+  Euf.assert_eq e ~premise:1 pa tt;
+  (* p(a) itself now equals true_const — a self-report, drained here. *)
+  (match Euf.propagate e with
+   | [ imp ] ->
+     check
+       "pred-prop: p(a) self-implied true"
+       (Term.equal imp.Euf.atom pa && imp.Euf.value)
+   | _ -> check "pred-prop: exactly one self-implied (p a)" false);
+  Euf.assert_eq e ~premise:2 a b;
+  (match Euf.propagate e with
+   | [ imp ] ->
+     check "pred-prop+: atom is p(b)" (Term.equal imp.Euf.atom pb);
+     check "pred-prop+: value true" imp.Euf.value;
+     check
+       "pred-prop+: explanation = {1;2}"
+       (List.sort compare (Euf.explain_implied e imp) = [ 1; 2 ])
+   | _ -> check "pred-prop+: exactly one implied (p b)" false);
+  check "pred-prop+: nothing new on re-poll" (Euf.propagate e = []);
+  (* negative: with the [true <> false] axiom, p(a)=false and a=b => p(b) entailed false
+     (provably distinct from true_const via the axiom). *)
+  let e2 = Euf.create ctx in
+  Euf.register_term e2 pa;
+  Euf.register_term e2 pb;
+  Euf.assert_neq e2 ~premise:0 tt ff;
+  Euf.assert_eq e2 ~premise:1 pa ff;
+  ignore (Euf.propagate e2 : Euf.implied list);
+  Euf.assert_eq e2 ~premise:2 a b;
+  (match
+     List.filter (fun (i : Euf.implied) -> Term.equal i.Euf.atom pb) (Euf.propagate e2)
+   with
+   | [ imp ] ->
+     check "pred-prop-: value false" (not imp.Euf.value);
+     check
+       "pred-prop-: explanation = {0;1;2}"
+       (List.sort compare (Euf.explain_implied e2 imp) = [ 0; 1; 2 ])
+   | _ -> check "pred-prop-: exactly one implied (p b)" false);
+  (* a nullary Bool App (bare Bool variable) is NOT watched: it can only be merged with
+     true/false by a direct assertion, so a watch would only echo it. *)
+  let q = Env.declare_fun env "q" (Rank.create [] Sort.bool) in
+  let e3 = Euf.create ctx in
+  let qc = Context.const ctx q in
+  Euf.register_term e3 qc;
+  Euf.assert_eq e3 ~premise:5 qc tt;
+  check "pred-prop: bare Bool var not watched (no self-report)" (Euf.propagate e3 = [])
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 4. Randomized cross-check: equivalence classes + consistency verdict. *)
 
@@ -867,6 +934,7 @@ let () =
   test_chain_selfloop ();
   test_chain_orders ();
   test_propagation ();
+  test_predicate_propagation ();
   test_errors ();
   test_random_crosscheck ();
   test_explanation_soundness ();

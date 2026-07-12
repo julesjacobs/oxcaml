@@ -89,7 +89,17 @@ let register_atom t atom term =
     t.atom_terms <- term :: t.atom_terms;
     match kind with
     | K_eq _ -> Term.Table.replace t.watched term atom
-    | K_bool | K_foreign -> ())
+    | K_bool ->
+      (* A predicate application [p(x…)] (arity >= 1) is watched by the engine against
+         [true_const] (⊤/⊥ bridge): map its term back to this atom so [check] turns an
+         engine-reported truth flip — e.g. [p(b)] entailed by [p(a) ∧ a = b] — into a
+         literal propagation. A nullary Bool atom (bare Bool variable / Bool constant) is
+         not engine-watched, so it is not recorded here. *)
+      (match term.node with
+       | App (_, args) when Iarr.length args >= 1 ->
+         Term.Table.replace t.watched term atom
+       | _ -> ())
+    | K_foreign -> ())
 ;;
 
 (* Internalise [term] (+ closure) into the e-graph with no atom binding — the combinator's
@@ -183,11 +193,14 @@ let check t effort =
     then failwith "Euf_adapter: empty conflict premise set (unsound) [codex AP4 tripwire]";
     Theory.Conflict { Explanation.premises; rule = Euf_congruence }
   | Euf.Consistent ->
-    (* A watched Eq atom whose entailed truth just changed becomes a theory propagation —
-       but only for atoms this adapter registered (C6); a watched Eq that is merely a
-       subterm of some other atom has no [Atom] and is skipped. Each propagated literal's
-       reason is SNAPSHOTTED now (precedence-valid — see {!reason_of_implied}) so ask-time
-       [explain] serves the cache instead of re-deriving against a later forest. *)
+    (* A watched atom whose entailed truth just changed becomes a theory propagation: an
+       [Eq] atom flipping (dis)equal, or a predicate [p(x…)] whose class reached
+       [true_const]/[false_const] (the ⊤/⊥ flow-back, e.g. [p(a), a = b |- p(b)]). Only
+       atoms this adapter registered are propagated (C6); a watched term that is merely a
+       subterm of some other atom (a bare Eq subterm, or a buried predicate) has no [Atom]
+       and is skipped. Each propagated literal's reason is SNAPSHOTTED now
+       (precedence-valid — see {!reason_of_implied}) so ask-time [explain] serves the
+       cache instead of re-deriving against a later forest. *)
     let lits =
       List.filter_map
         (fun (imp : Euf.implied) ->

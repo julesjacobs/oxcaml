@@ -47,7 +47,9 @@ type 'p enode =
   }
 
 type watched =
-  { w_atom : Term.t (* a watched non-Bool Eq atom *)
+  { w_atom : Term.t
+    (* a watched atom: either a non-Bool [Eq(a,b)] (truth = [a ~ b]) or a Bool-codomain
+         predicate application [p(x…)] (truth = [p(x…) ~ true_const]). *)
   ; w_a : int
   ; w_b : int
   ; mutable w_reported : int
@@ -113,6 +115,13 @@ type 'p t =
   ; index : int Term.Table.t (* Term -> e-node id *)
   ; sigtbl : int Sig.t
   ; watched : watched Dynarray.t
+  ; (* w_atom -> its two watched side TERMS, for [explain_implied]. Write-once and stable
+       (an atom's sides never change): a non-Bool [Eq(a,b)] maps to [(a, b)]; a predicate
+       [p(x…)] maps to [(p(x…), true_const)]. Terms (not e-node ids) so a re-registration
+       after [pop] re-derives fresh ids via [register]. Never cleaned: only queried for a
+       currently-live watch, so a stale entry for a popped-and-not-rewatched atom is
+       inert. *)
+    watch_sides : (Term.t * Term.t) Term.Table.t
   ; diseqs : 'p diseq Dynarray.t
   ; trail : 'p undo Dynarray.t
   ; levels : level Dynarray.t
@@ -138,6 +147,7 @@ let create ctx =
   ; index = Term.Table.create 256
   ; sigtbl = Sig.create 256
   ; watched = Dynarray.create ()
+  ; watch_sides = Term.Table.create 256
   ; diseqs = Dynarray.create ()
   ; trail = Dynarray.create ()
   ; levels = Dynarray.create ()
@@ -389,15 +399,32 @@ let rec register t (term : Term.t) : int =
        List.iter (fun r -> add_use t r id) roots;
        insert_congruence t id
      | Leaf -> ());
+    (* Set up a watch on this term if its entailed truth is a congruence fact the theory
+       must report (theory propagation / Nelson-Oppen sharing). Two shapes:
+       - a non-Bool [Eq(a,b)]: truth = [a ~ b], sides [(a, b)];
+       - a Bool-codomain predicate application [p(x…)] (arity >= 1): truth =
+         [p(x…) ~ true_const], sides [(term, true_const)]. This is the ⊤/⊥ bridge that
+         lets [p(a), a = b |- p(b)] flow back as a literal implication rather than being
+         discovered only reactively via the [true <> false] axiom on a wrong guess. A
+         nullary Bool [App] (a bare Bool variable) is NOT watched: its class can only be
+         merged with true/false by directly asserting it, so a watch would only ever
+         self-report the value SAT just set — no congruence can derive it. Follows the
+         same over-watch/filter pattern as [Eq] (the adapter maps a reported [w_atom] back
+         to its [Atom] and ignores watches with no atom, e.g. a buried predicate). *)
+    let add_watch sa sb =
+      let ia = register t sa
+      and ib = register t sb in
+      Dynarray.add_last t.watched { w_atom = term; w_a = ia; w_b = ib; w_reported = -1 };
+      Term.Table.replace t.watch_sides term (sa, sb);
+      (* a freshly-watched atom must be evaluated by the next {!propagate} even if no
+         merge follows (its sides may already be (dis)equal) — dirty its endpoints. *)
+      mark_touched t (find t ia);
+      mark_touched t (find t ib)
+    in
     (match term.node with
-     | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
-       let ia = register t a
-       and ib = register t b in
-       Dynarray.add_last t.watched { w_atom = term; w_a = ia; w_b = ib; w_reported = -1 };
-       (* a freshly-watched atom must be evaluated by the next {!propagate} even if no
-          merge follows (its sides may already be (dis)equal) — dirty its endpoints. *)
-       mark_touched t (find t ia);
-       mark_touched t (find t ib)
+     | Eq (a, b) when not (Sort.equal a.sort Sort.bool) -> add_watch a b
+     | App (_, args) when Sort.equal term.sort Sort.bool && Iarr.length args >= 1 ->
+       add_watch term (Context.bool_const t.ctx true)
      | _ -> ());
     id
 ;;
@@ -692,14 +719,20 @@ let propagate t =
   List.rev !acc
 ;;
 
-let eq_sides (atom : Term.t) =
-  match atom.node with
-  | Eq (a, b) -> a, b
-  | _ -> invalid_arg "Euf.explain_implied: atom is not an equality"
+(* The two watched side terms for a reported atom. Recorded at watch-creation time
+   ([watch_sides]); for a non-Bool [Eq(a,b)] this is [(a, b)], for a predicate [p(x…)] it
+   is [(p(x…), true_const)]. Fall back to the [Eq] node's own sides for robustness. *)
+let watched_sides t (atom : Term.t) =
+  match Term.Table.find_opt t.watch_sides atom with
+  | Some sides -> sides
+  | None ->
+    (match atom.node with
+     | Eq (a, b) -> a, b
+     | _ -> invalid_arg "Euf.explain_implied: atom is not a watched atom")
 ;;
 
 let explain_implied t imp =
-  let a, b = eq_sides imp.atom in
+  let a, b = watched_sides t imp.atom in
   let ia = register t a
   and ib = register t b in
   if imp.value

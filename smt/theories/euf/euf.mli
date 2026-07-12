@@ -47,10 +47,15 @@ val create : Context.t -> 'p t
 (** [register_term t term] internalises [term] and {e every} subterm below it
     (CONTRACT-REG-1/2, post-order): each distinct subterm gets an e-node keyed on its
     [Term] tag (O(1)); each [App] additionally joins the congruence table (so it can be
-    detected congruent to a peer). A registered non-Bool [Eq(a,b)] atom is {e watched} for
-    {!propagate} (its sides are registered too). Idempotent (C7): re-registering a term
-    perturbs neither state nor ids. Registration is monotone within a frame and is undone
-    by {!pop} of the frame that introduced it. *)
+    detected congruent to a peer). Two kinds of registered term are {e watched} for
+    {!propagate}: a non-Bool [Eq(a,b)] atom (truth = [a ~ b], its sides are registered
+    too) and a Bool-codomain predicate application [p(x…)] of arity >= 1 (truth =
+    [p(x…) ~ true_const], watched against the hash-consed [true] constant). The predicate
+    watch is the ⊤/⊥ bridge that surfaces [p(a), a = b |- p(b)] as a {!propagate} flip. A
+    nullary Bool [App] (a bare Bool variable) is not watched — no congruence can entail
+    its value, so a watch would only echo a direct assertion. Idempotent (C7):
+    re-registering a term perturbs neither state nor ids. Registration is monotone within
+    a frame and is undone by {!pop} of the frame that introduced it. *)
 val register_term : 'p t -> Term.t -> unit
 
 (** [assert_eq t ~premise a b] asserts [a = b] justified by [premise]; [a]/[b] (and their
@@ -91,19 +96,24 @@ val check : 'p t -> 'p check_result
     list is deterministic (C2): same state, same order every call. *)
 val explain : 'p t -> Term.t -> Term.t -> 'p list
 
-(** An equality atom EUF has newly {e implied} since the previous {!propagate}. *)
+(** A watched atom EUF has newly {e implied} since the previous {!propagate}. *)
 type implied =
-  { atom : Term.t (** a watched non-Bool [Eq(a,b)] registered via {!register_term} *)
+  { atom : Term.t
+    (** a watched atom registered via {!register_term}: a non-Bool [Eq(a,b)] (sides [a]/[b])
+      or a Bool-codomain predicate [p(x…)] (implicitly watched against [true_const]). *)
   ; value : bool
-    (** [true]: [a] and [b] are now in one class ([a = b] entailed). [false]: [a] and [b]
-      are now provably distinct (an asserted disequality separates their classes) —
-      [¬(a = b)] entailed. *)
+    (** For an [Eq(a,b)] — [true]: [a],[b] now in one class ([a = b] entailed); [false]:
+      [a], [b] now provably distinct ([¬(a = b)] entailed). For a predicate [p(x…)] —
+      [true]: [p(x…) ~ true_const] ([p(x…)] entailed); [false]: [p(x…)] provably distinct
+      from [true_const], i.e. [p(x…) ~ false_const] via the [true <> false] axiom
+      ([¬p(x…)] entailed). *)
   }
 
-(** [propagate t] returns the watched equality atoms whose entailed truth-value changed
-    since the last [propagate]/backtrack (theory propagation for the future adapter and
-    Nelson–Oppen sharing; DESIGN.md §6). Explanations are lazy — call {!explain_implied}.
-    Deterministic order (registration order, C1). *)
+(** [propagate t] returns the watched atoms whose entailed truth-value changed since the
+    last [propagate]/backtrack (theory propagation for the adapter and Nelson–Oppen
+    sharing; DESIGN.md §6): [Eq] atoms flipping (dis)equal and predicate atoms whose
+    congruence class reached [true_const]/[false_const]. Explanations are lazy — call
+    {!explain_implied}. Deterministic order (registration order, C1). *)
 val propagate : 'p t -> implied list
 
 (** [explain_implied t imp] is the premise-token subset entailing [imp] (lazy, C2). For

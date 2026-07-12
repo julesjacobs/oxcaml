@@ -341,6 +341,45 @@ let test_propagation () =
   | _ -> check "prop: expected propagations" false
 ;;
 
+(* 3b. ⊤/⊥ flow-back: assert +p(a) and a=b; then p(b) is theory-implied TRUE by congruence
+   ([p(a) ~ true_const], [p(a) ~ p(b)] => [p(b) ~ true_const]) and must be PROPAGATED as a
+   literal — not merely caught reactively via the [true <> false] axiom on a later wrong
+   guess (that path is {!test_predicate_conflict}). DISCRIMINATION: before predicate
+   watching, the adapter propagated only Eq atoms, so [check] returned no [p(b)] literal
+   and the [List.exists] below failed. *)
+
+let test_predicate_propagation () =
+  let env, _u, _unary, pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let p = pred "p" in
+  let h = make_harness env ctx in
+  let a_pa = reg h (Context.app ctx p [ a ]) in
+  let a_pb = reg h (Context.app ctx p [ b ]) in
+  let a_ab = reg h (Context.eq ctx a b) in
+  ignore a_pa;
+  (* assert +p(a) and a=b; the first check reports p(a) self-true AND the congruence
+     flow-back p(b)=true. *)
+  assert_lit h (Lit.make a_pa true);
+  assert_lit h (Lit.make a_ab true);
+  match A.check h.adapter Theory.Propagate with
+  | Theory.Propagations lits ->
+    let pb_pos = Lit.make a_pb true in
+    check "pred-prop: p(b) propagated true" (List.exists (Lit.equal pb_pos) lits);
+    let e = A.explain h.adapter pb_pos in
+    let prem = Lit.Set.of_list e.Explanation.premises in
+    check "pred-prop: explanation subset asserted" (Lit.Set.subset prem h.asserted);
+    check "pred-prop: explanation non-empty" (e.Explanation.premises <> []);
+    check "pred-prop: rule = Euf_congruence" (e.Explanation.rule = Euf_congruence);
+    (* determinism C2: same explanation twice *)
+    let e2 = A.explain h.adapter pb_pos in
+    check
+      "pred-prop: explain deterministic"
+      (e.Explanation.premises = e2.Explanation.premises)
+  | _ -> check "pred-prop: expected propagations" false
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 4. push/pop restoration: deep nesting, pop-below a conflict, and assert-after-pop with
    a DIFFERENT assertion (recheck-after-backtrack, no stale state). *)
@@ -1036,6 +1075,7 @@ let () =
   test_predicate_conflict ();
   test_bool_lit_conflict ();
   test_propagation ();
+  test_predicate_propagation ();
   test_explain_precedence_eq_path_property ();
   test_explain_precedence_diseq_regression ();
   test_explain_euf_perf_deferral ();
