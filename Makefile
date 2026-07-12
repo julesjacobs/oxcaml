@@ -68,6 +68,10 @@ CORPUS_DIRS ?= ../corpora/QF_UF ../corpora/QF_LIA ../corpora/QF_UFLIA
 CORPUS_TIMEOUT ?= 2
 CORPUS_JOBS ?= 48
 CORPUS_MAX_BYTES ?= 20971520
+# board #60 counted cutoff: set to a positive N for a deterministic, load-independent
+# per-file effort cap (SAT conflicts + decisions + seam Final-rounds). Empty (default) =
+# unbounded; the run still records per-file effort so an uncapped sweep calibrates N.
+CORPUS_MAX_EFFORT ?=
 
 .PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
@@ -168,7 +172,7 @@ corpus-run:
 	$(DUNE) build tests/corpus/corpus_classify.exe
 	CLASSIFY=_build/default/tests/corpus/corpus_classify.exe \
 	  CORPUS_TIMEOUT=$(CORPUS_TIMEOUT) CORPUS_JOBS=$(CORPUS_JOBS) \
-	  CORPUS_MAX_BYTES=$(CORPUS_MAX_BYTES) \
+	  CORPUS_MAX_BYTES=$(CORPUS_MAX_BYTES) CORPUS_MAX_EFFORT=$(CORPUS_MAX_EFFORT) \
 	  CORPUS_JSON=$(LOGS)/corpus-run.json CORPUS_RAW=$(LOGS)/corpus-run.raw \
 	  bash tests/corpus/corpus_run.sh $(CORPUS_DIRS)
 

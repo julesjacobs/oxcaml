@@ -1,7 +1,11 @@
-(* Per-file corpus classifier (board #124). Given one .smt2 file as argv[1], print a
-   single outcome token on stdout: solved-sat | solved-unsat | unknown |
-   unknown-incremental | parse-fail | mismatch Exit 0 always (the driver treats a
-   nonzero/killed exit as timeout/error).
+(* Per-file corpus classifier (board #124). Given one .smt2 file (first non-flag arg) and
+   an optional [--max-effort N] (board #60), print "<outcome> <effort>" on stdout: the
+   outcome token is solved-sat | solved-unsat | unknown | unknown-incremental | parse-fail
+   | mismatch, and [effort] is the deterministic counted work of the check (SAT
+   conflicts + decisions + seam Final-rounds; 0 for the paths that never run a check).
+   [--max-effort] is the deterministic, load-independent cutoff (a would-be answer past
+   the cap becomes `unknown`); absent = unbounded, and the emitted effort then feeds
+   calibration. Exit 0 always (the driver treats a nonzero/killed exit as timeout/error).
 
    It mirrors the solver CLI's decision (Parser->Session: a single-check-sat,
    push/pop-free file is solved once; anything incremental degrades) so the numbers
@@ -88,34 +92,55 @@ let scan_commands sexps =
 ;;
 
 let () =
+  (* Args: the .smt2 file (first non-flag arg) plus an optional [--max-effort N] — the
+     board #60 deterministic counted cutoff. Absent = unbounded: the effort is still
+     counted and emitted, so a plain (uncapped) sweep doubles as the calibration run that
+     records per-file effort to pick N. *)
+  let file = ref None in
+  let max_effort = ref None in
+  let rec parse = function
+    | [] -> ()
+    | "--max-effort" :: n :: rest ->
+      max_effort := Some (int_of_string n);
+      parse rest
+    | f :: rest when !file = None ->
+      file := Some f;
+      parse rest
+    | _ :: rest -> parse rest
+  in
+  parse (List.tl (Array.to_list Sys.argv));
   let file =
-    if Array.length Sys.argv >= 2
-    then Sys.argv.(1)
-    else (
+    match !file with
+    | Some f -> f
+    | None ->
       prerr_endline "corpus_classify: expected a .smt2 file argument";
-      exit 2)
+      exit 2
   in
   let src = read_file file in
-  let token =
+  let token, effort =
     match Sexp.parse_many src with
-    | exception Sexp.Malformed _ -> "parse-fail"
+    | exception Sexp.Malformed _ -> "parse-fail", 0
     | sexps ->
       let n_checks, incremental = scan_commands sexps in
       if incremental || n_checks <> 1
-      then "unknown-incremental"
+      then "unknown-incremental", 0
       else (
-        let s = Session.create () in
+        let s = Session.create ?max_effort:!max_effort () in
         match Parser.parse_into (Session.env s) (Session.context s) src with
-        | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail"
+        | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail", 0
         | parsed ->
           List.iter (Session.assert_term s) parsed.Parser.assertions;
           let v = Session.check_sat s in
           let label = label_of src in
-          (match v with
-           | Session.Sat -> if label = Some "unsat" then "mismatch" else "solved-sat"
-           | Session.Unsat -> if label = Some "sat" then "mismatch" else "solved-unsat"
-           | Session.Unknown -> "unknown"))
+          let tok =
+            match v with
+            | Session.Sat -> if label = Some "unsat" then "mismatch" else "solved-sat"
+            | Session.Unsat -> if label = Some "sat" then "mismatch" else "solved-unsat"
+            | Session.Unknown -> "unknown"
+          in
+          tok, Session.effort s)
   in
-  print_string token;
-  print_newline ()
+  (* Line: "<token> <effort>". [effort] is a deterministic function of the file (#60), so
+     the sweep records it for calibration; the driver splits on whitespace. *)
+  Printf.printf "%s %d\n" token effort
 ;;

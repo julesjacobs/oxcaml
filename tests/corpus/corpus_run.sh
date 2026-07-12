@@ -15,39 +15,51 @@
 # to $CORPUS_RAW.
 #
 # Env knobs (Makefile sets them): CLASSIFY (the corpus_classify exe), CORPUS_TIMEOUT (s),
-# CORPUS_JOBS, CORPUS_MAX_BYTES, CORPUS_JSON, CORPUS_RAW. Positional args: the logic dirs.
+# CORPUS_JOBS, CORPUS_MAX_BYTES, CORPUS_MAX_EFFORT, CORPUS_JSON, CORPUS_RAW. Positional
+# args: the logic dirs.
 set -uo pipefail
 
 CLASSIFY="${CLASSIFY:?CLASSIFY must point at the corpus_classify exe}"
 TIMEOUT="${CORPUS_TIMEOUT:-2}"
 JOBS="${CORPUS_JOBS:-48}"
 MAXBYTES="${CORPUS_MAX_BYTES:-20971520}"
+# board #60 counted cutoff: when set, each corpus_classify runs with --max-effort N (a
+# deterministic, load-independent cap). Empty = unbounded (the wall timeout still bounds
+# each file, and the emitted per-file effort feeds calibration to pick N).
+MAXEFFORT="${CORPUS_MAX_EFFORT:-}"
 JSON="${CORPUS_JSON:-../logs/corpus-run.json}"
 RAW="${CORPUS_RAW:-../logs/corpus-run.raw}"
 TRUNK="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 mkdir -p "$(dirname "$JSON")" "$(dirname "$RAW")"
 
-# Per-file: emit "<logic> <outcome> <file>". Outcome is a corpus_classify token
-# (solved-sat|solved-unsat|unknown|unknown-incremental|parse-fail|mismatch) or, added
-# here, skip-too-big / timeout / error.
+# Per-file: emit "<logic> <outcome> <effort> <file>". Outcome is a corpus_classify token
+# (solved-sat|solved-unsat|unknown|unknown-incremental|parse-fail|mismatch) or, added here,
+# skip-too-big / timeout / error. Effort is corpus_classify's deterministic counted work
+# (board #60), or "-" for the rows classify never produced (skip/timeout/error).
 classify_one() {
-  local file="$1" logic="$2" tok rc sz
+  local file="$1" logic="$2" out rc sz tok eff
   sz=$(stat -c%s "$file" 2>/dev/null || echo 0)
   if [ "$sz" -gt "$MAXBYTES" ]; then
-    echo "$logic skip-too-big $file"
+    echo "$logic skip-too-big - $file"
     return
   fi
-  tok=$(timeout -k 1 "${TIMEOUT}s" "$CLASSIFY" "$file" 2>/dev/null)
+  out=$(timeout -k 1 "${TIMEOUT}s" "$CLASSIFY" ${MAXEFFORT:+--max-effort "$MAXEFFORT"} "$file" 2>/dev/null)
   rc=$?
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     tok=timeout
-  elif [ "$rc" -ne 0 ] || [ -z "$tok" ]; then
+    eff=-
+  elif [ "$rc" -ne 0 ] || [ -z "$out" ]; then
     tok=error
+    eff=-
+  else
+    tok=$(printf '%s' "$out" | awk '{print $1}')
+    eff=$(printf '%s' "$out" | awk '{print $2}')
+    [ -n "$eff" ] || eff=-
   fi
-  echo "$logic $tok $file"
+  echo "$logic $tok $eff $file"
 }
 export -f classify_one
-export CLASSIFY TIMEOUT MAXBYTES
+export CLASSIFY TIMEOUT MAXBYTES MAXEFFORT
 
 : >"$RAW"
 start=$(date +%s.%N)
@@ -123,10 +135,23 @@ printf "%-10s %8s %8s %8s %8s %8s %8s %8s %8s %8s\n" \
 echo "json: $JSON"
 echo "raw:  $RAW"
 
+# board #60 calibration aid: the effort distribution over SOLVED files (effort is RAW col
+# 3; "-" rows — skip/timeout/error — are excluded). The counted cutoff is picked near the
+# knee (e.g. p99) so counted-solved is a SUPERSET of today's wall-quiet-solved set.
+solved_eff=$(awk '($2=="solved-sat"||$2=="solved-unsat") && $3!="-"{print $3}' "$RAW" | sort -n)
+n_solved=$(printf '%s\n' "$solved_eff" | grep -c . || true)
+pct() {
+  printf '%s\n' "$solved_eff" \
+    | awk -v p="$1" 'NF{a[++n]=$1} END{if(n==0){print 0;exit} i=int((p/100)*n); if(i<1)i=1; if(i>n)i=n; print a[i]}'
+}
+[ -n "$MAXEFFORT" ] \
+  && echo "cutoff: --max-effort $MAXEFFORT (deterministic; solved-set is load-independent)"
+echo "effort (solved, #60): n=$n_solved p50=$(pct 50) p90=$(pct 90) p99=$(pct 99) max=$(pct 100)  [pick --max-effort near the knee]"
+
 if [ "$total_mismatch" -gt 0 ]; then
   echo ""
   echo "CRITICAL: $total_mismatch SOUNDNESS MISMATCH(ES) — verdict contradicts label:"
-  awk '$2=="mismatch"{print "  "$3}' "$RAW" | head -20
+  awk '$2=="mismatch"{print "  "$4}' "$RAW" | head -20
   exit 1
 fi
 echo "soundness: 0 mismatches"

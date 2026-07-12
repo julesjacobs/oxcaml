@@ -160,9 +160,11 @@ let render_model (sort_cards, bindings) =
    model the session reconstructed and self-checked (const/Bool/LIA via the pipeline;
    function tables via the R1 in-process checker); a [Sat] with no reconstructable model,
    or one naming a symbol the printer cannot render, degrades to a sound [unknown]. We
-   never emit a [sat] the harness cannot transport or the evaluator cannot self-certify. *)
-let solve_batch src =
-  let s = Session.create () in
+   never emit a [sat] the harness cannot transport or the evaluator cannot self-certify.
+   [max_effort] threads the board #60 counted cutoff (a cut-off goal is a plain [unknown]
+   block, so the output format is unchanged). *)
+let solve_batch ?max_effort src =
+  let s = Session.create ?max_effort () in
   match Parser.parse_into (Session.env s) (Session.context s) src with
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
@@ -206,12 +208,29 @@ let solve_batch src =
 ;;
 
 let () =
+  (* Args: the .smt2 file (first non-flag arg) plus an optional [--max-effort N] — the
+     board #60 deterministic counted cutoff, threaded to the session. The output format is
+     unchanged: a goal cut off by the budget is a plain [unknown] block (the budget only
+     ever downgrades a would-be answer), so the harness goldens are unaffected. *)
+  let file = ref None in
+  let max_effort = ref None in
+  let rec parse = function
+    | [] -> ()
+    | "--max-effort" :: n :: rest ->
+      max_effort := Some (int_of_string n);
+      parse rest
+    | f :: rest when !file = None ->
+      file := Some f;
+      parse rest
+    | _ :: rest -> parse rest
+  in
+  parse (List.tl (Array.to_list Sys.argv));
   let file =
-    if Array.length Sys.argv >= 2
-    then Sys.argv.(1)
-    else (
+    match !file with
+    | Some f -> f
+    | None ->
       prerr_endline "oxsmt_cli: expected a .smt2 file argument";
-      exit 2)
+      exit 2
   in
   let src = read_file file in
   let sexps =
@@ -223,7 +242,7 @@ let () =
   let blocks =
     if incremental || n_checks <> 1
     then List.init n_checks (fun _ -> unknown_block)
-    else [ solve_batch src ]
+    else [ solve_batch ?max_effort:!max_effort src ]
   in
   List.iter print_block blocks
 ;;
