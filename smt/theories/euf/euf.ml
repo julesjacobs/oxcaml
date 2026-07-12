@@ -646,15 +646,19 @@ let propagate t =
        (mutants [euf_propagate_sep_stale_reps] / [euf_propagate_sep_skip_rebuild]). *)
     let sep = Int_set.create (Dynarray.length t.diseqs) in
     (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
-       [m = #e-nodes]. Every rep is an e-node id in [0, m), so this is injective (distinct
-       pairs give distinct keys) and cannot overflow — [m^2] fits a 63-bit [int] for any
-       instance that fits in memory. No merge happens inside [propagate], so [m] and every
-       [find] are stable for the whole call; the build and lookup loops therefore use the
-       same [m]. *)
+       [m = #e-nodes]. Every rep is an e-node id in [0, m), so distinct pairs give distinct
+       keys UNLESS the packing wraps: OCaml [int] arithmetic is mod 2^63, so injectivity
+       holds only for [m < floor (sqrt (2^63)) ~ 3.037e9]; the [assert] below enforces the
+       stricter [m <= 2^31], well inside that bound, so a wrap can never alias two pairs
+       (see the assert's fail-closed note). No merge happens inside [propagate], so [m] and
+       every [find] are stable for the whole call; the build and lookup loops therefore use
+       the same [m]. *)
     let m = Dynarray.length t.enodes in
-    (* [m] is fixed for the whole call (no merge inside [propagate]); guard the
-       injectivity/overflow precondition of the [lo*m+hi] packing once here — the keys
-       stay < m^2, which fits a 63-bit int iff m <= 2^31 (memory-infeasible before then). *)
+    (* [m] is fixed for the whole call (no merge inside [propagate]). Guard the packing's
+       injectivity precondition once here: keys alias only once [lo*m+hi] wraps mod 2^63,
+       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We assert the STRICTER [m <= 2^31],
+       so past it we fail closed (raise, never a wrong distinct-propagation) — and asserts
+       are live in [--profile release], so this is a real runtime guard, not debug-only. *)
     assert (m <= 1 lsl 31);
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
