@@ -615,11 +615,13 @@ let propagate t =
        (lo,hi) root pairs and test membership in O(1) per watched atom. Equivalent
        predicate: [distinct_witness a b <> None] iff the unordered pair [{find a, find b}]
        equals some diseq's separated pair — exactly membership of its normalized key.
-       [propagate] only needs this boolean; the citable witness is still re-derived lazily
-       by [explain_implied] for the few propagated lits that enter conflict analysis. The
-       set is membership-tested only (never iterated), so it introduces no Hashtbl-order
-       into any observable path (C8); watched iteration stays in registration/index order,
-       so the reported list is byte-identical to the old full-scan output.
+       [propagate] only needs this boolean; the citable witness is still produced by
+       [distinct_witness] via [explain_implied], which the adapter calls at propagation
+       time to snapshot each propagation's reason (#102 CONTRACT-EX), so the witness path
+       is unchanged. The set is membership-tested only (never iterated), so it introduces
+       no Hashtbl-order into any observable path (C8); watched iteration stays in
+       registration/index order, so the reported list is byte-identical to the old
+       full-scan output.
 
        Error asymmetry (soundness): a FALSE POSITIVE in this set (a spurious separated
        pair, or a stale/pre-merge rep that coincides with a watched pair's roots) makes
