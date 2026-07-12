@@ -160,9 +160,16 @@ Certificate event recorder (ADR-0013, M5 step 1): consumes the frozen `sat.mli` 
 emission hooks to record the Unsat-proof event stream (the four Unsat exits + E3
 `Theory_prop` materialization + ordered-RUP antecedents). Emission is **trace-gated** — an
 untraced solve is bit-identical (verdict/model/counters) to the pre-wiring core — so the
-recorder is off the shipping hot path. Replay/checking (Lean or a native RUP checker) is
-**step 2** (#153). Exercised by `make cert-test` (`cert_emit_test`, every check
-discriminating against the pre-wiring core). No frozen `.mli`. Owner: cert-tranche builders.
+recorder is off the shipping hot path. **Step 2 (#153, IMPLEMENTED):** `checker.{ml,mli}` is
+a native RUP replay checker over the recorder's event stream — it turns the gate from
+*searching* to *checking* (replay the emitted antecedent chains against the axiom DB rather
+than re-solving). Its axiom-DB admission surface is fix-the-class audited — all five paths
+have a definite terminal: empty `Query` legit (E1) / empty `Theory_lemma` Invalid / empty
+`Reason` Invalid / empty `Conflict` Unsupported / `learned` must RUP-derive (self/forward
+citation gated on already-verified ids). Exercised by `make cert-test` (`cert_emit_test`,
+discriminating against the pre-wiring core), `make checker-test` (`checker_test`, replay
+admission surface), and `make cert-corpus-gate` (end-to-end §4.1 checker-side acceptance over
+`tests/cases`). No frozen `.mli` (session.mli wiring is non-frozen). Owner: cert-tranche builders.
 
 ## smt/lexical (`oxsmt_lexical`)
 The one SMT-LIB 2.6 §3.1 lexer (ADR-0008), stdlib-only, zero deps. Emits a `token`
