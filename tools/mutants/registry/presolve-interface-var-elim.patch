@@ -1,0 +1,14 @@
+diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
+index 9687d165c3..65d390b6c7 100644
+--- a/smt/interface/presolve.ml
++++ b/smt/interface/presolve.ml
+@@ -169,7 +169,8 @@ let run ctx assertions =
+          match candidate c with
+          | Some (x, t)
+            when (not (Term.Map.mem x !sigma))
+-                && (not (Term.Set.mem x uf_vars))
++                && (ignore uf_vars;
++                    true)
+                 && uf_free t
+                 && not (Term.Set.mem x (reachable !sigma t)) ->
+            sigma := Term.Map.add x t !sigma;
