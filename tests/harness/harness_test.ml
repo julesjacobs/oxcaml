@@ -180,6 +180,29 @@ let () =
   check
     "table golden re-quotes a non-simple const name"
     (contains (produced_text [ quoted_table ]) "(const |a b| 0)");
+  (* Faithful carrier (codex HIGH): a QUOTED payload token in a table body — [|true|] as a
+     case result — is MALFORMED (a value is only ever a bare numeral / true|false / (-
+     n)). The harness must PRESERVE the bars, never launder [|true|] into a valid bare
+     [true], so the eval reader can fail the model closed rather than the harness silently
+     repairing a solver regression. Both the golden and the eval sidecar must still show
+     [|true|]. *)
+  let launder_goal =
+    match
+      parse_solver_output
+        "(result (verdict sat) (model (sort S 1) (fun p (default false) (case (0) \
+         |true|))) (counters (conflicts 0) (decisions 0) (propagations 0)))"
+    with
+    | Ok [ g ] -> g
+    | _ -> failwith "laundering input did not parse"
+  in
+  check
+    "quoted payload token preserved in golden (not laundered to bare true)"
+    (contains (produced_text [ launder_goal ]) "(case (0) |true|)");
+  check
+    "quoted payload token preserved in eval sidecar (not laundered)"
+    (match launder_goal.model with
+     | Some m -> contains (sidecar_of_model m) "|true|"
+     | None -> false);
   (* Pass: golden matches produced. *)
   let g = produced_text [ unknown_goal ] in
   check

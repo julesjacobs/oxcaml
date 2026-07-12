@@ -148,7 +148,7 @@ let parse_result sx =
       let is_flat_pairs pairs =
         List.for_all
           (function
-            | Sexp.List [ Sexp.Atom _; _ ] -> true
+            | Sexp.List [ (Sexp.Atom _ | Sexp.Quoted _); _ ] -> true
             | _ -> false)
           pairs
       in
@@ -159,7 +159,11 @@ let parse_result sx =
           (Flat
              (List.map
                 (function
-                  | Sexp.List [ Sexp.Atom k; v ] -> k, Sexp.to_string v
+                  (* the name may arrive |quoted| (e.g. [|a b|]); keep the content and let
+                     [render_model_body] re-derive the canonical quoting. The VALUE is
+                     carried by [to_string], which preserves a [Quoted] token's bars
+                     (faithful — a malformed quoted value is not laundered to a bare one). *)
+                  | Sexp.List [ (Sexp.Atom k | Sexp.Quoted k); v ] -> k, Sexp.to_string v
                   | _ -> raise (Bad_output "bad model binding"))
                 pairs))
       | Some entries -> Some (Table entries)
@@ -203,16 +207,21 @@ let expected_statuses (sexps : Sexp.t list) : verdict option list =
 (* Golden text generation. *)
 (* ------------------------------------------------------------------ *)
 
-(* Re-serialize one sidecar model entry [(sort|const|fun NAME ...)]. The harness Sexp
-   reader strips a quoted symbol's [|bars|] to a bare [Atom], so the NAME slot is
-   re-quoted with {!Sexp.quote_symbol} — a name like [a b] must round-trip as [|a b|] or
-   it re-lexes as two tokens and the eval reader rejects the model. The rest of an entry
-   (cardinalities, value tokens: numerals, [(- n)], [true]/[false]) are never symbol names
-   and never need quoting, so they pass through {!Sexp.to_string} verbatim. A shape the
-   CLI does not emit falls back to a plain [to_string]. *)
+(* Re-serialize one sidecar model entry [(sort|const|fun NAME ...)]. The NAME slot is
+   re-quoted with {!Sexp.quote_symbol} on its content — a name like [a b] must round-trip
+   as [|a b|] or it re-lexes as two tokens and the eval reader rejects the model — so a
+   name is faithful whether it arrived bare ([Atom]) or [|quoted|] ([Quoted]). The rest of
+   an entry (cardinalities, value tokens: numerals, [(- n)], [true]/[false]) are NOT
+   symbol names: they pass through {!Sexp.to_string} verbatim, which PRESERVES a [Quoted]
+   token's bars rather than laundering it — a malformed quoted payload like
+   [(case (0) |true|)] stays [|true|] so the eval reader fails it closed instead of the
+   harness repairing it. A shape the CLI does not emit falls back to a plain [to_string]. *)
 let render_entry (e : Sexp.t) : string =
   match e with
-  | Sexp.List (Sexp.Atom (("sort" | "const" | "fun") as kw) :: Sexp.Atom name :: rest) ->
+  | Sexp.List
+      (Sexp.Atom (("sort" | "const" | "fun") as kw)
+      :: (Sexp.Atom name | Sexp.Quoted name)
+      :: rest) ->
     let parts = kw :: Sexp.quote_symbol name :: List.map Sexp.to_string rest in
     "(" ^ String.concat " " parts ^ ")"
   | other -> Sexp.to_string other

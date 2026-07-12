@@ -6,22 +6,30 @@
    [(set-info :status ...)] and [(check-sat)] commands in a .smt2 file, and (b) parse the
    solver's machine-readable output blocks.
 
-   Quoted symbols and strings collapse to plain atoms on the way in (the bars/quotes are
-   dropped, the content is kept). That loss is harmless for the harness's *reading* — it
-   only inspects bare atoms — but a symbol name read here and later re-emitted (model
-   bindings in golden text and in the eval sidecar) must be re-quoted with [quote_symbol],
-   or a name like [a b] would re-lex as two tokens. *)
+   Double-quoted STRINGS collapse to plain atoms on the way in (harmless — strings never
+   appear in a model). A pipe-|quoted symbol|, by contrast, is kept as a DISTINCT [Quoted]
+   node that remembers it arrived quoted: a model payload token (a function-table case
+   result, a const value) is legitimately only a bare numeral / [true]/[false] / [(- n)],
+   so a QUOTED payload token is a malformed model. Preserving the [Quoted] kind lets
+   [to_string] re-emit the bars verbatim rather than laundering [|true|] into a valid bare
+   [true] — the eval reader (which has its own [Quoted] and rejects a quoted value token)
+   then fails the model closed, instead of the harness silently repairing a solver
+   regression. A [Quoted] in a NAME slot is re-derived to the canonical quoting by
+   [quote_symbol] on output, so names stay faithful either way. *)
 
 type t =
   | Atom of string
+  | Quoted of string
   | List of t list
 
 exception Parse_error of string
 
 (* Render an s-expression back to text. Used for canonicalizing model values in golden
-   output. *)
+   output. A [Quoted] re-emits its [|bars|] verbatim (faithful carrier: a quoted token is
+   never normalized to a bare atom). *)
 let rec to_string = function
   | Atom a -> a
+  | Quoted s -> "|" ^ s ^ "|"
   | List l -> "(" ^ String.concat " " (List.map to_string l) ^ ")"
 ;;
 
@@ -138,7 +146,7 @@ let parse_all (s : string) : t list =
         loop ()
     in
     loop ();
-    Atom (Buffer.contents b)
+    Quoted (Buffer.contents b)
   in
   let read_atom () =
     let b = Buffer.create 16 in
