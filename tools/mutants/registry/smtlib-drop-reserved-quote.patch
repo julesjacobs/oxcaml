@@ -1,11 +1,11 @@
-diff --git a/smt/smtlib/printer.ml b/smt/smtlib/printer.ml
-index 780b151..d226ac0 100644
---- a/smt/smtlib/printer.ml
-+++ b/smt/smtlib/printer.ml
-@@ -50,22 +50,7 @@ let is_simple_symbol name =
- 
- (* SMT-LIB 2.6 §3.1 reserved words: match the symbol syntax but are keywords; quoting
-    turns them into legal, distinct symbols. *)
+diff --git a/smt/lexical/lexer.ml b/smt/lexical/lexer.ml
+index 988cc002e5..7e50ec87ff 100644
+--- a/smt/lexical/lexer.ml
++++ b/smt/lexical/lexer.ml
+@@ -21,22 +21,7 @@ exception Error of string
+ (* §3.1 reserved words. Quoting escapes reserved-ness: [|let|] is an ordinary symbol. Note
+    Core/Ints operators ([and], [+], [true], …) are NOT lexically reserved — they are
+    ordinary symbols the grammar layer interprets. *)
 -let reserved_words =
 -  [ "_"
 -  ; "!"
@@ -24,5 +24,5 @@ index 780b151..d226ac0 100644
 -;;
 +let reserved_words = []
  
- (* Predefined Core + Ints (QF_UFLIA) function/operator symbols. A user symbol with one of
-    these names is unrepresentable (see header). [div]/[mod] are deliberately absent: they
+ (* §3.1 ⟨symbol⟩ constituent characters of a simple symbol. *)
+ let is_symbol_char = function

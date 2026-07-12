@@ -1,6 +1,6 @@
 module=smtlib
 suite=smtlib-test
-target=smt/smtlib/printer.ml
-description=printer's reserved_words list emptied (compiling variant): reserved words render bare instead of |quoted|. Compiles clean (binding still referenced), so the render assertions — not the compiler — must catch it (KILLED-TEST)
+target=smt/lexical/lexer.ml
+description=shared lexer's reserved_words list emptied (compiling variant): reserved words lex as ordinary symbols, so the printer (which delegates bare-vs-|quoted| to the lexer via quote_lexical) renders them bare instead of |quoted|. Compiles clean (binding still referenced), so the smtlib-test R1 render assertions — not the compiler — must catch it (KILLED-TEST). Re-anchor note: reserved_words moved printer.ml -> smt/lexical/lexer.ml in the shared-lexer refactor (ADR-0008); same fault, same oracle.
 review=M0-smtlib R1 (reserved words RENDER as |quoted|)
 expected=KILLED-TEST
