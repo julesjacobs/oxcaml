@@ -369,6 +369,44 @@ let register_allocator_ls cfg_with_infos =
   cfg_with_infos_profile ~accumulate:true "cfg_ls" Regalloc_ls.run
     cfg_with_infos
 
+let lscensus_peak cfg_with_infos =
+  let peak = ref 0 in
+  let visit id =
+    match Cfg_with_infos.liveness_find_opt cfg_with_infos id with
+    | None -> ()
+    | Some { Cfg_liveness.across; _ } ->
+      let n = Reg.Set.cardinal across in
+      if n > !peak then peak := n
+  in
+  Cfg_with_infos.fold_body_instructions cfg_with_infos ~init:()
+    ~f:(fun () (i : Cfg.basic Cfg.instruction) -> visit i.id);
+  Cfg_with_infos.fold_blocks cfg_with_infos
+    ~f:(fun _ (b : Cfg.basic_block) () -> visit b.terminator.id)
+    ~init:();
+  !peak
+
+(* Full-jane census: emit one compact stderr line per HIGH-PRESSURE function
+   (peak > 64 OR num_regs > 2000); ordinary functions emit nothing. peak <=
+   num_regs always, so functions with num_regs <= 64 are below the floor and
+   skip the (only) expensive step, the liveness scan. Unconditional (no env),
+   so it fires on the remote bench build. Output only; does not change codegen
+   or exit codes. *)
+let lscensus_run fd alloc cfg_with_infos =
+  let num_regs = List.length (Reg.all_relocatable_regs ()) in
+  if num_regs <= 64
+  then alloc cfg_with_infos
+  else
+    let peak = lscensus_peak cfg_with_infos in
+    if peak > 64 || num_regs > 2000
+    then (
+      let t0 = Sys.time () in
+      let r = alloc cfg_with_infos in
+      let t1 = Sys.time () in
+      Printf.eprintf "LSCENSUS %s nr=%d pk=%d ms=%.1f\n%!" fd.fun_name.sym_name
+        num_regs peak ((t1 -. t0) *. 1000.);
+      r)
+    else alloc cfg_with_infos
+
 let register_allocator fd : Cfg_with_infos.t -> Cfg_with_infos.t =
   (* First check for per-function regalloc attribute in codegen_options *)
   let rec find_regalloc_option = function
@@ -429,7 +467,7 @@ let compile_cfg ppf_dump ~funcnames fd_cmm cfg_with_layout =
         Regalloc_validate.Description.create
           (Cfg_with_infos.cfg_with_layout cfg_with_infos)
       in
-      cfg_with_infos ++ register_allocator fd_cmm
+      cfg_with_infos ++ lscensus_run fd_cmm (register_allocator fd_cmm)
       ++ cfg_with_infos_profile ~accumulate:true "cfg_validate_description"
            (Regalloc_validate.run cfg_description))
   ++ cfg_with_infos_profile ~accumulate:true "cfg_prologue" Cfg_prologue.run
