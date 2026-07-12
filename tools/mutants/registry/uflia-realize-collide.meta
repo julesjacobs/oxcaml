@@ -1,0 +1,6 @@
+module=uflia
+suite=test
+target=smt/interface/cdclt.ml
+description=The §10 ℤ-realization fresh() generator (cdclt.ml pass 1b) drops BOTH of its distinctness mechanisms — the [Hashtbl.replace int_used v] that records each assigned integer AND the [incr next] that advances the counter — so every pure-EUF Int class realizes to the SAME integer (the least LIA-unused value). Distinct EUF classes then collapse onto one integer, so a model asserting f(a) <> f(b) over pure-EUF Int results (tests/cases/uflia_int_table_sat) produces f(a)=f(b): the R1 in-process checker rejects it and the CLI emits unknown, contradicting the sat golden -> make test goes red. NOTE the invariant is per-class DISTINCTNESS; dropping EITHER line alone is a no-op (each mechanism independently guarantees distinctness, belt-and-suspenders), so the mutation drops both to genuinely break it.
+review=task #110 §10 realization (cdclt.ml pass 1b per-class distinctness). Reviewer LOW item named the single-line [replace int_used] drop; empirically that is a no-op (incr next still gives distinct values), so this mutant drops both lines to actually break distinctness — the finding is reported to the lead.
+expected=KILLED-TEST

@@ -11,3 +11,9 @@
     serialization seam arrive with M4. *)
 
 module Session = Session
+
+(** The R1 in-process model self-check (ADR-UF-models §3), exposed so the test suite can
+    unit-test the TCB guard directly (e.g. the [min_int * -1] fail-closed case, which no
+    solver path reaches but the invariant must uphold). [oxsmt_core]-only; not part of the
+    client-facing session flow, which drives it internally via {!Session}. *)
+module Model_check = Model_check

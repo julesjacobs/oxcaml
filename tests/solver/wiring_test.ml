@@ -909,6 +909,26 @@ let test_adr0010_bool_boundary () =
     (Session.check_sat s)
 ;;
 
+(* Regression (codex HIGH, task #110 fix round): the R1 checker's [mul_ovf] must fail
+   CLOSED on the [min_int * -1] wrap. [-min_int] wraps back to [min_int] and
+   [min_int / -1] wraps too, so a wrapped product slips past the quotient check — a false
+   [true] that silently defeats the fail-closed TCB guard. No solver path models
+   [min_int], so this is unreachable end-to-end (hence a DIRECT Model_check call, not a
+   CLI drive): a model binding x = min_int and the assertion [-x = min_int]. Evaluating
+   [-x] must raise inside the checker so the assertion fails closed and check = false (NOT
+   the wrap-true the old guard returned). Discriminating: the pre-fix guard returns true
+   here. *)
+let test_model_check_min_int_guard () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let assertion = Context.eq ctx (Context.neg ctx x) (Context.int_const ctx min_int) in
+  let model = [], [ Session.Const ("x", Session.VInt min_int) ] in
+  check
+    "Model_check min_int*-1 guard: -x = min_int fails closed (not a wrap-true)"
+    (not (Oxsmt_interface.Model_check.check model [ assertion ]))
+;;
+
 let () =
   test_push_pop ();
   test_assert_after_check ();
@@ -937,6 +957,7 @@ let () =
   test_determinism ();
   test_cli_refused_symbol_degrades ();
   test_cli_negative_int_token ();
+  test_model_check_min_int_guard ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

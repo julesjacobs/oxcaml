@@ -29,7 +29,15 @@ let mul_ovf a b =
   then 0
   else (
     let r = a * b in
-    if r / a <> b then raise Bad else r)
+    (* [r / a <> b] catches most overflow but MISSES [min_int * -1] (and [-1 * min_int]):
+       [-min_int] wraps back to [min_int], and [min_int / -1] wraps to [min_int] too, so
+       the quotient check passes on a wrapped product — silently defeating this
+       fail-closed TCB guard. Mirror the guard combine.ml / rational.ml / tests/eval carry
+       (codex HIGH): reject the [-1]/[min_int] pair explicitly. Unreachable on today's
+       solver path (it never models [min_int]), but the invariant must hold regardless. *)
+    if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
+    then raise Bad
+    else r)
 ;;
 
 let value_eq (a : Cdclt.value) (b : Cdclt.value) =
