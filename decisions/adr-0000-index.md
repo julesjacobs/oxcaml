@@ -48,4 +48,17 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   Supersedes the v1–v3 explicit-purification drafts. Full text (with errata: §5a
   mechanism, §3.6 surfaced-vs-buried + option-(a) infeasibility, §6 fixture trio,
   ite precondition) in `adr-0010-internalization.md`. [accepted]
+- ADR-0011 — Uninterpreted-function-table models (the QF_UF model gap): read out a
+  verified `sat` function/predicate TABLE model (default + cases, first-match) from
+  the combined `Cdclt` output — freeze-fork (b), unfrozen `Cdclt` currency, no
+  frozen-surface change. Every promoted `sat` gated through `Model_check` (uniform
+  gating); QF_UF first cut (mixed-sort QF_UFLIA Int-keyed tables deferred, §10 stub).
+  The QF_UF solved-rate lever (7,269/7,503 files need tables). Implemented + landed
+  on `task/uf-models` (trunk `e41b126672`); full text in `adr-0011-uf-models.md`.
+  [accepted — this land is its acceptance]
+- ADR-0012 — Lemma tier (stage-2 quantifier instantiation): L1 normative (trigger-based
+  e-matching instantiation, placeholders + scoped `env.mli` unfreeze, unforgeable
+  `.oxsmt.*` capability, `assert_lemma` binder-builder, nested-∀ rejected); L2–L6
+  interface sketches. Design-only, gated behind M4 close + the freeze rituals; full
+  text in `adr-0012-lemma-tier.md`. [ratified Rev 3.2 — design-only]
 
