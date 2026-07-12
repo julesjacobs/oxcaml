@@ -1,4 +1,5 @@
 module Sat = Oxsmt_solver.Sat
+module Sh = Oxsmt_solver.Search_heuristics
 module Dimacs = Oxsmt_dimacs.Dimacs
 
 (* Unit + property self-test for the CDCL SAT core (TASKS.md M1-sat).
@@ -550,7 +551,139 @@ let test_budget_tick_exception_safety () =
     (Sat.value s a || Sat.value s b)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* Modern-search heuristics (S3 LBD/reduceDB + #155 rephasing). The logic under test lives
+   in the pure, stateless {!Oxsmt_solver.Search_heuristics} — the frozen sat.mli hides the
+   solver internals, so this is where LBD, reduceDB selection, and the rephase schedule
+   are hand-checked directly. *)
+
+let test_lbd_of_levels () =
+  (* LBD = number of distinct decision levels among the literals. *)
+  check "lbd: empty clause is 0" (Sh.lbd_of_levels [||] = 0);
+  check "lbd: single level is 1" (Sh.lbd_of_levels [| 0 |] = 1);
+  check "lbd: all same level is 1" (Sh.lbd_of_levels [| 3; 3; 3 |] = 1);
+  check
+    (Printf.sprintf
+       "lbd: {1,2,2,5,5,5} = 3 (got %d)"
+       (Sh.lbd_of_levels [| 1; 2; 2; 5; 5; 5 |]))
+    (Sh.lbd_of_levels [| 1; 2; 2; 5; 5; 5 |] = 3);
+  check "lbd: {0,1,2,3} = 4" (Sh.lbd_of_levels [| 0; 1; 2; 3 |] = 4);
+  check "lbd: order-independent" (Sh.lbd_of_levels [| 5; 1; 5; 2 |] = 3)
+;;
+
+let test_reduce_deletions_protects_glue () =
+  (* Four glue clauses (LBD <= 2) and two non-glue (LBD 5, 4). n=6 => limit = n/2 = 3.
+     Correct: glue is protected, so only the two removable (non-glue) clauses are deleted.
+     The glue-deletion MUTANT (dropping the [lbd > glue_threshold] guard) treats glue as
+     removable; with only two non-glue clauses it must then reach into glue to fill the
+     third deletion slot, deleting glue clause index 1 — which this exact-array assertion
+     catches. *)
+  let s act lbd = { Sh.lbd; activity = act; protected_ = false } in
+  let stats = [| s 0.0 1; s 0.0 2; s 0.0 2; s 0.0 1; s 3.0 5; s 4.0 4 |] in
+  let del = Sh.reduce_deletions stats in
+  let show = Array.to_list (Array.map (fun b -> if b then 1 else 0) del) in
+  check
+    (Printf.sprintf "reduce: glue protected, del=[0;0;0;0;1;1] (got %s)" (show_ints show))
+    (del = [| false; false; false; false; true; true |])
+;;
+
+let test_reduce_deletions_worst_half_and_locked () =
+  (* Worst-first order (LBD desc, ties activity asc) among removable, and locked/binary
+     ([protected_]) never deleted. n=7 => limit=3. Removable =
+     {2 ,3,4,6}
+     ; index 5 locked. worst-first = [6(9); 4(8); 2(5,act1); 3(5,act2)] => delete top 3 =
+     {2 ,4,6}
+     , spare 3. *)
+  let mk lbd act protected_ = { Sh.lbd; activity = act; protected_ } in
+  let stats =
+    [| mk 1 0.0 false (* glue *)
+     ; mk 2 0.0 false (* glue *)
+     ; mk 5 1.0 false
+     ; mk 5 2.0 false
+     ; mk 8 1.0 false
+     ; mk 3 1.0 true (* locked: protected despite mid LBD *)
+     ; mk 9 0.5 false
+    |]
+  in
+  let del = Sh.reduce_deletions stats in
+  check
+    "reduce: worst-half by (lbd desc, act asc), glue+locked spared"
+    (del = [| false; false; true; false; true; false; true |])
+;;
+
+let test_rephase_schedule () =
+  (* The rephase cycle is a deterministic total function of the event count, front-loading
+     the TRUE-flip (event 0). *)
+  check "rephase: event 0 = Flipped_true" (Sh.rephase_mode 0 = Sh.Flipped_true);
+  check "rephase: event 1 = Best_trail" (Sh.rephase_mode 1 = Sh.Best_trail);
+  check "rephase: event 2 = Original_default" (Sh.rephase_mode 2 = Sh.Original_default);
+  check "rephase: event 3 = Saved" (Sh.rephase_mode 3 = Sh.Saved);
+  check "rephase: cycles at 4" (Sh.rephase_mode 4 = Sh.Flipped_true);
+  check "rephase: cycles at 5" (Sh.rephase_mode 5 = Sh.Best_trail);
+  (* Interval grows ~1.5x and is strictly increasing (backoff, no thrash). *)
+  check "rephase: grow 1000 -> 1500" (Sh.grow_interval 1000 = 1500);
+  check "rephase: grow 1500 -> 2250" (Sh.grow_interval 1500 = 2250);
+  check "rephase: grow strictly increasing" (Sh.grow_interval 1000 > 1000)
+;;
+
+(* The modern machinery (LBD reduceDB, adaptive restarts, and the decision-interval
+   rephase) only engages on a hard, decision-heavy instance. Pigeonhole PHP(n+1,n) is
+   unsat and drives thousands of conflicts and decisions, so reduceDB fires (>2000
+   conflicts), the LBD restart trigger fires, and — because it makes >1000 branch
+   decisions — a rephase impulse fires too. This asserts all of that stays SOUND (still
+   unsat) and DETERMINISTIC (I6: two identical runs, identical stats). *)
+let php_solver n =
+  let s = Sat.create () in
+  let pv = Array.make_matrix (n + 1) n 0 in
+  for i = 0 to n do
+    for h = 0 to n - 1 do
+      pv.(i).(h) <- Sat.new_var s
+    done
+  done;
+  for i = 0 to n do
+    Sat.add_clause s (List.init n (fun h -> Sat.pos pv.(i).(h)))
+  done;
+  for h = 0 to n - 1 do
+    for i = 0 to n do
+      for j = i + 1 to n do
+        Sat.add_clause s [ Sat.neg pv.(i).(h); Sat.neg pv.(j).(h) ]
+      done
+    done
+  done;
+  s
+;;
+
+let test_search_machinery_determinism () =
+  let n = 7 in
+  let s1 = php_solver n
+  and s2 = php_solver n in
+  let r1 = Sat.solve s1
+  and r2 = Sat.solve s2 in
+  check "machinery: PHP(8,7) unsat" (r1 = Sat.Unsat && r2 = Sat.Unsat);
+  let a = Sat.stats s1
+  and b = Sat.stats s2 in
+  check
+    (Printf.sprintf
+       "machinery: reduceDB engaged (>2000 conflicts, got %d)"
+       a.Sat.Stats.conflicts)
+    (a.Sat.Stats.conflicts > 2000);
+  check
+    "machinery: deterministic conflicts"
+    (a.Sat.Stats.conflicts = b.Sat.Stats.conflicts);
+  check
+    "machinery: deterministic decisions"
+    (a.Sat.Stats.decisions = b.Sat.Stats.decisions);
+  check
+    "machinery: deterministic propagations"
+    (a.Sat.Stats.propagations = b.Sat.Stats.propagations)
+;;
+
 let () =
+  test_lbd_of_levels ();
+  test_reduce_deletions_protects_glue ();
+  test_reduce_deletions_worst_half_and_locked ();
+  test_rephase_schedule ();
+  test_search_machinery_determinism ();
   test_dimacs_strict ();
   test_budget_tick_exception_safety ();
   test_analyze_multi ();

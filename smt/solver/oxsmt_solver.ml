@@ -7,3 +7,8 @@
     milestones (M2+); until then the core is propositional only and sees no terms. *)
 
 module Sat = Sat
+
+(** Pure heuristic building blocks for {!Sat}'s modern search layer (S3 LBD/reduceDB +
+    board #155 rephasing). Re-exported (not part of the frozen {!Sat} contract) so the
+    hand-checkable logic is unit-testable directly. *)
+module Search_heuristics = Search_heuristics

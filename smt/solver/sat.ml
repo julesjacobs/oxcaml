@@ -32,6 +32,11 @@ type clause =
   { id : int
   ; lits : lit array
   ; mutable activity : float
+  ; mutable lbd : int
+    (* LBD ("glue"): distinct decision levels among the literals, computed when the
+         clause is learned and improved (lowered) whenever conflict analysis re-derives it
+         as a reason. Drives LBD-based reduceDB (S3). 0 for original / transient clauses
+         (never in [learnts], never scored). *)
   ; learnt : bool
   ; mutable deleted : bool
   }
@@ -133,8 +138,31 @@ type t =
   ; (* Activity increments and decay factors. *)
     mutable var_inc : float
   ; mutable cla_inc : float
-  ; (* Learned-clause budget (grows across restarts). *)
-    mutable max_learnts : float
+  ; (* LBD-based reduceDB schedule (S3, Glucose-style): fire reduceDB when [conflicts]
+       reaches [next_reduce], then step it by a fixed increment — decoupled from restarts
+       (which are now frequent under the adaptive policy). *)
+    mutable next_reduce : int
+  ; (* Glucose-style adaptive restart / CaDiCaL-style rephasing state (S3 + #155). Fast
+       and slow exponential moving averages of learned-clause LBD: a restart fires when
+       recent LBD (fast) runs worse than the long-run average (slow). [trail_ema] is the
+       moving average of the trail length at conflict, used to BLOCK restarts/rephasing
+       while the trail is large (progress toward a model), which is what keeps rephasing
+       from disrupting the SAT instances it would otherwise regress. All reset per
+       [solve]. *)
+    mutable lbd_ema_fast : float
+  ; mutable lbd_ema_slow : float
+  ; mutable trail_ema : float
+  ; mutable conflicts_since_restart : int
+  ; (* Rephasing (#155): [decisions_since_rephase] drives a conflict-INDEPENDENT interval
+       (so it fires on the firehose, where conflicts≈0), [rephase_events] indexes the
+       [{saved, flipped, default, best}] cycle, [rephase_interval] grows to back off.
+       [best_phase] holds the per-var phase of the longest trail prefix seen; the phase
+       cycle's [Best_trail] mode replays it. *)
+    mutable decisions_since_rephase : int
+  ; mutable rephase_events : int
+  ; mutable rephase_interval : int
+  ; mutable best_trail_len : int
+  ; best_phase : bool Dynarray.t
   ; (* The model snapshot of the most recent Sat, and the last failed core. *)
     saved_model : int Dynarray.t
   ; mutable failed : lit list
@@ -163,6 +191,20 @@ type t =
 let var_decay = 0.95
 let cla_decay = 0.999
 
+(* Modern-search tuning (S3 + #155). Novelty-free: the values mirror Glucose / CaDiCaL. *)
+let lbd_ema_alpha_fast = 1.0 /. 32.0 (* recent-LBD window *)
+let lbd_ema_alpha_slow = 1.0 /. 4096.0 (* long-run LBD average *)
+let trail_ema_alpha = 1.0 /. 4096.0 (* trail-length average, for blocking *)
+let restart_margin = 1.25 (* fast/slow LBD ratio that forces a restart *)
+let block_margin = 1.4 (* trail vs its average that BLOCKS a restart/rephase *)
+let restart_min_conflicts = 50 (* EMA warm-up before adaptive restarts / blocking *)
+let reduce_first = 2000 (* first reduceDB at this many conflicts *)
+let reduce_inc = 300 (* then every this-many more *)
+let rephase_base_interval = 1000 (* decisions between the first rephase impulses *)
+
+(* One exponential-moving-average step: [x <- x + alpha*(sample - x)]. *)
+let ema_step x ~alpha ~sample = x +. (alpha *. (sample -. x))
+
 let create () =
   { nvars = 0
   ; ok = true
@@ -184,7 +226,16 @@ let create () =
   ; next_id = 0
   ; var_inc = 1.0
   ; cla_inc = 1.0
-  ; max_learnts = 0.0
+  ; next_reduce = reduce_first
+  ; lbd_ema_fast = 0.0
+  ; lbd_ema_slow = 0.0
+  ; trail_ema = 0.0
+  ; conflicts_since_restart = 0
+  ; decisions_since_rephase = 0
+  ; rephase_events = 0
+  ; rephase_interval = rephase_base_interval
+  ; best_trail_len = 0
+  ; best_phase = Dynarray.create ()
   ; saved_model = Dynarray.create ()
   ; failed = []
   ; conflicts = 0
@@ -357,6 +408,14 @@ let cla_bump t c =
 
 let cla_decay_bump t = t.cla_inc <- t.cla_inc /. cla_decay
 
+(* LBD ("glue") of a clause under the current assignment: the number of distinct decision
+   levels among its literals (S3). Never on the conflict-free firehose path — only inside
+   conflict analysis / reduceDB. *)
+let clause_lbd t lits =
+  Search_heuristics.lbd_of_levels
+    (Array.map (fun l -> Dynarray.get t.level (var_of_lit l)) lits)
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Variable allocation. Grows every per-var Dynarray and the two watch lists for the new
    var's literals, and makes the var decision-eligible. *)
@@ -368,6 +427,7 @@ let ensure_var t v =
     Dynarray.add_last t.trail_pos (-1);
     Dynarray.add_last t.reason Decision;
     Dynarray.add_last t.polarity true;
+    Dynarray.add_last t.best_phase true (* best-trail phase memory: FALSE-first default *);
     Dynarray.add_last t.seen false;
     Dynarray.add_last t.var_act 0.0;
     Dynarray.add_last t.heap_pos (-1);
@@ -392,7 +452,9 @@ let fresh_id t =
 ;;
 
 let mk_clause_with_id t id lits learnt =
-  let c = { id; lits = Array.copy lits; activity = 0.0; learnt; deleted = false } in
+  let c =
+    { id; lits = Array.copy lits; activity = 0.0; lbd = 0; learnt; deleted = false }
+  in
   if learnt then Dynarray.add_last t.learnts c else Dynarray.add_last t.clauses c;
   c
 ;;
@@ -538,7 +600,7 @@ let propagate t =
    by [analyze]. *)
 
 let transient_clause t lits =
-  { id = fresh_id t; lits; activity = 0.0; learnt = false; deleted = false }
+  { id = fresh_id t; lits; activity = 0.0; lbd = 0; learnt = false; deleted = false }
 ;;
 
 (* Cert emission (ADR-0013 §4.0): surface a materialized theory transient's id ↔ clause so
@@ -673,7 +735,14 @@ let analyze t confl =
   let dl = decision_level t in
   let continue = ref true in
   while !continue do
-    if !c.learnt then cla_bump t !c;
+    if !c.learnt
+    then (
+      cla_bump t !c;
+      (* LBD improvement (Glucose): a learned clause re-derived as a reason may now tie
+         together fewer levels; lowering its LBD protects a recently-useful clause from
+         reduceDB. Only lower, never raise. *)
+      let l = clause_lbd t !c.lits in
+      if l < !c.lbd then !c.lbd <- l);
     let lits = !c.lits in
     let start = if !p = -1 then 0 else 1 in
     for jj = start to Array.length lits - 1 do
@@ -859,12 +928,21 @@ let locked t c =
 
 let reduce_db t =
   let arr = Dynarray.to_array t.learnts in
-  Array.sort (fun a b -> compare a.activity b.activity) arr;
-  let n = Array.length arr in
-  for i = 0 to n - 1 do
-    let c = arr.(i) in
-    if (not (locked t c)) && Array.length c.lits > 2 && i < n / 2 then c.deleted <- true
-  done;
+  (* LBD-based reduceDB (S3): protect glue (LBD <= threshold), locked, and binary clauses;
+     among the rest delete the worst half by LBD (desc), ties by activity (asc). The pure
+     selection lives in {!Search_heuristics.reduce_deletions}; here we only supply the
+     per-clause stats and apply the verdict. *)
+  let stats =
+    Array.map
+      (fun c ->
+         { Search_heuristics.lbd = c.lbd
+         ; activity = c.activity
+         ; protected_ = locked t c || Array.length c.lits <= 2
+         })
+      arr
+  in
+  let del = Search_heuristics.reduce_deletions stats in
+  Array.iteri (fun i c -> if del.(i) then c.deleted <- true) arr;
   Dynarray.clear t.learnts;
   Array.iter (fun c -> if not c.deleted then Dynarray.add_last t.learnts c) arr
 ;;
@@ -945,7 +1023,7 @@ let save_model t =
   done
 ;;
 
-let record_learnt t learnt bt ants =
+let record_learnt t learnt bt ants lbd =
   if Array.length learnt = 1
   then (
     unchecked_enqueue t learnt.(0) Decision;
@@ -955,6 +1033,7 @@ let record_learnt t learnt bt ants =
     | None -> ())
   else (
     let c = mk_clause t learnt true in
+    c.lbd <- lbd;
     attach t c;
     cla_bump t c;
     unchecked_enqueue t learnt.(0) (Implied_by c);
@@ -1053,12 +1132,74 @@ let propagate_theory t =
   !confl
 ;;
 
+(* Snapshot the phase of the current trail as the "best" (longest-prefix) phase memory
+   whenever the trail is longer than any seen before this solve (#155 Best_trail mode).
+   Each assigned var records the polarity that reproduces its current value; unassigned
+   vars keep their prior best_phase. Called at a conflict, where the trail is at a local
+   maximum. *)
+let update_best_trail t =
+  let tl = Dynarray.length t.trail in
+  if tl > t.best_trail_len
+  then (
+    t.best_trail_len <- tl;
+    for i = 0 to tl - 1 do
+      let l = Dynarray.get t.trail i in
+      (* value true ⇒ decide positive ⇒ polarity false; value false ⇒ polarity true. The
+         literal on the trail is the true one, so [not (sign_of_lit l)] is the polarity. *)
+      Dynarray.set t.best_phase (var_of_lit l) (not (sign_of_lit l))
+    done)
+;;
+
+(* A restart/rephase is BLOCKED while the trail is much larger than its recent average:
+   many assignments = progress toward a model, so disrupting it would regress SAT
+   instances (the Glucose blocking-restart idea, reused for rephasing — this is what keeps
+   the TRUE-flip rephase from costing the QF_UFLIA files it would otherwise churn).
+   Requires EMA warm-up ([restart_min_conflicts]); with conflicts≈0 (the firehose)
+   blocking never fires, so the rephase impulse is free to search there. *)
+let blocking t =
+  t.conflicts >= restart_min_conflicts
+  && float_of_int (Dynarray.length t.trail) > block_margin *. t.trail_ema
+;;
+
+(* Glucose-style adaptive restart: recent learned-clause LBD (fast EMA) running worse than
+   the long-run average (slow EMA) means the search is in an unproductive region —
+   restart. Gated by EMA warm-up and by {!blocking}. *)
+let adaptive_restart t =
+  t.conflicts_since_restart >= restart_min_conflicts
+  && t.lbd_ema_fast > restart_margin *. t.lbd_ema_slow
+  && not (blocking t)
+;;
+
+(* Apply one rephase impulse from the [{saved, flipped, default, best}] cycle (#155):
+   reset the phase-saving array wholesale, then advance the cycle counter. The caller
+   restarts so the next descent uses the new phases from the top. *)
+let apply_rephase t =
+  let mode = Search_heuristics.rephase_mode t.rephase_events in
+  t.rephase_events <- t.rephase_events + 1;
+  match mode with
+  | Search_heuristics.Flipped_true ->
+    for v = 0 to t.nvars - 1 do
+      Dynarray.set t.polarity v false (* decide TRUE-first *)
+    done
+  | Search_heuristics.Original_default ->
+    for v = 0 to t.nvars - 1 do
+      Dynarray.set t.polarity v true (* decide FALSE-first (the create-time default) *)
+    done
+  | Search_heuristics.Best_trail ->
+    for v = 0 to t.nvars - 1 do
+      Dynarray.set t.polarity v (Dynarray.get t.best_phase v)
+    done
+  | Search_heuristics.Saved -> () (* keep phase saving untouched *)
+;;
+
 type search_result =
   | R_sat
   | R_unsat
   | R_restart
 
-(* One search episode, bounded by [conflict_limit] conflicts (0 = unbounded). *)
+(* One search episode. Restarts are driven by the Glucose-style adaptive trigger
+   ({!adaptive_restart}) plus a conflict-count [conflict_limit] fallback cap (the Luby
+   sequence, kept alongside per S3), and by the conflict-independent rephase interval. *)
 let search t assumps conflict_limit =
   let result = ref None in
   let conflicts_here = ref 0 in
@@ -1072,6 +1213,14 @@ let search t assumps conflict_limit =
     t.conflicts <- t.conflicts + 1;
     incr conflicts_here;
     budget_tick t (* effort (#60): one SAT conflict *);
+    (* Best-trail memory + trail-length EMA at the conflict point (the trail is at a local
+       maximum), before any realignment/backjump unwinds it (S3/#155). *)
+    update_best_trail t;
+    t.trail_ema
+    <- ema_step
+         t.trail_ema
+         ~alpha:trail_ema_alpha
+         ~sample:(float_of_int (Dynarray.length t.trail));
     if t.theory <> None
     then (
       let maxl = ref 0 in
@@ -1095,22 +1244,49 @@ let search t assumps conflict_limit =
       result := Some R_unsat)
     else (
       let learnt, bt, ants = analyze t confl in
+      let lbd = clause_lbd t learnt in
+      (* Feed the LBD EMAs (S3 adaptive restart) and count this conflict toward the
+         restart warm-up. *)
+      t.lbd_ema_fast
+      <- ema_step t.lbd_ema_fast ~alpha:lbd_ema_alpha_fast ~sample:(float_of_int lbd);
+      t.lbd_ema_slow
+      <- ema_step t.lbd_ema_slow ~alpha:lbd_ema_alpha_slow ~sample:(float_of_int lbd);
+      t.conflicts_since_restart <- t.conflicts_since_restart + 1;
       cancel_until t bt;
-      record_learnt t learnt bt ants;
+      record_learnt t learnt bt ants lbd;
       var_decay_bump t;
       cla_decay_bump t;
-      if
-        float_of_int (Dynarray.length t.learnts - Dynarray.length t.trail)
-        >= t.max_learnts
-      then reduce_db t)
+      (* LBD-based reduceDB on the conflict-count schedule (decoupled from restarts). *)
+      if t.conflicts >= t.next_reduce
+      then (
+        reduce_db t;
+        t.next_reduce <- t.next_reduce + reduce_inc))
   in
   while !result = None do
     match propagate_theory t with
     | Some confl -> handle_confl confl
     | None ->
-      if conflict_limit > 0 && !conflicts_here >= conflict_limit
+      let interval_hit = t.decisions_since_rephase >= t.rephase_interval in
+      let do_rephase = interval_hit && not (blocking t) in
+      (* A blocked rephase defers to the next interval without advancing the cycle. *)
+      if interval_hit && not do_rephase then t.decisions_since_rephase <- 0;
+      if do_rephase
+      then (
+        (* Conflict-independent rephase impulse (#155): reset phases per the cycle and
+           restart so the next descent uses them from the top. Fires on the firehose
+           (conflicts≈0) where conflict-triggered restarts never do; [blocking] shields
+           SAT instances making real progress toward a model (self-correction). *)
+        apply_rephase t;
+        t.rephase_interval <- Search_heuristics.grow_interval t.rephase_interval;
+        t.decisions_since_rephase <- 0;
+        t.conflicts_since_restart <- 0;
+        cancel_until t 0;
+        result := Some R_restart)
+      else if
+        (conflict_limit > 0 && !conflicts_here >= conflict_limit) || adaptive_restart t
       then (
         cancel_until t 0;
+        t.conflicts_since_restart <- 0;
         result := Some R_restart)
       else (
         (* Advance through assumptions, then branch. *)
@@ -1143,6 +1319,10 @@ let search t assumps conflict_limit =
             match pick_branch t with
             | Some l ->
               t.decisions <- t.decisions + 1;
+              t.decisions_since_rephase <- t.decisions_since_rephase + 1
+              (* rephase interval clock (#155): count genuine branch decisions only —
+                 assumption-forced decisions have a fixed phase, so they never need
+                 rephasing and would only dilute the interval *);
               new_decision_level t;
               unchecked_enqueue t l Decision;
               (* effort (#60): tick AFTER the decision is on the trail. [pick_branch] has
@@ -1234,13 +1414,25 @@ let solve ?(assumptions = []) t =
   else (
     let assumps = Array.of_list assumptions in
     cancel_until t 0;
-    t.max_learnts <- Float.max 100.0 (float_of_int (Dynarray.length t.clauses) /. 3.0);
+    (* Reset the modern-search episode state (S3 + #155) so this [solve] is a
+       deterministic function of the clause set + assumptions — two identical solves stay
+       bit-identical (I6). [best_phase] contents persist as warm memory (also
+       deterministic); only its length watermark resets so the next solve can re-snapshot. *)
+    t.lbd_ema_fast <- 0.0;
+    t.lbd_ema_slow <- 0.0;
+    t.trail_ema <- 0.0;
+    t.conflicts_since_restart <- 0;
+    t.decisions_since_rephase <- 0;
+    t.rephase_events <- 0;
+    t.rephase_interval <- rephase_base_interval;
+    t.next_reduce <- reduce_first;
+    t.best_trail_len <- 0;
     let rec go restart_no =
+      (* Luby conflict-count cap kept alongside the adaptive trigger (S3): a loose upper
+         bound that forces a restart if the LBD trigger never fires. *)
       let lim = luby restart_no * t.restart_base in
       match search t assumps lim with
-      | R_restart ->
-        t.max_learnts <- t.max_learnts *. 1.1;
-        go (restart_no + 1)
+      | R_restart -> go (restart_no + 1)
       | R_sat -> Sat
       | R_unsat -> Unsat
     in
