@@ -23,6 +23,8 @@ module Options = Oxcaml_args.Make_optcomp_options
 let main unix argv ppf ~flambda2 =
   native_code := true;
   Compmisc.set_backtrace_defaults ();
+
+  Compmisc.set_gc_pacing_defaults ();
   let columns =
     match Sys.getenv "COLUMNS" with
     | exception Not_found -> None

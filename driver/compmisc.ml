@@ -149,6 +149,66 @@ let backtraces_forced_on () =
 let set_backtrace_defaults () =
   if not (backtraces_forced_on ()) then Printexc.record_backtrace false
 
+(* The compiler is allocation-heavy and short-lived, so it benefits from a
+   laxer GC pace than the runtime default (space_overhead = 120): raising it
+   trades peak heap for fewer major collections. On large compilation units
+   this is about -8 to -10% wall-clock time at the cost of roughly +45% peak
+   heap. We only bump the default: if OCAMLRUNPARAM/CAMLRUNPARAM explicitly
+   sets space_overhead ("o=..."), the user/build-farm asked for a specific
+   value (possibly the default 120) and we leave it untouched. *)
+(* Size-adaptive GC pace. Small/medium units get a lax pace (fewer major
+   collections; the -8..-10% single-unit win). Large units (big generated or
+   heavy modules) keep a tighter pace so we do not enlarge their already-big
+   heaps: on the fleet a global lax pace regressed heavy compiles (>=5s) ~10%
+   via aggregate memory pressure / paging, even while the tree aggregate
+   improved. The size threshold is a best-effort proxy (heavy files are
+   predominantly large sources) and wants a fleet run to calibrate. *)
+let compiler_space_overhead_small = 400
+let compiler_space_overhead_large = 200
+let large_unit_source_bytes = 300 * 1024
+
+(* Mirror the runtime's OCAMLRUNPARAM parser (runtime/startup_aux.c): the
+   active variable is OCAMLRUNPARAM if it is set at all, otherwise
+   CAMLRUNPARAM; within it, fields are separated by commas and each field's
+   first character is its single-letter key. Lowercase 'o' is space_overhead
+   (uppercase 'O' is a different knob, max_overhead, which we ignore here). *)
+let space_overhead_set_in_env () =
+  let param =
+    match Sys.getenv_opt "OCAMLRUNPARAM" with
+    | Some _ as p -> p
+    | None -> Sys.getenv_opt "CAMLRUNPARAM"
+  in
+  match param with
+  | None -> false
+  | Some s ->
+    String.split_on_char ',' s
+    |> List.exists (fun field -> String.length field > 0 && field.[0] = 'o')
+
+(* Best-effort size of the compilation unit's source: the largest .ml/.mli on
+   the command line. Uses in_channel_length to avoid a Unix dependency. *)
+let largest_input_source_bytes () =
+  Array.fold_left
+    (fun acc arg ->
+      if Filename.check_suffix arg ".ml" || Filename.check_suffix arg ".mli"
+      then
+        match open_in_bin arg with
+        | exception _ -> acc
+        | ic ->
+          let n = try in_channel_length ic with _ -> 0 in
+          close_in_noerr ic;
+          Stdlib.max acc n
+      else acc)
+    0 Sys.argv
+
+let chosen_space_overhead () =
+  if largest_input_source_bytes () > large_unit_source_bytes
+  then compiler_space_overhead_large
+  else compiler_space_overhead_small
+
+let set_gc_pacing_defaults () =
+  if not (space_overhead_set_in_env ()) then
+    Gc.set { (Gc.get ()) with Gc.space_overhead = chosen_space_overhead () }
+
 let directory_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
 

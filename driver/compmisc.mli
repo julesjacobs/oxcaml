@@ -27,6 +27,11 @@ val read_clflags_from_env : unit -> unit
     driver startup; see the implementation for the rationale. *)
 val set_backtrace_defaults : unit -> unit
 
+(* Bump the GC's [space_overhead] default for the (allocation-heavy,
+   short-lived) compiler process, unless OCAMLRUNPARAM/CAMLRUNPARAM already
+   sets space_overhead explicitly. Should be called once at driver startup. *)
+val set_gc_pacing_defaults : unit -> unit
+
 val with_ppf_file :
   file_prefix:string -> file_extension:string -> (Format.formatter -> 'a) -> 'a
 
