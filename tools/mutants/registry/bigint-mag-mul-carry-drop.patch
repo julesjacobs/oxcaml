@@ -1,0 +1,13 @@
+diff --git a/smt/theories/lia/bigint.ml b/smt/theories/lia/bigint.ml
+index 1d2a1c8a94..e5f4d9cf36 100644
+--- a/smt/theories/lia/bigint.ml
++++ b/smt/theories/lia/bigint.ml
+@@ -122,7 +122,7 @@ let mag_mul a b =
+         r.(i + j) <- t land mask;
+         carry := t lsr radix_bits
+       done;
+-      r.(i + lb) <- r.(i + lb) + !carry
++      r.(i + lb) <- r.(i + lb) (* [@mutant] carry-out dropped *)
+     done;
+     trim r)
+ ;;

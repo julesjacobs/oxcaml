@@ -227,6 +227,31 @@ let test_deep_growth () =
 ;;
 
 (* =================================================================== *)
+(* 2c. Knuth Algorithm-D "add-back" regression vector (codex LOW). The add-back correction
+   step (quotient-digit estimate q̂ one too high -> the trial subtraction goes negative ->
+   add the divisor back and decrement q̂) fires only for specific limb patterns that the
+   random oracle essentially never generates, so pin it explicitly. u = 2^63, v = 2^62 +
+   1: the estimate overshoots and must add back, landing on q = 1, r = 2^62 - 1 (=
+   max_int). Verified: 1*(2^62+1) + (2^62-1) = 2^63 = u, and |r| < |v|. *)
+
+let test_knuth_addback () =
+  print_endline "Knuth add-back vector (codex LOW):";
+  let u =
+    Bigint.of_string "9223372036854775808"
+    (* 2^63 *)
+  in
+  let v =
+    Bigint.of_string "4611686018427387905"
+    (* 2^62 + 1 *)
+  in
+  let q, r = Bigint.divmod u v in
+  check "add-back q = 1" (Bigint.equal q Bigint.one);
+  check "add-back r = 2^62 - 1" (Bigint.equal r (Bigint.of_string "4611686018427387903"));
+  check "add-back u = q*v + r" (Bigint.equal u (Bigint.add (Bigint.mul q v) r));
+  check "add-back |r| < |v|" (Bigint.compare (Bigint.abs r) (Bigint.abs v) < 0)
+;;
+
+(* =================================================================== *)
 (* 3. Independent differential oracle (Python int). *)
 
 let python_oracle_script =
@@ -321,6 +346,7 @@ let () =
   test_fits ();
   test_properties ();
   test_deep_growth ();
+  test_knuth_addback ();
   test_oracle ();
   Printf.printf "\n%d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1

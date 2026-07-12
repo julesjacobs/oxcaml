@@ -279,6 +279,59 @@ let test_overflow_firewall () =
     (v = Session.Unsat || v = Session.Unknown)
 ;;
 
+(* core-bignum W2, dual-review F2: the REAL production R1 degrade paths run through
+   [Session.check_sat] -> [Sat.solve] -> the LIA adapter's EAGER model/branch projection
+   (the [cdclt]/[combine_models] snapshot inside the theory-driving solve), degrading via
+   the CONTRACT-POISON firewall — NOT via [Lia.solve_integer], which the session never
+   calls (the lia_test (a)/(b) fixtures drive that declared-unused path). These fixtures
+   pin the two R1 int-projection sinks on the path the solver actually takes; both must
+   degrade to [Unknown], never a truncated model or a wrong sat/unsat verdict. *)
+let test_bignum_r1_session_degrade () =
+  (* (i) Big-MODEL SAT: [max_int*x + y <= 0] with [x >= 2] is ℚ-feasible (y unbounded
+     below), but the integral model binds y = -2*max_int (Big); projecting it to native
+     int at the eager model sink overflows -> firewall -> Unknown (never a truncated
+     model). *)
+  (let s = Session.create () in
+   let ctx = Session.context s in
+   let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+   let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+   Session.assert_term s (Context.ge ctx x (Context.int_const ctx 2));
+   Session.assert_term
+     s
+     (Context.le
+        ctx
+        (Context.add ctx (Context.mul_const ctx max_int x) y)
+        (Context.int_const ctx 0));
+   check_verdict
+     "F2(i): Big-model SAT degrades to Unknown via the eager-projection firewall"
+     Session.Unknown
+     (Session.check_sat s));
+  (* (ii) Big B&B BRANCH-BOUND: pin x0=0; promote x1 = x0+min_int = -2^62 and x2 =
+     x1+min_int = -2^63; then 2*x3 + 1 = x2, so the ℚ relaxation binds x3 = -(2^63+1)/2, a
+     Big non-integer. B&B branches on x3 and floors it (< min_int, exceeds int63) -> the
+     adapter guard catches the projection Overflow -> firewall -> Unknown (never a
+     truncated bound). Session mirror of lia_test's fixture (b), exercising
+     [suggest_branch]. *)
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let mkv name = Context.const ctx (Session.declare_const s name Sort.int) in
+  let x0 = mkv "x0" in
+  let x1 = mkv "x1" in
+  let x2 = mkv "x2" in
+  let x3 = mkv "x3" in
+  let ic k = Context.int_const ctx k in
+  Session.assert_term s (Context.eq ctx x0 (ic 0));
+  Session.assert_term s (Context.eq ctx (Context.add ctx x0 (ic min_int)) x1);
+  Session.assert_term s (Context.eq ctx (Context.add ctx x1 (ic min_int)) x2);
+  Session.assert_term
+    s
+    (Context.eq ctx (Context.add ctx (Context.mul_const ctx 2 x3) (ic 1)) x2);
+  check_verdict
+    "F2(ii): Big B&B branch-bound degrades to Unknown via the adapter guard"
+    Session.Unknown
+    (Session.check_sat s)
+;;
+
 (* get_model on a pure-Boolean sat returns a Bool value per propositional variable. *)
 
 let test_get_model_bool () =
@@ -870,6 +923,7 @@ let () =
   test_adr0010_use_history ();
   test_adr0010_bool_boundary ();
   test_overflow_firewall ();
+  test_bignum_r1_session_degrade ();
   test_get_model_bool ();
   test_mixed_bool_theory_model ();
   test_uf_function_model ();

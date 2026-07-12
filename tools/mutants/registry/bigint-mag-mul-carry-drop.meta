@@ -1,0 +1,6 @@
+module=bigint
+suite=bigint-test
+target=smt/theories/lia/bigint.ml
+description=mag_mul drops the schoolbook carry-OUT: the per-i inner loop's final carry (r.(i+lb) <- r.(i+lb) + !carry) is discarded, so every partial product whose top column carries loses its high limb -> a WRONG multiplication VALUE (not an R5-equivalent demote-skip; the product is numerically wrong, not merely mis-tiered). Kills via the property vectors (a*b=b*a, (a*b)/b=a), the deep-growth tripwire (2^4096 / K!), and the Python differential oracle.
+review=core-bignum-review.md F3 (dual-review fix round, value-changing arithmetic mutant, MERGE CONDITION); DESIGN §10 (mutation testing); R3 (safe limb-multiply carry discipline)
+expected=KILLED-TEST

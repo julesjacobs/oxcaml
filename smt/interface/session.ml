@@ -302,9 +302,16 @@ let build_model t =
     | exception Rational.Overflow ->
       (* core-bignum R1 output-boundary: a [Big] LIA model value is integral but exceeds
          int63, so it cannot be projected to the native-int [Model.Int] sink without
-         truncating. [build_model] runs OUTSIDE the CONTRACT-POISON firewall (below), so
-         catch the projection [Overflow] HERE and degrade to no-model -> [Unknown] (sound;
-         never a truncated model, and no [Model.t] unfreeze). *)
+         truncating. BELT-AND-SUSPENDERS (dual-review F1): in the CURRENT pipeline this
+         arm is UNREACHABLE — LIA model/branch projection is EAGER inside [Sat.solve] (the
+         [Cdclt]/[Combine] model snapshot happens during the theory-driving solve), so a
+         [Big] model value's [Rational.num] overflow is raised and caught by the
+         CONTRACT-POISON firewall wrapping [check_sat]'s solve, degrading to [Unknown]
+         BEFORE [build_model] ever runs. The actual R1 mechanism is that firewall, not
+         this catch. This catch is retained as defense-in-depth: it is the
+         correctly-placed guard should model extraction ever move OUTSIDE [Sat.solve]
+         (then [build_model] would run unprotected). Either way: degrade to no-model ->
+         [Unknown], never a truncated model, no [Model.t] unfreeze. *)
       None)
   else Some (assemble [] [])
 ;;

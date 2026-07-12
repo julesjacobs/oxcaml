@@ -80,7 +80,7 @@ CORPUS_RELEASE_TIMEOUT ?= 120
 # Default = the committed regression cases; override with a corpus subset for a wider sweep.
 DEV_RELEASE_DIRS ?= tests/cases
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline dev-release-check perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline dev-release-check perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -261,6 +261,13 @@ euf-test:
 ##   (TASKS.md M4-adapters).
 euf-adapter-test:
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/theories/euf/test/euf_adapter_test.exe
+
+## bigint-test — smt/theories/lia Bigint self-test (core-bignum W2, stdlib-only): limb-
+##   boundary hand vectors, pure-OCaml property vectors, a Knuth add-back regression vector,
+##   a deep-growth tripwire (hundreds of limbs), and an INDEPENDENT Python differential
+##   oracle. Nonzero exit on any failed check (the suite the bigint mutants run against).
+bigint-test:
+	$(DUNE) exec smt/theories/lia/test/bigint_test.exe
 
 ## lia-test — smt/theories/lia unit + property self-test (stdlib-only, deterministic).
 ##   Exact rational/δ-rational arithmetic incl. overflow guards; hand cases (DdM
