@@ -158,21 +158,68 @@ let space_overhead_set_in_env () =
     String.split_on_char ',' s
     |> List.exists (fun field -> String.length field > 0 && field.[0] = 'o')
 
-(* Best-effort size of the compilation unit's source: the largest .ml/.mli on
-   the command line. Uses in_channel_length to avoid a Unix dependency. *)
+(* Best-effort size of the compilation unit's source. This runs before Arg
+   parsing, so it walks the raw argv: .ml/.mli arguments count directly; the
+   operands of -impl/-intf are sources regardless of suffix; -args/-args0
+   response files are expanded one level (newline- resp. NUL-separated, as in
+   [Arg.read_arg]/[read_arg0]); and the operands of common value-taking flags
+   are skipped so an output name like [-o gen.ml] is not misclassified.
+   Exotic forms (a custom -intf-suffix, .mlt) may still be missed: this is a
+   pacing heuristic, and an explicit o= in OCAMLRUNPARAM stays authoritative.
+   Uses in_channel_length to avoid a Unix dependency. *)
+let source_file_size_bytes path =
+  match open_in_bin path with
+  | exception _ -> 0
+  | ic ->
+    let n = try in_channel_length ic with _ -> 0 in
+    close_in_noerr ic;
+    n
+
+let response_file_args path ~null_sep =
+  match open_in_bin path with
+  | exception _ -> []
+  | ic ->
+    let n = try in_channel_length ic with _ -> 0 in
+    if n <= 0 || n > 16 * 1024 * 1024
+    then (close_in_noerr ic; [])
+    else begin
+      match really_input_string ic n with
+      | exception _ -> close_in_noerr ic; []
+      | s ->
+        close_in_noerr ic;
+        String.split_on_char (if null_sep then '\000' else '\n') s
+        |> List.filter (fun a -> String.length a > 0)
+    end
+
 let largest_input_source_bytes () =
-  Array.fold_left
-    (fun acc arg ->
-      if Filename.check_suffix arg ".ml" || Filename.check_suffix arg ".mli"
-      then
-        match open_in_bin arg with
-        | exception _ -> acc
-        | ic ->
-          let n = try in_channel_length ic with _ -> 0 in
-          close_in_noerr ic;
-          Stdlib.max acc n
-      else acc)
-    0 Sys.argv
+  let best = ref 0 in
+  let consider path = best := Stdlib.max !best (source_file_size_bytes path) in
+  let is_source a =
+    Filename.check_suffix a ".ml" || Filename.check_suffix a ".mli"
+  in
+  let takes_value = function
+    | "-o" | "-I" | "-H" | "-open" | "-pp" | "-ppx" | "-intf-suffix"
+    | "-dump-into-file" | "-cmi-file" | "-runtime-variant" | "-use-runtime" ->
+      true
+    | _ -> false
+  in
+  let rec scan = function
+    | [] -> ()
+    | ("-impl" | "-intf") :: path :: rest ->
+      consider path;
+      scan rest
+    | (("-args" | "-args0") as flag) :: path :: rest ->
+      List.iter
+        (fun a -> if is_source a then consider a)
+        (response_file_args path ~null_sep:(String.equal flag "-args0"));
+      scan rest
+    | flag :: _ :: rest when takes_value flag -> scan rest
+    | a :: rest ->
+      if is_source a then consider a;
+      scan rest
+  in
+  (match Array.to_list Sys.argv with [] -> () | _ :: args -> scan args);
+  !best
 
 let chosen_space_overhead () =
   if largest_input_source_bytes () > large_unit_source_bytes
