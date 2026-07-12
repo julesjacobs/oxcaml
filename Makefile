@@ -90,7 +90,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -366,6 +366,13 @@ lia-adapter-test:
 combine-test:
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/combine/test/combine_test.exe
 
+## stage0-test — ADR-0014 Stage 0 backtracking substrate: [Trail] unit tests, the
+##   pop-ordering oracle that kills the swap-drain-order mutant, and the machine-checkable
+##   cross-theory disjointness oracle (snapshot one engine, apply another's pop, assert
+##   unchanged) over the real EUF + simplex trails. Nonzero exit on any failed check.
+stage0-test:
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/fabric/test/stage0_trail_test.exe
+
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse
 ##   over ~30 programmatic sessions covering every node, quoting, negatives, div/mod, deep
@@ -436,6 +443,7 @@ test: check-frozen
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 	$(MAKE) combine-test
+	$(MAKE) stage0-test
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
 	$(MAKE) cert-test

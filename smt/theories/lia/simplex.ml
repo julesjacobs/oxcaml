@@ -54,8 +54,11 @@ type 'a undo =
 
 type 'a t =
   { vars : 'a var Dynarray.t
-  ; trail : 'a undo Dynarray.t
-  ; scopes : int Dynarray.t (* trail length at each open frame *)
+  ; (* Bound changes are the only observably backtrackable state (the tableau and
+       assignment are recomputed by [check], never restored). The shared substrate owns
+       the frame stack + newest-first drain (ADR-0014 Stage 0); this site carries no
+       per-frame payload beyond the trail watermark. *)
+    trail : ('a undo, unit) Oxsmt_core.Trail.t
   ; mutable pivots : int
   ; mutable dirty_basic : IntSet.t
     (* FIX #3b: a SUPERSET of the basic variables that may violate a bound — every basic
@@ -84,8 +87,7 @@ and 'a conflict =
 
 let create () =
   { vars = Dynarray.create ()
-  ; trail = Dynarray.create ()
-  ; scopes = Dynarray.create ()
+  ; trail = Oxsmt_core.Trail.create ()
   ; pivots = 0
   ; dirty_basic = IntSet.empty
   ; dirty_bound = IntSet.empty
@@ -245,8 +247,13 @@ let build_conflict t (contribs : contribution list) : 'a conflict =
 
 (* ---- Bound assertion (DdM06 AssertUpper/AssertLower). ---- *)
 
-let record_lower t (v : 'a var) old = Dynarray.add_last t.trail (Undo_lower (v.id, old))
-let record_upper t (v : 'a var) old = Dynarray.add_last t.trail (Undo_upper (v.id, old))
+let record_lower t (v : 'a var) old =
+  Oxsmt_core.Trail.record t.trail (Undo_lower (v.id, old))
+;;
+
+let record_upper t (v : 'a var) old =
+  Oxsmt_core.Trail.record t.trail (Undo_upper (v.id, old))
+;;
 
 (* [dirty_basic]/[dirty_bound] worklist maintenance (FIX #3b). Adding is always sound (the
    sets are supersets); the invariants that make
@@ -530,15 +537,13 @@ let check t =
 
 (* ---- push / pop ---- *)
 
-let push t = Dynarray.add_last t.scopes (Dynarray.length t.trail)
-
-let pop t n =
-  for _ = 1 to n do
-    let target = Dynarray.pop_last t.scopes in
-    while Dynarray.length t.trail > target do
-      match Dynarray.pop_last t.trail with
-      | Undo_lower (vid, old) -> (get t vid).lower <- old
-      | Undo_upper (vid, old) -> (get t vid).upper <- old
-    done
-  done
+(* Reverse one bound change. [pop] only ever loosens bounds (restores an older, weaker
+   [bound option]), so no feasibility violation can be created — the [dirty_*] sets need
+   no maintenance here (see their invariants). *)
+let apply_undo t = function
+  | Undo_lower (vid, old) -> (get t vid).lower <- old
+  | Undo_upper (vid, old) -> (get t vid).upper <- old
 ;;
+
+let push t = Oxsmt_core.Trail.push t.trail ()
+let pop t n = Oxsmt_core.Trail.pop t.trail ~apply:(apply_undo t) n

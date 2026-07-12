@@ -87,9 +87,14 @@ end = struct
          clobber each other, else [explain] returns the wrong premise set and 1UIP learns
          a wrong clause (codex C1). *)
       mutable propagated_by : R.owner Lit.Map.t
-    ; (* shared-equality literals pinned on the trail, one frame per open [push] level
-         (head = current). Carry sign + routed children (codex C2). Backtracked by [pop]. *)
-      mutable pin_frames : pin list list
+    ; (* shared-equality literals pinned on the trail; appended by [pin], iterated by
+         [all_pins], truncated to a frame watermark by [pop] (order among pins is not
+         observable — [check_pins] is a conjunction). The shared substrate (ADR-0014 Stage
+         0) owns the frame stack + truncation-on-pop discipline; each frame's payload is
+         the [pins] length at [push], so a pop drops exactly that frame's pins. Carry
+         sign + routed children (codex C2). *)
+      pins : pin Dynarray.t
+    ; pin_frames : (unit, int) Trail.t
     ; (* atom -> the (x, y) it equates, for a shared equality over two interface terms. *)
       eq_pair : (Term.t * Term.t) Atom.Table.t
     }
@@ -105,7 +110,8 @@ end = struct
     ; lia_used = Term.Set.empty
     ; bool_uf_args = Term.Set.empty
     ; propagated_by = Lit.Map.empty
-    ; pin_frames = [ [] ]
+    ; pins = Dynarray.create ()
+    ; pin_frames = Trail.create ()
     ; eq_pair = Atom.Table.create 16
     }
   ;;
@@ -361,13 +367,10 @@ end = struct
 
   (* Record a pinned shared-equality literal in the current frame. *)
   let pin t ~x ~y ~psign ~pto_a ~pto_b =
-    let p = { px = x; py = y; psign; pto_a; pto_b } in
-    match t.pin_frames with
-    | frame :: rest -> t.pin_frames <- (p :: frame) :: rest
-    | [] -> t.pin_frames <- [ [ p ] ]
+    Dynarray.add_last t.pins { px = x; py = y; psign; pto_a; pto_b }
   ;;
 
-  let all_pins t = List.concat t.pin_frames
+  let all_pins t = Dynarray.to_list t.pins
 
   let assert_lit t lit =
     let atom = Lit.atom lit in
@@ -628,24 +631,15 @@ end = struct
   let push t =
     A.push t.a;
     B.push t.b;
-    t.pin_frames <- [] :: t.pin_frames
+    Trail.push t.pin_frames (Dynarray.length t.pins)
   ;;
 
   let pop t n =
+    (* Children first: an over-pop raises in a child's [pop] before the pins are touched,
+       exactly as the old list-of-lists guard left them untouched. *)
     A.pop t.a n;
     B.pop t.b n;
-    let rec drop k frames =
-      if k <= 0
-      then frames
-      else (
-        match frames with
-        | _ :: rest -> drop (k - 1) rest
-        | [] -> [])
-    in
-    t.pin_frames
-    <- (match drop n t.pin_frames with
-        | [] -> [ [] ]
-        | frames -> frames)
+    Trail.pop t.pin_frames ~apply:ignore ~restore:(Dynarray.truncate t.pins) n
   ;;
 
   (* codex C3 (round-2 refinement) — sort-directed merge over ALL subterms, NEVER raising

@@ -100,9 +100,15 @@ type 'p undo =
   | U_sig_del of (int * int array) * int
   | U_reported of int * int
 
+(* Per-frame watermarks for EUF's auxiliary arrays — the [pop] target lengths for state
+   NOT reversed by the typed undo trail (which the shared substrate drains). The trail
+   watermark itself lives in the substrate's frame stack (ADR-0014 Stage 0: EUF shares
+   only the frame stack + drain loop, keeping its int-packed entry representation). This
+   whole record is one frame's payload, so all five watermarks push/pop atomically with
+   the trail watermark through a single stack — no separate level array to keep in
+   lockstep. *)
 type level =
-  { l_trail : int
-  ; l_enodes : int
+  { l_enodes : int
   ; l_watched : int
   ; l_diseqs : int
   ; l_touched : int (* {!t.touched} length at push (restored on pop) *)
@@ -123,8 +129,12 @@ type 'p t =
        inert. *)
     watch_sides : (Term.t * Term.t) Term.Table.t
   ; diseqs : 'p diseq Dynarray.t
-  ; trail : 'p undo Dynarray.t
-  ; levels : level Dynarray.t
+  ; (* The int-packed typed undo trail (kept as-is — the hottest path in the solver) rides
+       the shared substrate, which owns the frame stack, the newest-first
+       drain-to-watermark pop loop (where the prop-mark watermark-trap bug lived), and the
+       truncation discipline. Each frame's payload is the auxiliary-array watermarks
+       {!level}. *)
+    trail : ('p undo, level) Trail.t
   ; (* {!propagate} delta log (C1). Every union's surviving root, every asserted
        disequality's endpoints, and every freshly-watched atom's endpoints are appended
        here; {!propagate} re-evaluates only watched atoms touching a class in
@@ -149,8 +159,7 @@ let create ctx =
   ; watched = Dynarray.create ()
   ; watch_sides = Term.Table.create 256
   ; diseqs = Dynarray.create ()
-  ; trail = Dynarray.create ()
-  ; levels = Dynarray.create ()
+  ; trail = Trail.create ()
   ; touched = Dynarray.create ()
   ; prop_mark = 0
   ; stamp = 0
@@ -203,7 +212,7 @@ let dedup_int lst =
 
 (* --- trailed mutation ---------------------------------------------------- *)
 
-let push_undo t u = Dynarray.add_last t.trail u
+let push_undo t u = Trail.record t.trail u
 
 let set_parent t i v =
   let n = get t i in
@@ -835,10 +844,9 @@ let class_members t term =
 (* --- backtracking -------------------------------------------------------- *)
 
 let push t =
-  Dynarray.add_last
-    t.levels
-    { l_trail = Dynarray.length t.trail
-    ; l_enodes = Dynarray.length t.enodes
+  Trail.push
+    t.trail
+    { l_enodes = Dynarray.length t.enodes
     ; l_watched = Dynarray.length t.watched
     ; l_diseqs = Dynarray.length t.diseqs
     ; l_touched = Dynarray.length t.touched
@@ -846,30 +854,25 @@ let push t =
     }
 ;;
 
-let pop t n =
-  if n < 0 then invalid_arg "Euf.pop: negative";
-  if n > Dynarray.length t.levels then invalid_arg "Euf.pop: too many frames";
-  if n > 0
-  then (
-    let target = Dynarray.length t.levels - n in
-    let lv = Dynarray.get t.levels target in
-    while Dynarray.length t.trail > lv.l_trail do
-      apply_undo t (Dynarray.pop_last t.trail)
-    done;
-    Dynarray.truncate t.diseqs lv.l_diseqs;
-    Dynarray.truncate t.watched lv.l_watched;
-    (* restore the propagate delta log to its push-time snapshot: drop touched-roots
-       logged in the popped frames and rewind [prop_mark], so a union that was propagated
-       at a deeper level (its [set_reported] now undone by the trail) is re-evaluated
-       here. *)
-    Dynarray.truncate t.touched lv.l_touched;
-    t.prop_mark <- lv.l_prop_mark;
-    for i = Dynarray.length t.enodes - 1 downto lv.l_enodes do
-      Term.Table.remove t.index (get t i).term
-    done;
-    Dynarray.truncate t.enodes lv.l_enodes;
-    Dynarray.truncate t.levels target)
+(* Restore EUF's auxiliary arrays to a frame's push-time watermarks. The substrate has
+   already drained the typed undo trail newest-first (reversing every union/sig/reported
+   mutation via [apply_undo]); this only truncates the append-only arrays and rewinds
+   [prop_mark]. *)
+let restore_aux t lv =
+  Dynarray.truncate t.diseqs lv.l_diseqs;
+  Dynarray.truncate t.watched lv.l_watched;
+  (* restore the propagate delta log to its push-time snapshot: drop touched-roots logged
+     in the popped frames and rewind [prop_mark], so a union that was propagated at a
+     deeper level (its [set_reported] now undone by the trail) is re-evaluated here. *)
+  Dynarray.truncate t.touched lv.l_touched;
+  t.prop_mark <- lv.l_prop_mark;
+  for i = Dynarray.length t.enodes - 1 downto lv.l_enodes do
+    Term.Table.remove t.index (get t i).term
+  done;
+  Dynarray.truncate t.enodes lv.l_enodes
 ;;
+
+let pop t n = Trail.pop t.trail ~apply:(apply_undo t) ~restore:(restore_aux t) n
 
 module Debug = struct
   let self_check = self_check

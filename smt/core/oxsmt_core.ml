@@ -18,6 +18,7 @@ module Env = Env
 module Term = Term
 module Context = Context
 module Theory_view = Theory_view
+module Trail = Trail
 
 (* ADR-0005 THEORY vocabulary, re-exported so the M4 theory adapters (the first consumers
    of the seam) can name them as [Oxsmt_core.Atom] etc. Tranche-A froze
