@@ -161,8 +161,8 @@ module Naive = struct
             let all = ref true in
             List.iteri
               (fun k arg ->
-                 let bj = Iarr.get aj k in
-                 if find t (index t arg) <> find t (index t bj) then all := false)
+                let bj = Iarr.get aj k in
+                if find t (index t arg) <> find t (index t bj) then all := false)
               (Iarr.to_list ai);
             if !all
             then (
@@ -752,15 +752,15 @@ let test_random () =
       let pok = ref true in
       List.iter
         (fun pt ->
-           match Model.value m pt with
-           | Some (Model.Bool bv) ->
-             let oracle_true = Naive.equal nz pt true_c in
-             let oracle_false = Naive.equal nz pt false_c in
-             if bv && not oracle_true then pok := false;
-             if (not bv) && not oracle_false then pok := false
-           | _ ->
-             (* undetermined predicate: oracle must not have pinned it to true or false *)
-             if Naive.equal nz pt true_c || Naive.equal nz pt false_c then pok := false)
+          match Model.value m pt with
+          | Some (Model.Bool bv) ->
+            let oracle_true = Naive.equal nz pt true_c in
+            let oracle_false = Naive.equal nz pt false_c in
+            if bv && not oracle_true then pok := false;
+            if (not bv) && not oracle_false then pok := false
+          | _ ->
+            (* undetermined predicate: oracle must not have pinned it to true or false *)
+            if Naive.equal nz pt true_c || Naive.equal nz pt false_c then pok := false)
         pred_atoms;
       check "random: predicate truth matches oracle" !pok)
     else (
@@ -798,6 +798,118 @@ let test_random () =
   done
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* 3b. Explanation PRECEDENCE regression (#102). The adapter snapshots a propagated
+   literal's reason at PROPAGATION time; a later assertion that opens a shorter/alternate
+   congruence path must NOT sneak into the reason (the ask-time re-derivation bug: the
+   returned premise would postdate the explained literal, tripping the SAT core's
+   CONTRACT-EX guard -> poison -> unknown, which bricked the QG / eq_diamond /
+   EUF-in-QF_LIA families). Here: a=d is propagated true via the chain a=b,b=c,c=d; THEN a
+   shorter path a=e,e=d is asserted; [explain] must still cite only the (pre-propagation)
+   chain. *)
+let test_explain_precedence () =
+  let env, _u, _unary, _pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c = Context.const ctx (konst "c") in
+  let d = Context.const ctx (konst "d") in
+  let e = Context.const ctx (konst "e") in
+  let h = make_harness env ctx in
+  let a_ad = reg h (Context.eq ctx a d) in
+  let a_ab = reg h (Context.eq ctx a b) in
+  let a_bc = reg h (Context.eq ctx b c) in
+  let a_cd = reg h (Context.eq ctx c d) in
+  let a_ae = reg h (Context.eq ctx a e) in
+  let a_ed = reg h (Context.eq ctx e d) in
+  (* chain a=b, b=c, c=d -> a=d theory-implied true *)
+  assert_lit h (Lit.make a_ab true);
+  assert_lit h (Lit.make a_bc true);
+  assert_lit h (Lit.make a_cd true);
+  let ad_pos = Lit.make a_ad true in
+  (match A.check h.adapter Theory.Propagate with
+   | Theory.Propagations lits ->
+     check "precedence: (a=d) propagated true" (List.exists (Lit.equal ad_pos) lits)
+   | _ -> check "precedence: expected propagation of (a=d)" false);
+  (* snapshot the assertions that existed AT propagation time (all premises must be here) *)
+  let at_prop = h.asserted in
+  (* NOW assert a shorter alternate path a=e, e=d — strictly AFTER (a=d) was propagated. A
+     re-derivation against the current forest could route a~d through these later edges. *)
+  assert_lit h (Lit.make a_ae true);
+  assert_lit h (Lit.make a_ed true);
+  let expl = A.explain h.adapter ad_pos in
+  let prem = Lit.Set.of_list expl.Explanation.premises in
+  check "precedence: reason non-empty" (expl.Explanation.premises <> []);
+  (* THE property: every premise was asserted BEFORE the propagation (precedence-valid);
+     in particular the later a=e / e=d are excluded. *)
+  check
+    "precedence: reason excludes later-asserted premises"
+    (Lit.Set.subset prem at_prop);
+  check "precedence: reason excludes a=e" (not (Lit.Set.mem (Lit.make a_ae true) prem));
+  check "precedence: reason excludes e=d" (not (Lit.Set.mem (Lit.make a_ed true) prem))
+;;
+
+(* 3c. Cache lifecycle under push/pop (the AP1 trailed-state class). A propagated
+   literal's snapshotted reason lives in the frame that produced it; [pop] must drop it in
+   lockstep (else [explain] serves a reason whose premises unwound with the frame). The
+   recovery invariant: popping every open frame (the [cancel_until 0] analogue) leaves
+   only base-frame reasons — every deeper reason is gone, and a re-propagation re-caches
+   afresh. *)
+let test_explain_cache_pushpop () =
+  let env, _u, _unary, _pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c = Context.const ctx (konst "c") in
+  let d = Context.const ctx (konst "d") in
+  let e = Context.const ctx (konst "e") in
+  let g = Context.const ctx (konst "g") in
+  let h = make_harness env ctx in
+  let a_ab = reg h (Context.eq ctx a b) in
+  let a_ac = reg h (Context.eq ctx a c) in
+  let a_cb = reg h (Context.eq ctx c b) in
+  let a_de = reg h (Context.eq ctx d e) in
+  let a_dg = reg h (Context.eq ctx d g) in
+  let a_ge = reg h (Context.eq ctx g e) in
+  let propagated effort =
+    match A.check h.adapter effort with
+    | Theory.Propagations lits -> lits
+    | _ -> []
+  in
+  let explains lit = (A.explain h.adapter lit).Explanation.premises <> [] in
+  (* base: a=c, c=b -> (a=b) propagates true, reason cached in the base frame *)
+  assert_lit h (Lit.make a_ac true);
+  assert_lit h (Lit.make a_cb true);
+  let ab_pos = Lit.make a_ab true in
+  check
+    "cache: (a=b) propagated at base"
+    (List.exists (Lit.equal ab_pos) (propagated Theory.Propagate));
+  check "cache: base reason explains" (explains ab_pos);
+  (* push a frame; d=g, g=e -> (d=e) propagates true, reason cached in the deeper frame *)
+  A.push h.adapter;
+  assert_lit h (Lit.make a_dg true);
+  assert_lit h (Lit.make a_ge true);
+  let de_pos = Lit.make a_de true in
+  check
+    "cache: (d=e) propagated in frame 1"
+    (List.exists (Lit.equal de_pos) (propagated Theory.Propagate));
+  check "cache: frame-1 reason explains" (explains de_pos);
+  check "cache: base reason still explains under frame 1" (explains ab_pos);
+  (* pop the deeper frame (cancel_until analogue): its reason MUST be gone (fail-loud),
+     while the base reason survives. *)
+  A.pop h.adapter 1;
+  check_raises "cache: popped frame's reason is dropped" (fun () ->
+    A.explain h.adapter de_pos);
+  check "cache: base reason survives the pop" (explains ab_pos);
+  (* re-propagate (d=e) at base after re-asserting: cache is repopulated afresh. *)
+  assert_lit h (Lit.make a_dg true);
+  assert_lit h (Lit.make a_ge true);
+  check
+    "cache: (d=e) re-propagated at base"
+    (List.exists (Lit.equal de_pos) (propagated Theory.Propagate));
+  check "cache: re-cached reason explains" (explains de_pos)
+;;
+
 (* ================================================================== *)
 let () =
   print_endline "euf adapter self-test:";
@@ -805,6 +917,8 @@ let () =
   test_predicate_conflict ();
   test_bool_lit_conflict ();
   test_propagation ();
+  test_explain_precedence ();
+  test_explain_cache_pushpop ();
   test_pushpop_restore ();
   test_pop_boundaries ();
   test_register_idempotent ();

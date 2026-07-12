@@ -36,6 +36,12 @@ type t =
   ; atoms : info Atom.Table.t (* Atom -> its term + encoding; persists across pop *)
   ; watched : Atom.t Term.Table.t (* watched Eq-atom term -> Atom, for propagation *)
   ; mutable atom_terms : Term.t list (* registration order; model enumeration only *)
+  ; mutable explain_cache : Explanation.t Lit.Map.t
+      (* propagated lit -> its reason, SNAPSHOTTED at propagation time so [explain] is
+         O(1) and precedence-valid (CONTRACT-EX); see {!cache_reason} / the module note. *)
+  ; mutable frames : Lit.t list list
+  (* per-[push]-frame cached lits, head = current frame; used to drop stale reasons on
+     [pop] in lockstep with the decision level that produced them. *)
   }
 
 let create ctx _env =
@@ -53,6 +59,8 @@ let create ctx _env =
   ; atoms = Atom.Table.create 64
   ; watched = Term.Table.create 64
   ; atom_terms = []
+  ; explain_cache = Lit.Map.empty
+  ; frames = [ [] ]
   }
 ;;
 
@@ -123,6 +131,43 @@ let lits_of_prems prems =
     prems
 ;;
 
+(* The reason for a just-reported implied (dis)equality, SNAPSHOTTED at propagation time.
+   [Euf.explain_implied] reconstructs the premise set from the engine's CURRENT proof
+   forest — and that is precedence-valid ONLY here, at the instant [propagate] reports the
+   flip: the literal has not yet been assigned on the SAT trail (the seam assigns it after
+   [check] returns), so every premise is an assertion already strictly earlier on the
+   trail. Deferring this to ask-time [explain] (the old behaviour) let later merges add
+   union edges the forest walk would route through, yielding a premise asserted AFTER the
+   explained literal — the CONTRACT-EX violation that bricked the QG / eq_diamond /
+   EUF-in- QF_LIA families to [unknown]. Mirrors {!Lia_adapter.cache_reason}. *)
+let reason_of_implied t (imp : Euf.implied) : Explanation.t =
+  let premises = lits_of_prems (Euf.explain_implied t.engine imp) in
+  (* N1 / codex AP4 tripwire (unconditional, survives release [-noassert]): an empty
+     propagation reason is an unconditional entailment (soundness bug). A registered [Eq]
+     atom has distinct sides (reflexive folds to [true]), so proving it (dis)equal cites
+     >= 1 asserted literal; an empty set here is impossible, and raising degrades to
+     [unknown] via CONTRACT-POISON rather than feeding 1UIP an unsound clause. *)
+  if premises = []
+  then failwith "Euf_adapter: empty propagation reason (unsound) [codex AP4 tripwire]";
+  { Explanation.premises; rule = Euf_congruence }
+;;
+
+(* Cache a propagated literal's snapshotted reason in the current [push] frame. FIRST-WINS
+   (mirrors {!Lia_adapter.cache_reason}, load-bearing for CONTRACT-EX): the first
+   propagation's reason is the precedence-valid one; the engine only re-reports a watched
+   atom after a [pop] resets its [w_reported] (which has already uncached the old entry
+   via {!pop}), so a live double-report cannot occur, but the guard keeps the invariant
+   robust. The reason's premises are on the trail at or below the current frame, so they
+   cannot be popped without also popping (and uncaching) this entry. *)
+let cache_reason t lit expl =
+  if not (Lit.Map.mem lit t.explain_cache)
+  then (
+    t.explain_cache <- Lit.Map.add lit expl t.explain_cache;
+    match t.frames with
+    | fr :: rest -> t.frames <- (lit :: fr) :: rest
+    | [] -> t.frames <- [ [ lit ] ])
+;;
+
 let check t effort =
   match Euf.check t.engine with
   | Euf.Conflict prems ->
@@ -140,13 +185,18 @@ let check t effort =
   | Euf.Consistent ->
     (* A watched Eq atom whose entailed truth just changed becomes a theory propagation —
        but only for atoms this adapter registered (C6); a watched Eq that is merely a
-       subterm of some other atom has no [Atom] and is skipped. *)
+       subterm of some other atom has no [Atom] and is skipped. Each propagated literal's
+       reason is SNAPSHOTTED now (precedence-valid — see {!reason_of_implied}) so ask-time
+       [explain] serves the cache instead of re-deriving against a later forest. *)
     let lits =
       List.filter_map
         (fun (imp : Euf.implied) ->
-           match Term.Table.find_opt t.watched imp.Euf.atom with
-           | None -> None
-           | Some atom -> Some (Lit.make atom imp.Euf.value))
+          match Term.Table.find_opt t.watched imp.Euf.atom with
+          | None -> None
+          | Some atom ->
+            let lit = Lit.make atom imp.Euf.value in
+            cache_reason t lit (reason_of_implied t imp);
+            Some lit)
         (Euf.propagate t.engine)
     in
     (match lits, effort with
@@ -155,29 +205,48 @@ let check t effort =
      | _ :: _, _ -> Theory.Propagations lits)
 ;;
 
+(* [explain] serves the reason SNAPSHOTTED at propagation time ({!cache_reason}); the
+   ask-time re-derivation that violated CONTRACT-EX is gone. Every literal EUF propagates
+   is cached in [check] before the seam assigns it, and it stays cached until its frame is
+   popped (at which point it is off the trail and will not be explained), so a live
+   [explain] always hits. A miss is a driver/contract violation (an [explain] for a
+   literal EUF never propagated, or one whose frame was already popped) — fail loud so it
+   degrades to [unknown] via CONTRACT-POISON rather than fabricating an unsound premise
+   set. *)
 let explain t lit =
-  let atom = Lit.atom lit in
-  match Atom.Table.find_opt t.atoms atom with
-  | Some { kind = K_eq _; term } ->
-    (* Reconstruct the [implied] we propagated: its term is the Eq atom, its value is the
-       literal's sign. [explain_implied] returns a precedence-valid premise set
-       (CONTRACT-EX), self-checked by the engine. *)
-    let imp = { Euf.atom = term; value = Lit.sign lit } in
-    let premises = lits_of_prems (Euf.explain_implied t.engine imp) in
-    (* N1 (insurance): an empty propagation reason is unconstructible — a registered [Eq]
-       atom has distinct sides (reflexive folds to [true]), so proving it (dis)equal cites
-       >= 1 asserted literal. UNCONDITIONAL guard (not [assert]): a soundness tripwire
-       that must survive release [-noassert] (codex AP4); raising degrades to [unknown]. *)
-    if premises = []
-    then
-      failwith
-        "Euf_adapter.explain: empty propagation reason (unsound) [codex AP4 tripwire]";
-    { Explanation.premises; rule = Euf_congruence }
-  | _ -> invalid_arg "Euf_adapter.explain: literal was not propagated by this theory"
+  match Lit.Map.find_opt lit t.explain_cache with
+  | Some expl -> expl
+  | None ->
+    failwith
+      "Euf_adapter.explain: no cached reason for literal (not theory-propagated, or its \
+       frame was popped)"
 ;;
 
-let push t = Euf.push t.engine
-let pop t n = Euf.pop t.engine n
+let push t =
+  Euf.push t.engine;
+  t.frames <- [] :: t.frames
+;;
+
+let pop t n =
+  Euf.pop t.engine n;
+  (* Drop the last [n] frames, uncaching every reason they hold: a propagation's
+     snapshotted reason is valid only at the decision level that produced it (its premises
+     unwind with that level). Keep at least a root frame. Mirrors {!Lia_adapter.pop}. *)
+  let rec drop k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | fr :: rest ->
+        List.iter (fun l -> t.explain_cache <- Lit.Map.remove l t.explain_cache) fr;
+        drop (k - 1) rest
+      | [] -> [])
+  in
+  t.frames
+  <- (match drop n t.frames with
+      | [] -> [ [] ]
+      | fs -> fs)
+;;
 
 (* Subterm children (same split as the engine's registration walk): used only to build a
    model total over every term reachable from a registered atom. *)
