@@ -1,7 +1,14 @@
 ; Shipped session layer. stdlib-only over the other smt/ libraries (AGENTS.md dependency
-; firewall, I3): core + preprocess + solver, no opam packages, no ppx. It must NOT depend
-; on oxsmt_smtlib_parser (test-only) — the .smt2-driving CLI lives under tests/solver.
+; firewall, I3): core + preprocess + solver + the EUF/LIA THEORY adapters + the
+; Nelson-Oppen combinator, no opam packages, no ppx. It must NOT depend on
+; oxsmt_smtlib_parser (test-only) — the .smt2-driving CLI lives under tests/solver.
 
 (library
  (name oxsmt_interface)
- (libraries oxsmt_core oxsmt_preprocess oxsmt_solver))
+ (libraries
+  oxsmt_core
+  oxsmt_preprocess
+  oxsmt_solver
+  oxsmt_euf
+  oxsmt_lia
+  oxsmt_combine))

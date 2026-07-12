@@ -1,3 +1,4 @@
 (goal 1
-  (verdict unknown)
+  (verdict sat)
+  (model ((x 1)))
   (counters (conflicts <10) (decisions <10) (propagations <10)))

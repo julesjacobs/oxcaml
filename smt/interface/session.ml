@@ -1,55 +1,89 @@
-(* Session layer wiring the frozen core, preprocessing/clausification, and the CDCL SAT
-   core into a check-sat loop (DESIGN.md §3, §5). See session.mli for the contract, in
-   particular THE SOUNDNESS RULE.
+(* Session layer wiring the frozen core, preprocessing/clausification, the CDCL SAT core,
+   and — the M4 change — the Nelson-Oppen combined EUF+LIA theory stack into a full
+   CDCL(T) check-sat loop (DESIGN.md §3, §5, §6). See session.mli for the contract, in
+   particular THE SOUNDNESS RULE (rewritten for the theory-plugged regime).
 
    Everything threads one Context/Env (ADR-0003 Decision 6): terms asserted across
    [assert_term]/[push]/[pop] share the tag stream and hash-consing, so the same atom maps
-   to the same SAT variable throughout the session. *)
+   to the same SAT variable — and the same theory atom — throughout the session. The
+   theory is installed on the pristine SAT core at [create] (before any clause), per the
+   seam's attach contract; {!Cdclt} owns the seam glue. *)
 
 open Oxsmt_core
 module Sat = Oxsmt_solver.Sat
 module Preprocess = Oxsmt_preprocess.Preprocess
 module Cnf = Oxsmt_preprocess.Cnf
+module Lia = Oxsmt_lia.Lia
+module Rational = Oxsmt_lia.Rational
+module Combine = Oxsmt_combine.Combine
+
+(* Generous, deterministic per-check-sat cap on theory splits (B&B branches / N-O equality
+   splits). Exhaustion routes to [unknown] — never a verdict from an unfinished search
+   (I6: a counter, never wall-clock). Overridable at {!create} (tests drive the exhaustion
+   path with a tiny budget). *)
+let default_split_budget = 10_000
 
 type verdict =
   | Sat
   | Unsat
   | Unknown
 
+type model_value = Cdclt.value =
+  | VBool of bool
+  | VInt of int
+  | VUninterp of int
+
+type model_binding = Cdclt.binding = Const of string * model_value
+
 type t =
   { env : Env.t
   ; ctx : Context.t
   ; pp : Preprocess.t
   ; sat : Sat.t
-  ; atom_to_var : Sat.var Term.Table.t
-    (* one SAT var per distinct theory-atom / propositional-variable term, shared across
-         assertions via hash-cons identity *)
+  ; cdclt : Cdclt.t
+  ; prop_to_var : Sat.var Term.Table.t
+    (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
+         auxiliary Tseitin variables are per-formula. Shared via hash-cons identity. *)
   ; mutable bool_consts : (string * Sat.var) list
-    (* nullary Bool-App atoms (propositional variables), for [get_model] *)
-  ; mutable frames :
-      Sat.var list (* selector stack, innermost first; base always present *)
+    (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
+         [get_model] *)
+  ; mutable frames : Sat.var list
+    (* selector stack, innermost first; base always present *)
   ; mutable has_theory : bool
-    (* any Le / non-Bool Eq / applied predicate has been asserted: the SAT core cannot
-         reason about it, so a propositional Sat is theory-unsound (see .mli) *)
-  ; mutable degraded : bool (* Overflow/Unsupported seen: verdict must be Unknown (I8) *)
-  ; mutable last_real_sat : bool (* last check_sat was a genuine (non-degraded) Sat *)
+    (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
+         verdict's model comes from the theory, and a Sat is theory-validated *)
+  ; mutable degraded : bool
+    (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
+         CONTRACT-POISON) *)
+  ; mutable last_verdict : verdict
+    (* verdict of the most recent check_sat, for get_model *)
+  ; mutable last_model : model_binding list option
+    (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+  ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
+  ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
   }
 
-let create () =
+let create ?(split_budget = default_split_budget) () =
   let env = Env.create () in
   let ctx = Context.create env in
   let sat = Sat.create () in
+  (* Install the theory on the pristine core BEFORE any clause (pristine-attach). *)
+  let cdclt = Cdclt.create ctx env sat ~split_budget in
   let base = Sat.new_var sat in
   { env
   ; ctx
   ; pp = Preprocess.create env ctx
   ; sat
-  ; atom_to_var = Term.Table.create 256
+  ; cdclt
+  ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
   ; has_theory = false
   ; degraded = false
-  ; last_real_sat = false
+  ; last_verdict = Unknown
+  ; last_model = None
+  ; last_splits = 0
+  ; budget_exhausted = false
   }
 ;;
 
@@ -92,9 +126,10 @@ let is_theory_atom (a : Term.t) =
 
 let current_selector t = List.hd t.frames
 
-(* Map a clausified formula's local variable to a persistent SAT variable: atom variables
-   share one SAT var per distinct atom term (hash-cons identity); auxiliary Tseitin
-   variables are fresh per formula (kept in [local]). *)
+(* Map a clausified formula's local variable to a persistent SAT variable. Theory atoms go
+   through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
+   theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
+   term; auxiliary Tseitin variables are fresh per formula (kept in [local]). *)
 let assert_clausified t cnf =
   let n = Cnf.num_vars cnf in
   let local = Array.make (n + 1) None in
@@ -102,17 +137,21 @@ let assert_clausified t cnf =
     if Cnf.is_atom_var cnf v
     then (
       let atom = Cnf.subterm_of_var cnf v in
-      if is_theory_atom atom then t.has_theory <- true;
-      match Term.Table.find_opt t.atom_to_var atom with
-      | Some sv -> sv
-      | None ->
-        let sv = Sat.new_var t.sat in
-        Term.Table.add t.atom_to_var atom sv;
-        (match atom.node with
-         | App (sym, args) when Iarr.length args = 0 && Sort.equal atom.sort Sort.bool ->
-           t.bool_consts <- (Symbol.name sym, sv) :: t.bool_consts
-         | _ -> ());
-        sv)
+      if is_theory_atom atom
+      then (
+        t.has_theory <- true;
+        Cdclt.intern_atom t.cdclt atom)
+      else (
+        match Term.Table.find_opt t.prop_to_var atom with
+        | Some sv -> sv
+        | None ->
+          let sv = Sat.new_var t.sat in
+          Term.Table.add t.prop_to_var atom sv;
+          (match atom.node with
+           | App (sym, args) when Iarr.length args = 0 && Sort.equal atom.sort Sort.bool
+             -> t.bool_consts <- (Symbol.name sym, sv) :: t.bool_consts
+           | _ -> ());
+          sv))
     else (
       match local.(v) with
       | Some sv -> sv
@@ -140,7 +179,22 @@ let assert_term t term =
   | pterm ->
     (match Cnf.clausify pterm with
      | exception _ -> t.degraded <- true
-     | cnf -> assert_clausified t cnf)
+     | cnf ->
+       (* Atom registration walks the theory engines; a rejected / out-of-fragment atom or
+          an overflow escaping here degrades the whole session to unknown (I8). The
+          internalization combinator raises [Combine.Incomplete] from [register_atom]
+          (e.g. a structured Bool compound under a UF argument, ADR-0010 §3.6 case (ii)) —
+          a DELIBERATE completeness degrade, distinct from a [Combination_unsound] fault,
+          and it surfaces HERE at assert-time registration, so it must be caught on this
+          ingress path too. *)
+       (try assert_clausified t cnf with
+        | Combine.Incomplete _ -> t.degraded <- true
+        | Term.Overflow
+        | Term.Unsupported _
+        | Rational.Overflow
+        | Lia.Poisoned
+        | Lia.Unsupported _
+        | Invalid_argument _ -> t.degraded <- true))
 ;;
 
 let push t = t.frames <- Sat.new_var t.sat :: t.frames
@@ -151,30 +205,118 @@ let pop t =
   | _ :: rest -> t.frames <- rest
 ;;
 
+(* The self-checkable model of the just-decided [Sat]. It has two disjoint parts:
+   - the combined theory's nullary-symbol model (Int / uninterpreted-sort constants; see
+     {!Cdclt.model_bindings}), present only for a theory query;
+   - a [Bool] per propositional variable (the nullary Bool [App]s in {!bool_consts}),
+     which the SAT core owns — these NEVER appear in the theory snapshot, so a mixed
+     Boolean/theory query must union them in or the §8 evaluator rejects the model as
+     omitting a declared Bool constant. Reserved preprocessing witnesses ([.oxsmt.*], e.g.
+     an ITE lift) are hash-consed internal symbols that never existed in the user's query;
+     they are filtered out so the external model names only user-declared symbols. A name
+     can in principle appear in both parts (a Bool constant that is also an argument of an
+     applied predicate, hence a theory subterm); the SAT assignment is authoritative for a
+     propositional variable, so {!bool_consts} wins the union. [None] (→ [unknown]) when
+     no table-free model is reconstructable (any applied uninterpreted symbol is
+     constrained). *)
+let build_model t =
+  let keep name = not (Preprocess.is_reserved_name name) in
+  let by_name (Const (a, _)) (Const (b, _)) = String.compare a b in
+  let bool_bindings =
+    List.filter_map
+      (fun (name, sv) ->
+         if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
+      t.bool_consts
+  in
+  let bool_names = List.map (fun (Const (n, _)) -> n) bool_bindings in
+  let assemble theory_bindings =
+    let theory_bindings =
+      List.filter
+        (fun (Const (n, _)) -> keep n && not (List.mem n bool_names))
+        theory_bindings
+    in
+    List.sort by_name (theory_bindings @ bool_bindings)
+  in
+  if t.has_theory
+  then (
+    match Cdclt.model_bindings t.cdclt with
+    | None -> None
+    | Some theory_bindings -> Some (assemble theory_bindings))
+  else Some (assemble [])
+;;
+
 let check_sat t =
-  t.last_real_sat <- false;
+  t.last_verdict <- Unknown;
+  t.last_model <- None;
+  t.budget_exhausted <- false;
   if t.degraded
   then Unknown
   else (
+    Cdclt.begin_check t.cdclt;
     let assumptions = List.map Sat.pos t.frames in
-    match Sat.solve ~assumptions t.sat with
-    | Sat.Unsat -> Unsat (* propositional unsat is sound: theories only remove models *)
-    | Sat.Sat ->
-      if t.has_theory
-      then Unknown (* SAT model may be theory-inconsistent (see .mli) *)
-      else (
-        t.last_real_sat <- true;
-        Sat))
+    let v =
+      match Sat.solve ~assumptions t.sat with
+      | Sat.Unsat -> Unsat (* theory conflicts only strengthen unsat; still sound *)
+      | Sat.Sat ->
+        (* THE SOUNDNESS RULE (M4): report [Sat] only when a self-checkable model is
+           reconstructable. A model with no applied uninterpreted symbol is (a) verifiable
+           by the §8 layer-1 evaluator and (b) function-free, hence in the fragment the
+           combination decides soundly. When the model would need a function table we
+           degrade to [Unknown] rather than trust an unself-checked [Sat] — this is also
+           the firewall against the combination's known incompleteness/soundness gap on
+           function applications appearing only inside arithmetic atoms (no purification
+           pass yet; see the M4 report). *)
+        (match build_model t with
+         | Some m ->
+           t.last_model <- Some m;
+           Sat
+         | None -> Unknown)
+      | exception Cdclt.Split_budget_exceeded ->
+        (* Not a fault: the deterministic split cap fired. Distinct stat, sticky. *)
+        t.degraded <- true;
+        t.budget_exhausted <- true;
+        Unknown
+      | exception Combine.Incomplete _ ->
+        (* DELIBERATE completeness degrade (ADR-0010 §3.6 case (ii): a structured Bool
+           compound under a UF argument the combinator chooses not to decide). A NAMED
+           arm, not the CONTRACT-POISON catch-all below: this is a "known unknown", not a
+           bricked theory instance. register_atom can raise it mid-solve (split-atom
+           re-registration in [on_assign], [intern ~split:true] in [check]), so it is
+           caught here as well as at the [assert_term] ingress. Sticky → Unknown. *)
+        t.degraded <- true;
+        Unknown
+      | exception ((Out_of_memory | Stack_overflow) as e) ->
+        (* Resource-exhaustion / control-flow asynchronous exceptions: the process state
+           is not trustworthy, so we do NOT swallow them into a verdict — re-raise. *)
+        raise e
+      | exception _ ->
+        (* CONTRACT-POISON firewall (I8), catch-all. [Sat.solve] drives the untrusted
+           theory callbacks ([on_assign]/[check]/[explain]/[on_backtrack], which run
+           [Combined.check]/[model]/[explain]/[register_atom]); ANY exception they let
+           escape — a declared poison ([Lia.Poisoned], [Rational.Overflow],
+           [Lia.Unsupported], [Combine.Combination_unsound],
+           [Sat.Theory_contract_violation]) OR an unforeseen
+           [Failure]/[Invalid_argument]/[Not_found]/[Term.Overflow] from a bug in theory
+           code — bricks this query to [Unknown] rather than crashing the session or
+           leaking a verdict from a bricked theory. This handler wraps ONLY the
+           theory-driving [Sat.solve] call; model reconstruction ([build_model], in the
+           [Sat.Sat] arm) and the session's own bookkeeping run OUTSIDE it, so a
+           programming error there still surfaces as a crash rather than a silent
+           [Unknown]. *)
+        t.degraded <- true;
+        Unknown
+    in
+    t.last_splits <- Cdclt.splits_used t.cdclt;
+    t.last_verdict <- v;
+    v)
 ;;
 
 let get_model t =
-  if not t.last_real_sat
-  then None
-  else
-    Some
-      (List.sort
-         (fun (a, _) (b, _) -> String.compare a b)
-         (List.map (fun (name, sv) -> name, Sat.value t.sat sv) t.bool_consts))
+  match t.last_verdict with
+  | Unsat | Unknown -> None
+  | Sat -> t.last_model
 ;;
 
 let stats t = Sat.stats t.sat
+let splits t = t.last_splits
+let budget_exhausted t = t.budget_exhausted

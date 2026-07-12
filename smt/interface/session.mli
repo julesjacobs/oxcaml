@@ -1,46 +1,77 @@
 (** Session API (DESIGN.md §3): declare symbols, assert terms, check-sat, push/pop.
 
     A session bundles one {!Oxsmt_core.Env.t} + {!Oxsmt_core.Context.t}, a
-    {!Oxsmt_preprocess.Preprocess} handle, the {!Oxsmt_preprocess.Cnf} clausifier, and the
-    {!Oxsmt_solver.Sat} core. All term construction threads the one context (ADR-0003
-    Decision 6), so the same atom is the same SAT variable throughout the session.
-    Shipped, stdlib-only (INVARIANTS.md I3): it never links the test-only SMT-LIB parser.
+    {!Oxsmt_preprocess.Preprocess} handle, the {!Oxsmt_preprocess.Cnf} clausifier, the
+    {!Oxsmt_solver.Sat} core, and — the M4 change — the Nelson-Oppen combined EUF+LIA
+    theory stack driven through the CDCL(T) seam ({!Cdclt}). All term construction threads
+    the one context (ADR-0003 Decision 6), so the same atom is the same SAT variable AND
+    the same theory atom throughout the session. Shipped, stdlib-only (INVARIANTS.md I3):
+    it never links the test-only SMT-LIB parser.
 
-    {b THE SOUNDNESS RULE (v1 is a propositional core, not yet a theory solver).}
+    {b THE SOUNDNESS RULE (v1 is now a real CDCL(T) solver over EUF+LIA).}
 
-    {i Why it holds — the boolean skeleton over-approximates.} Clausification replaces
-    each theory atom by a fresh Boolean variable, dropping every theory constraint that
-    ties those variables to arithmetic/congruence. So the propositional problem is a
-    {b relaxation} of the real one: every real model induces a propositional model (read
-    off the truth value each atom takes under the real interpretation), but not conversely
-    — a propositional model may assign the atoms in a way no theory interpretation allows
-    (it can set both [x < 0] and [x > 0] true, which are independent Booleans to the SAT
-    core). Two consequences, asymmetric:
+    {i M1 regime (superseded).} Before the theories were wired, the boolean skeleton
+    over-approximated: theory atoms were opaque Booleans with no arithmetic/congruence
+    meaning, so a propositional [Sat] could be theory-inconsistent and had to be
+    downgraded to [Unknown]. Only propositional [Unsat] and pure-Boolean formulas got real
+    verdicts.
 
-    - {b Propositional [Unsat] ⇒ real [Unsat] (sound, even with theory atoms).} If not
-      even the relaxation has a model, the (more constrained) real problem has none
-      either. The SAT core cannot see theory constraints, but adding them only removes
-      models, never adds them.
-    - {b Propositional [Sat] proves nothing} until a theory vets the atom assignment: the
-      witness may be theory-inconsistent. So with any theory atom present, [Sat] must
-      become [Unknown] — reporting [Sat] would be unsound.
+    {i M4 regime (current).} The combined theory is installed on the SAT core before any
+    clause (pristine-attach) and {b every} theory atom (order [Le], non-Bool [Eq], applied
+    predicate) is registered with it as it is clausified. The CDCL(T) loop then
+    interleaves Boolean search with theory propagation and, at each full Boolean model, a
+    complete [Final] theory check (LIA branch-and-bound for integrality, model-based
+    Nelson-Oppen for the EUF/LIA arrangement). Consequences:
 
-    Concretely:
+    {ul
+     {- {b [Unsat]} is sound as before — theory conflicts only remove models — and is now
+        also derived {e via} theory conflicts (a propositionally-satisfiable skeleton
+        whose theory is inconsistent comes out [Unsat], not [Unknown]). This is the regime
+        flip: the degradation honeypots ([degrade_*], propositionally-sat / theory-unsat)
+        are now real [Unsat].
+    }
+     {- {b [Sat]} is reported {e only} when the [Final] theory check accepts a full
+        Boolean model {e and} a self-checkable model is reconstructable — one with no
+        applied uninterpreted symbol (see {!get_model}). Such a model is verifiable by the
+        §8 layer-1 evaluator and is function-free, hence in the fragment the Nelson-Oppen
+        combination decides soundly; a query whose model would need a function table is
+        degraded to [Unknown] rather than reported on an unself-checked [Sat]. (This also
+        firewalls the combination's current incompleteness on function applications that
+        appear only inside an arithmetic atom — no purification pass exists yet, so their
+        congruence can be missed; degrading to [Unknown] keeps every reported verdict
+        sound.) A v1 completeness limit on the [Sat] direction, never a soundness one.
+    }
+     {- {b [Unknown]} is the disciplined fallback (never a guessed verdict). It is
+        returned when — and only when — the theory stack cannot certify a definite answer:
+       - a {!Oxsmt_core.Term.Overflow}/{!Oxsmt_core.Term.Unsupported} in preprocessing or
+         an out-of-fragment atom the adapters reject (I8);
+       - the {b CONTRACT-POISON firewall}: {e any} exception escaping the untrusted theory
+         callbacks that {!check_sat}'s [Sat.solve] drives — a declared poison
+         ([Lia.Poisoned], [Rational.Overflow], [Lia.Unsupported],
+         [Combine.Combination_unsound], [Sat.Theory_contract_violation]) or an unforeseen
+         [Failure]/[Invalid_argument]/[Not_found]/[Term.Overflow] from a bug in theory
+         code — bricks the query to [Unknown] (I8: degrade, never crash, never a verdict
+         from a bricked theory). The firewall is a catch-all, {e except} that
+         [Out_of_memory] and [Stack_overflow] are re-raised (the process state is
+         untrustworthy) and are the only escapees. Its boundary is precisely the
+         [Sat.solve] call: model reconstruction and the session's own bookkeeping run
+         outside it, so a programming error there surfaces as a crash rather than a
+         silently-swallowed [Unknown];
+       - a {b deliberate completeness degrade}: the internalization combinator raises
+         [Combine.Incomplete] for a shape it soundly chooses not to decide (ADR-0010 §3.6:
+         a structured Bool compound under a UF argument). This is a "known [Unknown]",
+         distinct from the CONTRACT-POISON faults above; because [register_atom] runs both
+         at {!assert_term} (base-frame interning) and mid-[Sat.solve] (split-atom
+         re-registration), it is caught on BOTH paths and degrades sticky;
+       - the deterministic {b split budget} is exhausted (the [Final]-check split loop has
+         no intrinsic termination bound; see {!budget_exhausted}).
 
-    - If the asserted formulas contain {b any theory atom} — an order atom [Le], a
-      non-Bool equality [Eq], or an applied predicate [App] of arity ≥ 1 — then a
-      propositional [Sat] verdict is {b downgraded to [Unknown]} (per the argument above;
-      e.g. the skeleton of [x < 0] ∧ [x > 0] is satisfiable though the theory is not).
-    - Propositional [Unsat] is reported as [Unsat] {b even with theory atoms present}
-      (sound by the first consequence above).
-    - A {b pure-Boolean} formula (every atom is a propositional variable — a nullary
-      Bool-sorted symbol — or a Bool constant) gets a real [Sat]/[Unsat].
-    - {!Term.Overflow}/{!Term.Unsupported} anywhere in preprocessing or clausification
-      degrade the whole session to [Unknown] (INVARIANTS.md I8, session boundary): never a
-      crash, never a partial verdict.
+       A degraded session stays [Unknown] for the rest of its life (the poison is sticky).
+    }
+    }
 
-    When the EUF and LIA theories land (M2/M3) this rule is what they relax; until then it
-    is the wall that keeps v1 sound. *)
+    Determinism (I6): no wall-clock anywhere; the split budget is a counter; all theory
+    iteration is deterministic. *)
 
 type t
 
@@ -49,9 +80,21 @@ type verdict =
   | Unsat
   | Unknown
 
-(** A fresh session: empty env (with the reserved [div]/[mod] built-ins), fresh context
-    and SAT core, one active (base) assertion frame. *)
-val create : unit -> t
+(** A model value for a nullary symbol (re-exported from {!Cdclt}). *)
+type model_value = Cdclt.value =
+  | VBool of bool
+  | VInt of int
+  | VUninterp of int
+
+(** A model binding (re-exported from {!Cdclt}). v1 exposes only nullary [Const] bindings. *)
+type model_binding = Cdclt.binding = Const of string * model_value
+
+(** A fresh session: empty env (with the reserved [div]/[mod] built-ins), fresh context,
+    fresh SAT core with the combined EUF+LIA theory installed, one active (base) assertion
+    frame. [split_budget] overrides the deterministic per-[check_sat] theory-split cap
+    (default 10_000); a tiny value drives the budget-exhaustion path (see
+    {!budget_exhausted}) in tests. *)
+val create : ?split_budget:int -> unit -> t
 
 (** The session's {!Oxsmt_core.Env.t}. Exposed so a front end (e.g. the test-only SMT-LIB
     parser) can declare symbols and build assertion terms in the {e same} context the
@@ -70,10 +113,10 @@ val declare_fun : t -> string -> Oxsmt_core.Rank.t -> Oxsmt_core.Symbol.t
 val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
 
 (** [assert_term t phi] preprocesses [phi] (ADR-0003 §5 passes), clausifies the boolean
-    skeleton, and adds the clauses to the current frame. [phi] must be Bool-sorted and
-    built through {!context}. A theory atom in [phi] is recorded (see THE SOUNDNESS RULE);
-    an [Overflow]/[Unsupported] degrades the session to [Unknown]. Legal before or after
-    {!check_sat} (assert-after-check). *)
+    skeleton, registers each theory atom with the combined theory, and adds the clauses to
+    the current frame. [phi] must be Bool-sorted and built through {!context}. An
+    [Overflow]/[Unsupported]/rejected atom degrades the session to [Unknown] (I8). Legal
+    before or after {!check_sat} (assert-after-check). *)
 val assert_term : t -> Oxsmt_core.Term.t -> unit
 
 (** Open a new assertion frame. Assertions added until the matching {!pop} are retracted
@@ -86,15 +129,28 @@ val push : t -> unit
     no matching {!push}. *)
 val pop : t -> unit
 
-(** Decide satisfiability of the active assertions under THE SOUNDNESS RULE. Repeatable;
-    more assertions or push/pop may follow. *)
+(** Decide satisfiability of the active assertions via CDCL(T) under THE SOUNDNESS RULE.
+    Repeatable; more assertions or push/pop may follow. *)
 val check_sat : t -> verdict
 
-(** The model of the most recent {!check_sat}, iff that call returned a {e real} [Sat] (a
-    pure-Boolean formula — see THE SOUNDNESS RULE). Bindings are [(symbol-name, value)]
-    for every propositional variable, sorted by name. [None] after [Unsat]/[Unknown],
-    after a theory-downgraded [Sat], or before any [check_sat]. *)
-val get_model : t -> (string * bool) list option
+(** The model of the most recent {!check_sat}, iff that call returned [Sat] {e and} a
+    checkable model is reconstructable. Bindings are one [Const (symbol-name, value)] per
+    constrained nullary symbol, sorted by name: the theory's Int / uninterpreted-sort
+    constants {e unioned with} a [Bool] per declared propositional variable (a mixed
+    Boolean/theory [Sat] covers both, so the §8 evaluator sees every declared symbol).
+    Reserved internal witnesses ([".oxsmt.*"], e.g. an ITE lift) are excluded — the model
+    names only user-declared symbols. [None] after [Unsat]/[Unknown], before any
+    [check_sat], or when the [Sat]'s model would require a function table (any applied
+    uninterpreted symbol is constrained) — a v1 completeness limit of the model
+    reconstruction, not of the verdict. *)
+val get_model : t -> model_binding list option
 
 (** The SAT core's counter trio, monotonic across the session (DESIGN.md §8). *)
 val stats : t -> Oxsmt_solver.Sat.Stats.t
+
+(** Theory splits consumed by the most recent {!check_sat} (determinism/perf stat). *)
+val splits : t -> int
+
+(** [true] iff the most recent {!check_sat} degraded to [Unknown] by exhausting the split
+    budget (the distinct split-budget stat; the query is otherwise unresolved). *)
+val budget_exhausted : t -> bool

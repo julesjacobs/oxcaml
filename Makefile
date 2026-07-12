@@ -185,6 +185,7 @@ preprocess-test:
 ##   extraction, and the reserved-namespace guard on both the session and the parser. Lives
 ##   under tests/solver (links the test-only parser). Nonzero exit on any failed check.
 wiring-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
 	$(DUNE) exec tests/solver/wiring_test.exe
 
 ## euf-test — smt/theories/euf proof-producing congruence closure (Nieuwenhuis-

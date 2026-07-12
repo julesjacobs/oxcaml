@@ -29,7 +29,7 @@ let read_file path =
 
 type block =
   { verdict : string
-  ; model : (string * bool) list option
+  ; model : (string * string) list option (* (name, value-token) per nullary symbol *)
   ; conflicts : int
   ; decisions : int
   ; propagations : int
@@ -39,9 +39,7 @@ let unknown_block =
   { verdict = "unknown"; model = None; conflicts = 0; decisions = 0; propagations = 0 }
 ;;
 
-(* Render one result block to text. Raises [Printer.Unsupported] if a model symbol name is
-   unrepresentable in SMT-LIB (see [print_block]); nothing is emitted on that path. *)
-let render_block b =
+let print_block b =
   let buf = Buffer.create 128 in
   Buffer.add_string buf "(result";
   Printf.bprintf buf " (verdict %s)" b.verdict;
@@ -52,11 +50,7 @@ let render_block b =
      List.iteri
        (fun i (name, v) ->
           if i > 0 then Buffer.add_char buf ' ';
-          (* Re-quote the symbol name: [Session.get_model] returns the bare content of a
-            |quoted| declared const, so a name like [p q] must print as [|p q|] to survive
-            the harness/eval round-trip. Reuse the shipped printer's SMT-LIB 2.6 quoting
-            (the CLI already links smt/; only the firewalled harness lib hand-rolls it). *)
-          Printf.bprintf buf "(%s %b)" (Oxsmt_smtlib.Printer.quote_symbol name) v)
+          Printf.bprintf buf "(%s %s)" name v)
        m;
      Buffer.add_string buf "))"
    | None -> ());
@@ -66,20 +60,7 @@ let render_block b =
     b.conflicts
     b.decisions
     b.propagations;
-  Buffer.contents buf
-;;
-
-let print_block b =
-  (* A model symbol the shipped printer refuses (empty [||], an operator collision like
-     [|+|]) is representable in the parser but not printable — rendering it raises
-     [Printer.Unsupported]. Never crash and never emit a malformed/partial model: degrade
-     this goal to a sound [unknown] with no model. [unknown_block] has no model, so the
-     fallback render cannot re-raise. (Matches the wiring branch's fix shape.) *)
-  let text =
-    try render_block b with
-    | Oxsmt_smtlib.Printer.Unsupported _ -> render_block unknown_block
-  in
-  print_string text;
+  print_string (Buffer.contents buf);
   print_newline ()
 ;;
 
@@ -99,14 +80,31 @@ let scan_commands sexps =
     sexps
 ;;
 
-let verdict_string = function
-  | Session.Sat -> "sat"
-  | Session.Unsat -> "unsat"
-  | Session.Unknown -> "unknown"
+(* Render a model value as the token the eval Model reader types against the symbol's
+   declared sort: [true]/[false] for Bool, the numeral (SMT-LIB [(- n)] for negatives) for
+   Int, the element index for an uninterpreted sort. *)
+let token_of_value = function
+  | Session.VBool b -> if b then "true" else "false"
+  | Session.VInt n -> if n >= 0 then string_of_int n else Printf.sprintf "(- %d)" (-n)
+  | Session.VUninterp i -> string_of_int i
+;;
+
+(* Symbol names are rendered through the shared SMT-LIB printer's lexical quoter (grounded
+   in the one shared lexer, ADR-0008), so a name that is not a simple symbol — [|a b|],
+   [|1x|] — round-trips as [|a b|] rather than the malformed bare [a b]. The §8 evaluator
+   reads it back through the same lexer, so quoting cannot desync on a token boundary. *)
+let render_model bindings =
+  List.map
+    (fun (Session.Const (name, v)) ->
+       Oxsmt_smtlib.Printer.quote_symbol name, token_of_value v)
+    bindings
 ;;
 
 (* Batch solve: one check-sat, no push/pop. Parse into the session's own context so the
-   asserted terms share its tag stream, then solve once. *)
+   asserted terms share its tag stream, then solve once. A [Sat] whose model cannot be
+   reconstructed for the §8 self-check (a UF model that would need function tables — a v1
+   limit) is soundly reported as [unknown]: we never emit a [sat] the harness cannot
+   self-certify. *)
 let solve_batch src =
   let s = Session.create () in
   match Parser.parse_into (Session.env s) (Session.context s) src with
@@ -117,12 +115,31 @@ let solve_batch src =
     List.iter (Session.assert_term s) parsed.Parser.assertions;
     let v = Session.check_sat s in
     let st = Session.stats s in
-    { verdict = verdict_string v
-    ; model = Session.get_model s
-    ; conflicts = st.Oxsmt_solver.Sat.Stats.conflicts
-    ; decisions = st.Oxsmt_solver.Sat.Stats.decisions
-    ; propagations = st.Oxsmt_solver.Sat.Stats.propagations
-    }
+    let block verdict model =
+      { verdict
+      ; model
+      ; conflicts = st.Oxsmt_solver.Sat.Stats.conflicts
+      ; decisions = st.Oxsmt_solver.Sat.Stats.decisions
+      ; propagations = st.Oxsmt_solver.Sat.Stats.propagations
+      }
+    in
+    (match v with
+     | Session.Sat ->
+       (match Session.get_model s with
+        | Some bindings ->
+          (match render_model bindings with
+           | model -> block "sat" (Some model)
+           | exception Oxsmt_smtlib.Printer.Unsupported _ ->
+             (* A model names a symbol the SMT-LIB printer cannot faithfully render: the
+                empty symbol [||], or a predefined-operator collision like [|+|]. Quoting
+                is purely lexical and cannot disambiguate these, so the printer's refusal
+                is CORRECT (not something to make total). Emitting the name anyway would
+                be malformed solver output; degrade this goal to a sound [unknown] with no
+                model rather than crash the CLI. *)
+             block "unknown" None)
+        | None -> block "unknown" None)
+     | Session.Unsat -> block "unsat" None
+     | Session.Unknown -> block "unknown" None)
 ;;
 
 let () =
