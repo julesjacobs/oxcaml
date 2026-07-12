@@ -12,6 +12,7 @@ open Oxsmt_core
 type prem =
   | P_lit of Lit.t
   | P_axiom
+  | P_fabric of Fabric.edge_id
 
 (* How an atom's term is encoded into the engine. A non-Bool [Eq(a,b)] atom asserts a
    (dis)equality on its two sides. A Bool-codomain predicate / bool constant is encoded
@@ -36,7 +37,7 @@ type t =
   ; atoms : info Atom.Table.t (* Atom -> its term + encoding; persists across pop *)
   ; watched : Atom.t Term.Table.t (* watched Eq-atom term -> Atom, for propagation *)
   ; mutable atom_terms : Term.t list (* registration order; model enumeration only *)
-  ; mutable explain_cache : Explanation.t Lit.Map.t
+  ; mutable explain_cache : Fabric.Explanation.t Lit.Map.t
     (* propagated lit -> its reason, SNAPSHOTTED at propagation time so [explain] is
          O(1) and precedence-valid (CONTRACT-EX); see {!cache_reason} / the module note. *)
   ; mutable frames : Lit.t list list
@@ -128,6 +129,15 @@ let internalize_term t term =
   if not (List.memq term t.atom_terms) then t.atom_terms <- term :: t.atom_terms
 ;;
 
+let fabric_are_equal t a b = Euf.equal_if_registered t.engine a b
+
+let assert_fabric_eq t ~edge_id a b =
+  Euf.assert_eq t.engine ~premise:(P_fabric edge_id) a b
+;;
+
+(* The congruence child fixes no arithmetic value; the fix-trigger queries only LIA. *)
+let fixed_bounds _t _term = None
+
 let assert_lit t lit =
   let atom = Lit.atom lit in
   let positive = Lit.sign lit in
@@ -149,12 +159,25 @@ let assert_lit t lit =
 
 (* Drop the axiom token; keep only genuinely-asserted literals. Sound because the dropped
    fact ([true <> false]) is a theory tautology, not a hypothesis. *)
-let lits_of_prems prems =
+let justifications_of_prems prems =
   List.filter_map
     (function
-      | P_lit l -> Some l
+      | P_lit l -> Some (Fabric.Real l)
+      | P_fabric edge_id -> Some (Fabric.Fabric edge_id)
       | P_axiom -> None)
     prems
+;;
+
+let ordinary_explanation (e : Fabric.Explanation.t) =
+  let premises =
+    List.map
+      (function
+        | Fabric.Real lit -> lit
+        | Fabric.Fabric _ ->
+          failwith "Euf_adapter: fabric handle crossed the direct THEORY seam")
+      e.premises
+  in
+  { Explanation.premises; rule = e.rule }
 ;;
 
 (* The reason for a just-reported implied (dis)equality, SNAPSHOTTED at propagation time.
@@ -166,8 +189,8 @@ let lits_of_prems prems =
    union edges the forest walk would route through, yielding a premise asserted AFTER the
    explained literal — the CONTRACT-EX violation that bricked the QG / eq_diamond /
    EUF-in- QF_LIA families to [unknown]. Mirrors {!Lia_adapter.cache_reason}. *)
-let reason_of_implied t (imp : Euf.implied) : Explanation.t =
-  let premises = lits_of_prems (Euf.explain_implied t.engine imp) in
+let reason_of_implied t (imp : Euf.implied) : Fabric.Explanation.t =
+  let premises = justifications_of_prems (Euf.explain_implied t.engine imp) in
   (* N1 / codex AP4 tripwire (unconditional, survives release [-noassert]): an empty
      propagation reason is an unconditional entailment (soundness bug). A registered [Eq]
      atom has distinct sides (reflexive folds to [true]), so proving it (dis)equal cites
@@ -175,7 +198,7 @@ let reason_of_implied t (imp : Euf.implied) : Explanation.t =
      [unknown] via CONTRACT-POISON rather than feeding 1UIP an unsound clause. *)
   if premises = []
   then failwith "Euf_adapter: empty propagation reason (unsound) [codex AP4 tripwire]";
-  { Explanation.premises; rule = Euf_congruence }
+  { Fabric.Explanation.premises; rule = Explanation.Rule_tag.Euf_congruence }
 ;;
 
 (* Cache a propagated literal's snapshotted reason in the current [push] frame. FIRST-WINS
@@ -216,7 +239,7 @@ let stale_bound_predicate t term =
      | Some { kind = K_eq _ | K_foreign; _ } | None -> false)
 ;;
 
-let check t effort =
+let check_fabric t effort =
   (* Pop-recovery for the predicate late-binding recurrence (#161): one O(#watches) re-arm
      of the bound predicate watches a [pop] may have left stale, gated by the [pop]-set
      flag so a check with no intervening pop does nothing. Runs before [Euf.check] — it
@@ -228,7 +251,7 @@ let check t effort =
     t.predicates_maybe_stale <- false);
   match Euf.check t.engine with
   | Euf.Conflict prems ->
-    let premises = lits_of_prems prems in
+    let premises = justifications_of_prems prems in
     (* N1 (insurance): a conflict with no premises would be an unconditional [false] — a
        soundness bug. Unconstructible here (the violated disequality forces true=false or
        a merged asserted diseq, always citing >= 1 asserted literal; reflexive [Eq] folds
@@ -238,7 +261,7 @@ let check t effort =
        to [unknown] via CONTRACT-POISON — never a verdict from an unsound conflict. *)
     if premises = []
     then failwith "Euf_adapter: empty conflict premise set (unsound) [codex AP4 tripwire]";
-    Theory.Conflict { Explanation.premises; rule = Euf_congruence }
+    Fabric.Conflict { Fabric.Explanation.premises; rule = Euf_congruence }
   | Euf.Consistent ->
     (* A watched atom whose entailed truth just changed becomes a theory propagation: an
        [Eq] atom flipping (dis)equal, or a predicate [p(x…)] whose class reached
@@ -260,9 +283,17 @@ let check t effort =
         (Euf.propagate t.engine)
     in
     (match lits, effort with
-     | [], Theory.Final -> Theory.Sat
-     | [], Theory.Propagate -> Theory.Propagations []
-     | _ :: _, _ -> Theory.Propagations lits)
+     | [], Theory.Final -> Fabric.Sat
+     | [], Theory.Propagate -> Fabric.Propagations []
+     | _ :: _, _ -> Fabric.Propagations lits)
+;;
+
+let check t effort =
+  match check_fabric t effort with
+  | Fabric.Sat -> Theory.Sat
+  | Fabric.Propagations lits -> Theory.Propagations lits
+  | Fabric.Conflict e -> Theory.Conflict (ordinary_explanation e)
+  | Fabric.Split terms -> Theory.Split terms
 ;;
 
 (* [explain] serves the reason SNAPSHOTTED at propagation time ({!cache_reason}); the
@@ -273,7 +304,7 @@ let check t effort =
    literal EUF never propagated, or one whose frame was already popped) — fail loud so it
    degrades to [unknown] via CONTRACT-POISON rather than fabricating an unsound premise
    set. *)
-let explain t lit =
+let explain_fabric t lit =
   match Lit.Map.find_opt lit t.explain_cache with
   | Some expl -> expl
   | None ->
@@ -281,6 +312,8 @@ let explain t lit =
       "Euf_adapter.explain: no cached reason for literal (not theory-propagated, or its \
        frame was popped)"
 ;;
+
+let explain t lit = ordinary_explanation (explain_fabric t lit)
 
 let push t =
   Euf.push t.engine;

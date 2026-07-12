@@ -20,7 +20,48 @@ module type CONGRUENCE_CHILD = sig
   val internalize_term : t -> Term.t -> unit
 end
 
-module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : sig
+type edge_id = Fabric.edge_id
+
+type justification = Fabric.justification =
+  | Real of Lit.t
+  | Fabric of edge_id
+
+module Fabric_explanation = Fabric.Explanation
+
+type fabric_check_result = Fabric.check_result =
+  | Sat
+  | Propagations of Lit.t list
+  | Conflict of Fabric_explanation.t
+  | Split of Term.t list
+
+module type FABRIC_CHILD = sig
+  include Theory.THEORY
+
+  val check_fabric : t -> Theory.effort -> fabric_check_result
+  val explain_fabric : t -> Lit.t -> Fabric_explanation.t
+  val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
+end
+
+module type FABRIC_CONGRUENCE_CHILD = sig
+  include FABRIC_CHILD
+
+  val internalize_term : t -> Term.t -> unit
+  val fabric_are_equal : t -> Term.t -> Term.t -> bool
+  val assert_fabric_eq : t -> edge_id:edge_id -> Term.t -> Term.t -> unit
+end
+
+(* ADR-0014 Stage 1b OFF toggle (deliverable 12). Read ONCE at module init, exactly the
+   [euf.ml] [OXSMT_EUF_SELF_CHECK] pattern: unset / "0" / "false" / "no" / "" leaves the
+   fabric ON; any other value turns it OFF. When OFF (and, at run time, whenever no fabric
+   edge is live) the combinator takes the byte-for-byte trunk path — no scan, no
+   injection, no new counters. *)
+let fabric_off =
+  match Sys.getenv_opt "OXSMT_NO_FABRIC" with
+  | None | Some ("0" | "false" | "no" | "") -> false
+  | Some _ -> true
+;;
+
+module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig
   include Theory.THEORY
 
   (* ADR-0012 L2/O3: read-only exposure of the congruence child's state so the session can
@@ -29,6 +70,15 @@ module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : sig
   type congruence_state = A.t
 
   val congruence_state : t -> congruence_state
+
+  type fabric_stats =
+    { edges_injected : int
+    ; pairs_skipped : int
+    ; expansions : int
+    }
+
+  val fabric_stats : t -> fabric_stats
+  val set_fabric_trace : t -> Fabric.trace option -> unit
 end = struct
   (* A pinned shared-equality literal: the pair it relates, its asserted polarity, and
      which children it was actually asserted to (a negative equality may reach only the
@@ -97,6 +147,38 @@ end = struct
     ; pin_frames : (unit, int) Trail.t
     ; (* atom -> the (x, y) it equates, for a shared equality over two interface terms. *)
       eq_pair : (Term.t * Term.t) Atom.Table.t
+    ; (* ---- ADR-0014 Stage 1b theory fabric (all dormant unless an edge is live) -------
+         When [fabric_off] or [Hashtbl.length registry = 0] the combinator takes the trunk
+         path and NONE of the following is touched (the pure-corpus byte-unchanged
+         guarantee). *)
+      mutable next_edge : edge_id
+      (* monotone edge_id allocator; grow-only over the whole solve so an injected
+           edge's Γ can cite only STRICTLY-SMALLER ids — acyclicity by construction (F2). *)
+    ; registry : (edge_id, reg_entry) Hashtbl.t
+      (* edge_id -> the Γ + witness + endpoints recorded at injection. FIRST-wins,
+           origin-frame trailed on [fabric_frames] (F2/F3). Never traversed by iteration
+           (only keyed lookup), so it introduces no Hashtbl-order nondeterminism (I6). *)
+    ; mutable combined_reason : Explanation.t Lit.Map.t
+      (* propagated lit -> its fully-expanded (all-[Lit.t]) reason, snapshotted the
+           first time it is served, FIRST-wins, trailed. Solve-time and cert-time
+           consumers read the SAME immutable registry, so they cite byte-identical Γ (F4). *)
+    ; mutable order : int Lit.Map.t
+      (* F1(b) assertion-order ledger: each asserted lit's arrival ordinal. *)
+    ; mutable assert_counter : int
+    ; fabric_frames : (unit -> unit, unit) Trail.t
+      (* cold-path closure trail (Trail realization 1b): each entry undoes one registry
+           / combined-reason / propagated_by insertion when its frame pops. *)
+    ; mutable trace : Fabric.trace option (* F7 cert emission hook; unset ⇒ zero cost. *)
+    ; mutable stat_edges : int
+    ; mutable stat_skipped : int
+    ; mutable stat_expansions : int
+    }
+
+  and reg_entry =
+    { gamma : justification list (* the recorded premise set (may hold Fabric handles) *)
+    ; witness : Fabric.equality_witness
+    ; reg_s : Term.t
+    ; reg_t : Term.t
     }
 
   let create ctx env =
@@ -113,6 +195,16 @@ end = struct
     ; pins = Dynarray.create ()
     ; pin_frames = Trail.create ()
     ; eq_pair = Atom.Table.create 16
+    ; next_edge = 0
+    ; registry = Hashtbl.create 16
+    ; combined_reason = Lit.Map.empty
+    ; order = Lit.Map.empty
+    ; assert_counter = 0
+    ; fabric_frames = Trail.create ()
+    ; trace = None
+    ; stat_edges = 0
+    ; stat_skipped = 0
+    ; stat_expansions = 0
     }
   ;;
 
@@ -377,6 +469,17 @@ end = struct
     let term = term_of t atom in
     let positive = Lit.sign lit in
     let owner = R.assert_to term ~positive in
+    (* F1(b) assertion-order ledger (deliverable 9): stamp this literal with a monotone
+       arrival ordinal so a fabric injection can assert
+       [max assertion_order(Γ) < current counter] combinator-side, without any theory
+       reading the SAT trail. Only when the fabric is live — off, this is trunk.
+       First-wins keeps the earliest (precedence-relevant) ordinal for a re-asserted
+       literal. *)
+    if not fabric_off
+    then (
+      t.assert_counter <- t.assert_counter + 1;
+      if not (Lit.Map.mem lit t.order)
+      then t.order <- Lit.Map.add lit t.assert_counter t.order);
     (match owner with
      | R.A -> A.assert_lit t.a lit
      | R.B -> B.assert_lit t.b lit
@@ -399,8 +502,24 @@ end = struct
       pin t ~x ~y ~psign:positive ~pto_a ~pto_b
   ;;
 
+  (* When no fabric edge is live this is the trunk grow-only, last-wins, untrailed map
+     (the pure-corpus path is byte-unchanged). Once an edge is live (Rev 6.1 pin), a
+     fabric-reason literal's owner must be FIRST-wins and origin-frame TRAILED: a post-pop
+     re-propagation of the same literal must be free to record the FRESH owner, and
+     [Combine.explain] must not route a re-propagation to the wrong child (the #102
+     surface, mutant [pop/re-propagate-different-owner]). *)
   let record_props t owner lits =
-    List.iter (fun l -> t.propagated_by <- Lit.Map.add l owner t.propagated_by) lits
+    if fabric_off || Hashtbl.length t.registry = 0
+    then List.iter (fun l -> t.propagated_by <- Lit.Map.add l owner t.propagated_by) lits
+    else
+      List.iter
+        (fun l ->
+           if not (Lit.Map.mem l t.propagated_by)
+           then (
+             t.propagated_by <- Lit.Map.add l owner t.propagated_by;
+             Trail.record t.fabric_frames (fun () ->
+               t.propagated_by <- Lit.Map.remove l t.propagated_by)))
+        lits
   ;;
 
   (* --- model-based combination (Final) --------------------------------------------- *)
@@ -576,7 +695,7 @@ end = struct
       Theory.Propagations (la @ lb)
   ;;
 
-  let check t effort : Theory.check_result =
+  let check_off t effort : Theory.check_result =
     match effort with
     | Theory.Propagate ->
       (match A.check t.a Theory.Propagate with
@@ -617,7 +736,7 @@ end = struct
                      propagations is not a Sat certificate)"))))
   ;;
 
-  let explain t lit =
+  let explain_off t lit =
     match Lit.Map.find_opt lit t.propagated_by with
     | Some R.A -> A.explain t.a lit
     | Some R.B | Some R.Both -> B.explain t.b lit
@@ -628,10 +747,294 @@ end = struct
        | R.A | R.Both -> A.explain t.a lit)
   ;;
 
+  (* ==== ADR-0014 Stage 1b — the theory fabric ====================================== *)
+
+  (* F2 recursive handle expansion. Replace each [Fabric e] by [registry[e].gamma],
+     recursively, until every premise is a real [Lit.t]. Termination + acyclicity are by
+     construction (an edge's Γ cites only STRICTLY-SMALLER live ids, checked at
+     injection), and re-verified here with a visited set that FAILS CLOSED (→
+     [Combination_unsound] → unknown) on a cycle or a missing/popped handle. Deterministic
+     first-occurrence order, deduplicated (a premise SET). Expanded at BOTH seam-return
+     points (eager [Conflict] in [realize], lazy reason in [explain_on]). *)
+  let expand_justifications t (js : justification list) : Lit.t list =
+    let visited : (edge_id, unit) Hashtbl.t = Hashtbl.create 8 in
+    let seen = ref Lit.Map.empty in
+    let out = ref [] in
+    let push_lit l =
+      if not (Lit.Map.mem l !seen)
+      then (
+        seen := Lit.Map.add l () !seen;
+        out := l :: !out)
+    in
+    let rec go = function
+      | Real l -> push_lit l
+      | Fabric e ->
+        if Hashtbl.mem visited e
+        then
+          raise (Combination_unsound "fabric expansion: edge cycle (acyclicity violated)");
+        Hashtbl.replace visited e ();
+        (match Hashtbl.find_opt t.registry e with
+         | None ->
+           raise
+             (Combination_unsound
+                "fabric expansion: missing or popped edge handle (fail-closed)")
+         | Some entry ->
+           t.stat_expansions <- t.stat_expansions + 1;
+           List.iter go entry.gamma)
+    in
+    List.iter go js;
+    List.rev !out
+  ;;
+
+  let expand_explanation t (fe : Fabric.Explanation.t) : Explanation.t =
+    { Explanation.premises = expand_justifications t fe.premises; rule = fe.rule }
+  ;;
+
+  (* F1-SEM (deliverable 8): confirm the recorded Γ entails [s = w] via the TWO oriented
+     Farkas derivations, NOT a four-bound 0 ≤ 0 sum. [s ≤ w] is witnessed by
+     [{s ≤ v (s_upper), w ≥ v (t_lower)}]; [s ≥ w] by
+     [{s ≥ v (s_lower), w ≤ v (t_upper)}]. Both oriented pairs must be present in Γ (as
+     [Real] members) — [Lia.fixed_bounds]'s ACTIVE-EXACT contract makes each of those the
+     tight bound to the SAME value [v], so the two chains give [s = w]. A weak-Γ (one
+     oriented bound dropped) breaks a direction and the injection is refused. O(|Γ|). *)
+  let f1_sem_entails ~gamma ~(witness : Fabric.equality_witness) =
+    let reals =
+      List.fold_left
+        (fun acc j ->
+           match j with
+           | Real l -> Lit.Map.add l () acc
+           | Fabric _ -> acc)
+        Lit.Map.empty
+        gamma
+    in
+    let has l = Lit.Map.mem l reals in
+    has witness.Fabric.s_upper
+    && has witness.Fabric.t_lower
+    && has witness.Fabric.s_lower
+    && has witness.Fabric.t_upper
+  ;;
+
+  (* F1(b): every real member of Γ arrived strictly before this injection (its assertion
+     ordinal is recorded, and no later than the current counter). A member with NO
+     recorded ordinal is a forward reference — rejected (fail-closed). *)
+  let gamma_precedence_ok t gamma =
+    List.for_all
+      (function
+        | Fabric _ -> true
+        | Real l ->
+          (match Lit.Map.find_opt l t.order with
+           | Some o -> o <= t.assert_counter
+           | None -> false))
+      gamma
+  ;;
+
+  (* F2 acyclicity, enforced at injection: any [Fabric] handle in Γ must cite a
+     strictly-smaller (than the about-to-be-allocated [t.next_edge]) and still-live edge. *)
+  let gamma_acyclic_ok t gamma =
+    List.for_all
+      (function
+        | Real _ -> true
+        | Fabric e -> e < t.next_edge && Hashtbl.mem t.registry e)
+      gamma
+  ;;
+
+  (* Attempt one justified fixed-value equality injection [a = b] into the hub. FIRST-wins
+     (an already-connected pair records nothing, F2). H5 transactional: ALL fallible work
+     — Γ extraction, the F1-SEM re-sum, the F1(b) and acyclicity checks — happens BEFORE
+     [assert_fabric_eq] touches the union-find; past the commit point the merge is pure
+     trailed union-find (no user code, no overflow), so a skipped pair leaves ZERO partial
+     state. H1/L1: [Term.Overflow]/[Combination_unsound] before commit → skip the pair
+     (completeness loss), counters set only after a complete injection. *)
+  let try_inject t ~a ~b ~(fb_a : Fabric.fixed_bounds) ~(fb_b : Fabric.fixed_bounds) =
+    if A.fabric_are_equal t.a a b
+    then ()
+    else (
+      let prepared =
+        try
+          let gamma =
+            [ fb_a.Fabric.lower; fb_a.Fabric.upper; fb_b.Fabric.lower; fb_b.Fabric.upper ]
+          in
+          let real = function
+            | Real l -> Some l
+            | Fabric _ -> None
+          in
+          match
+            ( real fb_a.Fabric.lower
+            , real fb_a.Fabric.upper
+            , real fb_b.Fabric.lower
+            , real fb_b.Fabric.upper )
+          with
+          | Some a_lo, Some a_hi, Some b_lo, Some b_hi ->
+            let witness =
+              { Fabric.value = fb_a.Fabric.value
+              ; s_lower = a_lo
+              ; s_upper = a_hi
+              ; t_lower = b_lo
+              ; t_upper = b_hi
+              }
+            in
+            if
+              String.equal fb_a.Fabric.value fb_b.Fabric.value
+              && f1_sem_entails ~gamma ~witness
+              && gamma_precedence_ok t gamma
+              && gamma_acyclic_ok t gamma
+            then Some (gamma, witness)
+            else None
+          | _ -> None
+        with
+        | Term.Overflow | Combination_unsound _ -> None
+      in
+      match prepared with
+      | None -> t.stat_skipped <- t.stat_skipped + 1
+      | Some (gamma, witness) ->
+        let edge = t.next_edge in
+        t.next_edge <- t.next_edge + 1;
+        let entry = { gamma; witness; reg_s = a; reg_t = b } in
+        Hashtbl.replace t.registry edge entry;
+        Trail.record t.fabric_frames (fun () -> Hashtbl.remove t.registry edge);
+        (* commit: pure trailed union-find from here — cannot raise. *)
+        A.assert_fabric_eq t.a ~edge_id:edge a b;
+        (* F7 emission: the [{edge_id; s; t; Γ; witness}] event, materialized from the
+           same registry entry the cert-time path (F4) will read, so they cite identical
+           Γ. *)
+        (match t.trace with
+         | None -> ()
+         | Some tr ->
+           tr.Fabric.on_fabric_eq
+             { edge_id = edge
+             ; s = entry.reg_s
+             ; t = entry.reg_t
+             ; gamma = expand_justifications t entry.gamma
+             ; witness = entry.witness
+             });
+        t.stat_edges <- t.stat_edges + 1)
+  ;;
+
+  (* The fix-trigger (deliverable 5, OQ3 per-round scan). Walk the shared INTERFACE set in
+     Term-tag order (determinism, I6) and, for each Int term LIA currently fixes to an
+     exact integer value, inject an equality against the first earlier-tag term fixed to
+     the same value. The value→term table is only PROBED by key (never traversed), so a
+     [Hashtbl] keeps O(1) probing with no traversal-order dependence — the resolution of
+     the Hash-vs-Map acceptance question. *)
+  let fabric_scan t =
+    let by_value : (string, Term.t) Hashtbl.t = Hashtbl.create 32 in
+    Term.Set.iter
+      (fun (b : Term.t) ->
+         match b.Term.sort with
+         | Sort.Bool | Sort.Uninterpreted _ -> ()
+         | Sort.Int _ ->
+           (match B.fixed_bounds t.b b with
+            | None -> ()
+            | Some fb_b ->
+              (match Hashtbl.find_opt by_value fb_b.Fabric.value with
+               | None -> Hashtbl.replace by_value fb_b.Fabric.value b
+               | Some a when Term.equal a b -> ()
+               | Some a ->
+                 (match B.fixed_bounds t.b a with
+                  | Some fb_a -> try_inject t ~a ~b ~fb_a ~fb_b
+                  | None -> ()))))
+      t.interface
+  ;;
+
+  (* Convert a child's fabric result to the frozen seam currency, expanding [Fabric]
+     handles at the eager-[Conflict] seam-return point and recording propagation owners. *)
+  let realize t owner (r : fabric_check_result) : Theory.check_result =
+    match r with
+    | Sat -> Theory.Sat
+    | Split ts -> Theory.Split ts
+    | Conflict fe -> Theory.Conflict (expand_explanation t fe)
+    | Propagations lits ->
+      record_props t owner lits;
+      Theory.Propagations lits
+  ;;
+
+  let check_b_propagate_on t la : Theory.check_result =
+    match realize t R.B (B.check_fabric t.b Theory.Propagate) with
+    | Theory.Conflict e -> Theory.Conflict e
+    | Theory.Sat | Theory.Split _ -> Theory.Propagations la
+    | Theory.Propagations lb -> Theory.Propagations (la @ lb)
+  ;;
+
+  (* The fabric-live drive: identical control flow to [check_off], but children are driven
+     via [check_fabric] so an injected edge's consequence reasons (which hold [Fabric]
+     handles) are expanded in [realize]/[explain_on] instead of crashing the frozen seam. *)
+  let check_on_drive t effort : Theory.check_result =
+    match effort with
+    | Theory.Propagate ->
+      (match realize t R.A (A.check_fabric t.a Theory.Propagate) with
+       | Theory.Conflict e -> Theory.Conflict e
+       | Theory.Sat | Theory.Split _ -> check_b_propagate_on t []
+       | Theory.Propagations la -> check_b_propagate_on t la)
+    | Theory.Final ->
+      (match realize t R.A (A.check_fabric t.a Theory.Final) with
+       | Theory.Conflict e -> Theory.Conflict e
+       | Theory.Split terms -> Theory.Split terms
+       | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
+       | (Theory.Sat | Theory.Propagations []) as ra ->
+         (match realize t R.B (B.check_fabric t.b Theory.Final) with
+          | Theory.Conflict e -> Theory.Conflict e
+          | Theory.Split terms -> Theory.Split terms
+          | Theory.Propagations (_ :: _ as lb) -> Theory.Propagations lb
+          | (Theory.Sat | Theory.Propagations []) as rb ->
+            (match ra, rb with
+             | Theory.Sat, Theory.Sat -> combine_models t
+             | _ ->
+               raise
+                 (Combination_unsound
+                    "child returned a non-Sat consistent result at Final (empty \
+                     propagations is not a Sat certificate)"))))
+  ;;
+
+  let explain_on t lit =
+    match Lit.Map.find_opt lit t.combined_reason with
+    | Some e -> e
+    | None ->
+      let owner =
+        match Lit.Map.find_opt lit t.propagated_by with
+        | Some o -> o
+        | None -> R.assert_to (term_of t (Lit.atom lit)) ~positive:(Lit.sign lit)
+      in
+      let fe =
+        match owner with
+        | R.A -> A.explain_fabric t.a lit
+        | R.B | R.Both -> B.explain_fabric t.b lit
+      in
+      let e = expand_explanation t fe in
+      (* F4 combined-reason cache: snapshot FIRST-wins, origin-frame trailed, so
+         solve-time 1UIP, this lazy path, and cert-time all cite byte-identical Γ. *)
+      t.combined_reason <- Lit.Map.add lit e t.combined_reason;
+      Trail.record t.fabric_frames (fun () ->
+        t.combined_reason <- Lit.Map.remove lit t.combined_reason);
+      e
+  ;;
+
+  (* Dispatch. When the fabric is OFF, or ON but no edge is live after the scan, the trunk
+     path runs verbatim (frozen [check]/[explain]) — the pure-corpus behaviour is
+     byte-identical. An injected edge is expanded only via the fabric drive. *)
+  let check t effort : Theory.check_result =
+    if fabric_off
+    then check_off t effort
+    else (
+      fabric_scan t;
+      if Hashtbl.length t.registry = 0
+      then check_off t effort
+      else check_on_drive t effort)
+  ;;
+
+  let explain t lit =
+    if fabric_off || Hashtbl.length t.registry = 0
+    then explain_off t lit
+    else explain_on t lit
+  ;;
+
   let push t =
     A.push t.a;
     B.push t.b;
-    Trail.push t.pin_frames (Dynarray.length t.pins)
+    Trail.push t.pin_frames (Dynarray.length t.pins);
+    (* F3: the fabric frame carries the origin-frame undo of every registry /
+       combined-reason / propagated_by entry the injections in this scope recorded. Pushed
+       in lockstep with the pin frame; empty (and free) whenever no edge is live. *)
+    Trail.push t.fabric_frames ()
   ;;
 
   let pop t n =
@@ -639,7 +1042,10 @@ end = struct
        exactly as the old list-of-lists guard left them untouched. *)
     A.pop t.a n;
     B.pop t.b n;
-    Trail.pop t.pin_frames ~apply:ignore ~restore:(Dynarray.truncate t.pins) n
+    Trail.pop t.pin_frames ~apply:ignore ~restore:(Dynarray.truncate t.pins) n;
+    (* F3: drop this scope's fabric edges/reasons/owners (each entry's closure removes its
+       own registry / combined-reason / propagated_by key), newest-first. *)
+    Trail.pop t.fabric_frames ~apply:(fun f -> f ()) n
   ;;
 
   (* codex C3 (round-2 refinement) — sort-directed merge over ALL subterms, NEVER raising
@@ -745,4 +1151,19 @@ end = struct
   type congruence_state = A.t
 
   let congruence_state t = t.a
+
+  type fabric_stats =
+    { edges_injected : int
+    ; pairs_skipped : int
+    ; expansions : int
+    }
+
+  let fabric_stats t =
+    { edges_injected = t.stat_edges
+    ; pairs_skipped = t.stat_skipped
+    ; expansions = t.stat_expansions
+    }
+  ;;
+
+  let set_fabric_trace t tr = t.trace <- tr
 end

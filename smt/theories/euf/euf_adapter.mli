@@ -41,6 +41,22 @@ include Oxsmt_core.Theory.THEORY
     internalisation. *)
 val internalize_term : t -> Oxsmt_core.Term.t -> unit
 
+val check_fabric : t -> Oxsmt_core.Theory.effort -> Oxsmt_core.Fabric.check_result
+val explain_fabric : t -> Oxsmt_core.Lit.t -> Oxsmt_core.Fabric.Explanation.t
+val fabric_are_equal : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t -> bool
+
+(** The congruence child never fixes a term to an arithmetic value (that is the arithmetic
+    child's role); it satisfies the shared [FABRIC_CHILD] surface with a constant [None].
+    The fix-trigger only ever queries the arithmetic child. *)
+val fixed_bounds : t -> Oxsmt_core.Term.t -> Oxsmt_core.Fabric.fixed_bounds option
+
+val assert_fabric_eq
+  :  t
+  -> edge_id:Oxsmt_core.Fabric.edge_id
+  -> Oxsmt_core.Term.t
+  -> Oxsmt_core.Term.t
+  -> unit
+
 (** {2 Read-only e-graph query API (ADR-0012 L2 / R6, tranche 2 E-matching).}
 
     Thin, {b non-registering} forwards to the underlying engine's query accessors (see

@@ -25,6 +25,26 @@ open Oxsmt_core
 module Th = Theory
 module Cmb = Oxsmt_combine.Combine
 
+(* Stage-1b: the hand-rolled children are frozen [THEORY]s; they satisfy the richer
+   [FABRIC_CHILD]/[FABRIC_CONGRUENCE_CHILD] seam by wrapping their own [check]/[explain]
+   (so recorded seam-call sequences are unchanged) and reporting no fixed bounds (so the
+   fix-trigger never injects through a toy — the real fabric path is exercised by the
+   real-adapter layer). *)
+let fabric_of_expl (e : Explanation.t) : Cmb.Fabric_explanation.t =
+  { Cmb.Fabric_explanation.premises =
+      List.map (fun l -> Cmb.Real l) e.Explanation.premises
+  ; rule = e.Explanation.rule
+  }
+;;
+
+let fabric_of_check (r : Th.check_result) : Cmb.fabric_check_result =
+  match r with
+  | Th.Sat -> Cmb.Sat
+  | Th.Propagations l -> Cmb.Propagations l
+  | Th.Conflict e -> Cmb.Conflict (fabric_of_expl e)
+  | Th.Split ts -> Cmb.Split ts
+;;
+
 let failures = ref 0
 let passes = ref 0
 
@@ -125,6 +145,14 @@ struct
     record (E_model Tag.tag);
     Model.of_alist (!model_fn ())
   ;;
+
+  (* FABRIC seam: delegate to the scripted [check]/[explain] (so recording is unchanged);
+     a mock fixes no bounds and merges no fabric edge. *)
+  let check_fabric () eff = fabric_of_check (check () eff)
+  let explain_fabric () l = fabric_of_expl (explain () l)
+  let fixed_bounds () _ = None
+  let fabric_are_equal () _ _ = false
+  let assert_fabric_eq () ~edge_id:_ _ _ = ()
 end
 
 module MockA = Make_mock (struct
@@ -1044,6 +1072,12 @@ module Toy_lia = struct
     Model.of_alist
       (Term.Map.fold (fun k v acc -> (k, Model.Int v) :: acc) t.last_model [])
   ;;
+
+  (* FABRIC seam (arithmetic child): the brute-force toy tracks no simplex bounds, so it
+     reports no fixed value — the fix-trigger never injects through it. *)
+  let check_fabric t eff = fabric_of_check (check t eff)
+  let explain_fabric t l = fabric_of_expl (explain t l)
+  let fixed_bounds _t _term = None
 end
 
 (* ---- TOY EUF: naive congruence closure over App, with disequalities --------------- *)
@@ -1204,6 +1238,21 @@ module Toy_euf = struct
     Model.of_alist
       (Term.Map.fold (fun k v acc -> (k, Model.Uninterp v) :: acc) t.last_class [])
   ;;
+
+  (* FABRIC seam (congruence child). [fabric_are_equal] reads the closure; the toy fixes
+     no arithmetic value so [fixed_bounds] is [None] and [assert_fabric_eq] is unreached
+     in the toy layer (a real fixed-value injection is exercised by the real-adapter
+     layer). *)
+  let check_fabric t eff = fabric_of_check (check t eff)
+  let explain_fabric t l = fabric_of_expl (explain t l)
+  let fixed_bounds _t _term = None
+
+  let fabric_are_equal t a b =
+    let find = closure t in
+    find a.Term.tag = find b.Term.tag
+  ;;
+
+  let assert_fabric_eq _t ~edge_id:_ _ _ = ()
 end
 
 module Cuflia = Cmb.Combine (Oxsmt_combine.Uflia_router) (Toy_euf) (Toy_lia)
@@ -2275,6 +2324,181 @@ let test_owned_eq_sides_guard_toy () =
 ;;
 
 (* ================================================================================== *)
+(* ADR-0014 Stage 1b — the theory fabric (justified LIA fixed-value equality injection). *)
+
+module Fab = Cuflia_real
+
+(* Drive a conjunction of unit literals through a REAL combined instance to a Final
+   verdict, capturing every emitted fabric event and the injected-edge count. The fixed-
+   value fabric fixtures resolve at [Final] without a Split (the injection conflicts or is
+   consistent before any arrangement split), so a [Split] here is itself a failure. *)
+let fab_run ?(trace = true) f (formula : (Term.t * bool) list) =
+  let t = Fab.create f.ctx f.env in
+  let events = ref [] in
+  if trace
+  then
+    Fab.set_fabric_trace
+      t
+      (Some { Fabric.on_fabric_eq = (fun e -> events := e :: !events) });
+  let atoms : Atom.t Term.Table.t = Term.Table.create 32 in
+  let atom_of term =
+    match Term.Table.find_opt atoms term with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms term a;
+      Fab.register_atom t a term;
+      a
+  in
+  let assert_tm term sign = Fab.assert_lit t (Lit.make (atom_of term) sign) in
+  List.iter (fun (term, sign) -> assert_tm term sign) formula;
+  let rec loop depth =
+    if depth > 64
+    then `Unknown
+    else (
+      match Fab.check t Th.Final with
+      | Th.Conflict _ -> `Unsat
+      | Th.Sat -> `Sat
+      | Th.Propagations lits ->
+        List.iter (fun l -> Fab.assert_lit t l) lits;
+        loop (depth + 1)
+      | Th.Split _ -> `Split)
+  in
+  let v =
+    try loop 0 with
+    | Cmb.Combination_unsound _ -> `Unknown
+  in
+  v, List.rev !events, (Fab.fabric_stats t).Fab.edges_injected
+;;
+
+(* Two shared Int terms fixed by LIA BOUNDS (not EUF-visible equalities) to the same value
+   makes [f(x)≠f(y)] UNSAT — the fabric injects [x=y] into the hub, congruence closes
+   [f(x)~f(y)], and the diseq conflicts. WITHOUT the injection EUF never learns [x~y] at
+   [Final] without a split; the fabric removes that round-trip. Also the F7 acceptance: a
+   fabric UNSAT records ONE well-formed [on_fabric_eq] event carrying the 4 oriented bound
+   literals as Γ. KILLS weak-Γ (verifier refuses → 0 edges → not UNSAT) and confirms the
+   [Conflict] premises are real [Lit.t]s (handle-leak-via-check → the frozen seam would
+   never typecheck a bare handle; the expansion chokepoint is what makes it real). *)
+let test_fabric_fixed_value_unsat () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let ff = ufun f "f" in
+  let five = Context.int_const f.ctx 5 in
+  let formula =
+    [ Context.le f.ctx x five, true
+    ; Context.ge f.ctx x five, true
+    ; Context.le f.ctx y five, true
+    ; Context.ge f.ctx y five, true
+    ; Context.eq f.ctx (Context.app f.ctx ff [ x ]) (Context.app f.ctx ff [ y ]), false
+    ]
+  in
+  let v, events, edges = fab_run f formula in
+  check "fabric: bound-fixed x,y ∧ f(x)≠f(y) ⇒ UNSAT" (v = `Unsat);
+  check "fabric: exactly one edge injected" (edges = 1);
+  check "fabric: exactly one on_fabric_eq event" (List.length events = 1);
+  match events with
+  | [ e ] ->
+    check
+      "fabric: event equates x and y"
+      ((Term.equal e.Fabric.s x && Term.equal e.Fabric.t y)
+       || (Term.equal e.Fabric.s y && Term.equal e.Fabric.t x));
+    check
+      "fabric: Γ carries the 4 oriented bound literals"
+      (List.length e.Fabric.gamma = 4)
+  | _ -> check "fabric: event well-formed" false
+;;
+
+(* Soundness: two shared terms fixed to DIFFERENT values are never equated — no injection,
+   [f(x)≠f(y)] stays SAT. A mutant that equated on presence-in-map rather than equal value
+   would inject [x=y] and wrong-UNSAT this. *)
+let test_fabric_distinct_values_sat () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let ff = ufun f "f" in
+  let formula =
+    [ Context.le f.ctx x (Context.int_const f.ctx 5), true
+    ; Context.ge f.ctx x (Context.int_const f.ctx 5), true
+    ; Context.le f.ctx y (Context.int_const f.ctx 6), true
+    ; Context.ge f.ctx y (Context.int_const f.ctx 6), true
+    ; Context.eq f.ctx (Context.app f.ctx ff [ x ]) (Context.app f.ctx ff [ y ]), false
+    ]
+  in
+  let v, _events, edges = fab_run f formula in
+  check "fabric: x=5,y=6 ∧ f(x)≠f(y) ⇒ SAT (no false equate)" (v = `Sat);
+  check "fabric: no edge injected for distinct values" (edges = 0)
+;;
+
+(* Soundness: the offset case. [x] and [x+1] share one simplex variable (the const rides
+   the bound); with [x] fixed to 5 the fabric must see [x+1] fixed to 6, NOT 5, and NOT
+   equate [x] with [x+1]. [f(x)≠f(x+1)] is SAT. A [fixed_bounds] that dropped the const
+   would inject [x=x+1] and wrong-UNSAT. *)
+let test_fabric_const_offset_sat () =
+  let f = fixture () in
+  let x = const f "x" in
+  let ff = ufun f "f" in
+  let xp1 = Context.add f.ctx x (Context.int_const f.ctx 1) in
+  let formula =
+    [ Context.le f.ctx x (Context.int_const f.ctx 5), true
+    ; Context.ge f.ctx x (Context.int_const f.ctx 5), true
+    ; Context.eq f.ctx (Context.app f.ctx ff [ x ]) (Context.app f.ctx ff [ xp1 ]), false
+    ]
+  in
+  let v, _events, _edges = fab_run f formula in
+  check "fabric: x=5 ∧ f(x)≠f(x+1) ⇒ SAT (const offset respected)" (v = `Sat)
+;;
+
+(* F3: the injected edge is origin-frame trailed — a [pop] over the frame that fixed [y]
+   drops the merge AND its registry entry, so the verdict flips back and a re-assert
+   restores it. A strand-the-edge mutant (edge/merge survives the pop) wrong-UNSATs the
+   post-pop check; a stale-owner mutant (untrailed [propagated_by]) misroutes explain. *)
+let test_fabric_pop_reassert () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let ff = ufun f "f" in
+  let five = Context.int_const f.ctx 5 in
+  let t = Fab.create f.ctx f.env in
+  let atoms : Atom.t Term.Table.t = Term.Table.create 32 in
+  let atom_of term =
+    match Term.Table.find_opt atoms term with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms term a;
+      Fab.register_atom t a term;
+      a
+  in
+  let assert_tm term sign = Fab.assert_lit t (Lit.make (atom_of term) sign) in
+  let fx = Context.app f.ctx ff [ x ]
+  and fy = Context.app f.ctx ff [ y ] in
+  (* base frame: x fixed to 5, f(x)≠f(y), y free ⇒ SAT (no injection). *)
+  assert_tm (Context.le f.ctx x five) true;
+  assert_tm (Context.ge f.ctx x five) true;
+  assert_tm (Context.eq f.ctx fx fy) false;
+  let final () =
+    match Fab.check t Th.Final with
+    | Th.Conflict _ -> `Unsat
+    | Th.Sat -> `Sat
+    | Th.Propagations _ -> `Prop
+    | Th.Split _ -> `Split
+  in
+  (* base: no edge is injectable (only x is fixed), so the frame is NOT unsat — the
+     arrangement is simply undecided (a Split). The F3 property under test is
+     edge-presence ⟺ UNSAT, not the base verdict. *)
+  check "fabric pop: base (y free) ⇒ not UNSAT" (final () <> `Unsat);
+  Fab.push t;
+  assert_tm (Context.le f.ctx y five) true;
+  assert_tm (Context.ge f.ctx y five) true;
+  check "fabric pop: y fixed to 5 ⇒ UNSAT (edge injected)" (final () = `Unsat);
+  Fab.pop t 1;
+  check "fabric pop: after pop, edge dropped ⇒ NOT UNSAT again" (final () <> `Unsat);
+  Fab.push t;
+  assert_tm (Context.le f.ctx y five) true;
+  assert_tm (Context.ge f.ctx y five) true;
+  check "fabric pop: re-assert ⇒ UNSAT again (re-injection)" (final () = `Unsat)
+;;
 
 let () =
   Printf.printf "== combine mechanics ==\n";
@@ -2331,6 +2555,11 @@ let () =
   test_pure_qf_lia_zero_splits ();
   test_push_pop_reassert_real ();
   test_use_history_transition_real ();
+  Printf.printf "== ADR-0014 Stage 1b fabric ==\n";
+  test_fabric_fixed_value_unsat ();
+  test_fabric_distinct_values_sat ();
+  test_fabric_const_offset_sat ();
+  test_fabric_pop_reassert ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

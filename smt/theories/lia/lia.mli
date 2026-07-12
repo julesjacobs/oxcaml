@@ -120,6 +120,12 @@ val model : 'tok t -> (Term.t * int) list
     finite part), for inspection/tests; [Rational.zero] for an unseen term. *)
 val rational_value : 'tok t -> Term.t -> Rational.t
 
+(** [fixed_bounds t term] returns [(value, lower_reason, upper_reason)] exactly when the
+    simplex variable denoting [term] has active, equal, integral lower/upper bounds.  The
+    reasons are oriented: [lower_reason] proves [term >= value] and [upper_reason] proves
+    [term <= value]. *)
+val fixed_bounds : 'tok t -> Term.t -> (Rational.t * 'tok * 'tok) option
+
 (** [push t] / [pop t n]: backtrack frames (ADR-0005 D6), delegated to the simplex bound
     stack; created variables persist (idempotent re-registration). *)
 val push : 'tok t -> unit

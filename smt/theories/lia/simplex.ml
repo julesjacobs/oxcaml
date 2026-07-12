@@ -129,6 +129,17 @@ let get_upper t v =
   | None -> None
 ;;
 
+let fixed_bounds t v =
+  let var = get t v in
+  match var.lower, var.upper with
+  | Some lower, Some upper
+    when Delta.equal lower.bval upper.bval
+         && Delta.is_rational lower.bval
+         && Rational.is_int (Delta.c_part lower.bval) ->
+    Some (Delta.c_part lower.bval, lower.reason, upper.reason)
+  | _ -> None
+;;
+
 let new_problem_var t =
   let id = Dynarray.length t.vars in
   let v =

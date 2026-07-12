@@ -182,12 +182,43 @@ module type CONGRUENCE_CHILD = sig
   val internalize_term : t -> Oxsmt_core.Term.t -> unit
 end
 
+type edge_id = Fabric.edge_id
+
+type justification = Fabric.justification =
+  | Real of Lit.t
+  | Fabric of edge_id
+
+module Fabric_explanation = Fabric.Explanation
+
+type fabric_check_result = Fabric.check_result =
+  | Sat
+  | Propagations of Lit.t list
+  | Conflict of Fabric_explanation.t
+  | Split of Term.t list
+
+(** Rich, non-frozen child seam used only inside the combinator. *)
+module type FABRIC_CHILD = sig
+  include Theory.THEORY
+
+  val check_fabric : t -> Theory.effort -> fabric_check_result
+  val explain_fabric : t -> Lit.t -> Fabric_explanation.t
+  val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
+end
+
+module type FABRIC_CONGRUENCE_CHILD = sig
+  include FABRIC_CHILD
+
+  val internalize_term : t -> Term.t -> unit
+  val fabric_are_equal : t -> Term.t -> Term.t -> bool
+  val assert_fabric_eq : t -> edge_id:edge_id -> Term.t -> Term.t -> unit
+end
+
 (** [Combine (R) (A) (B)] is the combined theory ([A] = the congruence child, [B] =
     arithmetic). Its [model] (valid after [Final]→[Sat]) is the sort-directed merge of the
     children's models: each term takes the child value whose variant matches the term's
     sort (Int from the arithmetic child, [Uninterp] from the congruence child), so the
     single witness respects the arrangement both children agreed on (CONTRACT-MODEL). *)
-module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : sig
+module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig
   include Theory.THEORY
 
   (** ADR-0012 L2/O3 (tranche 2): a read-only accessor for the congruence child's state,
@@ -199,6 +230,15 @@ module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : sig
   type congruence_state = A.t
 
   val congruence_state : t -> congruence_state
+
+  type fabric_stats =
+    { edges_injected : int
+    ; pairs_skipped : int
+    ; expansions : int
+    }
+
+  val fabric_stats : t -> fabric_stats
+  val set_fabric_trace : t -> Fabric.trace option -> unit
 end
 [@@warning "-67"]
 (* -67: the result signature (abstract [t]) does not mention the functor parameters, so

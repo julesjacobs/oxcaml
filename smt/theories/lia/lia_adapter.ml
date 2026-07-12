@@ -20,12 +20,12 @@
 open Oxsmt_core
 
 type t =
-  { lia : Lit.t Lia.t
+  { lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
   ; atom_of_term : Atom.t Term.Table.t
     (* reverse map, for turning a propagated term back into its literal *)
   ; mutable explain_cache :
-      Explanation.t Lit.Map.t (* propagated lit -> its lazy reason *)
+      Fabric.Explanation.t Lit.Map.t (* propagated lit -> its lazy reason *)
   ; mutable frames : Lit.t list list
     (* per-frame lits cached, head = current frame; used to drop stale reasons on [pop] *)
   ; mutable overflows : int (* overflow-induced degradations to unknown (adapter side) *)
@@ -70,7 +70,8 @@ let assert_lit t lit =
   guard t (fun () ->
     let atom = Lit.atom lit in
     match Atom.Table.find_opt t.term_of_atom atom with
-    | Some term -> Lia.assert_atom t.lia term ~polarity:(Lit.sign lit) ~premise:lit
+    | Some term ->
+      Lia.assert_atom t.lia term ~polarity:(Lit.sign lit) ~premise:(Fabric.Real lit)
     | None ->
       (* CONTRACT: [assert_lit]'s atom was registered first. A miss is a driver bug; fail
          loud -> engine degrades to unknown rather than reasoning on an unmapped atom. *)
@@ -109,6 +110,32 @@ let propagation_reason premises : Explanation.t =
   }
 ;;
 
+let fabric_conflict_explanation (c : Fabric.justification Lia.conflict)
+  : Fabric.Explanation.t
+  =
+  { premises = checked_premises "conflict premise set" c.premises
+  ; rule = Explanation.Rule_tag.Lia_farkas
+  }
+;;
+
+let fabric_propagation_reason premises : Fabric.Explanation.t =
+  { premises = checked_premises "propagation reason" premises
+  ; rule = Explanation.Rule_tag.Lia_bound
+  }
+;;
+
+let ordinary_explanation (e : Fabric.Explanation.t) =
+  let premises =
+    List.map
+      (function
+        | Fabric.Real lit -> lit
+        | Fabric.Fabric _ ->
+          failwith "Lia_adapter: fabric handle crossed the direct THEORY seam")
+      e.premises
+  in
+  { Explanation.premises; rule = e.rule }
+;;
+
 (* Cache a propagated literal's reason in the current frame so [explain] can serve it and
    [pop] can drop it when its decision level unwinds. FIRST-WINS, and this is load-bearing
    for CONTRACT-EX: the reason from the FIRST propagation is the precedence-valid one —
@@ -141,28 +168,36 @@ let propagations t =
     | None -> None
     | Some atom ->
       let lit = Lit.make atom polarity in
-      cache_reason t lit (propagation_reason premises);
+      cache_reason t lit (fabric_propagation_reason premises);
       Some lit)
 ;;
 
-let check t (effort : Theory.effort) : Theory.check_result =
+let check_fabric t (effort : Theory.effort) : Fabric.check_result =
   guard t (fun () ->
     match Lia.check t.lia with
-    | Conflict c -> Theory.Conflict (conflict_explanation c)
+    | Conflict c -> Fabric.Conflict (fabric_conflict_explanation c)
     | Sat_candidate ->
       (match effort with
-       | Theory.Propagate -> Theory.Propagations (propagations t)
+       | Theory.Propagate -> Fabric.Propagations (propagations t)
        | Theory.Final ->
          (* Rational-feasible: integral -> genuine ℤ model -> Sat; else ask CDCL(T) to
             branch on the two distinct, currently-false atoms [x<=floor v] /
             [x>=floor v+1] (CONTRACT-SPLIT: >=2 distinct atoms, genuinely constraining —
             not the discarded [Eq v ¬Eq] tautology). *)
          (match Lia.suggest_branch t.lia with
-          | None -> Theory.Sat
-          | Some (le_atom, ge_atom) -> Theory.Split [ le_atom; ge_atom ])))
+          | None -> Fabric.Sat
+          | Some (le_atom, ge_atom) -> Fabric.Split [ le_atom; ge_atom ])))
 ;;
 
-let explain t lit =
+let check t effort =
+  match check_fabric t effort with
+  | Fabric.Sat -> Theory.Sat
+  | Fabric.Propagations lits -> Theory.Propagations lits
+  | Fabric.Conflict e -> Theory.Conflict (ordinary_explanation e)
+  | Fabric.Split terms -> Theory.Split terms
+;;
+
+let explain_fabric t lit =
   match Lit.Map.find_opt lit t.explain_cache with
   | Some expl -> expl
   | None ->
@@ -170,6 +205,16 @@ let explain t lit =
        trail; its reason was cached at propagation time. A miss is a driver/contract
        violation — fail loud rather than fabricate an unsound premise set. *)
     failwith "Lia_adapter.explain: no cached reason for literal (not theory-propagated?)"
+;;
+
+let explain t lit = ordinary_explanation (explain_fabric t lit)
+
+let fixed_bounds t term =
+  guard t (fun () ->
+    match Lia.fixed_bounds t.lia term with
+    | None -> None
+    | Some (value, lower, upper) ->
+      Some { Fabric.value = Rational.to_string value; lower; upper })
 ;;
 
 let model t =

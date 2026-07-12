@@ -307,6 +307,111 @@ let rational_value t (term : Term.t) =
   | None -> Rational.zero
 ;;
 
+(* Lookup-only [combo_of_term]: [term]'s (varid, coeff) pairs + integer const, WITHOUT
+   allocating a problem var or slack (a fabric scan must not mutate the tableau merely by
+   asking whether a shared term is fixed). [None] if any leaf has no simplex var yet. *)
+let existing_combo t (term : Term.t) : ((int * int) list * int) option =
+  let existing_problem tm = Term.Table.find_opt t.var_of_term tm in
+  match term.node with
+  | App _ ->
+    (match existing_problem term with
+     | Some id -> Some ([ id, 1 ], 0)
+     | None -> None)
+  | Arith { coeffs; const } ->
+    let rec gather acc = function
+      | [] -> Some (List.rev acc)
+      | (tm, c) :: rest ->
+        (match existing_problem tm with
+         | None -> None
+         | Some id -> gather ((id, c) :: acc) rest)
+    in
+    (match gather [] (Iarr.to_list coeffs) with
+     | None -> None
+     | Some pairs -> Some (pairs, const))
+  | Int_const _ -> None
+  | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> None
+;;
+
+(* Lookup-only [var_for_combo]: the existing simplex variable carrying [pairs], if any. A
+   coeff-1 singleton is its own problem var; anything else is a deduplicated slack. *)
+let existing_combo_var t pairs =
+  match pairs with
+  | [ (x, 1) ] -> Some x
+  | _ -> Hashtbl.find_opt t.slacks (sort_key pairs)
+;;
+
+let negate_pairs pairs = List.map (fun (v, c) -> v, ineg c) pairs
+
+(* [fixed_bounds t term] — is [term] pinned to a single integer by ACTIVE ASSERTED bounds?
+   The subtlety (DdM): [var_for_combo] bounds only the coeff-+1 form directly, so [x <= c]
+   lands on [x]'s variable but [x >= c] lands on the slack [s = -x] (as [-x <= -c]). A
+   term is fixed only when its tightest asserted upper equals its tightest asserted lower,
+   and those two bounds may live on the variable AND on its negated-combo slack. We gather
+   the ACTIVE (User) bounds from BOTH, orient the slack's (which bounds [-combo]), take
+   the tightest of each side, and — when they coincide on an integer — return that value
+   plus the term's const together with the two oriented premise tokens. *)
+let fixed_bounds t term =
+  ensure_live t;
+  match existing_combo t term with
+  | None -> None
+  | Some (pairs, const) ->
+    let take_user b =
+      match b with
+      | Some (User tok, (d : Delta.t)) -> Some (d, tok)
+      | Some (Branch _, _) | None -> None
+    in
+    let pos = existing_combo_var t pairs in
+    let neg = existing_combo_var t (negate_pairs pairs) in
+    (* [term <= d] candidates: variable's own upper, and [-term >= d'] ⇒ [term <= -d']. *)
+    let uppers =
+      List.filter_map
+        Fun.id
+        [ (match pos with
+           | Some v -> take_user (Simplex.get_upper t.simplex v)
+           | None -> None)
+        ; (match neg with
+           | Some v ->
+             (match take_user (Simplex.get_lower t.simplex v) with
+              | Some (d, tok) -> Some (Delta.neg d, tok)
+              | None -> None)
+           | None -> None)
+        ]
+    in
+    let lowers =
+      List.filter_map
+        Fun.id
+        [ (match pos with
+           | Some v -> take_user (Simplex.get_lower t.simplex v)
+           | None -> None)
+        ; (match neg with
+           | Some v ->
+             (match take_user (Simplex.get_upper t.simplex v) with
+              | Some (d, tok) -> Some (Delta.neg d, tok)
+              | None -> None)
+           | None -> None)
+        ]
+    in
+    let tightest cmp = function
+      | [] -> None
+      | x :: rest ->
+        Some
+          (List.fold_left
+             (fun best c -> if cmp (fst c) (fst best) then c else best)
+             x
+             rest)
+    in
+    let min_upper = tightest (fun a b -> Delta.lt a b) uppers in
+    let max_lower = tightest (fun a b -> Delta.lt b a) lowers in
+    (match min_upper, max_lower with
+     | Some (du, up_tok), Some (dl, lo_tok)
+       when Delta.equal du dl && Delta.is_rational du && Rational.is_int (Delta.c_part du)
+       ->
+       (* fixed to [du]; the TERM's value is [du + const]. [lo_tok] proves [term >= v],
+          [up_tok] proves [term <= v] — the two oriented premises F1-SEM re-sums. *)
+       Some (Rational.add (Delta.c_part du) (Rational.of_int const), lo_tok, up_tok)
+     | _ -> None)
+;;
+
 let value_is_integer d = Delta.is_rational d && Rational.is_int (Delta.c_part d)
 
 (* Lowest-tag problem variable whose current value is non-integer (needs branching).

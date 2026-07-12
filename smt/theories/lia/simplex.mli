@@ -70,6 +70,10 @@ val get_lower : 'a t -> int -> ('a * Delta.t) option
 
 val get_upper : 'a t -> int -> ('a * Delta.t) option
 
+(** [fixed_bounds t v] returns the common integral value and the active exact lower and
+    upper premise tokens when [v]'s current interval is the singleton integer [value]. *)
+val fixed_bounds : 'a t -> int -> (Rational.t * 'a * 'a) option
+
 (** [push t] opens a backtrack frame; [pop t n] undoes the last [n] frames, restoring
     bounds (and clearing any pending conflict). *)
 val push : 'a t -> unit

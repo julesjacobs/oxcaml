@@ -30,6 +30,11 @@ module Explanation = Explanation
 module Theory = Theory
 module Model = Model
 
+(* ADR-0014 theory-fabric justification currency. Deliberately outside the frozen THEORY
+   seam (§B.2): the combinator and its children name it as [Oxsmt_core.Fabric] to widen
+   the engine tokens to [justification] without touching any frozen .mli. *)
+module Fabric = Fabric
+
 (** Test-only whitebox hook into the hash-cons bucket primitives (R1). NOT part of the
     frozen public surface and NOT for solver code — it exists so the core test suite can
     exercise [Node.equal_node] / [Node.hash_node] in isolation, i.e. detect a scalar

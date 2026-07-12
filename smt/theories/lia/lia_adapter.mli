@@ -28,6 +28,10 @@
 open Oxsmt_core
 include Theory.THEORY
 
+val check_fabric : t -> Theory.effort -> Fabric.check_result
+val explain_fabric : t -> Lit.t -> Fabric.Explanation.t
+val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
+
 (** {2 Reason builders (exposed for the empty-premise tripwire test).}
 
     [conflict_explanation] / [propagation_reason] turn an engine conflict / a bound
