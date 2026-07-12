@@ -152,13 +152,17 @@ module Degree = struct
   let to_float deg = if deg = max_int then Float.infinity else Float.of_int deg
 end
 
-let bit_matrix_threshold : int Lazy.t =
+let bit_matrix_threshold () =
   (* Enable the bit-matrix interference graph by default. The previous
      default of 0 meant [num_registers < 0], i.e. the bit matrix (PR #5296) was
      never used and IRC always fell back to the edge Hashtbl. num_registers is
-     per-function (stamps reset per function), so this bounds the matrix at
-     ~threshold^2/16 bytes for the single largest function. *)
-  Regalloc_utils.int_of_param ~default:50_000 "BIT_MATRIX_THRESHOLD"
+     per-function (stamps reset per function). [BitMatrix.make] over-allocates
+     by 10% headroom, so the worst-case matrix for one function just under the
+     threshold is ~((1.1*threshold)^2)/16 bytes, i.e. ~190 MB at the 50k
+     default; functions at or above the threshold use the memory-bounded edge
+     Hashtbl instead. Read per call (not cached in a lazy) so per-function
+     [@regalloc_param BIT_MATRIX_THRESHOLD:N] overrides are honoured. *)
+  Lazy.force (Regalloc_utils.int_of_param ~default:50_000 "BIT_MATRIX_THRESHOLD")
 
 (** Interference graph representation.
 
@@ -180,7 +184,7 @@ type t =
 let[@inline] make () =
   let num_registers = Reg.For_testing.get_stamp () in
   let adj_set =
-    if num_registers < Lazy.force bit_matrix_threshold
+    if num_registers < bit_matrix_threshold ()
     then BitMatrix (BitMatrix.make ~num_registers)
     else EdgeSet (EdgeSet.make ~num_registers)
   in
@@ -195,7 +199,15 @@ let[@inline] clear graph =
   | EdgeSet set -> EdgeSet.clear set
   | BitMatrix matrix ->
     if BitMatrix.capacity matrix < num_registers
-    then graph.adj_set <- BitMatrix (BitMatrix.make ~num_registers)
+    then
+      (* Spill rewrites create registers, so a function that started below
+         the threshold can cross it between rounds: re-check the threshold
+         before reallocating, falling back to the memory-bounded edge set
+         rather than growing the quadratic matrix without bound. *)
+      graph.adj_set
+        <- (if num_registers < bit_matrix_threshold ()
+           then BitMatrix (BitMatrix.make ~num_registers)
+           else EdgeSet (EdgeSet.make ~num_registers))
     else BitMatrix.clear matrix);
   Reg.Tbl.clear graph.adj_list;
   Reg.Tbl.clear graph.degree
