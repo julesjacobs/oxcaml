@@ -10,14 +10,39 @@ exception Unsupported of string
 exception Malformed of string
 
 module Decls = struct
+  (* A [define-fun] is a non-recursive MACRO (SMT-LIB 2.6 §4.2.2): parameters + result
+     sort + an UNEXPANDED body s-expression, substituted at each use site. It is not a
+     declared symbol (it never reaches the model), so it lives apart from [consts]/[funs]. *)
+  type macro =
+    { params : (string * Sort.t) list
+    ; result_sort : Sort.t
+    ; body : Sexp.t
+    }
+
   type t =
     { consts : (string, Symbol.t * Sort.t) Hashtbl.t
     ; funs : (string, Symbol.t * Rank.t) Hashtbl.t
     ; sorts : (string, Sort.t) Hashtbl.t
+    ; macros : (string, macro) Hashtbl.t
+      (* [define-fun] names currently mid-expansion — the recursion guard: a macro
+           re-entered while already on the expansion stack is a rejected recursive
+           definition (define-fun is non-recursive). *)
+    ; expanding : (string, unit) Hashtbl.t
     }
 
   let create () =
-    { consts = Hashtbl.create 32; funs = Hashtbl.create 32; sorts = Hashtbl.create 16 }
+    { consts = Hashtbl.create 32
+    ; funs = Hashtbl.create 32
+    ; sorts = Hashtbl.create 16
+    ; macros = Hashtbl.create 16
+    ; expanding = Hashtbl.create 8
+    }
+  ;;
+
+  (* Any name already claimed by a declaration or a prior definition — [define-fun]
+     requires a fresh name (no redefinition). *)
+  let is_defined t name =
+    Hashtbl.mem t.consts name || Hashtbl.mem t.funs name || Hashtbl.mem t.macros name
   ;;
 
   let const_sort t name = Option.map snd (Hashtbl.find_opt t.consts name)
@@ -129,16 +154,78 @@ and parse_atom ctx decls env name =
      | _ -> parse_symbol_ref ctx decls name [])
 
 and parse_symbol_ref ctx decls name args =
-  (* A reference to a declared symbol, possibly applied. *)
-  match Hashtbl.find_opt decls.Decls.consts name with
-  | Some (sym, _) ->
-    if args = []
-    then Context.const ctx sym
-    else raise (Malformed ("constant applied to arguments: " ^ name))
+  (* A reference to a define-fun macro, a declared symbol, or (applied) function. Macros
+     are checked first: a [define-fun] name expands to its substituted body. *)
+  match Hashtbl.find_opt decls.Decls.macros name with
+  | Some m -> expand_macro ctx decls name m args
   | None ->
-    (match Hashtbl.find_opt decls.Decls.funs name with
-     | Some (sym, _) -> Context.app ctx sym args
-     | None -> raise (Malformed ("undeclared symbol: " ^ name)))
+    (match Hashtbl.find_opt decls.Decls.consts name with
+     | Some (sym, _) ->
+       if args = []
+       then Context.const ctx sym
+       else raise (Malformed ("constant applied to arguments: " ^ name))
+     | None ->
+       (match Hashtbl.find_opt decls.Decls.funs name with
+        | Some (sym, _) -> Context.app ctx sym args
+        | None -> raise (Malformed ("undeclared symbol: " ^ name))))
+
+(* Expand a [define-fun] application by capture-free substitution (SMT-LIB 2.6 §4.2.2).
+   The already-parsed argument terms are bound to the parameter names and the body is
+   parsed in THAT environment ONLY — the caller's local [let] bindings deliberately do not
+   leak into the body, and substitution is capture-free because the arguments are complete
+   hash-consed terms (an inner [let] in the body freely shadows a parameter). Arity, each
+   argument's sort against its parameter, and the body's sort against the declared result
+   sort are all checked (else [Malformed]). A macro re-entered while already expanding is
+   a recursive definition, which [define-fun] forbids — rejected [Unsupported]. *)
+and expand_macro ctx decls name (m : Decls.macro) (args : Term.t list) =
+  let np = List.length m.Decls.params
+  and na = List.length args in
+  if na <> np
+  then
+    raise
+      (Malformed
+         (Printf.sprintf
+            "define-fun %s applied to %d argument(s), expected %d"
+            name
+            na
+            np));
+  if Hashtbl.mem decls.Decls.expanding name
+  then
+    raise
+      (Unsupported
+         (Printf.sprintf
+            "recursive define-fun %s (define-fun is non-recursive; define-fun-rec is out \
+             of scope)"
+            name));
+  let env =
+    List.map2
+      (fun (pname, psort) (arg : Term.t) ->
+         if not (Sort.equal arg.sort psort)
+         then
+           raise
+             (Malformed
+                (Printf.sprintf
+                   "define-fun %s: argument for parameter %s has the wrong sort"
+                   name
+                   pname));
+         pname, arg)
+      m.Decls.params
+      args
+  in
+  Hashtbl.add decls.Decls.expanding name ();
+  let body =
+    Fun.protect
+      ~finally:(fun () -> Hashtbl.remove decls.Decls.expanding name)
+      (fun () -> parse_term ctx decls env m.Decls.body)
+  in
+  if not (Sort.equal body.sort m.Decls.result_sort)
+  then
+    raise
+      (Malformed
+         (Printf.sprintf
+            "define-fun %s: body sort does not match the declared result sort"
+            name));
+  body
 
 and parse_app ctx decls env head args =
   match head with
@@ -306,6 +393,32 @@ let read_string (src : string) : query =
          else Hashtbl.replace decls.Decls.funs name (sym, rank)
        | "declare-fun", _ ->
          raise (Malformed "declare-fun expects (name (domain) codomain)")
+       | "define-fun", [ name_s; params_s; ret_s; body ] ->
+         (* A non-recursive macro (SMT-LIB 2.6 §4.2.2): record signature + unexpanded
+            body; expand at each use site (see [expand_macro]). Zero parameters = a named
+            constant. The name must be fresh (no redefinition). *)
+         let name = sym_name name_s in
+         if Decls.is_defined decls name
+         then raise (Malformed ("define-fun redefines an existing symbol: " ^ name));
+         let params =
+           match params_s with
+           | Sexp.List ps ->
+             List.map
+               (function
+                 | Sexp.List [ pn_s; psort_s ] -> sym_name pn_s, parse_sort decls psort_s
+                 | _ -> raise (Malformed "define-fun parameter must be (name sort)"))
+               ps
+           | _ -> raise (Malformed "define-fun parameters must be a list")
+         in
+         let names = List.map fst params in
+         if List.length (List.sort_uniq String.compare names) <> List.length names
+         then raise (Malformed ("define-fun " ^ name ^ " has duplicate parameter names"));
+         let result_sort = parse_sort decls ret_s in
+         Hashtbl.replace decls.Decls.macros name { Decls.params; result_sort; body }
+       | "define-fun", _ ->
+         raise (Malformed "define-fun expects (name ((param sort)...) sort body)")
+       | ("define-fun-rec" | "define-funs-rec"), _ ->
+         raise (Unsupported "recursive definitions (define-fun-rec / define-funs-rec)")
        | "assert", [ t ] ->
          let term = parse_term ctx decls [] t in
          if not (Sort.equal term.sort Sort.bool)
@@ -315,8 +428,7 @@ let read_string (src : string) : query =
        | "check-sat", [] -> ()
        | "check-sat", _ -> raise (Malformed "check-sat takes no arguments")
        | "exit", _ -> stopped := true
-       | ("push" | "pop" | "define-fun" | "define-fun-rec" | "declare-datatypes"), _ ->
-         raise (Unsupported cmd)
+       | ("push" | "pop" | "declare-datatypes"), _ -> raise (Unsupported cmd)
        | _ -> raise (Unsupported ("command " ^ cmd)))
     | Sexp.List _ -> () (* after (exit) *)
     | (Sexp.Atom _ | Sexp.Quoted _) as s ->

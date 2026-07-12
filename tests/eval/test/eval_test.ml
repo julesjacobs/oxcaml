@@ -65,6 +65,22 @@ let expect_malformed name smt2 model_src =
   | exception e -> report name false ("raised non-Malformed " ^ Printexc.to_string e)
 ;;
 
+(* Reader-level rejections must be a CLEAN loud reject — [Reader.Malformed] (bad input) or
+   [Reader.Unsupported] (out of scope) — not a crash or a stack overflow. *)
+let expect_reader_malformed name smt2 =
+  match Reader.read_string smt2 with
+  | _ -> report name false "expected Reader.Malformed, none raised"
+  | exception Reader.Malformed _ -> report name true ""
+  | exception e -> report name false ("raised non-Malformed " ^ Printexc.to_string e)
+;;
+
+let expect_reader_unsupported name smt2 =
+  match Reader.read_string smt2 with
+  | _ -> report name false "expected Reader.Unsupported, none raised"
+  | exception Reader.Unsupported _ -> report name true ""
+  | exception e -> report name false ("raised non-Unsupported " ^ Printexc.to_string e)
+;;
+
 (* --- per-node satisfying + falsifying pairs -------------------------------------- *)
 
 let node_cases () =
@@ -460,6 +476,110 @@ let table_format_cases () =
     "(model (sort S 1) (const a 0) (fun f (case (0) 0)))"
 ;;
 
+(* --- define-fun as a non-recursive macro (SMT-LIB 2.6 §4.2.2; board #93) ----------- *)
+
+let define_fun_cases () =
+  (* basic unary macro: expand at the use site, then evaluate. *)
+  let inc = "(declare-const x Int)(define-fun inc ((n Int)) Int (+ n 1))" in
+  expect_satisfies "df/unary-sat" (inc ^ "(assert (= (inc x) 4))") "(model (const x 3))";
+  expect_fails
+    "df/unary-fail"
+    ~index:0
+    (inc ^ "(assert (= (inc x) 4))")
+    "(model (const x 2))";
+  (* zero parameters = a named constant. *)
+  expect_satisfies
+    "df/zero-arg-const"
+    "(declare-const x Int)(define-fun k () Int 5)(assert (= x k))"
+    "(model (const x 5))";
+  (* n-ary (arity 2): a max macro built from ite. *)
+  let mx =
+    "(declare-const x Int)(declare-const y Int)\n\
+     (define-fun mx ((a Int) (b Int)) Int (ite (<= a b) b a))"
+  in
+  expect_satisfies
+    "df/binary-sat"
+    (mx ^ "(assert (= (mx x y) 5))")
+    "(model (const x 3) (const y 5))";
+  expect_fails
+    "df/binary-fail"
+    ~index:0
+    (mx ^ "(assert (= (mx x y) 5))")
+    "(model (const x 1) (const y 2))";
+  (* composition: a macro whose body calls an EARLIER macro (non-recursive nesting). *)
+  expect_satisfies
+    "df/composition"
+    (inc ^ "(define-fun inc2 ((n Int)) Int (inc (inc n)))(assert (= (inc2 x) 5))")
+    "(model (const x 3))";
+  (* self-COMPOSITION at the use site — (inc (inc x)) — is NOT recursion; must expand. *)
+  expect_satisfies
+    "df/nested-self-use-ok"
+    (inc ^ "(assert (= (inc (inc x)) 5))")
+    "(model (const x 3))";
+  (* nested [let] in the body shadows a parameter of the same name. *)
+  expect_satisfies
+    "df/inner-let-shadows-param"
+    "(declare-const x Int)(define-fun f ((n Int)) Int (let ((n 100)) n))\n\
+     (assert (= (f x) 100))"
+    "(model (const x 3))";
+  (* the target shape: QF_UF, define-fun over an uninterpreted sort + function, model. *)
+  let uf =
+    "(set-logic QF_UF)(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)\n\
+     (define-fun g ((z S)) S (f z))"
+  in
+  expect_satisfies
+    "df/qf-uf-sat"
+    (uf ^ "(assert (= (g a) a))")
+    "(model (sort S 1) (const a 0) (fun f (default 0) (case (0) 0)))";
+  expect_fails
+    "df/qf-uf-fail"
+    ~index:0
+    (uf ^ "(assert (= (g a) a))")
+    "(model (sort S 2) (const a 0) (fun f (default 1) (case (0) 1)))";
+  (* --- loud rejections (reader-level, no model needed) --- *)
+  (* caller locals do NOT leak into the body: [m] is a caller [let], not a parameter, so
+     the body cannot see it → undeclared. *)
+  expect_reader_malformed
+    "df/no-caller-local-leak"
+    "(declare-const x Int)(define-fun f ((n Int)) Int m)\n\
+     (assert (let ((m 9)) (= (f x) m)))";
+  (* a recursive body (used) is rejected loudly as Unsupported (non-recursive macro). *)
+  expect_reader_unsupported
+    "df/recursive-rejected"
+    "(declare-const x Int)(define-fun r ((n Int)) Int (+ (r n) 1))(assert (= (r x) 0))";
+  (* mutual recursion likewise. *)
+  expect_reader_unsupported
+    "df/mutual-recursion-rejected"
+    "(declare-const x Int)(define-fun p ((n Int)) Int (q n))\n\
+     (define-fun q ((n Int)) Int (p n))(assert (= (p x) 0))";
+  expect_reader_unsupported
+    "df/define-fun-rec-rejected"
+    "(define-fun-rec r ((n Int)) Int (+ (r n) 1))";
+  expect_reader_unsupported
+    "df/define-funs-rec-rejected"
+    "(define-funs-rec ((r ((n Int)) Int)) ((+ (r n) 1)))";
+  (* ill-sorted argument (Bool where Int expected). *)
+  expect_reader_malformed
+    "df/ill-sorted-arg"
+    "(declare-const p Bool)(define-fun f ((n Int)) Int n)(assert (= (f p) 0))";
+  (* body sort does not match the declared result sort. *)
+  expect_reader_malformed
+    "df/body-result-sort-mismatch"
+    "(declare-const x Int)(define-fun f ((n Int)) Bool (+ n 1))(assert (f x))";
+  (* wrong arity at the use site. *)
+  expect_reader_malformed
+    "df/arity-mismatch"
+    "(declare-const x Int)(define-fun f ((n Int)) Int n)(assert (= (f x x) 0))";
+  (* redefinition (name already declared / defined). *)
+  expect_reader_malformed
+    "df/redefinition"
+    "(declare-const x Int)(define-fun x () Int 0)(assert (= x 0))";
+  (* duplicate parameter names. *)
+  expect_reader_malformed
+    "df/duplicate-params"
+    "(declare-const x Int)(define-fun f ((n Int) (n Int)) Int n)(assert (= (f x x) 0))"
+;;
+
 (* --- the gate's real sat cases: every .model sidecar must MODEL-SATISFIES ---------- *)
 
 let read_file path =
@@ -503,6 +623,7 @@ let () =
   r7_completeness_cases ();
   minint_reingest_cases ();
   table_format_cases ();
+  define_fun_cases ();
   gate_cases dir;
   (* explicit deliberately-corrupted models: a wrong value must MODEL-FAIL *)
   expect_fails

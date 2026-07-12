@@ -4,8 +4,8 @@ open Oxsmt_core
     redundancy, task #74 — deliberately NOT the shipped [oxsmt_smtlib] parser nor the
     gate's reader; it shares no code with them). It builds frozen-API {!Term.t}s through
     {!Context}'s smart constructors, so every term it returns is well-sorted and
-    hash-consed by construction, and records enough declaration info for {!Eval_model} to type
-    the sidecar tokens.
+    hash-consed by construction, and records enough declaration info for {!Eval_model} to
+    type the sidecar tokens.
 
     Reject-don't-guess: any construct outside the subset raises {!Unsupported}; any
     ill-formed / ill-sorted / undeclared input raises {!Malformed}. Nothing is silently
@@ -14,11 +14,16 @@ open Oxsmt_core
     Subset. Commands: [set-logic] (QF_UF / QF_LIA / QF_UFLIA / QF_IDL / QF_RDL),
     [set-info :status], [declare-sort] (arity 0), [declare-fun], [declare-const],
     [assert], [check-sat], [exit]; [set-option] and non-[:status] [set-info] are ignored.
+    [define-fun] is supported as a non-recursive macro (SMT-LIB 2.6 §4.2.2): its body is
+    stored unexpanded and substituted at each use site (zero parameters = a named
+    constant). Recursion is rejected — a macro referring to itself is {!Unsupported}, as
+    are [define-fun-rec] / [define-funs-rec].
+
     Terms: [true]/[false], numerals, [and]/[or]/[not]/[=>], [ite], [=]/[distinct],
     chainable [<=]/[<]/[>=]/[>], [+]/[-]/[*] (linear only), [div]/[mod]/[abs], parallel
-    [let], [(! t ...)] annotations (attributes dropped), [|quoted symbols|], and declared
-    symbols. [define-fun], quantifiers, [push]/[pop], and compound sorts are
-    {!Unsupported}. *)
+    [let], [(! t ...)] annotations (attributes dropped), [|quoted symbols|], declared
+    symbols, and [define-fun] applications. Quantifiers, [push]/[pop], and compound sorts
+    are {!Unsupported}. *)
 
 type status =
   | Sat
@@ -26,8 +31,8 @@ type status =
   | Unknown
   | No_status
 
-(** The declaration table, consumed by {!Eval_model} to interpret sidecar tokens against each
-    symbol's declared sort. *)
+(** The declaration table, consumed by {!Eval_model} to interpret sidecar tokens against
+    each symbol's declared sort. *)
 module Decls : sig
   type t
 
