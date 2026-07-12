@@ -109,18 +109,28 @@ let match_conjunctive view lemma budget patterns sigma =
 
 let substitutions view (lemma : Lemma.t) ~budget =
   let n = Array.length lemma.qvars in
-  let out = ref [] in
-  List.iter
-    (fun alternative ->
-       let sigmas = match_conjunctive view lemma budget alternative [] in
-       List.iter
-         (fun sigma ->
-            (* Emit only fully-bound substitutions (every qvar covered). Indices in [sigma]
-             are distinct by construction ([bind] adds at most once per index), so length
-             = n iff all qvars are bound. *)
-            if List.length sigma = n
-            then out := Array.init n (fun i -> List.assoc i sigma) :: !out)
-         sigmas)
-    lemma.triggers;
-  List.rev !out
+  if n = 0
+  then
+    (* A zero-qvar lemma is [forall (). body] = the ground fact [body]; there is nothing
+       to match, so it instantiates ONCE with the empty substitution regardless of
+       triggers. (Matching a trigger would also yield the empty substitution, but a
+       zero-qvar lemma need not carry one — [body] is unconditionally a valid instance of
+       itself.) This is the [[||]] the interface contracts; returning [] here would
+       silently drop the fact. *)
+    [ [||] ]
+  else (
+    let out = ref [] in
+    List.iter
+      (fun alternative ->
+         let sigmas = match_conjunctive view lemma budget alternative [] in
+         List.iter
+           (fun sigma ->
+              (* Emit only fully-bound substitutions (every qvar covered). Indices in
+               [sigma] are distinct by construction ([bind] adds at most once per index),
+               so length = n iff all qvars are bound. *)
+              if List.length sigma = n
+              then out := Array.init n (fun i -> List.assoc i sigma) :: !out)
+           sigmas)
+      lemma.triggers;
+    List.rev !out)
 ;;

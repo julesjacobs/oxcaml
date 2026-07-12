@@ -34,6 +34,10 @@ exception Budget_exhausted
 (** [substitutions view lemma ~budget] is the complete ground substitutions found by
     E-matching [lemma]'s triggers against [view], each a [Term.t array] in [lemma.qvars]
     order. A substitution is emitted only if it binds {e every} qvar (a trigger set that
-    fails to cover some qvar contributes nothing). A lemma with empty [triggers] yields
-    [[]] (auto-selection is tranche 3). May raise {!Budget_exhausted}. *)
+    fails to cover some qvar contributes nothing). Two edge cases:
+    - a {b zero-qvar} lemma ([qvars = [||]], i.e. [forall (). body]) yields exactly one
+      empty substitution [[ [||] ]] — its [body] is a ground fact, instantiated once,
+      regardless of triggers;
+    - a lemma with {e ≥1 qvar} and {b empty} [triggers] yields [[]] (no matching;
+      auto-trigger selection is tranche 3). May raise {!Budget_exhausted}. *)
 val substitutions : Egraph_view.t -> Lemma.t -> budget:int ref -> Term.t array list

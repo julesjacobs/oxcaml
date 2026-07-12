@@ -102,6 +102,15 @@ let round t view =
   t.total_rounds <- t.total_rounds + 1;
   let out = ref [] in
   let budget = ref t.budget_remaining in
+  (* Keys this round added to [dedup], newest-first — so an aborted round can roll them
+     back (codex MED, manager.ml dedup pollution): the session asserts the WHOLE batch
+     [out] only when the round did NOT hit the budget; on [budget_exhausted] it discards
+     [out] and returns [Unknown] WITHOUT asserting (session.ml). If the dedup entries
+     survived, those never-asserted instances would be permanently suppressed on a later
+     round -> a missed refutation (spurious [Unknown] where [Unsat] is right). So a dedup
+     entry must only outlive the round if its instance is actually handed to the session
+     to assert. *)
+  let added = ref [] in
   (* Turn a (lemma, sigma) into a deduped, budget-debited instance. Dedup is keyed
      (owning-frame selector, instance body tag): a duplicate (already-active clause) costs
      no budget and emits nothing (redundancy filter, §L5). *)
@@ -113,6 +122,7 @@ let round t view =
     else (
       spend budget;
       Hashtbl.replace t.dedup key ();
+      added := key :: !added;
       t.total_instances <- t.total_instances + 1;
       out := (lemma.frame, inst) :: !out)
   in
@@ -130,7 +140,13 @@ let round t view =
        process lemma sigma
      done
    with
-   | Matcher.Budget_exhausted -> t.budget_hit <- true);
+   | Matcher.Budget_exhausted ->
+     t.budget_hit <- true;
+     (* Roll back this round's dedup entries + counters: the session will NOT assert the
+        aborted batch, so none of these instances become active clauses. *)
+     List.iter (Hashtbl.remove t.dedup) !added;
+     t.total_instances <- t.total_instances - List.length !added;
+     out := []);
   t.budget_remaining <- !budget;
   List.rev !out
 ;;

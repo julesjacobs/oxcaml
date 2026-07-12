@@ -416,6 +416,24 @@ let assert_lemma t ~qvars ~build =
     invalid_arg
       "Session.assert_lemma: body/trigger references a reserved (.oxsmt.*) symbol that \
        is not one of this lemma's qvars";
+  (* ADR-0012 L3: a trigger pattern must be an UNINTERPRETED application (an [App] with
+     arity >= 1) — arithmetic/order/equality-headed triggers are rejected at
+     [assert_lemma], not silently ignored by the matcher. Arithmetic lives in the lemma
+     BODY (handled by the assert-time pipeline), never as a trigger root; a bare qvar or
+     ground constant (nullary [App]) is not a usable trigger either. Rejecting here is
+     spec-conformance + fail-loud on a brand-new API, cheaper than letting callers depend
+     on accept-and-ignore (codex MED). *)
+  let uf_application (p : Term.t) =
+    match p.node with
+    | App (_, args) -> Iarr.length args > 0
+    | _ -> false
+  in
+  if List.exists (List.exists (fun p -> not (uf_application p))) triggers
+  then
+    invalid_arg
+      "Session.assert_lemma: a trigger must be an uninterpreted application f(...) \
+       (arity >= 1); arithmetic/order/equality-headed triggers are not supported \
+       (ADR-0012 L3)";
   let lemma =
     { Lemma.qvars = qv
     ; body

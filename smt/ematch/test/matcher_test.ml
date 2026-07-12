@@ -530,6 +530,142 @@ let e_stale_pop () =
     (v2 <> Session.Unsat)
 ;;
 
+(* U-DEDUP-ROLLBACK (codex MED, dedup pollution): a budget-aborted round must NOT leave
+   its never-asserted instances in the dedup cache — the session discards the aborted
+   batch without asserting, so a surviving dedup entry would permanently suppress the
+   instance on a later round (a missed refutation, spurious Unknown). Setup: a lemma over
+   100 candidates with gen_budget 3 aborts round 1 after adding the first candidate(s) to
+   dedup; then the view shrinks to just that first candidate and the budget resets. WITH
+   rollback the first candidate is re-emittable (round 2 emits it); WITHOUT rollback it
+   stays dedup-suppressed (round 2 emits nothing). Uses a MUTABLE hand-rolled view so the
+   second round exercises the exact instance the abort touched. *)
+let u_dedup_rollback () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "f" int_to_int in
+  let mk name =
+    Context.const sc.ctx (Env.declare_fun sc.env name (Rank.create [] Sort.int))
+  in
+  let all =
+    List.init 100 (fun i -> Context.app sc.ctx f [ mk (Printf.sprintf "a%d" i) ])
+  in
+  let cands = ref all in
+  let view : Egraph_view.t =
+    { app_terms_by_symbol = (fun s -> if Symbol.equal s f then !cands else [])
+    ; find_class_opt = (fun _ -> None)
+    ; equal_if_registered = (fun a b -> Term.equal a b)
+    ; class_members = (fun t -> [ t ])
+    }
+  in
+  let lemma =
+    make_lemma sc ~id:0 ~arity:1 (fun q ->
+      ( Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0)
+      , [ [ Context.app sc.ctx f [ q.(0) ] ] ] ))
+  in
+  let mgr = Manager.create ~gen_budget:3 sc.ctx sc.env in
+  Manager.add_lemma mgr lemma;
+  Manager.begin_check mgr;
+  let _r1 = Manager.round mgr view in
+  check "U-DEDUP-ROLLBACK: round 1 hit the budget" (Manager.budget_exhausted mgr);
+  (* The instance the abort touched is now the ONLY candidate; a fresh-budget round must
+     re-emit it (rolled back), not suppress it (polluted). *)
+  cands := [ List.hd all ];
+  Manager.begin_check mgr;
+  let r2 = Manager.round mgr view in
+  check
+    "U-DEDUP-ROLLBACK: aborted instance re-emittable next round (dedup rolled back)"
+    (List.length r2 = 1)
+;;
+
+(* E-ZERO-QVAR (codex MED, matcher.ml zero-qvar contract): a [forall (). body] lemma is a
+   ground fact and must instantiate ONCE. Body p(a) contradicts the ground ¬p(a): the
+   empty substitution must be emitted → p(a) asserted → unsat. Discrimination: the pre-fix
+   matcher returned [] for a zero-qvar lemma → the fact was never asserted → unknown. *)
+let e_zero_qvar () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let p = Session.declare_fun s "p" int_to_bool in
+  let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+  let pa = Context.app ctx p [ a ] in
+  Session.assert_term s (Context.not_ ctx pa);
+  ignore
+    (Session.assert_lemma s ~qvars:[] ~build:(fun _qv ->
+       { Session.body = pa; triggers = [] })
+     : Session.lemma);
+  let v = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-ZERO-QVAR: forall(). p(a) instantiates its body -> unsat (got %s)"
+       (verdict_str v))
+    (v = Session.Unsat)
+;;
+
+(* E-FRAME (codex coverage gap → required): the wrong-lemma-frame future-soundness guard —
+   the only e2e that exercises a matcher instance in a NON-BASE frame. Base f(a)<0; a
+   lemma forall x. f(x)>0 (trigger f(x)) is asserted in a PUSHED frame; the matcher
+   generates f(a)>0 guarded by the pushed frame, closing the goal there (unsat). After
+   pop, the lemma AND its instance retract, so f(a)<0 alone no longer refutes (not unsat).
+   DISCRIMINATION: a regression that asserted the instance at the BASE frame instead of
+   the lemma's frame would leave f(a)>0 alive after the pop and wrong-UNSAT the final
+   check — every other e2e uses the base frame and would miss it. *)
+let e_frame () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "f" int_to_int in
+  let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+  let fa = Context.app ctx f [ a ] in
+  Session.assert_term s (Context.lt ctx fa (Context.int_const ctx 0));
+  Session.push s;
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", Sort.int ]
+       ~build:(fun qv ->
+         let x = Qvar.to_term qv.(0) in
+         { Session.body =
+             Context.gt ctx (Context.app ctx f [ x ]) (Context.int_const ctx 0)
+         ; triggers = [ [ Context.app ctx f [ x ] ] ]
+         })
+     : Session.lemma);
+  let v1 = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-FRAME: pushed lemma's instance closes goal in frame>=1 -> unsat (got %s)"
+       (verdict_str v1))
+    (v1 = Session.Unsat);
+  Session.pop s;
+  let v2 = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-FRAME: after pop, instance retracts with its frame -> not unsat (got %s)"
+       (verdict_str v2))
+    (v2 <> Session.Unsat)
+;;
+
+(* E-ARITH-TRIGGER-REJECT (codex MED, ADR-0012 L3): assert_lemma must REJECT an
+   arith-headed trigger (not silently ignore it). A trigger x+1 (Arith root) is not an
+   uninterpreted application → Invalid_argument. Discrimination: the pre-fix session
+   accepted it and the matcher silently found no matches → unknown. *)
+let e_arith_trigger_reject () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let raises_invalid thunk =
+    match thunk () with
+    | _ -> false
+    | exception Invalid_argument _ -> true
+  in
+  check
+    "E-ARITH-TRIGGER-REJECT: arith-headed trigger rejected at assert_lemma"
+    (raises_invalid (fun () ->
+       Session.assert_lemma
+         s
+         ~qvars:[ "x", Sort.int ]
+         ~build:(fun qv ->
+           let x = Qvar.to_term qv.(0) in
+           { Session.body = Context.eq ctx x (Context.int_const ctx 0)
+           ; triggers = [ [ Context.add ctx x (Context.int_const ctx 1) ] ]
+           })))
+;;
+
 let () =
   ignore int_int_to_int;
   ignore int_to_bool;
@@ -540,6 +676,7 @@ let () =
   u_cap ();
   u_det ();
   u_manager_cap ();
+  u_dedup_rollback ();
   e_find ();
   e_nested ();
   e_multi ();
@@ -547,6 +684,9 @@ let () =
   e_no_trigger_no_fire ();
   e_det ();
   e_stale_pop ();
+  e_zero_qvar ();
+  e_frame ();
+  e_arith_trigger_reject ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;
