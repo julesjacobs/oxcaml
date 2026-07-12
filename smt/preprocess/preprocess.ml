@@ -16,10 +16,14 @@ open Oxsmt_core
 type t =
   { env : Env.t
   ; ctx : Context.t
+  ; cap : Env.reserved_cap
+    (* ADR-0012 R1: fresh reserved symbols are minted through the cap-gated
+         [Env.declare_reserved], since the public [Env.declare_fun] now rejects
+         [.oxsmt.*]. *)
   ; mutable counter : int
   }
 
-let create env ctx = { env; ctx; counter = 0 }
+let create cap env ctx = { env; ctx; cap; counter = 0 }
 
 type definition =
   { symbol : Symbol.t
@@ -27,20 +31,17 @@ type definition =
   }
 
 (* Reserved fresh-symbol namespace: [".oxsmt.<kind>.<n>"], deterministic in the session
-   counter. Front ends must keep user names out of this namespace (see .mli);
-   [reserved_prefix] / [is_reserved_name] are the single source of truth the parser and
-   session guards share. *)
-let reserved_prefix = ".oxsmt."
-
-let is_reserved_name name =
-  let p = reserved_prefix in
-  String.length name >= String.length p && String.sub name 0 (String.length p) = p
-;;
+   counter. The prefix / predicate now live in {!Env} as the single source of truth
+   (ADR-0012 R1); re-exported here for the parser + session guards that reference
+   [Preprocess.is_reserved_name]. *)
+let reserved_prefix = Env.reserved_prefix
+let is_reserved_name = Env.is_reserved_name
 
 let fresh_symbol t ~kind sort =
   let name = Printf.sprintf "%s%s.%d" reserved_prefix kind t.counter in
   t.counter <- t.counter + 1;
-  Env.declare_fun t.env name (Rank.create [] sort)
+  (* cap-gated mint: the public door rejects [.oxsmt.*], this is the legitimate minter. *)
+  Env.declare_reserved t.cap t.env name (Rank.create [] sort)
 ;;
 
 let rec map_lr f = function

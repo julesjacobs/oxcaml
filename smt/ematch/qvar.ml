@@ -15,14 +15,10 @@ let is_qvar_name name =
 
 let to_term q = q
 
-(* The single reserved-namespace declaration point. Phase B swaps this to the cap-gated
-   [Env.declare_reserved]; until then it uses [Env.declare_fun] (which does not yet reject
-   [.oxsmt.*]). Isolated here so the cap thread-through is a one-line change. *)
-let declare env name rank = Env.declare_fun env name rank
-
-let mint env ctx ~lemma_id ~index sort =
+let mint cap env ctx ~lemma_id ~index sort =
   let name = Printf.sprintf "%s%d.%d" prefix lemma_id index in
-  let sym = declare env name (Rank.create [] sort) in
+  (* cap-gated mint (R1): the public [Env.declare_fun]/[declare_sort] reject [.oxsmt.*]. *)
+  let sym = Env.declare_reserved cap env name (Rank.create [] sort) in
   Context.const ctx sym
 ;;
 

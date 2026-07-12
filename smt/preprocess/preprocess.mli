@@ -29,20 +29,22 @@
 open Oxsmt_core
 
 (** The reserved name prefix ([".oxsmt."]) that all fresh preprocessing symbols use, and
-    the predicate that recognizes it. Front ends (the SMT-LIB parser, the session's
-    declaration path) must reject {e user} declarations in this namespace so a user symbol
-    can never collide with a fresh one (INVARIANTS.md I6 freshness; board #48). This is
-    the single source of truth for that guard. *)
+    the predicate that recognizes it. Re-exported from {!Env}, which is now the single
+    source of truth (ADR-0012 R1): the public {!Env.declare_fun}/{!Env.declare_sort}
+    reject this namespace by construction, so a user symbol can never collide with a fresh
+    one (INVARIANTS.md I6 freshness; board #48). *)
 val reserved_prefix : string
 
 val is_reserved_name : string -> bool
 
 type t
 
-(** [create env ctx] makes a preprocessing handle over a session. [env] must be the same
-    {!Env.t} that [ctx] was created from ({!Context.create}); fresh symbols are declared
-    in it and then built through [ctx]. *)
-val create : Env.t -> Context.t -> t
+(** [create cap env ctx] makes a preprocessing handle over a session. [env] must be the
+    same {!Env.t} that [ctx] was created from ({!Context.create}); fresh symbols are
+    declared in it through the cap-gated {!Env.declare_reserved} (ADR-0012 R1 — the public
+    {!Env.declare_fun} now rejects the reserved [".oxsmt.*"] namespace) and then built
+    through [ctx]. [cap] must be the {!Env.reserved_cap} minted with [env]. *)
+val create : Env.reserved_cap -> Env.t -> Context.t -> t
 
 (** A fresh nullary symbol a pass introduced, with a term computing its value. [value] may
     use [div]/[mod] or an Int-sorted [Ite]; it is {b not} part of the preprocessed formula

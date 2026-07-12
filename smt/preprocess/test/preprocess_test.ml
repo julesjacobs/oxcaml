@@ -182,7 +182,7 @@ let n_int_vars = 2
 let n_bool_vars = 2
 
 let make_session () =
-  let env = Env.create () in
+  let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
   let x =
     Array.init n_int_vars (fun i ->
@@ -195,7 +195,7 @@ let make_session () =
   let f = Env.declare_fun env "f" (Rank.create [ Sort.int ] Sort.int) in
   let g = Env.declare_fun env "g" (Rank.create [ Sort.int; Sort.int ] Sort.int) in
   let pr = Env.declare_fun env "pr" (Rank.create [ Sort.int ] Sort.bool) in
-  { env; ctx; pp = Preprocess.create env ctx; x; p; f; g; pr }
+  { env; ctx; pp = Preprocess.create cap env ctx; x; p; f; g; pr }
 ;;
 
 (* ------------------------------------------------------------------ *)

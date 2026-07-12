@@ -57,6 +57,10 @@ type model = sort_card list * model_binding list
 
 type t =
   { env : Env.t
+  ; cap : Env.reserved_cap
+    (* ADR-0012 R1: the reserved-minting capability for [env], kept private (never
+         returned by [Session.env]) and threaded only to the legitimate minters —
+         preprocessing and the lemma tier's [Qvar.mint]. *)
   ; ctx : Context.t
   ; pp : Preprocess.t
   ; sat : Sat.t
@@ -102,7 +106,10 @@ type t =
   }
 
 let create ?(split_budget = default_split_budget) ?max_effort () =
-  let env = Env.create () in
+  (* ADR-0012 R1: the session is the SOLE caller of [create_with_cap] in solver code (the
+     documented convention); it keeps the cap private and threads it to the
+     reserved-symbol minters. [Session.env] returns only the [env], never the cap. *)
+  let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
   let sat = Sat.create () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
@@ -113,8 +120,9 @@ let create ?(split_budget = default_split_budget) ?max_effort () =
   let cdclt = Cdclt.create ctx env sat ~split_budget ~budget in
   let base = Sat.new_var sat in
   { env
+  ; cap
   ; ctx
-  ; pp = Preprocess.create env ctx
+  ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
   ; mgr = Manager.create ctx env
@@ -310,7 +318,7 @@ let assert_lemma t ~qvars ~build =
   let qv =
     Array.of_list
       (List.mapi
-         (fun k (_name, sort) -> Qvar.mint t.env t.ctx ~lemma_id:id ~index:k sort)
+         (fun k (_name, sort) -> Qvar.mint t.cap t.env t.ctx ~lemma_id:id ~index:k sort)
          qvars)
   in
   let { body; triggers } = build qv in

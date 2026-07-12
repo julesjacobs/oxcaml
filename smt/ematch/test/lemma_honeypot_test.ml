@@ -195,8 +195,28 @@ let h_repeat_refute () =
 let coercion_gate () =
   let s = Session.create () in
   let ctx = Session.context s in
-  (* mint a placeholder directly and coerce it into asserted terms *)
-  let q = Qvar.to_term (Qvar.mint (Session.env s) ctx ~lemma_id:999 ~index:0 Sort.int) in
+  (* Capture a REAL session-minted qvar by coercing it out of assert_lemma's build
+     callback (the R1 POINT 4 escape). We do it inside a push and pop the frame first, so
+     the lemma is NOT live when we test the gate — isolating the gate's degrade from the
+     liveness degrade. The qvar term survives the pop (terms are grow-only, hash-consed). *)
+  let stolen = ref None in
+  Session.push s;
+  let _l =
+    Session.assert_lemma
+      s
+      ~qvars:[ "x", Sort.int ]
+      ~build:(fun qv ->
+        stolen := Some (Qvar.to_term qv.(0));
+        { Session.body = Context.ge ctx (Qvar.to_term qv.(0)) (Context.int_const ctx 0)
+        ; triggers = []
+        })
+  in
+  Session.pop s;
+  let q =
+    match !stolen with
+    | Some q -> q
+    | None -> failwith "coercion_gate: qvar not captured"
+  in
   Session.assert_term s (Context.ge ctx q (Context.int_const ctx 0));
   Session.assert_term s (Context.le ctx q (Context.int_const ctx (-1)));
   let v = Session.check_sat s in
@@ -207,6 +227,55 @@ let coercion_gate () =
     (v = Session.Unknown);
   (* and it did not crash: reaching here at all is the no-[Failure] half of the check *)
   check "GATE: no crash on coerced placeholder" true
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Forgeability regression (R1, §7): the public declaration doors reject the reserved
+   namespace, so the raw [Env] handed out by [Session.env] cannot forge a placeholder.
+   Both [declare_fun] AND [declare_sort] must reject (shared namespace, codex POINT 3).
+   This is the load-bearing soundness door for the placeholder mechanism: with it open, a
+   client could intern a placeholder name and collide with a tier-minted qvar (codex's
+   wrong-unsat repro). Guard under test: the [is_reserved_name] rejection in Env's public
+   doors. *)
+let forge_gate () =
+  let s = Session.create () in
+  let env = Session.env s in
+  let raises_reserved f =
+    match f () with
+    | _ -> false
+    | exception Oxsmt_core.Env.Reserved_symbol _ -> true
+  in
+  check
+    "FORGE: Env.declare_fun rejects .oxsmt.qvar.*"
+    (raises_reserved (fun () ->
+       Oxsmt_core.Env.declare_fun env ".oxsmt.qvar.0.0" (Rank.create [] Sort.int)));
+  check
+    "FORGE: Env.declare_sort rejects .oxsmt.*"
+    (raises_reserved (fun () -> Oxsmt_core.Env.declare_sort env ".oxsmt.qvar.0.0"))
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Cap-mismatch negative (ADR-0012 per-env strengthening): a [reserved_cap] minted for one
+   env is rejected on a DIFFERENT env — Invalid_argument, not a silent mint. Guard under
+   test: the [cap <> t.id] check in Env.declare_reserved. *)
+let cap_per_env () =
+  let module Env = Oxsmt_core.Env in
+  let _env_a, cap_a = Env.create_with_cap () in
+  let env_b, cap_b = Env.create_with_cap () in
+  let raises_invalid f =
+    match f () with
+    | _ -> false
+    | exception Invalid_argument _ -> true
+  in
+  check
+    "CAP: env A's cap is REJECTED minting on env B"
+    (raises_invalid (fun () ->
+       Env.declare_reserved cap_a env_b ".oxsmt.qvar.0.0" (Rank.create [] Sort.int)));
+  check
+    "CAP: env B's own cap mints on env B"
+    (not
+       (raises_invalid (fun () ->
+          Env.declare_reserved cap_b env_b ".oxsmt.qvar.0.0" (Rank.create [] Sort.int))))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -247,6 +316,8 @@ let () =
   h_pushpop ();
   h_repeat_refute ();
   coercion_gate ();
+  forge_gate ();
+  cap_per_env ();
   determinism ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1

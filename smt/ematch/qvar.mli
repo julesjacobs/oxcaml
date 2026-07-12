@@ -19,18 +19,21 @@ type t = private Term.t
     lemma body / triggers through the session {!Context}. *)
 val to_term : t -> Term.t
 
-(** [mint env ctx ~lemma_id ~index sort] mints the [index]-th placeholder of lemma
+(** [mint cap env ctx ~lemma_id ~index sort] mints the [index]-th placeholder of lemma
     [lemma_id] as a fresh nullary constant [.oxsmt.qvar.<lemma_id>.<index>] of [sort],
-    interned in [env] and built through [ctx]. Distinct [(lemma_id, index)] pairs mint
-    distinct placeholders, so no placeholder is ever reused across lemmas (I1/I2 hold by
-    construction, capture is vacuous — ADR-0012 §3a).
-
-    {b Phase B (env unfreeze):} the reserved namespace is closed to public declaration, so
-    this will take the [Oxsmt_core.Env.reserved_cap] capability and mint via
-    [Env.declare_reserved]. Until the frozen [env.mli] unfreeze lands, minting uses the
-    current [Env.declare_fun] door (the session's public declaration guard already blocks
-    [.oxsmt.*], so only the raw-[Env] forge door is open in the interim). *)
-val mint : Env.t -> Context.t -> lemma_id:int -> index:int -> Sort.t -> t
+    interned in [env] through the cap-gated {!Oxsmt_core.Env.declare_reserved} (the public
+    declaration doors reject the reserved namespace, R1) and built through [ctx]. [cap]
+    must be the {!Oxsmt_core.Env.reserved_cap} minted with [env]. Distinct
+    [(lemma_id, index)] pairs mint distinct placeholders, so no placeholder is ever reused
+    across lemmas (I1/I2 hold by construction, capture is vacuous — ADR-0012 §3a). *)
+val mint
+  :  Env.reserved_cap
+  -> Env.t
+  -> Context.t
+  -> lemma_id:int
+  -> index:int
+  -> Sort.t
+  -> t
 
 (** The reserved qvar name prefix, [".oxsmt.qvar."]. *)
 val prefix : string
