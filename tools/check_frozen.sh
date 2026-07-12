@@ -27,8 +27,11 @@ SPINE=SPINE.md
 # scheduled three) + the new THEORY vocabulary atom/lit/explanation/theory.
 # Frozen at the M2 EUF-adapter merge (ADR-0005 Tranche B): model.mli — its [value]
 # variant's Uninterp witness (open q3) is now pinned by the EUF adapter's first real
-# model (Uninterp = congruence-class representative id). sat.mli (Tranche C, M4)
-# freezes later — see decisions/adr-0005-freeze-plan.md.
+# model (Uninterp = congruence-class representative id).
+# Frozen at the Tranche-C freeze event (ADR-0005 freeze plan; ADR-0013 §4.0): sat.mli — its
+# certificate-emission trace surface (on_input ~origin / on_unit / on_learned contract /
+# on_theory_clause / on_unsat) + add_clause ?origin, sized against the four Unsat exits so
+# cert emission attaches without a re-unfreeze.
 FROZEN_FILES=(
   smt/core/sort.mli
   smt/core/symbol.mli
@@ -43,6 +46,7 @@ FROZEN_FILES=(
   smt/core/explanation.mli
   smt/core/theory.mli
   smt/core/model.mli
+  smt/solver/sat.mli
 )
 
 case "${1:-check}" in

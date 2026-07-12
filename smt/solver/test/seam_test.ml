@@ -57,6 +57,10 @@ let with_collector s =
            (fun ~id ~clause ~antecedents ~btlevel ->
              ignore id;
              acc := (sorted_dimacs clause, List.sort compare antecedents, btlevel) :: !acc)
+       ; on_input = (fun ~id:_ ~clause:_ ~origin:_ -> ())
+       ; on_unit = (fun ~id:_ ~lit:_ -> ())
+       ; on_theory_clause = (fun ~id:_ ~clause:_ ~role:_ -> ())
+       ; on_unsat = (fun _ -> ())
        });
   fun () -> List.rev !acc
 ;;

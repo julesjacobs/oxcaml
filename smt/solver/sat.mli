@@ -48,10 +48,23 @@ val new_var : t -> var
 (** Number of variables allocated so far. *)
 val num_vars : t -> int
 
+(** The provenance of an added clause (ADR-0013 §4.0, RR5). [Query] is a genuine query
+    clause from the clausifier/session; [Theory_lemma] is a CONTRACT-SPLIT / theory lemma
+    added mid-solve. The certificate emitter routes a [Query] clause to an [Input] intro
+    and a [Theory_lemma] clause to a [Valid_lemma] [Theory] intro — never an [Input]. *)
+type origin =
+  | Query
+  | Theory_lemma
+
 (** Add a permanent clause (disjunction of literals). Legal between [solve]s. Level-0
     simplification (tautology/duplicate/falsified-literal removal, unit propagation)
-    happens here; an empty clause makes the instance permanently unsat. *)
-val add_clause : t -> lit list -> unit
+    happens here; an empty clause makes the instance permanently unsat.
+
+    [origin] (default [Query]) tags the clause's provenance for certificate emission
+    (ADR-0013 §4.0). It has no effect on solving — it is the frozen seam consumed by the
+    trace's {!field-on_input}; a defaulted call is behaviourally identical to the untagged
+    form. *)
+val add_clause : ?origin:origin -> t -> lit list -> unit
 
 (** [solve ?assumptions t] decides satisfiability under the given unit assumptions
     (default none). After [Sat], query the model with {!value}. After [Unsat] with
@@ -82,17 +95,71 @@ end
 
 val stats : t -> Stats.t
 
-(** {2 Proof-readiness hook (§7)}
+(** {2 Proof-readiness / certificate-emission hooks (§7; ADR-0013 §4.0)}
 
-    A compile-out-able trace of the resolution derivation of each learned clause:
-    [on_learned] fires once per learned clause with a fresh clause [id], the learned
-    [clause] (asserting literal at index 0), the ids of the [antecedents] resolved to
-    derive it (the initial conflict clause followed by the reason clauses visited during
-    1UIP analysis), and the [btlevel] the solver then backjumps to. Zero cost when no
-    trace is set — antecedents are not even accumulated. This is the seam for DRAT-style
-    logging later (serialization, not redesign). *)
+    A compile-out-able trace of the search that certificate emission (ADR-0013) attaches
+    to. [None] by default —
+    {b zero cost and bit-identical verdicts, models, and stats when unset}, and every hook
+    is a pure side channel that never feeds back into search. The record is a frozen
+    {e seam}: the emission bodies (the four terminal steps, the E3 [analyze_final] walk,
+    the [on_input]/[on_unit] firing) land later as [sat.ml] internals (editable), so the
+    {b signatures} here are complete against all four [Unsat] exits and the
+    [Decision]/[Implied_by]/[Theory_prop] reason walk WITHOUT a further unfreeze.
+
+    {b Id-resolvability invariant.} Every clause [id] a hook cites is resolvable against a
+    {e content-bearing} event elsewhere in the stream — {!field-on_input} (id + clause +
+    origin), {!field-on_learned} (id + clause), or {!field-on_theory_clause} (id +
+    clause + role). No hook emits a bare id whose clause was never surfaced, so
+    {!unsat_conclusion} carries ids only. *)
+
+(** Which theory-transient clause {!field-on_theory_clause} surfaced, so the emitter picks
+    the right leaf shape. [Reason] is the propagation clause [p ∨ ¬p₁ ∨ … ∨ ¬pₖ] (the
+    implied literal at slot 0 — the EUF/LIA "¬Γ ∨ p" propagation leaf); [Conflict] is the
+    falsified premise clause [¬p₁ ∨ … ∨ ¬pₙ] (the theory conflict leaf). *)
+type theory_clause_role =
+  | Reason
+  | Conflict
+
+(** The empty-clause conclusion of a solve, one constructor per [Sat] [Unsat] exit
+    (ADR-0013 §4.0 E1–E4). Each carries exactly what the terminal [||] step needs; the ids
+    resolve per the id-resolvability invariant above.
+
+    - [Root_empty] — E1 (a [Query] clause) / E4 (a [Theory_lemma]) filtered to [] under
+      level-0 simplification; the terminal step is level-0 RUP of [input_id] against the
+      checker's re-derived unit closure. E1 vs E4 is the [origin] recorded for [input_id].
+    - [Level0_conflict] — E2, a level-0 conflict clause (a Boolean clause, or a
+      {e nonempty} theory conflict transient); terminal step is level-0 RUP of
+      [conflict_id].
+    - [Failed_assumption] — E3, the universal session exit: [antecedents] is the
+      assumption-forcing reason chain in RUP-consumption order ([Implied_by] clause ids
+      and materialized [Theory_prop] reason ids); after the selector strip it derives []. *)
+type unsat_conclusion =
+  | Root_empty of { input_id : int }
+  | Level0_conflict of { conflict_id : int }
+  | Failed_assumption of { antecedents : int list }
+
 type trace =
-  { on_learned : id:int -> clause:lit array -> antecedents:int list -> btlevel:int -> unit
+  { on_input : id:int -> clause:lit array -> origin:origin -> unit
+    (** fires once per permanent clause {!add_clause} retains, with a stable [id]; [origin]
+      splits genuine query inputs from theory Split/lemma clauses. *)
+  ; on_unit : id:int -> lit:lit -> unit
+    (** fires once per standing level-0 unit; the checker re-derives the unit closure by
+      propagation, so no forcing-clause provenance is carried. *)
+  ; on_learned : id:int -> clause:lit array -> antecedents:int list -> btlevel:int -> unit
+    (** fires once per learned clause with a fresh clause [id], the learned [clause]
+      (asserting literal at index 0), the [antecedents] resolved to derive it, and the
+      [btlevel] the solver then backjumps to. Contract (ADR-0013 §1.4): [antecedents] in
+      ordered-RUP order (the reason clauses in reverse-resolution order, conflict last),
+      and when a trace is active the emitted-and-stored clause is the {e unminimized} 1UIP
+      clause. Learned units fire it too. Zero cost when no trace is set — antecedents are
+      not even accumulated. *)
+  ; on_theory_clause : id:int -> clause:lit array -> role:theory_clause_role -> unit
+    (** fires when a lazy theory reason / conflict clause is materialized, surfacing its id
+      ↔ clause so any hint that cites a theory transient (in {!field-on_learned}'s
+      antecedents or an {!unsat_conclusion}) resolves to an emitted leaf. The theory-side
+      witness (EUF proof tree / LIA multipliers) is attached off-seam by the adapter. *)
+  ; on_unsat : unsat_conclusion -> unit
+    (** fires at whichever [Sat] [Unsat] exit fires, carrying the terminal [||]-step data. *)
   }
 
 val set_trace : t -> trace option -> unit

@@ -55,8 +55,29 @@ type reason =
   | Implied_by of clause
   | Theory_prop
 
+(* Certificate provenance / trace types (ADR-0013 §4.0). These are the frozen
+   cert-emission seam (sat.mli, Tranche C). The emission bodies land later as [sat.ml]
+   internals; the record here is only DESTRUCTURED (never constructed) by the core —
+   clients build it. *)
+type origin =
+  | Query
+  | Theory_lemma
+
+type theory_clause_role =
+  | Reason
+  | Conflict
+
+type unsat_conclusion =
+  | Root_empty of { input_id : int }
+  | Level0_conflict of { conflict_id : int }
+  | Failed_assumption of { antecedents : int list }
+
 type trace =
-  { on_learned : id:int -> clause:lit array -> antecedents:int list -> btlevel:int -> unit
+  { on_input : id:int -> clause:lit array -> origin:origin -> unit
+  ; on_unit : id:int -> lit:lit -> unit
+  ; on_learned : id:int -> clause:lit array -> antecedents:int list -> btlevel:int -> unit
+  ; on_theory_clause : id:int -> clause:lit array -> role:theory_clause_role -> unit
+  ; on_unsat : unsat_conclusion -> unit
   }
 
 (* ADR-0005 §3 CDCL(T) theory-callback seam. Modeled on {!trace}: a settable record,
@@ -768,7 +789,11 @@ let reduce_db t =
 (* Permanent clause addition with level-0 simplification. Only legal at decision level 0
    (guaranteed by [solve], which cancels to 0 before returning). *)
 
-let add_clause t lits =
+let add_clause ?(origin = Query) t lits =
+  (* [origin] is the RR5 cert-provenance tag (ADR-0013 §4.0). Accepted-and-ignored here —
+     the freeze pins the signature; cert step-1 (M5) starts consuming it (routing [Query]
+     to [on_input] and [Theory_lemma] to a Valid_lemma leaf). No solving effect. *)
+  ignore (origin : origin);
   List.iter (fun l -> ensure_var t (var_of_lit l)) lits;
   if t.ok
   then (
