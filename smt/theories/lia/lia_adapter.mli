@@ -28,6 +28,20 @@
 open Oxsmt_core
 include Theory.THEORY
 
+(** {2 Reason builders (exposed for the empty-premise tripwire test).}
+
+    [conflict_explanation] / [propagation_reason] turn an engine conflict / a bound
+    propagation's premise set into the frozen [Explanation.t] the CDCL(T) core consumes.
+    Both enforce the codex AP4 tripwire in parity with {!Euf_adapter}: an EMPTY premise
+    set is a soundness bug (a premise-free conflict would learn the empty clause ->
+    spurious [unsat]; a premise-free propagation is an unconditional entailment), so they
+    raise (degrading the query to [unknown] via CONTRACT-POISON) rather than return an
+    unsound reason. Unconstructible from the engine; exposed only so a test can drive the
+    tripwire directly. *)
+
+val conflict_explanation : Lit.t Lia.conflict -> Explanation.t
+val propagation_reason : Lit.t list -> Explanation.t
+
 (** [true] once an overflow has bricked the underlying {!Lia} instance; never raises. *)
 val is_poisoned : t -> bool
 

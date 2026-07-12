@@ -77,12 +77,36 @@ let assert_lit t lit =
       failwith "Lia_adapter.assert_lit: literal's atom was not registered")
 ;;
 
+(* LIA parity with {!Euf_adapter}'s codex AP4 tripwire: an EMPTY premise set is an
+   unconditional entailment (for a propagation) or an unconditional [false] (for a
+   conflict) — a soundness bug either way. UNCONDITIONAL guard, not [assert]: like AP4 it
+   must survive the release [-noassert] build, because feeding 1UIP a premise-free
+   conflict would learn the empty clause (a spurious [unsat]). Raising here degrades the
+   query to [unknown] via CONTRACT-POISON instead. Unconstructible from the engine — a
+   Farkas conflict's infeasible core always cites >= 1 asserted bound, and a bound
+   propagation always carries its single entailing bound (see
+   {!Lia.propagate}/{!Lia.check}) — so this only fires on a corrupted reason set. *)
+let checked_premises what premises =
+  if premises = []
+  then
+    failwith (Printf.sprintf "Lia_adapter: empty %s (unsound) [codex AP4 tripwire]" what);
+  premises
+;;
+
 let conflict_explanation (c : Lit.t Lia.conflict) : Explanation.t =
   (* Premises are the [Lit.t] tokens of the infeasible bound set; the Farkas multipliers
      stay engine-internal (self-checked at production, DESIGN §7) and route to the
      off-core M5 certificate module, never onto the frozen [Explanation] (ADR-0005 D7 /
      ADR-0006). *)
-  { premises = c.premises; rule = Explanation.Rule_tag.Lia_farkas }
+  { premises = checked_premises "conflict premise set" c.premises
+  ; rule = Explanation.Rule_tag.Lia_farkas
+  }
+;;
+
+let propagation_reason premises : Explanation.t =
+  { premises = checked_premises "propagation reason" premises
+  ; rule = Explanation.Rule_tag.Lia_bound
+  }
 ;;
 
 (* Cache a propagated literal's reason in the current frame so [explain] can serve it and
@@ -117,7 +141,7 @@ let propagations t =
     | None -> None
     | Some atom ->
       let lit = Lit.make atom polarity in
-      cache_reason t lit { Explanation.premises; rule = Explanation.Rule_tag.Lia_bound };
+      cache_reason t lit (propagation_reason premises);
       Some lit)
 ;;
 

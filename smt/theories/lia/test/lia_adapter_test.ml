@@ -612,6 +612,51 @@ let test_determinism () =
 ;;
 
 (* ================================================================== *)
+(* 8. Empty-premise tripwire (LIA parity with Euf_adapter's codex AP4). A conflict or a
+   propagation whose reason set is EMPTY is a soundness bug — a premise-free conflict
+   would learn the empty clause (spurious [unsat]); a premise-free propagation is an
+   unconditional entailment. The adapter's reason builders must fail-close (raise,
+   degrading to unknown) rather than hand CDCL(T) an unsound reason. This drives the
+   tripwire's own path directly: with the guard removed both empty-premise cases return a
+   value and these checks go RED. *)
+
+let test_empty_premise_tripwire () =
+  print_endline "empty-premise tripwire (AP4 parity):";
+  let is_tripwire = function
+    | Failure msg ->
+      (* substring match: the message names the AP4 tripwire *)
+      let needle = "codex AP4 tripwire" in
+      let rec has i =
+        i + String.length needle <= String.length msg
+        && (String.sub msg i (String.length needle) = needle || has (i + 1))
+      in
+      has 0
+    | _ -> false
+  in
+  let alloc = Atom.create_allocator () in
+  let a_lit = Lit.make (Atom.fresh alloc) true in
+  (* Happy path: a non-empty reason builds normally with the right rule tag (proves the
+     guard is not over-firing on legitimate reasons). *)
+  let c_ok =
+    Lia_adapter.conflict_explanation { Lia.premises = [ a_lit ]; farkas = [ q 1 ] }
+  in
+  check
+    "non-empty conflict builds (rule Lia_farkas)"
+    (c_ok.Explanation.rule = Explanation.Rule_tag.Lia_farkas);
+  check "non-empty conflict keeps its premise" (c_ok.Explanation.premises = [ a_lit ]);
+  let p_ok = Lia_adapter.propagation_reason [ a_lit ] in
+  check
+    "non-empty propagation reason builds (rule Lia_bound)"
+    (p_ok.Explanation.rule = Explanation.Rule_tag.Lia_bound);
+  (* Discriminating cases: an EMPTY reason set trips the guard for both a conflict and a
+     propagation. *)
+  check_raises "empty conflict premise set trips tripwire" is_tripwire (fun () ->
+    Lia_adapter.conflict_explanation { Lia.premises = []; farkas = [] });
+  check_raises "empty propagation reason trips tripwire" is_tripwire (fun () ->
+    Lia_adapter.propagation_reason [])
+;;
+
+(* ================================================================== *)
 
 let () =
   print_endline "== Lia_adapter tests ==";
@@ -624,6 +669,7 @@ let () =
   test_poison ();
   test_idempotent_and_wide ();
   test_determinism ();
+  test_empty_premise_tripwire ();
   Printf.printf "\n%d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
