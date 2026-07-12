@@ -2217,33 +2217,83 @@ let remove_exception_ident id =
 (* Inline fast path for [String.compare]/[%compare] on strings.  The dominant
    cost of [caml_string_compare] on the (many, short) strings compared during
    typing is the C-call boundary, not the comparison itself.  We compare the
-   first byte inline and only fall back to the C call when the first bytes are
-   equal.  This is exact: byte 0 is always in bounds (a string occupies at least
-   one word) and is 0 for the empty string (the last word is zero-filled at
-   allocation, see [caml_alloc_string]), so the first-byte test yields the exact
-   lexicographic sign whenever byte 0 differs, and defers to the byte-accurate C
-   comparison otherwise. *)
+   first SEVEN bytes inline and only fall back to the C call when they are
+   equal.  Loading a full word at offset 0 is always in bounds (a string block
+   occupies at least one word); after [bswap64] the word holds bytes 0..7 in
+   lexicographic (big-endian) order, and shifting right by 8 drops byte 7 --
+   which must be excluded because in a single-word block it is the padding
+   count byte written by [caml_alloc_string] (anti-correlated with length, so
+   including it can flip the sign for short strings with embedded NULs, e.g.
+   "a\000" vs "a").  Bytes 0..6 are always authoritative: within the string
+   they compare real content, and beyond the string the zero padding sorts a
+   proper prefix first, matching lexicographic order.  If the seven bytes tie,
+   we defer to the byte-accurate C comparison.  Native-only: the unboxed
+   [int64] operations used here do not exist in bytecode, where we emit the
+   plain C call. *)
 let string_compare_fast_path a b loc =
-  let int_scalar : any_locality_mode Scalar.Integral.t = Value (Taggable Int) in
-  let ceq = Pscalar (Binary (Icmp (int_scalar, Ceq))) in
-  let three_way =
-    Pscalar (Binary (Three_way_compare_int (Signed, int_scalar)))
-  in
-  let ida = Ident.create_local "cmp_s1" in
-  let idb = Ident.create_local "cmp_s2" in
-  let idb1 = Ident.create_local "cmp_b1" in
-  let idb2 = Ident.create_local "cmp_b2" in
-  let duid = Lambda.debug_uid_none in
-  let byte0 v = Lprim (Pstringrefu, [v; Lconst (Const_base (Const_int 0))], loc) in
-  Llet (Strict, Lambda.layout_string, ida, duid, a,
-  Llet (Strict, Lambda.layout_string, idb, duid, b,
-  Llet (Strict, Lambda.layout_int, idb1, duid, byte0 (Lvar ida),
-  Llet (Strict, Lambda.layout_int, idb2, duid, byte0 (Lvar idb),
-    Lifthenelse
-      ( Lprim (ceq, [Lvar idb1; Lvar idb2], loc),
-        Lprim (Pccall caml_string_compare, [Lvar ida; Lvar idb], loc),
-        Lprim (three_way, [Lvar idb1; Lvar idb2], loc),
-        Lambda.layout_int )))))
+  if not !Clflags.native_code
+  then Lprim (Pccall caml_string_compare, [ a; b ], loc)
+  else (
+    let int64u : _ Scalar.Integral.t = Naked (Boxable (Int64 Any_locality_mode)) in
+    let load v =
+      Lprim
+        ( Pstring_load_64
+            { unsafe = true
+            ; index_kind = Ptagged_int_index
+            ; mode = alloc_heap
+            ; boxed = false
+            }
+        , [ v; Lconst (Const_base (Const_int 0)) ]
+        , loc )
+    in
+    let bswap e = Lprim (Pscalar (Unary (Integral (int64u, Bswap))), [ e ], loc) in
+    let drop_last_byte e =
+      Lprim
+        ( Pscalar (Binary (Shift (int64u, Lsr, Int)))
+        , [ e; Lconst (Const_base (Const_int 8)) ]
+        , loc )
+    in
+    let head v = drop_last_byte (bswap (load v)) in
+    let ceq = Pscalar (Binary (Icmp (Scalar.Integral.ignore_locality int64u, Ceq))) in
+    let three_way =
+      Pscalar
+        (Binary (Three_way_compare_int (Signed, Scalar.Integral.ignore_locality int64u)))
+    in
+    let ida = Ident.create_local "cmp_s1" in
+    let idb = Ident.create_local "cmp_s2" in
+    let idh1 = Ident.create_local "cmp_h1" in
+    let idh2 = Ident.create_local "cmp_h2" in
+    let duid = Lambda.debug_uid_none in
+    Llet
+      ( Strict
+      , Lambda.layout_string
+      , ida
+      , duid
+      , a
+      , Llet
+          ( Strict
+          , Lambda.layout_string
+          , idb
+          , duid
+          , b
+          , Llet
+              ( Strict
+              , Lambda.Punboxed_or_untagged_integer Lambda.Unboxed_int64
+              , idh1
+              , duid
+              , head (Lvar ida)
+              , Llet
+                  ( Strict
+                  , Lambda.Punboxed_or_untagged_integer Lambda.Unboxed_int64
+                  , idh2
+                  , duid
+                  , head (Lvar idb)
+                  , Lifthenelse
+                      ( Lprim (ceq, [ Lvar idh1; Lvar idh2 ], loc)
+                      , Lprim (Pccall caml_string_compare, [ Lvar ida; Lvar idb ], loc)
+                      , Lprim (three_way, [ Lvar idh1; Lvar idh2 ], loc)
+                      , Lambda.layout_int ) ) ) ) ))
+;;
 
 let lambda_of_prim prim_name prim loc args arg_exps =
   match prim, args with
