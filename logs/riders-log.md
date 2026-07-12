@@ -63,3 +63,18 @@ Batch of four small independent board rows, one commit each.
   after pop-below-binding" fails and the recovered-explain crashes on the missing cache; the
   "propagated at binding frame" check stays green (isolates the NEW recurrence). Restored →
   1493/0 (adapter), 6412/0 (engine).
+
+## Item 4 — Board #152(c): rewrite u_dedup_rollback via the seed path (was vacuous)
+
+- Vacuousness confirmed: the old test used a TRIGGER-based lemma over 100 candidates with
+  gen_budget 3. Matcher.substitutions debits the budget INSIDE its enumeration
+  (matcher.ml:92) and raises Budget_exhausted BEFORE returning, so manager `process` never
+  runs → `added=[]` → the dedup-rollback branch (manager.ml:156) was never exercised.
+- Rewrite (empty-trigger lemma + seeds, matching u_seed_rollback): empty triggers make the
+  matcher a no-op, so budget is spent INSIDE `process` as the seed queue drains. gen_budget
+  3, seeds s0..s4: round 1 processes s0,s1,s2 INTO dedup then aborts on s3 (non-vacuous),
+  rolling back their dedup entries + restoring seeds. Round 2 (budget reset, restored set)
+  must re-attempt the rolled-back instances and re-hit the budget.
+- Discrimination VERIFIED: disable ONLY the dedup rollback (manager.ml:156) → round 2 skips
+  the still-suppressed s0,s1,s2 and drains s3,s4 within budget → does NOT abort; both round-2
+  checks flip RED (24/3). With the rollback: 27/0. (Test-only change; no source touched.)

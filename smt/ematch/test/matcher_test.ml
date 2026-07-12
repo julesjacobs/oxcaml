@@ -539,47 +539,56 @@ let e_stale_pop () =
 (* U-DEDUP-ROLLBACK (codex MED, dedup pollution): a budget-aborted round must NOT leave
    its never-asserted instances in the dedup cache — the session discards the aborted
    batch without asserting, so a surviving dedup entry would permanently suppress the
-   instance on a later round (a missed refutation, spurious Unknown). Setup: a lemma over
-   100 candidates with gen_budget 3 aborts round 1 after adding the first candidate(s) to
-   dedup; then the view shrinks to just that first candidate and the budget resets. WITH
-   rollback the first candidate is re-emittable (round 2 emits it); WITHOUT rollback it
-   stays dedup-suppressed (round 2 emits nothing). Uses a MUTABLE hand-rolled view so the
-   second round exercises the exact instance the abort touched. *)
+   instance on a later round (a missed refutation, spurious Unknown).
+
+   Driven through the SEED path (empty-trigger lemma), NOT a trigger-based lemma: with a
+   trigger the matcher debits the budget INSIDE its own enumeration
+   ([Matcher.substitutions] raises {!Matcher.Budget_exhausted} before returning), so
+   [process] never runs and NOTHING is added to dedup — the rollback branch is vacuous
+   (the earlier version of this test never exercised it). An empty-trigger lemma makes the
+   matcher a no-op, so the budget is spent INSIDE [process] as the seed queue drains, and
+   dedup entries are genuinely added before the abort.
+
+   Setup: gen_budget 3, five distinct seeds s0..s4. Round 1 processes s0,s1,s2 into dedup
+   (spending the budget), then aborts popping s3 — rolling back the s0,s1,s2 dedup entries
+   (and restoring all consumed seeds). Round 2 (budget reset, same restored seed set) must
+   re-attempt those rolled-back instances and re-hit the budget. DISCRIMINATION: with the
+   dedup rollback DISABLED, s0,s1,s2 stay dedup-suppressed, so round 2 skips them (no
+   budget spent), drains s3,s4 within budget, and does NOT abort — the round-2 abort flag
+   flips. *)
 let u_dedup_rollback () =
   let sc = scaffold () in
   let f = Env.declare_fun sc.env "f" int_to_int in
   let mk name =
     Context.const sc.ctx (Env.declare_fun sc.env name (Rank.create [] Sort.int))
   in
-  let all =
-    List.init 100 (fun i -> Context.app sc.ctx f [ mk (Printf.sprintf "a%d" i) ])
-  in
-  let cands = ref all in
-  let view : Egraph_view.t =
-    { app_terms_by_symbol = (fun s -> if Symbol.equal s f then !cands else [])
-    ; find_class_opt = (fun _ -> None)
-    ; equal_if_registered = (fun a b -> Term.equal a b)
-    ; class_members = (fun t -> [ t ])
-    }
-  in
+  (* empty triggers -> the matcher contributes nothing; the seed drain drives [process]. *)
   let lemma =
     make_lemma sc ~id:0 ~arity:1 (fun q ->
-      ( Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0)
-      , [ [ Context.app sc.ctx f [ q.(0) ] ] ] ))
+      Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0), [])
   in
   let mgr = Manager.create ~gen_budget:3 sc.ctx sc.env in
   Manager.add_lemma mgr lemma;
+  List.iter
+    (fun i -> Manager.seed_instance mgr lemma [| mk (Printf.sprintf "a%d" i) |])
+    [ 0; 1; 2; 3; 4 ];
   Manager.begin_check mgr;
-  let _r1 = Manager.round mgr view in
-  check "U-DEDUP-ROLLBACK: round 1 hit the budget" (Manager.budget_exhausted mgr);
-  (* The instance the abort touched is now the ONLY candidate; a fresh-budget round must
-     re-emit it (rolled back), not suppress it (polluted). *)
-  cands := [ List.hd all ];
-  Manager.begin_check mgr;
-  let r2 = Manager.round mgr view in
+  let r1 = Manager.round mgr Egraph_view.empty in
+  (* Round 1 processed s0,s1,s2 INTO dedup (spending the budget) then aborted on s3 — this
+     is the non-vacuous setup the earlier trigger-based version failed to reach. *)
   check
-    "U-DEDUP-ROLLBACK: aborted instance re-emittable next round (dedup rolled back)"
-    (List.length r2 = 1)
+    "U-DEDUP-ROLLBACK: round 1 aborted (budget spent inside process)"
+    (Manager.budget_exhausted mgr);
+  check "U-DEDUP-ROLLBACK: aborted round 1 asserts nothing" (r1 = []);
+  Manager.begin_check mgr;
+  let r2 = Manager.round mgr Egraph_view.empty in
+  (* WITH the dedup rollback, s0,s1,s2 are re-emittable, so round 2 re-processes them and
+     re-hits the budget. WITHOUT it they stay suppressed and round 2 drains s3,s4 cleanly
+     — so this abort flag is exactly what the rollback buys. *)
+  check
+    "U-DEDUP-ROLLBACK: round 2 re-aborts on the rolled-back instances (dedup rolled back)"
+    (Manager.budget_exhausted mgr);
+  check "U-DEDUP-ROLLBACK: aborted round 2 asserts nothing" (r2 = [])
 ;;
 
 (* U-SEED-ROLLBACK (codex, popped-seeds sibling of dedup pollution): a manual seed
