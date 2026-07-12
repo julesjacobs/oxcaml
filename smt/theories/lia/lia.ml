@@ -45,6 +45,26 @@ type 'tok t =
   ; problem_vars : (int * Term.t) Dynarray.t (* (simplex id, term), creation order *)
   ; slacks : ((int * int) list, int) Hashtbl.t (* sorted (varid,coeff) key -> slack id *)
   ; registered : reg Dynarray.t
+  ; reg_index :
+      int Term.Table.t (* registered atom term -> its index in [registered]; O(1) dedup *)
+  ; reg_by_var : (int, int list) Hashtbl.t
+    (* simplex var id -> indices into [registered] of atoms whose bound is on that var.
+         [propagate] visits only atoms on a [dirty] var, so this is the reverse lookup. *)
+  ; dirty : (int, unit) Hashtbl.t
+    (* vars whose simplex bound MAY have changed since the last [propagate] (set on
+         every [assert_atom]/[register_atom] and on [pop] for un-reported atoms).
+         Bound-to-bound entailment reads a var's own bounds only, and those bounds change
+         only via those ops, so a var absent here cannot have any newly-entailed
+         registered atom — the [propagate] delta scans exactly [dirty]. Cleared each
+         [propagate]. *)
+  ; reported : bool Dynarray.t
+    (* parallel to [registered]: [true] once the atom has been emitted by [propagate] at
+         a still-live frame (INVARIANT P: reported ⟺ currently bound-entailed). Skipped by
+         the delta scan so an already-propagated atom is not re-emitted; reset on [pop]. *)
+  ; mutable report_frames : int list list
+    (* push/pop stack (head = current frame), each holding the reg indices first
+         reported in that frame — mirrors the adapter's explain-cache framing so a [pop]
+         un-reports exactly the atoms whose entailing bound it unwinds. *)
   ; mutable overflows : int (* number of overflow-degradations to unknown *)
   }
 
@@ -57,6 +77,11 @@ let create ctx =
   ; problem_vars = Dynarray.create ()
   ; slacks = Hashtbl.create 64
   ; registered = Dynarray.create ()
+  ; reg_index = Term.Table.create 64
+  ; reg_by_var = Hashtbl.create 64
+  ; dirty = Hashtbl.create 64
+  ; reported = Dynarray.create ()
+  ; report_frames = [ [] ]
   ; overflows = 0
   }
 ;;
@@ -182,6 +207,11 @@ let assert_atom t atom ~polarity ~premise =
   guard_overflow t (fun () ->
     List.iter
       (fun (var, sense, rhs) ->
+         (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
+           mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
+           already-entailed bound is harmless: the delta skips its already-reported
+           atoms.) *)
+         Hashtbl.replace t.dirty var ();
          let _ : _ Simplex.conflict option =
            match sense with
            | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
@@ -197,14 +227,31 @@ let register_atom t (atom : Term.t) =
      not propagation targets in v1. *)
   match atom.node with
   | Le _ ->
-    if not (Dynarray.exists (fun r -> Term.equal r.atom atom) t.registered)
+    if not (Term.Table.mem t.reg_index atom)
     then
       guard_overflow t (fun () ->
+        let add var is_upper rhs =
+          let i = Dynarray.length t.registered in
+          Dynarray.add_last t.registered { atom; var; is_upper; rhs };
+          Dynarray.add_last t.reported false;
+          Term.Table.replace t.reg_index atom i;
+          Hashtbl.replace
+            t.reg_by_var
+            var
+            (i
+             ::
+             (match Hashtbl.find_opt t.reg_by_var var with
+              | Some is -> is
+              | None -> []));
+          (* A freshly registered atom may already be entailed by an existing bound on
+             [var] (registration can follow the assert that set it). Mark [var] dirty so
+             the next [propagate] reports it — matching the pre-delta scan, which
+             re-evaluated every registered atom on every call. *)
+          Hashtbl.replace t.dirty var ()
+        in
         match constraints_of_atom t atom ~polarity:true with
-        | [ (var, `Upper, rhs) ] ->
-          Dynarray.add_last t.registered { atom; var; is_upper = true; rhs }
-        | [ (var, `Lower, rhs) ] ->
-          Dynarray.add_last t.registered { atom; var; is_upper = false; rhs }
+        | [ (var, `Upper, rhs) ] -> add var true rhs
+        | [ (var, `Lower, rhs) ] -> add var false rhs
         | _ -> ())
   | _ -> ()
 ;;
@@ -344,46 +391,101 @@ let solve_integer ?(budget = default_budget) t =
     Int_unknown
 ;;
 
+(* Incremental bound-to-bound propagation (delta). Report only the atoms whose entailment
+   became newly TRUE/FALSE since the last call, not the whole entailed set every check.
+
+   Since an atom's entailment reads only its own var's bounds, and those bounds change
+   only through [assert_atom]/[register_atom] (recorded in [dirty]) and [pop] (which
+   re-dirties the un-reported), it suffices to visit atoms on [dirty] vars and skip those
+   already [reported]. Candidates are sorted by registration index so the emitted order is
+   deterministic (I6) and identical to the pre-delta full scan.
+
+   Un-reported reporting is monotone within a frame (a bound that entails an atom only
+   tightens until a [pop]), so a [reported] atom is still entailed and needs no re-check.
+   [pop] restores that invariant by un-reporting the atoms of the frames it unwinds. *)
 let propagate t =
   ensure_live t;
   let out = ref [] in
-  Dynarray.iter
-    (fun r ->
-       (* atom's positive reading is [var <sense> rhs]. TRUE if the current bound already
-         entails it; FALSE if the current opposite bound refutes it. Explanation = the
-         single entailing bound (Lia_bound). *)
-       let up = Simplex.get_upper t.simplex r.var in
-       let lo = Simplex.get_lower t.simplex r.var in
-       let emit polarity prem = out := (r.atom, polarity, [ prem ]) :: !out in
-       if r.is_upper
+  let cands =
+    Hashtbl.fold
+      (fun var () acc ->
+         match Hashtbl.find_opt t.reg_by_var var with
+         | Some is -> List.rev_append is acc
+         | None -> acc)
+      t.dirty
+      []
+    |> List.sort_uniq Int.compare
+  in
+  Hashtbl.clear t.dirty;
+  List.iter
+    (fun i ->
+       if not (Dynarray.get t.reported i)
        then (
-         (* atom: var <= rhs *)
-         match up with
-         | Some (User tok, u) when Delta.le u r.rhs -> emit true tok
-         | _ ->
-           (match lo with
-            | Some (User tok, l) when Delta.lt r.rhs l -> emit false tok
-            | _ -> ()))
-       else (
-         (* atom: var >= rhs *)
-         match lo with
-         | Some (User tok, l) when Delta.le r.rhs l -> emit true tok
-         | _ ->
-           (match up with
-            | Some (User tok, u) when Delta.lt u r.rhs -> emit false tok
-            | _ -> ())))
-    t.registered;
+         let r = Dynarray.get t.registered i in
+         (* atom's positive reading is [var <sense> rhs]. TRUE if the current bound already
+           entails it; FALSE if the current opposite bound refutes it. Explanation = the
+           single entailing bound (Lia_bound). *)
+         let up = Simplex.get_upper t.simplex r.var in
+         let lo = Simplex.get_lower t.simplex r.var in
+         let emit polarity prem =
+           out := (r.atom, polarity, [ prem ]) :: !out;
+           Dynarray.set t.reported i true;
+           match t.report_frames with
+           | fr :: rest -> t.report_frames <- (i :: fr) :: rest
+           | [] -> t.report_frames <- [ [ i ] ]
+         in
+         if r.is_upper
+         then (
+           (* atom: var <= rhs *)
+           match up with
+           | Some (User tok, u) when Delta.le u r.rhs -> emit true tok
+           | _ ->
+             (match lo with
+              | Some (User tok, l) when Delta.lt r.rhs l -> emit false tok
+              | _ -> ()))
+         else (
+           (* atom: var >= rhs *)
+           match lo with
+           | Some (User tok, l) when Delta.le r.rhs l -> emit true tok
+           | _ ->
+             (match up with
+              | Some (User tok, u) when Delta.lt u r.rhs -> emit false tok
+              | _ -> ()))))
+    cands;
   List.rev !out
 ;;
 
 let push t =
   ensure_live t;
-  Simplex.push t.simplex
+  Simplex.push t.simplex;
+  t.report_frames <- [] :: t.report_frames
 ;;
 
 let pop t n =
   ensure_live t;
-  Simplex.pop t.simplex n
+  Simplex.pop t.simplex n;
+  (* Un-report every atom first reported in a popped frame: its entailing bound is being
+     unwound. Re-dirty its var so the next [propagate] re-checks it and re-emits if a
+     surviving (shallower) bound still entails it — this is what lets an atom entailed at
+     level N and backtracked past be re-reported when re-entailed (CONTRACT-EX). *)
+  let rec drop k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | fr :: rest ->
+        List.iter
+          (fun i ->
+             Dynarray.set t.reported i false;
+             Hashtbl.replace t.dirty (Dynarray.get t.registered i).var ())
+          fr;
+        drop (k - 1) rest
+      | [] -> [])
+  in
+  t.report_frames
+  <- (match drop n t.report_frames with
+      | [] -> [ [] ]
+      | fs -> fs)
 ;;
 
 (* Diagnostics stay readable after poisoning (you need [overflow_count] precisely to
