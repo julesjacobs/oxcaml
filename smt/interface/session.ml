@@ -242,6 +242,51 @@ let assert_clausified ?sel t cnf =
     cnf
 ;;
 
+(* Bool-cardinality rule (TODO Predicates §2; the one sanctioned finite sort). [Bool] has
+   exactly two values, so every Bool-sorted term is true or false in every model. The
+   clausifier ({!Cnf.clausify}) only surfaces Bool-sorted terms it reaches through the
+   Boolean skeleton (top-level atoms + connective children); a Bool-sorted PREDICATE
+   application [p(x…)] that occurs ONLY buried in an argument position (e.g. [g (f a)]
+   with [f : S -> Bool]) gets NO SAT variable, so the SAT core never case-splits it and
+   EUF never binds it to [true_const]/[false_const] — it stays a third opaque Boolean
+   class. [n >= 3] such terms forced pairwise-distinct by congruence are then
+   pigeonhole-impossible yet the engine cannot see it: {!Combine}'s H2 guard degrades that
+   to [unknown] (sound, never wrong-SAT), but it is INCOMPLETE. This walk closes the
+   completeness half by interning every Bool-sorted [App] (arity >= 1) subterm as its own
+   theory atom, so the SAT core case-splits it (each interned var lands in the decision
+   heap) and EUF binds it — pigeonhole over the two values is then discharged by
+   congruence + the [true <> false] axiom. Interning is idempotent ([Cdclt] [t2v]), so a
+   predicate that already surfaced as a clause literal is a no-op; the only new vars are
+   the buried ones. Runs under the same try/CONTRACT-POISON discipline as clause
+   registration (an out-of-fragment atom degrades, never crashes). *)
+let register_bool_terms t (pterm : Term.t) =
+  let seen = Term.Table.create 64 in
+  let rec go (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.add seen term ();
+      match term.node with
+      | App (_, args) ->
+        if Iarr.length args >= 1 && Sort.equal term.sort Sort.bool
+        then (
+          t.has_theory <- true;
+          ignore (Cdclt.intern_atom t.cdclt term : Oxsmt_solver.Sat.var));
+        Iarr.iter go args
+      | Eq (a, b) ->
+        go a;
+        go b
+      | Le a | Not a -> go a
+      | And xs | Or xs -> Iarr.iter go xs
+      | Ite (c, a, b) ->
+        go c;
+        go a;
+        go b
+      | Arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
+      | Bool_const _ | Int_const _ -> ())
+  in
+  go pterm
+;;
+
 (* Preprocess -> clausify -> register a Bool term into the frame guarded by [sel]
    (default: the current innermost frame). Shared by [assert_term] and
    [assert_instance_at_frame]; the exception handling is the I8/CONTRACT-POISON
@@ -257,7 +302,14 @@ let assert_bool_at ?sel t pterm =
        DELIBERATE completeness degrade, distinct from a [Combination_unsound] fault, and
        it surfaces HERE at assert-time registration, so it must be caught on this ingress
        path too. *)
-    (try assert_clausified ?sel t cnf with
+    (try
+       assert_clausified ?sel t cnf;
+       (* Bool-cardinality rule: surface every buried Bool-sorted predicate application as
+          its own SAT atom so the finite Bool sort is decided, not left opaque (see
+          {!register_bool_terms}). Same term, same try-block, so an out-of-fragment buried
+          atom degrades identically to a clause-borne one. *)
+       register_bool_terms t pterm
+     with
      | Combine.Incomplete _ -> t.degraded <- true
      | Term.Overflow
      | Term.Unsupported _

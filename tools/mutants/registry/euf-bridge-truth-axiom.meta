@@ -1,0 +1,6 @@
+module=euf
+suite=euf-adapter-test
+target=smt/theories/euf/euf_adapter.ml
+description=Euf_adapter.create asserts the standing ⊤/⊥ bridge as true_const = false_const (assert_eq) instead of true_const <> false_const (assert_neq), inverting the axiom that makes Bool a two-valued sort. This is the SOUNDNESS half of the ⊤/⊥ bridge (the "asserted atoms -> equations" direction): an asserted predicate atom is encoded as p(x) = true_const / false_const (K_bool), and the true<>false axiom is what turns a congruence-derived collision (p(a)~true, p(b)~false, a=b => p(a)~p(b)) into a conflict. With the axiom merged the wrong way, true and false share a class, so no such collision is ever a conflict and the solver would wrong-SAT p(a) ∧ ¬p(b) ∧ a=b. Killed by euf_adapter_test test_predicate_conflict (asserts +p(x), -p(y), x=y and REQUIRES a Conflict; the mutant yields Consistent) and test_bool_lit_conflict (asserting the true constant false must conflict); the randomized oracle cross-check (test_random) also diverges.
+review=TODO Predicates item 1 (⊤/⊥ bridging, asserted-atoms->equations direction). Invariant: the standing bridge disequality is true_const <> false_const, so Bool has exactly two values and a predicate class reaching both true and false is unsat. Complements euf-predicate-watch-polarity (the flow-back/propagation direction).
+expected=KILLED-TEST
