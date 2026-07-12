@@ -182,20 +182,28 @@ let h_repeat_refute () =
 (* Assert-side qvar gate (R1 POINT 4, §1.1): a coerced placeholder reaching [assert_term]
    degrades to a clean [Unknown] (via the I8 Unsupported discipline), NEVER a crash and
    never registered. This closes the [Qvar.t]-coercion escape that the private alias alone
-   does not. Guard under test: the [Qvar.term_contains_qvar] gate at the top of
-   assert_term. Remove it and the placeholder reaches the solver. *)
+   does not. A placeholder is a bound-variable artifact, not a real fresh const, so a
+   coerced-in placeholder term is OUT OF FRAGMENT — the conservative verdict is [Unknown].
+
+   Discrimination note: the term is chosen table-free and UNSAT-if-the-placeholder-is-
+   accepted ([q >= 0] and [q <= -1]). With the gate: the first assert degrades ->
+   [Unknown]. Without the gate: the placeholder is taken as a real Int const and the pair
+   is [Unsat] -> RED. (A UF-model-bearing term like [f(q)=0] would NOT discriminate,
+   because the M2 [.oxsmt.*] model-filtering net independently degrades it to [Unknown] —
+   that filtering is exactly why a leaked placeholder "influences nothing observable"; the
+   gate is the front-line closure, M2 the defense-in-depth backstop.) *)
 let coercion_gate () =
   let s = Session.create () in
   let ctx = Session.context s in
-  let f = Session.declare_fun s "f" int_to_int in
-  (* mint a placeholder directly and coerce it into an asserted term *)
+  (* mint a placeholder directly and coerce it into asserted terms *)
   let q = Qvar.to_term (Qvar.mint (Session.env s) ctx ~lemma_id:999 ~index:0 Sort.int) in
-  Session.assert_term
-    s
-    (Context.eq ctx (Context.app ctx f [ q ]) (Context.int_const ctx 0));
+  Session.assert_term s (Context.ge ctx q (Context.int_const ctx 0));
+  Session.assert_term s (Context.le ctx q (Context.int_const ctx (-1)));
   let v = Session.check_sat s in
   check
-    (Printf.sprintf "GATE: coerced placeholder -> clean unknown (got %s)" (verdict_str v))
+    (Printf.sprintf
+       "GATE: coerced placeholder -> clean unknown, not unsat (got %s)"
+       (verdict_str v))
     (v = Session.Unknown);
   (* and it did not crash: reaching here at all is the no-[Failure] half of the check *)
   check "GATE: no crash on coerced placeholder" true
