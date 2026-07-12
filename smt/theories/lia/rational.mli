@@ -1,18 +1,26 @@
 (** Exact rational arithmetic for the LIA simplex (Dutertre-de Moura [DdM06]).
 
     Values are normalized fractions [num/den] with [den > 0] and [gcd(|num|, den) = 1];
-    [zero = 0/1]. Every arithmetic operation is {b overflow-guarded}: it raises
-    {!Overflow} {e before} producing a wrapped (silently wrong) result. This is the LIA
-    analogue of the [Term.Overflow] session-boundary contract (INVARIANTS.md I8, ADR-0003
-    Overflow/Unsupported): the numeric layer never wraps unsoundly; the exception is
-    raised before any mutable solver state is touched, so the catch boundary degrades to
-    verdict [unknown] with state intact. We define a local exception (rather than reuse
-    [Term.Overflow]) because this module is term-agnostic; the boundary contract is
-    identical.
+    [zero = 0/1]. Two-tier (core-bignum W2): a native-int [Small] fast path with an
+    arbitrary-precision [Big] fallback (hand-rolled {!Bigint}, stdlib-only). The tier is
+    an implementation detail — [t] is abstract and values are canonical (fits-int63 ⟺
+    [Small]), so the tier is invisible to verdicts, models, and pivot order (INVARIANTS.md
+    I6).
 
-    Native [int] numerators/denominators are a v1 decision (ADR-0003): refinement VCs
-    carry tiny coefficients. The revisit trigger is a real VC overflowing native [int]
-    (swap for a stdlib bignum), which this interface is shaped to allow. *)
+    {b Overflow contract (core-bignum-review.md R1).} INTERNAL arithmetic never wraps and
+    never raises: [add]/[sub]/[mul]/[div]/[neg]/[abs]/[compare]/[of_frac] promote to [Big]
+    on native overflow and continue exactly. The exception {!Overflow} is raised ONLY at
+    the OUTPUT-PROJECTION boundary — [num], [den], [floor], [ceil] return a native [int]
+    and raise iff the (integer) value does not fit int63 — so a [Big] model value or B&B
+    branch bound degrades to verdict [unknown] at those sinks (retaining the pre-W2 poison
+    there), and NEVER truncates. This preserves the [Term.Overflow] session-boundary
+    contract (INVARIANTS.md I8, ADR-0003): the exception is raised before any mutable
+    solver state is touched, so the catch boundary degrades with state intact. Local
+    exception (not [Term.Overflow]) because this module is term-agnostic; the boundary
+    contract is identical.
+
+    Do NOT use polymorphic [(=)] / [Stdlib.compare] / [Hashtbl.hash] on [t] (a two-tier
+    variant makes them tier-sensitive): use {!equal} / {!compare} (value-based, R5). *)
 
 exception Overflow
 
@@ -23,11 +31,15 @@ val one : t
 val of_int : int -> t
 
 (** [of_frac num den] is [num/den] normalized; [den <> 0] required ([Invalid_argument]
-    otherwise). Raises {!Overflow} if normalization would wrap (e.g. numerator/denominator
-    = [min_int]). *)
+    otherwise). Never raises {!Overflow} (promotes to [Big] if the native normalization
+    would wrap). *)
 val of_frac : int -> int -> t
 
+(** [num t] / [den t]: the numerator / denominator as a native [int]. OUTPUT-PROJECTION
+    boundary (R1): raises {!Overflow} iff the component does not fit int63 (only possible
+    in the [Big] tier). Callers at native-int sinks catch this and degrade to [unknown]. *)
 val num : t -> int
+
 val den : t -> int
 val add : t -> t -> t
 val sub : t -> t -> t
@@ -38,7 +50,10 @@ val div : t -> t -> t
 
 val neg : t -> t
 val abs : t -> t
+
+(** Value-based total order / equality — never raise (promote to a common tier). *)
 val compare : t -> t -> int
+
 val equal : t -> t -> bool
 
 (** [sign t] is [-1], [0], or [1]. *)
@@ -46,13 +61,23 @@ val sign : t -> int
 
 val is_zero : t -> bool
 
-(** [is_int t] iff [den t = 1]. *)
+(** [is_int t] iff [den t = 1]. Never raises. *)
 val is_int : t -> bool
 
-(** [floor t] / [ceil t]: greatest integer [<= t] / least integer [>= t]. *)
+(** [floor t] / [ceil t]: greatest integer [<= t] / least integer [>= t], as a native
+    [int]. OUTPUT-PROJECTION boundary (R1): raises {!Overflow} iff that integer does not
+    fit int63; never truncates. *)
 val floor : t -> int
 
 val ceil : t -> int
 val min : t -> t -> t
 val max : t -> t -> t
+
+(** Canonical decimal (core-bignum-review.md R7, the shared certificate wire format,
+    ADR-0006 #7): ["num"] when [den = 1], else ["num/den"]; each component has no leading
+    zeros, the sign is on the numerator only, and [den > 0]; zero renders exactly ["0"]. *)
 val to_string : t -> string
+
+(** Parse the {!to_string} grammar (decimal ["num"] or ["num/den"]); [den > 0] required.
+    Round-trips with {!to_string}. *)
+val of_string : string -> t
