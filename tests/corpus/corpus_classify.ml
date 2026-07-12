@@ -133,7 +133,14 @@ let scan_commands sexps =
        | Sexp.List (head :: _) ->
          (match Sexp.simple head with
           | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
-          | Some ("push" | "pop") -> n_checks, true
+          (* push/pop AND reset/reset-assertions are stateful commands v1 does not support.
+            The parser silently no-ops reset* (parser.ml), so a file that resets away a
+            contradictory assertion would otherwise be solved on its STALE assertion set
+            and report a false verdict; degrade it to unknown-incremental here, exactly as
+            push/pop. Dispatch is on the Sexp command HEAD (whitespace-robust:
+            [( reset ... )] is caught, unlike a raw substring scan) and only a top-level
+            command head, so a user symbol named [reset] inside a term never trips it. *)
+          | Some ("push" | "pop" | "reset" | "reset-assertions") -> n_checks, true
           | _ -> n_checks, incr)
        | _ -> n_checks, incr)
     (0, false)

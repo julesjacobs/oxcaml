@@ -241,6 +241,16 @@ corpus-run-release:
 regress-test:
 	@mkdir -p $(LOGS)
 	$(DUNE) build tests/corpus/corpus_classify.exe
+	@# Discrimination self-test (board #162 scoped review): the reset-assertions
+	@# whitespace-evasion shape MUST degrade to unknown-incremental. Before the scan_commands
+	@# reset* backstop this file was solved on its stale assertion set and reported a false
+	@# `mismatch` (the RED); this asserts the GREEN so the gate's own discrimination can't
+	@# silently regress.
+	@out=$$(_build/default/tests/corpus/corpus_classify.exe tests/regress/fixtures/reset_assertions_evasion.smt2); \
+	  case "$$out" in \
+	    "unknown-incremental "*) echo "regress selftest: reset-evasion -> [$$out] OK" ;; \
+	    *) echo "regress selftest FAILED: reset-evasion -> [$$out] (want unknown-incremental)" >&2; exit 1 ;; \
+	  esac
 	CLASSIFY=_build/default/tests/corpus/corpus_classify.exe \
 	  REGRESS_TIMEOUT=$(REGRESS_TIMEOUT) REGRESS_JOBS=$(REGRESS_JOBS) \
 	  REGRESS_RAW=$(LOGS)/regress-run.raw REGRESS_REPORT=$(LOGS)/regress-harness-report.md \

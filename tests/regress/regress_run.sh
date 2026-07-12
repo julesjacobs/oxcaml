@@ -6,12 +6,21 @@
 #
 # WHY IT IS SOUND BY CONSTRUCTION. The verdict for a kept file comes from the exact same
 # binary the headline uses — tests/corpus/corpus_classify.exe (the shipped Session path;
-# guarded against the CLI by tests/corpus/driver_equiv_test). corpus_classify itself
-# fail-closes: it degrades an incremental file to `unknown-incremental` and an
-# unsupported/unparsable file to `parse-fail`, and it NEVER returns a definite sat/unsat it
-# cannot stand behind. So this runner's own static filter (regress_scan.awk) only shapes the
-# skip CENSUS and avoids wasting time on hopeless files — a mis-scan can mislabel a skip
-# bucket but can never manufacture a false MISMATCH.
+# guarded against the CLI by tests/corpus/driver_equiv_test). corpus_classify's own
+# scan_commands is the AUTHORITATIVE stateful/incremental gate: it dispatches on each
+# top-level Sexp command HEAD and degrades multi-check, push/pop, AND reset/reset-assertions
+# to `unknown-incremental` (the last three matter because the parser silently no-ops reset*
+# — see parser.ml — so a reset file would otherwise be solved on a STALE assertion set); an
+# unsupported/unparsable file becomes `parse-fail`. Because that gate is head-exact (not a
+# text scan), it catches whitespace shapes like `( reset-assertions )`, so a file that would
+# yield a wrong verdict never reaches a definite answer. This runner's OWN static filter
+# (regress_scan.awk) is therefore only a cheap pre-filter to shape the skip CENSUS and skip
+# hopeless files without spawning a solve — its correctness is backstopped by scan_commands,
+# so a mis-scan can mislabel a skip bucket but can NOT manufacture a false MISMATCH. (The
+# deeper fix — making the PARSER itself fail-closed on reset* — is tracked in the riders
+# lane; this scan_commands degrade is the belt-and-suspenders driver-level layer.) The
+# tests/regress/fixtures/reset_assertions_evasion.smt2 fixture + the `make regress-test`
+# self-test are the standing RED/GREEN guard for this claim.
 #
 # FAIL-CLOSED FILTER (v1: non-incremental + supported logic only). A file is KEPT only when
 # it is single-check, in a logic we ship (QF_UF / QF_LIA / QF_UFLIA), quantifier-free, and

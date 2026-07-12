@@ -19,10 +19,12 @@ BEGIN { logic = "-"; nchk = 0; pp = 0; q = 0; ci = 0; ne = 0; ev = "-"; lastv = 
   }
   # (check-sat and (check-sat-assuming both count as one check each.
   tmp = line; nchk += gsub(/\(check-sat/, "", tmp)
-  # push/pop and reset/reset-assertions are all stateful (incremental-family) commands we
-  # do not support; the parser treats reset* as a SILENT no-op (parser.ml), which can flip a
-  # verdict, so a file using any of them must be skipped as incremental, not solved.
-  if (line ~ /\(push/ || line ~ /\(pop/ || line ~ /\(reset/) pp = 1
+  # push/pop and reset/reset-assertions are all stateful (incremental-family) commands we do
+  # not support. This is only a CHEAP PRE-FILTER (allow optional whitespace after the paren,
+  # e.g. `( reset-assertions )`); the AUTHORITATIVE, head-exact gate is corpus_classify's
+  # scan_commands, which degrades all of these to unknown-incremental even if this regex
+  # misses one — so a miss here costs at most a wasted solve, never a false MISMATCH.
+  if (line ~ /\([ \t]*push/ || line ~ /\([ \t]*pop/ || line ~ /\([ \t]*reset/) pp = 1
   if (line ~ /\(forall/ || line ~ /\(exists/) q = 1
   if (line ~ /^[ \t]*;[ \t]*EXPECT:/) {
     v = line; sub(/^[ \t]*;[ \t]*EXPECT:[ \t]*/, "", v); gsub(/[ \t\r]+$/, "", v)
