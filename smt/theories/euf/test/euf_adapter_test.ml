@@ -799,15 +799,16 @@ let test_random () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 3b. Explanation PRECEDENCE regression (#102). The adapter snapshots a propagated
-   literal's reason at PROPAGATION time; a later assertion that opens a shorter/alternate
-   congruence path must NOT sneak into the reason (the ask-time re-derivation bug: the
-   returned premise would postdate the explained literal, tripping the SAT core's
-   CONTRACT-EX guard -> poison -> unknown, which bricked the QG / eq_diamond /
-   EUF-in-QF_LIA families). Here: a=d is propagated true via the chain a=b,b=c,c=d; THEN a
-   shorter path a=e,e=d is asserted; [explain] must still cite only the (pre-propagation)
-   chain. *)
-let test_explain_precedence () =
+(* 3b(i). Explanation reason-content on the EQUALITY path (#102). NOT a discriminator for
+   the ask-time bug — a redundant same-class merge is skipped (euf.ml), so the forest path
+   from a to d stays unique and the old ask-time code returned the same reason, so this
+   PASSES against both implementations. Its job is to PIN the equality-path reason
+   content: a=d propagated via the chain a=b,b=c,c=d must be explained by exactly that
+   chain, and a later shorter path a=e,e=d must not change the cached content. A future
+   regression that corrupted equality-path reason content (in a way the diseq
+   discriminator below would not catch) turns this red. Kept alongside 3b(ii) per the
+   team-lead's ruling. *)
+let test_explain_precedence_eq_path_property () =
   let env, _u, _unary, _pred, konst, _bpred = make_env () in
   let ctx = Context.create env in
   let a = Context.const ctx (konst "a") in
@@ -822,31 +823,97 @@ let test_explain_precedence () =
   let a_cd = reg h (Context.eq ctx c d) in
   let a_ae = reg h (Context.eq ctx a e) in
   let a_ed = reg h (Context.eq ctx e d) in
-  (* chain a=b, b=c, c=d -> a=d theory-implied true *)
   assert_lit h (Lit.make a_ab true);
   assert_lit h (Lit.make a_bc true);
   assert_lit h (Lit.make a_cd true);
   let ad_pos = Lit.make a_ad true in
   (match A.check h.adapter Theory.Propagate with
    | Theory.Propagations lits ->
-     check "precedence: (a=d) propagated true" (List.exists (Lit.equal ad_pos) lits)
-   | _ -> check "precedence: expected propagation of (a=d)" false);
-  (* snapshot the assertions that existed AT propagation time (all premises must be here) *)
-  let at_prop = h.asserted in
-  (* NOW assert a shorter alternate path a=e, e=d — strictly AFTER (a=d) was propagated. A
-     re-derivation against the current forest could route a~d through these later edges. *)
+     check "eq-path: (a=d) propagated true" (List.exists (Lit.equal ad_pos) lits)
+   | _ -> check "eq-path: expected propagation of (a=d)" false);
+  let chain =
+    Lit.Set.of_list [ Lit.make a_ab true; Lit.make a_bc true; Lit.make a_cd true ]
+  in
+  let expl1 = A.explain h.adapter ad_pos in
+  check
+    "eq-path: reason is exactly the causal chain {a=b,b=c,c=d}"
+    (Lit.Set.equal (Lit.Set.of_list expl1.Explanation.premises) chain);
+  (* a later shorter path must not change the cached reason content *)
   assert_lit h (Lit.make a_ae true);
   assert_lit h (Lit.make a_ed true);
-  let expl = A.explain h.adapter ad_pos in
-  let prem = Lit.Set.of_list expl.Explanation.premises in
-  check "precedence: reason non-empty" (expl.Explanation.premises <> []);
-  (* THE property: every premise was asserted BEFORE the propagation (precedence-valid);
-     in particular the later a=e / e=d are excluded. *)
+  let expl2 = A.explain h.adapter ad_pos in
   check
-    "precedence: reason excludes later-asserted premises"
+    "eq-path: reason content stable under a later shorter path"
+    (Lit.Set.equal (Lit.Set.of_list expl2.Explanation.premises) chain)
+;;
+
+(* 3b(ii). Explanation PRECEDENCE regression (#102), on the DISEQUALITY path — the actual
+   home of the defect (codex review). [distinct_witness] (euf.ml) scans asserted diseqs in
+   fixed ASSERTION order and returns the FIRST that separates the two classes; the
+   ask-time re-derivation therefore picks whichever separating diseq was asserted earliest
+   AT ASK TIME, then explains the two congruence legs against the CURRENT forest — legs
+   that a later merge can shorten, yielding premises that POSTDATE the explained literal
+   (CONTRACT-EX violation -> poison -> unknown). Snapshotting the reason at propagation
+   time fixes it.
+
+   Scenario (codex's exact construction): assert e<>f EARLY (so it sits first in the diseq
+   scan), then c<>d, a=c, b=d — now a,b are separated only by the c<>d witness, so ~(a=b)
+   propagates with reason [{a=c, b=d, c<>d}] (all pre-propagation). THEN assert a=e, b=f:
+   a~c~e and b~d~f, so e<>f ALSO now separates a,b — and it is earlier in the scan, so an
+   ask-time re-derivation switches to it and cites the LATER a=e / b=f. [explain] must
+   still return the snapshotted [{a=c, b=d, c<>d}]. (This test FAILS against the pre-fix
+   ask-time implementation and passes with the cache — the "locks the bug shut" criterion;
+   the equality-path variant did not, because a redundant same-class merge is skipped so
+   the forest path stays unique. Verified both directions in a scratch worktree, see the
+   fix-round report.) *)
+let test_explain_precedence_diseq_regression () =
+  let env, _u, _unary, _pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c = Context.const ctx (konst "c") in
+  let d = Context.const ctx (konst "d") in
+  let e = Context.const ctx (konst "e") in
+  let f = Context.const ctx (konst "f") in
+  let h = make_harness env ctx in
+  let a_ab = reg h (Context.eq ctx a b) in
+  let a_ef = reg h (Context.eq ctx e f) in
+  let a_cd = reg h (Context.eq ctx c d) in
+  let a_ac = reg h (Context.eq ctx a c) in
+  let a_bd = reg h (Context.eq ctx b d) in
+  let a_ae = reg h (Context.eq ctx a e) in
+  let a_bf = reg h (Context.eq ctx b f) in
+  (* e<>f asserted FIRST (earliest in the diseq scan), then the c<>d witness + merges *)
+  assert_lit h (Lit.make a_ef false);
+  assert_lit h (Lit.make a_cd false);
+  assert_lit h (Lit.make a_ac true);
+  assert_lit h (Lit.make a_bd true);
+  (* a~c, b~d, c<>d => ~(a=b) theory-implied (distinct) *)
+  let ab_neg = Lit.make a_ab false in
+  (match A.check h.adapter Theory.Propagate with
+   | Theory.Propagations lits ->
+     check "precedence(diseq): ~(a=b) propagated" (List.exists (Lit.equal ab_neg) lits)
+   | _ -> check "precedence(diseq): expected propagation of ~(a=b)" false);
+  (* assertions present AT propagation time — every valid premise must be among these *)
+  let at_prop = h.asserted in
+  (* NOW merge a~e and b~f (strictly AFTER the propagation): e<>f now ALSO separates a,b,
+     and it is earlier in the diseq scan, so an ask-time re-derivation would cite a=e/b=f. *)
+  assert_lit h (Lit.make a_ae true);
+  assert_lit h (Lit.make a_bf true);
+  let expl = A.explain h.adapter ab_neg in
+  let prem = Lit.Set.of_list expl.Explanation.premises in
+  check "precedence(diseq): reason non-empty" (expl.Explanation.premises <> []);
+  (* THE property (fails on the ask-time implementation): every premise predates the
+     propagation — the later a=e / b=f are excluded. *)
+  check
+    "precedence(diseq): reason excludes later-asserted premises"
     (Lit.Set.subset prem at_prop);
-  check "precedence: reason excludes a=e" (not (Lit.Set.mem (Lit.make a_ae true) prem));
-  check "precedence: reason excludes e=d" (not (Lit.Set.mem (Lit.make a_ed true) prem))
+  check
+    "precedence(diseq): reason excludes a=e"
+    (not (Lit.Set.mem (Lit.make a_ae true) prem));
+  check
+    "precedence(diseq): reason excludes b=f"
+    (not (Lit.Set.mem (Lit.make a_bf true) prem))
 ;;
 
 (* 3c. Cache lifecycle under push/pop (the AP1 trailed-state class). A propagated
@@ -910,6 +977,58 @@ let test_explain_cache_pushpop () =
   check "cache: re-cached reason explains" (explains de_pos)
 ;;
 
+(* 3d. Fix x euf-perf incremental-propagate interaction (budget-reviewer F1 / probe 4).
+   euf-perf's [Euf.propagate] is delta-driven: a watched atom's flip is reported at the
+   next [propagate] whose dirty set touches its class, which may be a LATER [check] than
+   the one right after the causal merge. The snapshotted reason must still be
+   precedence-valid and causal regardless of WHICH check reports it (precedence is tied to
+   "before the literal is trailed", structural, not to report timing). Here (a=b)'s causal
+   merge c=b lands with NO intervening check; an unrelated d=e is then asserted; the flip
+   surfaces only at the next [check] — and [explain] must return the causal [{a=c, c=b}],
+   never the unrelated d=e. *)
+let test_explain_euf_perf_deferral () =
+  let env, _u, _unary, _pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c = Context.const ctx (konst "c") in
+  let d = Context.const ctx (konst "d") in
+  let e = Context.const ctx (konst "e") in
+  let h = make_harness env ctx in
+  let a_ab = reg h (Context.eq ctx a b) in
+  let a_ac = reg h (Context.eq ctx a c) in
+  let a_cb = reg h (Context.eq ctx c b) in
+  let a_de = reg h (Context.eq ctx d e) in
+  let propd effort =
+    match A.check h.adapter effort with
+    | Theory.Propagations lits -> lits
+    | _ -> []
+  in
+  let ab_pos = Lit.make a_ab true in
+  (* a=c, then DRAIN propagate so its delta watermark advances (no flip for a=b yet) *)
+  assert_lit h (Lit.make a_ac true);
+  check
+    "deferral: (a=b) not yet implied after only a=c"
+    (not (List.exists (Lit.equal ab_pos) (propd Theory.Propagate)));
+  (* causal merge c=b lands with NO check; then an unrelated d=e; the (a=b) flip is
+     deferred to the NEXT check, reported alongside d=e's dirty entry. *)
+  assert_lit h (Lit.make a_cb true);
+  assert_lit h (Lit.make a_de true);
+  check
+    "deferral: (a=b) reported at the later check (after c=b + unrelated d=e)"
+    (List.exists (Lit.equal ab_pos) (propd Theory.Propagate));
+  let expl = A.explain h.adapter ab_pos in
+  let prem = Lit.Set.of_list expl.Explanation.premises in
+  check "deferral: reason non-empty" (expl.Explanation.premises <> []);
+  (* causal {a=c, c=b} only — the unrelated later d=e must not appear *)
+  check
+    "deferral: reason is the causal pair {a=c, c=b}"
+    (Lit.Set.equal prem (Lit.Set.of_list [ Lit.make a_ac true; Lit.make a_cb true ]));
+  check
+    "deferral: reason excludes the unrelated d=e"
+    (not (Lit.Set.mem (Lit.make a_de true) prem))
+;;
+
 (* ================================================================== *)
 let () =
   print_endline "euf adapter self-test:";
@@ -917,7 +1036,9 @@ let () =
   test_predicate_conflict ();
   test_bool_lit_conflict ();
   test_propagation ();
-  test_explain_precedence ();
+  test_explain_precedence_eq_path_property ();
+  test_explain_precedence_diseq_regression ();
+  test_explain_euf_perf_deferral ();
   test_explain_cache_pushpop ();
   test_pushpop_restore ();
   test_pop_boundaries ();

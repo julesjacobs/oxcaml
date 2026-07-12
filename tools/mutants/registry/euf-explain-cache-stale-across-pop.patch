@@ -1,0 +1,13 @@
+diff --git a/smt/theories/euf/euf_adapter.ml b/smt/theories/euf/euf_adapter.ml
+index f6e9d8e82c..6f993e0ecf 100644
+--- a/smt/theories/euf/euf_adapter.ml
++++ b/smt/theories/euf/euf_adapter.ml
+@@ -238,7 +238,7 @@ let pop t n =
+     else (
+       match frames with
+       | fr :: rest ->
+-        List.iter (fun l -> t.explain_cache <- Lit.Map.remove l t.explain_cache) fr;
++        ignore fr;
+         drop (k - 1) rest
+       | [] -> [])
+   in

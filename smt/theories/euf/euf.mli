@@ -95,7 +95,7 @@ val explain : 'p t -> Term.t -> Term.t -> 'p list
 type implied =
   { atom : Term.t (** a watched non-Bool [Eq(a,b)] registered via {!register_term} *)
   ; value : bool
-    (** [true]: [a] and [b] are now in one class ([a = b] entailed). [false]: [a] and [b]
+  (** [true]: [a] and [b] are now in one class ([a = b] entailed). [false]: [a] and [b]
       are now provably distinct (an asserted disequality separates their classes) —
       [¬(a = b)] entailed. *)
   }
@@ -139,10 +139,11 @@ val context : 'p t -> Context.t
 
 (** Debug/test controls. *)
 module Debug : sig
-  (** When [true] (the default), every explanation produced by {!check}/{!explain}/
-      {!explain_implied} is re-verified the moment it is produced by replaying its
-      premises' equalities into a {e fresh, independent} naive union-find and confirming
-      they alone imply the claimed (dis)equality (DESIGN.md §7 self-check). A failed
-      self-check raises [Failure]. Turn off only for a production/perf build. *)
+  (** When [true], every explanation produced by {!check}/{!explain}/{!explain_implied} is
+      re-verified the moment it is produced by replaying its premises' equalities into a
+      {e fresh, independent} naive union-find and confirming they alone imply the claimed
+      (dis)equality (DESIGN.md §7 self-check). A failed self-check raises [Failure].
+      Defaults to [false] (perf); opt in via the [OXSMT_EUF_SELF_CHECK] environment
+      variable (read at module init), as the test/CI configuration does. *)
   val self_check : bool ref
 end
