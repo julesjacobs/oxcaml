@@ -215,10 +215,16 @@ struct
         in
         (* PRECONDITION defensive check (codex): preprocessing lifts every Int-sorted
            [Ite] before assertion (ADR-0003 invariant 10); a residual one would take no
-           use-bit for its neutral-parented Int branches. Fail loud in debug rather than
-           silently under-approximate. *)
+           use-bit for its neutral-parented Int branches and silently under-approximate.
+           UNCONDITIONAL guard, not [assert]: a soundness tripwire that must survive the
+           release [-noassert] build (codex AP4), so raise [Combination_unsound] (→ engine
+           CONTRACT-POISON → [unknown]) rather than let a residual Int-[Ite] pass. *)
         (match term.Term.node with
-         | Term.Ite _ -> assert (not is_int)
+         | Term.Ite _ when is_int ->
+           raise
+             (Combination_unsound
+                "residual Int-Ite in interface walk: preprocessing must lift it \
+                 (ADR-0003 inv. 10) [codex AP4 tripwire]")
          | _ -> ());
         (* boundary Int node: an OWNED node under a parent EDGE whose owner differs (ADR
            §3.1 "for each parent→child edge it compares owners and records a crossing").

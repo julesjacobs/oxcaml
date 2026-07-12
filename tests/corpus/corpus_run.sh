@@ -46,6 +46,12 @@ ASSERTIONS="$(printf '%s' "$STAMP" | sed -n 's/.*assertions=\([a-z]*\).*/\1/p')"
 EUF_SELF_CHECK="$(printf '%s' "$STAMP" | sed -n 's/.*euf_self_check=\([a-z]*\).*/\1/p')"
 [ -n "$ASSERTIONS" ] || ASSERTIONS=unknown
 [ -n "$EUF_SELF_CHECK" ] || EUF_SELF_CHECK=unknown
+# codex AP5(ii): bind the stamp to the ACTUAL classifier binary by its sha256 (forensic /
+# audit — detects a stamp that describes one binary but was produced by another, e.g. a
+# stale CLASSIFY passed to a direct corpus_run.sh invocation). Not a promote gate itself;
+# the gate keys on release_config, and the make target fixes CLASSIFY to the fresh build.
+CLASSIFIER_SHA256="$(sha256sum "$CLASSIFY" 2>/dev/null | cut -d' ' -f1)"
+[ -n "$CLASSIFIER_SHA256" ] || CLASSIFIER_SHA256=unknown
 # release_config: the fail-closed predicate the promote gate re-checks.
 if [ "$ASSERTIONS" = off ] && [ "$EUF_SELF_CHECK" = off ] && [ "$DIRTY" = false ]; then
   RELEASE_CONFIG=true
@@ -112,7 +118,7 @@ total_mismatch=$(awk '$2=="mismatch"' "$RAW" | wc -l)
   echo "{"
   echo "  \"schema\": \"oxsmt-corpus-baseline/v1\","
   echo "  \"trunk\": \"$TRUNK\","
-  echo "  \"stamp\": { \"build_commit\": \"$BUILD_COMMIT\", \"dirty\": $DIRTY, \"assertions\": \"$ASSERTIONS\", \"euf_self_check\": \"$EUF_SELF_CHECK\", \"max_effort\": \"${MAXEFFORT:-unbounded}\", \"release_config\": $RELEASE_CONFIG },"
+  echo "  \"stamp\": { \"build_commit\": \"$BUILD_COMMIT\", \"dirty\": $DIRTY, \"assertions\": \"$ASSERTIONS\", \"euf_self_check\": \"$EUF_SELF_CHECK\", \"classifier_sha256\": \"$CLASSIFIER_SHA256\", \"max_effort\": \"${MAXEFFORT:-unbounded}\", \"release_config\": $RELEASE_CONFIG },"
   echo "  \"timeout_s\": $TIMEOUT, \"workers\": $JOBS, \"wall_s\": $wall, \"files_per_s\": $fps,"
   echo "  \"logics\": {"
   first=1

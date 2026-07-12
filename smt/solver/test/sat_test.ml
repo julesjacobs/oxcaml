@@ -457,8 +457,49 @@ let test_dimacs_strict () =
 
 (* ------------------------------------------------------------------ *)
 
+(* Board #60 / codex AP1 regression: a [Budget.Exceeded] raised at a decision tick must
+   not permanently lose the decision variable. Repro shape (codex's): clause (a ∨ b) and a
+   hook that raises on the FIRST tick of each solve. Pre-fix — the tick fired after
+   [pick_branch] popped the var from the VSIDS heap but before [unchecked_enqueue] — two
+   budgeted solves pop a then b off the heap and drop them (neither trailed, so
+   [cancel_until 0] cannot restore them), and a third solve returns [Sat] with both false,
+   FALSIFYING (a ∨ b). Post-fix the tick is after enqueue, so every raise leaves the
+   decided var trailed and fully recoverable; the disarmed third solve is [Sat] with a
+   satisfying model. *)
+let test_budget_tick_exception_safety () =
+  let module Local = struct
+    exception Stop
+  end
+  in
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  let b = Sat.new_var s in
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  let ticks = ref 0 in
+  Sat.set_budget_tick
+    s
+    (Some
+       (fun () ->
+         incr ticks;
+         if !ticks = 1 then raise Local.Stop));
+  let budgeted_solve () =
+    ticks := 0;
+    try ignore (Sat.solve s : Sat.result) with
+    | Local.Stop -> ()
+  in
+  budgeted_solve ();
+  budgeted_solve ();
+  Sat.set_budget_tick s None;
+  let r = Sat.solve s in
+  check "AP1: disarmed solve after two budget exceptions is Sat" (r = Sat.Sat);
+  check
+    "AP1: recovered model satisfies (a ∨ b) (no lost variable)"
+    (Sat.value s a || Sat.value s b)
+;;
+
 let () =
   test_dimacs_strict ();
+  test_budget_tick_exception_safety ();
   test_analyze_multi ();
   test_analyze_unit ();
   test_minimize_must_not_fire ();

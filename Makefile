@@ -72,8 +72,15 @@ CORPUS_MAX_BYTES ?= 20971520
 # per-file effort cap (SAT conflicts + decisions + seam Final-rounds). Empty (default) =
 # unbounded; the run still records per-file effort so an uncapped sweep calibrates N.
 CORPUS_MAX_EFFORT ?=
+# board #69: the GENEROUS wall safety net for `corpus-run-release`. The counted cap is the
+# binding cutoff; this only backstops pathological unbounded between-tick work (codex AP2b).
+# Large enough that it essentially never fires for a well-calibrated N.
+CORPUS_RELEASE_TIMEOUT ?= 120
+# board #69: sample dirs for `make dev-release-check` (dev≡release verdict-equality gate).
+# Default = the committed regression cases; override with a corpus subset for a wider sweep.
+DEV_RELEASE_DIRS ?= tests/cases
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline dev-release-check perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -183,19 +190,38 @@ corpus-run:
 ##   `make promote-baseline`. Pair with a counted cutoff (CORPUS_MAX_EFFORT=N) for a
 ##   load-independent, byte-reproducible headline.
 corpus-run-release:
+	@test -n "$(CORPUS_MAX_EFFORT)" || { \
+	  echo "corpus-run-release: CORPUS_MAX_EFFORT must be a finite N (codex AP2a) — a" >&2; \
+	  echo "  promotable run is cut off by the deterministic counted budget, never wall-only." >&2; \
+	  echo "  e.g. make corpus-run-release CORPUS_MAX_EFFORT=50000" >&2; \
+	  exit 1; }
 	@mkdir -p $(LOGS)
 	$(DUNE) build --profile release tests/corpus/corpus_classify.exe
 	CLASSIFY=_build/default/tests/corpus/corpus_classify.exe \
-	  CORPUS_TIMEOUT=$(CORPUS_TIMEOUT) CORPUS_JOBS=$(CORPUS_JOBS) \
+	  CORPUS_TIMEOUT=$(CORPUS_RELEASE_TIMEOUT) CORPUS_JOBS=$(CORPUS_JOBS) \
 	  CORPUS_MAX_BYTES=$(CORPUS_MAX_BYTES) CORPUS_MAX_EFFORT=$(CORPUS_MAX_EFFORT) \
 	  CORPUS_JSON=$(LOGS)/corpus-run.json CORPUS_RAW=$(LOGS)/corpus-run.raw \
 	  bash tests/corpus/corpus_run.sh $(CORPUS_DIRS)
+	@# AP5(i): CLASSIFY is a LITERAL (not $$(CLASSIFY)), so a promotable run is bound to the
+	@# freshly-built --profile release exe and cannot be pointed at another binary via a
+	@# make/env override. CORPUS_RELEASE_TIMEOUT is a GENEROUS safety net only — the counted
+	@# CORPUS_MAX_EFFORT is the binding, load-independent cutoff (AP2b: the wall still
+	@# backstops unbounded between-tick work; a file that hits it is a deterministic-enough
+	@# unknown, never counted-solved).
 
 ## promote-baseline — fail-closed headline promote (board #69). Copies a corpus-run JSON to
 ##   the committed tests/corpus/baseline_summary.json ONLY IF its provenance stamp is
-##   release_config=true and mismatch_count=0. No override. Defaults to the last run JSON.
+##   release_config=true, dirty=false, build_commit==HEAD, finite max_effort, and
+##   mismatch_count=0. No override. Defaults to the last run JSON.
 promote-baseline:
 	bash tools/promote_baseline.sh $(LOGS)/corpus-run.json
+
+## dev-release-check — repeatable dev≡release output-equality gate (board #69, codex AP4 /
+##   budget-reviewer H1). Builds corpus_classify under dev and --profile release and asserts
+##   byte-identical verdict+effort on $(DEV_RELEASE_DIRS) (default tests/cases): the release
+##   profile (assertions + debug oracles off) must be PERF-ONLY, never verdict-affecting.
+dev-release-check:
+	DUNE="$(DUNE)" DEV_RELEASE_DIRS="$(DEV_RELEASE_DIRS)" bash tools/dev_release_check.sh
 
 ## preprocess-test — smt/preprocess unit + property self-test (stdlib-only,
 ##   deterministic). Brute-force equivalence-by-evaluation for the desugaring

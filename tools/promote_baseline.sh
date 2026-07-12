@@ -6,12 +6,25 @@
 # nothing used to check the MEASURING BINARY's provenance, and a debug-oracle-on / dirty-
 # tree measurement silently became the headline (the contamination this board fixes).
 #
-# This gate refuses to promote unless the run JSON's provenance stamp says the number came
-# from a RELEASE-CONFIG binary on a CLEAN tree with ZERO soundness mismatches:
-#   release_config == true   (assertions off AND debug oracles off AND tree not dirty)
-#   mismatch_count  == 0      (no verdict contradicts a :status label)
+# This gate refuses to promote unless the run JSON's provenance stamp AND a live re-check of
+# the tree say the number came from a RELEASE-CONFIG binary, built from the COMMIT BEING
+# FILED, on a CLEAN tree, with a FINITE counted cutoff and ZERO soundness mismatches:
+#   release_config == true          (assertions off AND debug oracles off AND tree not dirty)
+#   stamp.dirty    == false          (re-checked; the run was on a clean tree)
+#   build_commit   == current HEAD   (re-checked live; the number was measured at THIS tree,
+#                                     not a stale run JSON from another commit; codex M1)
+#   max_effort     != unbounded      (a load-independent counted cap bound the run; codex AP2)
+#   mismatch_count == 0              (no verdict contradicts a :status label)
 # There is NO override flag — a wrong-config number can never be promoted. Fix the config
-# and re-measure (see `make corpus-run-release`).
+# and re-measure (see `make corpus-run-release CORPUS_MAX_EFFORT=N`).
+#
+# THREAT MODEL (codex AP5, ruled): this gate defends against ACCIDENTS — a dev-profile or
+# dirty-tree or wall-only run silently becoming the headline. It is NOT an adversarial
+# authenticator: the run JSON is trusted input, and hand-editing a measurement artifact to
+# forge release_config/mismatch_count is OUT OF THREAT MODEL (process forbids editing
+# measurement artifacts). The stamp records the classifier's sha256 for forensics, and the
+# `corpus-run-release` target binds CLASSIFY to the freshly-built release exe (not
+# overridable), so the accident paths are closed; deliberate forgery is not in scope.
 #
 # Usage: tools/promote_baseline.sh [RUN_JSON]   (default ../logs/corpus-run.json)
 set -uo pipefail
@@ -28,14 +41,35 @@ DEST="tests/corpus/baseline_summary.json"
 # by sed is sufficient (and matches how that script hand-writes the JSON).
 stamp=$(grep -o '"stamp": {[^}]*}' "$RUN_JSON")
 release=$(printf '%s' "$stamp" | sed -n 's/.*"release_config": \([a-z]*\).*/\1/p')
+dirty=$(printf '%s' "$stamp" | sed -n 's/.*"dirty": \([a-z]*\).*/\1/p')
+build_commit=$(printf '%s' "$stamp" | sed -n 's/.*"build_commit": "\([^"]*\)".*/\1/p')
+max_effort=$(printf '%s' "$stamp" | sed -n 's/.*"max_effort": "\([^"]*\)".*/\1/p')
 mismatch=$(sed -n 's/.*"mismatch_count": \([0-9][0-9]*\).*/\1/p' "$RUN_JSON")
 [ -n "$release" ] || release=absent
+[ -n "$dirty" ] || dirty=absent
+[ -n "$build_commit" ] || build_commit=absent
+[ -n "$max_effort" ] || max_effort=absent
 [ -n "$mismatch" ] || mismatch=absent
+head_commit=$(git rev-parse HEAD 2>/dev/null || echo unknown)
 
 fail=0
 if [ "$release" != true ]; then
   echo "promote-baseline: REFUSED — measurement is not release-config (release_config=$release)." >&2
   echo "  stamp: ${stamp:-<none: pre-#69 or malformed JSON>}" >&2
+  fail=1
+fi
+if [ "$dirty" != false ]; then
+  echo "promote-baseline: REFUSED — stamp.dirty=$dirty; the run was not on a clean tree." >&2
+  fail=1
+fi
+if [ "$build_commit" != "$head_commit" ]; then
+  echo "promote-baseline: REFUSED — build_commit ($build_commit) != current HEAD ($head_commit);" >&2
+  echo "  the number was measured at a different tree than the one being filed (codex M1)." >&2
+  fail=1
+fi
+if [ "$max_effort" = unbounded ] || [ "$max_effort" = absent ]; then
+  echo "promote-baseline: REFUSED — max_effort=$max_effort; a promotable run needs a finite" >&2
+  echo "  counted cutoff (codex AP2), else the headline is wall-clock/load-dependent." >&2
   fail=1
 fi
 if [ "$mismatch" != 0 ]; then

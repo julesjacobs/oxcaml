@@ -130,8 +130,12 @@ let check t effort =
     (* N1 (insurance): a conflict with no premises would be an unconditional [false] — a
        soundness bug. Unconstructible here (the violated disequality forces true=false or
        a merged asserted diseq, always citing >= 1 asserted literal; reflexive [Eq] folds
-       to [true] before registration so no vacuous atom exists), asserted anyway. *)
-    assert (premises <> []);
+       to [true] before registration so no vacuous atom exists). UNCONDITIONAL guard, not
+       [assert]: an empty premise set is an unconditional [false] (soundness bug), so this
+       tripwire must survive the release [-noassert] build (codex AP4). Raising degrades
+       to [unknown] via CONTRACT-POISON — never a verdict from an unsound conflict. *)
+    if premises = []
+    then failwith "Euf_adapter: empty conflict premise set (unsound) [codex AP4 tripwire]";
     Theory.Conflict { Explanation.premises; rule = Euf_congruence }
   | Euf.Consistent ->
     (* A watched Eq atom whose entailed truth just changed becomes a theory propagation —
@@ -162,8 +166,12 @@ let explain t lit =
     let premises = lits_of_prems (Euf.explain_implied t.engine imp) in
     (* N1 (insurance): an empty propagation reason is unconstructible — a registered [Eq]
        atom has distinct sides (reflexive folds to [true]), so proving it (dis)equal cites
-       >= 1 asserted literal. *)
-    assert (premises <> []);
+       >= 1 asserted literal. UNCONDITIONAL guard (not [assert]): a soundness tripwire
+       that must survive release [-noassert] (codex AP4); raising degrades to [unknown]. *)
+    if premises = []
+    then
+      failwith
+        "Euf_adapter.explain: empty propagation reason (unsound) [codex AP4 tripwire]";
     { Explanation.premises; rule = Euf_congruence }
   | _ -> invalid_arg "Euf_adapter.explain: literal was not propagated by this theory"
 ;;

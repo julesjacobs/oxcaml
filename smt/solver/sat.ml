@@ -971,9 +971,17 @@ let search t assumps conflict_limit =
             match pick_branch t with
             | Some l ->
               t.decisions <- t.decisions + 1;
-              budget_tick t (* effort (#60): one SAT decision *);
               new_decision_level t;
-              unchecked_enqueue t l Decision
+              unchecked_enqueue t l Decision;
+              (* effort (#60): tick AFTER the decision is on the trail. [pick_branch] has
+                 already popped [l]'s var from the VSIDS heap; ticking before [enqueue]
+                 would let [Budget.Exceeded] escape with the var neither on the trail nor
+                 in the heap, and [Sat.solve]'s entry [cancel_until 0] only restores
+                 trailed vars — the var would be lost, and a later solve on the same core
+                 could return a model that omits (hence may falsify a clause over) it
+                 [codex AP1, wrong-SAT]. Ticking here means any raise leaves [l] trailed
+                 and fully recoverable by [cancel_until 0]. *)
+              budget_tick t
             | None ->
               (* Full Boolean assignment consistent under Propagate-effort. A plugged
                  theory gets a complete (Final) check: it may accept the model (Sat),
@@ -1001,9 +1009,14 @@ let search t assumps conflict_limit =
                     if not t.ok then result := Some R_unsat)))
           else (
             t.decisions <- t.decisions + 1;
-            budget_tick t (* effort (#60): one SAT decision (assumption-forced) *);
             new_decision_level t;
-            unchecked_enqueue t !next Decision))
+            unchecked_enqueue t !next Decision;
+            (* effort (#60): tick AFTER enqueue, same rule as the [pick_branch] site above
+               (codex AP1). This branch decides an assumption literal, whose var was NOT
+               popped from the heap, so a pre-enqueue raise here would in fact be
+               recoverable — but ticking post-enqueue keeps a single, obviously-safe
+               placement for every decision and is robust to future refactors. *)
+            budget_tick t))
   done;
   match !result with
   | Some r -> r

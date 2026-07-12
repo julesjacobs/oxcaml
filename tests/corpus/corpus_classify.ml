@@ -35,7 +35,14 @@ module Parser = Oxsmt_smtlib_parser.Parser
    effort/time and depresses the wall-cutoff headline. We disable it here so measurement
    never pays for it, and stamp the resulting state. The always-on simplex Farkas verifier
    (simplex.mli) is a soundness invariant, not a perf-debug toggle, and is deliberately
-   NOT disabled. *)
+   NOT disabled.
+
+   Coordination (team-lead): the trunk DEFAULT of [Euf.Debug.self_check] flips to OFF when
+   task/euf-perf (1c) lands, which also adds the [OXSMT_EUF_SELF_CHECK] opt-in env gate.
+   This explicit force makes the measurement binary release-config BY CONSTRUCTION under
+   EITHER land order (it becomes redundant, never wrong, once 1c lands); we do NOT add a
+   second env gate (1c owns it). [--stamp] READS the live ref, so it reports the true
+   effective state regardless of which branch is in the tree. *)
 let () = Oxsmt_euf.Euf.Debug.self_check := false
 
 (* Never-true, non-constant so the compiler cannot fold it to the special [assert false]
