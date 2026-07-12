@@ -53,6 +53,18 @@ let expect_raises name f =
   | exception _ -> report name true ""
 ;;
 
+(* Fail-closed assertion for the R7 completeness contract: the outcome must be a loud
+   [Eval_model.Malformed] — never [Satisfies] (that would be an unsound accept), and never
+   an unrelated crash. *)
+let expect_malformed name smt2 model_src =
+  match outcome_of smt2 model_src with
+  | Eval.Satisfies -> report name false "expected MALFORMED, got SATISFIES"
+  | Eval.Fails { index; _ } ->
+    report name false (Printf.sprintf "expected MALFORMED, got FAILS %d" index)
+  | exception Eval_model.Malformed _ -> report name true ""
+  | exception e -> report name false ("raised non-Malformed " ^ Printexc.to_string e)
+;;
+
 (* --- per-node satisfying + falsifying pairs -------------------------------------- *)
 
 let node_cases () =
@@ -276,6 +288,178 @@ let rejection_cases () =
     outcome_of "(declare-const p Bool)(assert p)" "(model (const p 3))")
 ;;
 
+(* --- R7 formula-completeness contract (UF-models ADR §4) -------------------------- *)
+
+let r7_completeness_cases () =
+  (* (a) declared-but-UNUSED symbols/sorts are NOT required. Here [f] is declared but
+         never applied and need not be in the model; the USED consts [a]/[b] +
+         [(sort S 2)] are all that is required. *)
+  expect_satisfies
+    "r7-a/unused-fun-not-required"
+    "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(declare-const b S)\n\
+     (assert (distinct a b))"
+    "(model (sort S 2) (const a 0) (const b 1))";
+  expect_satisfies
+    "r7-a/unused-const-not-required"
+    "(declare-const x Int)(declare-const unused Int)(assert (= x 3))"
+    "(model (const x 3))";
+  (* (b) a binding missing for a symbol that APPEARS in an assertion is fail-closed
+     (MALFORMED), never SATISFIES — for a const, a function table, ... *)
+  expect_malformed
+    "r7-b/missing-used-const"
+    "(declare-const x Int)(declare-const y Int)(assert (= x y))"
+    "(model (const x 3))";
+  expect_malformed
+    "r7-b/missing-used-fun-table"
+    "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(assert (= (f a) a))"
+    "(model (sort S 1) (const a 0))";
+  (* ... and even for a symbol that appears ONLY in an UNTAKEN [ite] branch: the check is
+     syntactic, so omitting [y] is rejected though lazy evaluation would never reach it
+     (fail-closed / stricter). *)
+  expect_malformed
+    "r7-b/untaken-ite-branch-counts"
+    "(declare-const x Int)(declare-const y Int)(assert (= (ite (<= x 0) x y) x))"
+    "(model (const x -1))";
+  (* (c) a USED uninterpreted sort with no [(sort S k)] entry is fail-closed. *)
+  expect_malformed
+    "r7-c/missing-sort-entry"
+    "(declare-sort S 0)(declare-const a S)(declare-const b S)(assert (distinct a b))"
+    "(model (const a 0) (const b 1))";
+  (* (c) the empty-sort rule: cardinality >= 1 always — [(sort S 0)] and negatives are
+     rejected at parse time. *)
+  expect_raises "r7-c/sort-card-zero-rejected" (fun () ->
+    outcome_of
+      "(declare-sort S 0)(declare-const a S)(declare-const b S)(assert (distinct a b))"
+      "(model (sort S 0) (const a 0) (const b 1))");
+  expect_raises "r7-c/sort-card-negative-rejected" (fun () ->
+    outcome_of
+      "(declare-sort S 0)(declare-const a S)(declare-const b S)(assert (distinct a b))"
+      "(model (sort S -1) (const a 0) (const b 1))")
+;;
+
+(* --- min_int model re-ingest (board eval-minint-reingest; ADR-0003 native int) ----- *)
+
+let minint_reingest_cases () =
+  (* [min_int]'s magnitude ([max_int + 1]) is not a representable positive native int, so
+     the SMT-LIB [(- n)] sidecar form must parse the whole signed literal, not negate a
+     parsed-positive [n]. Derive the token width-independently from [string_of_int]. *)
+  let s = string_of_int min_int in
+  let mag = String.sub s 1 (String.length s - 1) in
+  let minint_tok = Printf.sprintf "(- %s)" mag in
+  (* re-ingesting [x := min_int] as a model VALUE now succeeds (was
+     UNSUPPORTED/MALFORMED): [min_int <= 0] holds. *)
+  expect_satisfies
+    "minint/model-value-satisfies"
+    "(declare-const x Int)(assert (<= x 0))"
+    (Printf.sprintf "(model (const x %s))" minint_tok);
+  (* the round-trip equality: model [x := min_int] against an assertion that also names
+     [min_int] (exercises the reader's signed-literal path too). *)
+  expect_satisfies
+    "minint/reingest-eq"
+    (Printf.sprintf "(declare-const x Int)(assert (= x %s))" minint_tok)
+    (Printf.sprintf "(model (const x %s))" minint_tok);
+  (* a wrong value still MODEL-FAILS — min_int is representable, so it evaluates rather
+     than abstaining. *)
+  expect_fails
+    "minint/wrong-value-fails"
+    ~index:0
+    (Printf.sprintf "(declare-const x Int)(assert (= x %s))" minint_tok)
+    "(model (const x 0))";
+  (* the fix is tightly bounded: a genuinely out-of-range magnitude still abstains
+     (MALFORMED), never a wrong accept. *)
+  expect_malformed
+    "minint/huge-magnitude-abstains"
+    "(declare-const x Int)(assert (<= x 0))"
+    "(model (const x (- 99999999999999999999999999)))";
+  (* representing min_int does NOT weaken the overflow guard: arithmetic that leaves
+     native range (negating min_int, via [0 - x]) still raises rather than wrapping. *)
+  expect_raises "minint/neg-still-overflows" (fun () ->
+    outcome_of
+      "(declare-const x Int)(assert (= (- 0 x) 0))"
+      (Printf.sprintf "(model (const x %s))" minint_tok))
+;;
+
+(* --- function-table wire format vs the UF-models ADR §0/§1 (confirm-and-harden) ---- *)
+
+let table_format_cases () =
+  let g_decls =
+    "(declare-sort S 0)(declare-fun g (S S) S)(declare-const a S)(declare-const b S)"
+  in
+  (* n-ary (arity 2): a binary uninterpreted function, congruence-shaped table. *)
+  expect_satisfies
+    "table/binary-fun-sat"
+    (g_decls ^ "(assert (= (g a b) a))")
+    "(model (sort S 2) (const a 0) (const b 1)\n\
+    \  (fun g (default 1) (case (0 1) 0) (case (1 0) 1)))";
+  expect_fails
+    "table/binary-fun-fail"
+    ~index:0
+    (g_decls ^ "(assert (= (g a b) a))")
+    "(model (sort S 2) (const a 0) (const b 1) (fun g (default 1) (case (0 1) 1)))";
+  (* default fallthrough: an argument tuple with no matching case takes the default. *)
+  expect_satisfies
+    "table/default-fallthrough"
+    (g_decls ^ "(assert (= (g b b) b))")
+    "(model (sort S 2) (const a 0) (const b 1) (fun g (default 1) (case (0 1) 0)))";
+  (* codomain = Int. *)
+  let h_decls = "(declare-sort S 0)(declare-fun h (S) Int)(declare-const a S)" in
+  expect_satisfies
+    "table/int-codomain-sat"
+    (h_decls ^ "(assert (= (h a) 7))")
+    "(model (sort S 1) (const a 0) (fun h (default 0) (case (0) 7)))";
+  expect_fails
+    "table/int-codomain-fail"
+    ~index:0
+    (h_decls ^ "(assert (= (h a) 7))")
+    "(model (sort S 1) (const a 0) (fun h (default 0) (case (0) 8)))";
+  (* codomain = Bool (a predicate table); genuine true/false cells + Bool default. *)
+  let p_decls = "(declare-sort S 0)(declare-fun p (S) Bool)(declare-const a S)" in
+  expect_satisfies
+    "table/bool-codomain-sat"
+    (p_decls ^ "(assert (p a))")
+    "(model (sort S 1) (const a 0) (fun p (default false) (case (0) true)))";
+  expect_fails
+    "table/bool-codomain-fail"
+    ~index:0
+    (p_decls ^ "(assert (p a))")
+    "(model (sort S 1) (const a 0) (fun p (default true) (case (0) false)))";
+  expect_satisfies
+    "table/bool-default-fallthrough"
+    (p_decls ^ "(declare-const b S)(assert (p b))")
+    "(model (sort S 2) (const a 0) (const b 1) (fun p (default true) (case (0) false)))";
+  (* mixed-sort (Int-keyed) table: the QF_UFLIA case is solver-DEFERRED (ADR §10
+     concrete-ℤ realization), but the evaluator's reader already accepts Int
+     domains/codomains, so no eval-side work is owed when §10 lands. *)
+  let k_decls =
+    "(set-logic QF_UFLIA)(declare-sort S 0)(declare-fun k (Int) S)(declare-const a S)"
+  in
+  expect_satisfies
+    "table/int-keyed-sat"
+    (k_decls ^ "(assert (= (k 5) a))")
+    "(model (sort S 1) (const a 0) (fun k (default 0) (case (5) 0)))";
+  (* adjoined / card-1 sort (R2): a single-element universe, default-only table (no case),
+     and a const naming the sole element. *)
+  expect_satisfies
+    "table/card1-adjoined-default-only"
+    "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(assert (= (f a) a))"
+    "(model (sort S 1) (const a 0) (fun f (default 0)))";
+  (* an element index >= cardinality is rejected at parse (R2 range bound). *)
+  expect_malformed
+    "table/element-index-out-of-range"
+    "(declare-sort S 0)(declare-const a S)(declare-const b S)(assert (distinct a b))"
+    "(model (sort S 1) (const a 0) (const b 1))";
+  (* a case-arity mismatch (2 args for a unary function) is rejected. *)
+  expect_malformed
+    "table/case-arity-mismatch"
+    "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(assert (= (f a) a))"
+    "(model (sort S 1) (const a 0) (fun f (default 0) (case (0 0) 0)))";
+  (* a function table with no (default ...) is rejected (default is mandatory, §1). *)
+  expect_malformed
+    "table/missing-default"
+    "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(assert (= (f a) a))"
+    "(model (sort S 1) (const a 0) (fun f (case (0) 0)))"
+;;
+
 (* --- the gate's real sat cases: every .model sidecar must MODEL-SATISFIES ---------- *)
 
 let read_file path =
@@ -316,6 +500,9 @@ let () =
   div_mod_boundary ();
   overflow_cases ();
   rejection_cases ();
+  r7_completeness_cases ();
+  minint_reingest_cases ();
+  table_format_cases ();
   gate_cases dir;
   (* explicit deliberately-corrupted models: a wrong value must MODEL-FAIL *)
   expect_fails

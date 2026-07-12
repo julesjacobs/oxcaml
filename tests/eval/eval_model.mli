@@ -33,3 +33,10 @@ val lookup_const : t -> Symbol.t -> Value.t option
 
 (** Table bound to a function symbol, if the model defines it. *)
 val lookup_fun : t -> Symbol.t -> fun_table option
+
+(** Declared cardinality of an uninterpreted sort by name, if the model supplies a
+    [(sort S k)] entry. Present entries always have [k >= 1] (a [(sort S 0)] is rejected
+    at parse time per the ADR empty-sort rule); [None] means no entry was supplied. Used
+    by the formula-completeness check ({!Eval.check}) to require a cardinality entry for
+    every uninterpreted sort the assertions use. *)
+val sort_card : t -> string -> int option

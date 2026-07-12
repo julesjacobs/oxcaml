@@ -22,7 +22,14 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
   in
   let as_int = function
     | Sexp.Atom a -> int_of a
-    | Sexp.List [ Sexp.Atom "-"; Sexp.Atom a ] -> -int_of a
+    (* SMT-LIB writes a negative as [(- n)] with [n] an unsigned numeral. Parse the whole
+       signed literal ["-" ^ n] directly rather than negating a parsed-positive [n]: the
+       magnitude of [min_int] is [max_int + 1], which is NOT a representable positive
+       native int, so [-int_of n] spuriously rejects the perfectly representable
+       [min_int]. ADR-0003 makes [min_int] a valid [Int_const] — only operations whose
+       RESULT leaves native range (e.g. [neg min_int]) overflow; a value at the boundary
+       does not. Anything genuinely out of range (e.g. one past [min_int]) still fails. *)
+    | Sexp.List [ Sexp.Atom "-"; Sexp.Atom a ] -> int_of ("-" ^ a)
     | Sexp.Quoted _ | Sexp.List _ -> raise (Malformed "expected an integer value")
   in
   match sort with
@@ -158,3 +165,4 @@ let of_file decls path =
 
 let lookup_const t sym = Hashtbl.find_opt t.consts (Symbol.name sym)
 let lookup_fun t sym = Hashtbl.find_opt t.funs (Symbol.name sym)
+let sort_card t name = Hashtbl.find_opt t.sort_card name

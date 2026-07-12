@@ -189,6 +189,15 @@ and parse_operator ctx decls env op args =
   | "+", first :: rest ->
     List.fold_left (fun acc x -> Context.add ctx acc (p x)) (p first) rest
   | "+", [] -> raise (Malformed "+ expects at least one argument")
+  | "-", [ Sexp.Atom s ] when is_numeral s ->
+    (* Signed integer literal [(- n)]: parse ["-" ^ n] directly rather than negating a
+       parsed-positive [n]. The magnitude of [min_int] is [max_int + 1] (unrepresentable
+       as a positive native int), so [neg (int_const n)] cannot build [min_int]; the whole
+       signed literal can. Behaviour-preserving for every other numeral (folds to the same
+       [Int_const]); genuinely out-of-range magnitudes still raise [Unsupported]. *)
+    (match int_of_string_opt ("-" ^ s) with
+     | Some n -> Context.int_const ctx n
+     | None -> raise (Unsupported ("numeral exceeds native int: -" ^ s)))
   | "-", [ a ] -> Context.neg ctx (p a)
   | "-", first :: (_ :: _ as rest) ->
     List.fold_left (fun acc x -> Context.sub ctx acc (p x)) (p first) rest

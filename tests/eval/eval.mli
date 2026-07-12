@@ -42,9 +42,20 @@ type outcome =
       ; trace : string (* rendered subterm values along the failing assertion *)
       }
 
-(** [check model assertions] evaluates the assertions in order; [Satisfies] iff every one
-    evaluates to [Bool true]. A non-Bool assertion is an {!Eval_error} (well-sorted
-    assertions are Bool, so this signals a malformed query). *)
+(** [require_formula_complete model assertions] enforces the UF-models ADR §4 R7
+    formula-completeness contract: the model must bind every symbol that syntactically
+    appears in [assertions] (an untaken [ite] branch counts) and supply a [(sort S k)]
+    cardinality entry for every uninterpreted sort any subterm has. Declared-but-unused
+    symbols/sorts are NOT required. The reserved [div]/[mod] built-ins are skipped. Raises
+    a loud {!Eval_model.Malformed} on the first incompleteness — fail-closed (abstain),
+    never a silent pass. *)
+val require_formula_complete : Eval_model.t -> Term.t list -> unit
+
+(** [check model assertions] first enforces {!require_formula_complete}, then evaluates
+    the assertions in order; [Satisfies] iff every one evaluates to [Bool true]. A
+    formula-incomplete model raises {!Eval_model.Malformed} (never [Satisfies]); a
+    non-Bool assertion is an {!Eval_error} (well-sorted assertions are Bool, so this
+    signals a malformed query). *)
 val check : Eval_model.t -> Term.t list -> outcome
 
 (** A bounded, indented dump of a term with each visited subterm's value — the

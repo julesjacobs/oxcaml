@@ -187,7 +187,73 @@ type outcome =
       ; trace : string
       }
 
+(* Formula-completeness (UF-models ADR §4 R7). The emitted model must be FORMULA-complete:
+   it must bind every symbol that SYNTACTICALLY appears in the assertions and supply a
+   [(sort S k)] cardinality entry for every uninterpreted sort any subterm has. Two points
+   are deliberate:
+   - Syntactic, not semantic: a symbol under an UNTAKEN [ite] branch still counts, so this
+     is stricter than lazy evaluation would be. Rejecting a model that omits it is
+     fail-closed — a completeness loss (abstain), never a wrong [Satisfies].
+   - Declared-but-UNUSED symbols/sorts are NOT required (that is signature-completeness,
+     which the ADR rejects for the emitted contract). The reserved [div]/[mod] built-ins
+     (name + arity 2) are not model-bound and are skipped, mirroring {!eval_app}. Missing
+     data is a loud {!Eval_model.Malformed}. *)
+let require_formula_complete (model : Eval_model.t) (assertions : Term.t list) : unit =
+  let seen : (int, unit) Hashtbl.t = Hashtbl.create 256 in
+  let missing = ref [] in
+  let note m = if not (List.mem m !missing) then missing := m :: !missing in
+  let check_sort (sort : Sort.t) =
+    match sort with
+    | Sort.Uninterpreted sym ->
+      let name = Symbol.name sym in
+      if Option.is_none (Eval_model.sort_card model name)
+      then note (Printf.sprintf "cardinality entry for sort %s" name)
+    | Sort.Bool | Sort.Int _ -> ()
+  in
+  let check_app sym arity =
+    let name = Symbol.name sym in
+    if not ((name = "div" || name = "mod") && arity = 2)
+    then (
+      let bound =
+        if arity = 0
+        then Option.is_some (Eval_model.lookup_const model sym)
+        else Option.is_some (Eval_model.lookup_fun model sym)
+      in
+      if not bound then note (Printf.sprintf "binding for symbol %s" name))
+  in
+  let rec walk (t : Term.t) =
+    if not (Hashtbl.mem seen t.tag)
+    then (
+      Hashtbl.add seen t.tag ();
+      check_sort t.sort;
+      match t.node with
+      | Term.Bool_const _ | Term.Int_const _ -> ()
+      | Term.Not a -> walk a
+      | Term.And xs | Term.Or xs -> Iarr.iter walk xs
+      | Term.Ite (c, a, b) ->
+        walk c;
+        walk a;
+        walk b
+      | Term.Eq (a, b) ->
+        walk a;
+        walk b
+      | Term.Le a -> walk a
+      | Term.Arith { coeffs; _ } -> Iarr.iter (fun (ti, _) -> walk ti) coeffs
+      | Term.App (sym, args) ->
+        check_app sym (Iarr.length args);
+        Iarr.iter walk args)
+  in
+  List.iter walk assertions;
+  match List.rev !missing with
+  | [] -> ()
+  | ms ->
+    raise
+      (Eval_model.Malformed
+         ("model is not formula-complete; missing " ^ String.concat ", " ms))
+;;
+
 let check (model : Eval_model.t) (assertions : Term.t list) : outcome =
+  require_formula_complete model assertions;
   let rec loop i = function
     | [] -> Satisfies
     | t :: tl ->
