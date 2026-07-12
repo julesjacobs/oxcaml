@@ -97,7 +97,15 @@ let register_atom t atom term =
          not engine-watched, so it is not recorded here. *)
       (match term.node with
        | App (_, args) when Iarr.length args >= 1 ->
-         Term.Table.replace t.watched term atom
+         Term.Table.replace t.watched term atom;
+         (* Re-arm the engine watch. [term] may have been internalised earlier as a
+            boundary-only term (via [internalize_term]) — its watch already exists and may
+            have consumed and DROPPED its one-shot truth flip for lack of this atom
+            binding. Clear the stale last-reported value so [check]'s next [propagate]
+            re-reports the currently-entailed truth to the now-bound atom (codex
+            late-binding MEDIUM); harmless (a no-op reset) when [term] is freshly
+            registered here. *)
+         Euf.rearm_watch t.engine term
        | _ -> ())
     | K_foreign -> ())
 ;;

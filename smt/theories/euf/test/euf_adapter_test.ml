@@ -380,6 +380,101 @@ let test_predicate_propagation () =
   | _ -> check "pred-prop: expected propagations" false
 ;;
 
+(* 3c. Predicate watch survives push/pop + re-assertion (belt-and-suspenders for the
+   mid-solve-registration / pop lifecycle probe): assert +p(a) at base, push+assert a=b →
+   p(b) propagates true; pop drops a=b so p(b) is no longer entailed (no stale
+   re-propagation); re-asserting a=b re-derives p(b) true (the watch was not lost by the
+   pop). pa/pb/ab are registered at base, so pop of the inner frame does not truncate
+   their e-nodes — the watch persists exactly as an Eq watch would. *)
+
+let test_predicate_pushpop_restore () =
+  let env, _u, _unary, pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let p = pred "p" in
+  let h = make_harness env ctx in
+  let a_pa = reg h (Context.app ctx p [ a ]) in
+  let a_pb = reg h (Context.app ctx p [ b ]) in
+  let a_ab = reg h (Context.eq ctx a b) in
+  let pb_pos = Lit.make a_pb true in
+  let propagated_pb () =
+    match A.check h.adapter Theory.Propagate with
+    | Theory.Propagations lits -> List.exists (Lit.equal pb_pos) lits
+    | _ -> false
+  in
+  (* base: +p(a) *)
+  assert_lit h (Lit.make a_pa true);
+  ignore (A.check h.adapter Theory.Propagate : Theory.check_result);
+  (* frame 1: a=b => p(b) propagates true *)
+  A.push h.adapter;
+  assert_lit h (Lit.make a_ab true);
+  check "pred-pushpop: p(b) propagated true under a=b" (propagated_pb ());
+  (* pop: a=b retracted; p(b) no longer entailed — must NOT be (stale-)re-propagated, and
+     no conflict. *)
+  A.pop h.adapter 1;
+  h.asserted <- Lit.Set.remove (Lit.make a_ab true) h.asserted;
+  check
+    "pred-pushpop: no stale p(b) after pop"
+    (match A.check h.adapter Theory.Final with
+     | Theory.Conflict _ -> false
+     | Theory.Sat | Theory.Split _ -> true
+     | Theory.Propagations lits -> not (List.exists (Lit.equal pb_pos) lits));
+  (* re-assert a=b after the pop: the watch survived, p(b) is entailed true again. *)
+  assert_lit h (Lit.make a_ab true);
+  check "pred-pushpop: p(b) re-propagated true after re-assert" (propagated_pb ())
+;;
+
+(* 3d. LATE BINDING (codex MEDIUM): a predicate first seen via [internalize_term]
+   (boundary/buried — engine watch created, no atom bound) can have its one-shot propagate
+   flip consumed (w_reported advanced) and then DROPPED for lacking an atom. A later
+   [register_atom] must RE-ARM the watch so the currently-entailed truth re-propagates;
+   without the re-arm, [register]'s idempotent early return leaves w_reported stale and
+   the predicate's theory propagation is permanently lost. Sequence: internalize p(a);
+   bind + assert p(b)=true and a=b; a [check] consumes p(a)'s flip unbound (dropped); THEN
+   register_atom p(a); the next [check] must still propagate +p(a). DISCRIMINATION: RED
+   without the re-arm (no p(a) propagation ever), GREEN with it. *)
+
+let test_predicate_late_binding () =
+  let env, _u, _unary, pred, konst, _bpred = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let p = pred "p" in
+  let pa_term = Context.app ctx p [ a ] in
+  let h = make_harness env ctx in
+  (* p(a) first appears as a boundary-only internalization: engine watch created, NO atom. *)
+  A.internalize_term h.adapter pa_term;
+  let a_pb = reg h (Context.app ctx p [ b ]) in
+  let a_ab = reg h (Context.eq ctx a b) in
+  (* p(b)=true and a=b ⇒ p(a) entailed true by congruence. *)
+  assert_lit h (Lit.make a_pb true);
+  assert_lit h (Lit.make a_ab true);
+  (* a check while p(a) is still unbound: the engine reports p(a)'s flip, the adapter
+     drops it (no atom) and the engine's w_reported for p(a) is now consumed. *)
+  ignore (A.check h.adapter Theory.Propagate : Theory.check_result);
+  (* NOW p(a) surfaces as a real atom (e.g. a mid-solve lemma instance). *)
+  let a_pa = Atom.fresh h.alloc in
+  A.register_atom h.adapter a_pa pa_term;
+  Atom.Table.replace h.term_of_atom a_pa pa_term;
+  (* the currently-entailed truth of p(a) must re-propagate. *)
+  let pa_pos = Lit.make a_pa true in
+  (match A.check h.adapter Theory.Propagate with
+   | Theory.Propagations lits ->
+     check
+       "pred-latebind: p(a) propagated true after late register_atom"
+       (List.exists (Lit.equal pa_pos) lits);
+     let e = A.explain h.adapter pa_pos in
+     check
+       "pred-latebind: explanation subset asserted"
+       (Lit.Set.subset (Lit.Set.of_list e.Explanation.premises) h.asserted);
+     check "pred-latebind: explanation non-empty" (e.Explanation.premises <> [])
+   | Theory.Sat | Theory.Split _ ->
+     check "pred-latebind: p(a) propagated true after late register_atom" false
+   | Theory.Conflict _ -> check "pred-latebind: unexpected conflict" false);
+  ignore (a_ab, a_pb)
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 4. push/pop restoration: deep nesting, pop-below a conflict, and assert-after-pop with
    a DIFFERENT assertion (recheck-after-backtrack, no stale state). *)
@@ -1076,6 +1171,8 @@ let () =
   test_bool_lit_conflict ();
   test_propagation ();
   test_predicate_propagation ();
+  test_predicate_pushpop_restore ();
+  test_predicate_late_binding ();
   test_explain_precedence_eq_path_property ();
   test_explain_precedence_diseq_regression ();
   test_explain_euf_perf_deferral ();

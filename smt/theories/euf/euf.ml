@@ -758,6 +758,24 @@ let explain_implied t imp =
       premises edges1 @ premises edges2 @ [ d.d_prem ])
 ;;
 
+(* Re-arm the watch on [term]: reset its last-reported value to unknown (trailed, so a
+   [pop] restores it like any other [w_reported] change) and re-dirty its endpoints, so
+   the next {!propagate} re-reports [term]'s currently-entailed truth. No-op if [term] is
+   not watched. Used when an [Atom] is bound to a predicate whose watch was created
+   earlier by a boundary-only registration and whose one-shot flip was already consumed
+   and dropped for lack of an atom (CONTRACT-REG late binding): without this, [register]'s
+   idempotent early return leaves [w_reported] stale and the propagation is lost forever. *)
+let rearm_watch t term =
+  Dynarray.iteri
+    (fun idx w ->
+       if Term.equal w.w_atom term
+       then (
+         if w.w_reported <> -1 then set_reported t idx (-1);
+         mark_touched t (find t w.w_a);
+         mark_touched t (find t w.w_b)))
+    t.watched
+;;
+
 (* --- queries ------------------------------------------------------------- *)
 
 let are_equal t a b = find t (register t a) = find t (register t b)

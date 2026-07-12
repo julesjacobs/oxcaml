@@ -122,6 +122,16 @@ val propagate : 'p t -> implied list
     endpoints. *)
 val explain_implied : 'p t -> implied -> 'p list
 
+(** [rearm_watch t term] resets the watch on [term] (if any) so the next {!propagate}
+    re-reports its currently-entailed truth: its last-reported value is cleared to unknown
+    and its endpoints re-dirtied. Needed when an atom is bound to a predicate whose watch
+    was created earlier by a boundary-only {!register_term} and whose one-shot flip was
+    already consumed by a {!propagate} while it had no owner — the adapter calls this at
+    the binding [register_atom] so a mid-solve predicate (e.g. a lemma instance) does not
+    silently lose its theory propagation. No-op if [term] is not watched. Trailed, so a
+    subsequent {!pop} restores the reset like any other watch state. *)
+val rearm_watch : 'p t -> Term.t -> unit
+
 (** [are_equal t a b] holds iff [a] and [b] are currently in the same class (registers
     them if new). O(tree height). *)
 val are_equal : 'p t -> Term.t -> Term.t -> bool

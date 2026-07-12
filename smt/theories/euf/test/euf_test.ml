@@ -744,6 +744,143 @@ let test_propagate_pushpop_vs_full () =
   done
 ;;
 
+(* 5a'. Same incremental-vs-full-rescan cross-check, but the watch set now includes
+   PREDICATE atoms (Bool-codomain apps watched against true_const, the ⊤/⊥ bridge, #136)
+   alongside Eq atoms, exercised through randomized push/pop. A predicate watch is a watch
+   over the pair (pred, true_const), so its ground-truth [status] is the same
+   distinct-witness scan as an Eq (equal-to-true ⇒ true; separated-from-true by a diseq —
+   e.g. the level-0 true<>false axiom once pred~false — ⇒ false). Self-contained universe
+   (own env with a predicate + true/false consts) so it neither perturbs {!build_universe}
+   nor the Eq-only oracle above. Any divergence between the engine's incremental predicate
+   propagation and the full scan (a lost/stale predicate watch across pop, a missed
+   re-report) surfaces as a mismatch. *)
+let test_predicate_propagate_pushpop_vs_full () =
+  set_seed 0x5AFEB0075EED;
+  let sequences = 400 in
+  for _ = 1 to sequences do
+    let env = Env.create () in
+    let u = Env.declare_sort env "U" in
+    let usort = Sort.uninterpreted u in
+    let konst name = Env.declare_fun env name (Rank.create [] usort) in
+    let p = Env.declare_fun env "p" (Rank.create [ usort ] Sort.bool) in
+    let ctx = Context.create env in
+    let c0 = Context.const ctx (konst "c0")
+    and c1 = Context.const ctx (konst "c1")
+    and c2 = Context.const ctx (konst "c2") in
+    let pa = Context.app ctx p [ c0 ]
+    and pb = Context.app ctx p [ c1 ] in
+    let tt = Context.bool_const ctx true
+    and ff = Context.bool_const ctx false in
+    let univ = [| c0; c1; c2; pa; pb; tt; ff |] in
+    let it = 5 in
+    let iff = 6 in
+    let n = Array.length univ in
+    let e = Euf.create ctx in
+    Array.iter (Euf.register_term e) univ;
+    (* level-0 true<>false axiom (mirrors the adapter); asserted before any push, so it is
+       in every frame's snapshot and never popped. *)
+    Euf.assert_neq e ~premise:(fresh_prem ()) tt ff;
+    (* watch set: both predicate atoms (each auto-watched vs true_const; status pair is
+       (pred_idx, it)) + a few random Eq atoms, deduped by hash-consed term. *)
+    let watch_tbl = Term.Table.create 16 in
+    Term.Table.replace watch_tbl pa (3, it);
+    Term.Table.replace watch_tbl pb (4, it);
+    (* Eq watch atoms only among the three usort consts (indices 0..2): [Context.eq]
+       sort-checks, so an Eq must join same-sorted terms. The random assert loop below is
+       sort-agnostic (raw engine merges), so it still exercises pred/true/false classes. *)
+    for _ = 1 to 2 + rand_int 4 do
+      let i = rand_int 3
+      and j = rand_int 3 in
+      if i <> j
+      then (
+        let atom = Context.eq ctx univ.(i) univ.(j) in
+        Euf.register_term e atom;
+        Term.Table.replace watch_tbl atom (i, j))
+    done;
+    let watch = Term.Table.fold (fun a pr acc -> (a, pr) :: acc) watch_tbl [] in
+    let reported = Term.Table.create 16 in
+    List.iter (fun (a, _) -> Term.Table.replace reported a (-1)) watch;
+    let active_diseqs = ref [ it, iff ] in
+    let frames = ref [] in
+    let status (i, j) =
+      if Euf.are_equal e univ.(i) univ.(j)
+      then 1
+      else if
+        List.exists
+          (fun (c, d) ->
+             (Euf.are_equal e univ.(i) univ.(c) && Euf.are_equal e univ.(j) univ.(d))
+             || (Euf.are_equal e univ.(i) univ.(d) && Euf.are_equal e univ.(j) univ.(c)))
+          !active_diseqs
+      then 0
+      else -1
+    in
+    let step_and_check () =
+      let engine_out =
+        List.filter_map
+          (fun (imp : Euf.implied) ->
+             match Term.Table.find_opt reported imp.Euf.atom with
+             | Some _ -> Some (imp.Euf.atom.Term.tag, imp.Euf.value)
+             | None -> None)
+          (Euf.propagate e)
+      in
+      let ref_out = ref [] in
+      List.iter
+        (fun (a, pr) ->
+           let s = status pr in
+           if s <> -1 && s <> Term.Table.find reported a
+           then (
+             Term.Table.replace reported a s;
+             ref_out := (a.Term.tag, s = 1) :: !ref_out))
+        watch;
+      let srt l = List.sort compare l in
+      check
+        "pred propagate incremental == full rescan (push/pop)"
+        (srt engine_out = srt !ref_out)
+    in
+    let steps = 12 + rand_int 12 in
+    for _ = 1 to steps do
+      match rand_int 10 with
+      | 0 | 1 ->
+        Euf.push e;
+        frames := (!active_diseqs, Term.Table.copy reported) :: !frames
+      | 2 when !frames <> [] ->
+        let k = if List.length !frames >= 2 && rand_int 2 = 0 then 2 else 1 in
+        let rec nth l k =
+          match l, k with
+          | x :: _, 1 -> Some x
+          | _ :: tl, k -> nth tl (k - 1)
+          | [], _ -> None
+        in
+        (match nth !frames k with
+         | None -> ()
+         | Some (dsnap, rsnap) ->
+           Euf.pop e k;
+           let rec drop l k =
+             if k = 0
+             then l
+             else (
+               match l with
+               | _ :: tl -> drop tl (k - 1)
+               | [] -> [])
+           in
+           frames := drop !frames k;
+           active_diseqs := dsnap;
+           Term.Table.reset reported;
+           Term.Table.iter (fun a v -> Term.Table.replace reported a v) rsnap)
+      | 3 | 4 -> step_and_check ()
+      | _ ->
+        let i = rand_int n
+        and j = rand_int n in
+        if rand_int 10 < 6
+        then Euf.assert_eq e ~premise:(fresh_prem ()) univ.(i) univ.(j)
+        else (
+          Euf.assert_neq e ~premise:(fresh_prem ()) univ.(i) univ.(j);
+          active_diseqs := (i, j) :: !active_diseqs)
+    done;
+    step_and_check ()
+  done
+;;
+
 (* 5b. Registration INSIDE a frame is undone by pop (e-node truncation + use-list
    restore), and re-registration after pop rederives congruence. *)
 
@@ -940,6 +1077,7 @@ let () =
   test_explanation_soundness ();
   test_pushpop ();
   test_propagate_pushpop_vs_full ();
+  test_predicate_propagate_pushpop_vs_full ();
   test_register_in_frame ();
   test_determinism ();
   test_query_api_nonmutating ();
