@@ -470,6 +470,11 @@ let jstr = function
   | _ -> None
 ;;
 
+let jbool = function
+  | JBool b -> Some b
+  | _ -> None
+;;
+
 type logic_stat =
   { logic : string
   ; total_available : int
@@ -478,11 +483,22 @@ type logic_stat =
   ; mismatches : int
   }
 
+(* Board #69 binary-provenance stamp, if the baseline carries one. A baseline promoted
+   before #69 has no stamp -> [None] -> rendered as UNVERIFIED provenance (never crash). *)
+type corpus_stamp =
+  { build_commit : string
+  ; dirty : bool
+  ; assertions : string
+  ; euf_self_check : string
+  ; release_config : bool
+  }
+
 type corpus_summary =
   { schema : string
   ; c_trunk : string (* the trunk hash/label the baseline measured *)
   ; logics : logic_stat list
   ; mismatch_count : int
+  ; stamp : corpus_stamp option
   }
 
 (* Pure parse of the committed baseline. Returns None on any structural surprise or an
@@ -516,11 +532,26 @@ let parse_corpus_summary (s : string) : corpus_summary option =
                })
             entries
         in
+        let stamp =
+          match jmember "stamp" j with
+          | Some (JObj _ as sj) ->
+            let ss k d = Option.value ~default:d (Option.bind (jmember k sj) jstr) in
+            let sb k = Option.value ~default:false (Option.bind (jmember k sj) jbool) in
+            Some
+              { build_commit = ss "build_commit" "?"
+              ; dirty = sb "dirty"
+              ; assertions = ss "assertions" "?"
+              ; euf_self_check = ss "euf_self_check" "?"
+              ; release_config = sb "release_config"
+              }
+          | _ -> None
+        in
         Some
           { schema
           ; c_trunk = top_str "trunk"
           ; logics
           ; mismatch_count = top_int "mismatch_count"
+          ; stamp
           }
       | _ -> None)
 ;;
@@ -1050,6 +1081,35 @@ let selftest () =
     (parse_corpus_summary {|{"schema":"other/v9","logics":{},"mismatch_count":0}|} = None)
     true;
   check "corpus malformed json -> None" (parse_corpus_summary "{not json" = None) true;
+  (* Board #69: binary-provenance stamp parse (release / non-release / absent). *)
+  check
+    "corpus stamp: release_config=true parsed"
+    (match
+       parse_corpus_summary
+         {|{"schema":"oxsmt-corpus-baseline/v1","trunk":"x","logics":{},"mismatch_count":0,"stamp":{"build_commit":"abc","dirty":false,"assertions":"off","euf_self_check":"off","release_config":true}}|}
+     with
+     | Some { stamp = Some st; _ } -> st.release_config
+     | _ -> false)
+    true;
+  check
+    "corpus stamp: absent -> None (pre-#69 baseline)"
+    (match
+       parse_corpus_summary
+         {|{"schema":"oxsmt-corpus-baseline/v1","trunk":"x","logics":{},"mismatch_count":0}|}
+     with
+     | Some { stamp; _ } -> stamp = None
+     | None -> false)
+    true;
+  check
+    "corpus stamp: non-release fields parsed"
+    (match
+       parse_corpus_summary
+         {|{"schema":"oxsmt-corpus-baseline/v1","trunk":"x","logics":{},"mismatch_count":0,"stamp":{"build_commit":"abc","dirty":true,"assertions":"on","euf_self_check":"off","release_config":false}}|}
+     with
+     | Some { stamp = Some st; _ } ->
+       (not st.release_config) && st.dirty && st.assertions = "on"
+     | _ -> false)
+    true;
   (* Harness-digest per-dir count parse (task #25 staleness guard). Happy paths return
      [Ok]; the three degenerate shapes fail CLOSED as [Error] so an unparseable digest can
      never silently disarm the guard. *)
@@ -1187,7 +1247,29 @@ let () =
        head
        (if corpus_stale cs
         then "STALE, re-run `make corpus-run` + promote for a current number"
-        else "current"));
+        else "current");
+     (* Board #69: provenance of the measuring binary. A promotable headline must come
+        from a release-config binary (assertions off, debug oracles off) on a clean tree;
+        surface the stamp and flag non-release / unverified provenance loudly. *)
+     (match cs.stamp with
+      | None ->
+        out
+          "  - _⚠ provenance UNVERIFIED — baseline predates the #69 stamp; re-measure \
+           via `make corpus-run-release` then `make promote-baseline`_\n"
+      | Some st ->
+        if not st.release_config
+        then
+          out
+            "- **⚠ NON-RELEASE MEASUREMENT:** headline came from a non-release-config \
+             binary — NOT promotable (board #69).\n";
+        out
+          "  - _provenance (#69): build %s, assertions %s, euf_self_check %s%s — %s_\n"
+          (let c = st.build_commit in
+           if String.length c > 10 then String.sub c 0 10 else c)
+          st.assertions
+          st.euf_self_check
+          (if st.dirty then ", DIRTY tree" else "")
+          (if st.release_config then "release-config" else "NON-release")));
   out "\n";
   (* Milestones from TASKS.md *)
   let rows = parse_tasks cfg.tasks in

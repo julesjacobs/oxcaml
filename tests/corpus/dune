@@ -6,4 +6,4 @@
 (executable
  (name corpus_classify)
  (modules corpus_classify)
- (libraries oxsmt_interface oxsmt_smtlib_parser))
+ (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_euf))

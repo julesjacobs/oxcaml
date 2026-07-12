@@ -24,6 +24,44 @@ module Session = Oxsmt_interface.Session
 module Sexp = Oxsmt_smtlib_parser.Sexp
 module Parser = Oxsmt_smtlib_parser.Parser
 
+(* Board #69 — binary-provenance stamping. A measurement is only trustworthy from a
+   RELEASE-config binary, so this classifier (a) forces every debug oracle OFF and (b) can
+   report its build config via [--stamp], which corpus_run.sh records into the run JSON
+   and the promote gate checks fail-closed.
+
+   Debug oracles OFF: the EUF explanation self-check (euf.mli) is an O(n^2) replay that
+   only VALIDATES a verdict — it never changes one — so leaving it on (its default, and it
+   was never disabled anywhere: the contamination this board fixes) only inflates
+   effort/time and depresses the wall-cutoff headline. We disable it here so measurement
+   never pays for it, and stamp the resulting state. The always-on simplex Farkas verifier
+   (simplex.mli) is a soundness invariant, not a perf-debug toggle, and is deliberately
+   NOT disabled. *)
+let () = Oxsmt_euf.Euf.Debug.self_check := false
+
+(* Never-true, non-constant so the compiler cannot fold it to the special [assert false]
+   form (which stays compiled even under [-noassert]); a general [assert e] IS elided by
+   [-noassert], which is exactly what distinguishes a release build. *)
+let never = ref false
+
+let assertions_enabled =
+  let hit = ref false in
+  (try assert !never with
+   | Assert_failure _ -> hit := true);
+  !hit
+;;
+
+let onoff b = if b then "on" else "off"
+
+(* One-line, whitespace-delimited config stamp (corpus_run.sh parses [k=v] fields).
+   Reports the EFFECTIVE config the sweep runs under. Commit provenance is added by the
+   shell (the binary cannot know the tree it was built from without a build-time embed). *)
+let print_stamp () =
+  Printf.printf
+    "assertions=%s euf_self_check=%s\n"
+    (onoff assertions_enabled)
+    (onoff !Oxsmt_euf.Euf.Debug.self_check)
+;;
+
 let read_file path =
   let ic = open_in_bin path in
   Fun.protect
@@ -98,8 +136,12 @@ let () =
      records per-file effort to pick N. *)
   let file = ref None in
   let max_effort = ref None in
+  let stamp = ref false in
   let rec parse = function
     | [] -> ()
+    | "--stamp" :: rest ->
+      stamp := true;
+      parse rest
     | "--max-effort" :: n :: rest ->
       max_effort := Some (int_of_string n);
       parse rest
@@ -109,6 +151,11 @@ let () =
     | _ :: rest -> parse rest
   in
   parse (List.tl (Array.to_list Sys.argv));
+  (* [--stamp]: report build config and exit (no file needed). The sweep calls this once. *)
+  if !stamp
+  then (
+    print_stamp ();
+    exit 0);
   let file =
     match !file with
     | Some f -> f

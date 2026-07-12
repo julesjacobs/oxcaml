@@ -30,6 +30,29 @@ MAXEFFORT="${CORPUS_MAX_EFFORT:-}"
 JSON="${CORPUS_JSON:-../logs/corpus-run.json}"
 RAW="${CORPUS_RAW:-../logs/corpus-run.raw}"
 TRUNK="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+# Board #69 — binary-provenance stamp. A measurement is only PROMOTABLE from a release-
+# config binary on a clean tree; record the facts so `make promote-baseline` can enforce
+# it fail-closed (no override) and STATUS.md can display them.
+#  - build_commit: full HEAD. The Makefile rebuilds CLASSIFY immediately before this run,
+#    so on a CLEAN tree the binary is built from exactly this commit; a DIRTY tree breaks
+#    that guarantee, hence [dirty] is itself part of the promotable predicate.
+#  - assertions / euf_self_check: read straight from the binary via `--stamp`, so they
+#    describe the ACTUAL build/run config, not an assumption.
+BUILD_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then DIRTY=true; else DIRTY=false; fi
+STAMP="$("$CLASSIFY" --stamp 2>/dev/null || echo '')"
+ASSERTIONS="$(printf '%s' "$STAMP" | sed -n 's/.*assertions=\([a-z]*\).*/\1/p')"
+EUF_SELF_CHECK="$(printf '%s' "$STAMP" | sed -n 's/.*euf_self_check=\([a-z]*\).*/\1/p')"
+[ -n "$ASSERTIONS" ] || ASSERTIONS=unknown
+[ -n "$EUF_SELF_CHECK" ] || EUF_SELF_CHECK=unknown
+# release_config: the fail-closed predicate the promote gate re-checks.
+if [ "$ASSERTIONS" = off ] && [ "$EUF_SELF_CHECK" = off ] && [ "$DIRTY" = false ]; then
+  RELEASE_CONFIG=true
+else
+  RELEASE_CONFIG=false
+fi
+
 mkdir -p "$(dirname "$JSON")" "$(dirname "$RAW")"
 
 # Per-file: emit "<logic> <outcome> <effort> <file>". Outcome is a corpus_classify token
@@ -89,6 +112,7 @@ total_mismatch=$(awk '$2=="mismatch"' "$RAW" | wc -l)
   echo "{"
   echo "  \"schema\": \"oxsmt-corpus-baseline/v1\","
   echo "  \"trunk\": \"$TRUNK\","
+  echo "  \"stamp\": { \"build_commit\": \"$BUILD_COMMIT\", \"dirty\": $DIRTY, \"assertions\": \"$ASSERTIONS\", \"euf_self_check\": \"$EUF_SELF_CHECK\", \"max_effort\": \"${MAXEFFORT:-unbounded}\", \"release_config\": $RELEASE_CONFIG },"
   echo "  \"timeout_s\": $TIMEOUT, \"workers\": $JOBS, \"wall_s\": $wall, \"files_per_s\": $fps,"
   echo "  \"logics\": {"
   first=1

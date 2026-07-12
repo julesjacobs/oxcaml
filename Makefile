@@ -73,7 +73,7 @@ CORPUS_MAX_BYTES ?= 20971520
 # unbounded; the run still records per-file effort so an uncapped sweep calibrates N.
 CORPUS_MAX_EFFORT ?=
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline perf-gen perf-bench preprocess-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -175,6 +175,27 @@ corpus-run:
 	  CORPUS_MAX_BYTES=$(CORPUS_MAX_BYTES) CORPUS_MAX_EFFORT=$(CORPUS_MAX_EFFORT) \
 	  CORPUS_JSON=$(LOGS)/corpus-run.json CORPUS_RAW=$(LOGS)/corpus-run.raw \
 	  bash tests/corpus/corpus_run.sh $(CORPUS_DIRS)
+
+## corpus-run-release — the PROMOTABLE measurement (board #69). Builds the classifier
+##   with `--profile release` (assertions off) — the classifier also forces debug oracles
+##   off at startup — so `--stamp` reports release-config; corpus_run.sh records that stamp
+##   plus the build commit + clean/dirty tree into the run JSON, and only such a run passes
+##   `make promote-baseline`. Pair with a counted cutoff (CORPUS_MAX_EFFORT=N) for a
+##   load-independent, byte-reproducible headline.
+corpus-run-release:
+	@mkdir -p $(LOGS)
+	$(DUNE) build --profile release tests/corpus/corpus_classify.exe
+	CLASSIFY=_build/default/tests/corpus/corpus_classify.exe \
+	  CORPUS_TIMEOUT=$(CORPUS_TIMEOUT) CORPUS_JOBS=$(CORPUS_JOBS) \
+	  CORPUS_MAX_BYTES=$(CORPUS_MAX_BYTES) CORPUS_MAX_EFFORT=$(CORPUS_MAX_EFFORT) \
+	  CORPUS_JSON=$(LOGS)/corpus-run.json CORPUS_RAW=$(LOGS)/corpus-run.raw \
+	  bash tests/corpus/corpus_run.sh $(CORPUS_DIRS)
+
+## promote-baseline — fail-closed headline promote (board #69). Copies a corpus-run JSON to
+##   the committed tests/corpus/baseline_summary.json ONLY IF its provenance stamp is
+##   release_config=true and mismatch_count=0. No override. Defaults to the last run JSON.
+promote-baseline:
+	bash tools/promote_baseline.sh $(LOGS)/corpus-run.json
 
 ## preprocess-test — smt/preprocess unit + property self-test (stdlib-only,
 ##   deterministic). Brute-force equivalence-by-evaluation for the desugaring
