@@ -838,54 +838,71 @@ end = struct
       gamma
   ;;
 
-  (* Attempt one justified fixed-value equality injection [a = b] into the hub. FIRST-wins
-     (an already-connected pair records nothing, F2). H5 transactional: ALL fallible work
-     — Γ extraction, the F1-SEM re-sum, the F1(b) and acyclicity checks — happens BEFORE
-     [assert_fabric_eq] touches the union-find; past the commit point the merge is pure
-     trailed union-find (no user code, no overflow), so a skipped pair leaves ZERO partial
-     state. H1/L1: [Term.Overflow]/[Combination_unsound] before commit → skip the pair
-     (completeness loss), counters set only after a complete injection. *)
-  let try_inject t ~a ~b ~(fb_a : Fabric.fixed_bounds) ~(fb_b : Fabric.fixed_bounds) =
+  (* Attempt one justified fixed-value equality injection [a = b] into the hub, returning
+     whether it committed a NEW edge. The fix-trigger (deliverable 5) is
+     DISAGREEMENT-DRIVEN (OQ3 per-round, but targeted): it fires only on the shared pair
+     [find_disagreement] would otherwise trichotomy-split, and only when LIA has BOTH
+     endpoints fixed to the SAME exact integer value — so it removes the round-trip
+     exactly where the split would have happened, adding O(1) [fixed_bounds] probes per
+     would-be split rather than an interface-wide scan every round (which net-regressed
+     throughput badly).
+
+     FIRST-wins (an already-connected pair records nothing, F2). H5 transactional: ALL
+     fallible work — [fixed_bounds], Γ extraction, the F1-SEM re-sum, the F1(b) and
+     acyclicity checks — happens BEFORE [assert_fabric_eq] touches the union-find; past
+     the commit the merge is pure trailed union-find (no user code, no overflow), so a
+     skipped pair leaves ZERO partial state. H1/L1: [Term.Overflow]/[Combination_unsound]
+     before commit → skip the pair (completeness loss), counters set only after a complete
+     injection. *)
+  let try_inject_pair t (a : Term.t) (b : Term.t) : bool =
     if A.fabric_are_equal t.a a b
-    then ()
+    then false
     else (
       let prepared =
         try
-          let gamma =
-            [ fb_a.Fabric.lower; fb_a.Fabric.upper; fb_b.Fabric.lower; fb_b.Fabric.upper ]
-          in
-          let real = function
-            | Real l -> Some l
-            | Fabric _ -> None
-          in
-          match
-            ( real fb_a.Fabric.lower
-            , real fb_a.Fabric.upper
-            , real fb_b.Fabric.lower
-            , real fb_b.Fabric.upper )
-          with
-          | Some a_lo, Some a_hi, Some b_lo, Some b_hi ->
-            let witness =
-              { Fabric.value = fb_a.Fabric.value
-              ; s_lower = a_lo
-              ; s_upper = a_hi
-              ; t_lower = b_lo
-              ; t_upper = b_hi
-              }
+          match B.fixed_bounds t.b a, B.fixed_bounds t.b b with
+          | Some fb_a, Some fb_b when String.equal fb_a.Fabric.value fb_b.Fabric.value ->
+            let gamma =
+              [ fb_a.Fabric.lower
+              ; fb_a.Fabric.upper
+              ; fb_b.Fabric.lower
+              ; fb_b.Fabric.upper
+              ]
             in
-            if
-              String.equal fb_a.Fabric.value fb_b.Fabric.value
-              && f1_sem_entails ~gamma ~witness
-              && gamma_precedence_ok t gamma
-              && gamma_acyclic_ok t gamma
-            then Some (gamma, witness)
-            else None
+            let real = function
+              | Real l -> Some l
+              | Fabric _ -> None
+            in
+            (match
+               ( real fb_a.Fabric.lower
+               , real fb_a.Fabric.upper
+               , real fb_b.Fabric.lower
+               , real fb_b.Fabric.upper )
+             with
+             | Some a_lo, Some a_hi, Some b_lo, Some b_hi ->
+               let witness =
+                 { Fabric.value = fb_a.Fabric.value
+                 ; s_lower = a_lo
+                 ; s_upper = a_hi
+                 ; t_lower = b_lo
+                 ; t_upper = b_hi
+                 }
+               in
+               if
+                 f1_sem_entails ~gamma ~witness
+                 && gamma_precedence_ok t gamma
+                 && gamma_acyclic_ok t gamma
+               then Some (gamma, witness)
+               else None
+             | _ -> None)
           | _ -> None
         with
         | Term.Overflow | Combination_unsound _ -> None
       in
       match prepared with
-      | None -> t.stat_skipped <- t.stat_skipped + 1
+      | None ->
+        t.stat_skipped <- t.stat_skipped + 1;
+        false
       | Some (gamma, witness) ->
         let edge = t.next_edge in
         t.next_edge <- t.next_edge + 1;
@@ -907,33 +924,8 @@ end = struct
              ; gamma = expand_justifications t entry.gamma
              ; witness = entry.witness
              });
-        t.stat_edges <- t.stat_edges + 1)
-  ;;
-
-  (* The fix-trigger (deliverable 5, OQ3 per-round scan). Walk the shared INTERFACE set in
-     Term-tag order (determinism, I6) and, for each Int term LIA currently fixes to an
-     exact integer value, inject an equality against the first earlier-tag term fixed to
-     the same value. The value→term table is only PROBED by key (never traversed), so a
-     [Hashtbl] keeps O(1) probing with no traversal-order dependence — the resolution of
-     the Hash-vs-Map acceptance question. *)
-  let fabric_scan t =
-    let by_value : (string, Term.t) Hashtbl.t = Hashtbl.create 32 in
-    Term.Set.iter
-      (fun (b : Term.t) ->
-         match b.Term.sort with
-         | Sort.Bool | Sort.Uninterpreted _ -> ()
-         | Sort.Int _ ->
-           (match B.fixed_bounds t.b b with
-            | None -> ()
-            | Some fb_b ->
-              (match Hashtbl.find_opt by_value fb_b.Fabric.value with
-               | None -> Hashtbl.replace by_value fb_b.Fabric.value b
-               | Some a when Term.equal a b -> ()
-               | Some a ->
-                 (match B.fixed_bounds t.b a with
-                  | Some fb_a -> try_inject t ~a ~b ~fb_a ~fb_b
-                  | None -> ()))))
-      t.interface
+        t.stat_edges <- t.stat_edges + 1;
+        true)
   ;;
 
   (* Convert a child's fabric result to the frozen seam currency, expanding [Fabric]
@@ -953,6 +945,32 @@ end = struct
     | Theory.Conflict e -> Theory.Conflict e
     | Theory.Sat | Theory.Split _ -> Theory.Propagations la
     | Theory.Propagations lb -> Theory.Propagations (la @ lb)
+  ;;
+
+  (* Fabric-aware model combination: on a shared-pair disagreement that a trichotomy would
+     split, first try the justified fabric merge (LIA fixed both endpoints to one value) —
+     removing the propositional round-trip. An injected merge fires EUF congruence, whose
+     conflict/propagation is surfaced through the same expansion/cache path; otherwise the
+     arrangement is re-decided (loop). A pair the fabric can't discharge falls back to the
+     trichotomy split, so completeness is unchanged. Terminates: each injection merges two
+     previously-distinct classes (are_equal then skips the pair), a monotone decrease. *)
+  let rec combine_models_fabric t : Theory.check_result =
+    let ma = A.model t.a in
+    let mb = B.model t.b in
+    check_pins t ma mb;
+    match find_disagreement t ma mb with
+    | None ->
+      require_bool_args_bound t ma;
+      Theory.Sat
+    | Some (x, y) ->
+      if try_inject_pair t x y
+      then (
+        match realize t R.A (A.check_fabric t.a Theory.Final) with
+        | Theory.Conflict e -> Theory.Conflict e
+        | Theory.Split terms -> Theory.Split terms
+        | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
+        | Theory.Sat | Theory.Propagations [] -> combine_models_fabric t)
+      else Theory.Split (R.equality_split t.ctx x y)
   ;;
 
   (* The fabric-live drive: identical control flow to [check_off], but children are driven
@@ -977,7 +995,7 @@ end = struct
           | Theory.Propagations (_ :: _ as lb) -> Theory.Propagations lb
           | (Theory.Sat | Theory.Propagations []) as rb ->
             (match ra, rb with
-             | Theory.Sat, Theory.Sat -> combine_models t
+             | Theory.Sat, Theory.Sat -> combine_models_fabric t
              | _ ->
                raise
                  (Combination_unsound
@@ -1008,17 +1026,13 @@ end = struct
       e
   ;;
 
-  (* Dispatch. When the fabric is OFF, or ON but no edge is live after the scan, the trunk
-     path runs verbatim (frozen [check]/[explain]) — the pure-corpus behaviour is
-     byte-identical. An injected edge is expanded only via the fabric drive. *)
+  (* Dispatch. OFF ⇒ the trunk path verbatim (byte-identical). ON ⇒ the fabric drive,
+     whose ONLY divergence from trunk when nothing injects is the
+     [find_disagreement]-driven fix-trigger (two [fixed_bounds] probes per would-be split)
+     — so a file that injects no edge has the same splits, verdict, and counters as trunk.
+     Handle expansion + the combined-reason cache activate only once an edge is live. *)
   let check t effort : Theory.check_result =
-    if fabric_off
-    then check_off t effort
-    else (
-      fabric_scan t;
-      if Hashtbl.length t.registry = 0
-      then check_off t effort
-      else check_on_drive t effort)
+    if fabric_off then check_off t effort else check_on_drive t effort
   ;;
 
   let explain t lit =
