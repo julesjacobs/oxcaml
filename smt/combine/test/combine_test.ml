@@ -644,10 +644,14 @@ let test_model_domain_and_sort () =
     (match Model.value m p with
      | Some (Model.Uninterp 9) -> true
      | _ -> false);
-  (* round-2 landmine: a pure-EUF Int term (valued only as an opaque class by the
-     congruence child, unseen by the arithmetic child) is the DEFINING QF_UFLIA shape, not
-     an error. model() must NOT raise; it OMITS the term (no sort-wrong Int witness), and
-     the §8 evaluator reads such a term's value from the containing EUF term it needs. *)
+  (* round-2 landmine + §10 realization (task #110): a pure-EUF Int term (valued only as
+     an opaque class by the congruence child, unseen by the arithmetic child) is the
+     DEFINING QF_UFLIA shape, not an error. model() must NOT raise. It used to OMIT the
+     term; the §10 ℤ-realization now SURFACES its EUF class here as [Uninterp cid] — the
+     extraction-layer "realize me" signal read only by the Int arm of {!Cdclt.model}'s
+     [value_of], which turns it into a concrete integer. The term still never gets a
+     non-Int VALUE in the shipped table (Cdclt realizes it), and model() still never
+     raises on the opaque-class shape. *)
   reset_mocks ();
   let f = fixture () in
   let x = const f "x" in
@@ -666,9 +670,10 @@ let test_model_domain_and_sort () =
     | Cmb.Combination_unsound _ -> None
   in
   check
-    "C3: pure-EUF Int term (opaque class only) → model omits it, never raises"
+    "C3: pure-EUF Int term (opaque class only) → model surfaces its EUF class (§10 \
+     realize signal), never raises"
     (match m with
-     | Some m -> Model.value m x = None
+     | Some m -> Model.value m x = Some (Model.Uninterp 5)
      | None -> false)
 ;;
 
@@ -1498,10 +1503,11 @@ let test_integration_compound_pin () =
    ONLY as a function argument, with no arithmetic atom on it. [f(x)] here is Int-sorted
    but is seen only by EUF (inside the uninterpreted-sort equality k(f(x)) = k(z), routed
    to EUF); the arithmetic child never sees it, so it has only an opaque class. The old
-   model() raised on it → unknown on this normal shape. Now model() omits f(x) and the
-   witness (a,b the arithmetic child, the k-terms the congruence child) passes the eval
-   self-check. Also carries a compound pin (y = x+1) so both landmines fire in one
-   fixture. *)
+   model() raised on it → unknown on this normal shape. model() now SURFACES f(x)'s EUF
+   class (§10 realize signal, task #110) rather than omitting it, and the witness (a,b the
+   arithmetic child, the k-terms the congruence child, f(x) its realized integer) still
+   passes the eval self-check. Also carries a compound pin (y = x+1) so both landmines
+   fire in one fixture. *)
 let test_integration_pure_euf_int_arg () =
   let f = fixture () in
   let x = const f "x"

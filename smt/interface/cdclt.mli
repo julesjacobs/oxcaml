@@ -80,7 +80,10 @@ val model_bindings : t -> binding list option
 
 (** [model t] reconstructs the FULL finite function model from the accepting-Final->Sat
     snapshot: uninterpreted-sort cardinalities + const bindings + per-symbol function /
-    predicate tables (ADR-UF-models §1). [None] (=> fail-closed [unknown]) when the last
-    check-sat was not a theory [Sat], a needed value is missing, or a buried (unbound)
-    Bool-codomain predicate cell would have to be guessed. Deterministic (R10). *)
+    predicate tables (ADR-UF-models §1). Int-sorted table cells get concrete integers: a
+    LIA-valued term keeps its integer, a pure-EUF Int class (LIA never valued it) is
+    realized to a distinct integer (QF_UFLIA §10 ℤ-realization, task #110; see the .ml).
+    [None] (=> fail-closed [unknown]) when the last check-sat was not a theory [Sat], a
+    needed value is missing, or a buried (unbound) Bool-codomain predicate cell would have
+    to be guessed. Deterministic (R10). *)
 val model : t -> (sort_card list * binding list) option

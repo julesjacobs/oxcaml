@@ -658,7 +658,23 @@ struct
     let int_variant term =
       match model_eval mb term, model_eval ma term with
       | Some (Model.Int _ as v), _ | _, Some (Model.Int _ as v) -> Some v
-      | _ -> None
+      | _ ->
+        (* §10 ℤ-realization seed (task #110): an Int-sorted term no child constrains
+           numerically — a pure-EUF Int class (never surfaced into a LIA atom, so LIA does
+           not value it; EUF values it only as an opaque congruence class) — carries its
+           EUF class id so extraction ({!Cdclt.model}) can realize a concrete integer for
+           it. Before this, such a term was OMITTED from the merged model, which forced
+           the Cdclt table builder to degrade any QF_UFLIA sat whose tables touch such a
+           class to [unknown]. Surfacing the class does NOT change the combination
+           decision: [find_disagreement]/[check_pins] read the child models [ma]/[mb]
+           directly, and {!Cdclt} is the sole consumer of this merged model. The Int term
+           still never gets a non-Int VALUE — [Uninterp] here is the extraction-layer
+           signal "realize me", read only by the Int-sorted arm of Cdclt's [value_of].
+           Reuses the existing [Model.Uninterp] constructor; no [Model.t] / frozen-surface
+           change. *)
+        (match model_eval ma term with
+         | Some (Model.Uninterp _ as v) -> Some v
+         | _ -> None)
     in
     let variant term matches =
       match model_eval ma term, model_eval mb term with

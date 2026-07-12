@@ -336,7 +336,18 @@ let value_compare (a : value) (b : value) =
    when a needed value is missing or a Bool-codomain (predicate) cell is unbound (buried
    H2 class; the combinator usually degrades that earlier via [Incomplete], guarded here
    too). Deterministic (R10): ascending class-id numbering, then canonical sort of sorts,
-   bindings, and case tuples. *)
+   bindings, and case tuples.
+
+   {b QF_UFLIA §10 ℤ-realization (task #110).} An Int-sorted table cell (function argument
+   or result) needs a concrete integer. Two sources: LIA valued it numerically
+   ([Model.Int n] — keep n), or it is a pure-EUF Int class LIA never valued
+   ([Model.Uninterp cid], surfaced by [combine.ml]'s model rather than omitted). Pass 1b
+   realizes each such class to a concrete integer distinct from every LIA-used integer and
+   distinct per class — respecting EUF (dis)equalities by construction (same class => same
+   integer; distinct classes / a class vs a LIA value => different integers). The class
+   appears in no LIA atom so LIA constrains it not at all, hence any such integer is a
+   legal witness; a wrong choice can only make an assertion false under the R1 checker
+   ([Model_check]) => [unknown], never a wrong [sat]. *)
 let model t =
   match t.last_model with
   | None -> None
@@ -370,14 +381,69 @@ let model t =
             List.iteri (fun i cid -> Hashtbl.replace index cid i) ids;
             sort_cards := { sort_name = name; card = List.length ids } :: !sort_cards)
          sort_ids;
+       (* pass 1b: the §10 ℤ-realization (task #110). An Int-sorted term LIA valued
+          numerically arrives as [Model.Int n] (tier 1: keep n). An Int class LIA never
+          valued arrives as [Model.Uninterp cid] (combine.ml's model surfaces a pure-EUF
+          Int class here rather than omitting it): realize it to a concrete integer,
+          distinct from every ALREADY-VALUED integer AND distinct per class. The exclusion
+          pool ([int_used]) is EVERY [Model.Int n] appearing anywhere in the merged model
+          — not merely integers LIA assigned to variables, but also constants AND numerals
+          (an [Int_const] resolves to its own value via the combinator's [model_eval], so
+          it is present here). This is load-bearing: a tier-2 class can carry an asserted
+          disequality against a numeral or a valued constant (e.g. [x <> 5], the diseq
+          routed to EUF only), and realizing away from the full valued set is exactly what
+          keeps that disequality true. Respects EUF (dis)equalities by construction — a
+          same-class term realizes to the SAME integer, distinct classes (and a class vs
+          any valued integer) to DIFFERENT integers. The class appears in no LIA atom, so
+          LIA constrains it not at all and any such integer is a legal witness; a wrong
+          choice can only make an assertion false under the R1 checker (Model_check) ->
+          [unknown], never a wrong [sat]. Deterministic (R10): least-unused-nonnegative
+          over ASCENDING class ids, over the valued set. *)
+       let int_used : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+       let int_classes = ref [] in
+       List.iter
+         (fun (term : Term.t) ->
+            match term.Term.sort with
+            | Sort.Int _ ->
+              (match Model.value m term with
+               | Some (Model.Int n) -> Hashtbl.replace int_used n ()
+               | Some (Model.Uninterp cid) -> int_classes := cid :: !int_classes
+               | _ -> ())
+            | Sort.Bool | Sort.Uninterpreted _ -> ())
+         terms;
+       let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
+       let next = ref 0 in
+       let fresh () =
+         while Hashtbl.mem int_used !next do
+           incr next
+         done;
+         let v = !next in
+         Hashtbl.replace int_used v ();
+         incr next;
+         v
+       in
+       List.iter
+         (fun cid ->
+            if not (Hashtbl.mem int_realize cid)
+            then Hashtbl.replace int_realize cid (fresh ()))
+         (List.sort_uniq Int.compare !int_classes);
        let value_of (term : Term.t) =
          match Model.value m term with
          | Some (Model.Bool b) -> VBool b
          | Some (Model.Int n) -> VInt n
          | Some (Model.Uninterp cid) ->
-           (match Hashtbl.find_opt index cid with
-            | Some i -> VUninterp i
-            | None -> raise Degrade)
+           (* An [Uninterp] value on an Int-sorted term is the §10 realize-me signal (pass
+              1b); on an uninterpreted-sorted term it is the dense element index (pass 1). *)
+           (match term.Term.sort with
+            | Sort.Int _ ->
+              (match Hashtbl.find_opt int_realize cid with
+               | Some n -> VInt n
+               | None -> raise Degrade)
+            | Sort.Uninterpreted _ ->
+              (match Hashtbl.find_opt index cid with
+               | Some i -> VUninterp i
+               | None -> raise Degrade)
+            | Sort.Bool -> raise Degrade)
          | None -> raise Degrade
        in
        let default_for (sort : Sort.t) =
