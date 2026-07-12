@@ -10,10 +10,13 @@
     {!Lia} to the frozen engine interface (ADR-0005) is a later, separate concern;
     {!Lia}'s ['tok] premise-token parameter is the seam it will bind [Lit.t] to.
 
-    Public submodules: {!Rational} (exact overflow-guarded ℚ), {!Delta} (δ-rationals),
-    {!Simplex} (the DdM tableau), {!Lia} (the atom-facing decision procedure), and
-    {!Lia_adapter} (the frozen {!Oxsmt_core.Theory.THEORY} binding, ADR-0005 M4). *)
+    Public submodules: {!Bigint} (stdlib arbitrary-precision ints, the [Rational] Big-tier
+    fallback — core-bignum W2), {!Rational} (exact ℚ, two-tier Small/Big), {!Delta}
+    (δ-rationals), {!Simplex} (the DdM tableau), {!Lia} (the atom-facing decision
+    procedure), and {!Lia_adapter} (the frozen {!Oxsmt_core.Theory.THEORY} binding,
+    ADR-0005 M4). *)
 
+module Bigint = Bigint
 module Rational = Rational
 module Delta = Delta
 module Simplex = Simplex

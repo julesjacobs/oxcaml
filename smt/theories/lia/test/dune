@@ -19,3 +19,12 @@
  (name lia_adapter_test)
  (modules lia_adapter_test)
  (libraries oxsmt_core oxsmt_lia))
+
+; Bigint self-test (core-bignum W2): hand vectors + pure-OCaml property vectors + an
+; INDEPENDENT Python differential oracle (R4). The oracle shells out via stdlib
+; [Sys.command]; no library dep is added, so the I3 firewall holds. python3-absent → skip.
+
+(executable
+ (name bigint_test)
+ (modules bigint_test)
+ (libraries oxsmt_core oxsmt_lia))
