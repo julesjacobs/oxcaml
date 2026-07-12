@@ -652,6 +652,10 @@ let propagate t =
        [find] are stable for the whole call; the build and lookup loops therefore use the
        same [m]. *)
     let m = Dynarray.length t.enodes in
+    (* [m] is fixed for the whole call (no merge inside [propagate]); guard the
+       injectivity/overflow precondition of the [lo*m+hi] packing once here — the keys
+       stay < m^2, which fits a 63-bit int iff m <= 2^31 (memory-infeasible before then). *)
+    assert (m <= 1 lsl 31);
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
       (fun d ->
