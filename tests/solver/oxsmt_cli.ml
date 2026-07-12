@@ -156,10 +156,11 @@ let render_model (sort_cards, bindings) =
 ;;
 
 (* Batch solve: one check-sat, no push/pop. Parse into the session's own context so the
-   asserted terms share its tag stream, then solve once. A [Sat] whose model cannot be
-   reconstructed for the §8 self-check (a UF model that would need function tables — a v1
-   limit) is soundly reported as [unknown]: we never emit a [sat] the harness cannot
-   self-certify. *)
+   asserted terms share its tag stream, then solve once. A [Sat] is emitted only with the
+   model the session reconstructed and self-checked (const/Bool/LIA via the pipeline;
+   function tables via the R1 in-process checker); a [Sat] with no reconstructable model,
+   or one naming a symbol the printer cannot render, degrades to a sound [unknown]. We
+   never emit a [sat] the harness cannot transport or the evaluator cannot self-certify. *)
 let solve_batch src =
   let s = Session.create () in
   match Parser.parse_into (Session.env s) (Session.context s) src with
@@ -181,22 +182,14 @@ let solve_batch src =
     (match v with
      | Session.Sat ->
        (match Session.get_model s with
-        (* A FUNCTION-TABLE / sorted model is a sound, self-checked [sat] at the session
-           level (R1 checker gated it), and the CLI renders it in the §8 sidecar grammar.
-           But the harness model-transport still parses only the LEGACY flat const body
-           (ADR-UF-models R9, not yet built): feeding it a table body is a parse error.
-           Until R9 lands, degrade a table/sorted model to a SOUND [unknown] at the corpus
-           boundary (a completeness gap the harness tolerates), rather than emit output
-           the harness cannot transport. Const-only models take the unchanged legacy path.
-           The library-level flip is exercised by tests/solver/wiring_test. *)
-        | Some ((sort_cards, bindings) as m)
-          when sort_cards = []
-               && not
-                    (List.exists
-                       (function
-                         | Session.Fun _ -> true
-                         | Session.Const _ -> false)
-                       bindings) ->
+        (* A [Sat] whose model was reconstructed and self-checked at the session level is
+           rendered and emitted here. A table-free (const/Bool/LIA) model uses the LEGACY
+           flat body; a FUNCTION-TABLE / sorted model uses the §8 sidecar grammar — the
+           harness model-transport now carries both (ADR-UF-models R9), and the R1
+           in-process checker has already gated any table model's [sat] (THE SOUNDNESS
+           RULE), so the table flip reaches the corpus. [render_model] decides which body
+           to emit. *)
+        | Some m ->
           (match render_model m with
            | body -> block "sat" (Some body)
            | exception Oxsmt_smtlib.Printer.Unsupported _ ->
@@ -207,8 +200,6 @@ let solve_batch src =
                 be malformed solver output; degrade this goal to a sound [unknown] with no
                 model rather than crash the CLI. *)
              block "unknown" None)
-        | Some _ ->
-          block "unknown" None (* table/sorted model: sound degrade pending R9 *)
         | None -> block "unknown" None)
      | Session.Unsat -> block "unsat" None
      | Session.Unknown -> block "unknown" None)
