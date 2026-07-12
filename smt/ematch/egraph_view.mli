@@ -8,7 +8,21 @@
     Every closure is genuinely read-only: the matcher cannot perturb the e-graph, which
     the failure-direction analysis (ADR-0012 §3, R6) requires. An {e unregistered} term is
     a singleton class matched by tag-equality only, so a stale/missing class yields either
-    a valid universal instance or no instance, never a wrong refutation (§3 M3). *)
+    a valid universal instance or no instance, never a wrong refutation (§3 M3).
+
+    {b VALIDITY WINDOW (soundness-adjacent — read before caching).} A view is a {e live}
+    query surface over the engine at the instant each closure is called: it reflects the
+    engine's {b current} trail/registration state, NOT a snapshot. A caller MUST NOT
+    retain results (class members, representatives, candidate lists) across any state
+    change — another [assert]/[check_sat], a [push], or a [pop]. Between rounds the
+    session rebuilds the view from the live engine ({!Oxsmt_interface}), and the matcher
+    holds nothing across rounds — it re-queries from scratch each {!Matcher.substitutions}
+    call. This is load-bearing: instantiating from a class that a [pop] has retracted is
+    the wrong-lemma-instance path. (Registered {e terms} are grow-only across the
+    session's frame selectors, so a term can outlive the assertion that introduced it; but
+    an instance is only ever asserted guarded by its {e live} lemma's frame, and the
+    manager matches only lemmas still in the live store — so a popped lemma is never
+    instantiated.) Validity window pinned by the E-STALE-POP acceptance test. *)
 
 open Oxsmt_core
 

@@ -767,6 +767,90 @@ let test_errors () =
   check "after pop, check consistent" (Euf.check e = Euf.Consistent)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* 7. Read-only query API (ADR-0012 L2 / R6): app_terms_by_symbol / find_class_opt /
+   equal_if_registered / class_members are GENUINELY NON-MUTATING. A dense query workload
+   over a rich e-graph must leave every observable — num_terms, the full are_equal matrix,
+   the check verdict — byte-identical, and a query on an UNREGISTERED term must NOT
+   register it. Discrimination (the mutation-detector has teeth): the REGISTERING
+   accessors [are_equal]/[class_of] DO grow num_terms, so if the read-only accessors ever
+   start registering (e.g. someone wires them to [register], or adds path compression that
+   grows state), the invariance below breaks. This is the test the team-lead required (req
+   A). *)
+let test_query_api_nonmutating () =
+  let env, _u, unary, konst = make_env () in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c = Context.const ctx (konst "c") in
+  let f = unary "f"
+  and g = unary "g" in
+  let fa = Context.app ctx f [ a ]
+  and fb = Context.app ctx f [ b ]
+  and gc = Context.app ctx g [ c ] in
+  let e = Euf.create ctx in
+  List.iter (Euf.register_term e) [ a; b; c; fa; fb; gc ];
+  Euf.assert_eq e ~premise:1 a b (* => fa ~ fb by congruence *);
+  Euf.assert_eq e ~premise:2 c fa (* => c ~ fa ~ fb *);
+  let terms = [ a; b; c; fa; fb; gc ] in
+  (* observable-state snapshot: num_terms + full are_equal matrix + check verdict *)
+  let snapshot () =
+    ( Euf.num_terms e
+    , List.map (fun t1 -> List.map (fun t2 -> Euf.are_equal e t1 t2) terms) terms
+    , Euf.check e = Euf.Consistent )
+  in
+  let before = snapshot () in
+  (* dense query workload through the read-only API only *)
+  for _ = 1 to 1000 do
+    List.iter
+      (fun t ->
+         ignore (Euf.app_terms_by_symbol e f : Term.t list);
+         ignore (Euf.app_terms_by_symbol e g : Term.t list);
+         ignore (Euf.find_class_opt e t : int option);
+         ignore (Euf.class_members e t : Term.t list);
+         List.iter (fun t2 -> ignore (Euf.equal_if_registered e t t2 : bool)) terms)
+      terms
+  done;
+  check
+    "query-api: observable state (num_terms, are_equal matrix, check) unchanged by dense \
+     queries"
+    (before = snapshot ());
+  (* the read-only accessors agree with the engine's own are_equal on registered terms *)
+  check
+    "query-api: equal_if_registered agrees with are_equal on registered terms"
+    (List.for_all
+       (fun t1 ->
+          List.for_all
+            (fun t2 -> Euf.equal_if_registered e t1 t2 = Euf.are_equal e t1 t2)
+            terms)
+       terms);
+  (* app_terms_by_symbol returns exactly the registered f-apps in id order *)
+  check
+    "query-api: app_terms_by_symbol f = [fa; fb]"
+    (Euf.app_terms_by_symbol e f = [ fa; fb ]);
+  check
+    "query-api: class_members fa = its congruence class {c, fa, fb} (id order)"
+    (Euf.class_members e fa = [ c; fa; fb ]);
+  (* DISCRIMINATOR (part 1): a query on an UNREGISTERED term is inert — None / singleton /
+     no growth. *)
+  let d = Context.const ctx (konst "d") in
+  let n = Euf.num_terms e in
+  check "query-api: find_class_opt on unregistered -> None" (Euf.find_class_opt e d = None);
+  check
+    "query-api: class_members on unregistered -> singleton [d]"
+    (Euf.class_members e d = [ d ]);
+  ignore (Euf.equal_if_registered e d a : bool);
+  check
+    "query-api: unregistered queries did NOT register (num_terms constant)"
+    (Euf.num_terms e = n);
+  (* DISCRIMINATOR (part 2): the REGISTERING accessors DO grow num_terms — proving the
+     invariance above is a live mutation detector, not vacuous. *)
+  ignore (Euf.class_of e d : int);
+  check
+    "query-api: are_equal/class_of DO register (num_terms grows) — detector has teeth"
+    (Euf.num_terms e > n)
+;;
+
 (* ================================================================== *)
 let () =
   print_endline "euf self-test:";
@@ -781,6 +865,7 @@ let () =
   test_propagate_pushpop_vs_full ();
   test_register_in_frame ();
   test_determinism ();
+  test_query_api_nonmutating ();
   Printf.printf
     "\neuf self-test: %d checks, %d randomized assert-cases, %d failure(s)\n"
     !checks

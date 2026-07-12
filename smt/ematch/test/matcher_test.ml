@@ -484,6 +484,52 @@ let e_det () =
   check "E-DET: two runs identical" (run () = run ())
 ;;
 
+(* E-STALE-POP (staleness across backtracking, team-lead req B): the matcher must not emit
+   an instance of a POPPED lemma, nor carry class data across a pop. A lemma L is asserted
+   in a PUSHED frame with trigger f(x); ground f(a)>0 registers f(a). First check: the
+   matcher generates f(a)=5 under L's frame, L is live -> unknown. Then pop (L retracted;
+   the manager drops it from the live store). Then assert f(a)=7. The registered term f(a)
+   SURVIVES the session pop (the e-graph is grow-only across session frames), so a matcher
+   that cached L, or matched against the popped lemma, would regenerate f(a)=5 and
+   wrong-unsat [f(a)=5 & f(a)=7]. Because the matcher iterates the LIVE store fresh each
+   round over a view rebuilt each round and holds nothing between rounds, no stale
+   instance is emitted -> the final check is NOT unsat. Matcher-driven analogue of
+   H-PUSHPOP; the wrong-lemma-instance path is soundness-adjacent, so this is its own
+   discriminating test. *)
+let e_stale_pop () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "f" int_to_int in
+  let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+  let fa = Context.app ctx f [ a ] in
+  Session.push s;
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", Sort.int ]
+       ~build:(fun qv ->
+         let x = Qvar.to_term qv.(0) in
+         { Session.body =
+             Context.eq ctx (Context.app ctx f [ x ]) (Context.int_const ctx 5)
+         ; triggers = [ [ Context.app ctx f [ x ] ] ]
+         })
+     : Session.lemma);
+  Session.assert_term s (Context.gt ctx fa (Context.int_const ctx 0));
+  let v1 = Session.check_sat s in
+  check
+    (Printf.sprintf "E-STALE-POP: pushed live lemma -> unknown (got %s)" (verdict_str v1))
+    (v1 = Session.Unknown);
+  Session.pop s;
+  Session.assert_term s (Context.eq ctx fa (Context.int_const ctx 7));
+  let v2 = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-STALE-POP: matcher must NOT emit a popped lemma's instance -> not unsat (got \
+        %s)"
+       (verdict_str v2))
+    (v2 <> Session.Unsat)
+;;
+
 let () =
   ignore int_int_to_int;
   ignore int_to_bool;
@@ -500,6 +546,7 @@ let () =
   e_sound ();
   e_no_trigger_no_fire ();
   e_det ();
+  e_stale_pop ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;
