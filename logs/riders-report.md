@@ -109,11 +109,16 @@ test go RED.
   leaves the pre-reset assertions live → wrong verdict. Confirmed end-to-end:
   `(assert (= 0 1)) (reset-assertions) (check-sat)` returns `unsat` pre-fix (WRONG — the
   contradiction is reset away; should be sat/unknown), `unknown` post-fix.
+- **Audit evidence.** Matches the regress-harness reviewer's independent finding
+  (`logs/regress-harness-review.md`, regress lane) that reset/reset-assertions is the ONLY
+  verdict-flipping silent no-op in the dispatch. This parser fix is the ROOT layer; the
+  regress lane separately added a DRIVER-side backstop (corpus_classify degrades reset* to
+  unknown-incremental) plus a fixture exercising both layers.
 - **How.** Split the match arm: `reset`/`reset-assertions` now `unsupportedf` → the CLI's
   `solve_batch` catches `Parser.Unsupported` (oxsmt_cli.ml:169) and returns `unknown_block`
   (I8 fail-closed). Audit of the same arm: `set-option` and `get-model|get-value|
   get-unsat-core` are output-only / non-stateful (cannot change the assertion set) → kept as
-  no-ops; `push`/`pop` were already unsupported. reset* were the only verdict-flipping
+  no-ops; `push`/`pop` were already `unsupportedf`. reset* were the only verdict-flipping
   silent no-ops.
 - **How tested / discrimination.** `command_gate_cases` (roundtrip_test.ml): the exact
   issue5144 shape via `check_unsupported` (reset-assertions + reset) + a `check_parses_ok`
