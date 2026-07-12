@@ -401,6 +401,7 @@ test: check-frozen
 lemma-test:
 	$(DUNE) exec smt/ematch/test/lemma_honeypot_test.exe
 	$(DUNE) exec smt/ematch/test/crit_repro.exe
+	$(DUNE) exec smt/ematch/test/matcher_test.exe
 
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
 bench:

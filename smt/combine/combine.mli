@@ -187,7 +187,19 @@ end
     children's models: each term takes the child value whose variant matches the term's
     sort (Int from the arithmetic child, [Uninterp] from the congruence child), so the
     single witness respects the arrangement both children agreed on (CONTRACT-MODEL). *)
-module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : Theory.THEORY
+module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : sig
+  include Theory.THEORY
+
+  (** ADR-0012 L2/O3 (tranche 2): a read-only accessor for the congruence child's state,
+      so {!Oxsmt_interface} can build the lemma-tier e-graph query view over the concrete
+      {!Oxsmt_euf.Euf_adapter}. The abstract [Theory.THEORY] seam the CDCL(T) engine
+      drives is unchanged — this only widens the {e combinator's own} interface (not
+      frozen), it does not add a THEORY method. The matcher reads through the child's
+      non-registering query API; it never mutates the e-graph (R6). *)
+  type congruence_state = A.t
+
+  val congruence_state : t -> congruence_state
+end
 [@@warning "-67"]
-(* -67: the result signature [Theory.THEORY] (abstract [t]) does not mention the functor
-   parameters, so they read as "unused" in the declaration; they are used in the body. *)
+(* -67: the result signature (abstract [t]) does not mention the functor parameters, so
+   they read as "unused" in the declaration; they are used in the body. *)

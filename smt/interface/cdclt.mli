@@ -96,3 +96,9 @@ val model : t -> (sort_card list * binding list) option
 val add_ovf : int -> int -> int option
 
 val mul_ovf : int -> int -> int option
+
+(** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
+    L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the matcher
+    reads the e-graph without mutating it (R6). Rebuild it per instantiation round (the
+    e-graph grows as instances are asserted). *)
+val egraph_view : t -> Oxsmt_ematch.Egraph_view.t

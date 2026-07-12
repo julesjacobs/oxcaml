@@ -699,6 +699,57 @@ let explain_implied t imp =
 let are_equal t a b = find t (register t a) = find t (register t b)
 let class_of t term = find t (register t term)
 
+(* --- read-only query API (ADR-0012 L2 / R6, tranche 2) ------------------- *)
+(* These four accessors are GENUINELY NON-REGISTERING: they never call [register] and
+   never mutate the union-find / forest / congruence table ([find] has no path
+   compression, so it is a pure traversal). The E-matcher reads the e-graph through them;
+   the failure-direction table (ADR-0012 §3) requires the matcher cannot perturb the
+   e-graph. Iteration order is e-node id (= registration order), never
+   [Hashtbl]/[Term.Table] traversal (C8, I6). *)
+
+(* Registered ground [App] e-nodes whose head is [sym], in registration (id) order.
+   Trigger root candidates for the matcher. A non-representative (congruence-merged) node
+   is still returned — its own [term] is a legitimate ground term with head [sym]. *)
+let app_terms_by_symbol t sym =
+  let out = ref [] in
+  for i = Dynarray.length t.enodes - 1 downto 0 do
+    match (get t i).kind with
+    | Fun (s, _) when Symbol.equal s sym -> out := (get t i).term :: !out
+    | Fun _ | Leaf -> ()
+  done;
+  !out
+;;
+
+(* The class root of [term] iff it is already registered, else [None]. No registration. *)
+let find_class_opt t term =
+  match Term.Table.find_opt t.index term with
+  | Some id -> Some (find t id)
+  | None -> None
+;;
+
+(* Congruence-equality check that treats an UNREGISTERED term as its own singleton class
+   (tag-equality only): both registered => same root; else fall back to [Term.equal] (O(1)
+   hash-cons tag equality). Never registers, never mutates. *)
+let equal_if_registered t a b =
+  match Term.Table.find_opt t.index a, Term.Table.find_opt t.index b with
+  | Some ia, Some ib -> find t ia = find t ib
+  | _ -> Term.equal a b
+;;
+
+(* Members of [term]'s congruence class (id order), for matching modulo EUF-congruence
+   equalities. An unregistered term is a singleton class [ [term] ]. No registration. *)
+let class_members t term =
+  match Term.Table.find_opt t.index term with
+  | None -> [ term ]
+  | Some id ->
+    let root = find t id in
+    let out = ref [] in
+    for i = Dynarray.length t.enodes - 1 downto 0 do
+      if find t i = root then out := (get t i).term :: !out
+    done;
+    !out
+;;
+
 (* --- backtracking -------------------------------------------------------- *)
 
 let push t =

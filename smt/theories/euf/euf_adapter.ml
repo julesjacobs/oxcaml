@@ -297,3 +297,11 @@ let model t =
   List.iter walk (List.rev t.atom_terms);
   Model.of_alist !acc
 ;;
+
+(* Read-only e-graph query API (ADR-0012 L2 / R6): thin forwards to the engine's
+   non-registering accessors, for the tranche-2 E-matcher. The engine functions never
+   register or mutate; the adapter adds nothing. *)
+let app_terms_by_symbol t sym = Euf.app_terms_by_symbol t.engine sym
+let find_class_opt t term = Euf.find_class_opt t.engine term
+let equal_if_registered t a b = Euf.equal_if_registered t.engine a b
+let class_members t term = Euf.class_members t.engine term

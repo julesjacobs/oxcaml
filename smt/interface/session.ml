@@ -693,7 +693,10 @@ let check_sat t =
         then
           commit_sat t (* the ONLY [Sat] exit to the client goes through the R1 checker *)
         else (
-          let insts = Manager.round t.mgr in
+          (* Tranche 2: the matcher reads the live e-graph through a read-only view
+             rebuilt each round (the e-graph grows as instances are asserted).
+             Non-registering (R6): matching never perturbs the congruence closure. *)
+          let insts = Manager.round t.mgr (Cdclt.egraph_view t.cdclt) in
           if Manager.budget_exhausted t.mgr
           then Unknown (* generation budget spent with a live lemma (§3) *)
           else (

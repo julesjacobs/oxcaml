@@ -40,3 +40,15 @@ include Oxsmt_core.Theory.THEORY
     undone by [pop] of the frame that introduced it, exactly like {!register_atom}'s
     internalisation. *)
 val internalize_term : t -> Oxsmt_core.Term.t -> unit
+
+(** {2 Read-only e-graph query API (ADR-0012 L2 / R6, tranche 2 E-matching).}
+
+    Thin, {b non-registering} forwards to the underlying engine's query accessors (see
+    {!Oxsmt_euf.Euf}), so the lemma tier's matcher can read the congruence closure without
+    growing it. The combinator exposes the congruence child's state so {!Oxsmt_interface}
+    can call these. *)
+
+val app_terms_by_symbol : t -> Oxsmt_core.Symbol.t -> Oxsmt_core.Term.t list
+val find_class_opt : t -> Oxsmt_core.Term.t -> int option
+val equal_if_registered : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t -> bool
+val class_members : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t list

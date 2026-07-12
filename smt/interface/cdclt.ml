@@ -573,3 +573,18 @@ let model t =
      with
      | Degrade -> None)
 ;;
+
+(* ADR-0012 L2/O3 (tranche 2): a read-only e-graph query view over the live congruence
+   child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the concrete
+   [Euf_adapter.t] (the combinator's own additive accessor, not a THEORY method), whose
+   query functions forward to the engine's NON-REGISTERING accessors — so the matcher reads
+   the congruence closure without growing it (R6). Rebuilt per [round] by [Session], since
+   the e-graph changes as instances are asserted. *)
+let egraph_view t : Oxsmt_ematch.Egraph_view.t =
+  let cs = Combined.congruence_state t.theory in
+  { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)
+  ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
+  ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
+  ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
+  }
+;;

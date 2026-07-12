@@ -20,8 +20,16 @@ module type CONGRUENCE_CHILD = sig
   val internalize_term : t -> Term.t -> unit
 end
 
-module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : Theory.THEORY =
-struct
+module Combine (R : ROUTER) (A : CONGRUENCE_CHILD) (B : Theory.THEORY) : sig
+  include Theory.THEORY
+
+  (* ADR-0012 L2/O3: read-only exposure of the congruence child's state so the session can
+     build the lemma-tier e-graph query view over the concrete EUF adapter. Additive; the
+     [Theory.THEORY] seam the engine drives is unchanged. *)
+  type congruence_state = A.t
+
+  val congruence_state : t -> congruence_state
+end = struct
   (* A pinned shared-equality literal: the pair it relates, its asserted polarity, and
      which children it was actually asserted to (a negative equality may reach only the
      congruence child — CONTRACT S1). At Final every routed child's model must satisfy it. *)
@@ -739,4 +747,8 @@ struct
     in
     Model.of_alist bindings
   ;;
+
+  type congruence_state = A.t
+
+  let congruence_state t = t.a
 end

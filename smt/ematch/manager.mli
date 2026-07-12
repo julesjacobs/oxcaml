@@ -58,10 +58,17 @@ val begin_check : t -> unit
 
 (** [round t] produces the next batch of ground instances: in tranche 1 it drains the seed
     queue, applying the dedup filter (skip an instance whose body is already active) and
-    debiting the generation budget per instance. Returns [(frame, instance)] pairs — the
-    instance must be asserted guarded by [frame]'s selector (§1.4). Deterministic order
-    (seed enqueue order). [] means saturated. *)
-val round : t -> (Sat.var * Instance.t) list
+    debiting the generation budget per instance.
+
+    Tranche 2: [round t view] E-matches every live lemma's triggers against the read-only
+    e-graph [view] (deterministic lemma-id order, budget debited INSIDE enumeration, R4)
+    AND drains the manual seed queue — both feed one dedup + budget pipeline (a seeded
+    instance the matcher also finds dedups). Returns [(frame, instance)] pairs; each
+    instance must be asserted guarded by its lemma's [frame] selector (§1.4).
+    Deterministic order (matcher output, then seed FIFO). [] means saturated (no NEW
+    instance this round). On budget exhaustion the round stops early and
+    {!budget_exhausted} is set. *)
+val round : t -> Egraph_view.t -> (Sat.var * Instance.t) list
 
 (** [budget_exhausted t] is [true] iff the most recent {!round} stopped on the generation
     budget (→ [unknown], §3). Reset by {!begin_check}. *)

@@ -79,32 +79,59 @@ let begin_check t =
 
 let budget_exhausted t = t.budget_hit
 
-(* Drain the seed queue, dedup-filtering and budget-debiting per instance (§1.4). Stops on
-   budget exhaustion, leaving the rest enqueued (the loop degrades to [unknown] this
-   check). Order is seed enqueue order (Queue is FIFO) — deterministic (I6). *)
-let round t =
+(* Debit one generation-budget step; raise [Matcher.Budget_exhausted] the instant the
+   budget is spent (R4). Shared with the matcher (which debits its own enumeration steps
+   against the same [budget] ref); [round] catches the exception and degrades to
+   [unknown]. *)
+let spend budget =
+  if !budget <= 0 then raise Matcher.Budget_exhausted;
+  decr budget
+;;
+
+(* Produce the next batch of ground instances (ADR-0012 §1.4, tranche 2). Two producers
+   feed ONE dedup + budget + assert pipeline:
+   1. the E-matcher ({!Matcher.substitutions}) over every live lemma, in deterministic
+      lemma-id order (R8 round-robin fairness is tranche 3); and
+   2. the tranche-1 manual seed queue ({!seed_instance}), still supported so the manual
+      path and its honeypots keep working — a seeded instance the matcher also finds
+      dedups. The generation budget is debited INSIDE the matcher's enumeration (R4) and
+      once per NEW emitted instance / drained seed; on exhaustion the whole round stops
+      with instances still pending, and the loop degrades to [unknown] this check.
+      Deterministic order (matcher output, then seed FIFO order; I6). *)
+let round t view =
   t.total_rounds <- t.total_rounds + 1;
   let out = ref [] in
-  let continue = ref true in
-  while !continue && not (Queue.is_empty t.seeds) do
-    if t.budget_remaining <= 0
-    then (
-      t.budget_hit <- true;
-      continue := false)
+  let budget = ref t.budget_remaining in
+  (* Turn a (lemma, sigma) into a deduped, budget-debited instance. Dedup is keyed
+     (owning-frame selector, instance body tag): a duplicate (already-active clause) costs
+     no budget and emits nothing (redundancy filter, §L5). *)
+  let process (lemma : Lemma.t) sigma =
+    let inst = Instance.of_subst t.ctx ~qvars:lemma.qvars ~body:lemma.body sigma in
+    let key = lemma.frame, (Instance.to_term inst).Term.tag in
+    if Hashtbl.mem t.dedup key
+    then ()
     else (
-      let lemma, sigma = Queue.pop t.seeds in
-      let inst =
-        Instance.of_subst t.ctx ~qvars:lemma.Lemma.qvars ~body:lemma.Lemma.body sigma
-      in
-      let key = lemma.Lemma.frame, (Instance.to_term inst).Term.tag in
-      if Hashtbl.mem t.dedup key
-      then () (* redundancy filter: this (frame, body) clause already active (§L5) *)
-      else (
-        Hashtbl.replace t.dedup key ();
-        t.budget_remaining <- t.budget_remaining - 1;
-        t.total_instances <- t.total_instances + 1;
-        out := (lemma.Lemma.frame, inst) :: !out))
-  done;
+      spend budget;
+      Hashtbl.replace t.dedup key ();
+      t.total_instances <- t.total_instances + 1;
+      out := (lemma.frame, inst) :: !out)
+  in
+  (try
+     (* [t.lemmas] is newest-first (add_lemma prepends); [List.rev] gives ascending id
+        order — deterministic. Each live lemma is matched against the read-only e-graph
+        view. *)
+     List.iter
+       (fun (lemma : Lemma.t) ->
+          List.iter (process lemma) (Matcher.substitutions view lemma ~budget))
+       (List.rev t.lemmas);
+     (* Drain the manual seed queue (tranche-1 scaffold). *)
+     while not (Queue.is_empty t.seeds) do
+       let lemma, sigma = Queue.pop t.seeds in
+       process lemma sigma
+     done
+   with
+   | Matcher.Budget_exhausted -> t.budget_hit <- true);
+  t.budget_remaining <- !budget;
   List.rev !out
 ;;
 

@@ -11,6 +11,9 @@
 ; checks the exact same file. RED (unsat) on the unfixed tip, PASS (not-unsat / rejection)
 ; on the fix.
 
+; [matcher_test] is the tranche-2 acceptance (ADR-0012 L2/L3/R4): the E-matcher, both as
+; unit tests over a hand-rolled Egraph_view and end-to-end through the real Session stack.
+
 (executables
- (names lemma_honeypot_test crit_repro)
+ (names lemma_honeypot_test crit_repro matcher_test)
  (libraries oxsmt_core oxsmt_solver oxsmt_ematch oxsmt_interface))

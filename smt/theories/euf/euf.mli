@@ -121,6 +121,35 @@ val are_equal : 'p t -> Term.t -> Term.t -> bool
     identical runs but not meaningful across states. For tests/introspection. *)
 val class_of : 'p t -> Term.t -> int
 
+(** {2 Read-only query API (ADR-0012 L2 / R6, tranche 2 E-matching).}
+
+    Four {b genuinely non-registering} accessors the E-matcher reads the e-graph through.
+    Unlike {!are_equal}/{!class_of} (which {e register-if-new}, growing the e-graph),
+    these never call [register] and never mutate any structure — the matcher cannot
+    perturb the e-graph, which the failure-direction analysis (ADR-0012 §3) requires.
+    Every result is ordered by e-node id (= registration order), never by [Hashtbl]
+    traversal (C8, I6). An absent (unregistered) term is treated as its own
+    {b singleton class matched by tag-equality only}, so a stale/missing class yields
+    either a valid universal instance or no instance, never a wrong refutation. *)
+
+(** [app_terms_by_symbol t sym] is the registered ground [App] terms whose head is [sym],
+    in registration order — the trigger-root candidates for the matcher (R-EM3). *)
+val app_terms_by_symbol : 'p t -> Symbol.t -> Term.t list
+
+(** [find_class_opt t term] is [term]'s class root iff [term] is already registered, else
+    [None]. Never registers. *)
+val find_class_opt : 'p t -> Term.t -> int option
+
+(** [equal_if_registered t a b] is congruence-equality treating an unregistered term as
+    its own singleton class: both registered ⇒ same root; else [Term.equal] (hash-cons tag
+    equality). Never registers, never mutates. *)
+val equal_if_registered : 'p t -> Term.t -> Term.t -> bool
+
+(** [class_members t term] is the members of [term]'s congruence class in id order, for
+    matching modulo EUF-congruence equalities. An unregistered term is the singleton
+    [[term]]. Never registers. *)
+val class_members : 'p t -> Term.t -> Term.t list
+
 (** [push t] opens a backtrack frame (a checkpoint). *)
 val push : 'p t -> unit
 
