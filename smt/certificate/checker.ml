@@ -4,6 +4,7 @@
 module Sat = Oxsmt_solver.Sat
 
 type verdict =
+  | Valid_modulo_theory_leaves
   | Valid
   | Invalid of string
   | Unsupported of string
@@ -28,6 +29,7 @@ let of_recorder r ~assumptions =
 ;;
 
 let string_of_verdict = function
+  | Valid_modulo_theory_leaves -> "VALID(modulo theory leaves)"
   | Valid -> "VALID"
   | Invalid reason -> "INVALID(" ^ reason ^ ")"
   | Unsupported feature -> "UNSUPPORTED(" ^ feature ^ ")"
@@ -221,8 +223,17 @@ end
    (axioms + earlier verified learned clauses); the clause negates its own literals. Each
    antecedent, IN ORDER, must be unit (propagate its one free literal) or falsified
    (conflict — success). A cited clause that is satisfied, or has >=2 free literals,
-   breaks the chain: reject, never search. *)
-let ordered_rup base ~clause ~antecedents ~resolve =
+   breaks the chain: reject, never search.
+
+   [learned_verified id] gates a [Klearned] hint: it resolves ONLY if that learned clause
+   has ALREADY been verified (a lower emission index). This enforces the LRAT
+   id-monotonicity the emitter is documented to preserve rather than trusting it — a
+   learned clause may not cite ITSELF or a LATER (still-unverified, possibly circular)
+   learned clause, which would let two self- or mutually-referential learned clauses
+   "verify" out of nothing and certify a satisfiable query as unsat (reviewer CRIT-1, the
+   accept-invalid north star). Inputs / theory leaves have no such ordering and resolve
+   per their own rules. *)
+let ordered_rup base ~clause ~antecedents ~resolve ~learned_verified =
   let a : assign = Hashtbl.copy base in
   let conflict = ref false in
   List.iter
@@ -241,6 +252,12 @@ let ordered_rup base ~clause ~antecedents ~resolve =
              (Printf.sprintf "antecedent id %d is ambiguous (two clauses share it)" id)
          | Dangling ->
            Error (Printf.sprintf "antecedent id %d resolves to no content clause" id)
+         | Found (Klearned, _) when not (learned_verified id) ->
+           Error
+             (Printf.sprintf
+                "antecedent id %d cites a learned clause that is not yet verified (a \
+                 self- or forward/circular citation)"
+                id)
          | Found (_kind, hint) ->
            let satisfied = ref false
            and unassigned = ref [] in
@@ -353,7 +370,12 @@ let check ev =
              u.Recorder.id)
       ev.units;
     (* (c) each learned clause replays by ordered RUP over its recorded antecedents, then
-       is folded into the closure for the clauses that cite it downstream. *)
+       is folded into the closure for the clauses that cite it downstream. [verified]
+       grows in emission order and gates learned-clause hint resolution (CRIT-1): a clause
+       may only cite EARLIER, already-verified learned clauses — never itself or a later
+       one. *)
+    let verified = Hashtbl.create 256 in
+    let learned_verified id = Hashtbl.mem verified id in
     List.iter
       (fun (le : Recorder.learned_event) ->
          match
@@ -362,8 +384,11 @@ let check ev =
              ~clause:le.Recorder.clause
              ~antecedents:le.Recorder.antecedents
              ~resolve
+             ~learned_verified
          with
-         | Ok () -> Bcp.add_learned bcp le.Recorder.clause
+         | Ok () ->
+           Hashtbl.replace verified le.Recorder.id ();
+           Bcp.add_learned bcp le.Recorder.clause
          | Error reason ->
            rejectf
              "learned clause (id %d) fails ordered-RUP replay: %s"
@@ -431,7 +456,8 @@ let check ev =
          rejectf
            "Failed_assumption: seeding the assumptions true does not refute the verified \
             clause DB by BCP");
-    Valid
+    (* the skeleton closes; theory leaves are trusted axioms this tranche (MED-1). *)
+    Valid_modulo_theory_leaves
   with
   | Reject v -> v
 ;;

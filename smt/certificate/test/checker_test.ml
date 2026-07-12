@@ -52,7 +52,9 @@ let expect name kind ev =
   let v = Checker.check ev in
   let ok =
     match kind, v with
-    | `Valid, Checker.Valid -> true
+    (* today's good-cert verdict is the theory-leaf-conditional one (MED-1); plain [Valid]
+       is reserved for the leaf-checker tranche. *)
+    | `Valid, Checker.Valid_modulo_theory_leaves -> true
     | `Invalid, Checker.Invalid _ -> true
     | `Unsupported, Checker.Unsupported _ -> true
     | _ -> false
@@ -351,6 +353,38 @@ let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
   }
 ;;
 
+(* CRIT-1 (reviewer, logs/cert-step2-review.md): a learned-clause hint must resolve only
+   to an ALREADY-VERIFIED learned clause, never itself or a later one. These two streams
+   certify a trivially-SAT / SAT query as unsat pre-fix (accept-invalid, the north star);
+   the growing verified-id set makes each INVALID. *)
+
+(* exploit A: two SELF-citing learned clauses on an empty (trivially SAT) query. Each
+   learned clause cites its own id as its sole hint, so negating the clause falsifies the
+   cited (== same) clause and "verifies" it out of nothing. *)
+let exploit_self_cite : Checker.events =
+  let x = Sat.pos 3
+  and nx = Sat.neg 3 in
+  { Checker.inputs = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| x |] [ 20 ]; mk_learned 21 [| nx |] [ 21 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 21 })
+  ; assumptions = []
+  }
+;;
+
+(* exploit B: MUTUALLY-referential learned clauses certify a SATISFIABLE query ([a] alone
+   is sat, a=true) as unsat. id20 cites id21 and id21 cites id20; pre-fix both "verify". *)
+let exploit_mutual : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| na_ |] [ 21 ]; mk_learned 21 [| na_ |] [ 20 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 20 })
+  ; assumptions = []
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 
 let () =
@@ -443,6 +477,17 @@ let () =
     "corrupt: dangling antecedent id -> INVALID"
     `Invalid
     (handbuilt ~learned_ants:[ 10; 11; 999 ] ());
+  (* CRIT-1 (reviewer accept-invalid north star): a learned-clause hint that cites an
+     unverified learned id — itself, or a later/mutually-referential one. Both certify a
+     (trivially-)SAT query as unsat pre-fix; the verified-id gate makes them INVALID. *)
+  expect
+    "corrupt: self-citing learned clauses (empty query) -> INVALID"
+    `Invalid
+    exploit_self_cite;
+  expect
+    "corrupt: mutually-referential learned clauses (sat query) -> INVALID"
+    `Invalid
+    exploit_mutual;
   (* UNSUPPORTED extension point: an empty theory Conflict leaf (unconditional T_conflict
      [], ADR-0013 Rev 6) has no v1 leaf witness for ⊥-from-∅ — the checker fails closed to
      UNSUPPORTED, never VALID. Hand-built: the terminal cites the empty theory conflict. *)

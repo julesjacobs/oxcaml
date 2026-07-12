@@ -56,7 +56,9 @@ let run_file path : outcome * outcome option =
           let check_after () =
             let ev = Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s) in
             match Checker.check ev with
-            | Checker.Valid -> Cert_valid
+            (* skeleton-valid, theory leaves trusted this tranche (MED-1); plain [Valid]
+               is reserved for the leaf-checker tranche and treated identically here. *)
+            | Checker.Valid_modulo_theory_leaves | Checker.Valid -> Cert_valid
             | Checker.Invalid r -> Cert_invalid r
             | Checker.Unsupported f -> Cert_unsupported f
           in

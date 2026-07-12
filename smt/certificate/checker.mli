@@ -47,7 +47,17 @@
 module Sat = Oxsmt_solver.Sat
 
 type verdict =
+  | Valid_modulo_theory_leaves
+  (** the resolution SKELETON replays and the propositional refutation closes, but the
+      theory leaves ([Reason]/[Conflict] clauses, [Theory_lemma] inputs) are TRUSTED as
+      T-valid axioms at this stage — their EUF/LIA witness (proof tree / Farkas
+      multipliers) is a later leaf-checking tranche. This is the verdict today's checker
+      returns on a good cert; it is deliberately NOT plain [Valid] so a gate cannot
+      silently book a skeleton-only pass as fully certified (reviewer MED-1). *)
   | Valid
+  (** RESERVED — the full pass incl. verified leaf witnesses. Not returned until the
+      leaf-checker tranche lands; present so the eventual promotion is a type-level event
+      a consumer must handle, not a silent semantics change. *)
   | Invalid of string (** an artifact-attributable rejection (ADR-0013 §3.3) *)
   | Unsupported of string
   (** a well-formed leaf/feature this checker version cannot witness (coverage gap) *)
