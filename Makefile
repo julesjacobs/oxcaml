@@ -140,6 +140,15 @@ sat-test:
 seam-test:
 	$(DUNE) exec smt/solver/test/seam_test.exe
 
+## cert-test — certificate emission-wiring self-test (smt/certificate, ADR-0013 §4.0, M5
+##   step 1). Drives the frozen Sat trace seam through the Recorder and pins each hook for
+##   the four Unsat exits + E3 Theory_prop materialization + the ordered-RUP antecedent
+##   order; every check is discriminating (RED against the pre-wiring core). Also asserts a
+##   traced solve is bit-identical (verdict/model/counters) to an untraced one. Nonzero
+##   exit on any failed check.
+cert-test:
+	$(DUNE) exec smt/certificate/test/cert_emit_test.exe
+
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
 ##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat
 ##   model, and tolerates an absent corpus with a clear message. Digest to stdout,
@@ -391,6 +400,7 @@ test: check-frozen
 	$(MAKE) combine-test
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
+	$(MAKE) cert-test
 	$(MAKE) driver-equiv-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots

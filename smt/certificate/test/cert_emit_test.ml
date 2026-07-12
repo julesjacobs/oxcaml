@@ -1,0 +1,494 @@
+(* Cert step-1 emission wiring self-test (ADR-0013 §4.0). Drives the frozen Sat trace seam
+   through {!Oxsmt_certificate.Recorder} and pins that each hook fires with the right data
+   for the four Unsat exits + E3 Theory_prop materialization + the ordered-RUP antecedent
+   order. Every test is DISCRIMINATING: it fails against the pre-wiring code (hooks that
+   never fired, an antecedent order reversed by a stray List.rev, an analyze_final that
+   did not materialize Theory_prop reasons). Stdlib-only; deterministic; nonzero exit on
+   any failed check.
+
+   The theory tests reuse the seam_test scripted-mock pattern: a dumb theory recognizing
+   hard-coded conflict/implication sets, faithful to what a real adapter does at the seam. *)
+
+module Sat = Oxsmt_solver.Sat
+module Recorder = Oxsmt_certificate.Recorder
+
+let checks = ref 0
+let failures = ref 0
+
+let check name cond =
+  incr checks;
+  if not cond
+  then (
+    incr failures;
+    Printf.printf "  FAIL %s\n" name)
+;;
+
+(* clause (lit array) as a sorted DIMACS-int set, for content-based identification *)
+let dimacs_of_lit l =
+  let v = Sat.var_of_lit l + 1 in
+  if Sat.sign_of_lit l then v else -v
+;;
+
+let clause_set (c : Sat.lit array) =
+  List.sort compare (List.map dimacs_of_lit (Array.to_list c))
+;;
+
+let show_ints xs = "[" ^ String.concat ";" (List.map string_of_int xs) ^ "]"
+
+(* ------------------------------------------------------------------ *)
+(* The scripted mock theory (a trimmed copy of seam_test's, enough for the E3 shape). *)
+
+type mock_config =
+  { conflicts : Sat.lit list list
+  ; implications : (Sat.lit list * Sat.lit) list
+  ; final_splits : Sat.lit list list
+  }
+
+let empty_config = { conflicts = []; implications = []; final_splits = [] }
+
+let make_mock st config =
+  let trail = ref [] in
+  let is_true l = List.exists (fun (x, _) -> x = l) !trail in
+  let on_assign l = trail := (l, Sat.decision_level st) :: !trail in
+  let on_backtrack ~level = trail := List.filter (fun (_, lv) -> lv <= level) !trail in
+  let all_true ls = List.for_all is_true ls in
+  let pending_splits = ref config.final_splits in
+  let check ~final =
+    match List.find_opt all_true config.conflicts with
+    | Some premises -> Sat.T_conflict premises
+    | None ->
+      let props =
+        List.filter_map
+          (fun (ants, cons) ->
+             if all_true ants && not (is_true cons) then Some cons else None)
+          config.implications
+      in
+      let props = List.sort_uniq compare props in
+      if props <> []
+      then Sat.T_consistent props
+      else if final
+      then (
+        match !pending_splits with
+        | s :: rest ->
+          pending_splits := rest;
+          Sat.T_lemma [ s ]
+        | [] -> Sat.T_consistent [])
+      else Sat.T_consistent []
+  in
+  let explain l =
+    match List.find_opt (fun (_, cons) -> cons = l) config.implications with
+    | Some (ants, _) -> ants
+    | None -> []
+  in
+  { Sat.on_assign; on_backtrack; check; explain }
+;;
+
+(* ------------------------------------------------------------------ *)
+(* on_input / on_unit fire, before level-0 filtering, with origin. *)
+
+let test_on_input_and_unit () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.pos a ];
+  (* unit: on_input + on_unit *)
+  Sat.add_clause s [ Sat.pos a; Sat.neg b ];
+  (* retained width-2 clause: on_input only *)
+  let inputs = Recorder.inputs rec_ in
+  let units = Recorder.units rec_ in
+  check "input/unit: on_input fired for both clauses" (List.length inputs = 2);
+  check
+    (Printf.sprintf "input/unit: on_unit fired once (got %d)" (List.length units))
+    (List.length units = 1);
+  check
+    "input/unit: first input is the raw unit clause [1] with Query origin"
+    (match inputs with
+     | i :: _ -> clause_set i.Recorder.clause = [ 1 ] && i.Recorder.origin = Sat.Query
+     | [] -> false);
+  check
+    "input/unit: recorded unit lit is a"
+    (match units with
+     | [ u ] -> u.Recorder.lit = Sat.pos a
+     | _ -> false);
+  (* id-reuse: the retained width-2 clause's on_input id is stable & content-bearing *)
+  check "input/unit: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* E1 — a Query input that filters to [] (H2): on_input fired for it BEFORE filtering, and
+   the terminal Root_empty cites its id (which carries the Query origin). *)
+
+let test_e1_root_empty () =
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.pos a ];
+  (* a := true (unit) *)
+  Sat.add_clause s [ Sat.neg a ];
+  (* filters to [] under the level-0 unit ⇒ t.ok := false, no [||] among the inputs *)
+  let r = Sat.solve s in
+  check "e1: unsat" (r = Sat.Unsat);
+  (match Recorder.conclusion rec_ with
+   | Some (Sat.Root_empty { input_id }) ->
+     check "e1: conclusion is Root_empty" true;
+     let ev =
+       List.find_opt
+         (fun (i : Recorder.input_event) -> i.Recorder.id = input_id)
+         (Recorder.inputs rec_)
+     in
+     check
+       "e1: input_id resolves to an on_input event for the [-1] clause, Query origin"
+       (match ev with
+        | Some i -> clause_set i.Recorder.clause = [ -1 ] && i.Recorder.origin = Sat.Query
+        | None -> false)
+   | _ -> check "e1: conclusion is Root_empty" false);
+  check "e1: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* E2 — a level-0 conflict discovered by BCP in solve (not at add time): a retained
+   width-2 clause [a∨b] is falsified by two later level-0 units ¬a, ¬b. Level0_conflict
+   cites the retained clause, and its id resolves to that clause's on_input event
+   (id-reuse). *)
+
+let test_e2_level0_conflict () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  (* retained: neither literal decided yet *)
+  Sat.add_clause s [ Sat.neg a ];
+  (* ¬a unit *)
+  Sat.add_clause s [ Sat.neg b ];
+  (* ¬b unit; [a∨b] now false but undiscovered until solve's BCP *)
+  let r = Sat.solve s in
+  check "e2: unsat" (r = Sat.Unsat);
+  (match Recorder.conclusion rec_ with
+   | Some (Sat.Level0_conflict { conflict_id }) ->
+     let ev =
+       List.find_opt
+         (fun (i : Recorder.input_event) -> i.Recorder.id = conflict_id)
+         (Recorder.inputs rec_)
+     in
+     check
+       "e2: conflict_id resolves to the on_input event for [1;2] (id-reuse)"
+       (match ev with
+        | Some i -> clause_set i.Recorder.clause = [ 1; 2 ]
+        | None -> false)
+   | _ -> check "e2: conclusion is Level0_conflict" false);
+  check "e2: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* E3 — the universal session exit + the H1 Theory_prop materialization. Under assumption
+   a the theory propagates c (Theory_prop, explain c = [a]); the Boolean clause [¬c∨¬b]
+   then forces ¬b, so assumption b is found false ⇒ Failed_assumption. The forcing chain
+   crosses c's Theory_prop reason, which analyze_final MUST materialize (H1) — else the
+   emitted antecedents skip the theory-propagation ancestor and no Reason leaf is
+   surfaced. *)
+
+let test_e3_failed_assumption_theory_prop () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b
+  and lc = Sat.pos c in
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg c; Sat.neg b ];
+  (* ¬c ∨ ¬b *)
+  let r = Sat.solve ~assumptions:[ la; lb ] s in
+  check "e3: unsat" (r = Sat.Unsat);
+  let failed = List.sort compare (List.map dimacs_of_lit (Sat.failed_assumptions s)) in
+  check
+    (Printf.sprintf "e3: failed core = [1;2] (got %s)" (show_ints failed))
+    (failed = [ 1; 2 ]);
+  (match Recorder.conclusion rec_ with
+   | Some (Sat.Failed_assumption { antecedents }) ->
+     check "e3: conclusion is Failed_assumption" true;
+     check "e3: antecedents non-empty" (antecedents <> []);
+     (* H1 discrimination: some cited antecedent resolves to a materialized theory Reason
+        leaf (c's lazy reason). Without the Theory_prop leg in analyze_final this leaf is
+        never emitted nor cited, so this check goes RED. *)
+     let theory_reason_ids =
+       List.filter_map
+         (fun (te : Recorder.theory_event) ->
+            if te.Recorder.role = Sat.Reason then Some te.Recorder.id else None)
+         (Recorder.theory_clauses rec_)
+     in
+     check "e3 (H1): a Theory_prop reason leaf was materialized" (theory_reason_ids <> []);
+     check
+       "e3 (H1): the failed-assumption antecedents cite a materialized Theory reason id"
+       (List.exists (fun id -> List.mem id antecedents) theory_reason_ids)
+   | _ -> check "e3: conclusion is Failed_assumption" false);
+  check
+    "e3: no unresolved citations (Theory_prop reason surfaced)"
+    (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* E4 — a Final-effort Theory_lemma (split) that filters to [] at level 0 sets result
+   directly (H3): Root_empty citing the lemma, whose id carries the Theory_lemma origin
+   (RR5 provenance split — a query input would carry Query). Units ¬p, ¬q; the split [p∨q]
+   is falsified at level 0. *)
+
+let test_e4_theory_lemma_empty () =
+  let s = Sat.create () in
+  let p = Sat.new_var s
+  and q = Sat.new_var s in
+  let lp = Sat.pos p
+  and lq = Sat.pos q in
+  let mock = make_mock s { empty_config with final_splits = [ [ lp; lq ] ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg p ];
+  Sat.add_clause s [ Sat.neg q ];
+  let r = Sat.solve s in
+  check "e4: unsat" (r = Sat.Unsat);
+  (match Recorder.conclusion rec_ with
+   | Some (Sat.Root_empty { input_id }) ->
+     let ev =
+       List.find_opt
+         (fun (i : Recorder.input_event) -> i.Recorder.id = input_id)
+         (Recorder.inputs rec_)
+     in
+     check
+       "e4: input_id resolves to a Theory_lemma-origin on_input event for [p;q]"
+       (match ev with
+        | Some i ->
+          clause_set i.Recorder.clause = [ 1; 2 ] && i.Recorder.origin = Sat.Theory_lemma
+        | None -> false)
+   | _ -> check "e4: conclusion is Root_empty" false);
+  check "e4: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* on_theory_clause fires (role Conflict) for a theory conflict transient, so the learned
+   clause's antecedents (which cite it) resolve. *)
+
+let test_theory_conflict_surfaced () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b in
+  let mock = make_mock s { empty_config with conflicts = [ [ la; lb ] ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  let r = Sat.solve ~assumptions:[ la; lb ] s in
+  check "theory-confl: unsat" (r = Sat.Unsat);
+  let confl_leaves =
+    List.filter
+      (fun (te : Recorder.theory_event) -> te.Recorder.role = Sat.Conflict)
+      (Recorder.theory_clauses rec_)
+  in
+  check "theory-confl: a Conflict leaf was surfaced" (confl_leaves <> []);
+  check
+    "theory-confl: the negated-premise conflict clause [-2;-1] was surfaced"
+    (List.exists
+       (fun (te : Recorder.theory_event) -> clause_set te.Recorder.clause = [ -2; -1 ])
+       confl_leaves);
+  check "theory-confl: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* 1UIP theory-reason materialization (the analyze-path parallel of E3's H1). Under
+   assumptions p, a the theory propagates BOTH c and d TRUE at level 2 (explain each =
+   [p;a]); [¬c∨¬d] then conflicts and 1UIP resolves the two true theory literals against
+   their lazy reasons — driving theory_reason_clause inside analyze. Those reason leaves
+   are cited in the learned clause's antecedents, so they MUST be surfaced
+   (on_theory_clause Reason) or the citation is unresolved. Discriminates
+   note_theory_clause being wired into theory_reason_clause. *)
+
+let test_analyze_theory_reason () =
+  let s = Sat.create () in
+  let p = Sat.new_var s
+  and a = Sat.new_var s
+  and c = Sat.new_var s
+  and d = Sat.new_var s in
+  let lp = Sat.pos p
+  and la = Sat.pos a
+  and lc = Sat.pos c
+  and ld = Sat.pos d in
+  let mock =
+    make_mock s { empty_config with implications = [ [ lp; la ], lc; [ lp; la ], ld ] }
+  in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg c; Sat.neg d ];
+  (* ¬c ∨ ¬d *)
+  let r = Sat.solve ~assumptions:[ lp; la ] s in
+  check "analyze-reason: unsat" (r = Sat.Unsat);
+  let reason_leaves =
+    List.filter
+      (fun (te : Recorder.theory_event) -> te.Recorder.role = Sat.Reason)
+      (Recorder.theory_clauses rec_)
+  in
+  check "analyze-reason: a Reason leaf was surfaced during 1UIP" (reason_leaves <> []);
+  (* the learned clause(s) cite the materialized theory reason id(s) *)
+  let cited =
+    List.concat_map
+      (fun (le : Recorder.learned_event) -> le.Recorder.antecedents)
+      (Recorder.learned rec_)
+  in
+  check
+    "analyze-reason: a learned clause cites a materialized Reason leaf"
+    (List.exists
+       (fun (te : Recorder.theory_event) -> List.mem te.Recorder.id cited)
+       reason_leaves);
+  check "analyze-reason: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Ordered-RUP antecedent order (ADR-0013 §1.4(a); the dropped List.rev). A PURE-BOOLEAN
+   1UIP with a real resolution chain, so the conflict clause is an unambiguous retained
+   input: assume a; [¬a∨b] propagates b; [¬b∨c] propagates c; [¬b∨¬c] conflicts. 1UIP
+   seeds the accumulator with the conflict, then prepends each resolved reason, so the
+   frozen contract order [rₙ..r₁; conflict] puts the CONFLICT clause LAST. The old
+   [List.rev] returned [conflict; r₁..rₙ] (conflict FIRST) — so "the last antecedent is
+   the conflict clause" is exactly the discriminator: it goes RED against the pre-fix
+   core. *)
+
+let test_antecedent_order_conflict_last () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s in
+  let la = Sat.pos a in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg a; Sat.pos b ];
+  (* ¬a ∨ b *)
+  Sat.add_clause s [ Sat.neg b; Sat.pos c ];
+  (* ¬b ∨ c *)
+  Sat.add_clause s [ Sat.neg b; Sat.neg c ];
+  (* ¬b ∨ ¬c : the conflict clause, set {-3;-2} *)
+  ignore c;
+  let r = Sat.solve ~assumptions:[ la ] s in
+  check "order: unsat" (r = Sat.Unsat);
+  (* map an antecedent id to its (input) clause set *)
+  let clause_of_id id =
+    List.find_map
+      (fun (i : Recorder.input_event) ->
+         if i.Recorder.id = id then Some (clause_set i.Recorder.clause) else None)
+      (Recorder.inputs rec_)
+  in
+  (match Recorder.learned rec_ with
+   | [ le ] ->
+     check "order: exactly one learned clause" true;
+     let ants = le.Recorder.antecedents in
+     check
+       (Printf.sprintf
+          "order: >=2 antecedents (a reason was resolved); got %s"
+          (show_ints ants))
+       (List.length ants >= 2);
+     check
+       (Printf.sprintf
+          "order: conflict clause {-3;-2} is the LAST antecedent (contract \
+           [rₙ..r₁;confl]); got %s"
+          (show_ints ants))
+       (match List.rev ants with
+        | last :: _ -> clause_of_id last = Some [ -3; -2 ]
+        | [] -> false)
+   | ls ->
+     check
+       (Printf.sprintf "order: exactly one learned clause (got %d)" (List.length ls))
+       false);
+  check "order: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Side-channel: a solve with a recorder installed is bit-identical (verdict, model, full
+   counter trio) to one without, over a batch of random formulas. Guards "zero cost /
+   bit-identical" — emission never feeds back into search. *)
+
+let lcg = ref 0xC0FFEE123456
+
+let rand () =
+  let x = !lcg in
+  let x = x lxor (x lsr 12) in
+  let x = x lxor (x lsl 25) in
+  let x = x lxor (x lsr 27) in
+  lcg := x;
+  x * 0x2545F4914F6CDD1D land max_int
+;;
+
+let rand_n n = rand () mod n
+
+let random_clause num_vars =
+  let width = 1 + rand_n 3 in
+  List.init width (fun _ ->
+    let v = 1 + rand_n num_vars in
+    if rand_n 2 = 0 then Sat.pos (v - 1) else Sat.neg (v - 1))
+;;
+
+let build num_vars clauses ~trace =
+  let s = Sat.create () in
+  for _ = 0 to num_vars - 1 do
+    ignore (Sat.new_var s : Sat.var)
+  done;
+  let rec_ = Recorder.create () in
+  if trace then Sat.set_trace s (Some (Recorder.trace rec_));
+  List.iter (fun cl -> Sat.add_clause s cl) clauses;
+  s
+;;
+
+let test_traced_bit_identical () =
+  lcg := 0xC0FFEE123456;
+  let n = 3000 in
+  let mismatches = ref 0 in
+  for _ = 1 to n do
+    let num_vars = 3 + rand_n 10 in
+    let num_clauses = 1 + rand_n (num_vars * 4) in
+    let clauses = List.init num_clauses (fun _ -> random_clause num_vars) in
+    let plain = build num_vars clauses ~trace:false in
+    let r0 = Sat.solve plain in
+    let st0 = Sat.stats plain in
+    let m0 = Sat.model plain in
+    let traced = build num_vars clauses ~trace:true in
+    let r1 = Sat.solve traced in
+    let st1 = Sat.stats traced in
+    let m1 = Sat.model traced in
+    if
+      r0 <> r1
+      || st0.Sat.Stats.conflicts <> st1.Sat.Stats.conflicts
+      || st0.Sat.Stats.decisions <> st1.Sat.Stats.decisions
+      || st0.Sat.Stats.propagations <> st1.Sat.Stats.propagations
+      || m0 <> m1
+    then incr mismatches
+  done;
+  check
+    (Printf.sprintf
+       "side-channel: traced bit-identical to untraced over %d formulas (%d mismatches)"
+       n
+       !mismatches)
+    (!mismatches = 0)
+;;
+
+(* ------------------------------------------------------------------ *)
+
+let () =
+  test_on_input_and_unit ();
+  test_e1_root_empty ();
+  test_e2_level0_conflict ();
+  test_e3_failed_assumption_theory_prop ();
+  test_e4_theory_lemma_empty ();
+  test_theory_conflict_surfaced ();
+  test_analyze_theory_reason ();
+  test_antecedent_order_conflict_last ();
+  test_traced_bit_identical ();
+  Printf.printf "cert_emit_test: %d checks, %d failures\n" !checks !failures;
+  if !failures > 0 then exit 1
+;;

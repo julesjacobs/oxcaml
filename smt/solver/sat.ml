@@ -144,6 +144,13 @@ type t =
   ; mutable propagations : int
   ; restart_base : int
   ; mutable trace : trace option
+  ; mutable empty_input_id : int
+    (* ADR-0013 §4.0 E1/E4: the [on_input] id of the clause that filtered to [] and made
+         the instance permanently unsat, or -1 if [t.ok] never fell via an empty input.
+         The terminal [Root_empty] step (solve-entry E1 / Final-effort E4) cites it. Only
+         ever set on the [t.ok] true→false empty-input transition and only when traced;
+         never touched by the level-0-conflict path (E2), so [>= 0] reliably means "unsat
+         via an empty input". *)
   ; mutable theory : theory option
   ; mutable budget_tick : (unit -> unit) option
     (* board #60: called at each conflict / decision to tick a deterministic effort counter
@@ -183,6 +190,7 @@ let create () =
   ; propagations = 0
   ; restart_base = 100
   ; trace = None
+  ; empty_input_id = -1
   ; theory = None
   ; budget_tick = None
   }
@@ -370,13 +378,13 @@ let fresh_id t =
   id
 ;;
 
-let mk_clause t lits learnt =
-  let c =
-    { id = fresh_id t; lits = Array.copy lits; activity = 0.0; learnt; deleted = false }
-  in
+let mk_clause_with_id t id lits learnt =
+  let c = { id; lits = Array.copy lits; activity = 0.0; learnt; deleted = false } in
   if learnt then Dynarray.add_last t.learnts c else Dynarray.add_last t.clauses c;
   c
 ;;
+
+let mk_clause t lits learnt = mk_clause_with_id t (fresh_id t) lits learnt
 
 let attach t c =
   let l0 = c.lits.(0)
@@ -520,6 +528,28 @@ let transient_clause t lits =
   { id = fresh_id t; lits; activity = 0.0; learnt = false; deleted = false }
 ;;
 
+(* Cert emission (ADR-0013 §4.0): surface a materialized theory transient's id ↔ clause so
+   any later citation of it (an [analyze]/[analyze_final] antecedent, or an
+   [unsat_conclusion]) resolves to a content-bearing event. [Reason] is the propagation
+   clause [p ∨ ¬p₁ ∨ … ∨ ¬pₖ] (implied literal at slot 0); [Conflict] is a falsified
+   premise clause. Pure side channel, guarded by the trace: [transient_clause] mints the
+   id regardless of trace, so firing this changes nothing when untraced (bit-identical). *)
+let note_theory_clause t role c =
+  (match t.trace with
+   | Some tr -> tr.on_theory_clause ~id:c.id ~clause:c.lits ~role
+   | None -> ());
+  c
+;;
+
+(* The lits of a lazy theory reason clause for a propagated literal [lit] with (validated)
+   premises [p₁..pₖ]: [| lit; ¬p₁; …; ¬pₖ |]. Shared by {!theory_reason_clause} and the E3
+   [analyze_final] materialization. *)
+let reason_lits lit premises =
+  let lits = Array.make (List.length premises + 1) lit in
+  List.iteri (fun i p -> lits.(i + 1) <- neg_lit p) premises;
+  lits
+;;
+
 (* [theory.explain lit], validated against CONTRACT-EX: every premise must be an asserted
    (true) literal that appears STRICTLY earlier on the trail than [lit] — the reason valid
    at [lit]'s propagation time. A violation would make a malformed 1UIP back-edge (and can
@@ -557,9 +587,7 @@ let theory_explain_checked t lit =
    clause forces [lit] — a genuine implication, valid at [lit]'s propagation time. *)
 let theory_reason_clause t lit =
   let premises = theory_explain_checked t lit in
-  let lits = Array.make (List.length premises + 1) lit in
-  List.iteri (fun i p -> lits.(i + 1) <- neg_lit p) premises;
-  transient_clause t lits
+  note_theory_clause t Reason (transient_clause t (reason_lits lit premises))
 ;;
 
 (* A theory conflict, given the asserted premise set whose conjunction is T-inconsistent:
@@ -575,7 +603,7 @@ let theory_conflict_clause t premises =
        then
          raise (Theory_contract_violation "conflict premise set is not all asserted-true"))
     lits;
-  transient_clause t lits
+  note_theory_clause t Conflict (transient_clause t lits)
 ;;
 
 (* The theory implied [lit] but its negation is already asserted (a propagation into a
@@ -589,8 +617,7 @@ let theory_prop_conflict_clause t lit =
     | None -> assert false
   in
   let premises = th.explain lit in
-  let lits = Array.make (List.length premises + 1) lit in
-  List.iteri (fun i p -> lits.(i + 1) <- neg_lit p) premises;
+  let lits = reason_lits lit premises in
   Array.iter
     (fun l ->
        if lit_val t l <> -1
@@ -600,14 +627,18 @@ let theory_prop_conflict_clause t lit =
               "theory propagated a literal whose negation is asserted, but its \
                explanation is not falsified"))
     lits;
-  transient_clause t lits
+  note_theory_clause t Conflict (transient_clause t lits)
 ;;
 
 (* ------------------------------------------------------------------ *)
 (* 1UIP conflict analysis with local (self-subsumption) minimization.
 
    Returns the learned clause (asserting literal at index 0), the backjump level, and —
-   only when a trace is set — the antecedent clause ids of the resolution derivation. *)
+   only when a trace is set — the antecedent clause ids of the resolution derivation, in
+   the frozen [on_learned] ordered-RUP order [rₙ..r₁; conflict] (ADR-0013 §1.4(a)): the
+   reason clauses in reverse-resolution order, conflict last. The accumulator prepends
+   [confl.id] first then each reason [rᵢ.id] as it is resolved (r₁ first), so [!ants] is
+   already exactly that order — no reversal. *)
 
 let analyze t confl =
   let out = Dynarray.create () in
@@ -712,14 +743,33 @@ let analyze t confl =
       Dynarray.get t.level (var_of_lit learnt.(1)))
   in
   Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked;
-  learnt, bt, List.rev !ants
+  learnt, bt, !ants
 ;;
 
-(* Which assumption literals forced [p] to be true (i.e. the failed-assumption core, §7).
-   [p] is the negation of a false assumption. *)
+(* Which assumption literals forced [p] to be true (i.e. the failed-assumption core, §7),
+   and — only when a trace is set (ADR-0013 §4.0 E3) — the reason-clause ids of the
+   forcing derivation, in ordered-RUP order [rₙ..r₁] (the [Failed_assumption]
+   antecedents). [p] is the negation of a false assumption.
+
+   The E3 emission is the assumption-core parallel of {!analyze}'s :626 materialization:
+   the trail walk (high→low = most-recent-first) prepends a reason id per crossed
+   PROPAGATED literal, so [!ants] ends up oldest-reason-first = the RUP-consumption order.
+   Two reason kinds are crossed and BOTH must be materialized [H1, the load-bearing fold]:
+   [Implied_by cc] cites [cc.id] (already resolvable as an Input/learned clause);
+   [Theory_prop] has NO stored clause, so — like {!analyze}, unlike the pre-cert
+   [analyze_final] — the lazy reason [l ∨ ¬p₁ ∨ … ∨ ¬pₖ] is materialized here (same
+   premises used for marking), surfaced as a [Reason] theory leaf via
+   {!note_theory_clause}, and its id cited. Omitting the [Theory_prop] leg would drop
+   exactly the theory- propagation ancestors that dominate the EUF/LIA production path, so
+   a genuine theory [unsat] session would be uncertifiable. Assumption/selector literals
+   ([Decision]) are the core leaves — added to [out], no antecedent id (they are stripped
+   to [] at emission by the session, §1.0). When untraced, [ants] stays [] and no clause
+   is materialized — bit-identical to the pre-cert core walk. *)
 let analyze_final t p =
   let out = Dynarray.create () in
   Dynarray.add_last out p;
+  let track = t.trace <> None in
+  let ants = ref [] in
   if decision_level t > 0
   then (
     let marked = Dynarray.create () in
@@ -743,19 +793,28 @@ let analyze_final t p =
           for j = 1 to Array.length lits - 1 do
             let vj = var_of_lit lits.(j) in
             if Dynarray.get t.level vj > 0 then mark vj
-          done
+          done;
+          if track then ants := c.id :: !ants
         | Theory_prop ->
           (* a theory-propagated literal's premises are its reason; mark them (mirrors the
              [Implied_by] clause body, whose slot 0 is [l] itself and is skipped). Same
              strict CONTRACT-EX validation as the 1UIP path — a precedence-violating
              reason here would silently produce a wrong failed-assumption core, so it must
              raise. *)
+          let premises = theory_explain_checked t l in
           List.iter
             (fun q -> if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
-            (theory_explain_checked t l))
+            premises;
+          if track
+          then (
+            (* materialize the lazy reason (H1) and cite it *)
+            let c =
+              note_theory_clause t Reason (transient_clause t (reason_lits l premises))
+            in
+            ants := c.id :: !ants))
     done;
     Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked);
-  List.map neg_lit (Array.to_list (Dynarray.to_array out))
+  List.map neg_lit (Array.to_list (Dynarray.to_array out)), !ants
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -790,13 +849,24 @@ let reduce_db t =
    (guaranteed by [solve], which cancels to 0 before returning). *)
 
 let add_clause ?(origin = Query) t lits =
-  (* [origin] is the RR5 cert-provenance tag (ADR-0013 §4.0). Accepted-and-ignored here —
-     the freeze pins the signature; cert step-1 (M5) starts consuming it (routing [Query]
-     to [on_input] and [Theory_lemma] to a Valid_lemma leaf). No solving effect. *)
-  ignore (origin : origin);
   List.iter (fun l -> ensure_var t (var_of_lit l)) lits;
   if t.ok
   then (
+    (* Cert emission (ADR-0013 §4.0): reserve a stable id and surface the RAW input clause
+       with its [origin] BEFORE level-0 simplification — so a clause that filters to []
+       (E1/E4) is still id-resolvable. The retained arena clause below REUSES [input_id]
+       (mk_clause_with_id), so any downstream citation of it (a level-0 conflict's
+       [conflict_id], an [analyze]/[analyze_final] antecedent) resolves to this [on_input]
+       event. Guarded by the trace: untraced runs allocate no id and fire no hook, so the
+       id sequence and behaviour are bit-identical to the pre-cert core. *)
+    let input_id =
+      match t.trace with
+      | None -> -1
+      | Some tr ->
+        let id = fresh_id t in
+        tr.on_input ~id ~clause:(Array.of_list lits) ~origin;
+        id
+    in
     let ls = List.sort_uniq compare lits in
     let tautology = List.exists (fun l -> List.mem (neg_lit l) ls) ls in
     if not tautology
@@ -806,10 +876,24 @@ let add_clause ?(origin = Query) t lits =
       then (
         let ls = List.filter (fun l -> lit_val t l <> -1) ls in
         match ls with
-        | [] -> t.ok <- false
-        | [ l ] -> if lit_val t l = 0 then unchecked_enqueue t l Decision
+        | [] ->
+          t.ok <- false;
+          (* E1 (a [Query] input) / E4 (a [Theory_lemma], via {!add_theory_lemmas})
+             filtered to []: remember which input's id the terminal [Root_empty] step
+             cites. E1 vs E4 is read off [input_id]'s recorded [origin] by the emitter. *)
+          if t.trace <> None then t.empty_input_id <- input_id
+        | [ l ] ->
+          if lit_val t l = 0
+          then (
+            unchecked_enqueue t l Decision;
+            (* a standing level-0 unit (ADR-0013 §1.3): declared to the checker, which
+               also re-derives the unit closure from the [Input] clauses by BCP *)
+            match t.trace with
+            | Some tr -> tr.on_unit ~id:(fresh_id t) ~lit:l
+            | None -> ())
         | _ ->
-          let c = mk_clause t (Array.of_list ls) false in
+          let id = if input_id >= 0 then input_id else fresh_id t in
+          let c = mk_clause_with_id t id (Array.of_list ls) false in
           attach t c)))
 ;;
 
@@ -885,7 +969,11 @@ let enqueue_theory_lits t lits =
    re-reaching the same total assignment). *)
 let add_theory_lemmas t clauses =
   cancel_until t 0;
-  List.iter (fun ls -> add_clause t ls) clauses
+  (* [Theory_lemma] provenance (ADR-0013 §4.0 RR5): a Split/B&B/N-O lemma goes through the
+     SAME [add_clause] as a query input, so [on_input] must tag it so the emitter routes
+     it to a [Valid_lemma] leaf — never a trusted [Input]. A lemma that filters to [] here
+     is the E4 exit (a [Theory_lemma]-origin [Root_empty]). *)
+  List.iter (fun ls -> add_clause ~origin:Theory_lemma t ls) clauses
 ;;
 
 (* Boolean BCP interleaved with cheap Propagate-effort theory checks to a combined
@@ -917,7 +1005,9 @@ let propagate_theory t =
             (* a lemma that simplified to the empty clause at level 0 makes the instance
                unsat; surface it as an (empty, always-false) conflict so [handle_confl]
                concludes unsat rather than letting search run on to a spurious model *)
-            if t.ok then again := true else confl := Some (transient_clause t [||])))
+            if t.ok
+            then again := true
+            else confl := Some (note_theory_clause t Conflict (transient_clause t [||]))))
   done;
   !confl
 ;;
@@ -953,6 +1043,13 @@ let search t assumps conflict_limit =
     if decision_level t = 0
     then (
       t.ok <- false;
+      (* E2 (ADR-0013 §4.0): a level-0 conflict. The terminal step is level-0 RUP of
+         [confl] against the checker's re-derived unit closure. [confl.id] resolves via
+         [on_input] / [on_learned] (a Boolean clause) or [on_theory_clause] (a theory
+         transient — incl. an unconditional [T_conflict []] empty clause, Rev 6). *)
+      (match t.trace with
+       | Some tr -> tr.on_unsat (Level0_conflict { conflict_id = confl.id })
+       | None -> ());
       result := Some R_unsat)
     else (
       let learnt, bt, ants = analyze t confl in
@@ -982,7 +1079,15 @@ let search t assumps conflict_limit =
           match lit_val t pa with
           | 1 -> new_decision_level t (* dummy level: assumption already true *)
           | -1 ->
-            t.failed <- analyze_final t (neg_lit pa);
+            let core, ants = analyze_final t (neg_lit pa) in
+            t.failed <- core;
+            (* E3 (ADR-0013 §4.0), the universal session exit: [ants] is the
+               assumption-forcing reason chain in ordered-RUP order (Implied_by clause
+               ids + materialized Theory_prop reason ids). After the session strips the
+               assumed selectors it derives []. *)
+            (match t.trace with
+             | Some tr -> tr.on_unsat (Failed_assumption { antecedents = ants })
+             | None -> ());
             result := Some R_unsat;
             brk := true
           | _ ->
@@ -1031,7 +1136,18 @@ let search t assumps conflict_limit =
                     add_theory_lemmas t clauses;
                     (* an empty-at-level-0 lemma makes the instance unsat (blocker: search
                        must not run on to a spurious model) *)
-                    if not t.ok then result := Some R_unsat)))
+                    if not t.ok
+                    then (
+                      (* E4 (ADR-0013 §4.0 H3): a Final-effort [Theory_lemma] filtered to
+                         [] at level 0, setting [result] directly (no [confl], distinct
+                         from E2). [empty_input_id] is that lemma's [on_input] id; the
+                         emitter reads its [Theory_lemma] origin. *)
+                      (match t.trace with
+                       | Some tr ->
+                         if t.empty_input_id >= 0
+                         then tr.on_unsat (Root_empty { input_id = t.empty_input_id })
+                       | None -> ());
+                      result := Some R_unsat))))
           else (
             t.decisions <- t.decisions + 1;
             new_decision_level t;
@@ -1069,7 +1185,19 @@ let solve ?(assumptions = []) t =
   t.failed <- [];
   List.iter (fun l -> ensure_var t (var_of_lit l)) assumptions;
   if not t.ok
-  then Unsat
+  then (
+    (* E1 (ADR-0013 §4.0): the instance was already permanently unsat at entry — a [Query]
+       input filtered to [] under level-0 simplification. The terminal step is level-0 RUP
+       of [empty_input_id] against the checker's re-derived unit closure. Guarded by
+       [>= 0]: if [t.ok] fell via a level-0 conflict (E2) in a prior [solve] rather than
+       an empty input, [empty_input_id] is -1 and no [Root_empty] is fabricated (that
+       solve already emitted its own [Level0_conflict]); fail-closed. *)
+    (match t.trace with
+     | Some tr ->
+       if t.empty_input_id >= 0
+       then tr.on_unsat (Root_empty { input_id = t.empty_input_id })
+     | None -> ());
+    Unsat)
   else (
     let assumps = Array.of_list assumptions in
     cancel_until t 0;
