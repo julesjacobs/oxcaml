@@ -66,16 +66,39 @@ let learned t = List.rev t.learned_rev
 let theory_clauses t = List.rev t.theory_rev
 let conclusion t = t.conclusion
 
-module IntSet = Set.Make (Int)
+(* content-bearing id occurrence COUNTS (sat.mli id-resolvability: on_input, on_learned,
+   on_theory_clause). A count MAP, not a set: within one solver every emitted id is unique
+   (fresh_id is strictly monotonic and no id is surfaced by two content events), so a
+   content id with count > 1 means TWO different clauses share an id — the only way that
+   happens is one recorder recording two solvers' streams (each restarting ids from 0),
+   the codex HIGH-4 misuse. Binding a recorder to a single solver would need a Sat.t
+   identity accessor, which the frozen sat.mli does not expose; rejecting ambiguous ids is
+   the sound alternative. *)
+let content_counts t =
+  let tbl = Hashtbl.create 256 in
+  let bump id =
+    Hashtbl.replace
+      tbl
+      id
+      (1
+       +
+       try Hashtbl.find tbl id with
+       | Not_found -> 0)
+  in
+  List.iter (fun (e : input_event) -> bump e.id) t.inputs_rev;
+  List.iter (fun (e : learned_event) -> bump e.id) t.learned_rev;
+  List.iter (fun (e : theory_event) -> bump e.id) t.theory_rev;
+  tbl
+;;
 
 let unresolved_citations t =
-  (* content-bearing ids (sat.mli id-resolvability): on_input, on_learned,
-     on_theory_clause *)
-  let content =
-    IntSet.empty
-    |> List.fold_right (fun (e : input_event) acc -> IntSet.add e.id acc) t.inputs_rev
-    |> List.fold_right (fun (e : learned_event) acc -> IntSet.add e.id acc) t.learned_rev
-    |> List.fold_right (fun (e : theory_event) acc -> IntSet.add e.id acc) t.theory_rev
+  let counts = content_counts t in
+  (* a cited id resolves IFF exactly one content event carries it; count 0 = dangling,
+     count > 1 = ambiguous (two clauses, one id) — both fail-closed to unresolved. *)
+  let resolves id =
+    match Hashtbl.find_opt counts id with
+    | Some 1 -> true
+    | _ -> false
   in
   let from_conclusion =
     match t.conclusion with
@@ -90,5 +113,5 @@ let unresolved_citations t =
       from_conclusion
       t.learned_rev
   in
-  List.sort_uniq compare (List.filter (fun id -> not (IntSet.mem id content)) cited)
+  List.sort_uniq compare (List.filter (fun id -> not (resolves id)) cited)
 ;;

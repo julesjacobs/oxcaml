@@ -410,9 +410,14 @@ let test_antecedent_order_conflict_last () =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Side-channel: a solve with a recorder installed is bit-identical (verdict, model, full
-   counter trio) to one without, over a batch of random formulas. Guards "zero cost /
-   bit-identical" — emission never feeds back into search. *)
+(* Side-channel soundness: installing a recorder never flips a VERDICT, over a batch of
+   random formulas. It is NOT bit-identical to untraced any more — the frozen unminimized-
+   clause contract means a traced solve bypasses minimization, so learned clauses (hence
+   counters and the eventual model) legitimately differ (a weaker but still sound and
+   complete solver, ADR-0013 §1.4(b)). The guarantee that matters is that emission is a
+   pure side channel for the ANSWER: Sat stays Sat, Unsat stays Unsat. (Untraced
+   bit-identicality to the pre-cert core is covered by sat_test / seam_test running
+   untraced.) *)
 
 let lcg = ref 0xC0FFEE123456
 
@@ -445,7 +450,7 @@ let build num_vars clauses ~trace =
   s
 ;;
 
-let test_traced_bit_identical () =
+let test_traced_verdict_preserved () =
   lcg := 0xC0FFEE123456;
   let n = 3000 in
   let mismatches = ref 0 in
@@ -455,26 +460,172 @@ let test_traced_bit_identical () =
     let clauses = List.init num_clauses (fun _ -> random_clause num_vars) in
     let plain = build num_vars clauses ~trace:false in
     let r0 = Sat.solve plain in
-    let st0 = Sat.stats plain in
-    let m0 = Sat.model plain in
     let traced = build num_vars clauses ~trace:true in
     let r1 = Sat.solve traced in
-    let st1 = Sat.stats traced in
-    let m1 = Sat.model traced in
-    if
-      r0 <> r1
-      || st0.Sat.Stats.conflicts <> st1.Sat.Stats.conflicts
-      || st0.Sat.Stats.decisions <> st1.Sat.Stats.decisions
-      || st0.Sat.Stats.propagations <> st1.Sat.Stats.propagations
-      || m0 <> m1
-    then incr mismatches
+    if r0 <> r1 then incr mismatches
   done;
   check
     (Printf.sprintf
-       "side-channel: traced bit-identical to untraced over %d formulas (%d mismatches)"
+       "side-channel: traced verdict == untraced verdict over %d formulas (%d mismatches)"
        n
        !mismatches)
     (!mismatches = 0)
+;;
+
+(* ------------------------------------------------------------------ *)
+(* CRIT-1 (codex): a MINIMIZABLE conflict under an active trace must emit-and-store the
+   UNMINIMIZED 1UIP clause (frozen sat.mli:156). Codex's trigger:
+   [(¬a∨b); (¬c∨¬a∨d); (¬c∨¬b∨¬d)] under assumptions [a;c]. The 1UIP clause is (¬c∨¬a∨¬b);
+   minimization would drop ¬b (its reason (¬a∨b) is subsumed) giving (¬c∨¬a). With the
+   bypass the emitted clause keeps ¬b, and the emitted antecedent chain is the full chain
+   that derives THAT clause. Discriminator: without the bypass the emitted clause is
+   (¬c∨¬a) [set {-3;-1}]. *)
+
+let test_crit1_unminimized_when_traced () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s
+  and d = Sat.new_var s in
+  ignore (b, d);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg a; Sat.pos b ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg a; Sat.pos d ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg b; Sat.neg d ];
+  let r = Sat.solve ~assumptions:[ Sat.pos a; Sat.pos c ] s in
+  check "crit1: unsat under [a;c]" (r = Sat.Unsat);
+  (match Recorder.learned rec_ with
+   | [ le ] ->
+     check
+       (Printf.sprintf
+          "crit1: emitted-and-stored clause is UNMINIMIZED {-3;-2;-1} (got %s)"
+          (show_ints (clause_set le.Recorder.clause)))
+       (clause_set le.Recorder.clause = [ -3; -2; -1 ]);
+     check
+       "crit1: >=2 antecedents (full chain, not truncated to a minimized clause)"
+       (List.length le.Recorder.antecedents >= 2)
+   | ls ->
+     check
+       (Printf.sprintf "crit1: exactly one learned clause (got %d)" (List.length ls))
+       false);
+  check "crit1: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* CRIT-2 (codex): a theory propagation at LEVEL 0 feeding an E2 level-0 conflict must
+   surface its reason clause, or the checker's level-0 closure (§1.3, over Input clauses)
+   cannot derive it. Codex's trigger: theory a⇒c; level-0 inputs [a], [¬c∨x], [¬c∨y],
+   [¬x∨¬y]. c is propagated at level 0, x,y follow, [¬x∨¬y] conflicts at level 0 (E2). The
+   reason (c∨¬a) must be a surfaced Reason leaf. Discriminator: without the
+   enqueue_theory_lits L0 surfacing, no Reason leaf exists for c. *)
+
+let test_crit2_level0_theory_reason () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and c = Sat.new_var s
+  and x = Sat.new_var s
+  and y = Sat.new_var s in
+  let la = Sat.pos a
+  and lc = Sat.pos c
+  and lx = Sat.pos x
+  and ly = Sat.pos y in
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ la ];
+  Sat.add_clause s [ Sat.neg c; lx ];
+  Sat.add_clause s [ Sat.neg c; ly ];
+  Sat.add_clause s [ Sat.neg x; Sat.neg y ];
+  let r = Sat.solve s in
+  check "crit2: unsat" (r = Sat.Unsat);
+  check
+    "crit2: conclusion is Level0_conflict (E2)"
+    (match Recorder.conclusion rec_ with
+     | Some (Sat.Level0_conflict _) -> true
+     | _ -> false);
+  let has_c_reason =
+    List.exists
+      (fun (te : Recorder.theory_event) ->
+         te.Recorder.role = Sat.Reason && clause_set te.Recorder.clause = [ -1; 2 ])
+      (Recorder.theory_clauses rec_)
+  in
+  check "crit2: level-0 theory reason (c ∨ ¬a) surfaced as a Reason leaf" has_c_reason;
+  check "crit2: no unresolved citations" (Recorder.unresolved_citations rec_ = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* CRIT-3 (codex): a REPEATED solve on an already-unsat core must re-emit a checkable
+   conclusion (no silent traced Unsat). E2 sets [t.ok] false; the second solve returns
+   Unsat via the entry and must re-fire the persisted Level0_conflict. Discriminator:
+   without terminal persistence the second solve emits nothing → count stays 1. *)
+
+let counting_trace count last =
+  { Sat.on_input = (fun ~id:_ ~clause:_ ~origin:_ -> ())
+  ; on_unit = (fun ~id:_ ~lit:_ -> ())
+  ; on_learned = (fun ~id:_ ~clause:_ ~antecedents:_ ~btlevel:_ -> ())
+  ; on_theory_clause = (fun ~id:_ ~clause:_ ~role:_ -> ())
+  ; on_unsat =
+      (fun c ->
+        incr count;
+        last := Some c)
+  }
+;;
+
+let test_crit3_repeated_solve_reemits () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let count = ref 0 in
+  let last = ref None in
+  Sat.set_trace s (Some (counting_trace count last));
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  Sat.add_clause s [ Sat.neg a ];
+  Sat.add_clause s [ Sat.neg b ];
+  let r1 = Sat.solve s in
+  let c1 = !count in
+  let r2 = Sat.solve s in
+  let c2 = !count in
+  check "crit3: first solve unsat (E2)" (r1 = Sat.Unsat);
+  check "crit3: second solve unsat" (r2 = Sat.Unsat);
+  check "crit3: first solve emitted one conclusion" (c1 = 1);
+  check
+    (Printf.sprintf "crit3: repeated solve re-emitted a conclusion (total %d)" c2)
+    (c2 = 2);
+  check
+    "crit3: re-emitted conclusion is Level0_conflict"
+    (match !last with
+     | Some (Sat.Level0_conflict _) -> true
+     | _ -> false)
+;;
+
+(* ------------------------------------------------------------------ *)
+(* HIGH-4 (codex): unresolved_citations must NOT false-clean an ambiguous id. Reuse ONE
+   recorder across two solvers whose ids both restart from 0: solver 1 emits content id 0
+   ([a]); solver 2 emits content id 0 ([b∨c]) and cites conflict id 0. The recorder cannot
+   bind to a solver identity, so it rejects the ambiguity (id 0 in two content events →
+   count 2 → unresolved). Discriminator: an IntSet-collapse implementation returns []. *)
+
+let test_high4_ambiguous_id () =
+  let rec_ = Recorder.create () in
+  let s1 = Sat.create () in
+  let a = Sat.new_var s1 in
+  Sat.set_trace s1 (Some (Recorder.trace rec_));
+  Sat.add_clause s1 [ Sat.pos a ];
+  ignore (Sat.solve s1 : Sat.result);
+  let s2 = Sat.create () in
+  let b = Sat.new_var s2
+  and c = Sat.new_var s2 in
+  Sat.set_trace s2 (Some (Recorder.trace rec_));
+  Sat.add_clause s2 [ Sat.pos b; Sat.pos c ];
+  Sat.add_clause s2 [ Sat.neg b ];
+  Sat.add_clause s2 [ Sat.neg c ];
+  let r = Sat.solve s2 in
+  check "high4: solver-2 unsat" (r = Sat.Unsat);
+  check
+    "high4: ambiguous cited id reported unresolved (not false-clean)"
+    (Recorder.unresolved_citations rec_ <> [])
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -488,7 +639,11 @@ let () =
   test_theory_conflict_surfaced ();
   test_analyze_theory_reason ();
   test_antecedent_order_conflict_last ();
-  test_traced_bit_identical ();
+  test_crit1_unminimized_when_traced ();
+  test_crit2_level0_theory_reason ();
+  test_crit3_repeated_solve_reemits ();
+  test_high4_ambiguous_id ();
+  test_traced_verdict_preserved ();
   Printf.printf "cert_emit_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

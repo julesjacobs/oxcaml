@@ -144,13 +144,15 @@ type t =
   ; mutable propagations : int
   ; restart_base : int
   ; mutable trace : trace option
-  ; mutable empty_input_id : int
-    (* ADR-0013 §4.0 E1/E4: the [on_input] id of the clause that filtered to [] and made
-         the instance permanently unsat, or -1 if [t.ok] never fell via an empty input.
-         The terminal [Root_empty] step (solve-entry E1 / Final-effort E4) cites it. Only
-         ever set on the [t.ok] true→false empty-input transition and only when traced;
-         never touched by the level-0-conflict path (E2), so [>= 0] reliably means "unsat
-         via an empty input". *)
+  ; mutable terminal : unsat_conclusion option
+    (* ADR-0013 §4.0: the terminal conclusion of a PERMANENT unsat ([t.ok] false) —
+         [Root_empty] for an empty [Query]/[Theory_lemma] input (E1/E4), [Level0_conflict]
+         for a level-0 conflict (E2). Set (traced only) at the [t.ok] true→false
+         transition and PERSISTED across solves, so every repeated [solve] that returns
+         [Unsat] via the [not t.ok] entry re-emits the same checkable conclusion (no
+         silent traced Unsat — codex CRIT-3). E3 (failed assumption) leaves [t.ok] true
+         and is re-derived fresh each solve, so it never populates this. [None] when
+         [t.ok] holds or untraced. *)
   ; mutable theory : theory option
   ; mutable budget_tick : (unit -> unit) option
     (* board #60: called at each conflict / decision to tick a deterministic effort counter
@@ -190,7 +192,7 @@ let create () =
   ; propagations = 0
   ; restart_base = 100
   ; trace = None
-  ; empty_input_id = -1
+  ; terminal = None
   ; theory = None
   ; budget_tick = None
   }
@@ -198,6 +200,17 @@ let create () =
 
 let set_trace t tr = t.trace <- tr
 let set_budget_tick t f = t.budget_tick <- f
+
+(* Emit the persisted terminal conclusion of a permanent unsat ([t.terminal]) if a trace
+   is installed. Called at every [solve] exit that returns [Unsat] off [not t.ok] (E1
+   entry, E2 level-0 conflict, E4 empty theory lemma), so a REPEATED solve on an
+   already-unsat core re-emits its checkable conclusion — never a silent traced [Unsat]
+   (codex CRIT-3). *)
+let emit_terminal t =
+  match t.trace, t.terminal with
+  | Some tr, Some c -> tr.on_unsat c
+  | _ -> ()
+;;
 
 (* Tick the driver's effort counter at a counted work event (conflict / decision). Opaque
    to the core; may raise (e.g. [Budget.Exceeded]) to unwind [solve] at a cap — the driver
@@ -694,35 +707,47 @@ let analyze t confl =
   done;
   Dynarray.set out 0 (neg_lit !p);
   (* Local minimization: drop a literal whose reason's other literals are all already in
-     the learned clause (marked) or fixed at level 0. *)
-  let len = Dynarray.length out in
-  let jw = ref 1 in
-  for i = 1 to len - 1 do
-    let l = Dynarray.get out i in
-    let v = var_of_lit l in
-    let redundant =
-      match Dynarray.get t.reason v with
-      | Decision -> false (* a decision literal is never redundant *)
-      | Theory_prop ->
-        false (* keep theory-propagated literals (sound: never over-drop) *)
-      | Implied_by rc ->
-        let rlits = rc.lits in
-        let ok = ref true in
-        let k = ref 1 in
-        while !ok && !k < Array.length rlits do
-          let vk = var_of_lit rlits.(!k) in
-          if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
-          then ok := false;
-          incr k
-        done;
-        !ok
-    in
-    if not redundant
-    then (
-      Dynarray.set out !jw l;
-      incr jw)
-  done;
-  Dynarray.truncate out !jw;
+     the learned clause (marked) or fixed at level 0.
+
+     BYPASSED when a trace is active [ADR-0013 §1.4(b)/§4.0 delta 1; frozen sat.mli:156]:
+     the emitted-AND-stored learned clause must be the UNMINIMIZED 1UIP clause.
+     Minimization drops a literal justified by a level>0 reason that is NOT among [ants]
+     (the resolution chain); a hint-restricted ordered-RUP replay of the minimized clause
+     would need that absent reason and stall (codex CRIT-1). The full [ants] chain
+     (finalized above, before this loop) already matches the unminimized clause exactly.
+     Bypassing slows the traced solve (a weaker solver — larger learnts) but keeps every
+     downstream antecedent chain over unminimized clauses; trace is OFF by default, so the
+     uncertified corpus is untouched. When untraced, minimize as before (bit-identical). *)
+  if not track
+  then (
+    let len = Dynarray.length out in
+    let jw = ref 1 in
+    for i = 1 to len - 1 do
+      let l = Dynarray.get out i in
+      let v = var_of_lit l in
+      let redundant =
+        match Dynarray.get t.reason v with
+        | Decision -> false (* a decision literal is never redundant *)
+        | Theory_prop ->
+          false (* keep theory-propagated literals (sound: never over-drop) *)
+        | Implied_by rc ->
+          let rlits = rc.lits in
+          let ok = ref true in
+          let k = ref 1 in
+          while !ok && !k < Array.length rlits do
+            let vk = var_of_lit rlits.(!k) in
+            if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
+            then ok := false;
+            incr k
+          done;
+          !ok
+      in
+      if not redundant
+      then (
+        Dynarray.set out !jw l;
+        incr jw)
+    done;
+    Dynarray.truncate out !jw);
   (* Backjump level: the second-highest decision level in the clause (0 for a unit). Move
      that literal to slot 1 so the learned clause watches it. *)
   let learnt = Dynarray.to_array out in
@@ -879,9 +904,13 @@ let add_clause ?(origin = Query) t lits =
         | [] ->
           t.ok <- false;
           (* E1 (a [Query] input) / E4 (a [Theory_lemma], via {!add_theory_lemmas})
-             filtered to []: remember which input's id the terminal [Root_empty] step
-             cites. E1 vs E4 is read off [input_id]'s recorded [origin] by the emitter. *)
-          if t.trace <> None then t.empty_input_id <- input_id
+             filtered to []: persist the terminal [Root_empty] citing this input's id, so
+             the solve exit (and any repeated solve) re-emits it. E1 vs E4 is read off
+             [input_id]'s recorded [origin] by the emitter. (A subsequent level-0 conflict
+             cannot follow — [t.ok] is now false — so the propagate-effort empty-lemma
+             path, which routes through E2, overwrites this to [Level0_conflict] at the E2
+             site as ADR §4.0 specifies.) *)
+          if t.trace <> None then t.terminal <- Some (Root_empty { input_id })
         | [ l ] ->
           if lit_val t l = 0
           then (
@@ -948,6 +977,18 @@ let enqueue_theory_lits t lits =
        | 1 -> go progressed rest (* already implied; skip *)
        | 0 ->
          unchecked_enqueue t l Theory_prop;
+         (* Cert emission (ADR-0013 §4.0, codex CRIT-2): a theory propagation at LEVEL 0
+            is NOT derivable from the [Input] clauses, so the checker's level-0 BCP
+            closure (§1.3) cannot recover it — an E2 [Level0_conflict] (or E3 core)
+            resting on it would cite a clause the closure can't falsify. Eagerly
+            materialize the reason [l ∨ ¬p₁ ∨ … ∨ ¬pₖ] as a [Reason] theory leaf (via
+            {!theory_reason_clause}'s [on_theory_clause] side effect) so the checker can
+            derive [l] in its level-0 closure. Level>0 props stay lazy —
+            [analyze]/[analyze_final] materialize them on demand. Guarded by the trace
+            ([theory_reason_clause] validates CONTRACT-EX and allocates a transient; both
+            are pure side channels here). *)
+         if t.trace <> None && decision_level t = 0
+         then ignore (theory_reason_clause t l : clause);
          go true rest
        | _ -> `Confl (theory_prop_conflict_clause t l) (* forced true but already false *))
   in
@@ -1046,10 +1087,11 @@ let search t assumps conflict_limit =
       (* E2 (ADR-0013 §4.0): a level-0 conflict. The terminal step is level-0 RUP of
          [confl] against the checker's re-derived unit closure. [confl.id] resolves via
          [on_input] / [on_learned] (a Boolean clause) or [on_theory_clause] (a theory
-         transient — incl. an unconditional [T_conflict []] empty clause, Rev 6). *)
-      (match t.trace with
-       | Some tr -> tr.on_unsat (Level0_conflict { conflict_id = confl.id })
-       | None -> ());
+         transient — incl. an unconditional [T_conflict []] empty clause, Rev 6).
+         Persisted so a repeated solve on the now-unsat core re-emits it (codex CRIT-3). *)
+      if t.trace <> None
+      then t.terminal <- Some (Level0_conflict { conflict_id = confl.id });
+      emit_terminal t;
       result := Some R_unsat)
     else (
       let learnt, bt, ants = analyze t confl in
@@ -1140,13 +1182,9 @@ let search t assumps conflict_limit =
                     then (
                       (* E4 (ADR-0013 §4.0 H3): a Final-effort [Theory_lemma] filtered to
                          [] at level 0, setting [result] directly (no [confl], distinct
-                         from E2). [empty_input_id] is that lemma's [on_input] id; the
-                         emitter reads its [Theory_lemma] origin. *)
-                      (match t.trace with
-                       | Some tr ->
-                         if t.empty_input_id >= 0
-                         then tr.on_unsat (Root_empty { input_id = t.empty_input_id })
-                       | None -> ());
+                         from E2). [t.terminal] was set to [Root_empty] (that lemma's
+                         [on_input] id, [Theory_lemma] origin) by [add_clause]; emit it. *)
+                      emit_terminal t;
                       result := Some R_unsat))))
           else (
             t.decisions <- t.decisions + 1;
@@ -1186,17 +1224,12 @@ let solve ?(assumptions = []) t =
   List.iter (fun l -> ensure_var t (var_of_lit l)) assumptions;
   if not t.ok
   then (
-    (* E1 (ADR-0013 §4.0): the instance was already permanently unsat at entry — a [Query]
-       input filtered to [] under level-0 simplification. The terminal step is level-0 RUP
-       of [empty_input_id] against the checker's re-derived unit closure. Guarded by
-       [>= 0]: if [t.ok] fell via a level-0 conflict (E2) in a prior [solve] rather than
-       an empty input, [empty_input_id] is -1 and no [Root_empty] is fabricated (that
-       solve already emitted its own [Level0_conflict]); fail-closed. *)
-    (match t.trace with
-     | Some tr ->
-       if t.empty_input_id >= 0
-       then tr.on_unsat (Root_empty { input_id = t.empty_input_id })
-     | None -> ());
+    (* Permanent-unsat entry: re-emit the persisted terminal conclusion (codex CRIT-3, no
+       silent traced Unsat). [t.terminal] is [Root_empty] when a [Query] input filtered to
+       [] before any solve (E1), or [Level0_conflict]/[Root_empty] carried over from a
+       prior solve that drove the core permanently unsat (E2/E4). E3 leaves [t.ok] true,
+       so it never reaches here. *)
+    emit_terminal t;
     Unsat)
   else (
     let assumps = Array.of_list assumptions in

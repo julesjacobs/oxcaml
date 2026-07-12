@@ -57,9 +57,12 @@ val theory_clauses : t -> theory_event list
     through one of the four exits (E1–E4). *)
 val conclusion : t -> Sat.unsat_conclusion option
 
-(** The clause ids cited by the recorded conclusion and by learned-clause antecedents that
-    do NOT resolve to a content-bearing event ([on_input] / [on_learned] /
-    [on_theory_clause] — [on_unit] is excluded per the sat.mli id-resolvability list). The
-    id-resolvability invariant holds iff this is []; a nonempty result is a wiring bug (a
-    hook cited an id whose clause was never surfaced). Sorted, deduplicated. *)
+(** The cited clause ids (the conclusion's + every learned clause's antecedents) that do
+    NOT resolve to EXACTLY ONE content-bearing event ([on_input] / [on_learned] /
+    [on_theory_clause] — [on_unit] excluded per the sat.mli id-resolvability list). A
+    cited id is unresolved if it appears in zero content events (dangling) OR in more than
+    one (ambiguous — two distinct clauses under one id, which only arises when one
+    recorder is misused across two solvers whose ids both restart from 0; the recorder
+    cannot bind to a solver identity, so it rejects the ambiguity fail-closed). The
+    id-resolvability invariant holds iff this is []. Sorted, deduplicated. *)
 val unresolved_citations : t -> int list

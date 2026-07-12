@@ -322,8 +322,10 @@ let single_learned s assumptions =
 let test_minimize_must_not_fire () =
   (* c0 a->e, c1 e->b, c2 c∧b->d, c3 c∧a->¬d (conflict). Decide a then c. 1UIP analysis
      yields [{¬c,¬a,¬b}]; ¬b is a reasoned literal whose reason (¬e ∨ b) carries ¬e —
-     level 1, NOT in the clause — so ¬b is NOT redundant and must be kept. The mutant
-     drops it, giving [{¬c,¬a}]. *)
+     level 1, NOT in the clause — so it is not redundant. Under the cert-step-1 contract
+     minimization is bypassed while [with_collector]'s trace is active, so the observed
+     clause is the unminimized [{¬c,¬a,¬b}] — the same literals it would keep with
+     minimization on, so this assertion is unchanged. *)
   let clauses = [ [ -1; 5 ]; [ -5; 2 ]; [ -3; -2; 4 ]; [ -3; -1; -4 ] ] in
   let s = build 5 clauses in
   let r, ls = single_learned s [ lit 1; lit 3 ] in
@@ -339,26 +341,32 @@ let test_minimize_must_not_fire () =
   | _ -> ()
 ;;
 
-let test_minimize_fires () =
-  (* c0 a->b, c2 c∧a->d, c3 c∧b->¬d (conflict). Decide a then c. 1UIP analysis yields
-     [{¬c,¬a,¬b}] before minimization; ¬b's reason (¬a ∨ b) carries only ¬a, which IS in
-     the clause, so ¬b is genuinely redundant and correctly removed, giving [{¬c,¬a}].
-     (The mutant also removes it here — this case documents legitimate firing and pins it;
-     the discriminating case is min-keep above.) *)
+let test_minimize_bypassed_when_traced () =
+  (* c0 a->b, c2 c∧a->d, c3 c∧b->¬d (conflict). Decide a then c. 1UIP analysis yields the
+     UNMINIMIZED [{¬c,¬a,¬b}]; ¬b's reason (¬a ∨ b) carries only ¬a (in the clause), so ¬b
+     would be dropped by minimization giving [{¬c,¬a}]. But the frozen sat.mli:156
+     contract requires that WHEN A TRACE IS ACTIVE the emitted-and-stored clause is the
+     UNMINIMIZED 1UIP clause (ADR-0013 §1.4(b): a hint-restricted ordered-RUP replay of
+     the minimized clause would stall on the absent minimization reason). [with_collector]
+     installs a trace, so minimization is bypassed and the observed clause is [{¬c,¬a,¬b}]
+     (was [-3;-1] before the cert-step-1 fix — that assertion encoded the bug, codex
+     CRITICAL-1). NOTE: minimization now runs only on UNTRACED solves, so the
+     sat-minimize-unsound mutant is no longer observable through this trace-based path —
+     see the cert-step1 report / master flag. *)
   let clauses = [ [ -1; 2 ]; [ -3; -1; 4 ]; [ -3; -2; -4 ] ] in
   let s = build 4 clauses in
   let r, ls = single_learned s [ lit 1; lit 3 ] in
-  check "min-fire: unsat under assumptions" (r = Sat.Unsat);
-  check "min-fire: one learned clause" (List.length ls = 1);
+  check "min-bypass: unsat under assumptions" (r = Sat.Unsat);
+  check "min-bypass: one learned clause" (List.length ls = 1);
   match ls with
   | [ (clause, _ants, bt) ] ->
     check
       (Printf.sprintf
-         "min-fire: learned = [-3;-1] (minimized; got %s)"
+         "min-bypass: learned = [-3;-2;-1] (unminimized under trace; got %s)"
          (show_ints clause))
-      (clause = [ -3; -1 ]);
-    check "min-fire: backjump level = 1" (bt = 1);
-    check "min-fire: learned clause entailed" (learned_clause_entailed clauses 4 clause)
+      (clause = [ -3; -2; -1 ]);
+    check "min-bypass: backjump level = 1" (bt = 1);
+    check "min-bypass: learned clause entailed" (learned_clause_entailed clauses 4 clause)
   | _ -> ()
 ;;
 
@@ -511,7 +519,7 @@ let () =
   test_analyze_multi ();
   test_analyze_unit ();
   test_minimize_must_not_fire ();
-  test_minimize_fires ();
+  test_minimize_bypassed_when_traced ();
   test_propagation ();
   test_level0_contradiction ();
   test_empty_clause ();
