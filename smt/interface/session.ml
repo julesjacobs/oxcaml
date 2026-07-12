@@ -75,9 +75,15 @@ type t =
   ; mutable last_model : model option
     (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
   ; mutable asserted : Term.t list
-    (* every ORIGINAL asserted term (pre-preprocessing), for the R1 in-process model
-         self-check. v1 QF_UF queries are non-incremental, so this is exactly the active
-         assertion set. *)
+    (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
+         model self-check. Frame-scoped in lockstep with [frames] (F3): a [push] snapshots
+         it onto [asserted_saved] and a [pop] restores that snapshot, so a retracted
+         frame's assertions do NOT linger — [Model_check] evaluates the current active
+         set, never a popped assertion (which would spuriously reject a valid post-pop
+         [Sat]). *)
+  ; mutable asserted_saved : Term.t list list
+    (* [asserted] snapshots saved at each [push], innermost first; one per non-base
+         frame (so [length asserted_saved = length frames - 1]). Restored by [pop]. *)
   ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
   ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
   }
@@ -102,6 +108,7 @@ let create ?(split_budget = default_split_budget) () =
   ; last_verdict = Unknown
   ; last_model = None
   ; asserted = []
+  ; asserted_saved = []
   ; last_splits = 0
   ; budget_exhausted = false
   }
@@ -218,12 +225,25 @@ let assert_term t term =
         | Invalid_argument _ -> t.degraded <- true))
 ;;
 
-let push t = t.frames <- Sat.new_var t.sat :: t.frames
+let push t =
+  (* Snapshot the active assertion set BEFORE opening the frame, so the matching [pop]
+     restores exactly the pre-frame set (F3: keeps [asserted] = the active set). *)
+  t.asserted_saved <- t.asserted :: t.asserted_saved;
+  t.frames <- Sat.new_var t.sat :: t.frames
+;;
 
 let pop t =
   match t.frames with
   | [ _ ] | [] -> invalid_arg "Session.pop: no matching push"
-  | _ :: rest -> t.frames <- rest
+  | _ :: rest ->
+    t.frames <- rest;
+    (* Restore the assertion set to the matching [push]'s snapshot, dropping the frame's
+       assertions in lockstep (asserted_saved has one entry per non-base frame). *)
+    (match t.asserted_saved with
+     | s :: srest ->
+       t.asserted <- s;
+       t.asserted_saved <- srest
+     | [] -> ())
 ;;
 
 (* The self-checkable model of the just-decided [Sat]. It has two disjoint parts:
