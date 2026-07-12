@@ -655,6 +655,39 @@ struct
   let model t =
     let ma = A.model t.a in
     let mb = B.model t.b in
+    (* §10 v2 gap A (task #117): class value inheritance. A pure-EUF Int class that shares
+       its EUF class with a LIA-valued term must INHERIT that term's integer rather than
+       let {!Cdclt} mint a fresh one — else congruent App twins (e.g. [f a] LIA-valued,
+       [f b] pure-EUF under [a = b]) land two disagreeing rows at one table key and R1
+       rejects. [class_int] maps an EUF class id to the LIA integer some member of that
+       class carries: for each Int-sorted term with BOTH an EUF class id (from [ma], which
+       classes every Int App) AND a LIA integer (from [mb] or an [Arith] fold), record
+       [cid -> n]. In a combination-certified Sat a class has at most one LIA value (two
+       congruent Int terms LIA-valued differently is exactly the disagreement
+       [find_disagreement] splits on before Sat); defensively the reducer is [min], so the
+       map is order-independent and any residual inconsistency is still caught by R1 (->
+       [unknown], never wrong-sat). *)
+    let class_int : (int, int) Hashtbl.t = Hashtbl.create 64 in
+    let lia_int term =
+      match model_eval mb term with
+      | Some (Model.Int n) -> Some n
+      | _ ->
+        (match model_eval ma term with
+         | Some (Model.Int n) -> Some n
+         | _ -> None)
+    in
+    Term.Set.iter
+      (fun (term : Term.t) ->
+         match term.Term.sort with
+         | Sort.Int _ ->
+           (match lia_int term, model_eval ma term with
+            | Some n, Some (Model.Uninterp cid) ->
+              (match Hashtbl.find_opt class_int cid with
+               | Some m when m <= n -> ()
+               | _ -> Hashtbl.replace class_int cid n)
+            | _ -> ())
+         | Sort.Bool | Sort.Uninterpreted _ -> ())
+      t.all_terms;
     let int_variant term =
       match model_eval mb term, model_eval ma term with
       | Some (Model.Int _ as v), _ | _, Some (Model.Int _ as v) -> Some v
@@ -671,9 +704,14 @@ struct
            still never gets a non-Int VALUE — [Uninterp] here is the extraction-layer
            signal "realize me", read only by the Int-sorted arm of Cdclt's [value_of].
            Reuses the existing [Model.Uninterp] constructor; no [Model.t] / frozen-surface
-           change. *)
+           change. Gap A (task #117): if this class inherits a LIA integer ([class_int]),
+           surface THAT integer ([Model.Int]) instead of the realize-me signal, so every
+           term of the class shares the LIA value. *)
         (match model_eval ma term with
-         | Some (Model.Uninterp _ as v) -> Some v
+         | Some (Model.Uninterp cid as v) ->
+           (match Hashtbl.find_opt class_int cid with
+            | Some n -> Some (Model.Int n)
+            | None -> Some v)
          | _ -> None)
     in
     let variant term matches =

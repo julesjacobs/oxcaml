@@ -1,3 +1,4 @@
 (goal 1
-  (verdict unknown)
+  (verdict sat)
+  (model (const a 0) (const b 0) (fun f (default 0) (case (0) 7)) (fun g (default 0) (case (7) 0)))
   (counters (conflicts <10) (decisions <10) (propagations <10)))

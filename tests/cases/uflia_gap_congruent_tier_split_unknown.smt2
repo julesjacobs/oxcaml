@@ -1,15 +1,15 @@
-; QF_UFLIA §10 realization — KNOWN COMPLETENESS GAP (codex MED, board #117). HONEST
-; MARKER: this file is SAT, but the v1 realization degrades it to unknown (never wrong-sat
-; — R1 catches the bad model). It FLIPS to sat when #117 (class-value inheritance) lands.
+; QF_UFLIA §10 v2 realization — GAP A REGRESSION GUARD (task #117 landed; was codex MED).
+; This file is SAT. Under the v1 realization it degraded to unknown (never wrong-sat — R1
+; caught the bad model); #117 (class-value inheritance) makes it sat, and this fixture now
+; guards that fix.
 ;
-; Gap: a congruent class split across realization tiers. a = b makes f(a) and f(b) the
+; Shape: a congruent class split across realization tiers. a = b makes f(a) and f(b) the
 ; SAME EUF class by congruence. f(a) = 7 surfaces to LIA (tier-1, value 7); f(b) occurs
-; only under g, so it is a pure-EUF Int class (tier-2) and the v1 realization assigns it a
-; FRESH integer != 7 rather than inheriting its class's LIA value 7. f's table then gets
-; two rows with the same argument key but different results (7 and the fresh value) —
-; inconsistent — so the R1 checker rejects the model and the solver emits unknown. The fix
-; (#117) is to inherit the LIA value across every term of a class before minting a fresh
-; one.
+; only under g, so it is a pure-EUF Int class (tier-2). v1 minted a FRESH integer != 7 for
+; that class rather than inheriting its class's LIA value 7 — so f's table got two rows at
+; the same argument key with different results and R1 rejected. The #117 fix (combine.ml
+; class_int): a pure-EUF class that shares its EUF class with a LIA-valued term inherits
+; that integer, so every term of the class agrees.
 (set-logic QF_UFLIA)
 (set-info :status sat)
 (declare-fun f (Int) Int)

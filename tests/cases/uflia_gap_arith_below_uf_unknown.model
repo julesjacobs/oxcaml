@@ -1,0 +1,5 @@
+(model
+  (const x 0)
+  (fun p (default 0)
+        (case (0) 1)
+        (case (2) 5)))

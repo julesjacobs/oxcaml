@@ -407,7 +407,17 @@ let model t =
             | Sort.Int _ ->
               (match Model.value m term with
                | Some (Model.Int n) -> Hashtbl.replace int_used n ()
-               | Some (Model.Uninterp cid) -> int_classes := cid :: !int_classes
+               | Some (Model.Uninterp cid) ->
+                 (* §10 v2 gap B (task #117): an [Arith] term (a linear composite used only
+                   as a UF argument) is NOT realized to a fresh per-class integer — it is
+                   EVALUATED structurally from its operands in [value_of], mirroring R1's
+                   [ev], so its table key matches R1's structural evaluation. Only genuine
+                   leaves (vars, UF apps) mint a fresh class integer; skipping [Arith]
+                   here also keeps the fresh-integer stream (and every other class's
+                   assignment) byte-identical. *)
+                 (match term.Term.node with
+                  | Term.Arith _ -> ()
+                  | _ -> int_classes := cid :: !int_classes)
                | _ -> ())
             | Sort.Bool | Sort.Uninterpreted _ -> ())
          terms;
@@ -427,11 +437,48 @@ let model t =
             if not (Hashtbl.mem int_realize cid)
             then Hashtbl.replace int_realize cid (fresh ()))
          (List.sort_uniq Int.compare !int_classes);
-       let value_of (term : Term.t) =
-         match Model.value m term with
-         | Some (Model.Bool b) -> VBool b
-         | Some (Model.Int n) -> VInt n
-         | Some (Model.Uninterp cid) ->
+       (* Overflow-guarded add/mul for the §10 v2 gap-B structural fold, mirroring R1's
+          [Model_check.add_ovf]/[mul_ovf] (incl. the [min_int * -1] wrap): on overflow
+          raise [Degrade] so extraction produces no model rather than a wrapped key — R1's
+          own fold would [raise Bad] on the same input, so the two stay in lockstep at
+          [unknown] rather than disagreeing. *)
+       let add_ovf a b =
+         let r = a + b in
+         if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (r >= 0) (a >= 0))
+         then raise Degrade
+         else r
+       in
+       let mul_ovf a b =
+         if a = 0 || b = 0
+         then 0
+         else (
+           let r = a * b in
+           if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
+           then raise Degrade
+           else r)
+       in
+       let rec value_of (term : Term.t) =
+         match Model.value m term, term.Term.node with
+         | Some (Model.Bool b), _ -> VBool b
+         | Some (Model.Int n), _ -> VInt n
+         | _, Term.Arith lin ->
+           (* §10 v2 gap B (task #117): a pure-EUF Int [Arith] term (LIA never numerically
+              valued it — else the [Model.Int] arm above caught it, tier 1) is EVALUATED
+              structurally over its operands, exactly as R1's [ev] does, so the table key
+              this row is stored under equals the key R1 recomputes. Operands resolve
+              recursively (leaves realize/inherit via the arms below); [Arith] children
+              are non-[Arith] (term.ml invariant), so the recursion is shallow. *)
+           let v =
+             Iarr.fold
+               (fun acc (child, coeff) ->
+                  match value_of child with
+                  | VInt cv -> add_ovf acc (mul_ovf coeff cv)
+                  | _ -> raise Degrade)
+               lin.Term.const
+               lin.Term.coeffs
+           in
+           VInt v
+         | Some (Model.Uninterp cid), _ ->
            (* An [Uninterp] value on an Int-sorted term is the §10 realize-me signal (pass
               1b); on an uninterpreted-sorted term it is the dense element index (pass 1). *)
            (match term.Term.sort with
@@ -444,7 +491,7 @@ let model t =
                | Some i -> VUninterp i
                | None -> raise Degrade)
             | Sort.Bool -> raise Degrade)
-         | None -> raise Degrade
+         | None, _ -> raise Degrade
        in
        let default_for (sort : Sort.t) =
          match sort with
