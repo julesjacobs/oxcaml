@@ -162,17 +162,17 @@ let farkas_cancels fx premises mult =
   let const = ref Rational.zero in
   List.iter
     (fun lit ->
-      let coeffs, k = Hashtbl.find fx.hp lit in
-      let m = mult lit in
-      List.iter
-        (fun (i, c) ->
-          let cur =
-            try Hashtbl.find acc i with
-            | Not_found -> Rational.zero
-          in
-          Hashtbl.replace acc i (Rational.add cur (Rational.mul m (q c))))
-        coeffs;
-      const := Rational.add !const (Rational.mul m (q k)))
+       let coeffs, k = Hashtbl.find fx.hp lit in
+       let m = mult lit in
+       List.iter
+         (fun (i, c) ->
+            let cur =
+              try Hashtbl.find acc i with
+              | Not_found -> Rational.zero
+            in
+            Hashtbl.replace acc i (Rational.add cur (Rational.mul m (q c))))
+         coeffs;
+       const := Rational.add !const (Rational.mul m (q k)))
     premises;
   List.for_all (fun l -> Rational.sign (mult l) >= 0) premises
   && Hashtbl.fold (fun _ c ok -> ok && Rational.is_zero c) acc true

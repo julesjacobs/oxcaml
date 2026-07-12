@@ -192,16 +192,16 @@ let farkas_combination fx premises farkas =
   let const = ref Rational.zero in
   List.iter2
     (fun tok mult ->
-      let coeffs, k = Hashtbl.find fx.hp tok in
-      List.iter
-        (fun (i, c) ->
-          let cur =
-            try Hashtbl.find acc i with
-            | Not_found -> Rational.zero
-          in
-          Hashtbl.replace acc i (Rational.add cur (Rational.mul mult (q c))))
-        coeffs;
-      const := Rational.add !const (Rational.mul mult (q k)))
+       let coeffs, k = Hashtbl.find fx.hp tok in
+       List.iter
+         (fun (i, c) ->
+            let cur =
+              try Hashtbl.find acc i with
+              | Not_found -> Rational.zero
+            in
+            Hashtbl.replace acc i (Rational.add cur (Rational.mul mult (q c))))
+         coeffs;
+       const := Rational.add !const (Rational.mul mult (q k)))
     premises
     farkas;
   acc, !const
@@ -504,7 +504,7 @@ let test_bruteforce () =
        let asg = Array.make n 0 in
        List.iter
          (fun (term, v) ->
-           Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
+            Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
          model;
        if not (List.for_all (sat_constraint asg) !constraints) then incr mismatches
      | Lia.Int_unsat _ -> if expected then incr mismatches);
@@ -641,6 +641,58 @@ let test_determinism () =
   check "determinism: same verdict+model" (v1 = v2);
   check "determinism: same pivot count" (p1 = p2);
   Printf.printf "    (verdict=%s, pivots=%d)\n" v1 p1
+;;
+
+(* Big-tier determinism (I6): a system that FORCES Big promotion inside the ℚ-simplex must
+   produce bit-identical results across independent runs — same verdict, same pivot count,
+   and (at the R1 model-value sink) the same overflow attribution and poison state. The
+   tier is an implementation detail; promotion must not perturb pivot order or the degrade
+   decision, else the corpus verdict would depend on native-int reachability. This is the
+   [Small]-tier {!test_determinism} arm re-run on the promoting path. *)
+
+let build_promoting_system () =
+  (* [max_int·x + y <= 0] with [x >= 2] drives [max_int·x] into the tableau (promotes to
+     Big); the ℚ system is feasible (y unbounded below), and the ℤ model binds y =
+     -2·max_int (Big), so [solve_integer] degrades at the R1 projection sink. Same shape
+     as [test_overflow]'s [mk_overflowing]. *)
+  let fx = make_fixture 2 in
+  ignore (assert_le fx [ 0, max_int; 1, 1 ] 0 ~polarity:true);
+  ignore (assert_le fx [ 0, -1 ] 2 ~polarity:true);
+  fx
+;;
+
+let test_determinism_big () =
+  print_endline "determinism (Big tier):";
+  let run_check () =
+    let fx = build_promoting_system () in
+    let v =
+      match Lia.check fx.solver with
+      | Lia.Sat_candidate -> "sat"
+      | Lia.Conflict _ -> "conflict"
+    in
+    v, Lia.pivot_count fx.solver, Lia.is_poisoned fx.solver
+  in
+  let c1 = run_check () in
+  let c2 = run_check () in
+  check "Big determinism: check verdict/pivots/poison identical across runs" (c1 = c2);
+  let run_solve () =
+    let fx = build_promoting_system () in
+    let v =
+      match Lia.solve_integer fx.solver with
+      | Lia.Int_sat _ -> "sat"
+      | Lia.Int_unsat _ -> "unsat"
+      | Lia.Int_unknown -> "unknown"
+    in
+    v, Lia.pivot_count fx.solver, Lia.overflow_count fx.solver, Lia.is_poisoned fx.solver
+  in
+  let s1 = run_solve () in
+  let s2 = run_solve () in
+  check
+    "Big determinism: solve_integer verdict/pivots/overflow/poison identical across runs"
+    (s1 = s2);
+  let cv, _, _ = c1 in
+  let sv, sp, so, _ = s1 in
+  Printf.printf "    (check=%s; solve=%s, pivots=%d, overflow=%d)\n" cv sv sp so
 ;;
 
 (* ================================================================== *)
@@ -849,6 +901,7 @@ let () =
   test_bruteforce ();
   test_overflow ();
   test_determinism ();
+  test_determinism_big ();
   Printf.printf "\nlia self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

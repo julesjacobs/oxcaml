@@ -80,9 +80,9 @@ let test_boundaries () =
   (* of_int / to_int_opt round-trip at the native boundaries. *)
   List.iter
     (fun n ->
-      check
-        (Printf.sprintf "of_int/to_int_opt %d" n)
-        (Bigint.to_int_opt (Bigint.of_int n) = Some n))
+       check
+         (Printf.sprintf "of_int/to_int_opt %d" n)
+         (Bigint.to_int_opt (Bigint.of_int n) = Some n))
     [ 0; 1; -1; max_int; min_int; 2147483648 (* 2^31 *); -2147483648 ]
 ;;
 
@@ -151,6 +151,82 @@ let test_properties () =
 ;;
 
 (* =================================================================== *)
+(* 2b. Deep-growth tripwire (core-bignum-review.md R8). The property vectors above top out
+   near 45 decimal digits (~5 limbs) — the magnitudes W2 actually meets in the simplex.
+   This arm drives magnitudes into the hundreds of limbs to catch carry/borrow,
+   canonicalization, and long-division bugs that ONLY surface at depth (a limb-index
+   off-by-one, a missing final carry, a mis-sized quotient). Every check is a
+   self-consistent algebraic identity, so it needs no oracle. Bounded and fast (pure
+   integer work, well under a second). *)
+
+let test_deep_growth () =
+  print_endline "deep growth (R8):";
+  let two = Bigint.of_int 2 in
+  let pow2 n =
+    let r = ref Bigint.one in
+    for _ = 1 to n do
+      r := Bigint.mul !r two
+    done;
+    !r
+  in
+  let n = 4096 in
+  let big_pow = pow2 n in
+  (* 2^4096: ~1234 decimal digits, ~133 limbs. *)
+  check
+    "2^n round-trips to_string/of_string"
+    (Bigint.equal (Bigint.of_string (Bigint.to_string big_pow)) big_pow);
+  check "2^n does not fit int63" (not (Bigint.fits_int big_pow));
+  (* halving n times returns to 1, with a zero remainder at every step (deep divmod by a
+     small divisor while the dividend shrinks limb by limb). *)
+  (let r = ref big_pow
+   and rem_ok = ref true in
+   for _ = 1 to n do
+     let q, rm = Bigint.divmod !r two in
+     if not (Bigint.is_zero rm) then rem_ok := false;
+     r := q
+   done;
+   check "2^n halved n times: zero remainder each step" !rem_ok;
+   check "2^n halved n times returns to 1" (Bigint.equal !r Bigint.one));
+  (* 2^a * 2^b = 2^(a+b): deep multiplication whose product crosses many limb boundaries. *)
+  (let a = 1500 in
+   let b = n - a in
+   check "2^a * 2^b = 2^(a+b)" (Bigint.equal (Bigint.mul (pow2 a) (pow2 b)) big_pow));
+  (* K! built forward vs. backward must agree (commutativity at depth), and dividing back
+     out by every factor 2..K must land exactly on 1. *)
+  let k = 400 in
+  let fact_forward () =
+    let r = ref Bigint.one in
+    for i = 2 to k do
+      r := Bigint.mul !r (Bigint.of_int i)
+    done;
+    !r
+  in
+  let fact_backward () =
+    let r = ref Bigint.one in
+    for i = k downto 2 do
+      r := Bigint.mul !r (Bigint.of_int i)
+    done;
+    !r
+  in
+  let f = fact_forward () in
+  check "K! is order-independent (a*b = b*a at depth)" (Bigint.equal f (fact_backward ()));
+  (let r = ref f
+   and rem_ok = ref true in
+   for i = 2 to k do
+     let q, rm = Bigint.divmod !r (Bigint.of_int i) in
+     if not (Bigint.is_zero rm) then rem_ok := false;
+     r := q
+   done;
+   check "K! / (2..K) : zero remainder each step" !rem_ok;
+   check "K! divided by all its factors returns to 1" (Bigint.equal !r Bigint.one));
+  (* gcd across two deep magnitudes must divide both and be positive. *)
+  let g = Bigint.gcd f big_pow in
+  check "gcd(K!,2^n) > 0" (Bigint.sign g > 0);
+  check "gcd(K!,2^n) | K!" (Bigint.is_zero (snd (Bigint.divmod f g)));
+  check "gcd(K!,2^n) | 2^n" (Bigint.is_zero (snd (Bigint.divmod big_pow g)))
+;;
+
+(* =================================================================== *)
 (* 3. Independent differential oracle (Python int). *)
 
 let python_oracle_script =
@@ -196,7 +272,7 @@ let test_oracle () =
     let oc = open_out inp in
     Array.iter
       (fun (a, b) ->
-        Printf.fprintf oc "%s %s\n" (Bigint.to_string a) (Bigint.to_string b))
+         Printf.fprintf oc "%s %s\n" (Bigint.to_string a) (Bigint.to_string b))
       inputs;
     close_out oc;
     (* write + run the oracle *)
@@ -217,19 +293,19 @@ let test_oracle () =
       let ic = open_in outp in
       Array.iter
         (fun (a, b) ->
-          let line = input_line ic in
-          match String.split_on_char ' ' line with
-          | [ p_add; p_sub; p_mul; p_q; p_r; p_gcd ] ->
-            check "oracle add" (Bigint.to_string (Bigint.add a b) = p_add);
-            check "oracle sub" (Bigint.to_string (Bigint.sub a b) = p_sub);
-            check "oracle mul" (Bigint.to_string (Bigint.mul a b) = p_mul);
-            check "oracle gcd" (Bigint.to_string (Bigint.gcd a b) = p_gcd);
-            if not (Bigint.is_zero b)
-            then (
-              let q, r = Bigint.divmod a b in
-              check "oracle q" (Bigint.to_string q = p_q);
-              check "oracle r" (Bigint.to_string r = p_r))
-          | _ -> check "oracle line parse" false)
+           let line = input_line ic in
+           match String.split_on_char ' ' line with
+           | [ p_add; p_sub; p_mul; p_q; p_r; p_gcd ] ->
+             check "oracle add" (Bigint.to_string (Bigint.add a b) = p_add);
+             check "oracle sub" (Bigint.to_string (Bigint.sub a b) = p_sub);
+             check "oracle mul" (Bigint.to_string (Bigint.mul a b) = p_mul);
+             check "oracle gcd" (Bigint.to_string (Bigint.gcd a b) = p_gcd);
+             if not (Bigint.is_zero b)
+             then (
+               let q, r = Bigint.divmod a b in
+               check "oracle q" (Bigint.to_string q = p_q);
+               check "oracle r" (Bigint.to_string r = p_r))
+           | _ -> check "oracle line parse" false)
         inputs;
       close_in ic);
     (try Sys.remove inp with
@@ -244,6 +320,7 @@ let () =
   test_boundaries ();
   test_fits ();
   test_properties ();
+  test_deep_growth ();
   test_oracle ();
   Printf.printf "\n%d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
