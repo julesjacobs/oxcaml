@@ -1,8 +1,8 @@
 (** Preprocessing and clausification (DESIGN.md §5). Re-exports the two public surfaces:
 
     - {!Preprocess} — the ADR-0003 desugaring passes (Int/value-[Ite] removal, [div]/[mod]
-      elimination, a minimal [simplify]) and their [Pipeline]-clean composition, all
-      threading the session {!Oxsmt_core.Context}.
+      elimination) and their [Pipeline]-clean composition, all threading the session
+      {!Oxsmt_core.Context}.
     - {!Cnf} — the Tseitin clausifier turning a preprocessed Bool-sorted term into
       abstract CNF (its own {!Cnf.Lit}/{!Cnf.Clause} over its own variable ids) plus the
       atom map.

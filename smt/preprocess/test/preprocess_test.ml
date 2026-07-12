@@ -379,11 +379,7 @@ let test_pass_equivalence () =
     let phi_run, d_run = Preprocess.run_with_definitions s.pp phi in
     construction_ok "run" phi_run;
     pipeline_ok s "run" phi_run;
-    check_equiv s "run" ~orig:phi ~result:phi_run ~defs:d_run;
-    (* simplify: full equivalence, no fresh symbols *)
-    let phi_s = Preprocess.simplify s.pp phi in
-    construction_ok "simplify" phi_s;
-    check_equiv s "simplify" ~orig:phi ~result:phi_s ~defs:[]
+    check_equiv s "run" ~orig:phi ~result:phi_run ~defs:d_run
   done
 ;;
 

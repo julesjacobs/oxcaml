@@ -203,45 +203,6 @@ let div_mod_elimination t root =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* simplify: bottom-up rebuild through the constructors (identity on normalized terms). *)
-
-let simplify t root =
-  let ctx = t.ctx in
-  let memo : Term.t Term.Table.t = Term.Table.create 256 in
-  let rec go term =
-    match Term.Table.find_opt memo term with
-    | Some r -> r
-    | None ->
-      let r = rebuild term in
-      Term.Table.replace memo term r;
-      r
-  and rebuild (term : Term.t) =
-    match term.node with
-    | Bool_const _ | Int_const _ -> term
-    | App (sym, args) -> Context.app ctx sym (map_lr go (Iarr.to_list args))
-    | Arith l ->
-      Context.linear_combination
-        ctx
-        (map_lr (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
-        l.const
-    | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
-    | Eq (a, b) ->
-      let a' = go a in
-      let b' = go b in
-      Context.eq ctx a' b'
-    | Not a -> Context.not_ ctx (go a)
-    | And xs -> Context.and_ ctx (map_lr go (Iarr.to_list xs))
-    | Or xs -> Context.or_ ctx (map_lr go (Iarr.to_list xs))
-    | Ite (c, a, b) ->
-      let c' = go c in
-      let a' = go a in
-      let b' = go b in
-      Context.ite ctx c' a' b'
-  in
-  go root
-;;
-
-(* ------------------------------------------------------------------ *)
 (* run. div/mod first: it may surface an Ite into a euclidean side constraint, which
    ite_removal then clears; and it removes every div/mod before ite_removal runs, which
    reintroduces neither (ADR-0003 pipeline invariant). *)

@@ -12,7 +12,6 @@
     - {!div_mod_elimination} — {e equisatisfiable}; introduces a fresh quotient/remainder
       pair per distinct (dividend, divisor). Equivalence modulo those symbols: euclidean
       [q]/[r] are uniquely determined.
-    - {!simplify} — {e fully equivalent}; introduces no fresh symbols.
     - {!run} — {!div_mod_elimination} then {!ite_removal}; equisatisfiable, fresh symbols
       from both.
 
@@ -68,12 +67,6 @@ val ite_removal : t -> Term.t -> Term.t * definition list
     raises {!Term.Unsupported} — but {!Context.div}/{!Context.mod_} already reject those
     at construction, so this pass never encounters one in practice. *)
 val div_mod_elimination : t -> Term.t -> Term.t * definition list
-
-(** Re-canonicalize by rebuilding bottom-up through the smart constructors. Construction
-    already constant-folds, so this is effectively the identity on well-formed terms; it
-    is the minimal, obviously-sound simplification hook (ADR-0003 Decision 5 defers a real
-    rewriter). Introduces no fresh symbols; fully equivalence-preserving. *)
-val simplify : t -> Term.t -> Term.t
 
 (** [run] = {!div_mod_elimination} then {!ite_removal}. This order clears both pipeline
     invariants in a single pass each: [div_mod_elimination] may surface an [Ite] into a
