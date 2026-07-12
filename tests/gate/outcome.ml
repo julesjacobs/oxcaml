@@ -2,15 +2,19 @@
    certification outcomes; Malformed/Unsupported come from the reader before encoding;
    No_status means the file carries no claim to certify.
 
-   REFUTED is the only ship-stopping outcome and is always a kernel-checked proof of the
-   opposite claim (see NOTES.md). *)
+   REFUTED is the only ship-stopping outcome and is always a KERNEL-checked proof of the
+   opposite claim: the refutation witness check uses [decide] only — never the
+   compiler-trusted [native_decide] — so a compiler / [Lean.ofReduceBool] miscompile can
+   never manufacture a false ship-stopper (ADR-0006 Decision 3, review AP4; see NOTES.md).
+   CERTIFIED, by contrast, is not kernel-only: a sat witness may certify via
+   native_decide, and that (weaker) tier is recorded — see [Certified] below. *)
 
 type t =
   | Certified of string
     (* the tactic that discharged the goal — the trust-tier provenance (ADR-0006 Decision
        3): [native_decide] is compiler-trusted (Lean.ofReduceBool axiom + compiler),
-       everything else ([grind]/[decide]/[omega]) is kernel-checked. Carried so STATUS can
-       report the kernel-vs-compiler tier mix honestly. *)
+       everything else ([grind]/[decide]/[omega]) is kernel-checked. Carried so STATUS
+       (status_gen parse_gate_log) can report the kernel-vs-compiler tier mix honestly. *)
   | Refuted of string (* how it was refuted *)
   | Inconclusive of string
   | Encode_error of string

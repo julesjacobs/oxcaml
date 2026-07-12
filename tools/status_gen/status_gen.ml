@@ -666,6 +666,13 @@ type gate_summary =
   { lean : string
   ; encoding : string
   ; case_outcomes : (string * int) list (* outcome -> count *)
+  ; (* CERTIFIED trust-tier mix (#86 / AP2b): [decide]/[grind]/[omega] are kernel-checked,
+       [native_decide] is compiler-trusted (Lean.ofReduceBool axiom + compiler). Parsed
+       from the trailing tactic on each [case] CERTIFIED log line. [cert_untagged] counts
+       CERTIFIED lines carrying no recognised tactic (e.g. a pre-#86 log). *)
+    cert_kernel : int
+  ; cert_compiler : int
+  ; cert_untagged : int
   ; cache_hits : int
   ; cache_total : int
   ; honeypots : int
@@ -703,6 +710,18 @@ let parse_gate_log path : gate_summary option =
     let outcomes = Hashtbl.create 8 in
     let hits = ref 0
     and total = ref 0 in
+    let cert_kernel = ref 0
+    and cert_compiler = ref 0
+    and cert_untagged = ref 0 in
+    (* Trailing tactic on a "[case] CERTIFIED … (disp) <tactic>" line is the trust tier
+       (#86 / AP2b). A line with no recognised tactic (e.g. a pre-#86 blank detail) is
+       counted [untagged] rather than silently attributed to the kernel default. *)
+    let classify_tier t =
+      match List.rev (String.split_on_char ' ' t |> List.filter (fun w -> w <> "")) with
+      | "native_decide" :: _ -> incr cert_compiler
+      | ("decide" | "grind" | "omega") :: _ -> incr cert_kernel
+      | _ -> incr cert_untagged
+    in
     List.iter
       (fun l ->
          let t = trim l in
@@ -715,7 +734,8 @@ let parse_gate_log path : gate_summary option =
                 try Hashtbl.find outcomes outcome with
                 | Not_found -> 0
               in
-              Hashtbl.replace outcomes outcome (cur + 1)
+              Hashtbl.replace outcomes outcome (cur + 1);
+              if String.equal outcome "CERTIFIED" then classify_tier t
             | None -> ());
            if contains_sub t "(cache)" then incr hits))
       ls;
@@ -760,6 +780,9 @@ let parse_gate_log path : gate_summary option =
       ; case_outcomes =
           Hashtbl.fold (fun k v acc -> (k, v) :: acc) outcomes []
           |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+      ; cert_kernel = !cert_kernel
+      ; cert_compiler = !cert_compiler
+      ; cert_untagged = !cert_untagged
       ; cache_hits = !hits
       ; cache_total = !total
       ; honeypots = !honeypots
@@ -1338,7 +1361,19 @@ let () =
        (if outc = "" then "none" else outc)
        g.honeypots
        g.honeypot_floor
-       (if g.honeypots_ok then "(all fired)" else "(BREACH)"));
+       (if g.honeypots_ok then "(all fired)" else "(BREACH)");
+     (* Trust-tier mix of the CERTIFIED cases (#86 / AP2b): kernel-checked
+        (decide/grind/omega) vs compiler-trusted (native_decide, +Lean.ofReduceBool
+        axiom). Not a breach either way — CERTIFIED is sound in both tiers — but the mix
+        is reported so the compiler-trusted surface is visible, never silently folded into
+        the kernel. *)
+     out
+       "  - certification tiers: %d kernel-checked, %d compiler-trusted (native_decide)%s\n"
+       g.cert_kernel
+       g.cert_compiler
+       (if g.cert_untagged > 0
+        then Printf.sprintf ", %d untagged (pre-#86 log)" g.cert_untagged
+        else ""));
   (* Corpus solved-rate from stats over tests/cases. Use only the single most recent stats
      file: `make status` never writes a new one, so this is stable between back-to-back
      runs, and it reflects one coherent run rather than a mix. `make status-fresh`

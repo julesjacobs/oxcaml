@@ -30,7 +30,16 @@ let encoding_version = "enc-v3"
 
 (* Centralised grind invocation; part of the cache key via [grind_config]. *)
 let grind_tactic = "grind"
-let grind_config = "grind:default"
+
+(* [grind_config] is the CERTIFY-tactic-policy component of the cache key (cache.ml:64).
+   It versions not just grind's config but the whole tactic policy — bump it whenever
+   WHICH tactic runs, or its trust tier, changes, so legacy rows orphan (key miss) and
+   re-certify under the current policy instead of a stale verdict being served (cache is
+   monotonic; ~27 entries, cheap). [+sat-escalate:v2] marks the #86 change: on a
+   witness/model decide failure the CERTIFY path now escalates to native_decide, so old
+   rows cached under the decide-only policy (some hiding a witness decide-timeout as
+   "grind gave up") must not be hit by the new binary (review AP3). *)
+let grind_config = "grind:default+sat-escalate:v2"
 
 (* ---- name assignment (fresh, collision-free Lean identifiers) ---- *)
 

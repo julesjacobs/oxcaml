@@ -32,52 +32,103 @@ type attempt =
   | `Encode of string
   ]
 
-let try_unsat ctx (q : Ast.query) : attempt =
-  match Encoder.encode_unsat q with
-  | exception Encoder.Encode_error m -> `Encode m
-  | src ->
-    (match
-       Lean_runner.run
-         ~logdir:ctx.logdir
-         ~timeout:ctx.timeout
-         ~tag:(uniq ctx "unsat")
-         ~src
-     with
-     | Proved -> `Proved Encoder.grind_tactic
-     | Timed_out -> `Timeout
-     | Tactic_failed s -> `Gaveup s
-     | Elab_error s -> `Encode s)
+(* One SHARED wall-clock deadline per query certification (review AP1). Every Lean attempt
+   for a file — primary, native escalation, and refutation — draws from the SAME budget
+   rather than each receiving a fresh [ctx.timeout], so the whole certification is bounded
+   by ~one --timeout instead of 2-3×. [remaining] is recomputed at each attempt, so source
+   generation already elapsed is charged against the budget (AP1: "encode inside the
+   watchdog"). At or below [min_budget] we skip the Lean spawn and report `Timeout` — an
+   out-of-budget attempt is budget-limited, so (per F1 / should_cache) never cached and
+   retried on a larger --timeout. *)
+let min_budget = 0.1
+let remaining ~deadline = deadline -. Unix.gettimeofday ()
+
+(* ADR-0006 open-q2 native_decide size cap (AP5): native_decide COMPILES the goal, so an
+   oversized generated source risks pathological compile time/memory. Above this bound we
+   do NOT enter native compilation; the caller degrades to a non-verdict (INCONCLUSIVE). *)
+let native_src_cap_bytes = 1 lsl 20 (* 1 MiB *)
+
+let try_unsat ctx ~deadline (q : Ast.query) : attempt =
+  if remaining ~deadline <= min_budget
+  then `Timeout
+  else (
+    match Encoder.encode_unsat q with
+    | exception Encoder.Encode_error m -> `Encode m
+    | src ->
+      if remaining ~deadline <= min_budget
+      then `Timeout
+      else (
+        match
+          Lean_runner.run
+            ~logdir:ctx.logdir
+            ~timeout:(remaining ~deadline)
+            ~tag:(uniq ctx "unsat")
+            ~src
+        with
+        | Proved -> `Proved Encoder.grind_tactic
+        | Timed_out -> `Timeout
+        | Tactic_failed s -> `Gaveup s
+        | Elab_error s -> `Encode s))
 ;;
 
-let try_sat ctx (q : Ast.query) (m : Model.t) : attempt =
-  let attempt tactic =
+(* One SAT model-check attempt with [tactic], under the shared deadline. native_decide is
+   the compiled path, so it is gated by the size cap (AP5). *)
+let sat_attempt ctx ~deadline (q : Ast.query) (m : Model.t) ~tactic : attempt =
+  if remaining ~deadline <= min_budget
+  then `Timeout
+  else (
     match Encoder.encode_sat q m ~tactic with
     | exception Encoder.Encode_error msg -> `Encode msg
     | exception Model.Bad_model msg -> `Encode ("bad model: " ^ msg)
     | src ->
-      (match
-         Lean_runner.run
-           ~logdir:ctx.logdir
-           ~timeout:ctx.timeout
-           ~tag:(uniq ctx ("sat-" ^ tactic))
-           ~src
-       with
-       | Proved -> `Proved tactic
-       | Timed_out -> `Timeout
-       | Tactic_failed s -> `Gaveup s
-       | Elab_error s -> `Encode s)
-  in
-  match attempt "decide" with
-  | `Proved t -> `Proved t
-  (* [decide] reduces in the kernel; on a large concrete model it can blow up (NOTES.md:
-     Gaveup) OR run out the budget (Timeout). [native_decide] compiles the SAME decision
-     procedure, so escalate on either failure — recovering certifications a bare-Gaveup
-     fallthrough silently dropped to Inconclusive. Bounded: exactly ONE escalation, only
-     on a decide failure, each attempt under the per-query timeout — it cannot burn
-     unbounded budget. native_decide is compiler-trusted (ADR-0006 Decision 3); the
-     succeeding tactic name rides out in the outcome so the tier is auditable. *)
-  | `Gaveup _ | `Timeout -> attempt "native_decide"
-  | `Encode _ as other -> other
+      if String.equal tactic "native_decide" && String.length src > native_src_cap_bytes
+      then
+        `Gaveup
+          (Printf.sprintf
+             "native_decide skipped: generated Lean %d bytes exceeds %d-byte cap \
+              (ADR-0006 open-q2)"
+             (String.length src)
+             native_src_cap_bytes)
+      else if remaining ~deadline <= min_budget
+      then `Timeout
+      else (
+        match
+          Lean_runner.run
+            ~logdir:ctx.logdir
+            ~timeout:(remaining ~deadline)
+            ~tag:(uniq ctx ("sat-" ^ tactic))
+            ~src
+        with
+        | Proved -> `Proved tactic
+        | Timed_out -> `Timeout
+        | Tactic_failed s -> `Gaveup s
+        | Elab_error s -> `Encode s))
+;;
+
+(* CERTIFY-path model check: [decide], escalating to the compiler-trusted [native_decide]
+   on a decide failure (Gaveup OR Timeout). Returns whether the PRIMARY decide TIMED OUT —
+   load-bearing for caching (review F1): a decide-timeout chain that reaches no definite
+   verdict is budget-limited, so its non-verdict result must stay OUT of the cache and be
+   retried on a larger --timeout (DESIGN §8 "timeouts never cached"). Without the flag the
+   escalation would MASK it — a resource-class native Gaveup ("maximum recursion depth",
+   not evaluated-false) collapses to a cacheable "model did not check". native_decide MAY
+   certify here (CERTIFIED is not a kernel-only class); the tactic rides out in the
+   outcome as the trust tier (ADR-0006 Decision 3). *)
+let try_sat_chain ctx ~deadline (q : Ast.query) (m : Model.t) : attempt * bool =
+  match sat_attempt ctx ~deadline q m ~tactic:"decide" with
+  | `Proved t -> `Proved t, false
+  | `Gaveup _ -> sat_attempt ctx ~deadline q m ~tactic:"native_decide", false
+  | `Timeout -> sat_attempt ctx ~deadline q m ~tactic:"native_decide", true
+  | `Encode _ as other -> other, false
+;;
+
+(* REFUTATION model check: [decide] ONLY. A REFUTED is ship-stopping and MUST stay
+   kernel-checked (AP4 / ADR-0006 Decision 3 kernel-only REFUTED contract), so the
+   compiler-trusted native_decide escalation is deliberately NOT used — a compiler /
+   [Lean.ofReduceBool] miscompile can then never manufacture a false ship-stopper. A
+   decide timeout/gaveup here simply yields no refutation (the caller's [default]). *)
+let try_sat_refute ctx ~deadline (q : Ast.query) (m : Model.t) : attempt =
+  sat_attempt ctx ~deadline q m ~tactic:"decide"
 ;;
 
 (* ---- certification per claim ---- *)
@@ -91,11 +142,14 @@ let trust_phrase = function
   | _ -> "kernel-checked"
 ;;
 
-let refute_with_witness ctx q model_opt ~default : Outcome.t =
+let refute_with_witness ctx ~deadline q model_opt ~default : Outcome.t =
   match model_opt with
   | Some m ->
-    (match try_sat ctx q m with
+    (match try_sat_refute ctx ~deadline q m with
      | `Proved tac ->
+       (* decide-only (try_sat_refute), so [tac] is always "decide" and [trust_phrase]
+          resolves to kernel-checked — the label stays derived from the tactic, never
+          assumed, so a future policy change can't silently mislabel it. *)
        Outcome.Refuted
          (Printf.sprintf
             "assertions satisfiable, witness %s by %s"
@@ -105,31 +159,51 @@ let refute_with_witness ctx q model_opt ~default : Outcome.t =
   | None -> default
 ;;
 
-let certify_unsat ctx q model_opt : Outcome.t =
-  match try_unsat ctx q with
+let certify_unsat ctx ~deadline q model_opt : Outcome.t =
+  match try_unsat ctx ~deadline q with
   | `Proved tac -> Certified tac
   | `Encode m -> Encode_error m
   | `Timeout ->
-    refute_with_witness ctx q model_opt ~default:(Inconclusive "grind timed out")
+    refute_with_witness
+      ctx
+      ~deadline
+      q
+      model_opt
+      ~default:(Inconclusive "grind timed out")
   | `Gaveup s ->
-    refute_with_witness ctx q model_opt ~default:(Inconclusive ("grind gave up: " ^ s))
+    refute_with_witness
+      ctx
+      ~deadline
+      q
+      model_opt
+      ~default:(Inconclusive ("grind gave up: " ^ s))
 ;;
 
-let certify_sat ctx q model_opt : Outcome.t =
+let certify_sat ctx ~deadline q model_opt : Outcome.t =
   match model_opt with
   | None -> Inconclusive "sat claim but no .model sidecar supplied"
   | Some m ->
-    (match try_sat ctx q m with
-     | `Proved tac -> Certified tac
-     | `Encode s -> Encode_error s
-     (* decide AND its native_decide escalation both timed out (try_sat). Kept out of the
-        cache (should_cache), so a larger --timeout re-tries from scratch. *)
-     | `Timeout -> Inconclusive "model check timed out (decide, then native_decide)"
-     | `Gaveup s ->
-       (* the supplied model did not check; is the query actually unsat? *)
-       (match try_unsat ctx q with
+    (match try_sat_chain ctx ~deadline q m with
+     | `Proved tac, _ -> Certified tac
+     | `Encode s, _ -> Encode_error s
+     (* decide AND its native_decide escalation both timed out. Kept out of the cache
+        (should_cache), so a larger --timeout re-tries from scratch. *)
+     | `Timeout, _ -> Inconclusive "model check timed out (decide, then native_decide)"
+     | `Gaveup s, decide_timed_out ->
+       (* the supplied model did not check; is the query actually unsat? (ship-stopper
+          refutation, run regardless of the timeout taint). *)
+       (match try_unsat ctx ~deadline q with
         | `Proved _ -> Refuted "sat claim but assertions proved unsat by grind"
-        | _ -> Inconclusive ("model did not check: " ^ s)))
+        | _ ->
+          if decide_timed_out
+          then
+            (* F1: decide TIMED OUT and native_decide then gave up (e.g. a resource-class
+               "maximum recursion depth", not an evaluated-false). The query is
+               budget-limited, so report it AS a timeout — should_cache then keeps it
+               uncached and a larger --timeout retries the whole chain, rather than
+               pinning it Inconclusive forever behind a cached "model did not check". *)
+            Inconclusive ("model check timed out (decide); native_decide gave up: " ^ s)
+          else Inconclusive ("model did not check: " ^ s)))
 ;;
 
 (* ---- file wrapper + cache ---- *)
@@ -215,10 +289,13 @@ let certify_file ctx ~cache_dir ~allow_cache smt2 : Outcome.t * disposition * bo
                        `Read_error
                      | _ -> `Miss
                    in
+                   (* One shared deadline for the WHOLE certification of this file — all
+                      Lean attempts (primary, escalation, refutation) draw from it (AP1). *)
+                   let deadline = Unix.gettimeofday () +. ctx.timeout in
                    let o =
                      match claim with
-                     | Ast.Unsat -> certify_unsat ctx q model_opt
-                     | Ast.Sat -> certify_sat ctx q model_opt
+                     | Ast.Unsat -> certify_unsat ctx ~deadline q model_opt
+                     | Ast.Sat -> certify_sat ctx ~deadline q model_opt
                      | Ast.Unknown -> No_status
                    in
                    if allow_cache && should_cache o
@@ -1024,6 +1101,21 @@ let cmd_selftest () =
           Printf.sprintf "Hit %s detail=%S" (Outcome.tag o) (Outcome.detail o)
         | Cache.Absent -> "Absent"
         | Cache.Unreadable m -> "Unreadable " ^ m));
+  (* (1c) F1 cacheability: a decide-timeout chain that then gave up is budget-limited and
+     must NOT be cached (retry at a larger --timeout); a genuine "model did not check" (no
+     timeout in the chain) stays cacheable. Guards the laundering the review found. *)
+  if
+    should_cache
+      (Outcome.Inconclusive "model check timed out (decide); native_decide gave up: x")
+  then (
+    ok := false;
+    print_endline "should_cache F1: FAIL (timeout-tainted Inconclusive would be cached)")
+  else if not (should_cache (Outcome.Inconclusive "model did not check: x"))
+  then (
+    ok := false;
+    print_endline "should_cache F1: FAIL (genuine model-did-not-check wrongly excluded)")
+  else
+    print_endline "should_cache F1: OK (timeout-tainted uncached, genuine gaveup cached)";
   (* (2) absent key -> clean Absent, not a read-error. *)
   (match Cache.lookup ~dir:cache_dir ~claim:"unsat" (dummy "0000nope") with
    | Cache.Absent -> print_endline "cache absent-key: OK (clean miss, not a read-error)"

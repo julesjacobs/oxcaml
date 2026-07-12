@@ -50,7 +50,11 @@ Read this before touching `encoder.ml`. Lean 4.31.0, core only (no mathlib).
 
 grind does **not** synthesize existential witnesses (exp4: `∃ x, x ≥ 0 ∧ x ≤ 5`
 fails), so REFUTED cannot come from asking grind to prove satisfiability. Instead
-REFUTED is always a **kernel-checked** proof of the opposite claim:
+REFUTED is always a **kernel-checked** proof of the opposite claim. The witness
+refutation deliberately uses `decide` **only** — never the compiler-trusted
+`native_decide` that the *certify* path may escalate to — so a compiler /
+`Lean.ofReduceBool` miscompile can never manufacture a false ship-stopper
+(ADR-0006 Decision 3, review AP4):
 
 - claimed **unsat** but a witness model is supplied → run the **sat encoder** on
   that model; if `decide` closes `⋀ assertions`, the query is satisfiable, so the
