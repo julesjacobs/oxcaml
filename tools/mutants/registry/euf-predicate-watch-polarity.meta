@@ -1,0 +1,6 @@
+module=euf
+suite=euf-test
+target=smt/theories/euf/euf.ml
+description=Euf.register watches a Bool-codomain predicate application against the FALSE constant instead of true_const, inverting the ⊤/⊥ bridge's polarity. A predicate whose congruence class reaches true_const would no longer flip its watch (or, with the true<>false axiom present, would flip to the WRONG value), so the adapter propagates p(x) with inverted polarity — a WRONG theory propagation (the soundness-critical direction: a bad theory-implied literal becomes a bad learned clause). Killed by euf_test test_predicate_propagation, whose positive case asserts p(a)=true, a=b and requires the congruence flow-back to report p(b) implied TRUE (with a true<>false axiom in the negative case requiring implied FALSE); the mutant reports the wrong value or none, so both directions of the check diverge.
+review=#136 Predicates ⊤/⊥ bridging (predicate apps watched against true_const so p(a),a=b |- p(b) propagates; invariant: the watch target is true_const, equal=>predicate true / distinct=>false via the axiom)
+expected=KILLED-TEST
