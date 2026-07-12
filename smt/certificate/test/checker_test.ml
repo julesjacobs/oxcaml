@@ -429,6 +429,62 @@ let overreject_dup_lit : Checker.events =
   }
 ;;
 
+(* CRITICAL (codex, this round): a RAW-EMPTY Theory_lemma INPUT clause fabricates ⊥.
+   Theory lemmas arrive as input_events with origin=Theory_lemma; a raw-empty one has no
+   Valid_lemma witness in any theory (ADR-0013 §4.0 E4 admits only a NONEMPTY lemma that
+   FILTERS to [] under the level-0 closure). Pre-fix it is admitted to the axiom DB as a
+   trusted [] that certifies the SAT query [{a}] unsat through ALL THREE terminals:
+   Root_empty citing it, Level0_conflict citing it, and Failed_assumption (empty
+   antecedents — never cites it, yet BCP over the poisoned DB refutes anything). Post-fix
+   the admission guard keys on origin and rejects the empty lemma before it enters the DB,
+   so all three go INVALID. Contrast [empty_query_input_ok]: an empty QUERY input is the
+   legitimate E1 opposite and stays VALID. *)
+let mk_lemma_input id clause : Recorder.input_event =
+  { id; clause; origin = Sat.Theory_lemma }
+;;
+
+let exploit_empty_lemma_root_empty : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Root_empty { input_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+let exploit_empty_lemma_level0 : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+let exploit_empty_lemma_failed_assumption : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* the E1 opposite the origin-keyed guard must NOT break: a raw-empty QUERY input asserts
+   the empty clause = false, which is legitimately unsat. Stays VALID pre- and post-fix. *)
+let empty_query_input_ok : Checker.events =
+  { Checker.inputs = [ mk_input 1 [||] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Root_empty { input_id = 1 })
+  ; assumptions = []
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 
 let () =
@@ -541,6 +597,26 @@ let () =
     (handbuilt ~learned_ants:[ 10; 11; 12; 999 ] ());
   (* C2 (codex, CRITICAL): empty theory Reason clause admitted as ⊥ -> a SAT query VALID. *)
   expect "corrupt: empty theory Reason clause -> INVALID" `Invalid exploit_empty_reason;
+  (* CRITICAL (codex, this round): a raw-empty Theory_lemma INPUT fabricates ⊥ and
+     certifies the SAT query [{a}] unsat through all THREE terminals. Each must go
+     INVALID; the empty QUERY input opposite must stay VALID (the origin-keyed guard, not
+     a blanket empty ban). *)
+  expect
+    "corrupt: empty Theory_lemma input (Root_empty) -> INVALID"
+    `Invalid
+    exploit_empty_lemma_root_empty;
+  expect
+    "corrupt: empty Theory_lemma input (Level0_conflict) -> INVALID"
+    `Invalid
+    exploit_empty_lemma_level0;
+  expect
+    "corrupt: empty Theory_lemma input (Failed_assumption, uncited) -> INVALID"
+    `Invalid
+    exploit_empty_lemma_failed_assumption;
+  expect
+    "positive: empty QUERY input stays legitimately unsat (E1) -> VALID"
+    `Valid
+    empty_query_input_ok;
   (* H4 (codex, HIGH->CRITICAL): ambiguous content id admitted to the DB (never cited) ->
      a SAT query VALID. Must be rejected at stream admission. Also the M6 clean
      discriminator of the #153a ambiguity guard (only ambiguity triggers). *)

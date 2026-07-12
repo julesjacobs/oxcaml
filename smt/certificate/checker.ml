@@ -334,9 +334,14 @@ exception Reject of verdict
 let rejectf fmt = Printf.ksprintf (fun s -> raise (Reject (Invalid s))) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Reject (Unsupported s))) fmt
 
-(* A cited clause that is the empty theory Conflict transient is an unconditional
-   [T_conflict []] (ADR-0013 Rev 6): no v1 theory leaf witnesses ⊥-from-∅, so it is
-   loud-uncertified (Unsupported), never fabricated as Valid.
+(* Fail-closed guard for the empty-clause fabrications of ⊥. A raw-empty clause admitted
+   to the axiom DB is a trusted [] that refutes ANYTHING, so each origin that cannot
+   legitimately carry an empty clause is rejected here — at ingest, before the clause
+   enters the closure.
+
+   The one origin that CAN carry a raw empty clause is a [Kinput Sat.Query]: asserting the
+   empty clause is a legitimately-unsat E1 query, so it falls through to [()] and is
+   trusted.
 
    MARKED EXTENSION POINT (do NOT implement here) for the ADR-0014 Rev-4 fabric-edge /
    [Shared_eq] leaf (a virtual proposition for s=t with assumption discharge): such a leaf
@@ -346,6 +351,16 @@ let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Reject (Unsupported s)))
    own reviewed tranche. *)
 let guard_theory_leaf kind clause =
   match kind with
+  | Kinput Sat.Theory_lemma when Array.length clause = 0 ->
+    (* codex (this round): a raw-empty Theory_lemma INPUT is a fabricated ⊥ with no
+       Valid_lemma witness in ANY theory. ADR-0013 §4.0 E4 admits only a NONEMPTY lemma
+       that FILTERS to [] under the level-0 closure (the [falsified] check), never a
+       clause that arrives empty. Contrast [Kinput Sat.Query], where an empty input is the
+       legitimate E1 opposite (assert-false = unsat) and is trusted below. *)
+    rejectf
+      "empty Theory_lemma input clause — a theory lemma has no Valid_lemma witness for ⊥ \
+       from the empty premise set (ADR-0013 §4.0 E4 admits only a NONEMPTY lemma that \
+       filters to [] under the level-0 closure)"
   | Ktheory Sat.Reason when Array.length clause = 0 ->
     (* codex C2: an empty Reason clause admitted to the axiom DB is a fabricated ⊥ that
        refutes anything. A Reason is the propagation clause [p ∨ ¬p₁ ∨ … ∨ ¬pₖ] with the
@@ -402,6 +417,16 @@ let check ev =
       (fun (e : Recorder.theory_event) ->
          guard_theory_leaf (Ktheory e.Recorder.role) e.Recorder.clause)
       ev.theory;
+    (* codex (this round): guard every INPUT at ADMISSION too — a raw-empty Theory_lemma
+       input is a fabricated ⊥ that certifies a SAT query unsat through ALL THREE
+       terminals: two cite it (Root_empty / Level0_conflict) and Failed_assumption never
+       cites it yet is refuted by BCP over the poisoned axiom DB. Guarding here — before
+       [add_axioms] — covers the uncited-terminal case a citation-site guard alone would
+       miss. An empty Query input falls through and stays the legitimate E1 unsat. *)
+    List.iter
+      (fun (e : Recorder.input_event) ->
+         guard_theory_leaf (Kinput e.Recorder.origin) e.Recorder.clause)
+      ev.inputs;
     (* the closure engine: axioms (inputs both origins + theory leaves) then verified
        learned clauses, folded incrementally. *)
     let bcp = Bcp.create () in

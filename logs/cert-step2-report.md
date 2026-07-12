@@ -4,6 +4,36 @@
 `oxsmt` @ 167a305f2a) · awaiting the single delta re-verify + Lean gate. Fix-tip sha in the
 SendMessage.
 
+## Fix round part 3 (codex delta-confirm — empty Theory_lemma input), append-only on the part-2 tip
+
+Codex's delta-confirm on the part-2 tip (`d52ee2ab85`) surfaced one residual **CRITICAL**: a
+raw-empty `Theory_lemma` **input** clause fabricates ⊥. The part-2 empty-clause guard
+(`guard_theory_leaf`) covered only the theory-*event* roles (`Reason`/`Conflict`), but a
+theory lemma arrives as an `input_event` with `origin=Theory_lemma` (kind `Kinput
+Theory_lemma`) and slipped past — a raw-empty one was admitted to the axiom DB as a trusted
+`[||]` that certifies a SAT query unsat through **all three terminals**: `Root_empty` citing
+it, `Level0_conflict` citing it, and `Failed_assumption` with empty antecedents, which never
+cites it yet is refuted by BCP over the poisoned DB. Per ADR-0013 §4.0, E4 admits only a
+**nonempty** lemma that *filters* to `[]` under the level-0 closure; a raw-empty lemma has no
+`Valid_lemma` witness in any theory.
+
+- **CRITICAL (empty Theory_lemma input) — FIXED.** `guard_theory_leaf` gains a `Kinput
+  Sat.Theory_lemma when Array.length clause = 0` case (→ **INVALID**), and `check` now runs
+  the guard over **every input at stream admission** (mirroring the part-2 theory-event
+  admission guard) — *before* `add_axioms`, so the uncited `Failed_assumption` terminal is
+  covered, not just the two citation sites. The origin key is load-bearing: an empty **Query**
+  input is the legitimate E1 opposite (assert-false = unsat) and falls through to trusted.
+- **Discrimination — all three terminals, each RED against the unfixed checker.** New
+  `exploit_empty_lemma_root_empty` / `_level0` / `_failed_assumption` (SAT query `{a}` +
+  empty `Theory_lemma` id 30) each returned VALID(modulo theory leaves) pre-fix (confirmed by
+  stashing only `checker.ml` and re-running: 3 failures) and INVALID post-fix.
+- **No over-rejection.** New positive `empty_query_input_ok` (empty **Query** input, E1) stays
+  VALID; the E4 real-solve positive (`e4_theory_lemma_empty`, nonempty lemma filtering to `[]`)
+  is untouched.
+
+Post part-3: `checker_test` **44/44**, corpus gate **24/24 VALID** (repeat-solve re-emit 24/24),
+driver-equiv 48/48 (0 divergence), frozen **14/14**, `dune build @fmt` clean. sat.mli untouched.
+
 ## Fix round part 2 (codex batch — C2/H4/H3/M5/M6), append-only on the CRIT-1/MED-1 tip
 
 The codex leg independently CONFIRMED the self-citing CRITICAL (its C1 = same-model CRIT-1;
