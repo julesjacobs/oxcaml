@@ -7,3 +7,14 @@
  (name corpus_classify)
  (modules corpus_classify)
  (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_euf))
+
+; driver_equiv_test — the driver-equivalence guard (task #133). Shells out to BOTH the
+; corpus_classify and oxsmt_cli executables over a deterministic file sample and asserts
+; their verdicts agree, so the two drivers can never silently diverge again (a
+; measurement-integrity hazard). Test-only, stdlib + Unix via harness_lib; it links NO
+; smt/ library (it drives the built binaries, not the session).
+
+(executable
+ (name driver_equiv_test)
+ (modules driver_equiv_test)
+ (libraries harness_lib))

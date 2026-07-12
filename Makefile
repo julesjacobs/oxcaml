@@ -80,7 +80,7 @@ CORPUS_RELEASE_TIMEOUT ?= 120
 # Default = the committed regression cases; override with a corpus subset for a wider sweep.
 DEV_RELEASE_DIRS ?= tests/cases
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline dev-release-check perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -239,6 +239,23 @@ wiring-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	$(DUNE) exec tests/solver/wiring_test.exe
 
+## driver-equiv-test — the driver-equivalence guard (task #133). Builds corpus_classify
+##   (the headline measurement driver) and oxsmt_cli (the shipped batch path), then asserts
+##   they return equivalent verdicts over a deterministic committed sample (tests/cases +
+##   tests/corpus/equiv_fixtures — presolve-active, no-op, incremental, and parse-fail
+##   files across QF_UF/QF_LIA/QF_UFLIA). Makes any future driver split loud: the two must
+##   drive the Session identically or the official sweep would measure a path that differs
+##   from the one that ships (a measurement-integrity hazard). Point it at a real corpus
+##   subtree for a wider spot-sweep: append dirs after the committed ones. Nonzero on any
+##   divergence, error, or classifier nondeterminism.
+driver-equiv-test:
+	$(DUNE) build tests/corpus/driver_equiv_test.exe tests/corpus/corpus_classify.exe \
+	  tests/solver/oxsmt_cli.exe
+	_build/default/tests/corpus/driver_equiv_test.exe \
+	  --classify _build/default/tests/corpus/corpus_classify.exe \
+	  --cli _build/default/tests/solver/oxsmt_cli.exe \
+	  tests/cases tests/corpus/equiv_fixtures
+
 ## euf-test — smt/theories/euf proof-producing congruence closure (Nieuwenhuis-
 ##   Oliveras) unit + property self-test (stdlib-only, deterministic). The textbook
 ##   refutation with exact conflict premises, deep congruence chains, (dis)equality
@@ -374,6 +391,7 @@ test: check-frozen
 	$(MAKE) combine-test
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
+	$(MAKE) driver-equiv-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

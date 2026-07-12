@@ -187,7 +187,17 @@ let () =
         match Parser.parse_into (Session.env s) (Session.context s) src with
         | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail", 0
         | parsed ->
-          List.iter (Session.assert_term s) parsed.Parser.assertions;
+          (* W1b: submit the whole assertion set through the equality-elimination
+             presolve, exactly as the solver CLI's batch path does (oxsmt_cli.ml
+             [solve_batch], on by default). Presolve is a no-op on a zero-alias file, so
+             this is byte-identical to the old per-term [assert_term] stream there and
+             moves only the alias-bearing files — but it MUST be the same entry point the
+             CLI uses, or the headline sweep would measure a different solver path than
+             the one that ships (a measurement-integrity hazard: a driver split can hide
+             wins AND regressions). The driver-equivalence test
+             (tests/corpus/driver_equiv_test.ml) is the standing guard that these two
+             paths never diverge again. *)
+          Session.assert_presolved s parsed.Parser.assertions;
           let v = Session.check_sat s in
           let label = label_of src in
           let tok =
