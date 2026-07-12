@@ -37,10 +37,10 @@ type t =
   ; watched : Atom.t Term.Table.t (* watched Eq-atom term -> Atom, for propagation *)
   ; mutable atom_terms : Term.t list (* registration order; model enumeration only *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
-      (* propagated lit -> its reason, SNAPSHOTTED at propagation time so [explain] is
+    (* propagated lit -> its reason, SNAPSHOTTED at propagation time so [explain] is
          O(1) and precedence-valid (CONTRACT-EX); see {!cache_reason} / the module note. *)
   ; mutable frames : Lit.t list list
-  (* per-[push]-frame cached lits, head = current frame; used to drop stale reasons on
+    (* per-[push]-frame cached lits, head = current frame; used to drop stale reasons on
      [pop] in lockstep with the decision level that produced them. *)
   }
 
@@ -191,12 +191,12 @@ let check t effort =
     let lits =
       List.filter_map
         (fun (imp : Euf.implied) ->
-          match Term.Table.find_opt t.watched imp.Euf.atom with
-          | None -> None
-          | Some atom ->
-            let lit = Lit.make atom imp.Euf.value in
-            cache_reason t lit (reason_of_implied t imp);
-            Some lit)
+           match Term.Table.find_opt t.watched imp.Euf.atom with
+           | None -> None
+           | Some atom ->
+             let lit = Lit.make atom imp.Euf.value in
+             cache_reason t lit (reason_of_implied t imp);
+             Some lit)
         (Euf.propagate t.engine)
     in
     (match lits, effort with

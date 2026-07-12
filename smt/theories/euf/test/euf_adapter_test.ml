@@ -161,8 +161,8 @@ module Naive = struct
             let all = ref true in
             List.iteri
               (fun k arg ->
-                let bj = Iarr.get aj k in
-                if find t (index t arg) <> find t (index t bj) then all := false)
+                 let bj = Iarr.get aj k in
+                 if find t (index t arg) <> find t (index t bj) then all := false)
               (Iarr.to_list ai);
             if !all
             then (
@@ -752,15 +752,15 @@ let test_random () =
       let pok = ref true in
       List.iter
         (fun pt ->
-          match Model.value m pt with
-          | Some (Model.Bool bv) ->
-            let oracle_true = Naive.equal nz pt true_c in
-            let oracle_false = Naive.equal nz pt false_c in
-            if bv && not oracle_true then pok := false;
-            if (not bv) && not oracle_false then pok := false
-          | _ ->
-            (* undetermined predicate: oracle must not have pinned it to true or false *)
-            if Naive.equal nz pt true_c || Naive.equal nz pt false_c then pok := false)
+           match Model.value m pt with
+           | Some (Model.Bool bv) ->
+             let oracle_true = Naive.equal nz pt true_c in
+             let oracle_false = Naive.equal nz pt false_c in
+             if bv && not oracle_true then pok := false;
+             if (not bv) && not oracle_false then pok := false
+           | _ ->
+             (* undetermined predicate: oracle must not have pinned it to true or false *)
+             if Naive.equal nz pt true_c || Naive.equal nz pt false_c then pok := false)
         pred_atoms;
       check "random: predicate truth matches oracle" !pok)
     else (

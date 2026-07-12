@@ -95,7 +95,7 @@ val explain : 'p t -> Term.t -> Term.t -> 'p list
 type implied =
   { atom : Term.t (** a watched non-Bool [Eq(a,b)] registered via {!register_term} *)
   ; value : bool
-  (** [true]: [a] and [b] are now in one class ([a = b] entailed). [false]: [a] and [b]
+    (** [true]: [a] and [b] are now in one class ([a = b] entailed). [false]: [a] and [b]
       are now provably distinct (an asserted disequality separates their classes) —
       [¬(a = b)] entailed. *)
   }
