@@ -248,7 +248,7 @@ wiring-test:
 ##   assert/push/pop/check vs scratch recomputation, and run-twice determinism.
 ##   Nonzero exit on any failed check (TASKS.md M2-euf).
 euf-test:
-	$(DUNE) exec smt/theories/euf/test/euf_test.exe
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/theories/euf/test/euf_test.exe
 
 ## euf-adapter-test — ADR-0005 THEORY adapter (Euf_adapter) adversarial self-test
 ##   (stdlib-only, deterministic). Drives the frozen THEORY surface only (create /
@@ -260,7 +260,7 @@ euf-test:
 ##   truth + Bool-Eq currency, and run-twice determinism. Nonzero exit on any failed check
 ##   (TASKS.md M4-adapters).
 euf-adapter-test:
-	$(DUNE) exec smt/theories/euf/test/euf_adapter_test.exe
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/theories/euf/test/euf_adapter_test.exe
 
 ## lia-test — smt/theories/lia unit + property self-test (stdlib-only, deterministic).
 ##   Exact rational/δ-rational arithmetic incl. overflow guards; hand cases (DdM
@@ -293,7 +293,7 @@ lia-adapter-test:
 ##   mixed-equality totality, deep tower, pure-QF_LIA zero-split, use-history transition,
 ##   push/pop-reassert). Nonzero exit on any failed check.
 combine-test:
-	$(DUNE) exec smt/combine/test/combine_test.exe
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/combine/test/combine_test.exe
 
 ## smtlib-test — round-trip suite for the SMT-LIB2 printer + test-only parser.
 ##   Deterministic and corpus-independent (committed test): round-trip A (print->parse
@@ -362,8 +362,8 @@ spine:
 test: check-frozen
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
 	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
-	$(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
-	$(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 	$(MAKE) combine-test
 	$(MAKE) smtlib-test
 
