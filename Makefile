@@ -375,12 +375,14 @@ test: check-frozen
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
 
-## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance honeypots (H-SOUND / H-REFUTE /
-##   H-PUSHPOP / H-REPEAT-REFUTE) + the assert-side qvar gate, driven end-to-end through the
-##   real Session + Cdclt + Combine + EUF + LIA stack (no mocks). Nonzero exit on any
-##   failed check. See smt/ematch/test/lemma_honeypot_test.ml.
+## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
+##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1
+##   dedup regression (lemma_honeypot_test), plus lemma-reviewer-2's verbatim C1/C2 wrong-
+##   Unsat reproducers (crit_repro), all end-to-end through the real Session + Cdclt +
+##   Combine + EUF + LIA stack (no mocks). Nonzero exit on any failed check.
 lemma-test:
 	$(DUNE) exec smt/ematch/test/lemma_honeypot_test.exe
+	$(DUNE) exec smt/ematch/test/crit_repro.exe
 
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
 bench:

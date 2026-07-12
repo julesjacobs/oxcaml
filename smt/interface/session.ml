@@ -260,11 +260,35 @@ let assert_bool_at ?sel t pterm =
      | Invalid_argument _ -> t.degraded <- true)
 ;;
 
+(* ADR-0012 R1 / codex C1: the load-bearing assert-side gate rejects a user term carrying
+   ANY reserved [.oxsmt.*] symbol — not just [.oxsmt.qvar.*]. [Symbol.intern] is public
+   and preprocessing witnesses ([.oxsmt.ite/q/r.*]) acquire a rank in the env once minted,
+   so a client could intern one and build a term that CAPTURES an internal witness ->
+   wrong verdict (codex's ite-capture trigger). The single source of truth for the
+   reservation is [Env.is_reserved_name]. [allowed] whitelists a specific lemma's own qvar
+   symbols — the ONLY reserved symbols legitimately present in a lemma body/trigger (a
+   ground user assertion whitelists nothing). *)
+let rec term_has_reserved ?(allowed = []) (t : Term.t) =
+  let bad_sym s =
+    Env.is_reserved_name (Symbol.name s) && not (List.exists (Symbol.equal s) allowed)
+  in
+  let rec_ = term_has_reserved ~allowed in
+  match t.node with
+  | App (sym, args) -> bad_sym sym || Iarr.exists rec_ args
+  | Arith l -> Iarr.exists (fun (tm, _c) -> rec_ tm) l.coeffs
+  | Le a | Not a -> rec_ a
+  | Eq (a, b) -> rec_ a || rec_ b
+  | And xs | Or xs -> Iarr.exists rec_ xs
+  | Ite (c, a, b) -> rec_ c || rec_ a || rec_ b
+  | Bool_const _ | Int_const _ -> false
+;;
+
 let assert_term t term =
-  (* ADR-0012 §1.1 (R1 POINT 4): the load-bearing assert-side gate. A user term carrying a
-     coerced / interned [.oxsmt.qvar.*] placeholder degrades to a clean [Unknown] via the
-     I8 Unsupported discipline (NOT a raw [Failure]) — never registered, never in a model. *)
-  if Qvar.term_contains_qvar term
+  (* Load-bearing assert-side gate (R1 POINT 4 + codex C1): a user term carrying ANY
+     reserved [.oxsmt.*] symbol (a coerced/interned qvar OR a captured preprocessing
+     witness) degrades to a clean [Unknown] via the I8 Unsupported discipline (NOT a raw
+     [Failure]) — never registered, never in a model, never capturing an internal aux. *)
+  if term_has_reserved term
   then t.degraded <- true
   else (
     t.asserted <- term :: t.asserted;
@@ -324,6 +348,25 @@ let assert_lemma t ~qvars ~build =
   let { body; triggers } = build qv in
   if not (Sort.equal (body : Term.t).sort Sort.bool)
   then invalid_arg "Session.assert_lemma: lemma body must be Bool-sorted";
+  (* codex C1 (lemma path): the body/triggers may reference THIS lemma's qvars but no
+     other reserved [.oxsmt.*] symbol — a captured preprocessing witness smuggled into a
+     lemma body would let its instance capture the internal aux (wrong verdict). Reject
+     foreign reserved symbols; the lemma's own qvars are whitelisted. *)
+  let qvar_syms =
+    Array.to_list
+      (Array.map
+         (fun q ->
+            match (Qvar.to_term q).Term.node with
+            | App (s, _) -> s
+            | _ -> assert false (* a qvar is a nullary App by construction *))
+         qv)
+  in
+  let foreign tm = term_has_reserved ~allowed:qvar_syms tm in
+  if foreign body || List.exists (List.exists foreign) triggers
+  then
+    invalid_arg
+      "Session.assert_lemma: body/trigger references a reserved (.oxsmt.*) symbol that \
+       is not one of this lemma's qvars";
   let lemma =
     { Lemma.qvars = qv
     ; body

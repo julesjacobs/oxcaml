@@ -20,9 +20,11 @@ type t =
   ; mutable next_id : int
   ; mutable lemmas : Lemma.t list (* the live store; a pop filters it (§1.5) *)
   ; seeds : (Lemma.t * Term.t array) Queue.t (* tranche-1 manual instances *)
-  ; dedup : (int, Sat.var) Hashtbl.t
-    (* instance body tag -> owning lemma's frame selector; scoped to active-clause
-         lifetime (dropped on that frame's pop, §1.4 R2) *)
+  ; dedup : (Sat.var * int, unit) Hashtbl.t
+    (* (owning frame selector, instance body tag) -> present. Keyed on (frame, tag), NOT
+         tag alone (codex M1): the SAME body guarded by two different selectors is two
+         DIFFERENT clauses, so two live lemmas' equal-bodied instances must NOT dedup each
+         other. Scoped to active-clause lifetime — dropped on that frame's pop (§1.4 R2). *)
   ; mutable budget_remaining : int
   ; mutable budget_hit : bool
   ; mutable total_instances : int
@@ -55,7 +57,20 @@ let fresh_id t =
 
 let add_lemma t (lemma : Lemma.t) = t.lemmas <- lemma :: t.lemmas
 let has_live_lemma t = t.lemmas <> []
-let seed_instance t lemma sigma = Queue.add (lemma, sigma) t.seeds
+
+(* codex C2: only a lemma PHYSICALLY present in this manager's live store may be seeded.
+   [List.memq] closes ownership AND liveness in one check: a handle from a different
+   session is not in this manager's store (its base selector would otherwise collide,
+   riding an active foreign selector -> wrong Unsat); a popped lemma was filtered out of
+   the store by [on_pop]. Reject a foreign/stale handle rather than enqueue it. *)
+let seed_instance t lemma sigma =
+  if not (List.memq lemma t.lemmas)
+  then
+    invalid_arg
+      "Ematch.Manager.seed_instance: lemma handle is not a live lemma of this session \
+       (foreign or popped)";
+  Queue.add (lemma, sigma) t.seeds
+;;
 
 let begin_check t =
   t.budget_remaining <- t.gen_budget;
@@ -81,11 +96,11 @@ let round t =
       let inst =
         Instance.of_subst t.ctx ~qvars:lemma.Lemma.qvars ~body:lemma.Lemma.body sigma
       in
-      let tag = (Instance.to_term inst).Term.tag in
-      if Hashtbl.mem t.dedup tag
-      then () (* redundancy filter: instance body already active (§L5) *)
+      let key = lemma.Lemma.frame, (Instance.to_term inst).Term.tag in
+      if Hashtbl.mem t.dedup key
+      then () (* redundancy filter: this (frame, body) clause already active (§L5) *)
       else (
-        Hashtbl.replace t.dedup tag lemma.Lemma.frame;
+        Hashtbl.replace t.dedup key ();
         t.budget_remaining <- t.budget_remaining - 1;
         t.total_instances <- t.total_instances + 1;
         out := (lemma.Lemma.frame, inst) :: !out))
@@ -96,10 +111,11 @@ let round t =
 let on_pop t selector =
   t.lemmas <- List.filter (fun (l : Lemma.t) -> not (Int.equal l.frame selector)) t.lemmas;
   (* drop dedup entries owned by the popped frame (§1.4 R2: retracted instance
-     re-generates) *)
+     re-generates) — the key is (frame, tag), so match on the frame component *)
   let stale =
     Hashtbl.fold
-      (fun tag fr acc -> if Int.equal fr selector then tag :: acc else acc)
+      (fun ((fr, _tag) as key) () acc ->
+         if Int.equal fr selector then key :: acc else acc)
       t.dedup
       []
   in

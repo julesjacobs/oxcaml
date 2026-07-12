@@ -279,6 +279,60 @@ let cap_per_env () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* NOTE: codex's two CRITICAL wrong-Unsat regressions (C1
+   witness-capture-via-public-intern, C2 cross-session-lemma-injection) live VERBATIM in
+   the sibling [crit_repro.ml] (= logs/lemma-crit-repro.ml), so the scoped-confirm round
+   checks the exact same file. This file keeps the honeypots, the gate/forge/cap
+   negatives, and the M1 completeness regression below. *)
+
+(* ------------------------------------------------------------------ *)
+(* M1 REGRESSION (codex MEDIUM, manager dedup). Two live lemmas producing the same body
+   under DIFFERENT frame selectors are different clauses; tag-only dedup let L2's pushed
+   instance permanently consume L1's base seed, so after popping L2 the still-live base L1
+   could not refute → spurious Unknown. (frame, tag) dedup keeps them distinct.
+   Discrimination: revert dedup to tag-only → the second check goes Unknown. *)
+let m1_cross_frame_dedup () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let p = Session.declare_fun s "p" int_to_bool in
+  let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+  let pa = Context.app ctx p [ a ] in
+  Session.assert_term s (Context.not_ ctx pa);
+  (* base goal ¬p(a) *)
+  let l1 =
+    Session.assert_lemma
+      s
+      ~qvars:[ "x", Sort.int ]
+      ~build:(fun qv ->
+        { Session.body = Context.app ctx p [ Qvar.to_term qv.(0) ]; triggers = [] })
+  in
+  (* L1 base *)
+  Session.push s;
+  let l2 =
+    Session.assert_lemma
+      s
+      ~qvars:[ "x", Sort.int ]
+      ~build:(fun qv ->
+        { Session.body = Context.app ctx p [ Qvar.to_term qv.(0) ]; triggers = [] })
+  in
+  (* L2 pushed *)
+  Session.instantiate s l2 [| a |];
+  (* codex's order: L2[a] before L1[a] *)
+  Session.instantiate s l1 [| a |];
+  let v1 = Session.check_sat s in
+  check
+    (Printf.sprintf "M1: check1 -> unsat (got %s)" (verdict_str v1))
+    (v1 = Session.Unsat);
+  Session.pop s;
+  let v2 = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "M1: after pop, live base L1 still refutes -> unsat (got %s)"
+       (verdict_str v2))
+    (v2 = Session.Unsat)
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Determinism smoke: the honeypots run twice byte-identically (I6). A tight-budget
    verdict-affecting determinism regression is a tranche-3 test (R7); this is the
    tranche-1 floor. *)
@@ -318,6 +372,7 @@ let () =
   coercion_gate ();
   forge_gate ();
   cap_per_env ();
+  m1_cross_frame_dedup ();
   determinism ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1

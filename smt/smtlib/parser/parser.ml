@@ -292,23 +292,16 @@ and chain st mk ts =
 
 (* Reject user declarations in the reserved fresh-symbol namespace (board #48): a user
    symbol named ".oxsmt.*" would collide with a symbol preprocessing invents, which is
-   unsound. Kept in sync with [Oxsmt_preprocess.Preprocess.reserved_prefix] (this
-   test-only parser does not link that library, so the constant is duplicated with this
-   note). *)
-let reserved_prefix = ".oxsmt."
-
-let is_reserved_internal name =
-  String.length name >= String.length reserved_prefix
-  && String.sub name 0 (String.length reserved_prefix) = reserved_prefix
-;;
-
+   unsound. Single source of truth = {!Oxsmt_core.Env} (ADR-0012 F1): this parser links
+   [oxsmt_core], so it references [Env.is_reserved_name] directly rather than keeping a
+   local copy of the prefix (retiring the two-copies drift the old note warned about). *)
 let check_not_reserved name =
-  if is_reserved_internal name
+  if Env.is_reserved_name name
   then
     malformedf
       "declaration of reserved internal symbol %s (%s* is preprocessing-only)"
       name
-      reserved_prefix
+      Env.reserved_prefix
 ;;
 
 let declare_sort st name =
