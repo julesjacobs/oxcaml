@@ -1,8 +1,8 @@
 diff --git a/smt/theories/euf/euf.ml b/smt/theories/euf/euf.ml
-index ab947936c2..f4300584ab 100644
+index c163fbb229..f4a2ccb198 100644
 --- a/smt/theories/euf/euf.ml
 +++ b/smt/theories/euf/euf.ml
-@@ -658,7 +658,7 @@ let propagate t =
+@@ -662,7 +662,7 @@ let propagate t =
           let du = find t d.d_a
           and dv = find t d.d_b in
           let key = if du <= dv then pack du dv else pack dv du in
