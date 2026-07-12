@@ -798,6 +798,19 @@
  (action
   (copy driver/oxcaml_main.ml %{targets})))
 
+; C1 frame-table bake (task #11): the compiler opts in to the baked
+; frame-descriptor table by linking the reserve object into its own native
+; executable. Built here in the main context so the link path is unambiguous;
+; this is the ONLY place the ~4 MB reserve is pulled in (normal executables
+; never link it). The post-link bake step (tools/bake_frame_table.sh) then
+; fills the section in the installed ocamlopt.opt.
+(rule
+ (targets caml_frame_bake_reserve.o)
+ (deps runtime/caml_frame_bake_reserve.c)
+ (action
+  (run %{ocaml-config:c_compiler} -c -O2 -o caml_frame_bake_reserve.o
+    runtime/caml_frame_bake_reserve.c)))
+
 (executable
  (name oxcaml_main_native)
  (modes native)
@@ -805,6 +818,9 @@
   (backend bisect_ppx))
  (ocamlopt_flags
   (:standard -runtime-variant nnp))
+ (link_deps caml_frame_bake_reserve.o)
+ (link_flags
+  (:standard caml_frame_bake_reserve.o))
  (libraries
   memtrace
   flambda2
@@ -964,10 +980,27 @@
    %{dep:middle_end/flambda2/to_cmm/flambda2_to_cmm.cmxa}
    %{dep:middle_end/flambda2/flambda2.cmxa})))
 
+; C1 frame-table auto-bake (build phase): bake the linked native compiler so the
+; INSTALLED ocamlopt.opt ships with a populated .caml_frametable_baked section
+; (magic OXFRMBK1) and skips the ~7 ms per-startup table rebuild. This runs as an
+; ordinary build rule -- nix and every other consumer builds through the same
+; build system, so the deployed binary is baked with NO manual post-link step.
+; The bake is a pure same-size section overwrite: it patches the compiler's own
+; frame-descriptor data, never its emitted code, and preserves the build-id. The
+; tool is build-safe (falls back to an unbaked passthrough copy with a warning if
+; the reserve is absent/mismatched, never failing the build). oxcaml_main_native.exe
+; itself is left unbaked for any internal consumer; only this installed copy is baked.
+(rule
+ (targets ocamlopt_opt_baked.exe)
+ (deps oxcaml_main_native.exe tools/bake_frame_table.sh)
+ (action
+  (run bash tools/bake_frame_table.sh oxcaml_main_native.exe
+    ocamlopt_opt_baked.exe)))
+
 (install
  (files
   (oxcaml_main.bc as ocamlopt.byte)
-  (oxcaml_main_native.exe as ocamlopt.opt))
+  (ocamlopt_opt_baked.exe as ocamlopt.opt))
  (section bin)
  (package ocaml))
 
