@@ -69,4 +69,10 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   codex Rev-4 final leg (3 HIGH + 1 MEDIUM). Design-only; full text in
   `adr-0013-certificates-replay.md`. The D3 erratum was applied to `adr-0006-certificates.md`
   as its Revision 5 at this promotion. [ratified Rev 5 — design-only]
+- ADR-0014 — Theory–e-graph fabric (theories interact through a shared congruence hub, not
+  propositional round-trips): a shared backtracking substrate (`Trail`) + fix-triggered
+  trichotomy bridging + typed child-explanation currency with `propagated_by` pop-lifecycle
+  discipline; staged severable dispatch (Stage 0 = the Trail substrate + simplex/combine/EUF
+  migrations, landed 7dd331ac74; Stage 1a+ tracked). Full text in `adr-0014-egraph-fabric.md`.
+  [ratified Rev 6.1 — design-only]
 
