@@ -1,0 +1,19 @@
+diff --git a/smt/core/trail.ml b/smt/core/trail.ml
+index dc1cdca455..21f3c373ac 100644
+--- a/smt/core/trail.ml
++++ b/smt/core/trail.ml
+@@ -19,9 +19,11 @@ let mark t = Dynarray.length t.entries
+ (* Drain newest-first to trail length [target], applying each entry's inverse. The single
+    place the pop watermark loop lives. *)
+ let drain_to t ~apply target =
+-  while Dynarray.length t.entries > target do
+-    apply (Dynarray.pop_last t.entries)
+-  done
++  (* MUTANT (stage0-trail-drain-order): oldest-first instead of newest-first *)
++  for i = target to Dynarray.length t.entries - 1 do
++    apply (Dynarray.get t.entries i)
++  done;
++  Dynarray.truncate t.entries target
+ ;;
+ 
+ let rewind_to t ~apply m =
