@@ -65,6 +65,13 @@ type 'tok t =
     (* push/pop stack (head = current frame), each holding the reg indices first
          reported in that frame — mirrors the adapter's explain-cache framing so a [pop]
          un-reports exactly the atoms whose entailing bound it unwinds. *)
+  ; mutable check_dirty : bool
+    (* a simplex bound MAY have changed since the last [check] that returned
+         [Sat_candidate]. Set by [assert_atom]/[pop]/[solve_integer] (the ops that mutate
+         bounds); cleared only when [check] re-establishes feasibility. When clear, the
+         tableau is still the feasible one the last [check] certified — so [check] can
+         skip the simplex feasibility scan and return [Sat_candidate] without re-pivoting
+         (FIX #3a). A [Conflict] leaves it set, so the next [check] re-runs. *)
   ; mutable overflows : int (* number of overflow-degradations to unknown *)
   }
 
@@ -82,6 +89,7 @@ let create ctx =
   ; dirty = Hashtbl.create 64
   ; reported = Dynarray.create ()
   ; report_frames = [ [] ]
+  ; check_dirty = true
   ; overflows = 0
   }
 ;;
@@ -204,6 +212,8 @@ let constraints_of_atom t (atom : Term.t) ~polarity
 
 let assert_atom t atom ~polarity ~premise =
   ensure_live t;
+  (* A new/tightened bound can make the tableau infeasible -> the next [check] must run. *)
+  t.check_dirty <- true;
   guard_overflow t (fun () ->
     List.iter
       (fun (var, sense, rhs) ->
@@ -274,9 +284,20 @@ let externalize (c : _ Simplex.conflict) : 'tok conflict =
 
 let check t =
   ensure_live t;
-  match Simplex.check t.simplex with
-  | None -> Sat_candidate
-  | Some c -> Conflict (externalize c)
+  (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
+     feasible check. The tableau/assignment the previous [check] certified feasible is
+     still current (no assert/pop happened), so returning [Sat_candidate] re-certifies the
+     SAME feasible state — never an unrepaired one (the DdM invariants held then and
+     nothing has touched them since). A [Conflict] leaves [check_dirty] set so the
+     engine's backtrack (which [pop]s -> re-dirties) forces a real re-check. *)
+  if not t.check_dirty
+  then Sat_candidate
+  else (
+    match Simplex.check t.simplex with
+    | None ->
+      t.check_dirty <- false;
+      Sat_candidate
+    | Some c -> Conflict (externalize c))
 ;;
 
 let rational_value t (term : Term.t) =
@@ -338,6 +359,10 @@ let model t =
 
 let solve_integer ?(budget = default_budget) t =
   ensure_live t;
+  (* B&B pushes/asserts/pops simplex bounds directly (bypassing [assert_atom]); DdM does
+     not restore VALUES on [pop], so the assignment left behind need not be feasible for
+     the restored bounds. Force any later [check] to re-run rather than trust the gate. *)
+  t.check_dirty <- true;
   let splits = ref 0 in
   (* [root_conflict] captures a ℚ-level conflict found with no branch in scope, so a
      genuine single-Farkas certificate can be surfaced. *)
@@ -464,6 +489,9 @@ let push t =
 let pop t n =
   ensure_live t;
   Simplex.pop t.simplex n;
+  (* Restoring (loosening) bounds can leave the assignment infeasible for the restored
+     frame; the next [check] must re-run rather than trust the gate. *)
+  t.check_dirty <- true;
   (* Un-report every atom first reported in a popped frame: its entailing bound is being
      unwound. Re-dirty its var so the next [propagate] re-checks it and re-emits if a
      surviving (shallower) bound still entails it — this is what lets an atom entailed at

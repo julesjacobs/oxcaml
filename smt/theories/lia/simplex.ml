@@ -9,6 +9,7 @@
 exception Farkas_error of string
 
 module IntMap = Map.Make (Int)
+module IntSet = Set.Make (Int)
 
 (* A linear expression: var id -> nonzero coefficient (absent = 0). Used both for a
    variable's immutable Farkas half-plane basis ([def], over problem vars) and for a basic
@@ -56,6 +57,20 @@ type 'a t =
   ; trail : 'a undo Dynarray.t
   ; scopes : int Dynarray.t (* trail length at each open frame *)
   ; mutable pivots : int
+  ; mutable dirty_basic : IntSet.t
+    (* FIX #3b: a SUPERSET of the basic variables that may violate a bound — every basic
+         var whose value changed ([update]/[pivot_and_update]) or whose bound tightened
+         ([assert_*]) since [check] last restored feasibility. [first_violating] scans
+         only this instead of all vars, pruning non-violating members as it goes. Superset
+         invariant: any violating basic var is present, so [check] can never miss a
+         violation and certify Sat on an unrepaired tableau. [pop] only loosens bounds
+         (never creates a violation), so it needs no maintenance. *)
+  ; mutable dirty_bound : IntSet.t
+    (* FIX #3b: a SUPERSET of the variables whose [lower]/[upper] may form an empty
+         interval (l > u). Such an interval is created only by the [assert_*] that
+         tightens one bound past the other (detected there); [pop] only loosens, so it can
+         only resolve one. [empty_interval_conflict] scans only this, reading current
+         bounds as ground truth. *)
   ; mutable poisoned : bool
     (* set the instant a Rational.Overflow escapes a state-mutating op: the tableau may be
      left mid-pivot (INV-EQ broken), so any further reasoning is unsound and must be
@@ -72,6 +87,8 @@ let create () =
   ; trail = Dynarray.create ()
   ; scopes = Dynarray.create ()
   ; pivots = 0
+  ; dirty_basic = IntSet.empty
+  ; dirty_bound = IntSet.empty
   ; poisoned = false
   }
 ;;
@@ -231,6 +248,14 @@ let build_conflict t (contribs : contribution list) : 'a conflict =
 let record_lower t (v : 'a var) old = Dynarray.add_last t.trail (Undo_lower (v.id, old))
 let record_upper t (v : 'a var) old = Dynarray.add_last t.trail (Undo_upper (v.id, old))
 
+(* [dirty_basic]/[dirty_bound] worklist maintenance (FIX #3b). Adding is always sound (the
+   sets are supersets); the invariants that make
+   [first_violating]/[empty_interval_conflict] complete are that every
+   value-changed/bound-tightened basic var lands in [dirty_basic] and every newly-empty
+   interval lands in [dirty_bound]. *)
+let mark_basic t id = t.dirty_basic <- IntSet.add id t.dirty_basic
+let mark_bound t id = t.dirty_bound <- IntSet.add id t.dirty_bound
+
 (* Update a nonbasic var to value d, repairing basic values (INV-EQ) (DdM06 Update). *)
 let update t (v : 'a var) (d : Delta.t) =
   let diff = Delta.sub d v.value in
@@ -240,7 +265,10 @@ let update t (v : 'a var) (d : Delta.t) =
        then (
          let a = coeff b.row v.id in
          if not (Rational.is_zero a)
-         then b.value <- Delta.add b.value (Delta.scale a diff)))
+         then (
+           b.value <- Delta.add b.value (Delta.scale a diff);
+           (* value changed -> it may now violate its bound *)
+           mark_basic t b.id)))
     t.vars;
   v.value <- d
 ;;
@@ -257,6 +285,7 @@ let assert_lower t vid (d : Delta.t) reason =
          let old = v.lower in
          record_lower t v old;
          v.lower <- Some { bval = d; reason };
+         mark_bound t vid;
          let c =
            build_conflict
              t
@@ -269,6 +298,10 @@ let assert_lower t vid (d : Delta.t) reason =
          let old = v.lower in
          record_lower t v old;
          v.lower <- Some { bval = d; reason };
+         (* A tighter lower bound on a basic var may make its (unchanged) value violate;
+            for a nonbasic var, [update] moves it in-bounds and marks the basics it
+            shifts. *)
+         if v.basic then mark_basic t vid;
          if (not v.basic) && Delta.lt v.value d then update t v d;
          None))
 ;;
@@ -284,6 +317,7 @@ let assert_upper t vid (d : Delta.t) reason =
          let old = v.upper in
          record_upper t v old;
          v.upper <- Some { bval = d; reason };
+         mark_bound t vid;
          let c =
            build_conflict
              t
@@ -296,6 +330,7 @@ let assert_upper t vid (d : Delta.t) reason =
          let old = v.upper in
          record_upper t v old;
          v.upper <- Some { bval = d; reason };
+         if v.basic then mark_basic t vid;
          if (not v.basic) && Delta.lt d v.value then update t v d;
          None))
 ;;
@@ -335,13 +370,19 @@ let pivot_and_update t (bi : 'a var) (nj : 'a var) (v : Delta.t) =
   let theta = Delta.scale (Rational.div Rational.one a) (Delta.sub v bi.value) in
   bi.value <- v;
   nj.value <- Delta.add nj.value theta;
+  (* [nj] becomes basic with a new value; the other basic rows that mention [nj] shift
+     too. Each such var may now violate its bound -> add to the worklist ([bi] leaves the
+     basis at its target value, so it needs no entry). *)
+  mark_basic t nj.id;
   Dynarray.iter
     (fun k ->
        if k.basic && k.id <> bi.id
        then (
          let a_kn = coeff k.row nj.id in
          if not (Rational.is_zero a_kn)
-         then k.value <- Delta.add k.value (Delta.scale a_kn theta)))
+         then (
+           k.value <- Delta.add k.value (Delta.scale a_kn theta);
+           mark_basic t k.id)))
     t.vars;
   pivot t bi nj
 ;;
@@ -349,24 +390,38 @@ let pivot_and_update t (bi : 'a var) (nj : 'a var) (v : Delta.t) =
 (* ---- Check (DdM06). Bland's rule: smallest-id violating basic; smallest-id suitable
    nonbasic. Returns the first basic variable violating a bound, scanning by id. ---- *)
 
+(* FIX #3b: the smallest-id violating basic variable, scanning only the [dirty_basic]
+   worklist (a superset of the violating basic vars) instead of all vars. [IntSet] is
+   ordered by id, so the first violating member found is the global smallest-id violator —
+   Bland's leaving rule and its termination guarantee are unchanged. Confirmed-clean
+   members (non-violating, or now nonbasic) are pruned; a returned violator is kept for
+   the re-check that follows its pivot. When none violate, [dirty_basic] is emptied. *)
 let first_violating t =
-  let n = Dynarray.length t.vars in
-  let rec go i =
-    if i >= n
-    then None
-    else (
+  let rec go s =
+    match IntSet.min_elt_opt s with
+    | None ->
+      t.dirty_basic <- s;
+      None
+    | Some i ->
       let v = get t i in
-      if v.basic
-      then (
-        match v.lower with
-        | Some l when Delta.lt v.value l.bval -> Some (v, `Low)
-        | _ ->
-          (match v.upper with
-           | Some u when Delta.lt u.bval v.value -> Some (v, `High)
-           | _ -> go (i + 1)))
-      else go (i + 1))
+      let viol =
+        if v.basic
+        then (
+          match v.lower with
+          | Some l when Delta.lt v.value l.bval -> Some (v, `Low)
+          | _ ->
+            (match v.upper with
+             | Some u when Delta.lt u.bval v.value -> Some (v, `High)
+             | _ -> None))
+        else None
+      in
+      (match viol with
+       | Some _ ->
+         t.dirty_basic <- s;
+         viol
+       | None -> go (IntSet.remove i s))
   in
-  go 0
+  go t.dirty_basic
 ;;
 
 (* Smallest-id nonbasic in [bi]'s row that can move [bi] toward feasibility. [dir = `Inc]
@@ -413,31 +468,38 @@ let conflict_of t (bi : 'a var) ~low =
 ;;
 
 (* An asserted lower bound above an asserted upper bound (empty interval) is an immediate
-   contradiction. The pivot loop is basic-only and value-driven, so it does not witness this
-   for a nonbasic variable — [check] detects it structurally here. This replaces the earlier
-   cached-[pending] scheme, which used a single scalar that a later [assert] overwrote and a
-   subsequent [pop] then dropped, losing an earlier still-live contradiction (codex R1,
-   false-SAT). Reading current bounds is the ground truth: reports the conflict iff both
-   bounds are still asserted, vanishes exactly when a [pop] removes one. Scans in id order
-   (determinism, I6). Farkas certificate: 1·(l - def) + 1·(def - u) = l - u > 0. *)
+   contradiction. The pivot loop is basic-only and value-driven, so it does not witness
+   this for a nonbasic variable — [check] detects it structurally here. This replaces the
+   earlier cached-[pending] scheme, which used a single scalar that a later [assert]
+   overwrote and a subsequent [pop] then dropped, losing an earlier still-live
+   contradiction (codex R1, false-SAT). Reading current bounds is the ground truth:
+   reports the conflict iff both bounds are still asserted, vanishes exactly when a [pop]
+   removes one. Scans in id order (determinism, I6). Farkas certificate: 1·(l - def) +
+   1·(def - u) = l - u > 0.
+
+   FIX #3b: scans only the [dirty_bound] worklist (a superset of the vars that may have l
+   > u), not all vars; current bounds remain the ground truth (a member whose interval a
+   [pop] has since reopened is pruned), and [IntSet] order keeps the id-order scan. *)
 let empty_interval_conflict t =
-  let n = Dynarray.length t.vars in
-  let rec go i =
-    if i >= n
-    then None
-    else (
+  let rec go s =
+    match IntSet.min_elt_opt s with
+    | None ->
+      t.dirty_bound <- s;
+      None
+    | Some i ->
       let v = get t i in
-      match v.lower, v.upper with
-      | Some l, Some u when Delta.lt u.bval l.bval ->
-        Some
-          (build_conflict
-             t
-             [ { var = i; mult = Rational.one; use_lower = true }
-             ; { var = i; mult = Rational.one; use_lower = false }
-             ])
-      | _ -> go (i + 1))
+      (match v.lower, v.upper with
+       | Some l, Some u when Delta.lt u.bval l.bval ->
+         t.dirty_bound <- s;
+         Some
+           (build_conflict
+              t
+              [ { var = i; mult = Rational.one; use_lower = true }
+              ; { var = i; mult = Rational.one; use_lower = false }
+              ])
+       | _ -> go (IntSet.remove i s))
   in
-  go 0
+  go t.dirty_bound
 ;;
 
 let check t =
