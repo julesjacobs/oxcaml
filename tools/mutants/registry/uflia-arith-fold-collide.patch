@@ -1,13 +1,13 @@
 diff --git a/smt/interface/cdclt.ml b/smt/interface/cdclt.ml
-index dc21c81a4b..effff55e2c 100644
+index 737482d5f9..c1ab42f141 100644
 --- a/smt/interface/cdclt.ml
 +++ b/smt/interface/cdclt.ml
-@@ -474,7 +474,7 @@ let model t =
-                   match value_of child with
-                   | VInt cv -> add_ovf acc (mul_ovf coeff cv)
-                   | _ -> raise Degrade)
--               lin.Term.const
-+               0
-                lin.Term.coeffs
+@@ -491,7 +491,7 @@ let model t =
+                    | Some s -> s))
+              | _ -> raise Degrade
             in
-            VInt v
+-           VInt (Iarr.fold step lin.Term.const lin.Term.coeffs)
++           VInt (Iarr.fold step 0 lin.Term.coeffs)
+          | Some (Model.Uninterp cid), _ ->
+            (* An [Uninterp] value on an Int-sorted term is the §10 realize-me signal (pass
+               1b); on an uninterpreted-sorted term it is the dense element index (pass 1). *)
