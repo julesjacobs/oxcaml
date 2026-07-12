@@ -82,10 +82,19 @@ let scan_commands sexps =
 
 (* Render a model value as the token the eval Model reader types against the symbol's
    declared sort: [true]/[false] for Bool, the numeral (SMT-LIB [(- n)] for negatives) for
-   Int, the element index for an uninterpreted sort. *)
+   Int, the element index for an uninterpreted sort. A negative is rendered by STRIPPING
+   the leading '-' from [string_of_int] rather than negating, so [min_int] does not
+   overflow (mirrors the shipped printer's [add_int_lit]): [-n] would wrap for [min_int]
+   and emit the malformed [(- -4611686018427387904)]. The value is always renderable —
+   never degrade. *)
 let token_of_value = function
   | Session.VBool b -> if b then "true" else "false"
-  | Session.VInt n -> if n >= 0 then string_of_int n else Printf.sprintf "(- %d)" (-n)
+  | Session.VInt n ->
+    if n >= 0
+    then string_of_int n
+    else (
+      let s = string_of_int n in
+      "(- " ^ String.sub s 1 (String.length s - 1) ^ ")")
   | Session.VUninterp i -> string_of_int i
 ;;
 

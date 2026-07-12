@@ -497,6 +497,19 @@ let test_cli_refused_symbol_degrades () =
     (contains_substr out "(|a b| 0)")
 ;;
 
+(* A negative Int model value renders as the well-formed SMT-LIB [(- N)] (token_of_value
+   strips the leading '-' from [string_of_int] rather than negating — so [min_int] cannot
+   overflow into the malformed [(- -N)]; mirrors the shipped printer's [add_int_lit]). The
+   reachable path is pinned here end-to-end via the real CLI; [min_int] itself is a
+   boundary the solver never models and the eval reader cannot reingest (both overflow),
+   so it is correctness-by-mirroring-the-printer, not a round-trippable case (see report). *)
+let test_cli_negative_int_token () =
+  let out, code = run_cli "(declare-const y Int)(assert (= y (- 5)))(check-sat)" in
+  check "negative-int CLI: clean exit" (code = 0);
+  check "negative-int CLI: renders (- 5)" (contains_substr out "(- 5)");
+  check "negative-int CLI: no malformed double-minus" (not (contains_substr out "(- -"))
+;;
+
 (* ------------------------------------------------------------------ *)
 (* ADR-0010 §6 acceptance corpus, at the SESSION level (end-to-end through the
    internalization Combine + EUF + LIA stack). Two verdict regimes to keep straight:
@@ -688,6 +701,7 @@ let () =
   test_parser_into_session ();
   test_determinism ();
   test_cli_refused_symbol_degrades ();
+  test_cli_negative_int_token ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

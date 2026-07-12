@@ -1,7 +1,9 @@
-(* CDCL(T) seam glue: the adapter that presents the Nelson-Oppen combined theory
-   [Combine (Uflia_router) (Euf_adapter) (Lia_adapter)] to the propositional SAT core
-   through its {!Oxsmt_solver.Sat.theory} callback record (ADR-0005 §3). This is the piece
-   that makes {!Session} a real CDCL(T) solver rather than a propositional skeleton.
+(* CDCL(T) seam glue: the adapter that presents the internalization-based combined theory
+   [Combine (Uflia_router) (Euf_adapter) (Lia_adapter)] (ADR-0010: model-based
+   Nelson-Oppen where each boundary node is its own proxy, no purification pass) to the
+   propositional SAT core through its {!Oxsmt_solver.Sat.theory} callback record (ADR-0005
+   §3). This is the piece that makes {!Session} a real CDCL(T) solver rather than a
+   propositional skeleton.
 
    {b What it maps.} The SAT core speaks [Sat.var]/[Sat.lit] over opaque boolean
    variables; the frozen THEORY speaks [Atom.t]/[Lit.t]. Each theory atom is minted 1:1
