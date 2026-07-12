@@ -208,6 +208,16 @@ let reduce_first = 2000 (* first reduceDB at this many conflicts *)
 let reduce_inc = 300 (* then every this-many more *)
 let rephase_base_interval = 1000 (* decisions between the first rephase impulses *)
 
+(* Glucose adaptive restarts default OFF (team-lead ruling B, board #172 fix round). The
+   mechanism is fully built and compiled — EMAs, trigger, blocking — but inert behind this
+   flag: on the measured corpus it fired for no benefit and cost QF_UF/QF_UFLIA (official
+   950: +17 with it on vs +20 with it off; see logs/sat-search-report.md). Luby stays the
+   restart policy. Kept as a tuning follow-up: a future family that wants glucose restarts
+   flips this to [true] (and re-measures). The LBD EMAs still update (they are the
+   trigger's input and cost one float op per conflict); [blocking] still gates the rephase
+   impulse. *)
+let adaptive_restart_enabled = false
+
 (* One exponential-moving-average step: [x <- x + alpha*(sample - x)]. *)
 let ema_step x ~alpha ~sample = x +. (alpha *. (sample -. x))
 
@@ -1174,7 +1184,8 @@ let blocking t =
    the long-run average (slow EMA) means the search is in an unproductive region —
    restart. Gated by EMA warm-up and by {!blocking}. *)
 let adaptive_restart t =
-  t.conflicts_since_restart >= restart_min_conflicts
+  adaptive_restart_enabled
+  && t.conflicts_since_restart >= restart_min_conflicts
   && t.lbd_ema_fast > restart_margin *. t.lbd_ema_slow
   && not (blocking t)
 ;;

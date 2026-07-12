@@ -679,9 +679,13 @@ let test_search_machinery_determinism () =
 ;;
 
 (* ENGAGEMENT tests (board #172 codex gap): pin that each mechanism actually FIRES in the
-   solve path — a mutant that disables it must go RED. Each was verified RED by disabling
-   its mechanism in sat.ml (all-on → mutant): rephasing 4000→1500 decisions; reduceDB
-   31518→6458 conflicts; adaptive restart 31518→4141 conflicts. *)
+   solve path — a mutant that disables it must go RED. These run in the SHIPPED config,
+   where adaptive restart is default-OFF (team-lead ruling B; see
+   [adaptive_restart_enabled] in sat.ml). Verified RED by mutation: rephasing 4000→1500
+   decisions; reduceDB 4141→3437 conflicts on PHP(8,7) (adaptive off); and re-enabling
+   adaptive restart inflates the same instance 4141→31518. The reduceDB test's two-sided
+   window pins BOTH: its lower bound catches reduceDB being disabled, its upper bound
+   catches adaptive restart being turned back on (which would silently revert ruling B). *)
 
 (* Rephasing engagement, ISOLATED: with N > rephase_base_interval free variables and NO
    clauses, the solve makes zero conflicts (so reduceDB and adaptive restart never fire —
@@ -709,28 +713,38 @@ let test_rephase_engagement () =
     (st.Sat.Stats.decisions > n)
 ;;
 
-(* reduceDB + adaptive-restart engagement: on PHP(8,7) (hard unsat, tens of thousands of
-   conflicts) BOTH conflict-driven mechanisms fire, and their clause deletion / frequent
-   restarting drastically reshapes the search — conflicts climb well past what either
-   absence produces. Disabling reduceDB (conflicts →~6458) OR adaptive restart (→~4141)
-   each drops it below this bound — RED. (Direction is not "better": on pigeonhole these
-   mechanisms inflate the conflict count; the test pins ENGAGEMENT, not benefit.) *)
-let test_reducedb_restart_engagement () =
+(* reduceDB engagement + adaptive-restart-OFF guard, on PHP(8,7) (hard unsat). In the
+   shipped config (adaptive off) this solves in 4141 conflicts. reduceDB fires ~7 times
+   and its clause deletion reshapes the search: disabling reduceDB drops it to 3437 —
+   below the LOWER bound (RED). Re-enabling adaptive restart inflates it to 31518 (the
+   frequent restarting explodes pigeonhole) — above the UPPER bound (RED). So the window
+   pins reduceDB engagement AND that adaptive restart stays off per ruling B; a mutant on
+   either goes RED. (Direction is not "better": on pigeonhole both mechanisms inflate the
+   conflict count; the test pins ENGAGEMENT / config, not benefit. This is why
+   adaptive-restart engagement can't be pinned as a positive "it fires" bound here — the
+   ruling makes it inert and the flag is not reachable behind the frozen sat.mli — so the
+   upper bound guards the ruling instead.) *)
+let test_reducedb_engagement () =
   let s = php_solver 7 in
   let r = Sat.solve s in
   let st = Sat.stats s in
-  check "reduce/restart-engage: PHP(8,7) unsat" (r = Sat.Unsat);
+  let c = st.Sat.Stats.conflicts in
+  check "reduce-engage: PHP(8,7) unsat" (r = Sat.Unsat);
+  check
+    (Printf.sprintf "reduce-engage: conflicts %d > 3800 (reduceDB firing; off → 3437)" c)
+    (c > 3800);
   check
     (Printf.sprintf
-       "reduce/restart-engage: conflicts %d > 15000 (both mechanisms firing)"
-       st.Sat.Stats.conflicts)
-    (st.Sat.Stats.conflicts > 15000)
+       "reduce-engage: conflicts %d < 10000 (adaptive restart OFF per ruling B; on → \
+        31518)"
+       c)
+    (c < 10000)
 ;;
 
 let () =
   test_lbd_of_levels ();
   test_rephase_engagement ();
-  test_reducedb_restart_engagement ();
+  test_reducedb_engagement ();
   test_reduce_deletions_protects_glue ();
   test_reduce_deletions_worst_half_and_locked ();
   test_rephase_schedule ();
