@@ -69,11 +69,27 @@ let try_sat ctx (q : Ast.query) (m : Model.t) : attempt =
   in
   match attempt "decide" with
   | `Proved t -> `Proved t
-  | `Gaveup _ -> attempt "native_decide" (* NOTES.md: decide can blow up; fall back *)
-  | other -> other
+  (* [decide] reduces in the kernel; on a large concrete model it can blow up (NOTES.md:
+     Gaveup) OR run out the budget (Timeout). [native_decide] compiles the SAME decision
+     procedure, so escalate on either failure — recovering certifications a bare-Gaveup
+     fallthrough silently dropped to Inconclusive. Bounded: exactly ONE escalation, only
+     on a decide failure, each attempt under the per-query timeout — it cannot burn
+     unbounded budget. native_decide is compiler-trusted (ADR-0006 Decision 3); the
+     succeeding tactic name rides out in the outcome so the tier is auditable. *)
+  | `Gaveup _ | `Timeout -> attempt "native_decide"
+  | `Encode _ as other -> other
 ;;
 
 (* ---- certification per claim ---- *)
+
+(* Trust-honest phrasing for the tactic that discharged a goal (ADR-0006 Decision 3):
+   [native_decide] trusts the compiler + [Lean.ofReduceBool] axiom, so it is NOT
+   kernel-checked; [grind]/[decide]/[omega] emit kernel-checked proof terms. Used in
+   REFUTED detail so a compiler-trusted witness is never mislabelled kernel-checked. *)
+let trust_phrase = function
+  | "native_decide" -> "compiler-checked"
+  | _ -> "kernel-checked"
+;;
 
 let refute_with_witness ctx q model_opt ~default : Outcome.t =
   match model_opt with
@@ -81,14 +97,17 @@ let refute_with_witness ctx q model_opt ~default : Outcome.t =
     (match try_sat ctx q m with
      | `Proved tac ->
        Outcome.Refuted
-         (Printf.sprintf "assertions satisfiable, witness kernel-checked by %s" tac)
+         (Printf.sprintf
+            "assertions satisfiable, witness %s by %s"
+            (trust_phrase tac)
+            tac)
      | _ -> default)
   | None -> default
 ;;
 
 let certify_unsat ctx q model_opt : Outcome.t =
   match try_unsat ctx q with
-  | `Proved _ -> Certified
+  | `Proved tac -> Certified tac
   | `Encode m -> Encode_error m
   | `Timeout ->
     refute_with_witness ctx q model_opt ~default:(Inconclusive "grind timed out")
@@ -101,9 +120,11 @@ let certify_sat ctx q model_opt : Outcome.t =
   | None -> Inconclusive "sat claim but no .model sidecar supplied"
   | Some m ->
     (match try_sat ctx q m with
-     | `Proved _ -> Certified
+     | `Proved tac -> Certified tac
      | `Encode s -> Encode_error s
-     | `Timeout -> Inconclusive "model check (decide) timed out"
+     (* decide AND its native_decide escalation both timed out (try_sat). Kept out of the
+        cache (should_cache), so a larger --timeout re-tries from scratch. *)
+     | `Timeout -> Inconclusive "model check timed out (decide, then native_decide)"
      | `Gaveup s ->
        (* the supplied model did not check; is the query actually unsat? *)
        (match try_unsat ctx q with
@@ -985,6 +1006,24 @@ let cmd_selftest () =
         | Cache.Hit o -> "Hit " ^ Outcome.tag o
         | Cache.Absent -> "Absent"
         | Cache.Unreadable m -> "Unreadable " ^ m));
+  (* (1b) CERTIFIED carries its tactic as the trust-tier provenance (#86): a compiler-
+     trusted [native_decide] must round-trip verbatim, so STATUS can separate it from the
+     kernel-checked tiers. A bare [Certified] that dropped the detail would read back as
+     [Certified ""] and fail this. *)
+  let ckey = dummy "9c0ffee5deadbeefcafef00d1234567890abcdef0123456789abcdef01234567" in
+  Cache.store ~dir:cache_dir ckey ~claim:"sat" (Outcome.Certified "native_decide");
+  (match Cache.lookup ~dir:cache_dir ~claim:"sat" ckey with
+   | Cache.Hit (Outcome.Certified "native_decide") ->
+     print_endline "cache tier round-trip: OK (CERTIFIED tactic preserved)"
+   | other ->
+     ok := false;
+     Printf.printf
+       "cache tier round-trip: FAIL (expected Hit (Certified native_decide), got %s)\n"
+       (match other with
+        | Cache.Hit o ->
+          Printf.sprintf "Hit %s detail=%S" (Outcome.tag o) (Outcome.detail o)
+        | Cache.Absent -> "Absent"
+        | Cache.Unreadable m -> "Unreadable " ^ m));
   (* (2) absent key -> clean Absent, not a read-error. *)
   (match Cache.lookup ~dir:cache_dir ~claim:"unsat" (dummy "0000nope") with
    | Cache.Absent -> print_endline "cache absent-key: OK (clean miss, not a read-error)"
@@ -1052,7 +1091,7 @@ let cmd_selftest () =
   flip_test
     "certified->refuted"
     ~claim:"unsat"
-    ~stored:Outcome.Certified
+    ~stored:(Outcome.Certified "decide")
     ~needle:"(outcome CERTIFIED)"
     ~repl:"(outcome REFUTED)";
   (* (10) integrity-preimage injectivity (codex round-3 LOW): two content tuples that

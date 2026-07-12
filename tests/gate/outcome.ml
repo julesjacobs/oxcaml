@@ -6,7 +6,11 @@
    opposite claim (see NOTES.md). *)
 
 type t =
-  | Certified
+  | Certified of string
+    (* the tactic that discharged the goal — the trust-tier provenance (ADR-0006 Decision
+       3): [native_decide] is compiler-trusted (Lean.ofReduceBool axiom + compiler),
+       everything else ([grind]/[decide]/[omega]) is kernel-checked. Carried so STATUS can
+       report the kernel-vs-compiler tier mix honestly. *)
   | Refuted of string (* how it was refuted *)
   | Inconclusive of string
   | Encode_error of string
@@ -15,7 +19,7 @@ type t =
   | No_status
 
 let tag = function
-  | Certified -> "CERTIFIED"
+  | Certified _ -> "CERTIFIED"
   | Refuted _ -> "REFUTED"
   | Inconclusive _ -> "INCONCLUSIVE"
   | Encode_error _ -> "ENCODE_ERROR"
@@ -25,8 +29,13 @@ let tag = function
 ;;
 
 let detail = function
-  | Certified | No_status -> ""
-  | Refuted s | Inconclusive s | Encode_error s | Malformed s | Unsupported s -> s
+  | No_status -> ""
+  | Certified s
+  | Refuted s
+  | Inconclusive s
+  | Encode_error s
+  | Malformed s
+  | Unsupported s -> s
 ;;
 
 (* A ship-stopping outcome blocks the gate (DESIGN.md §8 verdict asymmetry). *)
@@ -36,14 +45,14 @@ let is_ship_stopper = function
 ;;
 
 let is_certified = function
-  | Certified -> true
+  | Certified _ -> true
   | _ -> false
 ;;
 
 (* Exit code for the single-file [certify] subcommand. Malformed vs Unsupported get
    distinct codes (DESIGN task: "exit code distinguishes unsupported from malformed"). *)
 let exit_code = function
-  | Certified -> 0
+  | Certified _ -> 0
   | Refuted _ | Encode_error _ -> 1 (* ship-stopper / encoder bug *)
   | Inconclusive _ -> 2
   | Malformed _ -> 3

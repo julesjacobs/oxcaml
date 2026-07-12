@@ -102,7 +102,7 @@ let atom s =
    [None] to [Unreadable] (counted, re-certified via Lean) — never a Hit of any class. *)
 let outcome_of tag detail : Outcome.t option =
   match tag with
-  | "CERTIFIED" -> Some Certified
+  | "CERTIFIED" -> Some (Certified detail)
   | "REFUTED" -> Some (Refuted detail)
   | "INCONCLUSIVE" -> Some (Inconclusive detail)
   | "ENCODE_ERROR" -> Some (Encode_error detail)
