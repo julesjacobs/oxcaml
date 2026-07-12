@@ -48,8 +48,12 @@ echo "dump exit=$? size=$DUMPSZ"
 [ "${DUMPSZ:-0}" -gt 0 ] 2>/dev/null || fallback "bake dump empty (reserve absent or dump failed)"
 
 echo "=== 2. reserve section size vs dump size (must be equal for in-place update) ==="
-SECSZ=$(readelf -SW "$BIN" \
-  | awk -v s="$SEC" 'index($0,s){for(i=1;i<=NF;i++) if($i==s){print strtonum("0x"$(i+4)); exit}}')
+SECHEX=$(readelf -SW "$BIN" \
+  | awk -v s="$SEC" 'index($0,s){for(i=1;i<=NF;i++) if($i==s){print $(i+4); exit}}')
+# readelf prints the size in hex without 0x; convert in bash (strtonum is gawk-only
+# and its absence would silently install the unbaked fallback on every build).
+SECSZ=""
+[ -n "$SECHEX" ] && SECSZ=$((16#$SECHEX))
 echo "section=${SECSZ:-<absent>} dump=$DUMPSZ"
 [ -n "$SECSZ" ] || fallback "reserve section $SEC absent"
 [ "$SECSZ" = "$DUMPSZ" ] || fallback "reserve size $SECSZ != dump size $DUMPSZ"

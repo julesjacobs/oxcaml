@@ -37,7 +37,9 @@
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#if defined(__ELF__)
 #include <link.h>
+#endif
 
 struct caml_frame_descrs {
   int num_descr;
@@ -331,6 +333,11 @@ struct frame_cache_hdr {
   uint64_t num_descr;
   uint64_t cap;             /* = mask + 1, length of the descriptors array */
   uint64_t checksum;        /* FNV-1a over the [cap] descriptor words */
+  uint64_t anchor;          /* &caml_baked_frametable at bake time: the stored
+                               descriptors are absolute pointers, so any change
+                               of load bias (PIE/ASLR relink or a dynamic
+                               loader placing the image elsewhere) must reject
+                               the bake; build-id+checksum cannot catch it. */
   uint32_t build_id_len;
   unsigned char build_id[FRAME_BUILD_ID_MAX];
 };
@@ -339,6 +346,7 @@ struct frame_cache_hdr {
    half of the staleness guard (a cache from any other build is rejected). */
 struct frame_buildid { unsigned char id[FRAME_BUILD_ID_MAX]; uint32_t len; };
 
+#if defined(__ELF__)
 static int frame_buildid_cb(struct dl_phdr_info *info, size_t sz, void *data)
 {
   (void) sz;
@@ -370,6 +378,11 @@ static void frame_get_buildid(struct frame_buildid *out)
   out->len = 0;
   dl_iterate_phdr(frame_buildid_cb, out);
 }
+#else
+/* Non-ELF targets: no build-id and no bake (see the gates in
+   frame_baked_load/dump); the stub keeps the call sites compiling. */
+static void frame_get_buildid(struct frame_buildid *out) { out->len = 0; }
+#endif /* __ELF__ */
 
 static uint64_t frame_checksum(frame_descr **d, intnat cap)
 {
@@ -402,7 +415,7 @@ static uint64_t frame_checksum(frame_descr **d, intnat cap)
 /* in only the buckets actually probed (true lazy fault, lower RSS). The       */
 /* checksum is still stored and verified on demand via CAML_FRAME_BAKE_VERIFY. */
 
-#define FRAME_BAKED_MAGIC 0x314b424d5246584full /* "OXFRMBK1" */
+#define FRAME_BAKED_MAGIC 0x324b424d5246584full /* "OXFRMBK2" (v2: adds the load-bias anchor) */
 #define FRAME_BAKED_BODY_OFF 4096u               /* body page-aligned for faulting */
 #define FRAME_BAKED_CAP_MAX (1u << 19)           /* 524288 slots = 4 MB */
 #define FRAME_BAKED_RESERVE \
@@ -424,12 +437,20 @@ extern unsigned char caml_baked_frametable[] __attribute__((weak));
    validated hit. Any mismatch returns 0 so the caller rebuilds normally. */
 static int frame_baked_load(caml_frametable_list *fts, int verify)
 {
+#if !defined(__ELF__)
+  /* The bake is ELF-only: it relies on the GNU build-id and on the ELF
+     section/objcopy pipeline. Non-ELF targets always rebuild. */
+  (void) fts; (void) verify;
+  return 0;
+#else
   /* Weak-null check FIRST: if this binary was linked without the reserve
      object, the symbol is NULL and there is no baked table — rebuild. */
   if (caml_baked_frametable == NULL) return 0;
   struct frame_cache_hdr *h =
     (struct frame_cache_hdr *) (void *) caml_baked_frametable;
   if (h->magic != FRAME_BAKED_MAGIC) return 0;
+  if (h->anchor != (uint64_t)(uintnat) caml_baked_frametable)
+    return 0; /* load bias differs from bake time (PIE/ASLR): pointers stale */
   intnat num_descr = count_descriptors(fts);
   if (h->num_descr != (uint64_t) num_descr) return 0;
   if (h->cap == 0 || (h->cap & (h->cap - 1)) != 0) return 0; /* power of 2 */
@@ -451,6 +472,7 @@ static int frame_baked_load(caml_frametable_list *fts, int verify)
   current_frame_descrs.frametables = fts;
   frame_descrs_from_cache = 1; /* copy-out-on-mutation via ensure_heap_descriptors */
   return 1;
+#endif /* __ELF__ */
 }
 
 /* Bake step: serialize the freshly-built table into [path] as the exact
@@ -459,6 +481,10 @@ static int frame_baked_load(caml_frametable_list *fts, int verify)
    then patches this into the binary. Failures are reported but non-fatal. */
 static void frame_baked_dump(const char *path)
 {
+#if !defined(__ELF__)
+  (void) path;
+  fprintf(stderr, "[frame] bake: unsupported on non-ELF targets\n");
+#else
   intnat cap = capacity(current_frame_descrs);
   if (FRAME_BAKED_BODY_OFF + (size_t) cap * sizeof(frame_descr *)
       > FRAME_BAKED_RESERVE) {
@@ -475,6 +501,7 @@ static void frame_baked_dump(const char *path)
   h->num_descr = (uint64_t) current_frame_descrs.num_descr;
   h->cap = (uint64_t) cap;
   h->checksum = frame_checksum(current_frame_descrs.descriptors, cap);
+  h->anchor = (uint64_t)(uintnat) caml_baked_frametable;
   struct frame_buildid bid;
   frame_get_buildid(&bid);
   h->build_id_len = bid.len;
@@ -489,6 +516,7 @@ static void frame_baked_dump(const char *path)
   }
   caml_stat_free(img);
   if (!ok) fprintf(stderr, "[frame] bake: failed to write %s\n", path);
+#endif /* __ELF__ */
 }
 
 void caml_init_frame_descriptors(void)
