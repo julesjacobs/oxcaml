@@ -1,9 +1,44 @@
 # Cert step 2 — replay CHECKER — FREEZE report
 
-**Branch** `task/cert-step2` · **RE-FROZEN after fix round** (off trunk `oxsmt` @ 167a305f2a) ·
-awaiting delta re-verify (same-model + codex) + Lean gate. Fix-round sha in the SendMessage.
+**Branch** `task/cert-step2` · **RE-FROZEN after fix round (both legs folded)** (off trunk
+`oxsmt` @ 167a305f2a) · awaiting the single delta re-verify + Lean gate. Fix-tip sha in the
+SendMessage.
 
-## Fix round (reviewer REJECT — CRIT-1 accept-invalid + MED-1), append-only on b34096472bb
+## Fix round part 2 (codex batch — C2/H4/H3/M5/M6), append-only on the CRIT-1/MED-1 tip
+
+The codex leg independently CONFIRMED the self-citing CRITICAL (its C1 = same-model CRIT-1;
+the verified-id gate covers both) and added five items. All landed in this same round; each
+adversarial stream reproduced RED (VALID/accept-invalid, or over-reject) against the pre-fix
+tip, then flipped after the fix. The two legs certified SAT queries as unsat four ways
+(self-cite, mutual-ref, empty-Reason, ambiguous-admission) — every one is now INVALID.
+
+- **C2 [CRITICAL] — FIXED.** An empty theory `Reason` clause was admitted into the axiom DB
+  as a fabricated ⊥ (`guard_theory_leaf` guarded only the empty-`Conflict` role), refuting a
+  SAT query. Now an empty `Reason` = **INVALID** (malformed — a Reason must carry its implied
+  literal at slot 0); empty `Conflict` stays `Unsupported` per ADR Rev 6. Test: theory Reason
+  `[||]` + `Failed_assumption []` on SAT query `{a}` → INVALID.
+- **H4 [HIGH→CRITICAL] — FIXED.** The axiom DB admitted all clauses regardless of id
+  ambiguity — a spurious clause under a duplicate id was trusted and poisoned BCP even when
+  its id was never cited. Ambiguous content ids are now rejected at **stream admission**
+  (`build_index` returns the ambiguous-id list; `check` fails closed before building the DB),
+  not only at citation. Test: id 10 = `[a]` (SAT query) + spurious `[¬a]`, `Failed_assumption
+  []` → INVALID.
+- **H3 [HIGH] — FIXED.** `ordered_rup` returned `Ok` on the first falsified hint without
+  validating the trailing antecedent ids. Now every antecedent id is validated (resolve +
+  learned-verified) over the **full list up front**, before propagation, so a forged/dangling
+  tail is caught even after an early conflict. Test: `[10;11;12;999]` (999 after the 12 that
+  conflicts) → INVALID.
+- **M5 [MED] — FIXED.** Duplicate raw literals `[a;a]` defeated unit detection and
+  OVER-rejected a valid cert. Clauses are dedup-normalized at ingest (`dedup_clause` at the
+  index, the axiom DB, and learned folds). Test: input `[a;a]` + `[¬a]`, `Root_empty` → VALID.
+- **M6 [MED] — DONE.** Added `exploit_ambiguous_admission`, a clean discriminator that
+  triggers ONLY on the #153a ambiguity guard (via H4's admission check); `high4_ambiguous`
+  (the real cross-solver case) now also rejects via that guard.
+
+Post part-2: `checker_test` 40/40, `cert_emit_test` 51/51, corpus gate 24/24 VALID, frozen
+14/14, `@fmt` clean. sat.mli untouched.
+
+## Fix round part 1 (reviewer REJECT — CRIT-1 accept-invalid + MED-1), append-only on b34096472bb
 
 - **CRIT-1 (the demonstrated accept-invalid) — FIXED.** Learned-clause ordered RUP resolved
   antecedent hint ids against the GLOBAL event index, so a learned clause could cite ITSELF

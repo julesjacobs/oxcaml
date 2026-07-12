@@ -61,8 +61,18 @@ type resolution =
   | Dangling
   | Ambiguous
 
-(* id -> (kind, clause), with a separate ambiguity set: a content id emitted by two
-   distinct events (any kinds) is poisoned to [Ambiguous]. *)
+(* Duplicate raw literals defeat unit detection (a [a;a] clause looks 2-free), which would
+   OVER-reject a valid cert (codex M5). Normalize every clause to a duplicate-free literal
+   set at ingest; falsification/RUP/BCP all consume the normalized form. *)
+let dedup_clause (c : Sat.lit array) : Sat.lit array =
+  Array.of_list (List.sort_uniq compare (Array.to_list c))
+;;
+
+(* id -> (kind, clause), plus the list of AMBIGUOUS content ids (an id emitted by two
+   distinct content events, any kinds — the cross-solver misuse). Ambiguity is rejected at
+   STREAM ADMISSION, not only when cited (codex H4): otherwise a spurious clause under a
+   duplicate id is silently admitted to the axiom DB and poisons BCP even though its id is
+   never cited. Stored clauses are dedup-normalized (M5). *)
 let build_index ev =
   let by_id = Hashtbl.create 256 in
   let ambiguous = Hashtbl.create 16 in
@@ -77,22 +87,26 @@ let build_index ev =
   in
   List.iter
     (fun (e : Recorder.input_event) ->
-       add e.Recorder.id (Kinput e.Recorder.origin, e.Recorder.clause))
+       add e.Recorder.id (Kinput e.Recorder.origin, dedup_clause e.Recorder.clause))
     ev.inputs;
   List.iter
-    (fun (e : Recorder.learned_event) -> add e.Recorder.id (Klearned, e.Recorder.clause))
+    (fun (e : Recorder.learned_event) ->
+       add e.Recorder.id (Klearned, dedup_clause e.Recorder.clause))
     ev.learned;
   List.iter
     (fun (e : Recorder.theory_event) ->
-       add e.Recorder.id (Ktheory e.Recorder.role, e.Recorder.clause))
+       add e.Recorder.id (Ktheory e.Recorder.role, dedup_clause e.Recorder.clause))
     ev.theory;
-  fun id ->
+  let resolve id =
     if Hashtbl.mem ambiguous id
     then Ambiguous
     else (
       match Hashtbl.find_opt by_id id with
       | Some (k, c) -> Found (k, c)
       | None -> Dangling)
+  in
+  let ambiguous_ids = Hashtbl.fold (fun id () acc -> id :: acc) ambiguous [] in
+  resolve, ambiguous_ids
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -234,62 +248,83 @@ end
    accept-invalid north star). Inputs / theory leaves have no such ordering and resolve
    per their own rules. *)
 let ordered_rup base ~clause ~antecedents ~resolve ~learned_verified =
-  let a : assign = Hashtbl.copy base in
-  let conflict = ref false in
-  List.iter
-    (fun l ->
-       if (not !conflict) && set_true a (Sat.neg_lit l) = `Conflict then conflict := true)
-    (Array.to_list clause);
-  if !conflict
-  then Ok () (* negating the clause already contradicts the closure: it is entailed *)
-  else (
-    let rec go = function
-      | [] -> Error "RUP chain consumed without deriving a conflict"
-      | id :: rest ->
-        (match (resolve id : resolution) with
-         | Ambiguous ->
-           Error
-             (Printf.sprintf "antecedent id %d is ambiguous (two clauses share it)" id)
-         | Dangling ->
-           Error (Printf.sprintf "antecedent id %d resolves to no content clause" id)
-         | Found (Klearned, _) when not (learned_verified id) ->
-           Error
-             (Printf.sprintf
-                "antecedent id %d cites a learned clause that is not yet verified (a \
-                 self- or forward/circular citation)"
-                id)
-         | Found (_kind, hint) ->
-           let satisfied = ref false
-           and unassigned = ref [] in
-           Array.iter
-             (fun l ->
-                match lit_status a l with
-                | LTrue -> satisfied := true
-                | LFalse -> ()
-                | LUnassigned -> unassigned := l :: !unassigned)
-             hint;
-           if !satisfied
-           then
-             Error
-               (Printf.sprintf
-                  "hint %d is already satisfied, not unit (chain is not ordered-RUP)"
-                  id)
-           else (
-             match !unassigned with
-             | [] -> Ok () (* falsified: conflict reached *)
-             | [ l ] ->
-               (match set_true a l with
-                | `Conflict -> Ok () (* propagation conflicts: conflict reached *)
-                | `Ok -> go rest)
-             | more ->
+  (* Every antecedent id must resolve to a content clause and, if learned, be ALREADY
+     verified — validated over the FULL list up front (codex H3), so a forged / dangling /
+     unverified id in the TAIL is caught even when propagation reaches a conflict early
+     and would otherwise stop before consuming it. *)
+  let validate_id id =
+    match (resolve id : resolution) with
+    | Ambiguous ->
+      Error (Printf.sprintf "antecedent id %d is ambiguous (two clauses share it)" id)
+    | Dangling ->
+      Error (Printf.sprintf "antecedent id %d resolves to no content clause" id)
+    | Found (Klearned, _) when not (learned_verified id) ->
+      Error
+        (Printf.sprintf
+           "antecedent id %d cites a learned clause that is not yet verified (a self- or \
+            forward/circular citation)"
+           id)
+    | Found _ -> Ok ()
+  in
+  match
+    List.find_map
+      (fun id ->
+         match validate_id id with
+         | Error e -> Some e
+         | Ok () -> None)
+      antecedents
+  with
+  | Some e -> Error e
+  | None ->
+    let a : assign = Hashtbl.copy base in
+    let conflict = ref false in
+    List.iter
+      (fun l ->
+         if (not !conflict) && set_true a (Sat.neg_lit l) = `Conflict
+         then conflict := true)
+      (Array.to_list clause);
+    if !conflict
+    then Ok () (* negating the clause already contradicts the closure: it is entailed *)
+    else (
+      let rec go = function
+        | [] -> Error "RUP chain consumed without deriving a conflict"
+        | id :: rest ->
+          (* ids are pre-validated above; [resolve] here only fetches the clause. *)
+          (match (resolve id : resolution) with
+           | Ambiguous | Dangling ->
+             Error (Printf.sprintf "antecedent id %d unresolved (unreachable)" id)
+           | Found (_kind, hint) ->
+             let satisfied = ref false
+             and unassigned = ref [] in
+             Array.iter
+               (fun l ->
+                  match lit_status a l with
+                  | LTrue -> satisfied := true
+                  | LFalse -> ()
+                  | LUnassigned -> unassigned := l :: !unassigned)
+               hint;
+             if !satisfied
+             then
                Error
                  (Printf.sprintf
-                    "hint %d is not unit (%d free literals) — hint-restricted RUP \
-                     refuses to search"
-                    id
-                    (List.length more))))
-    in
-    go antecedents)
+                    "hint %d is already satisfied, not unit (chain is not ordered-RUP)"
+                    id)
+             else (
+               match !unassigned with
+               | [] -> Ok () (* falsified: conflict reached *)
+               | [ l ] ->
+                 (match set_true a l with
+                  | `Conflict -> Ok () (* propagation conflicts: conflict reached *)
+                  | `Ok -> go rest)
+               | more ->
+                 Error
+                   (Printf.sprintf
+                      "hint %d is not unit (%d free literals) — hint-restricted RUP \
+                       refuses to search"
+                      id
+                      (List.length more))))
+      in
+      go antecedents)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -311,6 +346,13 @@ let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Reject (Unsupported s)))
    own reviewed tranche. *)
 let guard_theory_leaf kind clause =
   match kind with
+  | Ktheory Sat.Reason when Array.length clause = 0 ->
+    (* codex C2: an empty Reason clause admitted to the axiom DB is a fabricated ⊥ that
+       refutes anything. A Reason is the propagation clause [p ∨ ¬p₁ ∨ … ∨ ¬pₖ] with the
+       implied literal at slot 0 (sat.mli), so an empty one is MALFORMED — Invalid. *)
+    rejectf
+      "empty theory Reason clause — malformed (a Reason must carry its implied literal \
+       at slot 0)"
   | Ktheory Sat.Conflict when Array.length clause = 0 ->
     unsupportedf
       "empty theory Conflict clause (unconditional T_conflict []) — no v1 leaf witnesses \
@@ -320,7 +362,18 @@ let guard_theory_leaf kind clause =
 
 let check ev =
   try
-    let resolve = build_index ev in
+    let resolve, ambiguous_ids = build_index ev in
+    (* codex H4: reject ambiguity at STREAM ADMISSION — an id shared by two content
+       clauses makes BOTH untrustworthy, and one would otherwise be admitted to the axiom
+       DB and poison BCP even if its id is never cited. Fail closed before anything is
+       trusted. *)
+    (match ambiguous_ids with
+     | [] -> ()
+     | ids ->
+       rejectf
+         "ambiguous content id(s) [%s] — each is emitted by two distinct clauses (a \
+          cross-solver stream); rejected at admission"
+         (String.concat "; " (List.map string_of_int (List.sort compare ids))));
     (* a cited id must resolve to a content event of an ALLOWED kind. *)
     let resolve_as ~what ~allowed id =
       match (resolve id : resolution) with
@@ -354,10 +407,14 @@ let check ev =
     let bcp = Bcp.create () in
     Bcp.add_axioms
       bcp
-      (List.map (fun (e : Recorder.input_event) -> e.Recorder.clause) ev.inputs);
+      (List.map
+         (fun (e : Recorder.input_event) -> dedup_clause e.Recorder.clause)
+         ev.inputs);
     Bcp.add_axioms
       bcp
-      (List.map (fun (e : Recorder.theory_event) -> e.Recorder.clause) ev.theory);
+      (List.map
+         (fun (e : Recorder.theory_event) -> dedup_clause e.Recorder.clause)
+         ev.theory);
     Bcp.propagate bcp;
     (* (b) every declared level-0 unit is inside the re-derived axiom closure. *)
     List.iter
@@ -381,14 +438,14 @@ let check ev =
          match
            ordered_rup
              (Bcp.snapshot bcp)
-             ~clause:le.Recorder.clause
+             ~clause:(dedup_clause le.Recorder.clause)
              ~antecedents:le.Recorder.antecedents
              ~resolve
              ~learned_verified
          with
          | Ok () ->
            Hashtbl.replace verified le.Recorder.id ();
-           Bcp.add_learned bcp le.Recorder.clause
+           Bcp.add_learned bcp (dedup_clause le.Recorder.clause)
          | Error reason ->
            rejectf
              "learned clause (id %d) fails ordered-RUP replay: %s"

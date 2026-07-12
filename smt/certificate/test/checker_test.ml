@@ -385,6 +385,50 @@ let exploit_mutual : Checker.events =
   }
 ;;
 
+(* C2 (codex, CRITICAL): an EMPTY theory Reason clause is admitted into the axiom DB as ⊥
+   (guard_theory_leaf guarded only the empty-Conflict role), so BCP finds an immediate
+   conflict and a SAT query is certified unsat. A Reason must carry its implied literal at
+   slot 0 — an empty Reason is malformed → INVALID. Query [{a}] is SAT. *)
+let exploit_empty_reason : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; units = []
+  ; learned = []
+  ; theory = [ ({ id = 30; clause = [||]; role = Sat.Reason } : Recorder.theory_event) ]
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* H4 (codex, HIGH→CRITICAL): a spurious clause sharing an id with a real one is admitted
+   to the axiom DB even though the ambiguity is NEVER cited, poisoning BCP. Here id 10
+   carries both [a] (the real, SAT query [{a}]) and a spurious [¬a]; the E3 terminal cites
+   nothing, so the ambiguity slips past citation-time resolution and BCP refutes a SAT
+   query. Ambiguous content ids must be rejected at STREAM ADMISSION. Triggers ONLY on
+   ambiguity (M6: a clean discriminator of the #153a admission guard). *)
+let exploit_ambiguous_admission : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 10 [| na_ |] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* M5 (codex): duplicate raw literals defeat unit detection, OVER-rejecting a valid cert.
+   Input id10 [a;a] is really the unit [a]; without dedup it is seen as 2-free and never
+   propagated, so [¬a] (id11) is not falsified and Root_empty spuriously fails. Post-fix
+   (dedup at ingest) this is VALID. *)
+let overreject_dup_lit : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_; a_ |]; mk_input 11 [| na_ |] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Root_empty { input_id = 11 })
+  ; assumptions = []
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 
 let () =
@@ -488,6 +532,25 @@ let () =
     "corrupt: mutually-referential learned clauses (sat query) -> INVALID"
     `Invalid
     exploit_mutual;
+  (* H3 (codex): ordered_rup must validate the FULL antecedent list even after an early
+     falsification — a forged/dangling id in the TAIL (here 999 after the 12 that already
+     conflicts) must not slip through. *)
+  expect
+    "corrupt: dangling antecedent AFTER early conflict -> INVALID"
+    `Invalid
+    (handbuilt ~learned_ants:[ 10; 11; 12; 999 ] ());
+  (* C2 (codex, CRITICAL): empty theory Reason clause admitted as ⊥ -> a SAT query VALID. *)
+  expect "corrupt: empty theory Reason clause -> INVALID" `Invalid exploit_empty_reason;
+  (* H4 (codex, HIGH->CRITICAL): ambiguous content id admitted to the DB (never cited) ->
+     a SAT query VALID. Must be rejected at stream admission. Also the M6 clean
+     discriminator of the #153a ambiguity guard (only ambiguity triggers). *)
+  expect
+    "corrupt: ambiguous content id at admission -> INVALID"
+    `Invalid
+    exploit_ambiguous_admission;
+  (* M5 (codex): duplicate raw literals must NOT over-reject a valid cert (dedup at
+     ingest). *)
+  expect "positive: duplicate raw literals do not over-reject" `Valid overreject_dup_lit;
   (* UNSUPPORTED extension point: an empty theory Conflict leaf (unconditional T_conflict
      [], ADR-0013 Rev 6) has no v1 leaf witness for ⊥-from-∅ — the checker fails closed to
      UNSUPPORTED, never VALID. Hand-built: the terminal cites the empty theory conflict. *)
