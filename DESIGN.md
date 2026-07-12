@@ -739,3 +739,37 @@ touched reviewed/TCB hunk, or a conflict resolution gets the full
 re-test, and a moved reviewed hunk still triggers the scoped re-review.
 The point of the exact-sha discipline is semantic-conflict defense, not
 ceremony — spend it where that risk exists.
+
+### A3 — Agent context economics and rotation (2026-07-12, design author)
+
+Agents run on a 1M-token context window, but context is not free: near the
+limit a single tool call costs on the order of a dollar (the full window is
+re-read on every cache miss), and reasoning quality degrades as the window
+fills. Auto-compaction rescues a stuck agent but is lossy and uncontrolled.
+The fleet therefore treats context as a budget to be spent deliberately:
+
+- **Default: a fresh agent per task.** Spawn new agents for new tasks
+  unless the incumbent's accumulated context is *definitely* useful for
+  the specific dispatch — e.g. a builder mid-way through the very arc in
+  question, or a specialist whose load-bearing knowledge is not yet
+  written down. "Vaguely familiar with the area" does not qualify;
+  on-disk artifacts (ADRs, logs/ memos, probe plans, design notes,
+  runbooks) are the durable memory, and the habit of writing everything
+  down is precisely what makes fresh spawns cheap.
+- **Rotation thresholds by role.** General ceiling: do not dispatch new
+  work to an agent past ~50% of the window; rotate at the next task
+  boundary. Roles whose history carries little forward value get much
+  tighter budgets — e.g. a codex-driver (whose job is mediating scoped
+  external-review sessions) should not run past ~20%; spawn a fresh
+  driver per review arc. Long-lived coordination roles (integrator)
+  rotate via an explicit handoff runbook committed to logs/.
+- **Never interrupt mid-task to rotate** — mid-task compaction is
+  survivable; rotate at boundaries. Never resume a dormant high-fill
+  agent for new work.
+- **Monitoring:** `check-agent-context.py` (repo root, outside the
+  reviewed tree) reads each subagent transcript's latest usage entry and
+  flags ROTATE ≥50% / CRITICAL ≥80%; the orchestrator runs it
+  periodically and plans rotations from it.
+- **Sizing dispatches:** a task should fit in the agent's remaining
+  headroom without crossing the ceiling; if it can't, split the task or
+  start fresh.

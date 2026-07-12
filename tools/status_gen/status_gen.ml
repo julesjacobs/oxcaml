@@ -1134,7 +1134,15 @@ let () =
          "- **‼ CORPUS SOUNDNESS BREACH:** %d verdict mismatch(es) vs the pre-labeled \
           corpus — ship-stopping (DESIGN.md §8).\n"
          cs.mismatch_count;
-     out "- **Corpus solved-rate (committed pre-adapter baseline) — the headline:**\n";
+     let baseline_kind =
+       if starts_with ~prefix:"79fd661" cs.c_trunk
+       then "pre-adapter baseline"
+       else "post-adapter measurement"
+     in
+     out
+       "- **Corpus solved-rate (committed %s, trunk %s) — the headline:**\n"
+       baseline_kind
+       cs.c_trunk;
      List.iter
        (fun l ->
           let pct = if l.scanned = 0 then 0 else 100 * l.solved / l.scanned in
