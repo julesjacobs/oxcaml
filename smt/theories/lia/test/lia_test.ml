@@ -607,6 +607,55 @@ let test_overflow () =
 ;;
 
 (* ================================================================== *)
+(* R1 fixture (b) — the B&B BRANCH-BOUND int-projection sink (design R1 acceptance
+   prerequisite (b)). Pairs with test_overflow's (a), the SAT-Big-MODEL-value sink. Here
+   the OTHER R1 sink fires: [Rational.floor] at the branch point. Construction — pin x0 =
+   0; promote x1 = x0 + min_int = -2^62 and x2 = x1 + min_int = -2^63 (Big integers, via
+   the min_int-const equality promotion, same mechanism as the L5 case); then 2·x3 + 1 =
+   x2, so x3 = -(2^63+1)/2 = -2^62 - 1/2 — a Big NON-integer whose floor (-2^62 - 1) is
+   BELOW min_int, i.e. does not fit int63. B&B must branch on x3 (the only non-integer),
+   and flooring it hits the R1 branch-bound sink → degrade to [Int_unknown], never a
+   truncated bound or wrong sat/unsat. *)
+
+let test_bb_big_branch_bound () =
+  print_endline "B&B Big branch-bound (R1 fixture b):";
+  let fx = make_fixture 4 in
+  let assert_eq lhs rhs_var =
+    let eq = Context.eq fx.ctx lhs fx.vars.(rhs_var) in
+    Lia.assert_atom fx.solver eq ~polarity:true ~premise:fx.next_tok;
+    fx.next_tok <- fx.next_tok + 1
+  in
+  (* pin x0 = 0 *)
+  ignore (assert_le fx [ 0, 1 ] 0 ~polarity:true);
+  ignore (assert_le fx [ 0, -1 ] 0 ~polarity:true);
+  (* x1 = x0 + min_int = -2^62 (promotes to Big) *)
+  assert_eq (Context.linear_combination fx.ctx [ 1, fx.vars.(0) ] min_int) 1;
+  (* x2 = x1 + min_int = -2^63 (Big) *)
+  assert_eq (Context.linear_combination fx.ctx [ 1, fx.vars.(1) ] min_int) 2;
+  (* 2·x3 + 1 = x2 ⇒ x3 = -(2^63+1)/2, a Big non-integer, floor below min_int *)
+  assert_eq (Context.linear_combination fx.ctx [ 2, fx.vars.(3) ] 1) 2;
+  (* the ℚ relaxation is feasible: internal growth PROMOTES (never raises, never poisons). *)
+  check
+    "R1(b): feasible relaxation, internal growth promotes (not poisoned)"
+    (match Lia.check fx.solver with
+     | Lia.Sat_candidate -> not (Lia.is_poisoned fx.solver)
+     | _ -> false
+     | exception _ -> false);
+  (* B&B branches on the Big non-integer x3; flooring it hits the R1 branch-bound sink. *)
+  let r = Lia.solve_integer fx.solver in
+  check
+    "R1(b): Big branch bound degrades to Int_unknown (no truncation, no wrong verdict)"
+    (r = Lia.Int_unknown);
+  check
+    "R1(b): the branch-bound projection overflow is counted"
+    (Lia.overflow_count fx.solver >= 1);
+  (* state-safe (I8): a fresh solver on a small problem is unaffected by the degrade. *)
+  let fx2 = make_fixture 1 in
+  ignore (assert_le fx2 [ 0, 1 ] (-3) ~polarity:true);
+  expect_sat fx2 "R1(b): fresh solver after branch-bound degrade works"
+;;
+
+(* ================================================================== *)
 (* Determinism (I6): identical inputs -> identical verdict, model, and pivot count. *)
 
 let build_sample_system () =
@@ -900,6 +949,7 @@ let () =
   test_codex_findings ();
   test_bruteforce ();
   test_overflow ();
+  test_bb_big_branch_bound ();
   test_determinism ();
   test_determinism_big ();
   Printf.printf "\nlia self-test: %d checks, %d failure(s)\n" !checks !failures;
