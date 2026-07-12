@@ -61,11 +61,6 @@ let is_overflow = function
   | _ -> false
 ;;
 
-let is_poisoned_exn = function
-  | Lia.Poisoned -> true
-  | _ -> false
-;;
-
 let q = Rational.of_int
 
 (* ================================================================== *)
@@ -167,17 +162,17 @@ let farkas_cancels fx premises mult =
   let const = ref Rational.zero in
   List.iter
     (fun lit ->
-       let coeffs, k = Hashtbl.find fx.hp lit in
-       let m = mult lit in
-       List.iter
-         (fun (i, c) ->
-            let cur =
-              try Hashtbl.find acc i with
-              | Not_found -> Rational.zero
-            in
-            Hashtbl.replace acc i (Rational.add cur (Rational.mul m (q c))))
-         coeffs;
-       const := Rational.add !const (Rational.mul m (q k)))
+      let coeffs, k = Hashtbl.find fx.hp lit in
+      let m = mult lit in
+      List.iter
+        (fun (i, c) ->
+          let cur =
+            try Hashtbl.find acc i with
+            | Not_found -> Rational.zero
+          in
+          Hashtbl.replace acc i (Rational.add cur (Rational.mul m (q c))))
+        coeffs;
+      const := Rational.add !const (Rational.mul m (q k)))
     premises;
   List.for_all (fun l -> Rational.sign (mult l) >= 0) premises
   && Hashtbl.fold (fun _ c ok -> ok && Rational.is_zero c) acc true
@@ -507,51 +502,50 @@ let test_push_pop () =
 ;;
 
 (* ================================================================== *)
-(* 5. CONTRACT-POISON: an engine overflow is surfaced as unknown (never a verdict). The
-   trigger (from lia_test): a near-max_int slack coefficient overflows during check's
-   pivot. *)
+(* 5. core-bignum W2: the system that used to overflow int63 during check's pivot now
+   PROMOTES to Big and the ℚ-simplex completes. The residual native-int ceiling is only
+   the OUTPUT projection (R1): the ℤ model binds y = -2·max_int (Big), so MODEL EXTRACTION
+   raises Rational.Overflow — which the session's build_model catch degrades to unknown
+   (never a truncated model). Adapter-level view of the R1 model-value sink. *)
 
 let mk_overflowing () =
   let fx = make_fixture 2 in
   ignore (assert_le fx [ 0, max_int; 1, 1 ] 0 ~polarity:true);
   (* max_int·x + y <= 0 *)
   ignore (assert_le fx [ 0, -1 ] 2 ~polarity:true);
-  (* -x + 2 <= 0 -> x >= 2; check's pivot then computes max_int·2 -> overflow *)
+  (* -x + 2 <= 0 -> x >= 2; the pivot computes max_int·2, which now PROMOTES (no overflow) *)
   fx
 ;;
 
 let test_poison () =
-  print_endline "poison / overflow -> unknown:";
-  (* The overflowing check raises Rational.Overflow (never a spurious Sat/Conflict),
-     counts the degradation, and bricks the instance. *)
+  print_endline "W2 promote + R1 model-value sink (adapter):";
+  (* check PROMOTES: no Rational.Overflow, no poison, nothing counted — the ℚ-simplex is
+     feasible and the pivot's max_int·2 grows to Big transparently. *)
   (let fx = mk_overflowing () in
+   let v = Lia_adapter.check fx.adapter Theory.Final in
+   check
+     "check Final PROMOTES to a real verdict (Sat/Split, no Overflow/poison)"
+     (match v with
+      | Theory.Sat | Theory.Split _ -> true
+      | _ -> false);
+   check
+     "no degradation counted (promotion, not an overflow ceiling)"
+     (Lia_adapter.overflows_to_unknown fx.adapter = 0);
+   check
+     "not poisoned (internal growth promotes, I8)"
+     (not (Lia_adapter.is_poisoned fx.adapter));
+   (* The ℤ model value y = -2·max_int exceeds int63: extracting it hits the R1 projection
+      sink and raises Rational.Overflow (the session degrades that to unknown; never a
+      truncated model). *)
    check_raises
-     "overflowing check raises Rational.Overflow (no spurious verdict)"
+     "model extraction hits the R1 int-projection sink -> Rational.Overflow"
      is_overflow
-     (fun () -> propagate fx);
-   check
-     "overflows_to_unknown counted the degradation"
-     (Lia_adapter.overflows_to_unknown fx.adapter = 1);
-   check
-     "instance is poisoned after the escaped overflow"
-     (Lia_adapter.is_poisoned fx.adapter);
-   (* Reuse is bricked: every reasoning entry raises Lia.Poisoned rather than a verdict. *)
-   check_raises "reuse check on poisoned -> Poisoned" is_poisoned_exn (fun () ->
-     Lia_adapter.check fx.adapter Theory.Final);
-   check_raises "reuse assert_lit on poisoned -> Poisoned" is_poisoned_exn (fun () ->
-     let a, _ = register_le fx [ 1, 1 ] 0 in
-     Lia_adapter.assert_lit fx.adapter (Lit.make a true));
-   check_raises "reuse model on poisoned -> Poisoned" is_poisoned_exn (fun () ->
-     ignore (Lia_adapter.model fx.adapter));
-   (* A subsequent Poisoned is the aftermath of the one overflow, not a new one. *)
-   check
-     "overflow count stays 1 across poisoned reuse"
-     (Lia_adapter.overflows_to_unknown fx.adapter = 1));
-  (* A fresh adapter is unaffected by another's poisoning. *)
+     (fun () -> ignore (Lia_adapter.model fx.adapter)));
+  (* A fresh adapter is unaffected. *)
   let fx = make_fixture 1 in
   ignore (assert_le fx [ 0, 1 ] (-3) ~polarity:true);
   (match Lia_adapter.check fx.adapter Theory.Final with
-   | Theory.Sat -> check "fresh adapter after a poisoned one still solves" true
+   | Theory.Sat -> check "fresh adapter solves x<=3" true
    | _ -> check "fresh adapter should solve x<=3" false);
   check "fresh adapter not poisoned" (not (Lia_adapter.is_poisoned fx.adapter));
   check "fresh adapter overflow count 0" (Lia_adapter.overflows_to_unknown fx.adapter = 0)

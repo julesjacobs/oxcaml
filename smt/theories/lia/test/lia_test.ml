@@ -77,12 +77,25 @@ let test_rational () =
   check "sign(-3/4) = -1" (Rational.sign (qf (-3) 4) = -1);
   check "is_int 6/3" (Rational.is_int (qf 6 3));
   check_raises "of_frac zero denom" (fun () -> ignore (qf 1 0));
-  (* overflow guards *)
-  check_raises "add overflow" (fun () -> ignore (Rational.add (q max_int) (q 1)));
-  check_raises "neg min_int overflow" (fun () -> ignore (Rational.neg (q min_int)));
-  check_raises "mul overflow" (fun () -> ignore (Rational.mul (q max_int) (q 2)));
-  check_raises "cross-mul overflow in compare" (fun () ->
-    ignore (Rational.compare (qf max_int 1) (qf 1 max_int)))
+  (* core-bignum W2: arithmetic that used to overflow int63 now PROMOTES to Big and
+     returns the exact value (internal ops never raise; only the num/floor/ceil projection
+     does). max_int = 2^62-1 = 4611686018427387903; max_int+1 = -min_int = 2^62. *)
+  check
+    "add promotes: max_int + 1 = 2^62"
+    (Rational.equal
+       (Rational.add (q max_int) (q 1))
+       (Rational.of_string "4611686018427387904"));
+  check
+    "neg promotes: -min_int = 2^62"
+    (Rational.equal (Rational.neg (q min_int)) (Rational.of_string "4611686018427387904"));
+  check
+    "mul promotes: max_int * 2 = 9223372036854775806"
+    (Rational.equal
+       (Rational.mul (q max_int) (q 2))
+       (Rational.of_string "9223372036854775806"));
+  check
+    "compare promotes (no raise): max_int/1 > 1/max_int"
+    (Rational.compare (qf max_int 1) (qf 1 max_int) > 0)
 ;;
 
 let test_delta () =
@@ -179,16 +192,16 @@ let farkas_combination fx premises farkas =
   let const = ref Rational.zero in
   List.iter2
     (fun tok mult ->
-       let coeffs, k = Hashtbl.find fx.hp tok in
-       List.iter
-         (fun (i, c) ->
-            let cur =
-              try Hashtbl.find acc i with
-              | Not_found -> Rational.zero
-            in
-            Hashtbl.replace acc i (Rational.add cur (Rational.mul mult (q c))))
-         coeffs;
-       const := Rational.add !const (Rational.mul mult (q k)))
+      let coeffs, k = Hashtbl.find fx.hp tok in
+      List.iter
+        (fun (i, c) ->
+          let cur =
+            try Hashtbl.find acc i with
+            | Not_found -> Rational.zero
+          in
+          Hashtbl.replace acc i (Rational.add cur (Rational.mul mult (q c))))
+        coeffs;
+      const := Rational.add !const (Rational.mul mult (q k)))
     premises
     farkas;
   acc, !const
@@ -491,7 +504,7 @@ let test_bruteforce () =
        let asg = Array.make n 0 in
        List.iter
          (fun (term, v) ->
-            Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
+           Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
          model;
        if not (List.for_all (sat_constraint asg) !constraints) then incr mismatches
      | Lia.Int_unsat _ -> if expected then incr mismatches);
@@ -508,16 +521,16 @@ let test_bruteforce () =
 ;;
 
 (* ================================================================== *)
-(* Overflow: near-max_int coefficients raise Rational.Overflow cleanly; a fresh solver on
-   a small problem is unaffected (state-safe, I8). *)
+(* core-bignum W2: coefficient growth that used to overflow int63 now PROMOTES to Big, so
+   the ℚ-simplex [check] completes (never raises, never poisons). The residual native-int
+   ceiling is only the OUTPUT projection (R1): this system's ℤ model binds y = -2·max_int,
+   which exceeds int63, so [solve_integer] degrades to [Int_unknown] AT MODEL EXTRACTION
+   (Rational.num), counting it and poisoning exactly at that sink. This doubles as the R1
+   Big-model-value acceptance fixture at the Lia layer (never a truncated model). *)
 
 let test_overflow () =
-  print_endline "overflow:";
+  print_endline "overflow (W2 promote + R1 model-value sink):";
   let big = max_int in
-  (* A near-max_int coefficient that survives gcd normalization (gcd(big,1) = 1): the
-     slack s = big·x + y. Then forcing x up to 2 makes the assignment update compute
-     big·2, which overflows. The guarded arithmetic must raise Rational.Overflow rather
-     than wrap. *)
   let mk_overflowing () =
     let fx = make_fixture 2 in
     ignore (assert_le fx [ 0, big; 1, 1 ] 0 ~polarity:true);
@@ -526,22 +539,36 @@ let test_overflow () =
     (* -x + 2 <= 0 ==> x >= 2 *)
     fx
   in
-  (* [check] (the Propagate-level path) raises Rational.Overflow cleanly — no silent wrap.
-     Specifically Rational.Overflow, not some other exception. *)
+  (* [check] PROMOTES rather than raising: the ℚ-simplex is feasible (y unbounded below),
+     so it returns Sat_candidate and does NOT poison — the pre-W2 Rational.Overflow is
+     gone. *)
   (let fx = mk_overflowing () in
-   let is_overflow =
-     match Lia.check fx.solver with
-     | _ -> false
-     | exception Rational.Overflow -> true
-     | exception _ -> false
-   in
-   check "check on near-max_int raises Rational.Overflow (clean, no wrap)" is_overflow);
-  (* [solve_integer] (the complete driver) degrades the same overflow to Int_unknown and
-     counts it as the distinct overflow-to-unknown stat. *)
+   check
+     "check on near-max_int PROMOTES to Sat_candidate (no overflow)"
+     (match Lia.check fx.solver with
+      | Lia.Sat_candidate -> true
+      | _ -> false
+      | exception _ -> false);
+   check
+     "check did not poison (internal growth promotes, I8)"
+     (not (Lia.is_poisoned fx.solver));
+   check
+     "reuse check after promote is still Sat_candidate (live, not bricked)"
+     (match Lia.check fx.solver with
+      | Lia.Sat_candidate -> true
+      | _ -> false
+      | exception _ -> false));
+  (* [solve_integer]: the ℤ model binds y = -2·max_int (Big); extracting it hits the R1
+     int-projection sink -> Int_unknown, counted, and the instance is poisoned there. *)
   (let fx = mk_overflowing () in
    let r = Lia.solve_integer fx.solver in
-   check "solve_integer degrades overflow to Int_unknown" (r = Lia.Int_unknown);
-   check "overflow_count attributes the degradation" (Lia.overflow_count fx.solver = 1));
+   check
+     "solve_integer degrades Big model VALUE to Int_unknown (R1 sink)"
+     (r = Lia.Int_unknown);
+   check
+     "overflow_count attributes the projection degrade"
+     (Lia.overflow_count fx.solver = 1);
+   check "poisoned at the projection sink" (Lia.is_poisoned fx.solver));
   let is_poisoned name f =
     incr checks;
     match f () with
@@ -556,38 +583,27 @@ let test_overflow () =
         name
         (Printexc.to_string e)
   in
-  (* BRICK SEMANTICS (review item 10): once an overflow escapes, the instance is poisoned;
-     REUSE must raise Lia.Poisoned rather than return a spurious verdict. This is the
-     exact reviewer scenario that previously returned Sat_candidate / SAT[2,0]. *)
-  (* Path 1: the check-escape path. *)
+  (* BRICK SEMANTICS retained at the projection sink: once the model-extraction overflow
+     is caught, the instance is poisoned; REUSE must raise Lia.Poisoned, not a spurious
+     verdict. *)
   (let fx = mk_overflowing () in
-   (try ignore (Lia.check fx.solver) with
-    | Rational.Overflow -> ());
-   check "poisoned after escaped check" (Lia.is_poisoned fx.solver);
-   is_poisoned "reuse check on poisoned -> Poisoned (was spurious Sat)" (fun () ->
+   ignore (Lia.solve_integer fx.solver);
+   is_poisoned "reuse check after projection-poison -> Poisoned" (fun () ->
      Lia.check fx.solver);
-   is_poisoned "reuse solve_integer on poisoned -> Poisoned (was spurious SAT)" (fun () ->
+   is_poisoned "reuse solve_integer after projection-poison -> Poisoned" (fun () ->
      Lia.solve_integer fx.solver);
-   is_poisoned "reuse assert_atom on poisoned -> Poisoned" (fun () ->
+   is_poisoned "reuse assert_atom after projection-poison -> Poisoned" (fun () ->
      assert_le fx [ 1, 1 ] 0 ~polarity:true));
-  (* Path 2: the solve_integer-internal-catch path is EQUALLY poisoned (the old mli claim
-     that solve_integer "has no such hazard" was wrong). *)
-  (let fx = mk_overflowing () in
-   check
-     "solve_integer (hitting call) returns Int_unknown"
-     (Lia.solve_integer fx.solver = Lia.Int_unknown);
-   check "poisoned after solve_integer internal catch" (Lia.is_poisoned fx.solver);
-   is_poisoned "reuse check after solve_integer-catch -> Poisoned" (fun () ->
-     Lia.check fx.solver);
-   is_poisoned "reuse solve_integer after solve_integer-catch -> Poisoned" (fun () ->
-     Lia.solve_integer fx.solver));
   (* state-safe (I8): a fresh solver on a small problem is unaffected. *)
   let fx2 = make_fixture 1 in
   ignore (assert_le fx2 [ 0, 1 ] (-3) ~polarity:true);
   expect_sat fx2 "fresh solver after overflow works";
-  (* direct rational overflow is observable and clean *)
-  check_raises "rational mul near max_int raises" (fun () ->
-    ignore (Rational.mul (q big) (q 4)))
+  (* direct rational arithmetic promotes to the exact Big value (no raise). 4·max_int. *)
+  check
+    "rational mul near max_int promotes to the exact Big value"
+    (Rational.equal
+       (Rational.mul (q big) (q 4))
+       (Rational.of_string "18446744073709551612"))
 ;;
 
 (* ================================================================== *)
@@ -696,8 +712,13 @@ let test_codex_findings () =
     | Lia.Sat_candidate -> check "L3 control precondition: conflict in scope" false);
    Lia.pop fx.solver 1;
    expect_sat fx "L3 control: in-scope conflict clears on pop");
-  (* L2/L4/L5 (false-sat via silent wrap): min_int atom constants must overflow in
-     translation (=> Rational.Overflow => poison => unknown), not wrap to a bogus bound. *)
+  (* L2/L4/L5 (false-sat via silent wrap). core-bignum W2 splits these by WHERE the value
+     crosses back to native int: a value that reaches the native-int coefficient/const
+     projection ([ineg]/[isub]/[iadd] → Rational.num, lia.ml) still degrades soundly to
+     Overflow → poison → unknown (L2 -const, L4 1-const, and the L5 coeff SUM below); a
+     value that stays a Big-backed *bound* (the L5 rhs const, above) PROMOTES and is
+     asserted exactly. Neither wraps to a bogus bound — that soundness property is what
+     these guard. *)
   let raises_overflow name f =
     incr checks;
     match f () with
@@ -732,16 +753,39 @@ let test_codex_findings () =
    check
      "L4: instance poisoned after neg translation overflow"
      (Lia.is_poisoned fx.solver));
-  (* L5: equality coeff/const merge, cb-ca with a min_int const, and a coeff sum at
-     max_int. *)
+  (* L5 rhs const (was: min_int rhs => Overflow => poison). core-bignum W2: the min_int
+     equality const PROMOTES to a Big-backed bound; x0 - x1 = -min_int = 2^62 is asserted
+     SOUNDLY — not the pre-W2 wrap-to-min_int false-sat. Verified two ways: the pinned
+     bound is the correct POSITIVE 2^62 (s := x0 - x1 >= 1 stays SAT, whereas a
+     wrapped-negative rhs would Conflict), and contradicting it (x0 = x1 = 0, i.e. 0 =
+     2^62) is a Conflict. *)
   (let fx = make_fixture 2 in
    let a = Context.linear_combination fx.ctx [ 1, fx.vars.(0) ] min_int in
-   (* x0 + min_int *)
-   let b = fx.vars.(1) in
-   let eq = Context.eq fx.ctx a b in
-   raises_overflow "L5: (x0+min_int = x1) raises on the guarded rhs merge" (fun () ->
-     Lia.assert_atom fx.solver eq ~polarity:true ~premise:0);
-   check "L5: instance poisoned after equality-merge overflow" (Lia.is_poisoned fx.solver));
+   let eq = Context.eq fx.ctx a fx.vars.(1) in
+   Lia.assert_atom fx.solver eq ~polarity:true ~premise:0;
+   check
+     "L5 rhs: (x0+min_int=x1) asserts via promotion (no overflow, not poisoned)"
+     (not (Lia.is_poisoned fx.solver));
+   ignore (assert_le fx [ 0, -1; 1, 1 ] 1 ~polarity:true);
+   (* s >= 1 *)
+   check
+     "L5 rhs: promoted bound is the correct +2^62 (s>=1 SAT, not wrapped-negative)"
+     (match Lia.check fx.solver with
+      | Lia.Sat_candidate -> true
+      | _ -> false));
+  (let fx = make_fixture 2 in
+   let a = Context.linear_combination fx.ctx [ 1, fx.vars.(0) ] min_int in
+   let eq = Context.eq fx.ctx a fx.vars.(1) in
+   Lia.assert_atom fx.solver eq ~polarity:true ~premise:0;
+   ignore (assert_le fx [ 0, 1 ] 0 ~polarity:true);
+   ignore (assert_le fx [ 0, -1 ] 0 ~polarity:true);
+   ignore (assert_le fx [ 1, 1 ] 0 ~polarity:true);
+   ignore (assert_le fx [ 1, -1 ] 0 ~polarity:true);
+   check
+     "L5 rhs: x0=x1=0 contradicts x0-x1=2^62 (Conflict, sound promotion)"
+     (match Lia.check fx.solver with
+      | Lia.Conflict _ -> true
+      | _ -> false));
   let fx = make_fixture 1 in
   let a = Context.mul_const fx.ctx max_int fx.vars.(0) in
   (* max_int·x0 *)
