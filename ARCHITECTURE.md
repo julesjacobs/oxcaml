@@ -155,6 +155,15 @@ the in-search O2 locus (ADR-0012 §5 erratum). Consumed by `Session` (`assert_le
 `instantiate`); exercised by `make lemma-test` (lemma_honeypot + crit_repro + matcher). No
 frozen `.mli`. Owner: lemma-tranche builders.
 
+## smt/certificate (`oxsmt_certificate`)
+Certificate event recorder (ADR-0013, M5 step 1): consumes the frozen `sat.mli` Tranche-C
+emission hooks to record the Unsat-proof event stream (the four Unsat exits + E3
+`Theory_prop` materialization + ordered-RUP antecedents). Emission is **trace-gated** — an
+untraced solve is bit-identical (verdict/model/counters) to the pre-wiring core — so the
+recorder is off the shipping hot path. Replay/checking (Lean or a native RUP checker) is
+**step 2** (#153). Exercised by `make cert-test` (`cert_emit_test`, every check
+discriminating against the pre-wiring core). No frozen `.mli`. Owner: cert-tranche builders.
+
 ## smt/lexical (`oxsmt_lexical`)
 The one SMT-LIB 2.6 §3.1 lexer (ADR-0008), stdlib-only, zero deps. Emits a `token`
 type whose **headline invariant is "token kind is never lost"**: a quoted `|0|` is a
