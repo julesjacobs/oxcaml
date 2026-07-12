@@ -320,6 +320,33 @@ let value_compare (a : value) (b : value) =
   | VUninterp x, VUninterp y -> Int.compare x y
 ;;
 
+(* Overflow-guarded int add/mul for the §10-v2 gap-B structural Arith fold ({!model}'s
+   [value_of]). [None] on overflow. These are a VERBATIM copy — held in guard PARITY — of
+   [Model_check.add_ovf]/[mul_ovf] (R1's [ev] uses the raising form; the option here maps
+   to a [Degrade]), INCLUDING the [min_int * -1] / [-1 * min_int] wrap clause the quotient
+   check alone misses. Parity is load-bearing: R1 re-evaluates every table key with its
+   own fold, so a divergence here would make R1 reject a key the extractor computed
+   differently — a gratuitous [unknown] re-opening the gap. Copied rather than shared
+   because [Cdclt] is below [Model_check] in the dependency order; the wiring-test parity
+   oracle pins them equal (task #117; the [min_int] edge is unreachable on the solver path
+   but the invariant must hold — same rationale as the R1 guard's own regression). *)
+let add_ovf a b =
+  let r = a + b in
+  if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (r >= 0) (a >= 0))
+  then None
+  else Some r
+;;
+
+let mul_ovf a b =
+  if a = 0 || b = 0
+  then Some 0
+  else (
+    let r = a * b in
+    if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
+    then None
+    else Some r)
+;;
+
 (* Reconstruct the FINITE FUNCTION MODEL — uninterpreted-sort universes + const bindings +
    per-symbol function/predicate tables — from the snapshot taken at the accepting
    Final->Sat (ADR-UF-models §1). Reads only [Model.value] over the registered subterms. A
@@ -437,26 +464,6 @@ let model t =
             if not (Hashtbl.mem int_realize cid)
             then Hashtbl.replace int_realize cid (fresh ()))
          (List.sort_uniq Int.compare !int_classes);
-       (* Overflow-guarded add/mul for the §10 v2 gap-B structural fold, mirroring R1's
-          [Model_check.add_ovf]/[mul_ovf] (incl. the [min_int * -1] wrap): on overflow
-          raise [Degrade] so extraction produces no model rather than a wrapped key — R1's
-          own fold would [raise Bad] on the same input, so the two stay in lockstep at
-          [unknown] rather than disagreeing. *)
-       let add_ovf a b =
-         let r = a + b in
-         if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (r >= 0) (a >= 0))
-         then raise Degrade
-         else r
-       in
-       let mul_ovf a b =
-         if a = 0 || b = 0
-         then 0
-         else (
-           let r = a * b in
-           if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
-           then raise Degrade
-           else r)
-       in
        let rec value_of (term : Term.t) =
          match Model.value m term, term.Term.node with
          | Some (Model.Bool b), _ -> VBool b
@@ -467,17 +474,24 @@ let model t =
               structurally over its operands, exactly as R1's [ev] does, so the table key
               this row is stored under equals the key R1 recomputes. Operands resolve
               recursively (leaves realize/inherit via the arms below); [Arith] children
-              are non-[Arith] (term.ml invariant), so the recursion is shallow. *)
-           let v =
-             Iarr.fold
-               (fun acc (child, coeff) ->
-                  match value_of child with
-                  | VInt cv -> add_ovf acc (mul_ovf coeff cv)
-                  | _ -> raise Degrade)
-               lin.Term.const
-               lin.Term.coeffs
+              are non-[Arith] (term.ml invariant), so the recursion is shallow. The fold
+              uses the module-level overflow guards {!add_ovf}/{!mul_ovf}, in guard PARITY
+              with R1's [Model_check.add_ovf]/[mul_ovf] (incl. the [min_int * -1] wrap;
+              pinned by the wiring-test parity oracle): on overflow it [Degrade]s to
+              no-model, exactly where R1's fold [raise Bad]s, so the two never disagree —
+              a divergence would gratuitously reject a valid model. *)
+           let step acc (child, coeff) =
+             match value_of child with
+             | VInt cv ->
+               (match mul_ovf coeff cv with
+                | None -> raise Degrade
+                | Some p ->
+                  (match add_ovf acc p with
+                   | None -> raise Degrade
+                   | Some s -> s))
+             | _ -> raise Degrade
            in
-           VInt v
+           VInt (Iarr.fold step lin.Term.const lin.Term.coeffs)
          | Some (Model.Uninterp cid), _ ->
            (* An [Uninterp] value on an Int-sorted term is the §10 realize-me signal (pass
               1b); on an uninterpreted-sorted term it is the dense element index (pass 1). *)

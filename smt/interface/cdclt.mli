@@ -87,3 +87,12 @@ val model_bindings : t -> binding list option
     needed value is missing, or a buried (unbound) Bool-codomain predicate cell would have
     to be guessed. Deterministic (R10). *)
 val model : t -> (sort_card list * binding list) option
+
+(** Overflow-guarded int add/mul used by {!model}'s §10-v2 gap-B structural Arith fold;
+    [None] on overflow (task #117). Exposed so the wiring-test parity oracle can pin them
+    equal to [Model_check.add_ovf]/[mul_ovf] on the [min_int] edge — R1 re-folds every
+    table key, so extraction's fold MUST agree with R1's or a valid model is gratuitously
+    rejected. INCLUDING the [min_int * -1] / [-1 * min_int] wrap clause. *)
+val add_ovf : int -> int -> int option
+
+val mul_ovf : int -> int -> int option

@@ -929,6 +929,45 @@ let test_model_check_min_int_guard () =
     (not (Oxsmt_interface.Model_check.check model [ assertion ]))
 ;;
 
+(* Task #117 guard parity: {!Cdclt}'s §10-v2 gap-B structural Arith fold uses its own copy
+   of the overflow-guarded add/mul; R1 ({!Model_check}) re-folds every table key with its
+   own copy. If the two ever diverge on an overflow edge, R1 rejects a key the extractor
+   computed differently — a valid model gratuitously degrades to [unknown]. Pin them EQUAL
+   over an edge matrix that includes the [min_int * -1] / [-1 * min_int] wrap (the clause
+   a bare quotient check misses) and the additive-overflow corners. [Cdclt] returns
+   [int option] (None = overflow -> Degrade); [Model_check] raises on overflow (-> Bad ->
+   the assertion fails closed); normalize both to [int option] and require agreement. *)
+let test_ovf_guard_parity () =
+  let mc_opt f a b =
+    try Some (f a b) with
+    | _ -> None
+  in
+  let edges = [ 0; 1; -1; 2; -2; 7; max_int; min_int; max_int - 1; min_int + 1 ] in
+  List.iter
+    (fun a ->
+       List.iter
+         (fun b ->
+            check
+              (Printf.sprintf "add_ovf parity a=%d b=%d" a b)
+              (Oxsmt_interface.Cdclt.add_ovf a b
+               = mc_opt Oxsmt_interface.Model_check.add_ovf a b);
+            check
+              (Printf.sprintf "mul_ovf parity a=%d b=%d" a b)
+              (Oxsmt_interface.Cdclt.mul_ovf a b
+               = mc_opt Oxsmt_interface.Model_check.mul_ovf a b))
+         edges)
+    edges;
+  (* Discriminating spot-checks: the min_int wrap the quotient check alone would MISS must
+     be rejected (None) by both, and a normal product must survive. *)
+  check "mul_ovf min_int*-1 -> None" (Oxsmt_interface.Cdclt.mul_ovf min_int (-1) = None);
+  check "mul_ovf -1*min_int -> None" (Oxsmt_interface.Cdclt.mul_ovf (-1) min_int = None);
+  check
+    "add_ovf min_int+min_int -> None"
+    (Oxsmt_interface.Cdclt.add_ovf min_int min_int = None);
+  check "mul_ovf 6*7 = 42" (Oxsmt_interface.Cdclt.mul_ovf 6 7 = Some 42);
+  check "add_ovf 6+7 = 13" (Oxsmt_interface.Cdclt.add_ovf 6 7 = Some 13)
+;;
+
 let () =
   test_push_pop ();
   test_assert_after_check ();
@@ -958,6 +997,7 @@ let () =
   test_cli_refused_symbol_degrades ();
   test_cli_negative_int_token ();
   test_model_check_min_int_guard ();
+  test_ovf_guard_parity ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

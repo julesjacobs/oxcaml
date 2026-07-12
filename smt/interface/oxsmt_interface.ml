@@ -17,3 +17,9 @@ module Session = Session
     solver path reaches but the invariant must uphold). [oxsmt_core]-only; not part of the
     client-facing session flow, which drives it internally via {!Session}. *)
 module Model_check = Model_check
+
+(** The CDCL(T) seam glue, exposed so the test suite can pin {!Cdclt.add_ovf}/[mul_ovf] —
+    the §10-v2 gap-B structural-fold overflow guards — in PARITY with the matching
+    {!Model_check} guards (task #117). Not part of the client-facing session flow, which
+    drives it internally via {!Session}. *)
+module Cdclt = Cdclt
