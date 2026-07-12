@@ -132,6 +132,13 @@ val explain_implied : 'p t -> implied -> 'p list
     subsequent {!pop} restores the reset like any other watch state. *)
 val rearm_watch : 'p t -> Term.t -> unit
 
+(** [rearm_watches_if t pred] re-arms (same per-watch effect as {!rearm_watch}) every
+    watch whose watched-atom term satisfies [pred], in a single O(#watches) pass. The
+    adapter's pop-recovery for the predicate late-binding recurrence re-arms a whole set
+    of bound predicate watches at once after a [pop] restored their trailed last-reported
+    values; a per-term {!rearm_watch} loop would be O(#predicates x #watches). *)
+val rearm_watches_if : 'p t -> (Term.t -> bool) -> unit
+
 (** [are_equal t a b] holds iff [a] and [b] are currently in the same class (registers
     them if new). O(tree height). *)
 val are_equal : 'p t -> Term.t -> Term.t -> bool

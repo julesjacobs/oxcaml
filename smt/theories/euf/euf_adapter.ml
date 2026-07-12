@@ -41,7 +41,14 @@ type t =
          O(1) and precedence-valid (CONTRACT-EX); see {!cache_reason} / the module note. *)
   ; mutable frames : Lit.t list list
     (* per-[push]-frame cached lits, head = current frame; used to drop stale reasons on
-     [pop] in lockstep with the decision level that produced them. *)
+         [pop] in lockstep with the decision level that produced them. *)
+  ; mutable predicates_maybe_stale : bool
+    (* set by [pop]; a [pop] may have restored a bound predicate watch's TRAILED
+     [w_reported] to a value snapshotted while the predicate was unbound (or bound in a
+     since-popped frame), so the engine will not re-report a currently-entailed truth to
+     the still-bound atom (the late-binding recurrence). Cleared by the next [check]'s
+     one-pass re-arm. A single bool, so a [check] with no intervening [pop] does zero
+     recovery work. *)
   }
 
 let create ctx _env =
@@ -61,6 +68,7 @@ let create ctx _env =
   ; atom_terms = []
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
+  ; predicates_maybe_stale = false
   }
 ;;
 
@@ -186,7 +194,38 @@ let cache_reason t lit expl =
     | [] -> t.frames <- [ [ lit ] ])
 ;;
 
+(* A bound predicate watch whose currently-entailed truth is NOT live on the trail for its
+   atom (no cached propagation in either polarity). After a [pop] restored such a watch's
+   trailed [w_reported], the engine will not re-report — but the atom is still bound
+   (register_atom's [t.watched] entry is MONOTONE, not trailed), so the propagation was
+   lost again (the late-binding recurrence, codex MED / board #161). Re-arming lets the
+   next [propagate] recompute the truth: it re-reports if still entailed, and reports
+   nothing if the entailing merge was itself popped (idempotent — a re-arm never
+   fabricates a propagation). Only predicate ([K_bool]) watches recur this way: an [Eq]
+   atom is bound at [register_atom] BEFORE any report, so its [w_reported] restoration
+   always tracks its entailing merge (both unwind together on [pop]). *)
+let stale_bound_predicate t term =
+  match Term.Table.find_opt t.watched term with
+  | None -> false
+  | Some atom ->
+    (match Atom.Table.find_opt t.atoms atom with
+     | Some { kind = K_bool; _ } ->
+       not
+         (Lit.Map.mem (Lit.make atom true) t.explain_cache
+          || Lit.Map.mem (Lit.make atom false) t.explain_cache)
+     | Some { kind = K_eq _ | K_foreign; _ } | None -> false)
+;;
+
 let check t effort =
+  (* Pop-recovery for the predicate late-binding recurrence (#161): one O(#watches) re-arm
+     of the bound predicate watches a [pop] may have left stale, gated by the [pop]-set
+     flag so a check with no intervening pop does nothing. Runs before [Euf.check] — it
+     only dirties endpoints (no merge/separate), so the conflict scan is unaffected and
+     the re-armed truths are picked up by [Euf.propagate] in the [Consistent] branch. *)
+  if t.predicates_maybe_stale
+  then (
+    Euf.rearm_watches_if t.engine (fun term -> stale_bound_predicate t term);
+    t.predicates_maybe_stale <- false);
   match Euf.check t.engine with
   | Euf.Conflict prems ->
     let premises = lits_of_prems prems in
@@ -250,6 +289,11 @@ let push t =
 
 let pop t n =
   Euf.pop t.engine n;
+  (* A [pop] may have restored a bound predicate watch's trailed [w_reported] to a stale
+     value while its atom binding survives (monotone [t.watched]); flag the next [check]
+     to re-arm and re-deliver (the late-binding recurrence, #161 — see
+     {!stale_bound_predicate} / {!check}). *)
+  t.predicates_maybe_stale <- true;
   (* Drop the last [n] frames, uncaching every reason they hold: a propagation's
      snapshotted reason is valid only at the decision level that produced it (its premises
      unwind with that level). Keep at least a root frame. Mirrors {!Lia_adapter.pop}. *)

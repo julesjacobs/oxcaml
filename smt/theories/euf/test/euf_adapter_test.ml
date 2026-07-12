@@ -475,6 +475,70 @@ let test_predicate_late_binding () =
   ignore (a_ab, a_pb)
 ;;
 
+(* 3e. LATE-BINDING POP RECURRENCE (codex MED / board #161). The register-time re-arm (3d)
+   is TRAILED, so a [pop] below the binding frame restores the bound predicate watch's
+   stale [w_reported] while the atom binding survives ([t.watched] is monotone, not
+   trailed) — the propagation is lost AGAIN. The CHECK-TIME re-arm (a [pop]-set flag
+   drives one O(#watches) recovery pass) must re-deliver the currently-entailed truth. The
+   entailing facts ([p(b)], [a=b]) live at BASE so they survive the pop; only the
+   binding + its register-time re-arm were at the popped frame. DISCRIMINATION: each
+   post-pop propagation is RED without the check-time re-arm (register-time re-arm alone
+   does not survive the pop). *)
+let test_predicate_latebind_pop_recurrence () =
+  print_endline "predicate late-binding pop recurrence (#161):";
+  (* internalize p(a) unbound; p(b)=[value] and a=b entail p(a)=[value]; bind p(a) at a
+     pushed frame [depth] deep; pop back below the binding; the truth must re-propagate. *)
+  let one_case ~name ~value ~depth =
+    let env, _u, _unary, pred, konst, _bpred = make_env () in
+    let ctx = Context.create env in
+    let a = Context.const ctx (konst "a") in
+    let b = Context.const ctx (konst "b") in
+    let p = pred "p" in
+    let pa_term = Context.app ctx p [ a ] in
+    let h = make_harness env ctx in
+    A.internalize_term h.adapter pa_term;
+    let a_pb = reg h (Context.app ctx p [ b ]) in
+    let a_ab = reg h (Context.eq ctx a b) in
+    assert_lit h (Lit.make a_pb value);
+    assert_lit h (Lit.make a_ab true);
+    (* a check while p(a) is unbound: the engine reports its flip, the adapter drops it
+       (no atom) and the engine's [w_reported] for p(a) is consumed. *)
+    ignore (A.check h.adapter Theory.Propagate : Theory.check_result);
+    for _ = 1 to depth do
+      A.push h.adapter
+    done;
+    (* bind p(a) at the pushed (deep) frame — the register-time re-arm fires here. *)
+    let a_pa = Atom.fresh h.alloc in
+    A.register_atom h.adapter a_pa pa_term;
+    Atom.Table.replace h.term_of_atom a_pa pa_term;
+    let pa_lit = Lit.make a_pa value in
+    let propagates_pa () =
+      match A.check h.adapter Theory.Propagate with
+      | Theory.Propagations lits -> List.exists (Lit.equal pa_lit) lits
+      | _ -> false
+    in
+    check (name ^ ": propagated at binding frame") (propagates_pa ());
+    (* pop back below the binding: the register-time re-arm is undone, the binding
+       survives. Without the check-time re-arm the propagation is lost again (the
+       recurrence). *)
+    A.pop h.adapter depth;
+    check
+      (name ^ ": RE-propagated after pop-below-binding (recurrence fixed)")
+      (propagates_pa ());
+    (* the recovered propagation still explains soundly (non-empty, subset asserted). *)
+    let e = A.explain h.adapter pa_lit in
+    check
+      (name ^ ": recovered explanation subset asserted")
+      (Lit.Set.subset (Lit.Set.of_list e.Explanation.premises) h.asserted);
+    check (name ^ ": recovered explanation non-empty") (e.Explanation.premises <> [])
+  in
+  (* (i) codex repro (true-valued, one frame); (ii) false-valued; (iii) deeper two-level
+     push with the binding after the pushes and a pop of both frames. *)
+  one_case ~name:"latebind-pop true" ~value:true ~depth:1;
+  one_case ~name:"latebind-pop false" ~value:false ~depth:1;
+  one_case ~name:"latebind-pop deep(2)" ~value:true ~depth:2
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 4. push/pop restoration: deep nesting, pop-below a conflict, and assert-after-pop with
    a DIFFERENT assertion (recheck-after-backtrack, no stale state). *)
@@ -1173,6 +1237,7 @@ let () =
   test_predicate_propagation ();
   test_predicate_pushpop_restore ();
   test_predicate_late_binding ();
+  test_predicate_latebind_pop_recurrence ();
   test_explain_precedence_eq_path_property ();
   test_explain_precedence_diseq_regression ();
   test_explain_euf_perf_deferral ();

@@ -785,6 +785,23 @@ let rearm_watch t term =
     t.watched
 ;;
 
+(* Batched {!rearm_watch}: re-arm (same per-watch effect) every watch whose [w_atom]
+   satisfies [pred], in ONE O(#watches) pass. The adapter's pop-recovery for the predicate
+   late-binding recurrence (#161) re-arms a whole set of bound predicate watches at once;
+   a per-term {!rearm_watch} loop would be O(#predicates x #watches). Iteration is
+   watched-index (registration) order, so the set of endpoints dirtied is
+   order-independent and the next {!propagate}'s reported list stays byte-identical (I6). *)
+let rearm_watches_if t pred =
+  Dynarray.iteri
+    (fun idx w ->
+       if pred w.w_atom
+       then (
+         if w.w_reported <> -1 then set_reported t idx (-1);
+         mark_touched t (find t w.w_a);
+         mark_touched t (find t w.w_b)))
+    t.watched
+;;
+
 (* --- queries ------------------------------------------------------------- *)
 
 let are_equal t a b = find t (register t a) = find t (register t b)

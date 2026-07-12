@@ -37,3 +37,29 @@ Batch of four small independent board rows, one commit each.
   Unsat; reserved-sort → Unknown. Only sort reservedness differs.
 - Discrimination VERIFIED: disable `bad_sort t.sort ||` → sort-carried case returns Unsat
   (RED, 16/17), control stays green. Restored → 17/17.
+
+## Item 3 — Board #161: predicate late-binding pop recurrence
+
+- Bug: the register-time re-arm (euf_adapter, existing test 3d) is TRAILED (euf.mli:131), so
+  a pop BELOW the binding frame restores a bound predicate watch's stale w_reported while the
+  atom binding survives (t.watched is monotone, NOT trailed) — the propagation is lost again.
+  Eq atoms are immune (bound at register, before any report; w_reported restoration tracks
+  the entailing merge). Entailing facts at base survive the pop; only the binding + its
+  re-arm were at the popped frame.
+- Fix (check-time idempotent re-arm, pop-proof):
+  - euf.ml/euf.mli: new `rearm_watches_if : 'p t -> (Term.t -> bool) -> unit` — one
+    O(#watches) pass re-arming every matching watch (vs O(#predicates x #watches) per-term).
+  - euf_adapter.ml: `predicates_maybe_stale` bool set by `pop`; `check` (before Euf.check)
+    does one re-arm pass over BOUND predicate watches whose atom has NO live cached
+    propagation (`stale_bound_predicate`), then clears the flag. A check with no intervening
+    pop does zero work (single-bool gate). Re-arm is idempotent: propagate recomputes the
+    truth (delivers if still entailed, nothing if the entailing merge was itself popped).
+  - euf.mli/euf_adapter.mli NOT frozen (only core/*.mli + sat.mli). euf.mli edit is additive.
+- Test: `test_predicate_latebind_pop_recurrence` — 3 cases: (i) codex repro true-valued,
+  (ii) false-valued, (iii) two-level push with binding after the pushes + pop of both. Each
+  asserts propagation at the binding frame (register-time re-arm, unchanged) AND re-propagation
+  after pop-below-binding + a sound recovered explanation.
+- Discrimination VERIFIED: disable the check-time re-arm (keep the flag read) → "RE-propagated
+  after pop-below-binding" fails and the recovered-explain crashes on the missing cache; the
+  "propagated at binding frame" check stays green (isolates the NEW recurrence). Restored →
+  1493/0 (adapter), 6412/0 (engine).
