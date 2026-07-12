@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=flatten descends into Not (| Not a -> flatten a), so an equality UNDER a negation — (not (= x 5)) — is treated as a top-level conjunct and x is eliminated (x -> 5), DROPPING the negation. This is the wrong-unsat surface (codex M2): on (not (= x 5)) /\ x >= 6 the correct answer is sat (x=6), but the mutant eliminates x->5, drops the not, and 5>=6 is false -> unsat. A conditional/negated equality is never unconditional (constraint 1: descend NO further than a root And). Killed by test_presolve_negated_eq_not_eliminated (verdict sat + empty elimination set).
+review=logs/w1b-design.md build-soundness constraint 1 (top-level conjuncts only; nothing under Or/Ite/Not) + codex M2 wrong-unsat coverage
+expected=KILLED-TEST

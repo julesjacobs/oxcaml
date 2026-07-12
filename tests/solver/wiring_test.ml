@@ -1193,6 +1193,128 @@ let test_presolve_run_direct () =
   check "run: under-UF variable skipped" (r_uf.Oxsmt_interface.Presolve.defs = [])
 ;;
 
+(* codex H1 == same-model F1 (both legs, independently). Substitution composes
+   coefficients through the arithmetic smart constructors, so an alias inlined into a
+   huge-coefficient term overflows int63. That MUST degrade to a clean [Unknown]
+   (assert_term's I8 discipline), NOT escape [assert_presolved] as a crash. Two triggers,
+   one per leg — both on the NON-NORMALIZING Eq/Arith path (an inequality would be
+   gcd-tightened at build and not overflow, so it would not discriminate):
+   - codex, COEFFICIENT composition (mul): x = 1e9, then 1e12·x = 3·w -> 1e21 on
+     substitution. *)
+let test_presolve_overflow_coeff_degrades () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let w = Context.const ctx (Session.declare_const s "w" Sort.int) in
+  (match
+     Session.assert_presolved
+       s
+       [ Context.eq ctx x (Context.int_const ctx 1_000_000_000)
+       ; Context.eq
+           ctx
+           (Context.mul_const ctx 1_000_000_000_000 x)
+           (Context.mul_const ctx 3 w)
+       ]
+   with
+   | () -> ()
+   | exception e ->
+     check ("coeff overflow raised " ^ Printexc.to_string e ^ " (want unknown)") false);
+  check_verdict
+    "overflow(coeff): degrades to unknown"
+    Session.Unknown
+    (Session.check_sat s)
+;;
+
+(* - reviewer, CONSTANT composition (add; not gcd-divided): y = max_int, x = y + 1, x >= 0
+     -> max_int + 1 on substitution. *)
+let test_presolve_overflow_const_degrades () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  (match
+     Session.assert_presolved
+       s
+       [ Context.eq ctx y (Context.int_const ctx max_int)
+       ; Context.eq ctx x (Context.add ctx y (Context.int_const ctx 1))
+       ; Context.ge ctx x (Context.int_const ctx 0)
+       ]
+   with
+   | () -> ()
+   | exception e ->
+     check ("const overflow raised " ^ Printexc.to_string e ^ " (want unknown)") false);
+  check_verdict
+    "overflow(const): degrades to unknown"
+    Session.Unknown
+    (Session.check_sat s)
+;;
+
+(* codex H2 (DOC-ONLY ruling, same-model adjudication): substituting a variable by an
+   equal term is equisatisfiable IN ANY THEORY, so eliminating an e-graph-member variable
+   is sound even for QF_UFLIA (the interface guard is defense-in-depth, not a soundness
+   gate), and R1 gates every reported Sat. This pins that (= x (f a)) /\ (= x 5) — where x
+   IS eliminated (x is not syntactically under a UF, so the under-UF guard does not flag
+   it) — is verdict-sound with a valid R1-checked model (f a = 5, x = 5). *)
+let test_presolve_eq_uf_side_sound () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "f" (Rank.create [ Sort.int ] Sort.int) in
+  let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx x (Context.app ctx f [ a ])
+    ; Context.eq ctx x (Context.int_const ctx 5)
+    ];
+  (* A reported Sat has already passed the R1 in-process check over the ORIGINAL
+     assertions ((= x (f a)) and (= x 5)); the model must bind x = 5. Whether x is
+     eliminated is an optimization detail, not asserted — the point is verdict-soundness. *)
+  match Session.check_sat s, Session.get_model s with
+  | Session.Sat, Some (_, m) ->
+    check "eq-uf-side: R1-checked model binds x = 5" (find_int_in_model m "x" = Some 5)
+  | v, _ -> check ("eq-uf-side: expected sat+valid model, got " ^ verdict_str v) false
+;;
+
+(* codex M1: an eliminated Int def can carry a NON-Int leaf — (= x (ite b 1 2)) has a Bool
+   guard b. When x is eliminated and appears nowhere else, b never reaches the theory, so
+   re-derivation must DEFAULT b (not just Int leaves) or eval_value returns None and a
+   satisfiable formula spuriously degrades. Expect sat with x re-derived to 2 (b:=false). *)
+let test_presolve_bool_dep_default () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let b = Context.const ctx (Session.declare_const s "b" Sort.bool) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.eq
+        ctx
+        x
+        (Context.ite ctx b (Context.int_const ctx 1) (Context.int_const ctx 2))
+    ];
+  check "M1: x eliminated" (Session.eliminated_vars s = [ "x" ]);
+  match Session.check_sat s, Session.get_model s with
+  | Session.Sat, Some (_, m) ->
+    check "M1: x re-derived to 2 (b defaulted false)" (find_int_in_model m "x" = Some 2)
+  | v, _ -> check ("M1: expected sat+model, got " ^ verdict_str v) false
+;;
+
+(* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
+   conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
+   flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
+   Guards the flatten-Not-descent mutant. *)
+let test_presolve_negated_eq_not_eliminated () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.not_ ctx (Context.eq ctx x (Context.int_const ctx 5))
+    ; Context.ge ctx x (Context.int_const ctx 6)
+    ];
+  check "negated-eq: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "negated-eq: sat (x=6)" Session.Sat (Session.check_sat s)
+;;
+
 let () =
   test_push_pop ();
   test_assert_after_check ();
@@ -1233,6 +1355,11 @@ let () =
   test_presolve_neutral ();
   test_presolve_determinism ();
   test_presolve_run_direct ();
+  test_presolve_overflow_coeff_degrades ();
+  test_presolve_overflow_const_degrades ();
+  test_presolve_eq_uf_side_sound ();
+  test_presolve_bool_dep_default ();
+  test_presolve_negated_eq_not_eliminated ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

@@ -155,6 +155,11 @@ let name_of (x : Term.t) =
 
 let run ctx assertions =
   let conjuncts = List.concat_map flatten assertions in
+  (* Interface variables to skip (constraint 3, defense-in-depth): vars occurring under a
+     UF application. NOT a soundness requirement — substituting a variable by an equal
+     term is equisatisfiable IN ANY THEORY (codex H2 / same-model adjudication), and R1
+     gates every reported Sat — so this only ever forgoes an optimization, never affects a
+     verdict. *)
   let uf_vars = under_uf_vars assertions in
   (* Pass 1 (first-wins, cycle-guarded): scan conjuncts in order, building the alias map
      [sigma] and the elimination [order]. Tag each conjunct [`Def] (its defining equality,

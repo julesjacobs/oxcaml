@@ -1,10 +1,9 @@
 diff --git a/smt/interface/session.ml b/smt/interface/session.ml
-index 17842f5471..ca3fdb5d2b 100644
 --- a/smt/interface/session.ml
 +++ b/smt/interface/session.ml
-@@ -534,7 +534,7 @@ let splice_elim_defs t (sort_cards, bindings) =
-            (fun name -> if not (Hashtbl.mem bound name) then add (Const (name, VInt 0)))
-            (free_int_var_names d.Presolve.value);
+@@ -557,7 +557,7 @@
+               if not (Hashtbl.mem bound name) then add (Const (name, default_value sort)))
+            (free_var_leaves d.Presolve.value);
           match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
 -         | Some v -> add (Const (d.Presolve.name, v))
 +         | Some _v -> add (Const (d.Presolve.name, VInt 0))

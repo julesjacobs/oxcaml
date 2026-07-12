@@ -1,8 +1,7 @@
 diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
-index 9687d165c3..a12c705897 100644
 --- a/smt/interface/presolve.ml
 +++ b/smt/interface/presolve.ml
-@@ -225,7 +225,7 @@ let run ctx assertions =
+@@ -230,7 +230,7 @@
        List.filter_map
          (function
            | `Def -> None

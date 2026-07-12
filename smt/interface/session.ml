@@ -334,9 +334,17 @@ let assert_presolved t terms =
     (* Record the ORIGINALS for R1 (order-insensitive; [Model_check.check] folds over
        all). The pre-preprocessing terms are exactly what the R1 checker must satisfy. *)
     List.iter (fun term -> t.asserted <- term :: t.asserted) terms;
-    let { Presolve.reduced; defs } = Presolve.run t.ctx terms in
-    t.elim_defs <- defs;
-    List.iter (internalize_reduced t) reduced)
+    (* I8/CONTRACT-POISON (codex H1): the substitution builds terms through the arithmetic
+       smart constructors, so composing coefficients can raise [Term.Overflow] (e.g.
+       [x = 2y] substituted into [C·x = 0] with [2·C] out of int63) — or an [Unsupported]
+       operand. That must degrade to a clean [Unknown], never escape [assert_presolved] as
+       a crash. Same discipline as {!internalize_reduced}. *)
+    match Presolve.run t.ctx terms with
+    | exception Term.Overflow -> t.degraded <- true
+    | exception Term.Unsupported _ -> t.degraded <- true
+    | { Presolve.reduced; defs } ->
+      t.elim_defs <- defs;
+      List.iter (internalize_reduced t) reduced)
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
@@ -473,22 +481,24 @@ let name_of = function
   | Fun (n, _) -> n
 ;;
 
-(* Names of the nullary Int-variable leaves of [term] (a W1b def value, which is UF-free —
-   so every leaf variable is a nullary Int [App]). Used to default any surviving-but-
-   unconstrained variable that a def references. *)
-let free_int_var_names (term : Term.t) =
+(* The nullary-variable leaves of [term] (a W1b def value, which is UF-free — so every
+   leaf variable is a nullary [App]) as [(name, sort)] pairs, deduplicated by name. Used
+   to default any surviving-but-unconstrained variable a def references. Codex M1: an Int
+   def value can carry NON-Int leaves — e.g. [(= x (ite b 1 2))] has a Bool [b] in the
+   guard, and an [Ite] guard can compare uninterpreted-sort variables — so this must
+   collect leaves of EVERY sort, not just Int, or such a variable is left unbound and R1
+   spuriously rejects a satisfiable model. *)
+let free_var_leaves (term : Term.t) =
   let seen = Hashtbl.create 16 in
   let acc = ref [] in
   let rec go (u : Term.t) =
     match u.node with
     | App (sym, args) when Iarr.length args = 0 ->
-      if Sort.equal u.sort Sort.int
+      let n = Symbol.name sym in
+      if not (Hashtbl.mem seen n)
       then (
-        let n = Symbol.name sym in
-        if not (Hashtbl.mem seen n)
-        then (
-          Hashtbl.add seen n ();
-          acc := n :: !acc))
+        Hashtbl.add seen n ();
+        acc := (n, u.sort) :: !acc)
     | App (_, args) -> Iarr.iter go args
     | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
     | Le a | Not a -> go a
@@ -506,6 +516,17 @@ let free_int_var_names (term : Term.t) =
   !acc
 ;;
 
+(* A canonical default value for an unconstrained variable of [sort], used when a def
+   references a surviving variable the theory never valued (any value satisfies an
+   otherwise-free variable; uninterpreted sorts are inhabited so element 0 exists). *)
+let default_value (sort : Sort.t) =
+  if Sort.equal sort Sort.bool
+  then VBool false
+  else if Sort.equal sort Sort.int
+  then VInt 0
+  else VUninterp 0
+;;
+
 (* W1b model reconstruction (logs/w1b-design.md, constraint 4). Splice the eliminated
    variables back into the reduced model: for each [def] (processed in REVERSE elimination
    order, matching the design note — harmless here since each [def.value] is already
@@ -513,10 +534,11 @@ let free_int_var_names (term : Term.t) =
    far and bind [def.name] to it. Both re-derivation and R1 share [Model_check]'s
    evaluator (identical overflow guards). A variable that [def.value] references but that
    the theory left UNCONSTRAINED (its only constraints were dropped defs) is bound to a
-   canonical [0] FIRST and that binding is kept, so R1 evaluates the original assertions
-   under the same value (any value satisfies an otherwise-free variable). If [eval_value]
-   returns [None] the variable is left unbound and R1 will fail closed to [unknown] —
-   never a wrong value. No-op when nothing was eliminated. *)
+   canonical sort-default FIRST (Bool [false] / Int [0] / uninterpreted element [0]) and
+   that binding is kept, so R1 evaluates the original assertions under the same value (any
+   value satisfies an otherwise-free variable). If [eval_value] returns [None] the
+   variable is left unbound and R1 will fail closed to [unknown] — never a wrong value.
+   No-op when nothing was eliminated. *)
 let splice_elim_defs t (sort_cards, bindings) =
   match t.elim_defs with
   | [] -> sort_cards, bindings
@@ -531,8 +553,9 @@ let splice_elim_defs t (sort_cards, bindings) =
     List.iter
       (fun (d : Presolve.def) ->
          List.iter
-           (fun name -> if not (Hashtbl.mem bound name) then add (Const (name, VInt 0)))
-           (free_int_var_names d.Presolve.value);
+           (fun (name, sort) ->
+              if not (Hashtbl.mem bound name) then add (Const (name, default_value sort)))
+           (free_var_leaves d.Presolve.value);
          match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
          | Some v -> add (Const (d.Presolve.name, v))
          | None -> ())
