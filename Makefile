@@ -80,7 +80,17 @@ CORPUS_RELEASE_TIMEOUT ?= 120
 # Default = the committed regression cases; override with a corpus subset for a wider sweep.
 DEV_RELEASE_DIRS ?= tests/cases
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+# regress-test knobs (board #162). The cvc5 + z3 SOLVER-regression suites, used as an
+# edge-case SOUNDNESS oracle — deliberately SEPARATE from the headline corpus sweep (these
+# dirs are NOT in CORPUS_DIRS and never enter the denominator). REGRESS_DIRS is soft: a
+# missing suite is skipped (so `make test` stays green on a checkout without the corpora).
+# The suite (cvc5|z3) is auto-detected from each path. Wall cap 1s/file (SIGKILL); a timeout
+# only ever downgrades to unknown, so the MISMATCH gate is machine-independent.
+REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
+REGRESS_TIMEOUT ?= 1
+REGRESS_JOBS ?= 48
+
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -217,6 +227,24 @@ corpus-run-release:
 	@# CORPUS_MAX_EFFORT is the binding, load-independent cutoff (AP2b: the wall still
 	@# backstops unbounded between-tick work; a file that hits it is a deterministic-enough
 	@# unknown, never counted-solved).
+
+## regress-test — cvc5 + z3 SOLVER-regression suites as an edge-case SOUNDNESS oracle
+##   (board #162). SEPARATE from the headline sweep (REGRESS_DIRS are NOT in CORPUS_DIRS and
+##   never enter the denominator). Reuses the shipped corpus_classify path, applies the
+##   fail-closed v1 filter (non-incremental + QF_UF/QF_LIA/QF_UFLIA only), and compares our
+##   verdict against each file's out-of-band expected status (cvc5 `; EXPECT:`, z3 paired
+##   `.expected.out`). A definite verdict that CONTRADICTS the expected status is a MISMATCH:
+##   the runner lists it and exits nonzero. Skips are censused (the feature-gap map). Digest
+##   to stdout; report to $(LOGS)/regress-harness-report.md; per-file detail to
+##   $(LOGS)/regress-run.raw. Soft: a missing suite dir is skipped, not an error. On `make
+##   test` (runtime well under 60s); run standalone for the full report.
+regress-test:
+	@mkdir -p $(LOGS)
+	$(DUNE) build tests/corpus/corpus_classify.exe
+	CLASSIFY=_build/default/tests/corpus/corpus_classify.exe \
+	  REGRESS_TIMEOUT=$(REGRESS_TIMEOUT) REGRESS_JOBS=$(REGRESS_JOBS) \
+	  REGRESS_RAW=$(LOGS)/regress-run.raw REGRESS_REPORT=$(LOGS)/regress-harness-report.md \
+	  bash tests/regress/regress_run.sh $(REGRESS_DIRS)
 
 ## promote-baseline — fail-closed headline promote (board #69). Copies a corpus-run JSON to
 ##   the committed tests/corpus/baseline_summary.json ONLY IF its provenance stamp is
@@ -402,6 +430,7 @@ test: check-frozen
 	$(MAKE) lemma-test
 	$(MAKE) cert-test
 	$(MAKE) driver-equiv-test
+	$(MAKE) regress-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1
