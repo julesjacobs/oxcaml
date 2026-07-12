@@ -1,0 +1,13 @@
+diff --git a/smt/theories/euf/euf.ml b/smt/theories/euf/euf.ml
+index e376074c1e..cca113c844 100644
+--- a/smt/theories/euf/euf.ml
++++ b/smt/theories/euf/euf.ml
+@@ -626,7 +626,7 @@ let propagate t =
+          let du = find t d.d_a
+          and dv = find t d.d_b in
+          let key = if du <= dv then du, dv else dv, du in
+-         Hashtbl.replace sep key ())
++         ignore (key : int * int))
+       t.diseqs;
+     Dynarray.iteri
+       (fun idx w ->

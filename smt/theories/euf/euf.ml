@@ -605,7 +605,39 @@ let propagate t =
   t.prop_mark <- Dynarray.length t.touched;
   let acc = ref [] in
   if Hashtbl.length dirty > 0
-  then
+  then (
+    (* Separated-class index, built ONCE per [propagate] call. No merge happens inside a
+       [propagate], so every representative is stable here: the unordered root-pair
+       [{find d_a, find d_b}] of each asserted disequality is fixed for the whole call. So
+       instead of re-running the O(#diseqs) [distinct_witness] scan for every dirty
+       watched atom (the quadratic that dominated QG: ~252 dirty atoms × up to ~600 diseqs
+       × 2 finds each, per call), we scan the diseqs once into a hash set of normalized
+       (lo,hi) root pairs and test membership in O(1) per watched atom. Equivalent
+       predicate: [distinct_witness a b <> None] iff the unordered pair [{find a, find b}]
+       equals some diseq's separated pair — exactly membership of its normalized key.
+       [propagate] only needs this boolean; the citable witness is still re-derived lazily
+       by [explain_implied] for the few propagated lits that enter conflict analysis. The
+       set is membership-tested only (never iterated), so it introduces no Hashtbl-order
+       into any observable path (C8); watched iteration stays in registration/index order,
+       so the reported list is byte-identical to the old full-scan output.
+
+       Error asymmetry (soundness): a FALSE POSITIVE in this set (a spurious separated
+       pair, or a stale/pre-merge rep that coincides with a watched pair's roots) makes
+       [propagate] report a watched Eq FALSE that is not actually entailed distinct — a
+       wrong theory propagation, the wrong-verdict direction. A FALSE NEGATIVE (a real
+       separated pair missing) only drops a distinct-propagation — a completeness loss,
+       not a soundness one. We do not lean on the downstream lazy [explain_implied] guard
+       to catch a spurious propagation; the [test_propagate_pushpop_vs_full] oracle checks
+       byte-identical output against an independent full scan, forbidding BOTH directions
+       (mutants [euf_propagate_sep_stale_reps] / [euf_propagate_sep_skip_rebuild]). *)
+    let sep = Hashtbl.create (Dynarray.length t.diseqs) in
+    Dynarray.iter
+      (fun d ->
+         let du = find t d.d_a
+         and dv = find t d.d_b in
+         let key = if du <= dv then du, dv else dv, du in
+         Hashtbl.replace sep key ())
+      t.diseqs;
     Dynarray.iteri
       (fun idx w ->
          let ra = find t w.w_a
@@ -615,15 +647,15 @@ let propagate t =
            let cur =
              if ra = rb
              then 1
-             else if distinct_witness t w.w_a w.w_b <> None
-             then 0
-             else -1
+             else (
+               let key = if ra <= rb then ra, rb else rb, ra in
+               if Hashtbl.mem sep key then 0 else -1)
            in
            if cur <> -1 && cur <> w.w_reported
            then (
              set_reported t idx cur;
              acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
-      t.watched;
+      t.watched);
   List.rev !acc
 ;;
 

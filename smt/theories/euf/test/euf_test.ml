@@ -547,10 +547,20 @@ let test_pushpop () =
    union propagated at a DEEPER level and then popped must be re-reported at the shallower
    level (the engine restores [prop_mark] to its push-time value on pop; a bug that didn't
    would MISS the re-report here, while the reference — restoring its map on pop — would
-   still emit it, so the outputs diverge). *)
+   still emit it, so the outputs diverge).
+
+   This is ALSO the oracle for the per-call separated-root-pair hash set in
+   [Euf.propagate] (#103): the reference's [status] computes distinct-ness by an
+   independent full scan over [active_diseqs] (never touching the engine's set), so any
+   divergence between the engine's O(1) membership test and the true scan — a
+   lost/duplicated pair, a missed normalization, a stale (pre-merge) rep, a skipped
+   rebuild — surfaces here as an output mismatch. Watched atoms and disequalities are
+   deliberately dense (many pairs collapse onto shared roots under merging, the QG shape)
+   so the set is non-trivially populated and both pair orientations are exercised. See the
+   mutants registry [euf_propagate_sep_*] patches. *)
 let test_propagate_pushpop_vs_full () =
   set_seed 0x9A7C0FFE;
-  let sequences = 300 in
+  let sequences = 600 in
   for _ = 1 to sequences do
     let ctx, univ = build_universe () in
     let n = Array.length univ in
@@ -560,7 +570,7 @@ let test_propagate_pushpop_vs_full () =
        watches it); deduped by the hash-consed term, matching the engine's single watch
        per atom. *)
     let watch_tbl = Term.Table.create 16 in
-    for _ = 1 to 3 + rand_int 4 do
+    for _ = 1 to 6 + rand_int 8 do
       let i = rand_int n
       and j = rand_int n in
       if i <> j
