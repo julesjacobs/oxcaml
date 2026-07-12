@@ -151,14 +151,19 @@ exception Combination_unsound of string
 (** Raised (→ verdict [unknown]) when the combinator meets a shape it handles SOUNDLY but
     INCOMPLETELY — a deliberate completeness degrade, {b distinct from}
     {!Combination_unsound} so a caller/log can tell "we chose not to decide this" from "a
-    child violated its contract". The sole case in v1: a STRUCTURED Boolean compound (an
-    [And]/[Or]/[Not]/[Ite] or a Bool-[Eq]/iff) occurring as an argument of an
-    uninterpreted function, e.g. [h (b ∧ c)] (internalization ADR §3.6, case (ii)). The
-    leaf bridge names a nullary [K_bool] leaf, so a compound argument would decouple from
-    its operands and wrong-SAT; rather than encode a Tseitin coupling (deferred, ADR §9
-    [bool-compound-uf-args]) the walk detects the shape at assert time and degrades. A
-    Bool LEAF ([h p], [p] a variable) and a Bool CONSTANT ([h true]/[h false]) do NOT
-    raise — they are native (§3.6 cases (i)/(i')). *)
+    child violated its contract". A Boolean argument of an uninterpreted function
+    (internalization ADR §3.6) raises in exactly two situations:
+    - {b at assert time} — a STRUCTURED Boolean compound (an [And]/[Or]/[Not]/[Ite] or a
+      Bool-[Eq]/iff, and a LIA order atom [Le]) as a UF argument, e.g. [h (b ∧ c)] (case
+      (ii)): the leaf bridge names a nullary [K_bool] leaf, so a compound would decouple
+      from its operands and wrong-SAT.
+    - {b at Sat certification} — a BURIED Bool leaf ([h p], [p] a bare Bool variable) or a
+      buried Bool-returning application ([h (g z)], [g : … → Bool]) that is NOT bound to
+      [true]/[false] in the congruence child, i.e. never surfaced as a SAT atom (codex
+      H2 + sibling): such a term would stay a third opaque Boolean class and wrong-SAT. A
+      Bool CONSTANT ([h true]/[h false]) and a SURFACED (bound) Bool leaf do NOT raise —
+      they are native / decidable (§3.6 cases (i')/(i)). The precise handling of the
+      degraded shapes is the deferred Tseitin coupling (ADR §9 [bool-compound-uf-args]). *)
 exception Incomplete of string
 
 (** The congruence child [A]. It is an ordinary {!Oxsmt_core.Theory.THEORY} plus

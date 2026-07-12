@@ -1780,6 +1780,44 @@ let test_h2_buried_bool_uf_real () =
       false
 ;;
 
+(* KNOWN-GAP fixture (board #42, codex delta MEDIUM) — the grow-only [bool_uf_args] set is
+   not retracted on [pop], so a Bool-UF-arg recorded before a pop lingers and, unbound
+   after the pop, forces a SPURIOUS degrade. Sequence: push; assert h(b)≠h(false); pop;
+   check — after the pop the problem is EMPTY (the disequality is retracted), so it is
+   GENUINELY SAT, but the stale [b] in [bool_uf_args] is unbound at Sat certification →
+   UNKNOWN. This is a completeness gap (never a wrong SAT/UNSAT), pinned here as KNOWN, in
+   the same grow-only-vs-pop class as M1. FLIP the expectation to Vsat when the
+   grow-only/activity reconciliation lands (board #42). Driven directly against the
+   combined theory so the push/pop lifecycle is real. *)
+let test_pop_stale_bool_uf_arg_known_gap () =
+  let f = fixture () in
+  let b = bvar f "b" in
+  let h = bfun f "h" in
+  let hb = Context.app f.ctx h [ b ]
+  and hfalse = Context.app f.ctx h [ Context.bool_const f.ctx false ] in
+  let t = Cuflia_real.create f.ctx f.env in
+  let a = fresh_atom f in
+  Cuflia_real.push t;
+  Cuflia_real.register_atom t a (Context.eq f.ctx hb hfalse);
+  Cuflia_real.assert_lit t (Lit.make a false);
+  Cuflia_real.pop t 1;
+  let verdict =
+    try
+      match Cuflia_real.check t Th.Final with
+      | Th.Sat -> `Sat
+      | Th.Conflict _ -> `Unsat
+      | Th.Split _ | Th.Propagations _ -> `Other
+    with
+    | Oxsmt_combine.Combine.Incomplete _ -> `Unknown
+  in
+  check
+    "KNOWN GAP #42: push;h(b)≠h(false);pop;check ⇒ UNKNOWN today (grow-only \
+     bool_uf_args; flip to SAT on reconciliation)"
+    (match verdict with
+     | `Unknown -> true
+     | `Sat | `Unsat | `Other -> false)
+;;
+
 (* Part 4 — the ADR §6 acceptance corpus through the REAL stack (Euf_adapter +
    Lia_adapter, no mocks). Every fixture is the internalization design's load-bearing
    evidence. *)
@@ -2167,6 +2205,7 @@ let () =
   test_h1_distinct_bare_vars_real ();
   test_h2_buried_bool_leaf_real ();
   test_h2_buried_bool_uf_real ();
+  test_pop_stale_bool_uf_arg_known_gap ();
   Printf.printf "\n== combine ADR §6 corpus (REAL Euf_adapter + real Lia_adapter) ==\n";
   test_r1_real ();
   test_fx1_fy1_real ();
