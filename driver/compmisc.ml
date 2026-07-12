@@ -135,8 +135,9 @@ let read_clflags_from_env () =
    backtrace recording OFF for compiler processes by default, regardless of
    the ambient b=1.
 
-   The opt-in is the OXCAML_BACKTRACES environment variable (the ICE hint in
-   [Location.report_exception] points users at it). We deliberately key off a
+   The opt-in is the OXCAML_BACKTRACES environment variable. (Surfacing a
+   hint about it on the ICE / uncaught-exception path is left as a follow-up;
+   nothing in-tree prints it yet.) We deliberately key off a
    fresh variable rather than honouring OCAMLRUNPARAM 'b': the farm ALWAYS
    sets b=1, so honouring 'b' would mean the default never fires. (Contrast
    the GC space_overhead default, which can honour an explicit o= precisely
@@ -147,7 +148,12 @@ let backtraces_forced_on () =
   | Some _ -> true
 
 let set_backtrace_defaults () =
-  if not (backtraces_forced_on ()) then Printexc.record_backtrace false
+  (* Set the state explicitly in both directions: the opt-in must ENABLE
+     recording even when the environment did not (OCAMLRUNPARAM without 'b'),
+     not merely refrain from disabling it. *)
+  if backtraces_forced_on ()
+  then Printexc.record_backtrace true
+  else Printexc.record_backtrace false
 
 let directory_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
