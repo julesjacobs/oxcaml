@@ -255,6 +255,58 @@ let forge_gate () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Sort-carried reserved-symbol gate (R1 / codex C1, board #122): a reserved [.oxsmt.*]
+   symbol can hide in a term's SORT, not only in an [App] head. [Env.declare_fun] /
+   [Session.declare_const] reject only reserved NAMES, not reserved sorts in the rank, and
+   [Symbol.intern] / [Sort.uninterpreted] are public — so a client can mint an
+   uninterpreted sort [Uninterpreted] over a [.oxsmt.*] name and declare a const of it
+   with an innocuous head. Such a term carries NO reserved App head, so the App-head-only
+   walk let it through; the widened [term_has_reserved] also checks each subterm's sort
+   and degrades it to a clean [Unknown].
+
+   Discrimination: both sides assert the model-free UNSAT shape [c1 <> c2 /\ c1 = c2] (no
+   model built, so the M2 [.oxsmt.*] model-filtering net cannot independently mask the
+   difference). Only the SORT's reservedness differs. With the widening: the reserved-sort
+   side degrades on its first assert -> [Unknown]; without it, the term is accepted and
+   the pair is [Unsat] -> RED. The user-sort control stays [Unsat], proving the widening
+   does not over-fire on legitimate uninterpreted sorts. *)
+let unsat_pair_over_sort s sort =
+  let ctx = Session.context s in
+  let c1 = Context.const ctx (Session.declare_const s "sc1" sort) in
+  let c2 = Context.const ctx (Session.declare_const s "sc2" sort) in
+  Session.assert_term s (Context.not_ ctx (Context.eq ctx c1 c2));
+  Session.assert_term s (Context.eq ctx c1 c2);
+  Session.check_sat s
+;;
+
+let sort_carried_gate () =
+  (* Control: the identical UNSAT shape over a legitimate USER uninterpreted sort is a
+     real [Unsat] (the gate must not fire on it). *)
+  let control =
+    let s = Session.create () in
+    let user_sort = Sort.uninterpreted (Session.declare_sort s "S") in
+    unsat_pair_over_sort s user_sort
+  in
+  check
+    (Printf.sprintf
+       "SORT-GATE control: user-sort unsat pair -> unsat (got %s)"
+       (verdict_str control))
+    (control = Session.Unsat);
+  (* Under test: the only reserved symbol is sort-carried (the [App] head "sc1"/"sc2" is
+     innocuous). The widened gate must degrade to [Unknown], never register or verdict. *)
+  let gated =
+    let s = Session.create () in
+    let reserved_sort = Sort.uninterpreted (Symbol.intern ".oxsmt.sortcap") in
+    unsat_pair_over_sort s reserved_sort
+  in
+  check
+    (Printf.sprintf
+       "SORT-GATE: sort-carried .oxsmt.* -> clean unknown, not unsat (got %s)"
+       (verdict_str gated))
+    (gated = Session.Unknown)
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Cap-mismatch negative (ADR-0012 per-env strengthening): a [reserved_cap] minted for one
    env is rejected on a DIFFERENT env — Invalid_argument, not a silent mint. Guard under
    test: the [cap <> t.id] check in Env.declare_reserved. *)
@@ -371,6 +423,7 @@ let () =
   h_repeat_refute ();
   coercion_gate ();
   forge_gate ();
+  sort_carried_gate ();
   cap_per_env ();
   m1_cross_frame_dedup ();
   determinism ();

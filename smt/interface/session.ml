@@ -279,7 +279,25 @@ let rec term_has_reserved ?(allowed = []) (t : Term.t) =
   let bad_sym s =
     Env.is_reserved_name (Symbol.name s) && not (List.exists (Symbol.equal s) allowed)
   in
+  (* A SORT carries a symbol too: an [Uninterpreted] sort over a reserved [.oxsmt.*] name,
+     minted via the public [Symbol.intern] / [Sort.uninterpreted] doors, captures an
+     internal reservation just as an [App] head does — a user term whose ONLY reserved
+     symbol is sort-carried (e.g. a nullary constant of a reserved uninterpreted sort,
+     whose [App] head is an innocuous user name) would otherwise slip the App-head-only
+     walk. No [allowed] whitelist for sorts: [allowed] whitelists a lemma's own qvar
+     App-head symbols, and a reserved uninterpreted sort is never a legitimate qvar (nor
+     is one ever minted internally). *)
+  let bad_sort (s : Sort.t) =
+    match s with
+    | Sort.Uninterpreted sym -> Env.is_reserved_name (Symbol.name sym)
+    | Sort.Bool | Sort.Int _ -> false
+  in
   let rec_ = term_has_reserved ~allowed in
+  (* Every subterm's own sort is checked here, so a reserved sort appearing anywhere in
+     the term — in result OR argument position — is caught (an argument is itself a
+     recursed subterm carrying that sort). *)
+  bad_sort t.sort
+  ||
   match t.node with
   | App (sym, args) -> bad_sym sym || Iarr.exists rec_ args
   | Arith l -> Iarr.exists (fun (tm, _c) -> rec_ tm) l.coeffs
