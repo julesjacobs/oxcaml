@@ -1630,6 +1630,89 @@ let test_w1_real_tower () =
     check "W1 real stack: x=y ∧ g(f(x))<g(f(y)) ⇒ UNSAT (nested closure)" false
 ;;
 
+(* Category coverage for the e-graph membership rule (codex R4). The W1
+   congruence-through-a-LIA-atom collision must be caught for uninterpreted applications
+   of DIFFERENT shapes than the unary Int→Int [f] above, so a CATEGORY-SELECTIVE
+   under-inclusion in [internalize_uf_subterms] — one that internalizes only unary apps,
+   or only apps with Int arguments — cannot slip past the suite (the registry mutant
+   already covers the drop-unary case; these pin the arity and argument-sort dimensions).
+   Two shapes, each occurring ONLY inside a LIA order atom (so visibility rides the
+   membership internalize): an ARITY-2 application, and an application whose ARGUMENTS are
+   uninterpreted-SORTED. *)
+let test_w1_real_arity2 () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y"
+  and u = const f "u"
+  and v = const f "v" in
+  let gg = Env.declare_fun f.env "g2" (Rank.create [ Sort.int; Sort.int ] Sort.int) in
+  let gxy = Context.app f.ctx gg [ x; y ]
+  and guv = Context.app f.ctx gg [ u; v ] in
+  (* x=u ∧ y=v ∧ g(x,y) < g(u,v) — UNSAT: the two equalities ⇒ (EUF, pairwise-arg
+     congruence) g(x,y)=g(u,v), against the strict order. Exercises an arity-2 boundary
+     application. *)
+  let formula =
+    [ Context.eq f.ctx x u, true
+    ; Context.eq f.ctx y v, true
+    ; Context.lt f.ctx gxy guv, true
+    ]
+  in
+  (match Driver_real.solve ~cells:full_assignment_cells f formula with
+   | Vunsat -> check "W1 real (arity-2): x=u ∧ y=v ∧ g(x,y)<g(u,v) ⇒ UNSAT" true
+   | Vsat _ | Vunknown ->
+     check "W1 real (arity-2): x=u ∧ y=v ∧ g(x,y)<g(u,v) ⇒ UNSAT" false);
+  (* discriminator: drop the equalities ⇒ SAT (the UNSAT above is the congruence, not a
+     stack that certifies UNSAT unconditionally). *)
+  let g = fixture () in
+  let x = const g "x"
+  and y = const g "y"
+  and u = const g "u"
+  and v = const g "v" in
+  let gg = Env.declare_fun g.env "g2" (Rank.create [ Sort.int; Sort.int ] Sort.int) in
+  let gxy = Context.app g.ctx gg [ x; y ]
+  and guv = Context.app g.ctx gg [ u; v ] in
+  match
+    Driver_real.solve ~cells:full_assignment_cells g [ Context.lt g.ctx gxy guv, true ]
+  with
+  | Vsat _ -> check "W1 real (arity-2): g(x,y)<g(u,v) alone ⇒ SAT" true
+  | Vunsat | Vunknown -> check "W1 real (arity-2): g(x,y)<g(u,v) alone ⇒ SAT" false
+;;
+
+let test_w1_real_usort_args () =
+  let f = fixture () in
+  let u_sort = Sort.uninterpreted (Env.declare_sort f.env "U") in
+  let uconst nm =
+    Context.const f.ctx (Env.declare_fun f.env nm (Rank.create [] u_sort))
+  in
+  let a = uconst "a"
+  and b = uconst "b" in
+  let ff = Env.declare_fun f.env "fu" (Rank.create [ u_sort ] Sort.int) in
+  let fa = Context.app f.ctx ff [ a ]
+  and fb = Context.app f.ctx ff [ b ] in
+  (* a=b (uninterpreted-sort equality, routed EUF) ∧ f(a) < f(b) (LIA order, Int codomain)
+     — UNSAT: a=b ⇒ (EUF) f(a)=f(b), against the strict order. Exercises a boundary
+     application whose ARGUMENTS are uninterpreted-sorted (not Int). *)
+  let formula = [ Context.eq f.ctx a b, true; Context.lt f.ctx fa fb, true ] in
+  (match Driver_real.solve ~cells:full_assignment_cells f formula with
+   | Vunsat -> check "W1 real (U-sort args): a=b ∧ f(a)<f(b) ⇒ UNSAT" true
+   | Vsat _ | Vunknown -> check "W1 real (U-sort args): a=b ∧ f(a)<f(b) ⇒ UNSAT" false);
+  let g = fixture () in
+  let u_sort = Sort.uninterpreted (Env.declare_sort g.env "U") in
+  let uconst nm =
+    Context.const g.ctx (Env.declare_fun g.env nm (Rank.create [] u_sort))
+  in
+  let a = uconst "a"
+  and b = uconst "b" in
+  let ff = Env.declare_fun g.env "fu" (Rank.create [ u_sort ] Sort.int) in
+  let fa = Context.app g.ctx ff [ a ]
+  and fb = Context.app g.ctx ff [ b ] in
+  match
+    Driver_real.solve ~cells:full_assignment_cells g [ Context.lt g.ctx fa fb, true ]
+  with
+  | Vsat _ -> check "W1 real (U-sort args): f(a)<f(b) alone ⇒ SAT" true
+  | Vunsat | Vunknown -> check "W1 real (U-sort args): f(a)<f(b) alone ⇒ SAT" false
+;;
+
 (* Part 3 — Bool-boundary through the REAL stack (internalization ADR §3.6). *)
 
 let bfun f name = Env.declare_fun f.env name (Rank.create [ Sort.bool ] Sort.int)
@@ -2222,6 +2305,8 @@ let () =
     "\n== combine W1 gate (REAL Euf_adapter + real Lia_adapter, no mocks) ==\n";
   test_w1_real_flat ();
   test_w1_real_tower ();
+  test_w1_real_arity2 ();
+  test_w1_real_usort_args ();
   test_bool_leaf_real ();
   test_bool_compound_real ();
   test_h1_distinct_bare_vars_real ();

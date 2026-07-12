@@ -538,6 +538,135 @@ let test_pushpop () =
   done
 ;;
 
+(* 5a. Incremental [propagate] under push/pop equals a from-scratch full rescan
+   (same-model H1 / codex R5). An INDEPENDENT full-scan reference — its own last-reported
+   map, snapshotted on push and restored on pop exactly as the engine trails
+   [w_reported] + the [prop_mark] watermark — is driven in lockstep with the engine over a
+   randomized assert/neq/push/pop stream; the two per-step [propagate] outputs must be
+   identical. This machine-checks the watermark trap the incremental delta introduces: a
+   union propagated at a DEEPER level and then popped must be re-reported at the shallower
+   level (the engine restores [prop_mark] to its push-time value on pop; a bug that didn't
+   would MISS the re-report here, while the reference — restoring its map on pop — would
+   still emit it, so the outputs diverge). *)
+let test_propagate_pushpop_vs_full () =
+  set_seed 0x9A7C0FFE;
+  let sequences = 300 in
+  for _ = 1 to sequences do
+    let ctx, univ = build_universe () in
+    let n = Array.length univ in
+    let e = Euf.create ctx in
+    Array.iter (Euf.register_term e) univ;
+    (* distinct watched Eq atoms over random non-reflexive pairs (registering an Eq
+       watches it); deduped by the hash-consed term, matching the engine's single watch
+       per atom. *)
+    let watch_tbl = Term.Table.create 16 in
+    for _ = 1 to 3 + rand_int 4 do
+      let i = rand_int n
+      and j = rand_int n in
+      if i <> j
+      then (
+        let atom = Context.eq ctx univ.(i) univ.(j) in
+        Euf.register_term e atom;
+        Term.Table.replace watch_tbl atom (i, j))
+    done;
+    let watch = Term.Table.fold (fun a p acc -> (a, p) :: acc) watch_tbl [] in
+    (* reference last-reported value per watched atom (-1 unknown / 0 distinct / 1 equal) *)
+    let reported = Term.Table.create 16 in
+    List.iter (fun (a, _) -> Term.Table.replace reported a (-1)) watch;
+    let active_diseqs = ref [] in
+    (* per-level snapshot (active diseqs, reported copy); head = current level, like the
+       engine's trail + level record. *)
+    let frames = ref [] in
+    (* ground-truth status of a watched pair at the current engine class structure —
+       mirrors [distinct_witness]: distinct iff some active diseq separates exactly its
+       two classes. *)
+    let status (i, j) =
+      if Euf.are_equal e univ.(i) univ.(j)
+      then 1
+      else if
+        List.exists
+          (fun (c, d) ->
+             (Euf.are_equal e univ.(i) univ.(c) && Euf.are_equal e univ.(j) univ.(d))
+             || (Euf.are_equal e univ.(i) univ.(d) && Euf.are_equal e univ.(j) univ.(c)))
+          !active_diseqs
+      then 0
+      else -1
+    in
+    let step_and_check () =
+      let engine_out =
+        List.filter_map
+          (fun (imp : Euf.implied) ->
+             match Term.Table.find_opt reported imp.Euf.atom with
+             | Some _ -> Some (imp.Euf.atom.Term.tag, imp.Euf.value)
+             | None -> None)
+          (Euf.propagate e)
+      in
+      let ref_out = ref [] in
+      List.iter
+        (fun (a, p) ->
+           let s = status p in
+           if s <> -1 && s <> Term.Table.find reported a
+           then (
+             Term.Table.replace reported a s;
+             ref_out := (a.Term.tag, s = 1) :: !ref_out))
+        watch;
+      let srt l = List.sort compare l in
+      check
+        "propagate incremental == full rescan (push/pop)"
+        (srt engine_out = srt !ref_out)
+    in
+    let steps = 12 + rand_int 12 in
+    for _ = 1 to steps do
+      match rand_int 10 with
+      | 0 | 1 ->
+        Euf.push e;
+        frames := (!active_diseqs, Term.Table.copy reported) :: !frames
+      | 2 when !frames <> [] ->
+        let k = if List.length !frames >= 2 && rand_int 2 = 0 then 2 else 1 in
+        let rec nth l k =
+          match l, k with
+          | x :: _, 1 -> Some x
+          | _ :: tl, k -> nth tl (k - 1)
+          | [], _ -> None
+        in
+        (match nth !frames k with
+         | None -> ()
+         | Some (dsnap, rsnap) ->
+           Euf.pop e k;
+           let rec drop l k =
+             if k = 0
+             then l
+             else (
+               match l with
+               | _ :: tl -> drop tl (k - 1)
+               | [] -> [])
+           in
+           frames := drop !frames k;
+           active_diseqs := dsnap;
+           Term.Table.reset reported;
+           Term.Table.iter (fun a v -> Term.Table.replace reported a v) rsnap)
+      | 3 | 4 ->
+        (* propagate + compare only INTERMITTENTLY — a propagate is NOT run after every
+           assert, so a merge can be logged and then a push taken before any propagate
+           (prop_mark < touched-length at push). That is exactly the gap the pop-restore
+           of [prop_mark] must reopen: without it the union goes unre-reported at the
+           shallower level. Propagating every step would keep the gap empty and hide the
+           trap. *)
+        step_and_check ()
+      | _ ->
+        let i = rand_int n
+        and j = rand_int n in
+        if rand_int 10 < 6
+        then Euf.assert_eq e ~premise:(fresh_prem ()) univ.(i) univ.(j)
+        else (
+          Euf.assert_neq e ~premise:(fresh_prem ()) univ.(i) univ.(j);
+          active_diseqs := (i, j) :: !active_diseqs)
+    done;
+    (* a final reconciliation so every sequence ends on a compared state *)
+    step_and_check ()
+  done
+;;
+
 (* 5b. Registration INSIDE a frame is undone by pop (e-node truncation + use-list
    restore), and re-registration after pop rederives congruence. *)
 
@@ -639,6 +768,7 @@ let () =
   test_random_crosscheck ();
   test_explanation_soundness ();
   test_pushpop ();
+  test_propagate_pushpop_vs_full ();
   test_register_in_frame ();
   test_determinism ();
   Printf.printf
