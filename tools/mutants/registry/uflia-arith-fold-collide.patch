@@ -1,0 +1,13 @@
+diff --git a/smt/interface/cdclt.ml b/smt/interface/cdclt.ml
+index dc21c81a4b..effff55e2c 100644
+--- a/smt/interface/cdclt.ml
++++ b/smt/interface/cdclt.ml
+@@ -474,7 +474,7 @@ let model t =
+                   match value_of child with
+                   | VInt cv -> add_ovf acc (mul_ovf coeff cv)
+                   | _ -> raise Degrade)
+-               lin.Term.const
++               0
+                lin.Term.coeffs
+            in
+            VInt v
