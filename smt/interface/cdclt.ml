@@ -439,9 +439,12 @@ let model t =
                    as a UF argument) is NOT realized to a fresh per-class integer — it is
                    EVALUATED structurally from its operands in [value_of], mirroring R1's
                    [ev], so its table key matches R1's structural evaluation. Only genuine
-                   leaves (vars, UF apps) mint a fresh class integer; skipping [Arith]
-                   here also keeps the fresh-integer stream (and every other class's
-                   assignment) byte-identical. *)
+                   leaves (vars, UF apps) mint a fresh class integer. Skipping [Arith]
+                   here keeps the fresh assignment DETERMINISTIC across v2 runs (R10:
+                   least-unused over the sorted leaf-class ids); it intentionally does NOT
+                   match v1's fresh-value stream — v1 minted for [Arith] cids too, so v2
+                   hands out DIFFERENT integers to the surviving leaves. Determinism is a
+                   within-version property, not cross-version equality. *)
                  (match term.Term.node with
                   | Term.Arith _ -> ()
                   | _ -> int_classes := cid :: !int_classes)
