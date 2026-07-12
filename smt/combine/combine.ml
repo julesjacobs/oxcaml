@@ -290,19 +290,50 @@ struct
     go ~parent_owner:O_neutral top
   ;;
 
+  (* Internalize into the congruence child A exactly the uninterpreted-application
+     subterms of a foreign (LIA-owned) atom — the EUF e-graph MEMBERSHIP RULE (DESIGN.md
+     A4 erratum): EUF's cost must be proportional to the UNINTERPRETED structure, not the
+     term count. The e-graph needs exactly (i) uninterpreted applications [f(…)]/[p(…)]
+     and (ii) their argument subterms (the boundary nodes) — [Euf.register_term] on a
+     maximal [App] pulls in that whole argument closure by its post-order recursion, so
+     descending into an [App] here is unnecessary and we stop at it. A pure-arithmetic
+     term never under an uninterpreted symbol gets NO e-node: congruence provably cannot
+     conclude anything about it (its head [+]/[≤]/numeral is interpreted), and the
+     shared-value reasoning [x=y ⟹ x+1 ~ y+1] flows through the SEAM's value comparison,
+     never through congruence. So a pure-LIA [Le] atom internalizes nothing — the "UF-free
+     skip" is just the empty instance of this rule, with no switch and no stale-flag
+     hazard. This REPLACES the previous [A.internalize_term term] on the whole atom (which
+     internalized the full arithmetic closure — the euf-tax-on-LIA the perf analysis
+     measured). Monotone/grow-only: a term enters when its first under-[f] occurrence is
+     registered, exactly like boundary status. Direction: over-inclusion is merely slow,
+     under-inclusion is the wrong-SAT direction (an [f]-argument missing its e-node would
+     drop the W1 congruence) — the registry mutant guards it. The W1 hazard stays covered
+     BY CONSTRUCTION: [f]'s argument subterms are in the set, so [f(x)]/[f(y)] still
+     become congruent under an asserted [x=y]. *)
+  let internalize_uf_subterms t (term : Term.t) =
+    let rec go (u : Term.t) =
+      match u.Term.node with
+      | Term.App (_, args) when Iarr.length args > 0 -> A.internalize_term t.a u
+      | _ -> List.iter go (walk_children u)
+    in
+    go term
+  ;;
+
   let register_atom t atom term =
     Atom.Table.replace t.atom_term atom term;
     t.all_terms <- add_subterms t.all_terms term;
     (match R.owner term with
      | R.A -> A.register_atom t.a atom term
      | R.B ->
-       (* A LIA-only atom: register it with B, and INTERNALIZE its closure into the
-          congruence child A (no atom binding) so EUF's e-graph gains nodes for the atom's
-          [App] subterms and congruence-closes over them — the W1 fix, replacing round-7's
-          [owner(Le)=Both]/[K_foreign] path. A alone lacks a channel to see a term that
-          surfaces only inside B's atom. *)
+       (* A LIA-only atom: register it with B, and internalize into the congruence child A
+          ONLY its uninterpreted-application subterms (the membership rule; see
+          {!internalize_uf_subterms}). This keeps the W1 fix (EUF sees an [App] that
+          surfaces only inside a LIA atom, so [f x],[f y] under a [≤] still
+          congruence-close under [x = y]) while paying EUF cost proportional to the UF
+          structure, not the whole arithmetic closure — replacing the previous whole-atom
+          internalize. *)
        B.register_atom t.b atom term;
-       A.internalize_term t.a term
+       internalize_uf_subterms t term
      | R.Both ->
        A.register_atom t.a atom term;
        B.register_atom t.b atom term);

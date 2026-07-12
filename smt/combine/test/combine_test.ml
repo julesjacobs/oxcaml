@@ -236,18 +236,25 @@ let test_routing () =
   let f = fixture () in
   let x = const f "x"
   and y = const f "y" in
+  let ff = ufun f "f_route" in
+  let fx = Context.app f.ctx ff [ x ] in
   let ta = Context.eq f.ctx (const f "u") (const f "v") in
   let tb = Context.le f.ctx x y in
+  (* a B-owned atom that DOES carry an uninterpreted application [f x] *)
+  let tb_uf = Context.le f.ctx fx y in
   let tboth = Context.eq f.ctx x y in
   Ctrl_router.set_owner ta Ctrl_router.A;
   Ctrl_router.set_owner tb Ctrl_router.B;
+  Ctrl_router.set_owner tb_uf Ctrl_router.B;
   Ctrl_router.set_owner tboth Ctrl_router.Both;
   let t = Cmock.create f.ctx f.env in
   let aa = fresh_atom f
   and ab = fresh_atom f
+  and ab_uf = fresh_atom f
   and aboth = fresh_atom f in
   Cmock.register_atom t aa ta;
   Cmock.register_atom t ab tb;
+  Cmock.register_atom t ab_uf tb_uf;
   Cmock.register_atom t aboth tboth;
   let la = Lit.make aa true
   and lb = Lit.make ab true
@@ -260,9 +267,24 @@ let test_routing () =
   check
     "route: A-atom registered only to A"
     (saw_register "A" aa && not (saw_register "B" aa));
+  (* MEMBERSHIP RULE (DESIGN A4 erratum): a pure-LIA B-atom [x ≤ y] has NO uninterpreted
+     application, so it internalizes NOTHING into the congruence child — no arith-closure
+     e-nodes; the "UF-free skip" as the empty instance of the rule. *)
   check
-    "route: B-atom registered only to B, INTERNALIZED into A (EUF sees the closure)"
-    (saw_register "B" ab && (not (saw_register "A" ab)) && saw_internalize "A" tb);
+    "route: pure-LIA B-atom registered only to B, internalizes NOTHING into A"
+    (saw_register "B" ab
+     && (not (saw_register "A" ab))
+     && (not (saw_internalize "A" tb))
+     && not (saw_internalize "A" x));
+  (* but a B-atom carrying an uninterpreted application [f x ≤ y] internalizes exactly
+     that application into A (clauses (i)+(ii)) — the W1 boundary node stays visible to
+     EUF. *)
+  check
+    "route: B-atom with an uninterpreted application internalizes [f x] into A"
+    (saw_register "B" ab_uf
+     && (not (saw_register "A" ab_uf))
+     && saw_internalize "A" fx
+     && not (saw_internalize "A" tb_uf));
   check
     "route: Both-atom registered to A and B (union, polarity-blind)"
     (saw_register "A" aboth && saw_register "B" aboth);
