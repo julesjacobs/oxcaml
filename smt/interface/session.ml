@@ -305,30 +305,21 @@ let check_sat t =
       | Sat.Unsat -> Unsat (* theory conflicts only strengthen unsat; still sound *)
       | Sat.Sat ->
         (* THE SOUNDNESS RULE (M4): report [Sat] only when a self-checkable model is
-           reconstructable. A model with no applied uninterpreted symbol is (a) verifiable
-           by the §8 layer-1 evaluator and (b) function-free, hence in the fragment the
-           combination decides soundly. When the model would need a function table we
-           degrade to [Unknown] rather than trust an unself-checked [Sat] — this is also
-           the firewall against the combination's known incompleteness/soundness gap on
-           function applications appearing only inside arithmetic atoms (no purification
-           pass yet; see the M4 report). *)
+           reconstructable AND it passes the R1 in-process checker. This also firewalls
+           the combination's known incompleteness/soundness gap on function applications
+           appearing only inside arithmetic atoms (no purification pass yet; see the M4
+           report): a model it cannot soundly build is [None] -> [Unknown]. *)
         (match build_model t with
-         | Some ((_, bindings) as m) ->
-           (* R1 (ADR-UF-models §3): a FUNCTION-table model is a NEW capability whose
-              [sat] is promoted ONLY after the obligatory in-process self-check passes
-              over every ORIGINAL assertion (fail-closed to [unknown]). A table-free
-              (const / Bool / LIA) model keeps the existing pipeline promotion —
-              unchanged, already sound — so this adds no regression surface. QF_UF tables
-              carry no arithmetic, so the checker's construct coverage is complete for the
-              first cut. *)
-           let has_table =
-             List.exists
-               (function
-                 | Fun _ -> true
-                 | Const _ -> false)
-               bindings
-           in
-           if (not has_table) || Model_check.check m t.asserted
+         | Some m ->
+           (* R1 (ADR-UF-models §3, codex TCB ruling): EVERY promoted [sat] passes the
+              obligatory in-process self-check over every ACTIVE original assertion
+              ([t.asserted], frame-scoped per F3) — function tables AND table-free (const
+              / Bool / LIA) models alike. No [has_table] short-circuit exempts the
+              sort-bearing const-only slice, so the trust story is uniform: "no [sat]
+              without the checker." Fail-closed to [unknown]. The checker is cheap for
+              const models; QF_UF tables carry no arithmetic, so its construct coverage is
+              complete for the first cut. *)
+           if Model_check.check m t.asserted
            then (
              t.last_model <- Some m;
              Sat)
