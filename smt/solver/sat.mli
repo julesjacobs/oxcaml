@@ -127,9 +127,9 @@ type theory_clause_role =
     - [Root_empty] — E1 (a [Query] clause) / E4 (a [Theory_lemma]) filtered to [] under
       level-0 simplification; the terminal step is level-0 RUP of [input_id] against the
       checker's re-derived unit closure. E1 vs E4 is the [origin] recorded for [input_id].
-    - [Level0_conflict] — E2, a level-0 conflict clause (a Boolean clause, or a
-      {e nonempty} theory conflict transient); terminal step is level-0 RUP of
-      [conflict_id].
+    - [Level0_conflict] — E2, a level-0 conflict clause (a Boolean clause, or a theory
+      conflict transient — including the empty clause of an unconditional
+      [T_conflict []]); terminal step is level-0 RUP of [conflict_id].
     - [Failed_assumption] — E3, the universal session exit: [antecedents] is the
       assumption-forcing reason chain in RUP-consumption order ([Implied_by] clause ids
       and materialized [Theory_prop] reason ids); after the selector strip it derives []. *)
@@ -140,8 +140,11 @@ type unsat_conclusion =
 
 type trace =
   { on_input : id:int -> clause:lit array -> origin:origin -> unit
-    (** fires once per permanent clause {!add_clause} retains, with a stable [id]; [origin]
-      splits genuine query inputs from theory Split/lemma clauses. *)
+    (** fires for every asserted input clause with a stable [id], {e before} level-0
+      filtering — including a clause that filters to [] and is therefore not retained
+      (E1/E4 [Root_empty] id-resolvability depends on this: the terminal step cites that
+      clause's [id]). [origin] splits genuine query inputs from theory Split/lemma
+      clauses. *)
   ; on_unit : id:int -> lit:lit -> unit
     (** fires once per standing level-0 unit; the checker re-derives the unit closure by
       propagation, so no forcing-clause provenance is carried. *)
@@ -162,6 +165,12 @@ type trace =
     (** fires at whichever [Sat] [Unsat] exit fires, carrying the terminal [||]-step data. *)
   }
 
+(** Install (or, with [None], remove) the trace; see the bit-identical-when-unset note
+    above. {b Lifecycle contract:} a trace must be attached before the first
+    {!add_clause}. Attaching one after clauses exist — or detaching and re-enabling
+    mid-lifecycle — is unsupported: the emitter relies on observing every input from the
+    start, so it must never reach a state where a conclusion cites the [id] of a clause
+    added while untraced. *)
 val set_trace : t -> trace option -> unit
 
 (** {2 Theory seam — CDCL(T) (ADR-0005 §3; the seam for the M4 EUF/LIA adapters)}
