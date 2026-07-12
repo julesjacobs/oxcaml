@@ -67,11 +67,20 @@
          no intrinsic termination bound; see {!budget_exhausted}).
 
        A degraded session stays [Unknown] for the rest of its life (the poison is sticky).
+
+       Distinct from all of the above is the {b effort budget} (board #60, see {!create}'s
+       [max_effort] and {!effort_exhausted}): a deterministic cap on total search effort
+       (SAT conflicts + decisions + seam [Final]-rounds). When it fires the query is
+       [Unknown] with the BUDGET tag, but the session is NOT degraded — the cutoff poisons
+       nothing, so the SAME query re-run at a larger [max_effort] can still be decided. It
+       is a measurement/termination tool, never a soundness one: like the split budget and
+       the poison firewall it only ever turns a would-be answer into [Unknown], never a
+       [Sat]/[Unsat] from an unfinished search.
     }
     }
 
-    Determinism (I6): no wall-clock anywhere; the split budget is a counter; all theory
-    iteration is deterministic. *)
+    Determinism (I6): no wall-clock anywhere; the split and effort budgets are counters;
+    all theory iteration is deterministic. *)
 
 type t
 
@@ -111,9 +120,18 @@ type model = sort_card list * model_binding list
 (** A fresh session: empty env (with the reserved [div]/[mod] built-ins), fresh context,
     fresh SAT core with the combined EUF+LIA theory installed, one active (base) assertion
     frame. [split_budget] overrides the deterministic per-[check_sat] theory-split cap
-    (default 10_000); a tiny value drives the budget-exhaustion path (see
-    {!budget_exhausted}) in tests. *)
-val create : ?split_budget:int -> unit -> t
+    (default 10_000); a tiny value drives the split-budget path (see {!budget_exhausted})
+    in tests.
+
+    [max_effort] is the board #60 counted cutoff: the per-[check_sat] cap on total search
+    effort (SAT conflicts + decisions + seam [Final]-rounds).
+    {b Absent (the default) is UNBOUNDED}: the counter still runs — so {!effort} is always
+    available for instrumented calibration — but never cuts off, and since the count is
+    never surfaced by default the interactive / [make test] path is byte-identical to a
+    build without the budget. A finite [max_effort] makes exhaustion return [Unknown] with
+    the BUDGET tag ({!effort_exhausted}); per-check and poison-free (re-runnable at a
+    larger cap). *)
+val create : ?split_budget:int -> ?max_effort:int -> unit -> t
 
 (** The session's {!Oxsmt_core.Env.t}. Exposed so a front end (e.g. the test-only SMT-LIB
     parser) can declare symbols and build assertion terms in the {e same} context the
@@ -173,3 +191,14 @@ val splits : t -> int
 (** [true] iff the most recent {!check_sat} degraded to [Unknown] by exhausting the split
     budget (the distinct split-budget stat; the query is otherwise unresolved). *)
 val budget_exhausted : t -> bool
+
+(** Effort consumed by the most recent {!check_sat}: SAT conflicts + decisions + seam
+    [Final]-rounds (board #60). A deterministic function of the input (I6) — this is the
+    per-file value the calibration run records to pick the cutoff, and the determinism
+    check is that two runs report the same number. 0 before any {!check_sat}. *)
+val effort : t -> int
+
+(** [true] iff the most recent {!check_sat} returned [Unknown] because the {!create}
+    [max_effort] cap fired (the BUDGET tag). Unlike {!budget_exhausted} this is NOT sticky
+    and does not degrade the session — the same query is re-runnable at a larger cap. *)
+val effort_exhausted : t -> bool

@@ -430,6 +430,126 @@ let test_split_budget_exhaustion () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Board #60: the deterministic COUNTED effort budget (effort = SAT conflicts + decisions
+   + seam Final-rounds). A per-check, poison-free cap that turns an unfinished search into
+     [Unknown] with the BUDGET tag — never a sat/unsat from an unfinished search. Distinct
+     from the split budget above: NOT sticky, does not degrade the session. *)
+
+(* A mixed QF_UFLIA UNSAT probe that drives real search (a decision + a Nelson-Oppen Final
+   split): x = y+1 ∧ y = 0 ∧ g(x) ≠ g(1). Reused across the budget tests so the terminal
+   effort is a fixed, strictly-positive target to calibrate caps against. *)
+let build_budget_probe s =
+  let ctx = Session.context s in
+  let g = Session.declare_fun s "g" (Rank.create [ Sort.int ] Sort.int) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  Session.assert_term s (Context.eq ctx x (Context.add ctx y (Context.int_const ctx 1)));
+  Session.assert_term s (Context.eq ctx y (Context.int_const ctx 0));
+  Session.assert_term
+    s
+    (Context.not_
+       ctx
+       (Context.eq
+          ctx
+          (Context.app ctx g [ x ])
+          (Context.app ctx g [ Context.int_const ctx 1 ])))
+;;
+
+let test_effort_unbounded_matches () =
+  (* Default (no [max_effort]) is unbounded: the counter runs but never cuts off, so the
+     verdict equals a build with no budget. Confirmed here on a small sample; the whole-
+     suite byte-identity ([make test]) is the stronger check. *)
+  let unbounded build =
+    let s = Session.create () in
+    build s;
+    Session.check_sat s
+  in
+  let x_pos s =
+    let ctx = Session.context s in
+    let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+    Session.assert_term s (Context.gt ctx x (Context.int_const ctx 0))
+  in
+  check_verdict "unbounded: mixed probe" Session.Unsat (unbounded build_budget_probe);
+  check_verdict "unbounded: x>0 sat" Session.Sat (unbounded x_pos);
+  let s = Session.create () in
+  build_budget_probe s;
+  let _ = Session.check_sat s in
+  check "unbounded run records effort > 0" (Session.effort s > 0);
+  check "unbounded run never flags BUDGET" (not (Session.effort_exhausted s))
+;;
+
+let test_effort_budget_exhaustion () =
+  (* Self-calibrate: measure the probe's real terminal effort E (unbounded); a cap of E-1
+     must cut the search off (BUDGET), a cap of E must still decide it. Ticking never
+     changes the search, so the event sequence up to the E-th tick is identical either way
+     — hence exhaustion at E-1 and success at E are both deterministic. *)
+  let effort_of () =
+    let s = Session.create () in
+    build_budget_probe s;
+    let _ = Session.check_sat s in
+    Session.effort s
+  in
+  let e = effort_of () in
+  check "probe consumes some effort" (e > 0);
+  let s = Session.create ~max_effort:(e - 1) () in
+  build_budget_probe s;
+  check_verdict "cap E-1: BUDGET unknown" Session.Unknown (Session.check_sat s);
+  check "effort_exhausted set" (Session.effort_exhausted s);
+  check "not the (sticky) split-budget path" (not (Session.budget_exhausted s));
+  check "no model after BUDGET unknown" (Session.get_model s = None);
+  (* Poison-free / NOT sticky: a BUDGET cutoff never latches the session to [Unknown]
+     (contrast test_split_budget_exhaustion, whose degrade is sticky and
+     forever-[Unknown]). A second check on the SAME session re-counts effort from zero
+     (per-check reset) and re-runs the search — and because the SAT core keeps its learned
+     clauses across checks (incrementality), that second pass prunes enough to finish
+     UNDER the same cap here, solving to [Unsat]. The invariants that matter and hold
+     regardless: the re-run yields a SOUND verdict (never a [Sat] from an unfinished
+     search) and NEVER takes the sticky split-budget path. (Measurement is immune to this
+     cross-check effect: corpus_classify uses a fresh session per file.) *)
+  let v_rerun = Session.check_sat s in
+  check
+    "re-run is sound (unsat or budget-unknown, never sat)"
+    (v_rerun = Session.Unsat || v_rerun = Session.Unknown);
+  check
+    "re-run never took the sticky split-budget path"
+    (not (Session.budget_exhausted s));
+  check "re-run re-counted effort (per-check reset, not frozen)" (Session.effort s > 0);
+  (* Raise N and retry: the SAME query at cap = E is decided — BUDGET is never a verdict. *)
+  let s_ok = Session.create ~max_effort:e () in
+  build_budget_probe s_ok;
+  check_verdict
+    "cap E: real verdict (re-runnable at larger N)"
+    Session.Unsat
+    (Session.check_sat s_ok);
+  check "cap E: not exhausted" (not (Session.effort_exhausted s_ok))
+;;
+
+let test_effort_determinism () =
+  (* The load-bearing calibration claim: effort is a deterministic function of the input.
+     Two runs of the same query report byte-identical effort AND verdict — unbounded, and
+     capped just below E (identical (Unknown, effort) both times). *)
+  let run max_effort =
+    let s =
+      match max_effort with
+      | None -> Session.create ()
+      | Some m -> Session.create ~max_effort:m ()
+    in
+    build_budget_probe s;
+    let v = Session.check_sat s in
+    v, Session.effort s
+  in
+  let v1, e1 = run None in
+  let v2, e2 = run None in
+  check "determinism: same verdict (unbounded)" (v1 = v2 && v1 = Session.Unsat);
+  check "determinism: byte-identical effort (unbounded)" (e1 = e2);
+  let cap = e1 - 1 in
+  let w1, f1 = run (Some cap) in
+  let w2, f2 = run (Some cap) in
+  check "determinism: same capped verdict" (w1 = w2 && w1 = Session.Unknown);
+  check "determinism: byte-identical capped effort" (f1 = f2)
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Namespace guards (#48), unchanged. *)
 
 let test_namespace_guard () =
@@ -755,6 +875,9 @@ let () =
   test_uf_function_model ();
   test_model_excludes_witnesses ();
   test_split_budget_exhaustion ();
+  test_effort_unbounded_matches ();
+  test_effort_budget_exhaustion ();
+  test_effort_determinism ();
   test_namespace_guard ();
   test_parser_into_session ();
   test_determinism ();

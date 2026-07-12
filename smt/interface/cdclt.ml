@@ -88,6 +88,7 @@ type t =
   ; mutable level : int (* theory frames pushed above the base (= SAT decision level) *)
   ; split_budget : int
   ; mutable splits : int (* splits emitted in the current check-sat *)
+  ; budget : Budget.t (* shared effort budget (board #60): SAT ticks it, we tick Final *)
   ; mutable last_model : Model.t option (* snapshot taken at the accepting Final->Sat *)
   }
 
@@ -189,6 +190,11 @@ let rec split_lit t ~sign (tm : Term.t) =
 let check t ~final =
   if final
   then (
+    (* effort (board #60): one seam Final-round. Ticked before the (possibly expensive)
+       complete theory check so an exhausted budget cuts off here; a Final that returns a
+       [Split] is the wired realization of a B&B node, so this subsumes "B&B nodes". May
+       raise [Budget.Exceeded], which unwinds [Sat.solve] like [Split_budget_exceeded]. *)
+    Budget.tick t.budget;
     match Combined.check t.theory Theory.Final with
     | Theory.Sat ->
       t.last_model <- Some (Combined.model t.theory);
@@ -219,7 +225,7 @@ let explain t l =
 
 (* Install the combined theory into a pristine [sat] (no clauses, empty trail — the seam's
    set_theory contract). Must be called before any clause is added. *)
-let create ctx env sat ~split_budget =
+let create ctx env sat ~split_budget ~budget =
   let t =
     { theory = Combined.create ctx env
     ; sat
@@ -233,6 +239,7 @@ let create ctx env sat ~split_budget =
     ; level = 0
     ; split_budget
     ; splits = 0
+    ; budget
     ; last_model = None
     }
   in
@@ -244,16 +251,21 @@ let create ctx env sat ~split_budget =
        ; check = check t
        ; explain = explain t
        });
+  (* Effort seam (board #60): the SAT core ticks the shared budget at each conflict /
+     decision through this opaque closure, keeping [oxsmt_solver] budget-agnostic. *)
+  Sat.set_budget_tick sat (Some (fun () -> Budget.tick budget));
   t
 ;;
 
-(* Reset the per-check-sat split counter and stale model snapshot. *)
+(* Reset the per-check-sat split counter, effort budget, and stale model snapshot. *)
 let begin_check t =
   t.splits <- 0;
+  Budget.reset t.budget;
   t.last_model <- None
 ;;
 
 let splits_used t = t.splits
+let effort_used t = Budget.used t.budget
 
 (* Convert a snapshot [Model.value] to the sidecar vocabulary. *)
 let value_of (v : Model.value) =

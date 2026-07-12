@@ -42,21 +42,36 @@ type sort_card =
     bound); caught at the {!Session} boundary and turned into verdict [unknown]. *)
 exception Split_budget_exceeded
 
-(** [create ctx env sat ~split_budget] builds the combined theory over [ctx]/[env] and
-    installs it into [sat] via [Sat.set_theory]. [sat] MUST be pristine (no clauses, empty
-    trail) — the seam's attach contract. *)
-val create : Context.t -> Env.t -> Oxsmt_solver.Sat.t -> split_budget:int -> t
+(** [create ctx env sat ~split_budget ~budget] builds the combined theory over [ctx]/[env]
+    and installs it into [sat] via [Sat.set_theory]. [sat] MUST be pristine (no clauses,
+    empty trail) — the seam's attach contract. [budget] is the shared effort budget (board
+    #60): [create] installs a tick closure onto [sat] (counting SAT conflicts/decisions)
+    and this module ticks it once per [Final]-round, so a [Budget.Exceeded] unwinds
+    [Sat.solve] at the cap; {!Session} catches it. [budget] is reset per check by
+    {!begin_check}. *)
+val create
+  :  Context.t
+  -> Env.t
+  -> Oxsmt_solver.Sat.t
+  -> split_budget:int
+  -> budget:Budget.t
+  -> t
 
 (** [intern_atom t term] returns the SAT var 1:1 with theory atom [term], registering it
     with the combined theory on first sight (base frame — survives backjumps). The
     clausifier calls this for each theory atom before solving. Idempotent by hash-cons. *)
 val intern_atom : t -> Term.t -> Oxsmt_solver.Sat.var
 
-(** Reset the split counter and stale model snapshot; call at the start of each check-sat. *)
+(** Reset the split counter, the effort budget, and the stale model snapshot; call at the
+    start of each check-sat. *)
 val begin_check : t -> unit
 
 (** Splits emitted during the last check-sat (stat / determinism witness). *)
 val splits_used : t -> int
+
+(** Effort consumed on the shared budget so far in the current/most-recent check-sat
+    ([Budget.used]); the instrumentation read behind {!Session.effort}. *)
+val effort_used : t -> int
 
 (** The nullary-symbol (table-free) model reconstructed from the snapshot of the accepting
     Final->Sat, or [None] (see {!model} for the full function-model reconstruction). Kept

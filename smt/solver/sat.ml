@@ -124,6 +124,10 @@ type t =
   ; restart_base : int
   ; mutable trace : trace option
   ; mutable theory : theory option
+  ; mutable budget_tick : (unit -> unit) option
+    (* board #60: called at each conflict / decision to tick a deterministic effort counter
+     the driver owns; may raise to unwind [solve] at a budget cap. [None] in the pure core
+     (bit-identical). *)
   }
 
 let var_decay = 0.95
@@ -159,10 +163,21 @@ let create () =
   ; restart_base = 100
   ; trace = None
   ; theory = None
+  ; budget_tick = None
   }
 ;;
 
 let set_trace t tr = t.trace <- tr
+let set_budget_tick t f = t.budget_tick <- f
+
+(* Tick the driver's effort counter at a counted work event (conflict / decision). Opaque
+   to the core; may raise (e.g. [Budget.Exceeded]) to unwind [solve] at a cap — the driver
+   catches it at [check_sat]. [None] (pure core) is a no-op branch, bit-identical. *)
+let budget_tick t =
+  match t.budget_tick with
+  | None -> ()
+  | Some f -> f ()
+;;
 
 (* Pristine-attach (seam lifecycle contract): a theory may be attached/detached only when
    the solver is pristine — [ok], no clauses, empty trail. This makes the lifecycle safe
@@ -900,6 +915,7 @@ let search t assumps conflict_limit =
   let handle_confl confl =
     t.conflicts <- t.conflicts + 1;
     incr conflicts_here;
+    budget_tick t (* effort (#60): one SAT conflict *);
     if t.theory <> None
     then (
       let maxl = ref 0 in
@@ -955,6 +971,7 @@ let search t assumps conflict_limit =
             match pick_branch t with
             | Some l ->
               t.decisions <- t.decisions + 1;
+              budget_tick t (* effort (#60): one SAT decision *);
               new_decision_level t;
               unchecked_enqueue t l Decision
             | None ->
@@ -984,6 +1001,7 @@ let search t assumps conflict_limit =
                     if not t.ok then result := Some R_unsat)))
           else (
             t.decisions <- t.decisions + 1;
+            budget_tick t (* effort (#60): one SAT decision (assumption-forced) *);
             new_decision_level t;
             unchecked_enqueue t !next Decision))
   done;

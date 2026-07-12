@@ -164,6 +164,25 @@ exception Theory_contract_violation of string
     be reconstructed. The driver installs the theory first, before asserting. *)
 val set_theory : t -> theory option -> unit
 
+(** {2 Effort-budget tick hook (board #60)}
+
+    A settable [unit -> unit] side-channel, modeled on {!trace}/{!set_theory}: [None] by
+    default, so the pure propositional core is bit-identical (one [None] branch of
+    overhead when unset — no counter, no allocation, no behavior change). When set,
+    [solve] calls it at each SAT {b conflict} and each SAT {b decision} — the two
+    unbounded-in-principle events of Boolean search. The driver installs a closure that
+    ticks a deterministic effort counter and raises to unwind [solve] once a
+    per-[check_sat] cap is exceeded (the counted, load-independent cutoff replacing the
+    wall clock for corpus measurement).
+
+    The core treats the hook as opaque: it stores no counter itself and knows nothing of
+    the budget, so [oxsmt_solver] keeps its stdlib-only, dependency-firewall-clean surface
+    (I3). Any exception the hook raises propagates out of [solve] uncaught — the driver's
+    [check_sat] boundary is the sole intended catch site. Ticking does not touch the
+    search path, so with the hook unset (or an unbounded cap) verdicts, models, and the
+    counter trio are unchanged. *)
+val set_budget_tick : t -> (unit -> unit) option -> unit
+
 (** The current decision level (0 at the base, before any decision). Exposed so a theory
     adapter can tag each {!field-on_assign}ed literal with the level at which it was
     asserted — the level {!field-on_backtrack} later references to undo trail-synchronized

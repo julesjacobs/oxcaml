@@ -86,14 +86,23 @@ type t =
          frame (so [length asserted_saved = length frames - 1]). Restored by [pop]. *)
   ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
   ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
+  ; mutable last_effort : int
+    (* effort consumed by the most recent check_sat (board #60) *)
+  ; mutable effort_exhausted : bool
+    (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check, poison-free:
+     distinct from [degraded]/[budget_exhausted], NOT sticky. *)
   }
 
-let create ?(split_budget = default_split_budget) () =
+let create ?(split_budget = default_split_budget) ?max_effort () =
   let env = Env.create () in
   let ctx = Context.create env in
   let sat = Sat.create () in
+  (* One shared effort budget for the session (board #60). [max_effort = None] is
+     unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
+     / interactive / [make test] path is byte-identical (the count is never printed). *)
+  let budget = Budget.create ?max:max_effort () in
   (* Install the theory on the pristine core BEFORE any clause (pristine-attach). *)
-  let cdclt = Cdclt.create ctx env sat ~split_budget in
+  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget in
   let base = Sat.new_var sat in
   { env
   ; ctx
@@ -111,6 +120,8 @@ let create ?(split_budget = default_split_budget) () =
   ; asserted_saved = []
   ; last_splits = 0
   ; budget_exhausted = false
+  ; last_effort = 0
+  ; effort_exhausted = false
   }
 ;;
 
@@ -295,6 +306,7 @@ let check_sat t =
   t.last_verdict <- Unknown;
   t.last_model <- None;
   t.budget_exhausted <- false;
+  t.effort_exhausted <- false;
   if t.degraded
   then Unknown
   else (
@@ -330,6 +342,15 @@ let check_sat t =
         t.degraded <- true;
         t.budget_exhausted <- true;
         Unknown
+      | exception Budget.Exceeded ->
+        (* Board #60: the deterministic effort cap fired (SAT conflicts/decisions + seam
+           Final-rounds). NOT a fault and — unlike the split cap above — NOT sticky and
+           does NOT set [degraded]: the search was merely cut off, the theory instance is
+           not bricked, so the very same query is re-runnable at a larger [max_effort]
+           (poison-free, per DESIGN §6). A distinct BUDGET tag ([effort_exhausted]), never
+           a verdict from an unfinished search. *)
+        t.effort_exhausted <- true;
+        Unknown
       | exception Combine.Incomplete _ ->
         (* DELIBERATE completeness degrade (ADR-0010 §3.6 case (ii): a structured Bool
            compound under a UF argument the combinator chooses not to decide). A NAMED
@@ -361,6 +382,7 @@ let check_sat t =
         Unknown
     in
     t.last_splits <- Cdclt.splits_used t.cdclt;
+    t.last_effort <- Cdclt.effort_used t.cdclt;
     t.last_verdict <- v;
     v)
 ;;
@@ -374,3 +396,5 @@ let get_model t =
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let budget_exhausted t = t.budget_exhausted
+let effort t = t.last_effort
+let effort_exhausted t = t.effort_exhausted
