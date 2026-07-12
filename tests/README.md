@@ -96,12 +96,17 @@ order (so push/pop / multi-check-sat files yield one block per check), each:
 (result
   (verdict sat|unsat|unknown)
   (core-size N)          ; optional — present when a core is available (unsat)
-  (model ((x 0) (y 1)))  ; optional — present iff sat; bindings (name value)
+  (model ((x 0) (y 1)))  ; optional — present iff sat; LEGACY flat (name value) body, OR
+  (model (sort S 2) (const a 0) (fun f (default 0) (case (0) 0)))  ; sidecar body (tables)
   (counters (conflicts N) (decisions N) (propagations N)))
 ```
 
 `verdict` and `counters` (all three keys) are required; field order is not
-significant; extra fields are ignored. A non-zero exit, unparseable output, or a
+significant; extra fields are ignored. The `(model …)` body is EITHER the legacy
+flat `((name value) …)` pair-list (a table-free const/Bool/LIA model) OR the §8
+sidecar grammar (`(sort …)`/`(const …)`/`(fun …)` entries) for a function-table
+model; the harness parses both (ADR-UF-models R9) and carries the sidecar body
+through to the eval self-check verbatim. A non-zero exit, unparseable output, or a
 block count that disagrees with the number of `check-sat`s in the file is a
 harness failure.
 
@@ -126,13 +131,21 @@ Golden output is a committed sidecar next to each case: `foo.smt2` →
 (goal 1
   (verdict unsat)
   (core-size 3)                                             ; when available
-  (model ((x 0) (y 1)))                                     ; when sat, sorted by name
+  (model ((x 0) (y 1)))                                     ; when sat, flat body sorted by name
   (counters (conflicts <100) (decisions <10) (propagations <1k)))
 ```
 
+A function-table sat renders its model in the sidecar body instead, so the golden
+also ASSERTS the per-sort domain sizes (the `(sort S n)` entries) and the table
+rows, e.g. `(model (sort S 2) (const a 0) (fun f (default 0) (case (0) 0)))`.
+
 Counters are **log-scale buckets** — `<10`, `<100`, `<1k`, `<10k`, `>=10k`
 (DESIGN.md §8) — so a golden diff appears only on an order-of-magnitude change,
-not on every ±1 wobble. Models are canonicalized (bindings sorted by name).
+not on every ±1 wobble. A flat model is canonicalized (bindings sorted by name); a
+table model is carried in the solver's canonical R10 order (sorts/functions/case
+tuples already deterministically ordered). Per-sort cardinality and total table
+rows also land in the uncommitted stats sidecar (`max_card`/`table_rows`) for the
+corpus sweep to aggregate.
 **No wall-clock or other nondeterministic value ever appears in a golden (I5,
 I6).**
 

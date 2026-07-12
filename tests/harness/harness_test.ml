@@ -43,7 +43,7 @@ let unknown_goal =
 let sat_goal =
   { verdict = Sat
   ; core_size = None
-  ; model = Some [ "y", "1"; "x", "0" ]
+  ; model = Some (Flat [ "y", "1"; "x", "0" ])
   ; counters = { conflicts = 5; decisions = 250; propagations = 3000 }
   }
 ;;
@@ -133,7 +133,7 @@ let () =
   let quoted_goal =
     { verdict = Sat
     ; core_size = None
-    ; model = Some [ "p q", "true" ]
+    ; model = Some (Flat [ "p q", "true" ])
     ; counters = { conflicts = 0; decisions = 0; propagations = 0 }
     }
   in
@@ -143,6 +143,43 @@ let () =
   check
     "sidecar bridge re-quotes a non-simple model name"
     (contains (model_to_sidecar [ "p q", "true" ]) "(const |p q| true)");
+  (* R9 transport: a function-table (sidecar-grammar) model body round-trips through
+     parse_solver_output -> Table, renders back verbatim in the golden, and re-quotes a
+     non-simple symbol NAME on the way out (the harness Sexp reader drops the |bars|). *)
+  let table_output =
+    "(result (verdict sat) (model (sort S 2) (const a 0) (fun f (default 0) (case (0) 0) \
+     (case (1) 0))) (counters (conflicts 0) (decisions 0) (propagations 0)))"
+  in
+  let table_goal =
+    match parse_solver_output table_output with
+    | Ok [ g ] -> g
+    | _ -> failwith "table_output did not parse to one goal"
+  in
+  check
+    "table body parses to a Table model (not Flat, not bad-model error)"
+    (match table_goal.model with
+     | Some (Table _) -> true
+     | _ -> false);
+  check
+    "table golden renders the sidecar entries verbatim"
+    (contains
+       (produced_text [ table_goal ])
+       "(model (sort S 2) (const a 0) (fun f (default 0) (case (0) 0) (case (1) 0)))");
+  check
+    "table stats: max_card = 2, table_rows = 2"
+    (model_table_stats table_goal.model = (2, 2));
+  let quoted_table =
+    match
+      parse_solver_output
+        "(result (verdict sat) (model (sort S 1) (const |a b| 0)) (counters (conflicts \
+         0) (decisions 0) (propagations 0)))"
+    with
+    | Ok [ g ] -> g
+    | _ -> failwith "quoted table did not parse"
+  in
+  check
+    "table golden re-quotes a non-simple const name"
+    (contains (produced_text [ quoted_table ]) "(const |a b| 0)");
   (* Pass: golden matches produced. *)
   let g = produced_text [ unknown_goal ] in
   check
@@ -260,8 +297,8 @@ let () =
   (match Array.to_list Sys.argv with
    | _ :: eval_bin :: case_smt2 :: _ ->
      (* bool_or_sat: (or p q) and (not q); q=true violates (not q). *)
-     let good = [ "p", "true"; "q", "false" ] in
-     let bad = [ "p", "false"; "q", "true" ] in
+     let good = Flat [ "p", "true"; "q", "false" ] in
+     let bad = Flat [ "p", "false"; "q", "true" ] in
      let sat_of model =
        { verdict = Sat
        ; core_size = None

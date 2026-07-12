@@ -30,11 +30,28 @@ type counters =
   ; propagations : int
   }
 
+(* A sat model, in one of two solver-emitted shapes (R9 transport):
+   - [Flat] is the LEGACY table-free body [((name token) ...)] — one nullary-symbol
+     binding per pair, the value a rendered token the eval Model reader types against the
+     symbol's declared sort. Const/Bool/LIA models take this path, byte-identical to the
+     pre-UF harness.
+   - [Table] is the §8 sidecar-grammar body: a sequence of [(sort S n)] /
+     [(const name tok)] / [(fun f (default tok) (case (toks) tok) ...)] entries, carried
+     verbatim as the harness [Sexp.t] the solver emitted (already in the solver's
+     canonical R10 order). The entries are re-serialized on the way OUT (golden text +
+     eval sidecar) with the symbol NAME slot re-quoted — the harness Sexp reader strips
+     [|bars|], so a name like [a b] must be re-wrapped or it re-lexes as two tokens (see
+     {!render_entry}). Both N-version readers (tests/eval, tests/gate) parse this grammar
+     verbatim, so the sidecar write is near pass-through. *)
+type model =
+  | Flat of (string * string) list
+  | Table of Sexp.t list
+
 (* One goal = one (check-sat). *)
 type goal_result =
   { verdict : verdict
   ; core_size : int option (* present when the solver reports a core (unsat) *)
-  ; model : (string * string) list option (* present when sat *)
+  ; model : model option (* present when sat *)
   ; counters : counters
   }
 
@@ -49,11 +66,15 @@ type solver_output = goal_result list
      (result
        (verdict sat|unsat|unknown)
        (core-size N)          ; optional; unsat with a core
-       (model ((x 0) (y 1)))  ; optional; present iff sat
+       (model ((x 0) (y 1)))  ; optional; present iff sat — LEGACY flat body, or
+       (model (sort S 2) (const a 0) (fun f (default 0) (case (0) 0)))  ; sidecar body
        (counters (conflicts N) (decisions N) (propagations N)))
    v}
 
-   verdict and counters are required; field order is not significant. *)
+   verdict and counters are required; field order is not significant. The [(model ...)]
+   body is EITHER the legacy flat [((name token) ...)] list (table-free models) OR the
+   sidecar grammar (sort/const/fun entries) for a function-table model; the harness
+   accepts both (R9). *)
 
 exception Bad_output of string
 
@@ -118,16 +139,30 @@ let parse_result sx =
       | _ -> raise (Bad_output "bad core-size")
     in
     let model =
+      (* The (model ...) body is EITHER the legacy flat pair-list — a SINGLE [Sexp.List]
+         whose every element is a 2-element [(name value)] pair — OR the sidecar grammar,
+         a sequence of [(sort ...)] / [(const ...)] / [(fun ...)] entries. A sidecar entry
+         is a list headed by a keyword atom (arity <> 2 for fun/sort), so it never
+         masquerades as a flat pair-list; the discriminator is exactly "one list of
+         2-lists" => flat. *)
+      let is_flat_pairs pairs =
+        List.for_all
+          (function
+            | Sexp.List [ Sexp.Atom _; _ ] -> true
+            | _ -> false)
+          pairs
+      in
       match get "model" with
       | None | Some [] -> None
-      | Some [ Sexp.List bindings ] ->
+      | Some [ Sexp.List pairs ] when is_flat_pairs pairs ->
         Some
-          (List.map
-             (function
-               | Sexp.List [ Sexp.Atom k; v ] -> k, Sexp.to_string v
-               | _ -> raise (Bad_output "bad model binding"))
-             bindings)
-      | Some _ -> raise (Bad_output "bad model")
+          (Flat
+             (List.map
+                (function
+                  | Sexp.List [ Sexp.Atom k; v ] -> k, Sexp.to_string v
+                  | _ -> raise (Bad_output "bad model binding"))
+                pairs))
+      | Some entries -> Some (Table entries)
     in
     let counters =
       match get "counters" with
@@ -168,6 +203,68 @@ let expected_statuses (sexps : Sexp.t list) : verdict option list =
 (* Golden text generation. *)
 (* ------------------------------------------------------------------ *)
 
+(* Re-serialize one sidecar model entry [(sort|const|fun NAME ...)]. The harness Sexp
+   reader strips a quoted symbol's [|bars|] to a bare [Atom], so the NAME slot is
+   re-quoted with {!Sexp.quote_symbol} — a name like [a b] must round-trip as [|a b|] or
+   it re-lexes as two tokens and the eval reader rejects the model. The rest of an entry
+   (cardinalities, value tokens: numerals, [(- n)], [true]/[false]) are never symbol names
+   and never need quoting, so they pass through {!Sexp.to_string} verbatim. A shape the
+   CLI does not emit falls back to a plain [to_string]. *)
+let render_entry (e : Sexp.t) : string =
+  match e with
+  | Sexp.List (Sexp.Atom (("sort" | "const" | "fun") as kw) :: Sexp.Atom name :: rest) ->
+    let parts = kw :: Sexp.quote_symbol name :: List.map Sexp.to_string rest in
+    "(" ^ String.concat " " parts ^ ")"
+  | other -> Sexp.to_string other
+;;
+
+(* Render a model body (the text spliced inside [(model ...)]) for both golden text and
+   the eval sidecar. [Flat] sorts pairs by name (stability) and re-quotes each name;
+   [Table] carries the solver's canonical entry order (R10) verbatim, re-quoting names per
+   entry. *)
+let render_model_body = function
+  | Flat m ->
+    let m = List.sort (fun (a, _) (c, _) -> String.compare a c) m in
+    "("
+    ^ String.concat
+        " "
+        (List.map (fun (k, v) -> Printf.sprintf "(%s %s)" (Sexp.quote_symbol k) v) m)
+    ^ ")"
+  | Table entries -> String.concat " " (List.map render_entry entries)
+;;
+
+(* Table-size stats for a sat model (design-author watch item), for the corpus sweep to
+   aggregate: [max_card] = the largest uninterpreted-sort finite-universe cardinality (0
+   when the model has no [(sort ...)] entry — a table-free / const-only model),
+   [table_rows] = the total number of [(case ...)] rows across all function/predicate
+   tables (0 for a flat model, which has none). Derived from the parsed model, not a
+   solver-emitted counter, so it is a pure function of the accepted model
+   (byte-determinism carries over). *)
+let model_table_stats = function
+  | None | Some (Flat _) -> 0, 0
+  | Some (Table entries) ->
+    List.fold_left
+      (fun (max_card, rows) e ->
+         match e with
+         | Sexp.List [ Sexp.Atom "sort"; _; Sexp.Atom n ] ->
+           (match int_of_string_opt n with
+            | Some k -> max max_card k, rows
+            | None -> max_card, rows)
+         | Sexp.List (Sexp.Atom "fun" :: _ :: fun_entries) ->
+           let cases =
+             List.fold_left
+               (fun c -> function
+                  | Sexp.List (Sexp.Atom "case" :: _) -> c + 1
+                  | _ -> c)
+               0
+               fun_entries
+           in
+           max_card, rows + cases
+         | _ -> max_card, rows)
+      (0, 0)
+      entries
+;;
+
 let goal_block idx g =
   let b = Buffer.create 128 in
   Printf.bprintf b "(goal %d\n" idx;
@@ -176,15 +273,7 @@ let goal_block idx g =
    | Some sz -> Printf.bprintf b "  (core-size %d)\n" sz
    | None -> ());
   (match g.model with
-   | Some m ->
-     (* Canonicalize: sort bindings by variable name so the model is stable. *)
-     let m = List.sort (fun (a, _) (c, _) -> String.compare a c) m in
-     let rendered =
-       String.concat
-         " "
-         (List.map (fun (k, v) -> Printf.sprintf "(%s %s)" (Sexp.quote_symbol k) v) m)
-     in
-     Printf.bprintf b "  (model (%s))\n" rendered
+   | Some m -> Printf.bprintf b "  (model %s)\n" (render_model_body m)
    | None -> ());
   Printf.bprintf
     b
@@ -425,12 +514,13 @@ let run_solver solver file : (solver_output, string) result * string =
 (* N-version evaluator on a sat verdict's model before accepting it. *)
 (* ------------------------------------------------------------------ *)
 
-(* Render the solver's inline model [(name, value) ...] into the eval CLI's sidecar
-   grammar: one [(const NAME VALUE)] per binding. VALUE is the solver's own rendered token
-   (e.g. [true] / [false] for Bool; [5] / [(- 3)] for Int), which the evaluator's Model
-   reader interprets against each symbol's declared sort. Function/array models are not
-   representable in the flat inline format — the solver does not yet emit them, and would
-   need a richer harness model type alongside. *)
+(* Render a sat model into the eval CLI's sidecar grammar (the file the N-version
+   evaluator and the Lean gate both parse verbatim). A [Flat] model becomes one
+   [(const NAME VALUE)] per binding — VALUE is the solver's own rendered token
+   ([true]/[false] for Bool, [5] / [(- 3)] for Int, the element index for an uninterpreted
+   sort), typed by the reader against each symbol's declared sort. A [Table] model is near
+   pass-through: its sidecar entries are re-serialized (names re-quoted, {!render_entry})
+   and wrapped in [(model ...)] — the sort/const/fun grammar the solver already emitted. *)
 let model_to_sidecar (model : (string * string) list) : string =
   let b = Buffer.create 128 in
   Buffer.add_string b "(model\n";
@@ -442,6 +532,11 @@ let model_to_sidecar (model : (string * string) list) : string =
   Buffer.contents b
 ;;
 
+let sidecar_of_model = function
+  | Flat m -> model_to_sidecar m
+  | Table entries -> "(model " ^ String.concat " " (List.map render_entry entries) ^ ")\n"
+;;
+
 let truncate_detail s =
   let s = String.trim s in
   if String.length s <= 400 then s else String.sub s 0 400 ^ " [...]"
@@ -450,7 +545,7 @@ let truncate_detail s =
 (* Run [eval_bin smt2 <tmp-model>] and map its exit code to an [eval_outcome]: 0
    MODEL-SATISFIES, 1 MODEL-FAILS (soundness), 2 malformed/unsupported (contract bug),
    anything else / spawn failure -> unusable. The temp model file is always removed. *)
-let run_eval ~eval_bin ~smt2 ~(model : (string * string) list) : eval_outcome =
+let run_eval ~eval_bin ~smt2 ~(model : model) : eval_outcome =
   match
     let model_path = Filename.temp_file "oxsmt_model" ".model" in
     Fun.protect
@@ -459,7 +554,7 @@ let run_eval ~eval_bin ~smt2 ~(model : (string * string) list) : eval_outcome =
         | _ -> ())
       (fun () ->
          let oc = open_out_bin model_path in
-         output_string oc (model_to_sidecar model);
+         output_string oc (sidecar_of_model model);
          close_out oc;
          spawn_capture [| eval_bin; smt2; model_path |])
   with
