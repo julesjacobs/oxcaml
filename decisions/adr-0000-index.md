@@ -37,8 +37,15 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   touched reviewed hunks / conflict resolutions → full re-test + scoped
   re-review). The DESIGN §11 linear-trunk / every-commit-green-at-its-landed-sha
   invariant is unchanged. [accepted]
-<!-- ADR-0010 (internalization-based theory combination — each boundary node is
-     its own proxy; supersedes the explicit-purification drafts) is drafted
-     (logs/adr-purification-draft.md, v4) but NOT yet promoted; it promotes with
-     the stage-2 combination-rebuild landing. -->
+- ADR-0010 — Internalization-based theory combination: rebuild `smt/combine` so
+  each boundary term NODE is its own proxy (ownership by head symbol; no fresh
+  `.oxsmt.*` proxy symbols, no defining equations, no preprocess purify pass). A
+  total structural interface walk makes sharedness total by construction — killing
+  the W1/R1 wrong-SAT family (too-small approximation) and the fresh-sum
+  non-termination (too-large one); Bool-under-UF splits into native-constant /
+  leaf-bridge / degrade-to-`Incomplete` cases (§3.6). The CDCL(T) seam and the
+  frozen `THEORY` interface are KEPT (no e-graph hub); EUF/LIA adapters unchanged.
+  Supersedes the v1–v3 explicit-purification drafts. Full text (with errata: §5a
+  mechanism, §3.6 surfaced-vs-buried + option-(a) infeasibility, §6 fixture trio,
+  ite precondition) in `adr-0010-internalization.md`. [accepted]
 
