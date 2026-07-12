@@ -61,4 +61,12 @@ decision requires the adversarial-review ritual (DESIGN.md §10, §11).
   `.oxsmt.*` capability, `assert_lemma` binder-builder, nested-∀ rejected); L2–L6
   interface sketches. Design-only, gated behind M4 close + the freeze rituals; full
   text in `adr-0012-lemma-tier.md`. [ratified Rev 3.2 — design-only]
+- ADR-0013 — Certificates + Lean replay, end-to-end (M5, elaborates ADR-0006): the
+  resolution-skeleton + reflected-checker replay path — emission points (`on_learned`),
+  the four in-search `R_unsat` terminal exits (§4.0, incl. E3 `Theory_prop` materialization
+  + E4 Final-effort `T_lemma`), EUF explicit proof terms, LIA `omega` M5 bootstrap → reflected
+  Farkas multiplier checker target (D3 erratum), the A5 accounting identity. Rev 5 folds the
+  codex Rev-4 final leg (3 HIGH + 1 MEDIUM). Design-only; full text in
+  `adr-0013-certificates-replay.md`. The D3 erratum was applied to `adr-0006-certificates.md`
+  as its Revision 5 at this promotion. [ratified Rev 5 — design-only]
 

@@ -825,3 +825,44 @@ under-inclusion mutant. *Lesson (second occurrence of this shape, for
 lessons.md): when a fix arrives as an on/off switch, look for the
 proportionality rule it's approximating. Switches have cliffs and
 stale-state hazards; structural cost-proportionality has neither.*
+
+### A5 — Freezing is not an end in itself (2026-07-12, design author)
+
+An interface freeze exists to stabilize load-bearing surfaces against
+churn and drive-by edits — it is a tool, not a goal. A Term unfreeze (or
+any §10 unfreeze) is fine when it leads to a better design; run the
+ritual and take the better design. Concretely: when a design contorts
+itself to stay off a frozen surface (encodings, side-channels, reserved
+namespaces standing in for what a type should express), the comparison
+must be argued on design merits — correctness-by-construction,
+enforceability, extensibility — with freeze-avoidance carrying no weight
+of its own. If the frozen-surface version wins on merits, unfreeze.
+
+### A6 — Gates gate; sweeps attribute (2026-07-12, design author)
+
+Long corpus sweeps must not sit on the land critical path. The merge
+gates are the fast, binary checks: build, test suites, mutants,
+frozen-interface check, formatter, defensive gate. The full-corpus sweep
+is *attribution* — it tells us what a land bought, not whether it may
+land — so it runs as a follow-up job, concurrent with whatever the box
+is doing, and its results arrive as a STATUS amendment rather than
+inside the land chore. This became safe the moment counted-effort became
+the primary measurement term: counted effort is load-immune by
+construction, so sweeps no longer need the box to themselves and no
+longer need to serialize against builds or each other (wall numbers stay
+secondary/informational). The same reasoning extends downstream: a
+successor task may branch speculatively off an approved frozen tip
+before the fast-forward completes, since FF-only guarantees trunk equals
+that sha; a bounced land costs one rebase, which the velocity directive
+prices as acceptable.
+
+Two hard edges survive the decoupling. First, the mismatch tripwire is
+not measurement: if a post-land sweep reports MISMATCH>0 or a
+wrong-direction surprise, trunk stops advancing until it is explained —
+the sweep is off the critical path, the soundness signal it carries is
+not. Second, provenance discipline is unchanged: sweeps still run
+release-config binaries with stamped build_commit/dirty checks, and
+baseline promotion stays fail-closed. *Lesson: when a measurement
+protocol becomes load-immune, re-examine every place it was being
+serialized — the serialization was compensating for a fragility that no
+longer exists.*

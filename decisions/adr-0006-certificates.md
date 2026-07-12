@@ -9,6 +9,57 @@ per-compile trust from all search code (DESIGN §10 endgame), and replaying
 certificates as Lean proof scripts converts the oracle from a `grind` **searcher**
 into a **checker** (fast, deterministic, immune to grind incompleteness).
 
+**Revision 5 (2026-07-11) — D3 LIA-leaf-checker erratum (staged amendment; adds a
+ratified target, no frozen-type change; master-approved per reconciliation R5):**
+Decision 3 named Lean core **`omega` the FIRM default LIA leaf checker**. A
+cross-model finding that post-dates D3 (codex Rev-2 P2) shows `omega` validates **the
+theorem, not the certificate's witness**: `omega` re-derives its own refutation and
+**ignores the emitted Farkas multipliers**, so (a) an emitter that produced *wrong*
+multipliers is **masked in Lean** whenever the leaf goal is independently `omega`-true
+(the multiplier error is then caught only by the N-version OCaml checker), and (b)
+`omega`-on-a-leaf is Lean *re-searching*, in tension with D3's own thesis that Lean
+"stops searching (`grind`) and merely checks." D3 was ratified before this insight
+existed; this is the correction mechanism working, not decision churn.
+
+Amendment — **staged, both parts ratified:**
+- **`omega` remains the M5 BOOTSTRAP** LIA-leaf checker. D3's operational content is
+  intact for M5: `omega` is Lean *core* (no Mathlib), emits a **kernel-checked** proof
+  term (no extra axiom, unlike `native_decide`), is complete and deterministic, and —
+  unlike `grind` — never gives up. LIA replay works day one and is **kernel-sound on
+  the theorem**. In the bootstrap interim the OCaml checker is the sole *witness*
+  checker for LIA; this is stated, not hidden.
+- **A reflected multiplier checker is the ratified TARGET.** Represent the
+  `Le`-normal rows + the emitted `(lit, farkas_mult)` combo as **closed data**; a Lean
+  *function* clears denominators, checks each multiplier's sign (`Le`→nonnegative,
+  `Eq`→free per the L6 rule), sums the scaled rows by **kernel `Int` arithmetic**, and
+  checks the result cancels every variable to a **strictly positive constant**;
+  discharge `combineAndCheck rows combo = true` by `decide`, backed by a **once-proved
+  soundness theorem** `combineAndCheck rows combo = true → (∧ rowsᵢ with signs) → False`.
+  This **certifies the witness** (the emitted multipliers), closing (a), and is a
+  *check* not a *search*, closing (b). It is the **same reflected-checker + once-proved-
+  soundness-theorem discipline** as the M5 resolution skeleton (this ADR's R2/§3.1), so
+  the Lean side unifies around one construction.
+
+**Distinct from the route ADR-0006 already rejected.** The earlier "explicit-multiplier"
+Farkas route was rejected because it still called `omega` for the `Σ = k` algebraic
+identity (so it added trust rather than removing it). The target here is a **fully
+reflected, `omega`-free** computation over closed integer data discharged by `decide` —
+the ring-free normalizer that route lacked, now realized as `combineAndCheck`.
+
+**No frozen-type change.** The `Lia_farkas` leaf shape (`{ concl; combo }`, signed
+`farkas_mult`) is unchanged; both the bootstrap and target consume the identical leaf.
+`Explanation`/`Rule_tag`/`THEORY` seam unchanged and still frozen. The trust-grade
+distinction this erratum turns on — **certifies-the-theorem** (`omega`, bootstrap) vs
+**certifies-the-witness** (reflected checker, target) — is recorded in the trust story.
+
+**M5 acceptance criterion (added by this erratum):** the LIA leaf replays under `omega`
+at M5 (kernel-checked); the reflected multiplier checker + its soundness theorem is a
+tracked post-M5 target whose landing flips the LIA leaf from theorem-trust to
+witness-trust in Lean, and until it lands STATUS records that the LIA multiplier check
+is OCaml-only. (Rejected alternative, on record: making the reflected checker a
+*blocking* M5 deliverable — rejected because `omega` already gives kernel soundness at
+M5, so blocking M5 on the reflected checker trades no soundness for schedule risk.)
+
 **Revision 4 (2026-07-11) — L6 erratum (docs-only clarification; no code, no
 interface, no design change; master-approved):** the `Lia_farkas` leaf's multiplier
 convention, disambiguated for **equality premises** (codex cross-model finding L6,
