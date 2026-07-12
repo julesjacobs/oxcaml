@@ -251,6 +251,29 @@ val check_sat : t -> verdict
     reconstruction, not of the verdict. *)
 val get_model : t -> model option
 
+(** {2 Certificate emission (ADR-0013)}
+    — additive, compile-out-able side channel. *)
+
+(** Install (or, with [None], remove) a certificate-emission trace on the inner SAT core.
+    {b Must be called on a PRISTINE session} — before the first {!assert_term}/{!push} —
+    per the {!Oxsmt_solver.Sat.set_trace} lifecycle contract (the recorder must observe
+    every input from the start, or a conclusion could cite an untraced clause's id). A
+    [None] default means byte-identical solving; a set trace bypasses learned-clause
+    minimization (ADR-0013 §1.4(b), a weaker-but-sound solver), so verdicts are preserved
+    but counters may differ from an untraced run. *)
+val install_cert_trace : t -> Oxsmt_solver.Sat.trace option -> unit
+
+(** The active frame-selector assumptions the most recent (and next) {!check_sat} solves
+    under ([List.map Sat.pos frames]). The certificate's terminal [Failed_assumption] (E3)
+    step is conditioned on these being true — the checker seeds them to realize the §1.0
+    selector strip. *)
+val cert_assumptions : t -> Oxsmt_solver.Sat.lit list
+
+(** The failed-assumption (selector) core of the most recent {!check_sat} that returned
+    [Unsat] under a nonempty assumption set; empty otherwise. Passthrough of
+    {!Oxsmt_solver.Sat.failed_assumptions}. *)
+val failed_assumptions : t -> Oxsmt_solver.Sat.lit list
+
 (** The SAT core's counter trio, monotonic across the session (DESIGN.md §8). *)
 val stats : t -> Oxsmt_solver.Sat.Stats.t
 

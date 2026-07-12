@@ -1,0 +1,437 @@
+(* Certificate replay checker (ADR-0013 step 2). See checker.mli. Stdlib-only over the
+   recorder + the frozen Sat lit algebra. *)
+
+module Sat = Oxsmt_solver.Sat
+
+type verdict =
+  | Valid
+  | Invalid of string
+  | Unsupported of string
+
+type events =
+  { inputs : Recorder.input_event list
+  ; units : Recorder.unit_event list
+  ; learned : Recorder.learned_event list
+  ; theory : Recorder.theory_event list
+  ; conclusion : Sat.unsat_conclusion option
+  ; assumptions : Sat.lit list
+  }
+
+let of_recorder r ~assumptions =
+  { inputs = Recorder.inputs r
+  ; units = Recorder.units r
+  ; learned = Recorder.learned r
+  ; theory = Recorder.theory_clauses r
+  ; conclusion = Recorder.conclusion r
+  ; assumptions
+  }
+;;
+
+let string_of_verdict = function
+  | Valid -> "VALID"
+  | Invalid reason -> "INVALID(" ^ reason ^ ")"
+  | Unsupported feature -> "UNSUPPORTED(" ^ feature ^ ")"
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Kind-keyed citation resolution (board #153a). Each content event registers its clause
+   under its id AND its KIND. A citation site demands a specific kind set; a wrong-kind
+   hit (the [Root_empty]-cites-a-learned-id false-clean codex found) is rejected exactly
+   like a dangling id. Ambiguity (one id, two content clauses — the cross-solver misuse
+   HIGH-4) fails closed too: the recorder cannot bind to a solver identity, so a repeated
+   id is unresolvable, never silently collapsed. *)
+
+type kind =
+  | Kinput of Sat.origin
+  | Klearned
+  | Ktheory of Sat.theory_clause_role
+
+let kind_name = function
+  | Kinput Sat.Query -> "input(query)"
+  | Kinput Sat.Theory_lemma -> "input(theory-lemma)"
+  | Klearned -> "learned"
+  | Ktheory Sat.Reason -> "theory-reason"
+  | Ktheory Sat.Conflict -> "theory-conflict"
+;;
+
+type resolution =
+  | Found of kind * Sat.lit array
+  | Dangling
+  | Ambiguous
+
+(* id -> (kind, clause), with a separate ambiguity set: a content id emitted by two
+   distinct events (any kinds) is poisoned to [Ambiguous]. *)
+let build_index ev =
+  let by_id = Hashtbl.create 256 in
+  let ambiguous = Hashtbl.create 16 in
+  let add id kc =
+    if Hashtbl.mem ambiguous id
+    then ()
+    else if Hashtbl.mem by_id id
+    then (
+      Hashtbl.remove by_id id;
+      Hashtbl.replace ambiguous id ())
+    else Hashtbl.replace by_id id kc
+  in
+  List.iter
+    (fun (e : Recorder.input_event) ->
+       add e.Recorder.id (Kinput e.Recorder.origin, e.Recorder.clause))
+    ev.inputs;
+  List.iter
+    (fun (e : Recorder.learned_event) -> add e.Recorder.id (Klearned, e.Recorder.clause))
+    ev.learned;
+  List.iter
+    (fun (e : Recorder.theory_event) ->
+       add e.Recorder.id (Ktheory e.Recorder.role, e.Recorder.clause))
+    ev.theory;
+  fun id ->
+    if Hashtbl.mem ambiguous id
+    then Ambiguous
+    else (
+      match Hashtbl.find_opt by_id id with
+      | Some (k, c) -> Found (k, c)
+      | None -> Dangling)
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Partial assignment: var -> bool (absent = unassigned). *)
+
+type assign = (Sat.var, bool) Hashtbl.t
+
+type lit_status =
+  | LTrue
+  | LFalse
+  | LUnassigned
+
+let lit_status (a : assign) l =
+  match Hashtbl.find_opt a (Sat.var_of_lit l) with
+  | None -> LUnassigned
+  | Some b -> if b = Sat.sign_of_lit l then LTrue else LFalse
+;;
+
+(* Make [l] true. [`Conflict] if its var is already fixed the other way. *)
+let set_true (a : assign) l =
+  let v = Sat.var_of_lit l
+  and want = Sat.sign_of_lit l in
+  match Hashtbl.find_opt a v with
+  | Some b -> if b = want then `Ok else `Conflict
+  | None ->
+    Hashtbl.replace a v want;
+    `Ok
+;;
+
+let falsified (a : assign) clause =
+  Array.for_all (fun l -> lit_status a l = LFalse) clause
+;;
+
+(* ------------------------------------------------------------------ *)
+(* An incremental unit-propagation engine over a growing clause database (§1.3). The
+   database is built from the AXIOM clauses (query/lemma inputs + theory leaves) and then
+   the LEARNED clauses one at a time, each folded in only AFTER it has replayed by ordered
+   RUP — so the closure a learned clause is checked against never assumes a
+   not-yet-verified (or later) learned clause: no circularity. Every clause in the DB is
+   either a valid axiom (a theory leaf's witness is a later tranche) or a verified learned
+   clause, so a literal forced into the closure is genuinely entailed and a clause
+   falsified by it is genuinely refuted. Naive fixpoint; a session's guarded clauses yield
+   no level-0 unit and settle in one pass. *)
+module Bcp = struct
+  type t =
+    { assign : assign
+    ; mutable db : Sat.lit array list
+    }
+
+  let create () = { assign = Hashtbl.create 256; db = [] }
+  let snapshot t : assign = Hashtbl.copy t.assign
+
+  (* Propagate [db] to fixpoint into [a]; [true] if a level-0 conflict is derived (the
+     assignment then stands as-is, consistent up to the conflicting clause). *)
+  let propagate_into (a : assign) db =
+    let changed = ref true
+    and conflict = ref false in
+    while !changed && not !conflict do
+      changed := false;
+      List.iter
+        (fun clause ->
+           if not !conflict
+           then (
+             let satisfied = ref false
+             and unassigned = ref [] in
+             Array.iter
+               (fun l ->
+                  match lit_status a l with
+                  | LTrue -> satisfied := true
+                  | LFalse -> ()
+                  | LUnassigned -> unassigned := l :: !unassigned)
+               clause;
+             if not !satisfied
+             then (
+               match !unassigned with
+               | [] -> conflict := true
+               | [ l ] ->
+                 (match set_true a l with
+                  | `Ok -> changed := true
+                  | `Conflict -> conflict := true)
+               | _ -> ())))
+        db
+    done;
+    !conflict
+  ;;
+
+  let add_axioms t clauses = t.db <- clauses @ t.db
+  let propagate t = ignore (propagate_into t.assign t.db : bool)
+
+  (* Fold in one verified learned clause. Only a clause that is UNIT (or already
+     falsified) under the current closure can extend it — a satisfied or >=2-free clause
+     adds no level-0 fact — so the common case is O(width) and a full re-propagation runs
+     only when a learned unit actually fires (rare). This keeps the incremental closure
+     linear in practice rather than O(learned × clauses). *)
+  let add_learned t clause =
+    t.db <- clause :: t.db;
+    let satisfied = ref false
+    and unassigned = ref [] in
+    Array.iter
+      (fun l ->
+         match lit_status t.assign l with
+         | LTrue -> satisfied := true
+         | LFalse -> ()
+         | LUnassigned -> unassigned := l :: !unassigned)
+      clause;
+    if not !satisfied
+    then (
+      match !unassigned with
+      | [ l ] ->
+        (match set_true t.assign l with
+         | `Ok -> ignore (propagate_into t.assign t.db : bool) (* cascade the new unit *)
+         | `Conflict -> ())
+      | _ -> () (* [] conflict, or >=2 free: no new level-0 fact to propagate *))
+  ;;
+
+  (* [true] iff seeding [lits] true into a copy of the current closure and propagating
+     over the whole DB derives a conflict — the level-0 RUP of the assumption-forcing
+     against the verified clause DB (the OCaml-side selector strip; §4.0 E3). *)
+  let refutes_under t lits =
+    let a = snapshot t in
+    let seeded_conflict = List.exists (fun l -> set_true a l = `Conflict) lits in
+    seeded_conflict || propagate_into a t.db
+  ;;
+end
+
+(* ------------------------------------------------------------------ *)
+(* Ordered, hint-restricted RUP (§1.4) for a learned clause. [base] is the closure so far
+   (axioms + earlier verified learned clauses); the clause negates its own literals. Each
+   antecedent, IN ORDER, must be unit (propagate its one free literal) or falsified
+   (conflict — success). A cited clause that is satisfied, or has >=2 free literals,
+   breaks the chain: reject, never search. *)
+let ordered_rup base ~clause ~antecedents ~resolve =
+  let a : assign = Hashtbl.copy base in
+  let conflict = ref false in
+  List.iter
+    (fun l ->
+       if (not !conflict) && set_true a (Sat.neg_lit l) = `Conflict then conflict := true)
+    (Array.to_list clause);
+  if !conflict
+  then Ok () (* negating the clause already contradicts the closure: it is entailed *)
+  else (
+    let rec go = function
+      | [] -> Error "RUP chain consumed without deriving a conflict"
+      | id :: rest ->
+        (match (resolve id : resolution) with
+         | Ambiguous ->
+           Error
+             (Printf.sprintf "antecedent id %d is ambiguous (two clauses share it)" id)
+         | Dangling ->
+           Error (Printf.sprintf "antecedent id %d resolves to no content clause" id)
+         | Found (_kind, hint) ->
+           let satisfied = ref false
+           and unassigned = ref [] in
+           Array.iter
+             (fun l ->
+                match lit_status a l with
+                | LTrue -> satisfied := true
+                | LFalse -> ()
+                | LUnassigned -> unassigned := l :: !unassigned)
+             hint;
+           if !satisfied
+           then
+             Error
+               (Printf.sprintf
+                  "hint %d is already satisfied, not unit (chain is not ordered-RUP)"
+                  id)
+           else (
+             match !unassigned with
+             | [] -> Ok () (* falsified: conflict reached *)
+             | [ l ] ->
+               (match set_true a l with
+                | `Conflict -> Ok () (* propagation conflicts: conflict reached *)
+                | `Ok -> go rest)
+             | more ->
+               Error
+                 (Printf.sprintf
+                    "hint %d is not unit (%d free literals) — hint-restricted RUP \
+                     refuses to search"
+                    id
+                    (List.length more))))
+    in
+    go antecedents)
+;;
+
+(* ------------------------------------------------------------------ *)
+
+exception Reject of verdict
+
+let rejectf fmt = Printf.ksprintf (fun s -> raise (Reject (Invalid s))) fmt
+let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Reject (Unsupported s))) fmt
+
+(* A cited clause that is the empty theory Conflict transient is an unconditional
+   [T_conflict []] (ADR-0013 Rev 6): no v1 theory leaf witnesses ⊥-from-∅, so it is
+   loud-uncertified (Unsupported), never fabricated as Valid.
+
+   MARKED EXTENSION POINT (do NOT implement here) for the ADR-0014 Rev-4 fabric-edge /
+   [Shared_eq] leaf (a virtual proposition for s=t with assumption discharge): such a leaf
+   is NOT representable in today's frozen Sat trace (theory roles are exactly
+   [{Reason;Conflict}]), so the checker cannot see one yet — but when the cert format
+   grows that leaf kind, it must route HERE and be rejected fail-closed, landing as its
+   own reviewed tranche. *)
+let guard_theory_leaf kind clause =
+  match kind with
+  | Ktheory Sat.Conflict when Array.length clause = 0 ->
+    unsupportedf
+      "empty theory Conflict clause (unconditional T_conflict []) — no v1 leaf witnesses \
+       false from the empty premise set (ADR-0013 Rev 6)"
+  | _ -> ()
+;;
+
+let check ev =
+  try
+    let resolve = build_index ev in
+    (* a cited id must resolve to a content event of an ALLOWED kind. *)
+    let resolve_as ~what ~allowed id =
+      match (resolve id : resolution) with
+      | Ambiguous -> rejectf "%s cites ambiguous id %d (two clauses share it)" what id
+      | Dangling -> rejectf "%s cites id %d, which resolves to no content clause" what id
+      | Found (kind, clause) ->
+        if not (List.mem kind allowed)
+        then
+          rejectf
+            "%s cites id %d of kind %s; expected one of [%s]"
+            what
+            id
+            (kind_name kind)
+            (String.concat "; " (List.map kind_name allowed));
+        guard_theory_leaf kind clause;
+        kind, clause
+    in
+    (* terminal conclusion must be present (a truncated stream drops it). *)
+    let conclusion =
+      match ev.conclusion with
+      | Some c -> c
+      | None -> rejectf "no terminal conclusion (truncated / non-terminating stream)"
+    in
+    (* an empty theory Conflict leaf anywhere is loud-uncertified (Rev 6 / fabric ext pt). *)
+    List.iter
+      (fun (e : Recorder.theory_event) ->
+         guard_theory_leaf (Ktheory e.Recorder.role) e.Recorder.clause)
+      ev.theory;
+    (* the closure engine: axioms (inputs both origins + theory leaves) then verified
+       learned clauses, folded incrementally. *)
+    let bcp = Bcp.create () in
+    Bcp.add_axioms
+      bcp
+      (List.map (fun (e : Recorder.input_event) -> e.Recorder.clause) ev.inputs);
+    Bcp.add_axioms
+      bcp
+      (List.map (fun (e : Recorder.theory_event) -> e.Recorder.clause) ev.theory);
+    Bcp.propagate bcp;
+    (* (b) every declared level-0 unit is inside the re-derived axiom closure. *)
+    List.iter
+      (fun (u : Recorder.unit_event) ->
+         match lit_status bcp.Bcp.assign u.Recorder.lit with
+         | LTrue -> ()
+         | LFalse | LUnassigned ->
+           rejectf
+             "declared level-0 unit (id %d) is not entailed by BCP over the inputs"
+             u.Recorder.id)
+      ev.units;
+    (* (c) each learned clause replays by ordered RUP over its recorded antecedents, then
+       is folded into the closure for the clauses that cite it downstream. *)
+    List.iter
+      (fun (le : Recorder.learned_event) ->
+         match
+           ordered_rup
+             (Bcp.snapshot bcp)
+             ~clause:le.Recorder.clause
+             ~antecedents:le.Recorder.antecedents
+             ~resolve
+         with
+         | Ok () -> Bcp.add_learned bcp le.Recorder.clause
+         | Error reason ->
+           rejectf
+             "learned clause (id %d) fails ordered-RUP replay: %s"
+             le.Recorder.id
+             reason)
+      ev.learned;
+    (* terminal conclusion (§4.0 E1–E4). *)
+    (match conclusion with
+     | Sat.Root_empty { input_id } ->
+       (* E1 (Query) / E4 (Theory_lemma): a clause that filtered to [] under the level-0
+          closure. Kind-keyed: MUST be an input (the wrong-kind guard). *)
+       let _kind, clause =
+         resolve_as
+           ~what:"Root_empty"
+           ~allowed:[ Kinput Sat.Query; Kinput Sat.Theory_lemma ]
+           input_id
+       in
+       if not (falsified bcp.Bcp.assign clause)
+       then
+         rejectf
+           "Root_empty cites id %d, but that clause is not falsified by the level-0 \
+            closure"
+           input_id
+     | Sat.Level0_conflict { conflict_id } ->
+       (* E2: a level-0 conflict clause — a Boolean input/learned clause or a theory
+          Conflict transient. (A theory Reason leaf is a propagation, never a conflict.) *)
+       let _kind, clause =
+         resolve_as
+           ~what:"Level0_conflict"
+           ~allowed:
+             [ Kinput Sat.Query; Kinput Sat.Theory_lemma; Klearned; Ktheory Sat.Conflict ]
+           conflict_id
+       in
+       if not (falsified bcp.Bcp.assign clause)
+       then
+         rejectf
+           "Level0_conflict cites id %d, but that clause is not falsified by the level-0 \
+            closure"
+           conflict_id
+     | Sat.Failed_assumption { antecedents } ->
+       (* E3, the universal session exit. The recorded antecedents are the assumption-
+          forcing chain (the Lean cert's explicit []-derivation hints); the OCaml checker
+          confirms each resolves kind-keyed, then refutes the assumptions by BCP over the
+          verified clause DB (seeding the assumption literals true = the §1.0 selector
+          strip effect: an assumed-true selector's ¬sel literal is false throughout). This
+          is robust to the frequent level-0-failure case where analyze_final backjumped to
+          0 and emitted [] antecedents — the verified learned clauses in the DB carry the
+          forcing. *)
+       List.iter
+         (fun id ->
+            ignore
+              (resolve_as
+                 ~what:"Failed_assumption antecedent"
+                 ~allowed:
+                   [ Kinput Sat.Query
+                   ; Kinput Sat.Theory_lemma
+                   ; Klearned
+                   ; Ktheory Sat.Reason
+                   ]
+                 id
+               : kind * Sat.lit array))
+         antecedents;
+       if not (Bcp.refutes_under bcp ev.assumptions)
+       then
+         rejectf
+           "Failed_assumption: seeding the assumptions true does not refute the verified \
+            clause DB by BCP");
+    Valid
+  with
+  | Reject v -> v
+;;

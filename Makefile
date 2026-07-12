@@ -159,6 +159,26 @@ seam-test:
 cert-test:
 	$(DUNE) exec smt/certificate/test/cert_emit_test.exe
 
+## checker-test — certificate replay CHECKER self-test (smt/certificate, ADR-0013 step 2).
+##   Drives the same E1-E4 / theory-reason / ordered-RUP / crit / high4 scenarios as
+##   cert-test through Checker.check and pins VALID on every honest stream; then one
+##   discrimination test per corruption class (dropped hint, permuted hints, wrong
+##   antecedent set, forged citation kind, ambiguous id, truncated stream), each verified to
+##   FLIP the honest VALID to INVALID; plus exact-antecedent-SET assertions (board #153b).
+##   Nonzero exit on any failed check.
+checker-test:
+	$(DUNE) exec smt/certificate/test/checker_test.exe
+
+## cert-corpus-gate — end-to-end (ADR-0013 §4.1 step-1 acceptance, checker side): drives the
+##   committed tests/cases .smt2 files through the shipped Session with a recorder installed,
+##   and replays every Unsat cert through Oxsmt_certificate.Checker. Nonzero iff any unsat
+##   solve produced a non-VALID cert or a repeat-solve re-emit diverged (so an emission or
+##   checker regression is caught). Non-unsat files are skipped. The external QF_UF corpus is
+##   a superset; pass a directory as $(CORPUS_GATE_DIRS) to widen the sample.
+CORPUS_GATE_DIRS ?= tests/cases
+cert-corpus-gate:
+	$(DUNE) exec tests/certificate/cert_corpus_gate.exe -- $(CORPUS_GATE_DIRS)
+
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
 ##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat
 ##   model, and tolerates an absent corpus with a clear message. Digest to stdout,
@@ -447,6 +467,8 @@ test: check-frozen
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
 	$(MAKE) cert-test
+	$(MAKE) checker-test
+	$(MAKE) cert-corpus-gate
 	$(MAKE) driver-equiv-test
 	$(MAKE) regress-test
 

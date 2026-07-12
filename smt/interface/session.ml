@@ -761,6 +761,17 @@ let get_model t =
 ;;
 
 let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.elim_defs
+
+(* ADR-0013 certificate-emission hooks (additive; the trace is a compile-out-able side
+   channel that never feeds back into search). [install_cert_trace] must run on a PRISTINE
+   session — before the first {!assert_term} — because the recorder relies on observing
+   every input from the start (the {!Sat.set_trace} lifecycle contract).
+   [cert_assumptions] is the active selector-assumption set the terminal E3 step is
+   conditioned on (the certificate's selector strip is checked by seeding these true);
+   [failed_assumptions] is the failed-selector core of the most recent [Unsat]. *)
+let install_cert_trace t tr = Sat.set_trace t.sat tr
+let cert_assumptions t = List.map Sat.pos t.frames
+let failed_assumptions t = Sat.failed_assumptions t.sat
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let budget_exhausted t = t.budget_exhausted
