@@ -153,6 +153,12 @@ type t =
   ; mutable lbd_ema_slow : float
   ; mutable trail_ema : float
   ; mutable conflicts_since_restart : int
+  ; mutable conflicts_at_solve_start : int
+    (* [t.conflicts] snapshot at the current [solve]'s entry. The restart/reduceDB
+         warm-up and the blocking gate read [t.conflicts - conflicts_at_solve_start] — a
+         PER-SOLVE conflict count — so an incremental re-solve neither leaks the
+         cumulative count into the blocking gate (codex M2) nor fires reduceDB immediately
+         against it (codex M3). *)
   ; (* Rephasing (#155): [decisions_since_rephase] drives a conflict-INDEPENDENT interval
        (so it fires on the firehose, where conflicts≈0), [rephase_events] indexes the
        [{saved, flipped, default, best}] cycle, [rephase_interval] grows to back off.
@@ -231,6 +237,7 @@ let create () =
   ; lbd_ema_slow = 0.0
   ; trail_ema = 0.0
   ; conflicts_since_restart = 0
+  ; conflicts_at_solve_start = 0
   ; decisions_since_rephase = 0
   ; rephase_events = 0
   ; rephase_interval = rephase_base_interval
@@ -1154,10 +1161,12 @@ let update_best_trail t =
    many assignments = progress toward a model, so disrupting it would regress SAT
    instances (the Glucose blocking-restart idea, reused for rephasing — this is what keeps
    the TRUE-flip rephase from costing the QF_UFLIA files it would otherwise churn).
-   Requires EMA warm-up ([restart_min_conflicts]); with conflicts≈0 (the firehose)
-   blocking never fires, so the rephase impulse is free to search there. *)
+   Requires EMA warm-up ([restart_min_conflicts] conflicts THIS solve — codex M2: a
+   per-solve count, not the cumulative [t.conflicts], so a warm [trail_ema] is never
+   compared against a cold reset on an incremental re-solve); with conflicts≈0 (the
+   firehose) blocking never fires, so the rephase impulse is free to search there. *)
 let blocking t =
-  t.conflicts >= restart_min_conflicts
+  t.conflicts - t.conflicts_at_solve_start >= restart_min_conflicts
   && float_of_int (Dynarray.length t.trail) > block_margin *. t.trail_ema
 ;;
 
@@ -1213,14 +1222,19 @@ let search t assumps conflict_limit =
     t.conflicts <- t.conflicts + 1;
     incr conflicts_here;
     budget_tick t (* effort (#60): one SAT conflict *);
+    (* First conflict of THIS solve? Then SEED the EMAs to the first sample rather than
+       EMA-stepping up from a cold 0.0 (codex M2: a cold EMA makes [blocking]'s
+       [L > 1.4*ema] trivially true for thousands of conflicts, leaving adaptive restart
+       inert). Seeding makes the averages meaningful from conflict 1. *)
+    let first_conflict = t.conflicts - t.conflicts_at_solve_start = 1 in
     (* Best-trail memory + trail-length EMA at the conflict point (the trail is at a local
        maximum), before any realignment/backjump unwinds it (S3/#155). *)
     update_best_trail t;
+    let trail_len = float_of_int (Dynarray.length t.trail) in
     t.trail_ema
-    <- ema_step
-         t.trail_ema
-         ~alpha:trail_ema_alpha
-         ~sample:(float_of_int (Dynarray.length t.trail));
+    <- (if first_conflict
+        then trail_len
+        else ema_step t.trail_ema ~alpha:trail_ema_alpha ~sample:trail_len);
     if t.theory <> None
     then (
       let maxl = ref 0 in
@@ -1245,12 +1259,17 @@ let search t assumps conflict_limit =
     else (
       let learnt, bt, ants = analyze t confl in
       let lbd = clause_lbd t learnt in
-      (* Feed the LBD EMAs (S3 adaptive restart) and count this conflict toward the
-         restart warm-up. *)
+      let lbd_f = float_of_int lbd in
+      (* Feed the LBD EMAs (S3 adaptive restart), seeding on the first conflict of the
+         solve (codex M2) and counting this conflict toward the restart warm-up. *)
       t.lbd_ema_fast
-      <- ema_step t.lbd_ema_fast ~alpha:lbd_ema_alpha_fast ~sample:(float_of_int lbd);
+      <- (if first_conflict
+          then lbd_f
+          else ema_step t.lbd_ema_fast ~alpha:lbd_ema_alpha_fast ~sample:lbd_f);
       t.lbd_ema_slow
-      <- ema_step t.lbd_ema_slow ~alpha:lbd_ema_alpha_slow ~sample:(float_of_int lbd);
+      <- (if first_conflict
+          then lbd_f
+          else ema_step t.lbd_ema_slow ~alpha:lbd_ema_alpha_slow ~sample:lbd_f);
       t.conflicts_since_restart <- t.conflicts_since_restart + 1;
       cancel_until t bt;
       record_learnt t learnt bt ants lbd;
@@ -1275,12 +1294,16 @@ let search t assumps conflict_limit =
         (* Conflict-independent rephase impulse (#155): reset phases per the cycle and
            restart so the next descent uses them from the top. Fires on the firehose
            (conflicts≈0) where conflict-triggered restarts never do; [blocking] shields
-           SAT instances making real progress toward a model (self-correction). *)
+           SAT instances making real progress toward a model (self-correction). ORDER
+           MATTERS (codex M1): [cancel_until t 0] must run BEFORE [apply_rephase], because
+           backtracking phase-SAVES every trailed var back to its current value — which
+           would clobber the wholesale polarity reset for exactly the ~1000 assigned
+           firehose vars the [Flipped_true] epoch targets. Cancel first, then flip. *)
+        cancel_until t 0;
         apply_rephase t;
         t.rephase_interval <- Search_heuristics.grow_interval t.rephase_interval;
         t.decisions_since_rephase <- 0;
         t.conflicts_since_restart <- 0;
-        cancel_until t 0;
         result := Some R_restart)
       else if
         (conflict_limit > 0 && !conflicts_here >= conflict_limit) || adaptive_restart t
@@ -1422,10 +1445,14 @@ let solve ?(assumptions = []) t =
     t.lbd_ema_slow <- 0.0;
     t.trail_ema <- 0.0;
     t.conflicts_since_restart <- 0;
+    t.conflicts_at_solve_start <- t.conflicts;
     t.decisions_since_rephase <- 0;
     t.rephase_events <- 0;
     t.rephase_interval <- rephase_base_interval;
-    t.next_reduce <- reduce_first;
+    (* reduceDB schedule RELATIVE to this solve's starting conflict count (codex M3): an
+       absolute [reduce_first] would fire reduceDB immediately (then every conflict) on an
+       incremental re-solve whose cumulative [t.conflicts] already exceeds it. *)
+    t.next_reduce <- t.conflicts + reduce_first;
     t.best_trail_len <- 0;
     let rec go restart_no =
       (* Luby conflict-count cap kept alongside the adaptive trigger (S3): a loose upper

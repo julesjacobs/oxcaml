@@ -678,8 +678,59 @@ let test_search_machinery_determinism () =
     (a.Sat.Stats.propagations = b.Sat.Stats.propagations)
 ;;
 
+(* ENGAGEMENT tests (board #172 codex gap): pin that each mechanism actually FIRES in the
+   solve path — a mutant that disables it must go RED. Each was verified RED by disabling
+   its mechanism in sat.ml (all-on → mutant): rephasing 4000→1500 decisions; reduceDB
+   31518→6458 conflicts; adaptive restart 31518→4141 conflicts. *)
+
+(* Rephasing engagement, ISOLATED: with N > rephase_base_interval free variables and NO
+   clauses, the solve makes zero conflicts (so reduceDB and adaptive restart never fire —
+   only rephasing can act) and would decide each var exactly once (decisions = N) but for
+   the conflict-independent rephase interval, which fires a rephase+restart mid-descent
+   and forces re-decisions. So decisions STRICTLY EXCEEDS N iff the decision-interval
+   rephase engaged. (Disabling rephasing makes decisions = N — RED.) *)
+let test_rephase_engagement () =
+  let s = Sat.create () in
+  let n = 1500 in
+  for _ = 1 to n do
+    ignore (Sat.new_var s : Sat.var)
+  done;
+  let r = Sat.solve s in
+  let st = Sat.stats s in
+  check "rephase-engage: sat" (r = Sat.Sat);
+  check
+    "rephase-engage: zero conflicts (only rephasing can act)"
+    (st.Sat.Stats.conflicts = 0);
+  check
+    (Printf.sprintf
+       "rephase-engage: decisions %d > nvars %d (interval rephase+restart fired)"
+       st.Sat.Stats.decisions
+       n)
+    (st.Sat.Stats.decisions > n)
+;;
+
+(* reduceDB + adaptive-restart engagement: on PHP(8,7) (hard unsat, tens of thousands of
+   conflicts) BOTH conflict-driven mechanisms fire, and their clause deletion / frequent
+   restarting drastically reshapes the search — conflicts climb well past what either
+   absence produces. Disabling reduceDB (conflicts →~6458) OR adaptive restart (→~4141)
+   each drops it below this bound — RED. (Direction is not "better": on pigeonhole these
+   mechanisms inflate the conflict count; the test pins ENGAGEMENT, not benefit.) *)
+let test_reducedb_restart_engagement () =
+  let s = php_solver 7 in
+  let r = Sat.solve s in
+  let st = Sat.stats s in
+  check "reduce/restart-engage: PHP(8,7) unsat" (r = Sat.Unsat);
+  check
+    (Printf.sprintf
+       "reduce/restart-engage: conflicts %d > 15000 (both mechanisms firing)"
+       st.Sat.Stats.conflicts)
+    (st.Sat.Stats.conflicts > 15000)
+;;
+
 let () =
   test_lbd_of_levels ();
+  test_rephase_engagement ();
+  test_reducedb_restart_engagement ();
   test_reduce_deletions_protects_glue ();
   test_reduce_deletions_worst_half_and_locked ();
   test_rephase_schedule ();
