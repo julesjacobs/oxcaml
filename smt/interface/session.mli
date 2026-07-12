@@ -80,14 +80,33 @@ type verdict =
   | Unsat
   | Unknown
 
-(** A model value for a nullary symbol (re-exported from {!Cdclt}). *)
+(** A model value / table cell (re-exported from {!Cdclt}). [VUninterp i] is a 0-based
+    element index of its uninterpreted sort's finite universe. *)
 type model_value = Cdclt.value =
   | VBool of bool
   | VInt of int
   | VUninterp of int
 
-(** A model binding (re-exported from {!Cdclt}). v1 exposes only nullary [Const] bindings. *)
-type model_binding = Cdclt.binding = Const of string * model_value
+(** A total interpretation of one uninterpreted function/predicate (re-exported). *)
+type fun_table = Cdclt.fun_table =
+  { default : model_value
+  ; cases : (model_value list * model_value) list
+  }
+
+(** A model binding (re-exported from {!Cdclt}): a nullary symbol's value, or a
+    function/predicate table. *)
+type model_binding = Cdclt.binding =
+  | Const of string * model_value
+  | Fun of string * fun_table
+
+(** The finite-universe cardinality of one uninterpreted sort (re-exported). *)
+type sort_card = Cdclt.sort_card =
+  { sort_name : string
+  ; card : int
+  }
+
+(** The full reconstructed model: uninterpreted-sort cardinalities + symbol bindings. *)
+type model = sort_card list * model_binding list
 
 (** A fresh session: empty env (with the reserved [div]/[mod] built-ins), fresh context,
     fresh SAT core with the combined EUF+LIA theory installed, one active (base) assertion
@@ -143,7 +162,7 @@ val check_sat : t -> verdict
     [check_sat], or when the [Sat]'s model would require a function table (any applied
     uninterpreted symbol is constrained) — a v1 completeness limit of the model
     reconstruction, not of the verdict. *)
-val get_model : t -> model_binding list option
+val get_model : t -> model option
 
 (** The SAT core's counter trio, monotonic across the session (DESIGN.md §8). *)
 val stats : t -> Oxsmt_solver.Sat.Stats.t

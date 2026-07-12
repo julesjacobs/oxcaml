@@ -10,15 +10,33 @@ open Oxsmt_core
 
 type t
 
-(** A nullary-symbol model value (eval-agnostic; the CLI renders it to the §8 self-check
-    sidecar grammar). *)
+(** A model value / table cell (eval-agnostic; the CLI renders it to the §8 self-check
+    sidecar grammar). [VUninterp i] is a 0-based ELEMENT INDEX into its uninterpreted
+    sort's finite universe (not the raw e-graph class id — {!model} remaps). *)
 type value =
   | VBool of bool
   | VInt of int
   | VUninterp of int
 
-(** A model binding. v1 emits only nullary [Const] bindings (see {!model_bindings}). *)
-type binding = Const of string * value
+(** A total interpretation of one uninterpreted function/predicate: [cases] maps
+    argument-index tuples to results (structural first-match), [default] covers the rest
+    (ADR-UF-models §0/§1). *)
+type fun_table =
+  { default : value
+  ; cases : (value list * value) list
+  }
+
+(** A model binding: a nullary symbol's value, or a function/predicate's table. *)
+type binding =
+  | Const of string * value
+  | Fun of string * fun_table
+
+(** The finite-universe cardinality of one uninterpreted sort (SMT-LIB sorts are inhabited
+    ⇒ [card >= 1]). *)
+type sort_card =
+  { sort_name : string
+  ; card : int
+  }
 
 (** The per-check-sat split budget was exhausted (the [T_lemma] loop has no intrinsic
     bound); caught at the {!Session} boundary and turned into verdict [unknown]. *)
@@ -40,7 +58,14 @@ val begin_check : t -> unit
 (** Splits emitted during the last check-sat (stat / determinism witness). *)
 val splits_used : t -> int
 
-(** The nullary-symbol model reconstructed from the snapshot of the accepting Final->Sat,
-    or [None] if the last check-sat was not a theory [Sat] or no table-free model is
-    reconstructable (see {!binding}). *)
+(** The nullary-symbol (table-free) model reconstructed from the snapshot of the accepting
+    Final->Sat, or [None] (see {!model} for the full function-model reconstruction). Kept
+    for the const-only path. *)
 val model_bindings : t -> binding list option
+
+(** [model t] reconstructs the FULL finite function model from the accepting-Final->Sat
+    snapshot: uninterpreted-sort cardinalities + const bindings + per-symbol function /
+    predicate tables (ADR-UF-models §1). [None] (=> fail-closed [unknown]) when the last
+    check-sat was not a theory [Sat], a needed value is missing, or a buried (unbound)
+    Bool-codomain predicate cell would have to be guessed. Deterministic (R10). *)
+val model : t -> (sort_card list * binding list) option

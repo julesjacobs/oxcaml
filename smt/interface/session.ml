@@ -33,7 +33,22 @@ type model_value = Cdclt.value =
   | VInt of int
   | VUninterp of int
 
-type model_binding = Cdclt.binding = Const of string * model_value
+type fun_table = Cdclt.fun_table =
+  { default : model_value
+  ; cases : (model_value list * model_value) list
+  }
+
+type model_binding = Cdclt.binding =
+  | Const of string * model_value
+  | Fun of string * fun_table
+
+type sort_card = Cdclt.sort_card =
+  { sort_name : string
+  ; card : int
+  }
+
+(* The full reconstructed model: uninterpreted-sort cardinalities + symbol bindings. *)
+type model = sort_card list * model_binding list
 
 type t =
   { env : Env.t
@@ -57,8 +72,12 @@ type t =
          CONTRACT-POISON) *)
   ; mutable last_verdict : verdict
     (* verdict of the most recent check_sat, for get_model *)
-  ; mutable last_model : model_binding list option
+  ; mutable last_model : model option
     (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+  ; mutable asserted : Term.t list
+    (* every ORIGINAL asserted term (pre-preprocessing), for the R1 in-process model
+         self-check. v1 QF_UF queries are non-incremental, so this is exactly the active
+         assertion set. *)
   ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
   ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
   }
@@ -82,6 +101,7 @@ let create ?(split_budget = default_split_budget) () =
   ; degraded = false
   ; last_verdict = Unknown
   ; last_model = None
+  ; asserted = []
   ; last_splits = 0
   ; budget_exhausted = false
   }
@@ -173,6 +193,7 @@ let assert_clausified t cnf =
 ;;
 
 let assert_term t term =
+  t.asserted <- term :: t.asserted;
   match Preprocess.run t.pp term with
   | exception Term.Overflow -> t.degraded <- true
   | exception Term.Unsupported _ -> t.degraded <- true
@@ -219,30 +240,35 @@ let pop t =
      propositional variable, so {!bool_consts} wins the union. [None] (→ [unknown]) when
      no table-free model is reconstructable (any applied uninterpreted symbol is
      constrained). *)
+let name_of = function
+  | Const (n, _) -> n
+  | Fun (n, _) -> n
+;;
+
 let build_model t =
   let keep name = not (Preprocess.is_reserved_name name) in
-  let by_name (Const (a, _)) (Const (b, _)) = String.compare a b in
+  let by_name a b = String.compare (name_of a) (name_of b) in
   let bool_bindings =
     List.filter_map
       (fun (name, sv) ->
          if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
       t.bool_consts
   in
-  let bool_names = List.map (fun (Const (n, _)) -> n) bool_bindings in
-  let assemble theory_bindings =
+  let bool_names = List.map name_of bool_bindings in
+  let assemble sort_cards theory_bindings =
     let theory_bindings =
       List.filter
-        (fun (Const (n, _)) -> keep n && not (List.mem n bool_names))
+        (fun b -> keep (name_of b) && not (List.mem (name_of b) bool_names))
         theory_bindings
     in
-    List.sort by_name (theory_bindings @ bool_bindings)
+    sort_cards, List.sort by_name (theory_bindings @ bool_bindings)
   in
   if t.has_theory
   then (
-    match Cdclt.model_bindings t.cdclt with
+    match Cdclt.model t.cdclt with
     | None -> None
-    | Some theory_bindings -> Some (assemble theory_bindings))
-  else Some (assemble [])
+    | Some (sort_cards, theory_bindings) -> Some (assemble sort_cards theory_bindings))
+  else Some (assemble [] [])
 ;;
 
 let check_sat t =
@@ -267,9 +293,26 @@ let check_sat t =
            function applications appearing only inside arithmetic atoms (no purification
            pass yet; see the M4 report). *)
         (match build_model t with
-         | Some m ->
-           t.last_model <- Some m;
-           Sat
+         | Some ((_, bindings) as m) ->
+           (* R1 (ADR-UF-models §3): a FUNCTION-table model is a NEW capability whose
+              [sat] is promoted ONLY after the obligatory in-process self-check passes
+              over every ORIGINAL assertion (fail-closed to [unknown]). A table-free
+              (const / Bool / LIA) model keeps the existing pipeline promotion —
+              unchanged, already sound — so this adds no regression surface. QF_UF tables
+              carry no arithmetic, so the checker's construct coverage is complete for the
+              first cut. *)
+           let has_table =
+             List.exists
+               (function
+                 | Fun _ -> true
+                 | Const _ -> false)
+               bindings
+           in
+           if (not has_table) || Model_check.check m t.asserted
+           then (
+             t.last_model <- Some m;
+             Sat)
+           else Unknown
          | None -> Unknown)
       | exception Cdclt.Split_budget_exceeded ->
         (* Not a fault: the deterministic split cap fired. Distinct stat, sticky. *)

@@ -38,22 +38,35 @@ module Combined =
   Oxsmt_combine.Combine.Combine (Oxsmt_combine.Uflia_router) (Oxsmt_euf.Euf_adapter)
     (Oxsmt_lia.Lia_adapter)
 
-(* A model value for a nullary/function symbol, in the eval-agnostic vocabulary the CLI
-   renders to the §8 self-check sidecar grammar. *)
+(* A model value for a symbol / table cell, in the eval-agnostic vocabulary the CLI
+   renders to the §8 self-check sidecar grammar. [VUninterp i] is a 0-based ELEMENT INDEX
+   into its uninterpreted sort's finite universe (NOT the raw e-graph class id —
+   extraction remaps class ids to dense per-sort indices, ADR-UF-models §1/R10). *)
 type value =
   | VBool of bool
   | VInt of int
   | VUninterp of int
 
-(* A binding of a nullary symbol to its model value. v1 emits only [Const] bindings: a
-   complete UF model needs per-function tables, but [Combine.model]'s witness set is
-   scoped to atoms + Int interface terms and does not surface a theory's uninterpreted
-   leaves, so a table-free (LIA-only / pure-constant) model is exactly what is
-   reconstructable here. {!model_bindings} returns [None] when a checkable model would
-   need a function table (any applied symbol appears), and the driver then reports
-   [unknown] rather than an unself-checkable [sat] — a completeness limitation, not a
-   soundness one (follow-up: widen [Combine.model] / add function tables). *)
-type binding = Const of string * value
+(* A total interpretation of one uninterpreted function/predicate symbol (ADR-UF-models
+   §0/§1): [cases] maps argument-index tuples to the result value, [default] covers every
+   unlisted tuple. First-match / structural-equality lookup, as both N-version readers
+   expect (tests/eval eval.ml, tests/gate encoder.ml). *)
+type fun_table =
+  { default : value
+  ; cases : (value list * value) list
+  }
+
+(* A model binding: a nullary symbol's value, or a function/predicate's table. *)
+type binding =
+  | Const of string * value
+  | Fun of string * fun_table
+
+(* The finite universe cardinality of one uninterpreted sort (SMT-LIB sorts are inhabited
+   ⇒ [card >= 1], R2). *)
+type sort_card =
+  { sort_name : string
+  ; card : int
+  }
 
 (* Raised when the per-check-sat split budget is exhausted: the [T_lemma] loop has no
    intrinsic bound (LIA B&B / N-O splitting can diverge — CONTRACT-SPLIT-TERM), so the
@@ -273,8 +286,142 @@ let model_bindings t =
            | Term.App (_, _) -> raise Needs_table (* applied symbol: needs a table *)
            | _ -> None)
        in
-       let by_name (Const (a, _)) (Const (b, _)) = String.compare a b in
+       let name_of = function
+         | Const (a, _) -> a
+         | Fun (a, _) -> a
+       in
+       let by_name a b = String.compare (name_of a) (name_of b) in
        Some (List.sort by_name bindings)
      with
      | Needs_table -> None)
+;;
+
+(* Total order on model values (VBool < VInt < VUninterp), for canonical case ordering. *)
+let value_compare (a : value) (b : value) =
+  match a, b with
+  | VBool x, VBool y -> Bool.compare x y
+  | VBool _, _ -> -1
+  | _, VBool _ -> 1
+  | VInt x, VInt y -> Int.compare x y
+  | VInt _, _ -> -1
+  | _, VInt _ -> 1
+  | VUninterp x, VUninterp y -> Int.compare x y
+;;
+
+(* Reconstruct the FINITE FUNCTION MODEL — uninterpreted-sort universes + const bindings +
+   per-symbol function/predicate tables — from the snapshot taken at the accepting
+   Final->Sat (ADR-UF-models §1). Reads only [Model.value] over the registered subterms;
+   the snapshot is the liveness filter (a term whose e-nodes were popped is unvalued ->
+   [None] -> skipped; for QF_UF base-frame atoms are never popped, so every used term is
+   live — rider 2: NO e-graph mutation, NO euf.mli surface). Element ids are the e-graph
+   class ids remapped to dense 0-based per-sort indices. Returns [None] (=> [unknown],
+   fail-closed) when a needed value is missing or a Bool-codomain (predicate) cell is
+   unbound (buried H2 class; the combinator usually degrades that earlier via
+   [Incomplete], guarded here too). Deterministic (R10): ascending class-id numbering,
+   then canonical sort of sorts, bindings, and case tuples. *)
+let model t =
+  match t.last_model with
+  | None -> None
+  | Some m ->
+    let exception Degrade in
+    (try
+       let terms = Term.Set.elements t.subterms in
+       (* pass 1: per uninterpreted sort, gather distinct class ids -> dense 0-based index *)
+       let sort_ids : (string, int list) Hashtbl.t = Hashtbl.create 16 in
+       List.iter
+         (fun (term : Term.t) ->
+            match term.Term.sort with
+            | Sort.Uninterpreted sym ->
+              (match Model.value m term with
+               | Some (Model.Uninterp cid) ->
+                 let name = Symbol.name sym in
+                 let prev =
+                   match Hashtbl.find_opt sort_ids name with
+                   | Some l -> l
+                   | None -> []
+                 in
+                 Hashtbl.replace sort_ids name (cid :: prev)
+               | _ -> ())
+            | Sort.Bool | Sort.Int _ -> ())
+         terms;
+       let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
+       let sort_cards = ref [] in
+       Hashtbl.iter
+         (fun name ids ->
+            let ids = List.sort_uniq Int.compare ids in
+            List.iteri (fun i cid -> Hashtbl.replace index cid i) ids;
+            sort_cards := { sort_name = name; card = List.length ids } :: !sort_cards)
+         sort_ids;
+       let value_of (term : Term.t) =
+         match Model.value m term with
+         | Some (Model.Bool b) -> VBool b
+         | Some (Model.Int n) -> VInt n
+         | Some (Model.Uninterp cid) ->
+           (match Hashtbl.find_opt index cid with
+            | Some i -> VUninterp i
+            | None -> raise Degrade)
+         | None -> raise Degrade
+       in
+       let default_for (sort : Sort.t) =
+         match sort with
+         | Sort.Bool -> VBool false
+         | Sort.Int _ -> VInt 0
+         | Sort.Uninterpreted _ -> VUninterp 0
+       in
+       (* pass 2: non-Bool nullary consts + function/predicate table rows (per symbol) *)
+       let consts = ref [] in
+       let tables : (string, Sort.t * (value list * value) list ref) Hashtbl.t =
+         Hashtbl.create 16
+       in
+       List.iter
+         (fun (term : Term.t) ->
+            match term.Term.node with
+            | Term.App (sym, args) when Iarr.length args = 0 ->
+              (match term.Term.sort with
+               | Sort.Bool ->
+                 () (* propositional variable: session's bool_consts owns it *)
+               | Sort.Int _ | Sort.Uninterpreted _ ->
+                 consts := Const (Symbol.name sym, value_of term) :: !consts)
+            | Term.App (sym, args) ->
+              let row = List.map value_of (Iarr.to_list args), value_of term in
+              let name = Symbol.name sym in
+              let rows =
+                match Hashtbl.find_opt tables name with
+                | Some (_, rows) -> rows
+                | None ->
+                  let rows = ref [] in
+                  Hashtbl.replace tables name (term.Term.sort, rows);
+                  rows
+              in
+              rows := row :: !rows
+            | _ -> ())
+         terms;
+       let row_compare (a, ra) (b, rb) =
+         match List.compare value_compare a b with
+         | 0 -> value_compare ra rb
+         | c -> c
+       in
+       let fun_bindings =
+         Hashtbl.fold
+           (fun name (codomain, rows) acc ->
+              let cases = List.sort_uniq row_compare !rows in
+              Fun (name, { default = default_for codomain; cases }) :: acc)
+           tables
+           []
+       in
+       let name_of = function
+         | Const (n, _) -> n
+         | Fun (n, _) -> n
+       in
+       let bindings =
+         List.sort
+           (fun a b -> String.compare (name_of a) (name_of b))
+           (!consts @ fun_bindings)
+       in
+       let sort_cards =
+         List.sort (fun a b -> String.compare a.sort_name b.sort_name) !sort_cards
+       in
+       Some (sort_cards, bindings)
+     with
+     | Degrade -> None)
 ;;

@@ -29,7 +29,7 @@ let read_file path =
 
 type block =
   { verdict : string
-  ; model : (string * string) list option (* (name, value-token) per nullary symbol *)
+  ; model : string option (* pre-rendered model BODY sexp, spliced into [(model ...)] *)
   ; conflicts : int
   ; decisions : int
   ; propagations : int
@@ -44,15 +44,7 @@ let print_block b =
   Buffer.add_string buf "(result";
   Printf.bprintf buf " (verdict %s)" b.verdict;
   (match b.model with
-   | Some m ->
-     let m = List.sort (fun (a, _) (c, _) -> String.compare a c) m in
-     Buffer.add_string buf " (model (";
-     List.iteri
-       (fun i (name, v) ->
-          if i > 0 then Buffer.add_char buf ' ';
-          Printf.bprintf buf "(%s %s)" name v)
-       m;
-     Buffer.add_string buf "))"
+   | Some body -> Printf.bprintf buf " (model %s)" body
    | None -> ());
   Printf.bprintf
     buf
@@ -102,11 +94,65 @@ let token_of_value = function
    in the one shared lexer, ADR-0008), so a name that is not a simple symbol — [|a b|],
    [|1x|] — round-trips as [|a b|] rather than the malformed bare [a b]. The §8 evaluator
    reads it back through the same lexer, so quoting cannot desync on a token boundary. *)
-let render_model bindings =
-  List.map
-    (fun (Session.Const (name, v)) ->
-       Oxsmt_smtlib.Printer.quote_symbol name, token_of_value v)
-    bindings
+let q = Oxsmt_smtlib.Printer.quote_symbol
+
+(* Render the model BODY sexp. A table-free (const/Bool/LIA) model uses the LEGACY flat
+   [((name token) ...)] body — byte-identical to the pre-UF output, so the harness's
+   existing const transport is unchanged (no regression). A model with sorts/tables uses
+   the §8 sidecar grammar
+   [(sort S n) (const name tok) (fun f (default tok) (case (toks) tok) ...)] — the format
+   both N-version readers already parse (tests/eval, tests/gate). Raises
+   [Printer.Unsupported] on an unrenderable symbol name; caught by {!solve_batch}. *)
+let render_model (sort_cards, bindings) =
+  let has_table =
+    List.exists
+      (function
+        | Session.Fun _ -> true
+        | Session.Const _ -> false)
+      bindings
+  in
+  let buf = Buffer.create 128 in
+  if sort_cards = [] && not has_table
+  then (
+    let pairs =
+      List.filter_map
+        (function
+          | Session.Const (name, v) -> Some (q name, token_of_value v)
+          | Session.Fun _ -> None)
+        bindings
+      |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+    in
+    Buffer.add_char buf '(';
+    List.iteri
+      (fun i (n, v) ->
+         if i > 0 then Buffer.add_char buf ' ';
+         Printf.bprintf buf "(%s %s)" n v)
+      pairs;
+    Buffer.add_char buf ')')
+  else (
+    List.iter
+      (fun { Session.sort_name; card } ->
+         Printf.bprintf buf "(sort %s %d)" (q sort_name) card)
+      sort_cards;
+    List.iter
+      (function
+        | Session.Const (name, v) ->
+          Printf.bprintf buf "(const %s %s)" (q name) (token_of_value v)
+        | Session.Fun (name, { Session.default; cases }) ->
+          Printf.bprintf buf "(fun %s (default %s)" (q name) (token_of_value default);
+          List.iter
+            (fun (args, res) ->
+               Buffer.add_string buf " (case (";
+               List.iteri
+                 (fun i a ->
+                    if i > 0 then Buffer.add_char buf ' ';
+                    Buffer.add_string buf (token_of_value a))
+                 args;
+               Printf.bprintf buf ") %s)" (token_of_value res))
+            cases;
+          Buffer.add_char buf ')')
+      bindings);
+  Buffer.contents buf
 ;;
 
 (* Batch solve: one check-sat, no push/pop. Parse into the session's own context so the
@@ -135,9 +181,24 @@ let solve_batch src =
     (match v with
      | Session.Sat ->
        (match Session.get_model s with
-        | Some bindings ->
-          (match render_model bindings with
-           | model -> block "sat" (Some model)
+        (* A FUNCTION-TABLE / sorted model is a sound, self-checked [sat] at the session
+           level (R1 checker gated it), and the CLI renders it in the §8 sidecar grammar.
+           But the harness model-transport still parses only the LEGACY flat const body
+           (ADR-UF-models R9, not yet built): feeding it a table body is a parse error.
+           Until R9 lands, degrade a table/sorted model to a SOUND [unknown] at the corpus
+           boundary (a completeness gap the harness tolerates), rather than emit output
+           the harness cannot transport. Const-only models take the unchanged legacy path.
+           The library-level flip is exercised by tests/solver/wiring_test. *)
+        | Some ((sort_cards, bindings) as m)
+          when sort_cards = []
+               && not
+                    (List.exists
+                       (function
+                         | Session.Fun _ -> true
+                         | Session.Const _ -> false)
+                       bindings) ->
+          (match render_model m with
+           | body -> block "sat" (Some body)
            | exception Oxsmt_smtlib.Printer.Unsupported _ ->
              (* A model names a symbol the SMT-LIB printer cannot faithfully render: the
                 empty symbol [||], or a predefined-operator collision like [|+|]. Quoting
@@ -146,6 +207,8 @@ let solve_batch src =
                 be malformed solver output; degrade this goal to a sound [unknown] with no
                 model rather than crash the CLI. *)
              block "unknown" None)
+        | Some _ ->
+          block "unknown" None (* table/sorted model: sound degrade pending R9 *)
         | None -> block "unknown" None)
      | Session.Unsat -> block "unsat" None
      | Session.Unknown -> block "unknown" None)

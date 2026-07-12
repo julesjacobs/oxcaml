@@ -150,7 +150,7 @@ let test_lia_sat () =
   Session.assert_term s (Context.eq ctx x (Context.int_const ctx 3));
   check_verdict "LIA 0<=x<=5, x=3" Session.Sat (Session.check_sat s);
   match Session.get_model s with
-  | Some [ Session.Const ("x", Session.VInt 3) ] -> check "LIA sat model x=3" true
+  | Some (_, [ Session.Const ("x", Session.VInt 3) ]) -> check "LIA sat model x=3" true
   | Some _ | None -> check "LIA sat model x=3" false
 ;;
 
@@ -289,9 +289,13 @@ let test_get_model_bool () =
   Session.assert_term s (Context.or_ ctx [ p; q ]);
   Session.assert_term s (Context.not_ ctx q);
   (match Session.check_sat s, Session.get_model s with
-   | Session.Sat, Some m ->
+   | Session.Sat, Some (_, m) ->
      let find n =
-       List.find_map (fun (Session.Const (k, v)) -> if k = n then Some v else None) m
+       List.find_map
+         (function
+           | Session.Const (k, v) -> if k = n then Some v else None
+           | Session.Fun _ -> None)
+         m
      in
      check "model has p and q" (List.length m = 2);
      check "q is false" (find "q" = Some (Session.VBool false));
@@ -315,9 +319,13 @@ let test_mixed_bool_theory_model () =
   Session.assert_term s p;
   Session.assert_term s (Context.eq ctx x (Context.int_const ctx 0));
   match Session.check_sat s, Session.get_model s with
-  | Session.Sat, Some m ->
+  | Session.Sat, Some (_, m) ->
     let find n =
-      List.find_map (fun (Session.Const (k, v)) -> if k = n then Some v else None) m
+      List.find_map
+        (function
+          | Session.Const (k, v) -> if k = n then Some v else None
+          | Session.Fun _ -> None)
+        m
     in
     check
       "mixed model includes Bool const p (=true)"
@@ -325,6 +333,51 @@ let test_mixed_bool_theory_model () =
     check "mixed model includes Int const x (=0)" (find "x" = Some (Session.VInt 0));
     check "mixed model has exactly p and x" (List.length m = 2)
   | v, _ -> check ("mixed bool/theory: expected sat+model, got " ^ verdict_str v) false
+;;
+
+(* UF-models (ADR-UF-models): a QF_UF query that needs a FUNCTION TABLE now flips unknown
+   -> sat with a self-checked model (R1 in-process checker gates the promotion). euf_sat:
+   (distinct a b) ∧ (f a = f b) — SAT (a,b distinct, f collapses them). The model must
+   carry a sort cardinality for S and a table for f; a,b get distinct elements and f maps
+   both to one element. The R1 checker having passed is implied by the [Sat]. *)
+let test_uf_function_model () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let ssort = Sort.uninterpreted (Session.declare_sort s "S") in
+  let f = Session.declare_fun s "f" (Rank.create [ ssort ] ssort) in
+  let a = Context.const ctx (Session.declare_fun s "a" (Rank.create [] ssort)) in
+  let b = Context.const ctx (Session.declare_fun s "b" (Rank.create [] ssort)) in
+  Session.assert_term s (Context.not_ ctx (Context.eq ctx a b));
+  Session.assert_term
+    s
+    (Context.eq ctx (Context.app ctx f [ a ]) (Context.app ctx f [ b ]));
+  match Session.check_sat s, Session.get_model s with
+  | Session.Sat, Some (sorts, bindings) ->
+    check
+      "UF model: S has cardinality >= 2 (a,b distinct)"
+      (List.exists
+         (fun { Session.sort_name; card } -> sort_name = "S" && card >= 2)
+         sorts);
+    check
+      "UF model: f has a function table"
+      (List.exists
+         (function
+           | Session.Fun ("f", _) -> true
+           | _ -> false)
+         bindings);
+    (* a,b are distinct elements; f collapses them to one *)
+    let fa_fb_equal =
+      List.exists
+        (function
+          | Session.Fun ("f", { cases; _ }) ->
+            (match List.map snd cases with
+             | [ r1; r2 ] -> r1 = r2
+             | _ -> false)
+          | _ -> false)
+        bindings
+    in
+    check "UF model: f(a) = f(b) in the table (both cases → one result)" fa_fb_equal
+  | v, _ -> check ("UF function model: expected sat+model, got " ^ verdict_str v) false
 ;;
 
 (* Reserved preprocessing witnesses ([.oxsmt.*], here an ITE lift) must not leak into the
@@ -345,11 +398,15 @@ let test_model_excludes_witnesses () =
   Session.assert_term s (Context.eq ctx ite (Context.int_const ctx 1));
   let reserved n = String.length n >= 7 && String.equal (String.sub n 0 7) ".oxsmt." in
   match Session.check_sat s, Session.get_model s with
-  | Session.Sat, Some m ->
+  | Session.Sat, Some (_, m) ->
+    let name_of = function
+      | Session.Const (n, _) -> n
+      | Session.Fun (n, _) -> n
+    in
     check
       "model excludes .oxsmt.* witnesses"
-      (List.for_all (fun (Session.Const (n, _)) -> not (reserved n)) m);
-    check "model still names x" (List.exists (fun (Session.Const (n, _)) -> n = "x") m)
+      (List.for_all (fun b -> not (reserved (name_of b))) m);
+    check "model still names x" (List.exists (fun b -> name_of b = "x") m)
   | v, _ -> check ("ite witness: expected sat+model, got " ^ verdict_str v) false
 ;;
 
@@ -695,6 +752,7 @@ let () =
   test_overflow_firewall ();
   test_get_model_bool ();
   test_mixed_bool_theory_model ();
+  test_uf_function_model ();
   test_model_excludes_witnesses ();
   test_split_budget_exhaustion ();
   test_namespace_guard ();
