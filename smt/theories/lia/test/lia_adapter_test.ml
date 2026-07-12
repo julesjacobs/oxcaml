@@ -300,6 +300,58 @@ let test_reprop_precedence () =
     ((Lia_adapter.explain fx.adapter lit_a_true).Explanation.premises = [ lit_b ])
 ;;
 
+(* Re-entailment after the atom's OWN report frame is popped (incremental-delta
+   highest-risk path, review F1). Distinct from A1/A2, where A is reported at ROOT and
+   survives the pop: here A is first-reported INSIDE the pushed frame, so the pop must (a)
+   un-report A and re-arm its var for re-scan, (b) drop its cached reason, and (c) a
+   LATER, DIFFERENT entailing bound must re-emit A with a fresh, precedence-valid reason —
+   not leave it orphaned/never-re-propagated (the delta's correctness hinge). *)
+let test_reentail_after_frame_pop () =
+  print_endline "re-entail after own-frame pop (F1):";
+  let fx = make_fixture 1 in
+  let atom_a, _ = register_le fx [ 0, 1 ] (-5) in
+  (* A: x <= 5, registered at root, never asserted (a standing propagation target) *)
+  let lit_a_true = Lit.make atom_a true in
+  (* Frame 1: B (x<=3) entails A, so A is FIRST-reported in this pushed frame. *)
+  Lia_adapter.push fx.adapter;
+  let lit_b = assert_le fx [ 0, 1 ] (-3) ~polarity:true in
+  (match propagate fx with
+   | Theory.Propagations lits ->
+     check "A emitted in frame 1 (entailed by B)" (List.mem lit_a_true lits)
+   | _ -> check "expected A propagated in frame 1" false);
+  check
+    "frame 1: explain(A) = {B}"
+    ((Lia_adapter.explain fx.adapter lit_a_true).Explanation.premises = [ lit_b ]);
+  (* Pop frame 1: A's report frame is unwound; its cached reason must go, and with no
+     bound left on x, A is no longer entailed and must NOT be re-emitted. *)
+  Lia_adapter.pop fx.adapter 1;
+  check_raises
+    "after own-frame pop: explain(A) raises (reason dropped, not stale)"
+    (function
+      | Failure _ -> true
+      | _ -> false)
+    (fun () -> Lia_adapter.explain fx.adapter lit_a_true);
+  (match propagate fx with
+   | Theory.Propagations lits ->
+     check "A NOT re-emitted while un-entailed after pop" (not (List.mem lit_a_true lits))
+   | Theory.Conflict _ -> check "unexpected conflict after pop" false
+   | _ -> ());
+  (* Frame 1': a DIFFERENT bound C (x<=4) re-entails A. It MUST be re-emitted (the
+     un-report
+     + re-dirty on pop is what makes this reachable) with a fresh reason [{C}], not [{B}]. *)
+  Lia_adapter.push fx.adapter;
+  let lit_c = assert_le fx [ 0, 1 ] (-4) ~polarity:true in
+  (match propagate fx with
+   | Theory.Propagations lits ->
+     check
+       "A RE-emitted by C after its own report frame was popped"
+       (List.mem lit_a_true lits)
+   | _ -> check "expected A re-propagated by C" false);
+  check
+    "after re-entailment: explain(A) = {C} (fresh precedence-valid reason, not stale {B})"
+    ((Lia_adapter.explain fx.adapter lit_a_true).Explanation.premises = [ lit_c ])
+;;
+
 (* ================================================================== *)
 (* 3. Final: Sat when integral; Split (2 distinct constraining atoms) when not; drive a
    branch to Sat and read an integral Model. *)
@@ -572,6 +624,7 @@ let () =
   test_currency ();
   test_propagate_explain ();
   test_reprop_precedence ();
+  test_reentail_after_frame_pop ();
   test_final_split ();
   test_push_pop ();
   test_poison ();
