@@ -1,6 +1,6 @@
-# riders lane — FREEZE report
+# riders lane — FREEZE report (re-frozen: item 5 added)
 
-Branch `task/riders` off trunk `oxsmt` @ 167a305f2a. Four small independent board rows,
+Branch `task/riders` off trunk `oxsmt` @ 167a305f2a. Five small independent board rows,
 one commit each (reviewable individually). No frozen `.mli` touched (`make check-frozen`:
 14 interfaces match). All discrimination verified by neutering the fix and observing the
 test go RED.
@@ -11,6 +11,7 @@ test go RED.
 2. `bb7e52fe85` — #122 widen term_has_reserved to sort-carried symbols
 3. `7c6b8b6b6f` — #161 predicate late-binding pop recurrence (check-time re-arm)
 4. `9b7a2b6f76` — #152(c) rewrite u_dedup_rollback via the seed path
+5. `30b52d32c9` — #152(item5)/issue5144 reset/reset-assertions fail-closed
 
 ---
 
@@ -100,6 +101,26 @@ test go RED.
   round-2 checks flip RED (24/3). With the rollback: 27/0. The discrimination itself proves
   non-vacuousness (process ran and polluted dedup in round 1).
 
+## Item 5 — Board #152 item 5 / issue5144: reset/reset-assertions fail-closed
+
+- **What.** parser.ml treated `set-option | reset | reset-assertions` as a SILENT no-op.
+- **Why.** `reset`/`reset-assertions` clear the assertion set mid-script; this batch reader
+  folds every `assert` into ONE set for a single `check-sat`, so silently ignoring them
+  leaves the pre-reset assertions live → wrong verdict. Confirmed end-to-end:
+  `(assert (= 0 1)) (reset-assertions) (check-sat)` returns `unsat` pre-fix (WRONG — the
+  contradiction is reset away; should be sat/unknown), `unknown` post-fix.
+- **How.** Split the match arm: `reset`/`reset-assertions` now `unsupportedf` → the CLI's
+  `solve_batch` catches `Parser.Unsupported` (oxsmt_cli.ml:169) and returns `unknown_block`
+  (I8 fail-closed). Audit of the same arm: `set-option` and `get-model|get-value|
+  get-unsat-core` are output-only / non-stateful (cannot change the assertion set) → kept as
+  no-ops; `push`/`pop` were already unsupported. reset* were the only verdict-flipping
+  silent no-ops.
+- **How tested / discrimination.** `command_gate_cases` (roundtrip_test.ml): the exact
+  issue5144 shape via `check_unsupported` (reset-assertions + reset) + a `check_parses_ok`
+  positive control proving set-option/get-* still parse. Neutering the reset arm back to a
+  no-op reddens both `check_unsupported` checks (163→2 fail) and flips the CLI to `unsat`;
+  positive control stays green. Restored → 163/0.
+
 ---
 
 ## Gate (all components of `make test`, run individually — `make test` itself invokes a
@@ -107,9 +128,10 @@ sandbox-denied `timeout`)
 
 - `make check-frozen` — 14 interfaces match FROZEN.sha256
 - harness_test — all checks passed; run_harness — 47/47 PASS
-- combine-test 87/0; smtlib-test 4000/0; lemma-test (honeypot 17/0 + crit_repro + matcher
-  27/0); cert-test 51/0; driver-equiv-test 48 files, 0 divergence
+- combine-test 87/0; smtlib-test (roundtrip 163/0 + fuzz-lex 4000/0); lemma-test
+  (honeypot 17/0 + crit_repro + matcher 27/0); cert-test 51/0; driver-equiv-test 48 files,
+  0 divergence
 - affected suites: lia-adapter 49/0, euf-adapter 1493/0, euf 6412/0
 - `dune build @fmt` (non-promoting) exit 0; `dune build` exit 0
 
-FROZEN.
+FROZEN (re-frozen after item 5).
