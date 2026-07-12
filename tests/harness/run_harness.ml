@@ -183,15 +183,22 @@ let write_stats cfg ~run_id (rows : (Harness.file_eval * float) list) =
     (fun (fe, wall_ms) ->
        List.iteri
          (fun i (g : Harness.goal_result) ->
+            (* Table-size stats (design-author watch item): the corpus sweep aggregates
+             [max_card] (largest uninterpreted-sort universe) and [table_rows] (total
+             function-table case rows) across the swept instances; both 0 for a table-free
+             model. Uncommitted JSONL only (I5), alongside the exact solver counters. *)
+            let max_card, table_rows = Harness.model_table_stats g.Harness.model in
             Printf.fprintf
               oc
-              "{\"file\":\"%s\",\"goal\":%d,\"verdict\":\"%s\",\"conflicts\":%d,\"decisions\":%d,\"propagations\":%d,\"wall_ms\":%.3f}\n"
+              "{\"file\":\"%s\",\"goal\":%d,\"verdict\":\"%s\",\"conflicts\":%d,\"decisions\":%d,\"propagations\":%d,\"max_card\":%d,\"table_rows\":%d,\"wall_ms\":%.3f}\n"
               (json_escape fe.Harness.path)
               (i + 1)
               (Harness.verdict_to_string g.Harness.verdict)
               g.Harness.counters.conflicts
               g.Harness.counters.decisions
               g.Harness.counters.propagations
+              max_card
+              table_rows
               wall_ms)
          fe.Harness.output)
     rows;
