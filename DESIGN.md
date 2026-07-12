@@ -773,3 +773,55 @@ The fleet therefore treats context as a budget to be spent deliberately:
 - **Sizing dispatches:** a task should fit in the agent's remaining
   headroom without crossing the ceiling; if it can't, split the task or
   start fresh.
+
+### A4 — Whole-theory deactivation vs relevance filtering (2026-07-12, design author)
+
+The UF-free EUF skip is sound, but the reason must be stated precisely or
+it will either be rejected by over-applying the internalization lesson, or
+worse, slowly generalize back into per-term gating. The distinction: the
+banned thing was per-occurrence relevance filtering inside mixed problems —
+deciding which terms "matter"; every heuristic had counterexamples. A
+whole-theory deactivation by absent signature — "this problem contains zero
+uninterpreted function/predicate symbols, so congruence can contribute
+nothing LIA doesn't know, and the boundary set is empty" — is a total,
+syntactic, assert-time condition, not a relevance guess. One subtlety
+inherited from our own invariants: activation must be monotone and
+assert-triggered — the first UF symbol arriving (input or lemma instance,
+later) flips EUF on, exactly like boundary-status growth. Worded that way,
+it is the same grow-only pattern, not a new gate. Enforcement: a mutant in
+the registry — a mixed problem sneaking past a stale "UF-free" flag must be
+caught.
+
+**A4 erratum — from switch to membership rule (2026-07-12, design
+author).** The A4 "UF-free skip" is superseded: a binary switch makes the
+cost function discontinuous — one `f` buys congruence-grinding over ten
+thousand arithmetic terms — which is a design smell, not a fix. The cliff
+is an implementation conflation, not inherent to internalization. The
+correct rule: **EUF's cost must be proportional to the uninterpreted
+structure, not the term count.** The e-graph needs exactly: uninterpreted
+applications (`f(…)`, `p(…)`); their argument subterms — precisely the
+boundary nodes already computed; the Bool machinery (⊤/⊥, predicate
+atoms); and terms in equality atoms between the above. A pure-arithmetic
+term that never sits under an uninterpreted symbol needs no e-node at all
+— there is nothing above it for congruence to conclude about, and
+equalities among such terms are LIA's native food. This is not a
+relevance heuristic of the banned kind: it is definitional (congruence
+provably cannot involve terms outside this set), total, syntactic,
+computed at assert time, and monotone — a term enters the e-graph when
+its first under-`f` occurrence arrives and never leaves. Same invariant
+family as boundary status, same safe direction: over-inclusion is merely
+slow; under-inclusion is the wrong-SAT direction and gets the mutant (a
+term under `f` missing its e-node must be caught). Consequences: a
+pure-LIA file yields an empty e-graph — the "UF-free skip" is the empty
+instance of the general rule, with no activation logic and no stale-flag
+hazard; a QF_UFLIA file with 3 applications and 5,000 arithmetic terms
+pays for 3, not 5,000. The seam is untouched (it always operated on
+boundary nodes, which are all present); `x = y ⟹ x+1 ~ y+1` was never
+congruence's job (`+` is interpreted) — it flows through the seam's value
+comparison. Acceptance evidence: an e-graph-size counter in the goldens
+tracking #UF-applications + #boundary nodes (proportional by
+construction), the pure-LIA-implies-empty-e-graph property test, and the
+under-inclusion mutant. *Lesson (second occurrence of this shape, for
+lessons.md): when a fix arrives as an on/off switch, look for the
+proportionality rule it's approximating. Switches have cliffs and
+stale-state hazards; structural cost-proportionality has neither.*
