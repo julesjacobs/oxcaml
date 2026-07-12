@@ -156,6 +156,55 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     before or after {!check_sat} (assert-after-check). *)
 val assert_term : t -> Oxsmt_core.Term.t -> unit
 
+(** An opaque handle to a lemma stored by {!assert_lemma}, for the tranche-1 manual
+    instantiation scaffold {!instantiate}. *)
+type lemma
+
+(** Lemma provenance (for cores / messages). *)
+type origin =
+  | Named of string
+  | Anonymous
+
+(** What {!assert_lemma}'s [build] returns: the well-sorted Bool [body] over the minted
+    qvars plus ground symbols, and the multi-triggers ([Term.t list list]: outer =
+    alternative triggers, inner = conjunctive). Empty [triggers] requests auto-selection
+    (a tranche-3 feature; tranche 1 stores them verbatim). *)
+type lemma_def =
+  { body : Oxsmt_core.Term.t
+  ; triggers : Oxsmt_core.Term.t list list
+  }
+
+(** [assert_lemma t ~qvars ~build] states a universally-quantified lemma
+    [forall qvars. body] (ADR-0012 §1.3, mint-before-build binder-builder form). The
+    session mints one placeholder {!Oxsmt_ematch.Qvar.t} per [(name, sort)] in [qvars]
+    FIRST, hands the array to [build], and [build] constructs [body]/[triggers] {e using}
+    those handles (through {!context}), so occurrence-binding is by construction — the
+    caller never spells a reserved placeholder name (R1). [body] must be Bool-sorted
+    ([Invalid_argument] otherwise). The lemma is recorded in the CURRENT assertion frame;
+    {!pop} retracts it and every instance drawn from it together (§1.5).
+
+    While any lemma is live (in an active frame), THE SOUNDNESS RULE (§2) degrades a
+    {!check_sat} of [Sat] to [Unknown] — E-matching is refutation-only, so satisfiability
+    can never be concluded with a quantifier live. [Unsat] is reported unchanged (a ground
+    instance is a valid consequence).
+
+    Returns the stored {!lemma} handle (the ADR's [unit] widened additively for the
+    tranche-1 manual path; a caller may ignore it). *)
+val assert_lemma
+  :  t
+  -> qvars:(string * Oxsmt_core.Sort.t) list
+  -> build:(Oxsmt_ematch.Qvar.t array -> lemma_def)
+  -> lemma
+
+(** {b Tranche-1 scaffold} (ADR-0012 §8 manual-instances path).
+    [instantiate t lemma sigma] seeds a ground instance of [lemma] at substitution [sigma]
+    (ground terms in the lemma's qvars order); the next {!check_sat} draws it through the
+    real dedup + frame-scoped assertion pipeline. This stands in for the matcher until
+    tranche 2, which generates substitutions by E-matching and retires this entry point.
+    Each [sigma.(k)] must be ground; a [sigma] whose image still contains a placeholder is
+    an internal bug ([Failure] from the instance minter). *)
+val instantiate : t -> lemma -> Oxsmt_core.Term.t array -> unit
+
 (** Open a new assertion frame. Assertions added until the matching {!pop} are retracted
     by it. Implemented with a fresh selector variable: frame clauses are guarded by the
     selector, which {!check_sat} assumes true while the frame is active (standard
@@ -202,3 +251,14 @@ val effort : t -> int
     [max_effort] cap fired (the BUDGET tag). Unlike {!budget_exhausted} this is NOT sticky
     and does not degrade the session — the same query is re-runnable at a larger cap. *)
 val effort_exhausted : t -> bool
+
+(** Lemma-tier instantiation stats (ADR-0012 §O4), distinct from {!splits}: [live_lemmas]
+    currently in an active frame, and the cumulative [instances] generated / [rounds] run
+    across the session. *)
+type lemma_stats =
+  { live_lemmas : int
+  ; instances : int
+  ; rounds : int
+  }
+
+val lemma_stats : t -> lemma_stats

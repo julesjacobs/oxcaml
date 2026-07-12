@@ -1,0 +1,11 @@
+; Lemma-tier tranche-1 acceptance (ADR-0012 §7): the soundness-rule honeypots and the
+; assert-side qvar gate, driven end-to-end through the REAL Session + Cdclt + Combine +
+; EUF + LIA stack (no mocks). Stays within smt/ (dependency firewall, I3). Run via
+; `make lemma-test`; also built by `make build`. It links the shipped session
+; (oxsmt_interface) and the tier (oxsmt_ematch): no cycle — interface depends on ematch,
+; this test is a leaf above both.
+
+(executable
+ (name lemma_honeypot_test)
+ (modules lemma_honeypot_test)
+ (libraries oxsmt_core oxsmt_solver oxsmt_ematch oxsmt_interface))

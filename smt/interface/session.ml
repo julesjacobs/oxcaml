@@ -16,6 +16,11 @@ module Cnf = Oxsmt_preprocess.Cnf
 module Lia = Oxsmt_lia.Lia
 module Rational = Oxsmt_lia.Rational
 module Combine = Oxsmt_combine.Combine
+module Ematch = Oxsmt_ematch
+module Manager = Oxsmt_ematch.Manager
+module Qvar = Oxsmt_ematch.Qvar
+module Instance = Oxsmt_ematch.Instance
+module Lemma = Oxsmt_ematch.Lemma
 
 (* Generous, deterministic per-check-sat cap on theory splits (B&B branches / N-O equality
    splits). Exhaustion routes to [unknown] — never a verdict from an unfinished search
@@ -56,6 +61,9 @@ type t =
   ; pp : Preprocess.t
   ; sat : Sat.t
   ; cdclt : Cdclt.t
+  ; mgr : Manager.t
+    (* ADR-0012 lemma tier: the store + instantiation manager, threaded alongside the
+         Context/Cdclt. Frame-scoped in lockstep with [frames] via [Manager.on_pop]. *)
   ; prop_to_var : Sat.var Term.Table.t
     (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
          auxiliary Tseitin variables are per-formula. Shared via hash-cons identity. *)
@@ -109,6 +117,7 @@ let create ?(split_budget = default_split_budget) ?max_effort () =
   ; pp = Preprocess.create env ctx
   ; sat
   ; cdclt
+  ; mgr = Manager.create ctx env
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
@@ -168,7 +177,7 @@ let current_selector t = List.hd t.frames
    through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
    theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
    term; auxiliary Tseitin variables are fresh per formula (kept in [local]). *)
-let assert_clausified t cnf =
+let assert_clausified ?sel t cnf =
   let n = Cnf.num_vars cnf in
   let local = Array.make (n + 1) None in
   let sat_var v =
@@ -202,7 +211,15 @@ let assert_clausified t cnf =
     let sv = sat_var (Cnf.Lit.var l) in
     if Cnf.Lit.is_positive l then Sat.pos sv else Sat.neg sv
   in
-  let sel = current_selector t in
+  (* Default to the innermost frame's selector (an ordinary user assertion). A lemma
+     instance overrides [sel] with its OWNING lemma's frame selector (ADR-0012 §1.4 R2),
+     so the instance retracts with the lemma's frame, not whatever frame is innermost when
+     it is drawn. *)
+  let sel =
+    match sel with
+    | Some s -> s
+    | None -> current_selector t
+  in
   Cnf.iter_clauses
     (fun clause ->
        (* frame activation: clause holds only when the frame selector is assumed true *)
@@ -210,31 +227,114 @@ let assert_clausified t cnf =
     cnf
 ;;
 
+(* Preprocess -> clausify -> register a Bool term into the frame guarded by [sel]
+   (default: the current innermost frame). Shared by [assert_term] and
+   [assert_instance_at_frame]; the exception handling is the I8/CONTRACT-POISON
+   assert-time discipline. *)
+let assert_bool_at ?sel t pterm =
+  match Cnf.clausify pterm with
+  | exception _ -> t.degraded <- true
+  | cnf ->
+    (* Atom registration walks the theory engines; a rejected / out-of-fragment atom or an
+       overflow escaping here degrades the whole session to unknown (I8). The
+       internalization combinator raises [Combine.Incomplete] from [register_atom] (e.g. a
+       structured Bool compound under a UF argument, ADR-0010 §3.6 case (ii)) — a
+       DELIBERATE completeness degrade, distinct from a [Combination_unsound] fault, and
+       it surfaces HERE at assert-time registration, so it must be caught on this ingress
+       path too. *)
+    (try assert_clausified ?sel t cnf with
+     | Combine.Incomplete _ -> t.degraded <- true
+     | Term.Overflow
+     | Term.Unsupported _
+     | Rational.Overflow
+     | Lia.Poisoned
+     | Lia.Unsupported _
+     | Invalid_argument _ -> t.degraded <- true)
+;;
+
 let assert_term t term =
-  t.asserted <- term :: t.asserted;
-  match Preprocess.run t.pp term with
+  (* ADR-0012 §1.1 (R1 POINT 4): the load-bearing assert-side gate. A user term carrying a
+     coerced / interned [.oxsmt.qvar.*] placeholder degrades to a clean [Unknown] via the
+     I8 Unsupported discipline (NOT a raw [Failure]) — never registered, never in a model. *)
+  if Qvar.term_contains_qvar term
+  then t.degraded <- true
+  else (
+    t.asserted <- term :: t.asserted;
+    match Preprocess.run t.pp term with
+    | exception Term.Overflow -> t.degraded <- true
+    | exception Term.Unsupported _ -> t.degraded <- true
+    | pterm -> assert_bool_at t pterm)
+;;
+
+(* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
+   OWNING lemma's frame selector [frame], NOT the current innermost selector — so
+   [Session.pop] of the lemma's frame retracts the lemma AND every instance drawn from it
+   together. PRIVATE: it takes an [Instance.t] (a re-checked ground term), not a public
+   [Term.t], so it cannot be used to bypass the assert gate or to select an arbitrary SAT
+   var. The instance flows through the SAME preprocess -> clausify -> register_atom ->
+   Combine pipeline as a user assertion (§1.4); it is NOT added to [t.asserted] (the R1
+   model self-check set) — an instance is a consequence of a live lemma, and a
+   client-reported [Sat] only ever occurs with NO live lemma, hence with no active
+   instance. *)
+let assert_instance_at_frame t ~frame (inst : Instance.t) =
+  match Preprocess.run t.pp (Instance.to_term inst) with
   | exception Term.Overflow -> t.degraded <- true
   | exception Term.Unsupported _ -> t.degraded <- true
-  | pterm ->
-    (match Cnf.clausify pterm with
-     | exception _ -> t.degraded <- true
-     | cnf ->
-       (* Atom registration walks the theory engines; a rejected / out-of-fragment atom or
-          an overflow escaping here degrades the whole session to unknown (I8). The
-          internalization combinator raises [Combine.Incomplete] from [register_atom]
-          (e.g. a structured Bool compound under a UF argument, ADR-0010 §3.6 case (ii)) —
-          a DELIBERATE completeness degrade, distinct from a [Combination_unsound] fault,
-          and it surfaces HERE at assert-time registration, so it must be caught on this
-          ingress path too. *)
-       (try assert_clausified t cnf with
-        | Combine.Incomplete _ -> t.degraded <- true
-        | Term.Overflow
-        | Term.Unsupported _
-        | Rational.Overflow
-        | Lia.Poisoned
-        | Lia.Unsupported _
-        | Invalid_argument _ -> t.degraded <- true))
+  | pterm -> assert_bool_at ~sel:frame t pterm
 ;;
+
+type lemma = Lemma.t
+
+type origin = Lemma.origin =
+  | Named of string
+  | Anonymous
+
+(* What [assert_lemma]'s [build] returns: the well-sorted Bool [body] over the minted
+   qvars plus ground symbols, and the (possibly empty) multi-triggers. A record rather
+   than the ADR's object sketch (< body; triggers >) — cleaner OCaml, same content. *)
+type lemma_def =
+  { body : Term.t
+  ; triggers : Term.t list list
+  }
+
+(* ADR-0012 §1.3: mint-before-build binder-builder. The session mints the qvar handles
+   FIRST (via [Qvar.mint], reserved-namespace, cap-gated in Phase B), hands them to
+   [build], and the caller constructs the body/triggers USING those handles — so
+   occurrence-binding is by construction, never by the caller re-spelling a reserved name
+   (R1 defect (2)). The lemma is recorded in the CURRENT assertion frame (§1.5), so [pop]
+   retracts it (and its instances) together. Returns the stored [lemma] handle (the ADR's
+   [unit] is widened additively so the tranche-1 manual path — {!instantiate} — can name
+   the lemma; a caller may ignore it). *)
+let assert_lemma t ~qvars ~build =
+  let id = Manager.fresh_id t.mgr in
+  let qv =
+    Array.of_list
+      (List.mapi
+         (fun k (_name, sort) -> Qvar.mint t.env t.ctx ~lemma_id:id ~index:k sort)
+         qvars)
+  in
+  let { body; triggers } = build qv in
+  if not (Sort.equal (body : Term.t).sort Sort.bool)
+  then invalid_arg "Session.assert_lemma: lemma body must be Bool-sorted";
+  let lemma =
+    { Lemma.qvars = qv
+    ; body
+    ; triggers
+    ; id
+    ; frame = current_selector t
+    ; origin = Anonymous
+    }
+  in
+  Manager.add_lemma t.mgr lemma;
+  lemma
+;;
+
+(* TRANCHE-1 SCAFFOLD (ADR-0012 §8 manual-instances path). Seed a ground instance of
+   [lemma] at [sigma] (ground terms in the lemma's qvars order); the next {!check_sat}
+   loop drains it through the real dedup + frame-scoped assertion pipeline. The tranche-2
+   matcher replaces this producer (it will generate substitutions by E-matching), at which
+   point this entry point is retired. *)
+let instantiate t lemma sigma = Manager.seed_instance t.mgr lemma sigma
 
 let push t =
   (* Snapshot the active assertion set BEFORE opening the frame, so the matching [pop]
@@ -246,8 +346,13 @@ let push t =
 let pop t =
   match t.frames with
   | [ _ ] | [] -> invalid_arg "Session.pop: no matching push"
-  | _ :: rest ->
+  | popped :: rest ->
     t.frames <- rest;
+    (* ADR-0012 §1.5: retract the lemmas added in this frame AND every instance drawn from
+       them together (dedup entries + pending seeds owned by [popped] are dropped too), by
+       disabling the frame's selector. Soundness-load-bearing (a stranded pushed-frame
+       instance is the C1 wrong-[unsat]). *)
+    Manager.on_pop t.mgr popped;
     (* Restore the assertion set to the matching [push]'s snapshot, dropping the frame's
        assertions in lockstep (asserted_saved has one entry per non-base frame). *)
     (match t.asserted_saved with
@@ -316,6 +421,62 @@ let build_model t =
   else Some (assemble [] [])
 ;;
 
+(* One ground CDCL(T) decision under the CONTRACT-POISON firewall — the RAW verdict only,
+   no model build. This is what drives the outer lemma loop (§1.4): a [Sat] means "the
+   ground core is satisfiable, keep instantiating if a lemma is live", NOT a client
+   answer. Model reconstruction + the R1 self-check happen only at the committing [Sat]
+   ({!commit_sat}), so a live-lemma round is never blocked by a model the reconstructor
+   cannot yet build (e.g. a UFLIA function table) — that would be a spurious completeness
+   loss. The firewall wraps ONLY [Sat.solve] (the untrusted theory callbacks);
+   [commit_sat] runs outside it. *)
+let raw_solve t assumptions =
+  match Sat.solve ~assumptions t.sat with
+  | Sat.Unsat -> Unsat (* theory conflicts only strengthen unsat; still sound *)
+  | Sat.Sat -> Sat (* the ground core is satisfiable; model build is deferred to commit *)
+  | exception Cdclt.Split_budget_exceeded ->
+    (* Not a fault: the deterministic split cap fired. Distinct stat, sticky. *)
+    t.degraded <- true;
+    t.budget_exhausted <- true;
+    Unknown
+  | exception Budget.Exceeded ->
+    (* Board #60: the deterministic effort cap fired. NOT sticky, does NOT set [degraded];
+       the same query is re-runnable at a larger [max_effort]. A distinct BUDGET tag. *)
+    t.effort_exhausted <- true;
+    Unknown
+  | exception Combine.Incomplete _ ->
+    (* DELIBERATE completeness degrade (ADR-0010 §3.6 case (ii)); a NAMED arm, not the
+       catch-all. register_atom can raise it mid-solve. Sticky → Unknown. *)
+    t.degraded <- true;
+    Unknown
+  | exception ((Out_of_memory | Stack_overflow) as e) ->
+    (* Resource-exhaustion / async control-flow: process state untrustworthy — re-raise. *)
+    raise e
+  | exception _ ->
+    (* CONTRACT-POISON firewall (I8), catch-all over the untrusted theory callbacks driven
+       by [Sat.solve]: any escaping poison / unforeseen exception bricks this query to
+       [Unknown]. Sticky. *)
+    t.degraded <- true;
+    Unknown
+;;
+
+(* Commit a client-reported [Sat] (ADR-UF-models §3 / THE SOUNDNESS RULE M4): report [Sat]
+   only when a self-checkable model is reconstructable AND it passes the R1 in-process
+   checker — function tables AND table-free (const / Bool / LIA) models alike, no
+   [has_table] short-circuit ("no [sat] without the checker"). A model it cannot soundly
+   build is [None] -> [Unknown]; a checker rejection fail-closes to [Unknown]. Runs
+   OUTSIDE the [raw_solve] firewall, so a bug here surfaces as a crash, not a silent
+   [Unknown]. *)
+let commit_sat t =
+  match build_model t with
+  | Some m ->
+    if Model_check.check m t.asserted
+    then (
+      t.last_model <- Some m;
+      Sat)
+    else Unknown
+  | None -> Unknown
+;;
+
 let check_sat t =
   t.last_verdict <- Unknown;
   t.last_model <- None;
@@ -325,76 +486,40 @@ let check_sat t =
   then Unknown
   else (
     Cdclt.begin_check t.cdclt;
+    Manager.begin_check t.mgr (* fresh generation budget for this check_sat (§1.4) *);
     let assumptions = List.map Sat.pos t.frames in
-    let v =
-      match Sat.solve ~assumptions t.sat with
-      | Sat.Unsat -> Unsat (* theory conflicts only strengthen unsat; still sound *)
-      | Sat.Sat ->
-        (* THE SOUNDNESS RULE (M4): report [Sat] only when a self-checkable model is
-           reconstructable AND it passes the R1 in-process checker. This also firewalls
-           the combination's known incompleteness/soundness gap on function applications
-           appearing only inside arithmetic atoms (no purification pass yet; see the M4
-           report): a model it cannot soundly build is [None] -> [Unknown]. *)
-        (match build_model t with
-         | Some m ->
-           (* R1 (ADR-UF-models §3, codex TCB ruling): EVERY promoted [sat] passes the
-              obligatory in-process self-check over every ACTIVE original assertion
-              ([t.asserted], frame-scoped per F3) — function tables AND table-free (const
-              / Bool / LIA) models alike. No [has_table] short-circuit exempts the
-              sort-bearing const-only slice, so the trust story is uniform: "no [sat]
-              without the checker." Fail-closed to [unknown]. The checker is cheap for
-              const models; QF_UF tables carry no arithmetic, so its construct coverage is
-              complete for the first cut. *)
-           if Model_check.check m t.asserted
-           then (
-             t.last_model <- Some m;
-             Sat)
-           else Unknown
-         | None -> Unknown)
-      | exception Cdclt.Split_budget_exceeded ->
-        (* Not a fault: the deterministic split cap fired. Distinct stat, sticky. *)
-        t.degraded <- true;
-        t.budget_exhausted <- true;
-        Unknown
-      | exception Budget.Exceeded ->
-        (* Board #60: the deterministic effort cap fired (SAT conflicts/decisions + seam
-           Final-rounds). NOT a fault and — unlike the split cap above — NOT sticky and
-           does NOT set [degraded]: the search was merely cut off, the theory instance is
-           not bricked, so the very same query is re-runnable at a larger [max_effort]
-           (poison-free, per DESIGN §6). A distinct BUDGET tag ([effort_exhausted]), never
-           a verdict from an unfinished search. *)
-        t.effort_exhausted <- true;
-        Unknown
-      | exception Combine.Incomplete _ ->
-        (* DELIBERATE completeness degrade (ADR-0010 §3.6 case (ii): a structured Bool
-           compound under a UF argument the combinator chooses not to decide). A NAMED
-           arm, not the CONTRACT-POISON catch-all below: this is a "known unknown", not a
-           bricked theory instance. register_atom can raise it mid-solve (split-atom
-           re-registration in [on_assign], [intern ~split:true] in [check]), so it is
-           caught here as well as at the [assert_term] ingress. Sticky → Unknown. *)
-        t.degraded <- true;
-        Unknown
-      | exception ((Out_of_memory | Stack_overflow) as e) ->
-        (* Resource-exhaustion / control-flow asynchronous exceptions: the process state
-           is not trustworthy, so we do NOT swallow them into a verdict — re-raise. *)
-        raise e
-      | exception _ ->
-        (* CONTRACT-POISON firewall (I8), catch-all. [Sat.solve] drives the untrusted
-           theory callbacks ([on_assign]/[check]/[explain]/[on_backtrack], which run
-           [Combined.check]/[model]/[explain]/[register_atom]); ANY exception they let
-           escape — a declared poison ([Lia.Poisoned], [Rational.Overflow],
-           [Lia.Unsupported], [Combine.Combination_unsound],
-           [Sat.Theory_contract_violation]) OR an unforeseen
-           [Failure]/[Invalid_argument]/[Not_found]/[Term.Overflow] from a bug in theory
-           code — bricks this query to [Unknown] rather than crashing the session or
-           leaking a verdict from a bricked theory. This handler wraps ONLY the
-           theory-driving [Sat.solve] call; model reconstruction ([build_model], in the
-           [Sat.Sat] arm) and the session's own bookkeeping run OUTSIDE it, so a
-           programming error there still surfaces as a crash rather than a silent
-           [Unknown]. *)
-        t.degraded <- true;
-        Unknown
+    (* THE outer instantiation loop (ADR-0012 §1.4). There is exactly ONE [Sat] exit to
+       the client — the [not (has_live_lemma)] line — so THE SOUNDNESS RULE (§2) is an
+       unconditional wrapper over EVERY ground [Sat] (H1+H2), never a per-arm edit: while
+       a lemma is live a ground [Sat] either refutes on a later round (→ [Unsat]) or
+       saturates / exhausts the generation budget (→ [Unknown]). Instances are asserted
+       only BETWEEN complete ground checks, at decision level 0 (ADR-0010 invariant (i),
+       §1.4). *)
+    let rec loop () =
+      match raw_solve t assumptions with
+      | Unsat -> Unsat (* SOUND: instances are valid consequences of their lemmas *)
+      | Unknown -> Unknown (* poison / Incomplete / budget, sticky-or-not per the arm *)
+      | Sat ->
+        if not (Manager.has_live_lemma t.mgr)
+        then
+          commit_sat t (* the ONLY [Sat] exit to the client goes through the R1 checker *)
+        else (
+          let insts = Manager.round t.mgr in
+          if Manager.budget_exhausted t.mgr
+          then Unknown (* generation budget spent with a live lemma (§3) *)
+          else (
+            match insts with
+            | [] ->
+              Unknown (* saturated but a quantifier is live: THE SOUNDNESS RULE (§2) *)
+            | _ :: _ ->
+              List.iter
+                (fun (frame, inst) -> assert_instance_at_frame t ~frame inst)
+                insts;
+              (* An instance that overflowed / was rejected during assertion degraded the
+                 session (I8); stop rather than loop on a bricked state. *)
+              if t.degraded then Unknown else loop ()))
     in
+    let v = loop () in
     t.last_splits <- Cdclt.splits_used t.cdclt;
     t.last_effort <- Cdclt.effort_used t.cdclt;
     t.last_verdict <- v;
@@ -412,3 +537,12 @@ let splits t = t.last_splits
 let budget_exhausted t = t.budget_exhausted
 let effort t = t.last_effort
 let effort_exhausted t = t.effort_exhausted
+
+type lemma_stats = Manager.stats =
+  { live_lemmas : int
+  ; instances : int
+  ; rounds : int
+  }
+
+(* ADR-0012 §O4: lemma-tier instantiation stats, distinct from {!splits}. *)
+let lemma_stats t = Manager.stats t.mgr

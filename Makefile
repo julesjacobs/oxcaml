@@ -373,6 +373,14 @@ test: check-frozen
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 	$(MAKE) combine-test
 	$(MAKE) smtlib-test
+	$(MAKE) lemma-test
+
+## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance honeypots (H-SOUND / H-REFUTE /
+##   H-PUSHPOP / H-REPEAT-REFUTE) + the assert-side qvar gate, driven end-to-end through the
+##   real Session + Cdclt + Combine + EUF + LIA stack (no mocks). Nonzero exit on any
+##   failed check. See smt/ematch/test/lemma_honeypot_test.ml.
+lemma-test:
+	$(DUNE) exec smt/ematch/test/lemma_honeypot_test.exe
 
 ## bench — run the performance/adversarial corpus, emit digest to ../logs.
 bench:
