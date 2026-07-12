@@ -138,51 +138,29 @@ let sign = function
   | Big b -> Bigint.sign b.num
 ;;
 
-(* ---- Big-tier arithmetic (cross-cancel BEFORE the cross-multiply — R9 — so
-   intermediates do not balloon and then divide back down; applied in the Big tier only:
-   in [Small] the operands are O(1) native ints, so cross-cancel is pure overhead with no
-   size benefit and would regress the fast path, which §6 requires to stay byte-for-byte
-   today's code). ---- *)
-
-let bdiv a b = fst (Bigint.divmod a b)
+(* ---- Big-tier arithmetic: cross-multiply then normalize+demote. NOTE: an earlier
+   revision cross-cancelled gcd(den,den) before the cross-multiply (review R9, to bound
+   intermediate size). Measurement (logs/core-bignum-measurement.md) shows Big values on
+   the bucket-1 population stay <= 5 limbs (~155 bits) — the demote-back keeps them small
+   — so intermediates never balloon, and the extra gcd(s) per op that cross-cancel adds
+   dominated the cost (coef-size-100 spent 6.1M gcds). Removed; [bnorm_demote]'s single
+   normalization keeps every result canonical, and Bigint's native-int gcd/divmod fast
+   path (<= 2 limbs) makes it cheap. R9's huge-intermediate premise is not borne out on
+   this population; revisit only if a future file shows a real growth tail. ---- *)
 
 let big_add (an, ad) (bn, bd) =
-  let g = Bigint.gcd ad bd in
-  let ad' = bdiv ad g
-  and bd' = bdiv bd g in
-  let num = Bigint.add (Bigint.mul an bd') (Bigint.mul bn ad') in
-  let den = Bigint.mul ad bd' in
-  bnorm_demote num den
+  bnorm_demote (Bigint.add (Bigint.mul an bd) (Bigint.mul bn ad)) (Bigint.mul ad bd)
 ;;
 
 let big_sub (an, ad) (bn, bd) =
-  let g = Bigint.gcd ad bd in
-  let ad' = bdiv ad g
-  and bd' = bdiv bd g in
-  let num = Bigint.sub (Bigint.mul an bd') (Bigint.mul bn ad') in
-  let den = Bigint.mul ad bd' in
-  bnorm_demote num den
+  bnorm_demote (Bigint.sub (Bigint.mul an bd) (Bigint.mul bn ad)) (Bigint.mul ad bd)
 ;;
 
-let big_mul (an, ad) (bn, bd) =
-  let g1 = Bigint.gcd an bd
-  and g2 = Bigint.gcd bn ad in
-  let an' = bdiv an g1
-  and bd' = bdiv bd g1 in
-  let bn' = bdiv bn g2
-  and ad' = bdiv ad g2 in
-  bnorm_demote (Bigint.mul an' bn') (Bigint.mul ad' bd')
-;;
+let big_mul (an, ad) (bn, bd) = bnorm_demote (Bigint.mul an bn) (Bigint.mul ad bd)
 
 let big_div (an, ad) (bn, bd) =
-  (* (an/ad) / (bn/bd) = (an·bd) / (ad·bn) *)
-  let g1 = Bigint.gcd an bn
-  and g2 = Bigint.gcd bd ad in
-  let an' = bdiv an g1
-  and bn' = bdiv bn g1 in
-  let bd' = bdiv bd g2
-  and ad' = bdiv ad g2 in
-  bnorm_demote (Bigint.mul an' bd') (Bigint.mul ad' bn')
+  (* (an/ad) / (bn/bd) = (an*bd) / (ad*bn) *)
+  bnorm_demote (Bigint.mul an bd) (Bigint.mul ad bn)
 ;;
 
 let big_compare (an, ad) (bn, bd) =

@@ -127,73 +127,27 @@ let mag_mul a b =
     trim r)
 ;;
 
-(* ---- bit access (for binary long division) ---- *)
+(* A magnitude of <= 2 limbs has value <= radix^2 - 1 = max_int, so it fits a NONNEGATIVE
+   native int. Euclid's gcd and the normalization divisions spend most of their time on
+   such small operands (measured: values stay <= 5 limbs, and each division/Euclid step
+   shrinks them), so a native fast path here is the dominant speedup — it turns the bulk
+   of gcd/ divmod work into O(1) int arithmetic instead of the bit-by-bit general path. *)
+let mag_fits_int m = Array.length m <= 2
 
-let mag_bitlen m =
-  let len = Array.length m in
-  if len = 0
-  then 0
-  else (
-    let top = m.(len - 1) in
-    let rec bl v acc = if v = 0 then acc else bl (v lsr 1) (acc + 1) in
-    ((len - 1) * radix_bits) + bl top 0)
+let mag_to_pos_int m =
+  (if Array.length m >= 1 then m.(0) else 0)
+  + if Array.length m >= 2 then m.(1) * radix else 0
 ;;
 
-let mag_test_bit m i =
-  let limb = i / radix_bits
-  and off = i mod radix_bits in
-  if limb >= Array.length m then false else (m.(limb) lsr off) land 1 = 1
-;;
-
-(* [m << 1] as a magnitude (shift the whole number left by one bit). *)
-let mag_shl1 m =
-  let len = Array.length m in
-  if len = 0
+let mag_of_pos_int n =
+  if n = 0
   then [||]
-  else (
-    let r = Array.make (len + 1) 0 in
-    let carry = ref 0 in
-    for i = 0 to len - 1 do
-      let v = (m.(i) lsl 1) lor !carry in
-      r.(i) <- v land mask;
-      carry := v lsr radix_bits
-    done;
-    r.(len) <- !carry;
-    trim r)
+  else if n < radix
+  then [| n |]
+  else [| n land mask; n lsr radix_bits |]
 ;;
 
-(* Set bit 0 of a magnitude (the number is even here, so limb 0's bit 0 is 0). *)
-let mag_set_low_bit m =
-  if Array.length m = 0
-  then [| 1 |]
-  else (
-    let r = Array.copy m in
-    r.(0) <- r.(0) lor 1;
-    r)
-;;
-
-(* Unsigned division: [a = q*b + r], [0 <= r < b], [b] nonzero. Binary long division —
-   simple and obviously correct; [Big] is rare (see logs/core-bignum-measurement.md), so
-   the O(bits) loop is not on the hot path. (Knuth Algorithm D is the optimization if a
-   Phase-2 residency measurement flags divmod.) *)
-let mag_divmod a b =
-  if Array.length b = 0 then invalid_arg "Bigint.mag_divmod: divide by zero";
-  if mag_compare a b < 0
-  then [||], a
-  else (
-    let n = mag_bitlen a in
-    let q = Array.make ((n / radix_bits) + 1) 0 in
-    let rem = ref [||] in
-    for i = n - 1 downto 0 do
-      rem := mag_shl1 !rem;
-      if mag_test_bit a i then rem := mag_set_low_bit !rem;
-      if mag_compare !rem b >= 0
-      then (
-        rem := mag_sub !rem b;
-        q.(i / radix_bits) <- q.(i / radix_bits) lor (1 lsl (i mod radix_bits)))
-    done;
-    trim q, !rem)
-;;
+let rec int_gcd a b = if b = 0 then a else int_gcd b (a mod b)
 
 (* Divide a magnitude by a small positive [d] in [1, radix); returns (quotient, remainder).
    SAFETY: cur = rem*radix + m.(i) with rem <= d-1 <= radix-1 and m.(i) < radix, so
@@ -210,7 +164,121 @@ let mag_divmod_small m d =
   trim q, !rem
 ;;
 
-let rec mag_gcd a b = if Array.length b = 0 then a else mag_gcd b (snd (mag_divmod a b))
+let limb_bitlen v =
+  let rec go v acc = if v = 0 then acc else go (v lsr 1) (acc + 1) in
+  go v 0
+;;
+
+(* Knuth Algorithm D (TAOCP 4.3.1), base radix=2^31. Divide magnitude [u] by [v]; requires
+   |v| = n >= 2, |u| >= n, u >= v. Non-allocating in the inner loops (O(n*(m+1)) limb ops,
+   not O(bits) with per-bit allocation), which is the [Big]-tier hot path once values
+   exceed 2 limbs (logs/core-bignum-measurement Phase 2). All limb products stay < radix^2
+   = max_int+1 (see the qhat bounds below), so no native overflow. *)
+let mag_divmod_knuth u v =
+  let n = Array.length v in
+  let m = Array.length u - n in
+  (* D1: normalize by a left shift [s] so v's top limb has its high bit set (>= radix/2),
+     which bounds the quotient-digit estimate error to <= 2 (Knuth Thm B). *)
+  let s = radix_bits - limb_bitlen v.(n - 1) in
+  let vn = Array.make n 0 in
+  let carry = ref 0 in
+  for i = 0 to n - 1 do
+    let vv = (v.(i) lsl s) lor !carry in
+    vn.(i) <- vv land mask;
+    carry := vv lsr radix_bits
+  done;
+  let un = Array.make (m + n + 1) 0 in
+  carry := 0;
+  for i = 0 to m + n - 1 do
+    let src = if i < Array.length u then u.(i) else 0 in
+    let vv = (src lsl s) lor !carry in
+    un.(i) <- vv land mask;
+    carry := vv lsr radix_bits
+  done;
+  un.(m + n) <- !carry;
+  let q = Array.make (m + 1) 0 in
+  for j = m downto 0 do
+    (* D3: estimate qhat, rhat from the top two limbs. *)
+    let top = (un.(j + n) * radix) + un.(j + n - 1) in
+    let qhat = ref (top / vn.(n - 1)) in
+    let rhat = ref (top mod vn.(n - 1)) in
+    let refine = ref true in
+    while !refine do
+      if !qhat >= radix || !qhat * vn.(n - 2) > (!rhat * radix) + un.(j + n - 2)
+      then (
+        decr qhat;
+        rhat := !rhat + vn.(n - 1);
+        if !rhat >= radix then refine := false)
+      else refine := false
+    done;
+    (* D4: multiply-and-subtract qhat*vn from un[j..j+n]. *)
+    let borrow = ref 0 in
+    carry := 0;
+    for i = 0 to n - 1 do
+      let p = (!qhat * vn.(i)) + !carry in
+      carry := p lsr radix_bits;
+      let t = un.(j + i) - (p land mask) - !borrow in
+      if t < 0
+      then (
+        un.(j + i) <- t + radix;
+        borrow := 1)
+      else (
+        un.(j + i) <- t;
+        borrow := 0)
+    done;
+    let t = un.(j + n) - !carry - !borrow in
+    (* D5/D6: if the subtraction went negative, qhat was 1 too big — add vn back. *)
+    if t < 0
+    then (
+      un.(j + n) <- t + radix;
+      decr qhat;
+      let c = ref 0 in
+      for i = 0 to n - 1 do
+        let ss = un.(j + i) + vn.(i) + !c in
+        un.(j + i) <- ss land mask;
+        c := ss lsr radix_bits
+      done;
+      un.(j + n) <- (un.(j + n) + !c) land mask)
+    else un.(j + n) <- t;
+    q.(j) <- !qhat
+  done;
+  (* Quotient = q; remainder = (un[0..n-1]) >> s. *)
+  let rem = Array.make n 0 in
+  carry := 0;
+  for i = n - 1 downto 0 do
+    let cur = un.(i) in
+    rem.(i) <- (cur lsr s) lor (!carry lsl (radix_bits - s));
+    carry := cur land ((1 lsl s) - 1)
+  done;
+  trim q, trim rem
+;;
+
+(* Unsigned division: [a = q*b + r], [0 <= r < b], [b] nonzero. Native int fast path when
+   both fit (<= 2 limbs), single-limb-divisor fast path, else Knuth Algorithm D. *)
+let mag_divmod a b =
+  let lb = Array.length b in
+  if lb = 0 then invalid_arg "Bigint.mag_divmod: divide by zero";
+  if mag_fits_int a && mag_fits_int b
+  then (
+    let ai = mag_to_pos_int a
+    and bi = mag_to_pos_int b in
+    mag_of_pos_int (ai / bi), mag_of_pos_int (ai mod bi))
+  else if mag_compare a b < 0
+  then [||], a
+  else if lb = 1
+  then (
+    let q, r = mag_divmod_small a b.(0) in
+    q, if r = 0 then [||] else [| r |])
+  else mag_divmod_knuth a b
+;;
+
+let rec mag_gcd a b =
+  if mag_fits_int a && mag_fits_int b
+  then mag_of_pos_int (int_gcd (mag_to_pos_int a) (mag_to_pos_int b))
+  else if Array.length b = 0
+  then a
+  else mag_gcd b (snd (mag_divmod a b))
+;;
 
 (* ---- signed API ---- *)
 

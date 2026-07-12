@@ -57,32 +57,32 @@ type t =
   ; sat : Sat.t
   ; cdclt : Cdclt.t
   ; prop_to_var : Sat.var Term.Table.t
-    (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
+      (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
          auxiliary Tseitin variables are per-formula. Shared via hash-cons identity. *)
   ; mutable bool_consts : (string * Sat.var) list
-    (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
+      (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
          [get_model] *)
   ; mutable frames : Sat.var list
-    (* selector stack, innermost first; base always present *)
+      (* selector stack, innermost first; base always present *)
   ; mutable has_theory : bool
-    (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
+      (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
          verdict's model comes from the theory, and a Sat is theory-validated *)
   ; mutable degraded : bool
-    (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
+      (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
          CONTRACT-POISON) *)
   ; mutable last_verdict : verdict
-    (* verdict of the most recent check_sat, for get_model *)
+      (* verdict of the most recent check_sat, for get_model *)
   ; mutable last_model : model option
-    (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+      (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
   ; mutable asserted : Term.t list
-    (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
+      (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
          model self-check. Frame-scoped in lockstep with [frames] (F3): a [push] snapshots
          it onto [asserted_saved] and a [pop] restores that snapshot, so a retracted
          frame's assertions do NOT linger — [Model_check] evaluates the current active
          set, never a popped assertion (which would spuriously reject a valid post-pop
          [Sat]). *)
   ; mutable asserted_saved : Term.t list list
-    (* [asserted] snapshots saved at each [push], innermost first; one per non-base
+      (* [asserted] snapshots saved at each [push], innermost first; one per non-base
          frame (so [length asserted_saved = length frames - 1]). Restored by [pop]. *)
   ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
   ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
@@ -205,8 +205,8 @@ let assert_clausified t cnf =
   let sel = current_selector t in
   Cnf.iter_clauses
     (fun clause ->
-       (* frame activation: clause holds only when the frame selector is assumed true *)
-       Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
+      (* frame activation: clause holds only when the frame selector is assumed true *)
+      Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
     cnf
 ;;
 
@@ -282,7 +282,7 @@ let build_model t =
   let bool_bindings =
     List.filter_map
       (fun (name, sv) ->
-         if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
+        if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
       t.bool_consts
   in
   let bool_names = List.map name_of bool_bindings in
@@ -298,7 +298,14 @@ let build_model t =
   then (
     match Cdclt.model t.cdclt with
     | None -> None
-    | Some (sort_cards, theory_bindings) -> Some (assemble sort_cards theory_bindings))
+    | Some (sort_cards, theory_bindings) -> Some (assemble sort_cards theory_bindings)
+    | exception Rational.Overflow ->
+      (* core-bignum R1 output-boundary: a [Big] LIA model value is integral but exceeds
+         int63, so it cannot be projected to the native-int [Model.Int] sink without
+         truncating. [build_model] runs OUTSIDE the CONTRACT-POISON firewall (below), so
+         catch the projection [Overflow] HERE and degrade to no-model -> [Unknown] (sound;
+         never a truncated model, and no [Model.t] unfreeze). *)
+      None)
   else Some (assemble [] [])
 ;;
 
