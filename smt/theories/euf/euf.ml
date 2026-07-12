@@ -656,9 +656,12 @@ let propagate t =
     let m = Dynarray.length t.enodes in
     (* [m] is fixed for the whole call (no merge inside [propagate]). Guard the packing's
        injectivity precondition once here: keys alias only once [lo*m+hi] wraps mod 2^63,
-       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We assert the STRICTER [m <= 2^31],
-       so past it we fail closed (raise, never a wrong distinct-propagation) — and asserts
-       are live in [--profile release], so this is a real runtime guard, not debug-only. *)
+       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We assert the STRICTER [m <= 2^31] as
+       a DEV/DEBUG-profile guard (fail closed: raise, never a wrong distinct-propagation).
+       Under release, [main/dune] passes [-noassert], so this assert is COMPILED OUT of
+       the promotable binary; release-binary safety rests on the PHYSICAL UNREACHABILITY
+       of the bound — [m > 2^31] e-nodes would need ~155 GB, unreachable in any real solve
+       — not on the assert firing. *)
     assert (m <= 1 lsl 31);
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
