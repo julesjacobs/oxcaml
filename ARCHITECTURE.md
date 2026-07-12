@@ -61,7 +61,10 @@ M2+; **the M1 SAT core is propositional only and sees no terms**. Public surface
 `Sat` (int vars/lits, `add_clause`, `solve ?assumptions`, model + failed-
 assumption core, stats trio, a zero-cost proof-readiness `trace` hook per learned
 clause — I4/§7). Every derived fact is justified (I4); deterministic (I6): no
-wall-clock/randomness, count-based schedules. **Status: implemented** (~855 lines
+wall-clock/randomness, count-based schedules. The S3 search-heuristics layer (`search_heuristics.{ml,mli}`,
+#155/#172) adds glucose-style LBD scoring, LBD-based `reduceDB` learned-clause management,
+and phase rephasing; glucose adaptive restart is implemented but **default-OFF** (ruling B —
+corpus-weighted net-positive off, +20 vs +17). **Status: implemented** (~855 lines
 shipped, stdlib-only via `Dynarray`; well under the 1.5k budget). `sat.mli`
 freezes at the M1 THEORY freeze. Test-only DIMACS parser + DPLL oracle + bench
 runner under `smt/solver/test/` (`make sat-test`, `make sat-bench`). Owner:
