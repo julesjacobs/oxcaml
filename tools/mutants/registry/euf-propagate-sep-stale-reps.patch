@@ -1,15 +1,15 @@
 diff --git a/smt/theories/euf/euf.ml b/smt/theories/euf/euf.ml
-index e376074c1e..04f75903fe 100644
+index ab947936c2..488ee05d83 100644
 --- a/smt/theories/euf/euf.ml
 +++ b/smt/theories/euf/euf.ml
-@@ -623,8 +623,8 @@ let propagate t =
-     let sep = Hashtbl.create (Dynarray.length t.diseqs) in
+@@ -655,8 +655,8 @@ let propagate t =
+     let pack lo hi = (lo * m) + hi in
      Dynarray.iter
        (fun d ->
 -         let du = find t d.d_a
 -         and dv = find t d.d_b in
 +         let du = d.d_a
 +         and dv = d.d_b in
-          let key = if du <= dv then du, dv else dv, du in
-          Hashtbl.replace sep key ())
+          let key = if du <= dv then pack du dv else pack dv du in
+          Int_set.replace sep key ())
        t.diseqs;

@@ -77,6 +77,18 @@ module Sig = Hashtbl.Make (struct
     let hash (s, a) = Array.fold_left (fun h x -> (h * 31) + x) (s * 65599) a
   end)
 
+(* Int-keyed set for the per-call separated-root-pair table (#125). The two class-rep ids
+   of a disequality are packed into one [int] key (see [propagate]), so the hot membership
+   test uses an identity [int] hash — matching the [Symbol]/[Term] table idiom — instead
+   of the polymorphic [caml_hash] over a boxed [(int * int)] tuple (~11% of QG wall).
+   Never iterated -> no Hashtbl-order in any observable path (C8); lookup/insert only. *)
+module Int_set = Hashtbl.Make (struct
+    type t = int
+
+    let equal (a : int) b = a = b
+    let hash (x : int) = x
+  end)
+
 type 'p undo =
   | U_parent of int * int
   | U_size of int * int
@@ -632,13 +644,21 @@ let propagate t =
        to catch a spurious propagation; the [test_propagate_pushpop_vs_full] oracle checks
        byte-identical output against an independent full scan, forbidding BOTH directions
        (mutants [euf_propagate_sep_stale_reps] / [euf_propagate_sep_skip_rebuild]). *)
-    let sep = Hashtbl.create (Dynarray.length t.diseqs) in
+    let sep = Int_set.create (Dynarray.length t.diseqs) in
+    (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
+       [m = #e-nodes]. Every rep is an e-node id in [0, m), so this is injective (distinct
+       pairs give distinct keys) and cannot overflow — [m^2] fits a 63-bit [int] for any
+       instance that fits in memory. No merge happens inside [propagate], so [m] and every
+       [find] are stable for the whole call; the build and lookup loops therefore use the
+       same [m]. *)
+    let m = Dynarray.length t.enodes in
+    let pack lo hi = (lo * m) + hi in
     Dynarray.iter
       (fun d ->
          let du = find t d.d_a
          and dv = find t d.d_b in
-         let key = if du <= dv then du, dv else dv, du in
-         Hashtbl.replace sep key ())
+         let key = if du <= dv then pack du dv else pack dv du in
+         Int_set.replace sep key ())
       t.diseqs;
     Dynarray.iteri
       (fun idx w ->
@@ -650,8 +670,8 @@ let propagate t =
              if ra = rb
              then 1
              else (
-               let key = if ra <= rb then ra, rb else rb, ra in
-               if Hashtbl.mem sep key then 0 else -1)
+               let key = if ra <= rb then pack ra rb else pack rb ra in
+               if Int_set.mem sep key then 0 else -1)
            in
            if cur <> -1 && cur <> w.w_reported
            then (
