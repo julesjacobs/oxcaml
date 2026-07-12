@@ -305,6 +305,43 @@ let test_property label gen n =
     n
 ;;
 
+(* UNTRACED verdict oracle (cert-step-1 fix round): the sibling of {!test_property} that
+   installs NO trace and cross-checks only the verdict + sat-model against the DPLL
+   reference. This is the path that exercises local clause minimization: with a trace
+   active minimization is bypassed (frozen sat.mli:156), so {!test_property} — which
+   traces to observe learned clauses — no longer runs minimization, and the
+   sat-minimize-unsound mutant is invisible there. An unsound minimization drops a needed
+   literal from a learned clause, over-constraining the search into a spurious Unsat (or a
+   model that fails evaluation) on some random instance, so it MUST surface here as a DPLL
+   disagreement or a bad model. This is the mutant's kill site. *)
+let test_property_untraced label gen n =
+  let disagreements = ref 0 in
+  let bad_models = ref 0 in
+  for _ = 1 to n do
+    let num_vars, clauses = gen () in
+    let expected = Dpll.solve num_vars clauses in
+    let s = build num_vars clauses in
+    match Sat.solve s with
+    | Sat.Sat ->
+      if not expected then incr disagreements;
+      if not (model_satisfies clauses (Sat.model s)) then incr bad_models
+    | Sat.Unsat -> if expected then incr disagreements
+  done;
+  check
+    (Printf.sprintf
+       "property-untraced[%s]: %d formulas agree with DPLL (%d disagreements)"
+       label
+       n
+       !disagreements)
+    (!disagreements = 0);
+  check
+    (Printf.sprintf
+       "property-untraced[%s]: all sat models valid (%d bad)"
+       label
+       !bad_models)
+    (!bad_models = 0)
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Crafted conflicts that exercise 1UIP local (self-subsumption) minimization, the code
    the sat-minimize-unsound mutant corrupts. One case where minimization must NOT fire (a
@@ -530,6 +567,10 @@ let () =
   test_pigeonhole 5;
   test_property "sparse" gen_sparse 20000;
   test_property "dense" gen_dense 20000;
+  (* untraced verdict oracle: exercises local minimization (bypassed under trace) so the
+     sat-minimize-unsound mutant has a kill site — cert-step-1 fix round *)
+  test_property_untraced "sparse" gen_sparse 20000;
+  test_property_untraced "dense" gen_dense 20000;
   Printf.printf "sat_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
