@@ -37,12 +37,16 @@ module Parser = Oxsmt_smtlib_parser.Parser
    (simplex.mli) is a soundness invariant, not a perf-debug toggle, and is deliberately
    NOT disabled.
 
-   Coordination (team-lead): the trunk DEFAULT of [Euf.Debug.self_check] flips to OFF when
-   task/euf-perf (1c) lands, which also adds the [OXSMT_EUF_SELF_CHECK] opt-in env gate.
-   This explicit force makes the measurement binary release-config BY CONSTRUCTION under
-   EITHER land order (it becomes redundant, never wrong, once 1c lands); we do NOT add a
-   second env gate (1c owns it). [--stamp] READS the live ref, so it reports the true
-   effective state regardless of which branch is in the tree. *)
+   Coordination (team-lead, RECONCILED once task/euf-perf landed second): task/euf-perf
+   (1c) is now in the tree, so the trunk DEFAULT of [Euf.Debug.self_check] is already OFF
+   and the [OXSMT_EUF_SELF_CHECK] opt-in env gate (euf.ml) is the CANONICAL mechanism — 1c
+   owns the toggle. This explicit force is therefore now REDUNDANT-BUT-HARMLESS: it
+   re-asserts the default 1c already sets (never wrong), and is kept only as a
+   belt-and-suspenders release-config guarantee for this measurement binary and as a
+   self-documenting anchor for the [--stamp] readout. It is NOT a second env gate.
+   [--stamp] READS the live ref, so it reports the true effective state regardless.
+   (Pre-land this force was load-bearing under the land order where counted-budget
+   preceded 1c; that order resolved with 1c second.) *)
 let () = Oxsmt_euf.Euf.Debug.self_check := false
 
 (* Never-true, non-constant so the compiler cannot fold it to the special [assert false]
