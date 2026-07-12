@@ -1,0 +1,7 @@
+(model
+  (sort S 2)
+  (const a 0)
+  (const b 1)
+  (fun f (default 0)
+        (case (0) 0)
+        (case (1) 0)))
