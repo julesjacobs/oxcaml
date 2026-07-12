@@ -1,6 +1,6 @@
 # ADR-0013 — Certificates + Lean replay: the end-to-end path (M5, elaboration of ADR-0006)
 
-Status: **RATIFIED (Rev 5) 2026-07-12** — design-only, no code in `main/`; implementation is a tracked post-M4/M5 dispatch. Promoted verbatim from `logs/adr-certificates-draft.md` (the original DRAFT Rev-5 status line and all sections below preserved as-ratified for the record); the §Appendix D3-erratum block was additionally applied to `decisions/adr-0006-certificates.md` as its Revision 5 at this promotion. Dual adversarial review complete — codex Rev-4 final leg (3 HIGH + 1 MEDIUM, all folded into Rev 5) + same-model legs; master-ratified. Elaborates ADR-0006.
+Status: **RATIFIED (Rev 6) 2026-07-12** — design-only, no code in `main/`; implementation is a tracked post-M4/M5 dispatch. Promoted verbatim from `logs/adr-certificates-draft.md` (the original DRAFT Rev-5 status line and all sections below preserved as-ratified for the record); the §Appendix D3-erratum block was additionally applied to `decisions/adr-0006-certificates.md` as its Revision 5 at this promotion. Dual adversarial review complete — codex Rev-4 final leg (3 HIGH + 1 MEDIUM, all folded into Rev 5) + same-model legs; master-ratified. **Rev 6 (2026-07-12): §4.0 E2 sub-case fold from the sat.mli Tranche-C freeze review (unconditional `T_conflict []` → loud-uncertified; no frozen-type change) — see the Revision 6 block at the end.** Elaborates ADR-0006.
 
 _Original draft status line (preserved):_ **DRAFT Rev 5 — revised against the codex Rev-4 final leg**
 (`logs/codex-review/adr-certificates-rev4.md`: 3 HIGH + 1 MEDIUM, all verified with
@@ -776,3 +776,18 @@ witness-trust in Lean, and until it lands STATUS records that the LIA multiplier
 is OCaml-only. (Rejected alternative, on record: making the reflected checker a
 *blocking* M5 deliverable — rejected because `omega` already gives kernel soundness at
 M5, so blocking M5 on the reflected checker trades no soundness for schedule risk.)
+
+---
+
+## Revision 6 — §4.0 E2 sub-case (sat.mli Tranche-C freeze-review fold)
+
+**Revision 6 (2026-07-12) — §4.0 E2 sub-case (sat.mli Tranche-C freeze-review fold):** E2
+also covers an **unconditional `T_conflict []`** (theory.mli's empty-premise-set
+contradiction), which `theory_conflict_clause` mints as an **empty** transient funneled to
+the level-0-conflict site; its terminal step is `on_theory_clause ~role:Conflict` of the
+empty clause then `Level0_conflict {conflict_id}`. Emission is **loud-uncertified** —
+defensive-only-unreachable for the v1 theories (EUF/LIA conflicts always carry ≥1 asserted
+premise) and, were it to fire, no v1 leaf witnesses ⊥-from-∅ (`Valid_lemma`/`Lia_farkas`/
+`Euf_chain` all require content), so the fail-closed bucket is loud-uncertified, never a
+fabricated leaf. No frozen-type change — the `unsat_conclusion` / `on_theory_clause` surface
+already represents it.
