@@ -138,6 +138,23 @@ theory inconsistency); propositional `Unsat` stays sound; pure-Boolean formulas 
 real sat/unsat; `Overflow`/`Unsupported` → `Unknown` (I8). Unsat cores / reasons and
 the SMT-LIB serialization seam arrive with M4. Owner: M1-wiring (was M4-interface).
 
+## smt/ematch (`oxsmt_ematch`)
+Stage-2 quantifier instantiation for the lemma tier (ADR-0012), stdlib-only over
+`oxsmt_core` plus a read-only EUF query view. **Tranche 1 (#101):** `Qvar` placeholder
+(mint/gate walk under the reserved `.oxsmt.qvar.*` namespace), `Instance` capture-free
+substitution rebuild, `Lemma` record (incl. `frame : Sat.var`), `Manager` store with
+frame-scoped liveness + active-clause dedup + a manual seed queue + `on_pop`. **Tranche 2
+(#135):** `Egraph_view` — a genuinely non-registering read-only e-graph query surface
+(`app_terms_by_symbol`/`find_class_opt`/`equal_if_registered`/`class_members`, all
+deterministic tag-ordered, never mutating; ADR-0012 §5 L2) — and `Matcher`, a
+deterministic backtracking E-matcher (uninterpreted-symbol triggers, per-step budget
+debit; §5 L3) driving `Manager.round`'s transactional (dedup + seed) rollback. Matching is
+**structural** against the persistent registered-term e-graph end-to-end at the current
+outer-loop locus; congruence-modulo matching is coded and unit-covered but dormant until
+the in-search O2 locus (ADR-0012 §5 erratum). Consumed by `Session` (`assert_lemma`/
+`instantiate`); exercised by `make lemma-test` (lemma_honeypot + crit_repro + matcher). No
+frozen `.mli`. Owner: lemma-tranche builders.
+
 ## smt/lexical (`oxsmt_lexical`)
 The one SMT-LIB 2.6 §3.1 lexer (ADR-0008), stdlib-only, zero deps. Emits a `token`
 type whose **headline invariant is "token kind is never lost"**: a quoted `|0|` is a

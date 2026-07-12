@@ -809,6 +809,16 @@ it (O10). Triggers contain **only uninterpreted-symbol heads** (ADR-0010 invaria
 (iv)); an arithmetic-headed trigger is rejected at `assert_lemma` (arithmetic lives
 in the *body*, handled by the assert-time pipeline).
 
+**Tranche-2 erratum (as-built, #135).** In the tranche-2 outer-loop locus, `Ematch.round`
+queries the e-graph after `Sat.solve` returns, when frame-selector assumptions (level ≥1)
+have been backtracked to decision level 0. User-asserted (dis)equalities are therefore not
+reflected in the batch view; `class_members` sees only level-0-forced merges. Tranche-2
+E-matching is consequently **structural** against the persistent registered-term e-graph;
+"modulo EUF-congruence equalities" is realized in the matcher's argument-matching code
+(unit-covered by U-CONGRUENCE with a hand-rolled class) but does not bite end-to-end until
+the in-search O2 locus. Completeness scope only (§3/M3), never a soundness one; the
+tranche-2 product value is structural instantiation (E-FIND/E-NESTED/E-MULTI).
+
 ### L4 — trigger selection (annotated-first, auto fallback)
 If the lemma carries `triggers` (from `:pattern` or the API), use them verbatim
 (annotated-first). Otherwise auto-select: choose minimal subterms of `body` that
