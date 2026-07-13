@@ -130,8 +130,13 @@ type model = sort_card list * model_binding list
     never surfaced by default the interactive / [make test] path is byte-identical to a
     build without the budget. A finite [max_effort] makes exhaustion return [Unknown] with
     the BUDGET tag ({!effort_exhausted}); per-check and poison-free (re-runnable at a
-    larger cap). *)
-val create : ?split_budget:int -> ?max_effort:int -> unit -> t
+    larger cap).
+
+    [lemma_gen_budget] caps the number of ground lemma instances generated per [check_sat]
+    (ADR-0012 §1.4); on exhaustion the instantiation loop degrades to [Unknown] rather
+    than hanging (a matching-loop lemma such as associativity never runs away). Absent =
+    the manager's generous deterministic default. *)
+val create : ?split_budget:int -> ?max_effort:int -> ?lemma_gen_budget:int -> unit -> t
 
 (** The session's {!Oxsmt_core.Env.t}. Exposed so a front end (e.g. the test-only SMT-LIB
     parser) can declare symbols and build assertion terms in the {e same} context the
@@ -305,3 +310,17 @@ type lemma_stats =
   }
 
 val lemma_stats : t -> lemma_stats
+
+(** Provenance of one ground instance generated from a lemma (ADR-0012): the source
+    lemma's id, the substitution (qvar images in binder order), and the resulting ground
+    body. Certificate replay of instantiations is a later tranche; the record exists now. *)
+type instantiation =
+  { lemma_id : int
+  ; subst : Oxsmt_core.Term.t array
+  ; instance : Oxsmt_core.Term.t
+  }
+
+(** [lemma_instantiations t] is the instantiation trace, oldest-first: every ground
+    instance actually asserted this session, tagged with which lemma and substitution
+    produced it (a budget-aborted round's instances are absent). *)
+val lemma_instantiations : t -> instantiation list

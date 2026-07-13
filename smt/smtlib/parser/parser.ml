@@ -21,6 +21,24 @@ let name_of s =
    redeclaration by [declare_fun]. *)
 let tester_name_of cname = "is-" ^ cname
 
+(* A universally-quantified assertion, parsed from [(assert (forall (binders) body))]. The
+   parser cannot BUILD the lemma itself: the bound variables must be minted as cap-gated
+   placeholder qvars through the {!Oxsmt_interface.Session} (ADR-0012 §1.3
+   mint-before-build), which lives in a library this test-only parser must not depend on.
+   So instead the parser records the binders it read and a deferred [build] closure: the
+   driver mints one qvar per binder, hands their {!Term.t} images to [build] in binder
+   order, and [build] reads the body (and any [:pattern] triggers) with each binder name
+   bound to its qvar image. The body is read lazily inside [build] rather than eagerly,
+   because it is only well-sorted once the qvar images exist. *)
+type lemma_src =
+  { qvars :
+      (string * Sort.t) list (* forall binders, outer-first then inner (flattened) *)
+  ; build : Term.t array -> Term.t * Term.t list list
+    (* [build qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
+     substitute for the k-th binder. May raise {!Malformed}/{!Unsupported} (a body op
+     outside the subset), which the driver maps to a sound [unknown]. *)
+  }
+
 type t =
   { env : Env.t
   ; ctx : Context.t
@@ -29,7 +47,8 @@ type t =
   ; assertions : Term.t list
   ; datatypes : Datatype_defs.t
     (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
-     theory; empty when the query declares none *)
+         theory; empty when the query declares none *)
+  ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
   }
 
 type fundecl =
@@ -333,6 +352,77 @@ and chain st mk ts =
   | _ -> malformedf "chained relation needs >= 2 arguments"
 ;;
 
+(* ---- quantifiers (ADR-0012 lemma tier) ---- *)
+
+(* A quantifier binder list [((x S) (y T) ...)] -> [(name, sort)] pairs. Sorts are read
+   eagerly (so an out-of-subset binder sort — e.g. an array — fails at parse time, exactly
+   as a top-level declaration would). *)
+let read_binders st (binders : Sexp.t) : (string * Sort.t) list =
+  match binders with
+  | Sexp.List bs ->
+    List.map
+      (fun b ->
+         match b with
+         | Sexp.List [ nm; srt ] ->
+           (match Sexp.symbol_name nm with
+            | Some n -> n, sort_of_sexp st srt
+            | None ->
+              malformedf "malformed quantifier binder name: %s" (Sexp.to_string nm))
+         | _ -> malformedf "malformed quantifier binder: %s" (Sexp.to_string b))
+      bs
+  | _ -> malformedf "quantifier binder list must be a list"
+;;
+
+(* Pull the [:pattern (t1 t2 ...)] annotations out of a [(! body :attr ... )] attribute
+   tail. Each [:pattern] is one CONJUNCTIVE multi-trigger (its terms must all match under
+   one substitution); several [:pattern]s are ALTERNATIVE triggers (any may fire). Other
+   attributes (e.g. [:qid], [:named], [:weight]) are ignored. Returns the pattern groups
+   as raw s-expressions, read (with the qvars in scope) only inside [build]. *)
+let rec extract_patterns (attrs : Sexp.t list) : Sexp.t list list =
+  match attrs with
+  | Sexp.Atom (Tok.Keyword "pattern") :: Sexp.List pats :: rest ->
+    pats :: extract_patterns rest
+  | Sexp.Atom (Tok.Keyword _) :: _value :: rest -> extract_patterns rest
+  | _ :: rest -> extract_patterns rest
+  | [] -> []
+;;
+
+(* Peel nested [forall]s into one flat binder list (forall x. forall y. P == forall
+   x y. P) and return the innermost body together with its trigger groups. Only universal
+   quantifiers are flattened; an [exists] anywhere (including alternation under a forall)
+   is out of the fragment. [(! body :pattern ...)] on the innermost body supplies the
+   triggers. *)
+let rec collect_forall st acc (tail : Sexp.t list) =
+  match tail with
+  | [ binders; body ] ->
+    let acc = acc @ read_binders st binders in
+    (match body with
+     | Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: inner) ->
+       collect_forall st acc inner
+     | Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: _) ->
+       unsupportedf "existential quantifier is not supported (universal lemmas only)"
+     | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: core :: attrs) ->
+       acc, core, extract_patterns attrs
+     | _ -> acc, body, [])
+  | _ -> malformedf "malformed forall (expected (forall (binders) body))"
+;;
+
+(* Parse [(assert (forall ...))] into a {!lemma_src}. The binders are read now; the body
+   and triggers are read lazily by [build], with each binder name bound (innermost-first,
+   so an inner binder shadows an outer one of the same name) to its minted qvar image. *)
+let read_forall st (tail : Sexp.t list) : lemma_src =
+  let qvars, body_sexp, trigger_sexps = collect_forall st [] tail in
+  let build qvar_images =
+    let scope =
+      List.rev (List.mapi (fun i (name, _sort) -> name, qvar_images.(i)) qvars)
+    in
+    let body = read_term st scope body_sexp in
+    let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
+    body, triggers
+  in
+  { qvars; build }
+;;
+
 (* ---- commands ---- *)
 
 (* Reject user declarations in the reserved fresh-symbol namespace (board #48): a user
@@ -506,8 +596,30 @@ let parse_sort_decls (s : Sexp.t) =
   | _ -> malformedf "declare-datatypes sort list must be a list: %s" (Sexp.to_string s)
 ;;
 
+(* Logics we accept at [set-logic]. The quantifier-free family is fully modelled. The
+   QUANTIFIED family (UF/LIA + the array/real/datatype supersets present in the public
+   corpora) is accepted at the NAME level so the lemma pipeline (ADR-0012) is reached —
+   but acceptance of the name is not a promise to model the theory: any construct outside
+   the subset (an array/real/datatype sort, a decimal literal, a nonlinear product) still
+   fails downstream (a parse-level [Unsupported], or a runtime degrade to [unknown] for a
+   lemma body). This is fail-closed by CONSTRUCT, not by logic name — a UFLIA file using
+   only UF + linear integers + universals solves; an AUFLIA file touching arrays degrades.
+   Universals only: an [exists] in the body is rejected as {!Unsupported} regardless. *)
 let known_logic = function
   | "QF_UFLIA" | "QF_UF" | "QF_LIA" | "QF_IDL" | "QF_RDL" | "QF_DT" | "QF_UFDT" -> true
+  (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
+  | "UF"
+  | "UFLIA"
+  | "UFIDL"
+  | "UFLRA"
+  | "LIA"
+  | "LRA"
+  | "AUFLIA"
+  | "AUFLIRA"
+  | "ALIA"
+  | "AUFDTLIA"
+  | "UFDT"
+  | "UFDTLIA" -> true
   | _ -> false
 ;;
 
@@ -515,6 +627,21 @@ let run st sexps =
   let logic = ref None in
   let status = ref None in
   let asserts = ref [] in
+  let lemmas = ref [] in
+  (* Classify an assertion body: a top-level [forall] (optionally wrapped in a [(! ...)]
+     annotation, e.g. [:named]) becomes a lemma; anything else is a ground term. A
+     [forall] nested INSIDE a term (not the assertion root) stays out of the fragment —
+     [read_term] rejects it — so only assertion-root universals are lifted to lemmas. *)
+  let rec classify (b : Sexp.t) =
+    match b with
+    | Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ->
+      `Lemma (read_forall st tail)
+    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: inner :: _attrs) -> classify inner
+    | _ ->
+      let t = read_term st [] b in
+      if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
+      `Ground t
+  in
   (* Extract a declared name (any symbol atom, quoted or not). *)
   let name_of s =
     match Sexp.symbol_name s with
@@ -574,10 +701,9 @@ let run st sexps =
           | Some "define-fun", _ ->
             malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
           | Some "assert", [ body ] ->
-            let t = read_term st [] body in
-            if not (Sort.equal t.Term.sort Sort.bool)
-            then malformedf "assertion is not Bool";
-            asserts := t :: !asserts
+            (match classify body with
+             | `Ground t -> asserts := t :: !asserts
+             | `Lemma l -> lemmas := l :: !lemmas)
           | Some "check-sat", _ -> ()
           | Some "exit", _ -> ()
           | Some ("push" | "pop"), _ ->
@@ -599,7 +725,7 @@ let run st sexps =
           | Some other, _ -> unsupportedf "unsupported command: %s" other
           | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
-  !logic, !status, List.rev !asserts
+  !logic, !status, List.rev !asserts, List.rev !lemmas
 ;;
 
 let parse_into env ctx src =
@@ -620,13 +746,13 @@ let parse_into env ctx src =
     | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))
     | Tok.Error m -> raise (Malformed ("lexical: " ^ m))
   in
-  let logic, status, assertions =
+  let logic, status, assertions, lemmas =
     try run st sexps with
     | Term.Sort_error m -> raise (Malformed ("sort error: " ^ m))
     | Term.Unsupported m -> raise (Unsupported m)
     | Term.Overflow -> raise (Unsupported "arithmetic exceeds native int range")
   in
-  { env; ctx; logic; status; assertions; datatypes = st.datatypes }
+  { env; ctx; logic; status; assertions; datatypes = st.datatypes; lemmas }
 ;;
 
 let parse src =

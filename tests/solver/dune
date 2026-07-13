@@ -7,7 +7,12 @@
 (executable
  (name oxsmt_cli)
  (modules oxsmt_cli)
- (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_smtlib))
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_smtlib
+  oxsmt_query_loader))
 
 ; Session semantics + namespace-guard unit tests (make wiring-test).
 

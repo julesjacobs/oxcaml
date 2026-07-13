@@ -25,6 +25,15 @@ type stats =
   ; rounds : int (* [round] calls so far this session *)
   }
 
+(** Provenance of one generated ground instance (ADR-0012: each instantiation records
+    which lemma and which substitution produced it). Certificate replay of these steps is
+    a later tranche; the RECORD exists now (see {!instantiations}). *)
+type instantiation =
+  { lemma_id : int (* the source {!Lemma.t}'s dense id *)
+  ; subst : Term.t array (* ground image of each qvar, in [Lemma.qvars] order *)
+  ; instance : Term.t (* the resulting ground body [φ[σ]] *)
+  }
+
 (** [create ctx env] makes an empty manager over the session's context/env (used to
     rebuild instance bodies and to mint qvars). [gen_budget] caps instances generated per
     [check_sat] (default generous; deterministic, I6). *)
@@ -79,3 +88,11 @@ val budget_exhausted : t -> bool
 val on_pop : t -> Sat.var -> unit
 
 val stats : t -> stats
+
+(** [instantiations t] is the provenance log, oldest-first (generation order): every
+    ground instance actually asserted this session, each tagged with its source lemma id
+    and substitution ({!instantiation}). A budget-aborted round's instances are absent
+    (they were never asserted); a [pop] does not prune the trace (its soundness is the
+    frame selector's job). This is the record the certificate checker will replay in a
+    later tranche. *)
+val instantiations : t -> instantiation list

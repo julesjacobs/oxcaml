@@ -6,7 +6,7 @@
 (executable
  (name corpus_classify)
  (modules corpus_classify)
- (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_euf))
+ (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_euf oxsmt_query_loader))
 
 ; driver_equiv_test — the driver-equivalence guard (task #133). Shells out to BOTH the
 ; corpus_classify and oxsmt_cli executables over a deterministic file sample and asserts

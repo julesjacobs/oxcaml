@@ -22,15 +22,33 @@
 exception Malformed of string
 exception Unsupported of string
 
+(** A universally-quantified assertion, [(assert (forall (binders) body))] (ADR-0012 lemma
+    tier). The parser cannot construct the lemma itself — the bound variables must be
+    minted as cap-gated placeholder qvars through {!Oxsmt_interface.Session} (mint-before-
+    build, §1.3), which lives in a library this test-only parser must not depend on. So it
+    records the binders and a deferred [build]: the driver mints one qvar per binder and
+    passes their {!Oxsmt_core.Term.t} images (in binder order) to [build], which reads the
+    body and any [:pattern] triggers with each binder bound to its qvar image. Nested
+    [forall]s are flattened into one binder list; an [exists] is out of the fragment. *)
+type lemma_src =
+  { qvars : (string * Oxsmt_core.Sort.t) list (* forall binders, flattened, outer-first *)
+  ; build : Oxsmt_core.Term.t array -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
+    (** [build qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for the
+      k-th binder. May raise {!Malformed}/{!Unsupported} when the body is outside the
+      subset — the driver maps that to a sound [unknown]. *)
+  }
+
 type t =
   { env : Oxsmt_core.Env.t
   ; ctx : Oxsmt_core.Context.t
   ; logic : string option
   ; status : Oxsmt_smtlib.Status.t option
-  ; assertions : Oxsmt_core.Term.t list (* in file order *)
+  ; assertions : Oxsmt_core.Term.t list (* ground assertions, in file order *)
   ; datatypes : Oxsmt_core.Datatype_defs.t
-    (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors, and
-     testers, keyed by symbol, for the datatype theory. [empty] when none declared. *)
+    (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
+         and testers, keyed by symbol, for the datatype theory. [empty] when none
+         declared. *)
+  ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
   }
 
 (** [parse src] parses a whole SMT-LIB2 document, creating a fresh {!Oxsmt_core.Env.t} and

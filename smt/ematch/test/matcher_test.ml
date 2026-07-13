@@ -717,6 +717,103 @@ let e_arith_trigger_reject () =
            })))
 ;;
 
+(* E-LOOP: a matching-loop lemma hits its generation budget and returns [unknown] — it
+   never hangs (GOALS Lemmas; ADR-0012 §1.4/§3). [forall x. f(x) = f(g(x))] with trigger
+   [f(x)] is a runaway: matching [f(a)] yields [f(a)=f(g(a))], which registers [f(g(a))],
+   which matches the SAME trigger -> [f(g(a))=f(g(g(a)))] -> ... forever, with no
+   contradiction (the ground core stays sat). With a finite [lemma_gen_budget] the loop
+   stops on the budget and THE SOUNDNESS RULE degrades the live-lemma [Sat] to [Unknown].
+
+   Discrimination is two-pronged: (1) the test RETURNS at all — the loop terminated, did
+   not hang; (2) a LARGER budget produces STRICTLY MORE instances — the signature of a
+   budget-bounded runaway, unlike natural saturation (which would plateau at the same
+   count regardless of budget). A build that dropped the live lemma would wrongly report
+   [sat] at both budgets. *)
+let e_loop () =
+  let solve budget =
+    let s = Session.create ~lemma_gen_budget:budget () in
+    let ctx = Session.context s in
+    let f = Session.declare_fun s "f" int_to_int in
+    let g = Session.declare_fun s "g" int_to_int in
+    let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+    ignore
+      (Session.assert_lemma
+         s
+         ~qvars:[ "x", Sort.int ]
+         ~build:(fun qv ->
+           let x = Qvar.to_term qv.(0) in
+           let fx = Context.app ctx f [ x ] in
+           { Session.body =
+               Context.eq ctx fx (Context.app ctx f [ Context.app ctx g [ x ] ])
+           ; triggers = [ [ fx ] ]
+           })
+       : Session.lemma);
+    (* [f(a) >= 0] registers [f(a)] (the loop seed) and is consistent with the lemma. *)
+    Session.assert_term
+      s
+      (Context.ge ctx (Context.app ctx f [ a ]) (Context.int_const ctx 0));
+    let v = Session.check_sat s in
+    v, (Session.lemma_stats s).instances
+  in
+  let v_small, n_small = solve 10 in
+  let v_big, n_big = solve 400 in
+  check
+    (Printf.sprintf
+       "E-LOOP: matching loop -> unknown, small budget (got %s)"
+       (verdict_str v_small))
+    (v_small = Session.Unknown);
+  check
+    (Printf.sprintf
+       "E-LOOP: matching loop -> unknown, large budget (got %s)"
+       (verdict_str v_big))
+    (v_big = Session.Unknown);
+  (* A larger budget yields STRICTLY MORE instances — the signature of a budget-bounded
+     runaway, not natural saturation (which would plateau regardless of budget). *)
+  check
+    (Printf.sprintf "E-LOOP: budget-bounded, not saturation (%d < %d)" n_small n_big)
+    (n_small < n_big)
+;;
+
+(* E-PROVENANCE: every generated instance is recorded with its source lemma id and
+   substitution (GOALS Lemmas). Reuses the E-FIND goal (one instance, x|->a): the trace
+   must hold exactly that one instantiation, tagged with lemma id 0 (the session's first
+   lemma) and [subst = [| a |]]. Discrimination: a manager that generated the instance but
+   kept no record would leave the trace empty. *)
+let e_provenance () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "f" int_to_int in
+  let a = Context.const ctx (Session.declare_const s "a" Sort.int) in
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", Sort.int ]
+       ~build:(fun qv ->
+         let x = Qvar.to_term qv.(0) in
+         { Session.body =
+             Context.gt ctx (Context.app ctx f [ x ]) (Context.int_const ctx 0)
+         ; triggers = [ [ Context.app ctx f [ x ] ] ]
+         })
+     : Session.lemma);
+  Session.assert_term
+    s
+    (Context.lt ctx (Context.app ctx f [ a ]) (Context.int_const ctx 0));
+  ignore (Session.check_sat s : Session.verdict);
+  match Session.lemma_instantiations s with
+  | [ inst ] ->
+    check "E-PROVENANCE: one recorded instantiation" true;
+    check "E-PROVENANCE: tagged with source lemma id 0" (inst.Session.lemma_id = 0);
+    check
+      "E-PROVENANCE: substitution binds x|->a"
+      (Array.length inst.Session.subst = 1 && Term.equal inst.Session.subst.(0) a)
+  | other ->
+    check
+      (Printf.sprintf
+         "E-PROVENANCE: expected exactly one record (got %d)"
+         (List.length other))
+      false
+;;
+
 let () =
   ignore int_int_to_int;
   ignore int_to_bool;
@@ -739,6 +836,8 @@ let () =
   e_zero_qvar ();
   e_frame ();
   e_arith_trigger_reject ();
+  e_loop ();
+  e_provenance ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

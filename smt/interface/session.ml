@@ -111,7 +111,7 @@ type t =
      {!assert_presolved} path eliminated something. *)
   }
 
-let create ?(split_budget = default_split_budget) ?max_effort () =
+let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget () =
   (* ADR-0012 R1: the session is the SOLE caller of [create_with_cap] in solver code (the
      documented convention); it keeps the cap private and threads it to the
      reserved-symbol minters. [Session.env] returns only the [env], never the cap. *)
@@ -131,7 +131,7 @@ let create ?(split_budget = default_split_budget) ?max_effort () =
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
-  ; mgr = Manager.create ctx env
+  ; mgr = Manager.create ?gen_budget:lemma_gen_budget ctx env
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
@@ -838,3 +838,11 @@ type lemma_stats = Manager.stats =
 
 (* ADR-0012 §O4: lemma-tier instantiation stats, distinct from {!splits}. *)
 let lemma_stats t = Manager.stats t.mgr
+
+type instantiation = Manager.instantiation =
+  { lemma_id : int
+  ; subst : Oxsmt_core.Term.t array
+  ; instance : Oxsmt_core.Term.t
+  }
+
+let lemma_instantiations t = Manager.instantiations t.mgr

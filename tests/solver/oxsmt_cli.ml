@@ -169,13 +169,19 @@ let solve_batch ?max_effort ?(presolve = true) src =
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
     unknown_block
-  | parsed ->
-    (* W1b: the batch path runs the equality-elimination presolve over the whole assertion
-       set (a no-op on zero-alias files). [--no-presolve] restores the per-term
+  | parsed when not (Oxsmt_query_loader.assert_all ~presolve s parsed) ->
+    (* W1b: the shared loader submits the ground batch through the equality-elimination
+       presolve (a no-op on zero-alias files) plus each [forall] lemma through the cap-
+       gated mint-before-build [assert_lemma] (ADR-0012); the SAME loader backs
+       corpus_classify so the two drivers cannot diverge. A universally-quantified lemma
+       outside the reader's subset degrades here to a sound [unknown] — never a dropped
+       quantifier (sound for the [sat] direction). [--no-presolve] restores the per-term
        [assert_term] path for A/B measurement; both are sound. *)
-    if presolve
-    then Session.assert_presolved s parsed.Parser.assertions
-    else List.iter (Session.assert_term s) parsed.Parser.assertions;
+    unknown_block
+  | _loaded ->
+    (* Assertions (ground batch + [forall] lemmas) were loaded into [s] by the guard
+       above; solve the ground core once. THE SOUNDNESS RULE (a live lemma degrades [Sat]
+       to [Unknown]) is enforced inside {!Session.check_sat}. *)
     let v = Session.check_sat s in
     let st = Session.stats s in
     let block verdict model =

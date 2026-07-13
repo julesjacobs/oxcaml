@@ -13,6 +13,18 @@ type stats =
   ; rounds : int
   }
 
+(* Provenance of one generated ground instance (ADR-0012: "each instantiation records
+   which lemma and which substitution produced it, and replays in the certificate
+   checker"). Certificate replay of instantiations is a later tranche, but the RECORD
+   exists now: an append-only log of every NEW instance actually handed to the session to
+   assert. A budget-aborted round's instances are rolled OUT of the log (they are never
+   asserted), so the log is exactly the asserted-instance sequence. *)
+type instantiation =
+  { lemma_id : int (* the source lemma's dense id ({!Lemma.t.id}) *)
+  ; subst : Term.t array (* ground image of each qvar, in [Lemma.qvars] order *)
+  ; instance : Term.t (* the resulting ground body [φ[σ]] *)
+  }
+
 type t =
   { ctx : Context.t
   ; env : Env.t
@@ -29,6 +41,7 @@ type t =
   ; mutable budget_hit : bool
   ; mutable total_instances : int
   ; mutable total_rounds : int
+  ; mutable provenance : instantiation list (* newest-first; see {!instantiation} *)
   }
 
 let create ?(gen_budget = default_gen_budget) ctx env =
@@ -43,6 +56,7 @@ let create ?(gen_budget = default_gen_budget) ctx env =
   ; budget_hit = false
   ; total_instances = 0
   ; total_rounds = 0
+  ; provenance = []
   }
 ;;
 
@@ -130,6 +144,12 @@ let round t view =
       Hashtbl.replace t.dedup key ();
       added := key :: !added;
       t.total_instances <- t.total_instances + 1;
+      (* Provenance: one record per NEW instance, in lockstep with the dedup key. A
+         budget-aborted round drops exactly [List.length !added] newest records below, so
+         the log tracks the asserted-instance sequence (never a never-asserted instance). *)
+      t.provenance
+      <- { lemma_id = lemma.Lemma.id; subst = sigma; instance = Instance.to_term inst }
+         :: t.provenance;
       out := (lemma.frame, inst) :: !out)
   in
   (try
@@ -155,6 +175,17 @@ let round t view =
         aborted batch, so none of these instances become active clauses. *)
      List.iter (Hashtbl.remove t.dedup) !added;
      t.total_instances <- t.total_instances - List.length !added;
+     (* Drop this round's provenance records (the newest [List.length !added], since each
+        new instance appended exactly one) — they are never asserted. *)
+     let rec drop n l =
+       if n <= 0
+       then l
+       else (
+         match l with
+         | [] -> []
+         | _ :: tl -> drop (n - 1) tl)
+     in
+     t.provenance <- drop (List.length !added) t.provenance;
      out := [];
      (* Restore the seeds this aborted round consumed, at the FRONT of the queue in
         original FIFO order (the not-yet-consumed remainder stays after them), so no
@@ -190,6 +221,13 @@ let on_pop t selector =
   Queue.clear t.seeds;
   Queue.transfer kept t.seeds
 ;;
+
+(* The instantiation provenance, oldest-first (generation order). [t.provenance] is stored
+   newest-first, so reverse. A pop does NOT prune this: it is a HISTORICAL trace of what
+   was instantiated (the soundness of a popped instance is handled by its deactivated
+   frame selector, not by this record); frame-scoped pruning for replay is a
+   certificate-tranche concern. *)
+let instantiations t = List.rev t.provenance
 
 let stats t =
   { live_lemmas = List.length t.lemmas

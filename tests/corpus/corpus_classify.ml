@@ -196,24 +196,26 @@ let () =
         | parsed ->
           (* W1b: submit the whole assertion set through the equality-elimination
              presolve, exactly as the solver CLI's batch path does (oxsmt_cli.ml
-             [solve_batch], on by default). Presolve is a no-op on a zero-alias file, so
-             this is byte-identical to the old per-term [assert_term] stream there and
-             moves only the alias-bearing files — but it MUST be the same entry point the
-             CLI uses, or the headline sweep would measure a different solver path than
-             the one that ships (a measurement-integrity hazard: a driver split can hide
+             [solve_batch], on by default), plus each universally-quantified lemma through
+             the cap-gated mint-before-build [assert_lemma] (ADR-0012). Both drivers route
+             through ONE shared loader ({!Oxsmt_query_loader}) so they cannot diverge on
+             the assertion path (a measurement-integrity hazard: a driver split can hide
              wins AND regressions). The driver-equivalence test
-             (tests/corpus/driver_equiv_test.ml) is the standing guard that these two
-             paths never diverge again. *)
-          Session.assert_presolved s parsed.Parser.assertions;
-          let v = Session.check_sat s in
-          let label = label_of src in
-          let tok =
-            match v with
-            | Session.Sat -> if label = Some "unsat" then "mismatch" else "solved-sat"
-            | Session.Unsat -> if label = Some "sat" then "mismatch" else "solved-unsat"
-            | Session.Unknown -> "unknown"
-          in
-          tok, Session.effort s)
+             (tests/corpus/driver_equiv_test.ml) is the standing guard. A lemma the reader
+             cannot represent degrades the query to [unknown] — never a dropped quantifier
+             (sound for the [sat] direction). *)
+          if not (Oxsmt_query_loader.assert_all s parsed)
+          then "unknown", 0
+          else (
+            let v = Session.check_sat s in
+            let label = label_of src in
+            let tok =
+              match v with
+              | Session.Sat -> if label = Some "unsat" then "mismatch" else "solved-sat"
+              | Session.Unsat -> if label = Some "sat" then "mismatch" else "solved-unsat"
+              | Session.Unknown -> "unknown"
+            in
+            tok, Session.effort s))
   in
   (* Line: "<token> <effort>". [effort] is a deterministic function of the file (#60), so
      the sweep records it for calibration; the driver splits on whitespace. *)
