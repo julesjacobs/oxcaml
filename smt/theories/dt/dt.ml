@@ -736,7 +736,20 @@ let leaf_value t (x : Term.t) : Model.value =
              | _ -> None)
           members
       in
-      Model.Int (Option.value int_const ~default:0)
+      (* An Int-sorted class value is the class's [Int_const] literal —
+         arbitrary-precision [Bigint.t] (core-bignum W2). [Model.Int] is native [int]
+         (model.mli is frozen), so a value beyond [int] range has no faithful scalar
+         model: degrade to an opaque [Uninterp] marker (the bignum R1 int-projection-sink
+         pattern) rather than a silently truncated [Model.Int] — never claim a wrong
+         value. A satisfiable query whose model needs a >int63 field then reads unknown,
+         matching sat-DT-degrades-to-unknown. FOLLOW-UP (constructor-tree sat models) owes
+         real >int63 representation or must keep degrading here. *)
+      (match int_const with
+       | None -> Model.Int 0
+       | Some n ->
+         (match Bigint.to_int_opt n with
+          | Some i -> Model.Int i
+          | None -> Model.Uninterp (Euf.class_of t.engine x)))
     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ ->
       Model.Uninterp (Euf.class_of t.engine x))
 ;;

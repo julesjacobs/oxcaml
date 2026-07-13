@@ -35,11 +35,11 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
     else List.iter (Session.assert_term s) parsed.Parser.assertions;
     List.iter
       (fun (lem : Parser.lemma_src) ->
-        ignore
-          (Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
-             let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
-             { Session.body; triggers })
-           : Session.lemma))
+         ignore
+           (Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
+              let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
+              { Session.body; triggers })
+            : Session.lemma))
       parsed.Parser.lemmas;
     true
   with
