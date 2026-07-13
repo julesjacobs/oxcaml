@@ -119,7 +119,7 @@ Hard boundaries:
 
 ## 4. Terms and sorts
 
-**Decided principles** (these are commitments):
+**Decided principles**:
 
 - Dynamically sorted, construction-restricted, match-friendly: the classic
   hash-consing pattern (Filliâtre–Conchon) exposed as a **`private` type** —
@@ -145,7 +145,7 @@ and node = Var of Symbol.t | App of Symbol.t * t list | (* ... *)
 ```
 
 The exact field layout and constructor set are an **explicit M0 design task**
-(ADR + adversarial review before the freeze), with real open questions this
+(ADR + adversarial review before the freeze), with open questions this
 document deliberately does not settle:
 
 - Arithmetic representation: naive nodes (`Add`, `Le`) vs a normalized linear
@@ -159,7 +159,7 @@ document deliberately does not settle:
   (unboxed types, immutable arrays) pay their way in the representation.
 
 These interact with theory-plugin ergonomics and the load-bearing
-normalization invariants, which is precisely why they get a considered design
+normalization invariants, which is why they get a considered design
 pass rather than inheriting a sketch from the planning phase.
 
 Supporting machinery:
@@ -246,7 +246,7 @@ chains connect), and any learned clause can be re-checked via the oracle.
 certificate checker eventually removes per-compile trust from all search code.
 And with Lean as the oracle, certificates can be **replayed as Lean proof
 scripts** (Farkas combinations, congruence chains, resolution steps), so Lean
-stops *searching* (`grind`) and merely *checks* — fast, complete, and immune
+stops *searching* (`grind`) and merely *checks* — fast and immune
 to grind's incompleteness. Pull this work earlier than originally staged.
 
 ## 8. Testing and the correctness gate
@@ -323,7 +323,7 @@ Four layers, cheapest first:
      rather than in the first real codebase.
    - **The dev loop itself is monitored the same way**: PR-suite wall-clock,
      cache hit rate, slowest tests, triage/nightly queue depths, and
-     time-from-dispatch-to-merge are aggregated the same way. Latency rot has no
+     time-from-dispatch-to-merge are aggregated. Latency rot has no
      natural victim in an all-agent project — no agent gets annoyed waiting —
      so the master must watch these numbers and spawn re-curation/
      parallelization tasks when the loop silts up.
