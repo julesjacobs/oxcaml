@@ -114,18 +114,6 @@ let small_make_raise num den =
   if d = 1 then W.of_int_unchecked n else W.of_block (W.Frac { n; d })
 ;;
 
-(* Native (numerator, denominator) if the value is immediate or a [Frac]; [None] if [Big].
-   Allocates a [Some] in the fraction/mixed path only — never on the immediate fast path,
-   which never calls this. *)
-let small_parts x =
-  if W.is_immediate x
-  then Some (W.to_int_unchecked x, 1)
-  else (
-    match W.to_block x with
-    | W.Frac f -> Some (f.n, f.d)
-    | W.Big _ -> None)
-;;
-
 let to_big x =
   if W.is_immediate x
   then Bigint.of_int (W.to_int_unchecked x), Bigint.one
@@ -224,28 +212,80 @@ let big_compare (an, ad) (bn, bd) =
   Bigint.compare (Bigint.mul an bd) (Bigint.mul bn ad)
 ;;
 
+(* ---- native small-value arithmetic on extracted (numerator, denominator) int pairs.
+
+   Used when both operands are small (immediate or [Frac]), so every component fits int63.
+   ALLOCATION-FREE: the components are passed as bare ints — no option/tuple/closure to
+   box (an earlier revision returned an [(int*int) option] and that showed up as
+   minor-heap churn on the fraction-heavy pools). On native [Overflow] the whole op is
+   redone in [Bigint], rebuilding the operand pair from the same ints (they fit, so this
+   is exactly [big_* (to_big x) (to_big y)]); the result is bit-identical to the
+   pure-[Bigint] path (guarded by the differential oracle). ---- *)
+
+let add_small an ad bn bd =
+  try small_make_raise (add_int (mul_int an bd) (mul_int bn ad)) (mul_int ad bd) with
+  | Overflow ->
+    big_add (Bigint.of_int an, Bigint.of_int ad) (Bigint.of_int bn, Bigint.of_int bd)
+;;
+
+let sub_small an ad bn bd =
+  try small_make_raise (sub_int (mul_int an bd) (mul_int bn ad)) (mul_int ad bd) with
+  | Overflow ->
+    big_sub (Bigint.of_int an, Bigint.of_int ad) (Bigint.of_int bn, Bigint.of_int bd)
+;;
+
+let mul_small an ad bn bd =
+  try small_make_raise (mul_int an bn) (mul_int ad bd) with
+  | Overflow ->
+    big_mul (Bigint.of_int an, Bigint.of_int ad) (Bigint.of_int bn, Bigint.of_int bd)
+;;
+
+let div_small an ad bn bd =
+  try small_make_raise (mul_int an bd) (mul_int ad bn) with
+  | Overflow ->
+    big_div (Bigint.of_int an, Bigint.of_int ad) (Bigint.of_int bn, Bigint.of_int bd)
+;;
+
+let compare_small an ad bn bd =
+  try Int.compare (mul_int an bd) (mul_int bn ad) with
+  | Overflow ->
+    big_compare (Bigint.of_int an, Bigint.of_int ad) (Bigint.of_int bn, Bigint.of_int bd)
+;;
+
 (* ---- public arithmetic: immediate (integer) zero-alloc fast path, then the native
-   fraction cross-multiply, then whole-op promotion to [Bigint].
+   fraction cross-multiply (allocation-free, via the [*_small] helpers), then whole-op
+   promotion to [Bigint].
 
    immediate ⊗ immediate: both denominators are 1, so the result denominator is 1 and the
    value is already canonical — a single guarded native op, NO allocation.
-   immediate/[Frac] ⊗ immediate/[Frac]: the guarded native cross-multiply +
-   [small_make_raise] (identical to the pre-Zarith [Small] arithmetic). Overflow promotes
-   to [Big] exactly; any [Big] operand routes straight to the [Bigint] path. All arms
-   produce a value bit-identical to the pure-[Bigint] computation (guarded by the
-   differential oracle). ---- *)
+   immediate/[Frac] ⊗ immediate/[Frac]: the guarded native cross-multiply (identical to
+   the pre-Zarith [Small] arithmetic). Overflow promotes to [Big] exactly; any [Big]
+   operand routes straight to the [Bigint] path. The block dispatch below matches
+   [Frac]/[Big] arms directly (no intermediate tuple/option), so the fraction path
+   allocates only its result. ---- *)
 
 let add x y =
   if W.is_immediate x && W.is_immediate y
   then (
     try W.of_int_unchecked (add_int (W.to_int_unchecked x) (W.to_int_unchecked y)) with
     | Overflow -> big_add (to_big x) (to_big y))
+  else if W.is_immediate x
+  then (
+    match W.to_block y with
+    | W.Frac f -> add_small (W.to_int_unchecked x) 1 f.n f.d
+    | W.Big _ -> big_add (to_big x) (to_big y))
+  else if W.is_immediate y
+  then (
+    match W.to_block x with
+    | W.Frac f -> add_small f.n f.d (W.to_int_unchecked y) 1
+    | W.Big _ -> big_add (to_big x) (to_big y))
   else (
-    match small_parts x, small_parts y with
-    | Some (an, ad), Some (bn, bd) ->
-      (try small_make_raise (add_int (mul_int an bd) (mul_int bn ad)) (mul_int ad bd) with
-       | Overflow -> big_add (to_big x) (to_big y))
-    | _ -> big_add (to_big x) (to_big y))
+    match W.to_block x with
+    | W.Big _ -> big_add (to_big x) (to_big y)
+    | W.Frac fx ->
+      (match W.to_block y with
+       | W.Frac fy -> add_small fx.n fx.d fy.n fy.d
+       | W.Big _ -> big_add (to_big x) (to_big y)))
 ;;
 
 let sub x y =
@@ -253,12 +293,23 @@ let sub x y =
   then (
     try W.of_int_unchecked (sub_int (W.to_int_unchecked x) (W.to_int_unchecked y)) with
     | Overflow -> big_sub (to_big x) (to_big y))
+  else if W.is_immediate x
+  then (
+    match W.to_block y with
+    | W.Frac f -> sub_small (W.to_int_unchecked x) 1 f.n f.d
+    | W.Big _ -> big_sub (to_big x) (to_big y))
+  else if W.is_immediate y
+  then (
+    match W.to_block x with
+    | W.Frac f -> sub_small f.n f.d (W.to_int_unchecked y) 1
+    | W.Big _ -> big_sub (to_big x) (to_big y))
   else (
-    match small_parts x, small_parts y with
-    | Some (an, ad), Some (bn, bd) ->
-      (try small_make_raise (sub_int (mul_int an bd) (mul_int bn ad)) (mul_int ad bd) with
-       | Overflow -> big_sub (to_big x) (to_big y))
-    | _ -> big_sub (to_big x) (to_big y))
+    match W.to_block x with
+    | W.Big _ -> big_sub (to_big x) (to_big y)
+    | W.Frac fx ->
+      (match W.to_block y with
+       | W.Frac fy -> sub_small fx.n fx.d fy.n fy.d
+       | W.Big _ -> big_sub (to_big x) (to_big y)))
 ;;
 
 let mul x y =
@@ -266,12 +317,23 @@ let mul x y =
   then (
     try W.of_int_unchecked (mul_int (W.to_int_unchecked x) (W.to_int_unchecked y)) with
     | Overflow -> big_mul (to_big x) (to_big y))
+  else if W.is_immediate x
+  then (
+    match W.to_block y with
+    | W.Frac f -> mul_small (W.to_int_unchecked x) 1 f.n f.d
+    | W.Big _ -> big_mul (to_big x) (to_big y))
+  else if W.is_immediate y
+  then (
+    match W.to_block x with
+    | W.Frac f -> mul_small f.n f.d (W.to_int_unchecked y) 1
+    | W.Big _ -> big_mul (to_big x) (to_big y))
   else (
-    match small_parts x, small_parts y with
-    | Some (an, ad), Some (bn, bd) ->
-      (try small_make_raise (mul_int an bn) (mul_int ad bd) with
-       | Overflow -> big_mul (to_big x) (to_big y))
-    | _ -> big_mul (to_big x) (to_big y))
+    match W.to_block x with
+    | W.Big _ -> big_mul (to_big x) (to_big y)
+    | W.Frac fx ->
+      (match W.to_block y with
+       | W.Frac fy -> mul_small fx.n fx.d fy.n fy.d
+       | W.Big _ -> big_mul (to_big x) (to_big y)))
 ;;
 
 let div x y =
@@ -281,12 +343,23 @@ let div x y =
     (* (a/1) / (b/1) = a/b, normalized; b <> 0. *)
     try small_make_raise (W.to_int_unchecked x) (W.to_int_unchecked y) with
     | Overflow -> big_div (to_big x) (to_big y))
+  else if W.is_immediate x
+  then (
+    match W.to_block y with
+    | W.Frac f -> div_small (W.to_int_unchecked x) 1 f.n f.d
+    | W.Big _ -> big_div (to_big x) (to_big y))
+  else if W.is_immediate y
+  then (
+    match W.to_block x with
+    | W.Frac f -> div_small f.n f.d (W.to_int_unchecked y) 1
+    | W.Big _ -> big_div (to_big x) (to_big y))
   else (
-    match small_parts x, small_parts y with
-    | Some (an, ad), Some (bn, bd) ->
-      (try small_make_raise (mul_int an bd) (mul_int ad bn) with
-       | Overflow -> big_div (to_big x) (to_big y))
-    | _ -> big_div (to_big x) (to_big y))
+    match W.to_block x with
+    | W.Big _ -> big_div (to_big x) (to_big y)
+    | W.Frac fx ->
+      (match W.to_block y with
+       | W.Frac fy -> div_small fx.n fx.d fy.n fy.d
+       | W.Big _ -> big_div (to_big x) (to_big y)))
 ;;
 
 let neg x =
@@ -319,17 +392,28 @@ let abs x =
 
 (* Value-based (R5/R6): never raises; promotes to a common tier on native overflow. Both
    immediate: a direct [Int.compare] — no cross-multiply, so no overflow and no trap
-   frame. immediate/[Frac] pair: the native guarded cross-multiply. Anything with a [Big]
-   cross-multiplies in Bigint. *)
+   frame. immediate/[Frac] pair: the native guarded cross-multiply ([compare_small]).
+   Anything with a [Big] cross-multiplies in Bigint. *)
 let compare x y =
   if W.is_immediate x && W.is_immediate y
   then Int.compare (W.to_int_unchecked x) (W.to_int_unchecked y)
+  else if W.is_immediate x
+  then (
+    match W.to_block y with
+    | W.Frac f -> compare_small (W.to_int_unchecked x) 1 f.n f.d
+    | W.Big _ -> big_compare (to_big x) (to_big y))
+  else if W.is_immediate y
+  then (
+    match W.to_block x with
+    | W.Frac f -> compare_small f.n f.d (W.to_int_unchecked y) 1
+    | W.Big _ -> big_compare (to_big x) (to_big y))
   else (
-    match small_parts x, small_parts y with
-    | Some (an, ad), Some (bn, bd) ->
-      (try Int.compare (mul_int an bd) (mul_int bn ad) with
-       | Overflow -> big_compare (to_big x) (to_big y))
-    | _ -> big_compare (to_big x) (to_big y))
+    match W.to_block x with
+    | W.Big _ -> big_compare (to_big x) (to_big y)
+    | W.Frac fx ->
+      (match W.to_block y with
+       | W.Frac fy -> compare_small fx.n fx.d fy.n fy.d
+       | W.Big _ -> big_compare (to_big x) (to_big y)))
 ;;
 
 (* Value-based equality. Both immediate is a direct int equality; anything else routes
