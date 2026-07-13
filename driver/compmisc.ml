@@ -124,7 +124,8 @@ let read_clflags_from_env () =
   ()
 
 (* The compiler is allocation-heavy and short-lived, so it benefits from a
-   laxer GC pace than the runtime default (space_overhead = 120): raising it
+   laxer GC pace than the runtime default (space_overhead = 80,
+   [Percent_free_def] in runtime/caml/config.h): raising it
    trades peak heap for fewer major collections. On large compilation units
    this is about -8 to -10% wall-clock time at the cost of roughly +45% peak
    heap. We only bump the default: if OCAMLRUNPARAM/CAMLRUNPARAM explicitly
