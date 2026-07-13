@@ -327,7 +327,16 @@ let assert_bool_at ?sel t pterm =
    reservation is [Env.is_reserved_name]. [allowed] whitelists a specific lemma's own qvar
    symbols — the ONLY reserved symbols legitimately present in a lemma body/trigger (a
    ground user assertion whitelists nothing). *)
-let rec term_has_reserved ?(allowed = []) (t : Term.t) =
+let term_has_reserved ?(allowed = []) (t0 : Term.t) =
+  (* MEMOIZED over the hash-cons DAG. A user term is a maximally-shared DAG (the SMT-LIB
+     [let] reader binds each value to one hash-consed node and reuses it by reference), so
+     the naive per-path recursion re-walks a shared subterm once per path to it —
+     exponential on let-heavy inputs (e.g. the nec-smt bounded-model-checking VCs). Keep a
+     visited set of tags already proven CLEAN; [allowed] is fixed within one call, so a
+     [false] result is a pure function of the subterm and safe to cache. A [true] short-
+     circuits immediately (never cached). The sibling engine walks (Cdclt.collect,
+     Combine.add_subterms / interface_walk) all guard the same way. *)
+  let visited : (int, unit) Hashtbl.t = Hashtbl.create 256 in
   let bad_sym s =
     Env.is_reserved_name (Symbol.name s) && not (List.exists (Symbol.equal s) allowed)
   in
@@ -344,20 +353,29 @@ let rec term_has_reserved ?(allowed = []) (t : Term.t) =
     | Sort.Uninterpreted sym | Sort.Datatype sym -> Env.is_reserved_name (Symbol.name sym)
     | Sort.Bool | Sort.Int _ -> false
   in
-  let rec_ = term_has_reserved ~allowed in
   (* Every subterm's own sort is checked here, so a reserved sort appearing anywhere in
      the term — in result OR argument position — is caught (an argument is itself a
      recursed subterm carrying that sort). *)
-  bad_sort t.sort
-  ||
-  match t.node with
-  | App (sym, args) -> bad_sym sym || Iarr.exists rec_ args
-  | Arith l -> Iarr.exists (fun (tm, _c) -> rec_ tm) l.coeffs
-  | Le a | Not a -> rec_ a
-  | Eq (a, b) -> rec_ a || rec_ b
-  | And xs | Or xs -> Iarr.exists rec_ xs
-  | Ite (c, a, b) -> rec_ c || rec_ a || rec_ b
-  | Bool_const _ | Int_const _ -> false
+  let rec rec_ (t : Term.t) =
+    if Hashtbl.mem visited t.Term.tag
+    then false
+    else (
+      let r =
+        bad_sort t.sort
+        ||
+        match t.node with
+        | App (sym, args) -> bad_sym sym || Iarr.exists rec_ args
+        | Arith l -> Iarr.exists (fun (tm, _c) -> rec_ tm) l.coeffs
+        | Le a | Not a -> rec_ a
+        | Eq (a, b) -> rec_ a || rec_ b
+        | And xs | Or xs -> Iarr.exists rec_ xs
+        | Ite (c, a, b) -> rec_ c || rec_ a || rec_ b
+        | Bool_const _ | Int_const _ -> false
+      in
+      if not r then Hashtbl.replace visited t.Term.tag ();
+      r)
+  in
+  rec_ t0
 ;;
 
 let assert_term t term =

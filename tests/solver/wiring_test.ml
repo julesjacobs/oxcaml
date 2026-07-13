@@ -1317,6 +1317,37 @@ let test_presolve_negated_eq_not_eliminated () =
   check_verdict "negated-eq: sat (x=6)" Session.Sat (Session.check_sat s)
 ;;
 
+(* Shared-DAG blowup guard (dag-memo). The assert-side walks — [Session.term_has_reserved]
+   (the R1 reserved-symbol gate) and [Presolve.under_uf_vars] — must be memoized over the
+   hash-cons DAG. A maximally-shared term (built here as [a_{i+1} = f(a_i, b_i)],
+   [b_{i+1} = f(b_i, a_i)]) has [2*depth] distinct nodes but 2^depth root-to-leaf paths,
+   so an UN-memoized per-path recursion is exponential (this is exactly the nec-smt
+   bounded-model-checking VC shape). At depth 27 the unmemoized walk is ~10^8 node-visits
+   per walk and takes multiple CPU-seconds; the memoized walk is O(depth) and returns in
+   microseconds. Drive the defect's own path: [assert_presolved] runs BOTH walks, so this
+   FAILS (blows past the budget) if EITHER regresses to the unmemoized form. *)
+let test_dag_sharing_no_blowup () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "f" (Rank.create [ Sort.int; Sort.int ] Sort.int) in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  let depth = 27 in
+  let rec build i a b =
+    if i = 0
+    then a, b
+    else build (i - 1) (Context.app ctx f [ a; b ]) (Context.app ctx f [ b; a ])
+  in
+  let a, b = build depth x y in
+  let top = Context.eq ctx a b in
+  let t0 = Sys.time () in
+  Session.assert_presolved s [ top ];
+  let elapsed = Sys.time () -. t0 in
+  check
+    (Printf.sprintf "shared-DAG assert does not blow up (%.3fs CPU, want < 2.0s)" elapsed)
+    (elapsed < 2.0)
+;;
+
 let () =
   test_push_pop ();
   test_assert_after_check ();
@@ -1362,6 +1393,7 @@ let () =
   test_presolve_eq_uf_side_sound ();
   test_presolve_bool_dep_default ();
   test_presolve_negated_eq_not_eliminated ();
+  test_dag_sharing_no_blowup ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

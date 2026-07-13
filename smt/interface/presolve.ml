@@ -66,21 +66,32 @@ let rec uf_free (t : Term.t) =
    vacuous. *)
 let under_uf_vars (assertions : Term.t list) =
   let acc = ref Term.Set.empty in
+  (* MEMOIZED over the hash-cons DAG. The assertion set is maximally shared (the [let]
+     reader reuses each bound value by reference), so the naive per-path recursion
+     re-walks a shared subterm once per path to it — exponential on let-heavy inputs. A
+     node's contribution depends on the [under_uf] flag it was reached with (an [App] leaf
+     is only recorded when it appears under a function argument), so the visited key
+     carries that flag. *)
+  let visited : (int * bool, unit) Hashtbl.t = Hashtbl.create 256 in
   let rec walk ~under_uf (t : Term.t) =
-    match t.node with
-    | App (_, args) when Iarr.length args > 0 -> Iarr.iter (walk ~under_uf:true) args
-    | App (_, _) -> if under_uf then acc := Term.Set.add t !acc
-    | Arith lin -> Iarr.iter (fun (tm, _c) -> walk ~under_uf tm) lin.coeffs
-    | Le a | Not a -> walk ~under_uf a
-    | Eq (a, b) ->
-      walk ~under_uf a;
-      walk ~under_uf b
-    | And xs | Or xs -> Iarr.iter (walk ~under_uf) xs
-    | Ite (c, a, b) ->
-      walk ~under_uf c;
-      walk ~under_uf a;
-      walk ~under_uf b
-    | Bool_const _ | Int_const _ -> ()
+    let key = t.Term.tag, under_uf in
+    if not (Hashtbl.mem visited key)
+    then (
+      Hashtbl.replace visited key ();
+      match t.node with
+      | App (_, args) when Iarr.length args > 0 -> Iarr.iter (walk ~under_uf:true) args
+      | App (_, _) -> if under_uf then acc := Term.Set.add t !acc
+      | Arith lin -> Iarr.iter (fun (tm, _c) -> walk ~under_uf tm) lin.coeffs
+      | Le a | Not a -> walk ~under_uf a
+      | Eq (a, b) ->
+        walk ~under_uf a;
+        walk ~under_uf b
+      | And xs | Or xs -> Iarr.iter (walk ~under_uf) xs
+      | Ite (c, a, b) ->
+        walk ~under_uf c;
+        walk ~under_uf a;
+        walk ~under_uf b
+      | Bool_const _ | Int_const _ -> ())
   in
   List.iter (walk ~under_uf:false) assertions;
   !acc
