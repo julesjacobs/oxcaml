@@ -161,20 +161,28 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
 let env t = t.env
 let context t = t.ctx
 
-(* board #58 O-MINTER: the cap-backed minter for theory-internal reserved symbols, for a
-   front end that must mint one mid-parse (the SMT-LIB parser's [?internal_mint] hook —
-   arrays op symbols are per-sort instantiations discovered only at first [select]/[store]
-   use, so they cannot be pre-minted at a declaration site). Returns an OPAQUE
-   {!Oxsmt_core.Internal_minter.t} (not a bare [string -> Rank.t -> Symbol.t] closure):
-   the caller can mint only [admit]-sanctioned marker names and never obtains the cap or a
-   re-delegatable general closure (ADR-0012: [Session] stays the sole cap holder). The
-   [admit] gate names the parse-time theory vocabulary a session sanctions; the sensitive
-   reserved namespaces (arrays ext witness, datatype testers, qvars, preprocessing
-   witnesses) are minted directly via {!Env.declare_reserved} by trusted code here, never
-   through this door, so they are NEVER admitted. On trunk no theory mints at parse time,
-   so the sanctioned set is EMPTY — this minter admits nothing (a theory migration widens
-   [admit] to its own marker grammar). *)
-let parse_minter t = Internal_minter.create ~admit:(fun _ -> false) t.cap t.env
+(* board #58 O-MINTER — the MARKER-GRAMMAR REGISTRATION SITE.
+   [parse_sanctioned_marker name] is the [admit] gate for the front-end minter
+   {!parse_minter}: exactly the parse-time theory-internal names a session lets the
+   SMT-LIB parser mint. On trunk it admits NOTHING (no theory mints at parse time), so a
+   caller holding only a [Session.t] has no successful mint path (the O-MINTER close).
+
+   {b PAIRING CONTRACT — a theory migration widening this MUST read it (see
+     Oxsmt_core.Internal_minter.create).}
+   Admitting a marker grammar here lets any [Session.t] holder mint those names via
+   [Internal_minter.mint]. That is sound ONLY IF the theory's CONSUMING side classifies
+   its markers by something the holder cannot forge to a harmful effect — REGISTRY
+   MEMBERSHIP (arrays: a marker-shaped-but-unregistered op gets no ROW) or RANK AGREEMENT
+   (bv: a mis-ranked marker is inert) — so a forged-but-admitted marker degrades to
+   [unknown], never a wrong verdict. Banked lesson (mint-exemption-tcb-hole): an admission
+   is a wrong-[unsat] hole precisely when the consuming theory classifies on the SAME
+   forgeable thing it admits. So DO NOT add a grammar arm here without a paired
+   consuming-side inertness check, and NEVER admit the sensitive reserved namespaces
+   ([.oxsmt.arr.ext.*], datatype testers [.oxsmt.is-*]/[.oxsmt.dt.*], qvars
+   [.oxsmt.qvar.*], preprocessing witnesses [.oxsmt.ite/q/r.*]) — those are minted
+   directly via [Env.declare_reserved] by trusted code and have no inertness guard. *)
+let parse_sanctioned_marker (_name : string) = false
+let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
 (* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
    can never collide with one preprocessing invents. *)

@@ -27,7 +27,23 @@ type t
     {!Env.reserved_cap} minted with [env] (re-checked by {!Env.declare_reserved} on every
     {!mint}, so a cap for a different env yields a minter that always raises). [admit] is
     the sanctioned-name gate: {!mint} refuses any [name] for which [admit name] is false.
-    Only a cap holder can call this. *)
+    Only a cap holder can call this.
+
+    {b PAIRING CONTRACT — read before widening [admit].} A [t] handed to a front end lets
+    its holder mint {e any} name [admit] accepts. Admitting a theory's marker grammar here
+    is therefore sound ONLY IF that theory's CONSUMING side classifies its markers by
+    something the holder cannot forge to a harmful effect — REGISTRY MEMBERSHIP (arrays: a
+    marker-shaped-but-unregistered op gets no theory semantics) or RANK AGREEMENT (bv: a
+    mis-ranked marker is inert) — so a forged-but-admitted marker degrades to [unknown],
+    never a wrong verdict. This is the banked lesson (mint-exemption-tcb-hole): an
+    admission/exemption is a wrong-[unsat] hole precisely when the consuming theory
+    classifies on the SAME forgeable thing it admits. So:
+    {b do not add a marker grammar to any [admit] without a paired consuming-side
+      inertness check},
+    and never admit the sensitive reserved namespaces (arrays ext witness
+    [.oxsmt.arr.ext.*], datatype testers, qvars, preprocessing witnesses) — those are
+    minted directly via {!Env.declare_reserved} by trusted code and have no such inertness
+    guard. *)
 val create : admit:(string -> bool) -> Env.reserved_cap -> Env.t -> t
 
 (** [mint t name rank] interns the reserved [name] with [rank] through the cap door.

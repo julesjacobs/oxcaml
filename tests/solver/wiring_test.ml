@@ -724,15 +724,27 @@ let test_session_parse_minter () =
     | exception (Invalid_argument _ | Env.Reserved_symbol _) -> true
     | exception _ -> false
   in
+  (* Marker grammars: on trunk none are sanctioned, so even a legitimately-shaped marker
+     is refused (deny-by-default). RED against a permissive [admit] / the old public
+     general closure (which minted these fine). *)
   check
     "parse_minter admits no reserved name on trunk (arrays op shape)"
     (refused ".oxsmt.arr.select|Int|Int");
   check
     "parse_minter admits no reserved name on trunk (bv marker shape)"
     (refused ".oxsmt.bv|8");
+  (* Sensitive reserved namespaces: NEVER admitted through this front-end door — they are
+     minted directly via [Env.declare_reserved] by trusted code and have no inertness
+     guard. These must stay refused even after a theory migration widens the marker
+     grammar. *)
   check
     "parse_minter refuses the arrays ext-witness namespace"
     (refused ".oxsmt.arr.ext.0");
+  check "parse_minter refuses the datatype tester namespace" (refused ".oxsmt.is-Cons");
+  check "parse_minter refuses the qvar namespace" (refused ".oxsmt.qvar.0.0");
+  check
+    "parse_minter refuses the preprocessing-witness namespace"
+    (refused ".oxsmt.ite.0");
   check "parse_minter refuses a user-namespace name" (refused "user_fn")
 ;;
 
