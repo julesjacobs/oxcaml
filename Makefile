@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -374,6 +374,15 @@ rational-word-test:
 lia-test:
 	$(DUNE) exec smt/theories/lia/test/lia_test.exe
 
+## bv-blast-test — smt/bitblast QF_BV bit-blaster adversarial self-test (stdlib-only,
+##   deterministic). Exhaustive small-width oracle (widths 3-4, every operator, ALL input
+##   assignments) comparing each Tseitin circuit against an INDEPENDENT value-arithmetic
+##   evaluator, in both directions (wrong-answer-UNSAT + right-answer-SAT); end-to-end
+##   sat/unsat via Bv_solve with every sat model re-checked; and the fail-closed door
+##   (unencoded op -> unknown). Nonzero exit on any failed check.
+bv-blast-test:
+	$(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+
 ## lia-adapter-test — smt/theories/lia THEORY-adapter (ADR-0005 M4) unit + property
 ##   self-test (stdlib-only, deterministic). Currency round-trip (Atom/Lit <-> Term),
 ##   conflict rule tags with a PUBLIC-OUTPUT Farkas verifier, bound propagation + lazy
@@ -482,6 +491,7 @@ test: check-frozen
 	$(MAKE) checker-test
 	$(MAKE) cert-corpus-gate
 	$(MAKE) driver-equiv-test
+	$(MAKE) bv-blast-test
 	$(MAKE) regress-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
