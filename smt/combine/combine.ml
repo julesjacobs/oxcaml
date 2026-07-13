@@ -384,7 +384,11 @@ end = struct
         let is_int =
           match term.Term.sort with
           | Sort.Int _ -> true
-          | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> false
+          | Sort.Bool
+          | Sort.Uninterpreted _
+          | Sort.Datatype _
+          | Sort.Array _
+          | Sort.BitVec _ -> false
         in
         (* PRECONDITION defensive check (codex): preprocessing lifts every Int-sorted
            [Ite] before assertion (ADR-0003 invariant 10); a residual one would take no
@@ -461,7 +465,8 @@ end = struct
              | Sort.Int _
              | Sort.Uninterpreted _
              | Sort.Datatype _
-             | Sort.Array _ )
+             | Sort.Array _
+             | Sort.BitVec _ )
            , _ ) -> ());
         List.iter (go ~parent_owner:o) (walk_children term))
     in
@@ -723,7 +728,8 @@ end = struct
   let find_disagreement t ma mb =
     let candidate (term : Term.t) =
       match term.Term.sort with
-      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> false
+      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _
+        -> false
       | Sort.Int _ -> true
     in
     let valued =
@@ -799,7 +805,28 @@ end = struct
              (Incomplete
                 "array-sorted term live at Sat certification: handled by the standalone \
                  arrays theory, not this combinator")
-         | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ -> ())
+         | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.BitVec _ -> ())
+      t.all_terms
+  ;;
+
+  (* Guard-before-Sat (bitvectors): refuse to certify Sat while any bitvector-sorted term
+     is live. The combinator has no bitvector model and the bit-level constraints are
+     unchecked here, so a Sat would be a wrong-Sat. Bitvectors are decided by the eager
+     bit-blasting engine at the propositional layer; this front-half guard fires only if a
+     bitvector term reaches the combinator's Sat-certification point, degrading it to
+     [unknown] rather than fabricating a verdict. Mirrors {!require_no_datatype_terms};
+     called at both Sat points. *)
+  let require_no_bitvec_terms t =
+    Term.Set.iter
+      (fun (term : Term.t) ->
+         match term.Term.sort with
+         | Sort.BitVec _ ->
+           raise
+             (Incomplete
+                "bitvector-sorted term live at Sat certification: decided by \
+                 bit-blasting, not the combinator")
+         | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _
+           -> ())
       t.all_terms
   ;;
 
@@ -815,6 +842,7 @@ end = struct
          argument to be bound (else a wrong-SAT would leak, codex H2). *)
       require_bool_args_bound t ma;
       require_no_datatype_terms t;
+      require_no_bitvec_terms t;
       Theory.Sat
   ;;
 
@@ -1198,6 +1226,7 @@ end = struct
     | None ->
       require_bool_args_bound t ma;
       require_no_datatype_terms t;
+      require_no_bitvec_terms t;
       Theory.Sat
     | Some (x, y) ->
       if try_inject_pair t x y
@@ -1345,7 +1374,11 @@ end = struct
                | Some m when m <= n -> ()
                | _ -> Hashtbl.replace class_int cid n)
             | _ -> ())
-         | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> ())
+         | Sort.Bool
+         | Sort.Uninterpreted _
+         | Sort.Datatype _
+         | Sort.Array _
+         | Sort.BitVec _ -> ())
       t.all_terms;
     let int_variant term =
       match model_eval mb term, model_eval ma term with
@@ -1416,6 +1449,19 @@ end = struct
               (Incomplete
                  "array-sorted term in candidate model: handled by the standalone arrays \
                   theory, not this combinator")
+          (* A bitvector-sorted term has no [Model.value] the combinator can certify
+             ([Model.value] offers only Int/Bool/Uninterp); handing it the opaque
+             [Uninterp] witness would let the merged model claim [Sat] with the bit-level
+             constraints unchecked — a wrong-[Sat]. Bitvectors are decided by the eager
+             bit-blasting engine at the propositional layer, not here, so refuse to
+             certify: raise [Incomplete] -> [unknown] (completeness degrade, not soundness
+             poison). This is the front-half backstop; it is never reached once blasting
+             resolves the query before the combinator sees it. *)
+          | Sort.BitVec _ ->
+            raise
+              (Incomplete
+                 "bitvector-sorted term in candidate model: decided by bit-blasting, not \
+                  the combinator (front-half backstop -> unknown)")
         in
         Option.map (fun v -> term, v) value)
     in

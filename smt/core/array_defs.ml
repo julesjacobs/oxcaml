@@ -28,6 +28,7 @@ let rec sort_key (s : Sort.t) : string =
   | Sort.Uninterpreted sym -> "U:" ^ Symbol.name sym
   | Sort.Datatype sym -> "D:" ^ Symbol.name sym
   | Sort.Array (i, e) -> Printf.sprintf "(A %s %s)" (sort_key i) (sort_key e)
+  | Sort.BitVec w -> Printf.sprintf "(BV %d)" w
 ;;
 
 (* The reserved sub-namespace every array op symbol lives under (board #58). Shared by

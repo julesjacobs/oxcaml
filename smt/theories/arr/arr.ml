@@ -108,7 +108,8 @@ let role_of t (term : Term.t) : Defs.entry option =
 let array_sort (sort : Sort.t) : (Sort.t * Sort.t) option =
   match sort with
   | Sort.Array (i, e) -> Some (i, e)
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ -> None
+  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
+    None
 ;;
 
 let rec lits_of_prem = function

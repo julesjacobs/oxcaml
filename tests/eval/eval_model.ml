@@ -52,6 +52,8 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
      into a model for this reader; an array value would be a function graph, not a scalar
      token. Reject rather than mis-parse. *)
   | Sort.Array _ -> raise (Malformed "array-sorted model values are not supported yet")
+  | Sort.BitVec _ ->
+    raise (Malformed "bitvector-sorted model values are not supported yet")
 ;;
 
 let card_check t (sort : Sort.t) (v : Value.t) =

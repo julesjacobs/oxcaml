@@ -483,7 +483,8 @@ let model t =
                  in
                  Hashtbl.replace sort_ids name (cid :: prev)
                | _ -> ())
-            | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ -> ())
+            | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
+              ())
          terms;
        let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let sort_cards = ref [] in
@@ -534,7 +535,11 @@ let model t =
                   | Term.Arith _ -> ()
                   | _ -> int_classes := cid :: !int_classes)
                | _ -> ())
-            | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> ())
+            | Sort.Bool
+            | Sort.Uninterpreted _
+            | Sort.Datatype _
+            | Sort.Array _
+            | Sort.BitVec _ -> ())
          terms;
        let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let next = ref 0 in
@@ -588,7 +593,7 @@ let model t =
             (* A datatype-sorted term reaching extraction has no certified value ([Model]
                offers no constructor-tree witness yet); combine already refuses to certify
                such a Sat, so this is a defensive backstop — degrade to no-model. *)
-            | Sort.Bool | Sort.Datatype _ | Sort.Array _ -> raise Degrade)
+            | Sort.Bool | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise Degrade)
          | None, _ -> raise Degrade
        in
        let default_for (sort : Sort.t) =
@@ -596,7 +601,7 @@ let model t =
          | Sort.Bool -> VBool false
          | Sort.Int _ -> VInt Bigint.zero
          | Sort.Uninterpreted _ -> VUninterp 0
-         | Sort.Datatype _ | Sort.Array _ -> raise Degrade
+         | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise Degrade
        in
        (* pass 2: non-Bool nullary consts + function/predicate table rows (per symbol) *)
        let consts = ref [] in
@@ -610,7 +615,11 @@ let model t =
               (match term.Term.sort with
                | Sort.Bool ->
                  () (* propositional variable: session's bool_consts owns it *)
-               | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ ->
+               | Sort.Int _
+               | Sort.Uninterpreted _
+               | Sort.Datatype _
+               | Sort.Array _
+               | Sort.BitVec _ ->
                  consts := Const (Symbol.name sym, value_of term) :: !consts)
             | Term.App (sym, args) ->
               let row = List.map value_of (Iarr.to_list args), value_of term in

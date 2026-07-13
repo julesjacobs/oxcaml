@@ -16,6 +16,7 @@ module Symbol = Symbol
 module Sort = Sort
 module Datatype_defs = Datatype_defs
 module Array_defs = Array_defs
+module Bv = Bv
 module Rank = Rank
 module Env = Env
 module Internal_minter = Internal_minter

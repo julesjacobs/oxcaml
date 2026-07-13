@@ -117,11 +117,52 @@ let add_int_lit buf n =
    internal ["is-C"] function name. Constructor and selector applications are ordinary
    [App]s and print bare under their SMT-LIB names. [dts] is [Datatype_defs.empty] for the
    registry-free [print_term]. *)
+(* The SMT-LIB keyword for a prefix-form bitvector operator ([(bvadd a b)] etc.); [None]
+   for the ops rendered with special syntax ([concat], indexed [extract]/extend). *)
+let bv_prefix_keyword (op : Bv.op) =
+  match op with
+  | Bvnot -> Some "bvnot"
+  | Bvand -> Some "bvand"
+  | Bvor -> Some "bvor"
+  | Bvxor -> Some "bvxor"
+  | Bvneg -> Some "bvneg"
+  | Bvadd -> Some "bvadd"
+  | Bvsub -> Some "bvsub"
+  | Bvmul -> Some "bvmul"
+  | Bvudiv -> Some "bvudiv"
+  | Bvurem -> Some "bvurem"
+  | Bvshl -> Some "bvshl"
+  | Bvlshr -> Some "bvlshr"
+  | Bvashr -> Some "bvashr"
+  | Bvult -> Some "bvult"
+  | Bvule -> Some "bvule"
+  | Bvslt -> Some "bvslt"
+  | Bvsle -> Some "bvsle"
+  | Concat | Extract _ | Zero_extend _ | Sign_extend _ -> None
+;;
+
+(* A bitvector literal renders as the binary form [#b<bits>] (MSB first), always exact. *)
+let bv_const_string ~value ~width =
+  let bits = Bv.bits_lsb value ~width in
+  let buf = Buffer.create (width + 2) in
+  Buffer.add_string buf "#b";
+  for i = width - 1 downto 0 do
+    Buffer.add_char buf (if bits.(i) then '1' else '0')
+  done;
+  Buffer.contents buf
+;;
+
 let render_family dts arrs =
   let rec render buf (t : Term.t) =
     match t.node with
     | Bool_const b -> Buffer.add_string buf (if b then "true" else "false")
     | Int_const n -> add_int_lit buf n
+    | App (sym, _args) when Bv.is_bv_sym sym ->
+      (match Bv.view t with
+       | Some v -> render_bv buf v
+       | None ->
+         (* A [Bv]-namespaced symbol always views; this is unreachable. Fail closed. *)
+         raise (Unsupported "bitvector symbol did not decode"))
     | App (sym, args) ->
       (match Array_defs.role_of_sym arrs sym with
        | Some { Array_defs.role; _ } ->
@@ -202,6 +243,49 @@ let render_family dts arrs =
          render buf x)
       xs;
     Buffer.add_char buf ')'
+  and render_bv buf (v : Bv.view) =
+    match v with
+    | Bv.Const { value; width } -> Buffer.add_string buf (bv_const_string ~value ~width)
+    | Bv.Op { op; args; result_width = _ } ->
+      let render_args () =
+        List.iter
+          (fun a ->
+             Buffer.add_char buf ' ';
+             render buf a)
+          args
+      in
+      let indexed head =
+        Buffer.add_string buf "(";
+        Buffer.add_string buf head;
+        render_args ();
+        Buffer.add_char buf ')'
+      in
+      (match op, bv_prefix_keyword op with
+       | _, Some kw -> indexed kw
+       | Bv.Concat, None -> indexed "concat"
+       | Bv.Extract (i, j), None -> indexed (Printf.sprintf "(_ extract %d %d)" i j)
+       | Bv.Zero_extend n, None -> indexed (Printf.sprintf "(_ zero_extend %d)" n)
+       | Bv.Sign_extend n, None -> indexed (Printf.sprintf "(_ sign_extend %d)" n)
+       | ( ( Bv.Bvnot
+           | Bv.Bvand
+           | Bv.Bvor
+           | Bv.Bvxor
+           | Bv.Bvneg
+           | Bv.Bvadd
+           | Bv.Bvsub
+           | Bv.Bvmul
+           | Bv.Bvudiv
+           | Bv.Bvurem
+           | Bv.Bvshl
+           | Bv.Bvlshr
+           | Bv.Bvashr
+           | Bv.Bvult
+           | Bv.Bvule
+           | Bv.Bvslt
+           | Bv.Bvsle )
+         , None ) ->
+         (* [bv_prefix_keyword] returns [Some] for exactly these, so [None] is impossible. *)
+         raise (Unsupported "bitvector prefix operator without keyword"))
   (* [Arith] = sum of (coeff * term) plus a constant. Render each summand (the term bare
      when its coeff is 1, else a "( * coeff term )" product), append the constant when
      nonzero. One summand and no constant prints that summand alone (never a unary [+]);
@@ -278,7 +362,8 @@ let collect_decls dts arrs env assertions =
   let mod_sym = Env.mod_sym env in
   let rec visit_sort (s : Sort.t) =
     match s with
-    | Sort.Bool | Sort.Int _ -> ()
+    (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, like Bool/Int. *)
+    | Sort.Bool | Sort.Int _ | Sort.BitVec _ -> ()
     (* An [(Array I E)] sort is built-in — no [declare-sort] of its own — but its index
        and element sorts must still be collected so an uninterpreted [I]/[E] is declared. *)
     | Sort.Array (index, element) ->
@@ -326,8 +411,12 @@ let collect_decls dts arrs env assertions =
      index/element sorts get declared. *)
   let is_array_symbol sym = Option.is_some (Array_defs.role_of_sym arrs sym) in
   let register_fun sym =
-    (* reserved div/mod are built-ins, never declared *)
-    if (not (Symbol.equal sym div_sym)) && not (Symbol.equal sym mod_sym)
+    (* reserved div/mod, and the bitvector operator/literal symbols, are built-ins: never
+       emitted as [declare-fun] (their sorts are built-in and need no declaration). *)
+    if
+      (not (Symbol.equal sym div_sym))
+      && (not (Symbol.equal sym mod_sym))
+      && not (Bv.is_bv_sym sym)
     then
       if not (Sym_tbl.mem fun_seen sym)
       then (
@@ -373,6 +462,7 @@ let rec sort_string (s : Sort.t) =
   | Sort.Uninterpreted sym | Sort.Datatype sym -> quote_sort_symbol (Symbol.name sym)
   | Sort.Array (index, element) ->
     Printf.sprintf "(Array %s %s)" (sort_string index) (sort_string element)
+  | Sort.BitVec w -> Printf.sprintf "(_ BitVec %d)" w
 ;;
 
 (* Render one constructor [(C (sel1 S1) ... (seln Sn))] for a declare-datatypes block;

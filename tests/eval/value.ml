@@ -24,6 +24,7 @@ let to_string = function
       | Bool -> "Bool"
       | Int _ -> "Int"
       | Array _ -> "Array"
+      | BitVec w -> Printf.sprintf "(_ BitVec %d)" w
     in
     Printf.sprintf "%s@%d" sname id
 ;;

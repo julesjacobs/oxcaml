@@ -29,12 +29,19 @@ type t = private
   | Uninterpreted of Symbol.t
   | Datatype of Symbol.t
   | Array of t * t
+  | BitVec of int (* fixed-width bitvector, width >= 1 (GOALS: bitvectors) *)
 
 and int_kind = Mathematical
 
 val bool : t
 val int : t
 val uninterpreted : Symbol.t -> t
+
+(** [bitvec width] is the bitvector sort of the given [width]. Raises [Invalid_argument]
+    if [width < 1] (v1 requires a positive width). Like [Datatype], [BitVec] is a distinct
+    variant so every [Sort.t] match must route bitvector terms to the bit-blasting engine;
+    the operators/literals are ordinary [App] terms over {!Bv_defs}-registered symbols. *)
+val bitvec : int -> t
 
 (** [datatype_ sym] is the datatype sort declared under [sym]. Identity is [sym], so
     [equal]/[hash] stay O(1). The shape is registered separately in {!Datatype_defs}. *)

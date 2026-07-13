@@ -262,7 +262,7 @@ let declare_datatype t sort constructors =
   let sort_sym =
     match (sort : Oxsmt_core.Sort.t) with
     | Datatype s -> s
-    | Bool | Int _ | Uninterpreted _ | Array _ ->
+    | Bool | Int _ | Uninterpreted _ | Array _ | BitVec _ ->
       invalid_arg "Session.declare_datatype: sort must be a Sort.Datatype"
   in
   let ctors =
@@ -484,7 +484,7 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
     (* An array sort carries its index/element sorts; recurse so a reserved symbol buried
        in one is caught. *)
     | Sort.Array (index, element) -> bad_sort index || bad_sort element
-    | Sort.Bool | Sort.Int _ -> false
+    | Sort.Bool | Sort.Int _ | Sort.BitVec _ -> false
   in
   (* Every subterm's own sort is checked here, so a reserved sort appearing anywhere in
      the term — in result OR argument position — is caught (an argument is itself a
@@ -777,7 +777,7 @@ let default_value (sort : Sort.t) : model_value =
   | Sort.Bool -> VBool false
   | Sort.Int _ -> VInt Bigint.zero
   | Sort.Uninterpreted _ -> VUninterp 0
-  | Sort.Datatype _ | Sort.Array _ -> raise No_default_value
+  | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise No_default_value
 ;;
 
 (* W1b model reconstruction (logs/w1b-design.md, constraint 4). Splice the eliminated
