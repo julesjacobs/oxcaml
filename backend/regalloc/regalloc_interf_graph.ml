@@ -169,7 +169,17 @@ let bit_matrix_threshold () =
      default; functions at or above the threshold use the memory-bounded edge
      Hashtbl instead. Read per call (not cached in a lazy) so per-function
      [@regalloc_param BIT_MATRIX_THRESHOLD:N] overrides are honoured. *)
-  Lazy.force (Regalloc_utils.int_of_param ~default:50_000 "BIT_MATRIX_THRESHOLD")
+  if Sys.int_size < 63
+  then
+    (* On 32-bit hosts the matrix sizing arithmetic
+       (num_registers*(num_registers+1)/2 bits) overflows [int], and the
+       byte count exceeds [Sys.max_string_length], long before the 50k
+       default: the matrix is never safe there, so force the edge set
+       (the pre-default-flip behaviour), ignoring any override. *)
+    0
+  else
+    Lazy.force
+      (Regalloc_utils.int_of_param ~default:50_000 "BIT_MATRIX_THRESHOLD")
 
 (** Interference graph representation.
 
