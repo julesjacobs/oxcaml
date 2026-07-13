@@ -101,6 +101,7 @@ let test_rational () =
      fast path that dropped the gcd/promotion or mis-shaped the value would diverge here. *)
   let bi = Bigint.of_int in
   let oracle_add a b = Bigint.to_string (Bigint.add (bi a) (bi b)) in
+  let oracle_sub a b = Bigint.to_string (Bigint.sub (bi a) (bi b)) in
   let oracle_mul a b = Bigint.to_string (Bigint.mul (bi a) (bi b)) in
   let ints = [ 0; 1; -1; 2; -3; 7; 1000; -1000; max_int; min_int; max_int - 1 ] in
   List.iter
@@ -112,6 +113,11 @@ let test_rational () =
               (Rational.equal
                  (Rational.add (q a) (q b))
                  (Rational.of_string (oracle_add a b)));
+            check
+              (Printf.sprintf "fastpath sub %d-%d exact" a b)
+              (Rational.equal
+                 (Rational.sub (q a) (q b))
+                 (Rational.of_string (oracle_sub a b)));
             check
               (Printf.sprintf "fastpath mul %d*%d exact" a b)
               (Rational.equal
@@ -821,6 +827,32 @@ let test_push_pop () =
   expect_sat fx "after pop, sat again"
 ;;
 
+(* core-bignum W2 cube/fabric migration (existing_combo / existing_combo_var): the fabric
+   fixed-value path was migrated off native-int coeffs onto arbitrary-precision Rational
+   (Rational.of_bigint), with the slack lookup keyed by the same Rational.to_string
+   sort_key the real ingest records. This pins that it STILL FIRES on a small-coefficient
+   combo (the Bromberger more_slacked cube anchor is small-coeff/den=1): a 2-var combo
+   [x+y] pinned to a single integer by two ACTIVE USER bounds must be found by
+   [fixed_bounds]. Discriminating: if the migrated slack keying diverged from the ingest,
+   the lookup would miss and [fixed_bounds] would return [None] — i.e. the cube win would
+   be silently disabled. (Corpus confirmation: Bromberger more_slacked cut_lemmas solve
+   fast, logged in bignum-log.md.) *)
+let test_cube_still_fires () =
+  print_endline "cube/fabric fix-path still fires (W2 cube migration):";
+  let fx = make_fixture 2 in
+  let xpy = Context.linear_combination fx.ctx [ 1, fx.vars.(0); 1, fx.vars.(1) ] 0 in
+  ignore (assert_le fx [ 0, 1; 1, 1 ] (-3) ~polarity:true);
+  (* x + y <= 3 *)
+  ignore (assert_le fx [ 0, -1; 1, -1 ] 3 ~polarity:true);
+  (* -(x + y) + 3 <= 0 ==> x + y >= 3 *)
+  ignore (Lia.check fx.solver);
+  check
+    "small-coeff combo x+y pinned to 3 => fixed_bounds fires (slack key preserved)"
+    (match Lia.fixed_bounds fx.solver xpy with
+     | Some (v, _, _) -> Rational.equal v (Rational.of_int 3)
+     | None -> false)
+;;
+
 (* ================================================================== *)
 (* Cross-model (codex) review findings L1-L5: each test encodes the exact reproduction. *)
 
@@ -1003,6 +1035,7 @@ let () =
   test_farkas_mutant ();
   test_propagation ();
   test_push_pop ();
+  test_cube_still_fires ();
   test_codex_findings ();
   test_bruteforce ();
   test_overflow ();
