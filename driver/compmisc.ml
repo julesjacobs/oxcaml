@@ -159,14 +159,18 @@ let space_overhead_set_in_env () =
     |> List.exists (fun field -> String.length field > 0 && field.[0] = 'o')
 
 (* Best-effort size of the compilation unit's source. This runs before Arg
-   parsing, so it walks the raw argv: .ml/.mli arguments count directly; the
-   operands of -impl/-intf are sources regardless of suffix; -args/-args0
-   response files are expanded one level (newline- resp. NUL-separated, as in
-   [Arg.read_arg]/[read_arg0]); and the operands of common value-taking flags
-   are skipped so an output name like [-o gen.ml] is not misclassified.
-   Exotic forms (a custom -intf-suffix, .mlt) may still be missed: this is a
-   pacing heuristic, and an explicit o= in OCAMLRUNPARAM stays authoritative.
-   Uses in_channel_length to avoid a Unix dependency. *)
+   parsing, so it walks the raw argv (the argv the driver was invoked with,
+   which for embedded uses of [Maindriver.main]/[Optmaindriver.main] may
+   differ from [Sys.argv]): .ml/.mli arguments count directly; the operands
+   of -impl/-intf are sources regardless of suffix; -args/-args0 response
+   files are expanded (newline- resp. NUL-separated, trailing CR trimmed, as
+   in [Arg.read_arg]/[read_arg0]) and scanned with the same option-aware
+   walk, to a bounded nesting depth; and the operands of common value-taking
+   flags are skipped so an output name like [-o gen.ml] is not
+   misclassified. Exotic forms (a custom -intf-suffix, .mlt) may still be
+   missed: this is a pacing heuristic, and an explicit o= in OCAMLRUNPARAM
+   stays authoritative. Uses in_channel_length to avoid a Unix
+   dependency. *)
 let source_file_size_bytes path =
   match open_in_bin path with
   | exception _ -> 0
@@ -188,47 +192,59 @@ let response_file_args path ~null_sep =
       | s ->
         close_in_noerr ic;
         String.split_on_char (if null_sep then '\000' else '\n') s
+        |> List.map (fun a ->
+             (* [Arg.read_arg] strips one trailing CR per line, so
+                CRLF-formatted -args files parse the same way here. *)
+             let n = String.length a in
+             if (not null_sep) && n > 0 && a.[n - 1] = '\r'
+             then String.sub a 0 (n - 1)
+             else a)
         |> List.filter (fun a -> String.length a > 0)
     end
 
-let largest_input_source_bytes () =
+let largest_input_source_bytes argv =
   let best = ref 0 in
   let consider path = best := Stdlib.max !best (source_file_size_bytes path) in
   let is_source a =
     Filename.check_suffix a ".ml" || Filename.check_suffix a ".mli"
   in
+  (* Only flags whose operand is a non-source value; keep in sync with
+     main_args.ml (e.g. -dump-into-file is Arg.Unit and must NOT be here,
+     or it would swallow a following source file). *)
   let takes_value = function
     | "-o" | "-I" | "-H" | "-open" | "-pp" | "-ppx" | "-intf-suffix"
-    | "-dump-into-file" | "-cmi-file" | "-runtime-variant" | "-use-runtime" ->
+    | "-cmi-file" | "-runtime-variant" | "-use-runtime" ->
       true
     | _ -> false
   in
-  let rec scan = function
+  (* [depth] bounds response-file nesting (and cuts self-referencing
+     -args files short); the real expansion in [Arg] is recursive too. *)
+  let rec scan depth = function
     | [] -> ()
     | ("-impl" | "-intf") :: path :: rest ->
       consider path;
-      scan rest
+      scan depth rest
     | (("-args" | "-args0") as flag) :: path :: rest ->
-      List.iter
-        (fun a -> if is_source a then consider a)
-        (response_file_args path ~null_sep:(String.equal flag "-args0"));
-      scan rest
-    | flag :: _ :: rest when takes_value flag -> scan rest
+      (if depth > 0 then
+         scan (depth - 1)
+           (response_file_args path ~null_sep:(String.equal flag "-args0")));
+      scan depth rest
+    | flag :: _ :: rest when takes_value flag -> scan depth rest
     | a :: rest ->
       if is_source a then consider a;
-      scan rest
+      scan depth rest
   in
-  (match Array.to_list Sys.argv with [] -> () | _ :: args -> scan args);
+  (match Array.to_list argv with [] -> () | _ :: args -> scan 2 args);
   !best
 
-let chosen_space_overhead () =
-  if largest_input_source_bytes () > large_unit_source_bytes
+let chosen_space_overhead argv =
+  if largest_input_source_bytes argv > large_unit_source_bytes
   then compiler_space_overhead_large
   else compiler_space_overhead_small
 
-let set_gc_pacing_defaults () =
+let set_gc_pacing_defaults ~argv =
   if not (space_overhead_set_in_env ()) then
-    Gc.set { (Gc.get ()) with Gc.space_overhead = chosen_space_overhead () }
+    Gc.set { (Gc.get ()) with Gc.space_overhead = chosen_space_overhead argv }
 
 let directory_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
