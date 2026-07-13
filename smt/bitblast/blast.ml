@@ -299,6 +299,44 @@ let bv_eq t a b =
   mk_and_list t (List.init w (fun j -> mk_iff t a.(j) b.(j)))
 ;;
 
+let zext t a k = Array.append a (Array.make k (Sat.neg_lit t.tru))
+
+(* Euclidean division: introduce fresh quotient [q] and remainder [r] and constrain them
+   so that, WHEN the divisor is nonzero, [a = b*q + r] exactly with [r <u b]. Two overflow
+   guards make the w-bit encoding faithful (without them the wrap of b*q admits a spurious
+   quotient, e.g. q=8 for a=0,b=2 at w=4):
+   - b*q is formed at DOUBLE width and its high half is forced to 0 (b*q < 2^w);
+   - the add b*q + r is checked at width w+1 against zero-extended a (carry-out 0). The
+     constraint is a global definition (b=0 => vacuous), so asserting it unconditionally
+     is sound wherever the div/rem term occurs. Returns [(q, r, is_zero_b)]. *)
+let divmod_vars t a b =
+  let w = Array.length a in
+  let q = Array.init w (fun _ -> fresh t) in
+  let r = Array.init w (fun _ -> fresh t) in
+  let is_zero_b = mk_not (mk_or_list t (Array.to_list b)) in
+  let prod2 = mul t (zext t b w) (zext t q w) in
+  let no_ovf = mk_and_list t (List.init w (fun i -> mk_not prod2.(w + i))) in
+  let prod_low = Array.sub prod2 0 w in
+  let sum1 = ripple_add t (zext t prod_low 1) (zext t r 1) (Sat.neg_lit t.tru) in
+  let sum_eq = bv_eq t sum1 (zext t a 1) in
+  let r_lt_b = ult t r b in
+  let ok = mk_and_list t [ no_ovf; sum_eq; r_lt_b ] in
+  add t [ is_zero_b; ok ];
+  q, r, is_zero_b
+;;
+
+(* bvudiv: b=0 -> all ones (SMT-LIB total semantics), else the quotient. *)
+let udiv t a b =
+  let q, _, zb = divmod_vars t a b in
+  Array.init (Array.length a) (fun i -> mk_ite t zb t.tru q.(i))
+;;
+
+(* bvurem: b=0 -> a, else the remainder. *)
+let urem t a b =
+  let _, r, zb = divmod_vars t a b in
+  Array.init (Array.length a) (fun i -> mk_ite t zb a.(i) r.(i))
+;;
+
 (* {2 Blasting the term DAG} *)
 
 let rec bits t (term : Term.t) : Sat.lit array =
@@ -347,9 +385,8 @@ and bits_uncached t (term : Term.t) : Sat.lit array =
      | Some (Bv_op.Sign_extend k), [ a ] ->
        let ab = bits t a in
        Array.append ab (Array.make k ab.(Array.length ab - 1))
-     | Some (Bv_op.Udiv | Bv_op.Urem), _ ->
-       (* Optional in v1: fail closed rather than emit an unchecked circuit. *)
-       unsupported "bvudiv/bvurem not encoded (fail-closed to unknown)"
+     | Some Bv_op.Udiv, [ a; b ] -> udiv t (bits t a) (bits t b)
+     | Some Bv_op.Urem, [ a; b ] -> urem t (bits t a) (bits t b)
      | Some op, _ -> unsupported "bit-vector op %s: unexpected arity" (Bv_op.to_string op)
      | None, _ -> unsupported "uninterpreted function over bit-vectors (out of QF_BV)")
   | Ite (c, a, b) ->

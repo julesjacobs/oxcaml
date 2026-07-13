@@ -16,8 +16,8 @@
       by re-evaluating the formula under it (also enforced inside the driver as a
       fail-closed net).
 
-   3. FAIL-CLOSED door: a formula with an unencoded operator (bvudiv) returns [Unknown],
-      never a verdict.
+   3. FAIL-CLOSED door: a formula with an unencoded construct (here an uninterpreted
+      function over bit-vectors, outside QF_BV) returns [Unknown], never a verdict.
 
    Stdlib-only (I3); deterministic (full enumeration, no PRNG, no wall-clock). Nonzero
    exit on any failed check. *)
@@ -155,33 +155,42 @@ let run_oracle () =
   print_endline "layer 1: exhaustive small-width oracle";
   List.iter
     (fun w ->
-      List.iter
-        (fun (name, op) -> oracle_bv2 name w w (bin op))
-        [ "bvand", Bv_op.And
-        ; "bvor", Bv_op.Or
-        ; "bvxor", Bv_op.Xor
-        ; "bvadd", Bv_op.Add
-        ; "bvsub", Bv_op.Sub
-        ; "bvmul", Bv_op.Mul
-        ; "bvshl", Bv_op.Shl
-        ; "bvlshr", Bv_op.Lshr
-        ; "bvashr", Bv_op.Ashr
-        ];
-      List.iter
-        (fun (name, op) -> oracle_bv1 name w w (un op))
-        [ "bvnot", Bv_op.Not; "bvneg", Bv_op.Neg ];
-      List.iter
-        (fun (name, op) -> oracle_pred name w (bin op))
-        [ "bvult", Bv_op.Ult
-        ; "bvule", Bv_op.Ule
-        ; "bvugt", Bv_op.Ugt
-        ; "bvuge", Bv_op.Uge
-        ; "bvslt", Bv_op.Slt
-        ; "bvsle", Bv_op.Sle
-        ; "bvsgt", Bv_op.Sgt
-        ; "bvsge", Bv_op.Sge
-        ])
+       List.iter
+         (fun (name, op) -> oracle_bv2 name w w (bin op))
+         [ "bvand", Bv_op.And
+         ; "bvor", Bv_op.Or
+         ; "bvxor", Bv_op.Xor
+         ; "bvadd", Bv_op.Add
+         ; "bvsub", Bv_op.Sub
+         ; "bvmul", Bv_op.Mul
+         ; "bvshl", Bv_op.Shl
+         ; "bvlshr", Bv_op.Lshr
+         ; "bvashr", Bv_op.Ashr
+         ; "bvudiv", Bv_op.Udiv
+         ; "bvurem", Bv_op.Urem
+         ];
+       List.iter
+         (fun (name, op) -> oracle_bv1 name w w (un op))
+         [ "bvnot", Bv_op.Not; "bvneg", Bv_op.Neg ];
+       List.iter
+         (fun (name, op) -> oracle_pred name w (bin op))
+         [ "bvult", Bv_op.Ult
+         ; "bvule", Bv_op.Ule
+         ; "bvugt", Bv_op.Ugt
+         ; "bvuge", Bv_op.Uge
+         ; "bvslt", Bv_op.Slt
+         ; "bvsle", Bv_op.Sle
+         ; "bvsgt", Bv_op.Sgt
+         ; "bvsge", Bv_op.Sge
+         ])
     [ 3; 4 ];
+  (* division is the subtle case (the mul-wraparound spurious-quotient trap): a wider
+     exhaustive pass over all inputs, including divide-by-zero. *)
+  List.iter
+    (fun w ->
+       oracle_bv2 "bvudiv" w w (bin Bv_op.Udiv);
+       oracle_bv2 "bvurem" w w (bin Bv_op.Urem))
+    [ 5 ];
   (* width-changing ops *)
   oracle_bv1 "zero_extend" 3 5 (fun reg ctx x ->
     Bv_defs_stub.op reg ctx ~result_width:5 (Bv_op.Zero_extend 2) [ x ]);
@@ -273,16 +282,21 @@ let run_e2e () =
 (* {2 Layer 3 — fail-closed} *)
 
 let run_fail_closed () =
-  print_endline "layer 3: fail-closed on unencoded op";
-  let reg, ctx = fresh () in
+  print_endline "layer 3: fail-closed on unencoded construct";
+  (* an uninterpreted function over bit-vectors is out of QF_BV: it must degrade to
+     Unknown, never a verdict. *)
+  let env = Env.create () in
+  let ctx = Context.create env in
+  let reg = Bv_defs_stub.create env in
   let defs = Bv_defs_stub.defs reg in
   let x = Bv_defs_stub.var reg ctx "d_x" 4 in
-  let y = Bv_defs_stub.var reg ctx "d_y" 4 in
-  let q = Bv_defs_stub.op reg ctx Bv_op.Udiv [ x; y ] in
-  let f = Context.eq ctx q x in
+  let bv4 = Bv_defs_stub.sort reg 4 in
+  let f = Env.declare_fun env "uf_f" (Rank.create [ bv4 ] bv4) in
+  let fx = Context.app ctx f [ x ] in
+  let g = Context.eq ctx fx x in
   check
-    "bvudiv -> Unknown"
-    (match Bv_solve.solve defs [ f ] with
+    "uninterpreted BV function -> Unknown"
+    (match Bv_solve.solve defs [ g ] with
      | Bv_solve.Unknown _ -> true
      | _ -> false)
 ;;
