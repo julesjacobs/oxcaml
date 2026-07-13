@@ -1,8 +1,8 @@
 diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
-index cb85dd9468..358c8802be 100644
+index d6c28f60d2..e28b3d4826 100644
 --- a/smt/interface/presolve.ml
 +++ b/smt/interface/presolve.ml
-@@ -531,7 +531,7 @@ let simplify_contextual ctx assertions =
+@@ -541,7 +541,7 @@ let simplify_contextual ctx assertions =
            | Ite _ -> env.subst)
          else env.subst
        in
@@ -10,4 +10,4 @@ index cb85dd9468..358c8802be 100644
 +      { atoms; subst; memo = env.memo }
    in
    let rec simp env (t : Term.t) : Term.t =
-     incr steps;
+     tick ();

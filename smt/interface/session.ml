@@ -194,14 +194,18 @@ let pass_a_flag =
    team-lead ruling): a derived unit must never enter a cert as a trusted [Input]. *)
 let pass_a_enabled t = Lazy.force pass_a_flag && not t.cert_active
 
-(* Contextual simplification (task #13) toggle. Default ON: it collapses the nested-ITE
-   verification conditions (nec-smt / Dartagnan) that CDCL(T) otherwise thrashes on.
-   [OXSMT_PRESOLVE_CTX=0] turns it OFF for the A/B baseline. Read once. *)
+(* Contextual simplification (task #13) toggle. Default OFF (both review legs concur): the
+   pass collapses the nested-ITE verification conditions (nec-smt / Dartagnan) that
+   CDCL(T) otherwise thrashes on, and its win direction is UNSAT where the R1 self-check
+   does not run — so, matching the Pass A precedent, it ships OFF (byte-identical to
+   trunk) until a fires-inclusive ON/OFF 0-mismatch corpus sweep is recorded; a follow-up
+   then flips the default. [OXSMT_PRESOLVE_CTX=1] turns it ON (the A/B ON leg and the
+   wiring-test gate). Read once. *)
 let ctx_simp_flag =
   lazy
     (match Sys.getenv_opt "OXSMT_PRESOLVE_CTX" with
-     | Some ("0" | "false" | "no") -> false
-     | Some _ | None -> true)
+     | Some ("1" | "true" | "yes") -> true
+     | Some _ | None -> false)
 ;;
 
 (* Contextual simplification runs only when enabled AND no certificate trace is installed:

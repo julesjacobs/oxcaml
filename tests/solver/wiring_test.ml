@@ -1829,10 +1829,14 @@ let test_dag_sharing_no_blowup () =
 
 (* --- Contextual simplification (task #13) --------------------------------------------
    [Presolve.simplify_contextual], driven through [assert_presolved]. The win direction is
-   UNSAT (R1 does not run), so these fixtures ARE the soundness margin; each of the four
-   mis-scope fixtures is a SAT problem the pass must preserve, and is the ORACLE a
-   registry mutant (module=presolve) flips to UNSAT. A model-preserving rewrite: no
-   variable is eliminated, so [eliminated_vars] stays empty throughout. *)
+   UNSAT (R1 does not run), so these fixtures ARE the soundness margin. THREE registry
+   mutants (module=presolve) are wrong-scoping bugs each caught by a SAT fixture that
+   flips to UNSAT (else-branch, condition, polarity — the last also caught end-to-end by
+   [n3] below); the FOURTH (shared-memo) is a SILENT NO-OP that preserves verdicts and is
+   caught by the structural effectiveness oracle [test_ctx_simp_fires], not a verdict
+   flip. A model-preserving rewrite: no variable is eliminated, so [eliminated_vars] stays
+   empty throughout. NOTE: the ship default is OFF (see [ctx_simp_flag]);
+   [make wiring-test] sets OXSMT_PRESOLVE_CTX=1 so these fixtures exercise the ON path. *)
 
 (* EFFECTIVENESS + equality substitution: the then-branch assumes [x = 5], so [(>= x 100)]
    folds to false there; the else-branch is unconstrained on [x] except [x <> 5]. Sat with
@@ -1991,6 +1995,86 @@ let test_ctx_simp_fires () =
   | _ -> check "ctx fires: expected a single simplified term" false
 ;;
 
+(* MUTANT ORACLE 3 (end-to-end, stronger than the unit polarity check) — the reviewer's
+   n3: a negated condition with the variable in the THEN branch.
+   [(= r (ite (not (= v 7)) (+ v 1000) 500)) /\ (v=7 \/ v=3) /\ r=1003]. Correct: sat at
+   v=3 (then-branch v<>7 holds, v+1000=1003=r). Under the ctx-eq-subst-ignore-polarity
+   mutant, v->7 is wrongly substituted in the v<>7 branch, so the then-branch becomes
+   7+1000=1007 and r is forced to 1007 (v=3) or 500 (v=7), neither 1003 -> solved-UNSAT (a
+   wrong verdict). This drives the mis-scope through the full session (assert_presolved ->
+   check_sat), a strictly stronger discriminator than the unit-level
+   [test_ctx_simp_polarity_oracle]. *)
+let test_ctx_simp_n3_polarity_e2e () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let r = Context.const ctx (Session.declare_const s "r" Sort.int) in
+  let v = Context.const ctx (Session.declare_const s "v" Sort.int) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.not_ ctx (Context.eq ctx v (Context.int_const ctx 7)))
+      (Context.linear_combination ctx [ 1, v ] 1000)
+      (Context.int_const ctx 500)
+  in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx r ite
+    ; Context.or_
+        ctx
+        [ Context.eq ctx v (Context.int_const ctx 7)
+        ; Context.eq ctx v (Context.int_const ctx 3)
+        ]
+    ; Context.eq ctx r (Context.int_const ctx 1003)
+    ];
+  check_verdict
+    "ctx n3 polarity (e2e): sat (v=3, r=1003)"
+    Session.Sat
+    (Session.check_sat s)
+;;
+
+(* COMPLETENESS re-fold (presolve.ml:543 obligation): an OUTER [(= x 5)] rewrites the
+   inner atom [(<= y x)] to [(<= y 5)]; [assume] records the REWRITTEN atom, so an inner
+   reoccurrence of the ORIGINAL [(<= y x)] matches [env.atoms] only after its children are
+   substituted — the simp path must re-check the REBUILT term against the assumed atoms.
+   In [(ite (= x 5) (ite (<= y x) (<= y x) false) true)], with the re-fold the inner ite's
+   then-branch folds to [true]; without it, it stays the rebuilt [(<= y 5)] atom. This is
+   completeness only (equivalence holds either way) — checked structurally on the direct
+   [simplify_contextual] output. *)
+let test_ctx_simp_nested_refold () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  let inner =
+    Context.ite
+      ctx
+      (Context.le ctx y x)
+      (Context.le ctx y x)
+      (Context.bool_const ctx false)
+  in
+  let top =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 5))
+      inner
+      (Context.bool_const ctx true)
+  in
+  match Oxsmt_interface.Presolve.simplify_contextual ctx [ top ] with
+  | [ r ] ->
+    (match r.node with
+     | Ite (_, a, _) ->
+       (match a.node with
+        | Ite (_, at, _) ->
+          check
+            "ctx nested re-fold: inner reoccurrence folded to true"
+            (match at.node with
+             | Bool_const true -> true
+             | _ -> false)
+        | _ -> check "ctx nested re-fold: then-branch not the expected inner ite" false)
+     | _ -> check "ctx nested re-fold: unexpected result shape" false)
+  | _ -> check "ctx nested re-fold: expected a single simplified term" false
+;;
+
 (* NEUTRALITY: an ITE-free assertion set is passed through untouched (same verdict as any
    other presolve path); nothing eliminated. *)
 let test_ctx_simp_no_ite_neutral () =
@@ -2068,8 +2152,10 @@ let () =
   test_ctx_simp_else_branch_oracle ();
   test_ctx_simp_condition_oracle ();
   test_ctx_simp_polarity_oracle ();
+  test_ctx_simp_n3_polarity_e2e ();
   test_ctx_simp_shared_subterm_sat ();
   test_ctx_simp_fires ();
+  test_ctx_simp_nested_refold ();
   test_ctx_simp_no_ite_neutral ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1

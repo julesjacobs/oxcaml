@@ -317,7 +317,7 @@ dt-sat-gate:
 ##   under tests/solver (links the test-only parser). Nonzero exit on any failed check.
 wiring-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
-	$(DUNE) exec tests/solver/wiring_test.exe
+	OXSMT_PRESOLVE_CTX=1 $(DUNE) exec tests/solver/wiring_test.exe
 
 ## driver-equiv-test — the driver-equivalence guard (task #133). Builds corpus_classify
 ##   (the headline measurement driver) and oxsmt_cli (the shipped batch path), then asserts

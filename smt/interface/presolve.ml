@@ -472,6 +472,15 @@ let is_bare_var (t : Term.t) =
 ;;
 
 let simplify_contextual ctx assertions =
+  (* One node-visit budget shared across BOTH walks below (discovery + rewrite). On the
+     cap the top-level [List.map] raises [Ctx_budget] and the whole simplified list is
+     discarded for the ORIGINAL [assertions] — a neutral abort, never a partial/asymmetric
+     rewrite. *)
+  let steps = ref 0 in
+  let tick () =
+    incr steps;
+    if !steps > ctx_max_steps then raise Ctx_budget
+  in
   (* Does [t]'s subtree contain any [Ite]? Memoized over the hash-cons DAG. An assertion
      with no [Ite] cannot be contextually simplified (the assumption env is only ever
      extended at an [ite]), so it is passed through untouched — the pass is then exactly
@@ -479,12 +488,14 @@ let simplify_contextual ctx assertions =
      large-arith files where the win never fires. The table is LOCAL to this call: term
      identity ([Term.equal]/[Term.hash]) is the per-[Context] hash-cons tag, so a table
      shared across [Context]s (one session per corpus file) would collide tags and return
-     stale answers — a module-global table silently disables the pass. *)
+     stale answers — a module-global table silently disables the pass. Discovery visits
+     count against the shared budget (memoized ⇒ DAG-linear, but still bounded). *)
   let has_ite_table : bool Term.Table.t = Term.Table.create 4096 in
   let rec has_ite (t : Term.t) =
     match Term.Table.find_opt has_ite_table t with
     | Some b -> b
     | None ->
+      tick ();
       let b =
         match t.node with
         | Ite _ -> true
@@ -501,7 +512,6 @@ let simplify_contextual ctx assertions =
   let root =
     { atoms = Term.Map.empty; subst = Term.Map.empty; memo = Term.Table.create 4096 }
   in
-  let steps = ref 0 in
   (* Extend [env] with [atom = truth]: strip a leading [Not] (flipping [truth]) so a
      positive atom is recorded, and add the variable→literal substitution when the peeled
      atom is [(= v k)] AND [truth] is true. A FRESH scope (its own memo). *)
@@ -534,8 +544,7 @@ let simplify_contextual ctx assertions =
       { atoms; subst; memo = Term.Table.create 64 }
   in
   let rec simp env (t : Term.t) : Term.t =
-    incr steps;
-    if !steps > ctx_max_steps then raise Ctx_budget;
+    tick ();
     match Term.Table.find_opt env.memo t with
     | Some r -> r
     | None ->
@@ -545,7 +554,17 @@ let simplify_contextual ctx assertions =
         | None ->
           (match Term.Map.find_opt t env.atoms with
            | Some b -> Context.bool_const ctx b
-           | None -> rebuild env t)
+           | None ->
+             (* Re-fold after rebuild: an outer substitution may have rewritten the atom
+                that [assume] recorded (it records the REWRITTEN [c'], not the original
+                [c]), so a branch occurrence of the ORIGINAL atom matches [env.atoms] only
+                once its children are substituted. Check the rebuilt result against the
+                assumed atoms too, else the promised recurrence-fold is missed
+                (completeness only — equivalence holds either way). *)
+             let r' = rebuild env t in
+             (match Term.Map.find_opt r' env.atoms with
+              | Some b -> Context.bool_const ctx b
+              | None -> r'))
       in
       Term.Table.add env.memo t r;
       r

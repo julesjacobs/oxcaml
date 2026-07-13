@@ -1,8 +1,8 @@
-diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
-index cb85dd9468..9217be561c 100644
---- a/smt/interface/presolve.ml
-+++ b/smt/interface/presolve.ml
-@@ -574,7 +574,7 @@ let simplify_contextual ctx assertions =
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index d6c28f60d2..279f069842 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -593,7 +593,7 @@ let simplify_contextual ctx assertions =
         | Bool_const false -> simp env b
         | App _ | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ ->
           let env_then = assume env c' ~truth:true in
