@@ -381,10 +381,12 @@ let neg x =
        | Overflow ->
          let n, d = to_big x in
          bnorm_demote (Bigint.neg n) d)
-    (* [Big] negation preserves the >int63 magnitude, so the result is never
-       immediate/[Frac] representable — it stays [Big] (no re-demotion possible; codex
-       LOW, inert). *)
-    | W.Big b -> W.of_block (W.Big { num = Bigint.neg b.num; den = b.den }))
+    (* [Big] negation routes through [bnorm_demote] to RE-CANONICALIZE. It almost always
+       stays [Big], but the int63 asymmetry makes re-demotion genuinely reachable:
+       −(2^62/d) = −2^62/d = min_int/d is [Frac]-representable (min_int FITS int63 while
+       +2^62 does not), so a raw [Big] rebuild would leave a value in the wrong tier and
+       break canonical-uniqueness. [bnorm_demote] lands it on the canonical arm. *)
+    | W.Big b -> bnorm_demote (Bigint.neg b.num) b.den)
 ;;
 
 let abs x =
@@ -404,7 +406,11 @@ let abs x =
        | Overflow ->
          let n, d = to_big x in
          bnorm_demote (Bigint.abs n) d)
-    | W.Big b -> W.of_block (W.Big { num = Bigint.abs b.num; den = b.den }))
+    (* [Big] abs routes through [bnorm_demote] for the same canonical-uniqueness reason as
+       [neg] (uniform, and never a wrong tier). abs cannot itself reach the min_int demote
+       — it yields a positive numerator, and +2^62 does not fit int63 — so in practice
+       this stays [Big], but re-canonicalizing keeps the invariant unconditionally true. *)
+    | W.Big b -> bnorm_demote (Bigint.abs b.num) b.den)
 ;;
 
 (* Value-based (R5/R6): never raises; promotes to a common tier on native overflow. Both

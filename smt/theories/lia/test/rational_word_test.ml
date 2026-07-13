@@ -296,7 +296,33 @@ let test_min_int () =
        check
          (Printf.sprintf "min_int/%d + neg = 0" d)
          (Rational.is_zero (Rational.add fr (Rational.neg fr))))
-    [ 3; 5; 7; 4611686018427387903 (* odd/coprime and a large denominator *) ]
+    [ 3; 5; 7; 4611686018427387903 (* odd/coprime and a large denominator *) ];
+  (* codex-LOW close: neg/abs of a Big fraction. neg(2^62/d) = min_int/d, which is
+     [Frac]-representable (min_int fits int63 while +2^62 does not — the int63 asymmetry),
+     so the Big neg/abs arm now re-canonicalizes via bnorm_demote instead of rebuilding a
+     Big. NOTE this re-demote is NOT observable through the abstract API — a physical
+     Big{-2^62,d} and Frac{min_int,d} have identical to_string/num/den/compare (that is why
+     the LOW was inert). So these pin the VALUE of neg/abs on a Big fraction — net-new
+     coverage, since neg/abs are not in the Python differential oracle — which a wrong-value
+     regression on that arm would break; the physical re-canonicalization is internal purity
+     that keeps canonical-uniqueness literally true. *)
+  List.iter
+    (fun d ->
+       let big_frac =
+         s (pos_s ^ "/" ^ string_of_int d)
+         (* 2^62/d, a Big fraction *)
+       in
+       check (Printf.sprintf "2^62/%d is a `Big_frac" d) (rep_of big_frac = `Big_frac);
+       check
+         (Printf.sprintf "neg(2^62/%d) = min_int/%d (canonical string)" d d)
+         (Rational.to_string (Rational.neg big_frac) = min_s ^ "/" ^ string_of_int d);
+       check
+         (Printf.sprintf "abs(2^62/%d) = 2^62/%d" d d)
+         (Rational.to_string (Rational.abs big_frac) = pos_s ^ "/" ^ string_of_int d);
+       check
+         (Printf.sprintf "neg is an involution on 2^62/%d" d)
+         (Rational.equal (Rational.neg (Rational.neg big_frac)) big_frac))
+    [ 3; 5; 7 ]
 ;;
 
 let test_oracle () =
