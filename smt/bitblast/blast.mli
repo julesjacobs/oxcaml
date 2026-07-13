@@ -8,8 +8,11 @@
     added to the SAT core, no combinator/theory is involved. Two consequences the review
     turns on: (1) a [Sat] model reads straight back off the bit assignment as a concrete
     bit-vector value per variable; (2) the [Unsat] path is pure propositional, so the
-    existing RUP certificate checker applies unchanged — bit-blasting adds no theory
-    leaves.
+    existing RUP certificate checker applies ARCHITECTURALLY unchanged — bit-blasting adds
+    no theory leaves. (v1 caveat: certificate EMISSION for the bit-blasting path is not
+    yet wired — the property is that the refutation is ordinary propositional resolution
+    with nothing for the checker to special-case, not that a certificate is emitted
+    today.)
 
     Every encoding is equisatisfiable: Tseitin introduces fresh variables but never drops
     a constraint. An operator this version cannot encode raises {!Unsupported_bv}; the

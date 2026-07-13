@@ -206,12 +206,34 @@ let parse_sanctioned_marker name = Array_defs.is_op_name name
 let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
 (* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
-   can never collide with one preprocessing invents. *)
+   can never collide with one preprocessing invents.
+
+   They ALSO reject any name containing '\' or '|' (F2, codex BLOCKER). Internal marker
+   namespaces — currently the bit-vector vocabulary's ['\bv|...'] symbols
+   ({!Oxsmt_core.Bv}) — encode their instance in a name built from those two bytes
+   precisely because the SMT-LIB lexer forbids them in every symbol form, so no PARSED
+   symbol can collide. This closes the remaining PROGRAMMATIC door: without it,
+   [declare_fun "\\bv|bvadd|1"] forges a symbol {!Oxsmt_core.Bv.view} decodes as a real
+   [bvadd], and the bit-blaster would encode a user's opaque function as bit-vector
+   addition (a wrong verdict). The general byte rejection matches the lexer's rule exactly
+   and covers all present and future marker namespaces. (The bit-vector builders mint
+   through [Env.declare_fun] directly, below this guard, so this does not impede
+   legitimate marker minting.) *)
+let has_marker_byte name =
+  String.exists (fun c -> Char.equal c '\\' || Char.equal c '|') name
+;;
+
 let guard_name name =
   if Preprocess.is_reserved_name name
   then
     invalid_arg
-      (Printf.sprintf "Session: cannot declare reserved internal symbol %s" name)
+      (Printf.sprintf "Session: cannot declare reserved internal symbol %s" name);
+  if has_marker_byte name
+  then
+    invalid_arg
+      (Printf.sprintf
+         "Session: cannot declare symbol %s (contains a reserved marker byte '\\' or '|')"
+         name)
 ;;
 
 let declare_sort t name =
@@ -941,14 +963,22 @@ let check_sat t =
   t.effort_exhausted <- false;
   if t.degraded
   then Unknown
-  else if Bv_dispatch.is_pure_bv t.asserted
+  else if Bv_dispatch.is_pure_bv t.asserted && not (Manager.has_live_lemma t.mgr)
   then (
-    (* Pure QF_BV: resolve by eager bit-blasting BEFORE the combinator (which fail-closed
-       degrades any live bit-vector term to unknown, combine.ml). Bv_solve re-checks every
-       sat model with the independent evaluator, so a Sat here is already self-certified —
-       we surface its bindings directly rather than through the BV-unaware R1 combinator
-       checker. Unsat is the pure-propositional SAT-core refutation; Unknown is the
-       fail-closed door on any construct the blaster does not encode. *)
+    (* Pure QF_BV with NO live quantified lemma: resolve by eager bit-blasting BEFORE the
+       combinator (which fail-closed degrades any live bit-vector term to unknown,
+       combine.ml). Bv_solve re-checks every sat model with the independent evaluator, so
+       a Sat here is already self-certified — we surface its bindings directly rather than
+       through the BV-unaware R1 combinator checker. Unsat is the pure-propositional
+       SAT-core refutation; Unknown is the fail-closed door on any construct the blaster
+       does not encode.
+
+       The [not (has_live_lemma)] guard is a SOUNDNESS gate (F1): [is_pure_bv] inspects
+       only [t.asserted] (the ground set), so a live [forall] lemma (in [t.mgr]) is
+       invisible to it — bit-blasting the ground set alone would ignore the quantifier and
+       could report [Sat] for a model the lemma forbids (a wrong-[Sat]). A lemma'd session
+       therefore takes the combinator path below, where THE SOUNDNESS RULE degrades a
+       lemma-live ground [Sat] to [Unknown] (never a model that ignores a quantifier). *)
     match Bv_dispatch.solve t.asserted with
     | Bv_dispatch.Unsat ->
       t.last_verdict <- Unsat;

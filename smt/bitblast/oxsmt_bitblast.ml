@@ -4,7 +4,10 @@
     n Boolean SAT variables, each operator a Tseitin circuit, and the existing
     {!Oxsmt_solver.Sat} core does the solving — no SAT-core change, no combinator/theory
     involvement. Sat models read straight back as concrete bit-vectors; the Unsat path is
-    pure propositional (the RUP certificate checker applies unchanged, no theory leaves).
+    pure propositional (the RUP certificate checker applies ARCHITECTURALLY unchanged, no
+    theory leaves — v1 caveat: cert EMISSION for this path is not yet wired; the
+    refutation is ordinary propositional resolution, nothing for the checker to
+    special-case).
 
     Public surface:
     - {!Bv_op} — the operator vocabulary the circuit library matches on.

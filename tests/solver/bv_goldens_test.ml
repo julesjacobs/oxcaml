@@ -15,6 +15,12 @@
 
 module Session = Oxsmt_interface.Session
 module Parser = Oxsmt_smtlib_parser.Parser
+module Context = Oxsmt_core.Context
+module Sort = Oxsmt_core.Sort
+module Bv = Oxsmt_core.Bv
+module Bigint = Oxsmt_core.Bigint
+module Rank = Oxsmt_core.Rank
+module Qvar = Oxsmt_ematch.Qvar
 
 let failures = ref 0
 
@@ -68,6 +74,73 @@ let solve src =
       | Session.Unknown -> "unknown", None)
 ;;
 
+(* F1 soundness (codex BLOCKER): [is_pure_bv] inspects only the ground [t.asserted], so a
+   live [forall] lemma is invisible to it. WITHOUT the [not (has_live_lemma)] gate, a
+   pure-BV SAT ground set plus a live lemma routes to the bit-blaster, which ignores the
+   quantifier and reports [Sat] — a model that ignores a quantifier (wrong-SAT). WITH the
+   gate, a live lemma forces the combinator path where THE SOUNDNESS RULE degrades to
+   [Unknown]. This test builds exactly that session and asserts [Unknown]; it FAILS
+   (reports Sat) against the pre-fix code. *)
+let run_f1_soundness () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let env = Session.env s in
+  let x = Context.const ctx (Session.declare_const s "f1x" (Sort.bitvec 8)) in
+  (* pure-BV, satisfiable on its own: x <u 3 *)
+  Session.assert_term
+    s
+    (Bv.binop ctx env Bv.Bvult x (Bv.const ctx env ~value:(Bigint.of_int 3) ~width:8));
+  (* a live lemma (forall y. y + 0 = y), kept live by a non-refuting instance *)
+  let a = Context.const ctx (Session.declare_const s "f1a" Sort.int) in
+  let lemma =
+    Session.assert_lemma
+      s
+      ~qvars:[ "y", Sort.int ]
+      ~build:(fun qv ->
+        let y = Qvar.to_term qv.(0) in
+        { Session.body = Context.eq ctx (Context.add ctx y (Context.int_const ctx 0)) y
+        ; triggers = []
+        })
+  in
+  Session.instantiate s lemma [| a |];
+  let v = Session.check_sat s in
+  match v with
+  | Session.Unknown ->
+    Printf.printf "  ok   F1 live-lemma + pure-BV -> unknown (no wrong-Sat)\n"
+  | Session.Sat ->
+    incr failures;
+    Printf.printf "  FAIL F1 live-lemma + pure-BV -> SAT (wrong: quantifier ignored)\n"
+  | Session.Unsat ->
+    incr failures;
+    Printf.printf "  FAIL F1 live-lemma + pure-BV -> unsat (unexpected)\n"
+;;
+
+(* F2 soundness (codex BLOCKER): the '\bv|...' marker is lexer-proof on the PARSER path,
+   but the programmatic declaration door must also refuse it. WITHOUT the guard, a
+   [declare_fun "\bv|bvadd|1"] forges a symbol [Bv.view] decodes as a real bvadd, and the
+   bit-blaster encodes a user's opaque function as bit-vector addition (a wrong-UNSAT /
+   wrong verdict). This test forges exactly that name (what Bv would mint for bvadd at
+   width 1) through the SESSION declaration door and asserts it RAISES; it FAILS (the
+   declare succeeds) against the pre-fix code. *)
+let run_f2_forge_rejected () =
+  let s = Session.create () in
+  let bv1 = Sort.bitvec 1 in
+  let forged = "\\bv|bvadd|1" in
+  (match Session.declare_fun s forged (Rank.create [ bv1; bv1 ] bv1) with
+   | exception Invalid_argument _ ->
+     Printf.printf "  ok   F2 programmatic bv-marker forge rejected (declare_fun)\n"
+   | _ ->
+     incr failures;
+     Printf.printf "  FAIL F2 forge NOT rejected: declare_fun admitted a '\\bv|' name\n");
+  (* the sort door is guarded by the same check *)
+  match Session.declare_sort s "\\bv|sortforge" with
+  | exception Invalid_argument _ ->
+    Printf.printf "  ok   F2 programmatic bv-marker forge rejected (declare_sort)\n"
+  | _ ->
+    incr failures;
+    Printf.printf "  FAIL F2 forge NOT rejected: declare_sort admitted a '\\bv|' name\n"
+;;
+
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/bv-goldens" in
   let files =
@@ -102,6 +175,8 @@ let () =
          Printf.printf "  FAIL %-40s sat but no surfaced model\n" f)
        else Printf.printf "  ok   %-40s %s\n" f got)
     files;
+  run_f1_soundness ();
+  run_f2_forge_rejected ();
   Printf.printf
     "\nbv-goldens self-test: %d file(s), %d failure(s)\n"
     (List.length files)
