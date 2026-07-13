@@ -118,11 +118,17 @@ type t =
     (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
          poison-free: distinct from [degraded]/[budget_exhausted], NOT sticky. *)
   ; mutable elim_defs : Presolve.def list
-    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated, in
-     elimination order. [build_model] re-derives each one's value from its definition and
-     splices it into the model so the R1 checker (which evaluates the ORIGINAL assertions
-     in [asserted]) and [get_model] both bind it. Empty unless the batch
-     {!assert_presolved} path eliminated something. *)
+    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated,
+         in elimination order. [build_model] re-derives each one's value from its
+         definition and splices it into the model so the R1 checker (which evaluates the
+         ORIGINAL assertions in [asserted]) and [get_model] both bind it. Empty unless the
+         batch {!assert_presolved} path eliminated something. *)
+  ; mutable cert_active : bool
+    (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
+     (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
+     would otherwise enter the cert as a trusted [Input], laundering a preprocessing
+     consequence into the query and blinding the gate (codex MED-3/4). Cert corpus runs
+     are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is free. *)
   }
 
 let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget () =
@@ -169,9 +175,22 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
   ; last_effort = 0
   ; effort_exhausted = false
   ; elim_defs = []
+  ; cert_active = false
   }
 ;;
 
+(* Pass A (task #7 entailed-equality extraction) toggle. Default OFF ⇒ byte-identical to
+   trunk (Pass A never runs, no augmentation). Read once. *)
+let pass_a_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_PRESOLVE_EQ" with
+     | Some ("1" | "true" | "yes") -> true
+     | _ -> false)
+;;
+
+(* Pass A runs only when enabled AND no certificate trace is installed (§cert-OFF gating,
+   team-lead ruling): a derived unit must never enter a cert as a trusted [Input]. *)
+let pass_a_enabled t = Lazy.force pass_a_flag && not t.cert_active
 let env t = t.env
 let context t = t.ctx
 
@@ -606,12 +625,29 @@ let assert_presolved t terms =
        [x = 2y] substituted into [C·x = 0] with [2·C] out of int63) — or an [Unsupported]
        operand. That must degrade to a clean [Unknown], never escape [assert_presolved] as
        a crash. Same discipline as {!internalize_reduced}. *)
+    (* Pass A (task #7, gated: flag + cert-OFF): the equalities entailed by top-level
+       disjunctions, added as extra top-level unit assertions. They are equisatisfiable
+       consequences of [terms], so they are NOT recorded in [t.asserted] (the R1 set stays
+       the ORIGINAL assertions); they are internalized alongside the reduced conjuncts. On
+       eq_diamond these units chain [x0=…=xn] at the EUF level 0, refuting [x0≠xn] with no
+       search. Bypassed entirely when OFF (byte-identical to trunk — no augmentation, so
+       the LOW-7 zero-alias early-return in [Presolve.run] is unaffected). *)
+    let extra =
+      if pass_a_enabled t
+      then (
+        match Presolve.entailed_equalities t.ctx terms with
+        | exception Term.Overflow -> []
+        | exception Term.Unsupported _ -> []
+        | eqs -> eqs)
+      else []
+    in
     match Presolve.run t.ctx terms with
     | exception Term.Overflow -> t.degraded <- true
     | exception Term.Unsupported _ -> t.degraded <- true
     | { Presolve.reduced; defs } ->
       t.elim_defs <- defs;
-      List.iter (internalize_reduced t) reduced)
+      List.iter (internalize_reduced t) reduced;
+      List.iter (internalize_reduced t) extra)
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
@@ -1115,7 +1151,15 @@ let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.e
    [cert_assumptions] is the active selector-assumption set the terminal E3 step is
    conditioned on (the certificate's selector strip is checked by seeding these true);
    [failed_assumptions] is the failed-selector core of the most recent [Unsat]. *)
-let install_cert_trace t tr = Sat.set_trace t.sat tr
+let install_cert_trace t tr =
+  (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
+     entailed-equality unit must not enter the cert as a trusted [Input]. Set BEFORE any
+     assert (this runs on a pristine session), so [assert_presolved]'s [pass_a_enabled]
+     sees it. *)
+  t.cert_active <- Option.is_some tr;
+  Sat.set_trace t.sat tr
+;;
+
 let cert_assumptions t = List.map Sat.pos t.frames
 let failed_assumptions t = Sat.failed_assumptions t.sat
 let stats t = Sat.stats t.sat

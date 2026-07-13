@@ -56,6 +56,25 @@ type result =
       def list (* eliminated variables, in ELIMINATION order (first eliminated first) *)
   }
 
+(** [entailed_equalities ctx assertions] is Pass A (task #7): the equalities entailed by
+    top-level disjunctions, to ADD as extra top-level unit assertions. For each top-level
+    conjunct [(or D_1 … D_k)] it returns the equalities holding in the induced
+    equality-closure of {e every} disjunct (hence entailed by the [or]), as a spanning
+    forest of fresh [Eq] terms built through [ctx]. Sound (equisatisfiable, both
+    directions): adds only entailed facts; eliminates no variable and introduces no new
+    term, so the model surface is unchanged (R1 checks the ORIGINAL assertions — the added
+    units must NOT be recorded in the R1 set).
+
+    Grammar (soundness-critical: the win direction is UNSAT, where R1 does not run):
+    within a disjunct it descends through [And] only; a leaf is a positive [Eq(a,b)]
+    between NON-Bool terms; OPAQUE at [Eq]-operands, [Not], [Or], [Ite], and Bool/iff
+    equalities. Each disjunct's closure is an INDEPENDENT union-find; the intersection is
+    same-class-in- every-branch (never a cross-branch merge); emits a spanning forest.
+    Single pass (no fixpoint). Neutral-abort (returns a subset, never fails) on an
+    equality-free disjunct or a hard term/leaf cap. Pure and deterministic (I6). The
+    caller gates it (flag + cert-OFF). *)
+val entailed_equalities : Context.t -> Term.t list -> Term.t list
+
 (** [run ctx assertions] presolves [assertions] (raw asserted terms, built through [ctx]).
     Total and deterministic: on a zero-alias input it returns
     [{ reduced = assertions; defs = [] }] (exact neutrality). All produced terms are built

@@ -1456,6 +1456,74 @@ let test_presolve_run_direct () =
   check "run: under-UF variable skipped" (r_uf.Oxsmt_interface.Presolve.defs = [])
 ;;
 
+(* Pass A entailed-equality extraction (task #7): the reviewer-pinned soundness contracts
+   as DISCRIMINATING mutation tests. The win direction is UNSAT (R1 does not run there),
+   so the grammar + independent-intersection contracts ARE the soundness margin — each
+   check below FAILS against the named mutant (verified by mutating the source).
+   Sort-agnostic: Int vars suffice (a Bool/iff equality is an Int-Eq whose result is
+   Bool-sorted). *)
+let test_presolve_pass_a () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let v name = Context.const ctx (Session.declare_const s name Sort.int) in
+  let a = v "a"
+  and b = v "b"
+  and c = v "c"
+  and d = v "d"
+  and u = v "u"
+  and w = v "w" in
+  let eq = Context.eq ctx in
+  let mem x y lst =
+    List.exists (fun e -> Term.equal e (eq x y) || Term.equal e (eq y x)) lst
+  in
+  let ee = Oxsmt_interface.Presolve.entailed_equalities ctx in
+  (* (1) positive diamond: both branches entail a=c (via b, via d) ⇒ a=c extracted; the
+         branch-local b,d are NOT entailed. *)
+  let diamond =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq b c ]; Context.and_ ctx [ eq a d; eq d c ] ]
+  in
+  let r1 = ee [ diamond ] in
+  check "pass_a: diamond entails a=c" (mem a c r1);
+  check "pass_a: diamond does NOT entail a=b" (not (mem a b r1));
+  check "pass_a: diamond does NOT entail a=d" (not (mem a d r1));
+  (* (2) GRAMMAR opacity (codex BLOCKER-1 / fable #5): the Bool/iff equality operand
+     [(= (= a b) (= c d))] must be OPAQUE — a=b is NOT entailed by branch 1. A mutant that
+     recurses into Eq-operands extracts a=b ⇒ wrong-Unsat. u=w IS entailed by both. *)
+  let bool_nest =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq (eq a b) (eq c d); eq u w ]
+      ; Context.and_ ctx [ eq a b; eq u w ]
+      ]
+  in
+  let r2 = ee [ bool_nest ] in
+  check "pass_a: grammar opaque at Bool-Eq operand (no a=b)" (not (mem a b r2));
+  check "pass_a: grammar still extracts entailed u=w" (mem u w r2);
+  (* (3) INDEPENDENT per-branch intersection (codex BLOCKER-2): (a=b,c=d) vs (a=c,b=d) —
+     correct intersection is EMPTY. A mutant unioning the branch union-finds merges all
+     four terms and extracts a=d ⇒ wrong-Unsat. *)
+  let cross =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq c d ]; Context.and_ ctx [ eq a c; eq b d ] ]
+  in
+  let r3 = ee [ cross ] in
+  check "pass_a: cross-branch intersection has no a=d" (not (mem a d r3));
+  check "pass_a: cross-branch intersection empty" (r3 = []);
+  (* (4) fire-condition: an equality-free disjunct ⇒ all-singleton closure ⇒ empty
+     intersection ⇒ neutral []. *)
+  let with_le =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq b c ]; Context.le ctx a (Context.int_const ctx 0) ]
+  in
+  check "pass_a: equality-free disjunct bails" (ee [ with_le ] = []);
+  (* (5) determinism (I6): identical extraction run twice. *)
+  check "pass_a: deterministic" (ee [ diamond ] = ee [ diamond ])
+;;
+
 (* codex H1 == same-model F1 (both legs, independently). Substitution composes
    coefficients through the arithmetic smart constructors, so an alias inlined into a
    huge-coefficient term overflows int63. That MUST degrade to a clean [Unknown]
@@ -1724,6 +1792,7 @@ let () =
   test_presolve_neutral ();
   test_presolve_determinism ();
   test_presolve_run_direct ();
+  test_presolve_pass_a ();
   test_presolve_overflow_coeff_degrades ();
   test_presolve_bignum_const_solves ();
   test_presolve_eq_uf_side_sound ();

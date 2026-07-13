@@ -164,6 +164,155 @@ let name_of (x : Term.t) =
   | _ -> invalid_arg "Presolve.name_of: not an application"
 ;;
 
+(* --- Pass A: entailed-equality extraction from top-level disjunctions (task #7) ------
+   For each top-level conjunct [(or D_1 … D_k)], add the equalities entailed by EVERY
+   disjunct: if [e] is in the induced equality-closure of every [D_j] then [D_j ⊨ e] for
+   all j, so [(or D_j) ⊨ e] — adding [e] is equisatisfiable (both directions), eliminates
+   no variable, and introduces no new term. On eq_diamond each diamond
+   [(or (and (=xi yi)(=yi x{i+1})) (and (=xi zi)(=zi x{i+1})))] entails [xi=x{i+1}]; the
+   added units chain [x0=…=xn] at the EUF level 0, refuting [x0≠xn] with no search.
+
+   Reviewer-pinned contracts (logs/codex-review/preprocess-design.md,
+   preprocess-design-review-fable.md); each has a mutation test in [presolve_test]:
+   - ATOMIC-LEAF GRAMMAR (codex BLOCKER-1 / fable #5): within a disjunct, descend through
+     [And] ONLY; a leaf is a positive [Eq(a,b)] between NON-Bool terms; OPAQUE at
+     Eq-operands, [Not], [Or], [Ite], and Bool/iff equalities. Recursing into any of those
+     can extract a non-entailed equality ⇒ wrong-Unsat.
+   - INDEPENDENT PER-BRANCH INTERSECTION (codex BLOCKER-2): each disjunct gets its OWN
+     union-find; the intersection is "same class in EVERY branch" via signature vectors;
+     the branch union-finds are NEVER merged. Emit a spanning FOREST (chain per
+     intersection-class), never the O(n²) materialized closure.
+   - SINGLE PASS, no fixpoint (fable #4): the EUF core does the transitive chaining.
+   - BUDGET / neutral abort (codex MED-6 / fable #3): bail an [Or] as soon as a disjunct
+     has no equality leaves (its closure is all-singletons ⇒ empty intersection), or a
+     hard term/leaf cap is exceeded — skip that [Or], never fail.
+   - DETERMINISM (fable #6): term-tag order throughout (universe via [Term.Set]; groups
+     via an ordered [Map]; edges in ascending index order).
+
+   Soundness backstop note: the win direction is UNSAT, where R1 (model self-check) does
+   NOT run — so these contracts ARE the soundness margin (fable #2). Gated + cert-OFF at
+   the session; a wrong (non-entailed) addition is caught only by the ON-vs-OFF 0-mismatch
+   sweep, so the discriminating mutants are mandatory. *)
+
+let pass_a_max_terms = 512
+let pass_a_max_leaves = 1024
+
+(* Atomic equality leaves of one disjunct, under the pinned grammar. *)
+let eq_leaves (d : Term.t) =
+  let acc = ref [] in
+  let rec go (t : Term.t) =
+    match t.node with
+    | And xs -> Iarr.iter go xs
+    | Eq (a, b) when not (Sort.equal a.sort Sort.bool) -> acc := (a, b) :: !acc
+    (* OPAQUE: Not, Or, Ite, Bool/iff Eq, App, Le, Arith, consts — no recursion. *)
+    | _ -> ()
+  in
+  go d;
+  !acc
+;;
+
+(* Equalities entailed by [(or ds)] as a spanning forest of new [Eq] terms (built through
+   [ctx]). [] (neutral) when a disjunct has no eq leaves or a cap is exceeded. *)
+let or_entailed_eqs ctx (ds : Term.t list) =
+  let branches = List.map eq_leaves ds in
+  (* fire-condition: an equality-free disjunct ⇒ its closure is all singletons ⇒ the
+     intersection is empty ⇒ this [Or] entails nothing. Bail. *)
+  if
+    List.exists
+      (function
+        | [] -> true
+        | _ -> false)
+      branches
+  then []
+  else (
+    let univ_set =
+      List.fold_left
+        (List.fold_left (fun s (a, b) -> Term.Set.add a (Term.Set.add b s)))
+        Term.Set.empty
+        branches
+    in
+    let universe = Array.of_list (Term.Set.elements univ_set) in
+    let n = Array.length universe in
+    let too_big =
+      n > pass_a_max_terms
+      || List.exists (fun l -> List.length l > pass_a_max_leaves) branches
+    in
+    if too_big
+    then [] (* neutral abort — skip this Or, never fail *)
+    else (
+      let idx = Term.Table.create (2 * n) in
+      Array.iteri (fun i t -> Term.Table.replace idx t i) universe;
+      let k = List.length branches in
+      (* one INDEPENDENT union-find per branch (never merged across branches). *)
+      let ufs = Array.init k (fun _ -> Array.init n (fun i -> i)) in
+      let rec find uf i =
+        let p = uf.(i) in
+        if p = i then i else find uf p
+      in
+      let union uf i j =
+        let ri = find uf i
+        and rj = find uf j in
+        if ri <> rj then uf.(ri) <- rj
+      in
+      List.iteri
+        (fun b leaves ->
+           let uf = ufs.(b) in
+           List.iter
+             (fun (a, c) -> union uf (Term.Table.find idx a) (Term.Table.find idx c))
+             leaves)
+        branches;
+      (* signature vector = class rep in each branch; equal signatures ⇒ same class in
+         every branch ⇒ entailed equal. *)
+      let sig_of i = List.init k (fun b -> find ufs.(b) i) in
+      let module SM = Map.Make (struct
+          type t = int list
+
+          let compare = compare
+        end)
+      in
+      let groups = ref SM.empty in
+      for i = 0 to n - 1 do
+        let s = sig_of i in
+        groups
+        := SM.update
+             s
+             (function
+               | None -> Some [ i ]
+               | Some l -> Some (i :: l))
+             !groups
+      done;
+      let out = ref [] in
+      SM.iter
+        (fun _ idxs ->
+           match List.sort compare idxs with
+           | [] | [ _ ] -> ()
+           | x :: rest ->
+             ignore
+               (List.fold_left
+                  (fun prev cur ->
+                     out := Context.eq ctx universe.(prev) universe.(cur) :: !out;
+                     cur)
+                  x
+                  rest
+                : int))
+        !groups;
+      List.rev !out))
+;;
+
+(* Pass A entry: entailed equalities to ADD as top-level units, over the flattened
+   top-level conjuncts. Pure; deterministic. The caller (Session, gated + cert-OFF)
+   internalizes these but does NOT record them in the R1 [asserted] set (they are derived
+   consequences, not original assertions). *)
+let entailed_equalities ctx assertions =
+  let conjuncts = List.concat_map flatten assertions in
+  List.concat_map
+    (fun (c : Term.t) ->
+       match c.node with
+       | Or ds -> or_entailed_eqs ctx (Iarr.to_list ds)
+       | _ -> [])
+    conjuncts
+;;
+
 let run ctx assertions =
   let conjuncts = List.concat_map flatten assertions in
   (* Interface variables to skip (constraint 3, defense-in-depth): vars occurring under a
