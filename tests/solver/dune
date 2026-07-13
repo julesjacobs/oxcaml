@@ -37,6 +37,13 @@
   oxsmt_smtlib_parser
   oxsmt_query_loader))
 
+; Durable exhaustive small-width oracle for the task-#11 operator sugar (make bv-op-coverage-test).
+
+(executable
+ (name bv_op_coverage_test)
+ (modules bv_op_coverage_test)
+ (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))
+
 ; Datatypes sat-model gate (make dt-sat-gate): drives the tests/dt-goldens-sat sat goldens
 ; through the real Session asserting a CHECKED sat, and proves Dt_model_check is RED against
 ; a deliberately-wrong constructor tree (banked review rule).

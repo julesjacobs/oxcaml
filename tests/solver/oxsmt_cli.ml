@@ -175,6 +175,13 @@ let solve_batch ?max_effort ?(presolve = true) src =
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
     unknown_block
+  | exception _ ->
+    (* ROBUSTNESS / fail-closed (I8): the reader maps its expected rejections to
+       [Malformed]/[Unsupported], but an unmapped exception on untrusted corpus input
+       ([Failure]/[Invalid_argument]/[Stack_overflow]/...) must still degrade to a sound
+       [unknown] rather than crash the driver (the "error instead of degrade" robustness
+       item). [unknown] is always sound; a crash is never acceptable. *)
+    unknown_block
   | parsed when not (Oxsmt_query_loader.assert_all ~presolve s parsed) ->
     (* W1b: the shared loader submits the ground batch through the equality-elimination
        presolve (a no-op on zero-alias files) plus each [forall] lemma through the cap-

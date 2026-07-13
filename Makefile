@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -402,6 +402,14 @@ bv-blast-test:
 bv-goldens-test:
 	$(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
 
+## bv-op-coverage-test — durable exhaustive small-width oracle for the task-#11 QF_BV
+##   operator sugar (signed div/rem/mod, bvcomp, negated-bitwise, rotates, repeat). For each
+##   op it enumerates small-width inputs, computes an INDEPENDENT OCaml reference, and asserts
+##   through the real parse -> check_sat dispatch that the built term matches. Self-contained
+##   (no z3). Nonzero exit on any mismatch.
+bv-op-coverage-test:
+	$(DUNE) exec tests/solver/bv_op_coverage_test.exe
+
 ## lia-adapter-test — smt/theories/lia THEORY-adapter (ADR-0005 M4) unit + property
 ##   self-test (stdlib-only, deterministic). Currency round-trip (Atom/Lit <-> Term),
 ##   conflict rule tags with a PUBLIC-OUTPUT Farkas verifier, bound propagation + lazy
@@ -514,6 +522,7 @@ test: check-frozen
 	$(MAKE) driver-equiv-test
 	$(MAKE) bv-blast-test
 	$(MAKE) bv-goldens-test
+	$(MAKE) bv-op-coverage-test
 	$(MAKE) dt-sat-gate
 	$(MAKE) regress-test
 

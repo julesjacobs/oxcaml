@@ -110,13 +110,13 @@ type pstate =
 module Tok = Oxsmt_lexical.Lexer
 
 (* Get-or-mint a theory-internal reserved symbol mid-parse via the owner-supplied opaque
-   {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers go through here instead of
-   [Env.declare_fun st.env], which rejects the reserved [.oxsmt.*] namespace: the bit-vector
-   builders ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] operator/literal symbols through
-   [(internal_mint st)], and the arrays branch's [array_op_sym] its [.oxsmt.arr.*] ones.
-   With no minter supplied, degrade to [Malformed] (a sound unknown), never a silent
-   success; [Internal_minter.mint] itself raises if the name is outside the minter's [admit]
-   grammar. *)
+   {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers go through here instead
+   of [Env.declare_fun st.env], which rejects the reserved [.oxsmt.*] namespace: the
+   bit-vector builders ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] operator/literal
+   symbols through [(internal_mint st)], and the arrays branch's [array_op_sym] its
+   [.oxsmt.arr.*] ones. With no minter supplied, degrade to [Malformed] (a sound unknown),
+   never a silent success; [Internal_minter.mint] itself raises if the name is outside the
+   minter's [admit] grammar. *)
 let internal_mint st name rank =
   match st.internal_mint with
   | Some m -> Internal_minter.mint m name rank
@@ -124,6 +124,38 @@ let internal_mint st name rank =
     malformedf
       "internal symbol %s requires a cap-backed minter (parse this through a Session)"
       name
+;;
+
+(* ---- bit-vector width cap (rider #19) ---- *)
+
+(* Upper bound on any bit-vector width the reader will CONSTRUCT. The eager bit-blaster
+   allocates ~width SAT literals per bv term, and a repeat/extend/literal/BitVec width
+   comes straight from user numerals — so an adversarial [((_ repeat 500000000) x)] or
+   [(_ BitVec 1099511627776)] would allocate until the process is KILLED (an uncatchable
+   out-of-memory abort during GC, NOT an exception a parse-scoped handler can absorb —
+   fable MED-1). Bound it UP FRONT: a width over the cap degrades to [Malformed] ->
+   unknown BEFORE any allocation. Real bit-vectors are far below this (a few thousand bits
+   at most); the cap only rejects pathological inputs. Overridable via
+   [OXSMT_MAX_BV_WIDTH] so a test can drive the cap without allocating a crash-sized term. *)
+let max_bv_width =
+  match Sys.getenv_opt "OXSMT_MAX_BV_WIDTH" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 1 -> n
+     | _ -> 1 lsl 20)
+  | None -> 1 lsl 20
+;;
+
+let check_bv_width what w =
+  if w < 1 || w > max_bv_width
+  then malformedf "%s: bitvector width %d out of range [1, %d]" what w max_bv_width
+;;
+
+(* [n*w] guarded against BOTH the cap and int overflow (an [(_ repeat n)] result width). *)
+let checked_product ~what ~n ~w =
+  if n < 1 || w < 1 || n > max_bv_width / w
+  then malformedf "%s: bitvector width %d*%d exceeds the max %d" what n w max_bv_width;
+  n * w
 ;;
 
 (* ---- sorts ---- *)
@@ -153,7 +185,9 @@ let rec sort_of_sexp st (s : Sexp.t) : Sort.t =
          ; Sexp.Atom (Tok.Numeral n)
          ] ->
        (match int_of_string_opt n with
-        | Some w when w >= 1 -> Sort.bitvec w
+        | Some w when w >= 1 ->
+          check_bv_width "(_ BitVec n)" w;
+          Sort.bitvec w
         | _ -> malformedf "(_ BitVec %s): width must be a positive integer" n)
      | Sexp.List _ ->
        unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
@@ -222,6 +256,34 @@ let bv_literal st ~digits ~bits_per_digit ~value_of_digit =
   Bv.const st.ctx (internal_mint st) ~value ~width
 ;;
 
+(* [(_ bvN W)] — the SMT-LIB decimal bitvector-literal indexed identifier (§3.1): the
+   nonnegative decimal value [N] at width [W]. This is the pervasive constant form emitted by
+   symbolic-execution generators (Sage/Sydr/Triton/…); we parse it into the same
+   {!Oxsmt_core.Bv} constant a [#x]/[#b] literal produces (value reduced into [0, 2^W)). *)
+let is_bv_dec_name text =
+  String.length text > 2
+  && Char.equal text.[0] 'b'
+  && Char.equal text.[1] 'v'
+  && String.for_all
+       (fun c -> c >= '0' && c <= '9')
+       (String.sub text 2 (String.length text - 2))
+;;
+
+let read_bv_dec_literal st ~text ~width_s =
+  let digits = String.sub text 2 (String.length text - 2) in
+  let value =
+    match Bigint.of_string digits with
+    | v -> v
+    | exception Invalid_argument _ ->
+      malformedf "malformed (_ bv%s W) literal value" digits
+  in
+  match int_of_string_opt width_s with
+  | Some width when width >= 1 ->
+    check_bv_width "(_ bvN W)" width;
+    Bv.const st.ctx (internal_mint st) ~value ~width
+  | _ -> malformedf "(_ bv%s %s): width must be a positive integer" digits width_s
+;;
+
 let hex_digit_value c =
   match c with
   | '0' .. '9' -> Char.code c - Char.code '0'
@@ -261,6 +323,13 @@ let is_bv_keyword = function
   | "bvuge"
   | "bvsgt"
   | "bvsge"
+  | "bvsdiv"
+  | "bvsrem"
+  | "bvsmod"
+  | "bvcomp"
+  | "bvnand"
+  | "bvnor"
+  | "bvxnor"
   | "concat" -> true
   | _ -> false
 ;;
@@ -307,6 +376,14 @@ let rec read_term st scope (s : Sexp.t) : Term.t =
   | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
     validate_bang_attrs attrs;
     read_term st scope body
+  (* [(_ bvN W)] decimal bitvector literal — a nullary indexed identifier (a constant
+     term, never applied), so it resolves here rather than through [read_app]. *)
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text; _ })
+      ; Sexp.Atom (Tok.Numeral width_s)
+      ]
+    when is_bv_dec_name text -> read_bv_dec_literal st ~text ~width_s
   | Sexp.List (head :: args) -> read_app st scope head args s
   | Sexp.List [] -> malformedf "empty application ()"
 
@@ -411,6 +488,16 @@ and read_app st scope head args orig =
       ; Sexp.Atom (Tok.Symbol { text = ("zero_extend" | "sign_extend") as ext; _ })
       ; Sexp.Atom (Tok.Numeral n)
       ] -> read_bv_extend st scope ~ext ~n args orig
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = ("rotate_left" | "rotate_right") as rot; _ })
+      ; Sexp.Atom (Tok.Numeral n)
+      ] -> read_bv_rotate st scope ~rot ~n args orig
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = "repeat"; _ })
+      ; Sexp.Atom (Tok.Numeral n)
+      ] -> read_bv_repeat st scope ~n args orig
   | _ ->
     unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string head)
 
@@ -439,13 +526,70 @@ and read_bv_extend st scope ~ext ~n args orig =
   match args with
   | [ a ] ->
     (match int_of_string_opt n with
-     | Some n ->
+     | Some n when n >= 0 ->
        let x = read_term st scope a in
+       let w =
+         match Bv.width_of_sort x.Term.sort with
+         | Some w -> w
+         | None -> malformedf "(_ %s n): operand is not a bitvector" ext
+       in
+       (* result width is [w + n]; cap it before the blaster allocates (rider #19). The
+          [n > max_bv_width] short-circuit avoids overflowing [w + n]. *)
+       check_bv_width ext (if n > max_bv_width then max_bv_width + 1 else w + n);
        if String.equal ext "zero_extend"
        then Bv.zero_extend st.ctx (internal_mint st) ~n x
        else Bv.sign_extend st.ctx (internal_mint st) ~n x
-     | None -> malformedf "(_ %s n): n must be a numeral: %s" ext (Sexp.to_string orig))
+     | _ ->
+       malformedf "(_ %s n): n must be a nonneg numeral: %s" ext (Sexp.to_string orig))
   | _ -> malformedf "(_ %s n) expects 1 argument: %s" ext (Sexp.to_string orig)
+
+(* [(_ rotate_left n) x] / [(_ rotate_right n) x] — SUGAR via extract + concat over the
+   operand width [w]: rotate by [k = n mod w]. Both leaf ops are oracle-verified; the
+   expansion's semantics are oracle-checked against a direct rotate reference. *)
+and read_bv_rotate st scope ~rot ~n args orig =
+  match args, int_of_string_opt n with
+  | [ a ], Some n when n >= 0 ->
+    let x = read_term st scope a in
+    let ctx = st.ctx
+    and mint = internal_mint st in
+    let w =
+      match Bv.width_of_sort x.Term.sort with
+      | Some w -> w
+      | None -> malformedf "(_ %s n): operand is not a bitvector" rot
+    in
+    let k = n mod w in
+    if k = 0
+    then x
+    else (
+      let ext hi lo = Bv.extract ctx mint ~i:hi ~j:lo x in
+      let cat hi lo = Bv.concat ctx mint hi lo in
+      if String.equal rot "rotate_left"
+      then cat (ext (w - 1 - k) 0) (ext (w - 1) (w - k))
+      else cat (ext (k - 1) 0) (ext (w - 1) k))
+  | _ ->
+    malformedf
+      "(_ %s n) expects a nonneg numeral index and 1 argument: %s"
+      rot
+      (Sexp.to_string orig)
+
+(* [(_ repeat n) x] — SUGAR: [x] concatenated with itself [n >= 1] times. *)
+and read_bv_repeat st scope ~n args orig =
+  match args, int_of_string_opt n with
+  | [ a ], Some n when n >= 1 ->
+    let x = read_term st scope a in
+    let ctx = st.ctx
+    and mint = internal_mint st in
+    let w =
+      match Bv.width_of_sort x.Term.sort with
+      | Some w -> w
+      | None -> malformedf "(_ repeat n): operand is not a bitvector"
+    in
+    (* Cap the result width [n*w] BEFORE the fold, so an adversarial [n] cannot build a
+       crash-sized chain of concats (rider #19 / fable MED-1). *)
+    let (_ : int) = checked_product ~what:"(_ repeat n)" ~n ~w in
+    let rec go k acc = if k <= 1 then acc else go (k - 1) (Bv.concat ctx mint x acc) in
+    go n x
+  | _ -> malformedf "(_ repeat n) expects n >= 1 and 1 argument: %s" (Sexp.to_string orig)
 
 (* The equal-width prefix bitvector operators + [concat] + the four comparisons, plus the
    "greater" sugar duals rewritten to the swapped "lesser" form. [None] for a name outside
@@ -465,6 +609,78 @@ and read_bv_op st scope op args orig =
     | _ -> malformedf "%s expects 1 argument: %s" op (Sexp.to_string orig)
   in
   let b o x y = Bv.binop st.ctx (internal_mint st) o x y in
+  (* Signed division/remainder/modulo and [bvcomp] are SMT-LIB SUGAR over the unsigned
+     primitives (bvudiv/bvurem/bvneg/bvadd) plus sign-bit tests — the reference expansions
+     from the QF_BV theory. Building them here (rather than as new blaster circuits) keeps
+     the bit-blaster and its exhaustive oracle unchanged: every leaf op is already
+     oracle-verified, and the parser-side expansions are oracle-checked against a direct
+     signed reference (bv_blast_test). *)
+  let ctx = st.ctx in
+  let mint = internal_mint st in
+  let width x =
+    match Bv.width_of_sort x.Term.sort with
+    | Some w -> w
+    | None -> malformedf "%s: operand is not a bitvector" op
+  in
+  let neg x = Bv.unop ctx mint Bv.Bvneg x in
+  let bit1 v = Bv.const ctx mint ~value:(Bigint.of_int v) ~width:1 in
+  let msb_set x =
+    let w = width x in
+    Context.eq ctx (Bv.extract ctx mint ~i:(w - 1) ~j:(w - 1) x) (bit1 1)
+  in
+  let ite = Context.ite ctx in
+  let both p q = Context.and_ ctx [ p; q ] in
+  let notb = Context.not_ ctx in
+  (* bvsdiv/bvsrem: unsigned op on magnitudes, result sign per the four sign combinations. *)
+  let signed_divlike uop x y =
+    let ms = msb_set x
+    and mt = msb_set y in
+    ite
+      (both (notb ms) (notb mt))
+      (b uop x y)
+      (ite
+         (both ms (notb mt))
+         (neg (b uop (neg x) y))
+         (ite (both (notb ms) mt) (neg (b uop x (neg y))) (b uop (neg x) (neg y))))
+  in
+  (* bvsrem shares bvsdiv's shape EXCEPT the both-negative case is [bvneg (urem -x -y)]. *)
+  let bvsrem x y =
+    let ms = msb_set x
+    and mt = msb_set y in
+    ite
+      (both (notb ms) (notb mt))
+      (b Bv.Bvurem x y)
+      (ite
+         (both ms (notb mt))
+         (neg (b Bv.Bvurem (neg x) y))
+         (ite
+            (both (notb ms) mt)
+            (b Bv.Bvurem x (neg y))
+            (neg (b Bv.Bvurem (neg x) (neg y)))))
+  in
+  (* bvsmod: sign follows the DIVISOR (SMT-LIB); computed from the magnitude remainder
+     [u]. *)
+  let bvsmod x y =
+    let w = width x in
+    let ms = msb_set x
+    and mt = msb_set y in
+    let abs_x = ite ms (neg x) x
+    and abs_y = ite mt (neg y) y in
+    let u = b Bv.Bvurem abs_x abs_y in
+    let zero = Bv.const ctx mint ~value:Bigint.zero ~width:w in
+    ite
+      (Context.eq ctx u zero)
+      u
+      (ite
+         (both (notb ms) (notb mt))
+         u
+         (ite
+            (both ms (notb mt))
+            (b Bv.Bvadd (neg u) y)
+            (ite (both (notb ms) mt) (b Bv.Bvadd u y) (neg u))))
+  in
+  (* bvcomp: 1-bit result, all-ones iff the operands are bitwise equal. *)
+  let bvcomp x y = ite (Context.eq ctx x y) (bit1 1) (bit1 0) in
   match op with
   | "bvnot" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvnot)
   | "bvneg" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvneg)
@@ -489,6 +705,14 @@ and read_bv_op st scope op args orig =
   | "bvsgt" -> bin (fun x y -> b Bv.Bvslt y x)
   | "bvsge" -> bin (fun x y -> b Bv.Bvsle y x)
   | "concat" -> bin (Bv.concat st.ctx (internal_mint st))
+  | "bvsdiv" -> bin (signed_divlike Bv.Bvudiv)
+  | "bvsrem" -> bin bvsrem
+  | "bvsmod" -> bin bvsmod
+  | "bvcomp" -> bin bvcomp
+  (* Negated bitwise ops: SMT-LIB SUGAR = bvnot of the corresponding bitwise op. *)
+  | "bvnand" -> bin (fun x y -> Bv.unop ctx mint Bv.Bvnot (b Bv.Bvand x y))
+  | "bvnor" -> bin (fun x y -> Bv.unop ctx mint Bv.Bvnot (b Bv.Bvor x y))
+  | "bvxnor" -> bin (fun x y -> Bv.unop ctx mint Bv.Bvnot (b Bv.Bvxor x y))
   | _ -> unsupportedf "bitvector operator %s is not in the v1 subset" op
 
 (* Apply a user-declared function or expand a define-fun (no builtin-operator meaning). *)
