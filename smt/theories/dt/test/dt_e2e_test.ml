@@ -210,6 +210,32 @@ let () =
    Session.assert_term s (Context.eq ctx (ap snd_ p) (ap snd_ q));
    Session.assert_term s (Context.not_ ctx (Context.eq ctx p q));
    expect "record: fst=fst & snd=snd & p<>q refutes" (Session.check_sat s) Session.Unsat);
+  (* LAZINESS WITNESS (user land item): a don't-care datatype variable — present via a
+     positive equality, never under a selector/tester/disequality — must demand ZERO
+     constructor case splits. The split-atom counter (Session.splits, emitted from the
+     cdclt split site) reading 0 is the permanent, deterministic (I5) witness that
+     don't-cares stay free: only selector/tester presence, a disequality (incl. the field
+     cascade), and a finite sort demand a split. A large/recursive don't-care (List) would
+     blow up if it split, so 0 is load-bearing. *)
+  (let s, ls, _cs, _nil, _cons, _head = setup () in
+   let ctx = Session.context s in
+   let x = k s "dc_x" ls
+   and y = k s "dc_y" ls in
+   (* only a positive equality (a merge) — no selector, tester, or diseq touches x/y *)
+   Session.assert_term s (Context.eq ctx x y);
+   let v = Session.check_sat s in
+   incr checks;
+   if v = Session.Unsat
+   then (
+     incr failures;
+     Printf.printf "  FAIL laziness: don't-care positive eq reported unsat\n");
+   incr checks;
+   if Session.splits s <> 0
+   then (
+     incr failures;
+     Printf.printf
+       "  FAIL laziness: don't-care datatype var demanded %d split(s), want 0\n"
+       (Session.splits s)));
   Printf.printf "Dt e2e tests: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

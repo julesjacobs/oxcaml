@@ -192,12 +192,13 @@ let register_atom t atom term =
     Atom.Table.replace t.atoms atom { term; kind };
     t.atom_terms <- term :: t.atom_terms;
     match kind with
-    | K_eq (a, b) ->
-      Term.Table.replace t.watched term atom;
-      if is_dt_sort t a.Term.sort
-      then (
-        Term.Table.replace t.split_relevant a ();
-        Term.Table.replace t.split_relevant b ())
+    | K_eq _ ->
+      (* watch for propagation only. Split-relevance is NOT seeded here: an equality atom
+         does not by itself demand a case split (a positive equality merely merges; only a
+         DISEQUALITY creates distinctness pressure), so relevance is seeded at assert time
+         for the negative polarity — see [assert_lit]. Marking both sides here (polarity
+         unknown at register time) would case-split a positive-equality don't-care. *)
+      Term.Table.replace t.watched term atom
     | K_bool ->
       (match term.Term.node with
        | Term.App (_, args) when Iarr.length args >= 1 ->
@@ -217,12 +218,15 @@ let assert_lit t lit =
     then Euf.assert_eq t.engine ~premise:(P_lit lit) a b
     else (
       Euf.assert_neq t.engine ~premise:(P_lit lit) a b;
-      (* a DISEQUALITY over datatype-sorted sides seeds field-relevance: the pigeonhole
-         pressure that forces the fields to be case-split flows only from distinctness,
-         not from a positive equality (which merely merges), so field-relevance cascades
-         from here, never from [assert_eq]. *)
+      (* a DISEQUALITY over datatype-sorted sides is the ONLY equality-shaped split demand
+         (a positive equality merely merges — never a split). Its operands become
+         split-relevant (so a bare-variable enum diseq like [distinct v1..v4] case-splits)
+         AND diseq-relevant (so field-relevance cascades to constructor fields for the
+         bounded-enum field pigeonhole). Neither is seeded by [assert_eq]. *)
       if is_dt_sort t a.Term.sort
       then (
+        Term.Table.replace t.split_relevant a ();
+        Term.Table.replace t.split_relevant b ();
         Term.Table.replace t.diseq_relevant a ();
         Term.Table.replace t.diseq_relevant b ()))
   | Some { kind = K_bool; term } ->
