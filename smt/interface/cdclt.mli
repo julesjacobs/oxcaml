@@ -50,9 +50,11 @@ exception Split_budget_exceeded
     [Sat.solve] at the cap; {!Session} catches it. [budget] is reset per check by
     {!begin_check}.
 
-    [registry] carries the session's datatype declarations (empty for a non-datatype
-    problem). The theory the seam drives is chosen lazily at the first [intern_atom]: the
-    standalone DT theory when [registry] is non-empty, else the EUF+LIA combined stack. *)
+    [registry] / [array_registry] carry the session's datatype / array declarations (each
+    empty for a problem not using that theory). The theory the seam drives is chosen
+    lazily at the first [intern_atom]: the standalone arrays theory when [array_registry]
+    is non-empty, else the standalone DT theory when [registry] is non-empty, else the
+    EUF+LIA combined stack. *)
 val create
   :  Context.t
   -> Env.t
@@ -60,6 +62,7 @@ val create
   -> split_budget:int
   -> budget:Budget.t
   -> registry:Oxsmt_core.Datatype_defs.t ref
+  -> array_registry:Oxsmt_core.Array_defs.t ref
   -> t
 
 (** [intern_atom t term] returns the SAT var 1:1 with theory atom [term], registering it

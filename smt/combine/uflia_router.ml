@@ -25,7 +25,7 @@ let owner term =
      (* A datatype equality/disequality is decided by congruence (the datatype theory is
         an e-graph client alongside EUF), so it routes to EUF like an uninterpreted-sort
         equality — no arithmetic arrangement. *)
-     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> A)
+     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> A)
 ;;
 
 (* The ASSERT fan-out — a subset of [owner] (combine.mli). Two narrowings:

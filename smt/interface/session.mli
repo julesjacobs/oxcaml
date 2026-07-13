@@ -163,6 +163,14 @@ val context : t -> Oxsmt_core.Context.t
     own marker grammar. *)
 val parse_minter : t -> Oxsmt_core.Internal_minter.t
 
+(** [set_arrays t defs] installs the array [select]/[store] symbol registry the front end
+    parsed ({!Oxsmt_core.Array_defs}), routing the session onto the standalone arrays
+    theory (QF_AX: read-over-write + extensionality). Must precede {!assert_term}. A
+    non-empty registry also degrades any [Final]->[Sat] on the problem to [Unknown] in v1
+    (sat models on arrays are not yet self-checked); UNSAT is unaffected. A no-op with an
+    empty registry. *)
+val set_arrays : t -> Oxsmt_core.Array_defs.t -> unit
+
 (** [declare_sort]/[declare_fun]/[declare_const] declare into {!env}. They reject the
     reserved fresh-symbol namespace ([".oxsmt.*"], board #48) with [Invalid_argument] so a
     user symbol cannot collide with one preprocessing invents. *)

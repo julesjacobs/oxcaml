@@ -52,7 +52,11 @@ val quote_symbol : string -> string
     (the default empty one) on a tester term would render it under its internal symbol
     name — a DIFFERENT byte string than {!print_session} produces. With the same registry
     the two entry points render byte-identically. *)
-val print_term : ?datatypes:Oxsmt_core.Datatype_defs.t -> Oxsmt_core.Term.t -> string
+val print_term
+  :  ?datatypes:Oxsmt_core.Datatype_defs.t
+  -> ?arrays:Oxsmt_core.Array_defs.t
+  -> Oxsmt_core.Term.t
+  -> string
 
 (** [print_session ?status env assertions] renders a complete SMT-LIB2 script:
 
@@ -80,10 +84,18 @@ val print_term : ?datatypes:Oxsmt_core.Datatype_defs.t -> Oxsmt_core.Term.t -> s
     tester [declare-fun]s are suppressed (implicit in the block), testers render as
     [((_ is C) t)], and the logic becomes [QF_UFDT]. Omitting it (the default empty
     registry) reproduces the byte-identical QF_UFLIA behaviour for datatype-free sessions.
-    Raises {!Unsupported} if a datatype sort is used with no matching registry entry. *)
+    Raises {!Unsupported} if a datatype sort is used with no matching registry entry.
+
+    [?arrays] supplies the array [select]/[store] symbol registry (from the parser /
+    session). When non-empty, those symbols render as [(select ...)] / [(store ...)]
+    rather than their internal per-instantiation names, are suppressed from the
+    [declare-fun] block (they are theory builtins), array sorts render as [(Array I E)],
+    and the logic becomes [QF_AUFLIA]. Omitting it (the default empty registry) is
+    byte-identical for array-free sessions. *)
 val print_session
   :  ?status:Status.t
   -> ?datatypes:Oxsmt_core.Datatype_defs.t
+  -> ?arrays:Oxsmt_core.Array_defs.t
   -> Oxsmt_core.Env.t
   -> Oxsmt_core.Term.t list
   -> string

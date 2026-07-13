@@ -384,7 +384,7 @@ end = struct
         let is_int =
           match term.Term.sort with
           | Sort.Int _ -> true
-          | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> false
+          | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> false
         in
         (* PRECONDITION defensive check (codex): preprocessing lifts every Int-sorted
            [Ite] before assertion (ADR-0003 invariant 10); a residual one would take no
@@ -457,7 +457,12 @@ end = struct
                    "structured Bool compound as an uninterpreted-function argument")
             (* Int-sorted nodes are unreachable under [Sort.Bool] (frozen 9-node set). *)
             | Term.Int_const _ | Term.Arith _ -> ())
-         | (Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _), _ -> ());
+         | ( ( Sort.Bool
+             | Sort.Int _
+             | Sort.Uninterpreted _
+             | Sort.Datatype _
+             | Sort.Array _ )
+           , _ ) -> ());
         List.iter (go ~parent_owner:o) (walk_children term))
     in
     go ~parent_owner:O_neutral top
@@ -718,7 +723,7 @@ end = struct
   let find_disagreement t ma mb =
     let candidate (term : Term.t) =
       match term.Term.sort with
-      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> false
+      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> false
       | Sort.Int _ -> true
     in
     let valued =
@@ -785,6 +790,15 @@ end = struct
            raise
              (Incomplete
                 "datatype-sorted term live at Sat certification: no datatype theory yet")
+         | Sort.Array _ ->
+           (* An array-sorted term reaching the EUF+LIA combinator at Sat certification
+             means arrays leaked past the standalone arrays-theory dispatch; the
+             combinator has no array axioms, so refuse to certify (→ unknown), never a
+             wrong-[Sat]. *)
+           raise
+             (Incomplete
+                "array-sorted term live at Sat certification: handled by the standalone \
+                 arrays theory, not this combinator")
          | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ -> ())
       t.all_terms
   ;;
@@ -1331,7 +1345,7 @@ end = struct
                | Some m when m <= n -> ()
                | _ -> Hashtbl.replace class_int cid n)
             | _ -> ())
-         | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> ())
+         | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> ())
       t.all_terms;
     let int_variant term =
       match model_eval mb term, model_eval ma term with
@@ -1394,6 +1408,14 @@ end = struct
               (Incomplete
                  "datatype-sorted term in candidate model: no datatype-theory model \
                   support yet (plumbing backstop -> unknown)")
+          | Sort.Array _ ->
+            (* Same backstop as the datatype arm: an array-sorted term in this
+               combinator's candidate model means arrays leaked past the standalone
+               arrays-theory dispatch. Refuse to certify (→ unknown), never a wrong-[Sat]. *)
+            raise
+              (Incomplete
+                 "array-sorted term in candidate model: handled by the standalone arrays \
+                  theory, not this combinator")
         in
         Option.map (fun v -> term, v) value)
     in

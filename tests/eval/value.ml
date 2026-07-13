@@ -23,6 +23,7 @@ let to_string = function
       | Datatype sym -> Symbol.name sym
       | Bool -> "Bool"
       | Int _ -> "Int"
+      | Array _ -> "Array"
     in
     Printf.sprintf "%s@%d" sname id
 ;;

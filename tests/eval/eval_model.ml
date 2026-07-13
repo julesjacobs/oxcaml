@@ -48,6 +48,10 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
      token. Reject rather than mis-parse until that value shape exists. *)
   | Sort.Datatype _ ->
     raise (Malformed "datatype-sorted model values are not supported yet")
+  (* Arrays degrade [sat] to [unknown] (v1), so no array-sorted binding is ever emitted
+     into a model for this reader; an array value would be a function graph, not a scalar
+     token. Reject rather than mis-parse. *)
+  | Sort.Array _ -> raise (Malformed "array-sorted model values are not supported yet")
 ;;
 
 let card_check t (sort : Sort.t) (v : Value.t) =

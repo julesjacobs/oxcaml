@@ -48,6 +48,10 @@ type t =
     (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
          and testers, keyed by symbol, for the datatype theory. [empty] when none
          declared. *)
+  ; arrays : Oxsmt_core.Array_defs.t
+    (* the [select]/[store] operator symbols minted for the array instantiations the
+         query uses, keyed by symbol, for the arrays theory. [empty] when the query uses
+         no arrays. *)
   ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
   }
 

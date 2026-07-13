@@ -31,8 +31,9 @@ STATS    ?= $(LOGS)/stats
 CASES    ?= tests/cases
 FIXTURES ?= tests/harness/fixtures
 DT_GOLDENS ?= tests/dt-goldens
+ARR_GOLDENS ?= tests/arr-goldens
 HARNESS_ARGS := --solver $(SOLVER) --eval $(EVAL) --dir $(CASES) --dir $(FIXTURES) \
-                --dir $(DT_GOLDENS) --logs $(LOGS) --stats $(STATS)
+                --dir $(DT_GOLDENS) --dir $(ARR_GOLDENS) --logs $(LOGS) --stats $(STATS)
 
 # SAT bench corpus. Defaults to the uf50/uuf50 families (the M1 verdict-agreement
 # target, solved in seconds); GLOBs at runtime and tolerates absence. Override to
@@ -410,7 +411,7 @@ stage0-test:
 smtlib-test:
 	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
-	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens
+	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens tests/arr-goldens
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).

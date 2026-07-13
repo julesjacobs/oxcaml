@@ -859,6 +859,7 @@ let check_b path =
        Printer.print_session
          ?status:parsed.status
          ~datatypes:parsed.datatypes
+         ~arrays:parsed.arrays
          parsed.env
          parsed.assertions
      with

@@ -39,57 +39,67 @@ module Combined =
     (Oxsmt_lia.Lia_adapter)
 
 module Dt = Oxsmt_dt.Dt
+module Arr = Oxsmt_arr.Arr
 
 (* The theory the seam drives. A problem that declares an algebraic datatype installs the
-   standalone DT theory (an e-graph client — EUF congruence + the datatype axioms; GOALS
-   Datatypes); every other problem keeps the Nelson-Oppen EUF+LIA {!Combined} stack,
-   byte-identical to before. The choice is made lazily at the first [intern] (after the
-   session's declarations, so the datatype registry is populated by then) and is total,
-   syntactic, assert-time — never a per-term relevance guess. *)
+   standalone DT theory, one that uses arrays the standalone arrays theory (both e-graph
+   clients — EUF congruence plus their own axioms); every other problem keeps the
+   Nelson-Oppen EUF+LIA {!Combined} stack, byte-identical to before. The choice is made
+   lazily at the first [intern] (after the session's declarations, so the datatype / array
+   registries are populated by then) and is total, syntactic, assert-time — never a
+   per-term relevance guess. *)
 type theory_impl =
   | TCombined of Combined.t
   | TDt of Dt.t
+  | TArr of Arr.t
 
 let th_register impl a term =
   match impl with
   | TCombined th -> Combined.register_atom th a term
   | TDt th -> Dt.register_atom th a term
+  | TArr th -> Arr.register_atom th a term
 ;;
 
 let th_assert impl lit =
   match impl with
   | TCombined th -> Combined.assert_lit th lit
   | TDt th -> Dt.assert_lit th lit
+  | TArr th -> Arr.assert_lit th lit
 ;;
 
 let th_check impl effort =
   match impl with
   | TCombined th -> Combined.check th effort
   | TDt th -> Dt.check th effort
+  | TArr th -> Arr.check th effort
 ;;
 
 let th_explain impl lit =
   match impl with
   | TCombined th -> Combined.explain th lit
   | TDt th -> Dt.explain th lit
+  | TArr th -> Arr.explain th lit
 ;;
 
 let th_push impl =
   match impl with
   | TCombined th -> Combined.push th
   | TDt th -> Dt.push th
+  | TArr th -> Arr.push th
 ;;
 
 let th_pop impl n =
   match impl with
   | TCombined th -> Combined.pop th n
   | TDt th -> Dt.pop th n
+  | TArr th -> Arr.pop th n
 ;;
 
 let th_model impl =
   match impl with
   | TCombined th -> Combined.model th
   | TDt th -> Dt.model th
+  | TArr th -> Arr.model th
 ;;
 
 (* A model value for a symbol / table cell, in the eval-agnostic vocabulary the CLI
@@ -137,6 +147,9 @@ type t =
   ; env : Env.t
   ; registry : Oxsmt_core.Datatype_defs.t ref
     (* datatype declarations (shared ref with Session); empty for a non-DT problem *)
+  ; array_registry : Oxsmt_core.Array_defs.t ref
+    (* array select/store symbols (shared ref with Session); empty for a non-array
+         problem. Checked before [registry] in [ensure_theory]. *)
   ; sat : Sat.t
   ; alloc : Atom.allocator
   ; v2a : (Sat.var, Atom.t) Hashtbl.t (* SAT var -> theory atom (theory atoms only) *)
@@ -190,9 +203,11 @@ let ensure_theory t =
   | Some impl -> impl
   | None ->
     let impl =
-      if Oxsmt_core.Datatype_defs.is_empty !(t.registry)
-      then TCombined (Combined.create t.ctx t.env)
-      else TDt (Dt.create t.ctx t.env !(t.registry))
+      if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
+      then TArr (Arr.create t.ctx t.env !(t.array_registry))
+      else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+      then TDt (Dt.create t.ctx t.env !(t.registry))
+      else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;
     impl
@@ -313,12 +328,13 @@ let explain t l =
    set_theory contract). Must be called before any clause is added. The theory itself is
    created lazily at the first [intern] (see {!ensure_theory}) from the datatype
    [registry] (empty => the EUF+LIA stack), so a non-datatype session is byte-identical. *)
-let create ctx env sat ~split_budget ~budget ~registry =
+let create ctx env sat ~split_budget ~budget ~registry ~array_registry =
   let t =
     { theory = None
     ; ctx
     ; env
     ; registry
+    ; array_registry
     ; sat
     ; alloc = Atom.create_allocator ()
     ; v2a = Hashtbl.create 256
@@ -462,7 +478,7 @@ let model t =
                  in
                  Hashtbl.replace sort_ids name (cid :: prev)
                | _ -> ())
-            | Sort.Bool | Sort.Int _ | Sort.Datatype _ -> ())
+            | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ -> ())
          terms;
        let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let sort_cards = ref [] in
@@ -513,7 +529,7 @@ let model t =
                   | Term.Arith _ -> ()
                   | _ -> int_classes := cid :: !int_classes)
                | _ -> ())
-            | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> ())
+            | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> ())
          terms;
        let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let next = ref 0 in
@@ -567,7 +583,7 @@ let model t =
             (* A datatype-sorted term reaching extraction has no certified value ([Model]
                offers no constructor-tree witness yet); combine already refuses to certify
                such a Sat, so this is a defensive backstop — degrade to no-model. *)
-            | Sort.Bool | Sort.Datatype _ -> raise Degrade)
+            | Sort.Bool | Sort.Datatype _ | Sort.Array _ -> raise Degrade)
          | None, _ -> raise Degrade
        in
        let default_for (sort : Sort.t) =
@@ -575,7 +591,7 @@ let model t =
          | Sort.Bool -> VBool false
          | Sort.Int _ -> VInt Bigint.zero
          | Sort.Uninterpreted _ -> VUninterp 0
-         | Sort.Datatype _ -> raise Degrade
+         | Sort.Datatype _ | Sort.Array _ -> raise Degrade
        in
        (* pass 2: non-Bool nullary consts + function/predicate table rows (per symbol) *)
        let consts = ref [] in
@@ -589,7 +605,7 @@ let model t =
               (match term.Term.sort with
                | Sort.Bool ->
                  () (* propositional variable: session's bool_consts owns it *)
-               | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ ->
+               | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ ->
                  consts := Const (Symbol.name sym, value_of term) :: !consts)
             | Term.App (sym, args) ->
               let row = List.map value_of (Iarr.to_list args), value_of term in
@@ -650,8 +666,9 @@ let egraph_view t : Oxsmt_ematch.Egraph_view.t =
     ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
     ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
     }
-  | Some (TDt _) | None ->
-    (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype (or
-       theory-free) session never reaches here (no quantified lemmas in that fragment). *)
+  | Some (TDt _) | Some (TArr _) | None ->
+    (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype / arrays
+       (or theory-free) session never reaches here (no quantified lemmas in that
+       fragment). *)
     failwith "Cdclt.egraph_view: e-graph view is only available for the EUF+LIA theory"
 ;;

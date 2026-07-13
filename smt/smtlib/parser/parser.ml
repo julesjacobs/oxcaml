@@ -34,7 +34,7 @@ type lemma_src =
   { qvars :
       (string * Sort.t) list (* forall binders, outer-first then inner (flattened) *)
   ; build : Term.t array -> Term.t * Term.t list list
-    (* [build qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
+  (* [build qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
      substitute for the k-th binder. May raise {!Malformed}/{!Unsupported} (a body op
      outside the subset), which the driver maps to a sound [unknown]. *)
   }
@@ -46,8 +46,11 @@ type t =
   ; status : Oxsmt_smtlib.Status.t option
   ; assertions : Term.t list
   ; datatypes : Datatype_defs.t
-    (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
+      (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
          theory; empty when the query declares none *)
+  ; arrays : Array_defs.t
+      (* the array [select]/[store] symbols used, for the arrays theory; empty when the
+         query uses no arrays *)
   ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
   }
 
@@ -74,28 +77,33 @@ type pstate =
   ; expanding :
       (string, unit) Hashtbl.t (* define names currently mid-expansion (cycle guard) *)
   ; memo : (string * int list, Term.t) Hashtbl.t
-    (* expansion cache keyed by (define name, argument-term tags). A define with the
+      (* expansion cache keyed by (define name, argument-term tags). A define with the
          same arguments always expands to the same hash-consed term, so this turns the
          exponential body re-read on nested chains (e.g. [f_{i+1}(x) = f_i(x) + f_i(x)])
          into linear work. Tags are the [Context] hash-cons identity, so the key is exact
          and cheap. *)
   ; dt_names : (string, unit) Hashtbl.t
-    (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
+      (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
          [Sort.datatype_] rather than [Sort.uninterpreted] *)
   ; mutable datatypes : Datatype_defs.t (* the accumulated datatype shape registry *)
   ; internal_mint : Internal_minter.t option
-    (* board #58 O-MINTER: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*])
-     mid-parse. Some internal symbols cannot be pre-minted at a declaration site: arrays
-     op symbols are per-(index sort, element sort) instantiations discovered only at the
-     first [select]/[store] use. Supplied by the parser's OWNER as an OPAQUE
-     {!Oxsmt_core.Internal_minter.t} — a [Session]-driven parse threads
-     [Oxsmt_interface.Session.parse_minter], which wraps [Env.declare_reserved] over the
-     session's private cap behind an [admit] gate, so the parser can mint a
-     collision-proof sanctioned marker WITHOUT ever holding the cap or a general closure
-     (ADR-0012: only [Session] holds the cap). [None] (a standalone [parse], or a driver
-     that threads no [~internal_mint]) means no cap-backed minter: {!internal_mint} then
-     raises [Malformed] rather than silently succeeding. Inert on trunk — no parser path
-     mints internal names yet — this is the arrays/bv migration hook. *)
+      (* board #58 O-MINTER: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*])
+         mid-parse. Some internal symbols cannot be pre-minted at a declaration site:
+         arrays op symbols are per-(index sort, element sort) instantiations discovered
+         only at the first [select]/[store] use. Supplied by the parser's OWNER as an
+         OPAQUE {!Oxsmt_core.Internal_minter.t} — a [Session]-driven parse threads
+         [Oxsmt_interface.Session.parse_minter], which wraps [Env.declare_reserved] over
+         the session's private cap behind an [admit] gate, so the parser can mint a
+         collision-proof sanctioned marker WITHOUT ever holding the cap or a general
+         closure (ADR-0012: only [Session] holds the cap). [None] (a standalone [parse],
+         or a driver that threads no [~internal_mint]) means no cap-backed minter:
+         {!internal_mint} then raises [Malformed] rather than silently succeeding. The
+         arrays [array_op_sym] is its first consumer. *)
+  ; array_ops : (string, Symbol.t) Hashtbl.t
+      (* the monomorphic [select]/[store] symbols minted per (role, index, element)
+         instantiation, keyed by a deterministic string; arrays are polymorphic so each
+         instantiation gets its own symbol with a concrete rank *)
+  ; mutable arrays : Array_defs.t (* the accumulated array select/store symbol registry *)
   }
 
 module Tok = Oxsmt_lexical.Lexer
@@ -104,9 +112,8 @@ module Tok = Oxsmt_lexical.Lexer
    {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers (e.g. the arrays branch's
    [array_op_sym]) go through here instead of [Env.declare_fun st.env], which now rejects
    the internal marker byte class. With no minter supplied, degrade to [Malformed] (a
-   sound unknown), never a silent success. Staged ahead of its consumer, so it is unused
-   on trunk. *)
-let[@warning "-32"] internal_mint st name rank =
+   sound unknown), never a silent success. Its consumer is [array_op_sym]. *)
+let internal_mint st name rank =
   match st.internal_mint with
   | Some m -> Internal_minter.mint m name rank
   | None ->
@@ -117,7 +124,7 @@ let[@warning "-32"] internal_mint st name rank =
 
 (* ---- sorts ---- *)
 
-let sort_of_sexp st (s : Sexp.t) : Sort.t =
+let rec sort_of_sexp st (s : Sexp.t) : Sort.t =
   match Sexp.symbol_name s with
   (* [Bool]/[Int] are the builtin sorts regardless of quoting (quoting is lexical). *)
   | Some "Bool" -> Sort.bool
@@ -129,9 +136,44 @@ let sort_of_sexp st (s : Sexp.t) : Sort.t =
      | None -> malformedf "unknown sort: %s" name)
   | None ->
     (match s with
+     (* [(Array I E)] is the one compound sort v1 models: a functional, extensional array
+        from index sort [I] to element sort [E]. Both are read recursively (so a nested
+        [(Array I (Array J E))] works). Any other parametric/compound sort is out of the
+        fragment (fail-closed to unknown). *)
+     | Sexp.List [ head; i_s; e_s ] when Sexp.simple head = Some "Array" ->
+       Sort.array_ ~index:(sort_of_sexp st i_s) ~element:(sort_of_sexp st e_s)
      | Sexp.List _ ->
        unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
      | _ -> malformedf "expected a sort, got %s" (Sexp.to_string s))
+;;
+
+(* Get-or-mint the monomorphic [select]/[store] symbol for one array instantiation and
+   record it in {!Array_defs} so the arrays theory can classify the [App] head. The
+   canonical name comes from {!Array_defs.op_symbol_name}, so the arrays theory minting a
+   fresh [select] mid-solve interns the {e same} symbol (identity is by name) and its
+   terms hash-cons with these. Ranks: [select] is [(Array(i,e), i) -> e]; [store] is
+   [(Array(i,e), i, e) -> Array(i,e)]. *)
+let array_op_sym st (role : Array_defs.role) ~index ~element : Symbol.t =
+  let name = Array_defs.op_symbol_name role ~index ~element in
+  match Hashtbl.find_opt st.array_ops name with
+  | Some sym -> sym
+  | None ->
+    let arr = Sort.array_ ~index ~element in
+    let dom, cod =
+      match role with
+      | Array_defs.Select -> [ arr; index ], element
+      | Array_defs.Store -> [ arr; index; element ], arr
+    in
+    (* board #58: mint through the cap-backed opaque internal minter, not
+       [Env.declare_fun]. The op name is a reserved [.oxsmt.arr.*] symbol bearing [|]
+       sort-key separators; the public door rejects both, so this is the only door that
+       can intern it (and the only one that should — it is a theory-internal symbol, not a
+       user declaration). The session's minter admits exactly this op-name grammar
+       (Session.parse_minter). *)
+    let sym = internal_mint st name (Rank.create dom cod) in
+    Hashtbl.replace st.array_ops name sym;
+    st.arrays <- Array_defs.add st.arrays sym role ~index ~element;
+    sym
 ;;
 
 (* ---- numerals ---- *)
@@ -226,12 +268,12 @@ and read_let st scope rest =
     let new_scope =
       List.map
         (fun b ->
-           match b with
-           | Sexp.List [ name; def ] ->
-             (match Sexp.symbol_name name with
-              | Some n -> n, read_term st scope def
-              | None -> malformedf "malformed let binding name: %s" (Sexp.to_string name))
-           | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
+          match b with
+          | Sexp.List [ name; def ] ->
+            (match Sexp.symbol_name name with
+             | Some n -> n, read_term st scope def
+             | None -> malformedf "malformed let binding name: %s" (Sexp.to_string name))
+          | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
     read_term st (new_scope @ scope) body
@@ -349,6 +391,32 @@ and read_op st scope op args orig =
   | ("div" | "mod"), _ -> malformedf "%s expects 2 arguments" op
   | "abs", [ a ] -> Context.abs st.ctx (rd a)
   | "abs", _ -> malformedf "abs expects 1 argument"
+  (* Array theory operators (QF_AX). The array argument is read first so its
+     [Sort.Array (index, element)] is known; the monomorphic [select]/[store] symbol for
+     that instantiation is minted/recorded ([array_op_sym]) and applied. [Context.app]
+     sort-checks the remaining arguments against the minted rank, so an ill-sorted index
+     or value fails closed to [Malformed] -> unknown. A [select]/[store] on a non-array
+     first argument is likewise rejected. *)
+  | "select", [ a; i ] ->
+    let arr = rd a in
+    (match arr.Term.sort with
+     | Sort.Array (index, element) ->
+       Context.app
+         st.ctx
+         (array_op_sym st Array_defs.Select ~index ~element)
+         [ arr; rd i ]
+     | _ -> malformedf "select applied to a non-array term")
+  | "select", _ -> malformedf "select expects 2 arguments"
+  | "store", [ a; i; v ] ->
+    let arr = rd a in
+    (match arr.Term.sort with
+     | Sort.Array (index, element) ->
+       Context.app
+         st.ctx
+         (array_op_sym st Array_defs.Store ~index ~element)
+         [ arr; rd i; rd v ]
+     | _ -> malformedf "store applied to a non-array term")
+  | "store", _ -> malformedf "store expects 3 arguments"
   (* not a builtin operator — a user-declared function or a define-fun *)
   | _ -> apply_named st scope op args orig
 
@@ -371,10 +439,10 @@ and expand st scope name (def : definition) arg_sexps =
   let bindings =
     List.map2
       (fun (pname, psort) arg ->
-         let t = read_term st scope arg in
-         if not (Sort.equal t.Term.sort psort)
-         then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
-         pname, t)
+        let t = read_term st scope arg in
+        if not (Sort.equal t.Term.sort psort)
+        then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
+        pname, t)
       def.params
       arg_sexps
   in
@@ -406,9 +474,9 @@ and read_mul st scope args =
   let consts, nonconsts =
     List.partition_map
       (fun (t : Term.t) ->
-         match t.node with
-         | Term.Int_const k -> Either.Left k
-         | _ -> Either.Right t)
+        match t.node with
+        | Term.Int_const k -> Either.Left k
+        | _ -> Either.Right t)
       ts
   in
   match nonconsts with
@@ -447,13 +515,12 @@ let read_binders st (binders : Sexp.t) : (string * Sort.t) list =
   | Sexp.List bs ->
     List.map
       (fun b ->
-         match b with
-         | Sexp.List [ nm; srt ] ->
-           (match Sexp.symbol_name nm with
-            | Some n -> n, sort_of_sexp st srt
-            | None ->
-              malformedf "malformed quantifier binder name: %s" (Sexp.to_string nm))
-         | _ -> malformedf "malformed quantifier binder: %s" (Sexp.to_string b))
+        match b with
+        | Sexp.List [ nm; srt ] ->
+          (match Sexp.symbol_name nm with
+           | Some n -> n, sort_of_sexp st srt
+           | None -> malformedf "malformed quantifier binder name: %s" (Sexp.to_string nm))
+        | _ -> malformedf "malformed quantifier binder: %s" (Sexp.to_string b))
       bs
   | _ -> malformedf "quantifier binder list must be a list"
 ;;
@@ -553,13 +620,13 @@ let define_fun st name params_sexp ret_sexp body =
   let params =
     List.map
       (fun p ->
-         match p with
-         | Sexp.List [ pn; psort ] ->
-           (match Sexp.symbol_name pn with
-            | Some pn -> pn, sort_of_sexp st psort
-            | None ->
-              malformedf "malformed define-fun parameter name: %s" (Sexp.to_string pn))
-         | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
+        match p with
+        | Sexp.List [ pn; psort ] ->
+          (match Sexp.symbol_name pn with
+           | Some pn -> pn, sort_of_sexp st psort
+           | None ->
+             malformedf "malformed define-fun parameter name: %s" (Sexp.to_string pn))
+        | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
       params_sexp
   in
   let ret = sort_of_sexp st ret_sexp in
@@ -608,14 +675,14 @@ let parse_constructor st dt_sort (cdef : Sexp.t) : Datatype_defs.constructor =
     let selectors =
       List.mapi
         (fun index sel ->
-           match sel with
-           | Sexp.List [ sname_s; ssort_s ] ->
-             name_of sname_s, index, sort_of_sexp st ssort_s
-           | _ ->
-             malformedf
-               "malformed selector in constructor %s: %s"
-               cname
-               (Sexp.to_string sel))
+          match sel with
+          | Sexp.List [ sname_s; ssort_s ] ->
+            name_of sname_s, index, sort_of_sexp st ssort_s
+          | _ ->
+            malformedf
+              "malformed selector in constructor %s: %s"
+              cname
+              (Sexp.to_string sel))
         sel_sexps
     in
     let dom = List.map (fun (_, _, fs) -> fs) selectors in
@@ -623,8 +690,8 @@ let parse_constructor st dt_sort (cdef : Sexp.t) : Datatype_defs.constructor =
     let sel_records =
       List.map
         (fun (sname, index, field_sort) ->
-           let sel_sym = declare_fun_sym st sname [ dt_sort ] field_sort in
-           { Datatype_defs.sym = sel_sym; index; field_sort })
+          let sel_sym = declare_fun_sym st sname [ dt_sort ] field_sort in
+          { Datatype_defs.sym = sel_sym; index; field_sort })
         selectors
     in
     let tester_sym = declare_fun_sym st (tester_name_of cname) [ dt_sort ] Sort.bool in
@@ -646,28 +713,28 @@ let process_datatypes st sort_decls ctor_lists =
   let sort_syms =
     List.map
       (fun (name, arity) ->
-         (match arity with
-          | Sexp.Atom (Tok.Numeral "0") -> ()
-          | _ ->
-            unsupportedf "parametric datatype %s (nonzero arity) is not supported" name);
-         name, declare_datatype_sort st name)
+        (match arity with
+         | Sexp.Atom (Tok.Numeral "0") -> ()
+         | _ ->
+           unsupportedf "parametric datatype %s (nonzero arity) is not supported" name);
+        name, declare_datatype_sort st name)
       sort_decls
   in
   List.iter2
     (fun (name, sort_sym) ctor_list ->
-       let dt_sort = Sort.datatype_ sort_sym in
-       let constructors =
-         match ctor_list with
-         (* A datatype with zero constructors is uninhabited and not well-formed SMT-LIB
+      let dt_sort = Sort.datatype_ sort_sym in
+      let constructors =
+        match ctor_list with
+        (* A datatype with zero constructors is uninhabited and not well-formed SMT-LIB
            (SMT-LIB 2.6 requires >= 1 constructor); reject rather than register an empty,
            value-less datatype. *)
-         | Sexp.List [] -> malformedf "datatype %s has no constructors" name
-         | Sexp.List cs -> List.map (parse_constructor st dt_sort) cs
-         | _ -> malformedf "malformed constructor list for datatype %s" name
-       in
-       match Datatype_defs.add st.datatypes { sort_sym; constructors } with
-       | dts -> st.datatypes <- dts
-       | exception Invalid_argument m -> malformedf "%s" m)
+        | Sexp.List [] -> malformedf "datatype %s has no constructors" name
+        | Sexp.List cs -> List.map (parse_constructor st dt_sort) cs
+        | _ -> malformedf "malformed constructor list for datatype %s" name
+      in
+      match Datatype_defs.add st.datatypes { sort_sym; constructors } with
+      | dts -> st.datatypes <- dts
+      | exception Invalid_argument m -> malformedf "%s" m)
     sort_syms
     ctor_lists
 ;;
@@ -678,9 +745,9 @@ let parse_sort_decls (s : Sexp.t) =
   | Sexp.List decls ->
     List.map
       (fun d ->
-         match d with
-         | Sexp.List [ n; a ] -> name_of n, a
-         | _ -> malformedf "malformed datatype sort declaration: %s" (Sexp.to_string d))
+        match d with
+        | Sexp.List [ n; a ] -> name_of n, a
+        | _ -> malformedf "malformed datatype sort declaration: %s" (Sexp.to_string d))
       decls
   | _ -> malformedf "declare-datatypes sort list must be a list: %s" (Sexp.to_string s)
 ;;
@@ -703,7 +770,14 @@ let known_logic = function
   | "QF_DT"
   | "QF_UFDT"
   | "QF_DTLIA"
-  | "QF_UFDTLIA" -> true
+  | "QF_UFDTLIA"
+  (* quantifier-free arrays (select/store/extensionality). Arrays combined with arithmetic
+     (QF_ALIA/QF_AUFLIA) are accepted at the name level too, but arithmetic atoms fall
+     outside the standalone arrays theory and degrade to unknown per the fail-closed
+     CONSTRUCT discipline. *)
+  | "QF_AX"
+  | "QF_ALIA"
+  | "QF_AUFLIA" -> true
   (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
   | "UF"
   | "UFLIA"
@@ -752,70 +826,70 @@ let run st sexps =
   in
   List.iter
     (fun (cmd : Sexp.t) ->
-       (* Command keywords are UNQUOTED symbol heads; dispatch on that text. *)
-       match cmd with
-       | Sexp.Atom _ -> malformedf "unexpected top-level atom: %s" (Sexp.to_string cmd)
-       | Sexp.List [] -> malformedf "malformed command: ()"
-       | Sexp.List (head :: rest) ->
-         (match Sexp.simple head, rest with
-          | Some "set-logic", [ l ] ->
-            (match Sexp.simple l with
-             | Some l when known_logic l -> logic := Some l
-             | Some l ->
-               unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
-             | None -> malformedf "malformed set-logic argument")
-          | Some "set-info", _ ->
-            (match rest with
-             | [ Sexp.Atom (Tok.Keyword "status"); v ] ->
-               (match Sexp.simple v with
-                | Some v ->
-                  (match Oxsmt_smtlib.Status.of_string v with
-                   | Some s -> status := Some s
-                   | None -> malformedf "unknown :status value: %s" v)
-                | None -> malformedf "malformed :status value")
-             | _ -> () (* ignore other :info, incl. multi-line |...| / string values *))
-          | Some "declare-sort", [ n; arity ] ->
-            (match arity with
-             | Sexp.Atom (Tok.Numeral "0") -> declare_sort st (name_of n)
-             | _ -> unsupportedf "declare-sort %s with nonzero arity" (name_of n))
-          | Some "declare-const", [ n; ret ] ->
-            declare_fun st (name_of n) [] (sort_of_sexp st ret)
-          | Some "declare-fun", [ n; params; ret ] ->
-            let dom, cod = read_signature st params ret in
-            declare_fun st (name_of n) dom cod
-          (* [(declare-datatypes ((T0 a0) ...) (ctor-list0 ...))] — mutually recursive. *)
-          | Some "declare-datatypes", [ sort_decls; Sexp.List ctor_lists ] ->
-            process_datatypes st (parse_sort_decls sort_decls) ctor_lists
-          | Some "declare-datatypes", _ ->
-            malformedf "malformed declare-datatypes: %s" (Sexp.to_string cmd)
-          (* [(declare-datatype T (ctor ...))] — the single-datatype (arity 0) form. *)
-          | Some "declare-datatype", [ n; Sexp.List ctors ] ->
-            process_datatypes
-              st
-              [ name_of n, Sexp.Atom (Tok.Numeral "0") ]
-              [ Sexp.List ctors ]
-          | Some "declare-datatype", _ ->
-            malformedf "malformed declare-datatype: %s" (Sexp.to_string cmd)
-          | Some "define-fun", [ n; Sexp.List params; ret; body ] ->
-            define_fun st (name_of n) params ret body
-          | Some ("define-fun-rec" | "define-funs-rec"), _ ->
-            unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
-          | Some "define-fun", _ ->
-            malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
-          | Some "assert", [ body ] ->
-            (match classify body with
-             | `Ground t -> asserts := t :: !asserts
-             | `Lemma l -> lemmas := l :: !lemmas)
-          | Some "check-sat", _ -> ()
-          | Some "exit", _ -> ()
-          | Some ("push" | "pop"), _ ->
-            unsupportedf "incremental push/pop is not supported"
-          | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()
-          (* Output-only / non-stateful directives: ignoring them cannot change the
+      (* Command keywords are UNQUOTED symbol heads; dispatch on that text. *)
+      match cmd with
+      | Sexp.Atom _ -> malformedf "unexpected top-level atom: %s" (Sexp.to_string cmd)
+      | Sexp.List [] -> malformedf "malformed command: ()"
+      | Sexp.List (head :: rest) ->
+        (match Sexp.simple head, rest with
+         | Some "set-logic", [ l ] ->
+           (match Sexp.simple l with
+            | Some l when known_logic l -> logic := Some l
+            | Some l ->
+              unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
+            | None -> malformedf "malformed set-logic argument")
+         | Some "set-info", _ ->
+           (match rest with
+            | [ Sexp.Atom (Tok.Keyword "status"); v ] ->
+              (match Sexp.simple v with
+               | Some v ->
+                 (match Oxsmt_smtlib.Status.of_string v with
+                  | Some s -> status := Some s
+                  | None -> malformedf "unknown :status value: %s" v)
+               | None -> malformedf "malformed :status value")
+            | _ -> () (* ignore other :info, incl. multi-line |...| / string values *))
+         | Some "declare-sort", [ n; arity ] ->
+           (match arity with
+            | Sexp.Atom (Tok.Numeral "0") -> declare_sort st (name_of n)
+            | _ -> unsupportedf "declare-sort %s with nonzero arity" (name_of n))
+         | Some "declare-const", [ n; ret ] ->
+           declare_fun st (name_of n) [] (sort_of_sexp st ret)
+         | Some "declare-fun", [ n; params; ret ] ->
+           let dom, cod = read_signature st params ret in
+           declare_fun st (name_of n) dom cod
+         (* [(declare-datatypes ((T0 a0) ...) (ctor-list0 ...))] — mutually recursive. *)
+         | Some "declare-datatypes", [ sort_decls; Sexp.List ctor_lists ] ->
+           process_datatypes st (parse_sort_decls sort_decls) ctor_lists
+         | Some "declare-datatypes", _ ->
+           malformedf "malformed declare-datatypes: %s" (Sexp.to_string cmd)
+         (* [(declare-datatype T (ctor ...))] — the single-datatype (arity 0) form. *)
+         | Some "declare-datatype", [ n; Sexp.List ctors ] ->
+           process_datatypes
+             st
+             [ name_of n, Sexp.Atom (Tok.Numeral "0") ]
+             [ Sexp.List ctors ]
+         | Some "declare-datatype", _ ->
+           malformedf "malformed declare-datatype: %s" (Sexp.to_string cmd)
+         | Some "define-fun", [ n; Sexp.List params; ret; body ] ->
+           define_fun st (name_of n) params ret body
+         | Some ("define-fun-rec" | "define-funs-rec"), _ ->
+           unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
+         | Some "define-fun", _ ->
+           malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
+         | Some "assert", [ body ] ->
+           (match classify body with
+            | `Ground t -> asserts := t :: !asserts
+            | `Lemma l -> lemmas := l :: !lemmas)
+         | Some "check-sat", _ -> ()
+         | Some "exit", _ -> ()
+         | Some ("push" | "pop"), _ ->
+           unsupportedf "incremental push/pop is not supported"
+         | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()
+         (* Output-only / non-stateful directives: ignoring them cannot change the
             assertion set, hence cannot flip a verdict. *)
-          | Some "set-option", _ -> ()
-          | Some (("reset" | "reset-assertions") as c), _ ->
-            (* Fail CLOSED — NOT a silent no-op. This reader folds every [assert] into ONE
+         | Some "set-option", _ -> ()
+         | Some (("reset" | "reset-assertions") as c), _ ->
+           (* Fail CLOSED — NOT a silent no-op. This reader folds every [assert] into ONE
               assertion set for a single [check-sat], so it cannot honour [reset] /
               [reset-assertions] clearing that set mid-script. Silently ignoring them left
               the pre-reset assertions live and FLIPPED the verdict (e.g.
@@ -823,9 +897,9 @@ let run st sexps =
               [unsat]). Raising degrades the query to [unknown] (I8), never a wrong
               verdict; incremental support is a documented follow-up (see the CLI's
               push/pop degrade). *)
-            unsupportedf "%s is not supported by the batch (single-check) reader" c
-          | Some other, _ -> unsupportedf "unsupported command: %s" other
-          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
+           unsupportedf "%s is not supported by the batch (single-check) reader" c
+         | Some other, _ -> unsupportedf "unsupported command: %s" other
+         | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
   !logic, !status, List.rev !asserts, List.rev !lemmas
 ;;
@@ -842,6 +916,8 @@ let parse_into ?internal_mint env ctx src =
     ; dt_names = Hashtbl.create 8
     ; datatypes = Datatype_defs.empty
     ; internal_mint
+    ; array_ops = Hashtbl.create 8
+    ; arrays = Array_defs.empty
     }
   in
   let sexps =
@@ -855,7 +931,15 @@ let parse_into ?internal_mint env ctx src =
     | Term.Unsupported m -> raise (Unsupported m)
     | Term.Overflow -> raise (Unsupported "arithmetic exceeds native int range")
   in
-  { env; ctx; logic; status; assertions; datatypes = st.datatypes; lemmas }
+  { env
+  ; ctx
+  ; logic
+  ; status
+  ; assertions
+  ; datatypes = st.datatypes
+  ; arrays = st.arrays
+  ; lemmas
+  }
 ;;
 
 let parse src =

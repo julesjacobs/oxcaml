@@ -54,6 +54,9 @@ let run_file path : outcome * outcome option =
           theory on the cert path too (else it degrades to unknown here while the product
           CLI decides it — a latent driver divergence). Empty on a non-datatype file. *)
        Session.set_datatypes s parsed.Parser.datatypes;
+       (* likewise the arrays registry, so an array file's select/store atoms classify and
+          its unsat conflicts emit theory clauses that replay as theory leaves. *)
+       Session.set_arrays s parsed.Parser.arrays;
        (match Session.assert_presolved s parsed.Parser.assertions with
         | exception ex -> Error ("assert: " ^ Printexc.to_string ex), None
         | () ->

@@ -67,6 +67,15 @@ type t =
          A ref SHARED with [cdclt] (same ref), so a [set_datatypes] after [create] is
          visible when cdclt reads it lazily at the first theory-atom intern to pick the
          standalone DT theory over the EUF+LIA combined stack. *)
+  ; array_registry : Oxsmt_core.Array_defs.t ref
+    (* array select/store symbols (arrays lane); empty unless [set_arrays] was called. A
+         ref SHARED with [cdclt] (same ref), read lazily at the first theory-atom intern
+         to pick the standalone arrays theory. *)
+  ; mutable has_arrays : bool
+    (* [set_arrays] installed a non-empty array registry. A [Final]->[Sat] on an array
+         problem degrades to [Unknown] in v1: the ROW/extensionality saturation is sound
+         for refutation but the model is not self-checked, so [sat] is withheld rather
+         than risk a wrong-[sat]. UNSAT flows through unchanged. *)
   ; pp : Preprocess.t
   ; sat : Sat.t
   ; cdclt : Cdclt.t
@@ -128,15 +137,18 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
      / interactive / [make test] path is byte-identical (the count is never printed). *)
   let budget = Budget.create ?max:max_effort () in
   let registry = ref Oxsmt_core.Datatype_defs.empty in
+  let array_registry = ref Oxsmt_core.Array_defs.empty in
   (* Install the seam callbacks on the pristine core BEFORE any clause (pristine-attach);
-     the theory itself is chosen lazily from [registry] at the first intern. The ref is
-     shared with [cdclt]. *)
-  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget ~registry in
+     the theory itself is chosen lazily from [registry] / [array_registry] at the first
+     intern. The refs are shared with [cdclt]. *)
+  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry in
   let base = Sat.new_var sat in
   { env
   ; cap
   ; ctx
   ; registry
+  ; array_registry
+  ; has_arrays = false
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
@@ -212,6 +224,15 @@ let declare_const t name sort = declare_fun t name (Rank.create [] sort)
    [assert_term] (a datatype must be known before its atoms are interned). *)
 let set_datatypes t defs = t.registry := defs
 
+(* Install the array [select]/[store] symbol registry (arrays lane) the front end parsed.
+   Records it into the shared registry ref, which flips the session onto the standalone
+   arrays theory at its first theory-atom intern. Must precede [assert_term]. A non-empty
+   registry also arms the v1 sat-degrade ([has_arrays]). *)
+let set_arrays t defs =
+  t.array_registry := defs;
+  if not (Oxsmt_core.Array_defs.is_empty defs) then t.has_arrays <- true
+;;
+
 (* One constructor for the programmatic {!declare_datatype} door: its name and each
    field's (selector name, sort). A nullary constructor (an enum case) has [fields = []]. *)
 type ctor_decl =
@@ -232,7 +253,7 @@ let declare_datatype t sort constructors =
   let sort_sym =
     match (sort : Oxsmt_core.Sort.t) with
     | Datatype s -> s
-    | Bool | Int _ | Uninterpreted _ ->
+    | Bool | Int _ | Uninterpreted _ | Array _ ->
       invalid_arg "Session.declare_datatype: sort must be a Sort.Datatype"
   in
   let ctors =
@@ -437,9 +458,12 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
      walk. No [allowed] whitelist for sorts: [allowed] whitelists a lemma's own qvar
      App-head symbols, and a reserved uninterpreted sort is never a legitimate qvar (nor
      is one ever minted internally). *)
-  let bad_sort (s : Sort.t) =
+  let rec bad_sort (s : Sort.t) =
     match s with
     | Sort.Uninterpreted sym | Sort.Datatype sym -> Env.is_reserved_name (Symbol.name sym)
+    (* An array sort carries its index/element sorts; recurse so a reserved symbol buried
+       in one is caught. *)
+    | Sort.Array (index, element) -> bad_sort index || bad_sort element
     | Sort.Bool | Sort.Int _ -> false
   in
   (* Every subterm's own sort is checked here, so a reserved sort appearing anywhere in
@@ -733,7 +757,7 @@ let default_value (sort : Sort.t) : model_value =
   | Sort.Bool -> VBool false
   | Sort.Int _ -> VInt Bigint.zero
   | Sort.Uninterpreted _ -> VUninterp 0
-  | Sort.Datatype _ -> raise No_default_value
+  | Sort.Datatype _ | Sort.Array _ -> raise No_default_value
 ;;
 
 (* W1b model reconstruction (logs/w1b-design.md, constraint 4). Splice the eliminated
@@ -870,14 +894,24 @@ let raw_solve t assumptions =
    OUTSIDE the [raw_solve] firewall, so a bug here surfaces as a crash, not a silent
    [Unknown]. *)
 let commit_sat t =
-  match build_model t with
-  | Some m ->
-    if Model_check.check m t.asserted
-    then (
-      t.last_model <- Some m;
-      Sat)
-    else Unknown
-  | None -> Unknown
+  (* Arrays v1 sat-degrade: the standalone arrays theory reasons soundly for refutation
+     (ROW + extensionality add only theory-valid consequences), but its [Final]->[Sat]
+     model is not self-checkable by the R1 evaluator (which treats [select]/[store] as
+     plain uninterpreted functions with no array semantics), so a spuriously-passing R1
+     check could admit a wrong-[sat]. Withhold [sat] on any array problem -> [Unknown];
+     UNSAT is unaffected (it never reaches here). A model-emitting arrays sat is a
+     documented follow-up. *)
+  if t.has_arrays
+  then Unknown
+  else (
+    match build_model t with
+    | Some m ->
+      if Model_check.check m t.asserted
+      then (
+        t.last_model <- Some m;
+        Sat)
+      else Unknown
+    | None -> Unknown)
 ;;
 
 let check_sat t =

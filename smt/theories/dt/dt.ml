@@ -105,7 +105,7 @@ let head_args (term : Term.t) : (Symbol.t * Term.t array) option =
 let dt_sort_sym (sort : Sort.t) : Symbol.t option =
   match sort with
   | Sort.Datatype s -> Some s
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ -> None
+  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Array _ -> None
 ;;
 
 let is_dt_sort t (sort : Sort.t) =
@@ -750,7 +750,7 @@ let leaf_value t (x : Term.t) : Model.value =
          (match Bigint.to_int_opt n with
           | Some i -> Model.Int i
           | None -> Model.Uninterp (Euf.class_of t.engine x)))
-    | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ ->
+    | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ ->
       Model.Uninterp (Euf.class_of t.engine x))
 ;;
 
