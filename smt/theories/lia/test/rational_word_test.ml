@@ -48,18 +48,25 @@ let q = Rational.of_int
 let qf = Rational.of_frac
 let s = Rational.of_string
 
-(* Observe the representation through the PUBLIC API only (the module is abstract): the
-   canonical invariant is fits-int63-integer <=> immediate, so is_int && num-succeeds <=>
-   the immediate integer form, is_int && num-raises <=> a Big-integer block (den = 1,
-   |num| > int63), not is_int <=> a fraction block. `Imm distinguishes the zero-alloc
-   integer path from `Big_int / `Frac blocks. *)
+(* Observe the FULL three-tier representation through the PUBLIC API only (the module is
+   abstract), so the suite can assert which physical arm a value lands on (codex fix-round
+   LOW: the earlier 3-way [rep_of] conflated a small [Frac] with a big fraction). The
+   canonical invariant maps to observable behaviour:
+   - is_int && num-succeeds <=> immediate integer (den = 1, fits int63) -> `Imm
+   - is_int && num-raises <=> Big integer (den = 1, |num| > int63) -> `Big_int
+   - not is_int && num,den succeed <=> small [Frac] (both components fit int63) -> `Frac
+   - not is_int && num|den raises <=> Big fraction (a component > int63) -> `Big_frac
+     [`Imm] is the zero-alloc integer path; [`Frac] is the native-int fraction path. *)
 let rep_of x =
   if Rational.is_int x
   then (
     match Rational.num x with
     | _ -> `Imm
     | exception Rational.Overflow -> `Big_int)
-  else `Frac
+  else (
+    match Rational.num x, Rational.den x with
+    | _, _ -> `Frac
+    | exception Rational.Overflow -> `Big_frac)
 ;;
 
 let test_rep () =
@@ -131,8 +138,11 @@ let test_rep () =
     "1/2 + 1/3 = 5/6 stays a fraction block"
     (rep_of (Rational.add (qf 1 2) (qf 1 3)) = `Frac);
   check
-    "block fraction: 1/(10^19) stays a fraction block"
-    (rep_of (Rational.div (q 1) big) = `Frac
+    "small fraction 1/2 is a native `Frac (both components fit int63)"
+    (rep_of (qf 1 2) = `Frac);
+  check
+    "big fraction 1/(10^19) is a `Big_frac (denominator exceeds int63)"
+    (rep_of (Rational.div (q 1) big) = `Big_frac
      && Rational.to_string (Rational.div (q 1) big) = "1/10000000000000000000");
   (* --- poly-compare hazard: an immediate vs a large-NEGATIVE block. Structural
      [Stdlib.compare] orders every immediate BEFORE every block, so it returns the WRONG
@@ -348,7 +358,7 @@ let test_oracle () =
            and rsum = rep_of (Rational.add a b) in
            if ra = `Imm && rb = `Imm && rsum <> `Imm then saw_promote_up := true;
            if (ra <> `Imm || rb <> `Imm) && rsum = `Imm then saw_demote_down := true;
-           if rsum = `Frac then saw_frac := true;
+           if rsum = `Frac || rsum = `Big_frac then saw_frac := true;
            if ra = `Imm <> (rb = `Imm) then saw_mixed := true)
         pairs;
       close_in ic);
