@@ -24,58 +24,56 @@ let expect name got want =
     Printf.printf "  FAIL %s: got %s, want %s\n" name (s got) (s want))
 ;;
 
-(* Declare List + Color into a fresh session and register their datatype structure. *)
+(* Declare List + Color into a fresh session via the programmatic door (which mints
+   reserved .oxsmt.is-C testers), and pull the constructor/selector symbols back out of
+   the returned datatype record. This exercises the exact API->theory path the TCB cares
+   about. *)
+let ctor (dt : Defs.datatype) i = (List.nth dt.Defs.constructors i).Defs.sym
+
+let sel (dt : Defs.datatype) i j =
+  (List.nth (List.nth dt.Defs.constructors i).Defs.selectors j).Defs.sym
+;;
+
 let setup () =
   let s = Session.create () in
-  let list_sym = Session.declare_sort s "List" in
-  let list_sort = Sort.datatype_ list_sym in
-  let color_sym = Session.declare_sort s "Color" in
-  let color_sort = Sort.datatype_ color_sym in
-  let df name dom cod = Session.declare_fun s name (Rank.create dom cod) in
-  let nil = df "nil" [] list_sort in
-  let cons = df "cons" [ Sort.int; list_sort ] list_sort in
-  let head = df "head" [ list_sort ] Sort.int in
-  let tail = df "tail" [ list_sort ] list_sort in
-  let is_nil = df "is-nil" [ list_sort ] Sort.bool in
-  let is_cons = df "is-cons" [ list_sort ] Sort.bool in
-  let red = df "red" [] color_sort in
-  let green = df "green" [] color_sort in
-  let blue = df "blue" [] color_sort in
-  let is_red = df "is-red" [ color_sort ] Sort.bool in
-  let is_green = df "is-green" [ color_sort ] Sort.bool in
-  let is_blue = df "is-blue" [ color_sort ] Sort.bool in
-  let sel sym index field_sort = { Defs.sym; index; field_sort } in
-  let defs =
-    Defs.add
-      Defs.empty
-      { Defs.sort_sym = list_sym
-      ; constructors =
-          [ { Defs.sym = nil; selectors = []; tester = is_nil }
-          ; { Defs.sym = cons
-            ; selectors = [ sel head 0 Sort.int; sel tail 1 list_sort ]
-            ; tester = is_cons
-            }
-          ]
-      }
+  let list_sort = Sort.datatype_ (Session.declare_sort s "List") in
+  let color_sort = Sort.datatype_ (Session.declare_sort s "Color") in
+  let dt_list =
+    Session.declare_datatype
+      s
+      list_sort
+      [ { Session.ctor_name = "nil"; fields = [] }
+      ; { Session.ctor_name = "cons"; fields = [ "head", Sort.int; "tail", list_sort ] }
+      ]
   in
-  let defs =
-    Defs.add
-      defs
-      { Defs.sort_sym = color_sym
-      ; constructors =
-          [ { Defs.sym = red; selectors = []; tester = is_red }
-          ; { Defs.sym = green; selectors = []; tester = is_green }
-          ; { Defs.sym = blue; selectors = []; tester = is_blue }
-          ]
-      }
-  in
-  Session.set_datatypes s defs;
+  ignore
+    (Session.declare_datatype
+       s
+       color_sort
+       [ { Session.ctor_name = "red"; fields = [] }
+       ; { Session.ctor_name = "green"; fields = [] }
+       ; { Session.ctor_name = "blue"; fields = [] }
+       ]);
+  let nil = ctor dt_list 0 in
+  let cons = ctor dt_list 1 in
+  let head = sel dt_list 1 0 in
   s, list_sort, color_sort, nil, cons, head
 ;;
 
 let k s name sort = Context.const (Session.context s) (Session.declare_const s name sort)
 
 let () =
+  (* TCB property: declare_datatype mints testers in the reserved namespace, so a user
+     function cannot forge one and shadow it in the printed session. *)
+  (let s = Session.create () in
+   let ls = Sort.datatype_ (Session.declare_sort s "L") in
+   let dt = Session.declare_datatype s ls [ { Session.ctor_name = "c"; fields = [] } ] in
+   let tester = (List.nth dt.Defs.constructors 0).Defs.tester in
+   incr checks;
+   if not (Env.is_reserved_name (Symbol.name tester))
+   then (
+     incr failures;
+     Printf.printf "  FAIL tester %s is not reserved-namespaced\n" (Symbol.name tester)));
   (* Rule 1: constructor clash *)
   (let s, ls, _cs, nil, cons, _head = setup () in
    let ctx = Session.context s in

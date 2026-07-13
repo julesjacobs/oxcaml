@@ -162,6 +162,29 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}. *)
 val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
 
+(** One constructor for {!declare_datatype}: its name and each field's (selector name,
+    sort). A nullary constructor (an enum case) has [fields = []]. *)
+type ctor_decl =
+  { ctor_name : string
+  ; fields : (string * Oxsmt_core.Sort.t) list
+  }
+
+(** [declare_datatype t sort constructors] declares an ADT and its constructors
+    programmatically (the Session-API path, distinct from the .smt2 parser). Constructor
+    and selector symbols mint normally; each TESTER mints in the RESERVED [.oxsmt.*]
+    namespace via the session's capability (ADR-0012), so a user function cannot forge
+    [is-C] and silently shadow the tester in the printed session the Lean oracle checks.
+    [sort] must be the datatype's [Sort.Datatype] (declare it first via {!declare_sort} +
+    {!Oxsmt_core.Sort.datatype_} so a recursive field can reference it). Returns the built
+    {!Oxsmt_core.Datatype_defs.datatype} (all minted symbols, for building terms) and adds
+    it to the session registry, installing the DT theory. Must precede
+    {!assert_term}/{!check_sat}. *)
+val declare_datatype
+  :  t
+  -> Oxsmt_core.Sort.t
+  -> ctor_decl list
+  -> Oxsmt_core.Datatype_defs.datatype
+
 (** [assert_term t phi] preprocesses [phi] (ADR-0003 §5 passes), clausifies the boolean
     skeleton, registers each theory atom with the combined theory, and adds the clauses to
     the current frame. [phi] must be Bool-sorted and built through {!context}. An

@@ -189,6 +189,56 @@ let declare_const t name sort = declare_fun t name (Rank.create [] sort)
    [assert_term] (a datatype must be known before its atoms are interned). *)
 let set_datatypes t defs = t.registry := defs
 
+(* One constructor for the programmatic {!declare_datatype} door: its name and each
+   field's (selector name, sort). A nullary constructor (an enum case) has [fields = []]. *)
+type ctor_decl =
+  { ctor_name : string
+  ; fields : (string * Oxsmt_core.Sort.t) list
+  }
+
+(* Declare an ADT and its constructors programmatically (the Session-API path, distinct
+   from the .smt2 parser which builds a Datatype_defs itself). Constructor and selector
+   symbols mint normally; each TESTER mints in the RESERVED [.oxsmt.*] namespace via the
+   session cap (ADR-0012), so a user function cannot forge [is-C] and silently shadow the
+   tester in the printed session the Lean oracle checks — the TCB printer-suppression
+   hole. [sort] must be the datatype's [Sort.Datatype] (declared first via
+   {!declare_sort} + [Sort.datatype_], so a recursive field can reference it). Returns the
+   built {!Oxsmt_core.Datatype_defs.datatype} (all minted symbols) and adds it to the
+   session registry, installing the DT theory. Must precede [assert_term]. *)
+let declare_datatype t sort constructors =
+  let sort_sym =
+    match (sort : Oxsmt_core.Sort.t) with
+    | Datatype s -> s
+    | Bool | Int _ | Uninterpreted _ ->
+      invalid_arg "Session.declare_datatype: sort must be a Sort.Datatype"
+  in
+  let ctors =
+    List.map
+      (fun { ctor_name; fields } ->
+         let ctor_sym =
+           declare_fun t ctor_name (Rank.create (List.map snd fields) sort)
+         in
+         let selectors =
+           List.mapi
+             (fun i (sel_name, field_sort) ->
+                let sym = declare_fun t sel_name (Rank.create [ sort ] field_sort) in
+                { Oxsmt_core.Datatype_defs.sym; index = i; field_sort })
+             fields
+         in
+         (* Reserved tester: minted through the session's private cap so its
+           [.oxsmt.is-<C>] name is un-forgeable on the public declaration doors. *)
+         let tester_name = Printf.sprintf "%sis-%s" Env.reserved_prefix ctor_name in
+         let tester =
+           Env.declare_reserved t.cap t.env tester_name (Rank.create [ sort ] Sort.bool)
+         in
+         { Oxsmt_core.Datatype_defs.sym = ctor_sym; selectors; tester })
+      constructors
+  in
+  let dt = { Oxsmt_core.Datatype_defs.sort_sym; constructors = ctors } in
+  t.registry := Oxsmt_core.Datatype_defs.add !(t.registry) dt;
+  dt
+;;
+
 (* A theory atom is anything the propositional core cannot itself reason about: an order
    atom, a non-Bool equality, or an applied (arity >= 1) predicate. A nullary Bool [App]
    is a plain propositional variable, and [Bool_const] is a constant — neither is a theory
