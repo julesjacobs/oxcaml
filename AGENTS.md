@@ -7,3 +7,4 @@ Write plainly. No AI-slop language. De-AI all your writing.
 When unsure, make the call and keep moving.
 Any process or step that takes longer than 5 minutes must be thought about:
 can we eliminate this? can we speed it up?
+Parallelize - you can run max 20 agents - if you're running fewer than 5, rethink.
