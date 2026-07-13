@@ -59,6 +59,13 @@ type t =
          instantiations) — the field-relevance cascade only crosses these, bounding it to
          the finite input structure (no runaway down a recursive spine of split-born
          selector terms). *)
+  ; mutable diseq_pairs : (Term.t * Term.t) list
+    (* datatype-sorted disequality operand pairs, in assertion order — the guide for
+         disequality-aware model completion (a free field must not be filled with a value
+         that reproduces a forbidden term). Used only at model build, guarded by
+         [not (are_equal a b)] so a popped-but-not-removed pair (still distinct classes)
+         is at worst harmless over-distinctness, never a wrong verdict; the §8 checker
+         remains the authority. *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   }
@@ -88,6 +95,7 @@ let create ctx _env reg =
   ; split_relevant = Term.Table.create 64
   ; diseq_relevant = Term.Table.create 64
   ; input_dt = Term.Table.create 64
+  ; diseq_pairs = []
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
   }
@@ -243,7 +251,8 @@ let assert_lit t lit =
         Term.Table.replace t.split_relevant a ();
         Term.Table.replace t.split_relevant b ();
         Term.Table.replace t.diseq_relevant a ();
-        Term.Table.replace t.diseq_relevant b ()))
+        Term.Table.replace t.diseq_relevant b ();
+        t.diseq_pairs <- (a, b) :: t.diseq_pairs))
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -811,6 +820,114 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
                 c0
                 rest))
     in
+    (* Structural equality of two model trees (constructor name + fields, or scalar leaf).
+       Used only to steer completion away from forbidden values; the §8 checker's own
+       [v_eq] is the authority. *)
+    let mv_eq (a : Model.value) (b : Model.value) =
+      match a, b with
+      | Model.Int x, Model.Int y -> Int.equal x y
+      | Model.Bool x, Model.Bool y -> Bool.equal x y
+      | Model.Uninterp x, Model.Uninterp y -> Int.equal x y
+      | _ -> false
+    in
+    let rec tree_eq (x : ctor_tree) (y : ctor_tree) =
+      match x, y with
+      | Ctor (n1, k1), Ctor (n2, k2) ->
+        String.equal n1 n2
+        && List.length k1 = List.length k2
+        && List.for_all2 tree_eq k1 k2
+      | Leaf a, Leaf b -> mv_eq a b
+      | _ -> false
+    in
+    (* The value of [x] IF it is fully fixed by constructor witnesses down to constrained
+       leaves (no free datatype class on the way); [None] once a free class is reached.
+       This is the value a disequality [y <> x] must forbid on [y]'s class — computable up
+       front, independent of the free-class completion below. *)
+    let rec constrained_value (x : Term.t) (depth : int) : ctor_tree option =
+      if depth > 10_000
+      then None
+      else (
+        let k = Euf.class_of t.engine x in
+        match Hashtbl.find_opt witnesses k with
+        | None -> if is_dt_sort t x.Term.sort then None else Some (Leaf (leaf_value t x))
+        | Some wterm ->
+          let sym, wargs = Option.get (head_args wterm) in
+          let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+          let fields =
+            Array.to_list
+              (Array.map
+                 (fun a ->
+                    if is_dt_sort t a.Term.sort
+                    then constrained_value a (depth + 1)
+                    else Some (Leaf (leaf_value t a)))
+                 wargs)
+          in
+          if List.for_all Option.is_some fields
+          then Some (Ctor (Symbol.name c.Defs.sym, List.map Option.get fields))
+          else None)
+    in
+    (* Disequality-aware completion (gapdx-newtheories: the confirmed QF_DT root cause). A
+       free field filled with the sort's base value can reproduce a value a disequality
+       forbids (e.g. [x <> leaf zero] with [x] forced to [leaf]: base-completing [data x]
+       to [zero] rebuilds [leaf zero]). [forbidden] maps a class to trees its value must
+       avoid: seeded from each disequality pair by the fully-constrained side, then
+       propagated through a single-field constructor (if [x <> C v] and [x = C f] with [C]
+       one field, then [f <> v]). Consulted only when completing a FREE class; multi-field
+       propagation is skipped (the checker then fails such a case closed to [unknown],
+       never wrong). *)
+    let forbidden : (int, ctor_tree list) Hashtbl.t = Hashtbl.create 32 in
+    let add_forbidden k v =
+      let cur = Option.value (Hashtbl.find_opt forbidden k) ~default:[] in
+      if not (List.exists (tree_eq v) cur) then Hashtbl.replace forbidden k (v :: cur)
+    in
+    List.iter
+      (fun (a, b) ->
+         if not (Euf.are_equal t.engine a b)
+         then (
+           (match constrained_value b 0 with
+            | Some vb -> add_forbidden (Euf.class_of t.engine a) vb
+            | None -> ());
+           match constrained_value a 0 with
+           | Some va -> add_forbidden (Euf.class_of t.engine b) va
+           | None -> ()))
+      t.diseq_pairs;
+    (* propagate through single-field constructors to a fixpoint (bounded) *)
+    let ctor_terms_ordered = List.rev t.ctor_terms in
+    let changed = ref true in
+    let rounds = ref 0 in
+    while !changed && !rounds < 1_000 do
+      changed := false;
+      incr rounds;
+      List.iter
+        (fun (x : Term.t) ->
+           let k = Euf.class_of t.engine x in
+           match Hashtbl.find_opt witnesses k with
+           | Some wterm ->
+             let sym, wargs = Option.get (head_args wterm) in
+             let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+             if Array.length wargs = 1 && is_dt_sort t wargs.(0).Term.sort
+             then
+               List.iter
+                 (function
+                   | Ctor (fname, [ fchild ])
+                     when String.equal fname (Symbol.name c.Defs.sym) ->
+                     let fk = Euf.class_of t.engine wargs.(0) in
+                     let before =
+                       List.length
+                         (Option.value (Hashtbl.find_opt forbidden fk) ~default:[])
+                     in
+                     add_forbidden fk fchild;
+                     if
+                       List.length
+                         (Option.value (Hashtbl.find_opt forbidden fk) ~default:[])
+                       <> before
+                     then changed := true
+                   | _ -> ())
+                 (Option.value (Hashtbl.find_opt forbidden k) ~default:[])
+           | None -> ())
+        (t.dt_terms @ ctor_terms_ordered)
+    done;
+    let forbidden_of k = Option.value (Hashtbl.find_opt forbidden k) ~default:[] in
     (* Model COMPLETION for an unconstrained class. Distinct e-classes are never
        asserted-equal (a positive equality would have MERGED them), so giving distinct
        unconstrained classes DISTINCT witness values is always sound and, crucially,
@@ -844,9 +961,20 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           | None ->
             (match datatype_of_sort t x.Term.sort with
              | Some dt ->
-               let idx = !next_idx in
-               incr next_idx;
-               distinct_base dt idx depth
+               (* pick the least index (from [next_idx] up) whose completion avoids this
+                  class's forbidden values, so a disequality-forced field takes a
+                  non-colliding value; bounded — on exhaustion take the base and let the
+                  §8 checker fail closed. *)
+               let fbd = forbidden_of k in
+               let rec pick idx tries =
+                 let tr = distinct_base dt idx depth in
+                 if tries < 64 && List.exists (tree_eq tr) fbd
+                 then pick (idx + 1) (tries + 1)
+                 else (
+                   next_idx := idx + 1;
+                   tr)
+               in
+               pick !next_idx 0
              | None -> Leaf (leaf x))
         in
         Hashtbl.replace memo k tr;
