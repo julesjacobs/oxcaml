@@ -236,12 +236,12 @@ typedef uint64_t uintnat;
 /* Default speed setting for the major GC.  The heap will grow until
    the dead objects and the free list represent this percentage of the
    total size of live objects. */
-#define Percent_free_def 80
+#define Percent_free_def 200
 
 /* Default "small heap mode" setting for the major GC.  The GC will
    add an Idle phase when the sweeping work for a cycle is smaller than
    this limit. */
-#define Small_heap_limit_def 262144
+#define Small_heap_limit_def 134217728
 
 /* Default setting for the compacter: 500%
    (i.e. trigger the compacter when 5/6 of the heap is free or garbage).
