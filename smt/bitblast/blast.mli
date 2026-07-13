@@ -64,6 +64,12 @@ val assert_term : t -> Term.t -> unit
     first-encounter order — the model read-back set. *)
 val bv_vars : t -> (Term.t * Oxsmt_solver.Sat.lit array) list
 
+(** The free Boolean variables encountered, each with its single literal, in
+    first-encounter order. Part of the model read-back set alongside {!bv_vars}: without
+    their truth values the independent re-check cannot evaluate an assertion that mentions
+    a Boolean variable and would fail closed to [unknown]. *)
+val bool_vars : t -> (Term.t * Oxsmt_solver.Sat.lit) list
+
 (** [bits t term] blasts a bit-vector-sorted term to its bit literals (LSB first). Exposed
     for the exhaustive circuit oracle; the driver only needs {!assert_term}. *)
 val bits : t -> Term.t -> Oxsmt_solver.Sat.lit array

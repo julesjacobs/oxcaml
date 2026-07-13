@@ -19,6 +19,8 @@ type t =
   ; bv_cache : Sat.lit array Term.Table.t
   ; bool_cache : Sat.lit Term.Table.t
   ; mutable vars : (Term.t * Sat.lit array) list (* first-encounter order, reversed *)
+  ; mutable bool_vars :
+      (Term.t * Sat.lit) list (* free Bool vars, first-encounter, reversed *)
   }
 
 let create defs =
@@ -32,11 +34,13 @@ let create defs =
   ; bv_cache = Term.Table.create 256
   ; bool_cache = Term.Table.create 256
   ; vars = []
+  ; bool_vars = []
   }
 ;;
 
 let sat t = t.sat
 let bv_vars t = List.rev t.vars
+let bool_vars t = List.rev t.bool_vars
 let unsupported fmt = Printf.ksprintf (fun s -> raise (Unsupported_bv s)) fmt
 
 (* {2 Literal-level gates with constant folding}
@@ -446,7 +450,12 @@ and blast_bool_uncached t (term : Term.t) : Sat.lit =
      | Some (Const _) -> unsupported "bit-vector literal in Bool position"
      | None ->
        if Iarr.length node_args = 0
-       then fresh t (* a free Boolean variable *)
+       then (
+         (* a free Boolean variable: fresh literal, recorded so the model read-back can
+            recover its truth value for the independent re-check (bv_solve) *)
+         let l = fresh t in
+         t.bool_vars <- (term, l) :: t.bool_vars;
+         l)
        else unsupported "uninterpreted predicate (out of QF_BV)")
   | Le _ | Arith _ | Int_const _ -> unsupported "arithmetic atom (not QF_BV)"
 

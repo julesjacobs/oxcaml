@@ -32,6 +32,17 @@ let read_model blaster =
     (Blast.bv_vars blaster)
 ;;
 
+(* Free Boolean variables' truth values under the SAT model, encoded as 0/1 so the shared
+   [lookup] the re-checker reads (a [Term.t -> Bigint.t]) covers them too — [Bv_eval]
+   interprets a looked-up Boolean value as [true] iff it is nonzero. Not surfaced in the
+   returned bit-vector model; used only to complete the independent re-check. *)
+let read_bool_model blaster =
+  let sat = Blast.sat blaster in
+  List.map
+    (fun (term, l) -> term, if lit_value sat l then Bigint.one else Bigint.zero)
+    (Blast.bool_vars blaster)
+;;
+
 let solve defs assertions =
   match
     let blaster = Blast.create defs in
@@ -44,9 +55,11 @@ let solve defs assertions =
      | Sat.Unsat -> Unsat
      | Sat.Sat ->
        let model = read_model blaster in
+       let bool_model = read_bool_model blaster in
        (* soundness net: never emit a Sat the model does not actually satisfy *)
-       let tbl = Term.Table.create (List.length model) in
+       let tbl = Term.Table.create (List.length model + List.length bool_model) in
        List.iter (fun (t, (v, _)) -> Term.Table.replace tbl t v) model;
+       List.iter (fun (t, v) -> Term.Table.replace tbl t v) bool_model;
        let lookup t = Term.Table.find_opt tbl t in
        (match List.for_all (fun a -> Bv_eval.eval_bool defs ~lookup a) assertions with
         | true -> Sat model
