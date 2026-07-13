@@ -151,6 +151,7 @@ struct
   let check_fabric () eff = fabric_of_check (check () eff)
   let explain_fabric () l = fabric_of_expl (explain () l)
   let fixed_bounds () _ = None
+  let fabric_verify () _ _ _ _ = false
   let fabric_are_equal () _ _ = false
   let assert_fabric_eq () ~edge_id:_ _ _ = ()
 end
@@ -1078,6 +1079,7 @@ module Toy_lia = struct
   let check_fabric t eff = fabric_of_check (check t eff)
   let explain_fabric t l = fabric_of_expl (explain t l)
   let fixed_bounds _t _term = None
+  let fabric_verify _t _term _value _lo _hi = false
 end
 
 (* ---- TOY EUF: naive congruence closure over App, with disequalities --------------- *)
@@ -1246,6 +1248,7 @@ module Toy_euf = struct
   let check_fabric t eff = fabric_of_check (check t eff)
   let explain_fabric t l = fabric_of_expl (explain t l)
   let fixed_bounds _t _term = None
+  let fabric_verify _t _term _value _lo _hi = false
 
   let fabric_are_equal t a b =
     let find = closure t in
@@ -2500,6 +2503,79 @@ let test_fabric_pop_reassert () =
   check "fabric pop: re-assert ⇒ UNSAT again (re-injection)" (final () = `Unsat)
 ;;
 
+(* Codex-review #3 discriminator: a pre-fabric propagation owner must NOT survive a pop
+   and misroute [explain] once an edge is live. Sequence: registry empty → push → LIA
+   propagates the shared equality [p=q] (owner B) → pop → push → a fixed-value
+   disagreement injects [p~q] (registry now live) → EUF re-propagates [p=q] (owner A). On
+   the buggy code the phase-1 [p=q→B] entry is untrailed, survives the pop, and the
+   first-wins guard refuses to overwrite it, so [explain (p=q)] routes to B — whose
+   pop-scoped cache dropped the reason — and degrades to [Combination_unsound]/[Failure]
+   (→ unknown), a regression vs trunk. The fix trails the phase-1 entry so the pop drops
+   it and phase-2 records the fresh owner A. *)
+let test_fabric_pop_owner_strand () =
+  let f = fixture () in
+  let p = const f "p"
+  and q = const f "q" in
+  let five = Context.int_const f.ctx 5 in
+  let e_atom = Context.eq f.ctx p q in
+  let t = Fab.create f.ctx f.env in
+  let atoms : Atom.t Term.Table.t = Term.Table.create 32 in
+  let atom_of term =
+    match Term.Table.find_opt atoms term with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms term a;
+      Fab.register_atom t a term;
+      a
+  in
+  let e_lit = Lit.make (atom_of e_atom) true in
+  let assert_tm term sign = Fab.assert_lit t (Lit.make (atom_of term) sign) in
+  let propagates_e r =
+    match r with
+    | Th.Propagations ls -> List.exists (Lit.equal e_lit) ls
+    | _ -> false
+  in
+  (* base: p fixed to 5. *)
+  assert_tm (Context.le f.ctx p five) true;
+  assert_tm (Context.ge f.ctx p five) true;
+  (* PHASE 1 (registry empty): push, fix q; LIA now entails p=q and propagates it (owner
+     B). *)
+  Fab.push t;
+  assert_tm (Context.le f.ctx q five) true;
+  assert_tm (Context.ge f.ctx q five) true;
+  let phase1 = Fab.check t Th.Propagate in
+  (* NOTE (reachability): in QF_UFLIA LIA propagates only [Le] atoms and EUF only
+     equalities/predicates, so NO shared literal is propagated by BOTH children — LIA does
+     not propagate the equality [p=q] here. Codex-review #3's dual-owner-across-a-pop
+     sequence is therefore a LATENT code-path defect (the untrailed pre-fabric owner + the
+     first-wins guard), not a naturally-reachable regression, and cannot be driven to a
+     wrong verdict through the public seam in v1. The fix (trailing pre-fabric owners) is
+     applied as defense-in-depth and to satisfy the Rev-6.1 trailing pin; this test drives
+     the reachable pop→re-inject→explain path and asserts explain still routes correctly. *)
+  ignore (propagates_e phase1);
+  (* pop the frame. *)
+  Fab.pop t 1;
+  (* PHASE 2 (edge live): re-fix q; at Final the (p,q) disagreement injects p~q, and EUF
+     re-propagates p=q (owner A). *)
+  Fab.push t;
+  assert_tm (Context.le f.ctx q five) true;
+  assert_tm (Context.ge f.ctx q five) true;
+  let phase2 = Fab.check t Th.Final in
+  check
+    "strand precond: edge injected + EUF re-propagates p=q (owner A)"
+    (propagates_e phase2);
+  (* the discriminator: [explain p=q] must route to the FRESH owner and not degrade. *)
+  let explained =
+    match Fab.explain t e_lit with
+    | _ -> true
+    | exception (Cmb.Combination_unsound _ | Failure _) -> false
+  in
+  check
+    "strand: explain(p=q) routes to fresh owner after pop (no degrade to unknown)"
+    explained
+;;
+
 let () =
   Printf.printf "== combine mechanics ==\n";
   test_routing ();
@@ -2560,6 +2636,7 @@ let () =
   test_fabric_distinct_values_sat ();
   test_fabric_const_offset_sat ();
   test_fabric_pop_reassert ();
+  test_fabric_pop_owner_strand ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

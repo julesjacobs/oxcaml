@@ -40,6 +40,7 @@ module type FABRIC_CHILD = sig
   val check_fabric : t -> Theory.effort -> fabric_check_result
   val explain_fabric : t -> Lit.t -> Fabric_explanation.t
   val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
+  val fabric_verify : t -> Term.t -> string -> justification -> justification -> bool
 end
 
 module type FABRIC_CONGRUENCE_CHILD = sig
@@ -502,15 +503,38 @@ end = struct
       pin t ~x ~y ~psign:positive ~pto_a ~pto_b
   ;;
 
-  (* When no fabric edge is live this is the trunk grow-only, last-wins, untrailed map
-     (the pure-corpus path is byte-unchanged). Once an edge is live (Rev 6.1 pin), a
-     fabric-reason literal's owner must be FIRST-wins and origin-frame TRAILED: a post-pop
-     re-propagation of the same literal must be free to record the FRESH owner, and
-     [Combine.explain] must not route a re-propagation to the wrong child (the #102
-     surface, mutant [pop/re-propagate-different-owner]). *)
+  (* Owner map for routing [explain] (Rev 6.1 pin; codex-review #3).
+
+     OFF ⇒ the trunk grow-only, last-wins, untrailed map (byte-identical).
+
+     ON, no edge live yet ⇒ keep trunk LAST-wins semantics but TRAIL each mutation
+     (restoring the prior binding on pop). Untrailed pre-fabric entries were the bug: an
+     owner recorded while [registry] was empty SURVIVED a pop, and once an edge went live
+     the first-wins guard below REFUSED to overwrite the stale owner — [explain] then
+     routed a re-propagated literal to a child whose pop-scoped cache had dropped it →
+     [unknown], a completeness REGRESSION vs trunk (whose last-wins would have corrected
+     it). Trailing drops such an entry on its frame's pop; restoring the prior binding is
+     unobservable while no edge is live (a popped literal is never explained), so output
+     stays trunk- identical.
+
+     ON, edge live ⇒ FIRST-wins + origin-frame TRAILED: the first propagation's owner is
+     the precedence-valid one, dropped on its frame's pop so a post-pop re-propagation
+     records the FRESH owner (mutant [pop/re-propagate-different-owner]). *)
   let record_props t owner lits =
-    if fabric_off || Hashtbl.length t.registry = 0
+    if fabric_off
     then List.iter (fun l -> t.propagated_by <- Lit.Map.add l owner t.propagated_by) lits
+    else if Hashtbl.length t.registry = 0
+    then
+      List.iter
+        (fun l ->
+           let prev = Lit.Map.find_opt l t.propagated_by in
+           t.propagated_by <- Lit.Map.add l owner t.propagated_by;
+           Trail.record t.fabric_frames (fun () ->
+             t.propagated_by
+             <- (match prev with
+                 | Some o -> Lit.Map.add l o t.propagated_by
+                 | None -> Lit.Map.remove l t.propagated_by)))
+        lits
     else
       List.iter
         (fun l ->
@@ -790,30 +814,6 @@ end = struct
     { Explanation.premises = expand_justifications t fe.premises; rule = fe.rule }
   ;;
 
-  (* F1-SEM (deliverable 8): confirm the recorded Γ entails [s = w] via the TWO oriented
-     Farkas derivations, NOT a four-bound 0 ≤ 0 sum. [s ≤ w] is witnessed by
-     [{s ≤ v (s_upper), w ≥ v (t_lower)}]; [s ≥ w] by
-     [{s ≥ v (s_lower), w ≤ v (t_upper)}]. Both oriented pairs must be present in Γ (as
-     [Real] members) — [Lia.fixed_bounds]'s ACTIVE-EXACT contract makes each of those the
-     tight bound to the SAME value [v], so the two chains give [s = w]. A weak-Γ (one
-     oriented bound dropped) breaks a direction and the injection is refused. O(|Γ|). *)
-  let f1_sem_entails ~gamma ~(witness : Fabric.equality_witness) =
-    let reals =
-      List.fold_left
-        (fun acc j ->
-           match j with
-           | Real l -> Lit.Map.add l () acc
-           | Fabric _ -> acc)
-        Lit.Map.empty
-        gamma
-    in
-    let has l = Lit.Map.mem l reals in
-    has witness.Fabric.s_upper
-    && has witness.Fabric.t_lower
-    && has witness.Fabric.s_lower
-    && has witness.Fabric.t_upper
-  ;;
-
   (* F1(b): every real member of Γ arrived strictly before this injection (its assertion
      ordinal is recorded, and no later than the current counter). A member with NO
      recorded ordinal is a forward reference — rejected (fail-closed). *)
@@ -888,8 +888,27 @@ end = struct
                  ; t_upper = b_hi
                  }
                in
+               (* F1-SEM (deliverable 8): the injecting child re-derives, by a path
+                  INDEPENDENT of the [fixed_bounds] tuple ({!Lia.oriented_bound_value}),
+                  that each endpoint really is fixed to the group value with these two
+                  oriented-bound premises. Both fixed to one value ⇒ the two oriented
+                  Farkas implications ([a<=v,b>=v ⊢ a<=b] and [a>=v,b<=v ⊢ a>=b]) give
+                  [a=b]. A wrong value / swapped-or-foreign token / dropped bound in
+                  [fixed_bounds] is REJECTED here (the ADR weak-Γ mutant is non-vacuous),
+                  not injected as an unsound merge. *)
                if
-                 f1_sem_entails ~gamma ~witness
+                 B.fabric_verify
+                   t.b
+                   a
+                   fb_a.Fabric.value
+                   fb_a.Fabric.lower
+                   fb_a.Fabric.upper
+                 && B.fabric_verify
+                      t.b
+                      b
+                      fb_b.Fabric.value
+                      fb_b.Fabric.lower
+                      fb_b.Fabric.upper
                  && gamma_precedence_ok t gamma
                  && gamma_acyclic_ok t gamma
                then Some (gamma, witness)

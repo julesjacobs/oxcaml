@@ -32,6 +32,18 @@ val check_fabric : t -> Theory.effort -> Fabric.check_result
 val explain_fabric : t -> Lit.t -> Fabric.Explanation.t
 val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
 
+(** [fabric_verify t term value lo hi] — ADR-0014 Stage 1b F1-SEM independent semantic
+    verifier: re-derives, by a path SEPARATE from the {!fixed_bounds} tuple, that [term]
+    is fixed to [value] with [lo]/[hi] as its oriented bound premises. Rejects a wrong
+    value, a swapped/foreign token, or a dropped/non-exact bound. *)
+val fabric_verify
+  :  t
+  -> Term.t
+  -> string
+  -> Fabric.justification
+  -> Fabric.justification
+  -> bool
+
 (** {2 Reason builders (exposed for the empty-premise tripwire test).}
 
     [conflict_explanation] / [propagation_reason] turn an engine conflict / a bound

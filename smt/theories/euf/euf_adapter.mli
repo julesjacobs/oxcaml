@@ -50,6 +50,15 @@ val fabric_are_equal : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t -> bool
     The fix-trigger only ever queries the arithmetic child. *)
 val fixed_bounds : t -> Oxsmt_core.Term.t -> Oxsmt_core.Fabric.fixed_bounds option
 
+(** The congruence child is never the fabric's fixed-value witness — constant [false]. *)
+val fabric_verify
+  :  t
+  -> Oxsmt_core.Term.t
+  -> string
+  -> Oxsmt_core.Fabric.justification
+  -> Oxsmt_core.Fabric.justification
+  -> bool
+
 val assert_fabric_eq
   :  t
   -> edge_id:Oxsmt_core.Fabric.edge_id

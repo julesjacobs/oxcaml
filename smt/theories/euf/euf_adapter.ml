@@ -138,6 +138,9 @@ let assert_fabric_eq t ~edge_id a b =
 (* The congruence child fixes no arithmetic value; the fix-trigger queries only LIA. *)
 let fixed_bounds _t _term = None
 
+(* The congruence child is never the fabric's fixed-value witness; it verifies nothing. *)
+let fabric_verify _t _term _value _lo _hi = false
+
 let assert_lit t lit =
   let atom = Lit.atom lit in
   let positive = Lit.sign lit in

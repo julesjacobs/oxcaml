@@ -217,6 +217,32 @@ let fixed_bounds t term =
       Some { Fabric.value = Rational.to_string value; lower; upper })
 ;;
 
+(* ADR-0014 Stage 1b F1-SEM independent semantic verifier (§B.1 C1). Re-derive, via
+   {!Lia.oriented_bound_value} — a code path SEPARATE from the {!fixed_bounds} tuple the
+   fix-trigger produced — that [term] really is fixed to [value] with [lo]/[hi] as its
+   oriented bound premises. Rejects a wrong value, a swapped/foreign token, or a
+   dropped/non-exact bound (so the ADR's weak-Γ mutant is non-vacuously caught). Both
+   premises must be genuine trail literals ([Real]); a [Fabric]-handle bound cannot be a
+   fixed-value witness in Stage 1b. *)
+let fabric_verify t term value lo hi =
+  guard t (fun () ->
+    match lo, hi with
+    | Fabric.Real lo_lit, Fabric.Real hi_lit ->
+      (match
+         ( Lia.oriented_bound_value t.lia term `Lower
+         , Lia.oriented_bound_value t.lia term `Upper )
+       with
+       | Some (lt, lv), Some (ut, uv) ->
+         String.equal (Rational.to_string lv) value
+         && String.equal (Rational.to_string uv) value
+         &&
+           (match lt, ut with
+           | Fabric.Real l, Fabric.Real u -> Lit.equal l lo_lit && Lit.equal u hi_lit
+           | _ -> false)
+       | _ -> false)
+    | _ -> false)
+;;
+
 let model t =
   (* Valid only after [check Final] returned [Sat] (all problem vars integral);
      [Lia.model] raises otherwise. LIA emits only [Int] values. *)

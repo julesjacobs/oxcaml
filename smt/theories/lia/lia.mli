@@ -120,11 +120,24 @@ val model : 'tok t -> (Term.t * int) list
     finite part), for inspection/tests; [Rational.zero] for an unseen term. *)
 val rational_value : 'tok t -> Term.t -> Rational.t
 
-(** [fixed_bounds t term] returns [(value, lower_reason, upper_reason)] exactly when the
-    simplex variable denoting [term] has active, equal, integral lower/upper bounds.  The
-    reasons are oriented: [lower_reason] proves [term >= value] and [upper_reason] proves
-    [term <= value]. *)
+(** [fixed_bounds t term] returns [(value, lower_reason, upper_reason)] exactly when
+    [term]'s tightest ACTIVE ASSERTED (User) lower and upper bounds coincide on an
+    integer. The reasons are oriented: [lower_reason] proves [term >= value] and
+    [upper_reason] proves [term <= value]. Slack-aware ([x >= c] lands on the [-x] slack)
+    and const-aware ([x] and [x + 1] share one variable). This is the fabric fix-TRIGGER. *)
 val fixed_bounds : 'tok t -> Term.t -> (Rational.t * 'tok * 'tok) option
+
+(** [oriented_bound_value t term which] — ADR-0014 Stage 1b F1-SEM independent oriented-
+    bound accessor (§B.1 C1/Rev5-B3). Returns [(token, value)] for [term]'s tightest
+    active asserted bound on [which] side, with NO cross-side equality bundling — a
+    SEPARATE consumer from {!fixed_bounds}, so the fabric's semantic verifier can
+    re-derive a fixed-value pair's oriented premises independently of the trigger's tuple
+    and REJECT a wrong value / swapped-or-foreign token / dropped bound. *)
+val oriented_bound_value
+  :  'tok t
+  -> Term.t
+  -> [ `Lower | `Upper ]
+  -> ('tok * Rational.t) option
 
 (** [push t] / [pop t n]: backtrack frames (ADR-0005 D6), delegated to the simplex bound
     stack; created variables persist (idempotent re-registration). *)

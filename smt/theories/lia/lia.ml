@@ -342,16 +342,19 @@ let existing_combo_var t pairs =
 
 let negate_pairs pairs = List.map (fun (v, c) -> v, ineg c) pairs
 
-(* [fixed_bounds t term] — is [term] pinned to a single integer by ACTIVE ASSERTED bounds?
+(* The tightest ACTIVE ASSERTED (User) oriented bound of [term] on [which] side, in TERM
+   space (const folded in), with its premise token — or [None].
+
    The subtlety (DdM): [var_for_combo] bounds only the coeff-+1 form directly, so [x <= c]
    lands on [x]'s variable but [x >= c] lands on the slack [s = -x] (as [-x <= -c]). A
-   term is fixed only when its tightest asserted upper equals its tightest asserted lower,
-   and those two bounds may live on the variable AND on its negated-combo slack. We gather
-   the ACTIVE (User) bounds from BOTH, orient the slack's (which bounds [-combo]), take
-   the tightest of each side, and — when they coincide on an integer — return that value
-   plus the term's const together with the two oriented premise tokens. *)
-let fixed_bounds t term =
-  ensure_live t;
+   side's tightest bound may therefore live on the variable OR on its negated-combo slack
+   (whose bound is on [-combo], so it flips). Only User bounds are fabric-citable — a
+   [Branch] B&B bound carries no trail literal (F1-SEM ACTIVE EXACT). Shared by
+   [fixed_bounds] (the fix-trigger, which bundles both sides + an equality test) and
+   [oriented_bound_value] (the independent F1-SEM re-verifier's per-side read); the two
+   are distinct consumers so a bug in the trigger's bundling/tuple/equality logic is
+   caught by the verifier rather than trusted. *)
+let tightest_oriented t (term : Term.t) (which : [ `Lower | `Upper ]) =
   match existing_combo t term with
   | None -> None
   | Some (pairs, const) ->
@@ -360,56 +363,76 @@ let fixed_bounds t term =
       | Some (User tok, (d : Delta.t)) -> Some (d, tok)
       | Some (Branch _, _) | None -> None
     in
+    let flip = function
+      | Some (d, tok) -> Some (Delta.neg d, tok)
+      | None -> None
+    in
     let pos = existing_combo_var t pairs in
     let neg = existing_combo_var t (negate_pairs pairs) in
-    (* [term <= d] candidates: variable's own upper, and [-term >= d'] ⇒ [term <= -d']. *)
-    let uppers =
-      List.filter_map
-        Fun.id
+    let cands =
+      match which with
+      | `Upper ->
+        (* [term <= d]: variable's own upper; and [-combo >= d'] ⇒ [combo <= -d']. *)
         [ (match pos with
            | Some v -> take_user (Simplex.get_upper t.simplex v)
            | None -> None)
         ; (match neg with
-           | Some v ->
-             (match take_user (Simplex.get_lower t.simplex v) with
-              | Some (d, tok) -> Some (Delta.neg d, tok)
-              | None -> None)
+           | Some v -> flip (take_user (Simplex.get_lower t.simplex v))
            | None -> None)
         ]
-    in
-    let lowers =
-      List.filter_map
-        Fun.id
+      | `Lower ->
         [ (match pos with
            | Some v -> take_user (Simplex.get_lower t.simplex v)
            | None -> None)
         ; (match neg with
-           | Some v ->
-             (match take_user (Simplex.get_upper t.simplex v) with
-              | Some (d, tok) -> Some (Delta.neg d, tok)
-              | None -> None)
+           | Some v -> flip (take_user (Simplex.get_upper t.simplex v))
            | None -> None)
         ]
     in
-    let tightest cmp = function
+    let better a b =
+      match which with
+      | `Upper -> Delta.lt a b (* tightest upper = min *)
+      | `Lower -> Delta.lt b a (* tightest lower = max *)
+    in
+    let tightest =
+      match List.filter_map Fun.id cands with
       | [] -> None
       | x :: rest ->
         Some
           (List.fold_left
-             (fun best c -> if cmp (fst c) (fst best) then c else best)
+             (fun best c -> if better (fst c) (fst best) then c else best)
              x
              rest)
     in
-    let min_upper = tightest (fun a b -> Delta.lt a b) uppers in
-    let max_lower = tightest (fun a b -> Delta.lt b a) lowers in
-    (match min_upper, max_lower with
-     | Some (du, up_tok), Some (dl, lo_tok)
-       when Delta.equal du dl && Delta.is_rational du && Rational.is_int (Delta.c_part du)
-       ->
-       (* fixed to [du]; the TERM's value is [du + const]. [lo_tok] proves [term >= v],
-          [up_tok] proves [term <= v] — the two oriented premises F1-SEM re-sums. *)
-       Some (Rational.add (Delta.c_part du) (Rational.of_int const), lo_tok, up_tok)
+    (match tightest with
+     | Some (d, tok) when Delta.is_rational d && Rational.is_int (Delta.c_part d) ->
+       Some (tok, Rational.add (Delta.c_part d) (Rational.of_int const))
      | _ -> None)
+;;
+
+(* [fixed_bounds t term] — is [term] pinned to one integer by ACTIVE ASSERTED bounds? Its
+   tightest lower and upper coincide on an integer [v]; returns
+   [(v, lower_tok, upper_tok)] where [lower_tok] proves [term >= v] and [upper_tok] proves
+   [term <= v] (the two oriented Farkas premises the fabric injection needs). This is the
+   fix-TRIGGER. *)
+let fixed_bounds t term =
+  ensure_live t;
+  match tightest_oriented t term `Lower, tightest_oriented t term `Upper with
+  | Some (lo_tok, lv), Some (up_tok, uv) when Rational.equal lv uv ->
+    Some (lv, lo_tok, up_tok)
+  | _ -> None
+;;
+
+(* ADR-0014 Stage 1b F1-SEM independent oriented-bound accessor (§B.1 C1/Rev5-B3). Returns
+   ONE oriented bound of [term] as [(token, value)] with NO cross-side equality bundling.
+   The fabric's semantic re-verifier consumes it to re-derive, by a path independent of
+   the [fixed_bounds] tuple, that a fixed-value pair's cited premises really are that
+   term's oriented bounds at the group value — so a [fixed_bounds] bug (wrong value,
+   swapped or foreign token, dropped/non-exact bound) is REJECTED rather than injected as
+   an unsound merge, and the ADR's weak-Γ acceptance mutant is non-vacuous. *)
+let oriented_bound_value t (term : Term.t) (which : [ `Lower | `Upper ]) =
+  ensure_live t;
+  tightest_oriented t term which
 ;;
 
 let value_is_integer d = Delta.is_rational d && Rational.is_int (Delta.c_part d)

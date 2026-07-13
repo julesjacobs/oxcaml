@@ -203,6 +203,10 @@ module type FABRIC_CHILD = sig
   val check_fabric : t -> Theory.effort -> fabric_check_result
   val explain_fabric : t -> Lit.t -> Fabric_explanation.t
   val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
+
+  (** F1-SEM independent re-verifier: confirm [term] is fixed to [value] with the two
+      given oriented-bound premises, by a path separate from {!fixed_bounds}. *)
+  val fabric_verify : t -> Term.t -> string -> justification -> justification -> bool
 end
 
 module type FABRIC_CONGRUENCE_CHILD = sig
