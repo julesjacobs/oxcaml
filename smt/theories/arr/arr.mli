@@ -34,12 +34,15 @@ open Oxsmt_core
 
 type t
 
-(** [create ctx env registry] is an empty arrays theory over session [ctx]/[env], reading
-    the [select]/[store] symbol classification from [registry] ({!Array_defs}). With an
-    empty [registry] the theory is inert pure congruence closure, so a non-array problem
-    is unaffected. [env] is retained so the theory can mint the [select] symbol / a
-    witness index it needs mid-solve. *)
-val create : Context.t -> Env.t -> Array_defs.t -> t
+(** [create ctx env cap registry] is an empty arrays theory over session [ctx]/[env],
+    reading the [select]/[store] symbol classification from [registry] ({!Array_defs}).
+    With an empty [registry] the theory is inert pure congruence closure, so a non-array
+    problem is unaffected. [env] is retained so the theory can mint the [select] symbol it
+    needs mid-solve; [cap] is the session's ADR-0012 R1 reserved-minting capability,
+    required because the extensionality rule mints FRESH witness index constants in the
+    reserved [".oxsmt.*"] namespace (unforgeable — a user-nameable witness would be a
+    wrong-UNSAT vector). *)
+val create : Context.t -> Env.t -> Env.reserved_cap -> Array_defs.t -> t
 
 (* The frozen {!Oxsmt_core.Theory.THEORY} operations, driven by the CDCL(T) seam. *)
 

@@ -141,7 +141,9 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
   (* Install the seam callbacks on the pristine core BEFORE any clause (pristine-attach);
      the theory itself is chosen lazily from [registry] / [array_registry] at the first
      intern. The refs are shared with [cdclt]. *)
-  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry in
+  let cdclt =
+    Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap
+  in
   let base = Sat.new_var sat in
   { env
   ; cap

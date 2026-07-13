@@ -63,6 +63,7 @@ val create
   -> budget:Budget.t
   -> registry:Oxsmt_core.Datatype_defs.t ref
   -> array_registry:Oxsmt_core.Array_defs.t ref
+  -> cap:Oxsmt_core.Env.reserved_cap
   -> t
 
 (** [intern_atom t term] returns the SAT var 1:1 with theory atom [term], registering it

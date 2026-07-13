@@ -145,6 +145,10 @@ type t =
          until then, and forever for a pure-propositional problem with no theory atom. *)
   ; ctx : Context.t
   ; env : Env.t
+  ; cap : Env.reserved_cap
+    (* ADR-0012 R1 reserved-minting capability for [env] (threaded from Session, the
+         sole holder). Handed to the standalone arrays theory, which mints unforgeable
+         reserved extensionality witnesses; unused by the other theories. *)
   ; registry : Oxsmt_core.Datatype_defs.t ref
     (* datatype declarations (shared ref with Session); empty for a non-DT problem *)
   ; array_registry : Oxsmt_core.Array_defs.t ref
@@ -204,7 +208,7 @@ let ensure_theory t =
   | None ->
     let impl =
       if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
-      then TArr (Arr.create t.ctx t.env !(t.array_registry))
+      then TArr (Arr.create t.ctx t.env t.cap !(t.array_registry))
       else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
       then TDt (Dt.create t.ctx t.env !(t.registry))
       else TCombined (Combined.create t.ctx t.env)
@@ -328,11 +332,12 @@ let explain t l =
    set_theory contract). Must be called before any clause is added. The theory itself is
    created lazily at the first [intern] (see {!ensure_theory}) from the datatype
    [registry] (empty => the EUF+LIA stack), so a non-datatype session is byte-identical. *)
-let create ctx env sat ~split_budget ~budget ~registry ~array_registry =
+let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
   let t =
     { theory = None
     ; ctx
     ; env
+    ; cap
     ; registry
     ; array_registry
     ; sat

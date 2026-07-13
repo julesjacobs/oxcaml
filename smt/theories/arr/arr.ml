@@ -36,6 +36,11 @@ type info =
 type t =
   { ctx : Context.t
   ; env : Env.t
+  ; cap : Env.reserved_cap
+    (* ADR-0012 R1 reserved-minting capability for [env], threaded from the session (the
+         sole holder). The arrays theory is a legitimate reserved-symbol minter — like
+         preprocessing and the lemma tier — because its extensionality rule introduces
+         FRESH witness indices mid-solve, which MUST be unforgeable (see [witness_index]). *)
   ; mutable reg : Defs.t (* select/store classification; grows as we mint fresh selects *)
   ; engine : prem Euf.t
   ; true_const : Term.t
@@ -58,7 +63,7 @@ type t =
 
 let max_iters = 1_000_000
 
-let create ctx env reg =
+let create ctx env cap reg =
   let engine = Euf.create ctx in
   let true_const = Context.bool_const ctx true in
   let false_const = Context.bool_const ctx false in
@@ -67,6 +72,7 @@ let create ctx env reg =
   Euf.assert_neq engine ~premise:P_axiom true_const false_const;
   { ctx
   ; env
+  ; cap
   ; reg
   ; engine
   ; true_const
@@ -222,13 +228,20 @@ let witness_index t (a : Term.t) (b : Term.t) (index : Sort.t) : Term.t =
   match Hashtbl.find_opt t.ext_witness key with
   | Some w -> w
   | None ->
-    (* A fresh nullary index constant. The ["@arr.ext."] prefix is not a legal simple
-       SMT-LIB symbol, so it cannot collide with a user declaration, and it is not the
-       reserved [".oxsmt."] prefix, so [Env.declare_fun] admits it. Counter keeps distinct
-       diseq pairs on distinct witnesses. *)
-    let name = Printf.sprintf "@arr.ext.%d" t.fresh_counter in
+    (* A fresh nullary index constant for the extensionality Skolem. It MUST be
+       unforgeable: if a user could name the same symbol, they could assert an equality at
+       this very index and turn our [select a k <> select b k] into a false conflict — a
+       wrong-UNSAT. Freshness therefore rests on the reserved [".oxsmt."] namespace
+       (ADR-0012 R1), NOT on lexical illegality: [@arr.ext.N] would be forgeable because
+       [@] and [.] are legal SMT-LIB simple-symbol characters (a user
+       [(declare-const @arr.ext.0 ...)] aliases the symbol, which is interned by name). We
+       mint through the cap-gated {!Env.declare_reserved} door, so the reserved guard
+       rejects any user declaration or assertion that mentions [".oxsmt.*"] (the same
+       protection DT's testers rely on). The counter keeps distinct diseq pairs on
+       distinct witnesses. *)
+    let name = Printf.sprintf ".oxsmt.arr.ext.%d" t.fresh_counter in
     t.fresh_counter <- t.fresh_counter + 1;
-    let sym = Env.declare_fun t.env name (Rank.create [] index) in
+    let sym = Env.declare_reserved t.cap t.env name (Rank.create [] index) in
     let w = Context.const t.ctx sym in
     Euf.register_term t.engine w;
     Hashtbl.replace t.ext_witness key w;
