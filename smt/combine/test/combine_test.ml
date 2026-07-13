@@ -115,10 +115,27 @@ struct
   let model_fn = ref (fun () : (Term.t * Model.value) list -> [])
   let explain_fn = ref (fun (_ : Lit.t) -> trivial_expl)
 
+  (* Scriptable fabric hooks (default to the inert seam so every existing test is
+     unaffected). The owner-strand white-box test scripts these to force a fabric
+     injection through the combinator. *)
+  let fixed_bounds_fn = ref (fun (_ : Term.t) : Fabric.fixed_bounds option -> None)
+
+  let fabric_verify_fn =
+    ref
+      (fun
+          (_ : Term.t)
+           (_ : string)
+           (_ : Fabric.justification)
+           (_ : Fabric.justification)
+         -> false)
+  ;;
+
   let reset () =
     check_fn := default_check;
     (model_fn := fun () -> []);
-    explain_fn := fun _ -> trivial_expl
+    (explain_fn := fun _ -> trivial_expl);
+    (fixed_bounds_fn := fun _ -> None);
+    fabric_verify_fn := fun _ _ _ _ -> false
   ;;
 
   type t = unit
@@ -150,8 +167,8 @@ struct
      a mock fixes no bounds and merges no fabric edge. *)
   let check_fabric () eff = fabric_of_check (check () eff)
   let explain_fabric () l = fabric_of_expl (explain () l)
-  let fixed_bounds () _ = None
-  let fabric_verify () _ _ _ _ = false
+  let fixed_bounds () term = !fixed_bounds_fn term
+  let fabric_verify () term value lo hi = !fabric_verify_fn term value lo hi
   let fabric_are_equal () _ _ = false
   let assert_fabric_eq () ~edge_id:_ _ _ = ()
 end
@@ -2624,7 +2641,126 @@ let test_f1sem_verifier_discriminates () =
       (not (La.fabric_verify t p v fb.Fabric.upper fb.Fabric.lower));
     check
       "f1sem: verifier REJECTS a semantically insufficient (one-sided) Γ [weak-Γ mutant]"
-      (not (La.fabric_verify t q v (Fabric.Real q_ge_lit) (Fabric.Real q_ge_lit)))
+      (not (La.fabric_verify t q v (Fabric.Real q_ge_lit) (Fabric.Real q_ge_lit)));
+    (* Γ-membership tie (codex): a cited premise that is a genuine asserted literal but is
+       NOT p's actual oriented bound (here q's bound stands in for p's lower) is REJECTED
+       — the verifier ties the cited Γ member to p's independently-re-derived oriented
+       bound, it does not merely validate a value/token triple in isolation. *)
+    check
+      "f1sem: verifier REJECTS a foreign (non-oriented-bound) Γ member [membership tie]"
+      (not (La.fabric_verify t p v (Fabric.Real q_ge_lit) fb.Fabric.upper))
+;;
+
+(* WHITE-BOX discriminator for the pre-fabric owner-strand fix (codex-review #3), driving
+   the exact dual-owner-across-a-pop sequence the natural QF_UFLIA driver can't yet reach
+   (no shared literal is dual-propagated today; Stage-2 merge callbacks will make it
+   live). Mock children let us script it precisely: phase 1 (registry empty): push; the
+   arithmetic child B propagates the shared literal e = (x=y) → propagated_by[e] = B; pop
+   that frame; phase 2 (edge live): push; the (x,y) model disagreement triggers a
+   justified fabric injection (registry now non-empty), and the congruence child A
+   re-propagates e. On the PRE-FIX code the phase-1 [e→B] entry is untrailed, survives the
+   pop, and the first-wins guard refuses to overwrite it, so [explain e] routes to B —
+   whose reason was unwound by the pop (here: B.explain raises) — and degrades. The fix
+   trails the phase-1 entry, so the pop drops it and phase 2 records the fresh owner A;
+   [explain e] routes to A and succeeds. VERIFIED to fail on the pre-fix record_props
+   (trailing reverted in scratch), pass on the fix. *)
+let test_owner_strand_whitebox () =
+  reset_mocks ();
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let five = Context.int_const f.ctx 5 in
+  let xle = Context.le f.ctx x five
+  and xge = Context.ge f.ctx x five
+  and yle = Context.le f.ctx y five
+  and yge = Context.ge f.ctx y five in
+  let e_atom = Context.eq f.ctx x y in
+  let t = Cmock.create f.ctx f.env in
+  List.iter (fun tm -> Ctrl_router.set_owner tm Ctrl_router.B) [ xle; xge; yle; yge ];
+  Ctrl_router.set_owner e_atom Ctrl_router.Both;
+  let atoms : Atom.t Term.Table.t = Term.Table.create 16 in
+  let atom_of tm =
+    match Term.Table.find_opt atoms tm with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms tm a;
+      Cmock.register_atom t a tm;
+      a
+  in
+  let lit tm sign = Lit.make (atom_of tm) sign in
+  (* register the equality (interface: euf-uses x,y) + the bounds (interface: lia-uses
+     x,y) so [find_disagreement] ranges over [{x, y}]. *)
+  ignore (atom_of e_atom);
+  let xle_l = lit xle true
+  and xge_l = lit xge true
+  and yle_l = lit yle true
+  and yge_l = lit yge true in
+  let e_lit = lit e_atom true in
+  (* assert the four bound lits so their tokens are in the assertion-order ledger (F1(b)). *)
+  List.iter (Cmock.assert_lit t) [ xle_l; xge_l; yle_l; yge_l ];
+  (* B reports x,y both fixed to 5 (with the asserted bound lits as oriented premises) and
+     verifies; the model disagreement (A: distinct classes, B: both 5) drives the
+     injection. *)
+  (MockB.fixed_bounds_fn
+   := fun tm ->
+        if Term.equal tm x
+        then
+          Some
+            { Fabric.value = "5"; lower = Fabric.Real xge_l; upper = Fabric.Real xle_l }
+        else if Term.equal tm y
+        then
+          Some
+            { Fabric.value = "5"; lower = Fabric.Real yge_l; upper = Fabric.Real yle_l }
+        else None);
+  (MockB.fabric_verify_fn := fun _ _ _ _ -> true);
+  (MockA.model_fn := fun () -> [ x, Model.Uninterp 0; y, Model.Uninterp 1 ]);
+  (MockB.model_fn := fun () -> [ x, Model.Int 5; y, Model.Int 5 ]);
+  (MockA.explain_fn
+   := fun l ->
+        if Lit.equal l e_lit
+        then { Explanation.premises = []; rule = Explanation.Rule_tag.Euf_congruence }
+        else trivial_expl);
+  (MockB.explain_fn
+   := fun l ->
+        if Lit.equal l e_lit
+        then failwith "mock LIA: e=(x=y) reason was unwound by the pop"
+        else trivial_expl);
+  (* PHASE 1 (registry empty): B propagates e (owner B), inside a pushed frame. *)
+  (MockA.check_fn := fun _ -> Th.Propagations []);
+  (MockB.check_fn
+   := fun eff ->
+        match eff with
+        | Th.Propagate -> Th.Propagations [ e_lit ]
+        | Th.Final -> Th.Sat);
+  Cmock.push t;
+  (match Cmock.check t Th.Propagate with
+   | Th.Propagations ls when List.exists (Lit.equal e_lit) ls -> ()
+   | _ -> check "white-box strand precond: phase-1 B propagates e" false);
+  Cmock.pop t 1;
+  (* PHASE 2 (edge live): the (x,y) disagreement injects a fabric edge; A re-propagates e. *)
+  let a_final = ref 0 in
+  (MockA.check_fn
+   := fun eff ->
+        match eff with
+        | Th.Final ->
+          incr a_final;
+          if !a_final = 1 then Th.Sat else Th.Propagations [ e_lit ]
+        | Th.Propagate -> Th.Propagations []);
+  Cmock.push t;
+  (match Cmock.check t Th.Final with
+   | Th.Propagations ls when List.exists (Lit.equal e_lit) ls -> ()
+   | _ -> check "white-box strand precond: phase-2 injects + A propagates e" false);
+  (* discriminator: explain e must route to the fresh owner (A) and not degrade. *)
+  let ok =
+    match Cmock.explain t e_lit with
+    | _ -> true
+    | exception (Failure _ | Cmb.Combination_unsound _) -> false
+  in
+  check
+    "owner-strand (white-box): explain routes to fresh owner after pop+re-propagate"
+    ok;
+  reset_mocks ()
 ;;
 
 let () =
@@ -2689,6 +2825,7 @@ let () =
   test_fabric_pop_reassert ();
   test_fabric_pop_owner_strand ();
   test_f1sem_verifier_discriminates ();
+  test_owner_strand_whitebox ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

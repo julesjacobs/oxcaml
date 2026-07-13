@@ -429,10 +429,64 @@ let fixed_bounds t term =
    the [fixed_bounds] tuple, that a fixed-value pair's cited premises really are that
    term's oriented bounds at the group value — so a [fixed_bounds] bug (wrong value,
    swapped or foreign token, dropped/non-exact bound) is REJECTED rather than injected as
-   an unsound merge, and the ADR's weak-Γ acceptance mutant is non-vacuous. *)
+   an unsound merge, and the ADR's weak-Γ acceptance mutant is non-vacuous.
+
+   Independence (codex F1-SEM residual): this DELIBERATELY does not call
+   [tightest_oriented] — it re-reads the raw simplex bounds by a separate code path with
+   its own combining logic, so the verifier is independent even of that helper's
+   arithmetic (a bug in [tightest_oriented]'s candidate/tightest fold does not mirror
+   here). Both read the same [Simplex.get_lower]/[get_upper] ground truth; only the
+   combinator logic is duplicated, and that is the point. Coverage matches [fixed_bounds]:
+   a coeff-1 singleton bounded on its own variable and/or the negated-[-x] slack, plus the
+   term const; a non-unit coefficient (e.g. [2x]) with no own slack is out of coverage
+   here as in the trigger — see the report's finding-3 follow-up. *)
 let oriented_bound_value t (term : Term.t) (which : [ `Lower | `Upper ]) =
   ensure_live t;
-  tightest_oriented t term which
+  match existing_combo t term with
+  | None -> None
+  | Some (pairs, const) ->
+    let user_lower v =
+      match Simplex.get_lower t.simplex v with
+      | Some (User tok, d) -> Some (tok, d)
+      | Some (Branch _, _) | None -> None
+    in
+    let user_upper v =
+      match Simplex.get_upper t.simplex v with
+      | Some (User tok, d) -> Some (tok, d)
+      | Some (Branch _, _) | None -> None
+    in
+    let pos = existing_combo_var t pairs in
+    let neg = existing_combo_var t (negate_pairs pairs) in
+    let on v f =
+      match v with
+      | Some id -> f id
+      | None -> None
+    in
+    let flip = function
+      | Some (tok, d) -> Some (tok, Delta.neg d)
+      | None -> None
+    in
+    (* [`Upper]: [term <= d] from the combo's own upper OR [-combo >= d'] ⇒ [term <= -d'];
+       [`Lower]: symmetric. Take the tighter of the two sources inline (min upper / max
+       lower) — no shared [tightest_oriented] fold. *)
+    let a, b =
+      match which with
+      | `Upper -> on pos user_upper, flip (on neg user_lower)
+      | `Lower -> on pos user_lower, flip (on neg user_upper)
+    in
+    let tighter =
+      match a, b, which with
+      | None, None, _ -> None
+      | Some x, None, _ | None, Some x, _ -> Some x
+      | Some (ta, da), Some (tb, db), `Upper ->
+        if Delta.lt da db then Some (ta, da) else Some (tb, db)
+      | Some (ta, da), Some (tb, db), `Lower ->
+        if Delta.lt db da then Some (ta, da) else Some (tb, db)
+    in
+    (match tighter with
+     | Some (tok, d) when Delta.is_rational d && Rational.is_int (Delta.c_part d) ->
+       Some (tok, Rational.add (Delta.c_part d) (Rational.of_int const))
+     | _ -> None)
 ;;
 
 let value_is_integer d = Delta.is_rational d && Rational.is_int (Delta.c_part d)
