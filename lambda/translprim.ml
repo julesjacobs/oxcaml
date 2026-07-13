@@ -2214,6 +2214,101 @@ let add_exception_ident id =
 let remove_exception_ident id =
   Hashtbl.remove try_ids id
 
+(* Inline fast path for [String.compare]/[%compare] on strings.  The dominant
+   cost of [caml_string_compare] on the (many, short) strings compared during
+   typing is the C-call boundary, not the comparison itself.  We compare the
+   first SEVEN bytes inline and only fall back to the C call when they are
+   equal.  Loading a full word at offset 0 is always in bounds (a string block
+   occupies at least one word); after [bswap64] the word holds bytes 0..7 in
+   lexicographic (big-endian) order, and shifting right by 8 drops byte 7 --
+   which must be excluded because in a single-word block it is the padding
+   count byte written by [caml_alloc_string] (anti-correlated with length, so
+   including it can flip the sign for short strings with embedded NULs, e.g.
+   "a\000" vs "a").  Bytes 0..6 are always authoritative: within the string
+   they compare real content, and beyond the string the zero padding sorts a
+   proper prefix first, matching lexicographic order.  If the seven bytes tie,
+   we defer to the byte-accurate C comparison. *)
+let string_compare_fast_path_applies () =
+  (* Native-only: the unboxed [int64] operations used here do not exist in
+     bytecode.  64-bit little-endian targets only: the word-0 load is
+     in-bounds only when a word is 8 bytes (on a 32-bit target a one-word
+     string block is 4 bytes, so the load reads past it), and the
+     bswap64-then-shift head extraction assumes a little-endian load (on a
+     big-endian target it would drop byte 0 and keep the pad byte).
+     Whitelist known-good targets rather than exclude known-bad ones. *)
+  !Clflags.native_code
+  && (match Config.architecture with
+     | "amd64" | "arm64" -> true
+     | _ -> false)
+
+let string_compare_fast_path a b loc =
+  if not (string_compare_fast_path_applies ())
+  then Lprim (Pccall caml_string_compare, [ a; b ], loc)
+  else (
+    let int64u : _ Scalar.Integral.t = Naked (Boxable (Int64 Any_locality_mode)) in
+    let load v =
+      Lprim
+        ( Pstring_load_64
+            { unsafe = true
+            ; index_kind = Ptagged_int_index
+            ; mode = alloc_heap
+            ; boxed = false
+            }
+        , [ v; Lconst (Const_base (Const_int 0)) ]
+        , loc )
+    in
+    let bswap e = Lprim (Pscalar (Unary (Integral (int64u, Bswap))), [ e ], loc) in
+    let drop_last_byte e =
+      Lprim
+        ( Pscalar (Binary (Shift (int64u, Lsr, Int)))
+        , [ e; Lconst (Const_base (Const_int 8)) ]
+        , loc )
+    in
+    let head v = drop_last_byte (bswap (load v)) in
+    let ceq = Pscalar (Binary (Icmp (Scalar.Integral.ignore_locality int64u, Ceq))) in
+    let three_way =
+      Pscalar
+        (Binary (Three_way_compare_int (Signed, Scalar.Integral.ignore_locality int64u)))
+    in
+    let ida = Ident.create_local "cmp_s1" in
+    let idb = Ident.create_local "cmp_s2" in
+    let idh1 = Ident.create_local "cmp_h1" in
+    let idh2 = Ident.create_local "cmp_h2" in
+    let duid = Lambda.debug_uid_none in
+    (* Bind [b] before [a]: native argument evaluation for the plain
+       [Pccall] is right-to-left, so this keeps the evaluation order of
+       effectful operands identical to the non-fast-path code. *)
+    Llet
+      ( Strict
+      , Lambda.layout_string
+      , idb
+      , duid
+      , b
+      , Llet
+          ( Strict
+          , Lambda.layout_string
+          , ida
+          , duid
+          , a
+          , Llet
+              ( Strict
+              , Lambda.Punboxed_or_untagged_integer Lambda.Unboxed_int64
+              , idh1
+              , duid
+              , head (Lvar ida)
+              , Llet
+                  ( Strict
+                  , Lambda.Punboxed_or_untagged_integer Lambda.Unboxed_int64
+                  , idh2
+                  , duid
+                  , head (Lvar idb)
+                  , Lifthenelse
+                      ( Lprim (ceq, [ Lvar idh1; Lvar idh2 ], loc)
+                      , Lprim (Pccall caml_string_compare, [ Lvar ida; Lvar idb ], loc)
+                      , Lprim (three_way, [ Lvar idh1; Lvar idh2 ], loc)
+                      , Lambda.layout_int ) ) ) ) ))
+;;
+
 let lambda_of_prim prim_name prim loc args arg_exps =
   match prim, args with
   | Primitive (prim, arity), args when arity = List.length args ->
@@ -2222,6 +2317,8 @@ let lambda_of_prim prim_name prim loc args arg_exps =
       Lprim(Pccall prim_sys_argv, [lambda_unit], loc)
   | External prim, args ->
       Lprim(Pccall prim, args, loc)
+  | Comparison(Compare, Compare_strings), [a; b] ->
+      string_compare_fast_path a b loc
   | Comparison(comp, knd), ([_;_] as args) ->
       let prim = comparison_primitive comp knd in
       Lprim(prim, args, loc)
