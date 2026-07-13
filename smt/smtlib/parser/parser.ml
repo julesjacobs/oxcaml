@@ -667,7 +667,15 @@ let parse_sort_decls (s : Sexp.t) =
    only UF + linear integers + universals solves; an AUFLIA file touching arrays degrades.
    Universals only: an [exists] in the body is rejected as {!Unsupported} regardless. *)
 let known_logic = function
-  | "QF_UFLIA" | "QF_UF" | "QF_LIA" | "QF_IDL" | "QF_RDL" | "QF_DT" | "QF_UFDT" -> true
+  | "QF_UFLIA"
+  | "QF_UF"
+  | "QF_LIA"
+  | "QF_IDL"
+  | "QF_RDL"
+  | "QF_DT"
+  | "QF_UFDT"
+  | "QF_DTLIA"
+  | "QF_UFDTLIA" -> true
   (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
   | "UF"
   | "UFLIA"

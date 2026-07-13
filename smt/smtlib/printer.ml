@@ -224,9 +224,9 @@ let render_family dts =
   render
 ;;
 
-let print_term t =
+let print_term ?(datatypes = Datatype_defs.empty) t =
   let buf = Buffer.create 64 in
-  render_family Datatype_defs.empty buf t;
+  render_family datatypes buf t;
   Buffer.contents buf
 ;;
 
@@ -376,7 +376,13 @@ let print_session ?status ?(datatypes = Datatype_defs.empty) env assertions =
   (* The base printer targets QF_UFLIA; a session that declares datatypes needs a logic
      that admits them (QF_UFDT is the UF+DT superset our reader accepts). Non-datatype
      sessions are byte-identical to before. *)
-  line (if dt_syms = [] then "(set-logic QF_UFLIA)" else "(set-logic QF_UFDT)");
+  (* Non-datatype sessions keep the base QF_UFLIA label (LIA is the superset the base
+     always declares). A datatype session declares QF_UFDTLIA — the UF+DT+LIA superset —
+     NOT QF_UFDT: a datatype with integer fields carries arithmetic, and QF_UFDT would
+     omit LIA, so a strict consumer (the Lean oracle) would reject the otherwise-faithful
+     dump. The superset is always sound (a pure-DT problem is in QF_UFDTLIA), matching the
+     base's always-superset convention. *)
+  line (if dt_syms = [] then "(set-logic QF_UFLIA)" else "(set-logic QF_UFDTLIA)");
   List.iter
     (fun sym ->
        line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))

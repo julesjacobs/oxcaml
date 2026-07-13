@@ -671,6 +671,43 @@ let printer_programmatic_tester_collision () =
       text
 ;;
 
+(* BYTE-level printer oracle (codex): round-trip B compares assertions by [Term.equal],
+   and the parser accepts BOTH [(is-C t)] and [((_ is C) t)], so a printer mutant that
+   emits the wrong tester form still round-trips equal — the byte-identity claim is
+   untested there. This pins print_session's EXACT output for a datatype session with a
+   tester: the [(set-logic QF_UFDTLIA)] label (not QF_UFDT), the [(declare-datatypes ...)]
+   block with ctor/selector suppression, and the [((_ is succ) n)] tester rendering. Any
+   of those mutating changes the bytes and fails here. *)
+let printer_byte_oracle () =
+  incr checks;
+  let src =
+    "(set-logic QF_DT)\n\
+     (declare-datatypes ((nat 0)) (((succ (pred nat)) (zero))))\n\
+     (declare-const n nat)\n\
+     (assert ((_ is succ) n))\n\
+     (check-sat)\n"
+  in
+  let expected =
+    "(set-logic QF_UFDTLIA)\n\
+     (declare-datatypes ((nat 0)) (((succ (pred nat)) (zero))))\n\
+     (declare-const n nat)\n\
+     (assert ((_ is succ) n))\n\
+     (check-sat)\n"
+  in
+  match Parser.parse src with
+  | exception e -> fail "printer-byte-oracle: parse raised %s" (Printexc.to_string e)
+  | parsed ->
+    let text =
+      Printer.print_session ~datatypes:parsed.datatypes parsed.env parsed.assertions
+    in
+    if not (String.equal text expected)
+    then
+      fail
+        "printer-byte-oracle: bytes differ\n--- expected ---\n%s--- actual ---\n%s"
+        expected
+        text
+;;
+
 (* Exponential-re-read guard (reviewer-identified test-only DoS): a doubling chain
    [f_{i+1}(x) = f_i(x) + f_i(x)] makes an unmemoized expander read [f_0]'s body 2^depth
    times. Memoization on (define, arg-tags) collapses that to one expansion per (define,
@@ -853,6 +890,7 @@ let () =
   define_fun_cases ();
   parser_fail_closed_cases ();
   printer_programmatic_tester_collision ();
+  printer_byte_oracle ();
   define_fun_perf ();
   let dirs = List.tl (Array.to_list Sys.argv) in
   if dirs <> []

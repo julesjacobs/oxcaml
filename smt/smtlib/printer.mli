@@ -45,9 +45,14 @@ exception Unsupported of string
     are the reserved built-ins and print bare as operator applications. *)
 val quote_symbol : string -> string
 
-(** [print_term t] renders a single term as an SMT-LIB2 s-expression (no trailing
-    newline). Exposed for tests and reuse. *)
-val print_term : Oxsmt_core.Term.t -> string
+(** [print_term ?datatypes t] renders a single term as an SMT-LIB2 s-expression (no
+    trailing newline). Exposed for tests and reuse. [?datatypes] MUST be the same registry
+    {!print_session} is given when [t] may contain a tester application: a tester renders
+    as [((_ is C) t)] only when the registry resolves its symbol, so omitting the registry
+    (the default empty one) on a tester term would render it under its internal symbol
+    name — a DIFFERENT byte string than {!print_session} produces. With the same registry
+    the two entry points render byte-identically. *)
+val print_term : ?datatypes:Oxsmt_core.Datatype_defs.t -> Oxsmt_core.Term.t -> string
 
 (** [print_session ?status env assertions] renders a complete SMT-LIB2 script:
 

@@ -769,6 +769,26 @@ end = struct
       t.bool_uf_args
   ;;
 
+  (* Guard-before-Sat (codex): refuse to certify Sat while any datatype-sorted term is
+     live. The combinator has no datatype model and the datatype axioms (constructor
+     distinctness, injectivity, occurs) are unchecked here, so a Sat would be a wrong-Sat.
+     Fires up front, independent of the merged-model builder's per-term arm, so the wrong
+     verdict can never be reported even if a datatype term escaped that later walk.
+     Incomplete -> unknown. Called on BOTH the trunk ([combine_models]) and the DEFAULT
+     fabric ([combine_models_fabric]) Sat-certification points. Removed when the datatype
+     theory owns these classes. *)
+  let require_no_datatype_terms t =
+    Term.Set.iter
+      (fun (term : Term.t) ->
+         match term.Term.sort with
+         | Sort.Datatype _ ->
+           raise
+             (Incomplete
+                "datatype-sorted term live at Sat certification: no datatype theory yet")
+         | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ -> ())
+      t.all_terms
+  ;;
+
   (* Both children have just certified [Final]→[Sat] (codex C4): consume their models. *)
   let combine_models t : Theory.check_result =
     let ma = A.model t.a in
@@ -780,22 +800,7 @@ end = struct
       (* Int arrangement agrees; about to certify Sat — now require every buried Bool UF
          argument to be bound (else a wrong-SAT would leak, codex H2). *)
       require_bool_args_bound t ma;
-      (* Guard-before-Sat (codex): refuse to certify Sat while any datatype-sorted term is
-         live. The combinator has no datatype model and the datatype axioms (constructor
-         distinctness, injectivity, occurs) are unchecked here, so a Sat would be a
-         wrong-Sat. This up-front refusal is independent of — and fires before — the
-         merged model builder's per-term arm, so the wrong verdict can never be reported
-         even if a datatype term escaped that later walk. Incomplete -> unknown. Removed
-         when the datatype theory owns these classes. *)
-      Term.Set.iter
-        (fun (term : Term.t) ->
-           match term.Term.sort with
-           | Sort.Datatype _ ->
-             raise
-               (Incomplete
-                  "datatype-sorted term live at Sat certification: no datatype theory yet")
-           | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ -> ())
-        t.all_terms;
+      require_no_datatype_terms t;
       Theory.Sat
   ;;
 
@@ -1178,6 +1183,7 @@ end = struct
     match find_disagreement t ma mb with
     | None ->
       require_bool_args_bound t ma;
+      require_no_datatype_terms t;
       Theory.Sat
     | Some (x, y) ->
       if try_inject_pair t x y
