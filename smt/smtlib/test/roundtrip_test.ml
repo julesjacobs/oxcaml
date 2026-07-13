@@ -708,6 +708,46 @@ let printer_byte_oracle () =
         text
 ;;
 
+(* BYTE oracle for the Bigint x datatype rendering INTERSECTION (team-lead): a datatype
+   session whose Int-field selector is equated to a literal far beyond int63. Pins that
+   the arbitrary-precision numeral renders via [Bigint.to_string] EXACTLY, inside the
+   datatype-session framing (QF_UFDTLIA + declare-datatypes with the Int-field selector,
+   which is suppressed as a datatype member and used bare in [(val c)]). The literal is
+   2^128, unrepresentable in int63. *)
+let printer_byte_oracle_bignum () =
+  incr checks;
+  let big = "340282366920938463463374607431768211456" in
+  let src =
+    "(set-logic QF_DT)\n\
+     (declare-datatypes ((cell 0)) (((mk (val Int)))))\n\
+     (declare-const c cell)\n\
+     (assert (= (val c) "
+    ^ big
+    ^ "))\n(check-sat)\n"
+  in
+  let expected =
+    "(set-logic QF_UFDTLIA)\n\
+     (declare-datatypes ((cell 0)) (((mk (val Int)))))\n\
+     (declare-const c cell)\n\
+     (assert (= (val c) "
+    ^ big
+    ^ "))\n(check-sat)\n"
+  in
+  match Parser.parse src with
+  | exception e ->
+    fail "printer-byte-oracle-bignum: parse raised %s" (Printexc.to_string e)
+  | parsed ->
+    let text =
+      Printer.print_session ~datatypes:parsed.datatypes parsed.env parsed.assertions
+    in
+    if not (String.equal text expected)
+    then
+      fail
+        "printer-byte-oracle-bignum: bytes differ\n--- expected ---\n%s--- actual ---\n%s"
+        expected
+        text
+;;
+
 (* Exponential-re-read guard (reviewer-identified test-only DoS): a doubling chain
    [f_{i+1}(x) = f_i(x) + f_i(x)] makes an unmemoized expander read [f_0]'s body 2^depth
    times. Memoization on (define, arg-tags) collapses that to one expansion per (define,
@@ -891,6 +931,7 @@ let () =
   parser_fail_closed_cases ();
   printer_programmatic_tester_collision ();
   printer_byte_oracle ();
+  printer_byte_oracle_bignum ();
   define_fun_perf ();
   let dirs = List.tl (Array.to_list Sys.argv) in
   if dirs <> []

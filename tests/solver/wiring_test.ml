@@ -1297,7 +1297,7 @@ let test_default_value_datatype_fail_closed () =
   check
     "default_value Int = VInt 0"
     (match Session.For_test.default_value Sort.int with
-     | Session.VInt 0 -> true
+     | Session.VInt z -> Bigint.equal z Bigint.zero
      | _ -> false);
   check
     "default_value Uninterpreted = VUninterp 0"
