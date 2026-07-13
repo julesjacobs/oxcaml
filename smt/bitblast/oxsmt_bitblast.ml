@@ -11,10 +11,10 @@
     - {!Blast} — the circuit library (term DAG -> SAT literals).
     - {!Bv_eval} — independent value-semantics evaluator (oracle + model check).
     - {!Bv_solve} — the solve driver (fail-closed to [Unknown], never a wrong verdict).
-    - {!Bv_defs_stub} — TEMPORARY pre-handoff registry; deleted on rebase onto bv-front. *)
+    - {!Bv_adapter} — the bridge from bv-front's [Oxsmt_core.Bv] vocabulary to {!Blast}. *)
 
 module Bv_op = Bv_op
 module Blast = Blast
 module Bv_eval = Bv_eval
 module Bv_solve = Bv_solve
-module Bv_defs_stub = Bv_defs_stub
+module Bv_adapter = Bv_adapter
