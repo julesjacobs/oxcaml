@@ -33,7 +33,7 @@ exception Unsupported of string
 type lemma_src =
   { qvars : (string * Oxsmt_core.Sort.t) list (* forall binders, flattened, outer-first *)
   ; build : Oxsmt_core.Term.t array -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
-    (** [build qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for the
+  (** [build qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for the
       k-th binder. May raise {!Malformed}/{!Unsupported} when the body is outside the
       subset — the driver maps that to a sound [unknown]. *)
   }
@@ -45,7 +45,7 @@ type t =
   ; status : Oxsmt_smtlib.Status.t option
   ; assertions : Oxsmt_core.Term.t list (* ground assertions, in file order *)
   ; datatypes : Oxsmt_core.Datatype_defs.t
-    (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
+      (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
          and testers, keyed by symbol, for the datatype theory. [empty] when none
          declared. *)
   ; arrays : Oxsmt_core.Array_defs.t
