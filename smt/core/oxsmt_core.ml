@@ -10,6 +10,7 @@
     library-private [Node] module (dune [private_modules]) and is unreachable from
     outside; likewise the no-copy [Iarr_unsafe] cast. *)
 
+module Bigint = Bigint
 module Iarr = Iarr
 module Symbol = Symbol
 module Sort = Sort

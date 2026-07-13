@@ -41,6 +41,16 @@ val mul_const : t -> int -> Term.t -> Term.t
     for LIA). *)
 val linear_combination : t -> (int * Term.t) list -> int -> Term.t
 
+(** Arbitrary-precision entry points (core-bignum W2): identical to {!int_const} /
+    {!mul_const} / {!linear_combination} but taking {!Bigint.t} coefficients/constants, so
+    a literal or coefficient exceeding int63 is admitted without loss (the [int] variants
+    above are exactly these with a [Bigint.of_int] widen). Used by the parser for >2^63
+    numerals and by presolve when rebuilding a substituted linear term. *)
+val int_const_big : t -> Bigint.t -> Term.t
+
+val mul_const_big : t -> Bigint.t -> Term.t -> Term.t
+val linear_combination_big : t -> (Bigint.t * Term.t) list -> Bigint.t -> Term.t
+
 (** [div t x d] / [mod_ t x d]: [d] must be a nonzero [Int_const], else
     {!Term.Unsupported} (a documented v1 limitation). Built on the reserved [div]/[mod]
     symbols, eliminated by a later pass. *)

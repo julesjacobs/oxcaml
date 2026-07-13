@@ -88,14 +88,15 @@ let euclid a b =
 let mix name vals = List.fold_left (fun h v -> (h * 31) + v) (Hashtbl.hash name) vals
 let func_int sym vals = (((mix (Symbol.name sym) vals mod 17) + 17) mod 17) - 8
 let func_bool sym vals = mix (Symbol.name sym) vals land 1 = 1
+let bi_to_int b = Option.get (Bigint.to_int_opt b)
 
 let rec eval_int interp (t : Term.t) : int =
   match t.node with
-  | Int_const k -> k
+  | Int_const k -> bi_to_int k
   | Arith l ->
     Iarr.fold
-      (fun acc (tm, c) -> acc + (c * eval_int interp tm))
-      l.Term.const
+      (fun acc (tm, c) -> acc + (bi_to_int c * eval_int interp tm))
+      (bi_to_int l.Term.const)
       l.Term.coeffs
   | Ite (c, a, b) -> if eval_bool interp c then eval_int interp a else eval_int interp b
   | App (sym, args) ->

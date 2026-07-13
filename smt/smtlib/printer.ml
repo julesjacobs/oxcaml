@@ -101,15 +101,14 @@ let quote_sort_symbol name =
 (* ------------------------------------------------------------------ *)
 (* Term rendering into a Buffer. *)
 
-(* Integer literal: nonnegative as-is; negative as [(- N)]. Strip the leading '-' from the
-   string form rather than negating, so [min_int] does not overflow. *)
+(* Integer literal (arbitrary precision, core-bignum W2): nonnegative as-is; negative as
+   [(- N)]. [Bigint.to_string] of the negated magnitude gives the unsigned digits. *)
 let add_int_lit buf n =
-  if n >= 0
-  then Buffer.add_string buf (string_of_int n)
+  if Bigint.sign n >= 0
+  then Buffer.add_string buf (Bigint.to_string n)
   else (
-    let s = string_of_int n in
     Buffer.add_string buf "(- ";
-    Buffer.add_substring buf s 1 (String.length s - 1);
+    Buffer.add_string buf (Bigint.to_string (Bigint.neg n));
     Buffer.add_char buf ')')
 ;;
 
@@ -178,7 +177,7 @@ and render_arith buf (l : Term.linear) =
     Iarr.fold
       (fun acc (t, c) ->
          let b = Buffer.create 32 in
-         if c = 1
+         if Bigint.equal c Bigint.one
          then render b t
          else (
            Buffer.add_string b "(* ";
@@ -192,7 +191,7 @@ and render_arith buf (l : Term.linear) =
   in
   let summands = List.rev summands in
   let parts =
-    if l.const = 0
+    if Bigint.is_zero l.const
     then summands
     else (
       let b = Buffer.create 16 in

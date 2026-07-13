@@ -80,16 +80,16 @@ let is_numeral s =
        s
 ;;
 
-let int_of_numeral s =
+(* Build an integer-constant term from a decimal string: native fast path, then
+   arbitrary-precision (core-bignum W2) so a >int63 numeral reads without loss. [s] may
+   carry a leading '-'. *)
+let const_of_decimal ctx s =
   match int_of_string_opt s with
-  | Some n -> n
-  | None -> raise (Unsupported ("numeral exceeds native int: " ^ s))
-;;
-
-let checked_mul a b =
-  let p = a * b in
-  if a <> 0 && p / a <> b then raise (Unsupported "constant multiplication overflow");
-  p
+  | Some n -> Context.int_const ctx n
+  | None ->
+    (match Bigint.of_string s with
+     | b -> Context.int_const_big ctx b
+     | exception Invalid_argument _ -> raise (Unsupported ("malformed numeral: " ^ s)))
 ;;
 
 (* Resolve a sort s-expression (Atom name; compound sorts are unsupported). *)
@@ -150,7 +150,7 @@ and parse_atom ctx decls env name =
     (match name with
      | "true" -> Context.bool_const ctx true
      | "false" -> Context.bool_const ctx false
-     | _ when is_numeral name -> Context.int_const ctx (int_of_numeral name)
+     | _ when is_numeral name -> const_of_decimal ctx name
      | _ -> parse_symbol_ref ctx decls name [])
 
 and parse_symbol_ref ctx decls name args =
@@ -282,9 +282,7 @@ and parse_operator ctx decls env op args =
        as a positive native int), so [neg (int_const n)] cannot build [min_int]; the whole
        signed literal can. Behaviour-preserving for every other numeral (folds to the same
        [Int_const]); genuinely out-of-range magnitudes still raise [Unsupported]. *)
-    (match int_of_string_opt ("-" ^ s) with
-     | Some n -> Context.int_const ctx n
-     | None -> raise (Unsupported ("numeral exceeds native int: -" ^ s)))
+    const_of_decimal ctx ("-" ^ s)
   | "-", [ a ] -> Context.neg ctx (p a)
   | "-", first :: (_ :: _ as rest) ->
     List.fold_left (fun acc x -> Context.sub ctx acc (p x)) (p first) rest
@@ -310,10 +308,11 @@ and parse_mul ctx factors =
          | _ -> Right t)
       factors
   in
-  let c = List.fold_left checked_mul 1 consts in
+  (* Constant factors fold in arbitrary precision (core-bignum W2); never overflows. *)
+  let c = List.fold_left Bigint.mul Bigint.one consts in
   match nonconsts with
-  | [] -> Context.int_const ctx c
-  | [ t ] -> Context.mul_const ctx c t
+  | [] -> Context.int_const_big ctx c
+  | [ t ] -> Context.mul_const_big ctx c t
   | _ :: _ :: _ ->
     raise (Unsupported "nonlinear multiplication (>= 2 non-constant factors)")
 

@@ -948,14 +948,16 @@ let test_router_polarity_contract () =
 (* An Int assignment of atomic terms (App / literal) → int; used by toy LIA and the
    SAT-model self-check. Descends into Arith (LIA's view) but treats an App atomically
    (LIA is congruence-blind). *)
+let bi_to_int b = Option.get (Bigint.to_int_opt b)
+
 let rec eval_int (asg : int Term.Map.t) (t : Term.t) : int =
   match t.Term.node with
-  | Term.Int_const n -> n
+  | Term.Int_const n -> bi_to_int n
   | Term.App (_, _) -> Term.Map.find t asg
   | Term.Arith lin ->
     Iarr.fold
-      (fun acc (child, c) -> acc + (c * eval_int asg child))
-      lin.Term.const
+      (fun acc (child, c) -> acc + (bi_to_int c * eval_int asg child))
+      (bi_to_int lin.Term.const)
       lin.Term.coeffs
   | _ -> raise (Invalid_argument "eval_int: not an Int term")
 ;;
@@ -1045,7 +1047,7 @@ module Toy_lia = struct
       Term.Set.elements t.atoms
       |> List.filter_map (fun (a : Term.t) ->
         match a.Term.node with
-        | Term.Int_const n -> Some (a, n)
+        | Term.Int_const n -> Some (a, bi_to_int n)
         | _ -> None)
       |> List.fold_left (fun m (a, n) -> Term.Map.add a n m) Term.Map.empty
     in
@@ -1419,14 +1421,14 @@ let model_satisfies (m : Model.t) (formula : (Term.t * bool) list) : bool =
     | Some _ -> None
     | None ->
       (match tm.Term.node with
-       | Term.Int_const n -> Some n
+       | Term.Int_const n -> Some (bi_to_int n)
        | Term.Arith lin ->
          Iarr.fold
            (fun acc (child, c) ->
               match acc, ev_int child with
-              | Some a, Some v -> Some (a + (c * v))
+              | Some a, Some v -> Some (a + (bi_to_int c * v))
               | _ -> None)
-           (Some lin.Term.const)
+           (Some (bi_to_int lin.Term.const))
            lin.Term.coeffs
        | _ -> None)
   in

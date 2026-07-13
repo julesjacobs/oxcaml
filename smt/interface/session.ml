@@ -35,7 +35,7 @@ type verdict =
 
 type model_value = Cdclt.value =
   | VBool of bool
-  | VInt of int
+  | VInt of Bigint.t
   | VUninterp of int
 
 type fun_table = Cdclt.fun_table =
@@ -629,7 +629,7 @@ let default_value (sort : Sort.t) =
   if Sort.equal sort Sort.bool
   then VBool false
   else if Sort.equal sort Sort.int
-  then VInt 0
+  then VInt Bigint.zero
   else VUninterp 0
 ;;
 

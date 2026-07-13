@@ -1,5 +1,9 @@
-(** Hand-rolled arbitrary-precision signed integers — the [Big]-tier fallback arithmetic
-    for {!Rational} (core-bignum W2). Stdlib-only (INVARIANTS.md I3): no Zarith.
+(** Hand-rolled arbitrary-precision signed integers. Two consumers: the [Big]-tier
+    fallback arithmetic for {!Rational} (core-bignum W2), and the arbitrary-precision
+    coefficients/constants of the core term layer ([Term.Int_const] and [linear], since
+    the core arithmetic representation was widened off native [int] to admit >int63 input
+    literals). It lives in [oxsmt_core] so both the term layer and the LIA theory can name
+    it; stdlib-only (INVARIANTS.md I3): no Zarith.
 
     Sign-magnitude, little-endian base-2^31 limbs (core-bignum-review.md R3: 2^31, not
     2^62 — OCaml's 63-bit [int] has no double-width product). Values are {b canonical}: no
@@ -21,6 +25,13 @@ val sign : t -> int
 val is_zero : t -> bool
 val equal : t -> t -> bool
 val compare : t -> t -> int
+
+(** Value-based structural hash (sign + limbs); equal values hash equal (canonicity), and
+    it is deterministic (I6). This is the sanctioned value hash for the core term
+    hash-cons bucket over [Int_const]/linear coefficients — do not substitute polymorphic
+    [Hashtbl.hash] on [t]. *)
+val hash : t -> int
+
 val neg : t -> t
 val abs : t -> t
 val add : t -> t -> t

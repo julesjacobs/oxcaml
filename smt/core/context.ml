@@ -9,13 +9,28 @@ type t =
 
 let create env = { env; state = Node.create_state () }
 let term_count t = Node.term_count t.state
-let int_const t n = Node.int_const t.state n
+
+(* The native-[int] arithmetic API is a thin wrapper over the arbitrary-precision core:
+   every [int] argument widens through [Bigint.of_int]. The [_big] variants take a
+   [Bigint.t] directly and are the path for coefficients/literals that exceed int63 (the
+   parser's big numerals, the presolve substitution rebuild). *)
+let int_const_big t n = Node.int_const t.state n
+let int_const t n = Node.int_const t.state (Bigint.of_int n)
 let bool_const t b = Node.bool_const t.state b
 let add t a b = Node.add t.state a b
 let sub t a b = Node.sub t.state a b
 let neg t a = Node.neg t.state a
-let mul_const t c a = Node.mul_const t.state c a
-let linear_combination t pairs const = Node.linear_combination t.state pairs const
+let mul_const_big t c a = Node.mul_const t.state c a
+let mul_const t c a = Node.mul_const t.state (Bigint.of_int c) a
+let linear_combination_big t pairs const = Node.linear_combination t.state pairs const
+
+let linear_combination t pairs const =
+  Node.linear_combination
+    t.state
+    (List.map (fun (c, tm) -> Bigint.of_int c, tm) pairs)
+    (Bigint.of_int const)
+;;
+
 let eq t a b = Node.eq t.state a b
 let le t a b = Node.le t.state a b
 let lt t a b = Node.lt t.state a b
@@ -67,7 +82,8 @@ let divmod t which x d =
   Node.require_int which x;
   Node.require_int which d;
   match d.Term.node with
-  | Term.Int_const 0 -> raise (Node.Unsupported (Printf.sprintf "%s by zero" which))
+  | Term.Int_const k when Bigint.is_zero k ->
+    raise (Node.Unsupported (Printf.sprintf "%s by zero" which))
   | Term.Int_const _ ->
     let sym = if String.equal which "div" then Env.div_sym t.env else Env.mod_sym t.env in
     Node.app t.state sym [ x; d ] Sort.int

@@ -43,7 +43,11 @@ type 'tok t =
   ; simplex : 'tok reason Simplex.t
   ; var_of_term : int Term.Table.t (* problem-var term -> simplex id *)
   ; problem_vars : (int * Term.t) Dynarray.t (* (simplex id, term), creation order *)
-  ; slacks : ((int * int) list, int) Hashtbl.t (* sorted (varid,coeff) key -> slack id *)
+  ; slacks : ((int * string) list, int) Hashtbl.t
+    (* sorted (varid, canonical-coeff-string) key -> slack id; the coeff is stringified
+         via [Rational.to_string] because coefficients are now arbitrary-precision
+         [Rational.t] (core-bignum W2) and must not be keyed by a polymorphic hash of the
+         two-tier value. *)
   ; registered : reg Dynarray.t
   ; reg_index :
       int Term.Table.t (* registered atom term -> its index in [registered]; O(1) dedup *)
@@ -123,15 +127,6 @@ let guard_overflow t f =
     raise Rational.Overflow
 ;;
 
-(* Overflow-guarded native-int arithmetic on user-derived constants/coefficients: routed
-   through the guarded {!Rational} ops (which raise {!Rational.Overflow} rather than
-   wrap), so an atom constant or coefficient at the int boundary degrades to [unknown]
-   instead of silently producing a WRONG bound (codex L2/L4/L5). All are integer-valued
-   in, out. *)
-let ineg n = Rational.num (Rational.neg (Rational.of_int n))
-let isub a b = Rational.num (Rational.sub (Rational.of_int a) (Rational.of_int b))
-let iadd a b = Rational.num (Rational.add (Rational.of_int a) (Rational.of_int b))
-
 (* Get or create the problem variable for a term leaf. *)
 let problem_var t (term : Term.t) =
   match Term.Table.find_opt t.var_of_term term with
@@ -143,39 +138,47 @@ let problem_var t (term : Term.t) =
     id
 ;;
 
-(* Linear combination of an Int-sorted term: (problem-var id, coeff) pairs + integer
-   const. [Arith] nodes carry the normalized form; a bare App/leaf is [1·leaf];
-   [Int_const] is a pure constant. Int-[Ite] must have been removed by preprocessing. *)
-let combo_of_term t (term : Term.t) : (int * int) list * int =
+(* Linear combination of an Int-sorted term: (problem-var id, coeff) pairs + const, with
+   coefficients/const as arbitrary-precision {!Rational.t} (core-bignum W2 — a term
+   coefficient can exceed int63). [Arith] nodes carry the normalized form; a bare App/leaf
+   is [1·leaf]; [Int_const] is a pure constant. Int-[Ite] must have been removed by
+   preprocessing. The [Bigint -> Rational] widen never loses precision and never raises;
+   the residual int boundary is only at model extraction. *)
+let combo_of_term t (term : Term.t) : (int * Rational.t) list * Rational.t =
   match term.node with
   | Arith { coeffs; const } ->
     let pairs =
-      Iarr.fold (fun acc (tm, c) -> (problem_var t tm, c) :: acc) [] coeffs |> List.rev
+      Iarr.fold
+        (fun acc (tm, c) -> (problem_var t tm, Rational.of_bigint c) :: acc)
+        []
+        coeffs
+      |> List.rev
     in
-    pairs, const
-  | Int_const k -> [], k
+    pairs, Rational.of_bigint const
+  | Int_const k -> [], Rational.of_bigint k
   | Ite _ -> raise (Unsupported "LIA: Int-Ite must be removed by preprocessing")
-  | _ -> [ problem_var t term, 1 ], 0
+  | _ -> [ problem_var t term, Rational.one ], Rational.zero
 ;;
 
-let sort_key (pairs : (int * int) list) =
+(* Canonical dedup key for a slack definition: sort by varid, stringify the coefficient
+   (value-canonical, so it does not depend on the [Rational] tier). *)
+let sort_key (pairs : (int * Rational.t) list) : (int * string) list =
   List.sort (fun (a, _) (b, _) -> Int.compare a b) pairs
+  |> List.map (fun (x, c) -> x, Rational.to_string c)
 ;;
 
 (* The simplex variable carrying a linear combination, and whether the reported bound is a
    direct problem-var bound. Coeff-1 singletons bound their variable directly (DdM);
    anything else uses a deduplicated slack [s = Σ coeff·x]. *)
-let var_for_combo t (pairs : (int * int) list) =
+let var_for_combo t (pairs : (int * Rational.t) list) =
   match pairs with
-  | [ (x, 1) ] -> x
+  | [ (x, c) ] when Rational.equal c Rational.one -> x
   | _ ->
     let key = sort_key pairs in
     (match Hashtbl.find_opt t.slacks key with
      | Some s -> s
      | None ->
-       let s =
-         Simplex.new_slack t.simplex (List.map (fun (x, c) -> x, Rational.of_int c) pairs)
-       in
+       let s = Simplex.new_slack t.simplex pairs in
        Hashtbl.replace t.slacks key s;
        s)
 ;;
@@ -193,32 +196,36 @@ let constraints_of_atom t (atom : Term.t) ~polarity
     let var = var_for_combo t pairs in
     if polarity
     then
-      (* Σ coeff·x + const <= 0 ==> var <= -const (guarded: const=min_int must not wrap) *)
-      [ var, `Upper, Delta.of_rat (Rational.of_int (ineg const)) ]
+      (* Σ coeff·x + const <= 0 ==> var <= -const *)
+      [ var, `Upper, Delta.of_rat (Rational.neg const) ]
     else
-      (* ¬(inner <= 0) ≡ inner >= 1 (exact ℤ complement) ==> var >= 1 - const (guarded) *)
-      [ var, `Lower, Delta.of_rat (Rational.of_int (isub 1 const)) ]
+      (* ¬(inner <= 0) ≡ inner >= 1 (exact ℤ complement) ==> var >= 1 - const *)
+      [ var, `Lower, Delta.of_rat (Rational.sub Rational.one const) ]
   | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
     if not polarity then raise (Unsupported "LIA: disequality needs a trichotomy split");
     (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
     let pa, ca = combo_of_term t a in
     let pb, cb = combo_of_term t b in
-    (* coeff merges guarded (iadd/isub): a coefficient sum at the int boundary must raise,
-       not wrap to a wrong merged constraint (codex L5). *)
+    (* Coefficient merges are exact [Rational] arithmetic (never wraps, promotes to Big),
+       so a coefficient sum of any size stays a correct merged constraint (supersedes the
+       pre-W2 int-boundary degrade of codex L5). *)
     let merged =
       let tbl = Hashtbl.create 16 in
       let cur x =
         try Hashtbl.find tbl x with
-        | Not_found -> 0
+        | Not_found -> Rational.zero
       in
-      List.iter (fun (x, c) -> Hashtbl.replace tbl x (iadd (cur x) c)) pa;
-      List.iter (fun (x, c) -> Hashtbl.replace tbl x (isub (cur x) c)) pb;
-      Hashtbl.fold (fun x c acc -> if c = 0 then acc else (x, c) :: acc) tbl []
+      List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.add (cur x) c)) pa;
+      List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.sub (cur x) c)) pb;
+      Hashtbl.fold
+        (fun x c acc -> if Rational.is_zero c then acc else (x, c) :: acc)
+        tbl
+        []
     in
     if merged = [] then raise (Unsupported "LIA: trivial equality (should be folded)");
     let var = var_for_combo t merged in
-    (* rhs = -(ca - cb) = cb - ca, guarded *)
-    let rhs = Delta.of_rat (Rational.of_int (isub cb ca)) in
+    (* rhs = -(ca - cb) = cb - ca *)
+    let rhs = Delta.of_rat (Rational.sub cb ca) in
     [ var, `Upper, rhs; var, `Lower, rhs ]
   | _ -> raise (Unsupported "LIA: atom is neither Le nor an Int equality")
 ;;
@@ -539,7 +546,12 @@ let suggest_branch t =
   | None -> None
   | Some (term, _, d) ->
     let f = Rational.floor (Delta.c_part d) in
-    let fp1 = guard_overflow t (fun () -> iadd f 1) in
+    (* [f + 1] via [Rational] so a [max_int] floor degrades to [unknown] rather than
+       wrapping (the projection raises [Rational.Overflow], caught by [guard_overflow]). *)
+    let fp1 =
+      guard_overflow t (fun () ->
+        Rational.floor (Rational.add (Rational.of_int f) Rational.one))
+    in
     let le_atom = Context.le t.ctx term (Context.int_const t.ctx f) in
     let ge_atom = Context.ge t.ctx term (Context.int_const t.ctx fp1) in
     Some (le_atom, ge_atom)
@@ -624,9 +636,10 @@ let solve_integer ?(budget = default_budget) t =
            incr splits;
            let f = Rational.floor (Delta.c_part d) in
            let lo = Delta.of_rat (Rational.of_int f) in
-           (* f+1 guarded: a branch point at the int boundary must raise (→ Int_unknown
-              below), not wrap to a bogus bound (codex L2/L4/L5 class). *)
-           let hi = Delta.of_rat (Rational.of_int (iadd f 1)) in
+           (* f+1 via [Rational]: a branch point at the int boundary degrades to
+              [Int_unknown] (the projection raises), not a bogus wrapped bound (codex
+              L2/L4/L5 class). *)
+           let hi = Delta.of_rat (Rational.add (Rational.of_int f) Rational.one) in
            Simplex.push t.simplex;
            let _ = Simplex.assert_upper t.simplex id lo (Branch id) in
            let r1 = dfs ~depth0:false in

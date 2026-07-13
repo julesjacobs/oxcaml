@@ -150,7 +150,8 @@ let test_lia_sat () =
   Session.assert_term s (Context.eq ctx x (Context.int_const ctx 3));
   check_verdict "LIA 0<=x<=5, x=3" Session.Sat (Session.check_sat s);
   match Session.get_model s with
-  | Some (_, [ Session.Const ("x", Session.VInt 3) ]) -> check "LIA sat model x=3" true
+  | Some (_, [ Session.Const ("x", Session.VInt v) ]) when Bigint.to_int_opt v = Some 3 ->
+    check "LIA sat model x=3" true
   | Some _ | None -> check "LIA sat model x=3" false
 ;;
 
@@ -383,7 +384,9 @@ let test_mixed_bool_theory_model () =
     check
       "mixed model includes Bool const p (=true)"
       (find "p" = Some (Session.VBool true));
-    check "mixed model includes Int const x (=0)" (find "x" = Some (Session.VInt 0));
+    check
+      "mixed model includes Int const x (=0)"
+      (find "x" = Some (Session.VInt (Bigint.of_int 0)));
     check "mixed model has exactly p and x" (List.length m = 2)
   | v, _ -> check ("mixed bool/theory: expected sat+model, got " ^ verdict_str v) false
 ;;
@@ -909,63 +912,21 @@ let test_adr0010_bool_boundary () =
     (Session.check_sat s)
 ;;
 
-(* Regression (codex HIGH, task #110 fix round): the R1 checker's [mul_ovf] must fail
-   CLOSED on the [min_int * -1] wrap. [-min_int] wraps back to [min_int] and
-   [min_int / -1] wraps too, so a wrapped product slips past the quotient check — a false
-   [true] that silently defeats the fail-closed TCB guard. No solver path models
-   [min_int], so this is unreachable end-to-end (hence a DIRECT Model_check call, not a
-   CLI drive): a model binding x = min_int and the assertion [-x = min_int]. Evaluating
-   [-x] must raise inside the checker so the assertion fails closed and check = false (NOT
-   the wrap-true the old guard returned). Discriminating: the pre-fix guard returns true
-   here. *)
+(* Regression, now an arbitrary-precision witness (core-bignum W2): with a model binding x
+   = min_int, the assertion [-x = min_int] must evaluate to FALSE — [-x] is exactly [2^63]
+   ([Bigint], no wrap), and [2^63 <> min_int = -2^63]. Pre-bignum the R1 checker's native
+   [-min_int] wrapped back to [min_int], making the assertion a spurious [true] (wrong
+   self-certified sat); the exact fold makes it correctly false, so [check] returns false.
+   Discriminating: the pre-bignum wrap returns true here. *)
 let test_model_check_min_int_guard () =
   let s = Session.create () in
   let ctx = Session.context s in
   let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
   let assertion = Context.eq ctx (Context.neg ctx x) (Context.int_const ctx min_int) in
-  let model = [], [ Session.Const ("x", Session.VInt min_int) ] in
+  let model = [], [ Session.Const ("x", Session.VInt (Bigint.of_int min_int)) ] in
   check
-    "Model_check min_int*-1 guard: -x = min_int fails closed (not a wrap-true)"
+    "Model_check -x = min_int: exact bignum makes it false (not a wrap-true)"
     (not (Oxsmt_interface.Model_check.check model [ assertion ]))
-;;
-
-(* Task #117 guard parity: {!Cdclt}'s §10-v2 gap-B structural Arith fold uses its own copy
-   of the overflow-guarded add/mul; R1 ({!Model_check}) re-folds every table key with its
-   own copy. If the two ever diverge on an overflow edge, R1 rejects a key the extractor
-   computed differently — a valid model gratuitously degrades to [unknown]. Pin them EQUAL
-   over an edge matrix that includes the [min_int * -1] / [-1 * min_int] wrap (the clause
-   a bare quotient check misses) and the additive-overflow corners. [Cdclt] returns
-   [int option] (None = overflow -> Degrade); [Model_check] raises on overflow (-> Bad ->
-   the assertion fails closed); normalize both to [int option] and require agreement. *)
-let test_ovf_guard_parity () =
-  let mc_opt f a b =
-    try Some (f a b) with
-    | _ -> None
-  in
-  let edges = [ 0; 1; -1; 2; -2; 7; max_int; min_int; max_int - 1; min_int + 1 ] in
-  List.iter
-    (fun a ->
-       List.iter
-         (fun b ->
-            check
-              (Printf.sprintf "add_ovf parity a=%d b=%d" a b)
-              (Oxsmt_interface.Cdclt.add_ovf a b
-               = mc_opt Oxsmt_interface.Model_check.add_ovf a b);
-            check
-              (Printf.sprintf "mul_ovf parity a=%d b=%d" a b)
-              (Oxsmt_interface.Cdclt.mul_ovf a b
-               = mc_opt Oxsmt_interface.Model_check.mul_ovf a b))
-         edges)
-    edges;
-  (* Discriminating spot-checks: the min_int wrap the quotient check alone would MISS must
-     be rejected (None) by both, and a normal product must survive. *)
-  check "mul_ovf min_int*-1 -> None" (Oxsmt_interface.Cdclt.mul_ovf min_int (-1) = None);
-  check "mul_ovf -1*min_int -> None" (Oxsmt_interface.Cdclt.mul_ovf (-1) min_int = None);
-  check
-    "add_ovf min_int+min_int -> None"
-    (Oxsmt_interface.Cdclt.add_ovf min_int min_int = None);
-  check "mul_ovf 6*7 = 42" (Oxsmt_interface.Cdclt.mul_ovf 6 7 = Some 42);
-  check "add_ovf 6+7 = 13" (Oxsmt_interface.Cdclt.add_ovf 6 7 = Some 13)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -978,7 +939,7 @@ let test_ovf_guard_parity () =
 let find_int_in_model m n =
   List.find_map
     (function
-      | Session.Const (k, Session.VInt v) when k = n -> Some v
+      | Session.Const (k, Session.VInt v) when k = n -> Bigint.to_int_opt v
       | _ -> None)
     m
 ;;
@@ -1227,28 +1188,35 @@ let test_presolve_overflow_coeff_degrades () =
     (Session.check_sat s)
 ;;
 
-(* - reviewer, CONSTANT composition (add; not gcd-divided): y = max_int, x = y + 1, x >= 0
-     -> max_int + 1 on substitution. *)
-let test_presolve_overflow_const_degrades () =
+(* core-bignum W2 (term layer): CONSTANT composition past int63 now SOLVES exactly rather
+   than degrading. y = max_int, x = y + 1, x >= 0: substitution yields x = max_int + 1 =
+   2^63 (exact [Bigint]), which satisfies x >= 0, so the query is SAT and the
+   reconstructed model binds x to exactly 2^63 (carried as a [VInt Bigint], R1-verified).
+   Discriminating: pre-bignum this raised/degraded to unknown. *)
+let test_presolve_bignum_const_solves () =
   let s = Session.create () in
   let ctx = Session.context s in
   let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
   let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
-  (match
-     Session.assert_presolved
-       s
-       [ Context.eq ctx y (Context.int_const ctx max_int)
-       ; Context.eq ctx x (Context.add ctx y (Context.int_const ctx 1))
-       ; Context.ge ctx x (Context.int_const ctx 0)
-       ]
-   with
-   | () -> ()
-   | exception e ->
-     check ("const overflow raised " ^ Printexc.to_string e ^ " (want unknown)") false);
-  check_verdict
-    "overflow(const): degrades to unknown"
-    Session.Unknown
-    (Session.check_sat s)
+  Session.assert_presolved
+    s
+    [ Context.eq ctx y (Context.int_const ctx max_int)
+    ; Context.eq ctx x (Context.add ctx y (Context.int_const ctx 1))
+    ; Context.ge ctx x (Context.int_const ctx 0)
+    ];
+  check_verdict "bignum(const): solves SAT (exact 2^63)" Session.Sat (Session.check_sat s);
+  let expected = Bigint.add (Bigint.of_int max_int) Bigint.one in
+  let x_ok =
+    match Session.get_model s with
+    | Some (_, binds) ->
+      List.exists
+        (function
+          | Session.Const ("x", Session.VInt v) -> Bigint.equal v expected
+          | _ -> false)
+        binds
+    | None -> false
+  in
+  check "bignum(const): model binds x = 2^63 exactly" x_ok
 ;;
 
 (* codex H2 (DOC-ONLY ruling, same-model adjudication): substituting a variable by an
@@ -1377,7 +1345,6 @@ let () =
   test_cli_refused_symbol_degrades ();
   test_cli_negative_int_token ();
   test_model_check_min_int_guard ();
-  test_ovf_guard_parity ();
   test_presolve_alias_chain ();
   test_presolve_cycle_guard ();
   test_presolve_shadowed_alias ();
@@ -1389,7 +1356,7 @@ let () =
   test_presolve_determinism ();
   test_presolve_run_direct ();
   test_presolve_overflow_coeff_degrades ();
-  test_presolve_overflow_const_degrades ();
+  test_presolve_bignum_const_solves ();
   test_presolve_eq_uf_side_sound ();
   test_presolve_bool_dep_default ();
   test_presolve_negated_eq_not_eliminated ();

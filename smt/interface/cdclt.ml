@@ -44,7 +44,8 @@ module Combined =
    extraction remaps class ids to dense per-sort indices, ADR-UF-models §1/R10). *)
 type value =
   | VBool of bool
-  | VInt of int
+  | VInt of
+      Bigint.t (* arbitrary precision (core-bignum W2): a term value can exceed int63 *)
   | VUninterp of int
 
 (* A total interpretation of one uninterpreted function/predicate symbol (ADR-UF-models
@@ -271,7 +272,7 @@ let effort_used t = Budget.used t.budget
 let value_of (v : Model.value) =
   match v with
   | Model.Bool b -> VBool b
-  | Model.Int n -> VInt n
+  | Model.Int n -> VInt (Bigint.of_int n)
   | Model.Uninterp i -> VUninterp i
 ;;
 
@@ -314,37 +315,10 @@ let value_compare (a : value) (b : value) =
   | VBool x, VBool y -> Bool.compare x y
   | VBool _, _ -> -1
   | _, VBool _ -> 1
-  | VInt x, VInt y -> Int.compare x y
+  | VInt x, VInt y -> Bigint.compare x y
   | VInt _, _ -> -1
   | _, VInt _ -> 1
   | VUninterp x, VUninterp y -> Int.compare x y
-;;
-
-(* Overflow-guarded int add/mul for the §10-v2 gap-B structural Arith fold ({!model}'s
-   [value_of]). [None] on overflow. These are a VERBATIM copy — held in guard PARITY — of
-   [Model_check.add_ovf]/[mul_ovf] (R1's [ev] uses the raising form; the option here maps
-   to a [Degrade]), INCLUDING the [min_int * -1] / [-1 * min_int] wrap clause the quotient
-   check alone misses. Parity is load-bearing: R1 re-evaluates every table key with its
-   own fold, so a divergence here would make R1 reject a key the extractor computed
-   differently — a gratuitous [unknown] re-opening the gap. Copied rather than shared
-   because [Cdclt] is below [Model_check] in the dependency order; the wiring-test parity
-   oracle pins them equal (task #117; the [min_int] edge is unreachable on the solver path
-   but the invariant must hold — same rationale as the R1 guard's own regression). *)
-let add_ovf a b =
-  let r = a + b in
-  if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (r >= 0) (a >= 0))
-  then None
-  else Some r
-;;
-
-let mul_ovf a b =
-  if a = 0 || b = 0
-  then Some 0
-  else (
-    let r = a * b in
-    if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
-    then None
-    else Some r)
 ;;
 
 (* Reconstruct the FINITE FUNCTION MODEL — uninterpreted-sort universes + const bindings +
@@ -470,7 +444,7 @@ let model t =
        let rec value_of (term : Term.t) =
          match Model.value m term, term.Term.node with
          | Some (Model.Bool b), _ -> VBool b
-         | Some (Model.Int n), _ -> VInt n
+         | Some (Model.Int n), _ -> VInt (Bigint.of_int n)
          | _, Term.Arith lin ->
            (* §10 v2 gap B (task #117): a pure-EUF Int [Arith] term (LIA never numerically
               valued it — else the [Model.Int] arm above caught it, tier 1) is EVALUATED
@@ -478,20 +452,13 @@ let model t =
               this row is stored under equals the key R1 recomputes. Operands resolve
               recursively (leaves realize/inherit via the arms below); [Arith] children
               are non-[Arith] (term.ml invariant), so the recursion is shallow. The fold
-              uses the module-level overflow guards {!add_ovf}/{!mul_ovf}, in guard PARITY
-              with R1's [Model_check.add_ovf]/[mul_ovf] (incl. the [min_int * -1] wrap;
-              pinned by the wiring-test parity oracle): on overflow it [Degrade]s to
-              no-model, exactly where R1's fold [raise Bad]s, so the two never disagree —
-              a divergence would gratuitously reject a valid model. *)
+              is exact arbitrary-precision arithmetic ({!Bigint}, core-bignum W2),
+              matching R1's [Model_check] fold exactly — neither can overflow, so a big
+              constant or coefficient is evaluated precisely rather than degrading the
+              model. *)
            let step acc (child, coeff) =
              match value_of child with
-             | VInt cv ->
-               (match mul_ovf coeff cv with
-                | None -> raise Degrade
-                | Some p ->
-                  (match add_ovf acc p with
-                   | None -> raise Degrade
-                   | Some s -> s))
+             | VInt cv -> Bigint.add acc (Bigint.mul coeff cv)
              | _ -> raise Degrade
            in
            VInt (Iarr.fold step lin.Term.const lin.Term.coeffs)
@@ -501,7 +468,7 @@ let model t =
            (match term.Term.sort with
             | Sort.Int _ ->
               (match Hashtbl.find_opt int_realize cid with
-               | Some n -> VInt n
+               | Some n -> VInt (Bigint.of_int n)
                | None -> raise Degrade)
             | Sort.Uninterpreted _ ->
               (match Hashtbl.find_opt index cid with
@@ -516,7 +483,7 @@ let model t =
        let default_for (sort : Sort.t) =
          match sort with
          | Sort.Bool -> VBool false
-         | Sort.Int _ -> VInt 0
+         | Sort.Int _ -> VInt Bigint.zero
          | Sort.Uninterpreted _ -> VUninterp 0
          | Sort.Datatype _ -> raise Degrade
        in

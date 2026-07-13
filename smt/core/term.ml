@@ -11,7 +11,7 @@ type t = Node.t =
 
 and node = Node.node =
   | Bool_const of bool
-  | Int_const of int
+  | Int_const of Bigint.t
   | App of Symbol.t * t Iarr.t
   | Arith of linear
   | Le of t
@@ -22,8 +22,8 @@ and node = Node.node =
   | Ite of t * t * t
 
 and linear = Node.linear =
-  { coeffs : (t * int) Iarr.t
-  ; const : int
+  { coeffs : (t * Bigint.t) Iarr.t
+  ; const : Bigint.t
   }
 
 exception Overflow = Node.Overflow
@@ -72,12 +72,13 @@ module Debug = struct
     let cs = Iarr.to_list l.coeffs in
     if cs = [] then fail "Arith with empty coeffs should be Int_const";
     (match cs with
-     | [ (_, 1) ] when l.const = 0 -> fail "Arith {[(a,1)];0} should have unwrapped to a"
+     | [ (_, c) ] when Bigint.equal c Bigint.one && Bigint.is_zero l.const ->
+       fail "Arith {[(a,1)];0} should have unwrapped to a"
      | _ -> ());
     let prev = ref min_int in
     List.iter
       (fun (t, c) ->
-         if c = 0 then fail "Arith has a zero coefficient";
+         if Bigint.is_zero c then fail "Arith has a zero coefficient";
          if not (Sort.equal t.sort Sort.int) then fail "Arith coefficient term is not Int";
          (match t.node with
           | Arith _ -> fail "Arith coefficient term is itself an Arith"
@@ -87,7 +88,9 @@ module Debug = struct
       cs
   ;;
 
-  let gcd_of_coeffs (l : linear) = Iarr.fold (fun g (_, c) -> Node.gcd_pos g c) 0 l.coeffs
+  let gcd_of_coeffs (l : linear) =
+    Iarr.fold (fun g (_, c) -> Bigint.gcd g c) Bigint.zero l.coeffs
+  ;;
 
   let check ?(mode = Construction) ?env (root : t) =
     let seen : (int, node) Hashtbl.t = Hashtbl.create 256 in
@@ -124,7 +127,9 @@ module Debug = struct
         if not (Sort.equal arg.sort Sort.int) then fail "Le arg not Int";
         (match arg.node with
          | Int_const _ -> fail "Le arg is a constant (should have folded)"
-         | Arith l -> if gcd_of_coeffs l <> 1 then fail "Le not gcd-normalized (gcd <> 1)"
+         | Arith l ->
+           if not (Bigint.equal (gcd_of_coeffs l) Bigint.one)
+           then fail "Le not gcd-normalized (gcd <> 1)"
          | _ -> () (* bare term: single coeff 1, gcd = 1 *))
       | Eq (a, b) ->
         if not (Sort.equal t.sort Sort.bool) then fail "Eq not Bool";

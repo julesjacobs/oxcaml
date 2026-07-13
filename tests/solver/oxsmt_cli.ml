@@ -82,11 +82,11 @@ let scan_commands sexps =
 let token_of_value = function
   | Session.VBool b -> if b then "true" else "false"
   | Session.VInt n ->
-    if n >= 0
-    then string_of_int n
-    else (
-      let s = string_of_int n in
-      "(- " ^ String.sub s 1 (String.length s - 1) ^ ")")
+    (* Arbitrary precision (core-bignum W2): render via [Bigint.to_string], negatives as
+       [(- N)]. Always renderable — never degrade. *)
+    if Oxsmt_core.Bigint.sign n >= 0
+    then Oxsmt_core.Bigint.to_string n
+    else "(- " ^ Oxsmt_core.Bigint.to_string (Oxsmt_core.Bigint.neg n) ^ ")"
   | Session.VUninterp i -> string_of_int i
 ;;
 

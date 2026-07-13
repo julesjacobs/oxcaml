@@ -93,7 +93,7 @@ type verdict =
     element index of its uninterpreted sort's finite universe. *)
 type model_value = Cdclt.value =
   | VBool of bool
-  | VInt of int
+  | VInt of Oxsmt_core.Bigint.t (* arbitrary precision (core-bignum W2) *)
   | VUninterp of int
 
 (** A total interpretation of one uninterpreted function/predicate (re-exported). *)

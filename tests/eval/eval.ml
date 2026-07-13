@@ -2,6 +2,14 @@ open Oxsmt_core
 
 exception Eval_error of string
 
+(* Project a term's arbitrary-precision constant/coefficient ([Bigint.t], core-bignum W2)
+   to native [int]; a value exceeding int63 raises (fail-closed, never truncates). *)
+let int_of_big b =
+  match Bigint.to_int_opt b with
+  | Some i -> i
+  | None -> raise (Eval_error "integer literal/coefficient exceeds native int range")
+;;
+
 (* Overflow-guarded integer arithmetic: raise, never wrap (I8 spirit). *)
 let add_ovf a b =
   let s = a + b in
@@ -73,7 +81,7 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
   let rec go (t : Term.t) : Value.t =
     match t.node with
     | Term.Bool_const b -> Value.Bool b
-    | Term.Int_const n -> Value.Int n
+    | Term.Int_const n -> Value.Int (int_of_big n)
     | Term.Not a -> Value.Bool (not (as_bool (go a)))
     | Term.And xs ->
       (* fold so every operand is forced (model errors stay loud even past a false one) *)
@@ -98,8 +106,8 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
     | Term.Arith { coeffs; const } ->
       let sum =
         Iarr.fold
-          (fun acc (ti, ci) -> add_ovf acc (mul_ovf ci (as_int (go ti))))
-          const
+          (fun acc (ti, ci) -> add_ovf acc (mul_ovf (int_of_big ci) (as_int (go ti))))
+          (int_of_big const)
           coeffs
       in
       Value.Int sum
@@ -149,7 +157,7 @@ let eval_term ~env (t : Term.t) : Value.t =
 let head_and_children (t : Term.t) : string * Term.t list =
   match t.node with
   | Term.Bool_const b -> Bool.to_string b, []
-  | Term.Int_const n -> Int.to_string n, []
+  | Term.Int_const n -> Bigint.to_string n, []
   | Term.Not a -> "(not _)", [ a ]
   | Term.And xs -> "(and ...)", Iarr.to_list xs
   | Term.Or xs -> "(or ...)", Iarr.to_list xs
@@ -157,7 +165,8 @@ let head_and_children (t : Term.t) : string * Term.t list =
   | Term.Eq (a, b) -> "(= _ _)", [ a; b ]
   | Term.Le a -> "(<= _ 0)", [ a ]
   | Term.Arith { coeffs; const } ->
-    Printf.sprintf "(linear +%d ...)" const, List.map fst (Iarr.to_list coeffs)
+    ( Printf.sprintf "(linear +%s ...)" (Bigint.to_string const)
+    , List.map fst (Iarr.to_list coeffs) )
   | Term.App (sym, args) ->
     let name = Symbol.name sym in
     ( (if Iarr.length args = 0 then name else Printf.sprintf "(%s ...)" name)

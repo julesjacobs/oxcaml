@@ -152,14 +152,16 @@ let idx_of fx (tm : Term.t) =
 (* The NORMALIZED <=0 half-plane of an [Le] atom's inner term, keyed by variable index.
    LIA reasons over this (gcd-tightened) form, so the independent Farkas verifier must
    too. *)
+let bi_to_int b = Option.get (Bigint.to_int_opt b)
+
 let inner_halfplane fx (inner : Term.t) =
   match inner.Term.node with
   | Term.Arith l ->
     let coeffs =
-      Iarr.fold (fun acc (tm, c) -> (idx_of fx tm, c) :: acc) [] l.Term.coeffs
+      Iarr.fold (fun acc (tm, c) -> (idx_of fx tm, bi_to_int c) :: acc) [] l.Term.coeffs
     in
-    coeffs, l.Term.const
-  | Term.Int_const k -> [], k
+    coeffs, bi_to_int l.Term.const
+  | Term.Int_const k -> [], bi_to_int k
   | _ -> [ idx_of fx inner, 1 ], 0
 ;;
 
@@ -306,8 +308,10 @@ let test_hand_cases () =
       (match inner.Term.node with
        | Term.Arith l ->
          check "2x<=3 gcd-tightens: single coeff 1" (Iarr.length l.Term.coeffs = 1);
-         check "2x<=3 gcd-tightens: coeff = 1" (snd (Iarr.get l.Term.coeffs 0) = 1);
-         check "2x<=3 gcd-tightens: const = -1" (l.Term.const = -1)
+         check
+           "2x<=3 gcd-tightens: coeff = 1"
+           (Bigint.equal (snd (Iarr.get l.Term.coeffs 0)) Bigint.one);
+         check "2x<=3 gcd-tightens: const = -1" (bi_to_int l.Term.const = -1)
        | _ -> check "2x<=3 unexpected inner (want Arith x-1)" false)
     | _ -> check "2x<=3 not an Le atom" false);
    ignore (assert_le fx [ 0, 2 ] (-3) ~polarity:true);
@@ -840,47 +844,36 @@ let test_codex_findings () =
     | Lia.Sat_candidate -> check "L3 control precondition: conflict in scope" false);
    Lia.pop fx.solver 1;
    expect_sat fx "L3 control: in-scope conflict clears on pop");
-  (* L2/L4/L5 (false-sat via silent wrap). core-bignum W2 splits these by WHERE the value
-     crosses back to native int: a value that reaches the native-int coefficient/const
-     projection ([ineg]/[isub]/[iadd] → Rational.num, lia.ml) still degrades soundly to
-     Overflow → poison → unknown (L2 -const, L4 1-const, and the L5 coeff SUM below); a
-     value that stays a Big-backed *bound* (the L5 rhs const, above) PROMOTES and is
-     asserted exactly. Neither wraps to a bogus bound — that soundness property is what
-     these guard. *)
-  let raises_overflow name f =
-    incr checks;
-    match f () with
-    | _ ->
-      incr failures;
-      Printf.printf "  FAIL %s (expected Rational.Overflow)\n" name
-    | exception Rational.Overflow -> ()
-    | exception e ->
-      incr failures;
-      Printf.printf
-        "  FAIL %s (expected Rational.Overflow, got %s)\n"
-        name
-        (Printexc.to_string e)
-  in
-  (* L2: positive Le, var <= -const, const=min_int => -const wraps. *)
+  (* L2/L4/L5 (originally false-sat via silent wrap). core-bignum W2 (term layer): every
+     coefficient/const now stays exact arbitrary-precision [Rational] through the ingest —
+     none projects back to native int at translation — so these atoms PROMOTE to exact
+     Big-backed bounds/coefficients and are asserted precisely. The soundness property the
+     originals guarded (no wrap to a bogus bound) holds by exactness; the assertions below
+     pin the exact bound (feasible where it should be, Conflict where it should be). *)
+  (* L2 (core-bignum W2, term-layer): [x + min_int <= 0] ==> [x <= -min_int = 2^63]. The
+     [-const] bound now PROMOTES to an exact Big-backed bound instead of wrapping/raising
+     — translates cleanly, not poisoned, and feasible (x = 0 works). Discriminating: a
+     wrapped [x <= min_int] would make x = 0 a Conflict, not Sat. *)
   (let fx = make_fixture 1 in
    let atom = mk_le fx [ 0, 1 ] min_int in
-   raises_overflow "L2: x+min_int<=0 (pos) raises on -const" (fun () ->
-     Lia.assert_atom fx.solver atom ~polarity:true ~premise:0);
-   check "L2: instance poisoned after translation overflow" (Lia.is_poisoned fx.solver);
-   incr checks;
-   match Lia.check fx.solver with
-   | exception Lia.Poisoned -> ()
-   | _ ->
-     incr failures;
-     Printf.printf "  FAIL L2: reuse after translation overflow must raise Poisoned\n");
-  (* L4: negated Le, var >= 1-const, const=min_int => 1-const wraps. *)
-  (let fx = make_fixture 1 in
-   let atom = mk_le fx [ 0, 1 ] min_int in
-   raises_overflow "L4: ¬(x+min_int<=0) (neg) raises on 1-const" (fun () ->
-     Lia.assert_atom fx.solver atom ~polarity:false ~premise:0);
+   Lia.assert_atom fx.solver atom ~polarity:true ~premise:0;
+   check "L2: x<=2^63 promotes exactly (not poisoned)" (not (Lia.is_poisoned fx.solver));
    check
-     "L4: instance poisoned after neg translation overflow"
-     (Lia.is_poisoned fx.solver));
+     "L2: exact bound is feasible (x=0 Sat, not a wrapped Conflict)"
+     (match Lia.check fx.solver with
+      | Lia.Sat_candidate -> true
+      | _ -> false));
+  (* L4: [¬(x + min_int <= 0)] ==> [x >= 1 - min_int = 1 + 2^63]. The [1-const] bound
+     promotes exactly; translates cleanly, not poisoned, feasible (large x works). *)
+  (let fx = make_fixture 1 in
+   let atom = mk_le fx [ 0, 1 ] min_int in
+   Lia.assert_atom fx.solver atom ~polarity:false ~premise:0;
+   check "L4: x>=1+2^63 promotes exactly (not poisoned)" (not (Lia.is_poisoned fx.solver));
+   check
+     "L4: exact lower bound is feasible (Sat)"
+     (match Lia.check fx.solver with
+      | Lia.Sat_candidate -> true
+      | _ -> false));
   (* L5 rhs const (was: min_int rhs => Overflow => poison). core-bignum W2: the min_int
      equality const PROMOTES to a Big-backed bound; x0 - x1 = -min_int = 2^62 is asserted
      SOUNDLY — not the pre-W2 wrap-to-min_int false-sat. Verified two ways: the pinned
@@ -914,15 +907,25 @@ let test_codex_findings () =
      (match Lia.check fx.solver with
       | Lia.Conflict _ -> true
       | _ -> false));
-  let fx = make_fixture 1 in
-  let a = Context.mul_const fx.ctx max_int fx.vars.(0) in
-  (* max_int·x0 *)
-  let b = Context.neg fx.ctx fx.vars.(0) in
-  (* -x0 *)
-  let eq = Context.eq fx.ctx a b in
-  raises_overflow "L5: (max_int·x0 = -x0) raises on the guarded coeff merge" (fun () ->
-    Lia.assert_atom fx.solver eq ~polarity:true ~premise:0);
-  check "L5: instance poisoned after coeff-merge overflow" (Lia.is_poisoned fx.solver);
+  (* L5 (core-bignum W2): [max_int·x0 = -x0] ==> [(max_int+1)·x0 = 0] ==> x0 = 0. The
+     coefficient sum [max_int + 1 = 2^63] is now an EXACT Big merge (never wraps to a
+     bogus coefficient), so it translates cleanly, is not poisoned, and pins x0 = 0.
+     Discriminating: adding x0 >= 1 must Conflict (a wrapped coeff would not). *)
+  (let fx = make_fixture 1 in
+   let a = Context.mul_const fx.ctx max_int fx.vars.(0) in
+   let b = Context.neg fx.ctx fx.vars.(0) in
+   let eq = Context.eq fx.ctx a b in
+   Lia.assert_atom fx.solver eq ~polarity:true ~premise:0;
+   check
+     "L5: (max_int+1)·x0=0 exact merge (not poisoned)"
+     (not (Lia.is_poisoned fx.solver));
+   ignore (assert_le fx [ 0, -1 ] 1 ~polarity:true);
+   (* x0 >= 1, contradicting x0 = 0 *)
+   check
+     "L5: x0>=1 contradicts x0=0 (Conflict, exact merge)"
+     (match Lia.check fx.solver with
+      | Lia.Conflict _ -> true
+      | _ -> false));
   (* R1 (re-verify HIGH, false-SAT): an earlier-scope l>u contradiction must not be lost
      when a LATER assert (in a pushed scope) records its own contradiction and that scope
      is then popped. The old single-scalar `pending` was overwritten by the second

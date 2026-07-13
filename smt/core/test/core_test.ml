@@ -109,12 +109,17 @@ let p_sym = Env.declare_fun env "pred" (Rank.create [ Sort.int ] Sort.bool)
    fragment the generators below produce (nullary vars + arithmetic
    + boolean structure). *)
 
+let bi_to_int b = Option.get (Bigint.to_int_opt b)
+
 let rec eval_int ai t =
   match t.Term.node with
-  | Term.Int_const k -> k
+  | Term.Int_const k -> bi_to_int k
   | Term.App (s, args) when Iarr.length args = 0 -> ai s
   | Term.Arith l ->
-    Iarr.fold (fun acc (tm, c) -> acc + (c * eval_int ai tm)) l.Term.const l.Term.coeffs
+    Iarr.fold
+      (fun acc (tm, c) -> acc + (bi_to_int c * eval_int ai tm))
+      (bi_to_int l.Term.const)
+      l.Term.coeffs
   | Term.Ite (c, a, b) -> if eval_bool ai c then eval_int ai a else eval_int ai b
   | _ -> failwith "eval_int: unsupported node"
 
@@ -204,14 +209,14 @@ let test_normalization () =
   let k n = Context.int_const c n in
   let is_int_const t n =
     match t.Term.node with
-    | Term.Int_const m -> m = n
+    | Term.Int_const m -> Bigint.to_int_opt m = Some n
     | _ -> false
   in
   let is_arith t expect_coeffs expect_const =
     match t.Term.node with
     | Term.Arith l ->
-      l.Term.const = expect_const
-      && List.map (fun (tm, cc) -> tm.Term.tag, cc) (Iarr.to_list l.Term.coeffs)
+      Bigint.to_int_opt l.Term.const = Some expect_const
+      && List.map (fun (tm, cc) -> tm.Term.tag, bi_to_int cc) (Iarr.to_list l.Term.coeffs)
          = expect_coeffs
     | _ -> false
   in
@@ -386,43 +391,56 @@ let test_sort_errors () =
 ;;
 
 (* ================================================================== *)
-let test_overflow_unsupported () =
-  print_endline "overflow (pre-mutation contract):";
+(* Arbitrary-precision promotion (core-bignum W2): arithmetic at the former native-int
+   boundary no longer raises [Overflow] — it produces the EXACT >int63 value. These are
+   discriminating against the pre-bignum guarded-int code, which raised on every case
+   here. Expected values are computed independently in [Bigint]. *)
+let test_bignum_promotion () =
+  print_endline "arbitrary-precision promotion (core-bignum W2):";
   let c = Context.create env in
   let x = Context.const c int_vars.(0) in
-  (* Direct constant fold overflow: raise BEFORE any interning. *)
+  let bmax = Bigint.of_int max_int in
+  let bmin = Bigint.of_int min_int in
+  let const_val t =
+    match (t : Term.t).node with
+    | Term.Int_const k -> Some k
+    | _ -> None
+  in
+  let coeff0 t =
+    match (t : Term.t).node with
+    | Term.Arith l -> Some (snd (Iarr.get l.Term.coeffs 0))
+    | _ -> None
+  in
+  let arith_const t =
+    match (t : Term.t).node with
+    | Term.Arith l -> Some l.Term.const
+    | _ -> None
+  in
+  (* max_int + 1 = 2^63 exactly (a single Int_const, not an overflow). *)
   let a = Context.int_const c max_int in
   let b = Context.int_const c 1 in
-  let before = Context.term_count c in
-  check_raises "max_int + 1 overflows" (fun () -> Context.add c a b);
-  check "table unchanged after add overflow" (Context.term_count c = before);
-  (* Coefficient-merge overflow. *)
+  check
+    "max_int + 1 = 2^63 (Int_const, promoted)"
+    (const_val (Context.add c a b) = Some (Bigint.add bmax Bigint.one));
+  (* Coefficient merge past int63: (max_int)*x + x = (max_int+1)*x. *)
   let t1 = Context.mul_const c max_int x in
-  let before = Context.term_count c in
-  check_raises "coeff merge overflow" (fun () -> Context.add c t1 x);
-  check "table unchanged after coeff overflow" (Context.term_count c = before);
-  (* neg min_int overflows — and leaves the table untouched (I8). *)
+  check
+    "coeff merge (max_int+1)*x"
+    (coeff0 (Context.add c t1 x) = Some (Bigint.add bmax Bigint.one));
+  (* -min_int = 2^63 (would wrap to min_int pre-bignum). *)
   let mn = Context.int_const c min_int in
-  let before = Context.term_count c in
-  check_raises "neg min_int overflows" (fun () -> Context.neg c mn);
-  check "table unchanged after neg overflow" (Context.term_count c = before);
-  (* sub overflow leaves the table untouched (sweep: sub is atomic — its negation is
-     evaluated as a build_linear argument, before any hash-cons). *)
-  let before = Context.term_count c in
-  check_raises "sub min_int overflows" (fun () -> Context.sub c x mn);
-  check "table unchanged after sub overflow" (Context.term_count c = before);
-  (* mul_const overflow. *)
+  check "neg min_int = 2^63" (const_val (Context.neg c mn) = Some (Bigint.neg bmin));
+  (* x - min_int = x + 2^63: the constant promotes. *)
+  check
+    "sub: x - min_int const = 2^63"
+    (arith_const (Context.sub c x mn) = Some (Bigint.neg bmin));
+  (* mul_const max_int (2x) = (2*max_int)*x. *)
   let wide = Context.add c x x in
-  let before = Context.term_count c in
-  check_raises "mul_const overflow" (fun () -> Context.mul_const c max_int wide);
-  check "table unchanged after mul_const overflow" (Context.term_count c = before);
-  (* abs(min_int) overflows via its desugared [neg]; it must NOT intern the desugared [0]
-     / comparison atom before raising (codex C3 / I8 raise-before- mutation). The
-     term_count-unchanged assertion is the C3 regression guard: the old abs (ge/int_const
-     0 before neg) bumped the table from 1 to 2. *)
-  let before = Context.term_count c in
-  check_raises "abs min_int overflows" (fun () -> Context.abs c mn);
-  check "table unchanged after abs overflow (C3)" (Context.term_count c = before)
+  check
+    "mul_const max_int (2x) coeff = 2*max_int"
+    (coeff0 (Context.mul_const c max_int wide) = Some (Bigint.mul (Bigint.of_int 2) bmax));
+  (* abs(min_int) folds to 2^63 (constant operand; the desugared ite constant-folds). *)
+  check "abs min_int = 2^63" (const_val (Context.abs c mn) = Some (Bigint.neg bmin))
 ;;
 
 (* ================================================================== *)
@@ -858,7 +876,7 @@ let () =
   test_symbol_sort_env ();
   test_normalization ();
   test_sort_errors ();
-  test_overflow_unsupported ();
+  test_bignum_promotion ();
   test_unsupported_matrix ();
   test_hashcons_sharing ();
   test_scalar_distinctness ();

@@ -28,7 +28,7 @@ let subst ctx lookup body =
        | None -> term)
     | App (sym, args) -> Context.app ctx sym (List.map go (Iarr.to_list args))
     | Arith l ->
-      Context.linear_combination
+      Context.linear_combination_big
         ctx
         (List.map (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
         l.const

@@ -492,6 +492,19 @@ let define_fun_cases () =
      ^ decls
      ^ "(define-fun clamp ((x Int)) Int (ite (< x 0) 0 x))\n\
         (assert (= (clamp a) (clamp b)))\n");
+  (* core-bignum W2: integer literals and coefficients past native int63 (max_int =
+     2^62-1) parse and print/re-parse identically. 2^62, 2^63, 2^64 (the convert-family
+     value) each exceed max_int; the last case is a negated big literal and a big
+     coefficient. Discriminating: pre-bignum [int_lit] returned Unsupported ("exceeds
+     native int range") on every one of these, so the parse step here failed outright. *)
+  check_df_roundtrip
+    ~name:"bignum-literals-boundary"
+    (hdr
+     ^ decls
+     ^ "(assert (<= a 4611686018427387904))\n\
+        (assert (<= a 9223372036854775808))\n\
+        (assert (>= a 18446744073709551616))\n\
+        (assert (= (* a 18446744073709551616) (- 9223372036854775808)))\n");
   (* ---- rejections ---- *)
   (* caller's let binding must NOT leak into the body: body references y, which is neither
      a param nor a global, so expansion fails with an undeclared-symbol Malformed even

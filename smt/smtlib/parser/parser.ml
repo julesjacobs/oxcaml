@@ -111,7 +111,13 @@ let sort_of_sexp st (s : Sexp.t) : Sort.t =
 let int_lit st a =
   match int_of_string_opt a with
   | Some k -> Context.int_const st.ctx k
-  | None -> unsupportedf "integer literal exceeds native int range: %s" a
+  | None ->
+    (* Exceeds int63 — build an arbitrary-precision constant (core-bignum W2). SMT-LIB
+       numerals are canonical decimal (no sign, no leading zeros), which is exactly
+       [Bigint.of_string]'s grammar; a genuinely malformed token is a parse error. *)
+    (match Bigint.of_string a with
+     | b -> Context.int_const_big st.ctx b
+     | exception Invalid_argument _ -> malformedf "malformed integer literal: %s" a)
 ;;
 
 (* ---- terms ---- *)
@@ -336,7 +342,9 @@ and read_mul st scope args =
       | [ t ] -> t
       | _ -> Context.int_const st.ctx 1
     in
-    List.fold_left (fun acc k -> Context.mul_const st.ctx k acc) base consts
+    (* [k] is a [Bigint.t] coefficient (possibly > int63); fold with the
+       arbitrary-precision [mul_const_big]. *)
+    List.fold_left (fun acc k -> Context.mul_const_big st.ctx k acc) base consts
 
 (* [(rel a b c ...)] means the conjunction of consecutive pairs. *)
 and chain st mk ts =

@@ -71,7 +71,7 @@ let ite_removal t root =
     | Bool_const _ | Int_const _ -> term
     | App (sym, args) -> Context.app ctx sym (map_lr go (Iarr.to_list args))
     | Arith l ->
-      Context.linear_combination
+      Context.linear_combination_big
         ctx
         (map_lr (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
         l.const
@@ -167,8 +167,15 @@ let div_mod_elimination t root =
       let d = Iarr.get args 1 in
       let dv =
         match d.node with
-        | Int_const k when k <> 0 -> k
-        | Int_const _ -> raise (Term.Unsupported "div/mod by zero")
+        | Int_const k when Bigint.is_zero k -> raise (Term.Unsupported "div/mod by zero")
+        | Int_const k ->
+          (* Divisor must fit native [int] for [get_qr] (core-bignum W2): a >int63
+             constant divisor is out of the supported fragment — degrade rather than
+             truncate. *)
+          (match Bigint.to_int_opt k with
+           | Some kv -> kv
+           | None ->
+             raise (Term.Unsupported "div/mod by an out-of-range constant divisor"))
         | _ -> raise (Term.Unsupported "div/mod by a non-constant divisor")
       in
       let q, r = get_qr x' dv in
@@ -176,7 +183,7 @@ let div_mod_elimination t root =
     | Bool_const _ | Int_const _ -> term
     | App (sym, args) -> Context.app ctx sym (map_lr go (Iarr.to_list args))
     | Arith l ->
-      Context.linear_combination
+      Context.linear_combination_big
         ctx
         (map_lr (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
         l.const

@@ -294,6 +294,16 @@ let compare x y =
 ;;
 
 let equal x y = compare x y = 0
+
+(* Value-based hash: fold sign and every limb. Canonical representation ⇒ equal values
+   have identical (sign, mag) ⇒ equal hashes. Deterministic (no polymorphic hash, no
+   allocation-order dependence). *)
+let hash t =
+  let h = ref (t.sign + 1) in
+  Array.iter (fun limb -> h := (!h * 31) + limb) t.mag;
+  !h land max_int
+;;
+
 let neg x = { sign = -x.sign; mag = x.mag }
 let abs x = if x.sign = 0 then zero else { sign = 1; mag = x.mag }
 

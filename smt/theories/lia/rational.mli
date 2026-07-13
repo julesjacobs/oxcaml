@@ -30,6 +30,10 @@ val zero : t
 val one : t
 val of_int : int -> t
 
+(** [of_bigint n] is the integer [n] (den = 1); never raises (demotes to [Small] iff it
+    fits int63). The ingestion path for core term coefficients that exceed int63. *)
+val of_bigint : Oxsmt_core.Bigint.t -> t
+
 (** [of_frac num den] is [num/den] normalized; [den <> 0] required ([Invalid_argument]
     otherwise). Never raises {!Overflow} (promotes to [Big] if the native normalization
     would wrap). *)

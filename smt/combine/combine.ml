@@ -654,16 +654,23 @@ end = struct
     | Some v -> Some v
     | None ->
       (match t.Term.node with
-       | Term.Int_const n -> Some (Model.Int n)
+       (* A constant / coefficient exceeding int63 (core-bignum W2) cannot be surfaced as
+          a native-[int] [Model.Int]; return [None] — the fail-safe "unvalued" signal — so
+          the query degrades to [unknown] rather than truncating. *)
+       | Term.Int_const n -> Option.map (fun i -> Model.Int i) (Bigint.to_int_opt n)
        | Term.Arith lin ->
-         let rec fold acc = function
-           | [] -> Some (Model.Int acc)
-           | (child, coeff) :: rest ->
-             (match model_eval model child with
-              | Some (Model.Int v) -> fold (add_guard acc (mul_guard coeff v)) rest
-              | _ -> None)
-         in
-         fold lin.Term.const (Iarr.to_list lin.Term.coeffs)
+         (match Bigint.to_int_opt lin.Term.const with
+          | None -> None
+          | Some const0 ->
+            let rec fold acc = function
+              | [] -> Some (Model.Int acc)
+              | (child, coeff) :: rest ->
+                (match Bigint.to_int_opt coeff, model_eval model child with
+                 | Some ci, Some (Model.Int v) ->
+                   fold (add_guard acc (mul_guard ci v)) rest
+                 | _ -> None)
+            in
+            fold const0 (Iarr.to_list lin.Term.coeffs))
        | _ -> None)
   ;;
 

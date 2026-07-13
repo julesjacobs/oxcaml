@@ -20,6 +20,10 @@
      not fit int63. Callers at model-extraction / B&B branch-bound sinks keep degrading
      that to [unknown] (retain the poison exactly there); they must NEVER truncate. *)
 
+(* [Bigint] now lives in [oxsmt_core] (it also backs core term coefficients); name it
+   unqualified here as before. *)
+module Bigint = Oxsmt_core.Bigint
+
 exception Overflow
 
 (* ---- guarded native-int primitives (unchanged; the promotion TRIGGER) ---- *)
@@ -98,6 +102,11 @@ let to_big = function
 let zero = Small { num = 0; den = 1 }
 let one = Small { num = 1; den = 1 }
 let of_int n = Small { num = n; den = 1 }
+
+(* Integer from an arbitrary-precision [Bigint] (den = 1); demotes to [Small] iff it fits
+   int63 (canonical-demote invariant). The ingestion path for core term coefficients that
+   exceed int63. *)
+let of_bigint n = bnorm_demote n Bigint.one
 
 let make num den =
   if den = 0 then invalid_arg "Rational: zero denominator";

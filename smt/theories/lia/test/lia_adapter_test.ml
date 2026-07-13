@@ -109,11 +109,14 @@ let idx_of fx (tm : Term.t) =
 
 (* The <=0 half-plane of an [Le] atom's inner term (the gcd-normalized form LIA reasons
    over), keyed by variable index. *)
+let bi_to_int b = Option.get (Bigint.to_int_opt b)
+
 let inner_halfplane fx (inner : Term.t) =
   match inner.Term.node with
   | Term.Arith l ->
-    Iarr.fold (fun acc (tm, c) -> (idx_of fx tm, c) :: acc) [] l.Term.coeffs, l.Term.const
-  | Term.Int_const k -> [], k
+    ( Iarr.fold (fun acc (tm, c) -> (idx_of fx tm, bi_to_int c) :: acc) [] l.Term.coeffs
+    , bi_to_int l.Term.const )
+  | Term.Int_const k -> [], bi_to_int k
   | _ -> [ idx_of fx inner, 1 ], 0
 ;;
 

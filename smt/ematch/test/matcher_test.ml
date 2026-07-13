@@ -111,7 +111,7 @@ let subst_to_names sigmas =
             (fun (t : Term.t) ->
                match t.node with
                | App (s, _) -> Symbol.name s
-               | Int_const n -> Printf.sprintf "#%d" n
+               | Int_const n -> "#" ^ Bigint.to_string n
                | _ -> "?")
             arr))
     sigmas

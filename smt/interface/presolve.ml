@@ -220,13 +220,13 @@ let run ctx assertions =
     and rebuild (t : Term.t) =
       match t.node with
       | Bool_const b -> Context.bool_const ctx b
-      | Int_const n -> Context.int_const ctx n
+      | Int_const n -> Context.int_const_big ctx n
       | App (sym, args) ->
         if Iarr.length args = 0
         then t (* a surviving variable — unchanged (preserves hash-cons identity) *)
         else Context.app ctx sym (List.map subst (Iarr.to_list args))
       | Arith lin ->
-        Context.linear_combination
+        Context.linear_combination_big
           ctx
           (List.map (fun (tm, co) -> co, subst tm) (Iarr.to_list lin.coeffs))
           lin.const

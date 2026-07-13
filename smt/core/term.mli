@@ -14,7 +14,14 @@
     Booleans are terms: connectives ([And]/[Or]/[Not]/[Ite]/Bool-sorted [Eq]) are
     Bool-sorted nodes (Decision 2). Arithmetic is a single normalized linear form
     ([Arith]); order comparisons lower to one [Le] atom ([arg <= 0]), gcd-tightened
-    (Decision 1). Nullary constants and program variables are [App(sym, [])]. *)
+    (Decision 1). Nullary constants and program variables are [App(sym, [])].
+
+    {b Arbitrary-precision integers (core-bignum W2, GOALS solve-rate b2).} Integer
+    literals and linear coefficients/constants are {!Bigint.t}, not native [int], so a
+    coefficient of any size (e.g. the >2^63 literals in the QF_LIA convert family) is
+    representable and term construction never overflows. The native-[int] precision
+    boundary that remains is downstream, at the model / branch-and-bound int-projection
+    sinks, which degrade to [unknown] (never wrap). *)
 
 type t = Node.t = private
   { node : node
@@ -24,7 +31,7 @@ type t = Node.t = private
 
 and node = Node.node = private
   | Bool_const of bool
-  | Int_const of int
+  | Int_const of Bigint.t (* arbitrary precision *)
   | App of Symbol.t * t Iarr.t (* EUF-congruent; nullary = constant *)
   | Arith of linear (* Int; LIA leaf to EUF *)
   | Le of t (* (arg <= 0), arg : Int; only order atom; gcd-normalized *)
@@ -35,13 +42,16 @@ and node = Node.node = private
   | Ite of t * t * t (* cond Bool; branches share result sort *)
 
 and linear = Node.linear = private
-  { coeffs : (t * int) Iarr.t (* tag-sorted, coeff <> 0, no Arith child *)
-  ; const : int
+  { coeffs : (t * Bigint.t) Iarr.t (* tag-sorted, coeff <> 0, no Arith child *)
+  ; const : Bigint.t
   }
 
-(** Raised by an arithmetic constructor that would exceed native [int] range, {b before}
-    any intern-table mutation; caught at the session layer and turned into verdict
-    [unknown] (ADR-0003 Overflow contract). *)
+(** Retained from the ADR-0003 Overflow contract and still caught at the session layer
+    (turned into verdict [unknown]), but
+    {b no longer raised by any arithmetic constructor}: arithmetic is arbitrary-precision
+    ({!Bigint}), so construction cannot overflow. The residual native-[int] precision
+    boundary moved downstream to the model / branch-and-bound int-projection sinks
+    (core-bignum W2 R1), which degrade to [unknown] and never wrap. *)
 exception Overflow
 
 (** Raised by a constructor given an ill-sorted operand. *)

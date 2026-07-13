@@ -16,7 +16,9 @@
     procedure), and {!Lia_adapter} (the frozen {!Oxsmt_core.Theory.THEORY} binding,
     ADR-0005 M4). *)
 
-module Bigint = Bigint
+(* [Bigint] moved down into [oxsmt_core] (it now also backs the core term coefficients);
+   re-exported here so [Oxsmt_lia.Bigint] keeps naming it for existing consumers/tests. *)
+module Bigint = Oxsmt_core.Bigint
 module Rational = Rational
 module Delta = Delta
 module Simplex = Simplex

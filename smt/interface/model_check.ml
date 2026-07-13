@@ -17,33 +17,10 @@ open Oxsmt_core
 (* Fail-closed sentinel: the model cannot self-certify this assertion. *)
 exception Bad
 
-let add_ovf a b =
-  let r = a + b in
-  if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (r >= 0) (a >= 0))
-  then raise Bad
-  else r
-;;
-
-let mul_ovf a b =
-  if a = 0 || b = 0
-  then 0
-  else (
-    let r = a * b in
-    (* [r / a <> b] catches most overflow but MISSES [min_int * -1] (and [-1 * min_int]):
-       [-min_int] wraps back to [min_int], and [min_int / -1] wraps to [min_int] too, so
-       the quotient check passes on a wrapped product — silently defeating this
-       fail-closed TCB guard. Mirror the guard combine.ml / rational.ml / tests/eval carry
-       (codex HIGH): reject the [-1]/[min_int] pair explicitly. Unreachable on today's
-       solver path (it never models [min_int]), but the invariant must hold regardless. *)
-    if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
-    then raise Bad
-    else r)
-;;
-
 let value_eq (a : Cdclt.value) (b : Cdclt.value) =
   match a, b with
   | VBool x, VBool y -> Bool.equal x y
-  | VInt x, VInt y -> x = y
+  | VInt x, VInt y -> Bigint.equal x y
   | VUninterp x, VUninterp y -> x = y
   | _ -> raise Bad
 ;;
@@ -90,14 +67,16 @@ let ev_with
            | Some (_, r) -> r
            | None -> tbl.Cdclt.default))
     | Term.Arith lin ->
+      (* Exact arbitrary-precision fold (core-bignum W2): a big coefficient or constant is
+         evaluated precisely, never truncated. *)
       let s =
         Iarr.fold
-          (fun acc (c, coeff) -> add_ovf acc (mul_ovf coeff (as_int (ev c))))
+          (fun acc (c, coeff) -> Bigint.add acc (Bigint.mul coeff (as_int (ev c))))
           lin.Term.const
           lin.Term.coeffs
       in
       VInt s
-    | Term.Le a -> VBool (as_int (ev a) <= 0)
+    | Term.Le a -> VBool (Bigint.compare (as_int (ev a)) Bigint.zero <= 0)
     | Term.Eq (a, b) -> VBool (value_eq (ev a) (ev b))
     | Term.Not a -> VBool (not (as_bool (ev a)))
     | Term.And xs -> VBool (Iarr.fold (fun acc x -> acc && as_bool (ev x)) true xs)

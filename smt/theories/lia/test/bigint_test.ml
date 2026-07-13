@@ -127,6 +127,11 @@ let test_properties () =
     let c = Bigint.compare a b in
     check "compare/equal agree" (c = 0 = Bigint.equal a b);
     check "compare antisymmetric" (Bigint.compare b a = -c);
+    (* hash respects value equality; also stable under a round-trip through to_string. *)
+    check "equal => hash equal" ((not (Bigint.equal a b)) || Bigint.hash a = Bigint.hash b);
+    check
+      "hash stable across of_string(to_string)"
+      (Bigint.hash a = Bigint.hash (Bigint.of_string (Bigint.to_string a)));
     if not (Bigint.is_zero b)
     then (
       let q, r = Bigint.divmod a b in

@@ -4,10 +4,17 @@
    constructors are the sole construction path (INVARIANTS.md I1/I2). This module is
    [private_modules]: invisible outside the core library.
 
-   Construction is effect-free until [hashcons]: every constructor computes and
-   overflow-checks its normalized node first, and only then interns it, so a raised
-   [Overflow]/[Sort_error]/[Unsupported] never leaves partial state in the intern table
-   (ADR-0003 Overflow/Unsupported contract; INVARIANTS.md I8). *)
+   Construction is effect-free until [hashcons]: every constructor computes its normalized
+   node first, and only then interns it, so a raised [Sort_error]/[Unsupported] never
+   leaves partial state in the intern table (ADR-0003 Unsupported contract; INVARIANTS.md
+   I8).
+
+   Arithmetic is arbitrary-precision ({!Bigint}), so an integer literal or coefficient of
+   any size is representable and construction never overflows. [Overflow] is retained (it
+   is part of the frozen {!Term} surface and callers still catch it) but is no longer
+   raised here; the residual native-[int] precision boundary moved downstream to the model
+   / B&B int-projection sinks, which degrade to [unknown] via [Rational.Overflow]
+   (core-bignum W2 R1) and never wrap. *)
 
 exception Overflow
 exception Sort_error of string
@@ -21,7 +28,7 @@ type t =
 
 and node =
   | Bool_const of bool
-  | Int_const of int
+  | Int_const of Bigint.t
   | App of Symbol.t * t Iarr.t
   | Arith of linear
   | Le of t
@@ -32,8 +39,8 @@ and node =
   | Ite of t * t * t
 
 and linear =
-  { coeffs : (t * int) Iarr.t
-  ; const : int
+  { coeffs : (t * Bigint.t) Iarr.t
+  ; const : Bigint.t
   }
 
 (* ------------------------------------------------------------------ *)
@@ -48,12 +55,12 @@ let same_children xs ys = Iarr.equal (fun a b -> a.tag = b.tag) xs ys
 let equal_node (a : node) (b : node) =
   match a, b with
   | Bool_const x, Bool_const y -> Bool.equal x y
-  | Int_const x, Int_const y -> Int.equal x y
+  | Int_const x, Int_const y -> Bigint.equal x y
   | App (f, xs), App (g, ys) -> Symbol.equal f g && same_children xs ys
   | Arith l1, Arith l2 ->
-    Int.equal l1.const l2.const
+    Bigint.equal l1.const l2.const
     && Iarr.equal
-         (fun (t1, c1) (t2, c2) -> t1.tag = t2.tag && Int.equal c1 c2)
+         (fun (t1, c1) (t2, c2) -> t1.tag = t2.tag && Bigint.equal c1 c2)
          l1.coeffs
          l2.coeffs
   | Le x, Le y -> x.tag = y.tag
@@ -80,12 +87,12 @@ let hash_node (n : node) : int =
   let tags acc xs = Iarr.hash_fold (fun acc x -> (acc * 31) + x.tag) acc xs in
   match n with
   | Bool_const b -> Hashtbl.hash (0, b)
-  | Int_const k -> Hashtbl.hash (1, k)
+  | Int_const k -> Hashtbl.hash (1, Bigint.hash k)
   | App (s, xs) -> tags (Hashtbl.hash (2, Symbol.hash s)) xs
   | Arith l ->
     Iarr.hash_fold
-      (fun acc (t, c) -> (((acc * 31) + t.tag) * 31) + c)
-      (Hashtbl.hash (3, l.const))
+      (fun acc (t, c) -> (((acc * 31) + t.tag) * 31) + Bigint.hash c)
+      (Hashtbl.hash (3, Bigint.hash l.const))
       l.coeffs
   | Le a -> Hashtbl.hash (4, a.tag)
   | Eq (a, b) -> Hashtbl.hash (5, a.tag, b.tag)
@@ -124,43 +131,28 @@ let hashcons st node sort =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Overflow-guarded integer arithmetic. Native [int] is a v1 decision; every op that can
-   wrap raises [Overflow] BEFORE any interning (ADR-0003 Overflow contract). *)
+(* Arbitrary-precision integer arithmetic ({!Bigint}). Coefficients and constants are
+   [Bigint.t], so no op wraps and none raises [Overflow] (the pre-W2 native-[int] guards
+   are gone). Local aliases keep the constructor bodies readable. *)
 
-let add_ovf a b =
-  let s = a + b in
-  if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (s >= 0) (a >= 0))
-  then raise Overflow
-  else s
-;;
+let bzero = Bigint.zero
+let bone = Bigint.one
+let badd = Bigint.add
+let bsub = Bigint.sub
+let bmul = Bigint.mul
+let bneg = Bigint.neg
+let bis_zero = Bigint.is_zero
 
-let neg_ovf a = if a = min_int then raise Overflow else -a
+(* Exact division [a / b] when [b] divides [a] (the gcd-reduction case): the remainder is
+   zero, so truncation-toward-zero is exact. *)
+let bdiv_exact a b = fst (Bigint.divmod a b)
 
-let mul_ovf a b =
-  if a = 0 || b = 0
-  then 0
-  else if (a = min_int && b = -1) || (b = min_int && a = -1)
-  then raise Overflow
-  else (
-    let p = a * b in
-    if p / b <> a then raise Overflow else p)
-;;
-
-let sub_ovf a b = add_ovf a (neg_ovf b)
-
-(* gcd, returned non-negative. min_int guard keeps it in range (TCB). *)
-let rec gcd_raw a b = if b = 0 then a else gcd_raw b (a mod b)
-
-let gcd_pos a b =
-  let g = gcd_raw a b in
-  if g < 0 then if g = min_int then raise Overflow else -g else g
-;;
-
-(* ceil (k / g) for g > 0, exact over native int (no overflow: q+1 only when g > 1, so q <
-   k). *)
-let ceil_div k g =
-  let q = k / g in
-  if k mod g <> 0 && k > 0 then q + 1 else q
+(* ceil (k / g) for g > 0. [divmod] truncates toward zero, so the remainder carries the
+   sign of [k]: bump the quotient up by one exactly when [k > 0] and the division is
+   inexact (remainder > 0); for [k <= 0] truncation-toward-zero already rounds up. *)
+let bceil_div k g =
+  let q, r = Bigint.divmod k g in
+  if Bigint.sign r > 0 then badd q bone else q
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -185,17 +177,17 @@ let terms_of t =
   match t.node with
   | Int_const k -> [], k
   | Arith l -> Iarr.to_list l.coeffs, l.const
-  | _ -> [ t, 1 ], 0
+  | _ -> [ t, bone ], bzero
 ;;
 
-(* Merge coefficient contributions: sort by child tag, sum duplicates (overflow-checked),
-   drop zeros. Result is tag-sorted, distinct, nonzero. *)
+(* Merge coefficient contributions: sort by child tag, sum duplicates, drop zeros. Result
+   is tag-sorted, distinct, nonzero. *)
 let merge_terms terms =
   let sorted = List.stable_sort (fun (a, _) (b, _) -> Int.compare a.tag b.tag) terms in
   let rec go = function
     | [] -> []
-    | (t1, c1) :: (t2, c2) :: rest when t1.tag = t2.tag -> go ((t1, add_ovf c1 c2) :: rest)
-    | (t, c) :: rest -> if c = 0 then go rest else (t, c) :: go rest
+    | (t1, c1) :: (t2, c2) :: rest when t1.tag = t2.tag -> go ((t1, badd c1 c2) :: rest)
+    | (t, c) :: rest -> if bis_zero c then go rest else (t, c) :: go rest
   in
   go sorted
 ;;
@@ -206,7 +198,7 @@ let build_linear st terms const =
   let coeffs = merge_terms terms in
   match coeffs with
   | [] -> hashcons st (Int_const const) Sort.int
-  | [ (t, 1) ] when const = 0 -> t
+  | [ (t, c) ] when Bigint.equal c bone && bis_zero const -> t
   | _ -> hashcons st (Arith { coeffs = Iarr.of_list coeffs; const }) Sort.int
 ;;
 
@@ -218,13 +210,13 @@ let add st a b =
   require_int "add" b;
   let ta, ka = terms_of a
   and tb, kb = terms_of b in
-  build_linear st (ta @ tb) (add_ovf ka kb)
+  build_linear st (ta @ tb) (badd ka kb)
 ;;
 
 let neg st a =
   require_int "neg" a;
   let ta, ka = terms_of a in
-  build_linear st (List.map (fun (t, c) -> t, neg_ovf c) ta) (neg_ovf ka)
+  build_linear st (List.map (fun (t, c) -> t, bneg c) ta) (bneg ka)
 ;;
 
 let sub st a b =
@@ -232,16 +224,16 @@ let sub st a b =
   require_int "sub" b;
   let ta, ka = terms_of a
   and tb, kb = terms_of b in
-  build_linear st (ta @ List.map (fun (t, c) -> t, neg_ovf c) tb) (sub_ovf ka kb)
+  build_linear st (ta @ List.map (fun (t, c) -> t, bneg c) tb) (bsub ka kb)
 ;;
 
 let mul_const st c a =
   require_int "mul_const" a;
-  if c = 0
-  then int_const st 0
+  if bis_zero c
+  then int_const st bzero
   else (
     let ta, ka = terms_of a in
-    build_linear st (List.map (fun (t, ci) -> t, mul_ovf ci c) ta) (mul_ovf ka c))
+    build_linear st (List.map (fun (t, ci) -> t, bmul ci c) ta) (bmul ka c))
 ;;
 
 let linear_combination st pairs const =
@@ -250,8 +242,8 @@ let linear_combination st pairs const =
       (fun (acc, k) (c, term) ->
          require_int "linear_combination" term;
          let tt, kt = terms_of term in
-         ( List.rev_append (List.map (fun (t, ci) -> t, mul_ovf ci c) tt) acc
-         , add_ovf k (mul_ovf kt c) ))
+         ( List.rev_append (List.map (fun (t, ci) -> t, bmul ci c) tt) acc
+         , badd k (bmul kt c) ))
       ([], const)
       pairs
   in
@@ -264,11 +256,11 @@ let linear_combination st pairs const =
 let mk_le st terms const =
   let coeffs = merge_terms terms in
   match coeffs with
-  | [] -> bool_const st (const <= 0)
+  | [] -> bool_const st (Bigint.compare const bzero <= 0)
   | _ ->
-    let g = List.fold_left (fun g (_, c) -> gcd_pos g c) 0 coeffs in
-    let coeffs' = List.map (fun (t, c) -> t, c / g) coeffs in
-    let const' = ceil_div const g in
+    let g = List.fold_left (fun g (_, c) -> Bigint.gcd g c) bzero coeffs in
+    let coeffs' = List.map (fun (t, c) -> t, bdiv_exact c g) coeffs in
+    let const' = bceil_div const g in
     let arg = build_linear st coeffs' const' in
     hashcons st (Le arg) Sort.bool
 ;;
@@ -278,7 +270,7 @@ let le st a b =
   require_int "le" b;
   let ta, ka = terms_of a
   and tb, kb = terms_of b in
-  mk_le st (ta @ List.map (fun (t, c) -> t, neg_ovf c) tb) (sub_ovf ka kb)
+  mk_le st (ta @ List.map (fun (t, c) -> t, bneg c) tb) (bsub ka kb)
 ;;
 
 let lt st a b =
@@ -287,7 +279,7 @@ let lt st a b =
   let ta, ka = terms_of a
   and tb, kb = terms_of b in
   (* a < b <=> a - b + 1 <= 0 *)
-  mk_le st (ta @ List.map (fun (t, c) -> t, neg_ovf c) tb) (add_ovf (sub_ovf ka kb) 1)
+  mk_le st (ta @ List.map (fun (t, c) -> t, bneg c) tb) (badd (bsub ka kb) bone)
 ;;
 
 let ge st a b = le st b a
@@ -300,7 +292,7 @@ let eq st a b =
   then bool_const st true
   else (
     match a.node, b.node with
-    | Int_const x, Int_const y -> bool_const st (Int.equal x y)
+    | Int_const x, Int_const y -> bool_const st (Bigint.equal x y)
     | Bool_const x, Bool_const y -> bool_const st (Bool.equal x y)
     | _ ->
       let lo, hi = if a.tag < b.tag then a, b else b, a in
@@ -375,15 +367,11 @@ let distinct st ts =
 
 let abs st a =
   require_int "abs" a;
-  (* Compute the overflow-prone negation FIRST. [neg] raises [Overflow] BEFORE interning
-     anything (its arithmetic is evaluated as [build_linear] arguments, ahead of the
-     hash-cons), so on a min_int-magnitude operand [abs] raises with the intern table
-     untouched (I8: raise before any mutation). The old order interned [int_const 0] and
-     the [ge] atom first, leaking them on the raise (codex C3). [ge] negates exactly the
-     same coefficients/constant as [neg], so once [neg] has succeeded [ge] cannot overflow
-     — abs is now all-or-nothing. *)
+  (* [abs x = ite (x >= 0) x (-x)]. Arbitrary-precision arithmetic never overflows, so the
+     old min_int-magnitude raise-before-intern ordering (codex C3) is moot; the two
+     branches are interned unconditionally. *)
   let neg_a = neg st a in
-  let nonneg = ge st a (int_const st 0) in
+  let nonneg = ge st a (int_const st bzero) in
   ite st nonneg a neg_a
 ;;
 

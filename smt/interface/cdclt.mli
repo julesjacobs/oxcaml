@@ -15,7 +15,7 @@ type t
     sort's finite universe (not the raw e-graph class id — {!model} remaps). *)
 type value =
   | VBool of bool
-  | VInt of int
+  | VInt of Bigint.t (* arbitrary precision (core-bignum W2) *)
   | VUninterp of int
 
 (** A total interpretation of one uninterpreted function/predicate: [cases] maps
@@ -87,15 +87,6 @@ val model_bindings : t -> binding list option
     needed value is missing, or a buried (unbound) Bool-codomain predicate cell would have
     to be guessed. Deterministic (R10). *)
 val model : t -> (sort_card list * binding list) option
-
-(** Overflow-guarded int add/mul used by {!model}'s §10-v2 gap-B structural Arith fold;
-    [None] on overflow (task #117). Exposed so the wiring-test parity oracle can pin them
-    equal to [Model_check.add_ovf]/[mul_ovf] on the [min_int] edge — R1 re-folds every
-    table key, so extraction's fold MUST agree with R1's or a valid model is gratuitously
-    rejected. INCLUDING the [min_int * -1] / [-1 * min_int] wrap clause. *)
-val add_ovf : int -> int -> int option
-
-val mul_ovf : int -> int -> int option
 
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
