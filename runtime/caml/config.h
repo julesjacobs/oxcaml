@@ -241,7 +241,7 @@ typedef uint64_t uintnat;
 /* Default "small heap mode" setting for the major GC.  The GC will
    add an Idle phase when the sweeping work for a cycle is smaller than
    this limit. */
-#define Small_heap_limit_def 262144
+#define Small_heap_limit_def 67108864
 
 /* Default setting for the compacter: 500%
    (i.e. trigger the compacter when 5/6 of the heap is free or garbage).
