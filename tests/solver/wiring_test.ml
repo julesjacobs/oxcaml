@@ -1520,8 +1520,90 @@ let test_presolve_pass_a () =
       [ Context.and_ ctx [ eq a b; eq b c ]; Context.le ctx a (Context.int_const ctx 0) ]
   in
   check "pass_a: equality-free disjunct bails" (ee [ with_le ] = []);
-  (* (5) determinism (I6): identical extraction run twice. *)
+  (* (5) GRAMMAR OPACITY per named-opaque arm (fable rider #1): a disjunct that contains
+     [(= a b)] ONLY under an opaque node does NOT entail a=b; each arm-descending mutant
+     would extract a=b (a wrong-Unsat). Shape: branch1 = (= u w) ∧ TRAP[(= a b)], branch2
+     = (= u w) ∧ (= a b); correct extraction = [{u=w}], never a=b. Each check FAILS
+     against the mutant that recurses into that arm (mutation-verified). *)
+  let p = Context.const ctx (Session.declare_const s "pbool" Sort.bool) in
+  let qp = Session.declare_fun s "qp" (Rank.create [ Sort.bool ] Sort.bool) in
+  let trap_case name trap =
+    let f =
+      Context.or_
+        ctx
+        [ Context.and_ ctx [ eq u w; trap ]; Context.and_ ctx [ eq u w; eq a b ] ]
+    in
+    let r = ee [ f ] in
+    check ("pass_a: " ^ name ^ " opaque (no a=b)") (not (mem a b r));
+    check ("pass_a: " ^ name ^ " still extracts u=w") (mem u w r)
+  in
+  trap_case "Not" (Context.not_ ctx (eq a b));
+  trap_case "Ite" (Context.ite ctx p (eq a b) (eq c d));
+  trap_case "Or" (Context.or_ ctx [ eq a b; eq c d ]);
+  trap_case "App" (Context.app ctx qp [ eq a b ]);
+  (* (6) ABSENT-BRANCH SINGLETON (codex): a term present in only one branch must not be
+     spuriously equated. branch1=[{a,b,c}], branch2=[{a,d}]: only a is shared but its
+     class differs, b/c/d are branch-local ⇒ nothing entailed. *)
+  let absent =
+    Context.or_ ctx [ Context.and_ ctx [ eq a b; eq b c ]; Context.and_ ctx [ eq a d ] ]
+  in
+  check "pass_a: absent-branch singleton no spurious merge" (ee [ absent ] = []);
+  (* (7) FOREST CARDINALITY (codex): four terms equal in every branch ⇒ a spanning TREE of
+     3 edges, not the 6-edge full closure. A mutant emitting the closure gives 6. Branches
+     are DISTINCT (chain vs star over [{a,b,c,d}]) so [Context.or_] keeps both (identical
+     disjuncts would hash-cons-dedup to a non-[Or] and Pass A would not fire). *)
+  let all4 =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq b c; eq c d ] (* chain *)
+      ; Context.and_ ctx [ eq a b; eq a c; eq a d ] (* star, same closure *)
+      ]
+  in
+  check "pass_a: spanning forest cardinality (3 not 6)" (List.length (ee [ all4 ]) = 3);
+  (* (8) CAP / NEUTRAL ABORT (codex): a universe over the per-Or cap emits NOTHING (never
+     a partial forest). 513 distinct terms (> pass_a_max_terms=512) must abort to [].
+     Chain vs star branches (both force all-equal) keep the two disjuncts distinct. *)
+  let big =
+    let xs =
+      List.init 513 (fun i ->
+        Context.const ctx (Session.declare_const s (Printf.sprintf "cx%d" i) Sort.int))
+    in
+    let x0 = List.hd xs in
+    let rec chain = function
+      | x :: (y :: _ as rest) -> eq x y :: chain rest
+      | _ -> []
+    in
+    let star = List.filter_map (fun x -> if x == x0 then None else Some (eq x0 x)) xs in
+    Context.or_ ctx [ Context.and_ ctx (chain xs); Context.and_ ctx star ]
+  in
+  check "pass_a: over-cap Or neutral-aborts to []" (ee [ big ] = []);
+  (* (9) determinism (I6): identical extraction run twice. *)
   check "pass_a: deterministic" (ee [ diamond ] = ee [ diamond ])
+;;
+
+(* cert-trace set-once / pristine hardening (task #7 rider #3): [install_cert_trace] must
+   raise on a double-install and on a post-assert install, so the cert-OFF Pass-A gate
+   cannot be defeated by installing a trace after Pass A already fired. Discriminating:
+   the pre-rider [install_cert_trace] (a bare [Sat.set_trace]) does NOT raise here. *)
+let test_cert_trace_set_once () =
+  let noop : Oxsmt_solver.Sat.trace =
+    { on_input = (fun ~id:_ ~clause:_ ~origin:_ -> ())
+    ; on_unit = (fun ~id:_ ~lit:_ -> ())
+    ; on_learned = (fun ~id:_ ~clause:_ ~antecedents:_ ~btlevel:_ -> ())
+    ; on_theory_clause = (fun ~id:_ ~clause:_ ~role:_ -> ())
+    ; on_unsat = (fun _ -> ())
+    }
+  in
+  let s = Session.create () in
+  Session.install_cert_trace s (Some noop);
+  check_raises "cert set-once: double install raises" (fun () ->
+    Session.install_cert_trace s (Some noop));
+  let s2 = Session.create () in
+  let ctx = Session.context s2 in
+  let x = Context.const ctx (Session.declare_const s2 "x" Sort.bool) in
+  Session.assert_term s2 x;
+  check_raises "cert set-once: post-assert install raises" (fun () ->
+    Session.install_cert_trace s2 (Some noop))
 ;;
 
 (* codex H1 == same-model F1 (both legs, independently). Substitution composes
@@ -1793,6 +1875,7 @@ let () =
   test_presolve_determinism ();
   test_presolve_run_direct ();
   test_presolve_pass_a ();
+  test_cert_trace_set_once ();
   test_presolve_overflow_coeff_degrades ();
   test_presolve_bignum_const_solves ();
   test_presolve_eq_uf_side_sound ();

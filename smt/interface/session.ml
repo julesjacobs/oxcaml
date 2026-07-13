@@ -179,13 +179,15 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
   }
 ;;
 
-(* Pass A (task #7 entailed-equality extraction) toggle. Default OFF ⇒ byte-identical to
-   trunk (Pass A never runs, no augmentation). Read once. *)
+(* Pass A (task #7 entailed-equality extraction) toggle. Default ON (both review legs
+   cleared default-ON; the win is ~84-95 eq_diamond files and OFF forfeits it).
+   [OXSMT_PRESOLVE_EQ=0] turns it OFF for the A/B baseline. Cert-OFF gating (below) is
+   INDEPENDENT of this flag: a live cert trace disables Pass A regardless. Read once. *)
 let pass_a_flag =
   lazy
     (match Sys.getenv_opt "OXSMT_PRESOLVE_EQ" with
-     | Some ("1" | "true" | "yes") -> true
-     | _ -> false)
+     | Some ("0" | "false" | "no") -> false
+     | _ -> true)
 ;;
 
 (* Pass A runs only when enabled AND no certificate trace is installed (§cert-OFF gating,
@@ -1152,10 +1154,26 @@ let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.e
    conditioned on (the certificate's selector strip is checked by seeding these true);
    [failed_assumptions] is the failed-selector core of the most recent [Unsat]. *)
 let install_cert_trace t tr =
+  (* Set-once / pristine hardening (task #7 rider, defense-in-depth): a cert trace must be
+     installed on a PRISTINE session (before any assert) and only once. Enforcing it makes
+     the cert-OFF Pass-A gate ([cert_active] set here, read by [assert_presolved]'s
+     [pass_a_enabled]) robust to a caller that would otherwise install a trace AFTER Pass
+     A already fired — the interleave that could launder a derived unit into the cert. The
+     interleave was verified unreachable in shipped callers; this fails it closed anyway.
+     Uninstall ([None]) is always allowed. *)
+  (match tr with
+   | Some _ ->
+     if t.cert_active
+     then
+       invalid_arg "Session.install_cert_trace: a trace is already installed (set-once)";
+     if t.asserted <> []
+     then
+       invalid_arg
+         "Session.install_cert_trace: must be installed on a pristine session, before \
+          any assert"
+   | None -> ());
   (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
-     entailed-equality unit must not enter the cert as a trusted [Input]. Set BEFORE any
-     assert (this runs on a pristine session), so [assert_presolved]'s [pass_a_enabled]
-     sees it. *)
+     entailed-equality unit must not enter the cert as a trusted [Input]. *)
   t.cert_active <- Option.is_some tr;
   Sat.set_trace t.sat tr
 ;;

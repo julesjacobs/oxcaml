@@ -1,0 +1,4 @@
+(goal 1
+  (verdict sat)
+  (model (sort U 3) (const a 0) (const c 0) (const e 1) (const g 2) (const h 2) (const p true))
+  (counters (conflicts <10) (decisions <10) (propagations <100)))

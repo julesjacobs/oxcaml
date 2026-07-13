@@ -502,6 +502,7 @@ test: check-frozen
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 	$(MAKE) combine-test
+	$(MAKE) wiring-test
 	$(MAKE) rational-word-test
 	$(MAKE) stage0-test
 	$(MAKE) wiring-test
