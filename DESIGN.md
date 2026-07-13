@@ -369,8 +369,7 @@ final authority on soundness. The mechanisms:
 - **Mutation testing.** Seeded faults must be caught by the suite; a
   surviving mutant halts feature work on that module.
 - **Honeypots.** Nightly known-wrong verdicts and seeded mutants must turn
-  the gate red; review agents occasionally get a PR with a planted bug —
-  approving it means the review process gets fixed before it is trusted again.
+  the gate red.
 - **Two-model review (codex + fable) on every land**; a zero-finding codex
   exit counts only after transcript validation.
 - **N-version checkers** (model evaluator, explanation verifiers, Lean
