@@ -138,8 +138,8 @@ let read_clflags_from_env () =
    via aggregate memory pressure / paging, even while the tree aggregate
    improved. The size threshold is a best-effort proxy (heavy files are
    predominantly large sources) and wants a fleet run to calibrate. *)
-let compiler_space_overhead_small = 400
-let compiler_space_overhead_large = 200
+let compiler_space_overhead_small = 800
+let compiler_space_overhead_large = 400
 let large_unit_source_bytes = 300 * 1024
 
 (* Mirror the runtime's OCAMLRUNPARAM parser (runtime/startup_aux.c): the
