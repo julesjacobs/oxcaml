@@ -330,15 +330,19 @@ let rational_value t (term : Term.t) =
   | None -> Rational.zero
 ;;
 
-(* Lookup-only [combo_of_term]: [term]'s (varid, coeff) pairs + integer const, WITHOUT
-   allocating a problem var or slack (a fabric scan must not mutate the tableau merely by
-   asking whether a shared term is fixed). [None] if any leaf has no simplex var yet. *)
-let existing_combo t (term : Term.t) : ((int * int) list * int) option =
+(* Lookup-only [combo_of_term]: [term]'s (varid, coeff) pairs + const, WITHOUT allocating
+   a problem var or slack (a fabric scan must not mutate the tableau merely by asking
+   whether a shared term is fixed). [None] if any leaf has no simplex var yet.
+   Coefficients/const are arbitrary-precision [Rational.t] (core-bignum W2), mirroring
+   {!combo_of_term} exactly so the [sort_key] slack lookup below hits the SAME key the
+   real ingest recorded (a native-int projection here would compute a different key and
+   silently miss the slack). *)
+let existing_combo t (term : Term.t) : ((int * Rational.t) list * Rational.t) option =
   let existing_problem tm = Term.Table.find_opt t.var_of_term tm in
   match term.node with
   | App _ ->
     (match existing_problem term with
-     | Some id -> Some ([ id, 1 ], 0)
+     | Some id -> Some ([ id, Rational.one ], Rational.zero)
      | None -> None)
   | Arith { coeffs; const } ->
     let rec gather acc = function
@@ -346,11 +350,11 @@ let existing_combo t (term : Term.t) : ((int * int) list * int) option =
       | (tm, c) :: rest ->
         (match existing_problem tm with
          | None -> None
-         | Some id -> gather ((id, c) :: acc) rest)
+         | Some id -> gather ((id, Rational.of_bigint c) :: acc) rest)
     in
     (match gather [] (Iarr.to_list coeffs) with
      | None -> None
-     | Some pairs -> Some (pairs, const))
+     | Some pairs -> Some (pairs, Rational.of_bigint const))
   | Int_const _ -> None
   | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> None
 ;;
@@ -359,11 +363,11 @@ let existing_combo t (term : Term.t) : ((int * int) list * int) option =
    coeff-1 singleton is its own problem var; anything else is a deduplicated slack. *)
 let existing_combo_var t pairs =
   match pairs with
-  | [ (x, 1) ] -> Some x
+  | [ (x, c) ] when Rational.equal c Rational.one -> Some x
   | _ -> Hashtbl.find_opt t.slacks (sort_key pairs)
 ;;
 
-let negate_pairs pairs = List.map (fun (v, c) -> v, ineg c) pairs
+let negate_pairs pairs = List.map (fun (v, c) -> v, Rational.neg c) pairs
 
 (* The tightest ACTIVE ASSERTED (User) oriented bound of [term] on [which] side, in TERM
    space (const folded in), with its premise token — or [None].
@@ -429,7 +433,7 @@ let tightest_oriented t (term : Term.t) (which : [ `Lower | `Upper ]) =
     in
     (match tightest with
      | Some (d, tok) when Delta.is_rational d && Rational.is_int (Delta.c_part d) ->
-       Some (tok, Rational.add (Delta.c_part d) (Rational.of_int const))
+       Some (tok, Rational.add (Delta.c_part d) const)
      | _ -> None)
 ;;
 
@@ -515,7 +519,7 @@ let oriented_bound_value t (term : Term.t) (which : [ `Lower | `Upper ]) =
     in
     (match tighter with
      | Some (tok, d) when Delta.is_rational d && Rational.is_int (Delta.c_part d) ->
-       Some (tok, Rational.add (Delta.c_part d) (Rational.of_int const))
+       Some (tok, Rational.add (Delta.c_part d) const)
      | _ -> None)
 ;;
 
