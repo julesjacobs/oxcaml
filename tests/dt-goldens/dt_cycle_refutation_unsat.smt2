@@ -1,7 +1,6 @@
 ; Datatype rule 4 — cycle refutation (occurs check). A datatype value cannot contain
 ; itself: x = (cons h x) is unsat. Uses two datatypes (nat, lst) to exercise a
-; multi-datatype declaration block. Marked :status unknown until the datatype theory
-; is wired.
+; multi-datatype declaration block. The DT theory decides it via the occurs check.
 (set-logic QF_DT)
 (set-info :status unsat)
 (declare-datatypes ((nat 0) (lst 0))

@@ -1,7 +1,7 @@
 ; Datatype rule 5 — enum case split / pigeonhole (GOALS: "four pairwise-distinct
 ; values of a three-constructor type is unsat"). color has exactly three nullary
-; constructors, so four distinct color values cannot exist: unsat. Marked :status
-; unknown until the datatype theory (case splitting) is wired.
+; constructors, so four distinct color values cannot exist: unsat. The DT theory decides
+; it via constructor case splits (the exhaustiveness clause) plus distinctness.
 (set-logic QF_DT)
 (set-info :status unsat)
 (declare-datatypes ((color 0)) (((red) (green) (blue))))
