@@ -112,103 +112,121 @@ let add_int_lit buf n =
     Buffer.add_char buf ')')
 ;;
 
-let rec render buf (t : Term.t) =
-  match t.node with
-  | Bool_const b -> Buffer.add_string buf (if b then "true" else "false")
-  | Int_const n -> add_int_lit buf n
-  | App (sym, args) ->
-    if Iarr.length args = 0
-    then Buffer.add_string buf (quote_symbol (Symbol.name sym))
-    else (
-      Buffer.add_char buf '(';
-      Buffer.add_string buf (quote_symbol (Symbol.name sym));
-      Iarr.iter
-        (fun a ->
-           Buffer.add_char buf ' ';
-           render buf a)
-        args;
-      Buffer.add_char buf ')')
-  | Arith l -> render_arith buf l
-  | Le arg ->
-    Buffer.add_string buf "(<= ";
-    render buf arg;
-    Buffer.add_string buf " 0)"
-  | Eq (a, b) -> render_bin buf "=" a b
-  | Not a ->
-    Buffer.add_string buf "(not ";
-    render buf a;
-    Buffer.add_char buf ')'
-  | And xs -> render_nary buf "and" xs
-  | Or xs -> render_nary buf "or" xs
-  | Ite (c, a, b) ->
-    Buffer.add_string buf "(ite ";
-    render buf c;
+(* The render family closes over the datatype registry [dts] so a tester application
+   [App (is-C, [t])] prints as the indexed identifier [((_ is C) t)] rather than as the
+   internal ["is-C"] function name. Constructor and selector applications are ordinary
+   [App]s and print bare under their SMT-LIB names. [dts] is [Datatype_defs.empty] for the
+   registry-free [print_term]. *)
+let render_family dts =
+  let rec render buf (t : Term.t) =
+    match t.node with
+    | Bool_const b -> Buffer.add_string buf (if b then "true" else "false")
+    | Int_const n -> add_int_lit buf n
+    | App (sym, args) ->
+      (match Datatype_defs.tester_of_sym dts sym with
+       | Some (_, ctor) ->
+         (* tester: ((_ is C) arg) *)
+         Buffer.add_string buf "((_ is ";
+         Buffer.add_string buf (quote_symbol (Symbol.name ctor.Datatype_defs.sym));
+         Buffer.add_char buf ')';
+         Iarr.iter
+           (fun a ->
+              Buffer.add_char buf ' ';
+              render buf a)
+           args;
+         Buffer.add_char buf ')'
+       | None ->
+         if Iarr.length args = 0
+         then Buffer.add_string buf (quote_symbol (Symbol.name sym))
+         else (
+           Buffer.add_char buf '(';
+           Buffer.add_string buf (quote_symbol (Symbol.name sym));
+           Iarr.iter
+             (fun a ->
+                Buffer.add_char buf ' ';
+                render buf a)
+             args;
+           Buffer.add_char buf ')'))
+    | Arith l -> render_arith buf l
+    | Le arg ->
+      Buffer.add_string buf "(<= ";
+      render buf arg;
+      Buffer.add_string buf " 0)"
+    | Eq (a, b) -> render_bin buf "=" a b
+    | Not a ->
+      Buffer.add_string buf "(not ";
+      render buf a;
+      Buffer.add_char buf ')'
+    | And xs -> render_nary buf "and" xs
+    | Or xs -> render_nary buf "or" xs
+    | Ite (c, a, b) ->
+      Buffer.add_string buf "(ite ";
+      render buf c;
+      Buffer.add_char buf ' ';
+      render buf a;
+      Buffer.add_char buf ' ';
+      render buf b;
+      Buffer.add_char buf ')'
+  and render_bin buf op a b =
+    Buffer.add_char buf '(';
+    Buffer.add_string buf op;
     Buffer.add_char buf ' ';
     render buf a;
     Buffer.add_char buf ' ';
     render buf b;
     Buffer.add_char buf ')'
-
-and render_bin buf op a b =
-  Buffer.add_char buf '(';
-  Buffer.add_string buf op;
-  Buffer.add_char buf ' ';
-  render buf a;
-  Buffer.add_char buf ' ';
-  render buf b;
-  Buffer.add_char buf ')'
-
-and render_nary buf op xs =
-  Buffer.add_char buf '(';
-  Buffer.add_string buf op;
-  Iarr.iter
-    (fun x ->
-       Buffer.add_char buf ' ';
-       render buf x)
-    xs;
-  Buffer.add_char buf ')'
-
-(* [Arith] = sum of (coeff * term) plus a constant. Render each summand (the term bare
-   when its coeff is 1, else a "( * coeff term )" product), append the constant when
-   nonzero. One summand and no constant prints that summand alone (never a unary [+]);
-   otherwise wrap in a "(+ ...)". *)
-and render_arith buf (l : Term.linear) =
-  let summands =
-    Iarr.fold
-      (fun acc (t, c) ->
-         let b = Buffer.create 32 in
-         if Bigint.equal c Bigint.one
-         then render b t
-         else (
-           Buffer.add_string b "(* ";
-           add_int_lit b c;
-           Buffer.add_char b ' ';
-           render b t;
-           Buffer.add_char b ')');
-         Buffer.contents b :: acc)
-      []
-      l.coeffs
-  in
-  let summands = List.rev summands in
-  let parts =
-    if Bigint.is_zero l.const
-    then summands
-    else (
-      let b = Buffer.create 16 in
-      add_int_lit b l.const;
-      summands @ [ Buffer.contents b ])
-  in
-  match parts with
-  | [ only ] -> Buffer.add_string buf only
-  | _ ->
-    Buffer.add_string buf "(+ ";
-    Buffer.add_string buf (String.concat " " parts);
+  and render_nary buf op xs =
+    Buffer.add_char buf '(';
+    Buffer.add_string buf op;
+    Iarr.iter
+      (fun x ->
+         Buffer.add_char buf ' ';
+         render buf x)
+      xs;
     Buffer.add_char buf ')'
+  (* [Arith] = sum of (coeff * term) plus a constant. Render each summand (the term bare
+     when its coeff is 1, else a "( * coeff term )" product), append the constant when
+     nonzero. One summand and no constant prints that summand alone (never a unary [+]);
+     otherwise wrap in a "(+ ...)". Coefficients/const are core-bignum [Bigint.t] (W2). *)
+  and render_arith buf (l : Term.linear) =
+    let summands =
+      Iarr.fold
+        (fun acc (t, c) ->
+           let b = Buffer.create 32 in
+           if Bigint.equal c Bigint.one
+           then render b t
+           else (
+             Buffer.add_string b "(* ";
+             add_int_lit b c;
+             Buffer.add_char b ' ';
+             render b t;
+             Buffer.add_char b ')');
+           Buffer.contents b :: acc)
+        []
+        l.coeffs
+    in
+    let summands = List.rev summands in
+    let parts =
+      if Bigint.is_zero l.const
+      then summands
+      else (
+        let b = Buffer.create 16 in
+        add_int_lit b l.const;
+        summands @ [ Buffer.contents b ])
+    in
+    match parts with
+    | [ only ] -> Buffer.add_string buf only
+    | _ ->
+      Buffer.add_string buf "(+ ";
+      Buffer.add_string buf (String.concat " " parts);
+      Buffer.add_char buf ')'
+  in
+  render
 ;;
 
 let print_term t =
   let buf = Buffer.create 64 in
-  render buf t;
+  render_family Datatype_defs.empty buf t;
   Buffer.contents buf
 ;;
 
@@ -227,17 +245,20 @@ module Sym_tbl = Hashtbl.Make (struct
 
 type decls =
   { sorts : Symbol.t list (* uninterpreted sort symbols, first-use order *)
+  ; datatypes : Symbol.t list (* datatype sort symbols, first-use order *)
   ; funs : Symbol.t list (* function/const symbols, first-use order *)
   }
 
-let collect_decls env assertions =
+let collect_decls dts env assertions =
   let sort_seen = Sym_tbl.create 16 in
+  let dt_seen = Sym_tbl.create 16 in
   let fun_seen = Sym_tbl.create 64 in
   let sorts = ref [] in
+  let datatypes = ref [] in
   let funs = ref [] in
   let div_sym = Env.div_sym env in
   let mod_sym = Env.mod_sym env in
-  let visit_sort (s : Sort.t) =
+  let rec visit_sort (s : Sort.t) =
     match s with
     | Sort.Bool | Sort.Int _ -> ()
     | Sort.Uninterpreted sym ->
@@ -245,12 +266,36 @@ let collect_decls env assertions =
       then (
         Sym_tbl.add sort_seen sym ();
         sorts := sym :: !sorts)
-    (* Datatype sorts need a [(declare-datatype ...)] block whose shape lives in
-       {!Datatype_defs}, which this printer entry point does not receive. Rather than emit
-       a wrong [(declare-sort ...)], refuse until the printer takes the registry (tracked
-       follow-up). *)
-    | Sort.Datatype _ ->
-      raise (Unsupported "printing datatype sorts is not supported yet")
+    | Sort.Datatype sym ->
+      if not (Sym_tbl.mem dt_seen sym)
+      then (
+        Sym_tbl.add dt_seen sym ();
+        datatypes := sym :: !datatypes;
+        (* Pull in the sorts a constructor field references — a sibling datatype (mutual
+           recursion) or an uninterpreted field sort — so every sort the emitted
+           [(declare-datatypes ...)] block mentions is itself declared first. *)
+        match Datatype_defs.datatype_of_sort dts sym with
+        | Some dt ->
+          List.iter
+            (fun (c : Datatype_defs.constructor) ->
+               List.iter
+                 (fun (sel : Datatype_defs.selector) -> visit_sort sel.field_sort)
+                 c.selectors)
+            dt.constructors
+        | None ->
+          raise
+            (Unsupported
+               (Printf.sprintf
+                  "datatype sort %s has no registry entry to print"
+                  (Symbol.name sym))))
+  in
+  (* A constructor / selector / tester symbol is declared by the datatype block, never as
+     a standalone [declare-fun]; its ranks are still walked (above) so its sorts are
+     collected. *)
+  let is_datatype_symbol sym =
+    Option.is_some (Datatype_defs.constructor_of_sym dts sym)
+    || Option.is_some (Datatype_defs.selector_of_sym dts sym)
+    || Option.is_some (Datatype_defs.tester_of_sym dts sym)
   in
   let register_fun sym =
     (* reserved div/mod are built-ins, never declared *)
@@ -264,7 +309,7 @@ let collect_decls env assertions =
            Iarr.iter visit_sort rank.Rank.domain;
            visit_sort rank.Rank.codomain
          | exception Not_found -> ());
-        funs := sym :: !funs)
+        if not (is_datatype_symbol sym) then funs := sym :: !funs)
   in
   let rec visit (t : Term.t) =
     match t.node with
@@ -284,7 +329,7 @@ let collect_decls env assertions =
       visit b
   in
   List.iter visit assertions;
-  { sorts = List.rev !sorts; funs = List.rev !funs }
+  { sorts = List.rev !sorts; datatypes = List.rev !datatypes; funs = List.rev !funs }
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -294,25 +339,79 @@ let sort_string (s : Sort.t) =
   match s with
   | Sort.Bool -> "Bool"
   | Sort.Int _ -> "Int"
-  | Sort.Uninterpreted sym -> quote_sort_symbol (Symbol.name sym)
-  | Sort.Datatype _ -> raise (Unsupported "printing datatype sorts is not supported yet")
+  (* A datatype sort prints by its name, the same as an uninterpreted sort; the datatype's
+     shape is emitted separately in the [(declare-datatypes ...)] block. *)
+  | Sort.Uninterpreted sym | Sort.Datatype sym -> quote_sort_symbol (Symbol.name sym)
 ;;
 
-let print_session ?status env assertions =
+(* Render one constructor [(C (sel1 S1) ... (seln Sn))] for a declare-datatypes block;
+   nullary constructors print as [(C)]. *)
+let constructor_string (c : Datatype_defs.constructor) =
+  let buf = Buffer.create 32 in
+  Buffer.add_char buf '(';
+  Buffer.add_string buf (quote_symbol (Symbol.name c.sym));
+  List.iter
+    (fun (sel : Datatype_defs.selector) ->
+       Buffer.add_string buf " (";
+       Buffer.add_string buf (quote_symbol (Symbol.name sel.sym));
+       Buffer.add_char buf ' ';
+       Buffer.add_string buf (sort_string sel.field_sort);
+       Buffer.add_char buf ')')
+    c.selectors;
+  Buffer.add_char buf ')';
+  Buffer.contents buf
+;;
+
+let print_session ?status ?(datatypes = Datatype_defs.empty) env assertions =
   let buf = Buffer.create 1024 in
   let line s =
     Buffer.add_string buf s;
     Buffer.add_char buf '\n'
   in
+  let { sorts; datatypes = dt_syms; funs } = collect_decls datatypes env assertions in
+  let render = render_family datatypes in
   (match status with
    | None -> ()
    | Some st -> line (Printf.sprintf "(set-info :status %s)" (Status.to_string st)));
-  line "(set-logic QF_UFLIA)";
-  let { sorts; funs } = collect_decls env assertions in
+  (* The base printer targets QF_UFLIA; a session that declares datatypes needs a logic
+     that admits them (QF_UFDT is the UF+DT superset our reader accepts). Non-datatype
+     sessions are byte-identical to before. *)
+  line (if dt_syms = [] then "(set-logic QF_UFLIA)" else "(set-logic QF_UFDT)");
   List.iter
     (fun sym ->
        line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))
     sorts;
+  (* All datatypes in one [(declare-datatypes ...)] block: SMT-LIB declares every sort
+     name before any constructor list, so mutual recursion needs no ordering among them. *)
+  (match dt_syms with
+   | [] -> ()
+   | _ ->
+     let sort_decls =
+       String.concat
+         " "
+         (List.map
+            (fun s -> Printf.sprintf "(%s 0)" (quote_sort_symbol (Symbol.name s)))
+            dt_syms)
+     in
+     let ctor_lists =
+       List.map
+         (fun s ->
+            match Datatype_defs.datatype_of_sort datatypes s with
+            | Some dt ->
+              "(" ^ String.concat " " (List.map constructor_string dt.constructors) ^ ")"
+            | None ->
+              raise
+                (Unsupported
+                   (Printf.sprintf
+                      "datatype sort %s has no registry entry to print"
+                      (Symbol.name s))))
+         dt_syms
+     in
+     line
+       (Printf.sprintf
+          "(declare-datatypes (%s) (%s))"
+          sort_decls
+          (String.concat " " ctor_lists)));
   List.iter
     (fun sym ->
        let name = quote_symbol (Symbol.name sym) in

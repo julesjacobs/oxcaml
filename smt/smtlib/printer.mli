@@ -66,9 +66,19 @@ val print_term : Oxsmt_core.Term.t -> string
     emitted before all function/constant declarations, so every declaration precedes its
     uses. A symbol declared but never used in an assertion is not emitted (it cannot
     affect the verdict). Raises {!Unsupported} via {!quote_symbol} on an unrepresentable
-    name. *)
+    name.
+
+    [?datatypes] supplies the algebraic-datatype shapes (from the parser / session). When
+    a session uses datatype sorts it emits, after the uninterpreted sorts and before the
+    function declarations, a single [(declare-datatypes ((T 0)...) (ctor-list...))] block
+    (all datatypes together, mutual recursion included); the constructor / selector /
+    tester [declare-fun]s are suppressed (implicit in the block), testers render as
+    [((_ is C) t)], and the logic becomes [QF_UFDT]. Omitting it (the default empty
+    registry) reproduces the byte-identical QF_UFLIA behaviour for datatype-free sessions.
+    Raises {!Unsupported} if a datatype sort is used with no matching registry entry. *)
 val print_session
   :  ?status:Status.t
+  -> ?datatypes:Oxsmt_core.Datatype_defs.t
   -> Oxsmt_core.Env.t
   -> Oxsmt_core.Term.t list
   -> string

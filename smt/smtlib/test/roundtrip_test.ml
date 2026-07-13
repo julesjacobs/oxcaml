@@ -660,7 +660,13 @@ let check_b path =
        from the parse-time (malformed/unsupported) skips above; direction A must never
        gain this catch, since A only prints printer-legal sessions and a raise there is a
        real bug. *)
-    (match Printer.print_session ?status:parsed.status parsed.env parsed.assertions with
+    (match
+       Printer.print_session
+         ?status:parsed.status
+         ~datatypes:parsed.datatypes
+         parsed.env
+         parsed.assertions
+     with
      | exception Printer.Unsupported m ->
        incr b_skip_unprintable;
        b_unprintable_seen := Filename.basename path :: !b_unprintable_seen;
