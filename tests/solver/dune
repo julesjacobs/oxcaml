@@ -71,5 +71,4 @@
   oxsmt_interface
   oxsmt_arr
   oxsmt_smtlib_parser
-  oxsmt_query_loader
-  unix))
+  oxsmt_query_loader))

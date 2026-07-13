@@ -59,13 +59,15 @@ type t =
          instantiations) — the field-relevance cascade only crosses these, bounding it to
          the finite input structure (no runaway down a recursive spine of split-born
          selector terms). *)
-  ; mutable diseq_pairs : (Term.t * Term.t) list
-    (* datatype-sorted disequality operand pairs, in assertion order — the guide for
-         disequality-aware model completion (a free field must not be filled with a value
-         that reproduces a forbidden term). Used only at model build, guarded by
-         [not (are_equal a b)] so a popped-but-not-removed pair (still distinct classes)
-         is at worst harmless over-distinctness, never a wrong verdict; the §8 checker
-         remains the authority. *)
+  ; mutable diseq_frames : (Term.t * Term.t) list list
+    (* datatype-sorted disequality operand pairs, a per-frame stack in lockstep with
+         [frames] (one list per push; [pop n] drops the popped frames' pairs). The guide
+         for disequality-aware model completion (a free field must not be filled with a
+         value that reproduces a forbidden term). Frame-scoped so it does not accumulate
+         across push/pop re-assertions and a popped disequality does not linger. Read
+         (flattened) at model build, additionally guarded by [not (are_equal a b)]; the §8
+         checker remains the authority, so this is completeness-steering only, never a
+         verdict. *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   }
@@ -95,7 +97,7 @@ let create ctx _env reg =
   ; split_relevant = Term.Table.create 64
   ; diseq_relevant = Term.Table.create 64
   ; input_dt = Term.Table.create 64
-  ; diseq_pairs = []
+  ; diseq_frames = [ [] ]
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
   }
@@ -252,7 +254,9 @@ let assert_lit t lit =
         Term.Table.replace t.split_relevant b ();
         Term.Table.replace t.diseq_relevant a ();
         Term.Table.replace t.diseq_relevant b ();
-        t.diseq_pairs <- (a, b) :: t.diseq_pairs))
+        match t.diseq_frames with
+        | fr :: rest -> t.diseq_frames <- ((a, b) :: fr) :: rest
+        | [] -> t.diseq_frames <- [ [ a, b ] ]))
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -657,7 +661,8 @@ let explain t lit =
 
 let push t =
   Euf.push t.engine;
-  t.frames <- [] :: t.frames
+  t.frames <- [] :: t.frames;
+  t.diseq_frames <- [] :: t.diseq_frames
 ;;
 
 let pop t n =
@@ -674,6 +679,19 @@ let pop t n =
   in
   t.frames
   <- (match drop n t.frames with
+      | [] -> [ [] ]
+      | fs -> fs);
+  (* keep the disequality-pair stack in lockstep: drop the popped frames' pairs *)
+  let rec drop_diseq k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | _ :: rest -> drop_diseq (k - 1) rest
+      | [] -> [])
+  in
+  t.diseq_frames
+  <- (match drop_diseq n t.diseq_frames with
       | [] -> [ [] ]
       | fs -> fs)
 ;;
@@ -890,7 +908,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
            match constrained_value a 0 with
            | Some va -> add_forbidden (Euf.class_of t.engine b) va
            | None -> ()))
-      t.diseq_pairs;
+      (List.concat t.diseq_frames);
     (* propagate through single-field constructors to a fixpoint (bounded) *)
     let ctor_terms_ordered = List.rev t.ctor_terms in
     let changed = ref true in

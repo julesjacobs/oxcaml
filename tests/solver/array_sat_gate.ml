@@ -1,5 +1,5 @@
 (* Sat-direction gate for the arrays model-construction lane (task #14), the arrays
-   analogue of {!Dt_sat_gate}. Three parts:
+   analogue of {!Dt_sat_gate}. Three parts, all in-process through the real {!Session}:
 
    1. GOLDENS — every [*_sat.smt2] under tests/arr-goldens-sat/ must be a CHECKED [Sat]:
       check_sat returns [Sat] only after {!Array_model_check} validated the array model
@@ -11,17 +11,11 @@
       a wrong sat. A bypass of the checker would report [Sat] here — so this being
       [unknown] is exactly the checker earning its keep.
 
-   These two run through a SUBPROCESS of the shipped CLI (one Session per OS process, the
-   production path): the arrays theory mints reserved symbols into the process-global
-   intern table, so multiple array Sessions in one process interfere — a known limitation
-   of in-process multi-session use, irrelevant to the one-query-per-process product/corpus
-   path.
-
-   3. WIRING (fault injection) — a SINGLE in-process Session, re-checked with the
-   {!Session.For_test.set_array_checker} override flipped between calls: a reject-all stub
-   forces [Unknown] on a genuinely-sat query (a commit that bypassed the checker would
-   report [Sat] — RED), the stub is observed invoked, and restoring the real checker gives
-   [Sat]. One Session, so no cross-session interference. *)
+   3. WIRING (fault injection) — a Session re-checked with the
+      {!Session.For_test.set_array_checker} override flipped between calls: a reject-all
+      stub forces [Unknown] on a genuinely-sat query (a commit that bypassed the checker
+      would report [Sat] — RED), the stub is observed invoked, and restoring the real
+      checker gives [Sat]. *)
 
 module Session = Oxsmt_interface.Session
 module Parser = Oxsmt_smtlib_parser.Parser
@@ -50,38 +44,22 @@ let read_file path =
   s
 ;;
 
-(* CLI sibling of this gate in the same _build dir; run one file, one Session per process. *)
-let cli = Filename.concat (Filename.dirname Sys.executable_name) "oxsmt_cli.exe"
-
-(* substring occurrence test (stdlib-only; no Str) *)
-let contains hay needle =
-  let nh = String.length hay
-  and nn = String.length needle in
-  let rec at i =
-    if i + nn > nh
-    then false
-    else if String.sub hay i nn = needle
-    then true
-    else at (i + 1)
-  in
-  nn = 0 || at 0
-;;
-
-let cli_verdict file =
-  let ic =
-    Unix.open_process_in
-      (Printf.sprintf "%s %s 2>/dev/null" (Filename.quote cli) (Filename.quote file))
-  in
-  let out =
-    try input_line ic with
-    | End_of_file -> ""
-  in
-  ignore (Unix.close_process_in ic);
-  if contains out "verdict sat"
-  then "sat"
-  else if contains out "verdict unsat"
-  then "unsat"
-  else "unknown"
+(* Parse (with the session's cap-backed minter, needed for the reserved array op symbols),
+   load, and solve one .smt2 source in a fresh Session. *)
+let solve src =
+  let s = Session.create () in
+  match
+    Parser.parse_into
+      ~internal_mint:(Session.parse_minter s)
+      (Session.env s)
+      (Session.context s)
+      src
+  with
+  | exception (Parser.Malformed _ | Parser.Unsupported _) -> Session.Unknown
+  | parsed ->
+    if Oxsmt_query_loader.assert_all s parsed
+    then Session.check_sat s
+    else Session.Unknown
 ;;
 
 let run_goldens dir =
@@ -91,23 +69,25 @@ let run_goldens dir =
   |> List.sort String.compare
   |> List.iter (fun f ->
     incr checks;
-    let v = cli_verdict (Filename.concat dir f) in
-    if not (String.equal v "sat") then fail "golden %s: got %s, want sat" f v)
+    match solve (read_file (Filename.concat dir f)) with
+    | Session.Sat -> ()
+    | Session.Unsat -> fail "golden %s: got unsat, want sat" f
+    | Session.Unknown -> fail "golden %s: got unknown, want sat" f)
 ;;
 
-let run_soundness file =
+(* the checker must NOT certify this unsatisfiable query as sat *)
+let run_soundness src =
   incr checks;
-  let v = cli_verdict file in
-  (* the checker must NOT certify this unsatisfiable query as sat *)
-  if String.equal v "sat"
-  then
+  match solve src with
+  | Session.Sat ->
     fail
       "soundness: storeinv-unsat reported SAT (WRONG-SAT — the checker failed to reject \
        an unsatisfiable array query)"
+  | Session.Unsat | Session.Unknown -> ()
 ;;
 
-(* One in-process Session, re-checked with the override flipped: proves the commit is
-   GATED on the checker verdict (RED against a bypass). *)
+(* Re-check one Session with the override flipped: proves the commit is GATED on the
+   checker verdict (RED against a bypass). *)
 let run_fault_injection src =
   let s = Session.create () in
   match
@@ -154,7 +134,7 @@ let run_fault_injection src =
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/arr-goldens-sat" in
   run_goldens dir;
-  run_soundness (Filename.concat dir "arr_storeinv_unsat_stays_unknown.smt2");
+  run_soundness (read_file (Filename.concat dir "arr_storeinv_unsat_stays_unknown.smt2"));
   run_fault_injection (read_file (Filename.concat dir "arr_select_over_store_sat.smt2"));
   Printf.printf "Array sat-gate: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
