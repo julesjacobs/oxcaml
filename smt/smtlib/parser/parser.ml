@@ -186,12 +186,22 @@ and read_app st scope head args orig =
   | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
   | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
     apply_named st scope op args orig
-  (* [(as t Sort)] sort ascription (e.g. [(as nil (List Int))]): keep the term, drop the
-     ascription — every term the smart constructors build is already fully sorted, and the
-     ascribing sort may be a compound [sort_of_sexp] does not model. *)
+  (* [(as t Sort)] sort ascription (e.g. [(as nil nat)]): read the term and CHECK the
+     ascription against its actual sort, rejecting a mismatch (codex) rather than dropping
+     it — a silently-ignored ascription could let a wrong-sorted term through. A
+     parametric / compound ascription [sort_of_sexp] cannot model raises [Unsupported] (->
+     unknown), which is sound: we abstain rather than skip the check. *)
   | Sexp.Atom (Tok.Reserved "as") ->
     (match args with
-     | [ t; _sort ] -> read_term st scope t
+     | [ t; sort_s ] ->
+       let term = read_term st scope t in
+       let ascribed = sort_of_sexp st sort_s in
+       if not (Sort.equal term.Term.sort ascribed)
+       then
+         malformedf
+           "(as ...) sort ascription %s does not match the term's sort"
+           (Sexp.to_string sort_s);
+       term
      | _ -> malformedf "malformed (as term sort): %s" (Sexp.to_string orig))
   | Sexp.Atom (Tok.Reserved ("forall" | "exists")) ->
     unsupportedf "quantifiers are not supported (QF only)"
@@ -581,6 +591,10 @@ let process_datatypes st sort_decls ctor_lists =
        let dt_sort = Sort.datatype_ sort_sym in
        let constructors =
          match ctor_list with
+         (* A datatype with zero constructors is uninhabited and not well-formed SMT-LIB
+           (SMT-LIB 2.6 requires >= 1 constructor); reject rather than register an empty,
+           value-less datatype. *)
+         | Sexp.List [] -> malformedf "datatype %s has no constructors" name
          | Sexp.List cs -> List.map (parse_constructor st dt_sort) cs
          | _ -> malformedf "malformed constructor list for datatype %s" name
        in

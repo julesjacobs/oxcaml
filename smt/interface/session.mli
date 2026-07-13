@@ -324,3 +324,12 @@ type instantiation =
     instance actually asserted this session, tagged with which lemma and substitution
     produced it (a budget-aborted round's instances are absent). *)
 val lemma_instantiations : t -> instantiation list
+
+(** Test-only whitebox hook. NOT for solver code. *)
+module For_test : sig
+  (** The canonical model-reconstruction default for an unconstrained variable of a given
+      sort (used by the W1b eliminated-def splice). Exposed so the wiring test can assert
+      it fails closed on a datatype sort — a datatype has no scalar default, so it must
+      raise rather than fabricate [VUninterp 0] (the silent wrong-value class, codex). *)
+  val default_value : Oxsmt_core.Sort.t -> model_value
+end

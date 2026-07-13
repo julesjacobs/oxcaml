@@ -1268,6 +1268,43 @@ let test_presolve_bool_dep_default () =
   | v, _ -> check ("M1: expected sat+model, got " ^ verdict_str v) false
 ;;
 
+(* codex silent-miss guard (default_value). The W1b eliminated-def splice defaults an
+   unconstrained free leaf of an eliminated def to a canonical sort value. The old if/else
+   chain fell through to [VUninterp 0] for ANY non-Bool/non-Int sort — including a
+   DATATYPE sort, whose values are constructor trees, not uninterpreted witnesses. Under
+   presolve a datatype const can surface as such a free leaf (e.g. eliminating
+   [x = (head d)] leaves [d : lst] as the only free leaf of the def), and the fabricated
+   [VUninterp 0] would be a silent wrong value fed to R1 — a wrong-Sat if R1 ever accepted
+   it (today masked by R1 only "by luck", codex). This drives [default_value] directly: it
+   must fail closed (raise) on a datatype sort while still returning the scalar defaults.
+   RED before the exhaustive-match fix (it returned VUninterp 0). The end-to-end
+   reachability is exercised by
+   tests/dt-goldens/dt_presolve_elim_datatype_leaf_unknown.smt2 (sound unknown, no crash);
+   a verdict golden cannot discriminate the fix because R1 independently masks the
+   fabricated value. *)
+let test_default_value_datatype_fail_closed () =
+  let env = Env.create () in
+  let lst = Sort.datatype_ (Env.declare_sort env "lst") in
+  let u = Sort.uninterpreted (Env.declare_sort env "U") in
+  check_raises "default_value fails closed on a datatype sort" (fun () ->
+    Session.For_test.default_value lst);
+  check
+    "default_value Bool = VBool false"
+    (match Session.For_test.default_value Sort.bool with
+     | Session.VBool false -> true
+     | _ -> false);
+  check
+    "default_value Int = VInt 0"
+    (match Session.For_test.default_value Sort.int with
+     | Session.VInt 0 -> true
+     | _ -> false);
+  check
+    "default_value Uninterpreted = VUninterp 0"
+    (match Session.For_test.default_value u with
+     | Session.VUninterp 0 -> true
+     | _ -> false)
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -1359,6 +1396,7 @@ let () =
   test_presolve_bignum_const_solves ();
   test_presolve_eq_uf_side_sound ();
   test_presolve_bool_dep_default ();
+  test_default_value_datatype_fail_closed ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
