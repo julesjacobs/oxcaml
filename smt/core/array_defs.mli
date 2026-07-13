@@ -30,15 +30,48 @@ type entry =
   }
 
 (** [op_symbol_name role ~index ~element] is the canonical, deterministic internal name of
-    the [select]/[store] symbol for one array instantiation. Interning it (via
-    {!Env.declare_fun}) yields the same {!Symbol.t} from any front end — the parser at
-    parse time, and the arrays theory when it builds a fresh [select] for a
-    read-over-write step — so those terms hash-cons to one identity and congruence
-    composes. The name is not a legal simple SMT-LIB symbol (the ["@arr."] prefix), so it
-    cannot collide with a user declaration; and it is not the reserved [".oxsmt."] prefix,
-    so [Env.declare_fun] admits it. Distinct (role, index, element) triples yield distinct
-    names. *)
+    the [select]/[store] symbol for one array instantiation. Interning it (via the
+    cap-gated reserved door {!Env.declare_reserved}, threaded as the parser's
+    [?internal_mint] and reused directly by the arrays theory) yields the same {!Symbol.t}
+    from any front end — the parser at parse time, and the arrays theory when it builds a
+    fresh [select] for a read-over-write step — so those terms hash-cons to one identity
+    and congruence composes.
+
+    The name lives in the reserved [".oxsmt.arr."] namespace (board #58). This is what
+    keeps it collision-proof, and NOT lexical illegality: the earlier ["@arr."] form was
+    in fact a perfectly spellable SMT-LIB simple symbol ([@] and [.] are both in the
+    simple-symbol charset), so a user [declare-fun] could alias it and hijack the theory's
+    classification — a wrong verdict. Two enforcement layers now close that, in depth:
+    - the [".oxsmt."] reserved prefix: the public {!Env.declare_fun}/{!Env.declare_sort}
+      doors reject it, and only a capability holder mints it via {!Env.declare_reserved};
+    - the [|] byte in the [role|index|element] sort-key separators: no SMT-LIB symbol
+      form, simple or quoted, can carry a [|] (it closes a quoted symbol and is absent
+      from the simple-symbol charset), so the name cannot even be written in parsed input,
+      and the public [Env] doors reject the byte class outright. Distinct (role, index,
+      element) triples yield distinct names. *)
 val op_symbol_name : role -> index:Sort.t -> element:Sort.t -> string
+
+(** [is_op_sym sym] is [true] when [sym]'s name is an array [select]/[store] op-symbol
+    name (the [".oxsmt.arr."] prefix with a [|] sort-key separator, which excludes the
+    ext-witness Skolem [.oxsmt.arr.ext.N]). The session's assert-side reserved-symbol gate
+    uses this to admit a legitimate op symbol appearing as an [App] head in an ordinary
+    assertion, while still rejecting every other reserved [.oxsmt.*] name (a coerced qvar
+    or a captured preprocessing witness). A name-shape test is sound as that exemption
+    because provenance is enforced at the minting door, not here: a [.oxsmt.arr.*] name
+    can only acquire a rank — hence be applied via {!Context.app} — through the cap-gated
+    {!Env.declare_reserved}, which only the parser's internal-mint hook and the arrays
+    theory reach; a user [Symbol.intern] yields a rank-less symbol {!Context.app} refuses,
+    and the public declare doors reject the prefix and the [|] byte. Registry-independent
+    (it does not consult {!t}), so it is stable across the whole session. *)
+val is_op_sym : Symbol.t -> bool
+
+(** [is_op_name name] is [is_op_sym] on the raw name string — the op-symbol grammar
+    without interning. This is the [admit] gate a [Session] gives its parse-time internal
+    minter ({!Oxsmt_interface.Session.parse_minter}): the minter mints ONLY names matching
+    this grammar, so the parser can intern array op symbols and nothing else (it can never
+    forge the ext-witness [.oxsmt.arr.ext.N] — no [|] — a tester, a qvar, or a
+    preprocessing witness). *)
+val is_op_name : string -> bool
 
 val empty : t
 val is_empty : t -> bool

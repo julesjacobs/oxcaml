@@ -142,7 +142,13 @@ let select_sym t ~index ~element : Symbol.t =
   | Some sym -> sym
   | None ->
     let arr = Sort.array_ ~index ~element in
-    let sym = Env.declare_fun t.env name (Rank.create [ arr; index ] element) in
+    (* board #58: the op name is a reserved [.oxsmt.arr.*] symbol with [|] sort-key
+       separators, so it must be minted through the cap door (the same [cap] the
+       ext-witness Skolem uses), not [Env.declare_fun] — the public door rejects both the
+       prefix and the byte class. *)
+    let sym =
+      Env.declare_reserved t.cap t.env name (Rank.create [ arr; index ] element)
+    in
     Hashtbl.replace t.select_syms name sym;
     t.reg <- Defs.add t.reg sym Defs.Select ~index ~element;
     sym
@@ -229,18 +235,29 @@ let witness_index t (a : Term.t) (b : Term.t) (index : Sort.t) : Term.t =
   | Some w -> w
   | None ->
     (* A fresh nullary index constant for the extensionality Skolem. It MUST be
-       unforgeable: if a user could name the same symbol, they could assert an equality at
-       this very index and turn our [select a k <> select b k] into a false conflict — a
-       wrong-UNSAT. Freshness therefore rests on the reserved [".oxsmt."] namespace
-       (ADR-0012 R1), NOT on lexical illegality: [@arr.ext.N] would be forgeable because
-       [@] and [.] are legal SMT-LIB simple-symbol characters (a user
-       [(declare-const @arr.ext.0 ...)] aliases the symbol, which is interned by name). We
-       mint through the cap-gated {!Env.declare_reserved} door, so the reserved guard
-       rejects any user declaration or assertion that mentions [".oxsmt.*"] (the same
-       protection DT's testers rely on). The counter keeps distinct diseq pairs on
-       distinct witnesses. *)
-    let name = Printf.sprintf ".oxsmt.arr.ext.%d" t.fresh_counter in
-    t.fresh_counter <- t.fresh_counter + 1;
+       unforgeable: if the same symbol could be named elsewhere, an equality asserted at
+       this very index would turn our [select a k <> select b k] into a false conflict — a
+       wrong-UNSAT. The reserved [".oxsmt.arr.ext."] namespace closes the EXTERNAL door
+       (parsed input / public [declare_fun] / raw [Env] can never produce a [.oxsmt.*]
+       symbol with a rank), NOT lexical illegality — [@arr.ext.N] would have been
+       forgeable since [@]/[.] are legal simple-symbol characters.
+
+       board #58 (codex critical, freshness by CONSTRUCTION not by counter trust): the
+       minting door [Session.internal_minter] is PUBLIC, so a trusted in-process caller
+       could pre-mint [.oxsmt.arr.ext.N] (giving that name a rank) and then our counter,
+       trusting itself, would hand the extensionality rule the CALLER's symbol -> capture
+       -> wrong verdict. So advance past any index whose name already carries a rank in
+       [env] (i.e. is already declared/minted), and only then mint. This makes the witness
+       fresh against the actual env state, not merely against our own counter. The counter
+       also keeps distinct diseq pairs on distinct witnesses. *)
+    let rec fresh_name () =
+      let name = Printf.sprintf ".oxsmt.arr.ext.%d" t.fresh_counter in
+      t.fresh_counter <- t.fresh_counter + 1;
+      match Env.rank t.env (Symbol.intern name) with
+      | (_ : Rank.t) -> fresh_name () (* already declared/minted — skip it *)
+      | exception Not_found -> name
+    in
+    let name = fresh_name () in
     let sym = Env.declare_reserved t.cap t.env name (Rank.create [] index) in
     let w = Context.const t.ctx sym in
     Euf.register_term t.engine w;

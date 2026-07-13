@@ -47,7 +47,13 @@ let run_file path : outcome * outcome option =
     let s = Session.create ~max_effort:200_000 () in
     let rec_ = Recorder.create () in
     Session.install_cert_trace s (Some (Recorder.trace rec_));
-    (match Parser.parse_into (Session.env s) (Session.context s) src with
+    (match
+       Parser.parse_into
+         ~internal_mint:(Session.parse_minter s)
+         (Session.env s)
+         (Session.context s)
+         src
+     with
      | exception ex -> Error ("parse: " ^ Printexc.to_string ex), None
      | parsed ->
        (* install datatype shapes before asserting, so a QF_DT/QF_UFDT file runs the DT

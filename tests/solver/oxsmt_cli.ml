@@ -165,7 +165,13 @@ let render_model (sort_cards, bindings) =
    block, so the output format is unchanged). *)
 let solve_batch ?max_effort ?(presolve = true) src =
   let s = Session.create ?max_effort () in
-  match Parser.parse_into (Session.env s) (Session.context s) src with
+  match
+    Parser.parse_into
+      ~internal_mint:(Session.parse_minter s)
+      (Session.env s)
+      (Session.context s)
+      src
+  with
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
     unknown_block

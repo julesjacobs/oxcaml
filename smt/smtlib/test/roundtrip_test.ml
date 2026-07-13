@@ -839,7 +839,20 @@ let b_unprintable_seen = ref []
 
 let check_b path =
   let text = read_file path in
-  match Parser.parse text with
+  (* board #58: an arrays file mints its [.oxsmt.arr.*] op symbols mid-parse through the
+     cap-backed [?internal_mint] door, so this direction-B check owns a throwaway env with
+     its own capability (the analogue of what a [Session] hands the product drivers). The
+     env is private to this parse, so there is no cross-context aliasing risk. The SAME
+     minter/env backs the reprint reparse below, so the op symbols intern to one identity.
+     A standalone [Parser.parse] has no cap and would degrade every arrays file to a
+     [Malformed] skip — a silent loss of the arrays round-trip coverage this suite adds. *)
+  let env, cap = Env.create_with_cap () in
+  let ctx = Context.create env in
+  (* board #58 O-MINTER: an opaque minter that admits exactly the arrays op-symbol grammar
+     (the same narrowing [Session.parse_minter] applies), so this local parse can intern
+     [select]/[store] op symbols and nothing else. *)
+  let internal_mint = Internal_minter.create ~admit:Array_defs.is_op_name cap env in
+  match Parser.parse_into ~internal_mint env ctx text with
   | exception Parser.Malformed m ->
     incr b_skip;
     Printf.printf "  skip (malformed): %s (%s)\n" path m
@@ -869,7 +882,7 @@ let check_b path =
        Printf.printf "  skip (unprintable): %s (%s)\n" path m
      | out ->
        incr checks;
-       (match Parser.parse_into parsed.env parsed.ctx out with
+       (match Parser.parse_into ~internal_mint parsed.env parsed.ctx out with
         | parsed2 ->
           if not (terms_equal parsed.assertions parsed2.assertions)
           then fail "B/%s: assertions differ after reprint\n%s" path out

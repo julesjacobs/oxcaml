@@ -707,13 +707,14 @@ let test_cap_door_mints_internal () =
 ;;
 
 (* board #58 O-MINTER: [Session.parse_minter] returns an OPAQUE minter, not a bare general
-   [Env.declare_reserved] closure. On trunk it sanctions NO marker (no theory mints at
-   parse time), so a caller holding only a [Session.t] has NO path to mint a reserved name
-   through it — every [Internal_minter.mint] attempt is refused (the O-MINTER close).
-   DISCRIMINATING: against a permissive-admit regression (or the old public
-   [Session.internal_minter] general closure), minting ".oxsmt.arr.select|..." SUCCEEDS,
-   so [refused] returns false and the checks fail. The old [Session.internal_minter]
-   accessor is GONE (compile-enforced by session.mli). *)
+   [Env.declare_reserved] closure — the old [Session.internal_minter] general accessor is
+   GONE (compile-enforced by session.mli). Its [admit] gate is NARROW: the arrays
+   migration widened it to the arrays op-symbol grammar ONLY ({!Array_defs.is_op_name}:
+   [.oxsmt.arr.] prefix + a [|] separator), so a caller holding only a [Session.t] can
+   mint select/store op names but NOTHING else — not the arrays ext witness, not a bv
+   marker (bv widens its own grammar when it lands), not a user or preprocessing name.
+   DISCRIMINATING: against an admit-all regression the ext-witness/user mints would
+   SUCCEED; against a deny-all regression the op mint would FAIL. *)
 let test_session_parse_minter () =
   let s = Session.create () in
   let m = Session.parse_minter s in
@@ -728,17 +729,17 @@ let test_session_parse_minter () =
      is refused (deny-by-default). RED against a permissive [admit] / the old public
      general closure (which minted these fine). *)
   check
-    "parse_minter admits no reserved name on trunk (arrays op shape)"
-    (refused ".oxsmt.arr.select|Int|Int");
+    "parse_minter ADMITS the arrays op-symbol grammar (arrays migration widened it)"
+    (not (refused ".oxsmt.arr.select|Int|Int"));
   check
-    "parse_minter admits no reserved name on trunk (bv marker shape)"
+    "parse_minter refuses the bv marker shape (not arrays' grammar; bv widens at bv land)"
     (refused ".oxsmt.bv|8");
   (* Sensitive reserved namespaces: NEVER admitted through this front-end door — they are
      minted directly via [Env.declare_reserved] by trusted code and have no inertness
      guard. These must stay refused even after a theory migration widens the marker
      grammar. *)
   check
-    "parse_minter refuses the arrays ext-witness namespace"
+    "parse_minter refuses the arrays ext-witness namespace (.oxsmt.arr.ext.N, no '|')"
     (refused ".oxsmt.arr.ext.0");
   check "parse_minter refuses the datatype tester namespace" (refused ".oxsmt.is-Cons");
   check "parse_minter refuses the qvar namespace" (refused ".oxsmt.qvar.0.0");
@@ -767,6 +768,169 @@ let test_parser_internal_mint_threading () =
     "parse_into with ~internal_mint threads and solves"
     Session.Sat
     (Session.check_sat s)
+;;
+
+(* board #58 (arrays migration): the array [select]/[store] op symbols now live in the
+   reserved namespace as [.oxsmt.arr.<op>|<sortkey>|<sortkey>], minted through the cap
+   door instead of [Env.declare_fun]. This pins the two soundness properties the migration
+   buys, against the canonical name the parser and theory actually build
+   ([Array_defs.op_symbol_name], not a hand-written literal that could drift):
+   - the real op name is doubly rejected at the PUBLIC doors — the [.oxsmt.] reserved
+     prefix AND the [|] sort-key-separator byte class — so no user declaration can alias
+     it;
+   - the cap door [Env.declare_reserved] MINTS it. Against the pre-migration [@arr.*] name
+     this call RAISED ("not a reserved (.oxsmt.*) name"), so this check is RED on the code
+     path before the rename. *)
+let test_arrays_op_symbol_reserved () =
+  let name =
+    Array_defs.op_symbol_name Array_defs.Select ~index:Sort.int ~element:Sort.int
+  in
+  check "array op name carries the reserved .oxsmt. prefix" (Env.is_reserved_name name);
+  check "array op name carries a '|' sort-key separator byte" (String.contains name '|');
+  let env, cap = Env.create_with_cap () in
+  let r =
+    Rank.create [ Sort.array_ ~index:Sort.int ~element:Sort.int; Sort.int ] Sort.int
+  in
+  check
+    "public Env.declare_fun rejects the real array op name (reserved prefix + '|' byte)"
+    (match Env.declare_fun env name r with
+     | exception Env.Reserved_symbol _ -> true
+     | _ -> false
+     | exception _ -> false);
+  check
+    "cap door mints the real array op name (RED against the pre-migration @arr. name)"
+    (match Env.declare_reserved cap env name r with
+     | _ -> true
+     | exception _ -> false)
+;;
+
+(* board #58 hardening (codex stack-review CRITICAL, arrays lane): the op-symbol registry
+   ({!Array_defs}) is caller-installable through the PUBLIC [Session.set_arrays] +
+   [Array_defs.add]. Nothing but the entries' own names constrains it, so a caller could
+   register an ARBITRARY symbol as a select/store; the arrays theory classifies an [App]
+   head by registry membership ([role_of_sym]) and would then apply read-over-write to a
+   symbol that is not an array operator -> a WRONG unsat on a formula that is sat under
+   the uninterpreted reading. Fix: [Array_defs.add] rejects any entry whose symbol NAME is
+   not the canonical [op_symbol_name] for its claimed (role, index, element), making the
+   registry self-certifying. *)
+let test_array_defs_add_rejects_noncanonical () =
+  let env = Env.create () in
+  let arr = Sort.array_ ~index:Sort.int ~element:Sort.int in
+  let sel_rank = Rank.create [ arr; Sort.int ] Sort.int in
+  let bogus = Env.declare_fun env "mysel" sel_rank in
+  check
+    "Array_defs.add rejects an arbitrary (non-canonical) symbol claimed as a select"
+    (match
+       Array_defs.add
+         Array_defs.empty
+         bogus
+         Array_defs.Select
+         ~index:Sort.int
+         ~element:Sort.int
+     with
+     | exception Invalid_argument _ -> true
+     | _ -> false);
+  (* the canonically-named op symbol (what the parser/theory actually mint) is accepted *)
+  let env2, cap = Env.create_with_cap () in
+  let canon_name =
+    Array_defs.op_symbol_name Array_defs.Select ~index:Sort.int ~element:Sort.int
+  in
+  let canon = Env.declare_reserved cap env2 canon_name sel_rank in
+  check
+    "Array_defs.add accepts the canonically-named op symbol"
+    (match
+       Array_defs.add
+         Array_defs.empty
+         canon
+         Array_defs.Select
+         ~index:Sort.int
+         ~element:Sort.int
+     with
+     | _ -> true
+     | exception _ -> false)
+;;
+
+(* End-to-end form of the same CRITICAL: build a poisoned registry mapping two arbitrary
+   uninterpreted functions to select/store and drive a solve. Pre-fix the theory trusts
+   it, applies ROW1, and returns a wrong unsat; post-fix [Array_defs.add] refuses the
+   poisoned entries so the registry cannot be built (the door is closed). RED against the
+   pre-fix tip. *)
+let test_registry_poison_no_wrong_unsat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let arr = Sort.array_ ~index:Sort.int ~element:Sort.int in
+  let a = Context.const ctx (Session.declare_const s "a" arr) in
+  let i = Context.const ctx (Session.declare_const s "i" Sort.int) in
+  let v = Context.const ctx (Session.declare_const s "v" Sort.int) in
+  let sel_sym = Session.declare_fun s "mysel" (Rank.create [ arr; Sort.int ] Sort.int) in
+  let st_sym =
+    Session.declare_fun s "mysto" (Rank.create [ arr; Sort.int; Sort.int ] arr)
+  in
+  match
+    try
+      Some
+        (Array_defs.add
+           (Array_defs.add
+              Array_defs.empty
+              sel_sym
+              Array_defs.Select
+              ~index:Sort.int
+              ~element:Sort.int)
+           st_sym
+           Array_defs.Store
+           ~index:Sort.int
+           ~element:Sort.int)
+    with
+    | Invalid_argument _ -> None
+  with
+  | None -> check "poisoned arrays registry rejected at Array_defs.add (hole closed)" true
+  | Some reg ->
+    Session.set_arrays s reg;
+    (* [mysel(mysto(a,i,v), i) <> v]: ROW1 would refute if these were REAL ops, but they
+       are ordinary uninterpreted functions, so the formula is SAT — a wrong unsat is the
+       bug. This is the fable leg's O-REGISTRY reproduction shape. *)
+    let store_app = Context.app ctx st_sym [ a; i; v ] in
+    let sel_app = Context.app ctx sel_sym [ store_app; i ] in
+    Session.assert_term s (Context.not_ ctx (Context.eq ctx sel_app v));
+    check
+      "no wrong unsat from a poisoned arrays registry"
+      (match Session.check_sat s with
+       | Session.Unsat -> false
+       | Session.Sat | Session.Unknown -> true)
+;;
+
+(* board #58 O-MINTER + arrays migration: the front-end minter [Session.parse_minter] is
+   an opaque {!Internal_minter.t} whose [admit] gate is NARROWED to exactly the arrays
+   op-symbol grammar ({!Array_defs.is_op_name}). This is what forecloses the
+   witness-capture half of the codex critical: a caller cannot pre-mint the extensionality
+   Skolem name [.oxsmt.arr.ext.N] (or a tester/qvar/preprocessing-witness name) through
+   the parse door and later collide with the theory's own witness — the gate refuses every
+   reserved name that is not an op symbol. DISCRIMINATING both ways: RED against a
+   deny-all admit (the op mint fails) AND against an admit-all minter (the witness/qvar
+   mints succeed). The theory-side freshness advance (Arr.witness_index) and the
+   assert-gate exemption ([is_op_sym]) are the deeper backstops for trusted in-process
+   code that mints via [Env.declare_reserved] directly. *)
+let test_parse_minter_admit_gate () =
+  let s = Session.create () in
+  let mint = Session.parse_minter s in
+  let arr = Sort.array_ ~index:Sort.int ~element:Sort.int in
+  let sel_name =
+    Array_defs.op_symbol_name Array_defs.Select ~index:Sort.int ~element:Sort.int
+  in
+  let admits name rank =
+    match Internal_minter.mint mint name rank with
+    | _ -> true
+    | exception _ -> false
+  in
+  check
+    "parse_minter admits an array op-symbol name"
+    (admits sel_name (Rank.create [ arr; Sort.int ] Sort.int));
+  check
+    "parse_minter REFUSES the extensionality-witness name (.oxsmt.arr.ext.N, no '|')"
+    (not (admits ".oxsmt.arr.ext.0" (Rank.create [] Sort.int)));
+  check
+    "parse_minter REFUSES a non-op reserved name (qvar/tester/witness namespace)"
+    (not (admits ".oxsmt.q.0" (Rank.create [] Sort.int)))
 ;;
 
 let test_parser_into_session () =
@@ -1540,6 +1704,10 @@ let () =
   test_cap_door_mints_internal ();
   test_session_parse_minter ();
   test_parser_internal_mint_threading ();
+  test_arrays_op_symbol_reserved ();
+  test_array_defs_add_rejects_noncanonical ();
+  test_registry_poison_no_wrong_unsat ();
+  test_parse_minter_admit_gate ();
   test_parser_into_session ();
   test_determinism ();
   test_cli_refused_symbol_degrades ();

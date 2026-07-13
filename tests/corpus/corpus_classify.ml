@@ -191,7 +191,13 @@ let () =
       then "unknown-incremental", 0
       else (
         let s = Session.create ?max_effort:!max_effort () in
-        match Parser.parse_into (Session.env s) (Session.context s) src with
+        match
+          Parser.parse_into
+            ~internal_mint:(Session.parse_minter s)
+            (Session.env s)
+            (Session.context s)
+            src
+        with
         | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail", 0
         | parsed ->
           (* W1b: submit the whole assertion set through the equality-elimination

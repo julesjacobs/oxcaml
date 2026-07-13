@@ -178,8 +178,7 @@ let context t = t.ctx
 (* board #58 O-MINTER — the MARKER-GRAMMAR REGISTRATION SITE.
    [parse_sanctioned_marker name] is the [admit] gate for the front-end minter
    {!parse_minter}: exactly the parse-time theory-internal names a session lets the
-   SMT-LIB parser mint. On trunk it admits NOTHING (no theory mints at parse time), so a
-   caller holding only a [Session.t] has no successful mint path (the O-MINTER close).
+   SMT-LIB parser mint.
 
    {b PAIRING CONTRACT — a theory migration widening this MUST read it (see
      Oxsmt_core.Internal_minter.create).}
@@ -194,8 +193,16 @@ let context t = t.ctx
    consuming-side inertness check, and NEVER admit the sensitive reserved namespaces
    ([.oxsmt.arr.ext.*], datatype testers [.oxsmt.is-*]/[.oxsmt.dt.*], qvars
    [.oxsmt.qvar.*], preprocessing witnesses [.oxsmt.ite/q/r.*]) — those are minted
-   directly via [Env.declare_reserved] by trusted code and have no inertness guard. *)
-let parse_sanctioned_marker (_name : string) = false
+   directly via [Env.declare_reserved] by trusted code and have no inertness guard.
+
+   board #58 arrays migration: widened to the arrays op-symbol grammar
+   ({!Array_defs.is_op_name}: the [.oxsmt.arr.] prefix with a [|] sort-key separator). Its
+   PAIRED consuming-side inertness check (required by the contract above) is REGISTRY
+   MEMBERSHIP: the theory classifies an [App] head only via {!Array_defs.role_of_sym}, and
+   {!Array_defs.add} refuses any entry whose name is not the canonical [op_symbol_name],
+   so an admitted-but-unregistered op-shaped mint is inert. The grammar EXCLUDES the ext
+   witness [.oxsmt.arr.ext.N] (no [|]), so this door never admits the witness namespace. *)
+let parse_sanctioned_marker name = Array_defs.is_op_name name
 let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
 (* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
@@ -438,7 +445,16 @@ let assert_bool_at ?sel t pterm =
    wrong verdict (codex's ite-capture trigger). The single source of truth for the
    reservation is [Env.is_reserved_name]. [allowed] whitelists a specific lemma's own qvar
    symbols — the ONLY reserved symbols legitimately present in a lemma body/trigger (a
-   ground user assertion whitelists nothing). *)
+   ground user assertion whitelists nothing).
+
+   board #58: array [select]/[store] op symbols also live in the reserved namespace
+   ([.oxsmt.arr.<op>|<sortkey>|<sortkey>]) and DO appear as App heads in ordinary parsed
+   assertions, so they must pass this gate: [bad_sym] exempts [Array_defs.is_op_sym]. That
+   exemption is a name-shape test, sound because provenance is enforced at the minting
+   door — only the cap-gated [Env.declare_reserved] grants a [.oxsmt.arr.*] name a rank,
+   so an op-named symbol that reaches a built term is one the parser/theory minted, never
+   a user alias (see [Array_defs.is_op_sym]). It does not touch the qvar/witness
+   namespaces. *)
 let term_has_reserved ?(allowed = []) (t0 : Term.t) =
   (* MEMOIZED over the hash-cons DAG. A user term is a maximally-shared DAG (the SMT-LIB
      [let] reader binds each value to one hash-consed node and reuses it by reference), so
@@ -450,7 +466,9 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
      Combine.add_subterms / interface_walk) all guard the same way. *)
   let visited : (int, unit) Hashtbl.t = Hashtbl.create 256 in
   let bad_sym s =
-    Env.is_reserved_name (Symbol.name s) && not (List.exists (Symbol.equal s) allowed)
+    Env.is_reserved_name (Symbol.name s)
+    && (not (List.exists (Symbol.equal s) allowed))
+    && not (Array_defs.is_op_sym s)
   in
   (* A SORT carries a symbol too: an [Uninterpreted] sort over a reserved [.oxsmt.*] name,
      minted via the public [Symbol.intern] / [Sort.uninterpreted] doors, captures an
