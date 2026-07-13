@@ -150,6 +150,20 @@ val oriented_bound_value
   -> [ `Lower | `Upper ]
   -> ('tok * Rational.t) option
 
+(** [notify_equality t eq ~premise] asserts an EUF-entailed positive Int equality
+    (ADR-0014 Stage 2 fabric [new_eq]) into the tableau, attributed to [premise]. Behaves
+    like {!assert_atom} for a positive equality, EXCEPT one case: a [0 = 0] TAUTOLOGY (the
+    equality's variable combination AND constants both cancel) is a NO-OP instead of
+    raising {!Unsupported}. The merge callback re-surfaces such an equality when
+    congruence unions two terms LIA already relates; the re-notification carries no
+    constraint, so skipping it is sound and complete and avoids degrading the query to
+    [unknown]. Every UNSATISFIABLE constant equality is NOT skipped — it keeps raising
+    {!Unsupported} (fail closed to [unknown], as {!assert_atom} does), because silently
+    dropping it would be a wrong-verdict hole. This covers both an unfolded [0 = k]
+    ([k <> 0]) and a [Context.eq]-FOLDED [c1 = c2] ([c1 <> c2]), which arrives as a
+    [Bool_const false]; only a [true]-folded / [0 = 0] tautology is the no-op. *)
+val notify_equality : 'tok t -> Term.t -> premise:'tok -> unit
+
 (** [push t] / [pop t n]: backtrack frames (ADR-0005 D6), delegated to the simplex bound
     stack; created variables persist (idempotent re-registration). *)
 val push : 'tok t -> unit

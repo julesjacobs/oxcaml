@@ -183,6 +183,50 @@ let var_for_combo t (pairs : (int * Rational.t) list) =
        s)
 ;;
 
+(* The simplex reading of a positive Int equality [a = b]. When the variable combination
+   of [combo(a) - combo(b)] cancels, the equality is a CONSTANT RELATION with no simplex
+   variable to bound, and the two sub-cases are DISTINCT and must not be conflated:
+   - [Trivially_true] ([0 = 0], the constants also match): a tautology — no constraint.
+   - [Trivially_false] ([0 = k], k <> 0): an UNSATISFIABLE relation — a live constraint.
+     Otherwise [Bounds] carries the pair of bounds [Σ coeff·x = cb - ca]. Callers pick the
+     policy per sub-case (see {!constraints_of_atom} and {!notify_equality}); collapsing
+     the two constant cases into one is a soundness hazard (silently dropping a [0 = k] is
+     a wrong-verdict hole). Uses the same var-creating {!combo_of_term} as the assert
+     path, so the classification matches assertion exactly — a lookup-only test could
+     disagree when a leaf's variable is not registered yet. *)
+type equality_reading =
+  | Bounds of (int * [ `Upper | `Lower ] * Delta.t) list
+  | Trivially_true
+  | Trivially_false
+
+let equality_reading t (a : Term.t) (b : Term.t) : equality_reading =
+  (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
+  let pa, ca = combo_of_term t a in
+  let pb, cb = combo_of_term t b in
+  (* Coefficient merges are exact [Rational] arithmetic (never wraps, promotes to Big), so
+     a coefficient sum of any size stays a correct merged constraint (supersedes the
+     pre-W2 int-boundary degrade of codex L5). *)
+  let merged =
+    let tbl = Hashtbl.create 16 in
+    let cur x =
+      try Hashtbl.find tbl x with
+      | Not_found -> Rational.zero
+    in
+    List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.add (cur x) c)) pa;
+    List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.sub (cur x) c)) pb;
+    Hashtbl.fold (fun x c acc -> if Rational.is_zero c then acc else (x, c) :: acc) tbl []
+  in
+  match merged with
+  | [] ->
+    (* no variable term: the equality is the constant relation [0 = cb - ca] *)
+    if Rational.equal ca cb then Trivially_true else Trivially_false
+  | _ :: _ ->
+    let var = var_for_combo t merged in
+    (* rhs = -(ca - cb) = cb - ca *)
+    let rhs = Delta.of_rat (Rational.sub cb ca) in
+    Bounds [ var, `Upper, rhs; var, `Lower, rhs ]
+;;
+
 (* Read [atom] (an [Le] or Int [Eq]) at [polarity] into simplex assertions [f]. [f] is
    [`Upper]/[`Lower] applied to (var, δ-rhs). Returns the list of (var, sense, rhs) so
    callers can either assert (setting bounds) or register (recording for propagation). *)
@@ -203,31 +247,34 @@ let constraints_of_atom t (atom : Term.t) ~polarity
       [ var, `Lower, Delta.of_rat (Rational.sub Rational.one const) ]
   | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
     if not polarity then raise (Unsupported "LIA: disequality needs a trichotomy split");
-    (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
-    let pa, ca = combo_of_term t a in
-    let pb, cb = combo_of_term t b in
-    (* Coefficient merges are exact [Rational] arithmetic (never wraps, promotes to Big),
-       so a coefficient sum of any size stays a correct merged constraint (supersedes the
-       pre-W2 int-boundary degrade of codex L5). *)
-    let merged =
-      let tbl = Hashtbl.create 16 in
-      let cur x =
-        try Hashtbl.find tbl x with
-        | Not_found -> Rational.zero
-      in
-      List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.add (cur x) c)) pa;
-      List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.sub (cur x) c)) pb;
-      Hashtbl.fold
-        (fun x c acc -> if Rational.is_zero c then acc else (x, c) :: acc)
-        tbl
-        []
-    in
-    if merged = [] then raise (Unsupported "LIA: trivial equality (should be folded)");
-    let var = var_for_combo t merged in
-    (* rhs = -(ca - cb) = cb - ca *)
-    let rhs = Delta.of_rat (Rational.sub cb ca) in
-    [ var, `Upper, rhs; var, `Lower, rhs ]
+    (* The user assert/register path raises on BOTH constant sub-cases, exactly as before:
+       a [0 = k] is a live constraint that must not be dropped, and a [0 = 0] should have
+       been folded by preprocessing — hitting either here is a contract violation. *)
+    (match equality_reading t a b with
+     | Bounds cs -> cs
+     | Trivially_true | Trivially_false ->
+       raise (Unsupported "LIA: trivial equality (should be folded)"))
   | _ -> raise (Unsupported "LIA: atom is neither Le nor an Int equality")
+;;
+
+(* Apply already-computed (var, sense, rhs) bounds to the simplex, attributing each to
+   [premise]. Marks each touched var dirty for the next propagate delta. Callers wrap this
+   in {!guard_overflow} so a coefficient overflow during the preceding combo computation
+   poisons cleanly. *)
+let apply_bounds t cs ~premise =
+  List.iter
+    (fun (var, sense, rhs) ->
+       (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
+         mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
+         already-entailed bound is harmless: the delta skips its already-reported atoms.) *)
+       Hashtbl.replace t.dirty var ();
+       let _ : _ Simplex.conflict option =
+         match sense with
+         | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
+         | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
+       in
+       ())
+    cs
 ;;
 
 let assert_atom t atom ~polarity ~premise =
@@ -235,20 +282,55 @@ let assert_atom t atom ~polarity ~premise =
   (* A new/tightened bound can make the tableau infeasible -> the next [check] must run. *)
   t.check_dirty <- true;
   guard_overflow t (fun () ->
-    List.iter
-      (fun (var, sense, rhs) ->
-         (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
-           mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
-           already-entailed bound is harmless: the delta skips its already-reported
-           atoms.) *)
-         Hashtbl.replace t.dirty var ();
-         let _ : _ Simplex.conflict option =
-           match sense with
-           | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
-           | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
-         in
-         ())
-      (constraints_of_atom t atom ~polarity))
+    apply_bounds t (constraints_of_atom t atom ~polarity) ~premise)
+;;
+
+(* ADR-0014 Stage 2 fabric [new_eq] entry: assert an EUF-entailed positive Int equality
+   [eq] into the tableau, attributed to [premise]. Differs from {!assert_atom} for a
+   positive equality ONLY in the [Trivially_true] ([0 = 0]) case: the merge callback fires
+   whenever the e-graph unions two Int classes, and congruence can RE-SURFACE an equality
+   LIA already relates (its variable combination already cancels to [0 = 0]). That
+   re-notification is a tautology — no LIA constraint — so it is a NO-OP here instead of
+   the {!Unsupported} raise that would degrade the whole query to [unknown].
+
+   The [Trivially_false] ([0 = k], k <> 0) case is deliberately NOT no-oped: that relation
+   is UNSATISFIABLE, so silently dropping it would be a wrong-verdict hole. It keeps
+   raising {!Unsupported} exactly like {!assert_atom} — the same fail-closed [unknown] as
+   trunk, never a laundered [sat]. (A genuine [0 = k] merge means the branch is
+   inconsistent; the combinator's find_disagreement/model-agreement split still surfaces
+   and splits the pair, which reaches this same raise, so behaviour is unchanged and
+   sound.)
+
+   [Bounds] asserts as usual. When [Context.eq] already FOLDED the equality to a boolean
+   constant (it folds two equal constants to [true] and two unequal ones to [false]), the
+   [true] fold is a tautology (no-op) but the [false] fold is [Context.eq c1 c2] with
+   [c1 <> c2] — an UNSATISFIABLE equality — so it fails closed exactly like
+   [Trivially_false] (symmetric; a silent no-op there is the same wrong-verdict hole in
+   the folded path). *)
+let notify_equality t (eq : Term.t) ~premise =
+  ensure_live t;
+  match eq.node with
+  | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
+    t.check_dirty <- true;
+    guard_overflow t (fun () ->
+      match equality_reading t a b with
+      | Trivially_true -> () (* [0 = 0] re-notification: no LIA constraint, skip *)
+      | Trivially_false ->
+        (* [0 = k], k <> 0: unsatisfiable — must NOT be silently dropped (wrong-verdict
+           hole). Fail closed, exactly like {!assert_atom}. *)
+        raise (Unsupported "LIA: trivial equality (should be folded)")
+      | Bounds cs -> apply_bounds t cs ~premise)
+  | Bool_const true ->
+    () (* [Context.eq] folded a true equality: tautology, no constraint *)
+  | Bool_const false ->
+    (* [Context.eq] folded [c1 = c2], c1 <> c2: an unsatisfiable equality. Fail closed
+       (symmetric with [Trivially_false]); never silently drop it. *)
+    raise (Unsupported "LIA: trivial equality (should be folded)")
+  | _ ->
+    (* Not an Int equality (defensive: the combinator only notifies Int-class merges);
+       fall back to the strict assert so any genuinely unhandled shape still degrades
+       loudly. *)
+    assert_atom t eq ~polarity:true ~premise
 ;;
 
 let register_atom t (atom : Term.t) =

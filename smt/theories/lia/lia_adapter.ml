@@ -88,10 +88,12 @@ let assert_lit t lit =
    like an ordinary [assert_lit]. The combinator does the fallible work — building the
    [eq] term and recording the edge Γ — BEFORE calling this, and this op is pure mutation
    (a pair of bounds on LIA's trail), so a skipped notification leaves zero partial state
-   (H5). *)
+   (H5). Uses {!Lia.notify_equality}, which no-ops a [0 = 0] TAUTOLOGY re-notification
+   (congruence can re-surface an equality LIA already relates — turning that into a
+   query-wide [unknown] was a latent Stage-2 gap) but keeps raising on an unsatisfiable
+   [0 = k] equality, so a genuine constant contradiction is never silently dropped. *)
 let notify_eq t ~edge_id eq =
-  guard t (fun () ->
-    Lia.assert_atom t.lia eq ~polarity:true ~premise:(Fabric.Fabric edge_id))
+  guard t (fun () -> Lia.notify_equality t.lia eq ~premise:(Fabric.Fabric edge_id))
 ;;
 
 (* LIA parity with {!Euf_adapter}'s codex AP4 tripwire: an EMPTY premise set is an

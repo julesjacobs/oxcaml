@@ -1026,6 +1026,94 @@ let test_codex_findings () =
 ;;
 
 (* ================================================================== *)
+(* ================================================================== *)
+(* notify_equality (ADR-0014 Stage 2 fabric new_eq) exactness — the review center of
+   gravity: a re-notified equality whose variable combination cancels must be handled
+   EXACTLY by sub-case. 0=0 (tautology) is a sound NO-OP; 0=k (k<>0) is UNSATISFIABLE and
+   must fail closed (raise -> unknown), never a silent no-op (that would be a
+   wrong-verdict hole). A genuine equality is asserted as usual. *)
+let test_notify_equality () =
+  print_endline "notify_equality exactness:";
+  (* 0=k contradiction: x0 = x0 + 3. This is the case the lazy-split prototype
+     manufactured; it MUST raise, not silently vanish. (Discriminating: a version that
+     no-ops every constant-relation equality would NOT raise here.) *)
+  (let fx = make_fixture 1 in
+   let x0 = fx.vars.(0) in
+   let x0p3 = Context.linear_combination fx.ctx [ 1, x0 ] 3 in
+   let eq_false = Context.eq fx.ctx x0 x0p3 in
+   check
+     "notify: x0 = x0+3 is a real Eq atom (not constant-folded away)"
+     (match eq_false.Term.node with
+      | Term.Eq _ -> true
+      | _ -> false);
+   check_raises
+     "notify: 0=3 contradiction fails closed (raises, not silently dropped)"
+     (fun () -> Lia.notify_equality fx.solver eq_false ~premise:0));
+  (* genuine equality x0=x1 IS asserted (not skipped): pin x0=5, x1=7, notify x0=x1,
+     expect the tableau to become infeasible. *)
+  (let fx = make_fixture 2 in
+   let x0 = fx.vars.(0)
+   and x1 = fx.vars.(1) in
+   ignore (assert_le fx [ 0, 1 ] (-5) ~polarity:true : int);
+   (* x0 <= 5 *)
+   ignore (assert_le fx [ 0, -1 ] 5 ~polarity:true : int);
+   (* x0 >= 5 *)
+   ignore (assert_le fx [ 1, 1 ] (-7) ~polarity:true : int);
+   (* x1 <= 7 *)
+   ignore (assert_le fx [ 1, -1 ] 7 ~polarity:true : int);
+   (* x1 >= 7 *)
+   Lia.notify_equality fx.solver (Context.eq fx.ctx x0 x1) ~premise:99;
+   match Lia.check fx.solver with
+   | Lia.Conflict _ ->
+     check "notify: genuine x0=x1 asserted (x0=5 & x1=7 => conflict)" true
+   | Lia.Sat_candidate ->
+     check "notify: genuine x0=x1 asserted (x0=5 & x1=7 => conflict)" false);
+  (* FOLDED contradiction: Context.eq folds two unequal constants to [Bool_const false],
+     so [0 = 1] arrives already folded. It is UNSATISFIABLE and must fail closed,
+     symmetric with the unfolded 0=k case. (Discriminating: RED against a
+     [Bool_const _ -> ()] arm that no-ops every boolean constant — the codex-caught
+     folded-path hole.) *)
+  (let fx = make_fixture 1 in
+   let eq01 =
+     Context.eq fx.ctx (Context.int_const fx.ctx 0) (Context.int_const fx.ctx 1)
+   in
+   check
+     "notify: Context.eq(0,1) folds to Bool_const false"
+     (match eq01.Term.node with
+      | Term.Bool_const false -> true
+      | _ -> false);
+   check_raises
+     "notify: folded 0=1 contradiction fails closed (raises, not dropped)"
+     (fun () -> Lia.notify_equality fx.solver eq01 ~premise:0));
+  (* a TRUE-folded identity (Context.eq of a term with itself -> Bool_const true) is a
+     no-op: it does not raise. *)
+  (let fx = make_fixture 1 in
+   let x0 = fx.vars.(0) in
+   let eq_true = Context.eq fx.ctx x0 x0 in
+   check
+     "notify: Context.eq(x0,x0) folds to Bool_const true"
+     (match eq_true.Term.node with
+      | Term.Bool_const true -> true
+      | _ -> false);
+   check
+     "notify: true-folded identity is a no-op (no raise)"
+     (match Lia.notify_equality fx.solver eq_true ~premise:0 with
+      | () -> true
+      | exception _ -> false));
+  (* tautology re-notification is a NO-OP (does not raise, does not perturb feasibility):
+     a syntactic identity x0=x0 folds to a Bool constant and is skipped; the query stays
+     sat. *)
+  let fx = make_fixture 1 in
+  let x0 = fx.vars.(0) in
+  ignore (assert_le fx [ 0, 1 ] (-5) ~polarity:true : int);
+  ignore (assert_le fx [ 0, -1 ] 5 ~polarity:true : int);
+  (* x0 = 5 *)
+  Lia.notify_equality fx.solver (Context.eq fx.ctx x0 x0) ~premise:0;
+  match Lia.check fx.solver with
+  | Lia.Sat_candidate -> check "notify: x0=x0 tautology is a no-op (still sat)" true
+  | Lia.Conflict _ -> check "notify: x0=x0 tautology is a no-op (still sat)" false
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -1042,6 +1130,7 @@ let () =
   test_bb_big_branch_bound ();
   test_determinism ();
   test_determinism_big ();
+  test_notify_equality ();
   Printf.printf "\nlia self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
