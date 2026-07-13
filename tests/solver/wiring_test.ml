@@ -632,7 +632,118 @@ let test_namespace_guard () =
     "parser accepts normal declaration"
     (match Parser.parse "(declare-const ok Bool)(assert ok)(check-sat)" with
      | _ -> true
+     | exception _ -> false);
+  (* board #58 defense-in-depth: a user cannot even WRITE an internal-marker byte in a
+     declaration. The shared lexer forbids [\] inside a quoted symbol and a [|] closes it,
+     so the parse path can never carry the [|]/[\] byte class to the Env door — the byte
+     class is closed at the lexer as well as the Env door. *)
+  check_raises "parser rejects a backslash inside a quoted-symbol declaration" (fun () ->
+    Parser.parse "(declare-const |a\\b| Int)(check-sat)")
+;;
+
+(* board #58: the internal-marker byte class ([|] 0x7C, [\] 0x5C) is rejected at the PUBLIC
+   Env declaration doors — the programmatic door the live wrong-unsat demonstration walked
+   through. No SMT-LIB symbol form (simple or quoted) can carry these bytes, so a name with
+   one can only arrive through this door; closing it shuts every internal-marker namespace
+   at the root. DISCRIMINATING: against the pre-fix door, [Env.declare_fun]/[declare_sort]
+   SUCCEED on these names (the aliasing bug), so [raises_reserved] returns false and each
+   check fails. *)
+let test_internal_marker_byte_class () =
+  let env = Env.create () in
+  let r = Rank.create [ Sort.int ] Sort.int in
+  let raises_reserved f =
+    match f () with
+    | _ -> false
+    | exception Env.Reserved_symbol _ -> true
+    | exception _ -> false
+  in
+  check
+    "Env.declare_fun rejects a bar-byte name (arrays op-symbol shape)"
+    (raises_reserved (fun () -> Env.declare_fun env "@arr.select|Int|Int" r));
+  check
+    "Env.declare_fun rejects a backslash-byte name (bv marker shape)"
+    (raises_reserved (fun () -> Env.declare_fun env "\\bv|8" r));
+  check
+    "Env.declare_sort rejects a bar-byte name"
+    (raises_reserved (fun () -> Env.declare_sort env "S|T"));
+  check
+    "Env.declare_sort rejects a backslash-byte name"
+    (raises_reserved (fun () -> Env.declare_sort env "S\\T"));
+  check
+    "Env.declare_fun still accepts a clean user name (guard is not over-broad)"
+    (match Env.declare_fun env "arr_select" r with
+     | _ -> true
      | exception _ -> false)
+;;
+
+(* board #58: the cap door still mints internal names, INCLUDING a sort-key-bearing name
+   that contains [|] (the arrays [.oxsmt.arr.select|<sortkey>] shape) — the byte-class
+   guard lives only on the PUBLIC doors; the cap door gates on the [.oxsmt.] prefix. A cap
+   from a different env is rejected (per-env), and a non-reserved name is refused. *)
+let test_cap_door_mints_internal () =
+  let env, cap = Env.create_with_cap () in
+  let r = Rank.create [ Sort.int ] Sort.int in
+  check
+    "cap door mints a plain .oxsmt.* name"
+    (match Env.declare_reserved cap env ".oxsmt.arr.k" r with
+     | _ -> true
+     | exception _ -> false);
+  check
+    "cap door mints a sort-key .oxsmt.* name containing a bar byte"
+    (match Env.declare_reserved cap env ".oxsmt.arr.select|Int|Int" r with
+     | _ -> true
+     | exception _ -> false);
+  check
+    "cap door refuses a NON-reserved (user-namespace) name"
+    (match Env.declare_reserved cap env "not_reserved" r with
+     | exception _ -> true
+     | _ -> false);
+  let _env2, cap2 = Env.create_with_cap () in
+  check
+    "a cap minted for a different env is rejected (per-env)"
+    (match Env.declare_reserved cap2 env ".oxsmt.arr.k2" r with
+     | exception _ -> true
+     | _ -> false)
+;;
+
+(* board #58: [Session.internal_minter] is the cap-backed closure a front end threads to
+   mint an internal symbol WITHOUT holding the cap. It mints [.oxsmt.*] fine and refuses a
+   user-namespace name (it is [Env.declare_reserved] under the hood). *)
+let test_session_internal_minter () =
+  let s = Session.create () in
+  let mint = Session.internal_minter s in
+  let r = Rank.create [ Sort.int ] Sort.int in
+  check
+    "internal_minter mints an .oxsmt.* name"
+    (match mint ".oxsmt.arr.sel" r with
+     | _ -> true
+     | exception _ -> false);
+  check
+    "internal_minter refuses a user-namespace name"
+    (match mint "user_fn" r with
+     | exception _ -> true
+     | _ -> false)
+;;
+
+(* board #58: the parser's [?internal_mint] threading is source-compatible with the
+   Session-driven drivers — a [parse_into ~internal_mint:(Session.internal_minter s)]
+   parses and solves a normal file identically. (No trunk parser command mints an internal
+   symbol yet, so the hook itself is exercised by the arrays/bv migrations; this pins the
+   wiring.) *)
+let test_parser_internal_mint_threading () =
+  let s = Session.create () in
+  let parsed =
+    Parser.parse_into
+      ~internal_mint:(Session.internal_minter s)
+      (Session.env s)
+      (Session.context s)
+      "(declare-const p Bool)(assert p)(check-sat)"
+  in
+  List.iter (Session.assert_term s) parsed.Parser.assertions;
+  check_verdict
+    "parse_into with ~internal_mint threads and solves"
+    Session.Sat
+    (Session.check_sat s)
 ;;
 
 let test_parser_into_session () =
@@ -1402,6 +1513,10 @@ let () =
   test_effort_budget_exhaustion ();
   test_effort_determinism ();
   test_namespace_guard ();
+  test_internal_marker_byte_class ();
+  test_cap_door_mints_internal ();
+  test_session_internal_minter ();
+  test_parser_internal_mint_threading ();
   test_parser_into_session ();
   test_determinism ();
   test_cli_refused_symbol_degrades ();

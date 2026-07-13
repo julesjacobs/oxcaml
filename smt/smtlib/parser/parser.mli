@@ -59,5 +59,21 @@ val parse : string -> t
     resulting terms share the tag stream (hash-cons identity) with terms already built in
     [ctx]. Used by the round-trip tests to compare via {!Oxsmt_core.Term.equal} within one
     context (the single-Context contract, ADR-0003). Re-declaring an already-known symbol
-    is idempotent. *)
-val parse_into : Oxsmt_core.Env.t -> Oxsmt_core.Context.t -> string -> t
+    is idempotent.
+
+    [?internal_mint] (board #58) is the cap-backed minter for theory-internal reserved
+    symbols ([.oxsmt.<theory>.*]) that must be minted mid-parse — arrays op symbols are
+    per-(index sort, element sort) instantiations discovered only at the first
+    [select]/[store] use, so they cannot be pre-minted at a declaration site. A
+    [Session]-driven parse threads {!Oxsmt_interface.Session.internal_minter}, which is
+    [Env.declare_reserved cap env] closed over the session's private cap: the parser mints
+    a collision-proof internal symbol without ever holding the cap (ADR-0012: only
+    [Session] holds it). Omitting it (a standalone {!parse}, or a driver with no theory
+    that mints at parse time) leaves a default that raises {!Malformed} if such a mint is
+    ever requested — never a silent success. *)
+val parse_into
+  :  ?internal_mint:(string -> Oxsmt_core.Rank.t -> Oxsmt_core.Symbol.t)
+  -> Oxsmt_core.Env.t
+  -> Oxsmt_core.Context.t
+  -> string
+  -> t

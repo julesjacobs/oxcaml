@@ -161,6 +161,16 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
 let env t = t.env
 let context t = t.ctx
 
+(* board #58: the cap-backed minter for theory-internal reserved symbols
+   ([.oxsmt.<theory>.*]), for a front end that must mint one mid-parse (the SMT-LIB
+   parser's [?internal_mint] hook — arrays op symbols are discovered only at first use, so
+   they cannot be pre-minted at a declaration site). This is [Env.declare_reserved] closed
+   over the session's PRIVATE cap and env: the caller can mint a collision-proof internal
+   symbol but never obtains the cap itself (ADR-0012: [Session] stays the sole cap
+   holder). The returned closure enforces the [.oxsmt.] prefix and the per-env cap, so it
+   cannot forge a user-namespace symbol. *)
+let internal_minter t = Env.declare_reserved t.cap t.env
+
 (* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
    can never collide with one preprocessing invents. *)
 let guard_name name =

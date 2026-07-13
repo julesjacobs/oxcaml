@@ -17,6 +17,29 @@ let is_reserved_name name =
   String.length name >= String.length p && String.sub name 0 (String.length p) = p
 ;;
 
+(* Bytes that no SMT-LIB symbol form — simple or quoted — can contain: [|] (0x7C) closes
+   a quoted symbol and [\] (0x5C) is illegal inside one (lexer §3.1, smt/lexical/lexer.ml),
+   and neither is in the simple-symbol charset. A name carrying one of these can ONLY
+   arrive through the programmatic [Env] door, never through parsed input. Rejecting it at
+   the public declaration doors (defense-in-depth for board #58) closes every present and
+   future internal-marker namespace — e.g. the arrays [.oxsmt.arr.select|<sortkey>] and
+   bitvector marker forms — at the root, independent of the [.oxsmt.] prefix. Reserved
+   minting via [declare_reserved] is UNAFFECTED: that door gates only on the [.oxsmt.]
+   prefix, so a cap holder can still mint a sort-key-bearing internal name that contains
+   [|]. *)
+let has_nonsymbol_byte name =
+  let n = String.length name in
+  let rec go i =
+    if i >= n
+    then false
+    else (
+      match name.[i] with
+      | '|' | '\\' -> true
+      | _ -> go (i + 1))
+  in
+  go 0
+;;
+
 exception Reserved_symbol of string
 
 (* The capability is the owning env's identity (ADR-0012 per-env strengthening): a cap
@@ -65,12 +88,14 @@ let declare_reserved cap t name rank =
 ;;
 
 let declare_sort _t name =
-  if is_builtin_reserved name || is_reserved_name name then raise (Reserved_symbol name);
+  if is_builtin_reserved name || is_reserved_name name || has_nonsymbol_byte name
+  then raise (Reserved_symbol name);
   Symbol.intern name
 ;;
 
 let declare_fun t name rank =
-  if is_builtin_reserved name || is_reserved_name name then raise (Reserved_symbol name);
+  if is_builtin_reserved name || is_reserved_name name || has_nonsymbol_byte name
+  then raise (Reserved_symbol name);
   let sym = Symbol.intern name in
   Hashtbl.replace t.ranks sym rank;
   sym

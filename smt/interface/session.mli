@@ -146,6 +146,18 @@ val env : t -> Oxsmt_core.Env.t
 (** The session's {!Oxsmt_core.Context.t} (same rationale as {!env}). *)
 val context : t -> Oxsmt_core.Context.t
 
+(** [internal_minter t] is the cap-backed minter for theory-internal reserved symbols
+    ([".oxsmt.<theory>.*"], board #58): [Oxsmt_core.Env.declare_reserved] closed over the
+    session's PRIVATE cap and {!env}. A front end that must mint an internal symbol
+    mid-parse — the SMT-LIB parser's [?internal_mint] hook, because arrays op symbols are
+    per-sort instantiations discovered only at first [select]/[store] use and so cannot be
+    pre-minted at a declaration site — threads this closure. The caller can mint a
+    collision-proof internal symbol but never obtains the {!Oxsmt_core.Env.reserved_cap}
+    itself, keeping the ADR-0012 invariant that [Session] is the sole cap holder. The
+    closure enforces the [".oxsmt."] prefix and the per-env cap, so it cannot forge a
+    user-namespace symbol. *)
+val internal_minter : t -> string -> Oxsmt_core.Rank.t -> Oxsmt_core.Symbol.t
+
 (** [declare_sort]/[declare_fun]/[declare_const] declare into {!env}. They reject the
     reserved fresh-symbol namespace ([".oxsmt.*"], board #48) with [Invalid_argument] so a
     user symbol cannot collide with one preprocessing invents. *)

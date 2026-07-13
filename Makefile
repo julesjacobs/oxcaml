@@ -474,6 +474,7 @@ test: check-frozen
 	$(MAKE) combine-test
 	$(MAKE) rational-word-test
 	$(MAKE) stage0-test
+	$(MAKE) wiring-test
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
 	$(MAKE) cert-test
