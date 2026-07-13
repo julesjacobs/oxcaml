@@ -193,6 +193,23 @@ let pass_a_flag =
 (* Pass A runs only when enabled AND no certificate trace is installed (§cert-OFF gating,
    team-lead ruling): a derived unit must never enter a cert as a trusted [Input]. *)
 let pass_a_enabled t = Lazy.force pass_a_flag && not t.cert_active
+
+(* Contextual simplification (task #13) toggle. Default ON: it collapses the nested-ITE
+   verification conditions (nec-smt / Dartagnan) that CDCL(T) otherwise thrashes on.
+   [OXSMT_PRESOLVE_CTX=0] turns it OFF for the A/B baseline. Read once. *)
+let ctx_simp_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_PRESOLVE_CTX" with
+     | Some ("0" | "false" | "no") -> false
+     | Some _ | None -> true)
+;;
+
+(* Contextual simplification runs only when enabled AND no certificate trace is installed:
+   the certificate measures the UNSIMPLIFIED assertion path, so the rewrite must be off
+   while a trace is live (the same cert-OFF discipline as Pass A). The rewrite is
+   model-preserving, so this gate protects the certificate contract, not verdict
+   soundness. *)
+let ctx_simp_enabled t = Lazy.force ctx_simp_flag && not t.cert_active
 let env t = t.env
 let context t = t.ctx
 
@@ -648,6 +665,26 @@ let assert_presolved t terms =
     | exception Term.Unsupported _ -> t.degraded <- true
     | { Presolve.reduced; defs } ->
       t.elim_defs <- defs;
+      (* Contextual simplification (task #13, gated: flag + cert-OFF): a model-preserving
+         term rewrite over the reduced conjuncts (assume each ITE condition within its own
+         branch), collapsing the nested-ITE VCs before clausification. It eliminates no
+         variable, so [t.elim_defs] / model reconstruction and the R1 set (the ORIGINAL
+         [t.asserted]) are untouched. On the hard budget it neutral-aborts to [reduced]
+         unchanged. It builds through [t.ctx]'s smart constructors, so the same
+         Overflow/Unsupported firewall as {!internalize_reduced} applies. *)
+      let reduced =
+        if ctx_simp_enabled t
+        then (
+          match Presolve.simplify_contextual t.ctx reduced with
+          | exception Term.Overflow ->
+            t.degraded <- true;
+            reduced
+          | exception Term.Unsupported _ ->
+            t.degraded <- true;
+            reduced
+          | simplified -> simplified)
+        else reduced
+      in
       List.iter (internalize_reduced t) reduced;
       List.iter (internalize_reduced t) extra)
 ;;

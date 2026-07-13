@@ -709,17 +709,17 @@ let test_cap_door_mints_internal () =
 (* board #58 O-MINTER: [Session.parse_minter] returns an OPAQUE minter, not a bare general
    [Env.declare_reserved] closure — the old [Session.internal_minter] general accessor is
    GONE (compile-enforced by session.mli). Its [admit] gate
-   ([Session.parse_sanctioned_marker]) sanctions ONLY the parse-time theory vocabulary: the
-   arrays op-symbol grammar ({!Array_defs.is_op_name}: [.oxsmt.arr.] prefix + a [|]
+   ([Session.parse_sanctioned_marker]) sanctions ONLY the parse-time theory vocabulary:
+   the arrays op-symbol grammar ({!Array_defs.is_op_name}: [.oxsmt.arr.] prefix + a [|]
    separator) and the bit-vector marker grammar ({!Oxsmt_core.Bv.is_bv_name}:
    [.oxsmt.bv|...]). Each admitted grammar is PAIRED with a consuming-side inertness check
    (arrays: registry membership; bv: [Bv.view] rank/sort agreement), so an admitted-but-
    mismatched mint is inert, never a wrong verdict. Everything OUTSIDE the sanctioned
    vocabulary is refused: the sensitive reserved namespaces (arrays ext witness, datatype
    testers, qvars, preprocessing witnesses — minted directly via [Env.declare_reserved] by
-   trusted code, no inertness guard) and any user name. DISCRIMINATING: against an admit-all
-   regression the ext-witness/user mints would SUCCEED; against a deny-all regression the op
-   mints would FAIL. *)
+   trusted code, no inertness guard) and any user name. DISCRIMINATING: against an
+   admit-all regression the ext-witness/user mints would SUCCEED; against a deny-all
+   regression the op mints would FAIL. *)
 let test_session_parse_minter () =
   let s = Session.create () in
   let m = Session.parse_minter s in
@@ -1827,6 +1827,185 @@ let test_dag_sharing_no_blowup () =
     (elapsed < 2.0)
 ;;
 
+(* --- Contextual simplification (task #13) --------------------------------------------
+   [Presolve.simplify_contextual], driven through [assert_presolved]. The win direction is
+   UNSAT (R1 does not run), so these fixtures ARE the soundness margin; each of the four
+   mis-scope fixtures is a SAT problem the pass must preserve, and is the ORACLE a
+   registry mutant (module=presolve) flips to UNSAT. A model-preserving rewrite: no
+   variable is eliminated, so [eliminated_vars] stays empty throughout. *)
+
+(* EFFECTIVENESS + equality substitution: the then-branch assumes [x = 5], so [(>= x 100)]
+   folds to false there; the else-branch is unconstrained on [x] except [x <> 5]. Sat with
+   a model, and nothing eliminated. *)
+let test_ctx_simp_eq_subst_sat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.ge ctx x (Context.int_const ctx 100))
+        (Context.ge ctx x (Context.int_const ctx 0))
+    ];
+  check "ctx eq-subst: nothing eliminated" (Session.eliminated_vars s = []);
+  match Session.check_sat s, Session.get_model s with
+  | Session.Sat, Some (_, m) ->
+    check "ctx eq-subst: model binds x" (find_int_in_model m "x" <> None)
+  | v, _ -> check ("ctx eq-subst: expected sat+model, got " ^ verdict_str v) false
+;;
+
+(* UNSAT direction (no wrong-Sat): [(ite (= x 5) (>= x 100) (= x 5))] is false in BOTH
+   branches (x=5 => x>=100 false; x<>5 => x=5 false), so with [x <= 4] the problem is
+   unsat. The contextual pass collapses the ite to false; the base solver would also
+   refute it — either way the verdict must be Unsat. *)
+let test_ctx_simp_unsat_direction () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.ge ctx x (Context.int_const ctx 100))
+        (Context.eq ctx x (Context.int_const ctx 5))
+    ; Context.le ctx x (Context.int_const ctx 4)
+    ];
+  check_verdict "ctx unsat-direction" Session.Unsat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 1 — substitute-in-the-else-branch. [(ite (= x 5) false (= x 7))] is Sat
+   (x = 7: condition false, else [(= 7 7)] true). If the then-branch assumption [x = 5]
+   leaks into the else-branch, [(= x 7)] becomes [(= 5 7)] = false, the ite collapses to
+   [(ite (= x 5) false false)] = false, and it flips to Unsat. *)
+let test_ctx_simp_else_branch_oracle () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.bool_const ctx false)
+        (Context.eq ctx x (Context.int_const ctx 7))
+    ];
+  check_verdict "ctx else-branch oracle: sat (x=7)" Session.Sat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 2 — assumption applied to the condition (above the branches).
+   [(ite (= x 5) false (>= x 7))] is Sat (x = 7). If the then-branch assumption is applied
+   back to the CONDITION, [(= x 5)] folds to true, the ite collapses to its then-branch
+   [false], and it flips to Unsat. *)
+let test_ctx_simp_condition_oracle () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.bool_const ctx false)
+        (Context.ge ctx x (Context.int_const ctx 7))
+    ];
+  check_verdict "ctx condition oracle: sat (x=7)" Session.Sat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 3 — equality substitution ignoring polarity (a disequality condition read
+   as an equality). [(ite (not (= x 5)) (>= x 100) false)] is Sat (x = 100: condition x<>5
+   true, then-branch x>=100 true). The then-branch establishes only [x <> 5] — NO
+   substitution. If the substitution [x -> 5] is added regardless of the true/false
+   polarity, [(>= x 100)] folds to [(>= 5 100)] = false and it flips to Unsat. *)
+let test_ctx_simp_polarity_oracle () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.not_ ctx (Context.eq ctx x (Context.int_const ctx 5)))
+        (Context.ge ctx x (Context.int_const ctx 100))
+        (Context.bool_const ctx false)
+    ];
+  check_verdict "ctx polarity oracle: sat (x=100)" Session.Sat (Session.check_sat s)
+;;
+
+(* SHARED-SUBTERM soundness: the subterm [(>= x 100)] appears in BOTH branches of
+   [(ite (= x 5) (and (<= x 3) (>= x 100)) (>= x 100))]. The then-branch folds it to false
+   under [x = 5]; the else-branch must keep it ([x <> 5]). Sat (x = 100 via the
+   else-branch). The verdict is preserved regardless of memo scoping (see
+   [test_ctx_simp_fires] for the effectiveness oracle — a shared memo bypasses the
+   substitution rather than corrupting it, so it stays Sat here). *)
+let test_ctx_simp_shared_subterm_sat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let ge100 = Context.ge ctx x (Context.int_const ctx 100) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.and_ ctx [ Context.le ctx x (Context.int_const ctx 3); ge100 ])
+        ge100
+    ];
+  check_verdict "ctx shared-subterm: sat (x=100)" Session.Sat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 4 + EFFECTIVENESS — the substitution actually fires, and the per-branch
+   memo is scoped correctly. Called directly on [simplify_contextual]: for
+   [(ite (= x 5) (>= x 100) foo)] the then-branch MUST fold to false (x = 5 makes x >= 100
+   false), while [foo] survives in the else-branch. This is the oracle for the shared-memo
+   mutant: sharing ONE memo across branch scopes lets the condition's subterms (memoized
+   under the parent as themselves) shadow the branch's [x -> 5] substitution, so the
+   then-branch is NOT folded — a silent no-op that forfeits the whole win. Also the direct
+   guard that the pass is not accidentally disabled (e.g. an ITE-scan or has-ite
+   regression). *)
+let test_ctx_simp_fires () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let foo = Context.const ctx (Session.declare_const s "foo_b" Sort.bool) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 5))
+      (Context.ge ctx x (Context.int_const ctx 100))
+      foo
+  in
+  match Oxsmt_interface.Presolve.simplify_contextual ctx [ ite ] with
+  | [ r ] ->
+    (match r.node with
+     | Ite (_, a, _) ->
+       check
+         "ctx fires: then-branch folded to false"
+         (match a.node with
+          | Bool_const false -> true
+          | _ -> false)
+     | Bool_const _ -> check "ctx fires: fully collapsed (acceptable)" true
+     | _ -> check "ctx fires: unexpected result shape" false)
+  | _ -> check "ctx fires: expected a single simplified term" false
+;;
+
+(* NEUTRALITY: an ITE-free assertion set is passed through untouched (same verdict as any
+   other presolve path); nothing eliminated. *)
+let test_ctx_simp_no_ite_neutral () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ge ctx x (Context.int_const ctx 0)
+    ; Context.le ctx x (Context.int_const ctx 10)
+    ];
+  check "ctx no-ite: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "ctx no-ite: sat" Session.Sat (Session.check_sat s)
+;;
+
 let () =
   test_push_pop ();
   test_assert_after_check ();
@@ -1884,6 +2063,14 @@ let () =
   test_f1_qvar_shadow_head ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
+  test_ctx_simp_eq_subst_sat ();
+  test_ctx_simp_unsat_direction ();
+  test_ctx_simp_else_branch_oracle ();
+  test_ctx_simp_condition_oracle ();
+  test_ctx_simp_polarity_oracle ();
+  test_ctx_simp_shared_subterm_sat ();
+  test_ctx_simp_fires ();
+  test_ctx_simp_no_ite_neutral ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

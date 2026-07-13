@@ -80,3 +80,23 @@ val entailed_equalities : Context.t -> Term.t list -> Term.t list
     [{ reduced = assertions; defs = [] }] (exact neutrality). All produced terms are built
     through [ctx]'s smart constructors. *)
 val run : Context.t -> Term.t list -> result
+
+(** [simplify_contextual ctx assertions] contextually simplifies each assertion (task
+    #13): within an [(ite c a b)] it assumes [c] true while rewriting [a] and false while
+    rewriting [b], folding a literal reoccurrence of the (peeled) condition atom to its
+    truth value and — for a [(= v k)] condition with [v] a bare non-reserved variable and
+    [k] a literal — substituting [v ↦ k] in the then-branch only. The rewrite is
+    model-PRESERVING (logically equivalent, eliminates no variable), so no model
+    reconstruction is needed and the R1 self-check (which evaluates the ORIGINAL asserted
+    terms) is unaffected. All produced terms are built through [ctx]'s smart constructors,
+    which fold the collapsed conditions automatically.
+
+    Soundness (the win direction is UNSAT, where R1 does not run — these are the margin):
+    the then/else assumptions are scoped strictly to their own branch (never the sibling,
+    the condition, or above the [ite]); the equality substitution fires only for the TRUE
+    polarity of an [Eq]; and each branch scope memoizes independently, so a fold under one
+    branch's assumptions never leaks to another scope. Neutral-abort on a hard node-visit
+    budget (returns the ORIGINAL list unchanged) and a pass-through for any assertion with
+    no [Ite] (exact neutrality). Pure and deterministic (I6). The caller gates it (flag +
+    cert-OFF). *)
+val simplify_contextual : Context.t -> Term.t list -> Term.t list

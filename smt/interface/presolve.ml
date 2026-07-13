@@ -403,3 +403,183 @@ let run ctx assertions =
     in
     { reduced; defs })
 ;;
+
+(* --- Contextual simplification (task #13) ---------------------------------------------
+   Within an [(ite c a b)] the condition [c] may be ASSUMED true while rewriting the
+   then-branch [a] and false while rewriting the else-branch [b] — a scope-local,
+   model-PRESERVING (logically equivalent) rewrite that eliminates NO variable. Two kinds
+   of fact are recorded per branch:
+   - BOOLEAN-ATOM: the atom (after stripping a leading [Not], flipping the truth) has a
+     known truth value in the branch, so a literal reoccurrence of it folds to that
+     constant. Sound in BOTH polarities (true in the then-branch, false in the
+     else-branch).
+   - EQUALITY→CONSTANT: when the (peeled) atom is [(= v k)] with [v] a bare non-reserved
+     variable and [k] a literal, the THEN-branch — the only place [v = k] holds — also
+     substitutes [v ↦ k], which drives the smart constructors' folding. The else-branch
+     knows only [v ≠ k], which establishes NO substitution. Restricting [k] to a literal
+     keeps the rewrite size-non-increasing. The {!Node} smart constructors already fold
+     constants, collapse [(ite true|false …)] and [(not const)], flatten [and]/[or] at
+     construction, so a substitution that turns a condition constant collapses the
+     enclosing [ite] for free — this is the whole win: it reaches ITEs whose conditions
+     are genuine non-constant subterms that local folding (all applied already at
+     construction) cannot touch.
+
+   SOUNDNESS (the win direction is UNSAT, where the R1 model self-check does NOT run — so
+   these scoping rules ARE the soundness margin; each has a discriminating registry
+   mutant, module=presolve, suite=wiring-test):
+   - the then-assumption is applied ONLY under [a], the else-assumption ONLY under [b],
+     and the condition [c] is rewritten under the PARENT env (leaking any of these to a
+     sibling branch, to the condition, or above the [ite] is wrong-Unsat);
+   - the equality substitution is added ONLY for the TRUE polarity of an [Eq] (a
+     disequality condition establishes no substitution);
+   - each branch env owns its OWN memo table: a term rewritten under one branch's
+     assumptions is never reused under a different env (a shared cache would leak a
+     branch-local fold to a sibling/parent — wrong-Unsat). Model reconstruction:
+     unaffected — no variable is eliminated, and the R1 checker evaluates the ORIGINAL
+     asserted terms, not these. Determinism (I6): a deterministic function of term
+     structure; [Term.Map]/[Term.Table] and the [Context] constructors are
+     order-insensitive. Hard node-visit budget with NEUTRAL ABORT: on cap the pass returns
+     the ORIGINAL terms unchanged (never a partial/asymmetric rewrite). *)
+
+let ctx_max_steps = 12_000_000
+
+exception Ctx_budget
+
+(* An assumption scope: the boolean atoms known true/false and the variable→literal
+   substitutions in force, plus this scope's OWN memo (so a fold under these assumptions
+   is physically unreachable from any other scope). *)
+type ctx_env =
+  { atoms : bool Term.Map.t
+  ; subst : Term.t Term.Map.t
+  ; memo : Term.t Term.Table.t
+  }
+
+(* An Int or Bool literal — the only right-hand side admitted for equality substitution. *)
+let is_literal (t : Term.t) =
+  match t.node with
+  | Int_const _ | Bool_const _ -> true
+  | App _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
+;;
+
+(* A bare non-reserved nullary variable — the only admissible substitution left-hand side.
+   Reserved [.oxsmt.*] symbols are internal witnesses and never substituted. *)
+let is_bare_var (t : Term.t) =
+  match t.node with
+  | App (sym, args) ->
+    Iarr.length args = 0 && not (Env.is_reserved_name (Symbol.name sym))
+  | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ | Bool_const _ ->
+    false
+;;
+
+let simplify_contextual ctx assertions =
+  (* Does [t]'s subtree contain any [Ite]? Memoized over the hash-cons DAG. An assertion
+     with no [Ite] cannot be contextually simplified (the assumption env is only ever
+     extended at an [ite]), so it is passed through untouched — the pass is then exactly
+     neutral for a cheap non-allocating walk, which matters for the propagation-bound /
+     large-arith files where the win never fires. The table is LOCAL to this call: term
+     identity ([Term.equal]/[Term.hash]) is the per-[Context] hash-cons tag, so a table
+     shared across [Context]s (one session per corpus file) would collide tags and return
+     stale answers — a module-global table silently disables the pass. *)
+  let has_ite_table : bool Term.Table.t = Term.Table.create 4096 in
+  let rec has_ite (t : Term.t) =
+    match Term.Table.find_opt has_ite_table t with
+    | Some b -> b
+    | None ->
+      let b =
+        match t.node with
+        | Ite _ -> true
+        | Bool_const _ | Int_const _ -> false
+        | App (_, args) -> Iarr.exists has_ite args
+        | Arith lin -> Iarr.exists (fun (tm, _c) -> has_ite tm) lin.coeffs
+        | Le a | Not a -> has_ite a
+        | Eq (a, b) -> has_ite a || has_ite b
+        | And xs | Or xs -> Iarr.exists has_ite xs
+      in
+      Term.Table.add has_ite_table t b;
+      b
+  in
+  let root =
+    { atoms = Term.Map.empty; subst = Term.Map.empty; memo = Term.Table.create 4096 }
+  in
+  let steps = ref 0 in
+  (* Extend [env] with [atom = truth]: strip a leading [Not] (flipping [truth]) so a
+     positive atom is recorded, and add the variable→literal substitution when the peeled
+     atom is [(= v k)] AND [truth] is true. A FRESH scope (its own memo). *)
+  let rec assume env (atom : Term.t) ~truth =
+    match atom.node with
+    | Not d -> assume env d ~truth:(not truth)
+    | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ | Eq _ | And _ | Or _ | Ite _ ->
+      let atoms = Term.Map.add atom truth env.atoms in
+      let subst =
+        if truth
+        then (
+          match atom.node with
+          | Eq (a, b) ->
+            if is_bare_var a && is_literal b
+            then Term.Map.add a b env.subst
+            else if is_bare_var b && is_literal a
+            then Term.Map.add b a env.subst
+            else env.subst
+          | Bool_const _
+          | Int_const _
+          | App _
+          | Arith _
+          | Le _
+          | Not _
+          | And _
+          | Or _
+          | Ite _ -> env.subst)
+        else env.subst
+      in
+      { atoms; subst; memo = Term.Table.create 64 }
+  in
+  let rec simp env (t : Term.t) : Term.t =
+    incr steps;
+    if !steps > ctx_max_steps then raise Ctx_budget;
+    match Term.Table.find_opt env.memo t with
+    | Some r -> r
+    | None ->
+      let r =
+        match Term.Map.find_opt t env.subst with
+        | Some v -> v
+        | None ->
+          (match Term.Map.find_opt t env.atoms with
+           | Some b -> Context.bool_const ctx b
+           | None -> rebuild env t)
+      in
+      Term.Table.add env.memo t r;
+      r
+  and rebuild env (t : Term.t) : Term.t =
+    match t.node with
+    | Bool_const b -> Context.bool_const ctx b
+    | Int_const n -> Context.int_const_big ctx n
+    | App (sym, args) ->
+      if Iarr.length args = 0
+      then t (* a variable — unchanged (preserves hash-cons identity) *)
+      else Context.app ctx sym (List.map (simp env) (Iarr.to_list args))
+    | Arith lin ->
+      Context.linear_combination_big
+        ctx
+        (List.map (fun (tm, co) -> co, simp env tm) (Iarr.to_list lin.coeffs))
+        lin.const
+    | Le a -> Context.le ctx (simp env a) (Context.int_const ctx 0)
+    | Eq (a, b) -> Context.eq ctx (simp env a) (simp env b)
+    | Not a -> Context.not_ ctx (simp env a)
+    | And xs -> Context.and_ ctx (List.map (simp env) (Iarr.to_list xs))
+    | Or xs -> Context.or_ ctx (List.map (simp env) (Iarr.to_list xs))
+    | Ite (c, a, b) ->
+      let c' = simp env c in
+      (match c'.node with
+       | Bool_const true -> simp env a
+       | Bool_const false -> simp env b
+       | App _ | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ ->
+         let env_then = assume env c' ~truth:true in
+         let env_else = assume env c' ~truth:false in
+         let a' = simp env_then a in
+         let b' = simp env_else b in
+         Context.ite ctx c' a' b')
+  in
+  match List.map (fun a -> if has_ite a then simp root a else a) assertions with
+  | exception Ctx_budget -> assertions
+  | simplified -> simplified
+;;
