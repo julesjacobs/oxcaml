@@ -1,0 +1,17 @@
+# Per-module line budgets (DESIGN.md §10 "modules stay small enough to rewrite":
+# per-module line budgets are a tripwire, not a hard gate). `make status` reports
+# each smt/ module's committed .ml+.mli line count (excluding test/ subdirs)
+# against its budget and flags overages.
+#
+# Budgets are provisional and MASTER-OWNED — adjust here as the design firms up.
+# Sources: DESIGN.md §5 (CDCL core ~1-2k lines; "a CDCL core at 6k lines is a
+# smell"), §11 ("smt/core ~1.5k"). Format: "<path-under-repo> <budget>", one per
+# line; blank lines and # comments ignored.
+
+smt/core            1500
+smt/solver          2500
+smt/theories/euf    1500
+smt/theories/lia    2000
+smt/interface       1000
+smt/smtlib          1500
+smt/preprocess      1000

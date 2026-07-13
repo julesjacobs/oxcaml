@@ -1,0 +1,13 @@
+diff --git a/smt/solver/sat.ml b/smt/solver/sat.ml
+index abc3216..0e0b02a 100644
+--- a/smt/solver/sat.ml
++++ b/smt/solver/sat.ml
+@@ -362,7 +362,7 @@ let propagate t =
+             let k = ref 2 in
+             let found = ref false in
+             while (not !found) && !k < len do
+-              if lit_val t c.lits.(!k) <> -1 then found := true else incr k
++              if lit_val t c.lits.(!k) = -1 then found := true else incr k
+             done;
+             if !found
+             then (

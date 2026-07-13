@@ -1,0 +1,25 @@
+; Test-only. Depends only on oxsmt_solver (stdlib-only), so it honors the
+; dependency firewall (I3) even though it lives under smt/. The DIMACS parser
+; (oxsmt_dimacs) is a separate TEST-ONLY library — never linked into shipped
+; solver code, the same split discipline the SMT-LIB parser follows (DESIGN.md
+; §3). Run via `make sat-test` / `make sat-bench`.
+
+(library
+ (name oxsmt_dimacs)
+ (modules dimacs)
+ (libraries oxsmt_solver))
+
+(executable
+ (name sat_test)
+ (modules sat_test dpll)
+ (libraries oxsmt_solver oxsmt_dimacs))
+
+(executable
+ (name seam_test)
+ (modules seam_test)
+ (libraries oxsmt_solver))
+
+(executable
+ (name sat_bench)
+ (modules sat_bench)
+ (libraries oxsmt_solver oxsmt_dimacs))

@@ -1,0 +1,6 @@
+; Test-harness support library. Exempt from the smt/ stdlib-only firewall (I3),
+; but kept to stdlib + Unix only (no opam packages) — see AGENTS.md.
+
+(library
+ (name harness_lib)
+ (libraries unix))

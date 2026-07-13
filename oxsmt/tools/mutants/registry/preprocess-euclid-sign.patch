@@ -1,0 +1,13 @@
+diff --git a/smt/preprocess/preprocess.ml b/smt/preprocess/preprocess.ml
+index 2cb5b09..9211178 100644
+--- a/smt/preprocess/preprocess.ml
++++ b/smt/preprocess/preprocess.ml
+@@ -125,7 +125,7 @@ let div_mod_elimination t root =
+       let q = Context.const ctx qsym in
+       let r = Context.const ctx rsym in
+       (* x = d*q + r *)
+-      let rhs = Context.linear_combination ctx [ dv, q; 1, r ] 0 in
++      let rhs = Context.linear_combination ctx [ dv, q; -1, r ] 0 in
+       let c_eq = Context.eq ctx x' rhs in
+       (* 0 <= r < |d| *)
+       let absd = if dv = min_int then raise Term.Overflow else abs dv in

@@ -1,0 +1,12 @@
+diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
+--- a/smt/interface/presolve.ml
++++ b/smt/interface/presolve.ml
+@@ -174,7 +174,7 @@
+          match candidate c with
+          | Some (x, t)
+            when (not (Term.Map.mem x !sigma))
+-                && (not (Term.Set.mem x uf_vars))
++                && (ignore uf_vars; true)
+                 && uf_free t
+                 && not (Term.Set.mem x (reachable !sigma t)) ->
+            sigma := Term.Map.add x t !sigma;

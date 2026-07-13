@@ -1,0 +1,6 @@
+module=euf
+suite=euf-test
+target=smt/theories/euf/euf.ml
+description=Euf.propagate computes each disequality's separated root-pair key but never inserts it — the per-call separated-root-pair set (#103) is left EMPTY (the "skip the rebuild" corruption). Every watched atom whose two classes are separated by an asserted disequality then reads as unknown (cur = -1) instead of distinct (cur = 0), so distinct-propagations are silently dropped (a completeness/false-negative failure: EUF stops telling CDCL(T) that two watched terms are provably unequal). Killed by euf_test test_propagate_pushpop_vs_full: the INDEPENDENT full-scan reference still reports each such atom distinct, so the per-step propagation outputs diverge on the first sequence that asserts a disequality separating a watched pair.
+review=#103 QG search-scaling (per-call sep-set replaces the O(#diseqs) distinct_witness rescan; the set must be repopulated every propagate call from the live diseqs)
+expected=KILLED-TEST

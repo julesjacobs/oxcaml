@@ -1,0 +1,6 @@
+module=preprocess
+suite=preprocess-test
+target=smt/preprocess/preprocess.ml
+description=ite_removal drops the negated-condition guard: fresh var unconstrained when c false
+review=preprocess-review ite_removal guard
+expected=KILLED-TEST

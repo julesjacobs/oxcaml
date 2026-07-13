@@ -1,0 +1,6 @@
+module=lia
+suite=lia-test
+target=smt/theories/lia/simplex.ml
+description=new_slack builds def with IntMap.add (OVERWRITE) instead of summing a repeated var's coefficients: [(x,1);(x,-1)] becomes s=-x not s=0, Farkas-certifying a false conflict (codex L1, false-unsat).
+review=codex-review/3086f73-lia.md item L1; DESIGN §10 (mutation testing)
+expected=KILLED-TEST

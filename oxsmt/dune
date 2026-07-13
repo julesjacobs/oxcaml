@@ -1,0 +1,12 @@
+; Workspace build environment (board #69). The default (dev) profile is unchanged — it
+; keeps OCaml assertions ON, so `make test` and the whole dev loop exercise every [assert]
+; and debug self-check. The `release` profile additionally compiles with `-noassert`,
+; disabling assertion checks: this is the config an official, PROMOTABLE corpus measurement
+; is built under (`dune build --profile release`; see tests/corpus + `make promote-baseline`),
+; so per-file effort/timing is not inflated by assertion overhead. `corpus_classify --stamp`
+; then reports `assertions=off`, which the fail-closed promote gate requires.
+
+(env
+ (release
+  (flags
+   (:standard -noassert))))

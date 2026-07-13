@@ -1,0 +1,6 @@
+module=combine
+suite=combine-test
+target=smt/combine/combine.ml
+description=internalize_uf_subterms (the EUF e-graph MEMBERSHIP RULE, DESIGN A4 erratum) stops internalizing the uninterpreted-application subterms of a LIA-owned atom (the App arm becomes a no-op instead of A.internalize_term). This is the UNDER-INCLUSION direction the erratum names as the wrong-SAT hazard: f's arguments never get e-nodes, so f(x)/f(y) that surface only inside a LIA atom never enter EUF and congruence cannot fire under an asserted x=y. The W1 gate (x=y /\ f(x)<f(y)) and R1 (x=0 /\ f(x+1)<f(1)) then wrong-SAT instead of UNSAT.
+review=DESIGN.md A4 erratum (e-graph membership rule; over-inclusion slow, under-inclusion wrong-SAT) + ADR-0010 W1 fix; euf-perf 1a
+expected=KILLED-TEST

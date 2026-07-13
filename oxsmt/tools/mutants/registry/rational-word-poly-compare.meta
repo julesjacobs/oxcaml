@@ -1,0 +1,6 @@
+module=rational
+suite=rational-word-test
+target=smt/theories/lia/rational.ml
+description=Rational.compare replaced by polymorphic Stdlib.compare on the one-word value. The representation is mixed (immediate ints interleaved with block pointers), so structural compare orders every immediate BEFORE every block regardless of value — e.g. compare 0 (-2^62-1) comes out NEGATIVE (immediate < block) though 0 > -2^62-1. A genuine value mis-order (not the merely-disciplined hazard Bigint carries, whose values are uniformly boxed). Kills via the one-word rep boundary vectors (immediate vs large-negative block) and, downstream, the simplex/Farkas cross-checks that compare mixed-tier values.
+review=user hard constraint 2 (polymorphic compare on Rational.t FORBIDDEN — comment + mutant); DESIGN §10 (mutation testing); rational_word.mli rep contract
+expected=KILLED-TEST

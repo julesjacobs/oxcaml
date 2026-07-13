@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/session.ml
+description=Model reconstruction binds every eliminated variable to VInt 0 instead of its re-derived value (Some _v -> ... VInt 0 instead of Some v -> ... v). The eliminated variable then carries a WRONG value, so the R1 in-process checker — which evaluates the ORIGINAL assertions, including the dropped definition (= x t) — rejects the model and the sat degrades to unknown. On (= x 5) /\ x <= 10 the correct answer is sat with x=5; the mutant binds x=0, R1 sees (= 0 5) = false, and the reported verdict flips sat -> unknown. This is the wrong-re-derivation mutant (build-soundness constraint 4). Killed by test_presolve_model_r1 and test_presolve_alias_chain.
+review=logs/w1b-design.md build-soundness constraint 4 (model reconstruction; R1 model-eval catches a wrong eliminated value)
+expected=KILLED-TEST

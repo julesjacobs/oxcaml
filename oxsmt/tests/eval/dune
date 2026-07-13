@@ -1,0 +1,14 @@
+; N-version model evaluator (task #74, DESIGN.md §8 layer 1 / §10). Test-only code
+; (under tests/, exempt from the smt/ firewall) but still stdlib-only: it consumes
+; oxsmt_core (the shared Term/Sort/Context vocabulary) and NOTHING else — no other
+; library under smt/ and no other test evaluator, so it stays an independent judge.
+
+(library
+ (name oxsmt_eval)
+ (libraries oxsmt_core)
+ (modules sexp value reader eval_model eval))
+
+(executable
+ (name eval_cli)
+ (libraries oxsmt_core oxsmt_eval)
+ (modules eval_cli))

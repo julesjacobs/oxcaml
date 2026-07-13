@@ -1,0 +1,6 @@
+module=euf
+suite=euf-adapter-test
+target=smt/theories/euf/euf_adapter.ml
+description=Euf_adapter.register_atom's K_bool arm binds a late-arriving predicate atom to its (already-existing) engine watch but SKIPS the Euf.rearm_watch call. The defect it models (codex late-binding MEDIUM): a predicate first seen via a boundary-only internalize_term has its watch created and its one-shot truth flip consumed-and-dropped by a propagate while it had no atom (w_reported advanced); without re-arming at bind time, register's idempotent early return leaves w_reported stale, so the engine never re-reports and the predicate's theory propagation is permanently lost. Not a soundness break (the true<>false axiom conflict still fires reactively), but a completeness loss precisely for mid-solve predicates (lemma-tier instances). Killed by euf_adapter_test test_predicate_late_binding, which internalizes p(a), consumes its flip unbound, then register_atoms p(a) and REQUIRES the next check to propagate +p(a); the mutant drops it, so the check fails (and the follow-on explain of the never-propagated literal raises).
+review=#136 Predicates fix round (late-binding watch re-arm; invariant: binding an atom to a predicate whose watch already exists must clear the stale last-reported value so the entailed truth re-propagates)
+expected=KILLED-TEST
