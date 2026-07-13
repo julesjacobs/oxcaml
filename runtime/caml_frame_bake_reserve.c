@@ -14,15 +14,15 @@
    zero size/runtime cost. A binary linked WITH this object carries a
    page-aligned PROGBITS section that the post-link bake step (objcopy
    --update-section, same size) fills in place. Keeping the reserve here means
-   only opted-in executables pay the ~4 MB, instead of every native binary.
+   only opted-in executables pay the ~8 MB, instead of every native binary.
 
    The size MUST equal FRAME_BAKED_RESERVE in frame_descriptors.c:
-   4096 (header page) + (1<<19) slots * sizeof(frame_descr *). Kept in sync by
+   4096 (header page) + (1<<20) slots * sizeof(frame_descr *). Kept in sync by
    the identical arithmetic below; frame_baked_load re-checks cap-fits so a
    mismatch fails closed to the rebuild path rather than corrupting memory. */
 
 #define FRAME_BAKED_BODY_OFF 4096u
-#define FRAME_BAKED_CAP_MAX (1u << 19)
+#define FRAME_BAKED_CAP_MAX (1u << 20)
 #define FRAME_BAKED_RESERVE \
   (FRAME_BAKED_BODY_OFF + FRAME_BAKED_CAP_MAX * sizeof(void *))
 
