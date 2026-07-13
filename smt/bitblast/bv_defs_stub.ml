@@ -1,14 +1,24 @@
 open Oxsmt_core
 
+(* what a minted symbol denotes (the stub's private classification) *)
+type stub_class =
+  | SConst of Bigint.t * int
+  | SVar
+  | SOp of Bv_op.t
+
 type t =
   { env : Env.t
   ; widths : (Symbol.t, int) Hashtbl.t (* BV sort symbol -> width *)
-  ; ops : (Symbol.t, Bv_op.t) Hashtbl.t (* App symbol -> operator *)
+  ; classes : (Symbol.t, stub_class) Hashtbl.t (* App symbol -> what it denotes *)
   ; sorts : (int, Sort.t) Hashtbl.t (* width -> its BV sort (interned once) *)
   }
 
 let create env =
-  { env; widths = Hashtbl.create 16; ops = Hashtbl.create 64; sorts = Hashtbl.create 16 }
+  { env
+  ; widths = Hashtbl.create 16
+  ; classes = Hashtbl.create 64
+  ; sorts = Hashtbl.create 16
+  }
 ;;
 
 let width_of_sort t (s : Sort.t) =
@@ -17,8 +27,32 @@ let width_of_sort t (s : Sort.t) =
   | _ -> None
 ;;
 
+let is_pred = function
+  | Bv_op.Ult
+  | Bv_op.Ule
+  | Bv_op.Ugt
+  | Bv_op.Uge
+  | Bv_op.Slt
+  | Bv_op.Sle
+  | Bv_op.Sgt
+  | Bv_op.Sge -> true
+  | _ -> false
+;;
+
 let defs t : Blast.defs =
-  { op_of_sym = (fun sym -> Hashtbl.find_opt t.ops sym); width_of_sort = width_of_sort t }
+  let classify (term : Term.t) =
+    match term.node with
+    | App (sym, args) ->
+      (match Hashtbl.find_opt t.classes sym with
+       | Some (SConst (v, w)) -> Some (Blast.Const (v, w))
+       | Some SVar -> None
+       | Some (SOp op) ->
+         let rw = if is_pred op then None else width_of_sort t term.sort in
+         Some (Blast.Op (op, Iarr.to_list args, rw))
+       | None -> None)
+    | _ -> None
+  in
+  { Blast.classify; width_of_sort = width_of_sort t }
 ;;
 
 let sort t w =
@@ -38,15 +72,15 @@ let width_of_term t (term : Term.t) =
   | None -> invalid_arg "bv_defs_stub: term is not bit-vector-sorted"
 ;;
 
-let declare_op t name rank bvop =
+let declare t name rank cls =
   let sym = Env.declare_fun t.env name rank in
-  Hashtbl.replace t.ops sym bvop;
+  Hashtbl.replace t.classes sym cls;
   sym
 ;;
 
 let var t ctx name w =
   let s = sort t w in
-  let sym = declare_op t name (Rank.create [] s) Bv_op.Var in
+  let sym = declare t name (Rank.create [] s) SVar in
   Context.app ctx sym []
 ;;
 
@@ -60,7 +94,7 @@ let const t ctx v w =
   in
   let _, vred = Bigint.divmod (Bigint.add (Bigint.abs v) modulus) modulus in
   let name = Printf.sprintf "bvc.%s.%d" (Bigint.to_string vred) w in
-  let sym = declare_op t name (Rank.create [] s) (Bv_op.Const vred) in
+  let sym = declare t name (Rank.create [] s) (SConst (vred, w)) in
   Context.app ctx sym []
 ;;
 
@@ -105,6 +139,6 @@ let op t ctx ?result_width bvop args =
       imm
       (String.concat "_" (List.map string_of_int arg_ws))
   in
-  let sym = declare_op t name (Rank.create dom res) bvop in
+  let sym = declare t name (Rank.create dom res) (SOp bvop) in
   Context.app ctx sym args
 ;;

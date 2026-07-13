@@ -17,13 +17,23 @@
 
 open Oxsmt_core
 
-(** How the blaster classifies an [App] symbol and recovers a sort's width. Supplied by
-    the caller so the circuit library is independent of the term/registry representation:
-    pre-handoff it is backed by {!Bv_defs_stub}; post-rebase by a thin adapter over
-    bv-front's [Bitvec_defs]. [op_of_sym] returns [None] for a symbol that is not a
-    bit-vector operator (e.g. a plain uninterpreted function). *)
+(** The classification of a bit-vector term the blaster reads. [Const] is a literal
+    ([value] canonical in [0, 2^width)). [Op] carries the operator, its operand terms
+    (each carries its own bit-vector sort, so operand widths come off them), and
+    [result_width] = [Some w] for a bit-vector result, [None] for a Bool-valued
+    comparison. A free bit-vector variable is NOT classified here: it is a term for which
+    {!field-classify} returns [None] while {!field-width_of_sort} returns [Some w]. *)
+type view =
+  | Const of Bigint.t * int
+  | Op of Bv_op.t * Term.t list * int option
+
+(** How the blaster classifies a term and recovers a sort's width. Supplied by the caller
+    so the circuit library is independent of the term representation: pre-handoff it is
+    backed by {!Bv_defs_stub}; post-rebase by a thin adapter over bv-front's [Bv.view].
+    [classify] returns [None] for a term that is not a bit-vector operator/literal minted
+    by the front end (a free bit-vector variable, or a non-bit-vector term). *)
 type defs =
-  { op_of_sym : Symbol.t -> Bv_op.t option
+  { classify : Term.t -> view option
   ; width_of_sort : Sort.t -> int option
   }
 

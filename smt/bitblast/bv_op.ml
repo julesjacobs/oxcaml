@@ -8,11 +8,7 @@
    representation. Keeping the variant here (not in the frozen core) is what lets the two
    builders develop against separate copies and reconcile with a single flat match. *)
 
-open Oxsmt_core
-
 type t =
-  | Const of Bigint.t (* value in [0, 2^width); width from the term's sort *)
-  | Var (* a free bit-vector variable (fresh bits, read back into the model) *)
   | Not
   | And
   | Or
@@ -43,8 +39,6 @@ type t =
   | Sge
 
 let to_string = function
-  | Const _ -> "const"
-  | Var -> "var"
   | Not -> "bvnot"
   | And -> "bvand"
   | Or -> "bvor"

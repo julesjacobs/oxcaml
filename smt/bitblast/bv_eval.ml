@@ -46,62 +46,63 @@ let width_of defs (term : Term.t) =
 let rec eval_bv defs ~lookup (term : Term.t) : Bigint.t * int =
   let w = width_of defs term in
   match term.node with
-  | App (sym, args) ->
-    let args = Iarr.to_list args in
-    let v1 () = fst (eval_bv defs ~lookup (List.nth args 0)) in
-    let v2 () = fst (eval_bv defs ~lookup (List.nth args 1)) in
+  | App (_sym, _) ->
     let value =
-      match defs.Blast.op_of_sym sym, args with
-      | Some (Bv_op.Const v), [] -> mask v w
-      | Some Bv_op.Var, [] | None, [] ->
+      match defs.Blast.classify term with
+      | Some (Blast.Const (v, _)) -> mask v w
+      | None ->
+        (* a free bit-vector variable *)
         (match lookup term with
          | Some v -> mask v w
          | None -> err "unbound bit-vector variable")
-      | Some Bv_op.Not, [ _ ] -> Bigint.sub (Bigint.sub (pow2 w) Bigint.one) (v1 ())
-      | Some Bv_op.And, [ _; _ ] ->
-        of_bits (Array.init w (fun i -> bit (v1 ()) i && bit (v2 ()) i))
-      | Some Bv_op.Or, [ _; _ ] ->
-        of_bits (Array.init w (fun i -> bit (v1 ()) i || bit (v2 ()) i))
-      | Some Bv_op.Xor, [ _; _ ] ->
-        of_bits (Array.init w (fun i -> bit (v1 ()) i <> bit (v2 ()) i))
-      | Some Bv_op.Neg, [ _ ] -> mask (Bigint.sub (pow2 w) (v1 ())) w
-      | Some Bv_op.Add, [ _; _ ] -> mask (Bigint.add (v1 ()) (v2 ())) w
-      | Some Bv_op.Sub, [ _; _ ] ->
-        mask (Bigint.add (v1 ()) (Bigint.sub (pow2 w) (v2 ()))) w
-      | Some Bv_op.Mul, [ _; _ ] -> mask (Bigint.mul (v1 ()) (v2 ())) w
-      | Some Bv_op.Udiv, [ _; _ ] ->
-        let b = v2 () in
-        if Bigint.is_zero b
-        then Bigint.sub (pow2 w) Bigint.one
-        else fst (Bigint.divmod (v1 ()) b)
-      | Some Bv_op.Urem, [ _; _ ] ->
-        let b = v2 () in
-        if Bigint.is_zero b then v1 () else snd (Bigint.divmod (v1 ()) b)
-      | Some Bv_op.Shl, [ _; _ ] ->
-        let s = shift_amt (v2 ()) w in
-        if s >= w then Bigint.zero else mask (Bigint.mul (v1 ()) (pow2 s)) w
-      | Some Bv_op.Lshr, [ _; _ ] ->
-        let s = shift_amt (v2 ()) w in
-        if s >= w then Bigint.zero else fst (Bigint.divmod (v1 ()) (pow2 s))
-      | Some Bv_op.Ashr, [ _; _ ] ->
-        let a = to_bits (v1 ()) w in
-        let s = shift_amt (v2 ()) w in
-        let sign = a.(w - 1) in
-        of_bits (Array.init w (fun j -> if j + s < w then a.(j + s) else sign))
-      | Some Bv_op.Concat, [ hi; lo ] ->
-        let hv, _ = eval_bv defs ~lookup hi in
-        let lv, lw = eval_bv defs ~lookup lo in
-        Bigint.add lv (Bigint.mul hv (pow2 lw))
-      | Some (Bv_op.Extract { hi; lo }), [ _ ] ->
-        mask (fst (Bigint.divmod (v1 ()) (pow2 lo))) (hi - lo + 1)
-      | Some (Bv_op.Zero_extend _), [ _ ] -> v1 ()
-      | Some (Bv_op.Sign_extend k), [ a ] ->
-        let av, aw = eval_bv defs ~lookup a in
-        if bit av (aw - 1)
-        then Bigint.add av (Bigint.sub (pow2 (aw + k)) (pow2 aw))
-        else av
-      | Some op, _ -> err "eval: bad arity for %s" (Bv_op.to_string op)
-      | None, _ -> err "eval: uninterpreted function over bit-vectors"
+      | Some (Blast.Op (op, args, _)) ->
+        let v1 () = fst (eval_bv defs ~lookup (List.nth args 0)) in
+        let v2 () = fst (eval_bv defs ~lookup (List.nth args 1)) in
+        (match op, args with
+         | Bv_op.Not, [ _ ] -> Bigint.sub (Bigint.sub (pow2 w) Bigint.one) (v1 ())
+         | Bv_op.And, [ _; _ ] ->
+           of_bits (Array.init w (fun i -> bit (v1 ()) i && bit (v2 ()) i))
+         | Bv_op.Or, [ _; _ ] ->
+           of_bits (Array.init w (fun i -> bit (v1 ()) i || bit (v2 ()) i))
+         | Bv_op.Xor, [ _; _ ] ->
+           of_bits (Array.init w (fun i -> bit (v1 ()) i <> bit (v2 ()) i))
+         | Bv_op.Neg, [ _ ] -> mask (Bigint.sub (pow2 w) (v1 ())) w
+         | Bv_op.Add, [ _; _ ] -> mask (Bigint.add (v1 ()) (v2 ())) w
+         | Bv_op.Sub, [ _; _ ] ->
+           mask (Bigint.add (v1 ()) (Bigint.sub (pow2 w) (v2 ()))) w
+         | Bv_op.Mul, [ _; _ ] -> mask (Bigint.mul (v1 ()) (v2 ())) w
+         | Bv_op.Udiv, [ _; _ ] ->
+           let b = v2 () in
+           if Bigint.is_zero b
+           then Bigint.sub (pow2 w) Bigint.one
+           else fst (Bigint.divmod (v1 ()) b)
+         | Bv_op.Urem, [ _; _ ] ->
+           let b = v2 () in
+           if Bigint.is_zero b then v1 () else snd (Bigint.divmod (v1 ()) b)
+         | Bv_op.Shl, [ _; _ ] ->
+           let s = shift_amt (v2 ()) w in
+           if s >= w then Bigint.zero else mask (Bigint.mul (v1 ()) (pow2 s)) w
+         | Bv_op.Lshr, [ _; _ ] ->
+           let s = shift_amt (v2 ()) w in
+           if s >= w then Bigint.zero else fst (Bigint.divmod (v1 ()) (pow2 s))
+         | Bv_op.Ashr, [ _; _ ] ->
+           let a = to_bits (v1 ()) w in
+           let s = shift_amt (v2 ()) w in
+           let sign = a.(w - 1) in
+           of_bits (Array.init w (fun j -> if j + s < w then a.(j + s) else sign))
+         | Bv_op.Concat, [ hi; lo ] ->
+           let hv, _ = eval_bv defs ~lookup hi in
+           let lv, lw = eval_bv defs ~lookup lo in
+           Bigint.add lv (Bigint.mul hv (pow2 lw))
+         | Bv_op.Extract { hi; lo }, [ _ ] ->
+           mask (fst (Bigint.divmod (v1 ()) (pow2 lo))) (hi - lo + 1)
+         | Bv_op.Zero_extend _, [ _ ] -> v1 ()
+         | Bv_op.Sign_extend k, [ a ] ->
+           let av, aw = eval_bv defs ~lookup a in
+           if bit av (aw - 1)
+           then Bigint.add av (Bigint.sub (pow2 (aw + k)) (pow2 aw))
+           else av
+         | op, _ -> err "eval: bad arity for %s in value position" (Bv_op.to_string op))
     in
     value, w
   | Ite (c, a, b) ->
@@ -109,11 +110,6 @@ let rec eval_bv defs ~lookup (term : Term.t) : Bigint.t * int =
   | _ -> err "eval: non-application in bit-vector position"
 
 and eval_bool defs ~lookup (term : Term.t) : bool =
-  let ub a = fst (eval_bv defs ~lookup a) in
-  let sb a =
-    let v, w = eval_bv defs ~lookup a in
-    signed v w
-  in
   match term.node with
   | Bool_const b -> b
   | Not a -> not (eval_bool defs ~lookup a)
@@ -127,21 +123,28 @@ and eval_bool defs ~lookup (term : Term.t) : bool =
     (match a.sort with
      | Sort.Bool -> Bool.equal (eval_bool defs ~lookup a) (eval_bool defs ~lookup b)
      | _ -> Bigint.equal (fst (eval_bv defs ~lookup a)) (fst (eval_bv defs ~lookup b)))
-  | App (sym, args) ->
-    let args = Iarr.to_list args in
-    (match defs.Blast.op_of_sym sym, args with
-     | Some Bv_op.Ult, [ a; b ] -> Bigint.compare (ub a) (ub b) < 0
-     | Some Bv_op.Ule, [ a; b ] -> Bigint.compare (ub a) (ub b) <= 0
-     | Some Bv_op.Ugt, [ a; b ] -> Bigint.compare (ub a) (ub b) > 0
-     | Some Bv_op.Uge, [ a; b ] -> Bigint.compare (ub a) (ub b) >= 0
-     | Some Bv_op.Slt, [ a; b ] -> Bigint.compare (sb a) (sb b) < 0
-     | Some Bv_op.Sle, [ a; b ] -> Bigint.compare (sb a) (sb b) <= 0
-     | Some Bv_op.Sgt, [ a; b ] -> Bigint.compare (sb a) (sb b) > 0
-     | Some Bv_op.Sge, [ a; b ] -> Bigint.compare (sb a) (sb b) >= 0
-     | None, [] ->
+  | App (_sym, _) ->
+    (match defs.Blast.classify term with
+     | Some (Blast.Op (op, args, _)) ->
+       let ub i = fst (eval_bv defs ~lookup (List.nth args i)) in
+       let sb i =
+         let v, w = eval_bv defs ~lookup (List.nth args i) in
+         signed v w
+       in
+       (match op, args with
+        | Bv_op.Ult, [ _; _ ] -> Bigint.compare (ub 0) (ub 1) < 0
+        | Bv_op.Ule, [ _; _ ] -> Bigint.compare (ub 0) (ub 1) <= 0
+        | Bv_op.Ugt, [ _; _ ] -> Bigint.compare (ub 0) (ub 1) > 0
+        | Bv_op.Uge, [ _; _ ] -> Bigint.compare (ub 0) (ub 1) >= 0
+        | Bv_op.Slt, [ _; _ ] -> Bigint.compare (sb 0) (sb 1) < 0
+        | Bv_op.Sle, [ _; _ ] -> Bigint.compare (sb 0) (sb 1) <= 0
+        | Bv_op.Sgt, [ _; _ ] -> Bigint.compare (sb 0) (sb 1) > 0
+        | Bv_op.Sge, [ _; _ ] -> Bigint.compare (sb 0) (sb 1) >= 0
+        | _ -> err "eval: non-predicate op in Bool position")
+     | Some (Blast.Const _) -> err "eval: bit-vector literal in Bool position"
+     | None ->
        (match lookup term with
         | Some v -> not (Bigint.is_zero v)
-        | None -> err "unbound Boolean variable")
-     | _ -> err "eval: unsupported Boolean application")
+        | None -> err "unbound Boolean variable"))
   | Le _ | Arith _ | Int_const _ -> err "eval: arithmetic atom (not QF_BV)"
 ;;

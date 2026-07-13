@@ -1,8 +1,12 @@
 open Oxsmt_core
 module Sat = Oxsmt_solver.Sat
 
+type view =
+  | Const of Bigint.t * int
+  | Op of Bv_op.t * Term.t list * int option
+
 type defs =
-  { op_of_sym : Symbol.t -> Bv_op.t option
+  { classify : Term.t -> view option
   ; width_of_sort : Sort.t -> int option
   }
 
@@ -350,45 +354,51 @@ let rec bits t (term : Term.t) : Sat.lit array =
 and bits_uncached t (term : Term.t) : Sat.lit array =
   let w = width_of t term in
   match term.node with
-  | App (sym, args) ->
-    let args = Iarr.to_list args in
-    (match t.defs.op_of_sym sym, args with
-     | Some (Bv_op.Const v), [] -> const_bits t v w
-     | Some Bv_op.Var, [] | None, [] ->
-       (* a free bit-vector variable (or uninterpreted BV constant): fresh bits *)
-       let vbits = Array.init w (fun _ -> fresh t) in
-       t.vars <- (term, vbits) :: t.vars;
-       vbits
-     | Some Bv_op.Not, [ a ] -> Array.map mk_not (bits t a)
-     | Some Bv_op.And, [ a; b ] -> bitwise t mk_and2 (bits t a) (bits t b)
-     | Some Bv_op.Or, [ a; b ] -> bitwise t mk_or2 (bits t a) (bits t b)
-     | Some Bv_op.Xor, [ a; b ] -> bitwise t mk_xor (bits t a) (bits t b)
-     | Some Bv_op.Neg, [ a ] -> neg t (bits t a)
-     | Some Bv_op.Add, [ a; b ] -> bv_add t (bits t a) (bits t b)
-     | Some Bv_op.Sub, [ a; b ] -> sub t (bits t a) (bits t b)
-     | Some Bv_op.Mul, [ a; b ] -> mul t (bits t a) (bits t b)
-     | Some Bv_op.Shl, [ a; b ] ->
-       var_shift t (bits t a) (bits t b) ~dir_left:true ~fill:(Sat.neg_lit t.tru)
-     | Some Bv_op.Lshr, [ a; b ] ->
-       var_shift t (bits t a) (bits t b) ~dir_left:false ~fill:(Sat.neg_lit t.tru)
-     | Some Bv_op.Ashr, [ a; b ] ->
-       let ab = bits t a in
-       var_shift t ab (bits t b) ~dir_left:false ~fill:ab.(Array.length ab - 1)
-     | Some Bv_op.Concat, [ hi; lo ] ->
-       (* SMT-LIB: (concat hi lo), lo occupies the low bits *)
-       Array.append (bits t lo) (bits t hi)
-     | Some (Bv_op.Extract { hi; lo }), [ a ] ->
-       let ab = bits t a in
-       Array.init (hi - lo + 1) (fun j -> ab.(lo + j))
-     | Some (Bv_op.Zero_extend k), [ a ] ->
-       Array.append (bits t a) (Array.make k (Sat.neg_lit t.tru))
-     | Some (Bv_op.Sign_extend k), [ a ] ->
-       let ab = bits t a in
-       Array.append ab (Array.make k ab.(Array.length ab - 1))
-     | Some Bv_op.Udiv, [ a; b ] -> udiv t (bits t a) (bits t b)
-     | Some Bv_op.Urem, [ a; b ] -> urem t (bits t a) (bits t b)
-     | Some op, _ -> unsupported "bit-vector op %s: unexpected arity" (Bv_op.to_string op)
-     | None, _ -> unsupported "uninterpreted function over bit-vectors (out of QF_BV)")
+  | App (_sym, node_args) ->
+    (match t.defs.classify term with
+     | Some (Const (v, _)) -> const_bits t v w
+     | Some (Op (op, args, _)) ->
+       (match op, args with
+        | Bv_op.Not, [ a ] -> Array.map mk_not (bits t a)
+        | Bv_op.And, [ a; b ] -> bitwise t mk_and2 (bits t a) (bits t b)
+        | Bv_op.Or, [ a; b ] -> bitwise t mk_or2 (bits t a) (bits t b)
+        | Bv_op.Xor, [ a; b ] -> bitwise t mk_xor (bits t a) (bits t b)
+        | Bv_op.Neg, [ a ] -> neg t (bits t a)
+        | Bv_op.Add, [ a; b ] -> bv_add t (bits t a) (bits t b)
+        | Bv_op.Sub, [ a; b ] -> sub t (bits t a) (bits t b)
+        | Bv_op.Mul, [ a; b ] -> mul t (bits t a) (bits t b)
+        | Bv_op.Shl, [ a; b ] ->
+          var_shift t (bits t a) (bits t b) ~dir_left:true ~fill:(Sat.neg_lit t.tru)
+        | Bv_op.Lshr, [ a; b ] ->
+          var_shift t (bits t a) (bits t b) ~dir_left:false ~fill:(Sat.neg_lit t.tru)
+        | Bv_op.Ashr, [ a; b ] ->
+          let ab = bits t a in
+          var_shift t ab (bits t b) ~dir_left:false ~fill:ab.(Array.length ab - 1)
+        | Bv_op.Concat, [ hi; lo ] ->
+          (* SMT-LIB: (concat hi lo), lo occupies the low bits *)
+          Array.append (bits t lo) (bits t hi)
+        | Bv_op.Extract { hi; lo }, [ a ] ->
+          let ab = bits t a in
+          Array.init (hi - lo + 1) (fun j -> ab.(lo + j))
+        | Bv_op.Zero_extend k, [ a ] ->
+          Array.append (bits t a) (Array.make k (Sat.neg_lit t.tru))
+        | Bv_op.Sign_extend k, [ a ] ->
+          let ab = bits t a in
+          Array.append ab (Array.make k ab.(Array.length ab - 1))
+        | Bv_op.Udiv, [ a; b ] -> udiv t (bits t a) (bits t b)
+        | Bv_op.Urem, [ a; b ] -> urem t (bits t a) (bits t b)
+        | op, _ ->
+          unsupported
+            "bit-vector op %s: unexpected arity in value position"
+            (Bv_op.to_string op))
+     | None ->
+       if Iarr.length node_args = 0
+       then (
+         (* a free bit-vector variable: fresh bits, recorded for model read-back *)
+         let vbits = Array.init w (fun _ -> fresh t) in
+         t.vars <- (term, vbits) :: t.vars;
+         vbits)
+       else unsupported "uninterpreted function over bit-vectors (out of QF_BV)")
   | Ite (c, a, b) ->
     let cl = blast_bool t c in
     let ab = bits t a
@@ -417,21 +427,27 @@ and blast_bool_uncached t (term : Term.t) : Sat.lit =
      | Sort.Bool -> mk_iff t (blast_bool t a) (blast_bool t b)
      | _ when is_bv t a -> bv_eq t (bits t a) (bits t b)
      | _ -> unsupported "equality over a non-Bool non-bit-vector sort")
-  | App (sym, args) ->
-    let args = Iarr.to_list args in
-    (match t.defs.op_of_sym sym, args with
-     | Some Bv_op.Ult, [ a; b ] -> ult t (bits t a) (bits t b)
-     | Some Bv_op.Ule, [ a; b ] -> ule t (bits t a) (bits t b)
-     | Some Bv_op.Ugt, [ a; b ] -> ult t (bits t b) (bits t a)
-     | Some Bv_op.Uge, [ a; b ] -> ule t (bits t b) (bits t a)
-     | Some Bv_op.Slt, [ a; b ] -> slt t (bits t a) (bits t b)
-     | Some Bv_op.Sle, [ a; b ] -> sle t (bits t a) (bits t b)
-     | Some Bv_op.Sgt, [ a; b ] -> slt t (bits t b) (bits t a)
-     | Some Bv_op.Sge, [ a; b ] -> sle t (bits t b) (bits t a)
-     | None, [] -> fresh t (* a free Boolean variable *)
-     | Some op, _ ->
-       unsupported "bit-vector predicate %s: unexpected arity" (Bv_op.to_string op)
-     | None, _ -> unsupported "uninterpreted predicate (out of QF_BV)")
+  | App (_sym, node_args) ->
+    (match t.defs.classify term with
+     | Some (Op (op, args, _)) ->
+       (match op, args with
+        | Bv_op.Ult, [ a; b ] -> ult t (bits t a) (bits t b)
+        | Bv_op.Ule, [ a; b ] -> ule t (bits t a) (bits t b)
+        | Bv_op.Ugt, [ a; b ] -> ult t (bits t b) (bits t a)
+        | Bv_op.Uge, [ a; b ] -> ule t (bits t b) (bits t a)
+        | Bv_op.Slt, [ a; b ] -> slt t (bits t a) (bits t b)
+        | Bv_op.Sle, [ a; b ] -> sle t (bits t a) (bits t b)
+        | Bv_op.Sgt, [ a; b ] -> slt t (bits t b) (bits t a)
+        | Bv_op.Sge, [ a; b ] -> sle t (bits t b) (bits t a)
+        | op, _ ->
+          unsupported
+            "bit-vector op %s in Bool position: not a predicate or bad arity"
+            (Bv_op.to_string op))
+     | Some (Const _) -> unsupported "bit-vector literal in Bool position"
+     | None ->
+       if Iarr.length node_args = 0
+       then fresh t (* a free Boolean variable *)
+       else unsupported "uninterpreted predicate (out of QF_BV)")
   | Le _ | Arith _ | Int_const _ -> unsupported "arithmetic atom (not QF_BV)"
 
 and is_bv t (term : Term.t) =
