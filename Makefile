@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -300,6 +300,17 @@ dev-release-check:
 preprocess-test:
 	$(DUNE) exec smt/preprocess/test/preprocess_test.exe
 
+## dt-sat-gate — datatypes SAT-direction gate (task/dt-models). Drives the
+##   tests/dt-goldens-sat [:status sat] goldens through the real Session and asserts a
+##   CHECKED sat (the constructor-tree model self-check passed), and proves Dt_model_check
+##   is RED against a deliberately-wrong constructor tree (the model self-check discriminates,
+##   never rubber-stamps). Kept off the harness (whose sat path runs the DT-unaware external
+##   eval); v1 DT soundness is the in-process constructor-tree checker. Nonzero on any failure.
+DT_SAT_GOLDENS ?= tests/dt-goldens-sat
+dt-sat-gate:
+	$(DUNE) build tests/solver/dt_sat_gate.exe
+	$(DUNE) exec tests/solver/dt_sat_gate.exe -- $(DT_SAT_GOLDENS)
+
 ## wiring-test — session layer (smt/interface) semantics + namespace guards. Push/pop
 ##   retraction, assert-after-check, THE SOUNDNESS RULE (theory atom -> unknown), model
 ##   extraction, and the reserved-namespace guard on both the session and the parser. Lives
@@ -428,7 +439,8 @@ stage0-test:
 smtlib-test:
 	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
-	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens tests/arr-goldens tests/bv-goldens
+	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens \
+	  tests/dt-goldens-sat tests/arr-goldens tests/bv-goldens
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
@@ -501,6 +513,7 @@ test: check-frozen
 	$(MAKE) driver-equiv-test
 	$(MAKE) bv-blast-test
 	$(MAKE) bv-goldens-test
+	$(MAKE) dt-sat-gate
 	$(MAKE) regress-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots

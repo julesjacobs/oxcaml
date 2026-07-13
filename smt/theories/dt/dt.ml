@@ -715,7 +715,12 @@ type ctor_tree =
 
 (* A value for a non-datatype leaf: a bound Bool/Int if the class carries one, else an
    opaque uninterpreted witness (Int defaults to 0 when unconstrained — no arithmetic
-   theory is present in a pure-DT problem). *)
+   theory is present in a pure-DT problem). [Bool] is a FINITE 2-element sort, so it must
+   NEVER flow through the unbounded [Uninterp] bucket (codex B1: that admitted three
+   pairwise-distinct Bool datatype fields as sat): an unconstrained Bool leaf defaults to
+   [Model.Bool false]. Diseq-respecting bounded completion (so two disequal Bool classes
+   get DISTINCT values) is layered on in {!check_model}; this default keeps the standalone
+   / public path sound (never [Uninterp] in a Bool position). *)
 let leaf_value t (x : Term.t) : Model.value =
   if Sort.equal x.Term.sort Sort.bool
   then
@@ -723,7 +728,7 @@ let leaf_value t (x : Term.t) : Model.value =
     then Model.Bool true
     else if Euf.are_equal t.engine x t.false_const
     then Model.Bool false
-    else Model.Uninterp (Euf.class_of t.engine x)
+    else Model.Bool false
   else (
     match x.Term.sort with
     | Sort.Int _ ->
@@ -752,18 +757,37 @@ let leaf_value t (x : Term.t) : Model.value =
           | None -> Model.Uninterp (Euf.class_of t.engine x)))
     (* BitVec is defensively unreachable here: a bit-vector term is resolved by the eager
        bit-blaster before the combinator, and any BV term that reached the combinator
-       degrades via [require_no_bitvec_terms] before model extraction. Fold into the generic
-       opaque-class fallback for exhaustiveness. *)
+       degrades via [require_no_bitvec_terms] before model extraction. Fold into the
+       generic opaque-class fallback for exhaustiveness. *)
     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
       Model.Uninterp (Euf.class_of t.engine x))
 ;;
 
-let constructor_model t : (Term.t * ctor_tree) list option =
+(* Shared model builder, parametrized on [leaf : Term.t -> Model.value] so a caller can
+   inject diseq-respecting completion for a finite scalar sort (e.g. [Bool]); the public
+   {!constructor_model} passes the plain per-class {!leaf_value}, {!check_model} passes a
+   Bool-completing wrapper (codex B1 fix). *)
+let constructor_model_gen t ~(leaf : Term.t -> Model.value)
+  : (Term.t * ctor_tree) list option
+  =
   let witnesses, clash = build_witnesses t in
   if clash <> None
   then None
   else (
     let memo : (int, ctor_tree) Hashtbl.t = Hashtbl.create 64 in
+    (* A sort-correct default scalar for a SYNTHESIZED (term-less) base field: a [Bool]
+       field must be [Model.Bool] (never [Uninterp]/[Int] — the checker's sort-inhabitance
+       would reject those), an [Int] field [0], an uninterpreted field element [0]. An
+       [Array]/[BitVec] field has no scalar model value here (a DT+arrays/BV mix is out of
+       the pure-DT fragment): return [Uninterp 0], which the checker's inhabitance rejects
+       for those sorts -> the sat degrades to [unknown] (sound). *)
+    let base_leaf (sort : Sort.t) : Model.value =
+      match sort with
+      | Sort.Bool -> Model.Bool false
+      | Sort.Int _ -> Model.Int 0
+      | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
+        Model.Uninterp 0
+    in
     (* a terminating constructor for a datatype: prefer a nullary one, else fewest DT
        fields *)
     let dt_field_count (c : Defs.constructor) =
@@ -787,6 +811,22 @@ let constructor_model t : (Term.t * ctor_tree) list option =
                 c0
                 rest))
     in
+    (* Model COMPLETION for an unconstrained class. Distinct e-classes are never
+       asserted-equal (a positive equality would have MERGED them), so giving distinct
+       unconstrained classes DISTINCT witness values is always sound and, crucially,
+       satisfies disequalities ([x <> y] over an infinite/large-enough sort). Each
+       unconstrained class draws a fresh [idx] from [next_idx]; [distinct_base dt idx]
+       realizes the idx-th distinct value of the sort:
+       - [idx = 0]: the terminating base constructor (nil / zero / the fewest-DT-fields
+         constructor), recursive fields themselves based — the finite witness;
+       - enum sort (every constructor nullary): the idx-th constructor when [idx < k];
+       - a self-recursive sort (some constructor has a field of THIS sort): a spine of
+         that recursive constructor of length [idx] over the base (distinct lengths =>
+         distinct trees: nil, cons(_,nil), cons(_,cons(_,nil)), …);
+       - otherwise fall back to the base — the §8 checker then fails closed (a distinct
+         value it could not realize => [unknown], never a wrong sat). Determinism (I5/I6):
+         idx is assigned in the deterministic tag-ordered traversal of [dt_terms]. *)
+    let next_idx = ref 0 in
     let rec tree_of (x : Term.t) (depth : int) : ctor_tree =
       let k = Euf.class_of t.engine x in
       match Hashtbl.find_opt memo k with
@@ -803,13 +843,16 @@ let constructor_model t : (Term.t * ctor_tree) list option =
               , Array.to_list (Array.map (fun a -> field_tree a depth) wargs) )
           | None ->
             (match datatype_of_sort t x.Term.sort with
-             | Some dt -> base_tree dt depth
-             | None -> Leaf (leaf_value t x))
+             | Some dt ->
+               let idx = !next_idx in
+               incr next_idx;
+               distinct_base dt idx depth
+             | None -> Leaf (leaf x))
         in
         Hashtbl.replace memo k tr;
         tr
     and field_tree (a : Term.t) depth =
-      if is_dt_sort t a.Term.sort then tree_of a (depth + 1) else Leaf (leaf_value t a)
+      if is_dt_sort t a.Term.sort then tree_of a (depth + 1) else Leaf (leaf a)
     and base_tree (dt : Defs.datatype) depth : ctor_tree =
       if depth > 10_000
       then Leaf (Model.Uninterp 0)
@@ -826,9 +869,139 @@ let constructor_model t : (Term.t * ctor_tree) list option =
                      match datatype_of_sort t s.Defs.field_sort with
                      | Some d -> base_tree d (depth + 1)
                      | None -> Leaf (Model.Uninterp 0))
-                   else Leaf (Model.Int 0))
+                   else Leaf (base_leaf s.Defs.field_sort))
                 c.Defs.selectors ))
+    and distinct_base (dt : Defs.datatype) (idx : int) depth : ctor_tree =
+      if idx = 0 || depth > 10_000
+      then base_tree dt depth
+      else (
+        let ctors = dt.Defs.constructors in
+        let is_enum =
+          List.for_all (fun (c : Defs.constructor) -> c.Defs.selectors = []) ctors
+        in
+        if is_enum
+        then (
+          (* the idx-th nullary constructor, if the domain is large enough; else base (the
+             §8 checker fails closed on the remaining collision) *)
+          match List.nth_opt ctors idx with
+          | Some c -> Ctor (Symbol.name c.Defs.sym, [])
+          | None -> base_tree dt depth)
+        else (
+          (* a constructor with a field of THIS datatype's sort — build a spine of length
+             [idx] over it, so distinct idx give distinct-length (distinct) trees *)
+          let self_rec =
+            List.find_opt
+              (fun (c : Defs.constructor) ->
+                 List.exists
+                   (fun (s : Defs.selector) ->
+                      match dt_sort_sym s.Defs.field_sort with
+                      | Some a -> Symbol.equal a dt.Defs.sort_sym
+                      | None -> false)
+                   c.Defs.selectors)
+              ctors
+          in
+          match self_rec with
+          | Some c ->
+            Ctor
+              ( Symbol.name c.Defs.sym
+              , List.map
+                  (fun (s : Defs.selector) ->
+                     match dt_sort_sym s.Defs.field_sort with
+                     | Some a when Symbol.equal a dt.Defs.sort_sym ->
+                       distinct_base dt (idx - 1) (depth + 1)
+                     | _ ->
+                       if is_dt_sort t s.Defs.field_sort
+                       then (
+                         match datatype_of_sort t s.Defs.field_sort with
+                         | Some d -> base_tree d (depth + 1)
+                         | None -> Leaf (Model.Uninterp 0))
+                       else Leaf (base_leaf s.Defs.field_sort))
+                  c.Defs.selectors )
+          | None -> base_tree dt depth))
     in
     let dt_terms = List.sort_uniq (fun a b -> compare a.Term.tag b.Term.tag) t.dt_terms in
     Some (List.map (fun x -> x, tree_of x 0) dt_terms))
+;;
+
+let constructor_model t = constructor_model_gen t ~leaf:(fun x -> leaf_value t x)
+
+(* Diseq-respecting bounded completion for the finite [Bool] sort (codex B1). [Bool] has
+   two inhabitants, so like an enum it must get a BOUNDED-domain assignment: a class equal
+   to the true/false constant takes that value; every other class draws the next of
+   [{false, true}] (deterministically, in first-seen order) and is memoized by class so
+   equal terms share it. Distinct disequal Bool classes thus get DISTINCT values (a 2-box
+   [distinct] stays sat), while a THIRD mutually-distinct Bool class necessarily reuses a
+   value — the trees then collide and the checker's structural [distinct] fails closed to
+   [unknown] (never the wrong-sat B1 admitted). A [Bool] leaf never becomes [Uninterp]. *)
+let bool_completion t : Term.t -> Model.value =
+  let memo : (int, bool) Hashtbl.t = Hashtbl.create 16 in
+  let next = ref 0 in
+  fun x ->
+    if Euf.are_equal t.engine x t.true_const
+    then Model.Bool true
+    else if Euf.are_equal t.engine x t.false_const
+    then Model.Bool false
+    else (
+      let k = Euf.class_of t.engine x in
+      match Hashtbl.find_opt memo k with
+      | Some b -> Model.Bool b
+      | None ->
+        (* 0 -> false, 1 -> true, >=2 -> false (collision; checker rejects a diseq) *)
+        let b = !next = 1 in
+        incr next;
+        Hashtbl.replace memo k b;
+        Model.Bool b)
+;;
+
+(* The full checker model: a [Term.t -> ctor_tree] assignment for every registered subterm
+   the §8 DT self-check needs (Dt_model_check). It is the union of
+
+   - [constructor_model_gen] — a constructor tree for every registered DATATYPE term (so a
+     datatype variable, a nested field, AND an underspecified selector term all have a
+     value the evaluator can look up); and
+
+   - a [Leaf] SCALAR for every registered NON-datatype atomic (nullary [App]) subterm — an
+     Int/Bool/uninterpreted-sort variable or nullary symbol — so a top-level Int/uninterp
+     equality (decided here by congruence) has operand values.
+
+   Both share ONE [leaf] function so a Bool field and a Bool scalar of the same class get
+   the same value: Bool leaves flow through the diseq-respecting {!bool_completion} (a
+   finite sort, bounded to 2 values — codex B1), all other leaves through {!leaf_value}.
+   Compound non-datatype terms (testers, equalities, connectives, constructor/selector
+   applications) are NOT listed: the evaluator computes them structurally. [None] iff the
+   tree build degrades (a cross-class constructor clash), so the caller fails closed to
+   [unknown]. Snapshotted at the accepting Final->Sat (see {!Cdclt}).
+
+   POSTURE (review F2): this extraction runs OUTSIDE the CONTRACT-POISON firewall (like
+   [Session.build_model] — the firewall wraps only [Sat.solve]), so a bug here surfaces as
+   a crash, never a silently-swallowed [unknown]. The tree walk needs NO explicit
+   recursion-depth guard for termination: assertion ASTs are finite hash-consed DAGs and
+   the model trees are finite ([base_tree]/[distinct_base] carry [depth > 10_000] caps,
+   and the occurs check refutes a cyclic assignment as UNSAT before any sat model is
+   built), so it always terminates. *)
+let check_model t : (Term.t * ctor_tree) list option =
+  let bool_of = bool_completion t in
+  let leaf (x : Term.t) : Model.value =
+    if Sort.equal x.Term.sort Sort.bool then bool_of x else leaf_value t x
+  in
+  match constructor_model_gen t ~leaf with
+  | None -> None
+  | Some trees ->
+    let seen = Term.Table.create 128 in
+    let scalars = ref [] in
+    let rec walk (term : Term.t) =
+      if not (Term.Table.mem seen term)
+      then (
+        Term.Table.replace seen term ();
+        (match term.Term.node with
+         | Term.App (_, args) when Iarr.length args = 0 ->
+           (* a nullary applied symbol: a datatype leaf is already covered by [trees];
+              collect a non-datatype leaf (Int/Bool/uninterpreted var) as a scalar *)
+           if not (is_dt_sort t term.Term.sort)
+           then scalars := (term, Leaf (leaf term)) :: !scalars
+         | _ -> ());
+        List.iter walk (children term))
+    in
+    List.iter walk (List.rev t.atom_terms);
+    Some (trees @ !scalars)
 ;;

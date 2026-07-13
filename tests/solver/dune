@@ -36,3 +36,17 @@
   oxsmt_interface
   oxsmt_smtlib_parser
   oxsmt_query_loader))
+
+; Datatypes sat-model gate (make dt-sat-gate): drives the tests/dt-goldens-sat sat goldens
+; through the real Session asserting a CHECKED sat, and proves Dt_model_check is RED against
+; a deliberately-wrong constructor tree (banked review rule).
+
+(executable
+ (name dt_sat_gate)
+ (modules dt_sat_gate)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_dt
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))

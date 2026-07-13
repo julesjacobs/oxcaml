@@ -191,6 +191,15 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}. *)
 val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
 
+(** [true] iff a datatype has been declared for this session ([set_datatypes] /
+    [declare_datatype] with a non-empty registry) — i.e. the standalone DT theory is
+    installed. A [Sat] from a DT session is self-checked by the in-process DT constructor-
+    tree checker, but its tree model is not yet carried by the scalar [model] type, so
+    {!get_model} is [None]; a front end uses this to report [sat] on the verdict alone
+    (matching the headline classifier) rather than treating a modelless [Sat] as a
+    non-self-checkable UF sat. *)
+val uses_datatypes : t -> bool
+
 (** One constructor for {!declare_datatype}: its name and each field's (selector name,
     sort). A nullary constructor (an enum case) has [fields = []]. *)
 type ctor_decl =
@@ -392,4 +401,19 @@ module For_test : sig
       it fails closed on a datatype sort — a datatype has no scalar default, so it must
       raise rather than fabricate [VUninterp 0] (the silent wrong-value class, codex). *)
   val default_value : Oxsmt_core.Sort.t -> model_value
+
+  (** Substitute (or, with [None], restore) the DT model self-checker that {!check_sat}'s
+      commit consults for a datatype [Sat] (GOALS Datatypes). Exposed ONLY to pin the
+      commit -> checker WIRING: a fault-injection test installs a reject-all stub and
+      asserts the session then reports [Unknown] on a genuinely-sat query — a regression
+      that bypassed the checker would ignore the stub and wrongly report [Sat]. [None]
+      (the default, and the only production state) uses the real {!Dt_model_check}; NOT
+      for solver code. *)
+  val set_dt_checker
+    :  (Oxsmt_core.Datatype_defs.t
+        -> (Oxsmt_core.Term.t * Oxsmt_dt.Dt.ctor_tree) list
+        -> Oxsmt_core.Term.t list
+        -> bool)
+         option
+    -> unit
 end

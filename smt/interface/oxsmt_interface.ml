@@ -24,6 +24,12 @@ module Model_check = Model_check
     drives it internally via {!Session}. *)
 module Cdclt = Cdclt
 
+(** The datatypes in-process model self-check (GOALS Datatypes), exposed so the sat-model
+    gate can drive it directly — in particular to prove it RED against a
+    deliberately-wrong constructor tree. Not part of the client-facing session flow, which
+    drives it internally via {!Session} (the DT commit branch). *)
+module Dt_model_check = Dt_model_check
+
 (** The W1b unconditional equality-elimination presolve (logs/w1b-design.md), exposed so
     the test suite can unit-test the transform directly (the reduced set / eliminated defs
     / interface-variable no-op). {!Session.assert_presolved} drives it internally on the

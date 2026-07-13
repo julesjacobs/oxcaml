@@ -168,6 +168,10 @@ type t =
   ; mutable splits : int (* splits emitted in the current check-sat *)
   ; budget : Budget.t (* shared effort budget (board #60): SAT ticks it, we tick Final *)
   ; mutable last_model : Model.t option (* snapshot taken at the accepting Final->Sat *)
+  ; mutable last_dt_model : (Term.t * Dt.ctor_tree) list option
+    (* DT constructor-tree checker model, snapshotted at the accepting Final->Sat when the
+     installed theory is the standalone DT theory (else [None]); read by {!Session}'s
+     DT-branch commit through {!dt_model} and checked by [Dt_model_check]. *)
   }
 
 let sign_lit = Sat.sign_of_lit
@@ -302,6 +306,14 @@ let check t ~final =
       match th_check impl Theory.Final with
       | Theory.Sat ->
         t.last_model <- Some (th_model impl);
+        (* At the accepting Final the engine holds the satisfying assignment — the valid
+           point to extract a checker model. For the standalone DT theory, snapshot its
+           constructor-tree model (Dt_model_check re-derives the verdict from it); other
+           theories have no tree model. *)
+        t.last_dt_model
+        <- (match impl with
+            | TDt th -> Dt.check_model th
+            | TCombined _ | TArr _ -> None);
         Sat.T_consistent []
       | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
       | Theory.Conflict e ->
@@ -353,6 +365,7 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; splits = 0
     ; budget
     ; last_model = None
+    ; last_dt_model = None
     }
   in
   Sat.set_theory
@@ -373,7 +386,8 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
 let begin_check t =
   t.splits <- 0;
   Budget.reset t.budget;
-  t.last_model <- None
+  t.last_model <- None;
+  t.last_dt_model <- None
 ;;
 
 let splits_used t = t.splits
@@ -664,6 +678,11 @@ let model t =
      with
      | Degrade -> None)
 ;;
+
+(* The DT constructor-tree checker model snapshotted at the accepting Final->Sat, or
+   [None] when the last check-sat was not a DT-theory [Sat]. Read by {!Session}'s DT
+   commit branch and validated by [Dt_model_check] before any [sat] is reported. *)
+let dt_model t = t.last_dt_model
 
 (* ADR-0012 L2/O3 (tranche 2): a read-only e-graph query view over the live congruence
    child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the

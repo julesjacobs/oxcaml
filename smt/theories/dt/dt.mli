@@ -58,3 +58,13 @@ type ctor_tree =
     unconstrained class is given its sort's first terminating constructor (so recursive
     sorts get a finite witness). [None] if a needed value is missing (fail-closed). *)
 val constructor_model : t -> (Term.t * ctor_tree) list option
+
+(** [check_model t] is the full candidate model the §8 DT self-check evaluates against the
+    formula: a [Term.t -> ctor_tree] assignment for every registered datatype term (via
+    {!constructor_model}, so datatype variables, nested fields, and underspecified
+    selector terms all resolve) UNIONED with a [Leaf] scalar for every registered
+    non-datatype atomic (nullary [App]) subterm (Int/Bool/uninterpreted-sort variable).
+    Compound terms are omitted — the evaluator computes them structurally. [None] iff
+    {!constructor_model} degrades (fail-closed). Valid after a [check Final] returned
+    [Sat]. *)
+val check_model : t -> (Term.t * ctor_tree) list option

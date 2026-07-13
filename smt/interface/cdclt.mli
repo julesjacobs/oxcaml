@@ -97,6 +97,13 @@ val model_bindings : t -> binding list option
     to be guessed. Deterministic (R10). *)
 val model : t -> (sort_card list * binding list) option
 
+(** [dt_model t] is the datatypes theory's constructor-tree checker model, snapshotted at
+    the accepting Final->Sat when the installed theory is the standalone DT theory (GOALS
+    Datatypes model construction); [None] otherwise or when it degraded (fail-closed).
+    Read by {!Session}'s DT commit branch and validated by [Dt_model_check] before a [sat]
+    is reported. Deterministic. *)
+val dt_model : t -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list option
+
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
     matcher reads the e-graph without mutating it (R6). It is a {b live} surface, NOT a

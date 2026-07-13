@@ -197,17 +197,19 @@ let context t = t.ctx
    [.oxsmt.qvar.*], preprocessing witnesses [.oxsmt.ite/q/r.*]) — those are minted
    directly via [Env.declare_reserved] by trusted code and have no inertness guard.
 
-   ADMITTED GRAMMARS (one predicate per line; each PAIRED with its consuming-side inertness
-   check per the contract above):
+   ADMITTED GRAMMARS (one predicate per line; each PAIRED with its consuming-side
+   inertness check per the contract above):
    - arrays op symbols ({!Array_defs.is_op_name}: the [.oxsmt.arr.] prefix with a [|]
-     sort-key separator). PAIRED check = REGISTRY MEMBERSHIP: the theory classifies an [App]
-     head only via {!Array_defs.role_of_sym}, and {!Array_defs.add} refuses any entry whose
-     name is not the canonical [op_symbol_name], so an admitted-but-unregistered op-shaped
-     mint is inert. EXCLUDES the ext witness [.oxsmt.arr.ext.N] (no [|]).
+     sort-key separator). PAIRED check = REGISTRY MEMBERSHIP: the theory classifies an
+     [App] head only via {!Array_defs.role_of_sym}, and {!Array_defs.add} refuses any
+     entry whose name is not the canonical [op_symbol_name], so an
+     admitted-but-unregistered op-shaped mint is inert. EXCLUDES the ext witness
+     [.oxsmt.arr.ext.N] (no [|]).
    - bit-vector markers ({!Oxsmt_core.Bv.is_bv_name}: the [.oxsmt.bv|...] prefix). PAIRED
-     check = RANK AGREEMENT: {!Oxsmt_core.Bv.view} verifies the decoded op's operand/result
-     sorts and arity against the term's actual sorts, so a mis-ranked admitted marker
-     decodes to [None] (ordinary uninterpreted, at worst [unknown]), never reinterpreted. *)
+     check = RANK AGREEMENT: {!Oxsmt_core.Bv.view} verifies the decoded op's
+     operand/result sorts and arity against the term's actual sorts, so a mis-ranked
+     admitted marker decodes to [None] (ordinary uninterpreted, at worst [unknown]), never
+     reinterpreted. *)
 let parse_sanctioned_marker name = Array_defs.is_op_name name || Bv.is_bv_name name
 let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
@@ -262,6 +264,7 @@ let declare_const t name sort = declare_fun t name (Rank.create [] sort)
    which flips the session onto the DT theory at its first check-sat. Must precede
    [assert_term] (a datatype must be known before its atoms are interned). *)
 let set_datatypes t defs = t.registry := defs
+let uses_datatypes t = not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
 
 (* Install the array [select]/[store] symbol registry (arrays lane) the front end parsed.
    Records it into the shared registry ref, which flips the session onto the standalone
@@ -956,6 +959,25 @@ let raw_solve t assumptions =
    build is [None] -> [Unknown]; a checker rejection fail-closes to [Unknown]. Runs
    OUTSIDE the [raw_solve] firewall, so a bug here surfaces as a crash, not a silent
    [Unknown]. *)
+(* TEST-ONLY fault-injection seam (F1 obligation, logs/dt-models-review-fable.md): the DT
+   commit consults its model self-checker through this indirection so a test can
+   substitute a stub and PIN that a DT [Sat] is GATED on the checker verdict. A regression
+   that bypassed the checker (e.g. rewriting the arm to [| Some _ -> Sat]) would ignore an
+   injected reject-all stub and report [Sat] where the test demands [Unknown] — the
+   missing coverage the reviewer flagged. [None] in every production path => the real
+   {!Dt_model_check.check}, so soundness is NEVER routed through a stub outside a test.
+   Set only via {!For_test.set_dt_checker}. *)
+let dt_checker_override
+  : (Oxsmt_core.Datatype_defs.t
+     -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list
+     -> Term.t list
+     -> bool)
+      option
+      ref
+  =
+  ref None
+;;
+
 let commit_sat t =
   (* Arrays v1 sat-degrade: the standalone arrays theory reasons soundly for refutation
      (ROW + extensionality add only theory-valid consequences), but its [Final]->[Sat]
@@ -966,6 +988,30 @@ let commit_sat t =
      documented follow-up. *)
   if t.has_arrays
   then Unknown
+  else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+  then (
+    (* DATATYPES (GOALS Datatypes model construction): the standalone DT theory is
+       installed, so soundness rests on the DT constructor-tree self-check, not the UF
+       [Model_check]/[Cdclt.model] reconstruction (which fails closed on a
+       [Sort.Datatype]). Validate the tree model extracted at Final ([Cdclt.dt_model])
+       against the ORIGINAL assertions with the independent [Dt_model_check]; report [Sat]
+       only if it passes. The scalar [model] binding-list type cannot carry constructor
+       trees, so [get_model] stays [None] for a DT [Sat] in v1 (surfacing the tree model
+       to the CLI / external eval is a follow-up); the verdict itself flips unknown ->
+       checked-[Sat]. *)
+    match Cdclt.dt_model t.cdclt with
+    | Some model ->
+      let check =
+        match !dt_checker_override with
+        | Some f -> f
+        | None -> Dt_model_check.check
+      in
+      if check !(t.registry) model t.asserted
+      then (
+        t.last_model <- None;
+        Sat)
+      else Unknown
+    | None -> Unknown)
   else (
     match build_model t with
     | Some m ->
@@ -1097,4 +1143,5 @@ let lemma_instantiations t = Manager.instantiations t.mgr
 
 module For_test = struct
   let default_value = default_value
+  let set_dt_checker f = dt_checker_override := f
 end
