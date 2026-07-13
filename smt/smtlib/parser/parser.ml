@@ -142,6 +142,15 @@ let rec sort_of_sexp st (s : Sexp.t) : Sort.t =
         fragment (fail-closed to unknown). *)
      | Sexp.List [ head; i_s; e_s ] when Sexp.simple head = Some "Array" ->
        Sort.array_ ~index:(sort_of_sexp st i_s) ~element:(sort_of_sexp st e_s)
+     (* [(_ BitVec n)] — the only indexed sort in the v1 subset. *)
+     | Sexp.List
+         [ Sexp.Atom (Tok.Reserved "_")
+         ; Sexp.Atom (Tok.Symbol { text = "BitVec"; _ })
+         ; Sexp.Atom (Tok.Numeral n)
+         ] ->
+       (match int_of_string_opt n with
+        | Some w when w >= 1 -> Sort.bitvec w
+        | _ -> malformedf "(_ BitVec %s): width must be a positive integer" n)
      | Sexp.List _ ->
        unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
      | _ -> malformedf "expected a sort, got %s" (Sexp.to_string s))
@@ -188,6 +197,68 @@ let int_lit st a =
     (match Bigint.of_string a with
      | b -> Context.int_const_big st.ctx b
      | exception Invalid_argument _ -> malformedf "malformed integer literal: %s" a)
+;;
+
+(* ---- bitvector literals ---- *)
+
+(* [#b<bits>] and [#x<hex>] (SMT-LIB §3.1). Width is the digit count times bits-per-digit;
+   the value is folded arbitrary-precision ({!Bigint}), so a literal wider than native
+   [int] is exact. The lexer already validated the digits, so an unexpected character here
+   is an internal error. *)
+let bv_literal st ~digits ~bits_per_digit ~value_of_digit =
+  let base = Bigint.of_int (1 lsl bits_per_digit) in
+  let value =
+    String.fold_left
+      (fun acc c -> Bigint.add (Bigint.mul acc base) (Bigint.of_int (value_of_digit c)))
+      Bigint.zero
+      digits
+  in
+  let width = String.length digits * bits_per_digit in
+  if width < 1 then malformedf "empty bitvector literal";
+  Bv.const st.ctx st.env ~value ~width
+;;
+
+let hex_digit_value c =
+  match c with
+  | '0' .. '9' -> Char.code c - Char.code '0'
+  | 'a' .. 'f' -> Char.code c - Char.code 'a' + 10
+  | 'A' .. 'F' -> Char.code c - Char.code 'A' + 10
+  | _ -> malformedf "malformed hex digit %c" c
+;;
+
+let bin_digit_value c =
+  match c with
+  | '0' -> 0
+  | '1' -> 1
+  | _ -> malformedf "malformed binary digit %c" c
+;;
+
+(* The prefix-form bitvector operator names (see {!read_bv_op}); indexed operators
+   ([extract], the extends) and the literals arrive by other syntactic routes. *)
+let is_bv_keyword = function
+  | "bvnot"
+  | "bvand"
+  | "bvor"
+  | "bvxor"
+  | "bvneg"
+  | "bvadd"
+  | "bvsub"
+  | "bvmul"
+  | "bvudiv"
+  | "bvurem"
+  | "bvshl"
+  | "bvlshr"
+  | "bvashr"
+  | "bvult"
+  | "bvule"
+  | "bvslt"
+  | "bvsle"
+  | "bvugt"
+  | "bvuge"
+  | "bvsgt"
+  | "bvsge"
+  | "concat" -> true
+  | _ -> false
 ;;
 
 (* ---- terms ---- *)
@@ -239,8 +310,9 @@ and read_atom st scope (tok : Tok.token) : Term.t =
   match tok with
   | Tok.Numeral n -> int_lit st n
   | Tok.Decimal d -> unsupportedf "decimal (real) literal is not in QF_UFLIA: %s" d
-  | Tok.Hex h -> unsupportedf "bitvector literal #x%s is not supported" h
-  | Tok.Binary b -> unsupportedf "bitvector literal #b%s is not supported" b
+  | Tok.Hex h -> bv_literal st ~digits:h ~bits_per_digit:4 ~value_of_digit:hex_digit_value
+  | Tok.Binary b ->
+    bv_literal st ~digits:b ~bits_per_digit:1 ~value_of_digit:bin_digit_value
   | Tok.String s -> malformedf "unexpected string literal in term position: %S" s
   | Tok.Keyword k -> malformedf "unexpected keyword :%s in term position" k
   | Tok.Reserved r -> malformedf "unexpected reserved word %s in term position" r
@@ -322,6 +394,19 @@ and read_app st scope head args orig =
   | Sexp.List
       [ Sexp.Atom (Tok.Reserved "_"); Sexp.Atom (Tok.Symbol { text = "is"; _ }); cname_s ]
     -> read_tester st scope (name_of cname_s) args orig
+  (* Indexed bitvector operators: [(_ extract i j)], [(_ zero_extend n)],
+     [(_ sign_extend n)]. Each heads a single-argument application. *)
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = "extract"; _ })
+      ; Sexp.Atom (Tok.Numeral i)
+      ; Sexp.Atom (Tok.Numeral j)
+      ] -> read_bv_extract st scope ~i ~j args orig
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = ("zero_extend" | "sign_extend") as ext; _ })
+      ; Sexp.Atom (Tok.Numeral n)
+      ] -> read_bv_extend st scope ~ext ~n args orig
   | _ ->
     unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string head)
 
@@ -336,6 +421,71 @@ and read_tester st scope cname args orig =
     if List.length args <> List.length dom
     then malformedf "tester (_ is %s) expects 1 argument" cname;
     Context.app st.ctx sym (List.map (read_term st scope) args)
+
+and read_bv_extract st scope ~i ~j args orig =
+  match args with
+  | [ a ] ->
+    (match int_of_string_opt i, int_of_string_opt j with
+     | Some i, Some j -> Bv.extract st.ctx st.env ~i ~j (read_term st scope a)
+     | _ ->
+       malformedf "(_ extract i j): indices must be numerals: %s" (Sexp.to_string orig))
+  | _ -> malformedf "(_ extract i j) expects 1 argument: %s" (Sexp.to_string orig)
+
+and read_bv_extend st scope ~ext ~n args orig =
+  match args with
+  | [ a ] ->
+    (match int_of_string_opt n with
+     | Some n ->
+       let x = read_term st scope a in
+       if String.equal ext "zero_extend"
+       then Bv.zero_extend st.ctx st.env ~n x
+       else Bv.sign_extend st.ctx st.env ~n x
+     | None -> malformedf "(_ %s n): n must be a numeral: %s" ext (Sexp.to_string orig))
+  | _ -> malformedf "(_ %s n) expects 1 argument: %s" ext (Sexp.to_string orig)
+
+(* The equal-width prefix bitvector operators + [concat] + the four comparisons, plus the
+   "greater" sugar duals rewritten to the swapped "lesser" form. [None] for a name outside
+   the v1 bitvector subset. Membership decides routing in {!read_op} (user functions take
+   precedence, so a user symbol that happens to look like one of these is unaffected — the
+   bitvector names are all SMT-LIB-reserved theory symbols). *)
+and read_bv_op st scope op args orig =
+  let rd = read_term st scope in
+  let bin f =
+    match args with
+    | [ a; b ] -> f (rd a) (rd b)
+    | _ -> malformedf "%s expects 2 arguments: %s" op (Sexp.to_string orig)
+  in
+  let un f =
+    match args with
+    | [ a ] -> f (rd a)
+    | _ -> malformedf "%s expects 1 argument: %s" op (Sexp.to_string orig)
+  in
+  let b o x y = Bv.binop st.ctx st.env o x y in
+  match op with
+  | "bvnot" -> un (Bv.unop st.ctx st.env Bv.Bvnot)
+  | "bvneg" -> un (Bv.unop st.ctx st.env Bv.Bvneg)
+  | "bvand" -> bin (b Bv.Bvand)
+  | "bvor" -> bin (b Bv.Bvor)
+  | "bvxor" -> bin (b Bv.Bvxor)
+  | "bvadd" -> bin (b Bv.Bvadd)
+  | "bvsub" -> bin (b Bv.Bvsub)
+  | "bvmul" -> bin (b Bv.Bvmul)
+  | "bvudiv" -> bin (b Bv.Bvudiv)
+  | "bvurem" -> bin (b Bv.Bvurem)
+  | "bvshl" -> bin (b Bv.Bvshl)
+  | "bvlshr" -> bin (b Bv.Bvlshr)
+  | "bvashr" -> bin (b Bv.Bvashr)
+  | "bvult" -> bin (b Bv.Bvult)
+  | "bvule" -> bin (b Bv.Bvule)
+  | "bvslt" -> bin (b Bv.Bvslt)
+  | "bvsle" -> bin (b Bv.Bvsle)
+  (* sugar: a "greater" op is the swapped "lesser" op *)
+  | "bvugt" -> bin (fun x y -> b Bv.Bvult y x)
+  | "bvuge" -> bin (fun x y -> b Bv.Bvule y x)
+  | "bvsgt" -> bin (fun x y -> b Bv.Bvslt y x)
+  | "bvsge" -> bin (fun x y -> b Bv.Bvsle y x)
+  | "concat" -> bin (Bv.concat st.ctx st.env)
+  | _ -> unsupportedf "bitvector operator %s is not in the v1 subset" op
 
 (* Apply a user-declared function or expand a define-fun (no builtin-operator meaning). *)
 and apply_named st scope op args orig =
@@ -417,7 +567,13 @@ and read_op st scope op args orig =
          [ arr; rd i; rd v ]
      | _ -> malformedf "store applied to a non-array term")
   | "store", _ -> malformedf "store expects 3 arguments"
-  (* not a builtin operator — a user-declared function or a define-fun *)
+  (* A user-declared function / define-fun takes precedence over the bitvector-operator
+     keywords (so a user symbol that happens to spell one of the reserved bitvector names
+     still resolves to the user's declaration); otherwise a bitvector keyword routes to
+     the bitvector builders, and anything else is an undeclared/unknown operator. *)
+  | _ when Hashtbl.mem st.defines op || Hashtbl.mem st.funs op ->
+    apply_named st scope op args orig
+  | _ when is_bv_keyword op -> read_bv_op st scope op args orig
   | _ -> apply_named st scope op args orig
 
 (* Expand a [define-fun] use site by capture-avoiding substitution: the argument
@@ -778,7 +934,12 @@ let known_logic = function
      CONSTRUCT discipline. *)
   | "QF_AX"
   | "QF_ALIA"
-  | "QF_AUFLIA" -> true
+  | "QF_AUFLIA"
+  (* bitvectors (bit-blasted); BV combined with arithmetic accepted at the name level. *)
+  | "QF_BV"
+  | "QF_UFBV"
+  | "QF_BVLIA"
+  | "QF_UFBVLIA" -> true
   (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
   | "UF"
   | "UFLIA"

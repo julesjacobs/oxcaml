@@ -932,9 +932,117 @@ let command_gate_cases () =
         (get-model)\n")
 ;;
 
+(* Bitvectors (GOALS: bitvectors). Direction-A round-trips build terms via the [Bv] smart
+   constructors, print (set-logic QF_UFBV, [(_ BitVec w)] sorts, [#b...] literals,
+   prefix/indexed operators), reparse into the SAME context, and compare by [Term.equal] —
+   so parser + printer + sort-checking are all exercised at once. Plus parse-only cases
+   for the sugar duals, and malformed cases for the width/index errors (fail-closed). *)
+let bv_cases () =
+  let bvc env ctx name w = const env ctx name (Sort.bitvec w) in
+  let lit ctx env v w = Bv.const ctx env ~value:(Bigint.of_int v) ~width:w in
+  check_a ~name:"bv-literal-eq" ~status:Status.Sat (fun env ctx ->
+    let x = bvc env ctx "x" 4 in
+    [ Context.eq ctx x (lit ctx env 5 4) ]);
+  check_a ~name:"bv-hex-literal" (fun env ctx ->
+    let x = bvc env ctx "x" 8 in
+    [ Context.eq ctx x (lit ctx env 0xa3 8) ]);
+  check_a ~name:"bv-bitwise" (fun env ctx ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.eq
+        ctx
+        (Bv.binop ctx env Bv.Bvand x y)
+        (Bv.binop ctx env Bv.Bvor x (Bv.unop ctx env Bv.Bvnot y))
+    ]);
+  check_a ~name:"bv-arith" (fun env ctx ->
+    let x = bvc env ctx "x" 16
+    and y = bvc env ctx "y" 16 in
+    [ Context.eq
+        ctx
+        (Bv.binop
+           ctx
+           env
+           Bv.Bvadd
+           (Bv.binop ctx env Bv.Bvmul x y)
+           (Bv.unop ctx env Bv.Bvneg x))
+        (Bv.binop ctx env Bv.Bvsub x y)
+    ]);
+  check_a ~name:"bv-shifts" (fun env ctx ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.eq
+        ctx
+        (Bv.binop ctx env Bv.Bvshl x y)
+        (Bv.binop ctx env Bv.Bvashr (Bv.binop ctx env Bv.Bvlshr x y) y)
+    ]);
+  check_a ~name:"bv-compares" (fun env ctx ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.and_
+        ctx
+        [ Bv.binop ctx env Bv.Bvult x y
+        ; Bv.binop ctx env Bv.Bvule x y
+        ; Bv.binop ctx env Bv.Bvslt x y
+        ; Bv.binop ctx env Bv.Bvsle x y
+        ]
+    ]);
+  check_a ~name:"bv-concat-extract" (fun env ctx ->
+    let x = bvc env ctx "x" 4
+    and y = bvc env ctx "y" 4 in
+    let c = Bv.concat ctx env x y in
+    (* extract the high nibble back out; it must equal x *)
+    [ Context.eq ctx (Bv.extract ctx env ~i:7 ~j:4 c) x ]);
+  check_a ~name:"bv-extends" (fun env ctx ->
+    let x = bvc env ctx "x" 8 in
+    [ Context.eq ctx (Bv.zero_extend ctx env ~n:8 x) (Bv.sign_extend ctx env ~n:8 x) ]);
+  check_a ~name:"bv-udiv-urem" (fun env ctx ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.eq ctx (Bv.binop ctx env Bv.Bvudiv x y) (Bv.binop ctx env Bv.Bvurem x y) ]);
+  (* sugar: (bvugt x y) parses to (bvult y x); prove the rewrite by comparing to the
+     hand-written swapped form in one context. *)
+  let bv_hdr =
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (declare-const y (_ BitVec 8))\n"
+  in
+  check_same
+    ~name:"bv-ugt-sugar"
+    (bv_hdr ^ "(assert (bvugt x y))\n")
+    (bv_hdr ^ "(assert (bvult y x))\n");
+  check_same
+    ~name:"bv-sge-sugar"
+    (bv_hdr ^ "(assert (bvsge x y))\n")
+    (bv_hdr ^ "(assert (bvsle y x))\n");
+  check_parse_ok ~name:"bv-all-ops" (bv_hdr ^ "(assert (bvuge (bvadd x #x01) y))\n");
+  (* width errors are parse-time failures (Malformed), fail-closed *)
+  check_malformed
+    ~name:"bv-width-mismatch"
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (declare-const y (_ BitVec 4))\n\
+     (assert (= (bvadd x y) x))\n";
+  check_malformed
+    ~name:"bv-extract-oob"
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (assert (= ((_ extract 8 0) x) x))\n";
+  check_malformed
+    ~name:"bv-compare-non-bv"
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (declare-const n Int)\n\
+     (assert (bvult x n))\n";
+  check_malformed
+    ~name:"bv-bad-width-sort"
+    "(set-logic QF_UFBV)\n(declare-const x (_ BitVec 0))\n(assert (= x x))\n"
+;;
+
 let () =
   print_endline "== round-trip A (print -> parse), programmatic sessions ==";
   sessions ();
+  print_endline "== bitvectors (round-trip + sugar + width errors) ==";
+  bv_cases ();
   print_endline
     "== naming classes (reserved words quoted; operators/sorts/empty refused) ==";
   naming_classes ();

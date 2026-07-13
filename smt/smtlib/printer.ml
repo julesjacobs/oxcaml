@@ -349,6 +349,7 @@ type decls =
   { sorts : Symbol.t list (* uninterpreted sort symbols, first-use order *)
   ; datatypes : Symbol.t list (* datatype sort symbols, first-use order *)
   ; funs : Symbol.t list (* function/const symbols, first-use order *)
+  ; uses_bitvec : bool (* any bitvector sort/term appears — selects a BV logic label *)
   }
 
 let collect_decls dts arrs env assertions =
@@ -358,12 +359,15 @@ let collect_decls dts arrs env assertions =
   let sorts = ref [] in
   let datatypes = ref [] in
   let funs = ref [] in
+  let uses_bitvec = ref false in
   let div_sym = Env.div_sym env in
   let mod_sym = Env.mod_sym env in
   let rec visit_sort (s : Sort.t) =
     match s with
-    (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, like Bool/Int. *)
-    | Sort.Bool | Sort.Int _ | Sort.BitVec _ -> ()
+    | Sort.Bool | Sort.Int _ -> ()
+    (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, but its presence
+       selects a bitvector logic label. *)
+    | Sort.BitVec _ -> uses_bitvec := true
     (* An [(Array I E)] sort is built-in — no [declare-sort] of its own — but its index
        and element sorts must still be collected so an uninterpreted [I]/[E] is declared. *)
     | Sort.Array (index, element) ->
@@ -433,6 +437,7 @@ let collect_decls dts arrs env assertions =
     match t.node with
     | Bool_const _ | Int_const _ -> ()
     | App (sym, args) ->
+      if Bv.is_bv_sym sym then uses_bitvec := true;
       register_fun sym;
       Iarr.iter visit args
     | Arith l -> Iarr.iter (fun (t, _) -> visit t) l.coeffs
@@ -447,7 +452,11 @@ let collect_decls dts arrs env assertions =
       visit b
   in
   List.iter visit assertions;
-  { sorts = List.rev !sorts; datatypes = List.rev !datatypes; funs = List.rev !funs }
+  { sorts = List.rev !sorts
+  ; datatypes = List.rev !datatypes
+  ; funs = List.rev !funs
+  ; uses_bitvec = !uses_bitvec
+  }
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -495,7 +504,7 @@ let print_session
     Buffer.add_string buf s;
     Buffer.add_char buf '\n'
   in
-  let { sorts; datatypes = dt_syms; funs } =
+  let { sorts; datatypes = dt_syms; funs; uses_bitvec } =
     collect_decls datatypes arrays env assertions
   in
   let render = render_family datatypes arrays in
@@ -511,15 +520,20 @@ let print_session
      omit LIA, so a strict consumer (the Lean oracle) would reject the otherwise-faithful
      dump. The superset is always sound (a pure-DT problem is in QF_UFDTLIA), matching the
      base's always-superset convention. *)
-  (* Logic label: a datatype session needs the DT superset; an array session needs one
-     admitting arrays ([QF_AUFLIA], the broad UF+arrays+LIA superset our reader accepts);
-     otherwise the base QF_UFLIA. Always a superset, hence sound. *)
-  line
-    (if dt_syms <> []
-     then "(set-logic QF_UFDTLIA)"
-     else if not (Array_defs.is_empty arrays)
-     then "(set-logic QF_AUFLIA)"
-     else "(set-logic QF_UFLIA)");
+  (* Logic label (always a superset of the query's theories, hence sound): a datatype
+     session needs the DT superset; a bitvector session [QF_UFBV]; an array session
+     [QF_AUFLIA] (the broad UF+arrays+LIA superset our reader accepts); otherwise the base
+     [QF_UFLIA]. Datatypes take precedence in the (not-yet-produced) mixed cases. *)
+  let logic =
+    if dt_syms <> []
+    then "QF_UFDTLIA"
+    else if uses_bitvec
+    then "QF_UFBV"
+    else if not (Array_defs.is_empty arrays)
+    then "QF_AUFLIA"
+    else "QF_UFLIA"
+  in
+  line (Printf.sprintf "(set-logic %s)" logic);
   List.iter
     (fun sym ->
        line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))

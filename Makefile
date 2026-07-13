@@ -411,7 +411,7 @@ stage0-test:
 smtlib-test:
 	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
-	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens tests/arr-goldens
+	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens tests/arr-goldens tests/bv-goldens
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
