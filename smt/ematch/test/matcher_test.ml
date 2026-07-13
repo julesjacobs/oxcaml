@@ -23,6 +23,7 @@ module Lemma = Oxsmt_ematch.Lemma
 module Manager = Oxsmt_ematch.Manager
 module Matcher = Oxsmt_ematch.Matcher
 module Egraph_view = Oxsmt_ematch.Egraph_view
+module Trigger = Oxsmt_ematch.Trigger
 module Sat = Oxsmt_solver.Sat
 
 let failures = ref 0
@@ -814,6 +815,93 @@ let e_provenance () =
       false
 ;;
 
+(* ================================================================== *)
+(* TRIGGER INFERENCE — Trigger.infer over hand-built lemma bodies. *)
+(* ================================================================== *)
+
+let mk_qvars sc ~id n =
+  Array.init n (fun k -> Qvar.mint sc.cap sc.env sc.ctx ~lemma_id:id ~index:k Sort.int)
+;;
+
+(* One conjunctive multi-trigger, as a Term set (order-independent Term.equal membership). *)
+let trigger_is triggers expected =
+  match triggers with
+  | [ conj ] ->
+    List.length conj = List.length expected
+    && List.for_all (fun e -> List.exists (Term.equal e) conj) expected
+  | _ -> false
+;;
+
+(* TI-SINGLE: body f(x) > 0 -> trigger f(x) (the only UF app covering x). *)
+let ti_single () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "f" int_to_int in
+  let qv = mk_qvars sc ~id:0 1 in
+  let x = Qvar.to_term qv.(0) in
+  let fx = Context.app sc.ctx f [ x ] in
+  let body = Context.gt sc.ctx fx (Context.int_const sc.ctx 0) in
+  check "TI-SINGLE: infers [f(x)]" (trigger_is (Trigger.infer ~qvars:qv body) [ fx ])
+;;
+
+(* TI-NESTED: body f(g(x)) > 0 -> the SMALLEST covering subterm g(x), not f(g(x)). *)
+let ti_nested () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "f" int_to_int in
+  let g = Env.declare_fun sc.env "g" int_to_int in
+  let qv = mk_qvars sc ~id:0 1 in
+  let x = Qvar.to_term qv.(0) in
+  let gx = Context.app sc.ctx g [ x ] in
+  let body =
+    Context.gt sc.ctx (Context.app sc.ctx f [ gx ]) (Context.int_const sc.ctx 0)
+  in
+  check
+    "TI-NESTED: infers smallest [g(x)] not [f(g(x))]"
+    (trigger_is (Trigger.infer ~qvars:qv body) [ gx ])
+;;
+
+(* TI-MULTI: body f(x) = g(y) -> conjunctive trigger {f(x), g(y)} covering both qvars. *)
+let ti_multi () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "f" int_to_int in
+  let g = Env.declare_fun sc.env "g" int_to_int in
+  let qv = mk_qvars sc ~id:0 2 in
+  let x = Qvar.to_term qv.(0)
+  and y = Qvar.to_term qv.(1) in
+  let fx = Context.app sc.ctx f [ x ]
+  and gy = Context.app sc.ctx g [ y ] in
+  let body = Context.eq sc.ctx fx gy in
+  check
+    "TI-MULTI: infers {f(x), g(y)}"
+    (trigger_is (Trigger.infer ~qvars:qv body) [ fx; gy ])
+;;
+
+(* TI-UNREACHABLE: body x + 1 <= 0 — x occurs only inside arithmetic, no UF app covers it,
+   so no trigger is inferable ([]). This is the soundness-preserving no-fire case: the
+   lemma stays live and a ground Sat degrades to unknown, never a dropped forall. *)
+let ti_unreachable () =
+  let sc = scaffold () in
+  let qv = mk_qvars sc ~id:0 1 in
+  let x = Qvar.to_term qv.(0) in
+  let body =
+    Context.le
+      sc.ctx
+      (Context.add sc.ctx x (Context.int_const sc.ctx 1))
+      (Context.int_const sc.ctx 0)
+  in
+  check
+    "TI-UNREACHABLE: qvar only in arithmetic -> no trigger"
+    (Trigger.infer ~qvars:qv body = [])
+;;
+
+(* TI-ZERO: a zero-qvar body needs no trigger (the matcher fires it once regardless). *)
+let ti_zero () =
+  let sc = scaffold () in
+  let p = Env.declare_fun sc.env "p" (Rank.create [] Sort.bool) in
+  check
+    "TI-ZERO: zero-qvar -> no trigger"
+    (Trigger.infer ~qvars:[||] (Context.const sc.ctx p) = [])
+;;
+
 let () =
   ignore int_int_to_int;
   ignore int_to_bool;
@@ -838,6 +926,11 @@ let () =
   e_arith_trigger_reject ();
   e_loop ();
   e_provenance ();
+  ti_single ();
+  ti_nested ();
+  ti_multi ();
+  ti_unreachable ();
+  ti_zero ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

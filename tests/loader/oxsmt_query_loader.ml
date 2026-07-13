@@ -7,6 +7,7 @@
 module Session = Oxsmt_interface.Session
 module Parser = Oxsmt_smtlib_parser.Parser
 module Qvar = Oxsmt_ematch.Qvar
+module Trigger = Oxsmt_ematch.Trigger
 module Term = Oxsmt_core.Term
 
 (* Assert a parsed document into [s]: the ground batch through the W1b
@@ -41,6 +42,18 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
          ignore
            (Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
               let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
+              (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
+                lemma the file gave NO [:pattern] (the common case — the public quantified
+                sets rarely ship patterns) gets one inferred from the body (smallest
+                UF-application subterms covering every qvar). Purely a completeness
+                heuristic — every instance is a valid consequence, so it never changes a
+                verdict — and an unreachable qvar just yields no trigger (the lemma does
+                not fire; a live lemma then degrades to a sound [unknown]). Inference is a
+                front-end policy, NOT a change to [assert_lemma]: an explicit empty
+                trigger through the programmatic API still means "do not fire". *)
+              let triggers =
+                if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
+              in
               { Session.body; triggers })
             : Session.lemma))
       parsed.Parser.lemmas;

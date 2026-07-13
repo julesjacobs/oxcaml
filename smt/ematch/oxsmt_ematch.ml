@@ -15,3 +15,4 @@ module Lemma = Lemma
 module Manager = Manager
 module Egraph_view = Egraph_view
 module Matcher = Matcher
+module Trigger = Trigger
