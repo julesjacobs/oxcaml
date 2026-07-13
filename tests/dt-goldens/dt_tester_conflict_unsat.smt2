@@ -3,7 +3,7 @@
 ; end (round-trip coverage). Marked :status unknown until the datatype theory wires
 ; the tester/constructor-exclusivity rule.
 (set-logic QF_DT)
-(set-info :status unknown)
+(set-info :status unsat)
 (declare-datatypes ((nat 0)) (((succ (pred nat)) (zero))))
 (declare-const n nat)
 (assert (and ((_ is succ) n) ((_ is zero) n)))

@@ -154,6 +154,14 @@ val declare_sort : t -> string -> Oxsmt_core.Symbol.t
 val declare_fun : t -> string -> Oxsmt_core.Rank.t -> Oxsmt_core.Symbol.t
 val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
 
+(** [set_datatypes t defs] installs the algebraic-datatype shapes (GOALS Datatypes) the
+    front end parsed ({!Oxsmt_core.Datatype_defs}). The sorts/constructors/selectors/
+    testers must already be declared as ordinary symbols (via {!declare_sort}/
+    {!declare_fun}); this records their datatype structure. A non-empty [defs] installs
+    the DT theory (an e-graph client: EUF congruence + the datatype axioms) for this
+    session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}. *)
+val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
+
 (** [assert_term t phi] preprocesses [phi] (ADR-0003 §5 passes), clausifies the boolean
     skeleton, registers each theory atom with the combined theory, and adds the clauses to
     the current frame. [phi] must be Bool-sorted and built through {!context}. An

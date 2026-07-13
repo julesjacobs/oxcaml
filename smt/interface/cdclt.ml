@@ -38,6 +38,60 @@ module Combined =
   Oxsmt_combine.Combine.Combine (Oxsmt_combine.Uflia_router) (Oxsmt_euf.Euf_adapter)
     (Oxsmt_lia.Lia_adapter)
 
+module Dt = Oxsmt_dt.Dt
+
+(* The theory the seam drives. A problem that declares an algebraic datatype installs the
+   standalone DT theory (an e-graph client — EUF congruence + the datatype axioms; GOALS
+   Datatypes); every other problem keeps the Nelson-Oppen EUF+LIA {!Combined} stack,
+   byte-identical to before. The choice is made lazily at the first [intern] (after the
+   session's declarations, so the datatype registry is populated by then) and is total,
+   syntactic, assert-time — never a per-term relevance guess. *)
+type theory_impl =
+  | TCombined of Combined.t
+  | TDt of Dt.t
+
+let th_register impl a term =
+  match impl with
+  | TCombined th -> Combined.register_atom th a term
+  | TDt th -> Dt.register_atom th a term
+;;
+
+let th_assert impl lit =
+  match impl with
+  | TCombined th -> Combined.assert_lit th lit
+  | TDt th -> Dt.assert_lit th lit
+;;
+
+let th_check impl effort =
+  match impl with
+  | TCombined th -> Combined.check th effort
+  | TDt th -> Dt.check th effort
+;;
+
+let th_explain impl lit =
+  match impl with
+  | TCombined th -> Combined.explain th lit
+  | TDt th -> Dt.explain th lit
+;;
+
+let th_push impl =
+  match impl with
+  | TCombined th -> Combined.push th
+  | TDt th -> Dt.push th
+;;
+
+let th_pop impl n =
+  match impl with
+  | TCombined th -> Combined.pop th n
+  | TDt th -> Dt.pop th n
+;;
+
+let th_model impl =
+  match impl with
+  | TCombined th -> Combined.model th
+  | TDt th -> Dt.model th
+;;
+
 (* A model value for a symbol / table cell, in the eval-agnostic vocabulary the CLI
    renders to the §8 self-check sidecar grammar. [VUninterp i] is a 0-based ELEMENT INDEX
    into its uninterpreted sort's finite universe (NOT the raw e-graph class id —
@@ -76,7 +130,13 @@ type sort_card =
 exception Split_budget_exceeded
 
 type t =
-  { theory : Combined.t
+  { mutable theory : theory_impl option
+    (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
+         until then, and forever for a pure-propositional problem with no theory atom. *)
+  ; ctx : Context.t
+  ; env : Env.t
+  ; registry : Oxsmt_core.Datatype_defs.t ref
+    (* datatype declarations (shared ref with Session); empty for a non-DT problem *)
   ; sat : Sat.t
   ; alloc : Atom.allocator
   ; v2a : (Sat.var, Atom.t) Hashtbl.t (* SAT var -> theory atom (theory atoms only) *)
@@ -125,10 +185,24 @@ let rec collect t (term : Term.t) =
 (* Get-or-create the SAT var for a theory-atom [term], registering it with the combined
    theory on first sight (CONTRACT-REG). [split] flags an atom minted mid-solve from a
    [Split], whose e-node registration may later be truncated by a backjump. *)
+let ensure_theory t =
+  match t.theory with
+  | Some impl -> impl
+  | None ->
+    let impl =
+      if Oxsmt_core.Datatype_defs.is_empty !(t.registry)
+      then TCombined (Combined.create t.ctx t.env)
+      else TDt (Dt.create t.ctx t.env !(t.registry))
+    in
+    t.theory <- Some impl;
+    impl
+;;
+
 let intern t ~split term =
   match Term.Table.find_opt t.t2v term with
   | Some v -> v
   | None ->
+    let impl = ensure_theory t in
     let v = Sat.new_var t.sat in
     let a = Atom.fresh t.alloc in
     Term.Table.replace t.t2v term v;
@@ -137,7 +211,7 @@ let intern t ~split term =
     Atom.Table.replace t.a2v a v;
     if split then Hashtbl.replace t.is_split v ();
     collect t term;
-    Combined.register_atom t.theory a term;
+    th_register impl a term;
     v
 ;;
 
@@ -147,11 +221,14 @@ let intern_atom t term = intern t ~split:false term
 (* Keep one theory frame per SAT decision level (I push lazily as levels open; a dummy
    assumption level can jump the level by more than one, hence the loop). *)
 let sync_level t =
-  let d = Sat.decision_level t.sat in
-  while t.level < d do
-    t.level <- t.level + 1;
-    Combined.push t.theory
-  done
+  match t.theory with
+  | None -> () (* no theory installed (pure-propositional): no frames to push *)
+  | Some impl ->
+    let d = Sat.decision_level t.sat in
+    while t.level < d do
+      t.level <- t.level + 1;
+      th_push impl
+    done
 ;;
 
 let on_assign t l =
@@ -160,18 +237,20 @@ let on_assign t l =
   match Hashtbl.find_opt t.v2a v with
   | None -> () (* an aux / selector / boolean-variable literal: not a theory atom *)
   | Some a ->
+    let impl = ensure_theory t in
     (* a Split-minted atom's e-nodes may have been truncated by a pop; re-register
        (idempotent) so the child engines hold it before we assert. *)
-    if Hashtbl.mem t.is_split v
-    then Combined.register_atom t.theory a (Hashtbl.find t.v2term v);
-    Combined.assert_lit t.theory (Lit.make a (sign_lit l))
+    if Hashtbl.mem t.is_split v then th_register impl a (Hashtbl.find t.v2term v);
+    th_assert impl (Lit.make a (sign_lit l))
 ;;
 
 let on_backtrack t ~level =
   let n = t.level - level in
   if n > 0
   then (
-    Combined.pop t.theory n;
+    (match t.theory with
+     | Some impl -> th_pop impl n
+     | None -> ());
     t.level <- level)
 ;;
 
@@ -189,46 +268,57 @@ let rec split_lit t ~sign (tm : Term.t) =
 ;;
 
 let check t ~final =
-  if final
-  then (
-    (* effort (board #60): one seam Final-round. Ticked before the (possibly expensive)
-       complete theory check so an exhausted budget cuts off here; a Final that returns a
-       [Split] is the wired realization of a B&B node, so this subsumes "B&B nodes". May
-       raise [Budget.Exceeded], which unwinds [Sat.solve] like [Split_budget_exceeded]. *)
-    Budget.tick t.budget;
-    match Combined.check t.theory Theory.Final with
-    | Theory.Sat ->
-      t.last_model <- Some (Combined.model t.theory);
-      Sat.T_consistent []
-    | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
-    | Theory.Conflict e ->
-      Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
-    | Theory.Split terms ->
-      t.splits <- t.splits + 1;
-      if t.splits > t.split_budget then raise Split_budget_exceeded;
-      Sat.T_lemma [ List.map (split_lit t ~sign:true) terms ])
-  else (
-    match Combined.check t.theory Theory.Propagate with
-    | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
-    | Theory.Conflict e ->
-      Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
-    | Theory.Sat | Theory.Split _ ->
-      (* neither is legal at Propagate effort (THEORY contract); the combinator never
-         returns them here, but stay total and treat as "nothing to add". *)
-      Sat.T_consistent [])
+  match t.theory with
+  | None ->
+    Sat.T_consistent [] (* no theory installed: propositional-only, nothing to add *)
+  | Some impl ->
+    if final
+    then (
+      (* effort (board #60): one seam Final-round. Ticked before the (possibly expensive)
+         complete theory check so an exhausted budget cuts off here; a Final that returns
+         a [Split] is the wired realization of a B&B node, so this subsumes "B&B nodes".
+         May raise [Budget.Exceeded], which unwinds [Sat.solve] like
+         [Split_budget_exceeded]. *)
+      Budget.tick t.budget;
+      match th_check impl Theory.Final with
+      | Theory.Sat ->
+        t.last_model <- Some (th_model impl);
+        Sat.T_consistent []
+      | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
+      | Theory.Conflict e ->
+        Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
+      | Theory.Split terms ->
+        t.splits <- t.splits + 1;
+        if t.splits > t.split_budget then raise Split_budget_exceeded;
+        Sat.T_lemma [ List.map (split_lit t ~sign:true) terms ])
+    else (
+      match th_check impl Theory.Propagate with
+      | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
+      | Theory.Conflict e ->
+        Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
+      | Theory.Sat | Theory.Split _ ->
+        (* neither is legal at Propagate effort (THEORY contract); the theory never
+           returns them here, but stay total and treat as "nothing to add". *)
+        Sat.T_consistent [])
 ;;
 
 let explain t l =
   let a = Hashtbl.find t.v2a (Sat.var_of_lit l) in
-  let e = Combined.explain t.theory (Lit.make a (sign_lit l)) in
+  let impl = ensure_theory t in
+  let e = th_explain impl (Lit.make a (sign_lit l)) in
   List.map (satlit_of_lit t) e.Explanation.premises
 ;;
 
-(* Install the combined theory into a pristine [sat] (no clauses, empty trail — the seam's
-   set_theory contract). Must be called before any clause is added. *)
-let create ctx env sat ~split_budget ~budget =
+(* Install the seam callbacks into a pristine [sat] (no clauses, empty trail — the seam's
+   set_theory contract). Must be called before any clause is added. The theory itself is
+   created lazily at the first [intern] (see {!ensure_theory}) from the datatype
+   [registry] (empty => the EUF+LIA stack), so a non-datatype session is byte-identical. *)
+let create ctx env sat ~split_budget ~budget ~registry =
   let t =
-    { theory = Combined.create ctx env
+    { theory = None
+    ; ctx
+    ; env
+    ; registry
     ; sat
     ; alloc = Atom.create_allocator ()
     ; v2a = Hashtbl.create 256
@@ -552,10 +642,16 @@ let model t =
    matcher reads the congruence closure without growing it (R6). Rebuilt per [round] by
    [Session], since the e-graph changes as instances are asserted. *)
 let egraph_view t : Oxsmt_ematch.Egraph_view.t =
-  let cs = Combined.congruence_state t.theory in
-  { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)
-  ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
-  ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
-  ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
-  }
+  match t.theory with
+  | Some (TCombined th) ->
+    let cs = Combined.congruence_state th in
+    { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)
+    ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
+    ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
+    ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
+    }
+  | Some (TDt _) | None ->
+    (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype (or
+       theory-free) session never reaches here (no quantified lemmas in that fragment). *)
+    failwith "Cdclt.egraph_view: e-graph view is only available for the EUF+LIA theory"
 ;;

@@ -30,8 +30,9 @@ LOGS     ?= ../logs
 STATS    ?= $(LOGS)/stats
 CASES    ?= tests/cases
 FIXTURES ?= tests/harness/fixtures
+DT_GOLDENS ?= tests/dt-goldens
 HARNESS_ARGS := --solver $(SOLVER) --eval $(EVAL) --dir $(CASES) --dir $(FIXTURES) \
-                --logs $(LOGS) --stats $(STATS)
+                --dir $(DT_GOLDENS) --logs $(LOGS) --stats $(STATS)
 
 # SAT bench corpus. Defaults to the uf50/uuf50 families (the M1 verdict-agreement
 # target, solved in seconds); GLOBs at runtime and tolerates absence. Override to

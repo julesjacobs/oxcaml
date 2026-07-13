@@ -44,6 +44,10 @@ type datatype =
 
 val empty : t
 
+(** [true] iff no datatype has been declared — the DT theory is not installed in this
+    case, so a non-datatype problem is unaffected. *)
+val is_empty : t -> bool
+
 (** [add t datatype] registers [datatype] and all its constructor/selector/tester symbols,
     building the reverse indices. Raises [Invalid_argument] on a duplicate datatype sort
     symbol or a symbol already registered in another role (a construction bug — every

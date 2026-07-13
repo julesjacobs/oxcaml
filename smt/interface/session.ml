@@ -62,6 +62,11 @@ type t =
          returned by [Session.env]) and threaded only to the legitimate minters —
          preprocessing and the lemma tier's [Qvar.mint]. *)
   ; ctx : Context.t
+  ; registry : Oxsmt_core.Datatype_defs.t ref
+    (* datatype declarations (GOALS Datatypes); empty unless [set_datatypes] was called.
+         A ref SHARED with [cdclt] (same ref), so a [set_datatypes] after [create] is
+         visible when cdclt reads it lazily at the first theory-atom intern to pick the
+         standalone DT theory over the EUF+LIA combined stack. *)
   ; pp : Preprocess.t
   ; sat : Sat.t
   ; cdclt : Cdclt.t
@@ -122,12 +127,16 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
      / interactive / [make test] path is byte-identical (the count is never printed). *)
   let budget = Budget.create ?max:max_effort () in
-  (* Install the theory on the pristine core BEFORE any clause (pristine-attach). *)
-  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget in
+  let registry = ref Oxsmt_core.Datatype_defs.empty in
+  (* Install the seam callbacks on the pristine core BEFORE any clause (pristine-attach);
+     the theory itself is chosen lazily from [registry] at the first intern. The ref is
+     shared with [cdclt]. *)
+  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget ~registry in
   let base = Sat.new_var sat in
   { env
   ; cap
   ; ctx
+  ; registry
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
@@ -172,6 +181,13 @@ let declare_fun t name rank =
 ;;
 
 let declare_const t name sort = declare_fun t name (Rank.create [] sort)
+
+(* Install the algebraic-datatype shapes (GOALS Datatypes) the front end parsed. The
+   caller has already declared the sorts/constructors/selectors/testers as ordinary
+   symbols in {!env}; this records their datatype structure into the shared registry ref,
+   which flips the session onto the DT theory at its first check-sat. Must precede
+   [assert_term] (a datatype must be known before its atoms are interned). *)
+let set_datatypes t defs = t.registry := defs
 
 (* A theory atom is anything the propositional core cannot itself reason about: an order
    atom, a non-Bool equality, or an applied (arity >= 1) predicate. A nullary Bool [App]

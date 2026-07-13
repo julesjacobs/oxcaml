@@ -25,16 +25,21 @@ module Term = Oxsmt_core.Term
    loaded. *)
 let assert_all ?(presolve = true) s (parsed : Parser.t) =
   try
+    (* Install any datatype shapes BEFORE asserting, so the theory stack selects the DT
+       theory when the file declared a datatype (empty registry = no-op, byte-identical on
+       non-DT files). Single point for BOTH drivers + the cert gate (all route through
+       this loader), superseding the per-driver set_datatypes threading. *)
+    Session.set_datatypes s parsed.Parser.datatypes;
     if presolve
     then Session.assert_presolved s parsed.Parser.assertions
     else List.iter (Session.assert_term s) parsed.Parser.assertions;
     List.iter
       (fun (lem : Parser.lemma_src) ->
-         ignore
-           (Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
-              let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
-              { Session.body; triggers })
-            : Session.lemma))
+        ignore
+          (Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
+             let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
+             { Session.body; triggers })
+           : Session.lemma))
       parsed.Parser.lemmas;
     true
   with

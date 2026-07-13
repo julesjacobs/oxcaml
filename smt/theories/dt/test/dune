@@ -1,0 +1,15 @@
+; Unit tests for the DT theory (Oxsmt_dt): drives the THEORY surface directly and checks
+; the four datatype rules. Firewall: oxsmt_core + oxsmt_euf + oxsmt_dt only (I3).
+
+(executable
+ (name dt_test)
+ (modules dt_test)
+ (libraries oxsmt_core oxsmt_euf oxsmt_dt))
+
+; End-to-end tests through the shipped Session/CDCL(T) loop (covers the enum constructor
+; case split, which needs the real SAT core). Depends on oxsmt_interface as a test.
+
+(executable
+ (name dt_e2e_test)
+ (modules dt_e2e_test)
+ (libraries oxsmt_core oxsmt_dt oxsmt_interface))

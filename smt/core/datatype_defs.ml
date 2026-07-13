@@ -69,6 +69,7 @@ let add t dt =
   { by_sort; by_ctor; by_selector; by_tester }
 ;;
 
+let is_empty t = Id_map.is_empty t.by_sort
 let datatype_of_sort t sort_sym = Id_map.find_opt (id sort_sym) t.by_sort
 let constructor_of_sym t sym = Id_map.find_opt (id sym) t.by_ctor
 let selector_of_sym t sym = Id_map.find_opt (id sym) t.by_selector

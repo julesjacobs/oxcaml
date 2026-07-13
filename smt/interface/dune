@@ -11,5 +11,6 @@
   oxsmt_solver
   oxsmt_euf
   oxsmt_lia
+  oxsmt_dt
   oxsmt_combine
   oxsmt_ematch))

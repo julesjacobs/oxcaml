@@ -2,7 +2,7 @@
 ; forces a = b, contradicting (not (= a b)): unsat. Marked :status unknown until the
 ; datatype theory is wired.
 (set-logic QF_DT)
-(set-info :status unknown)
+(set-info :status unsat)
 (declare-datatypes ((nat 0)) (((succ (pred nat)) (zero))))
 (declare-const a nat)
 (declare-const b nat)

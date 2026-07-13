@@ -3,7 +3,7 @@
 ; constructors, so four distinct color values cannot exist: unsat. Marked :status
 ; unknown until the datatype theory (case splitting) is wired.
 (set-logic QF_DT)
-(set-info :status unknown)
+(set-info :status unsat)
 (declare-datatypes ((color 0)) (((red) (green) (blue))))
 (declare-const a color)
 (declare-const b color)
