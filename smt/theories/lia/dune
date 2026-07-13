@@ -2,6 +2,12 @@
 ; packages, no Base/Core, no ppx. The LIA decision procedure (Dutertre-de Moura simplex +
 ; branch-and-bound) lives here, over the frozen core term API only.
 
+; [rational_word] holds the sole [Obj] cast for the one-word {!Rational} representation
+; (Zarith [Z]-style immediate-or-pointer). It is [private_modules] so no consumer outside
+; this library can reach the unsafe cast — the [iarr_unsafe]/[atom_unsafe] discipline
+; (ADR-0003). [Rational] is its only client.
+
 (library
  (name oxsmt_lia)
+ (private_modules rational_word)
  (libraries oxsmt_core))

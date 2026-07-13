@@ -1,32 +1,46 @@
-(* Exact rationals, two-tier (core-bignum W2). See rational.mli.
+(* Exact rationals in ONE WORD (Zarith [Z]-style). See rational.mli.
 
    Soundness-critical property: no operation ever wraps silently and no value is ever
-   mis-represented. Values are one of:
-   - [Small { num; den }] — the pre-W2 native-int representation (den>0,
-     gcd(|num|,den)=1), whose arithmetic is byte-for-byte the old guarded-int code (the
-     FAST PATH); or
-   - [Big { num; den }] — arbitrary-precision {!Bigint} numerator/denominator (den>0,
-     gcd=1), used only when the native path would overflow int63.
+   mis-represented. A value ({!Rational_word.t}) is one of:
+   - an IMMEDIATE tagged [int] — an integer with den = 1 that fits int63; the tagged int
+     IS the numerator. This is the dominant LIA operand shape (integer coefficients,
+     bounds, δ-constants) and its arithmetic runs inline and ALLOCATION-FREE (the FAST
+     PATH); or
+   - a POINTER to a {!Rational_word.block} — every other value: a fraction (den <> 1), or
+     an integer/fraction whose components exceed int63. The block is arbitrary-precision
+     ({!Bigint} num/den, den > 0, gcd = 1).
 
    Tier discipline (core-bignum-review.md R1/R5):
-   - INTERNAL arithmetic ([add]/[sub]/[mul]/[div]/[neg]/[abs]/[compare]) NEVER raises: a
-     [Small ⊗ Small] op runs the guarded int primitives and, on [Overflow], PROMOTES both
-     operands to [Big] and redoes the WHOLE op in [Bigint] (no partial-Small intermediate
-     leaks), then normalizes and DEMOTES back to [Small] iff the result fits int63.
-   - CANONICAL-DEMOTE invariant: fits-int63 ⟺ [Small]. A [Big] never holds a value that
-     fits int63, so a value has ONE representation — [compare]/[equal] are value-correct.
-   - The only ops that return a native [int] — [num]/[floor]/[ceil] (and [den]) — are the
+   - INTERNAL arithmetic ([add]/[sub]/[mul]/[div]/[neg]/[abs]/[compare]) NEVER raises: an
+     immediate ⊗ immediate op runs the guarded int primitives and, on [Overflow], PROMOTES
+     both operands to [Bigint] and redoes the WHOLE op arbitrary-precision (no partial
+     native-int intermediate leaks), then normalizes and DEMOTES back to an immediate iff
+     the result is again a fits-int63 integer. Any op touching a block routes straight to
+     the [Bigint] path.
+   - CANONICAL-DEMOTE invariant: fits-int63-integer ⟺ immediate. A block NEVER holds a
+     value an immediate could hold, so a value has ONE physical form — [compare]/[equal]
+     are value-correct and [to_string] is well-defined. [bnorm_demote] is the sole
+     producer of canonical values and the place this invariant is established.
+   - The only ops that return a native [int] — [num]/[den]/[floor]/[ceil] — are the
      OUTPUT-PROJECTION boundary (R1). They raise [Overflow] iff the (integer) value does
      not fit int63. Callers at model-extraction / B&B branch-bound sinks keep degrading
-     that to [unknown] (retain the poison exactly there); they must NEVER truncate. *)
+     that to [unknown] (retain the poison exactly there); they must NEVER truncate.
 
-(* [Bigint] now lives in [oxsmt_core] (it also backs core term coefficients); name it
-   unqualified here as before. *)
+   This module is the SOLE client of {!Rational_word} and the ONLY place the
+   representation invariant lives; it never itself names [Obj]. Do NOT use polymorphic
+   [(=)] / [Stdlib.compare] / [Hashtbl.hash] / [Marshal] on [t] — the representation is
+   mixed (immediates interleaved with pointers), so structural [compare] mis-orders an
+   immediate against a block (see rational_word.mli); use [compare]/[equal] (value-based,
+   R5). *)
+
 module Bigint = Oxsmt_core.Bigint
+module W = Rational_word
 
 exception Overflow
 
-(* ---- guarded native-int primitives (unchanged; the promotion TRIGGER) ---- *)
+(* ---- guarded native-int primitives (the promotion TRIGGER; unchanged from the
+   pre-Zarith two-tier code, so the fast path is byte-for-byte the old guarded-int
+   arithmetic) ---- *)
 
 let add_int a b =
   let r = a + b in
@@ -55,33 +69,14 @@ let gcd a b = gcd_pos (abs_int a) (abs_int b)
 
 (* ---- the type ---- *)
 
-type small =
-  { num : int
-  ; den : int (* invariant: den > 0, gcd(|num|,den) = 1 *)
-  }
-
-type t =
-  | Small of small
-  | Big of
-      { num : Bigint.t
-      ; den : Bigint.t (* invariant: den > 0, gcd = 1, NOT both fitting int63 *)
-      }
+type t = W.t
 
 (* ---- constructors / normalization ---- *)
 
-(* Today's int normalize, RAISING [Overflow] on any int boundary (den<0 flip on min_int,
-   gcd abs on min_int). Wrapped as [Small]; the caller's try/promote arm handles the
-   raise. *)
-let small_make_raise num den =
-  let num, den = if den < 0 then neg_int num, neg_int den else num, den in
-  let g = gcd num den in
-  let g = if g = 0 then 1 else g in
-  Small { num = num / g; den = den / g }
-;;
-
-(* Normalize a Bigint fraction (force den>0, divide by gcd) then DEMOTE to [Small] iff
-   both fit int63. [d <> 0] required. This is the sole producer of [Big] values, and the
-   place the canonical-demote invariant (fits ⟺ Small) is established. *)
+(* Normalize a Bigint fraction (force den>0, divide by gcd) then DEMOTE: an integer that
+   fits int63 becomes the IMMEDIATE form, everything else a canonical block. [d <> 0]
+   required. This is the sole producer of values and the place the canonical-demote
+   invariant (fits-int63-integer ⟺ immediate) is established. *)
 let bnorm_demote num den =
   let num, den =
     if Bigint.sign den < 0 then Bigint.neg num, Bigint.neg den else num, den
@@ -89,23 +84,44 @@ let bnorm_demote num den =
   let g = Bigint.gcd num den in
   let num = fst (Bigint.divmod num g) in
   let den = fst (Bigint.divmod den g) in
-  match Bigint.to_int_opt num, Bigint.to_int_opt den with
-  | Some n, Some d -> Small { num = n; den = d }
-  | _ -> Big { num; den }
+  if Bigint.equal den Bigint.one
+  then (
+    match Bigint.to_int_opt num with
+    | Some n -> W.of_int_unchecked n
+    | None -> W.of_block { num; den })
+  else W.of_block { num; den }
 ;;
 
-let to_big = function
-  | Small a -> Bigint.of_int a.num, Bigint.of_int a.den
-  | Big b -> b.num, b.den
+(* The native-int normalize, RAISING [Overflow] on any int boundary (den<0 flip on
+   min_int, gcd abs on min_int). den = 1 collapses to the immediate; a genuine small
+   fraction (den > 1, already reduced with den > 0) is a canonical block. The caller's
+   try/promote arm handles the raise. *)
+let small_make_raise num den =
+  let num, den = if den < 0 then neg_int num, neg_int den else num, den in
+  let g = gcd num den in
+  let g = if g = 0 then 1 else g in
+  let n = num / g
+  and d = den / g in
+  if d = 1
+  then W.of_int_unchecked n
+  else W.of_block { num = Bigint.of_int n; den = Bigint.of_int d }
 ;;
 
-let zero = Small { num = 0; den = 1 }
-let one = Small { num = 1; den = 1 }
-let of_int n = Small { num = n; den = 1 }
+let to_big x =
+  if W.is_immediate x
+  then Bigint.of_int (W.to_int_unchecked x), Bigint.one
+  else (
+    let b = W.to_block x in
+    b.num, b.den)
+;;
 
-(* Integer from an arbitrary-precision [Bigint] (den = 1); demotes to [Small] iff it fits
-   int63 (canonical-demote invariant). The ingestion path for core term coefficients that
-   exceed int63. *)
+let zero = W.of_int_unchecked 0
+let one = W.of_int_unchecked 1
+let of_int n = W.of_int_unchecked n
+
+(* Integer from an arbitrary-precision [Bigint] (den = 1); demotes to the immediate form
+   iff it fits int63 (canonical-demote invariant). The ingestion path for core term
+   coefficients that exceed int63. *)
 let of_bigint n = bnorm_demote n Bigint.one
 
 let make num den =
@@ -116,46 +132,39 @@ let make num den =
 
 let of_frac num den = make num den
 
-let num = function
-  | Small a -> a.num
-  | Big b ->
-    (match Bigint.to_int_opt b.num with
-     | Some n -> n
-     | None -> raise Overflow)
+let num x =
+  if W.is_immediate x
+  then W.to_int_unchecked x
+  else (
+    match Bigint.to_int_opt (W.to_block x).num with
+    | Some n -> n
+    | None -> raise Overflow)
 ;;
 
-let den = function
-  | Small a -> a.den
-  | Big b ->
-    (match Bigint.to_int_opt b.den with
-     | Some d -> d
-     | None -> raise Overflow)
+let den x =
+  if W.is_immediate x
+  then 1
+  else (
+    match Bigint.to_int_opt (W.to_block x).den with
+    | Some d -> d
+    | None -> raise Overflow)
 ;;
 
-let is_zero = function
-  | Small a -> a.num = 0
-  | Big b -> Bigint.is_zero b.num (* unreachable: zero fits, so it is always Small *)
+(* Zero is the fits-int63 integer 0, hence always the immediate 0; a block is never zero. *)
+let is_zero x = W.is_immediate x && W.to_int_unchecked x = 0
+let is_int x = W.is_immediate x || Bigint.equal (W.to_block x).den Bigint.one
+
+let sign x =
+  if W.is_immediate x
+  then compare (W.to_int_unchecked x) 0
+  else Bigint.sign (W.to_block x).num
 ;;
 
-let is_int = function
-  | Small a -> a.den = 1
-  | Big b -> Bigint.equal b.den Bigint.one
-;;
-
-let sign = function
-  | Small a -> compare a.num 0
-  | Big b -> Bigint.sign b.num
-;;
-
-(* ---- Big-tier arithmetic: cross-multiply then normalize+demote. NOTE: an earlier
-   revision cross-cancelled gcd(den,den) before the cross-multiply (review R9, to bound
-   intermediate size). Measurement (logs/core-bignum-measurement.md) shows Big values on
-   the bucket-1 population stay <= 5 limbs (~155 bits) — the demote-back keeps them small
-   — so intermediates never balloon, and the extra gcd(s) per op that cross-cancel adds
-   dominated the cost (coef-size-100 spent 6.1M gcds). Removed; [bnorm_demote]'s single
-   normalization keeps every result canonical, and Bigint's native-int gcd/divmod fast
-   path (<= 2 limbs) makes it cheap. R9's huge-intermediate premise is not borne out on
-   this population; revisit only if a future file shows a real growth tail. ---- *)
+(* ---- Big-tier arithmetic: cross-multiply then normalize+demote. As in the pre-Zarith
+   code, [bnorm_demote]'s single normalization keeps every result canonical; Bigint's
+   native-int gcd/divmod fast path (<= 2 limbs) makes the small-magnitude cases cheap, so
+   no cross-cancellation before the cross-multiply is warranted on this population (review
+   R9; logs/core-bignum-measurement.md). ---- *)
 
 let big_add (an, ad) (bn, bd) =
   bnorm_demote (Bigint.add (Bigint.mul an bd) (Bigint.mul bn ad)) (Bigint.mul ad bd)
@@ -177,145 +186,139 @@ let big_compare (an, ad) (bn, bd) =
   Bigint.compare (Bigint.mul an bd) (Bigint.mul bn ad)
 ;;
 
-(* ---- public arithmetic: Small fast path + whole-op promotion ---- *)
+(* ---- public arithmetic: immediate (integer) fast path + whole-op promotion.
 
-(* Integer fast path (both operands den=1): the result denominator is 1 and gcd(n,1)=1, so
-   the cross-multiply and the [small_make_raise] gcd normalization are both unnecessary —
-   the value is already canonical. This is the dominant LIA operand shape (integer
-   coefficients, bounds, δ-constants); it is a pure special case of the general formula,
-   so the produced [Small] is bit-identical to the general path (guarded by the property /
-   brute-force / differential oracles). Overflow still promotes to [Big] exactly. *)
+   When both operands are immediate, both denominators are 1, so the result denominator is
+   1 and the value is already canonical (gcd(n,1)=1): the cross-multiply and gcd
+   normalization are unnecessary and the arithmetic is a single guarded native op with NO
+   allocation. This is a pure special case of the general formula, so the produced value
+   is bit-identical to the Bigint path (guarded by the differential oracle). Overflow
+   promotes to a block exactly. Any op with a block operand routes straight to the Bigint
+   path. ---- *)
 
 let add x y =
-  match x, y with
-  | Small a, Small b when a.den = 1 && b.den = 1 ->
-    (try Small { num = add_int a.num b.num; den = 1 } with
-     | Overflow -> big_add (to_big x) (to_big y))
-  | Small a, Small b ->
-    (try
-       let n = add_int (mul_int a.num b.den) (mul_int b.num a.den) in
-       small_make_raise n (mul_int a.den b.den)
-     with
-     | Overflow -> big_add (to_big x) (to_big y))
-  | _ -> big_add (to_big x) (to_big y)
+  if W.is_immediate x && W.is_immediate y
+  then (
+    try W.of_int_unchecked (add_int (W.to_int_unchecked x) (W.to_int_unchecked y)) with
+    | Overflow -> big_add (to_big x) (to_big y))
+  else big_add (to_big x) (to_big y)
 ;;
 
 let sub x y =
-  match x, y with
-  | Small a, Small b when a.den = 1 && b.den = 1 ->
-    (try Small { num = sub_int a.num b.num; den = 1 } with
-     | Overflow -> big_sub (to_big x) (to_big y))
-  | Small a, Small b ->
-    (try
-       let n = sub_int (mul_int a.num b.den) (mul_int b.num a.den) in
-       small_make_raise n (mul_int a.den b.den)
-     with
-     | Overflow -> big_sub (to_big x) (to_big y))
-  | _ -> big_sub (to_big x) (to_big y)
+  if W.is_immediate x && W.is_immediate y
+  then (
+    try W.of_int_unchecked (sub_int (W.to_int_unchecked x) (W.to_int_unchecked y)) with
+    | Overflow -> big_sub (to_big x) (to_big y))
+  else big_sub (to_big x) (to_big y)
 ;;
 
 let mul x y =
-  match x, y with
-  | Small a, Small b when a.den = 1 && b.den = 1 ->
-    (try Small { num = mul_int a.num b.num; den = 1 } with
-     | Overflow -> big_mul (to_big x) (to_big y))
-  | Small a, Small b ->
-    (try small_make_raise (mul_int a.num b.num) (mul_int a.den b.den) with
-     | Overflow -> big_mul (to_big x) (to_big y))
-  | _ -> big_mul (to_big x) (to_big y)
+  if W.is_immediate x && W.is_immediate y
+  then (
+    try W.of_int_unchecked (mul_int (W.to_int_unchecked x) (W.to_int_unchecked y)) with
+    | Overflow -> big_mul (to_big x) (to_big y))
+  else big_mul (to_big x) (to_big y)
 ;;
 
 let div x y =
   if is_zero y then invalid_arg "Rational.div: division by zero";
-  match x, y with
-  | Small a, Small b ->
-    (try small_make_raise (mul_int a.num b.den) (mul_int a.den b.num) with
-     | Overflow -> big_div (to_big x) (to_big y))
-  | _ -> big_div (to_big x) (to_big y)
+  if W.is_immediate x && W.is_immediate y
+  then (
+    (* (a/1) / (b/1) = a/b, normalized; b <> 0. *)
+    try small_make_raise (W.to_int_unchecked x) (W.to_int_unchecked y) with
+    | Overflow -> big_div (to_big x) (to_big y))
+  else big_div (to_big x) (to_big y)
 ;;
 
-let neg = function
-  | Small a as x ->
-    (try Small { num = neg_int a.num; den = a.den } with
-     | Overflow ->
-       let n, d = to_big x in
-       bnorm_demote (Bigint.neg n) d)
-  | Big b -> Big { num = Bigint.neg b.num; den = b.den }
+let neg x =
+  if W.is_immediate x
+  then (
+    try W.of_int_unchecked (neg_int (W.to_int_unchecked x)) with
+    | Overflow ->
+      let n, d = to_big x in
+      bnorm_demote (Bigint.neg n) d)
+  else (
+    (* Negation preserves the block invariant: same magnitude and denominator, so a block
+       stays a (non-immediate) block. *)
+    let b = W.to_block x in
+    W.of_block { num = Bigint.neg b.num; den = b.den })
 ;;
 
-let abs = function
-  | Small a as x ->
-    (try Small { num = abs_int a.num; den = a.den } with
-     | Overflow ->
-       let n, d = to_big x in
-       bnorm_demote (Bigint.abs n) d)
-  | Big b -> Big { num = Bigint.abs b.num; den = b.den }
+let abs x =
+  if W.is_immediate x
+  then (
+    try W.of_int_unchecked (abs_int (W.to_int_unchecked x)) with
+    | Overflow ->
+      let n, d = to_big x in
+      bnorm_demote (Bigint.abs n) d)
+  else (
+    (* abs preserves the block invariant (magnitude and denominator unchanged). *)
+    let b = W.to_block x in
+    W.of_block { num = Bigint.abs b.num; den = b.den })
 ;;
 
-(* Value-based (R5/R6): never raises; promotes to a common tier on Small overflow. Integer
-   fast path (both den=1): a direct [Int.compare a.num b.num] — no cross-multiply, so no
-   overflow possible and no trap frame. Identical result to the general path
-   ([Int.compare (a.num*1) (b.num*1)]). *)
+(* Value-based (R5/R6): never raises; promotes to a common tier on native overflow. Both
+   immediate (integer den=1): a direct [Int.compare] — no cross-multiply, so no overflow
+   and no trap frame; identical to the general path ([Int.compare (a*1) (b*1)]). Anything
+   with a block cross-multiplies in Bigint. *)
 let compare x y =
-  match x, y with
-  | Small a, Small b when a.den = 1 && b.den = 1 -> Int.compare a.num b.num
-  | Small a, Small b ->
-    (try Int.compare (mul_int a.num b.den) (mul_int b.num a.den) with
-     | Overflow -> big_compare (to_big x) (to_big y))
-  | _ -> big_compare (to_big x) (to_big y)
+  if W.is_immediate x && W.is_immediate y
+  then Int.compare (W.to_int_unchecked x) (W.to_int_unchecked y)
+  else big_compare (to_big x) (to_big y)
 ;;
 
-(* Value-based equality. Small/Small is a fast structural compare (canonical ⇒ structural
-   = value equality); anything else routes through the value-based [compare], so a (bug-)
-   missed demotion is a perf wart, never a wrong [is_zero]/pivot/Farkas result. *)
+(* Value-based equality. Both immediate is a direct int equality; anything else routes
+   through the value-based [compare] (an immediate and a block are never value-equal —
+   canonicity — so this is correct and a bug-missed demotion would be a perf wart, never a
+   wrong [is_zero]/pivot/Farkas result). *)
 let equal x y =
-  match x, y with
-  | Small a, Small b -> a.num = b.num && a.den = b.den
-  | _ -> compare x y = 0
+  if W.is_immediate x && W.is_immediate y
+  then W.to_int_unchecked x = W.to_int_unchecked y
+  else compare x y = 0
 ;;
 
 let min x y = if compare x y <= 0 then x else y
 let max x y = if compare x y >= 0 then x else y
 
 (* ---- output projection to native int (R1): raise [Overflow] iff the integer value does
-   not fit int63; NEVER truncate. ---- *)
+   not fit int63; NEVER truncate. An immediate is a fits-int63 integer, so its floor/ceil
+   is itself and never overflows. ---- *)
 
-let floor = function
-  | Small a ->
-    let q = a.num / a.den
-    and r = a.num mod a.den in
-    if r < 0 then sub_int q 1 else q
-  | Big b ->
+let floor x =
+  if W.is_immediate x
+  then W.to_int_unchecked x
+  else (
+    let b = W.to_block x in
     let q, r = Bigint.divmod b.num b.den in
     let q = if Bigint.sign r < 0 then Bigint.sub q Bigint.one else q in
-    (match Bigint.to_int_opt q with
-     | Some n -> n
-     | None -> raise Overflow)
+    match Bigint.to_int_opt q with
+    | Some n -> n
+    | None -> raise Overflow)
 ;;
 
-let ceil = function
-  | Small a ->
-    let q = a.num / a.den
-    and r = a.num mod a.den in
-    if r > 0 then add_int q 1 else q
-  | Big b ->
+let ceil x =
+  if W.is_immediate x
+  then W.to_int_unchecked x
+  else (
+    let b = W.to_block x in
     let q, r = Bigint.divmod b.num b.den in
     let q = if Bigint.sign r > 0 then Bigint.add q Bigint.one else q in
-    (match Bigint.to_int_opt q with
-     | Some n -> n
-     | None -> raise Overflow)
+    match Bigint.to_int_opt q with
+    | Some n -> n
+    | None -> raise Overflow)
 ;;
 
 (* ---- decimal string (R7 cert grammar): "num" when den=1, else "num/den"; num/den each
-   in canonical decimal (no leading zeros, sign on numerator, den>0). Same grammar in both
-   tiers. ---- *)
-let to_string = function
-  | Small a ->
-    if a.den = 1 then string_of_int a.num else Printf.sprintf "%d/%d" a.num a.den
-  | Big b ->
+   in canonical decimal (no leading zeros, sign on numerator, den>0). An immediate renders
+   as a bare integer; a block den=1 (big integer) as a bare Bigint decimal. ---- *)
+let to_string x =
+  if W.is_immediate x
+  then string_of_int (W.to_int_unchecked x)
+  else (
+    let b = W.to_block x in
     if Bigint.equal b.den Bigint.one
     then Bigint.to_string b.num
-    else Printf.sprintf "%s/%s" (Bigint.to_string b.num) (Bigint.to_string b.den)
+    else Printf.sprintf "%s/%s" (Bigint.to_string b.num) (Bigint.to_string b.den))
 ;;
 
 (* Parse the R7 grammar: "num" or "num/den" (decimal, via {!Bigint.of_string}'s strict
