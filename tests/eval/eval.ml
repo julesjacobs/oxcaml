@@ -208,7 +208,9 @@ let require_formula_complete (model : Eval_model.t) (assertions : Term.t list) :
       let name = Symbol.name sym in
       if Option.is_none (Eval_model.sort_card model name)
       then note (Printf.sprintf "cardinality entry for sort %s" name)
-    | Sort.Bool | Sort.Int _ -> ()
+    (* No datatype-sorted model completeness obligation yet: the datatype theory emits no
+       model values, so a datatype query never reaches [Sat]-with-model here. *)
+    | Sort.Bool | Sort.Int _ | Sort.Datatype _ -> ()
   in
   let check_app sym arity =
     let name = Symbol.name sym in

@@ -20,6 +20,7 @@ let to_string = function
     let sname =
       match (sort : Sort.t) with
       | Uninterpreted sym -> Symbol.name sym
+      | Datatype sym -> Symbol.name sym
       | Bool -> "Bool"
       | Int _ -> "Int"
     in

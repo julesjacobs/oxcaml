@@ -341,7 +341,7 @@ let rec term_has_reserved ?(allowed = []) (t : Term.t) =
      is one ever minted internally). *)
   let bad_sort (s : Sort.t) =
     match s with
-    | Sort.Uninterpreted sym -> Env.is_reserved_name (Symbol.name sym)
+    | Sort.Uninterpreted sym | Sort.Datatype sym -> Env.is_reserved_name (Symbol.name sym)
     | Sort.Bool | Sort.Int _ -> false
   in
   let rec_ = term_has_reserved ~allowed in

@@ -318,7 +318,7 @@ end = struct
         let is_int =
           match term.Term.sort with
           | Sort.Int _ -> true
-          | Sort.Bool | Sort.Uninterpreted _ -> false
+          | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> false
         in
         (* PRECONDITION defensive check (codex): preprocessing lifts every Int-sorted
            [Ite] before assertion (ADR-0003 invariant 10); a residual one would take no
@@ -391,7 +391,7 @@ end = struct
                    "structured Bool compound as an uninterpreted-function argument")
             (* Int-sorted nodes are unreachable under [Sort.Bool] (frozen 9-node set). *)
             | Term.Int_const _ | Term.Arith _ -> ())
-         | (Sort.Bool | Sort.Int _ | Sort.Uninterpreted _), _ -> ());
+         | (Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _), _ -> ());
         List.iter (go ~parent_owner:o) (walk_children term))
     in
     go ~parent_owner:O_neutral top
@@ -645,7 +645,7 @@ end = struct
   let find_disagreement t ma mb =
     let candidate (term : Term.t) =
       match term.Term.sort with
-      | Sort.Bool | Sort.Uninterpreted _ -> false
+      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> false
       | Sort.Int _ -> true
     in
     let valued =
@@ -1127,7 +1127,7 @@ end = struct
                | Some m when m <= n -> ()
                | _ -> Hashtbl.replace class_int cid n)
             | _ -> ())
-         | Sort.Bool | Sort.Uninterpreted _ -> ())
+         | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> ())
       t.all_terms;
     let int_variant term =
       match model_eval mb term, model_eval ma term with
@@ -1175,6 +1175,21 @@ end = struct
             variant term (function
               | Model.Uninterp _ -> true
               | _ -> false)
+          (* A datatype-sorted term has no [Model.value] the current combinator can
+             certify: [Model.value] offers only Int/Bool/Uninterp, and handing a datatype
+             term the opaque [Uninterp] witness (as the Uninterpreted arm does) would let
+             the merged model claim [Sat] with the datatype axioms — constructor
+             distinctness, injectivity, occurs — never checked, i.e. a wrong-[Sat]. Until
+             the datatype theory owns these classes and emits constructor-tree values, the
+             sound behaviour is to refuse to certify: raise [Incomplete], which the engine
+             turns into [unknown] (a completeness degrade, not a soundness poison). This
+             is the plumbing-lane backstop; the datatype-theory lane replaces it with real
+             model extraction. *)
+          | Sort.Datatype _ ->
+            raise
+              (Incomplete
+                 "datatype-sorted term in candidate model: no datatype-theory model \
+                  support yet (plumbing backstop -> unknown)")
         in
         Option.map (fun v -> term, v) value)
     in

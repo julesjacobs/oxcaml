@@ -43,6 +43,11 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
     let id = as_int s in
     if id < 0 then raise (Malformed "uninterpreted element index must be non-negative");
     Value.Uninterp (sort, id)
+  (* The datatype theory does not emit model values yet, so no datatype-sorted binding
+     ever reaches this reader; a datatype value would be a constructor tree, not a scalar
+     token. Reject rather than mis-parse until that value shape exists. *)
+  | Sort.Datatype _ ->
+    raise (Malformed "datatype-sorted model values are not supported yet")
 ;;
 
 let card_check t (sort : Sort.t) (v : Value.t) =

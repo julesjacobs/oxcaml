@@ -13,6 +13,7 @@
 module Iarr = Iarr
 module Symbol = Symbol
 module Sort = Sort
+module Datatype_defs = Datatype_defs
 module Rank = Rank
 module Env = Env
 module Term = Term

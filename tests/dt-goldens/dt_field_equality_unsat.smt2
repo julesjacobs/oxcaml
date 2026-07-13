@@ -1,0 +1,11 @@
+; Datatype rule 2 — field-equality propagation (injectivity). (succ a) = (succ b)
+; forces a = b, contradicting (not (= a b)): unsat. Marked :status unknown until the
+; datatype theory is wired.
+(set-logic QF_DT)
+(set-info :status unknown)
+(declare-datatypes ((nat 0)) (((succ (pred nat)) (zero))))
+(declare-const a nat)
+(declare-const b nat)
+(assert (= (succ a) (succ b)))
+(assert (not (= a b)))
+(check-sat)

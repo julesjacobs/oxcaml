@@ -398,7 +398,7 @@ let model t =
                  in
                  Hashtbl.replace sort_ids name (cid :: prev)
                | _ -> ())
-            | Sort.Bool | Sort.Int _ -> ())
+            | Sort.Bool | Sort.Int _ | Sort.Datatype _ -> ())
          terms;
        let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let sort_cards = ref [] in
@@ -449,7 +449,7 @@ let model t =
                   | Term.Arith _ -> ()
                   | _ -> int_classes := cid :: !int_classes)
                | _ -> ())
-            | Sort.Bool | Sort.Uninterpreted _ -> ())
+            | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> ())
          terms;
        let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let next = ref 0 in
@@ -507,7 +507,10 @@ let model t =
               (match Hashtbl.find_opt index cid with
                | Some i -> VUninterp i
                | None -> raise Degrade)
-            | Sort.Bool -> raise Degrade)
+            (* A datatype-sorted term reaching extraction has no certified value ([Model]
+               offers no constructor-tree witness yet); combine already refuses to certify
+               such a Sat, so this is a defensive backstop — degrade to no-model. *)
+            | Sort.Bool | Sort.Datatype _ -> raise Degrade)
          | None, _ -> raise Degrade
        in
        let default_for (sort : Sort.t) =
@@ -515,6 +518,7 @@ let model t =
          | Sort.Bool -> VBool false
          | Sort.Int _ -> VInt 0
          | Sort.Uninterpreted _ -> VUninterp 0
+         | Sort.Datatype _ -> raise Degrade
        in
        (* pass 2: non-Bool nullary consts + function/predicate table rows (per symbol) *)
        let consts = ref [] in
@@ -528,7 +532,7 @@ let model t =
               (match term.Term.sort with
                | Sort.Bool ->
                  () (* propositional variable: session's bool_consts owns it *)
-               | Sort.Int _ | Sort.Uninterpreted _ ->
+               | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ ->
                  consts := Const (Symbol.name sym, value_of term) :: !consts)
             | Term.App (sym, args) ->
               let row = List.map value_of (Iarr.to_list args), value_of term in
@@ -575,11 +579,11 @@ let model t =
 ;;
 
 (* ADR-0012 L2/O3 (tranche 2): a read-only e-graph query view over the live congruence
-   child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the concrete
-   [Euf_adapter.t] (the combinator's own additive accessor, not a THEORY method), whose
-   query functions forward to the engine's NON-REGISTERING accessors — so the matcher reads
-   the congruence closure without growing it (R6). Rebuilt per [round] by [Session], since
-   the e-graph changes as instances are asserted. *)
+   child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the
+   concrete [Euf_adapter.t] (the combinator's own additive accessor, not a THEORY method),
+   whose query functions forward to the engine's NON-REGISTERING accessors — so the
+   matcher reads the congruence closure without growing it (R6). Rebuilt per [round] by
+   [Session], since the e-graph changes as instances are asserted. *)
 let egraph_view t : Oxsmt_ematch.Egraph_view.t =
   let cs = Combined.congruence_state t.theory in
   { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)

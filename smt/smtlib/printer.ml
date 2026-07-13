@@ -246,6 +246,12 @@ let collect_decls env assertions =
       then (
         Sym_tbl.add sort_seen sym ();
         sorts := sym :: !sorts)
+    (* Datatype sorts need a [(declare-datatype ...)] block whose shape lives in
+       {!Datatype_defs}, which this printer entry point does not receive. Rather than emit
+       a wrong [(declare-sort ...)], refuse until the printer takes the registry (tracked
+       follow-up). *)
+    | Sort.Datatype _ ->
+      raise (Unsupported "printing datatype sorts is not supported yet")
   in
   let register_fun sym =
     (* reserved div/mod are built-ins, never declared *)
@@ -290,6 +296,7 @@ let sort_string (s : Sort.t) =
   | Sort.Bool -> "Bool"
   | Sort.Int _ -> "Int"
   | Sort.Uninterpreted sym -> quote_sort_symbol (Symbol.name sym)
+  | Sort.Datatype _ -> raise (Unsupported "printing datatype sorts is not supported yet")
 ;;
 
 let print_session ?status env assertions =
