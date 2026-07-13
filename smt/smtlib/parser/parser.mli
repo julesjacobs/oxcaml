@@ -28,6 +28,9 @@ type t =
   ; logic : string option
   ; status : Oxsmt_smtlib.Status.t option
   ; assertions : Oxsmt_core.Term.t list (* in file order *)
+  ; datatypes : Oxsmt_core.Datatype_defs.t
+    (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors, and
+     testers, keyed by symbol, for the datatype theory. [empty] when none declared. *)
   }
 
 (** [parse src] parses a whole SMT-LIB2 document, creating a fresh {!Oxsmt_core.Env.t} and

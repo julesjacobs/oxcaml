@@ -10,12 +10,26 @@ exception Unsupported of string
 let malformedf fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
+let name_of s =
+  match Sexp.symbol_name s with
+  | Some n -> n
+  | None -> malformedf "expected a symbol name, got %s" (Sexp.to_string s)
+;;
+
+(* The internal function-symbol name minted for a constructor's tester [(_ is C)].
+   Readable and deterministic; a user symbol colliding with it is caught as a
+   redeclaration by [declare_fun]. *)
+let tester_name_of cname = "is-" ^ cname
+
 type t =
   { env : Env.t
   ; ctx : Context.t
   ; logic : string option
   ; status : Oxsmt_smtlib.Status.t option
   ; assertions : Term.t list
+  ; datatypes : Datatype_defs.t
+    (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
+     theory; empty when the query declares none *)
   }
 
 type fundecl =
@@ -41,10 +55,15 @@ type pstate =
   ; expanding :
       (string, unit) Hashtbl.t (* define names currently mid-expansion (cycle guard) *)
   ; memo : (string * int list, Term.t) Hashtbl.t
-    (* expansion cache keyed by (define name, argument-term tags). A define with the same
-     arguments always expands to the same hash-consed term, so this turns the exponential
-     body re-read on nested chains (e.g. [f_{i+1}(x) = f_i(x) + f_i(x)]) into linear work.
-     Tags are the [Context] hash-cons identity, so the key is exact and cheap. *)
+    (* expansion cache keyed by (define name, argument-term tags). A define with the
+         same arguments always expands to the same hash-consed term, so this turns the
+         exponential body re-read on nested chains (e.g. [f_{i+1}(x) = f_i(x) + f_i(x)])
+         into linear work. Tags are the [Context] hash-cons identity, so the key is exact
+         and cheap. *)
+  ; dt_names : (string, unit) Hashtbl.t
+    (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
+         [Sort.datatype_] rather than [Sort.uninterpreted] *)
+  ; mutable datatypes : Datatype_defs.t (* the accumulated datatype shape registry *)
   }
 
 module Tok = Oxsmt_lexical.Lexer
@@ -58,7 +77,8 @@ let sort_of_sexp st (s : Sexp.t) : Sort.t =
   | Some "Int" -> Sort.int
   | Some name ->
     (match Hashtbl.find_opt st.sorts name with
-     | Some sym -> Sort.uninterpreted sym
+     | Some sym ->
+       if Hashtbl.mem st.dt_names name then Sort.datatype_ sym else Sort.uninterpreted sym
      | None -> malformedf "unknown sort: %s" name)
   | None ->
     (match s with
@@ -141,12 +161,37 @@ and read_app st scope head args orig =
   | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
   | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
     apply_named st scope op args orig
+  (* [(as t Sort)] sort ascription (e.g. [(as nil (List Int))]): keep the term, drop the
+     ascription — every term the smart constructors build is already fully sorted, and the
+     ascribing sort may be a compound [sort_of_sexp] does not model. *)
+  | Sexp.Atom (Tok.Reserved "as") ->
+    (match args with
+     | [ t; _sort ] -> read_term st scope t
+     | _ -> malformedf "malformed (as term sort): %s" (Sexp.to_string orig))
   | Sexp.Atom (Tok.Reserved ("forall" | "exists")) ->
     unsupportedf "quantifiers are not supported (QF only)"
+  | Sexp.Atom (Tok.Reserved "match") -> unsupportedf "datatype match is not supported yet"
   | Sexp.Atom (Tok.Reserved r) ->
     malformedf "reserved word %s cannot head an application" r
+  (* Tester [((_ is C) t)]: an indexed identifier heads the application. Resolve to the
+     constructor [C]'s tester symbol (registered by [declare-datatype(s)]) and apply. *)
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_"); Sexp.Atom (Tok.Symbol { text = "is"; _ }); cname_s ]
+    -> read_tester st scope (name_of cname_s) args orig
   | _ ->
     unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string head)
+
+(* A tester application [((_ is C) t)]. The tester function symbol is minted as
+   ["is-" ^ C] by [declare-datatype(s)]; look it up and apply it (it is a [(dt) -> Bool]
+   predicate). *)
+and read_tester st scope cname args orig =
+  let tester_name = tester_name_of cname in
+  match Hashtbl.find_opt st.funs tester_name with
+  | None -> malformedf "tester for unknown constructor %s: %s" cname (Sexp.to_string orig)
+  | Some { sym; dom; _ } ->
+    if List.length args <> List.length dom
+    then malformedf "tester (_ is %s) expects 1 argument" cname;
+    Context.app st.ctx sym (List.map (read_term st scope) args)
 
 (* Apply a user-declared function or expand a define-fun (no builtin-operator meaning). *)
 and apply_named st scope op args orig =
@@ -355,8 +400,114 @@ let read_signature st (params : Sexp.t) (ret : Sexp.t) =
   dom, sort_of_sexp st ret
 ;;
 
+(* ---- datatypes ---- *)
+
+(* Declare (and store) a function symbol, returning its interned [Symbol.t]. *)
+let declare_fun_sym st name dom cod =
+  declare_fun st name dom cod;
+  (Hashtbl.find st.funs name).sym
+;;
+
+(* Intern a datatype sort name (phase 1), marking it so [sort_of_sexp] renders it as
+   [Sort.datatype_]. *)
+let declare_datatype_sort st name =
+  check_not_reserved name;
+  if Hashtbl.mem st.sorts name then malformedf "redeclaration of sort %s" name;
+  match Env.declare_sort st.env name with
+  | sym ->
+    Hashtbl.replace st.sorts name sym;
+    Hashtbl.replace st.dt_names name ();
+    sym
+  | exception Env.Reserved_symbol _ -> malformedf "cannot declare reserved symbol %s" name
+;;
+
+(* Parse one constructor definition [(C (sel1 S1) ... (seln Sn))] (nullary: [(C)]).
+   Declares the constructor [(S1..Sn) -> dt], each selector [(dt) -> Si], and the tester
+   [(dt) -> Bool], and returns the {!Datatype_defs.constructor} shape. Field sorts resolve
+   through [sort_of_sexp], so they may reference this datatype or a sibling already
+   interned in phase 1 (mutual recursion). *)
+let parse_constructor st dt_sort (cdef : Sexp.t) : Datatype_defs.constructor =
+  match cdef with
+  | Sexp.List (cname_s :: sel_sexps) ->
+    let cname = name_of cname_s in
+    let selectors =
+      List.mapi
+        (fun index sel ->
+           match sel with
+           | Sexp.List [ sname_s; ssort_s ] ->
+             name_of sname_s, index, sort_of_sexp st ssort_s
+           | _ ->
+             malformedf
+               "malformed selector in constructor %s: %s"
+               cname
+               (Sexp.to_string sel))
+        sel_sexps
+    in
+    let dom = List.map (fun (_, _, fs) -> fs) selectors in
+    let ctor_sym = declare_fun_sym st cname dom dt_sort in
+    let sel_records =
+      List.map
+        (fun (sname, index, field_sort) ->
+           let sel_sym = declare_fun_sym st sname [ dt_sort ] field_sort in
+           { Datatype_defs.sym = sel_sym; index; field_sort })
+        selectors
+    in
+    let tester_sym = declare_fun_sym st (tester_name_of cname) [ dt_sort ] Sort.bool in
+    { Datatype_defs.sym = ctor_sym; selectors = sel_records; tester = tester_sym }
+  | _ -> malformedf "malformed constructor definition: %s" (Sexp.to_string cdef)
+;;
+
+(* Shared core of [declare-datatype] (one datatype) and [declare-datatypes] (mutually
+   recursive block). [sort_decls] are the [(name arity)] pairs, [ctor_lists] the parallel
+   constructor-definition lists. Phase 1 interns every sort name first so phase 2's field
+   sorts can reference any of them. *)
+let process_datatypes st sort_decls ctor_lists =
+  if List.length sort_decls <> List.length ctor_lists
+  then
+    malformedf
+      "declare-datatypes: %d sort declarations but %d constructor lists"
+      (List.length sort_decls)
+      (List.length ctor_lists);
+  let sort_syms =
+    List.map
+      (fun (name, arity) ->
+         (match arity with
+          | Sexp.Atom (Tok.Numeral "0") -> ()
+          | _ ->
+            unsupportedf "parametric datatype %s (nonzero arity) is not supported" name);
+         name, declare_datatype_sort st name)
+      sort_decls
+  in
+  List.iter2
+    (fun (name, sort_sym) ctor_list ->
+       let dt_sort = Sort.datatype_ sort_sym in
+       let constructors =
+         match ctor_list with
+         | Sexp.List cs -> List.map (parse_constructor st dt_sort) cs
+         | _ -> malformedf "malformed constructor list for datatype %s" name
+       in
+       match Datatype_defs.add st.datatypes { sort_sym; constructors } with
+       | dts -> st.datatypes <- dts
+       | exception Invalid_argument m -> malformedf "%s" m)
+    sort_syms
+    ctor_lists
+;;
+
+(* The sort-declaration list [((n0 a0) (n1 a1) ...)] of a declare-datatypes block. *)
+let parse_sort_decls (s : Sexp.t) =
+  match s with
+  | Sexp.List decls ->
+    List.map
+      (fun d ->
+         match d with
+         | Sexp.List [ n; a ] -> name_of n, a
+         | _ -> malformedf "malformed datatype sort declaration: %s" (Sexp.to_string d))
+      decls
+  | _ -> malformedf "declare-datatypes sort list must be a list: %s" (Sexp.to_string s)
+;;
+
 let known_logic = function
-  | "QF_UFLIA" | "QF_UF" | "QF_LIA" | "QF_IDL" | "QF_RDL" -> true
+  | "QF_UFLIA" | "QF_UF" | "QF_LIA" | "QF_IDL" | "QF_RDL" | "QF_DT" | "QF_UFDT" -> true
   | _ -> false
 ;;
 
@@ -403,6 +554,19 @@ let run st sexps =
           | Some "declare-fun", [ n; params; ret ] ->
             let dom, cod = read_signature st params ret in
             declare_fun st (name_of n) dom cod
+          (* [(declare-datatypes ((T0 a0) ...) (ctor-list0 ...))] — mutually recursive. *)
+          | Some "declare-datatypes", [ sort_decls; Sexp.List ctor_lists ] ->
+            process_datatypes st (parse_sort_decls sort_decls) ctor_lists
+          | Some "declare-datatypes", _ ->
+            malformedf "malformed declare-datatypes: %s" (Sexp.to_string cmd)
+          (* [(declare-datatype T (ctor ...))] — the single-datatype (arity 0) form. *)
+          | Some "declare-datatype", [ n; Sexp.List ctors ] ->
+            process_datatypes
+              st
+              [ name_of n, Sexp.Atom (Tok.Numeral "0") ]
+              [ Sexp.List ctors ]
+          | Some "declare-datatype", _ ->
+            malformedf "malformed declare-datatype: %s" (Sexp.to_string cmd)
           | Some "define-fun", [ n; Sexp.List params; ret; body ] ->
             define_fun st (name_of n) params ret body
           | Some ("define-fun-rec" | "define-funs-rec"), _ ->
@@ -447,6 +611,8 @@ let parse_into env ctx src =
     ; defines = Hashtbl.create 16
     ; expanding = Hashtbl.create 8
     ; memo = Hashtbl.create 64
+    ; dt_names = Hashtbl.create 8
+    ; datatypes = Datatype_defs.empty
     }
   in
   let sexps =
@@ -460,7 +626,7 @@ let parse_into env ctx src =
     | Term.Unsupported m -> raise (Unsupported m)
     | Term.Overflow -> raise (Unsupported "arithmetic exceeds native int range")
   in
-  { env; ctx; logic; status; assertions }
+  { env; ctx; logic; status; assertions; datatypes = st.datatypes }
 ;;
 
 let parse src =
