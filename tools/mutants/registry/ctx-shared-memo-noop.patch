@@ -1,8 +1,8 @@
-diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
-index d6c28f60d2..e28b3d4826 100644
---- a/smt/interface/presolve.ml
-+++ b/smt/interface/presolve.ml
-@@ -541,7 +541,7 @@ let simplify_contextual ctx assertions =
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index 961dbf3a86..57329f6e3d 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -552,7 +552,7 @@ let simplify_contextual ctx assertions =
            | Ite _ -> env.subst)
          else env.subst
        in

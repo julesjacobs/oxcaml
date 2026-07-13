@@ -481,6 +481,17 @@ let simplify_contextual ctx assertions =
     incr steps;
     if !steps > ctx_max_steps then raise Ctx_budget
   in
+  (* Observability-only counters (OXSMT_PRESOLVE_CTX_STATS): [engaged] = the rewrite ran
+     on an ITE-bearing assertion; [subst_hits] = variable→literal substitutions applied;
+     [atom_folds] = assumed-atom occurrences folded to a truth constant (the other, more
+     common, way the pass rewrites — most nec-style collapse is atom-folding, not variable
+     substitution). [engaged] with [subst_hits] + [atom_folds] = 0 is fired-but-no-effect.
+     Counts are per distinct (scope, term) — memoization means a reused fold is tallied
+     once, so these are coarse effect indicators, not exact rewrite totals. Emitted once
+     per call to stderr, default-silent; never read back into the solve path. *)
+  let engaged = ref false in
+  let subst_hits = ref 0 in
+  let atom_folds = ref 0 in
   (* Does [t]'s subtree contain any [Ite]? Memoized over the hash-cons DAG. An assertion
      with no [Ite] cannot be contextually simplified (the assumption env is only ever
      extended at an [ite]), so it is passed through untouched — the pass is then exactly
@@ -550,10 +561,14 @@ let simplify_contextual ctx assertions =
     | None ->
       let r =
         match Term.Map.find_opt t env.subst with
-        | Some v -> v
+        | Some v ->
+          incr subst_hits;
+          v
         | None ->
           (match Term.Map.find_opt t env.atoms with
-           | Some b -> Context.bool_const ctx b
+           | Some b ->
+             incr atom_folds;
+             Context.bool_const ctx b
            | None ->
              (* Re-fold after rebuild: an outer substitution may have rewritten the atom
                 that [assume] recorded (it records the REWRITTEN [c'], not the original
@@ -563,7 +578,9 @@ let simplify_contextual ctx assertions =
                 (completeness only — equivalence holds either way). *)
              let r' = rebuild env t in
              (match Term.Map.find_opt r' env.atoms with
-              | Some b -> Context.bool_const ctx b
+              | Some b ->
+                incr atom_folds;
+                Context.bool_const ctx b
               | None -> r'))
       in
       Term.Table.add env.memo t r;
@@ -598,7 +615,32 @@ let simplify_contextual ctx assertions =
          let b' = simp env_else b in
          Context.ite ctx c' a' b')
   in
-  match List.map (fun a -> if has_ite a then simp root a else a) assertions with
-  | exception Ctx_budget -> assertions
-  | simplified -> simplified
+  let emit ~aborted =
+    match Sys.getenv_opt "OXSMT_PRESOLVE_CTX_STATS" with
+    | Some ("1" | "true" | "yes") ->
+      Printf.eprintf
+        "ctx: fired=%d substitutions=%d atomfolds=%d steps=%d aborted=%d\n%!"
+        (if !engaged then 1 else 0)
+        !subst_hits
+        !atom_folds
+        !steps
+        (if aborted then 1 else 0)
+    | Some _ | None -> ()
+  in
+  match
+    List.map
+      (fun a ->
+         if has_ite a
+         then (
+           engaged := true;
+           simp root a)
+         else a)
+      assertions
+  with
+  | exception Ctx_budget ->
+    emit ~aborted:true;
+    assertions
+  | simplified ->
+    emit ~aborted:false;
+    simplified
 ;;

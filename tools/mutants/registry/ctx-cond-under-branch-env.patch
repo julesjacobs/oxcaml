@@ -1,13 +1,13 @@
 diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
-index d6c28f60d2..5d44ef25cf 100644
+index 961dbf3a86..2b53c06fb0 100644
 --- aa/smt/interface/presolve.ml
 +++ bb/smt/interface/presolve.ml
-@@ -596,7 +596,7 @@ let simplify_contextual ctx assertions =
+@@ -613,7 +613,7 @@ let simplify_contextual ctx assertions =
           let env_else = assume env c' ~truth:false in
           let a' = simp env_then a in
           let b' = simp env_else b in
 -         Context.ite ctx c' a' b')
 +         Context.ite ctx (simp env_then c') a' b')
    in
-   match List.map (fun a -> if has_ite a then simp root a else a) assertions with
-   | exception Ctx_budget -> assertions
+   let emit ~aborted =
+     match Sys.getenv_opt "OXSMT_PRESOLVE_CTX_STATS" with

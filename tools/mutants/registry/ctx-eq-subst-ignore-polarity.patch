@@ -1,8 +1,8 @@
 diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
-index d6c28f60d2..bbbf1353da 100644
+index 961dbf3a86..738d435656 100644
 --- aa/smt/interface/presolve.ml
 +++ bb/smt/interface/presolve.ml
-@@ -521,7 +521,7 @@ let simplify_contextual ctx assertions =
+@@ -532,7 +532,7 @@ let simplify_contextual ctx assertions =
      | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ | Eq _ | And _ | Or _ | Ite _ ->
        let atoms = Term.Map.add atom truth env.atoms in
        let subst =
