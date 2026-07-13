@@ -941,6 +941,23 @@ let check_sat t =
   t.effort_exhausted <- false;
   if t.degraded
   then Unknown
+  else if Bv_dispatch.is_pure_bv t.asserted
+  then (
+    (* Pure QF_BV: resolve by eager bit-blasting BEFORE the combinator (which fail-closed
+       degrades any live bit-vector term to unknown, combine.ml). Bv_solve re-checks every
+       sat model with the independent evaluator, so a Sat here is already self-certified —
+       we surface its bindings directly rather than through the BV-unaware R1 combinator
+       checker. Unsat is the pure-propositional SAT-core refutation; Unknown is the
+       fail-closed door on any construct the blaster does not encode. *)
+    match Bv_dispatch.solve t.asserted with
+    | Bv_dispatch.Unsat ->
+      t.last_verdict <- Unsat;
+      Unsat
+    | Bv_dispatch.Unknown -> Unknown
+    | Bv_dispatch.Sat binds ->
+      t.last_verdict <- Sat;
+      t.last_model <- Some ([], List.map (fun (n, v, _w) -> Const (n, VInt v)) binds);
+      Sat)
   else (
     Cdclt.begin_check t.cdclt;
     Manager.begin_check t.mgr (* fresh generation budget for this check_sat (§1.4) *);

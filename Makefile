@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -383,6 +383,14 @@ lia-test:
 bv-blast-test:
 	$(DUNE) exec smt/bitblast/test/bv_blast_test.exe
 
+## bv-goldens-test — QF_BV end-to-end acceptance through the REAL Session dispatch: each
+##   tests/bv-goldens/*.smt2 is parsed + loaded + solved, and the verdict must equal the
+##   file's :status (two sat with surfaced self-checked models, two unsat, and the
+##   mixed-logic QF_UFBV door test that must degrade to unknown). Self-contained (no z3).
+##   Nonzero exit on any mismatch.
+bv-goldens-test:
+	$(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+
 ## lia-adapter-test — smt/theories/lia THEORY-adapter (ADR-0005 M4) unit + property
 ##   self-test (stdlib-only, deterministic). Currency round-trip (Atom/Lit <-> Term),
 ##   conflict rule tags with a PUBLIC-OUTPUT Farkas verifier, bound propagation + lazy
@@ -492,6 +500,7 @@ test: check-frozen
 	$(MAKE) cert-corpus-gate
 	$(MAKE) driver-equiv-test
 	$(MAKE) bv-blast-test
+	$(MAKE) bv-goldens-test
 	$(MAKE) regress-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots

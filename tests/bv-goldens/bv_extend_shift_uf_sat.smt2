@@ -1,7 +1,10 @@
-; Mixes zero_extend, sign_extend, a shift, and an uninterpreted function over bitvectors
-; (QF_UFBV): f applied to equal arguments is equal, so this is sat. Exercises the extends,
-; bvshl, and EUF congruence over bitvector terms. Marked :status unknown until the
-; bit-blasting engine is wired.
+; Mixes zero_extend, sign_extend, a shift, and a genuine uninterpreted function f over
+; bitvectors (QF_UFBV). True status is sat (f applied to equal arguments is equal). This
+; is the DOOR TEST: it is NOT pure QF_BV (f is an uninterpreted application), so the pure-
+; BV dispatch's conservative gate rejects it and it stays on the combinator's fail-closed
+; path, degrading to a sound unknown. Solving it needs UF+BV combination (a later lane);
+; eager bit-blasting alone cannot, and must not fabricate a verdict. :status unknown =
+; what our v1 engine returns (never a wrong verdict).
 (set-logic QF_UFBV)
 (set-info :status unknown)
 (declare-const x (_ BitVec 8))

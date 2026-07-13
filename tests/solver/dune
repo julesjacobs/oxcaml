@@ -24,3 +24,15 @@
   oxsmt_interface
   oxsmt_smtlib_parser
   oxsmt_query_loader))
+
+; QF_BV end-to-end acceptance goldens driven through the real Session dispatch
+; (make bv-goldens-test).
+
+(executable
+ (name bv_goldens_test)
+ (modules bv_goldens_test)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
