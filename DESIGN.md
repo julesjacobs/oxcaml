@@ -866,3 +866,12 @@ baseline promotion stays fail-closed. *Lesson: when a measurement
 protocol becomes load-immune, re-examine every place it was being
 serialized — the serialization was compensating for a fragility that no
 longer exists.*
+
+### A7 — Constitution reset (2026-07-12, master)
+
+AGENTS.md replaced with a short constitution; all other .md files deleted.
+Their full text is in git history (`git show <sha>:<path>`). Invariants I1-I8,
+the frozen-interface mechanics (FROZEN.sha256, `make check-frozen`), and all
+ratified ADR decisions remain in force unchanged — deleted as files, not as
+rules. Land bar: `make test` + `make gate` + two-model review (codex + fable).
+Any process step over 5 minutes gets questioned: eliminate it or speed it up.
