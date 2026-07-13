@@ -161,8 +161,12 @@ let render_family dts arrs =
       (match Bv.view t with
        | Some v -> render_bv buf v
        | None ->
-         (* A [Bv]-namespaced symbol always views; this is unreachable. Fail closed. *)
-         raise (Unsupported "bitvector symbol did not decode"))
+         (* A legitimately-built bit-vector term always views. [Bv.view] returns [None]
+            here only for a [.oxsmt.bv|] name whose recorded rank disagrees with its
+            decoded operator/widths (board #58: mintable only through the cap-gated
+            [Session.internal_minter]) — fail closed rather than render the operator over
+            mismatched operands (which would change the round-trip oracle formula). *)
+         raise (Unsupported "bitvector symbol did not decode (name/rank mismatch)"))
     | App (sym, args) ->
       (match Array_defs.role_of_sym arrs sym with
        | Some { Array_defs.role; _ } ->

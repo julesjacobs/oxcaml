@@ -41,9 +41,12 @@ let check name cond =
     Printf.printf "  FAIL %s\n" name)
 ;;
 
+(* A capped env plus its reserved-namespace minter: the bit-vector builders mint their
+   [.oxsmt.bv.*] symbols through [mint] (board #58), while [bvvar] declares an ordinary
+   user-named bit-vector variable through the public [Env] door. *)
 let fresh () =
-  let env = Env.create () in
-  env, Context.create env
+  let env, cap = Env.create_with_cap () in
+  env, Context.create env, Env.declare_reserved cap env
 ;;
 
 let bvvar env ctx name w =
@@ -51,11 +54,11 @@ let bvvar env ctx name w =
   Context.const ctx sym
 ;;
 
-let bvconst ctx env v w = Bv.const ctx env ~value:v ~width:w
-let bvconst_i ctx env i w = bvconst ctx env (big i) w
+let bvconst ctx mint v w = Bv.const ctx mint ~value:v ~width:w
+let bvconst_i ctx mint i w = bvconst ctx mint (big i) w
 
-let assert_eq ctx env blaster x i w =
-  Blast.assert_term blaster (Context.eq ctx x (bvconst_i ctx env i w))
+let assert_eq ctx mint blaster x i w =
+  Blast.assert_term blaster (Context.eq ctx x (bvconst_i ctx mint i w))
 ;;
 
 let is_sat blaster =
@@ -66,12 +69,12 @@ let is_sat blaster =
 
 (* {2 Layer 1 — exhaustive oracle} *)
 
-(* bit-vector-valued binary op [make env ctx x y], operands width [w], result width [wr]. *)
+(* bit-vector-valued binary op [make mint ctx x y], operands width [w], result width [wr]. *)
 let oracle_bv2 name w wr make =
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx (name ^ "_x") w in
   let y = bvvar env ctx (name ^ "_y") w in
-  let term = make env ctx x y in
+  let term = make mint ctx x y in
   let n = 1 lsl w in
   for a = 0 to n - 1 do
     for b = 0 to n - 1 do
@@ -83,15 +86,15 @@ let oracle_bv2 name w wr make =
         else None
       in
       let expected, _ = Bv_eval.eval_bv defs ~lookup term in
-      let exp_const = bvconst ctx env expected wr in
+      let exp_const = bvconst ctx mint expected wr in
       let b1 = Blast.create defs in
-      assert_eq ctx env b1 x a w;
-      assert_eq ctx env b1 y b w;
+      assert_eq ctx mint b1 x a w;
+      assert_eq ctx mint b1 y b w;
       Blast.assert_term b1 (Context.not_ ctx (Context.eq ctx term exp_const));
       check (Printf.sprintf "%s w=%d wrong-unsat a=%d b=%d" name w a b) (not (is_sat b1));
       let b2 = Blast.create defs in
-      assert_eq ctx env b2 x a w;
-      assert_eq ctx env b2 y b w;
+      assert_eq ctx mint b2 x a w;
+      assert_eq ctx mint b2 y b w;
       Blast.assert_term b2 (Context.eq ctx term exp_const);
       check (Printf.sprintf "%s w=%d right-sat a=%d b=%d" name w a b) (is_sat b2)
     done
@@ -99,19 +102,19 @@ let oracle_bv2 name w wr make =
 ;;
 
 let oracle_bv1 name w wr make =
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx (name ^ "_x") w in
-  let term = make env ctx x in
+  let term = make mint ctx x in
   for a = 0 to (1 lsl w) - 1 do
     let lookup t = if Term.equal t x then Some (big a) else None in
     let expected, _ = Bv_eval.eval_bv defs ~lookup term in
-    let exp_const = bvconst ctx env expected wr in
+    let exp_const = bvconst ctx mint expected wr in
     let b1 = Blast.create defs in
-    assert_eq ctx env b1 x a w;
+    assert_eq ctx mint b1 x a w;
     Blast.assert_term b1 (Context.not_ ctx (Context.eq ctx term exp_const));
     check (Printf.sprintf "%s w=%d wrong-unsat a=%d" name w a) (not (is_sat b1));
     let b2 = Blast.create defs in
-    assert_eq ctx env b2 x a w;
+    assert_eq ctx mint b2 x a w;
     Blast.assert_term b2 (Context.eq ctx term exp_const);
     check (Printf.sprintf "%s w=%d right-sat a=%d" name w a) (is_sat b2)
   done
@@ -119,10 +122,10 @@ let oracle_bv1 name w wr make =
 
 (* Bool-valued binary predicate. *)
 let oracle_pred name w make =
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx (name ^ "_x") w in
   let y = bvvar env ctx (name ^ "_y") w in
-  let term = make env ctx x y in
+  let term = make mint ctx x y in
   let n = 1 lsl w in
   for a = 0 to n - 1 do
     for b = 0 to n - 1 do
@@ -137,21 +140,21 @@ let oracle_pred name w make =
       let wrong = if expected then Context.not_ ctx term else term in
       let right = if expected then term else Context.not_ ctx term in
       let b1 = Blast.create defs in
-      assert_eq ctx env b1 x a w;
-      assert_eq ctx env b1 y b w;
+      assert_eq ctx mint b1 x a w;
+      assert_eq ctx mint b1 y b w;
       Blast.assert_term b1 wrong;
       check (Printf.sprintf "%s w=%d wrong-unsat a=%d b=%d" name w a b) (not (is_sat b1));
       let b2 = Blast.create defs in
-      assert_eq ctx env b2 x a w;
-      assert_eq ctx env b2 y b w;
+      assert_eq ctx mint b2 x a w;
+      assert_eq ctx mint b2 y b w;
       Blast.assert_term b2 right;
       check (Printf.sprintf "%s w=%d right-sat a=%d b=%d" name w a b) (is_sat b2)
     done
   done
 ;;
 
-let binop op env ctx x y = Bv.binop ctx env op x y
-let unop op env ctx x = Bv.unop ctx env op x
+let binop op mint ctx x y = Bv.binop ctx mint op x y
+let unop op mint ctx x = Bv.unop ctx mint op x
 
 let run_oracle () =
   print_endline "layer 1: exhaustive small-width oracle";
@@ -186,14 +189,14 @@ let run_oracle () =
        oracle_bv2 "bvurem" w w (binop Bv.Bvurem))
     [ 5 ];
   (* width-changing ops *)
-  oracle_bv1 "zero_extend" 3 5 (fun env ctx x -> Bv.zero_extend ctx env ~n:2 x);
-  oracle_bv1 "sign_extend" 3 5 (fun env ctx x -> Bv.sign_extend ctx env ~n:2 x);
-  oracle_bv1 "extract" 4 2 (fun env ctx x -> Bv.extract ctx env ~i:2 ~j:1 x);
+  oracle_bv1 "zero_extend" 3 5 (fun mint ctx x -> Bv.zero_extend ctx mint ~n:2 x);
+  oracle_bv1 "sign_extend" 3 5 (fun mint ctx x -> Bv.sign_extend ctx mint ~n:2 x);
+  oracle_bv1 "extract" 4 2 (fun mint ctx x -> Bv.extract ctx mint ~i:2 ~j:1 x);
   (* concat: distinct widths per arg (hi=2, lo=3, result 5) *)
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx "cc_x" 2 in
   let y = bvvar env ctx "cc_y" 3 in
-  let term = Bv.concat ctx env x y in
+  let term = Bv.concat ctx mint x y in
   for a = 0 to 3 do
     for b = 0 to 7 do
       let lookup t =
@@ -204,10 +207,10 @@ let run_oracle () =
         else None
       in
       let expected, _ = Bv_eval.eval_bv defs ~lookup term in
-      let exp_const = bvconst ctx env expected 5 in
+      let exp_const = bvconst ctx mint expected 5 in
       let b1 = Blast.create defs in
-      Blast.assert_term b1 (Context.eq ctx x (bvconst_i ctx env a 2));
-      Blast.assert_term b1 (Context.eq ctx y (bvconst_i ctx env b 3));
+      Blast.assert_term b1 (Context.eq ctx x (bvconst_i ctx mint a 2));
+      Blast.assert_term b1 (Context.eq ctx y (bvconst_i ctx mint b 3));
       Blast.assert_term b1 (Context.not_ ctx (Context.eq ctx term exp_const));
       check (Printf.sprintf "concat wrong-unsat a=%d b=%d" a b) (not (is_sat b1))
     done
@@ -219,22 +222,22 @@ let run_oracle () =
 let run_e2e () =
   print_endline "layer 2: end-to-end solve + model check";
   (* unsat: x + 1 = x (width 4) *)
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx "e_x" 4 in
-  let f = Context.eq ctx (Bv.binop ctx env Bv.Bvadd x (bvconst_i ctx env 1 4)) x in
+  let f = Context.eq ctx (Bv.binop ctx mint Bv.Bvadd x (bvconst_i ctx mint 1 4)) x in
   check
     "unsat x+1=x"
     (match Bv_solve.solve defs [ f ] with
      | Bv_solve.Unsat -> true
      | _ -> false);
   (* sat: 3*x = 6 (width 4) -> x=2; the driver's model check must pass *)
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx "s_x" 4 in
   let f =
     Context.eq
       ctx
-      (Bv.binop ctx env Bv.Bvmul (bvconst_i ctx env 3 4) x)
-      (bvconst_i ctx env 6 4)
+      (Bv.binop ctx mint Bv.Bvmul (bvconst_i ctx mint 3 4) x)
+      (bvconst_i ctx mint 6 4)
   in
   (match Bv_solve.solve defs [ f ] with
    | Bv_solve.Sat model ->
@@ -244,20 +247,20 @@ let run_e2e () =
       | None -> check "sat 3x=6 has x" false)
    | _ -> check "sat 3x=6 found" false);
   (* unsat: x <u y AND y <u x *)
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx "l_x" 4 in
   let y = bvvar env ctx "l_y" 4 in
-  let lt1 = Bv.binop ctx env Bv.Bvult x y in
-  let lt2 = Bv.binop ctx env Bv.Bvult y x in
+  let lt1 = Bv.binop ctx mint Bv.Bvult x y in
+  let lt2 = Bv.binop ctx mint Bv.Bvult y x in
   check
     "unsat x<y & y<x"
     (match Bv_solve.solve defs [ Context.and_ ctx [ lt1; lt2 ] ] with
      | Bv_solve.Unsat -> true
      | _ -> false);
   (* sat: x <u 3 with a genuine model *)
-  let env, ctx = fresh () in
+  let env, ctx, mint = fresh () in
   let x = bvvar env ctx "b_x" 4 in
-  let f = Bv.binop ctx env Bv.Bvult x (bvconst_i ctx env 3 4) in
+  let f = Bv.binop ctx mint Bv.Bvult x (bvconst_i ctx mint 3 4) in
   match Bv_solve.solve defs [ f ] with
   | Bv_solve.Sat model ->
     (match List.assoc_opt x model with
@@ -270,7 +273,7 @@ let run_e2e () =
 
 let run_fail_closed () =
   print_endline "layer 3: fail-closed on unencoded construct";
-  let env, ctx = fresh () in
+  let env, ctx, _mint = fresh () in
   let x = bvvar env ctx "d_x" 4 in
   let bv4 = Sort.bitvec 4 in
   let f = Env.declare_fun env "uf_f" (Rank.create [ bv4 ] bv4) in

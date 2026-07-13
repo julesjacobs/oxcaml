@@ -56,7 +56,10 @@ type t =
   }
 
 (** [parse src] parses a whole SMT-LIB2 document, creating a fresh {!Oxsmt_core.Env.t} and
-    {!Oxsmt_core.Context.t}. *)
+    {!Oxsmt_core.Context.t}. It owns that env, so it holds the reserved-minting capability
+    itself (never exposed) and threads its own [internal_mint]: a theory that mints a
+    reserved symbol mid-parse (bit-vectors, arrays) resolves. Sound because the cap and
+    env are local to the parse and never leave it. *)
 val parse : string -> t
 
 (** [parse_into env ctx src] parses using a caller-supplied env and context, so the

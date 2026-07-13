@@ -708,13 +708,18 @@ let test_cap_door_mints_internal () =
 
 (* board #58 O-MINTER: [Session.parse_minter] returns an OPAQUE minter, not a bare general
    [Env.declare_reserved] closure — the old [Session.internal_minter] general accessor is
-   GONE (compile-enforced by session.mli). Its [admit] gate is NARROW: the arrays
-   migration widened it to the arrays op-symbol grammar ONLY ({!Array_defs.is_op_name}:
-   [.oxsmt.arr.] prefix + a [|] separator), so a caller holding only a [Session.t] can
-   mint select/store op names but NOTHING else — not the arrays ext witness, not a bv
-   marker (bv widens its own grammar when it lands), not a user or preprocessing name.
-   DISCRIMINATING: against an admit-all regression the ext-witness/user mints would
-   SUCCEED; against a deny-all regression the op mint would FAIL. *)
+   GONE (compile-enforced by session.mli). Its [admit] gate
+   ([Session.parse_sanctioned_marker]) sanctions ONLY the parse-time theory vocabulary: the
+   arrays op-symbol grammar ({!Array_defs.is_op_name}: [.oxsmt.arr.] prefix + a [|]
+   separator) and the bit-vector marker grammar ({!Oxsmt_core.Bv.is_bv_name}:
+   [.oxsmt.bv|...]). Each admitted grammar is PAIRED with a consuming-side inertness check
+   (arrays: registry membership; bv: [Bv.view] rank/sort agreement), so an admitted-but-
+   mismatched mint is inert, never a wrong verdict. Everything OUTSIDE the sanctioned
+   vocabulary is refused: the sensitive reserved namespaces (arrays ext witness, datatype
+   testers, qvars, preprocessing witnesses — minted directly via [Env.declare_reserved] by
+   trusted code, no inertness guard) and any user name. DISCRIMINATING: against an admit-all
+   regression the ext-witness/user mints would SUCCEED; against a deny-all regression the op
+   mints would FAIL. *)
 let test_session_parse_minter () =
   let s = Session.create () in
   let m = Session.parse_minter s in
@@ -725,19 +730,15 @@ let test_session_parse_minter () =
     | exception (Invalid_argument _ | Env.Reserved_symbol _) -> true
     | exception _ -> false
   in
-  (* Marker grammars: on trunk none are sanctioned, so even a legitimately-shaped marker
-     is refused (deny-by-default). RED against a permissive [admit] / the old public
-     general closure (which minted these fine). *)
   check
-    "parse_minter ADMITS the arrays op-symbol grammar (arrays migration widened it)"
+    "parse_minter ADMITS the arrays op-symbol grammar (arrays migration)"
     (not (refused ".oxsmt.arr.select|Int|Int"));
   check
-    "parse_minter refuses the bv marker shape (not arrays' grammar; bv widens at bv land)"
-    (refused ".oxsmt.bv|8");
+    "parse_minter ADMITS the bit-vector marker grammar (bv migration)"
+    (not (refused ".oxsmt.bv|bvadd|1"));
   (* Sensitive reserved namespaces: NEVER admitted through this front-end door — they are
      minted directly via [Env.declare_reserved] by trusted code and have no inertness
-     guard. These must stay refused even after a theory migration widens the marker
-     grammar. *)
+     guard. These must stay refused with BOTH theory grammars widened. *)
   check
     "parse_minter refuses the arrays ext-witness namespace (.oxsmt.arr.ext.N, no '|')"
     (refused ".oxsmt.arr.ext.0");

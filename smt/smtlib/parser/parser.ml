@@ -95,10 +95,11 @@ type pstate =
          [Oxsmt_interface.Session.parse_minter], which wraps [Env.declare_reserved] over
          the session's private cap behind an [admit] gate, so the parser can mint a
          collision-proof sanctioned marker WITHOUT ever holding the cap or a general
-         closure (ADR-0012: only [Session] holds the cap). [None] (a standalone [parse],
-         or a driver that threads no [~internal_mint]) means no cap-backed minter:
-         {!internal_mint} then raises [Malformed] rather than silently succeeding. The
-         arrays [array_op_sym] is its first consumer. *)
+         closure (ADR-0012: only [Session] holds the cap). [None] (a driver that threads
+         no [~internal_mint]) means no cap-backed minter: {!internal_mint} then raises
+         [Malformed] rather than silently succeeding. The bit-vector builders
+         ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] markers through this and the arrays
+         [array_op_sym] its [.oxsmt.arr.*] ones. *)
   ; array_ops : (string, Symbol.t) Hashtbl.t
     (* the monomorphic [select]/[store] symbols minted per (role, index, element)
          instantiation, keyed by a deterministic string; arrays are polymorphic so each
@@ -109,10 +110,13 @@ type pstate =
 module Tok = Oxsmt_lexical.Lexer
 
 (* Get-or-mint a theory-internal reserved symbol mid-parse via the owner-supplied opaque
-   {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers (e.g. the arrays branch's
-   [array_op_sym]) go through here instead of [Env.declare_fun st.env], which now rejects
-   the internal marker byte class. With no minter supplied, degrade to [Malformed] (a
-   sound unknown), never a silent success. Its consumer is [array_op_sym]. *)
+   {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers go through here instead of
+   [Env.declare_fun st.env], which rejects the reserved [.oxsmt.*] namespace: the bit-vector
+   builders ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] operator/literal symbols through
+   [(internal_mint st)], and the arrays branch's [array_op_sym] its [.oxsmt.arr.*] ones.
+   With no minter supplied, degrade to [Malformed] (a sound unknown), never a silent
+   success; [Internal_minter.mint] itself raises if the name is outside the minter's [admit]
+   grammar. *)
 let internal_mint st name rank =
   match st.internal_mint with
   | Some m -> Internal_minter.mint m name rank
@@ -215,7 +219,7 @@ let bv_literal st ~digits ~bits_per_digit ~value_of_digit =
   in
   let width = String.length digits * bits_per_digit in
   if width < 1 then malformedf "empty bitvector literal";
-  Bv.const st.ctx st.env ~value ~width
+  Bv.const st.ctx (internal_mint st) ~value ~width
 ;;
 
 let hex_digit_value c =
@@ -426,7 +430,7 @@ and read_bv_extract st scope ~i ~j args orig =
   match args with
   | [ a ] ->
     (match int_of_string_opt i, int_of_string_opt j with
-     | Some i, Some j -> Bv.extract st.ctx st.env ~i ~j (read_term st scope a)
+     | Some i, Some j -> Bv.extract st.ctx (internal_mint st) ~i ~j (read_term st scope a)
      | _ ->
        malformedf "(_ extract i j): indices must be numerals: %s" (Sexp.to_string orig))
   | _ -> malformedf "(_ extract i j) expects 1 argument: %s" (Sexp.to_string orig)
@@ -438,8 +442,8 @@ and read_bv_extend st scope ~ext ~n args orig =
      | Some n ->
        let x = read_term st scope a in
        if String.equal ext "zero_extend"
-       then Bv.zero_extend st.ctx st.env ~n x
-       else Bv.sign_extend st.ctx st.env ~n x
+       then Bv.zero_extend st.ctx (internal_mint st) ~n x
+       else Bv.sign_extend st.ctx (internal_mint st) ~n x
      | None -> malformedf "(_ %s n): n must be a numeral: %s" ext (Sexp.to_string orig))
   | _ -> malformedf "(_ %s n) expects 1 argument: %s" ext (Sexp.to_string orig)
 
@@ -460,10 +464,10 @@ and read_bv_op st scope op args orig =
     | [ a ] -> f (rd a)
     | _ -> malformedf "%s expects 1 argument: %s" op (Sexp.to_string orig)
   in
-  let b o x y = Bv.binop st.ctx st.env o x y in
+  let b o x y = Bv.binop st.ctx (internal_mint st) o x y in
   match op with
-  | "bvnot" -> un (Bv.unop st.ctx st.env Bv.Bvnot)
-  | "bvneg" -> un (Bv.unop st.ctx st.env Bv.Bvneg)
+  | "bvnot" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvnot)
+  | "bvneg" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvneg)
   | "bvand" -> bin (b Bv.Bvand)
   | "bvor" -> bin (b Bv.Bvor)
   | "bvxor" -> bin (b Bv.Bvxor)
@@ -484,7 +488,7 @@ and read_bv_op st scope op args orig =
   | "bvuge" -> bin (fun x y -> b Bv.Bvule y x)
   | "bvsgt" -> bin (fun x y -> b Bv.Bvslt y x)
   | "bvsge" -> bin (fun x y -> b Bv.Bvsle y x)
-  | "concat" -> bin (Bv.concat st.ctx st.env)
+  | "concat" -> bin (Bv.concat st.ctx (internal_mint st))
   | _ -> unsupportedf "bitvector operator %s is not in the v1 subset" op
 
 (* Apply a user-declared function or expand a define-fun (no builtin-operator meaning). *)
@@ -1105,7 +1109,22 @@ let parse_into ?internal_mint env ctx src =
 ;;
 
 let parse src =
-  let env = Env.create () in
+  (* A standalone parse owns its env, so it builds its OWN cap-backed [Internal_minter]
+     (board #58 O-MINTER) and threads it — a theory that mints a reserved marker mid-parse
+     (bit-vectors, arrays) resolves rather than raising [Malformed]. Sound because the cap
+     and env are local to this parse and never leave it (contrast a [Session]-driven
+     [parse_into], where the cap stays private to the Session and only its opaque
+     [parse_minter] token is threaded). The [admit] gate is the same parse-time theory
+     vocabulary the Session sanctions — the bit-vector marker grammar (one predicate per
+     line so a further theory ORs in merge-friendly); it is PAIRED with the consuming-side
+     rank/sort check ([Bv.view]) that keeps a mismatched mint inert. *)
+  let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  parse_into env ctx src
+  let minter =
+    Internal_minter.create
+      ~admit:(fun name -> Array_defs.is_op_name name || Bv.is_bv_name name)
+      cap
+      env
+  in
+  parse_into ~internal_mint:minter env ctx src
 ;;

@@ -10,18 +10,21 @@
 
     {b Symbol identity.} Each specialised instance (operator + operand widths + any
     indices, or a literal's value + width) memoises a distinct {!Symbol.t} whose {e name}
-    encodes that instance. The names live in a private namespace prefixed by two bytes —
-    ['\\'] and ['|'] — that {b no} SMT-LIB symbol can contain (neither a simple symbol nor
-    a [|...|] quoted symbol admits ['\\'] or ['|']), so a bitvector symbol can never
-    collide with a user-declared function even though interning is by name. Because the
-    name carries the full instance, {!view} decodes a term with no side registry to thread
-    (contrast {!Datatype_defs}); the classification is a pure function of the term.
+    encodes that instance. The names live in the reserved [.oxsmt.bv.*] sub-namespace
+    (board #58): the public declaration doors ([Env.declare_fun]/[declare_sort] and their
+    [Session] wrappers) reject any [.oxsmt.*] name and the SMT-LIB reader rejects a user
+    declaration of one, so a bitvector symbol can never collide with a user-declared
+    function even though interning is by name. Because the name carries the full instance,
+    {!view} decodes a term with no side registry to thread (contrast {!Datatype_defs});
+    the classification is a pure function of the term.
 
-    Construction goes through {!Context}'s smart constructors (I2): each builder declares
-    the instance's rank in {!Env} and calls {!Context.app}/{!Context.const}, which
-    sort-checks the operands against that rank. The builders {e also} width-check up front
-    and raise {!Term.Sort_error} with a specific message (fail-closed, ADR release
-    [-noassert] safe) so a width error is a clear parse-time failure. *)
+    Construction goes through {!Context}'s smart constructors (I2): each builder mints the
+    instance's rank through a cap-backed {!minter} (the reserved namespace can only be
+    minted via {!Env.declare_reserved}, so the builder cannot use the public door) and
+    calls {!Context.app}/{!Context.const}, which sort-checks the operands against that
+    rank. The builders {e also} width-check up front and raise {!Term.Sort_error} with a
+    specific message (fail-closed, ADR release [-noassert] safe) so a width error is a
+    clear parse-time failure. *)
 
 (** The v1 operator set. Comparisons ([Bvult]/[Bvule]/[Bvslt]/[Bvsle]) yield [Bool]; every
     other operator yields a bitvector. The signed/unsigned "greater" duals and the strict
@@ -74,6 +77,14 @@ val view : Term.t -> view option
     [declare-fun], like the reserved [div]/[mod]). *)
 val is_bv_sym : Symbol.t -> bool
 
+(** [is_bv_name name] iff [name] is in the bit-vector marker namespace ([.oxsmt.bv|...]).
+    This is the bit-vector [admit] grammar for the parse-time reserved minter (board #58
+    O-MINTER): {!Oxsmt_interface.Session.parse_minter} and a standalone parse sanction
+    exactly these names. Admitting the grammar OBLIGATES the consuming-side rank/sort
+    check ({!view} verifies the decoded op's operand and result sorts against the term's
+    actual sorts), which keeps a mismatched mint inert. *)
+val is_bv_name : string -> bool
+
 (** [width_of_sort s] is [Some w] iff [s] is [Sort.BitVec w]. *)
 val width_of_sort : Sort.t -> int option
 
@@ -82,37 +93,48 @@ val width_of_sort : Sort.t -> int option
     since {!Bigint} exposes no bit operations. *)
 val bits_lsb : Bigint.t -> width:int -> bool array
 
-(* ---- Smart constructors. Each takes the session [ctx] and its [env]; each width-checks
-   and raises {!Term.Sort_error} on a violation, then builds through {!Context}. ---- *)
+(** A cap-backed minter for the reserved bitvector namespace: [mint name rank] interns a
+    [.oxsmt.bv.*] [name] with [rank]. Board #58 O-MINTER: a [Session]-driven parse applies
+    {!Oxsmt_interface.Session.parse_minter} (an opaque {!Internal_minter.t}) via
+    [Internal_minter.mint]; a standalone {!Oxsmt_smtlib_parser}[.parse] builds an
+    [Internal_minter] over its own capped env. The builders take a minter (not an
+    {!Env.t}) because the reserved namespace is unreachable through the public
+    [Env.declare_fun] door. *)
+type minter = string -> Rank.t -> Symbol.t
 
-(** [const ctx env ~value ~width] is the literal [value] (reduced into [0, 2^width)) of the
+(* ---- Smart constructors. Each takes the session [ctx] and a reserved-namespace
+   {!minter}; each width-checks and raises {!Term.Sort_error} on a violation, then builds
+   through {!Context}. ---- *)
+
+(** [const ctx mint ~value ~width] is the literal [value] (reduced into [0, 2^width)) of the
     given [width]. Raises [Invalid_argument] if [width < 1]. *)
-val const : Context.t -> Env.t -> value:Bigint.t -> width:int -> Term.t
+val const : Context.t -> minter -> value:Bigint.t -> width:int -> Term.t
 
-(** [unop ctx env op x] applies a unary operator ([Bvnot] or [Bvneg]); result width equals
-    [x]'s. Raises {!Term.Sort_error} if [x] is not a bitvector or [op] is not unary. *)
-val unop : Context.t -> Env.t -> op -> Term.t -> Term.t
+(** [unop ctx mint op x] applies a unary operator ([Bvnot] or [Bvneg]); result width
+    equals [x]'s. Raises {!Term.Sort_error} if [x] is not a bitvector or [op] is not
+    unary. *)
+val unop : Context.t -> minter -> op -> Term.t -> Term.t
 
-(** [binop ctx env op x y] applies an equal-width binary operator: the bitwise ops, the
+(** [binop ctx mint op x y] applies an equal-width binary operator: the bitwise ops, the
     arithmetic ops, the three shifts, and the four comparisons. [x] and [y] must be
     bitvectors of the {e same} width (shift amount shares the operand width, SMT-LIB).
     Result is that width, except a comparison which is [Bool]. Raises {!Term.Sort_error}
     on a width mismatch, a non-bitvector operand, or a non-binary [op]. *)
-val binop : Context.t -> Env.t -> op -> Term.t -> Term.t -> Term.t
+val binop : Context.t -> minter -> op -> Term.t -> Term.t -> Term.t
 
-(** [concat ctx env hi lo] is the concatenation ([hi] the high bits); result width is the
+(** [concat ctx mint hi lo] is the concatenation ([hi] the high bits); result width is the
     sum. Raises {!Term.Sort_error} if either operand is not a bitvector. *)
-val concat : Context.t -> Env.t -> Term.t -> Term.t -> Term.t
+val concat : Context.t -> minter -> Term.t -> Term.t -> Term.t
 
-(** [extract ctx env ~i ~j x] extracts bits [i .. j] inclusive ([i >= j >= 0],
+(** [extract ctx mint ~i ~j x] extracts bits [i .. j] inclusive ([i >= j >= 0],
     [i < width x]); result width is [i - j + 1]. Raises {!Term.Sort_error} on an
     out-of-range index or a non-bitvector operand. *)
-val extract : Context.t -> Env.t -> i:int -> j:int -> Term.t -> Term.t
+val extract : Context.t -> minter -> i:int -> j:int -> Term.t -> Term.t
 
-(** [zero_extend ctx env ~n x] prepends [n >= 0] zero bits; result width is [width x + n].
-    Raises {!Term.Sort_error} if [n < 0] or [x] is not a bitvector. *)
-val zero_extend : Context.t -> Env.t -> n:int -> Term.t -> Term.t
-
-(** [sign_extend ctx env ~n x] prepends [n >= 0] copies of [x]'s sign bit; result width is
+(** [zero_extend ctx mint ~n x] prepends [n >= 0] zero bits; result width is
     [width x + n]. Raises {!Term.Sort_error} if [n < 0] or [x] is not a bitvector. *)
-val sign_extend : Context.t -> Env.t -> n:int -> Term.t -> Term.t
+val zero_extend : Context.t -> minter -> n:int -> Term.t -> Term.t
+
+(** [sign_extend ctx mint ~n x] prepends [n >= 0] copies of [x]'s sign bit; result width
+    is [width x + n]. Raises {!Term.Sort_error} if [n < 0] or [x] is not a bitvector. *)
+val sign_extend : Context.t -> minter -> n:int -> Term.t -> Term.t

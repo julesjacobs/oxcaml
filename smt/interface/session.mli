@@ -158,9 +158,13 @@ val context : t -> Oxsmt_core.Context.t
     name (the O-MINTER narrowing; ADR-0012: [Session] stays the sole cap holder). The
     sensitive reserved namespaces (arrays ext witness, datatype testers, qvars,
     preprocessing witnesses) are minted directly through [Env.declare_reserved] by trusted
-    code and are NEVER admitted through this door. On trunk no theory mints at parse time,
-    so this minter admits {e nothing}; a theory migration widens its sanctioned set to its
-    own marker grammar. *)
+    code and are NEVER admitted through this door. The sanctioned set is the parse-time
+    theory vocabulary: it admits the bit-vector markers ([Oxsmt_core.Bv.is_bv_name],
+    [.oxsmt.bv|...]); a further theory (arrays) widens it with its own grammar.
+
+    A holder can still mint any ADMITTED shape, so admitting a grammar is PAIRED with that
+    theory's consuming-side check (bit-vectors: [Oxsmt_core.Bv.view] verifies
+    operand/result sorts and arity), which keeps a name/rank-mismatched mint inert. *)
 val parse_minter : t -> Oxsmt_core.Internal_minter.t
 
 (** [set_arrays t defs] installs the array [select]/[store] symbol registry the front end

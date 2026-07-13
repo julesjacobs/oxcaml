@@ -178,7 +178,9 @@ let context t = t.ctx
 (* board #58 O-MINTER — the MARKER-GRAMMAR REGISTRATION SITE.
    [parse_sanctioned_marker name] is the [admit] gate for the front-end minter
    {!parse_minter}: exactly the parse-time theory-internal names a session lets the
-   SMT-LIB parser mint.
+   SMT-LIB parser mint. It admits the arrays and bit-vector marker grammars (below); a
+   caller holding only a [Session.t] can mint those names and nothing else (the O-MINTER
+   close).
 
    {b PAIRING CONTRACT — a theory migration widening this MUST read it (see
      Oxsmt_core.Internal_minter.create).}
@@ -195,30 +197,36 @@ let context t = t.ctx
    [.oxsmt.qvar.*], preprocessing witnesses [.oxsmt.ite/q/r.*]) — those are minted
    directly via [Env.declare_reserved] by trusted code and have no inertness guard.
 
-   board #58 arrays migration: widened to the arrays op-symbol grammar
-   ({!Array_defs.is_op_name}: the [.oxsmt.arr.] prefix with a [|] sort-key separator). Its
-   PAIRED consuming-side inertness check (required by the contract above) is REGISTRY
-   MEMBERSHIP: the theory classifies an [App] head only via {!Array_defs.role_of_sym}, and
-   {!Array_defs.add} refuses any entry whose name is not the canonical [op_symbol_name],
-   so an admitted-but-unregistered op-shaped mint is inert. The grammar EXCLUDES the ext
-   witness [.oxsmt.arr.ext.N] (no [|]), so this door never admits the witness namespace. *)
-let parse_sanctioned_marker name = Array_defs.is_op_name name
+   ADMITTED GRAMMARS (one predicate per line; each PAIRED with its consuming-side inertness
+   check per the contract above):
+   - arrays op symbols ({!Array_defs.is_op_name}: the [.oxsmt.arr.] prefix with a [|]
+     sort-key separator). PAIRED check = REGISTRY MEMBERSHIP: the theory classifies an [App]
+     head only via {!Array_defs.role_of_sym}, and {!Array_defs.add} refuses any entry whose
+     name is not the canonical [op_symbol_name], so an admitted-but-unregistered op-shaped
+     mint is inert. EXCLUDES the ext witness [.oxsmt.arr.ext.N] (no [|]).
+   - bit-vector markers ({!Oxsmt_core.Bv.is_bv_name}: the [.oxsmt.bv|...] prefix). PAIRED
+     check = RANK AGREEMENT: {!Oxsmt_core.Bv.view} verifies the decoded op's operand/result
+     sorts and arity against the term's actual sorts, so a mis-ranked admitted marker
+     decodes to [None] (ordinary uninterpreted, at worst [unknown]), never reinterpreted. *)
+let parse_sanctioned_marker name = Array_defs.is_op_name name || Bv.is_bv_name name
 let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
-(* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
-   can never collide with one preprocessing invents.
+(* Declarations reject the reserved fresh-symbol namespace (board #48 / #58): every
+   theory-internal symbol — a preprocessing witness, a coerced qvar, and (board #58) the
+   bit-vector vocabulary's [.oxsmt.bv.*] operator/literal symbols ({!Oxsmt_core.Bv}) —
+   lives under the [.oxsmt.] prefix, which [Preprocess.is_reserved_name] rejects here.
+   This is the PRIMARY guard: a user symbol can never collide with an internal one, and
+   the only door that mints a reserved name is the cap-gated {!Env.declare_reserved} (the
+   bit-vector builders mint through it), which the public [Env] door below this guard
+   cannot reach.
 
-   They ALSO reject any name containing '\' or '|' (F2, codex BLOCKER). Internal marker
-   namespaces — currently the bit-vector vocabulary's ['\bv|...'] symbols
-   ({!Oxsmt_core.Bv}) — encode their instance in a name built from those two bytes
-   precisely because the SMT-LIB lexer forbids them in every symbol form, so no PARSED
-   symbol can collide. This closes the remaining PROGRAMMATIC door: without it,
-   [declare_fun "\\bv|bvadd|1"] forges a symbol {!Oxsmt_core.Bv.view} decodes as a real
-   [bvadd], and the bit-blaster would encode a user's opaque function as bit-vector
-   addition (a wrong verdict). The general byte rejection matches the lexer's rule exactly
-   and covers all present and future marker namespaces. (The bit-vector builders mint
-   through [Env.declare_fun] directly, below this guard, so this does not impede
-   legitimate marker minting.) *)
+   They ALSO reject any name containing '\' or '|' (F2, codex BLOCKER) — retained as
+   DEFENSE IN DEPTH. No SMT-LIB symbol form (simple or [|...|]-quoted) can contain either
+   byte (the lexer forbids them), so a name carrying one can only arrive programmatically;
+   this second, independent barrier covers the ['|'] field separator inside a bit-vector
+   or arrays marker name and any future marker scheme, even were the [.oxsmt.] prefix
+   guard ever weakened. The same rejection lives at the root [Env] door (board #58), so
+   both the Session and raw-[Env] programmatic paths are closed. *)
 let has_marker_byte name =
   String.exists (fun c -> Char.equal c '\\' || Char.equal c '|') name
 ;;
@@ -487,10 +495,23 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
      circuits immediately (never cached). The sibling engine walks (Cdclt.collect,
      Combine.add_subterms / interface_walk) all guard the same way. *)
   let visited : (int, unit) Hashtbl.t = Hashtbl.create 256 in
+  (* The bit-vector operator/literal symbols live in the reserved [.oxsmt.bv.*] namespace
+     (board #58) but, unlike a preprocessing witness or a coerced qvar, they are theory
+     VOCABULARY that legitimately appears in a user assertion — the interpreted-symbol
+     analogue of [div]/[mod] (which [is_reserved_name] also excludes). They cannot be
+     user-forged: the public declaration doors reject [.oxsmt.*], and a bare
+     [Symbol.intern] of a bit-vector name has no rank so {!Context.app} refuses it — the
+     only door that grants one is the cap-gated {!Env.declare_reserved} the bit-vector
+     builders mint through. So exempting them here is sound and restores the pre-#58
+     behaviour (before the migration these names were outside [.oxsmt.*], so the gate
+     already let them through); it is what routes a pure-[QF_BV] assertion to the
+     bit-blaster instead of degrading it. A mixed bit-vector/uninterpreted term still
+     degrades at the combinator ([Combine.require_no_bitvec_terms], sort-keyed). *)
   let bad_sym s =
     Env.is_reserved_name (Symbol.name s)
-    && (not (List.exists (Symbol.equal s) allowed))
-    && not (Array_defs.is_op_sym s)
+    && (not (Bv.is_bv_sym s))
+    && (not (Array_defs.is_op_sym s))
+    && not (List.exists (Symbol.equal s) allowed)
   in
   (* A SORT carries a symbol too: an [Uninterpreted] sort over a reserved [.oxsmt.*] name,
      minted via the public [Symbol.intern] / [Sort.uninterpreted] doors, captures an
