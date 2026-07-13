@@ -50,6 +50,10 @@ type t =
   ; mutable tester_terms : Term.t list (* registered tester applications, rev order *)
   ; mutable dt_terms : Term.t list (* every registered datatype-sorted term, rev order *)
   ; split_relevant : unit Term.Table.t (* DT terms in a diseq / under a selector-tester *)
+  ; diseq_relevant : unit Term.Table.t
+    (* DT terms that are an operand of a disequality (or a field of one, transitively) —
+         the seed set for field-relevance propagation; distinctness, not equality, is what
+         forces a field to be case-split. *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   }
@@ -77,6 +81,7 @@ let create ctx _env reg =
   ; tester_terms = []
   ; dt_terms = []
   ; split_relevant = Term.Table.create 64
+  ; diseq_relevant = Term.Table.create 64
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
   }
@@ -210,7 +215,16 @@ let assert_lit t lit =
   | Some { kind = K_eq (a, b); _ } ->
     if positive
     then Euf.assert_eq t.engine ~premise:(P_lit lit) a b
-    else Euf.assert_neq t.engine ~premise:(P_lit lit) a b
+    else (
+      Euf.assert_neq t.engine ~premise:(P_lit lit) a b;
+      (* a DISEQUALITY over datatype-sorted sides seeds field-relevance: the pigeonhole
+         pressure that forces the fields to be case-split flows only from distinctness,
+         not from a positive equality (which merely merges), so field-relevance cascades
+         from here, never from [assert_eq]. *)
+      if is_dt_sort t a.Term.sort
+      then (
+        Term.Table.replace t.diseq_relevant a ();
+        Term.Table.replace t.diseq_relevant b ()))
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -365,6 +379,29 @@ let saturate_round t ~changed : prem list option =
               | None -> ())
            | _ -> ()))
       (List.rev t.tester_terms);
+    (* single-constructor forcing: a value of a 1-constructor datatype IS that constructor
+       (a type tautology, hence an empty premise), so force [x = C (sel_1 x, ..)] for a
+       split-relevant term whose class has no witness. This is the injectivity DUAL that
+       lets congruence equate two records/tuples with equal fields
+       ([fst p = fst q ∧ snd p = snd q ⟹ p = q]); a multi-constructor choice is a guess
+       and stays a Split. Bounded: only split-relevant terms are forced, and an introduced
+       field is forced only if it is itself split-relevant. *)
+    List.iter
+      (fun x ->
+         if !conflict = None && Term.Table.mem t.split_relevant x
+         then (
+           match datatype_of_sort t x.Term.sort with
+           | Some { Defs.constructors = [ c ]; _ } ->
+             if witness_of t witnesses x = None
+             then (
+               let cterm = instantiate_ctor t c x in
+               if not (Euf.are_equal t.engine x cterm)
+               then (
+                 Euf.assert_eq t.engine ~premise:(P_derived []) x cterm;
+                 catalog t cterm;
+                 changed := true))
+           | Some _ | None -> ()))
+      (List.rev t.dt_terms);
     !conflict
 ;;
 
@@ -435,7 +472,16 @@ let occurs_check t witnesses : prem list option =
         (succs k);
       Hashtbl.replace color k `Black)
   in
-  Hashtbl.iter (fun k _ -> if not (Hashtbl.mem color k) then dfs k) witnesses;
+  (* Start the DFS from each witness class in a DETERMINISTIC order (registration order of
+     the constructor terms), never [Hashtbl.iter] over [witnesses] — the iteration order
+     of a Hashtbl is unspecified, so which cycle (and thus which conflict premise set) is
+     found would vary run-to-run, breaking I6 and cert reproducibility even though the
+     verdict is stable. *)
+  List.iter
+    (fun cterm ->
+       let k = Euf.class_of t.engine cterm in
+       if Hashtbl.mem witnesses k && not (Hashtbl.mem color k) then dfs k)
+    (List.rev t.ctor_terms);
   !result
 ;;
 
@@ -477,9 +523,45 @@ let collect_propagations t : Lit.t list =
     (Euf.propagate t.engine)
 ;;
 
+(* Propagate split-relevance through constructor fields, to a fixpoint: if a
+   split-relevant class has a constructor witness [C (a1..an)], its datatype-sorted fields
+   become split-relevant too. Without this, a bounded-enum FIELD pigeonhole
+   ([distinct (C x) (C y) (C z)] over a 2-value field type) never case-splits the fields
+   [x y z], so the split loop terminates and [Final] wrongly reports Sat — the fields must
+   be split so congruence surfaces the pigeonhole (two equal fields ⟹ their [C _] are
+   congruent ⟹ violate a distinctness). Non-datatype fields (e.g. Int) are left alone. *)
+let mark_field_relevance t witnesses =
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter
+      (fun x ->
+         if Term.Table.mem t.diseq_relevant x
+         then (
+           match witness_of t witnesses x with
+           | Some wterm ->
+             let _, wargs = Option.get (head_args wterm) in
+             Array.iter
+               (fun a ->
+                  if is_dt_sort t a.Term.sort && not (Term.Table.mem t.diseq_relevant a)
+                  then (
+                    (* into [split_relevant] so the field is case-split, and
+                     [diseq_relevant] so a nested field cascades further *)
+                    Term.Table.replace t.split_relevant a ();
+                    Term.Table.replace t.diseq_relevant a ();
+                    changed := true))
+               wargs
+           | None -> ()))
+      t.dt_terms
+  done
+;;
+
 (* At [Final] with no propagation pending: force a constructor for the tag-least
-   split-relevant datatype term whose class has no constructor yet (>= 2 constructors), as
-   the exhaustiveness clause [is-C1 x ∨ .. ∨ is-Ck x]. *)
+   split-relevant datatype term whose class has no constructor yet, as the exhaustiveness
+   clause [is-C1 x ∨ .. ∨ is-Ck x]. Only fires for >= 2 constructors (a genuine guess
+   among distinct atoms, CONTRACT-SPLIT); a single-constructor type is forced in
+   saturation (an entailed fact, not a guess), and a 0-constructor type (parser-rejected;
+   total here for safety) never splits. *)
 let exhaustiveness_split t witnesses : Term.t list option =
   let cand = ref None in
   List.iter
@@ -522,6 +604,7 @@ let check t effort =
            | _ :: _, _ -> Theory.Propagations lits
            | [], Theory.Propagate -> Theory.Propagations []
            | [], Theory.Final ->
+             mark_field_relevance t witnesses;
              (match exhaustiveness_split t witnesses with
               | Some terms -> Theory.Split terms
               | None -> Theory.Sat))))
@@ -645,15 +728,20 @@ let constructor_model t : (Term.t * ctor_tree) list option =
         0
         c.Defs.selectors
     in
-    let base_ctor (dt : Defs.datatype) : Defs.constructor =
-      let cs = dt.Defs.constructors in
-      match List.find_opt (fun (c : Defs.constructor) -> c.Defs.selectors = []) cs with
-      | Some c -> c
-      | None ->
-        List.fold_left
-          (fun best c -> if dt_field_count c < dt_field_count best then c else best)
-          (List.hd cs)
-          (List.tl cs)
+    let base_ctor (dt : Defs.datatype) : Defs.constructor option =
+      match dt.Defs.constructors with
+      | [] -> None (* 0-constructor type (parser-rejected); stay total *)
+      | c0 :: rest ->
+        (match
+           List.find_opt (fun (c : Defs.constructor) -> c.Defs.selectors = []) (c0 :: rest)
+         with
+         | Some c -> Some c
+         | None ->
+           Some
+             (List.fold_left
+                (fun best c -> if dt_field_count c < dt_field_count best then c else best)
+                c0
+                rest))
     in
     let rec tree_of (x : Term.t) (depth : int) : ctor_tree =
       let k = Euf.class_of t.engine x in
@@ -682,18 +770,20 @@ let constructor_model t : (Term.t * ctor_tree) list option =
       if depth > 10_000
       then Leaf (Model.Uninterp 0)
       else (
-        let c = base_ctor dt in
-        Ctor
-          ( Symbol.name c.Defs.sym
-          , List.map
-              (fun (s : Defs.selector) ->
-                 if is_dt_sort t s.Defs.field_sort
-                 then (
-                   match datatype_of_sort t s.Defs.field_sort with
-                   | Some d -> base_tree d (depth + 1)
-                   | None -> Leaf (Model.Uninterp 0))
-                 else Leaf (Model.Int 0))
-              c.Defs.selectors ))
+        match base_ctor dt with
+        | None -> Leaf (Model.Uninterp 0)
+        | Some c ->
+          Ctor
+            ( Symbol.name c.Defs.sym
+            , List.map
+                (fun (s : Defs.selector) ->
+                   if is_dt_sort t s.Defs.field_sort
+                   then (
+                     match datatype_of_sort t s.Defs.field_sort with
+                     | Some d -> base_tree d (depth + 1)
+                     | None -> Leaf (Model.Uninterp 0))
+                   else Leaf (Model.Int 0))
+                c.Defs.selectors ))
     in
     let dt_terms = List.sort_uniq (fun a b -> compare a.Term.tag b.Term.tag) t.dt_terms in
     Some (List.map (fun x -> x, tree_of x 0) dt_terms))

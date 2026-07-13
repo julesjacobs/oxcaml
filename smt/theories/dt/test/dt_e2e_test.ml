@@ -135,6 +135,81 @@ let () =
    then (
      incr failures;
      Printf.printf "  FAIL enum-sat: 3 distinct colors reported unsat\n"));
+  (* codex fix 1 — bounded-enum FIELD pigeonhole. wrap injects a 2-value enum; three
+     distinct wraps force three distinct fields, impossible over two values: unsat. Before
+     the field-relevance fix this returned Sat (the fields were never case-split). *)
+  (let s = Session.create () in
+   let bit = Sort.datatype_ (Session.declare_sort s "Bit") in
+   ignore
+     (Session.declare_datatype
+        s
+        bit
+        [ { Session.ctor_name = "b0"; fields = [] }
+        ; { Session.ctor_name = "b1"; fields = [] }
+        ]);
+   let ws = Sort.datatype_ (Session.declare_sort s "W") in
+   let dtw =
+     Session.declare_datatype
+       s
+       ws
+       [ { Session.ctor_name = "wrap"; fields = [ "get", bit ] } ]
+   in
+   let wrap = ctor dtw 0 in
+   let ctx = Session.context s in
+   let w a = Context.app ctx wrap [ k s a bit ] in
+   Session.assert_term s (Context.distinct ctx [ w "e1"; w "e2"; w "e3" ]);
+   expect
+     "enum-field pigeonhole: 3 distinct wraps of a 2-value field"
+     (Session.check_sat s)
+     Session.Unsat);
+  (* discrimination: TWO distinct wraps of a 2-value field is satisfiable (the field split
+     must not over-refute). NOT unsat is the soundness requirement (sat may degrade). *)
+  (let s = Session.create () in
+   let bit = Sort.datatype_ (Session.declare_sort s "Bit2") in
+   ignore
+     (Session.declare_datatype
+        s
+        bit
+        [ { Session.ctor_name = "z0"; fields = [] }
+        ; { Session.ctor_name = "z1"; fields = [] }
+        ]);
+   let ws = Sort.datatype_ (Session.declare_sort s "W2") in
+   let dtw =
+     Session.declare_datatype
+       s
+       ws
+       [ { Session.ctor_name = "wrap2"; fields = [ "g2", bit ] } ]
+   in
+   let wrap = ctor dtw 0 in
+   let ctx = Session.context s in
+   let w a = Context.app ctx wrap [ k s a bit ] in
+   Session.assert_term s (Context.distinct ctx [ w "f1"; w "f2" ]);
+   incr checks;
+   if Session.check_sat s = Session.Unsat
+   then (
+     incr failures;
+     Printf.printf "  FAIL enum-field-sat: 2 distinct wraps reported unsat\n"));
+  (* codex fix 2 — single-constructor record: fst p = fst q ∧ snd p = snd q ∧ p ≠ q is
+     unsat (forcing p = mk(fst p, snd p), q = mk(fst q, snd q), then congruence equates
+     them ⟹ p = q). Before the single-ctor forcing this returned Sat. *)
+  (let s = Session.create () in
+   let ps = Sort.datatype_ (Session.declare_sort s "Pair") in
+   let dt =
+     Session.declare_datatype
+       s
+       ps
+       [ { Session.ctor_name = "mk"; fields = [ "fst", Sort.int; "snd", Sort.int ] } ]
+   in
+   let fst_ = sel dt 0 0
+   and snd_ = sel dt 0 1 in
+   let ctx = Session.context s in
+   let p = k s "p" ps
+   and q = k s "q" ps in
+   let ap f x = Context.app ctx f [ x ] in
+   Session.assert_term s (Context.eq ctx (ap fst_ p) (ap fst_ q));
+   Session.assert_term s (Context.eq ctx (ap snd_ p) (ap snd_ q));
+   Session.assert_term s (Context.not_ ctx (Context.eq ctx p q));
+   expect "record: fst=fst & snd=snd & p<>q refutes" (Session.check_sat s) Session.Unsat);
   Printf.printf "Dt e2e tests: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
