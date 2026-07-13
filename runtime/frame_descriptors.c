@@ -32,13 +32,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__ELF__)
+/* The bake/load fast path is ELF-only (weak-symbol section reserve); its
+   file I/O and timing helpers are POSIX. Non-ELF targets compile none of
+   it and always take the rebuild path below. */
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#if defined(__ELF__)
 #include <link.h>
+#include "caml/osdeps.h" /* caml_secure_getenv */
 #endif
 
 struct caml_frame_descrs {
@@ -528,9 +532,13 @@ void caml_init_frame_descriptors(void)
   /* `init_frame_descriptors` is called from `init_gc`, before
      any mutator can run. We can mutate [current_frame_descrs]
      at will. */
-  const char *fstats = getenv("CAML_FRAME_STATS");
-  const char *fbake = getenv("CAML_FRAME_BAKE");
-  int bake_verify = getenv("CAML_FRAME_BAKE_VERIFY") != NULL;
+#if defined(__ELF__)
+  /* caml_secure_getenv: bake mode truncates and writes a caller-named
+     file with the process's privileges, so it must be inert (like the
+     other runtime env controls) in setuid/setgid executables. */
+  const char *fstats = caml_secure_getenv("CAML_FRAME_STATS");
+  const char *fbake = caml_secure_getenv("CAML_FRAME_BAKE");
+  int bake_verify = caml_secure_getenv("CAML_FRAME_BAKE_VERIFY") != NULL;
   struct timespec t0, t1;
   if (fstats) clock_gettime(CLOCK_MONOTONIC, &t0);
   int hit = 0;
@@ -552,6 +560,10 @@ void caml_init_frame_descriptors(void)
   /* Bake mode: the section image is dumped; exit before running any mutator.
      _exit avoids atexit handlers touching the half-initialised runtime. */
   if (fbake) { fflush(NULL); _exit(0); }
+#else
+  /* Non-ELF targets: no baked-table support, always rebuild. */
+  add_frame_descriptors(&current_frame_descrs, frametables);
+#endif /* __ELF__ */
 }
 
 static void register_frametables_from_stw_single(

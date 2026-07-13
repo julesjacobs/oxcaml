@@ -26,5 +26,12 @@
 #define FRAME_BAKED_RESERVE \
   (FRAME_BAKED_BODY_OFF + FRAME_BAKED_CAP_MAX * sizeof(void *))
 
+#if defined(__ELF__)
 __attribute__((section(".caml_frametable_baked"), aligned(4096)))
 unsigned char caml_baked_frametable[FRAME_BAKED_RESERVE];
+#else
+/* Mach-O/PE need different section syntax and frame_descriptors.c never
+   references the baked table there; keep this translation unit empty so
+   non-ELF builds that link the reserve object still compile. */
+typedef int caml_frame_bake_reserve_is_elf_only;
+#endif
