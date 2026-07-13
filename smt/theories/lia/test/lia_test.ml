@@ -463,6 +463,9 @@ let test_bruteforce () =
   let mismatches = ref 0 in
   let unknowns = ref 0 in
   let total_pivots = ref 0 in
+  (* Bromberger-Fleury cube-test arm, cross-checked against the same exhaustive oracle. *)
+  let cube_mismatches = ref 0 in
+  let cube_hits = ref 0 in
   for _ = 1 to systems do
     let n = rand_range 1 3 in
     let fx = make_fixture n in
@@ -496,6 +499,25 @@ let test_bruteforce () =
         constraints := (!coeffs, const, polarity) :: !constraints)
     done;
     let expected = enumerate n !constraints in
+    (* Independent cube arm on the SAME system, BEFORE b&b (cube_model restores the
+       simplex bounds it shrinks, so solve_integer below is unaffected). Any model it
+       returns MUST satisfy every constraint AND the system MUST be genuinely SAT (the
+       exhaustive [enumerate] is the oracle). Returning [None] on a real (but thin) SAT
+       region is allowed — the test is sufficient, not necessary; only a wrong model, or a
+       model on an unsat system, is a bug. Discriminates a broken shrink and a broken
+       re-verification. *)
+    ignore (Lia.check fx.solver : int Lia.result);
+    (match Lia.cube_model fx.solver with
+     | None -> ()
+     | Some model ->
+       incr cube_hits;
+       if not expected then incr cube_mismatches;
+       let asg = Array.make n 0 in
+       List.iter
+         (fun (term, v) ->
+            Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
+         model;
+       if not (List.for_all (sat_constraint asg) !constraints) then incr cube_mismatches);
     (match Lia.solve_integer fx.solver with
      | Lia.Int_unknown -> incr unknowns
      | Lia.Int_sat model ->
@@ -512,6 +534,11 @@ let test_bruteforce () =
   done;
   check "brute-force: no sat/unsat mismatches" (!mismatches = 0);
   check "brute-force: no unknowns on bounded systems" (!unknowns = 0);
+  check "brute-force cube: no wrong/unsound cube models" (!cube_mismatches = 0);
+  (* Non-vacuity: the cube test must actually fire (return a model) on a real fraction of
+     the random systems, else the arm above proves nothing. *)
+  check "brute-force cube: fired on a meaningful set" (!cube_hits > systems / 20);
+  Printf.printf "    (cube: %d hits, %d mismatches)\n" !cube_hits !cube_mismatches;
   Printf.printf
     "    (%d systems, %d mismatches, %d unknowns, %d total pivots)\n"
     systems

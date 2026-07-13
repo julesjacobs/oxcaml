@@ -112,8 +112,19 @@ val suggest_branch : 'tok t -> (Term.t * Term.t) option
     ({!register_atom}). *)
 val propagate : 'tok t -> (Term.t * bool * 'tok list) list
 
+(** [cube_model t] — after a {!Sat_candidate} whose ℚ-model is not integral — runs the
+    Bromberger–Fleury unit cube test ({!Simplex.cube_test}) to find an integer model with
+    no branch-and-bound. [Some model] (a total integer model over the problem variables,
+    also returned by a subsequent {!model} until the next {!check}) iff the test succeeds;
+    [None] means fall back to {!suggest_branch}. Sound: the point is re-verified feasible
+    by the simplex and by the session's independent R1 check, so a wrong point degrades to
+    [unknown], never a wrong [sat]. Sets the {!solve_integer}-style dirty flag (the test
+    push/pops simplex bounds). *)
+val cube_model : 'tok t -> (Term.t * int) list option
+
 (** [model t] is the integer assignment of the problem variables; valid only after
-    {!solve_integer} returned [Int_sat] (raises {!Failure} if a value is non-integral). *)
+    {!solve_integer} returned [Int_sat] or {!cube_model} returned [Some] (raises
+    {!Failure} if a value is non-integral and no cube model is stashed). *)
 val model : 'tok t -> (Term.t * int) list
 
 (** [rational_value t term] is the current δ-rational assignment of [term]'s variable (its

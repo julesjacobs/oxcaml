@@ -93,3 +93,16 @@ val poison : 'a t -> unit
 
 (** Number of variables allocated. *)
 val num_vars : 'a t -> int
+
+(** [cube_test t problem_vars] — the Bromberger–Fleury unit cube test (TACAS 2016). A
+    {e sufficient} integer-feasibility test that finds a model without branch-and-bound:
+    shrink every constraint interval inward by half the 1-norm of its coefficient row and
+    test rational feasibility of the shrunk system. [Some assignment] (a rounded integer
+    value per id in [problem_vars]) iff the shrunk system is feasible AND the rounded
+    point re-verifies feasible against the ORIGINAL bounds; [None] otherwise (inconclusive
+    — the caller falls back to branching). Runs under an internal {!push}/{!pop} so no
+    tightened bound persists and the tableau is left feasible; never poisons (all
+    arithmetic is exact/non-raising, and the sole int63 projection is caught).
+    [problem_vars] must be the integer variables to round; every coefficient row's def
+    references only these. *)
+val cube_test : 'a t -> int list -> (int * Rational.t) list option

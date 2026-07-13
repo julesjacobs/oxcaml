@@ -547,3 +547,109 @@ let apply_undo t = function
 
 let push t = Oxsmt_core.Trail.push t.trail ()
 let pop t n = Oxsmt_core.Trail.pop t.trail ~apply:(apply_undo t) n
+
+(* ---- Unit cube test (Bromberger & Fleury, "Fast cube tests for LIA constraint solving",
+   TACAS 2016). A sufficient integer-feasibility test that finds a model with no
+   branch-and-bound: shrink every constraint interval inward by half the 1-norm of the
+   constraint's coefficient row, and test rational feasibility of the shrunk system. If it
+   is feasible, its LP point rounded to the nearest integer satisfies the ORIGINAL system
+   — rounding each problem variable by at most 1/2 moves a constraint value [def·x] by at
+   most (1/2)·‖def‖₁, exactly the shrink — so it is a genuine integer model. Failure is
+   inconclusive (fall back to b&b): the test is sufficient, not necessary. ---- *)
+
+let half = Rational.of_frac 1 2
+
+(* Σ|coeffᵢ| of a var's immutable def over the problem variables (its sensitivity to
+   rounding each problem var by ≤ 1/2). A problem var's def is the singleton [{id:1}] so
+   its 1-norm is 1; a slack's is the sum of its |coefficients|. *)
+let one_norm (def : linexp) =
+  IntMap.fold (fun _ c acc -> Rational.add acc (Rational.abs c)) def Rational.zero
+;;
+
+(* Nearest integer to a δ-rational's finite part, as an integer Rational
+   ([floor(c + 1/2)]; the LIA atom path never sets a δ component, so [k] is irrelevant).
+   Raises {!Rational.Overflow} only at the int63 output-projection boundary. *)
+let round_nearest (d : Delta.t) =
+  Rational.of_int (Rational.floor (Rational.add (Delta.c_part d) half))
+;;
+
+let cube_test t (problem_vars : int list) : (int * Rational.t) list option =
+  let n = Dynarray.length t.vars in
+  (* Shrink+re-solve happens under a push/pop so no tightened bound persists; the internal
+     exact arithmetic (add/sub/mul/div, two-tier Rational) never raises, so this cannot
+     poison the instance. *)
+  push t;
+  let feasible = ref true in
+  let i = ref 0 in
+  while !feasible && !i < n do
+    let v = get t !i in
+    let shift = Delta.of_rat (Rational.mul half (one_norm v.def)) in
+    (match v.lower with
+     | Some b ->
+       (match assert_lower t v.id (Delta.add b.bval shift) b.reason with
+        | Some _ -> feasible := false
+        | None -> ())
+     | None -> ());
+    if !feasible
+    then (
+      match v.upper with
+      | Some b ->
+        (match assert_upper t v.id (Delta.sub b.bval shift) b.reason with
+         | Some _ -> feasible := false
+         | None -> ())
+      | None -> ());
+    incr i
+  done;
+  (if !feasible
+   then
+     feasible
+     := match check t with
+        | None -> true
+        | Some _ -> false);
+  (* Read the shrunk LP point at the problem vars BEFORE popping: [pop] restores bounds
+     but not values, and the restore-check below re-pivots (changing values). *)
+  let lp_point =
+    if !feasible
+    then Some (List.map (fun id -> id, (get t id).value) problem_vars)
+    else None
+  in
+  pop t 1;
+  (* Re-establish a feasible untightened tableau for the b&b fall-back (the shrink solve
+     may have left [dirty_basic] populated or the tableau at a shrunk-only vertex). *)
+  ignore (check t : 'a conflict option);
+  match lp_point with
+  | None -> None
+  | Some pts ->
+    (try
+       let assignment = List.map (fun (id, d) -> id, round_nearest d) pts in
+       (* Re-verify the rounded integer point against the ORIGINAL bounds:
+          [def·assignment] must lie within [lower, upper] for every var. This is the
+          soundness gate — the point is returned only if the simplex confirms it feasible
+          (the cube theorem guarantees this, so a failure here would be a bug, never a
+          normal outcome). *)
+       let vals =
+         List.fold_left (fun m (id, r) -> IntMap.add id r m) IntMap.empty assignment
+       in
+       let value_of def =
+         IntMap.fold
+           (fun j c acc -> Rational.add acc (Rational.mul c (coeff vals j)))
+           def
+           Rational.zero
+       in
+       let ok = ref true in
+       let k = ref 0 in
+       while !ok && !k < n do
+         let v = get t !k in
+         let d = Delta.of_rat (value_of v.def) in
+         (match v.lower with
+          | Some b -> if not (Delta.le b.bval d) then ok := false
+          | None -> ());
+         (match v.upper with
+          | Some b -> if not (Delta.le d b.bval) then ok := false
+          | None -> ());
+         incr k
+       done;
+       if !ok then Some assignment else None
+     with
+     | Rational.Overflow -> None)
+;;

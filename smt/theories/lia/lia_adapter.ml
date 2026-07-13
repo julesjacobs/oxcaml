@@ -202,7 +202,15 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
             not the discarded [Eq v ¬Eq] tautology). *)
          (match Lia.suggest_branch t.lia with
           | None -> Fabric.Sat
-          | Some (le_atom, ge_atom) -> Fabric.Split [ le_atom; ge_atom ])))
+          | Some (le_atom, ge_atom) ->
+            (* Before branching, try the Bromberger-Fleury unit cube test: a fat feasible
+               region yields an integer model in one shrink+re-solve, skipping b&b (which
+               may not terminate on unbounded directions — the Bromberger family's
+               design). Sound: the cube model is re-verified by the simplex and the
+               session R1 check; a miss falls back to the split. *)
+            (match Lia.cube_model t.lia with
+             | Some _ -> Fabric.Sat
+             | None -> Fabric.Split [ le_atom; ge_atom ]))))
 ;;
 
 let check t effort =

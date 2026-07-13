@@ -73,6 +73,17 @@ type 'tok t =
          skip the simplex feasibility scan and return [Sat_candidate] without re-pivoting
          (FIX #3a). A [Conflict] leaves it set, so the next [check] re-runs. *)
   ; mutable overflows : int (* number of overflow-degradations to unknown *)
+  ; mutable last_cube_model : (Term.t * int) list option
+    (* set by [cube_model] when the Bromberger-Fleury cube test found an integer model
+         at the current Final; read once by [model] (the adapter reads it immediately
+         after the Final->Sat). Cleared at the start of every [check] so it can never
+         satisfy a later, non-cube Sat with a stale point. *)
+  ; mutable cube_tried : bool
+    (* the cube test runs at most ONCE per instance — the first non-integral Final, which
+     for a batch query is the b&b root (fat feasible regions are cracked there). This
+     bounds its extra LP solve to one per query, so it cannot accumulate overhead on a
+     file that b&b would otherwise close within the wall (the [cut_lemma] unsat
+     regression). *)
   }
 
 let default_budget = 2000
@@ -91,6 +102,8 @@ let create ctx =
   ; report_frames = [ [] ]
   ; check_dirty = true
   ; overflows = 0
+  ; last_cube_model = None
+  ; cube_tried = false
   }
 ;;
 
@@ -284,6 +297,9 @@ let externalize (c : _ Simplex.conflict) : 'tok conflict =
 
 let check t =
   ensure_live t;
+  (* A cube model is valid only within the single Final->model window that produced it;
+     clear it here so a later (non-cube) Sat can never read a stale point. *)
+  t.last_cube_model <- None;
   (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
      feasible check. The tableau/assignment the previous [check] certified feasible is
      still current (no assert/pop happened), so returning [Sat_candidate] re-certifies the
@@ -543,7 +559,44 @@ let extract_model t =
 
 let model t =
   ensure_live t;
-  extract_model t
+  match t.last_cube_model with
+  | Some m -> m
+  | None -> extract_model t
+;;
+
+(* Bromberger-Fleury unit cube test (see {!Simplex.cube_test}): after a {!Sat_candidate}
+   whose ℚ-model is not integral, try to satisfy the asserted atoms with an integer model
+   directly, before branch-and-bound. On success the model is stashed in [last_cube_model]
+   (which {!model} then returns) and [Some] is returned; [None] means fall back to
+   {!suggest_branch}. Sound: the point is re-verified feasible by the simplex, and the
+   session's R1 model check re-validates it independently — a wrong point degrades to
+   [unknown], never a wrong [sat]. The internal cube test push/pops simplex bounds, so
+   [check_dirty] is set (mirroring {!solve_integer}) to force the next {!check} to re-run. *)
+let cube_model t =
+  ensure_live t;
+  if t.cube_tried
+  then None
+  else (
+    t.cube_tried <- true;
+    t.check_dirty <- true;
+    let ids = Dynarray.fold_left (fun acc (id, _term) -> id :: acc) [] t.problem_vars in
+    match Simplex.cube_test t.simplex ids with
+    | None -> None
+    | Some assignment ->
+      (try
+         let vals = Hashtbl.create (List.length assignment) in
+         List.iter (fun (id, r) -> Hashtbl.replace vals id (Rational.num r)) assignment;
+         let m =
+           Dynarray.fold_left
+             (fun acc (id, term) -> (term, Hashtbl.find vals id) :: acc)
+             []
+             t.problem_vars
+           |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
+         in
+         t.last_cube_model <- Some m;
+         Some m
+       with
+       | Rational.Overflow -> None))
 ;;
 
 let solve_integer ?(budget = default_budget) t =
