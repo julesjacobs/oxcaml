@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -311,6 +311,16 @@ dt-sat-gate:
 	$(DUNE) build tests/solver/dt_sat_gate.exe
 	$(DUNE) exec tests/solver/dt_sat_gate.exe -- $(DT_SAT_GOLDENS)
 
+## array-sat-gate — arrays SAT-direction gate (task #14). Drives the tests/arr-goldens-sat
+##   [:status sat] goldens through the shipped CLI (one Session per process, the product
+##   path) asserting a CHECKED sat, proves the array checker rejects an unsatisfiable
+##   storeinv-shape query, and pins the commit -> Array_model_check wiring with a
+##   fault-injection override (RED against a checker bypass). Nonzero on any failure.
+ARR_SAT_GOLDENS ?= tests/arr-goldens-sat
+array-sat-gate:
+	$(DUNE) build tests/solver/array_sat_gate.exe tests/solver/oxsmt_cli.exe
+	$(DUNE) exec tests/solver/array_sat_gate.exe -- $(ARR_SAT_GOLDENS)
+
 ## wiring-test — session layer (smt/interface) semantics + namespace guards. Push/pop
 ##   retraction, assert-after-check, THE SOUNDNESS RULE (theory atom -> unknown), model
 ##   extraction, and the reserved-namespace guard on both the session and the parser. Lives
@@ -448,7 +458,7 @@ smtlib-test:
 	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
 	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens \
-	  tests/dt-goldens-sat tests/arr-goldens tests/bv-goldens
+	  tests/dt-goldens-sat tests/arr-goldens tests/arr-goldens-sat tests/bv-goldens
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
@@ -524,6 +534,7 @@ test: check-frozen
 	$(MAKE) bv-goldens-test
 	$(MAKE) bv-op-coverage-test
 	$(MAKE) dt-sat-gate
+	$(MAKE) array-sat-gate
 	$(MAKE) regress-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots

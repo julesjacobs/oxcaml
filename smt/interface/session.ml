@@ -307,6 +307,7 @@ let declare_const t name sort = declare_fun t name (Rank.create [] sort)
    [assert_term] (a datatype must be known before its atoms are interned). *)
 let set_datatypes t defs = t.registry := defs
 let uses_datatypes t = not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+let uses_arrays t = t.has_arrays
 
 (* Install the array [select]/[store] symbol registry (arrays lane) the front end parsed.
    Records it into the shared registry ref, which flips the session onto the standalone
@@ -1057,16 +1058,45 @@ let dt_checker_override
   ref None
 ;;
 
+(* TEST-ONLY fault-injection seam for the arrays commit, mirroring {!dt_checker_override}:
+   pins that an array [Sat] is GATED on the checker verdict. [None] in production => the
+   real {!Array_model_check.check}. Set only via {!For_test.set_array_checker}. *)
+let array_checker_override
+  : (Oxsmt_core.Array_defs.t
+     -> (Term.t * Oxsmt_arr.Arr.value) list
+     -> Term.t list
+     -> bool)
+      option
+      ref
+  =
+  ref None
+;;
+
 let commit_sat t =
-  (* Arrays v1 sat-degrade: the standalone arrays theory reasons soundly for refutation
-     (ROW + extensionality add only theory-valid consequences), but its [Final]->[Sat]
-     model is not self-checkable by the R1 evaluator (which treats [select]/[store] as
-     plain uninterpreted functions with no array semantics), so a spuriously-passing R1
-     check could admit a wrong-[sat]. Withhold [sat] on any array problem -> [Unknown];
-     UNSAT is unaffected (it never reaches here). A model-emitting arrays sat is a
-     documented follow-up. *)
+  (* ARRAYS (QF_AX model construction, task #14): the standalone arrays theory is
+     installed, so soundness rests on the array self-check, not the UF [Model_check]
+     (which treats [select]/[store] as opaque functions with no array semantics). Validate
+     the array model extracted at Final ([Cdclt.array_model]) against the ORIGINAL
+     assertions with the independent [Array_model_check] (which computes
+     [select]/[store]/extensional-equality itself); report [Sat] only if it passes, else
+     [Unknown]. The scalar [model] type cannot carry array values, so [get_model] stays
+     [None] for an array [Sat] (surfacing the map model is a follow-up); the verdict flips
+     unknown -> checked-[Sat]. *)
   if t.has_arrays
-  then Unknown
+  then (
+    match Cdclt.array_model t.cdclt with
+    | Some model ->
+      let check =
+        match !array_checker_override with
+        | Some f -> f
+        | None -> Array_model_check.check
+      in
+      if check !(t.array_registry) model t.asserted
+      then (
+        t.last_model <- None;
+        Sat)
+      else Unknown
+    | None -> Unknown)
   else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
   then (
     (* DATATYPES (GOALS Datatypes model construction): the standalone DT theory is
@@ -1247,4 +1277,5 @@ let lemma_instantiations t = Manager.instantiations t.mgr
 module For_test = struct
   let default_value = default_value
   let set_dt_checker f = dt_checker_override := f
+  let set_array_checker f = array_checker_override := f
 end

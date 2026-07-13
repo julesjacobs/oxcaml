@@ -57,3 +57,19 @@
   oxsmt_dt
   oxsmt_smtlib_parser
   oxsmt_query_loader))
+
+; Arrays sat-model gate (make array-sat-gate): drives the tests/arr-goldens-sat sat goldens
+; through the real Session asserting a CHECKED sat, pins the commit -> Array_model_check
+; wiring via a fault-injection stub, and proves the checker rejects an unsatisfiable
+; storeinv-shape array query (RED against a checker bypass).
+
+(executable
+ (name array_sat_gate)
+ (modules array_sat_gate)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_arr
+  oxsmt_smtlib_parser
+  oxsmt_query_loader
+  unix))

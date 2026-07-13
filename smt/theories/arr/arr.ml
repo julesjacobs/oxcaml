@@ -527,3 +527,123 @@ let model t =
   List.iter walk (List.rev t.atom_terms);
   Model.of_alist !acc
 ;;
+
+(* --- array sat models (§8 self-check via Array_model_check) --- *)
+
+type value =
+  | Scalar of Model.value
+  | Array of
+      { entries : (value * value) list
+      ; default : value
+      }
+
+let array_model t : (Term.t * value) list option =
+  (* A per-e-class scalar for a NON-array leaf (an index/element value). Uninterpreted and
+     Int classes take a per-class-distinct witness (distinct classes => distinct values,
+     so an index/element disequality holds); Bool is a bounded 2-value domain (like the DT
+     Bool completion); an Int class carrying a literal takes it. *)
+  let bool_memo : (int, bool) Hashtbl.t = Hashtbl.create 16 in
+  let bool_next = ref 0 in
+  let scalar_of (x : Term.t) : Model.value =
+    if Sort.equal x.Term.sort Sort.bool
+    then
+      if Euf.are_equal t.engine x t.true_const
+      then Model.Bool true
+      else if Euf.are_equal t.engine x t.false_const
+      then Model.Bool false
+      else (
+        let k = Euf.class_of t.engine x in
+        match Hashtbl.find_opt bool_memo k with
+        | Some b -> Model.Bool b
+        | None ->
+          let b = !bool_next = 1 in
+          incr bool_next;
+          Hashtbl.replace bool_memo k b;
+          Model.Bool b)
+    else (
+      match x.Term.sort with
+      | Sort.Int _ ->
+        let members = Euf.class_members t.engine x in
+        (match
+           List.find_map
+             (fun (m : Term.t) ->
+                match m.Term.node with
+                | Term.Int_const n -> Some n
+                | _ -> None)
+             members
+         with
+         | Some n ->
+           (match Bigint.to_int_opt n with
+            | Some i -> Model.Int i
+            | None -> Model.Uninterp (Euf.class_of t.engine x))
+         | None -> Model.Uninterp (Euf.class_of t.engine x))
+      | _ -> Model.Uninterp (Euf.class_of t.engine x))
+  in
+  (* Group every registered [select b j] by the e-class of its array argument [b], so an
+     array class's model map lists (value of j -> value of that select) for every read of
+     a congruent array. This is the finite part of the weak-array value; unread indices
+     take the element sort's base default. *)
+  let by_class : (int, (Term.t * Term.t) list) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun sel ->
+       match head_args sel, role_of t sel with
+       | Some (_, [| arr; j |]), Some { Defs.role = Defs.Select; _ } ->
+         let k = Euf.class_of t.engine arr in
+         Hashtbl.replace
+           by_class
+           k
+           ((j, sel) :: Option.value (Hashtbl.find_opt by_class k) ~default:[])
+       | _ -> ())
+    (List.rev t.select_terms);
+  let memo : (int, value) Hashtbl.t = Hashtbl.create 64 in
+  let rec default_of (element : Sort.t) (depth : int) : value =
+    if depth > 1_000
+    then Scalar (Model.Uninterp 0)
+    else (
+      match element with
+      | Sort.Array (_, e2) -> Array { entries = []; default = default_of e2 (depth + 1) }
+      | Sort.Bool -> Scalar (Model.Bool false)
+      | Sort.Int _ -> Scalar (Model.Int 0)
+      | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
+        Scalar (Model.Uninterp 0))
+  and value_of (x : Term.t) (depth : int) : value =
+    if depth > 1_000
+    then Scalar (Model.Uninterp 0)
+    else (
+      match x.Term.sort with
+      | Sort.Array (_index, element) ->
+        let k = Euf.class_of t.engine x in
+        (match Hashtbl.find_opt memo k with
+         | Some v -> v
+         | None ->
+           (* seed a base value first (cycle guard; array sorts are non-recursive so this
+              is only defensive) *)
+           Hashtbl.replace
+             memo
+             k
+             (Array { entries = []; default = default_of element (depth + 1) });
+           let sels = Option.value (Hashtbl.find_opt by_class k) ~default:[] in
+           let entries =
+             List.map
+               (fun (j, sel) -> value_of j (depth + 1), value_of sel (depth + 1))
+               sels
+           in
+           let v = Array { entries; default = default_of element (depth + 1) } in
+           Hashtbl.replace memo k v;
+           v)
+      | _ -> Scalar (scalar_of x))
+  in
+  (* one value per registered subterm of an asserted atom (array leaves + index/element
+     leaves; the checker computes select/store/equality itself) *)
+  let seen = Term.Table.create 128 in
+  let acc = ref [] in
+  let rec collect (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.replace seen term ();
+      acc := (term, value_of term 0) :: !acc;
+      List.iter collect (children term))
+  in
+  List.iter collect (List.rev t.atom_terms);
+  Some !acc
+;;

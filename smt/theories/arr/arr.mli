@@ -53,3 +53,25 @@ val explain : t -> Lit.t -> Explanation.t
 val push : t -> unit
 val pop : t -> int -> unit
 val model : t -> Model.t
+
+(** A model value for the §8 array self-check ({!Oxsmt_interface.Array_model_check}):
+    either a [Scalar] (an index/element leaf — [Int]/[Bool]/uninterpreted-element witness)
+    or an [Array] as a finite index→element map ([entries], first-match) plus a [default]
+    element for every unlisted index. Array equality is extensional: two [Array] values
+    are equal iff their defaults are equal and they agree on the union of their listed
+    indices. *)
+type value =
+  | Scalar of Model.value
+  | Array of
+      { entries : (value * value) list
+      ; default : value
+      }
+
+(** [array_model t] is a candidate model — one {!value} per registered array-sorted term
+    (a finite map built from the [select] terms on its e-class plus a base default) and
+    one scalar per registered index/element leaf — valid after a [check Final] returned
+    [Sat]. [None] if a needed value cannot be formed (fail-closed). The independent
+    {!Oxsmt_interface.Array_model_check} evaluates every ORIGINAL assertion under it,
+    computing [select]/[store]/equality itself, and the session reports [sat] only if all
+    hold — so a satisfiable array query becomes a CHECKED sat, never a guessed one. *)
+val array_model : t -> (Term.t * value) list option

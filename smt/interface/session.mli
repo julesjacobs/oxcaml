@@ -200,6 +200,13 @@ val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
     non-self-checkable UF sat. *)
 val uses_datatypes : t -> bool
 
+(** [true] iff an array select/store registry has been installed ([set_arrays] with a
+    non-empty registry) — i.e. the standalone arrays theory is installed. Like a datatype
+    [Sat], an array [Sat] is self-checked in process (by the array model checker) but its
+    map model is not carried by the scalar [model] type, so {!get_model} is [None]; a
+    front end uses this to report [sat] on the verdict alone. *)
+val uses_arrays : t -> bool
+
 (** One constructor for {!declare_datatype}: its name and each field's (selector name,
     sort). A nullary constructor (an enum case) has [fields = []]. *)
 type ctor_decl =
@@ -412,6 +419,19 @@ module For_test : sig
   val set_dt_checker
     :  (Oxsmt_core.Datatype_defs.t
         -> (Oxsmt_core.Term.t * Oxsmt_dt.Dt.ctor_tree) list
+        -> Oxsmt_core.Term.t list
+        -> bool)
+         option
+    -> unit
+
+  (** Substitute (or, with [None], restore) the arrays model self-checker that
+      {!check_sat}'s commit consults for an array [Sat]. Exposed ONLY to pin the commit ->
+      checker WIRING (a fault-injection test installs a reject-all stub and asserts the
+      session then reports [Unknown] on a genuinely-sat array query). [None] (the default,
+      and the only production state) uses the real {!Array_model_check}. *)
+  val set_array_checker
+    :  (Oxsmt_core.Array_defs.t
+        -> (Oxsmt_core.Term.t * Oxsmt_arr.Arr.value) list
         -> Oxsmt_core.Term.t list
         -> bool)
          option

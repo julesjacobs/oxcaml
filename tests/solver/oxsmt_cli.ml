@@ -227,14 +227,16 @@ let solve_batch ?max_effort ?(presolve = true) src =
                 model rather than crash the CLI. *)
              block "unknown" None)
         | None ->
-          (* A DATATYPES session self-checks its [Sat] with the in-process
-             constructor-tree checker (Session.commit_sat), but the scalar [model] type
-             cannot carry a constructor tree, so [get_model] is [None] here (tree-model
-             transport to the external eval is a follow-up). Report [sat] on the verdict —
-             matching the headline classifier, which decides on the verdict alone — rather
-             than downgrading to [unknown]. A NON-DT modelless [Sat] (a UF table we could
-             not render) stays the sound [unknown]. *)
-          if Session.uses_datatypes s then block "sat" None else block "unknown" None)
+          (* A DATATYPES or ARRAYS session self-checks its [Sat] with the in-process
+             constructor-tree / array-map checker (Session.commit_sat), but the scalar
+             [model] type cannot carry a tree or an array map, so [get_model] is [None]
+             here (model transport to the external eval is a follow-up). Report [sat] on
+             the verdict — matching the headline classifier, which decides on the verdict
+             alone — rather than downgrading to [unknown]. A modelless [Sat] from neither
+             theory (a UF table we could not render) stays the sound [unknown]. *)
+          if Session.uses_datatypes s || Session.uses_arrays s
+          then block "sat" None
+          else block "unknown" None)
      | Session.Unsat -> block "unsat" None
      | Session.Unknown -> block "unknown" None)
 ;;

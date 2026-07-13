@@ -104,6 +104,12 @@ val model : t -> (sort_card list * binding list) option
     is reported. Deterministic. *)
 val dt_model : t -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list option
 
+(** [array_model t] is the arrays theory's checker model, snapshotted at the accepting
+    Final->Sat when the installed theory is the standalone arrays theory (QF_AX model
+    construction); [None] otherwise. Read by {!Session}'s arrays commit branch and
+    validated by [Array_model_check] before a [sat] is reported. Deterministic. *)
+val array_model : t -> (Term.t * Oxsmt_arr.Arr.value) list option
+
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
     matcher reads the e-graph without mutating it (R6). It is a {b live} surface, NOT a
