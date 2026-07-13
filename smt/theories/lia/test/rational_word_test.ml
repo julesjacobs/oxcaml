@@ -86,6 +86,11 @@ let test_rep () =
     (rep_of (Rational.mul (q min_int) (q 2)) = `Big_int
      && Rational.to_string (Rational.mul (q min_int) (q 2)) = "-9223372036854775808");
   check
+    "max_int - min_int promotes UP to a block = 2^63-1"
+    (rep_of (Rational.sub (q max_int) (q min_int)) = `Big_int
+     && Rational.to_string (Rational.sub (q max_int) (q min_int)) = "9223372036854775807"
+    );
+  check
     "neg min_int promotes UP to a block = 2^62"
     (rep_of (Rational.neg (q min_int)) = `Big_int
      && Rational.to_string (Rational.neg (q min_int)) = "4611686018427387904");
@@ -234,6 +239,56 @@ with open(inp) as f, open(outp, "w") as o:
 |py}
 ;;
 
+(* min_int at the tier boundary (fable + codex fix-round rider). [bnorm_demote] can
+   produce BOTH the immediate min_int and a [Frac { min_int; d }] (min_int fits int63),
+   and native [-min_int]/[abs min_int] WRAP (a regression the guarded base avoided). neg
+   must be a true additive inverse and abs must be nonnegative in every tier around
+   min_int; the results promote to [Big] (|value| exceeds int63). These vectors kill an
+   unguarded neg/abs. *)
+let test_min_int () =
+  print_endline "min_int tier boundary (neg/abs must not wrap):";
+  let min_s =
+    "-4611686018427387904"
+    (* min_int = -2^62 *)
+  in
+  let pos_s =
+    "4611686018427387904"
+    (* 2^62 = -min_int, does NOT fit int63 *)
+  in
+  (* immediate min_int (den = 1) *)
+  let mi = q min_int in
+  check "immediate min_int is `Imm" (rep_of mi = `Imm);
+  check "neg(min_int) = 2^62, a Big block" (Rational.to_string (Rational.neg mi) = pos_s);
+  check "abs(min_int) = 2^62, a Big block" (Rational.to_string (Rational.abs mi) = pos_s);
+  check "neg(min_int) is nonneg" (Rational.sign (Rational.neg mi) > 0);
+  check "abs(min_int) is nonneg" (Rational.sign (Rational.abs mi) >= 0);
+  check
+    "min_int + neg(min_int) = 0"
+    (Rational.is_zero (Rational.add mi (Rational.neg mi)));
+  (* Frac { min_int; d } — reachable via bnorm_demote (den <> 1, min_int fits) *)
+  List.iter
+    (fun d ->
+       let fr =
+         s (min_s ^ "/" ^ string_of_int d)
+         (* min_int / d, a Frac *)
+       in
+       check (Printf.sprintf "min_int/%d is a `Frac" d) (rep_of fr = `Frac);
+       let expect = pos_s ^ "/" ^ string_of_int d in
+       check
+         (Printf.sprintf "neg(min_int/%d) = 2^62/%d (Big), not wrapped-negative" d d)
+         (Rational.to_string (Rational.neg fr) = expect);
+       check
+         (Printf.sprintf "abs(min_int/%d) = 2^62/%d (Big), not wrapped-negative" d d)
+         (Rational.to_string (Rational.abs fr) = expect);
+       check
+         (Printf.sprintf "abs(min_int/%d) is nonneg" d)
+         (Rational.sign (Rational.abs fr) > 0);
+       check
+         (Printf.sprintf "min_int/%d + neg = 0" d)
+         (Rational.is_zero (Rational.add fr (Rational.neg fr))))
+    [ 3; 5; 7; 4611686018427387903 (* odd/coprime and a large denominator *) ]
+;;
+
 let test_oracle () =
   print_endline "differential oracle (Python Fraction, boundary-crossing):";
   if not (have_python ())
@@ -312,6 +367,7 @@ let test_oracle () =
 let () =
   print_endline "rational-word self-test:";
   test_rep ();
+  test_min_int ();
   test_oracle ();
   Printf.printf "\nrational-word self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1

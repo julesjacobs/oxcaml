@@ -371,9 +371,19 @@ let neg x =
       bnorm_demote (Bigint.neg n) d)
   else (
     match W.to_block x with
-    (* [Frac.n] <> min_int by invariant (a min_int numerator promotes to [Big]); negation
-       preserves the magnitude and denominator, so a block stays the same arm. *)
-    | W.Frac f -> W.of_block (W.Frac { n = -f.n; d = f.d })
+    (* GUARD the [Frac] negation: [bnorm_demote] CAN produce [Frac { min_int; d }]
+       (min_int fits int63), and [-min_int] wraps; so use [neg_int] and, on its
+       [Overflow], promote to [Big] (−(min_int/d) = 2^62/d, whose numerator exceeds int63)
+       — matching the immediate arm and the pre-Zarith base. A non-min_int [Frac] negation
+       stays a [Frac] (same magnitude/denominator, gcd preserved). *)
+    | W.Frac f ->
+      (try W.of_block (W.Frac { n = neg_int f.n; d = f.d }) with
+       | Overflow ->
+         let n, d = to_big x in
+         bnorm_demote (Bigint.neg n) d)
+    (* [Big] negation preserves the >int63 magnitude, so the result is never
+       immediate/[Frac] representable — it stays [Big] (no re-demotion possible; codex
+       LOW, inert). *)
     | W.Big b -> W.of_block (W.Big { num = Bigint.neg b.num; den = b.den }))
 ;;
 
@@ -386,7 +396,14 @@ let abs x =
       bnorm_demote (Bigint.abs n) d)
   else (
     match W.to_block x with
-    | W.Frac f -> W.of_block (W.Frac { n = abs f.n; d = f.d })
+    (* GUARD as in [neg]: [abs min_int] wraps to a negative, and [Frac { min_int; d }] is
+       reachable, so use [abs_int] and promote to [Big] on its [Overflow] (|min_int/d| =
+       2^62/d exceeds int63). A non-min_int [Frac] stays a [Frac]. *)
+    | W.Frac f ->
+      (try W.of_block (W.Frac { n = abs_int f.n; d = f.d }) with
+       | Overflow ->
+         let n, d = to_big x in
+         bnorm_demote (Bigint.abs n) d)
     | W.Big b -> W.of_block (W.Big { num = Bigint.abs b.num; den = b.den }))
 ;;
 
