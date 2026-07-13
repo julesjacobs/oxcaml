@@ -61,18 +61,19 @@ val parse : string -> t
     context (the single-Context contract, ADR-0003). Re-declaring an already-known symbol
     is idempotent.
 
-    [?internal_mint] (board #58) is the cap-backed minter for theory-internal reserved
-    symbols ([.oxsmt.<theory>.*]) that must be minted mid-parse — arrays op symbols are
-    per-(index sort, element sort) instantiations discovered only at the first
-    [select]/[store] use, so they cannot be pre-minted at a declaration site. A
-    [Session]-driven parse threads {!Oxsmt_interface.Session.internal_minter}, which is
-    [Env.declare_reserved cap env] closed over the session's private cap: the parser mints
-    a collision-proof internal symbol without ever holding the cap (ADR-0012: only
-    [Session] holds it). Omitting it (a standalone {!parse}, or a driver with no theory
-    that mints at parse time) leaves a default that raises {!Malformed} if such a mint is
-    ever requested — never a silent success. *)
+    [?internal_mint] (board #58 O-MINTER) is the opaque cap-backed minter for
+    theory-internal reserved symbols ([.oxsmt.<theory>.*]) that must be minted mid-parse —
+    arrays op symbols are per-(index sort, element sort) instantiations discovered only at
+    the first [select]/[store] use, so they cannot be pre-minted at a declaration site. A
+    [Session]-driven parse threads {!Oxsmt_interface.Session.parse_minter}, an opaque
+    {!Oxsmt_core.Internal_minter.t} wrapping [Env.declare_reserved] over the session's
+    private cap behind an [admit] gate: the parser mints a collision-proof sanctioned
+    marker without ever holding the cap or a general closure (ADR-0012: only [Session]
+    holds it). Omitting it (a standalone {!parse}, or a driver with no theory that mints
+    at parse time) makes any mid-parse mint request raise {!Malformed} — never a silent
+    success. *)
 val parse_into
-  :  ?internal_mint:(string -> Oxsmt_core.Rank.t -> Oxsmt_core.Symbol.t)
+  :  ?internal_mint:Oxsmt_core.Internal_minter.t
   -> Oxsmt_core.Env.t
   -> Oxsmt_core.Context.t
   -> string

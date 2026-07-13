@@ -83,27 +83,37 @@ type pstate =
     (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
          [Sort.datatype_] rather than [Sort.uninterpreted] *)
   ; mutable datatypes : Datatype_defs.t (* the accumulated datatype shape registry *)
-  ; internal_mint : string -> Rank.t -> Symbol.t
-    (* board #58: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*]) mid-parse.
-     Some internal symbols cannot be pre-minted at a declaration site: arrays op symbols
-     are per-(index sort, element sort) instantiations discovered only at the first
-     [select]/[store] use. Supplied by the parser's OWNER — a [Session]-driven parse
-     threads [Oxsmt_interface.Session.internal_minter], which is
-     [Env.declare_reserved cap env] closed over the session's private cap, so the parser
-     can mint a collision-proof internal symbol WITHOUT ever holding the cap (ADR-0012:
-     only [Session] holds it; the closure is the least authority that does the job). A
-     standalone [parse] has no cap-backed minter; its default raises [Malformed] if a
-     theory ever asks to mint here. Inert on trunk — no parser path mints internal names
-     yet — this is the arrays/bv migration hook. *)
+  ; internal_mint : Internal_minter.t option
+    (* board #58 O-MINTER: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*])
+     mid-parse. Some internal symbols cannot be pre-minted at a declaration site: arrays
+     op symbols are per-(index sort, element sort) instantiations discovered only at the
+     first [select]/[store] use. Supplied by the parser's OWNER as an OPAQUE
+     {!Oxsmt_core.Internal_minter.t} — a [Session]-driven parse threads
+     [Oxsmt_interface.Session.parse_minter], which wraps [Env.declare_reserved] over the
+     session's private cap behind an [admit] gate, so the parser can mint a
+     collision-proof sanctioned marker WITHOUT ever holding the cap or a general closure
+     (ADR-0012: only [Session] holds the cap). [None] (a standalone [parse], or a driver
+     that threads no [~internal_mint]) means no cap-backed minter: {!internal_mint} then
+     raises [Malformed] rather than silently succeeding. Inert on trunk — no parser path
+     mints internal names yet — this is the arrays/bv migration hook. *)
   }
 
 module Tok = Oxsmt_lexical.Lexer
 
-(* Get-or-mint a theory-internal reserved symbol mid-parse via the owner-supplied
-   [internal_mint] closure (board #58). Callers (e.g. the arrays branch's [array_op_sym])
-   go through here instead of [Env.declare_fun st.env], which now rejects the internal
-   marker byte class. Staged ahead of its consumer, so it is unused on trunk. *)
-let[@warning "-32"] internal_mint st name rank = st.internal_mint name rank
+(* Get-or-mint a theory-internal reserved symbol mid-parse via the owner-supplied opaque
+   {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers (e.g. the arrays branch's
+   [array_op_sym]) go through here instead of [Env.declare_fun st.env], which now rejects
+   the internal marker byte class. With no minter supplied, degrade to [Malformed] (a
+   sound unknown), never a silent success. Staged ahead of its consumer, so it is unused
+   on trunk. *)
+let[@warning "-32"] internal_mint st name rank =
+  match st.internal_mint with
+  | Some m -> Internal_minter.mint m name rank
+  | None ->
+    malformedf
+      "internal symbol %s requires a cap-backed minter (parse this through a Session)"
+      name
+;;
 
 (* ---- sorts ---- *)
 
@@ -820,17 +830,7 @@ let run st sexps =
   !logic, !status, List.rev !asserts, List.rev !lemmas
 ;;
 
-(* [internal_mint] default (board #58): no cap-backed minter was supplied (a standalone
-   [parse], or a driver that threads no [~internal_mint]), so a theory asking to mint an
-   internal symbol here is a query the reader cannot serve — degrade to [Malformed] (never
-   a silent success that would let an internal name in through an unauthorized path). *)
-let no_internal_mint name _rank =
-  malformedf
-    "internal symbol %s requires a cap-backed minter (parse this through a Session)"
-    name
-;;
-
-let parse_into ?(internal_mint = no_internal_mint) env ctx src =
+let parse_into ?internal_mint env ctx src =
   let st =
     { ctx
     ; env

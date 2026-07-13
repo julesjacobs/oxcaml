@@ -146,17 +146,22 @@ val env : t -> Oxsmt_core.Env.t
 (** The session's {!Oxsmt_core.Context.t} (same rationale as {!env}). *)
 val context : t -> Oxsmt_core.Context.t
 
-(** [internal_minter t] is the cap-backed minter for theory-internal reserved symbols
-    ([".oxsmt.<theory>.*"], board #58): [Oxsmt_core.Env.declare_reserved] closed over the
-    session's PRIVATE cap and {!env}. A front end that must mint an internal symbol
+(** [parse_minter t] is the cap-backed minter for theory-internal reserved symbols
+    ([".oxsmt.<theory>.*"], board #58 O-MINTER), for a front end that must mint one
     mid-parse — the SMT-LIB parser's [?internal_mint] hook, because arrays op symbols are
     per-sort instantiations discovered only at first [select]/[store] use and so cannot be
-    pre-minted at a declaration site — threads this closure. The caller can mint a
-    collision-proof internal symbol but never obtains the {!Oxsmt_core.Env.reserved_cap}
-    itself, keeping the ADR-0012 invariant that [Session] is the sole cap holder. The
-    closure enforces the [".oxsmt."] prefix and the per-env cap, so it cannot forge a
-    user-namespace symbol. *)
-val internal_minter : t -> string -> Oxsmt_core.Rank.t -> Oxsmt_core.Symbol.t
+    pre-minted at a declaration site. It returns an OPAQUE
+    {!Oxsmt_core.Internal_minter.t}, NOT a bare [string -> Rank.t -> Symbol.t] closure:
+    the holder can mint only the marker names the session sanctions (via the minter's
+    [admit] gate) and never obtains the {!Oxsmt_core.Env.reserved_cap} or a re-delegatable
+    general closure — so a caller holding only a [t] cannot forge an arbitrary reserved
+    name (the O-MINTER narrowing; ADR-0012: [Session] stays the sole cap holder). The
+    sensitive reserved namespaces (arrays ext witness, datatype testers, qvars,
+    preprocessing witnesses) are minted directly through [Env.declare_reserved] by trusted
+    code and are NEVER admitted through this door. On trunk no theory mints at parse time,
+    so this minter admits {e nothing}; a theory migration widens its sanctioned set to its
+    own marker grammar. *)
+val parse_minter : t -> Oxsmt_core.Internal_minter.t
 
 (** [declare_sort]/[declare_fun]/[declare_const] declare into {!env}. They reject the
     reserved fresh-symbol namespace ([".oxsmt.*"], board #48) with [Invalid_argument] so a

@@ -706,35 +706,46 @@ let test_cap_door_mints_internal () =
      | _ -> false)
 ;;
 
-(* board #58: [Session.internal_minter] is the cap-backed closure a front end threads to
-   mint an internal symbol WITHOUT holding the cap. It mints [.oxsmt.*] fine and refuses a
-   user-namespace name (it is [Env.declare_reserved] under the hood). *)
-let test_session_internal_minter () =
+(* board #58 O-MINTER: [Session.parse_minter] returns an OPAQUE minter, not a bare general
+   [Env.declare_reserved] closure. On trunk it sanctions NO marker (no theory mints at
+   parse time), so a caller holding only a [Session.t] has NO path to mint a reserved name
+   through it — every [Internal_minter.mint] attempt is refused (the O-MINTER close).
+   DISCRIMINATING: against a permissive-admit regression (or the old public
+   [Session.internal_minter] general closure), minting ".oxsmt.arr.select|..." SUCCEEDS,
+   so [refused] returns false and the checks fail. The old [Session.internal_minter]
+   accessor is GONE (compile-enforced by session.mli). *)
+let test_session_parse_minter () =
   let s = Session.create () in
-  let mint = Session.internal_minter s in
+  let m = Session.parse_minter s in
   let r = Rank.create [ Sort.int ] Sort.int in
+  let refused name =
+    match Internal_minter.mint m name r with
+    | _ -> false
+    | exception (Invalid_argument _ | Env.Reserved_symbol _) -> true
+    | exception _ -> false
+  in
   check
-    "internal_minter mints an .oxsmt.* name"
-    (match mint ".oxsmt.arr.sel" r with
-     | _ -> true
-     | exception _ -> false);
+    "parse_minter admits no reserved name on trunk (arrays op shape)"
+    (refused ".oxsmt.arr.select|Int|Int");
   check
-    "internal_minter refuses a user-namespace name"
-    (match mint "user_fn" r with
-     | exception _ -> true
-     | _ -> false)
+    "parse_minter admits no reserved name on trunk (bv marker shape)"
+    (refused ".oxsmt.bv|8");
+  check
+    "parse_minter refuses the arrays ext-witness namespace"
+    (refused ".oxsmt.arr.ext.0");
+  check "parse_minter refuses a user-namespace name" (refused "user_fn")
 ;;
 
-(* board #58: the parser's [?internal_mint] threading is source-compatible with the
-   Session-driven drivers — a [parse_into ~internal_mint:(Session.internal_minter s)]
+(* board #58 O-MINTER: the parser's [?internal_mint] threading is source-compatible with
+   the Session-driven drivers — a [parse_into ~internal_mint:(Session.parse_minter s)]
    parses and solves a normal file identically. (No trunk parser command mints an internal
    symbol yet, so the hook itself is exercised by the arrays/bv migrations; this pins the
-   wiring.) *)
+   wiring, and that [parse_minter] returns an [Internal_minter.t] the parser accepts.) *)
 let test_parser_internal_mint_threading () =
   let s = Session.create () in
   let parsed =
     Parser.parse_into
-      ~internal_mint:(Session.internal_minter s)
+      ~internal_mint:(Session.parse_minter s)
       (Session.env s)
       (Session.context s)
       "(declare-const p Bool)(assert p)(check-sat)"
@@ -1515,7 +1526,7 @@ let () =
   test_namespace_guard ();
   test_internal_marker_byte_class ();
   test_cap_door_mints_internal ();
-  test_session_internal_minter ();
+  test_session_parse_minter ();
   test_parser_internal_mint_threading ();
   test_parser_into_session ();
   test_determinism ();

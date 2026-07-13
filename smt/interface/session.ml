@@ -161,15 +161,20 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
 let env t = t.env
 let context t = t.ctx
 
-(* board #58: the cap-backed minter for theory-internal reserved symbols
-   ([.oxsmt.<theory>.*]), for a front end that must mint one mid-parse (the SMT-LIB
-   parser's [?internal_mint] hook — arrays op symbols are discovered only at first use, so
-   they cannot be pre-minted at a declaration site). This is [Env.declare_reserved] closed
-   over the session's PRIVATE cap and env: the caller can mint a collision-proof internal
-   symbol but never obtains the cap itself (ADR-0012: [Session] stays the sole cap
-   holder). The returned closure enforces the [.oxsmt.] prefix and the per-env cap, so it
-   cannot forge a user-namespace symbol. *)
-let internal_minter t = Env.declare_reserved t.cap t.env
+(* board #58 O-MINTER: the cap-backed minter for theory-internal reserved symbols, for a
+   front end that must mint one mid-parse (the SMT-LIB parser's [?internal_mint] hook —
+   arrays op symbols are per-sort instantiations discovered only at first [select]/[store]
+   use, so they cannot be pre-minted at a declaration site). Returns an OPAQUE
+   {!Oxsmt_core.Internal_minter.t} (not a bare [string -> Rank.t -> Symbol.t] closure):
+   the caller can mint only [admit]-sanctioned marker names and never obtains the cap or a
+   re-delegatable general closure (ADR-0012: [Session] stays the sole cap holder). The
+   [admit] gate names the parse-time theory vocabulary a session sanctions; the sensitive
+   reserved namespaces (arrays ext witness, datatype testers, qvars, preprocessing
+   witnesses) are minted directly via {!Env.declare_reserved} by trusted code here, never
+   through this door, so they are NEVER admitted. On trunk no theory mints at parse time,
+   so the sanctioned set is EMPTY — this minter admits nothing (a theory migration widens
+   [admit] to its own marker grammar). *)
+let parse_minter t = Internal_minter.create ~admit:(fun _ -> false) t.cap t.env
 
 (* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
    can never collide with one preprocessing invents. *)

@@ -17,6 +17,7 @@ module Sort = Sort
 module Datatype_defs = Datatype_defs
 module Rank = Rank
 module Env = Env
+module Internal_minter = Internal_minter
 module Term = Term
 module Context = Context
 module Theory_view = Theory_view
