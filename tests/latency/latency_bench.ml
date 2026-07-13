@@ -164,6 +164,32 @@ let verdict_str = function
   | Session.Unknown -> "unknown"
 ;;
 
+(* A silent wrong-answer regression must KILL the bench run, not print a warning: a bench
+   that keeps reporting latency for a query the solver now decides wrongly (or degrades to
+   [Unknown]) is measuring non-target work and hiding a soundness/completeness regression.
+   Every phase that runs a builder checks its verdict against the builder's declared
+   expectation through here; [main] exits nonzero if any check failed. *)
+let verdict_failures = ref 0
+let verdict_reported : (string, unit) Hashtbl.t = Hashtbl.create 16
+
+let require_verdict ~phase ~name ~expected got =
+  if got <> expected
+  then (
+    incr verdict_failures;
+    (* Called per-iteration (thorough — catches a nondeterministic flip too), but print
+       once per (phase, query) so a broken run fails loudly, not in 5000 identical lines. *)
+    let key = phase ^ ":" ^ name in
+    if not (Hashtbl.mem verdict_reported key)
+    then (
+      Hashtbl.add verdict_reported key ();
+      Printf.printf
+        "  FAIL [%s] %s: got %s, expected %s\n"
+        phase
+        name
+        (verdict_str got)
+        (verdict_str expected)))
+;;
+
 (* Per-query latency: fresh session each iteration, declare + assert + check_sat, timed as
    one unit (that is the "in-process small query answers in under 100us" target — the
    whole cost a caller pays). *)
@@ -188,13 +214,7 @@ let bench_per_query ~iters ~warmup out =
          let v = Session.check_sat s in
          got := v
        done;
-       if !got <> expected
-       then
-         Printf.printf
-           "  WARNING %s: got %s, expected %s (measuring non-target work)\n"
-           name
-           (verdict_str !got)
-           (verdict_str expected);
+       require_verdict ~phase:"per_query" ~name ~expected !got;
        let samples = Array.make iters 0.0 in
        for k = 0 to iters - 1 do
          let t0 = Unix.gettimeofday () in
@@ -242,23 +262,25 @@ let bench_session_pushpop ~queries out =
   let nb = Array.length bs in
   (* Warmup one cycle per builder so caches/first-touch allocation is out of the loop. *)
   for j = 0 to nb - 1 do
-    let _, build, _ = bs.(j) in
+    let name, build, expected = bs.(j) in
     Session.push s;
     let (_ : Session.verdict) = build s p in
-    let (_ : Session.verdict) = Session.check_sat s in
-    Session.pop s
+    let got = Session.check_sat s in
+    Session.pop s;
+    require_verdict ~phase:"pushpop" ~name ~expected got
   done;
   let samples = Array.make queries 0.0 in
   let cpu0 = Sys.time () in
   let wall0 = Unix.gettimeofday () in
   for k = 0 to queries - 1 do
-    let _, build, _ = bs.(k mod nb) in
+    let name, build, expected = bs.(k mod nb) in
     let t0 = Unix.gettimeofday () in
     Session.push s;
     let (_ : Session.verdict) = build s p in
-    let (_ : Session.verdict) = Session.check_sat s in
+    let got = Session.check_sat s in
     Session.pop s;
     let t1 = Unix.gettimeofday () in
+    require_verdict ~phase:"pushpop" ~name ~expected got;
     samples.(k) <- t1 -. t0
   done;
   let wall = Unix.gettimeofday () -. wall0 in
@@ -303,7 +325,7 @@ let bench_breakdown ~iters out =
     percentile a 0.50
   in
   List.iter
-    (fun (name, build, _) ->
+    (fun (name, build, expected) ->
        let c = Array.make iters 0.0
        and d = Array.make iters 0.0
        and asrt = Array.make iters 0.0
@@ -316,8 +338,9 @@ let bench_breakdown ~iters out =
          let t2 = Unix.gettimeofday () in
          let (_ : Session.verdict) = build s p in
          let t3 = Unix.gettimeofday () in
-         let (_ : Session.verdict) = Session.check_sat s in
+         let got = Session.check_sat s in
          let t4 = Unix.gettimeofday () in
+         require_verdict ~phase:"breakdown" ~name ~expected got;
          c.(k) <- t1 -. t0;
          d.(k) <- t2 -. t1;
          asrt.(k) <- t3 -. t2;
@@ -387,5 +410,11 @@ let () =
   bench_breakdown ~iters:!iters out;
   bench_session_pushpop ~queries:!queries out;
   if !log <> "" then Printf.printf "\nlog: %s\n" !log;
-  close_out out
+  close_out out;
+  (* A wrong-answer regression in ANY phase kills the run — the bench is a solver harness,
+     not just a stopwatch, so a silent verdict flip must not pass as green. *)
+  if !verdict_failures > 0
+  then (
+    Printf.printf "latency_bench: %d verdict mismatch(es) — FAILED\n" !verdict_failures;
+    exit 1)
 ;;
