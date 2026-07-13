@@ -2576,6 +2576,57 @@ let test_fabric_pop_owner_strand () =
     explained
 ;;
 
+(* REAL weak-Γ discriminator for the F1-SEM verifier (selection-review item a). Exercises
+   the actual [Lia_adapter.fabric_verify] — the independent semantic re-derivation — and
+   proves it does semantic work, not the old token-presence check. The load-bearing case
+   is a SEMANTICALLY INSUFFICIENT Γ: a term [q] with only a lower bound asserted (Γ =
+   [{q>=5}]) does NOT pin [q] to 5, and the verifier REJECTS a "fixed to 5" witness for
+   it. The old tautological check (the 4 witness tokens ∈ Γ) would ACCEPT such a witness —
+   so this assertion fails if the verifier is reverted to token-presence. Also:
+   correct-witness accept, wrong-value reject, swapped-oriented-token reject. *)
+let test_f1sem_verifier_discriminates () =
+  let module La = Oxsmt_lia.Lia_adapter in
+  let f = fixture () in
+  let p = const f "p"
+  and q = const f "q" in
+  let five = Context.int_const f.ctx 5 in
+  let t = La.create f.ctx f.env in
+  let atoms : Atom.t Term.Table.t = Term.Table.create 16 in
+  let atom_of term =
+    match Term.Table.find_opt atoms term with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms term a;
+      La.register_atom t a term;
+      a
+  in
+  let lit term sign = Lit.make (atom_of term) sign in
+  (* p pinned to 5 by BOTH bounds (a genuine fix). *)
+  La.assert_lit t (lit (Context.le f.ctx p five) true);
+  La.assert_lit t (lit (Context.ge f.ctx p five) true);
+  (* q lower-bounded ONLY (semantically insufficient: q ∈ [5, +∞), not pinned). *)
+  let q_ge = Context.ge f.ctx q five in
+  let q_ge_lit = Lit.make (atom_of q_ge) true in
+  La.assert_lit t q_ge_lit;
+  match La.fixed_bounds t p with
+  | None -> check "f1sem: p is fixed (precondition)" false
+  | Some fb ->
+    let v = fb.Fabric.value in
+    check
+      "f1sem: verifier ACCEPTS a genuine fix with its real oriented tokens"
+      (La.fabric_verify t p v fb.Fabric.lower fb.Fabric.upper);
+    check
+      "f1sem: verifier REJECTS a wrong claimed value"
+      (not (La.fabric_verify t p "6" fb.Fabric.lower fb.Fabric.upper));
+    check
+      "f1sem: verifier REJECTS swapped oriented tokens"
+      (not (La.fabric_verify t p v fb.Fabric.upper fb.Fabric.lower));
+    check
+      "f1sem: verifier REJECTS a semantically insufficient (one-sided) Γ [weak-Γ mutant]"
+      (not (La.fabric_verify t q v (Fabric.Real q_ge_lit) (Fabric.Real q_ge_lit)))
+;;
+
 let () =
   Printf.printf "== combine mechanics ==\n";
   test_routing ();
@@ -2637,6 +2688,7 @@ let () =
   test_fabric_const_offset_sat ();
   test_fabric_pop_reassert ();
   test_fabric_pop_owner_strand ();
+  test_f1sem_verifier_discriminates ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;
