@@ -126,12 +126,42 @@ let int_lit st a =
    token KINDS, so a quoted [|0|]/[|let|] is a symbol looked up by name — never the
    numeral [0] or the [let] keyword (the ADR-0008 boundary invariant, enforced
    end-to-end). *)
+(* F2 (codex): validate a [(! body attr...)] annotation TAIL is well-formed —
+   [attr = :keyword | :keyword value]. The tail is otherwise discarded, so an unvalidated
+   drop can silently delete content: [(! true (forall ((x Int)) false))] parses to [true],
+   dropping the [forall] (a wrong [sat]). Rejecting a non-keyword in attribute-name
+   position turns that malformed input into [Malformed] -> unknown. A well-formed tail
+   ([:named foo], [:pattern (...)], bare [:foo]) validates and is still dropped. *)
+let is_keyword_atom = function
+  | Sexp.Atom (Tok.Keyword _) -> true
+  | _ -> false
+;;
+
+let rec validate_bang_attrs = function
+  | [] -> ()
+  | Sexp.Atom (Tok.Keyword _) :: rest ->
+    (* consume the optional single attribute value (any non-keyword s-expr) *)
+    let rest =
+      match rest with
+      | v :: more when not (is_keyword_atom v) -> more
+      | _ -> rest
+    in
+    validate_bang_attrs rest
+  | other :: _ ->
+    malformedf
+      "malformed (! ...) annotation: expected a :keyword attribute, got %s"
+      (Sexp.to_string other)
+;;
+
 let rec read_term st scope (s : Sexp.t) : Term.t =
   match s with
   | Sexp.Atom tok -> read_atom st scope tok
   | Sexp.List (Sexp.Atom (Tok.Reserved "let") :: rest) -> read_let st scope rest
-  (* [(! t :attr ...)] annotation: keep the term, drop the attributes (e.g. :named). *)
-  | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: _attrs) -> read_term st scope body
+  (* [(! t :attr ...)] annotation: validate the attribute tail (F2), then keep the term
+     and drop the (well-formed) attributes (e.g. :named). *)
+  | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
+    validate_bang_attrs attrs;
+    read_term st scope body
   | Sexp.List (head :: args) -> read_app st scope head args s
   | Sexp.List [] -> malformedf "empty application ()"
 
@@ -183,6 +213,15 @@ and read_let st scope rest =
    operator; a quoted [|+|] head (or a reserved word) is never an operator. *)
 and read_app st scope head args orig =
   match head with
+  (* F1 (codex): a let-/qvar-bound variable in HEAD position. [scope] must be consulted
+     for the head, not just [read_atom] — SMT-LIB scoping shadows a global function of the
+     same name, and a scalar-bound name is not applicable, so [(x args)] is ill-sorted.
+     Resolving it to the shadowed global instead (the pre-fix behaviour) mis-parses the
+     body and can yield a definite verdict on ill-typed input (a wrong [unsat] when a
+     refuting lemma body is mis-built). Fail closed: reject -> Malformed -> unknown.
+     Binder-agnostic (any scope entry: [let] or a lemma qvar). *)
+  | Sexp.Atom (Tok.Symbol { text; _ }) when List.mem_assoc text scope ->
+    malformedf "bound variable %s cannot head an application (ill-sorted)" text
   | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
   | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
     apply_named st scope op args orig
@@ -658,7 +697,12 @@ let run st sexps =
     match b with
     | Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ->
       `Lemma (read_forall st tail)
-    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: inner :: _attrs) -> classify inner
+    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: inner :: attrs) ->
+      (* F2: validate the annotation tail before dropping it — otherwise a malformed tail
+         (e.g. a bare [forall] mistaken for an attribute) is silently discarded and can
+         drop a live quantifier (wrong [sat]). *)
+      validate_bang_attrs attrs;
+      classify inner
     | _ ->
       let t = read_term st [] b in
       if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";

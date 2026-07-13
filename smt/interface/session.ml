@@ -58,7 +58,7 @@ type model = sort_card list * model_binding list
 type t =
   { env : Env.t
   ; cap : Env.reserved_cap
-      (* ADR-0012 R1: the reserved-minting capability for [env], kept private (never
+    (* ADR-0012 R1: the reserved-minting capability for [env], kept private (never
          returned by [Session.env]) and threaded only to the legitimate minters —
          preprocessing and the lemma tier's [Qvar.mint]. *)
   ; ctx : Context.t
@@ -66,45 +66,45 @@ type t =
   ; sat : Sat.t
   ; cdclt : Cdclt.t
   ; mgr : Manager.t
-      (* ADR-0012 lemma tier: the store + instantiation manager, threaded alongside the
+    (* ADR-0012 lemma tier: the store + instantiation manager, threaded alongside the
          Context/Cdclt. Frame-scoped in lockstep with [frames] via [Manager.on_pop]. *)
   ; prop_to_var : Sat.var Term.Table.t
-      (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
+    (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
          auxiliary Tseitin variables are per-formula. Shared via hash-cons identity. *)
   ; mutable bool_consts : (string * Sat.var) list
-      (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
+    (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
          [get_model] *)
   ; mutable frames : Sat.var list
-      (* selector stack, innermost first; base always present *)
+    (* selector stack, innermost first; base always present *)
   ; mutable has_theory : bool
-      (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
+    (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
          verdict's model comes from the theory, and a Sat is theory-validated *)
   ; mutable degraded : bool
-      (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
+    (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
          CONTRACT-POISON) *)
   ; mutable last_verdict : verdict
-      (* verdict of the most recent check_sat, for get_model *)
+    (* verdict of the most recent check_sat, for get_model *)
   ; mutable last_model : model option
-      (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+    (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
   ; mutable asserted : Term.t list
-      (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
+    (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
          model self-check. Frame-scoped in lockstep with [frames] (F3): a [push] snapshots
          it onto [asserted_saved] and a [pop] restores that snapshot, so a retracted
          frame's assertions do NOT linger — [Model_check] evaluates the current active
          set, never a popped assertion (which would spuriously reject a valid post-pop
          [Sat]). *)
   ; mutable asserted_saved : Term.t list list
-      (* [asserted] snapshots saved at each [push], innermost first; one per non-base
+    (* [asserted] snapshots saved at each [push], innermost first; one per non-base
          frame (so [length asserted_saved = length frames - 1]). Restored by [pop]. *)
   ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
   ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
   ; mutable last_effort : int
-      (* effort consumed by the most recent check_sat (board #60) *)
+    (* effort consumed by the most recent check_sat (board #60) *)
   ; mutable effort_exhausted : bool
-      (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
+    (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
          poison-free: distinct from [degraded]/[budget_exhausted], NOT sticky. *)
   ; mutable elim_defs : Presolve.def list
-  (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated, in
+    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated, in
      elimination order. [build_model] re-derives each one's value from its definition and
      splices it into the model so the R1 checker (which evaluates the ORIGINAL assertions
      in [asserted]) and [get_model] both bind it. Empty unless the batch
@@ -237,8 +237,8 @@ let assert_clausified ?sel t cnf =
   in
   Cnf.iter_clauses
     (fun clause ->
-      (* frame activation: clause holds only when the frame selector is assumed true *)
-      Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
+       (* frame activation: clause holds only when the frame selector is assumed true *)
+       Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
     cnf
 ;;
 
@@ -493,9 +493,9 @@ let assert_lemma t ~qvars ~build =
     Array.to_list
       (Array.map
          (fun q ->
-           match (Qvar.to_term q).Term.node with
-           | App (s, _) -> s
-           | _ -> assert false (* a qvar is a nullary App by construction *))
+            match (Qvar.to_term q).Term.node with
+            | App (s, _) -> s
+            | _ -> assert false (* a qvar is a nullary App by construction *))
          qv)
   in
   let foreign tm = term_has_reserved ~allowed:qvar_syms tm in
@@ -672,13 +672,13 @@ let splice_elim_defs t (sort_cards, bindings) =
     in
     List.iter
       (fun (d : Presolve.def) ->
-        List.iter
-          (fun (name, sort) ->
-            if not (Hashtbl.mem bound name) then add (Const (name, default_value sort)))
-          (free_var_leaves d.Presolve.value);
-        match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
-        | Some v -> add (Const (d.Presolve.name, v))
-        | None -> ())
+         List.iter
+           (fun (name, sort) ->
+              if not (Hashtbl.mem bound name) then add (Const (name, default_value sort)))
+           (free_var_leaves d.Presolve.value);
+         match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
+         | Some v -> add (Const (d.Presolve.name, v))
+         | None -> ())
       (List.rev t.elim_defs);
     sort_cards, !acc
 ;;
@@ -689,7 +689,7 @@ let build_model t =
   let bool_bindings =
     List.filter_map
       (fun (name, sv) ->
-        if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
+         if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
       t.bool_consts
   in
   let bool_names = List.map name_of bool_bindings in

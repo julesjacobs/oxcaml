@@ -12,6 +12,7 @@
 open Oxsmt_core
 module Session = Oxsmt_interface.Session
 module Parser = Oxsmt_smtlib_parser.Parser
+module Loader = Oxsmt_query_loader
 
 let checks = ref 0
 let failures = ref 0
@@ -1305,6 +1306,30 @@ let test_default_value_datatype_fail_closed () =
      | _ -> false)
 ;;
 
+(* F1 (codex), qvar form — reachable now that forall parsing (lemmas) is on trunk. A lemma
+   binder [f] shadows a global function [f], used in head position [(f 0)] in the body.
+   Pre-fix, [read_app] ignored [scope] for the head and resolved [(f 0)] to the GLOBAL
+   [f], so the body [(not (= (f 0) (f 0)))] built to [not true] = [false] — a refuting
+   lemma that drove a WRONG unsat. Post-fix, [read_app] consults [scope]: the bound [f] in
+   head position is ill-sorted -> Malformed -> the loader's [build] raises -> [assert_all]
+   returns false (a sound degrade, never a dropped/mis-built quantifier). The let form is
+   covered by roundtrip_test.F1-let-shadow-head; this is the same binder-agnostic fix via
+   a qvar. *)
+let test_f1_qvar_shadow_head () =
+  let s = Session.create () in
+  let text =
+    "(set-logic UFLIA)\n\
+     (declare-fun f (Int) Int)\n\
+     (assert (= (f 0) 0))\n\
+     (assert (forall ((f Int)) (not (= (f 0) (f 0)))))\n\
+     (check-sat)\n"
+  in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+  check
+    "F1-qvar: binder shadowing a global fn in head position fails to load (sound degrade)"
+    (not (Loader.assert_all s parsed))
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -1397,6 +1422,7 @@ let () =
   test_presolve_eq_uf_side_sound ();
   test_presolve_bool_dep_default ();
   test_default_value_datatype_fail_closed ();
+  test_f1_qvar_shadow_head ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;

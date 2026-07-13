@@ -19,4 +19,8 @@
 (executable
  (name wiring_test)
  (modules wiring_test)
- (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser))
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))

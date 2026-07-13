@@ -145,6 +145,14 @@ let check_parse ~name ~kind text =
 let check_malformed ~name text = check_parse ~name ~kind:"malformed" text
 let check_unsupported ~name text = check_parse ~name ~kind:"unsupported" text
 
+let check_parse_ok ~name text =
+  incr checks;
+  match Parser.parse text with
+  | _ -> ()
+  | exception e ->
+    fail "parse-ok/%s: expected success, got %s" name (Printexc.to_string e)
+;;
+
 (* parse (expands define-fun) -> print (define-fun erased) -> parse : must fixpoint. *)
 let check_df_roundtrip ~name text =
   incr checks;
@@ -553,6 +561,116 @@ let define_fun_cases () =
     (hdr ^ "(declare-fun f (Int) Int)\n(define-fun f ((x Int)) Int x)\n(assert true)\n")
 ;;
 
+(* Parser fail-closed guards (codex rider): the parser must ERROR/degrade on ill-typed or
+   malformed input, never mis-parse to a definite verdict. Each was a wrong-verdict bug. *)
+let parser_fail_closed_cases () =
+  let hdr = "(set-logic QF_UFLIA)\n" in
+  (* F1 (let form): a let-bound scalar shadows a global function; using the bound name in
+     head position [(f 1)] is ill-sorted. Pre-fix [read_app] resolved the head to the
+     global [f], mis-parsing the body and producing a (wrong) [unsat]. Now [read_app]
+     consults the scope for the head first -> Malformed -> unknown. *)
+  check_malformed
+    ~name:"F1-let-shadow-head"
+    (hdr
+     ^ "(declare-fun f (Int) Int)\n\
+        (assert (= (f 1) 1))\n\
+        (assert (let ((f 0)) (= (f 1) 5)))\n\
+        (check-sat)\n");
+  (* F2: a malformed [!] annotation tail — a bare term where a [:keyword] attribute is
+     expected — was silently dropped, deleting the [forall] and flipping [unsat] to [sat].
+     The tail is now validated; the bad tail is Malformed -> unknown. *)
+  check_malformed
+    ~name:"F2-bang-tail-drops-quantifier"
+    (hdr ^ "(assert (! true (forall ((x Int)) false)))\n(check-sat)\n");
+  (* F2 control: a WELL-FORMED [:named] tail still parses (it is validated then dropped). *)
+  check_parse_ok
+    ~name:"F2-bang-named-ok"
+    (hdr ^ "(declare-const p Bool)\n(assert (! p :named foo))\n(check-sat)\n");
+  (* Tester-name collision (parser path). A datatype constructor [zero] mints the tester
+     function [is-zero]. On the PARSER path a user symbol of that same name can never
+     coexist with the tester — [declare_fun]'s redeclaration guard rejects whichever comes
+     second — so the printer can never conflate them here (the programmatic client path,
+     which bypasses this guard, is closed separately by minting testers in the reserved
+     namespace). Both declaration orders must be Malformed. *)
+  let dt = "(declare-datatypes ((nat 0)) (((succ (pred nat)) (zero))))\n" in
+  check_malformed
+    ~name:"tester-collision-dt-then-user"
+    (hdr ^ dt ^ "(declare-fun is-zero () Bool)\n(assert true)\n");
+  check_malformed
+    ~name:"tester-collision-user-then-dt"
+    (hdr ^ "(declare-fun is-zero () Bool)\n" ^ dt ^ "(assert true)\n")
+;;
+
+let str_contains hay needle =
+  let nl = String.length needle in
+  let rec go i =
+    (i + nl <= String.length hay && String.equal (String.sub hay i nl) needle)
+    || (i + nl <= String.length hay && go (i + 1))
+  in
+  nl = 0 || go 0
+;;
+
+(* Tester-name collision, PROGRAMMATIC-client path (codex, TCB gate-integrity). A client
+   that bypasses the parser (the compiler oracle path) can declare a user function AND
+   register a datatype in one [Env]. Were the datatype's tester minted under the SAME NAME
+   as the user function, they would be the SAME interned symbol, and the printer — which
+   suppresses ctor/selector/tester [declare-fun]s by registry membership — would silently
+   DROP the user function's declaration, so the Lean oracle would certify a DIFFERENT
+   problem. The closing invariant: tester symbols are minted in the RESERVED [.oxsmt.*]
+   namespace (which [Env] forbids user declarations from), so a reserved tester can never
+   be the same symbol as any user fn. This test constructs that configuration directly — a
+   reserved tester for [succ] alongside a USER fn literally named [is-succ] — and asserts
+   the printed session STILL declares and uses the user [is-succ] (neither suppressed nor
+   mis-rendered as a tester). A regression that minted testers under the bare [is-succ]
+   name would make [user_is_succ] the tester symbol and drop it, flipping this red. *)
+let printer_programmatic_tester_collision () =
+  incr checks;
+  let env, cap = Env.create_with_cap () in
+  let ctx = Context.create env in
+  let nat_sym = Env.declare_sort env "nat" in
+  let nat = Sort.datatype_ nat_sym in
+  let succ = Env.declare_fun env "succ" (Rank.create [ nat ] nat) in
+  let pred = Env.declare_fun env "pred" (Rank.create [ nat ] nat) in
+  let zero = Env.declare_fun env "zero" (Rank.create [] nat) in
+  let mk_tester c =
+    Env.declare_reserved
+      cap
+      env
+      (Env.reserved_prefix ^ "dt.is." ^ c)
+      (Rank.create [ nat ] Sort.bool)
+  in
+  let dts =
+    Datatype_defs.add
+      Datatype_defs.empty
+      { Datatype_defs.sort_sym = nat_sym
+      ; constructors =
+          [ { Datatype_defs.sym = succ
+            ; selectors = [ { Datatype_defs.sym = pred; index = 0; field_sort = nat } ]
+            ; tester = mk_tester "succ"
+            }
+          ; { Datatype_defs.sym = zero; selectors = []; tester = mk_tester "zero" }
+          ]
+      }
+  in
+  (* a USER function whose NAME collides with the tester's conventional "is-succ" *)
+  let user_is_succ = Env.declare_fun env "is-succ" (Rank.create [ nat ] Sort.bool) in
+  let x = Context.const ctx (Env.declare_fun env "x" (Rank.create [] nat)) in
+  let text =
+    Printer.print_session ~datatypes:dts env [ Context.app ctx user_is_succ [ x ] ]
+  in
+  if not (str_contains text "(declare-fun is-succ")
+  then
+    fail
+      "programmatic-tester-collision: user fn is-succ was dropped from the printed session\n\
+       %s"
+      text;
+  if str_contains text "((_ is succ)"
+  then
+    fail
+      "programmatic-tester-collision: user fn is-succ was mis-rendered as a tester\n%s"
+      text
+;;
+
 (* Exponential-re-read guard (reviewer-identified test-only DoS): a doubling chain
    [f_{i+1}(x) = f_i(x) + f_i(x)] makes an unmemoized expander read [f_0]'s body 2^depth
    times. Memoization on (define, arg-tags) collapses that to one expansion per (define,
@@ -733,6 +851,8 @@ let () =
   command_gate_cases ();
   print_endline "== define-fun macro expansion ==";
   define_fun_cases ();
+  parser_fail_closed_cases ();
+  printer_programmatic_tester_collision ();
   define_fun_perf ();
   let dirs = List.tl (Array.to_list Sys.argv) in
   if dirs <> []
