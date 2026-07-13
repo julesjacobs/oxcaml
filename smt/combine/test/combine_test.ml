@@ -2651,6 +2651,45 @@ let test_f1sem_verifier_discriminates () =
       (not (La.fabric_verify t p v (Fabric.Real q_ge_lit) fb.Fabric.upper))
 ;;
 
+(* Tie-break alignment (codex): when a term's tightest bound on a side is reached EQUALLY
+   by its own-variable bound and by its negated-combo slack, the producer ([fixed_bounds]
+   via [tightest_oriented], pos-first strict fold) records the OWN-VARIABLE token in Γ.
+   The verifier must break the tie the SAME way, or [Lit.equal] fails and a VALID
+   injection is spuriously refused to a fallback split. Here [x] is pinned to 5 with a
+   genuine lower-side tie: [¬(x<=4)] sets [x]'s own-variable lower to 5, and [x>=5] sets
+   the [-x] slack (⇒ [x] lower 5 via the flip) — two equal-value lower candidates with
+   distinct tokens. The verifier must ACCEPT the producer's tuple. Fails on the pre-fix
+   [oriented_bound_value] (neg-on-tie), passes once the tie-break is aligned to keep pos. *)
+let test_f1sem_tiebreak () =
+  let module La = Oxsmt_lia.Lia_adapter in
+  let f = fixture () in
+  let x = const f "x" in
+  let t = La.create f.ctx f.env in
+  let atoms : Atom.t Term.Table.t = Term.Table.create 16 in
+  let atom_of tm =
+    match Term.Table.find_opt atoms tm with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms tm a;
+      La.register_atom t a tm;
+      a
+  in
+  let five = Context.int_const f.ctx 5
+  and four = Context.int_const f.ctx 4 in
+  La.assert_lit t (Lit.make (atom_of (Context.le f.ctx x five)) true);
+  (* ¬(x<=4) ⇒ x>=5 on x's own variable (var lower = 5). *)
+  La.assert_lit t (Lit.make (atom_of (Context.le f.ctx x four)) false);
+  (* x>=5 ⇒ the [-x] slack (x lower = 5 via the flip) — the second, equal lower candidate. *)
+  La.assert_lit t (Lit.make (atom_of (Context.ge f.ctx x five)) true);
+  match La.fixed_bounds t x with
+  | None -> check "f1sem tie: x is fixed (precondition)" false
+  | Some fb ->
+    check
+      "f1sem tie: equal own-var/slack bounds ⇒ injection ACCEPTED (tie-break aligned)"
+      (La.fabric_verify t x fb.Fabric.value fb.Fabric.lower fb.Fabric.upper)
+;;
+
 (* WHITE-BOX discriminator for the pre-fabric owner-strand fix (codex-review #3), driving
    the exact dual-owner-across-a-pop sequence the natural QF_UFLIA driver can't yet reach
    (no shared literal is dual-propagated today; Stage-2 merge callbacks will make it
@@ -2825,6 +2864,7 @@ let () =
   test_fabric_pop_reassert ();
   test_fabric_pop_owner_strand ();
   test_f1sem_verifier_discriminates ();
+  test_f1sem_tiebreak ();
   test_owner_strand_whitebox ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1

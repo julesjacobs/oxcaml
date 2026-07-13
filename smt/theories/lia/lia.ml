@@ -475,13 +475,20 @@ let oriented_bound_value t (term : Term.t) (which : [ `Lower | `Upper ]) =
       | `Lower -> on pos user_lower, flip (on neg user_upper)
     in
     let tighter =
+      (* On a TIE (equal bound value from the own-variable and the negated-combo slack)
+         keep the OWN-VARIABLE token [a] — the neg source [b] is chosen only when strictly
+         tighter. This matches the fix-trigger's own tie-break ([tightest_oriented] folds
+         with the pos candidate first and a strict [Delta.lt], so a tie keeps pos), so the
+         verifier re-derives the SAME token the producer recorded in Γ and [Lit.equal]
+         succeeds — otherwise a valid injection is spuriously refused to a fallback split
+         (codex-verified tie-break misalignment). *)
       match a, b, which with
       | None, None, _ -> None
       | Some x, None, _ | None, Some x, _ -> Some x
       | Some (ta, da), Some (tb, db), `Upper ->
-        if Delta.lt da db then Some (ta, da) else Some (tb, db)
+        if Delta.lt db da then Some (tb, db) else Some (ta, da)
       | Some (ta, da), Some (tb, db), `Lower ->
-        if Delta.lt db da then Some (ta, da) else Some (tb, db)
+        if Delta.lt da db then Some (tb, db) else Some (ta, da)
     in
     (match tighter with
      | Some (tok, d) when Delta.is_rational d && Rational.is_int (Delta.c_part d) ->
