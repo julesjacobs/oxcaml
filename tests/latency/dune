@@ -1,0 +1,9 @@
+; Small-query latency microbenchmark (GOALS "Solve rate and speed" b3-4). Test-only,
+; outside the smt/ stdlib firewall (I3); links the shipped session layer directly plus
+; unix (for the harness-only wall clock — never in solver code / goldens, I5/I6). A
+; VISIBILITY tool, not a gate; build --profile release for headline numbers.
+
+(executable
+ (name latency_bench)
+ (modules latency_bench)
+ (libraries oxsmt_core oxsmt_interface unix))
