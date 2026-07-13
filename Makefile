@@ -354,6 +354,14 @@ euf-adapter-test:
 bigint-test:
 	$(DUNE) exec smt/theories/lia/test/bigint_test.exe
 
+## rational-word-test — one-word (Zarith-style) Rational representation self-test: the
+##   immediate/block rep-boundary vectors (promotion UP/DOWN, mixed, fraction) + an
+##   INDEPENDENT Python fractions.Fraction differential oracle crossing the boundary both
+##   ways. Simplex-free and fast; the mutation-testing suite for the rational-word mutants
+##   (poly-compare, wrap-instead-of-promote). Nonzero exit on any failed check.
+rational-word-test:
+	$(DUNE) exec smt/theories/lia/test/rational_word_test.exe
+
 ## lia-test — smt/theories/lia unit + property self-test (stdlib-only, deterministic).
 ##   Exact rational/δ-rational arithmetic incl. overflow guards; hand cases (DdM
 ##   feasible/infeasible systems, infeasible bound chains with exact Farkas multipliers,
@@ -464,6 +472,7 @@ test: check-frozen
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 	$(MAKE) combine-test
+	$(MAKE) rational-word-test
 	$(MAKE) stage0-test
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test

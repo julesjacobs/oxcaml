@@ -1,0 +1,16 @@
+diff --git a/smt/theories/lia/rational.ml b/smt/theories/lia/rational.ml
+index 311d75fcad..5598eed2b0 100644
+--- a/smt/theories/lia/rational.ml
++++ b/smt/theories/lia/rational.ml
+@@ -42,10 +42,7 @@ exception Overflow
+    pre-Zarith two-tier code, so the fast path is byte-for-byte the old guarded-int
+    arithmetic) ---- *)
+ 
+-let add_int a b =
+-  let r = a + b in
+-  if (b > 0 && r < a) || (b < 0 && r > a) then raise Overflow else r
+-;;
++let add_int a b = a + b
+ 
+ let sub_int a b =
+   let r = a - b in

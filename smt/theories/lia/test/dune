@@ -28,3 +28,13 @@
  (name bigint_test)
  (modules bigint_test)
  (libraries oxsmt_core oxsmt_lia))
+
+; One-word (Zarith-style) Rational representation self-test: rep-boundary vectors +
+; INDEPENDENT Python fractions.Fraction differential oracle crossing the immediate/block
+; boundary both ways. Simplex-free (so it always terminates) — the mutation-testing suite
+; for the rational-word mutants. Same I3 firewall; python3-absent → skip.
+
+(executable
+ (name rational_word_test)
+ (modules rational_word_test)
+ (libraries oxsmt_core oxsmt_lia))
