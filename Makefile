@@ -176,7 +176,7 @@ checker-test:
 ##   solve produced a non-VALID cert or a repeat-solve re-emit diverged (so an emission or
 ##   checker regression is caught). Non-unsat files are skipped. The external QF_UF corpus is
 ##   a superset; pass a directory as $(CORPUS_GATE_DIRS) to widen the sample.
-CORPUS_GATE_DIRS ?= tests/cases
+CORPUS_GATE_DIRS ?= tests/cases tests/dt-goldens
 cert-corpus-gate:
 	$(DUNE) exec tests/certificate/cert_corpus_gate.exe -- $(CORPUS_GATE_DIRS)
 

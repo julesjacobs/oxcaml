@@ -50,6 +50,10 @@ let run_file path : outcome * outcome option =
     (match Parser.parse_into (Session.env s) (Session.context s) src with
      | exception ex -> Error ("parse: " ^ Printexc.to_string ex), None
      | parsed ->
+       (* install datatype shapes before asserting, so a QF_DT/QF_UFDT file runs the DT
+          theory on the cert path too (else it degrades to unknown here while the product
+          CLI decides it — a latent driver divergence). Empty on a non-datatype file. *)
+       Session.set_datatypes s parsed.Parser.datatypes;
        (match Session.assert_presolved s parsed.Parser.assertions with
         | exception ex -> Error ("assert: " ^ Printexc.to_string ex), None
         | () ->

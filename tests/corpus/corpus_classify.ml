@@ -194,6 +194,11 @@ let () =
         match Parser.parse_into (Session.env s) (Session.context s) src with
         | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail", 0
         | parsed ->
+          (* Install datatype shapes before asserting, exactly as the CLI's batch path
+             does (oxsmt_cli.ml [solve_batch]) — else this headline driver degrades a
+             QF_DT/QF_UFDT file to unknown while the shipped CLI decides it, a
+             headline-vs-product split. Empty on a non-datatype file. *)
+          Session.set_datatypes s parsed.Parser.datatypes;
           (* W1b: submit the whole assertion set through the equality-elimination
              presolve, exactly as the solver CLI's batch path does (oxsmt_cli.ml
              [solve_batch], on by default), plus each universally-quantified lemma through
