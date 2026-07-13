@@ -750,6 +750,10 @@ let leaf_value t (x : Term.t) : Model.value =
          (match Bigint.to_int_opt n with
           | Some i -> Model.Int i
           | None -> Model.Uninterp (Euf.class_of t.engine x)))
+    (* BitVec is defensively unreachable here: a bit-vector term is resolved by the eager
+       bit-blaster before the combinator, and any BV term that reached the combinator
+       degrades via [require_no_bitvec_terms] before model extraction. Fold into the generic
+       opaque-class fallback for exhaustiveness. *)
     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
       Model.Uninterp (Euf.class_of t.engine x))
 ;;
