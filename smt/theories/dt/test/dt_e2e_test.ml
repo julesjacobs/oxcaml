@@ -236,6 +236,38 @@ let () =
      Printf.printf
        "  FAIL laziness: don't-care datatype var demanded %d split(s), want 0\n"
        (Session.splits s)));
+  (* CASCADE-BOUND witness (reviewer land item): a disequality over a RECURSIVE datatype
+     must not march the field-relevance cascade down the spine via split-born selector
+     terms. [x <> y] over a recursive list is trivially sat (differ at the top
+     constructor); with a tight split budget the bounded cascade (crosses only input
+     terms) resolves it in a few splits, while an unbounded cascade would unfold tl,
+     tl-of-tl, .. and exhaust the budget. Witness: NOT budget-exhausted and NOT unsat. *)
+  (let s = Session.create ~split_budget:16 () in
+   let ls = Sort.datatype_ (Session.declare_sort s "Lst") in
+   ignore
+     (Session.declare_datatype
+        s
+        ls
+        [ { Session.ctor_name = "nl"; fields = [] }
+        ; { Session.ctor_name = "cn"; fields = [ "hd", Sort.int; "tl", ls ] }
+        ]);
+   let ctx = Session.context s in
+   let x = k s "rx" ls
+   and y = k s "ry" ls in
+   Session.assert_term s (Context.not_ ctx (Context.eq ctx x y));
+   let v = Session.check_sat s in
+   incr checks;
+   if v = Session.Unsat
+   then (
+     incr failures;
+     Printf.printf "  FAIL cascade-bound: recursive x<>y reported unsat\n");
+   incr checks;
+   if Session.budget_exhausted s
+   then (
+     incr failures;
+     Printf.printf
+       "  FAIL cascade-bound: recursive x<>y exhausted the split budget (unbounded spine \
+        cascade)\n"));
   Printf.printf "Dt e2e tests: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

@@ -54,6 +54,11 @@ type t =
     (* DT terms that are an operand of a disequality (or a field of one, transitively) —
          the seed set for field-relevance propagation; distinctness, not equality, is what
          forces a field to be case-split. *)
+  ; input_dt : unit Term.Table.t
+    (* datatype terms from the ORIGINAL problem (not theory-introduced constructor
+         instantiations) — the field-relevance cascade only crosses these, bounding it to
+         the finite input structure (no runaway down a recursive spine of split-born
+         selector terms). *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   }
@@ -82,6 +87,7 @@ let create ctx _env reg =
   ; dt_terms = []
   ; split_relevant = Term.Table.create 64
   ; diseq_relevant = Term.Table.create 64
+  ; input_dt = Term.Table.create 64
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
   }
@@ -139,11 +145,20 @@ let derived_premise t a b =
 
 (* --- registration: catalog DT structure while registering into the e-graph --- *)
 
-let rec catalog t (term : Term.t) =
+(* [~input] is true when cataloging a term from the ORIGINAL problem (an asserted atom's
+   closure), false for a term the theory itself introduced mid-solve (a constructor
+   instantiation [C (sel_1 x, ..)] from a split/tester). Only input datatype terms enter
+   [input_dt], which BOUNDS the field-relevance cascade: it may march over the finite
+   input structure but never down a recursive spine of split-born selector terms (which
+   would spuriously exhaust the split budget on a trivially-sat recursive disequality). *)
+let rec catalog t ~input (term : Term.t) =
   if not (Term.Table.mem t.seen_cat term)
   then (
     Term.Table.replace t.seen_cat term ();
-    if is_dt_sort t term.Term.sort then t.dt_terms <- term :: t.dt_terms;
+    if is_dt_sort t term.Term.sort
+    then (
+      t.dt_terms <- term :: t.dt_terms;
+      if input then Term.Table.replace t.input_dt term ());
     match head_args term with
     | Some (sym, args) ->
       if Defs.constructor_of_sym t.reg sym <> None
@@ -156,20 +171,20 @@ let rec catalog t (term : Term.t) =
       then (
         t.tester_terms <- term :: t.tester_terms;
         if Array.length args >= 1 then Term.Table.replace t.split_relevant args.(0) ());
-      Array.iter (catalog t) args
+      Array.iter (catalog t ~input) args
     | None ->
       (match term.Term.node with
        | Term.Eq (a, b) ->
-         catalog t a;
-         catalog t b
-       | Term.Not a | Term.Le a -> catalog t a
-       | Term.And xs | Term.Or xs -> List.iter (catalog t) (Iarr.to_list xs)
+         catalog t ~input a;
+         catalog t ~input b
+       | Term.Not a | Term.Le a -> catalog t ~input a
+       | Term.And xs | Term.Or xs -> List.iter (catalog t ~input) (Iarr.to_list xs)
        | Term.Ite (a, b, c) ->
-         catalog t a;
-         catalog t b;
-         catalog t c
+         catalog t ~input a;
+         catalog t ~input b;
+         catalog t ~input c
        | Term.Arith lin ->
-         List.iter (fun (c, _) -> catalog t c) (Iarr.to_list lin.Term.coeffs)
+         List.iter (fun (c, _) -> catalog t ~input c) (Iarr.to_list lin.Term.coeffs)
        | Term.Bool_const _ | Term.Int_const _ -> ()
        | Term.App _ -> () (* unreachable: head_args returned None *)))
 ;;
@@ -185,7 +200,7 @@ let classify (term : Term.t) : kind =
 
 let register_atom t atom term =
   Euf.register_term t.engine term;
-  catalog t term;
+  catalog t ~input:true term;
   if not (Atom.Table.mem t.atoms atom)
   then (
     let kind = classify term in
@@ -378,7 +393,7 @@ let saturate_round t ~changed : prem list option =
                          ~premise:(derived_premise t tt t.true_const)
                          x
                          cterm;
-                       catalog t cterm;
+                       catalog t ~input:false cterm;
                        changed := true)))
               | None -> ())
            | _ -> ()))
@@ -402,7 +417,7 @@ let saturate_round t ~changed : prem list option =
                if not (Euf.are_equal t.engine x cterm)
                then (
                  Euf.assert_eq t.engine ~premise:(P_derived []) x cterm;
-                 catalog t cterm;
+                 catalog t ~input:false cterm;
                  changed := true))
            | Some _ | None -> ()))
       (List.rev t.dt_terms);
@@ -547,7 +562,15 @@ let mark_field_relevance t witnesses =
              let _, wargs = Option.get (head_args wterm) in
              Array.iter
                (fun a ->
-                  if is_dt_sort t a.Term.sort && not (Term.Table.mem t.diseq_relevant a)
+                  (* [input_dt] guard BOUNDS the cascade: cross only fields that are terms
+                   of the original problem, never a split-born selector term — else a
+                   recursive disequality ([x <> y] over a recursive datatype) would march
+                   down the spine (tail, tail-of-tail, ..) forever and spuriously exhaust
+                   the split budget on a trivially-sat query. Input structure is finite. *)
+                  if
+                    is_dt_sort t a.Term.sort
+                    && Term.Table.mem t.input_dt a
+                    && not (Term.Table.mem t.diseq_relevant a)
                   then (
                     (* into [split_relevant] so the field is case-split, and
                      [diseq_relevant] so a nested field cascades further *)
