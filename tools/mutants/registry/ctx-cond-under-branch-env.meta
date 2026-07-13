@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=Contextual simplification rebuilds the ite with the CONDITION re-simplified under the then-branch scope (Context.ite ctx (simp env_then c') a' b' instead of ... c' ...). The then-scope asserts the condition atom true, so simp env_then c' folds the condition to true and the ite collapses to its then-branch unconditionally — applying the branch assumption ABOVE/AT the ite (to the condition, which lives in the parent scope), dropping the else-branch. On (ite (= x 5) false (>= x 7)) the correct answer is sat (x>=7 via the else-branch); the mutant collapses to the then-branch false and flips to unsat. Killed by test_ctx_simp_condition_oracle.
+review=task #13 contextual simplification; logs/simplifier-log.md soundness net (condition rewritten under the parent env)
+expected=KILLED-TEST

@@ -1,0 +1,13 @@
+diff --git a/smt/interface/presolve.ml b/smt/interface/presolve.ml
+index cb85dd9468..326ad36321 100644
+--- a/smt/interface/presolve.ml
++++ b/smt/interface/presolve.ml
+@@ -577,7 +577,7 @@ let simplify_contextual ctx assertions =
+          let env_else = assume env c' ~truth:false in
+          let a' = simp env_then a in
+          let b' = simp env_else b in
+-         Context.ite ctx c' a' b')
++         Context.ite ctx (simp env_then c') a' b')
+   in
+   match List.map (fun a -> if has_ite a then simp root a else a) assertions with
+   | exception Ctx_budget -> assertions
