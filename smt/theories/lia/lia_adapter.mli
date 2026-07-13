@@ -44,6 +44,14 @@ val fabric_verify
   -> Fabric.justification
   -> bool
 
+(** [notify_eq t ~edge_id eq] reacts to an ADR-0014 Stage 2 hub [new_eq] (§A.3): asserts
+    the (already-constructed) Int equality atom [eq] into the tableau as a pair of bounds,
+    attributed to fabric [edge_id] (whose Γ is the EUF congruence proof; a later conflict
+    citing it expands to the real premises). Pure mutation on LIA's own trail — reversed
+    by an ordinary [pop] (F3 co-location); the combinator does the fallible construction
+    before calling, so a skip leaves no partial state (H5). *)
+val notify_eq : t -> edge_id:Fabric.edge_id -> Term.t -> unit
+
 (** {2 Reason builders (exposed for the empty-premise tripwire test).}
 
     [conflict_explanation] / [propagation_reason] turn an engine conflict / a bound

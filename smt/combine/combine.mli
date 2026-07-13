@@ -207,6 +207,11 @@ module type FABRIC_CHILD = sig
   (** F1-SEM independent re-verifier: confirm [term] is fixed to [value] with the two
       given oriented-bound premises, by a path separate from {!fixed_bounds}. *)
   val fabric_verify : t -> Term.t -> string -> justification -> justification -> bool
+
+  (** ADR-0014 Stage 2 (§A.3): react to a hub [new_eq] by asserting the (pre-built) Int
+      equality atom into this theory, attributed to the fabric edge. Pure mutation on the
+      theory's own trail (F3 co-location). *)
+  val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
 end
 
 module type FABRIC_CONGRUENCE_CHILD = sig
@@ -215,6 +220,17 @@ module type FABRIC_CONGRUENCE_CHILD = sig
   val internalize_term : t -> Term.t -> unit
   val fabric_are_equal : t -> Term.t -> Term.t -> bool
   val assert_fabric_eq : t -> edge_id:edge_id -> Term.t -> Term.t -> unit
+
+  (** ADR-0014 Stage 2/3: the hub's multi-consumer merge log, per-class tag slot, and the
+      congruence-explanation accessor for the [new_eq] justification (§A.3/§A.4). *)
+  type merge_cursor
+
+  val set_record_merges : t -> bool -> unit
+  val add_merge_consumer : t -> merge_cursor
+  val drain_merges : t -> merge_cursor -> Fabric.merge_event list
+  val set_class_tag : t -> Term.t -> Term.t -> unit
+  val class_tag : t -> Term.t -> Term.t option
+  val fabric_explain_eq : t -> Term.t -> Term.t -> justification list
 end
 
 (** [Combine (R) (A) (B)] is the combined theory ([A] = the congruence child, [B] =
@@ -243,6 +259,21 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+
+  (** Test-only access to the fabric edge registry + recursive handle expansion, so the
+      shared-ancestor (DAG diamond) and genuine-cycle behaviours of
+      [expand_justifications] can be driven directly. Not used by any shipping path. *)
+  module For_testing : sig
+    val register_edge
+      :  t
+      -> edge_id
+      -> justification list
+      -> s:Term.t
+      -> tt:Term.t
+      -> unit
+
+    val expand : t -> justification list -> Lit.t list
+  end
 end
 [@@warning "-67"]
 (* -67: the result signature (abstract [t]) does not mention the functor parameters, so

@@ -40,3 +40,10 @@ type eq_event =
   }
 
 type trace = { on_fabric_eq : eq_event -> unit }
+
+type merge_event =
+  { kept : Term.t
+  ; merged : Term.t
+  ; kept_tag : Term.t option
+  ; merged_tag : Term.t option
+  }

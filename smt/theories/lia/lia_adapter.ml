@@ -78,6 +78,22 @@ let assert_lit t lit =
       failwith "Lia_adapter.assert_lit: literal's atom was not registered")
 ;;
 
+(* ADR-0014 Stage 2 [new_eq] notification (§A.3): the hub merged two Int classes shared
+   with LIA, so assert the entailed equality [s = t] into the tableau directly (a pair of
+   bounds), attributed to the fabric edge whose Γ is the EUF congruence proof. A LIA
+   conflict later citing this premise expands (combinator F2 chokepoint) to the real trail
+   literals behind the merge. The assertion rides LIA's own trail, so an ordinary [pop]
+   reverses it via LIA's own frame pop (F3 co-location, ADR §C Stage 0 item 5). Overflow
+   during the pair-of-bounds construction degrades the query via CONTRACT-POISON, exactly
+   like an ordinary [assert_lit]. The combinator does the fallible work — building the
+   [eq] term and recording the edge Γ — BEFORE calling this, and this op is pure mutation
+   (a pair of bounds on LIA's trail), so a skipped notification leaves zero partial state
+   (H5). *)
+let notify_eq t ~edge_id eq =
+  guard t (fun () ->
+    Lia.assert_atom t.lia eq ~polarity:true ~premise:(Fabric.Fabric edge_id))
+;;
+
 (* LIA parity with {!Euf_adapter}'s codex AP4 tripwire: an EMPTY premise set is an
    unconditional entailment (for a propagation) or an unconditional [false] (for a
    conflict) — a soundness bug either way. UNCONDITIONAL guard, not [assert]: like AP4 it

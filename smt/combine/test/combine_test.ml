@@ -171,6 +171,19 @@ struct
   let fabric_verify () term value lo hi = !fabric_verify_fn term value lo hi
   let fabric_are_equal () _ _ = false
   let assert_fabric_eq () ~edge_id:_ _ _ = ()
+
+  (* ADR-0014 Stage 2/3: a mock records no merges, carries no per-class data, reacts to no
+     notification. *)
+  let notify_eq () ~edge_id:_ _ = ()
+
+  type merge_cursor = unit
+
+  let set_record_merges () _ = ()
+  let add_merge_consumer () = ()
+  let drain_merges () () = []
+  let set_class_tag () _ _ = ()
+  let class_tag () _ = None
+  let fabric_explain_eq () _ _ = []
 end
 
 module MockA = Make_mock (struct
@@ -1097,6 +1110,9 @@ module Toy_lia = struct
   let explain_fabric t l = fabric_of_expl (explain t l)
   let fixed_bounds _t _term = None
   let fabric_verify _t _term _value _lo _hi = false
+
+  (* ADR-0014 Stage 2: the toy arithmetic child ignores hub notifications. *)
+  let notify_eq _t ~edge_id:_ _ = ()
 end
 
 (* ---- TOY EUF: naive congruence closure over App, with disequalities --------------- *)
@@ -1273,6 +1289,20 @@ module Toy_euf = struct
   ;;
 
   let assert_fabric_eq _t ~edge_id:_ _ _ = ()
+
+  (* ADR-0014 Stage 2/3: the toy records no merge log and carries no per-class data, so
+     the combinator's Stage-2 drain is a no-op here (the real EUF→LIA notification is
+     driven in the real-adapter Stage-2 test). *)
+  let notify_eq _t ~edge_id:_ _ = ()
+
+  type merge_cursor = unit
+
+  let set_record_merges _t _ = ()
+  let add_merge_consumer _t = ()
+  let drain_merges _t () = []
+  let set_class_tag _t _ _ = ()
+  let class_tag _t _ = None
+  let fabric_explain_eq _t _ _ = []
 end
 
 module Cuflia = Cmb.Combine (Oxsmt_combine.Uflia_router) (Toy_euf) (Toy_lia)
@@ -2802,6 +2832,131 @@ let test_owner_strand_whitebox () =
   reset_mocks ()
 ;;
 
+(* ================================================================================== *)
+(* ADR-0014 Stage 2 — merge-notification callbacks (EUF→LIA, §A.3). *)
+
+(* THE STAGE-2 DEMONSTRATION (reasoning Path-1 forwarding cannot do). [x = y] merges
+   [x],[y] in the hub, so congruence closes [f(x) ~ f(y)] — but there is NO Boolean
+   [Eq(f(x),f(y))] atom, so trunk's Path-1 forwarding never puts that equality on the SAT
+   trail and LIA would learn it only via a Final trichotomy split. The Stage-2 callback
+   notifies LIA of the congruence merge directly, so LIA asserts [f(x) = f(y)] into the
+   tableau and the bounds [f(x) >= 5], [f(y) <= 3] are immediately infeasible ⇒ UNSAT,
+   with NO arrangement split. The mechanism is a CONGRUENCE-origin fabric edge (no Farkas
+   witness), so it emits no [on_fabric_eq] event — distinguishing it from a Stage-1b
+   fixed-value injection. *)
+let test_stage2_congruence_notify_unsat () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let ff = ufun f "f" in
+  let fx = Context.app f.ctx ff [ x ]
+  and fy = Context.app f.ctx ff [ y ] in
+  let formula =
+    [ Context.eq f.ctx x y, true
+    ; Context.ge f.ctx fx (Context.int_const f.ctx 5), true
+    ; Context.le f.ctx fy (Context.int_const f.ctx 3), true
+    ]
+  in
+  let v, events, edges = fab_run f formula in
+  check
+    "stage2: x=y ∧ f(x)>=5 ∧ f(y)<=3 ⇒ UNSAT (congruence eq notified to LIA)"
+    (v = `Unsat);
+  check "stage2: a congruence edge was created" (edges >= 1);
+  check "stage2: congruence edge emits NO on_fabric_eq (no Farkas witness)" (events = []);
+  (* Discriminator — DROP [x=y]: [f(x)>=5 ∧ f(y)<=3] alone is SAT (f(x),f(y) independent). *)
+  let g = fixture () in
+  let x = const g "x"
+  and y = const g "y" in
+  let ff = ufun g "f" in
+  let fx = Context.app g.ctx ff [ x ]
+  and fy = Context.app g.ctx ff [ y ] in
+  let sat_formula =
+    [ Context.ge g.ctx fx (Context.int_const g.ctx 5), true
+    ; Context.le g.ctx fy (Context.int_const g.ctx 3), true
+    ]
+  in
+  let v2, _events, edges2 = fab_run g sat_formula in
+  check "stage2: f(x)>=5 ∧ f(y)<=3 alone ⇒ SAT (no spurious UNSAT)" (v2 = `Sat);
+  check "stage2: no edge created without the congruence merge" (edges2 = 0)
+;;
+
+(* F3 backtracking for the Stage-2 notification: LIA's callback-asserted equality (and its
+   congruence edge) must unwind on [pop] and re-fire on re-assert. *)
+let test_stage2_pop_reassert () =
+  let f = fixture () in
+  let x = const f "x"
+  and y = const f "y" in
+  let ff = ufun f "f" in
+  let fx = Context.app f.ctx ff [ x ]
+  and fy = Context.app f.ctx ff [ y ] in
+  let t = Fab.create f.ctx f.env in
+  let atoms : Atom.t Term.Table.t = Term.Table.create 32 in
+  let atom_of term =
+    match Term.Table.find_opt atoms term with
+    | Some a -> a
+    | None ->
+      let a = fresh_atom f in
+      Term.Table.replace atoms term a;
+      Fab.register_atom t a term;
+      a
+  in
+  let assert_tm term sign = Fab.assert_lit t (Lit.make (atom_of term) sign) in
+  (* Drive to a fixpoint like {!fab_run}: a congruence merge surfaces at LIA only on the
+     check AFTER the notification. Propagated lits ride the current frame (a later [pop]
+     unwinds them). *)
+  let rec final depth =
+    if depth > 64
+    then `Unknown
+    else (
+      match Fab.check t Th.Final with
+      | Th.Conflict _ -> `Unsat
+      | Th.Sat -> `Sat
+      | Th.Propagations lits ->
+        List.iter (fun l -> Fab.assert_lit t l) lits;
+        final (depth + 1)
+      | Th.Split _ -> `Split)
+  in
+  let final () = final 0 in
+  assert_tm (Context.ge f.ctx fx (Context.int_const f.ctx 5)) true;
+  assert_tm (Context.le f.ctx fy (Context.int_const f.ctx 3)) true;
+  check "stage2 pop: bounds without x=y ⇒ not UNSAT" (final () <> `Unsat);
+  Fab.push t;
+  assert_tm (Context.eq f.ctx x y) true;
+  check "stage2 pop: x=y ⇒ UNSAT (congruence eq notified)" (final () = `Unsat);
+  Fab.pop t 1;
+  check "stage2 pop: after pop, notification unwound ⇒ NOT UNSAT" (final () <> `Unsat);
+  Fab.push t;
+  assert_tm (Context.eq f.ctx x y) true;
+  check "stage2 pop: re-assert x=y ⇒ UNSAT again (re-notification)" (final () = `Unsat)
+;;
+
+(* Codex #2 regression, on the fixed [expand_justifications] via {!Fab.For_testing}. The
+   fabric edge dependency graph is a DAG WITH SHARING (Stage 2 makes it reachable: two
+   congruence edges' Γ can cite one common Stage-1b ancestor — a diamond e1→e0←e2). Driven
+   on a hand-built registry. PRE-FIX the never-cleared visited set flagged e0's second
+   visit as a cycle → a valid UNSAT degraded to unknown; FIXED it expands cleanly; a
+   genuine self-cycle still raises (fail-closed). *)
+let test_stage2_shared_ancestor_no_false_cycle () =
+  let f = fixture () in
+  let l0 = Lit.make (fresh_atom f) true in
+  let dummy = const f "d" in
+  let t = Fab.create f.ctx f.env in
+  Fab.For_testing.register_edge t 0 [ Cmb.Real l0 ] ~s:dummy ~tt:dummy;
+  Fab.For_testing.register_edge t 1 [ Cmb.Fabric 0 ] ~s:dummy ~tt:dummy;
+  Fab.For_testing.register_edge t 2 [ Cmb.Fabric 0 ] ~s:dummy ~tt:dummy;
+  (match Fab.For_testing.expand t [ Cmb.Fabric 1; Cmb.Fabric 2 ] with
+   | lits ->
+     check "stage2 diamond: shared ancestor expands, NOT a false cycle" (lits = [ l0 ])
+   | exception Cmb.Combination_unsound _ ->
+     check "stage2 diamond: shared ancestor expands, NOT a false cycle" false);
+  Fab.For_testing.register_edge t 3 [ Cmb.Fabric 3 ] ~s:dummy ~tt:dummy;
+  check
+    "stage2 diamond: a genuine cycle is still caught (fail-closed)"
+    (match Fab.For_testing.expand t [ Cmb.Fabric 3 ] with
+     | _ -> false
+     | exception Cmb.Combination_unsound _ -> true)
+;;
+
 let () =
   Printf.printf "== combine mechanics ==\n";
   test_routing ();
@@ -2866,6 +3021,10 @@ let () =
   test_f1sem_verifier_discriminates ();
   test_f1sem_tiebreak ();
   test_owner_strand_whitebox ();
+  Printf.printf "== ADR-0014 Stage 2 merge callbacks (EUF→LIA) ==\n";
+  test_stage2_congruence_notify_unsat ();
+  test_stage2_pop_reassert ();
+  test_stage2_shared_ancestor_no_false_cycle ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

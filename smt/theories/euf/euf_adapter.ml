@@ -135,6 +135,21 @@ let assert_fabric_eq t ~edge_id a b =
   Euf.assert_eq t.engine ~premise:(P_fabric edge_id) a b
 ;;
 
+(* ADR-0014 Stage 2/3: the merge-notification pull log (see {!Euf.set_record_merges}) and
+   per-class tag slot, thin forwards to the engine. *)
+type merge_cursor = Euf.merge_cursor
+
+let set_record_merges t on = Euf.set_record_merges t.engine on
+let add_merge_consumer t = Euf.add_merge_consumer t.engine
+let drain_merges t c = Euf.drain_merges t.engine c
+let set_class_tag t term tag = Euf.set_class_tag t.engine term tag
+let class_tag t term = Euf.class_tag t.engine term
+
+(* EUF is the hub itself, not a theory that reacts to hub notifications — it satisfies the
+   shared [FABRIC_CHILD] surface with a no-op [notify_eq]. A hub merge is already
+   reflected in the congruence closure; there is nothing to re-assert. *)
+let notify_eq _t ~edge_id:_ _ = ()
+
 (* The congruence child fixes no arithmetic value; the fix-trigger queries only LIA. *)
 let fixed_bounds _t _term = None
 
@@ -170,6 +185,14 @@ let justifications_of_prems prems =
       | P_axiom -> None)
     prems
 ;;
+
+(* ADR-0014 Stage 2: the justification set entailing [a = b] in the current congruence
+   closure, as fabric currency (a [P_fabric] premise on the chain becomes a [Fabric]
+   handle the combinator expands). Precedence-valid (CONTRACT-EX: every returned premise
+   was asserted no later than the merge that first connected the pair), so it is a sound
+   [new_eq] justification. [Euf.explain] requires [are_equal a b]; the combinator only
+   calls this after {!fabric_are_equal}. *)
+let fabric_explain_eq t a b = justifications_of_prems (Euf.explain t.engine a b)
 
 let ordinary_explanation (e : Fabric.Explanation.t) =
   let premises =

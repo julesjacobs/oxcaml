@@ -41,6 +41,11 @@ module type FABRIC_CHILD = sig
   val explain_fabric : t -> Lit.t -> Fabric_explanation.t
   val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
   val fabric_verify : t -> Term.t -> string -> justification -> justification -> bool
+
+  (* ADR-0014 Stage 2 (§A.3): react to a hub [new_eq] by asserting the (pre-built) Int
+     equality atom into this theory, attributed to the fabric edge. Pure mutation on the
+     theory's own trail (F3 co-location). *)
+  val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
 end
 
 module type FABRIC_CONGRUENCE_CHILD = sig
@@ -49,6 +54,17 @@ module type FABRIC_CONGRUENCE_CHILD = sig
   val internalize_term : t -> Term.t -> unit
   val fabric_are_equal : t -> Term.t -> Term.t -> bool
   val assert_fabric_eq : t -> edge_id:edge_id -> Term.t -> Term.t -> unit
+
+  (* ADR-0014 Stage 2/3: the hub's multi-consumer merge log, per-class tag slot, and
+     congruence-explanation accessor for the [new_eq] justification (§A.3/§A.4). *)
+  type merge_cursor
+
+  val set_record_merges : t -> bool -> unit
+  val add_merge_consumer : t -> merge_cursor
+  val drain_merges : t -> merge_cursor -> Fabric.merge_event list
+  val set_class_tag : t -> Term.t -> Term.t -> unit
+  val class_tag : t -> Term.t -> Term.t option
+  val fabric_explain_eq : t -> Term.t -> Term.t -> justification list
 end
 
 (* ADR-0014 Stage 1b OFF toggle (deliverable 12). Read ONCE at module init, exactly the
@@ -58,6 +74,19 @@ end
    injection, no new counters. *)
 let fabric_off =
   match Sys.getenv_opt "OXSMT_NO_FABRIC" with
+  | None | Some ("0" | "false" | "no" | "") -> false
+  | Some _ -> true
+;;
+
+(* ADR-0014 Stage 2 callback toggle. When set (or the whole fabric is off), the merge log
+   is not recorded and no [new_eq] notification fires — the A/B OFF arm and the fallback
+   to Path-1 forwarding (ADR §C Stage 2 fallback: Path-1 is retained; callbacks are
+   additive, so turning them off is a pure soundness-equivalent retreat). Same read-once
+   discipline as {!fabric_off}. *)
+let fabric_callbacks_off =
+  fabric_off
+  ||
+  match Sys.getenv_opt "OXSMT_NO_FABRIC_CALLBACKS" with
   | None | Some ("0" | "false" | "no" | "") -> false
   | Some _ -> true
 ;;
@@ -80,6 +109,18 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+
+  module For_testing : sig
+    val register_edge
+      :  t
+      -> edge_id
+      -> justification list
+      -> s:Term.t
+      -> tt:Term.t
+      -> unit
+
+    val expand : t -> justification list -> Lit.t list
+  end
 end = struct
   (* A pinned shared-equality literal: the pair it relates, its asserted polarity, and
      which children it was actually asserted to (a negative equality may reach only the
@@ -170,6 +211,10 @@ end = struct
       (* cold-path closure trail (Trail realization 1b): each entry undoes one registry
            / combined-reason / propagated_by insertion when its frame pops. *)
     ; mutable trace : Fabric.trace option (* F7 cert emission hook; unset ⇒ zero cost. *)
+    ; lia_merge_cursor : A.merge_cursor option
+      (* ADR-0014 Stage 2: this combinator's own cursor into the hub merge log, for the
+           EUF→LIA notify. [Some] iff callbacks are on; a datatypes client (if wired)
+           holds its OWN cursor, so both see every merge. *)
     ; mutable stat_edges : int
     ; mutable stat_skipped : int
     ; mutable stat_expansions : int
@@ -177,14 +222,34 @@ end = struct
 
   and reg_entry =
     { gamma : justification list (* the recorded premise set (may hold Fabric handles) *)
-    ; witness : Fabric.equality_witness
+    ; origin : edge_origin
     ; reg_s : Term.t
     ; reg_t : Term.t
     }
 
+  (* How a fabric edge's equality was justified — for F7 cert emission only (expansion
+     F2/F4 reads [gamma] alone). Stage 1b's LIA fixed-value merge carries the two-oriented
+     Farkas witness; Stage 2's EUF→LIA congruence notification carries none (its cert leaf
+     is EUF's own congruence proof over the expanded real-literal Γ — ADR §C Stage 2 "same
+     Shared_eq/congruence cert", no new virtual proposition). *)
+  and edge_origin =
+    | Fixed_value of Fabric.equality_witness
+    | Congruence
+
   let create ctx env =
+    let a = A.create ctx env in
+    (* ADR-0014 Stage 2: turn on the hub merge log iff callbacks are live (else the engine
+       skips the append — pure-corpus / fabric-off is byte-identical) and register this
+       combinator's LIA-notify cursor. *)
+    let lia_merge_cursor =
+      if fabric_callbacks_off
+      then None
+      else (
+        A.set_record_merges a true;
+        Some (A.add_merge_consumer a))
+    in
     { ctx
-    ; a = A.create ctx env
+    ; a
     ; b = B.create ctx env
     ; atom_term = Atom.Table.create 64
     ; all_terms = Term.Set.empty
@@ -203,6 +268,7 @@ end = struct
     ; assert_counter = 0
     ; fabric_frames = Trail.create ()
     ; trace = None
+    ; lia_merge_cursor
     ; stat_edges = 0
     ; stat_skipped = 0
     ; stat_expansions = 0
@@ -775,13 +841,26 @@ end = struct
 
   (* F2 recursive handle expansion. Replace each [Fabric e] by [registry[e].gamma],
      recursively, until every premise is a real [Lit.t]. Termination + acyclicity are by
-     construction (an edge's Γ cites only STRICTLY-SMALLER live ids, checked at
-     injection), and re-verified here with a visited set that FAILS CLOSED (→
-     [Combination_unsound] → unknown) on a cycle or a missing/popped handle. Deterministic
+     construction (an edge's Γ cites only STRICTLY-SMALLER live ids, checked at injection
+     by [gamma_acyclic_ok]), and re-verified here, failing CLOSED (→ [Combination_unsound]
+     → unknown) on a genuine cycle or a missing/popped handle. Deterministic
      first-occurrence order, deduplicated (a premise SET). Expanded at BOTH seam-return
-     points (eager [Conflict] in [realize], lazy reason in [explain_on]). *)
+     points (eager [Conflict] in [realize], lazy reason in [explain_on]).
+
+     Two DISTINCT edge sets, because the edge dependency graph is a DAG with SHARING, not
+     a tree (Stage 2 makes this reachable: two congruence edges' Γ can cite one common
+     Stage-1b ancestor edge — a diamond):
+     - [on_path]: edges on the CURRENT DFS path. A genuine cycle is a back-edge to one of
+       these; that (and only that) fails closed. Entries are removed on unwind, so a
+       sibling re-reference is NOT mistaken for a cycle. (The pre-fix code used one
+       never-cleared [visited] set, so a shared ancestor cited by two edges
+       false-positived as a cycle and degraded a valid UNSAT to unknown — codex #2.)
+     - [expanded]: edges FULLY expanded already. A shared ancestor is walked once; a later
+       reference is skipped (its real [Lit.t]s are already in [out], deduped by [seen]),
+       which both fixes the false cycle and keeps expansion linear in the DAG. *)
   let expand_justifications t (js : justification list) : Lit.t list =
-    let visited : (edge_id, unit) Hashtbl.t = Hashtbl.create 8 in
+    let on_path : (edge_id, unit) Hashtbl.t = Hashtbl.create 8 in
+    let expanded : (edge_id, unit) Hashtbl.t = Hashtbl.create 8 in
     let seen = ref Lit.Map.empty in
     let out = ref [] in
     let push_lit l =
@@ -793,18 +872,22 @@ end = struct
     let rec go = function
       | Real l -> push_lit l
       | Fabric e ->
-        if Hashtbl.mem visited e
+        if Hashtbl.mem on_path e
         then
-          raise (Combination_unsound "fabric expansion: edge cycle (acyclicity violated)");
-        Hashtbl.replace visited e ();
-        (match Hashtbl.find_opt t.registry e with
-         | None ->
-           raise
-             (Combination_unsound
-                "fabric expansion: missing or popped edge handle (fail-closed)")
-         | Some entry ->
-           t.stat_expansions <- t.stat_expansions + 1;
-           List.iter go entry.gamma)
+          raise (Combination_unsound "fabric expansion: edge cycle (acyclicity violated)")
+        else if not (Hashtbl.mem expanded e)
+        then (
+          match Hashtbl.find_opt t.registry e with
+          | None ->
+            raise
+              (Combination_unsound
+                 "fabric expansion: missing or popped edge handle (fail-closed)")
+          | Some entry ->
+            Hashtbl.replace on_path e ();
+            t.stat_expansions <- t.stat_expansions + 1;
+            List.iter go entry.gamma;
+            Hashtbl.remove on_path e;
+            Hashtbl.replace expanded e ())
     in
     List.iter go js;
     List.rev !out
@@ -854,7 +937,7 @@ end = struct
      skipped pair leaves ZERO partial state. H1/L1: [Term.Overflow]/[Combination_unsound]
      before commit → skip the pair (completeness loss), counters set only after a complete
      injection. *)
-  let try_inject_pair t (a : Term.t) (b : Term.t) : bool =
+  let rec try_inject_pair t (a : Term.t) (b : Term.t) : bool =
     if A.fabric_are_equal t.a a b
     then false
     else (
@@ -925,26 +1008,105 @@ end = struct
       | Some (gamma, witness) ->
         let edge = t.next_edge in
         t.next_edge <- t.next_edge + 1;
-        let entry = { gamma; witness; reg_s = a; reg_t = b } in
+        let entry = { gamma; origin = Fixed_value witness; reg_s = a; reg_t = b } in
         Hashtbl.replace t.registry edge entry;
         Trail.record t.fabric_frames (fun () -> Hashtbl.remove t.registry edge);
         (* commit: pure trailed union-find from here — cannot raise. *)
         A.assert_fabric_eq t.a ~edge_id:edge a b;
-        (* F7 emission: the [{edge_id; s; t; Γ; witness}] event, materialized from the
-           same registry entry the cert-time path (F4) will read, so they cite identical
-           Γ. *)
-        (match t.trace with
-         | None -> ()
-         | Some tr ->
-           tr.Fabric.on_fabric_eq
-             { edge_id = edge
-             ; s = entry.reg_s
-             ; t = entry.reg_t
-             ; gamma = expand_justifications t entry.gamma
-             ; witness = entry.witness
-             });
+        emit_fabric_eq t edge entry;
         t.stat_edges <- t.stat_edges + 1;
         true)
+
+  (* F7 emission: the [{edge_id; s; t; Γ; witness}] event, materialized from the same
+     registry entry the cert-time path (F4) reads, so they cite identical Γ. Only a
+     [Fixed_value] edge carries a Farkas witness; a [Congruence] edge (Stage 2) is
+     certified by EUF's own congruence proof over the expanded Γ, so it emits no fabric-eq
+     event (ADR §C Stage 2). *)
+  and emit_fabric_eq t edge entry =
+    match t.trace, entry.origin with
+    | None, _ | _, Congruence -> ()
+    | Some tr, Fixed_value witness ->
+      tr.Fabric.on_fabric_eq
+        { edge_id = edge
+        ; s = entry.reg_s
+        ; t = entry.reg_t
+        ; gamma = expand_justifications t entry.gamma
+        ; witness
+        }
+  ;;
+
+  (* ==== ADR-0014 Stage 2 — merge-notification callbacks (EUF→LIA, §A.3) ============ *)
+
+  (* The A4-erratum callback domain (§B.5a): notify LIA only about a merge of two BOUNDARY
+     Int classes shared with LIA. A boundary Int term is in {!interface} (the crossing /
+     both-used set the walk builds), so LIA already values it — asserting the equality
+     touches an existing LIA variable, never mints a fresh unconstrained one. A
+     non-boundary (pure-EUF) Int merge is filtered out (sound to skip; it is not LIA's
+     business). *)
+  let notify_candidate t (term : Term.t) =
+    (match term.Term.sort with
+     | Sort.Int _ -> true
+     | Sort.Bool | Sort.Uninterpreted _ -> false
+     | _ -> false)
+    && Term.Set.mem term t.interface
+  ;;
+
+  (* Try to notify LIA of one hub merge [s = u] (F1c notify-OUT). Registers a
+     [Congruence]-origin fabric edge whose Γ is the EUF congruence proof, then asserts the
+     equality into LIA attributed to that edge. FIRST-wins / bounded by construction (the
+     merge log holds each union once; a re-union is skipped by the engine). H5
+     transactional: ALL fallible work — the EUF explain, the F1(b)/acyclicity checks, the
+     [Context.eq] construction — happens BEFORE the edge is registered and BEFORE
+     [notify_eq] mutates LIA, so a skipped pair leaves ZERO partial state. A congruence
+     proof always cites >= 1 asserted literal, so an empty Γ is a defensive skip
+     (completeness-safe), not a merge we assert unjustified. Returns whether a NEW edge
+     committed. *)
+  let try_notify_pair t (s : Term.t) (u : Term.t) : bool =
+    if not (notify_candidate t s && notify_candidate t u)
+    then false
+    else if not (A.fabric_are_equal t.a s u)
+    then
+      false (* defensive: the log only holds genuine unions, so this holds post-merge *)
+    else (
+      let prepared =
+        try
+          let gamma = A.fabric_explain_eq t.a s u in
+          if gamma = [] || not (gamma_precedence_ok t gamma && gamma_acyclic_ok t gamma)
+          then None
+          else Some (gamma, Context.eq t.ctx s u)
+        with
+        | Term.Overflow | Combination_unsound _ -> None
+      in
+      match prepared with
+      | None ->
+        t.stat_skipped <- t.stat_skipped + 1;
+        false
+      | Some (gamma, eq) ->
+        let edge = t.next_edge in
+        t.next_edge <- t.next_edge + 1;
+        let entry = { gamma; origin = Congruence; reg_s = s; reg_t = u } in
+        Hashtbl.replace t.registry edge entry;
+        Trail.record t.fabric_frames (fun () -> Hashtbl.remove t.registry edge);
+        (* commit: pure mutation on LIA's own trail (reversed by LIA's frame pop, F3). *)
+        B.notify_eq t.b ~edge_id:edge eq;
+        t.stat_edges <- t.stat_edges + 1;
+        true)
+  ;;
+
+  (* Drain the hub's merge log and notify LIA of each qualifying pair. Non-reentrant by
+     construction (the engine only logs during a merge; this runs after [A.check_fabric]
+     returns), so the cascade discipline (F5) holds — LIA's assertion cannot re-enter EUF
+     within this drain (a Stage-1b re-injection is at Final, a later check cycle). No-op
+     when callbacks are off (the log is empty — {!Euf.set_record_merges} was never turned
+     on). *)
+  let drain_and_notify t =
+    match t.lia_merge_cursor with
+    | None -> ()
+    | Some cursor ->
+      List.iter
+        (fun (ev : Fabric.merge_event) ->
+           ignore (try_notify_pair t ev.Fabric.kept ev.Fabric.merged : bool))
+        (A.drain_merges t.a cursor)
   ;;
 
   (* Convert a child's fabric result to the frozen seam currency, expanding [Fabric]
@@ -973,6 +1135,19 @@ end = struct
      arrangement is re-decided (loop). A pair the fabric can't discharge falls back to the
      trichotomy split, so completeness is unchanged. Terminates: each injection merges two
      previously-distinct classes (are_equal then skips the pair), a monotone decrease. *)
+  (* Drive the hub (A), then — on any non-conflict result — drain the merge log and notify
+     LIA (Stage 2), so the subsequent [B.check] sees the callback-asserted
+     bound-equalities. An EUF conflict is inconsistent; there is nothing to share. This is
+     the single point where a hub merge becomes a LIA notification, so the ordering (merge
+     → notify → LIA check) is uniform across Propagate/Final and the injection loop. *)
+  let check_a t effort : Theory.check_result =
+    let r = A.check_fabric t.a effort in
+    (match r with
+     | Conflict _ -> ()
+     | Sat | Split _ | Propagations _ -> drain_and_notify t);
+    realize t R.A r
+  ;;
+
   let rec combine_models_fabric t : Theory.check_result =
     let ma = A.model t.a in
     let mb = B.model t.b in
@@ -984,7 +1159,7 @@ end = struct
     | Some (x, y) ->
       if try_inject_pair t x y
       then (
-        match realize t R.A (A.check_fabric t.a Theory.Final) with
+        match check_a t Theory.Final with
         | Theory.Conflict e -> Theory.Conflict e
         | Theory.Split terms -> Theory.Split terms
         | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
@@ -998,12 +1173,12 @@ end = struct
   let check_on_drive t effort : Theory.check_result =
     match effort with
     | Theory.Propagate ->
-      (match realize t R.A (A.check_fabric t.a Theory.Propagate) with
+      (match check_a t Theory.Propagate with
        | Theory.Conflict e -> Theory.Conflict e
        | Theory.Sat | Theory.Split _ -> check_b_propagate_on t []
        | Theory.Propagations la -> check_b_propagate_on t la)
     | Theory.Final ->
-      (match realize t R.A (A.check_fabric t.a Theory.Final) with
+      (match check_a t Theory.Final with
        | Theory.Conflict e -> Theory.Conflict e
        | Theory.Split terms -> Theory.Split terms
        | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
@@ -1214,4 +1389,16 @@ end = struct
   ;;
 
   let set_fabric_trace t tr = t.trace <- tr
+
+  (* Test-only access to the fabric edge registry + expansion, so the codex #2
+     shared-ancestor / genuine-cycle behaviours can be driven on a hand-built diamond
+     without the fragile end-to-end setup. Not used by any shipping path. *)
+  module For_testing = struct
+    let register_edge t id gamma ~s ~tt =
+      Hashtbl.replace t.registry id { gamma; origin = Congruence; reg_s = s; reg_t = tt };
+      if id >= t.next_edge then t.next_edge <- id + 1
+    ;;
+
+    let expand t js = expand_justifications t js
+  end
 end

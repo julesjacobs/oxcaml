@@ -17,6 +17,16 @@
 
 open Oxsmt_core
 
+(* ADR-0014 Stage 2/3 merge notification (defined in {!Fabric} so the combinator can read
+   it without depending on this engine). Re-exported here as the engine's own
+   [merge_event]. *)
+type merge_event = Fabric.merge_event =
+  { kept : Term.t
+  ; merged : Term.t
+  ; kept_tag : Term.t option
+  ; merged_tag : Term.t option
+  }
+
 (* --- reasons on explanation-forest edges --------------------------------- *)
 
 type 'p reason =
@@ -44,6 +54,12 @@ type 'p enode =
   ; mutable fparent : int (* explanation-forest parent; = self at a tree root *)
   ; mutable freason : 'p reason (* reason for the edge to [fparent] *)
   ; mutable stamp : int (* scratch marker for NCA; not trailed *)
+  ; mutable tag : Term.t option
+    (* ADR-0014 Stage 3 (datatypes-scoped): per-class theory data — a witness [Term.t] a
+     client attaches to the class (datatypes: the representative constructor application
+     [C(a..)] of the class). Valid at a ROOT only; trailed; the surviving root inherits a
+     tag on merge if it had none. Two tagged classes merging is surfaced via the merge log
+     (both tags) for the client to resolve. *)
   }
 
 type watched =
@@ -99,6 +115,7 @@ type 'p undo =
   | U_sig_add of (int * int array)
   | U_sig_del of (int * int array) * int
   | U_reported of int * int
+  | U_tag of int * Term.t option (* ADR-0014 Stage 3: restore a root's per-class tag *)
 
 (* Per-frame watermarks for EUF's auxiliary arrays — the [pop] target lengths for state
    NOT reversed by the typed undo trail (which the shared substrate drains). The trail
@@ -146,6 +163,21 @@ type 'p t =
     touched : int Dynarray.t
   ; mutable prop_mark : int
   ; mutable stamp : int
+  ; (* ADR-0014 Stage 2 merge-notification log. When [record_merges] is set (by the
+       combinator when fabric callbacks are live), every actual class union appends its
+       two ORIGINAL endpoint terms here (newest first); {!take_merges} drains it. Default
+       OFF ⇒ the append is skipped, so direct-drive / fabric-off callers are
+       byte-identical and pay zero hot-path cost. Reset on {!pop} so an undrained merge
+       from a popped frame is never delivered (a completeness-safe drop; the normal
+       CDCL(T) loop drains at every [check] between push/pop, so this only guards an
+       assert-without-check driver). Order is the deterministic merge-queue order (I6).
+       MULTI-CONSUMER: an append-only log with a per-client read cursor
+       ({!add_merge_consumer} / {!drain_merges}), so the datatypes client and the
+       LIA-notify path each see every merge independently. Cleared (and cursors reset) on
+       {!pop}. *)
+    mutable record_merges : bool
+  ; merges : Fabric.merge_event Dynarray.t
+  ; mutable merge_cursors : int ref list
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
@@ -163,6 +195,9 @@ let create ctx =
   ; touched = Dynarray.create ()
   ; prop_mark = 0
   ; stamp = 0
+  ; record_merges = false
+  ; merges = Dynarray.create ()
+  ; merge_cursors = []
   }
 ;;
 
@@ -269,6 +304,7 @@ let apply_undo t = function
   | U_sig_add key -> Sig.remove t.sigtbl key
   | U_sig_del (key, v) -> Sig.replace t.sigtbl key v
   | U_reported (idx, old) -> (Dynarray.get t.watched idx).w_reported <- old
+  | U_tag (i, old) -> (get t i).tag <- old
 ;;
 
 (* --- congruence signatures ----------------------------------------------- *)
@@ -332,6 +368,21 @@ let merge t a0 b0 reason0 =
          incremental {!propagate} (a watched atom's status can only flip because one of
          its endpoints now finds to [root]; see [touched]). *)
       mark_touched t root;
+      (* ADR-0014 Stage 2/3: capture the two classes' per-class tags NOW (before the
+         surviving root inherits) and log the union for the merge-notification callback
+         (the two ORIGINAL endpoint terms — for an asserted equality the asserted pair,
+         for a congruence the two congruent [App] terms). Gated: off ⇒ skipped. *)
+      let tag_a = (get t ra).tag
+      and tag_b = (get t rb).tag in
+      if t.record_merges
+      then
+        Dynarray.add_last
+          t.merges
+          { Fabric.kept = (get t a).term
+          ; merged = (get t b).term
+          ; kept_tag = tag_a (* tag of [a]'s class (ra) *)
+          ; merged_tag = tag_b (* tag of [b]'s class (rb) *)
+          };
       (* forest edge between the ORIGINAL endpoints, carrying [reason] *)
       add_forest_edge t a b reason;
       let parents = dedup_int (get t child).uses in
@@ -341,6 +392,14 @@ let merge t a0 b0 reason0 =
       set_size t root ((get t root).size + (get t child).size);
       set_uses t root ((get t child).uses @ (get t root).uses);
       set_parent t child root;
+      (* ADR-0014 Stage 3: the surviving root inherits the child's per-class tag if it had
+         none (trailed). If BOTH carried a tag the collision is surfaced via the merge log
+         above for the client to resolve; the root keeps its own tag meanwhile. *)
+      (match (get t root).tag, (get t child).tag with
+       | None, (Some _ as ct) ->
+         push_undo t (U_tag (root, None));
+         (get t root).tag <- ct
+       | _ -> ());
       (* recompute parent signatures; schedule congruences *)
       List.iter
         (fun p ->
@@ -400,6 +459,7 @@ let rec register t (term : Term.t) : int =
       ; fparent = id
       ; freason = R_none
       ; stamp = 0
+      ; tag = None
       };
     Term.Table.replace t.index term id;
     (match kind with
@@ -439,6 +499,53 @@ let rec register t (term : Term.t) : int =
 ;;
 
 let register_term t term = ignore (register t term : int)
+
+(* --- ADR-0014 Stage 2 merge-notification log ----------------------------- *)
+
+let clear_merges t =
+  Dynarray.clear t.merges;
+  List.iter (fun c -> c := 0) t.merge_cursors
+;;
+
+let set_record_merges t b =
+  t.record_merges <- b;
+  if not b then clear_merges t
+;;
+
+type merge_cursor = int ref
+
+(* A merge consumer starts reading at the current end of the log (it sees only merges from
+   here on). Multiple consumers (datatypes, LIA-notify) each register their own cursor. *)
+let add_merge_consumer t =
+  let c = ref (Dynarray.length t.merges) in
+  t.merge_cursors <- c :: t.merge_cursors;
+  c
+;;
+
+let drain_merges t c =
+  let n = Dynarray.length t.merges in
+  let out = ref [] in
+  for i = n - 1 downto !c do
+    out := Dynarray.get t.merges i :: !out
+  done;
+  c := n;
+  !out
+;;
+
+(* ADR-0014 Stage 3 per-class tag (datatypes-scoped). Attach a witness [Term.t] to
+   [term]'s class (registering [term]/[tag] if new); trailed, so a [pop] restores it.
+   FIRST-set wins is NOT enforced here — a re-[set] on the same root overwrites (the
+   client sets a class's constructor witness once at the constructor assertion, so
+   overwrite does not arise in practice; the tag is a witness, not a justification). *)
+let set_class_tag t term tag =
+  let r = find t (register t term) in
+  ignore (register t tag : int);
+  push_undo t (U_tag (r, (get t r).tag));
+  (get t r).tag <- Some tag
+;;
+
+(* The per-class tag of [term]'s class, or [None]. Registers [term] if new. *)
+let class_tag t term = (get t (find t (register t term))).tag
 
 let assert_eq t ~premise a b =
   let ia = register t a
@@ -889,7 +996,15 @@ let restore_aux t lv =
   Dynarray.truncate t.enodes lv.l_enodes
 ;;
 
-let pop t n = Trail.pop t.trail ~apply:(apply_undo t) ~restore:(restore_aux t) n
+let pop t n =
+  Trail.pop t.trail ~apply:(apply_undo t) ~restore:(restore_aux t) n;
+  (* Drop any merges accumulated since the last drain and reset cursors: a pop retracts
+     the unions that produced them, so an undrained entry would name a merge that no
+     longer holds (a completeness-safe drop — see {!merges}). A consumer's action on an
+     already-drained merge unwinds via that consumer's own trailed state, not via
+     re-notification. *)
+  clear_merges t
+;;
 
 module Debug = struct
   let self_check = self_check

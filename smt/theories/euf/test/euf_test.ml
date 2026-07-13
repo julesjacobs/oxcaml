@@ -1065,6 +1065,114 @@ let test_query_api_nonmutating () =
 ;;
 
 (* ================================================================== *)
+(* ADR-0014 Stage 2 merge-notification log (multi-consumer cursor API) + Stage 3 per-class
+   tag. Discriminating on the callback + data behaviours a datatypes client needs:
+   fire-on-merge (asserted + congruence), correct reps, drain/cursor semantics, two
+   independent consumers each seeing every merge, unwind-on-pop / re-fire-on-reassert. *)
+let test_stage2_merge_log () =
+  let _env, _u, unary, konst = make_env () in
+  let ctx = Context.create _env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let f = unary "f" in
+  let fa = Context.app ctx f [ a ]
+  and fb = Context.app ctx f [ b ] in
+  let has ms u v =
+    List.exists
+      (fun (m : Euf.merge_event) ->
+         (Term.equal m.kept u && Term.equal m.merged v)
+         || (Term.equal m.kept v && Term.equal m.merged u))
+      ms
+  in
+  (* default OFF ⇒ no recording, zero cost, byte-identical to trunk. *)
+  let e0 = Euf.create ctx in
+  let c0 = Euf.add_merge_consumer e0 in
+  Euf.register_term e0 fa;
+  Euf.register_term e0 fb;
+  Euf.assert_eq e0 ~premise:1 a b;
+  check "stage2: merge log OFF by default ⇒ empty" (Euf.drain_merges e0 c0 = []);
+  (* ON ⇒ fire on the asserted merge AND the congruence merge it triggers; TWO consumers
+     each see every merge (multi-consumer cursors). *)
+  let e = Euf.create ctx in
+  Euf.set_record_merges e true;
+  let c1 = Euf.add_merge_consumer e in
+  let c2 = Euf.add_merge_consumer e in
+  Euf.register_term e fa;
+  Euf.register_term e fb;
+  Euf.assert_eq e ~premise:1 a b;
+  let ms = Euf.drain_merges e c1 in
+  check "stage2: asserted merge (a,b) fires" (has ms a b);
+  check "stage2: congruence merge (f a, f b) fires (correct reps)" (has ms fa fb);
+  check "stage2: cursor drains (second drain empty)" (Euf.drain_merges e c1 = []);
+  check
+    "stage2: second consumer independently sees every merge"
+    (has (Euf.drain_merges e c2) fa fb);
+  (* unwind: a merge inside a frame must NOT survive its [pop] (no-fire-after-rewind). *)
+  let e2 = Euf.create ctx in
+  Euf.set_record_merges e2 true;
+  let c3 = Euf.add_merge_consumer e2 in
+  Euf.register_term e2 fa;
+  Euf.register_term e2 fb;
+  Euf.push e2;
+  Euf.assert_eq e2 ~premise:1 a b;
+  Euf.pop e2 1;
+  check "stage2: pop clears the undrained log (unwind)" (Euf.drain_merges e2 c3 = []);
+  check "stage2: pop undoes the union (a,b no longer equal)" (not (Euf.are_equal e2 a b));
+  (* re-fire: re-asserting after the pop re-logs the merge. *)
+  Euf.assert_eq e2 ~premise:1 a b;
+  check
+    "stage2: re-assert after pop re-fires the merge"
+    (has (Euf.drain_merges e2 c3) a b)
+;;
+
+(* ADR-0014 Stage 3 per-class tag (datatypes-scoped): attach/read, inheritance on merge,
+   collision surfaced via the merge event, pop restoration. *)
+let test_stage3_class_tag () =
+  let _env, _u, _unary, konst = make_env () in
+  let ctx = Context.create _env in
+  let a = Context.const ctx (konst "a")
+  and b = Context.const ctx (konst "b")
+  and c = Context.const ctx (konst "c") in
+  let cA = Context.const ctx (konst "ctorA")
+  and cB = Context.const ctx (konst "ctorB") in
+  let e = Euf.create ctx in
+  Euf.set_record_merges e true;
+  let cur = Euf.add_merge_consumer e in
+  Euf.set_class_tag e a cA;
+  check "stage3: class_tag reads the attached witness" (Euf.class_tag e a = Some cA);
+  check "stage3: an untagged class reads None" (Euf.class_tag e b = None);
+  (* inheritance: b (untagged) merged into a (tagged) ⇒ the class carries a's tag. *)
+  Euf.assert_eq e ~premise:1 a b;
+  ignore (Euf.drain_merges e cur : Euf.merge_event list);
+  check
+    "stage3: untagged inherits the tagged class's witness on merge"
+    (Euf.class_tag e b = Some cA);
+  (* collision: c gets a DIFFERENT tag, then c merges the a/b class ⇒ the merge event
+     surfaces BOTH tags (the ctor-clash signal a datatypes client refutes on). *)
+  Euf.set_class_tag e c cB;
+  Euf.assert_eq e ~premise:2 b c;
+  let evs = Euf.drain_merges e cur in
+  let saw_collision =
+    List.exists
+      (fun (m : Euf.merge_event) ->
+         match m.kept_tag, m.merged_tag with
+         | Some x, Some y ->
+           (Term.equal x cA && Term.equal y cB) || (Term.equal x cB && Term.equal y cA)
+         | _ -> false)
+      evs
+  in
+  check
+    "stage3: a merge of two tagged classes surfaces BOTH tags (clash signal)"
+    saw_collision;
+  (* pop restoration: a tag attached in a frame is gone after its pop. *)
+  let e2 = Euf.create ctx in
+  Euf.push e2;
+  Euf.set_class_tag e2 a cA;
+  check "stage3: tag present inside the frame" (Euf.class_tag e2 a = Some cA);
+  Euf.pop e2 1;
+  check "stage3: tag restored (gone) after pop" (Euf.class_tag e2 a = None)
+;;
+
 let () =
   print_endline "euf self-test:";
   test_textbook ();
@@ -1081,6 +1189,8 @@ let () =
   test_register_in_frame ();
   test_determinism ();
   test_query_api_nonmutating ();
+  test_stage2_merge_log ();
+  test_stage3_class_tag ();
   Printf.printf
     "\neuf self-test: %d checks, %d randomized assert-cases, %d failure(s)\n"
     !checks

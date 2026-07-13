@@ -66,6 +66,35 @@ val assert_fabric_eq
   -> Oxsmt_core.Term.t
   -> unit
 
+(** {2 Merge-notification log + per-class data (ADR-0014 Stage 2/3, §A.3/§A.4).}
+
+    Thin forwards to the engine's multi-consumer merge log and per-class tag slot; the
+    combinator's LIA-notify path and a datatypes client each drain via their own cursor. *)
+
+type merge_cursor = Euf.merge_cursor
+
+val set_record_merges : t -> bool -> unit
+val add_merge_consumer : t -> merge_cursor
+val drain_merges : t -> merge_cursor -> Oxsmt_core.Fabric.merge_event list
+
+(** Per-class theory data (datatypes constructor tag). Thin forwards to
+    {!Oxsmt_euf.Euf.set_class_tag}/{!Oxsmt_euf.Euf.class_tag}. *)
+val set_class_tag : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t -> unit
+
+val class_tag : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t option
+
+(** EUF is the hub, not a theory that reacts to hub notifications; a no-op that satisfies
+    the shared [FABRIC_CHILD] surface. *)
+val notify_eq : t -> edge_id:Oxsmt_core.Fabric.edge_id -> Oxsmt_core.Term.t -> unit
+
+(** [fabric_explain_eq t a b] is the fabric justification set entailing [a = b] in the
+    current closure (precedence-valid, CONTRACT-EX). Requires [fabric_are_equal t a b]. *)
+val fabric_explain_eq
+  :  t
+  -> Oxsmt_core.Term.t
+  -> Oxsmt_core.Term.t
+  -> Oxsmt_core.Fabric.justification list
+
 (** {2 Read-only e-graph query API (ADR-0012 L2 / R6, tranche 2 E-matching).}
 
     Thin, {b non-registering} forwards to the underlying engine's query accessors (see

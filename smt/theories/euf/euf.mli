@@ -139,6 +139,62 @@ val rearm_watch : 'p t -> Term.t -> unit
     values; a per-term {!rearm_watch} loop would be O(#predicates x #watches). *)
 val rearm_watches_if : 'p t -> (Term.t -> bool) -> unit
 
+(** {2 Merge-notification log (ADR-0014 Stage 2, §A.3).}
+
+    The reverse of {!assert_eq}: instead of a theory pushing an equality {e into} the hub,
+    the hub records each class union so the combinator can notify an interested theory
+    {e out} of the hub (z3's [new_eq] theory hook). Deliberately a pull log, not a
+    synchronous callback: the engine calls no foreign code, so determinism and the
+    non-reentrant cascade discipline (F5) are preserved — the combinator drains after each
+    {!check} and reacts (asserting the bound-equality into LIA), never inside a merge. *)
+
+(** [set_record_merges t on] toggles merge logging. Default [false] ⇒ {!merge} appends
+    nothing and {!take_merges} is empty, so a direct-drive or fabric-off caller is
+    byte-identical and pays no hot-path cost. Turning it off also clears the pending log. *)
+val set_record_merges : 'p t -> bool -> unit
+
+(** A class union reported to a client (ADR-0014 Stage 2/3). [kept]/[merged] are the two
+    ORIGINAL endpoint terms of the union (no survivor semantics implied — for an asserted
+    equality the asserted pair, for a congruence the two congruent [App] terms).
+    [kept_tag] is the per-class tag ({!set_class_tag}) of [kept]'s class, [merged_tag] of
+    [merged]'s, both CAPTURED AT MERGE TIME (before the surviving root inherits) — so a
+    client sees both tags even when they collide. The merge reason is
+    [explain t kept merged] (precedence- valid when drained right after the union).
+    Defined in {!Oxsmt_core.Fabric} so the combinator (which drains for the LIA-notify
+    path) reads it without depending on this engine. *)
+type merge_event = Fabric.merge_event =
+  { kept : Term.t
+  ; merged : Term.t
+  ; kept_tag : Term.t option
+  ; merged_tag : Term.t option
+  }
+
+(** A per-client read position into the merge log. Multiple clients (datatypes, the
+    LIA-notify path) each hold their own cursor so every client sees every merge. *)
+type merge_cursor
+
+(** [add_merge_consumer t] registers a new client cursor positioned at the current end of
+    the log (it sees only merges from now on). *)
+val add_merge_consumer : 'p t -> merge_cursor
+
+(** [drain_merges t c] returns the merge events appended since [c] last drained (oldest
+    first) and advances [c] to the current end. Order is the deterministic merge-queue
+    order (I6). The log is cleared and all cursors reset by {!pop} (an undrained merge
+    from a popped frame is dropped — completeness-safe, never unsound; a consumer's action
+    on an already-drained merge unwinds via that consumer's own trailed state). *)
+val drain_merges : 'p t -> merge_cursor -> merge_event list
+
+(** [set_class_tag t term tag] attaches the witness [tag] to [term]'s class (datatypes:
+    the class's representative constructor application). Trailed (restored by {!pop}); the
+    surviving root inherits a tag on merge if it had none, and a merge of two tagged
+    classes is surfaced via {!take_merges} (both tags) for the client to resolve.
+    Registers [term]/[tag] if new. A re-set on a class overwrites. *)
+val set_class_tag : 'p t -> Term.t -> Term.t -> unit
+
+(** [class_tag t term] is the per-class tag of [term]'s class, or [None]. Registers [term]
+    if new. *)
+val class_tag : 'p t -> Term.t -> Term.t option
+
 (** [are_equal t a b] holds iff [a] and [b] are currently in the same class (registers
     them if new). O(tree height). *)
 val are_equal : 'p t -> Term.t -> Term.t -> bool
