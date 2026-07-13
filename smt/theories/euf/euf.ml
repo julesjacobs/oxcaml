@@ -47,7 +47,9 @@ type kind =
 type 'p enode =
   { term : Term.t
   ; kind : kind
-  ; mutable parent : int (* union-find parent; = self at a root *)
+    (* The union-find PARENT lives in the flat [t.parents] int array, not here — a
+         per-op hot read that a boxed record field made a pointer chase (see [find]).
+         Every other per-node field stays inline. *)
   ; mutable size : int (* class size; valid at a root *)
   ; mutable uses :
       int list (* App e-nodes with this root as a direct arg; valid at a root *)
@@ -135,6 +137,14 @@ type level =
 type 'p t =
   { ctx : Context.t
   ; enodes : 'p enode Dynarray.t
+  ; (* Union-find parent, one slot per e-node id, kept OUT of the [enode] record: [find] is
+       the solver's hottest read (~22% of QG wall) and a flat unboxed [int array] read with
+       [Array.unsafe_get] is far cheaper than a bounds-checked [Dynarray.get] into a boxed
+       record. Grown (doubling) in lockstep with [enodes] in [register]; slots [0,
+       Dynarray.length enodes) are the live parents, each seeded to itself at registration.
+       Capacity ([Array.length]) may exceed the live count — the surplus slots are stale
+       and never read (ids are always < [num_terms]). *)
+    mutable parents : int array
   ; index : int Term.Table.t (* Term -> e-node id *)
   ; sigtbl : int Sig.t
   ; watched : watched Dynarray.t
@@ -186,6 +196,7 @@ let mark_touched t root = Dynarray.add_last t.touched root
 let create ctx =
   { ctx
   ; enodes = Dynarray.create ()
+  ; parents = [||]
   ; index = Term.Table.create 256
   ; sigtbl = Sig.create 256
   ; watched = Dynarray.create ()
@@ -228,10 +239,20 @@ end
 
 let get t i = Dynarray.get t.enodes i
 
-let rec find t i =
-  let n = get t i in
-  if n.parent = i then i else find t n.parent
+(* Union-find [find] over the flat [t.parents] int array (NOT the boxed [enode] record).
+   Profiling QG timeouts (avg chain depth ~0.5, ~7M calls/solve, merge only ~2k) showed
+   [find] at ~22% of wall spent almost entirely on per-CALL cost — a [Dynarray.get] bounds
+   check plus a pointer chase into a boxed [enode] record — not on chain depth. A flat
+   [int array] read with [Array.unsafe_get] removes both: contiguous, unboxed, no bounds
+   check. Ids passed here are always valid e-node ids (< [num_terms]); every id is seeded
+   to itself at registration, so no slot is ever read uninitialised. No path compression
+   (the read-only query accessors — ADR-0012 R6 — rely on [find] being a pure traversal). *)
+let rec find_go parents i =
+  let p = Array.unsafe_get parents i in
+  if p = i then i else find_go parents p
 ;;
+
+let find t i = find_go t.parents i
 
 let dedup_int lst =
   let seen = Hashtbl.create 16 in
@@ -250,9 +271,8 @@ let dedup_int lst =
 let push_undo t u = Trail.record t.trail u
 
 let set_parent t i v =
-  let n = get t i in
-  push_undo t (U_parent (i, n.parent));
-  n.parent <- v
+  push_undo t (U_parent (i, Array.unsafe_get t.parents i));
+  Array.unsafe_set t.parents i v
 ;;
 
 let set_size t i v =
@@ -294,7 +314,7 @@ let sig_del t key =
 ;;
 
 let apply_undo t = function
-  | U_parent (i, old) -> (get t i).parent <- old
+  | U_parent (i, old) -> Array.unsafe_set t.parents i old
   | U_size (i, old) -> (get t i).size <- old
   | U_uses (i, old) -> (get t i).uses <- old
   | U_fedge (i, op, orr) ->
@@ -453,7 +473,6 @@ let rec register t (term : Term.t) : int =
       t.enodes
       { term
       ; kind
-      ; parent = id
       ; size = 1
       ; uses = []
       ; fparent = id
@@ -461,6 +480,16 @@ let rec register t (term : Term.t) : int =
       ; stamp = 0
       ; tag = None
       };
+    (* Grow the flat parent array in lockstep (doubling) and seed this node as its own
+       root. Not trailed: a [pop] truncates [enodes] back below [id] (so slot [id] becomes
+       stale and unread) and a later [register] reusing [id] re-seeds it here. *)
+    if id >= Array.length t.parents
+    then (
+      let ncap = Int.max 16 (2 * Array.length t.parents) in
+      let grown = Array.make ncap 0 in
+      Array.blit t.parents 0 grown 0 (Array.length t.parents);
+      t.parents <- grown);
+    Array.unsafe_set t.parents id id;
     Term.Table.replace t.index term id;
     (match kind with
      | Fun (_, args) ->
