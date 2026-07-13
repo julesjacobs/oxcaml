@@ -9,7 +9,7 @@ with some care) with *sketches* (code shapes, file names, formats,
 thresholds — illustrative only). Treat decisions as strong defaults and
 sketches as starting points for your own design pass; neither is law. When
 following the document conflicts with the goal, the goal wins — amend the
-document (a short ADR is enough) rather than comply with it.
+document rather than comply with it.
 
 ## 1. Goals and constraints
 
@@ -314,7 +314,7 @@ Four layers, cheapest first:
    not gated:
    - Per-goal bucketed counters in golden output (layer 2) make
      order-of-magnitude changes visible in the promotion diff itself.
-   - Nightly aggregation into `STATUS.md`: counter and wall-clock
+   - Nightly aggregation: counter and wall-clock
      distributions, top-k slowest goals, trend alerts on drift. Refinement
      VCs are expected to solve in low milliseconds; outliers are flagged for
      the master, who decides whether they warrant a task.
@@ -323,7 +323,7 @@ Four layers, cheapest first:
      rather than in the first real codebase.
    - **The dev loop itself is monitored the same way**: PR-suite wall-clock,
      cache hit rate, slowest tests, triage/nightly queue depths, and
-     time-from-dispatch-to-merge all land in `STATUS.md`. Latency rot has no
+     time-from-dispatch-to-merge are aggregated the same way. Latency rot has no
      natural victim in an all-agent project — no agent gets annoyed waiting —
      so the master must watch these numbers and spawn re-curation/
      parallelization tasks when the loop silts up.
@@ -354,241 +354,52 @@ says `unsat`, or grind can't confirm) files an issue and enters triage.
 - **M6+**: E-matching / lemma instantiation. **M7+**: CHC/kvar layer.
   Datatypes, bitvectors: parallel theory plugins any time after M4.
 
-## 10. Agent workflow (zero-human-review operating model)
+## 10. Trust model (zero human review)
 
-Organizing principle: **trust comes from agent review, oracles, redundancy,
-and external certification — what is absent is *human* review, not review.**
-Agent code review is genuinely strong and is the first line of defense; it
-catches what oracles cannot: design quality, spec conformance, invariant
-reasoning, weaknesses on rarely-exercised paths, and suspicious test
-changes. Its one structural limitation is correlation — reviewer and author
-share a base model and can share blind spots — which is why review verdicts
-are calibrated (honeypot PRs, below) and why the external gate, the only
-fully uncorrelated judge, retains final authority on soundness. The project
-is unusually suited to that backstop: it is maximally self-checkable and
-differential-testable.
+Trust comes from agent review, oracles, redundancy, and external
+certification; the Lean gate is the only fully uncorrelated judge and holds
+final authority on soundness. The mechanisms:
 
-**Against incorrectness:**
+- **Oracle-first.** No module starts until its independent oracle exists.
+  Agent-written tests never count as the gate.
+- **The gate is write-protected.** Oracle code, the Lean encoder, corpora,
+  frozen interfaces, and CI config are master-only; a child may not edit
+  tests/oracles in the same change as code — a test it believes wrong goes to
+  the master, not into the diff. Primary defense against test-gaming.
+- **Mutation testing.** Seeded faults must be caught by the suite; a
+  surviving mutant halts feature work on that module.
+- **Honeypots.** Nightly known-wrong verdicts and seeded mutants must turn
+  the gate red; review agents occasionally get a PR with a planted bug —
+  approving it means the review process gets fixed before it is trusted again.
+- **Two-model review (codex + fable) on every land**; a zero-finding codex
+  exit counts only after transcript validation.
+- **N-version checkers** (model evaluator, explanation verifiers, Lean
+  encoder) written from spec by separate sessions, no solver-internals access.
 
-- **Oracle-first ordering**: no module starts until its independent oracle
-  exists. Agent-written tests never count as the gate — code and tests from
-  the same session share blind spots. The gate is external: Lean kernel
-  certification, pre-labeled public benchmarks, model evaluation, explanation
-  checkers.
-- **The gate is write-protected from child agents.** Oracle code, the Lean
-  encoder, test corpora, frozen interfaces, and CI config live in paths child
-  agents cannot modify — enforced mechanically (diff checks in CI,
-  master-only merges for those paths), not by convention. Children may not
-  edit tests/oracles in the same PR as code; a test a child believes is wrong
-  becomes an issue for master adjudication. This is the primary defense
-  against test-gaming, the top behavioral risk under "make CI green"
-  pressure.
-- **Mutation testing is the review-substitute for oracle quality.** Routinely
-  inject seeded faults (flip a simplex comparison, drop a congruence merge,
-  omit an explanation premise) and require the tiered suite catches them. A
-  surviving mutant halts feature work on that module until the oracle is
-  strengthened.
-- **Honeypot the pipeline continuously.** Nightly, feed the gate known-wrong
-  verdicts and seeded-mutant code and require it goes red — a green gate that
-  hasn't recently proven it can go red is unaudited. This is also the answer
-  to "nothing gates the gate" during M0: the encoder is validated by claims
-  that must fail. The same trick calibrates reviewers: occasionally hand a
-  review agent a PR with a known injected bug; approval means the review
-  process is broken and gets fixed before further approvals are trusted.
-- **N-version checkers**: self-checkers (model evaluator, explanation
-  verifiers) are written by separate agent sessions from spec only, with no
-  access to solver internals, to reduce common-mode blind spots. The Lean
-  encoder deserves the same treatment: it is trusted translation code.
+Residual TCB, stated honestly: term smart constructors, check-sat glue, the
+SMT-LIB printer, the Lean encoder, the certificate replay checker, and VC
+generation in the refinement checker.
 
-**Against slowness and design ping-pong:**
+## 11. Orchestration
 
-- **Tiered CI budget, fixed upfront**: unit suite (seconds, every build) →
-  curated corpus + fixed-seed fuzz + Lean-certification of cache misses
-  within a fixed budget (minutes, every PR) → full benchmarks, continuous
-  fuzzing, and the Lean triage/timeout queue (nightly, off the merge path).
-- **Spec-by-citation**: each module implements a named paper/algorithm
-  (Dutertre–de Moura simplex, Nieuwenhuis–Oliveras union-find, MiniSat core)
-  — one decision each, made once. Agents implement from spec + acceptance
-  criteria (benchmark sets that must pass, perf envelope, size budget); they
-  do not co-design.
-- **Mechanical freezes**: frozen interface files are hash-checked in CI;
-  changes require an explicit unfreeze marker plus an adversarial review pass
-  by a fresh agent with an attack brief (grill-me style), since no human will
-  review them.
+A master agent plans, adjudicates, and approves; child agents build in their
+own worktrees and never push; a dedicated integrator executes merges on the
+master's sha-pinned approval. Dispatches are short and high-level: outcome,
+hard constraints, acceptance evidence — the builder owns the design.
 
-**Against design rot:**
+**Rebase → test → fast-forward only.** The integrator rebases onto trunk,
+runs the full suite on the rebased head, lands with `--ff-only`: trunk never
+contains an untested state, history stays linear, bisect stays mechanical.
+Reviews and suites run speculatively against pinned shas, in parallel across
+lanes; a rebase that shifts reviewed hunks triggers a scoped re-verify.
+Corpus sweeps attribute, they do not gate — they run off the land path, but
+MISMATCH>0 or a wrong-direction surprise stops trunk until explained.
 
-- **Modules stay small enough to rewrite.** With real oracles, a rotten module
-  is rewritten from its spec rather than patched — the payoff of oracle-heavy
-  design.
-- Tripwires: per-module line budgets (a CDCL core at 6k lines is a smell), no
-  new abstractions without a written case, periodic consolidation passes.
-- An `smt/AGENTS.md` carries conventions, invariants, and the frozen-interface
-  list, so every agent session starts with the same constitution.
-
-**Residual trusted computing base (stated honestly):** term smart
-constructors, the check-sat glue, the SMT-LIB printer, the Lean encoder, and —
-outside this project — VC generation in the refinement checker. These are
-validated only by round-trip and end-to-end behavior until certificate replay
-arrives; the encoder additionally by N-version implementation.
-
-## 11. Orchestration model
-
-A master agent (long-horizon planner) orchestrates child agents (task
-executors) with git as the integration fabric. The master's context window is
-a scarce resource and is treated as such.
-
-**Means, not ends.** The goal is a sound, fast solver — every rule, map, and
-metric below is instrumental, and the constitution says so in its opening
-lines. Goal displacement (a healthy-looking process wrapped around a stagnant
-product) is a named failure mode: `STATUS.md` leads with **outcome metrics**
-(milestone, pass rates per logic, corpus solved-rate, days since last
-outcome improvement) before any process metrics, and the master's loop
-includes a periodic ball-check — does the task queue trace back to milestone
-progress, or has recent work been mostly process grooming? The master has
-explicit authority to amend process rules via ADR when they stop serving the
-goal; rules are subject to the same consolidation-beats-accretion discipline
-as everything else.
-
-**Tools are context-frugal by default.** Every internal tool (test runner,
-bench runner, gate harness) writes full detail to files and prints a digest —
-counts, top-k outliers, first few failures with paths to full logs —
-verbosity strictly opt-in. A tool that floods an agent's context with
-thousands of lines is a defect of the same severity as a slow test suite,
-and for the same reason: it silently degrades every agent that touches it.
-
-**The master reads maps, not territory.** As a default the master does not
-read large files, run commands with large output, or write code — its context
-is reserved for planning, spec adjudication, merge decisions, and
-escalations. Questions are answered by dispatching **scout agents** (concise
-answers with `file:line` and invariant citations); commands run via **runner
-agents** returning structured summaries. These are defaults grounded in
-context economics, not rules requiring enforcement — children are as capable
-as the master and exercise judgment about what detail matters.
-
-**The master's working set** — a small, fixed set of files loaded at session
-start. Compactness of these files is what makes the scheme work, so it is a
-real requirement: growth is treated as a defect, consolidation beats
-accretion, and the nightly auditor flags bloat alongside drift:
-
-1. `ARCHITECTURE.md`: module DAG, one paragraph per module (responsibility,
-   owning task, status), one data-flow diagram.
-2. **The frozen `.mli`s** (or a generated `SPINE.md` concatenating them):
-   `Sort`, `Term` constructors, `THEORY`, the session API. The master's view
-   of the core data types *is* the interface files — compact, compiler-checked
-   against the code (cannot drift), and stable across sessions because they
-   are hash-frozen (§10).
-3. `INVARIANTS.md`: numbered, citable invariants ("I3: any `Term.t` in
-   existence is well-sorted"). Specs and child reports cite them by number.
-4. **Decision log** (ADRs): append-only with a one-line index; the master
-   reads full entries only on demand. Re-opening a logged decision requires
-   the adversarial-review ritual — this prevents the master re-litigating
-   against its own past self across sessions.
-5. `TASKS.md`: the board — status, owner, acceptance criteria, attempt count.
-6. `STATUS.md`: **generated by CI, never by an agent** — benchmark pass rates
-   per logic, corpus/cache stats, triage-queue depth, per-module line counts
-   vs budget. The empirical state of the world cannot be stale or gamed by an
-   optimistic child report.
-
-**Keeping maps honest**: a PR changing any `.mli` must include the
-corresponding map delta or it does not merge; a nightly **auditor agent**
-diffs maps against reality and files drift issues; children must flag
-map-mismatches explicitly (**escalation over silence**) rather than silently
-adapting — mismatch reports are the master's drift detector.
-
-**Repository topology and custodianship.** Development lives in `~/oxsmt`,
-deliberately separate from `~/oxcamls` (which is for real compiler work):
-
-```
-oxsmt/
-  DESIGN.md      # until it migrates into the branch at M0
-  main/          # clone of the personal oxcaml GitHub fork; branch `oxsmt`
-  worktrees/     # one git worktree per child task, branched off `oxsmt`
-  cache/         # content-addressed Lean oracle cache   (never in git)
-  corpora/       # public benchmark sets, fetched once   (never in git)
-  logs/          # full tool output; agents see digests, detail lands here
-```
-
-- The long-lived `oxsmt` branch on the personal fork is the integration
-  trunk; task branches (`oxsmt/task/<name>`) are short-lived, local-only,
-  bound 1:1 to a worktree.
-- **Authorship and integration are separated.** Task children commit in
-  their worktrees and never push. Merges are executed by a dedicated
-  **integrator agent** acting on a recorded master approval: rebase/merge
-  onto `oxsmt`, re-run the fast suite, push, clean up the worktree and
-  branch, report one line back. Trivial conflicts the integrator resolves
-  and re-verifies; non-trivial ones bounce to the task owner. The master
-  *decides* merges but never executes them — merge mechanics (rebase noise,
-  CI logs, conflict diffs) are exactly the context-heavy work it must not
-  absorb.
-- **Worktree lifecycle = task lifecycle**: created at dispatch, removed (and
-  branch deleted) at merge or abandonment; no orphans. Worktrees share the
-  object store, so they are cheap.
-- **Nothing lives loose in a worktree**: bench logs, build outputs, one-off
-  scripts go to `logs/` or a gitignored scratch dir — never untracked files
-  scattered through checkouts. This is the default outcome of unsupervised
-  agent work; preventing it has an owner, and the owner is the master.
-- **Custodial work is delegated too**: worktree pruning, upstream syncs
-  (periodically merging upstream oxcaml `main` into `oxsmt` so the branch
-  stays mergeable, not just the code compilable), and hygiene sweeps are
-  scheduled janitor-agent tasks. The master is responsible for it all not
-  becoming a mess, but discharges that responsibility by scheduling and
-  monitoring, never by doing.
-- Hygiene is monitored, not intended: `STATUS.md` includes live worktrees vs
-  active tasks, stale branches, and dirty/orphaned worktree counts; the
-  nightly auditor flags them like any other drift.
-
-**Git workflow**: trunk-based; one short-lived branch per task; merge requires
-green CI plus a recorded review-agent pass with an attack brief (reviewers
-must exhibit evidence — a failing input or an invariant argument — not
-opinions); the master approves all merges, the integrator executes them.
-
-**Rebase → test → fast-forward only.** The integrator rebases the task branch
-onto the current `oxsmt` tip, runs the full PR suite on the *rebased* head,
-and lands it with `--ff-only`: the commit on trunk is bit-identical to the
-commit CI tested, so trunk can never contain an untested state — this is the
-defense against semantic conflicts, where two independently-green branches
-combine into a broken trunk. If trunk moves meanwhile, re-rebase and re-test;
-integration serializes through the integrator's queue. Corollary: history is
-linear and every commit was green, which makes `git bisect` a perfectly
-mechanical debugging tool — the kind agents wield best. The one exception is
-the upstream sync (necessarily a merge commit): there the underlying
-principle still applies — the merge is built and fully tested locally and
-pushed only if green.
-
-Branches older than ~a day of agent work are re-scoped, not endlessly
-rebased. Module ownership keeps parallel children out of each other's files;
-shared-interface changes serialize through the master's unfreeze ritual.
-
-**Child task protocol**: each task ships with a spec file (spec-by-citation,
-acceptance criteria, non-goals) — children are pointed at spec files, never
-at prose the master paraphrases from memory. Completion reports are concise
-and structured: what changed, interfaces touched (normally "none"),
-invariants affected, map deltas, test evidence, open questions. Repeated
-failure on a task is a signal for the master to re-scope it (smaller task,
-better spec, different decomposition) rather than re-prompt the same task.
-
-**Predicted failure modes this design targets** (from simulating the plan):
-
-- *Test-gaming under green-CI pressure* (M2–M3, the LIA long tail) → gate
-  write-protection, honeypots, reviewer calibration.
-- *A quietly-broken gate during M0*, when the oracle infrastructure is being
-  built and nothing gates it → honeypots from day one; M0 built slowly with
-  N-version encoders.
-- *Local workarounds for other modules' bugs* (M4 combination debugging) →
-  workaround-requires-issue rule, consolidation passes.
-- *Heisenbugs outlasting agent attention spans* → hard determinism
-  requirement (fixed seeds, no wall-clock heuristics), decision-trail
-  logging with replay, first-class shrinker: convert the debugging style
-  agents are worst at into the one they are best at (small deterministic
-  repros).
-- *Master context exhaustion and cross-session amnesia* → the working-set
-  files are the master's externalized memory; the repo, not any
-  conversation, is the source of truth.
-- *Correlated blind spots* (all agents share one base model, so N-versioning
-  is weaker than with humans) → the only truly uncorrelated judges are
-  Lean's kernel, pre-labeled benchmarks, and evaluation-based model checking;
-  this is why the external gate outranks every other mechanism.
+Topology: `main/` (integration trunk, branch `oxsmt`), `worktrees/` (one per
+task, removed at merge or abandonment), `cache/`, `corpora/`, `logs/` (full
+tool output; agents see digests) — siblings, never in git. Nothing lives
+loose in a worktree. Tools print digests and write detail to `logs/`;
+flooding an agent's context is a defect.
 
 ## 12. Risks
 
@@ -620,26 +431,6 @@ better spec, different decomposition) rather than re-prompt the same task.
    later.
 
 ## Addenda
-
-### A1 — Async review pipelining (2026-07-11, design author)
-
-Amends the §11 git workflow. Agents produce **"PR" branches**; reviews and
-test runs happen **independently and speculatively** against pinned shas —
-multiple review rounds and suite runs per branch proceed in parallel with
-each other and with other lanes, and the integrator **pre-rebases and
-pre-tests** queued branches before final verdicts land, so landing is
-instant on approval. **Rebasing triggers a re-run.**
-
-The load-bearing invariant is unchanged: trunk stays linear, and every
-landed commit was fully reviewed *and* fully tested at its exact rebased
-sha (rebase → test → ff-only). Async here means *decoupled and
-speculative*, not post-merge: blocking gates (TCB codex passes, soundness
-verdicts) still gate landing; only the §10 trailing cross-model reviewer
-reviews post-merge. Rationale: (a) more parallelism and speculation for
-the same serial merge discipline; (b) more review rounds per branch per
-unit wall-clock. Sha-pinned dispatch and frozen tips remain the
-coordination primitives that make speculation safe. (In-repo ADR to
-follow in `decisions/`.)
 
 ### A2 — Combination by internalization (2026-07-11, design author)
 
@@ -740,40 +531,6 @@ re-test, and a moved reviewed hunk still triggers the scoped re-review.
 The point of the exact-sha discipline is semantic-conflict defense, not
 ceremony — spend it where that risk exists.
 
-### A3 — Agent context economics and rotation (2026-07-12, design author)
-
-Agents run on a 1M-token context window, but context is not free: near the
-limit a single tool call costs on the order of a dollar (the full window is
-re-read on every cache miss), and reasoning quality degrades as the window
-fills. Auto-compaction rescues a stuck agent but is lossy and uncontrolled.
-The fleet therefore treats context as a budget to be spent deliberately:
-
-- **Default: a fresh agent per task.** Spawn new agents for new tasks
-  unless the incumbent's accumulated context is *definitely* useful for
-  the specific dispatch — e.g. a builder mid-way through the very arc in
-  question, or a specialist whose load-bearing knowledge is not yet
-  written down. "Vaguely familiar with the area" does not qualify;
-  on-disk artifacts (ADRs, logs/ memos, probe plans, design notes,
-  runbooks) are the durable memory, and the habit of writing everything
-  down is precisely what makes fresh spawns cheap.
-- **Rotation thresholds by role.** General ceiling: do not dispatch new
-  work to an agent past ~50% of the window; rotate at the next task
-  boundary. Roles whose history carries little forward value get much
-  tighter budgets — e.g. a codex-driver (whose job is mediating scoped
-  external-review sessions) should not run past ~20%; spawn a fresh
-  driver per review arc. Long-lived coordination roles (integrator)
-  rotate via an explicit handoff runbook committed to logs/.
-- **Never interrupt mid-task to rotate** — mid-task compaction is
-  survivable; rotate at boundaries. Never resume a dormant high-fill
-  agent for new work.
-- **Monitoring:** `check-agent-context.py` (repo root, outside the
-  reviewed tree) reads each subagent transcript's latest usage entry and
-  flags ROTATE ≥50% / CRITICAL ≥80%; the orchestrator runs it
-  periodically and plans rotations from it.
-- **Sizing dispatches:** a task should fit in the agent's remaining
-  headroom without crossing the ceiling; if it can't, split the task or
-  start fresh.
-
 ### A4 — Whole-theory deactivation vs relevance filtering (2026-07-12, design author)
 
 The UF-free EUF skip is sound, but the reason must be stated precisely or
@@ -821,51 +578,9 @@ congruence's job (`+` is interpreted) — it flows through the seam's value
 comparison. Acceptance evidence: an e-graph-size counter in the goldens
 tracking #UF-applications + #boundary nodes (proportional by
 construction), the pure-LIA-implies-empty-e-graph property test, and the
-under-inclusion mutant. *Lesson (second occurrence of this shape, for
-lessons.md): when a fix arrives as an on/off switch, look for the
+under-inclusion mutant. *Lesson (second occurrence of this shape): when a fix arrives as an on/off switch, look for the
 proportionality rule it's approximating. Switches have cliffs and
 stale-state hazards; structural cost-proportionality has neither.*
-
-### A5 — Freezing is not an end in itself (2026-07-12, design author)
-
-An interface freeze exists to stabilize load-bearing surfaces against
-churn and drive-by edits — it is a tool, not a goal. A Term unfreeze (or
-any §10 unfreeze) is fine when it leads to a better design; run the
-ritual and take the better design. Concretely: when a design contorts
-itself to stay off a frozen surface (encodings, side-channels, reserved
-namespaces standing in for what a type should express), the comparison
-must be argued on design merits — correctness-by-construction,
-enforceability, extensibility — with freeze-avoidance carrying no weight
-of its own. If the frozen-surface version wins on merits, unfreeze.
-
-### A6 — Gates gate; sweeps attribute (2026-07-12, design author)
-
-Long corpus sweeps must not sit on the land critical path. The merge
-gates are the fast, binary checks: build, test suites, mutants,
-frozen-interface check, formatter, defensive gate. The full-corpus sweep
-is *attribution* — it tells us what a land bought, not whether it may
-land — so it runs as a follow-up job, concurrent with whatever the box
-is doing, and its results arrive as a STATUS amendment rather than
-inside the land chore. This became safe the moment counted-effort became
-the primary measurement term: counted effort is load-immune by
-construction, so sweeps no longer need the box to themselves and no
-longer need to serialize against builds or each other (wall numbers stay
-secondary/informational). The same reasoning extends downstream: a
-successor task may branch speculatively off an approved frozen tip
-before the fast-forward completes, since FF-only guarantees trunk equals
-that sha; a bounced land costs one rebase, which the velocity directive
-prices as acceptable.
-
-Two hard edges survive the decoupling. First, the mismatch tripwire is
-not measurement: if a post-land sweep reports MISMATCH>0 or a
-wrong-direction surprise, trunk stops advancing until it is explained —
-the sweep is off the critical path, the soundness signal it carries is
-not. Second, provenance discipline is unchanged: sweeps still run
-release-config binaries with stamped build_commit/dirty checks, and
-baseline promotion stays fail-closed. *Lesson: when a measurement
-protocol becomes load-immune, re-examine every place it was being
-serialized — the serialization was compensating for a fragility that no
-longer exists.*
 
 ### A7 — Constitution reset (2026-07-12, master)
 
