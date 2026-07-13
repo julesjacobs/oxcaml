@@ -95,7 +95,34 @@ let test_rational () =
        (Rational.of_string "9223372036854775806"));
   check
     "compare promotes (no raise): max_int/1 > 1/max_int"
-    (Rational.compare (qf max_int 1) (qf 1 max_int) > 0)
+    (Rational.compare (qf max_int 1) (qf 1 max_int) > 0);
+  (* Integer (den=1) fast path == general result, cross-checked against an INDEPENDENT
+     Bigint oracle over a matrix that stays Small and one that overflows to Big (#116). A
+     fast path that dropped the gcd/promotion or mis-shaped the value would diverge here. *)
+  let bi = Bigint.of_int in
+  let oracle_add a b = Bigint.to_string (Bigint.add (bi a) (bi b)) in
+  let oracle_mul a b = Bigint.to_string (Bigint.mul (bi a) (bi b)) in
+  let ints = [ 0; 1; -1; 2; -3; 7; 1000; -1000; max_int; min_int; max_int - 1 ] in
+  List.iter
+    (fun a ->
+       List.iter
+         (fun b ->
+            check
+              (Printf.sprintf "fastpath add %d+%d exact" a b)
+              (Rational.equal
+                 (Rational.add (q a) (q b))
+                 (Rational.of_string (oracle_add a b)));
+            check
+              (Printf.sprintf "fastpath mul %d*%d exact" a b)
+              (Rational.equal
+                 (Rational.mul (q a) (q b))
+                 (Rational.of_string (oracle_mul a b)));
+            check
+              (Printf.sprintf "fastpath compare %d?%d matches int" a b)
+              (Int.compare (Rational.compare (q a) (q b)) 0
+               = Int.compare (Bigint.compare (bi a) (bi b)) 0))
+         ints)
+    ints
 ;;
 
 let test_delta () =

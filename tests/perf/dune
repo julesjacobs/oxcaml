@@ -12,3 +12,10 @@
  (name perf_bench)
  (modules perf_bench)
  (libraries harness_lib unix))
+
+; Rational hot-op micro-benchmark (den=1 fast-path measurement, #116). Visibility tool.
+
+(executable
+ (name rational_microbench)
+ (modules rational_microbench)
+ (libraries oxsmt_lia unix))

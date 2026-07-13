@@ -179,8 +179,18 @@ let big_compare (an, ad) (bn, bd) =
 
 (* ---- public arithmetic: Small fast path + whole-op promotion ---- *)
 
+(* Integer fast path (both operands den=1): the result denominator is 1 and gcd(n,1)=1, so
+   the cross-multiply and the [small_make_raise] gcd normalization are both unnecessary —
+   the value is already canonical. This is the dominant LIA operand shape (integer
+   coefficients, bounds, δ-constants); it is a pure special case of the general formula,
+   so the produced [Small] is bit-identical to the general path (guarded by the property /
+   brute-force / differential oracles). Overflow still promotes to [Big] exactly. *)
+
 let add x y =
   match x, y with
+  | Small a, Small b when a.den = 1 && b.den = 1 ->
+    (try Small { num = add_int a.num b.num; den = 1 } with
+     | Overflow -> big_add (to_big x) (to_big y))
   | Small a, Small b ->
     (try
        let n = add_int (mul_int a.num b.den) (mul_int b.num a.den) in
@@ -192,6 +202,9 @@ let add x y =
 
 let sub x y =
   match x, y with
+  | Small a, Small b when a.den = 1 && b.den = 1 ->
+    (try Small { num = sub_int a.num b.num; den = 1 } with
+     | Overflow -> big_sub (to_big x) (to_big y))
   | Small a, Small b ->
     (try
        let n = sub_int (mul_int a.num b.den) (mul_int b.num a.den) in
@@ -203,6 +216,9 @@ let sub x y =
 
 let mul x y =
   match x, y with
+  | Small a, Small b when a.den = 1 && b.den = 1 ->
+    (try Small { num = mul_int a.num b.num; den = 1 } with
+     | Overflow -> big_mul (to_big x) (to_big y))
   | Small a, Small b ->
     (try small_make_raise (mul_int a.num b.num) (mul_int a.den b.den) with
      | Overflow -> big_mul (to_big x) (to_big y))
@@ -236,9 +252,13 @@ let abs = function
   | Big b -> Big { num = Bigint.abs b.num; den = b.den }
 ;;
 
-(* Value-based (R5/R6): never raises; promotes to a common tier on Small overflow. *)
+(* Value-based (R5/R6): never raises; promotes to a common tier on Small overflow. Integer
+   fast path (both den=1): a direct [Int.compare a.num b.num] — no cross-multiply, so no
+   overflow possible and no trap frame. Identical result to the general path
+   ([Int.compare (a.num*1) (b.num*1)]). *)
 let compare x y =
   match x, y with
+  | Small a, Small b when a.den = 1 && b.den = 1 -> Int.compare a.num b.num
   | Small a, Small b ->
     (try Int.compare (mul_int a.num b.den) (mul_int b.num a.den) with
      | Overflow -> big_compare (to_big x) (to_big y))
