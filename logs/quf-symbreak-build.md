@@ -205,3 +205,34 @@ the REAL code and asserts the verdict is not a wrong-UNSAT. Not a RED test — i
 future change that regresses BOTH the restriction and the pop-deactivation at once (the only
 dangerous case, which no single-mutation RED test can express). `make symbreak-test` now 12
 checks, 0 failures. Test-only commit on top of the R2 tip.
+
+### Third confirm bounce (codex) — free-constants-only + formula-is-exactly-the-batch
+
+Codex found two more wrong-unsat paths (guard-completion, not redesign):
+- **B3 [shipped path]:** the detector harvested EVERY nullary non-Bool App, including
+  DATATYPE CONSTRUCTORS — theory-interpreted (distinctness/exhaustiveness) invisibly to the
+  syntactic tag-multiset check. Trigger: `D=A|B, x:D, {A≠x, f(A,x)≠B, f(x,A)≠B}` is
+  syntactically swap(A,x)-symmetric, OFF sat / ON unsat, on any datatype query.
+- **B4 [public API]:** detection sees only the batch `terms`, but `assert_presolved` can
+  follow a prior `assert_term` — a symmetry of the batch need not be one of `prior ∧ batch`.
+
+**Fixes:**
+- B3: candidates are now genuinely FREE constants only — a POSITIVE predicate
+  `is_free_const` = nullary App of a NON-reserved symbol whose sort is `Sort.Uninterpreted`.
+  Excludes datatype constructors (Datatype sort), numerals (`Int_const`), BitVec/Int/Array
+  constants, reserved skolems; future interpreted sorts excluded by default. The QG wins are
+  uninterpreted-sort constants, untouched.
+- B4: the emission guard is now `formula_is_exactly_this_batch` = base frame ∧ no lemmas ∧
+  NO prior assertions (`t.asserted` empty before this batch). When it holds, a symmetry of
+  `terms` is a symmetry of the whole formula — the entire soundness story in one predicate.
+  This also discharges fable's standing batch-once-contract note.
+- Minor: `failed_assumptions` now filters by `sym_sel_in_core` (the selector CAPTURED at
+  solve time in `check_sat`), not the live `sym_sel` — a later assertion clears `sym_sel`
+  while the SAT core still holds the selector, so a read-time filter on the live value would
+  leak it. Captured, not read-time-keyed on mutable state.
+
+RED-verified (make symbreak-test, now 14 checks): B3 (detector emits over datatype
+constructors when the free-constant restriction is reverted to "any non-Bool"), B4
+(wrong-UNSAT when the no-prior-assertions guard is dropped). Gates by exit code: `make test`
+(OFF) / `make symbreak-test` (14) / `check-frozen` all 0. Batch-path win intact (label recheck
+42 QG files, 0 mismatch, 6 conversions). New tip below.

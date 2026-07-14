@@ -148,12 +148,19 @@ type t =
          not be retracted mid-solve. *)
   ; mutable sym_sel : Sat.var option
     (* symmetry breaking (task #25, F1): the ACTIVATION SELECTOR guarding the current
-     emission's lex clauses. The clauses are asserted as [(¬sym_sel ∨ C)] (via
-     [assert_clausified ~sel]); [check_sat] assumes [sym_sel] POSITIVE while [Some], so
-     the clauses are active. [sym_sel] occurs only negatively (a pure literal), so once a
-     later assertion clears it to [None] the clauses become vacuous — sound retraction of
-     a NON-MONOTONIC break without touching the permanent clause DB. Any assertion after
-     emission (assert_term / a further assert_presolved / push) clears it. *)
+         emission's lex clauses. The clauses are asserted as [(¬sym_sel ∨ C)] (via
+         [assert_clausified ~sel]); [check_sat] assumes [sym_sel] POSITIVE while [Some],
+         so the clauses are active. [sym_sel] occurs only negatively (a pure literal), so
+         once a later assertion clears it to [None] the clauses become vacuous — sound
+         retraction of a NON-MONOTONIC break without touching the permanent clause DB. Any
+         assertion after emission (assert_term / a further assert_presolved / push) clears
+         it. *)
+  ; mutable sym_sel_in_core : Sat.var option
+    (* symmetry breaking (task #25, R3 minor): the activation selector assumed by the MOST
+     RECENT [check_sat], captured at solve time. [failed_assumptions] filters by THIS, not
+     the live [sym_sel] — a later assertion clears [sym_sel] to [None] while the SAT core
+     still holds the selector from the previous solve, so a read-time filter keyed on the
+     live [sym_sel] would leak it. *)
   }
 
 let create
@@ -225,6 +232,7 @@ let create
   ; sym_counter = ref 0
   ; sym_sel = None
   ; lemmas_registered = false
+  ; sym_sel_in_core = None
   }
 ;;
 
@@ -856,6 +864,14 @@ let assert_presolved t terms =
   (* F1: a further batch after a prior emission may break that symmetry; retract the prior
      lex clauses before this batch (possibly) emits its own. *)
   deactivate_symbreak t;
+  (* B4: capture whether the formula is EMPTY before this batch. Symmetry detection sees
+     only [terms]; if prior assertions exist, a symmetry of the batch need not be a
+     symmetry of [prior ∧ batch]. Captured before the originals below are recorded. *)
+  let no_prior_assertions =
+    match t.asserted with
+    | [] -> true
+    | _ -> false
+  in
   if List.exists term_has_reserved terms
   then t.degraded <- true
   else (
@@ -891,20 +907,26 @@ let assert_presolved t terms =
        when OFF (byte-identical to trunk). Neutral-abort inside [symmetry_break] returns
        [[]]; the Overflow/Unsupported firewall matches Pass A. *)
     let sym_extra =
-      (* R2 EMISSION RESTRICTION (codex B1/B2): emit ONLY at the base frame with no lemmas
-         registered. Under a pushed frame the lex clauses (guarded by [sym_sel], not the
-         frame selector) would survive the [pop] that retracts the assertions making the
-         batch symmetric (B1); with lemmas, a during-solve instance would extend the
-         formula un-retractably (B2, since [check_sat] fixes its assumptions once). Both
-         are structurally impossible when this holds. The post-emission incremental case
-         is still handled by [deactivate_symbreak] at every assertion entry. *)
-      let at_base_no_lemmas =
+      (* R2/R3 EMISSION RESTRICTION (codex B1/B2/B4): emit ONLY when the formula being
+         solved is EXACTLY this batch — the base frame, no lemmas registered, and no prior
+         assertions. Then a symmetry of [terms] is a symmetry of the whole formula, which
+         is the entire soundness story:
+         - B1: under a pushed frame the lex clauses (guarded by [sym_sel], not the frame
+           selector) would survive the [pop] that retracts the assertions making the batch
+           symmetric;
+         - B2: with lemmas a during-solve instance would extend the formula un-retractably
+           ([check_sat] fixes its assumptions once);
+         - B4: with prior assertions a symmetry of [terms] need not be one of
+           [prior ∧ terms]. The post-emission incremental case is still handled by
+           [deactivate_symbreak] at every assertion entry. *)
+      let formula_is_exactly_this_batch =
         (match t.frames with
          | [ _ ] -> true
          | _ -> false)
-        && not t.lemmas_registered
+        && (not t.lemmas_registered)
+        && no_prior_assertions
       in
-      if symbreak_enabled t && at_base_no_lemmas
+      if symbreak_enabled t && formula_is_exactly_this_batch
       then (
         (* F2: per-session name counter (persists across batches). F3 FINAL: catch ONLY
            the expected fragment exceptions ([Sort_error] from a would-be cross-sort
@@ -1460,6 +1482,10 @@ let check_sat t =
   t.last_model <- None;
   t.budget_exhausted <- false;
   t.effort_exhausted <- false;
+  (* R3 minor: capture the activation selector this solve will assume, so a post-solve
+     [failed_assumptions] strips it from the core even after a later assertion clears
+     [sym_sel]. *)
+  t.sym_sel_in_core <- t.sym_sel;
   if t.degraded
   then Unknown
   else if Bv_dispatch.is_pure_bv t.asserted && not (Manager.has_live_lemma t.mgr)
@@ -1596,7 +1622,7 @@ let cert_assumptions t = List.map Sat.pos t.frames
    assumption core. *)
 let failed_assumptions t =
   let failed = Sat.failed_assumptions t.sat in
-  match t.sym_sel with
+  match t.sym_sel_in_core with
   | None -> failed
   | Some sel -> List.filter (fun lit -> Sat.var_of_lit lit <> sel) failed
 ;;

@@ -963,6 +963,22 @@ let symbreak_constraints_max = 200_000
 
 exception Symbreak_budget
 
+(* A genuinely FREE constant eligible to be a symmetry candidate (B3): a nullary
+   application of a NON-reserved symbol whose sort is an UNINTERPRETED sort. Positive test
+   — an interpreted constant (datatype constructor [Datatype sort], bitvector/Int/array
+   constant, reserved skolem) is excluded, and any future interpreted sort is excluded by
+   default. Only over free constants is a syntactic transposition symmetry a real one. *)
+let is_free_const (t : Term.t) =
+  match t.node with
+  | App (sym, args) ->
+    Iarr.length args = 0
+    && (match t.sort with
+        | Sort.Uninterpreted _ -> true
+        | _ -> false)
+    && not (Env.is_reserved_name (Symbol.name sym))
+  | _ -> false
+;;
+
 (* Rebuild every term in [terms] under the leaf substitution [sigma] (constant-term ->
    constant-term), through [ctx] so the result is AC-canonical hash-consed. A substituted
    leaf is returned directly (NOT re-substituted — [sigma] is an involution on leaves, so
@@ -1063,7 +1079,14 @@ let symmetry_break ~counter cap env ctx assertions =
         bump ();
         match t.node with
         | App (_, args) when Iarr.length args = 0 ->
-          if not (Sort.equal t.sort Sort.bool) then consts := Term.Set.add t !consts
+          (* B3: a candidate must be a genuinely FREE constant — an element of an
+             UNINTERPRETED sort (positive test). This excludes datatype constructors (a
+             [Datatype] sort — theory-interpreted distinctness/exhaustiveness that the
+             syntactic check cannot see), numerals ([Int_const], not an [App]), bitvector
+             / Int / array constants, and reserved skolems. Future interpreted sorts are
+             excluded by default. Swapping two free constants of an uninterpreted sort is
+             a real symmetry exactly when it is a syntactic one. *)
+          if is_free_const t then consts := Term.Set.add t !consts
         | App (sym, args) ->
           if not (Sort.equal t.sort Sort.bool) then cells := Term.Set.add t !cells;
           Iarr.iteri

@@ -117,6 +117,24 @@ let asymmetric =
 |}
 ;;
 
+(* Datatype query (codex B3): D = A | B, x : D, [{A<>x, f(A,x)<>B, f(x,A)<>B}].
+   Syntactically swap(A,x)-symmetric, but A is a CONSTRUCTOR (theory-interpreted
+   distinctness/exhaustiveness the syntactic check can't see) and x is datatype-sorted —
+   treating either as a free symmetry candidate is wrong-unsat. The free-constant
+   restriction (uninterpreted sorts only) must find NO class here. *)
+let datatype_query =
+  {|
+(set-logic QF_UFDT)
+(declare-datatype D ((A) (B)))
+(declare-fun x () D)
+(declare-fun f (D D) D)
+(assert (not (= A x)))
+(assert (not (= (f A x) B)))
+(assert (not (= (f x A) B)))
+(check-sat)
+|}
+;;
+
 (* --- helpers -------------------------------------------------------------------------- *)
 
 (* Parse into a fresh cap-bearing env/ctx (NOT a session) so we can call [symmetry_break]
@@ -480,6 +498,57 @@ let test_b1_verdict_guard () =
     fail "B1 guard: WRONG-UNSAT after push/assert_presolved/pop (stale lex clauses)"
 ;;
 
+(* B3: the detector must find NO class in a datatype query — constructors and
+   datatype-sorted constants are theory-interpreted, not free. RED (emits) with the
+   free-constant restriction reverted to "any non-Bool". *)
+let test_b3_datatype () =
+  match detect datatype_query with
+  | [] -> ok "B3: no symmetry candidates in a datatype query (constructors excluded)"
+  | _ :: _ ->
+    fail "B3: emitted a break over datatype constructors (theory-interpreted, not free)"
+  | exception e ->
+    fail "B3: detector raised %s on a datatype query" (Printexc.to_string e)
+;;
+
+(* B4: a symmetry of the batch is not a symmetry of prior ∧ batch. With a prior assertion
+   ([op(e0,e1)=e0], base-SAT but asymmetric) the emission guard must skip, so the whole
+   formula stays SAT. RED (wrong-unsat) without the no-prior-assertions guard. *)
+let test_b4_prior_assertion () =
+  let s = Session.create () in
+  let env = Session.env s
+  and ctx = Session.context s in
+  let parsed = Parser.parse_into env ctx sat_symmetric in
+  let symtab = Hashtbl.create 16 in
+  let rec w (t : Term.t) =
+    match t.Term.node with
+    | App (sym, args) ->
+      Hashtbl.replace symtab (Symbol.name sym) sym;
+      Iarr.iter w args
+    | Le a | Not a -> w a
+    | Eq (a, b) ->
+      w a;
+      w b
+    | And xs | Or xs -> Iarr.iter w xs
+    | Ite (c, a, b) ->
+      w c;
+      w a;
+      w b
+    | Arith lin -> Iarr.iter (fun (tm, _) -> w tm) lin.Term.coeffs
+    | Bool_const _ | Int_const _ -> ()
+  in
+  List.iter w parsed.Parser.assertions;
+  let c n = Context.app ctx (Hashtbl.find symtab n) [] in
+  let cell a b = Context.app ctx (Hashtbl.find symtab "op") [ c a; c b ] in
+  (* prior assertion first: makes the formula NOT exactly the later batch *)
+  Session.assert_term s (Context.eq ctx (cell "e0" "e1") (c "e0"));
+  ignore (Oxsmt_query_loader.assert_all ~presolve:true s parsed : bool);
+  match Session.check_sat s with
+  | Session.Sat -> ok "B4: prior assertion + symmetric batch stays SAT (no emission)"
+  | Session.Unsat ->
+    fail "B4 WRONG-UNSAT: emitted a batch symmetry that prior ∧ batch does not have"
+  | Session.Unknown -> fail "B4: got unknown"
+;;
+
 let () =
   print_string "symbreak_test:\n";
   test_detector_fires ();
@@ -493,6 +562,8 @@ let () =
   test_b1_no_emit_under_frame ();
   test_b1_verdict_guard ();
   test_no_emit_with_lemmas ();
+  test_b3_datatype ();
+  test_b4_prior_assertion ();
   test_f3_hash_collision ();
   Printf.printf "symbreak_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
