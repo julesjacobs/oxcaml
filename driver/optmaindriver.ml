@@ -20,6 +20,166 @@ let usage = "Usage: ocamlopt <options> <files>\nOptions are:"
 module Options = Oxcaml_args.Make_optcomp_options
         (Oxcaml_args.Default.Optmain)
 
+(* Opt-in GC pacing for the compiler process itself, intended to be set by
+   the build system (e.g. -X gc-space-overhead=200 -X gc-idle-floor=512M).
+   The compiler is allocation-heavy and short-lived, so a laxer major-GC
+   pace trades bounded extra peak heap for materially less GC work; the
+   idle floor additionally lets small compilations finish without doing
+   any major-GC marking at all (see runtime/major_gc.c, Idle phase).
+   Both knobs are inert unless set. Explicit user settings in
+   OCAMLRUNPARAM/CAMLRUNPARAM take precedence, so a single invocation can
+   always be re-paced by hand when investigating time or memory issues. *)
+module Gc_pacing = struct
+  (* The floor is applied through the [caml_gc_set_idle_floor] primitive
+     (sets the small_heap_limit tweak AND re-arms the current cycle's
+     floor), which the bootstrap toolchain's runtime does not provide; the
+     final executables (driver/oxcaml_main.ml) install it here. The
+     bootstrap build never passes -X gc-idle-floor, so the failing default
+     is unreachable there. *)
+  let set_idle_floor_hook : (int -> unit) ref =
+    ref (fun _ ->
+      Compenv.fatal
+        "-X gc-idle-floor is not supported by this executable")
+
+  let space_overhead =
+    Oxcaml_args.Extra_options.int __LOC__ "gc-space-overhead" 0
+
+  let idle_floor =
+    Oxcaml_args.Extra_options.string __LOC__ "gc-idle-floor" ""
+
+  (* Mirror the runtime's OCAMLRUNPARAM parsing (runtime/startup_aux.c):
+     the active variable is OCAMLRUNPARAM if set at all, else CAMLRUNPARAM;
+     fields are comma-separated and identified by their leading
+     characters. *)
+  let env_field_present ~prefix =
+    let param =
+      match Sys.getenv_opt "OCAMLRUNPARAM" with
+      | Some _ as p -> p
+      | None -> Sys.getenv_opt "CAMLRUNPARAM"
+    in
+    match param with
+    | None -> false
+    | Some s ->
+      String.split_on_char ',' s
+      |> List.exists (fun field ->
+        String.length field >= String.length prefix
+        && String.sub field 0 (String.length prefix) = prefix)
+
+  (* Size in bytes: a decimal integer with an optional K/M/G binary
+     suffix. Guarded against multiply overflow, and capped at 1 TiB: a
+     floor beyond that disables major-GC marking outright on any real
+     compilation (unbounded heap growth), and such values are far more
+     likely a suffix typo (512G for 512M) than intent. *)
+  let max_size_bytes = 1 lsl 40
+
+  let parse_size_bytes s =
+    let n = String.length s in
+    if n = 0 then None
+    else begin
+      let mult, digits =
+        match s.[n - 1] with
+        | 'k' | 'K' -> 1024, String.sub s 0 (n - 1)
+        | 'm' | 'M' -> 1024 * 1024, String.sub s 0 (n - 1)
+        | 'g' | 'G' -> 1024 * 1024 * 1024, String.sub s 0 (n - 1)
+        | _ -> 1, s
+      in
+      match int_of_string_opt digits with
+      | Some i when i >= 0 && i <= max_size_bytes / mult ->
+        Some (i * mult)
+      | _ -> None
+    end
+
+  (* Physical memory in bytes, for %-terms. Read only when a %-term is
+     present, so machine-dependent behaviour is opt-in and visible in
+     the flag value. *)
+  let physical_memory_bytes () =
+    match open_in "/proc/meminfo" with
+    | exception _ -> None
+    | ic ->
+      let rec find () =
+        match input_line ic with
+        | exception _ -> None
+        | line ->
+          if String.length line > 9 && String.sub line 0 9 = "MemTotal:"
+          then Scanf.sscanf_opt line "MemTotal: %d kB" (fun kb -> kb * 1024)
+          else find ()
+      in
+      let r = find () in
+      close_in_noerr ic;
+      r
+
+  (* The flag value is the MIN of comma-separated terms; a term is
+     either an absolute SIZE or PERCENT'%' of physical memory PER CORE.
+     Per core because the floor is a per-process allowance and the worst
+     case is one compiler per core: a term of P% bounds the aggregate
+     floor allowance of a core-saturating build at P% of the machine's
+     memory, uniformly across machines with very different
+     memory-to-core ratios.  E.g. [1G,50%] = 1 GiB, but at most half the
+     per-core memory -- the full value on large build machines,
+     proportionally less on small development ones, with the whole
+     policy explicit in the (build-system-provided) flag rather than
+     implicit in the compiler. *)
+  let parse_floor_spec s =
+    let parse_term t =
+      let n = String.length t in
+      if n > 1 && t.[n - 1] = '%' then
+        match float_of_string_opt (String.sub t 0 (n - 1)) with
+        | Some pct when pct > 0. && pct <= 100. ->
+          (match physical_memory_bytes () with
+           | Some mem ->
+             let cores = max 1 (Domain.recommended_domain_count ()) in
+             Some
+               (int_of_float
+                  (float_of_int (mem / cores) *. pct /. 100.))
+           | None -> None)
+        | _ -> None
+      else parse_size_bytes t
+    in
+    match String.split_on_char ',' s with
+    | [] -> None
+    | terms ->
+      List.fold_left
+        (fun acc t ->
+           match acc, parse_term t with
+           | Some a, Some b -> Some (Stdlib.min a b)
+           | _ -> None)
+        (Some max_int) terms
+
+  (* Runs after argument parsing and before any compilation. Late enough
+     that -X and OCAMLPARAM's "before" section have been read (knobs in
+     OCAMLPARAM's per-file "after" section are NOT honoured: it is only
+     read per compilation unit, after this point); early enough that no
+     real GC work has happened. Also note [-depend] runs and exits during
+     argument parsing, i.e. unpaced, which is fine (it compiles
+     nothing). *)
+  let apply () =
+    begin match space_overhead () with
+    | 0 -> ()  (* the "unset" sentinel: 0 cannot be requested explicitly *)
+    | n when n < 0 ->
+      Compenv.fatal
+        (Printf.sprintf "-X gc-space-overhead expects a positive integer, \
+got: %d" n)
+    | n ->
+      if not (env_field_present ~prefix:"o") then
+        Gc.set { (Gc.get ()) with Gc.space_overhead = n }
+    end;
+    match idle_floor () with
+    | "" -> ()
+    | s ->
+      if not (env_field_present ~prefix:"Xsmall_heap_limit=") then begin
+        match parse_floor_spec s with
+        | Some bytes when bytes < max_int ->
+          (* The primitive takes words; bytes <= 1 TiB so this cannot
+             overflow. *)
+          !set_idle_floor_hook ((bytes + 7) / 8)
+        | _ ->
+          Compenv.fatal
+            ("-X gc-idle-floor expects a comma-separated min-expression "
+             ^ "of sizes (512M, 1G) and/or percentages of per-core "
+             ^ "physical memory (50%), got: " ^ s)
+      end
+end
+
 let main unix argv ppf ~flambda2 =
   native_code := true;
   let columns =
@@ -61,6 +221,7 @@ let main unix argv ppf ~flambda2 =
     Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler;
     Compenv.parse_arguments (ref argv) Compenv.anonymous "ocamlopt";
     Compmisc.read_clflags_from_env ();
+    Gc_pacing.apply ();
     (* Set platform-appropriate DWARF fission default when oxcaml-dwarf is
        enabled *)
     if Config.oxcaml_dwarf &&

@@ -496,6 +496,22 @@ uintnat* caml_lookup_gc_tweak(const char* name, uintnat len)
   return NULL;
 }
 
+/* Set the idle-phase floor (in words) and re-arm it for the current
+   cycle; [Gc.Tweak.set "small_heap_limit"] alone only takes effect from
+   the next sweep phase. Used by the compiler driver for
+   -X gc-idle-floor.
+
+   Contract: single-domain, process-startup use only (the driver calls it
+   during argument parsing). The re-arm reads STW-written pacing state and
+   may withdraw a pending mark request, neither of which is coordinated
+   with concurrently running domains. */
+CAMLprim value caml_gc_set_idle_floor(value words)
+{
+  caml_small_heap_limit = Long_val(words);
+  caml_rearm_idle_floor();
+  return Val_unit;
+}
+
 CAMLprim value caml_gc_tweak_get(value name)
 {
   CAMLparam1(name);
