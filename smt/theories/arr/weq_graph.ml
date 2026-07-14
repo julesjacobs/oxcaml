@@ -47,10 +47,12 @@ type t =
          monotonic). Equality-edge entries are folded from the merge stream and removed by
          {!pop} via [trail]. *)
   ; store_seen : (int, unit) Hashtbl.t (* store term tag -> unit; dedup add_store_edge *)
-  ; eq_seen : (int, unit) Hashtbl.t
-    (* orientation-normalized equality-edge key -> unit; dedup on_merge. Trailed
-         alongside the adjacency entries so a popped edge can be re-added after further
-         merges. *)
+  ; eq_seen : (int * int, unit) Hashtbl.t
+    (* orientation-normalized (min tag, max tag) equality-edge key -> unit; dedup
+         on_merge. A structural pair key, not a packed int: a Cantor-style pack overflows
+         for large tags and a collision would silently drop a distinct equality edge (W1
+         obligation 3). Trailed alongside the adjacency entries so a popped edge can be
+         re-added after further merges. *)
   ; trail : (unit -> unit, unit) Trail.t
   }
 
@@ -124,13 +126,11 @@ let add_store_edge t ~store_term ~base ~index =
     add_entry t base e_bwd)
 ;;
 
-let eq_key (a : Term.t) (b : Term.t) : int =
-  (* a stable orientation-normalized key; the raw tags are small non-negative ints, so
-     pack. Collisions only cost a redundant re-add attempt (dedup by adjacency would still
-     hold), but Cantor-pairing keeps it exact for the tag ranges we see. *)
-  let x = min a.Term.tag b.Term.tag
-  and y = max a.Term.tag b.Term.tag in
-  ((x + y) * (x + y + 1) / 2) + y
+let eq_key (a : Term.t) (b : Term.t) : int * int =
+  (* orientation-normalized (min tag, max tag); a structural pair, exact for all tags *)
+  let x = a.Term.tag
+  and y = b.Term.tag in
+  if x <= y then x, y else y, x
 ;;
 
 let on_merge t (a : Term.t) (b : Term.t) =
@@ -169,7 +169,15 @@ let neighbours t (x : Term.t) : entry list =
 ;;
 
 let find_path t (a : Term.t) (b : Term.t) : edge list option =
-  if Term.equal a b
+  (* QUERY-SIDE O9 guard (W1 obligation 2): reject an inadmissible (finite/non-stably-
+     infinite index) array up front, BEFORE the reflexive [a = a -> Some []] shortcut —
+     otherwise a rule could fire over a finite-index array via a zero-length path, since
+     the substrate's other O9 gates (add_store_edge/on_merge) never see a bare query. A
+     rule that asks for a path is thereby prevented from firing over any array the rules
+     must not touch, reflexive case included. *)
+  if not (array_sort_admissible a.Term.sort && array_sort_admissible b.Term.sort)
+  then None
+  else if Term.equal a b
   then Some []
   else (
     let pred : (int, Term.t * edge) Hashtbl.t = Hashtbl.create 64 in

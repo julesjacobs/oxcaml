@@ -105,7 +105,9 @@ val weakly_equivalent : t -> Term.t -> Term.t -> bool
 (** [find_path t a b] is the deterministic canonical weak-equivalence path from [a] to [b]
     (oriented edges), [Some []] when [a] and [b] are the same term, or [None] when they
     are not weakly equivalent. This is the O6 term-carrying query the W1 L1/L2 rules
-    consume. *)
+    consume. QUERY-SIDE O9 (W1 obligation 2): returns [None] when either sort is
+    inadmissible — BEFORE the reflexive [Some []] shortcut — so no rule can fire over a
+    finite-index array via a zero-length path, the reflexive case included. *)
 val find_path : t -> Term.t -> Term.t -> edge list option
 
 (** [self_check t array_terms] raises [Failure] if two terms in [array_terms] that the

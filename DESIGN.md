@@ -715,3 +715,33 @@ Soundness frame: every emitted clause is theory-valid (UNSAT direction can only 
 the sat direction is unchanged and validator-gated. The `row_split` arity/sort guards are
 LOAD-BEARING and re-inherited by L1/L2 through W2, with the `Array_defs.validate_ranks`
 install-door as the unchanged backstop (`[[arr-arity-guard-load-bearing]]`).
+
+**W0/W0.5 landed (dark) + review addenda (2026-07-14).** W0 (graph substrate) LANDED dark;
+both review legs ratified the builder's design deviation — the graph is maintained as a
+permanent-store + trailed-equality adjacency with deterministic BFS, NOT a re-rooting
+union-find forest, because mixing permanent and trailed unions in one forest dangles a union
+when an equality edge pops (codex verified), and the term-node/explicit-edge representation
+makes every class-collapse point a guardable edge, which RESOLVES the O1 term-guard gap
+outright (fable). W0.5 (dark store-chain analyzer) measured all 50 storecomm losses: OPEN = 0
+on every one (closed = exactly the 32 z3-unsat) -> storecomm IS CH-addressable (deterministic
+~60-way L2 closure, zero open off-diagonal tests), GREEN-lighting the W2-storecomm expectation
+and resolving OQ3/O4'. Obligation-4 check (fable rider): the LEGACY `row_split` path does NOT
+wrong-SAT on finite-index arrays today — they degrade to `unknown` via the fail-closed
+`Array_model_check` posture (sound, incomplete); no separate lane needed.
+
+**Consolidated W1 obligations (from the W0 dual review; binding, tested):**
+1. **Count bound is NOT acyclicity (LOAD-BEARING, codex).** The combined store+equality graph
+   cycles (s1—base—s2 with s1=s2) even though the equality subgraph is a forest. W1's lemma
+   count bound rests on SELECTED-PATH (one BFS path per trigger) + TRIGGER DEDUP (permanent
+   per-read-pair memo) + bounded re-emission across backtrack (the memo is not trailed, and a
+   term-level-tautology clause stays valid after any backtrack, so re-emission is suppressed
+   forever). Tested on a cycle-heavy instance under repeated backtracking (bounded emission).
+2. **Query-side O9 (LOAD-BEARING, codex).** `find_path a a` returned `Some []` before the O9
+   admissibility check, so a rule could fire over a finite-index array via a zero-length path;
+   `find_path` now rejects an inadmissible sort up front (before the reflexive shortcut).
+3. **eq_key overflow (codex).** The equality-edge dedup key switched from a Cantor pack (int
+   overflow -> silent collision -> dropped edge -> incompleteness) to a structural `(int*int)`
+   pair key.
+4. **Finite-index legacy path (fable rider):** checked, not a live bug (see above).
+5. **Freeze reports are box-local:** gate claims (make test EXIT, gate counts) go in the
+   commit message so they are tracked-verifiable.

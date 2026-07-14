@@ -111,7 +111,18 @@ let test_o9_untracked s =
   expect_bool
     "O9: Bool-index store edge is NOT tracked (arrays stay unrelated)"
     (Weq_graph.weakly_equivalent g s1 base)
-    false
+    false;
+  (* query-side O9 guard (obligation 2): the reflexive zero-length path must ALSO be
+     denied for a finite-index array, so a rule cannot fire over it via find_path a a =
+     Some []. *)
+  expect_bool
+    "O9: reflexive query on a Bool-index array is denied (no zero-length path)"
+    (Weq_graph.weakly_equivalent g base base)
+    false;
+  incr checks;
+  match Weq_graph.find_path g base base with
+  | None -> ()
+  | Some _ -> fail "O9: find_path on a Bool-index array (reflexive) must be None"
 ;;
 
 let test_equality_backtracking s =
