@@ -178,6 +178,17 @@ let rewrite2_enabled () =
   | Some _ | None -> false
 ;;
 
+(* Equality-over-concat splitting (family 1) is measured NET-NEUTRAL and REGRESSES
+   wide-width files (ext_con_004_001_1024: OFF unsat 3.6 s -> ON killed) because it
+   reshapes but still bit-blasts. It is therefore a separate opt-in sub-flag, OFF even
+   when the main gate is on, so the clean-positive normalizers + families 2/3 ship without
+   it. Kept for A/B attribution and as an enabler if a later blast-avoiding path uses it. *)
+let eqsplit_enabled () =
+  match Sys.getenv_opt "OXSMT_BV_REWRITE2_EQSPLIT" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let bvwidth (t : Term.t) =
   match Bv.width_of_sort t.Term.sort with
   | Some w -> w
@@ -425,6 +436,7 @@ let rewrite_bv_op ctx mint (op : Bv.op) (args : Term.t list) (w : int) : Term.t 
 
 let simplify ctx mint (terms : Term.t list) : Term.t list =
   let rewrite2 = rewrite2_enabled () in
+  let eqsplit = rewrite2 && eqsplit_enabled () in
   let count = occurrences terms in
   let shared (t : Term.t) =
     match Hashtbl.find_opt count t.Term.tag with
@@ -448,7 +460,7 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
     | Eq (a, b) ->
       let a' = simp a
       and b' = simp b in
-      if rewrite2 && bvwidth a' >= 1
+      if eqsplit && bvwidth a' >= 1
       then split_eq_concat ctx mint a' b'
       else Context.eq ctx a' b'
     | Bool_const _ | Int_const _ | Arith _ | Le _ -> t
