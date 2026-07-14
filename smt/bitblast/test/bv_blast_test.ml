@@ -366,6 +366,51 @@ let run_simplify_equiv () =
        (* equality of an extract against a concat slice *)
        equiv "eq_ext_concat" w (fun ctx m x y _ ->
          Context.eq ctx (ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y)) y))
+    [ 3; 4; 8 ];
+  (* Family 2 (task #36): bitwise identities + constant folding. Same OXSMT_BV_REWRITE2
+     gate; equivalence must hold both ways. *)
+  let bnot ctx m p = Bv.unop ctx m Bv.Bvnot p in
+  let band ctx m p q = Bv.binop ctx m Bv.Bvand p q in
+  let bor ctx m p q = Bv.binop ctx m Bv.Bvor p q in
+  let bxor ctx m p q = Bv.binop ctx m Bv.Bvxor p q in
+  let bmul ctx m p q = Bv.binop ctx m Bv.Bvmul p q in
+  List.iter
+    (fun w ->
+       let zero ctx m = k ctx m 0 w in
+       let ones ctx m = k ctx m ((1 lsl w) - 1) w in
+       let one ctx m = k ctx m 1 w in
+       equiv "and_zero" w (fun ctx m x _ _ -> band ctx m x (zero ctx m));
+       equiv "and_ones" w (fun ctx m x _ _ -> band ctx m x (ones ctx m));
+       equiv "and_self" w (fun ctx m x _ _ -> band ctx m x x);
+       equiv "or_zero" w (fun ctx m x _ _ -> bor ctx m x (zero ctx m));
+       equiv "or_ones" w (fun ctx m x _ _ -> bor ctx m x (ones ctx m));
+       equiv "or_self" w (fun ctx m x _ _ -> bor ctx m x x);
+       equiv "xor_zero" w (fun ctx m x _ _ -> bxor ctx m x (zero ctx m));
+       equiv "xor_self" w (fun ctx m x _ _ -> bxor ctx m x x);
+       equiv "xor_ones" w (fun ctx m x _ _ -> bxor ctx m x (ones ctx m));
+       equiv "not_not" w (fun ctx m x _ _ -> bnot ctx m (bnot ctx m x));
+       equiv "mul_zero" w (fun ctx m x _ _ -> bmul ctx m x (zero ctx m));
+       equiv "mul_one" w (fun ctx m x _ _ -> bmul ctx m x (one ctx m));
+       equiv "and_const_fold" w (fun ctx m _ _ _ ->
+         band ctx m (k ctx m 6 w) (k ctx m 3 w));
+       equiv "not_const_fold" w (fun ctx m _ _ _ -> bnot ctx m (k ctx m 5 w)))
+    [ 3; 4; 8 ];
+  (* Family 3 (task #36): shift by a constant amount folds to extract/concat. Cover
+     in-range, zero, and over-width amounts for shl/lshr/ashr; same gate. *)
+  let shl ctx m p q = Bv.binop ctx m Bv.Bvshl p q in
+  let lshr ctx m p q = Bv.binop ctx m Bv.Bvlshr p q in
+  let ashr ctx m p q = Bv.binop ctx m Bv.Bvashr p q in
+  List.iter
+    (fun w ->
+       List.iter
+         (fun kk ->
+            equiv (Printf.sprintf "shl_k%d" kk) w (fun ctx m x _ _ ->
+              shl ctx m x (k ctx m kk w));
+            equiv (Printf.sprintf "lshr_k%d" kk) w (fun ctx m x _ _ ->
+              lshr ctx m x (k ctx m kk w));
+            equiv (Printf.sprintf "ashr_k%d" kk) w (fun ctx m x _ _ ->
+              ashr ctx m x (k ctx m kk w)))
+         [ 0; 1; w - 1; w ])
     [ 3; 4; 8 ]
 ;;
 

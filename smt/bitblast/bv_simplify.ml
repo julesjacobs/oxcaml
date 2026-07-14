@@ -279,6 +279,150 @@ let split_eq_concat ctx mint (a : Term.t) (b : Term.t) : Term.t =
     Context.and_ ctx eqs
 ;;
 
+(* ---- Family 2 (task #36): bitwise identities + generic constant folding. Same dark
+   gate. Sound by bit-vector algebra; certified by the Layer-4 oracle. ---- *)
+
+let as_const (t : Term.t) : (Bigint.t * int) option =
+  match Bv.view t with
+  | Some (Bv.Const { value; width }) -> Some (value, width)
+  | _ -> None
+;;
+
+let is_zero_bv t =
+  match as_const t with
+  | Some (v, _) -> Bigint.is_zero v
+  | None -> false
+;;
+
+let is_allones_bv t =
+  match as_const t with
+  | Some (v, w) -> Bigint.equal v (Bigint.sub (pow2 w) Bigint.one)
+  | None -> false
+;;
+
+let is_one_bv t =
+  match as_const t with
+  | Some (v, _) -> Bigint.equal v Bigint.one
+  | None -> false
+;;
+
+let same_term (a : Term.t) (b : Term.t) = a == b || a.Term.tag = b.Term.tag
+let zero_bv ctx mint w = Bv.const ctx mint ~value:Bigint.zero ~width:w
+
+let allones_bv ctx mint w =
+  Bv.const ctx mint ~value:(Bigint.sub (pow2 w) Bigint.one) ~width:w
+;;
+
+(* Fold a fully-constant bit-vector node via the independent evaluator (the same total
+   SMT-LIB semantics the blaster is checked against). Returns [None] if any leaf is a free
+   variable (Eval_error) — i.e. not all-const. *)
+let try_fold_const ctx mint (t : Term.t) : Term.t option =
+  match Bv_eval.eval_bv Bv_adapter.defs ~lookup:(fun _ -> None) t with
+  | value, width -> Some (Bv.const ctx mint ~value ~width)
+  | exception Bv_eval.Eval_error _ -> None
+;;
+
+(* Rewrite a bitwise/mul bit-vector op given already-simplified args. Tries constant
+   folding first, then operator identities; falls back to rebuilding the op. [w] is the
+   result width. *)
+let rewrite_bv_op ctx mint (op : Bv.op) (args : Term.t list) (w : int) : Term.t =
+  let rebuild () =
+    match op, args with
+    | Bv.Bvnot, [ a ] -> Bv.unop ctx mint Bv.Bvnot a
+    | _, [ a; b ] -> Bv.binop ctx mint op a b
+    | _ -> failwith "rewrite_bv_op: unexpected arity"
+  in
+  (* all-const fold *)
+  let all_const = List.for_all (fun a -> as_const a <> None) args in
+  let folded = if all_const then try_fold_const ctx mint (rebuild ()) else None in
+  match folded with
+  | Some c -> c
+  | None ->
+    (match op, args with
+     | Bv.Bvnot, [ a ] ->
+       (match Bv.view a with
+        | Some (Bv.Op { op = Bv.Bvnot; args = [ x ]; _ }) -> x (* ~~x = x *)
+        | _ -> rebuild ())
+     | Bv.Bvand, [ a; b ] ->
+       if is_zero_bv a || is_zero_bv b
+       then zero_bv ctx mint w
+       else if is_allones_bv a
+       then b
+       else if is_allones_bv b
+       then a
+       else if same_term a b
+       then a
+       else rebuild ()
+     | Bv.Bvor, [ a; b ] ->
+       if is_allones_bv a || is_allones_bv b
+       then allones_bv ctx mint w
+       else if is_zero_bv a
+       then b
+       else if is_zero_bv b
+       then a
+       else if same_term a b
+       then a
+       else rebuild ()
+     | Bv.Bvxor, [ a; b ] ->
+       if is_zero_bv a
+       then b
+       else if is_zero_bv b
+       then a
+       else if same_term a b
+       then zero_bv ctx mint w
+       else if is_allones_bv a
+       then Bv.unop ctx mint Bv.Bvnot b
+       else if is_allones_bv b
+       then Bv.unop ctx mint Bv.Bvnot a
+       else rebuild ()
+     | Bv.Bvmul, [ a; b ] ->
+       if is_zero_bv a || is_zero_bv b
+       then zero_bv ctx mint w
+       else if is_one_bv a
+       then b
+       else if is_one_bv b
+       then a
+       else rebuild ()
+     (* Family 3: shift by a CONSTANT amount folds to extract/concat (fill bits), so the
+        blaster encodes a wire re-routing instead of a full barrel shifter. Sound by the
+        SMT-LIB shift semantics (over-width shl/lshr = 0, ashr = sign). *)
+     | (Bv.Bvshl | Bv.Bvlshr | Bv.Bvashr), [ x; kterm ] ->
+       (match as_const kterm with
+        | None -> rebuild ()
+        | Some (kval, _) ->
+          let over = Bigint.compare kval (Bigint.of_int w) >= 0 in
+          let sign_bit () = norm_extract ctx mint ~i:(w - 1) ~j:(w - 1) x in
+          (match Bigint.to_int_opt kval with
+           | Some 0 -> x
+           | _ when over ->
+             (match op with
+              | Bv.Bvashr -> Bv.sign_extend ctx mint ~n:(w - 1) (sign_bit ())
+              | _ -> zero_bv ctx mint w)
+           | Some k when k > 0 && k < w ->
+             (match op with
+              | Bv.Bvshl ->
+                norm_concat
+                  ctx
+                  mint
+                  (norm_extract ctx mint ~i:(w - 1 - k) ~j:0 x)
+                  (zero_bv ctx mint k)
+              | Bv.Bvlshr ->
+                norm_concat
+                  ctx
+                  mint
+                  (zero_bv ctx mint k)
+                  (norm_extract ctx mint ~i:(w - 1) ~j:k x)
+              | Bv.Bvashr ->
+                norm_concat
+                  ctx
+                  mint
+                  (Bv.sign_extend ctx mint ~n:(k - 1) (sign_bit ()))
+                  (norm_extract ctx mint ~i:(w - 1) ~j:k x)
+              | _ -> rebuild ())
+           | _ -> rebuild ()))
+     | _ -> rebuild ())
+;;
+
 let simplify ctx mint (terms : Term.t list) : Term.t list =
   let rewrite2 = rewrite2_enabled () in
   let count = occurrences terms in
@@ -316,6 +460,21 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
          norm_extract ctx mint ~i ~j (simp a)
        | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) when rewrite2 ->
          norm_concat ctx mint (simp hi) (simp lo)
+       | Some
+           (Bv.Op
+              { op =
+                  ( Bv.Bvnot
+                  | Bv.Bvand
+                  | Bv.Bvor
+                  | Bv.Bvxor
+                  | Bv.Bvmul
+                  | Bv.Bvshl
+                  | Bv.Bvlshr
+                  | Bv.Bvashr ) as op
+              ; args
+              ; result_width = Some w
+              })
+         when rewrite2 -> rewrite_bv_op ctx mint op (List.map simp args) w
        | _ ->
          let orig = Iarr.to_list orig_args in
          let simplified = List.map simp orig in
