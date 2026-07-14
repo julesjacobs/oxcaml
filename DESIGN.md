@@ -674,3 +674,44 @@ just makes the frozen text match the fail-loud reality rather than contradict it
 "frozen doc-comments are contracts" discipline). No behavior change. Surfaced by the
 codex/fable review of the ELS+FLP stack (finding F3); adjudged option (a) — amend the
 contract text — over building incremental-ELS reactivation for a dead path.
+
+### A12 — QF_AX weak-equivalence decision procedure (Christ-Hoenicke) (2026-07-14)
+
+RATIFIED-WITH-OBLIGATIONS (Rev 2; both adversarial legs). Full ADR body:
+`../logs/adr-weakeq-draft.md` (the ADR home — ADRs live in the untracked sibling
+`../logs/`, e.g. ADR-0014 = `../logs/adr-egraph-fabric-draft.md`; DESIGN.md carries the
+decision record, not the body). **Decision:** replace the blind index-split
+read-over-write (`row_split`) in the arrays theory with a maintained
+weak-equivalence graph (store edges + equality edges) and graph-guided read
+propagation — the residual QF_AX walls (23 swap store-permutation refutations) blow up
+`row_split` because no index diseqs are asserted, and every prior lemma-on-demand
+variant netted <=0 on the deterministic counted-effort measure (family 1/2, parked). CH
+confines the index-coincidence search to the actual store-chain path indices.
+
+Staged, env-gated `OXSMT_ARR_WEQ` (default OFF, byte-identical when unset), reject-capable
+at each stage on the **counted-effort** measure (wall A/B is inadmissible — QF_AX losses
+sit at the 2s wall):
+
+- **W0 (dark, this stage):** the maintained weak-equivalence graph (`Weq_graph`) off the
+  Euf merge stream with Trail undo, an abstract term-carrying e-graph view (O6, so the W3
+  fabric migration is a re-binding), the O9 index-sort-stability gate (rules fire only over
+  stably-infinite index sorts — a finite index sort breaks the model validator's
+  finite-default assumption, a wrong-SAT vector), and the O8 arity/sort forge tests.
+  Emits nothing; verdict-identical OFF and ON.
+- **W0.5:** a dark store-chain analyzer that arbitrates whether the storecomm losses are
+  CH-addressable (O4' established only that the CH-immune level-0 closure is <1%; the
+  split-induced share is OPEN).
+- **W1:** the O1'-guarded L1 read-over-weak-equivalence rule, ADDING to `row_split`. The
+  emitted clause is an unconditional array-theory tautology over TERMS with a negated
+  equality guard at EVERY class-collapse point (the two reads' own indices, path endpoints
+  including the zero-length branch-local-merge case, mid-path congruences, term-identity-
+  deduped store indices) — this is what makes the permanent lemma memo sound across
+  backtracking. Deterministic fuel -> `unknown`, cert self-disable.
+- **W2:** retire `row_split`; L1 + L2 + ROW1 is the decision procedure. The SAT authority
+  stays the `Array_model_check` materialized-diff-witness validator (O3/O10), so a bad
+  lemma set can only fail to refute (-> `unknown`), never wrong-`sat`.
+
+Soundness frame: every emitted clause is theory-valid (UNSAT direction can only prune);
+the sat direction is unchanged and validator-gated. The `row_split` arity/sort guards are
+LOAD-BEARING and re-inherited by L1/L2 through W2, with the `Array_defs.validate_ranks`
+install-door as the unchanged backstop (`[[arr-arity-guard-load-bearing]]`).

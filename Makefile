@@ -360,6 +360,14 @@ array-sat-gate:
 	$(DUNE) build tests/solver/array_sat_gate.exe tests/solver/oxsmt_cli.exe
 	$(DUNE) exec tests/solver/array_sat_gate.exe -- $(ARR_SAT_GOLDENS)
 
+## weq-graph-test — unit tests for the W0 dark weak-equivalence graph substrate
+##   (ADR-weakeq / DESIGN.md A12): the O9 index-sort-stability gate, store-edge permanence,
+##   equality-edge folding + Trail-undo on pop, deterministic path finding, and the
+##   self-check tripwire. Nonzero on any failed check.
+weq-graph-test:
+	$(DUNE) build tests/solver/weq_graph_test.exe
+	$(DUNE) exec tests/solver/weq_graph_test.exe
+
 ## wiring-test — session layer (smt/interface) semantics + namespace guards. Push/pop
 ##   retraction, assert-after-check, THE SOUNDNESS RULE (theory atom -> unknown), model
 ##   extraction, and the reserved-namespace guard on both the session and the parser. Lives
@@ -575,6 +583,7 @@ test: check-frozen
 	$(MAKE) bv-op-coverage-test
 	$(MAKE) dt-sat-gate
 	$(MAKE) array-sat-gate
+	$(MAKE) weq-graph-test
 	$(MAKE) regress-test
 	$(MAKE) sat-test
 	$(MAKE) satpre-test

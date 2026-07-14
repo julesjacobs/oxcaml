@@ -14,6 +14,23 @@ open Oxsmt_core
 module Euf = Oxsmt_euf.Euf
 module Defs = Array_defs
 
+(* Weak-equivalence decision procedure (ADR-weakeq / DESIGN.md A12), gated OXSMT_ARR_WEQ,
+   default OFF. W0 (this stage) is DARK: it maintains the {!Weq_graph} off the Euf merge
+   stream and (under OXSMT_ARR_WEQ_SELFCHECK) cross-checks its connectivity against the
+   engine, but emits NO lemmas and changes NO verdict — with the gate unset AND set the
+   solver is byte-identical. The L1/L2 generators that consume the graph land at W1/W2. *)
+let weq_on =
+  match Sys.getenv_opt "OXSMT_ARR_WEQ" with
+  | Some ("1" | "true" | "yes") -> true
+  | _ -> false
+;;
+
+let weq_selfcheck =
+  match Sys.getenv_opt "OXSMT_ARR_WEQ_SELFCHECK" with
+  | Some ("1" | "true" | "yes") -> true
+  | _ -> false
+;;
+
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a ROW-derived equality carries [P_derived reasons] — the
    trail literals whose conjunction entails the trigger. [P_axiom] is dropped when
@@ -72,9 +89,42 @@ type t =
   ; mutable fresh_counter : int
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
+  ; weq : (Weq_graph.t * Euf.merge_cursor) option
+    (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ (W0).
+     [None] keeps the OFF path byte-identical (no merge recording, no graph). *)
   }
 
 let max_iters = 1_000_000
+
+let rec lits_of_prem = function
+  | P_lit l -> [ l ]
+  | P_axiom -> []
+  | P_derived ls -> ls
+
+and lits_of_prems ps = List.concat_map lits_of_prem ps
+
+let dedup_lits (ls : Lit.t list) : Lit.t list =
+  let seen = ref Lit.Map.empty in
+  List.filter
+    (fun l ->
+       if Lit.Map.mem l !seen
+       then false
+       else (
+         seen := Lit.Map.add l () !seen;
+         true))
+    ls
+;;
+
+(* The abstract e-graph view (O6) the weak-equivalence graph reads through — standalone,
+   it closes over this theory's private Euf engine; on the fabric hub (W3) it is re-bound. *)
+let weq_view engine : Weq_graph.egraph_view =
+  { Weq_graph.class_of = (fun tm -> Euf.class_of engine tm)
+  ; are_equal = (fun a b -> Euf.are_equal engine a b)
+  ; explain_equal =
+      (fun a b -> dedup_lits (lits_of_prems (Euf.explain engine a b)))
+      (* premise literals entailing [a = b]; dark in W0, consumed by the W1 guards *)
+  }
+;;
 
 let create ctx env cap reg =
   let engine = Euf.create ctx in
@@ -83,6 +133,13 @@ let create ctx env cap reg =
   Euf.register_term engine true_const;
   Euf.register_term engine false_const;
   Euf.assert_neq engine ~premise:P_axiom true_const false_const;
+  let weq =
+    if weq_on
+    then (
+      Euf.set_record_merges engine true;
+      Some (Weq_graph.create (weq_view engine), Euf.add_merge_consumer engine))
+    else None
+  in
   { ctx
   ; env
   ; cap
@@ -102,6 +159,7 @@ let create ctx env cap reg =
   ; fresh_counter = 0
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
+  ; weq
   }
 ;;
 
@@ -124,25 +182,6 @@ let array_sort (sort : Sort.t) : (Sort.t * Sort.t) option =
   | Sort.Array (i, e) -> Some (i, e)
   | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
     None
-;;
-
-let rec lits_of_prem = function
-  | P_lit l -> [ l ]
-  | P_axiom -> []
-  | P_derived ls -> ls
-
-and lits_of_prems ps = List.concat_map lits_of_prem ps
-
-let dedup_lits (ls : Lit.t list) : Lit.t list =
-  let seen = ref Lit.Map.empty in
-  List.filter
-    (fun l ->
-       if Lit.Map.mem l !seen
-       then false
-       else (
-         seen := Lit.Map.add l () !seen;
-         true))
-    ls
 ;;
 
 (* --- minting fresh terms (select for a ROW step, a witness index for extensionality) --- *)
@@ -178,7 +217,17 @@ let rec catalog t (term : Term.t) =
     match head_args term with
     | Some (_, args) ->
       (match role_of t term with
-       | Some { Defs.role = Defs.Store; _ } -> t.store_terms <- term :: t.store_terms
+       | Some { Defs.role = Defs.Store; _ } ->
+         t.store_terms <- term :: t.store_terms;
+         (* record the permanent store edge in the weak-equivalence graph (W0, dark). The
+            [Array.length args = 3] guard is load-bearing exactly as in the ROW consuming
+            sites: a store-role symbol can be registered at a non-3 arity via the public
+            API ([[arr-arity-guard-load-bearing]]), and indexing args.(0)/args.(1)
+            unguarded would forge an edge over an extended-arity uninterpreted function. *)
+         (match t.weq with
+          | Some (g, _) when Array.length args = 3 ->
+            Weq_graph.add_store_edge g ~store_term:term ~base:args.(0) ~index:args.(1)
+          | _ -> ())
        | Some { Defs.role = Defs.Select; _ } -> t.select_terms <- term :: t.select_terms
        | None -> ());
       Array.iter (catalog t) args
@@ -611,7 +660,58 @@ let final_introduce_reads t : Theory.check_result option =
        | [] -> None))
 ;;
 
+(* --- weak-equivalence graph maintenance (W0, dark) --- *)
+
+(* Drain the Euf merge log into the graph. Called at the top of every {!check} and before
+   every {!push}/{!pop}, so between any two drains no push/pop intervened and the whole
+   drained batch belongs to the CURRENT frame — the edges are then trailed in the frame
+   they actually occurred in, and {!pop} removes exactly the right ones. (The engine
+   clears the log on its own [pop], so draining before ours is also what stops a
+   surviving-frame merge from being lost.) A no-op with the gate OFF (the log is empty; no
+   cursor). *)
+let weq_sync t =
+  match t.weq with
+  | None -> ()
+  | Some (g, cursor) ->
+    List.iter
+      (fun (ev : Euf.merge_event) -> Weq_graph.on_merge g ev.Fabric.kept ev.Fabric.merged)
+      (Euf.drain_merges t.engine cursor)
+;;
+
+(* The admissible (stably-infinite-index) array terms the self-check samples: store terms,
+   their bases, and select arrays — the domain the weak-equivalence graph reasons over. *)
+let weq_array_sample t : Term.t list =
+  let acc = ref [] in
+  let add tm = if array_sort tm.Term.sort <> None then acc := tm :: !acc in
+  List.iter
+    (fun st ->
+       add st;
+       match st.Term.node with
+       | Term.App (_, a) when Iarr.length a = 3 -> add (Iarr.get a 0)
+       | _ -> ())
+    t.store_terms;
+  List.iter
+    (fun sel ->
+       match sel.Term.node with
+       | Term.App (_, a) when Iarr.length a = 2 -> add (Iarr.get a 0)
+       | _ -> ())
+    t.select_terms;
+  !acc
+;;
+
+(* At Final under OXSMT_ARR_WEQ_SELFCHECK: re-drain (to fold this check's own saturation
+   merges) then cross-check graph connectivity against the engine. Raises on divergence
+   (test/CI only). Dark otherwise. *)
+let weq_final_self_check t =
+  match t.weq with
+  | Some (g, _) when weq_selfcheck ->
+    weq_sync t;
+    Weq_graph.self_check g (weq_array_sample t)
+  | _ -> ()
+;;
+
 let check t effort =
+  weq_sync t;
   match saturate t with
   | Some prems -> conflict_of prems
   | None ->
@@ -623,6 +723,7 @@ let check t effort =
        (match final_introduce_reads t with
         | Some result -> result
         | None ->
+          weq_final_self_check t;
           (match row_split t with
            | Some terms -> Theory.Split terms
            | None -> Theory.Sat)))
@@ -638,11 +739,22 @@ let explain t lit =
 ;;
 
 let push t =
+  weq_sync t;
+  (* fold pending merges into the current frame before it becomes a parent *)
+  (match t.weq with
+   | Some (g, _) -> Weq_graph.push g
+   | None -> ());
   Euf.push t.engine;
   t.frames <- [] :: t.frames
 ;;
 
 let pop t n =
+  weq_sync t;
+  (* fold pending (current-frame) merges before the engine clears its log on pop, then
+     unwind the graph's equality edges for the popped frames in lockstep with Euf *)
+  (match t.weq with
+   | Some (g, _) -> Weq_graph.pop g n
+   | None -> ());
   Euf.pop t.engine n;
   let rec drop k frames =
     if k = 0

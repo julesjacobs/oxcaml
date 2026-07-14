@@ -72,3 +72,10 @@
   oxsmt_arr
   oxsmt_smtlib_parser
   oxsmt_query_loader))
+
+; Unit tests for the W0 dark weak-equivalence graph substrate (make weq-graph-test).
+
+(executable
+ (name weq_graph_test)
+ (modules weq_graph_test)
+ (libraries oxsmt_core oxsmt_interface oxsmt_arr))
