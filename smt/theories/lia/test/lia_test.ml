@@ -1179,6 +1179,33 @@ let test_diophantine () =
    check
      "dio: transitive x1=x0+6 (x0=0) then 4x2+4x3=x1 ⇒ conflict via closure"
      (is_some (Lia.diophantine_conflict fx.solver)));
+  (* (e) PREMISE EXACTNESS (soundness): the conflict must cite EXACTLY the literals whose
+     conjunction is ℤ-unsatisfiable — here the equation atom plus BOTH oriented bounds
+     that pin x0=6 — nothing less (an under-cited premise set is a wrong-unsat generator:
+     the conjunction of a strict subset is satisfiable, so learning it would refute a
+     satisfiable branch) and nothing more (an over-wide set weakens learning). We capture
+     the exact tokens and compare the premise set. Discriminating: an implementation that
+     dropped the fixed-variable bound tokens (citing only the equation) would leave
+     premises = [{eq}], and [4x1+4x2=x0] alone is satisfiable — this check fails, and such
+     a conflict would be unsound. *)
+  (let fx = make_fixture 3 in
+   let t_le = assert_le fx [ 0, 1 ] (-6) ~polarity:true in
+   (* x0 <= 6 *)
+   let t_ge = assert_le fx [ 0, -1 ] 6 ~polarity:true in
+   (* x0 >= 6 *)
+   let t_eq = fx.next_tok in
+   assert_eq
+     fx
+     (Context.linear_combination fx.ctx [ 4, fx.vars.(1); 4, fx.vars.(2) ] 0)
+     fx.vars.(0);
+   match Lia.diophantine_conflict fx.solver with
+   | None -> check "dio: premise-exactness case produces a conflict" false
+   | Some c ->
+     let got = List.sort_uniq Int.compare c.Lia.premises in
+     let want = List.sort_uniq Int.compare [ t_le; t_ge; t_eq ] in
+     check
+       "dio: conflict cites EXACTLY {eq, x0<=6, x0>=6} (no under/over-citing)"
+       (List.equal Int.equal got want));
   (* (d) push/pop: the infeasible equation asserted inside a pushed scope is dropped on
      [pop], so the test no longer fires (eq_frames framing). *)
   let fx = make_fixture 3 in
