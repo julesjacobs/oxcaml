@@ -171,6 +171,53 @@ let test_strengthening_sat () =
   check "strengthen: model satisfies originals" (all_sat model clauses)
 ;;
 
+(* ---- PHASE-2 inprocessing integration. A pigeonhole PHP(6,5) is UNSAT and takes enough
+   conflicts to cross the first restart, at which a restart-boundary inprocessing ROUND
+   fires (make satpre-test sets OXSMT_SATPRE_INPROC_FIRST=1 so the first restart triggers
+   one). Eliminable "blocked triangle" gadgets are added so the round actually rebuilds
+   the clause DB (eliminates the gadget vars) and re-attaches the PHP learned clauses
+   mid-search — exercising the learn/forget + re-attach path. The verdict must stay UNSAT:
+   a round that dropped a needed ORIGINAL clause or corrupted the watch state would flip
+   or crash. ---- *)
+let php pigeons holes =
+  (* var (i in hole j), 1-based: (i-1)*holes + j, for i in 1..pigeons, j in 1..holes. *)
+  let v i j = ((i - 1) * holes) + j in
+  let clauses = ref [] in
+  for i = 1 to pigeons do
+    clauses := List.init holes (fun j -> v i (j + 1)) :: !clauses
+  done;
+  for j = 1 to holes do
+    for i = 1 to pigeons do
+      for i' = i + 1 to pigeons do
+        clauses := [ -v i j; -v i' j ] :: !clauses
+      done
+    done
+  done;
+  List.rev !clauses, pigeons * holes
+;;
+
+let test_inprocessing_unsat_preserved () =
+  let php_clauses, nphp = php 6 5 in
+  (* three blocked triangles on fresh vars nphp+1.., all eliminable *)
+  let gadget = ref [] in
+  let elim = ref [] in
+  for k = 0 to 2 do
+    let a = nphp + (3 * k) + 1
+    and x = nphp + (3 * k) + 2
+    and y = nphp + (3 * k) + 3 in
+    gadget := [ a; x ] :: [ a; y ] :: [ -a; -x; -y ] :: !gadget;
+    elim := (a - 1) :: !elim
+  done;
+  let clauses = php_clauses @ List.rev !gadget in
+  let s = build (nphp + 9) ~eliminable:!elim clauses in
+  let r = Sat.solve s in
+  let st = Sat.stats s in
+  check "inproc: PHP(6,5)+gadgets stays unsat" (r = Sat.Unsat);
+  check
+    (Printf.sprintf "inproc: search was nontrivial (conflicts=%d > 100)" st.conflicts)
+    (st.conflicts > 100)
+;;
+
 let () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") ->
@@ -180,6 +227,7 @@ let () =
     test_unsat_preserved ();
     test_strengthening_unsat ();
     test_strengthening_sat ();
+    test_inprocessing_unsat_preserved ();
     Printf.printf "satpre_test: %d checks, %d failures\n" !checks !failures;
     if !failures > 0 then exit 1
   | Some _ | None ->

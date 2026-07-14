@@ -220,9 +220,15 @@ type t =
          the pivot var to satisfy any deleted clause the reduced model left unsatisfied. *)
   ; restore_map : (var, lit array list) Hashtbl.t
     (* per eliminated pivot var: the clauses deleted for it, so [add_clause] can restore
-     them (re-add + un-eliminate) if a later clause names the var — the note's "restore
-     clauses deleted on l when a clause containing ¬l arrives" (kept sound under
-     incrementality). Empty unless something was eliminated. *)
+         them (re-add + un-eliminate) if a later clause names the var — the note's
+         "restore clauses deleted on l when a clause containing ¬l arrives" (kept sound
+         under incrementality). Empty unless something was eliminated. *)
+  ; mutable inproc_next : int
+    (* Phase-2 inprocessing schedule: fire a restart-boundary round once [t.conflicts]
+         reaches this. Reset per [solve] to a first-round offset; stepped by
+         [inproc_interval] with geometric back-off after each fire. Only consulted when
+         [satpre] is on, so the pure-core schedule is inert. *)
+  ; mutable inproc_interval : int
   }
 
 let var_decay = 0.95
@@ -238,6 +244,14 @@ let restart_min_conflicts = 50 (* EMA warm-up before adaptive restarts / blockin
 let reduce_first = 2000 (* first reduceDB at this many conflicts *)
 let reduce_inc = 300 (* then every this-many more *)
 let rephase_base_interval = 1000 (* decisions between the first rephase impulses *)
+
+let inproc_first =
+  5000 (* first inprocessing round after this many conflicts this solve *)
+;;
+
+let inproc_interval_base =
+  5000 (* base gap between rounds; doubles each fire (back-off) *)
+;;
 
 (* Glucose adaptive restarts default OFF (team-lead ruling B, board #172 fix round). The
    mechanism is fully built and compiled — EMAs, trigger, blocking — but inert behind this
@@ -259,6 +273,18 @@ let satpre_enabled () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") -> true
   | Some _ | None -> false
+;;
+
+(* First-inprocessing-round conflict offset (Phase 2). A measurement/test knob
+   (OXSMT_SATPRE_INPROC_FIRST): default [inproc_first], overridable so an A/B can tune
+   round frequency and a test can force an early round. Read per [solve]; only consulted
+   when the gate is on. *)
+let inproc_first_offset () =
+  match Sys.getenv_opt "OXSMT_SATPRE_INPROC_FIRST" with
+  | Some s ->
+    (try max 1 (int_of_string s) with
+     | _ -> inproc_first)
+  | None -> inproc_first
 ;;
 
 let create () =
@@ -309,6 +335,8 @@ let create () =
   ; eliminated = Dynarray.create ()
   ; elim_stack = Dynarray.create ()
   ; restore_map = Hashtbl.create 16
+  ; inproc_next = max_int
+  ; inproc_interval = 0
   }
 ;;
 
@@ -1716,8 +1744,28 @@ let resolve_on a b v =
     Some arr)
 ;;
 
-let preprocess t =
-  if t.satpre && t.trace = None && Dynarray.length t.learnts = 0 && t.ok
+(* One inprocessing ROUND, shared by solve-entry preprocessing and restart-boundary
+   inprocessing. It runs a SEQUENCE of simplification COMPONENTS over a working copy of
+   the IRREDUNDANT (original) clauses — currently
+   [subsumption; self-subsuming strengthening; bounded variable elimination] — and is
+   architected as an extensible list so later components (learned-clause vivification,
+   equivalent-literal substitution via binary-implication SCCs, failed-literal probing)
+   slot in without reshaping the loop (charter). Refs: Järvisalo, Heule & Biere,
+   "Inprocessing Rules" (IJCAR 2012); Fazekas, Biere & Scholl, "Incremental Inprocessing
+   SAT Solving" (SAT 2019).
+
+   {b Learn/forget discipline (the reason it is sound with learned clauses present).}
+   Elimination runs on the irredundant set only. Learned clauses are REDUNDANT (entailed
+   by the originals), so a learned clause mentioning an eliminated pivot is simply DELETED
+   (never resolved) — always sound. A kept learned clause names no eliminated var, and
+   since elimination only WEAKENS the formula (F ⟹ elim(F)) every model of the reduced set
+   extends to a model of F, which satisfies the learned clause; agreeing on the
+   non-eliminated vars, the reduced model satisfies it too — so kept learned clauses stay
+   entailed and are re-attached. New learned clauses can never mention an eliminated var
+   (it is off the trail: in no clause, never decided), so no future conflict analysis
+   reintroduces one. *)
+let run_round t =
+  if t.satpre && t.trace = None && t.ok
   then (
     match propagate t with
     | Some _ -> () (* level-0 conflict: bail and let search conclude unsat uniformly *)
@@ -1909,12 +1957,58 @@ let preprocess t =
              then (
                let c = mk_clause t wc.wl false in
                attach t c))
-          work))
+          work;
+        (* Learn/forget over the learned-clause DB (see the header). The watch lists were
+           just cleared and rebuilt for the originals, so every KEPT learned clause must
+           be re-attached; a learned clause mentioning an eliminated var is dropped
+           (marked deleted + removed from [learnts]). At level 0 after [propagate] no
+           learned clause is a reason (no level>0 assignments), so deleting any is safe. A
+           no-op when nothing was eliminated (the [exists] is false for every clause)
+           beyond the re-attach, which restores the exact prior watch state. *)
+        if Dynarray.length t.learnts > 0
+        then (
+          let kept = Dynarray.create () in
+          Dynarray.iter
+            (fun c ->
+               if Array.exists (fun l -> Dynarray.get t.eliminated (var_of_lit l)) c.lits
+               then c.deleted <- true
+               else (
+                 attach t c;
+                 Dynarray.add_last kept c))
+            t.learnts;
+          Dynarray.clear t.learnts;
+          Dynarray.append t.learnts kept)))
 ;;
+
+(* Solve-entry preprocessing (Phase 1): one round at decision level 0 before search. *)
+let preprocess t = run_round t
 
 let solve ?(assumptions = []) t =
   t.failed <- [];
   List.iter (fun l -> ensure_var t (var_of_lit l)) assumptions;
+  (* A10 assumptions guard (Phase-2 review rider). The assumptions path reaches the trail
+     via [ensure_var]+search, NOT [add_clause], so it bypasses the restore-on-mention
+     hook: an assumption naming an eliminated var would be solved against a clause set
+     from which that var's clauses were removed (a wrong verdict), and an
+     eliminable-but-not-yet- eliminated var could be eliminated by [preprocess] below and
+     then assumed. Both are a caller-contract violation ("no eliminable var is ever
+     assumed" — true for every current caller: assumptions are frame selectors / bv has
+     none, all frozen). Make the violation LOUD rather than latent: raise (not [assert],
+     survives -noassert). Fires only on a contract-violating caller, so every conforming
+     solve — and the whole OXSMT_SATPRE-off path — is unaffected. (A full incremental
+     solver would REACTIVATE instead, per Fazekas– Biere–Scholl SAT'19; that lands when
+     Phase-2 interleaves elimination with theory lemmas.) *)
+  List.iter
+    (fun l ->
+       let v = var_of_lit l in
+       if
+         v < Dynarray.length t.eliminable
+         && (Dynarray.get t.eliminable v || Dynarray.get t.eliminated v)
+       then
+         invalid_arg
+           "Sat.solve: an assumption names a variable marked eliminable/eliminated by \
+            CNF preprocessing (A10); assumptions must be over frozen variables")
+    assumptions;
   if not t.ok
   then (
     (* Permanent-unsat entry: re-emit the persisted terminal conclusion (codex CRIT-3, no
@@ -1944,6 +2038,13 @@ let solve ?(assumptions = []) t =
        incremental re-solve whose cumulative [t.conflicts] already exceeds it. *)
     t.next_reduce <- t.conflicts + reduce_first;
     t.best_trail_len <- 0;
+    (* Phase-2 inprocessing schedule, relative to this solve's conflict base (geometric
+       back-off). [max_int] when the gate is off => never fires (bit-identical). *)
+    t.inproc_interval <- inproc_interval_base;
+    t.inproc_next
+    <- (if t.satpre && t.trace = None
+        then t.conflicts + inproc_first_offset ()
+        else max_int);
     (* CNF preprocessing (A10): env-gated, cert-OFF, level 0. A no-op when OXSMT_SATPRE is
        off (bit-identical); when on it may simplify the clause DB and eliminate marked aux
        vars (reconstructed at [save_model]). *)
@@ -1953,7 +2054,16 @@ let solve ?(assumptions = []) t =
          bound that forces a restart if the LBD trigger never fires. *)
       let lim = luby restart_no * t.restart_base in
       match search t assumps lim with
-      | R_restart -> go (restart_no + 1)
+      | R_restart ->
+        (* Restart boundary (search has cancelled to level 0): fire a scheduled
+           inprocessing round, then step the geometric back-off. Guarded by [inproc_next]
+           = [max_int] when the gate is off, so the pure core never calls [run_round]. *)
+        if t.conflicts >= t.inproc_next
+        then (
+          run_round t;
+          t.inproc_next <- t.conflicts + t.inproc_interval;
+          t.inproc_interval <- t.inproc_interval * 2);
+        go (restart_no + 1)
       | R_sat -> Sat
       | R_unsat -> Unsat
     in

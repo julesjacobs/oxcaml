@@ -150,7 +150,7 @@ sat-test:
 ##   reconstruction (every model satisfies the original clauses; forced-flip cases), and
 ##   UNSAT preservation. Nonzero exit on any failed check.
 satpre-test:
-	OXSMT_SATPRE=1 $(DUNE) exec smt/solver/test/satpre_test.exe
+	OXSMT_SATPRE=1 OXSMT_SATPRE_INPROC_FIRST=1 $(DUNE) exec smt/solver/test/satpre_test.exe
 
 ## seam-test — CDCL(T) theory-callback seam (smt/solver, ADR-0005 §3) self-test via a
 ##   scripted MOCK theory: theory conflict at various trail depths, propagation-then-
