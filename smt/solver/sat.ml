@@ -2225,13 +2225,12 @@ let els_pass t work =
 (* One inprocessing ROUND, shared by solve-entry preprocessing and restart-boundary
    inprocessing. It runs a SEQUENCE of simplification COMPONENTS over a working copy of
    the IRREDUNDANT (original) clauses —
-   [subsumption; self-subsuming strengthening; bounded variable elimination] — followed by
-   learned-clause VIVIFICATION over the learned DB (no-theory path only). It is
-   architected as an extensible list so the remaining charter components
-   (equivalent-literal substitution via binary-implication SCCs, failed-literal probing)
-   slot in without reshaping the loop. Refs: Järvisalo, Heule & Biere, "Inprocessing
-   Rules" (IJCAR 2012); Fazekas, Biere & Scholl, "Incremental Inprocessing SAT Solving"
-   (SAT 2019).
+   [equivalent-literal substitution; subsumption; self-subsuming strengthening; bounded variable elimination]
+   — followed by learned-clause VIVIFICATION over the learned DB (no-theory path only). It
+   is architected as an extensible list so the one remaining charter component
+   (failed-literal probing) slots in without reshaping the loop. Refs: Järvisalo, Heule &
+   Biere, "Inprocessing Rules" (IJCAR 2012); Fazekas, Biere & Scholl, "Incremental
+   Inprocessing SAT Solving" (SAT 2019).
 
    {b Learn/forget discipline (the reason it is sound with learned clauses present).}
    Elimination runs on the irredundant set only. Learned clauses are REDUNDANT (entailed
@@ -2447,10 +2446,14 @@ let run_round t =
         (* Learn/forget over the learned-clause DB (see the header). The watch lists were
            just cleared and rebuilt for the originals, so every KEPT learned clause must
            be re-attached; a learned clause mentioning an eliminated var is dropped
-           (marked deleted + removed from [learnts]). At level 0 after [propagate] no
-           learned clause is a reason (no level>0 assignments), so deleting any is safe. A
-           no-op when nothing was eliminated (the [exists] is false for every clause)
-           beyond the re-attach, which restores the exact prior watch state. *)
+           (marked deleted + removed from [learnts]). Deleting a dropped clause is safe
+           even if it is the reason for a level-0 literal (a learned clause CAN be a
+           level-0 reason — a post-backjump BCP records [Implied_by] at level 0): the
+           dangling reason is never dereferenced, because conflict analysis
+           ([analyze]/[analyze_final]) only walks literals at level > 0 and [reduce_db]'s
+           [locked] check ranges over the surviving [learnts] (the dropped clause is gone
+           from it). A no-op when nothing was eliminated (the [exists] is false for every
+           clause) beyond the re-attach, which restores the exact prior watch state. *)
         if Dynarray.length t.learnts > 0
         then (
           let kept = Dynarray.create () in
