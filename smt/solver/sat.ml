@@ -229,6 +229,12 @@ type t =
          [inproc_interval] with geometric back-off after each fire. Only consulted when
          [satpre] is on, so the pure-core schedule is inert. *)
   ; mutable inproc_interval : int
+  ; (* A10 elimination statistics (cumulative over the solver's life), for the A/B
+       per-family report. Emitted to stderr at each [solve] exit when OXSMT_SATPRE_STATS
+       is truthy; never read by search, no frozen surface. *)
+    mutable stat_elim_vars : int
+  ; mutable stat_deleted_clauses : int
+  ; mutable stat_resolvents : int
   }
 
 let var_decay = 0.95
@@ -337,6 +343,9 @@ let create () =
   ; restore_map = Hashtbl.create 16
   ; inproc_next = max_int
   ; inproc_interval = 0
+  ; stat_elim_vars = 0
+  ; stat_deleted_clauses = 0
+  ; stat_resolvents = 0
   }
 ;;
 
@@ -1834,7 +1843,10 @@ let run_round t =
                         && sorted_subset d.wl wc.wl
                       then subsumed := true))
                  occ.(!lmin);
-               if !subsumed then wc.wdead <- true))
+               if !subsumed
+               then (
+                 wc.wdead <- true;
+                 t.stat_deleted_clauses <- t.stat_deleted_clauses + 1)))
           work;
         (* ---- Self-subsuming resolution (strengthening): if a clause [d] contains [¬l]
            and [d \ {¬l} ⊆ c \ {l}], the resolvent of [c] and [d] on [l] subsumes [c], so
@@ -1899,6 +1911,9 @@ let run_round t =
                    wc.wdead <- true;
                    Dynarray.add_last t.elim_stack (wc.wl, piv))
                 deleted_idxs;
+              t.stat_elim_vars <- t.stat_elim_vars + 1;
+              t.stat_deleted_clauses <- t.stat_deleted_clauses + List.length deleted_idxs;
+              t.stat_resolvents <- t.stat_resolvents + List.length resolvents;
               Dynarray.set t.eliminated v true;
               Hashtbl.replace
                 t.restore_map
@@ -2069,6 +2084,17 @@ let solve ?(assumptions = []) t =
     in
     let r = go 0 in
     cancel_until t 0;
+    (* A10 elimination-stats side channel (measurement only): emit cumulative counts to
+       stderr when OXSMT_SATPRE_STATS is truthy, for the A/B per-family report. Guarded so
+       an unset env costs one [getenv_opt] and no output — never on the pure-core path. *)
+    (match Sys.getenv_opt "OXSMT_SATPRE_STATS" with
+     | Some ("1" | "true" | "yes" | "on") ->
+       Printf.eprintf
+         "satpre-stats elim_vars=%d deleted_clauses=%d resolvents=%d\n%!"
+         t.stat_elim_vars
+         t.stat_deleted_clauses
+         t.stat_resolvents
+     | Some _ | None -> ());
     r)
 ;;
 
