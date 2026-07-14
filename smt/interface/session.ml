@@ -241,18 +241,24 @@ let ctx_simp_flag =
    soundness. *)
 let ctx_simp_enabled t = Lazy.force ctx_simp_flag && not t.cert_active
 
-(* Equality-over-ITE projection (task #34) toggle. Default OFF, matching the Pass A / ctx
-   precedent: the win direction is UNSAT (where the R1 self-check does not run), so it
-   ships OFF (byte-identical to trunk) until a fires-inclusive ON/OFF 0-mismatch corpus
-   sweep is recorded; a follow-up then flips the default. [OXSMT_PRESOLVE_PROJ=1] turns it
-   ON (the A/B ON leg and the wiring-test gate). Read once. Distinct flag from
-   OXSMT_PRESOLVE_CTX so the two ITE passes are measured independently (the contextual
-   pass is a banked negative). *)
+(* Equality-over-ITE projection (task #34) toggle. Default ON as of the recorded A/B.
+   MEASURED BASIS (builder-cc-incremental, quiesced box, 2s W=1, 101-file tier-weighted
+   nec sample, OXSMT_PRESOLVE_PROJ 0 vs 1 interleaved): OFF solved=2 -> ON solved=9 (NET
+   +7), 0 verdict disagreements, 0 regressions; all conversions fast timeout->unsat, and
+   oxsmt(ON) beats z3 4.8.5 on 2 of them (int_from_list/prp-39-34,
+   handler_sigchld/prp-22-47: z3 times out at 2s, we prove unsat). Zero regressions
+   confirms the neutral-abort keeps the deepest ITE-chain files (which the 500K budget
+   forfeits) at OFF-equivalent behaviour. (The proj: fire-count on the large tier is
+   under-observed because a still-timing-out file is SIGKILL'd before the once-per-solve
+   stderr line flushes — measurement-only; verdicts/net come off stdout and are
+   unaffected.) [OXSMT_PRESOLVE_PROJ=0] turns it OFF (byte-identical to trunk); read once.
+   Distinct flag from OXSMT_PRESOLVE_CTX so the two ITE passes stay independent (the
+   contextual pass is a banked negative). *)
 let proj_flag =
   lazy
     (match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ" with
-     | Some ("1" | "true" | "yes") -> true
-     | Some _ | None -> false)
+     | Some ("0" | "false" | "no") -> false
+     | Some _ | None -> true)
 ;;
 
 (* Runs only when enabled AND no certificate trace is installed: the certificate measures
