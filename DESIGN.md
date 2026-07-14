@@ -729,6 +729,23 @@ and resolving OQ3/O4'. Obligation-4 check (fable rider): the LEGACY `row_split` 
 wrong-SAT on finite-index arrays today — they degrade to `unknown` via the fail-closed
 `Array_model_check` posture (sound, incomplete); no separate lane needed.
 
+**W1 measurement status (2026-07-14, checkpoint 2dafbcef91; SOUND — 0 mismatches — and dark
+throughout).** Two L1 forms have been measured and are BOTH net-negative WITH EXPLANATIONS,
+not yet a verdict on the idea:
+- CLAUSE form (O1'-guarded wide avoidance disjunction added to `row_split`): counted-effort
+  QF_AX A/B = OFF 518 -> 410 @50k (NET -108; 107/108 regressions swap; ZERO gains). The wide
+  disjunct set forces the SAT solver to re-derive propositionally what the theory already
+  knows deductively (W0.5's entailed closure), inflating like the blind splits it replaces.
+- NAIVE PROPAGATION form (ruling (b) mechanism, no incremental trigger): collapses to 41
+  solved @50k — an implementation artifact (mass-assert of all entailed reachable pairs +
+  O(reads^2) per-Final rescan), NOT a fair test of the propagation idea.
+FAIR-PROPAGATION PENDING (handed off, bounded charter + pre-committed kill rule): the honest
+(b) test needs (1) an incremental merge-cursor-driven trigger, (2) diseq-endpoint-targeted
+propagation, (3) a path-confined one-index-at-a-time split for the fresh witness `k`, plus
+premise-completeness RED tests. If fair-(b) also nets <=0 with zero conversions, CH-as-W1
+joins the refuted ledger (option (c)) with W0 (landed) + W0.5 (banked) retained; no fourth
+form. Full spec + shas in `../logs/ax-bar-log.md`.
+
 **Consolidated W1 obligations (from the W0 dual review; binding, tested):**
 1. **Count bound is NOT acyclicity (LOAD-BEARING, codex).** The combined store+equality graph
    cycles (s1—base—s2 with s1=s2) even though the equality subgraph is a forest. W1's lemma
