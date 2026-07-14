@@ -450,6 +450,11 @@ lia-test:
 ##   (unencoded op -> unknown). Nonzero exit on any failed check.
 bv-blast-test:
 	$(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+	@# task #36: the same exhaustive oracle must also certify the dark word-level rewrite
+	@# families (extract/concat/bitwise/shift) and the eq-concat sub-flag are
+	@# equivalence-preserving. Run the Layer-4 simplifier-equivalence oracle with the gates on.
+	OXSMT_BV_REWRITE2=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+	OXSMT_BV_REWRITE2=1 OXSMT_BV_REWRITE2_EQSPLIT=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
 
 ## bv-goldens-test — QF_BV end-to-end acceptance through the REAL Session dispatch: each
 ##   tests/bv-goldens/*.smt2 is parsed + loaded + solved, and the verdict must equal the
@@ -458,6 +463,13 @@ bv-blast-test:
 ##   Nonzero exit on any mismatch.
 bv-goldens-test:
 	$(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+	@# task #36: end-to-end acceptance with the dark rewrite gate on — verdicts must be
+	@# unchanged AND every sat must still surface a model. This is the RED-verified gate for
+	@# model COMPLETION: bv_concat_extract_sat rewrites (= (extract 7 4 (concat x y)) x) to
+	@# x=x, dropping x/y from the blast; without completion the sat loses its model and this
+	@# run fails ("sat but no surfaced model").
+	OXSMT_BV_REWRITE2=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+	OXSMT_BV_REWRITE2=1 OXSMT_BV_REWRITE2_EQSPLIT=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
 
 ## bv-op-coverage-test — durable exhaustive small-width oracle for the task-#11 QF_BV
 ##   operator sugar (signed div/rem/mod, bvcomp, negated-bitwise, rotates, repeat). For each

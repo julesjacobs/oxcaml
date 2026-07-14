@@ -24,3 +24,10 @@ open Oxsmt_core
     introduces are minted through [mint] (the reserved bit-vector namespace). Free
     variables are never renamed, so a model over the result is a model over the originals. *)
 val simplify : Context.t -> Bv.minter -> Term.t list -> Term.t list
+
+(** Whether the dark extract/concat/bitwise/shift rewrite families (task #36) are enabled
+    (env [OXSMT_BV_REWRITE2]). Exposed so the dispatch can COMPLETE the model only on the
+    rewrite path: these families can eliminate a variable's only occurrence, so a surfaced
+    model must bind the dropped (now-unconstrained) var. Off ⇒ the pass is the additive-
+    only normalizer and the dispatch is byte-identical to before this task. *)
+val rewrite2_enabled : unit -> bool

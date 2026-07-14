@@ -53,6 +53,48 @@ let name_of_var (t : Term.t) =
   | _ -> None
 ;;
 
+(* Free USER variables of [terms]: nullary applications that are NOT bit-vector
+   operator/literal symbols (those are internal), of Bool or BitVec sort. Returns the
+   bit-vector vars as [(term, width)] and the Bool vars as [term], each deduplicated,
+   walking the shared DAG once. Used to COMPLETE a model: a sound word-level rewrite
+   ({!Bv_simplify}) can eliminate a variable's only occurrence (e.g.
+   [(= (extract 7 4 (concat x y)) x)] reduces to [x = x]), so the blaster never sees it
+   and returns no binding — but the ORIGINAL query names it, so the surfaced model must
+   still bind it (to any value; it is unconstrained, since the rewrite that dropped it is
+   equivalence- preserving per the exhaustive oracle). Without this, such a [sat] loses
+   its model and the CLI degrades it to [unknown] (a spurious non-solve). *)
+let free_user_vars (terms : Term.t list) =
+  let seen : unit Term.Table.t = Term.Table.create 256 in
+  let bv = ref [] in
+  let bool = ref [] in
+  let rec walk (t : Term.t) =
+    match Term.Table.find_opt seen t with
+    | Some () -> ()
+    | None ->
+      Term.Table.replace seen t ();
+      (match t.node with
+       | App (sym, args) when Iarr.length args = 0 ->
+         if not (Bv.is_bv_sym sym)
+         then (
+           match Bv.width_of_sort t.sort with
+           | Some w -> bv := (t, w) :: !bv
+           | None -> if Sort.equal t.sort Sort.bool then bool := t :: !bool)
+       | Not a | Le a -> walk a
+       | And xs | Or xs -> List.iter walk (Iarr.to_list xs)
+       | Ite (c, a, b) ->
+         walk c;
+         walk a;
+         walk b
+       | Eq (a, b) ->
+         walk a;
+         walk b
+       | App (_, args) -> List.iter walk (Iarr.to_list args)
+       | Bool_const _ | Int_const _ | Arith _ -> ())
+  in
+  List.iter walk terms;
+  List.rev !bv, List.rev !bool
+;;
+
 type result =
   | Unsat
   | Unknown
@@ -70,11 +112,35 @@ module Bv_simplify = Oxsmt_bitblast.Bv_simplify
    returning [Sat], so a [Sat] here is already self-certified — the session surfaces its
    bindings without re-running the (BV-unaware) R1 combinator checker. *)
 let solve ctx mint (asserted : Term.t list) : result =
-  let asserted = Bv_simplify.simplify ctx mint asserted in
-  match Bv_solve.solve Bv_adapter.defs asserted with
+  let simplified = Bv_simplify.simplify ctx mint asserted in
+  match Bv_solve.solve Bv_adapter.defs simplified with
   | Bv_solve.Unsat -> Unsat
   | Bv_solve.Unknown _ -> Unknown
   | Bv_solve.Sat (model, bool_model) ->
+    (* Model COMPLETION for rewrite-eliminated variables: the extract/concat/bitwise/shift
+       families (task #36) can eliminate a variable's only occurrence, so the blaster
+       never binds it and a [sat] would lose its model (CLI degrades to [unknown]). Any
+       user var named in the ORIGINAL query but absent from the blaster's model was
+       dropped by an (equivalence-preserving, oracle-certified) rewrite, so it is
+       unconstrained — bind it to 0 / false. Guarded on the rewrite gate so the OFF path
+       is byte-identical to before this task (the additive-only normalizer's pre-existing
+       cancellation behaviour is left exactly as it was). *)
+    let extra_bv, extra_bool =
+      if not (Bv_simplify.rewrite2_enabled ())
+      then [], []
+      else (
+        let present : unit Term.Table.t = Term.Table.create 256 in
+        List.iter (fun (t, _) -> Term.Table.replace present t ()) model;
+        List.iter (fun (t, _) -> Term.Table.replace present t ()) bool_model;
+        let orig_bv, orig_bool = free_user_vars asserted in
+        ( List.filter_map
+            (fun (t, w) ->
+               if Term.Table.mem present t then None else Some (t, (Bigint.zero, w)))
+            orig_bv
+        , List.filter_map
+            (fun t -> if Term.Table.mem present t then None else Some (t, false))
+            orig_bool ))
+    in
     let named f xs =
       List.filter_map
         (fun (t, r) ->
@@ -84,7 +150,7 @@ let solve ctx mint (asserted : Term.t list) : result =
         xs
     in
     Sat
-      { bv_vars = named (fun n (v, w) -> n, v, w) model
-      ; bool_vars = named (fun n b -> n, b) bool_model
+      { bv_vars = named (fun n (v, w) -> n, v, w) (model @ extra_bv)
+      ; bool_vars = named (fun n b -> n, b) (bool_model @ extra_bool)
       }
 ;;
