@@ -304,8 +304,8 @@ let sym_aux_names terms =
 
 (* F1: symmetry breaking is NON-MONOTONIC — an assertion AFTER the emission can break the
    detected symmetry, and the permanent lex clauses would then wrongly refute a SAT model
-   (SAT->UNSAT). The fix retracts the lex clauses on any post-emission assertion. This exact
-   sequence is RED (SAT->UNSAT) with the retraction disabled; [(= (op e0 e1) e0)] is
+   (SAT->UNSAT). The fix retracts the lex clauses on any post-emission assertion. This
+   exact sequence is RED (SAT->UNSAT) with the retraction disabled; [(= (op e0 e1) e0)] is
    genuinely SAT with the base problem (z3-confirmed) yet the stale lex clauses refute it. *)
 let test_f1_incremental () =
   let s = Session.create () in
@@ -388,6 +388,80 @@ let test_f3_multisort () =
      | Session.Unknown -> fail "F3: two-sort input unknown")
 ;;
 
+(* R2/B1: symmetry breaking must NOT emit under a pushed frame — the lex clauses are
+   guarded by the activation selector, not the frame selector, so they would survive the
+   [pop] that retracts the assertions making the batch symmetric. The restriction skips
+   emission when any frame is open. RED (emits) with the restriction disabled. *)
+let test_b1_no_emit_under_frame () =
+  let s = Session.create () in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) sat_symmetric in
+  Session.push s;
+  ignore (Oxsmt_query_loader.assert_all ~presolve:true s parsed : bool);
+  if Session.symbreak_active_for_test s
+  then fail "B1: emitted symmetry breaking under a pushed frame (restriction bypassed)"
+  else ok "B1: no emission under a pushed frame"
+;;
+
+(* R2/B2: symmetry breaking must NOT emit when a lemma is registered — a during-solve
+   instance would extend the formula and break the symmetry un-retractably (check_sat
+   fixes its assumptions once). RED (emits) with the restriction disabled. *)
+let test_no_emit_with_lemmas () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", Sort.int ]
+       ~build:(fun _qv -> { Session.body = Context.bool_const ctx true; triggers = [] })
+     : Session.lemma);
+  let parsed = Parser.parse_into (Session.env s) ctx sat_symmetric in
+  ignore (Oxsmt_query_loader.assert_all ~presolve:true s parsed : bool);
+  if Session.symbreak_active_for_test s
+  then fail "B2: emitted symmetry breaking with a lemma registered (restriction bypassed)"
+  else ok "B2: no emission when a lemma is registered"
+;;
+
+(* Rider 3 / F3: a REAL Sort.hash collision. [Sort.hash] is non-injective — an
+   uninterpreted sort whose symbol hashes to [h] collides with [BitVec w] when
+   [3h+2 = 7w+5] (h ≡ 1 mod 7, e.g. h=8 ↔ w=3). Constants of the two colliding sorts, with
+   EMPTY occurrence signatures, land in one hash bucket AND one signature bucket under the
+   buggy grouping, so a cross-sort candidate pair drives [Context.eq] to
+   [Term.Sort_error]. [Sort.equal] grouping keeps them apart. RED (raises) with the hash
+   grouping restored. *)
+let test_f3_hash_collision () =
+  let env, cap = Env.create_with_cap () in
+  let ctx = Context.create env in
+  let rec find i =
+    let sym = Env.declare_sort env (Printf.sprintf ".symbreak.scoll.%d" i) in
+    let h = Symbol.hash sym in
+    if h >= 8 && h mod 7 = 1 then Sort.uninterpreted sym, (3 * h) - 3 else find (i + 1)
+  in
+  let usort, num = find 0 in
+  let w = num / 7 in
+  let bvsort = Sort.bitvec w in
+  if Sort.hash usort <> Sort.hash bvsort
+  then
+    fail "F3-collision: constructed sorts do not actually hash-collide (test setup bug)"
+  else (
+    let mk name sort =
+      Context.app ctx (Env.declare_fun env name (Rank.create [] sort)) []
+    in
+    let a0 = mk ".symbreak.a0" usort
+    and a1 = mk ".symbreak.a1" usort in
+    let b0 = mk ".symbreak.b0" bvsort
+    and b1 = mk ".symbreak.b1" bvsort in
+    let asserts =
+      [ Context.not_ ctx (Context.eq ctx a0 a1); Context.not_ ctx (Context.eq ctx b0 b1) ]
+    in
+    match Presolve.symmetry_break ~counter:(ref 0) cap env ctx asserts with
+    | _ ->
+      ok "F3-collision: hash-colliding sorts handled by Sort.equal grouping (no crash)"
+    | exception e ->
+      fail
+        "F3-collision: symmetry_break raised %s (cross-sort pairing)"
+        (Printexc.to_string e))
+;;
+
 let () =
   print_string "symbreak_test:\n";
   test_detector_fires ();
@@ -398,6 +472,9 @@ let () =
   test_f1_incremental ();
   test_f2_counter ();
   test_f3_multisort ();
+  test_b1_no_emit_under_frame ();
+  test_no_emit_with_lemmas ();
+  test_f3_hash_collision ();
   Printf.printf "symbreak_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

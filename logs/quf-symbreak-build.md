@@ -159,3 +159,39 @@ fix-round tip:
 
 Re-gated by exit code: `make test` (OFF) 0, `make symbreak-test` 0 (8 checks), `check-frozen`
 0. New tip below.
+
+### Second confirm bounce (codex) — R2 structural restriction + riders
+
+Codex found two more F1 wrong-unsat paths beyond the incremental one:
+- **B1:** emission INSIDE a pushed frame (`push → assert_presolved → pop`) — the lex clauses
+  are guarded by `sym_sel`, not the frame selector, so they survive the `pop` that retracts
+  the assertions making the batch symmetric.
+- **B2:** during-solve lemma instances (`assert_instance_at_frame`) extend the formula, and
+  `check_sat` builds its assumption list once, so an emission could not be retracted mid-solve.
+
+**Fix (codex's simpler-restriction route):** `symmetry_break` EMITS ONLY when there are no
+open frames AND no lemmas registered — an explicit `at_base_no_lemmas` check at the emission
+site (`(match t.frames with [_] -> true | _ -> false) && not t.lemmas_registered`). B1 becomes
+impossible (no frame to pop under an emission); B2 impossible (no lemmas at emission, and
+`assert_lemma` sets `lemmas_registered` + deactivates any prior emission). The existing
+per-assertion `deactivate_symbreak` still handles the base-frame post-emission incremental
+case. Defensive belt kept: `deactivate_symbreak` on `pop` and `assert_instance_at_frame`, with
+comments that the restriction makes them unreachable.
+
+Three riders in the same commit:
+1. `failed_assumptions` filters out the internal `sym_sel` selector — a caller's core never
+   sees the private aux var.
+2. **F3 firewall FINAL FORM** (subsumes fable's re-raise ask): the `sym_extra` catch now
+   matches ONLY `(Term.Sort_error _ | Term.Overflow | Term.Unsupported _) -> []`; everything
+   else — `Out_of_memory`, `Stack_overflow`, `Sys.Break`, any unexpected soundness raise —
+   PROPAGATES.
+3. F3 test now exercises a REAL `Sort.hash` collision: an uninterpreted sort whose symbol
+   hashes to `h ≡ 1 (mod 7), h ≥ 8` collides with `BitVec ((3h-3)/7)` (e.g. `h=8 ↔ BitVec 3`,
+   both hash 26); with empty occurrence signatures the collided constants share one bucket and
+   a cross-sort pair drives `Context.eq` to `Sort_error` under the buggy grouping.
+
+RED-verified (make symbreak-test, now 11 checks): B1 (emits under frame with the restriction
+off), B2 (emits with a lemma registered when the restriction is off), F3-collision (raises
+`Sort_error` with `Sort.hash` grouping restored). Gates by exit code: `make test` (OFF) /
+`make symbreak-test` / `check-frozen` all 0. A test-only accessor `symbreak_active_for_test`
+was added to `session.mli` to check the restriction directly. New tip below.

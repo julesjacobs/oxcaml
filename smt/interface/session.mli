@@ -367,8 +367,14 @@ val cert_assumptions : t -> Oxsmt_solver.Sat.lit list
 
 (** The failed-assumption (selector) core of the most recent {!check_sat} that returned
     [Unsat] under a nonempty assumption set; empty otherwise. Passthrough of
-    {!Oxsmt_solver.Sat.failed_assumptions}. *)
+    {!Oxsmt_solver.Sat.failed_assumptions}, with the internal symmetry-breaking activation
+    selector (task #25) filtered out — a private aux var must never surface in a core. *)
 val failed_assumptions : t -> Oxsmt_solver.Sat.lit list
+
+(** Test-only (task #25): whether a symmetry-breaking emission is currently active (its
+    activation selector is still assumed). Used by [symbreak_test] to check the R2
+    emission restriction (no emission under a pushed frame or with lemmas registered). *)
+val symbreak_active_for_test : t -> bool
 
 (** The SAT core's counter trio, monotonic across the session (DESIGN.md §8). *)
 val stats : t -> Oxsmt_solver.Sat.Stats.t

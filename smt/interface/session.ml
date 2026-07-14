@@ -140,6 +140,12 @@ type t =
          [.oxsmt.sym.*] aux-var names, so a second [assert_presolved] emission does not
          reuse a name from the first (F2: idempotent [declare_reserved] would rebind it to
          a conflicting definition). *)
+  ; mutable lemmas_registered : bool
+    (* symmetry breaking (task #25, R2/codex B2): set once any lemma is registered. The
+         emission restriction refuses to emit when true — a during-solve lemma instance
+         ([assert_instance_at_frame]) extends the formula and can break the detected
+         symmetry, and [check_sat] builds its assumption list once, so an emission could
+         not be retracted mid-solve. *)
   ; mutable sym_sel : Sat.var option
     (* symmetry breaking (task #25, F1): the ACTIVATION SELECTOR guarding the current
      emission's lex clauses. The clauses are asserted as [(¬sym_sel ∨ C)] (via
@@ -218,6 +224,7 @@ let create
   ; cert_active = false
   ; sym_counter = ref 0
   ; sym_sel = None
+  ; lemmas_registered = false
   }
 ;;
 
@@ -884,20 +891,30 @@ let assert_presolved t terms =
        when OFF (byte-identical to trunk). Neutral-abort inside [symmetry_break] returns
        [[]]; the Overflow/Unsupported firewall matches Pass A. *)
     let sym_extra =
-      if symbreak_enabled t
+      (* R2 EMISSION RESTRICTION (codex B1/B2): emit ONLY at the base frame with no lemmas
+         registered. Under a pushed frame the lex clauses (guarded by [sym_sel], not the
+         frame selector) would survive the [pop] that retracts the assertions making the
+         batch symmetric (B1); with lemmas, a during-solve instance would extend the
+         formula un-retractably (B2, since [check_sat] fixes its assumptions once). Both
+         are structurally impossible when this holds. The post-emission incremental case
+         is still handled by [deactivate_symbreak] at every assertion entry. *)
+      let at_base_no_lemmas =
+        (match t.frames with
+         | [ _ ] -> true
+         | _ -> false)
+        && not t.lemmas_registered
+      in
+      if symbreak_enabled t && at_base_no_lemmas
       then (
-        (* F2: per-session name counter (persists across batches). F3: FAIL-CLOSED on ANY
-           NON-fatal exception — a cross-sort candidate can drive [Context.eq] to
-           [Term.Sort_error], and a soundness-neutral optimization must degrade to "no
-           breaking", never crash the query. Out_of_memory / Stack_overflow are re-raised
-           (matching [raw_solve]): [symmetry_break]'s DAG rebuild is non-tail-recursive,
-           so a deep term can overflow before the step budget bites, and those leave
-           process state untrustworthy — they must propagate, not be swallowed into a
-           silent no-op. *)
+        (* F2: per-session name counter (persists across batches). F3 FINAL: catch ONLY
+           the expected fragment exceptions ([Sort_error] from a would-be cross-sort
+           candidate, [Overflow]/[Unsupported] from arithmetic rebuild) → "no breaking".
+           Everything else — Out_of_memory, Stack_overflow (the DAG rebuild is
+           non-tail-recursive), Sys.Break, any unexpected soundness raise — PROPAGATES; it
+           must never be swallowed into a silent no-op. *)
         match Presolve.symmetry_break ~counter:t.sym_counter t.cap t.env t.ctx terms with
         | cs -> cs
-        | exception ((Out_of_memory | Stack_overflow) as e) -> raise e
-        | exception _ -> [])
+        | exception (Term.Sort_error _ | Term.Overflow | Term.Unsupported _) -> [])
       else []
     in
     match Presolve.run t.ctx terms with
@@ -976,6 +993,11 @@ let assert_presolved t terms =
    client-reported [Sat] only ever occurs with NO live lemma, hence with no active
    instance. *)
 let assert_instance_at_frame t ~frame (inst : Instance.t) =
+  (* R2 defensive belt: an instance extends the formula mid-solve. The emission
+     restriction already forbids emitting when lemmas are registered (and an instance only
+     exists under a registered lemma), so [sym_sel] is always [None] here — but clearing
+     it keeps the invariant local rather than relying on that reasoning. *)
+  deactivate_symbreak t;
   match Preprocess.run t.pp (Instance.to_term inst) with
   | exception Term.Overflow -> t.degraded <- true
   | exception Term.Unsupported _ -> t.degraded <- true
@@ -1005,9 +1027,11 @@ type lemma_def =
    [unit] is widened additively so the tranche-1 manual path — {!instantiate} — can name
    the lemma; a caller may ignore it). *)
 let assert_lemma t ~qvars ~build =
-  (* F1: a lemma extends the formula (its instances assert during solve); retract any
-     active symmetry-breaking emission first. *)
+  (* F1/R2: a lemma extends the formula (its instances assert during solve). Retract any
+     active emission, and mark lemmas registered so a LATER [assert_presolved] refuses to
+     emit (codex B2 — instances would break the symmetry mid-solve, un-retractably). *)
   deactivate_symbreak t;
+  t.lemmas_registered <- true;
   let id = Manager.fresh_id t.mgr in
   let qv =
     Array.of_list
@@ -1565,7 +1589,22 @@ let install_cert_trace t tr =
 ;;
 
 let cert_assumptions t = List.map Sat.pos t.frames
-let failed_assumptions t = Sat.failed_assumptions t.sat
+
+(* The failed-selector core, with the internal symmetry-breaking activation selector
+   filtered out (Rider 1): [sym_sel] is assumed positive during a solve, so it can appear
+   in the SAT core, but it is a private aux var and must never surface to a caller's
+   assumption core. *)
+let failed_assumptions t =
+  let failed = Sat.failed_assumptions t.sat in
+  match t.sym_sel with
+  | None -> failed
+  | Some sel -> List.filter (fun lit -> Sat.var_of_lit lit <> sel) failed
+;;
+
+(* Test-only introspection (task #25): is a symmetry-breaking emission currently active
+   (its activation selector still assumed)? Lets [symbreak_test] assert the R2 emission
+   restriction directly (no emission under a frame / with lemmas registered). *)
+let symbreak_active_for_test t = Option.is_some t.sym_sel
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let budget_exhausted t = t.budget_exhausted
