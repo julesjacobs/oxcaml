@@ -614,3 +614,16 @@ check/model-check (fail-closed) means a driver that wrongly marks a needed atom
 irrelevant degrades the query to `unknown`, never a wrong verdict. The relevancy
 driver ships env-gated, default OFF; the ON decision rides a corpus A/B (zero
 verdict disagreements + net-non-negative at 2s).
+
+### A9 — Tranche-C unfreeze: read-only VSIDS activity accessor (2026-07-13, master-approved)
+
+`sat.mli` grows one read-only value, `var_activity : t -> var -> float`, and
+`FROZEN.sha256` is regenerated to match. Same shape as the A8 hook: a pure
+addition, none of the frozen declarations change, and it never mutates the solver
+or affects search — a client that does not call it (every shipped caller) is
+bit-identical. The relevancy driver (A8) uses it so that, when a satisfied
+disjunction has no justifying child yet, the branch candidate it keeps relevant is
+the solver's own highest-activity unassigned child rather than an arbitrary
+lowest-var pick; this measurably tames the decision-count variance the first-cut
+lowest-var driver showed on the QF_UF sat sample. Read-only and side-effect-free,
+so it carries none of the soundness weight of the branch filter itself.

@@ -95,6 +95,16 @@ end
 
 val stats : t -> Stats.t
 
+(** [var_activity t v] is the current VSIDS activity of variable [v] ([0.0] for a variable
+    not yet allocated or never bumped). A read-only side channel — reading it never
+    mutates the solver and has no effect on search; a client that does not call it is
+    unaffected. Its intended use is a {!set_branch_filter} / relevancy driver that wants
+    to align its own choices (e.g. which candidate atom to make branchable) with the
+    solver's activity order rather than an arbitrary tie-break. Only the ordinal
+    comparison of activities is meaningful across a run — the absolute value drifts with
+    the global rescaling. *)
+val var_activity : t -> var -> float
+
 (** {2 Proof-readiness / certificate-emission hooks (§7; ADR-0013 §4.0)}
 
     A compile-out-able trace of the search that certificate emission (ADR-0013) attaches

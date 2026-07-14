@@ -166,7 +166,11 @@ let create
      events through [cdclt] to it, and install the SAT branch filter that consults it.
      Disabled by default => the filter is never installed and the glue is byte-identical
      to trunk. *)
-  let relevancy = if enable_relevancy then Some (Relevancy.create ()) else None in
+  let relevancy =
+    if enable_relevancy
+    then Some (Relevancy.create ~activity:(fun v -> Sat.var_activity sat v) ())
+    else None
+  in
   (match relevancy with
    | None -> ()
    | Some rel ->

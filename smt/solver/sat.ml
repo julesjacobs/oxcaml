@@ -1563,6 +1563,13 @@ let value t v = v < Dynarray.length t.saved_model && Dynarray.get t.saved_model 
 let model t = Array.init (Dynarray.length t.saved_model) (fun v -> value t v)
 let failed_assumptions t = t.failed
 
+(* Read-only VSIDS activity of a variable (sat.mli var_activity); 0.0 for an out-of-range
+   var. A pure side channel for a branch-filter/relevancy client — never mutated here, no
+   effect on search. *)
+let var_activity t v =
+  if v >= 0 && v < Dynarray.length t.var_act then Dynarray.get t.var_act v else 0.0
+;;
+
 module Stats = struct
   type t =
     { conflicts : int

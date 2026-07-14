@@ -40,6 +40,13 @@ type t =
   ; value_trail : int Dynarray.t (* vars assigned, in trail order *)
   ; value_level : int Dynarray.t (* the level each was assigned at (parallel) *)
   ; work : int Dynarray.t (* reused propagation worklist *)
+  ; activity : int -> float
+    (* read-only VSIDS activity of a SAT var (task #24 activity-based candidate selection):
+     when a satisfied disjunction has no justifying child yet, the branch candidate it
+     keeps relevant is the highest-activity unassigned child, aligning the forced decision
+     with the solver's own order instead of an arbitrary lowest-var pick. Defaults to the
+     constant 0.0 (=> pure lowest-var tie-break, the pre-experiment behaviour) when no
+     accessor is supplied. *)
   }
 
 let enabled_from_env () =
@@ -48,7 +55,7 @@ let enabled_from_env () =
   | Some _ | None -> false
 ;;
 
-let create () =
+let create ?(activity = fun _ -> 0.0) () =
   { nodes = Dynarray.create ()
   ; gated = Dynarray.create ()
   ; relevant = Dynarray.create ()
@@ -59,6 +66,7 @@ let create () =
   ; value_trail = Dynarray.create ()
   ; value_level = Dynarray.create ()
   ; work = Dynarray.create ()
+  ; activity
   }
 ;;
 
@@ -117,12 +125,13 @@ and mark_all t children level = Array.iter (fun (cv, _) -> mark t cv level) chil
    - if a relevant child already justifies, the connective is accounted for — done;
    - else if some child already justifies, mark the lowest-var such child (now relevant);
    - else (no child justifies yet) keep exactly ONE unassigned child branchable as a
-     candidate: if one is already relevant, wait for it; otherwise mark the lowest-var
-     unassigned child. When the candidate settles, this re-fires (via the parent index)
-     and either finds it justifying or advances to the next candidate. With no unassigned
-     child left (every child settled the wrong way) nothing is marked — the Tseitin clause
-     is then falsified and the SAT core takes the conflict, so the search never stalls
-     with an unsatisfiable clause whose literals are all filtered out. *)
+     candidate: if one is already relevant, wait for it; otherwise mark the
+     HIGHEST-ACTIVITY unassigned child (lowest-var tie-break) so the forced decision
+     follows the solver's own VSIDS order. When the candidate settles, this re-fires (via
+     the parent index) and either finds it justifying or advances to the next candidate.
+     With no unassigned child left (every child settled the wrong way) nothing is marked —
+     the Tseitin clause is then falsified and the SAT core takes the conflict, so the
+     search never stalls with an unsatisfiable clause whose literals are all filtered out. *)
 and pick_justifier t children level ~want_true =
   let satisfied =
     Array.exists
@@ -147,11 +156,20 @@ and pick_justifier t children level ~want_true =
       in
       if not has_pending
       then (
+        (* keep the HIGHEST-ACTIVITY unassigned child branchable (tie-break: lowest var),
+           so the decision the filter forces here is the one the solver's own VSIDS order
+           would prefer rather than an arbitrary lowest-var pick fighting it. *)
         let best_cand = ref (-1) in
+        let best_act = ref neg_infinity in
         Array.iter
           (fun (cv, _) ->
-             if Dynarray.get t.value cv = 0 && (!best_cand = -1 || cv < !best_cand)
-             then best_cand := cv)
+             if Dynarray.get t.value cv = 0
+             then (
+               let a = t.activity cv in
+               if !best_cand = -1 || a > !best_act || (a = !best_act && cv < !best_cand)
+               then (
+                 best_cand := cv;
+                 best_act := a)))
           children;
         if !best_cand >= 0 then mark t !best_cand level)))
 

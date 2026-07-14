@@ -44,8 +44,13 @@ type kind =
     default-OFF gate {!Session.create} consults. *)
 val enabled_from_env : unit -> bool
 
-(** A fresh driver with an empty graph and no marks. *)
-val create : unit -> t
+(** A fresh driver with an empty graph and no marks. [activity] is a read-only accessor
+    for a SAT variable's VSIDS activity (typically {!Oxsmt_solver.Sat.var_activity}
+    applied to the session's solver): when a satisfied disjunction has no justifying child
+    yet, the branch candidate the driver keeps relevant is the highest-activity unassigned
+    child, so the forced decision follows the solver's own order. Omitted, it defaults to
+    a constant, i.e. a pure lowest-var tie-break. *)
+val create : ?activity:(int -> float) -> unit -> t
 
 (** Register [var] as a gated ATOM (leaf) variable: once the graph is seeded, the filter
     ({!should_branch}) permits deciding it only while it is relevant. Idempotent (a shared
