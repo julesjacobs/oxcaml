@@ -188,6 +188,14 @@ type 'p t =
     mutable record_merges : bool
   ; merges : Fabric.merge_event Dynarray.t
   ; mutable merge_cursors : int ref list
+  ; (* Per-call scratch dirty-root set for {!propagate}, owned by this engine instance and
+       cleared (not reallocated) at the head of every call. An int-identity-hashed
+       {!Int_set} replaces the former per-call generic [Hashtbl.create 64]: the membership
+       test runs once per watched atom per propagate call (the hot [caml_hash] on int
+       keys, ~7% of QF_UF/QF_AX wall — EUF-internal), and a fresh [Hashtbl] every call
+       also churned the minor heap. Reusing one cleared table drops both. Not trailed: it
+       is rebuilt from [touched] on every call, so [push]/[pop] never touch it. *)
+    dirty : unit Int_set.t
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
@@ -209,6 +217,7 @@ let create ctx =
   ; record_merges = false
   ; merges = Dynarray.create ()
   ; merge_cursors = []
+  ; dirty = Int_set.create 64
   }
 ;;
 
@@ -255,13 +264,17 @@ let rec find_go parents i =
 let find t i = find_go t.parents i
 
 let dedup_int lst =
-  let seen = Hashtbl.create 16 in
+  (* [Int_set] (int-identity hash) rather than a generic [Hashtbl]: the keys are e-node
+     ids, so this drops the polymorphic [caml_hash]/[compare_val] on the merge/register
+     hot path (called on a merged class's [uses] every union). Same semantics — a set of
+     seen ints. *)
+  let seen = Int_set.create 16 in
   List.filter
     (fun x ->
-       if Hashtbl.mem seen x
+       if Int_set.mem seen x
        then false
        else (
-         Hashtbl.add seen x ();
+         Int_set.replace seen x ();
          true))
     lst
 ;;
@@ -617,18 +630,30 @@ let nca t x y =
    to their arguments' equalities (pushed back onto [pending]). *)
 let explain_core t a b =
   let out = ref [] in
-  let out_seen = Hashtbl.create 32 in
-  let explained = Hashtbl.create 32 in
+  (* [Int_set] (int-identity hash) for both seen-sets, replacing generic [Hashtbl]s: the
+     [caml_hash]/[compare_val] here is EUF-internal (fired per conflict/implied
+     explanation). [out_seen] keys on the forest-child e-node id directly. [explained]
+     normalizes each visited unordered pair [{x,y}] and packs it into one [int] key
+     [lo*m+hi] — the same injective packing the separated-class index uses ([m] = e-node
+     count, stable because [explain_core] never merges or registers). Distinct pairs give
+     distinct keys while [m <= 2^31] (asserted below; dev/debug guard, compiled out under
+     release [-noassert] where the bound is physically unreachable — ~155 GB of e-nodes).
+     Same semantics. *)
+  let out_seen = Int_set.create 32 in
+  let explained = Int_set.create 32 in
+  let m = Dynarray.length t.enodes in
+  assert (m <= 1 lsl 31);
+  let pack lo hi = (lo * m) + hi in
   let pending = Queue.create () in
   Queue.add (a, b) pending;
   while not (Queue.is_empty pending) do
     let x, y = Queue.pop pending in
     if x <> y
     then (
-      let key = if x < y then x, y else y, x in
-      if not (Hashtbl.mem explained key)
+      let key = if x < y then pack x y else pack y x in
+      if not (Int_set.mem explained key)
       then (
-        Hashtbl.add explained key ();
+        Int_set.replace explained key ();
         let c = nca t x y in
         let walk start =
           let cur = ref start in
@@ -637,9 +662,9 @@ let explain_core t a b =
             let child = !cur in
             (match n.freason with
              | R_given (prem, u, v) ->
-               if not (Hashtbl.mem out_seen child)
+               if not (Int_set.mem out_seen child)
                then (
-                 Hashtbl.add out_seen child ();
+                 Int_set.replace out_seen child ();
                  out := (child, prem, u, v) :: !out)
              | R_cong (f, g) ->
                (match (get t f).kind, (get t g).kind with
@@ -782,13 +807,19 @@ type implied =
    report nothing for it either. Iteration stays in watched-index (registration) order, so
    the reported list is byte-identical run to run. Empty dirty set ⇒ no work. *)
 let propagate t =
-  let dirty = Hashtbl.create 64 in
+  (* Reuse the engine-owned scratch set (int-identity hash, cleared not reallocated): the
+     dirty-membership test below runs once per watched atom per call, so a generic
+     [Hashtbl] over int keys paid [caml_hash]/[compare_val] there (EUF-internal, ~7% of
+     QF_UF/QF_AX wall) and a fresh table every call churned the minor heap. Semantics
+     unchanged — a set of dirty class roots for this call. *)
+  let dirty = t.dirty in
+  Int_set.clear dirty;
   for i = t.prop_mark to Dynarray.length t.touched - 1 do
-    Hashtbl.replace dirty (Dynarray.get t.touched i) ()
+    Int_set.replace dirty (Dynarray.get t.touched i) ()
   done;
   t.prop_mark <- Dynarray.length t.touched;
   let acc = ref [] in
-  if Hashtbl.length dirty > 0
+  if Int_set.length dirty > 0
   then (
     (* Separated-class index, built ONCE per [propagate] call. No merge happens inside a
        [propagate], so every representative is stable here: the unordered root-pair
@@ -847,7 +878,7 @@ let propagate t =
       (fun idx w ->
          let ra = find t w.w_a
          and rb = find t w.w_b in
-         if Hashtbl.mem dirty ra || Hashtbl.mem dirty rb
+         if Int_set.mem dirty ra || Int_set.mem dirty rb
          then (
            let cur =
              if ra = rb
