@@ -861,91 +861,129 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
        leaves (no free datatype class on the way); [None] once a free class is reached.
        This is the value a disequality [y <> x] must forbid on [y]'s class — computable up
        front, independent of the free-class completion below. *)
-    let rec constrained_value (x : Term.t) (depth : int) : ctor_tree option =
-      if depth > 10_000
-      then None
-      else (
-        let k = Euf.class_of t.engine x in
-        match Hashtbl.find_opt witnesses k with
-        | None -> if is_dt_sort t x.Term.sort then None else Some (Leaf (leaf_value t x))
-        | Some wterm ->
-          let sym, wargs = Option.get (head_args wterm) in
-          let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
-          let fields =
-            Array.to_list
-              (Array.map
-                 (fun a ->
-                    if is_dt_sort t a.Term.sort
-                    then constrained_value a (depth + 1)
-                    else Some (Leaf (leaf_value t a)))
-                 wargs)
-          in
-          if List.for_all Option.is_some fields
-          then Some (Ctor (Symbol.name c.Defs.sym, List.map Option.get fields))
-          else None)
+    (* [rep k] is a representative term of class [k], so the completion can MATERIALIZE
+       the tree of a disequal PEER class (a value it must avoid) by name. Seeded from
+       every datatype term the builder can see (the registered [dt_terms]/[ctor_terms]);
+       the disequality closure below registers disequality endpoints and
+       constructor-witness field arguments as it walks them. *)
+    let rep : (int, Term.t) Hashtbl.t = Hashtbl.create 64 in
+    let reg_rep (x : Term.t) =
+      let k = Euf.class_of t.engine x in
+      if not (Hashtbl.mem rep k) then Hashtbl.replace rep k x
     in
-    (* Disequality-aware completion (gapdx-newtheories: the confirmed QF_DT root cause). A
-       free field filled with the sort's base value can reproduce a value a disequality
-       forbids (e.g. [x <> leaf zero] with [x] forced to [leaf]: base-completing [data x]
-       to [zero] rebuilds [leaf zero]). [forbidden] maps a class to trees its value must
-       avoid: seeded from each disequality pair by the fully-constrained side, then
-       propagated through a single-field constructor (if [x <> C v] and [x = C f] with [C]
-       one field, then [f <> v]). Consulted only when completing a FREE class; multi-field
-       propagation is skipped (the checker then fails such a case closed to [unknown],
-       never wrong). *)
-    let forbidden : (int, ctor_tree list) Hashtbl.t = Hashtbl.create 32 in
-    let add_forbidden k v =
-      let cur = Option.value (Hashtbl.find_opt forbidden k) ~default:[] in
-      if not (List.exists (tree_eq v) cur) then Hashtbl.replace forbidden k (v :: cur)
+    List.iter reg_rep t.dt_terms;
+    List.iter reg_rep t.ctor_terms;
+    (* [witness_ca k] is the constructor + per-field [(class, term)] of a witnessed class,
+       or [None] for a free class. Registers each field arg into [rep] as a side effect. *)
+    let witness_ca k =
+      match Hashtbl.find_opt witnesses k with
+      | None -> None
+      | Some wterm ->
+        let sym, wargs = Option.get (head_args wterm) in
+        let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+        Array.iter reg_rep wargs;
+        Some (c, Array.map (fun (a : Term.t) -> Euf.class_of t.engine a, a) wargs)
+    in
+    (* Class-pair DISEQUALITY CLOSURE — the model-construction half of the Barrett
+       abstract decision procedure (gapdx-newtheories: the confirmed QF_DT root cause; the
+       previous [forbidden] machinery seeded only from FULLY-CONSTRAINED diseq sides and
+       propagated only through SINGLE-field constructors, so a diseq between two witnessed
+       classes with free descendants — [succ(succ f) <> succ g],
+       [cons(leaf f, n) <> cons(leaf g, n)] — was silently unenforced and the completion
+       could reproduce it).
+
+       [dis k] is the set of classes whose value [k]'s must differ from. Seeded from the
+       asserted disequalities (over classes), then pushed DOWN through same-constructor
+       witness chains: two classes with the SAME top constructor are disequal iff some
+       field differs — and a genuine diseq guarantees at least one field-class PAIR is
+       distinct (injectivity: equal field classes on every position would force the
+       parents equal, a contradiction), so we require the first distinct-class field
+       position to differ, UNLESS a position is already guaranteed distinct (its field
+       pair already in [dis], or its two field witnesses have different constructors).
+       Different top constructors need no propagation — the heads already differ. A pair
+       with a FREE side is left for the completion, which draws that free class a value
+       distinct from the peer's tree. Bounded fixpoint; deterministic (I5/I6): pairs are
+       processed in ascending class order. Sound irrespective of any imprecision — the
+       independent [Dt_model_check] gates every DT [sat], so an under-enforced diseq only
+       degrades to [unknown], never wrong. *)
+    let dis : (int, (int, unit) Hashtbl.t) Hashtbl.t = Hashtbl.create 64 in
+    let dis_set k =
+      match Hashtbl.find_opt dis k with
+      | Some s -> s
+      | None ->
+        let s = Hashtbl.create 8 in
+        Hashtbl.replace dis k s;
+        s
+    in
+    let mem_dis k1 k2 =
+      match Hashtbl.find_opt dis k1 with
+      | Some s -> Hashtbl.mem s k2
+      | None -> false
+    in
+    let add_dis k1 k2 =
+      if k1 = k2 || mem_dis k1 k2
+      then false
+      else (
+        Hashtbl.replace (dis_set k1) k2 ();
+        Hashtbl.replace (dis_set k2) k1 ();
+        true)
     in
     List.iter
       (fun (a, b) ->
          if not (Euf.are_equal t.engine a b)
          then (
-           (match constrained_value b 0 with
-            | Some vb -> add_forbidden (Euf.class_of t.engine a) vb
-            | None -> ());
-           match constrained_value a 0 with
-           | Some va -> add_forbidden (Euf.class_of t.engine b) va
-           | None -> ()))
+           reg_rep a;
+           reg_rep b;
+           ignore (add_dis (Euf.class_of t.engine a) (Euf.class_of t.engine b) : bool)))
       (List.concat t.diseq_frames);
-    (* propagate through single-field constructors to a fixpoint (bounded) *)
-    let ctor_terms_ordered = List.rev t.ctor_terms in
     let changed = ref true in
     let rounds = ref 0 in
-    while !changed && !rounds < 1_000 do
+    while !changed && !rounds < 100_000 do
       changed := false;
       incr rounds;
+      let pairs =
+        Hashtbl.fold
+          (fun k s acc ->
+             Hashtbl.fold (fun k2 () acc -> if k < k2 then (k, k2) :: acc else acc) s acc)
+          dis
+          []
+      in
       List.iter
-        (fun (x : Term.t) ->
-           let k = Euf.class_of t.engine x in
-           match Hashtbl.find_opt witnesses k with
-           | Some wterm ->
-             let sym, wargs = Option.get (head_args wterm) in
-             let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
-             if Array.length wargs = 1 && is_dt_sort t wargs.(0).Term.sort
-             then
-               List.iter
-                 (function
-                   | Ctor (fname, [ fchild ])
-                     when String.equal fname (Symbol.name c.Defs.sym) ->
-                     let fk = Euf.class_of t.engine wargs.(0) in
-                     let before =
-                       List.length
-                         (Option.value (Hashtbl.find_opt forbidden fk) ~default:[])
-                     in
-                     add_forbidden fk fchild;
-                     if
-                       List.length
-                         (Option.value (Hashtbl.find_opt forbidden fk) ~default:[])
-                       <> before
-                     then changed := true
-                   | _ -> ())
-                 (Option.value (Hashtbl.find_opt forbidden k) ~default:[])
-           | None -> ())
-        (t.dt_terms @ ctor_terms_ordered)
+        (fun (kx, ky) ->
+           match witness_ca kx, witness_ca ky with
+           | Some (cx, fx), Some (cy, fy) when Symbol.equal cx.Defs.sym cy.Defs.sym ->
+             let n = Array.length fx in
+             let guaranteed i =
+               let kxi, _ = fx.(i)
+               and kyi, _ = fy.(i) in
+               kxi <> kyi
+               && (mem_dis kxi kyi
+                   ||
+                   match witness_ca kxi, witness_ca kyi with
+                   | Some (ci, _), Some (cj, _) ->
+                     not (Symbol.equal ci.Defs.sym cj.Defs.sym)
+                   | _ -> false)
+             in
+             let already = ref false in
+             for i = 0 to n - 1 do
+               if guaranteed i then already := true
+             done;
+             if not !already
+             then (
+               let picked = ref false in
+               for i = 0 to n - 1 do
+                 if not !picked
+                 then (
+                   let kxi, _ = fx.(i)
+                   and kyi, _ = fy.(i) in
+                   if kxi <> kyi
+                   then (
+                     picked := true;
+                     if add_dis kxi kyi then changed := true))
+               done)
+           | _ -> ())
+        (List.sort compare pairs)
     done;
-    let forbidden_of k = Option.value (Hashtbl.find_opt forbidden k) ~default:[] in
     (* Model COMPLETION for an unconstrained class. Distinct e-classes are never
        asserted-equal (a positive equality would have MERGED them), so giving distinct
        unconstrained classes DISTINCT witness values is always sound and, crucially,
@@ -979,14 +1017,32 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           | None ->
             (match datatype_of_sort t x.Term.sort with
              | Some dt ->
-               (* pick the least index (from [next_idx] up) whose completion avoids this
-                  class's forbidden values, so a disequality-forced field takes a
-                  non-colliding value; bounded — on exhaustion take the base and let the
-                  §8 checker fail closed. *)
-               let fbd = forbidden_of k in
+               (* Complete this FREE class to a value distinct from every class it must
+                  differ from ([dis], the closure above): materialize each disequal peer's
+                  tree (by its [rep] term; memoized, and the [Uninterp k] placeholder set
+                  above breaks any cycle) and pick the least [distinct_base] index (from
+                  the shared [next_idx] up) whose tree avoids them all. Bounded — on
+                  exhaustion take the base and let the §8 checker fail closed ([unknown],
+                  never wrong). On a recursive sort [distinct_base] yields distinct-length
+                  spines, so a finite forbidden set is always avoidable; a
+                  non-self-recursive sort (e.g. a mutually-recursive [tree] with no direct
+                  self field) yields one value, so a forced-distinct peer there degrades
+                  to [unknown]. *)
+               let fbd =
+                 match Hashtbl.find_opt dis k with
+                 | None -> []
+                 | Some s ->
+                   let peers = Hashtbl.fold (fun k' () acc -> k' :: acc) s [] in
+                   List.filter_map
+                     (fun k' ->
+                        match Hashtbl.find_opt rep k' with
+                        | Some xr -> Some (tree_of xr depth)
+                        | None -> None)
+                     (List.sort compare peers)
+               in
                let rec pick idx tries =
                  let tr = distinct_base dt idx depth in
-                 if tries < 64 && List.exists (tree_eq tr) fbd
+                 if tries < 256 && List.exists (tree_eq tr) fbd
                  then pick (idx + 1) (tries + 1)
                  else (
                    next_idx := idx + 1;
