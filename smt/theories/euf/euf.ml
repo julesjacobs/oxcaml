@@ -196,6 +196,22 @@ type 'p t =
        also churned the minor heap. Reusing one cleared table drops both. Not trailed: it
        is rebuilt from [touched] on every call, so [push]/[pop] never touch it. *)
     dirty : unit Int_set.t
+  ; (* Separated-root-pair -> a witness disequality, rebuilt by {!propagate} (it already
+       scans every diseq to build its membership set, so recording the witness diseq
+       instead of [()] is free). {!distinct_witness} — called per distinct-propagation by
+       [explain_implied] to cite a separating diseq (fun_2309, ~17% of QF_AX instructions:
+       an O(#diseqs) scan PER call) — consults this for an O(1) hit instead of rescanning.
+       [sep_wit_m] is the e-node count at the last build ([0] = invalid): the packing key
+       [lo*m+hi] uses it, and equality with the current e-node count proves no [register]
+       (count grows) or [pop] (count shrinks, and would leave popped ids unsafe to [find])
+       has happened since — so every stored diseq id is still in bounds. A hit is
+       re-verified ([find] of the cached diseq's endpoints must still equal the queried
+       roots) before use, so a merge that moved roots since the build can never yield a
+       wrong witness — it falls back to the full scan. Not trailed: [pop] sets
+       [sep_wit_m <- 0] (belt-and-suspenders; the count-equality gate already fails after
+       a pop). *)
+    sep_wit : 'p diseq Int_set.t
+  ; mutable sep_wit_m : int
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
@@ -218,6 +234,8 @@ let create ctx =
   ; merges = Dynarray.create ()
   ; merge_cursors = []
   ; dirty = Int_set.create 64
+  ; sep_wit = Int_set.create 64
+  ; sep_wit_m = 0
   }
 ;;
 
@@ -386,6 +404,13 @@ let add_forest_edge t a b reason =
 (* --- merge + congruence closure (pending queue to fixpoint) -------------- *)
 
 let merge t a0 b0 reason0 =
+  (* Invalidate the {!distinct_witness} witness cache: a merge moves class roots, so its
+     packed keys and stored witnesses are stale. {!propagate} rebuilds it (and no merge
+     happens inside a [propagate]), so the cache is only ever consulted in the
+     propagate→explain window; this keeps that invariant true for any caller (not just the
+     CDCL(T) drive order), so the served witness is always the earliest-asserted one —
+     same as the full scan (counted-metric identity). One int write per [merge] call. *)
+  t.sep_wit_m <- 0;
   let q = Queue.create () in
   Queue.add (a0, b0, reason0) q;
   while not (Queue.is_empty q) do
@@ -770,25 +795,49 @@ let check t =
 
 (* --- disequality propagation + Nelson-Oppen sharing ---------------------- *)
 
-(* An asserted disequality separating the classes of [a] and [b], if any (C: fixed
-   assertion-order scan). Returned so [explain_implied] can cite it and its endpoints. *)
+(* An asserted disequality separating the classes of [a] and [b], if any. Returned so
+   [explain_implied] can cite it and its endpoints.
+
+   Fast path (fun_2309 was ~17% of QF_AX instructions as a raw O(#diseqs) scan run per
+   distinct-propagation): consult [t.sep_wit], the witness index {!propagate} builds while
+   scanning every diseq. It is usable only when its build-time e-node count still matches
+   (no [register]/[pop] since, so every stored id is in bounds and the [lo*m+hi] key is
+   the one it was stored under) and both queried roots are [< m]. A hit is RE-VERIFIED —
+   the cached diseq's endpoints must still [find] to the queried roots — so a merge that
+   moved roots since the build cannot yield a wrong witness. Any
+   miss/verify-fail/gate-fail falls back to the authoritative full scan (which also covers
+   a diseq asserted since the build, which the index would lack). Same result as the scan
+   in every case (a completeness fast path over a sound fallback), so output is unchanged. *)
 let distinct_witness t a b =
   let ra = find t a
   and rb = find t b in
-  let w = ref None in
-  (try
-     Dynarray.iter
-       (fun d ->
-          let du = find t d.d_a
-          and dv = find t d.d_b in
-          if (du = ra && dv = rb) || (du = rb && dv = ra)
-          then (
-            w := Some d;
-            raise Exit))
-       t.diseqs
-   with
-   | Exit -> ());
-  !w
+  let full_scan () =
+    let w = ref None in
+    (try
+       Dynarray.iter
+         (fun d ->
+            let du = find t d.d_a
+            and dv = find t d.d_b in
+            if (du = ra && dv = rb) || (du = rb && dv = ra)
+            then (
+              w := Some d;
+              raise Exit))
+         t.diseqs
+     with
+     | Exit -> ());
+    !w
+  in
+  let m = t.sep_wit_m in
+  if m > 0 && Dynarray.length t.enodes = m && ra < m && rb < m
+  then (
+    let key = if ra <= rb then (ra * m) + rb else (rb * m) + ra in
+    match Int_set.find_opt t.sep_wit key with
+    | Some d ->
+      let du = find t d.d_a
+      and dv = find t d.d_b in
+      if (du = ra && dv = rb) || (du = rb && dv = ra) then Some d else full_scan ()
+    | None -> full_scan ())
+  else full_scan ()
 ;;
 
 type implied =
@@ -847,7 +896,12 @@ let propagate t =
        to catch a spurious propagation; the [test_propagate_pushpop_vs_full] oracle checks
        byte-identical output against an independent full scan, forbidding BOTH directions
        (mutants [euf_propagate_sep_stale_reps] / [euf_propagate_sep_skip_rebuild]). *)
-    let sep = Int_set.create (Dynarray.length t.diseqs) in
+    (* Reuse the engine-owned witness index (cleared, not reallocated). It maps each
+       separated root pair to a WITNESS diseq (not just [()]); {!propagate} needs only the
+       membership test, but recording the witness is free here (we already scan every
+       diseq) and lets {!distinct_witness} skip its own O(#diseqs) rescan. *)
+    let sep = t.sep_wit in
+    Int_set.clear sep;
     (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
        [m = #e-nodes]. Every rep is an e-node id in [0, m), so distinct pairs give distinct
        keys UNLESS the packing wraps: OCaml [int] arithmetic is mod 2^63, so injectivity
@@ -866,13 +920,19 @@ let propagate t =
        of the bound — [m > 2^31] e-nodes would need ~155 GB, unreachable in any real solve
        — not on the assert firing. *)
     assert (m <= 1 lsl 31);
+    t.sep_wit_m <- m;
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
       (fun d ->
          let du = find t d.d_a
          and dv = find t d.d_b in
          let key = if du <= dv then pack du dv else pack dv du in
-         Int_set.replace sep key ())
+         (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
+           so the witness {!distinct_witness} serves is byte-identical to what its full
+           assertion-order scan would return (same premise token ⇒ identical learned
+           clauses ⇒ counted-metric identity). [Dynarray.iter] visits diseqs in assertion
+           order. *)
+         if not (Int_set.mem sep key) then Int_set.replace sep key d)
       t.diseqs;
     Dynarray.iteri
       (fun idx w ->
@@ -1053,7 +1113,14 @@ let restore_aux t lv =
   for i = Dynarray.length t.enodes - 1 downto lv.l_enodes do
     Term.Table.remove t.index (get t i).term
   done;
-  Dynarray.truncate t.enodes lv.l_enodes
+  Dynarray.truncate t.enodes lv.l_enodes;
+  (* Invalidate the {!distinct_witness} cache: a pop truncates [enodes]/[diseqs], so
+     cached diseq endpoint ids may now be out of bounds. Belt-and-suspenders — the
+     count-equality gate in {!distinct_witness} already fails after a pop changes the
+     e-node count, but a pop+re-register back to the same count between a [propagate] and
+     a [distinct_witness] (not the normal drive order) would slip past it; zeroing
+     [sep_wit_m] closes that. *)
+  t.sep_wit_m <- 0
 ;;
 
 let pop t n =
