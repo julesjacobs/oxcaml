@@ -746,6 +746,39 @@ premise-completeness RED tests. If fair-(b) also nets <=0 with zero conversions,
 joins the refuted ledger (option (c)) with W0 (landed) + W0.5 (banked) retained; no fourth
 form. Full spec + shas in `../logs/ax-bar-log.md`.
 
+**FINAL STATE (2026-07-14): fair-(b) LANDED dark, W2 PARKED per the pre-committed kill rule.**
+The CH program concludes here.
+- **fair-(b) LANDED (dark, `OXSMT_ARR_WEQ` default OFF).** The honest ruling-(b) propagation
+  form — CONFLICT-ONLY read-equality propagation (fire `assert_eq` only when the read pair is
+  already entailed-DISTINCT, so a merge always refutes and never survives into a SAT model to
+  corrupt its reconstruction), trailed `an_diseqs` (so `an_distinct` reflects only live
+  disequalities — the basis of the conflict-only gate and of `weq_read_premise`'s off-diagonal
+  premises), an incremental merge-cursor/diseq trigger, diseq-endpoint-targeted propagation,
+  and a path-confined witness split. Counted-effort QF_AX A/B = NET +1 at 20k/50k/200k, 0
+  disagreements / 0 mismatches at every budget, storecomm/storeinv/cvc completely FLAT, with
+  genuine swap-unsat WALL conversions. First weakeq form with zero SAT-family collateral (vs
+  the clause -108 / naive -477). Both review legs clean (fable APPROVE, codex SAFE). RED tests
+  (mutant-patch): drop off-diagonal `i≠jₗ` premise -> 11 wrong-unsat; drop `an_diseqs`
+  pop-restore -> 111 unknown-regr; fuel=0 -> safe degrade.
+- **W2 (retire `row_split`) PARKED.** Built the O11 weak-congruence-modulo-i read closure
+  (`Weq_graph.find_path_avoiding` i-avoiding-subpath BFS + a modulo-i propagation) and
+  broadened the narrow split into a genuine path-confined `row_split` replacement. NOROW
+  counted-effort A/B @50k: witness-only -215 -> broadened -61 -> +O11 -61 (O11 changed
+  NOTHING). W2 cannot reach net-≥0 for TWO reasons, both measured: (1) **SAT-model
+  completeness** — retiring `row_split` loses the global read materialization that constructs
+  valid swap models, so several `swap_invalid` (SAT) files reject at `Array_model_check` and go
+  `unknown` at tiny effort; `row_split` IS the SAT-model backstop. (2) **Split-ordering
+  efficiency** — path-confined telescoping is slower than blind `row_split`'s global tag-least
+  ordering (the regressed swap-unsat files solve only at ~500k). O11's propagation is
+  conflict-only (a refutation accelerator that needs decided index diseqs swap lacks) and
+  addresses NEITHER. A genuine W2 needs the full **O10** semantically-complete model-value
+  validator (materialize weakeq-determined read values for the SAT direction) PLUS complete,
+  non-path-confined case-split coverage — the "large/uncertain/multi-session" scope this ADR
+  always flagged. Parked scaffolding: `../logs/weq-w2-o11-parked.patch` (SOUND, 0 disagreements).
+- **Upstream statement:** the QF_AX 537 bar needs either that O10 + full-case-split investment
+  or a different lever; W0 graph + W0.5 analyzer + fair-(b) are banked, storecomm/storeinv
+  close under NOROW, and 2-3 swap-unsat walls convert in the landed default form.
+
 **Consolidated W1 obligations (from the W0 dual review; binding, tested):**
 1. **Count bound is NOT acyclicity (LOAD-BEARING, codex).** The combined store+equality graph
    cycles (s1—base—s2 with s1=s2) even though the equality subgraph is a forest. W1's lemma
