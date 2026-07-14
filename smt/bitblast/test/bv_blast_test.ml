@@ -156,6 +156,74 @@ let oracle_pred name w make =
 let binop op mint ctx x y = Bv.binop ctx mint op x y
 let unop op mint ctx x = Bv.unop ctx mint op x
 
+(* Memoization TRANSPARENCY (task #50/rider): the memoized {!Bv_eval.eval_bv} must agree
+   byte-for-byte with the unmemoized reference on every term+model — that is the proof
+   that caching by hash-consed term (per-call, model fixed) is semantics-preserving, not
+   an argument. Enumerate every binary op / predicate at widths 3-4 over ALL inputs (the
+   same space as the layer-1 oracle), plus nested + SHARED-subterm terms (where memo
+   actually changes the traversal), and assert memoized = unmemoized. *)
+let run_eval_memo_equiv () =
+  print_endline "eval memoization transparency: memoized == unmemoized (all inputs)";
+  let bv_cmp (v1, w1) (v2, w2) = Bigint.equal v1 v2 && w1 = w2 in
+  let check_bin name w make =
+    let env, ctx, mint = fresh () in
+    let x = bvvar env ctx (name ^ "_mx") w in
+    let y = bvvar env ctx (name ^ "_my") w in
+    let t = make mint ctx x y in
+    let is_bool = Sort.equal t.Term.sort Sort.bool in
+    let n = 1 lsl w in
+    for a = 0 to n - 1 do
+      for b = 0 to n - 1 do
+        let lookup u =
+          if Term.equal u x
+          then Some (big a)
+          else if Term.equal u y
+          then Some (big b)
+          else None
+        in
+        if is_bool
+        then
+          check
+            (Printf.sprintf "memo-eq %s w=%d a=%d b=%d" name w a b)
+            (Bool.equal
+               (Bv_eval.eval_bool defs ~lookup t)
+               (Bv_eval.eval_bool_unmemoized defs ~lookup t))
+        else
+          check
+            (Printf.sprintf "memo-eq %s w=%d a=%d b=%d" name w a b)
+            (bv_cmp
+               (Bv_eval.eval_bv defs ~lookup t)
+               (Bv_eval.eval_bv_unmemoized defs ~lookup t))
+      done
+    done
+  in
+  List.iter
+    (fun w ->
+       List.iter
+         (fun (nm, op) -> check_bin nm w (binop op))
+         [ "bvand", Bv.Bvand
+         ; "bvor", Bv.Bvor
+         ; "bvxor", Bv.Bvxor
+         ; "bvadd", Bv.Bvadd
+         ; "bvsub", Bv.Bvsub
+         ; "bvmul", Bv.Bvmul
+         ; "bvshl", Bv.Bvshl
+         ; "bvlshr", Bv.Bvlshr
+         ; "bvashr", Bv.Bvashr
+         ; "bvudiv", Bv.Bvudiv
+         ; "bvurem", Bv.Bvurem
+         ; "bvult", Bv.Bvult
+         ; "bvsle", Bv.Bvsle
+         ];
+       (* nested + SHARED subterm: exercises the DAG path where memo changes traversal *)
+       check_bin "nested_and" w (fun m c x y ->
+         Bv.binop c m Bv.Bvand (Bv.binop c m Bv.Bvand x y) (Bv.binop c m Bv.Bvand x y));
+       check_bin "ite_shared" w (fun m c x y ->
+         let s = Bv.binop c m Bv.Bvadd x y in
+         Context.ite c (Context.eq c x y) s s))
+    [ 3; 4 ]
+;;
+
 let run_oracle () =
   print_endline "layer 1: exhaustive small-width oracle";
   List.iter
@@ -439,6 +507,7 @@ let () =
   run_e2e ();
   run_fail_closed ();
   run_simplify_equiv ();
+  run_eval_memo_equiv ();
   Printf.printf "\nbv-blast self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

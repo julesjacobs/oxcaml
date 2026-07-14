@@ -104,6 +104,7 @@ type result =
       }
 
 module Bv_simplify = Oxsmt_bitblast.Bv_simplify
+module Bv_eval = Oxsmt_bitblast.Bv_eval
 
 (* Solve a pure-QF_BV assertion set by eager bit-blasting. A word-level pre-blast pass
    ({!Bv_simplify}) first normalizes the assertions to shrink the SAT instance; it never
@@ -117,40 +118,69 @@ let solve ctx mint (asserted : Term.t list) : result =
   | Bv_solve.Unsat -> Unsat
   | Bv_solve.Unknown _ -> Unknown
   | Bv_solve.Sat (model, bool_model) ->
-    (* Model COMPLETION for rewrite-eliminated variables: the extract/concat/bitwise/shift
-       families (task #36) can eliminate a variable's only occurrence, so the blaster
-       never binds it and a [sat] would lose its model (CLI degrades to [unknown]). Any
-       user var named in the ORIGINAL query but absent from the blaster's model was
-       dropped by an (equivalence-preserving, oracle-certified) rewrite, so it is
-       unconstrained — bind it to 0 / false. Guarded on the rewrite gate so the OFF path
-       is byte-identical to before this task (the additive-only normalizer's pre-existing
-       cancellation behaviour is left exactly as it was). *)
-    let extra_bv, extra_bool =
-      if not (Bv_simplify.rewrite2_enabled ())
-      then [], []
-      else (
-        let present : unit Term.Table.t = Term.Table.create 256 in
-        List.iter (fun (t, _) -> Term.Table.replace present t ()) model;
-        List.iter (fun (t, _) -> Term.Table.replace present t ()) bool_model;
-        let orig_bv, orig_bool = free_user_vars asserted in
-        ( List.filter_map
-            (fun (t, w) ->
-               if Term.Table.mem present t then None else Some (t, (Bigint.zero, w)))
-            orig_bv
-        , List.filter_map
-            (fun t -> if Term.Table.mem present t then None else Some (t, false))
-            orig_bool ))
-    in
-    let named f xs =
+    (* Model COMPLETION for rewrite-eliminated variables: a pre-blast rewrite can
+       eliminate a variable's only occurrence, so the blaster never binds it and a [sat]
+       would lose its model (the CLI then degrades it to [unknown]). Any user var named in
+       the ORIGINAL query but absent from the blaster's model was dropped by an
+       equivalence-preserving rewrite, so it is unconstrained — bind it to 0 / false. Task
+       #50: this runs UNCONDITIONALLY (not only under OXSMT_BV_REWRITE2) because the
+       LANDED additive-only normalizer also drops vars by cancellation ([a + b - a = b]) —
+       a pre-existing gate-OFF incompleteness this fixes. Deliberate gate-OFF behaviour
+       change: strictly MORE model bindings; verdicts unchanged. *)
+    let present : unit Term.Table.t = Term.Table.create 256 in
+    List.iter (fun (t, _) -> Term.Table.replace present t ()) model;
+    List.iter (fun (t, _) -> Term.Table.replace present t ()) bool_model;
+    let orig_bv, orig_bool = free_user_vars asserted in
+    let extra_bv =
       List.filter_map
-        (fun (t, r) ->
-           match name_of_var t with
-           | Some n -> Some (f n r)
-           | None -> None)
-        xs
+        (fun (t, w) ->
+           if Term.Table.mem present t then None else Some (t, (Bigint.zero, w)))
+        orig_bv
     in
-    Sat
-      { bv_vars = named (fun n (v, w) -> n, v, w) (model @ extra_bv)
-      ; bool_vars = named (fun n b -> n, b) (bool_model @ extra_bool)
-      }
+    let extra_bool =
+      List.filter_map
+        (fun t -> if Term.Table.mem present t then None else Some (t, false))
+        orig_bool
+    in
+    let full_bv = model @ extra_bv in
+    let full_bool = bool_model @ extra_bool in
+    (* Defense-in-depth re-check (fable rider): when completion injected a default,
+       re-check the COMPLETED model against the ORIGINAL assertions with the independent
+       evaluator. [Bv_solve] only validated the blaster model against the SIMPLIFIED
+       formula, so a hypothetical simplify-unsoundness that dropped a
+       genuinely-CONSTRAINED var would be MASKED by the 0-default; evaluating the
+       originals catches it. On any failure or eval error, degrade to a sound [Unknown]
+       rather than surface a wrong model. Runs only when a var was actually defaulted (the
+       masking case); the evaluator is memoized, so this is linear even on the shared sage
+       DAGs. *)
+    let completed = extra_bv <> [] || extra_bool <> [] in
+    let recheck_ok =
+      (not completed)
+      ||
+      let tbl : Bigint.t Term.Table.t = Term.Table.create 256 in
+      List.iter (fun (t, (v, _)) -> Term.Table.replace tbl t v) full_bv;
+      List.iter
+        (fun (t, b) -> Term.Table.replace tbl t (if b then Bigint.one else Bigint.zero))
+        full_bool;
+      let lookup t = Term.Table.find_opt tbl t in
+      try
+        List.for_all (fun a -> Bv_eval.eval_bool Bv_adapter.defs ~lookup a) asserted
+      with
+      | Bv_eval.Eval_error _ -> false
+    in
+    if not recheck_ok
+    then Unknown
+    else (
+      let named f xs =
+        List.filter_map
+          (fun (t, r) ->
+             match name_of_var t with
+             | Some n -> Some (f n r)
+             | None -> None)
+          xs
+      in
+      Sat
+        { bv_vars = named (fun n (v, w) -> n, v, w) full_bv
+        ; bool_vars = named (fun n b -> n, b) full_bool
+        })
 ;;

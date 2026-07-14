@@ -11,8 +11,25 @@ open Oxsmt_core
 
 exception Eval_error of string
 
-(** Value of a bit-vector-sorted term: [(v, width)] with [0 <= v < 2^width]. *)
+(** Value of a bit-vector-sorted term: [(v, width)] with [0 <= v < 2^width]. Memoized with
+    a per-call cache (transparent — the model is fixed within a call), so a shared DAG is
+    evaluated in linear time rather than blowing up exponentially. *)
 val eval_bv : Blast.defs -> lookup:(Term.t -> Bigint.t option) -> Term.t -> Bigint.t * int
 
-(** Truth of a Bool-sorted term. *)
+(** Truth of a Bool-sorted term. Memoized like {!eval_bv}. *)
 val eval_bool : Blast.defs -> lookup:(Term.t -> Bigint.t option) -> Term.t -> bool
+
+(** Unmemoized reference semantics, exposed ONLY for the memoization-transparency test
+    (memoized vs unmemoized must agree on every term). Exponential on shared DAGs — do NOT
+    use in production. *)
+val eval_bv_unmemoized
+  :  Blast.defs
+  -> lookup:(Term.t -> Bigint.t option)
+  -> Term.t
+  -> Bigint.t * int
+
+val eval_bool_unmemoized
+  :  Blast.defs
+  -> lookup:(Term.t -> Bigint.t option)
+  -> Term.t
+  -> bool
