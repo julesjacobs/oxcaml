@@ -437,23 +437,107 @@ let startup_cache_dir () =
   | Some d when String.length d > 0 -> Some d
   | _ -> None
 
+(* Every input that can change the emitted bytes of the stable object -- the
+   generic-function [.text], the symbol/segment/frame tables, their relocations,
+   and the DWARF describing them -- must appear in this key, so that changing a
+   flag between two links can never produce a false cache hit on a stale object.
+   The generic functions are emitted directly from Cmm through the backend
+   ([Cfg_selection] -> CFG passes -> register allocation -> [Emit]), NOT through
+   the Flambda2 middle end, so the load-bearing inputs are the target, the
+   backend/CFG/register-allocator flag set, and [-g]; the Flambda2 flags are
+   folded in too, conservatively, since a false MISS is merely a wasted relink
+   whereas a false HIT is a correctness bug. Inlining/simplification tuning does
+   not reach these functions. When linking against a prebuilt cached-generic-
+   functions object, its CONTENTS (not just its path) feed the emitted code, so
+   its content digest is included. *)
 let stable_startup_cache_key ~genfns ~units_tolink ~cached_genfns_imports =
+  let module F = Oxcaml_flags in
   let b = Buffer.create 65536 in
   let add s = Buffer.add_string b s; Buffer.add_char b '\000' in
   add Config.cmx_magic_number;
-  add (string_of_bool !Oxcaml_flags.manual_module_init);
-  add (string_of_bool !Oxcaml_flags.use_cached_generic_functions);
+  add (string_of_bool !F.manual_module_init);
+  add (string_of_bool !F.use_cached_generic_functions);
   add (string_of_bool !Clflags.output_complete_object);
+  (* Target / codegen invariants baked into the object at configure time. *)
+  add "|target|";
+  add Config.target;
+  add Config.architecture;
+  add Config.model;
+  add Config.system;
+  add (string_of_bool Config.flambda2);
+  add (string_of_bool Config.flat_float_array);
+  add (string_of_bool Config.function_sections);
+  add (string_of_bool Config.with_frame_pointers);
+  (* Emission-affecting Clflags. *)
+  add "|clflags|";
+  add
+    (Marshal.to_string
+       ( !Clflags.debug,
+         !Clflags.debug_full,
+         !Clflags.llvm_backend,
+         !Clflags.unsafe,
+         !Clflags.pic_code,
+         !Clflags.dlcode )
+       []);
+  (* Backend / CFG / register-allocator flag set (shapes the .text and tables). *)
+  add "|backend|";
+  add
+    (Marshal.to_string
+       ( !F.opt_level,
+         (!F.regalloc, !F.regalloc_linscan_threshold, !F.regalloc_params,
+          !F.regalloc_validate),
+         (!F.vectorize, !F.vectorize_max_block_size, !F.cfg_peephole_optimize),
+         (!F.x86_peephole_optimize, !F.x86_peephole_remove_mov_to_dead_register,
+          !F.x86_peephole_remove_redundant_cmp, !F.x86_peephole_combine_add_rsp),
+         (!F.cfg_stack_checks, !F.cfg_stack_checks_threshold,
+          !F.cfg_eliminate_dead_trap_handlers),
+         (!F.cfg_prologue_validate, !F.cfg_prologue_shrink_wrap,
+          !F.cfg_prologue_shrink_wrap_threshold, !F.cfg_merge_blocks),
+         (!F.cfg_value_propagation, !F.cfg_value_propagation_float,
+          !F.cfg_value_propagation_flow),
+         (!F.reorder_blocks_random, !F.basic_block_sections,
+          !F.module_entry_functions_section, !F.frametables_in_rodata),
+         (!F.disable_zero_alloc_checker, !F.disable_precise_zero_alloc_checker,
+          !F.zero_alloc_checker_details_cutoff, !F.zero_alloc_checker_details_extra,
+          !F.zero_alloc_checker_join),
+         (!F.function_layout, !F.disable_builtin_check, !F.disable_poll_insertion,
+          !F.allow_long_frames, !F.long_frames_threshold),
+         (!F.branch_relaxation_max_displacement, !F.caml_apply_inline_fast_path,
+          !F.symbol_visibility_protected, !F.internal_assembler) )
+       []);
+  (* Flambda2 flags (conservative; do not reach the generic-function .text). *)
+  add "|flambda2|";
+  add
+    (Marshal.to_string
+       ( !F.Flambda2.classic_mode,
+         !F.Flambda2.join_points,
+         !F.Flambda2.unbox_along_intra_function_control_flow,
+         !F.Flambda2.backend_cse_at_toplevel,
+         !F.Flambda2.cse_depth,
+         !F.Flambda2.join_depth,
+         !F.Flambda2.join_algorithm,
+         !F.Flambda2.function_result_types,
+         (!F.Flambda2.enable_reaper, !F.Flambda2.reaper_preserve_direct_calls,
+          !F.Flambda2.reaper_local_fields, !F.Flambda2.reaper_unbox,
+          !F.Flambda2.reaper_max_unbox_size,
+          !F.Flambda2.reaper_change_calling_conventions),
+         (!F.Flambda2.unicode, !F.Flambda2.kind_checks, !F.Flambda2.match_in_match) )
+       []);
+  add "|units|";
   List.iter
     (fun u -> List.iter (fun cu -> add (CU.full_path_as_string cu)) u.defines)
     units_tolink;
   add "|genfns|";
   add (Marshal.to_string (Generic_fns.Tbl.entries genfns) []);
-  if !Oxcaml_flags.use_cached_generic_functions
+  if !F.use_cached_generic_functions
   then begin
     add "|cached|";
     List.iter (fun cu -> add (CU.full_path_as_string cu))
-      (Generic_fns.imported_units cached_genfns_imports)
+      (Generic_fns.imported_units cached_genfns_imports);
+    (* The cached object's bytes feed the emitted program, so digest them. *)
+    let path = !F.cached_generic_functions_path in
+    if String.length path > 0 && Sys.file_exists path
+    then add (Digest.to_hex (Digest.file path))
   end;
   Digest.to_hex (Digest.string (Buffer.contents b))
 
