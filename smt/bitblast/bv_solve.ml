@@ -42,6 +42,31 @@ let read_bool_model blaster =
   List.map (fun (term, l) -> term, lit_value sat l) (Blast.bool_vars blaster)
 ;;
 
+(* A10 opt-in for the bit-blasted CNF: mark every SAT var EXCEPT the read-back set
+   eligible for variable elimination. The read-back set is exactly the leaf bit-vector
+   variables' bits ([bv_vars]) and the free Boolean variables ([bool_vars]) — the only
+   vars [read_model]/[read_bool_model] and the independent re-check consult; everything
+   else (gate outputs, division quotient/remainder, extension fillers) is pure aux
+   structure. The forced-true constant [tru] is a level-0 unit, so bounded elimination's
+   assigned-var skip already leaves it alone. Inert unless OXSMT_SATPRE is on (the core's
+   gate); when on, blasted CNF is where bounded elimination pays most. Sound regardless:
+   elimination preserves equisatisfiability, and every reported model is re-checked below
+   over the leaf values, fail-closed. *)
+let mark_aux_eliminable blaster =
+  let sat = Blast.sat blaster in
+  let frozen = Hashtbl.create 256 in
+  List.iter
+    (fun (_, bits) ->
+       Array.iter (fun l -> Hashtbl.replace frozen (Sat.var_of_lit l) ()) bits)
+    (Blast.bv_vars blaster);
+  List.iter
+    (fun (_, l) -> Hashtbl.replace frozen (Sat.var_of_lit l) ())
+    (Blast.bool_vars blaster);
+  for v = 0 to Sat.num_vars sat - 1 do
+    if not (Hashtbl.mem frozen v) then Sat.set_eliminable sat v
+  done
+;;
+
 let solve defs assertions =
   match
     let blaster = Blast.create defs in
@@ -50,6 +75,7 @@ let solve defs assertions =
   with
   | exception Blast.Unsupported_bv msg -> Unknown msg
   | blaster ->
+    mark_aux_eliminable blaster;
     (match Sat.solve (Blast.sat blaster) with
      | Sat.Unsat -> Unsat
      | Sat.Sat ->
