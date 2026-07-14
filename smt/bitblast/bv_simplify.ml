@@ -164,7 +164,123 @@ let occurrences (terms : Term.t list) : (int, int) Hashtbl.t =
   count
 ;;
 
+(* ---- Family 1 (task #36): extract/concat normalization + equality-over-concat
+   splitting. Env-gated dark (OXSMT_BV_REWRITE2); with it off the whole block is inert and
+   [simplify] is byte-identical to the additive-only pass. Every rewrite here is sound by
+   fixed-width extract/concat algebra, and is certified exhaustively by the Layer-4
+   simplifier-equivalence oracle (assert not(e = simplify e) -> Unsat). Census (task #20)
+   showed 95% of QF_BV losses are build/blast-bound and these rewrites (esp. eq-concat)
+   sidestep the eager materialization of wide equalities over concat trees. ---- *)
+
+let rewrite2_enabled () =
+  match Sys.getenv_opt "OXSMT_BV_REWRITE2" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+let bvwidth (t : Term.t) =
+  match Bv.width_of_sort t.Term.sort with
+  | Some w -> w
+  | None -> -1
+;;
+
+(* [norm_extract ctx mint ~i ~j x] = (extract [i:j] x), x already simplified, pushed
+   through concat/extract/const/extend to the underlying leaves. [i >= j >= 0],
+   [i < width x]. Falls back to a plain [Bv.extract] on anything it does not restructure
+   (always sound). *)
+let rec norm_extract ctx mint ~i ~j (x : Term.t) : Term.t =
+  let w = bvwidth x in
+  if w >= 1 && j = 0 && i = w - 1
+  then x (* full-width extract is the identity *)
+  else (
+    match Bv.view x with
+    | Some (Bv.Const { value; width = _ }) ->
+      let q = fst (Bigint.divmod value (pow2 j)) in
+      let v = snd (Bigint.divmod q (pow2 (i - j + 1))) in
+      Bv.const ctx mint ~value:v ~width:(i - j + 1)
+    | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) ->
+      let wl = bvwidth lo in
+      if i < wl
+      then norm_extract ctx mint ~i ~j lo
+      else if j >= wl
+      then norm_extract ctx mint ~i:(i - wl) ~j:(j - wl) hi
+      else
+        Bv.concat
+          ctx
+          mint
+          (norm_extract ctx mint ~i:(i - wl) ~j:0 hi)
+          (norm_extract ctx mint ~i:(wl - 1) ~j lo)
+    | Some (Bv.Op { op = Bv.Extract (_a, b); args = [ y ]; _ }) ->
+      norm_extract ctx mint ~i:(b + i) ~j:(b + j) y
+    | Some (Bv.Op { op = Bv.Zero_extend _; args = [ y ]; _ }) ->
+      let w0 = bvwidth y in
+      if i < w0
+      then norm_extract ctx mint ~i ~j y
+      else if j >= w0
+      then Bv.const ctx mint ~value:Bigint.zero ~width:(i - j + 1)
+      else
+        Bv.concat
+          ctx
+          mint
+          (Bv.const ctx mint ~value:Bigint.zero ~width:(i - w0 + 1))
+          (norm_extract ctx mint ~i:(w0 - 1) ~j y)
+    | Some (Bv.Op { op = Bv.Sign_extend _; args = [ y ]; _ }) when i < bvwidth y ->
+      norm_extract ctx mint ~i ~j y
+    | _ -> Bv.extract ctx mint ~i ~j x)
+;;
+
+(* Concat of adjacent constants folds; adjacent contiguous extracts of the SAME base
+   merge. Otherwise rebuild the concat on the (already-simplified) children. *)
+let norm_concat ctx mint (hi : Term.t) (lo : Term.t) : Term.t =
+  match Bv.view hi, Bv.view lo with
+  | Some (Bv.Const { value = vh; width = _ }), Some (Bv.Const { value = vl; width = wl })
+    ->
+    let v = Bigint.add (Bigint.mul vh (pow2 wl)) vl in
+    Bv.const ctx mint ~value:v ~width:(bvwidth hi + wl)
+  | ( Some (Bv.Op { op = Bv.Extract (a, b); args = [ y1 ]; _ })
+    , Some (Bv.Op { op = Bv.Extract (c, d); args = [ y2 ]; _ }) )
+    when y1 == y2 && b = c + 1 -> norm_extract ctx mint ~i:a ~j:d y1
+  | _ -> Bv.concat ctx mint hi lo
+;;
+
+(* Concat seam positions inside (0, width t): the bit indices where a concat boundary
+   falls, flattened through nested concats. [] for a non-concat. *)
+let rec seams (t : Term.t) : int list =
+  match Bv.view t with
+  | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) ->
+    let wl = bvwidth lo in
+    seams lo @ [ wl ] @ List.map (fun s -> s + wl) (seams hi)
+  | _ -> []
+;;
+
+(* Split (= a b) (a, b already-simplified equal-width bitvectors) into a conjunction of
+   per-slice equalities cut at the union of both sides' concat seams; each slice is pushed
+   into leaves by [norm_extract]. Sound: equal-width bitvectors are equal iff every bit
+   slice is. Returns a plain [Context.eq] when there is no concat structure (no churn). *)
+let split_eq_concat ctx mint (a : Term.t) (b : Term.t) : Term.t =
+  let w = bvwidth a in
+  let cuts = List.sort_uniq Int.compare (seams a @ seams b) in
+  match cuts with
+  | [] -> Context.eq ctx a b
+  | _ ->
+    let bounds = (0 :: cuts) @ [ w ] in
+    let rec pairs = function
+      | x :: (y :: _ as rest) -> (x, y) :: pairs rest
+      | _ -> []
+    in
+    let eqs =
+      List.map
+        (fun (loc, hic) ->
+           let j = loc
+           and i = hic - 1 in
+           Context.eq ctx (norm_extract ctx mint ~i ~j a) (norm_extract ctx mint ~i ~j b))
+        (pairs bounds)
+    in
+    Context.and_ ctx eqs
+;;
+
 let simplify ctx mint (terms : Term.t list) : Term.t list =
+  let rewrite2 = rewrite2_enabled () in
   let count = occurrences terms in
   let shared (t : Term.t) =
     match Hashtbl.find_opt count t.Term.tag with
@@ -185,12 +301,21 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
     | And xs -> Context.and_ ctx (List.map simp (Iarr.to_list xs))
     | Or xs -> Context.or_ ctx (List.map simp (Iarr.to_list xs))
     | Ite (c, a, b) -> Context.ite ctx (simp c) (simp a) (simp b)
-    | Eq (a, b) -> Context.eq ctx (simp a) (simp b)
+    | Eq (a, b) ->
+      let a' = simp a
+      and b' = simp b in
+      if rewrite2 && bvwidth a' >= 1
+      then split_eq_concat ctx mint a' b'
+      else Context.eq ctx a' b'
     | Bool_const _ | Int_const _ | Arith _ | Le _ -> t
     | App (sym, orig_args) ->
       (match Bv.view t with
        | Some (Bv.Op { op = Bv.Bvadd | Bv.Bvsub | Bv.Bvneg; _ }) ->
          rebuild ctx mint (lin_of ~simp ~shared t)
+       | Some (Bv.Op { op = Bv.Extract (i, j); args = [ a ]; _ }) when rewrite2 ->
+         norm_extract ctx mint ~i ~j (simp a)
+       | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) when rewrite2 ->
+         norm_concat ctx mint (simp hi) (simp lo)
        | _ ->
          let orig = Iarr.to_list orig_args in
          let simplified = List.map simp orig in

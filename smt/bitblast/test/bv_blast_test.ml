@@ -335,6 +335,37 @@ let run_simplify_equiv () =
          a ctx m g g);
        equiv "mixed_zero" w (fun ctx m x y _ -> s ctx m (a ctx m x y) (a ctx m y x));
        equiv "wrap_const" w (fun ctx m x _ _ -> a ctx m x (k ctx m ((1 lsl w) - 1) w)))
+    [ 3; 4; 8 ];
+  (* Family 1 (task #36): extract/concat normalization + eq-over-concat splitting. The
+     rewrite fires only under OXSMT_BV_REWRITE2; with the gate off these are near-identity
+     and the equivalence is trivial, so running both ways exercises soundness in both
+     configs. Widths chosen so every extract index is in range. *)
+  let cc ctx m p q = Bv.concat ctx m p q in
+  let ex ctx m ~i ~j p = Bv.extract ctx m ~i ~j p in
+  List.iter
+    (fun w ->
+       (* extract straddling a concat seam (bits from both hi and lo) *)
+       equiv "ext_of_concat_straddle" w (fun ctx m x y _ ->
+         ex ctx m ~i:w ~j:(w - 2) (cc ctx m x y));
+       (* extract fully inside the low / high halves *)
+       equiv "ext_of_concat_lo" w (fun ctx m x y _ ->
+         ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y));
+       equiv "ext_of_concat_hi" w (fun ctx m x y _ ->
+         ex ctx m ~i:((2 * w) - 1) ~j:w (cc ctx m x y));
+       (* nested extract *)
+       equiv "ext_of_ext" w (fun ctx m x _ _ ->
+         ex ctx m ~i:1 ~j:0 (ex ctx m ~i:(w - 1) ~j:1 x));
+       (* extract of a constant *)
+       equiv "ext_of_const" w (fun ctx m _ _ _ -> ex ctx m ~i:(w - 1) ~j:1 (k ctx m 5 w));
+       (* concat of two constants folds *)
+       equiv "concat_const" w (fun ctx m _ _ _ -> cc ctx m (k ctx m 2 w) (k ctx m 3 w));
+       (* equality over concats (the ext_con killer): mixed operands so the per-slice split
+         is nontrivial ((concat x y) = (concat y x) iff x=y) *)
+       equiv "eq_concat_mixed" w (fun ctx m x y _ ->
+         Context.eq ctx (cc ctx m x y) (cc ctx m y x));
+       (* equality of an extract against a concat slice *)
+       equiv "eq_ext_concat" w (fun ctx m x y _ ->
+         Context.eq ctx (ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y)) y))
     [ 3; 4; 8 ]
 ;;
 
