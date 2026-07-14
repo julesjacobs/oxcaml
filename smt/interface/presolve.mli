@@ -124,3 +124,41 @@ val simplify_contextual : Context.t -> Term.t list -> Term.t list
     (exact neutrality). All terms are built through [ctx]'s smart constructors. Pure and
     deterministic (I6). The caller gates it (flag + cert-OFF). *)
 val simplify_projection : Context.t -> Term.t list -> Term.t list
+
+(** [symmetry_break ctx assertions] detects interchangeable same-sort constants (constants
+    whose pairwise transposition maps the asserted set to itself) and returns extra
+    top-level Bool constraints — full-action generator-based LEX-LEADER symmetry breaking
+    over the ORIGINAL vocabulary (theory equalities only) — to internalize ALONGSIDE the
+    assertions (task #25, quf-symmetry-experiment.md §6). Returns [[]] when nothing is
+    broken (byte-neutral to a no-symmetry input).
+
+    {b General / structural (no family logic).} Same-sort constants are refined by a cheap
+    occurrence signature; each candidate transposition is then CONFIRMED EXACTLY by
+    rebuilding every conjunct under the swap through [ctx] (whose smart constructors
+    AC-normalize [and]/[or]/[eq], so the hash-cons tag is the canonical form) and
+    comparing the tag multiset to the original. Interchangeable classes are the connected
+    components of the confirmed-transposition graph.
+
+    {b Emission is a SOUND lex-leader, never value precedence.} Value precedence is proven
+    UNSOUND for this index+value symmetry (constants appear as both function arguments and
+    values → real SAT→UNSAT flips). For each class and each adjacent generator [g] the
+    pass requires the assignment [A] to be lexicographically <= [g(A)] over a fixed atom
+    sequence, encoded with a prefix-equal chain of shared hash-consed [and]-terms (the
+    clausifier supplies Tseitin aux vars — no reserved symbols are minted). [A ⪯ g(A)]
+    keeps >=1 representative per orbit ⇒ SAT-preserving; adding constraints ⇒
+    UNSAT-preserving.
+
+    {b Size cap (sat-safe).} Emission is skipped for classes of size >= 6 (offline A/B:
+    the size-6/7 classes regress the satisfiable instances they touch for ~0 conversion).
+
+    {b Equisatisfiable, not equivalent.} The returned constraints REMOVE symmetric models,
+    so the caller must NOT record them in the R1 self-check set (a found model still
+    satisfies the ORIGINAL assertions) and MUST gate the pass cert-OFF (a lex-leader
+    clause is not resolution-derivable into a certificate). Pure and deterministic (I6,
+    tag order); neutral-abort (returns [[]]) on any hard budget. All terms are built
+    through [ctx].
+
+    The lex prefix-equal chain uses fresh reserved [".oxsmt.sym.*"] nullary Bool aux vars
+    (an O(n) encoding; minted through the cap-gated [Env.declare_reserved] with
+    [cap]/[env], kind ["sym"], disjoint from preprocessing's fresh symbols). *)
+val symmetry_break : Env.reserved_cap -> Env.t -> Context.t -> Term.t list -> Term.t list

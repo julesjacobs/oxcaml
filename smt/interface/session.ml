@@ -266,6 +266,24 @@ let proj_flag =
    rewrite is model-preserving, so this gate protects the certificate contract, not
    verdict soundness. *)
 let proj_enabled t = Lazy.force proj_flag && not t.cert_active
+
+(* Symmetry breaking (task #25, quf-symmetry-experiment.md §6) toggle. Default OFF (dark):
+   the SOUND size-capped lex-leader converts a QG UNSAT tail (~+400 offline) but is a
+   partial lever pending a decisive OFF/ON A/B; it ships byte-identical to trunk until
+   then. [OXSMT_SYMBREAK=1] turns it ON (the A/B ON leg and the gated test). Read once. *)
+let symbreak_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_SYMBREAK" with
+     | Some ("1" | "true" | "yes") -> true
+     | Some _ | None -> false)
+;;
+
+(* Runs only when enabled AND no certificate trace is installed: the breaking constraints
+   REMOVE symmetric models (equisatisfiable, not equivalent), so a lex-leader clause is
+   not resolution-derivable — it must never enter a cert as a trusted input (the same
+   cert-OFF discipline as Pass A). Cert-OFF here protects soundness of the certificate,
+   not the verdict (the added constraints are equisatisfiable). *)
+let symbreak_enabled t = Lazy.force symbreak_flag && not t.cert_active
 let env t = t.env
 let context t = t.ctx
 
@@ -818,6 +836,22 @@ let assert_presolved t terms =
         | eqs -> eqs)
       else []
     in
+    (* Symmetry breaking (task #25, gated: flag + cert-OFF): full-action lex-leader
+       constraints over interchangeable same-sort constants, added as extra top-level
+       assertions. They are equisatisfiable (they REMOVE symmetric models, keeping >=1 per
+       orbit), so — like Pass A — they are NOT recorded in [t.asserted] (the R1 set stays
+       the ORIGINAL assertions; any found model still satisfies them). Bypassed entirely
+       when OFF (byte-identical to trunk). Neutral-abort inside [symmetry_break] returns
+       [[]]; the Overflow/Unsupported firewall matches Pass A. *)
+    let sym_extra =
+      if symbreak_enabled t
+      then (
+        match Presolve.symmetry_break t.cap t.env t.ctx terms with
+        | exception Term.Overflow -> []
+        | exception Term.Unsupported _ -> []
+        | cs -> cs)
+      else []
+    in
     match Presolve.run t.ctx terms with
     | exception Term.Overflow -> t.degraded <- true
     | exception Term.Unsupported _ -> t.degraded <- true
@@ -866,7 +900,8 @@ let assert_presolved t terms =
         else reduced
       in
       List.iter (internalize_reduced t) reduced;
-      List.iter (internalize_reduced t) extra)
+      List.iter (internalize_reduced t) extra;
+      List.iter (internalize_reduced t) sym_extra)
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its

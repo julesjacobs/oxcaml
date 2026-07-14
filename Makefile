@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -375,6 +375,15 @@ weq-graph-test:
 wiring-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	OXSMT_PRESOLVE_CTX=1 OXSMT_PRESOLVE_PROJ=1 $(DUNE) exec tests/solver/wiring_test.exe
+
+## symbreak-test — online symmetry-breaking presolve (task #25, dark OXSMT_SYMBREAK).
+##   Detector fires on a symmetric quasigroup and REJECTS a broken (cyclic-only) symmetry;
+##   the sound lex-leader preserves SAT and UNSAT; and a test-only value-precedence MUTANT
+##   flips the SAT instance to UNSAT (discrimination — the SAT-preservation check is RED if
+##   the product ever regressed to value precedence). Runs with OXSMT_SYMBREAK=1 so the
+##   product path is active. Nonzero exit on any failed check.
+symbreak-test:
+	OXSMT_SYMBREAK=1 $(DUNE) exec tests/solver/symbreak_test.exe
 
 ## driver-equiv-test — the driver-equivalence guard (task #133). Builds corpus_classify
 ##   (the headline measurement driver) and oxsmt_cli (the shipped batch path), then asserts

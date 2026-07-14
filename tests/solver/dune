@@ -25,6 +25,17 @@
   oxsmt_smtlib_parser
   oxsmt_query_loader))
 
+; Online symmetry-breaking unit + discrimination tests (make symbreak-test).
+
+(executable
+ (name symbreak_test)
+ (modules symbreak_test)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
+
 ; QF_BV end-to-end acceptance goldens driven through the real Session dispatch
 ; (make bv-goldens-test).
 

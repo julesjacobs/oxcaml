@@ -898,3 +898,361 @@ let simplify_projection ctx assertions =
     emit ~aborted:false;
     simplified
 ;;
+
+(* --- Symmetry breaking (task #25, quf-symmetry-experiment.md §6) ----------------------
+   Detect interchangeable same-sort constants — constants whose pairwise transposition
+   maps the asserted set to itself — and emit sound, full-action generator-based
+   LEX-LEADER symmetry-breaking constraints over the ORIGINAL vocabulary (theory
+   equalities only). NO value precedence: the offline experiment PROVED value precedence
+   unsound here (the constants appear as both function ARGUMENTS and VALUES — index+value
+   symmetry — so value precedence can eliminate every representative of a SAT orbit,
+   producing SAT→UNSAT flips). See [[symmetry-unsat-losses-mask-unsoundness]].
+
+   {b General / structural — no family or filename logic.} Detection is a bounded
+   graph-automorphism-style invariant: constants of one sort are refined by a cheap
+   occurrence signature, then each candidate transposition is CONFIRMED EXACTLY by
+   rebuilding every conjunct under the swap through [ctx]'s smart constructors (which
+   flatten/dedup/tag-sort [and]/[or] and tag-order [eq], so the hash-consed tag IS the
+   AC-canonical form) and comparing the resulting tag multiset to the original. Only a
+   confirmed transposition is ever used. Interchangeable classes are the connected
+   components of the confirmed-transposition graph (adjacent transpositions generate the
+   symmetric group on a component).
+
+   {b Soundness of the emission.} For a class {c_0..c_{k-1}} and each adjacent generator
+   g = (c_i c_{i+1}) (a confirmed symmetry), we require the assignment A to be
+   lexicographically <= g(A) over a fixed-ordered atom sequence a_1..a_n (the equalities
+   [(= cell c_v)] for application cells of the class sort and class values c_v), with
+   b_j = g(a_j) computed by rebuilding a_j under g. false<true, encoded with a
+   prefix-equal chain of SHARED hash-consed [and]-terms (the clausifier introduces its own
+   Tseitin aux vars — no reserved symbols are minted). A ⪯ g(A) keeps >=1 representative
+   per orbit ⇒ SAT-preserving; adding constraints ⇒ UNSAT-preserving; sound for any fixed
+   atom sequence (closure under g is NOT required — b_j is used as a plain Bool term).
+
+   {b Size cap (sat-safe).} Emission is SKIPPED for classes of size >= [symbreak_emit_max]
+   (default 6): the offline A/B showed size-6/7 classes regress the satisfiable instances
+   they touch (heavy encoding slows model-finding) while contributing ~0 conversions. The
+   captured win is the size-2..5 UNSAT tail.
+
+   {b Equisatisfiable, not equivalent.} These constraints REMOVE (symmetric) models, so —
+   like {!entailed_equalities} — the caller must NOT record them in the R1 self-check set
+   (which evaluates the ORIGINAL assertions; any found model still satisfies them) and must
+   gate the pass cert-OFF (a lex-leader clause is not resolution-derivable). Pure and
+   deterministic (I6): all iteration is in term-tag order. Neutral-abort (returns [[]],
+   i.e. no breaking) on any hard budget. All terms are built through [ctx]. *)
+
+(* Detection: bound the total exact-check work (each check rebuilds the conjunct DAG). *)
+let symbreak_max_steps = 4_000_000
+
+(* Skip a same-signature bucket larger than this before running pairwise exact checks —
+   O(bucket^2) checks would dominate on large symmetric sets (e.g. eq_diamond). A bucket
+   this large cannot yield an emittable class anyway (emit cap below). *)
+let symbreak_consider_max = 8
+
+(* Size cap (sat-safe): emit lex-leader only for classes of size in [2, symbreak_emit_max). *)
+let symbreak_emit_max = 6
+
+(* Cap the lex atom sequence per class (a longer sequence only strengthens the break; we
+   truncate deterministically in tag order — still sound). *)
+let symbreak_atoms_max = 512
+
+(* Cap total emitted breaking constraints across all classes; neutral-abort beyond. *)
+let symbreak_constraints_max = 200_000
+
+exception Symbreak_budget
+
+(* Rebuild every term in [terms] under the leaf substitution [sigma] (constant-term ->
+   constant-term), through [ctx] so the result is AC-canonical hash-consed. A substituted
+   leaf is returned directly (NOT re-substituted — [sigma] is an involution on leaves, so
+   recursion would not terminate). Memoized on the hash-cons tag. [bump] charges the DAG
+   walk against the global budget. *)
+let symbreak_rebuild ctx sigma bump terms =
+  let memo = Term.Table.create 256 in
+  let rec go (t : Term.t) =
+    match Term.Table.find_opt memo t with
+    | Some r -> r
+    | None ->
+      bump ();
+      let r =
+        match Term.Map.find_opt t sigma with
+        | Some target -> target
+        | None ->
+          (match t.node with
+           | Bool_const b -> Context.bool_const ctx b
+           | Int_const n -> Context.int_const_big ctx n
+           | App (sym, args) ->
+             if Iarr.length args = 0
+             then t
+             else Context.app ctx sym (List.map go (Iarr.to_list args))
+           | Arith lin ->
+             Context.linear_combination_big
+               ctx
+               (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+               lin.const
+           | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+           | Eq (a, b) -> Context.eq ctx (go a) (go b)
+           | Not a -> Context.not_ ctx (go a)
+           | And xs -> Context.and_ ctx (List.map go (Iarr.to_list xs))
+           | Or xs -> Context.or_ ctx (List.map go (Iarr.to_list xs))
+           | Ite (c, a, b) -> Context.ite ctx (go c) (go a) (go b))
+      in
+      Term.Table.add memo t r;
+      r
+  in
+  List.map go terms
+;;
+
+(* Multiset key of a conjunct list: the sorted tag list (hash-cons tag = AC-canonical id). *)
+let symbreak_tag_multiset (terms : Term.t list) =
+  List.sort Int.compare (List.map (fun (t : Term.t) -> t.Term.tag) terms)
+;;
+
+(* [symmetry_break ctx assertions] — see the block comment. Returns extra top-level Bool
+   constraints (the lex-leader clauses) to internalize alongside the assertions; [[]] when
+   nothing is broken (byte-neutral to a no-symmetry input). *)
+let symmetry_break cap env ctx assertions =
+  let conjuncts = List.concat_map flatten assertions in
+  let base_key = symbreak_tag_multiset conjuncts in
+  let steps = ref 0 in
+  let bump () =
+    incr steps;
+    if !steps > symbreak_max_steps then raise Symbreak_budget
+  in
+  (* Fresh reserved nullary Bool aux var for the lex prefix-equal chain (an O(n) encoding
+     — the aux var is opaque, so [and (aux) atom] is a 2-input And that the AC-flattening
+     smart constructor does NOT re-expand, unlike a shared [and]-term which would blow up
+     to O(n^2) clauses). Kind ["sym"] keeps the namespace disjoint from preprocessing's
+     fresh symbols. Deterministic (I6): a fixed input yields identical names. *)
+  let counter = ref 0 in
+  let fresh_bool () =
+    let name = Printf.sprintf "%ssym.%d" Env.reserved_prefix !counter in
+    incr counter;
+    let sym = Env.declare_reserved cap env name (Rank.create [] Sort.bool) in
+    Context.app ctx sym []
+  in
+  (* is (a b) a genuine symmetry? rebuild all conjuncts under the swap and compare. *)
+  let is_symmetry a b =
+    let sigma = Term.Map.add a b (Term.Map.singleton b a) in
+    let swapped = symbreak_rebuild ctx sigma bump conjuncts in
+    List.equal Int.equal (symbreak_tag_multiset swapped) base_key
+  in
+  try
+    (* 1. Harvest distinct nullary constants (non-Bool sort) and application cells; record
+          a cheap per-constant occurrence signature (parent App symbol-hash + arg
+          position). *)
+    let const_sig = Term.Table.create 256 in
+    (* term -> (sig accumulator) *)
+    let consts = ref Term.Set.empty in
+    let cells = ref Term.Set.empty in
+    let add_sig c key =
+      let prev =
+        try Term.Table.find const_sig c with
+        | Not_found -> []
+      in
+      Term.Table.replace const_sig c (key :: prev)
+    in
+    let seen = Term.Table.create 512 in
+    let rec harvest (t : Term.t) =
+      if not (Term.Table.mem seen t)
+      then (
+        Term.Table.add seen t ();
+        bump ();
+        match t.node with
+        | App (_, args) when Iarr.length args = 0 ->
+          if not (Sort.equal t.sort Sort.bool) then consts := Term.Set.add t !consts
+        | App (sym, args) ->
+          if not (Sort.equal t.sort Sort.bool) then cells := Term.Set.add t !cells;
+          Iarr.iteri
+            (fun i a ->
+               (match a.Term.node with
+                | App (_, aargs) when Iarr.length aargs = 0 ->
+                  if not (Sort.equal a.Term.sort Sort.bool)
+                  then add_sig a (Symbol.hash sym, i)
+                | _ -> ());
+               harvest a)
+            args
+        | Arith lin -> Iarr.iter (fun (tm, _c) -> harvest tm) lin.coeffs
+        | Le a | Not a -> harvest a
+        | Eq (a, b) ->
+          harvest a;
+          harvest b
+        | And xs | Or xs -> Iarr.iter harvest xs
+        | Ite (c, a, b) ->
+          harvest c;
+          harvest a;
+          harvest b
+        | Bool_const _ | Int_const _ -> ())
+    in
+    List.iter harvest conjuncts;
+    let sig_of c =
+      List.sort
+        compare
+        (try Term.Table.find const_sig c with
+         | Not_found -> [])
+    in
+    (* 2. Group constants by sort, then refine each sort-group by signature into buckets. *)
+    let const_list = Term.Set.elements !consts in
+    (* term-tag order is Term.Set.elements order (Set uses Term.compare = tag). *)
+    let by_sort = Hashtbl.create 16 in
+    List.iter
+      (fun c ->
+         let k = Sort.hash c.Term.sort in
+         let prev =
+           try Hashtbl.find by_sort k with
+           | Not_found -> []
+         in
+         Hashtbl.replace by_sort k (c :: prev))
+      const_list;
+    let cell_list = Term.Set.elements !cells in
+    let out = ref [] in
+    let n_constraints = ref 0 in
+    (* deterministic sort-group order: by the min constant tag in the group *)
+    let sort_groups =
+      Hashtbl.fold (fun _ v acc -> List.rev v :: acc) by_sort []
+      |> List.sort (fun g1 g2 ->
+        match g1, g2 with
+        | c1 :: _, c2 :: _ -> Int.compare c1.Term.tag c2.Term.tag
+        | _ -> 0)
+    in
+    List.iter
+      (fun group ->
+         (* refine by signature *)
+         let buckets = Hashtbl.create 16 in
+         List.iter
+           (fun c ->
+              let key = sig_of c in
+              let prev =
+                try Hashtbl.find buckets key with
+                | Not_found -> []
+              in
+              Hashtbl.replace buckets key (c :: prev))
+           group;
+         let bucket_list =
+           Hashtbl.fold (fun _ v acc -> List.rev v :: acc) buckets []
+           |> List.sort (fun b1 b2 ->
+             match b1, b2 with
+             | c1 :: _, c2 :: _ -> Int.compare c1.Term.tag c2.Term.tag
+             | _ -> 0)
+         in
+         List.iter
+           (fun bucket ->
+              let n = List.length bucket in
+              if n >= 2 && n <= symbreak_consider_max
+              then (
+                let arr = Array.of_list bucket in
+                (* arr is in tag order (bucket built from tag-ordered group, rev preserves) *)
+                Array.sort (fun a b -> Int.compare a.Term.tag b.Term.tag) arr;
+                (* union-find over confirmed-transposition graph *)
+                let parent = Array.init n (fun i -> i) in
+                let rec find i = if parent.(i) = i then i else find parent.(i) in
+                let union i j =
+                  let ri = find i
+                  and rj = find j in
+                  if ri <> rj then parent.(ri) <- rj
+                in
+                for i = 0 to n - 1 do
+                  for j = i + 1 to n - 1 do
+                    if find i <> find j && is_symmetry arr.(i) arr.(j) then union i j
+                  done
+                done;
+                (* collect components in tag order *)
+                let comp = Hashtbl.create 16 in
+                for i = 0 to n - 1 do
+                  let r = find i in
+                  let prev =
+                    try Hashtbl.find comp r with
+                    | Not_found -> []
+                  in
+                  Hashtbl.replace comp r (arr.(i) :: prev)
+                done;
+                let classes =
+                  Hashtbl.fold (fun _ v acc -> List.rev v :: acc) comp []
+                  |> List.filter (fun cs -> List.length cs >= 2)
+                  |> List.sort (fun a b ->
+                    match a, b with
+                    | c1 :: _, c2 :: _ -> Int.compare c1.Term.tag c2.Term.tag
+                    | _ -> 0)
+                in
+                List.iter
+                  (fun consts_in_class ->
+                     let k = List.length consts_in_class in
+                     (* SIZE CAP (sat-safe): emit only for 2 <= k < symbreak_emit_max. *)
+                     if k >= 2 && k < symbreak_emit_max
+                     then (
+                       let cs = Array.of_list consts_in_class in
+                       (* class sort *)
+                       let csort = cs.(0).Term.sort in
+                       (* atoms = (= cell c_v) for cells of the class sort, values in class;
+                       fixed order: (cell tag, value tag), truncated to the atom cap. *)
+                       let class_cells =
+                         List.filter (fun c -> Sort.equal c.Term.sort csort) cell_list
+                       in
+                       let atoms = ref [] in
+                       let natoms = ref 0 in
+                       (try
+                          List.iter
+                            (fun cell ->
+                               Array.iter
+                                 (fun v ->
+                                    if !natoms >= symbreak_atoms_max then raise Exit;
+                                    atoms := Context.eq ctx cell v :: !atoms;
+                                    incr natoms)
+                                 cs)
+                            class_cells
+                        with
+                        | Exit -> ());
+                       let atoms = List.rev !atoms in
+                       (* full-action lex-leader for each adjacent generator (c_i c_[{i+1}]).
+                       The lex constraint A <= g(A) over the atom sequence, false<true,
+                       encoded with an O(n) prefix-equal chain of fresh aux vars: p_0 =
+                       true; for each moved atom a_j (image b_j): (p_j /\ a_j) -> b_j
+                       [lex step] p_[{j+1}] <-> (p_j /\ (a_j = b_j)) [prefix advance] *)
+                       for i = 0 to k - 2 do
+                         let a = cs.(i)
+                         and b = cs.(i + 1) in
+                         let sigma = Term.Map.add a b (Term.Map.singleton b a) in
+                         let images = symbreak_rebuild ctx sigma bump atoms in
+                         (* the atoms actually MOVED by g (a_j <> b_j); fixed atoms
+                         contribute a vacuous step and no prefix change, so they are
+                         dropped soundly. *)
+                         let seq =
+                           List.rev
+                             (List.fold_left2
+                                (fun acc atom image ->
+                                   if Term.equal atom image
+                                   then acc
+                                   else (atom, image) :: acc)
+                                []
+                                atoms
+                                images)
+                         in
+                         let m = List.length seq in
+                         let prefix = ref (Context.bool_const ctx true) in
+                         List.iteri
+                           (fun j (atom, image) ->
+                              (* (prefix /\ atom) -> image *)
+                              let lhs = Context.and_ ctx [ !prefix; atom ] in
+                              out
+                              := Context.or_ ctx [ Context.not_ ctx lhs; image ] :: !out;
+                              incr n_constraints;
+                              if !n_constraints > symbreak_constraints_max
+                              then raise Symbreak_budget;
+                              (* advance the prefix through a fresh aux var, except after the
+                             last step (its value is never read). *)
+                              if j < m - 1
+                              then (
+                                let p = fresh_bool () in
+                                let def =
+                                  Context.and_ ctx [ !prefix; Context.eq ctx atom image ]
+                                in
+                                out := Context.eq ctx p def :: !out;
+                                incr n_constraints;
+                                prefix := p))
+                           seq
+                       done))
+                  classes))
+           bucket_list)
+      sort_groups;
+    List.rev !out
+  with
+  | Symbreak_budget -> []
+;;
