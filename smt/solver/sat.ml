@@ -1220,18 +1220,25 @@ let analyze_final t p =
         Dynarray.add_last marked v)
     in
     mark (var_of_lit p);
-    (* Walk start (F2). Without CB the level-0 literals are the contiguous prefix
-       [\[0, trail_lim.(0))], so starting at [trail_lim.(0)] skips them — byte-identical.
-       Under CB [trail_lim] POSITION entries are stale (a level-0 [Implied_by] literal can
-       land AFTER a level>0 one on the out-of-order trail), so we scan the WHOLE trail;
-       this is sound and complete because the marking gate below only propagates through
-       [level > 0] literals, and a level-0 literal (never a [Decision], its reason clause
-       is all level-0) contributes nothing to the core — visiting it is a harmless no-op. *)
+    (* Walk start + level-0 skip (F2, corrected by F-core). Without CB the level-0
+       literals are the contiguous prefix [\[0, trail_lim.(0))], so starting the walk at
+       [trail_lim.(0)] skips them. Under CB [trail_lim] POSITION entries are stale (a
+       level-0 literal can land AFTER a level>0 one on the out-of-order trail), so we scan
+       the WHOLE trail but SKIP level-0 literals in the body — the exact same immunity the
+       non-CB start gives, restored by a per-literal test. This skip is load-bearing, NOT
+       a no-op: a level-0 UNIT is enqueued with reason [Decision] ([add_clause] / a
+       learned unit in [record_learnt]), so without the guard the [Decision] arm would
+       append it to [out] and [failed_assumptions] would return a SUPERSET of the
+       assumptions — a violation of the frozen sat.mli subset contract (verdict
+       unaffected; the initial [p] is the true failed assumption). Level-0 facts are
+       unconditional (derivable from the clause set alone), never part of an assumption
+       core, so skipping them is correct; the [Implied_by]/[Theory_prop] arms already mark
+       only [level > 0] premises. *)
     let start = if t.chrono then 0 else Dynarray.get t.trail_lim 0 in
     for i = Dynarray.length t.trail - 1 downto start do
       let l = Dynarray.get t.trail i in
       let v = var_of_lit l in
-      if Dynarray.get t.seen v
+      if Dynarray.get t.seen v && ((not t.chrono) || Dynarray.get t.level v > 0)
       then (
         match Dynarray.get t.reason v with
         | Decision -> Dynarray.add_last out (neg_lit l)

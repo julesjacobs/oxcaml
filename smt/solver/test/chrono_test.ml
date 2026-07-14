@@ -580,6 +580,43 @@ let test_prop_seam n =
     (!raises = 0)
 ;;
 
+(* F-core, RED-verified: [failed_assumptions] must be a SUBSET of the assumptions (frozen
+   sat.mli contract). Under CB, [analyze_final]'s whole-trail walk must SKIP level-0
+   literals; a level-0 UNIT is enqueued with reason [Decision] ([add_clause] / a learned
+   unit), so without the skip the [Decision] arm appends it to the core, returning a
+   SUPERSET.
+
+   Trigger needs >= 2 assumptions (a single-assumption failure is at decision level 0, and
+   [analyze_final] is guarded by [decision_level > 0], so it never walks): [pos a] forces
+   [a] and [pos x] forces [x] (both level-0 units, reason [Decision]); assuming [pos a] is
+   satisfied (a dummy level, raising the decision level to 1), then assuming [neg x]
+   conflicts with the forced [x] and drives [analyze_final] at level 1. Buggy CB returns
+   failed = [neg x; pos x] (the extra [pos x] is the level-0 unit wrongly added); fixed
+   returns exactly [neg x] — a subset, and still a correct singleton core. *)
+let test_failed_assumptions_subset () =
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  let x = Sat.new_var s in
+  Sat.add_clause s [ Sat.pos a ];
+  Sat.add_clause s [ Sat.pos x ];
+  let assumptions = [ Sat.pos a; Sat.neg x ] in
+  let v = Sat.solve ~assumptions s in
+  check "failed-assumptions: unsat under the conflicting assumption" (v = Sat.Unsat);
+  let failed = Sat.failed_assumptions s in
+  let key l = (Sat.var_of_lit l * 2) + if Sat.sign_of_lit l then 1 else 0 in
+  let assumed = List.map key assumptions in
+  let subset = List.for_all (fun l -> List.mem (key l) assumed) failed in
+  check
+    (Printf.sprintf
+       "failed-assumptions: core is a SUBSET of the assumptions (|failed|=%d)"
+       (List.length failed))
+    subset;
+  (* the core must still be non-empty and name the actually-failing assumption *)
+  check
+    "failed-assumptions: core names the conflicting assumption [neg x]"
+    (List.exists (fun l -> key l = key (Sat.neg x)) failed)
+;;
+
 (* Guard: this executable is meaningless unless CB is actually engaged. We cannot query
    the gate through the frozen [Sat] surface, so we assert the env directly — a green run
    then genuinely exercised the chrono paths. *)
@@ -604,6 +641,7 @@ let () =
   test_directed 3000;
   test_seam_replay 4000;
   test_prop_seam 4000;
+  test_failed_assumptions_subset ();
   test_determinism 500;
   Printf.printf "chrono_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
