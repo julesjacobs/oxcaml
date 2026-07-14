@@ -78,6 +78,18 @@ val set_relevancy : t -> Relevancy.t option -> unit
     clausifier calls this for each theory atom before solving. Idempotent by hash-cons. *)
 val intern_atom : t -> Term.t -> Oxsmt_solver.Sat.var
 
+(** [bind_bool_var_atom t term v] registers [term] — a bare nullary Bool-sorted variable
+    used as an uninterpreted-function argument — as an EUF [K_bool] theory atom bound to
+    the ALREADY-ALLOCATED SAT var [v] (its propositional variable from {!Session}), so EUF
+    binds it to true/false when [v] is assigned. Unlike {!intern_atom} it reuses [v]
+    instead of minting a fresh var, keeping ONE SAT variable per term (the model reads its
+    value from the propositional side, EUF from the same var — they cannot diverge). This
+    closes the completeness half of the Bool-cardinality rule for buried bare Bool
+    variables (combine's H2 guard), the applied-predicate analogue of which
+    {!Session.register_bool_terms} already routes through {!intern_atom}. Idempotent: a
+    no-op if [term] is already a theory atom or [v] already owns one. *)
+val bind_bool_var_atom : t -> Oxsmt_core.Term.t -> Oxsmt_solver.Sat.var -> unit
+
 (** Reset the split counter, the effort budget, and the stale model snapshot; call at the
     start of each check-sat. *)
 val begin_check : t -> unit

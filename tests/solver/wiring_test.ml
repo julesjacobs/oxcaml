@@ -1154,24 +1154,27 @@ let test_adr0010_use_history () =
     (Session.check_sat s)
 ;;
 
-(* Bool boundary (§3.6, C6 + H2 errata) at the SESSION level. IMPORTANT wiring-level
-   distinction from the ADR §6 combine-level fixtures: a bare Bool variable [b] is a
-   PROPOSITIONAL variable (a nullary Bool [App]), NOT a theory atom — so the seam
-   ({!Cdclt.on_assign}) never forwards its truth value to the combinator (only theory
-   atoms are forwarded). From the combinator's view every such [b] under [h(b)] is
-   therefore BURIED/UNBOUND — the ADR's "surfaced/bound leaf" precondition (b asserted as
-   an atom EUF sees) is not met through the wiring — so the leaf bridge cannot fire and
-   the combinator degrades via [Combine.Incomplete]. Consequently ALL
-   Bool-leaf/compound-under- UF shapes come out Unknown at the Session level (sound; the
-   ADR's UNSAT/SAT leaf verdicts are combine-test-level, where b is asserted directly to
-   the combinator). This is a documented wiring completeness gap
-   [[wiring-bool-leaf-forwarding]], never a wrong verdict, and it exercises the
-   [Incomplete] named-catch. *)
+(* Bool boundary (§3.6, C6 + H2 errata) at the SESSION level. A bare Bool variable [b] is
+   a PROPOSITIONAL variable (a nullary Bool [App]), NOT a theory atom — so the seam
+   ({!Cdclt.on_assign}) does not forward its truth value to the combinator merely by
+   virtue of being a propositional var. The Bool-cardinality completeness fix
+   ({!Session.register_bool_terms} + {!Cdclt.bind_bool_var_atom}) closes the old
+   wiring-bool-leaf-forwarding gap: a bare Bool variable used as a UF argument is now
+   bound to its propositional SAT var as an EUF [K_bool] atom, so the SAT core decides it,
+   EUF binds it to true/false, and the leaf shapes below resolve to their true verdicts
+   (formerly all degraded to a sound Unknown). Congruence + the [true <> false] axiom then
+   discharges the pigeonhole cases. A STRUCTURED Bool compound under a UF argument (e.g.
+   [h (b ∧ c)]) is a different, harder case ([Combine]'s "structured Bool compound"
+   [Incomplete], §3.6 case (ii)) and still degrades to a sound Unknown — the leaf bridge
+   names a nullary leaf, and this fix does not abstract compounds. The ADR §6
+   combine-level fixtures pin the same verdicts at the combinator unit level (where [b] is
+   asserted directly, without the session's atom binding). *)
 let test_adr0010_bool_boundary () =
   let hb s = Session.declare_fun s "h" (Rank.create [ Sort.bool ] Sort.bool) in
   let neq ctx a b = Context.not_ ctx (Context.eq ctx a b) in
-  (* leaf ¬b ∧ h(b)≠h(false): combine-level UNSAT, but at the wiring level b is a
-     propositional var not forwarded to the theory → buried → Incomplete → sound Unknown. *)
+  (* leaf ¬b ∧ h(b)≠h(false): b is bound false, so h(b)=h(false) by congruence contradicts
+     the disequality → UNSAT. Formerly a sound Unknown (b buried, not forwarded); the
+     Bool-cardinality fix now binds b and the wiring reaches the combine-level UNSAT. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let h = hb s in
@@ -1180,10 +1183,11 @@ let test_adr0010_bool_boundary () =
   Session.assert_term s (Context.not_ ctx b);
   Session.assert_term s (neq ctx (Context.app ctx h [ b ]) hfalse);
   check_verdict
-    "bool leaf ¬b ∧ h(b)≠h(false) (buried at wiring → unknown)"
-    Session.Unknown
+    "bool leaf ¬b ∧ h(b)≠h(false) (b bound false → unsat)"
+    Session.Unsat
     (Session.check_sat s);
-  (* leaf b ∧ h(b)≠h(false): likewise b is not forwarded → Unknown (buried; never Sat). *)
+  (* leaf b ∧ h(b)≠h(false): b is bound true, so h(b) may differ from h(false) → SAT.
+     Formerly a sound Unknown; the fix binds b and the wiring reaches SAT. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let h = hb s in
@@ -1192,10 +1196,12 @@ let test_adr0010_bool_boundary () =
   Session.assert_term s b;
   Session.assert_term s (neq ctx (Context.app ctx h [ b ]) hfalse);
   check_verdict
-    "bool leaf b ∧ h(b)≠h(false) (buried at wiring → unknown)"
-    Session.Unknown
+    "bool leaf b ∧ h(b)≠h(false) (b bound true → sat)"
+    Session.Sat
     (Session.check_sat s);
-  (* buried H2: h(b)≠h(true) ∧ h(b)≠h(false) → UNKNOWN (b never surfaces; Incomplete). *)
+  (* buried H2: h(b)≠h(true) ∧ h(b)≠h(false) → UNSAT (b is true or false, so h(b) collides
+     with one of h(true)/h(false) — a 3-into-2 pigeonhole). Formerly a sound Unknown (b
+     never surfaced); the fix decides b and congruence discharges the pigeonhole. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let h = hb s in
@@ -1213,8 +1219,8 @@ let test_adr0010_bool_boundary () =
        (Context.app ctx h [ b ])
        (Context.app ctx h [ Context.bool_const ctx false ]));
   check_verdict
-    "bool buried H2 h(b)≠h(true) ∧ h(b)≠h(false)"
-    Session.Unknown
+    "bool buried H2 h(b)≠h(true) ∧ h(b)≠h(false) (b decided → unsat)"
+    Session.Unsat
     (Session.check_sat s);
   (* structured compound under a UF arg: ¬b ∧ h(b∧c)≠h(false) → UNKNOWN (degrade at walk). *)
   let s = Session.create () in

@@ -445,6 +445,24 @@ let is_theory_atom (a : Term.t) =
 
 let current_selector t = List.hd t.frames
 
+(* The persistent propositional SAT var for a NON-theory atom (a nullary Bool [App] / a
+   [Bool_const]), shared per distinct hash-consed term via [prop_to_var]. A nullary Bool
+   variable is also recorded in [bool_consts] so the model carries its value. Extracted so
+   {!register_bool_terms} can obtain (or mint) the SAME var it later binds into EUF —
+   keeping one SAT variable per term. *)
+let prop_var_of t (atom : Term.t) =
+  match Term.Table.find_opt t.prop_to_var atom with
+  | Some sv -> sv
+  | None ->
+    let sv = Sat.new_var t.sat in
+    Term.Table.add t.prop_to_var atom sv;
+    (match atom.node with
+     | App (sym, args) when Iarr.length args = 0 && Sort.equal atom.sort Sort.bool ->
+       t.bool_consts <- (Symbol.name sym, sv) :: t.bool_consts
+     | _ -> ());
+    sv
+;;
+
 (* Map a clausified formula's local variable to a persistent SAT variable. Theory atoms go
    through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
    theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
@@ -460,17 +478,7 @@ let assert_clausified ?sel ~root t cnf =
       then (
         t.has_theory <- true;
         Cdclt.intern_atom t.cdclt atom)
-      else (
-        match Term.Table.find_opt t.prop_to_var atom with
-        | Some sv -> sv
-        | None ->
-          let sv = Sat.new_var t.sat in
-          Term.Table.add t.prop_to_var atom sv;
-          (match atom.node with
-           | App (sym, args) when Iarr.length args = 0 && Sort.equal atom.sort Sort.bool
-             -> t.bool_consts <- (Symbol.name sym, sv) :: t.bool_consts
-           | _ -> ());
-          sv))
+      else prop_var_of t atom)
     else (
       match local.(v) with
       | Some sv -> sv
@@ -560,46 +568,71 @@ let assert_clausified ?sel ~root t cnf =
 (* Bool-cardinality rule (TODO Predicates §2; the one sanctioned finite sort). [Bool] has
    exactly two values, so every Bool-sorted term is true or false in every model. The
    clausifier ({!Cnf.clausify}) only surfaces Bool-sorted terms it reaches through the
-   Boolean skeleton (top-level atoms + connective children); a Bool-sorted PREDICATE
-   application [p(x…)] that occurs ONLY buried in an argument position (e.g. [g (f a)]
-   with [f : S -> Bool]) gets NO SAT variable, so the SAT core never case-splits it and
-   EUF never binds it to [true_const]/[false_const] — it stays a third opaque Boolean
-   class. [n >= 3] such terms forced pairwise-distinct by congruence are then
-   pigeonhole-impossible yet the engine cannot see it: {!Combine}'s H2 guard degrades that
-   to [unknown] (sound, never wrong-SAT), but it is INCOMPLETE. This walk closes the
-   completeness half by interning every Bool-sorted [App] (arity >= 1) subterm as its own
-   theory atom, so the SAT core case-splits it (each interned var lands in the decision
-   heap) and EUF binds it — pigeonhole over the two values is then discharged by
-   congruence + the [true <> false] axiom. Interning is idempotent ([Cdclt] [t2v]), so a
-   predicate that already surfaced as a clause literal is a no-op; the only new vars are
-   the buried ones. Runs under the same try/CONTRACT-POISON discipline as clause
-   registration (an out-of-fragment atom degrades, never crashes). *)
+   Boolean skeleton (top-level atoms + connective children); a Bool-sorted term that
+   occurs ONLY buried in an uninterpreted-function ARGUMENT position gets no truth channel
+   into EUF, so it stays a third opaque Boolean class distinct from
+   [true_const]/[false_const]. When [n >= 3] such classes are forced pairwise-distinct by
+   congruence the instance is pigeonhole-impossible, yet EUF cannot see it: {!Combine}'s
+   H2 guard ([require_bool_args_bound]) degrades that to [unknown] (sound, never
+   wrong-SAT), but it is INCOMPLETE. This walk closes the completeness half by giving
+   every such buried Bool term a truth channel:
+
+   - an APPLIED Bool predicate [p(x…)] (arity >= 1) becomes its own theory atom via
+     {!Cdclt.intern_atom} (a fresh SAT var on the decision heap; EUF also propagates its
+     truth by congruence). This is the original rule.
+
+   - a BARE nullary Bool variable [b] used as a UF argument (e.g. [Concat (b, x)]) gets no
+     fresh var — it is bound via {!Cdclt.bind_bool_var_atom} to the SAME [prop_to_var] SAT
+     var that carries it propositionally, so the model reads its value from [bool_consts]
+     while EUF binds it from the identical var (one variable per term, no
+     propositional/EUF divergence). [prop_var_of] mints that var here if the variable
+     never surfaced at top level. This is the bare-variable analogue the original rule
+     missed — a nullary [App] is not a theory atom ({!is_theory_atom}), so it never
+     reached [intern_atom], and a fresh theory var would have collided with the
+     propositional one.
+
+   Pigeonhole over the two Bool values is then discharged by congruence + the
+   [true <> false] axiom. Both operations are idempotent, so a term that already surfaced
+   is a no-op. UF-argument position is tracked top-down ([~under_uf], set when descending
+   into an applied [App]'s arguments); the [seen] key includes it so a term reached both
+   buried and at top level is visited in both contexts. Runs under the same
+   try/CONTRACT-POISON discipline as clause registration (an out-of-fragment atom
+   degrades, never crashes). *)
 let register_bool_terms t (pterm : Term.t) =
-  let seen = Term.Table.create 64 in
-  let rec go (term : Term.t) =
-    if not (Term.Table.mem seen term)
+  let seen : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+  let rec go ~under_uf (term : Term.t) =
+    let key = (term.Term.tag lsl 1) lor Bool.to_int under_uf in
+    if not (Hashtbl.mem seen key)
     then (
-      Term.Table.add seen term ();
+      Hashtbl.add seen key ();
       match term.node with
       | App (_, args) ->
-        if Iarr.length args >= 1 && Sort.equal term.sort Sort.bool
-        then (
-          t.has_theory <- true;
-          ignore (Cdclt.intern_atom t.cdclt term : Oxsmt_solver.Sat.var));
-        Iarr.iter go args
+        let is_uf = Iarr.length args >= 1 in
+        if Sort.equal term.sort Sort.bool
+        then
+          if is_uf
+          then (
+            t.has_theory <- true;
+            ignore (Cdclt.intern_atom t.cdclt term : Oxsmt_solver.Sat.var))
+          else if under_uf
+          then (
+            t.has_theory <- true;
+            Cdclt.bind_bool_var_atom t.cdclt term (prop_var_of t term));
+        (* The arguments of an uninterpreted application are in UF-argument position. *)
+        Iarr.iter (go ~under_uf:is_uf) args
       | Eq (a, b) ->
-        go a;
-        go b
-      | Le a | Not a -> go a
-      | And xs | Or xs -> Iarr.iter go xs
+        go ~under_uf:false a;
+        go ~under_uf:false b
+      | Le a | Not a -> go ~under_uf:false a
+      | And xs | Or xs -> Iarr.iter (go ~under_uf:false) xs
       | Ite (c, a, b) ->
-        go c;
-        go a;
-        go b
-      | Arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
+        go ~under_uf:false c;
+        go ~under_uf:false a;
+        go ~under_uf:false b
+      | Arith l -> Iarr.iter (fun (tm, _c) -> go ~under_uf:false tm) l.coeffs
       | Bool_const _ | Int_const _ -> ())
   in
-  go pterm
+  go ~under_uf:false pterm
 ;;
 
 (* Preprocess -> clausify -> register a Bool term into the frame guarded by [sel]

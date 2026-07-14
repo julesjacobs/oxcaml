@@ -1,11 +1,14 @@
 ; codex B1 regression: Box has a single Bool field, so it has exactly two inhabitants
 ; (box false, box true). Three pairwise-distinct boxes is therefore UNSAT (pigeonhole on a
 ; 2-element field). Before the finite-Bool fix the DT model path reported a WRONG sat
-; (Dt.leaf_value lumped Bool with the unbounded Uninterp bucket). The theory does not
-; case-split Bool fields so it does not refute; the constructor-tree self-check now REJECTS
-; the model (a Bool position may not hold an Uninterp / three distinct Bools cannot exist),
-; so the verdict is a sound `unknown` — never sat. Marked :status unsat; oxsmt degrades to
-; unknown (sound, completeness gap), and MUST NOT report sat.
+; (Dt.leaf_value lumped Bool with the unbounded Uninterp bucket); the constructor-tree
+; self-check then closed the wrong-sat hole by degrading to a sound `unknown`.
+;
+; The Bool-cardinality completeness fix ({!Session.register_bool_terms} +
+; {!Cdclt.bind_bool_var_atom}) now DECIDES each bare Bool constructor argument [a]/[b]/[c]:
+; they are bound to their propositional SAT vars as EUF [K_bool] atoms, so the SAT core
+; case-splits them and congruence + the [true <> false] axiom discharges the pigeonhole.
+; The verdict is now the correct `unsat` (matching :status), never a guessed sat.
 (set-logic QF_DT)
 (set-info :status unsat)
 (declare-datatypes ((Box 0)) (((box (val Bool)))))

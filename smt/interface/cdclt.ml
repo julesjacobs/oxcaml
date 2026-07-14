@@ -252,6 +252,35 @@ let intern t ~split term =
 (* Public wrapper used by {!Session} during clausification (base-frame registration). *)
 let intern_atom t term = intern t ~split:false term
 
+(* Bind an ALREADY-ALLOCATED SAT var [v] (a nullary Bool variable's PROPOSITIONAL var,
+   minted by {!Session} in [prop_to_var]/[bool_consts]) as an EUF [K_bool] theory atom for
+   [term], so the congruence engine merges [term] with [true_const]/[false_const] when the
+   SAT core assigns [v]. This is the completeness half of the Bool-cardinality rule for a
+   BARE Bool variable used as an uninterpreted-function argument (combine.ml's H2 guard):
+   unlike an applied predicate [p(x…)] — which {!Session.register_bool_terms} routes
+   through {!intern_atom} and whose truth EUF can also propagate by congruence — a bare
+   buried Bool variable surfaces in NO clause, so without an atom binding EUF never learns
+   its truth and leaves it a third opaque Boolean class
+   ([h(b) ≠ h(true) ∧ h(b) ≠ h(false)] then wrong-degrades to [unknown]). Reusing the SAME
+   [v] as the propositional variable (rather than minting a fresh one via {!intern}) keeps
+   a single SAT variable per term: the model still reads its value from [bool_consts], and
+   EUF and the propositional skeleton can never disagree on [term]. The var is on the SAT
+   decision heap ([Sat.new_var] inserts it), so it is decided even when it occurs in no
+   clause, and [on_assign] then asserts it to EUF. Idempotent: a no-op if [term] is
+   already a theory atom or [v] already owns one. *)
+let bind_bool_var_atom t term v =
+  if (not (Term.Table.mem t.t2v term)) && not (Hashtbl.mem t.v2a v)
+  then (
+    let impl = ensure_theory t in
+    let a = Atom.fresh t.alloc in
+    Term.Table.replace t.t2v term v;
+    Hashtbl.replace t.v2a v a;
+    Hashtbl.replace t.v2term v term;
+    Atom.Table.replace t.a2v a v;
+    collect t term;
+    th_register impl a term)
+;;
+
 (* Keep one theory frame per SAT decision level (I push lazily as levels open; a dummy
    assumption level can jump the level by more than one, hence the loop). *)
 let sync_level t =
