@@ -342,8 +342,27 @@ let run_simplify_equiv () =
      configs. Widths chosen so every extract index is in range. *)
   let cc ctx m p q = Bv.concat ctx m p q in
   let ex ctx m ~i ~j p = Bv.extract ctx m ~i ~j p in
+  let ze ctx m ~n p = Bv.zero_extend ctx m ~n p in
+  let se ctx m ~n p = Bv.sign_extend ctx m ~n p in
   List.iter
     (fun w ->
+       (* O-bv1: extract of zero_extend — inside the original, in the zero fill, straddling *)
+       equiv "ext_of_zext_lo" w (fun ctx m x _ _ ->
+         ex ctx m ~i:(w - 1) ~j:0 (ze ctx m ~n:2 x));
+       equiv "ext_of_zext_fill" w (fun ctx m x _ _ ->
+         ex ctx m ~i:(w + 1) ~j:w (ze ctx m ~n:2 x));
+       equiv "ext_of_zext_straddle" w (fun ctx m x _ _ ->
+         ex ctx m ~i:w ~j:(w - 1) (ze ctx m ~n:2 x));
+       (* O-bv1: extract of sign_extend — slice fully inside the original (the fired arm)
+         and a straddle (falls to the default Bv.extract; equivalence must still hold) *)
+       equiv "ext_of_sext_lo" w (fun ctx m x _ _ ->
+         ex ctx m ~i:(w - 1) ~j:0 (se ctx m ~n:2 x));
+       equiv "ext_of_sext_straddle" w (fun ctx m x _ _ ->
+         ex ctx m ~i:w ~j:(w - 1) (se ctx m ~n:2 x));
+       (* O-bv1: adjacent contiguous extracts of the SAME base merge back (concat (extract
+         [w-1:1] x) (extract [0:0] x) = x) *)
+       equiv "concat_adjacent_ext_merge" w (fun ctx m x _ _ ->
+         cc ctx m (ex ctx m ~i:(w - 1) ~j:1 x) (ex ctx m ~i:0 ~j:0 x));
        (* extract straddling a concat seam (bits from both hi and lo) *)
        equiv "ext_of_concat_straddle" w (fun ctx m x y _ ->
          ex ctx m ~i:w ~j:(w - 2) (cc ctx m x y));

@@ -195,14 +195,26 @@ let bvwidth (t : Term.t) =
   | None -> -1
 ;;
 
-(* [norm_extract ctx mint ~i ~j x] = (extract [i:j] x), x already simplified, pushed
-   through concat/extract/const/extend to the underlying leaves. [i >= j >= 0],
-   [i < width x]. Falls back to a plain [Bv.extract] on anything it does not restructure
-   (always sound). *)
-let rec norm_extract ctx mint ~i ~j (x : Term.t) : Term.t =
+(* [norm_extract ~simp ~shared ctx mint ~i ~j x] = (extract [i:j] x). [x] is an ORIGINAL
+   (un-simplified) term; the extract is pushed through concat/extract/const/extend toward
+   the leaves, and each leaf it stops at is passed through [simp]. [i >= j >= 0],
+   [i < width x].
+
+   SHARING GATE (O-bv2, the -15/-21 scar class, same discipline as {!lin_of}): the DAG
+   blaster encodes a node referenced by more than one parent ONCE. Pushing an extract INTO
+   such a [shared] node re-expands it per extract (e.g. eq-concat splitting emits many
+   extracts of one shared concat -> O(n^2)). So at a shared node we STOP: emit a plain
+   [Bv.extract] on [simp x] and let the blaster slice the once-encoded node. Only UNSHARED
+   structure is restructured. Every arm is equivalence-preserving (certified by the
+   Layer-4 oracle); the gate is a cost guard, not a soundness one — the
+   [ext_con_004_001_1024] canary is the evidence it is load-bearing on the eq-split path. *)
+let rec norm_extract ~simp ~shared ctx mint ~i ~j (x : Term.t) : Term.t =
   let w = bvwidth x in
+  let recur = norm_extract ~simp ~shared ctx mint in
   if w >= 1 && j = 0 && i = w - 1
-  then x (* full-width extract is the identity *)
+  then simp x (* full-width extract is the identity *)
+  else if shared x
+  then Bv.extract ctx mint ~i ~j (simp x) (* do not re-expand a shared node *)
   else (
     match Bv.view x with
     | Some (Bv.Const { value; width = _ }) ->
@@ -212,21 +224,16 @@ let rec norm_extract ctx mint ~i ~j (x : Term.t) : Term.t =
     | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) ->
       let wl = bvwidth lo in
       if i < wl
-      then norm_extract ctx mint ~i ~j lo
+      then recur ~i ~j lo
       else if j >= wl
-      then norm_extract ctx mint ~i:(i - wl) ~j:(j - wl) hi
-      else
-        Bv.concat
-          ctx
-          mint
-          (norm_extract ctx mint ~i:(i - wl) ~j:0 hi)
-          (norm_extract ctx mint ~i:(wl - 1) ~j lo)
+      then recur ~i:(i - wl) ~j:(j - wl) hi
+      else Bv.concat ctx mint (recur ~i:(i - wl) ~j:0 hi) (recur ~i:(wl - 1) ~j lo)
     | Some (Bv.Op { op = Bv.Extract (_a, b); args = [ y ]; _ }) ->
-      norm_extract ctx mint ~i:(b + i) ~j:(b + j) y
+      recur ~i:(b + i) ~j:(b + j) y
     | Some (Bv.Op { op = Bv.Zero_extend _; args = [ y ]; _ }) ->
       let w0 = bvwidth y in
       if i < w0
-      then norm_extract ctx mint ~i ~j y
+      then recur ~i ~j y
       else if j >= w0
       then Bv.const ctx mint ~value:Bigint.zero ~width:(i - j + 1)
       else
@@ -234,15 +241,16 @@ let rec norm_extract ctx mint ~i ~j (x : Term.t) : Term.t =
           ctx
           mint
           (Bv.const ctx mint ~value:Bigint.zero ~width:(i - w0 + 1))
-          (norm_extract ctx mint ~i:(w0 - 1) ~j y)
+          (recur ~i:(w0 - 1) ~j y)
     | Some (Bv.Op { op = Bv.Sign_extend _; args = [ y ]; _ }) when i < bvwidth y ->
-      norm_extract ctx mint ~i ~j y
-    | _ -> Bv.extract ctx mint ~i ~j x)
+      recur ~i ~j y
+    | _ -> Bv.extract ctx mint ~i ~j (simp x))
 ;;
 
-(* Concat of adjacent constants folds; adjacent contiguous extracts of the SAME base
-   merge. Otherwise rebuild the concat on the (already-simplified) children. *)
-let norm_concat ctx mint (hi : Term.t) (lo : Term.t) : Term.t =
+(* Concat of adjacent constants folds; adjacent contiguous UNSHARED extracts of the SAME
+   base merge (a reduction, not a re-expansion). [hi]/[lo] are ORIGINAL terms; the default
+   arm rebuilds on [simp]-ed children. *)
+let norm_concat ~simp ~shared ctx mint (hi : Term.t) (lo : Term.t) : Term.t =
   match Bv.view hi, Bv.view lo with
   | Some (Bv.Const { value = vh; width = _ }), Some (Bv.Const { value = vl; width = wl })
     ->
@@ -250,8 +258,9 @@ let norm_concat ctx mint (hi : Term.t) (lo : Term.t) : Term.t =
     Bv.const ctx mint ~value:v ~width:(bvwidth hi + wl)
   | ( Some (Bv.Op { op = Bv.Extract (a, b); args = [ y1 ]; _ })
     , Some (Bv.Op { op = Bv.Extract (c, d); args = [ y2 ]; _ }) )
-    when y1 == y2 && b = c + 1 -> norm_extract ctx mint ~i:a ~j:d y1
-  | _ -> Bv.concat ctx mint hi lo
+    when y1 == y2 && b = c + 1 && (not (shared hi)) && not (shared lo) ->
+    norm_extract ~simp ~shared ctx mint ~i:a ~j:d y1
+  | _ -> Bv.concat ctx mint (simp hi) (simp lo)
 ;;
 
 (* Concat seam positions inside (0, width t): the bit indices where a concat boundary
@@ -279,12 +288,17 @@ let split_eq_concat ctx mint (a : Term.t) (b : Term.t) : Term.t =
       | x :: (y :: _ as rest) -> (x, y) :: pairs rest
       | _ -> []
     in
+    (* [a]/[b] are already simplified; slices use identity-[simp]. No sharing gate here is
+       deliberate — this eq-split path is where the re-expansion scar lives, which is why
+       it stays behind the [OXSMT_BV_REWRITE2_EQSPLIT] sub-flag (default off) with the
+       [ext_con_004_001_1024] canary as its evidence. *)
+    let ne = norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ctx mint in
     let eqs =
       List.map
         (fun (loc, hic) ->
            let j = loc
            and i = hic - 1 in
-           Context.eq ctx (norm_extract ctx mint ~i ~j a) (norm_extract ctx mint ~i ~j b))
+           Context.eq ctx (ne ~i ~j a) (ne ~i ~j b))
         (pairs bounds)
     in
     Context.and_ ctx eqs
@@ -398,11 +412,16 @@ let rewrite_bv_op ctx mint (op : Bv.op) (args : Term.t list) (w : int) : Term.t 
         blaster encodes a wire re-routing instead of a full barrel shifter. Sound by the
         SMT-LIB shift semantics (over-width shl/lshr = 0, ashr = sign). *)
      | (Bv.Bvshl | Bv.Bvlshr | Bv.Bvashr), [ x; kterm ] ->
+       (* [x] is already simplified here, so extract/concat of it uses identity-[simp] and
+          no sharing gate (the fold emits a bounded number of extracts — not the eq-concat
+          re-expansion the gate guards). *)
+       let ne = norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ctx mint in
+       let nc = norm_concat ~simp:Fun.id ~shared:(fun _ -> false) ctx mint in
        (match as_const kterm with
         | None -> rebuild ()
         | Some (kval, _) ->
           let over = Bigint.compare kval (Bigint.of_int w) >= 0 in
-          let sign_bit () = norm_extract ctx mint ~i:(w - 1) ~j:(w - 1) x in
+          let sign_bit () = ne ~i:(w - 1) ~j:(w - 1) x in
           (match Bigint.to_int_opt kval with
            | Some 0 -> x
            | _ when over ->
@@ -411,24 +430,12 @@ let rewrite_bv_op ctx mint (op : Bv.op) (args : Term.t list) (w : int) : Term.t 
               | _ -> zero_bv ctx mint w)
            | Some k when k > 0 && k < w ->
              (match op with
-              | Bv.Bvshl ->
-                norm_concat
-                  ctx
-                  mint
-                  (norm_extract ctx mint ~i:(w - 1 - k) ~j:0 x)
-                  (zero_bv ctx mint k)
-              | Bv.Bvlshr ->
-                norm_concat
-                  ctx
-                  mint
-                  (zero_bv ctx mint k)
-                  (norm_extract ctx mint ~i:(w - 1) ~j:k x)
+              | Bv.Bvshl -> nc (ne ~i:(w - 1 - k) ~j:0 x) (zero_bv ctx mint k)
+              | Bv.Bvlshr -> nc (zero_bv ctx mint k) (ne ~i:(w - 1) ~j:k x)
               | Bv.Bvashr ->
-                norm_concat
-                  ctx
-                  mint
+                nc
                   (Bv.sign_extend ctx mint ~n:(k - 1) (sign_bit ()))
-                  (norm_extract ctx mint ~i:(w - 1) ~j:k x)
+                  (ne ~i:(w - 1) ~j:k x)
               | _ -> rebuild ())
            | _ -> rebuild ()))
      | _ -> rebuild ())
@@ -469,9 +476,11 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
        | Some (Bv.Op { op = Bv.Bvadd | Bv.Bvsub | Bv.Bvneg; _ }) ->
          rebuild ctx mint (lin_of ~simp ~shared t)
        | Some (Bv.Op { op = Bv.Extract (i, j); args = [ a ]; _ }) when rewrite2 ->
-         norm_extract ctx mint ~i ~j (simp a)
+         (* pass the ORIGINAL operand: [norm_extract] walks its structure with the
+            [shared] gate and [simp]s the leaves it stops at *)
+         norm_extract ~simp ~shared ctx mint ~i ~j a
        | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) when rewrite2 ->
-         norm_concat ctx mint (simp hi) (simp lo)
+         norm_concat ~simp ~shared ctx mint hi lo
        | Some
            (Bv.Op
               { op =
