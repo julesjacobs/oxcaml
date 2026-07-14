@@ -814,9 +814,43 @@ let test_branch_filter_parity () =
   then check "branch-filter parity: same model" (Sat.model s_none = Sat.model s_all)
 ;;
 
+(* (c) EXCEPTION-SAFETY (codex S1). The filter is called mid-scan on a var already popped
+   from the decision heap. If it RAISES, [pick_branch] must still re-insert every popped
+   var — the stashed ones AND the one in flight — before the exception propagates;
+   otherwise those vars are lost from the heap and, being untrailed, are NOT restored by
+   [cancel_until 0], so a later filter-free solve on the same core can return a model that
+   omits them and falsifies a clause over them (a wrong-SAT reachable from this public
+   API). RED against the pre-fix core (which re-inserts only after [go] returns normally). *)
+let test_branch_filter_exception_safe () =
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  let b = Sat.new_var s in
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  (* Stash the first var the filter is asked about, then raise on the second: against the
+     unfixed core this loses BOTH (the stashed [a] and the in-flight [b]). *)
+  let calls = ref 0 in
+  Sat.set_branch_filter
+    s
+    (Some
+       (fun _ ->
+         incr calls;
+         if !calls >= 2 then raise Exit else false));
+  (match Sat.solve s with
+   | (_ : Sat.result) ->
+     check "branch-filter exn-safe: filter raise propagates out of solve" false
+   | exception Exit -> ());
+  (* Clear the filter and re-solve. With the fix [a] and [b] are back in the heap, so the
+     core finds a genuine model of (a ∨ b). Against the unfixed core the heap is empty and
+     the no-theory path returns Sat with a = b = false, falsifying the clause. *)
+  Sat.set_branch_filter s None;
+  check "branch-filter exn-safe: re-solve sat" (Sat.solve s = Sat.Sat);
+  check "branch-filter exn-safe: model satisfies (a ∨ b)" (Sat.value s a || Sat.value s b)
+;;
+
 let () =
   test_branch_filter_firing ();
   test_branch_filter_parity ();
+  test_branch_filter_exception_safe ();
   test_lbd_of_levels ();
   test_rephase_engagement ();
   test_reducedb_engagement ();

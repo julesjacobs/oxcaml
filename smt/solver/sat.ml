@@ -1063,25 +1063,51 @@ let pick_branch t =
     go ()
   | Some filter ->
     let stashed = ref [] in
+    (* The var just popped from the heap and not yet either stashed or returned. Held so
+       the [finally] below re-inserts it on ANY exit — crucially if [filter] RAISES while
+       deciding it: [heap_remove_max] already set its [heap_pos] to -1, so without this it
+       would be lost from the heap and, being untrailed, NOT restored by [cancel_until 0]
+       — a later filter-free solve on the same core could then return a model omitting it
+       and falsifying a clause over it (a wrong-SAT reachable from the public API; codex
+       S1 finding). [-1] means "none in flight". *)
+    let in_flight = ref (-1) in
+    let reinsert () =
+      (* Re-insert the in-flight var (if the filter raised mid-decision) and every stashed
+         (unassigned, filtered-out) var, so every var popped in this call stays in the
+         activity order. [heap_insert] no-ops a var already present; [heap_remove_max] set
+         each popped var's [heap_pos] to -1, so this restores them. Runs on the normal
+         exit too (where [in_flight = -1], a no-op) — behaviourally identical to the
+         pre-fix re-insertion when [filter] does not raise. *)
+      if !in_flight >= 0
+      then (
+        heap_insert t !in_flight;
+        in_flight := -1);
+      List.iter (fun v -> heap_insert t v) !stashed
+    in
     let rec go () =
       match heap_remove_max t with
       | None -> None
       | Some v ->
         if Dynarray.get t.assigns v <> 0
         then go () (* already assigned: drop, exactly as the no-filter loop does *)
-        else if not (filter v)
-        then (
-          (* unassigned but currently irrelevant: keep it as a future candidate *)
-          stashed := v :: !stashed;
-          go ())
-        else Some (if Dynarray.get t.polarity v then neg v else pos v)
+        else (
+          (* [v] is popped: own it via [in_flight] across the (untrusted,
+             possibly-raising) [filter] call, so the [finally] re-inserts it if [filter]
+             raises here. *)
+          in_flight := v;
+          if not (filter v)
+          then (
+            in_flight := -1;
+            (* unassigned but currently irrelevant: keep it as a future candidate *)
+            stashed := v :: !stashed;
+            go ())
+          else (
+            (* decided: it becomes the branch literal, enqueued (hence assigned, off-heap)
+               by the caller — so it is NOT re-inserted. *)
+            in_flight := -1;
+            Some (if Dynarray.get t.polarity v then neg v else pos v)))
     in
-    let picked = go () in
-    (* Re-insert every stashed (unassigned, filtered-out) var so it remains in the
-       activity order; [heap_insert] no-ops a var already present, and [heap_remove_max]
-       set each stashed var's [heap_pos] to -1, so this restores them. *)
-    List.iter (fun v -> heap_insert t v) !stashed;
-    picked
+    Fun.protect ~finally:reinsert go
 ;;
 
 let save_model t =

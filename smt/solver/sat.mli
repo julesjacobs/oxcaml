@@ -285,15 +285,32 @@ val decision_level : t -> int
     makes its unset disjuncts irrelevant, so they are not decided and cannot spuriously
     over-constrain.
 
-    {b Soundness.} The filter can only make the engine decide {e fewer} variables; it adds
-    no literal to the trail and no clause, so it cannot manufacture a conflict — an
-    [Unsat] the filtered search reaches is over genuinely-asserted literals, exactly as
-    without the filter. Handing a partial (branchable-only) assignment to the theory's
-    [Final] check means the theory/model reconstruction must total it over the unbranched
-    atoms; the session's [Final]-check / model-check path (fail-closed) is the intended
-    backstop, so a filter that wrongly marks a needed atom irrelevant degrades a query to
-    [unknown], never a wrong verdict — that soundness obligation is on the driver, not
-    this core.
+    {b Soundness — what the core does and does not guarantee.} The filter adds no literal
+    to the trail and no clause, so it cannot manufacture a conflict: an [Unsat] the
+    filtered search reaches is over genuinely-asserted literals, exactly as without the
+    filter — {b no wrong [Unsat]}, unconditionally. It is {b not}, however, safe to trust
+    a filtered [Sat] without a model check. When only filtered-out variables remain,
+    branching yields no decision and the core reports the current {e partial} assignment
+    as complete WITHOUT checking that every clause is satisfied (it hands off exactly as
+    on an exhausted VSIDS order — via the theory [Final] check, or, with no theory,
+    directly). So a filter that leaves all of some clause's literals unassigned can drive
+    the core to report [Sat] on an assignment that falsifies that clause (a wrong-[Sat]
+    reachable from this API — codex S1). Therefore any client that installs a filter MUST
+    re-validate a [Sat] against the original formula with a full (total) model check and
+    treat a failure as [unknown]; the core does not itself certify that the
+    branchable-only assignment models the clause set. oxsmt's session does this —
+    [commit_sat]'s in-process [Model_check] gates every reported [Sat], fail-closed — so a
+    filter that wrongly marks a needed atom irrelevant costs at most a query degraded to
+    [unknown], never a wrong verdict, {e for that consumer}.
+
+    {b Filter totality / exception-safety.} The filter is called mid-scan in [pick_branch]
+    on a variable already popped from the decision heap. The core is exception-safe: on
+    any exit — including the filter {e raising} — every variable popped in that call (the
+    stashed ones and the one in flight) is re-inserted into the heap before the exception
+    propagates, so no variable is lost and the heap remains complete for the next solve
+    (untrailed popped vars would otherwise NOT be restored by [cancel_until 0]). The
+    filter SHOULD nonetheless be total (a pure lookup into precomputed marks); a raise
+    degrades the surrounding solve, it does not corrupt the core.
 
     {b Certificate independence.} The trace/certificate machinery (ADR-0013 §4.0)
     validates the {e clauses} learned and the input/unit closure, never the {e order} in
