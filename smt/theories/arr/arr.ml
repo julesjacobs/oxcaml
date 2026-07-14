@@ -53,6 +53,13 @@ type t =
   ; mutable select_terms : Term.t list (* registered select applications, rev order *)
   ; select_syms :
       (string, Symbol.t) Hashtbl.t (* minted select symbols, by canonical name *)
+  ; ensured_reads : (int * int, unit) Hashtbl.t
+    (* (store term tag, index term tag) pairs for which [select store index] has already
+         been materialized by the upward read-propagation rule ([ensure_store_reads]).
+         Guards termination: each (store, index) pair triggers at most one fresh select,
+         and a fresh select's index is drawn from an existing select, so no new index is
+         ever created. Monotonic like [select_terms] (terms persist across pop; only
+         e-graph merges are backtracked). *)
   ; ext_witness : (int * int, Term.t) Hashtbl.t
     (* fresh extensionality witness index per asserted array-diseq pair (by term tags,
          orientation-normalized), reused so re-assertion after a pop is stable *)
@@ -84,6 +91,7 @@ let create ctx env cap reg =
   ; store_terms = []
   ; select_terms = []
   ; select_syms = Hashtbl.create 16
+  ; ensured_reads = Hashtbl.create 64
   ; ext_witness = Hashtbl.create 32
   ; fresh_counter = 0
   ; explain_cache = Lit.Map.empty
@@ -299,6 +307,68 @@ let assert_lit t lit =
 
 (* --- read-over-write saturation --- *)
 
+(* Upward read propagation. The read-over-write rules ([row_round] / [row_split]) relate a
+   read of a STORE, [select (store base i v) j], to a read of its BASE, [select base j].
+   But they only fire once BOTH reads exist as terms, and the only term-introduction they
+   do is the base read ([build_select ... base]) given a store read. Nothing introduces
+   the store read given only a base read — so a read of an array [a] never reaches the
+   stores built over [a]. Two symptoms, one cause:
+
+   - the storeinv shape (store(a,i,select(b,i)) = store(b,i,select(a,i)), a<>b): unsat,
+     but the disequality's witness reads [select a k]/[select b k] never reach the two
+     stores, so the store equality is never exercised and the engine wrongly saturates
+     (unsat -> unknown);
+   - satisfiable queries whose model the self-check REJECTS: the engine saturates on an
+     under-constrained arrangement (reads on the declared arrays were never propagated up
+     to the store terms mentioned by the assertions), so the extracted model does not in
+     fact satisfy the assertions.
+
+   This closes both: for every store [st = store base i v] and every read [select arr j]
+   whose array [arr] is congruent to the store's [base], materialize [select st j]. The
+   existing round/split then relates it to [select base j] (i = j entailed => select st j
+   = v, else the guarded [row_split]).
+
+   Cost is controlled by WHEN this runs, not by restricting which indices it fires at:
+   [check] calls it only at [Final], once ordinary ROW saturation is otherwise clean and
+   quiet (see [final_introduce_reads]). A query that refutes during propagation never
+   reaches that point, so its fast refutation is untouched; the reads (and the
+   [row_split]s they spawn) are paid for only on a branch that survives to a full,
+   otherwise-consistent assignment — exactly where a store equality would otherwise go
+   unexercised. Running this eagerly inside [saturate] at every effort instead was
+   measured to flood deep store chains (swap/storecomm: ~22 nested stores) with case
+   splits and net out to a wash.
+
+   Termination: each (store term, index term) pair fires at most once ([ensured_reads]); a
+   fresh read's index [j] is an existing index term, so no new index — hence no new
+   (store,index) pair — is ever created. The introduction walks up a store chain across
+   rounds: reading a base introduces a read of the store over it, which is itself the base
+   of the next store, and so on. *)
+let ensure_store_reads t ~changed =
+  List.iter
+    (fun st ->
+       match head_args st with
+       | Some (_, [| base; _i; _v |])
+         when match role_of t st with
+              | Some { Defs.role = Defs.Store; _ } -> true
+              | _ -> false ->
+         List.iter
+           (fun sel ->
+              match head_args sel with
+              | Some (_, [| arr; j |])
+                when role_of t sel <> None && Euf.are_equal t.engine arr base ->
+                let key = st.Term.tag, j.Term.tag in
+                if not (Hashtbl.mem t.ensured_reads key)
+                then (
+                  Hashtbl.replace t.ensured_reads key ();
+                  match build_select t st j with
+                  | Some _ -> changed := true
+                  | None -> ())
+              | _ -> ())
+           t.select_terms
+       | _ -> ())
+    t.store_terms
+;;
+
 (* One ROW pass: for each select term [sel = select arr j] and each store term
    [st = store base i v] with [arr] congruent to [st], propagate the ENTAILED ROW
    equality. Only the definite direction ([i = j] known ⇒ sel = v) is propagated here; the
@@ -442,6 +512,30 @@ let conflict_of prems =
   Theory.Conflict { Explanation.premises; rule = Explanation.Rule_tag.Euf_congruence }
 ;;
 
+(* At [Final] only, after ordinary ROW saturation is clean and quiet: introduce the upward
+   witness reads ([ensure_store_reads]) and re-saturate. Deferring the introduction to
+   [Final] — rather than running it eagerly in [saturate] at every effort — is the
+   difference between +completeness with no regression and a net wash: a query that
+   refutes during propagation never reaches here, so its fast refutation is untouched; the
+   witness reads (and the [row_split]s they spawn) are paid for only on a branch that
+   survives to a full, otherwise-consistent assignment, which is exactly where the store
+   equality would otherwise go unexercised. Returns a re-saturation verdict (conflict /
+   propagations) if the new reads forced one; otherwise [None] to fall through to
+   [row_split]/[Sat]. *)
+let final_introduce_reads t : Theory.check_result option =
+  let changed = ref false in
+  ensure_store_reads t ~changed;
+  if not !changed
+  then None
+  else (
+    match saturate t with
+    | Some prems -> Some (conflict_of prems)
+    | None ->
+      (match collect_propagations t with
+       | _ :: _ as lits -> Some (Theory.Propagations lits)
+       | [] -> None))
+;;
+
 let check t effort =
   match saturate t with
   | Some prems -> conflict_of prems
@@ -451,9 +545,12 @@ let check t effort =
      | _ :: _, _ -> Theory.Propagations lits
      | [], Theory.Propagate -> Theory.Propagations []
      | [], Theory.Final ->
-       (match row_split t with
-        | Some terms -> Theory.Split terms
-        | None -> Theory.Sat))
+       (match final_introduce_reads t with
+        | Some result -> result
+        | None ->
+          (match row_split t with
+           | Some terms -> Theory.Split terms
+           | None -> Theory.Sat)))
 ;;
 
 let explain t lit =
