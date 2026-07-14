@@ -204,12 +204,19 @@ type 'p t =
        [sep_wit_m] is the e-node count at the last build ([0] = invalid): the packing key
        [lo*m+hi] uses it, and equality with the current e-node count proves no [register]
        (count grows) or [pop] (count shrinks, and would leave popped ids unsafe to [find])
-       has happened since — so every stored diseq id is still in bounds. A hit is
-       re-verified ([find] of the cached diseq's endpoints must still equal the queried
-       roots) before use, so a merge that moved roots since the build can never yield a
-       wrong witness — it falls back to the full scan. Not trailed: [pop] sets
-       [sep_wit_m <- 0] (belt-and-suspenders; the count-equality gate already fails after
-       a pop). *)
+       has happened since — so every stored diseq id is still in bounds. INVALIDATION is
+       the load-bearing correctness mechanism: [merge] (roots move) and [pop] set
+       [sep_wit_m <- 0], and the count-equality gate catches [register]/[pop], so the
+       cache is only ever consulted in the propagate→explain window where it holds the
+       current, earliest-asserted witness. The per-hit re-verify ([find] of the cached
+       diseq's endpoints must still equal the queried roots, else full-scan fallback) is
+       DEFENSE-IN-DEPTH over that invalidation, not load-bearing: with the invalidation
+       the cache is never consulted stale, so no functional/public-API test can
+       distinguish dropping the re-verify (fable's review executed that mutant — euf-test,
+       counted-identity, and a randomized push/pop oracle all stayed green), which is
+       itself the proof it is non-load-bearing. It is kept as a cheap fail-safe on the
+       wrong-verdict surface, guarding against a future root-mutating path added without
+       invalidation. Not trailed. *)
     sep_wit : 'p diseq Int_set.t
   ; mutable sep_wit_m : int
   }
@@ -661,13 +668,17 @@ let explain_core t a b =
      normalizes each visited unordered pair [{x,y}] and packs it into one [int] key
      [lo*m+hi] — the same injective packing the separated-class index uses ([m] = e-node
      count, stable because [explain_core] never merges or registers). Distinct pairs give
-     distinct keys while [m <= 2^31] (asserted below; dev/debug guard, compiled out under
-     release [-noassert] where the bound is physically unreachable — ~155 GB of e-nodes).
-     Same semantics. *)
+     distinct keys while [m <= 2^31] (guarded below by an explicit fail-closed raise; the
+     bound is physically unreachable — ~155 GB of e-nodes). Same semantics. *)
   let out_seen = Int_set.create 32 in
   let explained = Int_set.create 32 in
   let m = Dynarray.length t.enodes in
-  assert (m <= 1 lsl 31);
+  (* Fail CLOSED if the packing precondition is ever violated: [assert] is elided under
+     the release [-noassert] build, so an explicit raise is used instead — an overflowed
+     [lo*m+hi] could alias two pairs and mis-deduplicate the explanation walk. The raise
+     degrades to a sound [Unknown] via the solve firewall's catch-all
+     ({!Session.raw_solve}), never a silently wrong explanation. Unreachable in practice. *)
+  if m > 1 lsl 31 then invalid_arg "Euf.explain_core: e-node count exceeds packing bound";
   let pack lo hi = (lo * m) + hi in
   let pending = Queue.create () in
   Queue.add (a, b) pending;
@@ -802,12 +813,15 @@ let check t =
    distinct-propagation): consult [t.sep_wit], the witness index {!propagate} builds while
    scanning every diseq. It is usable only when its build-time e-node count still matches
    (no [register]/[pop] since, so every stored id is in bounds and the [lo*m+hi] key is
-   the one it was stored under) and both queried roots are [< m]. A hit is RE-VERIFIED —
-   the cached diseq's endpoints must still [find] to the queried roots — so a merge that
-   moved roots since the build cannot yield a wrong witness. Any
-   miss/verify-fail/gate-fail falls back to the authoritative full scan (which also covers
-   a diseq asserted since the build, which the index would lack). Same result as the scan
-   in every case (a completeness fast path over a sound fallback), so output is unchanged. *)
+   the one it was stored under) and both queried roots are [< m]. Correctness rests on the
+   INVALIDATION ([merge]/[pop] zero [sep_wit_m]; the count gate catches [register]/[pop]):
+   the cache is only ever consulted fresh, holding the earliest-asserted witness, so it
+   returns exactly what the scan would. The per-hit re-verify (cached diseq's endpoints
+   must still [find] to the queried roots, else fall back) is DEFENSE-IN-DEPTH over that
+   invalidation, not load-bearing — see the [sep_wit] field doc. Any miss/verify-fail/
+   gate-fail falls back to the authoritative full scan (which also covers a diseq asserted
+   since the build, which the index would lack). Same result as the scan in every case (a
+   fast path over a sound fallback), so output is unchanged. *)
 let distinct_witness t a b =
   let ra = find t a
   and rb = find t b in
@@ -905,21 +919,22 @@ let propagate t =
     (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
        [m = #e-nodes]. Every rep is an e-node id in [0, m), so distinct pairs give distinct
        keys UNLESS the packing wraps: OCaml [int] arithmetic is mod 2^63, so injectivity
-       holds only for [m < floor (sqrt (2^63)) ~ 3.037e9]; the [assert] below enforces the
-       stricter [m <= 2^31], well inside that bound, so a wrap can never alias two pairs
-       (see the assert's fail-closed note). No merge happens inside [propagate], so [m] and
+       holds only for [m < floor (sqrt (2^63)) ~ 3.037e9]; the fail-closed check below
+       enforces the stricter [m <= 2^31], well inside that bound, so a wrap can never alias
+       two pairs. No merge happens inside [propagate], so [m] and
        every [find] are stable for the whole call; the build and lookup loops therefore use
        the same [m]. *)
     let m = Dynarray.length t.enodes in
     (* [m] is fixed for the whole call (no merge inside [propagate]). Guard the packing's
        injectivity precondition once here: keys alias only once [lo*m+hi] wraps mod 2^63,
-       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We assert the STRICTER [m <= 2^31] as
-       a DEV/DEBUG-profile guard (fail closed: raise, never a wrong distinct-propagation).
-       Under release, [main/dune] passes [-noassert], so this assert is COMPILED OUT of
-       the promotable binary; release-binary safety rests on the PHYSICAL UNREACHABILITY
-       of the bound — [m > 2^31] e-nodes would need ~155 GB, unreachable in any real solve
-       — not on the assert firing. *)
-    assert (m <= 1 lsl 31);
+       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We enforce the STRICTER [m <= 2^31]
+       with an EXPLICIT fail-closed raise (NOT [assert], which [main/dune]'s release
+       [-noassert] would compile out of the promotable binary): an overflowed key could
+       alias two pairs and yield a wrong distinct-propagation (the wrong-verdict
+       direction), so we raise instead — degrading to a sound [Unknown] via the solve
+       firewall's catch-all ({!Session.raw_solve}) — rather than relying on the assert
+       firing. The bound is also physically unreachable ([m > 2^31] e-nodes ~ 155 GB). *)
+    if m > 1 lsl 31 then invalid_arg "Euf.propagate: e-node count exceeds packing bound";
     t.sep_wit_m <- m;
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter

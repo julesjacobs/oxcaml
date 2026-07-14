@@ -337,17 +337,17 @@ let test_propagation () =
    disequalities separate the same class pair, the cited witness must be the
    EARLIEST-asserted one — byte-identical to the old full assertion-order scan — so
    explanation premises (hence learned clauses / counted-metric identity) are unchanged by
-   the cache. Here [c1<>c2 :20] asserted first (then a=c1:21, b=c2:22) and a redundant
-   [a<>b :40] asserted later both separate class(a) from class(b); [propagate] builds the
-   witness index and the reported [a=b]-false explanation must cite the FIRST witness,
-   giving
-   {20 ;21;22}
-   , NOT
-   {40}
-   . DISCRIMINATION: a last-writer-wins index (or one that drops the re-verify and serves
-   a stale entry) would cite [40] and yield explanation
-   {40}
-   — this check goes RED. Verified RED against a last-wins mutation before landing. *)
+   the cache. Here diseq [c1<>c2] (premise 20) is asserted first (then a=c1:21, b=c2:22)
+   and a redundant [a<>b] (premise 40) later; both separate class(a) from class(b).
+   [propagate] builds the witness index and the reported [a=b]-false explanation must cite
+   the FIRST witness — premises 20,21,22 — NOT premise 40. DISCRIMINATION: a
+   LAST-writer-wins index cites 40 and yields explanation [40]; this check goes RED
+   (verified RED against a last-wins mutation before landing). It does NOT catch a dropped
+   re-verify: with the merge/pop/count invalidation the cache is never consulted stale, so
+   the re-verify is defense-in-depth, not load-bearing — that a public-API discrimination
+   test for it cannot be built is itself the proof it is non-load-bearing (fable's review
+   executed the drop-re-verify mutant: euf-test + counted-identity + a randomized push/pop
+   oracle all stayed green). *)
 let test_distinct_witness_first_wins () =
   let _env, _u, _unary, konst = make_env () in
   let ctx = Context.create _env in
