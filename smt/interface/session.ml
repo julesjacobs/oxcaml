@@ -922,21 +922,35 @@ let splice_elim_defs t (sort_cards, bindings) =
   match t.elim_defs with
   | [] -> sort_cards, bindings
   | _ :: _ ->
+    (* Every re-derivation evaluates [d.value] under the model built so far. Rather than
+       rebuild the evaluator's tables from the growing binding list per def (O(defs x
+       bindings) — the SMPT quadratic), build them ONCE and mutate them in lockstep with
+       [acc]: each Const added to [acc] is also written into [tbls], so [eval_in] reads
+       the same model [(sort_cards, !acc)] would. Only Const bindings are ever added here
+       (free-variable defaults and re-derived def values are both nullary), so [add_const]
+       covers every mutation; [bound] still tracks membership for the default guard. Names
+       across the originals and the added bindings are unique — an eliminated def
+       references only SURVIVING variables (w1b design note), so a def name never
+       coincides with a free-variable default, and the default guard makes each default
+       at-most-once — so the last-writer-wins table is unaffected by the incremental order
+       (byte-identical model to the former per-def rebuild). *)
     let bound = Hashtbl.create 64 in
     List.iter (fun b -> Hashtbl.replace bound (name_of b) ()) bindings;
+    let tbls = Model_check.tables_of_bindings bindings in
     let acc = ref bindings in
-    let add b =
-      acc := b :: !acc;
-      Hashtbl.replace bound (name_of b) ()
+    let add_const name v =
+      acc := Const (name, v) :: !acc;
+      Hashtbl.replace bound name ();
+      Model_check.add_const tbls name v
     in
     List.iter
       (fun (d : Presolve.def) ->
          List.iter
            (fun (name, sort) ->
-              if not (Hashtbl.mem bound name) then add (Const (name, default_value sort)))
+              if not (Hashtbl.mem bound name) then add_const name (default_value sort))
            (free_var_leaves d.Presolve.value);
-         match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
-         | Some v -> add (Const (d.Presolve.name, v))
+         match Model_check.eval_in tbls d.Presolve.value with
+         | Some v -> add_const d.Presolve.name v
          | None -> ())
       (List.rev t.elim_defs);
     sort_cards, !acc

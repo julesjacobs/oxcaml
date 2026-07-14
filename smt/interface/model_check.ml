@@ -86,7 +86,18 @@ let ev_with
   ev
 ;;
 
-let build_tables (bindings : Cdclt.binding list) =
+(* The evaluator's lookup tables: nullary consts and function/predicate tables, both keyed
+   by symbol name. Building them from a binding list is O(n); once built they are reused
+   across every evaluation, so a caller that evaluates many terms against a growing model
+   (the W1b eliminated-variable re-derivation) can keep ONE set of tables and mutate it in
+   place ([add_const]) rather than rebuilding per evaluation (which was O(defs x bindings)
+   overall — the SMPT quadratic). *)
+type tables =
+  { consts : (string, Cdclt.value) Hashtbl.t
+  ; funs : (string, Cdclt.fun_table) Hashtbl.t
+  }
+
+let tables_of_bindings (bindings : Cdclt.binding list) =
   let consts : (string, Cdclt.value) Hashtbl.t = Hashtbl.create 64 in
   let funs : (string, Cdclt.fun_table) Hashtbl.t = Hashtbl.create 64 in
   List.iter
@@ -94,26 +105,34 @@ let build_tables (bindings : Cdclt.binding list) =
       | Cdclt.Const (n, v) -> Hashtbl.replace consts n v
       | Cdclt.Fun (n, tbl) -> Hashtbl.replace funs n tbl)
     bindings;
-  consts, funs
+  { consts; funs }
+;;
+
+let add_const tbls name v = Hashtbl.replace tbls.consts name v
+
+(* [eval_in tbls t] is [Some v] when [t] evaluates to [v] under the tables, else [None]
+   (any missing binding / type error / overflow). Same fail-closed / overflow-guarded
+   [ev_with] as {!check}. *)
+let eval_in tbls t =
+  match ev_with tbls.consts tbls.funs t with
+  | v -> Some v
+  | exception Bad -> None
 ;;
 
 (* [check (sorts, bindings) assertions] is [true] iff every assertion evaluates to
    [VBool true] under the candidate model. Fail-closed: [false] on any evaluation fault. *)
 let check ((_sorts : Cdclt.sort_card list), (bindings : Cdclt.binding list)) assertions =
-  let consts, funs = build_tables bindings in
-  let ev = ev_with consts funs in
+  let tbls = tables_of_bindings bindings in
+  let ev = ev_with tbls.consts tbls.funs in
   try List.for_all (fun a -> as_bool (ev a)) assertions with
   | Bad -> false
 ;;
 
 (* [eval_value model t] is [Some v] when [t] evaluates to [v] under [model], else [None]
    (any missing binding / type error / overflow). Same fail-closed / overflow-guarded
-   evaluator as {!check}, exposed for the W1b presolve's eliminated-variable re-derivation
-   (session.ml): a value it cannot compute leaves the variable unbound, so R1 then rejects
-   the model — never a wrong value. *)
+   evaluator as {!check}. Builds the tables fresh; callers that evaluate many terms
+   against an evolving model should instead hold a {!tables} and use {!eval_in} /
+   {!add_const}. *)
 let eval_value ((_sorts : Cdclt.sort_card list), (bindings : Cdclt.binding list)) t =
-  let consts, funs = build_tables bindings in
-  match ev_with consts funs t with
-  | v -> Some v
-  | exception Bad -> None
+  eval_in (tables_of_bindings bindings) t
 ;;
