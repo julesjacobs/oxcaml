@@ -1114,6 +1114,89 @@ let test_notify_equality () =
   | Lia.Conflict _ -> check "notify: x0=x0 tautology is a no-op (still sat)" false
 ;;
 
+(* GCD / Diophantine integer-feasibility test. Each case is ℚ-FEASIBLE (so [Lia.check]
+   returns [Sat_candidate]); the conflict is purely integer, exactly the state b&b would
+   otherwise wander on. Discriminating throughout: a solver WITHOUT the test returns
+   [Sat_candidate]/[None] on every infeasible case here. *)
+let test_diophantine () =
+  print_endline "diophantine (gcd) integer-feasibility:";
+  let pin fx i v =
+    ignore (assert_le fx [ i, 1 ] (-v) ~polarity:true : int);
+    (* xi <= v *)
+    ignore (assert_le fx [ i, -1 ] v ~polarity:true : int)
+    (* xi >= v *)
+  in
+  let assert_eq fx lhs rhs =
+    Lia.assert_atom
+      fx.solver
+      (Context.eq fx.ctx lhs rhs)
+      ~polarity:true
+      ~premise:fx.next_tok;
+    fx.next_tok <- fx.next_tok + 1
+  in
+  let is_some = function
+    | Some _ -> true
+    | None -> false
+  in
+  (* (a) DIRECT: pin x0=6; assert 4·x1 + 4·x2 = x0. ℚ-feasible (x1=1.5), ℤ-infeasible
+         (gcd(4,4)=4 ∤ 6). *)
+  (let fx = make_fixture 3 in
+   pin fx 0 6;
+   assert_eq
+     fx
+     (Context.linear_combination fx.ctx [ 4, fx.vars.(1); 4, fx.vars.(2) ] 0)
+     fx.vars.(0);
+   check
+     "dio: 4x1+4x2=6 is ℚ-feasible (rational check does NOT catch it)"
+     (match Lia.check fx.solver with
+      | Lia.Sat_candidate -> true
+      | Lia.Conflict _ -> false);
+   check
+     "dio: 4x1+4x2=6 (gcd 4 ∤ 6) ⇒ conflict"
+     (is_some (Lia.diophantine_conflict fx.solver)));
+  (* (b) FEASIBLE control: pin x0=8; 4·x1 + 4·x2 = 8 has integer solutions (gcd 4 | 8) ⇒
+     the test must NOT fire (no over-firing / wrong unsat). *)
+  (let fx = make_fixture 3 in
+   pin fx 0 8;
+   assert_eq
+     fx
+     (Context.linear_combination fx.ctx [ 4, fx.vars.(1); 4, fx.vars.(2) ] 0)
+     fx.vars.(0);
+   check
+     "dio: 4x1+4x2=8 (gcd 4 | 8) ⇒ NO conflict (feasible, no over-firing)"
+     (not (is_some (Lia.diophantine_conflict fx.solver))));
+  (* (c) TRANSITIVE closure (the crux — the family's real shape): pin x0=0 directly;
+     assert x1 = x0 + 6 (so x1 is fixed to 6 THROUGH the equation, NOT a direct bound);
+     assert 4·x2 + 4·x3 = x1. Only the fixed-point closure over the equation system
+     substitutes x1; a direct-bounds-only test would miss it. *)
+  (let fx = make_fixture 4 in
+   pin fx 0 0;
+   assert_eq fx (Context.linear_combination fx.ctx [ 1, fx.vars.(0) ] 6) fx.vars.(1);
+   assert_eq
+     fx
+     (Context.linear_combination fx.ctx [ 4, fx.vars.(2); 4, fx.vars.(3) ] 0)
+     fx.vars.(1);
+   check
+     "dio: transitive x1=x0+6 (x0=0) then 4x2+4x3=x1 ⇒ conflict via closure"
+     (is_some (Lia.diophantine_conflict fx.solver)));
+  (* (d) push/pop: the infeasible equation asserted inside a pushed scope is dropped on
+     [pop], so the test no longer fires (eq_frames framing). *)
+  let fx = make_fixture 3 in
+  pin fx 0 6;
+  Lia.push fx.solver;
+  assert_eq
+    fx
+    (Context.linear_combination fx.ctx [ 4, fx.vars.(1); 4, fx.vars.(2) ] 0)
+    fx.vars.(0);
+  check
+    "dio: conflict present inside pushed scope"
+    (is_some (Lia.diophantine_conflict fx.solver));
+  Lia.pop fx.solver 1;
+  check
+    "dio: after pop, the scoped equation is gone ⇒ NO conflict"
+    (not (is_some (Lia.diophantine_conflict fx.solver)))
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -1131,6 +1214,7 @@ let () =
   test_determinism ();
   test_determinism_big ();
   test_notify_equality ();
+  test_diophantine ();
   Printf.printf "\nlia self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

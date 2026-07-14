@@ -467,18 +467,37 @@ let test_model_excludes_witnesses () =
   | v, _ -> check ("ite witness: expected sat+model, got " ^ verdict_str v) false
 ;;
 
-(* Split-budget exhaustion (W-2): 2x=1 forces a branch-and-bound split; a budget of 0
-   refuses the first split → sound [Unknown] with [budget_exhausted], and the session
-   stays degraded (sticky). Drives the exact budget firewall path deterministically. *)
+(* Split-budget exhaustion (W-2): a Nelson-Oppen combination split drives the firewall.
+   [x = y + 1 ∧ y = 0 ∧ g(x) ≠ g(1)]: LIA fixes x = 1 but does not propagate that to the
+   congruence child, so the models disagree on [x = 1] and the combinator emits a
+   trichotomy split; a [split_budget] of 0 refuses that first split → sound [Unknown] with
+   [budget_exhausted], and the session stays degraded (sticky).
+
+   (An earlier version used the pure-arithmetic [2x = 1]; that is now refuted before any
+   branch — as an equality by the Diophantine gcd test, or as a bound pair by the existing
+   gcd tightening of order atoms — so it no longer reaches the split path. A combination
+   split is independent of both and exercises the budget firewall deterministically.) *)
 
 let test_split_budget_exhaustion () =
   let s = Session.create ~split_budget:0 () in
   let ctx = Session.context s in
+  let g = Session.declare_fun s "g" (Rank.create [ Sort.int ] Sort.int) in
   let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  Session.assert_term s (Context.eq ctx x (Context.add ctx y (Context.int_const ctx 1)));
+  Session.assert_term s (Context.eq ctx y (Context.int_const ctx 0));
   Session.assert_term
     s
-    (Context.eq ctx (Context.mul_const ctx 2 x) (Context.int_const ctx 1));
-  check_verdict "budget 0: 2x=1 -> unknown" Session.Unknown (Session.check_sat s);
+    (Context.not_
+       ctx
+       (Context.eq
+          ctx
+          (Context.app ctx g [ x ])
+          (Context.app ctx g [ Context.int_const ctx 1 ])));
+  check_verdict
+    "budget 0: N-O split refused -> unknown"
+    Session.Unknown
+    (Session.check_sat s);
   check "budget_exhausted flag set" (Session.budget_exhausted s);
   check "no model after budget unknown" (Session.get_model s = None);
   (* sticky: a later check stays unknown even with a further (feasible) assertion. *)

@@ -19,6 +19,15 @@
 
 open Oxsmt_core
 
+(* GCD / Diophantine integer-feasibility test before b&b branching. Default ON; set
+   OXSMT_NO_DIOPHANTINE to disable (A/B). Read once (module scope is fine — no term/id
+   currency, just a boolean policy). *)
+let diophantine_on =
+  match Sys.getenv_opt "OXSMT_NO_DIOPHANTINE" with
+  | None | Some ("0" | "false" | "no" | "") -> true
+  | Some _ -> false
+;;
+
 type t =
   { lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
@@ -204,6 +213,17 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
             not the discarded [Eq v ¬Eq] tautology). *)
          (match Lia.suggest_branch t.lia with
           | None -> Fabric.Sat
+          | Some (le_atom, ge_atom) when diophantine_on ->
+            (* Integer-feasibility (GCD) test before branching: a ℚ-feasible but
+               ℤ-infeasible equality row (e.g. [4s+4x=6]) is refuted here immediately
+               rather than left to b&b, which would otherwise wander. Sound conflict
+               (premises are ℤ-unsatisfiable); on [None] proceed exactly as before. *)
+            (match Lia.diophantine_conflict t.lia with
+             | Some c -> Fabric.Conflict (fabric_conflict_explanation c)
+             | None ->
+               (match Lia.cube_model t.lia with
+                | Some _ -> Fabric.Sat
+                | None -> Fabric.Split [ le_atom; ge_atom ]))
           | Some (le_atom, ge_atom) ->
             (* Before branching, try the Bromberger-Fleury unit cube test: a fat feasible
                region yields an integer model in one shrink+re-solve, skipping b&b (which

@@ -82,6 +82,11 @@ type 'tok t =
          at the current Final; read once by [model] (the adapter reads it immediately
          after the Final->Sat). Cleared at the start of every [check] so it can never
          satisfy a later, non-cube Sat with a stale point. *)
+  ; mutable eq_frames : (Term.t * Term.t * 'tok) list list
+    (* push/pop stack (head = current frame) of asserted positive Int equalities as
+         [(lhs, rhs, premise)], mirroring [report_frames]' framing so a [pop] drops
+         exactly the equalities asserted in the unwound frames. Read by
+         {!diophantine_conflict}. *)
   ; mutable cube_tried : bool
     (* the cube test runs at most ONCE per instance — the first non-integral Final, which
      for a batch query is the b&b root (fat feasible regions are cracked there). This
@@ -107,6 +112,7 @@ let create ctx =
   ; check_dirty = true
   ; overflows = 0
   ; last_cube_model = None
+  ; eq_frames = [ [] ]
   ; cube_tried = false
   }
 ;;
@@ -199,13 +205,13 @@ type equality_reading =
   | Trivially_true
   | Trivially_false
 
-let equality_reading t (a : Term.t) (b : Term.t) : equality_reading =
-  (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
+(* The merged linear form of [a = b]: [Σ coeff·x = rhs] with [rhs = cb - ca], over
+   problem-var ids, exact [Rational] coefficients (never wraps). Shared by
+   {!equality_reading} (the simplex bound translation) and {!diophantine_conflict} (the
+   integer-feasibility test), so both read the SAME normalized combo. *)
+let equality_merged t (a : Term.t) (b : Term.t) : (int * Rational.t) list * Rational.t =
   let pa, ca = combo_of_term t a in
   let pb, cb = combo_of_term t b in
-  (* Coefficient merges are exact [Rational] arithmetic (never wraps, promotes to Big), so
-     a coefficient sum of any size stays a correct merged constraint (supersedes the
-     pre-W2 int-boundary degrade of codex L5). *)
   let merged =
     let tbl = Hashtbl.create 16 in
     let cur x =
@@ -216,14 +222,19 @@ let equality_reading t (a : Term.t) (b : Term.t) : equality_reading =
     List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.sub (cur x) c)) pb;
     Hashtbl.fold (fun x c acc -> if Rational.is_zero c then acc else (x, c) :: acc) tbl []
   in
+  merged, Rational.sub cb ca
+;;
+
+let equality_reading t (a : Term.t) (b : Term.t) : equality_reading =
+  (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
+  let merged, rhs_rat = equality_merged t a b in
   match merged with
   | [] ->
-    (* no variable term: the equality is the constant relation [0 = cb - ca] *)
-    if Rational.equal ca cb then Trivially_true else Trivially_false
+    (* no variable term: the equality is the constant relation [0 = rhs] *)
+    if Rational.is_zero rhs_rat then Trivially_true else Trivially_false
   | _ :: _ ->
     let var = var_for_combo t merged in
-    (* rhs = -(ca - cb) = cb - ca *)
-    let rhs = Delta.of_rat (Rational.sub cb ca) in
+    let rhs = Delta.of_rat rhs_rat in
     Bounds [ var, `Upper, rhs; var, `Lower, rhs ]
 ;;
 
@@ -281,6 +292,16 @@ let assert_atom t atom ~polarity ~premise =
   ensure_live t;
   (* A new/tightened bound can make the tableau infeasible -> the next [check] must run. *)
   t.check_dirty <- true;
+  (* Record a positive Int equality for the integer-feasibility (gcd) test. Only the
+     positive polarity is a genuine equation [a = b]; a negated equality raises
+     [Unsupported] below (it is resolved by a trichotomy split, never asserted here). The
+     record is framed like [report_frames] so [pop] drops exactly this scope's equations. *)
+  (match (atom : Term.t).node with
+   | Eq (a, b) when polarity && not (Sort.equal a.sort Sort.bool) ->
+     (match t.eq_frames with
+      | fr :: rest -> t.eq_frames <- ((a, b, premise) :: fr) :: rest
+      | [] -> t.eq_frames <- [ [ a, b, premise ] ])
+   | _ -> ());
   guard_overflow t (fun () ->
     apply_bounds t (constraints_of_atom t atom ~polarity) ~premise)
 ;;
@@ -530,6 +551,140 @@ let fixed_bounds t term =
   | Some (lo_tok, lv), Some (up_tok, uv) when Rational.equal lv uv ->
     Some (lv, lo_tok, up_tok)
   | _ -> None
+;;
+
+(* Integer-feasibility (GCD / Diophantine) test on a single asserted equality.
+
+   The rational simplex certifies ℚ-feasibility, but an equation like [4·s + 4·x = 6] is
+   ℚ-feasible ([s=1.5]) while ℤ-INFEASIBLE (its integer combinations are multiples of
+   [gcd(4,4)=4], which does not divide 6). Without this test the b&b driver
+   ({!suggest_branch}) wanders indefinitely on such a row. This is a standard sound
+   integer-infeasibility certificate, ORTHOGONAL to the (refuted) cross-theory propagation
+   levers: it only ever REPORTS A CONFLICT on a genuinely ℤ-infeasible state; it never
+   merges classes, injects atoms, or otherwise perturbs the search.
+
+   For each recorded positive Int equality [Σ cᵢ·xᵢ = rhs], substitute every variable the
+   simplex has PINNED to a single integer value [vᵢ] (via {!fixed_bounds}, whose two
+   oriented-bound tokens prove [xᵢ = vᵢ]); the residual equation over the still-free
+   variables is [Σ_free cⱼ·xⱼ = rhs − Σ_fixed cᵢ·vᵢ]. All coefficients and the residual
+   are integer-valued (combo coefficients come from the normalized [Arith] form; fixed
+   values are integers). If [gcd(free cⱼ)] does not divide the residual, no integer
+   assignment of the free variables satisfies the equation: emit a conflict whose premises
+   are the equality literal together with the oriented-bound tokens of every substituted
+   variable (that conjunction is ℤ-unsatisfiable). A fully-fixed equation is left to the ℚ
+   simplex (an inconsistent constant relation is already a rational conflict). Any
+   [Rational] projection overflow or a non-integer coefficient (out of the integer
+   fragment) skips the row soundly (no conflict claimed).
+
+   [farkas] carries no rational multiplier here (the state is ℚ-feasible, so no Farkas
+   vector exists); the field is filled with a same-length placeholder and is never read on
+   this path (the adapter forwards only the premise set + rule tag, and {!externalize} —
+   the sole farkas consumer — is not on this path). The certificate/replay layer needs a
+   dedicated Diophantine rule tag; that is a follow-up (see the lane log). *)
+let diophantine_conflict t : 'tok conflict option =
+  ensure_live t;
+  if Simplex.is_poisoned t.simplex
+  then None
+  else (
+    let term_of_id = Hashtbl.create 64 in
+    Dynarray.iter (fun (id, term) -> Hashtbl.replace term_of_id id term) t.problem_vars;
+    let gcd_int a b =
+      let rec go a b = if b = 0 then a else go b (a mod b) in
+      go (abs a) (abs b)
+    in
+    (* [fixed]: var id -> (integer value, the trail-literal premises that pin it). Seeded
+       with the SIMPLEX-DIRECT fixings ([fixed_bounds], two oriented-bound tokens), then
+       extended by fixpoint over the asserted equations: a var determined transitively
+       through the equation system (e.g. [arg0 = fmt0 - distance] with [fmt0], [distance]
+       fixed) is NOT a direct simplex bound, so this equation-level closure is what makes
+       the substitution complete. Each closure entry's premises accumulate the equation's
+       literal plus the premises of every fixed var it was solved from — so a conflict
+       built from these premises cites only real trail literals whose conjunction is
+       ℤ-unsatisfiable. *)
+    let fixed : (int, Rational.t * 'tok list) Hashtbl.t = Hashtbl.create 64 in
+    Dynarray.iter
+      (fun (id, term) ->
+         match fixed_bounds t term with
+         | Some (v, lo, hi) -> Hashtbl.replace fixed id (v, [ lo; hi ])
+         | None -> ())
+      t.problem_vars;
+    (* Rows: each asserted equality's merged linear form + rhs + its literal. Malformed /
+       out-of-fragment rows are dropped soundly (no conflict claimed for them). *)
+    let rows =
+      List.filter_map
+        (fun (a, b, tok) ->
+           try
+             let merged, rhs = equality_merged t a b in
+             if
+               List.for_all (fun (_, c) -> Rational.is_int c) merged
+               && Rational.is_int rhs
+             then Some (merged, rhs, tok)
+             else None
+           with
+           | Exit | Rational.Overflow -> None)
+        (List.concat t.eq_frames)
+    in
+    let conflict = ref None in
+    (* Split a row by the current [fixed] map: residual (rhs minus the fixed
+       contributions), the free (var,coeff) list, and the accumulated premises (row
+       literal + every used fixed var's premises). *)
+    let split_row (merged, rhs, tok) =
+      let residual = ref rhs in
+      let prems = ref [ tok ] in
+      let free = ref [] in
+      List.iter
+        (fun (id, c) ->
+           match Hashtbl.find_opt fixed id with
+           | Some (v, ps) ->
+             residual := Rational.sub !residual (Rational.mul c v);
+             prems := List.rev_append ps !prems
+           | None -> free := (id, c) :: !free)
+        merged;
+      !residual, !free, !prems
+    in
+    (* One closure sweep: for each row solve/deduce, returning whether [fixed] grew. Sets
+       [conflict] on the first ℤ-infeasible row found. *)
+    let sweep () =
+      let changed = ref false in
+      List.iter
+        (fun row ->
+           if !conflict = None
+           then (
+             try
+               let residual, free, prems = split_row row in
+               match free with
+               | [] ->
+                 (* fully fixed: the equation must hold; a nonzero residual contradicts the
+                   substituted values. *)
+                 if not (Rational.is_zero residual)
+                 then conflict := Some { premises = prems; farkas = [] }
+               | [ (id, c) ] ->
+                 (* [c·x = residual] pins x. Non-integer quotient ⇒ no integer x ⇒
+                   conflict; else record x as fixed (premises = this row's). *)
+                 let q = Rational.div residual c in
+                 if not (Rational.is_int q)
+                 then conflict := Some { premises = prems; farkas = [] }
+                 else if not (Hashtbl.mem fixed id)
+                 then (
+                   Hashtbl.replace fixed id (q, prems);
+                   changed := true)
+               | _ ->
+                 (* ≥2 free vars: gcd test. Σ_free cⱼ·xⱼ = residual has an integer solution
+                   only if gcd(cⱼ) | residual. *)
+                 let g =
+                   List.fold_left (fun acc (_, c) -> gcd_int acc (Rational.num c)) 0 free
+                 in
+                 if g <> 0 && Rational.num residual mod g <> 0
+                 then conflict := Some { premises = prems; farkas = [] }
+             with
+             | Exit | Rational.Overflow -> ()))
+        rows;
+      !changed
+    in
+    (* Iterate to a fixpoint (bounded: [fixed] only grows, ≤ #vars) or first conflict. *)
+    let rec loop () = if !conflict = None && sweep () then loop () in
+    loop ();
+    !conflict)
 ;;
 
 (* ADR-0014 Stage 1b F1-SEM independent oriented-bound accessor (§B.1 C1/Rev5-B3). Returns
@@ -824,7 +979,8 @@ let propagate t =
 let push t =
   ensure_live t;
   Simplex.push t.simplex;
-  t.report_frames <- [] :: t.report_frames
+  t.report_frames <- [] :: t.report_frames;
+  t.eq_frames <- [] :: t.eq_frames
 ;;
 
 let pop t n =
@@ -853,6 +1009,20 @@ let pop t n =
   in
   t.report_frames
   <- (match drop n t.report_frames with
+      | [] -> [ [] ]
+      | fs -> fs);
+  (* Drop the equalities recorded in the unwound frames (plain frame drop; no per-entry
+     undo needed — they carry no simplex state, only the recorded triple). *)
+  let rec drop_eq k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | _ :: rest -> drop_eq (k - 1) rest
+      | [] -> [])
+  in
+  t.eq_frames
+  <- (match drop_eq n t.eq_frames with
       | [] -> [ [] ]
       | fs -> fs)
 ;;

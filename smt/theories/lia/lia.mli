@@ -99,6 +99,20 @@ val solve_integer : ?budget:int -> 'tok t -> 'tok integer_result
 
 val default_budget : int
 
+(** [diophantine_conflict t] — after a {!Sat_candidate} whose ℚ-model is non-integral —
+    runs a GCD / Diophantine integer-feasibility test over the asserted positive Int
+    equalities and returns a conflict iff one equality is ℤ-infeasible (its free-variable
+    coefficient gcd does not divide the residual once simplex-pinned variables are
+    substituted). SOUND integer-infeasibility certificate, orthogonal to combination: it
+    only ever reports a conflict on a genuinely ℤ-infeasible state (never merges/injects).
+    The conflict's premises are the equality literal plus the oriented-bound tokens of the
+    substituted variables; [farkas] is empty (the state is ℚ-feasible, so there is no
+    rational multiplier — this conflict is certified by the divisibility argument, not
+    Farkas, and its consumers on the solve path read only the premise set). [None] when no
+    recorded equality is infeasible, or on any overflow / non-integer coefficient (skipped
+    soundly). *)
+val diophantine_conflict : 'tok t -> 'tok conflict option
+
 (** [suggest_branch t] — after a {!Sat_candidate} — is the B&B split request for the
     lowest-tag non-integer variable [x] with value [v]: the atom pair
     [(x <= floor v, x >= floor v + 1)] built through the session {!Context}, mirroring the
