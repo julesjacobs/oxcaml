@@ -19,17 +19,24 @@ module Defs = Array_defs
    stream and (under OXSMT_ARR_WEQ_SELFCHECK) cross-checks its connectivity against the
    engine, but emits NO lemmas and changes NO verdict — with the gate unset AND set the
    solver is byte-identical. The L1/L2 generators that consume the graph land at W1/W2. *)
-let weq_on =
-  match Sys.getenv_opt "OXSMT_ARR_WEQ" with
+let env_flag name =
+  match Sys.getenv_opt name with
   | Some ("1" | "true" | "yes") -> true
   | _ -> false
 ;;
 
-let weq_selfcheck =
-  match Sys.getenv_opt "OXSMT_ARR_WEQ_SELFCHECK" with
-  | Some ("1" | "true" | "yes") -> true
-  | _ -> false
-;;
+(* W0.5 (ADR-weakeq §2a): the DARK store-chain analyzer — the storecomm arbiter. Read-only
+   (no lemmas, no verdict change): at Final it takes each asserted array diseq's canonical
+   L2 path and symbolically closes every path-index read down both store chains using ONLY
+   ROW1 + entailed off-diagonal diseqs, counting the UNRESOLVED index tests. Green-lights
+   the W2-storecomm expectation only if ~all paths close with zero open tests (linear
+   closure). Implies the graph is on. *)
+let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
+
+(* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
+   needs it. *)
+let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze
+let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
 
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a ROW-derived equality carries [P_derived reasons] — the
@@ -90,8 +97,14 @@ type t =
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   ; weq : (Weq_graph.t * Euf.merge_cursor) option
-    (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ (W0).
-     [None] keeps the OFF path byte-identical (no merge recording, no graph). *)
+    (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ
+         (W0). [None] keeps the OFF path byte-identical (no merge recording, no graph). *)
+  ; mutable an_diseqs : (Term.t * Term.t) list
+    (* W0.5 analyzer only: asserted disequalities (both array and index sorted),
+         appended when a negative [Eq] is asserted. NOT backtracked — the analyzer runs
+         once at the first Final and a stale pair only over-counts a candidate; empty
+         unless OXSMT_ARR_WEQ_ANALYZE. *)
+  ; mutable an_done : bool (* W0.5 analyzer: emit the per-solve summary at most once *)
   }
 
 let max_iters = 1_000_000
@@ -160,6 +173,8 @@ let create ctx env cap reg =
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
   ; weq
+  ; an_diseqs = []
+  ; an_done = false
   }
 ;;
 
@@ -352,7 +367,10 @@ let assert_lit t lit =
       (* An array disequality demands an extensionality witness: a <> b is satisfiable
          only if a and b differ at some index, so introduce a fresh one. Sound
          (Skolemization); it drives ROW to close read-over-write refutations. *)
-      extensionality t lit a b)
+      extensionality t lit a b;
+      (* W0.5 analyzer only: record the asserted diseq (array + index) for the dark
+         store-chain closure measurement. *)
+      if weq_analyze then t.an_diseqs <- (a, b) :: t.an_diseqs)
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -710,6 +728,149 @@ let weq_final_self_check t =
   | _ -> ()
 ;;
 
+(* --- W0.5 dark store-chain analyzer (storecomm arbiter, §2a) --- *)
+
+(* [i <> j] entailed by an asserted index disequality, modulo current congruence: some
+   recorded asserted diseq (x, y) has [i ~ x] and [j ~ y] (or swapped). O(#diseqs) per
+   test — analysis-only. Array-sorted recorded diseqs never match an index test
+   (cross-sort terms are never congruent). *)
+let an_distinct t (i : Term.t) (j : Term.t) : bool =
+  List.exists
+    (fun (x, y) ->
+       (Euf.are_equal t.engine i x && Euf.are_equal t.engine j y)
+       || (Euf.are_equal t.engine i y && Euf.are_equal t.engine j x))
+    t.an_diseqs
+;;
+
+(* Symbolically normalize the read [select(x0, j)] down [x0]'s store chain using ONLY ROW1
+   (i ~ j -> the store value) and entailed off-diagonal diseqs (i <> j -> recurse the
+   base), counting the UNRESOLVED index tests. Returns [(terminal, opens, reads)]:
+   - [terminal] is [`Value v] when ROW1 fired at a store on [j], else [`Leaf x] for the
+     array the walk stopped at (root, cycle, or an unresolved test) — used to compare the
+     two sides' reductions;
+   - [opens] counts index tests (j vs a store index) that were neither entailed-equal nor
+     entailed-distinct — the metric that decides linear closure;
+   - [reads] counts store hops walked. Terminates via a visited-class set (congruence
+     cycles), bounded by the store count. *)
+let an_normalize t sidx (x0 : Term.t) (j : Term.t)
+  : [ `Value of Term.t | `Leaf of Term.t ] * int * int
+  =
+  let visited = Hashtbl.create 16 in
+  let opens = ref 0
+  and reads = ref 0 in
+  let rec go (x : Term.t) =
+    let cx = Euf.class_of t.engine x in
+    if Hashtbl.mem visited cx
+    then `Leaf x
+    else (
+      Hashtbl.replace visited cx ();
+      let stores =
+        List.sort (fun a b -> compare a.Term.tag b.Term.tag) (Hashtbl.find_all sidx cx)
+      in
+      match stores with
+      | [] -> `Leaf x
+      | st :: _ ->
+        (match st.Term.node with
+         | Term.App (_, a) when Iarr.length a = 3 ->
+           let base = Iarr.get a 0
+           and i = Iarr.get a 1
+           and v = Iarr.get a 2 in
+           incr reads;
+           if Euf.are_equal t.engine i j
+           then `Value v (* ROW1: select(store(_,j,v), j) = v *)
+           else if an_distinct t i j
+           then go base (* off-diagonal: value unchanged at j *)
+           else (
+             incr opens;
+             `Leaf x)
+           (* unresolved test *)
+         | _ -> `Leaf x))
+  in
+  let terminal = go x0 in
+  terminal, !opens, !reads
+;;
+
+(* Two read reductions are forced equal (the L2 disjunct [select(a,j) <> select(b,j)] is
+   refuted) iff both fired ROW1 to congruent values, or both bottomed out at a congruent
+   base leaf. A Value-vs-Leaf pair is not decidable by this closure. *)
+let an_terminals_equal t (ta : [ `Value of Term.t | `Leaf of Term.t ]) tb : bool =
+  match ta, tb with
+  | `Value va, `Value vb -> Euf.are_equal t.engine va vb
+  | `Leaf la, `Leaf lb -> Euf.are_equal t.engine la lb
+  | _ -> false
+;;
+
+(* Run once at the first Final under OXSMT_ARR_WEQ_ANALYZE: for each asserted array diseq
+   that is weakly equivalent, take its canonical L2 path and symbolically close every path
+   store index; report the open-test distribution to stderr (one tab-separated line per
+   solve, so a per-file corpus run aggregates). Emits no lemmas, changes no verdict. *)
+let weq_analyze_final t =
+  match t.weq with
+  | Some (g, _) when weq_analyze && not t.an_done ->
+    t.an_done <- true;
+    weq_sync t;
+    let sidx = stores_by_class t in
+    let n_diseqs = ref 0
+    and n_weq = ref 0
+    and n_path_idx = ref 0
+    and n_open = ref 0
+    and max_open = ref 0
+    and n_reads = ref 0
+    and n_eqguards = ref 0
+    and n_closed = ref 0 in
+    List.iter
+      (fun (a, b) ->
+         if array_sort a.Term.sort <> None
+         then (
+           incr n_diseqs;
+           match Weq_graph.find_path g a b with
+           | None -> ()
+           | Some edges ->
+             incr n_weq;
+             (* distinct store indices on the path (term identity), and the eq-guard count *)
+             let seen = Hashtbl.create 16 in
+             let idxs = ref [] in
+             List.iter
+               (fun (e : Weq_graph.edge) ->
+                  match e with
+                  | Weq_graph.Store { index; _ } ->
+                    if not (Hashtbl.mem seen index.Term.tag)
+                    then (
+                      Hashtbl.replace seen index.Term.tag ();
+                      idxs := index :: !idxs)
+                  | Weq_graph.Equality _ -> incr n_eqguards)
+               edges;
+             let diseq_open = ref 0
+             and diseq_closed = ref true in
+             List.iter
+               (fun jl ->
+                  incr n_path_idx;
+                  let ta, oa, ra = an_normalize t sidx a jl in
+                  let tb, ob, rb = an_normalize t sidx b jl in
+                  n_reads := !n_reads + ra + rb;
+                  diseq_open := !diseq_open + oa + ob;
+                  if oa + ob > 0 || not (an_terminals_equal t ta tb)
+                  then diseq_closed := false)
+               !idxs;
+             n_open := !n_open + !diseq_open;
+             if !diseq_open > !max_open then max_open := !diseq_open;
+             if !diseq_closed then incr n_closed)
+         else ())
+      t.an_diseqs;
+    Printf.eprintf
+      "ARR_WEQ_ANALYZE\tarr_diseqs=%d\tweq=%d\tpath_idx=%d\teqguards=%d\topen=%d\tmax_open=%d\treads=%d\tclosed=%d\n\
+       %!"
+      !n_diseqs
+      !n_weq
+      !n_path_idx
+      !n_eqguards
+      !n_open
+      !max_open
+      !n_reads
+      !n_closed
+  | _ -> ()
+;;
+
 let check t effort =
   weq_sync t;
   match saturate t with
@@ -720,6 +881,7 @@ let check t effort =
      | _ :: _, _ -> Theory.Propagations lits
      | [], Theory.Propagate -> Theory.Propagations []
      | [], Theory.Final ->
+       weq_analyze_final t;
        (match final_introduce_reads t with
         | Some result -> result
         | None ->
