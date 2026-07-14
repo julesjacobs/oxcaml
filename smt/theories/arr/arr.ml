@@ -459,26 +459,43 @@ let saturate t : prem list option =
    where [guard] is [arr <> st] when [arr] is only congruent to (not syntactically) [st]
    (so the clause is unconditionally array-valid). Two/three distinct atoms, not a
    propositional tautology, so the SAT core keeps it. *)
+(* Per-call index: array e-class id -> the registered stores in that class. Mirror of
+   [selects_by_arr_class] for the store side, so [row_split] can enumerate the stores
+   congruent to a select's array ([Euf.are_equal arr st] = [class_of arr = class_of st])
+   without scanning every store. *)
+let stores_by_class t : (int, Term.t) Hashtbl.t =
+  let idx = Hashtbl.create 64 in
+  List.iter
+    (fun st ->
+       match role_of t st with
+       | Some { Defs.role = Defs.Store; _ } ->
+         Hashtbl.add idx (Euf.class_of t.engine st) st
+       | _ -> ())
+    t.store_terms;
+  idx
+;;
+
 let row_split t : Term.t list option =
   let cand = ref None in
   let by_tag a b = compare a.Term.tag b.Term.tag in
+  let sidx = stores_by_class t in
   List.iter
     (fun sel ->
        if !cand = None
        then (
          match head_args sel with
          | Some (_, [| arr; j |]) when role_of t sel <> None ->
+           (* stores congruent to [arr], in tag order — same set and order the old
+             full-scan visited, so the tag-least open pair chosen is identical. *)
+           let stores =
+             List.sort by_tag (Hashtbl.find_all sidx (Euf.class_of t.engine arr))
+           in
            List.iter
              (fun st ->
                 if !cand = None
                 then (
                   match head_args st with
-                  | Some (_, [| base; i; v |])
-                    when (match role_of t st with
-                          | Some { Defs.role = Defs.Store; _ } -> true
-                          | _ -> false)
-                         && Euf.are_equal t.engine arr st
-                         && not (Euf.are_equal t.engine i j) ->
+                  | Some (_, [| base; i; v |]) when not (Euf.are_equal t.engine i j) ->
                     (match build_select t base j with
                      | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
                        let idx_eq = Context.eq t.ctx i j in
@@ -496,7 +513,7 @@ let row_split t : Term.t list option =
                        cand := Some disjuncts
                      | _ -> ())
                   | _ -> ()))
-             (List.sort by_tag t.store_terms)
+             stores
          | _ -> ()))
     (List.sort by_tag t.select_terms);
   !cand
