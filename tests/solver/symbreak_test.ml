@@ -462,6 +462,24 @@ let test_f3_hash_collision () =
         (Printexc.to_string e))
 ;;
 
+(* B1 verdict-level property guard (not a RED test): codex's exact intermediate-frame
+   sequence — push; symmetric assert_presolved; pop; check_sat — must report the correct
+   verdict on the REAL code. The restriction + pop-deactivation both keep it correct; this
+   catches a future change that regresses BOTH at once (stale active lex clauses surviving
+   a pop), which no single-mutation RED test can express. *)
+let test_b1_verdict_guard () =
+  let s = Session.create () in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) sat_symmetric in
+  Session.push s;
+  ignore (Oxsmt_query_loader.assert_all ~presolve:true s parsed : bool);
+  Session.pop s;
+  match Session.check_sat s with
+  | Session.Sat | Session.Unknown ->
+    ok "B1 guard: push/assert_presolved/pop/check verdict correct"
+  | Session.Unsat ->
+    fail "B1 guard: WRONG-UNSAT after push/assert_presolved/pop (stale lex clauses)"
+;;
+
 let () =
   print_string "symbreak_test:\n";
   test_detector_fires ();
@@ -473,6 +491,7 @@ let () =
   test_f2_counter ();
   test_f3_multisort ();
   test_b1_no_emit_under_frame ();
+  test_b1_verdict_guard ();
   test_no_emit_with_lemmas ();
   test_f3_hash_collision ();
   Printf.printf "symbreak_test: %d checks, %d failures\n" !checks !failures;

@@ -195,3 +195,13 @@ off), B2 (emits with a lemma registered when the restriction is off), F3-collisi
 `Sort_error` with `Sort.hash` grouping restored). Gates by exit code: `make test` (OFF) /
 `make symbreak-test` / `check-frozen` all 0. A test-only accessor `symbreak_active_for_test`
 was added to `session.mli` to check the restriction directly. New tip below.
+
+### Post-accept addition (test-only)
+
+Deviation on the B1 test (accessor-based RED vs verdict-level repro) ACCEPTED. Added the
+cheap verdict-level property guard the lead asked for: `test_b1_verdict_guard` runs codex's
+exact intermediate-frame sequence (push; symmetric `assert_presolved`; pop; `check_sat`) on
+the REAL code and asserts the verdict is not a wrong-UNSAT. Not a RED test — it catches a
+future change that regresses BOTH the restriction and the pop-deactivation at once (the only
+dangerous case, which no single-mutation RED test can express). `make symbreak-test` now 12
+checks, 0 failures. Test-only commit on top of the R2 tip.
