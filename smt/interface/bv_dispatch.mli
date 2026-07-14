@@ -27,5 +27,8 @@ type result =
         (** one entry per free Boolean variable: [(name, truth_value)] *)
       }
 
-(** Eager-bit-blast the (pure-QF_BV) assertion set. Only call when {!is_pure_bv} holds. *)
-val solve : Term.t list -> result
+(** Eager-bit-blast the (pure-QF_BV) assertion set. Only call when {!is_pure_bv} holds. A
+    word-level pre-blast simplification ({!Oxsmt_bitblast.Bv_simplify}) runs first, using
+    [ctx] and the reserved-namespace [mint] to rebuild normalized terms; it preserves free
+    variables so the returned model is keyed by the user's names. *)
+val solve : Context.t -> Bv.minter -> Term.t list -> result

@@ -286,11 +286,64 @@ let run_fail_closed () =
      | _ -> false)
 ;;
 
+(* {2 Layer 4 — word-level simplifier equivalence oracle}
+
+   The pre-blast rewrite {!Bv_simplify} must be equivalence-preserving. For a battery of
+   additive expressions over free variables, prove [e = simplify e] through the real
+   blaster: assert the NEGATION and require Unsat, so the blaster certifies the two forms
+   agree on ALL assignments (an exhaustive symbolic check for these widths). A [Sat] here
+   is an unsound rewrite (the whole point of the oracle, since the bv model re-check
+   validates only the rewritten formula). *)
+let simplify1 ctx mint e =
+  match Bv_simplify.simplify ctx mint [ e ] with
+  | [ e' ] -> e'
+  | _ -> failwith "simplify returned wrong arity"
+;;
+
+let equiv name w build =
+  let env, ctx, mint = fresh () in
+  let x = bvvar env ctx (name ^ "_x") w in
+  let y = bvvar env ctx (name ^ "_y") w in
+  let z = bvvar env ctx (name ^ "_z") w in
+  let e = build ctx mint x y z in
+  let e' = simplify1 ctx mint e in
+  let b = Blast.create defs in
+  Blast.assert_term b (Context.not_ ctx (Context.eq ctx e e'));
+  check (Printf.sprintf "simplify-equiv %s w=%d" name w) (not (is_sat b))
+;;
+
+let run_simplify_equiv () =
+  print_endline "layer 4: word-level simplifier equivalence (assert negation -> unsat)";
+  let a ctx m p q = Bv.binop ctx m Bv.Bvadd p q in
+  let s ctx m p q = Bv.binop ctx m Bv.Bvsub p q in
+  let n ctx m p = Bv.unop ctx m Bv.Bvneg p in
+  let band ctx m p q = Bv.binop ctx m Bv.Bvand p q in
+  let k ctx m v w = Bv.const ctx m ~value:(big v) ~width:w in
+  List.iter
+    (fun w ->
+       equiv "cancel" w (fun ctx m x y _ -> s ctx m (a ctx m x y) x);
+       equiv "cancel2" w (fun ctx m x y z ->
+         s ctx m (a ctx m (a ctx m x y) z) (a ctx m y x));
+       equiv "const_fold" w (fun ctx m x _ _ ->
+         a ctx m (a ctx m x (k ctx m 3 w)) (k ctx m 5 w));
+       equiv "coeff2" w (fun ctx m x _ _ -> a ctx m x x);
+       equiv "coeff3" w (fun ctx m x _ _ -> a ctx m (a ctx m x x) x);
+       equiv "neg" w (fun ctx m x y _ -> n ctx m (s ctx m x y));
+       equiv "sub_chain" w (fun ctx m x y z -> s ctx m (s ctx m x y) z);
+       equiv "shared_atom" w (fun ctx m x y _ ->
+         let g = band ctx m x y in
+         a ctx m g g);
+       equiv "mixed_zero" w (fun ctx m x y _ -> s ctx m (a ctx m x y) (a ctx m y x));
+       equiv "wrap_const" w (fun ctx m x _ _ -> a ctx m x (k ctx m ((1 lsl w) - 1) w)))
+    [ 3; 4; 8 ]
+;;
+
 let () =
   print_endline "bv-blast self-test:";
   run_oracle ();
   run_e2e ();
   run_fail_closed ();
+  run_simplify_equiv ();
   Printf.printf "\nbv-blast self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

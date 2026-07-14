@@ -61,11 +61,16 @@ type result =
       ; bool_vars : (string * bool) list
       }
 
-(* Solve a pure-QF_BV assertion set by eager bit-blasting. [Bv_solve] re-checks every sat
-   model with the independent evaluator before returning [Sat], so a [Sat] here is already
-   self-certified — the session surfaces its bindings without re-running the (BV-unaware)
-   R1 combinator checker. *)
-let solve (asserted : Term.t list) : result =
+module Bv_simplify = Oxsmt_bitblast.Bv_simplify
+
+(* Solve a pure-QF_BV assertion set by eager bit-blasting. A word-level pre-blast pass
+   ({!Bv_simplify}) first normalizes the assertions to shrink the SAT instance; it never
+   renames free variables, so the model read back below is still keyed by the user's
+   names. [Bv_solve] re-checks every sat model with the independent evaluator before
+   returning [Sat], so a [Sat] here is already self-certified — the session surfaces its
+   bindings without re-running the (BV-unaware) R1 combinator checker. *)
+let solve ctx mint (asserted : Term.t list) : result =
+  let asserted = Bv_simplify.simplify ctx mint asserted in
   match Bv_solve.solve Bv_adapter.defs asserted with
   | Bv_solve.Unsat -> Unsat
   | Bv_solve.Unknown _ -> Unknown

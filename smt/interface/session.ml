@@ -1155,7 +1155,7 @@ let check_sat t =
        could report [Sat] for a model the lemma forbids (a wrong-[Sat]). A lemma'd session
        therefore takes the combinator path below, where THE SOUNDNESS RULE degrades a
        lemma-live ground [Sat] to [Unknown] (never a model that ignores a quantifier). *)
-    match Bv_dispatch.solve t.asserted with
+    match Bv_dispatch.solve t.ctx (Internal_minter.mint (parse_minter t)) t.asserted with
     | Bv_dispatch.Unsat ->
       t.last_verdict <- Unsat;
       Unsat

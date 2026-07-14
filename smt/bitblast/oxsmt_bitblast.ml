@@ -21,3 +21,4 @@ module Blast = Blast
 module Bv_eval = Bv_eval
 module Bv_solve = Bv_solve
 module Bv_adapter = Bv_adapter
+module Bv_simplify = Bv_simplify
