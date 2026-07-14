@@ -702,7 +702,19 @@ let simplify_contextual ctx assertions =
    clausifies for >90s if allowed to complete) — 500K separates them, admitting the bushy
    wins and aborting the deep-chain losses (which are losses at the 2s wall regardless). *)
 
-let proj_max_steps = 500_000
+let proj_max_steps_default = 500_000
+
+(* Env-overridable (OXSMT_PRESOLVE_PROJ_MAX_STEPS) for budget tuning / deep-chain
+   profiling without a recompile; falls back to [proj_max_steps_default] on
+   absent/unparseable. Read once per call (cheap). *)
+let proj_max_steps () =
+  match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ_MAX_STEPS" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n > 0 -> n
+     | Some _ | None -> proj_max_steps_default)
+  | None -> proj_max_steps_default
+;;
 
 exception Proj_budget
 
@@ -736,9 +748,10 @@ let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
 
 let simplify_projection ctx assertions =
   let steps = ref 0 in
+  let max_steps = proj_max_steps () in
   let tick () =
     incr steps;
-    if !steps > proj_max_steps then raise Proj_budget
+    if !steps > max_steps then raise Proj_budget
   in
   (* Observability-only counters (OXSMT_PRESOLVE_PROJ_STATS): [engaged] = the walk ran on
      an ITE-bearing assertion; [projections] = equality-over-ITE projections applied
