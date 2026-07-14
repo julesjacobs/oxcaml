@@ -333,6 +333,45 @@ let test_propagation () =
   | _ -> check "prop-: exactly one implied" false
 ;;
 
+(* 3c. distinct_witness witness IDENTITY (task #33 O(1) witness index). When SEVERAL
+   disequalities separate the same class pair, the cited witness must be the
+   EARLIEST-asserted one — byte-identical to the old full assertion-order scan — so
+   explanation premises (hence learned clauses / counted-metric identity) are unchanged by
+   the cache. Here [c1<>c2 :20] asserted first (then a=c1:21, b=c2:22) and a redundant
+   [a<>b :40] asserted later both separate class(a) from class(b); [propagate] builds the
+   witness index and the reported [a=b]-false explanation must cite the FIRST witness,
+   giving
+   {20 ;21;22}
+   , NOT
+   {40}
+   . DISCRIMINATION: a last-writer-wins index (or one that drops the re-verify and serves
+   a stale entry) would cite [40] and yield explanation
+   {40}
+   — this check goes RED. Verified RED against a last-wins mutation before landing. *)
+let test_distinct_witness_first_wins () =
+  let _env, _u, _unary, konst = make_env () in
+  let ctx = Context.create _env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c1 = Context.const ctx (konst "c1") in
+  let c2 = Context.const ctx (konst "c2") in
+  let ab = Context.eq ctx a b in
+  let e = Euf.create ctx in
+  Euf.register_term e ab;
+  Euf.assert_neq e ~premise:20 c1 c2;
+  Euf.assert_eq e ~premise:21 a c1;
+  Euf.assert_eq e ~premise:22 b c2;
+  Euf.assert_neq e ~premise:40 a b;
+  match Euf.propagate e with
+  | [ imp ] ->
+    check "witness-first: atom is (a=b)" (Term.equal imp.Euf.atom ab);
+    check "witness-first: value false" (not imp.Euf.value);
+    check
+      "witness-first: explanation = {20;21;22} (earliest witness, not {40})"
+      (List.sort compare (Euf.explain_implied e imp) = [ 20; 21; 22 ])
+  | _ -> check "witness-first: exactly one implied" false
+;;
+
 (* 3b. ⊤/⊥ bridge: a Bool-codomain predicate application is watched against [true_const],
    so a predicate truth entailed by congruence ([p(a), a = b |- p(b)]) surfaces as a
    {!propagate} flip — not merely as a reactive [true <> false] conflict on a wrong guess.
@@ -1179,6 +1218,7 @@ let () =
   test_chain_selfloop ();
   test_chain_orders ();
   test_propagation ();
+  test_distinct_witness_first_wins ();
   test_predicate_propagation ();
   test_errors ();
   test_random_crosscheck ();
