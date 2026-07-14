@@ -1,0 +1,16 @@
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index 9a3e3d7981..c0dc035b1b 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -821,9 +821,9 @@ let simplify_projection ctx assertions =
+       in
+       let b' =
+         match b.node with
+-        | Ite (c2, _a2, b2) when c2.tag = c.tag ->
++        | Ite (c2, a2, _b2) when c2.tag = c.tag ->
+           incr collapses;
+-          b2
++          a2
+         | Ite (c2, a2, _b2) when c2.tag = notc.tag ->
+           incr collapses;
+           a2
