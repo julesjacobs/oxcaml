@@ -67,9 +67,11 @@ end
 (* ------------------------------------------------------------------ *)
 (* SAT-core driver over DIMACS. *)
 
-let lit_of_dimacs s l =
+let lit_of_dimacs _s l =
+  (* vars are pre-allocated by [build]/[build_conflict_mock] (and [add_clause]
+     auto-allocates on demand), so this only maps a DIMACS literal to a [Sat.lit] — no
+     fresh var. *)
   let v = abs l - 1 in
-  ignore (Sat.new_var s : int);
   if l > 0 then Sat.pos v else Sat.neg v
 ;;
 
@@ -229,6 +231,136 @@ let test_determinism n =
     (!mismatches = 0)
 ;;
 
+(* THEORY-SEAM REPLAY test (§3.6/§10.5 audit item 6), RED-verified. Under CB a scattered
+   [cancel_until] is not a top-frame suffix, so the seam REBUILDS the theory to the
+   surviving trail ([on_backtrack ~0] to base + replay [on_assign] for each survivor)
+   instead of popping a frame suffix.
+
+   The mock is a REAL conflict-emitting theory over a fixed set of binary implication
+   constraints [a → b] (var indices; equivalently the clause [¬a ∨ b]). It keeps its own
+   trail-synchronized assignment view via a FRAME STACK indexed by SAT decision level —
+   exactly like the real cdclt adapter — pushing per level on [on_assign] and popping
+   frames on [on_backtrack]. At each [check] it reports [T_conflict [a; ¬b]] for the first
+   violated constraint (both literals currently asserted true), else consistent; it never
+   propagates, so it needs no [explain]. The instance's verdict must therefore equal the
+   DPLL oracle over [clauses ∧ {¬a∨b}], which we cross-check; every reported sat model
+   must satisfy the clauses AND the constraints.
+
+   RED against the naive frame-suffix [on_backtrack ~level] (no rebuild): the frame the
+   mock pops by count no longer matches the scattered Boolean removal, so its assignment
+   view goes stale; the core then either validates a stale [T_conflict] against the real
+   trail and raises {!Sat.Theory_contract_violation} (caught here as a failure) or reaches
+   a verdict that disagrees with the oracle. With the correct rebuild the view always
+   matches the trail. *)
+let random_constraints num_vars =
+  (* a handful of a→b implications over distinct vars *)
+  List.init
+    (1 + rand_n 4)
+    (fun _ ->
+       let a = rand_n num_vars in
+       let b = rand_n num_vars in
+       a, b)
+;;
+
+let constraint_clauses constraints =
+  (* a→b as the DIMACS clause [¬(a+1); (b+1)] for the oracle *)
+  List.map (fun (a, b) -> [ -(a + 1); b + 1 ]) constraints
+;;
+
+let build_conflict_mock num_vars clauses constraints =
+  let s = Sat.create () in
+  for _ = 1 to num_vars do
+    ignore (Sat.new_var s : int)
+  done;
+  let asg = Array.make num_vars 0 in
+  (* frames.(k) = vars assigned while the mock was at level k+1; mock_level tracks the
+     theory's own frame count, synced up to [Sat.decision_level] on each assign. *)
+  let frames : int list array ref = ref (Array.make 0 []) in
+  let mock_level = ref 0 in
+  let ensure_frames k =
+    if k > Array.length !frames
+    then (
+      let f = Array.make k [] in
+      Array.blit !frames 0 f 0 (Array.length !frames);
+      frames := f)
+  in
+  let on_assign l =
+    let dl = Sat.decision_level s in
+    ensure_frames dl;
+    while !mock_level < dl do
+      incr mock_level;
+      !frames.(!mock_level - 1) <- []
+    done;
+    let v = Sat.var_of_lit l in
+    asg.(v) <- (if Sat.sign_of_lit l then 1 else -1);
+    if !mock_level > 0 then !frames.(!mock_level - 1) <- v :: !frames.(!mock_level - 1)
+  in
+  let on_backtrack ~level =
+    while !mock_level > level do
+      List.iter (fun v -> asg.(v) <- 0) !frames.(!mock_level - 1);
+      !frames.(!mock_level - 1) <- [];
+      decr mock_level
+    done
+  in
+  let check ~final:_ =
+    let rec go = function
+      | [] -> Sat.T_consistent []
+      | (a, b) :: rest ->
+        if asg.(a) = 1 && asg.(b) = -1
+        then Sat.T_conflict [ Sat.pos a; Sat.neg b ]
+        else go rest
+    in
+    go constraints
+  in
+  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []) });
+  List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
+  s
+;;
+
+let test_seam_replay n =
+  let disagreements = ref 0 in
+  let bad_models = ref 0 in
+  let raises = ref 0 in
+  for _ = 1 to n do
+    (* small so the augmented oracle is cheap and solving terminates within budget *)
+    let num_vars = 5 + rand_n 6 in
+    let clause () =
+      List.init 3 (fun _ ->
+        let v = 1 + rand_n num_vars in
+        if rand_n 2 = 0 then v else -v)
+    in
+    let clauses = List.init ((num_vars * 4) + rand_n num_vars) (fun _ -> clause ()) in
+    let constraints = random_constraints num_vars in
+    let augmented = clauses @ constraint_clauses constraints in
+    let expected = Oracle.solve num_vars augmented in
+    try
+      let s = build_conflict_mock num_vars clauses constraints in
+      match Sat.solve s with
+      | Sat.Sat ->
+        if not expected then incr disagreements;
+        if not (model_satisfies augmented (Sat.model s)) then incr bad_models
+      | Sat.Unsat -> if expected then incr disagreements
+    with
+    | Sat.Theory_contract_violation _ -> incr raises
+  done;
+  check
+    (Printf.sprintf
+       "seam-replay: %d formulas agree with augmented DPLL (%d)"
+       n
+       !disagreements)
+    (!disagreements = 0);
+  check
+    (Printf.sprintf
+       "seam-replay: all sat models satisfy clauses+constraints (%d bad)"
+       !bad_models)
+    (!bad_models = 0);
+  check
+    (Printf.sprintf
+       "seam-replay: no theory-contract violation from a stale view (%d)"
+       !raises)
+    (!raises = 0)
+;;
+
 (* Guard: this executable is meaningless unless CB is actually engaged. We cannot query
    the gate through the frozen [Sat] surface, so we assert the env directly — a green run
    then genuinely exercised the chrono paths. *)
@@ -251,6 +383,7 @@ let () =
   test_property "sparse" gen_sparse 4000;
   test_property "dense" gen_dense 4000;
   test_directed 3000;
+  test_seam_replay 4000;
   test_determinism 500;
   Printf.printf "chrono_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1

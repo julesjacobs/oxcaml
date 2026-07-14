@@ -746,11 +746,26 @@ let cancel_until t level =
          correctness-first choice; a highest-level-watched invariant (Nadel–Ryvchin option
          (b)) is the perf follow-up. *)
       t.qhead <- 0;
-      (* Fire the theory backtrack after the Boolean trail is compacted (mirrors the
-         suffix arm), before the caller re-propagates / records the learnt clause. *)
+      (* THEORY-SEAM REBUILD under CB (task #41 §3.6/§10.5, audit item 6). The scattered
+         removal is NOT a clean top-frame suffix, so the frame-count [on_backtrack ~level]
+         the suffix arm uses would discard the WRONG theory assertions (a wrong-verdict
+         hazard): a theory literal whose TRUE level is <= [level] may have been filed into
+         a higher frame under the out-of-order trail, and vice versa. Instead we REBUILD:
+         [on_backtrack ~level:0] pops the theory to its base (the pre-solve registrations
+         survive — they sit at the base frame), then [on_assign] for each surviving trail
+         literal in order re-asserts it (the adapter filters non-atoms and re-registers
+         split atoms, so the theory ends holding exactly the survivors). Sound and simple
+         — it mirrors the [qhead <- 0] Boolean rebuild — and uses only the frozen seam
+         callbacks, so cdclt and sat.mli are untouched. CONTRACT-EX stays valid: survivors
+         are re-asserted in their compacted trail-position order (preserved by the
+         compaction), and [trail_pos] was updated above. COST: O(surviving trail) theory
+         re-assertions per chrono backtrack — the Stage-1 correctness-first choice paired
+         with the [qhead <- 0] cost; incremental (earliest-removed) undo is the follow-up. *)
       match t.theory with
       | None -> ()
-      | Some th -> th.on_backtrack ~level)
+      | Some th ->
+        th.on_backtrack ~level:0;
+        Dynarray.iter (fun l -> th.on_assign l) t.trail)
 ;;
 
 (* ------------------------------------------------------------------ *)
