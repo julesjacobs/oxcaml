@@ -22,6 +22,11 @@
 
 module Session = Oxsmt_interface.Session
 module Parser = Oxsmt_smtlib_parser.Parser
+module Array_defs = Oxsmt_core.Array_defs
+module Context = Oxsmt_core.Context
+module Sort = Oxsmt_core.Sort
+module Rank = Oxsmt_core.Rank
+module Internal_minter = Oxsmt_core.Internal_minter
 
 let checks = ref 0
 let failures = ref 0
@@ -134,11 +139,69 @@ let run_fault_injection src =
       Session.For_test.set_array_checker None)
 ;;
 
+(* API-only forge (task #23 review, [[arr-arity-guard-load-bearing]]): a select/store-role
+   symbol REGISTERED at the wrong arity must be inert in the ROW rules, not treated as an
+   array op — otherwise the read-over-write rule applies to an extended-arity
+   uninterpreted function and derives a WRONG-UNSAT. Not expressible in .smt2:
+   [Internal_minter.mint] admits any canonical [.oxsmt.arr.*] NAME with a caller-supplied
+   rank (name-shape gate only) and [Array_defs.add] classifies by name, not rank, so a
+   mis-ranked-but-registered op is reachable from the public OCaml API. The consuming-side
+   [Iarr.length] guards in arr.ml are what keep it inert; without them this query answers
+   [Unsat] (wrong; the true answer is Sat — the ops are arity-mismatched uninterpreted
+   functions). *)
+let run_arity_forge () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let minter = Session.parse_minter s in
+  let index = Sort.uninterpreted (Session.declare_sort s "Index") in
+  let element = Sort.uninterpreted (Session.declare_sort s "Element") in
+  let arr_sort = Sort.array_ ~index ~element in
+  let sel_name = Array_defs.op_symbol_name Array_defs.Select ~index ~element in
+  let sto_name = Array_defs.op_symbol_name Array_defs.Store ~index ~element in
+  (* mint at WRONG arity: real select is 2, store is 3 *)
+  let sel3 =
+    Internal_minter.mint
+      minter
+      sel_name
+      (Rank.create [ arr_sort; index; Sort.bool ] element)
+  in
+  let sto4 =
+    Internal_minter.mint
+      minter
+      sto_name
+      (Rank.create [ arr_sort; index; element; Sort.bool ] arr_sort)
+  in
+  let defs =
+    Array_defs.add
+      (Array_defs.add Array_defs.empty sel3 Array_defs.Select ~index ~element)
+      sto4
+      Array_defs.Store
+      ~index
+      ~element
+  in
+  Session.set_arrays s defs;
+  let a = Context.const ctx (Session.declare_const s "a" arr_sort) in
+  let i = Context.const ctx (Session.declare_const s "i" index) in
+  let v = Context.const ctx (Session.declare_const s "v" element) in
+  let fls = Context.bool_const ctx false in
+  let sto = Context.app ctx sto4 [ a; i; v; fls ] in
+  let sel = Context.app ctx sel3 [ sto; i; fls ] in
+  Session.assert_term s (Context.not_ ctx (Context.eq ctx sel v));
+  incr checks;
+  match Session.check_sat s with
+  | Session.Unsat ->
+    fail
+      "arity-forge: mis-ranked select/store treated as array ops -> WRONG-UNSAT (the \
+       O-MINTER inertness contract requires the consuming-side arity guards in arr.ml)"
+  | Session.Sat | Session.Unknown -> ()
+;;
+
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/arr-goldens-sat" in
   run_goldens dir;
   run_soundness (read_file (Filename.concat dir "arr_storeinv_unsat_stays_unknown.smt2"));
   run_fault_injection (read_file (Filename.concat dir "arr_select_over_store_sat.smt2"));
+  run_arity_forge ();
   Printf.printf "Array sat-gate: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

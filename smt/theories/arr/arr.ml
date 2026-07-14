@@ -362,8 +362,16 @@ let selects_by_arr_class t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
     (fun sel ->
+       (* [Iarr.length a = 2] is load-bearing, NOT a redundant sanity check: a select-role
+         symbol can be REGISTERED at a non-2 arity via the public API
+         (Session.parse_minter admits any canonical [.oxsmt.arr.*] name with a
+         caller-supplied rank; Array_defs classifies by name, not rank). The old
+         [head_args] match on [[| arr; _j |]] silently skipped such a mis-ranked App;
+         without this length guard the ROW rules would treat an extended-arity
+         uninterpreted function as a select and derive a wrong verdict. Every consuming
+         site below re-checks arity for the same reason. *)
        match sel.Term.node with
-       | Term.App (_, a) when role_of t sel <> None ->
+       | Term.App (_, a) when Iarr.length a = 2 && role_of t sel <> None ->
          Hashtbl.add idx (Euf.class_of t.engine (Iarr.get a 0)) sel
        | _ -> ())
     t.select_terms;
@@ -376,7 +384,9 @@ let ensure_store_reads t ~changed =
     (fun st ->
        match st.Term.node with
        | Term.App (_, a)
-         when match role_of t st with
+         when Iarr.length a = 3
+              &&
+              match role_of t st with
               | Some { Defs.role = Defs.Store; _ } -> true
               | _ -> false ->
          let base = Iarr.get a 0 in
@@ -385,7 +395,7 @@ let ensure_store_reads t ~changed =
          List.iter
            (fun sel ->
               match sel.Term.node with
-              | Term.App (_, sa) ->
+              | Term.App (_, sa) when Iarr.length sa = 2 ->
                 let j = Iarr.get sa 1 in
                 let key = st.Term.tag, j.Term.tag in
                 if not (Hashtbl.mem t.ensured_reads key)
@@ -418,7 +428,9 @@ let row_round t ~changed =
     (fun st ->
        match st.Term.node with
        | Term.App (_, a)
-         when match role_of t st with
+         when Iarr.length a = 3
+              &&
+              match role_of t st with
               | Some { Defs.role = Defs.Store; _ } -> true
               | _ -> false ->
          let i = Iarr.get a 1
@@ -426,7 +438,7 @@ let row_round t ~changed =
          List.iter
            (fun sel ->
               match sel.Term.node with
-              | Term.App (_, sa) ->
+              | Term.App (_, sa) when Iarr.length sa = 2 ->
                 let arr = Iarr.get sa 0
                 and j = Iarr.get sa 1 in
                 (* definite ROW1: i = j entailed ⇒ sel = v *)
@@ -496,7 +508,7 @@ let row_split t : Term.t list option =
        if !cand = None
        then (
          match sel.Term.node with
-         | Term.App (_, sa) when role_of t sel <> None ->
+         | Term.App (_, sa) when Iarr.length sa = 2 && role_of t sel <> None ->
            let arr = Iarr.get sa 0
            and j = Iarr.get sa 1 in
            (* stores congruent to [arr], in tag order — same set and order the old
@@ -509,7 +521,9 @@ let row_split t : Term.t list option =
                 if !cand = None
                 then (
                   match st.Term.node with
-                  | Term.App (_, a) when not (Euf.are_equal t.engine (Iarr.get a 1) j) ->
+                  | Term.App (_, a)
+                    when Iarr.length a = 3
+                         && not (Euf.are_equal t.engine (Iarr.get a 1) j) ->
                     let base = Iarr.get a 0
                     and i = Iarr.get a 1 in
                     (match build_select t base j with
