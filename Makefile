@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -198,6 +198,27 @@ cert-corpus-gate:
 chrono-test:
 	$(DUNE) build smt/solver/test/chrono_test.exe
 	OXSMT_CHRONO=1 $(DUNE) exec smt/solver/test/chrono_test.exe
+	$(MAKE) chrono-session-test
+
+## chrono-session-test (task #41 F2) — CB must be REACHABLE THROUGH THE PRODUCT. Every
+##   [Session] solve passes [List.map Sat.pos t.frames] (a nonempty base selector) as SAT
+##   assumptions, so a CB+assumptions guard makes the CLI trip its solve firewall to
+##   `unknown` on EVERY query. This runs the real solver CLI under OXSMT_CHRONO=1 on a
+##   trivially-solvable EUF sat case and an EUF unsat case and asserts each returns ITS
+##   verdict (never `unknown`). RED against unfixed Phase 2 (both were `unknown`); nonzero
+##   exit on any wrong/unknown verdict.
+chrono-session-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; fail=0; \
+	  for c in "euf_sat sat" "euf_explain_eqdiamond_unsat unsat"; do \
+	    f=$${c%% *}; want=$${c##* }; \
+	    got=$$(OXSMT_CHRONO=1 $$cli tests/cases/$$f.smt2 2>/dev/null | grep -o 'verdict [a-z]*' | awk '{print $$2}'); \
+	    if [ "$$got" != "$$want" ]; then \
+	      echo "chrono-session-test: FAIL $$f under OXSMT_CHRONO=1: want $$want, got $${got:-<none>} (F2: CB unreachable through session)"; \
+	      fail=1; \
+	    else echo "chrono-session-test: OK $$f -> $$got (CB reached through session)"; fi; \
+	  done; \
+	  test $$fail -eq 0
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
 ##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat

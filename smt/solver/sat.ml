@@ -1220,7 +1220,14 @@ let analyze_final t p =
         Dynarray.add_last marked v)
     in
     mark (var_of_lit p);
-    let start = Dynarray.get t.trail_lim 0 in
+    (* Walk start (F2). Without CB the level-0 literals are the contiguous prefix
+       [\[0, trail_lim.(0))], so starting at [trail_lim.(0)] skips them — byte-identical.
+       Under CB [trail_lim] POSITION entries are stale (a level-0 [Implied_by] literal can
+       land AFTER a level>0 one on the out-of-order trail), so we scan the WHOLE trail;
+       this is sound and complete because the marking gate below only propagates through
+       [level > 0] literals, and a level-0 literal (never a [Decision], its reason clause
+       is all level-0) contributes nothing to the core — visiting it is a harmless no-op. *)
+    let start = if t.chrono then 0 else Dynarray.get t.trail_lim 0 in
     for i = Dynarray.length t.trail - 1 downto start do
       let l = Dynarray.get t.trail i in
       let v = var_of_lit l in
@@ -2706,16 +2713,21 @@ let preprocess t = run_round t
 
 let solve ?(assumptions = []) t =
   t.failed <- [];
-  (* Stage-1 CB scope guards (task #41 §10.2). Assumptions ride the [analyze_final] /
-     [trail_lim.(0)] path, whose position entries go stale under CB — deferred, so CB with
-     assumptions raises rather than risk a wrong failed-assumption core. The relevancy
-     trail unwind assumes monotone levels, so CB and a branch filter are mutually
-     exclusive until the relevancy trail is made remove-by-level (§3.7). Both are
-     fail-loud [invalid_arg], never a silent degrade. *)
-  if t.chrono && assumptions <> []
-  then
-    invalid_arg
-      "Sat.solve: assumptions are unsupported under OXSMT_CHRONO (task #41 Stage 1)";
+  (* Stage-1 CB scope guard (task #41 §10.2). The relevancy trail unwind assumes monotone
+     levels, so CB and a branch filter are mutually exclusive until the relevancy trail is
+     made remove-by-level (§3.7). Fail-loud [invalid_arg], never a silent degrade.
+
+     F2 (assumptions under CB): assumptions were also guarded here originally, because the
+     only assumption-specific CB hazard is [analyze_final]'s failed-assumption-core walk,
+     which read [trail_lim.(0)] as a POSITION (stale under CB). That is now fixed:
+     [analyze_final] walks the whole trail under CB and gates marking by per-literal
+     level, so the core is correct (the VERDICT never depended on it). Assumptions are
+     otherwise CB-safe — each is a DECISION at a fixed level [i+1], never chronologically
+     relocated, and the assumption placement loop indexes by [decision_level] (=
+     [trail_lim] length, valid under CB). Permitting them is REQUIRED for the product:
+     every [Session] solve passes [List.map Sat.pos t.frames] (a nonempty base selector),
+     so the old guard made CB unreachable through the CLI (it tripped the firewall to
+     [Unknown] on every solve). *)
   if t.chrono && t.branch_filter <> None
   then
     invalid_arg
