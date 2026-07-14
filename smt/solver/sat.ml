@@ -1648,13 +1648,27 @@ let luby restart_no =
    reduced set). Phase 2 (inprocessing) will re-run a learnt-aware engine at restart level
    0. *)
 
-(* A working clause: a deduped, ascending-sorted literal array plus a death flag.
-   Immutable [wl] once created (the reconstruction stack aliases it), so elimination only
-   flips [wdead]. *)
+(* A working clause: a deduped, ascending-sorted literal array plus a death flag. [wl] is
+   REPLACED (never mutated in place) when self-subsuming resolution strengthens the clause
+   — always before BVE, so the value the reconstruction stack later aliases is the final
+   one. *)
 type wclause =
-  { wl : lit array
+  { mutable wl : lit array
   ; mutable wdead : bool
   }
+
+(* Membership of literal [x] in ascending sorted array [a]. *)
+let sorted_mem x a =
+  let lo = ref 0
+  and hi = ref (Array.length a - 1)
+  and found = ref false in
+  while (not !found) && !lo <= !hi do
+    let mid = (!lo + !hi) / 2 in
+    let v = a.(mid) in
+    if v = x then found := true else if v < x then lo := mid + 1 else hi := mid - 1
+  done;
+  !found
+;;
 
 let bve_size_cap = 20 (* skip a resolvent longer than this *)
 let bve_product_cap = 64 (* skip a var whose |pos|*|neg| exceeds this (bound the work) *)
@@ -1773,6 +1787,50 @@ let preprocess t =
                       then subsumed := true))
                  occ.(!lmin);
                if !subsumed then wc.wdead <- true))
+          work;
+        (* ---- Self-subsuming resolution (strengthening): if a clause [d] contains [¬l]
+           and [d \ {¬l} ⊆ c \ {l}], the resolvent of [c] and [d] on [l] subsumes [c], so
+           remove [l] from [c] (equivalence-preserving, no reconstruction). Only shrink
+           clauses that stay >= 2 literals (never create a unit here — that would open a
+           propagation this prototype does not thread). The [¬l ∈ d] guard keeps it
+           correct against an [occ] entry made stale by an earlier strengthening. ---- *)
+        Dynarray.iteri
+          (fun i wc ->
+             if not wc.wdead
+             then (
+               let progress = ref true in
+               while !progress && Array.length wc.wl >= 3 do
+                 progress := false;
+                 let cwl = wc.wl in
+                 Array.iter
+                   (fun l ->
+                      if not !progress
+                      then (
+                        let nl = neg_lit l in
+                        List.iter
+                          (fun j ->
+                             if (not !progress) && j <> i && live j
+                             then (
+                               let d = (Dynarray.get work j).wl in
+                               if
+                                 Array.exists (fun m -> m = nl) d
+                                 && Array.for_all (fun m -> m = nl || sorted_mem m cwl) d
+                               then (
+                                 wc.wl
+                                 <- Array.of_list
+                                      (List.filter (( <> ) l) (Array.to_list cwl));
+                                 progress := true)))
+                          occ.(nl)))
+                   cwl
+               done))
+          work;
+        (* Rebuild occurrence lists: subsumption killed clauses and strengthening rewrote
+           [wl]s, so the incremental [occ] is stale. A fresh rebuild over live clauses is
+           O(total literals); BVE then appends resolvents to it incrementally. *)
+        Array.fill occ 0 n2 [];
+        Dynarray.iteri
+          (fun i wc ->
+             if not wc.wdead then Array.iter (fun l -> occ.(l) <- i :: occ.(l)) wc.wl)
           work;
         (* ---- Bounded variable elimination on eliminable vars. ---- *)
         for v = 0 to t.nvars - 1 do

@@ -138,6 +138,39 @@ let test_unsat_preserved () =
   check "unsat-preserved: unsat" (Sat.solve s = Sat.Unsat)
 ;;
 
+(* ---- Self-subsuming resolution (strengthening) soundness. All eight 3-literal clauses
+   over three variables forbid every assignment => UNSAT. Every clause is 3-literal, so
+   strengthening fires heavily (each pair like (a∨b∨c)/(¬a∨b∨c) strengthens to (b∨c)); an
+   UNSOUND literal drop would delete a constraint and flip this to SAT. No var is marked
+   eliminable, so this isolates strengthening from BVE. Also a SAT companion (drop one
+   clause) that must stay SAT with a model satisfying the originals. ---- *)
+let all8 =
+  [ [ 1; 2; 3 ]
+  ; [ 1; 2; -3 ]
+  ; [ 1; -2; 3 ]
+  ; [ 1; -2; -3 ]
+  ; [ -1; 2; 3 ]
+  ; [ -1; 2; -3 ]
+  ; [ -1; -2; 3 ]
+  ; [ -1; -2; -3 ]
+  ]
+;;
+
+let test_strengthening_unsat () =
+  let s = build 3 ~eliminable:[] all8 in
+  check "strengthen: all-8 3-var stays unsat" (Sat.solve s = Sat.Unsat)
+;;
+
+let test_strengthening_sat () =
+  (* drop the last clause: now the assignment a=b=c=true is the unique model. *)
+  let clauses = List.filteri (fun i _ -> i < 7) all8 in
+  let s = build 3 ~eliminable:[] clauses in
+  let r = Sat.solve s in
+  let model = Sat.model s in
+  check "strengthen: 7-of-8 sat" (r = Sat.Sat);
+  check "strengthen: model satisfies originals" (all_sat model clauses)
+;;
+
 let () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") ->
@@ -145,6 +178,8 @@ let () =
     test_reconstruction_forced_flip ();
     test_pure_literal ();
     test_unsat_preserved ();
+    test_strengthening_unsat ();
+    test_strengthening_sat ();
     Printf.printf "satpre_test: %d checks, %d failures\n" !checks !failures;
     if !failures > 0 then exit 1
   | Some _ | None ->
