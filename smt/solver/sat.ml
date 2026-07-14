@@ -33,7 +33,7 @@ type clause =
   ; lits : lit array
   ; mutable activity : float
   ; mutable lbd : int
-      (* LBD ("glue"): distinct decision levels among the literals, computed when the
+    (* LBD ("glue"): distinct decision levels among the literals, computed when the
          clause is learned and improved (lowered) whenever conflict analysis re-derives it
          as a reason. Drives LBD-based reduceDB (S3). 0 for original / transient clauses
          (never in [learnts], never scored). *)
@@ -115,7 +115,7 @@ type t =
     assigns : int Dynarray.t (* 0 unknown, 1 true, -1 false *)
   ; level : int Dynarray.t (* decision level at which the var was assigned *)
   ; trail_pos : int Dynarray.t
-      (* var -> its index in [trail] while assigned, else -1. Read only for the theory
+    (* var -> its index in [trail] while assigned, else -1. Read only for the theory
          seam's strict CONTRACT-EX precedence check; write-only otherwise. *)
   ; reason :
       reason Dynarray.t (* why the var was assigned (Decision/Implied_by/Theory_prop) *)
@@ -154,7 +154,7 @@ type t =
   ; mutable trail_ema : float
   ; mutable conflicts_since_restart : int
   ; mutable conflicts_at_solve_start : int
-      (* [t.conflicts] snapshot at the current [solve]'s entry. The restart/reduceDB
+    (* [t.conflicts] snapshot at the current [solve]'s entry. The restart/reduceDB
          warm-up and the blocking gate read [t.conflicts - conflicts_at_solve_start] — a
          PER-SOLVE conflict count — so an incremental re-solve neither leaks the
          cumulative count into the blocking gate (codex M2) nor fires reduceDB immediately
@@ -179,7 +179,7 @@ type t =
   ; restart_base : int
   ; mutable trace : trace option
   ; mutable terminal : unsat_conclusion option
-      (* ADR-0013 §4.0: the terminal conclusion of a PERMANENT unsat ([t.ok] false) —
+    (* ADR-0013 §4.0: the terminal conclusion of a PERMANENT unsat ([t.ok] false) —
          [Root_empty] for an empty [Query]/[Theory_lemma] input (E1/E4), [Level0_conflict]
          for a level-0 conflict (E2). Set (traced only) at the [t.ok] true→false
          transition and PERSISTED across solves, so every repeated [solve] that returns
@@ -189,11 +189,11 @@ type t =
          [t.ok] holds or untraced. *)
   ; mutable theory : theory option
   ; mutable budget_tick : (unit -> unit) option
-      (* board #60: called at each conflict / decision to tick a deterministic effort
+    (* board #60: called at each conflict / decision to tick a deterministic effort
          counter the driver owns; may raise to unwind [solve] at a budget cap. [None] in
          the pure core (bit-identical). *)
   ; mutable branch_filter : (int -> bool) option
-      (* Relevancy branch-filter (sat.mli set_branch_filter). [None] => [pick_branch] is
+    (* Relevancy branch-filter (sat.mli set_branch_filter). [None] => [pick_branch] is
          bit-identical to the pre-hook core. When [Some f], [pick_branch] will not DECIDE
          an unassigned var [v] with [f v = false]; it skips and re-inserts it (so it stays
          a candidate for when it becomes relevant), and returns [None] when only
@@ -208,29 +208,29 @@ type t =
        bit-identical. *)
     satpre : bool
   ; eliminable : bool Dynarray.t
-      (* per-var: [true] iff a client marked [v] eliminable (set_eliminable). DEFAULT
+    (* per-var: [true] iff a client marked [v] eliminable (set_eliminable). DEFAULT
          false (frozen) — only pure-aux Tseitin vars are ever marked. *)
   ; eliminated : bool Dynarray.t
-      (* per-var: [true] once [preprocess] eliminated [v] (all its clauses removed). Such
+    (* per-var: [true] once [preprocess] eliminated [v] (all its clauses removed). Such
          a var is skipped by [pick_branch] (it is in no clause) and its model value is
          reconstructed in [save_model]. *)
   ; elim_stack : (lit array * lit) Dynarray.t
-      (* the reconstruction stack (the note's clause-deletion form): (deleted clause,
+    (* the reconstruction stack (the note's clause-deletion form): (deleted clause,
          pivot literal), in elimination order. [save_model] pops it in REVERSE, flipping
          the pivot var to satisfy any deleted clause the reduced model left unsatisfied. *)
   ; restore_map : (var, lit array list) Hashtbl.t
-      (* per eliminated pivot var: the clauses deleted for it, so [add_clause] can restore
+    (* per eliminated pivot var: the clauses deleted for it, so [add_clause] can restore
          them (re-add + un-eliminate) if a later clause names the var — the note's
          "restore clauses deleted on l when a clause containing ¬l arrives" (kept sound
          under incrementality). Empty unless something was eliminated. *)
   ; equiv : (var, lit) Hashtbl.t
-      (* Equivalent-literal substitution (ELS) reconstruction: [x -> L] means the positive
+    (* Equivalent-literal substitution (ELS) reconstruction: [x -> L] means the positive
          literal of [x] is equivalent to literal [L] (a representative that is NOT itself
          ELS-eliminated), so [x] was substituted away. [save_model] sets [x]'s value to
          [L]'s AFTER the flip-stack pass — a definitional reconstruction distinct from the
          note's flip-to-satisfy. Empty unless ELS eliminated something. *)
   ; mutable inproc_next : int
-      (* Phase-2 inprocessing schedule: fire a restart-boundary round once [t.conflicts]
+    (* Phase-2 inprocessing schedule: fire a restart-boundary round once [t.conflicts]
          reaches this. Reset per [solve] to a first-round offset; stepped by
          [inproc_interval] with geometric back-off after each fire. Only consulted when
          [satpre] is on, so the pure-core schedule is inert. *)
@@ -245,7 +245,7 @@ type t =
   ; mutable stat_els : int
   ; mutable stat_flp : int
   ; chrono : bool
-      (* Chronological backtracking (task #41 Stage 1; Nadel–Ryvchin SAT'18, Möhle–Biere
+    (* Chronological backtracking (task #41 Stage 1; Nadel–Ryvchin SAT'18, Möhle–Biere
          SAT'19). Read once from [OXSMT_CHRONO] at [create]; [false] (default) ⇒ every CB
          branch below is dead and the core is BYTE-IDENTICAL (verdicts, models, and the
          conflicts/decisions/propagations trio) to the pre-CB engine. When [true], the
@@ -256,7 +256,7 @@ type t =
          backtracks chronologically to [conflict_level - 1] when the backjump gap is
          within [chrono_threshold]. *)
   ; chrono_threshold : int
-  (* Nadel–Ryvchin threshold T ([OXSMT_CHRONO_T], default 100): backjump
+    (* Nadel–Ryvchin threshold T ([OXSMT_CHRONO_T], default 100): backjump
      non-chronologically (to [bt]) when [conflict_level - bt > chrono_threshold], else
      chronologically (to [conflict_level - 1]). Inert unless [chrono]. *)
   }
@@ -433,10 +433,11 @@ let budget_tick t =
    off the leftover flag. A poisoned solver is not pristine; rebuild it. The driver
    installs the theory first, before asserting. *)
 let set_theory t th =
-  if (not t.ok)
-     || Dynarray.length t.clauses <> 0
-     || Dynarray.length t.learnts <> 0
-     || Dynarray.length t.trail <> 0
+  if
+    (not t.ok)
+    || Dynarray.length t.clauses <> 0
+    || Dynarray.length t.learnts <> 0
+    || Dynarray.length t.trail <> 0
   then
     invalid_arg
       "Sat.set_theory: a theory may only be (de)attached on a pristine solver (ok, no \
@@ -880,15 +881,16 @@ let theory_explain_checked t lit =
   let lit_pos = Dynarray.get t.trail_pos (var_of_lit lit) in
   List.iter
     (fun p ->
-      if not
+       if
+         not
            (lit_val t p = 1
             && Dynarray.get t.trail_pos (var_of_lit p) >= 0
             && Dynarray.get t.trail_pos (var_of_lit p) < lit_pos)
-      then
-        raise
-          (Theory_contract_violation
-             "explain: premise not asserted strictly before the explained literal \
-              (CONTRACT-EX)"))
+       then
+         raise
+           (Theory_contract_violation
+              "explain: premise not asserted strictly before the explained literal \
+               (CONTRACT-EX)"))
     premises;
   premises
 ;;
@@ -911,9 +913,9 @@ let theory_conflict_clause t premises =
   let lits = Array.of_list (List.map neg_lit premises) in
   Array.iter
     (fun l ->
-      if lit_val t l <> -1
-      then
-        raise (Theory_contract_violation "conflict premise set is not all asserted-true"))
+       if lit_val t l <> -1
+       then
+         raise (Theory_contract_violation "conflict premise set is not all asserted-true"))
     lits;
   note_theory_clause t Conflict (transient_clause t lits)
 ;;
@@ -932,12 +934,12 @@ let theory_prop_conflict_clause t lit =
   let lits = reason_lits lit premises in
   Array.iter
     (fun l ->
-      if lit_val t l <> -1
-      then
-        raise
-          (Theory_contract_violation
-             "theory propagated a literal whose negation is asserted, but its \
-              explanation is not falsified"))
+       if lit_val t l <> -1
+       then
+         raise
+           (Theory_contract_violation
+              "theory propagated a literal whose negation is asserted, but its \
+               explanation is not falsified"))
     lits;
   note_theory_clause t Conflict (transient_clause t lits)
 ;;
@@ -983,8 +985,8 @@ let analyze t confl =
       let m = ref 0 in
       Array.iter
         (fun l ->
-          let lv = Dynarray.get t.level (var_of_lit l) in
-          if lv > !m then m := lv)
+           let lv = Dynarray.get t.level (var_of_lit l) in
+           if lv > !m then m := lv)
         confl.lits;
       !m)
   in
@@ -1096,8 +1098,9 @@ let analyze t confl =
     else (
       let maxi = ref 1 in
       for i = 2 to Array.length learnt - 1 do
-        if Dynarray.get t.level (var_of_lit learnt.(i))
-           > Dynarray.get t.level (var_of_lit learnt.(!maxi))
+        if
+          Dynarray.get t.level (var_of_lit learnt.(i))
+          > Dynarray.get t.level (var_of_lit learnt.(!maxi))
         then maxi := i
       done;
       let tmp = learnt.(1) in
@@ -1204,10 +1207,10 @@ let reduce_db t =
   let stats =
     Array.map
       (fun c ->
-        { Search_heuristics.lbd = c.lbd
-        ; activity = c.activity
-        ; protected_ = locked t c || Array.length c.lits <= 2
-        })
+         { Search_heuristics.lbd = c.lbd
+         ; activity = c.activity
+         ; protected_ = locked t c || Array.length c.lits <= 2
+         })
       arr
   in
   let del = Search_heuristics.reduce_deletions stats in
@@ -1255,12 +1258,12 @@ let rec restore_eliminated t v =
     heap_insert t v;
     List.iter
       (fun cl ->
-        Array.iter
-          (fun l ->
-            let w = var_of_lit l in
-            if Dynarray.get t.eliminated w then restore_eliminated t w)
-          cl;
-        !add_clause_ref t (Array.to_list cl))
+         Array.iter
+           (fun l ->
+              let w = var_of_lit l in
+              if Dynarray.get t.eliminated w then restore_eliminated t w)
+           cl;
+         !add_clause_ref t (Array.to_list cl))
       clauses
 ;;
 
@@ -1274,8 +1277,8 @@ let add_clause ?(origin = Query) t lits =
   then
     List.iter
       (fun l ->
-        let v = var_of_lit l in
-        if Dynarray.get t.eliminated v then restore_eliminated t v)
+         let v = var_of_lit l in
+         if Dynarray.get t.eliminated v then restore_eliminated t v)
       lits;
   if t.ok
   then (
@@ -1725,8 +1728,8 @@ let search t assumps conflict_limit =
         let maxl = ref 0 in
         Array.iter
           (fun l ->
-            let lv = Dynarray.get t.level (var_of_lit l) in
-            if lv > !maxl then maxl := lv)
+             let lv = Dynarray.get t.level (var_of_lit l) in
+             if lv > !maxl then maxl := lv)
           confl.lits;
         if !maxl < decision_level t then cancel_until t !maxl);
       if decision_level t = 0
@@ -1742,8 +1745,8 @@ let search t assumps conflict_limit =
         let m = ref 0 in
         Array.iter
           (fun l ->
-            let lv = Dynarray.get t.level (var_of_lit l) in
-            if lv > !m then m := lv)
+             let lv = Dynarray.get t.level (var_of_lit l) in
+             if lv > !m then m := lv)
           confl.lits;
         !m
       in
@@ -1788,8 +1791,8 @@ let search t assumps conflict_limit =
         t.decisions_since_rephase <- 0;
         t.conflicts_since_restart <- 0;
         result := Some R_restart)
-      else if (conflict_limit > 0 && !conflicts_here >= conflict_limit)
-              || adaptive_restart t
+      else if
+        (conflict_limit > 0 && !conflicts_here >= conflict_limit) || adaptive_restart t
       then (
         cancel_until t 0;
         t.conflicts_since_restart <- 0;
@@ -2015,7 +2018,10 @@ let vivify_learnt t c =
   let lits = c.lits in
   let n = Array.length lits in
   let kept = Dynarray.create () in
-  let shortened = ref false (* set once a conflict / forced-true proves entailment *) in
+  let shortened =
+    ref false
+    (* set once a conflict / forced-true proves entailment *)
+  in
   let i = ref 0 in
   let stop = ref false in
   while (not !stop) && !i < n do
@@ -2079,9 +2085,10 @@ let failed_literal_probing t =
       let forced =
         if probe (pos vv)
         then Some (neg vv)
-        else if (* re-check: probing [pos vv] enqueued nothing (it restored L0), so [vv]
+        else if
+          (* re-check: probing [pos vv] enqueued nothing (it restored L0), so [vv]
                    is still free unless a prior iteration's forced unit propagated onto it *)
-                Dynarray.get t.assigns vv = 0 && probe (neg vv)
+          Dynarray.get t.assigns vv = 0 && probe (neg vv)
         then Some (pos vv)
         else None
       in
@@ -2137,12 +2144,12 @@ let els_pass t work =
     let adj = Array.make n2 [] in
     Dynarray.iter
       (fun wc ->
-        if (not wc.wdead) && Array.length wc.wl = 2
-        then (
-          let a = wc.wl.(0)
-          and b = wc.wl.(1) in
-          adj.(neg_lit a) <- b :: adj.(neg_lit a);
-          adj.(neg_lit b) <- a :: adj.(neg_lit b)))
+         if (not wc.wdead) && Array.length wc.wl = 2
+         then (
+           let a = wc.wl.(0)
+           and b = wc.wl.(1) in
+           adj.(neg_lit a) <- b :: adj.(neg_lit a);
+           adj.(neg_lit b) <- a :: adj.(neg_lit b)))
       work;
     let adj = Array.map Array.of_list adj in
     (* iterative Tarjan SCC over the 2*nvars literal nodes *)
@@ -2225,9 +2232,10 @@ let els_pass t work =
     if not !complementary
     then
       for v = 0 to t.nvars - 1 do
-        if Dynarray.get t.eliminable v
-           && (not (Dynarray.get t.eliminated v))
-           && Dynarray.get t.assigns v = 0
+        if
+          Dynarray.get t.eliminable v
+          && (not (Dynarray.get t.eliminated v))
+          && Dynarray.get t.assigns v = 0
         then (
           let r = rep.(comp.(pos v)) in
           if var_of_lit r <> v && Dynarray.get t.assigns (var_of_lit r) = 0
@@ -2258,19 +2266,19 @@ let els_pass t work =
       let units = Hashtbl.create 16 in
       Dynarray.iter
         (fun wc ->
-          if (not wc.wdead) && not !unsafe
-          then (
-            match rewrite wc.wl with
-            | None -> ()
-            | Some arr ->
-              (match Array.length arr with
-               | 0 -> unsafe := true
-               | 1 ->
-                 let u = arr.(0) in
-                 if lit_val t u = -1 || Hashtbl.mem units (neg_lit u)
-                 then unsafe := true
-                 else Hashtbl.replace units u ()
-               | _ -> ())))
+           if (not wc.wdead) && not !unsafe
+           then (
+             match rewrite wc.wl with
+             | None -> ()
+             | Some arr ->
+               (match Array.length arr with
+                | 0 -> unsafe := true
+                | 1 ->
+                  let u = arr.(0) in
+                  if lit_val t u = -1 || Hashtbl.mem units (neg_lit u)
+                  then unsafe := true
+                  else Hashtbl.replace units u ()
+                | _ -> ())))
         work;
       if not !unsafe
       then (
@@ -2278,23 +2286,23 @@ let els_pass t work =
         let enq = ref [] in
         Dynarray.iter
           (fun wc ->
-            if not wc.wdead
-            then (
-              match rewrite wc.wl with
-              | None -> wc.wdead <- true (* tautology *)
-              | Some arr ->
-                (match Array.length arr with
-                 | 0 -> wc.wdead <- true (* unreachable: dry run ruled it out *)
-                 | 1 ->
-                   wc.wdead <- true;
-                   enq := arr.(0) :: !enq
-                 | _ -> wc.wl <- arr)))
+             if not wc.wdead
+             then (
+               match rewrite wc.wl with
+               | None -> wc.wdead <- true (* tautology *)
+               | Some arr ->
+                 (match Array.length arr with
+                  | 0 -> wc.wdead <- true (* unreachable: dry run ruled it out *)
+                  | 1 ->
+                    wc.wdead <- true;
+                    enq := arr.(0) :: !enq
+                  | _ -> wc.wl <- arr)))
           work;
         List.iter
           (fun (v, r) ->
-            Dynarray.set t.eliminated v true;
-            Hashtbl.replace t.equiv v r;
-            t.stat_els <- t.stat_els + 1)
+             Dynarray.set t.eliminated v true;
+             Hashtbl.replace t.equiv v r;
+             t.stat_els <- t.stat_els + 1)
           !to_elim;
         List.iter
           (fun u -> if lit_val t u = 0 then unchecked_enqueue t u Decision)
@@ -2337,19 +2345,19 @@ let run_round t =
       let bail = ref false in
       Dynarray.iter
         (fun c ->
-          if (not c.deleted) && not !bail
-          then (
-            let satisfied = Array.exists (fun l -> lit_val t l = 1) c.lits in
-            if not satisfied
-            then (
-              let ls =
-                Array.to_list c.lits
-                |> List.filter (fun l -> lit_val t l <> -1)
-                |> List.sort_uniq compare
-              in
-              match ls with
-              | [] | [ _ ] -> bail := true
-              | _ -> Dynarray.add_last work { wl = Array.of_list ls; wdead = false })))
+           if (not c.deleted) && not !bail
+           then (
+             let satisfied = Array.exists (fun l -> lit_val t l = 1) c.lits in
+             if not satisfied
+             then (
+               let ls =
+                 Array.to_list c.lits
+                 |> List.filter (fun l -> lit_val t l <> -1)
+                 |> List.sort_uniq compare
+               in
+               match ls with
+               | [] | [ _ ] -> bail := true
+               | _ -> Dynarray.add_last work { wl = Array.of_list ls; wdead = false })))
         t.clauses;
       if not !bail
       then (
@@ -2376,26 +2384,29 @@ let run_round t =
            ---- *)
         Dynarray.iteri
           (fun i wc ->
-            if not wc.wdead
-            then (
-              (* scan candidates off the literal with the fewest occurrences *)
-              let lmin = ref wc.wl.(0) in
-              Array.iter
-                (fun l -> if List.length occ.(l) < List.length occ.(!lmin) then lmin := l)
-                wc.wl;
-              let subsumed = ref false in
-              List.iter
-                (fun j ->
-                  if (not !subsumed) && j <> i && live j
-                  then (
-                    let d = Dynarray.get work j in
-                    if Array.length d.wl <= Array.length wc.wl && sorted_subset d.wl wc.wl
-                    then subsumed := true))
-                occ.(!lmin);
-              if !subsumed
-              then (
-                wc.wdead <- true;
-                t.stat_deleted_clauses <- t.stat_deleted_clauses + 1)))
+             if not wc.wdead
+             then (
+               (* scan candidates off the literal with the fewest occurrences *)
+               let lmin = ref wc.wl.(0) in
+               Array.iter
+                 (fun l ->
+                    if List.length occ.(l) < List.length occ.(!lmin) then lmin := l)
+                 wc.wl;
+               let subsumed = ref false in
+               List.iter
+                 (fun j ->
+                    if (not !subsumed) && j <> i && live j
+                    then (
+                      let d = Dynarray.get work j in
+                      if
+                        Array.length d.wl <= Array.length wc.wl
+                        && sorted_subset d.wl wc.wl
+                      then subsumed := true))
+                 occ.(!lmin);
+               if !subsumed
+               then (
+                 wc.wdead <- true;
+                 t.stat_deleted_clauses <- t.stat_deleted_clauses + 1)))
           work;
         (* ---- Self-subsuming resolution (strengthening): if a clause [d] contains [¬l]
            and [d \ {¬l} ⊆ c \ {l}], the resolvent of [c] and [d] on [l] subsumes [c], so
@@ -2409,34 +2420,35 @@ let run_round t =
            both [l] and [¬l] can't spuriously satisfy the membership; review rider). ---- *)
         Dynarray.iteri
           (fun i wc ->
-            if not wc.wdead
-            then (
-              let progress = ref true in
-              while !progress && Array.length wc.wl >= 3 do
-                progress := false;
-                let cwl = wc.wl in
-                Array.iter
-                  (fun l ->
-                    if not !progress
-                    then (
-                      let nl = neg_lit l in
-                      List.iter
-                        (fun j ->
-                          if (not !progress) && j <> i && live j
-                          then (
-                            let d = (Dynarray.get work j).wl in
-                            if Array.exists (fun m -> m = nl) d
-                               && Array.for_all
-                                    (fun m -> m = nl || (m <> l && sorted_mem m cwl))
-                                    d
-                            then (
-                              wc.wl
-                              <- Array.of_list
-                                   (List.filter (( <> ) l) (Array.to_list cwl));
-                              progress := true)))
-                        occ.(nl)))
-                  cwl
-              done))
+             if not wc.wdead
+             then (
+               let progress = ref true in
+               while !progress && Array.length wc.wl >= 3 do
+                 progress := false;
+                 let cwl = wc.wl in
+                 Array.iter
+                   (fun l ->
+                      if not !progress
+                      then (
+                        let nl = neg_lit l in
+                        List.iter
+                          (fun j ->
+                             if (not !progress) && j <> i && live j
+                             then (
+                               let d = (Dynarray.get work j).wl in
+                               if
+                                 Array.exists (fun m -> m = nl) d
+                                 && Array.for_all
+                                      (fun m -> m = nl || (m <> l && sorted_mem m cwl))
+                                      d
+                               then (
+                                 wc.wl
+                                 <- Array.of_list
+                                      (List.filter (( <> ) l) (Array.to_list cwl));
+                                 progress := true)))
+                          occ.(nl)))
+                   cwl
+               done))
           work;
         (* Rebuild occurrence lists: subsumption killed clauses and strengthening rewrote
            [wl]s, so the incremental [occ] is stale. A fresh rebuild over live clauses is
@@ -2444,13 +2456,14 @@ let run_round t =
         Array.fill occ 0 n2 [];
         Dynarray.iteri
           (fun i wc ->
-            if not wc.wdead then Array.iter (fun l -> occ.(l) <- i :: occ.(l)) wc.wl)
+             if not wc.wdead then Array.iter (fun l -> occ.(l) <- i :: occ.(l)) wc.wl)
           work;
         (* ---- Bounded variable elimination on eliminable vars. ---- *)
         for v = 0 to t.nvars - 1 do
-          if Dynarray.get t.eliminable v
-             && (not (Dynarray.get t.eliminated v))
-             && Dynarray.get t.assigns v = 0
+          if
+            Dynarray.get t.eliminable v
+            && (not (Dynarray.get t.eliminated v))
+            && Dynarray.get t.assigns v = 0
           then (
             let ps = List.filter live occ.(pos v) in
             let ns = List.filter live occ.(neg v) in
@@ -2460,9 +2473,9 @@ let run_round t =
               List.iter (fun r -> ignore (add_wclause r : int)) resolvents;
               List.iter
                 (fun (j, piv) ->
-                  let wc = Dynarray.get work j in
-                  wc.wdead <- true;
-                  Dynarray.add_last t.elim_stack (wc.wl, piv))
+                   let wc = Dynarray.get work j in
+                   wc.wdead <- true;
+                   Dynarray.add_last t.elim_stack (wc.wl, piv))
                 deleted_idxs;
               t.stat_elim_vars <- t.stat_elim_vars + 1;
               t.stat_deleted_clauses <- t.stat_deleted_clauses + List.length deleted_idxs;
@@ -2490,19 +2503,22 @@ let run_round t =
               let disqualified = ref false in
               List.iter
                 (fun pi ->
-                  List.iter
-                    (fun ni ->
-                      if not !disqualified
-                      then (
-                        match
-                          resolve_on (Dynarray.get work pi).wl (Dynarray.get work ni).wl v
-                        with
-                        | None -> () (* tautological resolvent: drops out (BCE) *)
-                        | Some r ->
-                          if Array.length r <= 1 || Array.length r > bve_size_cap
-                          then disqualified := true
-                          else resolvents := r :: !resolvents))
-                    ns)
+                   List.iter
+                     (fun ni ->
+                        if not !disqualified
+                        then (
+                          match
+                            resolve_on
+                              (Dynarray.get work pi).wl
+                              (Dynarray.get work ni).wl
+                              v
+                          with
+                          | None -> () (* tautological resolvent: drops out (BCE) *)
+                          | Some r ->
+                            if Array.length r <= 1 || Array.length r > bve_size_cap
+                            then disqualified := true
+                            else resolvents := r :: !resolvents))
+                     ns)
                 ps;
               if (not !disqualified) && List.length !resolvents <= np + nn + bve_margin
               then (
@@ -2518,10 +2534,10 @@ let run_round t =
         Dynarray.clear t.clauses;
         Dynarray.iter
           (fun wc ->
-            if (not wc.wdead) && Array.length wc.wl >= 2
-            then (
-              let c = mk_clause t wc.wl false in
-              attach t c))
+             if (not wc.wdead) && Array.length wc.wl >= 2
+             then (
+               let c = mk_clause t wc.wl false in
+               attach t c))
           work;
         (* Learn/forget over the learned-clause DB (see the header). The watch lists were
            just cleared and rebuilt for the originals, so every KEPT learned clause must
@@ -2539,11 +2555,11 @@ let run_round t =
           let kept = Dynarray.create () in
           Dynarray.iter
             (fun c ->
-              if Array.exists (fun l -> Dynarray.get t.eliminated (var_of_lit l)) c.lits
-              then c.deleted <- true
-              else (
-                attach t c;
-                Dynarray.add_last kept c))
+               if Array.exists (fun l -> Dynarray.get t.eliminated (var_of_lit l)) c.lits
+               then c.deleted <- true
+               else (
+                 attach t c;
+                 Dynarray.add_last kept c))
             t.learnts;
           Dynarray.clear t.learnts;
           Dynarray.append t.learnts kept);
@@ -2582,20 +2598,21 @@ let run_round t =
           let budget = ref vivify_budget in
           Array.iter
             (fun c ->
-              if !budget > 0
+               if
+                 !budget > 0
                  && (not c.deleted)
                  && Array.length c.lits >= 3
                  && Array.length c.lits <= vivify_size_cap
-              then (
-                decr budget;
-                match vivify_learnt t c with
-                | None -> ()
-                | Some sub ->
-                  c.deleted <- true;
-                  let nc = mk_clause t sub true in
-                  nc.lbd <- clause_lbd t sub;
-                  attach t nc;
-                  t.stat_vivified <- t.stat_vivified + 1))
+               then (
+                 decr budget;
+                 match vivify_learnt t c with
+                 | None -> ()
+                 | Some sub ->
+                   c.deleted <- true;
+                   let nc = mk_clause t sub true in
+                   nc.lbd <- clause_lbd t sub;
+                   attach t nc;
+                   t.stat_vivified <- t.stat_vivified + 1))
             snapshot;
           (* drop the replaced (deleted) learned clauses; the fresh shortened ones were
              already appended to [t.learnts] by [mk_clause] and stay. *)
@@ -2645,13 +2662,14 @@ let solve ?(assumptions = []) t =
      Phase-2 interleaves elimination with theory lemmas.) *)
   List.iter
     (fun l ->
-      let v = var_of_lit l in
-      if v < Dynarray.length t.eliminable
+       let v = var_of_lit l in
+       if
+         v < Dynarray.length t.eliminable
          && (Dynarray.get t.eliminable v || Dynarray.get t.eliminated v)
-      then
-        invalid_arg
-          "Sat.solve: an assumption names a variable marked eliminable/eliminated by CNF \
-           preprocessing (A10); assumptions must be over frozen variables")
+       then
+         invalid_arg
+           "Sat.solve: an assumption names a variable marked eliminable/eliminated by \
+            CNF preprocessing (A10); assumptions must be over frozen variables")
     assumptions;
   if not t.ok
   then (
