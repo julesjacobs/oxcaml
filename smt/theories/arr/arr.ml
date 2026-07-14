@@ -58,8 +58,14 @@ type t =
          been materialized by the upward read-propagation rule ([ensure_store_reads]).
          Guards termination: each (store, index) pair triggers at most one fresh select,
          and a fresh select's index is drawn from an existing select, so no new index is
-         ever created. Monotonic like [select_terms] (terms persist across pop; only
-         e-graph merges are backtracked). *)
+         ever created. NOT backtracked on pop, and that is safe — NOT because e-graph
+         nodes persist (they do not: [Euf.pop] truncates enodes to the push watermark),
+         but because [select_terms]/[store_terms] are themselves monotonic ([Arr.pop]
+         never truncates them) and every ROW consumer reaches a term through
+         [Euf.are_equal]/[Euf.class_of], which lazily re-register an enode truncated by a
+         pop. So a memoized pair whose select was dropped by [Euf.pop] is simply
+         re-materialized on demand the next time it is read; the memo only ever suppresses
+         a redundant [build_select], never a needed one. *)
   ; ext_witness : (int * int, Term.t) Hashtbl.t
     (* fresh extensionality witness index per asserted array-diseq pair (by term tags,
          orientation-normalized), reused so re-assertion after a pop is stable *)

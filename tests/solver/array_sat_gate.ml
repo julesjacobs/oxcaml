@@ -5,11 +5,14 @@
       check_sat returns [Sat] only after {!Array_model_check} validated the array model
       against the original assertions.
 
-   2. SOUNDNESS DISCRIMINATOR — the storeinv-shape UNSAT file the arrays theory does not
-      refute (it reaches a Final "Sat"). The array checker rejects it (no single model
-      satisfies the store-equality and the array disequality together) => [Unknown], never
-      a wrong sat. A bypass of the checker would report [Sat] here — so this being
-      [unknown] is exactly the checker earning its keep.
+   2. SOUNDNESS — the storeinv-shape UNSAT file must NEVER be reported [Sat]. Since upward
+      read propagation landed (ensure_store_reads in arr.ml) the arrays theory refutes
+      this shape directly and answers [unsat]; before that it saturated to a Final "Sat"
+      that the array checker rejected, giving a sound [unknown]. run_soundness accepts
+      unsat OR unknown, never sat, so it stays valid across that behaviour change. (The
+      checker-bypass discrimination — that a commit ignoring [Array_model_check] would
+      wrongly report [Sat] on a genuinely-sat query — now lives entirely in part 3, since
+      the theory no longer leaves this file at a Final "Sat" for the checker to catch.)
 
    3. WIRING (fault injection) — a Session re-checked with the
       {!Session.For_test.set_array_checker} override flipped between calls: a reject-all
