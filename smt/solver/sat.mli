@@ -264,3 +264,41 @@ val set_budget_tick : t -> (unit -> unit) option -> unit
     asserted — the level {!field-on_backtrack} later references to undo trail-synchronized
     theory state. Reading it inside [on_assign] is a pure query (no re-entrancy). *)
 val decision_level : t -> int
+
+(** {2 Decision branch-filter hook (relevancy)}
+
+    A settable [var -> bool] predicate, same [None]-by-default side-channel discipline as
+    {!set_trace}/{!set_theory}/{!set_budget_tick}: with the hook unset the branching
+    engine is {b bit-identical} to today (verdicts, models, and the conflicts/decisions/
+    propagations trio unchanged) — one [None] branch of overhead in {!field-pick}.
+
+    When set, the branching heuristic will not {b decide} an unassigned variable [v] for
+    which [filter v] is [false]; such a variable is skipped and kept as a future candidate
+    (re-inserted into the activity order), so once [filter v] becomes [true] it is
+    branched again. When every remaining unassigned variable is filtered out, branching
+    yields no decision — the search reports a complete assignment over the {e branchable}
+    variables and hands off to the theory's [Final] check exactly as it does when the
+    VSIDS order is exhausted. The intended client is a relevancy driver that maintains,
+    over the assignment trail (via {!field-on_assign}/{!field-on_backtrack}), which atoms
+    are relevant to satisfying the top-level formula under the current partial model, and
+    filters out the irrelevant ones (z3's [smt_relevancy]): a satisfied [(or a1 … a5)]
+    makes its unset disjuncts irrelevant, so they are not decided and cannot spuriously
+    over-constrain.
+
+    {b Soundness.} The filter can only make the engine decide {e fewer} variables; it adds
+    no literal to the trail and no clause, so it cannot manufacture a conflict — an
+    [Unsat] the filtered search reaches is over genuinely-asserted literals, exactly as
+    without the filter. Handing a partial (branchable-only) assignment to the theory's
+    [Final] check means the theory/model reconstruction must total it over the unbranched
+    atoms; the session's [Final]-check / model-check path (fail-closed) is the intended
+    backstop, so a filter that wrongly marks a needed atom irrelevant degrades a query to
+    [unknown], never a wrong verdict — that soundness obligation is on the driver, not
+    this core.
+
+    {b Certificate independence.} The trace/certificate machinery (ADR-0013 §4.0)
+    validates the {e clauses} learned and the input/unit closure, never the {e order} in
+    which decisions were taken; a branch-filter changes only which variable is decided
+    next, so an installed filter leaves every {!trace} hook's contract and the replayed
+    proof unaffected. A pure side channel: it never feeds conflict analysis and never
+    alters a learned clause. *)
+val set_branch_filter : t -> (var -> bool) option -> unit

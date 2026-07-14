@@ -741,7 +741,82 @@ let test_reducedb_engagement () =
     (c < 10000)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* Branch-filter hook (sat.mli set_branch_filter). Two discriminating checks the relevancy
+   lane rides on:
+   (a) FIRING oracle — a filter that forbids a set of otherwise-free decision vars
+       actually SUPPRESSES their decisions (the search stops branching once only forbidden
+       vars remain) while the verdict is unchanged. Must be RED against a no-op filter
+       (the vacuous-feature guard): a filter that changes nothing would leave the decision
+       count equal, so the strict inequality below fails.
+   (b) PARITY — installing an allow-all filter [fun _ -> true] reproduces the no-filter
+       search exactly (same verdict + conflicts/decisions/propagations + model), so the
+       [Some]-branch machinery (stash / re-insert) does not perturb search when nothing is
+       filtered; combined with [pick_branch]'s structural [None] arm this is the
+       bit-identical-when-unset contract. *)
+
+(* Three unit clauses (1)(2)(3) force vars 1..3 at level 0 (0 branch-decisions); vars
+   4,5,6 are allocated but appear in no clause, so the only branch-decisions are on
+   {4 ,5,6}
+   . *)
+let build_free_var_instance () =
+  let s = Sat.create () in
+  for _ = 1 to 6 do
+    ignore (Sat.new_var s : Sat.var)
+  done;
+  Sat.add_clause s [ lit 1 ];
+  Sat.add_clause s [ lit 2 ];
+  Sat.add_clause s [ lit 3 ];
+  s
+;;
+
+let test_branch_filter_firing () =
+  (* Baseline: no filter. The three free vars each get a branch-decision. *)
+  let s0 = build_free_var_instance () in
+  check "branch-filter firing: baseline sat" (Sat.solve s0 = Sat.Sat);
+  let d0 = (Sat.stats s0).Sat.Stats.decisions in
+  check "branch-filter firing: baseline decides the free vars" (d0 >= 3);
+  (* Filter forbids the three free vars (0-based 3,4,5). They must never be decided, so
+     the search stops branching and hands off with them unassigned. *)
+  let s1 = build_free_var_instance () in
+  Sat.set_branch_filter s1 (Some (fun v -> v < 3));
+  check "branch-filter firing: still sat" (Sat.solve s1 = Sat.Sat);
+  let d1 = (Sat.stats s1).Sat.Stats.decisions in
+  check
+    (Printf.sprintf "branch-filter firing: suppresses decisions (%d < %d)" d1 d0)
+    (d1 < d0);
+  check "branch-filter firing: forbidden vars undecided => zero branch-decisions" (d1 = 0)
+;;
+
+let test_branch_filter_parity () =
+  let mk () =
+    lcg := 0xC0FFEE1234;
+    build 12 (List.init 40 (fun _ -> random_clause 12))
+  in
+  let s_none = mk () in
+  let s_all = mk () in
+  Sat.set_branch_filter s_all (Some (fun _ -> true));
+  let r_none = Sat.solve s_none
+  and r_all = Sat.solve s_all in
+  check "branch-filter parity: same verdict" (r_none = r_all);
+  let a = Sat.stats s_none
+  and b = Sat.stats s_all in
+  check
+    "branch-filter parity: same conflicts"
+    (a.Sat.Stats.conflicts = b.Sat.Stats.conflicts);
+  check
+    "branch-filter parity: same decisions"
+    (a.Sat.Stats.decisions = b.Sat.Stats.decisions);
+  check
+    "branch-filter parity: same propagations"
+    (a.Sat.Stats.propagations = b.Sat.Stats.propagations);
+  if r_none = Sat.Sat
+  then check "branch-filter parity: same model" (Sat.model s_none = Sat.model s_all)
+;;
+
 let () =
+  test_branch_filter_firing ();
+  test_branch_filter_parity ();
   test_lbd_of_levels ();
   test_rephase_engagement ();
   test_reducedb_engagement ();

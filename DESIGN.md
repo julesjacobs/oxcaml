@@ -589,3 +589,28 @@ the frozen-interface mechanics (FROZEN.sha256, `make check-frozen`), and all
 ratified ADR decisions remain in force unchanged — deleted as files, not as
 rules. Land bar: `make test` + `make gate` + two-model review (codex + fable).
 Any process step over 5 minutes gets questioned: eliminate it or speed it up.
+
+### A8 — Tranche-C unfreeze: SAT decision branch-filter hook (2026-07-13, master-approved)
+
+`sat.mli` grows one optional value, `set_branch_filter : t -> (var -> bool)
+option -> unit`, and `FROZEN.sha256` is regenerated to match. This is the
+"decision-request hook, a Tranche-C candidate bought on measurement" that the A2
+erratum (above) explicitly reserved — now bought: QF_UF loses to z3 by
+decision-heuristic thrashing (measured 6-33x more decisions/conflicts on the
+QG/iso tail), whose root cause is full-biconditional Tseitin leaving a satisfied
+disjunction's other atoms free for VSIDS to decide and spuriously over-constrain.
+The hook lets a relevancy driver (z3 `smt_relevancy`) tell the brancher not to
+DECIDE currently-irrelevant atoms. None of the 14 frozen declarations change; this
+is an addition, and with the hook unset (`None`, the default) `pick_branch` and
+therefore every verdict/model/counter is bit-identical to before — so the
+certificate-emission surface is untouched in practice, and untouched in principle
+because certificate replay validates learned clauses and the input/unit closure,
+never the decision ORDER. Soundness distinction from the A4 relevance-filtering
+ban: that ban is on THEORY-level per-term gating, where under-inclusion silently
+drops a term the theory needed and yields wrong-SAT. This hook only restricts SAT
+*branching*; it asserts nothing, so it cannot create a conflict (no wrong-UNSAT),
+and handing a branchable-only partial assignment to the theory's `Final`
+check/model-check (fail-closed) means a driver that wrongly marks a needed atom
+irrelevant degrades the query to `unknown`, never a wrong verdict. The relevancy
+driver ships env-gated, default OFF; the ON decision rides a corpus A/B (zero
+verdict disagreements + net-non-negative at 2s).

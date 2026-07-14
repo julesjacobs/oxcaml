@@ -189,9 +189,18 @@ type t =
          [t.ok] holds or untraced. *)
   ; mutable theory : theory option
   ; mutable budget_tick : (unit -> unit) option
-    (* board #60: called at each conflict / decision to tick a deterministic effort counter
-     the driver owns; may raise to unwind [solve] at a budget cap. [None] in the pure core
-     (bit-identical). *)
+    (* board #60: called at each conflict / decision to tick a deterministic effort
+         counter the driver owns; may raise to unwind [solve] at a budget cap. [None] in
+         the pure core (bit-identical). *)
+  ; mutable branch_filter : (int -> bool) option
+    (* Relevancy branch-filter (sat.mli set_branch_filter). [None] => [pick_branch] is
+     bit-identical to the pre-hook core. When [Some f], [pick_branch] will not DECIDE an
+     unassigned var [v] with [f v = false]; it skips and re-inserts it (so it stays a
+     candidate for when it becomes relevant), and returns [None] when only filtered-out
+     vars remain (a complete assignment over the branchable vars => hand off to the Final
+     check). The filter adds nothing to the trail, so it cannot create a conflict; the
+     driver owns the soundness obligation that an irrelevant atom is safe to leave
+     unbranched (backstop: the session Final-check / model-check, fail-closed). *)
   }
 
 let var_decay = 0.95
@@ -263,11 +272,13 @@ let create () =
   ; terminal = None
   ; theory = None
   ; budget_tick = None
+  ; branch_filter = None
   }
 ;;
 
 let set_trace t tr = t.trace <- tr
 let set_budget_tick t f = t.budget_tick <- f
+let set_branch_filter t f = t.branch_filter <- f
 
 (* Emit the persisted terminal conclusion of a permanent unsat ([t.terminal]) if a trace
    is installed. Called at every [solve] exit that returns [Unsat] off [not t.ok] (E1
@@ -1024,13 +1035,53 @@ let add_clause ?(origin = Query) t lits =
 (* ------------------------------------------------------------------ *)
 (* Branching and search. *)
 
-let rec pick_branch t =
-  match heap_remove_max t with
-  | None -> None
-  | Some v ->
-    if Dynarray.get t.assigns v = 0
-    then Some (if Dynarray.get t.polarity v then neg v else pos v)
-    else pick_branch t
+(* Pick the highest-activity unassigned variable to branch on, as a signed literal under
+   phase saving. With no branch-filter installed this is the classic loop: pop the VSIDS
+   max, skip already-assigned vars, decide the first unassigned one — and
+   [t.branch_filter = None] takes exactly that path (bit-identical, sat.mli
+   set_branch_filter).
+
+   With a filter installed, an unassigned var the filter rejects (currently irrelevant) is
+   NOT decided: it is stashed and re-inserted into the heap after the pick, so it stays a
+   candidate for when a later relevancy mark makes [filter] accept it (no backtrack
+   needed). [None] is returned when the heap holds only assigned or filtered-out vars — a
+   complete assignment over the branchable vars — which the caller hands to the Final
+   check exactly as it does on an exhausted heap. The stash is re-inserted on every exit
+   path, so the filter only reorders WHICH candidate is picked; it never drops a var from
+   the order. *)
+let pick_branch t =
+  match t.branch_filter with
+  | None ->
+    let rec go () =
+      match heap_remove_max t with
+      | None -> None
+      | Some v ->
+        if Dynarray.get t.assigns v = 0
+        then Some (if Dynarray.get t.polarity v then neg v else pos v)
+        else go ()
+    in
+    go ()
+  | Some filter ->
+    let stashed = ref [] in
+    let rec go () =
+      match heap_remove_max t with
+      | None -> None
+      | Some v ->
+        if Dynarray.get t.assigns v <> 0
+        then go () (* already assigned: drop, exactly as the no-filter loop does *)
+        else if not (filter v)
+        then (
+          (* unassigned but currently irrelevant: keep it as a future candidate *)
+          stashed := v :: !stashed;
+          go ())
+        else Some (if Dynarray.get t.polarity v then neg v else pos v)
+    in
+    let picked = go () in
+    (* Re-insert every stashed (unassigned, filtered-out) var so it remains in the
+       activity order; [heap_insert] no-ops a var already present, and [heap_remove_max]
+       set each stashed var's [heap_pos] to -1, so this restores them. *)
+    List.iter (fun v -> heap_insert t v) !stashed;
+    picked
 ;;
 
 let save_model t =
