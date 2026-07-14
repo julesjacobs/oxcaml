@@ -17,6 +17,9 @@ module Options = Main_args.Make_jscomp_options (Main_args.Default.Jsmain)
 
 let main argv ppf =
   Clflags.jsir := true;
+  Compmisc.set_backtrace_defaults ();
+
+  Compmisc.set_gc_pacing_defaults ~argv;
   let program = "ocamlj" in
   let columns =
     match Sys.getenv "COLUMNS" with

@@ -123,6 +123,162 @@ let read_clflags_from_env () =
   set_from_env Clflags.error_style Clflags.error_style_reader;
   ()
 
+(* The build farm runs every build action -- including the compiler's own
+   ocamlopt/ocamlc processes -- with OCAMLRUNPARAM=b=1 so that a crashing
+   build action leaves a backtrace. For the compiler that is a poor trade:
+   every [raise] then walks the stack to stash a backtrace (the
+   caml_stash_backtrace / frame-descr walk), which measures at ~+2.8%
+   instructions / +4.8% cycles on typing-heavy compiles, while the recorded
+   trace is only ever useful for an internal compiler error (ICE) -- never
+   for the user-facing type/syntax errors that are the compiler's normal
+   "failure" output and carry their own source locations. So we turn
+   backtrace recording OFF for compiler processes by default, regardless of
+   the ambient b=1.
+
+   The opt-in is the OXCAML_BACKTRACES environment variable. (Surfacing a
+   hint about it on the ICE / uncaught-exception path is left as a follow-up;
+   nothing in-tree prints it yet.) We deliberately key off a
+   fresh variable rather than honouring OCAMLRUNPARAM 'b': the farm ALWAYS
+   sets b=1, so honouring 'b' would mean the default never fires. (Contrast
+   the GC space_overhead default, which can honour an explicit o= precisely
+   because the farm does not set o=.) *)
+let backtraces_forced_on () =
+  match Sys.getenv_opt "OXCAML_BACKTRACES" with
+  | None | Some ("" | "0" | "false") -> false
+  | Some _ -> true
+
+let set_backtrace_defaults () =
+  (* Set the state explicitly in both directions: the opt-in must ENABLE
+     recording even when the environment did not (OCAMLRUNPARAM without 'b'),
+     not merely refrain from disabling it. *)
+  if backtraces_forced_on ()
+  then Printexc.record_backtrace true
+  else Printexc.record_backtrace false
+
+(* The compiler is allocation-heavy and short-lived, so it benefits from a
+   laxer GC pace than the runtime default (space_overhead = 80,
+   [Percent_free_def] in runtime/caml/config.h): raising it
+   trades peak heap for fewer major collections. On large compilation units
+   this is about -8 to -10% wall-clock time at the cost of roughly +45% peak
+   heap. We only bump the default: if OCAMLRUNPARAM/CAMLRUNPARAM explicitly
+   sets space_overhead ("o=..."), the user/build-farm asked for a specific
+   value (possibly the default 120) and we leave it untouched. *)
+(* Size-adaptive GC pace. Small/medium units get a lax pace (fewer major
+   collections; the -8..-10% single-unit win). Large units (big generated or
+   heavy modules) keep a tighter pace so we do not enlarge their already-big
+   heaps: on the fleet a global lax pace regressed heavy compiles (>=5s) ~10%
+   via aggregate memory pressure / paging, even while the tree aggregate
+   improved. The size threshold is a best-effort proxy (heavy files are
+   predominantly large sources) and wants a fleet run to calibrate. *)
+let compiler_space_overhead_small = 400
+let compiler_space_overhead_large = 200
+let large_unit_source_bytes = 300 * 1024
+
+(* Mirror the runtime's OCAMLRUNPARAM parser (runtime/startup_aux.c): the
+   active variable is OCAMLRUNPARAM if it is set at all, otherwise
+   CAMLRUNPARAM; within it, fields are separated by commas and each field's
+   first character is its single-letter key. Lowercase 'o' is space_overhead
+   (uppercase 'O' is a different knob, max_overhead, which we ignore here). *)
+let space_overhead_set_in_env () =
+  let param =
+    match Sys.getenv_opt "OCAMLRUNPARAM" with
+    | Some _ as p -> p
+    | None -> Sys.getenv_opt "CAMLRUNPARAM"
+  in
+  match param with
+  | None -> false
+  | Some s ->
+    String.split_on_char ',' s
+    |> List.exists (fun field -> String.length field > 0 && field.[0] = 'o')
+
+(* Best-effort size of the compilation unit's source. This runs before Arg
+   parsing, so it walks the raw argv (the argv the driver was invoked with,
+   which for embedded uses of [Maindriver.main]/[Optmaindriver.main] may
+   differ from [Sys.argv]): .ml/.mli arguments count directly; the operands
+   of -impl/-intf are sources regardless of suffix; -args/-args0 response
+   files are expanded (newline- resp. NUL-separated, trailing CR trimmed, as
+   in [Arg.read_arg]/[read_arg0]) and scanned with the same option-aware
+   walk, to a bounded nesting depth; and the operands of common value-taking
+   flags are skipped so an output name like [-o gen.ml] is not
+   misclassified. Exotic forms (a custom -intf-suffix, .mlt) may still be
+   missed: this is a pacing heuristic, and an explicit o= in OCAMLRUNPARAM
+   stays authoritative. Uses in_channel_length to avoid a Unix
+   dependency. *)
+let source_file_size_bytes path =
+  match open_in_bin path with
+  | exception _ -> 0
+  | ic ->
+    let n = try in_channel_length ic with _ -> 0 in
+    close_in_noerr ic;
+    n
+
+let response_file_args path ~null_sep =
+  match open_in_bin path with
+  | exception _ -> []
+  | ic ->
+    let n = try in_channel_length ic with _ -> 0 in
+    if n <= 0 || n > 16 * 1024 * 1024
+    then (close_in_noerr ic; [])
+    else begin
+      match really_input_string ic n with
+      | exception _ -> close_in_noerr ic; []
+      | s ->
+        close_in_noerr ic;
+        String.split_on_char (if null_sep then '\000' else '\n') s
+        |> List.map (fun a ->
+             (* [Arg.read_arg] strips one trailing CR per line, so
+                CRLF-formatted -args files parse the same way here. *)
+             let n = String.length a in
+             if (not null_sep) && n > 0 && a.[n - 1] = '\r'
+             then String.sub a 0 (n - 1)
+             else a)
+        |> List.filter (fun a -> String.length a > 0)
+    end
+
+let largest_input_source_bytes argv =
+  let best = ref 0 in
+  let consider path = best := Stdlib.max !best (source_file_size_bytes path) in
+  let is_source a =
+    Filename.check_suffix a ".ml" || Filename.check_suffix a ".mli"
+  in
+  (* Only flags whose operand is a non-source value; keep in sync with
+     main_args.ml (e.g. -dump-into-file is Arg.Unit and must NOT be here,
+     or it would swallow a following source file). *)
+  let takes_value = function
+    | "-o" | "-I" | "-H" | "-open" | "-pp" | "-ppx" | "-intf-suffix"
+    | "-cmi-file" | "-runtime-variant" | "-use-runtime" ->
+      true
+    | _ -> false
+  in
+  (* [depth] bounds response-file nesting (and cuts self-referencing
+     -args files short); the real expansion in [Arg] is recursive too. *)
+  let rec scan depth = function
+    | [] -> ()
+    | ("-impl" | "-intf") :: path :: rest ->
+      consider path;
+      scan depth rest
+    | (("-args" | "-args0") as flag) :: path :: rest ->
+      (if depth > 0 then
+         scan (depth - 1)
+           (response_file_args path ~null_sep:(String.equal flag "-args0")));
+      scan depth rest
+    | flag :: _ :: rest when takes_value flag -> scan depth rest
+    | a :: rest ->
+      if is_source a then consider a;
+      scan depth rest
+  in
+  (match Array.to_list argv with [] -> () | _ :: args -> scan 2 args);
+  !best
+
+let chosen_space_overhead argv =
+  if largest_input_source_bytes argv > large_unit_source_bytes
+  then compiler_space_overhead_large
+  else compiler_space_overhead_small
+
+let set_gc_pacing_defaults ~argv =
+  if not (space_overhead_set_in_env ()) then
+    Gc.set { (Gc.get ()) with Gc.space_overhead = chosen_space_overhead argv }
+
 let directory_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
 

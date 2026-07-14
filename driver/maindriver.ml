@@ -19,7 +19,9 @@ open Clflags
 module Options = Main_args.Make_bytecomp_options (Main_args.Default.Main)
 
 let main argv ppf =
+  Compmisc.set_backtrace_defaults ();
   let program = "ocamlc" in
+  Compmisc.set_gc_pacing_defaults ~argv;
   Clflags.add_arguments __LOC__ Options.list;
   Clflags.add_arguments __LOC__
     ["-depend", Arg.Unit Makedepend.main_from_option,

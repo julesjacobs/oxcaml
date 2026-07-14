@@ -124,6 +124,16 @@
   (section lib)
   (package ocaml_runtime_stdlib))
 
+; C1 frame-table bake (task #11): opt-in reserve object, built standalone and
+; installed beside libasmrun.a. Deliberately NOT in libasmrun.a so only binaries
+; that add it to their link line (the compiler) carry the ~4 MB section.
+(rule
+ (targets caml_frame_bake_reserve.o)
+ (deps caml_frame_bake_reserve.c)
+ (action
+  (run %{ocaml-config:c_compiler} -c -O2 -o caml_frame_bake_reserve.o
+    caml_frame_bake_reserve.c)))
+
 (install
   (files
     libasmrun.a
@@ -131,6 +141,7 @@
     libasmruni.a
     libasmrun_pic.a
     libasmrun_shared.so
+    caml_frame_bake_reserve.o
   )
   (section lib)
   (package ocaml_runtime_stdlib))
