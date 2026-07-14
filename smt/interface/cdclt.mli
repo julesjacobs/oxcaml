@@ -66,6 +66,13 @@ val create
   -> cap:Oxsmt_core.Env.reserved_cap
   -> t
 
+(** Install (or, with [None], detach) the dynamic relevancy driver (task #24). When set,
+    the theory-seam trail events ([on_assign]/[on_backtrack]) are also streamed to it so
+    it can maintain relevancy marks in lockstep with the SAT trail. The branch filter that
+    consults the driver is installed on the SAT core directly by {!Session}. [None] (the
+    default) is byte-identical to the pre-relevancy glue. *)
+val set_relevancy : t -> Relevancy.t option -> unit
+
 (** [intern_atom t term] returns the SAT var 1:1 with theory atom [term], registering it
     with the combined theory on first sight (base frame — survives backjumps). The
     clausifier calls this for each theory atom before solving. Idempotent by hash-cons. *)

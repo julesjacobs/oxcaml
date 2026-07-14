@@ -135,8 +135,23 @@ type model = sort_card list * model_binding list
     [lemma_gen_budget] caps the number of ground lemma instances generated per [check_sat]
     (ADR-0012 §1.4); on exhaustion the instantiation loop degrades to [Unknown] rather
     than hanging (a matching-loop lemma such as associativity never runs away). Absent =
-    the manager's generous deterministic default. *)
-val create : ?split_budget:int -> ?max_effort:int -> ?lemma_gen_budget:int -> unit -> t
+    the manager's generous deterministic default.
+
+    [enable_relevancy] installs the dynamic-relevancy branch filter (task #24, QF_UF): the
+    decision heuristic only branches on atoms relevant to satisfying the formula under the
+    current partial assignment. Absent, it defaults to the [OXSMT_RELEVANCY] environment
+    gate (OFF unless that names an on value), so the shipped / [make test] path is
+    byte-identical to a build without it. Soundness is backstopped by the fail-closed
+    [Model_check] on every reported [Sat], so a wrong relevancy marking can only cost a
+    solve to [unknown], never a wrong verdict; verified for the pure QF_UF path (see
+    logs/quf-propagation-log.md). Tests pass it explicitly to exercise both settings. *)
+val create
+  :  ?split_budget:int
+  -> ?max_effort:int
+  -> ?lemma_gen_budget:int
+  -> ?enable_relevancy:bool
+  -> unit
+  -> t
 
 (** The session's {!Oxsmt_core.Env.t}. Exposed so a front end (e.g. the test-only SMT-LIB
     parser) can declare symbols and build assertion terms in the {e same} context the

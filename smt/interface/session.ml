@@ -123,6 +123,11 @@ type t =
          definition and splices it into the model so the R1 checker (which evaluates the
          ORIGINAL assertions in [asserted]) and [get_model] both bind it. Empty unless the
          batch {!assert_presolved} path eliminated something. *)
+  ; relevancy : Relevancy.t option
+    (* dynamic relevancy driver (task #24, QF_UF), [None] unless the [OXSMT_RELEVANCY]
+         gate is on (or {!create} is told to enable it). When [Some], {!assert_clausified}
+         feeds it the boolean-skeleton graph and the SAT core's branch filter consults it;
+         when [None] the whole feature is dark and byte-identical to trunk. *)
   ; mutable cert_active : bool
     (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
      (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
@@ -131,7 +136,13 @@ type t =
      are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is free. *)
   }
 
-let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget () =
+let create
+      ?(split_budget = default_split_budget)
+      ?max_effort
+      ?lemma_gen_budget
+      ?(enable_relevancy = Relevancy.enabled_from_env ())
+      ()
+  =
   (* ADR-0012 R1: the session is the SOLE caller of [create_with_cap] in solver code (the
      documented convention); it keeps the cap private and threads it to the
      reserved-symbol minters. [Session.env] returns only the [env], never the cap. *)
@@ -151,6 +162,16 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
     Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap
   in
   let base = Sat.new_var sat in
+  (* Dynamic relevancy (task #24): when enabled, create the driver, route the trail seam
+     events through [cdclt] to it, and install the SAT branch filter that consults it.
+     Disabled by default => the filter is never installed and the glue is byte-identical
+     to trunk. *)
+  let relevancy = if enable_relevancy then Some (Relevancy.create ()) else None in
+  (match relevancy with
+   | None -> ()
+   | Some rel ->
+     Cdclt.set_relevancy cdclt (Some rel);
+     Sat.set_branch_filter sat (Some (fun v -> Relevancy.should_branch rel v)));
   { env
   ; cap
   ; ctx
@@ -175,6 +196,7 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
   ; last_effort = 0
   ; effort_exhausted = false
   ; elim_defs = []
+  ; relevancy
   ; cert_active = false
   }
 ;;
@@ -387,7 +409,7 @@ let current_selector t = List.hd t.frames
    through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
    theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
    term; auxiliary Tseitin variables are fresh per formula (kept in [local]). *)
-let assert_clausified ?sel t cnf =
+let assert_clausified ?sel ~root t cnf =
   let n = Cnf.num_vars cnf in
   let local = Array.make (n + 1) None in
   let sat_var v =
@@ -434,7 +456,58 @@ let assert_clausified ?sel t cnf =
     (fun clause ->
        (* frame activation: clause holds only when the frame selector is assumed true *)
        Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
-    cnf
+    cnf;
+  (* Dynamic relevancy graph (task #24): recover the boolean-skeleton And/Or/iff/Ite DAG
+     over PERSISTENT SAT vars and hand it to the driver. Built AFTER clause emission so
+     every var already exists (via [lit_of] above) and [sat_var] is a pure lookup here —
+     the SAT var numbering is therefore identical to relevancy-off; only the branch order
+     differs. A no-op when relevancy is disabled. *)
+  match t.relevancy with
+  | None -> ()
+  | Some rel ->
+    (* Invert [subterm_of_var] so a compound's Bool children resolve to their vars. *)
+    let rev = Term.Table.create ((2 * n) + 1) in
+    for v = 1 to n do
+      Term.Table.replace rev (Cnf.subterm_of_var cnf v) v
+    done;
+    (* The (persistent SAT var, polarity) of a Bool child term, peeling [Not] for parity;
+       [None] only if a child never took a var (not reachable for a well-formed skeleton —
+       defensive). *)
+    let rec child_lit (tm : Term.t) positive =
+      match tm.node with
+      | Not a -> child_lit a (not positive)
+      | _ ->
+        (match Term.Table.find_opt rev tm with
+         | Some cv -> Some (sat_var cv, positive)
+         | None -> None)
+    in
+    for v = 1 to n do
+      let sv = sat_var v in
+      if Cnf.is_atom_var cnf v
+      then Relevancy.register_atom rel sv
+      else (
+        let node = Cnf.subterm_of_var cnf v in
+        let kind, child_terms =
+          match node.node with
+          | And xs -> Some Relevancy.KAnd, Iarr.to_list xs
+          | Or xs -> Some Relevancy.KOr, Iarr.to_list xs
+          | Eq (a, b) -> Some Relevancy.KIff, [ a; b ]
+          | Ite (c, a, b) -> Some Relevancy.KIte, [ c; a; b ]
+          | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ | Not _ -> None, []
+        in
+        match kind with
+        | None -> ()
+        | Some kind ->
+          let opt_children = List.map (fun ct -> child_lit ct true) child_terms in
+          if List.for_all Option.is_some opt_children
+          then (
+            let children = List.map Option.get opt_children in
+            Relevancy.register_node rel ~var:sv ~kind ~children))
+    done;
+    (* Seed the top-level formula's root var relevant at level 0. *)
+    (match child_lit root true with
+     | Some (rv, _) -> Relevancy.seed_root rel rv
+     | None -> ())
 ;;
 
 (* Bool-cardinality rule (TODO Predicates §2; the one sanctioned finite sort). [Bool] has
@@ -498,7 +571,7 @@ let assert_bool_at ?sel t pterm =
        it surfaces HERE at assert-time registration, so it must be caught on this ingress
        path too. *)
     (try
-       assert_clausified ?sel t cnf;
+       assert_clausified ?sel ~root:pterm t cnf;
        (* Bool-cardinality rule: surface every buried Bool-sorted predicate application as
           its own SAT atom so the finite Bool sort is decided, not left opaque (see
           {!register_bool_terms}). Same term, same try-block, so an out-of-fragment buried

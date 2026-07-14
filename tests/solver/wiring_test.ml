@@ -2109,7 +2109,92 @@ let test_ctx_simp_no_ite_neutral () =
   check_verdict "ctx no-ite: sat" Session.Sat (Session.check_sat s)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* Dynamic relevancy (task #24): the branch filter must suppress decisions on a satisfied
+   disjunction's free siblings, and it must NEVER change a verdict (soundness is
+   backstopped by the fail-closed Model_check on every reported Sat). *)
+
+let decisions_of s = (Session.stats s).Oxsmt_solver.Sat.Stats.decisions
+
+(* [(or p0 … p19)] with [p0] separately asserted true: with relevancy ON the Or is
+   satisfied by [p0], so [p1..p19] are irrelevant and never decided; OFF, VSIDS branches
+   on every free sibling. *)
+let relevancy_probe ~enable_relevancy =
+  let s = Session.create ~enable_relevancy () in
+  let ctx = Session.context s in
+  let ps =
+    List.init 20 (fun i ->
+      Context.const ctx (Session.declare_const s (Printf.sprintf "p%d" i) Sort.bool))
+  in
+  Session.assert_term s (Context.or_ ctx ps);
+  Session.assert_term s (List.hd ps);
+  let v = Session.check_sat s in
+  v, decisions_of s
+;;
+
+let test_relevancy_firing () =
+  let voff, doff = relevancy_probe ~enable_relevancy:false in
+  let von, don = relevancy_probe ~enable_relevancy:true in
+  check_verdict "relevancy firing: OFF sat" Session.Sat voff;
+  check_verdict "relevancy firing: ON sat" Session.Sat von;
+  (* RED against a stubbed filter (should_branch always true): then [don = doff] and this
+     fails. The free siblings are branched OFF but pruned ON. *)
+  check
+    (Printf.sprintf "relevancy firing: ON decisions (%d) < OFF decisions (%d)" don doff)
+    (don < doff)
+;;
+
+(* Relevancy is a decision-ordering side channel: it must never flip a verdict. Cover both
+   directions (sat and unsat) over Boolean and EUF-equality skeletons. *)
+let test_relevancy_verdict_parity () =
+  let run ~enable_relevancy build =
+    let s = Session.create ~enable_relevancy () in
+    let ctx = Session.context s in
+    build s ctx;
+    Session.check_sat s
+  in
+  let bool_const s ctx name =
+    Context.const ctx (Session.declare_const s name Sort.bool)
+  in
+  let cases =
+    [ ( "or-sat"
+      , fun s ctx ->
+          Session.assert_term
+            s
+            (Context.or_ ctx [ bool_const s ctx "a"; bool_const s ctx "b" ]) )
+    ; ( "and-not-unsat"
+      , fun s ctx ->
+          let p = bool_const s ctx "p" in
+          Session.assert_term s (Context.and_ ctx [ p; Context.not_ ctx p ]) )
+    ; ( "euf-eq-unsat"
+      , fun s ctx ->
+          let ss = Sort.uninterpreted (Session.declare_sort s "S") in
+          let a = Context.const ctx (Session.declare_const s "a" ss) in
+          let b = Context.const ctx (Session.declare_const s "b" ss) in
+          let e = Context.eq ctx a b in
+          Session.assert_term s (Context.and_ ctx [ e; Context.not_ ctx e ]) )
+    ; ( "euf-or-sat"
+      , fun s ctx ->
+          let ss = Sort.uninterpreted (Session.declare_sort s "S") in
+          let p = Session.declare_fun s "p" (Rank.create [ ss ] Sort.bool) in
+          let x = Context.const ctx (Session.declare_const s "x" ss) in
+          let y = Context.const ctx (Session.declare_const s "y" ss) in
+          Session.assert_term
+            s
+            (Context.or_ ctx [ Context.app ctx p [ x ]; Context.app ctx p [ y ] ]) )
+    ]
+  in
+  List.iter
+    (fun (name, build) ->
+       let off = run ~enable_relevancy:false build in
+       let on = run ~enable_relevancy:true build in
+       check_verdict (name ^ ": ON verdict matches OFF") off on)
+    cases
+;;
+
 let () =
+  test_relevancy_firing ();
+  test_relevancy_verdict_parity ();
   test_push_pop ();
   test_assert_after_check ();
   test_euf_unsat ();

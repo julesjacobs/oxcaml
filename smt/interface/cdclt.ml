@@ -175,8 +175,14 @@ type t =
          [Dt_model_check]. *)
   ; mutable last_array_model : (Term.t * Arr.value) list option
     (* arrays checker model, snapshotted at the accepting Final->Sat when the installed
-     theory is the standalone arrays theory (else [None]); read by {!Session}'s arrays
-     commit through {!array_model} and checked by [Array_model_check]. *)
+         theory is the standalone arrays theory (else [None]); read by {!Session}'s arrays
+         commit through {!array_model} and checked by [Array_model_check]. *)
+  ; mutable relevancy : Relevancy.t option
+    (* dynamic relevancy driver (task #24), [None] unless {!Session} installed one from the
+     [OXSMT_RELEVANCY] gate. When [Some], the two trail seam events below stream to it so
+     it can maintain relevancy marks in lockstep with the SAT trail; the branch filter
+     itself is installed directly on the SAT core by {!Session}. A [None] arm is
+     behaviourally inert — the theory glue is byte-identical with relevancy off. *)
   }
 
 let sign_lit = Sat.sign_of_lit
@@ -259,7 +265,20 @@ let sync_level t =
     done
 ;;
 
+(* Install the dynamic relevancy driver (task #24). [None] restores the byte-identical
+   default. The branch filter itself is installed on the SAT core by {!Session}; this only
+   routes the trail seam events below to the driver. *)
+let set_relevancy t r = t.relevancy <- r
+
 let on_assign t l =
+  (match t.relevancy with
+   | None -> ()
+   | Some rel ->
+     Relevancy.on_assign
+       rel
+       ~var:(Sat.var_of_lit l)
+       ~value:(sign_lit l)
+       ~level:(Sat.decision_level t.sat));
   sync_level t;
   let v = Sat.var_of_lit l in
   match Hashtbl.find_opt t.v2a v with
@@ -273,6 +292,9 @@ let on_assign t l =
 ;;
 
 let on_backtrack t ~level =
+  (match t.relevancy with
+   | None -> ()
+   | Some rel -> Relevancy.on_backtrack rel ~level);
   let n = t.level - level in
   if n > 0
   then (
@@ -376,6 +398,7 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; last_model = None
     ; last_dt_model = None
     ; last_array_model = None
+    ; relevancy = None
     }
   in
   Sat.set_theory
