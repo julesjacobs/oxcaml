@@ -376,12 +376,13 @@ wiring-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	OXSMT_PRESOLVE_CTX=1 OXSMT_PRESOLVE_PROJ=1 $(DUNE) exec tests/solver/wiring_test.exe
 
-## symbreak-test — online symmetry-breaking presolve (task #25, dark OXSMT_SYMBREAK).
-##   Detector fires on a symmetric quasigroup and REJECTS a broken (cyclic-only) symmetry;
-##   the sound lex-leader preserves SAT and UNSAT; and a test-only value-precedence MUTANT
-##   flips the SAT instance to UNSAT (discrimination — the SAT-preservation check is RED if
-##   the product ever regressed to value precedence). Runs with OXSMT_SYMBREAK=1 so the
-##   product path is active. Nonzero exit on any failed check.
+## symbreak-test — online symmetry-breaking presolve (task #25, OXSMT_SYMBREAK, default ON
+##   as of the quiesced A/B). Detector fires on a symmetric quasigroup and REJECTS a broken
+##   (cyclic-only) symmetry; the sound lex-leader preserves SAT and UNSAT; and a test-only
+##   value-precedence MUTANT flips the SAT instance to UNSAT (discrimination — the
+##   SAT-preservation check is RED if the product ever regressed to value precedence). Sets
+##   OXSMT_SYMBREAK=1 explicitly (redundant with the default, robust to a future OFF flip).
+##   Nonzero exit on any failed check.
 symbreak-test:
 	OXSMT_SYMBREAK=1 $(DUNE) exec tests/solver/symbreak_test.exe
 

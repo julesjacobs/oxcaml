@@ -1,4 +1,4 @@
 (goal 1
   (verdict sat)
-  (model (sort S 3) (const a 0) (const b 1) (fun f (default 0) (case (0) 2) (case (1) 2)))
-  (counters (conflicts <10) (decisions <10) (propagations <10)))
+  (model (sort S 2) (const a 0) (const b 1) (fun f (default 0) (case (0) 1) (case (1) 1)))
+  (counters (conflicts <10) (decisions <10) (propagations <100)))

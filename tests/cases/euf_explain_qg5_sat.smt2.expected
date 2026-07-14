@@ -1,4 +1,4 @@
 (goal 1
   (verdict sat)
-  (model (sort I 5) (const e0 4) (const e1 3) (const e2 2) (const e3 1) (const e4 0) (fun op (default 0) (case (0 0) 4) (case (0 1) 3) (case (0 2) 2) (case (0 3) 1) (case (0 4) 0) (case (1 0) 3) (case (1 1) 4) (case (1 2) 1) (case (1 3) 0) (case (1 4) 2) (case (2 0) 2) (case (2 1) 1) (case (2 2) 0) (case (2 3) 3) (case (2 4) 4) (case (3 0) 1) (case (3 1) 0) (case (3 2) 4) (case (3 3) 2) (case (3 4) 3) (case (4 0) 0) (case (4 1) 2) (case (4 2) 3) (case (4 3) 4) (case (4 4) 1)))
-  (counters (conflicts <10) (decisions <100) (propagations <1k)))
+  (model (sort I 5) (const e0 4) (const e1 2) (const e2 3) (const e3 1) (const e4 0) (fun op (default 0) (case (0 0) 1) (case (0 1) 3) (case (0 2) 4) (case (0 3) 0) (case (0 4) 2) (case (1 0) 3) (case (1 1) 0) (case (1 2) 2) (case (1 3) 1) (case (1 4) 4) (case (2 0) 0) (case (2 1) 4) (case (2 2) 3) (case (2 3) 2) (case (2 4) 1) (case (3 0) 2) (case (3 1) 1) (case (3 2) 0) (case (3 3) 4) (case (3 4) 3) (case (4 0) 4) (case (4 1) 2) (case (4 2) 1) (case (4 3) 3) (case (4 4) 0)))
+  (counters (conflicts <100) (decisions <10k) (propagations <10k)))

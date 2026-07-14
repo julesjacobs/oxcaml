@@ -298,15 +298,18 @@ let proj_flag =
    verdict soundness. *)
 let proj_enabled t = Lazy.force proj_flag && not t.cert_active
 
-(* Symmetry breaking (task #25, quf-symmetry-experiment.md §6) toggle. Default OFF (dark):
-   the SOUND size-capped lex-leader converts a QG UNSAT tail (~+400 offline) but is a
-   partial lever pending a decisive OFF/ON A/B; it ships byte-identical to trunk until
-   then. [OXSMT_SYMBREAK=1] turns it ON (the A/B ON leg and the gated test). Read once. *)
+(* Symmetry breaking (task #25, quf-symmetry-experiment.md §6) toggle. Default ON as of
+   the quiesced A/B (logs/symbreak-arbiter.md, be8e516b8b binary): the SOUND size-capped
+   lex-leader gives NET +972 on QF_UF (81.5% -> 94.4%), 0 verdict disagreements, 0
+   verdict-vs-:status contradictions; ON lost only 12 files, all near-wall Goel-BMC
+   timeouts (none wrong) — a known follow-up (a GENERAL detection-cost budget, NOT a
+   family/shape guard). Mirrors the ITE-projection flip precedent. [OXSMT_SYMBREAK=0]
+   turns it OFF (byte-identical to pre-flip trunk). Read once. *)
 let symbreak_flag =
   lazy
     (match Sys.getenv_opt "OXSMT_SYMBREAK" with
-     | Some ("1" | "true" | "yes") -> true
-     | Some _ | None -> false)
+     | Some ("0" | "false" | "no") -> false
+     | Some _ | None -> true)
 ;;
 
 (* Runs only when enabled AND no certificate trace is installed: the breaking constraints
