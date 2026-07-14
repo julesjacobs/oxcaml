@@ -410,6 +410,176 @@ let test_seam_replay n =
     (!raises = 0)
 ;;
 
+(* F1 — theory-PROPAGATION provenance under CB, RED-verified. The conflict-mock above
+   never propagates and its [explain = fun _ -> []] never runs, so it gave FALSE
+   CONFIDENCE for Phase 2: it exercised the verdict path but NOT the explanation path that
+   the real adapters (euf/lia/arr) take when [analyze] resolves through a
+   theory-propagated literal. This mock closes that gap.
+
+   The mock is a real theory over implication constraints [a → b] that also does UNIT
+   PROPAGATION of them ([a] true, [b] unassigned ⇒ propagate [b] with reason [{a}]; [b]
+   false, [a] unassigned ⇒ propagate [¬a] with reason [{¬b}]); it reports [T_conflict] for
+   a violated constraint. It faithfully mirrors the real adapters' FRAME-SCOPED reason
+   cache: a propagation's reason is snapshotted AT PROPAGATION TIME into the current
+   [push] frame and dropped on the matching [pop]; [explain] serves the cached reason and
+   — exactly like {!Euf_adapter.explain} / {!Lia_adapter.explain} — RAISES "no cached
+   reason (frame was popped)" when the entry is gone (there is no precedence-valid
+   ask-time recompute).
+
+   RED against unfixed Phase 2: the chrono [cancel_until] theory rebuild
+   ([on_backtrack ~level:0] + replay [on_assign] survivors) re-asserts a surviving
+   theory-propagated literal as a FACT but never re-caches its reason, so a later
+   [analyze] that resolves through it calls [explain] on an uncached literal ⇒ raise ⇒ the
+   [raises] counter fires (or, if a stale reason slips the CONTRACT-EX guard, an oracle
+   disagreement). With F1 — the chrono [cancel_until] SNAPSHOTS each surviving
+   [Theory_prop] literal's reason (via [theory_premises]) into the SAT core just before
+   the rebuild destroys the adapter cache, and serves it back afterwards — every surviving
+   propagated literal stays explainable, so [explain] always finds a valid entry.
+
+   PROBE INTERACTION (none): this mock runs on the THEORY-PLUGGED path. The SAT
+   inprocessing probes that open their own decision level and call [cancel_until]
+   (vivification, failed-literal probing, ELS — all now on trunk) are gated to
+   [t.theory = None], so they are inert here and cannot interact with the theory snapshot;
+   equivalently, F1's invariant is stated over [cancel_until] itself (any caller), not
+   over any one probe. *)
+exception Mock_frame_popped
+
+let build_prop_mock num_vars clauses constraints =
+  let s = Sat.create () in
+  for _ = 1 to num_vars do
+    ignore (Sat.new_var s : int)
+  done;
+  let asg = Array.make num_vars 0 in
+  let frames : int list array ref = ref (Array.make 0 []) in
+  let mock_level = ref 0 in
+  (* reason cache: signed-lit key -> premises; [cache_frames.(k-1)] lists the keys cached
+     while the mock was at level k, so [pop] drops exactly them (mirrors the adapters'
+     per-frame [explain_cache] + [frames]). Level-0 reasons live in [base_cache] and are
+     never popped — the base frame survives [on_backtrack ~level:0]. *)
+  let reason_tbl : (int, Sat.lit list) Hashtbl.t = Hashtbl.create 64 in
+  let cache_frames : int list array ref = ref (Array.make 0 []) in
+  let key l = (Sat.var_of_lit l * 2) + if Sat.sign_of_lit l then 1 else 0 in
+  let ensure k =
+    if k > Array.length !frames
+    then (
+      let grow a =
+        let f = Array.make k [] in
+        Array.blit !a 0 f 0 (Array.length !a);
+        a := f
+      in
+      grow frames;
+      grow cache_frames)
+  in
+  let cache_reason l prem =
+    let k = key l in
+    if not (Hashtbl.mem reason_tbl k)
+    then (
+      Hashtbl.replace reason_tbl k prem;
+      if !mock_level > 0
+      then !cache_frames.(!mock_level - 1) <- k :: !cache_frames.(!mock_level - 1))
+  in
+  let on_assign l =
+    let dl = Sat.decision_level s in
+    ensure dl;
+    while !mock_level < dl do
+      incr mock_level;
+      !frames.(!mock_level - 1) <- [];
+      !cache_frames.(!mock_level - 1) <- []
+    done;
+    let v = Sat.var_of_lit l in
+    asg.(v) <- (if Sat.sign_of_lit l then 1 else -1);
+    if !mock_level > 0 then !frames.(!mock_level - 1) <- v :: !frames.(!mock_level - 1)
+  in
+  let on_backtrack ~level =
+    while !mock_level > level do
+      List.iter (fun v -> asg.(v) <- 0) !frames.(!mock_level - 1);
+      !frames.(!mock_level - 1) <- [];
+      List.iter (fun k -> Hashtbl.remove reason_tbl k) !cache_frames.(!mock_level - 1);
+      !cache_frames.(!mock_level - 1) <- [];
+      decr mock_level
+    done
+  in
+  let check ~final:_ =
+    let rec first_confl = function
+      | [] -> None
+      | (a, b) :: rest ->
+        if asg.(a) = 1 && asg.(b) = -1 then Some (a, b) else first_confl rest
+    in
+    match first_confl constraints with
+    | Some (a, b) -> Sat.T_conflict [ Sat.pos a; Sat.neg b ]
+    | None ->
+      let props = ref [] in
+      List.iter
+        (fun (a, b) ->
+           if asg.(a) = 1 && asg.(b) = 0
+           then (
+             let l = Sat.pos b in
+             cache_reason l [ Sat.pos a ];
+             props := l :: !props)
+           else if asg.(b) = -1 && asg.(a) = 0
+           then (
+             let l = Sat.neg a in
+             cache_reason l [ Sat.neg b ];
+             props := l :: !props))
+        constraints;
+      Sat.T_consistent !props
+  in
+  let explain l =
+    match Hashtbl.find_opt reason_tbl (key l) with
+    | Some prem -> prem
+    | None -> raise Mock_frame_popped
+  in
+  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain });
+  List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
+  s
+;;
+
+let test_prop_seam n =
+  let disagreements = ref 0 in
+  let bad_models = ref 0 in
+  let raises = ref 0 in
+  for _ = 1 to n do
+    let num_vars = 5 + rand_n 6 in
+    let clause () =
+      List.init 3 (fun _ ->
+        let v = 1 + rand_n num_vars in
+        if rand_n 2 = 0 then v else -v)
+    in
+    let clauses = List.init ((num_vars * 4) + rand_n num_vars) (fun _ -> clause ()) in
+    let constraints = random_constraints num_vars in
+    let augmented = clauses @ constraint_clauses constraints in
+    let expected = Oracle.solve num_vars augmented in
+    try
+      let s = build_prop_mock num_vars clauses constraints in
+      match Sat.solve s with
+      | Sat.Sat ->
+        if not expected then incr disagreements;
+        if not (model_satisfies augmented (Sat.model s)) then incr bad_models
+      | Sat.Unsat -> if expected then incr disagreements
+    with
+    (* Either failure form: the mock's own "frame was popped" (mirrors euf/lia) or the
+       core's CONTRACT-EX guard tripping on a stale reason the mock let through. *)
+    | Mock_frame_popped | Sat.Theory_contract_violation _ -> incr raises
+  done;
+  check
+    (Printf.sprintf
+       "prop-seam: %d formulas agree with augmented DPLL (%d)"
+       n
+       !disagreements)
+    (!disagreements = 0);
+  check
+    (Printf.sprintf
+       "prop-seam: all sat models satisfy clauses+constraints (%d bad)"
+       !bad_models)
+    (!bad_models = 0);
+  check
+    (Printf.sprintf
+       "prop-seam: every theory-propagated literal stays explainable after a chrono \
+        backtrack (%d strandings)"
+       !raises)
+    (!raises = 0)
+;;
+
 (* Guard: this executable is meaningless unless CB is actually engaged. We cannot query
    the gate through the frozen [Sat] surface, so we assert the env directly — a green run
    then genuinely exercised the chrono paths. *)
@@ -433,6 +603,7 @@ let () =
   test_property "dense" gen_dense 4000;
   test_directed 3000;
   test_seam_replay 4000;
+  test_prop_seam 4000;
   test_determinism 500;
   Printf.printf "chrono_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1

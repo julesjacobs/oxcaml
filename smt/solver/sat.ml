@@ -257,8 +257,16 @@ type t =
          within [chrono_threshold]. *)
   ; chrono_threshold : int
     (* Nadel–Ryvchin threshold T ([OXSMT_CHRONO_T], default 100): backjump
-     non-chronologically (to [bt]) when [conflict_level - bt > chrono_threshold], else
-     chronologically (to [conflict_level - 1]). Inert unless [chrono]. *)
+         non-chronologically (to [bt]) when [conflict_level - bt > chrono_threshold], else
+         chronologically (to [conflict_level - 1]). Inert unless [chrono]. *)
+  ; chrono_reason : (int, lit list) Hashtbl.t
+    (* F1: preserved reasons of surviving theory-PROPAGATED literals across a chrono
+     [cancel_until] rebuild. var -> its snapshotted premise list, taken at the pre-rebuild
+     instant (when the adapter's reason cache is still intact) and served by
+     {!theory_premises} afterwards, because the rebuild ([on_backtrack ~level:0] + replay)
+     destroys the adapter's frame-scoped cache for the survivor. Entries are dropped when
+     the var is removed by a later [cancel_until]; empty (and untouched) unless [chrono].
+     Per-[t] (vars are per-[t]); [reset] each [solve]. *)
   }
 
 let var_decay = 0.95
@@ -395,6 +403,7 @@ let create () =
   ; stat_flp = 0
   ; chrono = chrono_from_env ()
   ; chrono_threshold = chrono_threshold_from_env ()
+  ; chrono_reason = Hashtbl.create 16
   }
 ;;
 
@@ -675,6 +684,20 @@ let unchecked_enqueue t lit reason =
   | Some th -> th.on_assign lit
 ;;
 
+(* The premise set of a theory-propagated [lit]. Normally the theory's own [explain]
+   (which reads its intact per-frame reason cache). Under CB, a surviving
+   theory-propagated literal's adapter cache was destroyed by a [cancel_until] rebuild
+   ([on_backtrack ~level:0]); its reason was snapshotted into [t.chrono_reason] just
+   before that rebuild, so we serve it from there (F1). A freshly propagated literal has
+   no snapshot and falls through to [explain] against the fresh cache. OFF
+   ([not t.chrono]): [chrono_reason] is always empty, so this is exactly [th.explain lit]
+   — byte-identical. *)
+let theory_premises t th lit =
+  match Hashtbl.find_opt t.chrono_reason (var_of_lit lit) with
+  | Some prem -> prem
+  | None -> th.explain lit
+;;
+
 (* Undo assignments back to [level] (0-based decision level to keep). Saves the phase of
    every unassigned var (phase saving) and returns it to the heap.
 
@@ -710,7 +733,7 @@ let cancel_until t level =
       | None -> ()
       | Some th -> th.on_backtrack ~level)
     else (
-      (* Scattered removal + in-place compaction of survivors. *)
+      (* Scattered removal + in-place compaction of survivors (level <= [level]). *)
       let n = Dynarray.length t.trail in
       let w = ref 0 in
       for i = 0 to n - 1 do
@@ -722,6 +745,7 @@ let cancel_until t level =
           Dynarray.set t.assigns v 0;
           Dynarray.set t.trail_pos v (-1);
           Dynarray.set t.reason v Decision;
+          Hashtbl.remove t.chrono_reason v;
           heap_insert t v)
         else (
           Dynarray.set t.trail !w l;
@@ -730,6 +754,38 @@ let cancel_until t level =
       done;
       Dynarray.truncate t.trail !w;
       Dynarray.truncate t.trail_lim level;
+      (* F1 — explanation provenance for surviving theory-PROPAGATED literals. The
+         theory-seam rebuild below pops the theory to base ([on_backtrack ~level:0]) and
+         re-drives it ONLY with [on_assign] (assertions); it never re-runs a theory check,
+         so a surviving [Theory_prop] literal is re-asserted as a FACT with NO reason
+         re-cached — the adapter's frame-scoped [explain_cache] (euf/lia/arr) for its
+         now-popped frame is gone, and a later [analyze] resolving through it would hit
+         "no cached reason (frame was popped)" and fail closed to unknown. We CANNOT
+         simply drop such survivors: a survivor's [Implied_by] reason clause may cite one
+         as a false premise, so removing it mid-trail corrupts that reason (a
+         [Decision]-pivot in [analyze]). Instead we SNAPSHOT each surviving [Theory_prop]
+         literal's reason NOW — while the theory's cache is still intact — into
+         [t.chrono_reason], and serve it from there afterwards (see [theory_premises]).
+         The snapshot is precedence-valid because it is taken at the pre-rebuild instant
+         (mirrors the adapters' own propagation-time snapshot), and
+         [theory_explain_checked] re-validates CONTRACT-EX against the compacted trail at
+         use time (fail-closed if a premise did not survive — the rare non-monotone case).
+         INVARIANT: every surviving [Theory_prop] literal remains explainable via its
+         snapshot. *)
+      (match t.theory with
+       | None -> ()
+       | Some th ->
+         for i = 0 to Dynarray.length t.trail - 1 do
+           let l = Dynarray.get t.trail i in
+           let v = var_of_lit l in
+           match Dynarray.get t.reason v with
+           | Theory_prop ->
+             (* [theory_premises] serves an EXISTING snapshot if this survivor was already
+                snapshotted at an earlier backtrack (its adapter cache is long gone); only
+                a freshly-propagated survivor falls through to the intact [th.explain]. *)
+             Hashtbl.replace t.chrono_reason v (theory_premises t th l)
+           | Decision | Implied_by _ -> ()
+         done);
       (* THE §10.2 CRUX. A scattered removal can turn a clause whose ONLY satisfying
          literal was a removed watched literal — with a surviving FALSE partner watch —
          into an UNDETECTED unit (or, once the caller flips a literal, a conflict).
@@ -754,13 +810,16 @@ let cancel_until t level =
          [on_backtrack ~level:0] pops the theory to its base (the pre-solve registrations
          survive — they sit at the base frame), then [on_assign] for each surviving trail
          literal in order re-asserts it (the adapter filters non-atoms and re-registers
-         split atoms, so the theory ends holding exactly the survivors). Sound and simple
-         — it mirrors the [qhead <- 0] Boolean rebuild — and uses only the frozen seam
-         callbacks, so cdclt and sat.mli are untouched. CONTRACT-EX stays valid: survivors
-         are re-asserted in their compacted trail-position order (preserved by the
-         compaction), and [trail_pos] was updated above. COST: O(surviving trail) theory
-         re-assertions per chrono backtrack — the Stage-1 correctness-first choice paired
-         with the [qhead <- 0] cost; incremental (earliest-removed) undo is the follow-up. *)
+         split atoms, so the theory ends holding exactly the survivors). Survivors that
+         were theory-PROPAGATED are re-asserted as facts and lose their in-adapter reason
+         cache; the snapshot taken above ([t.chrono_reason]) preserves their reasons (F1).
+         Sound and simple — it mirrors the [qhead <- 0] Boolean rebuild — and uses only
+         the frozen seam callbacks, so cdclt and sat.mli are untouched. CONTRACT-EX stays
+         valid: survivors are re-asserted in their compacted trail-position order
+         (preserved by the compaction), and [trail_pos] was updated above. COST:
+         O(surviving trail) theory re-assertions per chrono backtrack — the Stage-1
+         correctness-first choice paired with the [qhead <- 0] cost; incremental
+         (earliest-removed) undo is the follow-up. *)
       match t.theory with
       | None -> ()
       | Some th ->
@@ -892,7 +951,7 @@ let theory_explain_checked t lit =
     | Some th -> th
     | None -> assert false
   in
-  let premises = th.explain lit in
+  let premises = theory_premises t th lit in
   let lit_pos = Dynarray.get t.trail_pos (var_of_lit lit) in
   List.iter
     (fun p ->
@@ -945,7 +1004,7 @@ let theory_prop_conflict_clause t lit =
     | Some th -> th
     | None -> assert false
   in
-  let premises = th.explain lit in
+  let premises = theory_premises t th lit in
   let lits = reason_lits lit premises in
   Array.iter
     (fun l ->
@@ -2705,6 +2764,10 @@ let solve ?(assumptions = []) t =
     t.lbd_ema_fast <- 0.0;
     t.lbd_ema_slow <- 0.0;
     t.trail_ema <- 0.0;
+    (* F1: drop any preserved theory-propagation reasons from a prior solve; a level-0
+       survivor's reason is re-served by the theory's own (base-frame) cache. Empty and
+       untouched unless [chrono]. *)
+    Hashtbl.reset t.chrono_reason;
     t.conflicts_since_restart <- 0;
     t.conflicts_at_solve_start <- t.conflicts;
     t.decisions_since_rephase <- 0;
