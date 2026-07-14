@@ -887,11 +887,16 @@ let assert_presolved t terms =
       if symbreak_enabled t
       then (
         (* F2: per-session name counter (persists across batches). F3: FAIL-CLOSED on ANY
-           exception — a cross-sort candidate can drive [Context.eq] to [Term.Sort_error],
-           and a soundness-neutral optimization must degrade to "no breaking", never crash
-           the query. *)
+           NON-fatal exception — a cross-sort candidate can drive [Context.eq] to
+           [Term.Sort_error], and a soundness-neutral optimization must degrade to "no
+           breaking", never crash the query. Out_of_memory / Stack_overflow are re-raised
+           (matching [raw_solve]): [symmetry_break]'s DAG rebuild is non-tail-recursive,
+           so a deep term can overflow before the step budget bites, and those leave
+           process state untrustworthy — they must propagate, not be swallowed into a
+           silent no-op. *)
         match Presolve.symmetry_break ~counter:t.sym_counter t.cap t.env t.ctx terms with
         | cs -> cs
+        | exception ((Out_of_memory | Stack_overflow) as e) -> raise e
         | exception _ -> [])
       else []
     in
@@ -947,7 +952,11 @@ let assert_presolved t terms =
       (* F1: guard the symmetry-breaking clauses with a fresh activation selector so a
          later incremental assertion can retract them soundly (they are non-monotonic).
          The selector is assumed positive by [check_sat] while [t.sym_sel = Some _]; it
-         occurs only negatively in the clauses, so clearing it makes them vacuous. *)
+         occurs only negatively in the clauses, so clearing it makes them vacuous.
+         CONTRACT: emission is expected at the BASE frame (the batch [assert_presolved]
+         path runs before any [push]). The clauses are guarded by [sym_sel] alone, not the
+         frame selector, so retraction relies on [deactivate_symbreak] at every assertion
+         entry AND at [pop] (see [pop]) — not on frame scoping. *)
       (match sym_extra with
        | [] -> ()
        | _ :: _ ->
@@ -1082,6 +1091,13 @@ let pop t =
   | [ _ ] | [] -> invalid_arg "Session.pop: no matching push"
   | popped :: rest ->
     t.frames <- rest;
+    (* F1 defensive: the symmetry-breaking lex clauses are guarded by [sym_sel], NOT by a
+       frame selector, so a [pop] would not retract an emission made inside the popped
+       frame. The batch-once contract (assert_presolved runs at the base frame, before any
+       push) makes that unreachable in the shipped path, but clearing [sym_sel] here makes
+       the F1 soundness independent of that contract: after any pop the lex clauses go
+       vacuous. *)
+    deactivate_symbreak t;
     (* ADR-0012 §1.5: retract the lemmas added in this frame AND every instance drawn from
        them together (dedup entries + pending seeds owned by [popped] are dropped too), by
        disabling the frame's selector. Soundness-load-bearing (a stranded pushed-frame

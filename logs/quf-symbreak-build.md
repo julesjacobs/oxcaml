@@ -140,3 +140,22 @@ post-emission assertions, which the batch CLI never makes).
 The full-7503 ON/OFF A/B numbers above (net +969, 0 disagreements) stand for the batch
 path, which the fix round does not alter; a fresh quiesced lock-box A/B remains the
 promotable-magnitude follow-up. NOT landed; narrow dual confirm pending.
+
+### Narrow confirm bounce (fable)
+
+One required one-line fix + one non-blocking defensive guard, committed on top of the
+fix-round tip:
+- **Required (F3 firewall):** the `sym_extra` catch-all swallowed `Out_of_memory` /
+  `Stack_overflow`; `Stack_overflow` is REACHABLE (`symmetry_break`'s DAG rebuild is
+  non-tail-recursive, so a deep term can overflow before the step budget). Added
+  `| exception ((Out_of_memory | Stack_overflow) as e) -> raise e` before the catch-all,
+  matching `raw_solve`'s posture — those propagate, never a silent no-op.
+- **Non-blocking defensive:** the F1 pop-soundness relied on the implicit batch-once
+  base-frame contract (lex clauses guarded by `sym_sel`, not a frame selector). Added
+  `deactivate_symbreak` to `pop` (clears `sym_sel` after any pop) + a CONTRACT comment at
+  the emission site, so F1 soundness no longer depends on that contract. No separate RED
+  test: the offending scenario (emission inside a pushed frame) is contract-unreachable in
+  the shipped path, so a test would not discriminate.
+
+Re-gated by exit code: `make test` (OFF) 0, `make symbreak-test` 0 (8 checks), `check-frozen`
+0. New tip below.
