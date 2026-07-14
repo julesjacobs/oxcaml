@@ -242,10 +242,53 @@ let test_vivification_sat () =
     (st.conflicts > 100)
 ;;
 
+(* ---- EQUIVALENT-LITERAL SUBSTITUTION (ELS). x(1) ↔ y(2) via the two binaries; x marked
+   eliminable, y frozen ⇒ ELS substitutes x→y (rep frozen) at solve entry. The (2∨4)(2∨¬4)
+   pair forces y=true, so y's representative value is TRUE and x MUST be reconstructed to
+   true — a broken definitional reconstruction (x left at its default false) violates the
+   original (1∨3). So model.(0)=true + model satisfies originals + x=y discriminate. ---- *)
+let test_els_sat () =
+  let clauses =
+    [ [ -1; 2 ]
+    ; [ 1; -2 ] (* x ↔ y *)
+    ; [ 1; 3 ] (* x ∨ z : needs x's reconstructed value *)
+    ; [ 2; 4 ]
+    ; [ 2; -4 ] (* force y = true *)
+    ]
+  in
+  let s = build 4 ~eliminable:[ 0 ] clauses in
+  let r = Sat.solve s in
+  let model = Sat.model s in
+  check "els: sat" (r = Sat.Sat);
+  check "els: y forced true" (r = Sat.Sat && model.(1));
+  check
+    "els: x reconstructed = y (true)"
+    (r = Sat.Sat && model.(0) = model.(1) && model.(0));
+  check "els: model satisfies all original clauses" (r = Sat.Sat && all_sat model clauses)
+;;
+
+(* ---- ELS UNSAT preservation. x ↔ y, x forced true, y forced false ⇒ unsat; whether ELS
+   substitutes or its dry run skips (exposed-unsat), the verdict must stay UNSAT. ---- *)
+let test_els_unsat () =
+  let clauses =
+    [ [ -1; 2 ]
+    ; [ 1; -2 ] (* x ↔ y *)
+    ; [ 1; 5 ]
+    ; [ 1; -5 ] (* force x = true *)
+    ; [ -2; 6 ]
+    ; [ -2; -6 ] (* force y = false *)
+    ]
+  in
+  let s = build 6 ~eliminable:[ 0 ] clauses in
+  check "els: x↔y with x=true,y=false stays unsat" (Sat.solve s = Sat.Unsat)
+;;
+
 let () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") ->
     test_firing_fewer_propagations ();
+    test_els_sat ();
+    test_els_unsat ();
     test_reconstruction_forced_flip ();
     test_pure_literal ();
     test_unsat_preserved ();
