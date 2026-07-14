@@ -2575,7 +2575,16 @@ let run_round t =
                 (List.map (fun (j, _) -> (Dynarray.get work j).wl) deleted_idxs)
             in
             if np = 0 && nn = 0
-            then Dynarray.set t.eliminated v true (* in no clause: nothing to delete *)
+            then (
+              (* In no clause: nothing to delete. Record an EMPTY [restore_map] entry so
+                 an (out-of-contract) incremental re-add naming [v] takes the [Some []]
+                 restore path — un-eliminate [v], re-add zero clauses — rather than the
+                 [None] path, which is reserved for ELS-substituted vars (fail loud) and
+                 would otherwise leave [v] frozen out of [pick_branch], making the
+                 re-added clause unsatisfiable (a wrong Sat). Keeps every BVE sub-case
+                 honoring the [sat.mli] "BVE restores on re-add" contract. *)
+              Dynarray.set t.eliminated v true;
+              Hashtbl.replace t.restore_map v [])
             else if np = 0
             then
               (* pure literal (only negative): delete the neg clauses, pivot [neg v] *)

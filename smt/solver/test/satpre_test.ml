@@ -388,6 +388,63 @@ let test_els_cross_round_chain () =
     (r2 = Sat.Sat && Bool.equal m.(2) m.(1))
 ;;
 
+(* ---- F2 chain, COMPLEMENTED edge (R2 hardening). Same two-solve shape as above, but
+   solve 2 links A to C with OPPOSITE polarity (A ↔ ¬C), so the recorded chain is
+   equiv[B]=+A, equiv[A]=¬C. This exercises the SIGN-recursion branch of [save_model]'s
+   [resolve] (the positive-only chain above never does): B must resolve to ¬C, i.e. B and
+   C DISAGREE. C is forced FALSE (probing: C=true triggers (¬C∨p)(¬C∨¬p)), so B must be
+   true. The unfixed single-hop reconstruction, visiting key B before key A, reads A's
+   default (false) → B=false while ¬C=true — wrong. (Still order-sensitive like any
+   single-hop reproducer, but it additionally guards the negative [resolve] edge.) ---- *)
+let test_els_cross_round_chain_complemented () =
+  let s = Sat.create () in
+  for _ = 1 to 6 do
+    ignore (Sat.new_var s : Sat.var)
+  done;
+  (* A(0), B(2) eliminable; C(1), p(3), q(4), e(5) frozen *)
+  Sat.set_eliminable s 0;
+  Sat.set_eliminable s 2;
+  let add cls = List.iter (fun cl -> Sat.add_clause s (List.map to_lit cl)) cls in
+  add [ [ -1; 3 ]; [ 1; -3 ]; [ 1; 6 ]; [ -1; 6 ] ] (* solve 1: A ↔ B, + A home clauses *);
+  let r1 = Sat.solve s in
+  check "chain¬: solve1 sat" (r1 = Sat.Sat);
+  (* solve 2: A ↔ ¬C via (A∨C)(¬A∨¬C) ⇒ rep is frozen ¬C, equiv[A]=¬C; (¬C∨p)(¬C∨¬p) make
+     C=true a failed literal ⇒ probing forces C=false. *)
+  add [ [ 1; 2 ]; [ -1; -2 ]; [ -2; 4 ]; [ -2; -4 ] ];
+  let r2 = Sat.solve s in
+  let m = Sat.model s in
+  check "chain¬: solve2 sat" (r2 = Sat.Sat);
+  check "chain¬: C(var1) forced false" (r2 = Sat.Sat && not m.(1));
+  check
+    "chain¬: B(var2) = ¬C(var1) via sign-correct chain reconstruction"
+    (r2 = Sat.Sat && Bool.equal m.(2) (not m.(1)))
+;;
+
+(* ---- R1 REGRESSION (no-occurrence BVE restore). A zero-occurrence eliminable var is
+   marked eliminated by the [np = 0 && nn = 0] BVE branch. On an incremental re-add of a
+   clause naming it, the restore hook must UN-ELIMINATE it — else it stays frozen out of
+   [pick_branch], the re-added clause can never be satisfied, and the solver reports a
+   wrong Sat with the var defaulted false. Both x,y eliminable, solved with NO clauses
+   (both become zero-occurrence ⇒ eliminated), then (x∨y) is added and re-solved: the
+   model must satisfy (x∨y). RED against the unfixed branch (returns Sat with x=y=false,
+   violating (x∨y)); GREEN after recording an empty restore-map entry so restore
+   un-eliminates. ---- *)
+let test_bve_no_occurrence_restore () =
+  let s = Sat.create () in
+  for _ = 1 to 2 do
+    ignore (Sat.new_var s : Sat.var)
+  done;
+  Sat.set_eliminable s 0;
+  Sat.set_eliminable s 1;
+  let r1 = Sat.solve s in
+  check "bve-noocc: empty solve sat" (r1 = Sat.Sat);
+  Sat.add_clause s (List.map to_lit [ 1; 2 ]) (* (x ∨ y), names both eliminated vars *);
+  let r2 = Sat.solve s in
+  let m = Sat.model s in
+  check "bve-noocc: re-add (x∨y) still sat" (r2 = Sat.Sat);
+  check "bve-noocc: model satisfies the re-added (x∨y)" (r2 = Sat.Sat && (m.(0) || m.(1)))
+;;
+
 let () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") ->
@@ -396,6 +453,8 @@ let () =
     test_els_unsat ();
     test_els_flp_orphan_unsat ();
     test_els_cross_round_chain ();
+    test_els_cross_round_chain_complemented ();
+    test_bve_no_occurrence_restore ();
     test_flp_sat ();
     test_flp_unsat ();
     test_reconstruction_forced_flip ();
