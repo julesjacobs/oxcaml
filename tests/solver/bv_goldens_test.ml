@@ -224,6 +224,57 @@ let run_rank_crosscheck () =
       "  ok   rank-crosscheck: name<>rank marker not reinterpreted (no wrong unsat)\n"
 ;;
 
+(* Model completeness (task #27): a free Boolean variable in a satisfiable Bool+BV mix
+   must appear in the returned model, not only the bit-vector variables. This session
+   forces [b] true and [x = 0]; the model must bind both [b] and [x]. It FAILS against the
+   pre-fix code, where [Bv_dispatch] returned only bit-vector bindings and [get-model]
+   omitted [b] entirely. *)
+let run_bool_var_in_model () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let mint = Internal_minter.mint (Session.parse_minter s) in
+  let x = Context.const ctx (Session.declare_const s "m_x" (Sort.bitvec 8)) in
+  let b = Context.const ctx (Session.declare_const s "m_b" Sort.bool) in
+  (* b <=> (x = 0), and b, so a satisfying model has b=true and x=0 *)
+  Session.assert_term
+    s
+    (Context.eq ctx b (Context.eq ctx x (Bv.const ctx mint ~value:Bigint.zero ~width:8)));
+  Session.assert_term s b;
+  match Session.check_sat s with
+  | Session.Unsat | Session.Unknown ->
+    incr failures;
+    Printf.printf "  FAIL bool-in-model: mixed Bool+BV expected sat\n"
+  | Session.Sat ->
+    (match Session.get_model s with
+     | None ->
+       incr failures;
+       Printf.printf "  FAIL bool-in-model: sat but no model\n"
+     | Some (_, binds) ->
+       let has_bool =
+         List.exists
+           (function
+             | Session.Const ("m_b", Session.VBool true) -> true
+             | _ -> false)
+           binds
+       in
+       let has_bv =
+         List.exists
+           (function
+             | Session.Const ("m_x", Session.VInt _) -> true
+             | _ -> false)
+           binds
+       in
+       if has_bool && has_bv
+       then Printf.printf "  ok   bool-in-model: model binds both b and x\n"
+       else (
+         incr failures;
+         Printf.printf
+           "  FAIL bool-in-model: model missing %s (bv=%b bool=%b)\n"
+           (if has_bool then "bv var" else "bool var")
+           has_bv
+           has_bool))
+;;
+
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/bv-goldens" in
   let files =
@@ -261,6 +312,7 @@ let () =
   run_f1_soundness ();
   run_f2_forge_rejected ();
   run_rank_crosscheck ();
+  run_bool_var_in_model ();
   Printf.printf
     "\nbv-goldens self-test: %d file(s), %d failure(s)\n"
     (List.length files)

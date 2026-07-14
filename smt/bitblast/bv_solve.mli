@@ -10,11 +10,16 @@
 
 open Oxsmt_core
 
-(** A model: each free variable with its value and width. *)
+(** A model: each free bit-vector variable with its value and width. *)
 type model = (Term.t * (Bigint.t * int)) list
 
+(** The free Boolean variables of the formula with their truth values under the model.
+    Surfaced alongside {!model} so [get-model] on a mixed Bool+BV formula reports the
+    Boolean bindings too, not only the bit-vector ones. *)
+type bool_model = (Term.t * bool) list
+
 type verdict =
-  | Sat of model
+  | Sat of model * bool_model
   | Unsat
   | Unknown of string
 

@@ -1160,9 +1160,13 @@ let check_sat t =
       t.last_verdict <- Unsat;
       Unsat
     | Bv_dispatch.Unknown -> Unknown
-    | Bv_dispatch.Sat binds ->
+    | Bv_dispatch.Sat { bv_vars; bool_vars } ->
       t.last_verdict <- Sat;
-      t.last_model <- Some ([], List.map (fun (n, v, _w) -> Const (n, VInt v)) binds);
+      t.last_model
+      <- Some
+           ( []
+           , List.map (fun (n, v, _w) -> Const (n, VInt v)) bv_vars
+             @ List.map (fun (n, b) -> Const (n, VBool b)) bool_vars );
       Sat)
   else (
     Cdclt.begin_check t.cdclt;

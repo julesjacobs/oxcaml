@@ -240,7 +240,7 @@ let run_e2e () =
       (bvconst_i ctx mint 6 4)
   in
   (match Bv_solve.solve defs [ f ] with
-   | Bv_solve.Sat model ->
+   | Bv_solve.Sat (model, _) ->
      check "sat 3x=6 found" true;
      (match List.assoc_opt x model with
       | Some (v, _) -> check "sat 3x=6 x=2" (Bigint.equal v (big 2))
@@ -262,7 +262,7 @@ let run_e2e () =
   let x = bvvar env ctx "b_x" 4 in
   let f = Bv.binop ctx mint Bv.Bvult x (bvconst_i ctx mint 3 4) in
   match Bv_solve.solve defs [ f ] with
-  | Bv_solve.Sat model ->
+  | Bv_solve.Sat (model, _) ->
     (match List.assoc_opt x model with
      | Some (v, _) -> check "sat x<3 model valid" (Bigint.compare v (big 3) < 0)
      | None -> check "sat x<3 has x" false)

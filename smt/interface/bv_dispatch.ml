@@ -56,7 +56,10 @@ let name_of_var (t : Term.t) =
 type result =
   | Unsat
   | Unknown
-  | Sat of (string * Bigint.t * int) list
+  | Sat of
+      { bv_vars : (string * Bigint.t * int) list
+      ; bool_vars : (string * bool) list
+      }
 
 (* Solve a pure-QF_BV assertion set by eager bit-blasting. [Bv_solve] re-checks every sat
    model with the independent evaluator before returning [Sat], so a [Sat] here is already
@@ -66,12 +69,17 @@ let solve (asserted : Term.t list) : result =
   match Bv_solve.solve Bv_adapter.defs asserted with
   | Bv_solve.Unsat -> Unsat
   | Bv_solve.Unknown _ -> Unknown
-  | Bv_solve.Sat model ->
+  | Bv_solve.Sat (model, bool_model) ->
+    let named f xs =
+      List.filter_map
+        (fun (t, r) ->
+           match name_of_var t with
+           | Some n -> Some (f n r)
+           | None -> None)
+        xs
+    in
     Sat
-      (List.filter_map
-         (fun (t, (v, w)) ->
-            match name_of_var t with
-            | Some n -> Some (n, v, w)
-            | None -> None)
-         model)
+      { bv_vars = named (fun n (v, w) -> n, v, w) model
+      ; bool_vars = named (fun n b -> n, b) bool_model
+      }
 ;;

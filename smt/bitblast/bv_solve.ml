@@ -2,9 +2,10 @@ open Oxsmt_core
 module Sat = Oxsmt_solver.Sat
 
 type model = (Term.t * (Bigint.t * int)) list
+type bool_model = (Term.t * bool) list
 
 type verdict =
-  | Sat of model
+  | Sat of model * bool_model
   | Unsat
   | Unknown of string
 
@@ -32,15 +33,13 @@ let read_model blaster =
     (Blast.bv_vars blaster)
 ;;
 
-(* Free Boolean variables' truth values under the SAT model, encoded as 0/1 so the shared
-   [lookup] the re-checker reads (a [Term.t -> Bigint.t]) covers them too — [Bv_eval]
-   interprets a looked-up Boolean value as [true] iff it is nonzero. Not surfaced in the
-   returned bit-vector model; used only to complete the independent re-check. *)
+(* Free Boolean variables' truth values under the SAT model. Used two ways: surfaced in
+   the returned [bool_model] so [get-model] reports the Boolean bindings, and (encoded
+   0/1) fed into the shared [lookup] the re-checker reads so a re-checked assertion
+   mentioning a Boolean variable can be evaluated. *)
 let read_bool_model blaster =
   let sat = Blast.sat blaster in
-  List.map
-    (fun (term, l) -> term, if lit_value sat l then Bigint.one else Bigint.zero)
-    (Blast.bool_vars blaster)
+  List.map (fun (term, l) -> term, lit_value sat l) (Blast.bool_vars blaster)
 ;;
 
 let solve defs assertions =
@@ -59,10 +58,12 @@ let solve defs assertions =
        (* soundness net: never emit a Sat the model does not actually satisfy *)
        let tbl = Term.Table.create (List.length model + List.length bool_model) in
        List.iter (fun (t, (v, _)) -> Term.Table.replace tbl t v) model;
-       List.iter (fun (t, v) -> Term.Table.replace tbl t v) bool_model;
+       List.iter
+         (fun (t, b) -> Term.Table.replace tbl t (if b then Bigint.one else Bigint.zero))
+         bool_model;
        let lookup t = Term.Table.find_opt tbl t in
        (match List.for_all (fun a -> Bv_eval.eval_bool defs ~lookup a) assertions with
-        | true -> Sat model
+        | true -> Sat (model, bool_model)
         | false -> Unknown "sat model failed independent re-check (fail-closed)"
         | exception Bv_eval.Eval_error m -> Unknown ("model re-check error: " ^ m)))
 ;;

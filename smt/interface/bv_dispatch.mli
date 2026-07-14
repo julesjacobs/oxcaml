@@ -20,8 +20,12 @@ val is_pure_bv : Term.t list -> bool
 type result =
   | Unsat
   | Unknown
-  | Sat of (string * Bigint.t * int) list
-  (** one entry per free bit-vector variable: [(name, unsigned_value, width)] *)
+  | Sat of
+      { bv_vars : (string * Bigint.t * int) list
+        (** one entry per free bit-vector variable: [(name, unsigned_value, width)] *)
+      ; bool_vars : (string * bool) list
+        (** one entry per free Boolean variable: [(name, truth_value)] *)
+      }
 
 (** Eager-bit-blast the (pure-QF_BV) assertion set. Only call when {!is_pure_bv} holds. *)
 val solve : Term.t list -> result
