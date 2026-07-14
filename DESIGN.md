@@ -613,7 +613,14 @@ and handing a branchable-only partial assignment to the theory's `Final`
 check/model-check (fail-closed) means a driver that wrongly marks a needed atom
 irrelevant degrades the query to `unknown`, never a wrong verdict. The relevancy
 driver ships env-gated, default OFF; the ON decision rides a corpus A/B (zero
-verdict disagreements + net-non-negative at 2s).
+verdict disagreements + net-non-negative at 2s). Amended when the client landed (the
+seam+fix pair): the review found the raw core under a filter can report `sat` on a
+partial assignment that falsifies a clause (safe only because every consumer
+model-checks), so `pick_branch` was made exception-safe (it restores every popped
+variable on any exit, including a raising filter) and the `sat.mli` soundness
+paragraph was rewritten to hold unconditionally — no wrong-`Unsat` ever; a filtered
+`sat` is not self-certifying and the client must model-check it — plus a
+filter-totality contract line.
 
 ### A9 — Tranche-C unfreeze: read-only VSIDS activity accessor (2026-07-13, master-approved)
 
