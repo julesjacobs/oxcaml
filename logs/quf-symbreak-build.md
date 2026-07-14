@@ -236,3 +236,30 @@ constructors when the free-constant restriction is reverted to "any non-Bool"), 
 (wrong-UNSAT when the no-prior-assertions guard is dropped). Gates by exit code: `make test`
 (OFF) / `make symbreak-test` (14) / `check-frozen` all 0. Batch-path win intact (label recheck
 42 QG files, 0 mismatch, 6 conversions). New tip below.
+
+### Fourth confirm (codex) — set_datatypes install-door validator (pre-existing gap)
+
+Codex confirmed B3/B4/minor sound on every well-formed and shipped path; the remaining
+bounce is a PRE-EXISTING gap this lane surfaced: `set_datatypes` (session.ml) installed the
+datatype registry with ZERO validation, unlike `set_arrays` (which runs
+`Array_defs.validate_ranks` as the install-door defense — third instance of that pattern
+after the arrays arity-guard incident). A hand-built registry marking an uninterpreted-sort
+constant as a constructor slips `is_free_const` AND can drive other DT wrong-verdicts
+independent of symmetry.
+
+**Fix (a), the general one:** added `Datatype_defs.validate_ranks` (mirrors
+`Array_defs.validate_ranks`) and call it in `set_datatypes`. Every registered constructor /
+selector / tester must carry, in the env, its role's canonical datatype rank (constructor
+returns the datatype sort with the field sorts as domain; tester `(dt) -> Bool`; selector
+`(dt) -> field`); raises `Invalid_argument` fail-closed on a disagreeing or missing rank.
+This keeps `is_free_const`'s soundness BY CONSTRUCTION and closes the forged-registry class
+for ALL DT consumers, not just symmetry. (Belt (b) — `is_free_const` also checking registry
+non-membership — was NOT taken: it is not one line for `symmetry_break` (would need the
+registry threaded in), and the install door already closes the class.)
+
+RED-verified (make symbreak-test, now 15 checks): a forged registry marking an
+uninterpreted-sort constant `A` as a constructor is REJECTED at `set_datatypes` (RED —
+accepted — with the validator removed). Well-formed registries install cleanly: `dt-sat-gate`
+(18 checks) and the DT goldens in `make test` all pass. Gates by exit code: `make test`
+(OFF) / `make symbreak-test` (15) / `check-frozen` (14 intact — `datatype_defs.mli` is
+deliberately unfrozen) / `dt-sat-gate` all 0. New tip below.

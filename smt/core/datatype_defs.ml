@@ -69,6 +69,63 @@ let add t dt =
   { by_sort; by_ctor; by_selector; by_tester }
 ;;
 
+(* Full-signature rank equality (mirrors [Array_defs.rank_matches]). *)
+let rank_matches (a : Rank.t) (b : Rank.t) =
+  Sort.equal a.Rank.codomain b.Rank.codomain
+  && Iarr.length a.Rank.domain = Iarr.length b.Rank.domain
+  &&
+  let rec loop i =
+    i = Iarr.length a.Rank.domain
+    || (Sort.equal (Iarr.get a.Rank.domain i) (Iarr.get b.Rank.domain i) && loop (i + 1))
+  in
+  loop 0
+;;
+
+(* Install-door validator (mirrors [Array_defs.validate_ranks]): every registered
+   constructor / selector / tester symbol must carry, in the environment, the canonical
+   rank for its role in its datatype — a constructor returns the datatype sort, a tester
+   is [(dt) -> Bool], a selector is [(dt) -> field]. A hand-built registry marking an
+   arbitrary symbol (e.g. an uninterpreted-sort constant) as a constructor is thereby
+   rejected at the install door, keeping every downstream DT consumer's sort assumptions
+   (the theory's rules, the symmetry-breaking free-constant test) sound BY CONSTRUCTION.
+   Raises [Invalid_argument] on a disagreeing or missing rank. *)
+let validate_ranks t ~(rank_of : Symbol.t -> Rank.t option) =
+  let check ~role sym ~want =
+    match rank_of sym with
+    | Some r when rank_matches r want -> ()
+    | Some _ ->
+      invalid_arg
+        (Printf.sprintf
+           "Datatype_defs.validate_ranks: %s registered as a %s does not have that \
+            role's canonical rank for its datatype (full-signature disagreement)"
+           (Symbol.name sym)
+           role)
+    | None ->
+      invalid_arg
+        (Printf.sprintf
+           "Datatype_defs.validate_ranks: registered %s %s has no rank in the environment"
+           role
+           (Symbol.name sym))
+  in
+  Id_map.iter
+    (fun _ (dt : datatype) ->
+       let dt_sort = Sort.datatype_ dt.sort_sym in
+       List.iter
+         (fun (c : constructor) ->
+            let field_sorts = List.map (fun (s : selector) -> s.field_sort) c.selectors in
+            check ~role:"constructor" c.sym ~want:(Rank.create field_sorts dt_sort);
+            check ~role:"tester" c.tester ~want:(Rank.create [ dt_sort ] Sort.bool);
+            List.iter
+              (fun (sel : selector) ->
+                 check
+                   ~role:"selector"
+                   sel.sym
+                   ~want:(Rank.create [ dt_sort ] sel.field_sort))
+              c.selectors)
+         dt.constructors)
+    t.by_sort
+;;
+
 let is_empty t = Id_map.is_empty t.by_sort
 let datatype_of_sort t sort_sym = Id_map.find_opt (id sort_sym) t.by_sort
 let constructor_of_sym t sym = Id_map.find_opt (id sym) t.by_ctor

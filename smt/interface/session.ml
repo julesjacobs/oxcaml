@@ -406,7 +406,20 @@ let declare_const t name sort = declare_fun t name (Rank.create [] sort)
    symbols in {!env}; this records their datatype structure into the shared registry ref,
    which flips the session onto the DT theory at its first check-sat. Must precede
    [assert_term] (a datatype must be known before its atoms are interned). *)
-let set_datatypes t defs = t.registry := defs
+let set_datatypes t defs =
+  (* Install-door defense (mirrors [set_arrays] / [Array_defs.validate_ranks]): reject a
+     registry that marks a symbol as a constructor/selector/tester without that role's
+     canonical datatype rank in the env — e.g. a forged registry marking an
+     uninterpreted-sort constant as a constructor, which would otherwise slip the
+     symmetry-breaking free-constant test and drive other DT wrong-verdicts. Every
+     well-formed registry (parser / [declare_datatype]) installs cleanly. *)
+  Oxsmt_core.Datatype_defs.validate_ranks defs ~rank_of:(fun sym ->
+    match Oxsmt_core.Env.rank t.env sym with
+    | r -> Some r
+    | exception Not_found -> None);
+  t.registry := defs
+;;
+
 let uses_datatypes t = not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
 let uses_arrays t = t.has_arrays
 

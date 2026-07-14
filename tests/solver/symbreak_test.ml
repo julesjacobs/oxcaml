@@ -19,6 +19,7 @@ open Oxsmt_core
 module Session = Oxsmt_interface.Session
 module Presolve = Oxsmt_interface.Presolve
 module Parser = Oxsmt_smtlib_parser.Parser
+module Defs = Oxsmt_core.Datatype_defs
 
 let checks = ref 0
 let failures = ref 0
@@ -549,6 +550,35 @@ let test_b4_prior_assertion () =
   | Session.Unknown -> fail "B4: got unknown"
 ;;
 
+(* Install-door validator (codex R3, pre-existing gap): a hand-built datatype registry
+   that marks an uninterpreted-sort constant as a constructor must be REJECTED by
+   [set_datatypes] (mirroring [set_arrays]/[validate_ranks]). Without the door such a
+   registry would slip the free-constant test and drive DT wrong-verdicts. RED (accepted)
+   without the validator. *)
+let test_forged_datatype_registry () =
+  let s = Session.create () in
+  let usort = Sort.uninterpreted (Session.declare_sort s "U") in
+  let a = Session.declare_fun s "A" (Rank.create [] usort) in
+  (* fake datatype sort + a well-ranked tester, but constructor [A] returns U, not the
+     datatype — the forgery the validator must catch. *)
+  let d_sym = Session.declare_sort s "Dfake" in
+  let d_sort = Sort.datatype_ d_sym in
+  let tester = Session.declare_fun s "isA" (Rank.create [ d_sort ] Sort.bool) in
+  let forged =
+    Defs.add
+      Defs.empty
+      { Defs.sort_sym = d_sym
+      ; constructors = [ { Defs.sym = a; selectors = []; tester } ]
+      }
+  in
+  match Session.set_datatypes s forged with
+  | () ->
+    fail
+      "forged registry: set_datatypes accepted an uninterpreted constant as a constructor"
+  | exception Invalid_argument _ ->
+    ok "forged datatype registry rejected at install (set_datatypes validator)"
+;;
+
 let () =
   print_string "symbreak_test:\n";
   test_detector_fires ();
@@ -564,6 +594,7 @@ let () =
   test_no_emit_with_lemmas ();
   test_b3_datatype ();
   test_b4_prior_assertion ();
+  test_forged_datatype_registry ();
   test_f3_hash_collision ();
   Printf.printf "symbreak_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1

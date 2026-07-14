@@ -48,6 +48,16 @@ val empty : t
     case, so a non-datatype problem is unaffected. *)
 val is_empty : t -> bool
 
+(** [validate_ranks t ~rank_of] raises [Invalid_argument] if any registered
+    constructor/selector/tester symbol lacks, in the environment ([rank_of]), the
+    canonical rank for its role in its datatype: a constructor returns the datatype sort
+    with the field sorts as its domain, a tester is [(dt) -> Bool], a selector is
+    [(dt) -> field]. The install-door defense (mirrors {!Array_defs.validate_ranks}): a
+    hand-built registry marking an arbitrary symbol — e.g. an uninterpreted-sort constant
+    — as a constructor is rejected here, so every downstream consumer's datatype-sort
+    assumptions hold by construction. *)
+val validate_ranks : t -> rank_of:(Symbol.t -> Rank.t option) -> unit
+
 (** [add t datatype] registers [datatype] and all its constructor/selector/tester symbols,
     building the reverse indices. Raises [Invalid_argument] on a duplicate datatype sort
     symbol or a symbol already registered in another role (a construction bug — every
