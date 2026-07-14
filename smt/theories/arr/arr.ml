@@ -744,6 +744,25 @@ let array_model t : (Term.t * value) list option =
            ((j, sel) :: Option.value (Hashtbl.find_opt by_class k) ~default:[])
        | _ -> ())
     (List.rev t.select_terms);
+  (* A representative store term per e-class that contains one (tag-least, for
+     determinism). An array class that equals a [store base i v] must take that store's
+     VALUE — its base's value with [(i,v)] overlaid — not an independent map reconstructed
+     from its own reads: the two disagree at any index read on one side of the store
+     equality but not the other, and the self-check (which recomputes [store]
+     structurally) then rejects the whole model. This is the storecomm shape (a_k = store
+     a_j .. chains): deriving each array structurally over the store DAG makes the
+     [a_k = store ..] equalities hold by construction. *)
+  let store_of_class : (int, Term.t) Hashtbl.t = Hashtbl.create 64 in
+  List.iter
+    (fun st ->
+       match head_args st, role_of t st with
+       | Some (_, [| _b; _i; _v |]), Some { Defs.role = Defs.Store; _ } ->
+         let k = Euf.class_of t.engine st in
+         (match Hashtbl.find_opt store_of_class k with
+          | Some prev when prev.Term.tag <= st.Term.tag -> ()
+          | _ -> Hashtbl.replace store_of_class k st)
+       | _ -> ())
+    t.store_terms;
   let memo : (int, value) Hashtbl.t = Hashtbl.create 64 in
   let rec default_of (element : Sort.t) (depth : int) : value =
     if depth > 1_000
@@ -771,13 +790,33 @@ let array_model t : (Term.t * value) list option =
              memo
              k
              (Array { entries = []; default = default_of element (depth + 1) });
-           let sels = Option.value (Hashtbl.find_opt by_class k) ~default:[] in
-           let entries =
-             List.map
-               (fun (j, sel) -> value_of j (depth + 1), value_of sel (depth + 1))
-               sels
+           let v =
+             match Hashtbl.find_opt store_of_class k with
+             | Some { Term.node = Term.App (_, args); _ } when Iarr.length args = 3 ->
+               (* store-respecting: this class equals [store base i v]; take base's value
+                  with [(i, v)] overlaid, exactly as the checker computes [store base i v]
+                  (prepend (i-value, v-value); keep base's default), so the
+                  [a_k = store ..] equality holds by construction. *)
+               let a = Array.of_list (Iarr.to_list args) in
+               (match value_of a.(0) (depth + 1) with
+                | Array base ->
+                  Array
+                    { entries =
+                        (value_of a.(1) (depth + 1), value_of a.(2) (depth + 1))
+                        :: base.entries
+                    ; default = base.default
+                    }
+                | Scalar _ as s -> s (* base must be an array; defensive *))
+             | _ ->
+               (* root array (no store in its class): the finite map from its own reads. *)
+               let sels = Option.value (Hashtbl.find_opt by_class k) ~default:[] in
+               let entries =
+                 List.map
+                   (fun (j, sel) -> value_of j (depth + 1), value_of sel (depth + 1))
+                   sels
+               in
+               Array { entries; default = default_of element (depth + 1) }
            in
-           let v = Array { entries; default = default_of element (depth + 1) } in
            Hashtbl.replace memo k v;
            v)
       | _ -> Scalar (scalar_of x))
