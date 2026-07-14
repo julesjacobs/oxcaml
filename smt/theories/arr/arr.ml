@@ -59,6 +59,26 @@ let weq_fuel_cap =
    default emits the fully-guarded tautology. *)
 let weq_unsafe_noguard = env_flag "OXSMT_ARR_WEQ_UNSAFE_NOGUARD"
 
+(* W2-PREVIEW knob (experimental, gated): retire the blind [row_split] so L1 (+ ROW1 +
+   ensure_store_reads) is the sole Final-time saturation — the payoff configuration the
+   ADR predicts turns the W1 add-phase perturbation net-positive. Measurement-only for
+   now; the real W2 lands the retirement after this A/B clears. *)
+let weq_no_rowsplit = env_flag "OXSMT_ARR_WEQ_NOROW"
+
+(* General path-width cap (ADR §6 weq_max_idx): L1 fires only when the path has at most
+   this many distinct store indices, so the emitted avoidance disjunction stays a
+   genuinely SMALL finite case split. A general structural bound (NOT a per-logic/family
+   heuristic): a wide path (deep storecomm chain) yields a family-2-shaped wide clause
+   that wrecks the mostly-sat neighbours, so it is left to the definite ROW machinery.
+   Default: no cap. *)
+let weq_max_idx =
+  match Sys.getenv_opt "OXSMT_ARR_WEQ_MAXIDX" with
+  | Some s ->
+    (try int_of_string s with
+     | _ -> max_int)
+  | None -> max_int
+;;
+
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a ROW-derived equality carries [P_derived reasons] — the
    trail literals whose conjunction entails the trigger. [P_axiom] is dropped when
@@ -1036,12 +1056,27 @@ let weq_l1 t : Term.t list option =
                  then (
                    match Weq_graph.find_path g x1 x2 with
                    | Some path ->
-                     let clause = weq_clause t r1 i1 r2 i2 path in
-                     if List.length clause >= 2
-                     then (
-                       Hashtbl.replace t.weq_emitted key ();
-                       t.weq_fuel <- t.weq_fuel - 1;
-                       result := Some clause)
+                     (* general path-width cap (§6): count distinct store indices; a wide
+                       path yields a family-2-shaped clause and is left to the definite
+                       ROW machinery. Memoize the skip (paths only grow, so it stays
+                       capped). *)
+                     let seen = Hashtbl.create 16 in
+                     List.iter
+                       (fun (e : Weq_graph.edge) ->
+                          match e with
+                          | Weq_graph.Store { index; _ } ->
+                            Hashtbl.replace seen index.Term.tag ()
+                          | Weq_graph.Equality _ -> ())
+                       path;
+                     if Hashtbl.length seen > weq_max_idx
+                     then Hashtbl.replace t.weq_emitted key ()
+                     else (
+                       let clause = weq_clause t r1 i1 r2 i2 path in
+                       if List.length clause >= 2
+                       then (
+                         Hashtbl.replace t.weq_emitted key ();
+                         t.weq_fuel <- t.weq_fuel - 1;
+                         result := Some clause))
                    | None -> ())))
             rest;
           if !result = None then go rest
@@ -1071,7 +1106,7 @@ let check t effort =
           (match weq_l1 t with
            | Some terms -> Theory.Split terms
            | None ->
-             (match row_split t with
+             (match if weq_no_rowsplit then None else row_split t with
               | Some terms -> Theory.Split terms
               | None -> Theory.Sat))))
 ;;
