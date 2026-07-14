@@ -114,9 +114,9 @@ let head_args (term : Term.t) : (Symbol.t * Term.t array) option =
 ;;
 
 let role_of t (term : Term.t) : Defs.entry option =
-  match head_args term with
-  | Some (sym, _) -> Defs.role_of_sym t.reg sym
-  | None -> None
+  match term.Term.node with
+  | Term.App (sym, _) -> Defs.role_of_sym t.reg sym
+  | _ -> None
 ;;
 
 let array_sort (sort : Sort.t) : (Sort.t * Sort.t) option =
@@ -362,9 +362,9 @@ let selects_by_arr_class t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
     (fun sel ->
-       match head_args sel with
-       | Some (_, [| arr; _j |]) when role_of t sel <> None ->
-         Hashtbl.add idx (Euf.class_of t.engine arr) sel
+       match sel.Term.node with
+       | Term.App (_, a) when role_of t sel <> None ->
+         Hashtbl.add idx (Euf.class_of t.engine (Iarr.get a 0)) sel
        | _ -> ())
     t.select_terms;
   idx
@@ -374,17 +374,19 @@ let ensure_store_reads t ~changed =
   let idx = selects_by_arr_class t in
   List.iter
     (fun st ->
-       match head_args st with
-       | Some (_, [| base; _i; _v |])
+       match st.Term.node with
+       | Term.App (_, a)
          when match role_of t st with
               | Some { Defs.role = Defs.Store; _ } -> true
               | _ -> false ->
+         let base = Iarr.get a 0 in
          (* selects on an array congruent to this store's base — [Euf.are_equal arr base]
            is [class_of arr = class_of base], which is exactly the index bucket. *)
          List.iter
            (fun sel ->
-              match head_args sel with
-              | Some (_, [| _arr; j |]) ->
+              match sel.Term.node with
+              | Term.App (_, sa) ->
+                let j = Iarr.get sa 1 in
                 let key = st.Term.tag, j.Term.tag in
                 if not (Hashtbl.mem t.ensured_reads key)
                 then (
@@ -414,15 +416,19 @@ let row_round t ~changed =
   let idx = selects_by_arr_class t in
   List.iter
     (fun st ->
-       match head_args st with
-       | Some (_, [| _base; i; v |])
+       match st.Term.node with
+       | Term.App (_, a)
          when match role_of t st with
               | Some { Defs.role = Defs.Store; _ } -> true
               | _ -> false ->
+         let i = Iarr.get a 1
+         and v = Iarr.get a 2 in
          List.iter
            (fun sel ->
-              match head_args sel with
-              | Some (_, [| arr; j |]) ->
+              match sel.Term.node with
+              | Term.App (_, sa) ->
+                let arr = Iarr.get sa 0
+                and j = Iarr.get sa 1 in
                 (* definite ROW1: i = j entailed ⇒ sel = v *)
                 if Euf.are_equal t.engine i j && not (Euf.are_equal t.engine sel v)
                 then (
@@ -489,8 +495,10 @@ let row_split t : Term.t list option =
     (fun sel ->
        if !cand = None
        then (
-         match head_args sel with
-         | Some (_, [| arr; j |]) when role_of t sel <> None ->
+         match sel.Term.node with
+         | Term.App (_, sa) when role_of t sel <> None ->
+           let arr = Iarr.get sa 0
+           and j = Iarr.get sa 1 in
            (* stores congruent to [arr], in tag order — same set and order the old
              full-scan visited, so the tag-least open pair chosen is identical. *)
            let stores =
@@ -500,8 +508,10 @@ let row_split t : Term.t list option =
              (fun st ->
                 if !cand = None
                 then (
-                  match head_args st with
-                  | Some (_, [| base; i; v |]) when not (Euf.are_equal t.engine i j) ->
+                  match st.Term.node with
+                  | Term.App (_, a) when not (Euf.are_equal t.engine (Iarr.get a 1) j) ->
+                    let base = Iarr.get a 0
+                    and i = Iarr.get a 1 in
                     (match build_select t base j with
                      | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
                        let idx_eq = Context.eq t.ctx i j in
@@ -515,7 +525,6 @@ let row_split t : Term.t list option =
                            ; read_eq
                            ]
                        in
-                       ignore v;
                        cand := Some disjuncts
                      | _ -> ())
                   | _ -> ()))
