@@ -235,6 +235,7 @@ type t =
     mutable stat_elim_vars : int
   ; mutable stat_deleted_clauses : int
   ; mutable stat_resolvents : int
+  ; mutable stat_vivified : int
   }
 
 let var_decay = 0.95
@@ -346,6 +347,7 @@ let create () =
   ; stat_elim_vars = 0
   ; stat_deleted_clauses = 0
   ; stat_resolvents = 0
+  ; stat_vivified = 0
   }
 ;;
 
@@ -1710,6 +1712,8 @@ let sorted_mem x a =
 let bve_size_cap = 20 (* skip a resolvent longer than this *)
 let bve_product_cap = 64 (* skip a var whose |pos|*|neg| exceeds this (bound the work) *)
 let bve_margin = 0 (* eliminate only if #resolvents <= #deleted + margin (classic BVE) *)
+let vivify_size_cap = 30 (* skip vivifying a learned clause longer than this *)
+let vivify_budget = 2000 (* max learned clauses vivified per round (effort bound) *)
 
 (* Is sorted array [a] a subset of sorted array [b] (both ascending, deduped)? Linear
    merge. *)
@@ -1753,15 +1757,74 @@ let resolve_on a b v =
     Some arr)
 ;;
 
+(* Vivification / distillation of a learned clause [c] (the charter's win-bearing round
+   component). At decision level 0 with NO theory plugged: walk [c]'s literals, assuming
+   the negation of each (as a decision) and BCP-ing. Three outcomes shorten [c] to an
+   entailed sub-clause:
+   - a literal is already TRUE under the assumed prefix ⇒ the prefix entails it;
+   - assuming its negation CONFLICTS ⇒ the prefix + it is entailed (F ∧ ¬prefix unsat);
+   - a literal is already FALSE ⇒ it is redundant given the prefix, so it is dropped (the
+     assumed prefix stays the sub-clause). The produced sub-clause is a SUBSET of [c]'s
+     literals, so it implies [c]; and it is entailed by the formula (the conflict/forced
+     criteria are exactly the RUP/asymmetric entailment conditions). Replacing [c] by it
+     is therefore equivalence-preserving — and because it touches only a LEARNED
+     (redundant) clause, the reconstruction/witness stack is untouched. Returns the
+     shortened array (>= 2 literals, strictly shorter than [c]) or [None]; restores the
+     trail to level 0 on every exit.
+
+   Gated to [t.theory = None] by the caller: assuming a literal fires [on_assign] to a
+   plugged theory, so on the theory-plugged path this would drive theory asserts/pops it
+   is not yet audited for — the pure-propositional / bit-blasted path (bv's own solver) is
+   the target and where the literature says vivification pays. Refs: Piette, Hamadi &
+   Saïs, "Vivifying propositional clausal formulas" (ECAI 2008); the CDCL inprocessing
+   form (CaDiCaL/Kissat). *)
+let vivify_learnt t c =
+  let lits = c.lits in
+  let n = Array.length lits in
+  let kept = Dynarray.create () in
+  let shortened =
+    ref false
+    (* set once a conflict / forced-true proves entailment *)
+  in
+  let i = ref 0 in
+  let stop = ref false in
+  while (not !stop) && !i < n do
+    let li = lits.(!i) in
+    (match lit_val t li with
+     | 1 ->
+       (* prefix already entails [li]: sub-clause = assumed prefix ++ [li] *)
+       Dynarray.add_last kept li;
+       shortened := true;
+       stop := true
+     | -1 ->
+       () (* [li] redundant under the assumed prefix: drop it (not assumed, not kept) *)
+     | _ ->
+       new_decision_level t;
+       unchecked_enqueue t (neg_lit li) Decision;
+       (match propagate t with
+        | Some _ ->
+          Dynarray.add_last kept li;
+          shortened := true;
+          stop := true
+        | None -> Dynarray.add_last kept li));
+    incr i
+  done;
+  cancel_until t 0;
+  if !shortened && Dynarray.length kept >= 2 && Dynarray.length kept < n
+  then Some (Dynarray.to_array kept)
+  else None
+;;
+
 (* One inprocessing ROUND, shared by solve-entry preprocessing and restart-boundary
    inprocessing. It runs a SEQUENCE of simplification COMPONENTS over a working copy of
-   the IRREDUNDANT (original) clauses — currently
-   [subsumption; self-subsuming strengthening; bounded variable elimination] — and is
-   architected as an extensible list so later components (learned-clause vivification,
-   equivalent-literal substitution via binary-implication SCCs, failed-literal probing)
-   slot in without reshaping the loop (charter). Refs: Järvisalo, Heule & Biere,
-   "Inprocessing Rules" (IJCAR 2012); Fazekas, Biere & Scholl, "Incremental Inprocessing
-   SAT Solving" (SAT 2019).
+   the IRREDUNDANT (original) clauses —
+   [subsumption; self-subsuming strengthening; bounded variable elimination] — followed by
+   learned-clause VIVIFICATION over the learned DB (no-theory path only). It is
+   architected as an extensible list so the remaining charter components
+   (equivalent-literal substitution via binary-implication SCCs, failed-literal probing)
+   slot in without reshaping the loop. Refs: Järvisalo, Heule & Biere, "Inprocessing
+   Rules" (IJCAR 2012); Fazekas, Biere & Scholl, "Incremental Inprocessing SAT Solving"
+   (SAT 2019).
 
    {b Learn/forget discipline (the reason it is sound with learned clauses present).}
    Elimination runs on the irredundant set only. Learned clauses are REDUNDANT (entailed
@@ -1853,7 +1916,11 @@ let run_round t =
            remove [l] from [c] (equivalence-preserving, no reconstruction). Only shrink
            clauses that stay >= 2 literals (never create a unit here — that would open a
            propagation this prototype does not thread). The [¬l ∈ d] guard keeps it
-           correct against an [occ] entry made stale by an earlier strengthening. ---- *)
+           correct against an [occ] entry made stale by an earlier strengthening. The
+           subset test is SELF-CONTAINED — [m = nl || (m <> l && sorted_mem m cwl)] — so
+           it stays sound even if the working set ever stopped being tautology-free (today
+           [add_clause] guarantees it; the [m <> l] guard means a hypothetical [c] holding
+           both [l] and [¬l] can't spuriously satisfy the membership; review rider). ---- *)
         Dynarray.iteri
           (fun i wc ->
              if not wc.wdead
@@ -1874,7 +1941,9 @@ let run_round t =
                                let d = (Dynarray.get work j).wl in
                                if
                                  Array.exists (fun m -> m = nl) d
-                                 && Array.for_all (fun m -> m = nl || sorted_mem m cwl) d
+                                 && Array.for_all
+                                      (fun m -> m = nl || (m <> l && sorted_mem m cwl))
+                                      d
                                then (
                                  wc.wl
                                  <- Array.of_list
@@ -1992,6 +2061,45 @@ let run_round t =
                  Dynarray.add_last kept c))
             t.learnts;
           Dynarray.clear t.learnts;
+          Dynarray.append t.learnts kept);
+        (* ---- Vivification component: shorten learned clauses by re-propagation. Runs
+           only on the pure-propositional / bit-blasted path (no theory seam to drive),
+           over a snapshot of the current learned DB, effort-bounded. A shortened clause
+           replaces the original: mark the old deleted (its watches lazy-sweep) and attach
+           a fresh learned clause with the sub-clause. Only clauses of length in [3, cap]
+           are tried (a length-2 clause could only shorten to a unit, which this cut does
+           not thread). Sound: each replacement is by an entailed sub-clause (see
+           {!vivify_learnt}); it never touches original clauses or the reconstruction
+           stack. ---- *)
+        if t.theory = None && t.ok && Dynarray.length t.learnts > 0
+        then (
+          let snapshot = Dynarray.to_array t.learnts in
+          let budget = ref vivify_budget in
+          Array.iter
+            (fun c ->
+               if
+                 !budget > 0
+                 && (not c.deleted)
+                 && Array.length c.lits >= 3
+                 && Array.length c.lits <= vivify_size_cap
+               then (
+                 decr budget;
+                 match vivify_learnt t c with
+                 | None -> ()
+                 | Some sub ->
+                   c.deleted <- true;
+                   let nc = mk_clause t sub true in
+                   nc.lbd <- clause_lbd t sub;
+                   attach t nc;
+                   t.stat_vivified <- t.stat_vivified + 1))
+            snapshot;
+          (* drop the replaced (deleted) learned clauses; the fresh shortened ones were
+             already appended to [t.learnts] by [mk_clause] and stay. *)
+          let kept = Dynarray.create () in
+          Dynarray.iter
+            (fun c -> if not c.deleted then Dynarray.add_last kept c)
+            t.learnts;
+          Dynarray.clear t.learnts;
           Dynarray.append t.learnts kept)))
 ;;
 
@@ -2090,10 +2198,11 @@ let solve ?(assumptions = []) t =
     (match Sys.getenv_opt "OXSMT_SATPRE_STATS" with
      | Some ("1" | "true" | "yes" | "on") ->
        Printf.eprintf
-         "satpre-stats elim_vars=%d deleted_clauses=%d resolvents=%d\n%!"
+         "satpre-stats elim_vars=%d deleted_clauses=%d resolvents=%d vivified=%d\n%!"
          t.stat_elim_vars
          t.stat_deleted_clauses
          t.stat_resolvents
+         t.stat_vivified
      | Some _ | None -> ());
     r)
 ;;

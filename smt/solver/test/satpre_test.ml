@@ -218,6 +218,30 @@ let test_inprocessing_unsat_preserved () =
     (st.conflicts > 100)
 ;;
 
+(* ---- VIVIFICATION soundness. PHP(6,5) with the last mutual-exclusion clause dropped is
+   SATISFIABLE (two pigeons may now share the freed hole) but still near-unsat, so it
+   takes many conflicts → restart-boundary rounds fire, and with no theory plugged (raw
+   SAT API) the learned clauses are VIVIFIED. An over-shortened (non-entailed) vivified
+   clause would exclude the tight satisfying model → wrong UNSAT, or a returned model that
+   violates a clause. So SAT + model-satisfies-originals is the discriminator. ---- *)
+let test_vivification_sat () =
+  (* PHP(8,7) minus its last exclusion clause: SAT (two pigeons may share the freed hole),
+     but near-unsat, so it clears the first restart (>100 conflicts) and rounds fire → the
+     learned clauses are vivified before the model is found. *)
+  let php_clauses, nphp = php 8 7 in
+  let m = List.length php_clauses in
+  let clauses = List.filteri (fun i _ -> i < m - 1) php_clauses in
+  let s = build nphp ~eliminable:[] clauses in
+  let r = Sat.solve s in
+  let model = Sat.model s in
+  let st = Sat.stats s in
+  check "vivify: PHP(8,7)-1 is sat" (r = Sat.Sat);
+  check "vivify: model satisfies all clauses" (r = Sat.Sat && all_sat model clauses);
+  check
+    (Printf.sprintf "vivify: search cleared a restart (conflicts=%d > 100)" st.conflicts)
+    (st.conflicts > 100)
+;;
+
 let () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") ->
@@ -228,6 +252,7 @@ let () =
     test_strengthening_unsat ();
     test_strengthening_sat ();
     test_inprocessing_unsat_preserved ();
+    test_vivification_sat ();
     Printf.printf "satpre_test: %d checks, %d failures\n" !checks !failures;
     if !failures > 0 then exit 1
   | Some _ | None ->
