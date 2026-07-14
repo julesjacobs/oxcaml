@@ -236,6 +236,21 @@ type t =
   ; mutable stat_deleted_clauses : int
   ; mutable stat_resolvents : int
   ; mutable stat_vivified : int
+  ; chrono : bool
+    (* Chronological backtracking (task #41 Stage 1; Nadel–Ryvchin SAT'18, Möhle–Biere
+         SAT'19). Read once from [OXSMT_CHRONO] at [create]; [false] (default) ⇒ every CB
+         branch below is dead and the core is BYTE-IDENTICAL (verdicts, models, and the
+         conflicts/decisions/propagations trio) to the pre-CB engine. When [true], the
+         trail is no longer level-monotone: each literal's [level] slot is its TRUE level
+         (max level among a propagation's reason, a fresh level for a decision),
+         [cancel_until] removes the SCATTERED [level > target] literals rather than a
+         suffix, [analyze] works at the conflict clause's max level, and [handle_confl]
+         backtracks chronologically to [conflict_level - 1] when the backjump gap is
+         within [chrono_threshold]. *)
+  ; chrono_threshold : int
+    (* Nadel–Ryvchin threshold T ([OXSMT_CHRONO_T], default 100): backjump
+     non-chronologically (to [bt]) when [conflict_level - bt > chrono_threshold], else
+     chronologically (to [conflict_level - 1]). Inert unless [chrono]. *)
   }
 
 let var_decay = 0.95
@@ -282,6 +297,14 @@ let satpre_enabled () =
   | Some _ | None -> false
 ;;
 
+(* Chronological backtracking (task #41) is dark, env-gated at [create]: unset ⇒ [false] ⇒
+   byte-identical. Same on-value vocabulary as [OXSMT_RELEVANCY]. *)
+let chrono_from_env () =
+  match Sys.getenv_opt "OXSMT_CHRONO" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* First-inprocessing-round conflict offset (Phase 2). A measurement/test knob
    (OXSMT_SATPRE_INPROC_FIRST): default [inproc_first], overridable so an A/B can tune
    round frequency and a test can force an early round. Read per [solve]; only consulted
@@ -292,6 +315,17 @@ let inproc_first_offset () =
     (try max 1 (int_of_string s) with
      | _ -> inproc_first)
   | None -> inproc_first
+;;
+
+(* Nadel–Ryvchin threshold T ([OXSMT_CHRONO_T]); non-negative int, default 100 (the paper
+   default). A malformed or negative value falls back to the default. *)
+let chrono_threshold_from_env () =
+  match Sys.getenv_opt "OXSMT_CHRONO_T" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 0 -> n
+     | Some _ | None -> 100)
+  | None -> 100
 ;;
 
 let create () =
@@ -348,6 +382,8 @@ let create () =
   ; stat_deleted_clauses = 0
   ; stat_resolvents = 0
   ; stat_vivified = 0
+  ; chrono = chrono_from_env ()
+  ; chrono_threshold = chrono_threshold_from_env ()
   }
 ;;
 
@@ -586,10 +622,37 @@ let attach t c =
 
 let new_decision_level t = Dynarray.add_last t.trail_lim (Dynarray.length t.trail)
 
+(* The decision level to stamp on a literal being enqueued (task #41 §10.1). Without CB
+   ([not t.chrono]) it is always the current [decision_level] — byte-identical to the
+   pre-CB core, which set exactly that. Under CB a literal carries its TRUE level: a
+   decision (or a theory propagation, tagged conservatively at the current level) gets the
+   current [decision_level]; a Boolean propagation [Implied_by c] gets the max level among
+   the reason clause's OTHER literals ([c.lits.(1..)], all currently false), which is the
+   level at which the clause became unit — this may be BELOW the current decision level,
+   and is precisely what makes the out-of-order trail correct. Derived internally (no
+   signature change): all 8 [unchecked_enqueue] call sites are untouched, and
+   [record_learnt]'s [Implied_by] path automatically stamps the asserting literal its
+   correct backjump level [bt] even when the trail sits chronologically at
+   [conflict_level - 1]. *)
+let enqueue_level t reason =
+  if not t.chrono
+  then decision_level t
+  else (
+    match reason with
+    | Decision | Theory_prop -> decision_level t
+    | Implied_by c ->
+      let m = ref 0 in
+      for i = 1 to Array.length c.lits - 1 do
+        let lv = Dynarray.get t.level (var_of_lit c.lits.(i)) in
+        if lv > !m then m := lv
+      done;
+      !m)
+;;
+
 let unchecked_enqueue t lit reason =
   let v = var_of_lit lit in
   Dynarray.set t.assigns v (if sign_of_lit lit then 1 else -1);
-  Dynarray.set t.level v (decision_level t);
+  Dynarray.set t.level v (enqueue_level t reason);
   Dynarray.set t.trail_pos v (Dynarray.length t.trail);
   Dynarray.set t.reason v reason;
   Dynarray.add_last t.trail lit;
@@ -602,29 +665,81 @@ let unchecked_enqueue t lit reason =
 ;;
 
 (* Undo assignments back to [level] (0-based decision level to keep). Saves the phase of
-   every unassigned var (phase saving) and returns it to the heap. *)
+   every unassigned var (phase saving) and returns it to the heap.
+
+   Without CB (the [not t.chrono] arm) this truncates the trail SUFFIX [\[target, end)]
+   and is byte-identical to the pre-CB core. Under CB the [level > level] literals are
+   SCATTERED (the trail is not level-monotone), so we scan the whole trail, unassign
+   exactly those, compact the survivors in place preserving their relative order (and
+   their [trail_pos], which [explain]'s CONTRACT-EX reads), truncate [trail_lim] purely as
+   the decision COUNTER (its position entries are meaningless under CB), fire the theory
+   backtrack, and reset [qhead] to 0 (§10.2 — the soundness-critical crux; see below). *)
 let cancel_until t level =
   if decision_level t > level
-  then (
-    let target = Dynarray.get t.trail_lim level in
-    for i = Dynarray.length t.trail - 1 downto target do
-      let l = Dynarray.get t.trail i in
-      let v = var_of_lit l in
-      Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
-      Dynarray.set t.assigns v 0;
-      Dynarray.set t.trail_pos v (-1);
-      Dynarray.set t.reason v Decision;
-      heap_insert t v
-    done;
-    Dynarray.truncate t.trail target;
-    Dynarray.truncate t.trail_lim level;
-    t.qhead <- target;
-    (* Backjump notify (ADR-0005 §3 on_backtrack): the trail is now unwound to decision
-       [level]; the adapter pops the theory state asserted above it. Fires only on a real
-       unwind, after the Boolean trail is truncated. *)
-    match t.theory with
-    | None -> ()
-    | Some th -> th.on_backtrack ~level)
+  then
+    if not t.chrono
+    then (
+      let target = Dynarray.get t.trail_lim level in
+      for i = Dynarray.length t.trail - 1 downto target do
+        let l = Dynarray.get t.trail i in
+        let v = var_of_lit l in
+        Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
+        Dynarray.set t.assigns v 0;
+        Dynarray.set t.trail_pos v (-1);
+        Dynarray.set t.reason v Decision;
+        heap_insert t v
+      done;
+      Dynarray.truncate t.trail target;
+      Dynarray.truncate t.trail_lim level;
+      t.qhead <- target;
+      (* Backjump notify (ADR-0005 §3 on_backtrack): the trail is now unwound to decision
+         [level]; the adapter pops the theory state asserted above it. Fires only on a
+         real unwind, after the Boolean trail is truncated. *)
+      match t.theory with
+      | None -> ()
+      | Some th -> th.on_backtrack ~level)
+    else (
+      (* Scattered removal + in-place compaction of survivors. *)
+      let n = Dynarray.length t.trail in
+      let w = ref 0 in
+      for i = 0 to n - 1 do
+        let l = Dynarray.get t.trail i in
+        let v = var_of_lit l in
+        if Dynarray.get t.level v > level
+        then (
+          Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
+          Dynarray.set t.assigns v 0;
+          Dynarray.set t.trail_pos v (-1);
+          Dynarray.set t.reason v Decision;
+          heap_insert t v)
+        else (
+          Dynarray.set t.trail !w l;
+          Dynarray.set t.trail_pos v !w;
+          incr w)
+      done;
+      Dynarray.truncate t.trail !w;
+      Dynarray.truncate t.trail_lim level;
+      (* THE §10.2 CRUX. A scattered removal can turn a clause whose ONLY satisfying
+         literal was a removed watched literal — with a surviving FALSE partner watch —
+         into an UNDETECTED unit (or, once the caller flips a literal, a conflict).
+         Standard suffix truncation never reaches this, so the pre-CB core relied on
+         watches staying valid across a suffix cancel and never re-propagated. Under CB we
+         cannot: we reset [qhead] to 0 so the next [propagate] re-derives EVERY
+         implication over the compacted assignment from scratch. This is unconditionally
+         sound — it is plain BCP over the current partial model — and [propagate] itself
+         re-establishes each clause's watch (moving the removed literal's watch to a
+         non-false literal, forcing the unit, or reporting the conflict via its
+         [first]-value check), so no separate watch-repair pass is needed and no unit is
+         enqueued mid-backtrack to collide with the caller's [record_learnt]. COST:
+         re-scanning the surviving trail's watch lists per chrono backtrack — the Stage-1
+         correctness-first choice; a highest-level-watched invariant (Nadel–Ryvchin option
+         (b)) is the perf follow-up. *)
+      t.qhead <- 0;
+      (* Fire the theory backtrack after the Boolean trail is compacted (mirrors the
+         suffix arm), before the caller re-propagates / records the learnt clause. *)
+      match t.theory with
+      | None -> ()
+      | Some th -> th.on_backtrack ~level)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -845,7 +960,25 @@ let analyze t confl =
   let p = ref (-1) in
   let index = ref (Dynarray.length t.trail - 1) in
   let c = ref confl in
-  let dl = decision_level t in
+  (* The level 1UIP resolves down to. Without CB it is the current [decision_level]; under
+     CB (task #41 §10.3, Möhle–Biere corrected 1UIP) the conflict clause can be falsified
+     BELOW the current level, so it is the MAX literal level in the conflict clause. Both
+     coincide in the monotone case (a Boolean/theory conflict always involves a
+     current-level literal), so the [not t.chrono] path is byte-identical. Every literal
+     reached during resolution is at level <= [conflict_level], so counting
+     [>= conflict_level] is the same as [= conflict_level]. *)
+  let conflict_level =
+    if not t.chrono
+    then decision_level t
+    else (
+      let m = ref 0 in
+      Array.iter
+        (fun l ->
+           let lv = Dynarray.get t.level (var_of_lit l) in
+           if lv > !m then m := lv)
+        confl.lits;
+      !m)
+  in
   let continue = ref true in
   while !continue do
     if !c.learnt
@@ -865,12 +998,27 @@ let analyze t confl =
       then (
         var_bump t vq;
         mark vq;
-        if Dynarray.get t.level vq >= dl then incr path_c else Dynarray.add_last out q)
+        if Dynarray.get t.level vq >= conflict_level
+        then incr path_c
+        else Dynarray.add_last out q)
     done;
-    (* Next literal to resolve on: the most recent seen literal on the trail. *)
-    while not (Dynarray.get t.seen (var_of_lit (Dynarray.get t.trail !index))) do
-      decr index
-    done;
+    (* Next literal to resolve on: the most recent seen conflict-level literal on the
+       trail. Without CB the seen conflict-level literals sit contiguously at the trail
+       top, so the plain "most recent seen" walk lands on one — byte-identical. Under CB a
+       lower-level seen literal (already routed to [out]) can sit ABOVE conflict-level
+       literals, so the walk must skip any seen literal not at [conflict_level]. *)
+    if t.chrono
+    then
+      while
+        let v = var_of_lit (Dynarray.get t.trail !index) in
+        not (Dynarray.get t.seen v && Dynarray.get t.level v = conflict_level)
+      do
+        decr index
+      done
+    else
+      while not (Dynarray.get t.seen (var_of_lit (Dynarray.get t.trail !index))) do
+        decr index
+      done;
     let pl = Dynarray.get t.trail !index in
     decr index;
     p := pl;
@@ -1485,33 +1633,13 @@ let search t assumps conflict_limit =
     <- (if first_conflict
         then trail_len
         else ema_step t.trail_ema ~alpha:trail_ema_alpha ~sample:trail_len);
-    if t.theory <> None
-    then (
-      let maxl = ref 0 in
-      Array.iter
-        (fun l ->
-           let lv = Dynarray.get t.level (var_of_lit l) in
-           if lv > !maxl then maxl := lv)
-        confl.lits;
-      if !maxl < decision_level t then cancel_until t !maxl);
-    if decision_level t = 0
-    then (
-      t.ok <- false;
-      (* E2 (ADR-0013 §4.0): a level-0 conflict. The terminal step is level-0 RUP of
-         [confl] against the checker's re-derived unit closure. [confl.id] resolves via
-         [on_input] / [on_learned] (a Boolean clause) or [on_theory_clause] (a theory
-         transient — incl. an unconditional [T_conflict []] empty clause, Rev 6).
-         Persisted so a repeated solve on the now-unsat core re-emits it (codex CRIT-3). *)
-      if t.trace <> None
-      then t.terminal <- Some (Level0_conflict { conflict_id = confl.id });
-      emit_terminal t;
-      result := Some R_unsat)
-    else (
-      let learnt, bt, ants = analyze t confl in
+    (* Post-analyze bookkeeping shared by both modes: the LBD EMAs (seeded on the first
+       conflict of the solve, codex M2), the restart warm-up counter, the learned clause,
+       the activity decays, and the conflict-count reduceDB schedule. [cancel] chooses the
+       backtrack (standard [bt] vs the chrono target). *)
+    let learn learnt bt ants ~cancel =
       let lbd = clause_lbd t learnt in
       let lbd_f = float_of_int lbd in
-      (* Feed the LBD EMAs (S3 adaptive restart), seeding on the first conflict of the
-         solve (codex M2) and counting this conflict toward the restart warm-up. *)
       t.lbd_ema_fast
       <- (if first_conflict
           then lbd_f
@@ -1521,7 +1649,7 @@ let search t assumps conflict_limit =
           then lbd_f
           else ema_step t.lbd_ema_slow ~alpha:lbd_ema_alpha_slow ~sample:lbd_f);
       t.conflicts_since_restart <- t.conflicts_since_restart + 1;
-      cancel_until t bt;
+      cancel ();
       record_learnt t learnt bt ants lbd;
       var_decay_bump t;
       cla_decay_bump t;
@@ -1529,7 +1657,66 @@ let search t assumps conflict_limit =
       if t.conflicts >= t.next_reduce
       then (
         reduce_db t;
-        t.next_reduce <- t.next_reduce + reduce_inc))
+        t.next_reduce <- t.next_reduce + reduce_inc)
+    in
+    let conclude_unsat () =
+      t.ok <- false;
+      (* E2 (ADR-0013 §4.0): a level-0 conflict. The terminal step is level-0 RUP of
+         [confl] against the checker's re-derived unit closure. [confl.id] resolves via
+         [on_input] / [on_learned] (a Boolean clause) or [on_theory_clause] (a theory
+         transient — incl. an unconditional [T_conflict []] empty clause, Rev 6).
+         Persisted so a repeated solve on the now-unsat core re-emits it (codex CRIT-3). *)
+      if t.trace <> None
+      then t.terminal <- Some (Level0_conflict { conflict_id = confl.id });
+      emit_terminal t;
+      result := Some R_unsat
+    in
+    if not t.chrono
+    then (
+      (* ---- standard, byte-identical to the pre-CB core ---- *)
+      if t.theory <> None
+      then (
+        let maxl = ref 0 in
+        Array.iter
+          (fun l ->
+             let lv = Dynarray.get t.level (var_of_lit l) in
+             if lv > !maxl then maxl := lv)
+          confl.lits;
+        if !maxl < decision_level t then cancel_until t !maxl);
+      if decision_level t = 0
+      then conclude_unsat ()
+      else (
+        let learnt, bt, ants = analyze t confl in
+        learn learnt bt ants ~cancel:(fun () -> cancel_until t bt)))
+    else (
+      (* ---- chronological backtracking (task #41 §10.4) ---- *)
+      (* No pre-cancel realignment: [analyze] works natively at the conflict clause's max
+         level, which under CB may be below the current decision level. *)
+      let conflict_level =
+        let m = ref 0 in
+        Array.iter
+          (fun l ->
+             let lv = Dynarray.get t.level (var_of_lit l) in
+             if lv > !m then m := lv)
+          confl.lits;
+        !m
+      in
+      if conflict_level = 0
+      then conclude_unsat ()
+      else (
+        let learnt, bt, ants = analyze t confl in
+        (* Learned units (bt = 0) always take a NORMAL backjump to 0 (§10.1: units settle
+           at level 0). Otherwise backtrack chronologically to [conflict_level - 1] unless
+           the gap exceeds the threshold, when a standard backjump to [bt] is worth it
+           (Nadel–Ryvchin: chronological iff [conflict_level - bt <= chrono_threshold]).
+           The asserting literal lands at level [bt] regardless, via [enqueue_level]
+           (§10.1). *)
+        let is_unit = Array.length learnt = 1 in
+        let gap = conflict_level - bt in
+        let target =
+          if is_unit || gap > t.chrono_threshold then bt else conflict_level - 1
+        in
+        learn learnt bt ants ~cancel:(fun () -> cancel_until t target)))
   in
   while !result = None do
     match propagate_theory t with
@@ -2108,6 +2295,21 @@ let preprocess t = run_round t
 
 let solve ?(assumptions = []) t =
   t.failed <- [];
+  (* Stage-1 CB scope guards (task #41 §10.2). Assumptions ride the [analyze_final] /
+     [trail_lim.(0)] path, whose position entries go stale under CB — deferred, so CB with
+     assumptions raises rather than risk a wrong failed-assumption core. The relevancy
+     trail unwind assumes monotone levels, so CB and a branch filter are mutually
+     exclusive until the relevancy trail is made remove-by-level (§3.7). Both are
+     fail-loud [invalid_arg], never a silent degrade. *)
+  if t.chrono && assumptions <> []
+  then
+    invalid_arg
+      "Sat.solve: assumptions are unsupported under OXSMT_CHRONO (task #41 Stage 1)";
+  if t.chrono && t.branch_filter <> None
+  then
+    invalid_arg
+      "Sat.solve: OXSMT_CHRONO and a decision branch filter (relevancy) are mutually \
+       exclusive (task #41 Stage 1)";
   List.iter (fun l -> ensure_var t (var_of_lit l)) assumptions;
   (* A10 assumptions guard (Phase-2 review rider). The assumptions path reaches the trail
      via [ensure_var]+search, NOT [add_clause], so it bypasses the restore-on-mention

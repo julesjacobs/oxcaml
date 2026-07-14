@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -188,6 +188,16 @@ checker-test:
 CORPUS_GATE_DIRS ?= tests/cases tests/dt-goldens
 cert-corpus-gate:
 	$(DUNE) exec tests/certificate/cert_corpus_gate.exe -- $(CORPUS_GATE_DIRS)
+
+## chrono-test — chronological-backtracking (task #41 Stage 1) adversarial self-test, RUN
+##   WITH OXSMT_CHRONO=1 so every solver built is a CB solver. Cross-checks CB verdicts
+##   against an INDEPENDENT DPLL oracle over thousands of conflict-dense + sparse random
+##   CNFs, self-checks every sat model (the §10.2 watch-repair crux is RED-verified: a
+##   naive scattered-removal core reports a model that falsifies a clause), plus a directed
+##   hazard family and run-twice determinism. Nonzero exit on any failed check.
+chrono-test:
+	$(DUNE) build smt/solver/test/chrono_test.exe
+	OXSMT_CHRONO=1 $(DUNE) exec smt/solver/test/chrono_test.exe
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
 ##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat
@@ -528,6 +538,7 @@ test: check-frozen
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
 	$(MAKE) combine-test
+	$(MAKE) chrono-test
 	$(MAKE) wiring-test
 	$(MAKE) rational-word-test
 	$(MAKE) stage0-test
