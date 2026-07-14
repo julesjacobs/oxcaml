@@ -140,15 +140,18 @@ let run_fault_injection src =
 ;;
 
 (* API-only forge (task #23 review, [[arr-arity-guard-load-bearing]]): a select/store-role
-   symbol REGISTERED at the wrong arity must be inert in the ROW rules, not treated as an
-   array op — otherwise the read-over-write rule applies to an extended-arity
-   uninterpreted function and derives a WRONG-UNSAT. Not expressible in .smt2:
-   [Internal_minter.mint] admits any canonical [.oxsmt.arr.*] NAME with a caller-supplied
-   rank (name-shape gate only) and [Array_defs.add] classifies by name, not rank, so a
-   mis-ranked-but-registered op is reachable from the public OCaml API. The consuming-side
-   [Iarr.length] guards in arr.ml are what keep it inert; without them this query answers
-   [Unsat] (wrong; the true answer is Sat — the ops are arity-mismatched uninterpreted
-   functions). *)
+   symbol REGISTERED at the wrong arity must NEVER be treated as an array op — otherwise
+   the read-over-write rule applies to an extended-arity uninterpreted function and
+   derives a WRONG-UNSAT. Not expressible in .smt2: [Internal_minter.mint] admits any
+   canonical [.oxsmt.arr.*] NAME with a caller-supplied rank (name-shape gate only) and
+   [Array_defs.add] classifies by name, not rank, so a mis-ranked-but-registered op is
+   reachable from the public OCaml API. Two independent layers now guard this: the
+   registry-install door ([Session.set_arrays] -> [Array_defs.validate_ranks] raises on
+   the rank/arity disagreement) and, as the second layer, the consuming-side [Iarr.length]
+   guards in the arrays theory's ROW rules. The forge must be caught by AT LEAST ONE: this
+   test passes iff either set_arrays raises OR the query answers not-Unsat, and fails only
+   if the forge yields Unsat (the true answer is Sat — arity-mismatched uninterpreted
+   functions). RED against e0d17a5bfd, where neither layer existed. *)
 let run_arity_forge () =
   let s = Session.create () in
   let ctx = Session.context s in
@@ -179,21 +182,114 @@ let run_arity_forge () =
       ~index
       ~element
   in
-  Session.set_arrays s defs;
-  let a = Context.const ctx (Session.declare_const s "a" arr_sort) in
-  let i = Context.const ctx (Session.declare_const s "i" index) in
-  let v = Context.const ctx (Session.declare_const s "v" element) in
-  let fls = Context.bool_const ctx false in
-  let sto = Context.app ctx sto4 [ a; i; v; fls ] in
-  let sel = Context.app ctx sel3 [ sto; i; fls ] in
-  Session.assert_term s (Context.not_ ctx (Context.eq ctx sel v));
   incr checks;
-  match Session.check_sat s with
-  | Session.Unsat ->
+  match Session.set_arrays s defs with
+  | exception Invalid_argument _ -> () (* door layer caught the mis-ranked registry *)
+  | () ->
+    (* door did not catch it (e.g. that layer removed) — the consuming-side guards must *)
+    let a = Context.const ctx (Session.declare_const s "a" arr_sort) in
+    let i = Context.const ctx (Session.declare_const s "i" index) in
+    let v = Context.const ctx (Session.declare_const s "v" element) in
+    let fls = Context.bool_const ctx false in
+    let sto = Context.app ctx sto4 [ a; i; v; fls ] in
+    let sel = Context.app ctx sel3 [ sto; i; fls ] in
+    Session.assert_term s (Context.not_ ctx (Context.eq ctx sel v));
+    (match Session.check_sat s with
+     | Session.Unsat ->
+       fail
+         "arity-forge: mis-ranked select/store treated as array ops -> WRONG-UNSAT \
+          (neither the set_arrays rank check nor the arr.ml consuming-side arity guards \
+          caught it)"
+     | Session.Sat | Session.Unknown -> ())
+;;
+
+(* Sort-forge: the sibling of run_arity_forge for the CORRECT-arity / WRONG-SORT hole
+   (both review legs' reproduction of the same class). Register select/store canonical
+   names for (index=Index, element=Element) but mint them at rank arity 2/3 with the index
+   slot BOOL instead of Index. An arity-only check passes them; the sort-agnostic
+   congruence engine then relates the Bool "index" terms and read-over-write fires ->
+   WRONG-UNSAT (true answer Sat — these are ordinary uninterpreted functions). Caught by
+   the full-signature set_arrays check ([Rank.equal] against [canonical_rank]). Union
+   semantics: passes iff set_arrays raises OR the query is not-Unsat; RED at the
+   arity-only tip. *)
+let run_sort_forge () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let minter = Session.parse_minter s in
+  let index = Sort.uninterpreted (Session.declare_sort s "Index") in
+  let element = Sort.uninterpreted (Session.declare_sort s "Element") in
+  let arr_sort = Sort.array_ ~index ~element in
+  let sel_name = Array_defs.op_symbol_name Array_defs.Select ~index ~element in
+  let sto_name = Array_defs.op_symbol_name Array_defs.Store ~index ~element in
+  (* correct arity (2 / 3), WRONG index-slot sort: Bool instead of Index *)
+  let sel_b =
+    Internal_minter.mint minter sel_name (Rank.create [ arr_sort; Sort.bool ] element)
+  in
+  let sto_b =
+    Internal_minter.mint
+      minter
+      sto_name
+      (Rank.create [ arr_sort; Sort.bool; element ] arr_sort)
+  in
+  let defs =
+    Array_defs.add
+      (Array_defs.add Array_defs.empty sel_b Array_defs.Select ~index ~element)
+      sto_b
+      Array_defs.Store
+      ~index
+      ~element
+  in
+  incr checks;
+  match Session.set_arrays s defs with
+  | exception Invalid_argument _ -> () (* full-signature door caught the wrong-sort op *)
+  | () ->
+    let a = Context.const ctx (Session.declare_const s "a" arr_sort) in
+    let b = Context.const ctx (Session.declare_const s "b" Sort.bool) in
+    let v = Context.const ctx (Session.declare_const s "v" element) in
+    let sto = Context.app ctx sto_b [ a; b; v ] in
+    let sel = Context.app ctx sel_b [ sto; b ] in
+    Session.assert_term s (Context.not_ ctx (Context.eq ctx sel v));
+    (match Session.check_sat s with
+     | Session.Unsat ->
+       fail
+         "sort-forge: right-arity/wrong-sort select/store treated as array ops -> \
+          WRONG-UNSAT (arity check is insufficient; the door must compare full \
+          signatures)"
+     | Session.Sat | Session.Unknown -> ())
+;;
+
+(* Write-once reserved ranks (codex timing residual): even a full-signature door validates
+   the registry ONCE; a retained minter could then re-mint an already-validated op at a
+   different (wrong-sort) rank, which [Context.app] would honour. Env.declare_reserved now
+   refuses to CHANGE an existing reserved rank. Re-declaring the identical rank stays
+   idempotent; re-declaring a different rank must raise. *)
+let run_remint_forge () =
+  let s = Session.create () in
+  let minter = Session.parse_minter s in
+  let index = Sort.uninterpreted (Session.declare_sort s "Index") in
+  let element = Sort.uninterpreted (Session.declare_sort s "Element") in
+  let arr_sort = Sort.array_ ~index ~element in
+  let sel_name = Array_defs.op_symbol_name Array_defs.Select ~index ~element in
+  let canonical = Rank.create [ arr_sort; index ] element in
+  let (_ : Oxsmt_core.Symbol.t) = Internal_minter.mint minter sel_name canonical in
+  (* re-declaring the identical rank is idempotent (legitimate) *)
+  incr checks;
+  (match Internal_minter.mint minter sel_name canonical with
+   | (_ : Oxsmt_core.Symbol.t) -> ()
+   | exception e ->
+     fail
+       "remint: identical-rank re-declaration must be idempotent, got %s"
+       (Printexc.to_string e));
+  (* re-minting the SAME name at a DIFFERENT rank must raise *)
+  incr checks;
+  match
+    Internal_minter.mint minter sel_name (Rank.create [ arr_sort; Sort.bool ] element)
+  with
+  | (_ : Oxsmt_core.Symbol.t) ->
     fail
-      "arity-forge: mis-ranked select/store treated as array ops -> WRONG-UNSAT (the \
-       O-MINTER inertness contract requires the consuming-side arity guards in arr.ml)"
-  | Session.Sat | Session.Unknown -> ()
+      "remint: re-declaring a reserved op at a different rank must raise (reserved ranks \
+       are write-once)"
+  | exception Invalid_argument _ -> ()
 ;;
 
 let () =
@@ -202,6 +298,8 @@ let () =
   run_soundness (read_file (Filename.concat dir "arr_storeinv_unsat_stays_unknown.smt2"));
   run_fault_injection (read_file (Filename.concat dir "arr_select_over_store_sat.smt2"));
   run_arity_forge ();
+  run_sort_forge ();
+  run_remint_forge ();
   Printf.printf "Array sat-gate: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

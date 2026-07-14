@@ -13,11 +13,40 @@ type entry =
   ; element : Sort.t
   }
 
-type t = { by_sym : entry Id_map.t }
+(* Value is [(Symbol.t * entry)] rather than just [entry] so the registry can be validated
+   against the environment ({!validate_ranks}) — that check needs the [Symbol.t] to look
+   up the recorded rank, and the [int] key alone cannot be turned back into a [Symbol.t]. *)
+type t = { by_sym : (Symbol.t * entry) Id_map.t }
 
 let empty = { by_sym = Id_map.empty }
 let is_empty t = Id_map.is_empty t.by_sym
 let id (s : Symbol.t) = (s :> int)
+
+(* The canonical FULL rank an operator of this role over (index, element) must have:
+   [Select : (Array(i,e), i) -> e], [Store : (Array(i,e), i, e) -> Array(i,e)]. Used to
+   validate a registered symbol's actual environment rank ({!validate_ranks}) — arity
+   alone is not enough: an op minted at the right arity but WRONG SORTS also passes to the
+   sort-agnostic congruence engine and yields a wrong verdict. *)
+let canonical_rank role ~index ~element =
+  let arr = Sort.array_ ~index ~element in
+  match role with
+  | Select -> Rank.create [ arr; index ] element
+  | Store -> Rank.create [ arr; index; element ] arr
+;;
+
+(* Full-signature equality of two ranks — same codomain and same domain sorts in order.
+   Compared inline off [Rank.t]'s public record ([rank.mli] exposes [domain]/[codomain])
+   so this touches no frozen interface. *)
+let rank_matches (a : Rank.t) (b : Rank.t) =
+  Sort.equal a.Rank.codomain b.Rank.codomain
+  && Iarr.length a.Rank.domain = Iarr.length b.Rank.domain
+  &&
+  let rec loop i =
+    i = Iarr.length a.Rank.domain
+    || (Sort.equal (Iarr.get a.Rank.domain i) (Iarr.get b.Rank.domain i) && loop (i + 1))
+  in
+  loop 0
+;;
 
 (* A deterministic string identity for a sort. Distinct sorts yield distinct keys, so the
    generated operator name is unique per instantiation. *)
@@ -93,13 +122,49 @@ let add t sym role ~index ~element =
          canonical);
   let entry = { role; index; element } in
   match Id_map.find_opt (id sym) t.by_sym with
-  | Some existing ->
+  | Some (_, existing) ->
     (* Idempotent on the identical entry; a genuine role/sort conflict is a front-end
        construction bug (a symbol is minted once per (role, index, element)). *)
     if entry_equal existing entry
     then t
     else invalid_arg "Array_defs: symbol already registered in a conflicting role"
-  | None -> { by_sym = Id_map.add (id sym) entry t.by_sym }
+  | None -> { by_sym = Id_map.add (id sym) (sym, entry) t.by_sym }
 ;;
 
-let role_of_sym t sym = Id_map.find_opt (id sym) t.by_sym
+let role_of_sym t sym = Option.map snd (Id_map.find_opt (id sym) t.by_sym)
+
+(* Cross-check every registered operator's ACTUAL rank (looked up via [rank_of], which the
+   caller backs with the session {!Env}) against the canonical FULL SIGNATURE for its role
+   and sorts. The name-only check in [add] cannot catch this: [op_symbol_name] encodes the
+   (role, index, element) but not the rank, so a caller can mint a canonical
+   [.oxsmt.arr.*] name at the WRONG rank (e.g. via {!Internal_minter.mint}, whose admit
+   gate is name-shape only) and register it. Arity agreement alone is NOT sufficient: an
+   op minted at the right arity but WRONG argument/result SORTS (e.g. a select whose index
+   argument is [Bool]) also flows into the sort-agnostic congruence engine, so the ROW
+   rules would relate sort-mismatched terms — a wrong verdict. Requiring a full-signature
+   [rank_matches] against [canonical_rank] closes both. Raises [Invalid_argument] on a
+   disagreeing or missing rank. Mirrors the bitvector theory's rank-agreement discipline;
+   the consuming-side arity guards in the arrays theory are the (arity-only) second layer. *)
+let validate_ranks t ~(rank_of : Symbol.t -> Rank.t option) =
+  Id_map.iter
+    (fun _ (sym, entry) ->
+      let want = canonical_rank entry.role ~index:entry.index ~element:entry.element in
+      match rank_of sym with
+      | Some r when rank_matches r want -> ()
+      | Some _ ->
+        invalid_arg
+          (Printf.sprintf
+             "Array_defs.validate_ranks: %s registered as %s does not have the canonical \
+              rank for its index/element sorts (full-signature disagreement)"
+             (Symbol.name sym)
+             (match entry.role with
+              | Select -> "select"
+              | Store -> "store"))
+      | None ->
+        invalid_arg
+          (Printf.sprintf
+             "Array_defs.validate_ranks: registered operator %s has no rank in the \
+              environment"
+             (Symbol.name sym)))
+    t.by_sym
+;;

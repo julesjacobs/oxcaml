@@ -75,6 +75,19 @@ let create_with_cap () =
 
 let create () = fst (create_with_cap ())
 
+(* Full-signature rank equality, compared inline off [Rank.t]'s public record so the
+   write-once check below needs no addition to the frozen [rank.mli]. *)
+let same_rank (a : Rank.t) (b : Rank.t) =
+  Sort.equal a.Rank.codomain b.Rank.codomain
+  && Iarr.length a.Rank.domain = Iarr.length b.Rank.domain
+  &&
+  let rec loop i =
+    i = Iarr.length a.Rank.domain
+    || (Sort.equal (Iarr.get a.Rank.domain i) (Iarr.get b.Rank.domain i) && loop (i + 1))
+  in
+  loop 0
+;;
+
 let declare_reserved cap t name rank =
   if cap <> t.id
   then invalid_arg "Env.declare_reserved: capability does not match this env";
@@ -83,7 +96,23 @@ let declare_reserved cap t name rank =
     invalid_arg
       (Printf.sprintf "Env.declare_reserved: %s is not a reserved (.oxsmt.*) name" name);
   let sym = Symbol.intern name in
-  Hashtbl.replace t.ranks sym rank;
+  (* WRITE-ONCE: a reserved symbol's rank is fixed at first declaration. Re-declaring the
+     IDENTICAL rank is idempotent (legitimate: the parser and the arrays theory can each
+     mint the same canonical op name once, at the same canonical rank). CHANGING an
+     existing reserved rank is refused: otherwise a retained minter could re-mint an
+     already-validated operator at a different (wrong-sort) rank AFTER a consumer
+     validated the registry — the [Context.app] arity check reads the latest rank, so the
+     theory would then apply read-over-write to a sort-mismatched term. This makes the
+     rank a fact the consuming side can trust for the whole session, not just at
+     validation time. *)
+  (match Hashtbl.find_opt t.ranks sym with
+   | Some existing when not (same_rank existing rank) ->
+     invalid_arg
+       (Printf.sprintf
+          "Env.declare_reserved: %s already declared with a different rank (reserved \
+           ranks are write-once)"
+          name)
+   | _ -> Hashtbl.replace t.ranks sym rank);
   sym
 ;;
 

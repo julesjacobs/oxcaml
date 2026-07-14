@@ -86,3 +86,16 @@ val add : t -> Symbol.t -> role -> index:Sort.t -> element:Sort.t -> t
     symbol; [None] otherwise. This is how the theory answers "is this [App] head an array
     operator, and over which sorts". *)
 val role_of_sym : t -> Symbol.t -> entry option
+
+(** [validate_ranks t ~rank_of] raises [Invalid_argument] if any registered operator's
+    actual rank (via [rank_of], which the caller backs with the session {!Env}) disagrees
+    with the canonical FULL SIGNATURE for its role and (index, element) sorts, or has no
+    rank. Defence in depth against a caller registering a canonical [.oxsmt.arr.*] NAME
+    minted at the wrong rank: [add] validates the name (which encodes role and sorts but
+    not the rank itself) but not the rank, so the arrays theory could otherwise treat a
+    wrong-arity OR wrong-sort uninterpreted function as an operator and, since the
+    congruence engine is sort-agnostic, derive a wrong verdict. Full-signature (not just
+    arity) is required: a right-arity/wrong-sort op passes an arity check but still
+    corrupts ROW reasoning. Called at the registry-install door
+    ({!Oxsmt_interface.Session.set_arrays}). *)
+val validate_ranks : t -> rank_of:(Symbol.t -> Rank.t option) -> unit

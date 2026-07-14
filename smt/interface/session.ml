@@ -366,6 +366,16 @@ let uses_arrays t = t.has_arrays
    arrays theory at its first theory-atom intern. Must precede [assert_term]. A non-empty
    registry also arms the v1 sat-degrade ([has_arrays]). *)
 let set_arrays t defs =
+  (* Defence in depth: reject a registry whose operators were minted at a non-canonical
+     rank (a canonical [.oxsmt.arr.*] NAME can be minted at any arity via the internal
+     minter, whose admit gate is name-shape only, and [Array_defs.add] validates the name
+     but not the rank). Without this the arrays theory could apply read-over-write to an
+     extended-arity uninterpreted function — a wrong verdict. The arrays theory's
+     consuming-side arity guards are the second layer. *)
+  Oxsmt_core.Array_defs.validate_ranks defs ~rank_of:(fun sym ->
+    match Oxsmt_core.Env.rank t.env sym with
+    | r -> Some r
+    | exception Not_found -> None);
   t.array_registry := defs;
   if not (Oxsmt_core.Array_defs.is_empty defs) then t.has_arrays <- true
 ;;
