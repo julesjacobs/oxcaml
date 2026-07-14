@@ -1446,13 +1446,30 @@ let save_model t =
     then Dynarray.set t.saved_model (var_of_lit piv) (if sign_of_lit piv then 1 else -1)
   done;
   (* ELS reconstruction (A10): definitional [x := value(rep)]. Runs AFTER the flip stack
-     so every representative's value is final (a rep is never itself ELS-eliminated — no
-     chain — and if it was later BVE-eliminated its flip entry above already fixed it).
-     Empty map unless ELS eliminated something. *)
+     so every representative's value is final (if a rep was later BVE-eliminated its flip
+     entry above already fixed it). Empty map unless ELS eliminated something.
+
+     Chain resolution: [t.equiv] PERSISTS across solves, so a representative chosen in one
+     solve (recording [x := +r]) can itself be ELS-eliminated in a later solve (recording
+     [r := +s]) — a chain [x → r → s]. A single-hop read under this unordered
+     [Hashtbl.iter] would, if it visited [x] before [r], read [r]'s pre-reconstruction
+     default rather than its resolved value, yielding an order-dependent wrong model. So
+     resolve each var to its ULTIMATE representative literal before reading. TERMINATES:
+     an ELS target is a var that is not-yet-eliminated when the entry is recorded, and
+     elimination is monotone (an eliminated var's clauses are gone from later rounds'
+     implication graph, so it is never a later round's representative), so the walk visits
+     strictly-distinct keys and ends at a var with no [equiv] entry (a true
+     representative, whose snapshot value is final). *)
+  let rec resolve l =
+    match Hashtbl.find_opt t.equiv (var_of_lit l) with
+    | None -> l
+    | Some m -> resolve (if sign_of_lit l then m else neg_lit m)
+  in
   if Hashtbl.length t.equiv > 0
   then
     Hashtbl.iter
-      (fun x l -> Dynarray.set t.saved_model x (if saved_lit_val t l = 1 then 1 else -1))
+      (fun x l ->
+         Dynarray.set t.saved_model x (if saved_lit_val t (resolve l) = 1 then 1 else -1))
       t.equiv
 ;;
 
@@ -2093,10 +2110,17 @@ let failed_literal_probing t =
 
    Soundness: [x ↔ rep] holds in the formula, so substituting is equivalence-preserving;
    the eliminated [x] is reconstructed definitionally ([x := value(rep)], via {!t.equiv},
-   applied after the flip stack in [save_model] — reps are never themselves
-   ELS-eliminated, so there is no reconstruction chain). Only ELIMINABLE vars are
-   substituted (frozen theory/model vars stay), and no trail is manipulated (unlike
-   vivification) so there is NO theory-seam interaction — hence this runs on every path.
+   applied after the flip stack in [save_model]). Within a round a representative is never
+   itself ELS-eliminated, but [t.equiv] persists across rounds/solves, so a representative
+   chosen in one round can be ELS-eliminated in a later one — a cross-round chain that
+   [save_model] resolves to a fixpoint (see there). Only ELIMINABLE vars are substituted
+   (frozen theory/model vars stay). ELS's only trail effect is enqueuing FORCED level-0
+   units (a rewritten clause collapsing to a unit); it never opens a decision level or
+   backtracks (unlike vivification / failed-literal probing), so there is no
+   assume-under-a- plugged-theory hazard and it runs on every path. Those enqueues do fire
+   [on_assign] into any plugged theory seam — benign, exactly as a level-0 propagation
+   would, and ELS never substitutes a frozen theory-atom var — and they are propagated to
+   closure at the tail of [run_round] before any decision-level-opening component runs.
 
    To keep the round's [ok] invariant simple, a DRY RUN first classifies the rewritten
    clauses; if any would become the EMPTY clause or a level-0-conflicting unit (i.e. the
@@ -2281,11 +2305,12 @@ let els_pass t work =
    inprocessing. It runs a SEQUENCE of simplification COMPONENTS over a working copy of
    the IRREDUNDANT (original) clauses —
    [equivalent-literal substitution; subsumption; self-subsuming strengthening; bounded variable elimination]
-   — followed by learned-clause VIVIFICATION over the learned DB (no-theory path only). It
-   is architected as an extensible list so the one remaining charter component
-   (failed-literal probing) slots in without reshaping the loop. Refs: Järvisalo, Heule &
-   Biere, "Inprocessing Rules" (IJCAR 2012); Fazekas, Biere & Scholl, "Incremental
-   Inprocessing SAT Solving" (SAT 2019).
+   — then, after rebuilding the clause DB and closing the level-0 trail under BCP, runs
+   the two decision-level-opening components on the learned DB (no-theory path only):
+   learned-clause VIVIFICATION and failed-literal PROBING. The full charter component list
+   is now implemented; the loop is still an extensible SEQUENCE (a further component slots
+   in without reshaping it). Refs: Järvisalo, Heule & Biere, "Inprocessing Rules" (IJCAR
+   2012); Fazekas, Biere & Scholl, "Incremental Inprocessing SAT Solving" (SAT 2019).
 
    {b Learn/forget discipline (the reason it is sound with learned clauses present).}
    Elimination runs on the irredundant set only. Learned clauses are REDUNDANT (entailed
@@ -2522,6 +2547,26 @@ let run_round t =
             t.learnts;
           Dynarray.clear t.learnts;
           Dynarray.append t.learnts kept);
+        (* ---- Close the level-0 trail under BCP before any component that opens a
+           decision level (vivification, failed-literal probing). [els_pass] may have
+           enqueued forced units (equivalent-literal substitution rewrote an original
+           clause to a unit) WITHOUT propagating them. A downstream component uses the
+           assume / [propagate] / [cancel_until 0] pattern; run against the stale [qhead]
+           it would process those pending units first, mis-attribute the level-0 conflict
+           they cause to its own probe/assume decision, and then discard it —
+           [cancel_until 0] resets [qhead] PAST the level-0 units, orphaning a real
+           conflict (⇒ wrong Sat on an Unsat formula; the adjudication gadget). Establish
+           the round invariant here: the level-0 unit closure is fully propagated, and a
+           level-0 conflict concludes Unsat ([t.ok <- false]; [solve]/[go] finish Unsat
+           when [t.ok] is false). The [qhead] still points at the first ELS-enqueued unit
+           (the round-entry [propagate] advanced it only to the pre-ELS trail end, and
+           nothing since touches the real trail), and the clause DB was just rebuilt, so
+           this propagates the units against the current (substituted) clauses.
+           Vivification and FLP below are both guarded by [t.ok], so a conflict here makes
+           them no-ops. ---- *)
+        (match propagate t with
+         | Some _ -> t.ok <- false
+         | None -> ());
         (* ---- Vivification component: shorten learned clauses by re-propagation. Runs
            only on the pure-propositional / bit-blasted path (no theory seam to drive),
            over a snapshot of the current learned DB, effort-bounded. A shortened clause
@@ -2662,19 +2707,24 @@ let solve ?(assumptions = []) t =
           run_round t;
           t.inproc_next <- t.conflicts + t.inproc_interval;
           t.inproc_interval <- t.inproc_interval * 2);
-        (* a round component (ELS/FLP) can expose unsat by setting [t.ok] false; conclude
-           immediately rather than search on to a spurious model *)
+        (* a round component can expose unsat by setting [t.ok] false — failed-literal
+           probing on a forced-unit conflict, or the level-0 BCP closure of ELS's forced
+           units (ELS itself never sets it: its dry run skips substitution that would
+           expose unsat). Conclude immediately rather than search on to a spurious model. *)
         if not t.ok then Unsat else go (restart_no + 1)
       | R_sat -> Sat
       | R_unsat -> Unsat
     in
-    (* solve-entry [preprocess] can also expose unsat (level-0 FLP/ELS); conclude if so. *)
+    (* solve-entry [preprocess] can also expose unsat (failed-literal probing, or the
+       level-0 closure of ELS's forced units); conclude if so. *)
     let r = if not t.ok then Unsat else go 0 in
     cancel_until t 0;
     (* A10 elimination-stats side channel (measurement only): emit cumulative counts to
-       stderr when OXSMT_SATPRE_STATS is truthy, for the A/B per-family report. Guarded so
-       an unset env costs one [getenv_opt] and no output — never on the pure-core path. *)
-    (match Sys.getenv_opt "OXSMT_SATPRE_STATS" with
+       stderr when OXSMT_SATPRE_STATS is truthy, for the A/B per-family report. Gated on
+       [t.satpre] as well, so with preprocessing off the line is never emitted (nothing to
+       measure); an unset env costs one [getenv_opt] and no output — never on the
+       pure-core path. *)
+    (match if t.satpre then Sys.getenv_opt "OXSMT_SATPRE_STATS" else None with
      | Some ("1" | "true" | "yes" | "on") ->
        Printf.eprintf
          "satpre-stats elim_vars=%d deleted_clauses=%d resolvents=%d vivified=%d els=%d \
