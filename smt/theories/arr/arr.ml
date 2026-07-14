@@ -343,7 +343,29 @@ let assert_lit t lit =
    (store,index) pair — is ever created. The introduction walks up a store chain across
    rounds: reading a base introduces a read of the store over it, which is itself the base
    of the next store, and so on. *)
+(* Per-call index: array e-class id -> the registered selects whose array argument is in
+   that class. The ROW passes below relate a select [select arr j] to a store
+   [store base i v] exactly when [arr] is congruent to the store's own array ([row_round])
+   or to its base ([ensure_store_reads]) — i.e. when [class_of arr] equals [class_of st]
+   resp. [class_of base]. Grouping the selects by [class_of arr] once (O(selects)) lets
+   each store look up only the relevant selects instead of scanning the full selects x
+   stores product, which is the dominant per-decision cost on deep store chains (~130
+   selects x ~22 stores). Rebuilt each call because e-classes change as the search merges
+   classes. *)
+let selects_by_arr_class t : (int, Term.t) Hashtbl.t =
+  let idx = Hashtbl.create 64 in
+  List.iter
+    (fun sel ->
+       match head_args sel with
+       | Some (_, [| arr; _j |]) when role_of t sel <> None ->
+         Hashtbl.add idx (Euf.class_of t.engine arr) sel
+       | _ -> ())
+    t.select_terms;
+  idx
+;;
+
 let ensure_store_reads t ~changed =
+  let idx = selects_by_arr_class t in
   List.iter
     (fun st ->
        match head_args st with
@@ -351,11 +373,12 @@ let ensure_store_reads t ~changed =
          when match role_of t st with
               | Some { Defs.role = Defs.Store; _ } -> true
               | _ -> false ->
+         (* selects on an array congruent to this store's base — [Euf.are_equal arr base]
+           is [class_of arr = class_of base], which is exactly the index bucket. *)
          List.iter
            (fun sel ->
               match head_args sel with
-              | Some (_, [| arr; j |])
-                when role_of t sel <> None && Euf.are_equal t.engine arr base ->
+              | Some (_, [| _arr; j |]) ->
                 let key = st.Term.tag, j.Term.tag in
                 if not (Hashtbl.mem t.ensured_reads key)
                 then (
@@ -364,29 +387,36 @@ let ensure_store_reads t ~changed =
                   | Some _ -> changed := true
                   | None -> ())
               | _ -> ())
-           t.select_terms
+           (Hashtbl.find_all idx (Euf.class_of t.engine base))
        | _ -> ())
     t.store_terms
 ;;
 
-(* One ROW pass: for each select term [sel = select arr j] and each store term
-   [st = store base i v] with [arr] congruent to [st], propagate the ENTAILED ROW
-   equality. Only the definite direction ([i = j] known ⇒ sel = v) is propagated here; the
-   open case is deferred to a [Split] at [Final] ([row_split]). Sets [changed] on a
-   propagation. Never reports a conflict directly (Euf.check does). *)
+(* One ROW pass: for each store [st = store base i v] and each select [sel = select arr j]
+   with [arr] congruent to [st], propagate the ENTAILED ROW equality. Only the definite
+   direction ([i = j] known ⇒ sel = v) is propagated here; the open case is deferred to a
+   [Split] at [Final] ([row_split]). Sets [changed] on a propagation. Never reports a
+   conflict directly (Euf.check does).
+
+   Iterating stores-outer over the [selects_by_arr_class] index (instead of the old
+   selects x stores product) is order-insensitive and fixpoint-preserving: [saturate]
+   re-runs to a fixpoint on [changed], so a propagation that a within-pass merge would
+   newly enable is caught on the next pass (which rebuilds the index); and a pass that
+   propagates nothing did so against a valid index (no merge happened), i.e. it has
+   genuinely converged. The set of ROW consequences at the fixpoint is unchanged. *)
 let row_round t ~changed =
+  let idx = selects_by_arr_class t in
   List.iter
-    (fun sel ->
-       match head_args sel with
-       | Some (_, [| arr; j |]) when role_of t sel <> None ->
+    (fun st ->
+       match head_args st with
+       | Some (_, [| _base; i; v |])
+         when match role_of t st with
+              | Some { Defs.role = Defs.Store; _ } -> true
+              | _ -> false ->
          List.iter
-           (fun st ->
-              match head_args st with
-              | Some (_, [| base; i; v |])
-                when (match role_of t st with
-                      | Some { Defs.role = Defs.Store; _ } -> true
-                      | _ -> false)
-                     && Euf.are_equal t.engine arr st ->
+           (fun sel ->
+              match head_args sel with
+              | Some (_, [| arr; j |]) ->
                 (* definite ROW1: i = j entailed ⇒ sel = v *)
                 if Euf.are_equal t.engine i j && not (Euf.are_equal t.engine sel v)
                 then (
@@ -397,12 +427,11 @@ let row_round t ~changed =
                             (Euf.explain t.engine arr st @ Euf.explain t.engine i j)))
                   in
                   Euf.assert_eq t.engine ~premise:prem sel v;
-                  changed := true);
-                ignore base
+                  changed := true)
               | _ -> ())
-           t.store_terms
+           (Hashtbl.find_all idx (Euf.class_of t.engine st))
        | _ -> ())
-    t.select_terms
+    t.store_terms
 ;;
 
 (* Saturate ROW definite propagations to a fixpoint, interleaving [Euf.check] (a merge can
