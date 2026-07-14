@@ -63,3 +63,14 @@ verdict changes on well-formed input). Frozen at the tip of `task/env-redeclare-
 Single-leg review per the lead. Ends the registry-hole chase the symmetry lane surfaced:
 two pre-existing DT soundness gaps (set_datatypes validation, declare_fun write-once) found
 and closed.
+
+## Pre-ON belt (folded in): symmetry breaking skips datatype-using sessions
+
+Also on the symmetry pre-ON checklist (codex): a one-line `&& not (uses_datatypes t)` on the
+symmetry-breaking emission guard (session.ml `assert_presolved`). This DECOUPLES symmetry
+soundness from datatype-registry / Env well-formedness entirely — symmetry never emits on a
+datatype-using session. B3 already excludes datatype-sorted candidates, so this only skips the
+free (uninterpreted) constants of a mixed QF_UFDT problem; the measured win is pure QF_UF (no
+datatypes), so it costs nothing (pure-QF_UF `uses_datatypes` is false — the guard is a no-op
+there, win byte-identical). Gates re-run green: make test / symbreak-test (15) / wiring-test
+(211) / check-frozen all exit 0. Committed separately on this branch.

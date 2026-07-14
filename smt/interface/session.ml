@@ -938,6 +938,13 @@ let assert_presolved t terms =
          | _ -> false)
         && (not t.lemmas_registered)
         && no_prior_assertions
+        (* Belt (task #63 pre-ON): decouple symmetry breaking from the datatype registry /
+           Env well-formedness entirely — never emit on a datatype-using session. B3
+           already excludes datatype-sorted candidates, so this only skips the free
+           (uninterpreted) constants of a mixed QF_UFDT problem; the measured win is pure
+           QF_UF (no datatypes), so this costs nothing while removing any dependence of
+           symmetry soundness on DT registry correctness. *)
+        && not (uses_datatypes t)
       in
       if symbreak_enabled t && formula_is_exactly_this_batch
       then (
