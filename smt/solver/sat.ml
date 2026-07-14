@@ -243,6 +243,7 @@ type t =
   ; mutable stat_resolvents : int
   ; mutable stat_vivified : int
   ; mutable stat_els : int
+  ; mutable stat_flp : int
   ; chrono : bool
       (* Chronological backtracking (task #41 Stage 1; Nadel–Ryvchin SAT'18, Möhle–Biere
          SAT'19). Read once from [OXSMT_CHRONO] at [create]; [false] (default) ⇒ every CB
@@ -391,6 +392,7 @@ let create () =
   ; stat_resolvents = 0
   ; stat_vivified = 0
   ; stat_els = 0
+  ; stat_flp = 0
   ; chrono = chrono_from_env ()
   ; chrono_threshold = chrono_threshold_from_env ()
   }
@@ -2026,6 +2028,59 @@ let vivify_learnt t c =
   else None
 ;;
 
+let flp_probe_budget = 500 (* variables probed per round (effort bound) *)
+
+(* Failed-literal probing, the last cheap charter component. For a candidate literal [l]:
+   assume it (a decision) and BCP; if that conflicts then [F ∧ l] is unsat, so [¬l] is
+   entailed and is enqueued as a level-0 unit and propagated. Reuses the exact
+   assume/propagate/[cancel_until] trail machinery of {!vivify_learnt} (the
+   team-lead-noted overlap). Derives FORCED units — the variable is assigned, not
+   eliminated — so there is NO reconstruction. Gated to [t.theory = None] by the caller
+   (assuming a literal fires [on_assign] into a plugged theory seam, the same reason
+   vivification is gated), and effort-bounded. On a forced unit whose level-0 propagation
+   conflicts, the formula is unsat: set [t.ok] false — the round's callers ([solve]/[go])
+   conclude [Unsat]. Ref: the classic failed-literal / probing preprocessing (e.g. Le
+   Berre; Lynce/Marques-Silva). *)
+let failed_literal_probing t =
+  (* returns [true] if assuming [lit] conflicts under BCP (⇒ [¬lit] entailed); restores L0 *)
+  let probe lit =
+    new_decision_level t;
+    unchecked_enqueue t lit Decision;
+    let c = propagate t in
+    cancel_until t 0;
+    c <> None
+  in
+  let budget = ref flp_probe_budget in
+  let v = ref 0 in
+  while !budget > 0 && !v < t.nvars && t.ok do
+    let vv = !v in
+    incr v;
+    if Dynarray.get t.assigns vv = 0 && not (Dynarray.get t.eliminated vv)
+    then (
+      decr budget;
+      (* a forced literal to enqueue at level 0, if either polarity is a failed literal *)
+      let forced =
+        if probe (pos vv)
+        then Some (neg vv)
+        else if (* re-check: probing [pos vv] enqueued nothing (it restored L0), so [vv]
+                   is still free unless a prior iteration's forced unit propagated onto it *)
+                Dynarray.get t.assigns vv = 0 && probe (neg vv)
+        then Some (pos vv)
+        else None
+      in
+      match forced with
+      | None -> ()
+      | Some u ->
+        if lit_val t u = 0
+        then (
+          unchecked_enqueue t u Decision;
+          t.stat_flp <- t.stat_flp + 1);
+        (match propagate t with
+         | Some _ -> t.ok <- false (* the forced unit closes a level-0 conflict: unsat *)
+         | None -> ()))
+  done
+;;
+
 (* Equivalent-literal substitution (ELS), a purely propositional round component. Literals
    in one strongly connected component of the BINARY-IMPLICATION GRAPH (edges [¬a → b] and
    [¬b → a] for each binary clause [a ∨ b]) are all logically equivalent; substituting
@@ -2504,7 +2559,10 @@ let run_round t =
             (fun c -> if not c.deleted then Dynarray.add_last kept c)
             t.learnts;
           Dynarray.clear t.learnts;
-          Dynarray.append t.learnts kept)))
+          Dynarray.append t.learnts kept);
+        (* Failed-literal probing component (no-theory path only; derives forced level-0
+           units, may set [t.ok] false on an exposed conflict — callers conclude Unsat). *)
+        if t.theory = None && t.ok then failed_literal_probing t))
 ;;
 
 (* Solve-entry preprocessing (Phase 1): one round at decision level 0 before search. *)
@@ -2604,11 +2662,14 @@ let solve ?(assumptions = []) t =
           run_round t;
           t.inproc_next <- t.conflicts + t.inproc_interval;
           t.inproc_interval <- t.inproc_interval * 2);
-        go (restart_no + 1)
+        (* a round component (ELS/FLP) can expose unsat by setting [t.ok] false; conclude
+           immediately rather than search on to a spurious model *)
+        if not t.ok then Unsat else go (restart_no + 1)
       | R_sat -> Sat
       | R_unsat -> Unsat
     in
-    let r = go 0 in
+    (* solve-entry [preprocess] can also expose unsat (level-0 FLP/ELS); conclude if so. *)
+    let r = if not t.ok then Unsat else go 0 in
     cancel_until t 0;
     (* A10 elimination-stats side channel (measurement only): emit cumulative counts to
        stderr when OXSMT_SATPRE_STATS is truthy, for the A/B per-family report. Guarded so
@@ -2616,13 +2677,15 @@ let solve ?(assumptions = []) t =
     (match Sys.getenv_opt "OXSMT_SATPRE_STATS" with
      | Some ("1" | "true" | "yes" | "on") ->
        Printf.eprintf
-         "satpre-stats elim_vars=%d deleted_clauses=%d resolvents=%d vivified=%d els=%d\n\
+         "satpre-stats elim_vars=%d deleted_clauses=%d resolvents=%d vivified=%d els=%d \
+          flp=%d\n\
           %!"
          t.stat_elim_vars
          t.stat_deleted_clauses
          t.stat_resolvents
          t.stat_vivified
          t.stat_els
+         t.stat_flp
      | Some _ | None -> ());
     r)
 ;;

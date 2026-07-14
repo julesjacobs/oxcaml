@@ -283,12 +283,37 @@ let test_els_unsat () =
   check "els: x↔y with x=true,y=false stays unsat" (Sat.solve s = Sat.Unsat)
 ;;
 
+(* ---- FAILED-LITERAL PROBING. Assuming x(1) triggers (¬x∨y)∧(¬x∨¬y) ⇒ y and ¬y ⇒
+   conflict, so x is a FAILED literal and ¬x is entailed; FLP enqueues x=false at level 0.
+   The (x∨z) clause then forces z=true. A broken FLP that forced x=true instead would
+   violate (¬x∨y)/(¬x∨¬y). So model.(0)=false + model satisfies originals discriminate.
+   ---- *)
+let test_flp_sat () =
+  let clauses = [ [ -1; 2 ]; [ -1; -2 ] (* x failed ⇒ ¬x *); [ 1; 3 ] (* x ∨ z *) ] in
+  let s = build 3 ~eliminable:[] clauses in
+  let r = Sat.solve s in
+  let model = Sat.model s in
+  check "flp: sat" (r = Sat.Sat);
+  check "flp: x forced false by probing" (r = Sat.Sat && not model.(0));
+  check "flp: model satisfies all original clauses" (r = Sat.Sat && all_sat model clauses)
+;;
+
+(* ---- FLP UNSAT: both polarities of x are failed literals (assuming x conflicts via
+   (¬x∨y)(¬x∨¬y); assuming ¬x conflicts via (x∨a)(x∨¬a)) ⇒ unsat. ---- *)
+let test_flp_unsat () =
+  let clauses = [ [ -1; 2 ]; [ -1; -2 ]; [ 1; 4 ]; [ 1; -4 ] ] in
+  let s = build 4 ~eliminable:[] clauses in
+  check "flp: both-polarities-failed stays unsat" (Sat.solve s = Sat.Unsat)
+;;
+
 let () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") ->
     test_firing_fewer_propagations ();
     test_els_sat ();
     test_els_unsat ();
+    test_flp_sat ();
+    test_flp_unsat ();
     test_reconstruction_forced_flip ();
     test_pure_literal ();
     test_unsat_preserved ();
