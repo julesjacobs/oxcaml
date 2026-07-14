@@ -72,6 +72,20 @@ let weq_max_idx =
   | None -> max_int
 ;;
 
+(* Component C (fair (b), the path-confined narrow split): drive the open extensionality
+   witness [k] against the a<->b path store indices one at a time (ROW1-style, restricted
+   to the path stores), instead of the wide [k = j1 ∨ ... ∨ k = jm] clause or blind
+   [row_split] over every congruent store. Default ON under [OXSMT_ARR_WEQ]; set
+   [OXSMT_ARR_WEQ_NONARROW] to isolate the propagation half in an A/B. *)
+let weq_narrow_on = not (env_flag "OXSMT_ARR_WEQ_NONARROW")
+
+(* Component A (fair (b), the incremental trigger): skip the whole
+   propagation/narrow-split round at a Final when nothing merged and no array diseq was
+   asserted since the last round — only a new merge or new diseq can enable a new
+   propagation. Set [OXSMT_ARR_WEQ_NOTRIGGER] to run the round every Final (the unfair
+   per-Final rescan) for an A/B on the trigger itself. *)
+let weq_trigger_on = not (env_flag "OXSMT_ARR_WEQ_NOTRIGGER")
+
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a ROW-derived equality carries [P_derived reasons] — the
    trail literals whose conjunction entails the trigger. [P_axiom] is dropped when
@@ -143,7 +157,24 @@ type t =
          still a sound justification; the analyzer likewise only over-counts a candidate.
          Empty unless the graph is on. *)
   ; mutable an_done : bool (* W0.5 analyzer: emit the per-solve summary at most once *)
+  ; mutable an_diseq_stack : (Term.t * Term.t * Lit.t) list list
+    (* Backtrack stack for [an_diseqs] (one saved snapshot per open [push] frame). The
+         W1 propagation is CONFLICT-ONLY — it fires [assert_eq] on a read pair only when
+         the pair is currently entailed-DISTINCT ([an_distinct] finds a live diseq), so
+         the merge refutes the branch and never survives into a SAT model (whose
+         reconstruction it would corrupt — the naive/clause forms' storecomm-SAT ->
+         unknown regression). That gate is sound only if [an_diseqs] is CURRENT: a stale
+         (popped) diseq would let the propagation merge a pair that is no longer distinct,
+         both corrupting the SAT model and (via [weq_read_premise]'s [an_distinct]
+         store-index tests) admitting a stale premise. So [an_diseqs] is trailed here in
+         lockstep with [Euf]/[push]/[pop]. Empty unless the graph is on. *)
   ; mutable weq_fuel : int (* W1 L1: remaining propagation fuel this solve (O7) *)
+  ; mutable weq_dirty : bool
+    (* Component A incremental trigger: [true] iff a merge was folded or an array diseq was
+     asserted since the last propagation round ran, so a re-scan could enable a new
+     propagation. Starts [true] (the first Final must run). Set by [weq_sync] on a
+     non-empty drain, by [assert_lit] on a new array diseq, and by [pop] (state changed);
+     cleared when the round runs. Only meaningful when the graph is on. *)
   }
 
 let max_iters = 1_000_000
@@ -214,7 +245,9 @@ let create ctx env cap reg =
   ; weq
   ; an_diseqs = []
   ; an_done = false
+  ; an_diseq_stack = []
   ; weq_fuel = weq_fuel_cap
+  ; weq_dirty = true
   }
 ;;
 
@@ -390,7 +423,17 @@ let extensionality t lit (a : Term.t) (b : Term.t) =
   | Some (index, _element) ->
     let k = witness_index t a b index in
     (match build_select t a k, build_select t b k with
-     | Some sa, Some sb -> Euf.assert_neq t.engine ~premise:(P_lit lit) sa sb
+     | Some sa, Some sb ->
+       Euf.assert_neq t.engine ~premise:(P_lit lit) sa sb;
+       (* Record the witness read disequality so the weak-equivalence propagation can see
+          the reads are entailed-distinct and fire ONLY as a refutation (conflict-only —
+          never merging reads that would survive into a SAT model and corrupt the array
+          model reconstruction, the known storecomm-SAT failure mode of the naive/clause
+          forms). The lit is the array-diseq lit that justifies the witness diseq. *)
+       if weq_on
+       then (
+         t.an_diseqs <- (sa, sb, lit) :: t.an_diseqs;
+         t.weq_dirty <- true)
      | _ -> ())
 ;;
 
@@ -409,8 +452,14 @@ let assert_lit t lit =
          (Skolemization); it drives ROW to close read-over-write refutations. *)
       extensionality t lit a b;
       (* Record the asserted diseq (array + index) for the graph-based rules: the W0.5
-         analyzer's store-chain closure and the W1 L1 diseq-reachable triggers. *)
-      if weq_on then t.an_diseqs <- (a, b, lit) :: t.an_diseqs)
+         analyzer's store-chain closure and the W1 L1 diseq-reachable triggers. A new
+         array diseq is a fresh propagation trigger (component A); a new index diseq can
+         close an open path store-index test (an_distinct), likewise enabling a
+         propagation. *)
+      if weq_on
+      then (
+        t.an_diseqs <- (a, b, lit) :: t.an_diseqs;
+        t.weq_dirty <- true))
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -731,9 +780,17 @@ let weq_sync t =
   match t.weq with
   | None -> ()
   | Some (g, cursor) ->
-    List.iter
-      (fun (ev : Euf.merge_event) -> Weq_graph.on_merge g ev.Fabric.kept ev.Fabric.merged)
-      (Euf.drain_merges t.engine cursor)
+    (match Euf.drain_merges t.engine cursor with
+     | [] -> ()
+     | _ :: _ as evs ->
+       (* a class union since the last drain — fold it into the graph and mark the
+          propagation trigger dirty (component A): a new merge can complete a path, make
+          two read indices congruent, or bring a read's array into an endpoint class. *)
+       t.weq_dirty <- true;
+       List.iter
+         (fun (ev : Euf.merge_event) ->
+            Weq_graph.on_merge g ev.Fabric.kept ev.Fabric.merged)
+         evs)
 ;;
 
 (* The admissible (stably-infinite-index) array terms the self-check samples: store terms,
@@ -943,21 +1000,64 @@ let weq_read_parts t (sel : Term.t) : (Term.t * Term.t) option =
   | _ -> None
 ;;
 
-(* PREMISE for propagating [select(x1,i1) = select(x2,i2)] over the weak-equivalence
-   [path] from x1 to x2, when the whole path condition is ENTAILED (ADR §4 as THEORY
-   PROPAGATION, team-lead ruling (b)): the read equality holds GIVEN [i1 = i2], every path
-   Equality-edge [u = v], and [i1 <> jₗ] for every path store index jₗ (ROW2 telescoping).
-   Returns [Some premise-lits] carrying the justification of ALL of those
+(* Distinct store-index terms (term identity — O2, NOT e-class: a by-class dedup drops a
+   congruent-but-distinct store index under an unguarded search-level congruence, a
+   wrong-unsat vector) on [path], the store TERMS on it, and the e-class ids it visits
+   (for the narrow split's path confinement). *)
+let weq_path_info t (path : Weq_graph.edge list)
+  : Term.t list * (int, unit) Hashtbl.t * int
+  =
+  let stores = ref [] in
+  let classes = Hashtbl.create 16 in
+  let idx_seen = Hashtbl.create 16 in
+  let add_class tm = Hashtbl.replace classes (Euf.class_of t.engine tm) () in
+  List.iter
+    (fun (e : Weq_graph.edge) ->
+       match e with
+       | Weq_graph.Store { u; v; store_term; index; _ } ->
+         add_class u;
+         add_class v;
+         stores := store_term :: !stores;
+         if not (Hashtbl.mem idx_seen index.Term.tag)
+         then Hashtbl.replace idx_seen index.Term.tag ()
+       | Weq_graph.Equality { u; v } ->
+         add_class u;
+         add_class v)
+    path;
+  !stores, classes, Hashtbl.length idx_seen
+;;
+
+(* PREMISE for propagating [select(x1,i1) = select(x2,i2)] where [x1] is congruent to path
+   endpoint [a], [x2] to endpoint [b], along the weak-equivalence [path] from [a] to [b],
+   when the whole condition is ENTAILED (ADR §4 as THEORY PROPAGATION, team-lead ruling
+   (b)). The read equality holds GIVEN: [i1 = i2]; the ENDPOINT congruences [x1 = a] and
+   [x2 = b] (O1'(ii) — a search-level array merge bringing a read's array to an endpoint
+   MUST be a premise, else a retract of it is a wrong-unsat, RED #7); every path
+   Equality-edge [u = v] (O1'(iii)); and [i1 <> jₗ] for every path store index jₗ (ROW2
+   telescoping). Returns [Some premise-lits] carrying the justification of ALL of those
    (PREMISE-COMPLETENESS — omitting any is a wrong-unsat vector, the propagation-form of
    the O1' guards), or [None] if any store index test is OPEN (not entailed distinct) or a
-   path Equality edge no longer holds — those cases are left to the split path. Store
-   indices are deduped by TERM identity (O2). *)
-let weq_path_premise t (i1 : Term.t) (i2 : Term.t) (path : Weq_graph.edge list)
+   path Equality edge no longer holds — those cases are left to the narrow split. Store
+   indices deduped by TERM identity (O2). Precondition (caller): [are_equal x1 a],
+   [are_equal x2 b], [are_equal i1 i2]. *)
+let weq_read_premise
+      t
+      ~(x1 : Term.t)
+      ~(i1 : Term.t)
+      ~(x2 : Term.t)
+      ~(i2 : Term.t)
+      ~(a : Term.t)
+      ~(b : Term.t)
+      (path : Weq_graph.edge list)
   : Lit.t list option
   =
   let ok = ref true in
-  (* i1 = i2 is the caller's precondition (congruent-index pair) *)
-  let prem = ref (lits_of_prems (Euf.explain t.engine i1 i2)) in
+  let prem =
+    ref
+      (lits_of_prems (Euf.explain t.engine i1 i2)
+       @ lits_of_prems (Euf.explain t.engine x1 a)
+       @ lits_of_prems (Euf.explain t.engine x2 b))
+  in
   let store_seen = Hashtbl.create 16 in
   List.iter
     (fun (e : Weq_graph.edge) ->
@@ -975,106 +1075,201 @@ let weq_path_premise t (i1 : Term.t) (i2 : Term.t) (path : Weq_graph.edge list)
              Hashtbl.replace store_seen index.Term.tag ();
              match an_distinct t i1 index with
              | Some p -> prem := p @ !prem
-             | None -> ok := false (* open index test: leave to the split path *))))
+             | None -> ok := false (* open index test: leave to the narrow split *))))
     path;
   if !ok then Some (dedup_lits !prem) else None
 ;;
 
-(* W1 L1 as theory PROPAGATION (ruling (b)): for each diseq-reachable congruent-index read
-   pair whose weak-equivalence path is fully ENTAILED (W0.5's common case — 0 open tests
-   on storecomm), ASSERT the read equality into the engine with the path condition as its
-   PREMISE, rather than emitting a wide avoidance clause the SAT solver must re-derive
-   propositionally (which inflated exactly like blind row_split, the measured -108). No
-   permanent memo is needed (a propagation retracts with its premise and re-derives, like
-   [row_round]); [are_equal] skips an already-merged pair, so the round monotonically
-   converges. Fuel (O7) caps total propagations. Sets [changed] on a propagation. Open
-   paths (the fresh extensionality witness index) are left to row_split at W1 / a
-   path-confined narrow split in the follow-up. *)
+(* W1 L1 as theory PROPAGATION (ruling (b)), component B (TARGETED): for each asserted,
+   weakly-equivalent array diseq [(a,b)] take its canonical a->b path and propagate ONLY
+   the refutation-relevant read pairs — a read on [a]'s class ("a-side") against a read on
+   [b]'s class ("b-side") at a congruent index (the extensionality witness reads
+   [select(a,k)]/[select(b,k)] are the primary such pair) — NOT every diseq-reachable
+   congruent pair (that O(reads²) rescan collapsed the naive checkpoint). When the a->b
+   path is fully ENTAILED (all store indices entailed distinct from the read index, all
+   path merges hold — W0.5's common case: 0 open tests on storecomm) ASSERT the read
+   equality with the path condition as its PREMISE, rather than emitting a wide avoidance
+   clause the SAT solver must re-derive propositionally (which inflated exactly like blind
+   row_split, the measured -108). No permanent memo (a propagation retracts with its
+   premise and re-derives, like [row_round]); [are_equal] skips an already-merged pair.
+   Fuel (O7) caps total propagations. Sets [changed] on a propagation. *)
 let weq_propagate_round t ~changed =
   match t.weq with
   | Some (g, _) when weq_l1_on ->
-    let endpoints =
-      List.filter
-        (fun (a, b, _) ->
-           array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b)
-        t.an_diseqs
-    in
-    if endpoints <> []
-    then (
-      (* OQ2 lazy diseq-reachable scope: reads whose array is in the same e-class as an
-         asserted-diseq endpoint. *)
-      let is_reachable x =
-        List.exists
-          (fun (a, b, _) -> Euf.are_equal t.engine x a || Euf.are_equal t.engine x b)
-          endpoints
-      in
-      let reads =
-        List.filter_map
-          (fun sel ->
-             match weq_read_parts t sel with
-             | Some (x, i) when array_sort x.Term.sort <> None && is_reachable x ->
-               Some (sel, x, i)
-             | _ -> None)
-          t.select_terms
-      in
-      let reads =
-        List.sort (fun (s1, _, _) (s2, _, _) -> compare s1.Term.tag s2.Term.tag) reads
-      in
-      let rec go = function
-        | [] -> ()
-        | (r1, x1, i1) :: rest ->
-          List.iter
-            (fun (r2, x2, i2) ->
-               if
-                 t.weq_fuel > 0
-                 && (not (Euf.are_equal t.engine r1 r2))
-                 && Euf.are_equal t.engine i1 i2
-               then (
-                 match Weq_graph.find_path g x1 x2 with
-                 | Some path ->
-                   let n_idx =
-                     let s = Hashtbl.create 16 in
-                     List.iter
-                       (fun (e : Weq_graph.edge) ->
-                          match e with
-                          | Weq_graph.Store { index; _ } ->
-                            Hashtbl.replace s index.Term.tag ()
-                          | Weq_graph.Equality _ -> ())
-                       path;
-                     Hashtbl.length s
-                   in
-                   if n_idx <= weq_max_idx
-                   then (
-                     match weq_path_premise t i1 i2 path with
-                     | Some prem ->
-                       t.weq_fuel <- t.weq_fuel - 1;
-                       Euf.assert_eq t.engine ~premise:(P_derived prem) r1 r2;
-                       changed := true
-                     | None -> ())
-                 | None -> ()))
-            rest;
-          go rest
-      in
-      go reads)
+    List.iter
+      (fun (a, b, _) ->
+         if array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b
+         then (
+           match Weq_graph.find_path g a b with
+           | None -> ()
+           | Some path ->
+             let _stores, _classes, n_idx = weq_path_info t path in
+             if n_idx <= weq_max_idx
+             then (
+               let side arr =
+                 List.filter_map
+                   (fun sel ->
+                      match weq_read_parts t sel with
+                      | Some (x, i) when Euf.are_equal t.engine x arr -> Some (sel, x, i)
+                      | _ -> None)
+                   t.select_terms
+               in
+               let a_reads = side a
+               and b_reads = side b in
+               List.iter
+                 (fun (r1, x1, i1) ->
+                    List.iter
+                      (fun (r2, x2, i2) ->
+                         (* conflict-only: fire ONLY when the two reads are already
+                         entailed-distinct (some asserted diseq separates them, incl. the
+                         extensionality witness diseq), so asserting the read equality
+                         refutes the branch. On a SAT-surviving branch no such diseq
+                         exists, so nothing is merged and the array model reconstruction
+                         is not corrupted (O5: this is what keeps the mostly-SAT
+                         storecomm/swap neighbours from degrading to unknown, the
+                         naive-form -477 / clause -108 failure). *)
+                         if
+                           t.weq_fuel > 0
+                           && (not (Euf.are_equal t.engine r1 r2))
+                           && Euf.are_equal t.engine i1 i2
+                           && an_distinct t r1 r2 <> None
+                         then (
+                           match weq_read_premise t ~x1 ~i1 ~x2 ~i2 ~a ~b path with
+                           | Some prem ->
+                             t.weq_fuel <- t.weq_fuel - 1;
+                             Euf.assert_eq t.engine ~premise:(P_derived prem) r1 r2;
+                             changed := true
+                           | None -> ()))
+                      b_reads)
+                 a_reads)))
+      t.an_diseqs
   | _ -> ()
 ;;
 
-(* At Final, mirroring [final_introduce_reads]: run the L1 propagation round, then
-   re-saturate to surface any conflict / propagation it forced. [None] falls through to
-   row_split (W1 add-phase). *)
+(* Component C (fair (b), the PATH-CONFINED NARROW SPLIT): for a weakly-equivalent array
+   diseq [(a,b)] whose extensionality witness reads are not yet forced equal, drive the
+   witness index [k] against the a<->b path store indices ONE at a time, ROW1-style — NOT
+   the wide [k = j1 ∨ ... ∨ k = jm] clause (family 2, measured -107) and NOT blind
+   [row_split] over every congruent store. Emit the tag-least open ROW split
+   [(¬(arr = st) ∨) k = i ∨ select(arr,k) = select(base,k)] for a read [select(arr,k)] on
+   the path (the witness read or a telescoped continuation, [ensure_store_reads]
+   materialises the upward ones) against a PATH store [st = store(base,i,_)] congruent to
+   [arr] — the same theory-valid disjunction as [row_split] (validity: [arr ~ st] gives
+   [select(arr,k) = select(st,k)], and [k ≠ i ⇒ select(st,k) = select(base,k)]; the
+   [¬(arr = st)] guard makes it unconditional when [arr] is only congruent to [st]),
+   confined to the a<->b path so the search telescopes along the refutation chain instead
+   of every congruent store globally. The all-[k ≠ jₗ] branch is then closed by the
+   entailed propagation above, and each [k = jₗ] branch by definite ROW1. *)
+let weq_narrow_split t : Term.t list option =
+  match t.weq with
+  | Some (g, _) when weq_l1_on && weq_narrow_on ->
+    let by_tag a b = compare a.Term.tag b.Term.tag in
+    let cand = ref None in
+    List.iter
+      (fun (a, b, _) ->
+         if
+           !cand = None
+           && array_sort a.Term.sort <> None
+           && Weq_graph.weakly_equivalent g a b
+         then (
+           match Weq_graph.find_path g a b with
+           | None -> ()
+           | Some path ->
+             let path_stores, path_classes, n_idx = weq_path_info t path in
+             if n_idx <= weq_max_idx
+             then (
+               match array_sort a.Term.sort with
+               | None -> ()
+               | Some (index, _) ->
+                 let k = witness_index t a b index in
+                 (* reads at index ~ k whose array is on the a<->b path: the witness reads
+                   and their telescoped continuations *)
+                 let reads =
+                   List.filter_map
+                     (fun sel ->
+                        match weq_read_parts t sel with
+                        | Some (x, i)
+                          when Euf.are_equal t.engine i k
+                               && Hashtbl.mem path_classes (Euf.class_of t.engine x) ->
+                          Some (sel, x)
+                        | _ -> None)
+                     t.select_terms
+                 in
+                 let reads = List.sort (fun (s1, _) (s2, _) -> by_tag s1 s2) reads in
+                 let path_stores = List.sort_uniq by_tag path_stores in
+                 List.iter
+                   (fun (sel, arr) ->
+                      if !cand = None
+                      then
+                        List.iter
+                          (fun st ->
+                             if !cand = None
+                             then (
+                               match st.Term.node with
+                               | Term.App (_, sa)
+                                 when Iarr.length sa = 3
+                                      && Euf.are_equal t.engine arr st
+                                      && not (Euf.are_equal t.engine (Iarr.get sa 1) k) ->
+                                 let base = Iarr.get sa 0
+                                 and i = Iarr.get sa 1 in
+                                 (match build_select t base k with
+                                  | Some selbase
+                                    when not (Euf.are_equal t.engine sel selbase) ->
+                                    let idx_eq = Context.eq t.ctx i k in
+                                    let read_eq = Context.eq t.ctx sel selbase in
+                                    let disjuncts =
+                                      if Term.equal arr st
+                                      then [ idx_eq; read_eq ]
+                                      else
+                                        [ Context.not_ t.ctx (Context.eq t.ctx arr st)
+                                        ; idx_eq
+                                        ; read_eq
+                                        ]
+                                    in
+                                    cand := Some disjuncts
+                                  | _ -> ())
+                               | _ -> ()))
+                          path_stores)
+                   reads)))
+      t.an_diseqs;
+    !cand
+  | _ -> None
+;;
+
+(* At Final, after [final_introduce_reads]: (A) skip entirely when nothing merged and no
+   diseq was asserted since the last round ran (the incremental trigger — the naive
+   checkpoint's per-Final O(reads²) rescan was the -477 artifact); else run the (B)
+   targeted propagation round, re-saturate to surface any conflict / propagation, and if
+   none, offer the (C) path-confined narrow split. [None] falls through to row_split (W1
+   add-phase; W2 retires it). *)
 let final_weq t : Theory.check_result option =
-  weq_sync t;
-  let changed = ref false in
-  weq_propagate_round t ~changed;
-  if not !changed
+  if not weq_l1_on
   then None
   else (
-    match saturate t with
-    | Some prems -> Some (conflict_of prems)
-    | None ->
-      (match collect_propagations t with
-       | _ :: _ as lits -> Some (Theory.Propagations lits)
-       | [] -> None))
+    weq_sync t;
+    if weq_trigger_on && not t.weq_dirty
+    then None
+    else (
+      t.weq_dirty <- false;
+      let changed = ref false in
+      weq_propagate_round t ~changed;
+      let saturated =
+        if not !changed
+        then None
+        else (
+          match saturate t with
+          | Some prems -> Some (conflict_of prems)
+          | None ->
+            (match collect_propagations t with
+             | _ :: _ as lits -> Some (Theory.Propagations lits)
+             | [] -> None))
+      in
+      match saturated with
+      | Some _ as r -> r
+      | None ->
+        (match weq_narrow_split t with
+         | Some disjuncts -> Some (Theory.Split disjuncts)
+         | None -> None)))
 ;;
 
 let check t effort =
@@ -1116,7 +1311,10 @@ let push t =
   weq_sync t;
   (* fold pending merges into the current frame before it becomes a parent *)
   (match t.weq with
-   | Some (g, _) -> Weq_graph.push g
+   | Some (g, _) ->
+     Weq_graph.push g;
+     (* snapshot [an_diseqs] so [pop] can restore it (trailed distinctness, see field doc) *)
+     t.an_diseq_stack <- t.an_diseqs :: t.an_diseq_stack
    | None -> ());
   Euf.push t.engine;
   t.frames <- [] :: t.frames
@@ -1127,7 +1325,26 @@ let pop t n =
   (* fold pending (current-frame) merges before the engine clears its log on pop, then
      unwind the graph's equality edges for the popped frames in lockstep with Euf *)
   (match t.weq with
-   | Some (g, _) -> Weq_graph.pop g n
+   | Some (g, _) ->
+     Weq_graph.pop g n;
+     (* a pop retracts merges/diseqs, so premise-based propagations retract too and may
+        need re-deriving in the restored state (component A) *)
+     t.weq_dirty <- true;
+     (* restore [an_diseqs] to its value at the push of the frame we are popping into, so
+        [an_distinct] reflects only currently-live disequalities *)
+     let rec restore k stack =
+       match stack with
+       | saved :: rest ->
+         if k <= 1
+         then (
+           t.an_diseqs <- saved;
+           rest)
+         else restore (k - 1) rest
+       | [] ->
+         t.an_diseqs <- [];
+         []
+     in
+     t.an_diseq_stack <- restore n t.an_diseq_stack
    | None -> ());
   Euf.pop t.engine n;
   let rec drop k frames =
