@@ -644,3 +644,244 @@ let simplify_contextual ctx assertions =
     emit ~aborted:false;
     simplified
 ;;
+
+(* --- Equality-over-ITE projection (task #34) ----------------------------------------- A
+   LOCAL, model-PRESERVING rewrite on the shared hash-consed DAG — a DIFFERENT algorithm
+   from [simplify_contextual] above (which tracks a per-branch assumption context and was
+   measured net-negative on these families: it under-fired the [(= v_i v_j)]/[(not bool)]
+   conditions and its per-ITE contextual descent exceeded the wall). This pass tracks NO
+   context; it applies three pure ITE identities bottom-up and memoizes over the DAG:
+
+   1. EQUALITY-OVER-ITE PROJECTION (the nec-smt lever): [(= (ite c x y) d)] ->
+      [(ite c (= x d) (= y d))] when [d] is a leaf (constant or bare variable) — symmetric
+      in the operands. Exact ITE equivalence: total ITE semantics give
+      [(= (c?x:y) d) = (c ? (x=d) : (y=d))] in every model. Restricting [d] to a leaf
+      keeps each distributed equality size-1-bounded (no duplication of a large RHS). This
+      is precisely what oxsmt's diagnosed failure needs: a nec condition
+      [(= chain_ite literal)] — which oxsmt would otherwise Tseitin into a FRESH aux
+      boolean disconnected from the real variables — becomes a boolean function of the
+      ORIGINAL condition atoms (each leaf [(= const literal)] folds, [(ite c true false)]
+      collapses to [c]), so the SAT core sees atoms over the real variables instead of
+      thousands of opaque aux vars. (Confirmed on the exemplars: z3 4.8.5 collapses these
+      to mk-bool-var 1 in preprocessing; the projection reproduces that collapse for
+      oxsmt.)
+
+   2. BOOLEAN-ITE COLLAPSE: the {!Node} [ite] constructor folds a constant condition and
+      equal branches but NOT [(ite c true false) -> c] / [(ite c false true) -> (not c)] /
+      the one-constant-branch and/or forms, which are exactly what a projected Bool-sorted
+      ITE produces once its branch equalities fold to constants. [bool_ite] applies them
+      so the projection actually collapses to a boolean over [c] rather than leaving an
+      opaque Bool-sorted [ite] node (which would get its own Tseitin var).
+
+   3. SELECTOR COLLAPSE (local, depth-1): [(ite c a b)] where a branch is itself an [ite]
+      on the SAME condition [c] (or its complement [(not c)]) drops the dead sub-branch:
+      [(ite c (ite c a2 _) b) -> (ite c a2 b)], [(ite c a (ite c _ b2)) -> (ite c a b2)],
+      and the complement variants. Purely local (no assumption tracking) — the branch of
+      [c] fixes the nested same-condition [ite]'s selector.
+
+   SOUNDNESS: all three are logical EQUIVALENCES (not merely equisatisfiable) and
+   eliminate NO variable, so — like [simplify_contextual] — no [def]/model-reconstruction
+   machinery is needed and the R1 self-check (over the ORIGINAL asserted terms) is
+   untouched. The win direction is UNSAT (R1 does not run), so the discriminating tests
+   are the margin; but unlike the contextual pass there is no scope-leak surface (these
+   are context-free local identities). All terms are built through [ctx]'s smart
+   constructors (well-sorted, hash-consed). Determinism (I6): a deterministic function of
+   term structure.
+
+   TERMINATION / BUDGET: memoized on the hash-cons tag (main walk) and on the
+   [(ite-tag, leaf-tag)] pair (the projection), so each distinct node/projection is done
+   once. A deep single ITE spine compared against many distinct literals still makes the
+   count of distinct [(subterm, literal)] projections super-linear (O(depth^2) new terms
+   on the pathological single-chain shape), which — even collapsed for search — is too
+   large to clausify within the wall. A hard step budget with NEUTRAL ABORT (return the
+   input list unchanged — never a partial rewrite) caps that worst case at OFF-equivalent
+   behaviour: on abort the projected terms are discarded BEFORE any is internalized, so
+   the only ON cost on an aborted file is the bounded projection work (about
+   [proj_max_steps] hash-cons ops), never a blown-up clausification. Measured knee: the
+   med nec exemplar wins at ~9K steps; the 15,847-ITE bftpd worst case needs ~3.7M (and
+   clausifies for >90s if allowed to complete) — 500K separates them, admitting the bushy
+   wins and aborting the deep-chain losses (which are losses at the 2s wall regardless). *)
+
+let proj_max_steps = 500_000
+
+exception Proj_budget
+
+(* A leaf admissible as the non-ITE side of a projected equality: a constant, or a bare
+   nullary variable. Restricting the distributed side to a leaf keeps [(= x d)]/[(= y d)]
+   size-1-bounded so the projection cannot blow up term size. *)
+let proj_is_leaf (t : Term.t) =
+  match t.node with
+  | Int_const _ | Bool_const _ -> true
+  | App (_, args) -> Iarr.length args = 0
+  | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
+;;
+
+(* Build a Bool-sorted [(ite c x y)] collapsing the forms the {!Node} constructor leaves
+   alone: constant condition, constant branches ([(ite c true false) -> c] etc.), and a
+   single-constant branch (to [or]/[and]). [c], [x], [y] are already simplified. *)
+let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
+  match c.node with
+  | Bool_const true -> x
+  | Bool_const false -> y
+  | _ ->
+    (match x.node, y.node with
+     | Bool_const true, Bool_const false -> c
+     | Bool_const false, Bool_const true -> Context.not_ ctx c
+     | Bool_const true, _ -> Context.or_ ctx [ c; y ]
+     | Bool_const false, _ -> Context.and_ ctx [ Context.not_ ctx c; y ]
+     | _, Bool_const true -> Context.or_ ctx [ Context.not_ ctx c; x ]
+     | _, Bool_const false -> Context.and_ ctx [ c; x ]
+     | _ -> Context.ite ctx c x y)
+;;
+
+let simplify_projection ctx assertions =
+  let steps = ref 0 in
+  let tick () =
+    incr steps;
+    if !steps > proj_max_steps then raise Proj_budget
+  in
+  (* Observability-only counters (OXSMT_PRESOLVE_PROJ_STATS): [engaged] = the walk ran on
+     an ITE-bearing assertion; [projections] = equality-over-ITE projections applied
+     (distinct (ite,leaf) pairs); [collapses] = local selector collapses. Emitted once per
+     call to stderr, default-silent; never read back into the solve path. *)
+  let engaged = ref false in
+  let projections = ref 0 in
+  let collapses = ref 0 in
+  (* Main walk memo (per-Context hash-cons tag) and the projection memo keyed on the
+     (ite-node tag, leaf tag) pair. Both LOCAL to this call: the tag is the per-[Context]
+     hash-cons identity, so a table shared across [Context]s (one session per file) would
+     collide tags and return stale answers (a module-global table silently corrupts the
+     pass — the same footgun the contextual pass documents). *)
+  let memo : Term.t Term.Table.t = Term.Table.create 4096 in
+  let proj_memo : (int * int, Term.t) Hashtbl.t = Hashtbl.create 4096 in
+  let rec go (t : Term.t) : Term.t =
+    match Term.Table.find_opt memo t with
+    | Some r -> r
+    | None ->
+      tick ();
+      let r = rewrite t in
+      Term.Table.add memo t r;
+      r
+  and rewrite (t : Term.t) : Term.t =
+    match t.node with
+    | Bool_const _ | Int_const _ -> t
+    | App (sym, args) ->
+      if Iarr.length args = 0
+      then t (* a variable — unchanged (preserves hash-cons identity) *)
+      else Context.app ctx sym (List.map go (Iarr.to_list args))
+    | Arith lin ->
+      Context.linear_combination_big
+        ctx
+        (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+        lin.const
+    | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+    | Not a -> Context.not_ ctx (go a)
+    | And xs -> Context.and_ ctx (List.map go (Iarr.to_list xs))
+    | Or xs -> Context.or_ ctx (List.map go (Iarr.to_list xs))
+    | Eq (a, b) -> rewrite_eq (go a) (go b)
+    | Ite (c, a, b) -> rewrite_ite (go c) (go a) (go b)
+  and rewrite_eq (a : Term.t) (b : Term.t) : Term.t =
+    (* Project when one side is an [Ite] and the other a leaf; else the plain equality. *)
+    match a.node, b.node with
+    | Ite _, _ when proj_is_leaf b -> project a b
+    | _, Ite _ when proj_is_leaf a -> project b a
+    | _ -> Context.eq ctx a b
+  and project (ite_t : Term.t) (d : Term.t) : Term.t =
+    let key = ite_t.tag, d.tag in
+    match Hashtbl.find_opt proj_memo key with
+    | Some r -> r
+    | None ->
+      tick ();
+      incr projections;
+      let r =
+        match ite_t.node with
+        | Ite (c, x, y) -> bool_ite ctx c (rewrite_eq x d) (rewrite_eq y d)
+        | _ -> Context.eq ctx ite_t d (* unreachable: caller guarantees an Ite *)
+      in
+      Hashtbl.add proj_memo key r;
+      r
+  and rewrite_ite (c : Term.t) (a : Term.t) (b : Term.t) : Term.t =
+    match c.node with
+    | Bool_const true -> a
+    | Bool_const false -> b
+    | _ ->
+      (* Local selector collapse: within the [c]-true (then) branch a nested [ite] on the
+         same [c] takes its then-branch and on [(not c)] its else-branch; symmetrically in
+         the else branch. A depth-1 rewrite (no assumption tracking). *)
+      let notc = Context.not_ ctx c in
+      let a' =
+        match a.node with
+        | Ite (c2, a2, _b2) when c2.tag = c.tag ->
+          incr collapses;
+          a2
+        | Ite (c2, _a2, b2) when c2.tag = notc.tag ->
+          incr collapses;
+          b2
+        | _ -> a
+      in
+      let b' =
+        match b.node with
+        | Ite (c2, _a2, b2) when c2.tag = c.tag ->
+          incr collapses;
+          b2
+        | Ite (c2, a2, _b2) when c2.tag = notc.tag ->
+          incr collapses;
+          a2
+        | _ -> b
+      in
+      Context.ite ctx c a' b'
+  in
+  let emit ~aborted =
+    match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ_STATS" with
+    | Some ("1" | "true" | "yes") ->
+      Printf.eprintf
+        "proj: fired=%d projections=%d collapses=%d steps=%d aborted=%d\n%!"
+        (if !engaged then 1 else 0)
+        !projections
+        !collapses
+        !steps
+        (if aborted then 1 else 0)
+    | Some _ | None -> ()
+  in
+  (* Only walk assertions that contain an [Ite] (the projection can only fire under one);
+     an ITE-free assertion is returned untouched, so the pass is exactly neutral (a cheap
+     structural check) on pure-arith / propagation-bound files where it never wins.
+     MEMOIZED over the DAG (the assertion is a maximally-shared [let]-DAG; a naive
+     per-path walk is exponential), and its visits count against the shared budget. Table
+     LOCAL to this call (per-[Context] tag identity). *)
+  let has_ite_table : bool Term.Table.t = Term.Table.create 4096 in
+  let rec has_ite (t : Term.t) =
+    match Term.Table.find_opt has_ite_table t with
+    | Some b -> b
+    | None ->
+      tick ();
+      let b =
+        match t.node with
+        | Ite _ -> true
+        | Bool_const _ | Int_const _ -> false
+        | App (_, args) -> Iarr.exists has_ite args
+        | Arith lin -> Iarr.exists (fun (tm, _c) -> has_ite tm) lin.coeffs
+        | Le a | Not a -> has_ite a
+        | Eq (a, b) -> has_ite a || has_ite b
+        | And xs | Or xs -> Iarr.exists has_ite xs
+      in
+      Term.Table.add has_ite_table t b;
+      b
+  in
+  match
+    List.map
+      (fun a ->
+         if has_ite a
+         then (
+           engaged := true;
+           go a)
+         else a)
+      assertions
+  with
+  | exception Proj_budget ->
+    emit ~aborted:true;
+    assertions
+  | simplified ->
+    emit ~aborted:false;
+    simplified
+;;

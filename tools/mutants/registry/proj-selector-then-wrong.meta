@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=The local selector collapse takes the wrong sub-branch: in the else-branch of (ite c a b), a nested same-condition ite (ite c a2 b2) must collapse to its ELSE b2 (c is false there), but the mutant takes the THEN a2. This is a wrong equivalence — the else-branch of c fixes the nested ite's selector to false, so a2 is dead. On (ite c p (ite c q r)) the correct collapse is (ite c p r); the mutant gives (ite c p q). Killed by test_proj_selector_same_cond.
+review=task #34 equality-over-ITE projection; logs/ite-projection-log.md (local selector collapse)
+expected=KILLED-TEST

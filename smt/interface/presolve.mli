@@ -100,3 +100,27 @@ val run : Context.t -> Term.t list -> result
     no [Ite] (exact neutrality). Pure and deterministic (I6). The caller gates it (flag +
     cert-OFF). *)
 val simplify_contextual : Context.t -> Term.t list -> Term.t list
+
+(** [simplify_projection ctx assertions] rewrites each assertion with three pure,
+    model-PRESERVING ITE identities on the shared hash-consed DAG (task #34) — a DIFFERENT
+    algorithm from {!simplify_contextual} (no assumption-context tracking):
+
+    - EQUALITY-OVER-ITE PROJECTION: [(= (ite c x y) d)] -> [(ite c (= x d) (= y d))] when
+      [d] is a leaf (constant or bare variable), symmetric in the operands. This turns a
+      nec-smt condition [(= chain_ite literal)] into a boolean function of the ORIGINAL
+      condition atoms (rather than a fresh opaque Tseitin aux var), reproducing the DAG
+      collapse z3 does in preprocessing (mk-bool-var 1 on the exemplars).
+    - BOOLEAN-ITE COLLAPSE: a projected Bool-sorted [(ite c true false)] etc. is collapsed
+      to [c] / [(not c)] / [and]/[or] (the {!Oxsmt_core.Node} [ite] constructor does not).
+    - LOCAL SELECTOR COLLAPSE (depth-1): [(ite c a b)] drops a nested same-condition (or
+      complement) [ite]'s dead sub-branch.
+
+    All three are logical EQUIVALENCES (total ITE semantics) and eliminate NO variable, so
+    — like {!simplify_contextual} — no model reconstruction is needed and the R1
+    self-check (over the ORIGINAL asserted terms) is unaffected; unlike it, there is no
+    scope-leak surface (these are context-free local identities). Memoized over the DAG
+    and on the projection's [(ite-tag, leaf-tag)] pair; neutral-abort on a hard step
+    budget (returns the ORIGINAL list unchanged); pass-through for any ITE-free assertion
+    (exact neutrality). All terms are built through [ctx]'s smart constructors. Pure and
+    deterministic (I6). The caller gates it (flag + cert-OFF). *)
+val simplify_projection : Context.t -> Term.t list -> Term.t list

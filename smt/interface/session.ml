@@ -240,6 +240,26 @@ let ctx_simp_flag =
    model-preserving, so this gate protects the certificate contract, not verdict
    soundness. *)
 let ctx_simp_enabled t = Lazy.force ctx_simp_flag && not t.cert_active
+
+(* Equality-over-ITE projection (task #34) toggle. Default OFF, matching the Pass A / ctx
+   precedent: the win direction is UNSAT (where the R1 self-check does not run), so it
+   ships OFF (byte-identical to trunk) until a fires-inclusive ON/OFF 0-mismatch corpus
+   sweep is recorded; a follow-up then flips the default. [OXSMT_PRESOLVE_PROJ=1] turns it
+   ON (the A/B ON leg and the wiring-test gate). Read once. Distinct flag from
+   OXSMT_PRESOLVE_CTX so the two ITE passes are measured independently (the contextual
+   pass is a banked negative). *)
+let proj_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ" with
+     | Some ("1" | "true" | "yes") -> true
+     | Some _ | None -> false)
+;;
+
+(* Runs only when enabled AND no certificate trace is installed: the certificate measures
+   the UNSIMPLIFIED assertion path (the same cert-OFF discipline as Pass A / ctx). The
+   rewrite is model-preserving, so this gate protects the certificate contract, not
+   verdict soundness. *)
+let proj_enabled t = Lazy.force proj_flag && not t.cert_active
 let env t = t.env
 let context t = t.ctx
 
@@ -747,6 +767,28 @@ let assert_presolved t terms =
     | exception Term.Unsupported _ -> t.degraded <- true
     | { Presolve.reduced; defs } ->
       t.elim_defs <- defs;
+      (* Equality-over-ITE projection (task #34, gated: flag + cert-OFF): a
+         model-preserving local DAG rewrite over the reduced conjuncts —
+         [(= (ite c x y) d)] projected into the branches, plus Bool-ITE and local selector
+         collapse — turning nec-smt [(= chain_ite literal)] conditions into boolean
+         functions of the original atoms before clausification. Eliminates no variable, so
+         [t.elim_defs] / model reconstruction and the R1 set (the ORIGINAL [t.asserted])
+         are untouched. On the hard budget it neutral-aborts to [reduced] unchanged.
+         Builds through [t.ctx]'s smart constructors, so the same Overflow/Unsupported
+         firewall as {!internalize_reduced} applies. *)
+      let reduced =
+        if proj_enabled t
+        then (
+          match Presolve.simplify_projection t.ctx reduced with
+          | exception Term.Overflow ->
+            t.degraded <- true;
+            reduced
+          | exception Term.Unsupported _ ->
+            t.degraded <- true;
+            reduced
+          | simplified -> simplified)
+        else reduced
+      in
       (* Contextual simplification (task #13, gated: flag + cert-OFF): a model-preserving
          term rewrite over the reduced conjuncts (assume each ITE condition within its own
          branch), collapsing the nested-ITE VCs before clausification. It eliminates no

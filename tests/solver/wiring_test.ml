@@ -2109,6 +2109,203 @@ let test_ctx_simp_no_ite_neutral () =
   check_verdict "ctx no-ite: sat" Session.Sat (Session.check_sat s)
 ;;
 
+(* --- Equality-over-ITE projection (task #34) -----------------------------------------
+   [Presolve.simplify_projection]. All three identities are EQUIVALENCES, so — like the
+   contextual pass — the win direction is UNSAT (R1 does not run) and these fixtures ARE
+   the soundness margin. Registry mutants (module=presolve): [proj-branch-swap] swaps the
+   two projected sub-equalities, [proj-boolite-true-false] mis-collapses
+   [(ite c true false)], [proj-selector-then-wrong] takes the wrong sub-branch in the
+   selector collapse. NOTE: the ship default is OFF (see [proj_flag]); [make wiring-test]
+   sets OXSMT_PRESOLVE_PROJ=1 so the end-to-end fixtures exercise the ON path. The
+   direct-call fixtures do not need it. *)
+
+let proj_simplify ctx t = Oxsmt_interface.Presolve.simplify_projection ctx [ t ]
+
+(* EFFECTIVENESS + branch ORDER (the [proj-branch-swap] oracle). [(= (ite c 923 926) 923)]
+   projects to [(ite c (= 923 923) (= 926 923))] = [(ite c true false)] = [c]. The pass
+   MUST collapse it to exactly [c] (the condition atom), not leave an equality-over-ITE
+   and not produce [(not c)] (which is what swapping the branches would give). *)
+let test_proj_eq_over_ite_fires () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let ite = Context.ite ctx c (Context.int_const ctx 923) (Context.int_const ctx 926) in
+  match proj_simplify ctx (Context.eq ctx ite (Context.int_const ctx 923)) with
+  | [ r ] -> check "proj fires: (= (ite c 923 926) 923) -> c" (r.tag = c.tag)
+  | _ -> check "proj fires: expected a single term" false
+;;
+
+(* The complementary branch arm: [(= (ite c 923 926) 926)] -> [(ite c false true)] ->
+   [(not c)]. Exercises the [(ite c false true) -> (not c)] collapse; the branch-swap
+   mutant yields [c] instead. *)
+let test_proj_eq_over_ite_neg () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let ite = Context.ite ctx c (Context.int_const ctx 923) (Context.int_const ctx 926) in
+  let notc = Context.not_ ctx c in
+  match proj_simplify ctx (Context.eq ctx ite (Context.int_const ctx 926)) with
+  | [ r ] -> check "proj fires: (= (ite c 923 926) 926) -> (not c)" (r.tag = notc.tag)
+  | _ -> check "proj neg: expected a single term" false
+;;
+
+(* NESTED chain: [(= (ite c1 927 (ite c0 923 926)) 927)] where c1, c0 are distinct atoms.
+   Correct projection collapses to [(or c1 (and (not c1) (not c0)))]-equivalent — the
+   point for the test is only that NO equality-over-ITE and NO opaque Bool-sorted [ite]
+   survives (every [(= const const)] leaf folded), i.e. the chain fully reduces to a
+   boolean over the original condition atoms. Guards the recursion + the Bool-ITE
+   collapse. *)
+let has_eq_over_ite_or_bool_ite (t : Term.t) =
+  let rec go (t : Term.t) =
+    match t.node with
+    | Eq (a, b) ->
+      (match a.node, b.node with
+       | Ite _, _ | _, Ite _ -> true
+       | _ -> go a || go b)
+    | Ite (c, a, b) -> Sort.equal t.sort Sort.bool || go c || go a || go b
+    | Not a | Le a -> go a
+    | And xs | Or xs -> Iarr.exists go xs
+    | App (_, args) -> Iarr.exists go args
+    | Arith lin -> Iarr.exists (fun (tm, _c) -> go tm) lin.coeffs
+    | Bool_const _ | Int_const _ -> false
+  in
+  go t
+;;
+
+let test_proj_nested_chain_collapses () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  let c0 = Context.eq ctx x (Context.int_const ctx 0) in
+  let c1 = Context.eq ctx y (Context.int_const ctx 0) in
+  let inner =
+    Context.ite ctx c0 (Context.int_const ctx 923) (Context.int_const ctx 926)
+  in
+  let outer = Context.ite ctx c1 (Context.int_const ctx 927) inner in
+  match proj_simplify ctx (Context.eq ctx outer (Context.int_const ctx 927)) with
+  | [ r ] ->
+    check
+      "proj nested: no equality-over-ITE / opaque Bool-ITE survives"
+      (not (has_eq_over_ite_or_bool_ite r))
+  | _ -> check "proj nested: expected a single term" false
+;;
+
+(* SELECTOR COLLAPSE (same condition), the [proj-selector-then-wrong] oracle. The Bool-ITE
+   [(ite c p (ite c q r))]: in the else-branch [c] is false, so the nested same-[c] [ite]
+   takes its ELSE [r]. Result: [(ite c p r)] — the else must be [r], not [q] and not the
+   surviving nested ite. *)
+let test_proj_selector_same_cond () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let p = Context.const ctx (Session.declare_const s "p" Sort.bool) in
+  let q = Context.const ctx (Session.declare_const s "q" Sort.bool) in
+  let r_ = Context.const ctx (Session.declare_const s "r" Sort.bool) in
+  let inner = Context.ite ctx c q r_ in
+  match proj_simplify ctx (Context.ite ctx c p inner) with
+  | [ res ] ->
+    (match res.node with
+     | Ite (c', a', b') ->
+       check "proj selector: same cond kept" (c'.tag = c.tag);
+       check "proj selector: then = p" (a'.tag = p.tag);
+       check
+         "proj selector: else collapses to r (not the nested ite, not q)"
+         (b'.tag = r_.tag)
+     | _ -> check "proj selector: expected an ite" false)
+  | _ -> check "proj selector: expected a single term" false
+;;
+
+(* SELECTOR COLLAPSE (complement condition): [(ite c p (ite (not c) q r))]: in the
+   else-branch [c] is false so [(not c)] is true, and the nested [ite] takes its THEN [q].
+   Result: [(ite c p q)]. *)
+let test_proj_selector_complement () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let p = Context.const ctx (Session.declare_const s "p" Sort.bool) in
+  let q = Context.const ctx (Session.declare_const s "q" Sort.bool) in
+  let r_ = Context.const ctx (Session.declare_const s "r" Sort.bool) in
+  let inner = Context.ite ctx (Context.not_ ctx c) q r_ in
+  match proj_simplify ctx (Context.ite ctx c p inner) with
+  | [ res ] ->
+    (match res.node with
+     | Ite (c', a', b') ->
+       check "proj selector-compl: same cond kept" (c'.tag = c.tag);
+       check "proj selector-compl: then = p" (a'.tag = p.tag);
+       check "proj selector-compl: else collapses to q" (b'.tag = q.tag)
+     | _ -> check "proj selector-compl: expected an ite" false)
+  | _ -> check "proj selector-compl: expected a single term" false
+;;
+
+(* END-TO-END wrong-UNSAT guard (the scary direction). [(= (ite (= x 0) 10 20) 20)] means
+   the ITE value is 20, i.e. the else-branch, i.e. [x <> 0]. With [(not (= x 0))] asserted
+   this is consistent -> SAT (x = 5). A branch-swap projection reads the condition as
+   [x = 0] which, with [x <> 0], is UNSAT — a wrong-Unsat. The projection ON, the verdict
+   MUST be Sat. *)
+let test_proj_e2e_no_wrong_unsat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 0))
+      (Context.int_const ctx 10)
+      (Context.int_const ctx 20)
+  in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx ite (Context.int_const ctx 20)
+    ; Context.not_ ctx (Context.eq ctx x (Context.int_const ctx 0))
+    ];
+  check "proj e2e: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "proj e2e no-wrong-unsat: sat (x<>0)" Session.Sat (Session.check_sat s)
+;;
+
+(* END-TO-END wrong-SAT guard. Same ITE-equality with [(= x 0)] asserted: the ITE value 20
+   needs [x <> 0], contradicting [x = 0] -> UNSAT. A branch-swap reads [x = 0], consistent
+   with [x = 0] -> a wrong-Sat. Verdict MUST be Unsat. *)
+let test_proj_e2e_no_wrong_sat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 0))
+      (Context.int_const ctx 10)
+      (Context.int_const ctx 20)
+  in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx ite (Context.int_const ctx 20)
+    ; Context.eq ctx x (Context.int_const ctx 0)
+    ];
+  check_verdict
+    "proj e2e no-wrong-sat: unsat (x=0 forces ite=10<>20)"
+    Session.Unsat
+    (Session.check_sat s)
+;;
+
+(* NEUTRALITY: an ITE-free assertion set is passed through untouched. *)
+let test_proj_no_ite_neutral () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ge ctx x (Context.int_const ctx 0)
+    ; Context.le ctx x (Context.int_const ctx 10)
+    ];
+  check "proj no-ite: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "proj no-ite: sat" Session.Sat (Session.check_sat s)
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Dynamic relevancy (task #24): the branch filter must suppress decisions on a satisfied
    disjunction's free siblings, and it must NEVER change a verdict (soundness is
@@ -2261,6 +2458,14 @@ let () =
   test_ctx_simp_fires ();
   test_ctx_simp_nested_refold ();
   test_ctx_simp_no_ite_neutral ();
+  test_proj_eq_over_ite_fires ();
+  test_proj_eq_over_ite_neg ();
+  test_proj_nested_chain_collapses ();
+  test_proj_selector_same_cond ();
+  test_proj_selector_complement ();
+  test_proj_e2e_no_wrong_unsat ();
+  test_proj_e2e_no_wrong_sat ();
+  test_proj_no_ite_neutral ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
