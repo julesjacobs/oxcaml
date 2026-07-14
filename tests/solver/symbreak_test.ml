@@ -125,7 +125,7 @@ let detect src =
   let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
   let parsed = Parser.parse_into env ctx src in
-  Presolve.symmetry_break cap env ctx parsed.Parser.assertions
+  Presolve.symmetry_break ~counter:(ref 0) cap env ctx parsed.Parser.assertions
 ;;
 
 (* Solve a source through the shipped loader path (same as oxsmt_cli). With
@@ -249,6 +249,145 @@ let test_unsat_preserved () =
   | Session.Unknown -> fail "unsat golden: got unknown"
 ;;
 
+(* Two interchangeable-constant sorts in one problem — exercises the Sort.equal grouping
+   (F3: a Sort.hash-only bucket could pair cross-sort constants and crash in Context.eq). *)
+let two_sort_symmetric =
+  {|
+(set-logic QF_UF)
+(declare-sort I 0)
+(declare-sort J 0)
+(declare-fun op (I I) I)
+(declare-fun g (J J) J)
+(declare-fun a0 () I)
+(declare-fun a1 () I)
+(declare-fun b0 () J)
+(declare-fun b1 () J)
+(assert (distinct a0 a1))
+(assert (distinct b0 b1))
+(assert (or (= (op a0 a0) a0) (= (op a0 a0) a1)))
+(assert (or (= (op a1 a1) a0) (= (op a1 a1) a1)))
+(assert (or (= (g b0 b0) b0) (= (g b0 b0) b1)))
+(assert (or (= (g b1 b1) b0) (= (g b1 b1) b1)))
+(check-sat)
+|}
+;;
+
+(* Collect the reserved [.oxsmt.sym.*] aux-var names referenced by a term list. *)
+let sym_aux_names terms =
+  let names = ref [] in
+  let seen = Term.Table.create 64 in
+  let rec walk (t : Term.t) =
+    if not (Term.Table.mem seen t)
+    then (
+      Term.Table.add seen t ();
+      match t.Term.node with
+      | App (sym, args) ->
+        let n = Symbol.name sym in
+        if String.length n > 10 && String.sub n 0 10 = ".oxsmt.sym"
+        then names := n :: !names;
+        Iarr.iter walk args
+      | Le a | Not a -> walk a
+      | Eq (a, b) ->
+        walk a;
+        walk b
+      | And xs | Or xs -> Iarr.iter walk xs
+      | Ite (c, a, b) ->
+        walk c;
+        walk a;
+        walk b
+      | Arith lin -> Iarr.iter (fun (tm, _) -> walk tm) lin.Term.coeffs
+      | Bool_const _ | Int_const _ -> ())
+  in
+  List.iter walk terms;
+  !names
+;;
+
+(* F1: symmetry breaking is NON-MONOTONIC — an assertion AFTER the emission can break the
+   detected symmetry, and the permanent lex clauses would then wrongly refute a SAT model
+   (SAT->UNSAT). The fix retracts the lex clauses on any post-emission assertion. This exact
+   sequence is RED (SAT->UNSAT) with the retraction disabled; [(= (op e0 e1) e0)] is
+   genuinely SAT with the base problem (z3-confirmed) yet the stale lex clauses refute it. *)
+let test_f1_incremental () =
+  let s = Session.create () in
+  let env = Session.env s
+  and ctx = Session.context s in
+  let parsed = Parser.parse_into env ctx sat_symmetric in
+  (* name -> Symbol.t, by walking the parsed assertions *)
+  let symtab = Hashtbl.create 16 in
+  let rec w (t : Term.t) =
+    match t.Term.node with
+    | App (sym, args) ->
+      Hashtbl.replace symtab (Symbol.name sym) sym;
+      Iarr.iter w args
+    | Le a | Not a -> w a
+    | Eq (a, b) ->
+      w a;
+      w b
+    | And xs | Or xs -> Iarr.iter w xs
+    | Ite (c, a, b) ->
+      w c;
+      w a;
+      w b
+    | Arith lin -> Iarr.iter (fun (tm, _) -> w tm) lin.Term.coeffs
+    | Bool_const _ | Int_const _ -> ()
+  in
+  List.iter w parsed.Parser.assertions;
+  let c n = Context.app ctx (Hashtbl.find symtab n) [] in
+  let cell a b = Context.app ctx (Hashtbl.find symtab "op") [ c a; c b ] in
+  if not (Oxsmt_query_loader.assert_all ~presolve:true s parsed)
+  then fail "F1: loader rejected base"
+  else (
+    match Session.check_sat s with
+    | Session.Sat ->
+      (* A single asymmetric, base-satisfiable pin that breaks the value symmetry. *)
+      Session.assert_term s (Context.eq ctx (cell "e0" "e1") (c "e0"));
+      (match Session.check_sat s with
+       | Session.Sat -> ok "F1: incremental assertion keeps SAT (lex clauses retracted)"
+       | Session.Unsat ->
+         fail "F1 WRONG-UNSAT: stale lex clauses survived an incremental assertion"
+       | Session.Unknown -> fail "F1: unknown after incremental assert")
+    | _ -> fail "F1: base problem not SAT")
+;;
+
+(* F2: the aux-var name counter must persist across [symmetry_break] calls on one env — a
+   per-call reset reuses [.oxsmt.sym.0] with a conflicting definition. Two calls sharing a
+   counter must emit DISJOINT aux-var names. RED (overlap) with a per-call counter. *)
+let test_f2_counter () =
+  let env, cap = Env.create_with_cap () in
+  let ctx = Context.create env in
+  let parsed = Parser.parse_into env ctx sat_symmetric in
+  let counter = ref 0 in
+  let n1 =
+    sym_aux_names (Presolve.symmetry_break ~counter cap env ctx parsed.Parser.assertions)
+  in
+  let n2 =
+    sym_aux_names (Presolve.symmetry_break ~counter cap env ctx parsed.Parser.assertions)
+  in
+  let overlap = List.filter (fun n -> List.mem n n2) n1 in
+  if n1 <> [] && n2 <> [] && overlap = []
+  then ok "F2: aux-var names disjoint across calls (persistent counter)"
+  else
+    fail
+      "F2: aux-var name reuse across calls (n1=%d n2=%d overlap=%d)"
+      (List.length n1)
+      (List.length n2)
+      (List.length overlap)
+;;
+
+(* F3: a multi-sort input must not pair constants across sorts (a Sort.hash-only grouping
+   could, driving Context.eq to Term.Sort_error). Detector runs cleanly and the verdict is
+   correct. *)
+let test_f3_multisort () =
+  match detect two_sort_symmetric with
+  | exception e ->
+    fail "F3: detector raised %s on a two-sort input" (Printexc.to_string e)
+  | _cs ->
+    (match fst (solve ~presolve:true two_sort_symmetric) with
+     | Session.Sat -> ok "F3: two-sort input handled, verdict SAT (no cross-sort crash)"
+     | Session.Unsat -> fail "F3: two-sort input wrongly UNSAT"
+     | Session.Unknown -> fail "F3: two-sort input unknown")
+;;
+
 let () =
   print_string "symbreak_test:\n";
   test_detector_fires ();
@@ -256,6 +395,9 @@ let () =
   test_sat_preserved ();
   test_vp_mutant_flips ();
   test_unsat_preserved ();
+  test_f1_incremental ();
+  test_f2_counter ();
+  test_f3_multisort ();
   Printf.printf "symbreak_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

@@ -143,10 +143,9 @@ val simplify_projection : Context.t -> Term.t list -> Term.t list
     UNSOUND for this index+value symmetry (constants appear as both function arguments and
     values → real SAT→UNSAT flips). For each class and each adjacent generator [g] the
     pass requires the assignment [A] to be lexicographically <= [g(A)] over a fixed atom
-    sequence, encoded with a prefix-equal chain of shared hash-consed [and]-terms (the
-    clausifier supplies Tseitin aux vars — no reserved symbols are minted). [A ⪯ g(A)]
-    keeps >=1 representative per orbit ⇒ SAT-preserving; adding constraints ⇒
-    UNSAT-preserving.
+    sequence, encoded with an O(n) prefix-equal chain carried by fresh reserved
+    [".oxsmt.sym.*"] nullary Bool aux vars (see the last paragraph). [A ⪯ g(A)] keeps >=1
+    representative per orbit ⇒ SAT-preserving; adding constraints ⇒ UNSAT-preserving.
 
     {b Size cap (sat-safe).} Emission is skipped for classes of size >= 6 (offline A/B:
     the size-6/7 classes regress the satisfiable instances they touch for ~0 conversion).
@@ -160,5 +159,14 @@ val simplify_projection : Context.t -> Term.t list -> Term.t list
 
     The lex prefix-equal chain uses fresh reserved [".oxsmt.sym.*"] nullary Bool aux vars
     (an O(n) encoding; minted through the cap-gated [Env.declare_reserved] with
-    [cap]/[env], kind ["sym"], disjoint from preprocessing's fresh symbols). *)
-val symmetry_break : Env.reserved_cap -> Env.t -> Context.t -> Term.t list -> Term.t list
+    [cap]/[env], kind ["sym"], disjoint from preprocessing's fresh symbols). [~counter] is
+    a caller-owned monotone name counter: it MUST persist across calls on one [env]
+    (idempotent [declare_reserved] would otherwise rebind [.oxsmt.sym.0] to a second,
+    conflicting definition on a repeat call — wrong-unsat). *)
+val symmetry_break
+  :  counter:int ref
+  -> Env.reserved_cap
+  -> Env.t
+  -> Context.t
+  -> Term.t list
+  -> Term.t list

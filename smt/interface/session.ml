@@ -130,10 +130,24 @@ type t =
          when [None] the whole feature is dark and byte-identical to trunk. *)
   ; mutable cert_active : bool
     (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
-     (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
-     would otherwise enter the cert as a trusted [Input], laundering a preprocessing
-     consequence into the query and blinding the gate (codex MED-3/4). Cert corpus runs
-     are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is free. *)
+         (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
+         would otherwise enter the cert as a trusted [Input], laundering a preprocessing
+         consequence into the query and blinding the gate (codex MED-3/4). Cert corpus
+         runs are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is
+         free. *)
+  ; sym_counter : int ref
+    (* symmetry breaking (task #25): a PER-SESSION monotone counter for the reserved
+         [.oxsmt.sym.*] aux-var names, so a second [assert_presolved] emission does not
+         reuse a name from the first (F2: idempotent [declare_reserved] would rebind it to
+         a conflicting definition). *)
+  ; mutable sym_sel : Sat.var option
+    (* symmetry breaking (task #25, F1): the ACTIVATION SELECTOR guarding the current
+     emission's lex clauses. The clauses are asserted as [(¬sym_sel ∨ C)] (via
+     [assert_clausified ~sel]); [check_sat] assumes [sym_sel] POSITIVE while [Some], so
+     the clauses are active. [sym_sel] occurs only negatively (a pure literal), so once a
+     later assertion clears it to [None] the clauses become vacuous — sound retraction of
+     a NON-MONOTONIC break without touching the permanent clause DB. Any assertion after
+     emission (assert_term / a further assert_presolved / push) clears it. *)
   }
 
 let create
@@ -202,6 +216,8 @@ let create
   ; elim_defs = []
   ; relevancy
   ; cert_active = false
+  ; sym_counter = ref 0
+  ; sym_sel = None
   }
 ;;
 
@@ -771,7 +787,19 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
   rec_ t0
 ;;
 
+(* Symmetry breaking (task #25, F1): drop the current activation selector so its lex
+   clauses go vacuous on every future solve. Every assertion entry point that can EXTEND
+   the formula after an emission calls this: a later assertion may break the detected
+   symmetry, and the (permanent) lex clauses would then be NON-MONOTONIC — a wrong-unsat.
+   The selector occurs only negatively in the clauses, so once it is no longer assumed
+   positive the clauses are trivially satisfiable — sound retraction without touching the
+   permanent clause DB. *)
+let deactivate_symbreak t = t.sym_sel <- None
+
 let assert_term t term =
+  (* F1: an assertion after a symmetry-breaking emission may break the detected symmetry;
+     retract the (non-monotonic) lex clauses first. *)
+  deactivate_symbreak t;
   (* Load-bearing assert-side gate (R1 POINT 4 + codex C1): a user term carrying ANY
      reserved [.oxsmt.*] symbol (a coerced/interned qvar OR a captured preprocessing
      witness) degrades to a clean [Unknown] via the I8 Unsupported discipline (NOT a raw
@@ -797,6 +825,15 @@ let internalize_reduced t term =
   | pterm -> assert_bool_at t pterm
 ;;
 
+(* Like {!internalize_reduced} but guards every emitted clause with [sel] (task #25 F1:
+   the symmetry-breaking activation selector). *)
+let internalize_reduced_at ~sel t term =
+  match Preprocess.run t.pp term with
+  | exception Term.Overflow -> t.degraded <- true
+  | exception Term.Unsupported _ -> t.degraded <- true
+  | pterm -> assert_bool_at ~sel t pterm
+;;
+
 (* W1b equality-elimination presolve (logs/w1b-design.md). The BATCH entry point: given
    the whole asserted set at once (the CLI's parse result), run the {!Presolve} pass, then
    internalize the REDUCED set while keeping the ORIGINAL terms in [t.asserted] for the R1
@@ -809,6 +846,9 @@ let internalize_reduced t term =
    a zero-alias input the pass is a no-op ([reduced = originals], [defs = []]) and this is
    byte-identical to asserting each original with {!assert_term}. *)
 let assert_presolved t terms =
+  (* F1: a further batch after a prior emission may break that symmetry; retract the prior
+     lex clauses before this batch (possibly) emits its own. *)
+  deactivate_symbreak t;
   if List.exists term_has_reserved terms
   then t.degraded <- true
   else (
@@ -846,10 +886,13 @@ let assert_presolved t terms =
     let sym_extra =
       if symbreak_enabled t
       then (
-        match Presolve.symmetry_break t.cap t.env t.ctx terms with
-        | exception Term.Overflow -> []
-        | exception Term.Unsupported _ -> []
-        | cs -> cs)
+        (* F2: per-session name counter (persists across batches). F3: FAIL-CLOSED on ANY
+           exception — a cross-sort candidate can drive [Context.eq] to [Term.Sort_error],
+           and a soundness-neutral optimization must degrade to "no breaking", never crash
+           the query. *)
+        match Presolve.symmetry_break ~counter:t.sym_counter t.cap t.env t.ctx terms with
+        | cs -> cs
+        | exception _ -> [])
       else []
     in
     match Presolve.run t.ctx terms with
@@ -901,7 +944,16 @@ let assert_presolved t terms =
       in
       List.iter (internalize_reduced t) reduced;
       List.iter (internalize_reduced t) extra;
-      List.iter (internalize_reduced t) sym_extra)
+      (* F1: guard the symmetry-breaking clauses with a fresh activation selector so a
+         later incremental assertion can retract them soundly (they are non-monotonic).
+         The selector is assumed positive by [check_sat] while [t.sym_sel = Some _]; it
+         occurs only negatively in the clauses, so clearing it makes them vacuous. *)
+      (match sym_extra with
+       | [] -> ()
+       | _ :: _ ->
+         let sel = Sat.new_var t.sat in
+         t.sym_sel <- Some sel;
+         List.iter (internalize_reduced_at ~sel t) sym_extra))
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
@@ -944,6 +996,9 @@ type lemma_def =
    [unit] is widened additively so the tranche-1 manual path — {!instantiate} — can name
    the lemma; a caller may ignore it). *)
 let assert_lemma t ~qvars ~build =
+  (* F1: a lemma extends the formula (its instances assert during solve); retract any
+     active symmetry-breaking emission first. *)
+  deactivate_symbreak t;
   let id = Manager.fresh_id t.mgr in
   let qv =
     Array.of_list
@@ -1012,6 +1067,10 @@ let assert_lemma t ~qvars ~build =
 let instantiate t lemma sigma = Manager.seed_instance t.mgr lemma sigma
 
 let push t =
+  (* F1: a new frame's assertions may break a prior emission's symmetry; retract its lex
+     clauses. (A later [pop] does not resurrect them — a re-emission would be needed,
+     which the batch path does not do; sound, only forgoes the bonus.) *)
+  deactivate_symbreak t;
   (* Snapshot the active assertion set BEFORE opening the frame, so the matching [pop]
      restores exactly the pre-frame set (F3: keeps [asserted] = the active set). *)
   t.asserted_saved <- t.asserted :: t.asserted_saved;
@@ -1395,7 +1454,19 @@ let check_sat t =
   else (
     Cdclt.begin_check t.cdclt;
     Manager.begin_check t.mgr (* fresh generation budget for this check_sat (§1.4) *);
-    let assumptions = List.map Sat.pos t.frames in
+    (* F1: while a symmetry-breaking emission is active, assume its activation selector
+       POSITIVE so the (selector-guarded) lex clauses constrain this solve. Once a later
+       assertion cleared [sym_sel] to [None], the selector is no longer assumed and —
+       since it occurs only negatively — the clauses are trivially satisfiable
+       (retracted). Under assumptions this stays sound: an [Unsat] means unsat given the
+       frame + activation assumptions, and the activation clauses are equisatisfiable, so
+       the query is unsat. *)
+    let assumptions =
+      let frame_asms = List.map Sat.pos t.frames in
+      match t.sym_sel with
+      | Some sel -> Sat.pos sel :: frame_asms
+      | None -> frame_asms
+    in
     (* THE outer instantiation loop (ADR-0012 §1.4). There is exactly ONE [Sat] exit to
        the client — the [not (has_live_lemma)] line — so THE SOUNDNESS RULE (§2) is an
        unconditional wrapper over EVERY ground [Sat] (H1+H2), never a per-arm edit: while

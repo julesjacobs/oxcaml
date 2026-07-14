@@ -922,11 +922,14 @@ let simplify_projection ctx assertions =
    g = (c_i c_{i+1}) (a confirmed symmetry), we require the assignment A to be
    lexicographically <= g(A) over a fixed-ordered atom sequence a_1..a_n (the equalities
    [(= cell c_v)] for application cells of the class sort and class values c_v), with
-   b_j = g(a_j) computed by rebuilding a_j under g. false<true, encoded with a
-   prefix-equal chain of SHARED hash-consed [and]-terms (the clausifier introduces its own
-   Tseitin aux vars — no reserved symbols are minted). A ⪯ g(A) keeps >=1 representative
-   per orbit ⇒ SAT-preserving; adding constraints ⇒ UNSAT-preserving; sound for any fixed
-   atom sequence (closure under g is NOT required — b_j is used as a plain Bool term).
+   b_j = g(a_j) computed by rebuilding a_j under g. false<true, encoded with an O(n)
+   prefix-equal chain whose "prefix so far" is carried by fresh reserved [.oxsmt.sym.*]
+   nullary Bool aux vars ([fresh_bool]). The aux var is OPAQUE, so [and (aux) atom] is a
+   2-input node that the AC-flattening smart constructor does NOT re-expand — a shared
+   [and]-term chain would instead re-flatten to O(n^2) clauses (measured: it tanks the
+   A/B). A ⪯ g(A) keeps >=1 representative per orbit ⇒ SAT-preserving; adding constraints ⇒
+   UNSAT-preserving; sound for any fixed atom sequence (closure under g is NOT required —
+   b_j is used as a plain Bool term).
 
    {b Size cap (sat-safe).} Emission is SKIPPED for classes of size >= [symbreak_emit_max]
    (default 6): the offline A/B showed size-6/7 classes regress the satisfiable instances
@@ -1009,7 +1012,7 @@ let symbreak_tag_multiset (terms : Term.t list) =
 (* [symmetry_break ctx assertions] — see the block comment. Returns extra top-level Bool
    constraints (the lex-leader clauses) to internalize alongside the assertions; [[]] when
    nothing is broken (byte-neutral to a no-symmetry input). *)
-let symmetry_break cap env ctx assertions =
+let symmetry_break ~counter cap env ctx assertions =
   let conjuncts = List.concat_map flatten assertions in
   let base_key = symbreak_tag_multiset conjuncts in
   let steps = ref 0 in
@@ -1021,8 +1024,10 @@ let symmetry_break cap env ctx assertions =
      — the aux var is opaque, so [and (aux) atom] is a 2-input And that the AC-flattening
      smart constructor does NOT re-expand, unlike a shared [and]-term which would blow up
      to O(n^2) clauses). Kind ["sym"] keeps the namespace disjoint from preprocessing's
-     fresh symbols. Deterministic (I6): a fixed input yields identical names. *)
-  let counter = ref 0 in
+     fresh symbols. [counter] is a PER-SESSION monotone ref (F2): a second call must not
+     reuse [.oxsmt.sym.0] — [Env.declare_reserved] is idempotent, so reuse would rebind
+     one name to a second, conflicting definition (wrong-unsat). Deterministic (I6): a
+     fixed call sequence yields identical names. *)
   let fresh_bool () =
     let name = Printf.sprintf "%ssym.%d" Env.reserved_prefix !counter in
     incr counter;
@@ -1089,25 +1094,27 @@ let symmetry_break cap env ctx assertions =
         (try Term.Table.find const_sig c with
          | Not_found -> [])
     in
-    (* 2. Group constants by sort, then refine each sort-group by signature into buckets. *)
+    (* 2. Group constants by sort, then refine each sort-group by signature into buckets.
+       Grouping is by [Sort.equal], NOT [Sort.hash] alone (F3): [Sort.hash] is
+       non-injective (e.g. distinct Uninterpreted/BitVec sorts can collide), and a
+       cross-sort candidate pair would drive [Context.eq] to raise [Term.Sort_error] out
+       of the pass. #distinct sorts is small, so equal-grouping is cheap. *)
     let const_list = Term.Set.elements !consts in
     (* term-tag order is Term.Set.elements order (Set uses Term.compare = tag). *)
-    let by_sort = Hashtbl.create 16 in
-    List.iter
-      (fun c ->
-         let k = Sort.hash c.Term.sort in
-         let prev =
-           try Hashtbl.find by_sort k with
-           | Not_found -> []
-         in
-         Hashtbl.replace by_sort k (c :: prev))
-      const_list;
+    let sorts =
+      List.fold_left
+        (fun acc c ->
+           if List.exists (Sort.equal c.Term.sort) acc then acc else acc @ [ c.Term.sort ])
+        []
+        const_list
+    in
     let cell_list = Term.Set.elements !cells in
     let out = ref [] in
     let n_constraints = ref 0 in
-    (* deterministic sort-group order: by the min constant tag in the group *)
+    (* one group per distinct sort (tag order preserved by [filter]); deterministic
+       sort-group order by the min constant tag in the group. *)
     let sort_groups =
-      Hashtbl.fold (fun _ v acc -> List.rev v :: acc) by_sort []
+      List.map (fun s -> List.filter (fun c -> Sort.equal c.Term.sort s) const_list) sorts
       |> List.sort (fun g1 g2 ->
         match g1, g2 with
         | c1 :: _, c2 :: _ -> Int.compare c1.Term.tag c2.Term.tag

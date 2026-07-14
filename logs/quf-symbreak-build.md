@@ -95,3 +95,48 @@ with a sound, dark, size-capped lever.
 Built, gated, A/B-clean, dark. **NOT landed** (per charter). Frozen at the **tip of
 `task/quf-symbreak`** (off trunk `c37fee56d7`); awaiting dual review. Follow-up: quiesced
 lock-box A/B for a promotable magnitude before any default flip.
+
+---
+
+## Fix round (post-review) + rebase
+
+Both review legs (fable APPROVE-dark; codex SAFE-dark / three verified defects) drove a
+fix stack, now rebased onto trunk `a2423ec5fd`. Tip of `task/quf-symbreak` after rebase.
+
+- **F1 (wrong-unsat, non-monotonic incremental).** Symmetry breaking is not monotonic: an
+  assertion AFTER the emission can break the detected symmetry while the (permanent) lex
+  clauses remain → a SAT model wrongly refuted. Fix: the lex clauses are guarded by a fresh
+  **activation selector** (`assert_clausified ~sel`); `check_sat` assumes it POSITIVE while
+  `sym_sel = Some _`, and every post-emission assertion entry point (`assert_term`,
+  a further `assert_presolved`, `push`, `assert_lemma`) clears it to `None`. The selector
+  occurs only negatively (a pure literal), so once unassumed the clauses are trivially
+  satisfiable — sound retraction without touching the permanent clause DB. RED-verified:
+  `(= (op e0 e1) e0)` is base-SAT (z3) but the stale clauses refute it with the retraction
+  disabled.
+- **F2 (wrong-unsat, aux-var name reuse).** The `.oxsmt.sym.*` counter was per-call; a
+  second emission reused `.oxsmt.sym.0` with a conflicting definition (idempotent
+  `declare_reserved`). Fix: a per-session monotone `~counter` ref. RED-verified: two calls
+  sharing a counter now emit disjoint names (else overlap=50/50).
+- **F3 (crash).** Sort grouping used `Sort.hash` without `Sort.equal` → a hash collision
+  pairs cross-sort constants → `Context.eq` raises `Term.Sort_error` escaping the firewall.
+  Fix: group by `Sort.equal`; the `sym_extra` firewall is now fail-closed on ANY exception
+  (→ no breaking, never a crash). Test: a two-sort input is handled with no cross-sort pair.
+- **F4.** Corrected the `.mli`/impl comments that still described the abandoned
+  shared-`and`-term encoding; they now match the shipped O(n) reserved-aux-var chain.
+
+### Gates after rebase (by EXIT CODE)
+
+| gate | result |
+|---|---|
+| `make test` (OFF, bit-identical) | exit 0 |
+| `make symbreak-test` (now 8 checks: adds F1 incremental, F2 counter, F3 two-sort) | exit 0 |
+| `make check-frozen` | exit 0 |
+| touched-file fmt | clean |
+
+Label recheck (stratified 46-file QG sample, OFF vs ON): 0 ON-verdict-vs-`:status`
+mismatches; 6 conversions — the batch-path win is preserved (F1 retraction only fires on
+post-emission assertions, which the batch CLI never makes).
+
+The full-7503 ON/OFF A/B numbers above (net +969, 0 disagreements) stand for the batch
+path, which the fix round does not alter; a fresh quiesced lock-box A/B remains the
+promotable-magnitude follow-up. NOT landed; narrow dual confirm pending.
