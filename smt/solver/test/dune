@@ -20,6 +20,11 @@
  (libraries oxsmt_solver))
 
 (executable
+ (name satpre_test)
+ (modules satpre_test)
+ (libraries oxsmt_solver))
+
+(executable
  (name sat_bench)
  (modules sat_bench)
  (libraries oxsmt_solver oxsmt_dimacs))

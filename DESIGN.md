@@ -634,3 +634,24 @@ the solver's own highest-activity unassigned child rather than an arbitrary
 lowest-var pick; this measurably tames the decision-count variance the first-cut
 lowest-var driver showed on the QF_UF sat sample. Read-only and side-effect-free,
 so it carries none of the soundness weight of the branch filter itself.
+
+### A10 — Tranche-C unfreeze: eliminable-variable marking for CNF pre/inprocessing (2026-07-14)
+
+`sat.mli` grows one value, `set_eliminable : t -> var -> unit`, and `FROZEN.sha256`
+is regenerated to match. Same additive shape as A8/A9: none of the 14 frozen
+declarations change, and a client that never calls it (the default) leaves the
+whole feature inert — SAT preprocessing (bounded clause elimination, Jacobs 2021)
+eliminates nothing, and verdicts/models/counters are bit-identical. The value is
+the seam by which the clausifier tells the core which variables are pure Tseitin
+auxiliaries (invisible outside the SAT core) and therefore safe to eliminate. The
+core DEFAULTS every variable frozen, so this is the sole opt-in and "when in doubt,
+freeze" is structural: a forgotten marking costs only effectiveness, never
+soundness. Preprocessing itself is env-gated (`OXSMT_SATPRE`, default OFF) and, like
+the presolve passes, disabled while a certificate trace is installed (the added
+resolvents / deleted clauses are not yet routed through cert emission — a follow-up).
+Soundness rests on the note's Lemma 1 reconstruction, which the core performs inside
+the single model-snapshot choke point (`save_model`) before any consumer reads a
+value — so a reported model is correct over every variable including eliminated ones,
+with no downstream check required (the raw-SAT-API contract); a marked variable that
+later reappears in an added clause is restored (its deleted clauses re-added) to keep
+the elimination sound under incremental additions.

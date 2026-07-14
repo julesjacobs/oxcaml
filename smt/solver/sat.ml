@@ -194,13 +194,35 @@ type t =
          the pure core (bit-identical). *)
   ; mutable branch_filter : (int -> bool) option
     (* Relevancy branch-filter (sat.mli set_branch_filter). [None] => [pick_branch] is
-     bit-identical to the pre-hook core. When [Some f], [pick_branch] will not DECIDE an
-     unassigned var [v] with [f v = false]; it skips and re-inserts it (so it stays a
-     candidate for when it becomes relevant), and returns [None] when only filtered-out
-     vars remain (a complete assignment over the branchable vars => hand off to the Final
-     check). The filter adds nothing to the trail, so it cannot create a conflict; the
-     driver owns the soundness obligation that an irrelevant atom is safe to leave
-     unbranched (backstop: the session Final-check / model-check, fail-closed). *)
+         bit-identical to the pre-hook core. When [Some f], [pick_branch] will not DECIDE
+         an unassigned var [v] with [f v = false]; it skips and re-inserts it (so it stays
+         a candidate for when it becomes relevant), and returns [None] when only
+         filtered-out vars remain (a complete assignment over the branchable vars => hand
+         off to the Final check). The filter adds nothing to the trail, so it cannot
+         create a conflict; the driver owns the soundness obligation that an irrelevant
+         atom is safe to leave unbranched (backstop: the session Final-check /
+         model-check, fail-closed). *)
+  ; (* CNF preprocessing / inprocessing (DESIGN.md A10; Jacobs 2021 bounded clause
+       elimination). [satpre] is the OXSMT_SATPRE env gate, read once at [create]: OFF =>
+       [preprocess] is a no-op and every field below stays empty/false, so the core is
+       bit-identical. *)
+    satpre : bool
+  ; eliminable : bool Dynarray.t
+    (* per-var: [true] iff a client marked [v] eliminable (set_eliminable). DEFAULT
+         false (frozen) — only pure-aux Tseitin vars are ever marked. *)
+  ; eliminated : bool Dynarray.t
+    (* per-var: [true] once [preprocess] eliminated [v] (all its clauses removed). Such
+         a var is skipped by [pick_branch] (it is in no clause) and its model value is
+         reconstructed in [save_model]. *)
+  ; elim_stack : (lit array * lit) Dynarray.t
+    (* the reconstruction stack (the note's clause-deletion form): (deleted clause,
+         pivot literal), in elimination order. [save_model] pops it in REVERSE, flipping
+         the pivot var to satisfy any deleted clause the reduced model left unsatisfied. *)
+  ; restore_map : (var, lit array list) Hashtbl.t
+    (* per eliminated pivot var: the clauses deleted for it, so [add_clause] can restore
+     them (re-add + un-eliminate) if a later clause names the var — the note's "restore
+     clauses deleted on l when a clause containing ¬l arrives" (kept sound under
+     incrementality). Empty unless something was eliminated. *)
   }
 
 let var_decay = 0.95
@@ -229,6 +251,15 @@ let adaptive_restart_enabled = false
 
 (* One exponential-moving-average step: [x <- x + alpha*(sample - x)]. *)
 let ema_step x ~alpha ~sample = x +. (alpha *. (sample -. x))
+
+(* CNF preprocessing / inprocessing gate (DESIGN.md A10). OFF by default; ON only when
+   OXSMT_SATPRE names a truthy value. Read once at [create] into [t.satpre]. With it OFF
+   the whole feature is inert (bit-identical). *)
+let satpre_enabled () =
+  match Sys.getenv_opt "OXSMT_SATPRE" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
 
 let create () =
   { nvars = 0
@@ -273,6 +304,11 @@ let create () =
   ; theory = None
   ; budget_tick = None
   ; branch_filter = None
+  ; satpre = satpre_enabled ()
+  ; eliminable = Dynarray.create ()
+  ; eliminated = Dynarray.create ()
+  ; elim_stack = Dynarray.create ()
+  ; restore_map = Hashtbl.create 16
   }
 ;;
 
@@ -461,6 +497,8 @@ let ensure_var t v =
     Dynarray.add_last t.heap_pos (-1);
     Dynarray.add_last t.watches (Dynarray.create ());
     Dynarray.add_last t.watches (Dynarray.create ());
+    Dynarray.add_last t.eliminable false (* default frozen (A10) *);
+    Dynarray.add_last t.eliminated false;
     let nv = t.nvars in
     t.nvars <- t.nvars + 1;
     heap_insert t nv
@@ -471,6 +509,14 @@ let new_var t =
   let v = t.nvars in
   ensure_var t v;
   v
+;;
+
+(* Mark [v] eligible for variable elimination (DESIGN.md A10). Idempotent; grows per-var
+   state on demand so a var named before allocation is handled. DEFAULT is frozen — this
+   is the sole opt-in. *)
+let set_eliminable t v =
+  ensure_var t v;
+  Dynarray.set t.eliminable v true
 ;;
 
 let fresh_id t =
@@ -979,8 +1025,51 @@ let reduce_db t =
 (* Permanent clause addition with level-0 simplification. Only legal at decision level 0
    (guaranteed by [solve], which cancels to 0 before returning). *)
 
+(* Restore-on-mention (the note's "a new clause containing ¬l restores clauses deleted on
+   l", generalized to any mention of the pivot var — conservatively sound, restores a
+   superset). Un-eliminates [v]: re-decision-eligible, and every clause deleted for it is
+   re-added through {!add_clause} (so it is level-0-simplified afresh). Cascades — a
+   restored clause may name another eliminated var — and terminates because each call
+   removes [v] from [restore_map] first. The stale [elim_stack] entries for [v] are
+   harmless: the clause is back in the DB and satisfied by any model, so the
+   flip-to-satisfy walk never fires on it. In oxsmt this path is unreachable (aux vars are
+   per-formula fresh, never named by a later clause, and theory lemmas hold only frozen
+   theory atoms) — it is here for the general incremental contract. Forward reference to
+   [add_clause] via a ref, set below. *)
+let add_clause_ref : (?origin:origin -> t -> lit list -> unit) ref =
+  ref (fun ?origin:_ _ _ -> assert false)
+;;
+
+let rec restore_eliminated t v =
+  match Hashtbl.find_opt t.restore_map v with
+  | None -> ()
+  | Some clauses ->
+    Hashtbl.remove t.restore_map v;
+    Dynarray.set t.eliminated v false;
+    heap_insert t v;
+    List.iter
+      (fun cl ->
+         Array.iter
+           (fun l ->
+              let w = var_of_lit l in
+              if Dynarray.get t.eliminated w then restore_eliminated t w)
+           cl;
+         !add_clause_ref t (Array.to_list cl))
+      clauses
+;;
+
 let add_clause ?(origin = Query) t lits =
   List.iter (fun l -> ensure_var t (var_of_lit l)) lits;
+  (* A10 restore hook: if any literal names an already-eliminated var, restore it first so
+     the elimination stays sound. Guarded on a non-empty [restore_map] so an untouched
+     core (OXSMT_SATPRE off) pays nothing. *)
+  if Hashtbl.length t.restore_map > 0
+  then
+    List.iter
+      (fun l ->
+         let v = var_of_lit l in
+         if Dynarray.get t.eliminated v then restore_eliminated t v)
+      lits;
   if t.ok
   then (
     (* Cert emission (ADR-0013 §4.0): reserve a stable id and surface the RAW input clause
@@ -1032,6 +1121,9 @@ let add_clause ?(origin = Query) t lits =
           attach t c)))
 ;;
 
+(* Wire the forward reference used by {!restore_eliminated} (A10). *)
+let () = add_clause_ref := add_clause
+
 (* ------------------------------------------------------------------ *)
 (* Branching and search. *)
 
@@ -1056,7 +1148,11 @@ let pick_branch t =
       match heap_remove_max t with
       | None -> None
       | Some v ->
-        if Dynarray.get t.assigns v = 0
+        (* An eliminated var (A10) is in no clause; drop it from the order permanently
+           (never re-inserted) so it is never decided — its model value is reconstructed
+           in [save_model]. [eliminated] is all-false unless preprocessing ran, so this is
+           bit-identical when OXSMT_SATPRE is off. *)
+        if Dynarray.get t.assigns v = 0 && not (Dynarray.get t.eliminated v)
         then Some (if Dynarray.get t.polarity v then neg v else pos v)
         else go ()
     in
@@ -1088,8 +1184,8 @@ let pick_branch t =
       match heap_remove_max t with
       | None -> None
       | Some v ->
-        if Dynarray.get t.assigns v <> 0
-        then go () (* already assigned: drop, exactly as the no-filter loop does *)
+        if Dynarray.get t.assigns v <> 0 || Dynarray.get t.eliminated v
+        then go () (* already assigned or eliminated (A10): drop, as the no-filter loop *)
         else (
           (* [v] is popped: own it via [in_flight] across the (untrusted,
              possibly-raising) [filter] call, so the [finally] re-inserts it if [filter]
@@ -1110,10 +1206,37 @@ let pick_branch t =
     Fun.protect ~finally:reinsert go
 ;;
 
+(* Signed value of a literal under [saved_model] (1 true, -1 false, 0 unknown), for the
+   A10 reconstruction — [lit_val] reads [t.assigns], but at save time we walk the SNAPSHOT
+   because reconstruction mutates it. *)
+let saved_lit_val t l =
+  let s = Dynarray.get t.saved_model (var_of_lit l) in
+  if s = 0 then 0 else if sign_of_lit l then s else -s
+;;
+
+(* Take the model snapshot; then, if variable elimination ran (A10), reconstruct the
+   eliminated variables. Per the note's clause-deletion form (Lemma 1): an eliminated var
+   is unassigned in [assigns], so it enters the snapshot with a default of FALSE; then we
+   pop the deletion stack in REVERSE and, for each (deleted clause, pivot literal) whose
+   clause the reduced model leaves unsatisfied, force the pivot literal true. Reverse
+   order is essential — the last elimination is undone first — and correctness rests on
+   the added resolvents (permanent, hence satisfied) guaranteeing no two same-var pivots
+   demand opposite values. With no elimination [elim_stack] is empty, so this is exactly
+   the old snapshot (bit-identical when OXSMT_SATPRE is off). *)
 let save_model t =
   Dynarray.clear t.saved_model;
   for v = 0 to t.nvars - 1 do
-    Dynarray.add_last t.saved_model (Dynarray.get t.assigns v)
+    let a = Dynarray.get t.assigns v in
+    (* an eliminated var is never on the trail (never decided/propagated): default it
+       FALSE in the snapshot, to be fixed up by the flip-to-satisfy walk below *)
+    let a = if a = 0 && Dynarray.get t.eliminated v then -1 else a in
+    Dynarray.add_last t.saved_model a
+  done;
+  for i = Dynarray.length t.elim_stack - 1 downto 0 do
+    let cl, piv = Dynarray.get t.elim_stack i in
+    let satisfied = Array.exists (fun l -> saved_lit_val t l = 1) cl in
+    if not satisfied
+    then Dynarray.set t.saved_model (var_of_lit piv) (if sign_of_lit piv then 1 else -1)
   done
 ;;
 
@@ -1510,6 +1633,227 @@ let luby restart_no =
   1 lsl !seq
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* CNF preprocessing (DESIGN.md A10; Jacobs 2021 "Bounded clause elimination"). Env-gated
+   (OXSMT_SATPRE), OFF when a certificate trace is installed, run at [solve] entry (level
+   0). Two passes over a working copy of the original clauses: forward subsumption (delete
+   a clause another clause subsumes) then bounded variable elimination on ELIMINABLE vars
+   only (the note's [elim]: add all non-tautological resolvents, delete the pivot's
+   clauses, record them on the reconstruction stack). The clause DB is rebuilt from the
+   survivors.
+
+   Phase 1 restricts to the pre-search state: it runs only with NO learned clauses (so a
+   var we eliminate is guaranteed absent from every clause — a learned clause referencing
+   an eliminated var would be a wrong-Unsat risk since it is no longer entailed by the
+   reduced set). Phase 2 (inprocessing) will re-run a learnt-aware engine at restart level
+   0. *)
+
+(* A working clause: a deduped, ascending-sorted literal array plus a death flag.
+   Immutable [wl] once created (the reconstruction stack aliases it), so elimination only
+   flips [wdead]. *)
+type wclause =
+  { wl : lit array
+  ; mutable wdead : bool
+  }
+
+let bve_size_cap = 20 (* skip a resolvent longer than this *)
+let bve_product_cap = 64 (* skip a var whose |pos|*|neg| exceeds this (bound the work) *)
+let bve_margin = 0 (* eliminate only if #resolvents <= #deleted + margin (classic BVE) *)
+
+(* Is sorted array [a] a subset of sorted array [b] (both ascending, deduped)? Linear
+   merge. *)
+let sorted_subset a b =
+  let la = Array.length a
+  and lb = Array.length b in
+  if la > lb
+  then false
+  else (
+    let i = ref 0
+    and j = ref 0 in
+    while !i < la && !j < lb && a.(!i) >= b.(!j) do
+      if a.(!i) = b.(!j)
+      then (
+        incr i;
+        incr j)
+      else incr j (* b.(!j) < a.(!i): skip it *)
+    done;
+    !i = la)
+;;
+
+(* Resolvent of [a] (contains literal [pos v]) and [b] (contains [neg v]) on variable [v]:
+   the union of [a\{pos v}] and [b\{neg v}], deduped and sorted. [None] if it is a
+   tautology (contains some literal and its negation). *)
+let resolve_on a b v =
+  let pv = pos v
+  and nv = neg v in
+  let seen = Hashtbl.create 16 in
+  let add l = if l <> pv && l <> nv then Hashtbl.replace seen l () in
+  Array.iter add a;
+  Array.iter add b;
+  let taut =
+    Hashtbl.fold (fun l () acc -> acc || Hashtbl.mem seen (neg_lit l)) seen false
+  in
+  if taut
+  then None
+  else (
+    let lits = Hashtbl.fold (fun l () acc -> l :: acc) seen [] in
+    let arr = Array.of_list lits in
+    Array.sort compare arr;
+    Some arr)
+;;
+
+let preprocess t =
+  if t.satpre && t.trace = None && Dynarray.length t.learnts = 0 && t.ok
+  then (
+    match propagate t with
+    | Some _ -> () (* level-0 conflict: bail and let search conclude unsat uniformly *)
+    | None ->
+      (* Build the working set from the original clauses, simplified against the level-0
+         unit closure: drop clauses a level-0-true literal satisfies, drop level-0-false
+         literals. After full propagation every surviving clause has >= 2 unassigned
+         literals (a would-be unit already propagated), so a size <= 1 survivor is
+         unexpected — treat it defensively as a reason to bail. *)
+      let work = Dynarray.create () in
+      let bail = ref false in
+      Dynarray.iter
+        (fun c ->
+           if (not c.deleted) && not !bail
+           then (
+             let satisfied = Array.exists (fun l -> lit_val t l = 1) c.lits in
+             if not satisfied
+             then (
+               let ls =
+                 Array.to_list c.lits
+                 |> List.filter (fun l -> lit_val t l <> -1)
+                 |> List.sort_uniq compare
+               in
+               match ls with
+               | [] | [ _ ] -> bail := true
+               | _ -> Dynarray.add_last work { wl = Array.of_list ls; wdead = false })))
+        t.clauses;
+      if not !bail
+      then (
+        let n2 = 2 * t.nvars in
+        (* Occurrence lists, indexed by literal: working-clause indices containing it. A
+           clause holds each literal at most once, so no duplicate indices are added; dead
+           clauses are filtered lazily at use. Resolvents append here as they are created,
+           so a later var's elimination sees the updated clause set (chained elimination). *)
+        let occ = Array.make n2 [] in
+        Dynarray.iteri
+          (fun i wc -> Array.iter (fun l -> occ.(l) <- i :: occ.(l)) wc.wl)
+          work;
+        let add_wclause lits =
+          let i = Dynarray.length work in
+          Dynarray.add_last work { wl = lits; wdead = false };
+          Array.iter (fun l -> occ.(l) <- i :: occ.(l)) lits;
+          i
+        in
+        let live j = not (Dynarray.get work j).wdead in
+        (* ---- Forward subsumption: mark a clause dead if another clause subsumes it.
+           ---- *)
+        Dynarray.iteri
+          (fun i wc ->
+             if not wc.wdead
+             then (
+               (* scan candidates off the literal with the fewest occurrences *)
+               let lmin = ref wc.wl.(0) in
+               Array.iter
+                 (fun l ->
+                    if List.length occ.(l) < List.length occ.(!lmin) then lmin := l)
+                 wc.wl;
+               let subsumed = ref false in
+               List.iter
+                 (fun j ->
+                    if (not !subsumed) && j <> i && live j
+                    then (
+                      let d = Dynarray.get work j in
+                      if
+                        Array.length d.wl <= Array.length wc.wl
+                        && sorted_subset d.wl wc.wl
+                      then subsumed := true))
+                 occ.(!lmin);
+               if !subsumed then wc.wdead <- true))
+          work;
+        (* ---- Bounded variable elimination on eliminable vars. ---- *)
+        for v = 0 to t.nvars - 1 do
+          if
+            Dynarray.get t.eliminable v
+            && (not (Dynarray.get t.eliminated v))
+            && Dynarray.get t.assigns v = 0
+          then (
+            let ps = List.filter live occ.(pos v) in
+            let ns = List.filter live occ.(neg v) in
+            let np = List.length ps
+            and nn = List.length ns in
+            let do_eliminate deleted_idxs resolvents =
+              List.iter (fun r -> ignore (add_wclause r : int)) resolvents;
+              List.iter
+                (fun (j, piv) ->
+                   let wc = Dynarray.get work j in
+                   wc.wdead <- true;
+                   Dynarray.add_last t.elim_stack (wc.wl, piv))
+                deleted_idxs;
+              Dynarray.set t.eliminated v true;
+              Hashtbl.replace
+                t.restore_map
+                v
+                (List.map (fun (j, _) -> (Dynarray.get work j).wl) deleted_idxs)
+            in
+            if np = 0 && nn = 0
+            then Dynarray.set t.eliminated v true (* in no clause: nothing to delete *)
+            else if np = 0
+            then
+              (* pure literal (only negative): delete the neg clauses, pivot [neg v] *)
+              do_eliminate (List.map (fun j -> j, neg v) ns) []
+            else if nn = 0
+            then do_eliminate (List.map (fun j -> j, pos v) ps) []
+            else if np * nn <= bve_product_cap
+            then (
+              (* general elimination: compute resolvents, disqualify on a unit/empty
+                 resolvent (would open a propagation this prototype does not thread) or an
+                 over-long one, then apply the classic count bound. *)
+              let resolvents = ref [] in
+              let disqualified = ref false in
+              List.iter
+                (fun pi ->
+                   List.iter
+                     (fun ni ->
+                        if not !disqualified
+                        then (
+                          match
+                            resolve_on
+                              (Dynarray.get work pi).wl
+                              (Dynarray.get work ni).wl
+                              v
+                          with
+                          | None -> () (* tautological resolvent: drops out (BCE) *)
+                          | Some r ->
+                            if Array.length r <= 1 || Array.length r > bve_size_cap
+                            then disqualified := true
+                            else resolvents := r :: !resolvents))
+                     ns)
+                ps;
+              if (not !disqualified) && List.length !resolvents <= np + nn + bve_margin
+              then (
+                let deleted =
+                  List.map (fun j -> j, pos v) ps @ List.map (fun j -> j, neg v) ns
+                in
+                do_eliminate deleted !resolvents)))
+        done;
+        (* ---- Rebuild the clause DB from the survivors. ---- *)
+        for l = 0 to n2 - 1 do
+          Dynarray.clear (Dynarray.get t.watches l)
+        done;
+        Dynarray.clear t.clauses;
+        Dynarray.iter
+          (fun wc ->
+             if (not wc.wdead) && Array.length wc.wl >= 2
+             then (
+               let c = mk_clause t wc.wl false in
+               attach t c))
+          work))
+;;
+
 let solve ?(assumptions = []) t =
   t.failed <- [];
   List.iter (fun l -> ensure_var t (var_of_lit l)) assumptions;
@@ -1542,6 +1886,10 @@ let solve ?(assumptions = []) t =
        incremental re-solve whose cumulative [t.conflicts] already exceeds it. *)
     t.next_reduce <- t.conflicts + reduce_first;
     t.best_trail_len <- 0;
+    (* CNF preprocessing (A10): env-gated, cert-OFF, level 0. A no-op when OXSMT_SATPRE is
+       off (bit-identical); when on it may simplify the clause DB and eliminate marked aux
+       vars (reconstructed at [save_model]). *)
+    preprocess t;
     let rec go restart_no =
       (* Luby conflict-count cap kept alongside the adaptive trigger (S3): a loose upper
          bound that forces a restart if the LBD trigger never fires. *)

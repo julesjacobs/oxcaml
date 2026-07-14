@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -143,6 +143,14 @@ core-prelude-test:
 ##   an independent DPLL oracle. Nonzero exit on any failed check (TASKS.md M1-sat).
 sat-test:
 	$(DUNE) exec smt/solver/test/sat_test.exe
+
+## satpre-test — CNF preprocessing / bounded variable elimination (DESIGN.md A10). Run with
+##   OXSMT_SATPRE=1 so the gate is ON (the feature is read at Sat.create); the executable
+##   SKIPS with the gate off. Firing (marked run does fewer propagations than unmarked),
+##   reconstruction (every model satisfies the original clauses; forced-flip cases), and
+##   UNSAT preservation. Nonzero exit on any failed check.
+satpre-test:
+	OXSMT_SATPRE=1 $(DUNE) exec smt/solver/test/satpre_test.exe
 
 ## seam-test — CDCL(T) theory-callback seam (smt/solver, ADR-0005 §3) self-test via a
 ##   scripted MOCK theory: theory conflict at various trail depths, propagation-then-
@@ -536,6 +544,8 @@ test: check-frozen
 	$(MAKE) dt-sat-gate
 	$(MAKE) array-sat-gate
 	$(MAKE) regress-test
+	$(MAKE) sat-test
+	$(MAKE) satpre-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

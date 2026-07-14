@@ -329,3 +329,31 @@ val decision_level : t -> int
     proof unaffected. A pure side channel: it never feeds conflict analysis and never
     alters a learned clause. *)
 val set_branch_filter : t -> (var -> bool) option -> unit
+
+(** {2 CNF preprocessing / inprocessing — eliminable-variable marking (DESIGN.md A10)}
+
+    Mark variable [v] as eligible for CNF-level variable elimination (bounded variable
+    elimination / blocked-clause elimination, Jacobs 2021 "Bounded clause elimination").
+    The core DEFAULTS every variable {b frozen} — never eliminated — so a client that
+    never calls this (the default) leaves the whole feature inert: preprocessing
+    eliminates nothing and the search is {b bit-identical} to today (verdicts, models, and
+    the conflicts/decisions/propagations trio unchanged). This is the "when in doubt,
+    freeze" discipline made structural: only a variable a client has {e explicitly}
+    certified as invisible outside the SAT core — a pure auxiliary (Tseitin) structure
+    variable that no model path reads, that is not a theory-seam atom, an
+    assumption/selector literal, or a variable any re-added clause can name — may be
+    marked eliminable, and a forgotten marking costs only effectiveness, never soundness.
+
+    Preprocessing itself is env-gated ([OXSMT_SATPRE], default OFF) and runs at [solve]
+    entry (decision level 0); it is additionally disabled whenever a {!set_trace}
+    certificate trace is installed (the added resolvents / deleted clauses are not yet
+    routed through certificate emission). When it eliminates a marked variable [v] it
+    records the deleted clauses on a per-instance reconstruction stack; the model snapshot
+    taken at [Sat] reconstructs [v]'s value (flip-to-satisfy, per the note's Lemma 1)
+    before {!value}/{!model} read it, so a reported model is correct over {e every}
+    variable including eliminated ones — unconditionally, with no downstream check
+    required (the raw-SAT-API contract). Marking is idempotent and legal at any time; a
+    variable already eliminated that later appears in a newly {!add_clause}d clause is
+    restored (its deleted clauses re-added) so the elimination stays sound under
+    incremental additions. *)
+val set_eliminable : t -> var -> unit

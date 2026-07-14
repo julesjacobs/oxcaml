@@ -466,6 +466,13 @@ let assert_clausified ?sel ~root t cnf =
       | Some sv -> sv
       | None ->
         let sv = Sat.new_var t.sat in
+        (* A10: this is the SOLE site that mints a pure Tseitin auxiliary variable — fresh
+           per formula, never recorded in [prop_to_var]/[bool_consts]/[frames], never a
+           theory-seam atom (those go through [Cdclt.intern_atom] above), never named by a
+           later clause or a theory lemma. Mark it eliminable so SAT preprocessing may
+           eliminate it (no-op unless OXSMT_SATPRE is on). Every other [Sat.new_var] in
+           the session stays frozen by default (read by a model path or the theory seam). *)
+        Sat.set_eliminable t.sat sv;
         local.(v) <- Some sv;
         sv)
   in

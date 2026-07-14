@@ -847,7 +847,29 @@ let test_branch_filter_exception_safe () =
   check "branch-filter exn-safe: model satisfies (a ∨ b)" (Sat.value s a || Sat.value s b)
 ;;
 
+(* A10: with OXSMT_SATPRE off (the default this executable runs under), [set_eliminable]
+   is inert — marking variables must not change the verdict, model, or the counter trio
+   versus a run that never marks anything. Guards the "bit-identical when off" contract at
+   the unit level; the firing / reconstruction behaviour with the gate ON lives in
+   satpre_test.exe (run with OXSMT_SATPRE=1). *)
+let test_eliminable_inert_when_off () =
+  let clauses = [ [ -1; 2 ]; [ 1; -2; 3 ]; [ -3; 4 ]; [ 1; 2; -4 ]; [ -1; -3; 4 ] ] in
+  let run mark =
+    let s = build 4 clauses in
+    if mark then List.iter (fun v -> Sat.set_eliminable s v) [ 0; 1; 2; 3 ];
+    let r = Sat.solve s in
+    let st = Sat.stats s in
+    r, Array.to_list (Sat.model s), (st.conflicts, st.decisions, st.propagations)
+  in
+  let r0, m0, c0 = run false in
+  let r1, m1, c1 = run true in
+  check "eliminable-off: same verdict" (r0 = r1);
+  check "eliminable-off: same model" (m0 = m1);
+  check "eliminable-off: same counters" (c0 = c1)
+;;
+
 let () =
+  test_eliminable_inert_when_off ();
   test_branch_filter_firing ();
   test_branch_filter_parity ();
   test_branch_filter_exception_safe ();
