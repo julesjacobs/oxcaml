@@ -137,20 +137,57 @@ let gen_sparse () =
   num_vars, List.init num_clauses (fun _ -> clause ())
 ;;
 
+(* A learned clause L must be ENTAILED by the formula F: F ∧ ¬L is UNSAT (checked with the
+   INDEPENDENT DPLL oracle, never the solver under test). CB rewires the learning path
+   (conflict_level, the walk-skip), so this guards that the out-of-order 1UIP still
+   derives only sound clauses — a too-strong learnt (dropping a needed literal) is caught
+   here even when the final verdict is unaffected. Mirrors sat_test's
+   [learned_clause_entailed]. *)
+let learned_entailed num_vars clauses learned_dimacs =
+  let neg_units = List.map (fun l -> [ -l ]) learned_dimacs in
+  not (Oracle.solve num_vars (List.rev_append neg_units clauses))
+;;
+
+let dimacs_of_lit l =
+  let v = Sat.var_of_lit l + 1 in
+  if Sat.sign_of_lit l then v else -v
+;;
+
 let test_property label gen n =
   let disagreements = ref 0 in
   let bad_models = ref 0 in
   let sat_count = ref 0 in
+  let n_learned = ref 0 in
+  let unentailed = ref 0 in
   for _ = 1 to n do
     let num_vars, clauses = gen () in
     let expected = Oracle.solve num_vars clauses in
     let s = build num_vars clauses in
-    match Sat.solve s with
-    | Sat.Sat ->
-      incr sat_count;
-      if not expected then incr disagreements;
-      if not (model_satisfies clauses (Sat.model s)) then incr bad_models
-    | Sat.Unsat -> if expected then incr disagreements
+    (* Collect every learned clause (as DIMACS) under CB for entailment-checking. Trace is
+       a pure side channel; it does not perturb the search. *)
+    let learned = ref [] in
+    Sat.set_trace
+      s
+      (Some
+         { Sat.on_learned =
+             (fun ~id:_ ~clause ~antecedents:_ ~btlevel:_ ->
+               learned := List.map dimacs_of_lit (Array.to_list clause) :: !learned)
+         ; on_input = (fun ~id:_ ~clause:_ ~origin:_ -> ())
+         ; on_unit = (fun ~id:_ ~lit:_ -> ())
+         ; on_theory_clause = (fun ~id:_ ~clause:_ ~role:_ -> ())
+         ; on_unsat = (fun _ -> ())
+         });
+    (match Sat.solve s with
+     | Sat.Sat ->
+       incr sat_count;
+       if not expected then incr disagreements;
+       if not (model_satisfies clauses (Sat.model s)) then incr bad_models
+     | Sat.Unsat -> if expected then incr disagreements);
+    List.iter
+      (fun l ->
+         incr n_learned;
+         if not (learned_entailed num_vars clauses l) then incr unentailed)
+      !learned
   done;
   check
     (Printf.sprintf
@@ -162,7 +199,19 @@ let test_property label gen n =
   check
     (Printf.sprintf "property[%s]: all sat models valid (%d bad)" label !bad_models)
     (!bad_models = 0);
-  Printf.printf "  (property[%s]: %d formulas, %d sat)\n" label n !sat_count
+  check
+    (Printf.sprintf
+       "property[%s]: all %d learned clauses entailed (%d unentailed)"
+       label
+       !n_learned
+       !unentailed)
+    (!unentailed = 0);
+  Printf.printf
+    "  (property[%s]: %d formulas, %d sat, %d learned entailment-checked)\n"
+    label
+    n
+    !sat_count
+    !n_learned
 ;;
 
 (* Directed hazard family: chains of clauses engineered so that conflict-dense solving
