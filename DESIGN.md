@@ -655,3 +655,22 @@ value — so a reported model is correct over every variable including eliminate
 with no downstream check required (the raw-SAT-API contract); a marked variable that
 later reappears in an added clause is restored (its deleted clauses re-added) to keep
 the elimination sound under incremental additions.
+
+### A11 — Tranche-C unfreeze: clarify the A10 restoration promise for ELS (2026-07-14)
+
+TEXT-ONLY amendment of the `sat.mli` `set_eliminable` doc-comment; no declaration
+changes (the 14 frozen signatures are byte-identical to A10) — `FROZEN.sha256` is
+regenerated only because the comment bytes moved. The A10 text promised, without
+qualification, that "a variable already eliminated that later appears in a newly
+`add_clause`d clause is restored." That holds for the bounded-variable-elimination
+form (a `restore_map` replay re-adds the deleted clauses), but the newer
+equivalent-literal-substitution (ELS) form instead RAISES `Invalid_argument` on such
+a re-reference: ELS rewrote the variable's equivalence-establishing clauses away, so
+sound reactivation would need the incremental-ELS machinery (Fazekas–Biere–Scholl,
+SAT 2019) that is not built, and failing loud is preferred to a silent wrong result.
+Both branches are contractually UNREACHABLE for a conforming client, since an
+eliminable variable is by contract one that no re-added clause can name; the amend
+just makes the frozen text match the fail-loud reality rather than contradict it (the
+"frozen doc-comments are contracts" discipline). No behavior change. Surfaced by the
+codex/fable review of the ELS+FLP stack (finding F3); adjudged option (a) — amend the
+contract text — over building incremental-ELS reactivation for a dead path.

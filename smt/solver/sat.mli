@@ -352,8 +352,15 @@ val set_branch_filter : t -> (var -> bool) option -> unit
     taken at [Sat] reconstructs [v]'s value (flip-to-satisfy, per the note's Lemma 1)
     before {!value}/{!model} read it, so a reported model is correct over {e every}
     variable including eliminated ones — unconditionally, with no downstream check
-    required (the raw-SAT-API contract). Marking is idempotent and legal at any time; a
-    variable already eliminated that later appears in a newly {!add_clause}d clause is
-    restored (its deleted clauses re-added) so the elimination stays sound under
-    incremental additions. *)
+    required (the raw-SAT-API contract). Marking is idempotent and legal at any time. The
+    two elimination forms differ on the incremental re-add of a clause naming an
+    eliminated variable: {b bounded variable elimination} RESTORES the variable (its
+    deleted clauses are re-added) so the elimination stays sound under incremental
+    additions, whereas {b equivalent-literal substitution} instead RAISES
+    [Invalid_argument] on such a re-reference — its equivalence-establishing clauses were
+    rewritten away, so sound reactivation would need incremental-ELS machinery
+    (Fazekas–Biere–Scholl, SAT 2019) that is not built, and failing loud is preferred over
+    a silent wrong result. Both cases are contractually unreachable for a conforming
+    client, because an eliminable variable is by the paragraph above one that no re-added
+    clause can name. *)
 val set_eliminable : t -> var -> unit
