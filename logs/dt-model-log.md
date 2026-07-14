@@ -51,7 +51,7 @@ Soundness backstop unchanged: `Dt_model_check` gates every DT `sat` (session.ml 
 so any residual builder imprecision only degrades to `unknown`, never a wrong `sat`. The
 checker was NOT modified.
 
-Diff: dt.ml only, +134/-78. (session.ml and dt_model_check.ml were touched only by transient
+Diff: dt.ml only (~+80/-37 vs trunk after the blowup-guard follow-up). (session.ml and dt_model_check.ml were touched only by transient
 debug instrumentation, fully reverted.)
 
 ## Diagnosis method
@@ -87,7 +87,7 @@ fix vs trunk vs z3:
 
 ## Gates (by exit code)
 
-- `make dt-sat-gate`: 0 (20 checks, incl. the 2 new goldens + the wrong-tree discrimination).
+- `make dt-sat-gate`: 0 (21 checks, incl. the 3 new goldens + the wrong-tree discrimination).
 - `make check-frozen`: 0 (no frozen .mli touched).
 - `make test`: 0 (harness, combine-test, euf-test, wiring-test, chrono, satpre).
 - `dune build @fmt`: dt.ml clean under the real ocamlformat (a pre-existing
@@ -109,10 +109,13 @@ fix vs trunk vs z3:
 2. FINITE-DOMAIN leaves (Bool / enum). The completion never forces an unsound assignment
    over a finite sort; it fails to `unknown` via the checker. Verified empirically
    (all match z3 or degrade soundly, none wrong-sat):
-   - 2 Bool-field boxes distinct → sat; 3 → sound `unknown` (Bool pigeonhole: the free-class
-     completion cannot produce 3 distinct Bool values, so it collides and Dt_model_check
-     rejects → unknown — never wrong-sat). Bool leaves flow through the existing
-     `bool_completion` (B1), not the datatype `tree_of` path.
+   - PLAIN Bool 3-distinct (`(distinct p q r)`, p q r : Bool) → `unsat` — the SAT/Bool layer
+     refutes it directly, never reaching DT completion (fable's log-nit correction).
+   - The datatype-FIELD variant (3 boxes each holding one Bool field, `(distinct a b c)` over
+     `box(v Bool)`) → sound `unknown`: the free-class completion cannot produce 3 distinct
+     Bool-field values, so it collides and Dt_model_check rejects → unknown, never wrong-sat.
+     2 such boxes distinct → sat. Bool leaves flow through the existing `bool_completion`
+     (B1), not the datatype `tree_of` path.
    - 3 enum colors distinct → sat; 4 → `unsat` (the theory refutes over-capacity enums
      before model build; `distinct_base`'s enum arm + the `pick` exhaustion + checker
      backstop the rest). The closure does not assume fresh values exist — exhaustion over a
@@ -140,3 +143,47 @@ either. The cost is a **41.7 MB assertion** (1M+ tester applications, 680K `chil
 that giant term. Converting it needs a ~5x frontend/setup throughput win on a 41 MB term —
 outside this lane (the DT model path) and not a cheap convert. Noted and left; the
 sub-corpus stays at 7,999 raw / +3 correct vs z3 as the census projects.
+
+## Fix-before-land: base_tree / distinct_base node blowup (codex item (e))
+
+RED-verified: `dt_binary_tree_distinct_sat.smt2` (Tree = node(Tree,Tree) | leaf, 30
+pairwise-distinct free Trees) HANGS on the pre-fix code (killed at 8s, no verdict) because
+`distinct_base(idx)` recursed BOTH self-sorted fields of `node` → a 2^idx-node tree. After the
+fix it completes in ~78ms, `sat`, matching z3.
+
+Fix (dt.ml, in the model-completion block): (1) `distinct_base` spines only the FIRST
+self-sorted field, basing the rest — distinct-length spines are still pairwise-distinct, now
+O(idx) nodes; (2) `base_tree` memoized per sort (context-free) with a cycle-breaking
+placeholder; (3) a 2,000,000 total-node budget (`Too_big` → `None` → `unknown`) as a belt for
+any residual pathological shape — the checker never sees a partial tree, so completeness-only.
+The new golden is a permanent regression guard (dt-sat-gate: 21 checks, was 20). The 30-file
+sweep re-ran clean after the fix (30/30 checked-sat, 0 disagreements).
+
+## Probe (codex [SUSPECTED] checker gap — NOT a fix, per instructions): SOUND, presentation proceeds
+
+Claim: `Dt_model_check` keys an underspecified WRONG-CONSTRUCTOR selector's value by syntactic
+term (dt_model_check.ml:162), so `sel(a)`/`sel(b)` could get distinct values when `a=b` is
+entailed-but-underived, yielding a wrong-sat if the results are asserted distinct.
+
+Built five gadgets driving the real Session (verdict cross-checked vs z3 4.8.5 and the true
+verdict by construction): entailment of `a=b` via (i) constructor injectivity (`is A` on both +
+equal A-field), (ii) 2-constructor exhaustiveness (`not (is B)`), (iii) 3-constructor
+elimination exhaustiveness, (iv) direct constructor-equality (`a = B e0`, `b = B e0`), each with
+a WRONG-constructor selector applied to `a`,`b` and its results asserted distinct — the true
+verdict is UNSAT in every case. **All five returned `unsat` (matching z3); none produced a
+wrong-sat.**
+
+Mechanism that saves it (documented for the record): oxsmt's DT theory DERIVES these equality
+entailments (constructor injectivity: same constructor + merged fields → merge; exhaustiveness:
+tester assertions determine the constructor) and MERGES the two terms into one e-class. Once
+merged, a wrong-constructor selector on them is congruent (same class → one value), so the
+checker's per-term env lookup returns the SAME value for both — no spurious distinctness. Two
+terms left in DIFFERENT e-classes are, by that same completeness, NOT entailed-equal, and
+`sel_C` of a `D`-value (`C≠D`) is genuinely underspecified by SMT-LIB, so distinct values there
+are a legal model, not a wrong-sat. The checker independently evaluates the tester assertions
+structurally, rejecting any model whose tree violates a `(_ is C)` constraint, so the
+"case-exhaustiveness the theory doesn't merge" shape is also caught model-side. I could not
+construct a triggering case. Residual (unchanged, pre-existing, not this commit's scope): a
+genuine DT-theory INCOMPLETENESS that left two truly-entailed-equal terms unmerged AND was
+invisible to structural tester/field evaluation could still bite; none of the natural
+injectivity/exhaustiveness entailments do. No wrong-sat found → the beat-z3 presentation holds.

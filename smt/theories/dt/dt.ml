@@ -999,6 +999,21 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
        - otherwise fall back to the base — the §8 checker then fails closed (a distinct
          value it could not realize => [unknown], never a wrong sat). Determinism (I5/I6):
          idx is assigned in the deterministic tag-ordered traversal of [dt_terms]. *)
+    (* Total node budget over the whole model build (codex review item (e)): a
+       constructor-tree model that would need more nodes than a satisfiable QF_DT witness
+       ever reasonably has is abandoned to [None] -> [unknown] (the checker never sees a
+       partial tree, so this is completeness-only). Belt to the algorithmic fixes below:
+       [base_tree] is memoized per sort (its value is context-free), and [distinct_base]
+       spines only ONE self-sorted field (recursing every self field of a
+       >=2-recursive-field constructor — e.g. [node(Tree, Tree)] — built a 2^idx-node
+       tree, an effective hang the depth guard alone did not prevent). *)
+    let exception Too_big in
+    let nodes = ref 0 in
+    let tick () =
+      incr nodes;
+      if !nodes > 2_000_000 then raise Too_big
+    in
+    let base_tree_memo : (string, ctor_tree) Hashtbl.t = Hashtbl.create 16 in
     let next_idx = ref 0 in
     let rec tree_of (x : Term.t) (depth : int) : ctor_tree =
       let k = Euf.class_of t.engine x in
@@ -1011,9 +1026,9 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           | Some wterm ->
             let sym, wargs = Option.get (head_args wterm) in
             let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
-            Ctor
-              ( Symbol.name c.Defs.sym
-              , Array.to_list (Array.map (fun a -> field_tree a depth) wargs) )
+            let fields = Array.to_list (Array.map (fun a -> field_tree a depth) wargs) in
+            tick ();
+            Ctor (Symbol.name c.Defs.sym, fields)
           | None ->
             (match datatype_of_sort t x.Term.sort with
              | Some dt ->
@@ -1056,23 +1071,40 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
     and field_tree (a : Term.t) depth =
       if is_dt_sort t a.Term.sort then tree_of a (depth + 1) else Leaf (leaf a)
     and base_tree (dt : Defs.datatype) depth : ctor_tree =
-      if depth > 10_000
-      then Leaf (Model.Uninterp 0)
-      else (
-        match base_ctor dt with
-        | None -> Leaf (Model.Uninterp 0)
-        | Some c ->
-          Ctor
-            ( Symbol.name c.Defs.sym
-            , List.map
-                (fun (s : Defs.selector) ->
-                   if is_dt_sort t s.Defs.field_sort
-                   then (
-                     match datatype_of_sort t s.Defs.field_sort with
-                     | Some d -> base_tree d (depth + 1)
-                     | None -> Leaf (Model.Uninterp 0))
-                   else Leaf (base_leaf s.Defs.field_sort))
-                c.Defs.selectors ))
+      (* The base value of a sort is CONTEXT-FREE, so memoize it per sort: a shared
+         sub-base is computed once, not re-expanded at every occurrence (codex (e): a
+         >=2-DT-field base constructor re-expanded per field is 2^depth). The placeholder
+         installed on entry breaks a self-recursive base (a non-well-founded /
+         pathological shape SMT-LIB should not admit) — the resulting ill-sorted tree is
+         caught by the §8 checker -> [unknown], never wrong. *)
+      let key = Symbol.name dt.Defs.sort_sym in
+      match Hashtbl.find_opt base_tree_memo key with
+      | Some tr -> tr
+      | None ->
+        Hashtbl.replace base_tree_memo key (Leaf (Model.Uninterp 0));
+        let tr =
+          if depth > 10_000
+          then Leaf (Model.Uninterp 0)
+          else (
+            match base_ctor dt with
+            | None -> Leaf (Model.Uninterp 0)
+            | Some c ->
+              let fields =
+                List.map
+                  (fun (s : Defs.selector) ->
+                     if is_dt_sort t s.Defs.field_sort
+                     then (
+                       match datatype_of_sort t s.Defs.field_sort with
+                       | Some d -> base_tree d (depth + 1)
+                       | None -> Leaf (Model.Uninterp 0))
+                     else Leaf (base_leaf s.Defs.field_sort))
+                  c.Defs.selectors
+              in
+              tick ();
+              Ctor (Symbol.name c.Defs.sym, fields))
+        in
+        Hashtbl.replace base_tree_memo key tr;
+        tr
     and distinct_base (dt : Defs.datatype) (idx : int) depth : ctor_tree =
       if idx = 0 || depth > 10_000
       then base_tree dt depth
@@ -1086,7 +1118,9 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           (* the idx-th nullary constructor, if the domain is large enough; else base (the
              §8 checker fails closed on the remaining collision) *)
           match List.nth_opt ctors idx with
-          | Some c -> Ctor (Symbol.name c.Defs.sym, [])
+          | Some c ->
+            tick ();
+            Ctor (Symbol.name c.Defs.sym, [])
           | None -> base_tree dt depth)
         else (
           (* a constructor with a field of THIS datatype's sort — build a spine of length
@@ -1104,25 +1138,34 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           in
           match self_rec with
           | Some c ->
-            Ctor
-              ( Symbol.name c.Defs.sym
-              , List.map
-                  (fun (s : Defs.selector) ->
-                     match dt_sort_sym s.Defs.field_sort with
-                     | Some a when Symbol.equal a dt.Defs.sort_sym ->
-                       distinct_base dt (idx - 1) (depth + 1)
-                     | _ ->
-                       if is_dt_sort t s.Defs.field_sort
-                       then (
-                         match datatype_of_sort t s.Defs.field_sort with
-                         | Some d -> base_tree d (depth + 1)
-                         | None -> Leaf (Model.Uninterp 0))
-                       else Leaf (base_leaf s.Defs.field_sort))
-                  c.Defs.selectors )
+            (* Spine down ONE self-sorted field only; base the rest (codex (e): recursing
+               EVERY self field of a >=2-recursive-field constructor — e.g.
+               [node(Tree, Tree)] — builds a 2^idx-node tree). One recursing field still
+               gives distinct-length (hence distinct) trees per [idx], now O(idx) nodes. *)
+            let recursed = ref false in
+            let fields =
+              List.map
+                (fun (s : Defs.selector) ->
+                   match dt_sort_sym s.Defs.field_sort with
+                   | Some a when Symbol.equal a dt.Defs.sort_sym && not !recursed ->
+                     recursed := true;
+                     distinct_base dt (idx - 1) (depth + 1)
+                   | _ ->
+                     if is_dt_sort t s.Defs.field_sort
+                     then (
+                       match datatype_of_sort t s.Defs.field_sort with
+                       | Some d -> base_tree d (depth + 1)
+                       | None -> Leaf (Model.Uninterp 0))
+                     else Leaf (base_leaf s.Defs.field_sort))
+                c.Defs.selectors
+            in
+            tick ();
+            Ctor (Symbol.name c.Defs.sym, fields)
           | None -> base_tree dt depth))
     in
     let dt_terms = List.sort_uniq (fun a b -> compare a.Term.tag b.Term.tag) t.dt_terms in
-    Some (List.map (fun x -> x, tree_of x 0) dt_terms))
+    try Some (List.map (fun x -> x, tree_of x 0) dt_terms) with
+    | Too_big -> None)
 ;;
 
 let constructor_model t = constructor_model_gen t ~leaf:(fun x -> leaf_value t x)
