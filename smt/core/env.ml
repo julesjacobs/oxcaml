@@ -126,7 +126,25 @@ let declare_fun t name rank =
   if is_builtin_reserved name || is_reserved_name name || has_nonsymbol_byte name
   then raise (Reserved_symbol name);
   let sym = Symbol.intern name in
-  Hashtbl.replace t.ranks sym rank;
+  (* WRITE-ONCE (the user-named analogue of [declare_reserved]'s reserved write-once):
+     re-declaring a symbol at the IDENTICAL rank is idempotent, but CHANGING an existing
+     rank is refused. A rank-changing redeclaration is malformed SMT-LIB, and — the
+     soundness motive — it can silently repurpose a symbol another consumer has already
+     validated: e.g. redeclaring a datatype constructor (registered by a validated
+     [set_datatypes] at [() -> the datatype]) as an uninterpreted constant [() -> U]. The
+     DT theory still classifies it as a constructor by registry membership while its rank
+     now says U, so its rules fire on a sort-mismatched term — a wrong verdict. Making the
+     rank write-once keeps it a fact every consumer can trust for the whole session, not
+     just at declaration time. (The SMT-LIB parser already rejects redeclaration at its
+     own namespace layer; this closes the direct [Env]/[Session] API path.) *)
+  (match Hashtbl.find_opt t.ranks sym with
+   | Some existing when not (same_rank existing rank) ->
+     invalid_arg
+       (Printf.sprintf
+          "Env.declare_fun: %s already declared with a different rank (declared ranks \
+           are write-once)"
+          name)
+   | _ -> Hashtbl.replace t.ranks sym rank);
   sym
 ;;
 

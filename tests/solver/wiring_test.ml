@@ -2395,7 +2395,40 @@ let test_relevancy_verdict_parity () =
     cases
 ;;
 
+(* Env write-once (task #63): [declare_fun]'s unconditional last-wins let a caller
+   redeclare a datatype constructor (registered by a validated [set_datatypes] at
+   [() -> datatype]) as an uninterpreted constant at a different rank — the DT theory
+   keeps classifying it as a constructor by registry membership while its rank now says
+   another sort, a wrong verdict. A rank-CHANGING redeclaration is now rejected; an
+   idempotent same-rank one still works. *)
+let test_declare_fun_write_once () =
+  let module Defs = Oxsmt_core.Datatype_defs in
+  let s = Session.create () in
+  let d_sym = Session.declare_sort s "D" in
+  let d_sort = Sort.datatype_ d_sym in
+  let c = Session.declare_fun s "C" (Rank.create [] d_sort) in
+  let tester = Session.declare_fun s "is-C" (Rank.create [ d_sort ] Sort.bool) in
+  Session.set_datatypes
+    s
+    (Defs.add
+       Defs.empty
+       { Defs.sort_sym = d_sym
+       ; constructors = [ { Defs.sym = c; selectors = []; tester } ]
+       });
+  let u_sort = Sort.uninterpreted (Session.declare_sort s "U") in
+  check_raises
+    "redeclaring a registered constructor at a different rank is rejected"
+    (fun () -> Session.declare_fun s "C" (Rank.create [] u_sort));
+  (* idempotent same-rank redeclaration is still allowed (guards over-rejection) *)
+  check
+    "idempotent same-rank redeclaration is allowed"
+    (match Session.declare_fun s "C" (Rank.create [] d_sort) with
+     | _ -> true
+     | exception _ -> false)
+;;
+
 let () =
+  test_declare_fun_write_once ();
   test_relevancy_firing ();
   test_relevancy_verdict_parity ();
   test_push_pop ();
