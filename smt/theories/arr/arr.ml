@@ -34,9 +34,30 @@ let env_flag name =
 let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
 
 (* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
-   needs it. *)
+   needs it. OXSMT_ARR_WEQ turns on the W1 L1 read-over-weak-equivalence rule (added to
+   [row_split], not yet replacing it). *)
 let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze
+let weq_l1_on = env_flag "OXSMT_ARR_WEQ"
 let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
+
+(* O7 fuel: a hard cap on L1 clause emissions per solve. On exhaustion L1 stops emitting
+   and the sound [row_split] backstop continues (W1), so a pathological input degrades to
+   the engine's split budget (-> unknown), never a wrong verdict. Deterministic and load-
+   independent. *)
+let weq_fuel_cap =
+  match Sys.getenv_opt "OXSMT_ARR_WEQ_FUEL" with
+  | Some s ->
+    (try int_of_string s with
+     | _ -> 200_000)
+  | None -> 200_000
+;;
+
+(* TEST-ONLY (default OFF): drop the O1' class-collapse guards from the emitted L1 clause,
+   turning the sound rule into the deliberately-WRONG pre-erratum variant. Exists solely
+   so the RED tests can verify BY EXECUTION that each guard is load-bearing (a guarded run
+   is sound where this unguarded run wrong-refutes). NEVER set in production; the shipped
+   default emits the fully-guarded tautology. *)
+let weq_unsafe_noguard = env_flag "OXSMT_ARR_WEQ_UNSAFE_NOGUARD"
 
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a ROW-derived equality carries [P_derived reasons] — the
@@ -100,11 +121,22 @@ type t =
     (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ
          (W0). [None] keeps the OFF path byte-identical (no merge recording, no graph). *)
   ; mutable an_diseqs : (Term.t * Term.t) list
-    (* W0.5 analyzer only: asserted disequalities (both array and index sorted),
-         appended when a negative [Eq] is asserted. NOT backtracked — the analyzer runs
-         once at the first Final and a stale pair only over-counts a candidate; empty
-         unless OXSMT_ARR_WEQ_ANALYZE. *)
+    (* Asserted disequalities (both array and index sorted), appended when a negative
+         [Eq] is asserted; populated when the graph is on (W0.5 analyzer reads all of them
+         via [an_distinct]; W1 L1 reads the array-sorted ones as its diseq-reachable
+         triggers). NOT backtracked: a stale pair only risks re-attempting an L1 whose
+         emission is memoized ([weq_emitted]) and whose clause is an unconditional
+         term-level tautology (sound regardless of whether the diseq is still asserted);
+         the analyzer likewise only over-counts a candidate. Empty unless the graph is on. *)
   ; mutable an_done : bool (* W0.5 analyzer: emit the per-solve summary at most once *)
+  ; weq_emitted : (int * int, unit) Hashtbl.t
+    (* W1 L1: identity of already-emitted read-over-weakeq clauses, keyed by the
+         orientation-normalized (read1 tag, read2 tag) pair. PERMANENT (not trailed): an
+         L1 clause is a permanent term-level tautology in the SAT core, so re-emitting it
+         after a backtrack would prevent ever reaching Sat — the memo suppresses that
+         forever (obligation 1: trigger dedup + bounded re-emission across backtrack;
+         termination, not soundness). *)
+  ; mutable weq_fuel : int (* W1 L1: remaining emission fuel this solve (O7) *)
   }
 
 let max_iters = 1_000_000
@@ -175,6 +207,8 @@ let create ctx env cap reg =
   ; weq
   ; an_diseqs = []
   ; an_done = false
+  ; weq_emitted = Hashtbl.create 64
+  ; weq_fuel = weq_fuel_cap
   }
 ;;
 
@@ -368,9 +402,9 @@ let assert_lit t lit =
          only if a and b differ at some index, so introduce a fresh one. Sound
          (Skolemization); it drives ROW to close read-over-write refutations. *)
       extensionality t lit a b;
-      (* W0.5 analyzer only: record the asserted diseq (array + index) for the dark
-         store-chain closure measurement. *)
-      if weq_analyze then t.an_diseqs <- (a, b) :: t.an_diseqs)
+      (* Record the asserted diseq (array + index) for the graph-based rules: the W0.5
+         analyzer's store-chain closure and the W1 L1 diseq-reachable triggers. *)
+      if weq_on then t.an_diseqs <- (a, b) :: t.an_diseqs)
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -871,6 +905,152 @@ let weq_analyze_final t =
   | _ -> ()
 ;;
 
+(* --- W1: L1 read-over-weak-equivalence (ADR §4), gated OXSMT_ARR_WEQ, ADDS to row_split
+   --- *)
+
+(* The (array, index) of a genuine arity-2 Select term, or [None]. The
+   [Iarr.length a = 2] + role guard is the load-bearing arity contract
+   ([[arr-arity-guard-load-bearing]]). *)
+let weq_read_parts t (sel : Term.t) : (Term.t * Term.t) option =
+  match sel.Term.node with
+  | Term.App (_, a) when Iarr.length a = 2 ->
+    (match role_of t sel with
+     | Some { Defs.role = Defs.Select; _ } -> Some (Iarr.get a 0, Iarr.get a 1)
+     | _ -> None)
+  | _ -> None
+;;
+
+(* Build the L1 clause for reads [r1 = select(x1, i1)] and [r2 = select(x2, i2)] (i1 ~ i2)
+   over the weak-equivalence [path] from x1 to x2 (O1', ADR §4):
+
+   select(x1,i1) = select(x2,i2) (* head *) ∨ ¬(i1 = i2) (* O1'(i): the reads' own index
+   terms, if distinct *) ∨ ⋁ ¬(u = v) over Equality edges (* O1'(ii)/(iii): every path
+   class collapse *) ∨ ⋁ (i1 = jₗ) over Store indices (* store-index avoidance,
+   term-identity deduped (O2) *)
+
+   Every equality the telescoping ROW argument relies on appears negated, so the clause is
+   an unconditional array-theory tautology over TERMS — valid in every model regardless of
+   the current e-graph, hence safe as a permanent memoized clause across backtracking.
+   Endpoint and branch-local-array-merge collapses (RED #7) need no special case: the
+   graph is over term nodes, so such a collapse IS an Equality edge on the path and is
+   guarded like any other. The [weq_unsafe_noguard] branch is the deliberately-WRONG
+   pre-erratum variant (test-only) that drops the guards, so the RED tests can show each
+   is load-bearing. *)
+let weq_clause
+      t
+      (r1 : Term.t)
+      (i1 : Term.t)
+      (r2 : Term.t)
+      (i2 : Term.t)
+      (path : Weq_graph.edge list)
+  : Term.t list
+  =
+  let neg u v = Context.not_ t.ctx (Context.eq t.ctx u v) in
+  let head = Context.eq t.ctx r1 r2 in
+  let store_seen = Hashtbl.create 16 in
+  let store_idx = ref []
+  and eq_guards = ref [] in
+  (* key store indices by TERM identity (sound, O2) unless the unsafe variant is testing
+     the by-e-class dedup hole (drops a congruent-but-distinct store index ->
+     wrong-unsat). *)
+  let store_key (index : Term.t) =
+    if weq_unsafe_noguard then Euf.class_of t.engine index else index.Term.tag
+  in
+  List.iter
+    (fun (e : Weq_graph.edge) ->
+       match e with
+       | Weq_graph.Store { index; _ } ->
+         let k = store_key index in
+         if not (Hashtbl.mem store_seen k)
+         then (
+           Hashtbl.replace store_seen k ();
+           store_idx := index :: !store_idx)
+       | Weq_graph.Equality { u; v } -> eq_guards := neg u v :: !eq_guards)
+    path;
+  let idx_avoid = List.map (fun j -> Context.eq t.ctx i1 j) !store_idx in
+  if weq_unsafe_noguard
+  then
+    head :: idx_avoid (* WRONG (test-only): no ¬(i1=i2), no eq-guards, by-class dedup *)
+  else (
+    let idx_guard = if Term.equal i1 i2 then [] else [ neg i1 i2 ] in
+    (head :: idx_guard) @ !eq_guards @ idx_avoid)
+;;
+
+(* Emit (at most) one L1 clause: the first un-emitted, currently-unequal, congruent-index
+   read pair whose arrays are both weakly equivalent to an asserted array diseq endpoint
+   (OQ2 lazy diseq-reachable scope), taken over the deterministic BFS path between them
+   (OQ1 selected path). Permanent memo + fuel (obligation 1 / O7). [None] when nothing new
+   fires or fuel is spent, so [row_split] backstops (W1 adds; it does not yet replace). *)
+let weq_l1 t : Term.t list option =
+  match t.weq with
+  | Some (g, _) when weq_l1_on && t.weq_fuel > 0 ->
+    let endpoints =
+      List.filter
+        (fun (a, b) ->
+           array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b)
+        t.an_diseqs
+    in
+    if endpoints = []
+    then None
+    else (
+      (* OQ2 lazy diseq-reachable scope, tightened: a read triggers L1 only if its array
+         is in the SAME e-class as an asserted-diseq endpoint (i.e. reads ON the diseq
+         arrays a or b, congruent forms included) — not every read on the whole
+         weak-equivalence component. The wider component scope floods the mostly-sat
+         swap/storecomm neighbours with O(reads^2) wide disjunctions; the full read
+         closure is the W2 obligation (O11), gated behind row_split's retirement. *)
+      let is_reachable x =
+        List.exists
+          (fun (a, b) -> Euf.are_equal t.engine x a || Euf.are_equal t.engine x b)
+          endpoints
+      in
+      let reads =
+        List.filter_map
+          (fun sel ->
+             match weq_read_parts t sel with
+             | Some (x, i) when array_sort x.Term.sort <> None && is_reachable x ->
+               Some (sel, x, i)
+             | _ -> None)
+          t.select_terms
+      in
+      let reads =
+        List.sort (fun (s1, _, _) (s2, _, _) -> compare s1.Term.tag s2.Term.tag) reads
+      in
+      let result = ref None in
+      let rec go = function
+        | [] -> ()
+        | (r1, x1, i1) :: rest ->
+          List.iter
+            (fun (r2, x2, i2) ->
+               if
+                 !result = None
+                 && (not (Euf.are_equal t.engine r1 r2))
+                 && Euf.are_equal t.engine i1 i2
+               then (
+                 let key =
+                   if r1.Term.tag <= r2.Term.tag
+                   then r1.Term.tag, r2.Term.tag
+                   else r2.Term.tag, r1.Term.tag
+                 in
+                 if not (Hashtbl.mem t.weq_emitted key)
+                 then (
+                   match Weq_graph.find_path g x1 x2 with
+                   | Some path ->
+                     let clause = weq_clause t r1 i1 r2 i2 path in
+                     if List.length clause >= 2
+                     then (
+                       Hashtbl.replace t.weq_emitted key ();
+                       t.weq_fuel <- t.weq_fuel - 1;
+                       result := Some clause)
+                   | None -> ())))
+            rest;
+          if !result = None then go rest
+      in
+      go reads;
+      !result)
+  | _ -> None
+;;
+
 let check t effort =
   weq_sync t;
   match saturate t with
@@ -886,9 +1066,14 @@ let check t effort =
         | Some result -> result
         | None ->
           weq_final_self_check t;
-          (match row_split t with
+          (* W1: try the L1 read-over-weakeq clause first, then fall back to the (still
+             present) blind row_split; W2 will retire row_split. *)
+          (match weq_l1 t with
            | Some terms -> Theory.Split terms
-           | None -> Theory.Sat)))
+           | None ->
+             (match row_split t with
+              | Some terms -> Theory.Split terms
+              | None -> Theory.Sat))))
 ;;
 
 let explain t lit =
