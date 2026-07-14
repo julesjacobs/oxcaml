@@ -2227,11 +2227,22 @@ let remove_exception_ident id =
    "a\000" vs "a").  Bytes 0..6 are always authoritative: within the string
    they compare real content, and beyond the string the zero padding sorts a
    proper prefix first, matching lexicographic order.  If the seven bytes tie,
-   we defer to the byte-accurate C comparison.  Native-only: the unboxed
-   [int64] operations used here do not exist in bytecode, where we emit the
-   plain C call. *)
+   we defer to the byte-accurate C comparison. *)
+let string_compare_fast_path_applies () =
+  (* Native-only: the unboxed [int64] operations used here do not exist in
+     bytecode.  64-bit little-endian targets only: the word-0 load is
+     in-bounds only when a word is 8 bytes (on a 32-bit target a one-word
+     string block is 4 bytes, so the load reads past it), and the
+     bswap64-then-shift head extraction assumes a little-endian load (on a
+     big-endian target it would drop byte 0 and keep the pad byte).
+     Whitelist known-good targets rather than exclude known-bad ones. *)
+  !Clflags.native_code
+  && (match Config.architecture with
+     | "amd64" | "arm64" -> true
+     | _ -> false)
+
 let string_compare_fast_path a b loc =
-  if not !Clflags.native_code
+  if not (string_compare_fast_path_applies ())
   then Lprim (Pccall caml_string_compare, [ a; b ], loc)
   else (
     let int64u : _ Scalar.Integral.t = Naked (Boxable (Int64 Any_locality_mode)) in
@@ -2264,18 +2275,21 @@ let string_compare_fast_path a b loc =
     let idh1 = Ident.create_local "cmp_h1" in
     let idh2 = Ident.create_local "cmp_h2" in
     let duid = Lambda.debug_uid_none in
+    (* Bind [b] before [a]: native argument evaluation for the plain
+       [Pccall] is right-to-left, so this keeps the evaluation order of
+       effectful operands identical to the non-fast-path code. *)
     Llet
       ( Strict
       , Lambda.layout_string
-      , ida
+      , idb
       , duid
-      , a
+      , b
       , Llet
           ( Strict
           , Lambda.layout_string
-          , idb
+          , ida
           , duid
-          , b
+          , a
           , Llet
               ( Strict
               , Lambda.Punboxed_or_untagged_integer Lambda.Unboxed_int64
