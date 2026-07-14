@@ -1333,16 +1333,19 @@ let pop t n =
      (* restore [an_diseqs] to its value at the push of the frame we are popping into, so
         [an_distinct] reflects only currently-live disequalities *)
      let rec restore k stack =
-       match stack with
-       | saved :: rest ->
-         if k <= 1
-         then (
-           t.an_diseqs <- saved;
-           rest)
-         else restore (k - 1) rest
-       | [] ->
-         t.an_diseqs <- [];
-         []
+       if k <= 0
+       then stack (* pop nothing: no-op, matching [drop] below (codex M1) *)
+       else (
+         match stack with
+         | saved :: rest ->
+           if k = 1
+           then (
+             t.an_diseqs <- saved;
+             rest)
+           else restore (k - 1) rest
+         | [] ->
+           t.an_diseqs <- [];
+           [])
      in
      t.an_diseq_stack <- restore n t.an_diseq_stack
    | None -> ());
