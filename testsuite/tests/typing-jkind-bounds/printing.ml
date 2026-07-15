@@ -326,15 +326,19 @@ Error: Signature mismatch:
        Modules do not match:
          sig type 'a t : value mod portable with 'a end
        is not included in
-         sig type 'a t : value mod portable end
+         sig type 'a t : value mod portable with 'a @@ portable end
        Type declarations do not match:
          type 'a t : value mod portable with 'a
        is not included in
-         type 'a t : value mod portable
+         type 'a t : value mod portable with 'a @@ portable
        The kind of the first is value mod portable with 'a
          because of the definition of t at line 4, characters 2-40.
-       But the kind of the first must be a subkind of value mod portable
+       But the kind of the first must be a subkind of
+           value mod portable with 'a @@ portable
          because of the definition of t at line 2, characters 2-52.
+
+       The first mode-crosses less than the second along:
+         portability: mod portable with 'a ≰ mod portable
 |}]
 
 module M : sig
@@ -382,15 +386,19 @@ Error: Signature mismatch:
        Modules do not match:
          sig type 'a t : value mod portable with 'a end
        is not included in
-         sig type 'a t : value mod portable end
+         sig type 'a t : value mod portable with 'a @@ portable end
        Type declarations do not match:
          type 'a t : value mod portable with 'a
        is not included in
-         type 'a t : value mod portable
+         type 'a t : value mod portable with 'a @@ portable
        The kind of the first is value mod portable with 'a
          because of the definition of t at line 4, characters 2-60.
-       But the kind of the first must be a subkind of value mod portable
+       But the kind of the first must be a subkind of
+           value mod portable with 'a @@ portable
          because of the definition of t at line 2, characters 2-52.
+
+       The first mode-crosses less than the second along:
+         portability: mod portable with 'a ≰ mod portable
 |}]
 
 type 'a t_mutable : mutable_data with 'a

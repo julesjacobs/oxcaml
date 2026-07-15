@@ -80,10 +80,14 @@ module Mode_axis_pair = struct
     | "corruptible" -> comonadic Portability Corruptible
     | "shareable" -> comonadic Portability Shareable
     | "portable" -> comonadic Portability Portable
+    | "total" -> comonadic Totality Total
+    | "partial" -> comonadic Totality Partial
     | "contended" -> monadic Contention Contended
     | "corrupted" -> monadic Contention Corrupted
     | "shared" -> monadic Contention Shared
     | "uncontended" -> monadic Contention Uncontended
+    | "program" -> monadic Ghostness Program
+    | "logic" -> monadic Ghostness Logic
     | "unforkable" -> comonadic Forkable Unforkable
     | "forkable" -> comonadic Forkable Forkable
     | "yielding" -> comonadic Yielding Yielding
@@ -108,6 +112,8 @@ module Modality_axis_pair = struct
     match[@warning "-18"]
       Mode_axis_pair.to_value (Mode_axis_pair.of_string s)
     with
+    | Atom (Comonadic Totality, _) -> raise Not_found
+    | Atom (Monadic Ghostness, _) -> raise Not_found
     | Atom (Monadic ax, mode) -> Atom (Monadic ax, Join_const mode)
     | Atom (Comonadic ax, mode) -> Atom (Comonadic ax, Meet_const mode)
 end
@@ -140,7 +146,9 @@ module Transled_modifiers = struct
       uniqueness : Mode.Uniqueness.Const.t Monadic.Atom.t Location.loc option;
       portability :
         Mode.Portability.Const.t Comonadic.Atom.t Location.loc option;
+      totality : Mode.Totality.Const.t Comonadic.Atom.t Location.loc option;
       contention : Mode.Contention.Const.t Monadic.Atom.t Location.loc option;
+      ghostness : Mode.Ghostness.Const.t Monadic.Atom.t Location.loc option;
       forkable : Mode.Forkable.Const.t Comonadic.Atom.t Location.loc option;
       yielding : Mode.Yielding.Const.t Comonadic.Atom.t Location.loc option;
       statefulness :
@@ -161,7 +169,9 @@ module Transled_modifiers = struct
       linearity = None;
       uniqueness = None;
       portability = None;
+      totality = None;
       contention = None;
+      ghostness = None;
       forkable = None;
       yielding = None;
       statefulness = None;
@@ -178,7 +188,9 @@ module Transled_modifiers = struct
     | Modal (Comonadic Linearity) -> t.linearity
     | Modal (Monadic Uniqueness) -> t.uniqueness
     | Modal (Comonadic Portability) -> t.portability
+    | Modal (Comonadic Totality) -> t.totality
     | Modal (Monadic Contention) -> t.contention
+    | Modal (Monadic Ghostness) -> t.ghostness
     | Modal (Comonadic Forkable) -> t.forkable
     | Modal (Comonadic Yielding) -> t.yielding
     | Modal (Comonadic Statefulness) -> t.statefulness
@@ -193,7 +205,9 @@ module Transled_modifiers = struct
     | Modal (Comonadic Linearity) -> { t with linearity = value }
     | Modal (Monadic Uniqueness) -> { t with uniqueness = value }
     | Modal (Comonadic Portability) -> { t with portability = value }
+    | Modal (Comonadic Totality) -> { t with totality = value }
     | Modal (Monadic Contention) -> { t with contention = value }
+    | Modal (Monadic Ghostness) -> { t with ghostness = value }
     | Modal (Comonadic Forkable) -> { t with forkable = value }
     | Modal (Comonadic Yielding) -> { t with yielding = value }
     | Modal (Comonadic Statefulness) -> { t with statefulness = value }
@@ -322,8 +336,11 @@ let transl_mod_bounds annots =
               Some { txt = Per_axis.min (Modal (Monadic Uniqueness)); loc };
             portability =
               Some { txt = Per_axis.min (Modal (Comonadic Portability)); loc };
+            totality =
+              Some { txt = Per_axis.min (Modal (Comonadic Totality)); loc };
             contention =
               Some { txt = Per_axis.min (Modal (Monadic Contention)); loc };
+            ghostness = None;
             forkable =
               Some { txt = Per_axis.min (Modal (Comonadic Forkable)); loc };
             yielding =
@@ -453,24 +470,14 @@ let untransl_mode modes =
   in
   List.map untransl_annot modes.mode_desc
 
-let mode_annot_to_modality_annot mode_annot =
-  Location.map
-    (fun mode : Modality.atom ->
-      let (Atom (ax, mode)) = Mode_axis_pair.to_value mode in
-      match[@warning "-18"] ax with
-      | Comonadic ax -> Atom (Comonadic ax, Meet_const mode)
-      | Monadic ax -> Atom (Monadic ax, Join_const mode))
-    mode_annot
-
 let transl_modality ~maturity { txt = Parsetree.Modality modality; loc } =
   Language_extension.assert_enabled ~loc Mode maturity;
-  let mode =
-    try Mode_axis_pair.(of_string modality)
+  let modality =
+    try Modality_axis_pair.of_string modality
     with Not_found ->
       raise (Error (loc, Unrecognized_modifier (Modality, modality)))
   in
-  let mode_annot = { txt = mode; loc } in
-  mode_annot_to_modality_annot mode_annot
+  { txt = modality; loc }
 
 let untransl_modality =
   Location.map (fun (Atom (ax, t) : Modality.atom) : Parsetree.modality ->

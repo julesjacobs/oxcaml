@@ -1236,6 +1236,7 @@ module Base_and_axes = struct
                     (value_for_axis ~axis:(Modal (Monadic Uniqueness)))
                   ~contention:
                     (value_for_axis ~axis:(Modal (Monadic Contention)))
+                  ~ghostness:(value_for_axis ~axis:(Modal (Monadic Ghostness)))
                   ~visibility:
                     (value_for_axis ~axis:(Modal (Monadic Visibility)))
                   ~staticity:(value_for_axis ~axis:(Modal (Monadic Staticity)))
@@ -1248,6 +1249,7 @@ module Base_and_axes = struct
                     (value_for_axis ~axis:(Modal (Comonadic Linearity)))
                   ~portability:
                     (value_for_axis ~axis:(Modal (Comonadic Portability)))
+                  ~totality:(value_for_axis ~axis:(Modal (Comonadic Totality)))
                   ~forkable:(value_for_axis ~axis:(Modal (Comonadic Forkable)))
                   ~yielding:(value_for_axis ~axis:(Modal (Comonadic Yielding)))
                   ~statefulness:
@@ -2481,6 +2483,7 @@ let for_object =
         (* Since [global] implies [aliased] in presence of borrowing,
            objects also cross uniqueness. *)
       ~contention:(Crossing.Per_axis.max (Crossing.Axis.Monadic Contention))
+      ~ghostness:(Crossing.Per_axis.max (Crossing.Axis.Monadic Ghostness))
       ~visibility:(Crossing.Per_axis.max (Crossing.Axis.Monadic Visibility))
       ~staticity:(Crossing.Per_axis.max (Crossing.Axis.Monadic Staticity))
   in

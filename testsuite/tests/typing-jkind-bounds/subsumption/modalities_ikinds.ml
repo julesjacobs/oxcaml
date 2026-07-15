@@ -144,7 +144,7 @@ end
 
 module type T = S with type ('a, 'b) t = ('a, 'b) t
 [%%expect {|
-type ('a, 'b) t : value mod portable with 'b
+type ('a, 'b) t : value mod portable with 'a @@ portable with 'b
 module type S = sig type ('a, 'b) t : value mod portable end
 Line 7, characters 16-51:
 7 | module type T = S with type ('a, 'b) t = ('a, 'b) t
@@ -155,10 +155,14 @@ Error: In this "with" constraint, the new definition of "t"
          type ('a, 'b) t = ('a, 'b) t
        is not included in
          type ('a, 'b) t : value mod portable
-       The kind of the first is value mod portable with 'b
+       The kind of the first is
+           value mod portable with 'a @@ portable with 'b
          because of the definition of t at line 1, characters 0-77.
        But the kind of the first must be a subkind of value mod portable
          because of the definition of t at line 4, characters 2-38.
+
+       The first mode-crosses less than the second along:
+         portability: mod portable with 'b ≰ mod portable
 |}]
 
 module M : sig
@@ -176,7 +180,8 @@ end = struct
   type ('a, 'b) t : value mod portable with 'b
 end
 [%%expect {|
-module M : sig type ('a, 'b) t : value mod portable with 'b end
+module M :
+  sig type ('a, 'b) t : value mod portable with 'a @@ portable with 'b end
 |}]
 
 module M : sig

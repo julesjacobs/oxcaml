@@ -546,6 +546,17 @@ let axis_disagreement_reasons (axes : Jkind_axis.Axis.packed list) :
     Jkind.Sub_failure_reason.t list =
   List.map (fun axis -> Jkind.Sub_failure_reason.Axis_disagreement axis) axes
 
+let filter_axes_without_kind_modalities axes =
+  List.filter
+    (fun (Jkind_axis.Axis.Pack axis) ->
+      let open Mode.Crossing.Axis in
+      match axis with
+      | Jkind_axis.Axis.Modal (Comonadic Totality)
+      | Jkind_axis.Axis.Modal (Monadic Ghostness) ->
+        false
+      | Jkind_axis.Axis.Modal _ | Jkind_axis.Axis.Nonmodal _ -> true)
+    axes
+
 let label_mutability_contribution (lbl : Types.label_declaration) =
   Ldd.const
     (match lbl.ld_mutable with
@@ -1038,7 +1049,10 @@ let sub_jkind_l ?allow_any_crossing ?origin
       let { lhs_for_leq = sub_poly; rhs_for_leq = super_poly; fast_path } =
         compute_subcheck_polys ~context env sub super
       in
-      let violating_axes = Ldd.leq_with_reason sub_poly super_poly in
+      let violating_axes =
+        Ldd.leq_with_reason sub_poly super_poly
+        |> filter_axes_without_kind_modalities
+      in
       (if !Clflags.ikinds_debug
        then
          let origin_suffix = origin_suffix_of origin in
@@ -1214,7 +1228,10 @@ let sub_or_intersect ?origin
       let subcheck = compute_subcheck_polys ~context env t1 t2 in
       let sub_poly = subcheck.lhs_for_leq in
       let super_poly = subcheck.rhs_for_leq in
-      match Ldd.leq_with_reason sub_poly super_poly with
+      match
+        Ldd.leq_with_reason sub_poly super_poly
+        |> filter_axes_without_kind_modalities
+      with
       | [] ->
         debug_polys ~polys:(sub_poly, super_poly) ~outcome:"Sub" ();
         Jkind.Sub
@@ -1259,7 +1276,10 @@ let sub_or_error ?origin:_origin
     let { lhs_for_leq = sub_poly; rhs_for_leq = super_poly; _ } =
       compute_subcheck_polys ~context env t1 t2
     in
-    match Ldd.leq_with_reason sub_poly super_poly with
+    match
+      Ldd.leq_with_reason sub_poly super_poly
+      |> filter_axes_without_kind_modalities
+    with
     | [] -> Ok ()
     | _ ->
       (* Delegate to Jkind for detailed error reporting. *)

@@ -453,6 +453,24 @@ module type S = sig
     include Common_axis_pos with module Const := Const
   end
 
+  module Totality : sig
+    module Const : sig
+      type t =
+        | Total
+        | Partial
+
+      include Const with type t := t
+    end
+
+    include Common_axis_pos with module Const := Const
+
+    module Guts : sig
+      (** Returns [Some c] when the mode is conservatively known to be the
+          constant [c], without further constraining the solver. *)
+      val check_const_conservative : ('l * 'r) t -> Const.t option
+    end
+  end
+
   module Uniqueness : sig
     module Const : sig
       type t =
@@ -481,6 +499,24 @@ module type S = sig
     end
 
     include Common_axis_neg with module Const := Const
+  end
+
+  module Ghostness : sig
+    module Const : sig
+      type t =
+        | Program
+        | Logic
+
+      include Const with type t := t
+    end
+
+    include Common_axis_neg with module Const := Const
+
+    module Guts : sig
+      (** Returns [Some c] when the mode is conservatively known to be the
+          constant [c], without further constraining the solver. *)
+      val check_const_conservative : ('l * 'r) t -> Const.t option
+    end
   end
 
   module Forkable : sig
@@ -572,6 +608,7 @@ module type S = sig
     { areality : 'a;
       linearity : Linearity.Const.t;
       portability : Portability.Const.t;
+      totality : Totality.Const.t;
       forkable : Forkable.Const.t;
       yielding : Yielding.Const.t;
       statefulness : Statefulness.Const.t
@@ -580,6 +617,7 @@ module type S = sig
   type monadic =
     { uniqueness : Uniqueness.Const.t;
       contention : Contention.Const.t;
+      ghostness : Ghostness.Const.t;
       visibility : Visibility.Const.t;
       staticity : Staticity.Const.t
     }
@@ -596,9 +634,11 @@ module type S = sig
       | Linearity : ('areality comonadic_with, Linearity.Const.t) t
       | Statefulness : ('areality comonadic_with, Statefulness.Const.t) t
       | Portability : ('areality comonadic_with, Portability.Const.t) t
+      | Totality : ('areality comonadic_with, Totality.Const.t) t
       | Uniqueness : (monadic, Uniqueness.Const.t) t
       | Visibility : (monadic, Visibility.Const.t) t
       | Contention : (monadic, Contention.Const.t) t
+      | Ghostness : (monadic, Ghostness.Const.t) t
       | Staticity : (monadic, Staticity.Const.t) t
 
     val print : Fmt.formatter -> ('p, 'r) t -> unit
@@ -659,7 +699,7 @@ module type S = sig
       include Axis with type 'a t := 'a t
     end
 
-    type ('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j) modes =
+    type ('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j, 'k, 'l) modes =
       { areality : 'a;
         linearity : 'b;
         uniqueness : 'c;
@@ -669,7 +709,9 @@ module type S = sig
         yielding : 'g;
         statefulness : 'h;
         visibility : 'i;
-        staticity : 'j
+        staticity : 'j;
+        totality : 'k;
+        ghostness : 'l
       }
 
     module Const : sig
@@ -685,7 +727,9 @@ module type S = sig
               Yielding.Const.t,
               Statefulness.Const.t,
               Visibility.Const.t,
-              Staticity.Const.t )
+              Staticity.Const.t,
+              Totality.Const.t,
+              Ghostness.Const.t )
             modes
 
       module Option : sig
@@ -701,7 +745,9 @@ module type S = sig
             Yielding.Const.t option,
             Statefulness.Const.t option,
             Visibility.Const.t option,
-            Staticity.Const.t option )
+            Staticity.Const.t option,
+            Totality.Const.t option,
+            Ghostness.Const.t option )
           modes
 
         val none : t
@@ -1106,6 +1152,7 @@ module type S = sig
       val create :
         uniqueness:Uniqueness.Const.t Atom.t ->
         contention:Contention.Const.t Atom.t ->
+        ghostness:Ghostness.Const.t Atom.t ->
         visibility:Visibility.Const.t Atom.t ->
         staticity:Staticity.Const.t Atom.t ->
         t
@@ -1133,6 +1180,7 @@ module type S = sig
         regionality:Regionality.Const.t Atom.t ->
         linearity:Linearity.Const.t Atom.t ->
         portability:Portability.Const.t Atom.t ->
+        totality:Totality.Const.t Atom.t ->
         forkable:Forkable.Const.t Atom.t ->
         yielding:Yielding.Const.t Atom.t ->
         statefulness:Statefulness.Const.t Atom.t ->
@@ -1175,6 +1223,8 @@ module type S = sig
       uniqueness:bool ->
       portability:bool ->
       contention:bool ->
+      totality:bool ->
+      ghostness:bool ->
       forkable:bool ->
       yielding:bool ->
       statefulness:bool ->
