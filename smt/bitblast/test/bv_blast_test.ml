@@ -199,28 +199,28 @@ let run_eval_memo_equiv () =
   in
   List.iter
     (fun w ->
-       List.iter
-         (fun (nm, op) -> check_bin nm w (binop op))
-         [ "bvand", Bv.Bvand
-         ; "bvor", Bv.Bvor
-         ; "bvxor", Bv.Bvxor
-         ; "bvadd", Bv.Bvadd
-         ; "bvsub", Bv.Bvsub
-         ; "bvmul", Bv.Bvmul
-         ; "bvshl", Bv.Bvshl
-         ; "bvlshr", Bv.Bvlshr
-         ; "bvashr", Bv.Bvashr
-         ; "bvudiv", Bv.Bvudiv
-         ; "bvurem", Bv.Bvurem
-         ; "bvult", Bv.Bvult
-         ; "bvsle", Bv.Bvsle
-         ];
-       (* nested + SHARED subterm: exercises the DAG path where memo changes traversal *)
-       check_bin "nested_and" w (fun m c x y ->
-         Bv.binop c m Bv.Bvand (Bv.binop c m Bv.Bvand x y) (Bv.binop c m Bv.Bvand x y));
-       check_bin "ite_shared" w (fun m c x y ->
-         let s = Bv.binop c m Bv.Bvadd x y in
-         Context.ite c (Context.eq c x y) s s))
+      List.iter
+        (fun (nm, op) -> check_bin nm w (binop op))
+        [ "bvand", Bv.Bvand
+        ; "bvor", Bv.Bvor
+        ; "bvxor", Bv.Bvxor
+        ; "bvadd", Bv.Bvadd
+        ; "bvsub", Bv.Bvsub
+        ; "bvmul", Bv.Bvmul
+        ; "bvshl", Bv.Bvshl
+        ; "bvlshr", Bv.Bvlshr
+        ; "bvashr", Bv.Bvashr
+        ; "bvudiv", Bv.Bvudiv
+        ; "bvurem", Bv.Bvurem
+        ; "bvult", Bv.Bvult
+        ; "bvsle", Bv.Bvsle
+        ];
+      (* nested + SHARED subterm: exercises the DAG path where memo changes traversal *)
+      check_bin "nested_and" w (fun m c x y ->
+        Bv.binop c m Bv.Bvand (Bv.binop c m Bv.Bvand x y) (Bv.binop c m Bv.Bvand x y));
+      check_bin "ite_shared" w (fun m c x y ->
+        let s = Bv.binop c m Bv.Bvadd x y in
+        Context.ite c (Context.eq c x y) s s))
     [ 3; 4 ]
 ;;
 
@@ -228,33 +228,33 @@ let run_oracle () =
   print_endline "layer 1: exhaustive small-width oracle";
   List.iter
     (fun w ->
-       List.iter
-         (fun (name, op) -> oracle_bv2 name w w (binop op))
-         [ "bvand", Bv.Bvand
-         ; "bvor", Bv.Bvor
-         ; "bvxor", Bv.Bvxor
-         ; "bvadd", Bv.Bvadd
-         ; "bvsub", Bv.Bvsub
-         ; "bvmul", Bv.Bvmul
-         ; "bvshl", Bv.Bvshl
-         ; "bvlshr", Bv.Bvlshr
-         ; "bvashr", Bv.Bvashr
-         ; "bvudiv", Bv.Bvudiv
-         ; "bvurem", Bv.Bvurem
-         ];
-       List.iter
-         (fun (name, op) -> oracle_bv1 name w w (unop op))
-         [ "bvnot", Bv.Bvnot; "bvneg", Bv.Bvneg ];
-       List.iter
-         (fun (name, op) -> oracle_pred name w (binop op))
-         [ "bvult", Bv.Bvult; "bvule", Bv.Bvule; "bvslt", Bv.Bvslt; "bvsle", Bv.Bvsle ])
+      List.iter
+        (fun (name, op) -> oracle_bv2 name w w (binop op))
+        [ "bvand", Bv.Bvand
+        ; "bvor", Bv.Bvor
+        ; "bvxor", Bv.Bvxor
+        ; "bvadd", Bv.Bvadd
+        ; "bvsub", Bv.Bvsub
+        ; "bvmul", Bv.Bvmul
+        ; "bvshl", Bv.Bvshl
+        ; "bvlshr", Bv.Bvlshr
+        ; "bvashr", Bv.Bvashr
+        ; "bvudiv", Bv.Bvudiv
+        ; "bvurem", Bv.Bvurem
+        ];
+      List.iter
+        (fun (name, op) -> oracle_bv1 name w w (unop op))
+        [ "bvnot", Bv.Bvnot; "bvneg", Bv.Bvneg ];
+      List.iter
+        (fun (name, op) -> oracle_pred name w (binop op))
+        [ "bvult", Bv.Bvult; "bvule", Bv.Bvule; "bvslt", Bv.Bvslt; "bvsle", Bv.Bvsle ])
     [ 3; 4 ];
   (* division is the subtle case (the mul-wraparound spurious-quotient trap): a wider
      exhaustive pass over all inputs, including divide-by-zero. *)
   List.iter
     (fun w ->
-       oracle_bv2 "bvudiv" w w (binop Bv.Bvudiv);
-       oracle_bv2 "bvurem" w w (binop Bv.Bvurem))
+      oracle_bv2 "bvudiv" w w (binop Bv.Bvudiv);
+      oracle_bv2 "bvurem" w w (binop Bv.Bvurem))
     [ 5 ];
   (* width-changing ops *)
   oracle_bv1 "zero_extend" 3 5 (fun mint ctx x -> Bv.zero_extend ctx mint ~n:2 x);
@@ -389,20 +389,20 @@ let run_simplify_equiv () =
   let k ctx m v w = Bv.const ctx m ~value:(big v) ~width:w in
   List.iter
     (fun w ->
-       equiv "cancel" w (fun ctx m x y _ -> s ctx m (a ctx m x y) x);
-       equiv "cancel2" w (fun ctx m x y z ->
-         s ctx m (a ctx m (a ctx m x y) z) (a ctx m y x));
-       equiv "const_fold" w (fun ctx m x _ _ ->
-         a ctx m (a ctx m x (k ctx m 3 w)) (k ctx m 5 w));
-       equiv "coeff2" w (fun ctx m x _ _ -> a ctx m x x);
-       equiv "coeff3" w (fun ctx m x _ _ -> a ctx m (a ctx m x x) x);
-       equiv "neg" w (fun ctx m x y _ -> n ctx m (s ctx m x y));
-       equiv "sub_chain" w (fun ctx m x y z -> s ctx m (s ctx m x y) z);
-       equiv "shared_atom" w (fun ctx m x y _ ->
-         let g = band ctx m x y in
-         a ctx m g g);
-       equiv "mixed_zero" w (fun ctx m x y _ -> s ctx m (a ctx m x y) (a ctx m y x));
-       equiv "wrap_const" w (fun ctx m x _ _ -> a ctx m x (k ctx m ((1 lsl w) - 1) w)))
+      equiv "cancel" w (fun ctx m x y _ -> s ctx m (a ctx m x y) x);
+      equiv "cancel2" w (fun ctx m x y z ->
+        s ctx m (a ctx m (a ctx m x y) z) (a ctx m y x));
+      equiv "const_fold" w (fun ctx m x _ _ ->
+        a ctx m (a ctx m x (k ctx m 3 w)) (k ctx m 5 w));
+      equiv "coeff2" w (fun ctx m x _ _ -> a ctx m x x);
+      equiv "coeff3" w (fun ctx m x _ _ -> a ctx m (a ctx m x x) x);
+      equiv "neg" w (fun ctx m x y _ -> n ctx m (s ctx m x y));
+      equiv "sub_chain" w (fun ctx m x y z -> s ctx m (s ctx m x y) z);
+      equiv "shared_atom" w (fun ctx m x y _ ->
+        let g = band ctx m x y in
+        a ctx m g g);
+      equiv "mixed_zero" w (fun ctx m x y _ -> s ctx m (a ctx m x y) (a ctx m y x));
+      equiv "wrap_const" w (fun ctx m x _ _ -> a ctx m x (k ctx m ((1 lsl w) - 1) w)))
     [ 3; 4; 8 ];
   (* Family 1 (task #36): extract/concat normalization + eq-over-concat splitting. The
      rewrite fires only under OXSMT_BV_REWRITE2; with the gate off these are near-identity
@@ -414,45 +414,45 @@ let run_simplify_equiv () =
   let se ctx m ~n p = Bv.sign_extend ctx m ~n p in
   List.iter
     (fun w ->
-       (* O-bv1: extract of zero_extend — inside the original, in the zero fill, straddling *)
-       equiv "ext_of_zext_lo" w (fun ctx m x _ _ ->
-         ex ctx m ~i:(w - 1) ~j:0 (ze ctx m ~n:2 x));
-       equiv "ext_of_zext_fill" w (fun ctx m x _ _ ->
-         ex ctx m ~i:(w + 1) ~j:w (ze ctx m ~n:2 x));
-       equiv "ext_of_zext_straddle" w (fun ctx m x _ _ ->
-         ex ctx m ~i:w ~j:(w - 1) (ze ctx m ~n:2 x));
-       (* O-bv1: extract of sign_extend — slice fully inside the original (the fired arm)
+      (* O-bv1: extract of zero_extend — inside the original, in the zero fill, straddling *)
+      equiv "ext_of_zext_lo" w (fun ctx m x _ _ ->
+        ex ctx m ~i:(w - 1) ~j:0 (ze ctx m ~n:2 x));
+      equiv "ext_of_zext_fill" w (fun ctx m x _ _ ->
+        ex ctx m ~i:(w + 1) ~j:w (ze ctx m ~n:2 x));
+      equiv "ext_of_zext_straddle" w (fun ctx m x _ _ ->
+        ex ctx m ~i:w ~j:(w - 1) (ze ctx m ~n:2 x));
+      (* O-bv1: extract of sign_extend — slice fully inside the original (the fired arm)
          and a straddle (falls to the default Bv.extract; equivalence must still hold) *)
-       equiv "ext_of_sext_lo" w (fun ctx m x _ _ ->
-         ex ctx m ~i:(w - 1) ~j:0 (se ctx m ~n:2 x));
-       equiv "ext_of_sext_straddle" w (fun ctx m x _ _ ->
-         ex ctx m ~i:w ~j:(w - 1) (se ctx m ~n:2 x));
-       (* O-bv1: adjacent contiguous extracts of the SAME base merge back (concat (extract
+      equiv "ext_of_sext_lo" w (fun ctx m x _ _ ->
+        ex ctx m ~i:(w - 1) ~j:0 (se ctx m ~n:2 x));
+      equiv "ext_of_sext_straddle" w (fun ctx m x _ _ ->
+        ex ctx m ~i:w ~j:(w - 1) (se ctx m ~n:2 x));
+      (* O-bv1: adjacent contiguous extracts of the SAME base merge back (concat (extract
          [w-1:1] x) (extract [0:0] x) = x) *)
-       equiv "concat_adjacent_ext_merge" w (fun ctx m x _ _ ->
-         cc ctx m (ex ctx m ~i:(w - 1) ~j:1 x) (ex ctx m ~i:0 ~j:0 x));
-       (* extract straddling a concat seam (bits from both hi and lo) *)
-       equiv "ext_of_concat_straddle" w (fun ctx m x y _ ->
-         ex ctx m ~i:w ~j:(w - 2) (cc ctx m x y));
-       (* extract fully inside the low / high halves *)
-       equiv "ext_of_concat_lo" w (fun ctx m x y _ ->
-         ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y));
-       equiv "ext_of_concat_hi" w (fun ctx m x y _ ->
-         ex ctx m ~i:((2 * w) - 1) ~j:w (cc ctx m x y));
-       (* nested extract *)
-       equiv "ext_of_ext" w (fun ctx m x _ _ ->
-         ex ctx m ~i:1 ~j:0 (ex ctx m ~i:(w - 1) ~j:1 x));
-       (* extract of a constant *)
-       equiv "ext_of_const" w (fun ctx m _ _ _ -> ex ctx m ~i:(w - 1) ~j:1 (k ctx m 5 w));
-       (* concat of two constants folds *)
-       equiv "concat_const" w (fun ctx m _ _ _ -> cc ctx m (k ctx m 2 w) (k ctx m 3 w));
-       (* equality over concats (the ext_con killer): mixed operands so the per-slice split
+      equiv "concat_adjacent_ext_merge" w (fun ctx m x _ _ ->
+        cc ctx m (ex ctx m ~i:(w - 1) ~j:1 x) (ex ctx m ~i:0 ~j:0 x));
+      (* extract straddling a concat seam (bits from both hi and lo) *)
+      equiv "ext_of_concat_straddle" w (fun ctx m x y _ ->
+        ex ctx m ~i:w ~j:(w - 2) (cc ctx m x y));
+      (* extract fully inside the low / high halves *)
+      equiv "ext_of_concat_lo" w (fun ctx m x y _ ->
+        ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y));
+      equiv "ext_of_concat_hi" w (fun ctx m x y _ ->
+        ex ctx m ~i:((2 * w) - 1) ~j:w (cc ctx m x y));
+      (* nested extract *)
+      equiv "ext_of_ext" w (fun ctx m x _ _ ->
+        ex ctx m ~i:1 ~j:0 (ex ctx m ~i:(w - 1) ~j:1 x));
+      (* extract of a constant *)
+      equiv "ext_of_const" w (fun ctx m _ _ _ -> ex ctx m ~i:(w - 1) ~j:1 (k ctx m 5 w));
+      (* concat of two constants folds *)
+      equiv "concat_const" w (fun ctx m _ _ _ -> cc ctx m (k ctx m 2 w) (k ctx m 3 w));
+      (* equality over concats (the ext_con killer): mixed operands so the per-slice split
          is nontrivial ((concat x y) = (concat y x) iff x=y) *)
-       equiv "eq_concat_mixed" w (fun ctx m x y _ ->
-         Context.eq ctx (cc ctx m x y) (cc ctx m y x));
-       (* equality of an extract against a concat slice *)
-       equiv "eq_ext_concat" w (fun ctx m x y _ ->
-         Context.eq ctx (ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y)) y))
+      equiv "eq_concat_mixed" w (fun ctx m x y _ ->
+        Context.eq ctx (cc ctx m x y) (cc ctx m y x));
+      (* equality of an extract against a concat slice *)
+      equiv "eq_ext_concat" w (fun ctx m x y _ ->
+        Context.eq ctx (ex ctx m ~i:(w - 1) ~j:0 (cc ctx m x y)) y))
     [ 3; 4; 8 ];
   (* Family 2 (task #36): bitwise identities + constant folding. Same OXSMT_BV_REWRITE2
      gate; equivalence must hold both ways. *)
@@ -463,24 +463,23 @@ let run_simplify_equiv () =
   let bmul ctx m p q = Bv.binop ctx m Bv.Bvmul p q in
   List.iter
     (fun w ->
-       let zero ctx m = k ctx m 0 w in
-       let ones ctx m = k ctx m ((1 lsl w) - 1) w in
-       let one ctx m = k ctx m 1 w in
-       equiv "and_zero" w (fun ctx m x _ _ -> band ctx m x (zero ctx m));
-       equiv "and_ones" w (fun ctx m x _ _ -> band ctx m x (ones ctx m));
-       equiv "and_self" w (fun ctx m x _ _ -> band ctx m x x);
-       equiv "or_zero" w (fun ctx m x _ _ -> bor ctx m x (zero ctx m));
-       equiv "or_ones" w (fun ctx m x _ _ -> bor ctx m x (ones ctx m));
-       equiv "or_self" w (fun ctx m x _ _ -> bor ctx m x x);
-       equiv "xor_zero" w (fun ctx m x _ _ -> bxor ctx m x (zero ctx m));
-       equiv "xor_self" w (fun ctx m x _ _ -> bxor ctx m x x);
-       equiv "xor_ones" w (fun ctx m x _ _ -> bxor ctx m x (ones ctx m));
-       equiv "not_not" w (fun ctx m x _ _ -> bnot ctx m (bnot ctx m x));
-       equiv "mul_zero" w (fun ctx m x _ _ -> bmul ctx m x (zero ctx m));
-       equiv "mul_one" w (fun ctx m x _ _ -> bmul ctx m x (one ctx m));
-       equiv "and_const_fold" w (fun ctx m _ _ _ ->
-         band ctx m (k ctx m 6 w) (k ctx m 3 w));
-       equiv "not_const_fold" w (fun ctx m _ _ _ -> bnot ctx m (k ctx m 5 w)))
+      let zero ctx m = k ctx m 0 w in
+      let ones ctx m = k ctx m ((1 lsl w) - 1) w in
+      let one ctx m = k ctx m 1 w in
+      equiv "and_zero" w (fun ctx m x _ _ -> band ctx m x (zero ctx m));
+      equiv "and_ones" w (fun ctx m x _ _ -> band ctx m x (ones ctx m));
+      equiv "and_self" w (fun ctx m x _ _ -> band ctx m x x);
+      equiv "or_zero" w (fun ctx m x _ _ -> bor ctx m x (zero ctx m));
+      equiv "or_ones" w (fun ctx m x _ _ -> bor ctx m x (ones ctx m));
+      equiv "or_self" w (fun ctx m x _ _ -> bor ctx m x x);
+      equiv "xor_zero" w (fun ctx m x _ _ -> bxor ctx m x (zero ctx m));
+      equiv "xor_self" w (fun ctx m x _ _ -> bxor ctx m x x);
+      equiv "xor_ones" w (fun ctx m x _ _ -> bxor ctx m x (ones ctx m));
+      equiv "not_not" w (fun ctx m x _ _ -> bnot ctx m (bnot ctx m x));
+      equiv "mul_zero" w (fun ctx m x _ _ -> bmul ctx m x (zero ctx m));
+      equiv "mul_one" w (fun ctx m x _ _ -> bmul ctx m x (one ctx m));
+      equiv "and_const_fold" w (fun ctx m _ _ _ -> band ctx m (k ctx m 6 w) (k ctx m 3 w));
+      equiv "not_const_fold" w (fun ctx m _ _ _ -> bnot ctx m (k ctx m 5 w)))
     [ 3; 4; 8 ];
   (* Family 3 (task #36): shift by a constant amount folds to extract/concat. Cover
      in-range, zero, and over-width amounts for shl/lshr/ashr; same gate. *)
@@ -489,15 +488,77 @@ let run_simplify_equiv () =
   let ashr ctx m p q = Bv.binop ctx m Bv.Bvashr p q in
   List.iter
     (fun w ->
-       List.iter
-         (fun kk ->
-            equiv (Printf.sprintf "shl_k%d" kk) w (fun ctx m x _ _ ->
-              shl ctx m x (k ctx m kk w));
-            equiv (Printf.sprintf "lshr_k%d" kk) w (fun ctx m x _ _ ->
-              lshr ctx m x (k ctx m kk w));
-            equiv (Printf.sprintf "ashr_k%d" kk) w (fun ctx m x _ _ ->
-              ashr ctx m x (k ctx m kk w)))
-         [ 0; 1; w - 1; w ])
+      List.iter
+        (fun kk ->
+          equiv (Printf.sprintf "shl_k%d" kk) w (fun ctx m x _ _ ->
+            shl ctx m x (k ctx m kk w));
+          equiv (Printf.sprintf "lshr_k%d" kk) w (fun ctx m x _ _ ->
+            lshr ctx m x (k ctx m kk w));
+          equiv (Printf.sprintf "ashr_k%d" kk) w (fun ctx m x _ _ ->
+            ashr ctx m x (k ctx m kk w)))
+        [ 0; 1; w - 1; w ])
+    [ 3; 4; 8 ]
+;;
+
+(* rw3 (bv-rw3 probe): comparison-vs-bound + extract-into-op propagation. Same equivalence
+   discipline as families 1-3 — the rewrite fires only under OXSMT_BV_RW3, so with the
+   gate off these are identity and the equivalence is trivial; run in the ON config
+   (Makefile) to certify the real rewrites. [equiv] works for Bool-valued [e] too
+   (Context.eq on Bool = iff), so the comparison folds are exhaustively checked over all
+   width-w assignments. *)
+let run_rw3_equiv () =
+  print_endline "layer 4 (rw3): comparison-vs-bound + extract-into-op (negation -> unsat)";
+  let k ctx m v w = Bv.const ctx m ~value:(big v) ~width:w in
+  let a ctx m p q = Bv.binop ctx m Bv.Bvadd p q in
+  let mul ctx m p q = Bv.binop ctx m Bv.Bvmul p q in
+  let band ctx m p q = Bv.binop ctx m Bv.Bvand p q in
+  let bor ctx m p q = Bv.binop ctx m Bv.Bvor p q in
+  let bxor ctx m p q = Bv.binop ctx m Bv.Bvxor p q in
+  let bnot ctx m p = Bv.unop ctx m Bv.Bvnot p in
+  let ex ctx m ~i ~j p = Bv.extract ctx m ~i ~j p in
+  let ule ctx m p q = Bv.binop ctx m Bv.Bvule p q in
+  let ult ctx m p q = Bv.binop ctx m Bv.Bvult p q in
+  let sle ctx m p q = Bv.binop ctx m Bv.Bvsle p q in
+  let slt ctx m p q = Bv.binop ctx m Bv.Bvslt p q in
+  List.iter
+    (fun w ->
+      let maxv = (1 lsl w) - 1 in
+      (* comparison-vs-bound: reflexivity, bound tautologies/contradictions in both
+         operand positions, unsigned and signed, strict and non-strict *)
+      equiv "ule_refl" w (fun ctx m x _ _ -> ule ctx m x x);
+      equiv "ule_lo_left" w (fun ctx m x _ _ -> ule ctx m (k ctx m 0 w) x);
+      equiv "ule_hi_right" w (fun ctx m x _ _ -> ule ctx m x (k ctx m maxv w));
+      equiv "ule_zero_right" w (fun ctx m x _ _ -> ule ctx m x (k ctx m 0 w));
+      equiv "ule_max_left" w (fun ctx m x _ _ -> ule ctx m (k ctx m maxv w) x);
+      equiv "ult_refl" w (fun ctx m x _ _ -> ult ctx m x x);
+      equiv "ult_lo_right" w (fun ctx m x _ _ -> ult ctx m x (k ctx m 0 w));
+      equiv "ult_hi_left" w (fun ctx m x _ _ -> ult ctx m (k ctx m maxv w) x);
+      equiv "sle_refl" w (fun ctx m x _ _ -> sle ctx m x x);
+      equiv "sle_min_right" w (fun ctx m x _ _ -> sle ctx m x (k ctx m (1 lsl (w - 1)) w));
+      equiv "sle_max_right" w (fun ctx m x _ _ ->
+        sle ctx m x (k ctx m ((1 lsl (w - 1)) - 1) w));
+      equiv "sle_min_left" w (fun ctx m x _ _ -> sle ctx m (k ctx m (1 lsl (w - 1)) w) x);
+      equiv "sle_max_left" w (fun ctx m x _ _ ->
+        sle ctx m (k ctx m ((1 lsl (w - 1)) - 1) w) x);
+      equiv "slt_refl" w (fun ctx m x _ _ -> slt ctx m x x);
+      equiv "both_const_ule" w (fun ctx m _ _ _ -> ule ctx m (k ctx m 2 w) (k ctx m 5 w));
+      equiv "both_const_sle" w (fun ctx m _ _ _ ->
+        sle ctx m (k ctx m maxv w) (k ctx m 1 w));
+      (* is_zero_bit unsigned split: b is a middle constant with high zero bits, over a
+         FREE var and over an arithmetic operand (exercises the extract pushdown inside) *)
+      equiv "ule_split_var" w (fun ctx m x _ _ -> ule ctx m x (k ctx m (maxv / 2) w));
+      equiv "ule_split_sum" w (fun ctx m x y _ ->
+        ule ctx m (a ctx m x y) (k ctx m (maxv / 2) w));
+      (* extract-into-op width propagation *)
+      equiv "ext_add_low" w (fun ctx m x y _ -> ex ctx m ~i:(w - 2) ~j:0 (a ctx m x y));
+      equiv "ext_mul_low" w (fun ctx m x y _ -> ex ctx m ~i:(w - 2) ~j:0 (mul ctx m x y));
+      equiv "ext_and" w (fun ctx m x y _ -> ex ctx m ~i:(w - 1) ~j:1 (band ctx m x y));
+      equiv "ext_or" w (fun ctx m x y _ -> ex ctx m ~i:(w - 1) ~j:1 (bor ctx m x y));
+      equiv "ext_xor" w (fun ctx m x y _ -> ex ctx m ~i:(w - 2) ~j:1 (bxor ctx m x y));
+      equiv "ext_not" w (fun ctx m x _ _ -> ex ctx m ~i:(w - 2) ~j:1 (bnot ctx m x));
+      (* nested: extract of a sum of a bitwise op (composition through the pushdown) *)
+      equiv "ext_add_nested" w (fun ctx m x y z ->
+        ex ctx m ~i:(w - 2) ~j:0 (a ctx m (band ctx m x y) z)))
     [ 3; 4; 8 ]
 ;;
 
@@ -507,6 +568,7 @@ let () =
   run_e2e ();
   run_fail_closed ();
   run_simplify_equiv ();
+  run_rw3_equiv ();
   run_eval_memo_equiv ();
   Printf.printf "\nbv-blast self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1

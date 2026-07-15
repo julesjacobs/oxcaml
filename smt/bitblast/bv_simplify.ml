@@ -85,8 +85,8 @@ let rebuild ctx mint (w, const, atoms) =
   let contribs =
     Hashtbl.fold
       (fun tag (atom, coeff) acc ->
-         let c = reduce coeff ~modulus in
-         if Bigint.is_zero c then acc else (tag, atom, c) :: acc)
+        let c = reduce coeff ~modulus in
+        if Bigint.is_zero c then acc else (tag, atom, c) :: acc)
       atoms
       []
   in
@@ -156,8 +156,8 @@ let occurrences (terms : Term.t list) : (int, int) Hashtbl.t =
       Hashtbl.add visited t.Term.tag ();
       List.iter
         (fun c ->
-           bump c;
-           walk c)
+          bump c;
+          walk c)
         (children t))
   in
   List.iter walk terms;
@@ -189,6 +189,23 @@ let eqsplit_enabled () =
   | Some _ | None -> false
 ;;
 
+(* ---- rw3 (bv-rw3 probe): comparison-vs-bound rewriting + extract-into-op width
+   propagation. A SEPARATE env gate (OXSMT_BV_RW3, default off, byte-identical off) so it
+   composes with OXSMT_BV_REWRITE2 (additive + extract/concat + bitwise/shift) without
+   disturbing it. UNSAT-fold direction only: every rule turns a comparison into a Bool
+   constant / equality / narrower comparison, which cascades through the ALREADY-folding
+   Context.[{ite,and_,or_,not_,eq}] constructors to collapse an unsatisfiable formula to
+   [false] pre-blast. Mirrors z3 4.8.5 bv_rewriter.cpp's ALWAYS-ON core (mk_leq_core bound
+   rules + the is_zero_bit ule split at :548-576, and the extract-into-op pushdown at
+   :761-774 — NOT the param-gated propagate_extract). Each rule is certified by the
+   Layer-4 simplifier-equivalence oracle; see logs/bv-rw3-probe-log.md for the
+   rule-to-source map. *)
+let rw3_enabled () =
+  match Sys.getenv_opt "OXSMT_BV_RW3" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let bvwidth (t : Term.t) =
   match Bv.width_of_sort t.Term.sort with
   | Some w -> w
@@ -208,9 +225,9 @@ let bvwidth (t : Term.t) =
    structure is restructured. Every arm is equivalence-preserving (certified by the
    Layer-4 oracle); the gate is a cost guard, not a soundness one — the
    [ext_con_004_001_1024] canary is the evidence it is load-bearing on the eq-split path. *)
-let rec norm_extract ~simp ~shared ctx mint ~i ~j (x : Term.t) : Term.t =
+let rec norm_extract ~simp ~shared ~rw3 ctx mint ~i ~j (x : Term.t) : Term.t =
   let w = bvwidth x in
-  let recur = norm_extract ~simp ~shared ctx mint in
+  let recur = norm_extract ~simp ~shared ~rw3 ctx mint in
   if w >= 1 && j = 0 && i = w - 1
   then simp x (* full-width extract is the identity *)
   else if shared x
@@ -244,6 +261,19 @@ let rec norm_extract ~simp ~shared ctx mint ~i ~j (x : Term.t) : Term.t =
           (recur ~i:(w0 - 1) ~j y)
     | Some (Bv.Op { op = Bv.Sign_extend _; args = [ y ]; _ }) when i < bvwidth y ->
       recur ~i ~j y
+    (* rw3: extract-into-op width propagation (z3 bv_rewriter.cpp mk_extract :761-774,
+       ALWAYS-ON there). Bitwise ops distribute over any slice:
+       [(op a b)[i:j] = a[i:j] op b[i:j]]; add/mul only at [j = 0] because the low [i+1]
+       bits of a sum/product depend only on the low [i+1] bits of the operands (carry
+       flows upward), so slicing off the high bits is sound only when the slice is
+       anchored at bit 0. Sound + certified by the Layer-4 oracle; the [shared]-gate above
+       still bounds re-expansion. *)
+    | Some (Bv.Op { op = Bv.Bvnot; args = [ y ]; _ }) when rw3 ->
+      Bv.unop ctx mint Bv.Bvnot (recur ~i ~j y)
+    | Some (Bv.Op { op = (Bv.Bvand | Bv.Bvor | Bv.Bvxor) as op; args = [ a; b ]; _ })
+      when rw3 -> Bv.binop ctx mint op (recur ~i ~j a) (recur ~i ~j b)
+    | Some (Bv.Op { op = (Bv.Bvadd | Bv.Bvmul) as op; args = [ a; b ]; _ })
+      when rw3 && j = 0 -> Bv.binop ctx mint op (recur ~i ~j:0 a) (recur ~i ~j:0 b)
     | _ -> Bv.extract ctx mint ~i ~j (simp x))
 ;;
 
@@ -259,7 +289,7 @@ let norm_concat ~simp ~shared ctx mint (hi : Term.t) (lo : Term.t) : Term.t =
   | ( Some (Bv.Op { op = Bv.Extract (a, b); args = [ y1 ]; _ })
     , Some (Bv.Op { op = Bv.Extract (c, d); args = [ y2 ]; _ }) )
     when y1 == y2 && b = c + 1 && (not (shared hi)) && not (shared lo) ->
-    norm_extract ~simp ~shared ctx mint ~i:a ~j:d y1
+    norm_extract ~simp ~shared ~rw3:false ctx mint ~i:a ~j:d y1
   | _ -> Bv.concat ctx mint (simp hi) (simp lo)
 ;;
 
@@ -292,13 +322,13 @@ let split_eq_concat ctx mint (a : Term.t) (b : Term.t) : Term.t =
        deliberate — this eq-split path is where the re-expansion scar lives, which is why
        it stays behind the [OXSMT_BV_REWRITE2_EQSPLIT] sub-flag (default off) with the
        [ext_con_004_001_1024] canary as its evidence. *)
-    let ne = norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ctx mint in
+    let ne = norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ~rw3:false ctx mint in
     let eqs =
       List.map
         (fun (loc, hic) ->
-           let j = loc
-           and i = hic - 1 in
-           Context.eq ctx (ne ~i ~j a) (ne ~i ~j b))
+          let j = loc
+          and i = hic - 1 in
+          Context.eq ctx (ne ~i ~j a) (ne ~i ~j b))
         (pairs bounds)
     in
     Context.and_ ctx eqs
@@ -415,7 +445,7 @@ let rewrite_bv_op ctx mint (op : Bv.op) (args : Term.t list) (w : int) : Term.t 
        (* [x] is already simplified here, so extract/concat of it uses identity-[simp] and
           no sharing gate (the fold emits a bounded number of extracts — not the eq-concat
           re-expansion the gate guards). *)
-       let ne = norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ctx mint in
+       let ne = norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ~rw3:false ctx mint in
        let nc = norm_concat ~simp:Fun.id ~shared:(fun _ -> false) ctx mint in
        (match as_const kterm with
         | None -> rebuild ()
@@ -441,9 +471,118 @@ let rewrite_bv_op ctx mint (op : Bv.op) (args : Term.t list) (w : int) : Term.t 
      | _ -> rebuild ())
 ;;
 
+(* ---- rw3: comparison-vs-bound rewriting (z3 bv_rewriter.cpp mk_leq_core :439-589). ---- *)
+
+(* [is_zero_bit t idx] iff bit [idx] of [t] is KNOWN to be zero from its structure:
+   constants (bit test) and the zero sub-parts of a concat. Anything else -> [false]
+   (unknown, conservatively not-zero). Mirrors z3 is_zero_bit :2147. *)
+let rec is_zero_bit (t : Term.t) (idx : int) : bool =
+  match Bv.view t with
+  | Some (Bv.Const { value; width = _ }) ->
+    let q = fst (Bigint.divmod value (pow2 idx)) in
+    Bigint.is_zero (snd (Bigint.divmod q (Bigint.of_int 2)))
+  | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) ->
+    let wl = bvwidth lo in
+    if idx < wl then is_zero_bit lo idx else is_zero_bit hi (idx - wl)
+  | _ -> false
+;;
+
+(* signed interpretation of the canonical unsigned residue [v] at width [w]. *)
+let signed_val v w =
+  if Bigint.compare v (pow2 (w - 1)) >= 0 then Bigint.sub v (pow2 w) else v
+;;
+
+(* [rw_leq ~signed ctx mint a b] rewrites [a <= b] (unsigned or signed, [a]/[b] already
+   simplified) toward a Bool constant / equality / narrower comparison. Only ever weakens
+   to an EQUIVALENT form (certified by the Layer-4 oracle); on no match it rebuilds the
+   plain comparison. Order mirrors z3 mk_leq_core: reflexivity, both-const decision, the
+   numeral bound tautologies/contradictions (both operand positions), then the unsigned
+   is_zero_bit high-bit split. *)
+let rw_leq ~signed ctx mint (a : Term.t) (b : Term.t) : Term.t =
+  let w = bvwidth a in
+  let plain () = Bv.binop ctx mint (if signed then Bv.Bvsle else Bv.Bvule) a b in
+  if w < 1
+  then plain ()
+  else if same_term a b
+  then Context.bool_const ctx true (* a <= a *)
+  else (
+    let ca = as_const a
+    and cb = as_const b in
+    match ca, cb with
+    | Some (va, _), Some (vb, _) ->
+      let le =
+        if signed
+        then Bigint.compare (signed_val va w) (signed_val vb w) <= 0
+        else Bigint.compare va vb <= 0
+      in
+      Context.bool_const ctx le
+    | _ ->
+      let lower = if signed then pow2 (w - 1) else Bigint.zero in
+      let upper =
+        if signed
+        then Bigint.sub (pow2 (w - 1)) Bigint.one
+        else Bigint.sub (pow2 w) Bigint.one
+      in
+      let bound_match =
+        match cb, ca with
+        (* b is the lower bound: a <= lower <=> a = lower *)
+        | Some (vb, _), _ when Bigint.equal vb lower -> Some (Context.eq ctx a b)
+        (* b is the upper bound: a <= upper is a tautology *)
+        | Some (vb, _), _ when Bigint.equal vb upper -> Some (Context.bool_const ctx true)
+        (* a is the lower bound: lower <= b is a tautology *)
+        | _, Some (va, _) when Bigint.equal va lower -> Some (Context.bool_const ctx true)
+        (* a is the upper bound: upper <= b <=> b = upper *)
+        | _, Some (va, _) when Bigint.equal va upper -> Some (Context.eq ctx a b)
+        | _ -> None
+      in
+      (match bound_match with
+       | Some r -> r
+       | None ->
+         if signed
+         then plain ()
+         else (
+           (* unsigned is_zero_bit split (z3 :548-576): find the top set/unknown bit of b;
+              a <= b then forces a's bits above it to zero and compares the low slices.
+              The extracts are pushed into a/b's arithmetic (rw3:true, no sharing gate:
+              the slice is narrow, so this is bounded and is exactly the width-shrink that
+              exposes a folded high-half contradiction). *)
+           let ex t ~i ~j =
+             norm_extract ~simp:Fun.id ~shared:(fun _ -> false) ~rw3:true ctx mint ~i ~j t
+           in
+           let first_non_zero = ref (-1) in
+           let i = ref w in
+           (try
+              while !i > 0 do
+                decr i;
+                if not (is_zero_bit b !i)
+                then (
+                  first_non_zero := !i;
+                  raise Exit)
+              done
+            with
+            | Exit -> ());
+           let fnz = !first_non_zero in
+           if fnz = -1
+           then Context.eq ctx a (zero_bv ctx mint w) (* all bits of b are zero *)
+           else if fnz < w - 1
+           then (
+             let hi_zero =
+               Context.eq
+                 ctx
+                 (ex a ~i:(w - 1) ~j:(fnz + 1))
+                 (zero_bv ctx mint (w - 1 - fnz))
+             in
+             let lo_cmp =
+               Bv.binop ctx mint Bv.Bvule (ex a ~i:fnz ~j:0) (ex b ~i:fnz ~j:0)
+             in
+             Context.and_ ctx [ hi_zero; lo_cmp ])
+           else plain ())))
+;;
+
 let simplify ctx mint (terms : Term.t list) : Term.t list =
   let rewrite2 = rewrite2_enabled () in
   let eqsplit = rewrite2 && eqsplit_enabled () in
+  let rw3 = rw3_enabled () in
   let count = occurrences terms in
   let shared (t : Term.t) =
     match Hashtbl.find_opt count t.Term.tag with
@@ -475,26 +614,37 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
       (match Bv.view t with
        | Some (Bv.Op { op = Bv.Bvadd | Bv.Bvsub | Bv.Bvneg; _ }) ->
          rebuild ctx mint (lin_of ~simp ~shared t)
-       | Some (Bv.Op { op = Bv.Extract (i, j); args = [ a ]; _ }) when rewrite2 ->
+       | Some (Bv.Op { op = Bv.Extract (i, j); args = [ a ]; _ }) when rewrite2 || rw3 ->
          (* pass the ORIGINAL operand: [norm_extract] walks its structure with the
-            [shared] gate and [simp]s the leaves it stops at *)
-         norm_extract ~simp ~shared ctx mint ~i ~j a
+            [shared] gate and [simp]s the leaves it stops at. [~rw3] additionally enables
+            the extract-into-op width propagation. *)
+         norm_extract ~simp ~shared ~rw3 ctx mint ~i ~j a
        | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) when rewrite2 ->
          norm_concat ~simp ~shared ctx mint hi lo
+       | Some (Bv.Op { op = Bv.Bvule; args = [ a; b ]; _ }) when rw3 ->
+         rw_leq ~signed:false ctx mint (simp a) (simp b)
+       | Some (Bv.Op { op = Bv.Bvsle; args = [ a; b ]; _ }) when rw3 ->
+         rw_leq ~signed:true ctx mint (simp a) (simp b)
+       | Some (Bv.Op { op = Bv.Bvult; args = [ a; b ]; _ }) when rw3 ->
+         (* a <u b <=> not (b <=u a) *)
+         Context.not_ ctx (rw_leq ~signed:false ctx mint (simp b) (simp a))
+       | Some (Bv.Op { op = Bv.Bvslt; args = [ a; b ]; _ }) when rw3 ->
+         (* a <s b <=> not (b <=s a) *)
+         Context.not_ ctx (rw_leq ~signed:true ctx mint (simp b) (simp a))
        | Some
            (Bv.Op
-              { op =
-                  ( Bv.Bvnot
-                  | Bv.Bvand
-                  | Bv.Bvor
-                  | Bv.Bvxor
-                  | Bv.Bvmul
-                  | Bv.Bvshl
-                  | Bv.Bvlshr
-                  | Bv.Bvashr ) as op
-              ; args
-              ; result_width = Some w
-              })
+             { op =
+                 ( Bv.Bvnot
+                 | Bv.Bvand
+                 | Bv.Bvor
+                 | Bv.Bvxor
+                 | Bv.Bvmul
+                 | Bv.Bvshl
+                 | Bv.Bvlshr
+                 | Bv.Bvashr ) as op
+             ; args
+             ; result_width = Some w
+             })
          when rewrite2 -> rewrite_bv_op ctx mint op (List.map simp args) w
        | _ ->
          let orig = Iarr.to_list orig_args in
