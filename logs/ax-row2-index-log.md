@@ -115,17 +115,31 @@ fires), NEVER a wrong premise. Distinct index/element sorts (the whole corpus) n
 counted-identity (INDEXED≡NOINDEX 7/7 re-confirmed post-guard) and the +21 are preserved. Same
 ruling shape as the #53 strict-OFF gate: sound-by-construction, not sound-by-argument.
 
-### FABLE ⇄ CODEX RECONCILIATION (why both legs were right)
-- Fable APPROVE via the live-rep invariant ("key-hit ⇒ current co-classing; worst case a missed
-  match") is TRUE for DISTINCT index/element sorts: `row_round`'s only merges are on element-sort
-  read terms, and element-merge congruence never reaches an index-ARGUMENT class (arrays aren't
-  injective), so index-class reps are stable within a pass ⇒ the assumed orientation always held.
-- Codex BOUNCE via the else-branch divergence is TRUE for SAME-SORT `(Array T T)`: there element
-  sort = index sort, so a read-result merge IS an index-class merge — fable's stability premise
-  breaks, the hit can stale, and the unchecked assumption becomes a wrong premise.
-Both are correct in their domain; they conflict only because one reasons over the corpus (all
-distinct-sort) and the other over the full theory (same-sort legal). The guard dissolves the
-conflict: it does not RELY on index-class stability, so it is sound for BOTH sorts.
+### FABLE ⇄ CODEX RECONCILIATION — CONVERGED (codex RETRACTED the bounce)
+Final understanding (both legs agree; supersedes the mid-review split above): the live-rep
+invariant covers BOTH sort regimes — a stale key can only MISS, never mis-orient — so the
+UNGUARDED form was already sound, and rung-1a is dual-RATIFIED at b3d4a76e72 on this proof.
+- Codex RETRACTED its same-sort bounce after source-verifying `Euf`: `find` has NO path
+  compression (euf.ml:1181/325), `union` re-parents the ABSORBED root permanently (:304-308),
+  and class ids are monotonic / NEVER recycled. Consequence: `class_of` returns a class's LIVE
+  root id; a merge makes the absorbed root's id DEAD (no term maps to it via `class_of` again)
+  and it is never reissued. So a stale index entry — whose key component is a now-dead root id —
+  can NEVER be hit by a live lookup (which only produces live root ids); and any LIVE hit means
+  `class_of i` = the stored entry's live root id = `class_of x` ⇒ i ~ x LIVE (co-classing FORCED),
+  identically for j~y. This holds even for SAME-SORT `(Array T T)` where a read-result merge is
+  an index-class merge: the merge just makes some old id dead, it cannot make a live hit
+  mis-orient. So a hit ⇒ correct orientation; a stale entry ⇒ miss. NO wrong premise, either sort.
+- Fable's original "key-hit ⇒ current co-classing, worst case a missed match" was the same
+  invariant; the apparent same-sort hole was closed by the id-non-recycling property, not by
+  index-class stability.
+THE GUARD IS DEFENSE-IN-DEPTH, NOT A SOUNDNESS REQUIREMENT. It was accepted (master ruling)
+because its cost is per-HIT not per-call (counted-identity + the +21 re-confirmed post-guard =
+measurably free) and it makes soundness INDEPENDENT of the no-path-compression / no-id-recycling
+Euf invariant entirely — a future Euf change (adding path compression, or recycling ids) that
+broke the invariant would silently break the unguarded form, but the guarded form stays sound by
+construction. FOR A FUTURE READER deciding whether to remove the guard: it is safe to remove ONLY
+while `Euf.find` has no path compression AND class ids are never recycled (euf.ml find/union); the
+guard is the deliberate hedge against exactly those two changes.
 
 ### SAME-SORT RED (tests/arr-goldens-red/row2_samesort_red.smt2, wired into row2-red-gate)
 `(Array T T)` fixture: nested-index reads where `select(store a i v) j` telescopes (ROW2, `i≠j`
