@@ -1254,6 +1254,22 @@ let test_sig_pack_injective () =
   check "sigpack: a0 overflow -> -1" (pack ~n:1 ~s:1 ~a0:(1 lsl argb) ~a1:0 = -1);
   check "sigpack: a1 overflow -> -1" (pack ~n:2 ~s:1 ~a0:1 ~a1:(1 lsl argb) = -1);
   check "sigpack: arity>2 -> -1" (pack ~n:3 ~s:1 ~a0:1 ~a1:1 = -1);
+  (* (3b) OVERFLOW-ALIAS DISCRIMINATION (rider MEDIUM): a just-out-of-range arg (2^argb)
+     overflows into the NEXT field, aliasing a distinct in-range signature. The range
+     checks make the overflowing pack [-1] (distinct from the alias); DELETING the arity-2
+     bound check (euf.ml n=2 arm) makes both pack to the same key — this must be RED then.
+     - a0 overflow: (n=2,s=6,a0=2^argb,a1=3) [a0 spills into the sym field] vs
+       (n=2,s=7,a0=0,a1=3): with the a0 field 20-bit and sym at bit 40, a0=2^20 lands on
+       bit 40 = sym's low bit, so the broken packer reads it as sym=7,a0=0.
+     - a1 overflow: (n=2,s=6,a0=0,a1=2^argb) [a1's bit 20 spills into a0's low bit] vs
+       (n=2,s=6,a0=1,a1=0): a1=2^20 lands on bit 20 = a0=1's contribution. *)
+  let no_alias lhs rhs = not (lhs >= 0 && lhs = rhs) in
+  check
+    "sigpack: a0 overflow does not alias (RED w/o n=2 bound check)"
+    (no_alias (pack ~n:2 ~s:6 ~a0:(1 lsl argb) ~a1:3) (pack ~n:2 ~s:7 ~a0:0 ~a1:3));
+  check
+    "sigpack: a1 overflow does not alias (RED w/o n=2 bound check)"
+    (no_alias (pack ~n:2 ~s:6 ~a0:0 ~a1:(1 lsl argb)) (pack ~n:2 ~s:6 ~a0:1 ~a1:0));
   (* (4) INJECTIVITY SWEEP over a grid of in-range tuples: all packed keys distinct, none
      negative. A collision (broken packer) trips the table. *)
   let seen = Hashtbl.create 4096 in

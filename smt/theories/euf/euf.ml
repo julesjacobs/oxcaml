@@ -421,13 +421,21 @@ let sig_pack_arg_max = 1 lsl sig_pack_arg_bits
    consulted for [n = 2] and [a0] only for [n >= 1], so the arity tag keeps the arities
    disjoint even when the ignored args happen to collide. *)
 let pack_signature_fields ~n ~s ~a0 ~a1 =
-  if n < 0 || n > 2 || s >= sig_pack_sym_max
+  (* Fail-closed on ANY out-of-range field, including NEGATIVE (rider LOW): ids are
+     non-negative in production (enode/symbol ids), so the [< 0] guards are counted-
+     identity-safe, but on a TCB helper fail-closed beats a doc caveat — a negative field
+     would otherwise [lsl] into a sign/adjacent-field position and alias. Matches the
+     doc's "any out-of-range field → -1". *)
+  if n < 0 || n > 2 || s < 0 || s >= sig_pack_sym_max
   then -1
   else if n = 0
   then (* tag 0 *) s lsl 40
   else if n = 1
-  then if a0 >= sig_pack_arg_max then -1 else (1 lsl 60) lor (s lsl 40) lor (a0 lsl 20)
-  else if a0 >= sig_pack_arg_max || a1 >= sig_pack_arg_max
+  then
+    if a0 < 0 || a0 >= sig_pack_arg_max
+    then -1
+    else (1 lsl 60) lor (s lsl 40) lor (a0 lsl 20)
+  else if a0 < 0 || a0 >= sig_pack_arg_max || a1 < 0 || a1 >= sig_pack_arg_max
   then -1
   else (2 lsl 60) lor (s lsl 40) lor (a0 lsl 20) lor a1
 ;;
