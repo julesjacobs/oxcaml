@@ -1560,9 +1560,19 @@ let analyze t confl =
        cla_bump t cr;
        (* LBD improvement (Glucose): a learned clause re-derived as a reason may now tie
           together fewer levels; lowering its LBD protects a recently-useful clause from
-          reduceDB. Only lower, never raise. *)
-       let l = clause_lbd_cref t cr in
-       if l < cl_lbd t cr then cl_set_lbd t cr l
+          reduceDB. Only lower, never raise.
+
+          GLUE-SKIP (perf): if the STORED LBD is already glue ([<= glue_threshold]) the
+          recompute is pointless — lowering only lowers, so a glue clause stays glue, and
+          [reduce_deletions] EXCLUDES every clause with [lbd <= glue_threshold] from its
+          removable/sorted set (search_heuristics.ml: the [removable] filter requires
+          [lbd > glue_threshold]). So the exact glue LBD value never affects which clauses
+          are deleted, the order, the verdict, or any counter. [cla_bump] stays
+          unconditional (activity IS a removable-sort tiebreak). *)
+       if cl_lbd t cr > Search_heuristics.glue_threshold
+       then (
+         let l = clause_lbd_cref t cr in
+         if l < cl_lbd t cr then cl_set_lbd t cr l)
      | H_arena _ | H_transient _ -> ());
     let start = if !p = -1 then 0 else 1 in
     for jj = start to ch_len t !c - 1 do
