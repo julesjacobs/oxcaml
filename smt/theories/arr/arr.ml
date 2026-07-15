@@ -194,12 +194,15 @@ type t =
   ; mutable an_diseqs : (Term.t * Term.t * Lit.t) list
       (* Asserted disequalities (both array and index sorted) with their asserting
          literal, appended when a negative [Eq] is asserted; populated when the graph is
-         on (W0.5 analyzer reads all of them via [an_distinct]; W1 L1 reads the
-         array-sorted ones as its diseq-reachable triggers, and the literal is the
-         off-diagonal premise). NOT backtracked: a stale pair only risks re-attempting a
-         propagation that [are_equal] already skips, or an [an_distinct] premise that is
-         still a sound justification; the analyzer likewise only over-counts a candidate.
-         Empty unless the graph is on. *)
+         on (W0.5 analyzer reads all of them via [an_distinct]; W1 L1 and definite ROW2
+         read them via [an_distinct] as diseq-reachable / off-diagonal triggers, and the
+         literal is the propagation premise). TRAILED via [an_diseq_stack] (snapshot on
+         [push], restored on [pop]) so [an_distinct] reflects only currently-LIVE
+         disequalities. That trailing is not the whole soundness story: under ROW2 a
+         served conclusion is sound because the [i <> j] explanation travels IN the
+         propagation's reason (premise-in-reason completeness), so the RED fixture
+         tests/arr-goldens-red wrong-UNSATs a satisfiable instance if that premise is
+         dropped even with the trailing fully intact. Empty unless the graph is on. *)
   ; mutable an_done : bool (* W0.5 analyzer: emit the per-solve summary at most once *)
   ; mutable an_diseq_stack : (Term.t * Term.t * Lit.t) list list
       (* Backtrack stack for [an_diseqs] (one saved snapshot per open [push] frame). The

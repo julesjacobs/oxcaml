@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate array-sat-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -360,6 +360,24 @@ array-sat-gate:
 	$(DUNE) build tests/solver/array_sat_gate.exe tests/solver/oxsmt_cli.exe
 	$(DUNE) exec tests/solver/array_sat_gate.exe -- $(ARR_SAT_GOLDENS)
 
+## row2-red-gate — negative gate for definite ROW2 (OXSMT_ARR_ROW2) premise-completeness.
+##   The fixture is SATISFIABLE (z3 4.8.5 = sat) with a SAT-DECIDED [i<>j] as the SOLE carrier
+##   of [i<>j] (guarded by a Bool [d], so it is not level-0 / redundantly re-derived the way
+##   corpus diseqs are). The shipped code keeps the [i<>j] explanation in ROW2's propagation
+##   reason, so the sound verdict is [unknown] (never unsat; the flag-OFF path is unknown too).
+##   A commit that drops that premise makes it wrong-UNSAT (the M-storeidx class the fable
+##   review's RED targets). PASS iff the OXSMT_ARR_ROW2=1 verdict is NOT [unsat]; nonzero on
+##   wrong-UNSAT. See logs/ax-rowsort-log.md, logs/ax-row2-review-fable.md.
+ROW2_RED_FIXTURE ?= tests/arr-goldens-red/row2_premise_completeness_red.smt2
+row2-red-gate:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@out=`OXSMT_ARR_ROW2=1 $(DUNE) exec tests/solver/oxsmt_cli.exe -- $(ROW2_RED_FIXTURE) 2>/dev/null`; \
+	  echo "row2-red-gate: $$out"; \
+	  case "$$out" in \
+	    *"verdict unsat"*) echo "  FAIL: ROW2 premise-drop wrong-UNSAT on a satisfiable fixture"; exit 1 ;; \
+	    *) echo "  row2-red-gate: 1 check, 0 failures (verdict is not unsat)" ;; \
+	  esac
+
 ## weq-graph-test — unit tests for the W0 dark weak-equivalence graph substrate
 ##   (ADR-weakeq / DESIGN.md A12): the O9 index-sort-stability gate, store-edge permanence,
 ##   equality-edge folding + Trail-undo on pop, deterministic path finding, and the
@@ -605,6 +623,7 @@ test: check-frozen
 	$(MAKE) bv-op-coverage-test
 	$(MAKE) dt-sat-gate
 	$(MAKE) array-sat-gate
+	$(MAKE) row2-red-gate
 	$(MAKE) weq-graph-test
 	$(MAKE) regress-test
 	$(MAKE) sat-test
