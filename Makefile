@@ -483,6 +483,10 @@ bv-blast-test:
 	@# equivalence-preserving. Run the Layer-4 simplifier-equivalence oracle with the gates on.
 	OXSMT_BV_REWRITE2=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
 	OXSMT_BV_REWRITE2=1 OXSMT_BV_REWRITE2_EQSPLIT=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+	@# bv-rw3 (word-level fold): certify the comparison-vs-bound + extract-into-op rewrites and
+	@# the bounded-fixpoint re-normalization (run_rw3_equiv). Without this run the rw3 oracle
+	@# executes as trivial identity (gate off). Composes with REWRITE2.
+	OXSMT_BV_RW3=1 OXSMT_BV_REWRITE2=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
 
 ## bv-goldens-test — QF_BV end-to-end acceptance through the REAL Session dispatch: each
 ##   tests/bv-goldens/*.smt2 is parsed + loaded + solved, and the verdict must equal the
@@ -498,6 +502,9 @@ bv-goldens-test:
 	@# run fails ("sat but no surfaced model").
 	OXSMT_BV_REWRITE2=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
 	OXSMT_BV_REWRITE2=1 OXSMT_BV_REWRITE2_EQSPLIT=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+	@# bv-rw3: end-to-end acceptance with the word-level fold gate on — verdicts unchanged, sat
+	@# models still surfaced (the bounded fixpoint is equivalence-preserving).
+	OXSMT_BV_RW3=1 OXSMT_BV_REWRITE2=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
 
 ## bv-op-coverage-test — durable exhaustive small-width oracle for the task-#11 QF_BV
 ##   operator sugar (signed div/rem/mod, bvcomp, negated-bitwise, rotates, repeat). For each
