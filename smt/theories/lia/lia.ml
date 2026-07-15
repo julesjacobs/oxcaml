@@ -44,7 +44,7 @@ type 'tok t =
   ; var_of_term : int Term.Table.t (* problem-var term -> simplex id *)
   ; problem_vars : (int * Term.t) Dynarray.t (* (simplex id, term), creation order *)
   ; slacks : ((int * string) list, int) Hashtbl.t
-    (* sorted (varid, canonical-coeff-string) key -> slack id; the coeff is stringified
+      (* sorted (varid, canonical-coeff-string) key -> slack id; the coeff is stringified
          via [Rational.to_string] because coefficients are now arbitrary-precision
          [Rational.t] (core-bignum W2) and must not be keyed by a polymorphic hash of the
          two-tier value. *)
@@ -52,25 +52,25 @@ type 'tok t =
   ; reg_index :
       int Term.Table.t (* registered atom term -> its index in [registered]; O(1) dedup *)
   ; reg_by_var : (int, int list) Hashtbl.t
-    (* simplex var id -> indices into [registered] of atoms whose bound is on that var.
+      (* simplex var id -> indices into [registered] of atoms whose bound is on that var.
          [propagate] visits only atoms on a [dirty] var, so this is the reverse lookup. *)
   ; dirty : (int, unit) Hashtbl.t
-    (* vars whose simplex bound MAY have changed since the last [propagate] (set on
+      (* vars whose simplex bound MAY have changed since the last [propagate] (set on
          every [assert_atom]/[register_atom] and on [pop] for un-reported atoms).
          Bound-to-bound entailment reads a var's own bounds only, and those bounds change
          only via those ops, so a var absent here cannot have any newly-entailed
          registered atom — the [propagate] delta scans exactly [dirty]. Cleared each
          [propagate]. *)
   ; reported : bool Dynarray.t
-    (* parallel to [registered]: [true] once the atom has been emitted by [propagate] at
+      (* parallel to [registered]: [true] once the atom has been emitted by [propagate] at
          a still-live frame (INVARIANT P: reported ⟺ currently bound-entailed). Skipped by
          the delta scan so an already-propagated atom is not re-emitted; reset on [pop]. *)
   ; mutable report_frames : int list list
-    (* push/pop stack (head = current frame), each holding the reg indices first
+      (* push/pop stack (head = current frame), each holding the reg indices first
          reported in that frame — mirrors the adapter's explain-cache framing so a [pop]
          un-reports exactly the atoms whose entailing bound it unwinds. *)
   ; mutable check_dirty : bool
-    (* a simplex bound MAY have changed since the last [check] that returned
+      (* a simplex bound MAY have changed since the last [check] that returned
          [Sat_candidate]. Set by [assert_atom]/[pop]/[solve_integer] (the ops that mutate
          bounds); cleared only when [check] re-establishes feasibility. When clear, the
          tableau is still the feasible one the last [check] certified — so [check] can
@@ -78,17 +78,17 @@ type 'tok t =
          (FIX #3a). A [Conflict] leaves it set, so the next [check] re-runs. *)
   ; mutable overflows : int (* number of overflow-degradations to unknown *)
   ; mutable last_cube_model : (Term.t * int) list option
-    (* set by [cube_model] when the Bromberger-Fleury cube test found an integer model
+      (* set by [cube_model] when the Bromberger-Fleury cube test found an integer model
          at the current Final; read once by [model] (the adapter reads it immediately
          after the Final->Sat). Cleared at the start of every [check] so it can never
          satisfy a later, non-cube Sat with a stale point. *)
   ; mutable eq_frames : (Term.t * Term.t * 'tok) list list
-    (* push/pop stack (head = current frame) of asserted positive Int equalities as
+      (* push/pop stack (head = current frame) of asserted positive Int equalities as
          [(lhs, rhs, premise)], mirroring [report_frames]' framing so a [pop] drops
          exactly the equalities asserted in the unwound frames. Read by
          {!diophantine_conflict}. *)
   ; mutable cube_tried : bool
-    (* the cube test runs at most ONCE per instance — the first non-integral Final, which
+  (* the cube test runs at most ONCE per instance — the first non-integral Final, which
      for a batch query is the b&b root (fat feasible regions are cracked there). This
      bounds its extra LP solve to one per query, so it cannot accumulate overhead on a
      file that b&b would otherwise close within the wall (the [cut_lemma] unsat
@@ -275,16 +275,16 @@ let constraints_of_atom t (atom : Term.t) ~polarity
 let apply_bounds t cs ~premise =
   List.iter
     (fun (var, sense, rhs) ->
-       (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
+      (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
          mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
          already-entailed bound is harmless: the delta skips its already-reported atoms.) *)
-       Hashtbl.replace t.dirty var ();
-       let _ : _ Simplex.conflict option =
-         match sense with
-         | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
-         | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
-       in
-       ())
+      Hashtbl.replace t.dirty var ();
+      let _ : _ Simplex.conflict option =
+        match sense with
+        | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
+        | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
+      in
+      ())
     cs
 ;;
 
@@ -395,9 +395,9 @@ let externalize (c : _ Simplex.conflict) : 'tok conflict =
   let premises, farkas =
     List.fold_right2
       (fun p f (ps, fs) ->
-         match p with
-         | User tok -> tok :: ps, f :: fs
-         | Branch _ -> ps, fs)
+        match p with
+        | User tok -> tok :: ps, f :: fs
+        | Branch _ -> ps, fs)
       c.premises
       c.farkas
       ([], [])
@@ -586,8 +586,6 @@ let diophantine_conflict t : 'tok conflict option =
   if Simplex.is_poisoned t.simplex
   then None
   else (
-    let term_of_id = Hashtbl.create 64 in
-    Dynarray.iter (fun (id, term) -> Hashtbl.replace term_of_id id term) t.problem_vars;
     let gcd_int a b =
       let rec go a b = if b = 0 then a else go b (a mod b) in
       go (abs a) (abs b)
@@ -604,24 +602,23 @@ let diophantine_conflict t : 'tok conflict option =
     let fixed : (int, Rational.t * 'tok list) Hashtbl.t = Hashtbl.create 64 in
     Dynarray.iter
       (fun (id, term) ->
-         match fixed_bounds t term with
-         | Some (v, lo, hi) -> Hashtbl.replace fixed id (v, [ lo; hi ])
-         | None -> ())
+        match fixed_bounds t term with
+        | Some (v, lo, hi) -> Hashtbl.replace fixed id (v, [ lo; hi ])
+        | None -> ())
       t.problem_vars;
     (* Rows: each asserted equality's merged linear form + rhs + its literal. Malformed /
        out-of-fragment rows are dropped soundly (no conflict claimed for them). *)
     let rows =
       List.filter_map
         (fun (a, b, tok) ->
-           try
-             let merged, rhs = equality_merged t a b in
-             if
-               List.for_all (fun (_, c) -> Rational.is_int c) merged
+          try
+            let merged, rhs = equality_merged t a b in
+            if List.for_all (fun (_, c) -> Rational.is_int c) merged
                && Rational.is_int rhs
-             then Some (merged, rhs, tok)
-             else None
-           with
-           | Exit | Rational.Overflow -> None)
+            then Some (merged, rhs, tok)
+            else None
+          with
+          | Exit | Rational.Overflow -> None)
         (List.concat t.eq_frames)
     in
     let conflict = ref None in
@@ -634,11 +631,11 @@ let diophantine_conflict t : 'tok conflict option =
       let free = ref [] in
       List.iter
         (fun (id, c) ->
-           match Hashtbl.find_opt fixed id with
-           | Some (v, ps) ->
-             residual := Rational.sub !residual (Rational.mul c v);
-             prems := List.rev_append ps !prems
-           | None -> free := (id, c) :: !free)
+          match Hashtbl.find_opt fixed id with
+          | Some (v, ps) ->
+            residual := Rational.sub !residual (Rational.mul c v);
+            prems := List.rev_append ps !prems
+          | None -> free := (id, c) :: !free)
         merged;
       !residual, !free, !prems
     in
@@ -648,36 +645,36 @@ let diophantine_conflict t : 'tok conflict option =
       let changed = ref false in
       List.iter
         (fun row ->
-           if !conflict = None
-           then (
-             try
-               let residual, free, prems = split_row row in
-               match free with
-               | [] ->
-                 (* fully fixed: the equation must hold; a nonzero residual contradicts the
+          if !conflict = None
+          then (
+            try
+              let residual, free, prems = split_row row in
+              match free with
+              | [] ->
+                (* fully fixed: the equation must hold; a nonzero residual contradicts the
                    substituted values. *)
-                 if not (Rational.is_zero residual)
-                 then conflict := Some { premises = prems; farkas = [] }
-               | [ (id, c) ] ->
-                 (* [c·x = residual] pins x. Non-integer quotient ⇒ no integer x ⇒
+                if not (Rational.is_zero residual)
+                then conflict := Some { premises = prems; farkas = [] }
+              | [ (id, c) ] ->
+                (* [c·x = residual] pins x. Non-integer quotient ⇒ no integer x ⇒
                    conflict; else record x as fixed (premises = this row's). *)
-                 let q = Rational.div residual c in
-                 if not (Rational.is_int q)
-                 then conflict := Some { premises = prems; farkas = [] }
-                 else if not (Hashtbl.mem fixed id)
-                 then (
-                   Hashtbl.replace fixed id (q, prems);
-                   changed := true)
-               | _ ->
-                 (* ≥2 free vars: gcd test. Σ_free cⱼ·xⱼ = residual has an integer solution
+                let q = Rational.div residual c in
+                if not (Rational.is_int q)
+                then conflict := Some { premises = prems; farkas = [] }
+                else if not (Hashtbl.mem fixed id)
+                then (
+                  Hashtbl.replace fixed id (q, prems);
+                  changed := true)
+              | _ ->
+                (* ≥2 free vars: gcd test. Σ_free cⱼ·xⱼ = residual has an integer solution
                    only if gcd(cⱼ) | residual. *)
-                 let g =
-                   List.fold_left (fun acc (_, c) -> gcd_int acc (Rational.num c)) 0 free
-                 in
-                 if g <> 0 && Rational.num residual mod g <> 0
-                 then conflict := Some { premises = prems; farkas = [] }
-             with
-             | Exit | Rational.Overflow -> ()))
+                let g =
+                  List.fold_left (fun acc (_, c) -> gcd_int acc (Rational.num c)) 0 free
+                in
+                if g <> 0 && Rational.num residual mod g <> 0
+                then conflict := Some { premises = prems; farkas = [] }
+            with
+            | Exit | Rational.Overflow -> ()))
         rows;
       !changed
     in
@@ -771,12 +768,12 @@ let first_non_integer t =
   let best = ref None in
   Dynarray.iter
     (fun (id, term) ->
-       let d = Simplex.value t.simplex id in
-       if not (value_is_integer d)
-       then (
-         match !best with
-         | Some (bt, _, _) when bt.Term.tag <= term.Term.tag -> ()
-         | _ -> best := Some (term, id, d)))
+      let d = Simplex.value t.simplex id in
+      if not (value_is_integer d)
+      then (
+        match !best with
+        | Some (bt, _, _) when bt.Term.tag <= term.Term.tag -> ()
+        | _ -> best := Some (term, id, d)))
     t.problem_vars;
   !best
 ;;
@@ -800,10 +797,10 @@ let suggest_branch t =
 let extract_model t =
   Dynarray.fold_left
     (fun acc (id, term) ->
-       let d = Simplex.value t.simplex id in
-       if not (value_is_integer d)
-       then failwith "Lia.model: variable is not integral (call after Int_sat)";
-       (term, Rational.num (Delta.c_part d)) :: acc)
+      let d = Simplex.value t.simplex id in
+      if not (value_is_integer d)
+      then failwith "Lia.model: variable is not integral (call after Int_sat)";
+      (term, Rational.num (Delta.c_part d)) :: acc)
     []
     t.problem_vars
   |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
@@ -825,10 +822,10 @@ let model t =
 let extract_model_bigint t =
   Dynarray.fold_left
     (fun acc (id, term) ->
-       let d = Simplex.value t.simplex id in
-       if not (value_is_integer d)
-       then failwith "Lia.model_bigint: variable is not integral (call after Int_sat)";
-       (term, Rational.num_bigint (Delta.c_part d)) :: acc)
+      let d = Simplex.value t.simplex id in
+      if not (value_is_integer d)
+      then failwith "Lia.model_bigint: variable is not integral (call after Int_sat)";
+      (term, Rational.num_bigint (Delta.c_part d)) :: acc)
     []
     t.problem_vars
   |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
@@ -956,9 +953,9 @@ let propagate t =
   let cands =
     Hashtbl.fold
       (fun var () acc ->
-         match Hashtbl.find_opt t.reg_by_var var with
-         | Some is -> List.rev_append is acc
-         | None -> acc)
+        match Hashtbl.find_opt t.reg_by_var var with
+        | Some is -> List.rev_append is acc
+        | None -> acc)
       t.dirty
       []
     |> List.sort_uniq Int.compare
@@ -966,38 +963,38 @@ let propagate t =
   Hashtbl.clear t.dirty;
   List.iter
     (fun i ->
-       if not (Dynarray.get t.reported i)
-       then (
-         let r = Dynarray.get t.registered i in
-         (* atom's positive reading is [var <sense> rhs]. TRUE if the current bound already
+      if not (Dynarray.get t.reported i)
+      then (
+        let r = Dynarray.get t.registered i in
+        (* atom's positive reading is [var <sense> rhs]. TRUE if the current bound already
            entails it; FALSE if the current opposite bound refutes it. Explanation = the
            single entailing bound (Lia_bound). *)
-         let up = Simplex.get_upper t.simplex r.var in
-         let lo = Simplex.get_lower t.simplex r.var in
-         let emit polarity prem =
-           out := (r.atom, polarity, [ prem ]) :: !out;
-           Dynarray.set t.reported i true;
-           match t.report_frames with
-           | fr :: rest -> t.report_frames <- (i :: fr) :: rest
-           | [] -> t.report_frames <- [ [ i ] ]
-         in
-         if r.is_upper
-         then (
-           (* atom: var <= rhs *)
-           match up with
-           | Some (User tok, u) when Delta.le u r.rhs -> emit true tok
-           | _ ->
-             (match lo with
-              | Some (User tok, l) when Delta.lt r.rhs l -> emit false tok
-              | _ -> ()))
-         else (
-           (* atom: var >= rhs *)
-           match lo with
-           | Some (User tok, l) when Delta.le r.rhs l -> emit true tok
-           | _ ->
-             (match up with
-              | Some (User tok, u) when Delta.lt u r.rhs -> emit false tok
-              | _ -> ()))))
+        let up = Simplex.get_upper t.simplex r.var in
+        let lo = Simplex.get_lower t.simplex r.var in
+        let emit polarity prem =
+          out := (r.atom, polarity, [ prem ]) :: !out;
+          Dynarray.set t.reported i true;
+          match t.report_frames with
+          | fr :: rest -> t.report_frames <- (i :: fr) :: rest
+          | [] -> t.report_frames <- [ [ i ] ]
+        in
+        if r.is_upper
+        then (
+          (* atom: var <= rhs *)
+          match up with
+          | Some (User tok, u) when Delta.le u r.rhs -> emit true tok
+          | _ ->
+            (match lo with
+             | Some (User tok, l) when Delta.lt r.rhs l -> emit false tok
+             | _ -> ()))
+        else (
+          (* atom: var >= rhs *)
+          match lo with
+          | Some (User tok, l) when Delta.le r.rhs l -> emit true tok
+          | _ ->
+            (match up with
+             | Some (User tok, u) when Delta.lt u r.rhs -> emit false tok
+             | _ -> ()))))
     cands;
   List.rev !out
 ;;
@@ -1027,8 +1024,8 @@ let pop t n =
       | fr :: rest ->
         List.iter
           (fun i ->
-             Dynarray.set t.reported i false;
-             Hashtbl.replace t.dirty (Dynarray.get t.registered i).var ())
+            Dynarray.set t.reported i false;
+            Hashtbl.replace t.dirty (Dynarray.get t.registered i).var ())
           fr;
         drop (k - 1) rest
       | [] -> [])
