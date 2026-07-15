@@ -38,6 +38,41 @@ the scan — the A/B toggle that isolates the scan's share of the −59 (ROW2 vs
 verdict/counter-identical, differ only in wall). OFF byte-identical (index built only under
 weq_row2; new functions/flag unused OFF).
 
+## MID-PASS MERGE HAZARD — the reviewers' probe, argued in full
+The one way the per-pass index could be UNSOUND (non-counted-identical): the index is keyed on
+INDEX-class reps (`class_of i`, `class_of j`) captured when `build_an_diseq_index` runs at the
+top of a `row_round` pass. If, LATER IN THE SAME PASS, some `Euf.assert_eq` merged two classes
+such that an INDEX endpoint's rep changed, a subsequent `an_distinct_idx` lookup in that pass
+would key on the NEW rep against an index built with the OLD rep → a stale hit/miss → a
+different premise or a missed/spurious firing → divergence from the scan. Claim: this cannot
+happen. Proof (reviewers verify each step):
+
+1. `row_round` performs exactly two kinds of merge, both `Euf.assert_eq` on ELEMENT-sort read
+   terms: ROW1 `assert_eq sel v` (sel = `select(arr,j)`, v = the stored value) and ROW2
+   `assert_eq sel selbase` (sel, selbase = two `select` results). Neither operand is an INDEX
+   term; both are the element sort of the array.
+2. Congruence closure over an element-term merge can only merge (a) the two operands' classes
+   and (b) PARENTS that become congruent (terms `f(...sel...)` whose arg lists become
+   pairwise-equal). A `select` node is `App(sel_sym, [arr; j])`; its INDEX arg `j` is never the
+   RESULT of a merged term, so no element merge makes two index terms `j1`, `j2` congruent
+   (arrays are not injective — `select(a,i)=select(a,k)` does NOT entail `i=k`, and the engine
+   never derives it). So a merge of read results propagates ONLY to read/parent classes, never
+   to index-argument classes.
+3. `row_round` asserts NO index equality anywhere (no `assert_eq` on index terms; ROW1's `i=j`
+   is READ from the engine via `are_equal`, not created). So within one `row_round` pass, the
+   class rep of every INDEX term is invariant.
+4. Therefore the index built at the top of the pass keys every `an_distinct_idx` lookup in that
+   pass on reps that are still current ⇒ the lookup returns exactly the scan's first-match entry
+   and premise ⇒ counted-identical. Between passes, `saturate` calls `Euf.check` (which CAN
+   merge indices via congruence from newly-asserted equalities) and then the NEXT `row_round`
+   REBUILDS the index against the post-check reps — so cross-pass merges are absorbed by the
+   rebuild, never observed stale.
+
+Empirical corroboration already in the file: RED fixture + arr-goldens-sat 7/7 index≡scan, and
+the box A/B confirmed INDEXED≡NOINDEX counter-identity on the full QF_AX 551 (0 divergence). The
+hazard is closed by construction (step 2 is the load-bearing one: element-merge congruence never
+reaches an index-argument class); the empirics confirm no path was missed.
+
 ## Local gates (by exit code)
 - make test EXIT 0; check-frozen 14/14; array-sat-gate EXIT 0 both OFF and ROW2 (index);
   row2-red-gate EXIT 0; weq-graph-test 0.
