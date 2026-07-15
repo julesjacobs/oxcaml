@@ -33,12 +33,41 @@ let env_flag name =
    closure). Implies the graph is on. *)
 let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
 
+(* Lever "row-sort" (weakeq-guided [row_split] ORDERING): keep the blind [row_split]
+   machinery exactly — it is the confirmed SAT-model backstop — but change only its
+   split-SELECTION order so it offers open pairs whose store lies on an asserted array
+   diseq's weak-equivalence path BEFORE the global tag-least pair. Probe finding: the swap
+   walls have a tiny a<->b path (~8-9 store indices) yet blind [row_split]'s tag-least
+   order wanders far off it (46k-299k decisions vs ~14-16 relevant tests). This reorders
+   toward the path. Needs the graph (so [weq_on] below includes it) but NOT the L1
+   propagation ([weq_l1_on] stays OXSMT_ARR_WEQ-only), so it is a PURE [row_split]
+   reorder. Default OFF; OFF is byte-identical (the graph is not even built). *)
+let weq_rowsort = env_flag "OXSMT_ARR_ROWSORT"
+let weq_rowsort_dbg = env_flag "OXSMT_ARR_ROWSORT_DBG"
+
 (* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
-   needs it. OXSMT_ARR_WEQ turns on the W1 L1 read-over-weak-equivalence rule (added to
-   [row_split], not yet replacing it). *)
-let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze
+   needs it OR the row-sort ordering lever needs its paths. OXSMT_ARR_WEQ turns on the W1
+   L1 read-over-weak-equivalence rule (added to [row_split], not yet replacing it). *)
+let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze || weq_rowsort
 let weq_l1_on = env_flag "OXSMT_ARR_WEQ"
 let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
+
+(* Discrimination counters for the row-sort lever (OXSMT_ARR_ROWSORT_DBG): how often the
+   path-first scan supplied the split vs falling back to the global tag-least scan.
+   Printed once at exit. Proves the lever is ENGAGED (not a no-op) without a per-Final
+   log. *)
+let rowsort_path_hits = ref 0
+let rowsort_fallbacks = ref 0
+
+let () =
+  if weq_rowsort_dbg
+  then
+    at_exit (fun () ->
+      Printf.eprintf
+        "ARR_ROWSORT_DBG\tpath_first=%d\tfallback=%d\n%!"
+        !rowsort_path_hits
+        !rowsort_fallbacks)
+;;
 
 (* O7 fuel: a hard cap on L1 clause emissions per solve. On exhaustion L1 stops emitting
    and the sound [row_split] backstop continues (W1), so a pathological input degrades to
@@ -109,7 +138,7 @@ type t =
   { ctx : Context.t
   ; env : Env.t
   ; cap : Env.reserved_cap
-    (* ADR-0012 R1 reserved-minting capability for [env], threaded from the session (the
+      (* ADR-0012 R1 reserved-minting capability for [env], threaded from the session (the
          sole holder). The arrays theory is a legitimate reserved-symbol minter — like
          preprocessing and the lemma tier — because its extensionality rule introduces
          FRESH witness indices mid-solve, which MUST be unforgeable (see [witness_index]). *)
@@ -126,7 +155,7 @@ type t =
   ; select_syms :
       (string, Symbol.t) Hashtbl.t (* minted select symbols, by canonical name *)
   ; ensured_reads : (int * int, unit) Hashtbl.t
-    (* (store term tag, index term tag) pairs for which [select store index] has already
+      (* (store term tag, index term tag) pairs for which [select store index] has already
          been materialized by the upward read-propagation rule ([ensure_store_reads]).
          Guards termination: each (store, index) pair triggers at most one fresh select,
          and a fresh select's index is drawn from an existing select, so no new index is
@@ -139,16 +168,16 @@ type t =
          re-materialized on demand the next time it is read; the memo only ever suppresses
          a redundant [build_select], never a needed one. *)
   ; ext_witness : (int * int, Term.t) Hashtbl.t
-    (* fresh extensionality witness index per asserted array-diseq pair (by term tags,
+      (* fresh extensionality witness index per asserted array-diseq pair (by term tags,
          orientation-normalized), reused so re-assertion after a pop is stable *)
   ; mutable fresh_counter : int
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   ; weq : (Weq_graph.t * Euf.merge_cursor) option
-    (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ
+      (* the dark weak-equivalence graph + its merge cursor, [Some] iff OXSMT_ARR_WEQ
          (W0). [None] keeps the OFF path byte-identical (no merge recording, no graph). *)
   ; mutable an_diseqs : (Term.t * Term.t * Lit.t) list
-    (* Asserted disequalities (both array and index sorted) with their asserting
+      (* Asserted disequalities (both array and index sorted) with their asserting
          literal, appended when a negative [Eq] is asserted; populated when the graph is
          on (W0.5 analyzer reads all of them via [an_distinct]; W1 L1 reads the
          array-sorted ones as its diseq-reachable triggers, and the literal is the
@@ -158,7 +187,7 @@ type t =
          Empty unless the graph is on. *)
   ; mutable an_done : bool (* W0.5 analyzer: emit the per-solve summary at most once *)
   ; mutable an_diseq_stack : (Term.t * Term.t * Lit.t) list list
-    (* Backtrack stack for [an_diseqs] (one saved snapshot per open [push] frame). The
+      (* Backtrack stack for [an_diseqs] (one saved snapshot per open [push] frame). The
          W1 propagation is CONFLICT-ONLY — it fires [assert_eq] on a read pair only when
          the pair is currently entailed-DISTINCT ([an_distinct] finds a live diseq), so
          the merge refutes the branch and never survives into a SAT model (whose
@@ -170,7 +199,7 @@ type t =
          lockstep with [Euf]/[push]/[pop]. Empty unless the graph is on. *)
   ; mutable weq_fuel : int (* W1 L1: remaining propagation fuel this solve (O7) *)
   ; mutable weq_dirty : bool
-    (* Component A incremental trigger: [true] iff a merge was folded or an array diseq was
+  (* Component A incremental trigger: [true] iff a merge was folded or an array diseq was
      asserted since the last propagation round ran, so a re-scan could enable a new
      propagation. Starts [true] (the first Final must run). Set by [weq_sync] on a
      non-empty drain, by [assert_lit] on a new array diseq, and by [pop] (state changed);
@@ -190,11 +219,11 @@ let dedup_lits (ls : Lit.t list) : Lit.t list =
   let seen = ref Lit.Map.empty in
   List.filter
     (fun l ->
-       if Lit.Map.mem l !seen
-       then false
-       else (
-         seen := Lit.Map.add l () !seen;
-         true))
+      if Lit.Map.mem l !seen
+      then false
+      else (
+        seen := Lit.Map.add l () !seen;
+        true))
     ls
 ;;
 
@@ -518,7 +547,7 @@ let selects_by_arr_class t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
     (fun sel ->
-       (* [Iarr.length a = 2] is load-bearing, NOT a redundant sanity check: a select-role
+      (* [Iarr.length a = 2] is load-bearing, NOT a redundant sanity check: a select-role
          symbol can be REGISTERED at a non-2 arity via the public API
          (Session.parse_minter admits any canonical [.oxsmt.arr.*] name with a
          caller-supplied rank; Array_defs classifies by name, not rank). The old
@@ -526,10 +555,10 @@ let selects_by_arr_class t : (int, Term.t) Hashtbl.t =
          without this length guard the ROW rules would treat an extended-arity
          uninterpreted function as a select and derive a wrong verdict. Every consuming
          site below re-checks arity for the same reason. *)
-       match sel.Term.node with
-       | Term.App (_, a) when Iarr.length a = 2 && role_of t sel <> None ->
-         Hashtbl.add idx (Euf.class_of t.engine (Iarr.get a 0)) sel
-       | _ -> ())
+      match sel.Term.node with
+      | Term.App (_, a) when Iarr.length a = 2 && role_of t sel <> None ->
+        Hashtbl.add idx (Euf.class_of t.engine (Iarr.get a 0)) sel
+      | _ -> ())
     t.select_terms;
   idx
 ;;
@@ -538,31 +567,31 @@ let ensure_store_reads t ~changed =
   let idx = selects_by_arr_class t in
   List.iter
     (fun st ->
-       match st.Term.node with
-       | Term.App (_, a)
-         when Iarr.length a = 3
-              &&
-              match role_of t st with
-              | Some { Defs.role = Defs.Store; _ } -> true
-              | _ -> false ->
-         let base = Iarr.get a 0 in
-         (* selects on an array congruent to this store's base — [Euf.are_equal arr base]
+      match st.Term.node with
+      | Term.App (_, a)
+        when Iarr.length a = 3
+             &&
+             match role_of t st with
+             | Some { Defs.role = Defs.Store; _ } -> true
+             | _ -> false ->
+        let base = Iarr.get a 0 in
+        (* selects on an array congruent to this store's base — [Euf.are_equal arr base]
            is [class_of arr = class_of base], which is exactly the index bucket. *)
-         List.iter
-           (fun sel ->
-              match sel.Term.node with
-              | Term.App (_, sa) when Iarr.length sa = 2 ->
-                let j = Iarr.get sa 1 in
-                let key = st.Term.tag, j.Term.tag in
-                if not (Hashtbl.mem t.ensured_reads key)
-                then (
-                  Hashtbl.replace t.ensured_reads key ();
-                  match build_select t st j with
-                  | Some _ -> changed := true
-                  | None -> ())
-              | _ -> ())
-           (Hashtbl.find_all idx (Euf.class_of t.engine base))
-       | _ -> ())
+        List.iter
+          (fun sel ->
+            match sel.Term.node with
+            | Term.App (_, sa) when Iarr.length sa = 2 ->
+              let j = Iarr.get sa 1 in
+              let key = st.Term.tag, j.Term.tag in
+              if not (Hashtbl.mem t.ensured_reads key)
+              then (
+                Hashtbl.replace t.ensured_reads key ();
+                match build_select t st j with
+                | Some _ -> changed := true
+                | None -> ())
+            | _ -> ())
+          (Hashtbl.find_all idx (Euf.class_of t.engine base))
+      | _ -> ())
     t.store_terms
 ;;
 
@@ -582,35 +611,35 @@ let row_round t ~changed =
   let idx = selects_by_arr_class t in
   List.iter
     (fun st ->
-       match st.Term.node with
-       | Term.App (_, a)
-         when Iarr.length a = 3
-              &&
-              match role_of t st with
-              | Some { Defs.role = Defs.Store; _ } -> true
-              | _ -> false ->
-         let i = Iarr.get a 1
-         and v = Iarr.get a 2 in
-         List.iter
-           (fun sel ->
-              match sel.Term.node with
-              | Term.App (_, sa) when Iarr.length sa = 2 ->
-                let arr = Iarr.get sa 0
-                and j = Iarr.get sa 1 in
-                (* definite ROW1: i = j entailed ⇒ sel = v *)
-                if Euf.are_equal t.engine i j && not (Euf.are_equal t.engine sel v)
-                then (
-                  let prem =
-                    P_derived
-                      (dedup_lits
-                         (lits_of_prems
-                            (Euf.explain t.engine arr st @ Euf.explain t.engine i j)))
-                  in
-                  Euf.assert_eq t.engine ~premise:prem sel v;
-                  changed := true)
-              | _ -> ())
-           (Hashtbl.find_all idx (Euf.class_of t.engine st))
-       | _ -> ())
+      match st.Term.node with
+      | Term.App (_, a)
+        when Iarr.length a = 3
+             &&
+             match role_of t st with
+             | Some { Defs.role = Defs.Store; _ } -> true
+             | _ -> false ->
+        let i = Iarr.get a 1
+        and v = Iarr.get a 2 in
+        List.iter
+          (fun sel ->
+            match sel.Term.node with
+            | Term.App (_, sa) when Iarr.length sa = 2 ->
+              let arr = Iarr.get sa 0
+              and j = Iarr.get sa 1 in
+              (* definite ROW1: i = j entailed ⇒ sel = v *)
+              if Euf.are_equal t.engine i j && not (Euf.are_equal t.engine sel v)
+              then (
+                let prem =
+                  P_derived
+                    (dedup_lits
+                       (lits_of_prems
+                          (Euf.explain t.engine arr st @ Euf.explain t.engine i j)))
+                in
+                Euf.assert_eq t.engine ~premise:prem sel v;
+                changed := true)
+            | _ -> ())
+          (Hashtbl.find_all idx (Euf.class_of t.engine st))
+      | _ -> ())
     t.store_terms
 ;;
 
@@ -647,61 +676,136 @@ let stores_by_class t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
     (fun st ->
-       match role_of t st with
-       | Some { Defs.role = Defs.Store; _ } ->
-         Hashtbl.add idx (Euf.class_of t.engine st) st
-       | _ -> ())
+      match role_of t st with
+      | Some { Defs.role = Defs.Store; _ } ->
+        Hashtbl.add idx (Euf.class_of t.engine st) st
+      | _ -> ())
     t.store_terms;
   idx
 ;;
 
-let row_split t : Term.t list option =
+(* The tag-least open ROW split among the (select, store) pairs the predicate
+   [pair_ok sel st] admits. [pair_ok = fun _ _ -> true] is the ORIGINAL global scan (same
+   set, same tag order, same first-open pair chosen). Threading a predicate lets the
+   row-sort lever run refutation-relevant scans FIRST then fall back to the identical
+   unrestricted scan, so the reachable split SET is unchanged and only the selection ORDER
+   moves. *)
+let row_split_scan t ~(pair_ok : Term.t -> Term.t -> bool) : Term.t list option =
   let cand = ref None in
   let by_tag a b = compare a.Term.tag b.Term.tag in
   let sidx = stores_by_class t in
   List.iter
     (fun sel ->
-       if !cand = None
-       then (
-         match sel.Term.node with
-         | Term.App (_, sa) when Iarr.length sa = 2 && role_of t sel <> None ->
-           let arr = Iarr.get sa 0
-           and j = Iarr.get sa 1 in
-           (* stores congruent to [arr], in tag order — same set and order the old
+      if !cand = None
+      then (
+        match sel.Term.node with
+        | Term.App (_, sa) when Iarr.length sa = 2 && role_of t sel <> None ->
+          let arr = Iarr.get sa 0
+          and j = Iarr.get sa 1 in
+          (* stores congruent to [arr], in tag order — same set and order the old
              full-scan visited, so the tag-least open pair chosen is identical. *)
-           let stores =
-             List.sort by_tag (Hashtbl.find_all sidx (Euf.class_of t.engine arr))
-           in
-           List.iter
-             (fun st ->
-                if !cand = None
-                then (
-                  match st.Term.node with
-                  | Term.App (_, a)
-                    when Iarr.length a = 3
-                         && not (Euf.are_equal t.engine (Iarr.get a 1) j) ->
-                    let base = Iarr.get a 0
-                    and i = Iarr.get a 1 in
-                    (match build_select t base j with
-                     | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
-                       let idx_eq = Context.eq t.ctx i j in
-                       let read_eq = Context.eq t.ctx sel selbase in
-                       let disjuncts =
-                         if Term.equal arr st
-                         then [ idx_eq; read_eq ]
-                         else
-                           [ Context.not_ t.ctx (Context.eq t.ctx arr st)
-                           ; idx_eq
-                           ; read_eq
-                           ]
-                       in
-                       cand := Some disjuncts
-                     | _ -> ())
-                  | _ -> ()))
-             stores
-         | _ -> ()))
+          let stores =
+            List.sort by_tag (Hashtbl.find_all sidx (Euf.class_of t.engine arr))
+          in
+          List.iter
+            (fun st ->
+              if !cand = None && pair_ok sel st
+              then (
+                match st.Term.node with
+                | Term.App (_, a)
+                  when Iarr.length a = 3 && not (Euf.are_equal t.engine (Iarr.get a 1) j)
+                  ->
+                  let base = Iarr.get a 0
+                  and i = Iarr.get a 1 in
+                  (match build_select t base j with
+                   | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
+                     let idx_eq = Context.eq t.ctx i j in
+                     let read_eq = Context.eq t.ctx sel selbase in
+                     let disjuncts =
+                       if Term.equal arr st
+                       then [ idx_eq; read_eq ]
+                       else
+                         [ Context.not_ t.ctx (Context.eq t.ctx arr st); idx_eq; read_eq ]
+                     in
+                     cand := Some disjuncts
+                   | _ -> ())
+                | _ -> ()))
+            stores
+        | _ -> ()))
     (List.sort by_tag t.select_terms);
   !cand
+;;
+
+(* The row-sort ordering keys, computed FRESH from the live graph + live [an_diseqs] each
+   call (both trailed, so no cross-pop staleness): the store TERM tags on ANY asserted
+   array diseq's canonical path, and the e-CLASS ids of the extensionality witness indices
+   (read directly from [ext_witness]; NOT [witness_index], which would MINT). Prioritizing
+   a read at the witness index [k] against a path store drives exactly the refutation's
+   open tests ("does k coincide with this path store index?"). SOUNDNESS-IRRELEVANT: these
+   keys only pick WHICH open split to offer first; every split [row_split_scan] emits is
+   theory-valid regardless of the keys, so a stale/misidentified key can at worst change
+   ordering, never a verdict (the crucial contrast with the propagation forms, whose
+   premises must be current). *)
+let row_sort_keys t g : (int, unit) Hashtbl.t * (int, unit) Hashtbl.t =
+  let store_tags = Hashtbl.create 32 in
+  List.iter
+    (fun (a, b, _lit) ->
+      if array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b
+      then (
+        match Weq_graph.find_path g a b with
+        | None | Some [] -> ()
+        | Some edges ->
+          List.iter
+            (fun (e : Weq_graph.edge) ->
+              match e with
+              | Weq_graph.Store { store_term; _ } ->
+                Hashtbl.replace store_tags store_term.Term.tag ()
+              | Weq_graph.Equality _ -> ())
+            edges))
+    t.an_diseqs;
+  let witness_classes = Hashtbl.create 16 in
+  Hashtbl.iter
+    (fun _ w -> Hashtbl.replace witness_classes (Euf.class_of t.engine w) ())
+    t.ext_witness;
+  store_tags, witness_classes
+;;
+
+(* [row_split] with the optional weakeq-guided ordering. OFF (or no graph): the exact
+   original global tag-least scan. ON: try, in order, (1) a witness-read AGAINST a path
+   store (the extensionality index [k] vs a path store index — the refutation's open
+   tests),
+
+   (2) any read against a path store, then (3) the identical unrestricted scan. Reorder,
+   never restrict: tier 3 is the original scan, so the reachable split SET is unchanged. *)
+let row_split t : Term.t list option =
+  match if weq_rowsort then t.weq else None with
+  | None -> row_split_scan t ~pair_ok:(fun _ _ -> true)
+  | Some (g, _) ->
+    let store_tags, witness_classes = row_sort_keys t g in
+    if Hashtbl.length store_tags = 0
+    then row_split_scan t ~pair_ok:(fun _ _ -> true)
+    else (
+      let on_path st = Hashtbl.mem store_tags st.Term.tag in
+      let read_at_witness sel =
+        match sel.Term.node with
+        | Term.App (_, sa) when Iarr.length sa = 2 ->
+          Hashtbl.mem witness_classes (Euf.class_of t.engine (Iarr.get sa 1))
+        | _ -> false
+      in
+      match
+        row_split_scan t ~pair_ok:(fun sel st -> on_path st && read_at_witness sel)
+      with
+      | Some _ as r ->
+        if weq_rowsort_dbg then incr rowsort_path_hits;
+        r
+      | None ->
+        (match row_split_scan t ~pair_ok:(fun _ st -> on_path st) with
+         | Some _ as r ->
+           if weq_rowsort_dbg then incr rowsort_path_hits;
+           r
+         | None ->
+           if weq_rowsort_dbg then incr rowsort_fallbacks;
+           row_split_scan t ~pair_ok:(fun _ _ -> true)))
 ;;
 
 (* --- propagation reason caching (mirrors Dt / Euf_adapter) --- *)
@@ -728,12 +832,12 @@ let cache_reason t lit expl =
 let collect_propagations t : Lit.t list =
   List.filter_map
     (fun (imp : Euf.implied) ->
-       match Term.Table.find_opt t.watched imp.Euf.atom with
-       | None -> None
-       | Some atom ->
-         let lit = Lit.make atom imp.Euf.value in
-         cache_reason t lit (reason_of_implied t imp);
-         Some lit)
+      match Term.Table.find_opt t.watched imp.Euf.atom with
+      | None -> None
+      | Some atom ->
+        let lit = Lit.make atom imp.Euf.value in
+        cache_reason t lit (reason_of_implied t imp);
+        Some lit)
     (Euf.propagate t.engine)
 ;;
 
@@ -789,7 +893,7 @@ let weq_sync t =
        t.weq_dirty <- true;
        List.iter
          (fun (ev : Euf.merge_event) ->
-            Weq_graph.on_merge g ev.Fabric.kept ev.Fabric.merged)
+           Weq_graph.on_merge g ev.Fabric.kept ev.Fabric.merged)
          evs)
 ;;
 
@@ -800,16 +904,16 @@ let weq_array_sample t : Term.t list =
   let add tm = if array_sort tm.Term.sort <> None then acc := tm :: !acc in
   List.iter
     (fun st ->
-       add st;
-       match st.Term.node with
-       | Term.App (_, a) when Iarr.length a = 3 -> add (Iarr.get a 0)
-       | _ -> ())
+      add st;
+      match st.Term.node with
+      | Term.App (_, a) when Iarr.length a = 3 -> add (Iarr.get a 0)
+      | _ -> ())
     t.store_terms;
   List.iter
     (fun sel ->
-       match sel.Term.node with
-       | Term.App (_, a) when Iarr.length a = 2 -> add (Iarr.get a 0)
-       | _ -> ())
+      match sel.Term.node with
+      | Term.App (_, a) when Iarr.length a = 2 -> add (Iarr.get a 0)
+      | _ -> ())
     t.select_terms;
   !acc
 ;;
@@ -838,21 +942,21 @@ let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
      propagation (PREMISE-COMPLETENESS — omitting it is a wrong-unsat vector). *)
   List.find_map
     (fun (x, y, lit) ->
-       if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
-       then
-         Some
-           (dedup_lits
-              (lit
-               :: (lits_of_prems (Euf.explain t.engine i x)
-                   @ lits_of_prems (Euf.explain t.engine j y))))
-       else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
-       then
-         Some
-           (dedup_lits
-              (lit
-               :: (lits_of_prems (Euf.explain t.engine i y)
-                   @ lits_of_prems (Euf.explain t.engine j x))))
-       else None)
+      if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i x)
+                  @ lits_of_prems (Euf.explain t.engine j y))))
+      else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i y)
+                  @ lits_of_prems (Euf.explain t.engine j x))))
+      else None)
     t.an_diseqs
 ;;
 
@@ -934,42 +1038,42 @@ let weq_analyze_final t =
     and n_closed = ref 0 in
     List.iter
       (fun (a, b, _lit) ->
-         if array_sort a.Term.sort <> None
-         then (
-           incr n_diseqs;
-           match Weq_graph.find_path g a b with
-           | None -> ()
-           | Some edges ->
-             incr n_weq;
-             (* distinct store indices on the path (term identity), and the eq-guard count *)
-             let seen = Hashtbl.create 16 in
-             let idxs = ref [] in
-             List.iter
-               (fun (e : Weq_graph.edge) ->
-                  match e with
-                  | Weq_graph.Store { index; _ } ->
-                    if not (Hashtbl.mem seen index.Term.tag)
-                    then (
-                      Hashtbl.replace seen index.Term.tag ();
-                      idxs := index :: !idxs)
-                  | Weq_graph.Equality _ -> incr n_eqguards)
-               edges;
-             let diseq_open = ref 0
-             and diseq_closed = ref true in
-             List.iter
-               (fun jl ->
-                  incr n_path_idx;
-                  let ta, oa, ra = an_normalize t sidx a jl in
-                  let tb, ob, rb = an_normalize t sidx b jl in
-                  n_reads := !n_reads + ra + rb;
-                  diseq_open := !diseq_open + oa + ob;
-                  if oa + ob > 0 || not (an_terminals_equal t ta tb)
-                  then diseq_closed := false)
-               !idxs;
-             n_open := !n_open + !diseq_open;
-             if !diseq_open > !max_open then max_open := !diseq_open;
-             if !diseq_closed then incr n_closed)
-         else ())
+        if array_sort a.Term.sort <> None
+        then (
+          incr n_diseqs;
+          match Weq_graph.find_path g a b with
+          | None -> ()
+          | Some edges ->
+            incr n_weq;
+            (* distinct store indices on the path (term identity), and the eq-guard count *)
+            let seen = Hashtbl.create 16 in
+            let idxs = ref [] in
+            List.iter
+              (fun (e : Weq_graph.edge) ->
+                match e with
+                | Weq_graph.Store { index; _ } ->
+                  if not (Hashtbl.mem seen index.Term.tag)
+                  then (
+                    Hashtbl.replace seen index.Term.tag ();
+                    idxs := index :: !idxs)
+                | Weq_graph.Equality _ -> incr n_eqguards)
+              edges;
+            let diseq_open = ref 0
+            and diseq_closed = ref true in
+            List.iter
+              (fun jl ->
+                incr n_path_idx;
+                let ta, oa, ra = an_normalize t sidx a jl in
+                let tb, ob, rb = an_normalize t sidx b jl in
+                n_reads := !n_reads + ra + rb;
+                diseq_open := !diseq_open + oa + ob;
+                if oa + ob > 0 || not (an_terminals_equal t ta tb)
+                then diseq_closed := false)
+              !idxs;
+            n_open := !n_open + !diseq_open;
+            if !diseq_open > !max_open then max_open := !diseq_open;
+            if !diseq_closed then incr n_closed)
+        else ())
       t.an_diseqs;
     Printf.eprintf
       "ARR_WEQ_ANALYZE\tarr_diseqs=%d\tweq=%d\tpath_idx=%d\teqguards=%d\topen=%d\tmax_open=%d\treads=%d\tclosed=%d\n\
@@ -1013,16 +1117,16 @@ let weq_path_info t (path : Weq_graph.edge list)
   let add_class tm = Hashtbl.replace classes (Euf.class_of t.engine tm) () in
   List.iter
     (fun (e : Weq_graph.edge) ->
-       match e with
-       | Weq_graph.Store { u; v; store_term; index; _ } ->
-         add_class u;
-         add_class v;
-         stores := store_term :: !stores;
-         if not (Hashtbl.mem idx_seen index.Term.tag)
-         then Hashtbl.replace idx_seen index.Term.tag ()
-       | Weq_graph.Equality { u; v } ->
-         add_class u;
-         add_class v)
+      match e with
+      | Weq_graph.Store { u; v; store_term; index; _ } ->
+        add_class u;
+        add_class v;
+        stores := store_term :: !stores;
+        if not (Hashtbl.mem idx_seen index.Term.tag)
+        then Hashtbl.replace idx_seen index.Term.tag ()
+      | Weq_graph.Equality { u; v } ->
+        add_class u;
+        add_class v)
     path;
   !stores, classes, Hashtbl.length idx_seen
 ;;
@@ -1041,14 +1145,14 @@ let weq_path_info t (path : Weq_graph.edge list)
    indices deduped by TERM identity (O2). Precondition (caller): [are_equal x1 a],
    [are_equal x2 b], [are_equal i1 i2]. *)
 let weq_read_premise
-      t
-      ~(x1 : Term.t)
-      ~(i1 : Term.t)
-      ~(x2 : Term.t)
-      ~(i2 : Term.t)
-      ~(a : Term.t)
-      ~(b : Term.t)
-      (path : Weq_graph.edge list)
+  t
+  ~(x1 : Term.t)
+  ~(i1 : Term.t)
+  ~(x2 : Term.t)
+  ~(i2 : Term.t)
+  ~(a : Term.t)
+  ~(b : Term.t)
+  (path : Weq_graph.edge list)
   : Lit.t list option
   =
   let ok = ref true in
@@ -1061,21 +1165,20 @@ let weq_read_premise
   let store_seen = Hashtbl.create 16 in
   List.iter
     (fun (e : Weq_graph.edge) ->
-       if !ok
-       then (
-         match e with
-         | Weq_graph.Equality { u; v } ->
-           if Euf.are_equal t.engine u v
-           then prem := lits_of_prems (Euf.explain t.engine u v) @ !prem
-           else
-             ok := false (* the path merge no longer holds — not currently propagable *)
-         | Weq_graph.Store { index; _ } ->
-           if not (Hashtbl.mem store_seen index.Term.tag)
-           then (
-             Hashtbl.replace store_seen index.Term.tag ();
-             match an_distinct t i1 index with
-             | Some p -> prem := p @ !prem
-             | None -> ok := false (* open index test: leave to the narrow split *))))
+      if !ok
+      then (
+        match e with
+        | Weq_graph.Equality { u; v } ->
+          if Euf.are_equal t.engine u v
+          then prem := lits_of_prems (Euf.explain t.engine u v) @ !prem
+          else ok := false (* the path merge no longer holds — not currently propagable *)
+        | Weq_graph.Store { index; _ } ->
+          if not (Hashtbl.mem store_seen index.Term.tag)
+          then (
+            Hashtbl.replace store_seen index.Term.tag ();
+            match an_distinct t i1 index with
+            | Some p -> prem := p @ !prem
+            | None -> ok := false (* open index test: leave to the narrow split *))))
     path;
   if !ok then Some (dedup_lits !prem) else None
 ;;
@@ -1098,29 +1201,29 @@ let weq_propagate_round t ~changed =
   | Some (g, _) when weq_l1_on ->
     List.iter
       (fun (a, b, _) ->
-         if array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b
-         then (
-           match Weq_graph.find_path g a b with
-           | None -> ()
-           | Some path ->
-             let _stores, _classes, n_idx = weq_path_info t path in
-             if n_idx <= weq_max_idx
-             then (
-               let side arr =
-                 List.filter_map
-                   (fun sel ->
-                      match weq_read_parts t sel with
-                      | Some (x, i) when Euf.are_equal t.engine x arr -> Some (sel, x, i)
-                      | _ -> None)
-                   t.select_terms
-               in
-               let a_reads = side a
-               and b_reads = side b in
-               List.iter
-                 (fun (r1, x1, i1) ->
-                    List.iter
-                      (fun (r2, x2, i2) ->
-                         (* conflict-only: fire ONLY when the two reads are already
+        if array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b
+        then (
+          match Weq_graph.find_path g a b with
+          | None -> ()
+          | Some path ->
+            let _stores, _classes, n_idx = weq_path_info t path in
+            if n_idx <= weq_max_idx
+            then (
+              let side arr =
+                List.filter_map
+                  (fun sel ->
+                    match weq_read_parts t sel with
+                    | Some (x, i) when Euf.are_equal t.engine x arr -> Some (sel, x, i)
+                    | _ -> None)
+                  t.select_terms
+              in
+              let a_reads = side a
+              and b_reads = side b in
+              List.iter
+                (fun (r1, x1, i1) ->
+                  List.iter
+                    (fun (r2, x2, i2) ->
+                      (* conflict-only: fire ONLY when the two reads are already
                          entailed-distinct (some asserted diseq separates them, incl. the
                          extensionality witness diseq), so asserting the read equality
                          refutes the branch. On a SAT-surviving branch no such diseq
@@ -1128,20 +1231,19 @@ let weq_propagate_round t ~changed =
                          is not corrupted (O5: this is what keeps the mostly-SAT
                          storecomm/swap neighbours from degrading to unknown, the
                          naive-form -477 / clause -108 failure). *)
-                         if
-                           t.weq_fuel > 0
-                           && (not (Euf.are_equal t.engine r1 r2))
-                           && Euf.are_equal t.engine i1 i2
-                           && an_distinct t r1 r2 <> None
-                         then (
-                           match weq_read_premise t ~x1 ~i1 ~x2 ~i2 ~a ~b path with
-                           | Some prem ->
-                             t.weq_fuel <- t.weq_fuel - 1;
-                             Euf.assert_eq t.engine ~premise:(P_derived prem) r1 r2;
-                             changed := true
-                           | None -> ()))
-                      b_reads)
-                 a_reads)))
+                      if t.weq_fuel > 0
+                         && (not (Euf.are_equal t.engine r1 r2))
+                         && Euf.are_equal t.engine i1 i2
+                         && an_distinct t r1 r2 <> None
+                      then (
+                        match weq_read_premise t ~x1 ~i1 ~x2 ~i2 ~a ~b path with
+                        | Some prem ->
+                          t.weq_fuel <- t.weq_fuel - 1;
+                          Euf.assert_eq t.engine ~premise:(P_derived prem) r1 r2;
+                          changed := true
+                        | None -> ()))
+                    b_reads)
+                a_reads)))
       t.an_diseqs
   | _ -> ()
 ;;
@@ -1167,70 +1269,69 @@ let weq_narrow_split t : Term.t list option =
     let cand = ref None in
     List.iter
       (fun (a, b, _) ->
-         if
-           !cand = None
+        if !cand = None
            && array_sort a.Term.sort <> None
            && Weq_graph.weakly_equivalent g a b
-         then (
-           match Weq_graph.find_path g a b with
-           | None -> ()
-           | Some path ->
-             let path_stores, path_classes, n_idx = weq_path_info t path in
-             if n_idx <= weq_max_idx
-             then (
-               match array_sort a.Term.sort with
-               | None -> ()
-               | Some (index, _) ->
-                 let k = witness_index t a b index in
-                 (* reads at index ~ k whose array is on the a<->b path: the witness reads
+        then (
+          match Weq_graph.find_path g a b with
+          | None -> ()
+          | Some path ->
+            let path_stores, path_classes, n_idx = weq_path_info t path in
+            if n_idx <= weq_max_idx
+            then (
+              match array_sort a.Term.sort with
+              | None -> ()
+              | Some (index, _) ->
+                let k = witness_index t a b index in
+                (* reads at index ~ k whose array is on the a<->b path: the witness reads
                    and their telescoped continuations *)
-                 let reads =
-                   List.filter_map
-                     (fun sel ->
-                        match weq_read_parts t sel with
-                        | Some (x, i)
-                          when Euf.are_equal t.engine i k
-                               && Hashtbl.mem path_classes (Euf.class_of t.engine x) ->
-                          Some (sel, x)
-                        | _ -> None)
-                     t.select_terms
-                 in
-                 let reads = List.sort (fun (s1, _) (s2, _) -> by_tag s1 s2) reads in
-                 let path_stores = List.sort_uniq by_tag path_stores in
-                 List.iter
-                   (fun (sel, arr) ->
-                      if !cand = None
-                      then
-                        List.iter
-                          (fun st ->
-                             if !cand = None
-                             then (
-                               match st.Term.node with
-                               | Term.App (_, sa)
-                                 when Iarr.length sa = 3
-                                      && Euf.are_equal t.engine arr st
-                                      && not (Euf.are_equal t.engine (Iarr.get sa 1) k) ->
-                                 let base = Iarr.get sa 0
-                                 and i = Iarr.get sa 1 in
-                                 (match build_select t base k with
-                                  | Some selbase
-                                    when not (Euf.are_equal t.engine sel selbase) ->
-                                    let idx_eq = Context.eq t.ctx i k in
-                                    let read_eq = Context.eq t.ctx sel selbase in
-                                    let disjuncts =
-                                      if Term.equal arr st
-                                      then [ idx_eq; read_eq ]
-                                      else
-                                        [ Context.not_ t.ctx (Context.eq t.ctx arr st)
-                                        ; idx_eq
-                                        ; read_eq
-                                        ]
-                                    in
-                                    cand := Some disjuncts
-                                  | _ -> ())
-                               | _ -> ()))
-                          path_stores)
-                   reads)))
+                let reads =
+                  List.filter_map
+                    (fun sel ->
+                      match weq_read_parts t sel with
+                      | Some (x, i)
+                        when Euf.are_equal t.engine i k
+                             && Hashtbl.mem path_classes (Euf.class_of t.engine x) ->
+                        Some (sel, x)
+                      | _ -> None)
+                    t.select_terms
+                in
+                let reads = List.sort (fun (s1, _) (s2, _) -> by_tag s1 s2) reads in
+                let path_stores = List.sort_uniq by_tag path_stores in
+                List.iter
+                  (fun (sel, arr) ->
+                    if !cand = None
+                    then
+                      List.iter
+                        (fun st ->
+                          if !cand = None
+                          then (
+                            match st.Term.node with
+                            | Term.App (_, sa)
+                              when Iarr.length sa = 3
+                                   && Euf.are_equal t.engine arr st
+                                   && not (Euf.are_equal t.engine (Iarr.get sa 1) k) ->
+                              let base = Iarr.get sa 0
+                              and i = Iarr.get sa 1 in
+                              (match build_select t base k with
+                               | Some selbase
+                                 when not (Euf.are_equal t.engine sel selbase) ->
+                                 let idx_eq = Context.eq t.ctx i k in
+                                 let read_eq = Context.eq t.ctx sel selbase in
+                                 let disjuncts =
+                                   if Term.equal arr st
+                                   then [ idx_eq; read_eq ]
+                                   else
+                                     [ Context.not_ t.ctx (Context.eq t.ctx arr st)
+                                     ; idx_eq
+                                     ; read_eq
+                                     ]
+                                 in
+                                 cand := Some disjuncts
+                               | _ -> ())
+                            | _ -> ()))
+                        path_stores)
+                  reads)))
       t.an_diseqs;
     !cand
   | _ -> None
@@ -1445,9 +1546,9 @@ let array_model t : (Term.t * value) list option =
         (match
            List.find_map
              (fun (m : Term.t) ->
-                match m.Term.node with
-                | Term.Int_const n -> Some n
-                | _ -> None)
+               match m.Term.node with
+               | Term.Int_const n -> Some n
+               | _ -> None)
              members
          with
          | Some n ->
@@ -1464,14 +1565,14 @@ let array_model t : (Term.t * value) list option =
   let by_class : (int, (Term.t * Term.t) list) Hashtbl.t = Hashtbl.create 64 in
   List.iter
     (fun sel ->
-       match head_args sel, role_of t sel with
-       | Some (_, [| arr; j |]), Some { Defs.role = Defs.Select; _ } ->
-         let k = Euf.class_of t.engine arr in
-         Hashtbl.replace
-           by_class
-           k
-           ((j, sel) :: Option.value (Hashtbl.find_opt by_class k) ~default:[])
-       | _ -> ())
+      match head_args sel, role_of t sel with
+      | Some (_, [| arr; j |]), Some { Defs.role = Defs.Select; _ } ->
+        let k = Euf.class_of t.engine arr in
+        Hashtbl.replace
+          by_class
+          k
+          ((j, sel) :: Option.value (Hashtbl.find_opt by_class k) ~default:[])
+      | _ -> ())
     (List.rev t.select_terms);
   (* A representative store term per e-class that contains one (tag-least, for
      determinism). An array class that equals a [store base i v] must take that store's
@@ -1484,13 +1585,13 @@ let array_model t : (Term.t * value) list option =
   let store_of_class : (int, Term.t) Hashtbl.t = Hashtbl.create 64 in
   List.iter
     (fun st ->
-       match head_args st, role_of t st with
-       | Some (_, [| _b; _i; _v |]), Some { Defs.role = Defs.Store; _ } ->
-         let k = Euf.class_of t.engine st in
-         (match Hashtbl.find_opt store_of_class k with
-          | Some prev when prev.Term.tag <= st.Term.tag -> ()
-          | _ -> Hashtbl.replace store_of_class k st)
-       | _ -> ())
+      match head_args st, role_of t st with
+      | Some (_, [| _b; _i; _v |]), Some { Defs.role = Defs.Store; _ } ->
+        let k = Euf.class_of t.engine st in
+        (match Hashtbl.find_opt store_of_class k with
+         | Some prev when prev.Term.tag <= st.Term.tag -> ()
+         | _ -> Hashtbl.replace store_of_class k st)
+      | _ -> ())
     t.store_terms;
   let memo : (int, value) Hashtbl.t = Hashtbl.create 64 in
   let rec default_of (element : Sort.t) (depth : int) : value =
