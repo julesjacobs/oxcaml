@@ -192,15 +192,20 @@ let create
      reserved-symbol minters. [Session.env] returns only the [env], never the cap. *)
   let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  (* OXSMT_BASE_L0 (dark): force the unpoppable base frame TRUE with a permanent level-0
-     unit rather than assuming it every solve. Read the gate ONCE here (before
+  (* OXSMT_BASE_L0 (DEFAULT-ON): force the unpoppable base frame TRUE with a permanent
+     level-0 unit rather than assuming it every solve. Read the gate ONCE here (before
      [Sat.create] so the emitter knob can be set); [check_sat] / [cert_assumptions]
-     consult [base_at_level0] to omit [base] from their assumption sets. Unset =>
-     byte-identical to trunk. *)
+     consult [base_at_level0] to omit [base] from their assumption sets. [OXSMT_BASE_L0=0]
+     opts out and is byte-identical to the pre-flip trunk. *)
   let base_at_level0 =
+    (* DEFAULT-ON (pair-measured +113 on main; QF_LIA +87 / QF_UF +29 / UFLIA −3, 0 flips,
+       0 z3 disagreements). [OXSMT_BASE_L0=0] opts out (byte-identical to the pre-flip
+       trunk); any other value / unset ⇒ ON. Mirrors the OXSMT_SYMBREAK flip precedent.
+       The cert-emitter (#53) makes the ON path 33/33 cert-VALID, so default-ON is safe
+       for the certificate pipeline. *)
     match Sys.getenv_opt "OXSMT_BASE_L0" with
-    | Some "1" -> true
-    | _ -> false
+    | Some "0" -> false
+    | Some _ | None -> true
   in
   (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
      (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
