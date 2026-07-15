@@ -1060,7 +1060,11 @@ let cancel_until t level =
       for i = Dynarray.length t.trail - 1 downto target do
         let l = Dynarray.get t.trail i in
         let v = var_of_lit l in
-        Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
+        (* Phase to save = "was the var false" = [assigns v = -1]. [l] is the trail literal,
+           hence the TRUE literal for [v] ([lit_val t l = 1] by the trail invariant); by
+           {!lit_val} that means [assigns v = -1] iff [not (sign_of_lit l)]. Derive it from
+           [l] (the same value {!update_best_trail} uses) — no [assigns] read. *)
+        Dynarray.set t.polarity v (not (sign_of_lit l));
         Dynarray.set t.assigns v 0;
         Dynarray.set t.trail_pos v (-1);
         Dynarray.set t.reason v r_decision;
@@ -1084,7 +1088,8 @@ let cancel_until t level =
         let v = var_of_lit l in
         if Dynarray.get t.level v > level
         then (
-          Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
+          (* Phase from the trail literal [l], not an [assigns] read (see the monotone arm). *)
+          Dynarray.set t.polarity v (not (sign_of_lit l));
           Dynarray.set t.assigns v 0;
           Dynarray.set t.trail_pos v (-1);
           Dynarray.set t.reason v r_decision;
