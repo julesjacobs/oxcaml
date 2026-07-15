@@ -216,11 +216,14 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     SAT-var<->atom bijection, and the next {!check_sat} rebuilds the theory fresh against
     the new registry (so a re-used term re-classifies correctly — the none->DT,
     DT->arrays, and loader-overwrite patterns all return correct verdicts rather than the
-    #51 interim [unknown]). This is sound only BETWEEN queries: mutating the registry
-    while assertions are still live (no {!pop} since the last {!check_sat}) would strand
-    in-flight atoms, so it raises [Invalid_argument] — declarations must precede
-    assertions within a query. The common single-query path (all declarations before the
-    first {!check_sat}) never triggers a reset and is byte-identical to before. *)
+    #51 interim [unknown]). This is sound only BETWEEN queries: mutating the registry with
+    live state bound to the dropped bijection — live ground assertions (no {!pop} since
+    the last {!check_sat}) OR a live quantified lemma ({!assert_lemma}; user input,
+    outside the assertion set, and a base-frame lemma survives {!pop}) — raises
+    [Invalid_argument] rather than resetting under it. Declarations (and lemmas) must
+    precede assertions within a query. The common single-query path (all declarations
+    before the first {!check_sat}, no cross-query lemma) never triggers a reset and is
+    byte-identical to before. *)
 val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
 
 (** [true] iff a datatype has been declared for this session ([set_datatypes] /

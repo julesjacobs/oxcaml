@@ -935,12 +935,17 @@ core is not recreated — the inert-clause accumulation is identical to the pre-
 selector-based push/pop frame model (no new leak).
 
 **Fail-LOUD above base (the contract).** Resetting is sound only BETWEEN self-contained
-queries: with live assertions active (`asserted <> []`, i.e. no `pop` since the last
-`check_sat`) the cached theory holds in-flight atoms bound to the bijection that would be
-dropped — resetting would strand them (the #51 wrong-answer path). So a registry replacement
-attempted with live assertions raises a documented `Invalid_argument` rather than silently
-resetting under live state or silently rebuilding. The self-contained-VC pattern (declare →
-assert → check → pop) always reaches the reset with `asserted = []`.
+queries. Any live state BOUND to the bijection being dropped makes it unsound, so a registry
+replacement raises a documented `Invalid_argument` rather than resetting under it. TWO such
+channels, both treated identically: (1) live ground assertions (`asserted <> []`, i.e. no
+`pop` since the last `check_sat`); and (2) a live quantified lemma
+(`Manager.has_live_lemma`) — the lemma Manager is USER-INPUT state (the ADR-0012 store fed by
+`Session.assert_lemma`), NOT a derived consequence, and it lives OUTSIDE `asserted` (a
+base-frame lemma is never added to `asserted` and survives `pop`), so silently dropping it in
+the new era would be a wrong-`sat` channel (the codex/fable CRITICAL). The self-contained-VC
+pattern (declare → assert → check → pop, no live lemma) always reaches the reset clean. The
+datatype/array bijection reset therefore leaves NO stale term-classification live; the one
+piece it does not clear (a live lemma) is refused, not silently dropped.
 
 **Removes** the #51 interim non-monotonicity guard (`session.ml` `set_datatypes`/`set_arrays`
 `if Cdclt.theory_instantiated → degraded`), replacing fail-closed-to-`unknown` with the
@@ -948,7 +953,19 @@ correct verdict at base + fail-loud above base.
 
 **Acceptance.** `tests/solver/dt_multi_query_gate.ml`: none→DT, loader overwrite-rerank (the
 codex/fable CRITICAL, kept spec'd "must-not-be-unsat" as a world-independent standing gate),
-DT-guard-isolated overwrite, and disjoint overwrite all now REQUIRED-green (sat); a new
-fail-loud RED asserts the live-assertion replacement raises. Discrimination: neutering the
-reset reproduces all five failures (two wrong-`unsat`, two `unknown`, one missing raise).
-`make test` / `check-frozen` (14/14) / `dt-sat-gate` / `dt_test` EXIT 0.
+DT-guard-isolated overwrite, and disjoint overwrite all REQUIRED-green (sat); fail-loud REDs
+assert both a live-assertion replacement AND a live-base-frame-lemma replacement raise
+`Invalid_argument`; the DT-triggered reset preserves a live array mode (`uses_arrays`
+survives); and the content-gate is two-sided (`set_datatypes empty` after a nonempty registry
+resets). Discrimination: neutering the reset reproduces the datatype failures; dropping the
+`Manager.has_live_lemma` disjunct stops the lemma-RED raising; forcing `has_arrays <- false`
+fails the array-mode RED. `make test` / `check-frozen` (14/14) / `dt-sat-gate` / `dt_test`
+EXIT 0.
+
+**Fix round (post-freeze, codex+fable CRITICAL + codex MEDIUM).** The bijection reset missed
+the lemma Manager (`Session.mgr`) — an ADR-0012 user-input store outside `asserted`, whose
+base-frame lemma survives `pop`; remedied by the fail-loud lemma channel above (NOT a silent
+clear — a lemma is user input, not a derived consequence). The MEDIUM: a DT-triggered reset
+dropped a still-valid `has_arrays`; remedied by re-deriving it from the live array registry.
+No new frozen surface (`Manager` gains nothing; the guard reads the existing
+`Manager.has_live_lemma`).

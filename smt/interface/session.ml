@@ -464,22 +464,39 @@ let declare_const t name sort = declare_fun t name (Rank.create [] sort)
    differently-populated registry.
 
    FAIL-LOUD, never a silent rebuild under live state: the reset is sound only BETWEEN
-   self-contained queries. With live assertions still active ([asserted <> []]) the cached
-   theory holds in-flight atoms bound to the bijection we would drop; resetting would
-   strand them (precisely the #51 wrong-answer path). We cannot reset mid-query, so raise
-   a documented [Invalid_argument]. The self-contained-VC pattern (declare -> assert ->
-   check -> pop) reaches here with [asserted = []] and resets cleanly; the SAT core is at
-   level 0 between queries and the prior query's now-inert vars/clauses cannot affect a
-   later solve (their frame selector is free, and they are absent from the cleared
-   bijection). *)
+   self-contained queries. Any live state BOUND to the bijection we would drop makes the
+   reset unsound, so we raise a documented [Invalid_argument] rather than reset under it.
+   TWO such channels, both treated identically: (1) live ground assertions
+   ([asserted <> []]); (2) a live quantified lemma ([Manager.has_live_lemma]) — the lemma
+   Manager is USER-INPUT state (the ADR-0012 store fed by {!assert_lemma}), NOT a derived
+   consequence, and it lives OUTSIDE [asserted] (a base-frame lemma is never added to
+   [asserted] and survives [pop]), so silently dropping it in the new era would be a
+   wrong-[sat] channel. The self-contained-VC pattern (declare -> assert -> check -> pop,
+   no live lemma) reaches here clean and resets; the SAT core is at level 0 between
+   queries and the prior query's now-inert vars/clauses cannot affect a later solve (their
+   frame selector is free, and they are absent from the cleared bijection). *)
 let invalidate_theory_for_registry_change t =
-  (match t.asserted with
-   | [] -> ()
-   | _ :: _ ->
-     invalid_arg
-       "Session: datatype/array registry replaced with live assertions (task #54 \
-        contract-A: each query's declarations must precede its assertions; pop the prior \
-        query before redeclaring for a new one)");
+  (* FAIL-LOUD on ANY live state bound to the bijection we are about to drop. Two
+     channels:
+     (1) live ground assertions ([asserted <> []]); (2) a live quantified lemma
+         ([Manager.has_live_lemma]) — the codex/fable CRITICAL. The lemma Manager is the
+         ADR-0012 lemma store fed by {!assert_lemma}: USER-INPUT state, NOT a derived
+         consequence, and it is OUTSIDE [asserted] (a base-frame lemma is never added to
+         [asserted] and survives [pop]). Silently dropping a user-asserted quantifier in
+         the new era would be a wrong-[sat] channel, so a live lemma is treated EXACTLY
+         like a live assertion: the registry replacement raises rather than resetting
+         under it. The self-contained-VC pattern (declare -> assert -> check -> pop, no
+         live lemma) reaches here clean and resets. *)
+  if
+    (match t.asserted with
+     | [] -> false
+     | _ :: _ -> true)
+    || Manager.has_live_lemma t.mgr
+  then
+    invalid_arg
+      "Session: datatype/array registry replaced with live assertions or a live \
+       quantified lemma (task #54 contract-A: each query's declarations must precede its \
+       assertions / lemmas; pop the prior query before redeclaring for a new one)";
   Cdclt.reset_for_new_query t.cdclt;
   (* Session-side per-query state that maps terms -> SAT vars or caches the last verdict:
      cleared so a re-used term re-interns fresh and the new query starts unpoisoned.
@@ -488,7 +505,12 @@ let invalidate_theory_for_registry_change t =
   Term.Table.clear t.prop_to_var;
   t.bool_consts <- [];
   t.has_theory <- false;
-  t.has_arrays <- false;
+  (* Re-DERIVE [has_arrays] from the LIVE array registry rather than forcing it false: a
+     DT-triggered reset must not drop a still-valid array mode (codex MEDIUM). The array
+     registry is unchanged by a datatype mutation, so this preserves [has_arrays] across a
+     [set_datatypes]/[declare_datatype] reset; [set_arrays] overwrites it from its own
+     [defs] on the line after this call. *)
+  t.has_arrays <- not (Oxsmt_core.Array_defs.is_empty !(t.array_registry));
   t.degraded <- false;
   t.last_model <- None;
   t.last_verdict <- Unknown;
