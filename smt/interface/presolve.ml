@@ -1125,8 +1125,12 @@ let symbreak_stats_on =
 (* Size-relative detector budget (board #64 follow-up to the symmetry-breaking flip). It
    adds a per-class LOCAL merit gate at the emission site — see [class_merits_break] — and
    the size-relative detection cap ([symbreak_detect_factor * dag]). Purely a
-   strengthening of symmetry-breaking: it only ever SKIPS emission / aborts detection
-   (returning fewer breaking clauses), so it is SOUND regardless of the constants.
+   strengthening of symmetry-breaking: it only ever SKIPS emission / aborts detection, and
+   every clause it does emit is independently an equisatisfiability-preserving symmetry break,
+   so it is SOUND regardless of the constants. (NOT a strict subset of the OFF clause set: the
+   OFF path can hit the global [symbreak_max_steps] cap and emit nothing while the budget lets a
+   later high-merit class through — soundness rests on per-clause equisatisfiability, not on
+   emitting fewer clauses.)
 
    DEFAULT-ON (quiesced A/B on the frozen pre-land sha, QF_UF Goel+QG: OFF 6958 -> ON 6964
    = +6, gain-only, 0 flips -- logs/symbreak-budget-quiesced-ab.md; dual-review APPROVE
@@ -1289,8 +1293,8 @@ let symmetry_break ~counter cap env ctx assertions =
        of the pass. #distinct sorts is small, so equal-grouping is cheap. *)
     dag_nodes := Term.Table.length seen;
     (* Size-relative detection budget: cap the (expensive) pairwise/emission phase at a
-       fixed number of full-DAG traversals. OFF (default) leaves the fixed net untouched →
-       byte-identical. *)
+       fixed number of full-DAG traversals. Opted out (OXSMT_SYMBREAK_BUDGET=0) leaves the
+       fixed net untouched → byte-identical to the pre-flip default. *)
     if budget_on
     then step_cap := min !step_cap (!steps + (symbreak_detect_factor * !dag_nodes));
     let const_list = Term.Set.elements !consts in
