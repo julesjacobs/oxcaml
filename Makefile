@@ -141,8 +141,15 @@ core-prelude-test:
 ##   conflicts, assumption semantics, incremental add-after-solve, every sat model
 ##   self-checked by evaluation, and thousands of random CNFs cross-checked against
 ##   an independent DPLL oracle. Nonzero exit on any failed check (TASKS.md M1-sat).
+##   Run with OXSMT_LGC_FIXED=0 (the conflict-count reduceDB schedule) so the reduceDB
+##   ENGAGEMENT + flat-arena RELOCATION pins (test_reducedb_engagement,
+##   test_arena_reduce_db_stress: PHP(8,7) c=4141/digest ...) keep firing reduceDB ~10x
+##   and stay trunk-identical: those pins exercise the conflict-count schedule
+##   specifically, and OXSMT_LGC_FIXED default-ON fires reduceDB only at 5000 learned
+##   clauses — never on PHP(8,7) (~3437 learnts), which would silently drop the arena
+##   relocation coverage. The LGC-ON schedule's own reduceDB is covered by lgc-test.
 sat-test:
-	$(DUNE) exec smt/solver/test/sat_test.exe
+	OXSMT_LGC_FIXED=0 $(DUNE) exec smt/solver/test/sat_test.exe
 
 ## satpre-test — CNF preprocessing / bounded variable elimination (DESIGN.md A10). Run with
 ##   OXSMT_SATPRE=1 so the gate is ON (the feature is read at Sat.create); the executable

@@ -189,14 +189,15 @@ type t =
        reaches [next_reduce], then step it by a fixed increment — decoupled from restarts
        (which are now frequent under the adaptive policy). *)
     mutable next_reduce : int
-  ; (* Alternative reduceDB SCHEDULE (dark, OXSMT_LGC_FIXED): z3's smt_context LGC_FIXED
+  ; (* Alternative reduceDB SCHEDULE (DEFAULT-ON, OXSMT_LGC_FIXED): z3's smt_context LGC_FIXED
        scheme. When [lgc_fixed] is set, reduceDB fires on the LEARNED-CLAUSE COUNT
        crossing [lgc_threshold] (init 5000) rather than on the conflict-count
        [next_reduce] schedule, and the threshold grows GEOMETRICALLY (x1.1) each fire
        instead of the arithmetic [+ reduce_inc]. Scheduling only: the deletion policy
        ([reduce_deletions]) and the arena rebuild+remap ([reduce_db]) are unchanged.
-       [false] (default) leaves the conflict-count path bit-identical; [next_reduce] is
-       then the only live schedule. [lgc_base] is the initial threshold ([solve] resets
+       [false] (OXSMT_LGC_FIXED=0/false/no) restores the conflict-count path bit-identical
+       to the pre-flip trunk; [next_reduce] is then the only live schedule. [lgc_base] is
+       the initial threshold ([solve] resets
        [lgc_threshold] to it, relative to the live learnt count, per the M3 incremental-
        safety discipline that governs [next_reduce]). [lgc_sizerel] (OXSMT_LGC_SIZEREL)
        selects the PROPORTIONAL alternative to the tuned constant: base = max(floor,
@@ -378,6 +379,16 @@ let reduce_inc = 300 (* then every this-many more *)
 let lgc_initial = 5000
 let lgc_factor = 1.1
 
+(* Sane upper bound on the initial LGC threshold (a learned-clause count). Now that
+   OXSMT_LGC_FIXED is default-ON the OXSMT_LGC_INITIAL knob is live, so it is clamped in
+   [lgc_initial_from_env]: a value near [max_int] would make the per-solve reset
+   [live_learnts + base] overflow negative on an incremental re-solve, so
+   [learnts >= threshold] holds always and reduceDB fires EVERY conflict — a thrash (not
+   unsound, since [reduce_db] is satisfiability-preserving at any frequency, but
+   pathological). 100M learned clauses is far past what any instance retains before OOM,
+   so the clamp never perturbs a genuine run or an A/B sweep of the initial budget. *)
+let lgc_initial_max = 100_000_000
+
 (* Size-relative alternative to the tuned [lgc_initial] (OXSMT_LGC_SIZEREL): the initial
    threshold is #original-clauses / [lgc_sizerel_div] (MiniSat's learntsize_factor = 1/3),
    floored at [lgc_sizerel_floor] so a tiny instance does not GC into churn. Exists to be
@@ -435,25 +446,30 @@ let recursive_min_from_env () =
   | Some _ | None -> false
 ;;
 
-(* LGC_FIXED reduceDB schedule (dark) is env-gated at [create]: unset => [false] =>
-   byte-identical (the conflict-count schedule is the only live one). Same on-value
-   vocabulary as [OXSMT_CHRONO]. *)
+(* LGC_FIXED reduceDB schedule is env-gated at [create]. DEFAULT-ON: unset / any other
+   value => [true] => the learned-clause-count trigger (z3's LGC_FIXED). Set
+   [OXSMT_LGC_FIXED] to 0/false/no to opt out, restoring the conflict-count schedule
+   bit-identical to the pre-flip trunk. The opt-out token set byte-mirrors
+   [OXSMT_SYMBREAK] / [OXSMT_BASE_L0] / [OXSMT_ARR_ROW2] / [OXSMT_SYMBREAK_BUDGET]. The
+   fixed-vs-size-relative arm ([OXSMT_LGC_SIZEREL]) is selected by a quiesced per-family
+   head-to-head — see logs/lgc-flip-prep-log.md. *)
 let lgc_fixed_from_env () =
   match Sys.getenv_opt "OXSMT_LGC_FIXED" with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | Some _ | None -> false
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 (* Initial LGC threshold ([OXSMT_LGC_INITIAL]): a positive int, default [lgc_initial]
    (5000, the z3 default). ONLY consulted when [OXSMT_LGC_FIXED] is on, so it never
    perturbs the byte-identical OFF path. Overridable so an A/B can sweep the initial
    budget and the [lgc-test] discriminating suite can force an early, observable reduceDB.
-   A malformed or non-positive value falls back to the default. *)
+   A malformed or non-positive value falls back to the default; a value above
+   [lgc_initial_max] is clamped to it (the default-ON overflow-into-thrash guard). *)
 let lgc_initial_from_env () =
   match Sys.getenv_opt "OXSMT_LGC_INITIAL" with
   | Some s ->
     (match int_of_string_opt s with
-     | Some n when n >= 1 -> n
+     | Some n when n >= 1 -> min n lgc_initial_max
      | Some _ | None -> lgc_initial)
   | None -> lgc_initial
 ;;
@@ -491,7 +507,7 @@ let chrono_threshold_from_env () =
 
 let create ?(base_l0_cert_mode = false) () =
   let lgc_fixed = lgc_fixed_from_env () in
-  (* The two env reads below are gated on [lgc_fixed], so the OFF path never touches
+  (* The two env reads below are gated on [lgc_fixed], so the opted-out path never touches
      OXSMT_LGC_INITIAL / OXSMT_LGC_SIZEREL and stays byte-identical. [lgc_base] is the
      fixed initial threshold; [solve] recomputes the live threshold from it (size-relative
      when [lgc_sizerel]). *)

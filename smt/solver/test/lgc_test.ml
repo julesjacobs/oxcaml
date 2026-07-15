@@ -121,15 +121,20 @@ let rand () =
 
 let rand_n n = rand () mod n
 
-(* Set (or clear) the reduceDB-schedule gate for the NEXT [Sat.create]. [on=false] clears
-   the flag (empty string is falsy per [lgc_fixed_from_env]); [on=true] arms it with the
-   given initial threshold. *)
+(* Set (or clear) the reduceDB-schedule gate for the NEXT [Sat.create]. [on=false] opts
+   out with the "0" token ([OXSMT_LGC_FIXED] is now DEFAULT-ON, so an empty/unset value
+   is truthy — the OFF case must use an explicit opt-out token); [on=true] arms it with
+   the given initial threshold. *)
 let set_lgc ~on ~initial =
+  (* Pin the size-relative mode OFF so the forced [OXSMT_LGC_INITIAL] is the live
+     budget regardless of the OXSMT_LGC_SIZEREL default (this suite tests the
+     fixed-initial path). *)
+  Unix.putenv "OXSMT_LGC_SIZEREL" "0";
   if on
   then (
     Unix.putenv "OXSMT_LGC_FIXED" "1";
     Unix.putenv "OXSMT_LGC_INITIAL" (string_of_int initial))
-  else Unix.putenv "OXSMT_LGC_FIXED" ""
+  else Unix.putenv "OXSMT_LGC_FIXED" "0"
 ;;
 
 (* Solve one formula in the CURRENT env; return verdict, whether a reported model is
@@ -286,10 +291,100 @@ let test_load_bearing n ~initial =
   Printf.printf "  (load-bearing: %d/%d instances differ OFF vs ON)\n" !differ n
 ;;
 
+(* A conflict-dense SATISFIABLE small instance, regenerated from a FIXED seed so both
+   [initial] runs in the clamp test see the byte-identical instance. Filtered through the
+   oracle so the FIRST solve is SAT — the solver stays [ok] and RETAINS learnt clauses, so
+   the later incremental re-solves reset the threshold with [t.learnts] > 0 (the overflow
+   site). *)
+let clamp_instance () =
+  lcg := 0x123456789ABCDEF0;
+  let rec pick () =
+    let num_vars, clauses = gen_small () in
+    if Oracle.solve num_vars clauses then num_vars, clauses else pick ()
+  in
+  pick ()
+;;
+
+(* All-SAT enumeration of one conflict-dense SAT instance: repeatedly solve, block the
+   model just found, and solve again until UNSAT. This is the incremental driver the clamp
+   needs — every re-solve after the first resets the LGC threshold with [t.learnts] > 0
+   (retained across solves), and the later re-solves (most models blocked) must search hard
+   and CONFLICT, so the reduceDB fire-check runs against the reset threshold. Returns the
+   number of models and the final (monotonic) counter trio. *)
+let enumerate_all_sat ~initial =
+  Unix.putenv "OXSMT_LGC_FIXED" "1";
+  (* Fixed-initial path (the clamp's overflow site); pin sizerel OFF. *)
+  Unix.putenv "OXSMT_LGC_SIZEREL" "0";
+  Unix.putenv "OXSMT_LGC_INITIAL" (string_of_int initial);
+  let num_vars, clauses = clamp_instance () in
+  let s = build num_vars clauses in
+  let models = ref 0 in
+  let finished = ref false in
+  while not !finished do
+    match Sat.solve s with
+    | Sat.Unsat -> finished := true
+    | Sat.Sat ->
+      incr models;
+      let model = Sat.model s in
+      (* Blocking clause ¬model: forbid exactly this assignment so the next solve must find
+         a different model (or prove none remains). *)
+      let blocking =
+        List.init num_vars (fun v -> if model.(v) then Sat.neg v else Sat.pos v)
+      in
+      Sat.add_clause s blocking
+  done;
+  let st = Sat.stats s in
+  !models, (st.conflicts, st.decisions, st.propagations)
+;;
+
+(* (3) INITIAL-BUDGET CLAMP (review obligation for the default-ON flip; RED-verified).
+   OXSMT_LGC_INITIAL near [max_int] would make the per-solve reset [live_learnts + base]
+   overflow NEGATIVE on an incremental re-solve (live_learnts > 0), so
+   [learnts >= threshold] is always true and reduceDB fires EVERY conflict — a thrash
+   (sound, since reduce_db is satisfiability-preserving, but pathological).
+   [lgc_initial_from_env] clamps the knob to [lgc_initial_max], keeping the threshold
+   positive. Here the SAME all-SAT enumeration run with a sane large initial (5000) and with
+   [max_int] must enumerate the same number of models and reach the SAME final counter trio:
+   on this small instance neither ever GCs (learnt count stays far below either budget), so
+   the runs coincide exactly. RED: dropping the [min .. lgc_initial_max] clamp lets the
+   [max_int] run overflow once [t.learnts] > 0 and GC-thrash through the blocked re-solves,
+   inflating conflicts/decisions/propagations ⇒ the trio equality below fails. *)
+let test_initial_clamp () =
+  let models_sane, trio_sane = enumerate_all_sat ~initial:5000 in
+  let models_big, trio_big = enumerate_all_sat ~initial:max_int in
+  check
+    (Printf.sprintf
+       "initial-clamp: same model count (sane %d vs max_int %d)"
+       models_sane
+       models_big)
+    (models_sane = models_big);
+  let c1, d1, p1 = trio_sane in
+  let c2, d2, p2 = trio_big in
+  check
+    (Printf.sprintf
+       "initial-clamp: OXSMT_LGC_INITIAL=max_int clamped — no reset overflow/thrash (trio \
+        sane=(%d,%d,%d) max_int=(%d,%d,%d))"
+       c1
+       d1
+       p1
+       c2
+       d2
+       p2)
+    (trio_sane = trio_big);
+  Printf.printf
+    "  (initial-clamp: %d models enumerated, final trio (%d,%d,%d) matches sane vs max_int \
+     initial)\n"
+    models_sane
+    c1
+    d1
+    p1
+;;
+
 let () =
   Printf.printf "lgc_test: OXSMT_LGC_FIXED reduceDB-schedule self-test\n";
   test_soundness_under_gc 4000 ~initial:3;
   test_load_bearing 250 ~initial:12;
+  test_initial_clamp ();
   Printf.printf "lgc_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
