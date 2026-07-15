@@ -70,21 +70,21 @@ let with_collector s =
 
 type mock_config =
   { conflicts : Sat.lit list list
-    (* each premise set: if all its literals are currently asserted true, it is a theory
+      (* each premise set: if all its literals are currently asserted true, it is a theory
          conflict (its conjunction is "T-unsat") *)
   ; implications : (Sat.lit list * Sat.lit) list
-    (* (antecedents, consequent): all antecedents asserted true ⇒ propagate consequent,
+      (* (antecedents, consequent): all antecedents asserted true ⇒ propagate consequent,
          with the antecedents as its lazy explanation *)
   ; final_conflicts :
       Sat.lit list list (* extra conflicts recognized only at Final effort *)
   ; final_splits : Sat.lit list list
-    (* clauses emitted one-at-a-time at Final effort (CONTRACT-SPLIT disjunctions) until
+      (* clauses emitted one-at-a-time at Final effort (CONTRACT-SPLIT disjunctions) until
          all are exhausted *)
   ; explain_override : (Sat.lit -> Sat.lit list) option
-    (* if set, [explain] returns this instead of the rule antecedents — used to inject a
+      (* if set, [explain] returns this instead of the rule antecedents — used to inject a
          CONTRACT-EX-violating reason and confirm the core raises rather than trusts it *)
   ; propose_once : bool
-    (* if true, each consequent is proposed at most once across the whole solve (a latch
+  (* if true, each consequent is proposed at most once across the whole solve (a latch
      that survives backtracking). Lets a negative test isolate a single guarded path: with
      the guard removed, the solve then TERMINATES without re-proposing into a different
      guard, so the revert-check produces a clean RED instead of raising elsewhere or
@@ -149,12 +149,11 @@ let make_mock st config =
       let props =
         List.filter_map
           (fun (ants, cons) ->
-             if
-               all_true ants
+            if all_true ants
                && (not (is_true cons))
                && not (config.propose_once && List.mem cons !proposed)
-             then Some cons
-             else None)
+            then Some cons
+            else None)
           config.implications
       in
       let props = List.sort_uniq compare props in
@@ -750,13 +749,12 @@ let test_no_theory_regression () =
     let r1 = Sat.solve withth in
     let st1 = Sat.stats withth in
     let m1 = Sat.model withth in
-    if
-      r0 <> r1
-      || st0.Sat.Stats.conflicts <> st1.Sat.Stats.conflicts
-      || st0.Sat.Stats.decisions <> st1.Sat.Stats.decisions
-      || st0.Sat.Stats.propagations <> st1.Sat.Stats.propagations
-      || m0 <> m1
-      || not !(mock.invariant_ok)
+    if r0 <> r1
+       || st0.Sat.Stats.conflicts <> st1.Sat.Stats.conflicts
+       || st0.Sat.Stats.decisions <> st1.Sat.Stats.decisions
+       || st0.Sat.Stats.propagations <> st1.Sat.Stats.propagations
+       || m0 <> m1
+       || not !(mock.invariant_ok)
     then incr mismatches
   done;
   check
@@ -769,6 +767,40 @@ let test_no_theory_regression () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+
+(* CONTRACT-LEMMA (adr-0005-contract-lemma-erratum): a theory-VALID implication lemma
+   emitted as the signed clause (¬b ∨ cut) — the propagate-as-lemma shape a derived
+   integer cut uses (z3's assign(cut, core)). With the antecedent b forced true, the
+   clause unit-propagates the fresh atom cut to TRUE, with b as its reason. The contrast
+   run (no lemma → cut decided false by phase-saving) proves the lemma is what propagated
+   it, not the default. This is the runtime behavior CONTRACT-LEMMA relies on; it needs no
+   seam change (a signed Split clause already clausifies to this via split_lit's
+   Not-peeling). *)
+let test_valid_lemma_propagates () =
+  let setup ~with_lemma =
+    let s = Sat.create () in
+    let b = Sat.new_var s
+    and cut = Sat.new_var s in
+    let cfg =
+      if with_lemma
+      then { empty_config with final_splits = [ [ Sat.neg b; Sat.pos cut ] ] }
+      else empty_config
+    in
+    let mock = make_mock s cfg in
+    Sat.set_theory s (Some mock.theory);
+    Sat.add_clause s [ Sat.pos b ] (* antecedent forced true *);
+    let r = Sat.solve s in
+    r, Sat.value s cut, mock
+  in
+  let r0, cut0, _ = setup ~with_lemma:false in
+  check "lemma: baseline sat" (r0 = Sat.Sat);
+  check "lemma: without lemma, cut decided false (phase-saving)" (not cut0);
+  let r1, cut1, mock = setup ~with_lemma:true in
+  check "lemma: sat with lemma" (r1 = Sat.Sat);
+  check "lemma: valid lemma (¬b ∨ cut), b true ⇒ cut propagated TRUE" cut1;
+  check "lemma: emitted exactly once" (!(mock.splits_emitted) = 1);
+  check "lemma: push/pop invariant held" !(mock.invariant_ok)
+;;
 
 let () =
   test_conflict_at_depth ();
@@ -786,6 +818,7 @@ let () =
   test_final_split ();
   test_final_split_empty_unsat ();
   test_final_conflict ();
+  test_valid_lemma_propagates ();
   test_pushpop_stress ();
   test_no_theory_regression ();
   Printf.printf "seam_test: %d checks, %d failures\n" !checks !failures;
