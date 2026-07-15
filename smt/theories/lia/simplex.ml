@@ -8,29 +8,281 @@
 
 exception Farkas_error of string
 
-module IntMap = Map.Make (Int)
 module IntSet = Set.Make (Int)
 
 (* A linear expression: var id -> nonzero coefficient (absent = 0). Used both for a
    variable's immutable Farkas half-plane basis ([def], over problem vars) and for a basic
-   variable's mutable tableau [row] (over current nonbasic vars). *)
-type linexp = Rational.t IntMap.t
+   variable's mutable tableau [row] (over current nonbasic vars).
 
-let coeff (m : linexp) i =
-  match IntMap.find_opt i m with
-  | Some c -> c
-  | None -> Rational.zero
-;;
+   Representation: a SPARSE SORTED, growable pair of parallel arrays — [ids.(0..len-1)]
+   strictly ascending, [cs.(0..len-1)] the matching nonzero coefficients (no explicit
+   zero), with [len <= Array.length ids = Array.length cs] (the tail is spare capacity).
+   This is the same abstract var->coeff map the former [Rational.t Map.Make(Int).t] was —
+   coeff lookup is a binary search and every iterator ([fold]/[iter]/[bindings]) yields
+   entries in ASCENDING id order, exactly as [Map.Make(Int)] did — so verdicts, counters
+   and Farkas certificates are byte-identical, and the two order-sensitive consumers
+   ([entering] = Bland's smallest-id rule; [conflict_of]/[build_conflict] = the Farkas
+   premise/multiplier order) are unchanged.
 
-(* acc + s · m, dropping resulting zeros. *)
-let add_scaled (acc : linexp) (s : Rational.t) (m : linexp) : linexp =
-  IntMap.fold
-    (fun j c acc ->
-       let nv = Rational.add (coeff acc j) (Rational.mul s c) in
-       if Rational.is_zero nv then IntMap.remove j acc else IntMap.add j nv acc)
-    m
-    acc
-;;
+   Why a MUTABLE row (this lane): a basic variable's [row] is updated incrementally on
+   every pivot ([add_scaled] merge, [remove]). A persistent Map allocates O(log n) tree
+   nodes per update; a fresh sorted array allocates O(n) per update (the sparse-array
+   park's regression on wide rows). Here the hot incremental ops mutate the row IN PLACE
+   into its own backing arrays (growing capacity only when it must), so an incremental
+   update allocates nothing beyond an occasional doubling.
+
+   Ownership discipline (soundness-critical — an in-place write to a shared row would
+   corrupt the tableau and mis-verdict): the ONLY mutated destinations are (a) a var's own
+   [row], which is uniquely owned by that var, and (b) a fresh accumulator created by
+   [expand]/[build_conflict]. A var's immutable [def] and any row read as the SCALED
+   SOURCE of [add_scaled_in_place] (e.g. [nj.row] during pivot substitution) are only ever
+   read. Rows are never trailed (they are recomputed by [check] after [pop]), so in-place
+   mutation is backtrack-safe. The functional constructors ([singleton]/[of_list]/[map]/
+   [add]/[remove]) still allocate a fresh row and are used where a fresh value is wanted
+   (a var's [def], the pivot's [new_row]); [add_scaled_in_place]/[remove_in_place] are the
+   in-place ops used on the incremental hot path. *)
+module Lx = struct
+  (* INVARIANT: [ids.(0..len-1)] strictly ascending; [cs.(0..len-1)] all nonzero;
+     [len <= Array.length ids = Array.length cs]. *)
+  type t =
+    { mutable ids : int array
+    ; mutable cs : Rational.t array
+    ; mutable len : int
+    }
+
+  let create () = { ids = [||]; cs = [||]; len = 0 }
+
+  (* precondition: [c] nonzero (callers pass Rational.one / a checked coeff). *)
+  let singleton i c = { ids = [| i |]; cs = [| c |]; len = 1 }
+
+  (* Index of [i] in [ids.(0..len-1)], or -1. *)
+  let find_idx (m : t) i =
+    let lo = ref 0
+    and hi = ref (m.len - 1)
+    and res = ref (-1) in
+    while !lo <= !hi do
+      let mid = (!lo + !hi) / 2 in
+      let v = m.ids.(mid) in
+      if v = i
+      then (
+        res := mid;
+        lo := !hi + 1)
+      else if v < i
+      then lo := mid + 1
+      else hi := mid - 1
+    done;
+    !res
+  ;;
+
+  let coeff (m : t) i =
+    let k = find_idx m i in
+    if k < 0 then Rational.zero else m.cs.(k)
+  ;;
+
+  (* Ascending-id fold/iter/bindings — identical order to Map.Make(Int). *)
+  let fold f (m : t) init =
+    let acc = ref init in
+    for k = 0 to m.len - 1 do
+      acc := f m.ids.(k) m.cs.(k) !acc
+    done;
+    !acc
+  ;;
+
+  let iter f (m : t) =
+    for k = 0 to m.len - 1 do
+      f m.ids.(k) m.cs.(k)
+    done
+  ;;
+
+  let bindings (m : t) = List.init m.len (fun k -> m.ids.(k), m.cs.(k))
+
+  let for_all p (m : t) =
+    let ok = ref true
+    and k = ref 0 in
+    while !ok && !k < m.len do
+      if not (p m.ids.(!k) m.cs.(!k)) then ok := false;
+      incr k
+    done;
+    !ok
+  ;;
+
+  (* Grow [m]'s backing arrays so its capacity is at least [n] (preserving the live
+     prefix). Occasional doubling; the incremental ops call this instead of allocating a
+     fresh array per update. *)
+  let ensure_cap (m : t) n =
+    if Array.length m.ids < n
+    then (
+      let ncap = max n (max 4 (2 * Array.length m.ids)) in
+      let nids = Array.make ncap 0
+      and ncs = Array.make ncap Rational.zero in
+      Array.blit m.ids 0 nids 0 m.len;
+      Array.blit m.cs 0 ncs 0 m.len;
+      m.ids <- nids;
+      m.cs <- ncs)
+  ;;
+
+  (* FUNCTIONAL map of coefficients (keys unchanged), dropping any coefficient [f] sends
+     to zero so the no-explicit-zero invariant holds. Returns a FRESH row. *)
+  let map f (m : t) =
+    let rids = Array.make m.len 0
+    and rcs = Array.make m.len Rational.zero in
+    let w = ref 0 in
+    for k = 0 to m.len - 1 do
+      let c = f m.cs.(k) in
+      if not (Rational.is_zero c)
+      then (
+        rids.(!w) <- m.ids.(k);
+        rcs.(!w) <- c;
+        incr w)
+    done;
+    { ids = rids; cs = rcs; len = !w }
+  ;;
+
+  (* FUNCTIONAL insert/replace of [(i,c)]; a zero [c] removes [i]. Returns a FRESH row
+     (O(n) splice). Used off the hot path (the pivot's [new_row]). *)
+  let add i c (m : t) =
+    let k = find_idx m i in
+    if Rational.is_zero c
+    then
+      if k < 0
+      then { ids = Array.sub m.ids 0 m.len; cs = Array.sub m.cs 0 m.len; len = m.len }
+      else (
+        let rids = Array.make (m.len - 1) 0
+        and rcs = Array.make (m.len - 1) Rational.zero in
+        Array.blit m.ids 0 rids 0 k;
+        Array.blit m.cs 0 rcs 0 k;
+        Array.blit m.ids (k + 1) rids k (m.len - k - 1);
+        Array.blit m.cs (k + 1) rcs k (m.len - k - 1);
+        { ids = rids; cs = rcs; len = m.len - 1 })
+    else if k >= 0
+    then (
+      let rids = Array.sub m.ids 0 m.len
+      and rcs = Array.sub m.cs 0 m.len in
+      rcs.(k) <- c;
+      { ids = rids; cs = rcs; len = m.len })
+    else (
+      let p = ref 0 in
+      while !p < m.len && m.ids.(!p) < i do
+        incr p
+      done;
+      let p = !p in
+      let rids = Array.make (m.len + 1) 0
+      and rcs = Array.make (m.len + 1) Rational.zero in
+      Array.blit m.ids 0 rids 0 p;
+      Array.blit m.cs 0 rcs 0 p;
+      rids.(p) <- i;
+      rcs.(p) <- c;
+      Array.blit m.ids p rids (p + 1) (m.len - p);
+      Array.blit m.cs p rcs (p + 1) (m.len - p);
+      { ids = rids; cs = rcs; len = m.len + 1 })
+  ;;
+
+  let remove i (m : t) = add i Rational.zero m
+
+  (* Build from unsorted (id,coeff) pairs: sum coefficients on repeated ids, drop zeros,
+     produce a sorted FRESH row. Same abstract map (and same summed values) as folding
+     [add]/[remove] over the list. *)
+  let of_list pairs =
+    let sorted = List.stable_sort (fun (a, _) (b, _) -> Int.compare a b) pairs in
+    let rids = ref []
+    and rcs = ref [] in
+    let cur_id = ref 0
+    and cur_c = ref Rational.zero
+    and have = ref false in
+    let flush () =
+      if !have && not (Rational.is_zero !cur_c)
+      then (
+        rids := !cur_id :: !rids;
+        rcs := !cur_c :: !rcs)
+    in
+    List.iter
+      (fun (i, c) ->
+        if !have && i = !cur_id
+        then cur_c := Rational.add !cur_c c
+        else (
+          flush ();
+          cur_id := i;
+          cur_c := c;
+          have := true))
+      sorted;
+    flush ();
+    let ids = Array.of_list (List.rev !rids)
+    and cs = Array.of_list (List.rev !rcs) in
+    { ids; cs; len = Array.length ids }
+  ;;
+
+  (* Reusable scratch for the [add_scaled_in_place] merge. A single global buffer is safe:
+     the solver is single-threaded and [add_scaled_in_place] never re-enters itself, so no
+     two merges are ever live at once. Sized on demand; never shrinks. *)
+  let scratch_ids = ref [||]
+  let scratch_cs = ref [||]
+
+  let ensure_scratch n =
+    if Array.length !scratch_ids < n
+    then (
+      scratch_ids := Array.make n 0;
+      scratch_cs := Array.make n Rational.zero)
+  ;;
+
+  (* IN-PLACE [dst := dst + s·m], dropping resulting zeros. [dst] is mutated (must be
+     uniquely owned); [m] is read-only (and a distinct object from [dst]). A two-pointer
+     merge of the two sorted rows into the reusable scratch, then a copy back into [dst]'s
+     (grown-if-needed) backing — so no per-call array allocation beyond occasional growth.
+
+     Value contract, matching the former Map fold over [m] EXACTLY (so counters/certs are
+     byte-identical): an id only in [dst] is carried unchanged; an id only in [m] becomes
+     [Rational.add Rational.zero (Rational.mul s c)]; an id in both becomes
+     [Rational.add dst_c (Rational.mul s c)]; a zero result is dropped. *)
+  let add_scaled_in_place (dst : t) (s : Rational.t) (m : t) =
+    let cap = dst.len + m.len in
+    ensure_scratch cap;
+    let sids = !scratch_ids
+    and scs = !scratch_cs in
+    let w = ref 0
+    and ia = ref 0
+    and im = ref 0 in
+    let emit id c =
+      if not (Rational.is_zero c)
+      then (
+        sids.(!w) <- id;
+        scs.(!w) <- c;
+        incr w)
+    in
+    while !ia < dst.len || !im < m.len do
+      if !im >= m.len || (!ia < dst.len && dst.ids.(!ia) < m.ids.(!im))
+      then (
+        emit dst.ids.(!ia) dst.cs.(!ia);
+        incr ia)
+      else if !ia >= dst.len || m.ids.(!im) < dst.ids.(!ia)
+      then (
+        emit m.ids.(!im) (Rational.add Rational.zero (Rational.mul s m.cs.(!im)));
+        incr im)
+      else (
+        emit dst.ids.(!ia) (Rational.add dst.cs.(!ia) (Rational.mul s m.cs.(!im)));
+        incr ia;
+        incr im)
+    done;
+    ensure_cap dst !w;
+    Array.blit sids 0 dst.ids 0 !w;
+    Array.blit scs 0 dst.cs 0 !w;
+    dst.len <- !w
+  ;;
+
+  (* IN-PLACE removal of id [i] from [m] (a no-op if absent). [m] uniquely owned. The
+     overlapping left-shift is a single [Array.blit] (defined for overlapping ranges). *)
+  let remove_in_place (m : t) i =
+    let k = find_idx m i in
+    if k >= 0
+    then (
+      Array.blit m.ids (k + 1) m.ids k (m.len - k - 1);
+      Array.blit m.cs (k + 1) m.cs k (m.len - k - 1);
+      m.len <- m.len - 1)
+  ;;
+end
+
+type linexp = Lx.t
+
+let coeff = Lx.coeff
 
 type 'a bound =
   { bval : Delta.t
@@ -61,7 +313,7 @@ type 'a t =
     trail : ('a undo, unit) Oxsmt_core.Trail.t
   ; mutable pivots : int
   ; mutable dirty_basic : IntSet.t
-    (* FIX #3b: a SUPERSET of the basic variables that may violate a bound — every basic
+      (* FIX #3b: a SUPERSET of the basic variables that may violate a bound — every basic
          var whose value changed ([update]/[pivot_and_update]) or whose bound tightened
          ([assert_*]) since [check] last restored feasibility. [first_violating] scans
          only this instead of all vars, pruning non-violating members as it goes. Superset
@@ -69,13 +321,13 @@ type 'a t =
          violation and certify Sat on an unrepaired tableau. [pop] only loosens bounds
          (never creates a violation), so it needs no maintenance. *)
   ; mutable dirty_bound : IntSet.t
-    (* FIX #3b: a SUPERSET of the variables whose [lower]/[upper] may form an empty
+      (* FIX #3b: a SUPERSET of the variables whose [lower]/[upper] may form an empty
          interval (l > u). Such an interval is created only by the [assert_*] that
          tightens one bound past the other (detected there); [pop] only loosens, so it can
          only resolve one. [empty_interval_conflict] scans only this, reading current
          bounds as ground truth. *)
   ; mutable poisoned : bool
-    (* set the instant a Rational.Overflow escapes a state-mutating op: the tableau may be
+  (* set the instant a Rational.Overflow escapes a state-mutating op: the tableau may be
      left mid-pivot (INV-EQ broken), so any further reasoning is unsound and must be
      refused rather than trusted (see is_poisoned / Lia.Poisoned). *)
   }
@@ -133,12 +385,12 @@ let new_problem_var t =
   let id = Dynarray.length t.vars in
   let v =
     { id
-    ; def = IntMap.singleton id Rational.one
+    ; def = Lx.singleton id Rational.one
     ; value = Delta.zero
     ; lower = None
     ; upper = None
     ; basic = false
-    ; row = IntMap.empty
+    ; row = Lx.create ()
     }
   in
   Dynarray.add_last t.vars v;
@@ -147,41 +399,35 @@ let new_problem_var t =
 
 (* β(s) for a freshly-created slack: Σ coeff · β(var). *)
 let eval_def t (def : linexp) =
-  IntMap.fold
-    (fun j c acc -> Delta.add acc (Delta.scale c (get t j).value))
-    def
-    Delta.zero
+  Lx.fold (fun j c acc -> Delta.add acc (Delta.scale c (get t j).value)) def Delta.zero
 ;;
 
 (* Re-express a linear form over problem vars as a form over the {e current} nonbasic set,
    substituting each currently-basic variable by its row. Needed because a slack created
    mid-search may reference problem vars that pivoting has since made basic. *)
 let expand t (def : linexp) : linexp =
-  IntMap.fold
+  (* [acc] is a fresh row uniquely owned here, so it is a legal in-place destination; each
+     [vj.row]/singleton is read-only. Same accumulated map as the former fold of
+     [add_scaled], built without a fresh array per step. *)
+  Lx.fold
     (fun j c acc ->
-       let vj = get t j in
-       if vj.basic
-       then add_scaled acc c vj.row
-       else add_scaled acc c (IntMap.singleton j Rational.one))
+      let vj = get t j in
+      if vj.basic
+      then Lx.add_scaled_in_place acc c vj.row
+      else Lx.add_scaled_in_place acc c (Lx.singleton j Rational.one);
+      acc)
     def
-    IntMap.empty
+    (Lx.create ())
 ;;
 
 let new_slack t (pairs : (int * Rational.t) list) =
   guarded t (fun () ->
     (* SUM coefficients on a repeated variable — do NOT overwrite (codex L1). A caller
-       that passes e.g. [(x,1);(x,-1)] means s = 1·x + (-1)·x = 0·x, not s = -x;
-       overwriting with IntMap.add would build the wrong def and Farkas-certify a false
-       conflict. A resulting zero coefficient is dropped so [def] keeps its "no explicit
-       zero" invariant. *)
-    let def =
-      List.fold_left
-        (fun m (j, c) ->
-           let c' = Rational.add (coeff m j) c in
-           if Rational.is_zero c' then IntMap.remove j m else IntMap.add j c' m)
-        IntMap.empty
-        pairs
-    in
+       that passes e.g. [(x,1);(x,-1)] means s = 1·x + (-1)·x = 0·x, not s = -x. A
+       resulting zero coefficient is dropped so [def] keeps its "no explicit zero"
+       invariant. [Lx.of_list] sums repeated ids and drops zeros — same abstract map (and
+       same summed coefficient values) as the former fold of add/remove. *)
+    let def = Lx.of_list pairs in
     let id = Dynarray.length t.vars in
     let v =
       { id
@@ -190,7 +436,7 @@ let new_slack t (pairs : (int * Rational.t) list) =
       ; lower = None
       ; upper = None
       ; basic = true
-      ; row = IntMap.empty
+      ; row = Lx.create ()
       }
     in
     Dynarray.add_last t.vars v;
@@ -214,31 +460,34 @@ let build_conflict t (contribs : contribution list) : 'a conflict =
   (* Self-check: Σ mult · half-plane must cancel all variables and leave a strictly
      positive constant. Accumulate variable coefficients (linexp) and the δ-rational
      constant. *)
-  let acc_vars = ref IntMap.empty in
+  (* [acc_vars] is a fresh row uniquely owned here — a legal in-place destination. Each
+     [hp_vars] is either a fresh [Lx.map] result or the shared immutable [v.def], and is
+     only ever READ by [add_scaled_in_place], so no [def] is mutated. *)
+  let acc_vars = Lx.create () in
   let acc_const = ref Delta.zero in
   let premises = ref [] in
   let farkas = ref [] in
   List.iter
     (fun { var; mult; use_lower } ->
-       if Rational.sign mult < 0 then raise (Farkas_error "negative multiplier");
-       let v = get t var in
-       let bnd =
-         match if use_lower then v.lower else v.upper with
-         | Some b -> b
-         | None -> raise (Farkas_error "contribution references an absent bound")
-       in
-       (* half-plane variable part and constant part *)
-       let hp_vars, hp_const =
-         if use_lower
-         then IntMap.map Rational.neg v.def, bnd.bval (* l - def <= 0 *)
-         else v.def, Delta.neg bnd.bval (* def - u <= 0 *)
-       in
-       acc_vars := add_scaled !acc_vars mult hp_vars;
-       acc_const := Delta.add !acc_const (Delta.scale mult hp_const);
-       premises := bnd.reason :: !premises;
-       farkas := mult :: !farkas)
+      if Rational.sign mult < 0 then raise (Farkas_error "negative multiplier");
+      let v = get t var in
+      let bnd =
+        match if use_lower then v.lower else v.upper with
+        | Some b -> b
+        | None -> raise (Farkas_error "contribution references an absent bound")
+      in
+      (* half-plane variable part and constant part *)
+      let hp_vars, hp_const =
+        if use_lower
+        then Lx.map Rational.neg v.def, bnd.bval (* l - def <= 0 *)
+        else v.def, Delta.neg bnd.bval (* def - u <= 0 *)
+      in
+      Lx.add_scaled_in_place acc_vars mult hp_vars;
+      acc_const := Delta.add !acc_const (Delta.scale mult hp_const);
+      premises := bnd.reason :: !premises;
+      farkas := mult :: !farkas)
     contribs;
-  if not (IntMap.for_all (fun _ c -> Rational.is_zero c) !acc_vars)
+  if not (Lx.for_all (fun _ c -> Rational.is_zero c) acc_vars)
   then raise (Farkas_error "variables did not cancel");
   if not (Delta.lt Delta.zero !acc_const)
   then raise (Farkas_error "combined constant is not strictly positive");
@@ -268,14 +517,14 @@ let update t (v : 'a var) (d : Delta.t) =
   let diff = Delta.sub d v.value in
   Dynarray.iter
     (fun b ->
-       if b.basic
-       then (
-         let a = coeff b.row v.id in
-         if not (Rational.is_zero a)
-         then (
-           b.value <- Delta.add b.value (Delta.scale a diff);
-           (* value changed -> it may now violate its bound *)
-           mark_basic t b.id)))
+      if b.basic
+      then (
+        let a = coeff b.row v.id in
+        if not (Rational.is_zero a)
+        then (
+          b.value <- Delta.add b.value (Delta.scale a diff);
+          (* value changed -> it may now violate its bound *)
+          mark_basic t b.id)))
     t.vars;
   v.value <- d
 ;;
@@ -350,24 +599,33 @@ let pivot t (bi : 'a var) (nj : 'a var) =
   let a = coeff bi.row nj.id in
   (* nj = (1/a)·bi - Σ_{k≠nj} (a_bk/a)·k *)
   let inv = Rational.div Rational.one a in
-  let new_row = ref (IntMap.singleton bi.id inv) in
-  IntMap.iter
-    (fun k c ->
-       if k <> nj.id
-       then new_row := IntMap.add k (Rational.neg (Rational.mul c inv)) !new_row)
-    bi.row;
+  (* new_row = bi.id:inv + Σ_[{k≠nj}] (-(c·inv))·k, built as ONE fresh row (this runs once
+     per pivot, not on the per-basic-row inner loop, so a functional build is fine). [bi]
+     is basic, so [bi.id] never appears in [bi.row]; the functional ops read [bi.row]
+     only. Same entries/values as the former singleton + per-key add. *)
+  let new_row =
+    Lx.add
+      bi.id
+      inv
+      (Lx.map (fun c -> Rational.neg (Rational.mul c inv)) (Lx.remove nj.id bi.row))
+  in
   bi.basic <- false;
-  bi.row <- IntMap.empty;
+  bi.row <- Lx.create ();
   nj.basic <- true;
-  nj.row <- !new_row;
-  (* Substitute nj's new row into every other basic row that mentions nj. *)
+  nj.row <- new_row;
+  (* Substitute nj's new row into every other basic row that mentions nj. Each [k.row] is
+     uniquely owned by [k], so it is mutated IN PLACE (remove nj, then += a_kn·nj.row);
+     [nj.row] is the read-only scaled source. This is the incremental hot path the mutable
+     row targets: no fresh row array per substituted basic variable. *)
   Dynarray.iter
     (fun k ->
-       if k.basic && k.id <> nj.id
-       then (
-         let a_kn = coeff k.row nj.id in
-         if not (Rational.is_zero a_kn)
-         then k.row <- add_scaled (IntMap.remove nj.id k.row) a_kn nj.row))
+      if k.basic && k.id <> nj.id
+      then (
+        let a_kn = coeff k.row nj.id in
+        if not (Rational.is_zero a_kn)
+        then (
+          Lx.remove_in_place k.row nj.id;
+          Lx.add_scaled_in_place k.row a_kn nj.row)))
     t.vars;
   t.pivots <- t.pivots + 1
 ;;
@@ -383,13 +641,13 @@ let pivot_and_update t (bi : 'a var) (nj : 'a var) (v : Delta.t) =
   mark_basic t nj.id;
   Dynarray.iter
     (fun k ->
-       if k.basic && k.id <> bi.id
-       then (
-         let a_kn = coeff k.row nj.id in
-         if not (Rational.is_zero a_kn)
-         then (
-           k.value <- Delta.add k.value (Delta.scale a_kn theta);
-           mark_basic t k.id)))
+      if k.basic && k.id <> bi.id
+      then (
+        let a_kn = coeff k.row nj.id in
+        if not (Rational.is_zero a_kn)
+        then (
+          k.value <- Delta.add k.value (Delta.scale a_kn theta);
+          mark_basic t k.id)))
     t.vars;
   pivot t bi nj
 ;;
@@ -434,8 +692,9 @@ let first_violating t =
 (* Smallest-id nonbasic in [bi]'s row that can move [bi] toward feasibility. [dir = `Inc]
    when we must increase β(bi), [`Dec] when we must decrease it. *)
 let entering t (bi : 'a var) dir =
-  let entries = IntMap.bindings bi.row in
-  (* IntMap.bindings is sorted by id — Bland order. *)
+  let entries = Lx.bindings bi.row in
+  (* [Lx.bindings] yields entries in ascending id order — Bland order (as Map.bindings
+     did). *)
   let suitable (nj : 'a var) a =
     let can_increase =
       match nj.upper with
@@ -462,14 +721,14 @@ let entering t (bi : 'a var) dir =
 (* Build the Farkas conflict for an unfixable basic [bi]. [low] iff β(bi) < lower. *)
 let conflict_of t (bi : 'a var) ~low =
   let contribs = ref [ { var = bi.id; mult = Rational.one; use_lower = low } ] in
-  IntMap.iter
+  Lx.iter
     (fun j a ->
-       let pos = Rational.sign a > 0 in
-       (* For β(bi) < l (increase case): a>0 uses upper(j), a<0 uses lower(j). For β(bi) >
+      let pos = Rational.sign a > 0 in
+      (* For β(bi) < l (increase case): a>0 uses upper(j), a<0 uses lower(j). For β(bi) >
          u (decrease case): a>0 uses lower(j), a<0 uses upper(j). *)
-       let use_lower = if low then not pos else pos in
-       let mult = if pos then a else Rational.neg a in
-       contribs := { var = j; mult; use_lower } :: !contribs)
+      let use_lower = if low then not pos else pos in
+      let mult = if pos then a else Rational.neg a in
+      contribs := { var = j; mult; use_lower } :: !contribs)
     bi.row;
   build_conflict t (List.rev !contribs)
 ;;
@@ -563,7 +822,7 @@ let half = Rational.of_frac 1 2
    rounding each problem var by ≤ 1/2). A problem var's def is the singleton [{id:1}] so
    its 1-norm is 1; a slack's is the sum of its |coefficients|. *)
 let one_norm (def : linexp) =
-  IntMap.fold (fun _ c acc -> Rational.add acc (Rational.abs c)) def Rational.zero
+  Lx.fold (fun _ c acc -> Rational.add acc (Rational.abs c)) def Rational.zero
 ;;
 
 (* Nearest integer to a δ-rational's finite part, as an integer Rational
@@ -627,11 +886,12 @@ let cube_test t (problem_vars : int list) : (int * Rational.t) list option =
           soundness gate — the point is returned only if the simplex confirms it feasible
           (the cube theorem guarantees this, so a failure here would be a bug, never a
           normal outcome). *)
-       let vals =
-         List.fold_left (fun m (id, r) -> IntMap.add id r m) IntMap.empty assignment
-       in
+       (* [assignment] has one entry per problem var (distinct ids); [value_of] reads it
+          only via [coeff vals j], for which a dropped zero and an explicit zero are
+          indistinguishable — so [Lx.of_list] is value-identical to the former per-id add. *)
+       let vals = Lx.of_list assignment in
        let value_of def =
-         IntMap.fold
+         Lx.fold
            (fun j c acc -> Rational.add acc (Rational.mul c (coeff vals j)))
            def
            Rational.zero
