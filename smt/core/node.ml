@@ -110,32 +110,102 @@ let hash_node (n : node) : int =
   | Ite (a, b, c) -> mix (mix (mix 9 a.tag) b.tag) c.tag
 ;;
 
-module Node_tbl = Hashtbl.Make (struct
-    type nonrec t = node
+(* Strong (non-weak) monotonic intern table + tag counter (ADR-0003 Decision 4). SOUNDNESS
+   SURFACE: this table IS term identity — the whole solver, certificate chain, and model
+   checkers rest on "same structure <=> same tag". Aliasing two distinct nodes to one tag,
+   or reusing a tag for a different node, is the worst defect class in the codebase, so
+   the [equal_node] confirmation on a hash match below is load-bearing (RED: core_test's
+   hash-collision fixture — two structurally-distinct nodes with equal [hash_node] must
+   get DISTINCT tags; a mutant that accepts the first hash-matching slot fails it).
 
-    let equal = equal_node
-    let hash = hash_node
-  end)
+   Representation: a FLAT open-addressing table (design credit: thr-term-fable) instead of
+   [Hashtbl.Make(node)]. The chained table stored a LIVE [Cons {key; data; next}] box per
+   distinct term that persists for the Context's lifetime (promoted, hence marked every
+   major GC); this stores two flat [int] arrays plus the tag-indexed [terms] we allocate
+   anyway, removing ~4 live words per distinct term from the marked heap (front-end lane
+   round 2: shrinks the promoted heap that drives [do_some_marking]).
 
-(* Strong (non-weak) monotonic intern table + tag counter (ADR-0003 Decision 4).
    Per-Context, so two fresh Contexts building the same terms in the same order assign
-   identical tags (I6). Never iterated in a way that leaks order. *)
+   identical tags (I6): a MISS interns at [next_tag] and increments it, exactly as the old
+   table did — probe order and grow are never observed (the table is never iterated for a
+   result). *)
 type state =
   { mutable next_tag : int
-  ; tbl : t Node_tbl.t
+  ; mutable slot_tag : int array
+    (* slot -> (tag + 1); 0 = empty (so tag 0 is representable). Length is a power of
+         two. *)
+  ; mutable slot_hash :
+      int array (* cached [hash_node] at each slot, parallel to [slot_tag] *)
+  ; terms : t Dynarray.t (* tag-indexed: [Dynarray.get terms tag] is the interned term *)
   }
 
-let create_state () = { next_tag = 0; tbl = Node_tbl.create 1024 }
-let term_count st = Node_tbl.length st.tbl
+(* Power of two so [h land (cap - 1)] is the bucket. *)
+let initial_cap = 1024
+
+let create_state () =
+  { next_tag = 0
+  ; slot_tag = Array.make initial_cap 0
+  ; slot_hash = Array.make initial_cap 0
+  ; terms = Dynarray.create ()
+  }
+;;
+
+(* = number of distinct interned terms = [Dynarray.length st.terms]; every MISS adds one
+   term and bumps [next_tag] in lockstep. *)
+let term_count st = st.next_tag
+
+(* Double the slot arrays and reinsert, re-masking from the STORED [slot_hash] (never
+   recompute [hash_node] — same bucket math, no term re-walk). [terms] is tag-indexed and
+   untouched, so tags are stable across a grow. *)
+let grow st =
+  let old_tag = st.slot_tag
+  and old_hash = st.slot_hash in
+  let ncap = Array.length old_tag * 2 in
+  let nmask = ncap - 1 in
+  let ntag = Array.make ncap 0
+  and nhash = Array.make ncap 0 in
+  for j = 0 to Array.length old_tag - 1 do
+    let occ = old_tag.(j) in
+    if occ <> 0
+    then (
+      let h = old_hash.(j) in
+      let rec place i =
+        if ntag.(i) = 0
+        then (
+          ntag.(i) <- occ;
+          nhash.(i) <- h)
+        else place ((i + 1) land nmask)
+      in
+      place (h land nmask))
+  done;
+  st.slot_tag <- ntag;
+  st.slot_hash <- nhash
+;;
 
 let hashcons st node sort =
-  match Node_tbl.find_opt st.tbl node with
-  | Some t -> t
-  | None ->
-    let t = { node; sort; tag = st.next_tag } in
-    st.next_tag <- st.next_tag + 1;
-    Node_tbl.add st.tbl node t;
-    t
+  let h = hash_node node in
+  let mask = Array.length st.slot_tag - 1 in
+  let rec probe i =
+    let occ = st.slot_tag.(i) in
+    if occ = 0
+    then (
+      (* MISS: intern at [next_tag], mirroring the old table's insertion-order tagging. *)
+      let t = { node; sort; tag = st.next_tag } in
+      Dynarray.add_last st.terms t;
+      st.slot_tag.(i) <- st.next_tag + 1;
+      st.slot_hash.(i) <- h;
+      st.next_tag <- st.next_tag + 1;
+      (* Grow at 3/4 load: open addressing degrades sharply past ~0.7, so cap the load
+         factor and keep [cap] a power of two by doubling. Checked after the insert. *)
+      if st.next_tag * 4 > Array.length st.slot_tag * 3 then grow st;
+      t)
+    else if st.slot_hash.(i) = h && equal_node (Dynarray.get st.terms (occ - 1)).node node
+    then
+      (* HIT: cached-hash gate means [equal_node] runs only on a full-hash match. *)
+      Dynarray.get st.terms (occ - 1)
+    else probe ((i + 1) land mask)
+  in
+  probe (h land mask)
 ;;
 
 (* ------------------------------------------------------------------ *)

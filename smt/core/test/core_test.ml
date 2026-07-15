@@ -869,6 +869,65 @@ let test_debug_pipeline_red () =
     Term.Debug.check ~mode:Term.Debug.Pipeline dm)
 ;;
 
+(* SOUNDNESS RED (front-end lane round 2 — the flat open-addressing intern table). The
+   table IS term identity: it probes by [hash_node] and confirms a candidate slot with
+   [equal_node]. If that confirmation is dropped (a mutant that accepts the first slot
+   whose cached hash matches), two structurally-DISTINCT nodes that share a [hash_node]
+   alias to one tag — the worst defect class in the codebase (a wrong verdict, silently).
+   Because the hash mix is a plain function of child tags, distinct [Eq] nodes over a pool
+   of vars collide by the pigeonhole principle; interning them all, the correct table
+   keeps every distinct node a distinct term, so a hash bucket holding two DIFFERENT terms
+   exists. A mutant that skips [equal_node] aliases each colliding node to the first, so
+   no such distinct pair survives — caught below. *)
+let test_intern_hash_collision_red () =
+  print_endline "R2 whitebox: hash-colliding distinct nodes intern to distinct tags:";
+  let n = 80 in
+  let syms =
+    Array.init n (fun i ->
+      Env.declare_fun env (Printf.sprintf "collx%d" i) (Rank.create [] Sort.int))
+  in
+  let c = Context.create env in
+  let pool = Array.make n (Context.bool_const c true) in
+  for i = 0 to n - 1 do
+    pool.(i) <- Context.const c syms.(i)
+  done;
+  let by_hash : (int, Term.t) Hashtbl.t = Hashtbl.create 4096 in
+  let colliding = ref None in
+  (try
+     for i = 0 to n - 1 do
+       for j = i + 1 to n - 1 do
+         let e = Context.eq c pool.(i) pool.(j) in
+         let h = For_test.hash_node e in
+         match Hashtbl.find_opt by_hash h with
+         | Some prev when not (Term.equal prev e) ->
+           colliding := Some (prev, e);
+           raise Exit
+         | Some _ ->
+           () (* same term reached twice (shouldn't happen for distinct pairs) *)
+         | None -> Hashtbl.replace by_hash h e
+       done
+     done
+   with
+   | Exit -> ());
+  match !colliding with
+  | None ->
+    (* Under the correct table this is unreachable (collisions are dense); reaching it
+       means the equal_node gate is gone and every hash-colliding distinct node was
+       aliased. *)
+    check
+      "equal_node gate present: a hash bucket holds two DISTINCT Eq terms (mutant \
+       aliases them → none found)"
+      false
+  | Some (t1, t2) ->
+    check
+      "the colliding pair really shares hash_node"
+      (For_test.hash_node t1 = For_test.hash_node t2);
+    check "the colliding pair is structurally distinct" (not (For_test.equal_node t1 t2));
+    check
+      "hash-colliding structurally-distinct Eq nodes interned to DISTINCT tags"
+      (not (Term.equal t1 t2))
+;;
+
 (* ================================================================== *)
 let () =
   print_endline "core self-test:";
@@ -881,6 +940,7 @@ let () =
   test_hashcons_sharing ();
   test_scalar_distinctness ();
   test_bucket_primitives_whitebox ();
+  test_intern_hash_collision_red ();
   test_theory_view ();
   test_property_debug_check ();
   test_property_equal_phys ();
