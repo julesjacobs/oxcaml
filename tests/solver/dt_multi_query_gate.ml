@@ -177,6 +177,55 @@ let run_loader_overwrite_soundness_red () =
     Printf.printf "  ok   overwrite-rerank VC2: sat (correct — #54 reset landed?)\n%!"
 ;;
 
+(* DT-GUARD-ISOLATION RED (codex delta LOW rider). The soundness RED above goes through
+   the loader's [assert_all], which calls set_datatypes AND set_arrays(empty); BOTH now
+   carry the non-monotonicity guard, so the set_arrays(empty) guard alone already yields
+   unknown — removing ONLY the set_datatypes guard would still pass. This variant drives
+   the SAME role-reuse re-rank but installs the registry with set_datatypes ONLY (no
+   set_arrays call), so the set_datatypes guard is the SOLE thing standing between the
+   stale ctor_terms and the false constructor-clash. Stashing just the set_datatypes guard
+   makes THIS case wrong-unsat → the gate fails, isolating the DT guard. REQUIRED: must
+   not be unsat. *)
+let run_loader_overwrite_dt_isolated_red () =
+  Printf.printf "set_datatypes-ONLY overwrite re-rank (DT guard in isolation):\n%!";
+  let s = Session.create () in
+  let load_dt_only src =
+    Session.push s;
+    let v =
+      match Parser.parse_into (Session.env s) (Session.context s) src with
+      | exception _ -> Session.Unknown
+      | parsed ->
+        (* set_datatypes ONLY — deliberately NOT set_arrays, so no array-guard masking *)
+        Session.set_datatypes s parsed.Parser.datatypes;
+        List.iter (Session.assert_term s) parsed.Parser.assertions;
+        Session.check_sat s
+    in
+    Session.pop s;
+    v
+  in
+  ignore
+    (load_dt_only
+       "(declare-datatypes ((A 0) (B 0)) (((f (fsel B))) ((b0))))\n\
+        (declare-const x A)\n\
+        (assert (= x (f b0)))\n"
+     : Session.verdict);
+  let v2 =
+    load_dt_only
+      "(declare-datatypes ((A 0) (B 0)) (((a0) (a1)) ((mkB (f A)))))\n\
+       (declare-const b0 B)\n\
+       (assert (= (f b0) a0))\n"
+  in
+  match v2 with
+  | Session.Unsat ->
+    incr failures;
+    Printf.printf
+      "  FAIL dt-isolated VC2: WRONG unsat (set_datatypes guard not load-bearing)\n%!"
+  | Session.Unknown ->
+    Printf.printf "  ok   dt-isolated VC2: unknown (set_datatypes guard fail-closed)\n%!"
+  | Session.Sat ->
+    Printf.printf "  ok   dt-isolated VC2: sat (correct — #54 reset landed?)\n%!"
+;;
+
 (* DISJOINT-datatype loader case (info-only). Two self-contained VCs over DISJOINT
    datatypes (nat then lst — no shared/re-ranked symbol). Retained deliberately to show it
    is INSUFFICIENT as a soundness RED: with no role reuse the stale ctor_terms never
@@ -227,6 +276,7 @@ let () =
   run_multi_datatype ();
   run_none_then_dt_known_gap ();
   run_loader_overwrite_soundness_red ();
+  run_loader_overwrite_dt_isolated_red ();
   run_loader_overwrite_disjoint_info ();
   if !failures > 0
   then (
