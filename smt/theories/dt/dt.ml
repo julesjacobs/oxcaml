@@ -15,6 +15,28 @@ open Oxsmt_core
 module Euf = Oxsmt_euf.Euf
 module Defs = Datatype_defs
 
+let env_flag name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes") -> true
+  | _ -> false
+;;
+
+(* OXSMT_DT_INCR (W5 Lever B, dark, default OFF byte-identical): cache the per-check
+   datatype witness table ({!build_witnesses}) and the acyclicity ({!occurs_check}) result
+   across the redundant rebuilds a single [check] does (the fixpoint's final round, the
+   post-saturation build at [check], and every constructor-model build all recompute the
+   same table when no class changed since) and across a repeat [check] at the same state.
+   Sound-by-REBUILD (never key-remap → no #51 stale-class-key hazard,
+   [[dt-liveref-overwrite-wrong-unsat]]): the cache is DROPPED then rebuilt fresh on any
+   event that can change a constructor term's e-class — an Euf class union (detected via a
+   private merge cursor; recording MUST be enabled under this flag, the Lever-A war
+   story), a new constructor-term registration ([catalog]), or a push/pop (merge
+   retraction). A cache hit therefore means the constructor-term set AND every one's class
+   are unchanged since the build, so a rebuilt table would be identical (same insertion
+   order ⇒ identical witness selection and conflict premises), preserving
+   counted-identity. *)
+let incr_on = env_flag "OXSMT_DT_INCR"
+
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a DT-derived equality (field equality, selector
    evaluation, constructor instantiation) carries [P_derived reasons] — the trail literals
@@ -75,6 +97,17 @@ type t =
          verdict. *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
+  ; merge_cursor : Euf.merge_cursor option
+    (* W5 Lever B (OXSMT_DT_INCR): a private cursor into the engine's merge-notification
+         log, allocated (and recording enabled) only when [incr_on]. A non-empty drain
+         means an Euf union changed some class since the last build, so [witness_cache] /
+         [occurs_cache] are invalidated. [None] when the flag is off (no cursor, no cost). *)
+  ; mutable witness_cache : ((int, Term.t) Hashtbl.t * prem list option) option
+    (* Cached {!build_witnesses} result, or [None] when invalidated. Always [None] when
+         [incr_on] is false. *)
+  ; mutable occurs_cache : prem list option option
+    (* Cached {!occurs_check} result (outer option = cache validity, inner = the
+     conflict-or-none the check returns), invalidated in lockstep with [witness_cache]. *)
   }
 
 let max_iters = 1_000_000
@@ -86,6 +119,18 @@ let create ctx _env reg =
   Euf.register_term engine true_const;
   Euf.register_term engine false_const;
   Euf.assert_neq engine ~premise:P_axiom true_const false_const;
+  (* W5 Lever B: enable merge recording and register a private cursor ONLY under the flag.
+     Recording is off by default in this engine (DT does not otherwise consume the log),
+     so without this the drain would return [] forever and the cache would never
+     invalidate on a merge — the exact Lever-A war story. OFF ⇒ no cursor, recording stays
+     off, byte- identical. *)
+  let merge_cursor =
+    if incr_on
+    then (
+      Euf.set_record_merges engine true;
+      Some (Euf.add_merge_consumer engine))
+    else None
+  in
   { ctx
   ; reg
   ; engine
@@ -105,7 +150,27 @@ let create ctx _env reg =
   ; diseq_frames = [ [] ]
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
+  ; merge_cursor
+  ; witness_cache = None
+  ; occurs_cache = None
   }
+;;
+
+(* Drop the Lever-B caches (invalidate-by-rebuild). Called on every event that can change
+   a constructor term's e-class: a drained merge, a new constructor-term registration, and
+   push/pop. A no-op when the flag is off (caches stay [None]). *)
+let invalidate_incr t =
+  t.witness_cache <- None;
+  t.occurs_cache <- None
+;;
+
+(* Drain the private cursor and invalidate if any Euf union happened since the last drain.
+   Called at the single cache-read entry ([build_witnesses]); the cursor always advances
+   to the log's end, so no merge is ever missed between two builds. *)
+let sync_merges t =
+  match t.merge_cursor with
+  | Some c -> if Euf.drain_merges t.engine c <> [] then invalidate_incr t
+  | None -> ()
 ;;
 
 (* --- small helpers --- *)
@@ -177,7 +242,10 @@ let rec catalog t ~input (term : Term.t) =
     match head_args term with
     | Some (sym, args) ->
       if Defs.constructor_of_sym !(t.reg) sym <> None
-      then t.ctor_terms <- term :: t.ctor_terms
+      then (
+        t.ctor_terms <- term :: t.ctor_terms;
+        (* a new constructor term changes the witness table's domain — invalidate *)
+        if incr_on then invalidate_incr t)
       else if Defs.selector_of_sym !(t.reg) sym <> None
       then (
         t.selector_terms <- term :: t.selector_terms;
@@ -286,7 +354,7 @@ let instantiate_ctor t (c : Defs.constructor) (x : Term.t) : Term.t =
 ;;
 
 (* class-id -> canonical (tag-least) witness constructor term; [Some prems] clash. *)
-let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
+let build_witnesses_raw t : (int, Term.t) Hashtbl.t * prem list option =
   let witnesses = Hashtbl.create 64 in
   let conflict = ref None in
   List.iter
@@ -305,6 +373,26 @@ let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
            then Hashtbl.replace witnesses k cterm))
     (List.rev t.ctor_terms);
   witnesses, !conflict
+;;
+
+(* W5 Lever B cache wrapper. OFF ([incr_on] false): recompute every call, byte-identical
+   to trunk. ON: drain the merge cursor first (a union since the last build invalidates),
+   then return the cached table if still valid, else rebuild and cache. A hit is only
+   reached when no merge, no new constructor term, and no push/pop happened since the
+   build, so the rebuilt table would be identical — the returned table is READ-ONLY at
+   every call site ([Hashtbl.find_opt] only), so sharing the physical object across calls
+   is safe. *)
+let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
+  if not incr_on
+  then build_witnesses_raw t
+  else (
+    sync_merges t;
+    match t.witness_cache with
+    | Some r -> r
+    | None ->
+      let r = build_witnesses_raw t in
+      t.witness_cache <- Some r;
+      r)
 ;;
 
 let witness_of t witnesses x = Hashtbl.find_opt witnesses (Euf.class_of t.engine x)
@@ -461,7 +549,7 @@ let saturate t : prem list option =
 (* Acyclicity (occurs check): a constructor value cannot contain itself. Build the
    directed graph class -> class-of-each-DT-arg-of-its-witness and look for a cycle; a
    cycle's premises are the equalities placing each argument in the next class. *)
-let occurs_check t witnesses : prem list option =
+let occurs_check_raw t witnesses : prem list option =
   let color = Hashtbl.create 64 in
   (* class -> `Gray | `Black *)
   let parent = Hashtbl.create 64 in
@@ -520,6 +608,23 @@ let occurs_check t witnesses : prem list option =
        if Hashtbl.mem witnesses k && not (Hashtbl.mem color k) then dfs k)
     (List.rev t.ctor_terms);
   !result
+;;
+
+(* W5 Lever B cache wrapper for the acyclicity DFS. The result is a pure function of
+   [witnesses] + the current class structure, so it is valid exactly as long as
+   [witness_cache] is (both invalidated together by {!invalidate_incr}). Reached at
+   [check] right after {!build_witnesses}, which already drained the cursor, so no re-sync
+   here. OFF: recompute every call, byte-identical. *)
+let occurs_check t witnesses : prem list option =
+  if not incr_on
+  then occurs_check_raw t witnesses
+  else (
+    match t.occurs_cache with
+    | Some r -> r
+    | None ->
+      let r = occurs_check_raw t witnesses in
+      t.occurs_cache <- Some r;
+      r)
 ;;
 
 (* --- propagation reason caching (mirrors Euf_adapter) --- *)
@@ -667,11 +772,18 @@ let explain t lit =
 let push t =
   Euf.push t.engine;
   t.frames <- [] :: t.frames;
-  t.diseq_frames <- [] :: t.diseq_frames
+  t.diseq_frames <- [] :: t.diseq_frames;
+  if incr_on then invalidate_incr t
 ;;
 
 let pop t n =
   Euf.pop t.engine n;
+  (* a pop retracts merges — class reps revert, so any cached witness table / occurs
+     result is stale (the exact #51-class stale-across-pop hazard the spec flags).
+     Invalidate. The Euf pop already cleared its merge log and reset cursors, so a
+     subsequent [sync_merges] will not see the popped-frame merges — the explicit
+     invalidation here is load-bearing (RED-verified). *)
+  if incr_on then invalidate_incr t;
   let rec drop k frames =
     if k = 0
     then frames
