@@ -239,6 +239,42 @@ let subterms_sorted t =
    [Split], whose e-node registration may later be truncated by a backjump. *)
 let theory_instantiated t = t.theory <> None
 
+(* Reset-per-query theory invalidation (task #54). When {!Session} REPLACES the datatype /
+   array registry after a prior query has already instantiated + cached a theory, that
+   cached theory (and the whole SAT-var<->theory-atom bijection it registered) is stale
+   against the new registry — the #51 landmine: the session-lifetime
+   [ctor_terms]/[seen_cat] the old [Dt.t] accumulated would meet a differently-populated
+   registry and drive a false constructor-clash (the codex wrong-[unsat]). Rather than
+   fail-close to [unknown] (the #51 interim guard), DROP the entire theory instance and
+   the bijection, so the NEXT [intern] rebuilds the theory fresh from the new registry
+   ([ensure_theory]) and re-interns every term against it — no stale classification can
+   survive, because the old [Dt.t] (with its [ctor_terms]) is gone and every re-used
+   [Term.t] mints a brand-new atom.
+
+   PRECONDITION (enforced by {!Session}): called only between queries, with the SAT core
+   at decision level 0 and NO live assertions bound to the dropped bijection. {!Session}
+   raises fail-LOUD when a registry replacement is attempted with live assertions above
+   base (the contract-A ruling), so this never strands an in-flight atom. The SAT core's
+   vars/clauses from the prior (already-popped) query stay allocated but inert — their
+   frame selector is free to be false, so they are trivially satisfiable and, being absent
+   from the cleared [v2a], are ignored by [on_assign]; re-interned terms get fresh vars
+   that never collide. Keeps [alloc] / [sat] / [budget] / the shared registry refs; only
+   the per-session theory choice and the interning tables are reset. *)
+let reset_for_new_query t =
+  Vartbl.clear t.v2a;
+  Vartbl.clear t.v2term;
+  Atom.Table.clear t.a2v;
+  Term.Table.clear t.t2v;
+  Vartbl.clear t.is_split;
+  Term.Table.clear t.subterms;
+  t.theory <- None;
+  t.level <- 0;
+  t.splits <- 0;
+  t.last_model <- None;
+  t.last_dt_model <- None;
+  t.last_array_model <- None
+;;
+
 let ensure_theory t =
   match t.theory with
   | Some impl -> impl

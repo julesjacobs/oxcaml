@@ -187,7 +187,11 @@ val parse_minter : t -> Oxsmt_core.Internal_minter.t
     theory (QF_AX: read-over-write + extensionality). Must precede {!assert_term}. A
     non-empty registry also degrades any [Final]->[Sat] on the problem to [Unknown] in v1
     (sat models on arrays are not yet self-checked); UNSAT is unaffected. A no-op with an
-    empty registry. *)
+    empty registry.
+
+    RESET-PER-QUERY (task #54, contract-A): see {!set_datatypes} — replacing the array
+    registry after a prior query instantiated a theory invalidates it (fresh rebuild at
+    the next intern), and raises [Invalid_argument] if attempted with live assertions. *)
 val set_arrays : t -> Oxsmt_core.Array_defs.t -> unit
 
 (** [declare_sort]/[declare_fun]/[declare_const] declare into {!env}. They reject the
@@ -203,7 +207,20 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     testers must already be declared as ordinary symbols (via {!declare_sort}/
     {!declare_fun}); this records their datatype structure. A non-empty [defs] installs
     the DT theory (an e-graph client: EUF congruence + the datatype axioms) for this
-    session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}. *)
+    session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}.
+
+    RESET-PER-QUERY (task #54, contract-A ruling). Each query's sort/datatype declarations
+    are self-contained and PRECEDE its assertions. Calling this (or {!declare_datatype} /
+    {!set_arrays}) to mutate the datatype/array registry AFTER a prior query has already
+    instantiated a theory INVALIDATES that cached theory: it is dropped along with the
+    SAT-var<->atom bijection, and the next {!check_sat} rebuilds the theory fresh against
+    the new registry (so a re-used term re-classifies correctly — the none->DT,
+    DT->arrays, and loader-overwrite patterns all return correct verdicts rather than the
+    #51 interim [unknown]). This is sound only BETWEEN queries: mutating the registry
+    while assertions are still live (no {!pop} since the last {!check_sat}) would strand
+    in-flight atoms, so it raises [Invalid_argument] — declarations must precede
+    assertions within a query. The common single-query path (all declarations before the
+    first {!check_sat}) never triggers a reset and is byte-identical to before. *)
 val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
 
 (** [true] iff a datatype has been declared for this session ([set_datatypes] /
@@ -238,7 +255,9 @@ type ctor_decl =
     {!Oxsmt_core.Sort.datatype_} so a recursive field can reference it). Returns the built
     {!Oxsmt_core.Datatype_defs.datatype} (all minted symbols, for building terms) and adds
     it to the session registry, installing the DT theory. Must precede
-    {!assert_term}/{!check_sat}. *)
+    {!assert_term}/{!check_sat}. Adding a datatype AFTER a prior query instantiated a
+    theory invalidates the cached theory (reset-per-query, task #54 — see
+    {!set_datatypes}); doing so with live assertions raises [Invalid_argument]. *)
 val declare_datatype
   :  t
   -> Oxsmt_core.Sort.t

@@ -70,9 +70,23 @@ val create
     (at the first [intern_atom]) and cached. While [false], no theory atom has been
     interned or cataloged, so replacing the datatype/array registry is safe; once [true],
     the theory has classified terms against the current registry, so a NON-MONOTONIC
-    registry replacement must be treated as a poison (interim guard for #51/#54 — see
+    registry replacement invalidates it (see {!reset_for_new_query} and
     {!Session.set_datatypes}). *)
 val theory_instantiated : t -> bool
+
+(** [reset_for_new_query t] drops the cached theory instance and the SAT-var<->theory-atom
+    bijection (task #54, reset-per-query), so the next [intern] rebuilds the theory fresh
+    from the (just-replaced) registry and re-interns every term against it. This is the
+    correct-everywhere replacement for the #51 interim fail-closed guard: it turns the
+    none->DT / DT->arrays / loader-overwrite degrade patterns into correct verdicts
+    instead of [unknown], and dissolves the #51 stranded-[ctor_terms] wrong-[unsat]
+    landmine (the old [Dt.t] carrying those tables is discarded entirely). PRECONDITION:
+    called by {!Session} only between queries — SAT core at decision level 0, no live
+    assertions bound to the dropped bijection (Session fail-LOUDs a mid-query
+    replacement). The prior query's now-inert SAT vars/clauses stay allocated but cannot
+    affect a later solve (their frame selector is free, they are absent from the cleared
+    bijection). *)
+val reset_for_new_query : t -> unit
 
 (** Install (or, with [None], detach) the dynamic relevancy driver (task #24). When set,
     the theory-seam trail events ([on_assign]/[on_backtrack]) are also streamed to it so

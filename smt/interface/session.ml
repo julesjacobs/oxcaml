@@ -451,6 +451,52 @@ let declare_fun t name rank =
 
 let declare_const t name sort = declare_fun t name (Rank.create [] sort)
 
+(* RESET-PER-QUERY theory invalidation (task #54, contract-A ruling — the
+   correct-everywhere replacement for the #51 interim fail-closed guard). A datatype/array
+   registry mutation after a prior query has already instantiated + cached a theory means
+   the cached theory is stale for the new query (none->DT, DT->arrays, or a loader
+   overwrite that re-ranks a symbol — the #51 codex wrong-[unsat] landmine). Invalidate
+   it: drop the theory instance and the SAT-var<->atom bijection
+   ({!Cdclt.reset_for_new_query}) plus the session-side per-query interning/model state,
+   so the next [intern] rebuilds the theory fresh from the new registry and re-interns
+   every (possibly re-used) term against it — no stale classification can survive, and the
+   old [Dt.t]'s session-lifetime [ctor_terms] are discarded rather than met by a
+   differently-populated registry.
+
+   FAIL-LOUD, never a silent rebuild under live state: the reset is sound only BETWEEN
+   self-contained queries. With live assertions still active ([asserted <> []]) the cached
+   theory holds in-flight atoms bound to the bijection we would drop; resetting would
+   strand them (precisely the #51 wrong-answer path). We cannot reset mid-query, so raise
+   a documented [Invalid_argument]. The self-contained-VC pattern (declare -> assert ->
+   check -> pop) reaches here with [asserted = []] and resets cleanly; the SAT core is at
+   level 0 between queries and the prior query's now-inert vars/clauses cannot affect a
+   later solve (their frame selector is free, and they are absent from the cleared
+   bijection). *)
+let invalidate_theory_for_registry_change t =
+  (match t.asserted with
+   | [] -> ()
+   | _ :: _ ->
+     invalid_arg
+       "Session: datatype/array registry replaced with live assertions (task #54 \
+        contract-A: each query's declarations must precede its assertions; pop the prior \
+        query before redeclaring for a new one)");
+  Cdclt.reset_for_new_query t.cdclt;
+  (* Session-side per-query state that maps terms -> SAT vars or caches the last verdict:
+     cleared so a re-used term re-interns fresh and the new query starts unpoisoned.
+     Frames / [asserted] / [asserted_saved] are NOT touched — an empty pushed frame is
+     legitimate and its matching [pop] must still balance. *)
+  Term.Table.clear t.prop_to_var;
+  t.bool_consts <- [];
+  t.has_theory <- false;
+  t.has_arrays <- false;
+  t.degraded <- false;
+  t.last_model <- None;
+  t.last_verdict <- Unknown;
+  t.elim_defs <- [];
+  t.sym_sel <- None;
+  t.lemmas_registered <- false
+;;
+
 (* Install the algebraic-datatype shapes (GOALS Datatypes) the front end parsed. The
    caller has already declared the sorts/constructors/selectors/testers as ordinary
    symbols in {!env}; this records their datatype structure into the shared registry ref,
@@ -467,18 +513,16 @@ let set_datatypes t defs =
     match Oxsmt_core.Env.rank t.env sym with
     | r -> Some r
     | exception Not_found -> None);
-  (* NON-MONOTONICITY GUARD (interim, #51/#54). [set_datatypes] REPLACES the registry (it
-     is not additive like [declare_datatype]). Once the DT theory is instantiated it has
-     cataloged terms — session-lifetime [ctor_terms]/[seen_cat], NOT restored on [pop] —
-     against the OLD registry; with the by-ref read those stale classifications would be
-     matched against this new, differently-populated registry, and a re-ranked symbol
-     (e.g. a constructor now a selector, accepted by #63's same-rank write-once) could
-     drive [build_witnesses] to a FALSE constructor-clash -> wrong [unsat] (codex CRITICAL
-     on fb605dd1cc). Fail CLOSED: poison the session so subsequent solves degrade to
-     [unknown], deliberately restoring trunk's accidentally-safe behavior. The additive
-     [declare_datatype] path never trips this (it does not call [set_datatypes]); the
-     correct behaviour (reset-per-query theory rebuild) is the #54 contract. *)
-  if Cdclt.theory_instantiated t.cdclt then t.degraded <- true;
+  (* Task #54 reset-per-query. Invalidate the cached theory when this REPLACE actually
+     involves datatypes (new or currently-installed) — never on a pure-logic no-op
+     ([set_datatypes empty] on a session with no datatypes), which keeps the batched
+     pure-logic path byte-identical (the #51 interim guard wrongly degraded it too). *)
+  if
+    Cdclt.theory_instantiated t.cdclt
+    && not
+         (Oxsmt_core.Datatype_defs.is_empty defs
+          && Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+  then invalidate_theory_for_registry_change t;
   t.registry := defs
 ;;
 
@@ -500,11 +544,20 @@ let set_arrays t defs =
     match Oxsmt_core.Env.rank t.env sym with
     | r -> Some r
     | exception Not_found -> None);
-  (* Same non-monotonicity guard as [set_datatypes] (#51/#54): a registry REPLACEMENT
-     after the theory is instantiated is poisoned to [unknown]. *)
-  if Cdclt.theory_instantiated t.cdclt then t.degraded <- true;
+  (* Task #54 reset-per-query (same as [set_datatypes]): invalidate the cached theory when
+     this REPLACE actually involves arrays (new or currently-installed); a pure-logic
+     no-op ([set_arrays empty] on a session with no arrays) resets nothing and stays
+     byte-identical. [invalidate_theory_for_registry_change] clears [has_arrays]; the line
+     below re-derives it from [defs] so a non-array query following an array query is not
+     left with a stale [has_arrays]. *)
+  if
+    Cdclt.theory_instantiated t.cdclt
+    && not
+         (Oxsmt_core.Array_defs.is_empty defs
+          && Oxsmt_core.Array_defs.is_empty !(t.array_registry))
+  then invalidate_theory_for_registry_change t;
   t.array_registry := defs;
-  if not (Oxsmt_core.Array_defs.is_empty defs) then t.has_arrays <- true
+  t.has_arrays <- not (Oxsmt_core.Array_defs.is_empty defs)
 ;;
 
 (* One constructor for the programmatic {!declare_datatype} door: its name and each
@@ -553,6 +606,14 @@ let declare_datatype t sort constructors =
       constructors
   in
   let dt = { Oxsmt_core.Datatype_defs.sort_sym; constructors = ctors } in
+  (* Task #54 reset-per-query. The additive door also invalidates a stale cached theory:
+     adding the FIRST datatype after a pure-logic query instantiated the combined theory
+     (none->DT), or a further datatype after the DT theory was cached (the #51 accumulate
+     pattern), leaves the cached theory unable to serve the new query. A fresh reset
+     re-picks the DT theory against the grown registry at the next intern. Only fires once
+     a theory is instantiated (i.e. between queries — a single query declares before its
+     first [check_sat], so this is inert there and single-query behavior is unchanged). *)
+  if Cdclt.theory_instantiated t.cdclt then invalidate_theory_for_registry_change t;
   t.registry := Oxsmt_core.Datatype_defs.add !(t.registry) dt;
   dt
 ;;

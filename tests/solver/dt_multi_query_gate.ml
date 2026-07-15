@@ -80,14 +80,15 @@ let run_multi_datatype () =
   expect "nat-VC-again (after 2nd datatype, was RED)" (nat_vc "y") Session.Sat
 ;;
 
-(* KNOWN GAP (task #54, OUT of scope here): theory-CHOICE staleness. When the FIRST solve
-   has no datatype (the combined EUF/LIA theory is cached), a datatype declared for a
-   later VC cannot be handled by the already-chosen theory. This is the
-   arguably-most-common product pattern (early VCs pure logic, datatypes later) and needs
-   a lifecycle/rebuild charter, not this rider. Documented here as EXPECTED-degrade so the
-   gap is visible in-tree; NOT counted as a failure. *)
-let run_none_then_dt_known_gap () =
-  Printf.printf "none-then-DT (task #54, EXPECTED gap, not a failure):\n%!";
+(* THEORY-CHOICE staleness (task #54, NOW FIXED — was an EXPECTED-degrade under #51). When
+   the FIRST solve has no datatype (the combined EUF/LIA theory is cached), a datatype
+   declared for a later VC could not be handled by the already-chosen theory — the
+   arguably-most-common product pattern (early VCs pure logic, datatypes later). #54's
+   reset-per-query invalidation drops the stale combined theory when the later
+   [declare_datatype] mutates the registry, so the next intern rebuilds the DT theory. NOW
+   REQUIRED sat (two distinct nat values are satisfiable). *)
+let run_none_then_dt () =
+  Printf.printf "none-then-DT (task #54 reset-per-query, was EXPECTED-degrade):\n%!";
   let s = Session.create () in
   let ctx = Session.context s in
   (* first solve: an Int (LIA) atom, no datatype -> the COMBINED theory is instantiated
@@ -116,13 +117,7 @@ let run_none_then_dt_known_gap () =
   Session.assert_term s (Context.not_ ctx (Context.eq ctx x y));
   let v = Session.check_sat s in
   Session.pop s;
-  let vstr =
-    match v with
-    | Session.Sat -> "sat"
-    | Session.Unsat -> "unsat"
-    | Session.Unknown -> "unknown (known gap #54)"
-  in
-  Printf.printf "  info dt-after-pure-logic-VC: %s\n%!" vstr
+  expect "dt-after-pure-logic-VC" v Session.Sat
 ;;
 
 (* SOUNDNESS RED (codex CRITICAL on fb605dd1cc). The SMT-LIB LOADER path:
@@ -226,15 +221,14 @@ let run_loader_overwrite_dt_isolated_red () =
     Printf.printf "  ok   dt-isolated VC2: sat (correct — #54 reset landed?)\n%!"
 ;;
 
-(* DISJOINT-datatype loader case (info-only). Two self-contained VCs over DISJOINT
-   datatypes (nat then lst — no shared/re-ranked symbol). Retained deliberately to show it
-   is INSUFFICIENT as a soundness RED: with no role reuse the stale ctor_terms never
-   collide with a new-registry constructor, so even WITHOUT the guard this degrades to
-   unknown (never wrong-unsat) — a disjoint scenario MASKS the codex/fable CRITICAL. The
-   role-reuse RED above is what discriminates. Both live in the gate so the distinction is
-   visible in-tree. *)
-let run_loader_overwrite_disjoint_info () =
-  Printf.printf "loader/overwrite DISJOINT datatypes (info-only, masks role reuse):\n%!";
+(* DISJOINT-datatype loader case (task #54, NOW REQUIRED sat — was info-only under #51).
+   Two self-contained VCs over DISJOINT datatypes (nat then lst — no shared/re-ranked
+   symbol). Under #51 this degraded to unknown regardless of the guard (no role reuse to
+   clash), so it was kept info-only to show it could not serve as the soundness RED. Under
+   #54's reset-per-query the second overwrite rebuilds the DT theory against [{lst}], so
+   VC2 (a <> b over lst) is correctly SAT. *)
+let run_loader_overwrite_disjoint () =
+  Printf.printf "loader/overwrite DISJOINT datatypes (task #54 reset-per-query):\n%!";
   let s = Session.create () in
   let load_check src =
     Session.push s;
@@ -262,22 +256,63 @@ let run_loader_overwrite_disjoint_info () =
        (declare-const b lst)\n\
        (assert (not (= a b)))\n"
   in
-  let vstr = function
-    | Session.Sat -> "sat"
-    | Session.Unsat -> "unsat"
-    | Session.Unknown -> "unknown"
-  in
+  expect "disjoint VC2 (lst a<>b)" v2 Session.Sat
+;;
+
+(* FAIL-LOUD RED (task #54 contract-A). A registry replacement is sound only BETWEEN
+   self-contained queries. If the caller declares a NEW datatype while the prior query's
+   assertions are STILL LIVE (no [pop] between the check_sat and the redeclare), a reset
+   would strand in-flight atoms bound to the dropped bijection — the #51 wrong-answer
+   path. The contract-A ruling is to fail LOUD (documented [Invalid_argument]) rather than
+   reset under live state or silently rebuild. REQUIRED: [set_datatypes] with live
+   assertions + an instantiated theory RAISES. (Discriminates the guard: the pre-check
+   [asserted <> []] arm is the sole thing turning this into a raise rather than a wrong
+   reset.) *)
+let run_registry_replace_live_assertions_raises () =
   Printf.printf
-    "  info disjoint VC2: %s (would be unknown even unguarded — no clash)\n%!"
-    (vstr v2)
+    "fail-loud: registry replace with live assertions raises (contract-A):\n%!";
+  let s = Session.create () in
+  let load src =
+    match Parser.parse_into (Session.env s) (Session.context s) src with
+    | exception _ -> ()
+    | parsed ->
+      Session.set_datatypes s parsed.Parser.datatypes;
+      List.iter (Session.assert_term s) parsed.Parser.assertions
+  in
+  (* VC1 at BASE (no push), asserted, checked -> theory instantiated AND [asserted <> []]. *)
+  load
+    "(declare-datatypes ((A 0) (B 0)) (((f (fsel B))) ((b0))))\n\
+     (declare-const x A)\n\
+     (assert (= x (f b0)))\n";
+  ignore (Session.check_sat s : Session.verdict);
+  (* Now REPLACE the registry with live VC1 assertions still active (no pop): must raise. *)
+  match
+    Session.set_datatypes
+      s
+      (match
+         Parser.parse_into
+           (Session.env s)
+           (Session.context s)
+           "(declare-datatypes ((A 0) (B 0)) (((a0) (a1)) ((mkB (f A)))))\n"
+       with
+       | parsed -> parsed.Parser.datatypes
+       | exception _ -> Defs.empty)
+  with
+  | () ->
+    incr failures;
+    Printf.printf
+      "  FAIL live-assertion replace: returned (expected Invalid_argument)\n%!"
+  | exception Invalid_argument _ ->
+    Printf.printf "  ok   live-assertion replace: raised Invalid_argument (fail-loud)\n%!"
 ;;
 
 let () =
   run_multi_datatype ();
-  run_none_then_dt_known_gap ();
+  run_none_then_dt ();
   run_loader_overwrite_soundness_red ();
   run_loader_overwrite_dt_isolated_red ();
-  run_loader_overwrite_disjoint_info ();
+  run_loader_overwrite_disjoint ();
+  run_registry_replace_live_assertions_raises ();
   if !failures > 0
   then (
     Printf.printf "dt-multi-query gate: %d failure(s)\n%!" !failures;

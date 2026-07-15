@@ -892,3 +892,63 @@ untouched. Soundness of the E3 route is gated by the checker's existing `refutes
 leg per ADR-0007 + fable leg. Acceptance: cert-corpus-gate 33/33 VALID with `OXSMT_BASE_L0=1`
 AND 33/33 with it off; full gate suite green in BOTH flag states; the bogus-theory-conflict
 RED rejected; the raw-Sat gate-pin (OFF=E2 / ON=E3) green.
+### A15 — Reset-per-query theory invalidation (task #54, contract-A) (2026-07-15)
+
+(A14 is reserved by the in-flight #53 lane — the `sat.mli` `emit_level0_unit_decls`
+unfreeze; this addendum takes A15 to avoid the collision. If #53 does not land first, the
+master renumbers whichever lands second.)
+
+**Not a frozen-interface change** (`smt/interface/{session,cdclt}.mli` are theory-facing,
+not among the 14 hash-frozen core signatures; `check-frozen` stays 14/14). Additive to the
+session lifecycle; the single-query / corpus path is byte-identical (verified: full 8700
+QF_DT 0-flip + 62/62 cross-logic).
+
+**Problem.** The combined/standalone theory is chosen lazily at the first theory-atom
+intern (`Cdclt.ensure_theory`) and cached in `Cdclt.t.theory` for the session's lifetime;
+it is never reset when the datatype/array registry is REPLACED for a later query. A batched
+refinement-type VC workload reuses ONE Session (each VC declares its own datatypes, checked
+under push/pop). Three degrade patterns resulted: (1) loader overwrite — each VC's
+`set_datatypes` replaces the registry; (2) none→DT — an early pure-logic VC caches the
+EUF+LIA stack, a later VC declares a datatype it cannot serve; (3) DT→arrays. The #51
+interim guard fail-CLOSED all three to `unknown` (and, before it, the by-ref read produced a
+wrong `unsat` when a re-used symbol changed datatype role — the session-lifetime
+`ctor_terms`/`seen_cat` of the cached `Dt.t` met a differently-populated registry).
+
+**Fix.** On a registry mutation (`set_datatypes` / `set_arrays` / `declare_datatype`) after
+a theory is already instantiated, and only when the mutation actually involves datatypes /
+arrays (a pure-logic `set_datatypes empty` is a no-op — the batched pure-logic path stays
+byte-identical), INVALIDATE the cached theory: `Cdclt.reset_for_new_query` drops the theory
+instance and clears the SAT-var↔theory-atom bijection (`t2v`/`v2a`/`v2term`/`a2v`/`is_split`/
+`subterms`); `Session` clears its per-query term→var maps (`prop_to_var`, `bool_consts`) and
+last-verdict/model/poison state. The next intern rebuilds the theory fresh from the new
+registry and re-interns every (possibly re-used) term against it — so no stale
+classification can survive, and the discarded `Dt.t`'s `ctor_terms` dissolve the #51
+wrong-`unsat` landmine.
+
+**What survives a reset, and why it is sound.** The `Env` (symbol declarations), `Context`
+(hash-consing), the shared registry refs, the `Sat.t` core, the atom allocator, and the
+effort budget survive. The prior (already-popped) query's SAT vars/clauses stay allocated
+but INERT: their frame selector is free to be false (trivially satisfiable), and they are
+absent from the cleared bijection so `on_assign` ignores them; re-interned terms mint fresh
+vars that never collide. `sat.mli` is frozen and offers no clause-drop primitive, so the
+core is not recreated — the inert-clause accumulation is identical to the pre-existing
+selector-based push/pop frame model (no new leak).
+
+**Fail-LOUD above base (the contract).** Resetting is sound only BETWEEN self-contained
+queries: with live assertions active (`asserted <> []`, i.e. no `pop` since the last
+`check_sat`) the cached theory holds in-flight atoms bound to the bijection that would be
+dropped — resetting would strand them (the #51 wrong-answer path). So a registry replacement
+attempted with live assertions raises a documented `Invalid_argument` rather than silently
+resetting under live state or silently rebuilding. The self-contained-VC pattern (declare →
+assert → check → pop) always reaches the reset with `asserted = []`.
+
+**Removes** the #51 interim non-monotonicity guard (`session.ml` `set_datatypes`/`set_arrays`
+`if Cdclt.theory_instantiated → degraded`), replacing fail-closed-to-`unknown` with the
+correct verdict at base + fail-loud above base.
+
+**Acceptance.** `tests/solver/dt_multi_query_gate.ml`: none→DT, loader overwrite-rerank (the
+codex/fable CRITICAL, kept spec'd "must-not-be-unsat" as a world-independent standing gate),
+DT-guard-isolated overwrite, and disjoint overwrite all now REQUIRED-green (sat); a new
+fail-loud RED asserts the live-assertion replacement raises. Discrimination: neutering the
+reset reproduces all five failures (two wrong-`unsat`, two `unknown`, one missing raise).
+`make test` / `check-frozen` (14/14) / `dt-sat-gate` / `dt_test` EXIT 0.
