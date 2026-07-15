@@ -16,6 +16,26 @@ type result =
   ; defs : def list
   }
 
+(* Hash-consing makes tag equality physical identity, so a rewrite that returns children
+   unchanged returns the identical node. *)
+let same_tag (a : Term.t) (b : Term.t) = a.Term.tag = b.Term.tag
+
+(* Map [f] left-to-right; return [None] when every result is the identical node as its
+   input, so the caller can reuse its original hash-consed node instead of rebuilding it
+   (which would only re-derive the same node). *)
+let map_changed f xs =
+  let changed = ref false in
+  let ys =
+    List.map
+      (fun x ->
+         let y = f x in
+         if not (same_tag x y) then changed := true;
+         y)
+      xs
+  in
+  if !changed then Some ys else None
+;;
+
 (* Flatten a root [And] into its top-level conjuncts, descending NO further (constraint 1:
    an [Eq] under [Or]/[Ite]/[Not] — or under a nested non-[And] node — is never a
    top-level conjunct). A nested root [And] is flattened recursively; anything else is a
@@ -126,36 +146,48 @@ let candidate (c : Term.t) =
   | _ -> None
 ;;
 
-(* The set of variables reachable from [t] by following the current substitution [sigma]
-   (the transitive closure of the alias graph rooted at [t]'s variables). Adding [x ↦ t]
-   would close a cycle exactly when [x] is in this set; such an alias is rejected (kept as
-   an ordinary constraint) so [sigma] stays acyclic. *)
-let reachable sigma (t : Term.t) =
-  let acc = ref Term.Set.empty in
+(* Is [target] reachable from [t] by following the current substitution [sigma] (the
+   transitive closure of the alias graph rooted at [t]'s variables)? Adding [target ↦ t]
+   would close a cycle exactly when this holds; such an alias is rejected (kept as an
+   ordinary constraint) so [sigma] stays acyclic.
+
+   The old form built and returned the whole reachable [Term.Set] and the caller tested
+   one membership; this returns the boolean directly with an early exit, and takes a
+   caller- owned [visited] table (cleared here) so the per-candidate scan allocates no set
+   and uses O(1) monomorphic tag membership instead of the closure-dispatched [Term.Set].
+   Result is the identical boolean the old [Term.Set.mem target (reachable sigma t)]
+   produced. *)
+let reaches visited sigma ~target (t : Term.t) =
+  Term.Table.clear visited;
+  let found = ref false in
   let rec go (u : Term.t) =
-    match u.node with
-    | App (_, args) when Iarr.length args = 0 ->
-      if not (Term.Set.mem u !acc)
-      then (
-        acc := Term.Set.add u !acc;
-        match Term.Map.find_opt u sigma with
-        | Some rhs -> go rhs
-        | None -> ())
-    | App (_, args) -> Iarr.iter go args
-    | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
-    | Le a | Not a -> go a
-    | Eq (a, b) ->
-      go a;
-      go b
-    | And xs | Or xs -> Iarr.iter go xs
-    | Ite (c, a, b) ->
-      go c;
-      go a;
-      go b
-    | Bool_const _ | Int_const _ -> ()
+    if not !found
+    then (
+      match u.node with
+      | App (_, args) when Iarr.length args = 0 ->
+        if Term.equal u target
+        then found := true
+        else if not (Term.Table.mem visited u)
+        then (
+          Term.Table.replace visited u ();
+          match Term.Map.find_opt u sigma with
+          | Some rhs -> go rhs
+          | None -> ())
+      | App (_, args) -> Iarr.iter go args
+      | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+      | Le a | Not a -> go a
+      | Eq (a, b) ->
+        go a;
+        go b
+      | And xs | Or xs -> Iarr.iter go xs
+      | Ite (c, a, b) ->
+        go c;
+        go a;
+        go b
+      | Bool_const _ | Int_const _ -> ())
   in
   go t;
-  !acc
+  !found
 ;;
 
 let name_of (x : Term.t) =
@@ -328,6 +360,8 @@ let run ctx assertions =
      (constraint 3), whose RHS is UF-free, and which introduces no cycle. *)
   let sigma = ref Term.Map.empty in
   let order = ref [] in
+  (* Reused across every candidate's cycle probe (cleared per call by [reaches]). *)
+  let reach_visited = Term.Table.create 256 in
   let tagged =
     List.map
       (fun c ->
@@ -336,7 +370,7 @@ let run ctx assertions =
            when (not (Term.Map.mem x !sigma))
                 && (not (Term.Set.mem x uf_vars))
                 && uf_free t
-                && not (Term.Set.mem x (reachable !sigma t)) ->
+                && not (reaches reach_visited !sigma ~target:x t) ->
            sigma := Term.Map.add x t !sigma;
            order := x :: !order;
            `Def
@@ -367,24 +401,56 @@ let run ctx assertions =
         Term.Table.add memo t r;
         r
     and rebuild (t : Term.t) =
+      (* Every arm reuses [t] when substitution changed nothing beneath it: [subst] on an
+         unaliased subtree re-derives the identical hash-consed node, so returning [t]
+         directly is byte-identical and skips a reconstruction (list/array alloc +
+         hash-cons lookup). Prunes the rebuild to only the paths that actually mention an
+         alias. *)
       match t.node with
-      | Bool_const b -> Context.bool_const ctx b
-      | Int_const n -> Context.int_const_big ctx n
+      | Bool_const _ | Int_const _ -> t
       | App (sym, args) ->
         if Iarr.length args = 0
         then t (* a surviving variable — unchanged (preserves hash-cons identity) *)
-        else Context.app ctx sym (List.map subst (Iarr.to_list args))
+        else (
+          match map_changed subst (Iarr.to_list args) with
+          | None -> t
+          | Some args' -> Context.app ctx sym args')
       | Arith lin ->
-        Context.linear_combination_big
-          ctx
-          (List.map (fun (tm, co) -> co, subst tm) (Iarr.to_list lin.coeffs))
-          lin.const
-      | Le a -> Context.le ctx (subst a) (Context.int_const ctx 0)
-      | Eq (a, b) -> Context.eq ctx (subst a) (subst b)
-      | Not a -> Context.not_ ctx (subst a)
-      | And xs -> Context.and_ ctx (List.map subst (Iarr.to_list xs))
-      | Or xs -> Context.or_ ctx (List.map subst (Iarr.to_list xs))
-      | Ite (c, a, b) -> Context.ite ctx (subst c) (subst a) (subst b)
+        let changed = ref false in
+        let coeffs' =
+          List.map
+            (fun (tm, co) ->
+               let tm' = subst tm in
+               if not (same_tag tm tm') then changed := true;
+               co, tm')
+            (Iarr.to_list lin.coeffs)
+        in
+        if !changed then Context.linear_combination_big ctx coeffs' lin.const else t
+      | Le a ->
+        let a' = subst a in
+        if same_tag a a' then t else Context.le ctx a' (Context.int_const ctx 0)
+      | Eq (a, b) ->
+        let a' = subst a in
+        let b' = subst b in
+        if same_tag a a' && same_tag b b' then t else Context.eq ctx a' b'
+      | Not a ->
+        let a' = subst a in
+        if same_tag a a' then t else Context.not_ ctx a'
+      | And xs ->
+        (match map_changed subst (Iarr.to_list xs) with
+         | None -> t
+         | Some xs' -> Context.and_ ctx xs')
+      | Or xs ->
+        (match map_changed subst (Iarr.to_list xs) with
+         | None -> t
+         | Some xs' -> Context.or_ ctx xs')
+      | Ite (c, a, b) ->
+        let c' = subst c in
+        let a' = subst a in
+        let b' = subst b in
+        if same_tag c c' && same_tag a a' && same_tag b b'
+        then t
+        else Context.ite ctx c' a' b'
     in
     let reduced =
       List.filter_map

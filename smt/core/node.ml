@@ -83,23 +83,31 @@ let equal_node (a : node) (b : node) =
     , _ ) -> false
 ;;
 
+(* Monomorphic int mixing (31-based, matching [Iarr.hash_fold] above): allocation-free and
+   avoids the polymorphic [Hashtbl.hash] (caml_hash) that dominated the hash-cons profile
+   on large inputs. Only the bucket choice depends on this; [equal_node] decides identity,
+   so the sole invariant is [equal_node a b => hash_node a = hash_node b], which holds
+   because the hash is a pure function of the same value parts [equal_node] compares (the
+   constructor's discriminant seed, every child [tag], and every scalar payload). *)
+let mix acc x = (acc * 31) + x
+
 let hash_node (n : node) : int =
-  let tags acc xs = Iarr.hash_fold (fun acc x -> (acc * 31) + x.tag) acc xs in
+  let tags acc xs = Iarr.hash_fold (fun acc x -> mix acc x.tag) acc xs in
   match n with
-  | Bool_const b -> Hashtbl.hash (0, b)
-  | Int_const k -> Hashtbl.hash (1, Bigint.hash k)
-  | App (s, xs) -> tags (Hashtbl.hash (2, Symbol.hash s)) xs
+  | Bool_const b -> mix 0 (Bool.to_int b)
+  | Int_const k -> mix 1 (Bigint.hash k)
+  | App (s, xs) -> tags (mix 2 (Symbol.hash s)) xs
   | Arith l ->
     Iarr.hash_fold
-      (fun acc (t, c) -> (((acc * 31) + t.tag) * 31) + Bigint.hash c)
-      (Hashtbl.hash (3, Bigint.hash l.const))
+      (fun acc (t, c) -> mix (mix acc t.tag) (Bigint.hash c))
+      (mix 3 (Bigint.hash l.const))
       l.coeffs
-  | Le a -> Hashtbl.hash (4, a.tag)
-  | Eq (a, b) -> Hashtbl.hash (5, a.tag, b.tag)
-  | Not a -> Hashtbl.hash (6, a.tag)
-  | And xs -> tags (Hashtbl.hash 7) xs
-  | Or xs -> tags (Hashtbl.hash 8) xs
-  | Ite (a, b, c) -> Hashtbl.hash (9, a.tag, b.tag, c.tag)
+  | Le a -> mix 4 a.tag
+  | Eq (a, b) -> mix (mix 5 a.tag) b.tag
+  | Not a -> mix 6 a.tag
+  | And xs -> tags 7 xs
+  | Or xs -> tags 8 xs
+  | Ite (a, b, c) -> mix (mix (mix 9 a.tag) b.tag) c.tag
 ;;
 
 module Node_tbl = Hashtbl.Make (struct

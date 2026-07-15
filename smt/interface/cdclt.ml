@@ -139,6 +139,17 @@ type sort_card =
    from an unfinished search). Caught at the {!Session} boundary. *)
 exception Split_budget_exceeded
 
+(* Monomorphic [Sat.var]-keyed table ([Sat.var = int]): avoids the polymorphic
+   [caml_hash]/[compare_val] the default [Hashtbl] runs on every intern-path lookup. None
+   of the tables below ([v2a]/[v2term]/[is_split]) is ever iterated, so bucket layout is
+   not observable. *)
+module Vartbl = Hashtbl.Make (struct
+    type t = int
+
+    let equal = Int.equal
+    let hash (x : int) = x
+  end)
+
 type t =
   { mutable theory : theory_impl option
     (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
@@ -156,13 +167,12 @@ type t =
          problem. Checked before [registry] in [ensure_theory]. *)
   ; sat : Sat.t
   ; alloc : Atom.allocator
-  ; v2a : (Sat.var, Atom.t) Hashtbl.t (* SAT var -> theory atom (theory atoms only) *)
-  ; v2term : (Sat.var, Term.t) Hashtbl.t (* SAT var -> its atom term *)
+  ; v2a : Atom.t Vartbl.t (* SAT var -> theory atom (theory atoms only) *)
+  ; v2term : Term.t Vartbl.t (* SAT var -> its atom term *)
   ; a2v : Sat.var Atom.Table.t (* theory atom -> SAT var *)
   ; t2v : Sat.var Term.Table.t (* atom term -> SAT var (hash-cons sharing) *)
-  ; is_split :
-      (Sat.var, unit) Hashtbl.t (* atoms minted from a Split (need re-register) *)
-  ; mutable subterms : Term.Set.t (* every subterm of a registered atom, for the model *)
+  ; is_split : unit Vartbl.t (* atoms minted from a Split (need re-register) *)
+  ; subterms : unit Term.Table.t (* every subterm of a registered atom, for the model *)
   ; mutable level : int (* theory frames pushed above the base (= SAT decision level) *)
   ; split_budget : int
   ; mutable splits : int (* splits emitted in the current check-sat *)
@@ -194,11 +204,14 @@ let satlit_of_lit t (lit : Lit.t) =
   if Lit.sign lit then Sat.pos v else Sat.neg v
 ;;
 
-(* Collect [term] and every subterm (all sorts), for reconstructing the model. *)
+(* Collect [term] and every subterm (all sorts), for reconstructing the model. Membership
+   is a monotonic imperative table keyed on [Term] tag (O(1), monomorphic) rather than a
+   balanced [Term.Set] whose per-op closure-dispatched compare dominated the intern path;
+   [subterms_sorted] recovers the old tag-ascending [Set.elements] order at model time. *)
 let rec collect t (term : Term.t) =
-  if not (Term.Set.mem term t.subterms)
+  if not (Term.Table.mem t.subterms term)
   then (
-    t.subterms <- Term.Set.add term t.subterms;
+    Term.Table.replace t.subterms term ();
     match term.Term.node with
     | Term.Bool_const _ | Term.Int_const _ -> ()
     | Term.App (_, args) -> Iarr.iter (collect t) args
@@ -212,6 +225,13 @@ let rec collect t (term : Term.t) =
       collect t a;
       collect t b;
       collect t c)
+;;
+
+(* The collected subterms in tag-ascending order — identical to the old
+   [Term.Set.elements t.subterms], so every downstream model-extraction order is preserved
+   (I6). [Term.compare] is [Int.compare] on the tag. *)
+let subterms_sorted t =
+  List.sort Term.compare (Term.Table.fold (fun k () acc -> k :: acc) t.subterms [])
 ;;
 
 (* Get-or-create the SAT var for a theory-atom [term], registering it with the combined
@@ -240,10 +260,10 @@ let intern t ~split term =
     let v = Sat.new_var t.sat in
     let a = Atom.fresh t.alloc in
     Term.Table.replace t.t2v term v;
-    Hashtbl.replace t.v2a v a;
-    Hashtbl.replace t.v2term v term;
+    Vartbl.replace t.v2a v a;
+    Vartbl.replace t.v2term v term;
     Atom.Table.replace t.a2v a v;
-    if split then Hashtbl.replace t.is_split v ();
+    if split then Vartbl.replace t.is_split v ();
     collect t term;
     th_register impl a term;
     v
@@ -269,13 +289,13 @@ let intern_atom t term = intern t ~split:false term
    clause, and [on_assign] then asserts it to EUF. Idempotent: a no-op if [term] is
    already a theory atom or [v] already owns one. *)
 let bind_bool_var_atom t term v =
-  if (not (Term.Table.mem t.t2v term)) && not (Hashtbl.mem t.v2a v)
+  if (not (Term.Table.mem t.t2v term)) && not (Vartbl.mem t.v2a v)
   then (
     let impl = ensure_theory t in
     let a = Atom.fresh t.alloc in
     Term.Table.replace t.t2v term v;
-    Hashtbl.replace t.v2a v a;
-    Hashtbl.replace t.v2term v term;
+    Vartbl.replace t.v2a v a;
+    Vartbl.replace t.v2term v term;
     Atom.Table.replace t.a2v a v;
     collect t term;
     th_register impl a term)
@@ -310,13 +330,13 @@ let on_assign t l =
        ~level:(Sat.decision_level t.sat));
   sync_level t;
   let v = Sat.var_of_lit l in
-  match Hashtbl.find_opt t.v2a v with
+  match Vartbl.find_opt t.v2a v with
   | None -> () (* an aux / selector / boolean-variable literal: not a theory atom *)
   | Some a ->
     let impl = ensure_theory t in
     (* a Split-minted atom's e-nodes may have been truncated by a pop; re-register
        (idempotent) so the child engines hold it before we assert. *)
-    if Hashtbl.mem t.is_split v then th_register impl a (Hashtbl.find t.v2term v);
+    if Vartbl.mem t.is_split v then th_register impl a (Vartbl.find t.v2term v);
     th_assert impl (Lit.make a (sign_lit l))
 ;;
 
@@ -394,7 +414,7 @@ let check t ~final =
 ;;
 
 let explain t l =
-  let a = Hashtbl.find t.v2a (Sat.var_of_lit l) in
+  let a = Vartbl.find t.v2a (Sat.var_of_lit l) in
   let impl = ensure_theory t in
   let e = th_explain impl (Lit.make a (sign_lit l)) in
   List.map (satlit_of_lit t) e.Explanation.premises
@@ -414,12 +434,12 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; array_registry
     ; sat
     ; alloc = Atom.create_allocator ()
-    ; v2a = Hashtbl.create 256
-    ; v2term = Hashtbl.create 256
+    ; v2a = Vartbl.create 256
+    ; v2term = Vartbl.create 256
     ; a2v = Atom.Table.create 256
     ; t2v = Term.Table.create 256
-    ; is_split = Hashtbl.create 16
-    ; subterms = Term.Set.empty
+    ; is_split = Vartbl.create 16
+    ; subterms = Term.Table.create 256
     ; level = 0
     ; split_budget
     ; splits = 0
@@ -477,7 +497,7 @@ let model_bindings t =
     let exception Needs_table in
     (try
        let bindings =
-         Term.Set.elements t.subterms
+         subterms_sorted t
          |> List.filter_map (fun (term : Term.t) ->
            match term.Term.node with
            | Term.App (sym, args) when Iarr.length args = 0 ->
@@ -543,7 +563,7 @@ let model t =
   | Some m ->
     let exception Degrade in
     (try
-       let terms = Term.Set.elements t.subterms in
+       let terms = subterms_sorted t in
        (* pass 1: per uninterpreted sort, gather distinct class ids -> dense 0-based index *)
        let sort_ids : (string, int list) Hashtbl.t = Hashtbl.create 16 in
        List.iter

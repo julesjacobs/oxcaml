@@ -47,8 +47,14 @@ exception Reserved_symbol of string
    the id is never observable (not in terms, models, or cache keys), so I6 is unaffected. *)
 type reserved_cap = int
 
+(* Monomorphic symbol-keyed table: [Symbol.t] is an int, so this avoids the polymorphic
+   [caml_hash]/[compare_val] the default [Hashtbl] would run on every [rank] lookup (hit
+   per App/const during term construction). Never iterated in an order-observable way
+   (I6), so bucket layout is not observable. *)
+module Symtbl = Hashtbl.Make (Symbol)
+
 type t =
-  { ranks : (Symbol.t, Rank.t) Hashtbl.t
+  { ranks : Rank.t Symtbl.t
   ; div_sym : Symbol.t
   ; mod_sym : Symbol.t
   ; id : int
@@ -63,12 +69,12 @@ let fresh_id () =
 ;;
 
 let create_with_cap () =
-  let ranks = Hashtbl.create 64 in
+  let ranks = Symtbl.create 64 in
   let div_sym = Symbol.intern div_name in
   let mod_sym = Symbol.intern mod_name in
   let int_int_int = Rank.create [ Sort.int; Sort.int ] Sort.int in
-  Hashtbl.replace ranks div_sym int_int_int;
-  Hashtbl.replace ranks mod_sym int_int_int;
+  Symtbl.replace ranks div_sym int_int_int;
+  Symtbl.replace ranks mod_sym int_int_int;
   let id = fresh_id () in
   { ranks; div_sym; mod_sym; id }, id
 ;;
@@ -105,14 +111,14 @@ let declare_reserved cap t name rank =
      theory would then apply read-over-write to a sort-mismatched term. This makes the
      rank a fact the consuming side can trust for the whole session, not just at
      validation time. *)
-  (match Hashtbl.find_opt t.ranks sym with
+  (match Symtbl.find_opt t.ranks sym with
    | Some existing when not (same_rank existing rank) ->
      invalid_arg
        (Printf.sprintf
           "Env.declare_reserved: %s already declared with a different rank (reserved \
            ranks are write-once)"
           name)
-   | _ -> Hashtbl.replace t.ranks sym rank);
+   | _ -> Symtbl.replace t.ranks sym rank);
   sym
 ;;
 
@@ -137,17 +143,17 @@ let declare_fun t name rank =
      rank write-once keeps it a fact every consumer can trust for the whole session, not
      just at declaration time. (The SMT-LIB parser already rejects redeclaration at its
      own namespace layer; this closes the direct [Env]/[Session] API path.) *)
-  (match Hashtbl.find_opt t.ranks sym with
+  (match Symtbl.find_opt t.ranks sym with
    | Some existing when not (same_rank existing rank) ->
      invalid_arg
        (Printf.sprintf
           "Env.declare_fun: %s already declared with a different rank (declared ranks \
            are write-once)"
           name)
-   | _ -> Hashtbl.replace t.ranks sym rank);
+   | _ -> Symtbl.replace t.ranks sym rank);
   sym
 ;;
 
-let rank t sym = Hashtbl.find t.ranks sym
+let rank t sym = Symtbl.find t.ranks sym
 let div_sym t = t.div_sym
 let mod_sym t = t.mod_sym
