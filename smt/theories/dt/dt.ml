@@ -1039,10 +1039,12 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
                   the shared [next_idx] up) whose tree avoids them all. Bounded — on
                   exhaustion take the base and let the §8 checker fail closed ([unknown],
                   never wrong). On a recursive sort [distinct_base] yields distinct-length
-                  spines, so a finite forbidden set is always avoidable; a
-                  non-self-recursive sort (e.g. a mutually-recursive [tree] with no direct
-                  self field) yields one value, so a forced-distinct peer there degrades
-                  to [unknown]. *)
+                  spines, so a finite forbidden set is always avoidable; a MUTUALLY
+                  recursive sort with no direct self field (e.g. [tree] recurring only via
+                  [list]) is spined through the intermediate sort, so it too yields
+                  unboundedly many distinct values. A sort with no self-recursion at all
+                  (finite domain) can still exhaust its values — a forced-distinct peer
+                  beyond the domain then degrades to [unknown]. *)
                let fbd =
                  match Hashtbl.find_opt dis k with
                  | None -> []
@@ -1161,7 +1163,52 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
             in
             tick ();
             Ctor (Symbol.name c.Defs.sym, fields)
-          | None -> base_tree dt depth))
+          | None ->
+            (* No constructor has a DIRECT field of this sort, but the sort may still be
+               MUTUALLY recursive — reachable back to itself through ANOTHER datatype
+               (e.g. [tree = node(children:list) | leaf(data:nat)], where [tree] recurs
+               only via [list]). Spine through the first datatype-sorted field of the
+               first constructor that has one, recursing on THAT field's sort with the
+               same [idx]. Distinct [idx] then give distinct field values (when the
+               intermediate sort is productive) hence distinct trees; [idx = 0] already
+               took the [base_tree] guard above, so an [idx >= 1] tree differs from the
+               base too. If the intermediate sort is not productive the trees collide and
+               the §8 checker fails closed to [unknown] — never wrong. Cross-sort
+               recursion passes [depth + 1], so the [depth > 10_000] guard (with the node
+               budget) terminates any pathological non-well-founded mutual cycle. *)
+            let cross =
+              List.find_map
+                (fun (c : Defs.constructor) ->
+                   match
+                     List.find_opt
+                       (fun (s : Defs.selector) -> is_dt_sort t s.Defs.field_sort)
+                       c.Defs.selectors
+                   with
+                   | Some s -> Some (c, s)
+                   | None -> None)
+                ctors
+            in
+            (match cross with
+             | None -> base_tree dt depth
+             | Some (c, target) ->
+               let fields =
+                 List.map
+                   (fun (s : Defs.selector) ->
+                      if s.Defs.index = target.Defs.index
+                      then (
+                        match datatype_of_sort t s.Defs.field_sort with
+                        | Some d -> distinct_base d idx (depth + 1)
+                        | None -> Leaf (base_leaf s.Defs.field_sort))
+                      else if is_dt_sort t s.Defs.field_sort
+                      then (
+                        match datatype_of_sort t s.Defs.field_sort with
+                        | Some d -> base_tree d (depth + 1)
+                        | None -> Leaf (Model.Uninterp 0))
+                      else Leaf (base_leaf s.Defs.field_sort))
+                   c.Defs.selectors
+               in
+               tick ();
+               Ctor (Symbol.name c.Defs.sym, fields))))
     in
     let dt_terms = List.sort_uniq (fun a b -> compare a.Term.tag b.Term.tag) t.dt_terms in
     try Some (List.map (fun x -> x, tree_of x 0) dt_terms) with
