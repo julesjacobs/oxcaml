@@ -1,0 +1,13 @@
+vox2.refinement.type
+vox2.refinement.type
+vox2.refinement.type
+vox2.refinement.intro.prove
+vox2.refinement.intro.assume
+vox2.refinement.intro.assume_unchecked
+vox2.refinement.intro.pattern
+vox2.refinement.intro.prove
+refined-value holes: 3
+surface printer: postfix braces and intro forms
+round-trip: stable
+expecting a refinement predicate expression
+unclosed { (expected })

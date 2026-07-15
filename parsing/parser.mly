@@ -1037,6 +1037,8 @@ let maybe_pmod_constraint mode expr =
 %token FUN                    "fun"
 %token FUNCTION               "function"
 %token FUNCTOR                "functor"
+%token ASSUME                 "assume_"
+%token ASSUME_UNCHECKED       "assume_unchecked_"
 %token GLOBAL                 "global_"
 %token GREATER                ">"
 %token GREATERRBRACE          ">}"
@@ -1115,6 +1117,7 @@ let maybe_pmod_constraint mode expr =
 %token RBRACKET               "]"
 %token RBRACKETGREATER        "]>"
 %token REC                    "rec"
+%token REFINE                 "refine_"
 %token REPR                   "repr_"
 %token RPAREN                 ")"
 %token SEMI                   ";"
@@ -2893,6 +2896,24 @@ fun_expr:
      { mkexp_constraint ~loc:$sloc ~exp ~cty:None ~modes:[mode] }
   | EXCLAVE seq_expr
      { mkexp_exclave ~loc:$sloc ~kwd_loc:($loc($1)) $2 }
+  | REFINE seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox2.refinement.intro.prove";
+               loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
+  | ASSUME seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox2.refinement.intro.assume";
+               loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
+  | ASSUME_UNCHECKED seq_expr
+     { mkexp ~loc:$sloc
+         (Pexp_extension
+            ({ txt = "vox2.refinement.intro.assume_unchecked";
+               loc = make_loc $loc($1) },
+             PStr [ Str.eval $2 ])) }
 ;
 %inline expr:
   | or_function(fun_expr) { $1 }
@@ -3744,6 +3765,12 @@ pattern_gen:
     ) { $1 }
   | LAZY ext_attributes simple_pattern
       { mkpat_attrs ~loc:$sloc (Ppat_lazy $3) $2}
+  | REFINE simple_pattern
+      { mkpat ~loc:$sloc
+          (Ppat_extension
+             ({ txt = "vox2.refinement.intro.pattern";
+                loc = make_loc $loc($1) },
+              PPat ($2, None))) }
 ;
 
 simple_pattern:
@@ -5009,6 +5036,21 @@ atomic_type:
       { mktyp ~loc:$sloc (Ptyp_any (Some jkind)) }
   | LPAREN TYPE COLON jkind=jkind_annotation RPAREN
       { mktyp ~loc:$loc (Ptyp_of_kind jkind) }
+  (* Refinements use an ordinary expression payload.  [Pexp_hole] is the
+     distinguished refined value when the payload contains [_].  The
+     extension payload shape is the W1 parsetree representation: the
+     predicate is synthetically constrained by the refined skeleton. *)
+  | ty = atomic_type LBRACE predicate = seq_expr RBRACE
+      { mktyp ~loc:$sloc
+          (Ptyp_extension
+             ({ txt = "vox2.refinement.type"; loc = make_loc $sloc },
+              PStr [ Str.eval (Exp.constraint_ predicate (Some ty) []) ])) }
+  | atomic_type LBRACE RBRACE
+      { expecting $loc($3) "a refinement predicate expression" }
+  | atomic_type LBRACE error
+      { expecting $loc($3) "a refinement predicate expression" }
+  | atomic_type LBRACE seq_expr error
+      { unclosed "{" $loc($2) "}" $loc($4) }
 
 
 (* This is the syntax of the actual type parameters in an application of
