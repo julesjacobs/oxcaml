@@ -663,25 +663,44 @@ let ensure_store_reads t ~changed =
    propagation relying on [i <> j] must carry so a later retract of that diseq/chain
    retracts the propagation (PREMISE-COMPLETENESS — omitting it is a wrong-unsat vector;
    the definite-ROW2 mutant). *)
-let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
+(* WITNESS (no explanation built): the first recorded asserted diseq entry whose endpoints
+   are congruent to [i] and [j], ORIENTED so the returned [(x, y, lit)] has [i ~ x] and
+   [j ~ y]. Selecting the entry costs only [are_equal] (union-find finds); it does NOT
+   walk [Euf.explain], so a caller that only needs to KNOW [i <> j] is entailed (or that
+   will only build the premise once it commits to a propagation) pays nothing for the
+   explanation. Same match set as the old premise-returning [an_distinct]. *)
+let an_distinct_witness t (i : Term.t) (j : Term.t) : (Term.t * Term.t * Lit.t) option =
   List.find_map
     (fun (x, y, lit) ->
       if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
-      then
-        Some
-          (dedup_lits
-             (lit
-              :: (lits_of_prems (Euf.explain t.engine i x)
-                  @ lits_of_prems (Euf.explain t.engine j y))))
+      then Some (x, y, lit)
       else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
-      then
-        Some
-          (dedup_lits
-             (lit
-              :: (lits_of_prems (Euf.explain t.engine i y)
-                  @ lits_of_prems (Euf.explain t.engine j x))))
+      then Some (y, x, lit)
       else None)
     t.an_diseqs
+;;
+
+(* Build the deduped premise for an ORIENTED witness ([i ~ x], [j ~ y]): the diseq's own
+   literal plus the congruence chains linking [i] to [x] and [j] to [y]. This is where the
+   two [Euf.explain] walks happen, so it is called ONLY when a propagation is actually
+   emitted (never on the no-op / already-propagated paths). Byte-identical to the list the
+   old [an_distinct]/[an_distinct_idx] returned for the same (oriented) match. *)
+let an_distinct_premise
+  t
+  ((x, y, lit) : Term.t * Term.t * Lit.t)
+  (i : Term.t)
+  (j : Term.t)
+  =
+  dedup_lits
+    (lit
+     :: (lits_of_prems (Euf.explain t.engine i x)
+         @ lits_of_prems (Euf.explain t.engine j y)))
+;;
+
+(* Premise-returning form (unchanged behaviour): witness then premise. Retained for the
+   weq path-premise consumer that uses the premise directly. *)
+let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
+  Option.map (fun w -> an_distinct_premise t w i j) (an_distinct_witness t i j)
 ;;
 
 (* One ROW pass: for each store [st = store base i v] and each select [sel = select arr j]
@@ -724,7 +743,13 @@ let build_an_diseq_index t : (int * int, Term.t * Term.t * Lit.t) Hashtbl.t =
    never has both endpoints in one class in a consistent state, so the scan finds nothing
    either). Orientation recomputed per call ([i ~ x] ? normal : swapped), matching the
    scan's [i ~ x]-first check. *)
-let an_distinct_idx t index (i : Term.t) (j : Term.t) : Lit.t list option =
+(* Indexed WITNESS (no explanation built): the oriented [(x, y, lit)] with [i ~ x],
+   [j ~ y], O(1) via [build_an_diseq_index]. Same match selection as the indexed premise
+   form used to make before its [Euf.explain]; the premise is built separately by
+   [an_distinct_premise] only when a propagation commits. [ci = cj] -> [None]. *)
+let an_distinct_witness_idx t index (i : Term.t) (j : Term.t)
+  : (Term.t * Term.t * Lit.t) option
+  =
   let ci = Euf.class_of t.engine i
   and cj = Euf.class_of t.engine j in
   if Int.equal ci cj
@@ -736,29 +761,19 @@ let an_distinct_idx t index (i : Term.t) (j : Term.t) : Lit.t list option =
     | Some (x, y, lit) ->
       (* Mirror the scan's per-entry guard (codex bounce): VERIFY the candidate's
          orientation live rather than assume it. The (ci,cj) key match only guarantees
-         index-CLASS membership at index-BUILD time; for a same-sort [(Array T T)] array an
-         in-pass element merge (ROW2 asserts read-result equalities, and a read is the
+         index-CLASS membership at index-BUILD time; for a same-sort [(Array T T)] array
+         an in-pass element merge (ROW2 asserts read-result equalities, and a read is the
          element = index sort here) can stale the hit, so an ASSUMED orientation could
          [explain] over non-equal terms -> a wrong premise on a TCB path. Checking both
-         [are_equal] pairs makes it sound BY CONSTRUCTION: a valid hit is byte-identical to
-         the scan; a stale / non-matching hit degrades to [None] (a missed match,
-         completeness-only -> the [row_split] backstop still fires), never a wrong premise.
-         Distinct index/element sorts (the whole corpus) never stale, so counted-identity
-         and the +21 hold. *)
+         [are_equal] pairs makes it sound BY CONSTRUCTION: a valid hit is byte-identical
+         to the scan; a stale / non-matching hit degrades to [None] (a missed match,
+         completeness-only -> the [row_split] backstop still fires), never a wrong
+         premise. Distinct index/element sorts (the whole corpus) never stale, so
+         counted-identity and the +21 hold. *)
       if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
-      then
-        Some
-          (dedup_lits
-             (lit
-              :: (lits_of_prems (Euf.explain t.engine i x)
-                  @ lits_of_prems (Euf.explain t.engine j y))))
+      then Some (x, y, lit)
       else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
-      then
-        Some
-          (dedup_lits
-             (lit
-              :: (lits_of_prems (Euf.explain t.engine i y)
-                  @ lits_of_prems (Euf.explain t.engine j x))))
+      then Some (y, x, lit)
       else None)
 ;;
 
@@ -803,23 +818,27 @@ let row_round t ~changed =
               else if weq_row2
               then (
                 (* definite ROW2: i <> j entailed ⇒ sel = select(base,j). The FULL i<>j
-                   explanation ([an_distinct]) is a premise alongside [arr = st], so a
-                   retract of the diseq retracts this equality (PREMISE-COMPLETENESS).
-                   Build [select(base,j)] (hash-consed; catalog idempotent) so it
-                   telescopes down the chain; terminates (finite arrays × existing
-                   indices, each merged once then [are_equal] skips). *)
+                   explanation is a premise alongside [arr = st], so a retract of the
+                   diseq retracts this equality (PREMISE-COMPLETENESS). Find the diseq
+                   WITNESS first (are_equal only, no [Euf.explain]); build
+                   [select(base,j)] (hash-consed; catalog idempotent) and check the
+                   propagation is NEW; only THEN build the i<>j explanation premise -- so
+                   a pair that is already equal (re-examined every saturation pass) pays
+                   no explanation cost. Terminates (finite arrays × existing indices, each
+                   merged once then [are_equal] skips). *)
                 match
-                  (match diseq_idx with
-                   | Some di -> an_distinct_idx t di i j
-                   | None -> an_distinct t i j)
+                  match diseq_idx with
+                  | Some di -> an_distinct_witness_idx t di i j
+                  | None -> an_distinct_witness t i j
                 with
-                | Some dprem ->
+                | Some w ->
                   (match build_select t base j with
                    | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
                      let prem =
                        P_derived
                          (dedup_lits
-                            (lits_of_prems (Euf.explain t.engine arr st) @ dprem))
+                            (lits_of_prems (Euf.explain t.engine arr st)
+                             @ an_distinct_premise t w i j))
                      in
                      Euf.assert_eq t.engine ~premise:prem sel selbase;
                      changed := true
@@ -1077,7 +1096,7 @@ let an_normalize t sidx (x0 : Term.t) (j : Term.t)
            incr reads;
            if Euf.are_equal t.engine i j
            then `Value v (* ROW1: select(store(_,j,v), j) = v *)
-           else if an_distinct t i j <> None
+           else if an_distinct_witness t i j <> None
            then go base (* off-diagonal: value unchanged at j *)
            else (
              incr opens;
@@ -1315,7 +1334,7 @@ let weq_propagate_round t ~changed =
                       if t.weq_fuel > 0
                          && (not (Euf.are_equal t.engine r1 r2))
                          && Euf.are_equal t.engine i1 i2
-                         && an_distinct t r1 r2 <> None
+                         && an_distinct_witness t r1 r2 <> None
                       then (
                         match weq_read_premise t ~x1 ~i1 ~x2 ~i2 ~a ~b path with
                         | Some prem ->
