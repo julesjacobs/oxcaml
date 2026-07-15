@@ -46,7 +46,7 @@ type clause =
    MiniSat fast path. *)
 type watch =
   { cl : clause
-  ; blocker : lit
+  ; mutable blocker : lit
   }
 
 (* Why a variable is assigned. [Decision] is a branch choice or a level-0 unit (reason
@@ -861,11 +861,16 @@ let propagate t =
             c.lits.(0) <- c.lits.(1);
             c.lits.(1) <- false_lit);
           let first = c.lits.(0) in
-          let w' = { cl = c; blocker = first } in
-          if first <> w.blocker && lit_val t first = 1
+          (* Reuse [w] by refreshing its blocker to the new partner [first], rather than
+             allocating a fresh watch record on every non-fast-path visit (~40% of visits;
+             thr-sat-watch-log.md). [old_blocker] preserves the exact partner-satisfied
+             branch condition below. *)
+          let old_blocker = w.blocker in
+          w.blocker <- first;
+          if first <> old_blocker && lit_val t first = 1
           then (
             (* Newly satisfied by the partner watch. *)
-            Dynarray.set ws !j w';
+            Dynarray.set ws !j w;
             incr i;
             incr j)
           else (
@@ -881,11 +886,11 @@ let propagate t =
               let lk = c.lits.(!k) in
               c.lits.(1) <- lk;
               c.lits.(!k) <- false_lit;
-              Dynarray.add_last (Dynarray.get t.watches (neg_lit lk)) w';
+              Dynarray.add_last (Dynarray.get t.watches (neg_lit lk)) w;
               incr i (* drop from this watch list; now watched elsewhere *))
             else (
               (* No new watch: the clause is unit or conflicting. Keep the watch. *)
-              Dynarray.set ws !j w';
+              Dynarray.set ws !j w;
               incr i;
               incr j;
               if lit_val t first = -1
