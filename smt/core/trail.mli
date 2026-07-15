@@ -78,6 +78,36 @@ val mark : ('e, 'f) t -> int
     @raise Invalid_argument if [m < 0] or [m > length t]. *)
 val rewind_to : ('e, 'f) t -> apply:('e -> unit) -> int -> unit
 
+(** {2 Scope-aware undo addressing (ADR-0014 Stage 4)}
+
+    The frame stack already records, for each open frame, the trail length at which it was
+    opened — a [depth -> watermark] index. Stage 4's scope-aware-undo driver rewinds a
+    migrated trail to the frame of an earliest-removed decision level (an absolute target),
+    not by a [pop] COUNT. These expose that index. On a monotone trail (the removed set is a
+    contiguous suffix) rewinding to a frame is byte-identical to the equivalent {!pop}; the
+    driver's win is realized only once a NON-monotone caller (chronological backtracking)
+    replays the survivors above the rewind point (Stage 4.1), which is not part of this
+    substrate. *)
+
+(** [watermark_at t i] is the trail length at which the frame at 0-based depth [i] was
+    opened (the [i]-th still-open [push]'s checkpoint). @raise Invalid_argument if [i < 0]
+    or [i >= depth t]. *)
+val watermark_at : ('e, 'f) t -> int -> int
+
+(** [rewind_to_depth t ~apply ?restore d] discards every frame above absolute depth [d]
+    (keeping frames [0 .. d-1]), draining the trail newest-first to frame [d]'s checkpoint
+    and restoring that checkpoint's payload. It is exactly
+    [pop t ~apply ?restore (depth t - d)] — an absolute-depth addressing of {!pop} for the
+    Stage-4 driver, which computes a target level rather than a pop count — and is therefore
+    byte-identical to that [pop] on every trail. @raise Invalid_argument if [d < 0] or
+    [d > depth t]. *)
+val rewind_to_depth
+  :  ('e, 'f) t
+  -> apply:('e -> unit)
+  -> ?restore:('f -> unit)
+  -> int
+  -> unit
+
 (** {2 Test-only introspection}
 
     Not part of the substrate's operational contract; exposed so the Stage-0 disjointness

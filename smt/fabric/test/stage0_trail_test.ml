@@ -252,11 +252,73 @@ let test_disjoint_engines () =
   check "EUF back to base after final pop" (euf_digest e terms = euf_base)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* 4. Scope-aware undo addressing (ADR-0014 Stage 4.0) *)
+(* ------------------------------------------------------------------ *)
+
+let test_scope_addressing () =
+  (* [watermark_at] exposes each open frame's checkpoint (the [depth -> watermark] index). *)
+  let tr : (int, unit) Trail.t = Trail.create () in
+  Trail.push tr ();
+  Trail.record tr 1;
+  Trail.record tr 2;
+  Trail.push tr ();
+  Trail.record tr 3;
+  Trail.push tr ();
+  Trail.record tr 4;
+  Trail.record tr 5;
+  check "watermark_at 0 = 0" (Trail.watermark_at tr 0 = 0);
+  check "watermark_at 1 = 2" (Trail.watermark_at tr 1 = 2);
+  check "watermark_at 2 = 3" (Trail.watermark_at tr 2 = 3);
+  check_raises "watermark_at at depth raises" (fun () ->
+    Trail.watermark_at tr (Trail.depth tr));
+  check_raises "watermark_at negative raises" (fun () -> Trail.watermark_at tr (-1));
+  check_raises "rewind_to_depth beyond depth raises" (fun () ->
+    Trail.rewind_to_depth tr ~apply:ignore (Trail.depth tr + 1));
+  check_raises "rewind_to_depth negative raises" (fun () ->
+    Trail.rewind_to_depth tr ~apply:ignore (-1));
+  (* Degeneration (the S4.0 bar): on a monotone trail [rewind_to_depth d] applies the
+     IDENTICAL entry sequence and reaches the IDENTICAL (length, depth) as its equivalent
+     [pop (depth - d)], for every target depth. Two independently-built identical trails. *)
+  let build () =
+    let t : (int, unit) Trail.t = Trail.create () in
+    Trail.push t ();
+    Trail.record t 1;
+    Trail.record t 2;
+    Trail.push t ();
+    Trail.record t 3;
+    Trail.push t ();
+    Trail.record t 4;
+    Trail.record t 5;
+    t
+  in
+  for d = 0 to 3 do
+    let tp = build ()
+    and td = build () in
+    let sp = ref []
+    and sd = ref [] in
+    Trail.pop tp ~apply:(fun x -> sp := x :: !sp) (Trail.depth tp - d);
+    Trail.rewind_to_depth td ~apply:(fun x -> sd := x :: !sd) d;
+    check
+      (Printf.sprintf "rewind_to_depth %d: same applied entries as pop" d)
+      (!sp = !sd);
+    check
+      (Printf.sprintf "rewind_to_depth %d: same final length/depth as pop" d)
+      (Trail.length tp = Trail.length td && Trail.depth tp = Trail.depth td)
+  done;
+  (* [rewind_to_depth (depth t)] keeps all frames — a no-op, like [pop 0]. *)
+  let t = build () in
+  let n0 = Trail.length t in
+  Trail.rewind_to_depth t ~apply:(fun _ -> assert false) (Trail.depth t);
+  check "rewind_to_depth depth is a no-op" (Trail.length t = n0)
+;;
+
 let () =
   test_substrate ();
   test_pop_ordering ();
   test_disjoint_substrate ();
   test_disjoint_engines ();
+  test_scope_addressing ();
   Printf.printf
     "\nstage0 trail/disjointness self-test: %d checks, %d failure(s)\n"
     !checks

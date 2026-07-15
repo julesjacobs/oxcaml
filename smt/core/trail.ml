@@ -41,6 +41,19 @@ let pop t ~apply ?(restore = ignore) n =
     Dynarray.truncate t.frames target)
 ;;
 
+let watermark_at t i =
+  if i < 0 || i >= Dynarray.length t.frames then invalid_arg "Trail.watermark_at";
+  fst (Dynarray.get t.frames i)
+;;
+
+(* Absolute-depth addressing of [pop]: rewind to frame [d]'s checkpoint. The Stage-4
+   scope-aware-undo driver computes a target decision level, not a pop count. Identical to
+   [pop t (depth t - d)] by construction (no separate drain path). *)
+let rewind_to_depth t ~apply ?(restore = ignore) d =
+  if d < 0 || d > Dynarray.length t.frames then invalid_arg "Trail.rewind_to_depth";
+  pop t ~apply ~restore (Dynarray.length t.frames - d)
+;;
+
 module For_test = struct
   let entries t = Dynarray.to_list t.entries
 end
