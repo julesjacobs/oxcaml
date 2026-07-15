@@ -92,13 +92,13 @@ type t =
     (* selector stack, innermost first; base always present (the outermost / last
          element) *)
   ; base_at_level0 : bool
-    (* OXSMT_BASE_L0 (dark, default OFF): the unpoppable base frame is forced TRUE by a
-         permanent unit clause at level 0 instead of being ASSUMED positive on every
-         solve. Removes the artificial level-1 [base] decision and keeps [not base] out of
-         learned clauses (a sound search/encoding change — NOT a no-op: it shifts
-         decisions/LBD). When true, [base] is omitted from the solve and certificate
-         assumption sets; pushed frame selectors and the symmetry activation selector are
-         unaffected. *)
+    (* OXSMT_BASE_L0 (DEFAULT-ON; set to 0/false/no to opt out): the unpoppable base
+         frame is forced TRUE by a permanent unit clause at level 0 instead of being
+         ASSUMED positive on every solve. Removes the artificial level-1 [base] decision
+         and keeps [not base] out of learned clauses (a sound search/encoding change — NOT
+         a no-op: it shifts decisions/LBD). When true, [base] is omitted from the solve
+         and certificate assumption sets; pushed frame selectors and the symmetry
+         activation selector are unaffected. *)
   ; base_var : Sat.var (* the base-frame selector, for the level-0 forcing unit *)
   ; mutable base_unit_emitted : bool
     (* under [base_at_level0], the permanent [base] unit is added LAZILY on the first
@@ -195,23 +195,26 @@ let create
   (* OXSMT_BASE_L0 (DEFAULT-ON): force the unpoppable base frame TRUE with a permanent
      level-0 unit rather than assuming it every solve. Read the gate ONCE here (before
      [Sat.create] so the emitter knob can be set); [check_sat] / [cert_assumptions]
-     consult [base_at_level0] to omit [base] from their assumption sets. [OXSMT_BASE_L0=0]
-     opts out and is byte-identical to the pre-flip trunk. *)
+     consult [base_at_level0] to omit [base] from their assumption sets. [OXSMT_BASE_L0]
+     set to 0/false/no opts out and is byte-identical to the pre-flip trunk. *)
   let base_at_level0 =
     (* DEFAULT-ON (pair-measured +113 on main; QF_LIA +87 / QF_UF +29 / UFLIA −3, 0 flips,
-       0 z3 disagreements). [OXSMT_BASE_L0=0] opts out (byte-identical to the pre-flip
-       trunk); any other value / unset ⇒ ON. Mirrors the OXSMT_SYMBREAK flip precedent.
-       The cert-emitter (#53) makes the ON path 33/33 cert-VALID, so default-ON is safe
-       for the certificate pipeline. *)
+       0 z3 disagreements). [OXSMT_BASE_L0] set to 0/false/no opts out (byte-identical to
+       the pre-flip trunk); any other value / unset ⇒ ON. The opt-out token set is the
+       SAME as [OXSMT_SYMBREAK] (whose flip precedent this mirrors), so [=false] / [=no]
+       behave as expected rather than surprisingly turning the flag ON. The cert-emitter
+       (#53) makes the ON path 33/33 cert-VALID, so default-ON is safe for the certificate
+       pipeline. *)
     match Sys.getenv_opt "OXSMT_BASE_L0" with
-    | Some "0" -> false
+    | Some ("0" | "false" | "no") -> false
     | Some _ | None -> true
   in
   (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
      (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
      checker's contradictory closure would otherwise spuriously fail the "declared level-0
      unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
-     counter effect. Default (not base-l0) keeps every declaration => byte-identical. *)
+     counter effect. The opt-out (not base-l0) keeps every declaration => byte-identical
+     to the pre-flip trunk. *)
   let sat = Sat.create ~base_l0_cert_mode:base_at_level0 () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
