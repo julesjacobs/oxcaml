@@ -1016,6 +1016,23 @@ let simplify_projection ctx assertions =
 (* Detection: bound the total exact-check work (each check rebuilds the conjunct DAG). *)
 let symbreak_max_steps = 4_000_000
 
+(* Size-relative DETECTION budget (OXSMT_SYMBREAK_BUDGET, dark — board #64 "detector
+   budget"). Each candidate transposition check rebuilds the whole conjunct DAG (~[dag]
+   steps), so detection costs O(#buckets * bucket^2 * dag). On a large formula with many
+   incidental free constants this is a big WALL tax paid up front even when NO symmetry is
+   found (measured: symmetry-breaking ON adds +100..600 ms of detection wall on the big
+   emit=0 Goel-hwbench files vs OFF — the near-wall regressor mechanism). When the budget
+   is ON, once [dag] is known the pairwise/emission phase is capped at
+   [symbreak_detect_factor * dag] steps: at most this many full-DAG traversals of
+   detection work. Aborting detection only ever returns [] (no breaking) — SOUND
+   regardless of the factor; the factor only trades detection wall against keeping a win.
+   Sized above the productive-detection cost measured on the win corpus (QF_UF:
+   QG-classification productive detection uses <= ~25x dag;
+   logs/symbreak-budget-build-log.md) with margin, so the captured QG wins keep their full
+   detection budget while the Goel waste (60..184x dag) is cut. A proportionality constant
+   on instance size, not a family threshold. *)
+let symbreak_detect_factor = 12
+
 (* Skip a same-signature bucket larger than this before running pairwise exact checks —
    O(bucket^2) checks would dominate on large symmetric sets (e.g. eq_diamond). A bucket
    this large cannot yield an emittable class anyway (emit cap below). *)
@@ -1098,13 +1115,83 @@ let symbreak_tag_multiset (terms : Term.t list) =
 (* [symmetry_break ctx assertions] — see the block comment. Returns extra top-level Bool
    constraints (the lex-leader clauses) to internalize alongside the assertions; [[]] when
    nothing is broken (byte-neutral to a no-symmetry input). *)
+let symbreak_stats_on =
+  lazy
+    (match Sys.getenv_opt "OXSMT_SYMBREAK_STATS" with
+     | Some ("1" | "true" | "yes") -> true
+     | Some _ | None -> false)
+;;
+
+(* Size-relative detector budget (board #64 follow-up to the symmetry-breaking flip). A
+   DARK lever: default OFF, and OFF is byte-identical to the current default (every class
+   with [2 <= k < symbreak_emit_max] emits). When ON it adds a per-class LOCAL merit gate
+   at the emission site — see [class_merits_break]. [OXSMT_SYMBREAK_BUDGET=1] turns it on.
+   Read once per [symmetry_break] call (a single [getenv], negligible against the pass);
+   NOT cached, so a test can exercise both states in one process. *)
+let symbreak_budget_enabled () =
+  match Sys.getenv_opt "OXSMT_SYMBREAK_BUDGET" with
+  | Some ("1" | "true" | "yes") -> true
+  | Some _ | None -> false
+;;
+
+(* Per-class local structural merit (zero tuned constant, family-blind). Breaking a class
+   of [k] interchangeable domain constants is only worth its lex-leader cost when the
+   class domain is USED combinatorially: the number of application cells whose result is
+   of the class sort ([n_cells]) is at least [k * k], i.e. each domain element is
+   referenced by at least [k] cells on average. Measured discriminator (QF_UF,
+   logs/symbreak-budget-build- log.md): the QG-classification WIN files have
+   [n_cells >= 50] against [k <= 5] (the interchangeable constants ARE the quasigroup
+   domain, reused across every op-cell), while the Goel-hwbench REGRESSORS have
+   [n_cells <= 6 = k+1] (a few incidental interchangeable state constants). [k*k] sits in
+   the ~7x gap with margin on both sides and, unlike a formula-size ratio, correctly keeps
+   a genuine-but-sparse symmetry in a very large formula (a local property does not shrink
+   as the surrounding formula grows). The gate is per-class, so a mixed-family file keeps
+   its pervasive classes and drops its incidental ones within the same file. Purely a
+   strengthening: it only ever SKIPS emission, so it preserves soundness (fewer
+   symmetry-breaking clauses can only add models back). *)
+let class_merits_break ~k ~n_cells = n_cells >= k * k
+
 let symmetry_break ~counter cap env ctx assertions =
   let conjuncts = List.concat_map flatten assertions in
   let base_key = symbreak_tag_multiset conjuncts in
+  let stats_on = Lazy.force symbreak_stats_on in
+  let budget_on = symbreak_budget_enabled () in
+  let n_conjuncts = List.length conjuncts in
+  let class_log = ref [] in
+  let dag_nodes = ref 0 in
   let steps = ref 0 in
+  let emit_stats ~aborted =
+    if stats_on
+    then (
+      let classes = List.rev !class_log in
+      let n_classes = List.length classes in
+      let total_emit = List.fold_left (fun a (_, _, _, c) -> a + c) 0 classes in
+      let detail =
+        String.concat
+          " "
+          (List.map
+             (fun (k, cc, at, c) ->
+                Printf.sprintf "[k=%d cells=%d atoms=%d emit=%d]" k cc at c)
+             classes)
+      in
+      Printf.eprintf
+        "symbreak: conjuncts=%d dag=%d steps=%d classes=%d emit=%d aborted=%d %s\n%!"
+        n_conjuncts
+        !dag_nodes
+        !steps
+        n_classes
+        total_emit
+        (if aborted then 1 else 0)
+        detail)
+  in
+  (* Mutable step cap: the fixed [symbreak_max_steps] safety net during harvest, tightened
+     to a [dag]-proportional bound once harvest reveals [dag] (only when the budget is ON
+     — see [symbreak_detect_factor]). Harvest is a single memoized pass (~[dag] steps <<
+     the net), so it always completes before the tighter cap is installed. *)
+  let step_cap = ref symbreak_max_steps in
   let bump () =
     incr steps;
-    if !steps > symbreak_max_steps then raise Symbreak_budget
+    if !steps > !step_cap then raise Symbreak_budget
   in
   (* Fresh reserved nullary Bool aux var for the lex prefix-equal chain (an O(n) encoding
      — the aux var is opaque, so [and (aux) atom] is a 2-input And that the AC-flattening
@@ -1192,6 +1279,12 @@ let symmetry_break ~counter cap env ctx assertions =
        non-injective (e.g. distinct Uninterpreted/BitVec sorts can collide), and a
        cross-sort candidate pair would drive [Context.eq] to raise [Term.Sort_error] out
        of the pass. #distinct sorts is small, so equal-grouping is cheap. *)
+    dag_nodes := Term.Table.length seen;
+    (* Size-relative detection budget: cap the (expensive) pairwise/emission phase at a
+       fixed number of full-DAG traversals. OFF (default) leaves the fixed net untouched →
+       byte-identical. *)
+    if budget_on
+    then step_cap := min !step_cap (!steps + (symbreak_detect_factor * !dag_nodes));
     let const_list = Term.Set.elements !consts in
     (* term-tag order is Term.Set.elements order (Set uses Term.compare = tag). *)
     let sorts =
@@ -1278,6 +1371,7 @@ let symmetry_break ~counter cap env ctx assertions =
                      (* SIZE CAP (sat-safe): emit only for 2 <= k < symbreak_emit_max. *)
                      if k >= 2 && k < symbreak_emit_max
                      then (
+                       let c0 = !n_constraints in
                        let cs = Array.of_list consts_in_class in
                        (* class sort *)
                        let csort = cs.(0).Term.sort in
@@ -1286,73 +1380,97 @@ let symmetry_break ~counter cap env ctx assertions =
                        let class_cells =
                          List.filter (fun c -> Sort.equal c.Term.sort csort) cell_list
                        in
-                       let atoms = ref [] in
-                       let natoms = ref 0 in
-                       (try
-                          List.iter
-                            (fun cell ->
-                               Array.iter
-                                 (fun v ->
-                                    if !natoms >= symbreak_atoms_max then raise Exit;
-                                    atoms := Context.eq ctx cell v :: !atoms;
-                                    incr natoms)
-                                 cs)
-                            class_cells
-                        with
-                        | Exit -> ());
-                       let atoms = List.rev !atoms in
-                       (* full-action lex-leader for each adjacent generator (c_i c_[{i+1}]).
-                       The lex constraint A <= g(A) over the atom sequence, false<true,
-                       encoded with an O(n) prefix-equal chain of fresh aux vars: p_0 =
-                       true; for each moved atom a_j (image b_j): (p_j /\ a_j) -> b_j
-                       [lex step] p_[{j+1}] <-> (p_j /\ (a_j = b_j)) [prefix advance] *)
-                       for i = 0 to k - 2 do
-                         let a = cs.(i)
-                         and b = cs.(i + 1) in
-                         let sigma = Term.Map.add a b (Term.Map.singleton b a) in
-                         let images = symbreak_rebuild ctx sigma bump atoms in
-                         (* the atoms actually MOVED by g (a_j <> b_j); fixed atoms
-                         contribute a vacuous step and no prefix change, so they are
-                         dropped soundly. *)
-                         let seq =
-                           List.rev
-                             (List.fold_left2
-                                (fun acc atom image ->
-                                   if Term.equal atom image
-                                   then acc
-                                   else (atom, image) :: acc)
-                                []
-                                atoms
-                                images)
-                         in
-                         let m = List.length seq in
-                         let prefix = ref (Context.bool_const ctx true) in
-                         List.iteri
-                           (fun j (atom, image) ->
-                              (* (prefix /\ atom) -> image *)
-                              let lhs = Context.and_ ctx [ !prefix; atom ] in
-                              out
-                              := Context.or_ ctx [ Context.not_ ctx lhs; image ] :: !out;
-                              incr n_constraints;
-                              if !n_constraints > symbreak_constraints_max
-                              then raise Symbreak_budget;
-                              (* advance the prefix through a fresh aux var, except after the
-                             last step (its value is never read). *)
-                              if j < m - 1
-                              then (
-                                let p = fresh_bool () in
-                                let def =
-                                  Context.and_ ctx [ !prefix; Context.eq ctx atom image ]
-                                in
-                                out := Context.eq ctx p def :: !out;
+                       (* Size-relative budget (OXSMT_SYMBREAK_BUDGET, dark). When ON, drop a
+                       class whose domain is not used combinatorially enough to be worth
+                       the lex-leader cost (board #64). OFF (default) keeps every class,
+                       so the whole [if] guard collapses to [true] and emission is
+                       byte-identical to the current default. Only ever SKIPS emission —
+                       sound (see [class_merits_break]). *)
+                       if
+                         (not budget_on)
+                         || class_merits_break ~k ~n_cells:(List.length class_cells)
+                       then (
+                         let atoms = ref [] in
+                         let natoms = ref 0 in
+                         (try
+                            List.iter
+                              (fun cell ->
+                                 Array.iter
+                                   (fun v ->
+                                      if !natoms >= symbreak_atoms_max then raise Exit;
+                                      atoms := Context.eq ctx cell v :: !atoms;
+                                      incr natoms)
+                                   cs)
+                              class_cells
+                          with
+                          | Exit -> ());
+                         let atoms = List.rev !atoms in
+                         (* full-action lex-leader for each adjacent generator (c_i
+                         c_[{i+1}]). The lex constraint A <= g(A) over the atom sequence,
+                         false<true, encoded with an O(n) prefix-equal chain of fresh aux
+                         vars: p_0 = true; for each moved atom a_j (image b_j): (p_j /\
+                         a_j) -> b_j [lex step] p_[{j+1}] <-> (p_j /\ (a_j = b_j))
+                         [prefix advance] *)
+                         for i = 0 to k - 2 do
+                           let a = cs.(i)
+                           and b = cs.(i + 1) in
+                           let sigma = Term.Map.add a b (Term.Map.singleton b a) in
+                           let images = symbreak_rebuild ctx sigma bump atoms in
+                           (* the atoms actually MOVED by g (a_j <> b_j); fixed atoms
+                           contribute a vacuous step and no prefix change, so they are
+                           dropped soundly. *)
+                           let seq =
+                             List.rev
+                               (List.fold_left2
+                                  (fun acc atom image ->
+                                     if Term.equal atom image
+                                     then acc
+                                     else (atom, image) :: acc)
+                                  []
+                                  atoms
+                                  images)
+                           in
+                           let m = List.length seq in
+                           let prefix = ref (Context.bool_const ctx true) in
+                           List.iteri
+                             (fun j (atom, image) ->
+                                (* (prefix /\ atom) -> image *)
+                                let lhs = Context.and_ ctx [ !prefix; atom ] in
+                                out
+                                := Context.or_ ctx [ Context.not_ ctx lhs; image ] :: !out;
                                 incr n_constraints;
-                                prefix := p))
-                           seq
-                       done))
+                                if !n_constraints > symbreak_constraints_max
+                                then raise Symbreak_budget;
+                                (* advance the prefix through a fresh aux var, except after
+                               the last step (its value is never read). *)
+                                if j < m - 1
+                                then (
+                                  let p = fresh_bool () in
+                                  let def =
+                                    Context.and_
+                                      ctx
+                                      [ !prefix; Context.eq ctx atom image ]
+                                  in
+                                  out := Context.eq ctx p def :: !out;
+                                  incr n_constraints;
+                                  prefix := p))
+                             seq
+                         done;
+                         if stats_on
+                         then
+                           class_log
+                           := ( k
+                              , List.length class_cells
+                              , List.length atoms
+                              , !n_constraints - c0 )
+                              :: !class_log)))
                   classes))
            bucket_list)
       sort_groups;
+    emit_stats ~aborted:false;
     List.rev !out
   with
-  | Symbreak_budget -> []
+  | Symbreak_budget ->
+    emit_stats ~aborted:true;
+    []
 ;;

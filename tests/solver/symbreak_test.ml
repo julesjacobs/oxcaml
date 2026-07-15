@@ -27,8 +27,8 @@ let failures = ref 0
 let fail fmt =
   Printf.ksprintf
     (fun s ->
-       incr failures;
-       print_string ("  FAIL " ^ s ^ "\n"))
+      incr failures;
+      print_string ("  FAIL " ^ s ^ "\n"))
     fmt
 ;;
 
@@ -132,6 +132,60 @@ let datatype_query =
 (assert (not (= A x)))
 (assert (not (= (f A x) B)))
 (assert (not (= (f x A) B)))
+(check-sat)
+|}
+;;
+
+(* An INCIDENTAL symmetry: e0,e1 are interchangeable but referenced by only TWO cells of
+   the class sort ([(f e0)], [(f e1)]) — n_cells=2 < k*k=4. The symmetry is real (the
+   detector fires with the budget OFF), but breaking it is not worth its cost: this is the
+   Goel-hwbench shape (a couple of interchangeable state constants). The size-relative
+   budget must DROP it. Contrast the pervasive quasigroup [sat_symmetric] (k=3, nine op
+   cells, n_cells=9 >= 9 = k*k) which the budget must KEEP — the QG-classification win. *)
+let budget_incidental =
+  {|
+(set-logic QF_UF)
+(declare-sort I 0)
+(declare-fun f (I) I)
+(declare-fun e0 () I)
+(declare-fun e1 () I)
+(assert (distinct e0 e1))
+(assert (or (= (f e0) e0) (= (f e0) e1)))
+(assert (or (= (f e1) e0) (= (f e1) e1)))
+(check-sat)
+|}
+;;
+
+(* MIXED-family instance (proportional-mechanisms mixed-instance obligation): one file
+   with BOTH a pervasive class (sort I: a0,a1,a2 over nine op cells, n_cells=9 >= k*k=9 ->
+   KEEP) and an incidental class (sort J: b0,b1 over two g cells, n_cells=2 < k*k=4 ->
+   DROP). The per-class gate must allocate WITHIN the file: keep I's class, drop J's — not
+   decide the whole file on one side of a global threshold. *)
+let budget_mixed =
+  {|
+(set-logic QF_UF)
+(declare-sort I 0)
+(declare-sort J 0)
+(declare-fun op (I I) I)
+(declare-fun a0 () I)
+(declare-fun a1 () I)
+(declare-fun a2 () I)
+(declare-fun g (J) J)
+(declare-fun b0 () J)
+(declare-fun b1 () J)
+(assert (distinct a0 a1 a2))
+(assert (distinct b0 b1))
+(assert (or (= (op a0 a0) a0) (= (op a0 a0) a1) (= (op a0 a0) a2)))
+(assert (or (= (op a0 a1) a0) (= (op a0 a1) a1) (= (op a0 a1) a2)))
+(assert (or (= (op a0 a2) a0) (= (op a0 a2) a1) (= (op a0 a2) a2)))
+(assert (or (= (op a1 a0) a0) (= (op a1 a0) a1) (= (op a1 a0) a2)))
+(assert (or (= (op a1 a1) a0) (= (op a1 a1) a1) (= (op a1 a1) a2)))
+(assert (or (= (op a1 a2) a0) (= (op a1 a2) a1) (= (op a1 a2) a2)))
+(assert (or (= (op a2 a0) a0) (= (op a2 a0) a1) (= (op a2 a0) a2)))
+(assert (or (= (op a2 a1) a0) (= (op a2 a1) a1) (= (op a2 a1) a2)))
+(assert (or (= (op a2 a2) a0) (= (op a2 a2) a1) (= (op a2 a2) a2)))
+(assert (or (= (g b0) b0) (= (g b0) b1)))
+(assert (or (= (g b1) b0) (= (g b1) b1)))
 (check-sat)
 |}
 ;;
@@ -579,6 +633,43 @@ let test_forged_datatype_registry () =
     ok "forged datatype registry rejected at install (set_datatypes validator)"
 ;;
 
+(* Size-relative budget (OXSMT_SYMBREAK_BUDGET, board #64). The per-class local-merit gate
+   drops a class whose domain is not used combinatorially enough (n_cells < k*k) and keeps
+   a pervasive one (n_cells >= k*k). Toggled via the env per call, so both states run in
+   one process. RED both ways: (a) if the gate never fires, the incidental class is NOT
+   dropped under budget-ON; (b) if the gate is over-aggressive, the pervasive class is
+   dropped — which would forfeit the QG win the budget must preserve. *)
+let test_budget_gate () =
+  Unix.putenv "OXSMT_SYMBREAK_BUDGET" "0";
+  let off_incidental = detect budget_incidental in
+  Unix.putenv "OXSMT_SYMBREAK_BUDGET" "1";
+  let on_incidental = detect budget_incidental in
+  let on_pervasive = detect sat_symmetric in
+  let on_mixed = detect budget_mixed in
+  Unix.putenv "OXSMT_SYMBREAK_BUDGET" "0";
+  let off_mixed = detect budget_mixed in
+  if List.length off_incidental > 0 && on_incidental = []
+  then ok "budget: drops an incidental class (n_cells < k*k), emits it when OFF"
+  else
+    fail
+      "budget: incidental class not dropped (off=%d on=%d) — gate did not fire"
+      (List.length off_incidental)
+      (List.length on_incidental);
+  if List.length on_pervasive > 0
+  then ok "budget: keeps a pervasive class (n_cells >= k*k) — QG win protected"
+  else fail "budget: dropped a pervasive class (n_cells >= k*k) — over-aggressive gate";
+  (* MIXED-family: within one file the budget must KEEP the pervasive class and DROP the
+     incidental one — so [0 < on_mixed < off_mixed] (some breaking survives, strictly less
+     than with both classes). RED if the gate decides the whole file on one side. *)
+  if List.length on_mixed > 0 && List.length on_mixed < List.length off_mixed
+  then ok "budget: mixed file keeps pervasive + drops incidental (per-class allocation)"
+  else
+    fail
+      "budget: mixed-file allocation wrong (off=%d on=%d) — not per-class"
+      (List.length off_mixed)
+      (List.length on_mixed)
+;;
+
 let () =
   print_string "symbreak_test:\n";
   test_detector_fires ();
@@ -596,6 +687,7 @@ let () =
   test_b4_prior_assertion ();
   test_forged_datatype_registry ();
   test_f3_hash_collision ();
+  test_budget_gate ();
   Printf.printf "symbreak_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

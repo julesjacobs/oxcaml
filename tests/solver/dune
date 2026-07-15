@@ -34,7 +34,8 @@
   oxsmt_core
   oxsmt_interface
   oxsmt_smtlib_parser
-  oxsmt_query_loader))
+  oxsmt_query_loader
+  unix))
 
 ; QF_BV end-to-end acceptance goldens driven through the real Session dispatch
 ; (make bv-goldens-test).
@@ -63,10 +64,15 @@
 ; (task #51). Declares multiple datatypes across push-scoped checks in one Session via the
 ; accumulating declare_datatype API and asserts each stays checked-sat — RED before the DT
 ; theory read its registry by live ref, GREEN after. Documents the task #54 none-then-DT gap.
+
 (executable
  (name dt_multi_query_gate)
  (modules dt_multi_query_gate)
- (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
 
 (executable
  (name dt_sat_gate)
