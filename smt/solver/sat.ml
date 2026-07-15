@@ -554,20 +554,6 @@ let grow_int a needed =
     na)
 ;;
 
-let grow_float a needed =
-  let cap = Array.length a in
-  if needed <= cap
-  then a
-  else (
-    let ncap = ref (if cap = 0 then 8 else cap) in
-    while !ncap < needed do
-      ncap := !ncap * 2
-    done;
-    let na = Array.make !ncap 0.0 in
-    Array.blit a 0 na 0 cap;
-    na)
-;;
-
 (* Flat clause arena accessors. A [cref] indexes the parallel [a_*] raw arrays; a clause's
    literals live at [a_lits.(a_off.(cr) .. +a_len.(cr))]. All are O(1) bounds-checked raw
    array reads (inlined primitives — no [Dynarray.get] call). The literal getter/setter
@@ -615,16 +601,39 @@ let ch_lit t ch i =
 let arena_add t id lits learnt =
   let cr : cref = t.a_n in
   let n = Array.length lits in
-  (* ensure per-clause metadata capacity (the six arrays grow together) *)
+  (* ensure per-clause metadata capacity (the six arrays grow together). ATOMIC (rider 1):
+     allocate ALL fresh arrays into locals first, and rebind the fields together only
+     after every [Array.make] has succeeded — so an out-of-memory raise mid-grow leaves
+     every field at its old, mutually-consistent value (the six capacities never desync),
+     keeping the solver restorable-by-[cancel_until 0] by construction rather than by
+     argument. *)
   if t.a_n >= Array.length t.a_off
   then (
-    let need = t.a_n + 1 in
-    t.a_off <- grow_int t.a_off need;
-    t.a_len <- grow_int t.a_len need;
-    t.a_id <- grow_int t.a_id need;
-    t.a_lbd <- grow_int t.a_lbd need;
-    t.a_flags <- grow_int t.a_flags need;
-    t.a_act <- grow_float t.a_act need);
+    let cap = Array.length t.a_off in
+    let ncap = ref (if cap = 0 then 8 else cap) in
+    while !ncap < t.a_n + 1 do
+      ncap := !ncap * 2
+    done;
+    let ncap = !ncap in
+    let n_off = Array.make ncap 0 in
+    let n_len = Array.make ncap 0 in
+    let n_id = Array.make ncap 0 in
+    let n_lbd = Array.make ncap 0 in
+    let n_flags = Array.make ncap 0 in
+    let n_act = Array.make ncap 0.0 in
+    (* every allocation succeeded — blit (cannot raise) then rebind together *)
+    Array.blit t.a_off 0 n_off 0 cap;
+    Array.blit t.a_len 0 n_len 0 cap;
+    Array.blit t.a_id 0 n_id 0 cap;
+    Array.blit t.a_lbd 0 n_lbd 0 cap;
+    Array.blit t.a_flags 0 n_flags 0 cap;
+    Array.blit t.a_act 0 n_act 0 cap;
+    t.a_off <- n_off;
+    t.a_len <- n_len;
+    t.a_id <- n_id;
+    t.a_lbd <- n_lbd;
+    t.a_flags <- n_flags;
+    t.a_act <- n_act);
   (* ensure shared-literal capacity and append (copy, so the caller's array is not
      aliased) *)
   let off = t.a_lits_n in
@@ -810,18 +819,27 @@ let mk_clause_with_id t id lits learnt : cref = arena_add t id lits learnt
 let mk_clause t lits learnt = mk_clause_with_id t (fresh_id t) lits learnt
 
 (* Grow a watch list's parallel arrays (both, in lockstep) to hold at least one more
-   entry. *)
+   entry. ATOMIC (rider 1): allocate BOTH fresh arrays before rebinding either, so an
+   out-of-memory raise leaves [wcref]/[wblk] at their old, equal-length values (never a
+   desync that would OOB a later write). *)
 let wl_reserve ws =
   if ws.wn >= Array.length ws.wcref
   then (
     let cap = Array.length ws.wcref in
     let ncap = if cap = 0 then 4 else cap * 2 in
     let nc = Array.make ncap 0 in
-    Array.blit ws.wcref 0 nc 0 cap;
-    ws.wcref <- nc;
     let nb = Array.make ncap 0 in
+    Array.blit ws.wcref 0 nc 0 cap;
     Array.blit ws.wblk 0 nb 0 cap;
+    ws.wcref <- nc;
     ws.wblk <- nb)
+;;
+
+(* Write one watch entry into a list that ALREADY has room (no allocation, cannot raise). *)
+let wl_push ws ~cref ~blocker =
+  ws.wcref.(ws.wn) <- cref;
+  ws.wblk.(ws.wn) <- blocker;
+  ws.wn <- ws.wn + 1
 ;;
 
 (* Add a watch entry (cref + cached blocker) to literal [l]'s list, keeping the parallel
@@ -829,16 +847,23 @@ let wl_reserve ws =
 let watch_add t l ~cref ~blocker =
   let ws = Dynarray.get t.watches l in
   wl_reserve ws;
-  ws.wcref.(ws.wn) <- cref;
-  ws.wblk.(ws.wn) <- blocker;
-  ws.wn <- ws.wn + 1
+  wl_push ws ~cref ~blocker
 ;;
 
+(* Attach a clause's two watches BOTH-OR-NEITHER (rider 1). Reserve room in both lists
+   first (the only step that can raise — out of memory); once both have room, the two
+   writes cannot raise, so the clause is never left half-watched (a broken 2WL invariant).
+   The two watched literals are distinct (level-0 dedup), so [neg_lit l0] and [neg_lit l1]
+   index two DIFFERENT watch lists — reserving one never disturbs the other. *)
 let attach t (cr : cref) =
   let l0 = cl_lit t cr 0
   and l1 = cl_lit t cr 1 in
-  watch_add t (neg_lit l0) ~cref:cr ~blocker:l1;
-  watch_add t (neg_lit l1) ~cref:cr ~blocker:l0
+  let ws0 = Dynarray.get t.watches (neg_lit l0) in
+  let ws1 = Dynarray.get t.watches (neg_lit l1) in
+  wl_reserve ws0;
+  wl_reserve ws1;
+  wl_push ws0 ~cref:cr ~blocker:l1;
+  wl_push ws1 ~cref:cr ~blocker:l0
 ;;
 
 (* ------------------------------------------------------------------ *)

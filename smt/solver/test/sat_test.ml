@@ -791,6 +791,69 @@ let php_sat_minus_one n =
   s, List.rev !clauses
 ;;
 
+(* Digest of the FULL certificate event stream of a traced solve, in emission order and
+   exact per-event byte form (ids, literal order, origins/roles, terminal conclusion). A
+   relocation bug that corrupted a clause id or literal order — or a change to what the
+   arena emits — moves this digest; pinning it makes the committed test prove cert-byte
+   stability WITHOUT the external cert harness (rider 2). *)
+let cert_stream_digest build =
+  let buf = Buffer.create 4096 in
+  let cl a = show_ints (List.map dimacs_of_lit (Array.to_list a)) in
+  let s = build () in
+  Sat.set_trace
+    s
+    (Some
+       { Sat.on_input =
+           (fun ~id ~clause ~origin ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf
+                  "I %d %s %s\n"
+                  id
+                  (match origin with
+                   | Sat.Query -> "Q"
+                   | Sat.Theory_lemma -> "TL")
+                  (cl clause)))
+       ; on_unit =
+           (fun ~id ~lit ->
+             Buffer.add_string buf (Printf.sprintf "U %d %d\n" id (dimacs_of_lit lit)))
+       ; on_learned =
+           (fun ~id ~clause ~antecedents ~btlevel ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf
+                  "L %d bt=%d %s ants=%s\n"
+                  id
+                  btlevel
+                  (cl clause)
+                  (show_ints antecedents)))
+       ; on_theory_clause =
+           (fun ~id ~clause ~role ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf
+                  "T %d %s %s\n"
+                  id
+                  (match role with
+                   | Sat.Reason -> "R"
+                   | Sat.Conflict -> "C")
+                  (cl clause)))
+       ; on_unsat =
+           (fun c ->
+             Buffer.add_string
+               buf
+               (match c with
+                | Sat.Root_empty { input_id } ->
+                  Printf.sprintf "X root_empty %d\n" input_id
+                | Sat.Level0_conflict { conflict_id } ->
+                  Printf.sprintf "X level0 %d\n" conflict_id
+                | Sat.Failed_assumption { antecedents } ->
+                  Printf.sprintf "X failed %s\n" (show_ints antecedents)))
+       });
+  ignore (Sat.solve s : Sat.result);
+  Digest.to_hex (Digest.string (Buffer.contents buf))
+;;
+
 let test_arena_reduce_db_stress () =
   (* Interleave a full major GC every 500 conflicts, so the arena rebuild + cref remap in
      [reduce_db] runs across a collection. *)
@@ -815,12 +878,31 @@ let test_arena_reduce_db_stress () =
   let r1, c1, d1, p1 = run_unsat () in
   let r2, c2, d2, p2 = run_unsat () in
   check "arena-stress: PHP(8,7) unsat under forced-GC reduceDB relocation" (r1 = Sat.Unsat);
+  (* EXACT counter pin (rider 2): the trunk-9052a55287 conflict/decision/propagation
+     counts for PHP(8,7) — 4141 conflicts is the documented trunk value (see
+     test_reducedb_engagement). The arena is counted-identical, so it must reproduce them
+     EXACTLY; reduceDB fires ~10x here, so a relocation bug that perturbed the search
+     moves a counter and goes RED. Update only alongside a deliberate search-heuristic
+     change. *)
   check
-    (Printf.sprintf "arena-stress: reduceDB engaged (conflicts %d > 3800)" c1)
-    (c1 > 3800);
+    (Printf.sprintf
+       "arena-stress: PHP(8,7) exact counters trunk-identical (c=%d d=%d p=%d)"
+       c1
+       d1
+       p1)
+    (c1 = 4141 && d1 = 5009 && p1 = 47786);
   check
     "arena-stress: deterministic verdict+counters across two forced-GC runs"
     (r1 = r2 && c1 = c2 && d1 = d2 && p1 = p2);
+  (* CERT-BYTE pin (rider 2): the full certificate event stream of a traced PHP(8,7) solve
+     (which fires reduceDB relocation) digests to a value captured from the
+     dual-review-approved arena build (its 33/33 cert-byte match vs trunk was verified in
+     review). Any change to emitted ids, literal order, event order, or the terminal
+     conclusion — a relocation bug corrupting a clause id included — moves this digest. *)
+  let dg = cert_stream_digest (fun () -> php_solver 7) in
+  check
+    (Printf.sprintf "arena-stress: cert event-stream digest = pinned (got %s)" dg)
+    (String.equal dg "5c3e42f6284274caf63d6e114e8dba41");
   (* SAT leg — PHP(8,7) minus one AMO clause: conflict-heavy sat. The reported model must
      satisfy EVERY clause; a relocation bug that corrupts propagation drives a wrong-SAT
      model that falsifies a clause (or a wrong verdict / crash). *)
