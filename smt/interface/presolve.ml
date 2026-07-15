@@ -1016,7 +1016,7 @@ let simplify_projection ctx assertions =
 (* Detection: bound the total exact-check work (each check rebuilds the conjunct DAG). *)
 let symbreak_max_steps = 4_000_000
 
-(* Size-relative DETECTION budget (OXSMT_SYMBREAK_BUDGET, dark — board #64 "detector
+(* Size-relative DETECTION budget (OXSMT_SYMBREAK_BUDGET, DEFAULT-ON — board #64 "detector
    budget"). Each candidate transposition check rebuilds the whole conjunct DAG (~[dag]
    steps), so detection costs O(#buckets * bucket^2 * dag). On a large formula with many
    incidental free constants this is a big WALL tax paid up front even when NO symmetry is
@@ -1122,16 +1122,24 @@ let symbreak_stats_on =
      | Some _ | None -> false)
 ;;
 
-(* Size-relative detector budget (board #64 follow-up to the symmetry-breaking flip). A
-   DARK lever: default OFF, and OFF is byte-identical to the current default (every class
-   with [2 <= k < symbreak_emit_max] emits). When ON it adds a per-class LOCAL merit gate
-   at the emission site — see [class_merits_break]. [OXSMT_SYMBREAK_BUDGET=1] turns it on.
-   Read once per [symmetry_break] call (a single [getenv], negligible against the pass);
-   NOT cached, so a test can exercise both states in one process. *)
+(* Size-relative detector budget (board #64 follow-up to the symmetry-breaking flip). It
+   adds a per-class LOCAL merit gate at the emission site — see [class_merits_break] — and
+   the size-relative detection cap ([symbreak_detect_factor * dag]). Purely a
+   strengthening of symmetry-breaking: it only ever SKIPS emission / aborts detection
+   (returning fewer breaking clauses), so it is SOUND regardless of the constants.
+
+   DEFAULT-ON (quiesced A/B on the frozen pre-land sha, QF_UF Goel+QG: OFF 6958 -> ON 6964
+   = +6, gain-only, 0 flips -- logs/symbreak-budget-quiesced-ab.md; dual-review APPROVE
+   logs/symbreak-budget-review-fable.md). [OXSMT_SYMBREAK_BUDGET] set to 0/false/no opts
+   out (byte-identical to the pre-flip default: every class with
+   [2 <= k < symbreak_emit_max] emits, uncapped detection); unset / any other value => ON.
+   The opt-out token set is the SAME as [OXSMT_SYMBREAK] / [OXSMT_BASE_L0] /
+   [OXSMT_ARR_ROW2]. Read once per [symmetry_break] call (a single [getenv], negligible
+   against the pass); NOT cached, so a test can exercise both states in one process. *)
 let symbreak_budget_enabled () =
   match Sys.getenv_opt "OXSMT_SYMBREAK_BUDGET" with
-  | Some ("1" | "true" | "yes") -> true
-  | Some _ | None -> false
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 (* Per-class local structural merit (zero tuned constant, family-blind). Breaking a class
@@ -1380,12 +1388,13 @@ let symmetry_break ~counter cap env ctx assertions =
                        let class_cells =
                          List.filter (fun c -> Sort.equal c.Term.sort csort) cell_list
                        in
-                       (* Size-relative budget (OXSMT_SYMBREAK_BUDGET, dark). When ON, drop a
-                       class whose domain is not used combinatorially enough to be worth
-                       the lex-leader cost (board #64). OFF (default) keeps every class,
-                       so the whole [if] guard collapses to [true] and emission is
-                       byte-identical to the current default. Only ever SKIPS emission —
-                       sound (see [class_merits_break]). *)
+                       (* Size-relative budget (OXSMT_SYMBREAK_BUDGET, DEFAULT-ON). When
+                       ON (the default), drop a class whose domain is not used
+                       combinatorially enough to be worth the lex-leader cost (board #64).
+                       Set to 0/false/no to opt out: every class is kept, so the whole [if]
+                       guard collapses to [true] and emission is byte-identical to the
+                       pre-flip default. Only ever SKIPS emission — sound (see
+                       [class_merits_break]). *)
                        if
                          (not budget_on)
                          || class_merits_break ~k ~n_cells:(List.length class_cells)
