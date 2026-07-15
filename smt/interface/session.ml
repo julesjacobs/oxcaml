@@ -89,7 +89,16 @@ type t =
     (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
          [get_model] *)
   ; mutable frames : Sat.var list
-    (* selector stack, innermost first; base always present *)
+    (* selector stack, innermost first; base always present (the outermost / last
+         element) *)
+  ; base_at_level0 : bool
+    (* OXSMT_BASE_L0 (dark, default OFF): the unpoppable base frame is forced TRUE by a
+         permanent unit clause at level 0 instead of being ASSUMED positive on every
+         solve. Removes the artificial level-1 [base] decision and keeps [not base] out of
+         learned clauses (a sound search/encoding change — NOT a no-op: it shifts
+         decisions/LBD). When true, [base] is omitted from the solve and certificate
+         assumption sets; pushed frame selectors and the symmetry activation selector are
+         unaffected. *)
   ; mutable has_theory : bool
     (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
          verdict's model comes from the theory, and a Sat is theory-validated *)
@@ -189,6 +198,16 @@ let create
     Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap
   in
   let base = Sat.new_var sat in
+  (* OXSMT_BASE_L0 (dark): force the unpoppable base frame TRUE with a permanent unit at
+     level 0 rather than assuming it every solve. Read once here; [check_sat] and
+     [cert_assumptions] consult [base_at_level0] to omit [base] from their assumption
+     sets. Unset => no unit, base assumed as before, byte-identical to trunk. *)
+  let base_at_level0 =
+    match Sys.getenv_opt "OXSMT_BASE_L0" with
+    | Some "1" -> true
+    | _ -> false
+  in
+  if base_at_level0 then Sat.add_clause sat [ Sat.pos base ];
   (* Dynamic relevancy (task #24): when enabled, create the driver, route the trail seam
      events through [cdclt] to it, and install the SAT branch filter that consults it.
      Disabled by default => the filter is never installed and the glue is byte-identical
@@ -216,6 +235,7 @@ let create
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
+  ; base_at_level0
   ; has_theory = false
   ; degraded = false
   ; last_verdict = Unknown
@@ -509,6 +529,20 @@ let is_theory_atom (a : Term.t) =
 ;;
 
 let current_selector t = List.hd t.frames
+
+(* The frame selectors to ASSUME positive on a solve. Normally all of [frames]; under
+   [base_at_level0] the base frame (the last / outermost element) is forced true by a
+   permanent unit at level 0 (see [create]) and is therefore NOT assumed — dropping it
+   removes the artificial [base] decision level. Pushed frame selectors are always kept,
+   so their retraction-on-[pop] contract is unchanged. *)
+let assumed_frames t =
+  if t.base_at_level0
+  then (
+    match List.rev t.frames with
+    | _base :: pushed_rev -> List.rev pushed_rev
+    | [] -> [])
+  else t.frames
+;;
 
 (* The persistent propositional SAT var for a NON-theory atom (a nullary Bool [App] / a
    [Bool_const]), shared per distinct hash-consed term via [prop_to_var]. A nullary Bool
@@ -1551,7 +1585,9 @@ let check_sat t =
        frame + activation assumptions, and the activation clauses are equisatisfiable, so
        the query is unsat. *)
     let assumptions =
-      let frame_asms = List.map Sat.pos t.frames in
+      (* When [base_at_level0], [base] (the outermost / last frame) is forced true by a
+         permanent unit, so it is NOT assumed here; pushed frame selectors are kept. *)
+      let frame_asms = List.map Sat.pos (assumed_frames t) in
       match t.sym_sel with
       | Some sel -> Sat.pos sel :: frame_asms
       | None -> frame_asms
@@ -1637,7 +1673,7 @@ let install_cert_trace t tr =
   Sat.set_trace t.sat tr
 ;;
 
-let cert_assumptions t = List.map Sat.pos t.frames
+let cert_assumptions t = List.map Sat.pos (assumed_frames t)
 
 (* The failed-selector core, with the internal symmetry-breaking activation selector
    filtered out (Rider 1): [sym_sel] is assumed positive during a solve, so it can appear
