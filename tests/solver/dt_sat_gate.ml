@@ -313,7 +313,9 @@ let run_dag_blowup () =
      validate the (shared) leaf, not skip it after the first visit *)
   let rec diamond_bad_bottom i =
     if i = depth
-    then Dt.Ctor ("end", [ Dt.Leaf (Model.Int 0) ]) (* [end] is nullary: wrong arity *)
+    then
+      Dt.Ctor ("end", [ Dt.Leaf (Model.Int Bigint.zero) ])
+      (* [end] is nullary: wrong arity *)
     else (
       let sub = diamond_bad_bottom (i + 1) in
       Dt.Ctor (Printf.sprintf "c%d" i, [ sub; sub ]))
