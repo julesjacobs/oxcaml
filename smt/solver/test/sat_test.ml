@@ -868,11 +868,29 @@ let test_eliminable_inert_when_off () =
   check "eliminable-off: same counters" (c0 = c1)
 ;;
 
+(* OXSMT_CHRONO and a decision branch filter (relevancy) are mutually exclusive at the
+   [Sat.solve] entry (task #41 Stage 1), so the branch-filter tests — which install a
+   filter and solve — must not run under chronological backtracking; they would trip that
+   guard and abort the whole executable. They exercise the DEFAULT (non-CB) relevancy
+   path, which is where the firing they catch actually happens, so skipping them under CB
+   loses no coverage. Same on-value vocabulary as [Sat]'s own [chrono_from_env]. *)
+let chrono_on =
+  match Sys.getenv_opt "OXSMT_CHRONO" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let () =
   test_eliminable_inert_when_off ();
-  test_branch_filter_firing ();
-  test_branch_filter_parity ();
-  test_branch_filter_exception_safe ();
+  if chrono_on
+  then
+    Printf.printf
+      "sat_test: OXSMT_CHRONO set => skipping branch-filter tests (CB and a branch \
+       filter are mutually exclusive; they run in the default config)\n"
+  else (
+    test_branch_filter_firing ();
+    test_branch_filter_parity ();
+    test_branch_filter_exception_safe ());
   test_lbd_of_levels ();
   test_rephase_engagement ();
   test_reducedb_engagement ();
