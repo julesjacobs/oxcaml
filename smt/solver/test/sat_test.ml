@@ -742,6 +742,101 @@ let test_reducedb_engagement () =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Flat clause arena — reduceDB RELOCATION stress (task #48 W3, the committed RED). The
+   arena identifies a clause by an integer cref; [reduce_db] rebuilds a fresh arena from
+   the kept clauses and must remap EVERY live cref — both holder classes: every watch list
+   AND every [Implied_by] reason. This test forces many reduceDB cycles with a full major
+   GC interleaved between them (via the budget-tick hook), so relocation runs under
+   collection, and pins verdict + the exact counter trio (counted-identical to the
+   pre-arena core) on a hard UNSAT instance, plus model validity on a hard SAT instance.
+
+   DISCRIMINATION (a regression test must fail against buggy code): a remap-class-skip
+   mutant in [reduce_db] — dropping the watch-list rewrite OR the reason-array rewrite —
+   leaves stale crefs after the first relocation. Propagation / conflict analysis then
+   reads a wrong or out-of-range clause, so the solve changes a counter, flips the
+   verdict, or crashes out-of-bounds — and this test goes RED. Verified against both
+   mutants; see logs/sat-arena-build-log.md. *)
+
+(* PHP(8,7) with ONE at-most-one clause dropped: satisfiable (the freed hole 0 takes two
+   pigeons) yet still conflict-heavy, so reduceDB fires. Returns the solver AND the clause
+   list (1-based DIMACS) so the reported model can be validated against every clause. *)
+let php_sat_minus_one n =
+  let s = Sat.create () in
+  let clauses = ref [] in
+  let pv = Array.make_matrix (n + 1) n 0 in
+  for i = 0 to n do
+    for h = 0 to n - 1 do
+      pv.(i).(h) <- Sat.new_var s
+    done
+  done;
+  let addc lits =
+    clauses := List.map (fun (v, pos) -> if pos then v + 1 else -(v + 1)) lits :: !clauses;
+    Sat.add_clause
+      s
+      (List.map (fun (v, pos) -> if pos then Sat.pos v else Sat.neg v) lits)
+  in
+  for i = 0 to n do
+    addc (List.init n (fun h -> pv.(i).(h), true))
+  done;
+  let dropped = ref false in
+  for h = 0 to n - 1 do
+    for i = 0 to n do
+      for j = i + 1 to n do
+        if !dropped
+        then addc [ pv.(i).(h), false; pv.(j).(h), false ]
+        else dropped := true (* skip the first at-most-one clause => SAT *)
+      done
+    done
+  done;
+  s, List.rev !clauses
+;;
+
+let test_arena_reduce_db_stress () =
+  (* Interleave a full major GC every 500 conflicts, so the arena rebuild + cref remap in
+     [reduce_db] runs across a collection. *)
+  let with_gc_hook s =
+    let n = ref 0 in
+    Sat.set_budget_tick
+      s
+      (Some
+         (fun () ->
+           incr n;
+           if !n mod 500 = 0 then Gc.full_major ()))
+  in
+  (* UNSAT leg — PHP(8,7): >4000 conflicts, reduceDB fires ~10x. Pin verdict + exact
+     counters, and re-run to pin determinism under forced GC. *)
+  let run_unsat () =
+    let s = php_solver 7 in
+    with_gc_hook s;
+    let r = Sat.solve s in
+    let st = Sat.stats s in
+    r, st.Sat.Stats.conflicts, st.Sat.Stats.decisions, st.Sat.Stats.propagations
+  in
+  let r1, c1, d1, p1 = run_unsat () in
+  let r2, c2, d2, p2 = run_unsat () in
+  check "arena-stress: PHP(8,7) unsat under forced-GC reduceDB relocation" (r1 = Sat.Unsat);
+  check
+    (Printf.sprintf "arena-stress: reduceDB engaged (conflicts %d > 3800)" c1)
+    (c1 > 3800);
+  check
+    "arena-stress: deterministic verdict+counters across two forced-GC runs"
+    (r1 = r2 && c1 = c2 && d1 = d2 && p1 = p2);
+  (* SAT leg — PHP(8,7) minus one AMO clause: conflict-heavy sat. The reported model must
+     satisfy EVERY clause; a relocation bug that corrupts propagation drives a wrong-SAT
+     model that falsifies a clause (or a wrong verdict / crash). *)
+  let s, clauses = php_sat_minus_one 7 in
+  with_gc_hook s;
+  let r = Sat.solve s in
+  check "arena-stress: PHP(8,7)-minus-one is sat" (r = Sat.Sat);
+  match r with
+  | Sat.Sat ->
+    check
+      "arena-stress: sat model satisfies every clause"
+      (model_satisfies clauses (Sat.model s))
+  | Sat.Unsat -> ()
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Branch-filter hook (sat.mli set_branch_filter). Two discriminating checks the relevancy
    lane rides on:
    (a) FIRING oracle — a filter that forbids a set of otherwise-free decision vars
@@ -898,6 +993,7 @@ let () =
   test_reduce_deletions_worst_half_and_locked ();
   test_rephase_schedule ();
   test_search_machinery_determinism ();
+  test_arena_reduce_db_stress ();
   test_dimacs_strict ();
   test_budget_tick_exception_safety ();
   test_analyze_multi ();

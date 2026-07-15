@@ -23,42 +23,65 @@ type result =
   | Sat
   | Unsat
 
-(* A clause in the arena. [lits.(0)] and [lits.(1)] are the two watched literals;
-   propagation swaps array slots to move a watch. [id] is stable and unique
-   (proof-readiness, §7). [learnt] clauses are subject to [reduce_db]; original clauses
-   are never deleted. [deleted] is set by [reduce_db] and swept lazily out of watch lists
-   during propagation. *)
-type clause =
-  { id : int
-  ; lits : lit array
-  ; mutable activity : float
-  ; mutable lbd : int
-    (* LBD ("glue"): distinct decision levels among the literals, computed when the
-         clause is learned and improved (lowered) whenever conflict analysis re-derives it
-         as a reason. Drives LBD-based reduceDB (S3). 0 for original / transient clauses
-         (never in [learnts], never scored). *)
-  ; learnt : bool
-  ; mutable deleted : bool
+(* FLAT CLAUSE ARENA (task #48, W3). A clause is a [cref]: an index into parallel arrays.
+   All clause literals are concatenated into one shared [a_lits]; a clause owns the span
+   [a_off.(cr) .. a_off.(cr) + a_len.(cr)). Slots 0 and 1 of that span are the two watched
+   literals (propagation swaps within the span, exactly like the old [c.lits.(0)/(1)]
+   swaps). [a_id.(cr)] is the stable unique id (proof-readiness, §7). [a_lbd]/[a_act] carry
+   the LBD "glue" and VSIDS activity. [a_flags] bit 0 = learnt, bit 1 = deleted; deleted is
+   set by [reduce_db]/vivification and swept lazily out of watch lists during propagation.
+
+   Why an arena. It replaces per-clause heap records (each with its own [lits] array),
+   cutting the allocation/GC-marking churn that dominated the hard gap files; and it lets a
+   clause be named by an IMMEDIATE int, so a watch entry and an [Implied_by] reason store an
+   unboxed cref into an unboxed [int] array — NO [caml_modify] write barrier fires on the
+   propagation firehose (the 6.7% self-time the thr-sat-watch lever-1 analysis attributed
+   3:1 to watch-entry stores over reason stores). [reduce_db] is the crux: it rebuilds a
+   fresh arena from the kept clauses and remaps every live cref (all watch lists + every
+   [Implied_by] reason) — see there. *)
+type cref = int
+
+(* Reason encoding (was [type reason = Decision | Implied_by of clause | Theory_prop]).
+   Stored UNBOXED in an [int Dynarray.t] so [reason.(v) <- ...] fires no write barrier. A
+   nonnegative value IS the [Implied_by] cref; the two negative sentinels are the constant
+   constructors. [Decision] is a branch choice or a level-0 unit; [Theory_prop] marks a
+   literal a plugged theory enqueued (ADR-0005 §3 T_consistent), whose reason clause is
+   not stored but reconstructed lazily via [theory.explain] iff conflict analysis resolves
+   on it (CONTRACT-EX). With no theory plugged only [Decision]/[Implied_by] occur. *)
+let r_decision = -1
+let r_theory = -2
+
+(* An off-arena TRANSIENT theory reason/conflict clause (ADR-0005 §3). Minted with an id
+   (for trace antecedents) but never attached to a watch list, never stored in the arena,
+   never reduced — it exists only to be read by [analyze]/[analyze_final]. Kept as a
+   lightweight record (id + lits) so it costs the arena nothing, preserving the pre-arena
+   transient behaviour. *)
+type tclause =
+  { tid : int
+  ; tlits : lit array
   }
 
-(* A watch: the clause plus a cached "blocker" literal (the other watched literal). If the
-   blocker is already true the clause is satisfied and needs no inspection — the standard
-   MiniSat fast path. *)
-type watch =
-  { cl : clause
-  ; mutable blocker : lit
-  }
+(* A CLAUSE HANDLE for conflict analysis: either an arena clause (by cref) or an off-arena
+   transient. Used ONLY by [analyze]/[analyze_final]/[handle_confl] — never stored in a
+   watch or a reason (those hold bare crefs), so this box is per-conflict, off the
+   propagation firehose. *)
+type chandle =
+  | H_arena of cref
+  | H_transient of tclause
 
-(* Why a variable is assigned. [Decision] is a branch choice or a level-0 unit (reason
-   [None] in the pre-seam core). [Implied_by c] is Boolean unit propagation on clause [c].
-   [Theory_prop] marks a literal enqueued by a plugged theory (ADR-0005 §3 T_consistent):
-   its reason clause is NOT stored — it is reconstructed lazily via [theory.explain] only
-   if conflict analysis resolves on it (CONTRACT-EX). With no theory plugged, only
-   [Decision]/[Implied_by] occur, isomorphic to the original [clause option]. *)
-type reason =
-  | Decision
-  | Implied_by of clause
-  | Theory_prop
+(* A per-literal WATCH LIST, unboxed. The old [watch = { cl : clause; mutable blocker }]
+   record lived in a [watch Dynarray.t] — a POINTER array, so compacting it during
+   propagation ([Dynarray.set ws j w]) fired [caml_modify] on every kept entry (the
+   dominant barrier cost). Here each list is two PARALLEL unboxed [int Dynarray.t] kept in
+   lockstep: entry [i] is the clause [Dynarray.get wc i] watched with cached blocker
+   literal [Dynarray.get wb i]. Both are plain [int] arrays, so a compaction store is
+   barrier-free. The blocker is the MiniSat fast-path cache: if it is already true the
+   clause is satisfied and needs no inspection. INVARIANT: [wc] and [wb] always have equal
+   length (every add/keep/relocate/truncate below touches them together). *)
+type watchlist =
+  { wc : int Dynarray.t (* watched clause crefs *)
+  ; wb : int Dynarray.t (* cached blocker literal per entry *)
+  }
 
 (* Certificate provenance / trace types (ADR-0013 §4.0). These are the frozen
    cert-emission seam (sat.mli, Tranche C). The emission bodies land later as [sat.ml]
@@ -117,8 +140,9 @@ type t =
   ; trail_pos : int Dynarray.t
     (* var -> its index in [trail] while assigned, else -1. Read only for the theory
          seam's strict CONTRACT-EX precedence check; write-only otherwise. *)
-  ; reason :
-      reason Dynarray.t (* why the var was assigned (Decision/Implied_by/Theory_prop) *)
+  ; reason : int Dynarray.t
+    (* why the var was assigned, UNBOXED (Implied_by cref>=0 / [r_decision] /
+         [r_theory]); an [int] array, so [reason.(v) <- ...] fires no write barrier *)
   ; polarity : bool Dynarray.t (* saved phase: true => decide negative first *)
   ; seen : bool Dynarray.t (* scratch flag for conflict analysis *)
   ; (* Per-variable VSIDS activity and its max-heap (top = highest activity). *)
@@ -126,14 +150,25 @@ type t =
   ; heap : int Dynarray.t (* heap of vars *)
   ; heap_pos : int Dynarray.t (* var -> index in [heap], or -1 if absent *)
   ; (* Watch lists indexed by literal (length [2 * nvars]). *)
-    watches : watch Dynarray.t Dynarray.t
+    watches : watchlist Dynarray.t
   ; (* The assignment trail and its per-decision-level boundaries. *)
     trail : lit Dynarray.t
   ; trail_lim : int Dynarray.t
   ; mutable qhead : int (* propagation cursor into [trail] *)
-  ; (* Clause storage. *)
-    clauses : clause Dynarray.t
-  ; learnts : clause Dynarray.t
+  ; (* Flat clause arena (parallel arrays indexed by cref). [a_lits] holds every clause's
+       literals concatenated; a clause [cr] owns [a_lits.(a_off.(cr) .. +a_len.(cr))],
+       slots 0/1 watched. [a_flags] bit0 learnt, bit1 deleted. [clauses]/[learnts] are the
+       crefs of the original / learned clauses (originals never deleted; learnts subject
+       to [reduce_db]). *)
+    a_lits : int Dynarray.t
+  ; a_off : int Dynarray.t
+  ; a_len : int Dynarray.t
+  ; a_id : int Dynarray.t
+  ; a_lbd : int Dynarray.t
+  ; a_act : float Dynarray.t
+  ; a_flags : int Dynarray.t
+  ; clauses : cref Dynarray.t
+  ; learnts : cref Dynarray.t
   ; mutable next_id : int
   ; (* Activity increments and decay factors. *)
     mutable var_inc : float
@@ -376,6 +411,13 @@ let create ?(base_l0_cert_mode = false) () =
   ; trail = Dynarray.create ()
   ; trail_lim = Dynarray.create ()
   ; qhead = 0
+  ; a_lits = Dynarray.create ()
+  ; a_off = Dynarray.create ()
+  ; a_len = Dynarray.create ()
+  ; a_id = Dynarray.create ()
+  ; a_lbd = Dynarray.create ()
+  ; a_act = Dynarray.create ()
+  ; a_flags = Dynarray.create ()
   ; clauses = Dynarray.create ()
   ; learnts = Dynarray.create ()
   ; next_id = 0
@@ -481,6 +523,67 @@ let lit_val t l =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Flat clause arena accessors. A [cref] indexes the parallel [a_*] arrays; a clause's
+   literals live at [a_lits.(a_off.(cr) .. +a_len.(cr))]. All are O(1) [Dynarray] gets.
+   The literal getter/setter add the per-clause base offset; slots 0/1 are the watched
+   pair, so [cl_set_lit] is exactly the old [c.lits.(i) <- _] watched-literal swap (in
+   place, within the clause's span — never relocates). *)
+let cl_len t (cr : cref) = Dynarray.get t.a_len cr
+let cl_lit t (cr : cref) i = Dynarray.get t.a_lits (Dynarray.get t.a_off cr + i)
+let cl_set_lit t (cr : cref) i l = Dynarray.set t.a_lits (Dynarray.get t.a_off cr + i) l
+let cl_id t (cr : cref) = Dynarray.get t.a_id cr
+let cl_lbd t (cr : cref) = Dynarray.get t.a_lbd cr
+let cl_set_lbd t (cr : cref) v = Dynarray.set t.a_lbd cr v
+let cl_act t (cr : cref) = Dynarray.get t.a_act cr
+let cl_set_act t (cr : cref) v = Dynarray.set t.a_act cr v
+let cl_learnt t (cr : cref) = Dynarray.get t.a_flags cr land 1 <> 0
+let cl_deleted t (cr : cref) = Dynarray.get t.a_flags cr land 2 <> 0
+
+let cl_set_deleted t (cr : cref) =
+  Dynarray.set t.a_flags cr (Dynarray.get t.a_flags cr lor 2)
+;;
+
+(* Materialize a clause's literals as a fresh array (allocates). Off the firehose: used
+   only where an array value is genuinely needed (never in [propagate]). *)
+let cl_lits t (cr : cref) = Array.init (cl_len t cr) (fun i -> cl_lit t cr i)
+
+(* Clause-handle accessors, unifying an arena cref and an off-arena transient for
+   [analyze]/[analyze_final]. Per-conflict, off the firehose. A transient is never learnt. *)
+let ch_id t = function
+  | H_arena cr -> cl_id t cr
+  | H_transient tc -> tc.tid
+;;
+
+let ch_len t = function
+  | H_arena cr -> cl_len t cr
+  | H_transient tc -> Array.length tc.tlits
+;;
+
+let ch_lit t ch i =
+  match ch with
+  | H_arena cr -> cl_lit t cr i
+  | H_transient tc -> tc.tlits.(i)
+;;
+
+(* Append a clause to the arena and return its cref. Copies [lits] into the shared
+   [a_lits] (so the caller's array is never aliased — matching the old [Array.copy]);
+   records the metadata; and files the cref in [clauses] (original) or [learnts]
+   (learned). *)
+let arena_add t id lits learnt =
+  let cr : cref = Dynarray.length t.a_off in
+  let off = Dynarray.length t.a_lits in
+  Array.iter (fun l -> Dynarray.add_last t.a_lits l) lits;
+  Dynarray.add_last t.a_off off;
+  Dynarray.add_last t.a_len (Array.length lits);
+  Dynarray.add_last t.a_id id;
+  Dynarray.add_last t.a_lbd 0;
+  Dynarray.add_last t.a_act 0.0;
+  Dynarray.add_last t.a_flags (if learnt then 1 else 0);
+  if learnt then Dynarray.add_last t.learnts cr else Dynarray.add_last t.clauses cr;
+  cr
+;;
+
+(* ------------------------------------------------------------------ *)
 (* VSIDS variable-activity max-heap. Ordered by activity; ties by nothing explicit, so the
    heap's shape (a function of insertion/removal order) is the deterministic tiebreak. *)
 
@@ -574,11 +677,11 @@ let var_bump t v =
 
 let var_decay_bump t = t.var_inc <- t.var_inc /. var_decay
 
-let cla_bump t c =
-  c.activity <- c.activity +. t.cla_inc;
-  if c.activity > 1e20
+let cla_bump t (cr : cref) =
+  cl_set_act t cr (cl_act t cr +. t.cla_inc);
+  if cl_act t cr > 1e20
   then (
-    Dynarray.iter (fun c -> c.activity <- c.activity *. 1e-20) t.learnts;
+    Dynarray.iter (fun cr -> cl_set_act t cr (cl_act t cr *. 1e-20)) t.learnts;
     t.cla_inc <- t.cla_inc *. 1e-20)
 ;;
 
@@ -592,6 +695,13 @@ let clause_lbd t lits =
     (Array.map (fun l -> Dynarray.get t.level (var_of_lit l)) lits)
 ;;
 
+(* LBD of an ARENA clause [cr], reading its literals' levels in place (no
+   materialization). Same value as [clause_lbd t (cl_lits t cr)]; used on the per-conflict
+   [analyze] path. *)
+let clause_lbd_cref t (cr : cref) =
+  clause_lbd t (Array.init (cl_len t cr) (fun i -> cl_lit t cr i))
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Variable allocation. Grows every per-var Dynarray and the two watch lists for the new
    var's literals, and makes the var decision-eligible. *)
@@ -601,14 +711,14 @@ let ensure_var t v =
     Dynarray.add_last t.assigns 0;
     Dynarray.add_last t.level 0;
     Dynarray.add_last t.trail_pos (-1);
-    Dynarray.add_last t.reason Decision;
+    Dynarray.add_last t.reason r_decision;
     Dynarray.add_last t.polarity true;
     Dynarray.add_last t.best_phase true (* best-trail phase memory: FALSE-first default *);
     Dynarray.add_last t.seen false;
     Dynarray.add_last t.var_act 0.0;
     Dynarray.add_last t.heap_pos (-1);
-    Dynarray.add_last t.watches (Dynarray.create ());
-    Dynarray.add_last t.watches (Dynarray.create ());
+    Dynarray.add_last t.watches { wc = Dynarray.create (); wb = Dynarray.create () };
+    Dynarray.add_last t.watches { wc = Dynarray.create (); wb = Dynarray.create () };
     Dynarray.add_last t.eliminable false (* default frozen (A10) *);
     Dynarray.add_last t.eliminated false;
     let nv = t.nvars in
@@ -637,21 +747,22 @@ let fresh_id t =
   id
 ;;
 
-let mk_clause_with_id t id lits learnt =
-  let c =
-    { id; lits = Array.copy lits; activity = 0.0; lbd = 0; learnt; deleted = false }
-  in
-  if learnt then Dynarray.add_last t.learnts c else Dynarray.add_last t.clauses c;
-  c
-;;
-
+let mk_clause_with_id t id lits learnt : cref = arena_add t id lits learnt
 let mk_clause t lits learnt = mk_clause_with_id t (fresh_id t) lits learnt
 
-let attach t c =
-  let l0 = c.lits.(0)
-  and l1 = c.lits.(1) in
-  Dynarray.add_last (Dynarray.get t.watches (neg_lit l0)) { cl = c; blocker = l1 };
-  Dynarray.add_last (Dynarray.get t.watches (neg_lit l1)) { cl = c; blocker = l0 }
+(* Add a watch entry (cref + cached blocker) to literal [l]'s list, keeping the parallel
+   arrays in lockstep. *)
+let watch_add t l ~cref ~blocker =
+  let ws = Dynarray.get t.watches l in
+  Dynarray.add_last ws.wc cref;
+  Dynarray.add_last ws.wb blocker
+;;
+
+let attach t (cr : cref) =
+  let l0 = cl_lit t cr 0
+  and l1 = cl_lit t cr 1 in
+  watch_add t (neg_lit l0) ~cref:cr ~blocker:l1;
+  watch_add t (neg_lit l1) ~cref:cr ~blocker:l0
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -674,16 +785,17 @@ let new_decision_level t = Dynarray.add_last t.trail_lim (Dynarray.length t.trai
 let enqueue_level t reason =
   if not t.chrono
   then decision_level t
+  else if reason < 0
+  then (* [r_decision] / [r_theory] *) decision_level t
   else (
-    match reason with
-    | Decision | Theory_prop -> decision_level t
-    | Implied_by c ->
-      let m = ref 0 in
-      for i = 1 to Array.length c.lits - 1 do
-        let lv = Dynarray.get t.level (var_of_lit c.lits.(i)) in
-        if lv > !m then m := lv
-      done;
-      !m)
+    (* [Implied_by cr]: max level among the reason clause's OTHER (currently false) lits. *)
+    let cr : cref = reason in
+    let m = ref 0 in
+    for i = 1 to cl_len t cr - 1 do
+      let lv = Dynarray.get t.level (var_of_lit (cl_lit t cr i)) in
+      if lv > !m then m := lv
+    done;
+    !m)
 ;;
 
 let unchecked_enqueue t lit reason =
@@ -737,7 +849,7 @@ let cancel_until t level =
         Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
         Dynarray.set t.assigns v 0;
         Dynarray.set t.trail_pos v (-1);
-        Dynarray.set t.reason v Decision;
+        Dynarray.set t.reason v r_decision;
         heap_insert t v
       done;
       Dynarray.truncate t.trail target;
@@ -761,7 +873,7 @@ let cancel_until t level =
           Dynarray.set t.polarity v (Dynarray.get t.assigns v = -1);
           Dynarray.set t.assigns v 0;
           Dynarray.set t.trail_pos v (-1);
-          Dynarray.set t.reason v Decision;
+          Dynarray.set t.reason v r_decision;
           Hashtbl.remove t.chrono_reason v;
           heap_insert t v)
         else (
@@ -795,13 +907,12 @@ let cancel_until t level =
          for i = 0 to Dynarray.length t.trail - 1 do
            let l = Dynarray.get t.trail i in
            let v = var_of_lit l in
-           match Dynarray.get t.reason v with
-           | Theory_prop ->
+           if Dynarray.get t.reason v = r_theory
+           then
              (* [theory_premises] serves an EXISTING snapshot if this survivor was already
                 snapshotted at an earlier backtrack (its adapter cache is long gone); only
                 a freshly-propagated survivor falls through to the intact [th.explain]. *)
              Hashtbl.replace t.chrono_reason v (theory_premises t th l)
-           | Decision | Implied_by _ -> ()
          done);
       (* THE §10.2 CRUX. A scattered removal can turn a clause whose ONLY satisfying
          literal was a removed watched literal — with a surviving FALSE partner watch —
@@ -853,75 +964,83 @@ let propagate t =
     let p = Dynarray.get t.trail t.qhead in
     t.qhead <- t.qhead + 1;
     t.propagations <- t.propagations + 1;
-    (* Clauses in [watches.(p)] watch [neg_lit p], which is now false. *)
+    (* Clauses in [watches.(p)] watch [neg_lit p], which is now false. The list is two
+       parallel unboxed [int] arrays ([wc] crefs, [wb] cached blockers); we sweep entry
+       [i] and compact kept entries down to [j]. Every store below is into an [int] array
+       — no [caml_modify] write barrier (the arena's point). *)
     let ws = Dynarray.get t.watches p in
-    let n = Dynarray.length ws in
+    let wc = ws.wc
+    and wb = ws.wb in
+    let n = Dynarray.length wc in
     let i = ref 0
     and j = ref 0 in
     let false_lit = neg_lit p in
     while !i < n do
-      let w = Dynarray.get ws !i in
-      if lit_val t w.blocker = 1
+      let cr = Dynarray.get wc !i in
+      let blk = Dynarray.get wb !i in
+      if lit_val t blk = 1
       then (
         (* Clause already satisfied by its blocker; keep the watch untouched. *)
-        Dynarray.set ws !j w;
+        Dynarray.set wc !j cr;
+        Dynarray.set wb !j blk;
         incr i;
         incr j)
+      else if cl_deleted t cr
+      then incr i (* sweep deleted clause out of the watch list *)
       else (
-        let c = w.cl in
-        if c.deleted
-        then incr i (* sweep deleted clause out of the watch list *)
+        (* Ensure the false literal is at slot 1, its partner at slot 0. *)
+        if cl_lit t cr 0 = false_lit
+        then (
+          cl_set_lit t cr 0 (cl_lit t cr 1);
+          cl_set_lit t cr 1 false_lit);
+        let first = cl_lit t cr 0 in
+        (* The refreshed blocker is the new partner [first] (the pre-arena code mutated
+           [w.blocker <- first] here; we simply store [first] as the kept/relocated
+           entry's blocker below). [old_blocker] preserves the exact partner-satisfied
+           condition. *)
+        let old_blocker = blk in
+        if first <> old_blocker && lit_val t first = 1
+        then (
+          (* Newly satisfied by the partner watch. *)
+          Dynarray.set wc !j cr;
+          Dynarray.set wb !j first;
+          incr i;
+          incr j)
         else (
-          (* Ensure the false literal is at slot 1, its partner at slot 0. *)
-          if c.lits.(0) = false_lit
+          (* Look for a non-false literal to watch instead of [false_lit]. *)
+          let len = cl_len t cr in
+          let k = ref 2 in
+          let found = ref false in
+          while (not !found) && !k < len do
+            if lit_val t (cl_lit t cr !k) <> -1 then found := true else incr k
+          done;
+          if !found
           then (
-            c.lits.(0) <- c.lits.(1);
-            c.lits.(1) <- false_lit);
-          let first = c.lits.(0) in
-          (* Reuse [w] by refreshing its blocker to the new partner [first], rather than
-             allocating a fresh watch record on every non-fast-path visit (~40% of visits;
-             thr-sat-watch-log.md). [old_blocker] preserves the exact partner-satisfied
-             branch condition below. *)
-          let old_blocker = w.blocker in
-          w.blocker <- first;
-          if first <> old_blocker && lit_val t first = 1
-          then (
-            (* Newly satisfied by the partner watch. *)
-            Dynarray.set ws !j w;
-            incr i;
-            incr j)
+            let lk = cl_lit t cr !k in
+            cl_set_lit t cr 1 lk;
+            cl_set_lit t cr !k false_lit;
+            watch_add t (neg_lit lk) ~cref:cr ~blocker:first;
+            incr i (* drop from this watch list; now watched elsewhere *))
           else (
-            (* Look for a non-false literal to watch instead of [false_lit]. *)
-            let len = Array.length c.lits in
-            let k = ref 2 in
-            let found = ref false in
-            while (not !found) && !k < len do
-              if lit_val t c.lits.(!k) <> -1 then found := true else incr k
-            done;
-            if !found
+            (* No new watch: the clause is unit or conflicting. Keep the watch. *)
+            Dynarray.set wc !j cr;
+            Dynarray.set wb !j first;
+            incr i;
+            incr j;
+            if lit_val t first = -1
             then (
-              let lk = c.lits.(!k) in
-              c.lits.(1) <- lk;
-              c.lits.(!k) <- false_lit;
-              Dynarray.add_last (Dynarray.get t.watches (neg_lit lk)) w;
-              incr i (* drop from this watch list; now watched elsewhere *))
-            else (
-              (* No new watch: the clause is unit or conflicting. Keep the watch. *)
-              Dynarray.set ws !j w;
-              incr i;
-              incr j;
-              if lit_val t first = -1
-              then (
-                confl := Some c;
-                (* copy the tail of the watch list unchanged *)
-                while !i < n do
-                  Dynarray.set ws !j (Dynarray.get ws !i);
-                  incr i;
-                  incr j
-                done)
-              else unchecked_enqueue t first (Implied_by c)))))
+              confl := Some (H_arena cr);
+              (* copy the tail of the watch list unchanged *)
+              while !i < n do
+                Dynarray.set wc !j (Dynarray.get wc !i);
+                Dynarray.set wb !j (Dynarray.get wb !i);
+                incr i;
+                incr j
+              done)
+            else unchecked_enqueue t first cr)))
     done;
-    Dynarray.truncate ws !j
+    Dynarray.truncate wc !j;
+    Dynarray.truncate wb !j
   done;
   !confl
 ;;
@@ -934,9 +1053,7 @@ let propagate t =
    but never attached to a watch list or stored in the arena — they exist only to be read
    by [analyze]. *)
 
-let transient_clause t lits =
-  { id = fresh_id t; lits; activity = 0.0; lbd = 0; learnt = false; deleted = false }
-;;
+let transient_clause t lits : tclause = { tid = fresh_id t; tlits = lits }
 
 (* Cert emission (ADR-0013 §4.0): surface a materialized theory transient's id ↔ clause so
    any later citation of it (an [analyze]/[analyze_final] antecedent, or an
@@ -944,9 +1061,9 @@ let transient_clause t lits =
    clause [p ∨ ¬p₁ ∨ … ∨ ¬pₖ] (implied literal at slot 0); [Conflict] is a falsified
    premise clause. Pure side channel, guarded by the trace: [transient_clause] mints the
    id regardless of trace, so firing this changes nothing when untraced (bit-identical). *)
-let note_theory_clause t role c =
+let note_theory_clause t role (c : tclause) =
   (match t.trace with
-   | Some tr -> tr.on_theory_clause ~id:c.id ~clause:c.lits ~role
+   | Some tr -> tr.on_theory_clause ~id:c.tid ~clause:c.tlits ~role
    | None -> ());
   c
 ;;
@@ -1054,7 +1171,7 @@ let analyze t confl =
   let out = Dynarray.create () in
   Dynarray.add_last out 0 (* placeholder for the asserting literal *);
   let track = t.trace <> None in
-  let ants = ref (if track then [ confl.id ] else []) in
+  let ants = ref (if track then [ ch_id t confl ] else []) in
   (* Vars marked [seen] during analysis, to clear at the end. *)
   let marked = Dynarray.create () in
   let mark v =
@@ -1079,27 +1196,26 @@ let analyze t confl =
     then decision_level t
     else (
       let m = ref 0 in
-      Array.iter
-        (fun l ->
-           let lv = Dynarray.get t.level (var_of_lit l) in
-           if lv > !m then m := lv)
-        confl.lits;
+      for i = 0 to ch_len t confl - 1 do
+        let lv = Dynarray.get t.level (var_of_lit (ch_lit t confl i)) in
+        if lv > !m then m := lv
+      done;
       !m)
   in
   let continue = ref true in
   while !continue do
-    if !c.learnt
-    then (
-      cla_bump t !c;
-      (* LBD improvement (Glucose): a learned clause re-derived as a reason may now tie
-         together fewer levels; lowering its LBD protects a recently-useful clause from
-         reduceDB. Only lower, never raise. *)
-      let l = clause_lbd t !c.lits in
-      if l < !c.lbd then !c.lbd <- l);
-    let lits = !c.lits in
+    (match !c with
+     | H_arena cr when cl_learnt t cr ->
+       cla_bump t cr;
+       (* LBD improvement (Glucose): a learned clause re-derived as a reason may now tie
+          together fewer levels; lowering its LBD protects a recently-useful clause from
+          reduceDB. Only lower, never raise. *)
+       let l = clause_lbd_cref t cr in
+       if l < cl_lbd t cr then cl_set_lbd t cr l
+     | H_arena _ | H_transient _ -> ());
     let start = if !p = -1 then 0 else 1 in
-    for jj = start to Array.length lits - 1 do
-      let q = lits.(jj) in
+    for jj = start to ch_len t !c - 1 do
+      let q = ch_lit t !c jj in
       let vq = var_of_lit q in
       if (not (Dynarray.get t.seen vq)) && Dynarray.get t.level vq > 0
       then (
@@ -1136,11 +1252,13 @@ let analyze t confl =
     then continue := false
     else (
       (c
-       := match Dynarray.get t.reason vp with
-          | Implied_by cc -> cc
-          | Theory_prop -> theory_reason_clause t pl (* materialize the lazy reason *)
-          | Decision -> assert false);
-      if track then ants := !c.id :: !ants)
+       := let r = Dynarray.get t.reason vp in
+          if r >= 0
+          then H_arena r
+          else if r = r_theory
+          then H_transient (theory_reason_clause t pl) (* materialize the lazy reason *)
+          else assert false);
+      if track then ants := ch_id t !c :: !ants)
   done;
   Dynarray.set out 0 (neg_lit !p);
   (* Local minimization: drop a literal whose reason's other literals are all already in
@@ -1162,22 +1280,24 @@ let analyze t confl =
     for i = 1 to len - 1 do
       let l = Dynarray.get out i in
       let v = var_of_lit l in
+      let r = Dynarray.get t.reason v in
       let redundant =
-        match Dynarray.get t.reason v with
-        | Decision -> false (* a decision literal is never redundant *)
-        | Theory_prop ->
-          false (* keep theory-propagated literals (sound: never over-drop) *)
-        | Implied_by rc ->
-          let rlits = rc.lits in
+        (* [r_decision]: a decision literal is never redundant. [r_theory]: keep
+           theory-propagated literals (sound: never over-drop). Otherwise [r >= 0] is the
+           [Implied_by] reason clause. *)
+        if r < 0
+        then false
+        else (
+          let cr : cref = r in
           let ok = ref true in
           let k = ref 1 in
-          while !ok && !k < Array.length rlits do
-            let vk = var_of_lit rlits.(!k) in
+          while !ok && !k < cl_len t cr do
+            let vk = var_of_lit (cl_lit t cr !k) in
             if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
             then ok := false;
             incr k
           done;
-          !ok
+          !ok)
       in
       if not redundant
       then (
@@ -1262,21 +1382,24 @@ let analyze_final t p =
       let v = var_of_lit l in
       if Dynarray.get t.seen v && ((not t.chrono) || Dynarray.get t.level v > 0)
       then (
-        match Dynarray.get t.reason v with
-        | Decision -> Dynarray.add_last out (neg_lit l)
-        | Implied_by c ->
-          let lits = c.lits in
-          for j = 1 to Array.length lits - 1 do
-            let vj = var_of_lit lits.(j) in
+        let r = Dynarray.get t.reason v in
+        if r = r_decision
+        then Dynarray.add_last out (neg_lit l)
+        else if r >= 0
+        then (
+          (* [Implied_by cr] *)
+          let cr : cref = r in
+          for j = 1 to cl_len t cr - 1 do
+            let vj = var_of_lit (cl_lit t cr j) in
             if Dynarray.get t.level vj > 0 then mark vj
           done;
-          if track then ants := c.id :: !ants
-        | Theory_prop ->
-          (* a theory-propagated literal's premises are its reason; mark them (mirrors the
-             [Implied_by] clause body, whose slot 0 is [l] itself and is skipped). Same
-             strict CONTRACT-EX validation as the 1UIP path — a precedence-violating
-             reason here would silently produce a wrong failed-assumption core, so it must
-             raise. *)
+          if track then ants := cl_id t cr :: !ants)
+        else (
+          (* [r_theory]: a theory-propagated literal's premises are its reason; mark them
+             (mirrors the [Implied_by] clause body, whose slot 0 is [l] itself and is
+             skipped). Same strict CONTRACT-EX validation as the 1UIP path — a
+             precedence-violating reason here would silently produce a wrong
+             failed-assumption core, so it must raise. *)
           let premises = theory_explain_checked t l in
           List.iter
             (fun q -> if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
@@ -1287,7 +1410,7 @@ let analyze_final t p =
             let c =
               note_theory_clause t Reason (transient_clause t (reason_lits l premises))
             in
-            ants := c.id :: !ants))
+            ants := c.tid :: !ants)))
     done;
     Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked);
   List.map neg_lit (Array.to_list (Dynarray.to_array out)), !ants
@@ -1299,34 +1422,127 @@ let analyze_final t p =
    learned clauses. Deleted clauses are swept out of watch lists lazily during
    propagation. *)
 
-let locked t c =
-  let l0 = c.lits.(0) in
+let locked t (cr : cref) =
+  let l0 = cl_lit t cr 0 in
   lit_val t l0 = 1
   &&
-  match Dynarray.get t.reason (var_of_lit l0) with
-  | Implied_by rc -> rc == c
-  | Decision | Theory_prop -> false
+  (* the reason of [l0]'s var is [Implied_by cr] iff that reason int equals [cr] (was the
+     physical-equality [rc == c]). *)
+  let r = Dynarray.get t.reason (var_of_lit l0) in
+  r >= 0 && r = cr
 ;;
 
+(* Learned-clause deletion + ARENA RELOCATION (the crux, spec CRUX 1). Selects the learnts
+   to drop (unchanged: protect glue / locked / binary; delete the worst half by LBD desc,
+   activity asc — {!Search_heuristics.reduce_deletions}), then REBUILDS a fresh arena from
+   the kept clauses and remaps every live cref.
+
+   Kept order (deterministic ⇒ counted-identity: crefs are never observed in
+   verdict/counters/cert, only ids are, and ids are preserved in [a_id]): the originals
+   [t.clauses] in order, then the surviving learnts [t.learnts] in order. New crefs are
+   0,1,… in that order. The remap ([old_cref -> new_cref], -1 = dropped) then rewrites
+   BOTH live-cref holder classes in one pass:
+   1. the [reason] array — every [Implied_by cr]; a locked clause (the reason of a live
+      level>0 asserting literal) is PROTECTED from drop, so its remap is >=0 (fail-closed:
+      raise if a live one was dropped). A dropped cref can only be a STALE reason never
+      read — a level-0 unit's, or (defensively) an unassigned var's — which is reset to
+      [r_decision] (level-0/unassigned reasons are never dereferenced: [analyze]/
+      [analyze_final] skip level 0, [locked] ranges over learnts, [cancel_until] resets on
+      unwind). Such stale reasons arise only under SATPRE inprocessing, which re-creates
+      originals; the OFF path never drops a reason.
+   2. every watch list — remap the cref, DROP entries whose clause was dropped (matches
+      the old lazy deleted-sweep; live entries keep their relative order, so propagation
+      order is unchanged), blockers unchanged. *)
 let reduce_db t =
-  let arr = Dynarray.to_array t.learnts in
-  (* LBD-based reduceDB (S3): protect glue (LBD <= threshold), locked, and binary clauses;
-     among the rest delete the worst half by LBD (desc), ties by activity (asc). The pure
-     selection lives in {!Search_heuristics.reduce_deletions}; here we only supply the
-     per-clause stats and apply the verdict. *)
+  let learnt_arr = Dynarray.to_array t.learnts in
   let stats =
     Array.map
-      (fun c ->
-         { Search_heuristics.lbd = c.lbd
-         ; activity = c.activity
-         ; protected_ = locked t c || Array.length c.lits <= 2
+      (fun cr ->
+         { Search_heuristics.lbd = cl_lbd t cr
+         ; activity = cl_act t cr
+         ; protected_ = locked t cr || cl_len t cr <= 2
          })
-      arr
+      learnt_arr
   in
   let del = Search_heuristics.reduce_deletions stats in
-  Array.iteri (fun i c -> if del.(i) then c.deleted <- true) arr;
+  Array.iteri (fun i cr -> if del.(i) then cl_set_deleted t cr) learnt_arr;
+  (* Kept clauses in deterministic order: originals, then surviving learnts. *)
+  let kept_orig = Dynarray.to_array t.clauses in
+  let kept_learnt =
+    Array.of_seq (Seq.filter (fun cr -> not (cl_deleted t cr)) (Array.to_seq learnt_arr))
+  in
+  let n_orig = Array.length kept_orig in
+  let total = n_orig + Array.length kept_learnt in
+  let kept = Array.make (max 1 total) 0 in
+  Array.blit kept_orig 0 kept 0 n_orig;
+  Array.blit kept_learnt 0 kept n_orig (Array.length kept_learnt);
+  (* Snapshot each kept clause's data BEFORE clearing the arena, and build the remap. *)
+  let old_size = Dynarray.length t.a_off in
+  let remap = Array.make (max 1 old_size) (-1) in
+  let snap_lits = Array.init total (fun i -> cl_lits t kept.(i)) in
+  let snap_id = Array.init total (fun i -> cl_id t kept.(i)) in
+  let snap_lbd = Array.init total (fun i -> cl_lbd t kept.(i)) in
+  let snap_act = Array.init total (fun i -> cl_act t kept.(i)) in
+  let snap_learnt = Array.init total (fun i -> cl_learnt t kept.(i)) in
+  for i = 0 to total - 1 do
+    remap.(kept.(i)) <- i
+  done;
+  Dynarray.clear t.a_lits;
+  Dynarray.clear t.a_off;
+  Dynarray.clear t.a_len;
+  Dynarray.clear t.a_id;
+  Dynarray.clear t.a_lbd;
+  Dynarray.clear t.a_act;
+  Dynarray.clear t.a_flags;
+  Dynarray.clear t.clauses;
   Dynarray.clear t.learnts;
-  Array.iter (fun c -> if not c.deleted then Dynarray.add_last t.learnts c) arr
+  for i = 0 to total - 1 do
+    let off = Dynarray.length t.a_lits in
+    Array.iter (fun l -> Dynarray.add_last t.a_lits l) snap_lits.(i);
+    Dynarray.add_last t.a_off off;
+    Dynarray.add_last t.a_len (Array.length snap_lits.(i));
+    Dynarray.add_last t.a_id snap_id.(i);
+    Dynarray.add_last t.a_lbd snap_lbd.(i);
+    Dynarray.add_last t.a_act snap_act.(i);
+    Dynarray.add_last t.a_flags (if snap_learnt.(i) then 1 else 0);
+    if snap_learnt.(i)
+    then Dynarray.add_last t.learnts i
+    else Dynarray.add_last t.clauses i
+  done;
+  (* 1. reason array. *)
+  for v = 0 to t.nvars - 1 do
+    let r = Dynarray.get t.reason v in
+    if r >= 0
+    then (
+      let nr = remap.(r) in
+      if nr >= 0
+      then Dynarray.set t.reason v nr
+      else (
+        if Dynarray.get t.assigns v <> 0 && Dynarray.get t.level v > 0
+        then
+          failwith
+            "Sat.reduce_db: a live (level>0) Implied_by reason clause was dropped — \
+             locked invariant violated";
+        Dynarray.set t.reason v r_decision))
+  done;
+  (* 2. watch lists. *)
+  Dynarray.iter
+    (fun ws ->
+       let wc = ws.wc
+       and wb = ws.wb in
+       let n = Dynarray.length wc in
+       let j = ref 0 in
+       for i = 0 to n - 1 do
+         let nr = remap.(Dynarray.get wc i) in
+         if nr >= 0
+         then (
+           Dynarray.set wc !j nr;
+           Dynarray.set wb !j (Dynarray.get wb i);
+           incr j)
+       done;
+       Dynarray.truncate wc !j;
+       Dynarray.truncate wb !j)
+    t.watches
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -1429,7 +1645,7 @@ let add_clause ?(origin = Query) t lits =
         | [ l ] ->
           if lit_val t l = 0
           then (
-            unchecked_enqueue t l Decision;
+            unchecked_enqueue t l r_decision;
             (* a standing level-0 unit (ADR-0013 §1.3): declared to the checker, which
                also re-derives the unit closure from the [Input] clauses by BCP. The
                declaration is thus redundant; [base_l0_cert_mode] (default [false] emits
@@ -1594,19 +1810,20 @@ let save_model t =
 let record_learnt t learnt bt ants lbd =
   if Array.length learnt = 1
   then (
-    unchecked_enqueue t learnt.(0) Decision;
+    unchecked_enqueue t learnt.(0) r_decision;
     match t.trace with
     | Some tr ->
       tr.on_learned ~id:(fresh_id t) ~clause:learnt ~antecedents:ants ~btlevel:bt
     | None -> ())
   else (
     let c = mk_clause t learnt true in
-    c.lbd <- lbd;
+    cl_set_lbd t c lbd;
     attach t c;
     cla_bump t c;
-    unchecked_enqueue t learnt.(0) (Implied_by c);
+    unchecked_enqueue t learnt.(0) c (* [Implied_by c]: the cref IS the reason *);
     match t.trace with
-    | Some tr -> tr.on_learned ~id:c.id ~clause:learnt ~antecedents:ants ~btlevel:bt
+    | Some tr ->
+      tr.on_learned ~id:(cl_id t c) ~clause:learnt ~antecedents:ants ~btlevel:bt
     | None -> ())
 ;;
 
@@ -1623,7 +1840,7 @@ let enqueue_theory_lits t lits =
       (match lit_val t l with
        | 1 -> go progressed rest (* already implied; skip *)
        | 0 ->
-         unchecked_enqueue t l Theory_prop;
+         unchecked_enqueue t l r_theory;
          (* Cert emission (ADR-0013 §4.0, codex CRIT-2): a theory propagation at LEVEL 0
             is NOT derivable from the [Input] clauses, so the checker's level-0 BCP
             closure (§1.3) cannot recover it — an E2 [Level0_conflict] (or E3 core)
@@ -1635,9 +1852,11 @@ let enqueue_theory_lits t lits =
             ([theory_reason_clause] validates CONTRACT-EX and allocates a transient; both
             are pure side channels here). *)
          if t.trace <> None && decision_level t = 0
-         then ignore (theory_reason_clause t l : clause);
+         then ignore (theory_reason_clause t l : tclause);
          go true rest
-       | _ -> `Confl (theory_prop_conflict_clause t l) (* forced true but already false *))
+       | _ ->
+         `Confl (H_transient (theory_prop_conflict_clause t l))
+         (* forced true but already false *))
   in
   go false lits
 ;;
@@ -1690,7 +1909,8 @@ let propagate_theory t =
             (match enqueue_theory_lits t lits with
              | `Confl c -> confl := Some (c, true)
              | `Progress p -> again := p)
-          | T_conflict premises -> confl := Some (theory_conflict_clause t premises, true)
+          | T_conflict premises ->
+            confl := Some (H_transient (theory_conflict_clause t premises), true)
           | T_lemma clauses ->
             (* D3: Split is a Final-effort result; a Propagate-effort lemma is a contract
                deviation but still sound to add, so we accept it and re-propagate. *)
@@ -1701,7 +1921,10 @@ let propagate_theory t =
             if t.ok
             then again := true
             else
-              confl := Some (note_theory_clause t Conflict (transient_clause t [||]), true)))
+              confl
+              := Some
+                   ( H_transient (note_theory_clause t Conflict (transient_clause t [||]))
+                   , true )))
   done;
   !confl
 ;;
@@ -1865,7 +2088,7 @@ let search t assumps conflict_limit =
         <- Some
              (if theory && t.base_l0_cert_mode
               then Failed_assumption { antecedents = [] }
-              else Level0_conflict { conflict_id = confl.id });
+              else Level0_conflict { conflict_id = ch_id t confl });
       emit_terminal t;
       result := Some R_unsat
     in
@@ -1875,11 +2098,10 @@ let search t assumps conflict_limit =
       if t.theory <> None
       then (
         let maxl = ref 0 in
-        Array.iter
-          (fun l ->
-             let lv = Dynarray.get t.level (var_of_lit l) in
-             if lv > !maxl then maxl := lv)
-          confl.lits;
+        for i = 0 to ch_len t confl - 1 do
+          let lv = Dynarray.get t.level (var_of_lit (ch_lit t confl i)) in
+          if lv > !maxl then maxl := lv
+        done;
         if !maxl < decision_level t then cancel_until t !maxl);
       if decision_level t = 0
       then conclude_unsat ()
@@ -1892,11 +2114,10 @@ let search t assumps conflict_limit =
          level, which under CB may be below the current decision level. *)
       let conflict_level =
         let m = ref 0 in
-        Array.iter
-          (fun l ->
-             let lv = Dynarray.get t.level (var_of_lit l) in
-             if lv > !m then m := lv)
-          confl.lits;
+        for i = 0 to ch_len t confl - 1 do
+          let lv = Dynarray.get t.level (var_of_lit (ch_lit t confl i)) in
+          if lv > !m then m := lv
+        done;
         !m
       in
       if conflict_level = 0
@@ -1982,7 +2203,7 @@ let search t assumps conflict_limit =
                  assumption-forced decisions have a fixed phase, so they never need
                  rephasing and would only dilute the interval *);
               new_decision_level t;
-              unchecked_enqueue t l Decision;
+              unchecked_enqueue t l r_decision;
               (* effort (#60): tick AFTER the decision is on the trail. [pick_branch] has
                  already popped [l]'s var from the VSIDS heap; ticking before [enqueue]
                  would let [Budget.Exceeded] escape with the var neither on the trail nor
@@ -2011,7 +2232,9 @@ let search t assumps conflict_limit =
                        save_model t;
                        result := Some R_sat)
                   | T_conflict premises ->
-                    handle_confl ~theory:true (theory_conflict_clause t premises)
+                    handle_confl
+                      ~theory:true
+                      (H_transient (theory_conflict_clause t premises))
                   | T_lemma clauses ->
                     add_theory_lemmas t clauses;
                     (* an empty-at-level-0 lemma makes the instance unsat (blocker: search
@@ -2027,7 +2250,7 @@ let search t assumps conflict_limit =
           else (
             t.decisions <- t.decisions + 1;
             new_decision_level t;
-            unchecked_enqueue t !next Decision;
+            unchecked_enqueue t !next r_decision;
             (* effort (#60): tick AFTER enqueue, same rule as the [pick_branch] site above
                (codex AP1). This branch decides an assumption literal, whose var was NOT
                popped from the heap, so a pre-enqueue raise here would in fact be
@@ -2163,8 +2386,8 @@ let resolve_on a b v =
    the target and where the literature says vivification pays. Refs: Piette, Hamadi &
    Saïs, "Vivifying propositional clausal formulas" (ECAI 2008); the CDCL inprocessing
    form (CaDiCaL/Kissat). *)
-let vivify_learnt t c =
-  let lits = c.lits in
+let vivify_learnt t (cr : cref) =
+  let lits = cl_lits t cr in
   let n = Array.length lits in
   let kept = Dynarray.create () in
   let shortened =
@@ -2185,7 +2408,7 @@ let vivify_learnt t c =
        () (* [li] redundant under the assumed prefix: drop it (not assumed, not kept) *)
      | _ ->
        new_decision_level t;
-       unchecked_enqueue t (neg_lit li) Decision;
+       unchecked_enqueue t (neg_lit li) r_decision;
        (match propagate t with
         | Some _ ->
           Dynarray.add_last kept li;
@@ -2217,7 +2440,7 @@ let failed_literal_probing t =
   (* returns [true] if assuming [lit] conflicts under BCP (⇒ [¬lit] entailed); restores L0 *)
   let probe lit =
     new_decision_level t;
-    unchecked_enqueue t lit Decision;
+    unchecked_enqueue t lit r_decision;
     let c = propagate t in
     cancel_until t 0;
     c <> None
@@ -2246,7 +2469,7 @@ let failed_literal_probing t =
       | Some u ->
         if lit_val t u = 0
         then (
-          unchecked_enqueue t u Decision;
+          unchecked_enqueue t u r_decision;
           t.stat_flp <- t.stat_flp + 1);
         (match propagate t with
          | Some _ -> t.ok <- false (* the forced unit closes a level-0 conflict: unsat *)
@@ -2454,7 +2677,7 @@ let els_pass t work =
              t.stat_els <- t.stat_els + 1)
           !to_elim;
         List.iter
-          (fun u -> if lit_val t u = 0 then unchecked_enqueue t u Decision)
+          (fun u -> if lit_val t u = 0 then unchecked_enqueue t u r_decision)
           (List.sort_uniq compare !enq))))
 ;;
 
@@ -2493,14 +2716,15 @@ let run_round t =
       let work = Dynarray.create () in
       let bail = ref false in
       Dynarray.iter
-        (fun c ->
-           if (not c.deleted) && not !bail
+        (fun cr ->
+           if (not (cl_deleted t cr)) && not !bail
            then (
-             let satisfied = Array.exists (fun l -> lit_val t l = 1) c.lits in
+             let clits = cl_lits t cr in
+             let satisfied = Array.exists (fun l -> lit_val t l = 1) clits in
              if not satisfied
              then (
                let ls =
-                 Array.to_list c.lits
+                 Array.to_list clits
                  |> List.filter (fun l -> lit_val t l <> -1)
                  |> List.sort_uniq compare
                in
@@ -2687,14 +2911,16 @@ let run_round t =
         done;
         (* ---- Rebuild the clause DB from the survivors. ---- *)
         for l = 0 to n2 - 1 do
-          Dynarray.clear (Dynarray.get t.watches l)
+          let ws = Dynarray.get t.watches l in
+          Dynarray.clear ws.wc;
+          Dynarray.clear ws.wb
         done;
         Dynarray.clear t.clauses;
         Dynarray.iter
-          (fun wc ->
-             if (not wc.wdead) && Array.length wc.wl >= 2
+          (fun wcl ->
+             if (not wcl.wdead) && Array.length wcl.wl >= 2
              then (
-               let c = mk_clause t wc.wl false in
+               let c = mk_clause t wcl.wl false in
                attach t c))
           work;
         (* Learn/forget over the learned-clause DB (see the header). The watch lists were
@@ -2713,8 +2939,11 @@ let run_round t =
           let kept = Dynarray.create () in
           Dynarray.iter
             (fun c ->
-               if Array.exists (fun l -> Dynarray.get t.eliminated (var_of_lit l)) c.lits
-               then c.deleted <- true
+               if
+                 Array.exists
+                   (fun l -> Dynarray.get t.eliminated (var_of_lit l))
+                   (cl_lits t c)
+               then cl_set_deleted t c
                else (
                  attach t c;
                  Dynarray.add_last kept c))
@@ -2758,17 +2987,17 @@ let run_round t =
             (fun c ->
                if
                  !budget > 0
-                 && (not c.deleted)
-                 && Array.length c.lits >= 3
-                 && Array.length c.lits <= vivify_size_cap
+                 && (not (cl_deleted t c))
+                 && cl_len t c >= 3
+                 && cl_len t c <= vivify_size_cap
                then (
                  decr budget;
                  match vivify_learnt t c with
                  | None -> ()
                  | Some sub ->
-                   c.deleted <- true;
+                   cl_set_deleted t c;
                    let nc = mk_clause t sub true in
-                   nc.lbd <- clause_lbd t sub;
+                   cl_set_lbd t nc (clause_lbd t sub);
                    attach t nc;
                    t.stat_vivified <- t.stat_vivified + 1))
             snapshot;
@@ -2776,7 +3005,7 @@ let run_round t =
              already appended to [t.learnts] by [mk_clause] and stay. *)
           let kept = Dynarray.create () in
           Dynarray.iter
-            (fun c -> if not c.deleted then Dynarray.add_last kept c)
+            (fun c -> if not (cl_deleted t c) then Dynarray.add_last kept c)
             t.learnts;
           Dynarray.clear t.learnts;
           Dynarray.append t.learnts kept);
