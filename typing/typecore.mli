@@ -214,15 +214,11 @@ type existential_binding =
 
 type mode_mismatch_kind = Parameter | Return
 
-type total_context =
-  | Total_mode
-  | Logic_mode
+type total_context = Total_mode
 
 type total_context_violation =
   | Mutable_state
-  | Exception_handling
   | Primitive_call
-  | Lazy_evaluation
   | Loop
 
 type error =

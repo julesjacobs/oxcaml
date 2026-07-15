@@ -140,7 +140,7 @@ module Axis = struct
       Pack (Modal (Monadic Uniqueness));
       Pack (Modal (Comonadic Linearity));
       Pack (Modal (Monadic Contention));
-      Pack (Modal (Monadic Ghostness));
+      Pack (Modal (Monadic Logicality));
       Pack (Modal (Comonadic Portability));
       Pack (Modal (Comonadic Totality));
       Pack (Modal (Comonadic Forkable));
@@ -260,7 +260,7 @@ module Axis_set = struct
     | Modal (Monadic Uniqueness) -> 1
     | Modal (Comonadic Linearity) -> 2
     | Modal (Monadic Contention) -> 3
-    | Modal (Monadic Ghostness) -> 4
+    | Modal (Monadic Logicality) -> 4
     | Modal (Comonadic Portability) -> 5
     | Modal (Comonadic Totality) -> 6
     | Modal (Comonadic Forkable) -> 7
@@ -293,7 +293,7 @@ module Axis_set = struct
     |> set_axis (Modal (Monadic Uniqueness))
     |> set_axis (Modal (Comonadic Linearity))
     |> set_axis (Modal (Monadic Contention))
-    |> set_axis (Modal (Monadic Ghostness))
+    |> set_axis (Modal (Monadic Logicality))
     |> set_axis (Modal (Comonadic Portability))
     |> set_axis (Modal (Comonadic Totality))
     |> set_axis (Modal (Comonadic Forkable))

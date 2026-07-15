@@ -6202,7 +6202,7 @@ let mode_crossing_structure_memaddr =
   Mode.Crossing.create
     ~uniqueness:false
     ~contention:true
-    ~ghostness:false
+    ~logicality:false
     ~visibility:true
     ~regionality:false
     ~linearity:true
@@ -6218,7 +6218,7 @@ let mode_crossing_functor =
   Mode.Crossing.create
     ~uniqueness:true
     ~contention:true
-    ~ghostness:false
+    ~logicality:true
     ~visibility:true
     ~regionality:false
     ~linearity:false
@@ -6239,9 +6239,7 @@ let zap_modalities_to_floor_if_at_least level =
 
 let crossing_of_jkind env jkind =
   let context = mk_jkind_context_check_principal env in
-  let crossing = Ikind.crossing_of_jkind ~context env jkind in
-  let ghostness = Crossing.Axis.Monadic Ghostness in
-  Crossing.set ghostness (Crossing.Per_axis.max ghostness) crossing
+  Ikind.crossing_of_jkind ~context env jkind
 
 let crossing_of_ty env ?modalities ty =
   let principal = is_principal ty in
@@ -6278,8 +6276,7 @@ let crossing_of_ty env ?modalities ty =
     | None -> crossing
     | Some m -> Crossing.modality m crossing
   in
-  let ghostness = Crossing.Axis.Monadic Ghostness in
-  Crossing.set ghostness (Crossing.Per_axis.max ghostness) crossing
+  crossing
 
 let cross_left env ?modalities ty mode =
   let crossing = crossing_of_ty env ?modalities ty in
