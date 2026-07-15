@@ -45,6 +45,12 @@ let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
    populated, so it implies the graph ([weq_on]). *)
 let weq_row2 = env_flag "OXSMT_ARR_ROW2"
 
+(* Rung-1a measurement toggle: disable the [an_diseqs] class-pair index (below) and fall
+   back to the O(|an_diseqs|) list scan in [an_distinct]. Default OFF (index ON under ROW2).
+   Verdict/counter-identical either way -- it only trades a scan for a lookup -- so the A/B
+   of ROW2 vs ROW2+NOINDEX isolates the scan's share of the storecomm wall cost. *)
+let weq_row2_noindex = env_flag "OXSMT_ARR_ROW2_NOINDEX"
+
 (* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
    needs it OR definite ROW2 needs the [an_diseqs] it populates. OXSMT_ARR_WEQ turns on
    the W1 L1 read-over-weak-equivalence rule (added to [row_split], not yet replacing it). *)
@@ -680,8 +686,64 @@ let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
    newly enable is caught on the next pass (which rebuilds the index); and a pass that
    propagates nothing did so against a valid index (no merge happened), i.e. it has
    genuinely converged. The set of ROW consequences at the fixpoint is unchanged. *)
+(* Rung-1a: a class-pair index over [an_diseqs] making [an_distinct] O(1) in the ROW2 hot
+   loop (it was a per-(store,read)-per-pass O(|an_diseqs|) [List.find_map] with 2-4
+   [are_equal] per entry -- the storecomm 00060 scan storm). Built ONCE per [row_round]
+   pass, keyed on the normalized (min,max) INDEX-class pair, storing the FIRST [an_diseqs]
+   entry (list order) touching that pair. COUNTED-IDENTICAL to the scan: [an_distinct_idx]
+   returns the same first-match entry and the same explanation. SOUND to build once per
+   pass: [row_round] merges only READ classes (element/array sort) via [assert_eq], never
+   INDEX classes, so the index-class reps this is keyed on are stable for the pass it
+   serves (the next pass rebuilds after [Euf.check]). *)
+let build_an_diseq_index t : (int * int, Term.t * Term.t * Lit.t) Hashtbl.t =
+  let idx = Hashtbl.create 64 in
+  List.iter
+    (fun ((x, y, _) as e) ->
+      let cx = Euf.class_of t.engine x
+      and cy = Euf.class_of t.engine y in
+      let key = if cx <= cy then cx, cy else cy, cx in
+      if not (Hashtbl.mem idx key) then Hashtbl.add idx key e)
+    t.an_diseqs;
+  idx
+;;
+
+(* Indexed [an_distinct]: same result (first-match entry, same premise explanation) as the
+   [an_diseqs] scan, O(1) via [build_an_diseq_index]. [ci = cj] -> [None] (a live diseq
+   never has both endpoints in one class in a consistent state, so the scan finds nothing
+   either). Orientation recomputed per call ([i ~ x] ? normal : swapped), matching the
+   scan's [i ~ x]-first check. *)
+let an_distinct_idx t index (i : Term.t) (j : Term.t) : Lit.t list option =
+  let ci = Euf.class_of t.engine i
+  and cj = Euf.class_of t.engine j in
+  if Int.equal ci cj
+  then None
+  else (
+    let key = if ci <= cj then ci, cj else cj, ci in
+    match Hashtbl.find_opt index key with
+    | None -> None
+    | Some (x, y, lit) ->
+      if Euf.are_equal t.engine i x
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i x)
+                  @ lits_of_prems (Euf.explain t.engine j y))))
+      else
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i y)
+                  @ lits_of_prems (Euf.explain t.engine j x)))))
+;;
+
 let row_round t ~changed =
   let idx = selects_by_arr_class t in
+  (* rung-1a: build the [an_diseqs] class-pair index once for this pass unless NOINDEX (or
+     ROW2 off, where the ROW2 arm below never runs). *)
+  let diseq_idx =
+    if weq_row2 && not weq_row2_noindex then Some (build_an_diseq_index t) else None
+  in
   List.iter
     (fun st ->
       match st.Term.node with
@@ -721,7 +783,11 @@ let row_round t ~changed =
                    Build [select(base,j)] (hash-consed; catalog idempotent) so it
                    telescopes down the chain; terminates (finite arrays × existing
                    indices, each merged once then [are_equal] skips). *)
-                match an_distinct t i j with
+                match
+                  (match diseq_idx with
+                   | Some di -> an_distinct_idx t di i j
+                   | None -> an_distinct t i j)
+                with
                 | Some dprem ->
                   (match build_select t base j with
                    | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
