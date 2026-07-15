@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -199,6 +199,17 @@ chrono-test:
 	$(DUNE) build smt/solver/test/chrono_test.exe
 	OXSMT_CHRONO=1 $(DUNE) exec smt/solver/test/chrono_test.exe
 	$(MAKE) chrono-session-test
+
+## lgc-test — OXSMT_LGC_FIXED reduceDB-schedule self-test. Toggles the gate per solver
+##   (Unix.putenv) to compare the conflict-count schedule (OFF) against z3's LGC_FIXED
+##   lemma-count schedule (ON) in one process: cross-checks soundness under aggressive GC
+##   against an INDEPENDENT DPLL oracle (the flat-arena rebuild/remap driven on the
+##   lemma-count trigger must stay sound), and RED-verifies the schedule is load-bearing
+##   (OFF vs ON reach different counter trios on high-LBD instances). Nonzero exit on any
+##   failed check. Sets nothing in the env itself — the suite arms the gate internally.
+lgc-test:
+	$(DUNE) build smt/solver/test/lgc_test.exe
+	$(DUNE) exec smt/solver/test/lgc_test.exe
 
 ## chrono-session-test (task #41 F2) — CB must be REACHABLE THROUGH THE PRODUCT. Every
 ##   [Session] solve passes [List.map Sat.pos t.frames] (a nonempty base selector) as SAT
@@ -633,6 +644,7 @@ test: check-frozen
 	$(MAKE) core-test
 	$(MAKE) combine-test
 	$(MAKE) chrono-test
+	$(MAKE) lgc-test
 	$(MAKE) wiring-test
 	$(MAKE) rational-word-test
 	@# Fast deterministic theory self-tests, folded in so they cannot rot silently the way

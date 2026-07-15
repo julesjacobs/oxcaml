@@ -189,6 +189,24 @@ type t =
        reaches [next_reduce], then step it by a fixed increment — decoupled from restarts
        (which are now frequent under the adaptive policy). *)
     mutable next_reduce : int
+  ; (* Alternative reduceDB SCHEDULE (dark, OXSMT_LGC_FIXED): z3's smt_context LGC_FIXED
+       scheme. When [lgc_fixed] is set, reduceDB fires on the LEARNED-CLAUSE COUNT
+       crossing [lgc_threshold] (init 5000) rather than on the conflict-count
+       [next_reduce] schedule, and the threshold grows GEOMETRICALLY (x1.1) each fire
+       instead of the arithmetic [+ reduce_inc]. Scheduling only: the deletion policy
+       ([reduce_deletions]) and the arena rebuild+remap ([reduce_db]) are unchanged.
+       [false] (default) leaves the conflict-count path bit-identical; [next_reduce] is
+       then the only live schedule. [lgc_base] is the initial threshold ([solve] resets
+       [lgc_threshold] to it, relative to the live learnt count, per the M3 incremental-
+       safety discipline that governs [next_reduce]). [lgc_sizerel] (OXSMT_LGC_SIZEREL)
+       selects the PROPORTIONAL alternative to the tuned constant: base = max(floor,
+       #original-clauses / [lgc_sizerel_div]) (MiniSat's learntsize_factor idea), measured
+       head-to-head against the fixed 5000 so the tuned constant carries its own burden of
+       proof. *)
+    lgc_fixed : bool
+  ; lgc_sizerel : bool
+  ; lgc_base : int
+  ; mutable lgc_threshold : int
   ; (* Glucose-style adaptive restart / CaDiCaL-style rephasing state (S3 + #155). Fast
        and slow exponential moving averages of learned-clause LBD: a restart fires when
        recent LBD (fast) runs worse than the long-run average (slow). [trail_ema] is the
@@ -353,6 +371,19 @@ let block_margin = 1.4 (* trail vs its average that BLOCKS a restart/rephase *)
 let restart_min_conflicts = 50 (* EMA warm-up before adaptive restarts / blocking *)
 let reduce_first = 2000 (* first reduceDB at this many conflicts *)
 let reduce_inc = 300 (* then every this-many more *)
+
+(* LGC_FIXED reduceDB schedule (dark, OXSMT_LGC_FIXED): z3 smt_params defaults
+   [m_lemma_gc_initial = 5000], [m_lemma_gc_factor = 1.1]. reduceDB fires when the
+   learned-clause count reaches [lgc_initial], then the threshold grows x[lgc_factor]. *)
+let lgc_initial = 5000
+let lgc_factor = 1.1
+
+(* Size-relative alternative to the tuned [lgc_initial] (OXSMT_LGC_SIZEREL): the initial
+   threshold is #original-clauses / [lgc_sizerel_div] (MiniSat's learntsize_factor = 1/3),
+   floored at [lgc_sizerel_floor] so a tiny instance does not GC into churn. Exists to be
+   measured head-to-head against the fixed 5000. *)
+let lgc_sizerel_div = 3
+let lgc_sizerel_floor = 1000
 let rephase_base_interval = 1000 (* decisions between the first rephase impulses *)
 
 let inproc_first =
@@ -404,6 +435,37 @@ let recursive_min_from_env () =
   | Some _ | None -> false
 ;;
 
+(* LGC_FIXED reduceDB schedule (dark) is env-gated at [create]: unset => [false] =>
+   byte-identical (the conflict-count schedule is the only live one). Same on-value
+   vocabulary as [OXSMT_CHRONO]. *)
+let lgc_fixed_from_env () =
+  match Sys.getenv_opt "OXSMT_LGC_FIXED" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+(* Initial LGC threshold ([OXSMT_LGC_INITIAL]): a positive int, default [lgc_initial]
+   (5000, the z3 default). ONLY consulted when [OXSMT_LGC_FIXED] is on, so it never
+   perturbs the byte-identical OFF path. Overridable so an A/B can sweep the initial
+   budget and the [lgc-test] discriminating suite can force an early, observable reduceDB.
+   A malformed or non-positive value falls back to the default. *)
+let lgc_initial_from_env () =
+  match Sys.getenv_opt "OXSMT_LGC_INITIAL" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 1 -> n
+     | Some _ | None -> lgc_initial)
+  | None -> lgc_initial
+;;
+
+(* Size-relative initial-budget mode ([OXSMT_LGC_SIZEREL]); only consulted when
+   [OXSMT_LGC_FIXED] is on, so it never perturbs the byte-identical OFF path. *)
+let lgc_sizerel_from_env () =
+  match Sys.getenv_opt "OXSMT_LGC_SIZEREL" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* First-inprocessing-round conflict offset (Phase 2). A measurement/test knob
    (OXSMT_SATPRE_INPROC_FIRST): default [inproc_first], overridable so an A/B can tune
    round frequency and a test can force an early round. Read per [solve]; only consulted
@@ -428,6 +490,13 @@ let chrono_threshold_from_env () =
 ;;
 
 let create ?(base_l0_cert_mode = false) () =
+  let lgc_fixed = lgc_fixed_from_env () in
+  (* The two env reads below are gated on [lgc_fixed], so the OFF path never touches
+     OXSMT_LGC_INITIAL / OXSMT_LGC_SIZEREL and stays byte-identical. [lgc_base] is the
+     fixed initial threshold; [solve] recomputes the live threshold from it (size-relative
+     when [lgc_sizerel]). *)
+  let lgc_sizerel = lgc_fixed && lgc_sizerel_from_env () in
+  let lgc_base = if lgc_fixed then lgc_initial_from_env () else lgc_initial in
   { nvars = 0
   ; ok = true
   ; assigns = Dynarray.create ()
@@ -458,6 +527,10 @@ let create ?(base_l0_cert_mode = false) () =
   ; var_inc = 1.0
   ; cla_inc = 1.0
   ; next_reduce = reduce_first
+  ; lgc_fixed
+  ; lgc_sizerel
+  ; lgc_base
+  ; lgc_threshold = lgc_base (* [solve] recomputes this per-solve (M3) *)
   ; lbd_ema_fast = 0.0
   ; lbd_ema_slow = 0.0
   ; trail_ema = 0.0
@@ -2294,8 +2367,25 @@ let search t assumps conflict_limit =
       record_learnt t learnt bt ants lbd;
       var_decay_bump t;
       cla_decay_bump t;
-      (* LBD-based reduceDB on the conflict-count schedule (decoupled from restarts). *)
-      if t.conflicts >= t.next_reduce
+      (* reduceDB schedule. Default (OXSMT_LGC_FIXED off): the LBD-based conflict-count
+         schedule (decoupled from restarts) — bit-identical to trunk. Under the flag: z3's
+         LGC_FIXED — fire on the learned-clause COUNT crossing [lgc_threshold], grown x1.1
+         geometrically. Same [reduce_db] (deletion policy + arena rebuild/remap) either
+         way; only the trigger and the threshold growth differ. *)
+      if t.lgc_fixed
+      then (
+        if Dynarray.length t.learnts >= t.lgc_threshold
+        then (
+          reduce_db t;
+          (* Grow the threshold x[lgc_factor] (z3 truncates the double product to
+             unsigned). [max (threshold + 1)] guarantees a STRICT increase, so the
+             schedule always backs off and can never re-fire every conflict — even in the
+             degenerate case where the product rounds back to the same int. *)
+          t.lgc_threshold
+          <- max
+               (t.lgc_threshold + 1)
+               (int_of_float (float_of_int t.lgc_threshold *. lgc_factor))))
+      else if t.conflicts >= t.next_reduce
       then (
         reduce_db t;
         t.next_reduce <- t.next_reduce + reduce_inc)
@@ -3341,6 +3431,19 @@ let solve ?(assumptions = []) t =
        absolute [reduce_first] would fire reduceDB immediately (then every conflict) on an
        incremental re-solve whose cumulative [t.conflicts] already exceeds it. *)
     t.next_reduce <- t.conflicts + reduce_first;
+    (* LGC_FIXED threshold reset, mirroring the [next_reduce] M3 discipline: RELATIVE to
+       the live learnt count so an incremental re-solve (whose retained DB already exceeds
+       the base) does not GC immediately. [lgc_base] is the fixed budget; under
+       [lgc_sizerel] it is instead a fraction of this solve's original-clause count
+       (floored). Gated on the flag, so the OFF path is untouched. *)
+    if t.lgc_fixed
+    then (
+      let base =
+        if t.lgc_sizerel
+        then max lgc_sizerel_floor (Dynarray.length t.clauses / lgc_sizerel_div)
+        else t.lgc_base
+      in
+      t.lgc_threshold <- Dynarray.length t.learnts + base);
     t.best_trail_len <- 0;
     (* Phase-2 inprocessing schedule, relative to this solve's conflict base (geometric
        back-off). [max_int] when the gate is off => never fires (bit-identical). *)
