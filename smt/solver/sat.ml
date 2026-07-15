@@ -1187,7 +1187,7 @@ let cancel_until t level =
 
 let propagate t =
   let confl = ref None in
-  while !confl = None && t.qhead < Dynarray.length t.trail do
+  while Option.is_none !confl && t.qhead < Dynarray.length t.trail do
     let p = Dynarray.get t.trail t.qhead in
     t.qhead <- t.qhead + 1;
     t.propagations <- t.propagations + 1;
