@@ -56,11 +56,6 @@ let check_raises name pred f =
       Printf.printf "  FAIL %s (wrong exception: %s)\n" name (Printexc.to_string e))
 ;;
 
-let is_overflow = function
-  | Rational.Overflow -> true
-  | _ -> false
-;;
-
 let q = Rational.of_int
 
 (* ================================================================== *)
@@ -510,11 +505,20 @@ let test_push_pop () =
 ;;
 
 (* ================================================================== *)
-(* 5. core-bignum W2: the system that used to overflow int63 during check's pivot now
-   PROMOTES to Big and the ℚ-simplex completes. The residual native-int ceiling is only
-   the OUTPUT projection (R1): the ℤ model binds y = -2·max_int (Big), so MODEL EXTRACTION
-   raises Rational.Overflow — which the session's build_model catch degrades to unknown
-   (never a truncated model). Adapter-level view of the R1 model-value sink. *)
+(* 5. core-bignum W2 + ADR-0018 Bigint model boundary: the system that used to overflow
+   int63 during check's pivot PROMOTES to Big and the ℚ-simplex completes. The ℤ model
+   binds y = -2·max_int, which exceeds int63.
+
+   HISTORY: before A13 (95df47cc37, "Model.value Int of int -> Int of Bigint") the
+   adapter's [model] used [Lia.model]'s int63 projection, so extracting this Big value
+   raised Rational.Overflow and the session degraded to unknown. A13 switched the adapter
+   model boundary to [Lia.model_bigint] (arbitrary-precision, ADR-0018 unfreeze), so a
+   >int63 model value — e.g. a uint256 Certora constant — is now REPRESENTED EXACTLY
+   instead of lost to an overflow ceiling. This test now pins that boundary: the returned
+   model is the correct integer solution (x=2, y=-2·max_int), no exception. (The int63
+   sink still exists on the standalone [Lia.solve_integer] path, unchanged; lia_test
+   covers it.) The A13 acceptance battery missed this case because [lia_adapter_test] was
+   not part of `make test`'s target set, so the stale expectation went undetected. *)
 
 let mk_overflowing () =
   let fx = make_fixture 2 in
@@ -542,13 +546,21 @@ let test_poison () =
    check
      "not poisoned (internal growth promotes, I8)"
      (not (Lia_adapter.is_poisoned fx.adapter));
-   (* The ℤ model value y = -2·max_int exceeds int63: extracting it hits the R1 projection
-      sink and raises Rational.Overflow (the session degrades that to unknown; never a
-      truncated model). *)
-   check_raises
-     "model extraction hits the R1 int-projection sink -> Rational.Overflow"
-     is_overflow
-     (fun () -> ignore (Lia_adapter.model fx.adapter)));
+   (* ADR-0018 model boundary: [model] represents the >int63 value EXACTLY (no overflow,
+      no degradation) — the correct integer solution x=2, y=-2·max_int. *)
+   let m = Lia_adapter.model fx.adapter in
+   let got term =
+     match Model.value m term with
+     | Some (Model.Int v) -> Some v
+     | _ -> None
+   in
+   let expect_y = Bigint.mul (Bigint.of_int (-2)) (Bigint.of_int max_int) in
+   check
+     "adapter model represents the >int63 value exactly (ADR-0018 Bigint sink): x=2, \
+      y=-2·max_int"
+     (match got fx.vars.(0), got fx.vars.(1) with
+      | Some x, Some y -> Bigint.equal x (Bigint.of_int 2) && Bigint.equal y expect_y
+      | _ -> false));
   (* A fresh adapter is unaffected. *)
   let fx = make_fixture 1 in
   ignore (assert_le fx [ 0, 1 ] (-3) ~polarity:true);
