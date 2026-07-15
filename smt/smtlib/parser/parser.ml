@@ -1318,7 +1318,7 @@ let run st sexps =
   !logic, !status, List.rev !asserts, List.rev !lemmas
 ;;
 
-let parse_into ?internal_mint env ctx src =
+let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
   let st =
     { ctx
     ; env
@@ -1333,11 +1333,6 @@ let parse_into ?internal_mint env ctx src =
     ; array_ops = Hashtbl.create 8
     ; arrays = Array_defs.empty
     }
-  in
-  let sexps =
-    try Sexp.parse_many src with
-    | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))
-    | Tok.Error m -> raise (Malformed ("lexical: " ^ m))
   in
   let logic, status, assertions, lemmas =
     try run st sexps with
@@ -1354,6 +1349,15 @@ let parse_into ?internal_mint env ctx src =
   ; arrays = st.arrays
   ; lemmas
   }
+;;
+
+let parse_into ?internal_mint env ctx src =
+  let sexps =
+    try Sexp.parse_many src with
+    | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))
+    | Tok.Error m -> raise (Malformed ("lexical: " ^ m))
+  in
+  parse_into_sexps ?internal_mint env ctx sexps
 ;;
 
 let parse src =

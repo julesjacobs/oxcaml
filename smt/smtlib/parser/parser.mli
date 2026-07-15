@@ -85,3 +85,15 @@ val parse_into
   -> Oxsmt_core.Context.t
   -> string
   -> t
+
+(** [parse_into_sexps] is [parse_into] on an already-parsed s-expression forest, so a
+    driver that must inspect the top-level commands before solving (e.g. counting
+    [check-sat]s) parses the source ONCE and reuses the result, rather than building the
+    full {!Sexp.t} tree a second time. Identical to [parse_into] on [Sexp.parse_many src]
+    for any [src]; the only difference is who owns the (single) parse. *)
+val parse_into_sexps
+  :  ?internal_mint:Oxsmt_core.Internal_minter.t
+  -> Oxsmt_core.Env.t
+  -> Oxsmt_core.Context.t
+  -> Sexp.t list
+  -> t

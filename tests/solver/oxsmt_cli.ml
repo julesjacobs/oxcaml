@@ -163,14 +163,14 @@ let render_model (sort_cards, bindings) =
    never emit a [sat] the harness cannot transport or the evaluator cannot self-certify.
    [max_effort] threads the board #60 counted cutoff (a cut-off goal is a plain [unknown]
    block, so the output format is unchanged). *)
-let solve_batch ?max_effort ?(presolve = true) src =
+let solve_batch ?max_effort ?(presolve = true) sexps =
   let s = Session.create ?max_effort () in
   match
-    Parser.parse_into
+    Parser.parse_into_sexps
       ~internal_mint:(Session.parse_minter s)
       (Session.env s)
       (Session.context s)
-      src
+      sexps
   with
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
@@ -280,7 +280,7 @@ let () =
   let blocks =
     if incremental || n_checks <> 1
     then List.init n_checks (fun _ -> unknown_block)
-    else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve src ]
+    else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve sexps ]
   in
   List.iter print_block blocks
 ;;
