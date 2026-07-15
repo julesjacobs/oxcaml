@@ -72,15 +72,19 @@ type chandle =
 (* A per-literal WATCH LIST, unboxed. The old [watch = { cl : clause; mutable blocker }]
    record lived in a [watch Dynarray.t] — a POINTER array, so compacting it during
    propagation ([Dynarray.set ws j w]) fired [caml_modify] on every kept entry (the
-   dominant barrier cost). Here each list is two PARALLEL unboxed [int Dynarray.t] kept in
-   lockstep: entry [i] is the clause [Dynarray.get wc i] watched with cached blocker
-   literal [Dynarray.get wb i]. Both are plain [int] arrays, so a compaction store is
-   barrier-free. The blocker is the MiniSat fast-path cache: if it is already true the
-   clause is satisfied and needs no inspection. INVARIANT: [wc] and [wb] always have equal
-   length (every add/keep/relocate/truncate below touches them together). *)
+   dominant barrier cost). Here each list is two PARALLEL RAW [int array]s (not [Dynarray]:
+   the sweep is the propagation firehose and a [Dynarray.get] is an un-inlined call without
+   flambda) with a shared used-count [wn]; entry [i] (i < wn) is clause [wcref.(i)] watched
+   with cached blocker literal [wblk.(i)]. Both are plain unboxed [int] arrays, so a
+   compaction store is an inlined, barrier-free primitive. The blocker is the MiniSat
+   fast-path cache: if it is already true the clause is satisfied and needs no inspection.
+   INVARIANT: [wcref] and [wblk] always have equal length, and entries in [0, wn) are the
+   live watches (every add/keep/relocate/truncate below touches both in lockstep). *)
 type watchlist =
-  { wc : int Dynarray.t (* watched clause crefs *)
-  ; wb : int Dynarray.t (* cached blocker literal per entry *)
+  { mutable wcref : int array (* watched clause crefs; capacity = [Array.length wcref] *)
+  ; mutable wblk :
+      int array (* cached blocker literal per entry (index-aligned with wcref) *)
+  ; mutable wn : int (* used entry count; the two arrays are valid/aligned in [0, wn) *)
   }
 
 (* Certificate provenance / trace types (ADR-0013 §4.0). These are the frozen
@@ -155,18 +159,26 @@ type t =
     trail : lit Dynarray.t
   ; trail_lim : int Dynarray.t
   ; mutable qhead : int (* propagation cursor into [trail] *)
-  ; (* Flat clause arena (parallel arrays indexed by cref). [a_lits] holds every clause's
-       literals concatenated; a clause [cr] owns [a_lits.(a_off.(cr) .. +a_len.(cr))],
-       slots 0/1 watched. [a_flags] bit0 learnt, bit1 deleted. [clauses]/[learnts] are the
-       crefs of the original / learned clauses (originals never deleted; learnts subject
-       to [reduce_db]). *)
-    a_lits : int Dynarray.t
-  ; a_off : int Dynarray.t
-  ; a_len : int Dynarray.t
-  ; a_id : int Dynarray.t
-  ; a_lbd : int Dynarray.t
-  ; a_act : float Dynarray.t
-  ; a_flags : int Dynarray.t
+  ; (* Flat clause arena, RAW growable arrays (not [Dynarray]: without flambda a
+       [Dynarray.get] is an un-inlined function call, and this is the propagation
+       firehose; a raw [array.(i)] is an inlined bounds-checked primitive). [a_lits] holds
+       every clause's literals concatenated; clause [cr] owns
+       [a_lits.(a_off.(cr) .. +a_len.(cr))], slots 0/1 watched. [a_flags] bit0 learnt,
+       bit1 deleted. The six per-clause metadata arrays grow together (capacity
+       [Array.length a_off], used count [a_n]); [a_lits] grows separately (used count
+       [a_lits_n]). [clauses]/[learnts] stay [Dynarray] (cold: touched per-conflict / at
+       reduceDB, not on the firehose). Originals never deleted; learnts subject to
+       [reduce_db]. All accesses are bounds-CHECKED (no [unsafe]); a raw array cannot grow
+       in place, so [arena_add]/[reduce_db] rebind these mutable fields. *)
+    mutable a_lits : int array
+  ; mutable a_lits_n : int
+  ; mutable a_off : int array
+  ; mutable a_len : int array
+  ; mutable a_id : int array
+  ; mutable a_lbd : int array
+  ; mutable a_act : float array
+  ; mutable a_flags : int array
+  ; mutable a_n : int (* number of clauses; metadata valid in [0, a_n) *)
   ; clauses : cref Dynarray.t
   ; learnts : cref Dynarray.t
   ; mutable next_id : int
@@ -411,13 +423,15 @@ let create ?(base_l0_cert_mode = false) () =
   ; trail = Dynarray.create ()
   ; trail_lim = Dynarray.create ()
   ; qhead = 0
-  ; a_lits = Dynarray.create ()
-  ; a_off = Dynarray.create ()
-  ; a_len = Dynarray.create ()
-  ; a_id = Dynarray.create ()
-  ; a_lbd = Dynarray.create ()
-  ; a_act = Dynarray.create ()
-  ; a_flags = Dynarray.create ()
+  ; a_lits = Array.make 16 0
+  ; a_lits_n = 0
+  ; a_off = Array.make 16 0
+  ; a_len = Array.make 16 0
+  ; a_id = Array.make 16 0
+  ; a_lbd = Array.make 16 0
+  ; a_act = Array.make 16 0.0
+  ; a_flags = Array.make 16 0
+  ; a_n = 0
   ; clauses = Dynarray.create ()
   ; learnts = Dynarray.create ()
   ; next_id = 0
@@ -523,25 +537,54 @@ let lit_val t l =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Flat clause arena accessors. A [cref] indexes the parallel [a_*] arrays; a clause's
-   literals live at [a_lits.(a_off.(cr) .. +a_len.(cr))]. All are O(1) [Dynarray] gets.
-   The literal getter/setter add the per-clause base offset; slots 0/1 are the watched
-   pair, so [cl_set_lit] is exactly the old [c.lits.(i) <- _] watched-literal swap (in
-   place, within the clause's span — never relocates). *)
-let cl_len t (cr : cref) = Dynarray.get t.a_len cr
-let cl_lit t (cr : cref) i = Dynarray.get t.a_lits (Dynarray.get t.a_off cr + i)
-let cl_set_lit t (cr : cref) i l = Dynarray.set t.a_lits (Dynarray.get t.a_off cr + i) l
-let cl_id t (cr : cref) = Dynarray.get t.a_id cr
-let cl_lbd t (cr : cref) = Dynarray.get t.a_lbd cr
-let cl_set_lbd t (cr : cref) v = Dynarray.set t.a_lbd cr v
-let cl_act t (cr : cref) = Dynarray.get t.a_act cr
-let cl_set_act t (cr : cref) v = Dynarray.set t.a_act cr v
-let cl_learnt t (cr : cref) = Dynarray.get t.a_flags cr land 1 <> 0
-let cl_deleted t (cr : cref) = Dynarray.get t.a_flags cr land 2 <> 0
-
-let cl_set_deleted t (cr : cref) =
-  Dynarray.set t.a_flags cr (Dynarray.get t.a_flags cr lor 2)
+(* Raw growable-array helpers. A raw [array] cannot grow in place, so a full array is
+   doubled and returned; the caller rebinds the mutable field. Capacity is [Array.length];
+   the logical used-count is tracked separately ([a_n]/[a_lits_n]). *)
+let grow_int a needed =
+  let cap = Array.length a in
+  if needed <= cap
+  then a
+  else (
+    let ncap = ref (if cap = 0 then 8 else cap) in
+    while !ncap < needed do
+      ncap := !ncap * 2
+    done;
+    let na = Array.make !ncap 0 in
+    Array.blit a 0 na 0 cap;
+    na)
 ;;
+
+let grow_float a needed =
+  let cap = Array.length a in
+  if needed <= cap
+  then a
+  else (
+    let ncap = ref (if cap = 0 then 8 else cap) in
+    while !ncap < needed do
+      ncap := !ncap * 2
+    done;
+    let na = Array.make !ncap 0.0 in
+    Array.blit a 0 na 0 cap;
+    na)
+;;
+
+(* Flat clause arena accessors. A [cref] indexes the parallel [a_*] raw arrays; a clause's
+   literals live at [a_lits.(a_off.(cr) .. +a_len.(cr))]. All are O(1) bounds-checked raw
+   array reads (inlined primitives — no [Dynarray.get] call). The literal getter/setter
+   add the per-clause base offset; slots 0/1 are the watched pair, so [cl_set_lit] is
+   exactly the old [c.lits.(i) <- _] watched-literal swap (in place, within the clause's
+   span). *)
+let cl_len t (cr : cref) = t.a_len.(cr)
+let cl_lit t (cr : cref) i = t.a_lits.(t.a_off.(cr) + i)
+let cl_set_lit t (cr : cref) i l = t.a_lits.(t.a_off.(cr) + i) <- l
+let cl_id t (cr : cref) = t.a_id.(cr)
+let cl_lbd t (cr : cref) = t.a_lbd.(cr)
+let cl_set_lbd t (cr : cref) v = t.a_lbd.(cr) <- v
+let cl_act t (cr : cref) = t.a_act.(cr)
+let cl_set_act t (cr : cref) v = t.a_act.(cr) <- v
+let cl_learnt t (cr : cref) = t.a_flags.(cr) land 1 <> 0
+let cl_deleted t (cr : cref) = t.a_flags.(cr) land 2 <> 0
+let cl_set_deleted t (cr : cref) = t.a_flags.(cr) <- t.a_flags.(cr) lor 2
 
 (* Materialize a clause's literals as a fresh array (allocates). Off the firehose: used
    only where an array value is genuinely needed (never in [propagate]). *)
@@ -570,15 +613,31 @@ let ch_lit t ch i =
    records the metadata; and files the cref in [clauses] (original) or [learnts]
    (learned). *)
 let arena_add t id lits learnt =
-  let cr : cref = Dynarray.length t.a_off in
-  let off = Dynarray.length t.a_lits in
-  Array.iter (fun l -> Dynarray.add_last t.a_lits l) lits;
-  Dynarray.add_last t.a_off off;
-  Dynarray.add_last t.a_len (Array.length lits);
-  Dynarray.add_last t.a_id id;
-  Dynarray.add_last t.a_lbd 0;
-  Dynarray.add_last t.a_act 0.0;
-  Dynarray.add_last t.a_flags (if learnt then 1 else 0);
+  let cr : cref = t.a_n in
+  let n = Array.length lits in
+  (* ensure per-clause metadata capacity (the six arrays grow together) *)
+  if t.a_n >= Array.length t.a_off
+  then (
+    let need = t.a_n + 1 in
+    t.a_off <- grow_int t.a_off need;
+    t.a_len <- grow_int t.a_len need;
+    t.a_id <- grow_int t.a_id need;
+    t.a_lbd <- grow_int t.a_lbd need;
+    t.a_flags <- grow_int t.a_flags need;
+    t.a_act <- grow_float t.a_act need);
+  (* ensure shared-literal capacity and append (copy, so the caller's array is not
+     aliased) *)
+  let off = t.a_lits_n in
+  if off + n > Array.length t.a_lits then t.a_lits <- grow_int t.a_lits (off + n);
+  Array.blit lits 0 t.a_lits off n;
+  t.a_lits_n <- off + n;
+  t.a_off.(cr) <- off;
+  t.a_len.(cr) <- n;
+  t.a_id.(cr) <- id;
+  t.a_lbd.(cr) <- 0;
+  t.a_act.(cr) <- 0.0;
+  t.a_flags.(cr) <- (if learnt then 1 else 0);
+  t.a_n <- t.a_n + 1;
   if learnt then Dynarray.add_last t.learnts cr else Dynarray.add_last t.clauses cr;
   cr
 ;;
@@ -717,8 +776,8 @@ let ensure_var t v =
     Dynarray.add_last t.seen false;
     Dynarray.add_last t.var_act 0.0;
     Dynarray.add_last t.heap_pos (-1);
-    Dynarray.add_last t.watches { wc = Dynarray.create (); wb = Dynarray.create () };
-    Dynarray.add_last t.watches { wc = Dynarray.create (); wb = Dynarray.create () };
+    Dynarray.add_last t.watches { wcref = [||]; wblk = [||]; wn = 0 };
+    Dynarray.add_last t.watches { wcref = [||]; wblk = [||]; wn = 0 };
     Dynarray.add_last t.eliminable false (* default frozen (A10) *);
     Dynarray.add_last t.eliminated false;
     let nv = t.nvars in
@@ -750,12 +809,29 @@ let fresh_id t =
 let mk_clause_with_id t id lits learnt : cref = arena_add t id lits learnt
 let mk_clause t lits learnt = mk_clause_with_id t (fresh_id t) lits learnt
 
+(* Grow a watch list's parallel arrays (both, in lockstep) to hold at least one more
+   entry. *)
+let wl_reserve ws =
+  if ws.wn >= Array.length ws.wcref
+  then (
+    let cap = Array.length ws.wcref in
+    let ncap = if cap = 0 then 4 else cap * 2 in
+    let nc = Array.make ncap 0 in
+    Array.blit ws.wcref 0 nc 0 cap;
+    ws.wcref <- nc;
+    let nb = Array.make ncap 0 in
+    Array.blit ws.wblk 0 nb 0 cap;
+    ws.wblk <- nb)
+;;
+
 (* Add a watch entry (cref + cached blocker) to literal [l]'s list, keeping the parallel
    arrays in lockstep. *)
 let watch_add t l ~cref ~blocker =
   let ws = Dynarray.get t.watches l in
-  Dynarray.add_last ws.wc cref;
-  Dynarray.add_last ws.wb blocker
+  wl_reserve ws;
+  ws.wcref.(ws.wn) <- cref;
+  ws.wblk.(ws.wn) <- blocker;
+  ws.wn <- ws.wn + 1
 ;;
 
 let attach t (cr : cref) =
@@ -969,20 +1045,20 @@ let propagate t =
        [i] and compact kept entries down to [j]. Every store below is into an [int] array
        — no [caml_modify] write barrier (the arena's point). *)
     let ws = Dynarray.get t.watches p in
-    let wc = ws.wc
-    and wb = ws.wb in
-    let n = Dynarray.length wc in
+    let wc = ws.wcref
+    and wb = ws.wblk in
+    let n = ws.wn in
     let i = ref 0
     and j = ref 0 in
     let false_lit = neg_lit p in
     while !i < n do
-      let cr = Dynarray.get wc !i in
-      let blk = Dynarray.get wb !i in
+      let cr = wc.(!i) in
+      let blk = wb.(!i) in
       if lit_val t blk = 1
       then (
         (* Clause already satisfied by its blocker; keep the watch untouched. *)
-        Dynarray.set wc !j cr;
-        Dynarray.set wb !j blk;
+        wc.(!j) <- cr;
+        wb.(!j) <- blk;
         incr i;
         incr j)
       else if cl_deleted t cr
@@ -1002,8 +1078,8 @@ let propagate t =
         if first <> old_blocker && lit_val t first = 1
         then (
           (* Newly satisfied by the partner watch. *)
-          Dynarray.set wc !j cr;
-          Dynarray.set wb !j first;
+          wc.(!j) <- cr;
+          wb.(!j) <- first;
           incr i;
           incr j)
         else (
@@ -1023,8 +1099,8 @@ let propagate t =
             incr i (* drop from this watch list; now watched elsewhere *))
           else (
             (* No new watch: the clause is unit or conflicting. Keep the watch. *)
-            Dynarray.set wc !j cr;
-            Dynarray.set wb !j first;
+            wc.(!j) <- cr;
+            wb.(!j) <- first;
             incr i;
             incr j;
             if lit_val t first = -1
@@ -1032,15 +1108,14 @@ let propagate t =
               confl := Some (H_arena cr);
               (* copy the tail of the watch list unchanged *)
               while !i < n do
-                Dynarray.set wc !j (Dynarray.get wc !i);
-                Dynarray.set wb !j (Dynarray.get wb !i);
+                wc.(!j) <- wc.(!i);
+                wb.(!j) <- wb.(!i);
                 incr i;
                 incr j
               done)
             else unchecked_enqueue t first cr)))
     done;
-    Dynarray.truncate wc !j;
-    Dynarray.truncate wb !j
+    ws.wn <- !j
   done;
   !confl
 ;;
@@ -1476,39 +1551,51 @@ let reduce_db t =
   let kept = Array.make (max 1 total) 0 in
   Array.blit kept_orig 0 kept 0 n_orig;
   Array.blit kept_learnt 0 kept n_orig (Array.length kept_learnt);
-  (* Snapshot each kept clause's data BEFORE clearing the arena, and build the remap. *)
-  let old_size = Dynarray.length t.a_off in
+  (* Build the remap and fresh arena arrays sized EXACTLY to the kept set, blitting each
+     kept clause's literals straight from the old [a_lits] into the new one (no per-clause
+     materialization). The old arrays are read until the rebind at the end. *)
+  let old_size = t.a_n in
   let remap = Array.make (max 1 old_size) (-1) in
-  let snap_lits = Array.init total (fun i -> cl_lits t kept.(i)) in
-  let snap_id = Array.init total (fun i -> cl_id t kept.(i)) in
-  let snap_lbd = Array.init total (fun i -> cl_lbd t kept.(i)) in
-  let snap_act = Array.init total (fun i -> cl_act t kept.(i)) in
-  let snap_learnt = Array.init total (fun i -> cl_learnt t kept.(i)) in
   for i = 0 to total - 1 do
     remap.(kept.(i)) <- i
   done;
-  Dynarray.clear t.a_lits;
-  Dynarray.clear t.a_off;
-  Dynarray.clear t.a_len;
-  Dynarray.clear t.a_id;
-  Dynarray.clear t.a_lbd;
-  Dynarray.clear t.a_act;
-  Dynarray.clear t.a_flags;
+  let total_lits = ref 0 in
+  for i = 0 to total - 1 do
+    total_lits := !total_lits + cl_len t kept.(i)
+  done;
+  let n_off = Array.make (max 1 total) 0 in
+  let n_len = Array.make (max 1 total) 0 in
+  let n_id = Array.make (max 1 total) 0 in
+  let n_lbd = Array.make (max 1 total) 0 in
+  let n_act = Array.make (max 1 total) 0.0 in
+  let n_flags = Array.make (max 1 total) 0 in
+  let n_lits = Array.make (max 1 !total_lits) 0 in
   Dynarray.clear t.clauses;
   Dynarray.clear t.learnts;
+  let w = ref 0 in
   for i = 0 to total - 1 do
-    let off = Dynarray.length t.a_lits in
-    Array.iter (fun l -> Dynarray.add_last t.a_lits l) snap_lits.(i);
-    Dynarray.add_last t.a_off off;
-    Dynarray.add_last t.a_len (Array.length snap_lits.(i));
-    Dynarray.add_last t.a_id snap_id.(i);
-    Dynarray.add_last t.a_lbd snap_lbd.(i);
-    Dynarray.add_last t.a_act snap_act.(i);
-    Dynarray.add_last t.a_flags (if snap_learnt.(i) then 1 else 0);
-    if snap_learnt.(i)
-    then Dynarray.add_last t.learnts i
-    else Dynarray.add_last t.clauses i
+    let cr = kept.(i) in
+    let len = cl_len t cr in
+    Array.blit t.a_lits t.a_off.(cr) n_lits !w len;
+    n_off.(i) <- !w;
+    n_len.(i) <- len;
+    n_id.(i) <- cl_id t cr;
+    n_lbd.(i) <- cl_lbd t cr;
+    n_act.(i) <- cl_act t cr;
+    let learnt = cl_learnt t cr in
+    n_flags.(i) <- (if learnt then 1 else 0);
+    w := !w + len;
+    if learnt then Dynarray.add_last t.learnts i else Dynarray.add_last t.clauses i
   done;
+  t.a_off <- n_off;
+  t.a_len <- n_len;
+  t.a_id <- n_id;
+  t.a_lbd <- n_lbd;
+  t.a_act <- n_act;
+  t.a_flags <- n_flags;
+  t.a_lits <- n_lits;
+  t.a_n <- total;
+  t.a_lits_n <- !total_lits;
   (* 1. reason array. *)
   for v = 0 to t.nvars - 1 do
     let r = Dynarray.get t.reason v in
@@ -1528,20 +1615,19 @@ let reduce_db t =
   (* 2. watch lists. *)
   Dynarray.iter
     (fun ws ->
-       let wc = ws.wc
-       and wb = ws.wb in
-       let n = Dynarray.length wc in
+       let wc = ws.wcref
+       and wb = ws.wblk in
+       let n = ws.wn in
        let j = ref 0 in
        for i = 0 to n - 1 do
-         let nr = remap.(Dynarray.get wc i) in
+         let nr = remap.(wc.(i)) in
          if nr >= 0
          then (
-           Dynarray.set wc !j nr;
-           Dynarray.set wb !j (Dynarray.get wb i);
+           wc.(!j) <- nr;
+           wb.(!j) <- wb.(i);
            incr j)
        done;
-       Dynarray.truncate wc !j;
-       Dynarray.truncate wb !j)
+       ws.wn <- !j)
     t.watches
 ;;
 
@@ -2911,9 +2997,7 @@ let run_round t =
         done;
         (* ---- Rebuild the clause DB from the survivors. ---- *)
         for l = 0 to n2 - 1 do
-          let ws = Dynarray.get t.watches l in
-          Dynarray.clear ws.wc;
-          Dynarray.clear ws.wb
+          (Dynarray.get t.watches l).wn <- 0
         done;
         Dynarray.clear t.clauses;
         Dynarray.iter
