@@ -207,7 +207,7 @@ let create
      checker's contradictory closure would otherwise spuriously fail the "declared level-0
      unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
      counter effect. Default (not base-l0) keeps every declaration => byte-identical. *)
-  let sat = Sat.create ~emit_level0_unit_decls:(not base_at_level0) () in
+  let sat = Sat.create ~base_l0_cert_mode:base_at_level0 () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
      / interactive / [make test] path is byte-identical (the count is never printed). *)

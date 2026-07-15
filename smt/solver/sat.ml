@@ -267,18 +267,22 @@ type t =
          replay) destroys the adapter's frame-scoped cache for the survivor. Entries are
          dropped when the var is removed by a later [cancel_until]; empty (and untouched)
          unless [chrono]. Per-[t] (vars are per-[t]); [reset] each [solve]. *)
-  ; emit_level0_unit_decls : bool
-    (* Whether [add_clause] emits the [on_unit] level-0-unit DECLARATION to the cert trace
-     (base #53). Default [true] ⇒ byte-identical to the pre-#53 emitter (and the raw-Sat
-     [cert_emit_test] on_unit expectation holds). The session sets it [false] under
-     base-l0 (OXSMT_BASE_L0): the declaration is redundant (the checker re-derives every
-     level-0 unit from the raw [Input] clause + BCP; declared units are verified-not-
-     trusted, checker.ml (b)), and under base-l0 a base-frame input unit that a level-0
-     THEORY conflict retracts in the checker's (contradictory) closure would spuriously
-     fail (b) even though the E3 refutation over the whole DB is valid (see the E3 route
-     in [handle_confl]). Suppressing the redundant declaration removes that false failure;
-     the literal is still enqueued for search. Set once at [create]; never read by search
-     — no effect on verdicts/counters. *)
+  ; base_l0_cert_mode : bool
+    (* The ONE base-l0 CERTIFICATE-EMITTER mode bit (base #53). Default [false] ⇒ every
+     emitter behaviour is byte-identical to the pre-#53 build (raw-Sat [cert_emit_test]
+     on_unit + E2 expectations hold). The session sets it [true] under base-l0
+     (OXSMT_BASE_L0), where it drives BOTH cert-mode behaviours together so the OFF path
+     stays trunk-identical BY CONSTRUCTION (codex #53 bounce):
+     1. [add_clause] SUPPRESSES the redundant [on_unit] level-0-unit DECLARATION — the
+        checker re-derives every level-0 unit from the raw [Input] clause + BCP
+        (verified-not-trusted, checker.ml (b)), and under base-l0 a base-frame input unit
+        that a level-0 THEORY conflict retracts in the checker's (legitimately
+        contradictory) closure would otherwise spuriously fail (b).
+     2. a level-0 THEORY conflict concludes via the empty-core E3 [Failed_assumption]
+        route rather than E2 [Level0_conflict] (see [handle_confl]) — E3's [refutes_under]
+        over the whole DB certifies the contradictory closure; (b)'s false failure is
+        avoided the same way the pre-base-l0 build's base ASSUMPTION made these E3. Set
+        once at [create]; never read by search — no effect on verdicts/models/counters. *)
   }
 
 let var_decay = 0.95
@@ -356,7 +360,7 @@ let chrono_threshold_from_env () =
   | None -> 100
 ;;
 
-let create ?(emit_level0_unit_decls = true) () =
+let create ?(base_l0_cert_mode = false) () =
   { nvars = 0
   ; ok = true
   ; assigns = Dynarray.create ()
@@ -416,7 +420,7 @@ let create ?(emit_level0_unit_decls = true) () =
   ; chrono = chrono_from_env ()
   ; chrono_threshold = chrono_threshold_from_env ()
   ; chrono_reason = Hashtbl.create 16
-  ; emit_level0_unit_decls
+  ; base_l0_cert_mode
   }
 ;;
 
@@ -1428,10 +1432,10 @@ let add_clause ?(origin = Query) t lits =
             unchecked_enqueue t l Decision;
             (* a standing level-0 unit (ADR-0013 §1.3): declared to the checker, which
                also re-derives the unit closure from the [Input] clauses by BCP. The
-               declaration is thus redundant; [emit_level0_unit_decls] (default [true])
-               suppresses it under base-l0 — see the field doc + the E3 route in
-               [handle_confl] (#53). *)
-            if t.emit_level0_unit_decls
+               declaration is thus redundant; [base_l0_cert_mode] (default [false] emits
+               it, trunk-identical) SUPPRESSES it under base-l0 — see the field doc + the
+               E3 route in [handle_confl] (#53). *)
+            if not t.base_l0_cert_mode
             then (
               match t.trace with
               | Some tr -> tr.on_unit ~id:(fresh_id t) ~lit:l
@@ -1832,24 +1836,34 @@ let search t assumps conflict_limit =
            whose literals are ALL false in the level-0 closure, so the checker falsifies
            it directly (it does not self-propagate). [confl.id] resolves via [on_input] /
            [on_learned].
-         - THEORY level-0 conflict -> E3 [Failed_assumption] with an EMPTY assumption core
-           (base #53). The theory conflict clause is a valid T-lemma with all-but-one
-           literals already false at level 0; added to the checker's closure as an axiom
-           it UNIT-PROPAGATES its last literal (self-satisfying) instead of being
-           falsified in a consistent closure — so the E2 [falsified] test cannot see it
-           and the closure is contradictory. E3's [refutes_under] over the whole DB (which
-           includes the theory leaf) derives ⊥ BY CONSTRUCTION — it asks exactly "does BCP
-           refute the assumptions", and a contradictory DB refutes the empty set. This is
-           how the pre-base-l0 build certified these (the base ASSUMPTION made them E3);
-           base-l0 removed the assumption but the refutation is still an empty-core E3. No
-           antecedents are cited (the DB carries the refutation; the E3 antecedent list is
-           a RUP hint and [] is valid), so no [Ktheory Conflict] id reaches the checker's
-           Reason-only E3 allow-list. *)
+         - THEORY level-0 conflict, UNDER BASE-L0 CERT MODE -> E3 [Failed_assumption] with
+           an EMPTY assumption core (base #53). The theory conflict clause is a valid
+           T-lemma with all-but-one literals already false at level 0; added to the
+           checker's closure as an axiom it UNIT-PROPAGATES its last literal
+           (self-satisfying) instead of being falsified in a consistent closure — so the
+           E2 [falsified] test cannot see it and the closure is contradictory. E3's
+           [refutes_under] over the whole DB (which includes the theory leaf) derives ⊥ BY
+           CONSTRUCTION — it asks exactly "does BCP refute the assumptions", and a
+           contradictory DB refutes the empty set. This is how the pre-base-l0 build
+           certified these (the base ASSUMPTION made them E3); base-l0 removed the
+           assumption but the refutation is still an empty-core E3. No antecedents are
+           cited (the DB carries the refutation; the E3 antecedent list is a RUP hint and
+           [] is valid), so no [Ktheory Conflict] id reaches the checker's Reason-only E3
+           allow-list.
+
+         GATE (codex #53 bounce): the E3 route fires ONLY in base-l0 cert mode — signalled
+         by [t.base_l0_cert_mode] (the session sets that true under OXSMT_BASE_L0; see
+         [Sat.create]). Strict OFF (the default, [base_l0_cert_mode = false]) keeps a
+         level-0 THEORY conflict on the pre-existing E2 route, so the raw-Sat layer is
+         BYTE-IDENTICAL to trunk BY CONSTRUCTION — not merely by the reachability argument
+         that the product OFF path (base assumed at L1) never reaches a level-0 theory
+         conflict. OFF's E2 on such a conflict is the pre-#53 behaviour (fail-safe INVALID
+         if a checker ever saw it; unreachable from Session OFF). *)
       if t.trace <> None
       then
         t.terminal
         <- Some
-             (if theory
+             (if theory && t.base_l0_cert_mode
               then Failed_assumption { antecedents = [] }
               else Level0_conflict { conflict_id = confl.id });
       emit_terminal t;

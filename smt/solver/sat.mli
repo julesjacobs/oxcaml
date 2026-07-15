@@ -39,18 +39,20 @@ type result =
 
 (** A fresh solver with no variables and no clauses.
 
-    [emit_level0_unit_decls] (default [true]) controls whether {!add_clause} emits the
-    level-0-unit DECLARATION ([on_unit]) to an installed cert {!trace}. It is a pure
-    emitter knob — never read by search, so it has NO effect on verdicts, models, or the
-    conflicts/decisions/propagations counters (base #53). The declaration is redundant for
-    the checker (which re-derives every level-0 unit from the raw [Input] clause by BCP;
-    declared units are verified-not-trusted). A caller running base-frame-at-level-0
-    (session-side OXSMT_BASE_L0) passes [false]: there, a base-frame input unit that a
-    level-0 theory conflict retracts in the checker's contradictory closure would
-    otherwise spuriously fail the "declared level-0 unit entailed" check even though the
-    E3 refutation over the whole clause DB is valid. Default [true] keeps the pre-#53
-    emitter behaviour byte-identical. *)
-val create : ?emit_level0_unit_decls:bool -> unit -> t
+    [base_l0_cert_mode] (default [false]) is the base-l0 CERTIFICATE-EMITTER mode bit. It
+    is a pure emitter knob — never read by search, so it has NO effect on verdicts,
+    models, or the conflicts/decisions/propagations counters (base #53). Default [false]
+    keeps every emitter behaviour byte-identical to the pre-#53 build. A caller running
+    base-frame-at-level-0 (session-side OXSMT_BASE_L0) passes [true], which drives two
+    coupled cert-mode behaviours: (1) {!add_clause} SUPPRESSES the redundant level-0-unit
+    DECLARATION ([on_unit]) — the checker re-derives every level-0 unit from the raw
+    [Input] clause by BCP (verified-not-trusted); and (2) a level-0 theory conflict
+    concludes via the empty-core E3 route rather than E2. Both address the same base-l0
+    hazard: a base-frame input unit that a level-0 theory conflict retracts in the
+    checker's (legitimately contradictory) closure would otherwise spuriously fail the
+    "declared level-0 unit entailed" check even though the E3 refutation over the whole
+    clause DB is valid. *)
+val create : ?base_l0_cert_mode:bool -> unit -> t
 
 (** Allocate and return the next variable. Variables are also auto-allocated on demand by
     {!add_clause} and {!solve} when a literal names one not yet created, so explicit calls
