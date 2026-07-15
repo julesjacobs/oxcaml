@@ -40,10 +40,26 @@ let as_int = function
    original assertions) and {!eval_value} (W1b eliminated-variable re-derivation) so both
    use the identical fail-closed / overflow-guarded semantics. *)
 let ev_with
-      (consts : (string, Cdclt.value) Hashtbl.t)
-      (funs : (string, Cdclt.fun_table) Hashtbl.t)
+  (consts : (string, Cdclt.value) Hashtbl.t)
+  (funs : (string, Cdclt.fun_table) Hashtbl.t)
   =
+  (* Memoize by hash-cons tag: the model tables are FIXED for this [ev_with] call, so a
+     term's value is a pure function of the term. Without this a shared DAG (AND/OR/ITE
+     diamonds) is evaluated as a tree — exponential in depth. Same fix/precedent as the DT
+     checker's DAG memo (trunk a0a1f011e4). Sound: the memo is per-[ev_with]-call, and no
+     caller holds the returned closure across a table mutation ([eval_in]/[eval_value]
+     rebuild a fresh [ev_with] per call; [check] never mutates its tables), so a cached
+     value is never stale. Short-circuit (And/Or/Ite) is preserved — the memo only records
+     evaluations that actually happen. *)
+  let memo : Cdclt.value Term.Table.t = Term.Table.create 256 in
   let rec ev (t : Term.t) : Cdclt.value =
+    match Term.Table.find_opt memo t with
+    | Some v -> v
+    | None ->
+      let v = ev_node t in
+      Term.Table.replace memo t v;
+      v
+  and ev_node (t : Term.t) : Cdclt.value =
     match t.Term.node with
     | Term.Bool_const b -> VBool b
     | Term.Int_const n -> VInt n
@@ -59,9 +75,9 @@ let ev_with
         | None -> raise Bad
         | Some tbl ->
           let argv = List.map ev (Iarr.to_list args) in
+          let n = List.length argv in
           let matches (case_args, _) =
-            List.length case_args = List.length argv
-            && List.for_all2 value_eq case_args argv
+            List.length case_args = n && List.for_all2 value_eq case_args argv
           in
           (match List.find_opt matches tbl.Cdclt.cases with
            | Some (_, r) -> r
