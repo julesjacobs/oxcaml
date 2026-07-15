@@ -274,7 +274,12 @@ let model_table_stats = function
       entries
 ;;
 
-let goal_block idx g =
+(* [include_model] (default [true]) renders the [(model ...)] line for a sat goal. The
+   runner passes [false] when the committed golden is MODEL-OPTIONAL (omits the model
+   line): the model text is then not pinned, only verdict+counters(+core-size) are, and
+   the layer-1 eval self-check still validates the produced model each run. See
+   [golden_pins_model] and [evaluate]. *)
+let goal_block ?(include_model = true) idx g =
   let b = Buffer.create 128 in
   Printf.bprintf b "(goal %d\n" idx;
   Printf.bprintf b "  (verdict %s)\n" (verdict_to_string g.verdict);
@@ -282,8 +287,8 @@ let goal_block idx g =
    | Some sz -> Printf.bprintf b "  (core-size %d)\n" sz
    | None -> ());
   (match g.model with
-   | Some m -> Printf.bprintf b "  (model %s)\n" (render_model_body m)
-   | None -> ());
+   | Some m when include_model -> Printf.bprintf b "  (model %s)\n" (render_model_body m)
+   | _ -> ());
   Printf.bprintf
     b
     "  (counters (conflicts %s) (decisions %s) (propagations %s)))\n"
@@ -293,8 +298,20 @@ let goal_block idx g =
   Buffer.contents b
 ;;
 
-let produced_text (out : solver_output) : string =
-  String.concat "" (List.mapi (fun i g -> goal_block (i + 1) g) out)
+let produced_text ?(include_model = true) (out : solver_output) : string =
+  String.concat "" (List.mapi (fun i g -> goal_block ~include_model (i + 1) g) out)
+;;
+
+(* A golden PINS the model iff it carries any [(model ...)] line. A MODEL-OPTIONAL golden
+   omits it (verdict + counters + eval-validity are the pinned contract, not the model
+   text — search-fragile for a sat model with many equivalent solutions). No-op for an
+   unsat golden (no model line either way), so this only relaxes sat goldens that have
+   been deliberately written model-less. Per-file (all-or-nothing): to relax a multi-goal
+   file, drop every model line. *)
+let golden_pins_model (golden : string) : bool =
+  List.exists
+    (fun line -> String.starts_with ~prefix:"(model " (String.trim line))
+    (String.split_on_char '\n' golden)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -420,7 +437,19 @@ let evaluate
             | _ -> None)
           evals
       in
-      let produced = produced_text out in
+      (* Model-optional goldens: if the committed golden omits the [(model ...)] line, do
+         not pin the model text — render [produced] without it so verdict+counters match
+         regardless of which valid model was found. The layer-1 eval self-check
+         ([model_unsound], below) has already validated the actual produced model and
+         DOMINATES this comparison, so relaxing the golden never masks an unsound model.
+         [produced] (model-stripped here) is also what a promote writes, preserving the
+         model-less style. *)
+      let golden_model_less =
+        match golden with
+        | Some g -> not (golden_pins_model g)
+        | None -> false
+      in
+      let produced = produced_text ~include_model:(not golden_model_less) out in
       let outcome =
         (* Soundness signals dominate the golden comparison. *)
         match label_issue, model_unsound, eval_unusable with
