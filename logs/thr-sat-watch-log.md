@@ -121,3 +121,35 @@ clears the ≥5% bar on the target UF population, and all gates are green. Scope
 clause arena as a distinct lever with its own design round (the `reduce_db` relocation +
 arena reclamation is the crux) rather than build a broken clause-index variant or a
 zero-value pointer-array variant under this task.
+
+---
+
+## Trunk-hygiene note (pre-existing, not this branch): OXSMT_CHRONO=1 full sat_test exits 2
+
+Filing for whoever owns SAT test hygiene — first written record. Running the WHOLE
+`sat_test.exe` under `OXSMT_CHRONO=1` aborts with exit 2 (it is not a chrono-clean test
+binary; the sanctioned chrono gate is `make chrono-test`, which is green).
+
+Exact repro (identical on trunk `8e056625e6` and this branch — bisected to neither commit
+here):
+```
+cd <worktree>
+OXSMT_CHRONO=1 /home/jujacobs/.opam/5.4.0/bin/dune exec --profile release \
+  smt/solver/test/sat_test.exe ; echo "exit=$?"
+```
+Yields:
+```
+Fatal error: exception Invalid_argument("Sat.solve: OXSMT_CHRONO and a decision branch
+filter (relevancy) are mutually exclusive (task #41 Stage 1)")
+  ... Oxsmt_solver__Sat.solve (sat.ml solve guard)
+  ... Dune__exe__Sat_test.test_branch_filter_firing (sat_test.ml:783)
+  ... Dune__exe__Sat_test (sat_test.ml:873)
+exit=2
+```
+Cause: `test_branch_filter_firing` installs a decision branch filter then calls
+`Sat.solve`, which trips the (correct, intentional) `solve`-entry guard that CB and a
+branch filter are mutually exclusive (task #41 Stage 1). The guard and the test are both
+trunk code; the interaction is only exercised when the env var is applied to the full
+binary. Suggested fix (for the owner): have `test_branch_filter_firing` skip when
+`OXSMT_CHRONO` is set (or split it into a non-chrono test target). No product-code change
+implied.
