@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -349,6 +349,14 @@ DT_SAT_GOLDENS ?= tests/dt-goldens-sat
 dt-sat-gate:
 	$(DUNE) build tests/solver/dt_sat_gate.exe
 	$(DUNE) exec tests/solver/dt_sat_gate.exe -- $(DT_SAT_GOLDENS)
+
+## dt-multi-query-gate — batched-VC-per-Session regression (task #51). Declares multiple
+##   datatypes across push-scoped checks in ONE Session via the accumulating
+##   declare_datatype API and asserts each stays checked-sat (RED before the DT theory read
+##   its registry by live ref). Documents the task #54 none-then-DT theory-choice gap.
+dt-multi-query-gate:
+	$(DUNE) build tests/solver/dt_multi_query_gate.exe
+	$(DUNE) exec tests/solver/dt_multi_query_gate.exe
 
 ## array-sat-gate — arrays SAT-direction gate (task #14). Drives the tests/arr-goldens-sat
 ##   [:status sat] goldens through the shipped CLI (one Session per process, the product
@@ -630,6 +638,7 @@ test: check-frozen
 	$(MAKE) bv-goldens-test
 	$(MAKE) bv-op-coverage-test
 	$(MAKE) dt-sat-gate
+	$(MAKE) dt-multi-query-gate
 	$(MAKE) array-sat-gate
 	$(MAKE) row2-red-gate
 	$(MAKE) weq-graph-test

@@ -37,7 +37,12 @@ type info =
 
 type t =
   { ctx : Context.t
-  ; reg : Defs.t
+  ; reg : Defs.t ref
+    (* LIVE registry ref shared with the session/cdclt (NOT a snapshot): datatypes
+         declared AFTER this theory is instantiated (batched VC queries in one Session)
+         must be visible, or their terms fail classification -> unknown. The registry only
+         grows (monotonic [Datatype_defs.add]), so a live read never re-classifies an
+         existing term. *)
   ; engine : prem Euf.t
   ; true_const : Term.t
   ; false_const : Term.t
@@ -120,13 +125,13 @@ let dt_sort_sym (sort : Sort.t) : Symbol.t option =
 
 let is_dt_sort t (sort : Sort.t) =
   match dt_sort_sym sort with
-  | Some s -> Defs.is_datatype_sym t.reg s
+  | Some s -> Defs.is_datatype_sym !(t.reg) s
   | None -> false
 ;;
 
 let datatype_of_sort t (sort : Sort.t) : Defs.datatype option =
   match dt_sort_sym sort with
-  | Some s -> Defs.datatype_of_sort t.reg s
+  | Some s -> Defs.datatype_of_sort !(t.reg) s
   | None -> None
 ;;
 
@@ -171,13 +176,13 @@ let rec catalog t ~input (term : Term.t) =
       if input then Term.Table.replace t.input_dt term ());
     match head_args term with
     | Some (sym, args) ->
-      if Defs.constructor_of_sym t.reg sym <> None
+      if Defs.constructor_of_sym !(t.reg) sym <> None
       then t.ctor_terms <- term :: t.ctor_terms
-      else if Defs.selector_of_sym t.reg sym <> None
+      else if Defs.selector_of_sym !(t.reg) sym <> None
       then (
         t.selector_terms <- term :: t.selector_terms;
         if Array.length args >= 1 then Term.Table.replace t.split_relevant args.(0) ())
-      else if Defs.tester_of_sym t.reg sym <> None
+      else if Defs.tester_of_sym !(t.reg) sym <> None
       then (
         t.tester_terms <- term :: t.tester_terms;
         if Array.length args >= 1 then Term.Table.replace t.split_relevant args.(0) ());
@@ -346,7 +351,7 @@ let saturate_round t ~changed : prem list option =
          then (
            match head_args st with
            | Some (sym, sargs) when Array.length sargs = 1 ->
-             (match Defs.selector_of_sym t.reg sym with
+             (match Defs.selector_of_sym !(t.reg) sym with
               | Some (_dt, c, sel) ->
                 let x = sargs.(0) in
                 (match witness_of t witnesses x with
@@ -374,7 +379,7 @@ let saturate_round t ~changed : prem list option =
          then (
            match head_args tt with
            | Some (sym, targs) when Array.length targs = 1 ->
-             (match Defs.tester_of_sym t.reg sym with
+             (match Defs.tester_of_sym !(t.reg) sym with
               | Some (_dt, c) ->
                 let x = targs.(0) in
                 let is_true = Euf.are_equal t.engine tt t.true_const in
@@ -877,7 +882,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
       | None -> None
       | Some wterm ->
         let sym, wargs = Option.get (head_args wterm) in
-        let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+        let _, c = Option.get (Defs.constructor_of_sym !(t.reg) sym) in
         Array.iter reg_rep wargs;
         Some (c, Array.map (fun (a : Term.t) -> Euf.class_of t.engine a, a) wargs)
     in
@@ -1029,7 +1034,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           match Hashtbl.find_opt witnesses k with
           | Some wterm ->
             let sym, wargs = Option.get (head_args wterm) in
-            let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+            let _, c = Option.get (Defs.constructor_of_sym !(t.reg) sym) in
             let fields = Array.to_list (Array.map (fun a -> field_tree a depth) wargs) in
             tick ();
             Ctor (Symbol.name c.Defs.sym, fields)
@@ -1103,7 +1108,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
             match Hashtbl.find_opt witnesses k with
             | Some wterm ->
               let sym, wargs = Option.get (head_args wterm) in
-              let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+              let _, c = Option.get (Defs.constructor_of_sym !(t.reg) sym) in
               tick ();
               Ctor
                 ( Symbol.name c.Defs.sym

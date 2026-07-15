@@ -30,10 +30,11 @@ open Oxsmt_core
 type t
 
 (** [create ctx env registry] is an empty DT theory over session [ctx]/[env], reading
-    datatype structure from [registry] ({!Oxsmt_core.Datatype_defs}). With an empty
-    [registry] the theory is inert (pure congruence closure), so a non-datatype problem is
-    unaffected. *)
-val create : Context.t -> Env.t -> Datatype_defs.t -> t
+    datatype structure from the LIVE [registry] ref ({!Oxsmt_core.Datatype_defs}) — held
+    by reference, not snapshotted, so datatypes declared after this theory is instantiated
+    (batched queries in one session) are visible. With an empty [registry] the theory is
+    inert (pure congruence closure), so a non-datatype problem is unaffected. *)
+val create : Context.t -> Env.t -> Datatype_defs.t ref -> t
 
 (* The frozen {!Oxsmt_core.Theory.THEORY} operations, driven by the CDCL(T) seam. *)
 

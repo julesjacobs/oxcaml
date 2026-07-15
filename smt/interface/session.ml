@@ -451,6 +451,18 @@ let set_datatypes t defs =
     match Oxsmt_core.Env.rank t.env sym with
     | r -> Some r
     | exception Not_found -> None);
+  (* NON-MONOTONICITY GUARD (interim, #51/#54). [set_datatypes] REPLACES the registry (it
+     is not additive like [declare_datatype]). Once the DT theory is instantiated it has
+     cataloged terms — session-lifetime [ctor_terms]/[seen_cat], NOT restored on [pop] —
+     against the OLD registry; with the by-ref read those stale classifications would be
+     matched against this new, differently-populated registry, and a re-ranked symbol
+     (e.g. a constructor now a selector, accepted by #63's same-rank write-once) could
+     drive [build_witnesses] to a FALSE constructor-clash -> wrong [unsat] (codex CRITICAL
+     on fb605dd1cc). Fail CLOSED: poison the session so subsequent solves degrade to
+     [unknown], deliberately restoring trunk's accidentally-safe behavior. The additive
+     [declare_datatype] path never trips this (it does not call [set_datatypes]); the
+     correct behaviour (reset-per-query theory rebuild) is the #54 contract. *)
+  if Cdclt.theory_instantiated t.cdclt then t.degraded <- true;
   t.registry := defs
 ;;
 
@@ -472,6 +484,9 @@ let set_arrays t defs =
     match Oxsmt_core.Env.rank t.env sym with
     | r -> Some r
     | exception Not_found -> None);
+  (* Same non-monotonicity guard as [set_datatypes] (#51/#54): a registry REPLACEMENT
+     after the theory is instantiated is poisoned to [unknown]. *)
+  if Cdclt.theory_instantiated t.cdclt then t.degraded <- true;
   t.array_registry := defs;
   if not (Oxsmt_core.Array_defs.is_empty defs) then t.has_arrays <- true
 ;;

@@ -66,6 +66,14 @@ val create
   -> cap:Oxsmt_core.Env.reserved_cap
   -> t
 
+(** [theory_instantiated t] is [true] once the standalone/combined theory has been chosen
+    (at the first [intern_atom]) and cached. While [false], no theory atom has been
+    interned or cataloged, so replacing the datatype/array registry is safe; once [true],
+    the theory has classified terms against the current registry, so a NON-MONOTONIC
+    registry replacement must be treated as a poison (interim guard for #51/#54 — see
+    {!Session.set_datatypes}). *)
+val theory_instantiated : t -> bool
+
 (** Install (or, with [None], detach) the dynamic relevancy driver (task #24). When set,
     the theory-seam trail events ([on_assign]/[on_backtrack]) are also streamed to it so
     it can maintain relevancy marks in lockstep with the SAT trail. The branch filter that

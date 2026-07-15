@@ -237,6 +237,8 @@ let subterms_sorted t =
 (* Get-or-create the SAT var for a theory-atom [term], registering it with the combined
    theory on first sight (CONTRACT-REG). [split] flags an atom minted mid-solve from a
    [Split], whose e-node registration may later be truncated by a backjump. *)
+let theory_instantiated t = t.theory <> None
+
 let ensure_theory t =
   match t.theory with
   | Some impl -> impl
@@ -245,7 +247,7 @@ let ensure_theory t =
       if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
       then TArr (Arr.create t.ctx t.env t.cap !(t.array_registry))
       else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
-      then TDt (Dt.create t.ctx t.env !(t.registry))
+      then TDt (Dt.create t.ctx t.env t.registry)
       else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;

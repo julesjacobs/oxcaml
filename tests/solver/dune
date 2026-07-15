@@ -59,6 +59,15 @@
 ; through the real Session asserting a CHECKED sat, and proves Dt_model_check is RED against
 ; a deliberately-wrong constructor tree (banked review rule).
 
+; dt-multi-query gate (make dt-multi-query-gate): the batched-VC-per-Session regression
+; (task #51). Declares multiple datatypes across push-scoped checks in one Session via the
+; accumulating declare_datatype API and asserts each stays checked-sat — RED before the DT
+; theory read its registry by live ref, GREEN after. Documents the task #54 none-then-DT gap.
+(executable
+ (name dt_multi_query_gate)
+ (modules dt_multi_query_gate)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))
+
 (executable
  (name dt_sat_gate)
  (modules dt_sat_gate)
