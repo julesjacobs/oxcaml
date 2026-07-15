@@ -1684,7 +1684,18 @@ let install_cert_trace t tr =
      then
        invalid_arg
          "Session.install_cert_trace: must be installed on a pristine session, before \
-          any assert"
+          any assert";
+     (* OXSMT_BASE_L0 rider: the [base] forcing-unit is emitted lazily on the first
+        [check_sat] (see [base_unit_emitted]). A trace installed AFTER that first solve
+        would not record the unit as an Input, so a later refutation over it replays as a
+        (fail-safe) INVALID cert. Reject fail-loud. Inert when the flag is off:
+        [base_unit_emitted] is only ever set under [base_at_level0]. *)
+     if t.base_unit_emitted
+     then
+       invalid_arg
+         "Session.install_cert_trace: must be installed before the first check_sat (the \
+          OXSMT_BASE_L0 base-forcing unit is emitted there and would otherwise be \
+          untraced)"
    | None -> ());
   (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
      entailed-equality unit must not enter the cert as a trusted [Input]. *)
