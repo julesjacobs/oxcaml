@@ -95,3 +95,45 @@ Attribution A/B + corpus A/B on the QF_AX 551: OFF vs ROW2 vs ROW2+NOINDEX (+ la
 run split the −59 across scan / regeneration / materialization and decide which ladder rungs are
 needed. Kill rule: no regression anywhere (storecomm W=1+W=24), net positive, no family names,
 no global tuned threshold. Handed to the pair-runner / lockbox with a sha-stamped binary.
+
+## FIX ROUND (codex BOUNCE on b3d4a76e72 → guard, new commit on top; never amend)
+Codex found `an_distinct_idx`'s branches ASSUMED an orientation half without checking (the
+`else` arm took `(i~y ∧ j~x)` on a key-hit where `are_equal i x` is false, and the `then` arm
+took `j~y` unchecked). The `(ci,cj)` key match only guarantees index-CLASS membership at
+index-BUILD time. For a same-sort `(Array T T)` array — index sort = element sort, theory-legal,
+select results usable as indices — a mid-pass ROW2 `assert_eq` on read RESULTS (element = index
+sort) can merge an index-sort class, staling the hit; the assumed orientation would then
+`explain` over non-equal terms → a WRONG PREMISE on a ROW2 (TCB) path → potential wrong-unsat.
+
+FIX (per master ruling — make it moot, don't win the argument): MIRROR THE SCAN'S GUARD.
+`an_distinct_idx` now verifies BOTH orientations live —
+`if are_equal i x && are_equal j y then … else if are_equal i y && are_equal j x then … else None`
+— structurally IDENTICAL to the scan's per-entry check, applied to the single indexed candidate.
+Sound BY CONSTRUCTION: a valid hit is byte-identical to the scan; a stale/non-matching hit
+degrades to `None` = a missed match (ROW2 is completeness-only → `row_split` backstop still
+fires), NEVER a wrong premise. Distinct index/element sorts (the whole corpus) never stale, so
+counted-identity (INDEXED≡NOINDEX 7/7 re-confirmed post-guard) and the +21 are preserved. Same
+ruling shape as the #53 strict-OFF gate: sound-by-construction, not sound-by-argument.
+
+### FABLE ⇄ CODEX RECONCILIATION (why both legs were right)
+- Fable APPROVE via the live-rep invariant ("key-hit ⇒ current co-classing; worst case a missed
+  match") is TRUE for DISTINCT index/element sorts: `row_round`'s only merges are on element-sort
+  read terms, and element-merge congruence never reaches an index-ARGUMENT class (arrays aren't
+  injective), so index-class reps are stable within a pass ⇒ the assumed orientation always held.
+- Codex BOUNCE via the else-branch divergence is TRUE for SAME-SORT `(Array T T)`: there element
+  sort = index sort, so a read-result merge IS an index-class merge — fable's stability premise
+  breaks, the hit can stale, and the unchecked assumption becomes a wrong premise.
+Both are correct in their domain; they conflict only because one reasons over the corpus (all
+distinct-sort) and the other over the full theory (same-sort legal). The guard dissolves the
+conflict: it does not RELY on index-class stability, so it is sound for BOTH sorts.
+
+### SAME-SORT RED (tests/arr-goldens-red/row2_samesort_red.smt2, wired into row2-red-gate)
+`(Array T T)` fixture: nested-index reads where `select(store a i v) j` telescopes (ROW2, `i≠j`
+SAT-decided via `d`) and its result feeds a nested `select(a, …)`, so the ROW2 merge touches an
+index-sort class. SATISFIABLE (d=false witness); gate REQUIRES not-unsat under OXSMT_ARR_ROW2=1.
+Guarded form: unknown (ROW2 fires — 1 conflict/4 dec vs OFF 0/8 — then the guard keeps it sound).
+The fixture exercises the same-sort ROW2 path codex couldn't craft in-budget; it DOCUMENTS the
+boundary (attempts to make the assume-orientation mutant flip the verdict on it did not succeed —
+consistent with codex's finding — because the guard's soundness is by-construction, not
+contingent on a reachable misfire). row2-red-gate now runs BOTH fixtures (distinct + same-sort),
+2 checks 0 failures.

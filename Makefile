@@ -376,15 +376,24 @@ array-sat-gate:
 ##   A commit that drops that premise makes it wrong-UNSAT (the M-storeidx class the fable
 ##   review's RED targets). PASS iff the OXSMT_ARR_ROW2=1 verdict is NOT [unsat]; nonzero on
 ##   wrong-UNSAT. See logs/ax-rowsort-log.md, logs/ax-row2-review-fable.md.
-ROW2_RED_FIXTURE ?= tests/arr-goldens-red/row2_premise_completeness_red.smt2
+## The same-sort (Array T T) fixture (rung-1a fix round) adds the codex boundary: index
+##   sort = element sort, so a ROW2 read-result merge touches an index-sort class mid-pass and
+##   can stale the an_diseqs class-pair index; the guarded [an_distinct_idx] (verify both
+##   orientations live, else None) keeps it NOT-unsat by construction. Both fixtures gate the
+##   same "must not be unsat under OXSMT_ARR_ROW2=1" invariant.
+ROW2_RED_FIXTURES ?= tests/arr-goldens-red/row2_premise_completeness_red.smt2 tests/arr-goldens-red/row2_samesort_red.smt2
 row2-red-gate:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
-	@out=`OXSMT_ARR_ROW2=1 $(DUNE) exec tests/solver/oxsmt_cli.exe -- $(ROW2_RED_FIXTURE) 2>/dev/null`; \
-	  echo "row2-red-gate: $$out"; \
+	@fail=0; for f in $(ROW2_RED_FIXTURES); do \
+	  out=`OXSMT_ARR_ROW2=1 $(DUNE) exec tests/solver/oxsmt_cli.exe -- $$f 2>/dev/null`; \
+	  echo "row2-red-gate [$$f]: $$out"; \
 	  case "$$out" in \
-	    *"verdict unsat"*) echo "  FAIL: ROW2 premise-drop wrong-UNSAT on a satisfiable fixture"; exit 1 ;; \
-	    *) echo "  row2-red-gate: 1 check, 0 failures (verdict is not unsat)" ;; \
-	  esac
+	    *"verdict unsat"*) echo "  FAIL: ROW2 wrong-UNSAT on a satisfiable fixture"; fail=1 ;; \
+	    *) echo "  ok (verdict is not unsat)" ;; \
+	  esac; \
+	done; \
+	if [ $$fail -ne 0 ]; then exit 1; fi; \
+	echo "row2-red-gate: 2 checks, 0 failures"
 
 ## weq-graph-test — unit tests for the W0 dark weak-equivalence graph substrate
 ##   (ADR-weakeq / DESIGN.md A12): the O9 index-sort-stability gate, store-edge permanence,

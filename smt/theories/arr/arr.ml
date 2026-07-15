@@ -722,19 +722,32 @@ let an_distinct_idx t index (i : Term.t) (j : Term.t) : Lit.t list option =
     match Hashtbl.find_opt index key with
     | None -> None
     | Some (x, y, lit) ->
-      if Euf.are_equal t.engine i x
+      (* Mirror the scan's per-entry guard (codex bounce): VERIFY the candidate's
+         orientation live rather than assume it. The (ci,cj) key match only guarantees
+         index-CLASS membership at index-BUILD time; for a same-sort [(Array T T)] array an
+         in-pass element merge (ROW2 asserts read-result equalities, and a read is the
+         element = index sort here) can stale the hit, so an ASSUMED orientation could
+         [explain] over non-equal terms -> a wrong premise on a TCB path. Checking both
+         [are_equal] pairs makes it sound BY CONSTRUCTION: a valid hit is byte-identical to
+         the scan; a stale / non-matching hit degrades to [None] (a missed match,
+         completeness-only -> the [row_split] backstop still fires), never a wrong premise.
+         Distinct index/element sorts (the whole corpus) never stale, so counted-identity
+         and the +21 hold. *)
+      if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
       then
         Some
           (dedup_lits
              (lit
               :: (lits_of_prems (Euf.explain t.engine i x)
                   @ lits_of_prems (Euf.explain t.engine j y))))
-      else
+      else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
+      then
         Some
           (dedup_lits
              (lit
               :: (lits_of_prems (Euf.explain t.engine i y)
-                  @ lits_of_prems (Euf.explain t.engine j x)))))
+                  @ lits_of_prems (Euf.explain t.engine j x))))
+      else None)
 ;;
 
 let row_round t ~changed =
