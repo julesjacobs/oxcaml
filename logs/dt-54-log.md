@@ -124,6 +124,34 @@ live lemma EXACTLY like a live assertion: its guard raises `Invalid_argument` wh
 `asserted <> [] || Manager.has_live_lemma t.mgr`. (The earlier pre-draft cleared `t.mgr` via a
 new `Manager.clear`; that was superseded and removed — no new Manager surface.)
 
+#### Caller enumeration — the load-bearing fact (guard vs clear)
+The master's ruling: clear is admissible ONLY if EVERY live `mgr` lemma at reset time is
+internally DERIVED (never user input); if any user-input path exists, the guard is mandatory
+(silently dropping a user quantifier is a wrong-`sat` channel). Enumerated every writer that
+adds to the live store `Manager.t.lemmas` / seed queue (i.e. can be live at a between-query
+reset):
+
+1. `Session.assert_lemma` (session.ml:1279 → `Manager.add_lemma`) — the ONLY door that adds a
+   lemma to the store. **Product callers = the shared loader `Oxsmt_query_loader.assert_all`
+   (tests/loader/oxsmt_query_loader.ml:42), which passes `parsed.Parser.lemmas` — i.e. the
+   user's own `(assert (forall ...))` parsed from the .smt2.** Both product drivers
+   (`tests/solver/oxsmt_cli.ml:188`, `tests/corpus/corpus_classify.ml:211`) and the cert gate
+   route through that loader. So a datatype VC that follows a quantified VC in one Session has
+   a USER-authored lemma live in `mgr`. ⇒ a user-input path INTO `mgr` DEFINITELY EXISTS.
+2. `Session.instantiate` (session.ml:1288 → `Manager.seed_instance`) — manual seed door; only
+   the ematch unit tests call it, and the seed still originates from a user/asserted lemma.
+3. `Manager.round` (during `check_sat`) — derived instances, frame-scoped, dropped by
+   `Manager.on_pop`; NOT live at a between-query (base, post-pop) reset.
+
+CONCLUSION: because path (1) feeds USER quantifiers into `mgr`, CLEAR is UNSOUND (it would
+silently drop a user-asserted `forall` in the new era) → the GUARD is the correct remedy, as
+committed. NOTE symmetry-breaking lemmas (task #25) do NOT enter `mgr` — they are `sym_sel`-
+guarded lex clauses via `assert_clausified`, tracked by `lemmas_registered`/`sym_sel`, so the
+guard does not "spuriously poison" a symbreak VC; the only thing it refuses is a genuinely
+live USER quantifier that the caller failed to `pop` before the new self-contained query
+(a contract-A violation, correctly fail-loud). Both review legs should re-check this
+enumeration — it is the soundness pivot between guard and clear.
+
 RED: dt_multi_query_gate `run_base_lemma_blocks_reset_red`. Registers a BASE-frame forall lemma
 (no ground assert → `asserted = []`), instantiates the combined theory via a pushed ground atom
 then pops (base lemma survives), then attempts a registry change (`declare_datatype`) — REQUIRED
