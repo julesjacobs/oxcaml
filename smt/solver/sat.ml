@@ -316,20 +316,29 @@ type t =
          unless [chrono]. Per-[t] (vars are per-[t]); [reset] each [solve]. *)
   ; base_l0_cert_mode : bool
     (* The ONE base-l0 CERTIFICATE-EMITTER mode bit (base #53). Default [false] ⇒ every
-     emitter behaviour is byte-identical to the pre-#53 build (raw-Sat [cert_emit_test]
-     on_unit + E2 expectations hold). The session sets it [true] under base-l0
-     (OXSMT_BASE_L0), where it drives BOTH cert-mode behaviours together so the OFF path
-     stays trunk-identical BY CONSTRUCTION (codex #53 bounce):
-     1. [add_clause] SUPPRESSES the redundant [on_unit] level-0-unit DECLARATION — the
-        checker re-derives every level-0 unit from the raw [Input] clause + BCP
-        (verified-not-trusted, checker.ml (b)), and under base-l0 a base-frame input unit
-        that a level-0 THEORY conflict retracts in the checker's (legitimately
-        contradictory) closure would otherwise spuriously fail (b).
-     2. a level-0 THEORY conflict concludes via the empty-core E3 [Failed_assumption]
-        route rather than E2 [Level0_conflict] (see [handle_confl]) — E3's [refutes_under]
-        over the whole DB certifies the contradictory closure; (b)'s false failure is
-        avoided the same way the pre-base-l0 build's base ASSUMPTION made these E3. Set
-        once at [create]; never read by search — no effect on verdicts/models/counters. *)
+         emitter behaviour is byte-identical to the pre-#53 build (raw-Sat
+         [cert_emit_test] on_unit + E2 expectations hold). The session sets it [true]
+         under base-l0 (OXSMT_BASE_L0), where it drives BOTH cert-mode behaviours together
+         so the OFF path stays trunk-identical BY CONSTRUCTION (codex #53 bounce):
+         1. [add_clause] SUPPRESSES the redundant [on_unit] level-0-unit DECLARATION — the
+            checker re-derives every level-0 unit from the raw [Input] clause + BCP
+            (verified-not-trusted, checker.ml (b)), and under base-l0 a base-frame input
+            unit that a level-0 THEORY conflict retracts in the checker's (legitimately
+            contradictory) closure would otherwise spuriously fail (b).
+         2. a level-0 THEORY conflict concludes via the empty-core E3 [Failed_assumption]
+            route rather than E2 [Level0_conflict] (see [handle_confl]) — E3's
+            [refutes_under] over the whole DB certifies the contradictory closure; (b)'s
+            false failure is avoided the same way the pre-base-l0 build's base ASSUMPTION
+            made these E3. Set once at [create]; never read by search — no effect on
+            verdicts/models/counters. *)
+  ; recursive_min : bool
+    (* Recursive reason-graph learned-clause minimization (OXSMT_RECURSIVE_MIN). Read once
+     at [create]; default [false] ⇒ [analyze] runs the one-hop minimizer and the core is
+     byte-identical to trunk. When [true], [analyze] minimizes recursively through the
+     whole reason graph, expanding theory reasons via {!theory_reason_clause}. Only ever
+     drops literals that are genuinely redundant (all reason antecedents already in the
+     clause / level-0 / themselves removable), so it never changes soundness — only makes
+     learned clauses shorter. Bypassed under trace exactly like the one-hop minimizer. *)
   }
 
 let var_decay = 0.95
@@ -380,6 +389,17 @@ let satpre_enabled () =
    byte-identical. Same on-value vocabulary as [OXSMT_RELEVANCY]. *)
 let chrono_from_env () =
   match Sys.getenv_opt "OXSMT_CHRONO" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+(* Recursive reason-graph learned-clause minimization (OXSMT_RECURSIVE_MIN), dark,
+   env-gated at [create]: unset ⇒ [false] ⇒ the one-hop minimizer runs and the core is
+   byte-identical to trunk. When [true], [analyze]'s post-1UIP minimization recurses
+   through the full reason graph (Boolean [Implied_by] AND theory [Theory_prop] reasons)
+   as z3 does. Same on-value vocabulary as [OXSMT_CHRONO]. *)
+let recursive_min_from_env () =
+  match Sys.getenv_opt "OXSMT_RECURSIVE_MIN" with
   | Some ("1" | "true" | "yes" | "on") -> true
   | Some _ | None -> false
 ;;
@@ -477,6 +497,7 @@ let create ?(base_l0_cert_mode = false) () =
   ; chrono_threshold = chrono_threshold_from_env ()
   ; chrono_reason = Hashtbl.create 16
   ; base_l0_cert_mode
+  ; recursive_min = recursive_min_from_env ()
   }
 ;;
 
@@ -1257,6 +1278,94 @@ let theory_prop_conflict_clause t lit =
   note_theory_clause t Conflict (transient_clause t lits)
 ;;
 
+(* Abstract decision level of a var: a single bit [1 lsl (level mod 63)] (OCaml's native
+   [int] is 63-bit). The OR over a clause's literals is a cheap over-approximation of the
+   set of levels it spans. In recursive minimization it is a SOUND fast-fail filter: if an
+   antecedent's level bit is absent from the clause's level set, the antecedent cannot be
+   resolved away, so the literal under test is kept. A false negative here only KEEPS a
+   literal (never drops one), so a wrong [abstract_levels] can never cause an unsound drop
+   — it only costs a missed minimization. *)
+let abstract_level t v = 1 lsl (Dynarray.get t.level v land 63)
+
+(* The reason of the (currently true) literal [tl] as a uniform clause holder, or [None]
+   when [tl]'s var is a decision. Mirrors [analyze]'s resolution step exactly: an
+   [Implied_by] reason is the arena clause [t.reason]; a [Theory_prop] reason is the lazy
+   theory clause [tl ∨ ¬p₁ ∨ … ∨ ¬pₖ] materialized via {!theory_reason_clause} (slot 0 is
+   [tl] itself, slots 1.. its currently-false antecedents). *)
+let reason_holder_of_true_lit t tl =
+  let r = Dynarray.get t.reason (var_of_lit tl) in
+  if r >= 0
+  then Some (H_arena r)
+  else if r = r_theory
+  then Some (H_transient (theory_reason_clause t tl))
+  else (* r_decision *) None
+;;
+
+(* Recursive (self-subsumption) redundancy test for a learned-clause literal [l0] (false
+   under the current assignment), the standard MiniSat [litRedundant] extended to expand
+   theory reasons. [l0] is redundant iff every antecedent of its reason clause is already
+   in the learned clause (marked [seen]), fixed at level 0, or itself recursively
+   redundant. Reasons are read via {!reason_holder_of_true_lit} on the antecedent's TRUE
+   literal ([neg_lit] of the false clause-position literal), so both Boolean and theory
+   reasons resolve uniformly.
+
+   [t.seen] doubles as the "in clause OR proven removable" marker (MiniSat convention).
+   Vars newly marked while proving [l0] removable are appended to [marked] on success (so
+   [analyze]'s final sweep clears them) and rolled back on failure (so a failed probe
+   leaves no spurious [seen] that a later literal's test would misread as in-clause). The
+   reason graph is a DAG ordered by trail position (CONTRACT-EX forces every theory
+   premise strictly earlier on the trail than the literal it explains), and [seen]
+   prevents re-visiting, so this terminates. *)
+let lit_redundant t marked abstract_levels l0 =
+  let base = Dynarray.length marked in
+  let stack = Dynarray.create () in
+  Dynarray.add_last stack l0;
+  let ok = ref true in
+  let running = ref true in
+  while !running do
+    if Dynarray.length stack = 0
+    then running := false
+    else (
+      let x = Dynarray.get stack (Dynarray.length stack - 1) in
+      Dynarray.remove_last stack;
+      (* [x] is false; the true propagated literal for its var is [neg_lit x]. *)
+      match reason_holder_of_true_lit t (neg_lit x) with
+      | None ->
+        (* a decision literal: not removable *)
+        ok := false;
+        running := false
+      | Some c ->
+        let n = ch_len t c in
+        let k =
+          ref 1
+          (* slot 0 is the true literal itself *)
+        in
+        while !ok && !k < n do
+          let q = ch_lit t c !k in
+          let vq = var_of_lit q in
+          if (not (Dynarray.get t.seen vq)) && Dynarray.get t.level vq > 0
+          then (
+            let rq = Dynarray.get t.reason vq in
+            let has_reason = rq >= 0 || rq = r_theory in
+            if has_reason && abstract_level t vq land abstract_levels <> 0
+            then (
+              Dynarray.set t.seen vq true;
+              Dynarray.add_last marked vq;
+              Dynarray.add_last stack q)
+            else ok := false);
+          incr k
+        done;
+        if not !ok then running := false)
+  done;
+  if not !ok
+  then (
+    for j = base to Dynarray.length marked - 1 do
+      Dynarray.set t.seen (Dynarray.get marked j) false
+    done;
+    Dynarray.truncate marked base);
+  !ok
+;;
+
 (* ------------------------------------------------------------------ *)
 (* 1UIP conflict analysis with local (self-subsumption) minimization.
 
@@ -1374,37 +1483,65 @@ let analyze t confl =
      downstream antecedent chain over unminimized clauses; trace is OFF by default, so the
      uncertified corpus is untouched. When untraced, minimize as before (bit-identical). *)
   if not track
-  then (
-    let len = Dynarray.length out in
-    let jw = ref 1 in
-    for i = 1 to len - 1 do
-      let l = Dynarray.get out i in
-      let v = var_of_lit l in
-      let r = Dynarray.get t.reason v in
-      let redundant =
-        (* [r_decision]: a decision literal is never redundant. [r_theory]: keep
-           theory-propagated literals (sound: never over-drop). Otherwise [r >= 0] is the
-           [Implied_by] reason clause. *)
-        if r < 0
-        then false
-        else (
-          let cr : cref = r in
-          let ok = ref true in
-          let k = ref 1 in
-          while !ok && !k < cl_len t cr do
-            let vk = var_of_lit (cl_lit t cr !k) in
-            if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
-            then ok := false;
-            incr k
-          done;
-          !ok)
-      in
-      if not redundant
-      then (
-        Dynarray.set out !jw l;
-        incr jw)
-    done;
-    Dynarray.truncate out !jw);
+  then
+    if t.recursive_min
+    then (
+      (* RECURSIVE minimization (OXSMT_RECURSIVE_MIN): drop a literal whose reason
+         antecedents are all in the clause, level-0, or themselves recursively removable —
+         following the reason graph through both [Implied_by] and [Theory_prop] reasons,
+         as z3's [m_minimize_lemmas] does. Strictly stronger than the one-hop path below
+         (any literal it drops, the recursion also drops, since a directly-satisfied
+         reason is the depth-0 case), so it only ever produces shorter learned clauses. *)
+      let len = Dynarray.length out in
+      let abstract_levels = ref 0 in
+      for i = 0 to len - 1 do
+        abstract_levels
+        := !abstract_levels lor abstract_level t (var_of_lit (Dynarray.get out i))
+      done;
+      let jw = ref 1 in
+      for i = 1 to len - 1 do
+        let l = Dynarray.get out i in
+        let r = Dynarray.get t.reason (var_of_lit l) in
+        (* [r_decision]: a decision literal is never redundant. Otherwise ([r >= 0]
+           [Implied_by] or [r = r_theory]) test recursively. *)
+        let redundant = r <> r_decision && lit_redundant t marked !abstract_levels l in
+        if not redundant
+        then (
+          Dynarray.set out !jw l;
+          incr jw)
+      done;
+      Dynarray.truncate out !jw)
+    else (
+      let len = Dynarray.length out in
+      let jw = ref 1 in
+      for i = 1 to len - 1 do
+        let l = Dynarray.get out i in
+        let v = var_of_lit l in
+        let r = Dynarray.get t.reason v in
+        let redundant =
+          (* [r_decision]: a decision literal is never redundant. [r_theory]: keep
+             theory-propagated literals (sound: never over-drop). Otherwise [r >= 0] is
+             the [Implied_by] reason clause. *)
+          if r < 0
+          then false
+          else (
+            let cr : cref = r in
+            let ok = ref true in
+            let k = ref 1 in
+            while !ok && !k < cl_len t cr do
+              let vk = var_of_lit (cl_lit t cr !k) in
+              if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
+              then ok := false;
+              incr k
+            done;
+            !ok)
+        in
+        if not redundant
+        then (
+          Dynarray.set out !jw l;
+          incr jw)
+      done;
+      Dynarray.truncate out !jw);
   (* Backjump level: the second-highest decision level in the clause (0 for a unit). Move
      that literal to slot 1 so the learned clause watches it. *)
   let learnt = Dynarray.to_array out in
