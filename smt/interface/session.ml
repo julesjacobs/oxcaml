@@ -192,7 +192,22 @@ let create
      reserved-symbol minters. [Session.env] returns only the [env], never the cap. *)
   let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  let sat = Sat.create () in
+  (* OXSMT_BASE_L0 (dark): force the unpoppable base frame TRUE with a permanent level-0
+     unit rather than assuming it every solve. Read the gate ONCE here (before
+     [Sat.create] so the emitter knob can be set); [check_sat] / [cert_assumptions]
+     consult [base_at_level0] to omit [base] from their assumption sets. Unset =>
+     byte-identical to trunk. *)
+  let base_at_level0 =
+    match Sys.getenv_opt "OXSMT_BASE_L0" with
+    | Some "1" -> true
+    | _ -> false
+  in
+  (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
+     (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
+     checker's contradictory closure would otherwise spuriously fail the "declared level-0
+     unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
+     counter effect. Default (not base-l0) keeps every declaration => byte-identical. *)
+  let sat = Sat.create ~emit_level0_unit_decls:(not base_at_level0) () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
      / interactive / [make test] path is byte-identical (the count is never printed). *)
@@ -206,17 +221,10 @@ let create
     Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap
   in
   let base = Sat.new_var sat in
-  (* OXSMT_BASE_L0 (dark): force the unpoppable base frame TRUE with a permanent unit at
-     level 0 rather than assuming it every solve. The unit is NOT added here — it is
-     deferred to the first [check_sat] (see [base_unit_emitted]) so a certificate trace,
-     installed after [create] on the pristine session, records it as a genuine Input. Read
-     the gate once here; [check_sat] and [cert_assumptions] consult [base_at_level0] to
-     omit [base] from their assumption sets. Unset => byte-identical to trunk. *)
-  let base_at_level0 =
-    match Sys.getenv_opt "OXSMT_BASE_L0" with
-    | Some "1" -> true
-    | _ -> false
-  in
+  (* [base_at_level0] is read above (before [Sat.create]). The base forcing-unit is NOT
+     added here — it is deferred to the first [check_sat] (see [base_unit_emitted]) so a
+     certificate trace, installed after [create] on the pristine session, records it as a
+     genuine Input. *)
   (* Dynamic relevancy (task #24): when enabled, create the driver, route the trail seam
      events through [cdclt] to it, and install the SAT branch filter that consults it.
      Disabled by default => the filter is never installed and the glue is byte-identical

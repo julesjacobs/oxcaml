@@ -849,3 +849,38 @@ of `Int of Bigint` (named perf risk — build_model is 83–96% of SMPT's 2s bud
 
 **BLOCKING dual review on the frozen-surface diff** (model_check consumes `Model.value`,
 so this is TCB): codex leg per ADR-0007 + fable leg.
+
+### A14 — Tranche-C unfreeze: cert emitter knob for base-l0 level-0-unit declarations (2026-07-15)
+
+`sat.mli` grows one optional argument on `create`,
+`?emit_level0_unit_decls:bool -> unit -> t` (default `true`), and `FROZEN.sha256` is
+regenerated to match. Same additive shape as A8–A11: none of the 14 frozen DECLARATIONS'
+bodies change — `create` gains a defaulted label, so every existing `Sat.create ()` caller
+and the raw-SAT test fixtures are source- and behaviour-identical. The value is a PURE
+CERTIFICATE-EMITTER knob: it gates whether `add_clause` emits the redundant `on_unit`
+level-0-unit DECLARATION to an installed trace. It is never read by search — verdicts,
+models, and the conflicts/decisions/propagations counters are bit-identical in both states.
+
+Rationale (task #53, the base-l0 default-ON blocker). `on_unit` declarations are
+VERIFIED-not-trusted by the checker (checker.ml (b) requires each declared level-0 unit to
+be entailed by BCP over the inputs); they are redundant because the checker already
+re-derives every level-0 unit from the raw `Input` clause. Under base-frame-at-level-0
+(session `OXSMT_BASE_L0`), the base frame's clauses are unguarded level-0 inputs, so a
+base-frame input unit that a level-0 THEORY conflict RETRACTS in the checker's
+(legitimately contradictory) closure would spuriously fail check (b) — even though the E3
+refutation over the whole clause DB is valid. The session sets `emit_level0_unit_decls =
+false` under base-l0 to drop the false failure; the literal is still enqueued for search.
+
+Paired sat.ml-internal change (NOT on the frozen surface): a level-0 THEORY conflict now
+concludes via an empty-core E3 `Failed_assumption { antecedents = [] }` rather than E2
+`Level0_conflict` (a theory conflict clause self-propagates when added to the checker
+closure, so E2's `falsified` test cannot see it; E3's `refutes_under` over the whole DB
+derives ⊥ by construction). Boolean level-0 conflicts stay E2, so the non-base certs are
+untouched. Soundness of the E3 route is gated by the checker's existing `refutes_under`
+(unchanged) — a bogus theory conflict over a non-refuting DB is still rejected
+(checker_test `bogus_theory_conflict_empty_core_e3`).
+
+**BLOCKING dual review on the frozen-surface diff** (`create` is a TCB constructor): codex
+leg per ADR-0007 + fable leg. Acceptance: cert-corpus-gate 33/33 VALID with `OXSMT_BASE_L0=1`
+AND 33/33 with it off; full gate suite green in BOTH flag states; the bogus-theory-conflict
+RED rejected.

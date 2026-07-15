@@ -261,12 +261,24 @@ type t =
          chronologically (to [conflict_level - 1]). Inert unless [chrono]. *)
   ; chrono_reason : (int, lit list) Hashtbl.t
     (* F1: preserved reasons of surviving theory-PROPAGATED literals across a chrono
-     [cancel_until] rebuild. var -> its snapshotted premise list, taken at the pre-rebuild
-     instant (when the adapter's reason cache is still intact) and served by
-     {!theory_premises} afterwards, because the rebuild ([on_backtrack ~level:0] + replay)
-     destroys the adapter's frame-scoped cache for the survivor. Entries are dropped when
-     the var is removed by a later [cancel_until]; empty (and untouched) unless [chrono].
-     Per-[t] (vars are per-[t]); [reset] each [solve]. *)
+         [cancel_until] rebuild. var -> its snapshotted premise list, taken at the
+         pre-rebuild instant (when the adapter's reason cache is still intact) and served
+         by {!theory_premises} afterwards, because the rebuild ([on_backtrack ~level:0] +
+         replay) destroys the adapter's frame-scoped cache for the survivor. Entries are
+         dropped when the var is removed by a later [cancel_until]; empty (and untouched)
+         unless [chrono]. Per-[t] (vars are per-[t]); [reset] each [solve]. *)
+  ; emit_level0_unit_decls : bool
+    (* Whether [add_clause] emits the [on_unit] level-0-unit DECLARATION to the cert trace
+     (base #53). Default [true] ⇒ byte-identical to the pre-#53 emitter (and the raw-Sat
+     [cert_emit_test] on_unit expectation holds). The session sets it [false] under
+     base-l0 (OXSMT_BASE_L0): the declaration is redundant (the checker re-derives every
+     level-0 unit from the raw [Input] clause + BCP; declared units are verified-not-
+     trusted, checker.ml (b)), and under base-l0 a base-frame input unit that a level-0
+     THEORY conflict retracts in the checker's (contradictory) closure would spuriously
+     fail (b) even though the E3 refutation over the whole DB is valid (see the E3 route
+     in [handle_confl]). Suppressing the redundant declaration removes that false failure;
+     the literal is still enqueued for search. Set once at [create]; never read by search
+     — no effect on verdicts/counters. *)
   }
 
 let var_decay = 0.95
@@ -344,7 +356,7 @@ let chrono_threshold_from_env () =
   | None -> 100
 ;;
 
-let create () =
+let create ?(emit_level0_unit_decls = true) () =
   { nvars = 0
   ; ok = true
   ; assigns = Dynarray.create ()
@@ -404,6 +416,7 @@ let create () =
   ; chrono = chrono_from_env ()
   ; chrono_threshold = chrono_threshold_from_env ()
   ; chrono_reason = Hashtbl.create 16
+  ; emit_level0_unit_decls
   }
 ;;
 
@@ -1414,10 +1427,15 @@ let add_clause ?(origin = Query) t lits =
           then (
             unchecked_enqueue t l Decision;
             (* a standing level-0 unit (ADR-0013 §1.3): declared to the checker, which
-               also re-derives the unit closure from the [Input] clauses by BCP *)
-            match t.trace with
-            | Some tr -> tr.on_unit ~id:(fresh_id t) ~lit:l
-            | None -> ())
+               also re-derives the unit closure from the [Input] clauses by BCP. The
+               declaration is thus redundant; [emit_level0_unit_decls] (default [true])
+               suppresses it under base-l0 — see the field doc + the E3 route in
+               [handle_confl] (#53). *)
+            if t.emit_level0_unit_decls
+            then (
+              match t.trace with
+              | Some tr -> tr.on_unit ~id:(fresh_id t) ~lit:l
+              | None -> ()))
         | _ ->
           let id = if input_id >= 0 then input_id else fresh_id t in
           let c = mk_clause_with_id t id (Array.of_list ls) false in
@@ -1647,12 +1665,17 @@ let add_theory_lemmas t clauses =
    [search]). Returns [Some conflict] (Boolean or theory) or [None] (consistent fixpoint).
    With no theory plugged this is exactly {!propagate}. *)
 let propagate_theory t =
+  (* Returns [Some (clause, is_theory)]: [is_theory] distinguishes a BOOLEAN BCP conflict
+     ([propagate]) from a THEORY conflict (T_conflict / a falsified theory reason / an
+     empty-at-level-0 lemma). The flag drives the level-0 terminal choice in
+     [handle_confl] (base #53): a level-0 theory conflict routes to an empty-core E3, not
+     E2. *)
   let confl = ref None in
   let again = ref true in
   while !again do
     again := false;
     match propagate t with
-    | Some _ as c -> confl := c
+    | Some c -> confl := Some (c, false)
     | None ->
       (match t.theory with
        | None -> ()
@@ -1661,9 +1684,9 @@ let propagate_theory t =
           | T_consistent [] -> ()
           | T_consistent lits ->
             (match enqueue_theory_lits t lits with
-             | `Confl c -> confl := Some c
+             | `Confl c -> confl := Some (c, true)
              | `Progress p -> again := p)
-          | T_conflict premises -> confl := Some (theory_conflict_clause t premises)
+          | T_conflict premises -> confl := Some (theory_conflict_clause t premises, true)
           | T_lemma clauses ->
             (* D3: Split is a Final-effort result; a Propagate-effort lemma is a contract
                deviation but still sound to add, so we accept it and re-propagate. *)
@@ -1673,7 +1696,8 @@ let propagate_theory t =
                concludes unsat rather than letting search run on to a spurious model *)
             if t.ok
             then again := true
-            else confl := Some (note_theory_clause t Conflict (transient_clause t [||]))))
+            else
+              confl := Some (note_theory_clause t Conflict (transient_clause t [||]), true)))
   done;
   !confl
 ;;
@@ -1758,7 +1782,7 @@ let search t assumps conflict_limit =
      analysis sees a literal at the current level (its precondition). For a Boolean BCP
      conflict the highest level is always the current one, so the realignment is a no-op —
      and it is only computed when a theory is plugged, keeping the pure core untouched. *)
-  let handle_confl confl =
+  let handle_confl ~theory confl =
     t.conflicts <- t.conflicts + 1;
     incr conflicts_here;
     budget_tick t (* effort (#60): one SAT conflict *);
@@ -1803,13 +1827,31 @@ let search t assumps conflict_limit =
     in
     let conclude_unsat () =
       t.ok <- false;
-      (* E2 (ADR-0013 §4.0): a level-0 conflict. The terminal step is level-0 RUP of
-         [confl] against the checker's re-derived unit closure. [confl.id] resolves via
-         [on_input] / [on_learned] (a Boolean clause) or [on_theory_clause] (a theory
-         transient — incl. an unconditional [T_conflict []] empty clause, Rev 6).
-         Persisted so a repeated solve on the now-unsat core re-emits it (codex CRIT-3). *)
+      (* ADR-0013 §4.0 terminal for a level-0 conflict.
+         - BOOLEAN level-0 conflict -> E2 [Level0_conflict]: [confl] is a real clause
+           whose literals are ALL false in the level-0 closure, so the checker falsifies
+           it directly (it does not self-propagate). [confl.id] resolves via [on_input] /
+           [on_learned].
+         - THEORY level-0 conflict -> E3 [Failed_assumption] with an EMPTY assumption core
+           (base #53). The theory conflict clause is a valid T-lemma with all-but-one
+           literals already false at level 0; added to the checker's closure as an axiom
+           it UNIT-PROPAGATES its last literal (self-satisfying) instead of being
+           falsified in a consistent closure — so the E2 [falsified] test cannot see it
+           and the closure is contradictory. E3's [refutes_under] over the whole DB (which
+           includes the theory leaf) derives ⊥ BY CONSTRUCTION — it asks exactly "does BCP
+           refute the assumptions", and a contradictory DB refutes the empty set. This is
+           how the pre-base-l0 build certified these (the base ASSUMPTION made them E3);
+           base-l0 removed the assumption but the refutation is still an empty-core E3. No
+           antecedents are cited (the DB carries the refutation; the E3 antecedent list is
+           a RUP hint and [] is valid), so no [Ktheory Conflict] id reaches the checker's
+           Reason-only E3 allow-list. *)
       if t.trace <> None
-      then t.terminal <- Some (Level0_conflict { conflict_id = confl.id });
+      then
+        t.terminal
+        <- Some
+             (if theory
+              then Failed_assumption { antecedents = [] }
+              else Level0_conflict { conflict_id = confl.id });
       emit_terminal t;
       result := Some R_unsat
     in
@@ -1862,7 +1904,7 @@ let search t assumps conflict_limit =
   in
   while !result = None do
     match propagate_theory t with
-    | Some confl -> handle_confl confl
+    | Some (confl, theory) -> handle_confl ~theory confl
     | None ->
       let interval_hit = t.decisions_since_rephase >= t.rephase_interval in
       let do_rephase = interval_hit && not (blocking t) in
@@ -1949,13 +1991,13 @@ let search t assumps conflict_limit =
                  (match th.check ~final:true with
                   | T_consistent lits ->
                     (match enqueue_theory_lits t lits with
-                     | `Confl c -> handle_confl c
+                     | `Confl c -> handle_confl ~theory:true c
                      | `Progress true -> () (* re-check at the new fixpoint *)
                      | `Progress false ->
                        save_model t;
                        result := Some R_sat)
                   | T_conflict premises ->
-                    handle_confl (theory_conflict_clause t premises)
+                    handle_confl ~theory:true (theory_conflict_clause t premises)
                   | T_lemma clauses ->
                     add_theory_lemmas t clauses;
                     (* an empty-at-level-0 lemma makes the instance unsat (blocker: search

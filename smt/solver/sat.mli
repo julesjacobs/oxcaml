@@ -37,8 +37,20 @@ type result =
   | Sat
   | Unsat
 
-(** A fresh solver with no variables and no clauses. *)
-val create : unit -> t
+(** A fresh solver with no variables and no clauses.
+
+    [emit_level0_unit_decls] (default [true]) controls whether {!add_clause} emits the
+    level-0-unit DECLARATION ([on_unit]) to an installed cert {!trace}. It is a pure
+    emitter knob — never read by search, so it has NO effect on verdicts, models, or the
+    conflicts/decisions/propagations counters (base #53). The declaration is redundant for
+    the checker (which re-derives every level-0 unit from the raw [Input] clause by BCP;
+    declared units are verified-not-trusted). A caller running base-frame-at-level-0
+    (session-side OXSMT_BASE_L0) passes [false]: there, a base-frame input unit that a
+    level-0 theory conflict retracts in the checker's contradictory closure would
+    otherwise spuriously fail the "declared level-0 unit entailed" check even though the
+    E3 refutation over the whole clause DB is valid. Default [true] keeps the pre-#53
+    emitter behaviour byte-identical. *)
+val create : ?emit_level0_unit_decls:bool -> unit -> t
 
 (** Allocate and return the next variable. Variables are also auto-allocated on demand by
     {!add_clause} and {!solve} when a literal names one not yet created, so explicit calls
