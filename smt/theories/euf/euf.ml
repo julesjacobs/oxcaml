@@ -47,7 +47,7 @@ type kind =
 type 'p enode =
   { term : Term.t
   ; kind : kind
-    (* The union-find PARENT lives in the flat [t.parents] int array, not here — a
+      (* The union-find PARENT lives in the flat [t.parents] int array, not here — a
          per-op hot read that a boxed record field made a pointer chase (see [find]).
          Every other per-node field stays inline. *)
   ; mutable size : int (* class size; valid at a root *)
@@ -57,7 +57,7 @@ type 'p enode =
   ; mutable freason : 'p reason (* reason for the edge to [fparent] *)
   ; mutable stamp : int (* scratch marker for NCA; not trailed *)
   ; mutable tag : Term.t option
-    (* ADR-0014 Stage 3 (datatypes-scoped): per-class theory data — a witness [Term.t] a
+  (* ADR-0014 Stage 3 (datatypes-scoped): per-class theory data — a witness [Term.t] a
      client attaches to the class (datatypes: the representative constructor application
      [C(a..)] of the class). Valid at a ROOT only; trailed; the surviving root inherits a
      tag on merge if it had none. Two tagged classes merging is surfaced via the merge log
@@ -66,12 +66,12 @@ type 'p enode =
 
 type watched =
   { w_atom : Term.t
-    (* a watched atom: either a non-Bool [Eq(a,b)] (truth = [a ~ b]) or a Bool-codomain
+      (* a watched atom: either a non-Bool [Eq(a,b)] (truth = [a ~ b]) or a Bool-codomain
          predicate application [p(x…)] (truth = [p(x…) ~ true_const]). *)
   ; w_a : int
   ; w_b : int
   ; mutable w_reported : int
-    (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
+  (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
   }
 
 type 'p diseq =
@@ -219,6 +219,20 @@ type 'p t =
        invalidation. Not trailed. *)
     sep_wit : 'p diseq Int_set.t
   ; mutable sep_wit_m : int
+  ; (* Per-call scratch for {!explain_core}, owned by this engine instance and cleared
+       (not reallocated) at the head of every call — the same reuse discipline as
+       {!dirty}. [explain_core] runs on every conflict/implied-explanation (112K–307K
+       calls per solve on the QG/AX/UFLIA exemplars) and freshly allocated these three
+       structures each call (~13% of EUF-core minor-heap churn, measured). It is never
+       re-entrant: {!explain_implied} calls it twice in sequence and consumes each result
+       (a [premises] list) before the next, and the [self_check] replay uses the
+       independent [Naive] module — so a single shared, cleared instance is safe.
+       [ex_out_seen] keys on the forest-child e-node id; [ex_explained] on the packed
+       unordered pair; [ex_pending] is the congruence-expansion work queue. Not trailed:
+       rebuilt from the queried pair on every call. *)
+    ex_out_seen : unit Int_set.t
+  ; ex_explained : unit Int_set.t
+  ; ex_pending : (int * int) Queue.t
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
@@ -243,6 +257,9 @@ let create ctx =
   ; dirty = Int_set.create 64
   ; sep_wit = Int_set.create 64
   ; sep_wit_m = 0
+  ; ex_out_seen = Int_set.create 32
+  ; ex_explained = Int_set.create 32
+  ; ex_pending = Queue.create ()
   }
 ;;
 
@@ -296,11 +313,11 @@ let dedup_int lst =
   let seen = Int_set.create 16 in
   List.filter
     (fun x ->
-       if Int_set.mem seen x
-       then false
-       else (
-         Int_set.replace seen x ();
-         true))
+      if Int_set.mem seen x
+      then false
+      else (
+        Int_set.replace seen x ();
+        true))
     lst
 ;;
 
@@ -468,11 +485,11 @@ let merge t a0 b0 reason0 =
       (* recompute parent signatures; schedule congruences *)
       List.iter
         (fun p ->
-           let key = sig_key t p in
-           match Sig.find_opt t.sigtbl key with
-           | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
-           | Some _ -> ()
-           | None -> sig_add t key p)
+          let key = sig_key t p in
+          match Sig.find_opt t.sigtbl key with
+          | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
+          | Some _ -> ()
+          | None -> sig_add t key p)
         parents)
   done
 ;;
@@ -669,9 +686,12 @@ let explain_core t a b =
      [lo*m+hi] — the same injective packing the separated-class index uses ([m] = e-node
      count, stable because [explain_core] never merges or registers). Distinct pairs give
      distinct keys while [m <= 2^31] (guarded below by an explicit fail-closed raise; the
-     bound is physically unreachable — ~155 GB of e-nodes). Same semantics. *)
-  let out_seen = Int_set.create 32 in
-  let explained = Int_set.create 32 in
+     bound is physically unreachable — ~155 GB of e-nodes). Same semantics. Reuse the
+     engine-owned scratch sets (cleared, not reallocated); see the [ex_*] field docs. *)
+  let out_seen = t.ex_out_seen in
+  let explained = t.ex_explained in
+  Int_set.clear out_seen;
+  Int_set.clear explained;
   let m = Dynarray.length t.enodes in
   (* Fail CLOSED if the packing precondition is ever violated: [assert] is elided under
      the release [-noassert] build, so an explicit raise is used instead — an overflowed
@@ -680,7 +700,8 @@ let explain_core t a b =
      ({!Session.raw_solve}), never a silently wrong explanation. Unreachable in practice. *)
   if m > 1 lsl 31 then invalid_arg "Euf.explain_core: e-node count exceeds packing bound";
   let pack lo hi = (lo * m) + hi in
-  let pending = Queue.create () in
+  let pending = t.ex_pending in
+  Queue.clear pending;
   Queue.add (a, b) pending;
   while not (Queue.is_empty pending) do
     let x, y = Queue.pop pending in
@@ -789,15 +810,15 @@ let check t =
   (try
      Dynarray.iteri
        (fun _ d ->
-          if find t d.d_a = find t d.d_b
-          then (
-            let edges = explain_core t d.d_a d.d_b in
-            if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
-            then
-              failwith
-                "Euf self-check: conflict explanation does not connect the disequal terms";
-            result := Conflict (premises edges @ [ d.d_prem ]);
-            raise Exit))
+         if find t d.d_a = find t d.d_b
+         then (
+           let edges = explain_core t d.d_a d.d_b in
+           if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
+           then
+             failwith
+               "Euf self-check: conflict explanation does not connect the disequal terms";
+           result := Conflict (premises edges @ [ d.d_prem ]);
+           raise Exit))
        t.diseqs
    with
    | Exit -> ());
@@ -830,12 +851,12 @@ let distinct_witness t a b =
     (try
        Dynarray.iter
          (fun d ->
-            let du = find t d.d_a
-            and dv = find t d.d_b in
-            if (du = ra && dv = rb) || (du = rb && dv = ra)
-            then (
-              w := Some d;
-              raise Exit))
+           let du = find t d.d_a
+           and dv = find t d.d_b in
+           if (du = ra && dv = rb) || (du = rb && dv = ra)
+           then (
+             w := Some d;
+             raise Exit))
          t.diseqs
      with
      | Exit -> ());
@@ -939,33 +960,33 @@ let propagate t =
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
       (fun d ->
-         let du = find t d.d_a
-         and dv = find t d.d_b in
-         let key = if du <= dv then pack du dv else pack dv du in
-         (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
+        let du = find t d.d_a
+        and dv = find t d.d_b in
+        let key = if du <= dv then pack du dv else pack dv du in
+        (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
            so the witness {!distinct_witness} serves is byte-identical to what its full
            assertion-order scan would return (same premise token ⇒ identical learned
            clauses ⇒ counted-metric identity). [Dynarray.iter] visits diseqs in assertion
            order. *)
-         if not (Int_set.mem sep key) then Int_set.replace sep key d)
+        if not (Int_set.mem sep key) then Int_set.replace sep key d)
       t.diseqs;
     Dynarray.iteri
       (fun idx w ->
-         let ra = find t w.w_a
-         and rb = find t w.w_b in
-         if Int_set.mem dirty ra || Int_set.mem dirty rb
-         then (
-           let cur =
-             if ra = rb
-             then 1
-             else (
-               let key = if ra <= rb then pack ra rb else pack rb ra in
-               if Int_set.mem sep key then 0 else -1)
-           in
-           if cur <> -1 && cur <> w.w_reported
-           then (
-             set_reported t idx cur;
-             acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
+        let ra = find t w.w_a
+        and rb = find t w.w_b in
+        if Int_set.mem dirty ra || Int_set.mem dirty rb
+        then (
+          let cur =
+            if ra = rb
+            then 1
+            else (
+              let key = if ra <= rb then pack ra rb else pack rb ra in
+              if Int_set.mem sep key then 0 else -1)
+          in
+          if cur <> -1 && cur <> w.w_reported
+          then (
+            set_reported t idx cur;
+            acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
       t.watched);
   List.rev !acc
 ;;
@@ -1019,11 +1040,11 @@ let explain_implied t imp =
 let rearm_watch t term =
   Dynarray.iteri
     (fun idx w ->
-       if Term.equal w.w_atom term
-       then (
-         if w.w_reported <> -1 then set_reported t idx (-1);
-         mark_touched t (find t w.w_a);
-         mark_touched t (find t w.w_b)))
+      if Term.equal w.w_atom term
+      then (
+        if w.w_reported <> -1 then set_reported t idx (-1);
+        mark_touched t (find t w.w_a);
+        mark_touched t (find t w.w_b)))
     t.watched
 ;;
 
@@ -1036,11 +1057,11 @@ let rearm_watch t term =
 let rearm_watches_if t pred =
   Dynarray.iteri
     (fun idx w ->
-       if pred w.w_atom
-       then (
-         if w.w_reported <> -1 then set_reported t idx (-1);
-         mark_touched t (find t w.w_a);
-         mark_touched t (find t w.w_b)))
+      if pred w.w_atom
+      then (
+        if w.w_reported <> -1 then set_reported t idx (-1);
+        mark_touched t (find t w.w_a);
+        mark_touched t (find t w.w_b)))
     t.watched
 ;;
 
