@@ -25,6 +25,8 @@ type sample =
     uniqueness : Mode.Uniqueness.Const.t;
     portability : Mode.Portability.Const.t;
     contention : Mode.Contention.Const.t;
+    totality : Mode.Totality.Const.t;
+    ghostness : Mode.Ghostness.Const.t;
     forkable : Mode.Forkable.Const.t;
     yielding : Mode.Yielding.Const.t;
     statefulness : Mode.Statefulness.Const.t;
@@ -39,6 +41,8 @@ let sample_of_lattice x =
     uniqueness = uniqueness x;
     portability = portability x;
     contention = contention x;
+    totality = totality x;
+    ghostness = ghostness x;
     forkable = forkable x;
     yielding = yielding x;
     statefulness = statefulness x;
@@ -50,7 +54,8 @@ let sample_of_lattice x =
 let lattice_of_sample sample =
   create ~areality:sample.areality ~linearity:sample.linearity
     ~uniqueness:sample.uniqueness ~portability:sample.portability
-    ~contention:sample.contention ~forkable:sample.forkable
+    ~contention:sample.contention ~totality:sample.totality
+    ~ghostness:sample.ghostness ~forkable:sample.forkable
     ~yielding:sample.yielding ~statefulness:sample.statefulness
     ~visibility:sample.visibility ~staticity:sample.staticity
     ~externality:sample.externality
@@ -71,6 +76,9 @@ let mod_bounds_of_sample sample =
       ~contention:
         (Mode.Crossing.Monadic.Atom.Modality
            (Mode.Modality.Monadic.Atom.Join_const sample.contention))
+      ~ghostness:
+        (Mode.Crossing.Monadic.Atom.Modality
+           (Mode.Modality.Monadic.Atom.Join_const sample.ghostness))
       ~visibility:
         (Mode.Crossing.Monadic.Atom.Modality
            (Mode.Modality.Monadic.Atom.Join_const sample.visibility))
@@ -89,6 +97,9 @@ let mod_bounds_of_sample sample =
       ~portability:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.portability))
+      ~totality:
+        (Mode.Crossing.Comonadic.Atom.Modality
+           (Mode.Modality.Comonadic.Atom.Meet_const sample.totality))
       ~forkable:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.forkable))
@@ -194,9 +205,13 @@ let mask_of_axis : type a. a Jkind_axis.Axis.t -> t =
   | Modal (Monadic Contention) ->
     lattice_of_sample
       { sample with contention = Mode.Contention.Const.Uncontended }
+  | Modal (Monadic Ghostness) ->
+    lattice_of_sample { sample with ghostness = Mode.Ghostness.Const.Program }
   | Modal (Comonadic Portability) ->
     lattice_of_sample
       { sample with portability = Mode.Portability.Const.Nonportable }
+  | Modal (Comonadic Totality) ->
+    lattice_of_sample { sample with totality = Mode.Totality.Const.Partial }
   | Modal (Comonadic Forkable) ->
     lattice_of_sample { sample with forkable = Mode.Forkable.Const.Unforkable }
   | Modal (Comonadic Yielding) ->
@@ -272,6 +287,18 @@ let () =
       Mode.Contention.Const.Corrupted;
       Mode.Contention.Const.Shared;
       Mode.Contention.Const.Contended ];
+  check_axis
+    (module Mode.Totality.Const)
+    "totality"
+    (fun sample totality -> { sample with totality })
+    totality
+    [Mode.Totality.Const.Total; Mode.Totality.Const.Partial];
+  check_axis
+    (module Opposite (Mode.Ghostness.Const))
+    "ghostness"
+    (fun sample ghostness -> { sample with ghostness })
+    ghostness
+    [Mode.Ghostness.Const.Program; Mode.Ghostness.Const.Logic];
   check_axis
     (module Mode.Forkable.Const)
     "forkable"

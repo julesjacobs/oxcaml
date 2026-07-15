@@ -153,7 +153,7 @@ type t2 = A of int | B of t2 t
 type t3 : value mod portable = A of int | B of t2 t
 type t4 : value mod portable = t2
 [%%expect{|
-type 'a t : value mod portable
+type 'a t : value mod portable with 'a @@ portable
 type t2 = A of int | B of t2 t
 type t3 = A of int | B of t2 t
 type t4 = t2

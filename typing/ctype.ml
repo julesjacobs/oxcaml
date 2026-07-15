@@ -6202,10 +6202,12 @@ let mode_crossing_structure_memaddr =
   Mode.Crossing.create
     ~uniqueness:false
     ~contention:true
+    ~ghostness:false
     ~visibility:true
     ~regionality:false
     ~linearity:true
     ~portability:true
+    ~totality:true
     ~forkable:true
     ~yielding:true
     ~statefulness:true
@@ -6216,10 +6218,12 @@ let mode_crossing_functor =
   Mode.Crossing.create
     ~uniqueness:true
     ~contention:true
+    ~ghostness:false
     ~visibility:true
     ~regionality:false
     ~linearity:false
     ~portability:false
+    ~totality:false
     ~forkable:false
     ~yielding:false
     ~statefulness:false
@@ -6235,7 +6239,9 @@ let zap_modalities_to_floor_if_at_least level =
 
 let crossing_of_jkind env jkind =
   let context = mk_jkind_context_check_principal env in
-  Ikind.crossing_of_jkind ~context env jkind
+  let crossing = Ikind.crossing_of_jkind ~context env jkind in
+  let ghostness = Crossing.Axis.Monadic Ghostness in
+  Crossing.set ghostness (Crossing.Per_axis.max ghostness) crossing
 
 let crossing_of_ty env ?modalities ty =
   let principal = is_principal ty in
@@ -6267,9 +6273,13 @@ let crossing_of_ty env ?modalities ty =
       else
         jkind_crossing ()
   in
-  match modalities with
-  | None -> crossing
-  | Some m -> Crossing.modality m crossing
+  let crossing =
+    match modalities with
+    | None -> crossing
+    | Some m -> Crossing.modality m crossing
+  in
+  let ghostness = Crossing.Axis.Monadic Ghostness in
+  Crossing.set ghostness (Crossing.Per_axis.max ghostness) crossing
 
 let cross_left env ?modalities ty mode =
   let crossing = crossing_of_ty env ?modalities ty in
@@ -8751,8 +8761,8 @@ let exn_constructor_crossing env lid ~args locks =
       None ((Mode.Value.(disallow_right min)), locks)
   in
   (* Exceptions cross contention and visibility on the monadic side, and
-     portability and statefulness on the comonadic side, so we project those
-     axes. *)
+     portability, totality, and statefulness on the comonadic side, so we
+     project those axes. *)
   let monadic_mode = vmode.monadic in
   let monadic =
     [ monadic_mode
@@ -8771,6 +8781,9 @@ let exn_constructor_crossing env lid ~args locks =
     [ comonadic_source
       |> Mode.Value.Comonadic.proj Portability
       |> Mode.Value.Comonadic.max_with Portability;
+      comonadic_source
+      |> Mode.Value.Comonadic.proj Totality
+      |> Mode.Value.Comonadic.max_with Totality;
       comonadic_source
       |> Mode.Value.Comonadic.proj Statefulness
       |> Mode.Value.Comonadic.max_with Statefulness

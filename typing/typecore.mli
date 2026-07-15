@@ -214,6 +214,17 @@ type existential_binding =
 
 type mode_mismatch_kind = Parameter | Return
 
+type total_context =
+  | Total_mode
+  | Logic_mode
+
+type total_context_violation =
+  | Mutable_state
+  | Exception_handling
+  | Primitive_call
+  | Lazy_evaluation
+  | Loop
+
 type error =
   | Constructor_arity_mismatch of Longident.t * int * int
   | Label_mismatch of
@@ -350,6 +361,7 @@ type error =
   | Function_returns_local
   | Tail_call_local_returning
   | Bad_tail_annotation of [`Conflict|`Not_a_tailcall]
+  | Total_context_violation of total_context * total_context_violation
   | Optional_poly_param
   | Exclave_in_nontail_position
   | Exclave_returns_not_local

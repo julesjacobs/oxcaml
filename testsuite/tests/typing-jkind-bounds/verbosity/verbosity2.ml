@@ -20,11 +20,13 @@ type t
           unyielding
           many
           stateless
+          total
           immutable
           portable
           contended
           local
           unique
+          program
           static
           internal
 |}]
@@ -36,6 +38,7 @@ type t
       mod global
           many
           stateless
+          total
           immutable
           forkable
           unyielding
@@ -43,6 +46,7 @@ type t
           portable
           contended
           external_
+          program
           static
 |}]
 
@@ -57,9 +61,11 @@ type t
           once
           stateful
           nonportable
+          partial
           unique
           read_write
           uncontended
+          program
           static
 |}]
 
@@ -73,9 +79,11 @@ type t
           once
           stateful
           nonportable
+          partial
           unique
           read_write
           uncontended
+          program
           static
           internal
 |}]
@@ -90,9 +98,11 @@ type t
           yielding
           once
           stateful
+          partial
           unique
           read_write
           uncontended
+          program
           static
           internal
 |}]
@@ -107,9 +117,11 @@ type t
           unforkable
           yielding
           once
+          partial
           unique
           read_write
           uncontended
+          program
           static
           internal
 |}]
@@ -122,11 +134,13 @@ type 'a t
           unyielding
           many
           stateless
+          total
           immutable
           portable
           contended
           local
           unique
+          program
           static
           internal
       with 'a
@@ -140,11 +154,13 @@ type ('a
              unyielding
              many
              stateless
+             total
              immutable
              portable
              contended
              local
              unique
+             program
              static
              internal)
      t
@@ -160,9 +176,11 @@ type ('a
              unforkable
              yielding
              once
+             partial
              unique
              read_write
              uncontended
+             program
              static
              internal)
      t
@@ -179,9 +197,11 @@ type 'a t
           yielding
           once
           stateful
+          partial
           unique
           read_write
           uncontended
+          program
           static
       with 'a @@ external_
 |}]
@@ -197,10 +217,13 @@ type 'a t
           once
           stateful
           nonportable
+          partial
           unique
           read_write
           uncontended
+          program
           static
+      with 'a @@ external_
 |}]
 
 type 'a t : immutable_data with 'a @@ external_
@@ -211,11 +234,13 @@ type 'a t
           unyielding
           many
           stateless
+          total
           immutable
           portable
           contended
           local
           unique
+          program
           static
           internal
       with 'a
