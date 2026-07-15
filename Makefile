@@ -626,6 +626,15 @@ test: check-frozen
 	$(MAKE) chrono-test
 	$(MAKE) wiring-test
 	$(MAKE) rational-word-test
+	@# Fast deterministic theory self-tests, folded in so they cannot rot silently the way
+	@# the A13 lia_adapter_test case did (it was never in this set). All run <0.15s each;
+	@# euf-test/euf-adapter-test run their OXSMT_EUF_SELF_CHECK oracle cross-check, which is
+	@# already bounded (fixed-seed, small N; ~0.04s) so no separate smoke variant is needed.
+	$(MAKE) lia-test
+	$(MAKE) lia-adapter-test
+	$(MAKE) bigint-test
+	$(MAKE) euf-test
+	$(MAKE) euf-adapter-test
 	$(MAKE) stage0-test
 	$(MAKE) wiring-test
 	$(MAKE) smtlib-test
