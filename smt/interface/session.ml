@@ -569,9 +569,10 @@ let set_arrays t defs =
   (* Task #54 reset-per-query (same as [set_datatypes]): invalidate the cached theory when
      this REPLACE actually involves arrays (new or currently-installed); a pure-logic
      no-op ([set_arrays empty] on a session with no arrays) resets nothing and stays
-     byte-identical. [invalidate_theory_for_registry_change] clears [has_arrays]; the line
-     below re-derives it from [defs] so a non-array query following an array query is not
-     left with a stale [has_arrays]. *)
+     byte-identical. [invalidate_theory_for_registry_change] RE-DERIVES [has_arrays] from
+     the live array registry (still the OLD one at that point); the line below then
+     overwrites it from [defs], so a non-array query following an array query is not left
+     with a stale [has_arrays]. *)
   if
     Cdclt.theory_instantiated t.cdclt
     && not
