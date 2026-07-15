@@ -583,77 +583,111 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
   let rewrite2 = rewrite2_enabled () in
   let eqsplit = rewrite2 && eqsplit_enabled () in
   let rw3 = rw3_enabled () in
-  let count = occurrences terms in
-  let shared (t : Term.t) =
-    match Hashtbl.find_opt count t.Term.tag with
-    | Some n -> n > 1
-    | None -> false
+  (* One bottom-up simplification pass over [ts]. [occurrences]/[shared] are recomputed
+     per pass so the sharing gate stays accurate as the term set changes under the
+     fixpoint. *)
+  let one_pass (ts : Term.t list) : Term.t list =
+    let count = occurrences ts in
+    let shared (t : Term.t) =
+      match Hashtbl.find_opt count t.Term.tag with
+      | Some n -> n > 1
+      | None -> false
+    in
+    let memo : Term.t Term.Table.t = Term.Table.create 256 in
+    let rec simp (t : Term.t) : Term.t =
+      match Term.Table.find_opt memo t with
+      | Some r -> r
+      | None ->
+        let r = simp_uncached t in
+        Term.Table.replace memo t r;
+        r
+    and simp_uncached (t : Term.t) : Term.t =
+      match t.Term.node with
+      | Not a -> Context.not_ ctx (simp a)
+      | And xs -> Context.and_ ctx (List.map simp (Iarr.to_list xs))
+      | Or xs -> Context.or_ ctx (List.map simp (Iarr.to_list xs))
+      | Ite (c, a, b) -> Context.ite ctx (simp c) (simp a) (simp b)
+      | Eq (a, b) ->
+        let a' = simp a
+        and b' = simp b in
+        if eqsplit && bvwidth a' >= 1
+        then split_eq_concat ctx mint a' b'
+        else Context.eq ctx a' b'
+      | Bool_const _ | Int_const _ | Arith _ | Le _ -> t
+      | App (sym, orig_args) ->
+        (match Bv.view t with
+         | Some (Bv.Op { op = Bv.Bvadd | Bv.Bvsub | Bv.Bvneg; _ }) ->
+           rebuild ctx mint (lin_of ~simp ~shared t)
+         | Some (Bv.Op { op = Bv.Extract (i, j); args = [ a ]; _ }) when rewrite2 || rw3
+           ->
+           (* pass the ORIGINAL operand: [norm_extract] walks its structure with the
+              [shared] gate and [simp]s the leaves it stops at. [~rw3] additionally
+              enables the extract-into-op width propagation. *)
+           norm_extract ~simp ~shared ~rw3 ctx mint ~i ~j a
+         | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) when rewrite2 ->
+           norm_concat ~simp ~shared ctx mint hi lo
+         | Some (Bv.Op { op = Bv.Bvule; args = [ a; b ]; _ }) when rw3 ->
+           rw_leq ~signed:false ctx mint (simp a) (simp b)
+         | Some (Bv.Op { op = Bv.Bvsle; args = [ a; b ]; _ }) when rw3 ->
+           rw_leq ~signed:true ctx mint (simp a) (simp b)
+         | Some (Bv.Op { op = Bv.Bvult; args = [ a; b ]; _ }) when rw3 ->
+           (* a <u b <=> not (b <=u a) *)
+           Context.not_ ctx (rw_leq ~signed:false ctx mint (simp b) (simp a))
+         | Some (Bv.Op { op = Bv.Bvslt; args = [ a; b ]; _ }) when rw3 ->
+           (* a <s b <=> not (b <=s a) *)
+           Context.not_ ctx (rw_leq ~signed:true ctx mint (simp b) (simp a))
+         | Some
+             (Bv.Op
+               { op =
+                   ( Bv.Bvnot
+                   | Bv.Bvand
+                   | Bv.Bvor
+                   | Bv.Bvxor
+                   | Bv.Bvmul
+                   | Bv.Bvshl
+                   | Bv.Bvlshr
+                   | Bv.Bvashr ) as op
+               ; args
+               ; result_width = Some w
+               })
+           when rewrite2 -> rewrite_bv_op ctx mint op (List.map simp args) w
+         | _ ->
+           let orig = Iarr.to_list orig_args in
+           let simplified = List.map simp orig in
+           if List.for_all2 (fun a b -> a == b) simplified orig
+           then t
+           else Context.app ctx sym simplified)
+    in
+    List.map simp ts
   in
-  let memo : Term.t Term.Table.t = Term.Table.create 256 in
-  let rec simp (t : Term.t) : Term.t =
-    match Term.Table.find_opt memo t with
-    | Some r -> r
-    | None ->
-      let r = simp_uncached t in
-      Term.Table.replace memo t r;
-      r
-  and simp_uncached (t : Term.t) : Term.t =
-    match t.Term.node with
-    | Not a -> Context.not_ ctx (simp a)
-    | And xs -> Context.and_ ctx (List.map simp (Iarr.to_list xs))
-    | Or xs -> Context.or_ ctx (List.map simp (Iarr.to_list xs))
-    | Ite (c, a, b) -> Context.ite ctx (simp c) (simp a) (simp b)
-    | Eq (a, b) ->
-      let a' = simp a
-      and b' = simp b in
-      if eqsplit && bvwidth a' >= 1
-      then split_eq_concat ctx mint a' b'
-      else Context.eq ctx a' b'
-    | Bool_const _ | Int_const _ | Arith _ | Le _ -> t
-    | App (sym, orig_args) ->
-      (match Bv.view t with
-       | Some (Bv.Op { op = Bv.Bvadd | Bv.Bvsub | Bv.Bvneg; _ }) ->
-         rebuild ctx mint (lin_of ~simp ~shared t)
-       | Some (Bv.Op { op = Bv.Extract (i, j); args = [ a ]; _ }) when rewrite2 || rw3 ->
-         (* pass the ORIGINAL operand: [norm_extract] walks its structure with the
-            [shared] gate and [simp]s the leaves it stops at. [~rw3] additionally enables
-            the extract-into-op width propagation. *)
-         norm_extract ~simp ~shared ~rw3 ctx mint ~i ~j a
-       | Some (Bv.Op { op = Bv.Concat; args = [ hi; lo ]; _ }) when rewrite2 ->
-         norm_concat ~simp ~shared ctx mint hi lo
-       | Some (Bv.Op { op = Bv.Bvule; args = [ a; b ]; _ }) when rw3 ->
-         rw_leq ~signed:false ctx mint (simp a) (simp b)
-       | Some (Bv.Op { op = Bv.Bvsle; args = [ a; b ]; _ }) when rw3 ->
-         rw_leq ~signed:true ctx mint (simp a) (simp b)
-       | Some (Bv.Op { op = Bv.Bvult; args = [ a; b ]; _ }) when rw3 ->
-         (* a <u b <=> not (b <=u a) *)
-         Context.not_ ctx (rw_leq ~signed:false ctx mint (simp b) (simp a))
-       | Some (Bv.Op { op = Bv.Bvslt; args = [ a; b ]; _ }) when rw3 ->
-         (* a <s b <=> not (b <=s a) *)
-         Context.not_ ctx (rw_leq ~signed:true ctx mint (simp b) (simp a))
-       | Some
-           (Bv.Op
-             { op =
-                 ( Bv.Bvnot
-                 | Bv.Bvand
-                 | Bv.Bvor
-                 | Bv.Bvxor
-                 | Bv.Bvmul
-                 | Bv.Bvshl
-                 | Bv.Bvlshr
-                 | Bv.Bvashr ) as op
-             ; args
-             ; result_width = Some w
-             })
-         when rewrite2 -> rewrite_bv_op ctx mint op (List.map simp args) w
-       | _ ->
-         let orig = Iarr.to_list orig_args in
-         let simplified = List.map simp orig in
-         if List.for_all2 (fun a b -> a == b) simplified orig
-         then t
-         else Context.app ctx sym simplified)
+  (* rw3: bounded-fixpoint re-simplification. A single bottom-up pass leaves the fresh
+     terms that rw_leq's is_zero_bit split / extract-pushdown build UN-renormalized (e.g.
+     an extract of an additive term is left as [bvadd(c1,c2,...)] instead of folded to a
+     constant), so a word-level contradiction stays hidden until bit-blast. Re-running the
+     pass lets the additive normalizer fold those outputs, which cascades through
+     Context.[{eq,and_,ite}] to [false]. BOUNDED + total: at most [max_passes] passes,
+     clean early-stop the instant a pass is a fixpoint (term set unchanged by hash-cons
+     tag); at the cap we return the last COMPLETE pass (never a partial rewrite). Only
+     under rw3 — rewrite2/baseline are exactly one pass (byte-identical to before this
+     change). *)
+  let max_passes = 4 in
+  let same (a : Term.t list) (b : Term.t list) =
+    List.length a = List.length b
+    && List.for_all2 (fun (x : Term.t) (y : Term.t) -> x.tag = y.tag) a b
   in
-  let result = List.map simp terms in
+  let result =
+    if not rw3
+    then one_pass terms
+    else (
+      let rec fix (ts : Term.t list) (n : int) : Term.t list =
+        if n >= max_passes
+        then ts
+        else (
+          let ts' = one_pass ts in
+          if same ts ts' then ts' else fix ts' (n + 1))
+      in
+      fix terms 0)
+  in
   (* PROBE-ONLY premise check (behind OXSMT_BV_SIMPLIFY_STATS): does simplify reduce the
      asserted set to a pre-blast contradiction (any conjunct = Bool_const false)? Prints a
      one-line stderr marker BEFORE the caller blasts, so it is observable even if the full
