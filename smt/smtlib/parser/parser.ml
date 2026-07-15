@@ -10,6 +10,15 @@ exception Unsupported of string
 let malformedf fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
+(* Let-/qvar-binding scope. A persistent [String] map, NOT an association list: a deeply
+   nested [let]-chain (thousands deep in the TPTP first-order model-finding families)
+   makes an assoc-list scope O(references x nesting-depth) — the whole formula's term
+   construction went quadratic (NEQ015_size6: 1.5MB / 32s just to build). A map keyed by
+   the bound name is O(references x log depth) and returns the identical term for every
+   well-formed input (innermost binding wins, exactly as first-match on the old prepended
+   list), so the constructed term — hence every downstream verdict — is unchanged. *)
+module Scope = Map.Make (String)
+
 let name_of s =
   match Sexp.symbol_name s with
   | Some n -> n
@@ -336,7 +345,8 @@ let is_bv_keyword = function
 
 (* ---- terms ---- *)
 
-(* [scope] is the let-binding stack, innermost first. Matching is on the shared lexer's
+(* [scope] is the let-/qvar-binding map ({!Scope}), keyed by bound name; an inner binding
+   overwrites (shadows) an outer one of the same name. Matching is on the shared lexer's
    token KINDS, so a quoted [|0|]/[|let|] is a symbol looked up by name — never the
    numeral [0] or the [let] keyword (the ADR-0008 boundary invariant, enforced
    end-to-end). *)
@@ -402,7 +412,7 @@ and read_atom st scope (tok : Tok.token) : Term.t =
   | Tok.Symbol { text = "true"; quoted = false } -> Context.bool_const st.ctx true
   | Tok.Symbol { text = "false"; quoted = false } -> Context.bool_const st.ctx false
   | Tok.Symbol { text = name; _ } ->
-    (match List.assoc_opt name scope with
+    (match Scope.find_opt name scope with
      | Some t -> t
      | None ->
        (match Hashtbl.find_opt st.defines name with
@@ -429,7 +439,11 @@ and read_let st scope rest =
            | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
-    read_term st (new_scope @ scope) body
+    (* Extend the scope map with this let's bindings, shadowing the outer scope. Folding
+       right (first-listed binding added last) preserves the old assoc-list's first-match
+       resolution of an intra-let duplicate name (ill-formed input either way). *)
+    let scope = List.fold_right (fun (n, t) acc -> Scope.add n t acc) new_scope scope in
+    read_term st scope body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
 (* The application head selects interpretation. Only an UNQUOTED symbol can be a builtin
@@ -443,7 +457,7 @@ and read_app st scope head args orig =
      body and can yield a definite verdict on ill-typed input (a wrong [unsat] when a
      refuting lemma body is mis-built). Fail closed: reject -> Malformed -> unknown.
      Binder-agnostic (any scope entry: [let] or a lemma qvar). *)
-  | Sexp.Atom (Tok.Symbol { text; _ }) when List.mem_assoc text scope ->
+  | Sexp.Atom (Tok.Symbol { text; _ }) when Scope.mem text scope ->
     malformedf "bound variable %s cannot head an application (ill-sorted)" text
   | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
   | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
@@ -837,7 +851,12 @@ and expand st scope name (def : definition) arg_sexps =
     (* Cycle guard stays live across the body read: recursion re-enters [expand] with the
        same [name] before this key is cached, so it is caught here, not memoized. *)
     Hashtbl.replace st.expanding name ();
-    let body = read_term st bindings def.body in
+    (* Fresh scope containing ONLY the parameters (caller locals do not leak into the
+       body); [bindings] stays a list for the memo key above. *)
+    let param_scope =
+      List.fold_right (fun (n, t) acc -> Scope.add n t acc) bindings Scope.empty
+    in
+    let body = read_term st param_scope def.body in
     Hashtbl.remove st.expanding name;
     if not (Sort.equal body.Term.sort def.ret)
     then malformedf "define-fun %s body sort differs from declared result sort" name;
@@ -950,8 +969,13 @@ let rec collect_forall st acc (tail : Sexp.t list) =
 let read_forall st (tail : Sexp.t list) : lemma_src =
   let qvars, body_sexp, trigger_sexps = collect_forall st [] tail in
   let build qvar_images =
+    (* [qvars] is outer-to-inner; adding each in that order lets an inner binder overwrite
+       (shadow) an outer one of the same name — matching the old innermost-first list. *)
     let scope =
-      List.rev (List.mapi (fun i (name, _sort) -> name, qvar_images.(i)) qvars)
+      List.fold_left
+        (fun acc (i, name) -> Scope.add name qvar_images.(i) acc)
+        Scope.empty
+        (List.mapi (fun i (name, _sort) -> i, name) qvars)
     in
     let body = read_term st scope body_sexp in
     let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
@@ -1204,7 +1228,7 @@ let run st sexps =
       validate_bang_attrs attrs;
       classify inner
     | _ ->
-      let t = read_term st [] b in
+      let t = read_term st Scope.empty b in
       if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
       `Ground t
   in
