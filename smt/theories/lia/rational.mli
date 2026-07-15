@@ -44,6 +44,17 @@ val of_frac : int -> int -> t
     in the [Big] tier). Callers at native-int sinks catch this and degrade to [unknown]. *)
 val num : t -> int
 
+(** [num_bigint t] is the numerator as an arbitrary-precision {!Oxsmt_core.Bigint.t} — the
+    same value as {!num} but WITHOUT the int63 output-projection: it never raises
+    {!Overflow}, so a model value exceeding int63 (e.g. a uint256 constant) is
+    representable. Used at the Bigint model sink ({!Lia.model_bigint}). *)
+val num_bigint : t -> Oxsmt_core.Bigint.t
+
+(** [floor_bigint t] is [floor t] as an arbitrary-precision {!Oxsmt_core.Bigint.t} —
+    without {!floor}'s int63 output projection, so a >int63 branch point does not raise
+    {!Overflow}. Used by B&B branching ({!Lia.suggest_branch}) on uint256-range values. *)
+val floor_bigint : t -> Oxsmt_core.Bigint.t
+
 val den : t -> int
 val add : t -> t -> t
 val sub : t -> t -> t

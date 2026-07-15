@@ -480,7 +480,7 @@ let effort_used t = Budget.used t.budget
 let value_of (v : Model.value) =
   match v with
   | Model.Bool b -> VBool b
-  | Model.Int n -> VInt (Bigint.of_int n)
+  | Model.Int n -> VInt n
   | Model.Uninterp i -> VUninterp i
 ;;
 
@@ -616,7 +616,13 @@ let model t =
             match term.Term.sort with
             | Sort.Int _ ->
               (match Model.value m term with
-               | Some (Model.Int n) -> Hashtbl.replace int_used n ()
+               | Some (Model.Int n) ->
+                 (* Record only values that fit int63: the fresh witnesses [fresh] mints
+                   are small non-negative ints, so a >int63 used value (a uint256
+                   constant) cannot collide with any witness and need not be excluded. *)
+                 (match Bigint.to_int_opt n with
+                  | Some i -> Hashtbl.replace int_used i ()
+                  | None -> ())
                | Some (Model.Uninterp cid) ->
                  (* §10 v2 gap B (task #117): an [Arith] term (a linear composite used only
                    as a UF argument) is NOT realized to a fresh per-class integer — it is
@@ -657,7 +663,7 @@ let model t =
        let rec value_of (term : Term.t) =
          match Model.value m term, term.Term.node with
          | Some (Model.Bool b), _ -> VBool b
-         | Some (Model.Int n), _ -> VInt (Bigint.of_int n)
+         | Some (Model.Int n), _ -> VInt n
          | _, Term.Arith lin ->
            (* §10 v2 gap B (task #117): a pure-EUF Int [Arith] term (LIA never numerically
               valued it — else the [Model.Int] arm above caught it, tier 1) is EVALUATED

@@ -141,6 +141,13 @@ val cube_model : 'tok t -> (Term.t * int) list option
     {!Failure} if a value is non-integral and no cube model is stashed). *)
 val model : 'tok t -> (Term.t * int) list
 
+(** [model_bigint t] is {!model} with arbitrary-precision integer values (ADR-0018): same
+    validity precondition, but a value exceeding int63 (e.g. a uint256 constant) is
+    projected via {!Rational.num_bigint} and never overflows. This is the form the
+    combinator consumes at the [Model.Int] sink; the int-tier B&B/cube drivers keep
+    {!model}. *)
+val model_bigint : 'tok t -> (Term.t * Oxsmt_core.Bigint.t) list
+
 (** [rational_value t term] is the current δ-rational assignment of [term]'s variable (its
     finite part), for inspection/tests; [Rational.zero] for an unseen term. *)
 val rational_value : 'tok t -> Term.t -> Rational.t

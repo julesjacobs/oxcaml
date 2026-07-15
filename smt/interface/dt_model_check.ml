@@ -150,7 +150,7 @@ let make_inhabits reg : Sort.t -> v -> bool =
 let model_value_eq (a : Model.value) (b : Model.value) =
   match a, b with
   | Model.Bool x, Model.Bool y -> Bool.equal x y
-  | Model.Int x, Model.Int y -> Int.equal x y
+  | Model.Int x, Model.Int y -> Bigint.equal x y
   | Model.Uninterp x, Model.Uninterp y -> Int.equal x y
   | _ -> raise Bad
 ;;
@@ -207,11 +207,7 @@ let ev_with (reg : Defs.t) (env : v Term.Table.t) =
   and ev_node (t : Term.t) : v =
     match t.Term.node with
     | Term.Bool_const b -> Leaf (Model.Bool b)
-    | Term.Int_const n ->
-      (match Bigint.to_int_opt n with
-       | Some i -> Leaf (Model.Int i)
-       | None ->
-         raise Bad (* a >63-bit integer literal has no native scalar; fail closed *))
+    | Term.Int_const n -> Leaf (Model.Int n)
     | Term.Eq (a, b) -> Leaf (Model.Bool (v_eq (ev a) (ev b)))
     | Term.Not a -> Leaf (Model.Bool (not (as_bool (ev a))))
     | Term.And xs ->

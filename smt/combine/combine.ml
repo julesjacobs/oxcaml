@@ -626,32 +626,10 @@ end = struct
 
   let value_equal (u : Model.value) (v : Model.value) =
     match u, v with
-    | Model.Int a, Model.Int b -> a = b
+    | Model.Int a, Model.Int b -> Bigint.equal a b
     | Model.Bool a, Model.Bool b -> Bool.equal a b
     | Model.Uninterp a, Model.Uninterp b -> a = b
     | _ -> false
-  ;;
-
-  (* Overflow-GUARDED native-int arithmetic for the fold (codex W2): a raw [acc + coeff*v]
-     silently wraps (e.g. [max_int * 2 = -2]), which would let [check_pins] read a
-     VIOLATED pin as satisfied — a wrong [Sat], the L2 overflow family reborn. On overflow
-     we RAISE (→ CONTRACT-POISON → [unknown]), never wrap. *)
-  let add_guard a b =
-    let r = a + b in
-    (* overflow iff the operands share a sign that the result does not *)
-    if Bool.equal (a >= 0) (b >= 0) && not (Bool.equal (r >= 0) (a >= 0))
-    then raise (Combination_unsound "model evaluation: integer addition overflow")
-    else r
-  ;;
-
-  let mul_guard a b =
-    if a = 0 || b = 0
-    then 0
-    else (
-      let r = a * b in
-      if r / a <> b || (a = -1 && b = min_int) || (b = -1 && a = min_int)
-      then raise (Combination_unsound "model evaluation: integer multiplication overflow")
-      else r)
   ;;
 
   (* EVALUATE a term through a child's model. A child (esp. the arithmetic one) keys only
@@ -664,23 +642,20 @@ end = struct
     | Some v -> Some v
     | None ->
       (match t.Term.node with
-       (* A constant / coefficient exceeding int63 (core-bignum W2) cannot be surfaced as
-          a native-[int] [Model.Int]; return [None] — the fail-safe "unvalued" signal — so
-          the query degrades to [unknown] rather than truncating. *)
-       | Term.Int_const n -> Option.map (fun i -> Model.Int i) (Bigint.to_int_opt n)
+       (* Arbitrary-precision (ADR-0018): the model value is a [Bigint.t], so a constant
+          or coefficient exceeding int63 is surfaced exactly rather than degraded to
+          [None]. The fold stays in [Bigint] (no overflow guard needed). [None] now means
+          only a genuine LEAF is unvalued. *)
+       | Term.Int_const n -> Some (Model.Int n)
        | Term.Arith lin ->
-         (match Bigint.to_int_opt lin.Term.const with
-          | None -> None
-          | Some const0 ->
-            let rec fold acc = function
-              | [] -> Some (Model.Int acc)
-              | (child, coeff) :: rest ->
-                (match Bigint.to_int_opt coeff, model_eval model child with
-                 | Some ci, Some (Model.Int v) ->
-                   fold (add_guard acc (mul_guard ci v)) rest
-                 | _ -> None)
-            in
-            fold const0 (Iarr.to_list lin.Term.coeffs))
+         let rec fold acc = function
+           | [] -> Some (Model.Int acc)
+           | (child, coeff) :: rest ->
+             (match model_eval model child with
+              | Some (Model.Int v) -> fold (Bigint.add acc (Bigint.mul coeff v)) rest
+              | _ -> None)
+         in
+         fold lin.Term.const (Iarr.to_list lin.Term.coeffs)
        | _ -> None)
   ;;
 
@@ -1355,7 +1330,7 @@ end = struct
        [find_disagreement] splits on before Sat); defensively the reducer is [min], so the
        map is order-independent and any residual inconsistency is still caught by R1 (->
        [unknown], never wrong-sat). *)
-    let class_int : (int, int) Hashtbl.t = Hashtbl.create 64 in
+    let class_int : (int, Bigint.t) Hashtbl.t = Hashtbl.create 64 in
     let lia_int term =
       match model_eval mb term with
       | Some (Model.Int n) -> Some n
@@ -1371,7 +1346,7 @@ end = struct
            (match lia_int term, model_eval ma term with
             | Some n, Some (Model.Uninterp cid) ->
               (match Hashtbl.find_opt class_int cid with
-               | Some m when m <= n -> ()
+               | Some m when Bigint.compare m n <= 0 -> ()
                | _ -> Hashtbl.replace class_int cid n)
             | _ -> ())
          | Sort.Bool

@@ -292,7 +292,9 @@ let fabric_verify t term value lo hi =
 let model t =
   (* Valid only after [check Final] returned [Sat] (all problem vars integral);
      [Lia.model] raises otherwise. LIA emits only [Int] values. *)
-  Lia.model t.lia |> List.map (fun (term, v) -> term, Model.Int v) |> Model.of_alist
+  Lia.model_bigint t.lia
+  |> List.map (fun (term, v) -> term, Model.Int v)
+  |> Model.of_alist
 ;;
 
 let push t =

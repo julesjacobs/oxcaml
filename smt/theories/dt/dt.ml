@@ -777,11 +777,8 @@ let leaf_value t (x : Term.t) : Model.value =
          matching sat-DT-degrades-to-unknown. FOLLOW-UP (constructor-tree sat models) owes
          real >int63 representation or must keep degrading here. *)
       (match int_const with
-       | None -> Model.Int 0
-       | Some n ->
-         (match Bigint.to_int_opt n with
-          | Some i -> Model.Int i
-          | None -> Model.Uninterp (Euf.class_of t.engine x)))
+       | None -> Model.Int Bigint.zero
+       | Some n -> Model.Int n)
     (* BitVec is defensively unreachable here: a bit-vector term is resolved by the eager
        bit-blaster before the combinator, and any BV term that reached the combinator
        degrades via [require_no_bitvec_terms] before model extraction. Fold into the
@@ -811,7 +808,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
     let base_leaf (sort : Sort.t) : Model.value =
       match sort with
       | Sort.Bool -> Model.Bool false
-      | Sort.Int _ -> Model.Int 0
+      | Sort.Int _ -> Model.Int Bigint.zero
       | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
         Model.Uninterp 0
     in
@@ -843,7 +840,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
        [v_eq] is the authority. *)
     let mv_eq (a : Model.value) (b : Model.value) =
       match a, b with
-      | Model.Int x, Model.Int y -> Int.equal x y
+      | Model.Int x, Model.Int y -> Bigint.equal x y
       | Model.Bool x, Model.Bool y -> Bool.equal x y
       | Model.Uninterp x, Model.Uninterp y -> Int.equal x y
       | _ -> false

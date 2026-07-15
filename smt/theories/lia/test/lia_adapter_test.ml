@@ -368,7 +368,10 @@ let test_final_split () =
      let m = Lia_adapter.model fx.adapter in
      (match Model.value m fx.vars.(0) with
       | Some (Model.Int v) ->
-        check "model x is integral and within [2,10]" (v >= 2 && v <= 10)
+        check
+          "model x is integral and within [2,10]"
+          (Bigint.compare v (Bigint.of_int 2) >= 0
+           && Bigint.compare v (Bigint.of_int 10) <= 0)
       | _ -> check "model assigns x an Int" false)
    | _ -> check "integral feasible must be Sat" false);
   (* Non-integral rational model -> Split. A SINGLE Le atom always gcd-tightens to an
@@ -428,7 +431,8 @@ let test_final_split () =
        check
          "Split -> upper branch -> Sat with integral, satisfying model"
          (match Model.value m fx.vars.(0), Model.value m fx.vars.(1) with
-          | Some (Model.Int vx), Some (Model.Int vy) -> vx = vy && vx + vy >= 1
+          | Some (Model.Int vx), Some (Model.Int vy) ->
+            Bigint.equal vx vy && Bigint.compare (Bigint.add vx vy) (Bigint.of_int 1) >= 0
           | _ -> false)
      | _ -> check "upper branch of x=y ∧ x+y>=1 should be Sat" false);
     Lia_adapter.pop fx.adapter 1
@@ -438,7 +442,8 @@ let test_final_split () =
     check
       "x=y ∧ x+y>=1 direct Sat has integral, satisfying model"
       (match Model.value m fx.vars.(0), Model.value m fx.vars.(1) with
-       | Some (Model.Int vx), Some (Model.Int vy) -> vx = vy && vx + vy >= 1
+       | Some (Model.Int vx), Some (Model.Int vy) ->
+         Bigint.equal vx vy && Bigint.compare (Bigint.add vx vy) (Bigint.of_int 1) >= 0
        | _ -> false)
   | _ -> check "x=y ∧ x+y>=1 must be Split or Sat, never Conflict" false
 ;;

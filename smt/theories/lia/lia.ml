@@ -786,15 +786,14 @@ let suggest_branch t =
   match first_non_integer t with
   | None -> None
   | Some (term, _, d) ->
-    let f = Rational.floor (Delta.c_part d) in
-    (* [f + 1] via [Rational] so a [max_int] floor degrades to [unknown] rather than
-       wrapping (the projection raises [Rational.Overflow], caught by [guard_overflow]). *)
-    let fp1 =
-      guard_overflow t (fun () ->
-        Rational.floor (Rational.add (Rational.of_int f) Rational.one))
-    in
-    let le_atom = Context.le t.ctx term (Context.int_const t.ctx f) in
-    let ge_atom = Context.ge t.ctx term (Context.int_const t.ctx fp1) in
+    (* Arbitrary-precision branch point (ADR-0018): [floor_bigint] never projects to
+       int63, so a uint256-range fractional value branches instead of degrading to
+       [unknown]. The branch bounds are built as [Bigint] constants
+       ([Context.int_const_big]); the term layer is already arbitrary-precision. *)
+    let f = Rational.floor_bigint (Delta.c_part d) in
+    let fp1 = Oxsmt_core.Bigint.add f Oxsmt_core.Bigint.one in
+    let le_atom = Context.le t.ctx term (Context.int_const_big t.ctx f) in
+    let ge_atom = Context.ge t.ctx term (Context.int_const_big t.ctx fp1) in
     Some (le_atom, ge_atom)
 ;;
 
@@ -815,6 +814,33 @@ let model t =
   match t.last_cube_model with
   | Some m -> m
   | None -> extract_model t
+;;
+
+(* Arbitrary-precision model extraction (ADR-0018): identical to {!extract_model} but the
+   integer value is projected via {!Rational.num_bigint}, which never raises on a >int63
+   value — so a model assigning a variable a uint256-range value is representable at the
+   [Bigint] model sink instead of overflowing to [unknown]. The int-tier drivers (B&B,
+   cube) keep {!extract_model}/{!model}; only the model boundary consumed by the
+   combinator ({!Lia_adapter.model} -> [Model.Int]) needs the Bigint form. *)
+let extract_model_bigint t =
+  Dynarray.fold_left
+    (fun acc (id, term) ->
+       let d = Simplex.value t.simplex id in
+       if not (value_is_integer d)
+       then failwith "Lia.model_bigint: variable is not integral (call after Int_sat)";
+       (term, Rational.num_bigint (Delta.c_part d)) :: acc)
+    []
+    t.problem_vars
+  |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
+;;
+
+let model_bigint t =
+  ensure_live t;
+  match t.last_cube_model with
+  (* A cube model's values are the Bromberger–Fleury rounded integers, already native and
+     small; widen them exactly. *)
+  | Some m -> List.map (fun (term, v) -> term, Oxsmt_core.Bigint.of_int v) m
+  | None -> extract_model_bigint t
 ;;
 
 (* Bromberger-Fleury unit cube test (see {!Simplex.cube_test}): after a {!Sat_candidate}

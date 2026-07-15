@@ -795,3 +795,57 @@ The CH program concludes here.
 4. **Finite-index legacy path (fable rider):** checked, not a live bug (see above).
 5. **Freeze reports are box-local:** gate claims (make test EXIT, gate counts) go in the
    commit message so they are tracked-verifiable.
+
+### A13 — Model.value integer widened to Bigint (2026-07-15, master-approved)
+
+**Unfreeze of `smt/core/model.mli`** (one of the 14 hash-frozen core interfaces).
+Change: the `Model.value` variant `Int of int` becomes `Int of Bigint.t`. `FROZEN.sha256`
+is regenerated to match; the other 13 frozen signatures are byte-identical. This is a
+type-shape change, not additive, so — unlike A8–A11 — it is NOT dark/byte-identical: the
+acceptance battery (below) replaces byte-identity.
+
+**Rationale (master).** The term layer already carries arbitrary-precision integers
+(`Term.Int_const of Bigint.t`, killing the 2^64 coefficient cap), and the downstream model
+vocabulary is already Bigint (`Cdclt.value = VInt of Bigint.t`, rendered via
+`Bigint.to_string`). `Model.value`'s `Int of int` was the lagging int63 inconsistency
+between them: a satisfiable query whose model assigns a variable a value exceeding int63 —
+e.g. a uint256 mask (2^256) in the Certora/Solidity QF_UFLIA family — could not be
+represented at the LIA↔combinator model boundary, so `Lia.extract_model`'s native-int
+projection (`Rational.num`) raised `Rational.Overflow`, which escaped `Sat.solve` and
+degraded the query to `unknown`. 2^256 model values are core to the OxCaml refinement-type
+target. A parallel Bigint model channel (leaving `Model.value` native) was rejected as the
+two-event-path hazard class the certificate lane flagged.
+
+**Exact scope (this addendum's working name in code comments is "ADR-0018"):**
+- `smt/core/model.mli` / `.ml`: `Int of int` → `Int of Bigint.t` (the frozen change).
+- `smt/theories/lia/rational.{ml,mli}`: add `num_bigint` / `floor_bigint` — the numerator
+  and floor as `Bigint.t` WITHOUT the int63 output projection (never raise `Overflow`).
+- `smt/theories/lia/lia.{ml,mli}`: add `model_bigint` (arbitrary-precision model
+  extraction via `num_bigint`); `suggest_branch` branches via `floor_bigint` +
+  `Context.int_const_big` so B&B on a >int63 value no longer overflows. The int-tier
+  drivers (`model`, `cube_model`, `Int_sat`) are unchanged.
+- `smt/theories/lia/lia_adapter.ml`: `model` reads `model_bigint`.
+- `smt/combine/combine.ml`: `value_equal`/`model_eval`/`class_int` fold and compare in
+  `Bigint`; the `model_eval` Arith fold no longer needs an overflow guard (removed
+  `add_guard`/`mul_guard`) and no longer degrades a >int63 constant to `None`.
+- `smt/interface/cdclt.ml`: `value_of` `Model.Int n -> VInt n` (no `Bigint.of_int`); the
+  ζ-realization `int_used` pool records only int63-fitting used values (a >int63 value
+  cannot collide with the small non-negative witnesses `fresh` mints).
+- `smt/interface/{array,dt}_model_check.ml`, `smt/theories/{dt,arr}.ml`: `Model.Int`
+  construction/compare in `Bigint`; the prior >int63 → `Uninterp`/`Bad` degrades collapse
+  to keeping the exact value.
+- Tests updated to construct/compare `Model.Int` in `Bigint`.
+
+Nothing else on the frozen surface. `model_check` (the R1 UF checker) was ALREADY Bigint
+(it consumes `Cdclt.VInt`), so the TCB evaluator is unchanged.
+
+**Acceptance battery (replaces byte-identity; status at freeze):** make test green
+(check-frozen at the NEW hash); the 6 Certora `Rational.Overflow` unknowns no longer
+overflow — 2 convert to R1-checked sat, the other 4 no longer degrade but now require
+arbitrary-precision B&B SEARCH on 2^256-range values (a separate perf frontier, NOT a
+representation bug); a reduced RED golden carrying a forced 2^256 model value; a 0-flip A/B
+over QF_UFLIA 659 + a LIA regression sample; an SMPT wall/alloc check for the boxing cost
+of `Int of Bigint` (named perf risk — build_model is 83–96% of SMPT's 2s budget).
+
+**BLOCKING dual review on the frozen-surface diff** (model_check consumes `Model.value`,
+so this is TCB): codex leg per ADR-0007 + fable leg.

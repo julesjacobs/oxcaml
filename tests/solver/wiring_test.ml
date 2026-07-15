@@ -304,16 +304,21 @@ let test_bignum_r1_session_degrade () =
         ctx
         (Context.add ctx (Context.mul_const ctx max_int x) y)
         (Context.int_const ctx 0));
+   (* DESIGN A13: [Model.value] is now [Int of Bigint.t], so a model value exceeding int63
+      (here y = -2*max_int) is represented rather than overflowing the extraction
+      projection. The query is genuinely SAT (x=2, y=-2*max_int is a valid integer model),
+      R1-checked. *)
    check_verdict
-     "F2(i): Big-model SAT degrades to Unknown via the eager-projection firewall"
-     Session.Unknown
+     "F2(i): Big-model SAT is solved (A13 Bigint model), no longer degraded"
+     Session.Sat
      (Session.check_sat s));
-  (* (ii) Big B&B BRANCH-BOUND: pin x0=0; promote x1 = x0+min_int = -2^62 and x2 =
-     x1+min_int = -2^63; then 2*x3 + 1 = x2, so the ℚ relaxation binds x3 = -(2^63+1)/2, a
-     Big non-integer. B&B branches on x3 and floors it (< min_int, exceeds int63) -> the
-     adapter guard catches the projection Overflow -> firewall -> Unknown (never a
-     truncated bound). Session mirror of lia_test's fixture (b), exercising
-     [suggest_branch]. *)
+  (* (ii) Big B&B BRANCH-BOUND: pin x0=0; promote x1 = x0+min_int and x2 = x1+min_int =
+     -2^63; then 2*x3 + 1 = x2, so the ℚ relaxation binds x3 = -(2^63+1)/2, a Big
+     non-integer. DESIGN A13: [suggest_branch] now floors it via [floor_bigint] +
+     [int_const_big] (no int63 projection), so B&B proceeds instead of degrading. The
+     system is ℤ-INFEASIBLE — 2*x3+1 (odd) can never equal x2 = -2^63 (even) — so the real
+     verdict is UNSAT. Session mirror of lia_test's fixture (b), exercising the
+     arbitrary-precision branch. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let mkv name = Context.const ctx (Session.declare_const s name Sort.int) in
@@ -329,8 +334,8 @@ let test_bignum_r1_session_degrade () =
     s
     (Context.eq ctx (Context.add ctx (Context.mul_const ctx 2 x3) (ic 1)) x2);
   check_verdict
-    "F2(ii): Big B&B branch-bound degrades to Unknown via the adapter guard"
-    Session.Unknown
+    "F2(ii): Big B&B branch-bound solved UNSAT (A13 arbitrary-precision branch)"
+    Session.Unsat
     (Session.check_sat s)
 ;;
 
@@ -1657,9 +1662,13 @@ let test_presolve_overflow_coeff_degrades () =
    | () -> ()
    | exception e ->
      check ("coeff overflow raised " ^ Printexc.to_string e ^ " (want unknown)") false);
+  (* DESIGN A13: coefficient composition to 1e21 no longer overflows the model boundary
+     (Bigint terms + [Int of Bigint] model), so the query is decided on its merits: x=1e9
+     forces 1e21 = 3*w, and 10^21 mod 3 = 1, so there is no integer w — genuinely UNSAT.
+     (Pre-A13 this degraded to Unknown via the model-extraction int63 projection.) *)
   check_verdict
-    "overflow(coeff): degrades to unknown"
-    Session.Unknown
+    "overflow(coeff): decided UNSAT (A13 Bigint), no longer degraded"
+    Session.Unsat
     (Session.check_sat s)
 ;;
 

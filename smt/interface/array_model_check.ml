@@ -34,7 +34,7 @@ type v = Arr.value =
 
 let mv_eq (a : Model.value) (b : Model.value) =
   match a, b with
-  | Model.Int x, Model.Int y -> Int.equal x y
+  | Model.Int x, Model.Int y -> Bigint.equal x y
   | Model.Bool x, Model.Bool y -> Bool.equal x y
   | Model.Uninterp x, Model.Uninterp y -> Int.equal x y
   | _ -> raise Bad
@@ -100,10 +100,7 @@ let ev_with (reg : Adefs.t) (env : v Term.Table.t) =
   let rec ev (t : Term.t) : v =
     match t.Term.node with
     | Term.Bool_const b -> Scalar (Model.Bool b)
-    | Term.Int_const n ->
-      (match Bigint.to_int_opt n with
-       | Some i -> Scalar (Model.Int i)
-       | None -> raise Bad)
+    | Term.Int_const n -> Scalar (Model.Int n)
     | Term.Eq (a, b) -> Scalar (Model.Bool (v_eq (ev a) (ev b)))
     | Term.Not a -> Scalar (Model.Bool (not (as_bool (ev a))))
     | Term.And xs ->

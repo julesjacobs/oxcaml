@@ -1485,10 +1485,7 @@ let array_model t : (Term.t * value) list option =
                | _ -> None)
              members
          with
-         | Some n ->
-           (match Bigint.to_int_opt n with
-            | Some i -> Model.Int i
-            | None -> Model.Uninterp (Euf.class_of t.engine x))
+         | Some n -> Model.Int n
          | None -> Model.Uninterp (Euf.class_of t.engine x))
       | _ -> Model.Uninterp (Euf.class_of t.engine x))
   in
@@ -1535,7 +1532,7 @@ let array_model t : (Term.t * value) list option =
       match element with
       | Sort.Array (_, e2) -> Array { entries = []; default = default_of e2 (depth + 1) }
       | Sort.Bool -> Scalar (Model.Bool false)
-      | Sort.Int _ -> Scalar (Model.Int 0)
+      | Sort.Int _ -> Scalar (Model.Int Bigint.zero)
       | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
         Scalar (Model.Uninterp 0))
   and value_of (x : Term.t) (depth : int) : value =

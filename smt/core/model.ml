@@ -3,7 +3,7 @@
    encoding (open q3); this module is not hash-frozen until then (ADR-0005 Tranche B). *)
 
 type value =
-  | Int of int
+  | Int of Bigint.t
   | Bool of bool
   | Uninterp of int
 

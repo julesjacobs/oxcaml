@@ -13,7 +13,11 @@
     here fails [theory.mli] to compile, loudly. *)
 
 type value =
-  | Int of int
+  | Int of Bigint.t
+  (** an integer term's value. Arbitrary-precision ({!Oxsmt_core.Bigint.t}, ADR-0018
+      unfreeze) so a model value exceeding int63 — e.g. a uint256 Certora constant — is
+      representable; the term layer is already Bigint (kills the 2^64 coefficient cap),
+      and this closes the lagging int63 inconsistency at the model boundary. *)
   | Bool of bool
   | Uninterp of int
   (** an opaque, per-model class id for an uninterpreted-sort term (equal terms share it);
