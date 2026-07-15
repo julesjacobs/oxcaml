@@ -1015,12 +1015,19 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
     in
     let base_tree_memo : (string, ctor_tree) Hashtbl.t = Hashtbl.create 16 in
     let next_idx = ref 0 in
+    (* classes whose [tree_of] is currently on the build stack — their shared [memo] entry
+       is still the [Uninterp] cycle-break placeholder, not a real value. *)
+    let in_progress : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+    (* separate memo for the disequal-peer materialization ([fbd_tree]); kept apart from
+       the shared [memo] so peer steering never pollutes the real model build. *)
+    let fbd_memo : (int, ctor_tree) Hashtbl.t = Hashtbl.create 16 in
     let rec tree_of (x : Term.t) (depth : int) : ctor_tree =
       let k = Euf.class_of t.engine x in
       match Hashtbl.find_opt memo k with
       | Some tr -> tr
       | None ->
         Hashtbl.replace memo k (Leaf (Model.Uninterp k));
+        Hashtbl.replace in_progress k ();
         let tr =
           match Hashtbl.find_opt witnesses k with
           | Some wterm ->
@@ -1053,7 +1060,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
                    List.filter_map
                      (fun k' ->
                         match Hashtbl.find_opt rep k' with
-                        | Some xr -> Some (tree_of xr depth)
+                        | Some xr -> Some (fbd_tree xr depth)
                         | None -> None)
                      (List.sort compare peers)
                in
@@ -1069,7 +1076,54 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
              | None -> Leaf (leaf x))
         in
         Hashtbl.replace memo k tr;
+        Hashtbl.remove in_progress k;
         tr
+    (* Materialize a disequal PEER's tree for collision-steering ONLY, on the SEPARATE
+       [fbd_memo] so it can never pollute the shared [memo] of the real model build. This
+       is the fix for the cyclic-witness unknowns: computing [fbd] through the shared
+       [tree_of] baked an in-progress class's [Uninterp] cycle-break placeholder into a
+       peer's memoized tree, which then surfaced in the REAL model at a datatype position
+       and failed the checker's sort-inhabitance -> unknown. A fully-built shared value is
+       reused; an IN-PROGRESS class (its shared entry is still the placeholder) or a free
+       peer is approximated by its sort's base. Sound: [fbd] only STEERS [distinct_base]
+       away from collisions and the §8 [Dt_model_check] remains the authority; free-free
+       distinctness is already guaranteed by [next_idx]; and a peer that structurally
+       contains the class being completed cannot equal it, so approximating that
+       descendant is harmless. Recursion is over witness fields only (the
+       occurs-check-verified acyclic DAG) and is [tick]-budgeted. *)
+    and fbd_tree (x : Term.t) depth : ctor_tree =
+      let k = Euf.class_of t.engine x in
+      if Hashtbl.mem memo k && not (Hashtbl.mem in_progress k)
+      then Hashtbl.find memo k
+      else (
+        match Hashtbl.find_opt fbd_memo k with
+        | Some tr -> tr
+        | None ->
+          (match datatype_of_sort t x.Term.sort with
+           | Some dt0 -> Hashtbl.replace fbd_memo k (base_tree dt0 depth)
+           | None -> Hashtbl.replace fbd_memo k (Leaf (leaf x)));
+          let tr =
+            match Hashtbl.find_opt witnesses k with
+            | Some wterm ->
+              let sym, wargs = Option.get (head_args wterm) in
+              let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
+              tick ();
+              Ctor
+                ( Symbol.name c.Defs.sym
+                , Array.to_list
+                    (Array.map
+                       (fun a ->
+                          if is_dt_sort t a.Term.sort
+                          then fbd_tree a (depth + 1)
+                          else Leaf (leaf a))
+                       wargs) )
+            | None ->
+              (match datatype_of_sort t x.Term.sort with
+               | Some dt0 -> base_tree dt0 depth
+               | None -> Leaf (leaf x))
+          in
+          Hashtbl.replace fbd_memo k tr;
+          tr)
     and field_tree (a : Term.t) depth =
       if is_dt_sort t a.Term.sort then tree_of a (depth + 1) else Leaf (leaf a)
     and base_tree (dt : Defs.datatype) depth : ctor_tree =
