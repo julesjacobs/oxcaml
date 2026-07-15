@@ -41,14 +41,26 @@ let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
    for [row_split] to branch on an [i=j] atom already decided false. z3 wins QF_AX with
    plain theory_array + this rule (NOT Christ-Hoenicke): the deterministic read-through
    telescopes a decided [i<>j] down the store chain, closing the swap refutation without
-   the blind index split blow-up. Default OFF; OFF is byte-identical. Needs [an_diseqs]
-   populated, so it implies the graph ([weq_on]). *)
-let weq_row2 = env_flag "OXSMT_ARR_ROW2"
+   the blind index split blow-up. Needs [an_diseqs] populated, so it implies the graph
+   ([weq_on]).
+
+   DEFAULT-ON (pair-measured +23 on QF_AX, W=24: ROW2 leg 518/551 vs default 495; 0
+   both-solved flips, 0 z3 disagreements -- logs/pair-2026-07-15c.md). ROW2 was -58
+   intrinsic BEFORE the rung-1a [an_diseqs] class-pair index (storecomm wall cost); the
+   index reversed it (rung-1a landed at trunk b3d4a76e72). [OXSMT_ARR_ROW2] set to
+   0/false/no opts out (byte-identical to the pre-flip trunk); any other value / unset =>
+   ON. The opt-out token set is the SAME as [OXSMT_SYMBREAK] / [OXSMT_BASE_L0] (whose flip
+   precedent this mirrors). *)
+let weq_row2 =
+  match Sys.getenv_opt "OXSMT_ARR_ROW2" with
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
+;;
 
 (* Rung-1a measurement toggle: disable the [an_diseqs] class-pair index (below) and fall
-   back to the O(|an_diseqs|) list scan in [an_distinct]. Default OFF (index ON under ROW2).
-   Verdict/counter-identical either way -- it only trades a scan for a lookup -- so the A/B
-   of ROW2 vs ROW2+NOINDEX isolates the scan's share of the storecomm wall cost. *)
+   back to the O(|an_diseqs|) list scan in [an_distinct]. Default OFF (index ON under
+   ROW2). Verdict/counter-identical either way -- it only trades a scan for a lookup -- so
+   the A/B of ROW2 vs ROW2+NOINDEX isolates the scan's share of the storecomm wall cost. *)
 let weq_row2_noindex = env_flag "OXSMT_ARR_ROW2_NOINDEX"
 
 (* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
