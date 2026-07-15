@@ -33,56 +33,24 @@ let env_flag name =
    closure). Implies the graph is on. *)
 let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
 
-(* Lever "row-sort" (weakeq-guided [row_split] ORDERING): keep the blind [row_split]
-   machinery exactly — it is the confirmed SAT-model backstop — but change only its
-   split-SELECTION order so it offers open pairs whose store lies on an asserted array
-   diseq's weak-equivalence path BEFORE the global tag-least pair. Probe finding: the swap
-   walls have a tiny a<->b path (~8-9 store indices) yet blind [row_split]'s tag-least
-   order wanders far off it (46k-299k decisions vs ~14-16 relevant tests). This reorders
-   toward the path. Needs the graph (so [weq_on] below includes it) but NOT the L1
-   propagation ([weq_l1_on] stays OXSMT_ARR_WEQ-only), so it is a PURE [row_split]
-   reorder. Default OFF; OFF is byte-identical (the graph is not even built). *)
-let weq_rowsort = env_flag "OXSMT_ARR_ROWSORT"
-let weq_rowsort_dbg = env_flag "OXSMT_ARR_ROWSORT_DBG"
-
-(* Codex-leg lever (definite ROW2 propagation, z3 [assert_store_axiom2_core]): the missing
-   deterministic complement of [row_round]'s ROW1. When [i <> j] is ENTAILED (an asserted
-   index diseq, modulo congruence — [an_distinct]) for a store [st = store(base,i,v)] and
-   a read [select(arr,j)] with [arr ~ st], propagate [select(arr,j) = select(base,j)] with
-   BOTH the [arr = st] chain AND the FULL [i <> j] explanation as premises, instead of
-   waiting for [row_split] to branch on an [i=j] atom already decided false. z3 wins QF_AX
-   with plain theory_array + this rule (NOT Christ-Hoenicke). This is the branch-CLOSING
-   propagation the [row_split] reorder lacked: reorder picks the refutation-relevant
-   split, ROW2 makes each decided i<>j telescope its read-through deterministically.
-   Separately ablatable (OFF / rowsort-only / row2-only / rowsort+row2). Needs [an_diseqs]
+(* Definite ROW2 propagation (z3 [assert_store_axiom2_core]): the missing deterministic
+   complement of [row_round]'s ROW1. When [i <> j] is ENTAILED (an asserted index diseq,
+   modulo congruence — [an_distinct]) for a store [st = store(base,i,v)] and a read
+   [select(arr,j)] with [arr ~ st], propagate [select(arr,j) = select(base,j)] with BOTH
+   the [arr = st] chain AND the FULL [i <> j] explanation as premises, instead of waiting
+   for [row_split] to branch on an [i=j] atom already decided false. z3 wins QF_AX with
+   plain theory_array + this rule (NOT Christ-Hoenicke): the deterministic read-through
+   telescopes a decided [i<>j] down the store chain, closing the swap refutation without
+   the blind index split blow-up. Default OFF; OFF is byte-identical. Needs [an_diseqs]
    populated, so it implies the graph ([weq_on]). *)
 let weq_row2 = env_flag "OXSMT_ARR_ROW2"
 
 (* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
-   needs it OR the row-sort ordering lever needs its paths. OXSMT_ARR_WEQ turns on the W1
-   L1 read-over-weak-equivalence rule (added to [row_split], not yet replacing it). *)
-let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze || weq_rowsort || weq_row2
+   needs it OR definite ROW2 needs the [an_diseqs] it populates. OXSMT_ARR_WEQ turns on
+   the W1 L1 read-over-weak-equivalence rule (added to [row_split], not yet replacing it). *)
+let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze || weq_row2
 let weq_l1_on = env_flag "OXSMT_ARR_WEQ"
 let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
-
-(* Discrimination counters for the row-sort lever (OXSMT_ARR_ROWSORT_DBG): how often the
-   path-first scan supplied the split vs falling back to the global tag-least scan.
-   Printed once at exit. Proves the lever is ENGAGED (not a no-op) without a per-Final
-   log. *)
-let rowsort_path_hits = ref 0
-let rowsort_fallbacks = ref 0
-let row2_props = ref 0
-
-let () =
-  if weq_rowsort_dbg
-  then
-    at_exit (fun () ->
-      Printf.eprintf
-        "ARR_ROWSORT_DBG\tpath_first=%d\tfallback=%d\trow2_props=%d\n%!"
-        !rowsort_path_hits
-        !rowsort_fallbacks
-        !row2_props)
-;;
 
 (* O7 fuel: a hard cap on L1 clause emissions per solve. On exhaustion L1 stops emitting
    and the sound [row_split] backstop continues (W1), so a pathological input degrades to
@@ -707,7 +675,6 @@ let row_round t ~changed =
                             (lits_of_prems (Euf.explain t.engine arr st) @ dprem))
                      in
                      Euf.assert_eq t.engine ~premise:prem sel selbase;
-                     if weq_rowsort_dbg then incr row2_props;
                      changed := true
                    | _ -> ())
                 | None -> ())
@@ -758,13 +725,7 @@ let stores_by_class t : (int, Term.t) Hashtbl.t =
   idx
 ;;
 
-(* The tag-least open ROW split among the (select, store) pairs the predicate
-   [pair_ok sel st] admits. [pair_ok = fun _ _ -> true] is the ORIGINAL global scan (same
-   set, same tag order, same first-open pair chosen). Threading a predicate lets the
-   row-sort lever run refutation-relevant scans FIRST then fall back to the identical
-   unrestricted scan, so the reachable split SET is unchanged and only the selection ORDER
-   moves. *)
-let row_split_scan t ~(pair_ok : Term.t -> Term.t -> bool) : Term.t list option =
+let row_split t : Term.t list option =
   let cand = ref None in
   let by_tag a b = compare a.Term.tag b.Term.tag in
   let sidx = stores_by_class t in
@@ -783,7 +744,7 @@ let row_split_scan t ~(pair_ok : Term.t -> Term.t -> bool) : Term.t list option 
           in
           List.iter
             (fun st ->
-              if !cand = None && pair_ok sel st
+              if !cand = None
               then (
                 match st.Term.node with
                 | Term.App (_, a)
@@ -808,78 +769,6 @@ let row_split_scan t ~(pair_ok : Term.t -> Term.t -> bool) : Term.t list option 
         | _ -> ()))
     (List.sort by_tag t.select_terms);
   !cand
-;;
-
-(* The row-sort ordering keys, computed FRESH from the live graph + live [an_diseqs] each
-   call (both trailed, so no cross-pop staleness): the store TERM tags on ANY asserted
-   array diseq's canonical path, and the e-CLASS ids of the extensionality witness indices
-   (read directly from [ext_witness]; NOT [witness_index], which would MINT). Prioritizing
-   a read at the witness index [k] against a path store drives exactly the refutation's
-   open tests ("does k coincide with this path store index?"). SOUNDNESS-IRRELEVANT: these
-   keys only pick WHICH open split to offer first; every split [row_split_scan] emits is
-   theory-valid regardless of the keys, so a stale/misidentified key can at worst change
-   ordering, never a verdict (the crucial contrast with the propagation forms, whose
-   premises must be current). *)
-let row_sort_keys t g : (int, unit) Hashtbl.t * (int, unit) Hashtbl.t =
-  let store_tags = Hashtbl.create 32 in
-  List.iter
-    (fun (a, b, _lit) ->
-      if array_sort a.Term.sort <> None && Weq_graph.weakly_equivalent g a b
-      then (
-        match Weq_graph.find_path g a b with
-        | None | Some [] -> ()
-        | Some edges ->
-          List.iter
-            (fun (e : Weq_graph.edge) ->
-              match e with
-              | Weq_graph.Store { store_term; _ } ->
-                Hashtbl.replace store_tags store_term.Term.tag ()
-              | Weq_graph.Equality _ -> ())
-            edges))
-    t.an_diseqs;
-  let witness_classes = Hashtbl.create 16 in
-  Hashtbl.iter
-    (fun _ w -> Hashtbl.replace witness_classes (Euf.class_of t.engine w) ())
-    t.ext_witness;
-  store_tags, witness_classes
-;;
-
-(* [row_split] with the optional weakeq-guided ordering. OFF (or no graph): the exact
-   original global tag-least scan. ON: try, in order, (1) a witness-read AGAINST a path
-   store (the extensionality index [k] vs a path store index — the refutation's open
-   tests),
-
-   (2) any read against a path store, then (3) the identical unrestricted scan. Reorder,
-   never restrict: tier 3 is the original scan, so the reachable split SET is unchanged. *)
-let row_split t : Term.t list option =
-  match if weq_rowsort then t.weq else None with
-  | None -> row_split_scan t ~pair_ok:(fun _ _ -> true)
-  | Some (g, _) ->
-    let store_tags, witness_classes = row_sort_keys t g in
-    if Hashtbl.length store_tags = 0
-    then row_split_scan t ~pair_ok:(fun _ _ -> true)
-    else (
-      let on_path st = Hashtbl.mem store_tags st.Term.tag in
-      let read_at_witness sel =
-        match sel.Term.node with
-        | Term.App (_, sa) when Iarr.length sa = 2 ->
-          Hashtbl.mem witness_classes (Euf.class_of t.engine (Iarr.get sa 1))
-        | _ -> false
-      in
-      match
-        row_split_scan t ~pair_ok:(fun sel st -> on_path st && read_at_witness sel)
-      with
-      | Some _ as r ->
-        if weq_rowsort_dbg then incr rowsort_path_hits;
-        r
-      | None ->
-        (match row_split_scan t ~pair_ok:(fun _ st -> on_path st) with
-         | Some _ as r ->
-           if weq_rowsort_dbg then incr rowsort_path_hits;
-           r
-         | None ->
-           if weq_rowsort_dbg then incr rowsort_fallbacks;
-           row_split_scan t ~pair_ok:(fun _ _ -> true)))
 ;;
 
 (* --- propagation reason caching (mirrors Dt / Euf_adapter) --- *)
