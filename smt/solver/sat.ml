@@ -475,11 +475,15 @@ let lgc_initial_from_env () =
 ;;
 
 (* Size-relative initial-budget mode ([OXSMT_LGC_SIZEREL]); only consulted when
-   [OXSMT_LGC_FIXED] is on, so it never perturbs the byte-identical OFF path. *)
+   [OXSMT_LGC_FIXED] is on. DEFAULT-ON (sizerel-arm flip): unset / any other value =>
+   [true] => initial budget = max([lgc_sizerel_floor], #orig-clauses / [lgc_sizerel_div]).
+   Set to 0/false/no to opt out to the fixed [lgc_initial] constant. Same opt-out token
+   set as [OXSMT_LGC_FIXED]. This is the PROPORTIONAL arm of the flip; see
+   logs/lgc-flip-prep-log.md for the fixed-vs-sizerel selection protocol. *)
 let lgc_sizerel_from_env () =
   match Sys.getenv_opt "OXSMT_LGC_SIZEREL" with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | Some _ | None -> false
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 (* First-inprocessing-round conflict offset (Phase 2). A measurement/test knob
