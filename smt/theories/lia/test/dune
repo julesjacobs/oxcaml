@@ -38,3 +38,13 @@
  (name rational_word_test)
  (modules rational_word_test)
  (libraries oxsmt_core oxsmt_lia))
+
+; Standalone HNF kernel self-test (Stage B lattice kernel): hand matrices, a random
+; property sweep (self-check + an independent unimodularity witness), the lattice-
+; determinant invariant, and a modular/ring-lattice gcd example. oxsmt_core + oxsmt_lia
+; only (I3 firewall).
+
+(executable
+ (name hnf_test)
+ (modules hnf_test)
+ (libraries oxsmt_core oxsmt_lia))

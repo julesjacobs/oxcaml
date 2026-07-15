@@ -22,5 +22,6 @@ module Bigint = Oxsmt_core.Bigint
 module Rational = Rational
 module Delta = Delta
 module Simplex = Simplex
+module Hnf = Hnf
 module Lia = Lia
 module Lia_adapter = Lia_adapter
