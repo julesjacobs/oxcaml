@@ -99,6 +99,14 @@ type t =
          decisions/LBD). When true, [base] is omitted from the solve and certificate
          assumption sets; pushed frame selectors and the symmetry activation selector are
          unaffected. *)
+  ; base_var : Sat.var (* the base-frame selector, for the level-0 forcing unit *)
+  ; mutable base_unit_emitted : bool
+    (* under [base_at_level0], the permanent [base] unit is added LAZILY on the first
+         [check_sat] rather than at [create] — so that if a certificate trace was
+         installed (which happens on a pristine session, after [create] but before any
+         solve) the unit is captured as a genuine cert Input (the definitional
+         selector-unit), and the checker DERIVES [base] by BCP over inputs. Emitted
+         exactly once. *)
   ; mutable has_theory : bool
     (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
          verdict's model comes from the theory, and a Sat is theory-validated *)
@@ -199,15 +207,16 @@ let create
   in
   let base = Sat.new_var sat in
   (* OXSMT_BASE_L0 (dark): force the unpoppable base frame TRUE with a permanent unit at
-     level 0 rather than assuming it every solve. Read once here; [check_sat] and
-     [cert_assumptions] consult [base_at_level0] to omit [base] from their assumption
-     sets. Unset => no unit, base assumed as before, byte-identical to trunk. *)
+     level 0 rather than assuming it every solve. The unit is NOT added here — it is
+     deferred to the first [check_sat] (see [base_unit_emitted]) so a certificate trace,
+     installed after [create] on the pristine session, records it as a genuine Input. Read
+     the gate once here; [check_sat] and [cert_assumptions] consult [base_at_level0] to
+     omit [base] from their assumption sets. Unset => byte-identical to trunk. *)
   let base_at_level0 =
     match Sys.getenv_opt "OXSMT_BASE_L0" with
     | Some "1" -> true
     | _ -> false
   in
-  if base_at_level0 then Sat.add_clause sat [ Sat.pos base ];
   (* Dynamic relevancy (task #24): when enabled, create the driver, route the trail seam
      events through [cdclt] to it, and install the SAT branch filter that consults it.
      Disabled by default => the filter is never installed and the glue is byte-identical
@@ -236,6 +245,8 @@ let create
   ; bool_consts = []
   ; frames = [ base ]
   ; base_at_level0
+  ; base_var = base
+  ; base_unit_emitted = false
   ; has_theory = false
   ; degraded = false
   ; last_verdict = Unknown
@@ -1543,6 +1554,14 @@ let check_sat t =
      [failed_assumptions] strips it from the core even after a later assertion clears
      [sym_sel]. *)
   t.sym_sel_in_core <- t.sym_sel;
+  (* OXSMT_BASE_L0: add the permanent [base] forcing unit on the first solve (not at
+     [create]), so a certificate trace installed on the pristine session records it as a
+     genuine Input and the checker derives [base] by BCP over inputs. Added exactly once,
+     before any solve, with the default [Query] origin (routed to an [Input] intro). *)
+  if t.base_at_level0 && not t.base_unit_emitted
+  then (
+    Sat.add_clause t.sat [ Sat.pos t.base_var ];
+    t.base_unit_emitted <- true);
   if t.degraded
   then Unknown
   else if Bv_dispatch.is_pure_bv t.asserted && not (Manager.has_live_lemma t.mgr)
