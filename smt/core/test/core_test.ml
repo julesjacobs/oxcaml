@@ -928,6 +928,52 @@ let test_intern_hash_collision_red () =
       (not (Term.equal t1 t2))
 ;;
 
+(* SOUNDNESS RED #2 (front-end lane round 2 — the flat open-addressing intern table's GROW
+   path). Distinct from {!test_intern_hash_collision_red}, which guards the [equal_node]
+   slot gate on a SINGLE intern pass. This guards the RESIZE: [grow] re-places every live
+   entry into a fresh, doubled table by re-masking the STORED hash under the new mask with
+   the same first-empty linear probe. If it placed an entry in a slot the FUTURE probe
+   sequence for that key does not visit (e.g. an off-by-one home bucket in the resize), a
+   later lookup of that key would MISS and DUPLICATE-intern it — a second tag for one
+   structure, the worst defect class. A single-intern test never re-looks-up, so it cannot
+   see that; this test RE-INTERNS every node after the grows and asserts (a) the identical
+   term (tag) comes back and (b) [term_count] did not move. 100 vars => C(100,2)=4950
+   distinct hash-colliding Eq nodes (+100 consts), crossing the 1024→2048→4096→8192
+   resizes (three grows). A grow-only off-by-one ([place ((h+1) land nmask)] in
+   [Node.grow]) makes both checks fail. *)
+let test_intern_grow_reintern_red () =
+  print_endline
+    "R2 grow: re-intern across resizes returns identical tags (no dup intern):";
+  let k = 100 in
+  let syms =
+    Array.init k (fun i ->
+      Env.declare_fun env (Printf.sprintf "growx%d" i) (Rank.create [] Sort.int))
+  in
+  let c = Context.create env in
+  let pool = Array.init k (fun i -> Context.const c syms.(i)) in
+  let first = Array.make_matrix k k None in
+  for i = 0 to k - 1 do
+    for j = i + 1 to k - 1 do
+      first.(i).(j) <- Some (Context.eq c pool.(i) pool.(j))
+    done
+  done;
+  let count_after_first = Context.term_count c in
+  let all_same = ref true in
+  for i = 0 to k - 1 do
+    for j = i + 1 to k - 1 do
+      let again = Context.eq c pool.(i) pool.(j) in
+      match first.(i).(j) with
+      | Some e -> if not (Term.equal e again) then all_same := false
+      | None -> all_same := false
+    done
+  done;
+  check "re-intern after grows returns the identical term for every node" !all_same;
+  check
+    "term_count stable across re-intern (no duplicate interning across resize)"
+    (Context.term_count c = count_after_first);
+  check "pool crossed >=2 resizes (term_count > 4096)" (count_after_first > 4096)
+;;
+
 (* ================================================================== *)
 let () =
   print_endline "core self-test:";
@@ -941,6 +987,7 @@ let () =
   test_scalar_distinctness ();
   test_bucket_primitives_whitebox ();
   test_intern_hash_collision_red ();
+  test_intern_grow_reintern_red ();
   test_theory_view ();
   test_property_debug_check ();
   test_property_equal_phys ();
