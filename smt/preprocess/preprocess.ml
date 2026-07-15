@@ -107,8 +107,15 @@ let ite_removal t root =
       in
       if !changed then Context.linear_combination_big ctx coeffs' l.const else term
     | Le a ->
+      (* Preserve the OLD unconditional rebuild's side effect: [Context.int_const ctx 0]
+         first-interns the standalone [Int_const 0] term. It is an orphan here, but LIA
+         search may later reuse it and its hash-cons tag must match trunk; skipping it
+         would shift that tag on a formula with no explicit [0] literal. Interned BEFORE
+         [go a] to match OCaml's right-to-left argument evaluation of the old
+         [Context.le ctx (go a) (Context.int_const ctx 0)]. *)
+      let zero = Context.int_const ctx 0 in
       let a' = go a in
-      if same_tag a a' then term else Context.le ctx a' (Context.int_const ctx 0)
+      if same_tag a a' then term else Context.le ctx a' zero
     | Eq (a, b) ->
       let a' = go a in
       let b' = go b in
@@ -242,8 +249,12 @@ let div_mod_elimination t root =
       in
       if !changed then Context.linear_combination_big ctx coeffs' l.const else term
     | Le a ->
+      (* Preserve the OLD rebuild's [Int_const 0] interning at the same point
+         (right-to-left arg eval interns it before [go a]); see the matching note in
+         [ite_removal]. *)
+      let zero = Context.int_const ctx 0 in
       let a' = go a in
-      if same_tag a a' then term else Context.le ctx a' (Context.int_const ctx 0)
+      if same_tag a a' then term else Context.le ctx a' zero
     | Eq (a, b) ->
       let a' = go a in
       let b' = go b in

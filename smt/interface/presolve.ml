@@ -427,8 +427,12 @@ let run ctx assertions =
         in
         if !changed then Context.linear_combination_big ctx coeffs' lin.const else t
       | Le a ->
+        (* Preserve the OLD rebuild's [Int_const 0] interning at the same point (right-to-
+           left arg eval interns it before [subst a]): it is an orphan here but LIA search
+           may reuse it and its tag must match trunk on a formula with no explicit [0]. *)
+        let zero = Context.int_const ctx 0 in
         let a' = subst a in
-        if same_tag a a' then t else Context.le ctx a' (Context.int_const ctx 0)
+        if same_tag a a' then t else Context.le ctx a' zero
       | Eq (a, b) ->
         let a' = subst a in
         let b' = subst b in
