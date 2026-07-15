@@ -233,6 +233,17 @@ type 'p t =
     ex_out_seen : unit Int_set.t
   ; ex_explained : unit Int_set.t
   ; ex_pending : (int * int) Queue.t
+  ; (* Per-call scratch for {!merge} and {!dedup_int}, cleared (not reallocated) at entry
+       — same reuse discipline as {!dirty}/{!ex_pending}. [merge_q] is the
+       congruence-closure pending-merge fixpoint queue; [merge] is not re-entrant (its
+       loop only enqueues onto the same queue — it never calls [merge], [register], or
+       {!insert_congruence}). [dedup_seen] backs {!dedup_int}, called once per union in
+       [merge] and once per {!register}; the two never overlap ([register] binds its
+       [dedup_int] result before calling [insert_congruence], and nothing in [merge]'s
+       loop calls [register]), so one shared cleared set is safe. Not trailed: pure
+       per-call scratch. *)
+    merge_q : (int * int * 'p reason) Queue.t
+  ; dedup_seen : unit Int_set.t
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
@@ -260,6 +271,8 @@ let create ctx =
   ; ex_out_seen = Int_set.create 32
   ; ex_explained = Int_set.create 32
   ; ex_pending = Queue.create ()
+  ; merge_q = Queue.create ()
+  ; dedup_seen = Int_set.create 16
   }
 ;;
 
@@ -305,12 +318,12 @@ let rec find_go parents i =
 
 let find t i = find_go t.parents i
 
-let dedup_int lst =
+let dedup_int seen lst =
   (* [Int_set] (int-identity hash) rather than a generic [Hashtbl]: the keys are e-node
      ids, so this drops the polymorphic [caml_hash]/[compare_val] on the merge/register
      hot path (called on a merged class's [uses] every union). Same semantics — a set of
-     seen ints. *)
-  let seen = Int_set.create 16 in
+     seen ints. [seen] is the caller's reusable scratch set, cleared here. *)
+  Int_set.clear seen;
   List.filter
     (fun x ->
       if Int_set.mem seen x
@@ -435,7 +448,8 @@ let merge t a0 b0 reason0 =
      CDCL(T) drive order), so the served witness is always the earliest-asserted one —
      same as the full scan (counted-metric identity). One int write per [merge] call. *)
   t.sep_wit_m <- 0;
-  let q = Queue.create () in
+  let q = t.merge_q in
+  Queue.clear q;
   Queue.add (a0, b0, reason0) q;
   while not (Queue.is_empty q) do
     let a, b, reason = Queue.pop q in
@@ -467,7 +481,7 @@ let merge t a0 b0 reason0 =
           };
       (* forest edge between the ORIGINAL endpoints, carrying [reason] *)
       add_forest_edge t a b reason;
-      let parents = dedup_int (get t child).uses in
+      let parents = dedup_int t.dedup_seen (get t child).uses in
       (* remove parents from the table under their pre-union signatures *)
       List.iter (fun p -> sig_remove_if t p) parents;
       (* union child under root *)
@@ -555,7 +569,9 @@ let rec register t (term : Term.t) : int =
     Term.Table.replace t.index term id;
     (match kind with
      | Fun (_, args) ->
-       let roots = dedup_int (Array.to_list (Array.map (fun a -> find t a) args)) in
+       let roots =
+         dedup_int t.dedup_seen (Array.to_list (Array.map (fun a -> find t a) args))
+       in
        List.iter (fun r -> add_use t r id) roots;
        insert_congruence t id
      | Leaf -> ());
