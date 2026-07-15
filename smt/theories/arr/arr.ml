@@ -45,10 +45,23 @@ let weq_analyze = env_flag "OXSMT_ARR_WEQ_ANALYZE"
 let weq_rowsort = env_flag "OXSMT_ARR_ROWSORT"
 let weq_rowsort_dbg = env_flag "OXSMT_ARR_ROWSORT_DBG"
 
+(* Codex-leg lever (definite ROW2 propagation, z3 [assert_store_axiom2_core]): the missing
+   deterministic complement of [row_round]'s ROW1. When [i <> j] is ENTAILED (an asserted
+   index diseq, modulo congruence — [an_distinct]) for a store [st = store(base,i,v)] and
+   a read [select(arr,j)] with [arr ~ st], propagate [select(arr,j) = select(base,j)] with
+   BOTH the [arr = st] chain AND the FULL [i <> j] explanation as premises, instead of
+   waiting for [row_split] to branch on an [i=j] atom already decided false. z3 wins QF_AX
+   with plain theory_array + this rule (NOT Christ-Hoenicke). This is the branch-CLOSING
+   propagation the [row_split] reorder lacked: reorder picks the refutation-relevant
+   split, ROW2 makes each decided i<>j telescope its read-through deterministically.
+   Separately ablatable (OFF / rowsort-only / row2-only / rowsort+row2). Needs [an_diseqs]
+   populated, so it implies the graph ([weq_on]). *)
+let weq_row2 = env_flag "OXSMT_ARR_ROW2"
+
 (* The graph is maintained whenever the decision procedure is enabled OR the dark analyzer
    needs it OR the row-sort ordering lever needs its paths. OXSMT_ARR_WEQ turns on the W1
    L1 read-over-weak-equivalence rule (added to [row_split], not yet replacing it). *)
-let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze || weq_rowsort
+let weq_on = env_flag "OXSMT_ARR_WEQ" || weq_analyze || weq_rowsort || weq_row2
 let weq_l1_on = env_flag "OXSMT_ARR_WEQ"
 let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
 
@@ -58,15 +71,17 @@ let weq_selfcheck = env_flag "OXSMT_ARR_WEQ_SELFCHECK"
    log. *)
 let rowsort_path_hits = ref 0
 let rowsort_fallbacks = ref 0
+let row2_props = ref 0
 
 let () =
   if weq_rowsort_dbg
   then
     at_exit (fun () ->
       Printf.eprintf
-        "ARR_ROWSORT_DBG\tpath_first=%d\tfallback=%d\n%!"
+        "ARR_ROWSORT_DBG\tpath_first=%d\tfallback=%d\trow2_props=%d\n%!"
         !rowsort_path_hits
-        !rowsort_fallbacks)
+        !rowsort_fallbacks
+        !row2_props)
 ;;
 
 (* O7 fuel: a hard cap on L1 clause emissions per solve. On exhaustion L1 stops emitting
@@ -595,10 +610,41 @@ let ensure_store_reads t ~changed =
     t.store_terms
 ;;
 
+(* [i <> j] entailed by an asserted index disequality, modulo current congruence: some
+   recorded asserted diseq (x, y) has [i ~ x] and [j ~ y] (or swapped). O(#diseqs) per
+   test. Array-sorted recorded diseqs never match an index test (cross-sort terms are
+   never congruent). Some premise-lits entailing [i <> j] (the diseq's lit + the
+   congruence chains linking its endpoints to i and j), or None. The premise is what a
+   propagation relying on [i <> j] must carry so a later retract of that diseq/chain
+   retracts the propagation (PREMISE-COMPLETENESS — omitting it is a wrong-unsat vector;
+   the definite-ROW2 mutant). *)
+let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
+  List.find_map
+    (fun (x, y, lit) ->
+      if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i x)
+                  @ lits_of_prems (Euf.explain t.engine j y))))
+      else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
+      then
+        Some
+          (dedup_lits
+             (lit
+              :: (lits_of_prems (Euf.explain t.engine i y)
+                  @ lits_of_prems (Euf.explain t.engine j x))))
+      else None)
+    t.an_diseqs
+;;
+
 (* One ROW pass: for each store [st = store base i v] and each select [sel = select arr j]
-   with [arr] congruent to [st], propagate the ENTAILED ROW equality. Only the definite
-   direction ([i = j] known ⇒ sel = v) is propagated here; the open case is deferred to a
-   [Split] at [Final] ([row_split]). Sets [changed] on a propagation. Never reports a
+   with [arr] congruent to [st], propagate the ENTAILED ROW equality. The definite ROW1
+   direction ([i = j] known ⇒ sel = v) always fires. Under OXSMT_ARR_ROW2, the definite
+   ROW2 direction ([i <> j] entailed ⇒ sel = select(base,j)) fires too (z3's
+   [assert_store_axiom2_core]); its complement (undecided [i=j]) stays deferred to the
+   [row_split] [Split] at [Final]. Sets [changed] on a propagation. Never reports a
    conflict directly (Euf.check does).
 
    Iterating stores-outer over the [selects_by_arr_class] index (instead of the old
@@ -618,7 +664,8 @@ let row_round t ~changed =
              match role_of t st with
              | Some { Defs.role = Defs.Store; _ } -> true
              | _ -> false ->
-        let i = Iarr.get a 1
+        let base = Iarr.get a 0
+        and i = Iarr.get a 1
         and v = Iarr.get a 2 in
         List.iter
           (fun sel ->
@@ -627,16 +674,40 @@ let row_round t ~changed =
               let arr = Iarr.get sa 0
               and j = Iarr.get sa 1 in
               (* definite ROW1: i = j entailed ⇒ sel = v *)
-              if Euf.are_equal t.engine i j && not (Euf.are_equal t.engine sel v)
+              if Euf.are_equal t.engine i j
               then (
-                let prem =
-                  P_derived
-                    (dedup_lits
-                       (lits_of_prems
-                          (Euf.explain t.engine arr st @ Euf.explain t.engine i j)))
-                in
-                Euf.assert_eq t.engine ~premise:prem sel v;
-                changed := true)
+                if not (Euf.are_equal t.engine sel v)
+                then (
+                  let prem =
+                    P_derived
+                      (dedup_lits
+                         (lits_of_prems
+                            (Euf.explain t.engine arr st @ Euf.explain t.engine i j)))
+                  in
+                  Euf.assert_eq t.engine ~premise:prem sel v;
+                  changed := true))
+              else if weq_row2
+              then (
+                (* definite ROW2: i <> j entailed ⇒ sel = select(base,j). The FULL i<>j
+                   explanation ([an_distinct]) is a premise alongside [arr = st], so a
+                   retract of the diseq retracts this equality (PREMISE-COMPLETENESS).
+                   Build [select(base,j)] (hash-consed; catalog idempotent) so it
+                   telescopes down the chain; terminates (finite arrays × existing
+                   indices, each merged once then [are_equal] skips). *)
+                match an_distinct t i j with
+                | Some dprem ->
+                  (match build_select t base j with
+                   | Some selbase when not (Euf.are_equal t.engine sel selbase) ->
+                     let prem =
+                       P_derived
+                         (dedup_lits
+                            (lits_of_prems (Euf.explain t.engine arr st) @ dprem))
+                     in
+                     Euf.assert_eq t.engine ~premise:prem sel selbase;
+                     if weq_rowsort_dbg then incr row2_props;
+                     changed := true
+                   | _ -> ())
+                | None -> ())
             | _ -> ())
           (Hashtbl.find_all idx (Euf.class_of t.engine st))
       | _ -> ())
@@ -930,35 +1001,6 @@ let weq_final_self_check t =
 ;;
 
 (* --- W0.5 dark store-chain analyzer (storecomm arbiter, §2a) --- *)
-
-(* [i <> j] entailed by an asserted index disequality, modulo current congruence: some
-   recorded asserted diseq (x, y) has [i ~ x] and [j ~ y] (or swapped). O(#diseqs) per
-   test — analysis-only. Array-sorted recorded diseqs never match an index test
-   (cross-sort terms are never congruent). *)
-let an_distinct t (i : Term.t) (j : Term.t) : Lit.t list option =
-  (* Some premise-lits entailing [i <> j] (an asserted diseq whose endpoints are congruent
-     to i and j, plus the congruence chains), or None. The premise is what a propagation
-     relying on [i <> j] must carry so a later retract of that diseq/chain retracts the
-     propagation (PREMISE-COMPLETENESS — omitting it is a wrong-unsat vector). *)
-  List.find_map
-    (fun (x, y, lit) ->
-      if Euf.are_equal t.engine i x && Euf.are_equal t.engine j y
-      then
-        Some
-          (dedup_lits
-             (lit
-              :: (lits_of_prems (Euf.explain t.engine i x)
-                  @ lits_of_prems (Euf.explain t.engine j y))))
-      else if Euf.are_equal t.engine i y && Euf.are_equal t.engine j x
-      then
-        Some
-          (dedup_lits
-             (lit
-              :: (lits_of_prems (Euf.explain t.engine i y)
-                  @ lits_of_prems (Euf.explain t.engine j x))))
-      else None)
-    t.an_diseqs
-;;
 
 (* Symbolically normalize the read [select(x0, j)] down [x0]'s store chain using ONLY ROW1
    (i ~ j -> the store value) and entailed off-diagonal diseqs (i <> j -> recurse the
