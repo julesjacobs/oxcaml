@@ -447,6 +447,9 @@ and print_simple_out_type ppf =
       pp_close_box ppf ()
   | Otyp_object {fields; open_row} ->
       fprintf ppf "@[<2>< %a >@]" (print_fields open_row) fields
+  | Otyp_refine (skeleton, predicate) ->
+      fprintf ppf "@[<hov 1>%a{@ %s@ }@]"
+        print_simple_out_type skeleton predicate
   | Otyp_stuff s -> pp_print_string ppf s
   | Otyp_var (non_gen, s) -> ty_var ~non_gen ppf s
   | Otyp_variant (row_fields, closed, tags) ->

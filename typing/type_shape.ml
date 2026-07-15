@@ -325,7 +325,7 @@ module Type_shape = struct
                 | Tpoly (_, _)
                 | Trepr (_, _)
                 | Tpackage _ | Tquote _ | Tsplice _ | Tquote_eval _ | Tof_kind _
-                | Tbox _ ->
+                | Tbox _ | Trefine _ ->
                   assert false
               in
               Misc.fatal_errorf
@@ -367,6 +367,9 @@ module Type_shape = struct
           | Tunivar _ -> unknown_shape_any
           | Tof_kind _ -> unknown_shape_any
           | Tbox _ -> unknown_shape_value
+          | Trefine refinement ->
+            of_type_expr_go ~depth ~visited refinement.ref_skeleton subst
+              shape_for_constr
           | Tpackage _ -> unknown_shape_value
           (* CR sspies: Support first-class modules. *)
         in

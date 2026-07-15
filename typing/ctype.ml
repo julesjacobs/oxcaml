@@ -1040,7 +1040,8 @@ let rec copy_spine copy_scope ty =
   | Tsplice _
   | Tquote_eval _
   | Tof_kind _
-  | Tbox _ -> ty
+  | Tbox _
+  | Trefine _ -> ty
   | ( Tarrow _ | Tpoly _ | Trepr _ | Ttuple _ | Tunboxed_tuple _ | Tpackage _
     | Tconstr _ ) as desc ->
       let level = get_level ty in
@@ -2555,6 +2556,7 @@ and try_reduce_quote_eval env t =
                  List.map (fun (n, t) -> n, new_quote_eval_ty t) pack_cstrs }
   (* It is safe not to expand [Tof_kind], and we do not need to currently *)
   | Tof_kind _ -> raise Cannot_expand
+  | Trefine _ -> raise Cannot_expand
   | Tlink _ | Tsubst _ -> assert false
 
 and try_reduce_box t =
@@ -2659,6 +2661,8 @@ let rec extract_concrete_typedecl env ty =
   | Tsplice ty -> extract_concrete_typedecl (decr_stage env) ty
   | Tquote_eval ty -> extract_concrete_typedecl (incr_stage env) ty
   | Tbox ty -> extract_concrete_typedecl env ty
+  | Trefine refinement ->
+      extract_concrete_typedecl env refinement.ref_skeleton
   | Tarrow _ | Ttuple _ | Tunboxed_tuple _ | Tobject _ | Tfield _ | Tnil
   | Tvariant _ | Tpackage _ | Tof_kind _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
@@ -2819,6 +2823,7 @@ let contained_without_boxing env ty =
   | Tvar _ | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil | Tlink _
   | Tsubst _ | Tvariant _ | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _
   | Tquote _ | Tsplice _ | Tquote_eval _ -> []
+  | Trefine refinement -> [refinement.ref_skeleton]
 
 (* We use ty_prev to track the last type for which we found a definition,
    allowing us to return a type for which a definition was found even if
@@ -3050,6 +3055,9 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
       ty
     |> Jkind.map_type_expr new_quote_ty
   | Tbox _ -> Jkind.Builtin.value ~why:Boxed
+  | Trefine refinement ->
+    estimate_type_jkind ~expand_components ~ignore_mod_bounds env
+      refinement.ref_skeleton
   | Tnil -> Jkind.Builtin.value ~why:Tnil
   | Tlink _ | Tsubst _ -> assert false
   | Tvariant row ->
@@ -4396,6 +4404,16 @@ let rec mcomp type_pairs env t1 t2 =
             mcomp type_pairs (incr_stage env) t1 t2
         | (Tbox t1, Tbox t2, _, _) ->
             mcomp type_pairs env t1 t2
+        | (Trefine refinement1, Trefine refinement2, _, _) ->
+            if not
+                 (Refinement.equal_desc
+                    ~equal_type:(fun type1 type2 ->
+                      try
+                        mcomp type_pairs env type1 type2;
+                        true
+                      with Incompatible -> false)
+                    refinement1 refinement2)
+            then raise Incompatible
         | (Tbox t, _, _, _) when is_unboxable_ty env t2' ->
           mcomp type_pairs env t (unbox_ty_exn env t2')
         | (_, Tbox t, _, _) when is_unboxable_ty env t1' ->
@@ -5055,6 +5073,14 @@ and unify3 uenv t1 t1' t2 t2' =
       unify_with_incr_stage uenv (fun uenv -> unify uenv (new_splice_ty t1') s2)
   | (Tbox t1, Tbox t2) ->
       unify uenv t1 t2
+  | (Trefine refinement1, Trefine refinement2) ->
+      if not
+           (Refinement.equal_desc
+              ~equal_type:(fun type1 type2 ->
+                unify uenv type1 type2;
+                true)
+              refinement1 refinement2)
+      then raise_unexplained_for Unify
   | (_, Tbox t2) when is_unboxable_ty (get_env uenv) t1' ->
       unify uenv (unbox_ty_exn (get_env uenv) t1') t2
   | (Tbox t1, _) when is_unboxable_ty (get_env uenv) t2' ->
@@ -6444,6 +6470,15 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                 (incr_stage env) t1 t2
           | (Tbox t1, Tbox t2) ->
               moregen inst_nongen variance type_pairs env t1 t2
+          | (Trefine refinement1, Trefine refinement2) ->
+              if not
+                   (Refinement.equal_desc
+                      ~equal_type:(fun type1 type2 ->
+                        moregen inst_nongen Invariant type_pairs env
+                          type1 type2;
+                        true)
+                      refinement1 refinement2)
+              then raise_unexplained_for Moregen
           | (Tbox t, _) when is_unboxable_ty env t2' ->
               moregen inst_nongen variance type_pairs
                 env t (unbox_ty_exn env t2')
@@ -6957,6 +6992,15 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
                 (incr_stage env) ~do_jkind_check t1 t2
           | (Tbox t1, Tbox t2) ->
               eqtype rename type_pairs subst env ~do_jkind_check t1 t2
+          | (Trefine refinement1, Trefine refinement2) ->
+              if not
+                   (Refinement.equal_desc
+                      ~equal_type:(fun type1 type2 ->
+                        eqtype rename type_pairs subst env
+                          ~do_jkind_check type1 type2;
+                        true)
+                      refinement1 refinement2)
+              then raise_unexplained_for Equality
           | (_, _) ->
               raise_unexplained_for Equality
         end
@@ -7697,6 +7741,10 @@ let rec build_subtype env (visited : transient_expr list)
       let (t1', c) = build_subtype env visited loops posi level t1 in
       if c > Unchanged then (newty (Tbox t1'), c)
       else (t, Unchanged)
+  | Trefine _ ->
+      (* Refinements are rigid.  Enlarging only their skeleton would detach
+         the predicate's type graph, so keep the complete node unchanged. *)
+      t, Unchanged
   | Tnil ->
       if posi then
         let v = newvar (Jkind.Builtin.value ~why:Tnil) in
@@ -7890,6 +7938,12 @@ let rec subtype_rec env trace t1 t2 cstrs =
            (Subtype.Diff {got = t1; expected = t2} :: trace)
            t1 t2
            cstrs
+    | (Trefine refinement1, Trefine refinement2)
+      when Refinement.equal_desc
+             ~equal_type:(fun type1 type2 ->
+               is_equal env false [type1] [type2])
+             refinement1 refinement2 ->
+        cstrs
     | (_, _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
   end

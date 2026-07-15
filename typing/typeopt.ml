@@ -270,6 +270,10 @@ let classify ~classify_product env ty layout : _ classification =
      Unreduced splices and evals might stand for anything. *)
   | Tquote _ | Tsplice _ | Tquote_eval _ | Tbox _ ->
       Any
+  | Trefine _ ->
+      (* Refinements erase to their skeleton, but this optimization is allowed
+         to answer conservatively and must remain cycle-safe for -rectypes. *)
+      Any
   | Tlink _ | Tsubst _ | Tpoly _ | Tfield _ | Tunboxed_tuple _
   | Trepr _ ->
       assert false
@@ -863,6 +867,14 @@ and value_kind_mixed_block_field env ~loc ~visited ~depth ~num_nodes_visited
         | Tlink _ | Tsubst _ | Tvariant _ | Tunivar _ | Tpoly _ | Tpackage _
         | Tquote _ | Tsplice _ | Tquote_eval _ | Tof_kind _ | Tbox _ ->
           unknown ()
+        | Trefine refinement ->
+          begin match get_desc refinement.ref_skeleton with
+          | Tunboxed_tuple fields ->
+            Misc.Stdlib.Array.of_list_map
+              (fun (_, field) -> Some field)
+              fields
+          | _ -> unknown ()
+          end
         | Trepr _ -> Misc.fatal_error "value_kind_mixed_block_field: Trepr"
         end
     in

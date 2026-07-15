@@ -164,6 +164,14 @@ and raw_type_desc ppf ty =
     fprintf ppf "Tof_kind@ %a" (Format_doc.compat (Jkind.format env)) jkind
   | Tbox t ->
     fprintf ppf "@[Tbox@ %a@]" raw_type t
+  | Trefine refinement ->
+    fprintf ppf
+      "@[<hov1>Trefine {@[<1>skeleton=@ %a;@]@ \
+       @[<1>view=%s:@ %a;@]@ @[<1>pred=@ %a@]}@]"
+      raw_type refinement.ref_skeleton
+      (Ident.name refinement.ref_view.rb_id)
+      raw_type refinement.ref_view.rb_type
+      Refinement.print refinement.ref_pred
 
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"

@@ -1595,6 +1595,10 @@ let rec tree_of_modal_typexp mode modal ty =
       let tyl' = apply_subst s [ty] in
       Internal_names.add p';
       Otyp_constr (tree_of_path (Some Type) p', tree_of_typlist mode tyl')
+    | Trefine refinement ->
+      Otyp_refine
+        ( tree_of_typexp mode alloc_mode refinement.ref_skeleton,
+          Format.asprintf "%a" Refinement.print refinement.ref_pred )
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;

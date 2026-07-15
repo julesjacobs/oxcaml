@@ -44,6 +44,7 @@ let rec is_arrow_type t =
   | Types.Tconstr _
   | Types.Tvar _ | Types.Tunivar _ | Types.Tobject _ | Types.Tpoly _
   | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ | Types.Tbox _
+  | Types.Trefine _
   | Types.Trepr _
   | Types.Tfield _ | Types.Tnil | Types.Tvariant _ | Types.Tpackage _
   | Types.Tof_kind _ -> false
@@ -58,6 +59,7 @@ let rec need_parent t =
   | Types.Tvar _ | Types.Tunivar _ | Types.Tobject _ | Types.Tpoly _
   | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ | Types.Trepr _
   | Types.Tbox _
+  | Types.Trefine _
   | Types.Tfield _ | Types.Tnil | Types.Tvariant _ | Types.Tpackage _
   | Types.Tof_kind _ -> false
   | Types.Tsubst _ -> assert false

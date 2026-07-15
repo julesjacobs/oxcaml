@@ -752,6 +752,19 @@ let rec typexp copy_scope s ty =
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret), arg, ret, comm)
+      | Trefine refinement ->
+          (* W3 maps the complete embedded type graph while preserving paths
+             and binder stamps.  W5 adds value-path rewriting and
+             unconditional freshening at the import boundary. *)
+          let map_type = typexp copy_scope s in
+          Trefine
+            { ref_skeleton = map_type refinement.ref_skeleton;
+              ref_view =
+                { refinement.ref_view with
+                  rb_type = map_type refinement.ref_view.rb_type
+                };
+              ref_pred = Refinement.map_types map_type refinement.ref_pred;
+            }
       | Tof_kind jk -> Tof_kind (jkind copy_scope s jk)
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
