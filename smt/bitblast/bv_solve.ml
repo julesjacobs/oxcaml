@@ -11,6 +11,19 @@ type verdict =
 
 let two = Bigint.of_int 2
 
+(* OXSMT_SATPRE gate, read with the SAME token set as [Sat.satpre_enabled] (sat.ml). The
+   A10 eliminable marks below ([mark_aux_eliminable]) are consumed ONLY by the satpre
+   inprocessing pass; with satpre OFF (the default) [Sat.set_eliminable] writes a
+   [t.eliminable] slot that the solver never reads, so the whole marking scan is dead
+   work. Gating the marking call on this keeps the ON path byte-identical (marks still
+   run) and the OFF path byte-identical to before (the marks were already ignored) while
+   skipping the O(num_vars) scan on every default BV solve. *)
+let satpre_on () =
+  match Sys.getenv_opt "OXSMT_SATPRE" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* value of a bit literal under the SAT model *)
 let lit_value sat l =
   let b = Sat.value sat (Sat.var_of_lit l) in
@@ -57,7 +70,7 @@ let mark_aux_eliminable blaster =
   let frozen = Hashtbl.create 256 in
   List.iter
     (fun (_, bits) ->
-       Array.iter (fun l -> Hashtbl.replace frozen (Sat.var_of_lit l) ()) bits)
+      Array.iter (fun l -> Hashtbl.replace frozen (Sat.var_of_lit l) ()) bits)
     (Blast.bv_vars blaster);
   List.iter
     (fun (_, l) -> Hashtbl.replace frozen (Sat.var_of_lit l) ())
@@ -75,7 +88,7 @@ let solve defs assertions =
   with
   | exception Blast.Unsupported_bv msg -> Unknown msg
   | blaster ->
-    mark_aux_eliminable blaster;
+    if satpre_on () then mark_aux_eliminable blaster;
     (match Sat.solve (Blast.sat blaster) with
      | Sat.Unsat -> Unsat
      | Sat.Sat ->
