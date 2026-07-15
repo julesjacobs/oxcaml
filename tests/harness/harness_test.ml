@@ -314,6 +314,24 @@ let () =
           ~evals:[ Eval_satisfies ]
           [ sat_goal_altmodel ])
          .outcome);
+  (* PROMOTE-PRESERVATION: a FAILING model-less golden must yield a model-less [produced]
+     — the runner writes [fe.produced] verbatim on --promote, so if [produced] carried a
+     model line a promote would silently RE-PIN the model and revert the golden to
+     fragile. Here the golden is model-less and the counters mismatch (promotable);
+     [produced] must have no (model ...) line. *)
+  let model_less_mismatch =
+    eval
+      ~expected:[ Some Sat ]
+      ~golden:sat_g_model_less
+      ~evals:[ Eval_satisfies ]
+      [ { sat_goal with counters = { conflicts = 1; decisions = 1; propagations = 1 } } ]
+  in
+  check
+    "model-less golden with mismatching counters -> Fail_golden_mismatch"
+    (is_mismatch model_less_mismatch.outcome);
+  check
+    "model-less golden's promote text stays model-less (no silent re-pin)"
+    (not (contains model_less_mismatch.produced "(model"));
   (* Neither soundness failure nor an unreadable model is promotable. *)
   check "model-unsound not promotable" (not (promotable (Fail_model_unsound "x")));
   check "eval-unusable not promotable" (not (promotable (Fail_eval_unusable "x")));
