@@ -688,24 +688,5 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
       in
       fix terms 0)
   in
-  (* PROBE-ONLY premise check (behind OXSMT_BV_SIMPLIFY_STATS): does simplify reduce the
-     asserted set to a pre-blast contradiction (any conjunct = Bool_const false)? Prints a
-     one-line stderr marker BEFORE the caller blasts, so it is observable even if the full
-     solve is killed. Not a product code path; removed before any land. *)
-  (match Sys.getenv_opt "OXSMT_BV_SIMPLIFY_STATS" with
-   | None -> ()
-   | Some _ ->
-     let folded_false =
-       List.exists
-         (fun (t : Term.t) ->
-           match t.Term.node with
-           | Bool_const false -> true
-           | _ -> false)
-         result
-     in
-     Printf.eprintf
-       "BVSIMPLIFY_STATS folded_false=%b nterms=%d\n%!"
-       folded_false
-       (List.length result));
   result
 ;;
