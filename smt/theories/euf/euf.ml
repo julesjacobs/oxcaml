@@ -47,7 +47,7 @@ type kind =
 type 'p enode =
   { term : Term.t
   ; kind : kind
-      (* The union-find PARENT lives in the flat [t.parents] int array, not here — a
+    (* The union-find PARENT lives in the flat [t.parents] int array, not here — a
          per-op hot read that a boxed record field made a pointer chase (see [find]).
          Every other per-node field stays inline. *)
   ; mutable size : int (* class size; valid at a root *)
@@ -57,7 +57,7 @@ type 'p enode =
   ; mutable freason : 'p reason (* reason for the edge to [fparent] *)
   ; mutable stamp : int (* scratch marker for NCA; not trailed *)
   ; mutable tag : Term.t option
-  (* ADR-0014 Stage 3 (datatypes-scoped): per-class theory data — a witness [Term.t] a
+    (* ADR-0014 Stage 3 (datatypes-scoped): per-class theory data — a witness [Term.t] a
      client attaches to the class (datatypes: the representative constructor application
      [C(a..)] of the class). Valid at a ROOT only; trailed; the surviving root inherits a
      tag on merge if it had none. Two tagged classes merging is surfaced via the merge log
@@ -66,12 +66,12 @@ type 'p enode =
 
 type watched =
   { w_atom : Term.t
-      (* a watched atom: either a non-Bool [Eq(a,b)] (truth = [a ~ b]) or a Bool-codomain
+    (* a watched atom: either a non-Bool [Eq(a,b)] (truth = [a ~ b]) or a Bool-codomain
          predicate application [p(x…)] (truth = [p(x…) ~ true_const]). *)
   ; w_a : int
   ; w_b : int
   ; mutable w_reported : int
-  (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
+    (* last value propagate reported: -1 unknown, 0 distinct, 1 equal *)
   }
 
 type 'p diseq =
@@ -116,6 +116,8 @@ type 'p undo =
   | U_fedge of int * int * 'p reason
   | U_sig_add of (int * int array)
   | U_sig_del of (int * int array) * int
+  | U_psig_add of int (* packed-signature key added to [packtbl] (task #47) *)
+  | U_psig_del of int * int (* packed key + prior value restored to [packtbl] *)
   | U_reported of int * int
   | U_tag of int * Term.t option (* ADR-0014 Stage 3: restore a root's per-class tag *)
 
@@ -147,6 +149,14 @@ type 'p t =
     mutable parents : int array
   ; index : int Term.Table.t (* Term -> e-node id *)
   ; sigtbl : int Sig.t
+  ; (* Packed small-arity congruence signatures (task #47): a signature whose (sym, <=2
+       arg-rep ids) all fit their bitfields is stored here under a single injective [int]
+       key (identity hash, no array alloc, no generic array hash/compare) instead of in
+       [sigtbl]. Large arity / out-of-range ids fall back to [sigtbl] — the packing
+       decision is a deterministic function of the (sym, arg-rep) VALUES, so a given
+       signature always resolves to exactly one table and the two never collide. Never
+       iterated -> no Hashtbl-order in any observable path (C8). *)
+    packtbl : int Int_set.t
   ; watched : watched Dynarray.t
   ; (* w_atom -> its two watched side TERMS, for [explain_implied]. Write-once and stable
        (an atom's sides never change): a non-Bool [Eq(a,b)] maps to [(a, b)]; a predicate
@@ -255,6 +265,7 @@ let create ctx =
   ; parents = [||]
   ; index = Term.Table.create 256
   ; sigtbl = Sig.create 256
+  ; packtbl = Int_set.create 256
   ; watched = Dynarray.create ()
   ; watch_sides = Term.Table.create 256
   ; diseqs = Dynarray.create ()
@@ -326,11 +337,11 @@ let dedup_int seen lst =
   Int_set.clear seen;
   List.filter
     (fun x ->
-      if Int_set.mem seen x
-      then false
-      else (
-        Int_set.replace seen x ();
-        true))
+       if Int_set.mem seen x
+       then false
+       else (
+         Int_set.replace seen x ();
+         true))
     lst
 ;;
 
@@ -368,19 +379,6 @@ let set_reported t idx v =
   w.w_reported <- v
 ;;
 
-let sig_add t key v =
-  Sig.replace t.sigtbl key v;
-  push_undo t (U_sig_add key)
-;;
-
-let sig_del t key =
-  match Sig.find_opt t.sigtbl key with
-  | Some v ->
-    Sig.remove t.sigtbl key;
-    push_undo t (U_sig_del (key, v))
-  | None -> ()
-;;
-
 let apply_undo t = function
   | U_parent (i, old) -> Array.unsafe_set t.parents i old
   | U_size (i, old) -> (get t i).size <- old
@@ -391,16 +389,93 @@ let apply_undo t = function
     n.freason <- orr
   | U_sig_add key -> Sig.remove t.sigtbl key
   | U_sig_del (key, v) -> Sig.replace t.sigtbl key v
+  | U_psig_add key -> Int_set.remove t.packtbl key
+  | U_psig_del (key, v) -> Int_set.replace t.packtbl key v
   | U_reported (idx, old) -> (Dynarray.get t.watched idx).w_reported <- old
   | U_tag (i, old) -> (get t i).tag <- old
 ;;
 
 (* --- congruence signatures ----------------------------------------------- *)
 
-let sig_key t id =
+(* --- packed small-arity signature keys (task #47) ------------------------- Bitfield
+   layout in a 63-bit OCaml [int] (max positive [2^62 - 1], so 62 usable bits): [61..60]
+   arity tag (0|1|2) [59..40] sym (20b) [39..20] a0 (20b) [19..0] a1 (20b) Each field is
+   range-CHECKED before it is shifted in; if [arity > 2], [sym >= 2^20], or any arg-rep
+   [>= 2^20] the signature does NOT pack and [pack_sig] returns the sentinel [-1] (all
+   packed keys are [>= 0]), routing the caller to the unpacked [sigtbl]. The disjoint bit
+   ranges plus the arity tag make the map INJECTIVE by construction — distinct
+   [(sym, arg-reps)] tuples (of packable shape) map to distinct ints, and a field that
+   would overflow is never truncated into a shared key (it falls back instead). This
+   injectivity is the wrong-congruence firewall: a lossy pack would merge two distinct App
+   terms => wrong-UNSAT (the collision RED). *)
+let sig_pack_sym_bits = 20
+let sig_pack_arg_bits = 20
+let sig_pack_sym_max = 1 lsl sig_pack_sym_bits
+let sig_pack_arg_max = 1 lsl sig_pack_arg_bits
+
+(* PURE packing core (testable in isolation — the collision RED targets exactly this).
+   Given the arity [n] and the (already-resolved) symbol id [s] and arg-rep ids [a0]/[a1]
+   (unused fields pass [0]), return the injective packed key, or [-1] if any field is out
+   of its bitfield range. The range checks are the firewall: a field that would overflow
+   forces [-1] (unpacked fallback), NEVER a truncated/aliased key. NB [a1] is only
+   consulted for [n = 2] and [a0] only for [n >= 1], so the arity tag keeps the arities
+   disjoint even when the ignored args happen to collide. *)
+let pack_signature_fields ~n ~s ~a0 ~a1 =
+  if n < 0 || n > 2 || s >= sig_pack_sym_max
+  then -1
+  else if n = 0
+  then (* tag 0 *) s lsl 40
+  else if n = 1
+  then if a0 >= sig_pack_arg_max then -1 else (1 lsl 60) lor (s lsl 40) lor (a0 lsl 20)
+  else if a0 >= sig_pack_arg_max || a1 >= sig_pack_arg_max
+  then -1
+  else (2 lsl 60) lor (s lsl 40) lor (a0 lsl 20) lor a1
+;;
+
+let pack_sig t id =
+  match (get t id).kind with
+  | Leaf -> invalid_arg "Euf: pack_sig on a non-App e-node"
+  | Fun (sym, args) ->
+    let s = (sym :> int) in
+    (match Array.length args with
+     | 0 -> pack_signature_fields ~n:0 ~s ~a0:0 ~a1:0
+     | 1 -> pack_signature_fields ~n:1 ~s ~a0:(find t args.(0)) ~a1:0
+     | 2 -> pack_signature_fields ~n:2 ~s ~a0:(find t args.(0)) ~a1:(find t args.(1))
+     | _ -> -1)
+;;
+
+(* The unpacked fallback key (identical to the pre-#47 [sig_key]): materialize the arg-rep
+   array. Only reached when [pack_sig] returned [-1] (large arity / out-of-range ids). *)
+let unpacked_key t id =
   match (get t id).kind with
   | Fun (sym, args) -> (sym :> int), Array.map (fun a -> find t a) args
-  | Leaf -> invalid_arg "Euf: sig_key on a non-App e-node"
+  | Leaf -> invalid_arg "Euf: unpacked_key on a non-App e-node"
+;;
+
+(* Value stored under [id]'s signature, or [-1] if absent. [pk = pack_sig t id]
+   (caller-computed once, so the packed hot path recomputes no [find]s). *)
+let sig_lookup t id pk =
+  if pk >= 0
+  then (
+    match Int_set.find_opt t.packtbl pk with
+    | Some v -> v
+    | None -> -1)
+  else (
+    match Sig.find_opt t.sigtbl (unpacked_key t id) with
+    | Some v -> v
+    | None -> -1)
+;;
+
+(* Store [v] under [id]'s signature (trailed). [pk = pack_sig t id]. *)
+let sig_store t id pk v =
+  if pk >= 0
+  then (
+    Int_set.replace t.packtbl pk v;
+    push_undo t (U_psig_add pk))
+  else (
+    let key = unpacked_key t id in
+    Sig.replace t.sigtbl key v;
+    push_undo t (U_sig_add key))
 ;;
 
 let add_use t root id =
@@ -411,10 +486,21 @@ let add_use t root id =
 (* Remove [p]'s current-signature table entry, but only if it is the representative
    (identity by e-node id) — a congruence-merged non-representative has no entry. *)
 let sig_remove_if t p =
-  let key = sig_key t p in
-  match Sig.find_opt t.sigtbl key with
-  | Some v when v = p -> sig_del t key
-  | _ -> ()
+  let pk = pack_sig t p in
+  if pk >= 0
+  then (
+    match Int_set.find_opt t.packtbl pk with
+    | Some v when v = p ->
+      Int_set.remove t.packtbl pk;
+      push_undo t (U_psig_del (pk, v))
+    | _ -> ())
+  else (
+    let key = unpacked_key t p in
+    match Sig.find_opt t.sigtbl key with
+    | Some v when v = p ->
+      Sig.remove t.sigtbl key;
+      push_undo t (U_sig_del (key, v))
+    | _ -> ())
 ;;
 
 (* --- explanation forest -------------------------------------------------- *)
@@ -499,21 +585,21 @@ let merge t a0 b0 reason0 =
       (* recompute parent signatures; schedule congruences *)
       List.iter
         (fun p ->
-          let key = sig_key t p in
-          match Sig.find_opt t.sigtbl key with
-          | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
-          | Some _ -> ()
-          | None -> sig_add t key p)
+           let pk = pack_sig t p in
+           let qq = sig_lookup t p pk in
+           if qq >= 0
+           then (if find t qq <> find t p then Queue.add (p, qq, R_cong (p, qq)) q)
+           else sig_store t p pk p)
         parents)
   done
 ;;
 
 let insert_congruence t id =
-  let key = sig_key t id in
-  match Sig.find_opt t.sigtbl key with
-  | Some qq when find t qq <> find t id -> merge t id qq (R_cong (id, qq))
-  | Some _ -> ()
-  | None -> sig_add t key id
+  let pk = pack_sig t id in
+  let qq = sig_lookup t id pk in
+  if qq >= 0
+  then (if find t qq <> find t id then merge t id qq (R_cong (id, qq)))
+  else sig_store t id pk id
 ;;
 
 (* --- registration (CONTRACT-REG) ----------------------------------------- *)
@@ -826,15 +912,15 @@ let check t =
   (try
      Dynarray.iteri
        (fun _ d ->
-         if find t d.d_a = find t d.d_b
-         then (
-           let edges = explain_core t d.d_a d.d_b in
-           if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
-           then
-             failwith
-               "Euf self-check: conflict explanation does not connect the disequal terms";
-           result := Conflict (premises edges @ [ d.d_prem ]);
-           raise Exit))
+          if find t d.d_a = find t d.d_b
+          then (
+            let edges = explain_core t d.d_a d.d_b in
+            if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
+            then
+              failwith
+                "Euf self-check: conflict explanation does not connect the disequal terms";
+            result := Conflict (premises edges @ [ d.d_prem ]);
+            raise Exit))
        t.diseqs
    with
    | Exit -> ());
@@ -867,12 +953,12 @@ let distinct_witness t a b =
     (try
        Dynarray.iter
          (fun d ->
-           let du = find t d.d_a
-           and dv = find t d.d_b in
-           if (du = ra && dv = rb) || (du = rb && dv = ra)
-           then (
-             w := Some d;
-             raise Exit))
+            let du = find t d.d_a
+            and dv = find t d.d_b in
+            if (du = ra && dv = rb) || (du = rb && dv = ra)
+            then (
+              w := Some d;
+              raise Exit))
          t.diseqs
      with
      | Exit -> ());
@@ -976,33 +1062,33 @@ let propagate t =
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
       (fun d ->
-        let du = find t d.d_a
-        and dv = find t d.d_b in
-        let key = if du <= dv then pack du dv else pack dv du in
-        (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
+         let du = find t d.d_a
+         and dv = find t d.d_b in
+         let key = if du <= dv then pack du dv else pack dv du in
+         (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
            so the witness {!distinct_witness} serves is byte-identical to what its full
            assertion-order scan would return (same premise token ⇒ identical learned
            clauses ⇒ counted-metric identity). [Dynarray.iter] visits diseqs in assertion
            order. *)
-        if not (Int_set.mem sep key) then Int_set.replace sep key d)
+         if not (Int_set.mem sep key) then Int_set.replace sep key d)
       t.diseqs;
     Dynarray.iteri
       (fun idx w ->
-        let ra = find t w.w_a
-        and rb = find t w.w_b in
-        if Int_set.mem dirty ra || Int_set.mem dirty rb
-        then (
-          let cur =
-            if ra = rb
-            then 1
-            else (
-              let key = if ra <= rb then pack ra rb else pack rb ra in
-              if Int_set.mem sep key then 0 else -1)
-          in
-          if cur <> -1 && cur <> w.w_reported
-          then (
-            set_reported t idx cur;
-            acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
+         let ra = find t w.w_a
+         and rb = find t w.w_b in
+         if Int_set.mem dirty ra || Int_set.mem dirty rb
+         then (
+           let cur =
+             if ra = rb
+             then 1
+             else (
+               let key = if ra <= rb then pack ra rb else pack rb ra in
+               if Int_set.mem sep key then 0 else -1)
+           in
+           if cur <> -1 && cur <> w.w_reported
+           then (
+             set_reported t idx cur;
+             acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
       t.watched);
   List.rev !acc
 ;;
@@ -1056,11 +1142,11 @@ let explain_implied t imp =
 let rearm_watch t term =
   Dynarray.iteri
     (fun idx w ->
-      if Term.equal w.w_atom term
-      then (
-        if w.w_reported <> -1 then set_reported t idx (-1);
-        mark_touched t (find t w.w_a);
-        mark_touched t (find t w.w_b)))
+       if Term.equal w.w_atom term
+       then (
+         if w.w_reported <> -1 then set_reported t idx (-1);
+         mark_touched t (find t w.w_a);
+         mark_touched t (find t w.w_b)))
     t.watched
 ;;
 
@@ -1073,11 +1159,11 @@ let rearm_watch t term =
 let rearm_watches_if t pred =
   Dynarray.iteri
     (fun idx w ->
-      if pred w.w_atom
-      then (
-        if w.w_reported <> -1 then set_reported t idx (-1);
-        mark_touched t (find t w.w_a);
-        mark_touched t (find t w.w_b)))
+       if pred w.w_atom
+       then (
+         if w.w_reported <> -1 then set_reported t idx (-1);
+         mark_touched t (find t w.w_a);
+         mark_touched t (find t w.w_b)))
     t.watched
 ;;
 
@@ -1187,4 +1273,10 @@ let pop t n =
 
 module Debug = struct
   let self_check = self_check
+
+  (* Task #47: the PURE packed-signature core + its field widths, exposed for the
+     collision RED unit test (euf_test.ml). Not on any solve path. *)
+  let pack_signature_fields = pack_signature_fields
+  let sig_pack_sym_bits = sig_pack_sym_bits
+  let sig_pack_arg_bits = sig_pack_arg_bits
 end
