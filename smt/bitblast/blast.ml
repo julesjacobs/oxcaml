@@ -216,12 +216,22 @@ let mul t a b =
   let w = Array.length a in
   let acc = ref (const_bits t Bigint.zero w) in
   for i = 0 to w - 1 do
-    (* partial_i = (b_i ? (a << i) : 0) *)
-    let partial =
-      Array.init w (fun j ->
-        if j >= i then mk_and2 t b.(i) a.(j - i) else Sat.neg_lit t.tru)
-    in
-    acc := bv_add t !acc partial
+    (* Skip a forced-FALSE multiplier bit (a constant-0 row). Its partial is all
+       [mk_and2 t false _] = false (no new var), and [bv_add !acc 0] folds every
+       full-adder back to [acc] with zero new vars/clauses (mk_xor/mk_and2/mk_or2 fold
+       their constant operands), so the row is a no-op today. Skipping is BYTE-IDENTICAL —
+       the skipped row emitted nothing, so no later var number shifts — and removes the
+       fold work on the common constant-multiplier shape (bvmul x <const>). Variable and
+       forced-true rows are unchanged (a true bit's mk_and2 already folds to [a.(j-i)];
+       the ripple-add is the inherent multiply cost). *)
+    if not (is_false t b.(i))
+    then (
+      (* partial_i = (b_i ? (a << i) : 0) *)
+      let partial =
+        Array.init w (fun j ->
+          if j >= i then mk_and2 t b.(i) a.(j - i) else Sat.neg_lit t.tru)
+      in
+      acc := bv_add t !acc partial)
   done;
   !acc
 ;;
