@@ -1,10 +1,31 @@
 # DT checker DAG-awareness — task #28 (Dt_model_check.inhabits/v_eq/ev)
 
 Builder: dt-checker-fable. Worktree `worktrees/dt-checker`, branch `task/dt-checker`, off
-trunk `8e056625e6`. Files touched (diff = 2 files, +220/-42):
-- `smt/interface/dt_model_check.ml` (impl only; `dt_model_check.mli` UNCHANGED — it exposes
-  only `check`, and is NOT in FROZEN.sha256, so no unfreeze ritual needed).
+trunk `8e056625e6`. Files touched:
+- `smt/interface/dt_model_check.ml` (impl: the fix + the post-review O(1) sort guard).
+- `smt/interface/dt_model_check.mli` (post-review: single-Context precondition doc; still NOT
+  in FROZEN.sha256, so no unfreeze ritual — `check-frozen` = 14 match, unchanged).
 - `tests/solver/dt_sat_gate.ml` (new `run_dag_blowup` discrimination test).
+- `tests/dt-goldens-sat/dt_embedded_diamond_sat.smt2` (end-to-end RED golden).
+
+## Post-review riders (dual review APPROVE @8566be295c → byte-identical @4ca011a0be; codex
+## APPROVE-under-contract, `logs/codex-review/dt-checker-8566be295c.md`). Lead adjudication:
+1. **mli single-Context precondition (codex CRITICAL, contract-only).** codex noted `ev_memo`
+   keys on `Term.tag`, unique only within one `Context`; two terms from different `Context`s
+   colliding on a tag would alias. This is pre-existing in surface (the tag-keyed `env`
+   `Term.Table` already required single-Context) and production-unreachable (`Session.commit_sat`
+   always passes one `Context`) — NOT a wrong-sat. Rider = state the single-`Context` precondition
+   explicitly in `check`'s own doc (the TCB entry point should not merely inherit it from
+   `term.mli`). No code change.
+2. **O(1) sort guard (codex HIGH, fragment-gated).** `Inhabits_key.hash` called `Sort.hash`
+   (which recurses over `Array` sorts) BEFORE the sort match, so a deeply-nested `Array`-sorted
+   position risked `Stack_overflow` in the hash. Rider = restructure `make_inhabits` so the memo
+   (hence `Sort.hash`/`Sort.equal`) is consulted ONLY in the `Sort.Datatype _, Ctor _` arm
+   (`Sort.hash` on a `Datatype` is O(1) identity); every non-datatype `(sort, tree)` — including
+   any `Array` sort — returns `false` in O(1) via the catch-all WITHOUT hashing. Verdict-identical
+   (same logic; leaf/array cases were pointlessly memoized before) and the datatype recursion —
+   the only DAG-sharing path — is still memoized, so the diamond still collapses (gate 26/0,
+   run_dag_blowup + embedded golden still GREEN). Cannot accept-more (codex agrees).
 
 ## Outcome
 Made `Dt_model_check`'s recursive re-derivation DAG-aware so a diamond-shaped sort graph no

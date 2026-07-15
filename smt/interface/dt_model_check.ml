@@ -96,16 +96,24 @@ module Pair_tbl = Hashtbl.Make (Pair_key)
 let make_inhabits reg : Sort.t -> v -> bool =
   let memo = Inhabits_tbl.create 256 in
   let rec inhabits (sort : Sort.t) (tree : v) : bool =
-    match Inhabits_tbl.find_opt memo (sort, tree) with
-    | Some b -> b
-    | None ->
-      let b =
-        match sort, tree with
-        | Sort.Bool, Leaf (Model.Bool _) -> true
-        | Sort.Int _, Leaf (Model.Int _) -> true
-        | Sort.Uninterpreted _, Leaf (Model.Uninterp _) -> true
-        | Sort.Datatype s, Ctor (name, fields) ->
-          (match Defs.datatype_of_sort reg s with
+    match sort, tree with
+    | Sort.Bool, Leaf (Model.Bool _) -> true
+    | Sort.Int _, Leaf (Model.Int _) -> true
+    | Sort.Uninterpreted _, Leaf (Model.Uninterp _) -> true
+    (* Only the datatype arm RECURSES (and only there can the value be a shared DAG), so
+       this is the only arm that consults the per-call memo. Confining the memo here keeps
+       the key computation ([Inhabits_key.hash]/[equal], which call
+       [Sort.hash]/[Sort.equal]) off every non-datatype sort: a [Datatype] sort
+       hashes/compares in O(1) (identity is its symbol), whereas an [Array] sort's
+       hash/equal RECURSE over the (untrusted) sort tree. A deeply- nested [Array]-sorted
+       position therefore returns [false] in O(1) via the catch-all below WITHOUT ever
+       entering [Sort.hash] (codex HIGH: eager [Sort.hash] Stack_overflow). *)
+    | Sort.Datatype s, Ctor (name, fields) ->
+      (match Inhabits_tbl.find_opt memo (sort, tree) with
+       | Some b -> b
+       | None ->
+         let b =
+           match Defs.datatype_of_sort reg s with
            | None -> false
            | Some dt ->
              (match
@@ -120,20 +128,21 @@ let make_inhabits reg : Sort.t -> v -> bool =
                 && List.for_all2
                      (fun (sel : Defs.selector) f -> inhabits sel.Defs.field_sort f)
                      c.Defs.selectors
-                     fields))
-        (* Array/BitVec positions are out of the pure-DT fragment (a DT+arrays/BV mix
-           degrades to unknown at solve time); a DT model value never legitimately
-           inhabits one, so reject. *)
-        | ( ( Sort.Bool
-            | Sort.Int _
-            | Sort.Uninterpreted _
-            | Sort.Datatype _
-            | Sort.Array _
-            | Sort.BitVec _ )
-          , _ ) -> false
-      in
-      Inhabits_tbl.replace memo (sort, tree) b;
-      b
+                     fields)
+         in
+         Inhabits_tbl.replace memo (sort, tree) b;
+         b)
+    (* Array/BitVec positions are out of the pure-DT fragment (a DT+arrays/BV mix degrades
+       to unknown at solve time); a DT model value never legitimately inhabits one, so
+       reject. A sort/tree kind mismatch (e.g. a [Ctor] in a [Bool] position) rejects here
+       too. *)
+    | ( ( Sort.Bool
+        | Sort.Int _
+        | Sort.Uninterpreted _
+        | Sort.Datatype _
+        | Sort.Array _
+        | Sort.BitVec _ )
+      , _ ) -> false
   in
   inhabits
 ;;

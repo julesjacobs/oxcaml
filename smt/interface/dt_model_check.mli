@@ -21,6 +21,18 @@
 
 open Oxsmt_core
 
+(** [check registry model assertions] — see the module doc above.
+
+    {b Precondition (single [Context]).} Every [Term.t] in [model] and [assertions] must
+    come from ONE {!Context} / tag space. [Term.t] equal/compare/hash are defined by the
+    term's tag, which is unique only within a single [Context] ({!Term} global contract;
+    cross-[Context] term operations are UNDEFINED BEHAVIOR). This entry point relies on
+    that: the model environment ([Term.Table] keyed on tag) and the per-call memo tables
+    that make the re-derivation DAG-aware both assume tag uniqueness, so two terms from
+    different [Context]s that happen to collide on a tag would alias. Production always
+    satisfies this — {!Session.commit_sat} builds [model] and [assertions] from a single
+    [Context] — so the memoization is an exact speedup there; the caller must not mix
+    [Context]s in one call. *)
 val check
   :  Datatype_defs.t
   -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list
