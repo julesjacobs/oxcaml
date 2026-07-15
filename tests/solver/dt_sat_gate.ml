@@ -228,11 +228,107 @@ let run_fault_injection src =
     true
 ;;
 
+(* DAG-blowup regression (codex/fable dt-spine finding 2). The model BUILDER memoizes
+   [base_tree] per sort ({!Oxsmt_dt.Dt}), so a candidate value can be a shared DIAMOND
+   DAG: a chain of sorts [S_i = c_i(S_(i+1), S_(i+1))] bottoming out at a nullary [end]
+   has only [N] distinct physical [Ctor] nodes but [2^N] root-to-leaf paths (both fields
+   of every level point at the SAME physical sub-tree). Feed the checker exactly such a
+   value and require it to (a) ACCEPT a well-formed diamond, (b) REJECT an ill-formed one
+   whose ROOT names no constructor of the sort, and (c) REJECT one whose shared BOTTOM has
+   the wrong arity — proving the physical-identity memoization did not turn the checker
+   into a rubber-stamp. Before the memoization the ACCEPT case re-derived over all [2^N]
+   paths and hung the sat authority on a trivially-satisfiable input; this test therefore
+   does not complete at all against the un-memoized checker (RED = the whole gate times
+   out), and is ~instant with it (one visit per distinct node). *)
+let run_dag_blowup () =
+  let depth = 60 in
+  let env = Env.create () in
+  let sort_syms =
+    Array.init (depth + 1) (fun i -> Env.declare_sort env (Printf.sprintf "S%d" i))
+  in
+  let sorts = Array.map Sort.datatype_ sort_syms in
+  let reg = ref Defs.empty in
+  for i = 0 to depth - 1 do
+    let name s = Printf.sprintf "%s%d" s i in
+    let ci =
+      Env.declare_fun
+        env
+        (name "c")
+        (Rank.create [ sorts.(i + 1); sorts.(i + 1) ] sorts.(i))
+    in
+    let li = Env.declare_fun env (name "l") (Rank.create [ sorts.(i) ] sorts.(i + 1)) in
+    let ri = Env.declare_fun env (name "r") (Rank.create [ sorts.(i) ] sorts.(i + 1)) in
+    let is_ci = Env.declare_fun env (name "is-c") (Rank.create [ sorts.(i) ] Sort.bool) in
+    reg
+    := Defs.add
+         !reg
+         { Defs.sort_sym = sort_syms.(i)
+         ; constructors =
+             [ { Defs.sym = ci
+               ; selectors =
+                   [ { Defs.sym = li; index = 0; field_sort = sorts.(i + 1) }
+                   ; { Defs.sym = ri; index = 1; field_sort = sorts.(i + 1) }
+                   ]
+               ; tester = is_ci
+               }
+             ]
+         }
+  done;
+  let endsym = Env.declare_fun env "end" (Rank.create [] sorts.(depth)) in
+  let is_end = Env.declare_fun env "is-end" (Rank.create [ sorts.(depth) ] Sort.bool) in
+  reg
+  := Defs.add
+       !reg
+       { Defs.sort_sym = sort_syms.(depth)
+       ; constructors = [ { Defs.sym = endsym; selectors = []; tester = is_end } ]
+       };
+  let reg = !reg in
+  let ctx = Context.create env in
+  let x = Context.const ctx (Env.declare_fun env "x" (Rank.create [] sorts.(0))) in
+  (* A SHARED diamond: [sub] is bound once per level and placed in BOTH fields, so the two
+     children are the SAME physical object — the exact shape the builder's [base_tree]
+     memo produces. *)
+  let rec diamond i =
+    if i = depth
+    then Dt.Ctor ("end", [])
+    else (
+      let sub = diamond (i + 1) in
+      Dt.Ctor (Printf.sprintf "c%d" i, [ sub; sub ]))
+  in
+  let refl = Context.eq ctx x x in
+  incr checks;
+  if not (Dt_model_check.check reg [ x, diamond 0 ] [ refl ])
+  then fail "dag-blowup: a well-formed shared diamond must be a CHECKED sat";
+  (* discrimination A: a bogus ROOT constructor name is rejected (rubber-stamp would
+     accept) *)
+  let bogus_root =
+    match diamond 0 with
+    | Dt.Ctor (_, fields) -> Dt.Ctor ("nope", fields)
+    | leaf -> leaf
+  in
+  incr checks;
+  if Dt_model_check.check reg [ x, bogus_root ] [ refl ]
+  then fail "dag-blowup: a bogus-root-constructor tree must be rejected";
+  (* discrimination B: an ill-arity shared BOTTOM is rejected — the memo must still
+     validate the (shared) leaf, not skip it after the first visit *)
+  let rec diamond_bad_bottom i =
+    if i = depth
+    then Dt.Ctor ("end", [ Dt.Leaf (Model.Int 0) ]) (* [end] is nullary: wrong arity *)
+    else (
+      let sub = diamond_bad_bottom (i + 1) in
+      Dt.Ctor (Printf.sprintf "c%d" i, [ sub; sub ]))
+  in
+  incr checks;
+  if Dt_model_check.check reg [ x, diamond_bad_bottom 0 ] [ refl ]
+  then fail "dag-blowup: an ill-arity shared bottom must be rejected"
+;;
+
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/dt-goldens-sat" in
   run_goldens dir;
   run_discrimination ();
   run_bool_inhabitance ();
+  run_dag_blowup ();
   run_fault_injection (read_file (Filename.concat dir "dt_recursive_diseq_sat.smt2"));
   Printf.printf "Dt sat-gate: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
