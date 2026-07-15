@@ -1,0 +1,13 @@
+LGC arm A/B: WALL=2s CAP=120 STRIDE=1  arms=OFF/FIXED/SIZEREL  2026-07-15 18:54:57
+loadavg at start: 8.78 8.52 8.40 12/3794 227623
+FAMILY 2018-Goel-hwbench                                       n=111   robust_solved OFF=107   FIXED=107   SIZEREL=107   | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY QG-classification                                       n=119   robust_solved OFF=114   FIXED=115   SIZEREL=115   | fixedΔ=+1 sizerelΔ=+1 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY 20190906-CLEARSY                                        n=46    robust_solved OFF=42    FIXED=42    SIZEREL=42    | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY 2019-ezsmt                                              n=62    robust_solved OFF=18    FIXED=18    SIZEREL=20    | fixedΔ=+0 sizerelΔ=+2 | sizerel_loses_vs_fixed=1 disagree=0
+FAMILY 20220307-SMPT                                           n=120   robust_solved OFF=113   FIXED=113   SIZEREL=113   | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY CAV_2009_benchmarks                                     n=119   robust_solved OFF=119   FIXED=119   SIZEREL=119   | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY dillig                                                  n=117   robust_solved OFF=117   FIXED=117   SIZEREL=117   | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY convert                                                 n=107   robust_solved OFF=58    FIXED=58    SIZEREL=56    | fixedΔ=+0 sizerelΔ=-2 | sizerel_loses_vs_fixed=2 disagree=0
+FAMILY rings_preprocessed                                      n=98    robust_solved OFF=39    FIXED=39    SIZEREL=39    | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY slacks                                                  n=117   robust_solved OFF=113   FIXED=113   SIZEREL=113   | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0
+FAMILY mathsat                                                 n=114   robust_solved OFF=107   FIXED=107   SIZEREL=107   | fixedΔ=+0 sizerelΔ=+0 | sizerel_loses_vs_fixed=0 disagree=0

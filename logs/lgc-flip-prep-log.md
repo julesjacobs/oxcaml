@@ -128,7 +128,115 @@ ocamlformat diverges from the repo style and churns the whole file; hand-minimal
 guidance). Expect a trivial rebase at land against the in-flight sat.ml lanes (satcore-S1,
 watch-binary) — this flip touches only the env-reader defaults, the clamp, and the comment text.
 
+## Arm head-to-head — LOCAL run (team-lead scope change: "cheap and cheerful locally")
+
+Ran the 3-arm robust A/B myself (script logs/lgc-arm-ab.sh, raw logs/lgc-arm-ab-results.txt):
+OFF / FIXED / SIZEREL off ONE `--profile release` binary via explicit env, 2s wall, 2 passes
+per arm (ROBUST = solved in BOTH passes), per-file INTERLEAVED (all three arms back-to-back on
+each file, so instantaneous load hits them equally — the fixed-vs-sizerel COMPARISON is robust
+to load drift even if absolute counts are not). 0-flip gate = any two arms both returning a
+non-TO verdict must agree. Sample: 11 search-heavy sub-families (LGC only matters where reduceDB
+fires), ~1130 files evenly strided: QF_UF {Goel, QG-classification, CLEARSY}, QF_LIA {ezsmt,
+SMPT, CAV_2009, dillig, convert, rings_preprocessed, slacks}, QF_UFLIA {mathsat}. (Certora was
+still running when I stopped it to free resources.)
+
+RESULTS (robust_solved per arm):
+
+| family | n | OFF | FIXED | SIZEREL | sizerel vs fixed |
+|---|---|---|---|---|---|
+| QF_UF/2018-Goel-hwbench | 111 | 107 | 107 | 107 | 0 |
+| QF_UF/QG-classification | 119 | 114 | 115 | 115 | 0 |
+| QF_UF/20190906-CLEARSY | 46 | 42 | 42 | 42 | 0 |
+| QF_LIA/2019-ezsmt | 62 | 18 | 18 | **20** | **+2** |
+| QF_LIA/20220307-SMPT | 120 | 113 | 113 | 113 | 0 |
+| QF_LIA/CAV_2009 | 119 | 119 | 119 | 119 | 0 |
+| QF_LIA/dillig | 117 | 117 | 117 | 117 | 0 |
+| QF_LIA/convert | 107 | 58 | 58 | **56** | **-2** |
+| QF_LIA/rings_preprocessed | 98 | 39 | 39 | 39 | 0 |
+| QF_LIA/slacks | 117 | 113 | 113 | 113 | 0 |
+| QF_UFLIA/mathsat | 114 | 107 | 107 | 107 | 0 |
+| **TOTAL** | **1130** | **947** | **948** | **948** | **0** |
+
+- **0 disagreements** across all 11 families / ~1130 files (soundness signal — GC scheduling is
+  satisfiability-preserving, confirmed).
+- Both arms marginally beat OFF (+1 aggregate); **fixed and sizerel TIE in aggregate**.
+- Per-family: sizerel ≥ fixed on 10/11; sizerel WINS ezsmt (+2, the family the review flagged as
+  the robust-gain cluster) and LOSES convert (-2). These cancel → net zero.
+
+CAVEAT (measurement validity): this run used a WRONG (worktree-local) wall-lock path, so it was
+NOT fleet-serialized — it ran CONCURRENT with other 2s wall sweeps on a loaded box (loadavg
+~8-10). Absolute counts are depressed and the ±2 per-family churn is at the NOISE FLOOR, not a
+trustworthy mechanism signal. (The script is now corrected to take the shared fleet lock
+/usr/local/home/jujacobs/oxsmt/logs/.wall-ab-lock, released via `rm -rf`.) The per-file
+interleaving keeps the fixed-vs-sizerel COMPARISON meaningful, but a single load-noisy sample
+cannot resolve a ±2 family difference as mechanism vs timing.
+
+## Arm decision — SIZEREL (provisional; confirm on the quiesced lockbox leg)
+
+TIE in aggregate ⇒ the decision rule's "ties → sizerel" clause AND the proportional-mechanisms
+directive both select **SIZEREL** (the size-relative budget scales with instance size vs a global
+magic 5000; the tunable FIXED is NOT measured-better, so it does not clear the directive's bar to
+displace the principled arm). The convert -2 is treated as load noise (offset by ezsmt +2, net
+zero on a non-serialized run), NOT a hard family regression.
+
+FROZEN WINNING ARM = **SIZEREL = commit a9f93ee1b2** (branch tip; both env readers default-ON).
+FIXED fallback = commit 7ab32539ab (parent).
+
+FLAG for the post-review lockbox leg (pair-runner): re-measure fixed vs sizerel QUIESCED
+(fleet-serialized) with the per-family breakdown, watching QF_LIA/convert specifically. If a clean
+serialized run reproduces a REAL convert regression for sizerel with no offsetting family, fall
+back to FIXED (7ab32539ab) — the scoped-review freeze is a one-line swap of which commit is the
+tip. On the evidence so far the arms are interchangeable on headline; sizerel is chosen on
+principle per the directive.
+
+## Notes for the scoped reviewer
+
+### (1) Residual question: is reduce_db RELOCATION under the LGC (learnt-count) trigger covered?
+
+Post-flip the PRODUCTION default runs the LGC schedule (reduceDB fires at 5000 learnts), but the
+flat-arena RELOCATION stress fixture (sat_test test_arena_reduce_db_stress, PHP(8,7) ~10x firing
++ forced Gc.full_major interleave + exact counter/digest pins) runs under OXSMT_LGC_FIXED=0 (the
+conflict-count schedule) — I pinned it there to preserve its coverage (LGC-ON never reaches 5000
+learnts on PHP(8,7)). Does relocation-under-the-learnt-count-trigger deserve its OWN stress
+fixture that DOES reach the LGC threshold?
+
+MY POSITION: lgc-test's soundness-under-gc is SUFFICIENT; a dedicated LGC-trigger relocation
+fixture would be redundant. Reasoning:
+- `reduce_db` (arena rebuild + cref remap of BOTH holder classes — every watch list and every
+  Implied_by reason) is byte-identical regardless of WHICH schedule triggers it. The trigger
+  changes only WHEN it fires, not WHAT it does; a remap bug (dropped watch- or reason-rewrite)
+  corrupts crefs identically under either trigger.
+- lgc-test's soundness-under-gc ALREADY drives reduce_db many times VIA THE LGC LEARNT-COUNT
+  TRIGGER (tiny initial threshold 3 ⇒ 8456 learned clauses entailment-checked, total_learned >>
+  10× threshold) and cross-checks every verdict + model + learned-clause against an independent
+  DPLL oracle. A dropped remap ⇒ stale cref ⇒ wrong propagation ⇒ wrong verdict / invalid model /
+  unentailed clause ⇒ caught. (The review RED-verified this: disabling the ON reduce_db collapses
+  the load-bearing check.) So relocation-under-the-LGC-trigger IS exercised for soundness.
+- Large-DB relocation and the forced-Gc.full_major-under-relocation hazard are covered by
+  test_arena_reduce_db_stress (thousands of learnts remapped ~10x under a major GC). That hazard
+  is trigger-INDEPENDENT (it is reduce_db interacting with the OCaml GC, same code either
+  schedule), so running it under OXSMT_LGC_FIXED=0 loses nothing relocation-specific.
+
+So the two together (lgc-test drives reduce_db under the LGC trigger with oracle soundness;
+arena-stress drives large-DB relocation + forced-GC under the conflict trigger) cover the
+relocation code under both triggers. A "reach-5000-learnts under LGC" fixture would re-exercise
+the identical reduce_db with only a larger remap and a different trigger constant — no new failure
+mode. CHEAP HEDGE if the reviewer disagrees: add one lgc-test case that fires reduceDB via the LGC
+trigger at a LARGER threshold WITH a Gc.full_major interleave (mirrors arena-stress's forced-GC
+hazard but under the learnt-count trigger) — a few lines, no new corpus. I do not think it is
+needed; the reviewer adjudicates.
+
+### (2) Arm-decision toolchain label
+
+The local arm A/B binary was built `dune build --profile release` on the opam 5.4.0 switch
+(std release: assertions off, dev≡release verdict-equal per the repo's dev-release-check gate) —
+NOT the OxCaml flambda2 -O3 measurement toolchain (trunk @d18a9934c0's o3 profile). This is
+decision-grade for the fixed-vs-sizerel ARM choice (a relative comparison; the profile shifts all
+three arms together). The FINAL banked evidence leg (chosen arm) that goes to pair-runner's
+lockbox should be built with the O3-profile binary per the adoption.
+
 ## NOT done (by scope)
 
-Lockbox measurement (pair-runner), scoped dual review, and the land are out of scope for this prep.
-Do not self-approve / do not land.
+Scoped dual review, the definitive QUIESCED per-family lockbox arm-confirmation (pair-runner, on
+the O3-profile binary), and the land are out of scope for this prep. Do not self-approve / do not
+land.
