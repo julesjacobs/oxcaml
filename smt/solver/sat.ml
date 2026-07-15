@@ -180,6 +180,13 @@ type t =
   ; mutable a_act : float array
   ; mutable a_flags : int array
   ; mutable a_n : int (* number of clauses; metadata valid in [0, a_n) *)
+  ; (* Reusable LBD scratch (perf): distinct-decision-level count via the canonical Glucose
+       per-level stamp. [lbd_stamp.(lv) = lbd_gen] marks level [lv] as already counted for
+       the current clause; the monotone [lbd_gen] avoids clearing between calls. Grown lazily
+       (level < decision level <= nvars). Result-IDENTICAL to
+       {!Search_heuristics.lbd_of_levels} (the tested spec), with no per-call allocation. *)
+    mutable lbd_stamp : int array
+  ; mutable lbd_gen : int
   ; clauses : cref Dynarray.t
   ; learnts : cref Dynarray.t
   ; mutable next_id : int
@@ -542,6 +549,8 @@ let create ?(base_l0_cert_mode = false) () =
   ; a_act = Array.make 16 0.0
   ; a_flags = Array.make 16 0
   ; a_n = 0
+  ; lbd_stamp = [||]
+  ; lbd_gen = 0
   ; clauses = Dynarray.create ()
   ; learnts = Dynarray.create ()
   ; next_id = 0
@@ -869,19 +878,47 @@ let cla_bump t (cr : cref) =
 
 let cla_decay_bump t = t.cla_inc <- t.cla_inc /. cla_decay
 
+(* Distinct-decision-level count over a fresh generation of the reusable [lbd_stamp]: a
+   level [lv] is counted the first time [lbd_stamp.(lv)] is seen not equal to the current
+   generation [g]. Result-identical to [Search_heuristics.lbd_of_levels] (the tested spec) —
+   the same distinct count over the same multiset of levels — but with no per-call
+   allocation (the old Array.init/Array.map/Array.copy path). Indexed by decision level
+   (< [nvars]); grown lazily. *)
+let lbd_begin t =
+  t.lbd_gen <- t.lbd_gen + 1;
+  t.lbd_gen
+;;
+
+let lbd_count_level t g lv =
+  if lv >= Array.length t.lbd_stamp then t.lbd_stamp <- grow_int t.lbd_stamp (lv + 1);
+  if t.lbd_stamp.(lv) <> g
+  then (
+    t.lbd_stamp.(lv) <- g;
+    true)
+  else false
+;;
+
 (* LBD ("glue") of a clause under the current assignment: the number of distinct decision
    levels among its literals (S3). Never on the conflict-free firehose path — only inside
    conflict analysis / reduceDB. *)
 let clause_lbd t lits =
-  Search_heuristics.lbd_of_levels
-    (Array.map (fun l -> Dynarray.get t.level (var_of_lit l)) lits)
+  let g = lbd_begin t in
+  let count = ref 0 in
+  for i = 0 to Array.length lits - 1 do
+    if lbd_count_level t g (Dynarray.get t.level (var_of_lit lits.(i))) then incr count
+  done;
+  !count
 ;;
 
-(* LBD of an ARENA clause [cr], reading its literals' levels in place (no
-   materialization). Same value as [clause_lbd t (cl_lits t cr)]; used on the per-conflict
-   [analyze] path. *)
+(* LBD of an ARENA clause [cr], reading its literals' levels in place (no materialization).
+   Same value as [clause_lbd t (cl_lits t cr)]; used on the per-conflict [analyze] path. *)
 let clause_lbd_cref t (cr : cref) =
-  clause_lbd t (Array.init (cl_len t cr) (fun i -> cl_lit t cr i))
+  let g = lbd_begin t in
+  let count = ref 0 in
+  for i = 0 to cl_len t cr - 1 do
+    if lbd_count_level t g (Dynarray.get t.level (var_of_lit (cl_lit t cr i))) then incr count
+  done;
+  !count
 ;;
 
 (* ------------------------------------------------------------------ *)
