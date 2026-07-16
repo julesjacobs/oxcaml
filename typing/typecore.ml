@@ -707,9 +707,21 @@ let mode_lazy expected_mode =
     mode_coerce (Value.of_const ~hint_comonadic:Lazy_allocated_on_heap mode)
       expected_mode
   in
+  (* This is the only site where the totality and portability booleans differ
+     ([~totality:false] vs [~portability:true]); the difference is deliberate.
+     For a comonadic axis this crossing computes
+     [apply_right (Meet_const c) m = imply c (meet c m)]: [false] sets [c] to the
+     axis max (top), which is the identity, so the axis is COUPLED and the lazy
+     value inherits it from the thunk; [true] sets [c] to the axis min (bottom),
+     which yields top, so the axis is DECOUPLED from the thunk.  Totality must
+     couple: forcing runs the whole thunk, so a divergent/effectful body has to
+     make the lazy partial.  Portability must not couple here: a lazy's
+     portability is that of its FORCED RESULT (enforced via the result type, see
+     lazy.ml), not of values merely used inside the thunk, so an internal
+     nonportable capture must not leak onto the lazy. *)
   let mode_crossing =
     Crossing.create ~linearity:true ~portability:true
-      ~totality:true ~logicality:false
+      ~totality:false ~logicality:false
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
       ~visibility:false ~forkable:false ~yielding:false ~staticity:false
   in
@@ -4049,6 +4061,11 @@ and type_pat_aux
            pat_unique_barrier = Unique_barrier.not_computed () }
   | Ppat_lazy sp1 ->
       submode ~loc ~env:!!penv alloc_mode.mode mode_force_lazy;
+      (* Matching a [lazy] pattern forces the thunk, exactly as [Lazy.force]
+         does; forcing is a partial operation, so it constrains every enclosing
+         closure's totality to partial (mirror of [Lazy.force] being a partial
+         primitive). *)
+      constrain_enclosing_totality ~loc !!penv;
       let nv = solve_Ppat_lazy loc penv expected_ty in
       let alloc_mode = global_pat_mode alloc_mode in
       let p1 =
