@@ -42,17 +42,37 @@ Specs (from logs/perf-audit-theories-fable.md + the lead's ordering):
 - #3 stores_by_class (arr.ml, the store-side mirror of the AX_OCCIDX-cached selects index):
   give it the same rebuild-on-invalidate cache as rebuild_selects_idx/occidx_on — a merge
   cursor (detect-every-change AND receive-events: set_record_merges must be on), invalidate
-  BY REBUILD (never key-remap), per-trigger RED mutants (stale-index mutant must be caught),
-  counted-identity. Rebuilt per row_split (Final), so lower-frequency than the selects side.
+  BY REBUILD (never key-remap), counted-identity. Rebuilt per row_split (Final), so
+  lower-frequency than the selects side.
+  RED-mutant obligations (the merge-cursor war-story pair — BOTH must go RED before land):
+    (a) detect-every-change mutant: drop/weaken one invalidation trigger (skip a merge that
+        moves a store term between classes) so the index goes stale under a genuine class
+        change. Must produce a wrong verdict / gate RED. Proves the cache invalidates on
+        EVERY class-changing event, not just the obvious ones.
+    (b) receive-events mutant: disable set_record_merges (or no-op the merge-cursor advance)
+        so the cursor never receives the merge stream and the index silently freezes. Must
+        go RED. Proves the "AND receive-events" half — the AX_OCCIDX merge-cursor bug where
+        the index looked correct but never saw the events (forgot set_record_merges → stale
+        → caught only by this mutant). Both mutants distinct; a single "stale-index" mutant
+        does NOT discharge this — one can pass while the other's failure mode ships.
 - #4 euf.ml rearm_watch Θ(W²): euf_adapter register (euf_adapter.ml:108-117) calls per-atom
   rearm_watch, each scanning all watches. Fix: skip the scan when `term` is freshly created
   by this registration (comment already says the rearm is a no-op then), or maintain a
   term→watch-index map. counted-identity IF watch-arm order preserved; else dark flag.
 - #5 euf.ml add_forest_edge reroot-smaller: DARK flag OXSMT_FOREST_BALANCE. NOT byte-id
   (reroot direction → forest shape → explain paths → premises → learned clauses → search).
-  Full A/B (counted+wall, 0 flips), QF_UF/QF_AX/QF_DT targets; cert-corpus VALID (not
-  byte-id) ON, byte-id OFF; document "any forest path is a valid explanation" against the
-  euf.ml proof-forest invariants.
+  A/B CORPUS (the three theories whose refutations go through the proof forest, run
+  PER-FAMILY — separate counted+wall tables per logic, not a pooled aggregate):
+    - QF_UF  (the direct EUF forest consumer — primary signal)
+    - QF_AX  (arrays explain through Euf.explain, so forest shape feeds ROW2 premises)
+    - QF_DT  (datatype conflicts explain through the shared engine forest)
+  Each family: counted-identity table (--max-effort N, ON vs OFF) AND a wall table, with
+  0 both-solved verdict flips required on EVERY family (a per-family 0-flip gate, since a
+  pooled flip count can hide a family that regressed while another improved). cert-corpus
+  VALID (not byte-id) ON, byte-id OFF. Document "any forest path is a valid explanation"
+  against the euf.ml proof-forest invariants (reroot direction is correctness-neutral;
+  add_forest_edge already reroots the first endpoint unconditionally, so union-by-size on
+  the reroot choice only changes path lengths, never explanation validity).
 
 ## Verification backlog (untraced codex HIGHs + Step-0 residual)
 - lia.ml:631 diophantine_conflict O(n²) closure (Step-0 residual; LOW-MEDIUM, synthetic-only so far).
