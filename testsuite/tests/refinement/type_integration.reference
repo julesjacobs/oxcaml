@@ -3,6 +3,7 @@ unify rejects: different predicates
 unify rejects: refined versus unrefined
 unify accepts: distinct equal cyclic refinements
 unify rejects: distinct unequal cyclic refinements
+type optimizer: refined arrows scrape; cycles terminate
 instance: types copied consistently; binder stamp preserved
 graph traversal: skeleton, view, and predicate annotations
 occurs check: predicate annotation participates
