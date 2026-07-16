@@ -1414,7 +1414,9 @@ let run_cut_sweep ~label ~seed ~producer =
    vertex, and (unlike the ℤ-infeasible lattice hand case, whose antecedents have NO
    integer points so any validity oracle over them is vacuous) it HAS integer points
    (0,0),(1,0), (0,1). A CG/HNF cut here must genuinely PRESERVE those points, so the
-   validity oracle is non-vacuous. [producer] is the cut under test. *)
+   validity oracle is non-vacuous. [producer] is the cut under test. A [None] from [producer]
+   here is acceptable (it is not obligated to cut this one system); the randomized sweep
+   carries the fired-count floor, so this hand check gates cut VALIDITY only, not firing. *)
 let check_nonvacuous_hand ~label ~producer =
   let fx = make_fixture 2 in
   ignore (assert_le fx [ 0, -1 ] 0 ~polarity:true : int) (* -x0 <= 0 i.e. x0 >= 0 *);
