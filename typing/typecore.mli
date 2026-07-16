@@ -142,6 +142,9 @@ val type_let:
           Typedtree.value_binding list * Env.t
 val type_expression:
         Env.t -> Parsetree.expression -> Typedtree.expression
+val type_refinement:
+        Env.t -> Location.t -> type_expr -> Parsetree.expression ->
+          refinement_desc
 val type_representable_expression:
         why:Jkind.History.concrete_creation_reason ->
         Env.t -> Parsetree.expression -> Typedtree.expression * Jkind.sort
@@ -383,6 +386,10 @@ type error =
       { some_args_ok : bool; ty_fun : type_expr; jkind : jkind_lr }
   | Overwrite_of_invalid_term
   | Unexpected_hole
+  | Refinement_expression_not_supported of string
+  | Refinement_unresolved_type_variable of type_expr
+  | Refinement_value_not_representable of type_expr * Jkind.Violation.t
+  | Invalid_refinement_expression of Refinement.validation_error
   | Let_poly_not_yet_implemented
   | Let_poly_not_syntactic_value
   | Layout_poly_inst_not_yet_supported of invalid_layout_poly_inst_context

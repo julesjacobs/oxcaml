@@ -174,6 +174,9 @@ module TyVarEnv : sig
   val with_local_scope : (unit -> 'a) -> 'a
   (* see mli file *)
 
+  val with_reentrant_scope : (unit -> 'a) -> 'a
+  (* see mli file *)
+
   type poly_univars
   val with_univars : poly_univars -> (unit -> 'a) -> 'a
   (* evaluate with a locally extended set of univars *)
@@ -387,6 +390,57 @@ end = struct
   let univars = ref ([] : poly_univars)
   let assert_univars uvs =
     assert (List.for_all (fun (_name, v, _stage) -> not_generic v.univar) uvs)
+
+  let with_reentrant_scope f =
+    let context = narrow () in
+    let outer_used_variables = !used_variables in
+    let outer_used_anonymous_variables = !used_anonymous_variables in
+    let outer_warned_imprecise_locs = !warned_imprecise_locs in
+    let outer_pre_univars = !pre_univars in
+    let outer_univars = !univars in
+    Fun.protect
+      (fun () ->
+        let jkind_of_variable ty =
+          match get_desc ty with
+          | Tvar { jkind; _ } | Tunivar { jkind; _ } -> jkind
+          | _ -> Jkind.Builtin.any ~why:Dummy_jkind
+        in
+        let parent_variables =
+          TyVarMap.fold
+            (fun name info variables ->
+              TyVarMap.add name
+                ( info.ty,
+                  info.unused,
+                  jkind_of_variable info.ty,
+                  info.stage )
+                variables)
+            outer_used_variables !type_variables
+        in
+        let parent_variables =
+          List.fold_left
+            (fun variables (name, pending, stage) ->
+              TyVarMap.add name
+                ( pending.univar,
+                  ref false,
+                  jkind_of_variable pending.univar,
+                  stage )
+                variables)
+            parent_variables outer_univars
+        in
+        type_variables := parent_variables;
+        used_variables := TyVarMap.empty;
+        used_anonymous_variables := [];
+        warned_imprecise_locs := LocSet.empty;
+        pre_univars := [];
+        univars := [];
+        f ())
+      ~finally:(fun () ->
+        used_variables := outer_used_variables;
+        used_anonymous_variables := outer_used_anonymous_variables;
+        warned_imprecise_locs := outer_warned_imprecise_locs;
+        pre_univars := outer_pre_univars;
+        univars := outer_univars;
+        widen context)
 
   let rec find_poly_univars name = function
     | [] -> raise Not_found
@@ -954,6 +1008,13 @@ let type_open :
     ref =
   ref (fun ?used_slot:_ _ -> assert false)
 
+(* Forward declaration, set alongside [type_open] by [Typemod]. *)
+let type_refinement :
+  (Env.t -> Location.t -> type_expr -> Parsetree.expression -> refinement_desc)
+    ref =
+  ref (fun _ _ _ _ ->
+    Misc.fatal_error "Typetexp.type_refinement callback is not installed")
+
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
     (fun () -> transl_type_aux env ~policy ~aliased ~row_context mode styp)
@@ -1339,6 +1400,28 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let new_env = Env.enter_splice ~loc env in
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
+  | Ptyp_extension
+      ({ txt = "vox2.refinement.type"; _ },
+       PStr
+         [{ pstr_desc =
+              Pstr_eval
+                ({ pexp_desc =
+                     Pexp_constraint (predicate, Some skeleton, []);
+                   _ },
+                 []);
+            _ }]) ->
+      let skeleton =
+        transl_type env ~policy ~row_context mode skeleton
+      in
+      let refinement =
+        !type_refinement env loc skeleton.ctyp_type predicate
+      in
+      ctyp skeleton.ctyp_desc (newty (Trefine refinement))
+  | Ptyp_extension ({ txt = "vox2.refinement.type"; _ }, _) ->
+      raise
+        (Error_forward
+           (Location.errorf ~loc
+              "Malformed refinement type payload"))
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 

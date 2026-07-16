@@ -331,6 +331,10 @@ type error =
       { some_args_ok : bool; ty_fun : type_expr; jkind : jkind_lr }
   | Overwrite_of_invalid_term
   | Unexpected_hole
+  | Refinement_expression_not_supported of string
+  | Refinement_unresolved_type_variable of type_expr
+  | Refinement_value_not_representable of type_expr * Jkind.Violation.t
+  | Invalid_refinement_expression of Refinement.validation_error
   | Let_poly_not_yet_implemented
   | Let_poly_not_syntactic_value
   | Layout_poly_inst_not_yet_supported of invalid_layout_poly_inst_context
@@ -4747,6 +4751,32 @@ let force_delayed_checks () =
   Warnings.restore w_old;
   reset_delayed_checks ();
   Btype.backtrack snap
+
+let with_refinement_typing_frame env f =
+  let outer_delayed_checks = !delayed_checks in
+  let outer_allocations = !allocations in
+  let outer_total_context = !ambient_total_context in
+  let outer_primitive_application = !ambient_primitive_application in
+  delayed_checks := [];
+  allocations := [];
+  (* VOX2_MODES_TODO: replace the ordinary ambient expression context with
+     the total/logical refinement context supplied by the modes workstream. *)
+  ambient_total_context := None;
+  ambient_primitive_application := false;
+  Fun.protect
+    (fun () ->
+      (* VOX2_MODES_TODO: add the logical closure lock that presents captured
+         ambient values at logical mode. *)
+      let env = Env.add_region_lock env in
+      let result = f env in
+      force_delayed_checks ();
+      optimise_allocations ();
+      result)
+    ~finally:(fun () ->
+      delayed_checks := outer_delayed_checks;
+      allocations := outer_allocations;
+      ambient_total_context := outer_total_context;
+      ambient_primitive_application := outer_primitive_application)
 
 let rec final_subexpression exp =
   match exp.exp_desc with
@@ -13787,6 +13817,27 @@ let report_error ~loc env =
   | Unexpected_hole ->
       Location.errorf ~loc
         "wildcard \"_\" not expected."
+  | Refinement_expression_not_supported construct ->
+      Location.errorf ~loc
+        "%s is not yet supported in refinements."
+        construct
+  | Refinement_unresolved_type_variable ty ->
+      Location.errorf ~loc
+        "This refinement has an unresolved type variable %a.@ \
+         Refinement predicates must have fully determined inferred types at \
+         their point of formation."
+        (Style.as_inline_code Printtyp.type_expr) ty
+  | Refinement_value_not_representable (ty, violation) ->
+      Location.errorf ~loc
+        "The value refined by this predicate must be representable.@ %a"
+        (Jkind.Violation.report_with_offender
+           ~offender:(fun ppf -> Printtyp.type_expr ppf ty)
+           env) violation
+  | Invalid_refinement_expression validation_error ->
+      Location.errorf ~loc
+        "Invalid lowered refinement predicate: %s"
+        (Format.asprintf "%a"
+           Refinement.print_validation_error validation_error)
   | Let_poly_not_yet_implemented ->
       Location.errorf ~loc
         "The %a annotation is not yet implemented."
@@ -13840,6 +13891,226 @@ let type_expect env ?mode e ty =
   let expected_mode = mode_default_opt mode in
   let exp = type_expect env expected_mode e ty in
   maybe_check_uniqueness_exp exp; exp
+
+let refinement_hole_name = "_"
+
+let replace_refinement_holes predicate =
+  let default = Ast_mapper.default_mapper in
+  let mapper =
+    { default with
+      expr =
+        (fun mapper expression ->
+          match expression.pexp_desc with
+          | Pexp_hole ->
+            { expression with
+              pexp_desc =
+                Pexp_ident
+                  { txt = Longident.Lident refinement_hole_name;
+                    loc = expression.pexp_loc;
+                  }
+            }
+          | _ -> default.expr mapper expression);
+      (* A nested refinement owns the holes in its type payload. *)
+      typ = (fun _ core_type -> core_type);
+    }
+  in
+  mapper.expr mapper predicate
+
+let unsupported_refinement_expression expression construct =
+  raise
+    (Error
+       ( expression.exp_loc,
+         expression.exp_env,
+         Refinement_expression_not_supported construct ))
+
+let lower_refinement_expression ~view expression =
+  let variable_binder pattern =
+    match pattern.pat_desc with
+    | Tpat_var { id; _ } -> { rb_id = id; rb_type = pattern.pat_type }
+    | _ ->
+      unsupported_refinement_expression expression
+        "Non-variable binding patterns"
+  in
+  let rec lower ~function_head bound expression =
+    let lower_value = lower ~function_head:false bound in
+    let create rexp_desc =
+      Refinement.create
+        ~loc:expression.exp_loc ~type_:expression.exp_type rexp_desc
+    in
+    match expression.exp_desc with
+    | Texp_ident { path = Pident id; _ } when Ident.Set.mem id bound ->
+      create (Rexp_ident (Rbound id))
+    | Texp_ident { path; _ } ->
+      let reference = if function_head then Rapp path else Rglobal path in
+      create (Rexp_ident (Rfree reference))
+    | Texp_constant constant -> create (Rexp_constant constant)
+    | Texp_let (Nonrecursive, bindings, body) ->
+      let lowered_bindings, body_bound =
+        List.fold_left
+          (fun (lowered, body_bound) binding ->
+            let binder = variable_binder binding.vb_pat in
+            let rbind_expr = lower_value binding.vb_expr in
+            ( { rbind_binder = binder; rbind_expr } :: lowered,
+              Ident.Set.add binder.rb_id body_bound ))
+          ([], bound) bindings
+      in
+      create
+        (Rexp_let
+           ( List.rev lowered_bindings,
+             lower ~function_head:false body_bound body ))
+    | Texp_let (Recursive, _, _) ->
+      unsupported_refinement_expression expression "Recursive let bindings"
+    | Texp_function
+        { params =
+            [{ fp_arg_label = arg_label;
+               fp_kind = Tparam_pat pattern;
+               fp_newtypes = [];
+               _ }];
+          body = Tfunction_body body;
+          _ } ->
+      let param = variable_binder pattern in
+      let body =
+        lower ~function_head:false (Ident.Set.add param.rb_id bound) body
+      in
+      create (Rexp_function { arg_label; param; body })
+    | Texp_function _ ->
+      unsupported_refinement_expression expression
+        "Functions other than single-parameter variable lambdas"
+    | Texp_apply (function_, arguments, _, _, _) ->
+      let function_ = lower ~function_head:true bound function_ in
+      let arguments =
+        List.map
+          (function
+            | label, Arg (argument, _) -> label, lower_value argument
+            | _, Omitted _ ->
+              unsupported_refinement_expression expression
+                "Applications with omitted arguments")
+          arguments
+      in
+      create (Rexp_apply (function_, arguments))
+    | Texp_tuple (fields, _) ->
+      create
+        (Rexp_tuple
+           (List.map (fun (label, field) -> label, lower_value field) fields))
+    | Texp_construct (_, constructor, _, arguments, _) ->
+      let constructor =
+        { rconstr_type_path = cstr_res_type_path constructor;
+          rconstr_name = constructor.cstr_name;
+        }
+      in
+      create
+        (Rexp_construct
+           (constructor,
+            List.map (fun (_, argument) -> lower_value argument) arguments))
+    | Texp_field { record; label; _ } when label.lbl_mut = Immutable ->
+      let field =
+        { rfield_type_path = lbl_res_type_path label;
+          rfield_name = label.lbl_name;
+        }
+      in
+      create (Rexp_field (lower_value record, field))
+    | Texp_field _ ->
+      unsupported_refinement_expression expression "Mutable record fields"
+    | Texp_ifthenelse (condition, ifso, ifnot) ->
+      create
+        (Rexp_ifthenelse
+           ( lower_value condition,
+             lower_value ifso,
+             Option.map lower_value ifnot ))
+    | Texp_match _ ->
+      unsupported_refinement_expression expression "A match expression"
+    | _ ->
+      unsupported_refinement_expression expression "This expression form"
+  in
+  lower ~function_head:false (Ident.Set.singleton view.rb_id) expression
+
+exception Unresolved_refinement_type of type_expr
+
+let reject_unresolved_refinement_types skeleton predicate =
+  let check_root type_ =
+    with_type_mark (fun mark ->
+      let rec check type_ =
+        if try_mark_node mark type_
+        then begin
+          match get_desc type_ with
+          | Tvar { name = None; _ } ->
+            raise (Unresolved_refinement_type type_)
+          | _ -> iter_type_expr check type_
+        end
+      in
+      check type_)
+  in
+  check_root skeleton;
+  Refinement.iter_types check_root predicate
+
+let type_refinement env loc skeleton predicate =
+  Typetexp.TyVarEnv.with_reentrant_scope (fun () ->
+    with_refinement_typing_frame env (fun env ->
+      let sort =
+        match
+          Ctype.type_sort
+            ~why:Jkind.History.Structure_item
+            ~fixed:false env skeleton
+        with
+        | Ok sort -> sort
+        | Error violation ->
+          raise
+            (Error
+               (loc, env,
+                Refinement_value_not_representable (skeleton, violation)))
+      in
+      let ref_view =
+        { rb_id =
+            Ident.create_scoped
+              ~scope:(get_scope skeleton) refinement_hole_name;
+          rb_type = skeleton;
+        }
+      in
+      let description =
+        { val_type = skeleton;
+          val_kind = Val_reg sort;
+          val_lpoly = Lpoly.determined [];
+          val_attributes = [];
+          val_zero_alloc = Zero_alloc.default;
+          val_modalities = Modality.undefined;
+          val_loc = loc;
+          val_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
+        }
+      in
+      (* VOX2_MODES_TODO: bind the refined value at logical mode. *)
+      let env =
+        Env.add_value ~mode:Mode.Value.legacy ref_view.rb_id description env
+      in
+      let predicate = replace_refinement_holes predicate in
+      (* VOX2_MODES_TODO: check at total mode with logical captures. *)
+      let typed_predicate =
+        type_expect env ~mode:Mode.Value.legacy predicate
+          (mk_expected Predef.type_bool)
+      in
+      let ref_pred =
+        lower_refinement_expression ~view:ref_view typed_predicate
+      in
+      begin
+        match reject_unresolved_refinement_types skeleton ref_pred with
+        | () -> ()
+        | exception Unresolved_refinement_type type_ ->
+          raise (Error (loc, env, Refinement_unresolved_type_variable type_))
+      end;
+      let equal_type left right =
+        Ctype.is_equal env false [left] [right]
+      in
+      begin
+        match
+          Refinement.validate ~equal_type ~bool_type:Predef.type_bool
+            ~binders:[ref_view] ref_pred
+        with
+        | Ok () -> ()
+        | Error validation_error ->
+          raise
+            (Error
+               (loc, env, Invalid_refinement_expression validation_error))
+      end;
+      { ref_skeleton = skeleton; ref_view; ref_pred }))
 
 let type_exp env ?mode e =
   let expected_mode = mode_default_opt mode in

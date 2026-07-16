@@ -32,6 +32,11 @@ module TyVarEnv : sig
   val with_local_scope : (unit -> 'a) -> 'a
   (** Evaluate in a narrowed type-variable scope *)
 
+  val with_reentrant_scope : (unit -> 'a) -> 'a
+  (** Run a nested type translation while preserving the outer translation's
+      bookkeeping.  Outer named variables remain available to nested type
+      annotations and all tables are restored on success or exception. *)
+
   type poly_univars
   val make_poly_univars :
     Env.t -> (string Location.loc * Env.stage) list -> poly_univars
@@ -62,6 +67,11 @@ end
 val type_open:
   (?used_slot:bool ref -> Asttypes.override_flag -> Env.t -> Location.t ->
    Longident.t Asttypes.loc -> Path.t * Env.t)
+    ref
+
+(* Forward declaration, filled in by [Typemod]. *)
+val type_refinement:
+  (Env.t -> Location.t -> type_expr -> Parsetree.expression -> refinement_desc)
     ref
 
 val valid_tyvar_name : string -> bool
