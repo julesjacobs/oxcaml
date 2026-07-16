@@ -299,6 +299,12 @@ and type_desc =
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
 
+  | Trefine of refinement_desc
+  (** A rigid refinement over [ref_skeleton].  [ref_view] binds the
+      refined-value hole in [ref_pred] and records the type at which that value
+      is viewed.  Runtime layout and representation are those of the
+      skeleton. *)
+
 (** A typed refinement expression.  The constructors below mechanically
     mirror the supported subset of [Typedtree.expression_desc]. *)
 and refinement_expression =
@@ -355,6 +361,12 @@ and refinement_constructor =
 and refinement_field =
   { rfield_type_path : Path.t;
     rfield_name : string;
+  }
+
+and refinement_desc =
+  { ref_skeleton : type_expr;
+    ref_view : refinement_binder;
+    ref_pred : refinement_expression;
   }
 
 (** This is used in the Typedtree. It is distinct from
@@ -614,6 +626,12 @@ module Refinement : sig
 
   val free_bound_identifiers : t -> Ident.Set.t
 
+  val fold_types : ('a -> type_expr -> 'a) -> 'a -> t -> 'a
+  val iter_types : (type_expr -> unit) -> t -> unit
+  val map_types : (type_expr -> type_expr) -> t -> t
+  (** Traverse every node and binder annotation.  Paths and binder identities
+      are deliberately unchanged; W5 supplies import/path substitution. *)
+
   val subst : id:Ident.t -> by:t -> t -> t
   (** Capture-avoiding substitution of a bound value identifier. *)
 
@@ -621,14 +639,27 @@ module Refinement : sig
   (** Unconditionally freshen every binder and its bound occurrences. *)
 
   val alpha_equal :
-    equal_type:(type_expr -> type_expr -> bool) -> t -> t -> bool
+    equal_type:(type_expr -> type_expr -> bool) ->
+    ?binders:(refinement_binder * refinement_binder) list ->
+    t ->
+    t ->
+    bool
   (** Structural equality modulo threaded binder pairs. *)
+
+  val equal_desc :
+    equal_type:(type_expr -> type_expr -> bool) ->
+    refinement_desc ->
+    refinement_desc ->
+    bool
+  (** Rigid descriptor equality, including skeleton, view binder, and
+      alpha-equivalent predicate. *)
 
   val print : Format.formatter -> t -> unit
 
   val validate :
     equal_type:(type_expr -> type_expr -> bool) ->
     bool_type:type_expr ->
+    ?binders:refinement_binder list ->
     t ->
     (unit, validation_error) result
 

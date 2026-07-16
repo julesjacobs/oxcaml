@@ -148,6 +148,7 @@ let rec immediate_subtypes : type_expr -> type_expr list = fun ty ->
          but "better safe than sorry" *)
       immediate_subtypes_object_row [] ty
   | Tquote ty | Tsplice ty | Tquote_eval ty | Tbox ty -> [ty]
+  | Trefine refinement -> [refinement.ref_skeleton]
   | Tlink _ | Tsubst _ -> assert false (* impossible due to Ctype.repr *)
   | Tvar _ | Tunivar _ -> []
   | Tof_kind _ -> []
@@ -430,6 +431,8 @@ let check_type
     | (Tbox(_)            , Sep    )
     | (Tpackage _         , Sep    )
     | (Tof_kind(_)        , Sep    ) -> empty
+    | (Trefine refinement , Sep    ) ->
+        check_type hyps refinement.ref_skeleton Sep
     (* "Deeply separable" case for these same constructors. *)
     | (Tarrow _           , Deepsep)
     | (Ttuple _           , Deepsep)
@@ -446,6 +449,8 @@ let check_type
         let on_subtype context ty =
           context ++ check_type (Hyps.guard hyps) ty Deepsep in
         List.fold_left on_subtype empty tys
+    | (Trefine refinement , Deepsep) ->
+        check_type hyps refinement.ref_skeleton Deepsep
     (* Polymorphic type, and corresponding polymorphic variable.
 
        In theory, [Tpoly] (forall alpha. tau) would add a new variable

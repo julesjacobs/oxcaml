@@ -1076,6 +1076,8 @@ module Base_and_axes = struct
             ty =
           match Types.get_desc ty with
           | Tpoly (ty, _) | Trepr (ty, _) -> check ~relevant_axes t ty
+          | Trefine refinement ->
+            check ~relevant_axes t refinement.ref_skeleton
           | Ttuple _ ->
             if tuple_fuel > 0
             then

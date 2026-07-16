@@ -498,6 +498,8 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
               tree_of_val (depth - 1) obj ty
           | Tpackage _ ->
               Oval_stuff "<module>"
+          | Trefine refinement ->
+              tree_of_val depth obj refinement.ref_skeleton
         end
 
       and tree_of_list depth obj ty_arg =

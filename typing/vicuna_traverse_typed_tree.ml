@@ -153,6 +153,7 @@ let classify env ty : classification =
       raise (Vicuna_unsupported (Other "Unexpected type constructor Trepr"))
     | Tbox _ ->
       raise (Vicuna_unsupported (Other "Unexpected type constructor Tbox"))
+    | Trefine _ -> Any
 
 type can_be_float_array =
   | YesFloatArray
@@ -287,6 +288,12 @@ let rec value_kind env (subst : value_shape Subst.t) ~visited ~depth ty :
     raise (Vicuna_unsupported (Other "Unexpected type constructor Trepr"))
   | Tbox _ ->
     raise (Vicuna_unsupported (Other "Unexpected type constructor Tbox"))
+  | Trefine refinement ->
+    if cannot_proceed ()
+    then Value
+    else
+      let visited = Numbers.Int.Set.add (get_id ty) visited in
+      value_kind env subst ~visited ~depth refinement.ref_skeleton
   | Tpackage _ -> Block None
 
 and value_kind_variant env subst ~visited ~depth

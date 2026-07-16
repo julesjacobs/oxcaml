@@ -2871,6 +2871,11 @@ let type_for_annotation ~env ~loc typ =
               tpt_type = Mty_ident pack_path;
               tpt_txt = mkloc (Untypeast.lident_of_path pack_path) loc
             }
+        | Trefine _ ->
+          fatal_errorf
+            "Translquote [at %a]:@ Refinement types are not supported in \
+             quoted higher-rank function types"
+            Location.print_loc_in_lowercase loc
         | Tlink _ | Tsubst _ | Tfield _ | Tnil ->
           fatal_errorf
             "Translquote [at %a]:@ Unexpected type expression@ in a quoted \

@@ -187,6 +187,7 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
+  | Trefine of refinement_desc
 
 (* Keep this constructor list mechanically aligned with the supported subset
    of [Typedtree.expression_desc].  The payload differences are exactly the
@@ -246,6 +247,12 @@ and refinement_constructor =
 and refinement_field =
   { rfield_type_path : Path.t;
     rfield_name : string;
+  }
+
+and refinement_desc =
+  { ref_skeleton : type_expr;
+    ref_view : refinement_binder;
+    ref_pred : refinement_expression;
   }
 
 and arg_label =
@@ -1407,6 +1414,79 @@ module Refinement = struct
   let create ~loc ~type_ rexp_desc =
     { rexp_desc; rexp_type = type_; rexp_loc = loc }
 
+  let fold_types f init expression =
+    let fold_binder init binder = f init binder.rb_type in
+    let rec loop init expression =
+      let init = f init expression.rexp_type in
+      match expression.rexp_desc with
+      | Rexp_ident _ | Rexp_constant _ -> init
+      | Rexp_let (bindings, body) ->
+        let init =
+          List.fold_left
+            (fun init binding ->
+              let init = fold_binder init binding.rbind_binder in
+              loop init binding.rbind_expr)
+            init bindings
+        in
+        loop init body
+      | Rexp_function { param; body; arg_label = _ } ->
+        loop (fold_binder init param) body
+      | Rexp_apply (function_, arguments) ->
+        List.fold_left
+          (fun init (_, argument) -> loop init argument)
+          (loop init function_) arguments
+      | Rexp_tuple fields ->
+        List.fold_left (fun init (_, field) -> loop init field) init fields
+      | Rexp_construct (_, arguments) ->
+        List.fold_left loop init arguments
+      | Rexp_field (record, _) -> loop init record
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        let init = loop init condition in
+        let init = loop init ifso in
+        Option.fold ~none:init ~some:(loop init) ifnot
+    in
+    loop init expression
+
+  let iter_types f expression =
+    fold_types (fun () type_ -> f type_) () expression
+
+  let map_types f expression =
+    let map_binder binder = { binder with rb_type = f binder.rb_type } in
+    let rec map expression =
+      let rexp_desc =
+        match expression.rexp_desc with
+        | (Rexp_ident _ | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          Rexp_let
+            ( List.map
+                (fun binding ->
+                  { rbind_binder = map_binder binding.rbind_binder;
+                    rbind_expr = map binding.rbind_expr;
+                  })
+                bindings,
+              map body )
+        | Rexp_function { arg_label; param; body } ->
+          Rexp_function
+            { arg_label; param = map_binder param; body = map body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            (map function_,
+             List.map
+               (fun (label, argument) -> label, map argument)
+               arguments)
+        | Rexp_tuple fields ->
+          Rexp_tuple (List.map (fun (label, field) -> label, map field) fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct (constructor, List.map map arguments)
+        | Rexp_field (record, field) -> Rexp_field (map record, field)
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse
+            (map condition, map ifso, Option.map map ifnot)
+      in
+      { expression with rexp_desc; rexp_type = f expression.rexp_type }
+    in
+    map expression
+
   let free_bound_identifiers expression =
     let rec loop bound free expression =
       match expression.rexp_desc with
@@ -1633,7 +1713,7 @@ module Refinement = struct
       String.equal left right && left_delimiter = right_delimiter
     | _ -> left = right
 
-  let alpha_equal ~equal_type left right =
+  let alpha_equal ~equal_type ?(binders = []) left right =
     let paired pairs left right =
       match
         List.find_opt (fun (id, _) -> Ident.same id left) pairs,
@@ -1734,7 +1814,24 @@ module Refinement = struct
           _ ) ->
         false
     in
-    equal [] left right
+    let rec add_binders pairs = function
+      | [] -> Some pairs
+      | (left, right) :: rest ->
+        if equal_type left.rb_type right.rb_type
+        then add_binders ((left.rb_id, right.rb_id) :: pairs) rest
+        else None
+    in
+    Option.fold
+      ~none:false
+      ~some:(fun pairs -> equal pairs left right)
+      (add_binders [] binders)
+
+  let equal_desc ~equal_type left right =
+    equal_type left.ref_skeleton right.ref_skeleton
+    && alpha_equal
+         ~equal_type
+         ~binders:[left.ref_view, right.ref_view]
+         left.ref_pred right.ref_pred
 
   let print_constant ppf = function
     | Const_int value -> Format.fprintf ppf "%d" value
@@ -1836,7 +1933,7 @@ module Refinement = struct
 
   exception Invalid of validation_error
 
-  let validate ~equal_type ~bool_type expression =
+  let validate ~equal_type ~bool_type ?(binders = []) expression =
     let invalid error = raise (Invalid error) in
     let same_type left right = equal_type left right in
     let strip_mono type_ =
@@ -1973,7 +2070,13 @@ module Refinement = struct
     try
       if not (same_type expression.rexp_type bool_type)
       then invalid Root_type_mismatch;
-      ignore (loop Ident.Map.empty Ident.Set.empty expression : Ident.Set.t);
+      let bound, seen =
+        List.fold_left
+          (fun (bound, seen) binder -> add_binder bound seen binder)
+          (Ident.Map.empty, Ident.Set.empty)
+          binders
+      in
+      ignore (loop bound seen expression : Ident.Set.t);
       Ok ()
     with Invalid error -> Error error
 
@@ -2051,6 +2154,7 @@ let best_effort_compare_type_expr te1 te2 =
         | Tsplice _
         | Tquote_eval _
         | Tbox _
+        | Trefine _
         (* CR layouts v2.8: we can actually see Tsubst here in certain cases, eg during
            [Ctype.copy] when copying the types inside of with_bounds. We also can't
            compare Tsubst structurally, because the Tsubsts that are created in

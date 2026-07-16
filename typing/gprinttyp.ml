@@ -764,6 +764,17 @@ module Digraph = struct
         mk "[Kind]"
     | Types.Tbox t ->
         mk "[Box]" |> std_edge t
+    | Types.Trefine refinement ->
+        let predicate_types =
+          Types.Refinement.fold_types
+            (fun types type_ -> type_ :: types)
+            [] refinement.ref_pred
+          |> List.rev
+        in
+        mk "[Refine %a]" Types.Refinement.print refinement.ref_pred
+        |> edge (labelr "skeleton") refinement.ref_skeleton
+        |> edge (labelr "view") refinement.ref_view.rb_type
+        |> numbered predicate_types
   and variant params id0 (elts,main,fields) (name,rf)  =
     let id = Index.subnode ~name id0 in
     let fnode = Node id in

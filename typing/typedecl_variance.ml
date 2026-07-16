@@ -97,6 +97,13 @@ let compute_variance env visited vari ty =
         compute_variance_rec (Env.enter_quotation env) vari ty
     | Tbox ty ->
         compute_same ty
+    | Trefine refinement ->
+        let invariant = Variance.(compose vari full) in
+        compute_variance_rec env invariant refinement.ref_skeleton;
+        compute_variance_rec env invariant refinement.ref_view.rb_type;
+        Refinement.iter_types
+          (compute_variance_rec env invariant)
+          refinement.ref_pred
     | Tfield (_, _, ty1, ty2) ->
         compute_same ty1;
         compute_same ty2

@@ -378,6 +378,10 @@ let fold_type_expr f init ty =
     List.fold_left (fun result (_n, ty) -> f result ty) init pack.pack_cstrs
   | Tof_kind _ -> init
   | Tbox ty -> f init ty
+  | Trefine refinement ->
+    let result = f init refinement.ref_skeleton in
+    let result = f result refinement.ref_view.rb_type in
+    Refinement.fold_types f result refinement.ref_pred
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
@@ -621,6 +625,19 @@ let rec copy_type_desc ?(keep_names=false) f = function
         pack_cstrs = List.map (fun (n, ty) -> (n, f ty)) pack.pack_cstrs}
   | Tof_kind jk -> Tof_kind jk
   | Tbox ty -> Tbox (f ty)
+  | Trefine refinement ->
+    (* Copy every type annotation through the same graph copier, but preserve
+       refinement binder stamps.  Import-time freshening belongs to Subst in
+       W5; changing stamps during ordinary instance/copy would break bound
+       occurrences shared by the predicate. *)
+    Trefine
+      { ref_skeleton = f refinement.ref_skeleton;
+        ref_view =
+          { refinement.ref_view with
+            rb_type = f refinement.ref_view.rb_type
+          };
+        ref_pred = Refinement.map_types f refinement.ref_pred;
+      }
 
 (* TODO: rename to [module Copy_scope] *)
 module For_copy : sig
