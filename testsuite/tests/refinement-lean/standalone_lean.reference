@@ -2,3 +2,4 @@ fact environment: by-value scope filtering
 escaped goal: rejected
 Lean emission: byte-identical
 real Lean subprocess cases: completed or skipped
+reference identity and quantifier guards: checked

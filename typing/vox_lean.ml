@@ -72,7 +72,7 @@ type data_instance =
   }
 
 type reference =
-  { reference_key : string;
+  { reference_head : refinement_reference;
     reference_name : string;
     reference_sort : sort;
   }
@@ -257,46 +257,75 @@ let reference_basename = function
   | Rfun name | Rsibling name -> name
   | Rapp path | Rglobal path -> Path.last path
 
-let builtin_name reference =
-  match String.lowercase_ascii (reference_basename reference) with
-  | "=" | "eq" | "equal" | "eq_int" | "eq_bool" -> Some `Equal
-  | "<>" | "neq" | "not_equal" | "neq_int" | "neq_bool" ->
-    Some `Not_equal
-  | "<" | "lt" | "lt_int" | "int_lt" -> Some `Less
-  | "<=" | "le" | "le_int" | "int_le" -> Some `Less_equal
-  | ">" | "gt" | "gt_int" | "int_gt" -> Some `Greater
-  | ">=" | "ge" | "ge_int" | "int_ge" -> Some `Greater_equal
-  | "+" | "add" | "add_int" | "int_add" -> Some `Add
-  | "-" | "sub" | "sub_int" | "int_sub" -> Some `Subtract
-  | "*" | "mul" | "mul_int" | "int_mul" -> Some `Multiply
-  | "&&" | "and" | "and_bool" -> Some `And
-  | "||" | "or" | "or_bool" -> Some `Or
-  | "not" | "not_bool" -> Some `Not
-  | "implies" | "imply" -> Some `Implies
+let primitive_builtin = function
+  | "%equal" -> Some `Equal
+  | "%notequal" -> Some `Not_equal
+  | "%lessthan" -> Some `Less
+  | "%lessequal" -> Some `Less_equal
+  | "%greaterthan" -> Some `Greater
+  | "%greaterequal" -> Some `Greater_equal
+  | "%addint" -> Some `Add
+  | "%subint" -> Some `Subtract
+  | "%mulint" -> Some `Multiply
+  | "%sequand" -> Some `And
+  | "%sequor" -> Some `Or
+  | "%boolnot" -> Some `Not
   | _ -> None
 
-let reference_key = function
-  | Rfun name -> "fun:" ^ name
-  | Rsibling name -> "sibling:" ^ name
-  | Rapp path -> "app:" ^ Path.name path
-  | Rglobal path -> "global:" ^ Path.name path
+let builtin_name context = function
+  | (Rfun _ | Rsibling _) -> None
+  | (Rapp path | Rglobal path) ->
+    begin
+      match
+        Subst.Lazy.force_value_description (Env.find_value path context.env)
+      with
+      | { val_kind = Val_prim primitive; _ } ->
+        primitive_builtin primitive.prim_name
+      | _ -> None
+      | exception Not_found -> None
+    end
+
+let same_reference left right =
+  match left, right with
+  | Rfun left, Rfun right | Rsibling left, Rsibling right ->
+    String.equal left right
+  | Rapp left, Rapp right | Rglobal left, Rglobal right ->
+    Path.same left right
+  | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
+
+let quantifier_name = function
+  | Rfun name | Rsibling name ->
+    String.equal name "forall_" || String.equal name "exists_"
+  | Rapp path | Rglobal path ->
+    let name = Path.last path in
+    String.equal name "forall_" || String.equal name "exists_"
+
+let reference_description = function
+  | Rfun name -> "function " ^ name
+  | Rsibling name -> "sibling " ^ name
+  | Rapp path -> "application " ^ Path.name path
+  | Rglobal path -> "value " ^ Path.name path
 
 let note_reference context expression reference =
-  match builtin_name reference with
+  if quantifier_name reference then
+    error expression.rexp_loc
+      "quantifier combinator %s is not supported in refinements"
+      (reference_basename reference);
+  match builtin_name context reference with
   | Some _ -> ()
   | None ->
-    let key = reference_key reference in
     let sort = sort_of_type context expression.rexp_loc expression.rexp_type in
     begin
       match
         List.find_opt
-          (fun existing -> String.equal existing.reference_key key)
+          (fun existing -> same_reference existing.reference_head reference)
           context.references
       with
       | None ->
+        let index = List.length context.references in
         context.references <-
-          { reference_key = key;
-            reference_name = "VoxRef_" ^ digest key;
+          { reference_head = reference;
+            reference_name = "VoxRef_" ^ string_of_int index;
             reference_sort = sort;
           }
           :: context.references
@@ -304,7 +333,8 @@ let note_reference context expression reference =
         if not (String.equal (sort_key existing.reference_sort) (sort_key sort))
         then
           error expression.rexp_loc
-            "reference %s is used at inconsistent types" key
+            "reference %s is used at inconsistent types"
+            (reference_description reference)
     end
 
 let rec iter_expression function_ expression =
@@ -502,14 +532,15 @@ let record_field location data name =
     end
 
 let reference context location reference =
-  let key = reference_key reference in
   match
     List.find_opt
-      (fun reference -> String.equal reference.reference_key key)
+      (fun existing -> same_reference existing.reference_head reference)
       context.references
   with
   | Some reference -> reference
-  | None -> error location "internal error: missing Lean reference %s" key
+  | None ->
+    error location "internal error: missing Lean reference %s"
+      (reference_description reference)
 
 let emit_expression context variables expression =
   let local_counter = ref 0 in
@@ -540,7 +571,7 @@ let emit_expression context variables expression =
         end
       | Rexp_ident (Rfree reference_identifier) ->
         begin
-          match builtin_name reference_identifier with
+          match builtin_name context reference_identifier with
           | Some _ ->
             error expression.rexp_loc
               "builtin %s must be fully applied"
@@ -609,12 +640,12 @@ let emit_expression context variables expression =
       | Rexp_apply
           ( { rexp_desc = Rexp_ident (Rfree reference_identifier); _ },
             arguments )
-        when Option.is_some (builtin_name reference_identifier) ->
+        when Option.is_some (builtin_name context reference_identifier) ->
         let arguments =
           List.map (fun (_, argument) -> emit locals argument) arguments
         in
         emit_builtin expression.rexp_loc
-          (Option.get (builtin_name reference_identifier)) arguments
+          (Option.get (builtin_name context reference_identifier)) arguments
       | Rexp_apply (function_expression, arguments) ->
         let function_term, function_sort = emit locals function_expression in
         let arguments =
@@ -761,7 +792,7 @@ let emit_internal ~negated ~env (vc : Vox_vc.t) =
     context.data
   |> List.iter (emit_data context buffer);
   List.sort
-    (fun left right -> String.compare left.reference_key right.reference_key)
+    (fun left right -> String.compare left.reference_name right.reference_name)
     context.references
   |> List.iter (fun reference ->
     Buffer.add_string buffer
@@ -822,7 +853,9 @@ let resolve_lean ?lean () =
         | Some lean -> [lean]
         | None -> []
       in
-      from_environment @ ["lean"; pinned_lean]
+      (* The pinned compiler is part of the toolchain.  Prefer it to an
+         unrelated PATH wrapper (which may itself require network access). *)
+      from_environment @ [pinned_lean; "lean"]
   in
   List.find_opt command_exists candidates
 

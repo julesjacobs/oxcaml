@@ -20,7 +20,7 @@
    annotation [(x : int{ _ = 7 })] is proved from the fact [x = 7]
    recorded at the inner binder. The outer result just forwards it at
    the skeleton.
-   FINAL: accepts. TODAY: rejected at the inner introduction. *)
+   FINAL and TODAY: accepts. *)
 let scope_fact_in_scope () =
   let outer =
     let x = (7 : int{ _ = 7 }) in
@@ -31,14 +31,13 @@ let scope_fact_in_scope () =
 val scope_fact_in_scope : unit -> int = <fun>
 |}]
 
-(* @acc id=scope_fact_dropped final=REJECT today=ACCEPT stable=no unlocks=integration+verification
+(* @acc id=scope_fact_dropped final=REJECT today=REJECT stable=no unlocks=integration+verification
    A fact goes OUT OF SCOPE: [x = 7] holds only inside the inner let.
    Once [r] escapes, the fact mentioning [x] is dropped, so the
    obligation [r = 7] is NOT provable (dropping only weakens; it
    never lets an unprovable condition through).
    FINAL: rejected with a verification error (unprovable VC).
-   TODAY: rejected at the inner introduction -- same outcome, message
-   tightens to a VC failure. *)
+   TODAY: rejected with the final verification error. *)
 let scope_fact_dropped () =
   let r =
     let x = (7 : int{ _ = 7 }) in
@@ -46,14 +45,17 @@ let scope_fact_dropped () =
   in
   (r : int{ _ = 7 })
 [%%expect {|
-val scope_fact_dropped : unit -> int{ (app[Stdlib!.=] _ 7) } = <fun>
+Line 6, characters 2-20:
+6 |   (r : int{ _ = 7 })
+      ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
 |}]
 
 (* @acc id=mut_binder_exempt final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    A mutable refined binder: the initializer obligation ([1 = 1]) is
    discharged, but the binder contributes NO persistent fact. Merely
    declaring and reading it is fine.
-   FINAL: accepts. TODAY: rejected at the initializer. *)
+   FINAL and TODAY: accepts. *)
 let mut_binder_exempt () =
   let mutable x : int{ _ = 1 } = 1 in
   x
@@ -71,10 +73,8 @@ val mut_binder_exempt : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
    refinement must not survive. Re-imposing [int{ _ = 1 }] after the
    write must fail -- the fact is havocked on assignment, so there is
    no standing [x = 1] to discharge it.
-   FINAL: rejected with a verification error.
-   TODAY: rejected at the initializer -- same outcome, message
-   tightens. (This case is the guard against a mutable fact
-   surviving an assignment.) *)
+   FINAL and TODAY: rejected. This case guards against a mutable fact
+   surviving an assignment. *)
 let mut_no_persistent_fact () =
   let mutable x : int{ _ = 1 } = 1 in
   x <- 2;

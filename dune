@@ -247,6 +247,7 @@
   includecore
   type_shape
   tast_iterator
+  vox_verify
   tast_mapper
   signature_group
   cmt_format

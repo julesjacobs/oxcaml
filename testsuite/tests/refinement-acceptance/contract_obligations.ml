@@ -25,20 +25,22 @@ val c_eq1 : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
 (* @acc id=co_provable final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    Provable argument to a refined parameter: [1 = 1].
    FINAL: accepts (contract VC [1 = 1] discharged).
-   TODAY: rejected -- bare [1] rigidly clashes with the refined domain. *)
+   TODAY: accepts via contract verification. *)
 let co_provable = c_eq1 1
 [%%expect {|
 val co_provable : int = 1
 |}]
 
-(* @acc id=co_unprovable final=REJECT today=ACCEPT stable=no unlocks=integration+verification
+(* @acc id=co_unprovable final=REJECT today=REJECT stable=no unlocks=integration+verification
    Unprovable argument: [2 = 1] is false.
    FINAL: rejected with a clean contract-VERIFICATION error.
-   TODAY: rejected with a rigid type-clash error -- same outcome, the
-   message tightens to a VC failure when verification lands. *)
+   TODAY: rejected with the final verification error. *)
 let co_unprovable = c_eq1 2
 [%%expect {|
-val co_unprovable : int = 2
+Line 1, characters 26-27:
+1 | let co_unprovable = c_eq1 2
+                              ^
+Error: Refinement verification failed (disproved)
 |}]
 
 (* @acc id=co_dependent final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
@@ -47,7 +49,7 @@ val co_unprovable : int = 2
    elaborates today (the predicate resolves [n] as a value reference);
    the obligation lives at the call.
    FINAL: [dep 3 3] accepts (VC [3 = 3] discharged).
-   TODAY: rejected at the second argument. *)
+   TODAY: accepts. *)
 let dep (n : int) (a : int{ _ = n }) = a
 [%%expect {|
 val dep : int -> int{ (app[Stdlib!.=] _ global[n/298]) } -> int = <fun>

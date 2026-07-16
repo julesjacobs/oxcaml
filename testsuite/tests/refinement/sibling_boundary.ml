@@ -10,13 +10,11 @@
 (* Positive regression test for the sibling-reference boundary.
 
    A predicate that references a same-signature sibling value
-   ([val g : int{ _ = base }]) lowers to [Rglobal (Pident base)].  Signature
-   equality ([module type of]) and inclusion each independently rename the
-   value component, so the two copies used to carry different stamps for
-   [base] and the predicate heads failed to match.  The fix pairs [Sig_value]
-   identifiers in [includemod]'s component pairing (shared by the inclusion
-   and module-type-equality paths).  Every declaration below must COMPILE;
-   before the fix each failed with a "values do not match" stamp mismatch.
+   ([val g : int{ _ = base }]) lowers to the string-keyed [Rsibling "base"].
+   Signature equality ([module type of]) and inclusion may independently
+   rename the value component without changing that predicate head.  Every
+   declaration below must COMPILE; before sibling production each failed with
+   a "values do not match" stamp mismatch.
 
    [sibling_ref.mli] compiling at all covers the functor-signature variant
    ([module Make : functor (...) -> T], where [T]'s predicate names a sibling
