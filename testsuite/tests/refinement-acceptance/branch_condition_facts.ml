@@ -11,9 +11,15 @@
 (* (in the else-branch) as branch-local facts, so an obligation    *)
 (* guarded by the test discharges -- and this must hold for an     *)
 (* ordinary [if] that carries no refinement mark of its own, which *)
-(* is the common [if guard then use-needing-guard] idiom.          *)
-(*                                                                 *)
-(* Marker legend: see binder_facts.ml.                             *)
+(* is the common [if guard then use-needing-guard] idiom.         *)
+(*                                                                *)
+(* The condition fact flows only for a TOTAL/PURE condition (the  *)
+(* Q-003 purity gate): a condition that applies an impure/opaque  *)
+(* function records no fact, so a fact about one evaluation       *)
+(* cannot discharge an obligation about a different one           *)
+(* (bcf_impure_condition).                                        *)
+(*                                                                *)
+(* Marker legend: see binder_facts.ml.                            *)
 (* ============================================================= *)
 
 let needs_pos (x : int{ _ > 0 }) = x
@@ -54,4 +60,25 @@ Error: Refinement verification failed (not-proved)
 let bcf_marked_if (y : int) = (if y > 0 then y else 1 : int{ _ > 0 })
 [%%expect {|
 val bcf_marked_if : int -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+|}]
+
+(* An opaque, effectful helper for the purity-gate control below. *)
+let bad () = read_int ()
+[%%expect {|
+val bad : unit -> int = <fun>
+|}]
+
+(* @acc id=bcf_impure_condition final=REJECT today=REJECT stable=yes unlocks=verification
+   PURITY GATE (Q-003): a branch condition that applies an impure/opaque
+   function records NO fact, because a fact about one evaluation of [bad ()]
+   must not discharge an obligation about a different evaluation.  So the
+   guarded annotation stays unprovable and rejects.  Without the gate this
+   accepted, although [bad ()] may return a different value at the two calls --
+   a magic-free unsoundness. *)
+let bcf_impure_condition () = if bad () > 0 then needs_pos (bad ()) else 0
+[%%expect {|
+Line 1, characters 59-67:
+1 | let bcf_impure_condition () = if bad () > 0 then needs_pos (bad ()) else 0
+                                                               ^^^^^^^^
+Error: Refinement verification failed (not-proved)
 |}]
