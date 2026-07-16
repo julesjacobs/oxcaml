@@ -50,7 +50,7 @@ val co_unprovable : int = 2
    TODAY: rejected at the second argument. *)
 let dep (n : int) (a : int{ _ = n }) = a
 [%%expect {|
-val dep : int -> int{ (app[Stdlib!.=] _ global[n/297]) } -> int = <fun>
+val dep : int -> int{ (app[Stdlib!.=] _ global[n/298]) } -> int = <fun>
 |}]
 
 let co_dependent = dep 3 3
