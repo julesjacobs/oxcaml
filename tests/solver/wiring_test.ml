@@ -1936,6 +1936,42 @@ let test_skolem_fun_negated_not_skolemized () =
      | Session.Unsat | Session.Unknown -> true)
 ;;
 
+(* PARITY-NOT-DEPTH honeypot for chunk 2b (lead's explicit concern). An [exists] in the
+   ANTECEDENT of a [=>] is SHALLOW (depth 2) but NEGATIVE parity:
+   [(exists y. p x y) => q x] is [forall y. (p x y => q x)], so the antecedent existential
+   is really universal and must NOT become a Skolem FUNCTION. [read_lemma_body] descends
+   into the [=>] CONSEQUENT only; the antecedent is read by [read_term], which rejects the
+   [exists] -> the lemma is dropped (sentinel armed). Here [p a b] and [not (q a)] with
+   the true lemma is UNSAT (x=a: the witness b gives the antecedent, forcing q(a),
+   contradicting not q(a)); dropping the lemma yields a sound [unknown]. NOTE: unlike
+   chunk 2a's GROUND exists, a parity slip here could not produce a wrong verdict anyway —
+   the existential always sits inside a LIVE universal lemma, so every Skolemization
+   direction is a sound-for-unsat weakening/equisat and any [Sat] is degraded to [Unknown]
+   by the live-lemma rule; this guard is conservative hygiene (prefer dropping over
+   emitting a lossy lemma), and the check pins the sound outcome. *)
+let test_skolem_fun_antecedent_exists_not_skolemized () =
+  let s = Session.create () in
+  let text =
+    "(set-logic UFLIA)\n\
+     (declare-fun p (Int Int) Bool)\n\
+     (declare-fun q (Int) Bool)\n\
+     (declare-fun a () Int)\n\
+     (declare-fun b () Int)\n\
+     (assert (p a b))\n\
+     (assert (not (q a)))\n\
+     (assert (forall ((x Int)) (=> (exists ((y Int)) (p x y)) (q x))))\n\
+     (check-sat)\n"
+  in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+  ignore (Loader.assert_all s parsed : bool);
+  check
+    "skolem-fun PARITY: an exists in a => antecedent (shallow but negative) is not \
+     Skolemized (no wrong sat)"
+    (match Session.check_sat s with
+     | Session.Sat -> false
+     | Session.Unsat | Session.Unknown -> true)
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -2622,6 +2658,7 @@ let () =
   test_exists_negated_not_skolemized ();
   test_skolem_fun_under_forall_unsat ();
   test_skolem_fun_negated_not_skolemized ();
+  test_skolem_fun_antecedent_exists_not_skolemized ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   test_ctx_simp_eq_subst_sat ();
