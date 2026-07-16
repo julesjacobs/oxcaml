@@ -298,6 +298,43 @@ Line 1, characters 46-49:
 Error: This value is "partial" but is expected to be "total".
 |}]
 
+(* Statement-position residue inside a late-inferred closure (sequence LHS and
+   discarded local let) must also be rejected: the closure's totality is still
+   an inference variable when the residue is typed and is pinned total only
+   later by use, so the constraint is a submode edge on that variable, never a
+   snapshot. *)
+let _ = let bad () = ((while true do () done); 0) in expects_total bad
+[%%expect{|
+Line 1, characters 67-70:
+1 | let _ = let bad () = ((while true do () done); 0) in expects_total bad
+                                                                       ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = (let _ = while true do () done in 0) in expects_total bad
+[%%expect{|
+Line 1, characters 75-78:
+1 | let _ = let bad () = (let _ = while true do () done in 0) in expects_total bad
+                                                                               ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = (let _ = [| 0 |] in 0) in expects_total bad
+[%%expect{|
+Line 1, characters 61-64:
+1 | let _ = let bad () = (let _ = [| 0 |] in 0) in expects_total bad
+                                                                 ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = (let _ = { immutable_field = 0; mutable_field = 0 } in 0) in expects_total bad
+[%%expect{|
+Line 1, characters 96-99:
+1 | let _ = let bad () = (let _ = { immutable_field = 0; mutable_field = 0 } in 0) in expects_total bad
+                                                                                                    ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
 (* The tail-position row of the residue matrix is covered immediately above.
    The remaining rows require the enclosing closure's live totality variable
    even though the residue's value is discarded. *)
