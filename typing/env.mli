@@ -326,6 +326,10 @@ val walk_locks : env:t -> loc:Location.t -> Longident.t ->
     stateful. *)
 val walk_locks_for_legacy_construct : env:t -> Mode.Hint.pinpoint -> unit
 
+(** Constrains the totality of every enclosing closure to be partial. *)
+val constrain_enclosing_totality_partial :
+  env:t -> Mode.Hint.pinpoint -> unit
+
 val lookup_value:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * value_description * mode_with_locks
@@ -579,9 +583,6 @@ val enter_unbound_module : string -> module_unbound_reason -> t -> t
 
 val add_closure_lock : Mode.Hint.pinpoint
   -> ('l * Mode.allowed) Mode.Value.Comonadic.t -> t -> t
-
-val set_enclosing_totality : Mode.Totality.r option -> t -> t
-val enclosing_totality : t -> Mode.Totality.r option
 
 (** A variant of [add_closure_lock] where the mode of the closure is a constant
 due to the nature of the pinpoint. As a result, the mode is not printed in error
