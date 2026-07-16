@@ -33,7 +33,8 @@ let diophantine_on =
    off, {!Lia.hnf_cut} is never called and no counter is touched, so this whole lane is
    inert. When ON, at an integer-infeasible [Final] that {!Lia.diophantine_conflict} did
    NOT refute, on every [hnf_cut_period]-th such Final a multi-row lattice cut is derived
-   over the asserted equality rows and emitted through the CONTRACT-LEMMA seam as
+   over the tight constraint rows (asserted equalities AND active one-sided bounds) and
+   emitted through the CONTRACT-LEMMA seam as
    [Lemma [(cut, true); ¬antᵢ …]] (z3's assign(cut, core)), tightening the LP toward the
    ring-lattice conflict. A miss (no cut / self-check fail / unmappable antecedent) falls
    back to the B&B branch. *)

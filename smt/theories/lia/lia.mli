@@ -115,11 +115,12 @@ val diophantine_conflict : 'tok t -> 'tok conflict option
 
 (** [hnf_cut t] — after a {!Sat_candidate} whose ℚ-model is non-integral — a Stage B HNF
     integer cut (charter logs/lia-cuts-charter.md, spec logs/lia-cuts-hnf-spec.md) over
-    the asserted integer EQUALITY rows. It surfaces a MULTI-ROW integer-lattice
+    the TIGHT constraint rows (asserted equalities AND active one-sided bounds). It
+    surfaces a MULTI-ROW integer-lattice
     infeasibility that {!diophantine_conflict}'s single-row gcd test cannot see, returned
     as [Some (cut_atom, antecedent_tokens)] for emission through the CONTRACT-LEMMA seam:
     [cut_atom] is the bound atom [f·x <= k] (built through the session {!Context}) and
-    [antecedent_tokens] are the equality rows' premise tokens whose lattice combination
+    [antecedent_tokens] are the tight rows' premise tokens whose lattice combination
     proves it. The caller emits [Lemma [(cut_atom, true); ¬antecedentᵢ …]].
 
     SOUND by a self-checked certificate INDEPENDENT of the HNF kernel: the emitted cut is

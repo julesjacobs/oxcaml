@@ -1225,11 +1225,12 @@ let test_diophantine () =
 ;;
 
 (* ================================================================== *)
-(* Stage B HNF integer cut (Lia.hnf_cut): a MULTI-ROW integer-lattice cut over asserted
-   equalities. The oracle is INDEPENDENT and brute-force: for every cut the producer
-   emits, enumerate the integer box and verify that EVERY point satisfying all the
-   asserted equalities also satisfies the cut [f·x <= k] — i.e. the cut removes no integer
-   solution of the antecedent equalities (validity). This is the mutation-testing tripwire
+(* Stage B HNF integer cut (Lia.hnf_cut): a MULTI-ROW integer-lattice cut over the tight
+   constraint rows (asserted equalities AND active one-sided bound inequalities). The
+   oracle is INDEPENDENT and brute-force: for every cut the producer emits, enumerate the
+   integer box and verify that EVERY point satisfying all the asserted tight constraints
+   also satisfies the cut [f·x <= k] — i.e. the cut removes no integer solution of the
+   antecedent tight constraints (validity). This is the mutation-testing tripwire
    for a corrupt cut (a flipped coefficient / wrong rounding / wrong multiplier that
    produced an UNSOUND cut would exclude a real integer point and fail here). Also checks
    the producer fires on a hand case single-row gcd cannot see, and never emits on
