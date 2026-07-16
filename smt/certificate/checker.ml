@@ -235,9 +235,26 @@ end
 (* ------------------------------------------------------------------ *)
 (* Ordered, hint-restricted RUP (§1.4) for a learned clause. [base] is the closure so far
    (axioms + earlier verified learned clauses); the clause negates its own literals. Each
-   antecedent, IN ORDER, must be unit (propagate its one free literal) or falsified
-   (conflict — success). A cited clause that is satisfied, or has >=2 free literals,
-   breaks the chain: reject, never search.
+   antecedent, IN ORDER, must be unit (propagate its one free literal), falsified
+   (conflict — success), or ALREADY SATISFIED (a no-op — SKIP it and continue). A cited
+   clause with >=2 free literals breaks the chain: reject, never search.
+
+   SATISFIED-HINT SKIP (fix task #42): a hint whose clause is already satisfied under the
+   accumulated assignment forces nothing — its lone would-be unit role is void because a
+   satisfied clause propagates no literal. Skipping it removes NO inference and is exactly
+   equivalent to the emitter having omitted that antecedent from the chain; the derivation
+   the remaining hints produce is unchanged. This accepts NON-MINIMAL (but still ordered)
+   antecedent chains, which the LIA-heavy emitter produces: theory-propagated literals
+   carry lazy explain reasons that overlap the Boolean resolution chain, so analyze
+   records an antecedent whose unit literal an earlier antecedent already delivered. This
+   is the standard drat-trim-style treatment of satisfied antecedents (no-ops), and it
+   does NOT relax soundness: the skip fires ONLY on a hint that [validate_id] has already
+   resolved to a real, already-verified content clause (never a forged / dangling /
+   unverified / ambiguous id), and the "refuses to search" contract is untouched for the
+   unit / >=2-free / falsified cases. A chain that ends without a conflict (e.g. every
+   hint merely satisfied) still fails with "RUP chain consumed without deriving a
+   conflict". Emitting minimal reverse-propagation-ordered chains (fix shape (b),
+   emitter-side) remains the faithful long-term option; see ADR-0013 appendix.
 
    [learned_verified id] gates a [Klearned] hint: it resolves ONLY if that learned clause
    has ALREADY been verified (a lower emission index). This enforces the LRAT
@@ -305,10 +322,10 @@ let ordered_rup base ~clause ~antecedents ~resolve ~learned_verified =
                hint;
              if !satisfied
              then
-               Error
-                 (Printf.sprintf
-                    "hint %d is already satisfied, not unit (chain is not ordered-RUP)"
-                    id)
+               (* Satisfied hint: forces nothing, skip it (fix task #42). Equivalent to
+                  the emitter having omitted this antecedent; removes no inference. If the
+                  chain ends here without a conflict, [go []] still fails below. *)
+               go rest
              else (
                match !unassigned with
                | [] -> Ok () (* falsified: conflict reached *)

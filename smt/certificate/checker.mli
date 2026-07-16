@@ -21,6 +21,21 @@
       {e ordered, hint-restricted} RUP over its recorded antecedents [rₙ..r₁; conflict] —
       each cited clause must be unit (or falsified) at its turn; the checker never
       SEARCHES for a propagation. A dropped, permuted, or wrong-set hint chain fails.
+
+    {b ADR-0013 appendix (satisfied-hint skip, task #42).} A cited clause that is already
+    SATISFIED at its turn is a no-op and is SKIPPED, not rejected — the checker accepts
+    NON-MINIMAL (but still ordered) hint chains. Soundness: a satisfied clause forces no
+    literal, so skipping it removes no inference and is exactly equivalent to the emitter
+    having omitted that antecedent; the derivation the remaining hints close is unchanged,
+    and a chain that ends without a conflict still fails. This is the standard
+    drat-trim-style treatment of satisfied antecedents. It is needed because the LIA-heavy
+    analyze records antecedents whose unit literal an earlier antecedent already delivered
+    (theory-propagated literals' lazy explain reasons overlap the Boolean resolution
+    chain). The skip fires ONLY on an id the kind-keyed resolver already accepted (never a
+    dangling / ambiguous / wrong-kind / unverified-learned id), and the "never SEARCHES"
+    contract is untouched for the unit / ≥2-free cases. Emitting minimal
+    reverse-propagation-ordered chains (emitter-side, fix shape (b)) remains the faithful
+    long-term option, deferred.
     - {b Theory leaves = accepted axioms AT THIS STAGE (§1.5, deferred witness).} A
       [Reason] / [Conflict] theory clause is a leaf shell taken as a valid axiom here —
       its EUF/LIA witness (proof tree / Farkas multipliers) is a later leaf-checking

@@ -505,6 +505,57 @@ let empty_query_input_ok : Checker.events =
   }
 ;;
 
+(* task #42 SATISFIED-HINT SKIP — the rings id-162 pattern reproduced by hand: a redundant
+   antecedent whose satisfying literal an EARLIER antecedent already forced sits
+   MID-chain. Negate learned [b] → b:=false; 10=[a∨b] forces a; 11=[¬a∨c] forces c;
+   12=[¬a∨c] is now SATISFIED (c true) → SKIP; 13=[¬a∨¬c] is falsified → conflict. Pre-fix
+   the checker ERRORED on the satisfied hint 12 (INVALID); post-fix it skips it and the
+   chain still closes on 13. VALID — the exact positive the fix unblocks. *)
+let id162_satisfied_skip : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]
+      ; mk_input 11 [| na_; c_ |]
+      ; mk_input 12 [| na_; c_ |]
+      ; mk_input 13 [| na_; nc_ |]
+      ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12; 13 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #42 negative (i): a mid-chain hint that is NEITHER unit NOR satisfied (2 free
+   literals) still ERRORS — the skip is narrow and the "refuses to search" contract stands
+   for the non-satisfied cases. Negate [b] → b:=false; 10 forces a; 11=[c∨d] then has BOTH
+   literals free → reject, never search. *)
+let neither_unit_nor_satisfied : Checker.events =
+  let d_ = Sat.pos 3 in
+  { Checker.inputs = [ mk_input 10 [| a_; b_ |]; mk_input 11 [| c_; d_ |] ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10; 11 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #42 negative (ii): remove the load-bearing final hint (13) from the id-162 chain —
+   the remaining hints derive NO conflict. Skipping the satisfied 12 must NOT launder an
+   incomplete chain to valid: the chain is consumed without a conflict → ERROR. Proves the
+   conflict-derivation requirement survives the skip. *)
+let satisfied_but_no_conflict : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; c_ |] ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 
 let () =
@@ -573,7 +624,9 @@ let () =
     (handbuilt ~learned_ants:[ 11; 10; 12 ] ());
   (* wrong antecedent SET:
      {10 ,11,11}
-     (12 replaced by a duplicate) -> the second 11 is already satisfied, not unit. *)
+     (12 replaced by a duplicate). The second 11 is satisfied (c already forced), so it is
+     SKIPPED (task #42); with the load-bearing 12 gone the chain is consumed without a
+     conflict -> INVALID. *)
   expect
     "corrupt: wrong antecedent set -> INVALID"
     `Invalid
@@ -643,6 +696,22 @@ let () =
     "positive: empty QUERY input stays legitimately unsat (E1) -> VALID"
     `Valid
     empty_query_input_ok;
+  (* task #42 satisfied-hint SKIP: the rings id-162 pattern (redundant satisfied hint
+     mid-chain) now REPLAYS, and the two narrow-guard negatives (a hint neither unit nor
+     satisfied still errors; skipping a satisfied hint does not launder a chain that
+     derives no conflict). *)
+  expect
+    "positive: id-162 satisfied hint mid-chain skipped -> VALID"
+    `Valid
+    id162_satisfied_skip;
+  expect
+    "corrupt: hint neither unit nor satisfied (2 free) -> INVALID"
+    `Invalid
+    neither_unit_nor_satisfied;
+  expect
+    "corrupt: satisfied hint but chain derives no conflict -> INVALID"
+    `Invalid
+    satisfied_but_no_conflict;
   (* H4 (codex, HIGH->CRITICAL): ambiguous content id admitted to the DB (never cited) ->
      a SAT query VALID. Must be rejected at stream admission. Also the M6 clean
      discriminator of the #153a ambiguity guard (only ambiguity triggers). *)
