@@ -176,8 +176,7 @@ type stage_lock =
 type lock =
   | Const_closure_lock of bool * Mode.Hint.pinpoint *
       Mode.Value.Comonadic.Const.t
-  | Closure_lock of Mode.Hint.pinpoint * Mode.Value.Comonadic.r *
-      Mode.Ghostness.r option
+  | Closure_lock of Mode.Hint.pinpoint * Mode.Value.Comonadic.r
   | Region_lock
   | Exclave_lock
   | Unboxed_lock (* to prevent capture of terms with non-value types *)
@@ -1241,7 +1240,7 @@ let mode_unit ~staticity =
       portability = Nonportable;
       contention = Uncontended;
       totality = Partial;
-      ghostness = Program;
+      logicality = Physical;
       forkable = Forkable;
       yielding = Unyielding;
       statefulness = Stateful;
@@ -3137,11 +3136,9 @@ let add_const_closure_lock ?(ghost = false) closure_context comonadic env =
   let lock = Const_closure_lock (ghost, closure_context, comonadic) in
   add_lock lock env
 
-let add_closure_lock ?ghostness closure_context comonadic env =
+let add_closure_lock closure_context comonadic env =
   let lock = Closure_lock
-    ( closure_context,
-      Mode.Value.Comonadic.disallow_left comonadic,
-      Option.map Mode.Ghostness.disallow_left ghostness )
+    (closure_context, Mode.Value.Comonadic.disallow_left comonadic)
   in
   add_lock lock env
 
@@ -3737,8 +3734,8 @@ let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
       path, (mode, locks), a
     end
 
-let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0
-    ghostness0 =
+let closure_mode pp ({Mode.monadic; comonadic} : Mode.Value.l)
+    closure_context comonadic0 =
   let hint_comonadic : _ Mode.Hint.morph =
     Is_closed_by (Comonadic, {closure = closure_context; closed = pp})
   in
@@ -3752,12 +3749,6 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0
       [ monadic;
         Mode.Value.comonadic_to_monadic_min ~hint:hint_monadic comonadic0 ]
   in
-  Option.iter
-    (fun ghostness0 ->
-       Mode.Ghostness.submode_err pp
-         (Mode.Value.Monadic.proj Ghostness monadic)
-         ghostness0)
-    ghostness0;
   {Mode.monadic; comonadic}
 
 let const_closure_mode pp {Mode.monadic; comonadic}
@@ -3820,8 +3811,8 @@ let walk_locks ~errors ~env ~pp mode ty_and_lid locks =
       | Region_lock -> region_mode vmode
       | Const_closure_lock (_, closure_context, comonadic) ->
           const_closure_mode pp vmode closure_context comonadic
-      | Closure_lock (closure_context, comonadic, ghostness) ->
-          closure_mode pp vmode closure_context comonadic ghostness
+      | Closure_lock (closure_context, comonadic) ->
+          closure_mode pp vmode closure_context comonadic
       | Exclave_lock ->
           exclave_mode ~errors ~env ~pp vmode
       | Unboxed_lock ->
@@ -3841,6 +3832,22 @@ let walk_locks_for_legacy_construct ~env pp =
     (walk_locks ~errors:true ~env ~pp
        (Mode.Value.disallow_right Mode.Value.legacy) None locks
       : Mode.Value.l)
+
+let constrain_enclosing_totality_at_least ~env pp totality =
+  let locks = IdTbl.get_all_locks env.values in
+  let _stage_locks, locks = partition_locks locks in
+  List.iter
+    (function
+      | Closure_lock (_, comonadic) ->
+        Mode.Totality.submode_err pp
+          totality
+          (Mode.Value.Comonadic.proj Mode.Axis.Totality comonadic)
+      | Const_closure_lock _ | Region_lock | Exclave_lock | Unboxed_lock -> ())
+    locks
+
+let constrain_enclosing_totality_partial ~env pp =
+  constrain_enclosing_totality_at_least ~env pp
+    (Mode.Totality.of_const Mode.Totality.Const.Partial)
 
 (** Takes [m0] which is the parameter of [let mutable x] at declaration site,
   and [locks] which is the locks between the declaration and the usage (either
@@ -3873,7 +3880,8 @@ let walk_locks_for_mutable_mode ~errors ~loc ~env locks m0 =
           mode |> Mode.value_to_alloc_r2l |> Mode.alloc_as_value
       | Const_closure_lock (true, _, _) ->
           mode
-      | Const_closure_lock (false, pp, _) | Closure_lock (pp, _, _) ->
+      | Const_closure_lock (false, pp, _)
+      | Closure_lock (pp, _) ->
           may_lookup_error errors loc env
             (Mutable_value_used_in_closure pp)
       | Unboxed_lock -> mode

@@ -22,11 +22,11 @@ type t
           stateless
           total
           immutable
+          logical
           portable
           contended
           local
           unique
-          program
           static
           internal
 |}]
@@ -40,13 +40,13 @@ type t
           stateless
           total
           immutable
+          logical
           forkable
           unyielding
           aliased
           portable
           contended
           external_
-          program
           static
 |}]
 
@@ -65,7 +65,7 @@ type t
           unique
           read_write
           uncontended
-          program
+          physical
           static
 |}]
 
@@ -83,7 +83,7 @@ type t
           unique
           read_write
           uncontended
-          program
+          physical
           static
           internal
 |}]
@@ -102,7 +102,7 @@ type t
           unique
           read_write
           uncontended
-          program
+          physical
           static
           internal
 |}]
@@ -121,7 +121,7 @@ type t
           unique
           read_write
           uncontended
-          program
+          physical
           static
           internal
 |}]
@@ -136,11 +136,11 @@ type 'a t
           stateless
           total
           immutable
+          logical
           portable
           contended
           local
           unique
-          program
           static
           internal
       with 'a
@@ -156,11 +156,11 @@ type ('a
              stateless
              total
              immutable
+             logical
              portable
              contended
              local
              unique
-             program
              static
              internal)
      t
@@ -180,7 +180,7 @@ type ('a
              unique
              read_write
              uncontended
-             program
+             physical
              static
              internal)
      t
@@ -201,7 +201,7 @@ type 'a t
           unique
           read_write
           uncontended
-          program
+          physical
           static
       with 'a @@ external_
 |}]
@@ -221,7 +221,7 @@ type 'a t
           unique
           read_write
           uncontended
-          program
+          physical
           static
       with 'a @@ external_
 |}]
@@ -236,11 +236,11 @@ type 'a t
           stateless
           total
           immutable
+          logical
           portable
           contended
           local
           unique
-          program
           static
           internal
       with 'a

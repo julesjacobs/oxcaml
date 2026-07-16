@@ -26,7 +26,7 @@ type sample =
     portability : Mode.Portability.Const.t;
     contention : Mode.Contention.Const.t;
     totality : Mode.Totality.Const.t;
-    ghostness : Mode.Ghostness.Const.t;
+    logicality : Mode.Logicality.Const.t;
     forkable : Mode.Forkable.Const.t;
     yielding : Mode.Yielding.Const.t;
     statefulness : Mode.Statefulness.Const.t;
@@ -42,7 +42,7 @@ let sample_of_lattice x =
     portability = portability x;
     contention = contention x;
     totality = totality x;
-    ghostness = ghostness x;
+    logicality = logicality x;
     forkable = forkable x;
     yielding = yielding x;
     statefulness = statefulness x;
@@ -55,7 +55,7 @@ let lattice_of_sample sample =
   create ~areality:sample.areality ~linearity:sample.linearity
     ~uniqueness:sample.uniqueness ~portability:sample.portability
     ~contention:sample.contention ~totality:sample.totality
-    ~ghostness:sample.ghostness ~forkable:sample.forkable
+    ~logicality:sample.logicality ~forkable:sample.forkable
     ~yielding:sample.yielding ~statefulness:sample.statefulness
     ~visibility:sample.visibility ~staticity:sample.staticity
     ~externality:sample.externality
@@ -76,9 +76,9 @@ let mod_bounds_of_sample sample =
       ~contention:
         (Mode.Crossing.Monadic.Atom.Modality
            (Mode.Modality.Monadic.Atom.Join_const sample.contention))
-      ~ghostness:
+      ~logicality:
         (Mode.Crossing.Monadic.Atom.Modality
-           (Mode.Modality.Monadic.Atom.Join_const sample.ghostness))
+           (Mode.Modality.Monadic.Atom.Join_const sample.logicality))
       ~visibility:
         (Mode.Crossing.Monadic.Atom.Modality
            (Mode.Modality.Monadic.Atom.Join_const sample.visibility))
@@ -205,8 +205,8 @@ let mask_of_axis : type a. a Jkind_axis.Axis.t -> t =
   | Modal (Monadic Contention) ->
     lattice_of_sample
       { sample with contention = Mode.Contention.Const.Uncontended }
-  | Modal (Monadic Ghostness) ->
-    lattice_of_sample { sample with ghostness = Mode.Ghostness.Const.Program }
+  | Modal (Monadic Logicality) ->
+    lattice_of_sample { sample with logicality = Mode.Logicality.Const.Physical }
   | Modal (Comonadic Portability) ->
     lattice_of_sample
       { sample with portability = Mode.Portability.Const.Nonportable }
@@ -294,11 +294,11 @@ let () =
     totality
     [Mode.Totality.Const.Total; Mode.Totality.Const.Partial];
   check_axis
-    (module Opposite (Mode.Ghostness.Const))
-    "ghostness"
-    (fun sample ghostness -> { sample with ghostness })
-    ghostness
-    [Mode.Ghostness.Const.Program; Mode.Ghostness.Const.Logic];
+    (module Opposite (Mode.Logicality.Const))
+    "logicality"
+    (fun sample logicality -> { sample with logicality })
+    logicality
+    [Mode.Logicality.Const.Physical; Mode.Logicality.Const.Logical];
   check_axis
     (module Mode.Forkable.Const)
     "forkable"

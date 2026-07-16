@@ -136,7 +136,8 @@ end
 [%%expect{|
 module Mto_struct :
   sig
-    module type T = sig val id : ('mto : word). 'mto -> 'mto @@ stateless end
+    module type T =
+      sig val id : ('mto : word). 'mto -> 'mto @@ stateless total end
   end
 |}]
 
@@ -844,7 +845,8 @@ end
 [%%expect{|
 module type S28 =
   sig
-    module type Evil = sig val x : ('w : word). 'w -> 'w @@ stateless end
+    module type Evil =
+      sig val x : ('w : word). 'w -> 'w @@ stateless total end
   end
 |}]
 
@@ -860,7 +862,7 @@ end
 
 [%%expect{|
 module type S29 =
-  sig module type VeryEvil = sig val x : int -> int @@ portable end end
+  sig module type VeryEvil = sig val x : int -> int @@ portable total end end
 |}]
 
 (* CR implicit-variables: implement in structures. *)
@@ -1057,7 +1059,8 @@ end
 [%%expect{|
 module type S37 =
   sig
-    module type Inner = sig val id : ('t : word). 't -> unit @@ stateless end
+    module type Inner =
+      sig val id : ('t : word). 't -> unit @@ stateless total end
     val f : ('t : word). 't -> 't
   end
 |}]

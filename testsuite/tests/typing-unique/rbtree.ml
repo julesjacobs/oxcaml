@@ -500,10 +500,10 @@ module Make_Okasaki :
     sig
       type 'a t = (Ord.t, 'a) tree
       val fold : ('a -> 'b -> 'c -> 'c) -> 'c -> ('a, 'b) tree -> 'c
-      val balance_left : ('a, 'b) tree -> ('a, 'b) tree @@ stateless
-      val balance_right : ('a, 'b) tree -> ('a, 'b) tree @@ stateless
+      val balance_left : ('a, 'b) tree -> ('a, 'b) tree @@ stateless total
+      val balance_right : ('a, 'b) tree -> ('a, 'b) tree @@ stateless total
       val ins : Ord.t -> 'a -> (Ord.t, 'a) tree -> (Ord.t, 'a) tree
-      val set_black : ('a, 'b) tree -> ('a, 'b) tree @@ stateless
+      val set_black : ('a, 'b) tree -> ('a, 'b) tree @@ stateless total
       val insert : Ord.t -> 'a -> (Ord.t, 'a) tree -> (Ord.t, 'a) tree
     end
 Line 110, characters 16-52:

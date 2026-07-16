@@ -239,11 +239,11 @@ Lines 1-2, characters 0-43:
 2 |   #{ x : 'a contended; y : 'a @@ portable }
 Error: The kind of type "t" is
            value mod everything
-             mod logic dynamic
+             mod dynamic
              with 'a @@ portable
              with 'a contended
            & value mod everything
-               mod logic dynamic
+               mod dynamic
                with 'a @@ portable
                with 'a contended
          because it is an unboxed record.
@@ -264,11 +264,11 @@ Lines 1-2, characters 0-40:
 2 |   #{ x : 'a contended; y : 'a portable }
 Error: The kind of type "t" is
            value mod everything
-             mod logic dynamic
+             mod dynamic
              with 'a contended
              with 'a portable
            & value mod everything
-               mod logic dynamic
+               mod dynamic
                with 'a contended
                with 'a portable
          because it is an unboxed record.
