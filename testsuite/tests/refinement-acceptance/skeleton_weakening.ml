@@ -62,3 +62,37 @@ let sw_neutral_if_branches b (x : int{ _ = 1 }) = if b then x else 0
 val sw_neutral_if_branches : bool -> int{ (app[Stdlib!.=] _ 1) } -> int =
   <fun>
 |}]
+
+(* A refined CALL RESULT (not a variable use, which already binds at the
+   skeleton) is likewise weakened when used at a bare expected type.  The
+   refinement stays on the function arrow -- the verification pass still reads
+   it as a fact -- so only the use occurrence drops it.  These are the cases
+   the review flagged as failing to compile before the weakening was added. *)
+let mk () : int{ _ = 3 } = 3
+[%%expect {|
+val mk : unit -> int{ (app[Stdlib!.=] _ 3) } = <fun>
+|}]
+
+(* @acc id=sw_result_in_arith final=ACCEPT today=ACCEPT stable=yes unlocks=integration
+   A refined call result in bare arithmetic. *)
+let sw_result_in_arith = mk () + 1
+[%%expect {|
+val sw_result_in_arith : int = 4
+|}]
+
+(* @acc id=sw_result_to_skeleton final=ACCEPT today=ACCEPT stable=yes unlocks=integration
+   A refined call result annotated at its own skeleton (a covariant drop, so
+   no obligation). *)
+let sw_result_to_skeleton = (mk () : int)
+[%%expect {|
+val sw_result_to_skeleton : int = 3
+|}]
+
+(* @acc id=sw_result_to_bare_param final=ACCEPT today=ACCEPT stable=yes unlocks=integration
+   A refined call result passed where a bare parameter is expected. *)
+let sink (y : int) = y
+let sw_result_to_bare_param = sink (mk ())
+[%%expect {|
+val sink : int -> int = <fun>
+val sw_result_to_bare_param : int = 3
+|}]

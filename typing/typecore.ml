@@ -1559,6 +1559,24 @@ let proper_exp_loc exp =
     original formatting *)
 let unify_exp ~sexp env exp expected_ty =
   let loc = proper_exp_loc exp in
+  (* A refined value used where a bare (unrefined) type is expected may drop its
+     refinement to the skeleton: the covariant use direction, where forgetting
+     the predicate is sound.  This is the sanctioned expected-type weakening.
+     The refinement is preserved on the value's declared type (e.g. a function's
+     refined result stays on its arrow, which is where the verification pass
+     reads facts); only this use occurrence is weakened.  Weakening is confined
+     to a bare expected type: a refined expected type is an imposition site
+     (matched rigidly, or an obligation) and must not drop a predicate, and an
+     unconstrained expected variable is left for later. *)
+  let exp =
+    match get_desc exp.exp_type with
+    | Trefine { ref_skeleton; _ } ->
+      begin match get_desc expected_ty with
+      | Trefine _ | Tvar _ | Tunivar _ -> exp
+      | _ -> { exp with exp_type = instance ref_skeleton }
+      end
+    | _ -> exp
+  in
   try
     unify_exp_types loc env exp.exp_type expected_ty
   with Error(loc, env, Expr_type_clash(err, tfc, None)) ->

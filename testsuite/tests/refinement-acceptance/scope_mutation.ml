@@ -68,13 +68,17 @@ Warning 186 [unmutated-mutable]: mutable variable "x" was never mutated.
 val mut_binder_exempt : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
 |}]
 
-(* @acc id=mut_no_persistent_fact final=REJECT today=REJECT stable=no unlocks=integration+verification
-   The reason mutables are exempt: after [x <- 2] the original
-   refinement must not survive. Re-imposing [int{ _ = 1 }] after the
-   write must fail -- the fact is havocked on assignment, so there is
-   no standing [x = 1] to discharge it.
-   FINAL and TODAY: rejected. This case guards against a mutable fact
-   surviving an assignment. *)
+(* @acc id=mut_no_persistent_fact final=REJECT today=REJECT stable=yes unlocks=integration+verification
+   A mutable refined cell contributes no persistent fact, so after the
+   write there is no standing [x = 1] and re-imposing [int{ _ = 1 }] on
+   the read is unprovable.  The write of a CONCRETE constant is caught
+   earlier still, rigidly: the cell keeps its refined type [int{ _ = 1 }]
+   and the constant [2 : int] clashes with it (this is a rigid-typing
+   rejection, NOT a havoc of a fact -- there is no mutable fact to
+   havoc).  An unconstrained [Obj.magic] on the right of [<-] is the
+   accepted [Obj.magic] hole (imposition_channels.ml, imp_magic_mutassign),
+   not a rigid clash.
+   FINAL and TODAY: rejected. *)
 let mut_no_persistent_fact () =
   let mutable x : int{ _ = 1 } = 1 in
   x <- 2;

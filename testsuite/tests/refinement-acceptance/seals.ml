@@ -110,3 +110,22 @@ Error: Signature mismatch:
        is not compatible with the type "int -> int"
        Type "int{ (app[Stdlib!.>=] _ 0) }" is not compatible with type "int"
 |}]
+
+(* @acc id=seal_launder_unsound final=REJECT today=ACCEPT stable=no unlocks=seals
+   KNOWN GAP, deferred to the Seals stage: an UNCONSTRAINED implementation
+   ([Obj.magic 0] : the value-restricted [Tvar] result) behind a refined
+   interface laundered the refinement through signature inclusion, with no
+   obligation queued.  A concrete bare implementation is already rigidly
+   rejected (see seal_conforming); only this [Tvar]-through-seal case slips.
+   Signature-boundary obligations are the Seals stage -- the verification pass
+   over the structure has no visibility into the ascribing signature -- so this
+   is an ANCHOR recording the current unsound ACCEPT.  It flips to REJECT when
+   Seals queues the directed implication VC. *)
+module Seal_launder : sig
+  val x : int{ _ = 1 }
+end = struct
+  let x = Obj.magic 0
+end
+[%%expect {|
+module Seal_launder : sig val x : int{ (app[Stdlib!.=] _ 1) } end
+|}]

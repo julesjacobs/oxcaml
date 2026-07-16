@@ -366,12 +366,24 @@ let rec walk_expression state expression =
       arguments;
     check_application state expression function_ arguments;
     check_marks state expression marks
-  | Texp_ifthenelse (condition, ifso, ifnot) when marks <> [] ->
+  | Texp_ifthenelse (condition, ifso, ifnot) ->
     walk_expression state condition;
-    let condition_subject = subject state condition in
+    (* Record the condition (and, in the else branch, its negation) as a
+       branch-local fact around every [if], not only those carrying a
+       refinement mark of their own: obligations nested in a guarded branch
+       depend on the guard.  A condition that cannot be lowered contributes no
+       fact, which only weakens the branch conditions. *)
+    let condition_fact =
+      match subject state condition with
+      | condition_subject -> Some condition_subject
+      | exception Unsupported_subject _ -> None
+    in
     let saved_facts = state.facts in
-    state.facts <-
-      Facts.add ~loc:condition.exp_loc condition_subject state.facts;
+    Option.iter
+      (fun condition_subject ->
+        state.facts <-
+          Facts.add ~loc:condition.exp_loc condition_subject state.facts)
+      condition_fact;
     walk_expression state ifso;
     List.iter
       (fun (loc, refinement) ->
@@ -382,14 +394,17 @@ let rec walk_expression state expression =
     begin match ifnot with
     | None -> ()
     | Some ifnot ->
-      let negated =
-        Refinement.create ~loc:condition.exp_loc ~type_:Predef.type_bool
-          (Rexp_ifthenelse
-             ( condition_subject,
-               bool_node ~loc:condition.exp_loc false,
-               Some (bool_node ~loc:condition.exp_loc true) ))
-      in
-      state.facts <- Facts.add ~loc:condition.exp_loc negated state.facts;
+      Option.iter
+        (fun condition_subject ->
+          let negated =
+            Refinement.create ~loc:condition.exp_loc ~type_:Predef.type_bool
+              (Rexp_ifthenelse
+                 ( condition_subject,
+                   bool_node ~loc:condition.exp_loc false,
+                   Some (bool_node ~loc:condition.exp_loc true) ))
+          in
+          state.facts <- Facts.add ~loc:condition.exp_loc negated state.facts)
+        condition_fact;
       walk_expression state ifnot;
       List.iter
         (fun (loc, refinement) ->
@@ -398,10 +413,6 @@ let rec walk_expression state expression =
         marks;
       state.facts <- saved_facts
     end
-  | Texp_ifthenelse (condition, ifso, ifnot) ->
-    walk_expression state condition;
-    walk_expression state ifso;
-    Option.iter (walk_expression state) ifnot
   | _ ->
     walk_default_expression state expression;
     check_marks state expression marks
