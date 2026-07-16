@@ -287,6 +287,10 @@ let builtin_name context = function
 
 let same_reference left right =
   match left, right with
+  (* [Rsibling]/[Rfun] compare by source name.  This is sound only because a VC
+     is scoped to a single signature context, within which value names are
+     unique; two distinct signatures each with a value named [base] would both
+     lower to [Rsibling "base"] and be conflated if a VC ever spanned both. *)
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
   | Rapp left, Rapp right | Rglobal left, Rglobal right ->
