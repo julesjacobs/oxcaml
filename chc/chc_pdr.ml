@@ -44,8 +44,12 @@ type rel =
   | Rle
   | Rge
 
+(* [jdx = Some j] is a difference (octagon) literal [(x_idx - x_j) rel v]; [None] is the
+   single-variable [x_idx rel v]. Difference literals are the relational-invariant
+   template (interpolation proxy), same as the single-predicate engine. *)
 type lit =
   { idx : int
+  ; jdx : int option
   ; rel : rel
   ; v : value
   }
@@ -292,31 +296,56 @@ let model_cube (sy : sys) (p : int) (sess : Session.t) : cube =
         | Session.Const (name, Session.VBool b) -> Hashtbl.replace tbl name (VBool b)
         | _ -> ())
       bindings;
+    let ints = ref [] in
     let acc = ref [] in
     for i = sy.arity.(p) - 1 downto 0 do
       match Hashtbl.find_opt tbl (pre p i) with
-      | Some v -> acc := { idx = i; rel = Req; v } :: !acc
+      | Some v ->
+        acc := { idx = i; jdx = None; rel = Req; v } :: !acc;
+        (match v with
+         | VInt n -> ints := (i, n) :: !ints
+         | VBool _ -> ())
       | None -> ()
     done;
-    !acc
+    (* Difference (octagon) literals x_i - x_j = v_i - v_j for each int pair: the
+       relational-invariant template. *)
+    let diffs = ref [] in
+    List.iter
+      (fun (i, vi) ->
+        List.iter
+          (fun (j, vj) ->
+            if i < j
+            then
+              diffs
+              := { idx = i; jdx = Some j; rel = Req; v = VInt (Bigint.sub vi vj) }
+                 :: !diffs)
+          !ints)
+      !ints;
+    !acc @ !diffs
 ;;
 
 (* ---- cube / lemma expressions ---- *)
 
-let lit_expr name (l : lit) : expr =
+(* [name] maps a state-var index to its name in the chosen (pre/post) namespace. *)
+let lit_expr (name : int -> string) (l : lit) : expr =
+  let lhs =
+    match l.jdx with
+    | None -> Var (name l.idx)
+    | Some j -> Sub [ Var (name l.idx); Var (name j) ]
+  in
   match l.v, l.rel with
-  | VInt n, Req -> Eq (Var name, Int_lit n)
-  | VInt n, Rle -> Le (Var name, Int_lit n)
-  | VInt n, Rge -> Ge (Var name, Int_lit n)
-  | VBool true, _ -> Var name
-  | VBool false, _ -> Not (Var name)
+  | VInt n, Req -> Eq (lhs, Int_lit n)
+  | VInt n, Rle -> Le (lhs, Int_lit n)
+  | VInt n, Rge -> Ge (lhs, Int_lit n)
+  | VBool true, _ -> lhs
+  | VBool false, _ -> Not lhs
 ;;
 
 (* [cube_expr p ~post_ns s]: the cube over predicate p's state, rendered in the pre ([s_])
    or post ([t_]) namespace. *)
 let cube_expr (p : int) ~post_ns (s : cube) : expr =
   let name i = if post_ns then post p i else pre p i in
-  And (List.map (fun l -> lit_expr (name l.idx) l) s)
+  And (List.map (lit_expr name) s)
 ;;
 
 let clause_expr (p : int) (s : cube) : expr = Not (cube_expr p ~post_ns:false s)

@@ -199,6 +199,22 @@ let () =
       (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 1))) (Q y))))
       (assert (forall ((x Int)(y Int)) (=> (and (Q x)(= y (+ x 1))) (P y))))
       (assert (forall ((x Int)) (=> (and (Q x)(< x 0)) false)))|};
+  (* 13b. multi-predicate RELATIONAL invariant x=y across a ping-pong (arity-2 preds). The
+     decisive interpolation-proxy test: needs the difference-bound (octagon) template in
+     the multi-predicate engine. *)
+  check
+    "mp-relational-eq"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (declare-fun Q (Int Int) Bool)
+      (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 0)) (P x y))))
+      (assert (forall ((x Int)(y Int)(a Int)(b Int))
+        (=> (and (P x y)(= a (+ x 1))(= b (+ y 1))) (Q a b))))
+      (assert (forall ((x Int)(y Int)(a Int)(b Int))
+        (=> (and (Q x y)(= a (+ x 1))(= b (+ y 1))) (P a b))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x y)(not (= x y))) false)))
+      (assert (forall ((x Int)(y Int)) (=> (and (Q x y)(not (= x y))) false)))|};
   (* 14. multi-predicate ping-pong reaching a bad bound -> unsafe (replay-confirmed) *)
   check
     "mp-pingpong-unsafe"
