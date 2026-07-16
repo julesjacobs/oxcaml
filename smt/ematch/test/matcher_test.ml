@@ -107,14 +107,14 @@ let view_of ~apps ~classes : Egraph_view.t =
 let subst_to_names sigmas =
   List.map
     (fun arr ->
-       Array.to_list
-         (Array.map
-            (fun (t : Term.t) ->
-               match t.node with
-               | App (s, _) -> Symbol.name s
-               | Int_const n -> "#" ^ Bigint.to_string n
-               | _ -> "?")
-            arr))
+      Array.to_list
+        (Array.map
+           (fun (t : Term.t) ->
+             match t.node with
+             | App (s, _) -> Symbol.name s
+             | Int_const n -> "#" ^ Bigint.to_string n
+             | _ -> "?")
+           arr))
     sigmas
 ;;
 
@@ -902,6 +902,44 @@ let ti_zero () =
     (Trigger.infer ~qvars:[||] (Context.const sc.ctx p) = [])
 ;;
 
+(* TI-GROUND-PREF (lemmas-climb chunk 2c): trigger selection prefers a candidate whose
+   head has GROUND occurrences over one that does not (a head that never occurs in a
+   ground term can never match — the failure mode of a Skolem function minted for a nested
+   existential). Body [f(x) = g(x)]: [f(x)] and [g(x)] tie on size, and [f] is created
+   first so wins the tag tiebreak by DEFAULT. Supplying [~ground_occurrences] that reports
+   a ground occurrence of [g] (only) must flip the inferred trigger to [g(x)]; a mutant
+   that ignores the new key leaves it [f(x)] and fails. The symmetric case (ground
+   occurrence of [f]) must keep [f(x)], guarding against an always-flip mutant. *)
+let ti_ground_preference () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "f" int_to_int in
+  let g = Env.declare_fun sc.env "g" int_to_int in
+  let qv = mk_qvars sc ~id:0 1 in
+  let x = Qvar.to_term qv.(0) in
+  let fx = Context.app sc.ctx f [ x ]
+  and gx = Context.app sc.ctx g [ x ] in
+  let body = Context.eq sc.ctx fx gx in
+  check
+    "TI-GROUND-PREF default: size/tag tiebreak picks f(x)"
+    (trigger_is (Trigger.infer ~qvars:qv body) [ fx ]);
+  check
+    "TI-GROUND-PREF: a ground occurrence of g flips the trigger to g(x)"
+    (trigger_is
+       (Trigger.infer
+          ~ground_occurrences:(fun sym -> if Symbol.equal sym g then 1 else 0)
+          ~qvars:qv
+          body)
+       [ gx ]);
+  check
+    "TI-GROUND-PREF: a ground occurrence of f keeps the trigger f(x)"
+    (trigger_is
+       (Trigger.infer
+          ~ground_occurrences:(fun sym -> if Symbol.equal sym f then 1 else 0)
+          ~qvars:qv
+          body)
+       [ fx ])
+;;
+
 let () =
   ignore int_int_to_int;
   ignore int_to_bool;
@@ -931,6 +969,7 @@ let () =
   ti_multi ();
   ti_unreachable ();
   ti_zero ();
+  ti_ground_preference ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;

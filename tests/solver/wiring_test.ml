@@ -1972,6 +1972,39 @@ let test_skolem_fun_antecedent_exists_not_skolemized () =
      | Session.Unsat | Session.Unknown -> true)
 ;;
 
+(* CHUNK 2c end-to-end: trigger preference for ground-occurring heads un-inerts a Skolem
+   universal. [forall x. (p x) => (exists y. (and (r x y) (g x)))] Skolemizes (2b) to
+   [forall x. (p x) => (and (r x (f x)) (g x))]. The consequent does NOT fold (r x (f x)
+   is a live UF app), so the candidate triggers are p(x), g(x), f(x), all covering x; f(x)
+   is created first and — WITHOUT 2c — wins the size/tag tiebreak, so the trigger is the
+   Skolem head f(x), which never matches (no ground f term) and the lemma stays inert ->
+   unknown. WITH 2c, p and g have ground occurrences ([p a], [not (g a)]) and f has none,
+   so the trigger is a ground-matchable head; the lemma fires on [p a], forcing [g a],
+   which contradicts [not (g a)] -> UNSAT (single instantiation round). This is the
+   discriminating case: a mutant that ignores ~ground_occurrences leaves the trigger on
+   f(x) and returns unknown, failing this check. *)
+let test_skolem_fun_trigger_prefers_ground () =
+  let s = Session.create () in
+  let text =
+    "(set-logic UFLIA)\n\
+     (declare-fun p (Int) Bool)\n\
+     (declare-fun g (Int) Bool)\n\
+     (declare-fun r (Int Int) Bool)\n\
+     (declare-fun a () Int)\n\
+     (assert (p a))\n\
+     (assert (not (g a)))\n\
+     (assert (forall ((x Int)) (=> (p x) (exists ((y Int)) (and (r x y) (g x))))))\n\
+     (check-sat)\n"
+  in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+  ignore (Loader.assert_all s parsed : bool);
+  check
+    "skolem-fun 2c: ground-head trigger preference un-inerts the Skolem universal (unsat)"
+    (match Session.check_sat s with
+     | Session.Unsat -> true
+     | _ -> false)
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -2659,6 +2692,7 @@ let () =
   test_skolem_fun_under_forall_unsat ();
   test_skolem_fun_negated_not_skolemized ();
   test_skolem_fun_antecedent_exists_not_skolemized ();
+  test_skolem_fun_trigger_prefers_ground ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   test_ctx_simp_eq_subst_sat ();

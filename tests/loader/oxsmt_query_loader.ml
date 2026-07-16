@@ -79,6 +79,14 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
       let sym = Session.declare_fun s (pick ()) (Rank.create dom cod) in
       Context.app (Session.context s) sym args
     in
+    (* Ground-occurrence counts of head symbols across the ground assertions (lemmas-climb
+       chunk 2c): fed to auto-trigger inference so it PREFERS a trigger whose head
+       actually occurs in a ground term. Without it, a Skolem function minted for a nested
+       existential (chunk 2b) — which occurs only in that lemma's body, never in a ground
+       term — can win the trigger by size/tag and leave the lemma inert (it can never
+       match). Computed ONCE over the pre-presolve assertions; a heuristic seed, never a
+       soundness input. *)
+    let ground_occurrences = Trigger.ground_head_counts parsed.Parser.assertions in
     List.iter
       (fun (lem : Parser.lemma_src) ->
         match
@@ -94,7 +102,9 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
                front-end policy, NOT a change to [assert_lemma]: an explicit empty trigger
                through the programmatic API still means "do not fire". *)
             let triggers =
-              if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
+              if List.is_empty triggers
+              then Trigger.infer ~ground_occurrences ~qvars:qv body
+              else triggers
             in
             { Session.body; triggers })
         with
