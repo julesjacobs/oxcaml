@@ -241,6 +241,7 @@ let check t effort =
   | Fabric.Propagations lits -> Theory.Propagations lits
   | Fabric.Conflict e -> Theory.Conflict (ordinary_explanation e)
   | Fabric.Split terms -> Theory.Split terms
+  | Fabric.Lemma l -> Theory.Lemma l
 ;;
 
 let explain_fabric t lit =

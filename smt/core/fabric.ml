@@ -16,6 +16,7 @@ type check_result =
   | Propagations of Lit.t list
   | Conflict of Explanation.t
   | Split of Term.t list
+  | Lemma of (Term.t * bool) list
 
 type fixed_bounds =
   { value : string

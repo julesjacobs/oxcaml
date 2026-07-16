@@ -33,6 +33,7 @@ type fabric_check_result = Fabric.check_result =
   | Propagations of Lit.t list
   | Conflict of Fabric_explanation.t
   | Split of Term.t list
+  | Lemma of (Term.t * bool) list
 
 module type FABRIC_CHILD = sig
   include Theory.THEORY
@@ -824,6 +825,7 @@ end = struct
   let check_b_propagate t la : Theory.check_result =
     match B.check t.b Theory.Propagate with
     | Theory.Conflict e -> Theory.Conflict e
+    | Theory.Lemma l -> Theory.Lemma l
     | Theory.Sat | Theory.Split _ -> Theory.Propagations la
     | Theory.Propagations lb ->
       record_props t R.B lb;
@@ -835,8 +837,11 @@ end = struct
     | Theory.Propagate ->
       (match A.check t.a Theory.Propagate with
        | Theory.Conflict e -> Theory.Conflict e
+       | Theory.Lemma l -> Theory.Lemma l
        | Theory.Sat | Theory.Split _ ->
-         (* illegal at Propagate per the THEORY contract; treat as no propagations *)
+         (* [Sat]/[Split] are illegal at Propagate per the THEORY contract; treat as no
+            propagations. A [Lemma] IS legal at Propagate (the LCG-serving arm) and is
+            forwarded above, not dropped. *)
          check_b_propagate t []
        | Theory.Propagations la ->
          record_props t R.A la;
@@ -851,6 +856,7 @@ end = struct
       (match A.check t.a Theory.Final with
        | Theory.Conflict e -> Theory.Conflict e
        | Theory.Split terms -> Theory.Split terms
+       | Theory.Lemma l -> Theory.Lemma l
        | Theory.Propagations (_ :: _ as la) ->
          record_props t R.A la;
          Theory.Propagations la
@@ -858,6 +864,7 @@ end = struct
          (match B.check t.b Theory.Final with
           | Theory.Conflict e -> Theory.Conflict e
           | Theory.Split terms -> Theory.Split terms
+          | Theory.Lemma l -> Theory.Lemma l
           | Theory.Propagations (_ :: _ as lb) ->
             record_props t R.B lb;
             Theory.Propagations lb
@@ -1160,6 +1167,7 @@ end = struct
     match r with
     | Sat -> Theory.Sat
     | Split ts -> Theory.Split ts
+    | Lemma l -> Theory.Lemma l
     | Conflict fe -> Theory.Conflict (expand_explanation t fe)
     | Propagations lits ->
       record_props t owner lits;
@@ -1169,6 +1177,7 @@ end = struct
   let check_b_propagate_on t la : Theory.check_result =
     match realize t R.B (B.check_fabric t.b Theory.Propagate) with
     | Theory.Conflict e -> Theory.Conflict e
+    | Theory.Lemma l -> Theory.Lemma l
     | Theory.Sat | Theory.Split _ -> Theory.Propagations la
     | Theory.Propagations lb -> Theory.Propagations (la @ lb)
   ;;
@@ -1189,7 +1198,7 @@ end = struct
     let r = A.check_fabric t.a effort in
     (match r with
      | Conflict _ -> ()
-     | Sat | Split _ | Propagations _ -> drain_and_notify t);
+     | Sat | Split _ | Lemma _ | Propagations _ -> drain_and_notify t);
     realize t R.A r
   ;;
 
@@ -1209,6 +1218,7 @@ end = struct
         match check_a t Theory.Final with
         | Theory.Conflict e -> Theory.Conflict e
         | Theory.Split terms -> Theory.Split terms
+        | Theory.Lemma l -> Theory.Lemma l
         | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
         | Theory.Sat | Theory.Propagations [] -> combine_models_fabric t)
       else Theory.Split (R.equality_split t.ctx x y)
@@ -1222,17 +1232,20 @@ end = struct
     | Theory.Propagate ->
       (match check_a t Theory.Propagate with
        | Theory.Conflict e -> Theory.Conflict e
+       | Theory.Lemma l -> Theory.Lemma l
        | Theory.Sat | Theory.Split _ -> check_b_propagate_on t []
        | Theory.Propagations la -> check_b_propagate_on t la)
     | Theory.Final ->
       (match check_a t Theory.Final with
        | Theory.Conflict e -> Theory.Conflict e
        | Theory.Split terms -> Theory.Split terms
+       | Theory.Lemma l -> Theory.Lemma l
        | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
        | (Theory.Sat | Theory.Propagations []) as ra ->
          (match realize t R.B (B.check_fabric t.b Theory.Final) with
           | Theory.Conflict e -> Theory.Conflict e
           | Theory.Split terms -> Theory.Split terms
+          | Theory.Lemma l -> Theory.Lemma l
           | Theory.Propagations (_ :: _ as lb) -> Theory.Propagations lb
           | (Theory.Sat | Theory.Propagations []) as rb ->
             (match ra, rb with

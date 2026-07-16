@@ -418,7 +418,7 @@ let test_predicate_pushpop_restore () =
     "pred-pushpop: no stale p(b) after pop"
     (match A.check h.adapter Theory.Final with
      | Theory.Conflict _ -> false
-     | Theory.Sat | Theory.Split _ -> true
+     | Theory.Sat | Theory.Split _ | Theory.Lemma _ -> true
      | Theory.Propagations lits -> not (List.exists (Lit.equal pb_pos) lits));
   (* re-assert a=b after the pop: the watch survived, p(b) is entailed true again. *)
   assert_lit h (Lit.make a_ab true);
@@ -469,7 +469,7 @@ let test_predicate_late_binding () =
        "pred-latebind: explanation subset asserted"
        (Lit.Set.subset (Lit.Set.of_list e.Explanation.premises) h.asserted);
      check "pred-latebind: explanation non-empty" (e.Explanation.premises <> [])
-   | Theory.Sat | Theory.Split _ ->
+   | Theory.Sat | Theory.Split _ | Theory.Lemma _ ->
      check "pred-latebind: p(a) propagated true after late register_atom" false
    | Theory.Conflict _ -> check "pred-latebind: unexpected conflict" false);
   ignore (a_ab, a_pb)

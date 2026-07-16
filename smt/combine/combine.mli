@@ -195,6 +195,7 @@ type fabric_check_result = Fabric.check_result =
   | Propagations of Lit.t list
   | Conflict of Fabric_explanation.t
   | Split of Term.t list
+  | Lemma of (Term.t * bool) list
 
 (** Rich, non-frozen child seam used only inside the combinator. *)
 module type FABRIC_CHILD = sig

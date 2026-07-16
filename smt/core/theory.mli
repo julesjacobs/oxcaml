@@ -35,6 +35,22 @@ type check_result =
   (** [Final] only: clausify each term to a literal and assert their {b disjunction} as
       one clause (ADR-0005 CONTRACT-SPLIT) — a B&B branch, an N-O ℤ-trichotomy, or an
       E-matching lemma. Must force a choice among ≥2 distinct atoms. *)
+  | Lemma of (Term.t * bool) list
+  (** Legal at {b both} efforts. A theory-derived {e implication lemma}: the signed
+      disjunction [⋁ᵢ (if signᵢ then tmᵢ else ¬tmᵢ)] asserted as one clause,
+      {b valid in the theory} (ADR-0005 erratum CONTRACT-LEMMA — a strictly stronger
+      obligation than [Split]'s assignment-exhaustiveness: a [Lemma] is a T-tautology on
+      its own, so it can be added and propagate at any point without a paired
+      complementary disjunct). By convention the {b first} element is the newly-asserted
+      atom (e.g. an integer cut, or an LCG materialized bound) and the rest are its
+      negated antecedents, so when the antecedents hold the clause is unit and the SAT
+      core propagates the head with the clause as its reason (the LCG
+      materialize-literal-with-reason primitive, which the LIA cut lane reuses). Unlike
+      [Split] it does NOT defer a [Sat] certification and is NOT dropped at [Propagate];
+      the clausifier desugars it through the same signed-literal path as [Split]. The
+      distinct-atoms discipline still applies: the head atom must differ from every
+      antecedent atom, else the level-0 tautology filter drops the clause (an
+      incompleteness, not an unsoundness). *)
 
 module type THEORY = sig
   type t

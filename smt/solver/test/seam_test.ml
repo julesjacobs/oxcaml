@@ -70,21 +70,21 @@ let with_collector s =
 
 type mock_config =
   { conflicts : Sat.lit list list
-      (* each premise set: if all its literals are currently asserted true, it is a theory
+    (* each premise set: if all its literals are currently asserted true, it is a theory
          conflict (its conjunction is "T-unsat") *)
   ; implications : (Sat.lit list * Sat.lit) list
-      (* (antecedents, consequent): all antecedents asserted true ⇒ propagate consequent,
+    (* (antecedents, consequent): all antecedents asserted true ⇒ propagate consequent,
          with the antecedents as its lazy explanation *)
   ; final_conflicts :
       Sat.lit list list (* extra conflicts recognized only at Final effort *)
   ; final_splits : Sat.lit list list
-      (* clauses emitted one-at-a-time at Final effort (CONTRACT-SPLIT disjunctions) until
+    (* clauses emitted one-at-a-time at Final effort (CONTRACT-SPLIT disjunctions) until
          all are exhausted *)
   ; explain_override : (Sat.lit -> Sat.lit list) option
-      (* if set, [explain] returns this instead of the rule antecedents — used to inject a
+    (* if set, [explain] returns this instead of the rule antecedents — used to inject a
          CONTRACT-EX-violating reason and confirm the core raises rather than trusts it *)
   ; propose_once : bool
-  (* if true, each consequent is proposed at most once across the whole solve (a latch
+    (* if true, each consequent is proposed at most once across the whole solve (a latch
      that survives backtracking). Lets a negative test isolate a single guarded path: with
      the guard removed, the solve then TERMINATES without re-proposing into a different
      guard, so the revert-check produces a clean RED instead of raising elsewhere or
@@ -149,11 +149,12 @@ let make_mock st config =
       let props =
         List.filter_map
           (fun (ants, cons) ->
-            if all_true ants
+             if
+               all_true ants
                && (not (is_true cons))
                && not (config.propose_once && List.mem cons !proposed)
-            then Some cons
-            else None)
+             then Some cons
+             else None)
           config.implications
       in
       let props = List.sort_uniq compare props in
@@ -749,12 +750,13 @@ let test_no_theory_regression () =
     let r1 = Sat.solve withth in
     let st1 = Sat.stats withth in
     let m1 = Sat.model withth in
-    if r0 <> r1
-       || st0.Sat.Stats.conflicts <> st1.Sat.Stats.conflicts
-       || st0.Sat.Stats.decisions <> st1.Sat.Stats.decisions
-       || st0.Sat.Stats.propagations <> st1.Sat.Stats.propagations
-       || m0 <> m1
-       || not !(mock.invariant_ok)
+    if
+      r0 <> r1
+      || st0.Sat.Stats.conflicts <> st1.Sat.Stats.conflicts
+      || st0.Sat.Stats.decisions <> st1.Sat.Stats.decisions
+      || st0.Sat.Stats.propagations <> st1.Sat.Stats.propagations
+      || m0 <> m1
+      || not !(mock.invariant_ok)
     then incr mismatches
   done;
   check
@@ -802,6 +804,31 @@ let test_valid_lemma_propagates () =
   check "lemma: push/pop invariant held" !(mock.invariant_ok)
 ;;
 
+(* CONTRACT-LEMMA distinct-atoms trap (adr-0005-contract-lemma-erratum, sat.mli level-0
+   tautology removal): a lemma whose asserted head atom COINCIDES with an antecedent atom
+   clausifies to [cut ∨ ¬cut] — a tautology the level-0 simplifier silently DROPS, so the
+   head is never propagated. This is an INCOMPLETENESS (the cut is lost), not an
+   unsoundness, and it is the reason the producer must mint a head atom distinct from
+   every antecedent. This test pins the failure mode so a future reader sees the drop is
+   expected, and so a producer that accidentally reuses an antecedent atom is understood
+   to silently no-op rather than mispropagate. Contrast: {!test_valid_lemma_propagates},
+   whose distinct [¬b ∨ cut] DOES propagate. *)
+let test_lemma_coincident_atom_dropped () =
+  let s = Sat.create () in
+  let cut = Sat.new_var s in
+  (* the "lemma" is [cut ∨ ¬cut]: head atom = antecedent atom (the trap) *)
+  let mock =
+    make_mock s { empty_config with final_splits = [ [ Sat.pos cut; Sat.neg cut ] ] }
+  in
+  Sat.set_theory s (Some mock.theory);
+  let r = Sat.solve s in
+  check "lemma-trap: sat" (r = Sat.Sat);
+  check
+    "lemma-trap: coincident-atom lemma [cut ∨ ¬cut] dropped ⇒ cut NOT propagated true"
+    (not (Sat.value s cut));
+  check "lemma-trap: push/pop invariant held" !(mock.invariant_ok)
+;;
+
 let () =
   test_conflict_at_depth ();
   test_conflict_learns_negated_premises ();
@@ -819,6 +846,7 @@ let () =
   test_final_split_empty_unsat ();
   test_final_conflict ();
   test_valid_lemma_propagates ();
+  test_lemma_coincident_atom_dropped ();
   test_pushpop_stress ();
   test_no_theory_regression ();
   Printf.printf "seam_test: %d checks, %d failures\n" !checks !failures;

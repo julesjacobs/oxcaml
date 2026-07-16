@@ -22,6 +22,11 @@ type check_result =
   | Propagations of Lit.t list
   | Conflict of Explanation.t
   | Split of Term.t list
+  | Lemma of (Term.t * bool) list
+  (** A theory implication lemma (the internal-currency image of {!Theory.Lemma}): the
+      signed-literal disjunction the combinator forwards up through {!realize} to the
+      frozen seam. Carries only terms (no {!justification} handle) — the antecedents are
+      ordinary atoms the clausifier interns, so no expansion is needed. *)
 
 (** Adapter-facing fixed-bound witness. [value] is the canonical rational spelling;
     [lower]/[upper] are the active exact bounds [term >= value]/[term <= value]. *)

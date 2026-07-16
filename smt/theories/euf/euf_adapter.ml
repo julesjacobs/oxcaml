@@ -320,6 +320,7 @@ let check t effort =
   | Fabric.Propagations lits -> Theory.Propagations lits
   | Fabric.Conflict e -> Theory.Conflict (ordinary_explanation e)
   | Fabric.Split terms -> Theory.Split terms
+  | Fabric.Lemma l -> Theory.Lemma l
 ;;
 
 (* [explain] serves the reason SNAPSHOTTED at propagation time ({!cache_reason}); the

@@ -617,6 +617,7 @@ let scenario () =
     match Lia_adapter.check fx.adapter Theory.Final with
     | Theory.Sat -> "sat"
     | Theory.Split _ -> "split"
+    | Theory.Lemma _ -> "lemma"
     | Theory.Conflict _ -> "conflict"
     | Theory.Propagations _ -> "prop"
   in

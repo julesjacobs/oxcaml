@@ -439,12 +439,34 @@ let check t ~final =
       | Theory.Split terms ->
         t.splits <- t.splits + 1;
         if t.splits > t.split_budget then raise Split_budget_exceeded;
-        Sat.T_lemma [ List.map (split_lit t ~sign:true) terms ])
+        Sat.T_lemma [ List.map (split_lit t ~sign:true) terms ]
+      | Theory.Lemma signed ->
+        (* CONTRACT-LEMMA (ADR-0005 erratum): a theory-derived T-VALID implication clause.
+           Desugars through the SAME signed-literal clausifier as [Split] — each
+           [(tm, sign)] becomes [split_lit t ~sign tm] (Not-peeling tracks parity), so no
+           new clause-construction code and the level-0 tautology-removal trap is shared.
+           Budget it exactly like a Split: the [Lemma] loop has no intrinsic bound (an LIA
+           cut lane can emit one per Final round), so it must be capped by the same
+           per-check-sat budget or a diverging producer runs forever. *)
+        t.splits <- t.splits + 1;
+        if t.splits > t.split_budget then raise Split_budget_exceeded;
+        Sat.T_lemma [ List.map (fun (tm, sign) -> split_lit t ~sign tm) signed ])
     else (
       match th_check impl Theory.Propagate with
       | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
       | Theory.Conflict e ->
         Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
+      | Theory.Lemma signed ->
+        (* CONTRACT-LEMMA at Propagate effort (the LCG-serving arm): unlike [Split], a
+           [Lemma] is NOT dropped here. It is a valid clause, so it is sound to add
+           mid-search; the SAT core accepts a Propagate-effort [T_lemma] (sat.ml
+           [propagate_theory]: "a Propagate-effort lemma is a contract deviation but still
+           sound to add"), unwinds to level 0, adds the permanent clause, and
+           re-propagates — when its antecedents hold the clause is unit and BCP propagates
+           the head with the clause as reason. Same budget guard as the Final arm. *)
+        t.splits <- t.splits + 1;
+        if t.splits > t.split_budget then raise Split_budget_exceeded;
+        Sat.T_lemma [ List.map (fun (tm, sign) -> split_lit t ~sign tm) signed ]
       | Theory.Sat | Theory.Split _ ->
         (* neither is legal at Propagate effort (THEORY contract); the theory never
            returns them here, but stay total and treat as "nothing to add". *)

@@ -43,6 +43,7 @@ let fabric_of_check (r : Th.check_result) : Cmb.fabric_check_result =
   | Th.Propagations l -> Cmb.Propagations l
   | Th.Conflict e -> Cmb.Conflict (fabric_of_expl e)
   | Th.Split ts -> Cmb.Split ts
+  | Th.Lemma l -> Cmb.Lemma l
 ;;
 
 let failures = ref 0
@@ -1403,6 +1404,7 @@ module Make_driver (C : Th.THEORY) = struct
         match C.check t Th.Final with
         | Th.Conflict _ -> Vunsat
         | Th.Sat -> Vsat (C.model t)
+        | Th.Lemma _ -> Vunknown
         | Th.Propagations lits ->
           List.iter (fun l -> C.assert_lit t l) lits;
           search (depth + 1)
@@ -2041,7 +2043,7 @@ let test_pop_stale_bool_uf_arg_known_gap () =
       match Cuflia_real.check t Th.Final with
       | Th.Sat -> `Sat
       | Th.Conflict _ -> `Unsat
-      | Th.Split _ | Th.Propagations _ -> `Other
+      | Th.Split _ | Th.Lemma _ | Th.Propagations _ -> `Other
     with
     | Oxsmt_combine.Combine.Incomplete _ -> `Unknown
   in
@@ -2324,6 +2326,7 @@ let test_use_history_transition_real () =
       match Cuflia_real.check t Th.Final with
       | Th.Conflict _ -> Vunsat
       | Th.Sat -> Vsat (Cuflia_real.model t)
+      | Th.Lemma _ -> Vunknown
       | Th.Propagations lits ->
         List.iter (fun l -> Cuflia_real.assert_lit t l) lits;
         drive (depth + 1)
@@ -2437,6 +2440,7 @@ let fab_run ?(trace = true) f (formula : (Term.t * bool) list) =
       | Th.Propagations lits ->
         List.iter (fun l -> Fab.assert_lit t l) lits;
         loop (depth + 1)
+      | Th.Lemma _ -> `Unknown
       | Th.Split _ -> `Split)
   in
   let v =
@@ -2558,6 +2562,7 @@ let test_fabric_pop_reassert () =
     | Th.Sat -> `Sat
     | Th.Propagations _ -> `Prop
     | Th.Split _ -> `Split
+    | Th.Lemma _ -> `Lemma
   in
   (* base: no edge is injectable (only x is fixed), so the frame is NOT unsat — the
      arrangement is simply undecided (a Split). The F3 property under test is
@@ -2940,6 +2945,7 @@ let test_stage2_pop_reassert () =
       | Th.Propagations lits ->
         List.iter (fun l -> Fab.assert_lit t l) lits;
         final (depth + 1)
+      | Th.Lemma _ -> `Unknown
       | Th.Split _ -> `Split)
   in
   let final () = final 0 in
@@ -2983,8 +2989,59 @@ let test_stage2_shared_ancestor_no_false_cycle () =
      | exception Cmb.Combination_unsound _ -> true)
 ;;
 
+(* CONTRACT-LEMMA (adr-0005-contract-lemma-erratum): a child's [Theory.Lemma] must be
+   FORWARDED verbatim through the combinator to the frozen seam — from EITHER child, at
+   BOTH efforts. The load-bearing arm is Lemma-at-Propagate: unlike a [Split] (illegal at
+   Propagate, so combine drops it into [Propagations]), a [Lemma] is a valid clause the
+   combinator must NOT drop — it is the LCG-serving path (and the LIA-cut-at-Propagate
+   path). We drive the real {!Cmock} functor with one child scripted to emit a signed
+   [Lemma] and assert the combinator returns exactly that [Lemma], not a swallowed
+   [Propagations]. Runs under whichever dispatch path is active ([check_off] when
+   OXSMT_NO_FABRIC is set, [check_on_drive] otherwise); the Makefile exercises both. *)
+let test_lemma_forwarding () =
+  let f = fixture () in
+  let cut = const f "lemma_cut" in
+  let ante = const f "lemma_ante" in
+  (* first = the asserted atom (positive), rest = negated antecedents *)
+  let lemma = [ cut, true; ante, false ] in
+  let lemma_eq got =
+    List.length got = List.length lemma
+    && List.for_all2
+         (fun (t1, s1) (t2, s2) -> Term.equal t1 t2 && Bool.equal s1 s2)
+         got
+         lemma
+  in
+  let drive ~who ~eff =
+    reset_mocks ();
+    (* default MockA: Propagate→Propagations[], Final→Sat — exactly what lets child B be
+       reached; for the child-A cases we override A to emit the Lemma itself. *)
+    (match who with
+     | `A -> MockA.check_fn := fun _ -> Th.Lemma lemma
+     | `B -> MockB.check_fn := fun _ -> Th.Lemma lemma);
+    let t = Cmock.create f.ctx f.env in
+    let name =
+      Printf.sprintf
+        "lemma-forward: child %s at %s ⇒ Theory.Lemma (not dropped)"
+        (match who with
+         | `A -> "A"
+         | `B -> "B")
+        (match eff with
+         | Th.Propagate -> "Propagate"
+         | Th.Final -> "Final")
+    in
+    match Cmock.check t eff with
+    | Th.Lemma got -> check name (lemma_eq got)
+    | Th.Sat | Th.Split _ | Th.Propagations _ | Th.Conflict _ -> check name false
+  in
+  drive ~who:`A ~eff:Th.Final;
+  drive ~who:`A ~eff:Th.Propagate;
+  drive ~who:`B ~eff:Th.Final;
+  drive ~who:`B ~eff:Th.Propagate
+;;
+
 let () =
   Printf.printf "== combine mechanics ==\n";
+  test_lemma_forwarding ();
   test_routing ();
   test_push_pop_lockstep ();
   test_propagate_merge ();
