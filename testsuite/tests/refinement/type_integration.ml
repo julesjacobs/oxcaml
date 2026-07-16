@@ -62,6 +62,29 @@ let () =
     (refined Predef.type_int "value" "positive")
     Predef.type_int
 
+let cyclic_refined head =
+  let cycle =
+    Btype.newgenvar
+      (Jkind.Builtin.value ~why:(Jkind.History.Unknown "unification cycle"))
+  in
+  let ref_view =
+    { rb_id = Ident.create_scoped ~scope:1 "cycle"; rb_type = cycle }
+  in
+  let ref_pred = predicate ref_view head in
+  set_type_desc cycle
+    (Trefine { ref_skeleton = cycle; ref_view; ref_pred });
+  cycle
+
+let () =
+  expect_unify
+    "distinct equal cyclic refinements"
+    (cyclic_refined "cyclic")
+    (cyclic_refined "cyclic");
+  expect_unify_failure
+    "distinct unequal cyclic refinements"
+    (cyclic_refined "left")
+    (cyclic_refined "right")
+
 let () =
   let generic =
     Btype.newgenvar

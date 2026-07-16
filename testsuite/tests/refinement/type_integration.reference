@@ -1,6 +1,8 @@
 unify accepts: alpha-equivalent view binders
 unify rejects: different predicates
 unify rejects: refined versus unrefined
+unify accepts: distinct equal cyclic refinements
+unify rejects: distinct unequal cyclic refinements
 instance: types copied consistently; binder stamp preserved
 graph traversal: skeleton, view, and predicate annotations
 occurs check: predicate annotation participates

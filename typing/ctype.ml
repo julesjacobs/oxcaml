@@ -5074,13 +5074,20 @@ and unify3 uenv t1 t1' t2 t2' =
   | (Tbox t1, Tbox t2) ->
       unify uenv t1 t2
   | (Trefine refinement1, Trefine refinement2) ->
-      if not
-           (Refinement.equal_desc
-              ~equal_type:(fun type1 type2 ->
-                unify uenv type1 type2;
-                true)
-              refinement1 refinement2)
-      then raise_unexplained_for Unify
+      let linked = not (in_pattern_mode uenv) in
+      if linked then link_type t1' t2 else add_type_equality uenv t1' t2';
+      begin try
+        if not
+             (Refinement.equal_desc
+                ~equal_type:(fun type1 type2 ->
+                  unify uenv type1 type2;
+                  true)
+                refinement1 refinement2)
+        then raise_unexplained_for Unify
+      with Unify_trace trace ->
+        if linked then Transient_expr.set_desc tt1' d1;
+        raise_trace_for Unify trace
+      end
   | (_, Tbox t2) when is_unboxable_ty (get_env uenv) t1' ->
       unify uenv (unbox_ty_exn (get_env uenv) t1') t2
   | (Tbox t1, _) when is_unboxable_ty (get_env uenv) t2' ->
