@@ -431,10 +431,14 @@ let notify_equality t (eq : Term.t) ~premise =
   | Bool_const true ->
     () (* [Context.eq] folded a true equality: tautology, no constraint *)
   | Bool_const false ->
-    (* [Context.eq] folded [c1 = c2], c1 <> c2: an unsatisfiable equality. *)
-    t.check_dirty <- true;
+    (* [Context.eq] folded [c1 = c2], c1 <> c2: an unsatisfiable equality. H3 (review
+       census-followups): set [check_dirty] only on the ON path — the OFF [raise] poisons
+       and discards the instance, so a pre-raise mutation is unobservable, but keeping it
+       out of the OFF branch makes [=0] byte-identical to trunk in internal state too. *)
     if trivial_eq_fix_on
-    then record_false ()
+    then (
+      t.check_dirty <- true;
+      record_false ())
     else raise (Unsupported "LIA: trivial equality (should be folded)")
   | _ ->
     (* Not an Int equality (defensive: the combinator only notifies Int-class merges);
@@ -494,6 +498,18 @@ let externalize (c : _ Simplex.conflict) : 'tok conflict =
   { premises; farkas }
 ;;
 
+(* First recorded [Trivially_false] premise across the live frames, or [None]. A positive
+   [Trivially_false] equality is a standalone UNSAT relation independent of the simplex
+   (its negation is a valid tautology); it persists until its frame is popped. Non-
+   allocating: [None] — the common ON case, and always on the OFF path where
+   [false_frames] stays [[[]]] — walks the shallow frame-list spine only. Shared by
+   {!check} and {!solve_integer} so both honor the frame-scoped conflict identically. *)
+let rec first_false_frame = function
+  | [] -> None
+  | [] :: rest -> first_false_frame rest
+  | (premise :: _) :: _ -> Some premise
+;;
+
 let check t =
   ensure_live t;
   (* A cube model is valid only within the single Final->model window that produced it;
@@ -504,15 +520,7 @@ let check t =
      [Conflict] before (and regardless of) the simplex scan; it persists until the frame
      is popped, exactly like a simplex infeasibility. Empty when {!trivial_eq_fix_on} is
      off, so this branch is inert on the OFF path (trunk). *)
-  (* Non-allocating scan for the first recorded [Trivially_false] premise (allocation on
-     the hot [check] path would tax near-wall files). All-empty (the common ON case, and
-     always on OFF) walks the shallow frame list and returns [None] with no allocation. *)
-  let rec first_false = function
-    | [] -> None
-    | [] :: rest -> first_false rest
-    | (premise :: _) :: _ -> Some premise
-  in
-  match first_false t.false_frames with
+  match first_false_frame t.false_frames with
   | Some premise -> Conflict { premises = [ premise ]; farkas = [] }
   | None ->
     (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
@@ -1497,62 +1505,71 @@ let cube_model t =
 
 let solve_integer ?(budget = default_budget) t =
   ensure_live t;
-  (* B&B pushes/asserts/pops simplex bounds directly (bypassing [assert_atom]); DdM does
-     not restore VALUES on [pop], so the assignment left behind need not be feasible for
-     the restored bounds. Force any later [check] to re-run rather than trust the gate. *)
-  t.check_dirty <- true;
-  let splits = ref 0 in
-  (* [root_conflict] captures a ℚ-level conflict found with no branch in scope, so a
-     genuine single-Farkas certificate can be surfaced. *)
-  let root_conflict = ref None in
-  let rec dfs ~depth0 =
-    match Simplex.check t.simplex with
-    | Some c ->
-      if depth0 then root_conflict := Some (externalize c);
-      `Unsat
-    | None ->
-      (match first_non_integer t with
-       | None -> `Sat (extract_model t)
-       | Some (_, id, d) ->
-         if !splits >= budget
-         then `Unknown
-         else (
-           incr splits;
-           let f = Rational.floor (Delta.c_part d) in
-           let lo = Delta.of_rat (Rational.of_int f) in
-           (* f+1 via [Rational]: a branch point at the int boundary degrades to
-              [Int_unknown] (the projection raises), not a bogus wrapped bound (codex
-              L2/L4/L5 class). *)
-           let hi = Delta.of_rat (Rational.add (Rational.of_int f) Rational.one) in
-           Simplex.push t.simplex;
-           let _ = Simplex.assert_upper t.simplex id lo (Branch id) in
-           let r1 = dfs ~depth0:false in
-           Simplex.pop t.simplex 1;
-           match r1 with
-           | (`Sat _ | `Unknown) as r -> r
-           | `Unsat ->
+  (* H2 (review census-followups): honor a frame-scoped [Trivially_false] equality here
+     too, symmetric with {!check}. Such an equality records a [false_frames] premise but
+     adds no simplex bound, so a simplex-only scan below would return a wrong [Int_sat].
+     This driver is product-unused today (lia_adapter.mli: the live path calls {!check}
+     first), but the guard removes the latent trap for any future caller. Empty on the OFF
+     path (trunk). *)
+  match first_false_frame t.false_frames with
+  | Some premise -> Int_unsat (Some { premises = [ premise ]; farkas = [] })
+  | None ->
+    (* B&B pushes/asserts/pops simplex bounds directly (bypassing [assert_atom]); DdM does
+       not restore VALUES on [pop], so the assignment left behind need not be feasible for
+       the restored bounds. Force any later [check] to re-run rather than trust the gate. *)
+    t.check_dirty <- true;
+    let splits = ref 0 in
+    (* [root_conflict] captures a ℚ-level conflict found with no branch in scope, so a
+       genuine single-Farkas certificate can be surfaced. *)
+    let root_conflict = ref None in
+    let rec dfs ~depth0 =
+      match Simplex.check t.simplex with
+      | Some c ->
+        if depth0 then root_conflict := Some (externalize c);
+        `Unsat
+      | None ->
+        (match first_non_integer t with
+         | None -> `Sat (extract_model t)
+         | Some (_, id, d) ->
+           if !splits >= budget
+           then `Unknown
+           else (
+             incr splits;
+             let f = Rational.floor (Delta.c_part d) in
+             let lo = Delta.of_rat (Rational.of_int f) in
+             (* f+1 via [Rational]: a branch point at the int boundary degrades to
+                [Int_unknown] (the projection raises), not a bogus wrapped bound (codex
+                L2/L4/L5 class). *)
+             let hi = Delta.of_rat (Rational.add (Rational.of_int f) Rational.one) in
              Simplex.push t.simplex;
-             let _ = Simplex.assert_lower t.simplex id hi (Branch id) in
-             let r2 = dfs ~depth0:false in
+             let _ = Simplex.assert_upper t.simplex id lo (Branch id) in
+             let r1 = dfs ~depth0:false in
              Simplex.pop t.simplex 1;
-             r2))
-  in
-  (* Native-int incompleteness ceiling (I8): DdM pivoting and Farkas combinations grow
-     coefficients internally, so guarded rational arithmetic can overflow mid-solve on
-     small, non-adversarial inputs. Raising is sound; here — the complete decision driver
-     — we degrade that to [Int_unknown] and count it as a distinct stat so a benchmark
-     pass-rate gap is attributable, not a mystery. The fix is arbitrary-precision
-     rationals (tracked as the core-bignum row, post-M4). *)
-  match dfs ~depth0:true with
-  | `Sat m -> Int_sat m
-  | `Unknown -> Int_unknown
-  | `Unsat -> Int_unsat !root_conflict
-  | exception Rational.Overflow ->
-    (* Poison regardless of where the overflow arose (mid-pivot via Simplex.guarded, or a
-       branch-point iadd here): the instance is not safe to reuse. *)
-    Simplex.poison t.simplex;
-    t.overflows <- t.overflows + 1;
-    Int_unknown
+             match r1 with
+             | (`Sat _ | `Unknown) as r -> r
+             | `Unsat ->
+               Simplex.push t.simplex;
+               let _ = Simplex.assert_lower t.simplex id hi (Branch id) in
+               let r2 = dfs ~depth0:false in
+               Simplex.pop t.simplex 1;
+               r2))
+    in
+    (* Native-int incompleteness ceiling (I8): DdM pivoting and Farkas combinations grow
+       coefficients internally, so guarded rational arithmetic can overflow mid-solve on
+       small, non-adversarial inputs. Raising is sound; here — the complete decision
+       driver — we degrade that to [Int_unknown] and count it as a distinct stat so a
+       benchmark pass-rate gap is attributable, not a mystery. The fix is
+       arbitrary-precision rationals (tracked as the core-bignum row, post-M4). *)
+    (match dfs ~depth0:true with
+     | `Sat m -> Int_sat m
+     | `Unknown -> Int_unknown
+     | `Unsat -> Int_unsat !root_conflict
+     | exception Rational.Overflow ->
+       (* Poison regardless of where the overflow arose (mid-pivot via Simplex.guarded, or
+          a branch-point iadd here): the instance is not safe to reuse. *)
+       Simplex.poison t.simplex;
+       t.overflows <- t.overflows + 1;
+       Int_unknown)
 ;;
 
 (* Incremental bound-to-bound propagation (delta). Report only the atoms whose entailment

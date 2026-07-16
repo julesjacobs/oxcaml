@@ -1113,6 +1113,21 @@ let test_notify_equality () =
      (match Lia.notify_equality fx.solver eq_true ~premise:0 with
       | () -> true
       | exception _ -> false));
+  (* H2 (review census-followups): [solve_integer] must honor a frame-scoped
+     [Trivially_false] equality too. Such an equality records a [false_frames] premise but
+     adds NO simplex bound, so the driver's simplex-only DFS would return a wrong
+     [Int_sat] (x0=0). The entry guard (symmetric with {!Lia.check}) reports [Int_unsat]
+     instead. Discriminating: RED against the pre-guard driver (Int_sat) — the whole point
+     of the hedge. *)
+  (let fx = make_fixture 1 in
+   let x0 = fx.vars.(0) in
+   let x0p3 = Context.linear_combination fx.ctx [ 1, x0 ] 3 in
+   Lia.notify_equality fx.solver (Context.eq fx.ctx x0 x0p3) ~premise:0;
+   check
+     "notify: solve_integer honors false_frames (0=3 -> Int_unsat, not wrong Int_sat)"
+     (match Lia.solve_integer fx.solver with
+      | Lia.Int_unsat _ -> true
+      | Lia.Int_sat _ | Lia.Int_unknown -> false));
   (* tautology re-notification is a NO-OP (does not raise, does not perturb feasibility):
      a syntactic identity x0=x0 folds to a Bool constant and is skipped; the query stays
      sat. *)

@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -283,6 +283,27 @@ loud-unknown-test:
 	  case "$$err" in *"(unknown-reason "*) \
 	    echo "loud-unknown-test: OK reason on stderr -> [$$err]" ;; *) \
 	    echo "loud-unknown-test: FAIL no (unknown-reason ...) on stderr (loudness lost): [$$err]"; fail=1;; esac; \
+	  test $$fail -eq 0
+
+## lia-trivial-eq-test (task #78 follow-up, review H1) — OXSMT_LIA_TRIVIAL_EQ is read once at
+##   module load, so no single in-process build sees both flag states; the OFF Unsupported-
+##   raise path (trunk behaviour) has no unit coverage. This drives the real CLI on a
+##   trivial-false LIA equality ([x = x + 1] -> [0 = 1]) in BOTH env states and asserts the
+##   documented verdicts: default (fix ON) -> unsat (frame-scoped empty-Farkas conflict); with
+##   OXSMT_LIA_TRIVIAL_EQ=0 -> unknown (the trunk raise -> CONTRACT-POISON firewall). RED
+##   against a reverted fix (ON would give unknown, not unsat); nonzero exit on any mismatch.
+lia-trivial-eq-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; \
+	  f=tests/cases/lia_trivial_false_eq_unsat.smt2; fail=0; \
+	  on=$$($$cli $$f 2>/dev/null | grep -o 'verdict [a-z]*' | awk '{print $$2}'); \
+	  off=$$(OXSMT_LIA_TRIVIAL_EQ=0 $$cli $$f 2>/dev/null | grep -o 'verdict [a-z]*' | awk '{print $$2}'); \
+	  if [ "$$on" != "unsat" ]; then \
+	    echo "lia-trivial-eq-test: FAIL default(ON): want unsat, got $${on:-<none>}"; fail=1; \
+	  else echo "lia-trivial-eq-test: OK default(ON) -> unsat"; fi; \
+	  if [ "$$off" != "unknown" ]; then \
+	    echo "lia-trivial-eq-test: FAIL OXSMT_LIA_TRIVIAL_EQ=0: want unknown, got $${off:-<none>}"; fail=1; \
+	  else echo "lia-trivial-eq-test: OK OXSMT_LIA_TRIVIAL_EQ=0 -> unknown (trunk raise path)"; fi; \
 	  test $$fail -eq 0
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
@@ -752,6 +773,7 @@ test: check-frozen
 	@# euf-test/euf-adapter-test run their OXSMT_EUF_SELF_CHECK oracle cross-check, which is
 	@# already bounded (fixed-seed, small N; ~0.04s) so no separate smoke variant is needed.
 	$(MAKE) lia-test
+	$(MAKE) lia-trivial-eq-test
 	$(MAKE) lia-adapter-test
 	$(MAKE) hnf-test
 	$(MAKE) cut-budget-test
