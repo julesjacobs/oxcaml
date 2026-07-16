@@ -1487,6 +1487,38 @@ module Refinement = struct
     in
     map expression
 
+  let map_locs f expression =
+    let rec map expression =
+      let rexp_desc =
+        match expression.rexp_desc with
+        | (Rexp_ident _ | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          Rexp_let
+            ( List.map
+                (fun binding ->
+                  { binding with rbind_expr = map binding.rbind_expr })
+                bindings,
+              map body )
+        | Rexp_function { arg_label; param; body } ->
+          Rexp_function { arg_label; param; body = map body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            (map function_,
+             List.map
+               (fun (label, argument) -> label, map argument)
+               arguments)
+        | Rexp_tuple fields ->
+          Rexp_tuple (List.map (fun (label, field) -> label, map field) fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct (constructor, List.map map arguments)
+        | Rexp_field (record, field) -> Rexp_field (map record, field)
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse (map condition, map ifso, Option.map map ifnot)
+      in
+      { expression with rexp_desc; rexp_loc = f expression.rexp_loc }
+    in
+    map expression
+
   let map_paths ~value_path ~type_path expression =
     let map_reference = function
       | Rapp path -> Rapp (value_path path)
