@@ -129,6 +129,8 @@ typing_SOURCES = \
   typing/signature_group.mli typing/signature_group.ml \
   typing/printtyped.mli typing/printtyped.ml \
   typing/ctype.mli typing/ctype.ml \
+  typing/vox_vc.mli typing/vox_vc.ml \
+  typing/vox_lean.mli typing/vox_lean.ml \
   typing/printtyp.mli typing/printtyp.ml \
   typing/includeclass.mli typing/includeclass.ml \
   typing/mtype.mli typing/mtype.ml \
