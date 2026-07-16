@@ -1030,8 +1030,13 @@ let test_codex_findings () =
 (* notify_equality (ADR-0014 Stage 2 fabric new_eq) exactness — the review center of
    gravity: a re-notified equality whose variable combination cancels must be handled
    EXACTLY by sub-case. 0=0 (tautology) is a sound NO-OP; 0=k (k<>0) is UNSATISFIABLE and
-   must fail closed (raise -> unknown), never a silent no-op (that would be a
-   wrong-verdict hole). A genuine equality is asserted as usual. *)
+   must be CAUGHT, never a silent no-op (that would be a wrong-verdict hole). Under the
+   task #78 default-ON [trivial_eq_fix_on] the catch is a {!Lia.check} [Conflict] (the
+   query keeps its verdict instead of poisoning to [unknown]); with
+   [OXSMT_LIA_TRIVIAL_EQ=0] it is the pre-fix [Unsupported] raise. These in-process tests
+   exercise the default-ON path (the flag is read once at module load); the OFF raise is
+   covered by the manual wisa OFF run in logs/unknown-census-followups.md. A genuine
+   equality is asserted as usual. *)
 let test_notify_equality () =
   print_endline "notify_equality exactness:";
   (* 0=k contradiction: x0 = x0 + 3. This is the case the lazy-split prototype
@@ -1046,9 +1051,13 @@ let test_notify_equality () =
      (match eq_false.Term.node with
       | Term.Eq _ -> true
       | _ -> false);
-   check_raises
-     "notify: 0=3 contradiction fails closed (raises, not silently dropped)"
-     (fun () -> Lia.notify_equality fx.solver eq_false ~premise:0));
+   Lia.notify_equality fx.solver eq_false ~premise:0;
+   check
+     "notify: 0=3 contradiction caught as a check Conflict (default-ON; not dropped, not \
+      poison)"
+     (match Lia.check fx.solver with
+      | Lia.Conflict _ -> true
+      | Lia.Sat_candidate -> false));
   (* genuine equality x0=x1 IS asserted (not skipped): pin x0=5, x1=7, notify x0=x1,
      expect the tableau to become infeasible. *)
   (let fx = make_fixture 2 in
@@ -1082,9 +1091,13 @@ let test_notify_equality () =
      (match eq01.Term.node with
       | Term.Bool_const false -> true
       | _ -> false);
-   check_raises
-     "notify: folded 0=1 contradiction fails closed (raises, not dropped)"
-     (fun () -> Lia.notify_equality fx.solver eq01 ~premise:0));
+   Lia.notify_equality fx.solver eq01 ~premise:0;
+   check
+     "notify: folded 0=1 contradiction caught as a check Conflict (default-ON; not \
+      dropped)"
+     (match Lia.check fx.solver with
+      | Lia.Conflict _ -> true
+      | Lia.Sat_candidate -> false));
   (* a TRUE-folded identity (Context.eq of a term with itself -> Bool_const true) is a
      no-op: it does not raise. *)
   (let fx = make_fixture 1 in

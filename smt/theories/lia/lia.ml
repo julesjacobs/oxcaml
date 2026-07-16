@@ -87,6 +87,16 @@ type 'tok t =
          [(lhs, rhs, premise)], mirroring [report_frames]' framing so a [pop] drops
          exactly the equalities asserted in the unwound frames. Read by
          {!diophantine_conflict}. *)
+  ; mutable false_frames : 'tok list list
+      (* task #78 follow-up: push/pop stack (head = current frame) of premises of asserted
+         positive Int equalities that read [Trivially_false] ([0 = k], k <> 0) — an
+         UNSATISFIABLE relation preprocessing did not fold (the nec/wisa dense-disequality
+         shape, where [?v_i = ?v_j] over [ZERO_ + const] terms cancels the variable to a
+         nonzero constant). A non-empty frame makes {!check} report a [Conflict] on that
+         premise instead of {!constraints_of_atom} raising [Unsupported] and poisoning the
+         whole query to [unknown]. Mirrors [eq_frames]' framing (plain frame-drop on
+         [pop]; carries no simplex state). Only ever populated when {!trivial_eq_fix_on};
+         stays empty otherwise, so the OFF path is byte-for-byte trunk. *)
   ; mutable cube_tried : bool
   (* the cube test runs at most ONCE per instance — the first non-integral Final, which
      for a batch query is the b&b root (fat feasible regions are cracked there). This
@@ -96,6 +106,22 @@ type 'tok t =
   }
 
 let default_budget = 2000
+
+(* task #78 follow-up (verdict-affecting, tri-state, default-ON): a POSITIVE Int equality
+   whose two sides differ only by a constant (variables cancel) reads [Trivially_true]
+   ([0 = 0]) or [Trivially_false] ([0 = k], k <> 0). Preprocessing is SUPPOSED to fold
+   such atoms, but the [?v_i = ?v_j] shape over [ZERO_ + const] terms (nec/wisa) is not
+   folded by [Context.eq] (it only folds literal constants) and reaches {!assert_atom},
+   where the trunk raises [Unsupported] and poisons the whole query to [unknown] (census
+   task #78: QF_LIA/wisa ×5). ON: [Trivially_true] -> no-op (a tautology adds no
+   constraint), [Trivially_false] -> a frame-scoped [check] conflict (sound: the literal
+   is globally false, so its negation is a valid lemma; R1 remains the backstop). OFF
+   ([=0]): the exact trunk raise, byte-for-byte. Read once. *)
+let trivial_eq_fix_on =
+  match Sys.getenv_opt "OXSMT_LIA_TRIVIAL_EQ" with
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
+;;
 
 let create ctx =
   { ctx
@@ -113,6 +139,7 @@ let create ctx =
   ; overflows = 0
   ; last_cube_model = None
   ; eq_frames = [ [] ]
+  ; false_frames = [ [] ]
   ; cube_tried = false
   }
 ;;
@@ -334,7 +361,22 @@ let assert_atom t atom ~polarity ~premise =
       | [] -> t.eq_frames <- [ [ a, b, premise ] ])
    | _ -> ());
   guard_overflow t (fun () ->
-    apply_bounds t (constraints_of_atom t atom ~polarity) ~premise)
+    match (atom : Term.t).node with
+    | Eq (a, b) when trivial_eq_fix_on && polarity && not (Sort.equal a.sort Sort.bool) ->
+      (* task #78 follow-up: handle a positive Int equality that preprocessing left
+         un-folded but whose variables cancel to a constant, INSTEAD of the trunk
+         [Unsupported] raise (which poisons the query to [unknown]). *)
+      (match equality_reading t a b with
+       | Trivially_true -> () (* [0 = 0]: a tautology contributes no LIA constraint *)
+       | Trivially_false ->
+         (* [0 = k], k <> 0: the asserted equality is globally UNSAT. Record its premise
+            so {!check} reports a [Conflict] on it (never silently dropped — that would be
+            a wrong-verdict hole). The SAT core then learns the negation and backtracks. *)
+         (match t.false_frames with
+          | fr :: rest -> t.false_frames <- (premise :: fr) :: rest
+          | [] -> t.false_frames <- [ [ premise ] ])
+       | Bounds cs -> apply_bounds t cs ~premise)
+    | _ -> apply_bounds t (constraints_of_atom t atom ~polarity) ~premise)
 ;;
 
 (* ADR-0014 Stage 2 fabric [new_eq] entry: assert an EUF-entailed positive Int equality
@@ -361,6 +403,18 @@ let assert_atom t atom ~polarity ~premise =
    the folded path). *)
 let notify_equality t (eq : Term.t) ~premise =
   ensure_live t;
+  (* task #78 follow-up: record a [Trivially_false] merge-surfaced equality as a frame-
+     scoped [check] conflict (like {!assert_atom}) instead of raising [Unsupported] and
+     poisoning the query. The trunk comment argued the raise was "sound" because
+     find_disagreement re-surfaces and splits the pair reaching the SAME raise — but that
+     path still degrades to [unknown] (census task #78: nec/wisa merge exactly this
+     shape). Recording the conflict is sound (the merged equality is globally false → its
+     negation is valid) and complete. OFF ([=0]): the exact trunk raise. *)
+  let record_false () =
+    match t.false_frames with
+    | fr :: rest -> t.false_frames <- (premise :: fr) :: rest
+    | [] -> t.false_frames <- [ [ premise ] ]
+  in
   match eq.node with
   | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
     t.check_dirty <- true;
@@ -369,15 +423,19 @@ let notify_equality t (eq : Term.t) ~premise =
       | Trivially_true -> () (* [0 = 0] re-notification: no LIA constraint, skip *)
       | Trivially_false ->
         (* [0 = k], k <> 0: unsatisfiable — must NOT be silently dropped (wrong-verdict
-           hole). Fail closed, exactly like {!assert_atom}. *)
-        raise (Unsupported "LIA: trivial equality (should be folded)")
+           hole). *)
+        if trivial_eq_fix_on
+        then record_false ()
+        else raise (Unsupported "LIA: trivial equality (should be folded)")
       | Bounds cs -> apply_bounds t cs ~premise)
   | Bool_const true ->
     () (* [Context.eq] folded a true equality: tautology, no constraint *)
   | Bool_const false ->
-    (* [Context.eq] folded [c1 = c2], c1 <> c2: an unsatisfiable equality. Fail closed
-       (symmetric with [Trivially_false]); never silently drop it. *)
-    raise (Unsupported "LIA: trivial equality (should be folded)")
+    (* [Context.eq] folded [c1 = c2], c1 <> c2: an unsatisfiable equality. *)
+    t.check_dirty <- true;
+    if trivial_eq_fix_on
+    then record_false ()
+    else raise (Unsupported "LIA: trivial equality (should be folded)")
   | _ ->
     (* Not an Int equality (defensive: the combinator only notifies Int-class merges);
        fall back to the strict assert so any genuinely unhandled shape still degrades
@@ -441,20 +499,28 @@ let check t =
   (* A cube model is valid only within the single Final->model window that produced it;
      clear it here so a later (non-cube) Sat can never read a stale point. *)
   t.last_cube_model <- None;
-  (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
-     feasible check. The tableau/assignment the previous [check] certified feasible is
-     still current (no assert/pop happened), so returning [Sat_candidate] re-certifies the
-     SAME feasible state — never an unrepaired one (the DdM invariants held then and
-     nothing has touched them since). A [Conflict] leaves [check_dirty] set so the
-     engine's backtrack (which [pop]s -> re-dirties) forces a real re-check. *)
-  if not t.check_dirty
-  then Sat_candidate
-  else (
-    match Simplex.check t.simplex with
-    | None ->
-      t.check_dirty <- false;
-      Sat_candidate
-    | Some c -> Conflict (externalize c))
+  (* task #78 follow-up: a positive [Trivially_false] equality asserted in a still-live
+     frame is a standalone UNSAT relation independent of the simplex. Report it as a
+     [Conflict] before (and regardless of) the simplex scan; it persists until the frame
+     is popped, exactly like a simplex infeasibility. Empty when {!trivial_eq_fix_on} is
+     off, so this branch is inert on the OFF path (trunk). *)
+  match List.concat t.false_frames with
+  | premise :: _ -> Conflict { premises = [ premise ]; farkas = [] }
+  | [] ->
+    (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
+       feasible check. The tableau/assignment the previous [check] certified feasible is
+       still current (no assert/pop happened), so returning [Sat_candidate] re-certifies
+       the SAME feasible state — never an unrepaired one (the DdM invariants held then and
+       nothing has touched them since). A [Conflict] leaves [check_dirty] set so the
+       engine's backtrack (which [pop]s -> re-dirties) forces a real re-check. *)
+    if not t.check_dirty
+    then Sat_candidate
+    else (
+      match Simplex.check t.simplex with
+      | None ->
+        t.check_dirty <- false;
+        Sat_candidate
+      | Some c -> Conflict (externalize c))
 ;;
 
 let rational_value t (term : Term.t) =
@@ -1549,7 +1615,8 @@ let push t =
   ensure_live t;
   Simplex.push t.simplex;
   t.report_frames <- [] :: t.report_frames;
-  t.eq_frames <- [] :: t.eq_frames
+  t.eq_frames <- [] :: t.eq_frames;
+  t.false_frames <- [] :: t.false_frames
 ;;
 
 let pop t n =
@@ -1592,6 +1659,14 @@ let pop t n =
   in
   t.eq_frames
   <- (match drop_eq n t.eq_frames with
+      | [] -> [ [] ]
+      | fs -> fs);
+  (* task #78 follow-up: drop the [Trivially_false] premises recorded in the unwound
+     frames (same plain frame-drop as [eq_frames]; no simplex state). This is what
+     retracts the [check] conflict once the SAT core backtracks past the frame that
+     asserted the unsatisfiable equality. Inert (always [[]]) on the OFF path. *)
+  t.false_frames
+  <- (match drop_eq n t.false_frames with
       | [] -> [ [] ]
       | fs -> fs)
 ;;
