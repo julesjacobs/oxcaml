@@ -76,10 +76,10 @@ type mock_config =
 
 let empty_config = { conflicts = []; implications = []; final_splits = [] }
 
-let make_mock st config =
+let make_mock _st config =
   let trail = ref [] in
   let is_true l = List.exists (fun (x, _) -> x = l) !trail in
-  let on_assign l = trail := (l, Sat.decision_level st) :: !trail in
+  let on_assign l ~level = trail := (l, level) :: !trail in
   let on_backtrack ~level = trail := List.filter (fun (_, lv) -> lv <= level) !trail in
   let all_true ls = List.for_all is_true ls in
   let pending_splits = ref config.final_splits in

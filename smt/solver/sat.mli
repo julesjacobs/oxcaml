@@ -225,13 +225,27 @@ type theory_result =
   | T_lemma of lit list list
   (** clauses to add mid-solve: CONTRACT-SPLIT disjunctions (a B&B branch or an N-O
       ℤ-trichotomy). Each inner list is one clause over atoms the adapter has already
-      internalized via {!new_var}. Returned at [~final:true] (a Final-effort Split). *)
+      internalized via {!new_var}. Returned at [~final:true] as a Final-effort Split (a
+      B&B branch / N-O trichotomy) OR at [~final:false] as a first-class Propagate-effort
+      lemma (e.g. a derived cut or a lazy bound clause): the core accepts a Propagate
+      lemma, adds it, and re-propagates to fixpoint (H2 reconcile — the CONTRACT-LEMMA
+      lane delivers lemmas at Propagate effort). *)
 
 type theory =
-  { on_assign : lit -> unit
+  { on_assign : lit -> level:int -> unit
     (** trail-extension notify: [lit] was just placed on the trail (decision, propagation,
-      assumption, or learned unit). Fires in trail order. The adapter forwards its own
-      atoms to [THEORY.assert_lit] and ignores the rest. *)
+      assumption, or learned unit) at its TRUE decision level [level]. Fires in trail
+      order. The adapter forwards its own atoms to [THEORY.assert_lit] and ignores the
+      rest.
+
+      [level] is the level at which [lit] BELONGS — the value {!decision_level} returns on
+      a monotone trail, but NOT under chronological backtracking (ADR-0005 §3 / fabric S4
+      seam), where a learned unit is enqueued at its backjump level [bt] while the solver
+      still sits at a higher level [d]. The core PUSHES the true level (rather than the
+      adapter pulling {!decision_level}) so a scope-aware adapter files each assertion in
+      its true-level scope and cannot silently mis-file it under a non-monotone trail. On
+      a monotone trail [level = decision_level t] exactly, so every existing adapter is
+      byte-identical. *)
   ; on_backtrack : level:int -> unit
     (** backjump notify: the trail has just been unwound to decision [level]. The adapter
       forwards to [THEORY.pop], discarding theory state asserted above [level]. Fires on
@@ -283,10 +297,12 @@ val set_theory : t -> theory option -> unit
     counter trio are unchanged. *)
 val set_budget_tick : t -> (unit -> unit) option -> unit
 
-(** The current decision level (0 at the base, before any decision). Exposed so a theory
-    adapter can tag each {!field-on_assign}ed literal with the level at which it was
-    asserted — the level {!field-on_backtrack} later references to undo trail-synchronized
-    theory state. Reading it inside [on_assign] is a pure query (no re-entrancy). *)
+(** The solver's CURRENT decision level (0 at the base, before any decision). This is the
+    top of the trail, NOT necessarily the level of the literal being assigned: under
+    chronological backtracking a literal can be enqueued at a lower true level while the
+    solver sits here. A theory adapter that needs a literal's true level reads the
+    [~level] argument {!field-on_assign} now carries (which equals [decision_level t] on a
+    monotone trail); [decision_level] itself is a pure query with no re-entrancy. *)
 val decision_level : t -> int
 
 (** {2 Decision branch-filter hook (relevancy)}

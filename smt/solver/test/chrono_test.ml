@@ -333,7 +333,12 @@ let build_conflict_mock num_vars clauses constraints =
       Array.blit !frames 0 f 0 (Array.length !frames);
       frames := f)
   in
-  let on_assign l =
+  (* This mock deliberately frames by [decision_level] (not the new [~level]) to keep
+     testing the CB REBUILD path: under the rebuild the core replays every survivor at the
+     backtrack target level, and the mock must track that. The delivered [~level] is
+     ignored here; the true-level delivery itself is checked by
+     [test_true_level_delivery]. *)
+  let on_assign l ~level:_ =
     let dl = Sat.decision_level s in
     ensure_frames dl;
     while !mock_level < dl do
@@ -478,7 +483,9 @@ let build_prop_mock num_vars clauses constraints =
       if !mock_level > 0
       then !cache_frames.(!mock_level - 1) <- k :: !cache_frames.(!mock_level - 1))
   in
-  let on_assign l =
+  (* frames by [decision_level] (see the sibling mock): tests the rebuild + reason cache,
+     so the new [~level] is ignored here. *)
+  let on_assign l ~level:_ =
     let dl = Sat.decision_level s in
     ensure dl;
     while !mock_level < dl do
@@ -580,6 +587,95 @@ let test_prop_seam n =
     (!raises = 0)
 ;;
 
+(* TRUE-LEVEL DELIVERY (fabric S4.1 seam), RED-verified, PER-SITE. [on_assign] must hand the
+   theory a literal's TRUE decision level from BOTH firing sites. Under CB the trail is
+   non-monotone, so a delivered true level can be STRICTLY BELOW [decision_level]:
+   - ENQUEUE site ([unchecked_enqueue]): a learned unit enqueued at its backjump level while
+     the solver still sits at a higher level;
+   - REPLAY site (the chrono [cancel_until] rebuild): a survivor whose true level is below the
+     backtrack target, re-asserted while [decision_level] equals that (higher) target.
+   A conforming seam delivers the true level at each; the pre-S4 pull ([Sat.decision_level])
+   delivers the current level at both.
+
+   This observer attributes each delivery to a site WITHOUT a trail accessor: the chrono
+   rebuild fires [on_backtrack ~level:0] then replays the surviving trail, so between a
+   backtrack and the first NON-survivor delivery every fact is a replay of a literal held
+   before the backtrack ([pre_bt]); the first delivery not in [pre_bt] (the freshly learned
+   unit) ends the replay window and is an enqueue. It then requires a below-current delivery
+   at EACH site independently, plus one delivery equal to a positive current level.
+
+   RED, each mutation-killed INDEPENDENTLY: enqueue site -> [decision_level t] fails
+   [saw_below_enqueue]; replay site -> [decision_level t] fails [saw_below_replay]; an
+   always-zero delivery fails [saw_level_eq_current_pos] (0 never equals a positive current
+   level). [level <= decision_level] (a true level is never ABOVE current) is also asserted.
+   The observer never conflicts or propagates, so it cannot change the verdict. Own fixed seed
+   so it is placement-independent and reproducible. *)
+let test_true_level_delivery n =
+  let saved_lcg = !lcg in
+  lcg := 0x1E3779B97F4A7C16;
+  let key l = (Sat.var_of_lit l * 2) + if Sat.sign_of_lit l then 1 else 0 in
+  let saw_below_enqueue = ref false in
+  let saw_below_replay = ref false in
+  let saw_level_eq_current_pos = ref false in
+  let level_above_current = ref 0 in
+  for _ = 1 to n do
+    let num_vars, clauses = gen_dense () in
+    let s = Sat.create () in
+    for _ = 1 to num_vars do
+      ignore (Sat.new_var s : int)
+    done;
+    let view = ref (Hashtbl.create 64) in
+    let pre_bt = ref (Hashtbl.create 64) in
+    let replaying = ref false in
+    let on_assign l ~level =
+      let dl = Sat.decision_level s in
+      (* a replay re-asserts a survivor held before the backtrack; the first delivery not in
+         [pre_bt] is the freshly learned unit and ends the replay window *)
+      let is_replay = !replaying && Hashtbl.mem !pre_bt (key l) in
+      if !replaying && not (Hashtbl.mem !pre_bt (key l)) then replaying := false;
+      if level > dl then incr level_above_current;
+      if level = dl && dl > 0 then saw_level_eq_current_pos := true;
+      if level < dl
+      then if is_replay then saw_below_replay := true else saw_below_enqueue := true;
+      Hashtbl.replace !view (key l) ()
+    in
+    let on_backtrack ~level:_ =
+      pre_bt := !view;
+      view := Hashtbl.create 64;
+      replaying := true
+    in
+    let check ~final:_ =
+      replaying := false;
+      Sat.T_consistent []
+    in
+    Sat.set_theory
+      s
+      (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []) });
+    List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
+    ignore (Sat.solve s : Sat.result)
+  done;
+  lcg := saved_lcg;
+  check
+    (Printf.sprintf
+       "true-level: ENQUEUE site delivered a below-current true level over %d CB \
+        formulas (kills enqueue-site decision_level mutant)"
+       n)
+    !saw_below_enqueue;
+  check
+    "true-level: REPLAY site delivered a below-current true level (kills replay-site \
+     decision_level mutant)"
+    !saw_below_replay;
+  check
+    "true-level: some delivery equals a positive current level (kills always-zero mutant)"
+    !saw_level_eq_current_pos;
+  check
+    (Printf.sprintf
+       "true-level: delivered level is never above the current decision level (%d \
+        violations)"
+       !level_above_current)
+    (!level_above_current = 0)
+;;
+
 (* F-core, RED-verified: [failed_assumptions] must be a SUBSET of the assumptions (frozen
    sat.mli contract). Under CB, [analyze_final]'s whole-trail walk must SKIP level-0
    literals; a level-0 UNIT is enqueued with reason [Decision] ([add_clause] / a learned
@@ -641,6 +737,7 @@ let () =
   test_directed 3000;
   test_seam_replay 4000;
   test_prop_seam 4000;
+  test_true_level_delivery 4000;
   test_failed_assumptions_subset ();
   test_determinism 500;
   Printf.printf "chrono_test: %d checks, %d failures\n" !checks !failures;

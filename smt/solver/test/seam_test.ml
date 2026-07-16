@@ -119,7 +119,9 @@ let make_mock st config =
   let invariant_ok = ref true in
   let is_true l = List.exists (fun (x, _) -> x = l) !trail in
   let is_false l = is_true (Sat.neg_lit l) in
-  let on_assign l = trail := (l, Sat.decision_level st) :: !trail in
+  (* tag each fact with the TRUE level the seam now delivers (= [decision_level] here, as
+     these tests use no chronological backtracking) *)
+  let on_assign l ~level = trail := (l, level) :: !trail in
   let on_backtrack ~level =
     incr backtracks;
     (* the seam fires on_backtrack after unwinding the Boolean trail, so the solver's

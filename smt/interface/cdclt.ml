@@ -9,7 +9,7 @@
    variables; the frozen THEORY speaks [Atom.t]/[Lit.t]. Each theory atom is minted 1:1
    with a SAT var (CONTRACT-ATOM). This module owns that bijection ([v2a]/[a2v]) plus the
    atom->term map the theory needs, and translates every seam event:
-   - [on_assign lit]: forward the (registered) atom's signed literal to the theory
+   - [on_assign lit ~level]: forward the (registered) atom's signed literal to the theory
      ([assert_lit]); ignore non-atom vars (Tseitin aux, frame selectors, boolean vars).
    - [check ~final]: run the combined theory at [Propagate]/[Final] effort and map its
      {!Oxsmt_core.Theory.check_result} onto {!Oxsmt_solver.Sat.theory_result}. A [Split]
@@ -357,15 +357,23 @@ let sync_level t =
    routes the trail seam events below to the driver. *)
 let set_relevancy t r = t.relevancy <- r
 
-let on_assign t l =
+(* [~level] is [l]'s TRUE decision level, pushed by the SAT core (fabric S4 seam). On a
+   monotone trail it equals [Sat.decision_level t.sat] (so this is byte-identical to the
+   pre-S4 glue, which read that); under chronological backtracking it is [l]'s own
+   backjump level, which can be BELOW the current decision level. We forward it to
+   relevancy verbatim (a latent-correctness fix: the old code passed the CURRENT level,
+   wrong for a below-current CB assignment). The theory-atom assertion below still files
+   into the TOP frame: the child theories (Combined/Dt/Arr) are strictly LIFO scope
+   stacks, so an assertion cannot be filed into a lower (non-top) true-level frame without
+   breaking LIFO order — true-level filing / scope-aware undo needs the S4.0 sub-frame
+   watermark primitive wired into the child scope, the fabric S4 follow-up. On the
+   monotone (default, non-chrono) path [~level] equals the top frame, so top-frame filing
+   IS true-level filing and behavior is unchanged. *)
+let on_assign t l ~level =
   (match t.relevancy with
    | None -> ()
    | Some rel ->
-     Relevancy.on_assign
-       rel
-       ~var:(Sat.var_of_lit l)
-       ~value:(sign_lit l)
-       ~level:(Sat.decision_level t.sat));
+     Relevancy.on_assign rel ~var:(Sat.var_of_lit l) ~value:(sign_lit l) ~level);
   sync_level t;
   let v = Sat.var_of_lit l in
   match Vartbl.find_opt t.v2a v with

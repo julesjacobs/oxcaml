@@ -122,7 +122,7 @@ type theory_result =
   | T_lemma of lit list list
 
 type theory =
-  { on_assign : lit -> unit
+  { on_assign : lit -> level:int -> unit
   ; on_backtrack : level:int -> unit
   ; check : final:bool -> theory_result
   ; explain : lit -> lit list
@@ -1017,10 +1017,14 @@ let unchecked_enqueue t lit reason =
   Dynarray.add_last t.trail lit;
   (* Trail-extension notify (ADR-0005 §3 on_assign): every literal placed on the trail —
      decision, propagation, assumption, learned unit — streams to the theory, which
-     filters for its own atoms. Fires in trail order. *)
+     filters for its own atoms. Fires in trail order. We push [lit]'s TRUE level (the
+     value just stamped into [t.level] by [enqueue_level], = [decision_level] on a
+     monotone trail, = the backjump level under CB) so a scope-aware adapter files it in
+     its true-level scope (fabric S4 seam); the array read is the value the level slot now
+     holds. *)
   match t.theory with
   | None -> ()
-  | Some th -> th.on_assign lit
+  | Some th -> th.on_assign lit ~level:(Dynarray.get t.level v)
 ;;
 
 (* The premise set of a theory-propagated [lit]. Normally the theory's own [explain]
@@ -1151,8 +1155,12 @@ let cancel_until t level =
          split atoms, so the theory ends holding exactly the survivors). Survivors that
          were theory-PROPAGATED are re-asserted as facts and lose their in-adapter reason
          cache; the snapshot taken above ([t.chrono_reason]) preserves their reasons (F1).
-         Sound and simple — it mirrors the [qhead <- 0] Boolean rebuild — and uses only
-         the frozen seam callbacks, so cdclt and sat.mli are untouched. CONTRACT-EX stays
+         Sound and simple — it mirrors the [qhead <- 0] Boolean rebuild. The rebuild's
+         SHAPE is unchanged by fabric S4.1 (still [on_backtrack ~level:0] + replay-all);
+         only the [on_assign] callback now also carries the survivor's true [~level] (a
+         monotone-identical value here), so a scope-aware adapter could file it — the
+         earliest-removed incremental undo that would exploit it is the S4.2 follow-up.
+         CONTRACT-EX stays
          valid: survivors are re-asserted in their compacted trail-position order
          (preserved by the compaction), and [trail_pos] was updated above. COST:
          O(surviving trail) theory re-assertions per chrono backtrack — the Stage-1
@@ -1162,7 +1170,16 @@ let cancel_until t level =
       | None -> ()
       | Some th ->
         th.on_backtrack ~level:0;
-        Dynarray.iter (fun l -> th.on_assign l) t.trail)
+        (* Replay each survivor with its TRUE level (from [t.level], preserved by the
+           compaction above — the compaction never rewrites [t.level]). On a monotone
+           trail this equals the level in force at replay time; under CB it is the
+           survivor's own backjump level, so a scope-aware adapter reconstructs its
+           true-level scoping even though this loop still re-drives from base (the
+           earliest-removed incremental undo that would exploit the true level is the
+           fabric S4 follow-up, not this stage). *)
+        Dynarray.iter
+          (fun l -> th.on_assign l ~level:(Dynarray.get t.level (var_of_lit l)))
+          t.trail)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -2241,8 +2258,10 @@ let propagate_theory t =
           | T_conflict premises ->
             confl := Some (H_transient (theory_conflict_clause t premises), true)
           | T_lemma clauses ->
-            (* D3: Split is a Final-effort result; a Propagate-effort lemma is a contract
-               deviation but still sound to add, so we accept it and re-propagate. *)
+            (* D3: a Split is a Final-effort result; a Propagate-effort lemma is a
+               SANCTIONED first-class path (blessed in sat.mli's T_lemma doc, fabric S4.1
+               H2 reconcile — the CONTRACT-LEMMA lane's Propagate delivery): accept and
+               re-propagate. *)
             add_theory_lemmas t clauses;
             (* a lemma that simplified to the empty clause at level 0 makes the instance
                unsat; surface it as an (empty, always-false) conflict so [handle_confl]
