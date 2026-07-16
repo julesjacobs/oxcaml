@@ -1230,11 +1230,10 @@ let test_diophantine () =
    oracle is INDEPENDENT and brute-force: for every cut the producer emits, enumerate the
    integer box and verify that EVERY point satisfying all the asserted tight constraints
    also satisfies the cut [f·x <= k] — i.e. the cut removes no integer solution of the
-   antecedent tight constraints (validity). This is the mutation-testing tripwire
-   for a corrupt cut (a flipped coefficient / wrong rounding / wrong multiplier that
-   produced an UNSOUND cut would exclude a real integer point and fail here). Also checks
-   the producer fires on a hand case single-row gcd cannot see, and never emits on
-   integer-SAT systems. *)
+   antecedent tight constraints (validity). This is the mutation-testing tripwire for a
+   corrupt cut (a flipped coefficient / wrong rounding / wrong multiplier that produced an
+   UNSOUND cut would exclude a real integer point and fail here). Also checks the producer
+   fires on a hand case single-row gcd cannot see, and never emits on integer-SAT systems. *)
 
 (* assert [Σ coeffs·x = rhs] (coeffs by var index), recording it for the brute-force
    oracle *)
@@ -1380,6 +1379,111 @@ let test_hnf_cut () =
   check "hnf sweep: cuts fired on a meaningful set" (!fired > systems / 50)
 ;;
 
+(* Stage B3 CG-separation cut (Lia.cg_cut): the same MULTI-ROW tight-constraint
+   Chvátal–Gomory cut as {!Lia.hnf_cut}, but where B2 rejects an HNF-row multiplier that
+   is negative on an inequality row, B3 shifts it into the tight cone by an integer,
+   nonnegative amount. The soundness obligation is IDENTICAL and checked by the same
+   independent brute-force oracle: every emitted cut [f·x ≤ k] removes NO integer point of
+   the FULL tight polyhedron (equalities ∧ inequalities). Because the shift preserves the
+   multiplier's integer image and the fractional part of the rhs while forcing [μ' ≥ 0] on
+   every inequality row, an emitted cut stays T-valid; a mutant that BROKE the sign-shift
+   (used the raw, sign-invalid multiplier on an inequality row) would emit an invalid cut
+   and fail this oracle — the mutation tripwire. Verified RED: forcing the shift to a
+   no-op ([bigW.(k) <- w.(k)] unconditionally in {!Lia.cg_cut}) makes this sweep emit
+   unsound cuts and FAIL (documented in logs/lia-cuts-b3-log.md). B3 fires on strictly
+   MORE systems than B2 (the sign discipline no longer rejects), so the fired-count floor
+   is higher. *)
+let test_cg_cut () =
+  print_endline "CG-separation cut (Lia.cg_cut) soundness:";
+  (* Hand case (multi-row ℤ-infeasible, single-row gcd blind): B3 must also emit a valid
+     cut. *)
+  let fx = make_fixture 2 in
+  let eqs = ref [] in
+  assert_eq_rec fx eqs [ 0, 1; 1, 2 ] 0;
+  assert_eq_rec fx eqs [ 0, 2; 1, 1 ] 1;
+  (match Lia.check fx.solver with
+   | Lia.Sat_candidate ->
+     (match Lia.cg_cut fx.solver with
+      | Some (cut, ants) ->
+        check "cg hand: a cut is emitted on the multi-row ℤ-infeasible lattice" true;
+        check "cg hand: cut cites >=1 antecedent" (List.length ants >= 1);
+        let cc, ck = parse_cut fx cut in
+        let bad = ref 0 in
+        iter_box 2 8 (fun p ->
+          let sat_eqs = List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs in
+          if sat_eqs && sum_at cc ck p > 0 then incr bad);
+        check "cg hand: emitted cut removes no integer solution (valid)" (!bad = 0)
+      | None -> check "cg hand: cut emitted (multi-row lattice infeasibility)" false)
+   | _ -> check "cg hand: rational relaxation feasible" false);
+  (* Guard (deterministic, permanent): an integer-FEASIBLE equality system has an integer
+     LP vertex, so every HNF row has integer β and NO separating cut exists — B3 must emit
+     none (the β-non-integer gate; a spurious cut here could exclude the real solution). *)
+  let fxs = make_fixture 2 in
+  let _ = assert_eq_rec fxs (ref []) [ 0, 1; 1, 1 ] 2 in
+  let _ = assert_eq_rec fxs (ref []) [ 0, 1; 1, -1 ] 0 in
+  (match Lia.check fxs.solver with
+   | Lia.Sat_candidate ->
+     check
+       "cg guard: NO cut on an integer-feasible equality system (β-gate + self-check)"
+       (Lia.cg_cut fxs.solver = None)
+   | _ -> check "cg guard: feasible relaxation" false);
+  (* Random MIXED sweep: integer equalities + one-sided inequalities. Every emitted CG cut
+     must remove no integer point of the full polyhedron — the sign-shift tripwire. *)
+  let rng = Random.State.make [| 0xC63B; 11; 43 |] in
+  let systems = 3000 in
+  let fired = ref 0
+  and unsound = ref 0 in
+  for _ = 1 to systems do
+    let n = 2 + Random.State.int rng 2 in
+    let neq = 1 + Random.State.int rng 2 in
+    let nle = 1 + Random.State.int rng 3 in
+    let fx = make_fixture n in
+    let eqs = ref [] in
+    let les = ref [] in
+    let rand_coeffs () =
+      let c =
+        List.init n (fun i -> i, -3 + Random.State.int rng 7)
+        |> List.filter (fun (_, c) -> c <> 0)
+      in
+      if c = [] then [ 0, 1 ] else c
+    in
+    for _ = 1 to neq do
+      assert_eq_rec fx eqs (rand_coeffs ()) (-5 + Random.State.int rng 11)
+    done;
+    for _ = 1 to nle do
+      let coeffs = rand_coeffs () in
+      let const = -6 + Random.State.int rng 13 in
+      ignore (assert_le fx coeffs const ~polarity:true : int);
+      les := (coeffs, const) :: !les
+    done;
+    match Lia.check fx.solver with
+    | exception _ -> ()
+    | Lia.Conflict _ -> ()
+    | Lia.Sat_candidate ->
+      (match Lia.cg_cut fx.solver with
+       | exception _ -> ()
+       | None -> ()
+       | Some (cut, _) ->
+         incr fired;
+         let cc, ck = parse_cut fx cut in
+         iter_box n 6 (fun p ->
+           let sat_all =
+             List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
+             && List.for_all (fun (co, k) -> sum_at co k p <= 0) !les
+           in
+           if sat_all && sum_at cc ck p > 0 then incr unsound))
+  done;
+  Printf.printf
+    "    (%d mixed systems; cg cuts fired=%d unsound=%d)\n"
+    systems
+    !fired
+    !unsound;
+  check
+    "cg sweep: no emitted cut removes an integer point of the polyhedron (SOUND)"
+    (!unsound = 0);
+  check "cg sweep: cuts fired on a meaningful set" (!fired > systems / 50)
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -1399,6 +1503,7 @@ let () =
   test_notify_equality ();
   test_diophantine ();
   test_hnf_cut ();
+  test_cg_cut ();
   Printf.printf "\nlia self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

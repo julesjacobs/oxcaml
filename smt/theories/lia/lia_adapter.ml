@@ -34,18 +34,44 @@ let diophantine_on =
    inert. When ON, at an integer-infeasible [Final] that {!Lia.diophantine_conflict} did
    NOT refute, on every [hnf_cut_period]-th such Final a multi-row lattice cut is derived
    over the tight constraint rows (asserted equalities AND active one-sided bounds) and
-   emitted through the CONTRACT-LEMMA seam as
-   [Lemma [(cut, true); ¬antᵢ …]] (z3's assign(cut, core)), tightening the LP toward the
-   ring-lattice conflict. A miss (no cut / self-check fail / unmappable antecedent) falls
-   back to the B&B branch. *)
+   emitted through the CONTRACT-LEMMA seam as [Lemma [(cut, true); ¬antᵢ …]] (z3's
+   assign(cut, core)), tightening the LP toward the ring-lattice conflict. A miss (no cut
+   / self-check fail / unmappable antecedent) falls back to the B&B branch. *)
 let hnf_cuts_on =
   match Sys.getenv_opt "OXSMT_HNF_CUTS" with
   | Some ("1" | "true" | "yes" | "on") -> true
   | _ -> false
 ;;
 
+(* Stage B3 Chvátal–Gomory SEPARATION cut (DARK; sibling flag to {!hnf_cuts_on}). Default
+   OFF — byte-identical to trunk BY CONSTRUCTION when both flags are off. When ON, the cut
+   site calls {!Lia.cg_cut} (the sign-shifted multiplier search) instead of
+   {!Lia.hnf_cut}: B3 emits cuts B2's sign discipline rejects (charter
+   logs/lia-cuts-b2-log.md §next rung), staying a self-checked, fail-closed T-valid cut.
+   Independently measurable from B2 so B2's OFF-identity story is untouched. If both flags
+   are set, B3 (the superset) takes it. *)
+let cg_cuts_on =
+  match Sys.getenv_opt "OXSMT_CG_CUTS" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | _ -> false
+;;
+
 (* z3-parity throttle (util/lp/lp_settings.h m_hnf_cut_period); mirrored in {!Hnf.cut_period}. *)
 let hnf_cut_period = Hnf.cut_period
+
+(* Per-query budget on CG-cut ATTEMPTS (B3 only). An exact Hermite-Normal-Form over the
+   rank-reduced tight system costs ~O(coefficient blow-up) per call, and on files where
+   the lattice cut is productive it collapses the search within a handful of cuts
+   (measured: the rings prize cracks in ≤ 7 attempts); on files where it is NOT productive
+   the cut fires repeatedly without progress and its cost dominates the 2 s wall. Bounding
+   the attempts to a small constant keeps the prize gains and caps the worst-case tax — a
+   proportional cost guard, not a solver heuristic. Overridable ([OXSMT_CG_MAX_CUTS]) for
+   measurement. *)
+let cg_max_cuts =
+  match Option.bind (Sys.getenv_opt "OXSMT_CG_MAX_CUTS") int_of_string_opt with
+  | Some n when n >= 0 -> n
+  | _ -> 12
+;;
 
 type t =
   { lia : Fabric.justification Lia.t
@@ -61,6 +87,9 @@ type t =
       (* count of integer-infeasible [Final]s reaching the branch fallback — the throttle
          phase for HNF cuts (only touched when [hnf_cuts_on], so OFF is byte-identical). *)
   ; mutable hnf_cuts_emitted : int (* HNF cuts emitted as a Lemma (instrumentation) *)
+  ; mutable cg_attempts : int
+  (* CG-cut ATTEMPTS this query (each an exact HNF); bounded by [cg_max_cuts] so an
+     unproductive lattice cut cannot dominate the wall. Only touched on the B3 path. *)
   }
 
 let create ctx _env =
@@ -72,6 +101,7 @@ let create ctx _env =
   ; overflows = 0
   ; hnf_final_cuttable = 0
   ; hnf_cuts_emitted = 0
+  ; cg_attempts = 0
   }
 ;;
 
@@ -234,7 +264,10 @@ let propagations t =
    with a missing premise); likewise if an atom is absent from the term map, or the
    antecedent set is empty (never emit a premise-free cut). *)
 let hnf_lemma t : Fabric.check_result option =
-  match Lia.hnf_cut t.lia with
+  (* B3 (CG separation) is a strict superset of B2's cut-finding, so it takes precedence
+     when its flag is set; otherwise the B2 HNF-row cut. *)
+  let cut = if cg_cuts_on then Lia.cg_cut t.lia else Lia.hnf_cut t.lia in
+  match cut with
   | None -> None
   | Some (cut_atom, ant_tokens) ->
     let rec map acc = function
@@ -257,13 +290,18 @@ let hnf_lemma t : Fabric.check_result option =
    [hnf_final_cuttable] only, then returns the plain branch. *)
 let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
   let branch () = Fabric.Split [ le_atom; ge_atom ] in
-  if not hnf_cuts_on
+  if not (hnf_cuts_on || cg_cuts_on)
   then branch ()
   else (
     t.hnf_final_cuttable <- t.hnf_final_cuttable + 1;
-    if t.hnf_final_cuttable mod hnf_cut_period <> 0
+    (* B3 per-query attempt budget: after [cg_max_cuts] exact-HNF attempts, fall back to
+       plain b&b so an unproductive lattice cut cannot dominate the wall. B2 (no
+       [cg_cuts_on]) is unbudgeted — its behaviour is unchanged. *)
+    let budget_exhausted = cg_cuts_on && t.cg_attempts >= cg_max_cuts in
+    if t.hnf_final_cuttable mod hnf_cut_period <> 0 || budget_exhausted
     then branch ()
     else (
+      if cg_cuts_on then t.cg_attempts <- t.cg_attempts + 1;
       match hnf_lemma t with
       | Some lemma ->
         t.hnf_cuts_emitted <- t.hnf_cuts_emitted + 1;

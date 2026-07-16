@@ -116,12 +116,12 @@ val diophantine_conflict : 'tok t -> 'tok conflict option
 (** [hnf_cut t] — after a {!Sat_candidate} whose ℚ-model is non-integral — a Stage B HNF
     integer cut (charter logs/lia-cuts-charter.md, spec logs/lia-cuts-hnf-spec.md) over
     the TIGHT constraint rows (asserted equalities AND active one-sided bounds). It
-    surfaces a MULTI-ROW integer-lattice
-    infeasibility that {!diophantine_conflict}'s single-row gcd test cannot see, returned
-    as [Some (cut_atom, antecedent_tokens)] for emission through the CONTRACT-LEMMA seam:
-    [cut_atom] is the bound atom [f·x <= k] (built through the session {!Context}) and
-    [antecedent_tokens] are the tight rows' premise tokens whose lattice combination
-    proves it. The caller emits [Lemma [(cut_atom, true); ¬antecedentᵢ …]].
+    surfaces a MULTI-ROW integer-lattice infeasibility that {!diophantine_conflict}'s
+    single-row gcd test cannot see, returned as [Some (cut_atom, antecedent_tokens)] for
+    emission through the CONTRACT-LEMMA seam: [cut_atom] is the bound atom [f·x <= k]
+    (built through the session {!Context}) and [antecedent_tokens] are the tight rows'
+    premise tokens whose lattice combination proves it. The caller emits
+    [Lemma [(cut_atom, true); ¬antecedentᵢ …]].
 
     SOUND by a self-checked certificate INDEPENDENT of the HNF kernel: the emitted cut is
     a rational multiplier [μ] of the contributing equality rows with [μ·A = f] (integer)
@@ -132,6 +132,22 @@ val diophantine_conflict : 'tok t -> 'tok conflict option
     the z3-parity caps ([Hnf.max_rows]/[Hnf.max_cols]), or the self-check fails (cut-only
     degradation, never the verdict). Read-only over the engine state. *)
 val hnf_cut : 'tok t -> (Term.t * 'tok list) option
+
+(** [cg_cut t] — the Stage B3 Chvátal–Gomory SEPARATION cut (charter
+    logs/lia-cuts-charter.md; the rings prize, logs/lia-cuts-b2-log.md §next rung). Same
+    tight-constraint system, emission contract, and fail-closed self-check as {!hnf_cut},
+    but where {!hnf_cut} REJECTS an HNF-row multiplier that is negative on some inequality
+    row, [cg_cut] shifts it into the tight cone by the minimal nonnegative INTEGER shift
+    on the restricted rows — this preserves the multiplier's integer image ([μ·A]) and the
+    fractional part of [μ·c] (the shift adds an integer to it), so the cut stays a
+    T-valid, vertex-separating Chvátal–Gomory cut while becoming emittable. Every
+    fractional HNF row then yields a valid cut over a MULTI-ROW combination (the cuts
+    {!hnf_cut} could not emit); the smallest-[‖f'‖₁] one is returned. Re-verified against
+    the original A/c before emission ([μ' ≥ 0] on inequalities, [μ'·A] integer,
+    [μ'·c ∉ ℤ]); a failure drops the cut. [None] when no fractional row yields a cut, the
+    z3-parity caps are exceeded, or a contributing row is not a real trail literal.
+    Read-only over the engine state. *)
+val cg_cut : 'tok t -> (Term.t * 'tok list) option
 
 (** [suggest_branch t] — after a {!Sat_candidate} — is the B&B split request for the
     lowest-tag non-integer variable [x] with value [v]: the atom pair
