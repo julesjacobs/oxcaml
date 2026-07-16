@@ -27,6 +27,41 @@ open Location
 open Longident
 open Parsetree
 
+let refinement_type_extension = "vox2.refinement.type"
+
+let refinement_type_payload = function
+  | ({ txt; _ },
+     PStr
+       [{ pstr_desc =
+            Pstr_eval
+              ({ pexp_desc = Pexp_constraint (predicate, Some skeleton, []);
+                 pexp_attributes = [];
+                 _ },
+               []);
+          _ }])
+    when String.equal txt refinement_type_extension ->
+      Some (skeleton, predicate)
+  | _ -> None
+
+let refinement_expression_intro = function
+  | ({ txt; _ }, PStr [{ pstr_desc = Pstr_eval (body, []); _ }]) ->
+    let keyword =
+      match txt with
+      | "vox2.refinement.intro.prove" -> Some "refine_"
+      | "vox2.refinement.intro.assume" -> Some "assume_"
+      | "vox2.refinement.intro.assume_unchecked" ->
+        Some "assume_unchecked_"
+      | _ -> None
+    in
+    Option.map (fun keyword -> keyword, body) keyword
+  | _ -> None
+
+let refinement_pattern_intro = function
+  | ({ txt = "vox2.refinement.intro.pattern"; _ },
+     PPat (pattern, None)) ->
+    Some pattern
+  | _ -> None
+
 let prefix_symbols  = [ '!'; '?'; '~' ]
 let infix_symbols = [ '='; '<'; '>'; '@'; '^'; '|'; '&'; '+'; '-'; '*'; '/';
                       '$'; '%'; '#' ]
@@ -685,7 +720,14 @@ and core_type1 ctxt f x =
         pp f "@[<hov2><[%a]>@]" (core_type ctxt) t
     | Ptyp_splice t ->
         pp f "@[<hov2>$(%a)@]" (core_type ctxt) t
-    | Ptyp_extension e -> extension ctxt f e
+    | Ptyp_extension e ->
+        begin match refinement_type_payload e with
+        | Some (skeleton, predicate) ->
+          pp f "@[<2>%a{@;%a@;}@]"
+            (core_type1 ctxt) skeleton
+            (expression reset_ctxt) predicate
+        | None -> extension ctxt f e
+        end
     | (Ptyp_arrow _ | Ptyp_alias _ | Ptyp_poly _ | Ptyp_repr _
       | Ptyp_newlayout _ | Ptyp_of_kind _) ->
        paren true (core_type ctxt) f x
@@ -854,7 +896,12 @@ and simple_pattern ctxt (f:Format.formatter) (x:pattern) : unit =
         pp f "@[<2>exception@;%a@]" (pattern1 ctxt) p
     | Ppat_effect(p1, p2) ->
         pp f "@[<2>effect@;%a, @;%a@]" (pattern1 ctxt) p1 (pattern1 ctxt) p2
-    | Ppat_extension e -> extension ctxt f e
+    | Ppat_extension e ->
+        begin match refinement_pattern_intro e with
+        | Some pattern ->
+          pp f "@[<2>refine_@;%a@]" (simple_pattern ctxt) pattern
+        | None -> extension ctxt f e
+        end
     | Ppat_open (lid, p) ->
         let with_paren =
         match p.ppat_desc with
@@ -1186,7 +1233,14 @@ and expression ctxt f x =
           (binding_op ctxt) let_
           (list ~sep:"@," (binding_op ctxt)) ands
           (expression ctxt) body
-    | Pexp_extension e -> extension ctxt f e
+    | Pexp_extension e ->
+        begin match refinement_expression_intro e with
+        | Some _ when ctxt.semi ->
+          paren true (expression reset_ctxt) f x
+        | Some (keyword, body) ->
+          pp f "@[<2>%s@;%a@]" keyword (expression reset_ctxt) body
+        | None -> extension ctxt f e
+        end
     | Pexp_unreachable -> pp f "."
     | Pexp_overwrite (e1, e2) ->
         (* Similar to the case of [Pexp_stack] *)
@@ -1241,6 +1295,7 @@ and simple_expr ctxt f x =
     (* |`Normal -> longident_loc f li *)
     (* | `Prefix _ | `Infix _ -> pp f "( %a )" longident_loc li) *)
     | Pexp_constant c -> constant f c;
+    | Pexp_hole -> pp f "_"
     | Pexp_pack (me, opty) ->
         pp f "(module@;%a" (module_expr ctxt) me;
         Option.iter (pp f " :@ %a" (package_type ctxt)) opty;
