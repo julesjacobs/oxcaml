@@ -9,8 +9,9 @@
 *)
 
 (* FINAL: verification proves that either branch is nonnegative.
-   CURRENT: the annotation is recorded as an unchecked obligation, so the
-   definition and its refined signature are accepted. *)
+   CURRENT: the body is checked against the refinement's skeleton [int] and the
+   binding is assigned the refined type; no verification-condition obligation is
+   stored at this tip (the discharged VC arrives with the verification pass). *)
 
 #load "vox_spec.cmo";;
 

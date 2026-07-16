@@ -9,8 +9,10 @@
 *)
 
 (* FINAL: verification uses the branch condition to prove that the result is
-   at least both arguments.  CURRENT: the marked result obligation is not yet
-   discharged.  The conjunction is the ordinary boolean [&&]. *)
+   at least both arguments.  CURRENT: the body is checked against the refinement
+   skeleton [int] and the binding is assigned the refined type; the VC is not yet
+   generated or discharged (that arrives with the verification pass).  The
+   conjunction is the ordinary boolean [&&]. *)
 
 #load "vox_spec.cmo";;
 
