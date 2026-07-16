@@ -3084,10 +3084,11 @@ let test_stage2_shared_ancestor_no_false_cycle () =
    [Lemma] and assert the combinator returns exactly that [Lemma], not a swallowed
    [Propagations]. Runs under whichever dispatch path is active ([check_off] when
    OXSMT_NO_FABRIC is set, [check_on_drive] otherwise). The Makefile [combine-test] target
-   runs the executable TWICE: once fabric-ON (full suite, [check_on_drive]) and once with
-   OXSMT_NO_FABRIC=1 (fabric-OFF, [check_off] — this test included; only the fabric-only
+   runs the executable THREE times: once fabric-ON (full suite, [check_on_drive]) and once
+   with OXSMT_NO_FABRIC=1 (fabric-OFF, [check_off] — this test included; only the fabric-only
    tests listed in the runner are skipped-and-counted there), so BOTH dispatch paths of
-   the forwarding are gated, not just manually verified. *)
+   the forwarding are gated, not just manually verified; a third run pins
+   OXSMT_LIA_MODEL_REPAIR=0 for the forced-OFF repair path (post #59 default-ON flip). *)
 let test_lemma_forwarding () =
   let f = fixture () in
   let cut = const f "lemma_cut" in

@@ -92,7 +92,7 @@ let fabric_callbacks_off =
   | Some _ -> true
 ;;
 
-(* Lane A (task #30, dark): LIA-model disequality repair at Final. A negative shared Int
+(* Lane A (task #30; default-ON since #59): LIA-model disequality repair at Final. A negative shared Int
    equality (a disequality [x <> c]) is routed to the congruence child ONLY
    ([Uflia_router.assert_to], "Both when not positive -> A") because {!Lia} raises
    [Unsupported] on a negated equality (lia.mli). The pair-shaped [find_disagreement] net
@@ -105,9 +105,10 @@ let fabric_callbacks_off =
    When ON, {!repair_split} closes that gap by scanning the negatively-pinned pairs LIA's
    candidate model equates and emitting the existing trichotomy split. Read-once, tri-state
    (default-ON flip, task #59): unset -> ON (the new default), [=0/false/no] -> OFF (the
-   byte-for-byte trunk path -- no scan), any other value (incl. [=1/true/yes]) -> ON. The
-   forced-OFF ([=0]) path is the pre-flip default bit-for-bit, so the flip is an isolated
-   default change: nothing in the scan itself moved. *)
+   byte-for-byte trunk path -- no scan), any other value (incl. [=1/true/yes], and the
+   empty string [=""], which now maps to ON -- flip-family-consistent, no in-repo consumer
+   sets it empty) -> ON. The forced-OFF ([=0]) path is the pre-flip default bit-for-bit, so
+   the flip is an isolated default change: nothing in the scan itself moved. *)
 let model_repair_on =
   match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
   | Some ("0" | "false" | "no") -> false
@@ -828,7 +829,7 @@ end = struct
       t.all_terms
   ;;
 
-  (* Final-time disequality repair (task #30, dark; guarded by {!model_repair_on}). Scans
+  (* Final-time disequality repair (task #30, default-ON since #59; guarded by {!model_repair_on}). Scans
      the negatively-pinned Int pairs (disequalities [px <> py], including the var-vs-constant
      shape [find_disagreement] cannot return) that the LIA candidate model [mb] nonetheless
      EQUATES, and returns the first such pair's trichotomy split. That pair is a genuine
