@@ -680,6 +680,7 @@ type t = {
   implicit_jkinds: jkind_lr loc String.Map.t;
   flags: int;
   stage: stage;
+  enclosing_totality: Mode.Totality.r option;
   toplevel_scope: int
 }
 
@@ -985,6 +986,7 @@ let empty = {
   functor_args = Ident.empty;
   jkinds = IdTbl.empty;
   stage = 0;
+  enclosing_totality = None;
   toplevel_scope = Ident.lowest_scope
  }
 
@@ -3142,6 +3144,11 @@ let add_closure_lock closure_context comonadic env =
   in
   add_lock lock env
 
+let set_enclosing_totality enclosing_totality env =
+  { env with enclosing_totality }
+
+let enclosing_totality env = env.enclosing_totality
+
 let add_region_lock env = add_lock Region_lock env
 
 let add_exclave_lock env = add_lock Exclave_lock env
@@ -4312,6 +4319,7 @@ let add_components slot root env0 comps (locks : locks) =
     implicit_jkinds = env0.implicit_jkinds;
     flags = env0.flags;
     stage = env0.stage;
+    enclosing_totality = env0.enclosing_totality;
     toplevel_scope = env0.toplevel_scope;
   }
 
