@@ -42,7 +42,7 @@ type result =
 type cref = int
 
 (* Reason encoding (was [type reason = Decision | Implied_by of clause | Theory_prop]).
-   Stored UNBOXED in an [int Dynarray.t] so [reason.(v) <- ...] fires no write barrier. A
+   Stored UNBOXED in an [int array] so [reason.(v) <- ...] fires no write barrier. A
    nonnegative value IS the [Implied_by] cref; the two negative sentinels are the constant
    constructors. [Decision] is a branch choice or a level-0 unit; [Theory_prop] marks a
    literal a plugged theory enqueued (ADR-0005 §3 T_consistent), whose reason clause is
@@ -952,7 +952,7 @@ let clause_lbd_cref t (cr : cref) =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* Variable allocation. Grows every per-var Dynarray and the two watch lists for the new
+(* Variable allocation. Grows every per-var array and the two watch lists for the new
    var's literals, and makes the var decision-eligible. *)
 
 let ensure_var t v =
