@@ -1202,3 +1202,91 @@ val good_rec_local : unit -> int = <fun>
 val good_partial_param : (unit -> 'a) -> 'a = <fun>
 val good_unann_rec : unit -> 'a = <fun>
 |}]
+
+(* Round 5 (expanded) -- the full set of TASK-SPEC recursion Negatives as applied
+   local let-rec inside a total closure.  Each is partial via (Rec) with no
+   residue and no external capture, so it travels the Hereditary edge, not the
+   residue walk or the capture boundary. *)
+let bad_rec_local_returned @ total = fun () -> let rec f = fun x -> f x in f
+[%%expect{|
+Line 1, characters 68-69:
+1 | let bad_rec_local_returned @ total = fun () -> let rec f = fun x -> f x in f
+                                                                        ^
+Error: The value "f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 59-71
+         which is expected to be "total".
+|}]
+
+let bad_rec_local_funform @ total = fun () -> let rec f x = f x in f 0
+[%%expect{|
+Line 1, characters 60-61:
+1 | let bad_rec_local_funform @ total = fun () -> let rec f x = f x in f 0
+                                                                ^
+Error: The value "f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 56-63
+         which is expected to be "total".
+|}]
+
+let bad_mutual_local @ total = fun () -> let rec even n = odd n and odd n = even n in even 0
+[%%expect{|
+Line 1, characters 58-61:
+1 | let bad_mutual_local @ total = fun () -> let rec even n = odd n and odd n = even n in even 0
+                                                              ^^^
+Error: The value "odd" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 54-63
+         which is expected to be "total".
+|}]
+
+(* The laundering literal: a recursive tuple whose function component calls back
+   through the tuple; the closure captures the (Rec)-partial [ops]. *)
+let bad_ops_launder @ total = fun () -> let rec ops = ((fun x -> (fst ops) x), 0) in (fst ops) 0
+[%%expect{|
+Line 1, characters 70-73:
+1 | let bad_ops_launder @ total = fun () -> let rec ops = ((fun x -> (fst ops) x), 0) in (fst ops) 0
+                                                                          ^^^
+Error: The value "ops" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 55-77
+         which is expected to be "total".
+|}]
+
+let late_rec_funform () = let rec f x = f x in f 0
+let _ = expects_total late_rec_funform
+[%%expect{|
+val late_rec_funform : unit -> 'a = <fun>
+Line 2, characters 22-38:
+2 | let _ = expects_total late_rec_funform
+                          ^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_ops_launder () = let rec ops = ((fun x -> (fst ops) x), 0) in (fst ops) 0
+let _ = expects_total late_ops_launder
+[%%expect{|
+val late_ops_launder : unit -> 'a = <fun>
+Line 2, characters 22-38:
+2 | let _ = expects_total late_ops_launder
+                          ^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* Control (must still reject, but via (Boundary), not Hereditary): a TOP-LEVEL
+   divergent recursive function captured into a total closure.  The self-reference
+   partiality here crosses the closure boundary as an ordinary captured partial
+   value, so the capture comonadic rejects it -- confirming the local let-rec hole
+   was specifically about locals, not captures. *)
+let rec toplevel_loop x = toplevel_loop x
+let good_captures_toplevel_loop @ total = fun () -> toplevel_loop 0
+[%%expect{|
+val toplevel_loop : 'a -> 'b = <fun>
+Line 2, characters 52-65:
+2 | let good_captures_toplevel_loop @ total = fun () -> toplevel_loop 0
+                                                        ^^^^^^^^^^^^^
+Error: The value "toplevel_loop" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 2, characters 42-67
+         which is expected to be "total".
+|}]
