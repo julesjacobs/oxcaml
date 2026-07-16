@@ -277,6 +277,47 @@ let prove_refinement state ~env ~loc ~subject refinement replacements =
   let goal = replace_parameters replacements goal in
   prove state ~env ~loc goal
 
+let verify_seal_obligation ~env ~seal_location
+    (obligation : Ctype.refinement_seal_obligation) =
+  let subject_id = Ident.create_local "_seal_value" in
+  let subject =
+    Refinement.create ~loc:seal_location ~type_:obligation.rso_skeleton
+      (Rexp_ident (Rbound subject_id))
+  in
+  let hypothesis =
+    Vox_vc.instantiate ~refinement:obligation.rso_hypothesis ~with_:subject
+  in
+  let goal =
+    Vox_vc.instantiate ~refinement:obligation.rso_conclusion ~with_:subject
+  in
+  let condition =
+    Vox_vc.create ~loc:seal_location
+      ~facts:
+        [{ Vox_vc.expression = hypothesis;
+           location = Some obligation.rso_implementation_location;
+         }]
+      ~goal
+  in
+  let result = Vox_lean.discharge ~env condition in
+  match result.verdict with
+  | Vox_lean.Proved -> ()
+  | (Not_proved | Disproved | Solver_error) as verdict ->
+    let sub =
+      [ Location.msg ~loc:obligation.rso_interface_location
+          "Interface declaration for value %s"
+          obligation.rso_value_name;
+        Location.msg ~loc:obligation.rso_implementation_location
+          "Implementation declaration for value %s"
+          obligation.rso_value_name;
+      ]
+    in
+    Location.raise_errorf ~loc:seal_location ~sub
+      "Refinement verification failed at module seal for value %S (%s)"
+      obligation.rso_value_name (Vox_lean.string_of_verdict verdict)
+
+let verify_seal_obligations ~env ~seal_location obligations =
+  List.iter (verify_seal_obligation ~env ~seal_location) obligations
+
 let marked_refinements expression =
   List.filter_map
     (fun (extra, loc, _) ->
