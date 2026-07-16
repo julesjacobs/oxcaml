@@ -66,7 +66,7 @@ let axis_shapes =
       | Modal (Monadic Uniqueness) -> Chain2
       | Modal (Comonadic Linearity) -> Chain2
       | Modal (Monadic Contention) -> Diamond4
-      | Modal (Monadic Ghostness) -> Chain2
+      | Modal (Monadic Logicality) -> Chain2
       | Modal (Comonadic Portability) -> Diamond4
       | Modal (Comonadic Totality) -> Chain2
       | Modal (Comonadic Forkable) -> Chain2
@@ -255,10 +255,10 @@ module Levels = struct
     | Mode.Contention.Const.Shared -> 2
     | Mode.Contention.Const.Uncontended -> 3
 
-  let level_of_ghostness_monadic (x : Mode.Ghostness.Const.t) : int =
+  let level_of_logicality_monadic (x : Mode.Logicality.Const.t) : int =
     match x with
-    | Mode.Ghostness.Const.Logic -> 0
-    | Mode.Ghostness.Const.Program -> 1
+    | Mode.Logicality.Const.Logical -> 0
+    | Mode.Logicality.Const.Physical -> 1
 
   let level_of_totality (x : Mode.Totality.Const.t) : int =
     match x with
@@ -325,10 +325,10 @@ module Levels = struct
     | 3 -> Mode.Contention.Const.Uncontended
     | _ -> invalid_arg "Axis_lattice.contention_of_level_monadic"
 
-  let ghostness_of_level_monadic = function
-    | 0 -> Mode.Ghostness.Const.Logic
-    | 1 -> Mode.Ghostness.Const.Program
-    | _ -> invalid_arg "Axis_lattice.ghostness_of_level_monadic"
+  let logicality_of_level_monadic = function
+    | 0 -> Mode.Logicality.Const.Logical
+    | 1 -> Mode.Logicality.Const.Physical
+    | _ -> invalid_arg "Axis_lattice.logicality_of_level_monadic"
 
   let totality_of_level = function
     | 0 -> Mode.Totality.Const.Total
@@ -383,8 +383,8 @@ let linearity (x : t) : Mode.Linearity.Const.t =
 let contention (x : t) : Mode.Contention.Const.t =
   Levels.contention_of_level_monadic (get_axis x ~axis:3)
 
-let ghostness (x : t) : Mode.Ghostness.Const.t =
-  Levels.ghostness_of_level_monadic (get_axis x ~axis:4)
+let logicality (x : t) : Mode.Logicality.Const.t =
+  Levels.logicality_of_level_monadic (get_axis x ~axis:4)
 
 let portability (x : t) : Mode.Portability.Const.t =
   Levels.portability_of_level (get_axis x ~axis:5)
@@ -422,8 +422,8 @@ let set_linearity (l : Mode.Linearity.Const.t) (x : t) : t =
 let set_contention (c : Mode.Contention.Const.t) (x : t) : t =
   set_axis x ~axis:3 ~level:(Levels.level_of_contention_monadic c)
 
-let set_ghostness (g : Mode.Ghostness.Const.t) (x : t) : t =
-  set_axis x ~axis:4 ~level:(Levels.level_of_ghostness_monadic g)
+let set_logicality (g : Mode.Logicality.Const.t) (x : t) : t =
+  set_axis x ~axis:4 ~level:(Levels.level_of_logicality_monadic g)
 
 let set_portability (p : Mode.Portability.Const.t) (x : t) : t =
   set_axis x ~axis:5 ~level:(Levels.level_of_portability p)
@@ -459,9 +459,9 @@ let to_mode_crossing (x : t) : Mode.Crossing.t =
       ~contention:
         (Monadic.Atom.Modality
            (Mode.Modality.Monadic.Atom.Join_const (contention x)))
-      ~ghostness:
+      ~logicality:
         (Monadic.Atom.Modality
-           (Mode.Modality.Monadic.Atom.Join_const (ghostness x)))
+           (Mode.Modality.Monadic.Atom.Join_const (logicality x)))
       ~visibility:
         (Monadic.Atom.Modality
            (Mode.Modality.Monadic.Atom.Join_const (visibility x)))
@@ -496,12 +496,12 @@ let to_mode_crossing (x : t) : Mode.Crossing.t =
   { monadic; comonadic }
 
 let create ~areality ~linearity ~uniqueness ~portability ~contention ~totality
-    ~ghostness ~forkable ~yielding ~statefulness ~visibility ~staticity
+    ~logicality ~forkable ~yielding ~statefulness ~visibility ~staticity
     ~externality =
   bot |> set_areality areality |> set_uniqueness uniqueness
   |> set_linearity linearity |> set_contention contention
   |> set_portability portability
-  |> set_totality totality |> set_ghostness ghostness |> set_forkable forkable
+  |> set_totality totality |> set_logicality logicality |> set_forkable forkable
   |> set_yielding yielding
   |> set_statefulness statefulness
   |> set_visibility visibility |> set_staticity staticity
@@ -514,7 +514,7 @@ let nonfloat_value : t =
     ~portability:Mode.Portability.Const.max
     ~totality:Mode.Totality.Const.Partial
     ~contention:Mode.Contention.Const.Uncontended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.max
+    ~logicality:Mode.Logicality.Const.Physical ~forkable:Mode.Forkable.Const.max
     ~yielding:Mode.Yielding.Const.max ~statefulness:Mode.Statefulness.Const.max
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
@@ -524,7 +524,7 @@ let immutable_data : t =
     ~linearity:Mode.Linearity.Const.min ~uniqueness:Mode.Uniqueness.Const.Unique
     ~portability:Mode.Portability.Const.min ~totality:Mode.Totality.Const.Total
     ~contention:Mode.Contention.Const.Contended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.min
+    ~logicality:Mode.Logicality.Const.Logical ~forkable:Mode.Forkable.Const.min
     ~yielding:Mode.Yielding.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Immutable ~staticity:Mode.Staticity.Static
     ~externality:Jkind_axis.Externality.max
@@ -534,7 +534,7 @@ let mutable_data : t =
     ~linearity:Mode.Linearity.Const.min ~uniqueness:Mode.Uniqueness.Const.Unique
     ~portability:Mode.Portability.Const.min ~totality:Mode.Totality.Const.Total
     ~contention:Mode.Contention.Const.Uncontended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.min
+    ~logicality:Mode.Logicality.Const.Physical ~forkable:Mode.Forkable.Const.min
     ~yielding:Mode.Yielding.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
@@ -544,7 +544,7 @@ let sync_data : t =
     ~linearity:Mode.Linearity.Const.min ~uniqueness:Mode.Uniqueness.Const.Unique
     ~portability:Mode.Portability.Const.min ~totality:Mode.Totality.Const.Total
     ~contention:Mode.Contention.Const.Contended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.min
+    ~logicality:Mode.Logicality.Const.Physical ~forkable:Mode.Forkable.Const.min
     ~yielding:Mode.Yielding.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
@@ -555,7 +555,7 @@ let value : t =
     ~portability:Mode.Portability.Const.max
     ~totality:Mode.Totality.Const.Partial
     ~contention:Mode.Contention.Const.Uncontended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.min
+    ~logicality:Mode.Logicality.Const.Physical ~forkable:Mode.Forkable.Const.min
     ~yielding:Mode.Yielding.Const.max ~statefulness:Mode.Statefulness.Const.max
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
@@ -567,7 +567,7 @@ let arrow : t =
     ~portability:Mode.Portability.Const.max
     ~totality:Mode.Totality.Const.Partial
     ~contention:Mode.Contention.Const.Contended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.max
+    ~logicality:Mode.Logicality.Const.Logical ~forkable:Mode.Forkable.Const.max
     ~yielding:Mode.Yielding.Const.max ~statefulness:Mode.Statefulness.Const.max
     ~visibility:Mode.Visibility.Const.Immutable ~staticity:Mode.Staticity.Static
     ~externality:Jkind_axis.Externality.max
@@ -578,7 +578,7 @@ let immediate : t =
     ~uniqueness:Mode.Uniqueness.Const.Aliased
     ~portability:Mode.Portability.Const.min ~totality:Mode.Totality.Const.Total
     ~contention:Mode.Contention.Const.Contended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable:Mode.Forkable.Const.min
+    ~logicality:Mode.Logicality.Const.Logical ~forkable:Mode.Forkable.Const.min
     ~yielding:Mode.Yielding.Const.min ~statefulness:Mode.Statefulness.Const.min
     ~visibility:Mode.Visibility.Const.Immutable ~staticity:Mode.Staticity.Static
     ~externality:Jkind_axis.Externality.min
@@ -597,7 +597,7 @@ let object_legacy : t =
   in
   create ~linearity ~areality ~uniqueness:Mode.Uniqueness.Const.Aliased
     ~portability ~totality ~contention:Mode.Contention.Const.Uncontended
-    ~ghostness:Mode.Ghostness.Const.Program ~forkable ~yielding ~statefulness
+    ~logicality:Mode.Logicality.Const.Physical ~forkable ~yielding ~statefulness
     ~visibility:Mode.Visibility.Const.Read_write
     ~staticity:Mode.Staticity.Static ~externality:Jkind_axis.Externality.max
 

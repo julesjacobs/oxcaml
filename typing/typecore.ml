@@ -152,15 +152,11 @@ type mutable_restriction =
 
 type mode_mismatch_kind = Parameter | Return
 
-type total_context =
-  | Total_mode
-  | Logic_mode
+type total_context = Total_mode
 
 type total_context_violation =
   | Mutable_state
-  | Exception_handling
   | Primitive_call
-  | Lazy_evaluation
   | Loop
 
 type error =
@@ -553,17 +549,17 @@ let with_total_context total_context expected_mode =
   { expected_mode with total_context = Some total_context }
 
 let ambient_total_context = ref None
-let ambient_primitive_application = ref false
-
+let ambient_comparison_application = ref false
 let with_ambient_total_context total_context f =
   let previous = !ambient_total_context in
   ambient_total_context := total_context;
   try_finally f ~always:(fun () -> ambient_total_context := previous)
 
-let with_ambient_primitive_application f =
-  let previous = !ambient_primitive_application in
-  ambient_primitive_application := true;
-  try_finally f ~always:(fun () -> ambient_primitive_application := previous)
+let with_ambient_comparison_application f =
+  let previous = !ambient_comparison_application in
+  ambient_comparison_application := true;
+  try_finally f ~always:(fun () ->
+    ambient_comparison_application := previous)
 
 let reject_in_total_context ~loc ~env expected_mode violation =
   match expected_mode.total_context with
@@ -572,15 +568,6 @@ let reject_in_total_context ~loc ~env expected_mode violation =
       raise
         (Error
            (loc, env, Total_context_violation (total_context, violation)))
-
-let total_context_from_alloc_ghostness mode =
-  match
-    mode
-    |> Alloc.proj_monadic Ghostness
-    |> Ghostness.Guts.check_const_conservative
-  with
-  | Some Ghostness.Const.Logic -> Some Logic_mode
-  | Some Program | None -> None
 
 let primitive_is_total = function
   | "%identity"
@@ -601,48 +588,6 @@ let primitive_is_comparison = function
   | "%lessequal" | "%greaterequal" | "%compare"
   | "%eq" | "%noteq" -> true
   | _ -> false
-
-let stdlib_wrapper_is_impure path =
-  let forbidden_stdlib_name = function
-    | "print_string" | "print_bytes" | "print_char" | "print_int"
-    | "print_float" | "print_endline" | "print_newline"
-    | "prerr_char" | "prerr_string" | "prerr_bytes" | "prerr_int"
-    | "prerr_float" | "prerr_endline" | "prerr_newline"
-    | "read_line" | "read_int" | "read_int_opt" | "read_float"
-    | "read_float_opt" | "open_in" | "open_in_bin" | "open_in_gen"
-    | "open_out" | "open_out_bin" | "open_out_gen" | "flush"
-    | "flush_all" | "output_char" | "output_string" | "output_bytes"
-    | "output" | "output_substring" | "output_byte" | "output_binary_int"
-    | "output_value" | "seek_out" | "pos_out" | "out_channel_length"
-    | "close_out" | "close_out_noerr" | "set_binary_mode_out"
-    | "input_char" | "input_line" | "input" | "really_input"
-    | "really_input_string" | "input_byte" | "input_binary_int"
-    | "input_value" | "seek_in" | "pos_in" | "in_channel_length"
-    | "close_in" | "close_in_noerr" | "set_binary_mode_in" -> true
-    | _ -> false
-  in
-  let path_name = Path.name path in
-  let is_stdlib_path =
-    String.starts_with ~prefix:"Stdlib." path_name
-    || String.starts_with ~prefix:"Stdlib!." path_name
-  in
-  (is_stdlib_path && forbidden_stdlib_name (Path.last path))
-  || String.starts_with ~prefix:"Stdlib.Obj." path_name
-  || String.starts_with ~prefix:"Stdlib!.Obj." path_name
-  || String.starts_with ~prefix:"Stdlib.Effect." path_name
-  || String.starts_with ~prefix:"Stdlib!.Effect." path_name
-
-let violation_of_primitive = function
-  | "%makemutable" | "%field0" | "%setfield0" | "%incr" | "%decr"
-  | "%array_safe_get" | "%array_unsafe_get"
-  | "%array_safe_set" | "%array_unsafe_set"
-  | "%bytes_safe_get" | "%bytes_unsafe_get"
-  | "%bytes_safe_set" | "%bytes_unsafe_set"
-  | "%string_safe_set" | "%string_unsafe_set" -> Mutable_state
-  | "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace" ->
-      Exception_handling
-  | "%lazy_force" -> Lazy_evaluation
-  | _ -> Primitive_call
 
 let total_primitive_mode mode =
   mode |> Value.meet_const_with Totality Totality.Const.Total
@@ -766,6 +711,22 @@ let mode_strictly_local expected_mode =
 let mode_coerce mode expected_mode =
   mode_morph (fun m -> Value.meet [m; mode]) expected_mode
 
+let total_expected_mode expected_mode =
+  let total_mode =
+    Value.max_with_comonadic Totality
+      (Totality.of_const Totality.Const.Total)
+  in
+  mode_coerce total_mode expected_mode
+
+let logical_access_mode mode =
+  let modality =
+    Mode.Modality.Const.set
+      (Mode.Modality.Axis.Monadic Logicality)
+      (Mode.Modality.Monadic.Atom.Join_const Logicality.Const.Logical)
+      Mode.Modality.Const.id
+  in
+  Mode.Modality.Const.apply_left modality mode
+
 let mode_lazy expected_mode =
   let mode =
     Value.{
@@ -780,7 +741,7 @@ let mode_lazy expected_mode =
   in
   let mode_crossing =
     Crossing.create ~linearity:true ~portability:true
-      ~totality:true ~ghostness:false
+      ~totality:true ~logicality:false
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
       ~visibility:false ~forkable:false ~yielding:false ~staticity:false
   in
@@ -834,11 +795,6 @@ mode variable. We encode extra position information in the former. We need the
 latter to the both left and right mode because of how it will be used. *)
 let mode_argument ~funct ~index ~position_and_mode ~partial_app ~total_context
     marg =
-  let total_context =
-    match total_context with
-    | Some _ as total_context -> total_context
-    | None -> total_context_from_alloc_ghostness marg
-  in
   let mode_default mode =
     let mode = mode_default mode in
     match total_context with
@@ -6416,13 +6372,26 @@ let split_function_ty
      !Clflags.principal && get_level ty_arg < Btype.generic_level then
     Location.prerr_warning loc
       (not_principal "this higher-rank function");
+  let closure_is_total =
+    match
+      alloc_mode
+      |> Alloc.proj_comonadic Totality
+      |> Totality.Guts.check_const_conservative
+    with
+    | Some Totality.Const.Total -> true
+    | Some Partial | None -> false
+  in
   let env =
     match is_first_val_param with
     | false -> env
     | true ->
         let env =
-          Env.add_closure_lock
-            ~ghostness:(Value.proj_monadic Ghostness closed_over_mode)
+          let logicality =
+            if closure_is_total
+            then Logicality.of_const Logicality.Const.Logical
+            else Value.proj_monadic Logicality closed_over_mode
+          in
+          Env.add_closure_lock ~logicality ~lock_logical:closure_is_total
             (loc, Function)
             closed_over_mode.comonadic
             env
@@ -6443,16 +6412,15 @@ let split_function_ty
   let expected_inner_mode =
     let total_context =
       match expected_mode.total_context with
-      | Some Logic_mode as total_context -> total_context
-      | Some Total_mode | None ->
+      | Some Total_mode as total_context -> total_context
+      | None ->
           (match
              alloc_mode
              |> Alloc.proj_comonadic Totality
              |> Totality.Guts.check_const_conservative
            with
            | Some Totality.Const.Total -> Some Total_mode
-           | Some Partial | None ->
-               total_context_from_alloc_ghostness ret_mode)
+           | Some Partial | None -> None)
     in
     match total_context with
     | None -> expected_inner_mode
@@ -6471,6 +6439,26 @@ let split_function_ty
     end
   in
   let arg_value_mode = alloc_to_value_l2r arg_mode in
+  let arg_value_mode =
+    if closure_is_total
+    then begin
+      let arg_access_mode = Value.disallow_right arg_value_mode in
+      add_delayed_check (fun () ->
+        let totality_axis = Crossing.Axis.Comonadic Totality in
+        let totality_crossing =
+          crossing_of_ty env ty_arg |> Crossing.proj totality_axis
+        in
+        if not
+             (Crossing.Per_axis.equal totality_axis totality_crossing
+                (Crossing.Per_axis.min totality_axis))
+        then
+          Totality.submode_err (loc_fun, Function)
+            (Value.proj_comonadic Totality arg_access_mode)
+            (Totality.of_const Totality.Const.Total));
+      logical_access_mode arg_access_mode
+    end
+    else Value.disallow_right arg_value_mode
+  in
   let expected_pat_mode = simple_pat_mode arg_value_mode in
   let type_sort ~why ty =
     match Ctype.type_sort ~why ~fixed:false env ty with
@@ -6607,14 +6595,14 @@ let pat_modes ~force_toplevel ~recursive_values ~is_lpoly (attrs, spat) =
         | Some Partial | None -> lower
       in
       let lower =
-        match mode_annots.mode_modes.ghostness with
-        | Some Ghostness.Const.Logic ->
-            { lower with ghostness = Ghostness.Const.Logic }
-        | Some Program | None -> lower
+        match mode_annots.mode_modes.logicality with
+        | Some Logicality.Const.Logical ->
+            { lower with logicality = Logicality.Const.Logical }
+        | Some Physical | None -> lower
       in
       let upper =
-        match mode_annots.mode_modes.ghostness with
-        | None -> { lower with ghostness = Ghostness.Const.Logic }
+        match mode_annots.mode_modes.logicality with
+        | None -> { lower with logicality = Logicality.Const.Logical }
         | Some _ -> lower
       in
       let mode = Value.newvar () in
@@ -6650,11 +6638,6 @@ let pat_modes ~force_toplevel ~recursive_values ~is_lpoly (attrs, spat) =
       in
       Some env_alloc_mode, mode_default exp_mode
     else None, exp_mode
-  in
-  let exp_mode =
-    match mode_annots.mode_modes.ghostness with
-    | Some Ghostness.Const.Logic -> with_total_context Logic_mode exp_mode
-    | Some Program | None -> exp_mode
   in
   attrs, pat_mode, env_alloc_mode, exp_mode, spat
 
@@ -6701,16 +6684,26 @@ let check_total_context_expression env expected_mode sexp =
   in
   match expected_mode.total_context, sexp.pexp_desc with
   | None, _ -> ()
+  | Some Total_mode, Pexp_let (Immutable, _, bindings, _)
+    when List.exists
+           (fun binding ->
+              match binding.pvb_expr.pexp_desc with
+              | Pexp_function _ ->
+                  let modes =
+                    Typemode.transl_mode_annots binding.pvb_modes
+                  in
+                  (match modes.mode_modes.totality with
+                   | Some Totality.Const.Partial -> true
+                   | Some Total | None -> false)
+              | _ -> false)
+           bindings ->
+      Totality.submode_err (sexp.pexp_loc, Function)
+        (Totality.of_const Totality.Const.Partial)
+        (Totality.of_const Totality.Const.Total)
   | Some _, Pexp_let (Mutable, Nonrecursive, _, _)
-  | Some _, Pexp_setfield _
   | Some _, Pexp_array (Mutable, _)
   | Some _, Pexp_overwrite _ ->
       reject Mutable_state
-  | Some _, Pexp_try _
-  | Some _, Pexp_assert _
-  | Some _, Pexp_letexception _ ->
-      reject Exception_handling
-  | Some _, Pexp_lazy _ -> reject Lazy_evaluation
   | Some _, Pexp_while _
   | Some _, Pexp_for _ ->
       reject Loop
@@ -7349,6 +7342,11 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_function (params, body_constraint, body) ->
+      let expected_mode =
+        match expected_mode.total_context with
+        | Some Total_mode -> total_expected_mode expected_mode
+        | None -> expected_mode
+      in
       type_n_ary_function ~loc ~env ~expected_mode ~ty_expected ~explanation
         ~attributes:sexp.pexp_attributes (params, body_constraint, body)
   | Pexp_apply
@@ -7463,13 +7461,9 @@ and type_expect_
             (fun () ->
                match expected_mode.total_context, sfunct.pexp_desc with
                | Some _, Pexp_ident _ ->
-                   with_ambient_primitive_application (fun () ->
-                     with_ambient_total_context None (fun () ->
-                       type_exp env
-                         { funct_expected_mode with total_context = None }
-                         sfunct))
-               | None, _ | Some _, _ ->
-                   type_exp env funct_expected_mode sfunct)
+                   with_ambient_comparison_application (fun () ->
+                     type_exp env funct_expected_mode sfunct)
+               | None, _ | Some _, _ -> type_exp env funct_expected_mode sfunct)
         in
         let ty = instance funct.exp_type in
         let rt = wrap_trace_gadt_instances env (ret_tvar TypeSet.empty) ty in
@@ -7501,30 +7495,6 @@ and type_expect_
         | _ ->
             (rt, funct), sargs
       in
-      (match expected_mode.total_context, funct.exp_desc with
-       | Some total_context,
-         Texp_ident
-           { desc = { val_kind = Val_prim { prim_name; _ }; _ };
-             kind = Id_prim _;
-             _ }
-         when not (primitive_is_total prim_name)
-              && not (primitive_is_comparison prim_name) ->
-           raise
-             (Error
-                ( funct.exp_loc,
-                  env,
-                  Total_context_violation
-                    (total_context, violation_of_primitive prim_name) ))
-       | Some total_context,
-         Texp_ident { path; kind = Id_value; _ }
-         when stdlib_wrapper_is_impure path ->
-           raise
-             (Error
-                ( funct.exp_loc,
-                  env,
-                  Total_context_violation
-                    (total_context, Primitive_call) ))
-       | None, _ | Some _, _ -> ());
       let (args, ty_ret, mode_ret, pm) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
@@ -7783,10 +7753,6 @@ and type_expect_
         solve_Pexp_field ~label_usage:Env.Projection loc env sexp srecord Legacy
           lid
       in
-      (match label.lbl_mut with
-       | Immutable -> ()
-       | Mutable _ ->
-           reject_in_total_context ~loc ~env expected_mode Mutable_state);
       check_project_mutability ~loc:record.exp_loc ~env
         (Record_field label.lbl_name) label.lbl_mut mode;
       check_atomic_field_usage ~usage:Access ~loc:record.exp_loc ~env
@@ -8192,6 +8158,13 @@ and type_expect_
         exp_env = env }
   | Pexp_constraint (sarg, None, modes) ->
       let modes = Typemode.transl_mode_annots modes in
+      (match expected_mode.total_context, modes.mode_modes.totality,
+             sarg.pexp_desc with
+       | Some Total_mode, Some Totality.Const.Partial, Pexp_function _ ->
+           Totality.submode_err (loc, Function)
+             (Totality.of_const Totality.Const.Partial)
+             (Totality.of_const Totality.Const.Total)
+       | None, _, _ | Some Total_mode, _, _ -> ());
       let expected_mode =
         type_expect_mode ~loc ~env ~modes:modes.mode_modes expected_mode
       in
@@ -8496,7 +8469,7 @@ and type_expect_
         unify_exp_types loc env to_unify (generic_instance ty_expected));
       let env =
         Env.add_closure_lock
-          ~ghostness:(Value.proj_monadic Ghostness closure_mode)
+          ~logicality:(Value.proj_monadic Logicality closure_mode)
           (loc, Lazy) closure_mode.comonadic env
       in
       let arg = type_expect env expected_mode e (mk_expected ty) in
@@ -9353,7 +9326,7 @@ and type_newtype
   end
    ~before_generalize:(fun (_,ety,_,_) -> enforce_current_level env ety)
 
-and type_ident env ?(recarg=Rejected) ?total_context lid =
+and type_ident env ?(recarg=Rejected) ?total_context:_ lid =
   (* CR zqian: [lookup_value] should close over the memaddr of all prefix
   modules.  *)
   let path, desc, (mode, locks) = Env.lookup_value ~loc:lid.loc lid.txt env in
@@ -9369,32 +9342,14 @@ and type_ident env ?(recarg=Rejected) ?total_context lid =
   let mode = cross_left env desc.val_type mode in
   let mode =
     match desc.val_kind with
-    | Val_prim _ when !ambient_primitive_application ->
+    | Val_prim { prim_name; _ }
+      when !ambient_comparison_application
+           && primitive_is_comparison prim_name ->
         total_primitive_mode mode
     | Val_prim { prim_name; _ } when primitive_is_total prim_name ->
         total_primitive_mode mode
     | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
     | Val_anc _ -> mode
-  in
-  let mode =
-    match total_context, desc.val_kind with
-    | Some _, Val_prim { prim_name; _ } when primitive_is_total prim_name ->
-        mode
-    | Some total_context, Val_prim { prim_name; _ } ->
-        raise
-          (Error
-             ( lid.loc,
-               env,
-               Total_context_violation
-                 (total_context, violation_of_primitive prim_name) ))
-    | Some total_context, Val_mut _ ->
-        raise
-          (Error
-             ( lid.loc,
-               env,
-               Total_context_violation (total_context, Mutable_state) ))
-    | None, _ | Some _, (Val_reg _ | Val_ivar _ | Val_self _ | Val_anc _) ->
-        mode
   in
   (* There can be locks between the definition and a use of a value. For
   example, if a function closes over a value, there will be Closure_lock between
@@ -12013,12 +11968,6 @@ and type_expect_mode ~loc ~env ~(modes : Alloc.Const.Option.t) expected_mode =
       | Some Local -> mode_strictly_local expected_mode
       | _ -> expected_mode
     in
-    let expected_mode =
-      match modes.ghostness with
-      | Some Ghostness.Const.Logic ->
-          with_total_context Logic_mode expected_mode
-      | Some Program | None -> expected_mode
-    in
     expected_mode
 
 and type_n_ary_function
@@ -13650,23 +13599,17 @@ let report_error ~loc env =
          | `Conflict -> "is contradictory"
          | `Not_a_tailcall -> "is not on a tail call")
   | Total_context_violation (total_context, violation) ->
-      let mode =
-        match total_context with
-        | Total_mode -> "total"
-        | Logic_mode -> "logic"
-      in
+      let mode = match total_context with Total_mode -> "total" in
       let code = mode ^ " code" in
       let reason =
         match violation with
         | Mutable_state ->
             Printf.sprintf "mutable state is not permitted in %s." code
-        | Exception_handling ->
-            Printf.sprintf "exceptions are not permitted in %s." code
         | Primitive_call ->
-            "this primitive or external call is not on the pure primitive \
-             allowlist."
-        | Lazy_evaluation ->
-            Printf.sprintf "lazy evaluation is not permitted in %s." code
+            Printf.sprintf
+              "physical comparison on non-immediate values is not permitted \
+               in %s."
+              code
         | Loop -> Printf.sprintf "loops are not permitted in %s." code
       in
       Location.errorf ~loc

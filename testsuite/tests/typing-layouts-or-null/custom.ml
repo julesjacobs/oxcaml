@@ -258,7 +258,7 @@ Lines 1-4, characters 0-11:
 3 |   | Nonportable_some of (unit -> unit)
 4 | [@@or_null]
 Error: The kind of type "nonportable_payload" is
-           value_or_null non_float mod aliased immutable
+           value_or_null non_float mod aliased immutable logical
          because an [@@or_null] type gets its kind by applying or_null to its
          payload kind.
        But the kind of type "nonportable_payload" must be a subkind of

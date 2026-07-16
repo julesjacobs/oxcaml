@@ -641,28 +641,28 @@ module Lattices = struct
       | Uncontended -> Fmt.fprintf ppf "uncontended"
   end
 
-  module Ghostness = struct
+  module Logicality = struct
     type t =
-      | Program
-      | Logic
+      | Physical
+      | Logical
 
     include Total (struct
       type nonrec t = t
 
-      let min = Program
+      let min = Physical
 
-      let max = Logic
+      let max = Logical
 
-      let ord = function Program -> 0 | Logic -> 1
+      let ord = function Physical -> 0 | Logical -> 1
     end)
 
-    let legacy = Program
+    let legacy = Physical
 
-    let all = lazy [Program; Logic]
+    let all = lazy [Physical; Logical]
 
     let print ppf = function
-      | Program -> Fmt.fprintf ppf "program"
-      | Logic -> Fmt.fprintf ppf "logic"
+      | Physical -> Fmt.fprintf ppf "physical"
+      | Logical -> Fmt.fprintf ppf "logical"
   end
 
   module Forkable = struct
@@ -802,7 +802,7 @@ module Lattices = struct
   type monadic =
     { uniqueness : Uniqueness.t;
       contention : Contention.t;
-      ghostness : Ghostness.t;
+      logicality : Logicality.t;
       visibility : Visibility.t;
       staticity : Staticity.t
     }
@@ -813,26 +813,26 @@ module Lattices = struct
     let min =
       let uniqueness = Uniqueness.min in
       let contention = Contention.min in
-      let ghostness = Ghostness.min in
+      let logicality = Logicality.min in
       let visibility = Visibility.min in
       let staticity = Staticity.min in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let max =
       let uniqueness = Uniqueness.max in
       let contention = Contention.max in
-      let ghostness = Ghostness.max in
+      let logicality = Logicality.max in
       let visibility = Visibility.max in
       let staticity = Staticity.max in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let legacy =
       let uniqueness = Uniqueness.legacy in
       let contention = Contention.legacy in
-      let ghostness = Ghostness.legacy in
+      let logicality = Logicality.legacy in
       let visibility = Visibility.legacy in
       let staticity = Staticity.legacy in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     (** All product values, including every combination of axis values. *)
     let all =
@@ -841,10 +841,10 @@ module Lattices = struct
          let ( let+ ) xs f = List.map f xs in
          let* uniqueness = Lazy.force Uniqueness.all in
          let* contention = Lazy.force Contention.all in
-         let* ghostness = Lazy.force Ghostness.all in
+         let* logicality = Lazy.force Logicality.all in
          let* visibility = Lazy.force Visibility.all in
          let+ staticity = Lazy.force Staticity.all in
-         { uniqueness; contention; ghostness; visibility; staticity })
+         { uniqueness; contention; logicality; visibility; staticity })
 
     (* CR-someday ageorges: the following code manually enumerates axes. It would be nice
        to use the later definition of Lattices.Monadic.Axis.all *)
@@ -860,8 +860,8 @@ module Lattices = struct
                 { base with uniqueness });
                (let+ contention = Lazy.force Contention.all in
                 { base with contention });
-               (let+ ghostness = Lazy.force Ghostness.all in
-                { base with ghostness });
+               (let+ logicality = Lazy.force Logicality.all in
+                { base with logicality });
                (let+ visibility = Lazy.force Visibility.all in
                 { base with visibility });
                (let+ staticity = Lazy.force Staticity.all in
@@ -872,7 +872,7 @@ module Lattices = struct
     let le m1 m2 =
       let { uniqueness = uniqueness1;
             contention = contention1;
-            ghostness = ghostness1;
+            logicality = logicality1;
             visibility = visibility1;
             staticity = staticity1
           } =
@@ -880,7 +880,7 @@ module Lattices = struct
       in
       let { uniqueness = uniqueness2;
             contention = contention2;
-            ghostness = ghostness2;
+            logicality = logicality2;
             visibility = visibility2;
             staticity = staticity2
           } =
@@ -888,14 +888,14 @@ module Lattices = struct
       in
       Uniqueness.le uniqueness1 uniqueness2
       && Contention.le contention1 contention2
-      && Ghostness.le ghostness1 ghostness2
+      && Logicality.le logicality1 logicality2
       && Visibility.le visibility1 visibility2
       && Staticity.le staticity1 staticity2
 
     let equal m1 m2 =
       let { uniqueness = uniqueness1;
             contention = contention1;
-            ghostness = ghostness1;
+            logicality = logicality1;
             visibility = visibility1;
             staticity = staticity1
           } =
@@ -903,7 +903,7 @@ module Lattices = struct
       in
       let { uniqueness = uniqueness2;
             contention = contention2;
-            ghostness = ghostness2;
+            logicality = logicality2;
             visibility = visibility2;
             staticity = staticity2
           } =
@@ -911,7 +911,7 @@ module Lattices = struct
       in
       Uniqueness.equal uniqueness1 uniqueness2
       && Contention.equal contention1 contention2
-      && Ghostness.equal ghostness1 ghostness2
+      && Logicality.equal logicality1 logicality2
       && Visibility.equal visibility1 visibility2
       && Staticity.equal staticity1 staticity2
 
@@ -924,7 +924,7 @@ module Lattices = struct
         if c <> 0
         then c
         else
-          let c = Ghostness.compare_total m1.ghostness m2.ghostness in
+          let c = Logicality.compare_total m1.logicality m2.logicality in
           if c <> 0
           then c
           else
@@ -936,30 +936,30 @@ module Lattices = struct
     let join m1 m2 =
       let uniqueness = Uniqueness.join m1.uniqueness m2.uniqueness in
       let contention = Contention.join m1.contention m2.contention in
-      let ghostness = Ghostness.join m1.ghostness m2.ghostness in
+      let logicality = Logicality.join m1.logicality m2.logicality in
       let visibility = Visibility.join m1.visibility m2.visibility in
       let staticity = Staticity.join m1.staticity m2.staticity in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let meet m1 m2 =
       let uniqueness = Uniqueness.meet m1.uniqueness m2.uniqueness in
       let contention = Contention.meet m1.contention m2.contention in
-      let ghostness = Ghostness.meet m1.ghostness m2.ghostness in
+      let logicality = Logicality.meet m1.logicality m2.logicality in
       let visibility = Visibility.meet m1.visibility m2.visibility in
       let staticity = Staticity.meet m1.staticity m2.staticity in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let subtract m1 m2 =
       let uniqueness = Uniqueness.subtract m1.uniqueness m2.uniqueness in
       let contention = Contention.subtract m1.contention m2.contention in
-      let ghostness = Ghostness.subtract m1.ghostness m2.ghostness in
+      let logicality = Logicality.subtract m1.logicality m2.logicality in
       let visibility = Visibility.subtract m1.visibility m2.visibility in
       let staticity = Staticity.subtract m1.staticity m2.staticity in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let print ppf m =
       Fmt.fprintf ppf "%a,%a,%a,%a,%a" Uniqueness.print m.uniqueness
-        Contention.print m.contention Ghostness.print m.ghostness
+        Contention.print m.contention Logicality.print m.logicality
         Visibility.print m.visibility Staticity.print m.staticity
   end
 
@@ -1260,7 +1260,7 @@ module Lattices = struct
   *)
   module Uniqueness_op = Opposite (Uniqueness)
   module Contention_op = Opposite (Contention)
-  module Ghostness_op = Opposite (Ghostness)
+  module Logicality_op = Opposite (Logicality)
   module Visibility_op = Opposite (Visibility)
   module Staticity_op = Opposite (Staticity)
   module Monadic_op = Opposite (Monadic)
@@ -1278,7 +1278,7 @@ module Lattices = struct
     | Yielding : Yielding.t obj
     | Statefulness : Statefulness.t obj
     | Contention_op : Contention_op.t obj
-    | Ghostness_op : Ghostness_op.t obj
+    | Logicality_op : Logicality_op.t obj
     | Visibility_op : Visibility_op.t obj
     | Staticity_op : Staticity_op.t obj
     | Monadic_op : Monadic_op.t obj
@@ -1299,7 +1299,7 @@ module Lattices = struct
     | Locality -> Locality
     | Regionality -> Regionality
     | Uniqueness_op | Linearity | Monadic_op | Comonadic_with_regionality
-    | Comonadic_with_locality | Contention_op | Ghostness_op | Visibility_op
+    | Comonadic_with_locality | Contention_op | Logicality_op | Visibility_op
     | Portability | Totality | Forkable | Yielding | Statefulness | Staticity_op
       ->
       assert false
@@ -1318,7 +1318,7 @@ module Lattices = struct
     | Yielding -> false
     | Statefulness -> false
     | Contention_op -> true
-    | Ghostness_op -> true
+    | Logicality_op -> true
     | Visibility_op -> true
     | Staticity_op -> true
     | Monadic_op -> true
@@ -1337,7 +1337,7 @@ module Lattices = struct
     | Yielding -> Fmt.fprintf ppf "Yielding"
     | Statefulness -> Fmt.fprintf ppf "Statefulness"
     | Contention_op -> Fmt.fprintf ppf "Contention_op"
-    | Ghostness_op -> Fmt.fprintf ppf "Ghostness_op"
+    | Logicality_op -> Fmt.fprintf ppf "Logicality_op"
     | Visibility_op -> Fmt.fprintf ppf "Visibility_op"
     | Staticity_op -> Fmt.fprintf ppf "Staticity_op"
     | Monadic_op -> Fmt.fprintf ppf "Monadic_op"
@@ -1349,7 +1349,7 @@ module Lattices = struct
     | Regionality -> Regionality.min
     | Uniqueness_op -> Uniqueness_op.min
     | Contention_op -> Contention_op.min
-    | Ghostness_op -> Ghostness_op.min
+    | Logicality_op -> Logicality_op.min
     | Visibility_op -> Visibility_op.min
     | Forkable -> Forkable.min
     | Yielding -> Yielding.min
@@ -1367,7 +1367,7 @@ module Lattices = struct
     | Regionality -> Regionality.max
     | Uniqueness_op -> Uniqueness_op.max
     | Contention_op -> Contention_op.max
-    | Ghostness_op -> Ghostness_op.max
+    | Logicality_op -> Logicality_op.max
     | Visibility_op -> Visibility_op.max
     | Linearity -> Linearity.max
     | Portability -> Portability.max
@@ -1387,7 +1387,7 @@ module Lattices = struct
     | Regionality -> Regionality.le a b
     | Uniqueness_op -> Uniqueness_op.le a b
     | Contention_op -> Contention_op.le a b
-    | Ghostness_op -> Ghostness_op.le a b
+    | Logicality_op -> Logicality_op.le a b
     | Visibility_op -> Visibility_op.le a b
     | Linearity -> Linearity.le a b
     | Portability -> Portability.le a b
@@ -1407,7 +1407,7 @@ module Lattices = struct
     | Regionality -> Regionality.compare_total a b
     | Uniqueness_op -> Uniqueness_op.compare_total a b
     | Contention_op -> Contention_op.compare_total a b
-    | Ghostness_op -> Ghostness_op.compare_total a b
+    | Logicality_op -> Logicality_op.compare_total a b
     | Visibility_op -> Visibility_op.compare_total a b
     | Linearity -> Linearity.compare_total a b
     | Portability -> Portability.compare_total a b
@@ -1427,7 +1427,7 @@ module Lattices = struct
     | Regionality -> Regionality.equal a b
     | Uniqueness_op -> Uniqueness_op.equal a b
     | Contention_op -> Contention_op.equal a b
-    | Ghostness_op -> Ghostness_op.equal a b
+    | Logicality_op -> Logicality_op.equal a b
     | Visibility_op -> Visibility_op.equal a b
     | Linearity -> Linearity.equal a b
     | Portability -> Portability.equal a b
@@ -1447,7 +1447,7 @@ module Lattices = struct
     | Regionality -> Regionality.join a b
     | Uniqueness_op -> Uniqueness_op.join a b
     | Contention_op -> Contention_op.join a b
-    | Ghostness_op -> Ghostness_op.join a b
+    | Logicality_op -> Logicality_op.join a b
     | Visibility_op -> Visibility_op.join a b
     | Linearity -> Linearity.join a b
     | Portability -> Portability.join a b
@@ -1467,7 +1467,7 @@ module Lattices = struct
     | Regionality -> Regionality.meet a b
     | Uniqueness_op -> Uniqueness_op.meet a b
     | Contention_op -> Contention_op.meet a b
-    | Ghostness_op -> Ghostness_op.meet a b
+    | Logicality_op -> Logicality_op.meet a b
     | Visibility_op -> Visibility_op.meet a b
     | Linearity -> Linearity.meet a b
     | Portability -> Portability.meet a b
@@ -1487,7 +1487,7 @@ module Lattices = struct
     | Regionality -> Regionality.imply a b
     | Uniqueness_op -> Uniqueness_op.imply a b
     | Contention_op -> Contention_op.imply a b
-    | Ghostness_op -> Ghostness_op.imply a b
+    | Logicality_op -> Logicality_op.imply a b
     | Visibility_op -> Visibility_op.imply a b
     | Linearity -> Linearity.imply a b
     | Portability -> Portability.imply a b
@@ -1506,7 +1506,7 @@ module Lattices = struct
     | Regionality -> Regionality.print
     | Uniqueness_op -> Uniqueness_op.print
     | Contention_op -> Contention_op.print
-    | Ghostness_op -> Ghostness_op.print
+    | Logicality_op -> Logicality_op.print
     | Visibility_op -> Visibility_op.print
     | Linearity -> Linearity.print
     | Portability -> Portability.print
@@ -1525,7 +1525,7 @@ module Lattices = struct
     | Regionality -> Regionality.min
     | Uniqueness_op -> Uniqueness_op.min
     | Contention_op -> Contention_op.min
-    | Ghostness_op -> Ghostness_op.min
+    | Logicality_op -> Logicality_op.min
     | Visibility_op -> Visibility_op.min
     | Linearity -> Linearity.min
     | Portability -> Portability.min
@@ -1571,9 +1571,9 @@ module Lattices = struct
     | Contention_op, Contention_op -> 0
     | Contention_op, _ -> -1
     | _, Contention_op -> 1
-    | Ghostness_op, Ghostness_op -> 0
-    | Ghostness_op, _ -> -1
-    | _, Ghostness_op -> 1
+    | Logicality_op, Logicality_op -> 0
+    | Logicality_op, _ -> -1
+    | _, Logicality_op -> 1
     | Visibility_op, Visibility_op -> 0
     | Visibility_op, _ -> -1
     | _, Visibility_op -> 1
@@ -1601,7 +1601,7 @@ module Lattices = struct
     | Yielding, Yielding -> Misc.Is_eq
     | Statefulness, Statefulness -> Misc.Is_eq
     | Contention_op, Contention_op -> Misc.Is_eq
-    | Ghostness_op, Ghostness_op -> Misc.Is_eq
+    | Logicality_op, Logicality_op -> Misc.Is_eq
     | Visibility_op, Visibility_op -> Misc.Is_eq
     | Staticity_op, Staticity_op -> Misc.Is_eq
     | Monadic_op, Monadic_op -> Misc.Is_eq
@@ -1609,7 +1609,7 @@ module Lattices = struct
     | Comonadic_with_locality, Comonadic_with_locality -> Misc.Is_eq
     | ( ( Locality | Regionality | Uniqueness_op | Linearity | Portability
         | Totality | Forkable | Yielding | Statefulness | Contention_op
-        | Ghostness_op | Visibility_op | Staticity_op | Monadic_op
+        | Logicality_op | Visibility_op | Staticity_op | Monadic_op
         | Comonadic_with_regionality | Comonadic_with_locality ),
         _ ) ->
       Misc.Is_not_eq
@@ -1630,7 +1630,7 @@ module Lattices_mono = struct
       | Uniqueness : (Monadic_op.t, Uniqueness_op.t) t
       | Visibility : (Monadic_op.t, Visibility_op.t) t
       | Contention : (Monadic_op.t, Contention_op.t) t
-      | Ghostness : (Monadic_op.t, Ghostness_op.t) t
+      | Logicality : (Monadic_op.t, Logicality_op.t) t
       | Staticity : (Monadic_op.t, Staticity_op.t) t
 
     let print : type p r. _ -> (p, r) t -> unit =
@@ -1641,7 +1641,7 @@ module Lattices_mono = struct
       | Totality -> Fmt.fprintf ppf "totality"
       | Uniqueness -> Fmt.fprintf ppf "uniqueness"
       | Contention -> Fmt.fprintf ppf "contention"
-      | Ghostness -> Fmt.fprintf ppf "ghostness"
+      | Logicality -> Fmt.fprintf ppf "logicality"
       | Forkable -> Fmt.fprintf ppf "forkable"
       | Yielding -> Fmt.fprintf ppf "yielding"
       | Statefulness -> Fmt.fprintf ppf "statefulness"
@@ -1657,14 +1657,14 @@ module Lattices_mono = struct
       | Totality, Totality -> Is_eq
       | Uniqueness, Uniqueness -> Is_eq
       | Contention, Contention -> Is_eq
-      | Ghostness, Ghostness -> Is_eq
+      | Logicality, Logicality -> Is_eq
       | Forkable, Forkable -> Is_eq
       | Yielding, Yielding -> Is_eq
       | Statefulness, Statefulness -> Is_eq
       | Visibility, Visibility -> Is_eq
       | Staticity, Staticity -> Is_eq
       | ( ( Areality | Linearity | Uniqueness | Portability | Totality
-          | Contention | Ghostness | Forkable | Yielding | Statefulness
+          | Contention | Logicality | Forkable | Yielding | Statefulness
           | Visibility | Staticity ),
           _ ) ->
         Is_not_eq
@@ -1680,7 +1680,7 @@ module Lattices_mono = struct
       | Uniqueness -> 7
       | Visibility -> 8
       | Contention -> 9
-      | Ghostness -> 10
+      | Logicality -> 10
       | Staticity -> 11
 
     let compare : type p r1 r2. (p, r1) t -> (p, r2) t -> int =
@@ -1698,7 +1698,7 @@ module Lattices_mono = struct
       | Statefulness -> t.statefulness
       | Uniqueness -> t.uniqueness
       | Contention -> t.contention
-      | Ghostness -> t.ghostness
+      | Logicality -> t.logicality
       | Visibility -> t.visibility
       | Staticity -> t.staticity
 
@@ -1714,7 +1714,7 @@ module Lattices_mono = struct
       | Statefulness -> { t with statefulness = r }
       | Uniqueness -> { t with uniqueness = r }
       | Contention -> { t with contention = r }
-      | Ghostness -> { t with ghostness = r }
+      | Logicality -> { t with logicality = r }
       | Visibility -> { t with visibility = r }
       | Staticity -> { t with staticity = r }
 
@@ -1741,11 +1741,11 @@ module Lattices_mono = struct
         [ From Uniqueness;
           From Visibility;
           From Contention;
-          From Ghostness;
+          From Logicality;
           From Staticity ]
       | Locality | Regionality | Uniqueness_op | Linearity | Portability
       | Totality | Forkable | Yielding | Statefulness | Contention_op
-      | Ghostness_op | Visibility_op | Staticity_op ->
+      | Logicality_op | Visibility_op | Staticity_op ->
         []
 
     type 'b to_ = To : 'a obj * ('a, 'b) t -> 'b to_
@@ -1776,7 +1776,7 @@ module Lattices_mono = struct
         [ To (Comonadic_with_locality, Statefulness);
           To (Comonadic_with_regionality, Statefulness) ]
       | Contention_op -> [To (Monadic_op, Contention)]
-      | Ghostness_op -> [To (Monadic_op, Ghostness)]
+      | Logicality_op -> [To (Monadic_op, Logicality)]
       | Visibility_op -> [To (Monadic_op, Visibility)]
       | Staticity_op -> [To (Monadic_op, Staticity)]
 
@@ -1799,7 +1799,7 @@ module Lattices_mono = struct
       | Uniqueness -> Monadic ax
       | Visibility -> Monadic ax
       | Contention -> Monadic ax
-      | Ghostness -> Monadic ax
+      | Logicality -> Monadic ax
       | Staticity -> Monadic ax
   end
 
@@ -1816,7 +1816,7 @@ module Lattices_mono = struct
       Obj Yielding;
       Obj Statefulness;
       Obj Contention_op;
-      Obj Ghostness_op;
+      Obj Logicality_op;
       Obj Visibility_op;
       Obj Staticity_op;
       Obj Monadic_op;
@@ -1837,7 +1837,7 @@ module Lattices_mono = struct
       | Yielding -> Yielding.all
       | Statefulness -> Statefulness.all
       | Contention_op -> Contention.all
-      | Ghostness_op -> Ghostness.all
+      | Logicality_op -> Logicality.all
       | Visibility_op -> Visibility.all
       | Staticity_op -> Staticity.all
       | Monadic_op -> if full then Monadic.all else Monadic.spanning_elements
@@ -2456,10 +2456,10 @@ module Lattices_mono = struct
      fun _ m ->
       let uniqueness = linearity_to_uniqueness_op m.linearity in
       let contention = portability_to_contention_op m.portability in
-      let ghostness = Ghostness_op.min in
+      let logicality = Logicality_op.min in
       let visibility = statefulness_to_visibility_op m.statefulness in
       let staticity = Staticity_op.min in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let monadic_op_to_comonadic_max : type a.
         a comonadic_with obj -> Monadic_op.t -> a comonadic_with =
@@ -2489,10 +2489,10 @@ module Lattices_mono = struct
      fun _ m ->
       let uniqueness = linearity_to_uniqueness_op m.linearity in
       let contention = portability_to_contention_op m.portability in
-      let ghostness = Ghostness_op.max in
+      let logicality = Logicality_op.max in
       let visibility = statefulness_to_visibility_op m.statefulness in
       let staticity = Staticity_op.max in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let apply : type a b d. b obj -> (a, b, d) t -> a -> b =
      fun dst f a ->
@@ -2731,7 +2731,7 @@ module Lattices_mono = struct
           ( Portability_to_contention_op,
             Portability,
             areality_comonadic_obj areality )
-      | Comonadic_to_monadic_op_min areality, Ghostness ->
+      | Comonadic_to_monadic_op_min areality, Logicality ->
         Proj_const_min (areality_comonadic_obj areality)
       | Comonadic_to_monadic_op_min areality, Staticity ->
         Proj_const_min (areality_comonadic_obj areality)
@@ -2760,7 +2760,7 @@ module Lattices_mono = struct
           ( Portability_to_contention_op,
             Portability,
             areality_comonadic_obj areality )
-      | Comonadic_to_monadic_op_max areality, Ghostness ->
+      | Comonadic_to_monadic_op_max areality, Logicality ->
         Proj_const_max (areality_comonadic_obj areality)
       | Comonadic_to_monadic_op_max areality, Staticity ->
         Proj_const_max (areality_comonadic_obj areality)
@@ -2847,7 +2847,7 @@ module Lattices_mono = struct
       | Monadic_op_to_comonadic_max, Staticity -> Const_max_core
       | Monadic_op_to_comonadic_max, Contention ->
         And_max_core (Portability, Contention_op_to_portability)
-      | Monadic_op_to_comonadic_max, Ghostness -> Const_max_core
+      | Monadic_op_to_comonadic_max, Logicality -> Const_max_core
       | Monadic_op_to_comonadic_max, Visibility ->
         And_max_core (Statefulness, Visibility_op_to_statefulness)
       | Monadic_op_to_comonadic_max, Uniqueness ->
@@ -2901,7 +2901,7 @@ module Lattices_mono = struct
       | Monadic_op_to_comonadic_min, Staticity -> Const_min_core
       | Monadic_op_to_comonadic_min, Contention ->
         And_min_core (Portability, Contention_op_to_portability)
-      | Monadic_op_to_comonadic_min, Ghostness -> Const_min_core
+      | Monadic_op_to_comonadic_min, Logicality -> Const_min_core
       | Monadic_op_to_comonadic_min, Visibility ->
         And_min_core (Statefulness, Visibility_op_to_statefulness)
       | Monadic_op_to_comonadic_min, Uniqueness ->
@@ -3020,7 +3020,7 @@ module Lattices_mono = struct
       | Yielding -> []
       | Statefulness -> [To Visibility_op_to_statefulness]
       | Contention_op -> [To Portability_to_contention_op]
-      | Ghostness_op -> []
+      | Logicality_op -> []
       | Visibility_op -> [To Statefulness_to_visibility_op]
       | Staticity_op -> []
       | Monadic_op ->
@@ -3050,7 +3050,7 @@ module Lattices_mono = struct
       | Yielding -> []
       | Statefulness -> [To Visibility_op_to_statefulness]
       | Contention_op -> [To Portability_to_contention_op]
-      | Ghostness_op -> []
+      | Logicality_op -> []
       | Visibility_op -> [To Statefulness_to_visibility_op]
       | Staticity_op -> []
       | Monadic_op ->
@@ -3085,7 +3085,7 @@ module Lattices_mono = struct
     | Statefulness, Comonadic_with_regionality -> Statefulness
     | Uniqueness, Monadic_op -> Uniqueness_op
     | Contention, Monadic_op -> Contention_op
-    | Ghostness, Monadic_op -> Ghostness_op
+    | Logicality, Monadic_op -> Logicality_op
     | Visibility, Monadic_op -> Visibility_op
     | Staticity, Monadic_op -> Staticity_op
 
@@ -4375,7 +4375,7 @@ module Lattices_mono = struct
 
   let morphs_to_contention_op = morphs_to_obj Contention_op
 
-  let morphs_to_ghostness_op = morphs_to_obj Ghostness_op
+  let morphs_to_logicality_op = morphs_to_obj Logicality_op
 
   let morphs_to_visibility_op = morphs_to_obj Visibility_op
 
@@ -4400,7 +4400,7 @@ module Lattices_mono = struct
     | Yielding -> force_by_coverage ~full morphs_to_yielding
     | Statefulness -> force_by_coverage ~full morphs_to_statefulness
     | Contention_op -> force_by_coverage ~full morphs_to_contention_op
-    | Ghostness_op -> force_by_coverage ~full morphs_to_ghostness_op
+    | Logicality_op -> force_by_coverage ~full morphs_to_logicality_op
     | Visibility_op -> force_by_coverage ~full morphs_to_visibility_op
     | Staticity_op -> force_by_coverage ~full morphs_to_staticity_op
     | Monadic_op -> force_by_coverage ~full morphs_to_monadic_op
@@ -4461,7 +4461,7 @@ module Lattices_mono = struct
       | Comonadic_to_monadic_op_min _, Uniqueness -> Axis Linearity
       | Comonadic_to_monadic_op_min _, Visibility -> Axis Statefulness
       | Comonadic_to_monadic_op_min _, Contention -> Axis Portability
-      | Comonadic_to_monadic_op_min _, Ghostness -> None_responsible
+      | Comonadic_to_monadic_op_min _, Logicality -> None_responsible
       | Comonadic_to_monadic_op_min _, Staticity -> None_responsible
       | Monadic_op_to_comonadic_max, Areality -> None_responsible
       | Monadic_op_to_comonadic_max, Forkable -> None_responsible
@@ -4473,7 +4473,7 @@ module Lattices_mono = struct
       | Comonadic_to_monadic_op_max _, Uniqueness -> Axis Linearity
       | Comonadic_to_monadic_op_max _, Visibility -> Axis Statefulness
       | Comonadic_to_monadic_op_max _, Contention -> Axis Portability
-      | Comonadic_to_monadic_op_max _, Ghostness -> None_responsible
+      | Comonadic_to_monadic_op_max _, Logicality -> None_responsible
       | Comonadic_to_monadic_op_max _, Staticity -> None_responsible
 
     let rec find_responsible_axis_proj_simple : type a b b_ax l r.
@@ -4634,7 +4634,7 @@ let erase_hints () = S.erase_hints ()
 type monadic = C.monadic =
   { uniqueness : C.Uniqueness.t;
     contention : C.Contention.t;
-    ghostness : C.Ghostness.t;
+    logicality : C.Logicality.t;
     visibility : C.Visibility.t;
     staticity : C.Staticity.t
   }
@@ -6045,13 +6045,13 @@ module Contention = struct
     | Visibility.Const.Immutable -> zap_to_ceil
 end
 
-module Ghostness = struct
-  module Const = C.Ghostness
+module Logicality = struct
+  module Const = C.Logicality
 
   module Obj = struct
     type const = Const.t
 
-    let obj = C.Ghostness_op
+    let obj = C.Logicality_op
   end
 
   include Monadic_gen (Obj)
@@ -6329,7 +6329,7 @@ module Monadic = struct
     let proj = Axis.proj
 
     let all =
-      [P Uniqueness; P Contention; P Ghostness; P Visibility; P Staticity]
+      [P Uniqueness; P Contention; P Logicality; P Visibility; P Staticity]
       |> List.sort (fun (P ax1) (P ax2) -> compare ax1 ax2)
   end
 
@@ -6414,9 +6414,9 @@ module Monadic = struct
     let contention =
       proj Contention m |> Contention.zap_to_legacy ~visibility
     in
-    let ghostness = proj Ghostness m |> Ghostness.zap_to_legacy in
+    let logicality = proj Logicality m |> Logicality.zap_to_legacy in
     let staticity = proj Staticity m |> Staticity.zap_to_legacy in
-    { uniqueness; contention; ghostness; visibility; staticity }
+    { uniqueness; contention; logicality; visibility; staticity }
 
   let legacy = of_const Const.legacy
 
@@ -6513,7 +6513,7 @@ module Value_with (Areality : Areality) = struct
       visibility : 'i;
       staticity : 'j;
       totality : 'k;
-      ghostness : 'l
+      logicality : 'l
     }
 
   let split
@@ -6526,12 +6526,12 @@ module Value_with (Areality : Areality) = struct
         statefulness;
         uniqueness;
         contention;
-        ghostness;
+        logicality;
         visibility;
         staticity
       } =
     let monadic : Monadic.Const.t =
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
     in
     let comonadic : Comonadic.Const.t =
       { areality;
@@ -6557,7 +6557,7 @@ module Value_with (Areality : Areality) = struct
           : Comonadic.Const.t) =
       comonadic
     in
-    let ({ uniqueness; contention; ghostness; visibility; staticity }
+    let ({ uniqueness; contention; logicality; visibility; staticity }
           : Monadic.Const.t) =
       monadic
     in
@@ -6570,7 +6570,7 @@ module Value_with (Areality : Areality) = struct
       statefulness;
       uniqueness;
       contention;
-      ghostness;
+      logicality;
       visibility;
       staticity
     }
@@ -6619,7 +6619,7 @@ module Value_with (Areality : Areality) = struct
         Visibility.Const.t,
         Staticity.Const.t,
         Totality.Const.t,
-        Ghostness.Const.t )
+        Logicality.Const.t )
       modes
 
     let min =
@@ -6686,7 +6686,7 @@ module Value_with (Areality : Areality) = struct
           Visibility.Const.t option,
           Staticity.Const.t option,
           Totality.Const.t option,
-          Ghostness.Const.t option )
+          Logicality.Const.t option )
         modes
 
       let none =
@@ -6701,7 +6701,7 @@ module Value_with (Areality : Areality) = struct
           visibility = None;
           staticity = None;
           totality = None;
-          ghostness = None
+          logicality = None
         }
 
       let value opt ~default =
@@ -6717,7 +6717,7 @@ module Value_with (Areality : Areality) = struct
         let contention =
           Option.value opt.contention ~default:default.contention
         in
-        let ghostness = Option.value opt.ghostness ~default:default.ghostness in
+        let logicality = Option.value opt.logicality ~default:default.logicality in
         let yielding = Option.value opt.yielding ~default:default.yielding in
         let forkable = Option.value opt.forkable ~default:default.forkable in
         let statefulness =
@@ -6733,7 +6733,7 @@ module Value_with (Areality : Areality) = struct
           portability;
           totality;
           contention;
-          ghostness;
+          logicality;
           forkable;
           yielding;
           statefulness;
@@ -6747,7 +6747,7 @@ module Value_with (Areality : Areality) = struct
           match ax with
           | Uniqueness -> t.uniqueness
           | Contention -> t.contention
-          | Ghostness -> t.ghostness
+          | Logicality -> t.logicality
           | Visibility -> t.visibility
           | Staticity -> t.staticity)
         | Comonadic ax -> (
@@ -6766,7 +6766,7 @@ module Value_with (Areality : Areality) = struct
           match ax with
           | Uniqueness -> { t with uniqueness = a }
           | Contention -> { t with contention = a }
-          | Ghostness -> { t with ghostness = a }
+          | Logicality -> { t with logicality = a }
           | Visibility -> { t with visibility = a }
           | Staticity -> { t with staticity = a })
         | Comonadic ax -> (
@@ -6791,7 +6791,7 @@ module Value_with (Areality : Areality) = struct
             visibility;
             staticity;
             totality;
-            ghostness
+            logicality
           } =
         let option_print print ppf = function
           | None -> Fmt.fprintf ppf "None"
@@ -6820,8 +6820,8 @@ module Value_with (Areality : Areality) = struct
           staticity
           (option_print Totality.Const.print)
           totality
-          (option_print Ghostness.Const.print)
-          ghostness
+          (option_print Logicality.Const.print)
+          logicality
     end
 
     let diff m1 m2 =
@@ -6834,7 +6834,7 @@ module Value_with (Areality : Areality) = struct
       in
       let contention = diff Contention.Const.le m1.contention m2.contention in
       let totality = diff Totality.Const.le m1.totality m2.totality in
-      let ghostness = diff Ghostness.Const.le m1.ghostness m2.ghostness in
+      let logicality = diff Logicality.Const.le m1.logicality m2.logicality in
       let forkable = diff Forkable.Const.le m1.forkable m2.forkable in
       let yielding = diff Yielding.Const.le m1.yielding m2.yielding in
       let statefulness =
@@ -6848,7 +6848,7 @@ module Value_with (Areality : Areality) = struct
         portability;
         contention;
         totality;
-        ghostness;
+        logicality;
         forkable;
         yielding;
         statefulness;
@@ -7147,7 +7147,7 @@ module Const = struct
          totality;
          uniqueness;
          contention;
-         ghostness;
+         logicality;
          forkable;
          yielding;
          statefulness;
@@ -7162,7 +7162,7 @@ module Const = struct
       totality;
       uniqueness;
       contention;
-      ghostness;
+      logicality;
       forkable;
       yielding;
       statefulness;
@@ -7183,7 +7183,7 @@ module Const = struct
       | Comonadic Statefulness -> Right (Comonadic Statefulness)
       | Monadic Uniqueness -> Right (Monadic Uniqueness)
       | Monadic Contention -> Right (Monadic Contention)
-      | Monadic Ghostness -> Right (Monadic Ghostness)
+      | Monadic Logicality -> Right (Monadic Logicality)
       | Monadic Visibility -> Right (Monadic Visibility)
       | Monadic Staticity -> Right (Monadic Staticity)
 
@@ -7936,11 +7936,11 @@ module Crossing = struct
 
     let create ~uniqueness:(Atom.Modality (Join_const uniqueness))
         ~contention:(Atom.Modality (Join_const contention))
-        ~ghostness:(Atom.Modality (Join_const ghostness))
+        ~logicality:(Atom.Modality (Join_const logicality))
         ~visibility:(Atom.Modality (Join_const visibility))
         ~staticity:(Atom.Modality (Join_const staticity)) =
       Modality
-        (Join_const { uniqueness; contention; ghostness; visibility; staticity })
+        (Join_const { uniqueness; contention; logicality; visibility; staticity })
 
     let modality m (Modality t) = Modality (Modality.Const.concat ~then_:t m)
 
@@ -8273,7 +8273,7 @@ module Crossing = struct
       { monadic; comonadic = (Comonadic.set [@inlined hint]) ax a comonadic }
 
   let create ~regionality ~linearity ~uniqueness ~portability ~contention
-      ~totality ~ghostness ~forkable ~yielding ~statefulness ~visibility
+      ~totality ~logicality ~forkable ~yielding ~statefulness ~visibility
       ~staticity =
     let comonadic b ax =
       if b then Per_axis.min (Comonadic ax) else Per_axis.max (Comonadic ax)
@@ -8287,14 +8287,14 @@ module Crossing = struct
     let portability = comonadic portability Portability in
     let contention = monadic contention Contention in
     let totality = comonadic totality Totality in
-    let ghostness = monadic ghostness Ghostness in
+    let logicality = monadic logicality Logicality in
     let forkable = comonadic forkable Forkable in
     let yielding = comonadic yielding Yielding in
     let statefulness = comonadic statefulness Statefulness in
     let visibility = monadic visibility Visibility in
     let staticity = monadic staticity Staticity in
     let monadic =
-      Monadic.create ~uniqueness ~contention ~ghostness ~visibility ~staticity
+      Monadic.create ~uniqueness ~contention ~logicality ~visibility ~staticity
     in
     let comonadic =
       Comonadic.create ~regionality ~linearity ~portability ~totality ~yielding

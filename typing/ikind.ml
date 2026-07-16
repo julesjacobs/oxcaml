@@ -552,7 +552,7 @@ let filter_axes_without_kind_modalities axes =
       let open Mode.Crossing.Axis in
       match axis with
       | Jkind_axis.Axis.Modal (Comonadic Totality)
-      | Jkind_axis.Axis.Modal (Monadic Ghostness) ->
+      | Jkind_axis.Axis.Modal (Monadic Logicality) ->
         false
       | Jkind_axis.Axis.Modal _ | Jkind_axis.Axis.Nonmodal _ -> true)
     axes
