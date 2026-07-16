@@ -231,6 +231,15 @@ type smt =
 let query_count = ref 0
 let budget_ref = ref max_int
 
+(* Per-[check_sat] effort cap threaded to every oracle Session (board #60 [max_effort]: a
+   counted cutoff on SAT conflicts + decisions + seam Final-rounds). Without it a Session
+   is UNBOUNDED and a diverging LIA search — e.g. an unbounded-quotient parity
+   infeasibility like [2q = 2q'+1] — hangs [check_sat] forever, uninterruptible by our
+   between-queries query-count budget. A finite cap makes such a query return [Unknown]
+   (budget) so the PDR solve degrades to unknown instead of hanging (per-check,
+   poison-free, re-runnable). *)
+let effort_cap = ref 1_000_000
+
 (* Raised to abandon a solve to [Unknown] (budget/limit/oracle-unknown); also used with
    the sentinel messages ["__unsafe_*"] to signal an early UNSAFE finding. *)
 exception Give_up of string
@@ -244,7 +253,7 @@ let check_budget () =
 let solve_exprs (ts : ts) (asserts : expr list) : smt * Session.t =
   incr query_count;
   check_budget ();
-  let sess = Session.create () in
+  let sess = Session.create ~max_effort:!effort_cap () in
   let ctx = Session.context sess in
   let fvs = free_vars_list asserts in
   let vmap = Hashtbl.create 64 in
@@ -520,7 +529,7 @@ let invariant_exprs (p : pdr) (i : int) : expr list = frame_formula p i
    freshened so different steps do not share the transition relation's auxiliaries. *)
 let bmc_at (ts : ts) (k : int) : smt * Session.t =
   incr query_count;
-  let sess = Session.create () in
+  let sess = Session.create ~max_effort:!effort_cap () in
   let ctx = Session.context sess in
   let vmap = Hashtbl.create 256 in
   let get_sort name =
@@ -639,11 +648,17 @@ let verify_invariant (ts : ts) (inv : expr list) : bool =
 
 let default_budget = 200_000
 
-let solve ?(max_bmc = 40) ?(max_frames = 60) ?(budget = default_budget) (sys : system)
+let solve
+  ?(max_bmc = 40)
+  ?(max_frames = 60)
+  ?(budget = default_budget)
+  ?(max_effort = 1_000_000)
+  (sys : system)
   : result
   =
   query_count := 0;
   budget_ref := budget;
+  effort_cap := max_effort;
   let over_budget () = !query_count > budget in
   match extract_ts sys with
   | exception Not_ts reason ->

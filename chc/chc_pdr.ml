@@ -228,6 +228,12 @@ type smt =
 let query_count = ref 0
 let budget_ref = ref max_int
 
+(* Per-[check_sat] effort cap threaded to every oracle Session (board #60 [max_effort]).
+   Without it a Session is UNBOUNDED and a diverging LIA search hangs [check_sat] forever,
+   uninterruptible by the between-queries query-count budget. A finite cap degrades such a
+   query to [Unknown] (budget) so the PDR solve bails to unknown instead of hanging. *)
+let effort_cap = ref 1_000_000
+
 exception Give_up of string
 
 let check_budget () =
@@ -237,7 +243,7 @@ let check_budget () =
 let solve_exprs (sy : sys) (asserts : expr list) : smt * Session.t =
   incr query_count;
   check_budget ();
-  let sess = Session.create () in
+  let sess = Session.create ~max_effort:!effort_cap () in
   let ctx = Session.context sess in
   let fvs = List.fold_left fv SS.empty asserts in
   let vmap = Hashtbl.create 64 in
@@ -870,9 +876,12 @@ let replay (sy : sys) ~(bad_guard : expr list) (trace : step list) : bool =
 
 (* ---- top-level solve ---- *)
 
-let solve ?(max_frames = 60) ?(budget = 200_000) (s : system) : result =
+let solve ?(max_frames = 60) ?(budget = 200_000) ?(max_effort = 1_000_000) (s : system)
+  : result
+  =
   query_count := 0;
   budget_ref := budget;
+  effort_cap := max_effort;
   match build_sys s with
   | exception Not_linear r -> { verdict = Unknown ("not linear: " ^ r); detail = r }
   | sy ->
