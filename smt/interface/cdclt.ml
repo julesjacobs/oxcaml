@@ -150,6 +150,22 @@ module Vartbl = Hashtbl.Make (struct
     let hash (x : int) = x
   end)
 
+(* ADR-0014 Stage 4.2 DARK flag: earliest-removed incremental theory undo under
+   chronological backtracking. OFF (default, unset) => the driver installs
+   [on_chrono_rewind = None] and the SAT core takes its byte-identical full-rebuild chrono
+   arm; the [ckpt_log]/[base_ckpt] machinery below is never touched (and [on_assign] keeps
+   its exact pre-S4.2 [sync_level] behaviour). Requires BOTH this flag AND [OXSMT_CHRONO]:
+   incremental undo is meaningless without chrono, and only the chrono scattered-removal
+   arm ever invokes the hook (the monotone arm always uses [on_backtrack ~level]). Same
+   on-value vocabulary as the SAT core's [OXSMT_CHRONO]. *)
+let env_on name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+let incr_undo = lazy (env_on "OXSMT_CHRONO_INCR_UNDO" && env_on "OXSMT_CHRONO")
+
 type t =
   { mutable theory : theory_impl option
       (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
@@ -188,11 +204,24 @@ type t =
          theory is the standalone arrays theory (else [None]); read by {!Session}'s arrays
          commit through {!array_model} and checked by [Array_model_check]. *)
   ; mutable relevancy : Relevancy.t option
-  (* dynamic relevancy driver (task #24), [None] unless {!Session} installed one from the
-     [OXSMT_RELEVANCY] gate. When [Some], the two trail seam events below stream to it so
-     it can maintain relevancy marks in lockstep with the SAT trail; the branch filter
-     itself is installed directly on the SAT core by {!Session}. A [None] arm is
-     behaviourally inert — the theory glue is byte-identical with relevancy off. *)
+      (* dynamic relevancy driver (task #24), [None] unless {!Session} installed one from
+         the [OXSMT_RELEVANCY] gate. When [Some], the two trail seam events below stream
+         to it so it can maintain relevancy marks in lockstep with the SAT trail; the
+         branch filter itself is installed directly on the SAT core by {!Session}. A
+         [None] arm is behaviourally inert — the theory glue is byte-identical with
+         relevancy off. *)
+  ; ckpt_log : Combined.checkpoint option Dynarray.t
+      (* ADR-0014 S4.2 (dark, [incr_undo] only): one Combined sub-frame checkpoint per
+         [on_assign], in trail-stream order — [ckpt_log.(i)] is the theory watermark just
+         BEFORE trail literal [i] was asserted, so [rewind i] restores it and undoes
+         literals [i..]. The seam contract fires exactly one [on_assign] per trail
+         placement, so stream index == trail index. [None] entry = an [on_assign] with no
+         [Combined] theory. Grows with the trail; truncated to [w] on a chrono rewind;
+         empty and unused when the flag is off. *)
+  ; mutable base_ckpt : Combined.checkpoint option
+  (* ADR-0014 S4.2 (dark): the Combined checkpoint captured at theory creation
+     ([ensure_theory]), before ANY assertion — the [rewind 0] target when the earliest-
+     removed prefix has no logged checkpoint. [None] until a Combined theory exists. *)
   }
 
 let sign_lit = Sat.sign_of_lit
@@ -272,7 +301,10 @@ let reset_for_new_query t =
   t.splits <- 0;
   t.last_model <- None;
   t.last_dt_model <- None;
-  t.last_array_model <- None
+  t.last_array_model <- None;
+  (* S4.2 (dark): the checkpoint log/base belong to the dropped theory instance. *)
+  Dynarray.clear t.ckpt_log;
+  t.base_ckpt <- None
 ;;
 
 let ensure_theory t =
@@ -287,6 +319,15 @@ let ensure_theory t =
       else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;
+    (* S4.2 (dark): capture the before-any-assertion Combined watermark, the [rewind 0]
+       target. Only the Combined stack carries the sub-frame trail incr_undo needs; a
+       standalone DT/array theory leaves [base_ckpt = None] and the rewind arm fails loud
+       (see {!on_chrono_rewind}) rather than mis-undoing. *)
+    if Lazy.force incr_undo
+    then (
+      match impl with
+      | TCombined th -> t.base_ckpt <- Some (Combined.checkpoint th)
+      | TDt _ | TArr _ -> ());
     impl
 ;;
 
@@ -374,7 +415,21 @@ let on_assign t l ~level =
    | None -> ()
    | Some rel ->
      Relevancy.on_assign rel ~var:(Sat.var_of_lit l) ~value:(sign_lit l) ~level);
-  sync_level t;
+  if Lazy.force incr_undo
+  then
+    (* S4.2 single-base-frame discipline (dark): never push a per-level frame; log the
+       Combined sub-frame watermark BEFORE this literal is asserted, so a chrono
+       earliest-removed rewind can restore any trail prefix. [ckpt_log] grows one entry
+       per [on_assign], in lockstep with the trail (length == trail length). Under chrono
+       every backtrack routes through the SAT core's scattered-removal arm, which calls
+       [on_chrono_rewind] (not [on_backtrack] with a real pop), so the theory only ever
+       operates at its base frame — no frame push is needed. *)
+    Dynarray.add_last
+      t.ckpt_log
+      (match t.theory with
+       | Some (TCombined th) -> Some (Combined.checkpoint th)
+       | Some (TDt _ | TArr _) | None -> None)
+  else sync_level t;
   let v = Sat.var_of_lit l in
   match Vartbl.find_opt t.v2a v with
   | None -> () (* an aux / selector / boolean-variable literal: not a theory atom *)
@@ -397,6 +452,37 @@ let on_backtrack t ~level =
      | Some impl -> th_pop impl n
      | None -> ());
     t.level <- level)
+;;
+
+(* ADR-0014 S4.2 chrono earliest-removed incremental undo (dark, [incr_undo] only). The
+   SAT core calls [rewind w] where [w] is the earliest-removed pre-compaction trail index
+   (= the number of trail-prefix literals retained): rewind the Combined theory to the
+   sub-frame watermark logged just before literal [w] was asserted, dropping exactly the
+   theory state for stream positions [w..]. The core then replays those survivors via
+   [on_assign] (each re-logs its checkpoint into the truncated [ckpt_log]). OBS-EQ to the
+   pop-to-base + replay-all rebuild arm.
+
+   Fails loud on a standalone DT/array theory: incremental undo is only sound over the
+   Combined stack's sub-frame trail, and [base_ckpt] was not captured for those (a silent
+   no-undo would be a soundness break, so we raise rather than degrade). *)
+let on_chrono_rewind t w =
+  match t.theory with
+  | None -> ()
+  | Some (TDt _ | TArr _) ->
+    failwith "cdclt.on_chrono_rewind: OXSMT_CHRONO_INCR_UNDO requires the Combined theory"
+  | Some (TCombined th) ->
+    let logged =
+      if w < Dynarray.length t.ckpt_log then Dynarray.get t.ckpt_log w else None
+    in
+    let target =
+      match logged, t.base_ckpt with
+      | Some c, _ -> c
+      | None, Some c -> c (* w = 0 (or an unlogged prefix): rewind to before-any-assert *)
+      | None, None -> Combined.checkpoint th (* no theory activity yet: current == base *)
+    in
+    Combined.rewind_to_checkpoint th target;
+    (* Drop the log suffix; the core's replay loop re-appends checkpoints for [w..]. *)
+    if w < Dynarray.length t.ckpt_log then Dynarray.truncate t.ckpt_log w
 ;;
 
 (* Clausify one disjunct of a theory [Split] into a signed SAT literal (CONTRACT-SPLIT). A
@@ -518,6 +604,8 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; last_dt_model = None
     ; last_array_model = None
     ; relevancy = None
+    ; ckpt_log = Dynarray.create ()
+    ; base_ckpt = None
     }
   in
   Sat.set_theory
@@ -527,7 +615,10 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
        ; on_backtrack = on_backtrack t
        ; check = check t
        ; explain = explain t
-       ; on_chrono_rewind = None
+       ; (* S4.2 (dark): install the incremental-undo hook only under the flag; [None]
+            (default) keeps the SAT core on its byte-identical full-rebuild chrono arm. *)
+         on_chrono_rewind =
+           (if Lazy.force incr_undo then Some (on_chrono_rewind t) else None)
        });
   (* Effort seam (board #60): the SAT core ticks the shared budget at each conflict /
      decision through this opaque closure, keeping [oxsmt_solver] budget-agnostic. *)
