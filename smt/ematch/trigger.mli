@@ -20,23 +20,5 @@ open Oxsmt_core
     application (nothing can bind it) or when [qvars] is empty (a zero-qvar lemma is a
     ground fact the matcher fires without a trigger). Every returned pattern is a UF
     application, so it passes {!Lemma}/{!Matcher}'s trigger-fragment contract by
-    construction.
-
-    [ground_occurrences hd] is how many times head symbol [hd] occurs in a ground term of
-    the current problem (see {!ground_head_counts}); candidates are ordered by it
-    DESCENDING before the size/tag keys, so a head that can actually match a ground term
-    is preferred and a head with no ground occurrence (e.g. a Skolem function minted for a
-    nested existential, which never appears in a ground term) sorts last. Purely a
-    completeness heuristic — it changes only which valid instances fire, never a verdict.
-    The default [fun _ -> 0] makes the key inert, so the order is byte-identical to the
-    size/tag recipe (existing callers are unaffected). *)
-val infer
-  :  ?ground_occurrences:(Symbol.t -> int)
-  -> qvars:Qvar.t array
-  -> Term.t
-  -> Term.t list list
-
-(** [ground_head_counts terms] returns [fun hd -> count], the number of
-    [App]-with-arguments nodes headed by [hd] across [terms] (typically a query's ground
-    assertions). Intended as the [~ground_occurrences] argument to {!infer}. *)
-val ground_head_counts : Term.t list -> Symbol.t -> int
+    construction. *)
+val infer : qvars:Qvar.t array -> Term.t -> Term.t list list
