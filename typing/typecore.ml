@@ -700,6 +700,18 @@ let mode_lazy expected_mode =
     mode_coerce (Value.of_const ~hint_comonadic:Lazy_allocated_on_heap mode)
       expected_mode
   in
+  (* This is the only site where the totality and portability booleans differ
+     ([~totality:false] vs [~portability:true]); the difference is deliberate.
+     For a comonadic axis this crossing computes
+     [apply_right (Meet_const c) m = imply c (meet c m)]: [false] sets [c] to the
+     axis max (top), which is the identity, so the axis is COUPLED and the lazy
+     value inherits it from the thunk; [true] sets [c] to the axis min (bottom),
+     which yields top, so the axis is DECOUPLED from the thunk.  Totality must
+     couple: forcing runs the whole thunk, so a divergent/effectful body has to
+     make the lazy partial.  Portability must not couple here: a lazy's
+     portability is that of its FORCED RESULT (enforced via the result type, see
+     lazy.ml), not of values merely used inside the thunk, so an internal
+     nonportable capture must not leak onto the lazy. *)
   let mode_crossing =
     Crossing.create ~linearity:true ~portability:true
       ~totality:false ~logicality:false
