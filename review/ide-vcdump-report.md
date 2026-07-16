@@ -8,19 +8,17 @@ verified. The boot compiler builds; all required suites are green; the
 byte-identical default and live JSON samples are confirmed (see Verification
 evidence below).
 
-(The codex run that produced this change looped while streaming its final
-diff summary and was stopped by the lane manager once the on-disk deliverable —
-all source edits, green suites, and this report — was complete. The manager
-independently re-ran the verification below and completed this section.)
-
 ## Flags and mechanism
 
-- `-vox-dump-vc-json` adds one JSON document to stderr at process exit.  It
-  records every VC actually passed to `Vox_lean.discharge`, including VCs
-  processed before a later verification error aborts compilation.
+- `-vox-dump-vc-json FILE` writes one JSON document to `FILE` at process exit.
+  It does not write JSON to stdout or stderr. It records every VC actually
+  passed to `Vox_lean.discharge`, including VCs processed before a later
+  verification error aborts compilation.
 - `-vox-type-only` skips both `Vox_verify.verify_structure` calls in
   `typing/typemod.ml` and skips seal-obligation verification.  It therefore
-  generates and discharges no refinement VCs.
+  generates and discharges no refinement VCs. It performs full typechecking,
+  emits `.annot` when `-annot` is present, and prints the inferred signature
+  when `-i` is present, but never writes `.cmi`, `.cmo`, or `.cmt` artifacts.
 
 The flags are independent.  Combining them produces a valid document whose
 `verification_conditions` array is empty.
@@ -86,8 +84,11 @@ synthesized facts.  `Span` is:
 ```
 
 Lines are 1-based and columns are 0-based byte offsets, matching OCaml
-locations.  Strings are UTF-8 JSON strings.  Control characters, quotes, and
-backslashes are escaped; non-ASCII Lean output is preserved as UTF-8.
+locations. `Misc.Json.string` encodes every string: quotes and backslashes use
+the standard JSON escapes, and every byte outside printable ASCII (0x20-0x7e)
+is encoded separately as `\u00HH`. This deliberately turns the UTF-8 bytes of
+non-ASCII Lean output such as `⊢` and `→` into sequences of `\u00HH` escapes,
+so arbitrary solver bytes (including invalid UTF-8) still produce valid JSON.
 
 Provenance details by kind:
 
@@ -101,24 +102,33 @@ Provenance details by kind:
   seal point, and `interface` and `implementation` related spans identify the
   two declarations.
 
-`generated_lean` is null only when `Vox_lean.emit` fails; in that case
-`emission_error` contains the failure.  `detail` is the unmodified solver
-diagnostic.  For a `disproved` result, `counterexample` contains that diagnostic
-when it explicitly contains a `counterexample` or `witness` marker; otherwise
-it is null.
+`generated_lean` is exactly the positive, non-negated theorem returned by
+`Vox_lean.emit`; it does not include the negated theorem that `discharge`
+constructs internally while checking for a disproof. It is null only when
+`Vox_lean.emit` fails; in that case `emission_error` contains the failure.
+`detail` is the unmodified solver diagnostic. For a `disproved` result,
+`counterexample` repeats that diagnostic when it explicitly contains a
+`counterexample` or `witness` marker; otherwise it is null. The
+`Vox_lean.result.location` field is intentionally not serialized; the VC's
+`location`, `program_point`, and provenance spans carry the source locations
+exposed by schema version 1.
 
 ## Predicate rendering
 
 Goals and facts use the existing `Types.Refinement.print` source-like printer.
 This preserves refinement references and binder names and is easier for an IDE
 user to read than extracting a term from an entire generated theorem.  The
-exact solver input is independently available in `generated_lean`.
+positive theorem emitted for the VC is independently available in
+`generated_lean`; as noted above, the internal negated disproof variant is not.
 
 ## Verification evidence
 
 ### Build
 
-`make -s boot-compiler` builds clean with the change applied.
+`make -s boot-compiler` builds clean with the change applied. `make -s fmt` was
+also attempted, but the repository-wide target could not obtain its sandboxed
+`patdiff` executable and reported unrelated pre-existing line-length failures;
+it left no unrelated source changes, and `git diff --check` passes.
 
 ### Test suites (all green, no new flags in play)
 
@@ -141,21 +151,18 @@ Compiler used: `_build/_bootinstall/bin/ocamlc`.
 
 `vcok.ml` = `let ok = (2 : int{ _ = 2 })` (VC proves):
 - `ocamlc -c vcok.ml` (no flag): exit 0, **0 bytes** of output.
-- `ocamlc -vox-dump-vc-json -c vcok.ml`: exit 0, well-formed JSON on stderr
-  with one `annotation` VC: goal text `(app[Stdlib!.=] 2 2)`, generated Lean
-  `theorem vc_0 : (decide (2 = 2) = true) := by\n  grind`, discharge status
-  `proved`, provenance with a `subject` related span.
+- `ocamlc -vox-dump-vc-json vcok.json -c vcok.ml`: exit 0, **0 bytes** on
+  stdout and stderr, and well-formed JSON in `vcok.json` with one `annotation`
+  VC. The file contains only ASCII bytes.
 
 `vcbad.ml` = `let bad = (1 : int{ _ = 2 })` (VC disproves):
 - `ocamlc -c vcbad.ml` (no flag): exit 2, exactly the standard located error
   (`Error: Refinement verification failed (disproved)`), 159 bytes.
-- `ocamlc -vox-dump-vc-json -c vcbad.ml`: exit 2. The standard located error is
-  emitted first, **byte-for-byte unchanged**, and the JSON is appended after
-  it. The VC's discharge is `{ "status": "disproved", "detail": "<grind
-  failure incl. `h : decide False = false ⊢ False`>", "counterexample": null }`
-  — `counterexample` is null here because Lean's grind output for this VC does
-  not contain an explicit `counterexample`/`witness` marker (see the
-  conservative rule under JSON schema).
+- `ocamlc -vox-dump-vc-json vcbad.json -c vcbad.ml`: exit 2. The 159-byte
+  standard located error on stderr is **byte-for-byte unchanged** and stdout is
+  empty. `vcbad.json` is nevertheless written by the `at_exit` handler and
+  parses as JSON with one `disproved` VC. It contains only ASCII bytes; Lean's
+  UTF-8 `⊢` bytes appear as `\u00E2\u008A\u00A2`.
 
 `grep -c schema_version` on both no-flag outputs is 0: the dump never appears
 without the flag.
@@ -163,20 +170,26 @@ without the flag.
 ### Type-only fast pass
 
 `-vox-type-only` short-circuits both `Vox_verify.verify_structure` calls
-(typemod.ml:4150, :4470) and the `verify_seal_obligations` body, so no VC is
-generated or discharged. Combined with `-vox-dump-vc-json` it produces a valid
-document with an empty `verification_conditions` array.
+(typemod.ml:4151, :4471) and the `verify_seal_obligations` body, so no VC is
+generated or discharged. Manual checks with `vcok.ml` confirmed:
+
+- `-vox-type-only -c`: exit 0, silent, no `.cmi`, `.cmo`, `.cmt`, or `.annot`.
+- `-vox-type-only -annot -c`: exit 0, silent, only `.annot` is produced.
+- `-vox-type-only -i`: exit 0, prints
+  `val ok : int{ (app[Stdlib!.=] _ 2) }` and produces no compiled artifacts.
+- Combined with `-vox-dump-vc-json FILE`: exit 0, silent, and produces a valid
+  document with an empty `verification_conditions` array.
 
 ### Why the default path is byte-identical (by construction)
 
-- `record_vc` is called only inside `if !Clflags.vox_dump_vc_json` in `prove`
-  and in `verify_seal_obligation`; the `Vox_lean.discharge` call and the
+- `record_vc` is called only when `Clflags.vox_dump_vc_json` is `Some _` in
+  `prove` and `verify_seal_obligation`; the `Vox_lean.discharge` call and the
   verdict-matching / error-raising logic are unchanged and run in the same
   order.
 - The `at_exit` handler is registered unconditionally but emits nothing unless
-  `!Clflags.vox_dump_vc_json` is set.
+  a dump file was supplied; when supplied, it writes only to that file.
 - Provenance records are built by thunks forced only on the dump path; the
   new labeled arguments threaded through `prove`/`prove_refinement` and the
   call sites have no effect when the flag is off.
 - `vox_type_only` defaults to `false`, so both verify gates run exactly as
-  before.
+  before, and the existing save/backend paths are unchanged.

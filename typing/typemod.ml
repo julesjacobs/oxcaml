@@ -4476,7 +4476,7 @@ let type_implementation target modulename initial_env ast =
       if !Clflags.binary_annotations_cms then
         cms_register_toplevel_struct_attributes ~sourcefile ~uid ast;
       let simple_sg = Signature_names.simplify finalenv names sg in
-      if !Clflags.print_types then begin
+      if !Clflags.print_types || !Clflags.vox_type_only then begin
         remove_mode_and_jkind_variables finalenv sg;
         let zap_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
@@ -4491,11 +4491,12 @@ let type_implementation target modulename initial_env ast =
         Mode.erase_hints ();
         Typecore.optimise_allocations ();
         let shape = Shape_reduce.local_reduce Env.empty shape in
-        Printtyp.wrap_printing_env ~error:false initial_env
-          Format.(fun () -> fprintf std_formatter "%a@."
-              (Printtyp.printed_signature sourcefile)
-              simple_sg
-          );
+        if !Clflags.print_types then
+          Printtyp.wrap_printing_env ~error:false initial_env
+            Format.(fun () -> fprintf std_formatter "%a@."
+                (Printtyp.printed_signature sourcefile)
+                simple_sg
+            );
         gen_annot target (Cmt_format.Implementation str);
         { structure = str;
           coercion = Tcoerce_none;

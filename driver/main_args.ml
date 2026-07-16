@@ -927,8 +927,8 @@ let mk_dsource f =
 
 let mk_vox_dump_vc_json f =
   ( "-vox-dump-vc-json",
-    Arg.Unit f,
-    " Emit processed refinement verification conditions as JSON to stderr" )
+    Arg.String f,
+    "<file>  Write processed refinement verification conditions as JSON" )
 
 let mk_vox_type_only f =
   ( "-vox-type-only",
@@ -1219,7 +1219,7 @@ module type Core_options = sig
   val _dlocations : unit -> unit
 
   val _dsource : unit -> unit
-  val _vox_dump_vc_json : unit -> unit
+  val _vox_dump_vc_json : string -> unit
   val _vox_type_only : unit -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
@@ -2480,7 +2480,7 @@ module Default = struct
     let _dparsetree_loc_ghost_invariants = set parsetree_ghost_loc_invariant
     let _drawlambda = set dump_rawlambda
     let _dsource = set dump_source
-    let _vox_dump_vc_json = set vox_dump_vc_json
+    let _vox_dump_vc_json file = vox_dump_vc_json := Some file
     let _vox_type_only = set vox_type_only
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape

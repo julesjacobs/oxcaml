@@ -23,27 +23,6 @@ type vc_provenance =
 
 let dumped_vcs = ref []
 
-let json_string text =
-  let buffer = Buffer.create (String.length text + 2) in
-  Buffer.add_char buffer '"';
-  String.iter
-    (fun character ->
-      match character with
-      | '"' -> Buffer.add_string buffer "\\\""
-      | '\\' -> Buffer.add_string buffer "\\\\"
-      | '\b' -> Buffer.add_string buffer "\\b"
-      | '\012' -> Buffer.add_string buffer "\\f"
-      | '\n' -> Buffer.add_string buffer "\\n"
-      | '\r' -> Buffer.add_string buffer "\\r"
-      | '\t' -> Buffer.add_string buffer "\\t"
-      | '\000' .. '\031' ->
-        Buffer.add_string buffer
-          (Printf.sprintf "\\u%04X" (Char.code character))
-      | character -> Buffer.add_char buffer character)
-    text;
-  Buffer.add_char buffer '"';
-  Buffer.contents buffer
-
 let json_position (position : Lexing.position) =
   Json.object_
     [ Json.field "line" (Json.int position.pos_lnum);
@@ -53,7 +32,7 @@ let json_position (position : Lexing.position) =
 
 let json_span (location : Location.t) =
   Json.object_
-    [ Json.field "file" (json_string location.loc_start.pos_fname);
+    [ Json.field "file" (Json.string location.loc_start.pos_fname);
       Json.field "start" (json_position location.loc_start);
       Json.field "end" (json_position location.loc_end);
       Json.field "ghost" (string_of_bool location.loc_ghost);
@@ -61,14 +40,14 @@ let json_span (location : Location.t) =
 
 let json_related_span (role, location) =
   Json.object_
-    [ Json.field "role" (json_string role);
+    [ Json.field "role" (Json.string role);
       Json.field "span" (json_span location);
     ]
 
 let json_provenance provenance =
   Json.object_
-    [ Json.field "kind" (json_string provenance.kind);
-      Json.field "name" (Json.option json_string provenance.name);
+    [ Json.field "kind" (Json.string provenance.kind);
+      Json.field "name" (Json.option Json.string provenance.name);
       Json.field "source_span"
         (Json.option json_span provenance.source_span);
       Json.field "related_spans"
@@ -80,7 +59,7 @@ let render_expression expression =
 
 let json_fact (fact : Vox_vc.fact) =
   Json.object_
-    [ Json.field "text" (json_string (render_expression fact.expression));
+    [ Json.field "text" (Json.string (render_expression fact.expression));
       Json.field "source_span" (Json.option json_span fact.location);
     ]
 
@@ -105,7 +84,7 @@ let counterexample (result : Vox_lean.result) =
 
 let json_emission_error (error : Vox_lean.emission_error) =
   Json.object_
-    [ Json.field "message" (json_string error.message);
+    [ Json.field "message" (Json.string error.message);
       Json.field "location" (json_span error.location);
     ]
 
@@ -119,7 +98,7 @@ let record_vc ~kind ~program_point ~provenance ~env
   let goal =
     Json.object_
       [ Json.field "text"
-          (json_string (render_expression condition.Vox_vc.goal));
+          (Json.string (render_expression condition.Vox_vc.goal));
         Json.field "source_span"
           (json_span condition.Vox_vc.goal.rexp_loc);
       ]
@@ -127,23 +106,23 @@ let record_vc ~kind ~program_point ~provenance ~env
   let discharge =
     Json.object_
       [ Json.field "status"
-          (json_string (Vox_lean.string_of_verdict result.verdict));
-        Json.field "detail" (Json.option json_string result.detail);
+          (Json.string (Vox_lean.string_of_verdict result.verdict));
+        Json.field "detail" (Json.option Json.string result.detail);
         Json.field "counterexample"
-          (Json.option json_string (counterexample result));
+          (Json.option Json.string (counterexample result));
       ]
   in
   let json =
     Json.object_
       [ Json.field "location" (json_span condition.Vox_vc.location);
         Json.field "program_point" (json_span program_point);
-        Json.field "kind" (json_string kind);
+        Json.field "kind" (Json.string kind);
         Json.field "goal" goal;
         Json.field "facts"
           (Json.array (List.map json_fact condition.Vox_vc.facts));
         Json.field "discharge" discharge;
         Json.field "generated_lean"
-          (Json.option json_string generated_lean);
+          (Json.option Json.string generated_lean);
         Json.field "emission_error"
           (Json.option json_emission_error emission_error);
         Json.field "provenance" (json_provenance provenance);
@@ -153,7 +132,9 @@ let record_vc ~kind ~program_point ~provenance ~env
 
 let () =
   at_exit (fun () ->
-    if !Clflags.vox_dump_vc_json then begin
+    match !Clflags.vox_dump_vc_json with
+    | None -> ()
+    | Some file ->
       let document =
         Json.object_
           [ Json.field "schema_version" (Json.int 1);
@@ -161,10 +142,10 @@ let () =
               (Json.array (List.rev !dumped_vcs));
           ]
       in
-      output_string stderr document;
-      output_char stderr '\n';
-      flush stderr
-    end)
+      let channel = open_out file in
+      output_string channel document;
+      output_char channel '\n';
+      close_out channel)
 
 type definition =
   { id : Ident.t;
@@ -419,7 +400,7 @@ let prove state ~env ~loc ~kind ~program_point ~provenance goal =
       (String.concat ", " (List.map Ident.name escaped))
   | Ok condition ->
     let result = Vox_lean.discharge ~env condition in
-    if !Clflags.vox_dump_vc_json then
+    if Option.is_some !Clflags.vox_dump_vc_json then
       record_vc ~kind ~program_point ~provenance:(provenance ()) ~env
         condition result;
     begin match result.verdict with
@@ -456,7 +437,7 @@ let verify_seal_obligation ~env ~seal_location
       ~goal
   in
   let result = Vox_lean.discharge ~env condition in
-  if !Clflags.vox_dump_vc_json then begin
+  if Option.is_some !Clflags.vox_dump_vc_json then begin
     let provenance =
       { kind = "seal-implication";
         name = Some obligation.rso_value_name;
