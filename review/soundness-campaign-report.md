@@ -367,3 +367,77 @@ F1 is closed for the residue set. All other families — crossing, logicality
 obligation emission, predicate discipline, seal channel, and fact discipline —
 are repelled or sound. Known `Obj.magic` / integer-model holes remain documented
 and anchored.
+
+---
+
+# Reconciliation onto the refinement final tip (2026-07-16)
+
+- **Branch:** `soundness-final`, re-branched from the refinement line's final tip
+  `031643ffda` ("Merge F2 lazy-totality fix (650e185c8d) into refinement-codex")
+  and the soundness commit `ed33daa2d1` cherry-picked on top (clean; a pure
+  1874-line addition of the suite, no conflicts). Re-branch, not rebase.
+- **What moved under the suite since the re-sweep base `34c1e95414`:** the F2
+  lazy-totality repair (`08d7979c46`, merged at `031643ffda`) plus three
+  modes-integration commits (`9440721030`, `f0356c08bb`, `50416be104`). The F2
+  repair is the only change that touches a family the suite probes.
+- **Suite state:** `testsuite/tests/soundness-campaign/` — 13 files, 13 passed /
+  0 failed via `make test-one DIR=soundness-campaign` on a fresh build of this
+  tip. Full (rebuilding) `test-one` was used, not `-no-rebuild`, so the edited
+  source is re-copied into `_runtest` (no stale-deletion masking).
+
+## F2 anchor: flipped to REJECT, judged genuinely secure
+
+`lazy_force_at_total.ml` was a quarantine anchor recording the unsound accepts at
+`34c1e95414`. On the first run at `031643ffda` it FAILED loudly — the observed
+behavior flipped from accept to reject on all four exploit blocks, which is the
+signal the anchor was built to raise. I judged the new behavior against the F2
+repair design (`08d7979c46`: lazy construction inherits body partiality via
+`mode_lazy` crossing `~totality:false`; the `lazy` pattern calls
+`constrain_enclosing_totality`) and confirmed each rejection is the designed one,
+not an incidental error:
+
+| Block | 34c1e95414 (recorded) | 031643ffda (observed) | Judged |
+|---|---|---|---|
+| Q1 `let q1 @ total = lazy (diverging)` | ACCEPT (`total` lazy) | REJECT — `"loop" is "partial"`, used inside the thunk | secure: construction inherits body partiality |
+| Q2 `let q2 @ total = lazy (effectful)` | ACCEPT | REJECT — `"print_string" is "partial"` | secure: same mechanism |
+| Q3 `let (q3 @ total) l = match l with lazy x -> x` | ACCEPT | REJECT — `function is "partial" but ... "total"` at the `lazy` pattern | secure: pattern-force constrains enclosing totality |
+| Q4 `let (q4 @ total) l = Lazy.force l` | REJECT (control) | REJECT (unchanged) | sound control, unchanged |
+| Q5 `force_it`/`diverging`/`boom` | ACCEPT at `force_it`, diverges at runtime | REJECT at `force_it` definition | secure: exploit closed at definition (stronger than recorded) |
+
+The anchor was updated to record these secure rejections and its prose header
+rewritten from "OPEN FINDING / quarantine" to "F2 CLOSED / secure-behavior
+anchor". The expect blocks are the observed toplevel output, kept single-line to
+preserve the `Line 1, characters …` positions (an ocamlformat pass had to be
+bypassed so it would not multi-line the source and desync those positions).
+
+## Per-test verdict table (all judged, not auto-passed)
+
+| Test | Verdict at 031643ffda | Judgment |
+|---|---|---|
+| `lazy_force_at_total.ml` | REJECT (flipped) | F2 CLOSED — secure rejection matches repair design; anchor updated |
+| `late_inference_construct_matrix.ml` | pass | F1 residue set rejects (while/for/mutable/array); pure try/exn/lazy accept — sound narrowing, unchanged from re-sweep |
+| `late_inference_totality.ml` | pass | late-inference laundering repelled, unchanged |
+| `crossing_arrow_laundering.ml` | pass | GADT/record/existential fn-carrier stays partial, capture rejects — unchanged |
+| `fcmodule_object_capture.ml` | pass | first-class module / object fn-carrier stays partial, capture rejects — unchanged |
+| `logic_physical_laundering.ml` | pass | non-crossing carrier (logical `int ref`) rejects every channel; immediate/arrow crossing is sound — unchanged |
+| `refinement_rigidity_bypass.ml` | pass | bare/refined seal both directions, private abbrev, GADT eq, functor `with` all clash — unchanged |
+| `termination_laundering.ml` | pass | (Rec) partiality + lazy corecursion via `Lazy.force` capture — unchanged |
+| `persistence_module_graph.ml` | pass | no predicate collapse/loss under adversarial graphs; VC-live P4 rejects `not-proved` — unchanged |
+| `obligation_mark_integrity.ml` | pass | VC emission live: bare→refined emits+discharges (O6 accepts, O1/O3-O5 `not-proved`) — unchanged |
+| `predicate_discipline.ml` | pass | impure/deref/effect predicates reject at totality; comparison admission does not leak to program code — unchanged |
+| `seal_channel.ml` | pass | tautological bare-behind-refined fail-closed w/o Lean; directed Lean discharge (SC3 accept, SC4 `not-proved`) — unchanged |
+| `sc_diamond.ml` (+ `sc_diamond_base.mli`) | pass | cross-`.cmi` diamond persistence: no predicate corrupted/dropped/spuriously clashed — unchanged |
+
+The 12 non-lazy tests were green on the first run at this tip *before any
+promotion*, so their recorded expectations match observed behavior — the
+modes-integration commits between `34c1e95414` and `031643ffda` did not perturb
+any probed family. Every verdict above was checked against the family's design,
+not accepted on the strength of a green run.
+
+## Net
+
+F2 is CLOSED on the refinement final tip `031643ffda`: the lazy-force / lazy-
+construction totality holes reject as designed. No open MUST finding remains in
+the suite on this tip. Known, documented holes (`Obj.magic` laundering, integer
+overflow model) remain anchored in the `refinement-acceptance` corpus and are
+not suite findings.
