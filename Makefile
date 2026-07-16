@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -418,6 +418,17 @@ row2-red-gate:
 	if [ $$fail -ne 0 ]; then exit 1; fi; \
 	echo "row2-red-gate: 2 checks, 0 failures"
 
+## arr-store-idx-test — store-side occ-index (stores_by_class) merge-cursor invalidation
+##   unit test (perf audit #2, OXSMT_AX_OCCIDX store-side twin). Drives the arr THEORY
+##   surface to FORCE the no-pop, no-new-store merge window (build the cache at one Final,
+##   assert an array equality that merges a store into the queried array's class at the SAME
+##   level, Final again): real code drains the merge cursor and rebuilds so the reclassed
+##   store is found (ROW Split); a merge-cursor-off build freezes the stale index and misses
+##   it (Sat) — RED-verified for BOTH the detect-every-change and receive-events mutants.
+##   Run WITH OXSMT_AX_OCCIDX=1 so the store cache is live. Nonzero on any failed check.
+arr-store-idx-test:
+	OXSMT_AX_OCCIDX=1 $(DUNE) exec smt/theories/arr/test/arr_store_idx_test.exe
+
 ## weq-graph-test — unit tests for the W0 dark weak-equivalence graph substrate
 ##   (ADR-weakeq / DESIGN.md A12): the O9 index-sort-stability gate, store-edge permanence,
 ##   equality-edge folding + Trail-undo on pop, deterministic path finding, and the
@@ -687,6 +698,7 @@ test: check-frozen
 	$(MAKE) dt-multi-query-gate
 	$(MAKE) array-sat-gate
 	$(MAKE) row2-red-gate
+	$(MAKE) arr-store-idx-test
 	$(MAKE) weq-graph-test
 	$(MAKE) regress-test
 	$(MAKE) sat-test

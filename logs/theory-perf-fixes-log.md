@@ -31,9 +31,11 @@ the worst-case shape is REACHED — measure before opening the algorithmic lane.
     30 QF_AX storecomm/swap/storeinv/cvc effort 50000 = 0/0; make test 0; cert 33/33;
     array-sat 14/0; row2-red 2/0. arr.ml only.
 (3) stores_by_class cache (AX_OCCIDX store-side twin) — DONE (arr.ml, dark OXSMT_AX_OCCIDX).
-    See "Fix #3 detail" below. OFF-vs-ON counted-identity GREEN; RED obligation PARTIAL
-    (mega-mutant RED; the two spec merge-mutants can't individually bite — REDUNDANCY finding,
-    escalated to lead).
+    See "Fix #3 detail" below. OFF-vs-ON counted-identity GREEN; RED obligation DISCHARGED
+    via a targeted theory-API unit test (make arr-store-idx-test) that FORCES the no-pop
+    merge window — BOTH spec merge-mutants (detect-every-change, receive-events) go RED there
+    (per the lead's ruling; the corpus can't reach the window, but a scripted theory-API
+    drive can).
 (4) rearm_watch Θ(W²) → O(1) watch_index map — DONE (euf.ml, FLAGLESS byte-identical).
     See "Fix #4 detail" below.
 (5) add_forest_edge reroot-smaller — DONE (euf.ml, DARK OXSMT_FOREST_BALANCE, not byte-id).
@@ -54,26 +56,31 @@ is row_split (line ~939); the other caller weq_analyze_final is diagnostic (dark
 OXSMT_ARR_WEQ_ANALYZE, emits no lemmas).
 OFF-vs-ON COUNTED-IDENTITY: swap 40 + storecomm 40 + storeinv 38 + cvc 1 = 119 files,
 --max-effort 30000: 0 divergences, 0 timeouts. GREEN.
-RED-MUTANT RESULT (deviation from spec — see escalation):
-  The spec named two MERGE-focused mutants ((a) weaken merge-detect; (b) disable the merge
-  cursor / receive-events), both required RED. EMPIRICALLY NEITHER BITES:
-  - (a) merge-only off (drain but never invalidate): 119-file OFF-vs-ON = 0 diverge (GREEN).
-  - single catalog-only off: read5 GREEN. single pop-only off: read5 GREEN.
-  - MEGA (merge+catalog+pop ALL off): read5 RED — (verdict unsat both) OFF conflicts 31/dec
-    344/props 904 vs ON conflicts 59/dec 1376/props 3186 (counter divergence; verdict
-    PRESERVED — row_split is a heuristic that emits SOUND splits regardless of which
-    congruent store it picks, so cache staleness perturbs SEARCH, never soundness).
-  DIAGNOSIS: the three invalidators are REDUNDANT on the QF_AX corpus — store-class changes
-  are correlated with catalog/pop events, so ANY ONE trigger catches the staleness that
-  matters; only disabling ALL THREE opens a stale-read window. So no single-trigger mutant
-  (incl. the two spec merge-mutants) can go RED. The merge cursor is nonetheless RETAINED for
-  correctness-BY-CONSTRUCTION: a merge CAN reclass a store between a build and a read within a
-  no-pop Final→Final window ([[smallgaps]] detect-every-change principle); the corpus just
-  does not exercise it. RED obligation is discharged at the SET level (mega-mutant RED proves
-  the invalidation set is load-bearing) + the by-construction identity argument; the
-  spec's per-mutant merge obligation is UNSATISFIABLE as written. ESCALATED to lead for a
-  ruling (land with mega-RED + by-construction, vs. hunt a synthetic merge-window input, vs.
-  drop the redundant cursor — NOT recommended, breaks by-construction correctness).
+RED-MUTANT RESULT (per lead ruling — targeted theory-API unit test):
+  CORPUS behaviour first (why the spec's per-mutant RED can't come from a .smt2): on the
+  QF_AX corpus the three invalidators are REDUNDANT — store-class changes are correlated with
+  catalog/pop events, so any ONE trigger catches the staleness that matters.
+  - (a) merge-only off (drain but never invalidate): 119-file OFF-vs-ON = 0 diverge.
+  - catalog-only off: read5 GREEN. pop-only off: read5 GREEN.
+  - MEGA (merge+catalog+pop ALL off): read5 RED (verdict unsat both; counters 31/344/904 vs
+    59/1376/3186 — verdict PRESERVED, since row_split emits SOUND splits regardless of which
+    congruent store it picks; staleness perturbs SEARCH, not soundness).
+  So "the corpus doesn't hit the merge-only window" is a workload accident, not a guarantee —
+  exactly the silent-regression risk the per-trigger RED exists to catch (lead ruling). The
+  window IS reachable and merge IS its sole catcher: a same-level array equality that merges
+  a store into the queried array's class by congruence registers NO new store (no catalog)
+  and needs NO pop.
+  UNIT TEST (make arr-store-idx-test, smt/theories/arr/test/arr_store_idx_test.ml) FORCES it
+  at the theory API: register a read select(a,j) + a store st=store(b,i,v); Final #1 builds &
+  caches the store index (st not congruent to a → Sat, no split); assert a=st at the SAME
+  level (a's class padded a=a2=a3 so union-by-size keeps a's root → the surviving root is not
+  st's stale key); Final #2 must find st congruent to a and emit a ROW Split.
+    - real code: Final #1 = Sat, Final #2 = Split → PASS (2/0).
+    - MUTANT (a) detect-every-change (drain, never invalidate): Final #2 = Sat → RED.
+    - MUTANT (b) receive-events (store_cursor = None): Final #2 = Sat → RED.
+  BOTH spec mutants go RED in the forced window; real code passes. Runs under
+  OXSMT_AX_OCCIDX=1 (cache live); passes flag-off too (rebuild path). Mega-mutant RED and
+  OFF-vs-ON GREEN remain in the evidence set. Obligation DISCHARGED.
 
 ## Fix #4 detail — rearm_watch O(1) via watch_index (euf.ml, FLAGLESS byte-identical)
 euf_adapter.register_atom calls Euf.rearm_watch per predicate atom; rearm_watch did a
