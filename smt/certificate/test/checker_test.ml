@@ -65,6 +65,25 @@ let expect name kind ev =
     Printf.printf "  FAIL %s: got %s\n" name (Checker.string_of_verdict v))
 ;;
 
+(* Assert VALID *and* that the learned-clause full-closure RUP fallback (task #56)
+   actually FIRED — so these are positive tests of the fallback PATH, not vacuously-valid
+   streams that might pass via the hinted chain. Resets the cumulative counter per case. *)
+let expect_via_fallback name ev =
+  incr checks;
+  Checker.reset_fallback_firings ();
+  let v = Checker.check ev in
+  let fired = Checker.fallback_firing_count () in
+  match v with
+  | Checker.Valid_modulo_theory_leaves when fired > 0 -> ()
+  | _ ->
+    incr failures;
+    Printf.printf
+      "  FAIL %s: got %s (fallback fired=%d, expected VALID with fired>0)\n"
+      name
+      (Checker.string_of_verdict v)
+      fired
+;;
+
 (* ------------------------------------------------------------------ *)
 (* The scripted mock theory (trimmed copy of cert_emit_test's). *)
 
@@ -353,6 +372,22 @@ let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
   }
 ;;
 
+(* task #56 rider 2: same inputs as [handbuilt], but the learned clause is [c], which
+   those inputs do NOT entail (model a=false,b=true,c=false satisfies all three). So
+   corrupting the cited chain fails ordered RUP AND the full-closure fallback finds no ⊥ →
+   INVALID — the accept-invalid direction stays rejected under every hint-corruption
+   shape. *)
+let handbuilt_unentailed ?(learned_ants = [ 10; 11; 12 ]) () : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| c_ |] learned_ants ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nc_ ]
+  }
+;;
+
 (* CRIT-1 (reviewer, logs/cert-step2-review.md): a learned-clause hint must resolve only
    to an ALREADY-VERIFIED learned clause, never itself or a later one. These two streams
    certify a trivially-SAT / SAT query as unsat pre-fix (accept-invalid, the north star);
@@ -587,6 +622,46 @@ let e2_cited_not_falsified_closure_consistent : Checker.events =
   }
 ;;
 
+(* task #56 LEARNED-CLAUSE FULL-CLOSURE RUP FALLBACK. Mirrors the rings id-6571/6572
+   shape: a learned clause whose CITED antecedent is SATISFIED under the level-0 closure
+   (so the hinted ordered chain is consumed without a conflict), yet the clause is
+   ENTAILED by the verified closure. Inputs 10=[a∨b],11=[¬a∨c],12=[¬a∨¬c] entail b; 13=[d]
+   forces d; 14=[d∨b] is satisfied by d. Learned 20=[b] cites ONLY the satisfied 14 →
+   ordered RUP consumes the chain (14 skipped) → fails; the fallback seeds ¬b and BCP over
+   the closure derives ⊥ (b:=false ⇒ 10 forces a ⇒ 11 forces c ⇒ 12 conflicts) → VALID.
+   Failed_assumption under [¬b] closes it. Pre-fix (no fallback) → INVALID. *)
+let learned_fallback_entailed : Checker.events =
+  let d_ = Sat.pos 3 in
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]
+      ; mk_input 11 [| na_; c_ |]
+      ; mk_input 12 [| na_; nc_ |]
+      ; mk_input 13 [| d_ |]
+      ; mk_input 14 [| d_; b_ |]
+      ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 14 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #56 negative: an UNENTAILED learned clause must still be REJECTED — the fallback
+   is gated on genuine entailment, not a blanket pass (no accept-invalid). Query is a=true
+   (SAT); learned 20 = the unit [b] (b unconstrained) cites the satisfied 10 = [a] →
+   ordered RUP consumed → the fallback seeds b false and BCP over the single input derives
+   NO conflict → INVALID. *)
+let learned_unentailed : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 
 let () =
@@ -642,26 +717,40 @@ let () =
   in
   (* (2) DISCRIMINATION — each corruption FLIPS a VALID stream to INVALID/UNSUPPORTED.
      Every negative is paired with its honest VALID baseline above so the flip is proven. *)
-  (* dropped hint: the chain can no longer reach a conflict. *)
-  expect
-    "corrupt: dropped hint -> INVALID"
-    `Invalid
+  (* task #56 REFRAME (was three "corrupt hint chain -> INVALID" negatives): with the
+     full-closure RUP fallback, a well-formed but incomplete/mis-ordered/duplicated hint
+     chain on an ENTAILED learned clause is now VALID *via the fallback* — the cited chain
+     is advisory, the ground truth is closure-entailment. handbuilt's inputs entail [b],
+     so these three (dropped / permuted / wrong-set of well-formed cited ids) are now
+     positive tests of the FALLBACK PATH; each asserts the fallback actually FIRED. The
+     lost "corruption -> reject" discrimination is REPLACED below by the same shapes on an
+     UNENTAILED clause (the only soundness-relevant direction). *)
+  expect_via_fallback
+    "fallback: dropped hint on entailed clause -> VALID (fallback fired)"
     (handbuilt ~learned_ants:[ 10; 11 ] ());
-  (* permuted hints (order matters): [11;10;12] strands hint 11 (2 free literals) before
-     the propagations that would make it unit. *)
-  expect
-    "corrupt: permuted hints -> INVALID"
-    `Invalid
+  expect_via_fallback
+    "fallback: permuted hints on entailed clause -> VALID (fallback fired)"
     (handbuilt ~learned_ants:[ 11; 10; 12 ] ());
-  (* wrong antecedent SET:
-     {10 ,11,11}
-     (12 replaced by a duplicate). The second 11 is satisfied (c already forced), so it is
-     SKIPPED (task #42); with the load-bearing 12 gone the chain is consumed without a
-     conflict -> INVALID. *)
-  expect
-    "corrupt: wrong antecedent set -> INVALID"
-    `Invalid
+  expect_via_fallback
+    "fallback: wrong antecedent set on entailed clause -> VALID (fallback fired)"
     (handbuilt ~learned_ants:[ 10; 11; 11 ] ());
+  (* task #56 rider 2 — the REPLACEMENT discrimination: the SAME hint-corruption shapes on
+     an UNENTAILED clause still REJECT. [handbuilt_unentailed] learns [c], which
+     handbuilt's inputs do NOT entail (a=false,b=true,c=false is a model), so ordered RUP
+     fails AND the fallback finds no ⊥ → INVALID. Proves corruption + non-entailment (the
+     accept-invalid direction — the only soundness direction) stays fully rejected. *)
+  expect
+    "corrupt: dropped hint on UNENTAILED clause -> INVALID"
+    `Invalid
+    (handbuilt_unentailed ~learned_ants:[ 10; 11 ] ());
+  expect
+    "corrupt: permuted hints on UNENTAILED clause -> INVALID"
+    `Invalid
+    (handbuilt_unentailed ~learned_ants:[ 11; 10; 12 ] ());
+  expect
+    "corrupt: wrong antecedent set on UNENTAILED clause -> INVALID"
+    `Invalid
+    (handbuilt_unentailed ~learned_ants:[ 10; 11; 11 ] ());
   (* forged citation KIND (board #153a): a Root_empty whose input_id is actually a LEARNED
      event's id. The recorder's occurrence-count resolver false-cleans this; the
      kind-keyed checker rejects it. *)
@@ -754,6 +843,18 @@ let () =
     "corrupt: E2 cited not falsified AND closure consistent (sat query) -> INVALID"
     `Invalid
     e2_cited_not_falsified_closure_consistent;
+  (* task #56 learned-clause full-closure RUP fallback: a learned clause whose cited
+     antecedent is satisfied (hinted chain consumed) but which the verified closure
+     entails -> VALID; and the gate — an unentailed learned clause -> INVALID (fallback
+     gated on genuine entailment, no accept-invalid). *)
+  expect
+    "positive: learned clause cited-antecedent satisfied but closure-entailed -> VALID"
+    `Valid
+    learned_fallback_entailed;
+  expect
+    "corrupt: unentailed learned clause (fallback finds no ⊥) -> INVALID"
+    `Invalid
+    learned_unentailed;
   (* H4 (codex, HIGH->CRITICAL): ambiguous content id admitted to the DB (never cited) ->
      a SAT query VALID. Must be rejected at stream admission. Also the M6 clean
      discriminator of the #153a ambiguity guard (only ambiguity triggers). *)

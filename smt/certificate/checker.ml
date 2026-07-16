@@ -35,6 +35,17 @@ let string_of_verdict = function
   | Unsupported feature -> "UNSUPPORTED(" ^ feature ^ ")"
 ;;
 
+(* OBSERVABILITY (task #56): count how often a learned clause was accepted via the
+   full-closure RUP fallback rather than its hinted ordered chain. Chain quality is no
+   longer a validity criterion (the cited witness is advisory; soundness = closure
+   entailment), but it stays a MONITORED metric: a jump in this count flags a degraded /
+   drifting emitter without failing soundness. Cumulative across [check] calls; callers
+   reset as they wish (the corpus gate resets per run and prints the total; the self-test
+   resets per case to assert the fallback fired). *)
+let fallback_firings = ref 0
+let reset_fallback_firings () = fallback_firings := 0
+let fallback_firing_count () = !fallback_firings
+
 (* ------------------------------------------------------------------ *)
 (* Kind-keyed citation resolution (board #153a). Each content event registers its clause
    under its id AND its KIND. A citation site demands a specific kind set; a wrong-kind
@@ -472,27 +483,77 @@ let check ev =
        is folded into the closure for the clauses that cite it downstream. [verified]
        grows in emission order and gates learned-clause hint resolution (CRIT-1): a clause
        may only cite EARLIER, already-verified learned clauses — never itself or a later
-       one. *)
+       one.
+
+       LEARNED-CLAUSE FULL-CLOSURE RUP FALLBACK (fix task #56, sibling of the #47 E1/E2
+       terminal fallback). The hinted ordered chain is the FAST path. When it fails, fall
+       back to the RUP ground truth: does [base + ¬clause] derive ⊥ by unrestricted BCP
+       fixpoint over the whole verified closure? That is exactly [Bcp.refutes_under bcp]
+       seeded with the clause's literals negated — the same primitive E3 (and #47) use,
+       now unifying ALL replay sites on one acceptance criterion: the cited chain/witness
+       is ADVISORY, and the ground truth is UP-derivability of ⊥ from the admitted
+       axioms + earlier-verified learned clauses. Needed because the emitter records the
+       antecedent chain valid in the SOLVER's incremental level-0 state, while the
+       checker's batch closure over the full theory/cut-leaf union can satisfy a cited
+       antecedent (a literal flips true vs solver state — task #52 id-6571/6572),
+       stranding the hinted chain even though the clause is genuinely entailed.
+
+       SOUNDNESS: [bcp] here holds ONLY the admitted axioms (guarded inputs + theory
+       leaves) plus learned clauses already verified in THIS loop — [Bcp.add_learned] for
+       [le] runs only AFTER acceptance, so [bcp.db] at [le]'s turn contains no later or
+       self clause (the CRIT-1 emission-order invariant, now load-bearing for the
+       fallback: it reuses the verified DB rather than the cited ids, so a
+       self/forward/forged citation cannot launder a clause — an unentailed clause yields
+       no ⊥ and is still rejected). BCP fixpoint is not SEARCH (no case splits), so the
+       "never searches" contract holds. *)
     let verified = Hashtbl.create 256 in
     let learned_verified id = Hashtbl.mem verified id in
     List.iter
       (fun (le : Recorder.learned_event) ->
+         let cl = dedup_clause le.Recorder.clause in
+         let accept () =
+           Hashtbl.replace verified le.Recorder.id ();
+           Bcp.add_learned bcp cl
+         in
          match
            ordered_rup
              (Bcp.snapshot bcp)
-             ~clause:(dedup_clause le.Recorder.clause)
+             ~clause:cl
              ~antecedents:le.Recorder.antecedents
              ~resolve
              ~learned_verified
          with
-         | Ok () ->
-           Hashtbl.replace verified le.Recorder.id ();
-           Bcp.add_learned bcp (dedup_clause le.Recorder.clause)
+         | Ok () -> accept ()
          | Error reason ->
-           rejectf
-             "learned clause (id %d) fails ordered-RUP replay: %s"
-             le.Recorder.id
-             reason)
+           (* Fallback fires ONLY on the ordered-RUP Error; the hinted fast path above is
+             byte-unchanged. The fallback relaxes the ORDERING/sufficiency of the cited
+             chain, but citation WELL-FORMEDNESS stays a hard gate: every cited id must
+             still resolve to a real content clause and, if learned, be ALREADY verified
+             (the CRIT-1 anti-circularity gate — kept load-bearing here as defense in
+             depth, not left to rely solely on "an unentailed clause derives no ⊥"). A
+             dangling/ambiguous/forward-or-self learned citation is a malformed stream and
+             is rejected regardless of entailment. *)
+           let citations_wellformed =
+             List.for_all
+               (fun id ->
+                  match (resolve id : resolution) with
+                  | Found (Klearned, _) -> learned_verified id
+                  | Found _ -> true
+                  | Ambiguous | Dangling -> false)
+               le.Recorder.antecedents
+           in
+           if
+             citations_wellformed
+             && Bcp.refutes_under bcp (List.map Sat.neg_lit (Array.to_list cl))
+           then (
+             incr fallback_firings;
+             accept ())
+           else
+             rejectf
+               "learned clause (id %d) fails ordered-RUP replay (%s) AND the verified \
+                closure does not entail it (base + ¬clause derives no ⊥)"
+               le.Recorder.id
+               reason)
       ev.learned;
     (* terminal conclusion (§4.0 E1–E4). *)
     (* E1/E2 CITED-CLAUSE FALLBACK (fix task #47). The E1/E2 witness is normally the cited

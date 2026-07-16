@@ -140,6 +140,7 @@ let () =
   and n_error = ref 0
   and reemit_ok = ref 0
   and reemit_bad = ref 0 in
+  Checker.reset_fallback_firings ();
   List.iter
     (fun path ->
        let base = Filename.basename path in
@@ -180,7 +181,8 @@ let () =
   Printf.printf
     "\n\
      cert_corpus_gate: %d files | unsat-solves=%d (VALID=%d INVALID=%d UNSUPPORTED=%d) \
-     non-unsat=%d error=%d | repeat-solve re-emit VALID=%d bad=%d\n"
+     non-unsat=%d error=%d | repeat-solve re-emit VALID=%d bad=%d | learned-clause \
+     fallback-firings=%d\n"
     (List.length files)
     !n_unsat
     !n_valid
@@ -189,7 +191,8 @@ let () =
     !n_nonunsat
     !n_error
     !reemit_ok
-    !reemit_bad;
+    !reemit_bad
+    (Checker.fallback_firing_count ());
   (* nonzero iff an unsat-solve produced a non-VALID cert, or a re-emit diverged. *)
   if !n_invalid > 0 || !n_unsupported > 0 || !reemit_bad > 0 then exit 1
 ;;

@@ -20,8 +20,11 @@
     - {b Learned-clause ordered RUP (§1.4).} Each learned clause replays by
       {e ordered, hint-restricted} RUP over its recorded antecedents [rₙ..r₁; conflict] —
       each cited clause must be unit, falsified, or already satisfied (skipped) at its
-      turn — see the appendix below; the checker never SEARCHES for a propagation. A
-      dropped, permuted, or wrong-set hint chain fails.
+      turn — see the appendix below; the checker never SEARCHES for a propagation. If the
+      hinted ordered chain does not close, the checker FALLS BACK to full-closure RUP
+      (task #56, appendix): the clause is accepted iff [base + ¬clause] derives ⊥ by
+      unrestricted BCP fixpoint over the whole verified closure ([refutes_under]). The
+      hint chain is thus the fast path; the ground truth is closure-entailment.
 
     {b ADR-0013 appendix (satisfied-hint skip, task #42).} A cited clause that is already
     SATISFIED at its turn is a no-op and is SKIPPED, not rejected — the checker accepts
@@ -34,9 +37,59 @@
     (theory-propagated literals' lazy explain reasons overlap the Boolean resolution
     chain). The skip fires ONLY on an id the kind-keyed resolver already accepted (never a
     dangling / ambiguous / wrong-kind / unverified-learned id), and the "never SEARCHES"
-    contract is untouched for the unit / ≥2-free cases. Emitting minimal
-    reverse-propagation-ordered chains (emitter-side, fix shape (b)) remains the faithful
-    long-term option, deferred.
+    contract is untouched for the unit / ≥2-free cases.
+
+    {b ADR-0013 appendix (learned-clause full-closure RUP fallback, task #56).} When the
+    hint-restricted ordered chain does NOT close (consumed / not-unit / all-satisfied),
+    the checker falls back to full RUP over the ENTIRE verified closure: accept iff
+    [base + ¬clause] derives ⊥ by unrestricted BCP fixpoint over [bcp.db]
+    ([Bcp.refutes_under bcp] seeded with the clause's literals negated). This is the
+    direct sibling of the E1/E2 terminal fallback (task #47), and it UNIFIES all replay
+    sites — E1 [Root_empty], E2 [Level0_conflict], E3 [Failed_assumption], and
+    learned-clause ordered-RUP — on ONE acceptance criterion: the cited chain/witness is
+    ADVISORY, and the ground truth is UP-derivability of ⊥ from the admitted axioms +
+    earlier-verified learned clauses. Needed because the emitter records the antecedent
+    chain valid in the SOLVER's incremental level-0 state, while the checker's batch
+    closure over the full theory/cut leaf union can SATISFY a cited antecedent (a literal
+    flips true vs solver state — task #52, rings id-6571/6572), stranding the hinted chain
+    even though the clause is genuinely entailed. SOUND: [bcp.db] at a learned clause's
+    turn holds ONLY admitted axioms + learned clauses verified EARLIER in the loop (each
+    folded only after acceptance — the CRIT-1 emission-order invariant, load-bearing here:
+    no self / forward citation can enter the fallback DB). Citation WELL-FORMEDNESS stays
+    a HARD gate on the fallback (every cited id must resolve and, if learned, be
+    already-verified), so a dangling / ambiguous / forward-or-self citation is rejected
+    regardless of entailment (CRIT-1 defense in depth). An unentailed clause derives no ⊥
+    and is still rejected (no accept-invalid). BCP fixpoint is not SEARCH. CONSEQUENCE:
+    the cited chain being advisory means a well-formed but incomplete / mis-ordered chain
+    on an ENTAILED clause is now VALID — this is the intended unification, not a soundness
+    relaxation.
+
+    {b The explicit trade — chain quality becomes a monitored METRIC, not a validity
+      criterion.}
+    Soundness = closure entailment (checked here); hint-chain quality no longer gates
+    validity, but it stays OBSERVABLE via {!fallback_firing_count} (surfaced on the
+    corpus-gate summary line). A sudden rise in fallback firings flags a degraded /
+    drifting emitter — chains that no longer replay in hint-restricted order — WITHOUT
+    failing soundness. So the checker keeps a signal on emitter health while no longer
+    over-rejecting valid non-minimal chains.
+
+    {b COMPLETION of the advisory-witness principle.} With #42 (satisfied-hint skip), #47
+    (E1/E2 terminal fallback), and #56 (learned-clause fallback), ALL FOUR replay sites —
+    E1 [Root_empty], E2 [Level0_conflict], E3 [Failed_assumption], and learned-clause
+    ordered-RUP — now share ONE acceptance criterion: the recorded hint / cited witness is
+    ADVISORY (a fast path and a monitored quality metric), and validity is exactly
+    UP-derivability of ⊥ from the admitted axioms + earlier-verified learned clauses
+    ([refutes_under] over the verified closure). The checker's trust basis is the verified
+    closure, uniformly, everywhere.
+
+    {b Shape (b) — emitter-minimal reverse-propagation-ordered chains — is PERMANENTLY
+      DEFERRED (disproven).}
+    Named as the faithful long-term option at #42/#47 and expected to be motivated by its
+    "first genuine trigger" (cut lemmas, task #52), the trigger instead DISPROVED it: the
+    solver-incremental vs checker-batch-closure divergence is inherent, so no
+    statically-emitted antecedent chain can be simultaneously ordered-RUP under both the
+    solver's state and the checker's recomputed batch closure. The checker-side
+    full-closure fallback is the correct resolution.
     - {b Theory leaves = accepted axioms AT THIS STAGE (§1.5, deferred witness).} A
       [Reason] / [Conflict] theory clause is a leaf shell taken as a valid axiom here —
       its EUF/LIA witness (proof tree / Farkas multipliers) is a later leaf-checking
@@ -113,3 +166,13 @@ val of_recorder : Recorder.t -> assumptions:Sat.lit list -> events
 val check : events -> verdict
 
 val string_of_verdict : verdict -> string
+
+(** Cumulative count of learned clauses accepted via the full-closure RUP FALLBACK (task
+    #56 appendix) rather than their hinted ordered chain. Observability only — NOT a
+    soundness signal (soundness = closure entailment, which the fallback establishes). A
+    rising count is a degraded/drifting emitter producing chains that no longer replay in
+    hint-restricted order. The corpus gate surfaces the run total; the self-test asserts a
+    per-case firing. Increments across [check] calls until [reset_fallback_firings]. *)
+val fallback_firing_count : unit -> int
+
+val reset_fallback_firings : unit -> unit
