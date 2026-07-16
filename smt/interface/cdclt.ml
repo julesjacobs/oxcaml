@@ -540,11 +540,32 @@ let begin_check t =
   Budget.reset t.budget;
   t.last_model <- None;
   t.last_dt_model <- None;
-  t.last_array_model <- None
+  t.last_array_model <- None;
+  (* task #106: reset the LIA conflict-evidence stash so [last_conflict_core] reflects
+     only THIS check-sat (only the EUF+LIA stack carries it; DT/arrays have none). *)
+  match t.theory with
+  | Some (TCombined th) ->
+    Oxsmt_lia.Lia_adapter.clear_last_conflict (Combined.arith_state th)
+  | Some (TDt _) | Some (TArr _) | None -> ()
 ;;
 
 let splits_used t = t.splits
 let effort_used t = Budget.used t.budget
+
+(* task #106: passthrough of the LIA adapter's observational conflict evidence.
+   Re-exported record so {!Session} can read the fields. Only the EUF+LIA stack carries
+   it. *)
+type conflict_core = Oxsmt_lia.Lia_adapter.conflict_core =
+  { farkas : Oxsmt_lia.Rational.t list option
+  ; atoms : (Term.t * bool) list
+  }
+
+let last_conflict_core t : conflict_core option =
+  match t.theory with
+  | Some (TCombined th) ->
+    Oxsmt_lia.Lia_adapter.last_conflict_core (Combined.arith_state th)
+  | Some (TDt _) | Some (TArr _) | None -> None
+;;
 
 (* Convert a snapshot [Model.value] to the sidecar vocabulary. *)
 let value_of (v : Model.value) =

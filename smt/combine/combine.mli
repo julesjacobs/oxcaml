@@ -252,6 +252,16 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val congruence_state : t -> congruence_state
 
+  (** Symmetric to {!congruence_state}: a read-only accessor for the ARITHMETIC child's
+      state ([B]), so {!Oxsmt_interface} can read LIA-specific observational evidence —
+      the theory unsat core / Farkas coefficients of the most recent conflict (task #106)
+      — after an UNSAT. Widens only the combinator's own (non-frozen) interface, never the
+      abstract [Theory.THEORY] seam the CDCL(T) engine drives; the accessor is
+      non-mutating. *)
+  type arith_state = B.t
+
+  val arith_state : t -> arith_state
+
   type fabric_stats =
     { edges_injected : int
     ; pairs_skipped : int

@@ -123,6 +123,19 @@ val splits_used : t -> int
     ([Budget.used]); the instrumentation read behind {!Session.effort}. *)
 val effort_used : t -> int
 
+(** task #106: the LIA adapter's observational conflict evidence, re-exported so
+    {!Session} can surface it. Only the EUF+LIA stack carries it (DT/arrays give [None]).
+    See {!Oxsmt_lia.Lia_adapter.conflict_core}. *)
+type conflict_core = Oxsmt_lia.Lia_adapter.conflict_core =
+  { farkas : Oxsmt_lia.Rational.t list option
+  ; atoms : (Term.t * bool) list
+  }
+
+(** [last_conflict_core t] is the {!conflict_core} of the most recent theory conflict
+    since the last {!begin_check}, or [None] if there was none / it is not
+    term-representable. Observational — never affects solving. *)
+val last_conflict_core : t -> conflict_core option
+
 (** The nullary-symbol (table-free) model reconstructed from the snapshot of the accepting
     Final->Sat, or [None] (see {!model} for the full function-model reconstruction). Kept
     for the const-only path. *)

@@ -92,23 +92,23 @@ let fabric_callbacks_off =
   | Some _ -> true
 ;;
 
-(* Lane A (task #30; default-ON since #59): LIA-model disequality repair at Final. A negative shared Int
-   equality (a disequality [x <> c]) is routed to the congruence child ONLY
-   ([Uflia_router.assert_to], "Both when not positive -> A") because {!Lia} raises
+(* Lane A (task #30; default-ON since #59): LIA-model disequality repair at Final. A
+   negative shared Int equality (a disequality [x <> c]) is routed to the congruence child
+   ONLY ([Uflia_router.assert_to], "Both when not positive -> A") because {!Lia} raises
    [Unsupported] on a negated equality (lia.mli). The pair-shaped [find_disagreement] net
-   that is supposed to make that narrowing complete ranges over the Int-sorted, both-valued
-   INTERFACE members -- it never forms a variable-vs-CONSTANT disequality
-   (the nec-smt ITE-condition shape [i <> 0]) because the variable is EUF-only-used (not a
+   that is supposed to make that narrowing complete ranges over the Int-sorted,
+   both-valued INTERFACE members -- it never forms a variable-vs-CONSTANT disequality (the
+   nec-smt ITE-condition shape [i <> 0]) because the variable is EUF-only-used (not a
    both-used interface member) and the constant is not an interface node, so LIA never
-   hears the disequality and its
-   candidate model can set [x = c], a point R1 then rejects (logs/nec-probe-report.md).
-   When ON, {!repair_split} closes that gap by scanning the negatively-pinned pairs LIA's
-   candidate model equates and emitting the existing trichotomy split. Read-once, tri-state
-   (default-ON flip, task #59): unset -> ON (the new default), [=0/false/no] -> OFF (the
-   byte-for-byte trunk path -- no scan), any other value (incl. [=1/true/yes], and the
-   empty string [=""], which now maps to ON -- flip-family-consistent, no in-repo consumer
-   sets it empty) -> ON. The forced-OFF ([=0]) path is the pre-flip default bit-for-bit, so
-   the flip is an isolated default change: nothing in the scan itself moved. *)
+   hears the disequality and its candidate model can set [x = c], a point R1 then rejects
+   (logs/nec-probe-report.md). When ON, {!repair_split} closes that gap by scanning the
+   negatively-pinned pairs LIA's candidate model equates and emitting the existing
+   trichotomy split. Read-once, tri-state (default-ON flip, task #59): unset -> ON (the
+   new default), [=0/false/no] -> OFF (the byte-for-byte trunk path -- no scan), any other
+   value (incl. [=1/true/yes], and the empty string [=""], which now maps to ON --
+   flip-family-consistent, no in-repo consumer sets it empty) -> ON. The forced-OFF ([=0])
+   path is the pre-flip default bit-for-bit, so the flip is an isolated default change:
+   nothing in the scan itself moved. *)
 let model_repair_on =
   match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
   | Some ("0" | "false" | "no") -> false
@@ -124,6 +124,11 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
   type congruence_state = A.t
 
   val congruence_state : t -> congruence_state
+
+  (* task #106: symmetric read-only accessor for the arithmetic child (LIA). Additive. *)
+  type arith_state = B.t
+
+  val arith_state : t -> arith_state
 
   type fabric_stats =
     { edges_injected : int
@@ -218,25 +223,25 @@ end = struct
          path and NONE of the following is touched (the pure-corpus byte-unchanged
          guarantee). *)
       mutable next_edge : edge_id
-      (* monotone edge_id allocator; grow-only over the whole solve so an injected
+        (* monotone edge_id allocator; grow-only over the whole solve so an injected
            edge's Γ can cite only STRICTLY-SMALLER ids — acyclicity by construction (F2). *)
     ; registry : (edge_id, reg_entry) Hashtbl.t
-      (* edge_id -> the Γ + witness + endpoints recorded at injection. FIRST-wins,
+        (* edge_id -> the Γ + witness + endpoints recorded at injection. FIRST-wins,
            origin-frame trailed on [fabric_frames] (F2/F3). Never traversed by iteration
            (only keyed lookup), so it introduces no Hashtbl-order nondeterminism (I6). *)
     ; mutable combined_reason : Explanation.t Lit.Map.t
-      (* propagated lit -> its fully-expanded (all-[Lit.t]) reason, snapshotted the
+        (* propagated lit -> its fully-expanded (all-[Lit.t]) reason, snapshotted the
            first time it is served, FIRST-wins, trailed. Solve-time and cert-time
            consumers read the SAME immutable registry, so they cite byte-identical Γ (F4). *)
     ; mutable order : int Lit.Map.t
-      (* F1(b) assertion-order ledger: each asserted lit's arrival ordinal. *)
+        (* F1(b) assertion-order ledger: each asserted lit's arrival ordinal. *)
     ; mutable assert_counter : int
     ; fabric_frames : (unit -> unit, unit) Trail.t
-      (* cold-path closure trail (Trail realization 1b): each entry undoes one registry
+        (* cold-path closure trail (Trail realization 1b): each entry undoes one registry
            / combined-reason / propagated_by insertion when its frame pops. *)
     ; mutable trace : Fabric.trace option (* F7 cert emission hook; unset ⇒ zero cost. *)
     ; lia_merge_cursor : A.merge_cursor option
-      (* ADR-0014 Stage 2: this combinator's own cursor into the hub merge log, for the
+        (* ADR-0014 Stage 2: this combinator's own cursor into the hub merge log, for the
            EUF→LIA notify. [Some] iff callbacks are on; a datatypes client (if wired)
            holds its OWN cursor, so both see every merge. *)
     ; mutable stat_edges : int
@@ -453,10 +458,10 @@ end = struct
          | Term.Eq (a, b) when not (Sort.equal a.Term.sort Sort.bool) ->
            List.iter
              (fun (side : Term.t) ->
-                match side.Term.node, side.Term.sort with
-                | Term.App (_, sa), Sort.Int _ when Iarr.length sa = 0 ->
-                  mark_use side O_euf
-                | _ -> ())
+               match side.Term.node, side.Term.sort with
+               | Term.App (_, sa), Sort.Int _ when Iarr.length sa = 0 ->
+                 mark_use side O_euf
+               | _ -> ())
              [ a; b ]
          | _ -> ());
         (* Bool boundary — a Bool node as an argument of an uninterpreted function
@@ -627,22 +632,22 @@ end = struct
     then
       List.iter
         (fun l ->
-           let prev = Lit.Map.find_opt l t.propagated_by in
-           t.propagated_by <- Lit.Map.add l owner t.propagated_by;
-           Trail.record t.fabric_frames (fun () ->
-             t.propagated_by
-             <- (match prev with
-                 | Some o -> Lit.Map.add l o t.propagated_by
-                 | None -> Lit.Map.remove l t.propagated_by)))
+          let prev = Lit.Map.find_opt l t.propagated_by in
+          t.propagated_by <- Lit.Map.add l owner t.propagated_by;
+          Trail.record t.fabric_frames (fun () ->
+            t.propagated_by
+            <- (match prev with
+                | Some o -> Lit.Map.add l o t.propagated_by
+                | None -> Lit.Map.remove l t.propagated_by)))
         lits
     else
       List.iter
         (fun l ->
-           if not (Lit.Map.mem l t.propagated_by)
-           then (
-             t.propagated_by <- Lit.Map.add l owner t.propagated_by;
-             Trail.record t.fabric_frames (fun () ->
-               t.propagated_by <- Lit.Map.remove l t.propagated_by)))
+          if not (Lit.Map.mem l t.propagated_by)
+          then (
+            t.propagated_by <- Lit.Map.add l owner t.propagated_by;
+            Trail.record t.fabric_frames (fun () ->
+              t.propagated_by <- Lit.Map.remove l t.propagated_by)))
         lits
   ;;
 
@@ -692,15 +697,15 @@ end = struct
   let check_pins t ma mb =
     List.iter
       (fun p ->
-         let ok m =
-           match model_eval m p.px, model_eval m p.py with
-           | Some vx, Some vy -> Bool.equal (value_equal vx vy) p.psign
-           | _ -> false
-         in
-         if (p.pto_a && not (ok ma)) || (p.pto_b && not (ok mb))
-         then
-           raise
-             (Combination_unsound "child Sat-model violates an asserted shared equality"))
+        let ok m =
+          match model_eval m p.px, model_eval m p.py with
+          | Some vx, Some vy -> Bool.equal (value_equal vx vy) p.psign
+          | _ -> false
+        in
+        if (p.pto_a && not (ok ma)) || (p.pto_b && not (ok mb))
+        then
+          raise
+            (Combination_unsound "child Sat-model violates an asserted shared equality"))
       (all_pins t)
   ;;
 
@@ -769,13 +774,13 @@ end = struct
   let require_bool_args_bound t ma =
     Term.Set.iter
       (fun term ->
-         match model_eval ma term with
-         | Some (Model.Bool _) -> ()
-         | _ ->
-           raise
-             (Incomplete
-                "Bool leaf / predicate under an uninterpreted function is unbound \
-                 (buried, no true/false binding in EUF)"))
+        match model_eval ma term with
+        | Some (Model.Bool _) -> ()
+        | _ ->
+          raise
+            (Incomplete
+               "Bool leaf / predicate under an uninterpreted function is unbound \
+                (buried, no true/false binding in EUF)"))
       t.bool_uf_args
   ;;
 
@@ -790,21 +795,21 @@ end = struct
   let require_no_datatype_terms t =
     Term.Set.iter
       (fun (term : Term.t) ->
-         match term.Term.sort with
-         | Sort.Datatype _ ->
-           raise
-             (Incomplete
-                "datatype-sorted term live at Sat certification: no datatype theory yet")
-         | Sort.Array _ ->
-           (* An array-sorted term reaching the EUF+LIA combinator at Sat certification
+        match term.Term.sort with
+        | Sort.Datatype _ ->
+          raise
+            (Incomplete
+               "datatype-sorted term live at Sat certification: no datatype theory yet")
+        | Sort.Array _ ->
+          (* An array-sorted term reaching the EUF+LIA combinator at Sat certification
              means arrays leaked past the standalone arrays-theory dispatch; the
              combinator has no array axioms, so refuse to certify (→ unknown), never a
              wrong-[Sat]. *)
-           raise
-             (Incomplete
-                "array-sorted term live at Sat certification: handled by the standalone \
-                 arrays theory, not this combinator")
-         | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.BitVec _ -> ())
+          raise
+            (Incomplete
+               "array-sorted term live at Sat certification: handled by the standalone \
+                arrays theory, not this combinator")
+        | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.BitVec _ -> ())
       t.all_terms
   ;;
 
@@ -818,35 +823,37 @@ end = struct
   let require_no_bitvec_terms t =
     Term.Set.iter
       (fun (term : Term.t) ->
-         match term.Term.sort with
-         | Sort.BitVec _ ->
-           raise
-             (Incomplete
-                "bitvector-sorted term live at Sat certification: decided by \
-                 bit-blasting, not the combinator")
-         | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _
-           -> ())
+        match term.Term.sort with
+        | Sort.BitVec _ ->
+          raise
+            (Incomplete
+               "bitvector-sorted term live at Sat certification: decided by \
+                bit-blasting, not the combinator")
+        | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _
+          -> ())
       t.all_terms
   ;;
 
-  (* Final-time disequality repair (task #30, default-ON since #59; guarded by {!model_repair_on}). Scans
-     the negatively-pinned Int pairs (disequalities [px <> py], including the var-vs-constant
-     shape [find_disagreement] cannot return) that the LIA candidate model [mb] nonetheless
-     EQUATES, and returns the first such pair's trichotomy split. That pair is a genuine
-     EUF/LIA disagreement -- EUF asserts [px <> py] (it holds the disequality), LIA's model
-     sets [px = py] -- so splitting it is sound and drives progress:
+  (* Final-time disequality repair (task #30, default-ON since #59; guarded by
+     {!model_repair_on}). Scans the negatively-pinned Int pairs (disequalities [px <> py],
+     including the var-vs-constant shape [find_disagreement] cannot return) that the LIA
+     candidate model [mb] nonetheless EQUATES, and returns the first such pair's
+     trichotomy split. That pair is a genuine EUF/LIA disagreement -- EUF asserts
+     [px <> py] (it holds the disequality), LIA's model sets [px = py] -- so splitting it
+     is sound and drives progress:
      - the [px = py] branch is refuted by EUF's native disequality (a conflict), and
-     - the [px < py] / [px > py] branches reach LIA as [Le] bounds it enforces, so the SAME
-       pin cannot recur equated (LIA's next model separates px, py). Each disequality pin
-       fires at most as the existing shared-pair trichotomy does -- termination is the
-       standard Nelson-Oppen split argument (finitely many pins; each split strictly forbids
-       [px = py] on the branch LIA sees). A pin whose sides LIA does not value ([model_eval]
-       = [None]) is skipped (LIA does not constrain the pair; R1 remains the backstop).
-     Completeness-only: a spurious LIA model becomes a split, never a wrong verdict.
+     - the [px < py] / [px > py] branches reach LIA as [Le] bounds it enforces, so the
+       SAME pin cannot recur equated (LIA's next model separates px, py). Each disequality
+       pin fires at most as the existing shared-pair trichotomy does -- termination is the
+       standard Nelson-Oppen split argument (finitely many pins; each split strictly
+       forbids [px = py] on the branch LIA sees). A pin whose sides LIA does not value
+       ([model_eval] = [None]) is skipped (LIA does not constrain the pair; R1 remains the
+       backstop). Completeness-only: a spurious LIA model becomes a split, never a wrong
+       verdict.
 
-     COST GUARD: O(#pins) [model_eval]s over LIA leaves at Final only. Above [repair_pin_cap]
-     pins it is skipped entirely (falls through to the trunk path, where R1 catches any
-     spurious model -> unknown, no worse than OFF). *)
+     COST GUARD: O(#pins) [model_eval]s over LIA leaves at Final only. Above
+     [repair_pin_cap] pins it is skipped entirely (falls through to the trunk path, where
+     R1 catches any spurious model -> unknown, no worse than OFF). *)
   let repair_pin_cap = 4096
 
   let repair_split t mb =
@@ -1093,21 +1100,20 @@ end = struct
                   [a=b]. A wrong value / swapped-or-foreign token / dropped bound in
                   [fixed_bounds] is REJECTED here (the ADR weak-Γ mutant is non-vacuous),
                   not injected as an unsound merge. *)
-               if
-                 B.fabric_verify
-                   t.b
-                   a
-                   fb_a.Fabric.value
-                   fb_a.Fabric.lower
-                   fb_a.Fabric.upper
-                 && B.fabric_verify
-                      t.b
-                      b
-                      fb_b.Fabric.value
-                      fb_b.Fabric.lower
-                      fb_b.Fabric.upper
-                 && gamma_precedence_ok t gamma
-                 && gamma_acyclic_ok t gamma
+               if B.fabric_verify
+                    t.b
+                    a
+                    fb_a.Fabric.value
+                    fb_a.Fabric.lower
+                    fb_a.Fabric.upper
+                  && B.fabric_verify
+                       t.b
+                       b
+                       fb_b.Fabric.value
+                       fb_b.Fabric.lower
+                       fb_b.Fabric.upper
+                  && gamma_precedence_ok t gamma
+                  && gamma_acyclic_ok t gamma
                then Some (gamma, witness)
                else None
              | _ -> None)
@@ -1180,7 +1186,8 @@ end = struct
     then false
     else if not (A.fabric_are_equal t.a s u)
     then
-      false (* defensive: the log only holds genuine unions, so this holds post-merge *)
+      false
+      (* defensive: the log only holds genuine unions, so this holds post-merge *)
     else (
       let prepared =
         try
@@ -1219,7 +1226,7 @@ end = struct
     | Some cursor ->
       List.iter
         (fun (ev : Fabric.merge_event) ->
-           ignore (try_notify_pair t ev.Fabric.kept ev.Fabric.merged : bool))
+          ignore (try_notify_pair t ev.Fabric.kept ev.Fabric.merged : bool))
         (A.drain_merges t.a cursor)
   ;;
 
@@ -1419,19 +1426,19 @@ end = struct
     in
     Term.Set.iter
       (fun (term : Term.t) ->
-         match term.Term.sort with
-         | Sort.Int _ ->
-           (match lia_int term, model_eval ma term with
-            | Some n, Some (Model.Uninterp cid) ->
-              (match Hashtbl.find_opt class_int cid with
-               | Some m when Bigint.compare m n <= 0 -> ()
-               | _ -> Hashtbl.replace class_int cid n)
-            | _ -> ())
-         | Sort.Bool
-         | Sort.Uninterpreted _
-         | Sort.Datatype _
-         | Sort.Array _
-         | Sort.BitVec _ -> ())
+        match term.Term.sort with
+        | Sort.Int _ ->
+          (match lia_int term, model_eval ma term with
+           | Some n, Some (Model.Uninterp cid) ->
+             (match Hashtbl.find_opt class_int cid with
+              | Some m when Bigint.compare m n <= 0 -> ()
+              | _ -> Hashtbl.replace class_int cid n)
+           | _ -> ())
+        | Sort.Bool
+        | Sort.Uninterpreted _
+        | Sort.Datatype _
+        | Sort.Array _
+        | Sort.BitVec _ -> ())
       t.all_terms;
     let int_variant term =
       match model_eval mb term, model_eval ma term with
@@ -1524,6 +1531,12 @@ end = struct
   type congruence_state = A.t
 
   let congruence_state t = t.a
+
+  (* task #106: symmetric read-only accessor for the arithmetic child (LIA), so the
+     interface layer can read the most-recent-conflict evidence. Non-mutating. *)
+  type arith_state = B.t
+
+  let arith_state t = t.b
 
   type fabric_stats =
     { edges_injected : int

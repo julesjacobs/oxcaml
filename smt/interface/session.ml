@@ -1933,6 +1933,40 @@ let failed_assumptions t =
   | Some sel -> List.filter (fun lit -> Sat.var_of_lit lit <> sel) failed
 ;;
 
+(* task #106: theory infeasibility evidence for the most recent UNSAT check_sat. Purely
+   observational — it reads the LIA adapter's conflict stash (populated at conflict-
+   production time, off the frozen [Explanation]) and never influences a verdict. Gated on
+   [last_verdict = Unsat]: a Sat/Unknown/pre-check state has no refutation to expose, and
+   [begin_check] cleared the stash so a stale conflict cannot leak across checks. *)
+
+(* A premise (atom, polarity) rendered as the Bool [Term.t] that was asserted true: the
+   atom for a positive premise, its negation for a negative one. The conjunction of these
+   is the theory-unsat core. Built through the session context (D6). *)
+let signed_atom_term t (atom, polarity) =
+  if polarity then atom else Context.not_ t.ctx atom
+;;
+
+let last_unsat_core t =
+  match t.last_verdict with
+  | Sat | Unknown -> None
+  | Unsat ->
+    (match Cdclt.last_conflict_core t.cdclt with
+     | None -> None
+     | Some { atoms; _ } -> Some (List.map (signed_atom_term t) atoms))
+;;
+
+let last_farkas t =
+  match t.last_verdict with
+  | Sat | Unknown -> None
+  | Unsat ->
+    (match Cdclt.last_conflict_core t.cdclt with
+     | None | Some { farkas = None; _ } -> None
+     | Some { farkas = Some coeffs; atoms } ->
+       (* [coeffs] is index-aligned and equal-length with [atoms] (the adapter drops a
+          mismatch to [None]); pair each Farkas multiplier with its asserted half-plane. *)
+       Some (List.map2 (fun c a -> c, signed_atom_term t a) coeffs atoms))
+;;
+
 (* Test-only introspection (task #25): is a symmetry-breaking emission currently active
    (its activation selector still assumed)? Lets [symbreak_test] assert the R2 emission
    restriction directly (no emission under a frame / with lemmas registered). *)

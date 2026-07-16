@@ -66,6 +66,37 @@ val notify_eq : t -> edge_id:Fabric.edge_id -> Term.t -> unit
 val conflict_explanation : Lit.t Lia.conflict -> Explanation.t
 val propagation_reason : Lit.t list -> Explanation.t
 
+(** {2 Observational theory-infeasibility evidence (task #106).}
+
+    A read-only side channel for surfacing the most recent theory conflict's evidence
+    (Farkas dual coefficients + premise atoms) through the public {!Session} API, e.g. for
+    a CHC/Horn consumer building Farkas interpolants. Recorded OFF the frozen payload-free
+    {!Explanation} (ADR-0006): {!fabric_conflict_explanation} stashes the raw engine
+    conflict at production time. Reading it NEVER affects solving. *)
+
+(** The Farkas / premise evidence of one theory conflict, mapped to terms. *)
+type conflict_core =
+  { farkas : Rational.t list option
+  (** [Some coeffs] (index-aligned with [atoms], [coeffᵢ >= 0] the multiplier for
+      [atomsᵢ]'s asserted half-plane, [Σ coeffᵢ·half-planeᵢ] a false constant) for a
+      Farkas-certified rational-infeasibility conflict; [None] for a Diophantine /
+      divisibility conflict (empty engine [farkas] vector — certified by GCD, not a
+      rational multiplier). *)
+  ; atoms : (Term.t * bool) list
+  (** each premise atom's [Term.t] and its asserted polarity, in premise order. *)
+  }
+
+(** [last_conflict_core t] is the {!conflict_core} of the MOST RECENT conflict this
+    adapter produced since {!clear_last_conflict}, or [None] if no conflict was produced
+    or a premise cannot be represented as a term (a fabric-edge handle, or an atom absent
+    from the term map). A genuine T-infeasible core: the conjunction of its {!field:atoms}
+    (at their polarities) is theory-unsatisfiable. *)
+val last_conflict_core : t -> conflict_core option
+
+(** Reset the {!last_conflict_core} stash (called by {!Cdclt.begin_check} per check-sat so
+    a stale conflict cannot masquerade as the current query's core). *)
+val clear_last_conflict : t -> unit
+
 (** [true] once an overflow has bricked the underlying {!Lia} instance; never raises. *)
 val is_poisoned : t -> bool
 

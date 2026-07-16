@@ -406,6 +406,42 @@ val cert_assumptions : t -> Oxsmt_solver.Sat.lit list
     selector (task #25) filtered out — a private aux var must never surface in a core. *)
 val failed_assumptions : t -> Oxsmt_solver.Sat.lit list
 
+(** {2 Theory infeasibility evidence (task #106)}
+    — additive, observational; reading it never perturbs solving.
+
+    After a {!check_sat} that returned [Unsat] {e via a LIA theory conflict}, these
+    surface the refuting conflict's evidence for a downstream consumer (e.g. a CHC/Horn
+    solver building Farkas interpolants). The evidence is recorded off the frozen,
+    payload-free {!Explanation} (ADR-0006) by the LIA adapter at conflict-production time
+    and read back here; a [None]-by-default channel that a caller may ignore entirely.
+
+    {b What "core" means.} The atoms are the premises of the {e most recent} LIA conflict
+    — a genuinely theory-infeasible set (their conjunction is T-unsat, re-checkable on a
+    fresh session). For a conjunctive LIA query refuted at decision level 0 (the
+    counterexample- to-induction shape a CHC consumer generates) that conflict is the
+    whole-query refutation, so the atoms are exactly the asserted-formula subset that
+    clashes. For a query with Boolean structure it is the last theory lemma the search
+    derived — still a sound theory core, but not necessarily a minimal whole-formula core.
+    [None] when the last verdict was not [Unsat], the refutation was purely propositional
+    (no LIA conflict), or a premise is not representable as a term (an EUF-congruence
+    fabric-edge handle). *)
+
+(** [last_unsat_core t] is the theory-unsat core of the most recent {!check_sat}: the
+    premise literals of its refuting LIA conflict, each rendered as the Bool [Term.t] that
+    was asserted true (the atom, or its negation for a negative premise). The conjunction
+    is T-unsatisfiable. [None] per the rules above. *)
+val last_unsat_core : t -> Oxsmt_core.Term.t list option
+
+(** [last_farkas t] is the Farkas certificate of the most recent {!check_sat}'s refuting
+    conflict: [(coeffᵢ, litᵢ)] pairs where [coeffᵢ >= 0] is the dual multiplier for the
+    asserted half-plane [litᵢ] (same rendering as {!last_unsat_core}, index-aligned), and
+    [Σ coeffᵢ · half-plane(litᵢ)] is a variable-free false constant — the rational-
+    infeasibility proof. [None] when {!last_unsat_core} is [None], OR the refutation was a
+    Diophantine / divisibility conflict (certified by a GCD argument, not a rational
+    multiplier vector — its core is still available via {!last_unsat_core}). The
+    coefficient type is {!Oxsmt_lia.Rational.t}. *)
+val last_farkas : t -> (Oxsmt_lia.Rational.t * Oxsmt_core.Term.t) list option
+
 (** Test-only (task #25): whether a symmetry-breaking emission is currently active (its
     activation selector is still assumed). Used by [symbreak_test] to check the R2
     emission restriction (no emission under a pushed frame or with lemmas registered). *)

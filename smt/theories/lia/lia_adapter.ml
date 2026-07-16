@@ -93,9 +93,10 @@ let cg_max_cuts =
    Default: reject iff the cut uses EVERY tight row ([ant_count ≥ m], i.e.
    [ants_pct = 100]) — the crisp measured separator. The coefficient-density knob is
    disabled by default ([nnz_pct = 101] ⇒ [nnz > 1.01·n], never true). All three tunable
-   for the A/B: [OXSMT_CG_CUT_GATE=0] disables the gate (= pre-policy B3 on verdict+search;
-   an always-true gate still runs the support scan + callback, so not allocation-identical);
-   [OXSMT_CG_ANTS_PCT] / [OXSMT_CG_NNZ_PCT] set the density thresholds (percent). *)
+   for the A/B: [OXSMT_CG_CUT_GATE=0] disables the gate (= pre-policy B3 on
+   verdict+search; an always-true gate still runs the support scan + callback, so not
+   allocation-identical); [OXSMT_CG_ANTS_PCT] / [OXSMT_CG_NNZ_PCT] set the density
+   thresholds (percent). *)
 let cut_gate_on =
   match Sys.getenv_opt "OXSMT_CG_CUT_GATE" with
   | Some ("0" | "false" | "no" | "off") -> false
@@ -123,6 +124,22 @@ let cut_gate ~nnz ~ants ~m ~n =
   not (dense_ants || dense_nnz)
 ;;
 
+(* Observational theory-infeasibility evidence (task #106), mapped out of the engine
+   currency into [Term.t]s the public Session API can surface after an UNSAT check-sat.
+   Recorded OFF the frozen [Explanation] (which is payload-free per ADR-0006 — the Farkas
+   vector never rides the 1UIP path); this is a separate, read-only channel populated at
+   conflict-production time, so reading it never affects solving. *)
+type conflict_core =
+  { farkas : Rational.t list option
+      (* [Some coeffs] for a Farkas-certified rational-infeasibility conflict, index-
+         aligned with [atoms] ([coeffᵢ >= 0] the multiplier for [atomsᵢ]'s half-plane);
+         [None] for a Diophantine / divisibility conflict, whose engine [farkas] vector is
+         empty (the cert is the GCD argument, not a rational multiplier — see
+         {!Lia.diophantine_conflict}). *)
+  ; atoms :
+      (Term.t * bool) list (* each premise atom's [Term.t] + its asserted polarity *)
+  }
+
 type t =
   { lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
@@ -138,8 +155,13 @@ type t =
          phase for HNF cuts (only touched when [hnf_cuts_on], so OFF is byte-identical). *)
   ; mutable hnf_cuts_emitted : int (* HNF cuts emitted as a Lemma (instrumentation) *)
   ; mutable cg_attempts : int
-  (* CG-cut ATTEMPTS this query (each an exact HNF); bounded by [cg_max_cuts] so an
-     unproductive lattice cut cannot dominate the wall. Only touched on the B3 path. *)
+      (* CG-cut ATTEMPTS this query (each an exact HNF); bounded by [cg_max_cuts] so an
+         unproductive lattice cut cannot dominate the wall. Only touched on the B3 path. *)
+  ; mutable last_conflict : (Rational.t list * Fabric.justification list) option
+  (* task #106: the (farkas, premises) of the MOST RECENT conflict this adapter produced,
+     stashed verbatim from the engine [Lia.conflict] before it is projected to the
+     payload- free [Explanation]. Reset per check-sat by {!clear_last_conflict}.
+     Observational only. *)
   }
 
 let create ctx _env =
@@ -152,6 +174,7 @@ let create ctx _env =
   ; hnf_final_cuttable = 0
   ; hnf_cuts_emitted = 0
   ; cg_attempts = 0
+  ; last_conflict = None
   }
 ;;
 
@@ -242,12 +265,15 @@ let propagation_reason premises : Explanation.t =
   }
 ;;
 
-let fabric_conflict_explanation (c : Fabric.justification Lia.conflict)
+let fabric_conflict_explanation t (c : Fabric.justification Lia.conflict)
   : Fabric.Explanation.t
   =
-  { premises = checked_premises "conflict premise set" c.premises
-  ; rule = Explanation.Rule_tag.Lia_farkas
-  }
+  let premises = checked_premises "conflict premise set" c.premises in
+  (* task #106: stash the raw (farkas, premises) for the observational Session core API,
+     AFTER the emptiness tripwire (a degrading query records nothing). The multipliers
+     still stay off the returned [Explanation] (ADR-0006). *)
+  t.last_conflict <- Some (c.farkas, premises);
+  { premises; rule = Explanation.Rule_tag.Lia_farkas }
 ;;
 
 let fabric_propagation_reason premises : Fabric.Explanation.t =
@@ -384,7 +410,7 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
 let check_fabric t (effort : Theory.effort) : Fabric.check_result =
   guard t (fun () ->
     match Lia.check t.lia with
-    | Conflict c -> Fabric.Conflict (fabric_conflict_explanation c)
+    | Conflict c -> Fabric.Conflict (fabric_conflict_explanation t c)
     | Sat_candidate ->
       (match effort with
        | Theory.Propagate -> Fabric.Propagations (propagations t)
@@ -401,7 +427,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
                rather than left to b&b, which would otherwise wander. Sound conflict
                (premises are ℤ-unsatisfiable); on [None] proceed exactly as before. *)
             (match Lia.diophantine_conflict t.lia with
-             | Some c -> Fabric.Conflict (fabric_conflict_explanation c)
+             | Some c -> Fabric.Conflict (fabric_conflict_explanation t c)
              | None ->
                (match Lia.cube_model t.lia with
                 | Some _ -> Fabric.Sat
@@ -510,6 +536,43 @@ let is_poisoned t = Lia.is_poisoned t.lia
 let overflows_to_unknown t = t.overflows
 let pivot_count t = Lia.pivot_count t.lia
 let hnf_cuts_emitted t = t.hnf_cuts_emitted
+
+(* task #106 observational core. Reset the stash at the start of each check-sat (so a
+   stale conflict from a prior check cannot masquerade as this one's core) and read it
+   back, mapped from the engine premise tokens to [Term.t]s. Neither touches solver state. *)
+let clear_last_conflict t = t.last_conflict <- None
+
+let last_conflict_core t : conflict_core option =
+  match t.last_conflict with
+  | None -> None
+  | Some (farkas, premises) ->
+    (* Map each premise justification to its (atom term, polarity). A [Fabric] handle has
+       no single atom term (its Γ is an EUF congruence proof over the fabric edge), and a
+       [Real] whose atom is absent from the map cannot be surfaced — either makes the core
+       unrepresentable as terms, so return [None] rather than a partial/misleading core. *)
+    let rec map acc = function
+      | [] -> Some (List.rev acc)
+      | Fabric.Real lit :: rest ->
+        (match Atom.Table.find_opt t.term_of_atom (Lit.atom lit) with
+         | Some tm -> map ((tm, Lit.sign lit) :: acc) rest
+         | None -> None)
+      | Fabric.Fabric _ :: _ -> None
+    in
+    (match map [] premises with
+     | None -> None
+     | Some atoms ->
+       (* [farkas] is either empty (a Diophantine/divisibility conflict → no rational
+          multiplier vector) or index-aligned and equal in length to the premises (a
+          Farkas conflict). A length mismatch is not a shape we produce; surface no
+          coefficients rather than misalign them. *)
+       let farkas =
+         match farkas with
+         | [] -> None
+         | fs when List.compare_lengths fs atoms = 0 -> Some fs
+         | _ -> None
+       in
+       Some { farkas; atoms })
+;;
 
 (* Reset the per-query CG-cut attempt budget (task #53 H3). Zeroes [cg_attempts] so the
    [cg_max_cuts] cap starts fresh — the intent is one budget per top-level query. It is
