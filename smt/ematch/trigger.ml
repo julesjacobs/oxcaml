@@ -101,37 +101,65 @@ let candidates qvars body =
   !out
 ;;
 
-let infer ?(inert_head = fun (_ : Symbol.t) -> false) ~qvars body =
+(* Count, per head symbol, how many [App]-with-arguments nodes it heads across [terms]
+   (typically the ground assertions). Returned as a lookup closure. Fed to
+   [infer ~ground_occurrences] so trigger selection can PREFER a candidate whose head has
+   ground occurrences: a trigger head that never appears in a ground term cannot match, so
+   choosing it would leave the lemma inert (the exact failure mode of a Skolem-function
+   head minted for a nested existential — it occurs only in that lemma's body, never in a
+   ground term). Counting is a heuristic input to a completeness heuristic — it never
+   affects soundness (a mis-chosen trigger still only changes which valid instances fire). *)
+let ground_head_counts (terms : Term.t list) : Symbol.t -> int =
+  (* Keyed by the [Symbol.t] value itself. [Symbol.t] is a private int, so the polymorphic
+     hashtable's structural hash/equal are EXACT (no hash-collision conflation — do not
+     key by [Symbol.hash], which is lossy). *)
+  let tbl : (Symbol.t, int) Hashtbl.t = Hashtbl.create 256 in
+  let bump sym =
+    Hashtbl.replace tbl sym (1 + (Hashtbl.find_opt tbl sym |> Option.value ~default:0))
+  in
+  let rec go (t : Term.t) =
+    (match t.node with
+     | App (sym, args) when Iarr.length args > 0 -> bump sym
+     | _ -> ());
+    match t.node with
+    | App (_, args) -> Iarr.iter go args
+    | Arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
+    | Le a | Not a -> go a
+    | Eq (a, b) ->
+      go a;
+      go b
+    | And xs | Or xs -> Iarr.iter go xs
+    | Ite (c, a, b) ->
+      go c;
+      go a;
+      go b
+    | Bool_const _ | Int_const _ -> ()
+  in
+  List.iter go terms;
+  fun sym -> Hashtbl.find_opt tbl sym |> Option.value ~default:0
+;;
+
+let infer ?(ground_occurrences = fun (_ : Symbol.t) -> 0) ~qvars body =
   let n = Array.length qvars in
   if n = 0
   then [] (* zero-qvar lemma is a ground fact; the matcher fires it without a trigger *)
   else (
-    (* Is a candidate's head symbol INERT — provably unable to ever seed matching?
-       (candidates are always [App] with arguments, so a head always exists.) The caller
-       marks such heads; the only current case is a Skolem function minted for a nested
-       existential (chunk 2b): it occurs in exactly one lemma body and the only thing that
-       could create a ground [skf(t)] term is that very lemma firing, which needs a
-       [skf(t)] to match — a deadlock, so a trigger on it is inert. A ground-occurrence
-       COUNT heuristic was tried and measured a net corpus regression: it also demoted
-       user heads with no INITIAL ground occurrence that are legitimately created DURING
-       search (by other lemmas), losing more files than the Skolem demotion gained.
-       Restricting demotion to the provably-deadlocked (Skolem) heads keeps the gain
-       without that loss. Never a soundness input — a mis-chosen trigger only changes
-       which valid instances fire. *)
-    let head_inert (c : Term.t) =
+    (* Head-symbol ground-occurrence count of a candidate (candidates are always [App]
+       with arguments, so a head always exists); 0 for a head with no ground occurrence. *)
+    let head_occ (c : Term.t) =
       match c.Term.node with
-      | App (sym, _) -> inert_head sym
-      | _ -> false
+      | App (sym, _) -> ground_occurrences sym
+      | _ -> 0
     in
-    (* Non-inert-first, then smallest-first, then tag-tiebroken for determinism (I6). With
-       the default [inert_head = fun _ -> false] no head is inert, so the first key is a
-       constant tie and the order is byte-identical to the size/tag recipe. Among
-       non-inert candidates the size/tag order is untouched, so only a provably-inert head
-       is demoted. *)
+    (* Ground-occurrence-count DESCENDING first (prefer a head that can actually match — a
+       zero-occurrence Skolem head sorts last), then smallest-first, then tag-tiebroken
+       for determinism (I6). With the default [ground_occurrences = fun _ -> 0] every
+       head_occ is 0, so this key is inert and the order is byte-identical to the size/tag
+       recipe. *)
     let cands =
       List.map (fun c -> c, qvars_in qvars c) (candidates qvars body)
       |> List.sort (fun (a, _) (b, _) ->
-        let c = Bool.compare (head_inert a) (head_inert b) in
+        let c = Int.compare (head_occ b) (head_occ a) in
         if c <> 0
         then c
         else (

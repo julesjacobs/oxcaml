@@ -22,20 +22,21 @@ open Oxsmt_core
     application, so it passes {!Lemma}/{!Matcher}'s trigger-fragment contract by
     construction.
 
-    [inert_head hd] marks head symbol [hd] as INERT — provably unable to ever seed
-    matching, so a trigger on it can never fire. Inert candidates sort AFTER non-inert
-    ones (ahead of the size/tag keys), so a non-inert trigger is chosen whenever one
-    covers the qvars, while the size/tag order among non-inert candidates is left
-    untouched. The only current inert case is a Skolem function minted for a nested
-    existential (chunk 2b): it occurs in one lemma body and can only be created by that
-    lemma firing, which needs it — a deadlock. (A ground-occurrence-count key was tried
-    and regressed the corpus: it also demoted user heads with no INITIAL ground occurrence
-    that are legitimately created during search.) Purely a completeness heuristic — it
-    changes only which valid instances fire, never a verdict. The default [fun _ -> false]
-    marks nothing inert, so the order is byte-identical to the size/tag recipe (existing
-    callers are unaffected). *)
+    [ground_occurrences hd] is how many times head symbol [hd] occurs in a ground term of
+    the current problem (see {!ground_head_counts}); candidates are ordered by it
+    DESCENDING before the size/tag keys, so a head that can actually match a ground term
+    is preferred and a head with no ground occurrence (e.g. a Skolem function minted for a
+    nested existential, which never appears in a ground term) sorts last. Purely a
+    completeness heuristic — it changes only which valid instances fire, never a verdict.
+    The default [fun _ -> 0] makes the key inert, so the order is byte-identical to the
+    size/tag recipe (existing callers are unaffected). *)
 val infer
-  :  ?inert_head:(Symbol.t -> bool)
+  :  ?ground_occurrences:(Symbol.t -> int)
   -> qvars:Qvar.t array
   -> Term.t
   -> Term.t list list
+
+(** [ground_head_counts terms] returns [fun hd -> count], the number of
+    [App]-with-arguments nodes headed by [hd] across [terms] (typically a query's ground
+    assertions). Intended as the [~ground_occurrences] argument to {!infer}. *)
+val ground_head_counts : Term.t list -> Symbol.t -> int

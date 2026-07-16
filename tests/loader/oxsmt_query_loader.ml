@@ -68,13 +68,6 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
        (never the reserved namespace). The [skf!]/[sk!] prefixes are disjoint, so the two
        minters cannot collide. *)
     let skf_counter = ref 0 in
-    (* Set of Skolem-function symbols this loader minted (lemmas-climb chunk 2c). Such a
-       symbol is provably INERT as a trigger head: it occurs in exactly one lemma body and
-       the only thing that could create a ground [skf(t)] term is that lemma firing, which
-       needs a [skf(t)] to match — a deadlock. Auto-trigger inference is told to demote it
-       so a firable (non-Skolem) trigger is chosen instead. Keyed by the [Symbol.t] value
-       (a private int; polymorphic hash/equal are exact). *)
-    let skolem_syms : (Symbol.t, unit) Hashtbl.t = Hashtbl.create 16 in
     let skolem ~cod ~args =
       let env = Session.env s in
       let rec pick () =
@@ -84,10 +77,16 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
       in
       let dom = List.map (fun (t : Term.t) -> t.Term.sort) args in
       let sym = Session.declare_fun s (pick ()) (Rank.create dom cod) in
-      Hashtbl.replace skolem_syms sym ();
       Context.app (Session.context s) sym args
     in
-    let inert_head sym = Hashtbl.mem skolem_syms sym in
+    (* Ground-occurrence counts of head symbols across the ground assertions (lemmas-climb
+       chunk 2c): fed to auto-trigger inference so it PREFERS a trigger whose head
+       actually occurs in a ground term. Without it, a Skolem function minted for a nested
+       existential (chunk 2b) — which occurs only in that lemma's body, never in a ground
+       term — can win the trigger by size/tag and leave the lemma inert (it can never
+       match). Computed ONCE over the pre-presolve assertions; a heuristic seed, never a
+       soundness input. *)
+    let ground_occurrences = Trigger.ground_head_counts parsed.Parser.assertions in
     List.iter
       (fun (lem : Parser.lemma_src) ->
         match
@@ -104,7 +103,7 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
                through the programmatic API still means "do not fire". *)
             let triggers =
               if List.is_empty triggers
-              then Trigger.infer ~inert_head ~qvars:qv body
+              then Trigger.infer ~ground_occurrences ~qvars:qv body
               else triggers
             in
             { Session.body; triggers })

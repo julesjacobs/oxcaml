@@ -1,11 +1,10 @@
-; Chunk 2c (demote the inert Skolem trigger head) un-inerts a Skolem universal.
+; Chunk 2c (trigger preference for ground-occurring heads) un-inerts a Skolem universal.
 ; `forall x. (p x) => (exists y. (and (r x y) (g x)))` Skolemizes (chunk 2b) to
 ; `forall x. (p x) => (and (r x (f x)) (g x))`. The consequent does not fold, so the
 ; trigger candidates p(x), g(x), f(x) all cover x; without 2c the Skolem head f(x) wins the
-; size/tag tiebreak and can never match (the only source of a ground f-term is this lemma
-; firing, which needs one) -> the lemma is inert -> unknown. With 2c the loader marks f
-; inert, so inference demotes it and picks a firable head; the lemma fires on p a, forces
-; g a, and contradicts not (g a) -> unsat.
+; size/tag tiebreak and never matches (no ground f) -> the lemma is inert -> unknown. With
+; 2c, p and g have ground occurrences (p a, not (g a)) and f has none, so a ground-matchable
+; head is chosen; the lemma fires on p a, forces g a, and contradicts not (g a) -> unsat.
 (set-logic UFLIA)
 (set-info :status unsat)
 (declare-fun p (Int) Bool)
