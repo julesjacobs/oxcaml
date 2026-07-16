@@ -7180,8 +7180,10 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let existential_context env mutable_flag rec_flag
-              spat_sexp_list allow_modules
+            type_let
+              ~enclosing_totality:expected_mode.enclosing_totality
+              existential_context env mutable_flag rec_flag spat_sexp_list
+              allow_modules
           in
           let body =
             type_expect
@@ -7950,7 +7952,8 @@ and type_expect_
       end
   | Pexp_sequence(sexp1, sexp2) ->
       let exp1, sort1 =
-        type_statement ~explanation:Sequence_left_hand_side env sexp1
+        type_statement ~explanation:Sequence_left_hand_side
+          ~enclosing_totality:expected_mode.enclosing_totality env sexp1
       in
       let exp2 = type_expect env expected_mode sexp2 ty_expected_explained in
       re {
@@ -7980,7 +7983,8 @@ and type_expect_
       in
       let wh_body, wh_body_sort =
         type_statement ~explanation:While_loop_body
-          ~position body_env sbody
+          ~position ~enclosing_totality:expected_mode.enclosing_totality
+          body_env sbody
       in
       rue {
         exp_desc =
@@ -8009,7 +8013,8 @@ and type_expect_
       let new_env = Env.add_region_lock new_env in
       let position = RTail (Regionality.disallow_left Regionality.local, FNontail) in
       let for_body, for_body_sort =
-        type_statement ~explanation:For_loop_body ~position new_env sbody
+        type_statement ~explanation:For_loop_body ~position
+          ~enclosing_totality:expected_mode.enclosing_totality new_env sbody
       in
       rue {
         exp_desc = Texp_for {for_id; for_debug_uid = for_uid; for_pat = param;
@@ -10846,7 +10851,8 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
 
 (* Typing of statements (expressions whose values are discarded) *)
 
-and type_statement ?explanation ?(position=RNontail) env sexp =
+and type_statement ?explanation ?(position=RNontail) ~enclosing_totality
+    env sexp =
   (* OCaml 5.2.0 changed the type of 'while' to give 'while true do e done'
      a polymorphic type.  The change has the potential to trigger a
      nonreturning-statement warning in existing code that follows
@@ -10877,7 +10883,10 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
   in
   (* Raise the current level to detect non-returning functions *)
   with_local_level_generalize
-    (fun () -> type_exp env (mode_max_with_position position) sexp, sort)
+    (fun () ->
+      let expected_mode = mode_max_with_position position in
+      let expected_mode = { expected_mode with enclosing_totality } in
+      type_exp env expected_mode sexp, sort)
   ~before_generalize: begin fun (exp, _sort) ->
     let subexp = final_subexpression exp in
     let ty = expand_head env exp.exp_type in
@@ -11323,6 +11332,7 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
+    ?(enclosing_totality = None)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
@@ -11356,6 +11366,13 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   let spatl = List.map vb_pat_constraint spat_sexp_list in
   let spatl =
     List.map (pat_modes ~force_toplevel ~recursive_values ~is_lpoly) spatl
+  in
+  let spatl =
+    List.map
+      (fun (attrs, pat_mode, env_alloc_mode, exp_mode, spat) ->
+        let exp_mode = { exp_mode with enclosing_totality } in
+        attrs, pat_mode, env_alloc_mode, exp_mode, spat)
+      spatl
   in
   let attrs_list = List.map (fun (attrs, _, _, _, _) -> attrs) spatl in
 
