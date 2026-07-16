@@ -86,6 +86,24 @@ let () =
     (cyclic_refined "right")
 
 let () =
+  let skeleton = arrow Predef.type_int Predef.type_int in
+  begin match
+    Typeopt.is_function_type Env.empty
+      (refined skeleton "function" "callable")
+  with
+  | Some (argument, result)
+    when eq_type argument Predef.type_int
+      && eq_type result Predef.type_int ->
+    ()
+  | _ -> failwith "type optimizer did not scrape a refined arrow"
+  end;
+  begin match Typeopt.is_function_type Env.empty (cyclic_refined "scrape") with
+  | None -> ()
+  | Some _ -> failwith "type optimizer exposed a cyclic refinement as an arrow"
+  end;
+  print_endline "type optimizer: refined arrows scrape; cycles terminate"
+
+let () =
   let generic =
     Btype.newgenvar
       (Jkind.Builtin.value ~why:(Jkind.History.Unknown "refinement test"))

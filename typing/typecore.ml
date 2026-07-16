@@ -1792,11 +1792,24 @@ let iter_pattern_variables_type_mut ~f_immut ~f_mut pvs =
     | Val_mut _ -> f_mut pv_type
     | _ -> f_immut pv_lpoly pv_type) pvs
 
-let add_pattern_variables ?check ?check_as env pv =
+let refinement_skeleton type_ =
+  match get_desc type_ with
+  | Trefine { ref_skeleton; _ } -> ref_skeleton
+  | _ -> type_
+
+let add_pattern_variables ?check ?check_as ?(strip_refinement = false) env pv =
   List.fold_right
     (fun {pv_id; pv_mode; pv_value_kind; pv_type; pv_loc; pv_kind;
           pv_attributes; pv_uid; pv_lpoly} env ->
        let check = if pv_kind=As_var then check_as else check in
+       let pv_type =
+         if not strip_refinement
+         then pv_type
+         else
+           match pv_value_kind with
+           | Val_mut _ -> pv_type
+           | _ -> refinement_skeleton pv_type
+       in
        Env.add_value ?check ~mode:pv_mode pv_id
          {val_type = pv_type; val_kind = pv_value_kind; val_lpoly = pv_lpoly;
           Types.val_loc = pv_loc;
@@ -6254,6 +6267,19 @@ let rec is_inferred sexp =
   | Pexp_ifthenelse (_, e1, Some e2) -> is_inferred e1 && is_inferred e2
   | _ -> false
 
+(* Forms whose result can already carry a refinement are inferred before a
+   refined annotation is reconciled.  Propagation forms are deliberately not
+   included: the annotation checks the whole expression at its skeleton. *)
+let is_refinement_inferred_head sexp =
+  match sexp.pexp_desc with
+  | Pexp_apply
+      ({ pexp_desc = Pexp_extension ({ txt }, PStr []) }, [Nolabel, _])
+    when is_exclave_extension_node txt -> false
+  | Pexp_ident _ | Pexp_apply _ | Pexp_field _
+  | Pexp_constraint (_, Some _, _) | Pexp_coerce _ | Pexp_send _ | Pexp_new _ ->
+      true
+  | _ -> false
+
 (* check if the type of %apply or %revapply matches the type expected by
    the specialized typing rule for those primitives.
 *)
@@ -6796,6 +6822,58 @@ and type_expect_
       unify_exp ~sexp env (re exp) (instance ty_expected));
     exp
   in
+  let type_refinement_annotation sarg refined_type refinement =
+    let refined_type = instance refined_type in
+    let skeleton = instance refinement.ref_skeleton in
+    let mark arg = { arg with exp_type = refined_type }, true in
+    if not (is_refinement_inferred_head sarg)
+    then
+      let arg =
+        type_expect env expected_mode sarg (mk_expected skeleton)
+      in
+      mark arg
+    else
+      let arg = type_exp ~overwrite env expected_mode sarg in
+      match get_desc arg.exp_type with
+      | Trefine actual ->
+        let same =
+          Refinement.equal_desc
+            ~equal_type:(fun left right ->
+              Ctype.is_equal env false [left] [right])
+            actual refinement
+        in
+        if same
+        then begin
+          with_explanation (fun () ->
+            unify_exp_types loc env arg.exp_type refined_type);
+          { arg with exp_type = refined_type }, false
+        end
+        else begin
+          begin match sarg.pexp_desc with
+          | Pexp_ident _ | Pexp_apply _ -> ()
+          | _ ->
+            Location.raise_errorf ~loc
+              "This expression's refined type differs from the refinement \
+               expected here; let-bind it before applying a new refinement"
+          end;
+          with_explanation (fun () ->
+            unify_exp_types loc env
+              actual.ref_skeleton (instance refinement.ref_skeleton));
+          mark arg
+        end
+      | Tvar _ | Tunivar _ ->
+        if eq_type arg.exp_type skeleton
+        then mark arg
+        else begin
+          with_explanation (fun () ->
+            unify_exp_types loc env arg.exp_type refined_type);
+          { arg with exp_type = refined_type }, false
+        end
+      | _ ->
+        with_explanation (fun () ->
+          unify_exp_types loc env arg.exp_type skeleton);
+        mark arg
+  in
   let type_expect_record (type rep) ~overwrite (record_form : rep record_form)
         (lid_sexp_list: (Longident.t loc * Parsetree.expression) list)
         (opt_sexp : Parsetree.expression option) =
@@ -7207,9 +7285,18 @@ and type_expect_
               unique_use = unique_use ~loc ~env actual_mode
                 (as_single_mode expected_mode); mode = actual_mode }
       in
+      (* Names bind at carriers.  Local immutable entries are already stripped
+         when installed; this also projects module-level refined values while
+         leaving their interface descriptions intact.  Mutable names are
+         deliberately exempt. *)
+      let use_type =
+        match desc.val_kind with
+        | Val_reg _ -> refinement_skeleton desc.val_type
+        | _ -> desc.val_type
+      in
       let exp = rue {
         exp_desc; exp_loc = loc; exp_extra = [];
-        exp_type = desc.val_type;
+        exp_type = use_type;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
       in
@@ -7318,7 +7405,8 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let existential_context env mutable_flag rec_flag
+            type_let ~strip_refinement:true
+              existential_context env mutable_flag rec_flag
               spat_sexp_list allow_modules
           in
           let body =
@@ -8236,9 +8324,14 @@ and type_expect_
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
       let explanation = Option.map (fun msg -> Error_message_attr msg)
                           error_message_attr_opt in
-      let arg =
-        type_argument ~overwrite ?explanation env expected_mode sarg ty
-          (instance ty)
+      let arg, retain_constraint =
+        match overwrite, get_desc ty with
+        | No_overwrite, Trefine refinement ->
+          type_refinement_annotation sarg ty refinement
+        | _ ->
+          ( type_argument ~overwrite ?explanation env expected_mode sarg ty
+              (instance ty),
+            true )
       in
       rue {
         exp_desc = arg.exp_desc;
@@ -8246,7 +8339,10 @@ and type_expect_
         exp_type = ty';
         exp_attributes = arg.exp_attributes;
         exp_env = env;
-        exp_extra = (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra;
+        exp_extra =
+          if retain_constraint
+          then (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra
+          else arg.exp_extra;
       }
   | Pexp_constraint (sarg, Some sty, modes) ->
       let modes = Typemode.transl_mode_annots modes in
@@ -8266,7 +8362,15 @@ and type_expect_
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
       let explanation = Option.map (fun msg -> Error_message_attr msg)
                           error_message_attr_opt in
-      let arg = type_argument ~overwrite ?explanation env expected_mode sarg ty (instance ty) in
+      let arg, retain_constraint =
+        match overwrite, get_desc ty with
+        | No_overwrite, Trefine refinement ->
+          type_refinement_annotation sarg ty refinement
+        | _ ->
+          ( type_argument ~overwrite ?explanation env expected_mode sarg ty
+              (instance ty),
+            true )
+      in
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
@@ -8275,7 +8379,9 @@ and type_expect_
         exp_env = env;
         exp_extra =
           (Texp_mode modes, loc, []) ::
-          (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra;
+          (if retain_constraint
+           then (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra
+           else arg.exp_extra);
       }
   | Pexp_coerce(sarg, sty, sty') ->
       let arg, ty', exp_extra =
@@ -10590,6 +10696,10 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       let arg, sch =
         if vars = [] then begin
           let ty_arg0' = tpoly_get_mono ty_arg0 in
+          (* The arrow retains the refined domain as the durable contract
+             record.  The supplied expression is checked at its carrier. *)
+          let ty_arg' = refinement_skeleton ty_arg' in
+          let ty_arg0' = refinement_skeleton ty_arg0' in
           if wrapped_in_some then begin
             type_option_some
               env expected_mode sarg ty_arg' ty_arg0', None
@@ -11297,7 +11407,7 @@ and map_half_typed_cases
         *)
         let cont_vars, pvs =
           List.partition (fun pv -> pv.pv_kind = Continuation_var) pvs in
-        let add_pattern_vars = add_pattern_variables
+        let add_pattern_vars = add_pattern_variables ~strip_refinement:true
             ~check:(fun s ->
               Warnings.Unused_var_strict { name = s; mutated = false })
             ~check_as:(fun s ->
@@ -11546,6 +11656,7 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
+    ?(strip_refinement = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
@@ -11674,7 +11785,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
             pvs
         else pvs
       in
-      let continuation_env = add_pattern_variables new_env pvs in
+      let continuation_env =
+        add_pattern_variables ~strip_refinement new_env pvs
+      in
       let mode_pat_typ_list =
         List.map
           (fun (m, pat) ->
@@ -11693,7 +11806,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         let exp_env =
           if is_recursive
           then
-            let rhs_env = add_pattern_variables new_env rhs_pvs in
+            let rhs_env =
+              add_pattern_variables ~strip_refinement new_env rhs_pvs
+            in
             add_module_variables rhs_env mvs
           else env
         in
@@ -11825,6 +11940,33 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ) l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
+  (* A local binder can acquire its refinement only while its RHS is typed.
+     Re-enter it after generalization so the continuation sees the skeleton;
+     the typed pattern remains the refinement record for verification. *)
+  let new_env =
+    if not strip_refinement
+    then new_env
+    else
+      List.fold_left
+        (fun env pv ->
+          match pv.pv_value_kind with
+          | Val_mut _ -> env
+          | _ ->
+            begin match Env.find_value (Path.Pident pv.pv_id) env with
+            | lazy_description ->
+              let description =
+                Subst.Lazy.force_value_description lazy_description
+              in
+              let val_type = refinement_skeleton description.val_type in
+              if eq_type val_type description.val_type
+              then env
+              else
+                Env.add_value ~mode:pv.pv_mode pv.pv_id
+                  { description with val_type } env
+            | exception Not_found -> env
+            end)
+        new_env pvs
+  in
   (l, new_env)
 
 and type_let_def_wrap_warnings
@@ -12352,7 +12494,8 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
       let env =
         let check s = Warnings.Unused_var { name = s; mutated = false } in
         let pvs = tps.tps_pattern_variables in
-        add_pattern_variables ~check ~check_as:check env pvs
+        add_pattern_variables ~strip_refinement:true
+          ~check ~check_as:check env pvs
       in
       env, Texp_comp_for tbindings
   | Pcomp_when cond ->
@@ -14027,21 +14170,35 @@ let lower_refinement_expression ~view expression =
 exception Unresolved_refinement_type of type_expr
 
 let reject_unresolved_refinement_types skeleton predicate =
-  let check_root type_ =
+  let skeleton_variables = Hashtbl.create 8 in
+  let collect_skeleton_variables =
+    with_type_mark (fun mark ->
+      let rec collect type_ =
+        if try_mark_node mark type_
+        then begin
+          match get_desc type_ with
+          | Tvar _ ->
+            Hashtbl.replace skeleton_variables (get_id type_) ()
+          | _ -> iter_type_expr collect type_
+        end
+      in
+      collect skeleton)
+  in
+  collect_skeleton_variables;
+  let check_predicate_root type_ =
     with_type_mark (fun mark ->
       let rec check type_ =
         if try_mark_node mark type_
         then begin
           match get_desc type_ with
-          | Tvar { name = None; _ } ->
+          | Tvar _ when not (Hashtbl.mem skeleton_variables (get_id type_)) ->
             raise (Unresolved_refinement_type type_)
           | _ -> iter_type_expr check type_
         end
       in
       check type_)
   in
-  check_root skeleton;
-  Refinement.iter_types check_root predicate
+  Refinement.iter_types check_predicate_root predicate
 
 let type_refinement env loc skeleton predicate =
   Typetexp.TyVarEnv.with_reentrant_scope (fun () ->

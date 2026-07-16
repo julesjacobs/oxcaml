@@ -52,30 +52,39 @@ exception Error of Location.t * error
    about the runtime properties of a type - in particular, in
    [maybe_pointer_ty], when checking whether a type crosses externality. *)
 let scrape_ty env ty =
-  let ty =
-    match get_desc ty with
-    | Tpoly(ty, _) -> ty
-    | _ -> ty
-  in
-  match get_desc ty with
-  | Tconstr _
-  | Tquote _ | Tsplice _ | Tquote_eval _ ->
-      let ty = Ctype.expand_head_opt env ty in
-      begin match get_desc ty with
-      | Tconstr (p, _, _) ->
-          begin match find_unboxed_type (Env.find_type p env) with
-          | Some _ -> begin
-            match (Ctype.get_unboxed_type_approximation env ty) with
-            | { ty; or_null = None; modality = _ } ->
-              Some ty
-            | _ -> Some ty end
-          | None -> Some ty
-          | exception Not_found -> None
-          end
-      | _ ->
-          Some ty
-      end
-  | _ -> Some ty
+  with_type_mark (fun mark ->
+    let rec scrape ty =
+      let ty =
+        match get_desc ty with
+        | Tpoly(ty, _) -> ty
+        | _ -> ty
+      in
+      if not (try_mark_node mark ty)
+      then None
+      else
+        match get_desc ty with
+        | Trefine { ref_skeleton; _ } -> scrape ref_skeleton
+        | Tconstr _
+        | Tquote _ | Tsplice _ | Tquote_eval _ ->
+            let ty = Ctype.expand_head_opt env ty in
+            begin match get_desc ty with
+            | Trefine _ -> scrape ty
+            | Tconstr (p, _, _) ->
+                begin match find_unboxed_type (Env.find_type p env) with
+                | Some _ -> begin
+                  match (Ctype.get_unboxed_type_approximation env ty) with
+                  | { ty; or_null = None; modality = _ } ->
+                    Some ty
+                  | _ -> Some ty end
+                | None -> Some ty
+                | exception Not_found -> None
+                end
+            | _ ->
+                Some ty
+            end
+        | _ -> Some ty
+    in
+    scrape ty)
 
 (* See [scrape_ty]; this returns the [type_desc] of a scraped [type_expr]. *)
 let scrape env ty =

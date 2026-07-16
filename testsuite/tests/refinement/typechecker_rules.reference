@@ -1,0 +1,6 @@
+local binder: pattern refined; environment and use skeleton
+parameter: pattern and arrow refined; body use skeleton
+annotations: introduction marked; matching refinement unmarked
+contract: refined domain retained; argument checked at skeleton
+interface: signature refined; qualified use skeleton
+mutable binder: refinement is not stripped

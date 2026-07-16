@@ -82,3 +82,14 @@ type restored_after_unresolved_error = int{ _ = 0 }
 [%%expect {|
 type restored_after_unresolved_error = int{ (app[Stdlib!.=] _ 0) }
 |}]
+
+let named_unresolved x =
+  (x : int{ let f = fun (y : 'a) -> true in _ = 0 })
+
+[%%expect {|
+Line 2, characters 7-51:
+2 |   (x : int{ let f = fun (y : 'a) -> true in _ = 0 })
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This refinement has an unresolved type variable "'a".
+       Refinement predicates must have fully determined inferred types at their point of formation.
+|}]
