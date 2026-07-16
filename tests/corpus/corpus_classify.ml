@@ -126,23 +126,23 @@ let label_of src =
 let scan_commands sexps =
   List.fold_left
     (fun (n_checks, incr) sx ->
-       (* Command keywords are UNQUOTED symbol heads; dispatch on that text, exactly as the
+      (* Command keywords are UNQUOTED symbol heads; dispatch on that text, exactly as the
          parser/CLI do since the tokenizer landed ([Atom] carries a [Lexer.token], not a
          string — [Sexp.simple] extracts an unquoted symbol's text). *)
-       match sx with
-       | Sexp.List (head :: _) ->
-         (match Sexp.simple head with
-          | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
-          (* push/pop AND reset/reset-assertions are stateful commands v1 does not support.
+      match sx with
+      | Sexp.List (head :: _) ->
+        (match Sexp.simple head with
+         | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
+         (* push/pop AND reset/reset-assertions are stateful commands v1 does not support.
             The parser silently no-ops reset* (parser.ml), so a file that resets away a
             contradictory assertion would otherwise be solved on its STALE assertion set
             and report a false verdict; degrade it to unknown-incremental here, exactly as
             push/pop. Dispatch is on the Sexp command HEAD (whitespace-robust:
             [( reset ... )] is caught, unlike a raw substring scan) and only a top-level
             command head, so a user symbol named [reset] inside a term never trips it. *)
-          | Some ("push" | "pop" | "reset" | "reset-assertions") -> n_checks, true
-          | _ -> n_checks, incr)
-       | _ -> n_checks, incr)
+         | Some ("push" | "pop" | "reset" | "reset-assertions") -> n_checks, true
+         | _ -> n_checks, incr)
+      | _ -> n_checks, incr)
     (0, false)
     sexps
 ;;
@@ -155,10 +155,21 @@ let () =
   let file = ref None in
   let max_effort = ref None in
   let stamp = ref false in
+  (* [--explain] (board: lemmas-climb census): on parse-fail, append the reader exception
+     message as extra whitespace-delimited fields, so the census can bucket the unsolved
+     set by BLOCKING CONSTRUCT (array / real / datatype / bignum / other) rather than
+     guessing from a raw-text scan. Purely additive — the first two fields ("<token>
+     <effort>") are byte-identical to the non-explain output, so every existing consumer
+     (corpus_run.sh, driver_equiv_test) is untouched. *)
+  let explain = ref false in
+  let reason = ref "" in
   let rec parse = function
     | [] -> ()
     | "--stamp" :: rest ->
       stamp := true;
+      parse rest
+    | "--explain" :: rest ->
+      explain := true;
       parse rest
     | "--max-effort" :: n :: rest ->
       max_effort := Some (int_of_string n);
@@ -184,7 +195,9 @@ let () =
   let src = read_file file in
   let token, effort =
     match Sexp.parse_many src with
-    | exception Sexp.Malformed _ -> "parse-fail", 0
+    | exception Sexp.Malformed m ->
+      reason := "sexp-malformed: " ^ m;
+      "parse-fail", 0
     | sexps ->
       let n_checks, incremental = scan_commands sexps in
       if incremental || n_checks <> 1
@@ -198,12 +211,19 @@ let () =
             (Session.context s)
             src
         with
-        | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail", 0
+        | exception Parser.Malformed m ->
+          reason := "malformed: " ^ m;
+          "parse-fail", 0
+        | exception Parser.Unsupported m ->
+          reason := "unsupported: " ^ m;
+          "parse-fail", 0
         (* ROBUSTNESS / fail-closed (I8): an unmapped reader exception on untrusted corpus
            input ([Failure]/[Invalid_argument]/[Stack_overflow]/...) degrades to a clean
            parse-fail rather than crashing (matches oxsmt_cli's [unknown] degrade — the
            shared "error instead of degrade" fix; keeps the two drivers equivalent). *)
-        | exception _ -> "parse-fail", 0
+        | exception e ->
+          reason := "other: " ^ Printexc.to_string e;
+          "parse-fail", 0
         | parsed ->
           (* W1b: submit the whole assertion set through the equality-elimination
              presolve, exactly as the solver CLI's batch path does (oxsmt_cli.ml
@@ -229,6 +249,12 @@ let () =
             tok, Session.effort s))
   in
   (* Line: "<token> <effort>". [effort] is a deterministic function of the file (#60), so
-     the sweep records it for calibration; the driver splits on whitespace. *)
-  Printf.printf "%s %d\n" token effort
+     the sweep records it for calibration; the driver splits on whitespace. With
+     [--explain] a parse-fail line carries the reader message after the first two fields
+     (newlines flattened to spaces so the line stays single). *)
+  if !explain && token = "parse-fail" && !reason <> ""
+  then (
+    let flat = String.map (fun c -> if c = '\n' || c = '\r' then ' ' else c) !reason in
+    Printf.printf "%s %d %s\n" token effort flat)
+  else Printf.printf "%s %d\n" token effort
 ;;
