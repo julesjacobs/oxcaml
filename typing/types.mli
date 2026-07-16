@@ -630,13 +630,23 @@ module Refinement : sig
   val iter_types : (type_expr -> unit) -> t -> unit
   val map_types : (type_expr -> type_expr) -> t -> t
   (** Traverse every node and binder annotation.  Paths and binder identities
-      are deliberately unchanged; W5 supplies import/path substitution. *)
+      are unchanged. *)
+
+  val map_paths :
+    value_path:(Path.t -> Path.t) ->
+    type_path:(Path.t -> Path.t) ->
+    t ->
+    t
+  (** Rewrite value-reference heads and constructor/field type paths. *)
 
   val subst : id:Ident.t -> by:t -> t -> t
   (** Capture-avoiding substitution of a bound value identifier. *)
 
   val freshen_binders : t -> t
   (** Unconditionally freshen every binder and its bound occurrences. *)
+
+  val freshen_desc_binders : refinement_desc -> refinement_desc
+  (** Unconditionally freshen the view binder and every predicate binder. *)
 
   val alpha_equal :
     equal_type:(type_expr -> type_expr -> bool) ->
