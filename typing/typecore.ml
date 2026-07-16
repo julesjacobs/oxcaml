@@ -6326,6 +6326,19 @@ let split_function_ty
           |> Totality.disallow_right)
          enclosing_totality)
     expected_mode.enclosing_totality;
+  (* (Hereditary) via the ambient closure locks: a nested function literal must
+     be total wherever an enclosing closure is demanded total, whatever the
+     source of its partiality (residue, self-recursion, captured partial value,
+     explicit annotation).  The expected-mode edge above only reaches literals in
+     return/if/argument position; walking the append-only closure-lock stack
+     reaches let-bound literals too, so the discipline holds position- and
+     subsystem-independently.  [env] here still holds only the enclosing closure
+     locks; this closure's own lock is added below. *)
+  if is_first_val_param then
+    Env.constrain_enclosing_totality_at_least ~env (loc_fun, Function)
+      (alloc_mode
+       |> Alloc.proj_comonadic Totality
+       |> Totality.disallow_right);
   let really_poly =
     not has_poly && not (tpoly_is_mono ty_arg) && is_really_poly ~env ty_arg
   in

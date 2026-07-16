@@ -1115,3 +1115,90 @@ let good_returned_local @ total = fun () -> let inner () = 0 in inner
 val good_applied_local : unit -> int = <fun>
 val good_returned_local : unit -> unit -> int = <fun>
 |}]
+
+(* Round 5 -- (Hereditary) via the ambient closure locks.  A let-bound local
+   function that is partial for a NON-residue reason (self-recursion under (Rec),
+   or capturing a partial value) must still force its enclosing total closure
+   partial.  Round 4's residue walk did not reach these; the definition-site edge
+   in split_function_ty now walks the ambient closure-lock stack, so a partial
+   nested literal fails the @ total demand regardless of the partiality source or
+   the binding position. *)
+let bad_rec_local_tail @ total = fun () -> let rec f = fun x -> f x in f 0
+[%%expect{|
+Line 1, characters 64-65:
+1 | let bad_rec_local_tail @ total = fun () -> let rec f = fun x -> f x in f 0
+                                                                    ^
+Error: The value "f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 55-67
+         which is expected to be "total".
+|}]
+
+let bad_rec_local_tuple @ total = fun () -> let rec f = fun x -> f x in (f 0, 0)
+[%%expect{|
+Line 1, characters 65-66:
+1 | let bad_rec_local_tuple @ total = fun () -> let rec f = fun x -> f x in (f 0, 0)
+                                                                     ^
+Error: The value "f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 56-68
+         which is expected to be "total".
+|}]
+
+let bad_rec_local_ctor @ total = fun () -> let rec f = fun x -> f x in Some (f 0)
+[%%expect{|
+Line 1, characters 64-65:
+1 | let bad_rec_local_ctor @ total = fun () -> let rec f = fun x -> f x in Some (f 0)
+                                                                    ^
+Error: The value "f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 55-67
+         which is expected to be "total".
+|}]
+
+(* Defined but never applied: still a partial function literal in a total body. *)
+let bad_rec_local_defined_only @ total = fun () -> let rec f = fun x -> f x in 0
+[%%expect{|
+Line 1, characters 72-73:
+1 | let bad_rec_local_defined_only @ total = fun () -> let rec f = fun x -> f x in 0
+                                                                            ^
+Error: The value "f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 63-75
+         which is expected to be "total".
+|}]
+
+(* Divergence reached by capturing a partial local into another local. *)
+let bad_capture_into_local @ total = fun () -> let rec p = fun x -> p x in let g = fun () -> p 0 in g ()
+[%%expect{|
+Line 1, characters 68-69:
+1 | let bad_capture_into_local @ total = fun () -> let rec p = fun x -> p x in let g = fun () -> p 0 in g ()
+                                                                        ^
+Error: The value "p" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 59-71
+         which is expected to be "total".
+|}]
+
+(* Late inference: the enclosing totality is an unsolved variable until the later
+   use forces it total. *)
+let late_rec_local () = (let rec f = fun x -> f x in f 0)
+let _ = expects_total late_rec_local
+[%%expect{|
+val late_rec_local : unit -> 'a = <fun>
+Line 2, characters 22-36:
+2 | let _ = expects_total late_rec_local
+                          ^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* Controls: a non-self-referencing recursive local and a partial parameter stay
+   total; an unannotated outer with a partial local is simply inferred partial. *)
+let good_rec_local @ total = fun () -> let rec helper y = y + 1 in helper 0
+let good_partial_param @ total = fun (g @ partial) -> g ()
+let good_unann_rec () = let rec f = fun x -> f x in f 0
+[%%expect{|
+val good_rec_local : unit -> int = <fun>
+val good_partial_param : (unit -> 'a) -> 'a = <fun>
+val good_unann_rec : unit -> 'a = <fun>
+|}]
