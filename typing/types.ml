@@ -1487,6 +1487,56 @@ module Refinement = struct
     in
     map expression
 
+  let map_paths ~value_path ~type_path expression =
+    let map_reference = function
+      | Rapp path -> Rapp (value_path path)
+      | Rglobal path -> Rglobal (value_path path)
+      | (Rfun _ | Rsibling _) as reference -> reference
+    in
+    let rec map expression =
+      let rexp_desc =
+        match expression.rexp_desc with
+        | Rexp_ident (Rfree reference) ->
+          Rexp_ident (Rfree (map_reference reference))
+        | (Rexp_ident (Rbound _) | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          Rexp_let
+            ( List.map
+                (fun binding ->
+                  { binding with rbind_expr = map binding.rbind_expr })
+                bindings,
+              map body )
+        | Rexp_function ({ body; _ } as function_) ->
+          Rexp_function { function_ with body = map body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            (map function_,
+             List.map
+               (fun (label, argument) -> label, map argument)
+               arguments)
+        | Rexp_tuple fields ->
+          Rexp_tuple (List.map (fun (label, field) -> label, map field) fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct
+            ( { constructor with
+                rconstr_type_path =
+                  type_path constructor.rconstr_type_path
+              },
+              List.map map arguments )
+        | Rexp_field (record, field) ->
+          Rexp_field
+            ( map record,
+              { field with
+                rfield_type_path = type_path field.rfield_type_path
+              } )
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse
+            (map condition, map ifso, Option.map map ifnot)
+      in
+      { expression with rexp_desc }
+    in
+    map expression
+
   let free_bound_identifiers expression =
     let rec loop bound free expression =
       match expression.rexp_desc with
@@ -1644,7 +1694,46 @@ module Refinement = struct
     | Rexp_ident (Rbound occurrence) when Ident.same occurrence id -> by
     | _ -> with_desc expression rexp_desc
 
-  let freshen_binders expression =
+  let collect_binder_stamps avoid expression =
+    let add id = Hashtbl.replace avoid (Ident.stamp id) () in
+    let rec collect expression =
+      match expression.rexp_desc with
+      | Rexp_ident (Rbound id) -> add id
+      | Rexp_ident (Rfree _) | Rexp_constant _ -> ()
+      | Rexp_let (bindings, body) ->
+        List.iter
+          (fun binding ->
+            add binding.rbind_binder.rb_id;
+            collect binding.rbind_expr)
+          bindings;
+        collect body
+      | Rexp_function { param; body; arg_label = _ } ->
+        add param.rb_id;
+        collect body
+      | Rexp_apply (function_, arguments) ->
+        collect function_;
+        List.iter (fun (_, argument) -> collect argument) arguments
+      | Rexp_tuple fields ->
+        List.iter (fun (_, field) -> collect field) fields
+      | Rexp_construct (_, arguments) -> List.iter collect arguments
+      | Rexp_field (record, _) -> collect record
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        collect condition;
+        collect ifso;
+        Option.iter collect ifnot
+    in
+    collect expression
+
+  let fresh_id_avoiding avoid id =
+    let rec create () =
+      let fresh = fresh_id id in
+      if Hashtbl.mem avoid (Ident.stamp fresh) then create () else fresh
+    in
+    let fresh = create () in
+    Hashtbl.add avoid (Ident.stamp fresh) ();
+    fresh
+
+  let freshen_binders_with avoid initial_env expression =
     let rec lookup id = function
       | [] -> id
       | (old_id, fresh_id) :: rest ->
@@ -1666,7 +1755,7 @@ module Refinement = struct
             List.fold_left
               (fun (bindings, env) binding ->
                 let binder = binding.rbind_binder in
-                let fresh = fresh_id binder.rb_id in
+                let fresh = fresh_id_avoiding avoid binder.rb_id in
                 let binding =
                   { binding with
                     rbind_binder = { binder with rb_id = fresh }
@@ -1677,7 +1766,7 @@ module Refinement = struct
           in
           Rexp_let (List.rev bindings, freshen env body)
         | Rexp_function ({ param; body; _ } as function_) ->
-          let fresh = fresh_id param.rb_id in
+          let fresh = fresh_id_avoiding avoid param.rb_id in
           let body = freshen ((param.rb_id, fresh) :: env) body in
           Rexp_function
             { function_ with param = { param with rb_id = fresh }; body }
@@ -1704,7 +1793,27 @@ module Refinement = struct
       in
       with_desc expression rexp_desc
     in
-    freshen [] expression
+    freshen initial_env expression
+
+  let freshen_binders expression =
+    let avoid = Hashtbl.create 17 in
+    collect_binder_stamps avoid expression;
+    freshen_binders_with avoid [] expression
+
+  let freshen_desc_binders refinement =
+    let avoid = Hashtbl.create 17 in
+    Hashtbl.add avoid (Ident.stamp refinement.ref_view.rb_id) ();
+    collect_binder_stamps avoid refinement.ref_pred;
+    let fresh_view =
+      fresh_id_avoiding avoid refinement.ref_view.rb_id
+    in
+    { refinement with
+      ref_view = { refinement.ref_view with rb_id = fresh_view };
+      ref_pred =
+        freshen_binders_with avoid
+          [refinement.ref_view.rb_id, fresh_view]
+          refinement.ref_pred;
+    }
 
   let equal_constant left right =
     match left, right with

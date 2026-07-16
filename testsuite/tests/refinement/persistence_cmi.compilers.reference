@@ -1,0 +1,13 @@
+module type Imported =
+  sig
+    type record = { field : int; }
+    val preserved :
+      record{
+       (let same = (fun x -> (app[Stdlib!.=] x (_).field[record/279.field])) in
+   (app[Stdlib!.&&] (same 1)
+      (app[Stdlib!.=]
+         constructor[option/13!.Some] (_).field[record/279.field]
+         constructor[option/13!.Some] 1)))
+       }
+  end
+module Reexport : Imported
