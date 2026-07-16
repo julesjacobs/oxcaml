@@ -154,7 +154,7 @@ core-prelude-test:
 ##   leg (test_arena_reduce_db_sizerel, which overrides the env back to the default in
 ##   process), and the LGC schedule's reduceDB is also covered by lgc-test.
 sat-test:
-	OXSMT_LGC_FIXED=0 $(DUNE) exec smt/solver/test/sat_test.exe
+	OXSMT_LGC_FIXED=0 OXSMT_SATCORE_MODES=0 $(DUNE) exec smt/solver/test/sat_test.exe
 
 ## satpre-test — CNF preprocessing / bounded variable elimination (DESIGN.md A10). Run with
 ##   OXSMT_SATPRE=1 so the gate is ON (the feature is read at Sat.create); the executable
@@ -186,7 +186,7 @@ lemma-backjump-test:
 ##   synchronization under backjumps + Luby restarts, a final-check split, and a
 ##   no-theory regression (inert theory bit-identical to no theory).
 seam-test:
-	$(DUNE) exec smt/solver/test/seam_test.exe
+	OXSMT_SATCORE_MODES=0 $(DUNE) exec smt/solver/test/seam_test.exe
 
 ## cert-test — certificate emission-wiring self-test (smt/certificate, ADR-0013 §4.0, M5
 ##   step 1). Drives the frozen Sat trace seam through the Recorder and pins each hook for

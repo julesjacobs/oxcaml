@@ -136,6 +136,13 @@ type theory =
    query to [unknown]. *)
 exception Theory_contract_violation of string
 
+(* Tri-state gate for the S1 mode-alternation policy (#29 scoped flip); see
+   [satcore_modes_mode_from_env]. [Auto] = alternate iff the solve is theory-free. *)
+type satcore_modes_mode =
+  | Force_on
+  | Force_off
+  | Auto
+
 type t =
   { mutable nvars : int
   ; mutable ok : bool (* false once an empty clause is derived: permanently unsat *)
@@ -229,20 +236,27 @@ type t =
     mutable lbd_ema_fast : float
   ; mutable lbd_ema_slow : float
   ; mutable trail_ema : float
-  ; (* SAT-core stage 1 (dark, OXSMT_SATCORE_MODES): kissat-style stable/focused mode
-       alternation layered over the EMA/restart machinery. [satcore_modes] off (default) ⇒
-       the trunk restart policy (Luby cap + the dark global adaptive trigger) is the only
-       one live, bit-identical. On ⇒ the restart trigger is mode-scoped: FOCUSED mode
-       ([stable_mode] false) fires the LBD-EMA restart (the mechanism the global
-       adaptive-restart ruling rejected as a GLOBAL Luby replacement — here it is confined
-       to focused mode); STABLE mode is restart-quiet (let the trail settle; S2 will add
-       target-phase deciding here). The mode flips when [conflicts] reaches
-       [mode_switch_at], and [mode_interval] grows geometrically (kissat's lengthening
-       schedule). All three reset per-solve relative to [conflicts_at_solve_start] (the M3
-       discipline), so an incremental re-solve does not inherit a stale mode/limit. Mode
-       changes touch ONLY the restart cadence — never the trail, the backtrack primitive,
-       or the theory seam. *)
-    satcore_modes : bool
+  ; (* SAT-core stage 1 (OXSMT_SATCORE_MODES): kissat-style stable/focused mode
+       alternation layered over the EMA/restart machinery. [satcore_modes] off ⇒ the trunk
+       restart policy (Luby cap + the dark global adaptive trigger) is the only one live,
+       bit-identical. On ⇒ the restart trigger is mode-scoped: FOCUSED mode ([stable_mode]
+       false) fires the LBD-EMA restart (the mechanism the global adaptive-restart ruling
+       rejected as a GLOBAL Luby replacement — here it is confined to focused mode);
+       STABLE mode is restart-quiet (let the trail settle; S2 will add target-phase
+       deciding here). The mode flips when [conflicts] reaches [mode_switch_at], and
+       [mode_interval] grows geometrically (kissat's lengthening schedule). All three
+       reset per-solve relative to [conflicts_at_solve_start] (the M3 discipline), so an
+       incremental re-solve does not inherit a stale mode/limit. Mode changes touch ONLY
+       the restart cadence — never the trail, the backtrack primitive, or the theory seam.
+
+       [satcore_modes] is MUTABLE and re-derived at every [solve] entry from
+       [satcore_modes_env] and the structural theory-attachment state (#29 scoped flip):
+       [Auto] (default) ⇒ [Option.is_none t.theory] (alternate iff pure-SAT); [Force_on] ⇒
+       always true; [Force_off] ⇒ always false. So a theory-attached (SMT) solve under the
+       default env has [satcore_modes = false] ⇒ byte-identical to the pre-flip trunk BY
+       CONSTRUCTION, while a pure-SAT solve gets the alternation (the SATLIB win). *)
+    mutable satcore_modes : bool
+  ; satcore_modes_env : satcore_modes_mode
   ; mutable stable_mode : bool
   ; mutable mode_interval : int
   ; mutable mode_switch_at : int
@@ -470,13 +484,19 @@ let satpre_enabled () =
   | Some _ | None -> false
 ;;
 
-(* SAT-core S1 stable/focused mode alternation (dark), env-gated at [create]: unset ⇒
-   [false] ⇒ byte-identical (trunk restart policy is the only live one). Same on-value
-   vocabulary as [OXSMT_CHRONO]. *)
-let satcore_modes_from_env () =
+(* SAT-core S1 stable/focused mode alternation, tri-state (OXSMT_SATCORE_MODES). The
+   scoped-flip semantics (#29): the DEFAULT (env unset) is [Auto] — alternation is active
+   iff the solve is theory-FREE (pure SAT, no theory attached to the core), decided
+   structurally per-solve from [t.theory]. [=1/true/yes/on] forces it ON everywhere
+   (preserves the tonight-measured dark-ON path); [=0/false/no] forces it OFF everywhere.
+   A garbage value falls back to [Auto]. The effective boolean [t.satcore_modes] is
+   resolved at solve entry (a theory is attached AFTER [create] but before [solve]). The
+   [satcore_modes_mode] variant is defined just above [type t] (it is a field type). *)
+let satcore_modes_mode_from_env () =
   match Sys.getenv_opt "OXSMT_SATCORE_MODES" with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | Some _ | None -> false
+  | Some ("1" | "true" | "yes" | "on") -> Force_on
+  | Some ("0" | "false" | "no") -> Force_off
+  | Some _ | None -> Auto
 ;;
 
 (* Mode-hold initial interval ([OXSMT_SATCORE_MODE_INIT], conflicts): a MEASUREMENT knob
@@ -598,7 +618,18 @@ let create ?(base_l0_cert_mode = false) () =
      when [lgc_sizerel]). *)
   let lgc_sizerel = lgc_fixed && lgc_sizerel_from_env () in
   let lgc_base = if lgc_fixed then lgc_initial_from_env () else lgc_initial in
-  let satcore_modes = satcore_modes_from_env () in
+  let satcore_modes_env = satcore_modes_mode_from_env () in
+  (* PROVISIONAL effective gate; [solve] re-derives it from [satcore_modes_env] +
+     [t.theory] (#29 scoped flip). At [create] no theory is attached yet, so [Auto] is
+     provisionally ON here. This only seeds [mode_init] below; the mode state is fully
+     reset at [solve] entry when the effective gate is on, and never read when it is off
+     (the restart path consults [stable_mode]/[mode_*] only via [satcore_restart_wanted],
+     which is called only under [t.satcore_modes]). *)
+  let satcore_modes =
+    match satcore_modes_env with
+    | Force_off -> false
+    | Force_on | Auto -> true
+  in
   (* mode-hold init is read only under the flag, so OFF never touches the env var. [solve]
      recomputes [mode_switch_at] per-solve (M3); these create-time values matter only
      until the first [solve] resets them. *)
@@ -647,6 +678,7 @@ let create ?(base_l0_cert_mode = false) () =
   ; lbd_ema_slow = 0.0
   ; trail_ema = 0.0
   ; satcore_modes
+  ; satcore_modes_env
   ; stable_mode = false (* start focused *)
   ; mode_interval = mode_init
   ; mode_switch_at = mode_init
@@ -3756,6 +3788,18 @@ let solve ?(assumptions = []) t =
         else t.lgc_base
       in
       t.lgc_threshold <- Dynarray.length t.learnts + base);
+    (* #29 scoped flip: re-derive the effective mode-alternation gate for THIS solve from
+       the tri-state env and the structural theory-attachment state. [Auto] (default) ⇒
+       alternate iff no theory is attached (pure SAT); [Force_on]/[Force_off] override.
+       Done here, not at [create], because a theory is attached after [create] but before
+       [solve], and it is fixed for the solve (pristine-attach contract). A
+       theory-attached solve under the default env thus gets [false] ⇒ trunk restart
+       policy, byte-identical to the pre-flip trunk. *)
+    t.satcore_modes
+    <- (match t.satcore_modes_env with
+        | Force_on -> true
+        | Force_off -> false
+        | Auto -> Option.is_none t.theory);
     (* S1 mode-alternation reset, RELATIVE to this solve's conflict base (same M3
        discipline as [next_reduce]): start focused, interval back to the named-default
        init, first flip [init] conflicts from here. An absolute reset would make an

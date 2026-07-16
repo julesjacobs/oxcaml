@@ -111,15 +111,65 @@ let rand () =
 
 let rand_n n = rand () mod n
 
-(* Set (or clear) the mode-alternation gate for the NEXT [Sat.create]. [on=false] clears
-   it (empty string is falsy); [on=true] arms it with the given mode_init measurement knob
-   so modes churn fast on small instances. *)
+(* Set the mode-alternation gate for the NEXT [Sat.create]. [on=true] FORCES it on ("1")
+   with the given mode_init knob so modes churn fast on small instances; [on=false] FORCES
+   it off ("0"). NOTE: after the #29 scoped flip an UNSET / empty value means [Auto]
+   (alternate iff theory-free), NOT off — so the off baseline MUST use the explicit "0"
+   force, which is what this passes. The scoped-flip test below drives [Auto] separately. *)
 let set_modes ~on ~init =
   if on
   then (
     Unix.putenv "OXSMT_SATCORE_MODES" "1";
     Unix.putenv "OXSMT_SATCORE_MODE_INIT" (string_of_int init))
-  else Unix.putenv "OXSMT_SATCORE_MODES" ""
+  else Unix.putenv "OXSMT_SATCORE_MODES" "0"
+;;
+
+(* Drive the three env states explicitly for the scoped-flip test. [`Auto] UNSETS the var
+   (the default ⇒ alternate iff theory-free); [`On]/[`Off] force. mode_init armed so a
+   theory-free Auto/On churns fast on the larger instances. *)
+let set_modes_env state ~init =
+  Unix.putenv "OXSMT_SATCORE_MODE_INIT" (string_of_int init);
+  match state with
+  | `Auto ->
+    (try Unix.putenv "OXSMT_SATCORE_MODES" "" with
+     | _ -> ())
+  | `On -> Unix.putenv "OXSMT_SATCORE_MODES" "1"
+  | `Off -> Unix.putenv "OXSMT_SATCORE_MODES" "0"
+;;
+
+(* A no-op theory: accepts every model ([T_consistent []] at every check), propagates
+   nothing, explains nothing. Attaching it leaves the Boolean search unchanged (zero
+   theory props/conflicts) but flips [t.theory] to [Some] — the STRUCTURAL signal the
+   scoped gate reads. Used to make a solve "theory-attached" without perturbing counters. *)
+let noop_theory : Sat.theory =
+  { Sat.on_assign = (fun _ ~level:_ -> ())
+  ; on_backtrack = (fun ~level:_ -> ())
+  ; check = (fun ~final:_ -> Sat.T_consistent [])
+  ; explain = (fun _ -> [])
+  }
+;;
+
+(* [build] but with the no-op theory attached on the pristine solver (before any clause),
+   honoring the [set_theory] lifecycle contract. *)
+let build_with_theory num_vars clauses =
+  let s = Sat.create () in
+  Sat.set_theory s (Some noop_theory);
+  for _ = 1 to num_vars do
+    ignore (Sat.new_var s : int)
+  done;
+  List.iter (fun cl -> Sat.add_clause s (List.map lit_of_dimacs cl)) clauses;
+  s
+;;
+
+let run_built s clauses =
+  let v = Sat.solve s in
+  let model_ok =
+    match v with
+    | Sat.Sat -> model_satisfies clauses (Sat.model s)
+    | Sat.Unsat -> true
+  in
+  let st = Sat.stats s in
+  v, model_ok, (st.Sat.Stats.conflicts, st.Sat.Stats.decisions, st.Sat.Stats.propagations)
 ;;
 
 let run_one num_vars clauses =
@@ -339,12 +389,89 @@ let test_multi_query_reset () =
     (!mismatches = 0)
 ;;
 
+(* (5) SCOPED FLIP (#29): the default (Auto / env-unset) gate is THEORY-AWARE.
+   - THEORY-FREE solve: Auto must reach the SAME counter trio as forced-ON (alternation is
+     active) — proving Auto ⇒ on for pure SAT.
+   - THEORY-ATTACHED solve (no-op theory): Auto must reach the SAME trio as forced-OFF
+     (single-mode = pre-flip trunk) — proving Auto ⇒ off for SMT, byte-identical to trunk.
+     Same instance drives all six solves; verdicts must all agree, models valid.
+
+   RED both directions (the two equality checks):
+   - "Auto ignores theory, always ON" mutant ⇒ theory-attached Auto matches forced-ON not
+     forced-OFF ⇒ the theory-attached equality FAILS.
+   - "Auto always OFF" mutant ⇒ theory-free Auto matches forced-OFF not forced-ON ⇒ the
+     theory-free equality FAILS. Non-vacuity: forced-ON vs forced-OFF genuinely differ
+     (both with and without the no-op theory) on a robust fraction of instances, so
+     neither equality is a both-sides-dead coincidence. *)
+let test_scoped_flip n ~init =
+  let free_auto_ne_on = ref 0
+  and free_on_ne_off = ref 0
+  and att_auto_ne_off = ref 0
+  and att_on_ne_off = ref 0
+  and flips = ref 0
+  and bad = ref 0 in
+  for _ = 1 to n do
+    let num_vars, clauses = gen_large () in
+    (* theory-free: Auto vs forced-On vs forced-Off *)
+    set_modes_env `Auto ~init;
+    let va, oka, ca = run_built (build num_vars clauses) clauses in
+    set_modes_env `On ~init;
+    let von, okon, con = run_built (build num_vars clauses) clauses in
+    set_modes_env `Off ~init;
+    let voff, okoff, coff = run_built (build num_vars clauses) clauses in
+    if not (ca = con) then incr free_auto_ne_on;
+    if not (con = coff) then incr free_on_ne_off;
+    (* theory-attached (no-op theory): Auto vs forced-On vs forced-Off *)
+    set_modes_env `Auto ~init;
+    let tva, toka, tca = run_built (build_with_theory num_vars clauses) clauses in
+    set_modes_env `On ~init;
+    let tvon, tokon, tcon = run_built (build_with_theory num_vars clauses) clauses in
+    set_modes_env `Off ~init;
+    let tvoff, tokoff, tcoff = run_built (build_with_theory num_vars clauses) clauses in
+    if not (tca = tcoff) then incr att_auto_ne_off;
+    if not (tcon = tcoff) then incr att_on_ne_off;
+    if not (va = von && von = voff && voff = tva && tva = tvon && tvon = tvoff)
+    then incr flips;
+    if not (oka && okon && okoff && toka && tokon && tokoff) then incr bad
+  done;
+  check
+    (Printf.sprintf
+       "scoped-flip: theory-free Auto == forced-ON, byte-identical (%d differ)"
+       !free_auto_ne_on)
+    (!free_auto_ne_on = 0);
+  check
+    (Printf.sprintf
+       "scoped-flip: theory-attached Auto == forced-OFF (trunk), byte-identical (%d \
+        differ)"
+       !att_auto_ne_off)
+    (!att_auto_ne_off = 0);
+  check
+    (Printf.sprintf
+       "scoped-flip: On vs Off load-bearing — theory-free %d/%d, attached %d/%d"
+       !free_on_ne_off
+       n
+       !att_on_ne_off
+       n)
+    (!free_on_ne_off > n / 4 && !att_on_ne_off > n / 4);
+  check
+    (Printf.sprintf "scoped-flip: no verdict flips across all cells (%d)" !flips)
+    (!flips = 0);
+  check (Printf.sprintf "scoped-flip: all models valid (%d bad)" !bad) (!bad = 0);
+  Printf.printf
+    "  (scoped-flip: free On/Off differ %d/%d, attached On/Off differ %d/%d)\n%!"
+    !free_on_ne_off
+    n
+    !att_on_ne_off
+    n
+;;
+
 let () =
   Printf.printf "satcore_test: OXSMT_SATCORE_MODES mode-alternation self-test\n%!";
   test_soundness 4000 ~init:3;
   test_load_bearing 120 ~init:30;
   test_switching_liveness 120 ~small:30 ~big:10_000_000;
   test_multi_query_reset ();
+  test_scoped_flip 120 ~init:30;
   Printf.printf "satcore_test: %d checks, %d failures\n%!" !checks !failures;
   if !failures > 0 then exit 1
 ;;
