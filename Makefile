@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -163,6 +163,14 @@ sat-test:
 ##   UNSAT preservation. Nonzero exit on any failed check.
 satpre-test:
 	OXSMT_SATPRE=1 OXSMT_SATPRE_INPROC_FIRST=1 $(DUNE) exec smt/solver/test/satpre_test.exe
+
+## satcore-test — SAT-core S1 stable/focused mode alternation (OXSMT_SATCORE_MODES) self-
+##   test. Toggles the gate internally per solver via Unix.putenv, so it needs no preset
+##   env. Proves: soundness under mode churn (DPLL oracle), load-bearing (OFF vs ON differ,
+##   flag-ignore RED), switching-liveness (small vs big mode_init differ, never-switch RED),
+##   and multi-query verdict soundness (the reset rider). Fixed seed; nonzero exit on fail.
+satcore-test:
+	$(DUNE) exec smt/solver/test/satcore_test.exe
 
 ## seam-test — CDCL(T) theory-callback seam (smt/solver, ADR-0005 §3) self-test via a
 ##   scripted MOCK theory: theory conflict at various trail depths, propagation-then-
@@ -722,6 +730,7 @@ test: check-frozen
 	$(MAKE) regress-test
 	$(MAKE) sat-test
 	$(MAKE) satpre-test
+	$(MAKE) satcore-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

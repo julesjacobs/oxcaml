@@ -181,10 +181,10 @@ type t =
   ; mutable a_act : float array
   ; mutable a_flags : int array
   ; mutable a_n : int (* number of clauses; metadata valid in [0, a_n) *)
-  ; (* Reusable LBD scratch (perf): distinct-decision-level count via the canonical Glucose
-       per-level stamp. [lbd_stamp.(lv) = lbd_gen] marks level [lv] as already counted for
-       the current clause; the monotone [lbd_gen] avoids clearing between calls. Grown lazily
-       (level < decision level <= nvars). Result-IDENTICAL to
+  ; (* Reusable LBD scratch (perf): distinct-decision-level count via the canonical
+       Glucose per-level stamp. [lbd_stamp.(lv) = lbd_gen] marks level [lv] as already
+       counted for the current clause; the monotone [lbd_gen] avoids clearing between
+       calls. Grown lazily (level < decision level <= nvars). Result-IDENTICAL to
        {!Search_heuristics.lbd_of_levels} (the tested spec), with no per-call allocation. *)
     mutable lbd_stamp : int array
   ; mutable lbd_gen : int
@@ -198,21 +198,20 @@ type t =
        reaches [next_reduce], then step it by a fixed increment — decoupled from restarts
        (which are now frequent under the adaptive policy). *)
     mutable next_reduce : int
-  ; (* Alternative reduceDB SCHEDULE (DEFAULT-ON, OXSMT_LGC_FIXED): z3's smt_context LGC_FIXED
-       scheme. When [lgc_fixed] is set, reduceDB fires on the LEARNED-CLAUSE COUNT
-       crossing [lgc_threshold] (init 5000) rather than on the conflict-count
+  ; (* Alternative reduceDB SCHEDULE (DEFAULT-ON, OXSMT_LGC_FIXED): z3's smt_context
+       LGC_FIXED scheme. When [lgc_fixed] is set, reduceDB fires on the LEARNED-CLAUSE
+       COUNT crossing [lgc_threshold] (init 5000) rather than on the conflict-count
        [next_reduce] schedule, and the threshold grows GEOMETRICALLY (x1.1) each fire
        instead of the arithmetic [+ reduce_inc]. Scheduling only: the deletion policy
        ([reduce_deletions]) and the arena rebuild+remap ([reduce_db]) are unchanged.
        [false] (OXSMT_LGC_FIXED=0/false/no) restores the conflict-count path bit-identical
        to the pre-flip trunk; [next_reduce] is then the only live schedule. [lgc_base] is
-       the initial threshold ([solve] resets
-       [lgc_threshold] to it, relative to the live learnt count, per the M3 incremental-
-       safety discipline that governs [next_reduce]). [lgc_sizerel] (OXSMT_LGC_SIZEREL)
-       selects the PROPORTIONAL alternative to the tuned constant: base = max(floor,
-       #original-clauses / [lgc_sizerel_div]) (MiniSat's learntsize_factor idea), measured
-       head-to-head against the fixed 5000 so the tuned constant carries its own burden of
-       proof. *)
+       the initial threshold ([solve] resets [lgc_threshold] to it, relative to the live
+       learnt count, per the M3 incremental- safety discipline that governs
+       [next_reduce]). [lgc_sizerel] (OXSMT_LGC_SIZEREL) selects the PROPORTIONAL
+       alternative to the tuned constant: base = max(floor, #original-clauses /
+       [lgc_sizerel_div]) (MiniSat's learntsize_factor idea), measured head-to-head
+       against the fixed 5000 so the tuned constant carries its own burden of proof. *)
     lgc_fixed : bool
   ; lgc_sizerel : bool
   ; lgc_base : int
@@ -227,6 +226,23 @@ type t =
     mutable lbd_ema_fast : float
   ; mutable lbd_ema_slow : float
   ; mutable trail_ema : float
+  ; (* SAT-core stage 1 (dark, OXSMT_SATCORE_MODES): kissat-style stable/focused mode
+       alternation layered over the EMA/restart machinery. [satcore_modes] off (default) ⇒
+       the trunk restart policy (Luby cap + the dark global adaptive trigger) is the only
+       one live, bit-identical. On ⇒ the restart trigger is mode-scoped: FOCUSED mode
+       ([stable_mode] false) fires the LBD-EMA restart (the mechanism the global
+       adaptive-restart ruling rejected as a GLOBAL Luby replacement — here it is confined
+       to focused mode); STABLE mode is restart-quiet (let the trail settle; S2 will add
+       target-phase deciding here). The mode flips when [conflicts] reaches
+       [mode_switch_at], and [mode_interval] grows geometrically (kissat's lengthening
+       schedule). All three reset per-solve relative to [conflicts_at_solve_start] (the M3
+       discipline), so an incremental re-solve does not inherit a stale mode/limit. Mode
+       changes touch ONLY the restart cadence — never the trail, the backtrack primitive,
+       or the theory seam. *)
+    satcore_modes : bool
+  ; mutable stable_mode : bool
+  ; mutable mode_interval : int
+  ; mutable mode_switch_at : int
   ; mutable conflicts_since_restart : int
   ; mutable conflicts_at_solve_start : int
       (* [t.conflicts] snapshot at the current [solve]'s entry. The restart/reduceDB
@@ -406,6 +422,21 @@ let lgc_sizerel_div = 3
 let lgc_sizerel_floor = 1000
 let rephase_base_interval = 1000 (* decisions between the first rephase impulses *)
 
+(* SAT-core S1 mode-alternation cadence (OXSMT_SATCORE_MODES). The named default is
+   kissat's lengthening geometric schedule, expressed in CONFLICTS (kissat counts ticks;
+   conflicts is our available deterministic proxy): start in focused mode, hold each mode
+   for [satcore_mode_init] conflicts, and grow the hold ×[satcore_mode_growth] on each
+   flip so the phases lengthen over the solve. Per ruling 2 these are the SHIPPED named
+   default; the [OXSMT_SATCORE_MODE_INIT] override exists strictly as an A/B measurement
+   knob. *)
+let satcore_mode_init = 1000
+let satcore_mode_growth = 2
+
+(* Stable-mode restart warm-up (conflicts since last restart before the EMA trigger may
+   fire in stable mode) — ~20× the focused warm-up, so stable mode restarts RARELY rather
+   than never. Named default; part of the kissat-parity cadence. *)
+let satcore_stable_restart_min = 20 * restart_min_conflicts
+
 let inproc_first =
   5000 (* first inprocessing round after this many conflicts this solve *)
 ;;
@@ -434,6 +465,28 @@ let satpre_enabled () =
   match Sys.getenv_opt "OXSMT_SATPRE" with
   | Some ("1" | "true" | "yes" | "on") -> true
   | Some _ | None -> false
+;;
+
+(* SAT-core S1 stable/focused mode alternation (dark), env-gated at [create]: unset ⇒
+   [false] ⇒ byte-identical (trunk restart policy is the only live one). Same on-value
+   vocabulary as [OXSMT_CHRONO]. *)
+let satcore_modes_from_env () =
+  match Sys.getenv_opt "OXSMT_SATCORE_MODES" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+(* Mode-hold initial interval ([OXSMT_SATCORE_MODE_INIT], conflicts): a MEASUREMENT knob
+   only (ruling 2), default [satcore_mode_init]. ONLY consulted when OXSMT_SATCORE_MODES
+   is on, so it never perturbs the byte-identical OFF path. A malformed or non-positive
+   value falls back to the default. *)
+let satcore_mode_init_from_env () =
+  match Sys.getenv_opt "OXSMT_SATCORE_MODE_INIT" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 1 -> n
+     | Some _ | None -> satcore_mode_init)
+  | None -> satcore_mode_init
 ;;
 
 (* Chronological backtracking (task #41) is dark, env-gated at [create]: unset ⇒ [false] ⇒
@@ -526,6 +579,13 @@ let create ?(base_l0_cert_mode = false) () =
      when [lgc_sizerel]). *)
   let lgc_sizerel = lgc_fixed && lgc_sizerel_from_env () in
   let lgc_base = if lgc_fixed then lgc_initial_from_env () else lgc_initial in
+  let satcore_modes = satcore_modes_from_env () in
+  (* mode-hold init is read only under the flag, so OFF never touches the env var. [solve]
+     recomputes [mode_switch_at] per-solve (M3); these create-time values matter only
+     until the first [solve] resets them. *)
+  let mode_init =
+    if satcore_modes then satcore_mode_init_from_env () else satcore_mode_init
+  in
   { nvars = 0
   ; ok = true
   ; assigns = [||]
@@ -566,6 +626,10 @@ let create ?(base_l0_cert_mode = false) () =
   ; lbd_ema_fast = 0.0
   ; lbd_ema_slow = 0.0
   ; trail_ema = 0.0
+  ; satcore_modes
+  ; stable_mode = false (* start focused *)
+  ; mode_interval = mode_init
+  ; mode_switch_at = mode_init
   ; conflicts_since_restart = 0
   ; conflicts_at_solve_start = 0
   ; decisions_since_rephase = 0
@@ -899,10 +963,10 @@ let cla_decay_bump t = t.cla_inc <- t.cla_inc /. cla_decay
 
 (* Distinct-decision-level count over a fresh generation of the reusable [lbd_stamp]: a
    level [lv] is counted the first time [lbd_stamp.(lv)] is seen not equal to the current
-   generation [g]. Result-identical to [Search_heuristics.lbd_of_levels] (the tested spec) —
-   the same distinct count over the same multiset of levels — but with no per-call
-   allocation (the old Array.init/Array.map/Array.copy path). Indexed by decision level
-   (< [nvars]); grown lazily. *)
+   generation [g]. Result-identical to [Search_heuristics.lbd_of_levels] (the tested spec)
+   — the same distinct count over the same multiset of levels — but with no per-call
+   allocation (the old Array.init/Array.map/Array.copy path). Indexed by decision level (<
+   [nvars]); grown lazily. *)
 let lbd_begin t =
   (* Rollover guard (cold path): [lbd_gen] is a monotone generation tag; a stamp entry
      equal to the live [lbd_gen] means "already counted for the current clause".
@@ -935,18 +999,19 @@ let clause_lbd t lits =
   let g = lbd_begin t in
   let count = ref 0 in
   for i = 0 to Array.length lits - 1 do
-    if lbd_count_level t g (t.level.(var_of_lit lits.(i))) then incr count
+    if lbd_count_level t g t.level.(var_of_lit lits.(i)) then incr count
   done;
   !count
 ;;
 
-(* LBD of an ARENA clause [cr], reading its literals' levels in place (no materialization).
-   Same value as [clause_lbd t (cl_lits t cr)]; used on the per-conflict [analyze] path. *)
+(* LBD of an ARENA clause [cr], reading its literals' levels in place (no
+   materialization). Same value as [clause_lbd t (cl_lits t cr)]; used on the per-conflict
+   [analyze] path. *)
 let clause_lbd_cref t (cr : cref) =
   let g = lbd_begin t in
   let count = ref 0 in
   for i = 0 to cl_len t cr - 1 do
-    if lbd_count_level t g (t.level.(var_of_lit (cl_lit t cr i))) then incr count
+    if lbd_count_level t g t.level.(var_of_lit (cl_lit t cr i)) then incr count
   done;
   !count
 ;;
@@ -1050,7 +1115,7 @@ let attach t (cr : cref) =
 (* ------------------------------------------------------------------ *)
 (* Trail. *)
 
-let new_decision_level t = Dynarray.add_last t.trail_lim (t.trail_n)
+let new_decision_level t = Dynarray.add_last t.trail_lim t.trail_n
 
 (* The decision level to stamp on a literal being enqueued (task #41 §10.1). Without CB
    ([not t.chrono]) it is always the current [decision_level] — byte-identical to the
@@ -1083,8 +1148,8 @@ let enqueue_level t reason =
 let unchecked_enqueue t lit reason =
   let v = var_of_lit lit in
   t.assigns.(v) <- (if sign_of_lit lit then 1 else -1);
-  t.level.(v) <- (enqueue_level t reason);
-  t.trail_pos.(v) <- (t.trail_n);
+  t.level.(v) <- enqueue_level t reason;
+  t.trail_pos.(v) <- t.trail_n;
   t.reason.(v) <- reason;
   t.trail <- grow_int t.trail (t.trail_n + 1);
   t.trail.(t.trail_n) <- lit;
@@ -1098,7 +1163,7 @@ let unchecked_enqueue t lit reason =
      holds. *)
   match t.theory with
   | None -> ()
-  | Some th -> th.on_assign lit ~level:(t.level.(v))
+  | Some th -> th.on_assign lit ~level:t.level.(v)
 ;;
 
 (* The premise set of a theory-propagated [lit]. Normally the theory's own [explain]
@@ -1134,13 +1199,14 @@ let cancel_until t level =
       for i = t.trail_n - 1 downto target do
         let l = t.trail.(i) in
         let v = var_of_lit l in
-        (* Phase to save = "was the var false" = [assigns v = -1]. [l] is the trail literal,
-           hence the TRUE literal for [v] ([lit_val t l = 1] by the trail invariant); by
-           {!lit_val} that means [assigns v = -1] iff [not (sign_of_lit l)]. Derive it from
-           [l] (the same value {!update_best_trail} uses) — no [assigns] read. *)
+        (* Phase to save = "was the var false" = [assigns v = -1]. [l] is the trail
+           literal, hence the TRUE literal for [v] ([lit_val t l = 1] by the trail
+           invariant); by {!lit_val} that means [assigns v = -1] iff
+           [not (sign_of_lit l)]. Derive it from [l] (the same value {!update_best_trail}
+           uses) — no [assigns] read. *)
         Dynarray.set t.polarity v (not (sign_of_lit l));
         t.assigns.(v) <- 0;
-        t.trail_pos.(v) <- (-1);
+        t.trail_pos.(v) <- -1;
         t.reason.(v) <- r_decision;
         heap_insert t v
       done;
@@ -1162,10 +1228,11 @@ let cancel_until t level =
         let v = var_of_lit l in
         if t.level.(v) > level
         then (
-          (* Phase from the trail literal [l], not an [assigns] read (see the monotone arm). *)
+          (* Phase from the trail literal [l], not an [assigns] read (see the monotone
+             arm). *)
           Dynarray.set t.polarity v (not (sign_of_lit l));
           t.assigns.(v) <- 0;
-          t.trail_pos.(v) <- (-1);
+          t.trail_pos.(v) <- -1;
           t.reason.(v) <- r_decision;
           Hashtbl.remove t.chrono_reason v;
           heap_insert t v)
@@ -1239,11 +1306,10 @@ let cancel_until t level =
          only the [on_assign] callback now also carries the survivor's true [~level] (a
          monotone-identical value here), so a scope-aware adapter could file it — the
          earliest-removed incremental undo that would exploit it is the S4.2 follow-up.
-         CONTRACT-EX stays
-         valid: survivors are re-asserted in their compacted trail-position order
-         (preserved by the compaction), and [trail_pos] was updated above. COST:
-         O(surviving trail) theory re-assertions per chrono backtrack — the Stage-1
-         correctness-first choice paired with the [qhead <- 0] cost; incremental
+         CONTRACT-EX stays valid: survivors are re-asserted in their compacted
+         trail-position order (preserved by the compaction), and [trail_pos] was updated
+         above. COST: O(surviving trail) theory re-assertions per chrono backtrack — the
+         Stage-1 correctness-first choice paired with the [qhead <- 0] cost; incremental
          (earliest-removed) undo is the follow-up. *)
       match t.theory with
       | None -> ()
@@ -1258,7 +1324,7 @@ let cancel_until t level =
            fabric S4 follow-up, not this stage). *)
         for i = 0 to t.trail_n - 1 do
           let l = t.trail.(i) in
-          th.on_assign l ~level:(t.level.(var_of_lit l))
+          th.on_assign l ~level:t.level.(var_of_lit l)
         done)
 ;;
 
@@ -1523,7 +1589,7 @@ let lit_redundant t marked abstract_levels l0 =
         while !ok && !k < n do
           let q = ch_lit t c !k in
           let vq = var_of_lit q in
-          if (not (t.seen.(vq))) && t.level.(vq) > 0
+          if (not t.seen.(vq)) && t.level.(vq) > 0
           then (
             let rq = t.reason.(vq) in
             let has_reason = rq >= 0 || rq = r_theory in
@@ -1564,7 +1630,7 @@ let analyze t confl =
   (* Vars marked [seen] during analysis, to clear at the end. *)
   let marked = Dynarray.create () in
   let mark v =
-    if not (t.seen.(v))
+    if not t.seen.(v)
     then (
       t.seen.(v) <- true;
       Dynarray.add_last marked v)
@@ -1616,13 +1682,11 @@ let analyze t confl =
     for jj = start to ch_len t !c - 1 do
       let q = ch_lit t !c jj in
       let vq = var_of_lit q in
-      if (not (t.seen.(vq))) && t.level.(vq) > 0
+      if (not t.seen.(vq)) && t.level.(vq) > 0
       then (
         var_bump t vq;
         mark vq;
-        if t.level.(vq) >= conflict_level
-        then incr path_c
-        else Dynarray.add_last out q)
+        if t.level.(vq) >= conflict_level then incr path_c else Dynarray.add_last out q)
     done;
     (* Next literal to resolve on: the most recent seen conflict-level literal on the
        trail. Without CB the seen conflict-level literals sit contiguously at the trail
@@ -1632,13 +1696,13 @@ let analyze t confl =
     if t.chrono
     then
       while
-        let v = var_of_lit (t.trail.(!index)) in
+        let v = var_of_lit t.trail.(!index) in
         not (t.seen.(v) && t.level.(v) = conflict_level)
       do
         decr index
       done
     else
-      while not (t.seen.(var_of_lit (t.trail.(!index)))) do
+      while not t.seen.(var_of_lit t.trail.(!index)) do
         decr index
       done;
     let pl = t.trail.(!index) in
@@ -1720,8 +1784,7 @@ let analyze t confl =
             let k = ref 1 in
             while !ok && !k < cl_len t cr do
               let vk = var_of_lit (cl_lit t cr !k) in
-              if (not (t.seen.(vk))) && t.level.(vk) > 0
-              then ok := false;
+              if (not t.seen.(vk)) && t.level.(vk) > 0 then ok := false;
               incr k
             done;
             !ok)
@@ -1741,8 +1804,7 @@ let analyze t confl =
     else (
       let maxi = ref 1 in
       for i = 2 to Array.length learnt - 1 do
-        if t.level.(var_of_lit learnt.(i))
-           > t.level.(var_of_lit learnt.(!maxi))
+        if t.level.(var_of_lit learnt.(i)) > t.level.(var_of_lit learnt.(!maxi))
         then maxi := i
       done;
       let tmp = learnt.(1) in
@@ -1782,7 +1844,7 @@ let analyze_final t p =
   then (
     let marked = Dynarray.create () in
     let mark v =
-      if not (t.seen.(v))
+      if not t.seen.(v)
       then (
         t.seen.(v) <- true;
         Dynarray.add_last marked v)
@@ -2395,15 +2457,36 @@ let update_best_trail t =
    firehose) blocking never fires, so the rephase impulse is free to search there. *)
 let blocking t =
   t.conflicts - t.conflicts_at_solve_start >= restart_min_conflicts
-  && float_of_int (t.trail_n) > block_margin *. t.trail_ema
+  && float_of_int t.trail_n > block_margin *. t.trail_ema
 ;;
 
-(* Glucose-style adaptive restart: recent learned-clause LBD (fast EMA) running worse than
-   the long-run average (slow EMA) means the search is in an unproductive region —
-   restart. Gated by EMA warm-up and by {!blocking}. *)
-let adaptive_restart t =
-  adaptive_restart_enabled
-  && t.conflicts_since_restart >= restart_min_conflicts
+(* The Glucose EMA restart CONDITION: recent learned-clause LBD (fast EMA) running worse
+   than the long-run average (slow EMA) means the search is in an unproductive region.
+   Gated by EMA warm-up and by {!blocking}. Factored so both the (dark-global)
+   {!adaptive_restart} and the S1 focused-mode restart share one definition. *)
+let ema_restart_wanted t =
+  t.conflicts_since_restart >= restart_min_conflicts
+  && t.lbd_ema_fast > restart_margin *. t.lbd_ema_slow
+  && not (blocking t)
+;;
+
+(* Glucose-style adaptive restart, the pre-S1 GLOBAL trigger — gated OFF by
+   [adaptive_restart_enabled] (the ruling: global EMA lost to Luby). Unchanged. *)
+let adaptive_restart t = adaptive_restart_enabled && ema_restart_wanted t
+
+(* S1 restart policy (OXSMT_SATCORE_MODES on), kissat's two cadences over the same EMA
+   condition: FOCUSED mode restarts FREQUENTLY (warm-up [restart_min_conflicts]); STABLE
+   mode restarts RARELY (warm-up [satcore_stable_restart_min], ~20× longer) so the trail
+   can settle toward a model without being fully restart-starved. (A zero-restart stable
+   mode let the search wander thousands of conflicts and blew up ~3.7× on a seam instance
+   — stable is RARE, not never; kissat pairs it with target phases, added in S2.) The Luby
+   cap and the global adaptive trigger are BYPASSED when modes are on; the mode
+   alternation IS the policy — the mode-scoped claim that reopens the global-EMA no-go. *)
+let satcore_restart_wanted t =
+  let warmup =
+    if t.stable_mode then satcore_stable_restart_min else restart_min_conflicts
+  in
+  t.conflicts_since_restart >= warmup
   && t.lbd_ema_fast > restart_margin *. t.lbd_ema_slow
   && not (blocking t)
 ;;
@@ -2459,7 +2542,7 @@ let search t assumps conflict_limit =
     (* Best-trail memory + trail-length EMA at the conflict point (the trail is at a local
        maximum), before any realignment/backjump unwinds it (S3/#155). *)
     update_best_trail t;
-    let trail_len = float_of_int (t.trail_n) in
+    let trail_len = float_of_int t.trail_n in
     t.trail_ema
     <- (if first_conflict
         then trail_len
@@ -2505,7 +2588,16 @@ let search t assumps conflict_limit =
       else if t.conflicts >= t.next_reduce
       then (
         reduce_db t;
-        t.next_reduce <- t.next_reduce + reduce_inc)
+        t.next_reduce <- t.next_reduce + reduce_inc);
+      (* S1: flip stable/focused mode when the conflict count crosses the hold point, and
+         lengthen the next hold ×[satcore_mode_growth] (kissat's lengthening schedule).
+         Only the restart CADENCE changes — no trail/seam effect. Inert unless the flag is
+         on. *)
+      if t.satcore_modes && t.conflicts >= t.mode_switch_at
+      then (
+        t.stable_mode <- not t.stable_mode;
+        t.mode_interval <- t.mode_interval * satcore_mode_growth;
+        t.mode_switch_at <- t.conflicts + t.mode_interval)
     in
     let conclude_unsat () =
       t.ok <- false;
@@ -2616,8 +2708,16 @@ let search t assumps conflict_limit =
         t.decisions_since_rephase <- 0;
         t.conflicts_since_restart <- 0;
         result := Some R_restart)
-      else if (conflict_limit > 0 && !conflicts_here >= conflict_limit)
-              || adaptive_restart t
+      else if (* Restart policy. OFF (default): trunk — the Luby conflict cap plus the
+                 dark global adaptive trigger. ON (OXSMT_SATCORE_MODES): mode-scoped —
+                 focused mode fires the EMA restart, stable mode is quiet; the Luby cap is
+                 bypassed. Either way a restart is the ordinary [cancel_until 0]
+                 (trail-monotone, seam-safe). *)
+              if t.satcore_modes
+              then satcore_restart_wanted t
+              else
+                (conflict_limit > 0 && !conflicts_here >= conflict_limit)
+                || adaptive_restart t
       then (
         cancel_until t 0;
         t.conflicts_since_restart <- 0;
@@ -3545,6 +3645,16 @@ let solve ?(assumptions = []) t =
         else t.lgc_base
       in
       t.lgc_threshold <- Dynarray.length t.learnts + base);
+    (* S1 mode-alternation reset, RELATIVE to this solve's conflict base (same M3
+       discipline as [next_reduce]): start focused, interval back to the named-default
+       init, first flip [init] conflicts from here. An absolute reset would make an
+       incremental re-solve inherit a stale, already-crossed switch point. Gated on the
+       flag ⇒ OFF untouched. *)
+    if t.satcore_modes
+    then (
+      t.stable_mode <- false;
+      t.mode_interval <- satcore_mode_init_from_env ();
+      t.mode_switch_at <- t.conflicts + t.mode_interval);
     t.best_trail_len <- 0;
     (* Phase-2 inprocessing schedule, relative to this solve's conflict base (geometric
        back-off). [max_int] when the gate is off => never fires (bit-identical). *)

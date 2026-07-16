@@ -48,3 +48,8 @@
  (name sat_bench)
  (modules sat_bench)
  (libraries oxsmt_solver oxsmt_dimacs))
+
+(executable
+ (name satcore_test)
+ (modules satcore_test)
+ (libraries oxsmt_solver unix))
