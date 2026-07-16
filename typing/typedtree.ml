@@ -20,7 +20,7 @@ open Types
 open Data_types
 open Mode
 
-type constant =
+type constant = Types.constant =
     Const_int of int
   | Const_char of char
   | Const_untagged_char of char

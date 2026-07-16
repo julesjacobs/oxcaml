@@ -154,6 +154,28 @@ type constructor_ikind_entry =
 
 type type_ikind = constructor_ikind_entry
 
+(* Shared by [Typedtree.expression] and [refinement_expression]. *)
+type constant =
+    Const_int of int
+  | Const_char of char
+  | Const_untagged_char of char
+  | Const_string of string * Location.t * string option
+  | Const_float of string
+  | Const_float32 of string
+  | Const_unboxed_float of string
+  | Const_unboxed_float32 of string
+  | Const_int8 of int
+  | Const_int16 of int
+  | Const_int32 of int32
+  | Const_int64 of int64
+  | Const_nativeint of nativeint
+  | Const_untagged_int of int
+  | Const_untagged_int8 of int
+  | Const_untagged_int16 of int
+  | Const_unboxed_int32 of int32
+  | Const_unboxed_int64 of int64
+  | Const_unboxed_nativeint of nativeint
+
 and type_desc =
   | Tvar of { name : string option; jkind : jkind_lr }
   (** [Tvar (Some "a")] ==> ['a] or ['_a]
@@ -276,6 +298,64 @@ and type_desc =
 
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
+
+(** A typed refinement expression.  The constructors below mechanically
+    mirror the supported subset of [Typedtree.expression_desc]. *)
+and refinement_expression =
+  { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
+    rexp_loc : Location.t;
+  }
+
+and refinement_expression_desc =
+  | Rexp_ident of refinement_identifier
+  | Rexp_constant of constant
+  | Rexp_let of refinement_binding list * refinement_expression
+  | Rexp_function of
+      { arg_label : arg_label;
+        param : refinement_binder;
+        body : refinement_expression;
+      }
+  | Rexp_apply of
+      refinement_expression *
+        (arg_label * refinement_expression) list
+  | Rexp_tuple of (string option * refinement_expression) list
+  | Rexp_construct of
+      refinement_constructor * refinement_expression list
+  | Rexp_field of refinement_expression * refinement_field
+  | Rexp_ifthenelse of
+      refinement_expression * refinement_expression *
+        refinement_expression option
+
+and refinement_identifier =
+  | Rbound of Ident.t
+  | Rfree of refinement_reference
+
+and refinement_reference =
+  | Rfun of string
+  | Rsibling of string
+  | Rapp of Path.t
+  | Rglobal of Path.t
+
+and refinement_binder =
+  { rb_id : Ident.t;
+    rb_type : type_expr;
+  }
+
+and refinement_binding =
+  { rbind_binder : refinement_binder;
+    rbind_expr : refinement_expression;
+  }
+
+and refinement_constructor =
+  { rconstr_type_path : Path.t;
+    rconstr_name : string;
+  }
+
+and refinement_field =
+  { rfield_type_path : Path.t;
+    rfield_name : string;
+  }
 
 (** This is used in the Typedtree. It is distinct from
     {{!Asttypes.arg_label}[arg_label]} because Position argument labels are
@@ -509,6 +589,52 @@ val get_desc: type_expr -> type_desc
 val get_level: type_expr -> int
 val get_scope: type_expr -> int
 val get_id: type_expr -> int
+
+(** Construction and closed operations over the typed refinement-expression
+    AST.  These operations do not integrate refinements into [type_desc]. *)
+module Refinement : sig
+  type t = refinement_expression
+
+  type validation_error =
+    | Root_type_mismatch
+    | Unbound_identifier of Ident.t
+    | Bound_identifier_type_mismatch of Ident.t
+    | Duplicate_binder of Ident.t
+    | Global_binder of Ident.t
+    | Empty_let
+    | Invalid_name of string
+    | Function_type_mismatch
+    | Apply_type_mismatch
+    | Let_type_mismatch
+    | If_type_mismatch
+    | Tuple_type_mismatch
+
+  val create :
+    loc:Location.t -> type_:type_expr -> refinement_expression_desc -> t
+
+  val free_bound_identifiers : t -> Ident.Set.t
+
+  val subst : id:Ident.t -> by:t -> t -> t
+  (** Capture-avoiding substitution of a bound value identifier. *)
+
+  val freshen_binders : t -> t
+  (** Unconditionally freshen every binder and its bound occurrences. *)
+
+  val alpha_equal :
+    equal_type:(type_expr -> type_expr -> bool) -> t -> t -> bool
+  (** Structural equality modulo threaded binder pairs. *)
+
+  val print : Format.formatter -> t -> unit
+
+  val validate :
+    equal_type:(type_expr -> type_expr -> bool) ->
+    bool_type:type_expr ->
+    t ->
+    (unit, validation_error) result
+
+  val print_validation_error :
+    Format.formatter -> validation_error -> unit
+end
 
 (** Access to marks. They are stored in the scope field. *)
 type type_mark

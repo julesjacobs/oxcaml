@@ -125,6 +125,28 @@ type mod_bounds =
     externality: Jkind_axis.Externality.t;
   }
 
+(* Shared by [Typedtree.expression] and [refinement_expression]. *)
+type constant =
+    Const_int of int
+  | Const_char of char
+  | Const_untagged_char of char
+  | Const_string of string * Location.t * string option
+  | Const_float of string
+  | Const_float32 of string
+  | Const_unboxed_float of string
+  | Const_unboxed_float32 of string
+  | Const_int8 of int
+  | Const_int16 of int
+  | Const_int32 of int32
+  | Const_int64 of int64
+  | Const_nativeint of nativeint
+  | Const_untagged_int of int
+  | Const_untagged_int8 of int
+  | Const_untagged_int16 of int
+  | Const_unboxed_int32 of int32
+  | Const_unboxed_int64 of int64
+  | Const_unboxed_nativeint of nativeint
+
 module With_bounds_type_info = struct
   type t = {relevant_axes : Jkind_axis.Axis_set.t } [@@unboxed]
 
@@ -165,6 +187,66 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
+
+(* Keep this constructor list mechanically aligned with the supported subset
+   of [Typedtree.expression_desc].  The payload differences are exactly the
+   three refinement deltas: no environment, no elaboration metadata, and
+   resolved free references. *)
+and refinement_expression =
+  { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
+    rexp_loc : Location.t;
+  }
+
+and refinement_expression_desc =
+  | Rexp_ident of refinement_identifier
+  | Rexp_constant of constant
+  | Rexp_let of refinement_binding list * refinement_expression
+  | Rexp_function of
+      { arg_label : arg_label;
+        param : refinement_binder;
+        body : refinement_expression;
+      }
+  | Rexp_apply of
+      refinement_expression *
+        (arg_label * refinement_expression) list
+  | Rexp_tuple of (string option * refinement_expression) list
+  | Rexp_construct of
+      refinement_constructor * refinement_expression list
+  | Rexp_field of refinement_expression * refinement_field
+  | Rexp_ifthenelse of
+      refinement_expression * refinement_expression *
+        refinement_expression option
+
+and refinement_identifier =
+  | Rbound of Ident.t
+  | Rfree of refinement_reference
+
+and refinement_reference =
+  | Rfun of string
+  | Rsibling of string
+  | Rapp of Path.t
+  | Rglobal of Path.t
+
+and refinement_binder =
+  { rb_id : Ident.t;
+    rb_type : type_expr;
+  }
+
+and refinement_binding =
+  { rbind_binder : refinement_binder;
+    rbind_expr : refinement_expression;
+  }
+
+and refinement_constructor =
+  { rconstr_type_path : Path.t;
+    rconstr_name : string;
+  }
+
+and refinement_field =
+  { rfield_type_path : Path.t;
+    rfield_name : string;
+  }
 
 and arg_label =
   | Nolabel
@@ -1304,6 +1386,623 @@ let try_mark_node mark t = Transient_expr.try_mark_node mark (repr t)
 
 let eq_type t1 t2 = t1 == t2 || repr t1 == repr t2
 let compare_type t1 t2 = compare (get_id t1) (get_id t2)
+
+module Refinement = struct
+  type t = refinement_expression
+
+  type validation_error =
+    | Root_type_mismatch
+    | Unbound_identifier of Ident.t
+    | Bound_identifier_type_mismatch of Ident.t
+    | Duplicate_binder of Ident.t
+    | Global_binder of Ident.t
+    | Empty_let
+    | Invalid_name of string
+    | Function_type_mismatch
+    | Apply_type_mismatch
+    | Let_type_mismatch
+    | If_type_mismatch
+    | Tuple_type_mismatch
+
+  let create ~loc ~type_ rexp_desc =
+    { rexp_desc; rexp_type = type_; rexp_loc = loc }
+
+  let free_bound_identifiers expression =
+    let rec loop bound free expression =
+      match expression.rexp_desc with
+      | Rexp_ident (Rbound id) ->
+        if Ident.Set.mem id bound then free else Ident.Set.add id free
+      | Rexp_ident (Rfree _) | Rexp_constant _ -> free
+      | Rexp_let (bindings, body) ->
+        let free =
+          List.fold_left
+            (fun free binding -> loop bound free binding.rbind_expr)
+            free bindings
+        in
+        let bound =
+          List.fold_left
+            (fun bound binding ->
+              Ident.Set.add binding.rbind_binder.rb_id bound)
+            bound bindings
+        in
+        loop bound free body
+      | Rexp_function { param; body; arg_label = _ } ->
+        loop (Ident.Set.add param.rb_id bound) free body
+      | Rexp_apply (function_, arguments) ->
+        List.fold_left
+          (fun free (_, argument) -> loop bound free argument)
+          (loop bound free function_) arguments
+      | Rexp_tuple fields ->
+        List.fold_left
+          (fun free (_, field) -> loop bound free field)
+          free fields
+      | Rexp_construct (_, arguments) ->
+        List.fold_left (loop bound) free arguments
+      | Rexp_field (record, _) -> loop bound free record
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        let free = loop bound free condition in
+        let free = loop bound free ifso in
+        Option.fold ~none:free ~some:(loop bound free) ifnot
+    in
+    loop Ident.Set.empty Ident.Set.empty expression
+
+  let with_desc expression rexp_desc = { expression with rexp_desc }
+
+  let rec rename_free ~from ~to_ expression =
+    let rename expression = rename_free ~from ~to_ expression in
+    let rexp_desc =
+      match expression.rexp_desc with
+      | Rexp_ident (Rbound id) when Ident.same id from ->
+        Rexp_ident (Rbound to_)
+      | (Rexp_ident _ | Rexp_constant _) as desc -> desc
+      | Rexp_let (bindings, body) ->
+        let bindings =
+          List.map
+            (fun binding ->
+              { binding with rbind_expr = rename binding.rbind_expr })
+            bindings
+        in
+        let shadows =
+          List.exists
+            (fun binding -> Ident.same binding.rbind_binder.rb_id from)
+            bindings
+        in
+        Rexp_let (bindings, if shadows then body else rename body)
+      | Rexp_function ({ param; body; _ } as function_) ->
+        let body = if Ident.same param.rb_id from then body else rename body in
+        Rexp_function { function_ with body }
+      | Rexp_apply (function_, arguments) ->
+        Rexp_apply
+          (rename function_,
+           List.map
+             (fun (label, argument) -> label, rename argument)
+             arguments)
+      | Rexp_tuple fields ->
+        Rexp_tuple
+          (List.map (fun (label, field) -> label, rename field) fields)
+      | Rexp_construct (constructor, arguments) ->
+        Rexp_construct (constructor, List.map rename arguments)
+      | Rexp_field (record, field) -> Rexp_field (rename record, field)
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        Rexp_ifthenelse
+          (rename condition, rename ifso, Option.map rename ifnot)
+    in
+    with_desc expression rexp_desc
+
+  let fresh_id id =
+    Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+
+  let rec subst ~id ~by expression =
+    let free_in_by = free_bound_identifiers by in
+    let recurse = subst ~id ~by in
+    let freshen_capturing_binders bindings body =
+      List.fold_left
+        (fun (bindings, body) binding ->
+          let binder = binding.rbind_binder in
+          if Ident.Set.mem binder.rb_id free_in_by
+          then
+            let fresh = fresh_id binder.rb_id in
+            let binder = { binder with rb_id = fresh } in
+            ( { binding with rbind_binder = binder } :: bindings,
+              rename_free ~from:binding.rbind_binder.rb_id ~to_:fresh body )
+          else binding :: bindings, body)
+        ([], body) bindings
+      |> fun (bindings, body) -> List.rev bindings, body
+    in
+    let rexp_desc =
+      match expression.rexp_desc with
+      | Rexp_ident (Rbound occurrence) when Ident.same occurrence id ->
+        by.rexp_desc
+      | (Rexp_ident _ | Rexp_constant _) as desc -> desc
+      | Rexp_let (bindings, body) ->
+        let bindings =
+          List.map
+            (fun binding ->
+              { binding with rbind_expr = recurse binding.rbind_expr })
+            bindings
+        in
+        let shadows =
+          List.exists
+            (fun binding -> Ident.same binding.rbind_binder.rb_id id)
+            bindings
+        in
+        if shadows
+        then Rexp_let (bindings, body)
+        else
+          let bindings, body = freshen_capturing_binders bindings body in
+          Rexp_let (bindings, recurse body)
+      | Rexp_function ({ param; body; _ } as function_) ->
+        if Ident.same param.rb_id id
+        then Rexp_function function_
+        else
+          let param, body =
+            if Ident.Set.mem param.rb_id free_in_by
+            then
+              let fresh = fresh_id param.rb_id in
+              ( { param with rb_id = fresh },
+                rename_free ~from:param.rb_id ~to_:fresh body )
+            else param, body
+          in
+          Rexp_function { function_ with param; body = recurse body }
+      | Rexp_apply (function_, arguments) ->
+        Rexp_apply
+          (recurse function_,
+           List.map
+             (fun (label, argument) -> label, recurse argument)
+             arguments)
+      | Rexp_tuple fields ->
+        Rexp_tuple
+          (List.map (fun (label, field) -> label, recurse field) fields)
+      | Rexp_construct (constructor, arguments) ->
+        Rexp_construct (constructor, List.map recurse arguments)
+      | Rexp_field (record, field) -> Rexp_field (recurse record, field)
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        Rexp_ifthenelse
+          (recurse condition, recurse ifso, Option.map recurse ifnot)
+    in
+    match expression.rexp_desc with
+    | Rexp_ident (Rbound occurrence) when Ident.same occurrence id -> by
+    | _ -> with_desc expression rexp_desc
+
+  let freshen_binders expression =
+    let rec lookup id = function
+      | [] -> id
+      | (old_id, fresh_id) :: rest ->
+        if Ident.same id old_id then fresh_id else lookup id rest
+    in
+    let rec freshen env expression =
+      let rexp_desc =
+        match expression.rexp_desc with
+        | Rexp_ident (Rbound id) -> Rexp_ident (Rbound (lookup id env))
+        | (Rexp_ident (Rfree _) | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          let bindings =
+            List.map
+              (fun binding ->
+                { binding with rbind_expr = freshen env binding.rbind_expr })
+              bindings
+          in
+          let bindings, env =
+            List.fold_left
+              (fun (bindings, env) binding ->
+                let binder = binding.rbind_binder in
+                let fresh = fresh_id binder.rb_id in
+                let binding =
+                  { binding with
+                    rbind_binder = { binder with rb_id = fresh }
+                  }
+                in
+                binding :: bindings, (binder.rb_id, fresh) :: env)
+              ([], env) bindings
+          in
+          Rexp_let (List.rev bindings, freshen env body)
+        | Rexp_function ({ param; body; _ } as function_) ->
+          let fresh = fresh_id param.rb_id in
+          let body = freshen ((param.rb_id, fresh) :: env) body in
+          Rexp_function
+            { function_ with param = { param with rb_id = fresh }; body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            (freshen env function_,
+             List.map
+               (fun (label, argument) -> label, freshen env argument)
+               arguments)
+        | Rexp_tuple fields ->
+          Rexp_tuple
+            (List.map
+               (fun (label, field) -> label, freshen env field)
+               fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct (constructor, List.map (freshen env) arguments)
+        | Rexp_field (record, field) ->
+          Rexp_field (freshen env record, field)
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse
+            ( freshen env condition,
+              freshen env ifso,
+              Option.map (freshen env) ifnot )
+      in
+      with_desc expression rexp_desc
+    in
+    freshen [] expression
+
+  let equal_constant left right =
+    match left, right with
+    | ( Const_string (left, _, left_delimiter),
+        Const_string (right, _, right_delimiter) ) ->
+      String.equal left right && left_delimiter = right_delimiter
+    | _ -> left = right
+
+  let alpha_equal ~equal_type left right =
+    let paired pairs left right =
+      match
+        List.find_opt (fun (id, _) -> Ident.same id left) pairs,
+        List.find_opt (fun (_, id) -> Ident.same id right) pairs
+      with
+      | Some (_, paired_right), Some (paired_left, _) ->
+        Ident.same paired_right right && Ident.same paired_left left
+      | Some (_, paired_right), None -> Ident.same paired_right right
+      | None, Some _ -> false
+      | None, None -> Ident.same left right
+    in
+    let equal_reference left right =
+      match left, right with
+      | Rfun left, Rfun right | Rsibling left, Rsibling right ->
+        String.equal left right
+      | Rapp left, Rapp right | Rglobal left, Rglobal right ->
+        Path.same left right
+      | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
+    in
+    let rec equal pairs left right =
+      equal_type left.rexp_type right.rexp_type
+      &&
+      match left.rexp_desc, right.rexp_desc with
+      | Rexp_ident (Rbound left), Rexp_ident (Rbound right) ->
+        paired pairs left right
+      | Rexp_ident (Rfree left), Rexp_ident (Rfree right) ->
+        equal_reference left right
+      | Rexp_constant left, Rexp_constant right ->
+        equal_constant left right
+      | Rexp_let (left_bindings, left_body),
+        Rexp_let (right_bindings, right_body) ->
+        let rec bindings pairs left right =
+          match left, right with
+          | [], [] -> Some pairs
+          | left :: left_rest, right :: right_rest ->
+            let left_binder = left.rbind_binder in
+            let right_binder = right.rbind_binder in
+            if equal_type left_binder.rb_type right_binder.rb_type
+               && equal pairs left.rbind_expr right.rbind_expr
+            then
+              bindings
+                ((left_binder.rb_id, right_binder.rb_id) :: pairs)
+                left_rest right_rest
+            else None
+          | [], _ :: _ | _ :: _, [] -> None
+        in
+        Option.fold
+          ~none:false
+          ~some:(fun pairs -> equal pairs left_body right_body)
+          (bindings pairs left_bindings right_bindings)
+      | Rexp_function left, Rexp_function right ->
+        left.arg_label = right.arg_label
+        && equal_type left.param.rb_type right.param.rb_type
+        && equal
+             ((left.param.rb_id, right.param.rb_id) :: pairs)
+             left.body right.body
+      | Rexp_apply (left_function, left_arguments),
+        Rexp_apply (right_function, right_arguments) ->
+        equal pairs left_function right_function
+        && List.length left_arguments = List.length right_arguments
+        && List.for_all2
+             (fun (left_label, left) (right_label, right) ->
+               left_label = right_label && equal pairs left right)
+             left_arguments right_arguments
+      | Rexp_tuple left, Rexp_tuple right ->
+        List.length left = List.length right
+        && List.for_all2
+             (fun (left_label, left) (right_label, right) ->
+               left_label = right_label && equal pairs left right)
+             left right
+      | Rexp_construct (left_constructor, left_arguments),
+        Rexp_construct (right_constructor, right_arguments) ->
+        Path.same
+          left_constructor.rconstr_type_path
+          right_constructor.rconstr_type_path
+        && String.equal
+             left_constructor.rconstr_name right_constructor.rconstr_name
+        && List.length left_arguments = List.length right_arguments
+        && List.for_all2 (equal pairs) left_arguments right_arguments
+      | Rexp_field (left_record, left_field),
+        Rexp_field (right_record, right_field) ->
+        equal pairs left_record right_record
+        && Path.same left_field.rfield_type_path right_field.rfield_type_path
+        && String.equal left_field.rfield_name right_field.rfield_name
+      | Rexp_ifthenelse (left_condition, left_ifso, left_ifnot),
+        Rexp_ifthenelse (right_condition, right_ifso, right_ifnot) ->
+        equal pairs left_condition right_condition
+        && equal pairs left_ifso right_ifso
+        &&
+        begin match left_ifnot, right_ifnot with
+        | None, None -> true
+        | Some left, Some right -> equal pairs left right
+        | None, Some _ | Some _, None -> false
+        end
+      | ( (Rexp_ident _ | Rexp_constant _ | Rexp_let _ | Rexp_function _ |
+           Rexp_apply _ | Rexp_tuple _ | Rexp_construct _ | Rexp_field _ |
+           Rexp_ifthenelse _),
+          _ ) ->
+        false
+    in
+    equal [] left right
+
+  let print_constant ppf = function
+    | Const_int value -> Format.fprintf ppf "%d" value
+    | Const_char value -> Format.fprintf ppf "%C" value
+    | Const_untagged_char value -> Format.fprintf ppf "#%C" value
+    | Const_string (value, _, delimiter) ->
+      Format.fprintf ppf "%S%a" value
+        (fun ppf -> function
+          | None -> ()
+          | Some delimiter -> Format.fprintf ppf "[%s]" delimiter)
+        delimiter
+    | Const_float value -> Format.pp_print_string ppf value
+    | Const_float32 value -> Format.fprintf ppf "%ss" value
+    | Const_unboxed_float value -> Format.fprintf ppf "#%s" value
+    | Const_unboxed_float32 value -> Format.fprintf ppf "#%ss" value
+    | Const_int8 value -> Format.fprintf ppf "%ds" value
+    | Const_int16 value -> Format.fprintf ppf "%dS" value
+    | Const_int32 value -> Format.fprintf ppf "%ldl" value
+    | Const_int64 value -> Format.fprintf ppf "%LdL" value
+    | Const_nativeint value -> Format.fprintf ppf "%ndn" value
+    | Const_untagged_int value -> Format.fprintf ppf "#%d" value
+    | Const_untagged_int8 value -> Format.fprintf ppf "#%ds" value
+    | Const_untagged_int16 value -> Format.fprintf ppf "#%dS" value
+    | Const_unboxed_int32 value -> Format.fprintf ppf "#%ldl" value
+    | Const_unboxed_int64 value -> Format.fprintf ppf "#%LdL" value
+    | Const_unboxed_nativeint value -> Format.fprintf ppf "#%ndn" value
+
+  let print_path = Format_doc.compat Path.print
+
+  let print_reference ppf = function
+    | Rfun name -> Format.fprintf ppf "fun[%s]" name
+    | Rsibling name -> Format.fprintf ppf "sibling[%s]" name
+    | Rapp path -> Format.fprintf ppf "app[%a]" print_path path
+    | Rglobal path -> Format.fprintf ppf "global[%a]" print_path path
+
+  let print_bound_identifier ppf id =
+    Format.pp_print_string ppf (Ident.name id)
+
+  let print_identifier ppf = function
+    | Rbound id -> print_bound_identifier ppf id
+    | Rfree reference -> print_reference ppf reference
+
+  let print_label ppf = function
+    | Nolabel -> ()
+    | Labelled label -> Format.fprintf ppf "~%s:" label
+    | Optional label -> Format.fprintf ppf "?%s:" label
+    | Position label -> Format.fprintf ppf "@%s:" label
+
+  let rec print ppf expression =
+    match expression.rexp_desc with
+    | Rexp_ident identifier -> print_identifier ppf identifier
+    | Rexp_constant constant -> print_constant ppf constant
+    | Rexp_let (bindings, body) ->
+      Format.fprintf ppf "(@[<2>let %a in@ %a@])"
+        (Format.pp_print_list
+           ~pp_sep:(fun ppf () -> Format.fprintf ppf "@ and ")
+           (fun ppf binding ->
+             Format.fprintf ppf "%a =@ %a"
+               print_bound_identifier binding.rbind_binder.rb_id
+               print binding.rbind_expr))
+        bindings print body
+    | Rexp_function { arg_label; param; body } ->
+      Format.fprintf ppf "(@[<2>fun %a%a ->@ %a@])"
+        print_label arg_label print_bound_identifier param.rb_id print body
+    | Rexp_apply (function_, arguments) ->
+      Format.fprintf ppf "(@[<2>%a%a@])" print function_
+        (fun ppf arguments ->
+          List.iter
+            (fun (label, argument) ->
+              Format.fprintf ppf "@ %a%a" print_label label print argument)
+            arguments)
+        arguments
+    | Rexp_tuple fields ->
+      Format.fprintf ppf "(@[<hov>%a@])"
+        (Format.pp_print_list
+           ~pp_sep:(fun ppf () -> Format.fprintf ppf ",@ ")
+           (fun ppf (label, field) ->
+             match label with
+             | None -> print ppf field
+             | Some label -> Format.fprintf ppf "~%s:%a" label print field))
+        fields
+    | Rexp_construct (constructor, arguments) ->
+      Format.fprintf ppf "@[<2>constructor[%a.%s]%a@]"
+        print_path constructor.rconstr_type_path constructor.rconstr_name
+        (fun ppf arguments ->
+          List.iter (fun argument -> Format.fprintf ppf "@ %a" print argument)
+            arguments)
+        arguments
+    | Rexp_field (record, field) ->
+      Format.fprintf ppf "(%a).field[%a.%s]" print record
+        print_path field.rfield_type_path field.rfield_name
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      Format.fprintf ppf "(@[<2>if %a@ then %a%a@])"
+        print condition print ifso
+        (fun ppf -> function
+          | None -> ()
+          | Some ifnot -> Format.fprintf ppf "@ else %a" print ifnot)
+        ifnot
+
+  exception Invalid of validation_error
+
+  let validate ~equal_type ~bool_type expression =
+    let invalid error = raise (Invalid error) in
+    let same_type left right = equal_type left right in
+    let strip_mono type_ =
+      match get_desc type_ with
+      | Tpoly (type_, []) -> type_
+      | _ -> type_
+    in
+    let add_binder bound seen binder =
+      if Ident.is_global binder.rb_id then invalid (Global_binder binder.rb_id);
+      if Ident.Set.mem binder.rb_id seen
+      then invalid (Duplicate_binder binder.rb_id);
+      ( Ident.Map.add binder.rb_id binder.rb_type bound,
+        Ident.Set.add binder.rb_id seen )
+    in
+    let require_name kind name =
+      if String.length name = 0 then invalid (Invalid_name kind)
+    in
+    let validate_reference = function
+      | Rfun name -> require_name "function" name
+      | Rsibling name -> require_name "sibling" name
+      | Rapp _ | Rglobal _ -> ()
+    in
+    let rec loop bound seen expression =
+      match expression.rexp_desc with
+      | Rexp_ident (Rbound id) ->
+        begin match Ident.Map.find_opt id bound with
+        | None -> invalid (Unbound_identifier id)
+        | Some binder_type ->
+          if not (same_type binder_type expression.rexp_type)
+          then invalid (Bound_identifier_type_mismatch id)
+        end;
+        seen
+      | Rexp_ident (Rfree reference) ->
+        validate_reference reference;
+        seen
+      | Rexp_constant _ -> seen
+      | Rexp_let (bindings, body) ->
+        if bindings = [] then invalid Empty_let;
+        let seen =
+          List.fold_left
+            (fun seen binding ->
+              let seen = loop bound seen binding.rbind_expr in
+              if not
+                   (same_type
+                      binding.rbind_binder.rb_type
+                      binding.rbind_expr.rexp_type)
+              then invalid Let_type_mismatch;
+              seen)
+            seen bindings
+        in
+        let body_bound, seen =
+          List.fold_left
+            (fun (bound, seen) binding ->
+              add_binder bound seen binding.rbind_binder)
+            (bound, seen) bindings
+        in
+        let seen = loop body_bound seen body in
+        if not (same_type expression.rexp_type body.rexp_type)
+        then invalid Let_type_mismatch;
+        seen
+      | Rexp_function { arg_label; param; body } ->
+        let bound, seen = add_binder bound seen param in
+        let seen = loop bound seen body in
+        begin match get_desc expression.rexp_type with
+        | Tarrow ((type_label, _, _), argument_type, result_type, _)
+          when type_label = arg_label
+               && same_type (strip_mono argument_type) param.rb_type
+               && same_type result_type body.rexp_type ->
+          ()
+        | _ -> invalid Function_type_mismatch
+        end;
+        seen
+      | Rexp_apply (function_, arguments) ->
+        if arguments = [] then invalid Apply_type_mismatch;
+        let seen = loop bound seen function_ in
+        let function_type, seen =
+          List.fold_left
+            (fun (function_type, seen) (label, argument) ->
+              let seen = loop bound seen argument in
+              match get_desc function_type with
+              | Tarrow ((type_label, _, _), argument_type, result_type, _)
+                when type_label = label
+                     && same_type
+                          (strip_mono argument_type) argument.rexp_type ->
+                result_type, seen
+              | _ -> invalid Apply_type_mismatch)
+            (function_.rexp_type, seen) arguments
+        in
+        if not (same_type function_type expression.rexp_type)
+        then invalid Apply_type_mismatch;
+        seen
+      | Rexp_tuple fields ->
+        let seen =
+          List.fold_left
+            (fun seen (_, field) -> loop bound seen field)
+            seen fields
+        in
+        begin match get_desc expression.rexp_type with
+        | Ttuple field_types
+          when List.length fields >= 2
+               && List.length fields = List.length field_types
+               && List.for_all2
+                    (fun (label, field) (type_label, field_type) ->
+                      label = type_label
+                      && same_type field.rexp_type field_type)
+                    fields field_types ->
+          ()
+        | _ -> invalid Tuple_type_mismatch
+        end;
+        seen
+      | Rexp_construct (constructor, arguments) ->
+        require_name "constructor" constructor.rconstr_name;
+        List.fold_left (loop bound) seen arguments
+      | Rexp_field (record, field) ->
+        require_name "field" field.rfield_name;
+        loop bound seen record
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        let seen = loop bound seen condition in
+        let seen = loop bound seen ifso in
+        let seen =
+          Option.fold ~none:seen ~some:(loop bound seen) ifnot
+        in
+        if not (same_type condition.rexp_type bool_type)
+           || not (same_type ifso.rexp_type expression.rexp_type)
+           || not
+                (Option.fold
+                   ~none:true
+                   ~some:(fun ifnot ->
+                     same_type ifnot.rexp_type expression.rexp_type)
+                   ifnot)
+        then invalid If_type_mismatch;
+        seen
+    in
+    try
+      if not (same_type expression.rexp_type bool_type)
+      then invalid Root_type_mismatch;
+      ignore (loop Ident.Map.empty Ident.Set.empty expression : Ident.Set.t);
+      Ok ()
+    with Invalid error -> Error error
+
+  let print_validation_error ppf = function
+    | Root_type_mismatch ->
+      Format.pp_print_string ppf "root expression does not have type bool"
+    | Unbound_identifier id ->
+      Format.fprintf ppf "unbound refinement identifier %s" (Ident.name id)
+    | Bound_identifier_type_mismatch id ->
+      Format.fprintf ppf "type mismatch for refinement identifier %s"
+        (Ident.name id)
+    | Duplicate_binder id ->
+      Format.fprintf ppf "duplicate refinement binder %s" (Ident.name id)
+    | Global_binder id ->
+      Format.fprintf ppf "refinement binder %s is global" (Ident.name id)
+    | Empty_let -> Format.pp_print_string ppf "empty refinement let"
+    | Invalid_name kind ->
+      Format.fprintf ppf "empty refinement %s name" kind
+    | Function_type_mismatch ->
+      Format.pp_print_string ppf "refinement function type mismatch"
+    | Apply_type_mismatch ->
+      Format.pp_print_string ppf "refinement application type mismatch"
+    | Let_type_mismatch ->
+      Format.pp_print_string ppf "refinement let type mismatch"
+    | If_type_mismatch ->
+      Format.pp_print_string ppf "refinement conditional type mismatch"
+    | Tuple_type_mismatch ->
+      Format.pp_print_string ppf "refinement tuple type mismatch"
+end
 
 (* with-bounds *)
 

@@ -28,7 +28,7 @@ module Uid = Shape.Uid
    This is currently used only in [Typedtree], but the long term goal
    is to share this definition with [Lambda] and completely replace the
    usage of [Asttypes.constant] *)
-type constant =
+type constant = Types.constant =
     Const_int of int
   | Const_char of char
   | Const_untagged_char of char
