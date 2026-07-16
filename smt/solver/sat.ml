@@ -140,16 +140,16 @@ type t =
   { mutable nvars : int
   ; mutable ok : bool (* false once an empty clause is derived: permanently unsat *)
   ; (* Per-variable state, indexed by var. *)
-    assigns : int Dynarray.t (* 0 unknown, 1 true, -1 false *)
-  ; level : int Dynarray.t (* decision level at which the var was assigned *)
-  ; trail_pos : int Dynarray.t
+    mutable assigns : int array (* 0 unknown, 1 true, -1 false *)
+  ; mutable level : int array (* decision level at which the var was assigned *)
+  ; mutable trail_pos : int array
       (* var -> its index in [trail] while assigned, else -1. Read only for the theory
          seam's strict CONTRACT-EX precedence check; write-only otherwise. *)
-  ; reason : int Dynarray.t
+  ; mutable reason : int array
       (* why the var was assigned, UNBOXED (Implied_by cref>=0 / [r_decision] /
          [r_theory]); an [int] array, so [reason.(v) <- ...] fires no write barrier *)
   ; polarity : bool Dynarray.t (* saved phase: true => decide negative first *)
-  ; seen : bool Dynarray.t (* scratch flag for conflict analysis *)
+  ; mutable seen : bool array (* scratch flag for conflict analysis *)
   ; (* Per-variable VSIDS activity and its max-heap (top = highest activity). *)
     var_act : float Dynarray.t
   ; heap : int Dynarray.t (* heap of vars *)
@@ -527,12 +527,12 @@ let create ?(base_l0_cert_mode = false) () =
   let lgc_base = if lgc_fixed then lgc_initial_from_env () else lgc_initial in
   { nvars = 0
   ; ok = true
-  ; assigns = Dynarray.create ()
-  ; level = Dynarray.create ()
-  ; trail_pos = Dynarray.create ()
-  ; reason = Dynarray.create ()
+  ; assigns = [||]
+  ; level = [||]
+  ; trail_pos = [||]
+  ; reason = [||]
   ; polarity = Dynarray.create ()
-  ; seen = Dynarray.create ()
+  ; seen = [||]
   ; var_act = Dynarray.create ()
   ; heap = Dynarray.create ()
   ; heap_pos = Dynarray.create ()
@@ -655,7 +655,7 @@ let decision_level t = Dynarray.length t.trail_lim
 
 (* Signed value of a literal under the current assignment: 1 true, -1 false, 0 unknown. *)
 let lit_val t l =
-  let v = Dynarray.get t.assigns (var_of_lit l) in
+  let v = t.assigns.(var_of_lit l) in
   if v = 0 then 0 else if sign_of_lit l then v else -v
 ;;
 
@@ -673,6 +673,23 @@ let grow_int a needed =
       ncap := !ncap * 2
     done;
     let na = Array.make !ncap 0 in
+    Array.blit a 0 na 0 cap;
+    na)
+;;
+
+(* As [grow_int] but for a [bool] array (default [false]); used for the per-var [seen]
+   scratch flag, an [int]-free growable array. Capacity is [Array.length]; the used count
+   is the var count. *)
+let grow_bool a needed =
+  let cap = Array.length a in
+  if needed <= cap
+  then a
+  else (
+    let ncap = ref (if cap = 0 then 8 else cap) in
+    while !ncap < needed do
+      ncap := !ncap * 2
+    done;
+    let na = Array.make !ncap false in
     Array.blit a 0 na 0 cap;
     na)
 ;;
@@ -905,7 +922,7 @@ let clause_lbd t lits =
   let g = lbd_begin t in
   let count = ref 0 in
   for i = 0 to Array.length lits - 1 do
-    if lbd_count_level t g (Dynarray.get t.level (var_of_lit lits.(i))) then incr count
+    if lbd_count_level t g (t.level.(var_of_lit lits.(i))) then incr count
   done;
   !count
 ;;
@@ -916,7 +933,7 @@ let clause_lbd_cref t (cr : cref) =
   let g = lbd_begin t in
   let count = ref 0 in
   for i = 0 to cl_len t cr - 1 do
-    if lbd_count_level t g (Dynarray.get t.level (var_of_lit (cl_lit t cr i))) then incr count
+    if lbd_count_level t g (t.level.(var_of_lit (cl_lit t cr i))) then incr count
   done;
   !count
 ;;
@@ -927,13 +944,18 @@ let clause_lbd_cref t (cr : cref) =
 
 let ensure_var t v =
   while t.nvars <= v do
-    Dynarray.add_last t.assigns 0;
-    Dynarray.add_last t.level 0;
-    Dynarray.add_last t.trail_pos (-1);
-    Dynarray.add_last t.reason r_decision;
+    t.assigns <- grow_int t.assigns (t.nvars + 1);
+    t.assigns.(t.nvars) <- 0;
+    t.level <- grow_int t.level (t.nvars + 1);
+    t.level.(t.nvars) <- 0;
+    t.trail_pos <- grow_int t.trail_pos (t.nvars + 1);
+    t.trail_pos.(t.nvars) <- -1;
+    t.reason <- grow_int t.reason (t.nvars + 1);
+    t.reason.(t.nvars) <- r_decision;
     Dynarray.add_last t.polarity true;
     Dynarray.add_last t.best_phase true (* best-trail phase memory: FALSE-first default *);
-    Dynarray.add_last t.seen false;
+    t.seen <- grow_bool t.seen (t.nvars + 1);
+    t.seen.(t.nvars) <- false;
     Dynarray.add_last t.var_act 0.0;
     Dynarray.add_last t.heap_pos (-1);
     Dynarray.add_last t.watches { w = [||]; wn = 0 };
@@ -1039,7 +1061,7 @@ let enqueue_level t reason =
     let cr : cref = reason in
     let m = ref 0 in
     for i = 1 to cl_len t cr - 1 do
-      let lv = Dynarray.get t.level (var_of_lit (cl_lit t cr i)) in
+      let lv = t.level.(var_of_lit (cl_lit t cr i)) in
       if lv > !m then m := lv
     done;
     !m)
@@ -1047,10 +1069,10 @@ let enqueue_level t reason =
 
 let unchecked_enqueue t lit reason =
   let v = var_of_lit lit in
-  Dynarray.set t.assigns v (if sign_of_lit lit then 1 else -1);
-  Dynarray.set t.level v (enqueue_level t reason);
-  Dynarray.set t.trail_pos v (Dynarray.length t.trail);
-  Dynarray.set t.reason v reason;
+  t.assigns.(v) <- (if sign_of_lit lit then 1 else -1);
+  t.level.(v) <- (enqueue_level t reason);
+  t.trail_pos.(v) <- (Dynarray.length t.trail);
+  t.reason.(v) <- reason;
   Dynarray.add_last t.trail lit;
   (* Trail-extension notify (ADR-0005 §3 on_assign): every literal placed on the trail —
      decision, propagation, assumption, learned unit — streams to the theory, which
@@ -1061,7 +1083,7 @@ let unchecked_enqueue t lit reason =
      holds. *)
   match t.theory with
   | None -> ()
-  | Some th -> th.on_assign lit ~level:(Dynarray.get t.level v)
+  | Some th -> th.on_assign lit ~level:(t.level.(v))
 ;;
 
 (* The premise set of a theory-propagated [lit]. Normally the theory's own [explain]
@@ -1102,9 +1124,9 @@ let cancel_until t level =
            {!lit_val} that means [assigns v = -1] iff [not (sign_of_lit l)]. Derive it from
            [l] (the same value {!update_best_trail} uses) — no [assigns] read. *)
         Dynarray.set t.polarity v (not (sign_of_lit l));
-        Dynarray.set t.assigns v 0;
-        Dynarray.set t.trail_pos v (-1);
-        Dynarray.set t.reason v r_decision;
+        t.assigns.(v) <- 0;
+        t.trail_pos.(v) <- (-1);
+        t.reason.(v) <- r_decision;
         heap_insert t v
       done;
       Dynarray.truncate t.trail target;
@@ -1123,18 +1145,18 @@ let cancel_until t level =
       for i = 0 to n - 1 do
         let l = Dynarray.get t.trail i in
         let v = var_of_lit l in
-        if Dynarray.get t.level v > level
+        if t.level.(v) > level
         then (
           (* Phase from the trail literal [l], not an [assigns] read (see the monotone arm). *)
           Dynarray.set t.polarity v (not (sign_of_lit l));
-          Dynarray.set t.assigns v 0;
-          Dynarray.set t.trail_pos v (-1);
-          Dynarray.set t.reason v r_decision;
+          t.assigns.(v) <- 0;
+          t.trail_pos.(v) <- (-1);
+          t.reason.(v) <- r_decision;
           Hashtbl.remove t.chrono_reason v;
           heap_insert t v)
         else (
           Dynarray.set t.trail !w l;
-          Dynarray.set t.trail_pos v !w;
+          t.trail_pos.(v) <- !w;
           incr w)
       done;
       Dynarray.truncate t.trail !w;
@@ -1163,7 +1185,7 @@ let cancel_until t level =
          for i = 0 to Dynarray.length t.trail - 1 do
            let l = Dynarray.get t.trail i in
            let v = var_of_lit l in
-           if Dynarray.get t.reason v = r_theory
+           if t.reason.(v) = r_theory
            then
              (* [theory_premises] serves an EXISTING snapshot if this survivor was already
                 snapshotted at an earlier backtrack (its adapter cache is long gone); only
@@ -1220,7 +1242,7 @@ let cancel_until t level =
            earliest-removed incremental undo that would exploit the true level is the
            fabric S4 follow-up, not this stage). *)
         Dynarray.iter
-          (fun l -> th.on_assign l ~level:(Dynarray.get t.level (var_of_lit l)))
+          (fun l -> th.on_assign l ~level:(t.level.(var_of_lit l)))
           t.trail)
 ;;
 
@@ -1358,13 +1380,13 @@ let theory_explain_checked t lit =
     | None -> assert false
   in
   let premises = theory_premises t th lit in
-  let lit_pos = Dynarray.get t.trail_pos (var_of_lit lit) in
+  let lit_pos = t.trail_pos.(var_of_lit lit) in
   List.iter
     (fun p ->
       if not
            (lit_val t p = 1
-            && Dynarray.get t.trail_pos (var_of_lit p) >= 0
-            && Dynarray.get t.trail_pos (var_of_lit p) < lit_pos)
+            && t.trail_pos.(var_of_lit p) >= 0
+            && t.trail_pos.(var_of_lit p) < lit_pos)
       then
         raise
           (Theory_contract_violation
@@ -1430,7 +1452,7 @@ let theory_prop_conflict_clause t lit =
    resolved away, so the literal under test is kept. A false negative here only KEEPS a
    literal (never drops one), so a wrong [abstract_levels] can never cause an unsound drop
    — it only costs a missed minimization. *)
-let abstract_level t v = 1 lsl (Dynarray.get t.level v land 63)
+let abstract_level t v = 1 lsl (t.level.(v) land 63)
 
 (* The reason of the (currently true) literal [tl] as a uniform clause holder, or [None]
    when [tl]'s var is a decision. Mirrors [analyze]'s resolution step exactly: an
@@ -1438,7 +1460,7 @@ let abstract_level t v = 1 lsl (Dynarray.get t.level v land 63)
    theory clause [tl ∨ ¬p₁ ∨ … ∨ ¬pₖ] materialized via {!theory_reason_clause} (slot 0 is
    [tl] itself, slots 1.. its currently-false antecedents). *)
 let reason_holder_of_true_lit t tl =
-  let r = Dynarray.get t.reason (var_of_lit tl) in
+  let r = t.reason.(var_of_lit tl) in
   if r >= 0
   then Some (H_arena r)
   else if r = r_theory
@@ -1485,13 +1507,13 @@ let lit_redundant t marked abstract_levels l0 =
         while !ok && !k < n do
           let q = ch_lit t c !k in
           let vq = var_of_lit q in
-          if (not (Dynarray.get t.seen vq)) && Dynarray.get t.level vq > 0
+          if (not (t.seen.(vq))) && t.level.(vq) > 0
           then (
-            let rq = Dynarray.get t.reason vq in
+            let rq = t.reason.(vq) in
             let has_reason = rq >= 0 || rq = r_theory in
             if has_reason && abstract_level t vq land abstract_levels <> 0
             then (
-              Dynarray.set t.seen vq true;
+              t.seen.(vq) <- true;
               Dynarray.add_last marked vq;
               Dynarray.add_last stack q)
             else ok := false);
@@ -1502,7 +1524,7 @@ let lit_redundant t marked abstract_levels l0 =
   if not !ok
   then (
     for j = base to Dynarray.length marked - 1 do
-      Dynarray.set t.seen (Dynarray.get marked j) false
+      t.seen.(Dynarray.get marked j) <- false
     done;
     Dynarray.truncate marked base);
   !ok
@@ -1526,9 +1548,9 @@ let analyze t confl =
   (* Vars marked [seen] during analysis, to clear at the end. *)
   let marked = Dynarray.create () in
   let mark v =
-    if not (Dynarray.get t.seen v)
+    if not (t.seen.(v))
     then (
-      Dynarray.set t.seen v true;
+      t.seen.(v) <- true;
       Dynarray.add_last marked v)
   in
   let path_c = ref 0 in
@@ -1548,7 +1570,7 @@ let analyze t confl =
     else (
       let m = ref 0 in
       for i = 0 to ch_len t confl - 1 do
-        let lv = Dynarray.get t.level (var_of_lit (ch_lit t confl i)) in
+        let lv = t.level.(var_of_lit (ch_lit t confl i)) in
         if lv > !m then m := lv
       done;
       !m)
@@ -1578,11 +1600,11 @@ let analyze t confl =
     for jj = start to ch_len t !c - 1 do
       let q = ch_lit t !c jj in
       let vq = var_of_lit q in
-      if (not (Dynarray.get t.seen vq)) && Dynarray.get t.level vq > 0
+      if (not (t.seen.(vq))) && t.level.(vq) > 0
       then (
         var_bump t vq;
         mark vq;
-        if Dynarray.get t.level vq >= conflict_level
+        if t.level.(vq) >= conflict_level
         then incr path_c
         else Dynarray.add_last out q)
     done;
@@ -1595,25 +1617,25 @@ let analyze t confl =
     then
       while
         let v = var_of_lit (Dynarray.get t.trail !index) in
-        not (Dynarray.get t.seen v && Dynarray.get t.level v = conflict_level)
+        not (t.seen.(v) && t.level.(v) = conflict_level)
       do
         decr index
       done
     else
-      while not (Dynarray.get t.seen (var_of_lit (Dynarray.get t.trail !index))) do
+      while not (t.seen.(var_of_lit (Dynarray.get t.trail !index))) do
         decr index
       done;
     let pl = Dynarray.get t.trail !index in
     decr index;
     p := pl;
     let vp = var_of_lit pl in
-    Dynarray.set t.seen vp false;
+    t.seen.(vp) <- false;
     decr path_c;
     if !path_c <= 0
     then continue := false
     else (
       (c
-       := let r = Dynarray.get t.reason vp in
+       := let r = t.reason.(vp) in
           if r >= 0
           then H_arena r
           else if r = r_theory
@@ -1653,7 +1675,7 @@ let analyze t confl =
       let jw = ref 1 in
       for i = 1 to len - 1 do
         let l = Dynarray.get out i in
-        let r = Dynarray.get t.reason (var_of_lit l) in
+        let r = t.reason.(var_of_lit l) in
         (* [r_decision]: a decision literal is never redundant. Otherwise ([r >= 0]
            [Implied_by] or [r = r_theory]) test recursively. *)
         let redundant = r <> r_decision && lit_redundant t marked !abstract_levels l in
@@ -1669,7 +1691,7 @@ let analyze t confl =
       for i = 1 to len - 1 do
         let l = Dynarray.get out i in
         let v = var_of_lit l in
-        let r = Dynarray.get t.reason v in
+        let r = t.reason.(v) in
         let redundant =
           (* [r_decision]: a decision literal is never redundant. [r_theory]: keep
              theory-propagated literals (sound: never over-drop). Otherwise [r >= 0] is
@@ -1682,7 +1704,7 @@ let analyze t confl =
             let k = ref 1 in
             while !ok && !k < cl_len t cr do
               let vk = var_of_lit (cl_lit t cr !k) in
-              if (not (Dynarray.get t.seen vk)) && Dynarray.get t.level vk > 0
+              if (not (t.seen.(vk))) && t.level.(vk) > 0
               then ok := false;
               incr k
             done;
@@ -1703,16 +1725,16 @@ let analyze t confl =
     else (
       let maxi = ref 1 in
       for i = 2 to Array.length learnt - 1 do
-        if Dynarray.get t.level (var_of_lit learnt.(i))
-           > Dynarray.get t.level (var_of_lit learnt.(!maxi))
+        if t.level.(var_of_lit learnt.(i))
+           > t.level.(var_of_lit learnt.(!maxi))
         then maxi := i
       done;
       let tmp = learnt.(1) in
       learnt.(1) <- learnt.(!maxi);
       learnt.(!maxi) <- tmp;
-      Dynarray.get t.level (var_of_lit learnt.(1)))
+      t.level.(var_of_lit learnt.(1)))
   in
-  Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked;
+  Dynarray.iter (fun v -> t.seen.(v) <- false) marked;
   learnt, bt, !ants
 ;;
 
@@ -1744,9 +1766,9 @@ let analyze_final t p =
   then (
     let marked = Dynarray.create () in
     let mark v =
-      if not (Dynarray.get t.seen v)
+      if not (t.seen.(v))
       then (
-        Dynarray.set t.seen v true;
+        t.seen.(v) <- true;
         Dynarray.add_last marked v)
     in
     mark (var_of_lit p);
@@ -1768,9 +1790,9 @@ let analyze_final t p =
     for i = Dynarray.length t.trail - 1 downto start do
       let l = Dynarray.get t.trail i in
       let v = var_of_lit l in
-      if Dynarray.get t.seen v && ((not t.chrono) || Dynarray.get t.level v > 0)
+      if t.seen.(v) && ((not t.chrono) || t.level.(v) > 0)
       then (
-        let r = Dynarray.get t.reason v in
+        let r = t.reason.(v) in
         if r = r_decision
         then Dynarray.add_last out (neg_lit l)
         else if r >= 0
@@ -1779,7 +1801,7 @@ let analyze_final t p =
           let cr : cref = r in
           for j = 1 to cl_len t cr - 1 do
             let vj = var_of_lit (cl_lit t cr j) in
-            if Dynarray.get t.level vj > 0 then mark vj
+            if t.level.(vj) > 0 then mark vj
           done;
           if track then ants := cl_id t cr :: !ants)
         else (
@@ -1790,7 +1812,7 @@ let analyze_final t p =
              failed-assumption core, so it must raise. *)
           let premises = theory_explain_checked t l in
           List.iter
-            (fun q -> if Dynarray.get t.level (var_of_lit q) > 0 then mark (var_of_lit q))
+            (fun q -> if t.level.(var_of_lit q) > 0 then mark (var_of_lit q))
             premises;
           if track
           then (
@@ -1800,7 +1822,7 @@ let analyze_final t p =
             in
             ants := c.tid :: !ants)))
     done;
-    Dynarray.iter (fun v -> Dynarray.set t.seen v false) marked);
+    Dynarray.iter (fun v -> t.seen.(v) <- false) marked);
   List.map neg_lit (Array.to_list (Dynarray.to_array out)), !ants
 ;;
 
@@ -1816,7 +1838,7 @@ let locked t (cr : cref) =
   &&
   (* the reason of [l0]'s var is [Implied_by cr] iff that reason int equals [cr] (was the
      physical-equality [rc == c]). *)
-  let r = Dynarray.get t.reason (var_of_lit l0) in
+  let r = t.reason.(var_of_lit l0) in
   r >= 0 && r = cr
 ;;
 
@@ -1911,19 +1933,19 @@ let reduce_db t =
   t.a_lits_n <- !total_lits;
   (* 1. reason array. *)
   for v = 0 to t.nvars - 1 do
-    let r = Dynarray.get t.reason v in
+    let r = t.reason.(v) in
     if r >= 0
     then (
       let nr = remap.(r) in
       if nr >= 0
-      then Dynarray.set t.reason v nr
+      then t.reason.(v) <- nr
       else (
-        if Dynarray.get t.assigns v <> 0 && Dynarray.get t.level v > 0
+        if t.assigns.(v) <> 0 && t.level.(v) > 0
         then
           failwith
             "Sat.reduce_db: a live (level>0) Implied_by reason clause was dropped — \
              locked invariant violated";
-        Dynarray.set t.reason v r_decision))
+        t.reason.(v) <- r_decision))
   done;
   (* 2. watch lists (interleaved: entry i at slots [2*i]=cref, [2*i+1]=blocker). *)
   Dynarray.iter
@@ -2091,7 +2113,7 @@ let pick_branch t =
            (never re-inserted) so it is never decided — its model value is reconstructed
            in [save_model]. [eliminated] is all-false unless preprocessing ran, so this is
            bit-identical when OXSMT_SATPRE is off. *)
-        if Dynarray.get t.assigns v = 0 && not (Dynarray.get t.eliminated v)
+        if t.assigns.(v) = 0 && not (Dynarray.get t.eliminated v)
         then Some (if Dynarray.get t.polarity v then neg v else pos v)
         else go ()
     in
@@ -2123,7 +2145,7 @@ let pick_branch t =
       match heap_remove_max t with
       | None -> None
       | Some v ->
-        if Dynarray.get t.assigns v <> 0 || Dynarray.get t.eliminated v
+        if t.assigns.(v) <> 0 || Dynarray.get t.eliminated v
         then go () (* already assigned or eliminated (A10): drop, as the no-filter loop *)
         else (
           (* [v] is popped: own it via [in_flight] across the (untrusted,
@@ -2165,7 +2187,7 @@ let saved_lit_val t l =
 let save_model t =
   Dynarray.clear t.saved_model;
   for v = 0 to t.nvars - 1 do
-    let a = Dynarray.get t.assigns v in
+    let a = t.assigns.(v) in
     (* an eliminated var is never on the trail (never decided/propagated): default it
        FALSE in the snapshot, to be fixed up by the flip-to-satisfy walk below *)
     let a = if a = 0 && Dynarray.get t.eliminated v then -1 else a in
@@ -2516,7 +2538,7 @@ let search t assumps conflict_limit =
       then (
         let maxl = ref 0 in
         for i = 0 to ch_len t confl - 1 do
-          let lv = Dynarray.get t.level (var_of_lit (ch_lit t confl i)) in
+          let lv = t.level.(var_of_lit (ch_lit t confl i)) in
           if lv > !maxl then maxl := lv
         done;
         if !maxl < decision_level t then cancel_until t !maxl);
@@ -2532,7 +2554,7 @@ let search t assumps conflict_limit =
       let conflict_level =
         let m = ref 0 in
         for i = 0 to ch_len t confl - 1 do
-          let lv = Dynarray.get t.level (var_of_lit (ch_lit t confl i)) in
+          let lv = t.level.(var_of_lit (ch_lit t confl i)) in
           if lv > !m then m := lv
         done;
         !m
@@ -2864,7 +2886,7 @@ let failed_literal_probing t =
   while !budget > 0 && !v < t.nvars && t.ok do
     let vv = !v in
     incr v;
-    if Dynarray.get t.assigns vv = 0 && not (Dynarray.get t.eliminated vv)
+    if t.assigns.(vv) = 0 && not (Dynarray.get t.eliminated vv)
     then (
       decr budget;
       (* a forced literal to enqueue at level 0, if either polarity is a failed literal *)
@@ -2873,7 +2895,7 @@ let failed_literal_probing t =
         then Some (neg vv)
         else if (* re-check: probing [pos vv] enqueued nothing (it restored L0), so [vv]
                    is still free unless a prior iteration's forced unit propagated onto it *)
-                Dynarray.get t.assigns vv = 0 && probe (neg vv)
+                t.assigns.(vv) = 0 && probe (neg vv)
         then Some (pos vv)
         else None
       in
@@ -3019,10 +3041,10 @@ let els_pass t work =
       for v = 0 to t.nvars - 1 do
         if Dynarray.get t.eliminable v
            && (not (Dynarray.get t.eliminated v))
-           && Dynarray.get t.assigns v = 0
+           && t.assigns.(v) = 0
         then (
           let r = rep.(comp.(pos v)) in
-          if var_of_lit r <> v && Dynarray.get t.assigns (var_of_lit r) = 0
+          if var_of_lit r <> v && t.assigns.(var_of_lit r) = 0
           then (
             subst.(pos v) <- r;
             subst.(neg v) <- neg_lit r;
@@ -3243,7 +3265,7 @@ let run_round t =
         for v = 0 to t.nvars - 1 do
           if Dynarray.get t.eliminable v
              && (not (Dynarray.get t.eliminated v))
-             && Dynarray.get t.assigns v = 0
+             && t.assigns.(v) = 0
           then (
             let ps = List.filter live occ.(pos v) in
             let ns = List.filter live occ.(neg v) in
