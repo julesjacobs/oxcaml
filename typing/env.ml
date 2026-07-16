@@ -176,8 +176,7 @@ type stage_lock =
 type lock =
   | Const_closure_lock of bool * Mode.Hint.pinpoint *
       Mode.Value.Comonadic.Const.t
-  | Closure_lock of Mode.Hint.pinpoint * Mode.Value.Comonadic.r *
-      Mode.Logicality.r option * bool
+  | Closure_lock of Mode.Hint.pinpoint * Mode.Value.Comonadic.r
   | Region_lock
   | Exclave_lock
   | Unboxed_lock (* to prevent capture of terms with non-value types *)
@@ -3137,13 +3136,9 @@ let add_const_closure_lock ?(ghost = false) closure_context comonadic env =
   let lock = Const_closure_lock (ghost, closure_context, comonadic) in
   add_lock lock env
 
-let add_closure_lock ?logicality ?(lock_logical = false) closure_context
-    comonadic env =
+let add_closure_lock closure_context comonadic env =
   let lock = Closure_lock
-    ( closure_context,
-      Mode.Value.Comonadic.disallow_left comonadic,
-      Option.map Mode.Logicality.disallow_left logicality,
-      lock_logical )
+    (closure_context, Mode.Value.Comonadic.disallow_left comonadic)
   in
   add_lock lock env
 
@@ -3739,8 +3734,8 @@ let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
       path, (mode, locks), a
     end
 
-let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0
-    logicality0 lock_logical =
+let closure_mode pp ({Mode.monadic; comonadic} : Mode.Value.l)
+    closure_context comonadic0 =
   let hint_comonadic : _ Mode.Hint.morph =
     Is_closed_by (Comonadic, {closure = closure_context; closed = pp})
   in
@@ -3754,24 +3749,7 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0
       [ monadic;
         Mode.Value.comonadic_to_monadic_min ~hint:hint_monadic comonadic0 ]
   in
-  Option.iter
-    (fun logicality0 ->
-       Mode.Logicality.submode_err pp
-         (Mode.Value.Monadic.proj Logicality monadic)
-         logicality0)
-    logicality0;
-  let mode = {Mode.monadic; comonadic} in
-  if lock_logical
-  then
-    let modality =
-      Mode.Modality.Const.set
-        (Mode.Modality.Axis.Monadic Logicality)
-        (Mode.Modality.Monadic.Atom.Join_const
-           Mode.Logicality.Const.Logical)
-        Mode.Modality.Const.id
-    in
-    Mode.Modality.Const.apply_left modality mode
-  else mode
+  {Mode.monadic; comonadic}
 
 let const_closure_mode pp {Mode.monadic; comonadic}
   closure_context comonadic0 =
@@ -3833,10 +3811,8 @@ let walk_locks ~errors ~env ~pp mode ty_and_lid locks =
       | Region_lock -> region_mode vmode
       | Const_closure_lock (_, closure_context, comonadic) ->
           const_closure_mode pp vmode closure_context comonadic
-      | Closure_lock
-          (closure_context, comonadic, logicality, lock_logical) ->
-          closure_mode pp vmode closure_context comonadic logicality
-            lock_logical
+      | Closure_lock (closure_context, comonadic) ->
+          closure_mode pp vmode closure_context comonadic
       | Exclave_lock ->
           exclave_mode ~errors ~env ~pp vmode
       | Unboxed_lock ->
@@ -3889,7 +3865,7 @@ let walk_locks_for_mutable_mode ~errors ~loc ~env locks m0 =
       | Const_closure_lock (true, _, _) ->
           mode
       | Const_closure_lock (false, pp, _)
-      | Closure_lock (pp, _, _, _) ->
+      | Closure_lock (pp, _) ->
           may_lookup_error errors loc env
             (Mutable_value_used_in_closure pp)
       | Unboxed_lock -> mode
