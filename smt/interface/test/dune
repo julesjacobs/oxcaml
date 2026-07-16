@@ -1,0 +1,11 @@
+; H1 seam coverage for the CONTRACT-LEMMA / CONTRACT-SPLIT cdclt desugar
+; (adr-0005-contract-lemma-erratum). Drives Cdclt.desugar_result_for_test — the real
+; split_lit clausifier — so the multi-antecedent / per-disjunct-sign / Not-peeling desugar
+; and the both-efforts delivery (Lemma not dropped at Propagate; Split dropped) are gated.
+; Depends on the interface stack (oxsmt_interface) + the SAT core (oxsmt_solver) + core.
+; Run via `make cdclt-lemma-test`; also built by `make build`.
+
+(executable
+ (name cdclt_lemma_test)
+ (modules cdclt_lemma_test)
+ (libraries oxsmt_core oxsmt_solver oxsmt_interface))

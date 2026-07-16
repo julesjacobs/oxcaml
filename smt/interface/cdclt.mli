@@ -151,6 +151,19 @@ val dt_model : t -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list option
     validated by [Array_model_check] before a [sat] is reported. Deterministic. *)
 val array_model : t -> (Term.t * Oxsmt_arr.Arr.value) list option
 
+(** Test-only: run the CONTRACT-LEMMA/CONTRACT-SPLIT clausifier on a crafted THEORY
+    [check_result] at the given effort, exactly as {!check} does (it shares the same
+    internal desugar), returning the emitted SAT-core {!Oxsmt_solver.Sat.theory_result}.
+    Exposed for the H1 seam tests (adr-0005-contract-lemma-erratum): a [Lemma] desugars
+    identically at BOTH efforts (each [(tm, sign)] via the signed-literal path with
+    Not-peeling) and is NEVER dropped at [Propagate], whereas a [Split] clausifies only at
+    [Final] and is dropped at [Propagate]. Not part of the shipping contract. *)
+val desugar_result_for_test
+  :  t
+  -> final:bool
+  -> Theory.check_result
+  -> Oxsmt_solver.Sat.theory_result
+
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
     matcher reads the e-graph without mutating it (R6). It is a {b live} surface, NOT a

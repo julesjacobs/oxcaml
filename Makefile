@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -530,6 +530,14 @@ lia-test:
 hnf-test:
 	$(DUNE) exec smt/theories/lia/test/hnf_test.exe
 
+## cdclt-lemma-test — H1 seam coverage (adr-0005-contract-lemma-erratum): the cdclt
+##   CONTRACT-LEMMA / CONTRACT-SPLIT desugar (split_lit) exercised through the real
+##   Cdclt.desugar_result_for_test — multi-antecedent, per-disjunct sign, Not-peeling, and
+##   the both-efforts delivery (a Lemma is not dropped at Propagate; a Split is). Nonzero
+##   exit on any failed check.
+cdclt-lemma-test:
+	$(DUNE) exec smt/interface/test/cdclt_lemma_test.exe
+
 ## bv-blast-test — smt/bitblast QF_BV bit-blaster adversarial self-test (stdlib-only,
 ##   deterministic). Exhaustive small-width oracle (widths 3-4, every operator, ALL input
 ##   assignments) comparing each Tseitin circuit against an INDEPENDENT value-arithmetic
@@ -690,6 +698,7 @@ test: check-frozen
 	$(MAKE) lia-test
 	$(MAKE) lia-adapter-test
 	$(MAKE) hnf-test
+	$(MAKE) cdclt-lemma-test
 	$(MAKE) bigint-test
 	$(MAKE) euf-test
 	$(MAKE) euf-adapter-test

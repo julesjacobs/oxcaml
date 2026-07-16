@@ -152,18 +152,18 @@ module Vartbl = Hashtbl.Make (struct
 
 type t =
   { mutable theory : theory_impl option
-    (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
+      (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
          until then, and forever for a pure-propositional problem with no theory atom. *)
   ; ctx : Context.t
   ; env : Env.t
   ; cap : Env.reserved_cap
-    (* ADR-0012 R1 reserved-minting capability for [env] (threaded from Session, the
+      (* ADR-0012 R1 reserved-minting capability for [env] (threaded from Session, the
          sole holder). Handed to the standalone arrays theory, which mints unforgeable
          reserved extensionality witnesses; unused by the other theories. *)
   ; registry : Oxsmt_core.Datatype_defs.t ref
-    (* datatype declarations (shared ref with Session); empty for a non-DT problem *)
+      (* datatype declarations (shared ref with Session); empty for a non-DT problem *)
   ; array_registry : Oxsmt_core.Array_defs.t ref
-    (* array select/store symbols (shared ref with Session); empty for a non-array
+      (* array select/store symbols (shared ref with Session); empty for a non-array
          problem. Checked before [registry] in [ensure_theory]. *)
   ; sat : Sat.t
   ; alloc : Atom.allocator
@@ -179,16 +179,16 @@ type t =
   ; budget : Budget.t (* shared effort budget (board #60): SAT ticks it, we tick Final *)
   ; mutable last_model : Model.t option (* snapshot taken at the accepting Final->Sat *)
   ; mutable last_dt_model : (Term.t * Dt.ctor_tree) list option
-    (* DT constructor-tree checker model, snapshotted at the accepting Final->Sat when
+      (* DT constructor-tree checker model, snapshotted at the accepting Final->Sat when
          the installed theory is the standalone DT theory (else [None]); read by
          {!Session}'s DT-branch commit through {!dt_model} and checked by
          [Dt_model_check]. *)
   ; mutable last_array_model : (Term.t * Arr.value) list option
-    (* arrays checker model, snapshotted at the accepting Final->Sat when the installed
+      (* arrays checker model, snapshotted at the accepting Final->Sat when the installed
          theory is the standalone arrays theory (else [None]); read by {!Session}'s arrays
          commit through {!array_model} and checked by [Array_model_check]. *)
   ; mutable relevancy : Relevancy.t option
-    (* dynamic relevancy driver (task #24), [None] unless {!Session} installed one from the
+  (* dynamic relevancy driver (task #24), [None] unless {!Session} installed one from the
      [OXSMT_RELEVANCY] gate. When [Some], the two trail seam events below stream to it so
      it can maintain relevancy marks in lockstep with the SAT trail; the branch filter
      itself is installed directly on the SAT core by {!Session}. A [None] arm is
@@ -412,6 +412,44 @@ let rec split_lit t ~sign (tm : Term.t) =
     if sign then Sat.pos v else Sat.neg v
 ;;
 
+(* Desugar a THEORY [check_result] (other than the Final [Sat] arm, whose model snapshot
+   is impl-specific and stays in {!check}) into the SAT-core [theory_result], sharing the
+   signed-literal clausifier {!split_lit} for both [Split] and [Lemma]. Factored out of
+   {!check} so the CONTRACT-LEMMA/CONTRACT-SPLIT desugar is exercised directly by the seam
+   tests (see {!desugar_result_for_test}) rather than a re-implemented copy. Behavior is
+   byte-identical to the inlined arms it replaced:
+   - [Split] at [Final] clausifies (≥2-atom disjunction) and is DROPPED at [Propagate]
+     (illegal there — CONTRACT-SPLIT), matching the old
+     [Theory.Sat | Theory.Split _ -> T_consistent []] Propagate arm;
+   - [Lemma] (CONTRACT-LEMMA) clausifies IDENTICALLY at BOTH efforts — never dropped at
+     [Propagate] (the LCG-serving arm) — each [(tm, sign)] going through
+     [split_lit t ~sign tm] (Not-peeling tracks parity), capped by the same per-check-sat
+     split budget. *)
+let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
+  match r with
+  | Theory.Sat -> Sat.T_consistent [] (* Final: caller snapshots the model separately *)
+  | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
+  | Theory.Conflict e ->
+    Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
+  | Theory.Split terms ->
+    if not final
+    then Sat.T_consistent [] (* CONTRACT-SPLIT: a Split is illegal/dropped at Propagate *)
+    else (
+      t.splits <- t.splits + 1;
+      if t.splits > t.split_budget then raise Split_budget_exceeded;
+      Sat.T_lemma [ List.map (split_lit t ~sign:true) terms ])
+  | Theory.Lemma signed ->
+    t.splits <- t.splits + 1;
+    if t.splits > t.split_budget then raise Split_budget_exceeded;
+    Sat.T_lemma [ List.map (fun (tm, sign) -> split_lit t ~sign tm) signed ]
+;;
+
+(* Test-only re-export of {!desugar_result} so the CONTRACT-LEMMA seam tests (H1) can feed
+   a crafted [Theory.check_result] at either effort through the REAL clausifier and
+   inspect the emitted clause (multi-antecedent, per-disjunct sign, Not-peeling) and the
+   both-efforts delivery (a [Lemma] is not dropped at Propagate, a [Split] is). *)
+let desugar_result_for_test = desugar_result
+
 let check t ~final =
   match t.theory with
   | None ->
@@ -426,7 +464,7 @@ let check t ~final =
          [Split_budget_exceeded]. *)
       Budget.tick t.budget;
       match th_check impl Theory.Final with
-      | Theory.Sat ->
+      | Theory.Sat as r ->
         t.last_model <- Some (th_model impl);
         (* At the accepting Final the engine holds the satisfying assignment — the valid
            point to extract a checker model. For the standalone DT theory, snapshot its
@@ -440,45 +478,9 @@ let check t ~final =
         <- (match impl with
             | TArr th -> Arr.array_model th
             | TCombined _ | TDt _ -> None);
-        Sat.T_consistent []
-      | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
-      | Theory.Conflict e ->
-        Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
-      | Theory.Split terms ->
-        t.splits <- t.splits + 1;
-        if t.splits > t.split_budget then raise Split_budget_exceeded;
-        Sat.T_lemma [ List.map (split_lit t ~sign:true) terms ]
-      | Theory.Lemma signed ->
-        (* CONTRACT-LEMMA (ADR-0005 erratum): a theory-derived T-VALID implication clause.
-           Desugars through the SAME signed-literal clausifier as [Split] — each
-           [(tm, sign)] becomes [split_lit t ~sign tm] (Not-peeling tracks parity), so no
-           new clause-construction code and the level-0 tautology-removal trap is shared.
-           Budget it exactly like a Split: the [Lemma] loop has no intrinsic bound (an LIA
-           cut lane can emit one per Final round), so it must be capped by the same
-           per-check-sat budget or a diverging producer runs forever. *)
-        t.splits <- t.splits + 1;
-        if t.splits > t.split_budget then raise Split_budget_exceeded;
-        Sat.T_lemma [ List.map (fun (tm, sign) -> split_lit t ~sign tm) signed ])
-    else (
-      match th_check impl Theory.Propagate with
-      | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
-      | Theory.Conflict e ->
-        Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
-      | Theory.Lemma signed ->
-        (* CONTRACT-LEMMA at Propagate effort (the LCG-serving arm): unlike [Split], a
-           [Lemma] is NOT dropped here. It is a valid clause, so it is sound to add
-           mid-search; the SAT core accepts a Propagate-effort [T_lemma] (sat.ml
-           [propagate_theory]: "a Propagate-effort lemma is a contract deviation but still
-           sound to add"), unwinds to level 0, adds the permanent clause, and
-           re-propagates — when its antecedents hold the clause is unit and BCP propagates
-           the head with the clause as reason. Same budget guard as the Final arm. *)
-        t.splits <- t.splits + 1;
-        if t.splits > t.split_budget then raise Split_budget_exceeded;
-        Sat.T_lemma [ List.map (fun (tm, sign) -> split_lit t ~sign tm) signed ]
-      | Theory.Sat | Theory.Split _ ->
-        (* neither is legal at Propagate effort (THEORY contract); the theory never
-           returns them here, but stay total and treat as "nothing to add". *)
-        Sat.T_consistent [])
+        desugar_result t ~final:true r
+      | r -> desugar_result t ~final:true r)
+    else desugar_result t ~final:false (th_check impl Theory.Propagate)
 ;;
 
 let explain t l =
@@ -636,28 +638,27 @@ let model t =
        let sort_ids : (string, int list) Hashtbl.t = Hashtbl.create 16 in
        List.iter
          (fun (term : Term.t) ->
-            match term.Term.sort with
-            | Sort.Uninterpreted sym ->
-              (match Model.value m term with
-               | Some (Model.Uninterp cid) ->
-                 let name = Symbol.name sym in
-                 let prev =
-                   match Hashtbl.find_opt sort_ids name with
-                   | Some l -> l
-                   | None -> []
-                 in
-                 Hashtbl.replace sort_ids name (cid :: prev)
-               | _ -> ())
-            | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
-              ())
+           match term.Term.sort with
+           | Sort.Uninterpreted sym ->
+             (match Model.value m term with
+              | Some (Model.Uninterp cid) ->
+                let name = Symbol.name sym in
+                let prev =
+                  match Hashtbl.find_opt sort_ids name with
+                  | Some l -> l
+                  | None -> []
+                in
+                Hashtbl.replace sort_ids name (cid :: prev)
+              | _ -> ())
+           | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> ())
          terms;
        let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let sort_cards = ref [] in
        Hashtbl.iter
          (fun name ids ->
-            let ids = List.sort_uniq Int.compare ids in
-            List.iteri (fun i cid -> Hashtbl.replace index cid i) ids;
-            sort_cards := { sort_name = name; card = List.length ids } :: !sort_cards)
+           let ids = List.sort_uniq Int.compare ids in
+           List.iteri (fun i cid -> Hashtbl.replace index cid i) ids;
+           sort_cards := { sort_name = name; card = List.length ids } :: !sort_cards)
          sort_ids;
        (* pass 1b: the §10 ℤ-realization (task #110). An Int-sorted term LIA valued
           numerically arrives as [Model.Int n] (tier 1: keep n). An Int class LIA never
@@ -681,18 +682,18 @@ let model t =
        let int_classes = ref [] in
        List.iter
          (fun (term : Term.t) ->
-            match term.Term.sort with
-            | Sort.Int _ ->
-              (match Model.value m term with
-               | Some (Model.Int n) ->
-                 (* Record only values that fit int63: the fresh witnesses [fresh] mints
+           match term.Term.sort with
+           | Sort.Int _ ->
+             (match Model.value m term with
+              | Some (Model.Int n) ->
+                (* Record only values that fit int63: the fresh witnesses [fresh] mints
                    are small non-negative ints, so a >int63 used value (a uint256
                    constant) cannot collide with any witness and need not be excluded. *)
-                 (match Bigint.to_int_opt n with
-                  | Some i -> Hashtbl.replace int_used i ()
-                  | None -> ())
-               | Some (Model.Uninterp cid) ->
-                 (* §10 v2 gap B (task #117): an [Arith] term (a linear composite used only
+                (match Bigint.to_int_opt n with
+                 | Some i -> Hashtbl.replace int_used i ()
+                 | None -> ())
+              | Some (Model.Uninterp cid) ->
+                (* §10 v2 gap B (task #117): an [Arith] term (a linear composite used only
                    as a UF argument) is NOT realized to a fresh per-class integer — it is
                    EVALUATED structurally from its operands in [value_of], mirroring R1's
                    [ev], so its table key matches R1's structural evaluation. Only genuine
@@ -702,15 +703,15 @@ let model t =
                    match v1's fresh-value stream — v1 minted for [Arith] cids too, so v2
                    hands out DIFFERENT integers to the surviving leaves. Determinism is a
                    within-version property, not cross-version equality. *)
-                 (match term.Term.node with
-                  | Term.Arith _ -> ()
-                  | _ -> int_classes := cid :: !int_classes)
-               | _ -> ())
-            | Sort.Bool
-            | Sort.Uninterpreted _
-            | Sort.Datatype _
-            | Sort.Array _
-            | Sort.BitVec _ -> ())
+                (match term.Term.node with
+                 | Term.Arith _ -> ()
+                 | _ -> int_classes := cid :: !int_classes)
+              | _ -> ())
+           | Sort.Bool
+           | Sort.Uninterpreted _
+           | Sort.Datatype _
+           | Sort.Array _
+           | Sort.BitVec _ -> ())
          terms;
        let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let next = ref 0 in
@@ -725,8 +726,8 @@ let model t =
        in
        List.iter
          (fun cid ->
-            if not (Hashtbl.mem int_realize cid)
-            then Hashtbl.replace int_realize cid (fresh ()))
+           if not (Hashtbl.mem int_realize cid)
+           then Hashtbl.replace int_realize cid (fresh ()))
          (List.sort_uniq Int.compare !int_classes);
        let rec value_of (term : Term.t) =
          match Model.value m term, term.Term.node with
@@ -781,30 +782,30 @@ let model t =
        in
        List.iter
          (fun (term : Term.t) ->
-            match term.Term.node with
-            | Term.App (sym, args) when Iarr.length args = 0 ->
-              (match term.Term.sort with
-               | Sort.Bool ->
-                 () (* propositional variable: session's bool_consts owns it *)
-               | Sort.Int _
-               | Sort.Uninterpreted _
-               | Sort.Datatype _
-               | Sort.Array _
-               | Sort.BitVec _ ->
-                 consts := Const (Symbol.name sym, value_of term) :: !consts)
-            | Term.App (sym, args) ->
-              let row = List.map value_of (Iarr.to_list args), value_of term in
-              let name = Symbol.name sym in
-              let rows =
-                match Hashtbl.find_opt tables name with
-                | Some (_, rows) -> rows
-                | None ->
-                  let rows = ref [] in
-                  Hashtbl.replace tables name (term.Term.sort, rows);
-                  rows
-              in
-              rows := row :: !rows
-            | _ -> ())
+           match term.Term.node with
+           | Term.App (sym, args) when Iarr.length args = 0 ->
+             (match term.Term.sort with
+              | Sort.Bool ->
+                () (* propositional variable: session's bool_consts owns it *)
+              | Sort.Int _
+              | Sort.Uninterpreted _
+              | Sort.Datatype _
+              | Sort.Array _
+              | Sort.BitVec _ ->
+                consts := Const (Symbol.name sym, value_of term) :: !consts)
+           | Term.App (sym, args) ->
+             let row = List.map value_of (Iarr.to_list args), value_of term in
+             let name = Symbol.name sym in
+             let rows =
+               match Hashtbl.find_opt tables name with
+               | Some (_, rows) -> rows
+               | None ->
+                 let rows = ref [] in
+                 Hashtbl.replace tables name (term.Term.sort, rows);
+                 rows
+             in
+             rows := row :: !rows
+           | _ -> ())
          terms;
        let row_compare (a, ra) (b, rb) =
          match List.compare value_compare a b with
@@ -814,8 +815,8 @@ let model t =
        let fun_bindings =
          Hashtbl.fold
            (fun name (codomain, rows) acc ->
-              let cases = List.sort_uniq row_compare !rows in
-              Fun (name, { default = default_for codomain; cases }) :: acc)
+             let cases = List.sort_uniq row_compare !rows in
+             Fun (name, { default = default_for codomain; cases }) :: acc)
            tables
            []
        in

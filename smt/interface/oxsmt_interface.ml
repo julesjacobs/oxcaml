@@ -24,6 +24,12 @@ module Model_check = Model_check
     drives it internally via {!Session}. *)
 module Cdclt = Cdclt
 
+(** The shared effort budget (board #60), exposed so the seam tests can construct a
+    {!Cdclt.t} directly (it takes a [~budget]) — e.g. the CONTRACT-LEMMA desugar coverage
+    ({!Cdclt.desugar_result_for_test}). Not part of the client-facing session flow, which
+    builds and resets it internally via {!Session}. *)
+module Budget = Budget
+
 (** The datatypes in-process model self-check (GOALS Datatypes), exposed so the sat-model
     gate can drive it directly — in particular to prove it RED against a
     deliberately-wrong constructor tree. Not part of the client-facing session flow, which
