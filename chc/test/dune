@@ -1,0 +1,10 @@
+; Self-tests for the CHC solver: parse + solve a graded suite of hand-written linear-LIA
+; HORN problems (safe + unsafe + out-of-fragment) and assert the verdict.  Wired into
+; `make chc-test`.  Exits nonzero on any mismatch (soundness: a wrong safe/unsafe is a
+; hard failure; unknown where a definite answer was expected is a soft miss, reported but
+; not failing, since v1 is incomplete).
+
+(executable
+ (name chc_test)
+ (modules chc_test)
+ (libraries oxsmt_chc))

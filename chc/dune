@@ -1,0 +1,10 @@
+; oxsmt_chc: a CHC (Constrained Horn Clause) solver over the oxsmt LIA engine
+; (Spacer/PDR-style safety + BMC for unsafety).  A DEV/RESEARCH subsystem, not part
+; of the shipped compiler: it links the test-only SMT-LIB s-expression layer
+; (oxsmt_smtlib_parser) to read HORN .smt2 and drives the shipped Session library
+; (oxsmt_interface) as a black box through its public API.  Stdlib-only like the rest
+; of oxsmt (I3).
+
+(library
+ (name oxsmt_chc)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib oxsmt_smtlib_parser oxsmt_lexical))

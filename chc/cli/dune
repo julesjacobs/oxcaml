@@ -1,0 +1,7 @@
+; chc_cli: read a HORN .smt2 file, solve it, print sat/unsat/unknown (CHC convention:
+; sat = SAFE, unsat = UNSAFE).  Dev/bench tooling over the oxsmt_chc library.
+
+(executable
+ (name chc_cli)
+ (modules chc_cli)
+ (libraries oxsmt_chc))

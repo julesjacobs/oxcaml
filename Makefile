@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -843,6 +843,16 @@ test: check-frozen
 	$(MAKE) satpre-test
 	$(MAKE) satcore-test
 	$(MAKE) lemma-backjump-test
+	$(MAKE) chc-test
+
+## chc-test — CHC (Constrained Horn Clause) solver self-tests: a graded suite of
+##   hand-written linear-LIA HORN problems solved through the full parse -> PDR/BMC
+##   pipeline (chc/). Soundness-first grading: an opposite definite verdict is a hard
+##   failure; [unknown] where a definite answer is expected is a (soft) incompleteness
+##   miss. Deterministic, budget-bounded (self-terminating).
+chc-test:
+	$(DUNE) build chc/test/chc_test.exe
+	$(DUNE) exec chc/test/chc_test.exe
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

@@ -1,0 +1,167 @@
+(* CHC (Constrained Horn Clause) intermediate representation.
+
+   A HORN problem is a set of clauses [forall vars. (constr /\ B_1 /\ ... /\ B_n) => H],
+   where the [B_i] are applied uninterpreted predicates, [constr] is an interpreted LIA
+   formula, and the head [H] is either an applied predicate or [false].
+
+   We deliberately keep the body/constraint/head as our OWN expression AST ([expr]) rather
+   than as fully-built {!Oxsmt_core.Term.t}s. The engine must re-express a clause over
+   many different renamings of its bound variables (one fresh copy per BMC step / PDR
+   frame), and oxsmt exposes no generic term substitution — the term type is hash-consed
+   and [private]. Carrying an [expr] plus a builder that takes a [string -> Term.t]
+   variable environment gives us free, capture-free renaming: the engine supplies the
+   mapping and {!build_bool} constructs the term through the shared {!Oxsmt_core.Context}. *)
+
+module Bigint = Oxsmt_core.Bigint
+module Sort = Oxsmt_core.Sort
+module Term = Oxsmt_core.Term
+module Context = Oxsmt_core.Context
+
+(* Interpreted / predicate expression over named variables. Sort-correctness is not
+   enforced here — it is enforced by {!Oxsmt_core.Context}'s smart constructors when the
+   builder runs, which is the single sanctioned construction path (I2). *)
+type expr =
+  | Var of string
+  | Int_lit of Bigint.t
+  | Bool_lit of bool
+  | Neg of expr
+  | Add of expr list
+  | Sub of expr list (* n-ary; [Sub [a;b;c]] = a-b-c; [Sub [a]] = -a *)
+  | Mul of expr * expr (* linear: at least one side must build to a constant *)
+  | Div of expr * expr
+  | Mod of expr * expr
+  | Eq of expr * expr
+  | Le of expr * expr
+  | Lt of expr * expr
+  | Ge of expr * expr
+  | Gt of expr * expr
+  | Not of expr
+  | And of expr list
+  | Or of expr list
+  | Implies of expr * expr
+  | Iff of expr * expr
+  | Ite of expr * expr * expr
+  | Distinct of expr list
+  | Pred_app of string * expr list
+
+(* An applied predicate. *)
+type app =
+  { pred : string
+  ; args : expr list
+  }
+
+type head =
+  | H_false
+  | H_pred of app
+
+(* A normalized Horn clause. *)
+type clause =
+  { vars : (string * Sort.t) list (* forall-bound variables and their sorts *)
+  ; body_apps : app list (* uninterpreted predicate applications in the antecedent *)
+  ; constr : expr list (* interpreted antecedent conjuncts (implicit conjunction) *)
+  ; head : head
+  }
+
+type pred =
+  { name : string
+  ; arg_sorts : Sort.t list
+  }
+
+let arity p = List.length p.arg_sorts
+
+type system =
+  { env : Oxsmt_core.Env.t
+  ; ctx : Context.t
+  ; preds : pred list
+  ; clauses : clause list
+  }
+
+let find_pred sys name = List.find_opt (fun p -> String.equal p.name name) sys.preds
+
+(* ------------------------------------------------------------------ *)
+(* Building oxsmt terms from an [expr] under a variable environment. *)
+(* ------------------------------------------------------------------ *)
+
+exception Build_error of string
+
+(* [const_of_expr] recognizes an expression that is a ground integer constant, so [Mul]
+   can route to the linear [mul_const] constructor (LIA admits only constant
+   coefficients). Returns [None] for anything non-constant. *)
+let rec const_of_expr (e : expr) : Bigint.t option =
+  match e with
+  | Int_lit n -> Some n
+  | Neg a -> Option.map Bigint.neg (const_of_expr a)
+  | Add es ->
+    List.fold_left
+      (fun acc e ->
+        match acc, const_of_expr e with
+        | Some s, Some n -> Some (Bigint.add s n)
+        | _ -> None)
+      (Some Bigint.zero)
+      es
+  | Sub (first :: rest) ->
+    (match const_of_expr first with
+     | None -> None
+     | Some f ->
+       List.fold_left
+         (fun acc e ->
+           match acc, const_of_expr e with
+           | Some s, Some n -> Some (Bigint.sub s n)
+           | _ -> None)
+         (Some f)
+         rest)
+  | Sub [] -> None
+  | Mul (a, b) ->
+    (match const_of_expr a, const_of_expr b with
+     | Some x, Some y -> Some (Bigint.mul x y)
+     | _ -> None)
+  | _ -> None
+;;
+
+let rec build (ctx : Context.t) (venv : string -> Term.t) (e : expr) : Term.t =
+  let b = build ctx venv in
+  match e with
+  | Var x -> venv x
+  | Int_lit n -> Context.int_const_big ctx n
+  | Bool_lit v -> Context.bool_const ctx v
+  | Neg a -> Context.neg ctx (b a)
+  | Add [] -> Context.int_const ctx 0
+  | Add (x :: rest) -> List.fold_left (fun acc e -> Context.add ctx acc (b e)) (b x) rest
+  | Sub [ x ] -> Context.neg ctx (b x)
+  | Sub (x :: rest) -> List.fold_left (fun acc e -> Context.sub ctx acc (b e)) (b x) rest
+  | Sub [] -> raise (Build_error "empty (-)")
+  | Mul (a, c) ->
+    (match const_of_expr a with
+     | Some k -> Context.mul_const_big ctx k (b c)
+     | None ->
+       (match const_of_expr c with
+        | Some k -> Context.mul_const_big ctx k (b a)
+        | None -> raise (Build_error "nonlinear multiplication")))
+  | Div (a, c) -> Context.div ctx (b a) (b c)
+  | Mod (a, c) -> Context.mod_ ctx (b a) (b c)
+  | Eq (a, c) -> Context.eq ctx (b a) (b c)
+  | Le (a, c) -> Context.le ctx (b a) (b c)
+  | Lt (a, c) -> Context.lt ctx (b a) (b c)
+  | Ge (a, c) -> Context.ge ctx (b a) (b c)
+  | Gt (a, c) -> Context.gt ctx (b a) (b c)
+  | Not a -> Context.not_ ctx (b a)
+  | And [] -> Context.bool_const ctx true
+  | And [ x ] -> b x
+  | And es -> Context.and_ ctx (List.map b es)
+  | Or [] -> Context.bool_const ctx false
+  | Or [ x ] -> b x
+  | Or es -> Context.or_ ctx (List.map b es)
+  | Implies (a, c) -> Context.implies ctx (b a) (b c)
+  | Iff (a, c) -> Context.iff ctx (b a) (b c)
+  | Ite (c, t, e) -> Context.ite ctx (b c) (b t) (b e)
+  | Distinct es -> Context.distinct ctx (List.map b es)
+  | Pred_app (name, _) ->
+    raise (Build_error ("predicate application in interpreted position: " ^ name))
+;;
+
+let build_bool ctx venv es =
+  match es with
+  | [] -> Context.bool_const ctx true
+  | [ e ] -> build ctx venv e
+  | _ -> Context.and_ ctx (List.map (build ctx venv) es)
+;;
