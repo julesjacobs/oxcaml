@@ -1,65 +1,37 @@
 (* TEST
- expect;
+ readonly_files = "sibling_ref.mli";
+ setup-ocamlc.byte-build-env;
+ module = "sibling_ref.mli";
+ ocamlc.byte;
+ module = "sibling_boundary.ml";
+ ocamlc.byte;
 *)
 
-(* NEGATIVE / EXPECTED-FAILURE test tracking the sibling-reference boundary gap
-   (VOX2_SIBLING_BOUNDARY_TODO).
+(* Positive regression test for the sibling-reference boundary.
 
-   The persistence stage rewrites all four reference-head representations under
-   Subst, but a predicate that references a same-signature sibling value does
-   not yet survive signature equality/inclusion end-to-end.  Two things are
-   still missing, both OUTSIDE the persistence fence and assigned to the primary
-   lane's next stage:
-     - lowering produces Rglobal(Pident ...) for a sibling reference (sibling-
-       head production is future work; fail-closed until then); and
-     - the includemod value-pairing arm (typing/includemod.ml Sig_value) adds
-       nothing to the pairing substitution, so the two signatures' value stamps
-       are never aligned and the heads compare on raw stamps.
+   A predicate that references a same-signature sibling value
+   ([val g : int{ _ = base }]) lowers to [Rglobal (Pident base)].  Signature
+   equality ([module type of]) and inclusion each independently rename the
+   value component, so the two copies used to carry different stamps for
+   [base] and the predicate heads failed to match.  The fix pairs [Sig_value]
+   identifiers in [includemod]'s component pairing (shared by the inclusion
+   and module-type-equality paths).  Every declaration below must COMPILE;
+   before the fix each failed with a "values do not match" stamp mismatch.
 
-   The functor identity below therefore fails: the parameter and result copies
-   of [S] carry different stamps for [base], so [g]'s predicate heads differ.
+   [sibling_ref.mli] compiling at all covers the functor-signature variant
+   ([module Make : functor (...) -> T], where [T]'s predicate names a sibling
+   of the functor result). *)
 
-   When the sibling-reference fix lands, THIS expect block must flip to
-   acceptance (the functor is well typed and no error is printed).  Do not
-   silence it before then. *)
+(* [module type of] exercises the module-type-equality path; the re-ascription
+   exercises the inclusion path. *)
+module type D = module type of Sibling_ref
 
+module Reexport : D = Sibling_ref
+
+(* Functor identity over a sibling-referencing signature (inclusion). *)
 module type S = sig
   val base : int
   val g : int{ _ = base }
 end
 
 module F (X : S) : S = X
-[%%expect {|
-Line 1:
-Error: Module type declarations do not match:
-         module type S =
-           sig
-             val base : int
-             val g : int{ (app[Stdlib!.=] _ global[base/289]) }
-           end
-       does not match
-         module type S =
-           sig
-             val base : int
-             val g : int{ (app[Stdlib!.=] _ global[base/293]) }
-           end
-       At position "module type S = <here>"
-       Module types do not match:
-         sig
-           val base : int
-           val g : int{ (app[Stdlib!.=] _ global[base/289]) }
-         end
-       is not equal to
-         sig
-           val base : int
-           val g : int{ (app[Stdlib!.=] _ global[base/296]) }
-         end
-       At position "module type S = <here>"
-       Values do not match:
-         val g : int{ (app[Stdlib!.=] _ global[base/289]) }
-       is not included in
-         val g : int{ (app[Stdlib!.=] _ global[base/293]) }
-       The type "int{ (app[Stdlib!.=] _ global[base/289]) }"
-       is not compatible with the type
-         "int{ (app[Stdlib!.=] _ global[base/293]) }"
-|}]

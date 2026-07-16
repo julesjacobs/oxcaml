@@ -775,6 +775,11 @@ let rec typexp copy_scope s ty =
         | Trefine refinement ->
           let map_type = typexp copy_scope s in
           let map_type_path path =
+            (* A constructor/field path that maps to a type function would make
+               [type_path] fail; return it unchanged instead. This is unreachable for a
+               source-produced predicate (constructor/field paths name concrete types, and
+               destructive type-function substitution targets abstract types), so it only
+               preserves a traversal invariant. *)
             if to_subst_by_type_function s path then path else type_path s path
           in
           let refinement =
