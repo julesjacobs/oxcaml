@@ -59,7 +59,8 @@ let cg_cuts_on =
 (* z3-parity throttle (util/lp/lp_settings.h m_hnf_cut_period); mirrored in {!Hnf.cut_period}. *)
 let hnf_cut_period = Hnf.cut_period
 
-(* Per-query budget on CG-cut ATTEMPTS (B3 only). An exact Hermite-Normal-Form over the
+(* Adapter-lifetime budget on CG-cut ATTEMPTS (B3 only) — the counter is NOT reset per
+   query; a per-query reset is a tracked follow-up (task #53). An exact Hermite-Normal-Form over the
    rank-reduced tight system costs ~O(coefficient blow-up) per call, and on files where
    the lattice cut is productive it collapses the search within a handful of cuts
    (measured: the rings prize cracks in ≤ 7 attempts); on files where it is NOT productive
@@ -294,9 +295,11 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
   then branch ()
   else (
     t.hnf_final_cuttable <- t.hnf_final_cuttable + 1;
-    (* B3 per-query attempt budget: after [cg_max_cuts] exact-HNF attempts, fall back to
-       plain b&b so an unproductive lattice cut cannot dominate the wall. B2 (no
-       [cg_cuts_on]) is unbudgeted — its behaviour is unchanged. *)
+    (* B3 attempt budget (adapter-lifetime — consumed across all queries of an incremental
+       session, NOT reset per query; per-query reset tracked as task #53): after
+       [cg_max_cuts] exact-HNF attempts, fall back to plain b&b so an unproductive lattice
+       cut cannot dominate the wall. B2 (no [cg_cuts_on]) is unbudgeted — behaviour
+       unchanged. *)
     let budget_exhausted = cg_cuts_on && t.cg_attempts >= cg_max_cuts in
     if t.hnf_final_cuttable mod hnf_cut_period <> 0 || budget_exhausted
     then branch ()

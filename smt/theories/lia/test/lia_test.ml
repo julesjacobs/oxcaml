@@ -1386,13 +1386,16 @@ let test_hnf_cut () =
    independent brute-force oracle: every emitted cut [f·x ≤ k] removes NO integer point of
    the FULL tight polyhedron (equalities ∧ inequalities). Because the shift preserves the
    multiplier's integer image and the fractional part of the rhs while forcing [μ' ≥ 0] on
-   every inequality row, an emitted cut stays T-valid; a mutant that BROKE the sign-shift
-   (used the raw, sign-invalid multiplier on an inequality row) would emit an invalid cut
-   and fail this oracle — the mutation tripwire. Verified RED: forcing the shift to a
-   no-op ([bigW.(k) <- w.(k)] unconditionally in {!Lia.cg_cut}) makes this sweep emit
-   unsound cuts and FAIL (documented in logs/lia-cuts-b3-log.md). B3 fires on strictly
-   MORE systems than B2 (the sign discipline no longer rejects), so the fired-count floor
-   is higher. *)
+   every inequality row, an emitted cut stays T-valid. The LOAD-BEARING soundness guard is
+   the INDEPENDENT sign tripwire: {!Lia.cg_cut} re-verifies [μ' ≥ 0] on every inequality
+   row from the ORIGINAL A/c (the [restricted && sign bigW < 0] recheck) and returns None
+   on any violation, so a buggy shift cannot emit an unsound cut — it is caught and dropped.
+   Verified RED, TWO variants: bypassing the shift ALONE (keep the tripwire) emits 0 unsound
+   cuts (the tripwire drops the sign-invalid candidates) — the shift is a productivity/
+   completeness mechanism, NOT the soundness guard; disabling the sign DISCIPLINE (shift AND
+   tripwire together) makes this sweep emit 1436 unsound cuts and FAIL (documented in
+   logs/lia-cuts-b3-log.md). B3 fires on strictly MORE systems than B2 (the sign discipline
+   shifts rather than rejects), so the fired-count floor is higher. *)
 let test_cg_cut () =
   print_endline "CG-separation cut (Lia.cg_cut) soundness:";
   (* Hand case (multi-row ℤ-infeasible, single-row gcd blind): B3 must also emit a valid
