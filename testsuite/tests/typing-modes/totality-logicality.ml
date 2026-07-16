@@ -1290,3 +1290,106 @@ Error: The value "toplevel_loop" is "partial"
          because it is used inside the function at line 2, characters 42-67
          which is expected to be "total".
 |}]
+
+(* F2 -- lazy totality mirror.  Construction inherits body partiality into the
+   lazy value's totality (the same way portability is inherited from the lazy
+   body, testsuite/tests/typing-modes/lazy.ml), and matching a [lazy] pattern is
+   a forcing operation classified partial exactly like [Lazy.force]. *)
+
+(* Construction: a pure thunk stays total-able. *)
+let good_lazy_pure @ total = lazy 0
+[%%expect{|
+val good_lazy_pure : int lazy_t = lazy 0
+|}]
+
+(* Construction: divergent, effectful, and mutable-allocating thunks yield a
+   partial lazy that fails the @ total demand. *)
+let bad_lazy_diverge @ total = lazy (let rec loop () = loop () in loop ())
+[%%expect{|
+Line 1, characters 55-59:
+1 | let bad_lazy_diverge @ total = lazy (let rec loop () = loop () in loop ())
+                                                           ^^^^
+Error: The value "loop" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 50-62
+         which is expected to be "total".
+|}]
+
+let bad_lazy_effect @ total = lazy (print_string "x"; 0)
+[%%expect{|
+Line 1, characters 36-48:
+1 | let bad_lazy_effect @ total = lazy (print_string "x"; 0)
+                                        ^^^^^^^^^^^^
+Error: The value "print_string" is "partial"
+       but is expected to be "total"
+         because it is used inside the lazy expression at line 1, characters 30-56
+         which is expected to be "total".
+|}]
+
+let bad_lazy_ref @ total = lazy (ref 0)
+[%%expect{|
+Line 1, characters 33-36:
+1 | let bad_lazy_ref @ total = lazy (ref 0)
+                                     ^^^
+Error: The value "ref" is "partial"
+       but is expected to be "total"
+         because it is used inside the lazy expression at line 1, characters 27-39
+         which is expected to be "total".
+|}]
+
+(* Forcing via a [lazy] pattern (match arm or let-binding) is partial. *)
+let bad_force_pattern @ total = fun l -> match l with lazy x -> x
+[%%expect{|
+Line 1, characters 54-60:
+1 | let bad_force_pattern @ total = fun l -> match l with lazy x -> x
+                                                          ^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_force_letpattern @ total = fun l -> let (lazy x) = l in x
+[%%expect{|
+Line 1, characters 48-56:
+1 | let bad_force_letpattern @ total = fun l -> let (lazy x) = l in x
+                                                    ^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+(* Late inference: the pattern force constrains the enclosing closure's still
+   unresolved totality. *)
+let late_force_pattern l = match l with lazy x -> x
+let _ = expects_total late_force_pattern
+[%%expect{|
+val late_force_pattern : 'a lazy_t -> 'a = <fun>
+Line 2, characters 22-40:
+2 | let _ = expects_total late_force_pattern
+                          ^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* [Lazy.force] is unchanged: partial. *)
+let bad_lazy_force @ total = fun l -> Lazy.force l
+[%%expect{|
+Line 1, characters 38-48:
+1 | let bad_lazy_force @ total = fun l -> Lazy.force l
+                                          ^^^^^^^^^^
+Error: The value "Lazy.force" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 29-50
+         which is expected to be "total".
+|}]
+
+(* Residue boundary preserved from the v2 campaign: residue in a lazy body inside
+   a total closure rejects (the residue walk reaches the enclosing closure); a
+   pure lazy in a total closure accepts. *)
+let bad_lazy_while_in_total @ total = fun () -> lazy (while true do () done)
+[%%expect{|
+Line 1, characters 53-76:
+1 | let bad_lazy_while_in_total @ total = fun () -> lazy (while true do () done)
+                                                         ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let good_lazy_pure_in_total @ total = fun () -> lazy 0
+[%%expect{|
+val good_lazy_pure_in_total : unit -> int lazy_t = <fun>
+|}]
