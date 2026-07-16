@@ -28,16 +28,38 @@ let diophantine_on =
   | Some _ -> false
 ;;
 
+(* Stage B HNF integer cuts (DARK; charter logs/lia-cuts-charter.md, spec
+   logs/lia-cuts-hnf-spec.md). Default OFF — byte-identical to trunk BY CONSTRUCTION: when
+   off, {!Lia.hnf_cut} is never called and no counter is touched, so this whole lane is
+   inert. When ON, at an integer-infeasible [Final] that {!Lia.diophantine_conflict} did
+   NOT refute, on every [hnf_cut_period]-th such Final a multi-row lattice cut is derived
+   over the asserted equality rows and emitted through the CONTRACT-LEMMA seam as
+   [Lemma [(cut, true); ¬antᵢ …]] (z3's assign(cut, core)), tightening the LP toward the
+   ring-lattice conflict. A miss (no cut / self-check fail / unmappable antecedent) falls
+   back to the B&B branch. *)
+let hnf_cuts_on =
+  match Sys.getenv_opt "OXSMT_HNF_CUTS" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | _ -> false
+;;
+
+(* z3-parity throttle (util/lp/lp_settings.h m_hnf_cut_period); mirrored in {!Hnf.cut_period}. *)
+let hnf_cut_period = Hnf.cut_period
+
 type t =
   { lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
   ; atom_of_term : Atom.t Term.Table.t
-    (* reverse map, for turning a propagated term back into its literal *)
+      (* reverse map, for turning a propagated term back into its literal *)
   ; mutable explain_cache :
       Fabric.Explanation.t Lit.Map.t (* propagated lit -> its lazy reason *)
   ; mutable frames : Lit.t list list
-    (* per-frame lits cached, head = current frame; used to drop stale reasons on [pop] *)
+      (* per-frame lits cached, head = current frame; used to drop stale reasons on [pop] *)
   ; mutable overflows : int (* overflow-induced degradations to unknown (adapter side) *)
+  ; mutable hnf_final_cuttable : int
+      (* count of integer-infeasible [Final]s reaching the branch fallback — the throttle
+         phase for HNF cuts (only touched when [hnf_cuts_on], so OFF is byte-identical). *)
+  ; mutable hnf_cuts_emitted : int (* HNF cuts emitted as a Lemma (instrumentation) *)
   }
 
 let create ctx _env =
@@ -47,6 +69,8 @@ let create ctx _env =
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
   ; overflows = 0
+  ; hnf_final_cuttable = 0
+  ; hnf_cuts_emitted = 0
   }
 ;;
 
@@ -199,6 +223,52 @@ let propagations t =
       Some lit)
 ;;
 
+(* Map a HNF cut ([cut_atom] + antecedent premise tokens) into a CONTRACT-LEMMA
+   [Fabric.Lemma]: the head [(cut_atom, true)] followed by each antecedent as its NEGATED
+   trail literal [(atom_term, not sign)]. The antecedents are currently true, so the
+   clause is unit on [cut_atom] and BCP propagates it (z3's assign(cut, core)). [None] —
+   falling back to the branch — if any antecedent token is not a plain trail literal
+   ([Fabric.Real]): a combined-child [Fabric] edge has no single atom term and a [Lemma]
+   carries only terms, so such a cut cannot be represented (soundly skipped, never emitted
+   with a missing premise); likewise if an atom is absent from the term map, or the
+   antecedent set is empty (never emit a premise-free cut). *)
+let hnf_lemma t : Fabric.check_result option =
+  match Lia.hnf_cut t.lia with
+  | None -> None
+  | Some (cut_atom, ant_tokens) ->
+    let rec map acc = function
+      | [] -> Some (List.rev acc)
+      | Fabric.Real lit :: rest ->
+        (match Atom.Table.find_opt t.term_of_atom (Lit.atom lit) with
+         | Some tm -> map ((tm, not (Lit.sign lit)) :: acc) rest
+         | None -> None)
+      | Fabric.Fabric _ :: _ -> None
+    in
+    (match map [] ant_tokens with
+     | None | Some [] -> None
+     | Some ants -> Some (Fabric.Lemma ((cut_atom, true) :: ants)))
+;;
+
+(* At an integer-infeasible [Final] the fallback is the B&B split [x<=v ; x>=v+1]. With
+   HNF cuts ON, on every [hnf_cut_period]-th such Final try a lattice cut and emit it as a
+   [Lemma] instead; a miss falls back to the branch. OFF (or a non-period Final) touches
+   no counter and returns the plain branch — byte-identical to trunk. *)
+let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
+  let branch () = Fabric.Split [ le_atom; ge_atom ] in
+  if not hnf_cuts_on
+  then branch ()
+  else (
+    t.hnf_final_cuttable <- t.hnf_final_cuttable + 1;
+    if t.hnf_final_cuttable mod hnf_cut_period <> 0
+    then branch ()
+    else (
+      match hnf_lemma t with
+      | Some lemma ->
+        t.hnf_cuts_emitted <- t.hnf_cuts_emitted + 1;
+        lemma
+      | None -> branch ()))
+;;
+
 let check_fabric t (effort : Theory.effort) : Fabric.check_result =
   guard t (fun () ->
     match Lia.check t.lia with
@@ -223,7 +293,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
              | None ->
                (match Lia.cube_model t.lia with
                 | Some _ -> Fabric.Sat
-                | None -> Fabric.Split [ le_atom; ge_atom ]))
+                | None -> branch_or_hnf_cut t le_atom ge_atom))
           | Some (le_atom, ge_atom) ->
             (* Before branching, try the Bromberger-Fleury unit cube test: a fat feasible
                region yields an integer model in one shrink+re-solve, skipping b&b (which
@@ -232,7 +302,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
                session R1 check; a miss falls back to the split. *)
             (match Lia.cube_model t.lia with
              | Some _ -> Fabric.Sat
-             | None -> Fabric.Split [ le_atom; ge_atom ]))))
+             | None -> branch_or_hnf_cut t le_atom ge_atom))))
 ;;
 
 let check t effort =
@@ -327,3 +397,4 @@ let pop t n =
 let is_poisoned t = Lia.is_poisoned t.lia
 let overflows_to_unknown t = t.overflows
 let pivot_count t = Lia.pivot_count t.lia
+let hnf_cuts_emitted t = t.hnf_cuts_emitted

@@ -113,6 +113,25 @@ val default_budget : int
     soundly). *)
 val diophantine_conflict : 'tok t -> 'tok conflict option
 
+(** [hnf_cut t] — after a {!Sat_candidate} whose ℚ-model is non-integral — a Stage B HNF
+    integer cut (charter logs/lia-cuts-charter.md, spec logs/lia-cuts-hnf-spec.md) over
+    the asserted integer EQUALITY rows. It surfaces a MULTI-ROW integer-lattice
+    infeasibility that {!diophantine_conflict}'s single-row gcd test cannot see, returned
+    as [Some (cut_atom, antecedent_tokens)] for emission through the CONTRACT-LEMMA seam:
+    [cut_atom] is the bound atom [f·x <= k] (built through the session {!Context}) and
+    [antecedent_tokens] are the equality rows' premise tokens whose lattice combination
+    proves it. The caller emits [Lemma [(cut_atom, true); ¬antecedentᵢ …]].
+
+    SOUND by a self-checked certificate INDEPENDENT of the HNF kernel: the emitted cut is
+    a rational multiplier [μ] of the contributing equality rows with [μ·A = f] (integer)
+    and [μ·c = β ∉ ℤ]; because the rows are equalities, [f·x = β] for every feasible [x],
+    so no integer point satisfies the antecedents (the clause is T-valid) and the LP
+    vertex is separated. [μ] is re-verified against the original rows before emission — a
+    wrong cut is dropped, never emitted. [None] when no cut is found, the system exceeds
+    the z3-parity caps ([Hnf.max_rows]/[Hnf.max_cols]), or the self-check fails (cut-only
+    degradation, never the verdict). Read-only over the engine state. *)
+val hnf_cut : 'tok t -> (Term.t * 'tok list) option
+
 (** [suggest_branch t] — after a {!Sat_candidate} — is the B&B split request for the
     lowest-tag non-integer variable [x] with value [v]: the atom pair
     [(x <= floor v, x >= floor v + 1)] built through the session {!Context}, mirroring the

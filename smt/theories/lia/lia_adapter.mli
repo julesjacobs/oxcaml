@@ -75,3 +75,8 @@ val overflows_to_unknown : t -> int
 
 (** Total simplex pivots performed by the underlying engine (determinism/perf stat). *)
 val pivot_count : t -> int
+
+(** Number of Stage-B HNF integer cuts this adapter has emitted (as CONTRACT-LEMMA lemmas)
+    since creation — the dark-lever instrumentation (0 when [OXSMT_HNF_CUTS] is off, so
+    OFF is byte-identical). *)
+val hnf_cuts_emitted : t -> int

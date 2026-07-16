@@ -106,28 +106,28 @@ let test_rational () =
   let ints = [ 0; 1; -1; 2; -3; 7; 1000; -1000; max_int; min_int; max_int - 1 ] in
   List.iter
     (fun a ->
-       List.iter
-         (fun b ->
-            check
-              (Printf.sprintf "fastpath add %d+%d exact" a b)
-              (Rational.equal
-                 (Rational.add (q a) (q b))
-                 (Rational.of_string (oracle_add a b)));
-            check
-              (Printf.sprintf "fastpath sub %d-%d exact" a b)
-              (Rational.equal
-                 (Rational.sub (q a) (q b))
-                 (Rational.of_string (oracle_sub a b)));
-            check
-              (Printf.sprintf "fastpath mul %d*%d exact" a b)
-              (Rational.equal
-                 (Rational.mul (q a) (q b))
-                 (Rational.of_string (oracle_mul a b)));
-            check
-              (Printf.sprintf "fastpath compare %d?%d matches int" a b)
-              (Int.compare (Rational.compare (q a) (q b)) 0
-               = Int.compare (Bigint.compare (bi a) (bi b)) 0))
-         ints)
+      List.iter
+        (fun b ->
+          check
+            (Printf.sprintf "fastpath add %d+%d exact" a b)
+            (Rational.equal
+               (Rational.add (q a) (q b))
+               (Rational.of_string (oracle_add a b)));
+          check
+            (Printf.sprintf "fastpath sub %d-%d exact" a b)
+            (Rational.equal
+               (Rational.sub (q a) (q b))
+               (Rational.of_string (oracle_sub a b)));
+          check
+            (Printf.sprintf "fastpath mul %d*%d exact" a b)
+            (Rational.equal
+               (Rational.mul (q a) (q b))
+               (Rational.of_string (oracle_mul a b)));
+          check
+            (Printf.sprintf "fastpath compare %d?%d matches int" a b)
+            (Int.compare (Rational.compare (q a) (q b)) 0
+             = Int.compare (Bigint.compare (bi a) (bi b)) 0))
+        ints)
     ints
 ;;
 
@@ -227,16 +227,16 @@ let farkas_combination fx premises farkas =
   let const = ref Rational.zero in
   List.iter2
     (fun tok mult ->
-       let coeffs, k = Hashtbl.find fx.hp tok in
-       List.iter
-         (fun (i, c) ->
-            let cur =
-              try Hashtbl.find acc i with
-              | Not_found -> Rational.zero
-            in
-            Hashtbl.replace acc i (Rational.add cur (Rational.mul mult (q c))))
-         coeffs;
-       const := Rational.add !const (Rational.mul mult (q k)))
+      let coeffs, k = Hashtbl.find fx.hp tok in
+      List.iter
+        (fun (i, c) ->
+          let cur =
+            try Hashtbl.find acc i with
+            | Not_found -> Rational.zero
+          in
+          Hashtbl.replace acc i (Rational.add cur (Rational.mul mult (q c))))
+        coeffs;
+      const := Rational.add !const (Rational.mul mult (q k)))
     premises
     farkas;
   acc, !const
@@ -552,7 +552,7 @@ let test_bruteforce () =
        let asg = Array.make n 0 in
        List.iter
          (fun (term, v) ->
-            Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
+           Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
          model;
        if not (List.for_all (sat_constraint asg) !constraints) then incr cube_mismatches);
     (match Lia.solve_integer fx.solver with
@@ -563,7 +563,7 @@ let test_bruteforce () =
        let asg = Array.make n 0 in
        List.iter
          (fun (term, v) ->
-            Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
+           Array.iteri (fun i vt -> if Term.equal vt term then asg.(i) <- v) fx.vars)
          model;
        if not (List.for_all (sat_constraint asg) !constraints) then incr mismatches
      | Lia.Int_unsat _ -> if expected then incr mismatches);
@@ -1224,6 +1224,134 @@ let test_diophantine () =
     (not (is_some (Lia.diophantine_conflict fx.solver)))
 ;;
 
+(* ================================================================== *)
+(* Stage B HNF integer cut (Lia.hnf_cut): a MULTI-ROW integer-lattice cut over asserted
+   equalities. The oracle is INDEPENDENT and brute-force: for every cut the producer
+   emits, enumerate the integer box and verify that EVERY point satisfying all the
+   asserted equalities also satisfies the cut [f·x <= k] — i.e. the cut removes no integer
+   solution of the antecedent equalities (validity). This is the mutation-testing tripwire
+   for a corrupt cut (a flipped coefficient / wrong rounding / wrong multiplier that
+   produced an UNSOUND cut would exclude a real integer point and fail here). Also checks
+   the producer fires on a hand case single-row gcd cannot see, and never emits on
+   integer-SAT systems. *)
+
+(* assert [Σ coeffs·x = rhs] (coeffs by var index), recording it for the brute-force
+   oracle *)
+let assert_eq_rec fx eqs coeffs rhs =
+  let lhs =
+    Context.linear_combination fx.ctx (List.map (fun (i, c) -> c, fx.vars.(i)) coeffs) 0
+  in
+  let eq = Context.eq fx.ctx lhs (Context.int_const fx.ctx rhs) in
+  Lia.assert_atom fx.solver eq ~polarity:true ~premise:fx.next_tok;
+  fx.next_tok <- fx.next_tok + 1;
+  eqs := (coeffs, rhs) :: !eqs
+;;
+
+(* parse the cut atom [f·x <= k], returned as [Le inner] with [inner = f·x - k <= 0], into
+   (coeffs-by-index, const) meaning [Σ coeffs·x + const <= 0]. *)
+let parse_cut fx (cut : Term.t) =
+  match cut.Term.node with
+  | Term.Le inner -> inner_halfplane fx inner
+  | _ -> failwith "hnf_cut: cut atom is not an Le"
+;;
+
+(* enumerate every integer point in [-b,b]^n, applying [f] *)
+let iter_box n b f =
+  let p = Array.make n (-b) in
+  let rec go i =
+    if i = n
+    then f p
+    else
+      for v = -b to b do
+        p.(i) <- v;
+        go (i + 1)
+      done
+  in
+  go 0
+;;
+
+let sum_at coeffs const p =
+  List.fold_left (fun acc (i, c) -> acc + (c * p.(i))) const coeffs
+;;
+
+let test_hnf_cut () =
+  print_endline "HNF cut (Lia.hnf_cut) soundness:";
+  (* Hand case: x0 + 2·x1 = 0, 2·x0 + x1 = 1 — ℚ-feasible (x0=2/3, x1=-1/3) but
+     ℤ-infeasible; every SINGLE-row gcd passes (gcd(1,2)=1|0, gcd(2,1)=1|1), so
+     diophantine_conflict cannot see it — the multi-row lattice cut must. *)
+  let fx = make_fixture 2 in
+  let eqs = ref [] in
+  assert_eq_rec fx eqs [ 0, 1; 1, 2 ] 0;
+  assert_eq_rec fx eqs [ 0, 2; 1, 1 ] 1;
+  (match Lia.check fx.solver with
+   | Lia.Sat_candidate ->
+     check "hnf hand: ℚ-feasible (rational relaxation ok)" true;
+     (match Lia.hnf_cut fx.solver with
+      | Some (cut, ants) ->
+        check "hnf hand: a cut is emitted on the multi-row ℤ-infeasible lattice" true;
+        check "hnf hand: cut cites >=1 antecedent" (List.length ants >= 1);
+        let cc, ck = parse_cut fx cut in
+        (* validity: no integer point satisfies both equalities and violates the cut *)
+        let bad = ref 0 in
+        iter_box 2 8 (fun p ->
+          let sat_eqs = List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs in
+          if sat_eqs && sum_at cc ck p > 0 then incr bad);
+        check "hnf hand: emitted cut removes no integer solution (valid)" (!bad = 0)
+      | None -> check "hnf hand: cut emitted (multi-row lattice infeasibility)" false)
+   | _ -> check "hnf hand: rational relaxation feasible" false);
+  (* Random sweep: small equality systems, both ℤ-sat and ℤ-unsat. Every emitted cut is
+     brute-force VALID (removes no integer eq-solution); no cut is ever emitted on a
+     system that HAS an integer solution in the box (a spurious cut would exclude it). *)
+  let rng = Random.State.make [| 0xB5C2; 7; 31 |] in
+  let systems = 3000 in
+  let fired = ref 0
+  and unsound = ref 0
+  and spurious = ref 0 in
+  for _ = 1 to systems do
+    let n = 2 + Random.State.int rng 2 (* 2..3 vars *) in
+    let neq = 2 + Random.State.int rng 2 (* 2..3 eqs *) in
+    let fx = make_fixture n in
+    let eqs = ref [] in
+    for _ = 1 to neq do
+      let coeffs =
+        List.init n (fun i -> i, -3 + Random.State.int rng 7)
+        |> List.filter (fun (_, c) -> c <> 0)
+      in
+      let coeffs = if coeffs = [] then [ 0, 1 ] else coeffs in
+      assert_eq_rec fx eqs coeffs (-5 + Random.State.int rng 11)
+    done;
+    match Lia.check fx.solver with
+    | exception _ -> ()
+    | Lia.Conflict _ -> () (* rationally infeasible: no cut sought *)
+    | Lia.Sat_candidate ->
+      (match Lia.hnf_cut fx.solver with
+       | exception _ -> ()
+       | None -> ()
+       | Some (cut, _) ->
+         incr fired;
+         let cc, ck = parse_cut fx cut in
+         let has_int_sol = ref false in
+         iter_box n 6 (fun p ->
+           let sat_eqs = List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs in
+           if sat_eqs
+           then (
+             has_int_sol := true;
+             if sum_at cc ck p > 0 then incr unsound));
+         (* a cut on a system WITH an integer solution in the box is spurious (and the
+            [unsound] counter above would already have caught it excluding that point) *)
+         if !has_int_sol then incr spurious)
+  done;
+  Printf.printf
+    "    (%d systems; cuts fired=%d unsound=%d spurious-on-sat=%d)\n"
+    systems
+    !fired
+    !unsound
+    !spurious;
+  check "hnf sweep: no emitted cut removes an integer solution (SOUND)" (!unsound = 0);
+  check "hnf sweep: no cut emitted on a box-integer-feasible system" (!spurious = 0);
+  check "hnf sweep: cuts fired on a meaningful set" (!fired > systems / 50)
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -1242,6 +1370,7 @@ let () =
   test_determinism_big ();
   test_notify_equality ();
   test_diophantine ();
+  test_hnf_cut ();
   Printf.printf "\nlia self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

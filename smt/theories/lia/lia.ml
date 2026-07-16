@@ -778,6 +778,168 @@ let first_non_integer t =
   !best
 ;;
 
+(* Stage B HNF integer cut (charter logs/lia-cuts-charter.md, spec
+   logs/lia-cuts-hnf-spec.md). Over the currently-asserted integer EQUALITY rows, detect a
+   MULTI-ROW integer-lattice infeasibility that the single-row {!diophantine_conflict} gcd
+   test cannot see, and return it as a separating cut for emission through the
+   CONTRACT-LEMMA seam. Result is [Some (cut_atom, antecedent_tokens)]: [cut_atom] is the
+   bound atom [f·x <= k] built through the session {!Context}, and [antecedent_tokens] are
+   the premise tokens of the equality rows whose lattice combination proves the cut.
+   [None] when no cut is found, the system exceeds the z3-parity caps, or the self-check
+   fails (a degradation of THE CUT only, never the verdict).
+
+   {b Soundness (self-checked, independent of the HNF kernel).} Assemble the equality rows
+   as an integer system [A·x = c] (each row holds as an equality in every model of the
+   current assignment). Compute the row HNF [U·A = H] (U unimodular). For an HNF row [i]
+   let [g = gcd(H[i])]; if [g] does not divide [d_i = (U·c)_i] then the rational
+   multiplier [μ = U[i] / g] over the original rows gives [f = μ·A] (integer, [= H[i]/g])
+   and [β = μ·c = d_i/g ∉ ℤ]. Since the rows are equalities, [f·x = μ·A·x = μ·c = β] for
+   EVERY feasible [x]; as [f·x ∈ ℤ] for integer [x] but [β ∉ ℤ], no integer point
+   satisfies the antecedents, so the clause [(⋀ eqᵢ) → (f·x ≤ ⌊β⌋)] is T-valid, and it
+   separates the LP vertex ([f·x0 = β > ⌊β⌋]). The certificate [μ] is RE-VERIFIED here
+   against the ORIGINAL rows [A]/[c] ([μ·A = f] exact integer, [μ·c = β ∉ ℤ]); a kernel or
+   assembly bug fails this check and the cut is dropped — an unsound cut is never emitted. *)
+let hnf_cut t : (Term.t * 'tok list) option =
+  ensure_live t;
+  if Simplex.is_poisoned t.simplex
+  then None
+  else (
+    (* Integer equality rows (same source/discipline as {!diophantine_conflict}): each
+       asserted equality's merged linear form over problem-var ids + rhs + premise token,
+       dropping malformed/non-integer/out-of-fragment rows soundly. *)
+    let rows =
+      List.filter_map
+        (fun (a, b, tok) ->
+          try
+            let merged, rhs = equality_merged t a b in
+            if List.for_all (fun (_, c) -> Rational.is_int c) merged
+               && Rational.is_int rhs
+            then Some (merged, rhs, tok)
+            else None
+          with
+          | Exit | Rational.Overflow -> None)
+        (List.concat t.eq_frames)
+    in
+    let rowsA = Array.of_list rows in
+    let m = Array.length rowsA in
+    (* compact column index over the problem-var ids appearing in the rows *)
+    let col_of = Hashtbl.create 64 in
+    Array.iter
+      (fun (merged, _, _) ->
+        List.iter
+          (fun (id, _) ->
+            if not (Hashtbl.mem col_of id)
+            then Hashtbl.replace col_of id (Hashtbl.length col_of))
+          merged)
+      rowsA;
+    let n = Hashtbl.length col_of in
+    if m = 0 || n = 0 || m > Hnf.max_rows || n > Hnf.max_cols
+    then None
+    else (
+      let id_of_col = Array.make n 0 in
+      Hashtbl.iter (fun id j -> id_of_col.(j) <- id) col_of;
+      let term_of_id = Hashtbl.create 64 in
+      Dynarray.iter (fun (id, tm) -> Hashtbl.replace term_of_id id tm) t.problem_vars;
+      (* integer matrix A (m×n) and rhs c (m) over Bigint (coeffs are integer Rationals) *)
+      let mat_a = Array.make_matrix m n Bigint.zero in
+      let vec_c = Array.make m Bigint.zero in
+      Array.iteri
+        (fun i (merged, rhs, _) ->
+          List.iter
+            (fun (id, cf) -> mat_a.(i).(Hashtbl.find col_of id) <- Rational.num_bigint cf)
+            merged;
+          vec_c.(i) <- Rational.num_bigint rhs)
+        rowsA;
+      let hnf = Hnf.compute mat_a in
+      let u = hnf.Hnf.u
+      and h = hnf.Hnf.h in
+      (* d = U·c *)
+      let dot_row_c row =
+        let s = ref Bigint.zero in
+        for k = 0 to m - 1 do
+          s := Bigint.add !s (Bigint.mul row.(k) vec_c.(k))
+        done;
+        !s
+      in
+      let floor_div a b =
+        (* ⌊a/b⌋ with b > 0; Bigint.divmod truncates toward zero (r carries a's sign). *)
+        let q, r = Bigint.divmod a b in
+        if Bigint.sign r < 0 then Bigint.sub q Bigint.one else q
+      in
+      let result = ref None in
+      let i = ref 0 in
+      while Option.is_none !result && !i < m do
+        let hi = h.(!i) in
+        let ui = u.(!i) in
+        let g = Array.fold_left Bigint.gcd Bigint.zero hi in
+        if not (Bigint.is_zero g)
+        then (
+          let di = dot_row_c ui in
+          let _, r0 = Bigint.divmod di g in
+          if not (Bigint.is_zero r0)
+          then (
+            (* candidate cut on row i; re-verify the μ = ui/g certificate against A/c *)
+            let ok = ref true in
+            let f = Array.make n Bigint.zero in
+            for j = 0 to n - 1 do
+              let s = ref Bigint.zero in
+              for k = 0 to m - 1 do
+                s := Bigint.add !s (Bigint.mul ui.(k) mat_a.(k).(j))
+              done;
+              (* kernel-consistency tripwire: U·A must equal H for this row *)
+              if not (Bigint.equal !s hi.(j)) then ok := false;
+              (* f = (U·A)/g must be integer (recomputed from the ORIGINAL A) *)
+              let qj, rj = Bigint.divmod !s g in
+              if Bigint.is_zero rj then f.(j) <- qj else ok := false
+            done;
+            (* β = (U·c)/g must be NON-integer (recomputed from the ORIGINAL c): this is
+               the separation + validity witness (equalities force f·x = β ∉ ℤ). Explicit
+               here so the emission self-check is standalone-complete — a mutated
+               candidate gate cannot slip an integer-β (spurious, integer-feasible) cut
+               through. *)
+            let num_beta =
+              let s = ref Bigint.zero in
+              for k = 0 to m - 1 do
+                s := Bigint.add !s (Bigint.mul ui.(k) vec_c.(k))
+              done;
+              !s
+            in
+            let _, rb = Bigint.divmod num_beta g in
+            if Bigint.is_zero rb then ok := false;
+            if !ok
+            then (
+              let coeffs =
+                let acc = ref [] in
+                for j = n - 1 downto 0 do
+                  if not (Bigint.is_zero f.(j))
+                  then acc := (f.(j), Hashtbl.find term_of_id id_of_col.(j)) :: !acc
+                done;
+                !acc
+              in
+              match coeffs with
+              | [] -> () (* f ≡ 0 impossible with β ∉ ℤ, but never emit a constant cut *)
+              | _ ->
+                let k_bound = floor_div di g in
+                let pol = Context.linear_combination_big t.ctx coeffs Bigint.zero in
+                let cut_atom =
+                  Context.le t.ctx pol (Context.int_const_big t.ctx k_bound)
+                in
+                let ants =
+                  let acc = ref [] in
+                  for k = m - 1 downto 0 do
+                    if not (Bigint.is_zero ui.(k))
+                    then (
+                      let _, _, tok = rowsA.(k) in
+                      acc := tok :: !acc)
+                  done;
+                  !acc
+                in
+                result := Some (cut_atom, ants))));
+        incr i
+      done;
+      !result))
+;;
+
 let suggest_branch t =
   ensure_live t;
   match first_non_integer t with
