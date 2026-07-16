@@ -141,6 +141,9 @@ core-prelude-test:
 ##   conflicts, assumption semantics, incremental add-after-solve, every sat model
 ##   self-checked by evaluation, and thousands of random CNFs cross-checked against
 ##   an independent DPLL oracle. Nonzero exit on any failed check (TASKS.md M1-sat).
+##   Also pinned OXSMT_SATCORE_MODES=0: post the #29 scoped flip pure-SAT solves default the
+##   mode alternation ON, which perturbs sat_test's exact conflict-count pins; =0 forces the
+##   trunk restart cadence those pins capture (the alternation itself is covered by satcore-test).
 ##   Run with OXSMT_LGC_FIXED=0 (the conflict-count reduceDB schedule) so the reduceDB
 ##   ENGAGEMENT + flat-arena RELOCATION pins (test_reducedb_engagement,
 ##   test_arena_reduce_db_stress: PHP(8,7) c=4141/digest ...) keep firing reduceDB ~10x

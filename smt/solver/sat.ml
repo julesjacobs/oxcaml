@@ -254,7 +254,12 @@ type t =
        [Auto] (default) ⇒ [Option.is_none t.theory] (alternate iff pure-SAT); [Force_on] ⇒
        always true; [Force_off] ⇒ always false. So a theory-attached (SMT) solve under the
        default env has [satcore_modes = false] ⇒ byte-identical to the pre-flip trunk BY
-       CONSTRUCTION, while a pure-SAT solve gets the alternation (the SATLIB win). *)
+       CONSTRUCTION, while a pure-SAT solve gets the alternation (the SATLIB win). This
+       identity holds for ANY caller, not only the attach-at-create production driver:
+       [set_theory]'s pristine-attach guard REJECTS (raises [invalid_arg] on) a
+       mid-lifecycle (de)attach once clauses or trail exist, so [t.theory] — and hence the
+       re-derived [satcore_modes] of a theory-attached solve — is constant over a
+       clause-bearing solver. *)
     mutable satcore_modes : bool
   ; satcore_modes_env : satcore_modes_mode
   ; mutable stable_mode : bool
@@ -500,8 +505,10 @@ let satcore_modes_mode_from_env () =
 ;;
 
 (* Mode-hold initial interval ([OXSMT_SATCORE_MODE_INIT], conflicts): a MEASUREMENT knob
-   only (ruling 2), default [satcore_mode_init]. ONLY consulted when OXSMT_SATCORE_MODES
-   is on, so it never perturbs the byte-identical OFF path. A malformed or non-positive
+   only (ruling 2), default [satcore_mode_init]. ONLY consulted when the effective
+   mode-alternation gate is on (pure-SAT under the #29 [Auto] default, or
+   OXSMT_SATCORE_MODES=1), so it never perturbs the byte-identical theory-attached /
+   forced-OFF path. A malformed or non-positive
    value falls back to the default. *)
 let satcore_mode_init_from_env () =
   match Sys.getenv_opt "OXSMT_SATCORE_MODE_INIT" with
@@ -2851,8 +2858,9 @@ let search t assumps conflict_limit =
         t.decisions_since_rephase <- 0;
         t.conflicts_since_restart <- 0;
         result := Some R_restart)
-      else if (* Restart policy. OFF (default): trunk — the Luby conflict cap plus the
-                 dark global adaptive trigger. ON (OXSMT_SATCORE_MODES): mode-scoped —
+      else if (* Restart policy. OFF (SMT default, or OXSMT_SATCORE_MODES=0): trunk — the
+                 Luby conflict cap plus the dark global adaptive trigger. ON (pure-SAT
+                 default post-#29 scoped flip, or OXSMT_SATCORE_MODES=1): mode-scoped —
                  focused mode fires the EMA restart, stable mode is quiet; the Luby cap is
                  bypassed. Either way a restart is the ordinary [cancel_until 0]
                  (trail-monotone, seam-safe). *)

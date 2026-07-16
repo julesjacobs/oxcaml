@@ -124,8 +124,9 @@ let set_modes ~on ~init =
   else Unix.putenv "OXSMT_SATCORE_MODES" "0"
 ;;
 
-(* Drive the three env states explicitly for the scoped-flip test. [`Auto] UNSETS the var
-   (the default ⇒ alternate iff theory-free); [`On]/[`Off] force. mode_init armed so a
+(* Drive the three env states explicitly for the scoped-flip test. [`Auto] sets the var to
+   "" (empty ≡ unset for the env parser ⇒ the default: alternate iff theory-free);
+   [`On]/[`Off] force. mode_init armed so a
    theory-free Auto/On churns fast on the larger instances. *)
 let set_modes_env state ~init =
   Unix.putenv "OXSMT_SATCORE_MODE_INIT" (string_of_int init);
