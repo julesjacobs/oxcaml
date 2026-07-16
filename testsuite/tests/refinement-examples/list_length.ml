@@ -8,14 +8,19 @@
  expect;
 *)
 
-(* The program may pattern-match; only the predicate must stay inside the
-   currently supported predicate subset.  Its predicate uses identifiers,
-   equality, and application of the prelude measure.
+(* The predicate uses identifiers, equality, and application of the prelude
+   measure [Vox_spec.list_length].
 
    FINAL: once recursive measures can be total, the recursive call's refined
-   result is the induction hypothesis for the cons case.  CURRENT: the
-   verification pass reaches the obligation but cannot yet represent the [match]
-   expression form in a verification condition, so it rejects the body. *)
+   result is the induction hypothesis for the cons case.  CURRENT: the measure
+   [Vox_spec.list_length] is an ordinary (partial) user function -- not one of
+   the comparison primitives admitted inside a predicate.  A predicate is checked
+   at [total], so forming the refinement type calls the partial measure and is
+   rejected at totality, before any verification obligation is generated.  The
+   [unlocks] tag keeps [modes] alongside recursive-totality and verification:
+   the mode discipline is what now rejects the measure, and reaching the final
+   ACCEPT additionally needs the measure to become total (recursive-totality)
+   and the obligation to be discharged (verification). *)
 
 #load "vox_spec.cmo";;
 
@@ -28,9 +33,10 @@ let rec length (values : int list)
   | _head :: tail -> 1 + length tail
 
 [%%expect {|
-Lines 4-6, characters 2-36:
-4 | ..match values with
-5 |   | [] -> 0
-6 |   | _head :: tail -> 1 + length tail
-Error: Refinement verification failed: this expression form cannot yet be represented in a verification condition
+Line 2, characters 15-35:
+2 |     : int{ _ = Vox_spec.list_length values }
+                   ^^^^^^^^^^^^^^^^^^^^
+Error: The value "Vox_spec.list_length" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 2, characters 6-44).
 |}]

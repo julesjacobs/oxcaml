@@ -9,11 +9,15 @@
 *)
 
 (* This avoids the unresolved bare-implementation direction.  The
-   implementation result [_ = x * x] and interface result [_ >= 0] are both
-   refined; FINAL sealing proves the directed implication.  The Seals merge made
-   the seal-VC engage here, so rejection is now the directed-implication VC
-   (structural mismatch -> not-proved), as this example predicted; the VC still
-   awaits total-comparisons to reach the final ACCEPT. *)
+   implementation result [_ = x * x] and interface result [Vox_spec.int_ge _ 0]
+   are both refined; FINAL sealing proves the directed implication.  CURRENT: the
+   interface predicate is written through the prelude wrapper [Vox_spec.int_ge],
+   an ordinary (partial) user function -- not one of the comparison primitives
+   admitted inside a predicate.  A predicate is checked at [total], so forming
+   the interface refinement type calls the partial wrapper and is rejected at
+   totality, before the seal VC engages.  When total comparisons make the wrapper
+   total-annotatable the seal's directed-implication VC engages again; the
+   [unlocks] tag records that dependency. *)
 
 #load "vox_spec.cmo";;
 
@@ -25,17 +29,10 @@ end = struct
 end
 
 [%%expect {|
-Lines 3-5, characters 6-3:
-3 | ......struct
-4 |   let square (x : int) = (x * x : int{ _ = x * x })
-5 | end
-Error: Refinement verification failed at module seal for value "square" (not-proved)
-Line 2, characters 2-48:
+Line 2, characters 27-42:
 2 |   val square : int -> int{ Vox_spec.int_ge _ 0 }
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  Interface declaration for value square
-Line 4, characters 6-12:
-4 |   let square (x : int) = (x * x : int{ _ = x * x })
-          ^^^^^^
-  Implementation declaration for value square
+                               ^^^^^^^^^^^^^^^
+Error: The value "Vox_spec.int_ge" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 2, characters 22-48).
 |}]

@@ -32,10 +32,28 @@ type rich =
      }
 |}]
 
+(* A predicate is checked at [total] with the refined self viewed [logical].
+   Comparing the self reads its representation, which requires [physical]
+   access.  For a self whose type CROSSES logicality (an immediate such as
+   [int], see [int_reentrant] below) that is fine.  For a POLYMORPHIC self the
+   type is not known to cross, so the comparison is rejected: a polymorphic self
+   cannot be compared in its own predicate until the self's kind is known to
+   cross logicality.  Restriction deferred, unlocked by kind-constrained
+   declarations (the same feature that unlocks total comparisons); the sibling
+   [int_reentrant] keeps the parametric-refinement elaboration coverage. *)
 type 'a reentrant = 'a{ ((_ : 'a) = _) }
 
 [%%expect {|
-type 'a reentrant = 'a{ (app[Stdlib!.=] _ _) }
+Line 1, characters 26-27:
+1 | type 'a reentrant = 'a{ ((_ : 'a) = _) }
+                              ^
+Error: This value is "logical" but is expected to be "physical".
+|}]
+
+type int_reentrant = int{ ((_ : int) = _) }
+
+[%%expect {|
+type int_reentrant = int{ (app[Stdlib!.=] _ _) }
 |}]
 
 type drains_delayed_checks = int{

@@ -29,7 +29,7 @@ One **semantic** reconciliation (clean text, broken meaning) was needed:
 
   RESOLUTION (both-sides preservation, modes-deferred): dropped the four lines touching the
   deleted globals; kept the still-valid `delayed_checks`/`allocations` isolation, the region
-  lock, and BOTH `VOX2_MODES_TODO` markers (wiring the total/logical refinement context and
+  lock, and both modes-integration markers (wiring the total/logical refinement context and
   the logical closure lock into this frame is the modes-integration stage). Post-v2 there is
   no global ambient totality state to isolate -- the enclosing totality is a local value on
   `expected_mode`, and `type_refinement` types the predicate at `Mode.Value.legacy`, so no
@@ -93,7 +93,7 @@ closure-capture totality analysis observes the predicate's `>` (a polymorphic co
 partial in the totality axis) elaborated inside the closure body and marks the closure
 partial ("closes over the value (>) ... which is partial").
 
-This is the un-integrated boundary flagged by the two `VOX2_MODES_TODO` markers in
+This is the un-integrated boundary flagged by the two modes-integration markers in
 `with_refinement_typing_frame`: the frame does not yet establish a total/logical refinement
 context or add the closure lock that would isolate the predicate's captured/used values from
 the enclosing closure's totality. Every useful refinement predicate uses a comparison, so
@@ -110,7 +110,7 @@ interference"). Per "do not force green", this was escalated. RULING (main, 2026
 the merge stands as-is; the rejection is the mode-stub gap in canonical form -- predicates
 are checked at total with mentioned variables @ logical, so the predicate belongs to a
 logical context that must be isolated from the host closure's capture analysis by the
-logical closure lock (the second VOX2_MODES_TODO). Wiring that lock is modes-integration
+logical closure lock (the second modes-integration marker). Wiring that lock is modes-integration
 work (task #6), not merge scope. It is conservative/sound (over-rejects), and non-regression
 was proven (accepts at top level and in ordinary closures; the deleted ambients were never
 read by the closure-lock path).
@@ -122,7 +122,7 @@ integration flips it loudly when the closure lock lands.
 
 ### Forward pointer for the modes-integration lane (task #6)
 `with_refinement_typing_frame` (typing/typecore.ml ~4702) is precisely where total+logical
-predicate checking gets wired. Its two VOX2_MODES_TODO markers are the entry point: the
+predicate checking gets wired. Its two modes-integration markers are the entry point: the
 frame must (1) establish the total/logical refinement context for predicate elaboration and
 (2) add the logical closure lock that presents captured ambient values at logical mode --
 i.e. decide the correct env/lock context so a predicate elaborated inside a total closure is
@@ -138,6 +138,6 @@ the totality context is functionally threaded (`expected_mode` + env ambient loc
 fresh elaboration inside `type_refinement` cannot leak ambient totality state and there is
 nothing to save/restore -- the isolation the old lines provided is now inherent.
 
-## VOX2_MODES_TODO marker count
+## Modes-integration marker count
 4 on HEAD (unchanged) -- all in typing/typecore.ml (2 in `with_refinement_typing_frame`,
 2 in `type_refinement`). Modes integration remains the next stage.

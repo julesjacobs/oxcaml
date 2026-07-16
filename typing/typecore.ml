@@ -555,6 +555,14 @@ let primitive_is_total = function
   | "%apply" | "%revapply" -> true
   | _ -> false
 
+(* This must stay in sync with [Vox_lean.primitive_builtin]: these comparisons
+   are the same audited pure, deterministic proposition constructors. *)
+let primitive_is_refinement_comparison = function
+  | "%equal" | "%notequal"
+  | "%lessthan" | "%lessequal"
+  | "%greaterthan" | "%greaterequal" -> true
+  | _ -> false
+
 let total_primitive_mode mode =
   mode |> Value.meet_const_with Totality Totality.Const.Total
 
@@ -4684,6 +4692,7 @@ let check_unused
 (** Some delayed checks, to be executed after typing the whole
     compilation unit or toplevel phrase *)
 let delayed_checks = ref []
+let refinement_predicate_context = ref false
 let reset_delayed_checks () = delayed_checks := []
 let add_delayed_check f =
   delayed_checks := (f, Warnings.backup ()) :: !delayed_checks
@@ -4699,21 +4708,22 @@ let force_delayed_checks () =
   reset_delayed_checks ();
   Btype.backtrack snap
 
-let with_refinement_typing_frame env f =
+let with_refinement_typing_frame ~loc env f =
   let outer_delayed_checks = !delayed_checks in
   let outer_allocations = !allocations in
+  let outer_refinement_predicate_context = !refinement_predicate_context in
   delayed_checks := [];
   allocations := [];
-  (* VOX2_MODES_TODO: replace the ordinary ambient expression context with
-     the total/logical refinement context supplied by the modes workstream.
-     The base-era ambient totality refs were removed by the v2 spec adaptation;
-     the enclosing totality is now carried on [expected_mode], so the modes
-     stage must establish the refinement context there rather than via a
-     global ref. *)
+  refinement_predicate_context := true;
   Fun.protect
     (fun () ->
-      (* VOX2_MODES_TODO: add the logical closure lock that presents captured
-         ambient values at logical mode. *)
+      let env =
+        Env.add_const_closure_lock ~ghost:true (loc, Expression)
+          { Mode.Value.Comonadic.Const.max with
+            totality = Mode.Totality.Const.Total;
+          }
+          env
+      in
       let env = Env.add_region_lock env in
       let result = f env in
       force_delayed_checks ();
@@ -4721,7 +4731,8 @@ let with_refinement_typing_frame env f =
       result)
     ~finally:(fun () ->
       delayed_checks := outer_delayed_checks;
-      allocations := outer_allocations)
+      allocations := outer_allocations;
+      refinement_predicate_context := outer_refinement_predicate_context)
 
 let rec final_subexpression exp =
   match exp.exp_desc with
@@ -9379,7 +9390,10 @@ and type_ident env ?(recarg=Rejected) lid =
   let mode = cross_left env desc.val_type mode in
   let mode =
     match desc.val_kind with
-    | Val_prim { prim_name; _ } when primitive_is_total prim_name ->
+    | Val_prim { prim_name; _ }
+      when primitive_is_total prim_name
+           || (!refinement_predicate_context
+               && primitive_is_refinement_comparison prim_name) ->
         total_primitive_mode mode
     | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
     | Val_anc _ -> mode
@@ -14097,7 +14111,7 @@ let reject_unresolved_refinement_types skeleton predicate =
 
 let type_refinement env loc skeleton predicate =
   Typetexp.TyVarEnv.with_reentrant_scope (fun () ->
-    with_refinement_typing_frame env (fun env ->
+    with_refinement_typing_frame ~loc env (fun env ->
       let sort =
         match
           Ctype.type_sort
@@ -14129,14 +14143,42 @@ let type_refinement env loc skeleton predicate =
           val_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
         }
       in
-      (* VOX2_MODES_TODO: bind the refined value at logical mode. *)
+      let logical_mode =
+        let logical_lower_bound =
+          Mode.Value.of_const
+          { Mode.Value.Const.legacy with
+            logicality = Mode.Logicality.Const.Logical;
+          }
+        in
+        let logical_upper_bound =
+          Mode.Value.legacy
+          |> Mode.Value.join_const_with Logicality
+               Mode.Logicality.Const.Logical
+        in
+        let mode, _ = Mode.Value.newvar_below logical_upper_bound in
+        Mode.Value.submode_exn logical_lower_bound mode;
+        mode
+      in
+      (* Refinement skeletons are not generalized yet, so cross using their
+         jkind rather than the type's principality-sensitive crossing. *)
+      let self_mode =
+        logical_mode
+        |> Mode.Crossing.apply_left
+             (Ctype.type_jkind_purely env skeleton
+              |> Ctype.crossing_of_jkind env)
+      in
       let env =
-        Env.add_value ~mode:Mode.Value.legacy ref_view.rb_id description env
+        Env.add_value ~mode:self_mode ref_view.rb_id description env
       in
       let predicate = replace_refinement_holes predicate in
-      (* VOX2_MODES_TODO: check at total mode with logical captures. *)
+      let predicate_mode =
+        Mode.Value.of_const
+          { Mode.Value.Const.legacy with
+            totality = Mode.Totality.Const.Total;
+          }
+      in
       let typed_predicate =
-        type_expect env ~mode:Mode.Value.legacy predicate
+        type_expect env ~mode:predicate_mode predicate
           (mk_expected Predef.type_bool)
       in
       let ref_pred =
