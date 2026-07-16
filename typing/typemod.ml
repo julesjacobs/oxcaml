@@ -4147,7 +4147,8 @@ let type_toplevel_phrase env sig_acc s =
   Typecore.reset_allocations ();
   let (str, sg, mode, to_remove_from_sg, shape, env) =
     type_structure ~toplevel:(Some sig_acc) ~funct_body:false None env s in
-  Vox_verify.verify_structure ~toplevel:true str;
+  if not !Clflags.vox_type_only then
+    Vox_verify.verify_structure ~toplevel:true str;
   Value.submode_err (Location.none, Structure) mode toplevel_mode;
   remove_mode_and_jkind_variables env sg;
   remove_mode_and_jkind_variables_for_toplevel str;
@@ -4467,7 +4468,7 @@ let type_implementation target modulename initial_env ast =
         Profile.record_call "infer" (fun () -> type_structure initial_env ast)
       in
       Profile.record_call "refinement verification" (fun () ->
-        Vox_verify.verify_structure str);
+        if not !Clflags.vox_type_only then Vox_verify.verify_structure str);
       Value.submode_err (Location.in_file sourcefile, Structure)
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
       let uid = Uid.of_compilation_unit_id modulename in
