@@ -1001,3 +1001,117 @@ let local_exception_is_allowed @ total =
 val try_is_allowed : unit -> int = <fun>
 val local_exception_is_allowed : unit -> int = <fun>
 |}]
+
+(* Hereditary regression guard (round 4): a let-bound local function whose body
+   contains residue is itself partial.  The residue constraint reaches every
+   ambient closure lock, so the enclosing function is constrained partial too.
+   Applying such a local inside a total closure is therefore rejected -- the
+   defect that reopened the residue soundness class between rounds 2 and 3. *)
+let bad_applied_local_tail @ total = fun () -> let inner () = while true do () done in inner ()
+[%%expect{|
+Line 1, characters 62-83:
+1 | let bad_applied_local_tail @ total = fun () -> let inner () = while true do () done in inner ()
+                                                                  ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_applied_local_fun @ total = fun () -> let inner = fun () -> while true do () done in inner ()
+[%%expect{|
+Line 1, characters 68-89:
+1 | let bad_applied_local_fun @ total = fun () -> let inner = fun () -> while true do () done in inner ()
+                                                                        ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_applied_local_operand @ total = fun () -> let inner () = (while true do () done; 0) in inner () + 0
+[%%expect{|
+Line 1, characters 66-87:
+1 | let bad_applied_local_operand @ total = fun () -> let inner () = (while true do () done; 0) in inner () + 0
+                                                                      ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_applied_local_tuple @ total = fun () -> let inner () = while true do () done in (inner (), 0)
+[%%expect{|
+Line 1, characters 63-84:
+1 | let bad_applied_local_tuple @ total = fun () -> let inner () = while true do () done in (inner (), 0)
+                                                                   ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+(* Statefulness rather than divergence: the local builds a mutable array. *)
+let bad_applied_local_array @ total = fun () -> let inner () = [| 0 |] in inner ()
+[%%expect{|
+Line 1, characters 63-70:
+1 | let bad_applied_local_array @ total = fun () -> let inner () = [| 0 |] in inner ()
+                                                                   ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+(* Per (Hereditary) a partial function literal in a total body is rejected
+   whether it is applied, returned, or merely bound and discarded. *)
+let bad_returned_local @ total = fun () -> let inner () = while true do () done in inner
+[%%expect{|
+Line 1, characters 58-79:
+1 | let bad_returned_local @ total = fun () -> let inner () = while true do () done in inner
+                                                              ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_discarded_local @ total = fun () -> let _inner = fun () -> while true do () done in 0
+[%%expect{|
+Line 1, characters 67-88:
+1 | let bad_discarded_local @ total = fun () -> let _inner = fun () -> while true do () done in 0
+                                                                       ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+(* Residue reached through a method -- a deferred closure like a function
+   literal, typed by the Typeclass subsystem -- is constrained through the same
+   ambient closure locks. *)
+let bad_method_invoke @ total = fun () -> let o = object method m = (while true do () done; 0) end in o#m
+[%%expect{|
+Line 1, characters 69-90:
+1 | let bad_method_invoke @ total = fun () -> let o = object method m = (while true do () done; 0) end in o#m
+                                                                         ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_method_local @ total = fun () -> let _o = object method m = while true do () done end in 0
+[%%expect{|
+Line 1, characters 68-89:
+1 | let bad_method_local @ total = fun () -> let _o = object method m = while true do () done end in 0
+                                                                        ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+(* Late inference: the enclosing function's totality is an unsolved variable
+   forced total only at the later use; the residue constraint must still fire. *)
+let late_applied_local () = let inner () = while true do () done in inner ()
+let _ = expects_total late_applied_local
+[%%expect{|
+val late_applied_local : unit -> 'a = <fun>
+Line 2, characters 22-40:
+2 | let _ = expects_total late_applied_local
+                          ^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_method_invoke () = let o = object method m = (while true do () done; 0) end in o#m
+let _ = expects_total late_method_invoke
+[%%expect{|
+val late_method_invoke : unit -> int = <fun>
+Line 2, characters 22-40:
+2 | let _ = expects_total late_method_invoke
+                          ^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* Controls: a pure local stays total -- applied or returned -- so ordinary
+   helper definitions are unaffected. *)
+let good_applied_local @ total = fun () -> let inner () = 0 in inner ()
+let good_returned_local @ total = fun () -> let inner () = 0 in inner
+[%%expect{|
+val good_applied_local : unit -> int = <fun>
+val good_returned_local : unit -> unit -> int = <fun>
+|}]
