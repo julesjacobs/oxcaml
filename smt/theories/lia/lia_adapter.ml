@@ -60,14 +60,14 @@ let cg_cuts_on =
 let hnf_cut_period = Hnf.cut_period
 
 (* Adapter-lifetime budget on CG-cut ATTEMPTS (B3 only) — the counter is NOT reset per
-   query; a per-query reset is a tracked follow-up (task #53). An exact Hermite-Normal-Form over the
-   rank-reduced tight system costs ~O(coefficient blow-up) per call, and on files where
-   the lattice cut is productive it collapses the search within a handful of cuts
-   (measured: the rings prize cracks in ≤ 7 attempts); on files where it is NOT productive
-   the cut fires repeatedly without progress and its cost dominates the 2 s wall. Bounding
-   the attempts to a small constant keeps the prize gains and caps the worst-case tax — a
-   proportional cost guard, not a solver heuristic. Overridable ([OXSMT_CG_MAX_CUTS]) for
-   measurement. *)
+   query; a per-query reset is a tracked follow-up (task #53). An exact
+   Hermite-Normal-Form over the rank-reduced tight system costs ~O(coefficient blow-up)
+   per call, and on files where the lattice cut is productive it collapses the search
+   within a handful of cuts (measured: the rings prize cracks in ≤ 7 attempts); on files
+   where it is NOT productive the cut fires repeatedly without progress and its cost
+   dominates the 2 s wall. Bounding the attempts to a small constant keeps the prize gains
+   and caps the worst-case tax — a proportional cost guard, not a solver heuristic.
+   Overridable ([OXSMT_CG_MAX_CUTS]) for measurement. *)
 let cg_max_cuts =
   match Option.bind (Sys.getenv_opt "OXSMT_CG_MAX_CUTS") int_of_string_opt with
   | Some n when n >= 0 -> n
@@ -295,11 +295,24 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
   then branch ()
   else (
     t.hnf_final_cuttable <- t.hnf_final_cuttable + 1;
-    (* B3 attempt budget (adapter-lifetime — consumed across all queries of an incremental
-       session, NOT reset per query; per-query reset tracked as task #53): after
-       [cg_max_cuts] exact-HNF attempts, fall back to plain b&b so an unproductive lattice
-       cut cannot dominate the wall. B2 (no [cg_cuts_on]) is unbudgeted — behaviour
-       unchanged. *)
+    (* B3 attempt budget (per adapter INSTANCE): after [cg_max_cuts] exact-HNF attempts,
+       fall back to plain b&b so an unproductive lattice cut cannot dominate the wall. B2
+       (no [cg_cuts_on]) is unbudgeted — behaviour unchanged.
+
+       Scoping (task #53 H3 finding): this IS per-query on the corpus and on the
+       batch/reset paths — a non-incremental query runs in its own [create]d adapter
+       (cg_attempts=0), and a datatype/array registry change between queries
+       drops+recreates the theory ([Cdclt.reset_for_new_query] nulls it), so the budget is
+       fresh. The one residual is a PERSISTING-theory INCREMENTAL session
+       (push;assert;check-sat;…;check-sat with no registry change): the adapter survives
+       across check-sats, so the budget accumulates and later check-sats under-fire. A
+       truly per-check-sat reset would need a "new query" notification reaching the
+       theory, which neither the frozen [Theory] interface nor the [Sat.theory] callback
+       record exposes (the only per-solve-ish hook, [on_backtrack] level 0, also fires on
+       mid-solve RESTARTS — resetting there would REFRESH the budget mid-solve and change
+       the batch rings result, so it is unsound as a per-query proxy). Wiring such a hook
+       is a follow-up (it touches the internalization combinator), tracked for the
+       cut-policy lane; the corpus/headline are unaffected either way. *)
     let budget_exhausted = cg_cuts_on && t.cg_attempts >= cg_max_cuts in
     if t.hnf_final_cuttable mod hnf_cut_period <> 0 || budget_exhausted
     then branch ()

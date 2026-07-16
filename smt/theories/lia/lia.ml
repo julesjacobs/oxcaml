@@ -861,8 +861,17 @@ let select_independent_rows rows col_of n ~limit =
       | 0 -> compare a b
       | c -> c)
     order;
-  (* reduced pivot rows as (pivot_col, Rational vector over [0,n)); a candidate is independent
-     iff it has a nonzero entry after elimination against every existing pivot. *)
+  (* Pivot rows kept in REDUCED row-echelon form: each [(pivot_col, vec)] has [vec] zero
+     at every OTHER pivot's column (a proper RREF, not just forward echelon). This is what
+     makes the independence test correct — WITHOUT back-reduction a stale pivot [pv] can
+     carry a nonzero at a later pivot's column, so forward-eliminating a candidate
+     reintroduces a nonzero at an already-covered pivot column and the "first surviving
+     nonzero" scan can mistake a spanned direction for a new one, ACCEPTING a dependent
+     row (codex #51 H2). Two invariants maintained on each accept: the new candidate is
+     forward-reduced against all existing pivots (zero at their columns), and every
+     existing pivot is back-reduced by the new one (zero at its column). Together every
+     stored pivot is zero at all other pivot columns, so one forward pass now fully clears
+     a candidate at every pivot column and the test is exact. *)
   let pivots = ref [] in
   let selected = ref [] in
   let count = ref 0 in
@@ -872,6 +881,7 @@ let select_independent_rows rows col_of n ~limit =
     let signdef, _, _, _ = rows.(ri) in
     let vec = Array.make n Rational.zero in
     List.iter (fun (id, c) -> vec.(Hashtbl.find col_of id) <- c) signdef;
+    (* forward-reduce the candidate against every pivot (order-independent under RREF) *)
     List.iter
       (fun (pc, pv) ->
         if not (Rational.is_zero vec.(pc))
@@ -889,7 +899,18 @@ let select_independent_rows rows col_of n ~limit =
     done;
     if !pc >= 0
     then (
-      pivots := (!pc, vec) :: !pivots;
+      (* back-reduce existing pivots by the new one, so all pivots stay mutually reduced *)
+      let pcv = !pc in
+      List.iter
+        (fun (_, pv) ->
+          if not (Rational.is_zero pv.(pcv))
+          then (
+            let factor = Rational.div pv.(pcv) vec.(pcv) in
+            for j = 0 to n - 1 do
+              pv.(j) <- Rational.sub pv.(j) (Rational.mul factor vec.(j))
+            done))
+        !pivots;
+      pivots := (pcv, vec) :: !pivots;
       selected := ri :: !selected;
       incr count);
     incr i

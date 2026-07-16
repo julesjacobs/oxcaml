@@ -1274,6 +1274,175 @@ let sum_at coeffs const p =
   List.fold_left (fun acc (i, c) -> acc + (c * p.(i))) const coeffs
 ;;
 
+(* A recorded antecedent constraint, keyed by its premise token so a cut's
+   cited-antecedent set can be reconstructed from the tokens it returns.
+   [CEq (coeffs, rhs)] is [Σ coeffs·x = rhs]; [CLe (coeffs, const)] is
+   [Σ coeffs·x + const <= 0]. *)
+type cons =
+  | CEq of (int * int) list * int
+  | CLe of (int * int) list * int
+
+let sat_cons p = function
+  | CEq (co, r) -> sum_at co 0 p = r
+  | CLe (co, k) -> sum_at co k p <= 0
+;;
+
+(* Shared hardened soundness sweep for a cut producer ([Lia.hnf_cut] or [Lia.cg_cut]).
+   Random mixed systems of integer equalities + one-sided inequalities; for every emitted
+   cut [f·x <= k] it runs TWO independent brute-force oracles over the integer box, and
+   hardens the three #51 H4 gaps:
+
+   1. FULL-system oracle (as before): no integer point of [eqs ∧ les] violates the cut.
+   2. CITED-ANTECEDENT oracle (stronger, lemma-faithful): the cut is emitted as the lemma
+      [(cut) ∨ ¬ant_k …], i.e. it claims validity given EXACTLY its cited antecedents. So
+      no integer point of the cut's OWN cited antecedent set may violate it — a strictly
+      stronger obligation than the full system (the full system has more constraints,
+      hence fewer models, hence is easier to satisfy the cut under). This catches an
+      UNDER-CITED lemma (valid only because of a non-cited constraint), which the
+      full-system oracle cannot. Every cited token must map to an asserted premise
+      ([missing_cited]).
+   3. NON-VACUITY: counts cuts whose cited antecedents actually admit an integer box
+      point, so the oracle is provably exercising real points rather than passing on empty
+      antecedent sets (the vacuity of the ℤ-infeasible hand case, whose antecedents have
+      NO integer solutions). Asserted > 0.
+   4. EXCEPTIONS un-silenced: any exception from [check]/the producer is counted and fails
+      the test (these small, small-coefficient systems must not raise — Overflow needs
+      >int63, Poisoned needs a bricked instance; neither occurs here). The old sweep
+      swallowed all exceptions with [exception _ -> ()], which would have masked a
+      producer crash. (The box is bounded, so this is a bounded — not exhaustive —
+      soundness witness; the two oracles together are the "un-box-only" hardening.) *)
+let run_cut_sweep ~label ~seed ~producer =
+  let rng = Random.State.make seed in
+  let systems = 3000 in
+  let fired = ref 0
+  and unsound_full = ref 0
+  and unsound_cited = ref 0
+  and nonvacuous = ref 0
+  and missing_cited = ref 0
+  and exns = ref 0 in
+  for _ = 1 to systems do
+    let n = 2 + Random.State.int rng 2 in
+    let neq = 1 + Random.State.int rng 2 in
+    let nle = 1 + Random.State.int rng 3 in
+    let fx = make_fixture n in
+    let eqs = ref [] in
+    let les = ref [] in
+    let tbl : (int, cons) Hashtbl.t = Hashtbl.create 16 in
+    let rand_coeffs () =
+      let c =
+        List.init n (fun i -> i, -3 + Random.State.int rng 7)
+        |> List.filter (fun (_, c) -> c <> 0)
+      in
+      if c = [] then [ 0, 1 ] else c
+    in
+    for _ = 1 to neq do
+      let coeffs = rand_coeffs () in
+      let rhs = -5 + Random.State.int rng 11 in
+      let tok = fx.next_tok in
+      assert_eq_rec fx eqs coeffs rhs;
+      Hashtbl.replace tbl tok (CEq (coeffs, rhs))
+    done;
+    for _ = 1 to nle do
+      let coeffs = rand_coeffs () in
+      let const = -6 + Random.State.int rng 13 in
+      let tok = assert_le fx coeffs const ~polarity:true in
+      les := (coeffs, const) :: !les;
+      Hashtbl.replace tbl tok (CLe (coeffs, const))
+    done;
+    match Lia.check fx.solver with
+    | exception _ -> incr exns
+    | Lia.Conflict _ -> () (* rationally infeasible: no cut sought *)
+    | Lia.Sat_candidate ->
+      (match producer fx.solver with
+       | exception _ -> incr exns
+       | None -> ()
+       | Some (cut, ants) ->
+         incr fired;
+         let cc, ck = parse_cut fx cut in
+         (* (1) full-system oracle *)
+         iter_box n 6 (fun p ->
+           let sat_all =
+             List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
+             && List.for_all (fun (co, k) -> sum_at co k p <= 0) !les
+           in
+           if sat_all && sum_at cc ck p > 0 then incr unsound_full);
+         (* (2) cited-antecedent oracle: reconstruct the lemma's OWN premise set *)
+         let cited =
+           List.sort_uniq compare ants
+           |> List.map (fun tok ->
+             match Hashtbl.find_opt tbl tok with
+             | Some c -> c
+             | None ->
+               incr missing_cited;
+               CLe ([], 0)
+             (* placeholder; the missing_cited=0 check fails loud *))
+         in
+         let saw = ref false in
+         iter_box n 6 (fun p ->
+           if List.for_all (sat_cons p) cited
+           then (
+             saw := true;
+             if sum_at cc ck p > 0 then incr unsound_cited));
+         if !saw then incr nonvacuous)
+  done;
+  Printf.printf
+    "    (%s: %d systems; fired=%d unsound_full=%d unsound_cited=%d nonvacuous=%d \
+     missing_cited=%d exns=%d)\n"
+    label
+    systems
+    !fired
+    !unsound_full
+    !unsound_cited
+    !nonvacuous
+    !missing_cited
+    !exns;
+  check
+    (label ^ ": no cut removes an integer point of the FULL polyhedron")
+    (!unsound_full = 0);
+  check
+    (label ^ ": no cut removes an integer point of its CITED antecedents (lemma-faithful)")
+    (!unsound_cited = 0);
+  check (label ^ ": every cited token maps to an asserted premise") (!missing_cited = 0);
+  check (label ^ ": no unexpected exception from check/producer") (!exns = 0);
+  check
+    (label ^ ": cited-antecedent oracle non-vacuous (validated real integer points)")
+    (!nonvacuous > 0);
+  check (label ^ ": cuts fired on a meaningful set") (!fired > systems / 50)
+;;
+
+(* A NON-VACUOUS hand cut: [x0>=0, x1>=0, 2·x0+2·x1<=3] — ℚ-feasible with a fractional
+   vertex, and (unlike the ℤ-infeasible lattice hand case, whose antecedents have NO
+   integer points so any validity oracle over them is vacuous) it HAS integer points
+   (0,0),(1,0), (0,1). A CG/HNF cut here must genuinely PRESERVE those points, so the
+   validity oracle is non-vacuous. [producer] is the cut under test. *)
+let check_nonvacuous_hand ~label ~producer =
+  let fx = make_fixture 2 in
+  ignore (assert_le fx [ 0, -1 ] 0 ~polarity:true : int) (* -x0 <= 0 i.e. x0 >= 0 *);
+  ignore (assert_le fx [ 1, -1 ] 0 ~polarity:true : int) (* x1 >= 0 *);
+  ignore (assert_le fx [ 0, 2; 1, 2 ] (-3) ~polarity:true : int) (* 2x0+2x1 <= 3 *);
+  match Lia.check fx.solver with
+  | Lia.Sat_candidate ->
+    (match producer fx.solver with
+     | None -> () (* not obligated to cut here; the sweep carries the fired-count floor *)
+     | Some (cut, _) ->
+       let cc, ck = parse_cut fx cut in
+       let pts = ref 0
+       and bad = ref 0 in
+       iter_box 2 6 (fun p ->
+         let feasible = p.(0) >= 0 && p.(1) >= 0 && (2 * p.(0)) + (2 * p.(1)) <= 3 in
+         if feasible
+         then (
+           incr pts;
+           if sum_at cc ck p > 0 then incr bad));
+       check
+         (label ^ " nonvacuous hand: integer points exist (oracle non-vacuous)")
+         (!pts > 0);
+       check
+         (label ^ " nonvacuous hand: cut preserves every integer point (valid)")
+         (!bad = 0))
+  | _ -> check (label ^ " nonvacuous hand: rational relaxation feasible") false
+;;
+
 let test_hnf_cut () =
   print_endline "HNF cut (Lia.hnf_cut) soundness:";
   (* Hand case: x0 + 2·x1 = 0, 2·x0 + x1 = 1 — ℚ-feasible (x0=2/3, x1=-1/3) but
@@ -1291,12 +1460,25 @@ let test_hnf_cut () =
         check "hnf hand: a cut is emitted on the multi-row ℤ-infeasible lattice" true;
         check "hnf hand: cut cites >=1 antecedent" (List.length ants >= 1);
         let cc, ck = parse_cut fx cut in
-        (* validity: no integer point satisfies both equalities and violates the cut *)
-        let bad = ref 0 in
+        (* This lattice is ℤ-INFEASIBLE, so a validity oracle over its integer points is
+           VACUOUS (there are none) — the honest property here is that the cut fires where
+           single-row gcd is blind, and that the antecedents really have no integer point
+           (so the cut is a sound refutation witness, not an exclusion of a real
+           solution). NON-vacuous validity is carried by {!check_nonvacuous_hand} +
+           {!run_cut_sweep}. *)
+        let eq_pts = ref 0
+        and viol = ref 0 in
         iter_box 2 8 (fun p ->
-          let sat_eqs = List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs in
-          if sat_eqs && sum_at cc ck p > 0 then incr bad);
-        check "hnf hand: emitted cut removes no integer solution (valid)" (!bad = 0)
+          if List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
+          then (
+            incr eq_pts;
+            if sum_at cc ck p > 0 then incr viol));
+        check
+          "hnf hand: antecedent system is ℤ-infeasible (validity oracle vacuous here)"
+          (!eq_pts = 0);
+        check
+          "hnf hand: cut excludes no integer point of the antecedents (vacuously)"
+          (!viol = 0)
       | None -> check "hnf hand: cut emitted (multi-row lattice infeasibility)" false)
    | _ -> check "hnf hand: rational relaxation feasible" false);
   (* Guard RED (deterministic, permanent): an integer-FEASIBLE equality system
@@ -1315,68 +1497,15 @@ let test_hnf_cut () =
        "hnf guard: NO cut on an integer-feasible equality system (β-gate + self-check)"
        (Lia.hnf_cut fxs.solver = None)
    | _ -> check "hnf guard: feasible relaxation" false);
+  (* A NON-VACUOUS hand cut: integer points exist and must be preserved (fixes the vacuity
+     of the ℤ-infeasible case above). *)
+  check_nonvacuous_hand ~label:"hnf" ~producer:Lia.hnf_cut;
   (* Random MIXED sweep (B2): small systems of integer EQUALITIES and one-sided
-     INEQUALITIES. The B2 cut is a Chvátal–Gomory cut over the tight rows, so unlike Stage
-     B it may legitimately fire on a feasible system (a valid tightening) — the ONLY
-     soundness obligation is that every emitted cut removes NO integer point of the FULL
-     polyhedron (equalities ∧ inequalities). This is the mutation-testing tripwire: a
-     mutant that drops the per-row μ≥0 sign discipline (or the β/integrality checks) would
-     emit an invalid cut excluding a real integer point and fail here. *)
-  let rng = Random.State.make [| 0xB5C2; 7; 31 |] in
-  let systems = 3000 in
-  let fired = ref 0
-  and unsound = ref 0 in
-  for _ = 1 to systems do
-    let n = 2 + Random.State.int rng 2 (* 2..3 vars *) in
-    let neq = 1 + Random.State.int rng 2 (* 1..2 eqs *) in
-    let nle = 1 + Random.State.int rng 3 (* 1..3 inequalities *) in
-    let fx = make_fixture n in
-    let eqs = ref [] in
-    let les = ref [] in
-    let rand_coeffs () =
-      let c =
-        List.init n (fun i -> i, -3 + Random.State.int rng 7)
-        |> List.filter (fun (_, c) -> c <> 0)
-      in
-      if c = [] then [ 0, 1 ] else c
-    in
-    for _ = 1 to neq do
-      assert_eq_rec fx eqs (rand_coeffs ()) (-5 + Random.State.int rng 11)
-    done;
-    for _ = 1 to nle do
-      (* assert [Σ coeffs·x + const ≤ 0]; record the half-plane for the box oracle *)
-      let coeffs = rand_coeffs () in
-      let const = -6 + Random.State.int rng 13 in
-      ignore (assert_le fx coeffs const ~polarity:true : int);
-      les := (coeffs, const) :: !les
-    done;
-    match Lia.check fx.solver with
-    | exception _ -> ()
-    | Lia.Conflict _ -> () (* rationally infeasible: no cut sought *)
-    | Lia.Sat_candidate ->
-      (match Lia.hnf_cut fx.solver with
-       | exception _ -> ()
-       | None -> ()
-       | Some (cut, _) ->
-         incr fired;
-         let cc, ck = parse_cut fx cut in
-         iter_box n 6 (fun p ->
-           let sat_all =
-             List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
-             && List.for_all (fun (co, k) -> sum_at co k p <= 0) !les
-           in
-           (* a feasible integer point of the FULL polyhedron must satisfy the cut *)
-           if sat_all && sum_at cc ck p > 0 then incr unsound))
-  done;
-  Printf.printf
-    "    (%d mixed systems; cuts fired=%d unsound=%d)\n"
-    systems
-    !fired
-    !unsound;
-  check
-    "hnf sweep: no emitted cut removes an integer point of the polyhedron (SOUND)"
-    (!unsound = 0);
-  check "hnf sweep: cuts fired on a meaningful set" (!fired > systems / 50)
+     INEQUALITIES, through the shared hardened sweep (full-system AND cited-antecedent
+     oracles, non-vacuity, un-silenced exceptions). The mutation-testing tripwire: a
+     mutant that drops the per-row μ≥0 sign discipline (or the β/integrality checks) emits
+     an invalid cut and fails the oracle(s). *)
+  run_cut_sweep ~label:"hnf sweep" ~seed:[| 0xB5C2; 7; 31 |] ~producer:Lia.hnf_cut
 ;;
 
 (* Stage B3 CG-separation cut (Lia.cg_cut): the same MULTI-ROW tight-constraint
@@ -1389,13 +1518,13 @@ let test_hnf_cut () =
    every inequality row, an emitted cut stays T-valid. The LOAD-BEARING soundness guard is
    the INDEPENDENT sign tripwire: {!Lia.cg_cut} re-verifies [μ' ≥ 0] on every inequality
    row from the ORIGINAL A/c (the [restricted && sign bigW < 0] recheck) and returns None
-   on any violation, so a buggy shift cannot emit an unsound cut — it is caught and dropped.
-   Verified RED, TWO variants: bypassing the shift ALONE (keep the tripwire) emits 0 unsound
-   cuts (the tripwire drops the sign-invalid candidates) — the shift is a productivity/
-   completeness mechanism, NOT the soundness guard; disabling the sign DISCIPLINE (shift AND
-   tripwire together) makes this sweep emit 1436 unsound cuts and FAIL (documented in
-   logs/lia-cuts-b3-log.md). B3 fires on strictly MORE systems than B2 (the sign discipline
-   shifts rather than rejects), so the fired-count floor is higher. *)
+   on any violation, so a buggy shift cannot emit an unsound cut — it is caught and
+   dropped. Verified RED, TWO variants: bypassing the shift ALONE (keep the tripwire)
+   emits 0 unsound cuts (the tripwire drops the sign-invalid candidates) — the shift is a
+   productivity/ completeness mechanism, NOT the soundness guard; disabling the sign
+   DISCIPLINE (shift AND tripwire together) makes this sweep emit 1436 unsound cuts and
+   FAIL (documented in logs/lia-cuts-b3-log.md). B3 fires on strictly MORE systems than B2
+   (the sign discipline shifts rather than rejects), so the fired-count floor is higher. *)
 let test_cg_cut () =
   print_endline "CG-separation cut (Lia.cg_cut) soundness:";
   (* Hand case (multi-row ℤ-infeasible, single-row gcd blind): B3 must also emit a valid
@@ -1411,11 +1540,22 @@ let test_cg_cut () =
         check "cg hand: a cut is emitted on the multi-row ℤ-infeasible lattice" true;
         check "cg hand: cut cites >=1 antecedent" (List.length ants >= 1);
         let cc, ck = parse_cut fx cut in
-        let bad = ref 0 in
+        (* ℤ-INFEASIBLE lattice: the validity oracle over its integer points is VACUOUS
+           (there are none). Assert exactly that (a sound refutation witness); non-vacuous
+           validity is carried by {!check_nonvacuous_hand} + {!run_cut_sweep}. *)
+        let eq_pts = ref 0
+        and viol = ref 0 in
         iter_box 2 8 (fun p ->
-          let sat_eqs = List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs in
-          if sat_eqs && sum_at cc ck p > 0 then incr bad);
-        check "cg hand: emitted cut removes no integer solution (valid)" (!bad = 0)
+          if List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
+          then (
+            incr eq_pts;
+            if sum_at cc ck p > 0 then incr viol));
+        check
+          "cg hand: antecedent system is ℤ-infeasible (validity oracle vacuous here)"
+          (!eq_pts = 0);
+        check
+          "cg hand: cut excludes no integer point of the antecedents (vacuously)"
+          (!viol = 0)
       | None -> check "cg hand: cut emitted (multi-row lattice infeasibility)" false)
    | _ -> check "cg hand: rational relaxation feasible" false);
   (* Guard (deterministic, permanent): an integer-FEASIBLE equality system has an integer
@@ -1430,61 +1570,13 @@ let test_cg_cut () =
        "cg guard: NO cut on an integer-feasible equality system (β-gate + self-check)"
        (Lia.cg_cut fxs.solver = None)
    | _ -> check "cg guard: feasible relaxation" false);
-  (* Random MIXED sweep: integer equalities + one-sided inequalities. Every emitted CG cut
-     must remove no integer point of the full polyhedron — the sign-shift tripwire. *)
-  let rng = Random.State.make [| 0xC63B; 11; 43 |] in
-  let systems = 3000 in
-  let fired = ref 0
-  and unsound = ref 0 in
-  for _ = 1 to systems do
-    let n = 2 + Random.State.int rng 2 in
-    let neq = 1 + Random.State.int rng 2 in
-    let nle = 1 + Random.State.int rng 3 in
-    let fx = make_fixture n in
-    let eqs = ref [] in
-    let les = ref [] in
-    let rand_coeffs () =
-      let c =
-        List.init n (fun i -> i, -3 + Random.State.int rng 7)
-        |> List.filter (fun (_, c) -> c <> 0)
-      in
-      if c = [] then [ 0, 1 ] else c
-    in
-    for _ = 1 to neq do
-      assert_eq_rec fx eqs (rand_coeffs ()) (-5 + Random.State.int rng 11)
-    done;
-    for _ = 1 to nle do
-      let coeffs = rand_coeffs () in
-      let const = -6 + Random.State.int rng 13 in
-      ignore (assert_le fx coeffs const ~polarity:true : int);
-      les := (coeffs, const) :: !les
-    done;
-    match Lia.check fx.solver with
-    | exception _ -> ()
-    | Lia.Conflict _ -> ()
-    | Lia.Sat_candidate ->
-      (match Lia.cg_cut fx.solver with
-       | exception _ -> ()
-       | None -> ()
-       | Some (cut, _) ->
-         incr fired;
-         let cc, ck = parse_cut fx cut in
-         iter_box n 6 (fun p ->
-           let sat_all =
-             List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
-             && List.for_all (fun (co, k) -> sum_at co k p <= 0) !les
-           in
-           if sat_all && sum_at cc ck p > 0 then incr unsound))
-  done;
-  Printf.printf
-    "    (%d mixed systems; cg cuts fired=%d unsound=%d)\n"
-    systems
-    !fired
-    !unsound;
-  check
-    "cg sweep: no emitted cut removes an integer point of the polyhedron (SOUND)"
-    (!unsound = 0);
-  check "cg sweep: cuts fired on a meaningful set" (!fired > systems / 50)
+  (* NON-VACUOUS hand cut: integer points exist and must be preserved. *)
+  check_nonvacuous_hand ~label:"cg" ~producer:Lia.cg_cut;
+  (* Random MIXED sweep through the shared hardened sweep (full-system AND
+     cited-antecedent oracles, non-vacuity, un-silenced exceptions). Every emitted CG cut
+     must remove no integer point of the full polyhedron NOR of its own cited antecedents
+     — the sign-shift tripwire. B3 fires on strictly MORE systems than B2. *)
+  run_cut_sweep ~label:"cg sweep" ~seed:[| 0xC63B; 11; 43 |] ~producer:Lia.cg_cut
 ;;
 
 let () =
