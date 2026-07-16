@@ -352,6 +352,35 @@ let rec enter_pattern
     state.facts <- Facts.enter id state.facts
   | _ -> ()
 
+(* Q-003 purity gate for branch-condition facts.  A condition fact is stable
+   across occurrences -- and so sound to identify structurally in the
+   verification condition -- only when the condition is a deterministic,
+   side-effect-free function of immutable variables: a conservative syntactic
+   total form built from constants, identifiers, and applications of the
+   total/pure builtins (comparisons, integer arithmetic, boolean connectives)
+   recognized by [Vox_lean.primitive_builtin].  An application of any other
+   function is an opaque, possibly impure call, which makes the condition
+   non-total, so no fact is recorded: otherwise a fact about one evaluation of
+   [f ()] could discharge an obligation about a different evaluation of the same
+   syntactic call. *)
+let rec condition_is_total expression =
+  match expression.exp_desc with
+  | Texp_constant _ | Texp_ident _ -> true
+  | Texp_apply (function_, arguments, _, _, _) ->
+    total_builtin_head function_
+    && List.for_all
+         (function
+           | _, Arg (argument, _) -> condition_is_total argument
+           | _, Omitted _ -> false)
+         arguments
+  | _ -> false
+
+and total_builtin_head expression =
+  match expression.exp_desc with
+  | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ } ->
+    Option.is_some (Vox_lean.primitive_builtin primitive.prim_name)
+  | _ -> false
+
 let rec walk_expression state expression =
   let marks = marked_refinements expression in
   match expression.exp_desc with
@@ -415,9 +444,11 @@ let rec walk_expression state expression =
        depend on the guard.  A condition that cannot be lowered contributes no
        fact, which only weakens the branch conditions. *)
     let condition_fact =
-      match subject state condition with
-      | condition_subject -> Some condition_subject
-      | exception Unsupported_subject _ -> None
+      if condition_is_total condition then
+        match subject state condition with
+        | condition_subject -> Some condition_subject
+        | exception Unsupported_subject _ -> None
+      else None
     in
     let saved_facts = state.facts in
     Option.iter
