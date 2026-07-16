@@ -702,7 +702,7 @@ let mode_lazy expected_mode =
   in
   let mode_crossing =
     Crossing.create ~linearity:true ~portability:true
-      ~totality:true ~logicality:false
+      ~totality:false ~logicality:false
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
       ~visibility:false ~forkable:false ~yielding:false ~staticity:false
   in
@@ -4042,6 +4042,11 @@ and type_pat_aux
            pat_unique_barrier = Unique_barrier.not_computed () }
   | Ppat_lazy sp1 ->
       submode ~loc ~env:!!penv alloc_mode.mode mode_force_lazy;
+      (* Matching a [lazy] pattern forces the thunk, exactly as [Lazy.force]
+         does; forcing is a partial operation, so it constrains every enclosing
+         closure's totality to partial (mirror of [Lazy.force] being a partial
+         primitive). *)
+      constrain_enclosing_totality ~loc !!penv;
       let nv = solve_Ppat_lazy loc penv expected_ty in
       let alloc_mode = global_pat_mode alloc_mode in
       let p1 =
