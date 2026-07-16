@@ -1,5 +1,6 @@
 validator accepts: let/tuple/field/apply/if/construct
 validator accepts: single-parameter function
+validator accepts: else-less if with unit result
 constructors: ident constant let function apply tuple construct field ifthenelse
 printer: (fun[eq_int] 1 2)
 reference: fun[absolute]
@@ -8,9 +9,11 @@ reference: app[M!.operation]
 reference: global[M!.value]
 substitution: capture avoided
 alpha-equality: threaded shadowing pairs
+alpha-equality: binder pairing is bijective
 freshening: every imported binder renamed
 validator rejects: unbound binder (unbound refinement identifier free)
 validator rejects: non-bool root (root expression does not have type bool)
 validator rejects: duplicate binder (duplicate refinement binder duplicate)
 validator rejects: bound occurrence type (type mismatch for refinement identifier x)
 validator rejects: empty sibling name (empty refinement sibling name)
+validator rejects: else-less if with non-unit result (refinement conditional type mismatch)
