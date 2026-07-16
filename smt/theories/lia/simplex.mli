@@ -76,6 +76,15 @@ val push : 'a t -> unit
 
 val pop : 'a t -> int -> unit
 
+(** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind. [checkpoint t] is the current
+    bound-undo trail watermark (an opaque [int]); [rewind_to_checkpoint t m] restores
+    bounds to that watermark by draining the undo trail newest-first, without touching the
+    frame stack — the same restoration a [pop] performs, addressed by an absolute
+    watermark. *)
+val checkpoint : 'a t -> int
+
+val rewind_to_checkpoint : 'a t -> int -> unit
+
 (** Total pivots performed (determinism/perf stat, DESIGN.md §8). *)
 val pivot_count : 'a t -> int
 

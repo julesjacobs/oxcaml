@@ -807,6 +807,15 @@ let apply_undo t = function
 let push t = Oxsmt_core.Trail.push t.trail ()
 let pop t n = Oxsmt_core.Trail.pop t.trail ~apply:(apply_undo t) n
 
+(* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind. Bound changes are the only
+   backtrackable state (tableau/assignment are recomputed by [check]); a checkpoint is
+   simply the undo-trail watermark. [rewind_to_checkpoint] drains the bound-undo trail
+   newest-first to that watermark (identical to what a [pop] reverses), without touching
+   the frame stack. The [dirty_*] supersets need no maintenance (rewinding only LOOSENS
+   bounds, exactly like [pop] — see their invariants). *)
+let checkpoint t = Oxsmt_core.Trail.mark t.trail
+let rewind_to_checkpoint t m = Oxsmt_core.Trail.rewind_to t.trail ~apply:(apply_undo t) m
+
 (* ---- Unit cube test (Bromberger & Fleury, "Fast cube tests for LIA constraint solving",
    TACAS 2016). A sufficient integer-feasibility test that finds a model with no
    branch-and-bound: shrink every constraint interval inward by half the 1-norm of the

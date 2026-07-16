@@ -213,6 +213,14 @@ module type FABRIC_CHILD = sig
       equality atom into this theory, attributed to the fabric edge. Pure mutation on the
       theory's own trail (F3 co-location). *)
   val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
+
+  (** ADR-0014 Stage 4.2: sub-frame checkpoint/rewind for chrono earliest-removed
+      incremental undo (a watermark on the child's own undo trail; [rewind_to_checkpoint]
+      drains it back without touching the frame stack). *)
+  type checkpoint
+
+  val checkpoint : t -> checkpoint
+  val rewind_to_checkpoint : t -> checkpoint -> unit
 end
 
 module type FABRIC_CONGRUENCE_CHILD = sig
@@ -270,6 +278,15 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+
+  (** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
+      undo): capture both children's checkpoints + the pin/fabric trail watermarks;
+      [rewind_to_checkpoint] restores all four to an absolute watermark without touching
+      the frame stack. *)
+  type checkpoint
+
+  val checkpoint : t -> checkpoint
+  val rewind_to_checkpoint : t -> checkpoint -> unit
 
   (** Test-only access to the fabric edge registry + recursive handle expansion, so the
       shared-ancestor (DAG diamond) and genuine-cycle behaviours of

@@ -1842,6 +1842,65 @@ let pop t n =
       | fs -> fs)
 ;;
 
+(* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind. Simplex bounds ride the Simplex trail;
+   the [reported]/[eq] bookkeeping is framed as in [pop]. The chrono checkpoint-driver
+   holds the theory at a SINGLE base frame (no per-decision-level frames under CB), so
+   both frame lists have exactly one frame here. [checkpoint] captures the simplex
+   watermark + the base frame's reported/eq counts; [rewind_to_checkpoint] restores the
+   simplex bounds and drops the newest reported/eq entries recorded since the checkpoint —
+   un-reporting + re-dirtying each reported atom exactly as [pop] does (CONTRACT-EX),
+   addressed by an absolute count rather than a frame boundary. Fails LOUD if a non-base
+   frame is open, rather than silently mis-restoring. *)
+type checkpoint =
+  { c_simplex : int
+  ; c_reported : int
+  ; c_eq : int
+  }
+
+let single_base_frame = function
+  | [ fr ] -> fr
+  | _ ->
+    failwith
+      "Lia checkpoint/rewind: expected a single base frame (S4.2 CB checkpoint-driver \
+       invariant)"
+;;
+
+let checkpoint t =
+  { c_simplex = Simplex.checkpoint t.simplex
+  ; c_reported = List.length (single_base_frame t.report_frames)
+  ; c_eq = List.length (single_base_frame t.eq_frames)
+  }
+;;
+
+let rewind_to_checkpoint t c =
+  ensure_live t;
+  Simplex.rewind_to_checkpoint t.simplex c.c_simplex;
+  t.check_dirty <- true;
+  let fr = single_base_frame t.report_frames in
+  let rec drop_reported k fr =
+    if k <= 0
+    then fr
+    else (
+      match fr with
+      | [] -> []
+      | i :: tl ->
+        Dynarray.set t.reported i false;
+        Hashtbl.replace t.dirty (Dynarray.get t.registered i).var ();
+        drop_reported (k - 1) tl)
+  in
+  t.report_frames <- [ drop_reported (List.length fr - c.c_reported) fr ];
+  let efr = single_base_frame t.eq_frames in
+  let rec drop_first k l =
+    if k <= 0
+    then l
+    else (
+      match l with
+      | [] -> []
+      | _ :: tl -> drop_first (k - 1) tl)
+  in
+  t.eq_frames <- [ drop_first (List.length efr - c.c_eq) efr ]
+;;
+
 (* Diagnostics stay readable after poisoning (you need [overflow_count] precisely to
    attribute the brick). *)
 let pivot_count t = Simplex.pivot_count t.simplex

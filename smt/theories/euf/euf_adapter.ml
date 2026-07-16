@@ -373,6 +373,47 @@ let pop t n =
       | fs -> fs)
 ;;
 
+(* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
+   undo). Delegates the engine state to {!Euf.checkpoint}/{!Euf.rewind_to_checkpoint} and
+   mirrors {!pop}'s explain-cache invalidation at sub-frame granularity: uncache exactly
+   the reasons snapshotted since the checkpoint (a propagation's reason is valid only at
+   its producing level). The CB checkpoint-driver holds the adapter at a single base
+   frame, so [t.frames] has one frame here; fails loud otherwise. *)
+type checkpoint =
+  { a_engine : Euf.checkpoint
+  ; a_frames : int
+  }
+
+let checkpoint t =
+  match t.frames with
+  | [ fr ] -> { a_engine = Euf.checkpoint t.engine; a_frames = List.length fr }
+  | _ ->
+    failwith
+      "Euf_adapter.checkpoint: expected a single base frame (S4.2 CB driver invariant)"
+;;
+
+let rewind_to_checkpoint t c =
+  Euf.rewind_to_checkpoint t.engine c.a_engine;
+  t.predicates_maybe_stale <- true;
+  match t.frames with
+  | [ fr ] ->
+    let rec drop k fr =
+      if k <= 0
+      then fr
+      else (
+        match fr with
+        | [] -> []
+        | l :: tl ->
+          t.explain_cache <- Lit.Map.remove l t.explain_cache;
+          drop (k - 1) tl)
+    in
+    t.frames <- [ drop (List.length fr - c.a_frames) fr ]
+  | _ ->
+    failwith
+      "Euf_adapter.rewind_to_checkpoint: expected a single base frame (S4.2 CB driver \
+       invariant)"
+;;
+
 (* Subterm children (same split as the engine's registration walk): used only to build a
    model total over every term reachable from a registered atom. *)
 let children (term : Term.t) : Term.t list =

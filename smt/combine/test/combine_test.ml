@@ -153,10 +153,10 @@ struct
     ref
       (fun
           (_ : Term.t)
-           (_ : string)
-           (_ : Fabric.justification)
-           (_ : Fabric.justification)
-         -> false)
+          (_ : string)
+          (_ : Fabric.justification)
+          (_ : Fabric.justification)
+        -> false)
   ;;
 
   let reset () =
@@ -204,6 +204,13 @@ struct
   (* ADR-0014 Stage 2/3: a mock records no merges, carries no per-class data, reacts to no
      notification. *)
   let notify_eq () ~edge_id:_ _ = ()
+
+  (* ADR-0014 Stage 4.2: the mock carries no backtrackable state, so checkpoint/rewind are
+     no-ops (never exercised by these tests). *)
+  type checkpoint = unit
+
+  let checkpoint _ = ()
+  let rewind_to_checkpoint _ () = ()
 
   type merge_cursor = unit
 
@@ -531,9 +538,9 @@ let test_final_disagree_split () =
 ;;
 
 (* Truthiness of the repair flag, mirrored EXACTLY from combine.ml's read-once tri-state
-   (default-ON flip, task #59): unset -> ON, [=0/false/no] -> OFF, anything else -> ON. The
-   test asserts whichever branch the harness env selects: [combine-test] runs it at the
-   default (ON, Split) and once forced [=0] (OFF, Sat -- the trunk-exact path). *)
+   (default-ON flip, task #59): unset -> ON, [=0/false/no] -> OFF, anything else -> ON.
+   The test asserts whichever branch the harness env selects: [combine-test] runs it at
+   the default (ON, Split) and once forced [=0] (OFF, Sat -- the trunk-exact path). *)
 let repair_flag_on =
   match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
   | Some ("0" | "false" | "no") -> false
@@ -541,15 +548,15 @@ let repair_flag_on =
 ;;
 
 (* SITE-SPECIFIC RED for [Combine.repair_split] (task #30). A DISEQUALITY over a variable
-   and a CONSTANT ([x <> 0]) routes to the congruence child A only (negative Both), so it is
-   NOT a shared VARIABLE pair [find_disagreement] can return — the exact gap the flag closes.
-   Setup: assert [not (x = 0)] (a negative pin, psign=false); A's model holds the disequality
-   (x=5, so [check_pins] passes); B's (LIA) model EQUATES the pair (x=0), violating it.
-   [find_disagreement] returns None (x is not an interface variable pair), so control reaches
-   the repair site. Flag ON ⇒ the combinator must emit the ℤ-trichotomy Split on (x, 0);
-   flag OFF ⇒ the trunk path certifies Sat unchanged (OFF byte-identity). Mutating
-   [repair_split] to never emit flips the ON assertion Split→Sat and fails this test — the
-   mutation kill is isolated to this one site (no OR-aggregation). *)
+   and a CONSTANT ([x <> 0]) routes to the congruence child A only (negative Both), so it
+   is NOT a shared VARIABLE pair [find_disagreement] can return — the exact gap the flag
+   closes. Setup: assert [not (x = 0)] (a negative pin, psign=false); A's model holds the
+   disequality (x=5, so [check_pins] passes); B's (LIA) model EQUATES the pair (x=0),
+   violating it. [find_disagreement] returns None (x is not an interface variable pair),
+   so control reaches the repair site. Flag ON ⇒ the combinator must emit the ℤ-trichotomy
+   Split on (x, 0); flag OFF ⇒ the trunk path certifies Sat unchanged (OFF byte-identity).
+   Mutating [repair_split] to never emit flips the ON assertion Split→Sat and fails this
+   test — the mutation kill is isolated to this one site (no OR-aggregation). *)
 let test_final_diseq_repair () =
   reset_mocks ();
   let f = fixture () in
@@ -1225,6 +1232,12 @@ module Toy_lia = struct
 
   (* ADR-0014 Stage 2: the toy arithmetic child ignores hub notifications. *)
   let notify_eq _t ~edge_id:_ _ = ()
+
+  (* ADR-0014 Stage 4.2: no-op checkpoint/rewind (not exercised by these tests). *)
+  type checkpoint = unit
+
+  let checkpoint _ = ()
+  let rewind_to_checkpoint _ () = ()
 end
 
 (* ---- TOY EUF: naive congruence closure over App, with disequalities --------------- *)
@@ -1294,11 +1307,11 @@ module Toy_euf = struct
     in
     List.iter
       (fun l ->
-         if Lit.sign l
-         then (
-           match (term_of t l).Term.node with
-           | Term.Eq (a, b) -> union a.Term.tag b.Term.tag
-           | _ -> ()))
+        if Lit.sign l
+        then (
+          match (term_of t l).Term.node with
+          | Term.Eq (a, b) -> union a.Term.tag b.Term.tag
+          | _ -> ()))
       (asserted_lits t);
     let apps =
       Term.Set.elements t.terms
@@ -1312,17 +1325,16 @@ module Toy_euf = struct
       changed := false;
       List.iter
         (fun (t1, s1, a1) ->
-           List.iter
-             (fun (t2, s2, a2) ->
-                if
-                  Symbol.equal s1 s2
-                  && List.length a1 = List.length a2
-                  && List.for_all2 (fun x y -> find x.Term.tag = find y.Term.tag) a1 a2
-                  && find t1.Term.tag <> find t2.Term.tag
-                then (
-                  union t1.Term.tag t2.Term.tag;
-                  changed := true))
-             apps)
+          List.iter
+            (fun (t2, s2, a2) ->
+              if Symbol.equal s1 s2
+                 && List.length a1 = List.length a2
+                 && List.for_all2 (fun x y -> find x.Term.tag = find y.Term.tag) a1 a2
+                 && find t1.Term.tag <> find t2.Term.tag
+              then (
+                union t1.Term.tag t2.Term.tag;
+                changed := true))
+            apps)
         apps
     done;
     find
@@ -1332,12 +1344,12 @@ module Toy_euf = struct
     let find = closure t in
     List.for_all
       (fun l ->
-         if Lit.sign l
-         then true
-         else (
-           match (term_of t l).Term.node with
-           | Term.Eq (a, b) -> find a.Term.tag <> find b.Term.tag
-           | _ -> true))
+        if Lit.sign l
+        then true
+        else (
+          match (term_of t l).Term.node with
+          | Term.Eq (a, b) -> find a.Term.tag <> find b.Term.tag
+          | _ -> true))
       (asserted_lits t)
   ;;
 
@@ -1406,6 +1418,12 @@ module Toy_euf = struct
      the combinator's Stage-2 drain is a no-op here (the real EUF→LIA notification is
      driven in the real-adapter Stage-2 test). *)
   let notify_eq _t ~edge_id:_ _ = ()
+
+  (* ADR-0014 Stage 4.2: no-op checkpoint/rewind (not exercised by these tests). *)
+  type checkpoint = unit
+
+  let checkpoint _ = ()
+  let rewind_to_checkpoint _ () = ()
 
   type merge_cursor = unit
 
@@ -1536,9 +1554,9 @@ let model_satisfies (m : Model.t) (formula : (Term.t * bool) list) : bool =
        | Term.Arith lin ->
          Iarr.fold
            (fun acc (child, c) ->
-              match acc, ev_int child with
-              | Some a, Some v -> Some (Bigint.add a (Bigint.mul c v))
-              | _ -> None)
+             match acc, ev_int child with
+             | Some a, Some v -> Some (Bigint.add a (Bigint.mul c v))
+             | _ -> None)
            (Some lin.Term.const)
            lin.Term.coeffs
        | _ -> None)
@@ -1558,21 +1576,21 @@ let model_satisfies (m : Model.t) (formula : (Term.t * bool) list) : bool =
   in
   List.for_all
     (fun (term, sign) ->
-       let v =
-         match term.Term.node with
-         | Term.Le a ->
-           (match ev_int a with
-            | Some n -> Some (Bigint.compare n Bigint.zero <= 0)
-            | None -> None)
-         | Term.Eq (a, b) ->
-           (match eq_val a, eq_val b with
-            | Some x, Some y -> Some (val_eq x y)
-            | _ -> None)
-         | _ -> None
-       in
-       match v with
-       | Some b -> Bool.equal b sign
-       | None -> false)
+      let v =
+        match term.Term.node with
+        | Term.Le a ->
+          (match ev_int a with
+           | Some n -> Some (Bigint.compare n Bigint.zero <= 0)
+           | None -> None)
+        | Term.Eq (a, b) ->
+          (match eq_val a, eq_val b with
+           | Some x, Some y -> Some (val_eq x y)
+           | _ -> None)
+        | _ -> None
+      in
+      match v with
+      | Some b -> Bool.equal b sign
+      | None -> false)
     formula
 ;;
 
@@ -3085,9 +3103,9 @@ let test_stage2_shared_ancestor_no_false_cycle () =
    [Propagations]. Runs under whichever dispatch path is active ([check_off] when
    OXSMT_NO_FABRIC is set, [check_on_drive] otherwise). The Makefile [combine-test] target
    runs the executable THREE times: once fabric-ON (full suite, [check_on_drive]) and once
-   with OXSMT_NO_FABRIC=1 (fabric-OFF, [check_off] — this test included; only the fabric-only
-   tests listed in the runner are skipped-and-counted there), so BOTH dispatch paths of
-   the forwarding are gated, not just manually verified; a third run pins
+   with OXSMT_NO_FABRIC=1 (fabric-OFF, [check_off] — this test included; only the
+   fabric-only tests listed in the runner are skipped-and-counted there), so BOTH dispatch
+   paths of the forwarding are gated, not just manually verified; a third run pins
    OXSMT_LIA_MODEL_REPAIR=0 for the forced-OFF repair path (post #59 default-ON flip). *)
 let test_lemma_forwarding () =
   let f = fixture () in

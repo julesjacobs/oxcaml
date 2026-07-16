@@ -52,6 +52,14 @@ val fabric_verify
     before calling, so a skip leaves no partial state (H5). *)
 val notify_eq : t -> edge_id:Fabric.edge_id -> Term.t -> unit
 
+(** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
+    undo): delegate to {!Lia.checkpoint}/{!Lia.rewind_to_checkpoint} and invalidate the
+    explain-cache entries snapshotted since the checkpoint. *)
+type checkpoint
+
+val checkpoint : t -> checkpoint
+val rewind_to_checkpoint : t -> checkpoint -> unit
+
 (** {2 Reason builders (exposed for the empty-premise tripwire test).}
 
     [conflict_explanation] / [propagation_reason] turn an engine conflict / a bound

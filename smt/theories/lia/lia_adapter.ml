@@ -531,6 +531,44 @@ let pop t n =
       | fs -> fs)
 ;;
 
+(* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
+   undo). Delegates to {!Lia.checkpoint}/{!Lia.rewind_to_checkpoint} and mirrors {!pop}'s
+   explain-cache invalidation at sub-frame granularity. Single-base-frame under the CB
+   checkpoint-driver; fails loud otherwise. *)
+type checkpoint =
+  { a_lia : Lia.checkpoint
+  ; a_frames : int
+  }
+
+let checkpoint t =
+  match t.frames with
+  | [ fr ] -> { a_lia = Lia.checkpoint t.lia; a_frames = List.length fr }
+  | _ ->
+    failwith
+      "Lia_adapter.checkpoint: expected a single base frame (S4.2 CB driver invariant)"
+;;
+
+let rewind_to_checkpoint t c =
+  Lia.rewind_to_checkpoint t.lia c.a_lia;
+  match t.frames with
+  | [ fr ] ->
+    let rec drop k fr =
+      if k <= 0
+      then fr
+      else (
+        match fr with
+        | [] -> []
+        | l :: tl ->
+          t.explain_cache <- Lit.Map.remove l t.explain_cache;
+          drop (k - 1) tl)
+    in
+    t.frames <- [ drop (List.length fr - c.a_frames) fr ]
+  | _ ->
+    failwith
+      "Lia_adapter.rewind_to_checkpoint: expected a single base frame (S4.2 CB driver \
+       invariant)"
+;;
+
 (* Diagnostics (off the frozen contract; for tests/metrics). Safe on a poisoned instance. *)
 let is_poisoned t = Lia.is_poisoned t.lia
 let overflows_to_unknown t = t.overflows

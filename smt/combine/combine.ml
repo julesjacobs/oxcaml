@@ -47,6 +47,14 @@ module type FABRIC_CHILD = sig
      equality atom into this theory, attributed to the fabric edge. Pure mutation on the
      theory's own trail (F3 co-location). *)
   val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
+
+  (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind for the chrono earliest-removed
+     incremental undo (a child's own trail watermark; restore drains it without touching
+     the frame stack). *)
+  type checkpoint
+
+  val checkpoint : t -> checkpoint
+  val rewind_to_checkpoint : t -> checkpoint -> unit
 end
 
 module type FABRIC_CONGRUENCE_CHILD = sig
@@ -138,6 +146,15 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+
+  (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind (chrono earliest-removed incremental
+     undo). Captures both children's checkpoints plus the fabric pin/edge trail
+     watermarks; [rewind_to_checkpoint] restores all four without touching the frame
+     stack. *)
+  type checkpoint
+
+  val checkpoint : t -> checkpoint
+  val rewind_to_checkpoint : t -> checkpoint -> unit
 
   module For_testing : sig
     val register_edge
@@ -1386,6 +1403,36 @@ end = struct
     (* F3: drop this scope's fabric edges/reasons/owners (each entry's closure removes its
        own registry / combined-reason / propagated_by key), newest-first. *)
     Trail.pop t.fabric_frames ~apply:(fun f -> f ()) n
+  ;;
+
+  (* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
+     undo). The combinator's backtrackable state is exactly the two children plus the pin
+     vector and the fabric closure trail (every other field is grow-only / monotone and
+     untouched by [pop]). [checkpoint] captures each; [rewind_to_checkpoint] restores each
+     to an absolute watermark WITHOUT touching the frame stack — children via their own
+     sub-frame rewind, [pins] by truncation (its [pop] restore is the same truncation),
+     and the fabric closure trail by draining its undo closures newest-first (identical to
+     what its [pop] runs). *)
+  type checkpoint =
+    { c_a : A.checkpoint
+    ; c_b : B.checkpoint
+    ; c_pins : int
+    ; c_fabric : int
+    }
+
+  let checkpoint t =
+    { c_a = A.checkpoint t.a
+    ; c_b = B.checkpoint t.b
+    ; c_pins = Dynarray.length t.pins
+    ; c_fabric = Trail.mark t.fabric_frames
+    }
+  ;;
+
+  let rewind_to_checkpoint t c =
+    A.rewind_to_checkpoint t.a c.c_a;
+    B.rewind_to_checkpoint t.b c.c_b;
+    Dynarray.truncate t.pins c.c_pins;
+    Trail.rewind_to t.fabric_frames ~apply:(fun f -> f ()) c.c_fabric
   ;;
 
   (* codex C3 (round-2 refinement) — sort-directed merge over ALL subterms, NEVER raising
