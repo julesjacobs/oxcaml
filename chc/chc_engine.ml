@@ -256,12 +256,21 @@ let solve_exprs (ts : ts) (asserts : expr list) : smt * Session.t =
     | Some t -> t
     | None -> failwith ("unbound variable in build: " ^ name)
   in
-  List.iter (fun e -> Session.assert_term sess (Chc_ast.build ctx venv e)) asserts;
+  (* Term construction runs OUTSIDE the Session firewall; degrade any ill-sorted /
+     unsupported / overflow build on this query to [R_unknown] rather than crashing. *)
   let r =
-    match Session.check_sat sess with
-    | Session.Sat -> R_sat
-    | Session.Unsat -> R_unsat
-    | Session.Unknown -> R_unknown
+    match
+      List.iter (fun e -> Session.assert_term sess (Chc_ast.build ctx venv e)) asserts
+    with
+    | () ->
+      (match Session.check_sat sess with
+       | Session.Sat -> R_sat
+       | Session.Unsat -> R_unsat
+       | Session.Unknown -> R_unknown)
+    | exception Oxsmt_core.Term.Sort_error _ -> R_unknown
+    | exception Oxsmt_core.Term.Unsupported _ -> R_unknown
+    | exception Oxsmt_core.Term.Overflow -> R_unknown
+    | exception Chc_ast.Build_error _ -> R_unknown
   in
   r, sess
 ;;

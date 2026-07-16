@@ -251,12 +251,23 @@ let solve_exprs (sy : sys) (asserts : expr list) : smt * Session.t =
     | Some t -> t
     | None -> failwith ("unbound " ^ name)
   in
-  List.iter (fun e -> Session.assert_term sess (Chc_ast.build ctx venv e)) asserts;
+  (* Term construction runs OUTSIDE the Session firewall, so an ill-sorted / unsupported
+     expr (a v1 encoding gap for some file shape) would crash the process. Degrade any
+     construction fault on this query to [R_unknown] — sound (a query we cannot build
+     cannot decide the problem, so PDR bails to Unknown), never a crash or wrong verdict. *)
   let r =
-    match Session.check_sat sess with
-    | Session.Sat -> R_sat
-    | Session.Unsat -> R_unsat
-    | Session.Unknown -> R_unknown
+    match
+      List.iter (fun e -> Session.assert_term sess (Chc_ast.build ctx venv e)) asserts
+    with
+    | () ->
+      (match Session.check_sat sess with
+       | Session.Sat -> R_sat
+       | Session.Unsat -> R_unsat
+       | Session.Unknown -> R_unknown)
+    | exception Oxsmt_core.Term.Sort_error _ -> R_unknown
+    | exception Oxsmt_core.Term.Unsupported _ -> R_unknown
+    | exception Oxsmt_core.Term.Overflow -> R_unknown
+    | exception Chc_ast.Build_error _ -> R_unknown
   in
   r, sess
 ;;
