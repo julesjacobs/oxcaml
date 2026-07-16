@@ -778,59 +778,96 @@ let first_non_integer t =
   !best
 ;;
 
-(* Stage B HNF integer cut (charter logs/lia-cuts-charter.md, spec
-   logs/lia-cuts-hnf-spec.md). Over the currently-asserted integer EQUALITY rows, detect a
-   MULTI-ROW integer-lattice infeasibility that the single-row {!diophantine_conflict} gcd
-   test cannot see, and return it as a separating cut for emission through the
-   CONTRACT-LEMMA seam. Result is [Some (cut_atom, antecedent_tokens)]: [cut_atom] is the
-   bound atom [f·x <= k] built through the session {!Context}, and [antecedent_tokens] are
-   the premise tokens of the equality rows whose lattice combination proves the cut.
-   [None] when no cut is found, the system exceeds the z3-parity caps, or the self-check
-   fails (a degradation of THE CUT only, never the verdict).
+(* Stage B2 HNF tight-constraint integer cut (charter logs/lia-cuts-charter.md, spec
+   logs/lia-cuts-b-log.md §5a). Over the TIGHT constraints active at the current LP vertex
+   ({!Simplex.tight_rows}) — asserted equalities (fixed vars) AND active one-sided bounds
+   — derive a Chvátal–Gomory lattice cut and return it for emission through the
+   CONTRACT-LEMMA seam as [Some (cut_atom, antecedent_tokens)]: [cut_atom] is [f·x ≤ k]
+   built through the session {!Context}; the tokens are the contributing rows' trail
+   literals. This subsumes Stage B's equality-only cut (a fixed var appears as both its ±
+   tight bounds) and adds the inequality rows the ring lattice needs. [None] when no cut
+   is found, the system exceeds the z3-parity caps, a contributing row is not a real trail
+   literal, or the self-check fails (cut-only degradation, never the verdict).
 
-   {b Soundness (self-checked, independent of the HNF kernel).} Assemble the equality rows
-   as an integer system [A·x = c] (each row holds as an equality in every model of the
-   current assignment). Compute the row HNF [U·A = H] (U unimodular). For an HNF row [i]
-   let [g = gcd(H[i])]; if [g] does not divide [d_i = (U·c)_i] then the rational
-   multiplier [μ = U[i] / g] over the original rows gives [f = μ·A] (integer, [= H[i]/g])
-   and [β = μ·c = d_i/g ∉ ℤ]. Since the rows are equalities, [f·x = μ·A·x = μ·c = β] for
-   EVERY feasible [x]; as [f·x ∈ ℤ] for integer [x] but [β ∉ ℤ], no integer point
-   satisfies the antecedents, so the clause [(⋀ eqᵢ) → (f·x ≤ ⌊β⌋)] is T-valid, and it
-   separates the LP vertex ([f·x0 = β > ⌊β⌋]). The certificate [μ] is RE-VERIFIED here
-   against the ORIGINAL rows [A]/[c] ([μ·A = f] exact integer, [μ·c = β ∉ ℤ]); a kernel or
-   assembly bug fails this check and the cut is dropped — an unsound cut is never emitted. *)
+   {b Soundness (self-checked, independent of the HNF kernel).} Every tight row is
+   ±-normalized to [gₖ·x ≤ cₖ] (an [Upper] bound as is; a [Lower] bound [def ≥ l] as
+   [−def ≤ −l]); a fixed variable contributes BOTH directions. A candidate multiplier
+   [μ = ±U[i]/g] (g = gcd(H[i])) is accepted ONLY if [μ ≥ 0 on EVERY row] — the
+   Chvátal–Gomory sign condition (a fixed var's ± pair realizes an any-sign net
+   multiplier, so this uniform rule is correct for equalities and inequalities alike) —
+   AND [f = μ·A] is integer AND [β = μ·c ∉ ℤ]. Then for any feasible integer [x]:
+   [f·x = μ·A·x ≤ μ·c = β] (each row [gₖ·x ≤ cₖ] with [μₖ ≥ 0]) and [f·x ∈ ℤ], so
+   [f·x ≤ ⌊β⌋] — a T-valid cut; it separates the vertex ([gₖ·x0 = cₖ tight] ⇒
+   [f·x0 = β > ⌊β⌋]). The certificate [μ] (sign, integrality, non-integer β) is
+   RE-VERIFIED against the ORIGINAL rows before emission; a kernel or assembly bug fails
+   the check and the cut is dropped — an unsound cut is never emitted. *)
 let hnf_cut t : (Term.t * 'tok list) option =
   ensure_live t;
   if Simplex.is_poisoned t.simplex
   then None
   else (
-    (* Integer equality rows (same source/discipline as {!diophantine_conflict}): each
-       asserted equality's merged linear form over problem-var ids + rhs + premise token,
-       dropping malformed/non-integer/out-of-fragment rows soundly. *)
+    (* Build the constraint rows from the tight vertex, GROUPED by variable. A variable
+       tight on BOTH bounds is FIXED — an EQUALITY row [def = bound] with an UNRESTRICTED
+       multiplier (this subsumes Stage B's asserted-equality lattice: an equality [a=b] is
+       a fixed slack). A one-sided tight bound is a genuine INEQUALITY, ±-normalized to
+       [g·x ≤ c] with a multiplier RESTRICTED to [≥ 0] (Chvátal–Gomory). Each row records
+       [restricted : bool] and its antecedent trail-literal token(s). A [Branch] reason
+       (Lia's own b&b, off the adapter path) or a non-integer coeff drops the whole row's
+       variable soundly. Row shape: [(signdef, rhs, restricted, tokens)]. *)
+    let by_var = Hashtbl.create 64 in
+    List.iter
+      (fun (r : _ Simplex.tight_row) ->
+        let prev =
+          try Hashtbl.find by_var r.Simplex.row_var with
+          | Not_found -> []
+        in
+        Hashtbl.replace by_var r.Simplex.row_var (r :: prev))
+      (Simplex.tight_rows t.simplex);
+    let user_tok (r : _ Simplex.tight_row) =
+      match r.Simplex.row_reason with
+      | User tok -> Some tok
+      | Branch _ -> None
+    in
     let rows =
-      List.filter_map
-        (fun (a, b, tok) ->
-          try
-            let merged, rhs = equality_merged t a b in
-            if List.for_all (fun (_, c) -> Rational.is_int c) merged
-               && Rational.is_int rhs
-            then Some (merged, rhs, tok)
-            else None
-          with
-          | Exit | Rational.Overflow -> None)
-        (List.concat t.eq_frames)
+      Hashtbl.fold
+        (fun _ rs acc ->
+          let r0 = List.hd rs in
+          let def = r0.Simplex.row_def
+          and bound = r0.Simplex.row_bound in
+          let ints =
+            List.for_all (fun (_, c) -> Rational.is_int c) def && Rational.is_int bound
+          in
+          let toks = List.filter_map user_tok rs in
+          if (not ints) || List.length toks < List.length rs
+          then acc (* non-integer, or a Branch token: drop this variable's row(s) *)
+          else (
+            let has_lower = List.exists (fun r -> r.Simplex.row_side = `Lower) rs in
+            let has_upper = List.exists (fun r -> r.Simplex.row_side = `Upper) rs in
+            if has_lower && has_upper
+            then (def, bound, false (* equality: unrestricted *), toks) :: acc
+            else (
+              (* one-sided: ±-normalize to [≤]; multiplier restricted to ≥ 0 *)
+              let signdef, rhs =
+                match r0.Simplex.row_side with
+                | `Upper -> def, bound
+                | `Lower ->
+                  List.map (fun (id, c) -> id, Rational.neg c) def, Rational.neg bound
+              in
+              (signdef, rhs, true, toks) :: acc)))
+        by_var
+        []
     in
     let rowsA = Array.of_list rows in
     let m = Array.length rowsA in
     (* compact column index over the problem-var ids appearing in the rows *)
     let col_of = Hashtbl.create 64 in
     Array.iter
-      (fun (merged, _, _) ->
+      (fun (sd, _, _, _) ->
         List.iter
           (fun (id, _) ->
             if not (Hashtbl.mem col_of id)
             then Hashtbl.replace col_of id (Hashtbl.length col_of))
-          merged)
+          sd)
       rowsA;
     let n = Hashtbl.length col_of in
     if m = 0 || n = 0 || m > Hnf.max_rows || n > Hnf.max_cols
@@ -840,101 +877,102 @@ let hnf_cut t : (Term.t * 'tok list) option =
       Hashtbl.iter (fun id j -> id_of_col.(j) <- id) col_of;
       let term_of_id = Hashtbl.create 64 in
       Dynarray.iter (fun (id, tm) -> Hashtbl.replace term_of_id id tm) t.problem_vars;
-      (* integer matrix A (m×n) and rhs c (m) over Bigint (coeffs are integer Rationals) *)
+      (* integer matrix A (m×n, ±-normalized ≤-rows) and rhs c (m) over Bigint *)
       let mat_a = Array.make_matrix m n Bigint.zero in
       let vec_c = Array.make m Bigint.zero in
       Array.iteri
-        (fun i (merged, rhs, _) ->
+        (fun i (sd, rhs, _, _) ->
           List.iter
             (fun (id, cf) -> mat_a.(i).(Hashtbl.find col_of id) <- Rational.num_bigint cf)
-            merged;
+            sd;
           vec_c.(i) <- Rational.num_bigint rhs)
         rowsA;
       let hnf = Hnf.compute mat_a in
       let u = hnf.Hnf.u
       and h = hnf.Hnf.h in
-      (* d = U·c *)
-      let dot_row_c row =
-        let s = ref Bigint.zero in
-        for k = 0 to m - 1 do
-          s := Bigint.add !s (Bigint.mul row.(k) vec_c.(k))
-        done;
-        !s
-      in
       let floor_div a b =
         (* ⌊a/b⌋ with b > 0; Bigint.divmod truncates toward zero (r carries a's sign). *)
         let q, r = Bigint.divmod a b in
         if Bigint.sign r < 0 then Bigint.sub q Bigint.one else q
       in
-      let result = ref None in
-      let i = ref 0 in
-      while Option.is_none !result && !i < m do
-        let hi = h.(!i) in
-        let ui = u.(!i) in
-        let g = Array.fold_left Bigint.gcd Bigint.zero hi in
-        if not (Bigint.is_zero g)
-        then (
-          let di = dot_row_c ui in
-          let _, r0 = Bigint.divmod di g in
-          if not (Bigint.is_zero r0)
-          then (
-            (* candidate cut on row i; re-verify the μ = ui/g certificate against A/c *)
-            let ok = ref true in
-            let f = Array.make n Bigint.zero in
-            for j = 0 to n - 1 do
-              let s = ref Bigint.zero in
-              for k = 0 to m - 1 do
-                s := Bigint.add !s (Bigint.mul ui.(k) mat_a.(k).(j))
-              done;
-              (* kernel-consistency tripwire: U·A must equal H for this row *)
-              if not (Bigint.equal !s hi.(j)) then ok := false;
-              (* f = (U·A)/g must be integer (recomputed from the ORIGINAL A) *)
-              let qj, rj = Bigint.divmod !s g in
-              if Bigint.is_zero rj then f.(j) <- qj else ok := false
+      (* Try candidate multiplier [μ = sign·U[i] / g]. Accept iff (SIGN) [μₖ ≥ 0] on every
+         RESTRICTED (inequality) row — equality rows are unrestricted, (INT) [f = μ·A]
+         integer (= sign·H[i]/g), and (SEP) [β = μ·c ∉ ℤ] — all recomputed from the
+         ORIGINAL A/c. Returns the emitted cut or [None]. *)
+      let try_candidate i g sign =
+        let ok = ref true in
+        (* SIGN: on every INEQUALITY row, sign·U[i][k] ≥ 0 (Chvátal–Gomory) *)
+        for k = 0 to m - 1 do
+          let _, _, restricted, _ = rowsA.(k) in
+          if restricted && Bigint.sign u.(i).(k) * sign < 0 then ok := false
+        done;
+        if not !ok
+        then None
+        else (
+          let f = Array.make n Bigint.zero in
+          for j = 0 to n - 1 do
+            let s = ref Bigint.zero in
+            for k = 0 to m - 1 do
+              s := Bigint.add !s (Bigint.mul u.(i).(k) mat_a.(k).(j))
             done;
-            (* β = (U·c)/g must be NON-integer (recomputed from the ORIGINAL c): this is
-               the separation + validity witness (equalities force f·x = β ∉ ℤ). Explicit
-               here so the emission self-check is standalone-complete — a mutated
-               candidate gate cannot slip an integer-β (spurious, integer-feasible) cut
-               through. *)
-            let num_beta =
-              let s = ref Bigint.zero in
-              for k = 0 to m - 1 do
-                s := Bigint.add !s (Bigint.mul ui.(k) vec_c.(k))
+            let s = if sign < 0 then Bigint.neg !s else !s in
+            (* kernel-consistency tripwire: sign·U·A must equal sign·H for this row *)
+            let hij = if sign < 0 then Bigint.neg h.(i).(j) else h.(i).(j) in
+            if not (Bigint.equal s hij) then ok := false;
+            let qj, rj = Bigint.divmod s g in
+            if Bigint.is_zero rj then f.(j) <- qj else ok := false
+          done;
+          (* β = (sign·U·c)/g, recomputed from the ORIGINAL c, must be NON-integer *)
+          let num_beta =
+            let s = ref Bigint.zero in
+            for k = 0 to m - 1 do
+              s := Bigint.add !s (Bigint.mul u.(i).(k) vec_c.(k))
+            done;
+            if sign < 0 then Bigint.neg !s else !s
+          in
+          let _, rb = Bigint.divmod num_beta g in
+          if Bigint.is_zero rb then ok := false;
+          if not !ok
+          then None
+          else (
+            let coeffs =
+              let acc = ref [] in
+              for j = n - 1 downto 0 do
+                if not (Bigint.is_zero f.(j))
+                then acc := (f.(j), Hashtbl.find term_of_id id_of_col.(j)) :: !acc
               done;
-              !s
+              !acc
             in
-            let _, rb = Bigint.divmod num_beta g in
-            if Bigint.is_zero rb then ok := false;
-            if !ok
-            then (
-              let coeffs =
+            match coeffs with
+            | [] -> None (* constant cut: never emit *)
+            | _ ->
+              let k_bound = floor_div num_beta g in
+              let pol = Context.linear_combination_big t.ctx coeffs Bigint.zero in
+              let cut_atom = Context.le t.ctx pol (Context.int_const_big t.ctx k_bound) in
+              let ants =
                 let acc = ref [] in
-                for j = n - 1 downto 0 do
-                  if not (Bigint.is_zero f.(j))
-                  then acc := (f.(j), Hashtbl.find term_of_id id_of_col.(j)) :: !acc
+                for k = m - 1 downto 0 do
+                  if not (Bigint.is_zero u.(i).(k))
+                  then (
+                    let _, _, _, toks = rowsA.(k) in
+                    acc := List.rev_append (List.rev toks) !acc)
                 done;
                 !acc
               in
-              match coeffs with
-              | [] -> () (* f ≡ 0 impossible with β ∉ ℤ, but never emit a constant cut *)
-              | _ ->
-                let k_bound = floor_div di g in
-                let pol = Context.linear_combination_big t.ctx coeffs Bigint.zero in
-                let cut_atom =
-                  Context.le t.ctx pol (Context.int_const_big t.ctx k_bound)
-                in
-                let ants =
-                  let acc = ref [] in
-                  for k = m - 1 downto 0 do
-                    if not (Bigint.is_zero ui.(k))
-                    then (
-                      let _, _, tok = rowsA.(k) in
-                      acc := tok :: !acc)
-                  done;
-                  !acc
-                in
-                result := Some (cut_atom, ants))));
+              Some (cut_atom, ants)))
+      in
+      let result = ref None in
+      let i = ref 0 in
+      while Option.is_none !result && !i < m do
+        let g = Array.fold_left Bigint.gcd Bigint.zero h.(!i) in
+        if not (Bigint.is_zero g)
+        then (
+          match try_candidate !i g 1 with
+          | Some _ as r -> result := r
+          | None ->
+            (match try_candidate !i g (-1) with
+             | Some _ as r -> result := r
+             | None -> ()));
         incr i
       done;
       !result))

@@ -913,3 +913,43 @@ let cube_test t (problem_vars : int list) : (int * Rational.t) list option =
      with
      | Rational.Overflow -> None)
 ;;
+
+(* Stage B2 (HNF tight-constraint cut): every variable whose current value sits EXACTLY on
+   one of its finite NON-STRICT bounds — active-at-bound on the current assignment (z3
+   [get_equality_and_right_side_for_term_on_current_x]). Each row carries the variable's
+   immutable [def] (a linear form over problem-var ids; a problem var is [1·id]), the
+   bound VALUE, the SIDE it is tight on, and the bound's reason token. A FIXED variable
+   ([lower = upper] both tight) yields TWO rows (both sides) — the caller reads that as an
+   equality (the ± pair admits an any-sign lattice multiplier), while a one-sided tight
+   bound is a genuine inequality (the caller's Chvátal–Gomory sign discipline restricts
+   its multiplier to ≥ 0). Read-only. *)
+type 'a tight_row =
+  { row_var : int
+  ; row_def : (int * Rational.t) list
+  ; row_bound : Rational.t
+  ; row_side : [ `Lower | `Upper ]
+  ; row_reason : 'a
+  }
+
+let tight_rows t : 'a tight_row list =
+  let acc = ref [] in
+  Dynarray.iter
+    (fun v ->
+      let consider side bopt =
+        match bopt with
+        | Some b when Delta.is_rational b.bval && Delta.equal v.value b.bval ->
+          acc
+          := { row_var = v.id
+             ; row_def = Lx.bindings v.def
+             ; row_bound = Delta.c_part b.bval
+             ; row_side = side
+             ; row_reason = b.reason
+             }
+             :: !acc
+        | _ -> ()
+      in
+      consider `Lower v.lower;
+      consider `Upper v.upper)
+    t.vars;
+  List.rev !acc
+;;

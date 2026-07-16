@@ -106,3 +106,23 @@ val num_vars : 'a t -> int
     [problem_vars] must be the integer variables to round; every coefficient row's def
     references only these. *)
 val cube_test : 'a t -> int list -> (int * Rational.t) list option
+
+(** A tight constraint row (Stage B2 HNF cut): a variable's immutable [def] over
+    problem-var ids, the finite non-strict bound VALUE its current value sits on, the
+    SIDE, and that bound's reason token. *)
+type 'a tight_row =
+  { row_var : int
+  (** the simplex variable this bound is on (for grouping a fixed var's two sides) *)
+  ; row_def : (int * Rational.t) list
+  ; row_bound : Rational.t
+  ; row_side : [ `Lower | `Upper ]
+  ; row_reason : 'a
+  }
+
+(** [tight_rows t] is every variable whose current value equals one of its finite
+    non-strict bounds — the constraints ACTIVE at the current assignment (z3's
+    [get_equality_and_right_side_for_term_on_current_x]). A fixed variable
+    ([lower = upper] both tight) contributes both sides. Read-only; the Stage B2 HNF cut
+    assembles these (±-normalized to [≤]) and derives a lattice cut, restricting the
+    multiplier to [≥ 0] on genuine one-sided inequality rows (Chvátal–Gomory soundness). *)
+val tight_rows : 'a t -> 'a tight_row list

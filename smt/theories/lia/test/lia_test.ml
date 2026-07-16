@@ -1304,7 +1304,8 @@ let test_hnf_cut () =
      tripwire for the β-non-integer gate + the μ-recheck self-check: emitting here would
      be a SPURIOUS cut that could exclude the real solution (the unsoundness vector). If
      the guard is bypassed (verified: the sweep below goes RED), a cut is emitted and this
-     fires. *)
+     fires. (Carried from Stage B; still valid under B2 — an equality-only tight system
+     with an integer solution has integer β, so no cut is produced.) *)
   let fxs = make_fixture 2 in
   let _ = assert_eq_rec fxs (ref []) [ 0, 1; 1, 1 ] 2 in
   let _ = assert_eq_rec fxs (ref []) [ 0, 1; 1, -1 ] 0 in
@@ -1314,26 +1315,40 @@ let test_hnf_cut () =
        "hnf guard: NO cut on an integer-feasible equality system (β-gate + self-check)"
        (Lia.hnf_cut fxs.solver = None)
    | _ -> check "hnf guard: feasible relaxation" false);
-  (* Random sweep: small equality systems, both ℤ-sat and ℤ-unsat. Every emitted cut is
-     brute-force VALID (removes no integer eq-solution); no cut is ever emitted on a
-     system that HAS an integer solution in the box (a spurious cut would exclude it). *)
+  (* Random MIXED sweep (B2): small systems of integer EQUALITIES and one-sided
+     INEQUALITIES. The B2 cut is a Chvátal–Gomory cut over the tight rows, so unlike Stage
+     B it may legitimately fire on a feasible system (a valid tightening) — the ONLY
+     soundness obligation is that every emitted cut removes NO integer point of the FULL
+     polyhedron (equalities ∧ inequalities). This is the mutation-testing tripwire: a
+     mutant that drops the per-row μ≥0 sign discipline (or the β/integrality checks) would
+     emit an invalid cut excluding a real integer point and fail here. *)
   let rng = Random.State.make [| 0xB5C2; 7; 31 |] in
   let systems = 3000 in
   let fired = ref 0
-  and unsound = ref 0
-  and spurious = ref 0 in
+  and unsound = ref 0 in
   for _ = 1 to systems do
     let n = 2 + Random.State.int rng 2 (* 2..3 vars *) in
-    let neq = 2 + Random.State.int rng 2 (* 2..3 eqs *) in
+    let neq = 1 + Random.State.int rng 2 (* 1..2 eqs *) in
+    let nle = 1 + Random.State.int rng 3 (* 1..3 inequalities *) in
     let fx = make_fixture n in
     let eqs = ref [] in
-    for _ = 1 to neq do
-      let coeffs =
+    let les = ref [] in
+    let rand_coeffs () =
+      let c =
         List.init n (fun i -> i, -3 + Random.State.int rng 7)
         |> List.filter (fun (_, c) -> c <> 0)
       in
-      let coeffs = if coeffs = [] then [ 0, 1 ] else coeffs in
-      assert_eq_rec fx eqs coeffs (-5 + Random.State.int rng 11)
+      if c = [] then [ 0, 1 ] else c
+    in
+    for _ = 1 to neq do
+      assert_eq_rec fx eqs (rand_coeffs ()) (-5 + Random.State.int rng 11)
+    done;
+    for _ = 1 to nle do
+      (* assert [Σ coeffs·x + const ≤ 0]; record the half-plane for the box oracle *)
+      let coeffs = rand_coeffs () in
+      let const = -6 + Random.State.int rng 13 in
+      ignore (assert_le fx coeffs const ~polarity:true : int);
+      les := (coeffs, const) :: !les
     done;
     match Lia.check fx.solver with
     | exception _ -> ()
@@ -1345,25 +1360,22 @@ let test_hnf_cut () =
        | Some (cut, _) ->
          incr fired;
          let cc, ck = parse_cut fx cut in
-         let has_int_sol = ref false in
          iter_box n 6 (fun p ->
-           let sat_eqs = List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs in
-           if sat_eqs
-           then (
-             has_int_sol := true;
-             if sum_at cc ck p > 0 then incr unsound));
-         (* a cut on a system WITH an integer solution in the box is spurious (and the
-            [unsound] counter above would already have caught it excluding that point) *)
-         if !has_int_sol then incr spurious)
+           let sat_all =
+             List.for_all (fun (co, r) -> sum_at co 0 p = r) !eqs
+             && List.for_all (fun (co, k) -> sum_at co k p <= 0) !les
+           in
+           (* a feasible integer point of the FULL polyhedron must satisfy the cut *)
+           if sat_all && sum_at cc ck p > 0 then incr unsound))
   done;
   Printf.printf
-    "    (%d systems; cuts fired=%d unsound=%d spurious-on-sat=%d)\n"
+    "    (%d mixed systems; cuts fired=%d unsound=%d)\n"
     systems
     !fired
-    !unsound
-    !spurious;
-  check "hnf sweep: no emitted cut removes an integer solution (SOUND)" (!unsound = 0);
-  check "hnf sweep: no cut emitted on a box-integer-feasible system" (!spurious = 0);
+    !unsound;
+  check
+    "hnf sweep: no emitted cut removes an integer point of the polyhedron (SOUND)"
+    (!unsound = 0);
   check "hnf sweep: cuts fired on a meaningful set" (!fired > systems / 50)
 ;;
 
