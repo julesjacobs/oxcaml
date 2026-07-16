@@ -205,8 +205,8 @@ let _ @ total = fun (f @ partial) -> f
 - : 'a -> 'a = <fun>
 |}]
 
-(* Boundary and Ops remain live when a function earns totality after its body
-   has been typed. *)
+(* Structure-boundary guards: these unannotated top-level functions default to
+   partial before their later use at total.  They do not test late inference. *)
 let late_partial_parameter (ignored @ partial) = 0
 let _ = expects_total late_partial_parameter
 [%%expect{|
@@ -298,6 +298,96 @@ Line 1, characters 46-49:
 Error: This value is "partial" but is expected to be "total".
 |}]
 
+(* The tail-position row of the residue matrix is covered immediately above.
+   The remaining rows require the enclosing closure's live totality variable
+   even though the residue's value is discarded. *)
+let bad_while_sequence @ total =
+  fun () -> (while true do () done); 0
+[%%expect{|
+Line 2, characters 12-35:
+2 |   fun () -> (while true do () done); 0
+                ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_while_discard @ total =
+  fun () -> let _ = while true do () done in 0
+[%%expect{|
+Line 2, characters 20-41:
+2 |   fun () -> let _ = while true do () done in 0
+                        ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_for_sequence @ total =
+  fun () -> (for _i = 0 to 1 do () done); 0
+[%%expect{|
+Line 2, characters 12-40:
+2 |   fun () -> (for _i = 0 to 1 do () done); 0
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_for_discard @ total =
+  fun () -> let _ = for _i = 0 to 1 do () done in 0
+[%%expect{|
+Line 2, characters 20-46:
+2 |   fun () -> let _ = for _i = 0 to 1 do () done in 0
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_array_sequence @ total = fun () -> [| 0 |]; 0
+[%%expect{|
+Line 1, characters 43-50:
+1 | let bad_array_sequence @ total = fun () -> [| 0 |]; 0
+                                               ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_array_discard @ total = fun () -> let _ = [| 0 |] in 0
+[%%expect{|
+Line 1, characters 50-57:
+1 | let bad_array_discard @ total = fun () -> let _ = [| 0 |] in 0
+                                                      ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_mutable_record_sequence @ total =
+  fun () -> { immutable_field = 0; mutable_field = 0 }; 0
+[%%expect{|
+Line 2, characters 12-54:
+2 |   fun () -> { immutable_field = 0; mutable_field = 0 }; 0
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_mutable_record_discard @ total =
+  fun () ->
+    let _ = { immutable_field = 0; mutable_field = 0 } in
+    0
+[%%expect{|
+Line 3, characters 12-54:
+3 |     let _ = { immutable_field = 0; mutable_field = 0 } in
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+(* Pure discarded expressions and exception handling remain total. *)
+type irec = { i : int }
+let pure_sequence @ total = fun () -> (); 0
+let pure_discard @ total = fun () -> let _ = 0 in 0
+let immutable_record_discard @ total =
+  fun () -> let _ = { i = 0 } in 0
+let try_sequence @ total = fun () -> (try () with _ -> ()); 0
+[%%expect{|
+type irec = { i : int; }
+val pure_sequence : unit -> int = <fun>
+val pure_discard : unit -> int = <fun>
+val immutable_record_discard : unit -> int = <fun>
+val try_sequence : unit -> int = <fun>
+|}]
+
 (* try and local exceptions are allowed (not partial operations), so these are
    accepted even in the same let-in-then-force-total position. *)
 let _ = let good () = try 1 with _ -> 2 in expects_total good
@@ -322,7 +412,8 @@ Warning 5 [ignored-partial-application]: this function application is partial,
 - : unit -> int = <fun>
 |}]
 
-(* Lock also remains live when totality is earned later. *)
+(* These Lock examples also reject through the ordinary structure-boundary
+   default before the following physical-use checks are reached. *)
 let late_return_captured_ref () = captured_ref
 let _ = expects_total late_return_captured_ref
 let _ = expects_physical_ref (late_return_captured_ref ())
