@@ -260,12 +260,13 @@ let () =
       (assert (forall ((x Int)) (=> (and (P x)(< x 0)) false)))|};
   (* 15. three-predicate chain, safe. Invariant C =
      {0}
-     is TWO-SIDED (x<=0 /\ x>=0), which dumb interval generalization can't reach across
-     the chain in budget -> soft miss (the interpolation lever, same root cause as
-     two-var-eq). *)
+     is TWO-SIDED (x<=0 /\ x>=0), which one-sided half-space PDR generalization diverges
+     on. The forward two-sided interval propagation template propagates [0<=x<=0] down the
+     chain and [verify] certifies it, so this is now a MUST-solve (regression guard for
+     the template). *)
   check
     "mp-chain3-safe"
-    Safe_ok
+    Safe_must
     {|(set-logic HORN)
       (declare-fun A (Int) Bool)
       (declare-fun B (Int) Bool)
@@ -274,6 +275,33 @@ let () =
       (assert (forall ((x Int)) (=> (A x) (B x))))
       (assert (forall ((x Int)) (=> (B x) (C x))))
       (assert (forall ((x Int)) (=> (and (C x)(not (= x 0))) false)))|};
+  (* 15c. genuine two-sided interval (not a point) propagated across a chain: reachable is
+     [0..5], bad is out of range. Exercises the interval template on a wide bound. *)
+  check
+    "mp-interval-bound"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun A (Int) Bool)
+      (declare-fun B (Int) Bool)
+      (assert (forall ((x Int)) (=> (and (>= x 0)(<= x 5)) (A x))))
+      (assert (forall ((x Int)) (=> (A x) (B x))))
+      (assert (forall ((x Int)) (=> (and (B x)(or (< x 0)(> x 5))) false)))|};
+  (* 15d. SOUNDNESS discrimination for the interval template: the forward interval
+     computes a FINITE reachable bound for C ([2..2]) that CONTAINS the bad state x=2, so
+     the candidate must FAIL independent [verify] and fall through to PDR/BMC, which
+     confirms the genuine counterexample. A template that trusted its own bound guess
+     would wrongly report safe here — this test would then flip to an UNSOUND failure. *)
+  check
+    "mp-interval-unsafe"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun A (Int) Bool)
+      (declare-fun B (Int) Bool)
+      (declare-fun C (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (A x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (A x)(= y (+ x 1))) (B y))))
+      (assert (forall ((x Int)(y Int)) (=> (and (B x)(= y (+ x 1))) (C y))))
+      (assert (forall ((x Int)) (=> (and (C x)(= x 2)) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;

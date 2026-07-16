@@ -564,6 +564,207 @@ let verify (sy : sys) (inv : expr list array) : bool =
   !ok
 ;;
 
+(* ---- forward two-sided interval propagation (candidate-invariant generator) ---- *)
+
+(* A cheap forward abstract interpretation on the integer-interval domain: propagate
+   per-predicate, per-argument bounds [lo <= x <= hi] from the [init] sets along the edges
+   to a fixpoint (Kleene iteration with interval widening for termination). The result is
+   only ever a CANDIDATE invariant — it is handed to {!verify} (the same independent
+   firewall that gates PDR's [Safe]), so a loose or wrong guess can only cost a
+   fall-through to the full PDR search, never a wrong verdict. This is the "two-sided
+   single-variable bound" template: it reaches invariants like [x = 0] (i.e.
+   [0 <= x <= 0]) propagated down a predicate chain, which one-sided half-space PDR
+   generalization diverges on. *)
+
+(* Read the integer value bound to [vname] in the session's current model, if any. *)
+let model_int (sess : Session.t) (vname : string) : Bigint.t option =
+  match Session.get_model sess with
+  | None -> None
+  | Some (_, bindings) ->
+    List.find_map
+      (function
+        | Session.Const (n, Session.VInt v) when String.equal n vname -> Some v
+        | _ -> None)
+      bindings
+;;
+
+type bound =
+  | Empty (* the constraint set is unsat: no contribution *)
+  | Bounded of Bigint.t
+  | Unbounded
+
+(* Guess the extremal (max if [want_max], else min) value of integer variable [vname] over
+   [asserts], with value-level widening: after two model bumps in the extremal direction
+   we give up to [Unbounded] (a sound over-approximation, since the guess is verified
+   later). An [unknown] oracle also widens to [Unbounded]. *)
+let guess_bound (sy : sys) (asserts : expr list) (vname : string) ~(want_max : bool)
+  : bound
+  =
+  match solve_exprs sy asserts with
+  | R_unsat, _ -> Empty
+  | R_unknown, _ -> Empty
+  | R_sat, sess0 ->
+    (match model_int sess0 vname with
+     | None -> Unbounded (* not pinned by the model: treat as unbounded *)
+     | Some m0 ->
+       let rec go count m =
+         let more =
+           if want_max then Gt (Var vname, Int_lit m) else Lt (Var vname, Int_lit m)
+         in
+         match solve_exprs sy (asserts @ [ more ]) with
+         | R_unsat, _ -> Bounded m
+         | R_unknown, _ -> Unbounded
+         | R_sat, sess ->
+           (match model_int sess vname with
+            | None -> Unbounded
+            | Some m' -> if count >= 2 then Unbounded else go (count + 1) m')
+       in
+       go 0 m0)
+;;
+
+(* Per-predicate interval state: [reach.(p)] tracks whether p is known reachable; when it
+   is, [los.(p).(i)]/[his.(p).(i)] hold [Some bound] (finite) or [None] (unbounded). *)
+type istate =
+  { reach : bool array
+  ; los : Bigint.t option array array
+  ; his : Bigint.t option array array
+  }
+
+let interval_invariant (sy : sys) : expr list array option =
+  (* A private query budget so the propagation cannot dominate the solve; on exhaustion or
+     any give-up we simply produce no candidate (PDR then runs as before). *)
+  let start = !query_count in
+  let cap = min 3000 (max 200 ((!budget_ref - start) / 4)) in
+  let over () = !query_count - start > cap in
+  let st =
+    { reach = Array.make sy.npreds false
+    ; los = Array.init sy.npreds (fun p -> Array.make sy.arity.(p) None)
+    ; his = Array.init sy.npreds (fun p -> Array.make sy.arity.(p) None)
+    }
+  in
+  (* Widening join of a fresh [lo,hi] contribution into predicate [p]'s arg [i]. If [p]
+     was not yet reachable, adopt the contribution verbatim (first observation); otherwise
+     widen any side that would loosen straight to unbounded ([None]) so bounds change O(1)
+     times and the iteration terminates. Returns [true] if anything changed. *)
+  let join_lo p i (b : bound) : bool =
+    let cur = st.los.(p).(i) in
+    let nv =
+      match b with
+      | Empty -> cur
+      | Unbounded -> None
+      | Bounded m -> Some m
+    in
+    if not st.reach.(p)
+    then (
+      st.los.(p).(i) <- nv;
+      false)
+    else (
+      let merged =
+        match cur, nv with
+        | None, _ | _, None -> None
+        | Some a, Some c -> if Bigint.compare c a < 0 then None else Some a
+      in
+      if merged <> cur
+      then (
+        st.los.(p).(i) <- merged;
+        true)
+      else false)
+  in
+  let join_hi p i (b : bound) : bool =
+    let cur = st.his.(p).(i) in
+    let nv =
+      match b with
+      | Empty -> cur
+      | Unbounded -> None
+      | Bounded m -> Some m
+    in
+    if not st.reach.(p)
+    then (
+      st.his.(p).(i) <- nv;
+      false)
+    else (
+      let merged =
+        match cur, nv with
+        | None, _ | _, None -> None
+        | Some a, Some c -> if Bigint.compare c a > 0 then None else Some a
+      in
+      if merged <> cur
+      then (
+        st.his.(p).(i) <- merged;
+        true)
+      else false)
+  in
+  (* Current interval invariant of pred [p] as constraints over [namespace i]. *)
+  let bounds_exprs (namespace : int -> string) (p : int) : expr list =
+    let acc = ref [] in
+    for i = sy.arity.(p) - 1 downto 0 do
+      (match st.his.(p).(i) with
+       | Some h -> acc := Le (Var (namespace i), Int_lit h) :: !acc
+       | None -> ());
+      match st.los.(p).(i) with
+      | Some l -> acc := Ge (Var (namespace i), Int_lit l) :: !acc
+      | None -> ()
+    done;
+    !acc
+  in
+  (* Contribute the bounds of [namespace 0..arity-1] under [asserts] into predicate [p].
+     Marks [p] reachable iff [asserts] is satisfiable. Returns whether anything changed. *)
+  let contribute (p : int) (namespace : int -> string) (asserts : expr list) : bool =
+    if over ()
+    then false
+    else (
+      match check sy asserts with
+      | R_unsat | R_unknown -> false
+      | R_sat ->
+        let changed = ref false in
+        let was = st.reach.(p) in
+        for i = 0 to sy.arity.(p) - 1 do
+          if not (over ())
+          then (
+            let lo = guess_bound sy asserts (namespace i) ~want_max:false in
+            let hi = guess_bound sy asserts (namespace i) ~want_max:true in
+            (* [join_*] must observe reachability BEFORE we flip it on for the first
+               contribution, so the initial bounds are adopted verbatim. *)
+            if join_lo p i lo then changed := true;
+            if join_hi p i hi then changed := true)
+        done;
+        if not was
+        then (
+          st.reach.(p) <- true;
+          changed := true);
+        !changed)
+  in
+  try
+    (* seed from init *)
+    for p = 0 to sy.npreds - 1 do
+      ignore (contribute p (pre p) [ sy.init.(p) ] : bool)
+    done;
+    (* propagate along edges to a fixpoint (widening guarantees termination) *)
+    let changed = ref true in
+    let rounds = ref 0 in
+    while !changed && (not (over ())) && !rounds <= sy.npreds + 3 do
+      changed := false;
+      incr rounds;
+      Array.iter
+        (fun e ->
+          if st.reach.(e.src) && not (over ())
+          then (
+            let asserts = bounds_exprs (pre e.src) e.src @ e.guard in
+            if contribute e.dst (post e.dst) asserts then changed := true))
+        sy.edges
+    done;
+    if over ()
+    then None
+    else (
+      let inv =
+        Array.init sy.npreds (fun p ->
+          if not st.reach.(p) then [ Bool_lit false ] else bounds_exprs (pre p) p)
+      in
+      if verify sy inv then Some inv else None)
+  with
+  | Give_up _ -> None
+;;
+
 (* ---- counterexample path replay ---- *)
 
 (* Confirm a counterexample soundly by replaying its full edge chain, independent of the
@@ -684,6 +885,13 @@ let solve ?(max_frames = 60) ?(budget = 200_000) (s : system) : result =
          (fun (src, g) ->
            if check sy (sy.init.(src) :: g) = R_sat then raise (Give_up "__unsafe0"))
          sy.bad;
+       (* Cheap forward two-sided interval propagation: if it produces a candidate that
+          the independent {!verify} firewall certifies, we are done (this reaches
+          chain-propagated bounds like [x = 0] that one-sided PDR generalization diverges
+          on). Otherwise fall through to the full PDR search below. *)
+       (match interval_invariant sy with
+        | Some _ -> raise (Give_up "__safe_interval")
+        | None -> ());
        let p = mk_pdr sy 4 in
        let verdict = ref None in
        while !verdict = None do
@@ -738,6 +946,8 @@ let solve ?(max_frames = 60) ?(budget = 200_000) (s : system) : result =
      | Give_up "__unsafe_trivial" ->
        { verdict = Unsafe; detail = "trivial constraint-only counterexample" }
      | Give_up "__unsafe0" -> { verdict = Unsafe; detail = "counterexample at depth 0" }
+     | Give_up "__safe_interval" ->
+       { verdict = Safe; detail = "forward interval invariant, verified" }
      | Give_up r -> { verdict = Unknown r; detail = r }
      | Chc_ast.Build_error m -> { verdict = Unknown ("build: " ^ m); detail = m })
 ;;
