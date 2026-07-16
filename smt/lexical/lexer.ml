@@ -125,6 +125,26 @@ let advance s pos =
   else pos.col <- pos.col + 1
 ;;
 
+(* Scan a maximal run of chars satisfying [pred] from [pos.idx], advance [pos] over the
+   run in one step, and return the run as a single substring (FE2 L5). This replaces the
+   per-char [peek] (which boxes a [Some] per byte) → [Buffer.add_char] → [advance] loop
+   the token readers used, for the token classes whose runs contain NO newline (simple
+   symbols and numerals): [line] is therefore unchanged and [col] advances by the run
+   length, so the result — bytes, final [pos.idx], and [pos.line]/[pos.col] — is identical
+   to the old loop. Not used for strings/quoted symbols, whose content is not a verbatim
+   input substring. *)
+let scan_run s pos pred =
+  let start = pos.idx in
+  let n = String.length s in
+  let j = ref start in
+  while !j < n && pred s.[!j] do
+    incr j
+  done;
+  pos.idx <- !j;
+  pos.col <- pos.col + (!j - start);
+  String.sub s start (!j - start)
+;;
+
 let is_ws = function
   | ' ' | '\t' | '\n' | '\r' -> true
   | _ -> false
@@ -199,52 +219,27 @@ let read_string s pos =
 (* A maximal run of simple-symbol chars starting at a non-digit: a simple ⟨symbol⟩, or a
    ⟨reserved word⟩ if it is one of the fixed set. *)
 let read_symbolish s pos =
-  let buf = Buffer.create 16 in
-  let rec loop () =
-    match peek s pos with
-    | Some c when is_symbol_char c ->
-      Buffer.add_char buf c;
-      advance s pos;
-      loop ()
-    | _ -> Buffer.contents buf
-  in
-  let text = loop () in
+  let text = scan_run s pos is_symbol_char in
   if is_reserved_word text then Reserved text else Symbol { text; quoted = false }
 ;;
 
 (* Digit-leading: §3.1 ⟨numeral⟩ / ⟨decimal⟩. Read digits, then optional [.] digits. A
    trailing symbol char (e.g. [1a]) is a malformed numeral. *)
 let read_number s pos =
-  let buf = Buffer.create 16 in
-  let take_digits () =
-    let rec loop () =
-      match peek s pos with
-      | Some c when is_digit c ->
-        Buffer.add_char buf c;
-        advance s pos;
-        loop ()
-      | _ -> ()
-    in
-    loop ()
-  in
-  take_digits ();
-  let is_decimal =
+  let int_part = scan_run s pos is_digit in
+  let is_decimal, text =
     match peek s pos with
     | Some '.' ->
-      Buffer.add_char buf '.';
       advance s pos;
-      let before = Buffer.length buf in
-      take_digits ();
-      if Buffer.length buf = before
-      then errorf pos "decimal has no fractional digits (§3.1)";
-      true
-    | _ -> false
+      let frac = scan_run s pos is_digit in
+      if String.length frac = 0 then errorf pos "decimal has no fractional digits (§3.1)";
+      true, int_part ^ "." ^ frac
+    | _ -> false, int_part
   in
   (match peek s pos with
    | Some c when is_symbol_char c ->
      errorf pos "malformed numeral: unexpected %C after digits (§3.1)" c
    | _ -> ());
-  let text = Buffer.contents buf in
   if is_decimal then Decimal text else Numeral text
 ;;
 
