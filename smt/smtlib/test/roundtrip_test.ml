@@ -26,9 +26,9 @@ let checks = ref 0
 let fail fmt =
   Printf.ksprintf
     (fun s ->
-       incr failures;
-       print_string "  FAIL: ";
-       print_endline s)
+      incr failures;
+      print_string "  FAIL: ";
+      print_endline s)
     fmt
 ;;
 
@@ -242,8 +242,8 @@ let sessions () =
   check_print
     ~name:"int-min-print"
     (fun env ctx ->
-       let x = const env ctx "x" i in
-       [ Context.eq ctx x (Context.int_const ctx min_int) ])
+      let x = const env ctx "x" i in
+      [ Context.eq ctx x (Context.int_const ctx min_int) ])
     ~expect:
       (Printf.sprintf
          "(- %s)"
@@ -436,26 +436,26 @@ let naming_classes () =
      parser is lenient; that masking is exactly the R1 pattern) AND round-trip. *)
   List.iter
     (fun w ->
-       check_print
-         ~name:("reserved-word-render:" ^ w)
-         ~expect:(Printf.sprintf "(declare-const |%s| Int)" w)
-         (fun env ctx ->
-            let c = const env ctx w i in
-            [ Context.eq ctx c (Context.int_const ctx 0) ]);
-       check_a ~name:("reserved-word:" ^ w) (fun env ctx ->
-         let c = const env ctx w i in
-         [ Context.eq ctx c (Context.int_const ctx 0) ]))
+      check_print
+        ~name:("reserved-word-render:" ^ w)
+        ~expect:(Printf.sprintf "(declare-const |%s| Int)" w)
+        (fun env ctx ->
+           let c = const env ctx w i in
+           [ Context.eq ctx c (Context.int_const ctx 0) ]);
+      check_a ~name:("reserved-word:" ^ w) (fun env ctx ->
+        let c = const env ctx w i in
+        [ Context.eq ctx c (Context.int_const ctx 0) ]))
     reserved_word_class;
   (* predefined operators as function names (const and applied): REFUSED *)
   List.iter
     (fun op ->
-       check_refused ~name:("operator-const:" ^ op) (fun env ctx ->
-         let c = const env ctx op i in
-         [ Context.eq ctx c (Context.int_const ctx 0) ]);
-       check_refused ~name:("operator-app:" ^ op) (fun env ctx ->
-         let f = fn env op [ i ] i in
-         let x = const env ctx "x" i in
-         [ Context.eq ctx (Context.app ctx f [ x ]) (Context.int_const ctx 0) ]))
+      check_refused ~name:("operator-const:" ^ op) (fun env ctx ->
+        let c = const env ctx op i in
+        [ Context.eq ctx c (Context.int_const ctx 0) ]);
+      check_refused ~name:("operator-app:" ^ op) (fun env ctx ->
+        let f = fn env op [ i ] i in
+        let x = const env ctx "x" i in
+        [ Context.eq ctx (Context.app ctx f [ x ]) (Context.int_const ctx 0) ]))
     operator_class;
   (* empty name: REFUSED *)
   check_refused ~name:"empty-name" (fun env ctx ->
@@ -464,11 +464,11 @@ let naming_classes () =
   (* predefined SORT names as an uninterpreted sort: REFUSED *)
   List.iter
     (fun s ->
-       check_refused ~name:("sort-name:" ^ s) (fun env ctx ->
-         let so = usort env s in
-         let a = const env ctx "a" so
-         and c = const env ctx "c" so in
-         [ Context.eq ctx a c ]))
+      check_refused ~name:("sort-name:" ^ s) (fun env ctx ->
+        let so = usort env s in
+        let a = const env ctx "a" so
+        and c = const env ctx "c" so in
+        [ Context.eq ctx a c ]))
     [ "Int"; "Bool" ];
   (* reserved word as a sort name: |quoted|, round-trip *)
   check_a ~name:"sort-reserved-word" (fun env ctx ->
@@ -631,6 +631,26 @@ let parser_fail_closed_cases () =
   check_parse_ok
     ~name:"F2-bang-named-ok"
     (hdr ^ "(declare-const p Bool)\n(assert (! p :named foo))\n(check-sat)\n");
+  (* H3 (lemmas-climb review hedge): a DEGENERATE quantifier in term position — bare
+     [(exists)], binder-less / wrong-arity — must be [Malformed] (hard fail), not the
+     salvageable [Unsupported] a well-formed-but-nested quantifier gets. Guards the
+     "Malformed whole-fails, Unsupported drops" contract on the nested-quantifier path
+     ([read_term] validates the quantifier's structural shape before rejecting it). *)
+  check_malformed
+    ~name:"H3-degenerate-nested-exists"
+    (hdr ^ "(declare-fun p (Int) Bool)\n(assert (or (p 0) (exists)))\n(check-sat)\n");
+  (* H3 control: a WELL-FORMED nested quantifier is out of the fragment but NOT malformed
+     — it is [Unsupported], which partial assertion (lemmas-climb) SALVAGE-DROPS rather
+     than raising, so the whole document parses OK (the assertion is dropped; the query
+     degrades to a sound [unknown] at solve time). Contrast the degenerate case above,
+     whose [Malformed] propagates and fails the parse. Together they pin the "Malformed
+     hard-fails / Unsupported drops" distinction on the nested-quantifier path. *)
+  check_parse_ok
+    ~name:"H3-wellformed-nested-exists-parses-ok-dropped"
+    (hdr
+     ^ "(declare-fun p (Int) Bool)\n\
+        (assert (or (p 0) (exists ((x Int)) (p x))))\n\
+        (check-sat)\n");
   (* Tester-name collision (parser path). A datatype constructor [zero] mints the tester
      function [is-zero]. On the PARSER path a user symbol of that same name can never
      coexist with the tester — [declare_fun]'s redeclaration guard rejects whichever comes
@@ -851,12 +871,12 @@ let smt2_files dir =
     Array.sort String.compare entries;
     Array.fold_left
       (fun acc e ->
-         let p = Filename.concat dir e in
-         if Sys.is_directory p
-         then walk acc p
-         else if Filename.check_suffix p ".smt2"
-         then p :: acc
-         else acc)
+        let p = Filename.concat dir e in
+        if Sys.is_directory p
+        then walk acc p
+        else if Filename.check_suffix p ".smt2"
+        then p :: acc
+        else acc)
       acc
       entries
   in
@@ -884,17 +904,17 @@ let b_unprintable_seen = ref []
 
 let check_b path =
   let text = read_file path in
-  (* board #58: a committed file may mint arrays [.oxsmt.arr.*] or bit-vector [.oxsmt.bv|*]
-     op/marker symbols mid-parse through the cap-backed [?internal_mint] door, so this
-     direction-B check owns a throwaway env with its own capability (the analogue of what a
-     [Session] hands the product drivers). The env is private to this parse, so there is no
-     cross-context aliasing risk; the SAME minter/env backs the reprint reparse below, so a
-     round-tripped reserved symbol interns to one identity. *)
+  (* board #58: a committed file may mint arrays [.oxsmt.arr.*] or bit-vector
+     [.oxsmt.bv|*] op/marker symbols mid-parse through the cap-backed [?internal_mint]
+     door, so this direction-B check owns a throwaway env with its own capability (the
+     analogue of what a [Session] hands the product drivers). The env is private to this
+     parse, so there is no cross-context aliasing risk; the SAME minter/env backs the
+     reprint reparse below, so a round-tripped reserved symbol interns to one identity. *)
   let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
   (* Admit BOTH theory grammars (the same narrowing [Session.parse_minter] applies in the
-     combined tree), so this local parse can intern arrays op symbols and bit-vector markers
-     and nothing else. *)
+     combined tree), so this local parse can intern arrays op symbols and bit-vector
+     markers and nothing else. *)
   let internal_mint =
     Internal_minter.create
       ~admit:(fun name -> Array_defs.is_op_name name || Bv.is_bv_name name)
@@ -1123,17 +1143,17 @@ let () =
     let missing = List.filter (fun n -> not (List.mem n seen)) b_unprintable_allowlist in
     List.iter
       (fun n ->
-         fail
-           "B: %s entered the unprintable-skip class but is NOT allowlisted (printer \
-            regression on legal input?)"
-           n)
+        fail
+          "B: %s entered the unprintable-skip class but is NOT allowlisted (printer \
+           regression on legal input?)"
+          n)
       unexpected;
     List.iter
       (fun n ->
-         fail
-           "B: allowlisted golden %s was NOT unprintable-skipped this run (printer \
-            stopped refusing it, or it was not scanned — expected under tests/cases)"
-           n)
+        fail
+          "B: allowlisted golden %s was NOT unprintable-skipped this run (printer \
+           stopped refusing it, or it was not scanned — expected under tests/cases)"
+          n)
       missing;
     let expected = unexpected = [] && missing = [] in
     Printf.printf

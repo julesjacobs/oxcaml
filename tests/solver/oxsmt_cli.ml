@@ -228,10 +228,16 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
        over the arrays/datatypes theories can reach a path with no EUF+LIA e-graph view
        ([Cdclt.egraph_view] failure); degrade any such unmapped exception to a sound
        [unknown] rather than crash the CLI (mirrors corpus_classify, keeping the two
-       drivers equivalent). *)
+       drivers equivalent). The degrade is LOUD (visible-failure-modes directive): a
+       one-line stderr marker names the exception, so a silent completeness loss is never
+       invisible. *)
     let v =
       try Session.check_sat s with
-      | _ -> Session.Unknown
+      | e ->
+        Printf.eprintf
+          "oxsmt_cli: check_sat degraded to unknown: %s\n"
+          (Printexc.to_string e);
+        Session.Unknown
     in
     let st = Session.stats s in
     let block ?(reason = "") verdict model =

@@ -504,7 +504,23 @@ and read_app st scope head args orig =
        term
      | _ -> malformedf "malformed (as term sort): %s" (Sexp.to_string orig))
   | Sexp.Atom (Tok.Reserved ("forall" | "exists")) ->
-    unsupportedf "quantifiers are not supported (QF only)"
+    (* A quantifier in TERM position (nested inside a term, not an assertion root) is out
+       of the fragment. VALIDATE its structural shape FIRST so degenerate syntax (bare
+       [(exists)], binder-less, wrong arity) is a hard [Malformed] — the reader's stated
+       "Malformed whole-fails" contract — rather than a salvageable [Unsupported] drop.
+       The check is purely structural ([(Q (binders...) body)] with each binder a
+       2-element list); it does NOT resolve binder sorts, so a well-formed nested
+       quantifier over an unsupported sort (e.g. [Real]) stays [Unsupported] (soundly
+       dropped), not a hard fail. A well-formed-but-nested quantifier is the genuine
+       out-of-fragment case. *)
+    (match args with
+     | [ Sexp.List binders; _body ]
+       when List.for_all
+              (function
+                | Sexp.List [ _; _ ] -> true
+                | _ -> false)
+              binders -> unsupportedf "quantifiers are not supported (QF only)"
+     | _ -> malformedf "malformed quantifier (expected (forall|exists (binders) body))")
   | Sexp.Atom (Tok.Reserved "match") -> unsupportedf "datatype match is not supported yet"
   | Sexp.Atom (Tok.Reserved r) ->
     malformedf "reserved word %s cannot head an application" r
