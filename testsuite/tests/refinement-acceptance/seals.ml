@@ -238,7 +238,7 @@ Line 2, characters 2-29:
   Implementation declaration for value f
 |}]
 
-(* @acc id=seal_launder_unsound final=REJECT today=ACCEPT stable=no unlocks=seals
+(* @acc id=seal_launder_unsound final=REJECT today=REJECT stable=yes
    KNOWN GAP, deferred to the Seals stage: an UNCONSTRAINED implementation
    ([Obj.magic 0] : the value-restricted [Tvar] result) behind a refined
    interface laundered the refinement through signature inclusion, with no
@@ -246,8 +246,9 @@ Line 2, characters 2-29:
    rejected (see seal_conforming); only this [Tvar]-through-seal case slips.
    Signature-boundary obligations are the Seals stage -- the verification pass
    over the structure has no visibility into the ascribing signature -- so this
-   is an ANCHOR recording the current unsound ACCEPT.  It flips to REJECT when
-   Seals queues the directed implication VC. *)
+   was an ANCHOR recording the then-unsound ACCEPT.  The Seals merge closed the
+   [Tvar]-through-seal guard, so the laundered ['a] is now rejected structurally
+   at signature inclusion, reaching the final REJECT. *)
 module Seal_launder : sig
   val x : int{ _ = 1 }
 end = struct
