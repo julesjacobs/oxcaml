@@ -87,11 +87,11 @@ let build num_vars clauses =
 let model_satisfies clauses model =
   List.for_all
     (fun cl ->
-       List.exists
-         (fun l ->
-            let b = model.(abs l - 1) in
-            if l > 0 then b else not b)
-         cl)
+      List.exists
+        (fun l ->
+          let b = model.(abs l - 1) in
+          if l > 0 then b else not b)
+        cl)
     clauses
 ;;
 
@@ -185,8 +185,8 @@ let test_property label gen n =
      | Sat.Unsat -> if expected then incr disagreements);
     List.iter
       (fun l ->
-         incr n_learned;
-         if not (learned_entailed num_vars clauses l) then incr unentailed)
+        incr n_learned;
+        if not (learned_entailed num_vars clauses l) then incr unentailed)
       !learned
   done;
   check
@@ -233,8 +233,8 @@ let test_directed n =
       List.init
         (4 + rand_n 3)
         (fun _ ->
-           let v = 1 + rand_n num_vars in
-           if rand_n 2 = 0 then v else -v)
+          let v = 1 + rand_n num_vars in
+          if rand_n 2 = 0 then v else -v)
     in
     let clauses =
       List.init ((num_vars * 4) + rand_n num_vars) (fun _ -> three ())
@@ -306,9 +306,9 @@ let random_constraints num_vars =
   List.init
     (1 + rand_n 4)
     (fun _ ->
-       let a = rand_n num_vars in
-       let b = rand_n num_vars in
-       a, b)
+      let a = rand_n num_vars in
+      let b = rand_n num_vars in
+      a, b)
 ;;
 
 let constraint_clauses constraints =
@@ -366,7 +366,15 @@ let build_conflict_mock num_vars clauses constraints =
     in
     go constraints
   in
-  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []); on_chrono_rewind = None });
+  Sat.set_theory
+    s
+    (Some
+       { Sat.on_assign
+       ; on_backtrack
+       ; check
+       ; explain = (fun _ -> [])
+       ; on_chrono_rewind = None
+       });
   List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
   s
 ;;
@@ -518,16 +526,16 @@ let build_prop_mock num_vars clauses constraints =
       let props = ref [] in
       List.iter
         (fun (a, b) ->
-           if asg.(a) = 1 && asg.(b) = 0
-           then (
-             let l = Sat.pos b in
-             cache_reason l [ Sat.pos a ];
-             props := l :: !props)
-           else if asg.(b) = -1 && asg.(a) = 0
-           then (
-             let l = Sat.neg a in
-             cache_reason l [ Sat.neg b ];
-             props := l :: !props))
+          if asg.(a) = 1 && asg.(b) = 0
+          then (
+            let l = Sat.pos b in
+            cache_reason l [ Sat.pos a ];
+            props := l :: !props)
+          else if asg.(b) = -1 && asg.(a) = 0
+          then (
+            let l = Sat.neg a in
+            cache_reason l [ Sat.neg b ];
+            props := l :: !props))
         constraints;
       Sat.T_consistent !props
   in
@@ -536,7 +544,9 @@ let build_prop_mock num_vars clauses constraints =
     | Some prem -> prem
     | None -> raise Mock_frame_popped
   in
-  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None });
+  Sat.set_theory
+    s
+    (Some { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None });
   List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
   s
 ;;
@@ -587,29 +597,30 @@ let test_prop_seam n =
     (!raises = 0)
 ;;
 
-(* TRUE-LEVEL DELIVERY (fabric S4.1 seam), RED-verified, PER-SITE. [on_assign] must hand the
-   theory a literal's TRUE decision level from BOTH firing sites. Under CB the trail is
-   non-monotone, so a delivered true level can be STRICTLY BELOW [decision_level]:
-   - ENQUEUE site ([unchecked_enqueue]): a learned unit enqueued at its backjump level while
-     the solver still sits at a higher level;
-   - REPLAY site (the chrono [cancel_until] rebuild): a survivor whose true level is below the
-     backtrack target, re-asserted while [decision_level] equals that (higher) target.
-   A conforming seam delivers the true level at each; the pre-S4 pull ([Sat.decision_level])
-   delivers the current level at both.
+(* TRUE-LEVEL DELIVERY (fabric S4.1 seam), RED-verified, PER-SITE. [on_assign] must hand
+   the theory a literal's TRUE decision level from BOTH firing sites. Under CB the trail
+   is non-monotone, so a delivered true level can be STRICTLY BELOW [decision_level]:
+   - ENQUEUE site ([unchecked_enqueue]): a learned unit enqueued at its backjump level
+     while the solver still sits at a higher level;
+   - REPLAY site (the chrono [cancel_until] rebuild): a survivor whose true level is below
+     the backtrack target, re-asserted while [decision_level] equals that (higher) target.
+     A conforming seam delivers the true level at each; the pre-S4 pull
+     ([Sat.decision_level]) delivers the current level at both.
 
    This observer attributes each delivery to a site WITHOUT a trail accessor: the chrono
    rebuild fires [on_backtrack ~level:0] then replays the surviving trail, so between a
    backtrack and the first NON-survivor delivery every fact is a replay of a literal held
-   before the backtrack ([pre_bt]); the first delivery not in [pre_bt] (the freshly learned
-   unit) ends the replay window and is an enqueue. It then requires a below-current delivery
-   at EACH site independently, plus one delivery equal to a positive current level.
+   before the backtrack ([pre_bt]); the first delivery not in [pre_bt] (the freshly
+   learned unit) ends the replay window and is an enqueue. It then requires a
+   below-current delivery at EACH site independently, plus one delivery equal to a
+   positive current level.
 
    RED, each mutation-killed INDEPENDENTLY: enqueue site -> [decision_level t] fails
    [saw_below_enqueue]; replay site -> [decision_level t] fails [saw_below_replay]; an
-   always-zero delivery fails [saw_level_eq_current_pos] (0 never equals a positive current
-   level). [level <= decision_level] (a true level is never ABOVE current) is also asserted.
-   The observer never conflicts or propagates, so it cannot change the verdict. Own fixed seed
-   so it is placement-independent and reproducible. *)
+   always-zero delivery fails [saw_level_eq_current_pos] (0 never equals a positive
+   current level). [level <= decision_level] (a true level is never ABOVE current) is also
+   asserted. The observer never conflicts or propagates, so it cannot change the verdict.
+   Own fixed seed so it is placement-independent and reproducible. *)
 let test_true_level_delivery n =
   let saved_lcg = !lcg in
   lcg := 0x1E3779B97F4A7C16;
@@ -629,8 +640,8 @@ let test_true_level_delivery n =
     let replaying = ref false in
     let on_assign l ~level =
       let dl = Sat.decision_level s in
-      (* a replay re-asserts a survivor held before the backtrack; the first delivery not in
-         [pre_bt] is the freshly learned unit and ends the replay window *)
+      (* a replay re-asserts a survivor held before the backtrack; the first delivery not
+         in [pre_bt] is the freshly learned unit and ends the replay window *)
       let is_replay = !replaying && Hashtbl.mem !pre_bt (key l) in
       if !replaying && not (Hashtbl.mem !pre_bt (key l)) then replaying := false;
       if level > dl then incr level_above_current;
@@ -650,7 +661,13 @@ let test_true_level_delivery n =
     in
     Sat.set_theory
       s
-      (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []); on_chrono_rewind = None });
+      (Some
+         { Sat.on_assign
+         ; on_backtrack
+         ; check
+         ; explain = (fun _ -> [])
+         ; on_chrono_rewind = None
+         });
     List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
     ignore (Sat.solve s : Sat.result)
   done;
@@ -674,6 +691,356 @@ let test_true_level_delivery n =
         violations)"
        !level_above_current)
     (!level_above_current = 0)
+;;
+
+(* ------------------------------------------------------------------ *)
+(* S4.2 INCREMENTAL-UNDO OBS-EQ + frames-vs-watermark RED. The seam added
+   [on_chrono_rewind]: with [Some rewind] the chrono [cancel_until] rewinds the theory to
+   the earliest-removed watermark [w] and replays ONLY the survivors at compacted positions
+   [w..trail_n-1], instead of [on_backtrack ~level:0] + replay-of-ALL-survivors. These
+   tests drive that SAT-core dispatch DIRECTLY through mock theories — the env flag
+   [OXSMT_CHRONO_INCR_UNDO] gates only the real cdclt install, whereas a mock sets
+   [on_chrono_rewind] itself, so the core's [Some]/[None] arm is exercised regardless of the
+   flag. Both mocks are conflict-only (they never propagate, so [explain] is never called);
+   the verdict must equal the DPLL oracle over [clauses ∧ {¬a∨b}], and every sat model must
+   satisfy clauses+constraints — the same augmented-oracle cross-check as {!test_seam_replay}.
+
+   OBS-EQ ({!test_incr_undo_obs_eq}): the CORRECT mock keeps a FLAT, stream-indexed
+   assignment log — [on_assign] appends the var at the next stream position (the seam
+   contract fires exactly one [on_assign] per trail placement, so stream index == trail
+   index); [on_chrono_rewind w] clears exactly the assertions at stream positions [>= w] and
+   sets the log length back to [w]; the core then replays positions [w..]. Survivors [0,w)
+   are never cleared and [w..] are re-asserted, so the assignment view after every backtrack
+   equals a from-base rebuild's — observational equality BY CONSTRUCTION. Verified sound
+   against the independent oracle over thousands of conflict-dense CB solves + all-models
+   valid + zero stale [T_conflict] (no [Theory_contract_violation]).
+
+   RED — two mutants, both through the deeper {!gen_deep_directed} family (see {!run_mutant}):
+   - {!test_incr_undo_frame_pop_boundary}: the FAITHFUL frames-vs-watermark mutant
+     ({!build_frame_pop_mock}) keeps a decision-level FRAME STACK and pops whole frames to
+     the current level instead of rewinding to the absolute watermark [w]. Under CB a
+     literal's frame need not match its true level, so frame-popping CAN discard the wrong
+     assertions — but only when the trail is deep/out-of-order; on shallow trails frames ==
+     watermark and it is observationally equivalent (measured [caught = 0] on random 3-CNF).
+     Kept as a NON-gating DIAGNOSTIC that prints its catch count to document that boundary,
+     NOT a gate (asserting [caught > 0] on it would be RED theater on this generator).
+   - {!test_incr_undo_overkeep_red}: the LOAD-BEARING RED ({!build_overkeep_mock}) is the
+     correct flat-stream rewind with an OFF-BY-ONE bug — [on_chrono_rewind w] clears only
+     stream positions [>= w+1], KEEPING the earliest-removed literal (position [w]) as
+     STALE-TRUE while the core replays [w..] anyway. When [check] cites that stale var in a
+     [T_conflict] the core raises {!Sat.Theory_contract_violation} (or the stale view
+     disagrees with the oracle). An off-by-one absolute rewind ALWAYS strands the
+     earliest-removed literal, so this cannot be coincidence-lucky: it asserts [caught > 0]
+     and proves the watermark's exact position is load-bearing. Mirrors the frame-suffix RED
+     of {!test_seam_replay}, one level down (the incremental arm). *)
+let build_rewind_mock num_vars clauses constraints =
+  let s = Sat.create () in
+  for _ = 1 to num_vars do
+    ignore (Sat.new_var s : int)
+  done;
+  let asg = Array.make num_vars 0 in
+  (* flat stream: the var asserted at each [on_assign] stream position (== trail index) *)
+  let stream = ref (Array.make 16 0) in
+  let stream_n = ref 0 in
+  let push v =
+    if !stream_n >= Array.length !stream
+    then (
+      let a = Array.make (2 * Array.length !stream) 0 in
+      Array.blit !stream 0 a 0 (Array.length !stream);
+      stream := a);
+    !stream.(!stream_n) <- v;
+    incr stream_n
+  in
+  let on_assign l ~level:_ =
+    let v = Sat.var_of_lit l in
+    push v;
+    asg.(v) <- (if Sat.sign_of_lit l then 1 else -1)
+  in
+  (* Under CB every [cancel_until] takes the chrono arm, which with
+     [Some on_chrono_rewind] calls the rewind and NEVER [on_backtrack]; a no-op is
+     therefore correct here. *)
+  let on_backtrack ~level:_ = () in
+  (* CORRECT: sub-frame absolute rewind to stream position [w] — clear exactly [w..]. *)
+  let on_chrono_rewind w =
+    for i = w to !stream_n - 1 do
+      asg.(!stream.(i)) <- 0
+    done;
+    stream_n := w
+  in
+  let check ~final:_ =
+    let rec go = function
+      | [] -> Sat.T_consistent []
+      | (a, b) :: rest ->
+        if asg.(a) = 1 && asg.(b) = -1
+        then Sat.T_conflict [ Sat.pos a; Sat.neg b ]
+        else go rest
+    in
+    go constraints
+  in
+  Sat.set_theory
+    s
+    (Some
+       { Sat.on_assign
+       ; on_backtrack
+       ; check
+       ; explain = (fun _ -> [])
+       ; on_chrono_rewind = Some on_chrono_rewind
+       });
+  List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
+  s
+;;
+
+let build_frame_pop_mock num_vars clauses constraints =
+  let s = Sat.create () in
+  for _ = 1 to num_vars do
+    ignore (Sat.new_var s : int)
+  done;
+  let asg = Array.make num_vars 0 in
+  let frames : int list array ref = ref (Array.make 0 []) in
+  let mock_level = ref 0 in
+  let ensure_frames k =
+    if k > Array.length !frames
+    then (
+      let f = Array.make k [] in
+      Array.blit !frames 0 f 0 (Array.length !frames);
+      frames := f)
+  in
+  let on_assign l ~level:_ =
+    let dl = Sat.decision_level s in
+    ensure_frames dl;
+    while !mock_level < dl do
+      incr mock_level;
+      !frames.(!mock_level - 1) <- []
+    done;
+    let v = Sat.var_of_lit l in
+    asg.(v) <- (if Sat.sign_of_lit l then 1 else -1);
+    if !mock_level > 0 then !frames.(!mock_level - 1) <- v :: !frames.(!mock_level - 1)
+  in
+  let on_backtrack ~level:_ = () in
+  (* MUTANT: pop whole frames down to the CURRENT decision level, ignoring the watermark
+     [w]. Frame-count semantics, not a sub-frame absolute rewind — the S4.1 hazard. *)
+  let on_chrono_rewind _w =
+    let dl = Sat.decision_level s in
+    while !mock_level > dl do
+      List.iter (fun v -> asg.(v) <- 0) !frames.(!mock_level - 1);
+      !frames.(!mock_level - 1) <- [];
+      decr mock_level
+    done
+  in
+  let check ~final:_ =
+    let rec go = function
+      | [] -> Sat.T_consistent []
+      | (a, b) :: rest ->
+        if asg.(a) = 1 && asg.(b) = -1
+        then Sat.T_conflict [ Sat.pos a; Sat.neg b ]
+        else go rest
+    in
+    go constraints
+  in
+  Sat.set_theory
+    s
+    (Some
+       { Sat.on_assign
+       ; on_backtrack
+       ; check
+       ; explain = (fun _ -> [])
+       ; on_chrono_rewind = Some on_chrono_rewind
+       });
+  List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
+  s
+;;
+
+(* Load-bearing RED mutant: OFF-BY-ONE over-keep. Same flat stream as [build_rewind_mock],
+   but [on_chrono_rewind w] clears only stream positions [>= w+1] — it KEEPS the earliest-
+   removed literal (stream position [w], the literal whose true level exceeded the target,
+   i.e. the one the core actually removed from the trail). The core replays compacted
+   positions [w..] regardless, so the kept position-[w] entry becomes STALE-TRUE: it names
+   a var no longer on the real trail. When [check] then finds a constraint whose true side
+   is that stale var, it returns a [T_conflict] citing a literal that is NOT currently
+   true, and the core's premise-validity guard raises {!Sat.Theory_contract_violation} (or
+   the stale view misses a real conflict and disagrees with the oracle / yields a bad
+   model). Unlike frame-pop this cannot be watermark-coincidence-lucky: an
+   absolute-position rewind that is off by one ALWAYS strands the earliest-removed
+   literal, so the watermark must be EXACT. The [min] guard keeps the truncation in range
+   for the [w = trail_n] corner. *)
+let build_overkeep_mock num_vars clauses constraints =
+  let s = Sat.create () in
+  for _ = 1 to num_vars do
+    ignore (Sat.new_var s : int)
+  done;
+  let asg = Array.make num_vars 0 in
+  let stream = ref (Array.make 16 0) in
+  let stream_n = ref 0 in
+  let push v =
+    if !stream_n >= Array.length !stream
+    then (
+      let a = Array.make (2 * Array.length !stream) 0 in
+      Array.blit !stream 0 a 0 (Array.length !stream);
+      stream := a);
+    !stream.(!stream_n) <- v;
+    incr stream_n
+  in
+  let on_assign l ~level:_ =
+    let v = Sat.var_of_lit l in
+    push v;
+    asg.(v) <- (if Sat.sign_of_lit l then 1 else -1)
+  in
+  let on_backtrack ~level:_ = () in
+  let on_chrono_rewind w =
+    let keep = min (w + 1) !stream_n in
+    for i = keep to !stream_n - 1 do
+      asg.(!stream.(i)) <- 0
+    done;
+    stream_n := keep
+  in
+  let check ~final:_ =
+    let rec go = function
+      | [] -> Sat.T_consistent []
+      | (a, b) :: rest ->
+        if asg.(a) = 1 && asg.(b) = -1
+        then Sat.T_conflict [ Sat.pos a; Sat.neg b ]
+        else go rest
+    in
+    go constraints
+  in
+  Sat.set_theory
+    s
+    (Some
+       { Sat.on_assign
+       ; on_backtrack
+       ; check
+       ; explain = (fun _ -> [])
+       ; on_chrono_rewind = Some on_chrono_rewind
+       });
+  List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
+  s
+;;
+
+(* Deep directed formula: wider clauses + more vars => deeper, more out-of-order CB trails
+   (the regime where a scattered removal's earliest-removed sits below several higher
+   frames, so frame-count and absolute-watermark undo diverge). Shared by the RED drivers
+   below. *)
+let gen_deep_directed () =
+  let num_vars = 8 + rand_n 6 in
+  let three () =
+    List.init 3 (fun _ ->
+      let v = 1 + rand_n num_vars in
+      if rand_n 2 = 0 then v else -v)
+  in
+  let wide () =
+    List.init
+      (4 + rand_n 3)
+      (fun _ ->
+        let v = 1 + rand_n num_vars in
+        if rand_n 2 = 0 then v else -v)
+  in
+  let clauses =
+    List.init ((num_vars * 4) + rand_n num_vars) (fun _ -> three ())
+    @ List.init (2 + rand_n 3) (fun _ -> wide ())
+  in
+  num_vars, clauses
+;;
+
+let test_incr_undo_obs_eq n =
+  let disagreements = ref 0 in
+  let bad_models = ref 0 in
+  let raises = ref 0 in
+  for _ = 1 to n do
+    let num_vars = 5 + rand_n 6 in
+    let clause () =
+      List.init 3 (fun _ ->
+        let v = 1 + rand_n num_vars in
+        if rand_n 2 = 0 then v else -v)
+    in
+    let clauses = List.init ((num_vars * 4) + rand_n num_vars) (fun _ -> clause ()) in
+    let constraints = random_constraints num_vars in
+    let augmented = clauses @ constraint_clauses constraints in
+    let expected = Oracle.solve num_vars augmented in
+    try
+      let s = build_rewind_mock num_vars clauses constraints in
+      match Sat.solve s with
+      | Sat.Sat ->
+        if not expected then incr disagreements;
+        if not (model_satisfies augmented (Sat.model s)) then incr bad_models
+      | Sat.Unsat -> if expected then incr disagreements
+    with
+    | Sat.Theory_contract_violation _ -> incr raises
+  done;
+  check
+    (Printf.sprintf
+       "incr-undo obs-eq: %d formulas agree with augmented DPLL (%d)"
+       n
+       !disagreements)
+    (!disagreements = 0);
+  check
+    (Printf.sprintf
+       "incr-undo obs-eq: all sat models satisfy clauses+constraints (%d bad)"
+       !bad_models)
+    (!bad_models = 0);
+  check
+    (Printf.sprintf
+       "incr-undo obs-eq: the incremental arm never emits a stale conflict (%d)"
+       !raises)
+    (!raises = 0)
+;;
+
+(* Drive a mutant [build] over [n] deep-directed formulas + their random constraints;
+   return how many were CAUGHT (oracle disagreement, bad model, or a stale-conflict
+   [Theory_contract_violation]). Shared by the boundary diagnostic and the load-bearing
+   RED so both see the same (harder) formula distribution. *)
+let run_mutant build n =
+  let caught = ref 0 in
+  for _ = 1 to n do
+    let num_vars, clauses = gen_deep_directed () in
+    let constraints = random_constraints num_vars in
+    let augmented = clauses @ constraint_clauses constraints in
+    let expected = Oracle.solve num_vars augmented in
+    try
+      let s = build num_vars clauses constraints in
+      match Sat.solve s with
+      | Sat.Sat ->
+        if not expected
+        then incr caught
+        else if not (model_satisfies augmented (Sat.model s))
+        then incr caught
+      | Sat.Unsat -> if expected then incr caught
+    with
+    | Sat.Theory_contract_violation _ -> incr caught
+  done;
+  !caught
+;;
+
+(* Frame-pop boundary DIAGNOSTIC (not a gate). The faithful frames-vs-watermark mutant
+   (pop whole decision-level frames instead of rewinding to the absolute watermark) is
+   observationally EQUIVALENT to the correct rewind whenever the trail is shallow / has
+   few out-of-order survivors — which is the common case even on deep directed 3-CNF — so
+   it is frequently caught=0 and CANNOT be a hard gate without risking RED theater. We run
+   it and PRINT the count to document where the equivalence boundary sits; the
+   load-bearing discrimination is {!test_incr_undo_overkeep_red} below (an off-by-one
+   absolute-position rewind, which can never be frame-coincidence-lucky). *)
+let test_incr_undo_frame_pop_boundary n =
+  let caught = run_mutant build_frame_pop_mock n in
+  Printf.printf
+    "  (incr-undo frame-pop boundary: caught=%d / %d deep-directed formulas — \
+     frames==watermark on the rest; load-bearing RED is overkeep below)\n"
+    caught
+    n
+;;
+
+let test_incr_undo_overkeep_red n =
+  let caught = run_mutant build_overkeep_mock n in
+  (* RED: an off-by-one absolute-position rewind strands the earliest-removed literal as
+     stale-true EVERY backtrack, so over a deep-directed run it MUST be caught (a stale
+     [T_conflict] the core rejects, or an oracle disagreement). caught=0 would mean the
+     watermark's exact position is not load-bearing in this harness — do NOT ship green;
+     escalate (it would contradict the seam contract). *)
+  check
+    (Printf.sprintf
+       "incr-undo overkeep-RED: off-by-one watermark mutant is caught (>=1 of %d; \
+        caught=%d)"
+       n
+       caught)
+    (caught > 0)
 ;;
 
 (* F-core, RED-verified: [failed_assumptions] must be a SUBSET of the assumptions (frozen
@@ -738,6 +1105,9 @@ let () =
   test_seam_replay 4000;
   test_prop_seam 4000;
   test_true_level_delivery 4000;
+  test_incr_undo_obs_eq 4000;
+  test_incr_undo_frame_pop_boundary 4000;
+  test_incr_undo_overkeep_red 4000;
   test_failed_assumptions_subset ();
   test_determinism 500;
   Printf.printf "chrono_test: %d checks, %d failures\n" !checks !failures;
