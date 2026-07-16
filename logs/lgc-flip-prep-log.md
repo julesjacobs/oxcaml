@@ -240,3 +240,77 @@ lockbox should be built with the O3-profile binary per the adoption.
 Scoped dual review, the definitive QUIESCED per-family lockbox arm-confirmation (pair-runner, on
 the O3-profile binary), and the land are out of scope for this prep. Do not self-approve / do not
 land.
+
+---
+
+## HEDGE ADDENDUM (post-review, dual APPROVE-WITH-HEDGE obligations)
+
+Branch: task/lgc-flip. Two hedge obligations from the dual review, both discharged here.
+No shipped-solver code changed (sat.ml untouched): all changes are test-only (sat_test.ml,
+its dune), a Makefile COMMENT correction, and this log. So OFF-identity / the 4-combo flag
+matrix / golden identity are structurally unchanged by this addendum; the flip's soundness
+evidence is exactly as reviewed.
+
+NOTE ON LOG FILE: the deliverable named logs/lgc-fixed-build-log.md, but that file does not
+exist on task/lgc-flip (it lives on the sibling task/lgc-fixed branch). This branch's
+canonical log is this file (logs/lgc-flip-prep-log.md), referenced by every commit here, so
+the addendum lands here.
+
+### Hedge (1) — stale test-pin rationale FIXED
+
+CRUX: the sat-test Makefile comment justified running `OXSMT_LGC_FIXED=0` by claiming the
+default-ON binary "fires reduceDB only at 5000 learned clauses — never on PHP(8,7) (~3437
+learnts)". That describes the FIXED arm. The SHIPPED arm is SIZEREL (both OXSMT_LGC_FIXED and
+OXSMT_LGC_SIZEREL default-ON), whose initial budget is max(lgc_sizerel_floor=1000,
+#orig-clauses/3). PHP(8,7) has 204 original clauses (floor 1000 wins) and learns ~3437, so it
+DOES cross 1000 and reduceDB DOES fire under the shipped default — the opposite of the stale
+claim.
+
+VERIFIED empirically (temporary eprintf of the trios, since removed): under the SHIPPED
+default (FIXED+SIZEREL both on) PHP(8,7) solves to (conflicts,decisions,propagations) =
+(3461,4261,38658); with reduceDB disabled (FIXED, sizerel off, initial 100M never crossed)
+it is (3437,4187,38840). The no-reduceDB 3437 conflicts matches the documented pristine
+"off -> 3437" value in test_reducedb_engagement; the sizerel run differs (3461 != 3437),
+confirming reduceDB fires under the shipped SIZEREL trigger and moves the search.
+
+The DECISION to force OXSMT_LGC_FIXED=0 for the existing pins is still correct — but for the
+right reason: under the shipped default reduceDB fires on the LEARNED-CLAUSE trigger at the
+1000 floor on the GEOMETRIC x1.1 schedule, which moves the pinned counter trio (c=4141 d=5009
+p=47786) and cert digest off the CONFLICT-COUNT baseline those pins capture. Running the pins
+under the default would FAIL those (correct) pins. The Makefile comment (Makefile:144-155) is
+rewritten to say exactly this. Grepped the whole touched file set for other FIXED-as-shipped
+wording: the remaining "5000" mentions in sat.ml (lgc_initial default / head-to-head text)
+and lgc_test.ml (initial=5000 clamp fixture) correctly describe the FIXED constant / the
+fixed-initial suite, not the shipped-on-PHP behavior, so they are accurate and left as-is.
+
+### Hedge (2) — shipped-trigger forced-GC relocation test ADDED
+
+New leg test_arena_reduce_db_sizerel in smt/solver/test/sat_test.ml (called last in the
+runner so its in-process env override cannot perturb earlier pins; env saved and restored).
+It overrides the process env (Makefile pins OXSMT_LGC_FIXED=0) back to the SHIPPED default
+(FIXED+SIZEREL on), drives PHP(8,7) under a forced Gc.full_major every 500 conflicts so the
+arena rebuild + cref remap in reduce_db runs across a collection, and asserts:
+  - PHP(8,7) is UNSAT under the shipped SIZEREL forced-GC relocation;
+  - deterministic verdict+counter trio across two shipped-trigger forced-GC runs;
+  - a no-reduceDB baseline (FIXED, sizerel off, initial 100M) is also UNSAT and reaches a
+    DIFFERENT trio -> WITNESS that reduceDB actually fires under the shipped trigger (a
+    flag-ignoring mutant collapses the two runs and fails this);
+  - PHP(8,7)-minus-one-AMO is SAT under shipped SIZEREL relocation and its model satisfies
+    every clause.
+Discrimination against a relocation bug is identical to the sibling test_arena_reduce_db_stress
+(a remap-class-skip in reduce_db leaves stale crefs -> wrong verdict / corrupt model / OOB
+crash), now exercised under the trigger that ACTUALLY SHIPS rather than only the conflict-count
+schedule. Reuses the existing arena helpers (php_solver, php_sat_minus_one, model_satisfies);
+with_gc_hook was hoisted from test_arena_reduce_db_stress to a shared top-level helper (no
+behavior change to the existing test). dune: added test-only [unix] to the sat_test executable
+(Unix.putenv, mirroring lgc_test; never linked into the stdlib-only shipped solver, I3 firewall).
+
+### GATES (all green on this addendum, opam 5.4.0 std release)
+
+- make sat-test: 118 checks, 0 failures (was 112; +6 from the new leg), run under
+  OXSMT_LGC_FIXED=0 as the target pins it.
+- make lgc-test: 9 checks, 0 failures (soundness-under-gc, load-bearing 125/250, initial-clamp
+  trio (15,55,153) unchanged).
+- make check-frozen: 14/14 interfaces match FROZEN.sha256 (sat.mli untouched).
+- make test: exit 0; cert_corpus_gate 56 files unsat-solves=33 (VALID=33 INVALID=0), repeat
+  re-emit VALID=33; harness/core/combine/chrono/wiring/dt/array/weq/satpre all 0 failures.

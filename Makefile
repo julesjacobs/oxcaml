@@ -144,10 +144,15 @@ core-prelude-test:
 ##   Run with OXSMT_LGC_FIXED=0 (the conflict-count reduceDB schedule) so the reduceDB
 ##   ENGAGEMENT + flat-arena RELOCATION pins (test_reducedb_engagement,
 ##   test_arena_reduce_db_stress: PHP(8,7) c=4141/digest ...) keep firing reduceDB ~10x
-##   and stay trunk-identical: those pins exercise the conflict-count schedule
-##   specifically, and OXSMT_LGC_FIXED default-ON fires reduceDB only at 5000 learned
-##   clauses — never on PHP(8,7) (~3437 learnts), which would silently drop the arena
-##   relocation coverage. The LGC-ON schedule's own reduceDB is covered by lgc-test.
+##   and stay trunk-identical: those pins exercise the conflict-count schedule specifically.
+##   The SHIPPED default (OXSMT_LGC_FIXED + OXSMT_LGC_SIZEREL both on) instead fires reduceDB
+##   on the LEARNED-CLAUSE trigger at the size-relative floor max(1000, #orig/3) = 1000 for
+##   PHP(8,7), which its ~3437 learnts DO cross — but on the geometric x1.1 schedule, which
+##   moves the pinned counter trio + cert digest off the conflict-count baseline these pins
+##   capture; running them under the default would fail those (correct) pins, so we force the
+##   conflict-count schedule here. Relocation under the shipped SIZEREL trigger has its own
+##   leg (test_arena_reduce_db_sizerel, which overrides the env back to the default in
+##   process), and the LGC schedule's reduceDB is also covered by lgc-test.
 sat-test:
 	OXSMT_LGC_FIXED=0 $(DUNE) exec smt/solver/test/sat_test.exe
 

@@ -197,11 +197,11 @@ let rand_n n = rand () mod n
 let model_satisfies clauses model =
   List.for_all
     (fun cl ->
-       List.exists
-         (fun l ->
-            let b = model.(abs l - 1) in
-            if l > 0 then b else not b)
-         cl)
+      List.exists
+        (fun l ->
+          let b = model.(abs l - 1) in
+          if l > 0 then b else not b)
+        cl)
     clauses
 ;;
 
@@ -278,8 +278,8 @@ let test_property label gen n =
      | Sat.Unsat -> if expected then incr disagreements);
     List.iter
       (fun l ->
-         incr n_learned;
-         if not (learned_clause_entailed clauses num_vars l) then incr unentailed)
+        incr n_learned;
+        if not (learned_clause_entailed clauses num_vars l) then incr unentailed)
       !learned
   done;
   check
@@ -854,18 +854,20 @@ let cert_stream_digest build =
   Digest.to_hex (Digest.string (Buffer.contents buf))
 ;;
 
+(* Interleave a full major GC every 500 conflicts, so the arena rebuild + cref remap in
+   [reduce_db] runs across a collection. Shared by the conflict-count-schedule stress test
+   and the shipped-SIZEREL-trigger test below. *)
+let with_gc_hook s =
+  let n = ref 0 in
+  Sat.set_budget_tick
+    s
+    (Some
+       (fun () ->
+         incr n;
+         if !n mod 500 = 0 then Gc.full_major ()))
+;;
+
 let test_arena_reduce_db_stress () =
-  (* Interleave a full major GC every 500 conflicts, so the arena rebuild + cref remap in
-     [reduce_db] runs across a collection. *)
-  let with_gc_hook s =
-    let n = ref 0 in
-    Sat.set_budget_tick
-      s
-      (Some
-         (fun () ->
-           incr n;
-           if !n mod 500 = 0 then Gc.full_major ()))
-  in
   (* UNSAT leg — PHP(8,7): >4000 conflicts, reduceDB fires ~10x. Pin verdict + exact
      counters, and re-run to pin determinism under forced GC. *)
   let run_unsat () =
@@ -916,6 +918,99 @@ let test_arena_reduce_db_stress () =
       "arena-stress: sat model satisfies every clause"
       (model_satisfies clauses (Sat.model s))
   | Sat.Unsat -> ()
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Shipped-trigger arena RELOCATION (LGC-flip hedge item 2). test_arena_reduce_db_stress
+   above pins the CONFLICT-COUNT reduceDB schedule — the [sat-test] target forces
+   OXSMT_LGC_FIXED=0 so those pins stay trunk-identical — but the DEFAULT binary ships
+   OXSMT_LGC_FIXED + OXSMT_LGC_SIZEREL BOTH on: reduceDB fires on the LEARNED-CLAUSE
+   trigger at the size-relative floor max(lgc_sizerel_floor=1000, #orig-clauses / 3).
+   PHP(8,7) has 204 original clauses (the 1000 floor wins) and learns ~3437, so it crosses
+   1000 and reduceDB (arena rebuild + cref remap) fires under the trigger that ACTUALLY
+   SHIPS. The flip was approved without a leg exercising relocation under this trigger;
+   this is that leg. It overrides the process env (the Makefile pins OXSMT_LGC_FIXED=0) to
+   the shipped default, runs under a forced full GC every 500 conflicts so relocation runs
+   across a collection, and restores the env afterwards.
+
+   WITNESS the coverage is not vacuous — reduceDB really fires under the shipped trigger:
+   the same PHP(8,7) solved with reduceDB effectively disabled (FIXED, sizerel off, a huge
+   initial threshold it never crosses) reaches a DIFFERENT counter trio; deleting learned
+   clauses at the 1000 floor moves the search. A mutant that ignored the sizerel/fixed
+   flag would collapse the two runs together and fail this.
+
+   DISCRIMINATION vs a relocation bug: identical to test_arena_reduce_db_stress — a
+   remap-class-skip in [reduce_db] leaves stale crefs after the first relocation, so the
+   solve flips the verdict, corrupts the reported SAT model, or crashes out of bounds. *)
+let test_arena_reduce_db_sizerel () =
+  let saved_fixed = Sys.getenv_opt "OXSMT_LGC_FIXED" in
+  let saved_sizerel = Sys.getenv_opt "OXSMT_LGC_SIZEREL" in
+  let saved_initial = Sys.getenv_opt "OXSMT_LGC_INITIAL" in
+  (* Restore each var to its saved token; [None] (unset) maps to "" — which is truthy
+     under the default-ON readers, matching the unset default — since stdlib has no
+     unsetenv. *)
+  let restore () =
+    let put k = function
+      | Some v -> Unix.putenv k v
+      | None -> Unix.putenv k ""
+    in
+    put "OXSMT_LGC_FIXED" saved_fixed;
+    put "OXSMT_LGC_SIZEREL" saved_sizerel;
+    put "OXSMT_LGC_INITIAL" saved_initial
+  in
+  let php_trio () =
+    let s = php_solver 7 in
+    with_gc_hook s;
+    let r = Sat.solve s in
+    let st = Sat.stats s in
+    r, st.Sat.Stats.conflicts, st.Sat.Stats.decisions, st.Sat.Stats.propagations
+  in
+  (* Shipped default: FIXED + SIZEREL both on => learned-clause trigger at the 1000 floor. *)
+  Unix.putenv "OXSMT_LGC_FIXED" "1";
+  Unix.putenv "OXSMT_LGC_SIZEREL" "1";
+  Unix.putenv "OXSMT_LGC_INITIAL" "5000";
+  let r1, c1, d1, p1 = php_trio () in
+  let r2, c2, d2, p2 = php_trio () in
+  (* No-reduceDB baseline: FIXED on, sizerel off, threshold so high PHP(8,7) never crosses
+     it (100M = lgc_initial_max), so reduceDB never fires — the pristine search. *)
+  Unix.putenv "OXSMT_LGC_SIZEREL" "0";
+  Unix.putenv "OXSMT_LGC_INITIAL" "100000000";
+  let rb, cb, db, pb = php_trio () in
+  (* SAT leg under the shipped trigger — model must satisfy every clause after relocation. *)
+  Unix.putenv "OXSMT_LGC_FIXED" "1";
+  Unix.putenv "OXSMT_LGC_SIZEREL" "1";
+  Unix.putenv "OXSMT_LGC_INITIAL" "5000";
+  let s, clauses = php_sat_minus_one 7 in
+  with_gc_hook s;
+  let rsat = Sat.solve s in
+  let model = if rsat = Sat.Sat then Some (Sat.model s) else None in
+  restore ();
+  check
+    "sizerel-arena: PHP(8,7) unsat under shipped SIZEREL forced-GC relocation"
+    (r1 = Sat.Unsat);
+  check
+    "sizerel-arena: deterministic verdict+counters across two shipped-trigger forced-GC \
+     runs"
+    (r1 = r2 && c1 = c2 && d1 = d2 && p1 = p2);
+  check "sizerel-arena: no-reduceDB baseline is also unsat" (rb = Sat.Unsat);
+  check
+    (Printf.sprintf
+       "sizerel-arena: reduceDB fired under shipped trigger — sizerel trio (%d,%d,%d) \
+        differs from no-GC baseline (%d,%d,%d)"
+       c1
+       d1
+       p1
+       cb
+       db
+       pb)
+    (not (c1 = cb && d1 = db && p1 = pb));
+  check
+    "sizerel-arena: PHP(8,7)-minus-one is sat under shipped SIZEREL relocation"
+    (rsat = Sat.Sat);
+  match model with
+  | Some m ->
+    check "sizerel-arena: sat model satisfies every clause" (model_satisfies clauses m)
+  | None -> ()
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -1096,6 +1191,10 @@ let () =
      sat-minimize-unsound mutant has a kill site — cert-step-1 fix round *)
   test_property_untraced "sparse" gen_sparse 20000;
   test_property_untraced "dense" gen_dense 20000;
+  (* Last: this test overrides OXSMT_LGC_* in-process to exercise the shipped SIZEREL
+     reduceDB trigger, then restores the env. Running it last keeps that override from
+     perturbing any earlier pin that runs under the Makefile's OXSMT_LGC_FIXED=0. *)
+  test_arena_reduce_db_sizerel ();
   Printf.printf "sat_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

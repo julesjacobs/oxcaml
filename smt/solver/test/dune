@@ -9,10 +9,16 @@
  (modules dimacs)
  (libraries oxsmt_solver))
 
+; sat_test's shipped-SIZEREL reduceDB relocation leg (test_arena_reduce_db_sizerel)
+; overrides OXSMT_LGC_FIXED / OXSMT_LGC_SIZEREL / OXSMT_LGC_INITIAL in-process via
+; Unix.putenv (the Makefile pins OXSMT_LGC_FIXED=0 for the other reduceDB pins), so it needs
+; [unix]. Test-only, never linked into the shipped stdlib-only solver (I3 firewall), same as
+; lgc_test below.
+
 (executable
  (name sat_test)
  (modules sat_test dpll)
- (libraries oxsmt_solver oxsmt_dimacs))
+ (libraries oxsmt_solver oxsmt_dimacs unix))
 
 (executable
  (name seam_test)
