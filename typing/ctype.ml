@@ -4417,10 +4417,11 @@ let rec mcomp type_pairs env t1 t2 =
         | (Trefine _, _, _, _) | (_, Trefine _, _, _) ->
             (* Loud one-sided-refinement guard: a refined type meeting a bare
                type must never be silently related here.  The rigid discipline
-               says this is always a clash; the sanctioned one-sided sites (the
+               says this is always a clash; the sanctioned one-sided site (the
                expected-type weakening, which strips to the skeleton before
-               unification, and the seal-context arms above) are handled
-               earlier, so reaching this point is a forgotten/mis-added path. *)
+               this relation runs) is handled earlier, so reaching this point
+               is a forgotten/mis-added path.  [mcomp] has no seal-context
+               arm; that is [moregen]. *)
             raise Incompatible
         | (Tbox t, _, _, _) when is_unboxable_ty env t2' ->
           mcomp type_pairs env t (unbox_ty_exn env t2')

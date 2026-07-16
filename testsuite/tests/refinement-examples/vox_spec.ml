@@ -32,9 +32,11 @@ let int_gt (left : int) (right : int) = left > right
 (* @pre id=int_ge final=ACCEPT today=ACCEPT stable=no unlocks=total-comparisons *)
 let int_ge (left : int) (right : int) = left >= right
 
-(* [List.length] is the first measure used by the examples. Unlike the int wrappers above
-   (which the compiler WOULD accept @ total but the ruling keeps partial), this one is
-   genuinely not total yet: [List.length] is a recursive stdlib function and the mode
-   checker cannot establish structural recursive totality, so the wrapper is partial. *)
+(* [List.length] is the first measure used by the examples. Like the int wrappers above
+   it is not total-annotatable today, but for a different reason: the int wrappers use
+   comparison primitives, which are admitted total only INSIDE a refinement predicate
+   (predicate-scoped) and so are rejected at a top-level [@ total]; this one is blocked
+   more deeply -- [List.length] is a recursive stdlib function and the mode checker
+   cannot establish structural recursive totality, so the wrapper stays partial. *)
 (* @pre id=list_length final=ACCEPT today=ACCEPT stable=no unlocks=recursive-totality *)
 let list_length values = List.length values

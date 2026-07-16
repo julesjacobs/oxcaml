@@ -1491,6 +1491,12 @@ module Refinement = struct
     let rec map expression =
       let rexp_desc =
         match expression.rexp_desc with
+        | Rexp_constant (Const_string (value, loc, delimiter)) ->
+          (* [Const_string] is the only constant carrying a location; every
+             other embedded [Location.t] in the predicate AST is [rexp_loc],
+             handled below. Normalizing both closes the marshaling-digest
+             leak class rather than a single instance. *)
+          Rexp_constant (Const_string (value, f loc, delimiter))
         | (Rexp_ident _ | Rexp_constant _) as desc -> desc
         | Rexp_let (bindings, body) ->
           Rexp_let
