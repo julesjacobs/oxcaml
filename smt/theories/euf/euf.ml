@@ -535,9 +535,33 @@ let reroot t a =
   go a a R_none
 ;;
 
+(* Dark, default-OFF (perf audit #1): reroot the endpoint in the SMALLER class instead of
+   always the first one. Reroot cost is the length of the rerooted node's path to its
+   forest root, which is bounded by its class size; the union-find beside [merge] already
+   unions by size, but the forest reroot silently did not, so on long equality/congruence
+   chains the first-endpoint path grows 1,2,…,n → Θ(n²). Choosing the smaller class bounds
+   it. NOT byte-identical: the edge is undirected so either orientation is a valid
+   explanation (the reason rides the a—b edge regardless of which node stores it), but the
+   forest SHAPE changes → [explain_core]'s child-ordering/paths differ → premise order →
+   learned clauses → search. Verdict-preserving (explanation validity unchanged), hence
+   dark + per-family A/B, never a silent flip. *)
+let forest_balance =
+  match Sys.getenv_opt "OXSMT_FOREST_BALANCE" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let add_forest_edge t a b reason =
-  reroot t a;
-  set_fedge t a b reason
+  (* union-by-size on the reroot choice: reroot whichever endpoint sits in the smaller
+     class (sizes read pre-union at the [merge] call site — [find a]/[find b] are still
+     the two distinct roots here). *)
+  if forest_balance && (get t (find t b)).size < (get t (find t a)).size
+  then (
+    reroot t b;
+    set_fedge t b a reason)
+  else (
+    reroot t a;
+    set_fedge t a b reason)
 ;;
 
 (* --- merge + congruence closure (pending queue to fixpoint) -------------- *)
