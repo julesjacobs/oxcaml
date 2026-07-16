@@ -23,6 +23,9 @@ type stats =
   { live_lemmas : int (* lemmas currently in an active (unpopped) frame *)
   ; instances : int (* ground instances generated so far this session *)
   ; rounds : int (* [round] calls so far this session *)
+  ; seeds : int
+  (* of [instances], those produced by MBQI-lite seeding (chunk 3) rather than E-matching
+     — the population that had no matchable trigger. Session-cumulative. *)
   }
 
 (** Provenance of one generated ground instance (ADR-0012: each instantiation records
@@ -36,8 +39,22 @@ type instantiation =
 
 (** [create ctx env] makes an empty manager over the session's context/env (used to
     rebuild instance bodies and to mint qvars). [gen_budget] caps instances generated per
-    [check_sat] (default generous; deterministic, I6). *)
-val create : ?gen_budget:int -> Context.t -> Env.t -> t
+    [check_sat] (default generous; deterministic, I6).
+
+    Chunk 3 (MBQI-lite seeding). [seed] (default [true]) enables ground-term seeding of
+    trigger-inert universals inside {!round}; the session reads [OXSMT_LEMMA_SEED] and
+    passes [~seed:false] to build the seeding-disabled mutant (the RED baseline).
+    [seed_cap] bounds NEW seed instances per lemma per [check_sat]; [pool_cap] bounds the
+    ground-term candidate pool per qvar sort. Both are deterministic and additionally
+    clamped by [gen_budget]. *)
+val create
+  :  ?gen_budget:int
+  -> ?seed:bool
+  -> ?seed_cap:int
+  -> ?pool_cap:int
+  -> Context.t
+  -> Env.t
+  -> t
 
 (** The session's context/env (so the session need not re-thread them). *)
 val context : t -> Context.t
@@ -72,11 +89,18 @@ val begin_check : t -> unit
     Tranche 2: [round t view] E-matches every live lemma's triggers against the read-only
     e-graph [view] (deterministic lemma-id order, budget debited INSIDE enumeration, R4)
     AND drains the manual seed queue — both feed one dedup + budget pipeline (a seeded
-    instance the matcher also finds dedups). Returns [(frame, instance)] pairs; each
-    instance must be asserted guarded by its lemma's [frame] selector (§1.4).
-    Deterministic order (matcher output, then seed FIFO). [] means saturated (no NEW
-    instance this round). On budget exhaustion the round stops early and
-    {!budget_exhausted} is set. *)
+    instance the matcher also finds dedups).
+
+    Chunk 3 (MBQI-lite): when E-matching finds NO substitution for a live lemma (its
+    triggers are ground-less — the inert Skolem-function population), [round] additionally
+    seeds that lemma with existing ground terms of each qvar's sort drawn from [view]
+    ({!Egraph_view.ground_terms_by_sort}), capped at [seed_cap] NEW instances per lemma
+    per [check_sat]. Every seed instance is a ground consequence of the (valid) lemma, so
+    this is universally sound; it feeds the same dedup + budget + assert pipeline. Returns
+    [(frame, instance)] pairs; each instance must be asserted guarded by its lemma's
+    [frame] selector (§1.4). Deterministic order (matcher output, then seed FIFO). []
+    means saturated (no NEW instance this round). On budget exhaustion the round stops
+    early and {!budget_exhausted} is set. *)
 val round : t -> Egraph_view.t -> (Sat.var * Instance.t) list
 
 (** [budget_exhausted t] is [true] iff the most recent {!round} stopped on the generation

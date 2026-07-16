@@ -150,8 +150,13 @@ val create
   -> ?max_effort:int
   -> ?lemma_gen_budget:int
   -> ?enable_relevancy:bool
+  -> ?seed_lemmas:bool
   -> unit
   -> t
+(** [seed_lemmas] overrides the [OXSMT_LEMMA_SEED] gate for MBQI-lite ground-term seeding
+    of trigger-inert universals (chunk 3); absent, it defaults to that env gate
+    (DEFAULT-ON). Tests pass it explicitly to exercise the seeding-on and seeding-disabled
+    (RED) paths. *)
 
 (** The session's {!Oxsmt_core.Env.t}. Exposed so a front end (e.g. the test-only SMT-LIB
     parser) can declare symbols and build assertion terms in the {e same} context the
@@ -429,11 +434,13 @@ val effort_exhausted : t -> bool
 
 (** Lemma-tier instantiation stats (ADR-0012 §O4), distinct from {!splits}: [live_lemmas]
     currently in an active frame, and the cumulative [instances] generated / [rounds] run
-    across the session. *)
+    across the session. [seeds] is the subset of [instances] produced by MBQI-lite seeding
+    (chunk 3) of trigger-inert universals rather than by E-matching. *)
 type lemma_stats =
   { live_lemmas : int
   ; instances : int
   ; rounds : int
+  ; seeds : int
   }
 
 val lemma_stats : t -> lemma_stats

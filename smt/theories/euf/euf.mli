@@ -99,10 +99,10 @@ val explain : 'p t -> Term.t -> Term.t -> 'p list
 (** A watched atom EUF has newly {e implied} since the previous {!propagate}. *)
 type implied =
   { atom : Term.t
-    (** a watched atom registered via {!register_term}: a non-Bool [Eq(a,b)] (sides [a]/[b])
+  (** a watched atom registered via {!register_term}: a non-Bool [Eq(a,b)] (sides [a]/[b])
       or a Bool-codomain predicate [p(x…)] (implicitly watched against [true_const]). *)
   ; value : bool
-    (** For an [Eq(a,b)] — [true]: [a],[b] now in one class ([a = b] entailed); [false]:
+  (** For an [Eq(a,b)] — [true]: [a],[b] now in one class ([a = b] entailed); [false]:
       [a], [b] now provably distinct ([¬(a = b)] entailed). For a predicate [p(x…)] —
       [true]: [p(x…) ~ true_const] ([p(x…)] entailed); [false]: [p(x…)] provably distinct
       from [true_const], i.e. [p(x…) ~ false_const] via the [true <> false] axiom
@@ -232,6 +232,13 @@ val equal_if_registered : 'p t -> Term.t -> Term.t -> bool
     matching modulo EUF-congruence equalities. An unregistered term is the singleton
     [[term]]. Never registers. *)
 val class_members : 'p t -> Term.t -> Term.t list
+
+(** [registered_terms_by_sort t sort] is the registered ground terms (App or Leaf) whose
+    sort is [sort], in registration (id) order — the ground-term seed pool the E-matcher's
+    seeding producer draws from (ADR-0012 tranche 3, chunk 3: budget-capped instantiation
+    of a trigger-inert universal). Non-registering, like the other query accessors: it
+    reads the e-node store without growing it (R6). *)
+val registered_terms_by_sort : 'p t -> Sort.t -> Term.t list
 
 (** [push t] opens a backtrack frame (a checkpoint). *)
 val push : 'p t -> unit

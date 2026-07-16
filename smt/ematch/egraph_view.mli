@@ -28,15 +28,19 @@ open Oxsmt_core
 
 type t =
   { app_terms_by_symbol : Symbol.t -> Term.t list
-    (** Registered ground [App] terms with a given head, in registration order — trigger
+  (** Registered ground [App] terms with a given head, in registration order — trigger
       root candidates (R-EM3). *)
   ; find_class_opt : Term.t -> int option
-    (** The term's class root iff registered, else [None] (no registration). *)
+  (** The term's class root iff registered, else [None] (no registration). *)
   ; equal_if_registered : Term.t -> Term.t -> bool
-    (** Congruence-equality; an unregistered term is its own singleton class (tag equality). *)
+  (** Congruence-equality; an unregistered term is its own singleton class (tag equality). *)
   ; class_members : Term.t -> Term.t list
-    (** Members of the term's congruence class in id order; an unregistered term is the
+  (** Members of the term's congruence class in id order; an unregistered term is the
       singleton [[term]]. *)
+  ; ground_terms_by_sort : Sort.t -> Term.t list
+  (** Registered ground terms of a given sort, in registration order — the seed pool the
+      matcher's seeding producer (ADR-0012 tranche 3, chunk 3) draws from to instantiate a
+      trigger-inert universal. Like [app_terms_by_symbol], non-registering. *)
   }
 
 (** An empty view (no registered term): [app_terms_by_symbol]/[class_members] behave as if

@@ -106,3 +106,4 @@ val app_terms_by_symbol : t -> Oxsmt_core.Symbol.t -> Oxsmt_core.Term.t list
 val find_class_opt : t -> Oxsmt_core.Term.t -> int option
 val equal_if_registered : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t -> bool
 val class_members : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t list
+val registered_terms_by_sort : t -> Oxsmt_core.Sort.t -> Oxsmt_core.Term.t list

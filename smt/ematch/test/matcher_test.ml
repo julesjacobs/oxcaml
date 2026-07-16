@@ -101,20 +101,27 @@ let view_of ~apps ~classes : Egraph_view.t =
         match class_of term with
         | Some cls -> cls
         | None -> [ term ])
+  ; ground_terms_by_sort =
+      (fun sort ->
+        (* all known ground terms (from [apps] heads and [classes]) of the sort — the
+           seeding pool for the hand-rolled view; the matcher tests here don't seed, so a
+           simple filtered union suffices. *)
+        let all = List.concat_map (fun (_, terms) -> terms) apps @ List.concat classes in
+        List.filter (fun (t : Term.t) -> Sort.equal t.Term.sort sort) all)
   }
 ;;
 
 let subst_to_names sigmas =
   List.map
     (fun arr ->
-       Array.to_list
-         (Array.map
-            (fun (t : Term.t) ->
-               match t.node with
-               | App (s, _) -> Symbol.name s
-               | Int_const n -> "#" ^ Bigint.to_string n
-               | _ -> "?")
-            arr))
+      Array.to_list
+        (Array.map
+           (fun (t : Term.t) ->
+             match t.node with
+             | App (s, _) -> Symbol.name s
+             | Int_const n -> "#" ^ Bigint.to_string n
+             | _ -> "?")
+           arr))
     sigmas
 ;;
 
@@ -429,9 +436,11 @@ let e_sound () =
    a trigger the matcher generates nothing (auto-selection is tranche 3), so the live
    lemma leaves the sat core unrefuted -> [unknown] (NOT unsat). Confirms the matcher
    fires only on stated triggers, and pairs with E-FIND (same goal, trigger present ->
-   unsat). *)
+   unsat). Seeding is disabled here to isolate the matcher: chunk-3 MBQI-lite seeding
+   WOULD close this exact goal (x|->a from the registered f(a)), which the dedicated
+   [test_seed_closes_inert_skolem_unsat] covers. *)
 let e_no_trigger_no_fire () =
-  let s = Session.create () in
+  let s = Session.create ~seed_lemmas:false () in
   let ctx = Session.context s in
   let f = Session.declare_fun s "f" int_to_int in
   let a = Context.const ctx (Session.declare_const s "a" Sort.int) in

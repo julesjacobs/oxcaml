@@ -1972,6 +1972,50 @@ let test_skolem_fun_antecedent_exists_not_skolemized () =
      | Session.Unsat | Session.Unknown -> true)
 ;;
 
+(* Chunk 3 (MBQI-lite seeding). A Skolem-function universal whose only trigger is the
+   ground-less Skolem head is E-match-INERT: `forall x. (and ((f x) = x) (>= x 0))`, the
+   Skolemization of `forall x. (and (exists y. y = x) (>= x 0))`. The ground `(q a)`
+   registers `a`; seeding instantiates x|->a and the `(>= a 0)` conjunct contradicts the
+   ground `(< a 0)` -> unsat. This is the seed-ONLY refutation: E-matching alone never
+   fires the lemma. Two arms discriminate the seeding path:
+   - seeding ON -> unsat, and the seed counter is charged (the lemma actually FIRED);
+   - seeding OFF -> the inert lemma stays live, the ground check saturates, THE SOUNDNESS
+     RULE degrades to unknown (never a wrong sat). The OFF arm is the chunk-3 RED. *)
+let test_seed_closes_inert_skolem_unsat () =
+  let text =
+    "(set-logic UFLIA)\n\
+     (declare-fun a () Int)\n\
+     (declare-fun q (Int) Bool)\n\
+     (assert (q a))\n\
+     (assert (< a 0))\n\
+     (assert (forall ((x Int)) (and (exists ((y Int)) (= y x)) (>= x 0))))\n\
+     (check-sat)\n"
+  in
+  let solve ~seed_lemmas =
+    let s = Session.create ~seed_lemmas () in
+    let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+    ignore (Loader.assert_all s parsed : bool);
+    let v = Session.check_sat s in
+    v, (Session.lemma_stats s).Session.seeds
+  in
+  let v_on, seeds_on = solve ~seed_lemmas:true in
+  check
+    "seed: E-match-inert Skolem universal is closed by ground-term seeding (unsat)"
+    (match v_on with
+     | Session.Unsat -> true
+     | _ -> false);
+  check
+    (Printf.sprintf "seed: the inert lemma actually FIRED (seeds=%d > 0)" seeds_on)
+    (seeds_on > 0);
+  let v_off, seeds_off = solve ~seed_lemmas:false in
+  check
+    "seed RED: with seeding disabled the inert lemma never fires -> not unsat (unknown)"
+    (match v_off with
+     | Session.Unsat -> false
+     | Session.Sat | Session.Unknown -> true);
+  check "seed RED: seeding disabled generates zero seed instances" (seeds_off = 0)
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -2659,6 +2703,7 @@ let () =
   test_skolem_fun_under_forall_unsat ();
   test_skolem_fun_negated_not_skolemized ();
   test_skolem_fun_antecedent_exists_not_skolemized ();
+  test_seed_closes_inert_skolem_unsat ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   test_ctx_simp_eq_subst_sat ();

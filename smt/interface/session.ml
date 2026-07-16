@@ -193,6 +193,7 @@ let create
   ?max_effort
   ?lemma_gen_budget
   ?(enable_relevancy = Relevancy.enabled_from_env ())
+  ?seed_lemmas:seed_lemmas_override
   ()
   =
   (* ADR-0012 R1: the session is the SOLE caller of [create_with_cap] in solver code (the
@@ -216,6 +217,20 @@ let create
     match Sys.getenv_opt "OXSMT_BASE_L0" with
     | Some ("0" | "false" | "no") -> false
     | Some _ | None -> true
+  in
+  (* OXSMT_LEMMA_SEED (DEFAULT-ON, chunk 3): MBQI-lite ground-term seeding of a
+     trigger-inert universal lemma (see {!Oxsmt_ematch.Manager}). Same opt-out token set
+     as the flip precedents above; [=0]/[=false]/[=no] builds the seeding-disabled mutant
+     (the RED baseline). Seeding only ADDS sound ground consequences of live lemmas, so it
+     can only turn an [unknown] into [unsat] (a refutation the inert lemma enables), never
+     change a verdict unsoundly. *)
+  let seed_lemmas =
+    match seed_lemmas_override with
+    | Some b -> b (* explicit test override wins over the env gate *)
+    | None ->
+      (match Sys.getenv_opt "OXSMT_LEMMA_SEED" with
+       | Some ("0" | "false" | "no") -> false
+       | Some _ | None -> true)
   in
   (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
      (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
@@ -264,7 +279,7 @@ let create
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
-  ; mgr = Manager.create ?gen_budget:lemma_gen_budget ctx env
+  ; mgr = Manager.create ?gen_budget:lemma_gen_budget ~seed:seed_lemmas ctx env
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
@@ -1932,6 +1947,7 @@ type lemma_stats = Manager.stats =
   { live_lemmas : int
   ; instances : int
   ; rounds : int
+  ; seeds : int
   }
 
 (* ADR-0012 §O4: lemma-tier instantiation stats, distinct from {!splits}. *)

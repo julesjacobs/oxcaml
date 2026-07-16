@@ -38,13 +38,13 @@ type t =
   ; watched : Atom.t Term.Table.t (* watched Eq-atom term -> Atom, for propagation *)
   ; mutable atom_terms : Term.t list (* registration order; model enumeration only *)
   ; mutable explain_cache : Fabric.Explanation.t Lit.Map.t
-    (* propagated lit -> its reason, SNAPSHOTTED at propagation time so [explain] is
+      (* propagated lit -> its reason, SNAPSHOTTED at propagation time so [explain] is
          O(1) and precedence-valid (CONTRACT-EX); see {!cache_reason} / the module note. *)
   ; mutable frames : Lit.t list list
-    (* per-[push]-frame cached lits, head = current frame; used to drop stale reasons on
+      (* per-[push]-frame cached lits, head = current frame; used to drop stale reasons on
          [pop] in lockstep with the decision level that produced them. *)
   ; mutable predicates_maybe_stale : bool
-    (* set by [pop]; a [pop] may have restored a bound predicate watch's TRAILED
+  (* set by [pop]; a [pop] may have restored a bound predicate watch's TRAILED
      [w_reported] to a value snapshotted while the predicate was unbound (or bound in a
      since-popped frame), so the engine will not re-report a currently-entailed truth to
      the still-bound atom (the late-binding recurrence). Cleared by the next [check]'s
@@ -300,12 +300,12 @@ let check_fabric t effort =
     let lits =
       List.filter_map
         (fun (imp : Euf.implied) ->
-           match Term.Table.find_opt t.watched imp.Euf.atom with
-           | None -> None
-           | Some atom ->
-             let lit = Lit.make atom imp.Euf.value in
-             cache_reason t lit (reason_of_implied t imp);
-             Some lit)
+          match Term.Table.find_opt t.watched imp.Euf.atom with
+          | None -> None
+          | Some atom ->
+            let lit = Lit.make atom imp.Euf.value in
+            cache_reason t lit (reason_of_implied t imp);
+            Some lit)
         (Euf.propagate t.engine)
     in
     (match lits, effort with
@@ -430,3 +430,4 @@ let app_terms_by_symbol t sym = Euf.app_terms_by_symbol t.engine sym
 let find_class_opt t term = Euf.find_class_opt t.engine term
 let equal_if_registered t a b = Euf.equal_if_registered t.engine a b
 let class_members t term = Euf.class_members t.engine term
+let registered_terms_by_sort t sort = Euf.registered_terms_by_sort t.engine sort

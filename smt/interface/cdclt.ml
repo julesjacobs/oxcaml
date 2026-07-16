@@ -861,6 +861,8 @@ let egraph_view t : Oxsmt_ematch.Egraph_view.t =
     ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
     ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
     ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
+    ; ground_terms_by_sort =
+        (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
     }
   | Some (TDt _) | Some (TArr _) | None ->
     (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype / arrays

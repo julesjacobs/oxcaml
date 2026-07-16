@@ -1273,6 +1273,21 @@ let class_members t term =
     !out
 ;;
 
+(* Registered terms whose sort is [sort], in registration (id) order. Non-registering: it
+   only reads the [enodes] Dynarray (never [register]), like the other four query
+   accessors — the E-matcher's seeding producer (ADR-0012 tranche 3, chunk 3) reads the
+   ground-term pool for a sort without growing the e-graph (R6). Every registered e-node
+   (App or Leaf) of the sort is a candidate: it is a genuine ground term the solver has
+   already internalised, so an instance built from it is a sound ground consequence. *)
+let registered_terms_by_sort t sort =
+  let out = ref [] in
+  for i = Dynarray.length t.enodes - 1 downto 0 do
+    let term = (get t i).term in
+    if Sort.equal term.Term.sort sort then out := term :: !out
+  done;
+  !out
+;;
+
 (* --- backtracking -------------------------------------------------------- *)
 
 let push t =
