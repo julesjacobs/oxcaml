@@ -9,3 +9,18 @@
  (name cdclt_lemma_test)
  (modules cdclt_lemma_test)
  (libraries oxsmt_core oxsmt_solver oxsmt_interface))
+
+; task #106 consumer proof for the observational Session.last_unsat_core / last_farkas
+; API: core soundness, Farkas certificate arithmetic, and a Farkas interpolant verified on
+; fresh Sessions (the CHC use). Depends on the interface stack + core + the LIA rationals.
+; Run via `make session-cores-test`; also built by `make build`.
+
+(executable
+ (name session_cores_test)
+ (modules session_cores_test)
+ (libraries oxsmt_core oxsmt_lia oxsmt_interface))
+
+(rule
+ (alias runtest)
+ (action
+  (run ./session_cores_test.exe)))
