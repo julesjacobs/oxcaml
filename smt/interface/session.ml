@@ -113,6 +113,14 @@ type t =
   ; mutable degraded : bool
       (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
          CONTRACT-POISON) *)
+  ; mutable degraded_reason : string
+      (* census (task #78): the FIRST cause that set [degraded] (first-wins, sticky, never
+         reset), consulted at the pre-solve degraded gate. Empty until [degrade] fires.
+         Diagnostic-only (OXSMT_UNKNOWN_REASON); no verdict/counter effect. *)
+  ; mutable unknown_reason : string
+      (* census (task #78): the resolved cause of the MOST RECENT check_sat's [Unknown],
+         reset to "" at each check_sat entry and set at every giveup site. Surfaced by
+         {!last_unknown_reason}; diagnostic-only, never read by the solver itself. *)
   ; mutable last_verdict : verdict
       (* verdict of the most recent check_sat, for get_model *)
   ; mutable last_model : model option
@@ -265,6 +273,8 @@ let create
   ; base_unit_emitted = false
   ; has_theory = false
   ; degraded = false
+  ; degraded_reason = ""
+  ; unknown_reason = ""
   ; last_verdict = Unknown
   ; last_model = None
   ; asserted = []
@@ -281,6 +291,15 @@ let create
   ; lemmas_registered = false
   ; sym_sel_in_core = None
   }
+;;
+
+(* census (task #78): degrade the session to [Unknown] (I8 / CONTRACT-POISON) and record
+   the FIRST cause (first-wins, so the earliest / most specific reason survives). This is
+   a pure diagnostic wrapper over the pre-existing [t.degraded <- true] discipline: the
+   [degraded] bit and its verdict effect are unchanged; only [degraded_reason] is added. *)
+let degrade t reason =
+  t.degraded <- true;
+  if String.length t.degraded_reason = 0 then t.degraded_reason <- reason
 ;;
 
 (* Pass A (task #7 entailed-equality extraction) toggle. Default ON (both review legs
@@ -861,7 +880,7 @@ let register_bool_terms t (pterm : Term.t) =
    assert-time discipline. *)
 let assert_bool_at ?sel t pterm =
   match Cnf.clausify pterm with
-  | exception _ -> t.degraded <- true
+  | exception _ -> degrade t "clausify-fail"
   | cnf ->
     (* Atom registration walks the theory engines; a rejected / out-of-fragment atom or an
        overflow escaping here degrades the whole session to unknown (I8). The
@@ -878,13 +897,13 @@ let assert_bool_at ?sel t pterm =
           atom degrades identically to a clause-borne one. *)
        register_bool_terms t pterm
      with
-     | Combine.Incomplete _ -> t.degraded <- true
+     | Combine.Incomplete _ -> degrade t "combine-incomplete-register"
      | Term.Overflow
      | Term.Unsupported _
      | Rational.Overflow
      | Lia.Poisoned
      | Lia.Unsupported _
-     | Invalid_argument _ -> t.degraded <- true)
+     | Invalid_argument _ -> degrade t "register-poison")
 ;;
 
 (* ADR-0012 R1 / codex C1: the load-bearing assert-side gate rejects a user term carrying
@@ -991,12 +1010,12 @@ let assert_term t term =
      witness) degrades to a clean [Unknown] via the I8 Unsupported discipline (NOT a raw
      [Failure]) — never registered, never in a model, never capturing an internal aux. *)
   if term_has_reserved term
-  then t.degraded <- true
+  then degrade t "reserved-symbol"
   else (
     t.asserted <- term :: t.asserted;
     match Preprocess.run t.pp term with
-    | exception Term.Overflow -> t.degraded <- true
-    | exception Term.Unsupported _ -> t.degraded <- true
+    | exception Term.Overflow -> degrade t "preprocess-overflow"
+    | exception Term.Unsupported _ -> degrade t "preprocess-unsupported"
     | pterm -> assert_bool_at t pterm)
 ;;
 
@@ -1006,8 +1025,8 @@ let assert_term t term =
    [t.asserted] holds the ORIGINAL assertions (for R1), not the reduced ones. *)
 let internalize_reduced t term =
   match Preprocess.run t.pp term with
-  | exception Term.Overflow -> t.degraded <- true
-  | exception Term.Unsupported _ -> t.degraded <- true
+  | exception Term.Overflow -> degrade t "overflow"
+  | exception Term.Unsupported _ -> degrade t "unsupported"
   | pterm -> assert_bool_at t pterm
 ;;
 
@@ -1015,8 +1034,8 @@ let internalize_reduced t term =
    the symmetry-breaking activation selector). *)
 let internalize_reduced_at ~sel t term =
   match Preprocess.run t.pp term with
-  | exception Term.Overflow -> t.degraded <- true
-  | exception Term.Unsupported _ -> t.degraded <- true
+  | exception Term.Overflow -> degrade t "overflow"
+  | exception Term.Unsupported _ -> degrade t "unsupported"
   | pterm -> assert_bool_at ~sel t pterm
 ;;
 
@@ -1044,7 +1063,7 @@ let assert_presolved t terms =
     | _ -> false
   in
   if List.exists term_has_reserved terms
-  then t.degraded <- true
+  then degrade t "reserved-symbol"
   else (
     (* Record the ORIGINALS for R1 (order-insensitive; [Model_check.check] folds over
        all). The pre-preprocessing terms are exactly what the R1 checker must satisfy. *)
@@ -1118,8 +1137,8 @@ let assert_presolved t terms =
       else []
     in
     match Presolve.run t.ctx terms with
-    | exception Term.Overflow -> t.degraded <- true
-    | exception Term.Unsupported _ -> t.degraded <- true
+    | exception Term.Overflow -> degrade t "presolve-overflow"
+    | exception Term.Unsupported _ -> degrade t "presolve-unsupported"
     | { Presolve.reduced; defs } ->
       t.elim_defs <- defs;
       (* Equality-over-ITE projection (task #34, gated: flag + cert-OFF): a
@@ -1136,10 +1155,10 @@ let assert_presolved t terms =
         then (
           match Presolve.simplify_projection t.ctx reduced with
           | exception Term.Overflow ->
-            t.degraded <- true;
+            degrade t "presolve-proj-overflow";
             reduced
           | exception Term.Unsupported _ ->
-            t.degraded <- true;
+            degrade t "presolve-proj-unsupported";
             reduced
           | simplified -> simplified)
         else reduced
@@ -1156,10 +1175,10 @@ let assert_presolved t terms =
         then (
           match Presolve.simplify_contextual t.ctx reduced with
           | exception Term.Overflow ->
-            t.degraded <- true;
+            degrade t "presolve-ctx-overflow";
             reduced
           | exception Term.Unsupported _ ->
-            t.degraded <- true;
+            degrade t "presolve-ctx-unsupported";
             reduced
           | simplified -> simplified)
         else reduced
@@ -1199,8 +1218,8 @@ let assert_instance_at_frame t ~frame (inst : Instance.t) =
      it keeps the invariant local rather than relying on that reasoning. *)
   deactivate_symbreak t;
   match Preprocess.run t.pp (Instance.to_term inst) with
-  | exception Term.Overflow -> t.degraded <- true
-  | exception Term.Unsupported _ -> t.degraded <- true
+  | exception Term.Overflow -> degrade t "overflow"
+  | exception Term.Unsupported _ -> degrade t "unsupported"
   | pterm -> assert_bool_at ~sel:frame t pterm
 ;;
 
@@ -1541,18 +1560,21 @@ let raw_solve t assumptions =
   | Sat.Sat -> Sat (* the ground core is satisfiable; model build is deferred to commit *)
   | exception Cdclt.Split_budget_exceeded ->
     (* Not a fault: the deterministic split cap fired. Distinct stat, sticky. *)
-    t.degraded <- true;
+    degrade t "split-budget";
     t.budget_exhausted <- true;
+    t.unknown_reason <- "split-budget";
     Unknown
   | exception Budget.Exceeded ->
     (* Board #60: the deterministic effort cap fired. NOT sticky, does NOT set [degraded];
        the same query is re-runnable at a larger [max_effort]. A distinct BUDGET tag. *)
     t.effort_exhausted <- true;
+    t.unknown_reason <- "effort-budget";
     Unknown
   | exception Combine.Incomplete _ ->
     (* DELIBERATE completeness degrade (ADR-0010 §3.6 case (ii)); a NAMED arm, not the
        catch-all. register_atom can raise it mid-solve. Sticky → Unknown. *)
-    t.degraded <- true;
+    degrade t "combine-incomplete-solve";
+    t.unknown_reason <- "combine-incomplete-solve";
     Unknown
   | exception ((Out_of_memory | Stack_overflow) as e) ->
     (* Resource-exhaustion / async control-flow: process state untrustworthy — re-raise. *)
@@ -1561,7 +1583,8 @@ let raw_solve t assumptions =
     (* CONTRACT-POISON firewall (I8), catch-all over the untrusted theory callbacks driven
        by [Sat.solve]: any escaping poison / unforeseen exception bricks this query to
        [Unknown]. Sticky. *)
-    t.degraded <- true;
+    degrade t "poison-solve";
+    t.unknown_reason <- "poison-solve";
     Unknown
 ;;
 
@@ -1628,8 +1651,12 @@ let commit_sat t =
       then (
         t.last_model <- None;
         Sat)
-      else Unknown
-    | None -> Unknown)
+      else (
+        t.unknown_reason <- "array-model-check-failed";
+        Unknown)
+    | None ->
+      t.unknown_reason <- "array-no-model";
+      Unknown)
   else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
   then (
     (* DATATYPES (GOALS Datatypes model construction): the standalone DT theory is
@@ -1652,8 +1679,12 @@ let commit_sat t =
       then (
         t.last_model <- None;
         Sat)
-      else Unknown
-    | None -> Unknown)
+      else (
+        t.unknown_reason <- "dt-model-check-failed";
+        Unknown)
+    | None ->
+      t.unknown_reason <- "dt-no-model";
+      Unknown)
   else (
     match build_model t with
     | Some m ->
@@ -1661,8 +1692,12 @@ let commit_sat t =
       then (
         t.last_model <- Some m;
         Sat)
-      else Unknown
-    | None -> Unknown)
+      else (
+        t.unknown_reason <- "r1-model-check-failed";
+        Unknown)
+    | None ->
+      t.unknown_reason <- "no-model";
+      Unknown)
 ;;
 
 let check_sat t =
@@ -1670,6 +1705,8 @@ let check_sat t =
   t.last_model <- None;
   t.budget_exhausted <- false;
   t.effort_exhausted <- false;
+  (* census (task #78): fresh per-check reason slot; set at each giveup site below. *)
+  t.unknown_reason <- "";
   (* R3 minor: capture the activation selector this solve will assume, so a post-solve
      [failed_assumptions] strips it from the core even after a later assertion clears
      [sym_sel]. *)
@@ -1683,7 +1720,11 @@ let check_sat t =
     Sat.add_clause t.sat [ Sat.pos t.base_var ];
     t.base_unit_emitted <- true);
   if t.degraded
-  then Unknown
+  then (
+    (* Degradation recorded at assert time (I8); surface its first cause. *)
+    t.unknown_reason
+    <- (if String.length t.degraded_reason = 0 then "degraded" else t.degraded_reason);
+    Unknown)
   else if Bv_dispatch.is_pure_bv t.asserted && not (Manager.has_live_lemma t.mgr)
   then (
     (* Pure QF_BV with NO live quantified lemma: resolve by eager bit-blasting BEFORE the
@@ -1704,7 +1745,9 @@ let check_sat t =
     | Bv_dispatch.Unsat ->
       t.last_verdict <- Unsat;
       Unsat
-    | Bv_dispatch.Unknown -> Unknown
+    | Bv_dispatch.Unknown ->
+      t.unknown_reason <- "bv-blast-unknown";
+      Unknown
     | Bv_dispatch.Sat { bv_vars; bool_vars } ->
       t.last_verdict <- Sat;
       t.last_model
@@ -1752,10 +1795,13 @@ let check_sat t =
              Non-registering (R6): matching never perturbs the congruence closure. *)
           let insts = Manager.round t.mgr (Cdclt.egraph_view t.cdclt) in
           if Manager.budget_exhausted t.mgr
-          then Unknown (* generation budget spent with a live lemma (§3) *)
+          then (
+            t.unknown_reason <- "lemma-gen-budget";
+            Unknown (* generation budget spent with a live lemma (§3) *))
           else (
             match insts with
             | [] ->
+              t.unknown_reason <- "lemma-saturated";
               Unknown (* saturated but a quantifier is live: THE SOUNDNESS RULE (§2) *)
             | _ :: _ ->
               List.iter
@@ -1763,7 +1809,14 @@ let check_sat t =
                 insts;
               (* An instance that overflowed / was rejected during assertion degraded the
                  session (I8); stop rather than loop on a bricked state. *)
-              if t.degraded then Unknown else loop ()))
+              if t.degraded
+              then (
+                t.unknown_reason
+                <- (if String.length t.degraded_reason = 0
+                    then "lemma-instance-degraded"
+                    else t.degraded_reason);
+                Unknown)
+              else loop ()))
     in
     let v = loop () in
     t.last_splits <- Cdclt.splits_used t.cdclt;
@@ -1778,6 +1831,11 @@ let get_model t =
   | Sat -> t.last_model
 ;;
 
+(* census (task #78): the tag identifying WHY the most recent [check_sat] returned
+   [Unknown] (empty when the verdict was not [Unknown]). Diagnostic introspection only —
+   never consulted by the solver, so it cannot affect a verdict. Surfaced by the dev CLI
+   under OXSMT_UNKNOWN_REASON to bucket structural unknowns by cause. *)
+let last_unknown_reason t = t.unknown_reason
 let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.elim_defs
 
 (* ADR-0013 certificate-emission hooks (additive; the trace is a compile-out-able side

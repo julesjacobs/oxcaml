@@ -369,6 +369,14 @@ val check_sat : t -> verdict
     reconstruction, not of the verdict. *)
 val get_model : t -> model option
 
+(** census (task #78): a short tag naming WHY the most recent {!check_sat} returned
+    [Unknown] (e.g. ["r1-model-check-failed"], ["effort-budget"], ["lemma-saturated"],
+    ["combine-incomplete-solve"]). Empty string when the last verdict was not [Unknown].
+    Diagnostic introspection only — the solver never reads it, so it cannot influence a
+    verdict; the dev CLI surfaces it under [OXSMT_UNKNOWN_REASON] to bucket structural
+    unknowns by cause. *)
+val last_unknown_reason : t -> string
+
 (** {2 Certificate emission (ADR-0013)}
     — additive, compile-out-able side channel. *)
 

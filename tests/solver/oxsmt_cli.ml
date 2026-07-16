@@ -33,10 +33,19 @@ type block =
   ; conflicts : int
   ; decisions : int
   ; propagations : int
+  ; reason : string
+  (* census (task #78): WHY an [unknown] verdict was returned; "" for sat/unsat. Printed
+     to STDERR only under OXSMT_UNKNOWN_REASON so stdout stays byte-identical. *)
   }
 
-let unknown_block =
-  { verdict = "unknown"; model = None; conflicts = 0; decisions = 0; propagations = 0 }
+let unknown_block_with reason =
+  { verdict = "unknown"
+  ; model = None
+  ; conflicts = 0
+  ; decisions = 0
+  ; propagations = 0
+  ; reason
+  }
 ;;
 
 let print_block b =
@@ -61,13 +70,13 @@ let print_block b =
 let scan_commands sexps =
   List.fold_left
     (fun (n_checks, incr) sx ->
-       match sx with
-       | Sexp.List (head :: _) ->
-         (match Sexp.simple head with
-          | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
-          | Some ("push" | "pop") -> n_checks, true
-          | _ -> n_checks, incr)
-       | _ -> n_checks, incr)
+      match sx with
+      | Sexp.List (head :: _) ->
+        (match Sexp.simple head with
+         | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
+         | Some ("push" | "pop") -> n_checks, true
+         | _ -> n_checks, incr)
+      | _ -> n_checks, incr)
     (0, false)
     sexps
 ;;
@@ -125,14 +134,14 @@ let render_model (sort_cards, bindings) =
     Buffer.add_char buf '(';
     List.iteri
       (fun i (n, v) ->
-         if i > 0 then Buffer.add_char buf ' ';
-         Printf.bprintf buf "(%s %s)" n v)
+        if i > 0 then Buffer.add_char buf ' ';
+        Printf.bprintf buf "(%s %s)" n v)
       pairs;
     Buffer.add_char buf ')')
   else (
     List.iter
       (fun { Session.sort_name; card } ->
-         Printf.bprintf buf "(sort %s %d)" (q sort_name) card)
+        Printf.bprintf buf "(sort %s %d)" (q sort_name) card)
       sort_cards;
     List.iter
       (function
@@ -142,13 +151,13 @@ let render_model (sort_cards, bindings) =
           Printf.bprintf buf "(fun %s (default %s)" (q name) (token_of_value default);
           List.iter
             (fun (args, res) ->
-               Buffer.add_string buf " (case (";
-               List.iteri
-                 (fun i a ->
-                    if i > 0 then Buffer.add_char buf ' ';
-                    Buffer.add_string buf (token_of_value a))
-                 args;
-               Printf.bprintf buf ") %s)" (token_of_value res))
+              Buffer.add_string buf " (case (";
+              List.iteri
+                (fun i a ->
+                  if i > 0 then Buffer.add_char buf ' ';
+                  Buffer.add_string buf (token_of_value a))
+                args;
+              Printf.bprintf buf ") %s)" (token_of_value res))
             cases;
           Buffer.add_char buf ')')
       bindings);
@@ -174,14 +183,14 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
   with
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
-    unknown_block
+    unknown_block_with "cli-parse-unsupported"
   | exception _ ->
     (* ROBUSTNESS / fail-closed (I8): the reader maps its expected rejections to
        [Malformed]/[Unsupported], but an unmapped exception on untrusted corpus input
        ([Failure]/[Invalid_argument]/[Stack_overflow]/...) must still degrade to a sound
        [unknown] rather than crash the driver (the "error instead of degrade" robustness
        item). [unknown] is always sound; a crash is never acceptable. *)
-    unknown_block
+    unknown_block_with "cli-parse-crash"
   | parsed when not (Oxsmt_query_loader.assert_all ~presolve s parsed) ->
     (* W1b: the shared loader submits the ground batch through the equality-elimination
        presolve (a no-op on zero-alias files) plus each [forall] lemma through the cap-
@@ -190,7 +199,7 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
        outside the reader's subset degrades here to a sound [unknown] — never a dropped
        quantifier (sound for the [sat] direction). [--no-presolve] restores the per-term
        [assert_term] path for A/B measurement; both are sound. *)
-    unknown_block
+    unknown_block_with "cli-loader-reject"
   | _loaded ->
     (* Assertions (ground batch + [forall] lemmas) were loaded into [s] by the guard
        above; solve the ground core once. THE SOUNDNESS RULE (a live lemma degrades [Sat]
@@ -204,12 +213,13 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
       | _ -> Session.Unknown
     in
     let st = Session.stats s in
-    let block verdict model =
+    let block ?(reason = "") verdict model =
       { verdict
       ; model
       ; conflicts = st.Oxsmt_solver.Sat.Stats.conflicts
       ; decisions = st.Oxsmt_solver.Sat.Stats.decisions
       ; propagations = st.Oxsmt_solver.Sat.Stats.propagations
+      ; reason
       }
     in
     (match v with
@@ -232,7 +242,7 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
                 is CORRECT (not something to make total). Emitting the name anyway would
                 be malformed solver output; degrade this goal to a sound [unknown] with no
                 model rather than crash the CLI. *)
-             block "unknown" None)
+             block ~reason:"cli-printer-unsupported" "unknown" None)
         | None ->
           (* A DATATYPES or ARRAYS session self-checks its [Sat] with the in-process
              constructor-tree / array-map checker (Session.commit_sat), but the scalar
@@ -243,9 +253,9 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
              theory (a UF table we could not render) stays the sound [unknown]. *)
           if Session.uses_datatypes s || Session.uses_arrays s
           then block "sat" None
-          else block "unknown" None)
+          else block ~reason:"cli-unrenderable-model" "unknown" None)
      | Session.Unsat -> block "unsat" None
-     | Session.Unknown -> block "unknown" None)
+     | Session.Unknown -> block ~reason:(Session.last_unknown_reason s) "unknown" None)
 ;;
 
 let () =
@@ -286,8 +296,23 @@ let () =
   let n_checks, incremental = scan_commands sexps in
   let blocks =
     if incremental || n_checks <> 1
-    then List.init n_checks (fun _ -> unknown_block)
+    then List.init n_checks (fun _ -> unknown_block_with "cli-incremental")
     else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve sexps ]
   in
-  List.iter print_block blocks
+  List.iter print_block blocks;
+  (* census (task #78): when OXSMT_UNKNOWN_REASON is set (to any non-empty,
+     non-[0/false/no] value), emit one [(unknown-reason <tag>)] line to STDERR per
+     [unknown] block. STDOUT is byte-identical whether or not the flag is set (the sweep
+     reads reasons off stderr). *)
+  match Sys.getenv_opt "OXSMT_UNKNOWN_REASON" with
+  | None | Some ("" | "0" | "false" | "no") -> ()
+  | Some _ ->
+    List.iter
+      (fun b ->
+        if b.verdict = "unknown"
+        then
+          Printf.eprintf
+            "(unknown-reason %s)\n"
+            (if String.length b.reason = 0 then "unclassified" else b.reason))
+      blocks
 ;;
