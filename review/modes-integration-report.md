@@ -122,8 +122,9 @@ still accepts unchanged.
   mode-only rejection would be masked in default compilation and appear only under `-principal`
   (the batch-vs-toplevel masking class). A function value is not modelable — the Lean backend cannot
   model it as a proposition argument — so a predicate that actually *reads* a self which crosses
-  logicality but not totality (i.e. contains an arrow) is rejected explicitly, identically in batch
-  and `-principal`, with a dedicated `Refinement_self_not_modelable` error. A refinement that never
+  logicality but not totality (i.e. contains an arrow) is rejected explicitly with a dedicated
+  `Refinement_self_not_modelable` error. The rejection now fires in default batch compilation, not
+  only under `-principal` (see the adjudication and message-parity notes below). A refinement that never
   mentions its self, such as `(int -> int){ true }`, has nothing to model and is left alone
   (exercised by `refined_arrow_backend.ml`). Same deferral and unlock as the polymorphic case. The
   batch-mode regression is the new `refinement/refined_function_self_reject.ml`, which pins the
@@ -164,9 +165,34 @@ The principality-insensitivity child re-ran the refinement set, `typing-modes`, 
 suites are unaffected because the change is confined to refinement predicate elaboration plus a
 printer-only new error message.
 
-Direct probes (normal and `-principal`, identical outcome in each): a total closure mentioning a
+Direct probes (normal and `-principal`; identical verdict in each): a total closure mentioning a
 captured `ref` is accepted; dereferencing it rejects ("logical but expected physical"); `read_int`
 in a predicate rejects; `>` in an ordinary total closure still rejects. For the modelability gate:
-`(int -> int){ (_ = _) }` rejects in both batch and `-principal` (not modelable); `(int -> int){
-true }` compiles (self never read); `int`/`string` selfs accept; `ref` and polymorphic selfs reject
-with the unchanged "logical but expected physical" message.
+`(int -> int){ (_ = _) }` rejects in both batch and `-principal` with the same
+`Refinement_self_not_modelable` message; `(int -> int){ true }` compiles (self never read);
+`int`/`string` selfs accept; `ref` and polymorphic selfs reject with the unchanged "logical but
+expected physical" message.
+
+## Adjudication (default-batch masking) and message parity
+
+Two delta confirms initially disagreed on whether a function self was rejected at elaboration in
+*default* (non-`-principal`) batch compilation at the parent commit. Settled authoritatively with
+the batch driver test (`refined_function_self_reject.ml`, an `ocamlc.byte`-driver test) run through
+the dune harness against a freshly built final compiler at the parent commit: the compile succeeds
+(exit 0, empty output) — the function self is **accepted** there. The batch masking was therefore
+real, and the fix in this child is necessary. The other confirm's "rejects in both normal and
+`-principal`" came from the `elaboration.ml` `%%expect`, which runs the toplevel; the toplevel is
+principal-like in *both* its normal and `-principal` passes, so it never exercises default-batch and
+cannot observe the acceptance. `refined_function_self_reject.ml` runs `ocamlc.byte` in default mode
+and permanently settles the question (accepts at the parent, rejects on this child).
+
+The substance of the fix is that the rejection now fires in default batch compilation *at all*.
+Principality parity of the *message* is explicitly not a requirement (welcome when free). The
+verdict (reject) is identical in every mode and for every self shape. The message is identical too,
+with one recorded exception: a **bare tuple self containing an arrow** (for example
+`(int -> int) * int`) rejects in both modes but via different errors — in default batch the
+`Refinement_self_not_modelable` error fires; under `-principal` the pre-existing use-site mode error
+("logical but expected physical") fires first, before lowering and hence before the modelability
+check. Nominal wrappers (a record, variant, or alias over the same shape) are message-identical in
+both modes. Routing tuple selfs through the modelability check ahead of the use-site read is a
+possible follow-up (improvement queue); no code change is made here.
