@@ -59,6 +59,34 @@ let check name cond =
     Printf.printf "FAIL %s\n" name)
 ;;
 
+(* Fabric-off dual-mode support (H3). The combinator reads [OXSMT_NO_FABRIC] once at
+   module init; when set it takes the trunk Path-1 route with NO edge injection and NO
+   Stage-2 merge callbacks. Tests that assert fabric-specific effects (edge injection,
+   [on_fabric_eq] events, Stage-2 congruence-notify) therefore exercise a disabled
+   subsystem under fabric-off and cannot hold — they are skipped-and-counted there, an
+   EXPLICIT list (the two fabric sections below), never a catch-all "skip on failure". All
+   other tests — mechanics, integration, W1/corpus, and the mode-conditional
+   [test_lemma_forwarding] whose [check_off] path is the point of the fabric-off run — run
+   under BOTH modes. *)
+let fabric_off =
+  match Sys.getenv_opt "OXSMT_NO_FABRIC" with
+  | None | Some ("0" | "false" | "no" | "") -> false
+  | Some _ -> true
+;;
+
+let skips = ref 0
+
+(* Run [thunk] only when the fabric is on; under fabric-off, count it as skipped and say
+   so. A guarded test that WOULD pass fabric-off is still skipped (not silently run), so
+   the fabric-off coverage set is stable and auditable. *)
+let fabric_only name thunk =
+  if fabric_off
+  then (
+    incr skips;
+    Printf.printf "skip %s (fabric-only, OXSMT_NO_FABRIC=1)\n" name)
+  else thunk ()
+;;
+
 (* ---- term-building fixtures ------------------------------------------------------- *)
 
 type fixture =
@@ -2997,7 +3025,11 @@ let test_stage2_shared_ancestor_no_false_cycle () =
    path). We drive the real {!Cmock} functor with one child scripted to emit a signed
    [Lemma] and assert the combinator returns exactly that [Lemma], not a swallowed
    [Propagations]. Runs under whichever dispatch path is active ([check_off] when
-   OXSMT_NO_FABRIC is set, [check_on_drive] otherwise); the Makefile exercises both. *)
+   OXSMT_NO_FABRIC is set, [check_on_drive] otherwise). The Makefile [combine-test] target
+   runs the executable TWICE: once fabric-ON (full suite, [check_on_drive]) and once with
+   OXSMT_NO_FABRIC=1 (fabric-OFF, [check_off] — this test included; only the fabric-only
+   tests listed in the runner are skipped-and-counted there), so BOTH dispatch paths of
+   the forwarding are gated, not just manually verified. *)
 let test_lemma_forwarding () =
   let f = fixture () in
   let cut = const f "lemma_cut" in
@@ -3096,18 +3128,21 @@ let () =
   test_push_pop_reassert_real ();
   test_use_history_transition_real ();
   Printf.printf "== ADR-0014 Stage 1b fabric ==\n";
-  test_fabric_fixed_value_unsat ();
-  test_fabric_distinct_values_sat ();
-  test_fabric_const_offset_sat ();
-  test_fabric_pop_reassert ();
-  test_fabric_pop_owner_strand ();
-  test_f1sem_verifier_discriminates ();
-  test_f1sem_tiebreak ();
-  test_owner_strand_whitebox ();
+  fabric_only "test_fabric_fixed_value_unsat" test_fabric_fixed_value_unsat;
+  fabric_only "test_fabric_distinct_values_sat" test_fabric_distinct_values_sat;
+  fabric_only "test_fabric_const_offset_sat" test_fabric_const_offset_sat;
+  fabric_only "test_fabric_pop_reassert" test_fabric_pop_reassert;
+  fabric_only "test_fabric_pop_owner_strand" test_fabric_pop_owner_strand;
+  fabric_only "test_f1sem_verifier_discriminates" test_f1sem_verifier_discriminates;
+  fabric_only "test_f1sem_tiebreak" test_f1sem_tiebreak;
+  fabric_only "test_owner_strand_whitebox" test_owner_strand_whitebox;
   Printf.printf "== ADR-0014 Stage 2 merge callbacks (EUF→LIA) ==\n";
-  test_stage2_congruence_notify_unsat ();
-  test_stage2_pop_reassert ();
-  test_stage2_shared_ancestor_no_false_cycle ();
-  Printf.printf "\n%d passed, %d failed\n" !passes !failures;
+  fabric_only "test_stage2_congruence_notify_unsat" test_stage2_congruence_notify_unsat;
+  fabric_only "test_stage2_pop_reassert" test_stage2_pop_reassert;
+  fabric_only
+    "test_stage2_shared_ancestor_no_false_cycle"
+    test_stage2_shared_ancestor_no_false_cycle;
+  Printf.printf "\n%d passed, %d failed, %d skipped\n" !passes !failures !skips;
+  if !skips > 0 then Printf.printf "(%d skipped: fabric-only, OXSMT_NO_FABRIC=1)\n" !skips;
   if !failures > 0 then exit 1
 ;;

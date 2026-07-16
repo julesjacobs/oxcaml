@@ -572,9 +572,13 @@ lia-adapter-test:
 ##   through the REAL Euf_adapter + Lia_adapter (W1/R1/tower, f(x+1)<f(y+1), numeral corner,
 ##   k(x+1)≠k(1) buried-LIA, p(x+1), Bool leaf UNSAT + compound degrade-to-unknown,
 ##   mixed-equality totality, deep tower, pure-QF_LIA zero-split, use-history transition,
-##   push/pop-reassert). Nonzero exit on any failed check.
+##   push/pop-reassert). Nonzero exit on any failed check. Run TWICE to gate BOTH combine
+##   dispatch paths (adr-0005-contract-lemma-erratum H3): fabric-ON (full suite,
+##   [check_on_drive]) then OXSMT_NO_FABRIC=1 (fabric-OFF, [check_off]; fabric-only tests
+##   skip-and-count, the check_off Lemma-forwarding path still exercised).
 combine-test:
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/combine/test/combine_test.exe
+	OXSMT_EUF_SELF_CHECK=1 OXSMT_NO_FABRIC=1 $(DUNE) exec smt/combine/test/combine_test.exe
 
 ## stage0-test — ADR-0014 Stage 0 backtracking substrate: [Trail] unit tests, the
 ##   pop-ordering oracle that kills the swap-drain-order mutant, and the machine-checkable
