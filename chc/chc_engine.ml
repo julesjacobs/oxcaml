@@ -112,8 +112,15 @@ type rel =
   | Rle
   | Rge
 
+(* A cube literal. [jdx = None] is a single-variable literal [x_idx rel v]; [jdx = Some j]
+   is a DIFFERENCE (octagon-style) literal [(x_idx - x_j) rel v], the template that lets
+   generalization express a RELATIONAL invariant (e.g. [x - y = 0], i.e. [x = y]) — the
+   class one-sided single-variable interval widening cannot reach, and the proxy for true
+   Farkas interpolants (the public Session API exposes no theory unsat-core / LP dual, so
+   real interpolant extraction needs a main-solver API addition; see logs report). *)
 type lit =
   { idx : int
+  ; jdx : int option
   ; rel : rel
   ; v : value
   }
@@ -292,13 +299,34 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
            | Session.VUninterp _ -> ())
         | Session.Fun _ -> ())
       bindings;
+    (* Single-variable literals x_i = v_i (present in the model). *)
+    let ints = ref [] in
     let acc = ref [] in
     for i = ts.arity - 1 downto 0 do
       match Hashtbl.find_opt tbl (xname i) with
-      | Some v -> acc := { idx = i; rel = Req; v } :: !acc
+      | Some v ->
+        acc := { idx = i; jdx = None; rel = Req; v } :: !acc;
+        (match v with
+         | VInt n -> ints := (i, n) :: !ints
+         | VBool _ -> ())
       | None -> ()
     done;
-    !acc
+    (* Difference literals x_i - x_j = v_i - v_j for each ordered int pair (octagon
+       template): the seed for relational-invariant generalization. Generalization drops
+       or relaxes these; a surviving [x_i - x_j = 0] lemma expresses [x_i = x_j]. *)
+    let diffs = ref [] in
+    List.iter
+      (fun (i, vi) ->
+        List.iter
+          (fun (j, vj) ->
+            if i < j
+            then
+              diffs
+              := { idx = i; jdx = Some j; rel = Req; v = VInt (Bigint.sub vi vj) }
+                 :: !diffs)
+          !ints)
+      !ints;
+    !acc @ !diffs
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -306,13 +334,19 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
 (* ------------------------------------------------------------------ *)
 
 let lit_expr ~prime (l : lit) : expr =
-  let name = if prime then yname l.idx else xname l.idx in
+  let nm k = if prime then yname k else xname k in
+  (* term the relation constrains: x_i, or (x_i - x_j) for a difference literal *)
+  let lhs =
+    match l.jdx with
+    | None -> Var (nm l.idx)
+    | Some j -> Sub [ Var (nm l.idx); Var (nm j) ]
+  in
   match l.v, l.rel with
-  | VInt n, Req -> Eq (Var name, Int_lit n)
-  | VInt n, Rle -> Le (Var name, Int_lit n)
-  | VInt n, Rge -> Ge (Var name, Int_lit n)
-  | VBool true, _ -> Var name
-  | VBool false, _ -> Not (Var name)
+  | VInt n, Req -> Eq (lhs, Int_lit n)
+  | VInt n, Rle -> Le (lhs, Int_lit n)
+  | VInt n, Rge -> Ge (lhs, Int_lit n)
+  | VBool true, _ -> lhs
+  | VBool false, _ -> Not lhs
 ;;
 
 (* [cube_expr ~prime s] is the conjunction describing the states in cube [s]. *)
