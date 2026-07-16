@@ -236,6 +236,8 @@
   typedtree
   printtyped
   ctype
+  vox_vc
+  vox_lean
   printtyp
   rawprinttyp
   gprinttyp
