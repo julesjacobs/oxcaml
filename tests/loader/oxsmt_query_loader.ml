@@ -11,6 +11,19 @@ module Trigger = Oxsmt_ematch.Trigger
 module Term = Oxsmt_core.Term
 module Context = Oxsmt_core.Context
 module Sort = Oxsmt_core.Sort
+module Symbol = Oxsmt_core.Symbol
+module Env = Oxsmt_core.Env
+
+(* Is [name] already declared (any rank) in [env]? [Env.rank] raises when the symbol has
+   no rank, i.e. is undeclared. [Symbol.intern] is a pure hash-cons — interning a
+   candidate name does NOT declare it. Used to make a Skolem-witness name provably FRESH
+   before declaring it (a same-sort collision would otherwise be silently reused =
+   unsound). *)
+let is_declared env name =
+  match Env.rank env (Symbol.intern name) with
+  | _ -> true
+  | exception _ -> false
+;;
 
 (* Assert a parsed document into [s]: the ground batch through the W1b
    equality-elimination presolve (or the per-term [assert_term] stream when
@@ -45,10 +58,10 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
     else List.iter (Session.assert_term s) parsed.Parser.assertions;
     List.iter
       (fun (lem : Parser.lemma_src) ->
-         match
-           Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
-             let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
-             (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
+        match
+          Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
+            let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
+            (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
                lemma the file gave NO [:pattern] (the common case — the public quantified
                sets rarely ship patterns) gets one inferred from the body (smallest
                UF-application subterms covering every qvar). Purely a completeness
@@ -57,13 +70,13 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
                not fire; a live lemma then degrades to a sound [unknown]). Inference is a
                front-end policy, NOT a change to [assert_lemma]: an explicit empty trigger
                through the programmatic API still means "do not fire". *)
-             let triggers =
-               if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
-             in
-             { Session.body; triggers })
-         with
-         | (_ : Session.lemma) -> ()
-         (* Partial assertion (lemmas-climb): a SINGLE lemma OUT OF FRAGMENT (an [exists]
+            let triggers =
+              if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
+            in
+            { Session.body; triggers })
+        with
+        | (_ : Session.lemma) -> ()
+        (* Partial assertion (lemmas-climb): a SINGLE lemma OUT OF FRAGMENT (an [exists]
            in the body -> [Unsupported]; an unsupported op; an over-precision literal) is
            DROPPED and counted rather than failing the whole file. Dropping only weakens
            the set (sound for [unsat]); the sentinel below reinstates soundness for the
@@ -72,9 +85,43 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
            rejection — e.g. the F1 head-shadow wrong-unsat guard) is NOT dropped here: it
            propagates to the outer handler and degrades the WHOLE query to [unknown],
            preserving that contract. *)
-         | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
-           incr dropped)
+        | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
+          incr dropped)
       parsed.Parser.lemmas;
+    (* Skolemize each top-level POSITIVE existential (lemmas-climb chunk 2a): mint one
+       fresh ground witness per binder and assert the body over them. This is
+       EQUISATISFIABLE with [(assert (exists ...))] (a model gives a witness; a witness
+       gives a model), so it is sound in BOTH directions — a real assertion, not a drop.
+       Freshness is load-bearing: a witness name colliding with a same-sort user symbol
+       would be silently REUSED ([declare_fun] is idempotent at equal rank), constraining
+       the witness to that symbol — unsound. So each name is checked against the env and
+       bumped until unused, then declared through the ordinary user door (never the
+       reserved namespace). A body still outside the fragment (e.g. a nested [forall])
+       makes [ex_build] raise [Unsupported] -> drop it (the sentinel then guards [sat]);
+       [Malformed] propagates as a hard fail (outer handler), exactly as for lemmas. *)
+    let sk_counter = ref 0 in
+    let fresh_witness sort =
+      let env = Session.env s in
+      let rec pick () =
+        let name = Printf.sprintf "sk!%d" !sk_counter in
+        incr sk_counter;
+        if is_declared env name then pick () else name
+      in
+      let sym = Session.declare_const s (pick ()) sort in
+      Context.const (Session.context s) sym
+    in
+    List.iter
+      (fun (ex : Parser.exists_src) ->
+        let witnesses =
+          Array.map
+            (fun (_n, sort) -> fresh_witness sort)
+            (Array.of_list ex.Parser.ex_qvars)
+        in
+        match ex.Parser.ex_build witnesses with
+        | body -> Session.assert_term s body
+        | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
+          incr dropped)
+      parsed.Parser.existentials;
     (* If ANY assertion content was dropped, arm a trivial always-live universal lemma so
        THE SOUNDNESS RULE degrades a [Sat] to [Unknown]: a dropped conjunct can then never
        yield a wrong [sat], while [Unsat] of the asserted (weaker) subset stays sound.

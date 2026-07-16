@@ -33,9 +33,25 @@ exception Unsupported of string
 type lemma_src =
   { qvars : (string * Oxsmt_core.Sort.t) list (* forall binders, flattened, outer-first *)
   ; build : Oxsmt_core.Term.t array -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
-    (** [build qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for the
+  (** [build qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for the
       k-th binder. May raise {!Malformed}/{!Unsupported} when the body is outside the
       subset — the driver maps that to a sound [unknown]. *)
+  }
+
+(** A top-level POSITIVE existential [(assert (exists (binders) body))] (lemmas-climb
+    chunk 2a). Skolemized by the driver: the binders become fresh ground witnesses
+    (uninterpreted constants) and [ex_build] reads the body over them, asserted as a
+    ground formula — equisatisfiable with the original (sound in both directions). Only
+    produced for an [exists] at a positive assertion position (root or a top-level
+    [(and ...)] conjunct); a negated existential is never Skolemized (it is dropped
+    instead). *)
+type exists_src =
+  { ex_qvars :
+      (string * Oxsmt_core.Sort.t) list (* exists binders, flattened, outer-first *)
+  ; ex_build : Oxsmt_core.Term.t array -> Oxsmt_core.Term.t
+  (** [ex_build witnesses] is the Bool body with binder [k] -> [witnesses.(k)] (a fresh
+      ground constant). May raise {!Malformed}/{!Unsupported} when the body is outside the
+      subset (e.g. a nested [forall]); the driver drops it with the sat-degrade sentinel. *)
   }
 
 type t =
@@ -45,16 +61,19 @@ type t =
   ; status : Oxsmt_smtlib.Status.t option
   ; assertions : Oxsmt_core.Term.t list (* ground assertions, in file order *)
   ; datatypes : Oxsmt_core.Datatype_defs.t
-    (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
+      (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
          and testers, keyed by symbol, for the datatype theory. [empty] when none
          declared. *)
   ; arrays : Oxsmt_core.Array_defs.t
-    (* the [select]/[store] operator symbols minted for the array instantiations the
+      (* the [select]/[store] operator symbols minted for the array instantiations the
          query uses, keyed by symbol, for the arrays theory. [empty] when the query uses
          no arrays. *)
   ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
+  ; existentials : exists_src list
+      (* top-level POSITIVE [(assert (exists ...))] assertions the loader Skolemizes into
+         fresh ground witnesses (lemmas-climb chunk 2a), in file order *)
   ; dropped : int
-    (* count of assertion content outside the reader's fragment that partial assertion
+  (* count of assertion content outside the reader's fragment that partial assertion
      DROPPED rather than failing the whole file (lemmas-climb). [> 0] obliges the loader
      to arm a sat-degrade sentinel: dropping only weakens the set (sound for [unsat]), and
      the sentinel's live lemma degrades any [Sat] to [Unknown]. *)
