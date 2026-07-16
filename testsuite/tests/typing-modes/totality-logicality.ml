@@ -410,6 +410,161 @@ Line 3, characters 12-54:
 Error: The function is "partial" but is expected to be "total".
 |}]
 
+(* Residue constraints use the enclosing closure's totality from the typing
+   environment, so rebuilding an expected mode in an eager position cannot
+   drop the constraint. *)
+type eager_record = { eager_field : int }
+type eager_array_record = { eager_array_field : int array }
+[%%expect{|
+type eager_record = { eager_field : int; }
+type eager_array_record = { eager_array_field : int array; }
+|}]
+
+let bad_eager_while_tuple @ total = fun () -> ((while true do () done), 0)
+[%%expect{|
+Line 1, characters 47-70:
+1 | let bad_eager_while_tuple @ total = fun () -> ((while true do () done), 0)
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_while_constructor @ total = fun () -> Some (while true do () done; 0)
+[%%expect{|
+Line 1, characters 58-79:
+1 | let bad_eager_while_constructor @ total = fun () -> Some (while true do () done; 0)
+                                                              ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_while_scrutinee @ total = fun () -> match (while true do () done; 0) with _ -> 0
+[%%expect{|
+Line 1, characters 57-78:
+1 | let bad_eager_while_scrutinee @ total = fun () -> match (while true do () done; 0) with _ -> 0
+                                                             ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_while_condition @ total = fun () -> if (while true do () done; false) then 0 else 0
+[%%expect{|
+Line 1, characters 54-75:
+1 | let bad_eager_while_condition @ total = fun () -> if (while true do () done; false) then 0 else 0
+                                                          ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_while_guard @ total = fun (b : bool) -> match b with _ when (while true do () done; true) -> 0 | _ -> 1
+[%%expect{|
+Line 1, characters 75-96:
+1 | let bad_eager_while_guard @ total = fun (b : bool) -> match b with _ when (while true do () done; true) -> 0 | _ -> 1
+                                                                               ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_while_record @ total = fun () -> { eager_field = (while true do () done; 0) }
+[%%expect{|
+Line 1, characters 64-85:
+1 | let bad_eager_while_record @ total = fun () -> { eager_field = (while true do () done; 0) }
+                                                                    ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_while_assert @ total = fun () -> assert (while true do () done; true); 0
+[%%expect{|
+Line 1, characters 55-76:
+1 | let bad_eager_while_assert @ total = fun () -> assert (while true do () done; true); 0
+                                                           ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_tuple @ total = fun () -> ([| 0 |], 0)
+[%%expect{|
+Line 1, characters 47-54:
+1 | let bad_eager_array_tuple @ total = fun () -> ([| 0 |], 0)
+                                                   ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_constructor @ total = fun () -> Some [| 0 |]
+[%%expect{|
+Line 1, characters 57-64:
+1 | let bad_eager_array_constructor @ total = fun () -> Some [| 0 |]
+                                                             ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_scrutinee @ total = fun () -> match [| 0 |] with _ -> 0
+[%%expect{|
+Line 1, characters 56-63:
+1 | let bad_eager_array_scrutinee @ total = fun () -> match [| 0 |] with _ -> 0
+                                                            ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_condition @ total = fun () -> if ([| 0 |]; true) then 0 else 0
+[%%expect{|
+Line 1, characters 54-61:
+1 | let bad_eager_array_condition @ total = fun () -> if ([| 0 |]; true) then 0 else 0
+                                                          ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_guard @ total = fun (b : bool) -> match b with _ when ([| 0 |]; true) -> 0 | _ -> 1
+[%%expect{|
+Line 1, characters 75-82:
+1 | let bad_eager_array_guard @ total = fun (b : bool) -> match b with _ when ([| 0 |]; true) -> 0 | _ -> 1
+                                                                               ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_record @ total = fun () -> { eager_array_field = [| 0 |] }
+[%%expect{|
+Line 1, characters 69-76:
+1 | let bad_eager_array_record @ total = fun () -> { eager_array_field = [| 0 |] }
+                                                                         ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_eager_array_assert @ total = fun () -> assert ([| 0 |]; true); 0
+[%%expect{|
+Line 1, characters 55-62:
+1 | let bad_eager_array_assert @ total = fun () -> assert ([| 0 |]; true); 0
+                                                           ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = ((while true do () done), 0) in expects_total bad
+[%%expect{|
+Line 1, characters 67-70:
+1 | let _ = let bad () = ((while true do () done), 0) in expects_total bad
+                                                                       ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = Some [| 0 |] in expects_total bad
+[%%expect{|
+Line 1, characters 51-54:
+1 | let _ = let bad () = Some [| 0 |] in expects_total bad
+                                                       ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let pure_eager_tuple @ total = fun () -> (0, 0)
+let pure_eager_constructor @ total = fun () -> Some 0
+let pure_eager_scrutinee @ total = fun () -> match 0 with _ -> 0
+let pure_eager_condition @ total = fun () -> if true then 0 else 0
+let pure_eager_guard @ total = fun (b : bool) -> match b with _ when true -> 0 | _ -> 1
+let pure_eager_record @ total = fun () -> { eager_field = 0 }
+let pure_eager_assert @ total = fun () -> assert true; 0
+[%%expect{|
+val pure_eager_tuple : unit -> int * int = <fun>
+val pure_eager_constructor : unit -> int option = <fun>
+val pure_eager_scrutinee : unit -> int = <fun>
+val pure_eager_condition : unit -> int = <fun>
+val pure_eager_guard : bool -> int = <fun>
+val pure_eager_record : unit -> eager_record = <fun>
+val pure_eager_assert : unit -> int = <fun>
+|}]
+
 (* Pure discarded expressions and exception handling remain total. *)
 type irec = { i : int }
 let pure_sequence @ total = fun () -> (); 0

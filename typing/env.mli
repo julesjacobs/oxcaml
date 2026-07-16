@@ -580,6 +580,9 @@ val enter_unbound_module : string -> module_unbound_reason -> t -> t
 val add_closure_lock : Mode.Hint.pinpoint
   -> ('l * Mode.allowed) Mode.Value.Comonadic.t -> t -> t
 
+val set_enclosing_totality : Mode.Totality.r option -> t -> t
+val enclosing_totality : t -> Mode.Totality.r option
+
 (** A variant of [add_closure_lock] where the mode of the closure is a constant
 due to the nature of the pinpoint. As a result, the mode is not printed in error
 messages. [ghost = true] means the closure is not a value (such as

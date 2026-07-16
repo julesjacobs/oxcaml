@@ -673,13 +673,13 @@ let mode_strictly_local expected_mode =
 let mode_coerce mode expected_mode =
   mode_morph (fun m -> Value.meet [m; mode]) expected_mode
 
-let constrain_enclosing_totality ~loc (expected_mode : expected_mode) =
+let constrain_enclosing_totality ~loc env =
   Option.iter
     (fun enclosing_totality ->
        Totality.submode_err (loc, Function)
          (Totality.of_const Totality.Const.Partial)
          enclosing_totality)
-    expected_mode.enclosing_totality
+    (Env.enclosing_totality env)
 
 let mode_lazy expected_mode =
   let mode =
@@ -6350,6 +6350,7 @@ let split_function_ty
         in
         Env.add_region_lock env
   in
+  let env = Env.set_enclosing_totality (Some closure_totality) env in
   let ret_value_mode = alloc_as_value ret_mode in
   let expected_inner_mode =
     if not is_final_val_param then
@@ -6724,7 +6725,7 @@ and type_expect_
          when Array.exists
                 (fun label -> label.lbl_mut <> Immutable)
                 label.lbl_all ->
-           constrain_enclosing_totality ~loc expected_mode
+           constrain_enclosing_totality ~loc env
        | _ -> ());
       let repres_might_allocate (type rep) (record_form : rep record_form)
             (rep : rep) =
@@ -7128,7 +7129,7 @@ and type_expect_
         ty_expected_explained
   | Pexp_let(mutable_flag, rec_flag, spat_sexp_list, sbody) ->
       (match mutable_flag with
-       | Mutable -> constrain_enclosing_totality ~loc expected_mode
+       | Mutable -> constrain_enclosing_totality ~loc env
        | Immutable -> ());
       List.iter
         (fun binding ->
@@ -7138,7 +7139,7 @@ and type_expect_
                (match modes.mode_modes.totality with
                 | Some Totality.Const.Partial ->
                     constrain_enclosing_totality
-                      ~loc:binding.pvb_expr.pexp_loc expected_mode
+                      ~loc:binding.pvb_expr.pexp_loc env
                 | Some Totality.Const.Total | None -> ())
            | _ -> ())
         spat_sexp_list;
@@ -7180,10 +7181,8 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let
-              ~enclosing_totality:expected_mode.enclosing_totality
-              existential_context env mutable_flag rec_flag spat_sexp_list
-              allow_modules
+            type_let existential_context env mutable_flag rec_flag
+              spat_sexp_list allow_modules
           in
           let body =
             type_expect
@@ -7767,7 +7766,7 @@ and type_expect_
         exp_env = env }
   | Pexp_array(mutability, sargl) ->
       (match mutability with
-       | Mutable -> constrain_enclosing_totality ~loc expected_mode
+       | Mutable -> constrain_enclosing_totality ~loc env
        | Immutable -> ());
       (* [: :] syntax requires the iarray extension.
          Check for it before proceeding with type-based disambiguation. *)
@@ -7952,8 +7951,7 @@ and type_expect_
       end
   | Pexp_sequence(sexp1, sexp2) ->
       let exp1, sort1 =
-        type_statement ~explanation:Sequence_left_hand_side
-          ~enclosing_totality:expected_mode.enclosing_totality env sexp1
+        type_statement ~explanation:Sequence_left_hand_side env sexp1
       in
       let exp2 = type_expect env expected_mode sexp2 ty_expected_explained in
       re {
@@ -7963,7 +7961,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_while(scond, sbody) ->
-      constrain_enclosing_totality ~loc expected_mode;
+      constrain_enclosing_totality ~loc env;
       let env =
         Env.add_const_closure_lock ~ghost:true (loc, Loop)
           {Value.Comonadic.Const.max with linearity = Many} env
@@ -7982,9 +7980,7 @@ and type_expect_
         | _ -> instance Predef.type_unit
       in
       let wh_body, wh_body_sort =
-        type_statement ~explanation:While_loop_body
-          ~position ~enclosing_totality:expected_mode.enclosing_totality
-          body_env sbody
+        type_statement ~explanation:While_loop_body ~position body_env sbody
       in
       rue {
         exp_desc =
@@ -7994,7 +7990,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_for(param, slow, shigh, dir, sbody) ->
-      constrain_enclosing_totality ~loc expected_mode;
+      constrain_enclosing_totality ~loc env;
       let for_from =
         type_expect env (mode_region Value.max) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
@@ -8013,8 +8009,7 @@ and type_expect_
       let new_env = Env.add_region_lock new_env in
       let position = RTail (Regionality.disallow_left Regionality.local, FNontail) in
       let for_body, for_body_sort =
-        type_statement ~explanation:For_loop_body ~position
-          ~enclosing_totality:expected_mode.enclosing_totality new_env sbody
+        type_statement ~explanation:For_loop_body ~position new_env sbody
       in
       rue {
         exp_desc = Texp_for {for_id; for_debug_uid = for_uid; for_pat = param;
@@ -8028,7 +8023,7 @@ and type_expect_
       let modes = Typemode.transl_mode_annots modes in
       (match modes.mode_modes.totality, sarg.pexp_desc with
        | Some Totality.Const.Partial, Pexp_function _ ->
-           constrain_enclosing_totality ~loc expected_mode
+           constrain_enclosing_totality ~loc env
        | (Some Totality.Const.Total | None), _
        | Some Totality.Const.Partial, _ -> ());
       let expected_mode =
@@ -8061,7 +8056,7 @@ and type_expect_
       let modes = Typemode.transl_mode_annots modes in
       (match modes.mode_modes.totality, sarg.pexp_desc with
        | Some Totality.Const.Partial, Pexp_function _ ->
-           constrain_enclosing_totality ~loc expected_mode
+           constrain_enclosing_totality ~loc env
        | (Some Totality.Const.Total | None), _
        | Some Totality.Const.Partial, _ -> ());
       let (ty, exp_extra) =
@@ -8774,7 +8769,7 @@ and type_expect_
         ~attributes:sexp.pexp_attributes
         comp
   | Pexp_overwrite (exp1, exp2) ->
-      constrain_enclosing_totality ~loc expected_mode;
+      constrain_enclosing_totality ~loc env;
       if not (Language_extension.is_enabled Overwriting) then
         raise (Typetexp.Error (loc, env, Unsupported_extension Overwriting));
       if not (can_be_overwritten exp2.pexp_desc) then
@@ -10851,8 +10846,7 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
 
 (* Typing of statements (expressions whose values are discarded) *)
 
-and type_statement ?explanation ?(position=RNontail) ~enclosing_totality
-    env sexp =
+and type_statement ?explanation ?(position=RNontail) env sexp =
   (* OCaml 5.2.0 changed the type of 'while' to give 'while true do e done'
      a polymorphic type.  The change has the potential to trigger a
      nonreturning-statement warning in existing code that follows
@@ -10883,10 +10877,7 @@ and type_statement ?explanation ?(position=RNontail) ~enclosing_totality
   in
   (* Raise the current level to detect non-returning functions *)
   with_local_level_generalize
-    (fun () ->
-      let expected_mode = mode_max_with_position position in
-      let expected_mode = { expected_mode with enclosing_totality } in
-      type_exp env expected_mode sexp, sort)
+    (fun () -> type_exp env (mode_max_with_position position) sexp, sort)
   ~before_generalize: begin fun (exp, _sort) ->
     let subexp = final_subexpression exp in
     let ty = expand_head env exp.exp_type in
@@ -11332,7 +11323,6 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
-    ?(enclosing_totality = None)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
@@ -11366,13 +11356,6 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   let spatl = List.map vb_pat_constraint spat_sexp_list in
   let spatl =
     List.map (pat_modes ~force_toplevel ~recursive_values ~is_lpoly) spatl
-  in
-  let spatl =
-    List.map
-      (fun (attrs, pat_mode, env_alloc_mode, exp_mode, spat) ->
-        let exp_mode = { exp_mode with enclosing_totality } in
-        attrs, pat_mode, env_alloc_mode, exp_mode, spat)
-      spatl
   in
   let attrs_list = List.map (fun (attrs, _, _, _, _) -> attrs) spatl in
 

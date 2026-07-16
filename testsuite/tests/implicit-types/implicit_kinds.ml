@@ -169,7 +169,7 @@ Error: Signature mismatch:
              sig
                val pack :
                  ('from_sig : value_maybe_null). 'from_sig -> 'from_sig array
-                 @@ stateless total
+                 @@ stateless
              end
          end
        is not included in
@@ -184,7 +184,7 @@ Error: Signature mismatch:
            sig
              val pack :
                ('from_sig : value_maybe_null). 'from_sig -> 'from_sig array
-               @@ stateless total
+               @@ stateless
            end
        does not match
          module type T =
@@ -196,7 +196,7 @@ Error: Signature mismatch:
          sig
            val pack :
              ('from_sig : value_maybe_null). 'from_sig -> 'from_sig array @@
-             stateless total
+             stateless
          end
        is not equal to
          sig
@@ -206,7 +206,7 @@ Error: Signature mismatch:
        Values do not match:
          val pack :
            ('from_sig : value_maybe_null). 'from_sig -> 'from_sig array @@
-           stateless total
+           stateless
        is not included in
          val pack : ('from_sig : bits64). 'from_sig -> 'from_sig array
        The type "'a -> 'a array" is not compatible with the type "'b -> 'b array"
@@ -234,7 +234,7 @@ module type Sig_default_defines_struct =
         val pack :
           ('from_defined_sig : bits64).
             'from_defined_sig -> 'from_defined_sig array
-          @@ stateless total
+          @@ stateless
       end
   end
 |}]
