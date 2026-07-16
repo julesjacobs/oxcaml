@@ -216,6 +216,9 @@ type t =
   ; lgc_sizerel : bool
   ; lgc_base : int
   ; mutable lgc_threshold : int
+  ; lemma_backjump : bool
+      (* OXSMT_LEMMA_BACKJUMP (dark): deliver an asserting Theory.Lemma by a partial
+         backjump instead of [cancel_until 0]. Read once at [create]; OFF byte-identical. *)
   ; (* Glucose-style adaptive restart / CaDiCaL-style rephasing state (S3 + #155). Fast
        and slow exponential moving averages of learned-clause LBD: a restart fires when
        recent LBD (fast) runs worse than the long-run average (slow). [trail_ema] is the
@@ -560,6 +563,73 @@ let inproc_first_offset () =
   | None -> inproc_first
 ;;
 
+(* LEMMA-BACKJUMP ([OXSMT_LEMMA_BACKJUMP]), dark, default OFF, byte-identical by
+   construction. When ON, a Propagate/Final-effort [Theory.Lemma] that is ASSERTING under
+   the current assignment (exactly one non-false literal, and it is unassigned) is
+   delivered by a PARTIAL backjump — [cancel_until bt] to the highest decision level among
+   its false literals, then installed like a learned clause (attach + propagate the head
+   with the clause as reason) — instead of the unconditional [cancel_until 0] restart.
+   This turns the O(whole trail) LCG delivery tax (task #22) into an O(trail above bt)
+   backjump. Any non-asserting / tautologous / already-satisfied / [bt = 0] lemma falls
+   back to the exact [cancel_until 0] + [add_clause] path. Opt-in token set mirrors
+   [OXSMT_CHRONO] / [OXSMT_RECURSIVE_MIN] (strict-ON only). *)
+let lemma_backjump_from_env () =
+  match Sys.getenv_opt "OXSMT_LEMMA_BACKJUMP" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+(* LEMMA-DELIVERY PROBE (task #25 measurement/RED instrument — THROWAWAY, not shipped).
+   Unlike the task #22 probe (which emitted TAUTOLOGIES to measure the pure cancel_until-0
+   cost), this emits genuinely ASSERTING synthetic lemmas so the OXSMT_LEMMA_BACKJUMP path
+   actually engages: head = the positive literal of the first UNASSIGNED variable, body =
+   the negations of the deepest few TRUE trail literals (all currently false). That clause
+   is asserting (one unassigned literal, rest false), non-tautologous, and NOT
+   answer-preserving — so it is used ONLY for the answer-AGNOSTIC mechanism metric
+   ([lcg_trail_discarded]: total trail entries thrown away across all lemma deliveries)
+   and the RED (ON must backjump, i.e. discard < full trail; OFF must reset to 0). The
+   answer-preserving verdict/cert validation uses the real producer OXSMT_HNF_CUTS
+   instead. OFF (unset / 0): no emission, no counter maintenance — byte-identical. *)
+let lcg_probe_cap =
+  match Sys.getenv_opt "OXSMT_LCG_PROBE" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 0 -> n
+     | _ -> 0)
+  | None -> 0
+;;
+
+let lcg_probe_depth =
+  match Sys.getenv_opt "OXSMT_LCG_PROBE_DEPTH" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 1 -> n
+     | _ -> 8)
+  | None -> 8
+;;
+
+let lcg_probe_body =
+  match Sys.getenv_opt "OXSMT_LCG_PROBE_BODY" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 1 -> n
+     | _ -> 4)
+  | None -> 4
+;;
+
+(* Per-solve counters (reset at [solve] entry). [emitted] throttles the probe;
+   [deliveries] / [backjumps] / [trail_discarded] are the mechanism metric, printed to
+   stderr at solve exit when the probe is armed. *)
+let lcg_probe_emitted = ref 0
+let lcg_deliveries = ref 0
+let lcg_backjumps = ref 0
+let lcg_trail_discarded = ref 0
+
+(* Fallback-reason breakdown (diagnostic: WHY a lemma did not take the backjump path). *)
+let lcg_fb_taut = ref 0
+let lcg_fb_nonassert = ref 0
+let lcg_fb_bt0 = ref 0
+
 (* Nadel–Ryvchin threshold T ([OXSMT_CHRONO_T]); non-negative int, default 100 (the paper
    default). A malformed or negative value falls back to the default. *)
 let chrono_threshold_from_env () =
@@ -623,6 +693,7 @@ let create ?(base_l0_cert_mode = false) () =
   ; lgc_sizerel
   ; lgc_base
   ; lgc_threshold = lgc_base (* [solve] recomputes this per-solve (M3) *)
+  ; lemma_backjump = lemma_backjump_from_env ()
   ; lbd_ema_fast = 0.0
   ; lbd_ema_slow = 0.0
   ; trail_ema = 0.0
@@ -2372,13 +2443,168 @@ let enqueue_theory_lits t lits =
    deterministic budget that routes to [unknown] on exhaustion is the driver's obligation
    at M4. A well-behaved theory makes monotone progress (the permanent lemma prevents
    re-reaching the same total assignment). *)
+(* OXSMT_LEMMA_BACKJUMP delivery of ONE lemma clause [ls] by a partial backjump, when the
+   flag is on and the clause is ASSERTING under the current (deep) assignment. Returns
+   [true] iff it installed the clause this way; [false] means the caller must fall back to
+   the [cancel_until 0] + [add_clause] path for this clause.
+
+   ASSERTING = after dedup and the tautology filter (which [add_clause] also applies),
+   exactly one literal is non-false and it is UNASSIGNED (the head [h]); every other
+   literal is false. Then the clause becomes unit — forcing [h] — at [bt], the HIGHEST
+   decision level among its false literals. (This is the learned-clause backjump level:
+   the head is the notional highest, so [bt] is the "second-highest" counting it; taking
+   "second-highest among the false literals" literally would leave a false literal
+   unassigned above [bt] and break the unit invariant — so [bt] is the max false-literal
+   level. Flagged for review.)
+
+   We install exactly as [record_learnt] installs a learned clause: reorder to
+   [| h; l1; rest… |] where [l1] is a false literal at level [bt] (the 2WL invariant:
+   index 1 is the highest-level false literal, so backtracking past it re-fires the
+   watch), [cancel_until bt] (keeps every false literal — all at level ≤ bt — and leaves
+   [h] unassigned), attach, and [unchecked_enqueue h] with the clause as its [Implied_by]
+   reason. [enqueue_level] then stamps [h] at [bt] (= [decision_level] after the backjump;
+   = max level among the clause's other literals under CB) — identical to a Boolean
+   propagation, so no eager cert event is owed (the reason is materialized lazily by
+   [analyze] on demand, exactly as for the head propagated by BCP on the OFF path).
+
+   Cert: the raw clause is surfaced with [on_input ~origin:Theory_lemma] and the arena
+   clause REUSES that id ([mk_clause_with_id]), identical to [add_clause] — so any
+   citation of the clause (an [analyze] antecedent for [h]) resolves to the same
+   [Valid_lemma] leaf. The only [add_theory_lemmas] cert event in BOTH flag states is this
+   one [on_input] per clause, in the same order (the lazy-B ordered-RUP hazard: no theory
+   PROPAGATIONS are reordered — only the trail depth at which [h] is propagated changes).
+
+   Exception safety (the solver stays restorable by [cancel_until 0]): the install is the
+   learned-clause sequence, which already holds that invariant — [attach] is
+   both-or-neither (2WL never left half-formed) and [unchecked_enqueue] places [h] on the
+   trail, so a raise leaves [h] trailed (recoverable) or the clause fully attached;
+   nothing is stranded off the trail. [bt >= 1] is required so this never fires at level 0
+   (where it would have to reproduce [add_clause]'s [on_unit] level-0 declaration):
+   [bt = 0] falls back, and there [cancel_until bt = cancel_until 0], so the fallback is
+   also free of any lost benefit. *)
+let try_lemma_backjump t ls =
+  let ded = List.sort_uniq compare ls in
+  let tautology = List.exists (fun l -> List.mem (neg_lit l) ded) ded in
+  if tautology
+  then (
+    if lcg_probe_cap > 0 then incr lcg_fb_taut;
+    false)
+  else (
+    match List.filter (fun l -> lit_val t l <> -1) ded with
+    | [ h ] when lit_val t h = 0 ->
+      (* the head is the sole non-false literal and is unassigned; all others are false *)
+      let false_lits = List.filter (fun l -> l <> h) ded in
+      let bt = List.fold_left (fun m l -> max m t.level.(var_of_lit l)) 0 false_lits in
+      if bt < 1
+      then (
+        if lcg_probe_cap > 0 then incr lcg_fb_bt0;
+        false)
+      else (
+        let l1 = List.find (fun l -> t.level.(var_of_lit l) = bt) false_lits in
+        let rest = List.filter (fun l -> l <> l1) false_lits in
+        let arr = Array.of_list (h :: l1 :: rest) in
+        (* Cert leaf FIRST, before the backjump (matches [add_clause]'s pre-simplify
+           [on_input]); reuse its id for the arena clause. Untraced mirrors [add_clause]'s
+           multi-literal branch ([fresh_id] for the arena id). *)
+        let id =
+          match t.trace with
+          | Some tr ->
+            let id = fresh_id t in
+            tr.on_input ~id ~clause:(Array.of_list ls) ~origin:Theory_lemma;
+            id
+          | None -> fresh_id t
+        in
+        let before = t.trail_n in
+        cancel_until t bt;
+        if lcg_probe_cap > 0
+        then (
+          incr lcg_deliveries;
+          incr lcg_backjumps;
+          lcg_trail_discarded := !lcg_trail_discarded + (before - t.trail_n));
+        let c = mk_clause_with_id t id arr false in
+        attach t c;
+        unchecked_enqueue t h c;
+        true)
+    | _ ->
+      if lcg_probe_cap > 0 then incr lcg_fb_nonassert;
+      false)
+;;
+
 let add_theory_lemmas t clauses =
-  cancel_until t 0;
-  (* [Theory_lemma] provenance (ADR-0013 §4.0 RR5): a Split/B&B/N-O lemma goes through the
-     SAME [add_clause] as a query input, so [on_input] must tag it so the emitter routes
-     it to a [Valid_lemma] leaf — never a trusted [Input]. A lemma that filters to [] here
-     is the E4 exit (a [Theory_lemma]-origin [Root_empty]). *)
-  List.iter (fun ls -> add_clause ~origin:Theory_lemma t ls) clauses
+  if not t.lemma_backjump
+  then (
+    (* OFF: byte-identical to trunk — restart to level 0, then add each lemma clause. *)
+    let before = t.trail_n in
+    cancel_until t 0;
+    if lcg_probe_cap > 0
+    then (
+      lcg_deliveries := !lcg_deliveries + List.length clauses;
+      lcg_trail_discarded := !lcg_trail_discarded + (before - t.trail_n));
+    (* [Theory_lemma] provenance (ADR-0013 §4.0 RR5): a Split/B&B/N-O lemma goes through
+       the SAME [add_clause] as a query input, so [on_input] must tag it so the emitter
+       routes it to a [Valid_lemma] leaf — never a trusted [Input]. A lemma that filters
+       to [] here is the E4 exit (a [Theory_lemma]-origin [Root_empty]). *)
+    List.iter (fun ls -> add_clause ~origin:Theory_lemma t ls) clauses)
+  else
+    (* ON: deliver each asserting lemma by a partial backjump; anything else falls back to
+       the exact OFF path FOR THAT CLAUSE (a mid-batch fallback [cancel_until 0] only
+       forgoes a prior clause's backjump benefit — the clause stays permanently attached
+       and re-propagates its head by BCP — never a soundness issue; batches are size 1 in
+       practice). *)
+    List.iter
+      (fun ls ->
+        if not (try_lemma_backjump t ls)
+        then (
+          let before = t.trail_n in
+          cancel_until t 0;
+          if lcg_probe_cap > 0
+          then (
+            incr lcg_deliveries;
+            lcg_trail_discarded := !lcg_trail_discarded + (before - t.trail_n));
+          add_clause ~origin:Theory_lemma t ls))
+      clauses
+;;
+
+(* Emit one ASSERTING synthetic lemma through the real delivery seam (see
+   [lcg_probe_cap]). Called once at the top of [propagate_theory] — after the search has
+   made its decisions, so the trail is deep. head = the positive literal of the first
+   unassigned variable; body = the negations of up to [lcg_probe_body] deepest true trail
+   literals (all false, over variables other than the head). The clause is asserting, so
+   under OXSMT_LEMMA_BACKJUMP it exercises the partial-backjump path; under OFF it takes
+   the [cancel_until 0] path. Emits at most [lcg_probe_cap] times per solve, only when the
+   trail is at least [lcg_probe_depth] deep. Byte-identical no-op when
+   [lcg_probe_cap = 0]. *)
+let lcg_probe_maybe_emit t =
+  if lcg_probe_cap > 0
+     && !lcg_probe_emitted < lcg_probe_cap
+     && decision_level t >= lcg_probe_depth
+     && t.trail_n > 0
+  then (
+    (* first unassigned variable → head literal (positive), guaranteed [lit_val = 0] *)
+    let hv = ref (-1) in
+    let i = ref 0 in
+    while !hv < 0 && !i < t.nvars do
+      if t.assigns.(!i) = 0 then hv := !i;
+      incr i
+    done;
+    if !hv >= 0
+    then (
+      let h = 2 * !hv in
+      let body = ref [] in
+      let n = ref 0 in
+      let j = ref (t.trail_n - 1) in
+      while !n < lcg_probe_body && !j >= 0 do
+        let tl = t.trail.(!j) in
+        if var_of_lit tl <> !hv
+        then (
+          body := neg_lit tl :: !body;
+          incr n);
+        decr j
+      done;
+      if !body <> []
+      then (
+        incr lcg_probe_emitted;
+        add_theory_lemmas t [ h :: !body ])))
 ;;
 
 (* Boolean BCP interleaved with cheap Propagate-effort theory checks to a combined
@@ -2386,6 +2612,7 @@ let add_theory_lemmas t clauses =
    [search]). Returns [Some conflict] (Boolean or theory) or [None] (consistent fixpoint).
    With no theory plugged this is exactly {!propagate}. *)
 let propagate_theory t =
+  lcg_probe_maybe_emit t;
   (* Returns [Some (clause, is_theory)]: [is_theory] distinguishes a BOOLEAN BCP conflict
      ([propagate]) from a THEORY conflict (T_conflict / a falsified theory reason / an
      empty-at-level-0 lemma). The flag drives the level-0 terminal choice in
@@ -3625,6 +3852,15 @@ let solve ?(assumptions = []) t =
     Hashtbl.reset t.chrono_reason;
     t.conflicts_since_restart <- 0;
     t.conflicts_at_solve_start <- t.conflicts;
+    (* LEMMA-DELIVERY PROBE (throwaway): fresh emission budget + mechanism counters per
+       solve; no-op when the probe is disarmed. *)
+    lcg_probe_emitted := 0;
+    lcg_deliveries := 0;
+    lcg_backjumps := 0;
+    lcg_trail_discarded := 0;
+    lcg_fb_taut := 0;
+    lcg_fb_nonassert := 0;
+    lcg_fb_bt0 := 0;
     t.decisions_since_rephase <- 0;
     t.rephase_events <- 0;
     t.rephase_interval <- rephase_base_interval;
@@ -3711,6 +3947,21 @@ let solve ?(assumptions = []) t =
          t.stat_els
          t.stat_flp
      | Some _ | None -> ());
+    (* LEMMA-DELIVERY PROBE (throwaway measurement): the mechanism metric — total lemma
+       deliveries this solve, how many took the partial backjump, and total trail entries
+       discarded across all deliveries (the tax). Emitted only when the probe is armed. *)
+    if lcg_probe_cap > 0
+    then
+      Printf.eprintf
+        "lcg-probe deliveries=%d backjumps=%d trail_discarded=%d fb_taut=%d \
+         fb_nonassert=%d fb_bt0=%d\n\
+         %!"
+        !lcg_deliveries
+        !lcg_backjumps
+        !lcg_trail_discarded
+        !lcg_fb_taut
+        !lcg_fb_nonassert
+        !lcg_fb_bt0;
     r)
 ;;
 
