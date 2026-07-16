@@ -1142,10 +1142,10 @@ let hnf_cut t : (Term.t * 'tok list) option =
    trail literal.
 
    NOTE (env scope): [cg_cut] is env-INDEPENDENT public API -- the [OXSMT_CG_CUTS] gating
-   lives in the adapter ([Lia_adapter], guarded by [cg_cuts_on]), NOT here. The dark-lever
-   OFF byte-identity is therefore scoped to the shipped SOLVE PATH (which never reaches this
-   function when the flag is off); a direct API caller invoking [cg_cut] with the flag off
-   still gets the new rank-selection behaviour. *)
+   lives in the adapter ([Lia_adapter], guarded by [cg_cuts_on]; default-ON since #68),
+   NOT here. The [OXSMT_CG_CUTS=0] OFF byte-identity is therefore scoped to the shipped
+   SOLVE PATH (which never reaches this function when the flag is forced off); a direct
+   API caller invoking [cg_cut] regardless still gets the rank-selection behaviour. *)
 let cg_cut t : (Term.t * 'tok list) option =
   ensure_live t;
   if Simplex.is_poisoned t.simplex

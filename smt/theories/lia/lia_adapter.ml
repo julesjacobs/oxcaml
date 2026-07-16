@@ -43,17 +43,21 @@ let hnf_cuts_on =
   | _ -> false
 ;;
 
-(* Stage B3 Chvátal–Gomory SEPARATION cut (DARK; sibling flag to {!hnf_cuts_on}). Default
-   OFF — byte-identical to trunk BY CONSTRUCTION when both flags are off. When ON, the cut
-   site calls {!Lia.cg_cut} (the sign-shifted multiplier search) instead of
-   {!Lia.hnf_cut}: B3 emits cuts B2's sign discipline rejects (charter
+(* Stage B3 Chvátal–Gomory SEPARATION cut (default-ON since #68; sibling flag to
+   {!hnf_cuts_on}). When ON, the cut site calls {!Lia.cg_cut} (the sign-shifted multiplier
+   search) instead of {!Lia.hnf_cut}: B3 emits cuts B2's sign discipline rejects (charter
    logs/lia-cuts-b2-log.md §next rung), staying a self-checked, fail-closed T-valid cut.
    Independently measurable from B2 so B2's OFF-identity story is untouched. If both flags
-   are set, B3 (the superset) takes it. *)
+   are set, B3 (the superset) takes it.
+
+   Tri-state (established flip family, mirrors {!Combine.model_repair_on}): unset → ON
+   (the new default); [OXSMT_CG_CUTS=0]/false/no → OFF, the byte-for-byte pre-flip path
+   (B&B branch, no {!Lia.cg_cut} call, no counter touched — trunk-exact); anything else →
+   ON. Only this env→bool read changed at the flip; the cut machinery is untouched. *)
 let cg_cuts_on =
   match Sys.getenv_opt "OXSMT_CG_CUTS" with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | _ -> false
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 (* z3-parity throttle (util/lp/lp_settings.h m_hnf_cut_period); mirrored in {!Hnf.cut_period}. *)

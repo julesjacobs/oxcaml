@@ -16,9 +16,10 @@
      confirm [cut_attempts] returns to 0 AND further Finals make attempts again — i.e. the
      budget gate ([cg_attempts >= cg_max_cuts]) is re-opened.
 
-   Run with OXSMT_CG_CUTS=1 (+ a small OXSMT_CG_MAX_CUTS) — the make target sets both. If
-   CG is off, the cut site is never entered and the test SKIPS (reports so, exits 0),
-   because [cg_cuts_on] is fixed at module load. *)
+   CG cuts are default-ON since #68, so the cut site is live by default; the make target
+   sets a small OXSMT_CG_MAX_CUTS so the cap is observable. If CG is forced off
+   ([OXSMT_CG_CUTS=0]) the cut site is never entered and the test SKIPS (reports so, exits
+   0), because [cg_cuts_on] is fixed at module load. *)
 
 open Oxsmt_core
 open Oxsmt_lia
@@ -73,10 +74,12 @@ let final_is_cuttable fx =
   | Theory.Sat | Theory.Conflict _ | Theory.Propagations _ -> false
 ;;
 
+(* Mirrors {!Lia_adapter.cg_cuts_on} — tri-state, default-ON since #68. The cut site is
+   live unless [OXSMT_CG_CUTS=0] forces the pre-flip OFF path. *)
 let cg_on =
   match Sys.getenv_opt "OXSMT_CG_CUTS" with
-  | Some ("1" | "true" | "yes" | "on") -> true
-  | _ -> false
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 let () =
@@ -84,8 +87,8 @@ let () =
   if not cg_on
   then
     print_endline
-      "  SKIP: OXSMT_CG_CUTS not set — cut site inert at module load (run via `make \
-       cut-budget-test`)"
+      "  SKIP: OXSMT_CG_CUTS=0 forces the pre-flip OFF path — cut site inert at module \
+       load (run via `make cut-budget-test`)"
   else (
     (* Multi-row ℤ-infeasible: x0 + 2·x1 = 0, 2·x0 + x1 = 1. ℚ-vertex (2/3, -1/3); every
        single-row gcd divides its rhs, so it is diophantine-blind and reaches the cut. *)
