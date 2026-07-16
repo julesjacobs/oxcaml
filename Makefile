@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -260,6 +260,29 @@ chrono-session-test:
 	      fail=1; \
 	    else echo "chrono-session-test: OK $$f -> $$got (CB reached through session)"; fi; \
 	  done; \
+	  test $$fail -eq 0
+
+## loud-unknown-test (task #78, review H1) — the unknown-reason line is LOUD and
+##   UNCONDITIONAL (USER directive: "loud, no flag"). The harness logs solver stderr but
+##   never compares it, so deleting the emission passes the whole suite (reviewer proved
+##   this). This runs the real CLI on a stable known-unknown (the unrenderable-model
+##   degrade case) and asserts a `(unknown-reason <tag>)` line reaches STDERR while STDOUT
+##   stays SMT-LIB-clean (verdict unknown, and no reason on stdout). RED if the eprintf is
+##   disarmed/removed or the line leaks to stdout; nonzero exit on any check.
+loud-unknown-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; \
+	  f=tests/cases/bool_operator_collision_unknown.smt2; \
+	  out=$$($$cli $$f 2>/tmp/loud-unknown.stderr); \
+	  err=$$(cat /tmp/loud-unknown.stderr); \
+	  fail=0; \
+	  case "$$out" in *"verdict unknown"*) : ;; *) \
+	    echo "loud-unknown-test: FAIL stdout verdict not unknown: [$$out]"; fail=1;; esac; \
+	  case "$$out" in *"unknown-reason"*) \
+	    echo "loud-unknown-test: FAIL unknown-reason leaked onto STDOUT: [$$out]"; fail=1;; esac; \
+	  case "$$err" in *"(unknown-reason "*) \
+	    echo "loud-unknown-test: OK reason on stderr -> [$$err]" ;; *) \
+	    echo "loud-unknown-test: FAIL no (unknown-reason ...) on stderr (loudness lost): [$$err]"; fail=1;; esac; \
 	  test $$fail -eq 0
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
@@ -747,6 +770,7 @@ test: check-frozen
 	$(MAKE) bv-blast-test
 	$(MAKE) bv-goldens-test
 	$(MAKE) bv-op-coverage-test
+	$(MAKE) loud-unknown-test
 	$(MAKE) dt-sat-gate
 	$(MAKE) dt-multi-query-gate
 	$(MAKE) array-sat-gate
