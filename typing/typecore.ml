@@ -14198,8 +14198,12 @@ let type_refinement env loc skeleton predicate =
          would mask the error in batch compilation.
 
          The crossing is computed with a principality-insensitive
-         (always-principal) context so both decisions are the same in batch and
-         [-principal] mode. *)
+         (always-principal) context so the modelability decision is the same in
+         batch and [-principal] for direct arrows and nominal carriers.  For
+         anonymous structural carriers of functions (tuple/option/list) the ikind
+         solver still reads the global principal flag, so under [-principal] the
+         pre-existing use-site mode error may fire instead of this one -- the
+         reject verdict is the same either way. *)
       let crossing =
         Ctype.type_jkind_purely env skeleton
         |> Ctype.crossing_of_jkind_principal env

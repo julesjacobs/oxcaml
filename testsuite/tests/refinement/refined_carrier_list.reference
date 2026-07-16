@@ -1,0 +1,6 @@
+File "refined_carrier_list.ml", line 1, characters 9-61:
+1 | type c = ((int -> int) list){ ((_ : (int -> int) list) = _) }
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The value refined by this predicate has type (int -> int) list,
+       which is not modelable: it contains a function type,
+       and a function value cannot be read in its own refinement predicate.

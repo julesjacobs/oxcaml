@@ -6322,12 +6322,17 @@ let crossing_of_jkind env jkind =
   Ikind.crossing_of_jkind ~context env jkind
 
 (* Like [crossing_of_jkind], but resolves with-bounds with an always-principal
-   context, so the resulting crossing does not depend on whether [-principal] is
-   set.  Refinement predicate checking needs this for the refined self: with the
-   ordinary [check_principal] context, an arrow's totality with-bound is left
-   unresolved in default (non-principal) mode and defaults to crossing, which
-   would silently admit a non-modelable (function-typed) self inside a
-   predicate. *)
+   context.  Refinement predicate checking uses this for the refined self so the
+   modelability decision does not depend on whether [-principal] is set: with the
+   ordinary [check_principal] context an arrow's totality with-bound is left
+   unresolved in default mode and defaults to crossing, which would silently
+   admit a non-modelable (function-typed) self inside a predicate.  NOTE this is
+   only fully principality-insensitive for direct arrows and nominal carriers (a
+   record/variant/alias over a function): for anonymous structural carriers of
+   functions (a tuple, [option], or [list]) the ikind solver consults the global
+   [Clflags.principal] rather than the context passed here, so the crossing --
+   and hence which error is reported -- can still differ by mode.  The reject
+   verdict is unaffected in every case. *)
 let crossing_of_jkind_principal env jkind =
   let context = mk_jkind_context_always_principal env in
   Ikind.crossing_of_jkind ~context env jkind
