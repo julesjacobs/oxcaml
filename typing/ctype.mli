@@ -852,9 +852,12 @@ val print_global_state : Format.formatter -> global_state -> unit
 val crossing_of_jkind : Env.t -> 'd Types.jkind -> Mode.Crossing.t
 
 (** Like [crossing_of_jkind], but resolves with-bounds with an always-principal
-    context, giving a crossing that does not depend on whether [-principal] is
-    set.  Used by refinement predicate checking so a function-typed self is
-    rejected identically in batch and [-principal] mode. *)
+    context.  Used by refinement predicate checking so the modelability decision
+    for the refined self does not depend on [-principal].  Only fully
+    principality-insensitive for direct arrows and nominal carriers; for
+    anonymous structural carriers of functions (tuple/[option]/[list]) the ikind
+    solver reads the global [Clflags.principal] instead, so the reported error
+    may differ by mode (the reject verdict does not). *)
 val crossing_of_jkind_principal : Env.t -> 'd Types.jkind -> Mode.Crossing.t
 
 (** Get the crossing of a type wrapped in modalities. Non-principal types get

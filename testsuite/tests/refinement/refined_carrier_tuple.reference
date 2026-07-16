@@ -1,0 +1,6 @@
+File "refined_carrier_tuple.ml", line 1, characters 9-63:
+1 | type c = ((int -> int) * int){ ((_ : (int -> int) * int) = _) }
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The value refined by this predicate has type (int -> int) * int,
+       which is not modelable: it contains a function type,
+       and a function value cannot be read in its own refinement predicate.

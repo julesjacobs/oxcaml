@@ -188,11 +188,18 @@ and permanently settles the question (accepts at the parent, rejects on this chi
 
 The substance of the fix is that the rejection now fires in default batch compilation *at all*.
 Principality parity of the *message* is explicitly not a requirement (welcome when free). The
-verdict (reject) is identical in every mode and for every self shape. The message is identical too,
-with one recorded exception: a **bare tuple self containing an arrow** (for example
-`(int -> int) * int`) rejects in both modes but via different errors — in default batch the
-`Refinement_self_not_modelable` error fires; under `-principal` the pre-existing use-site mode error
-("logical but expected physical") fires first, before lowering and hence before the modelability
-check. Nominal wrappers (a record, variant, or alias over the same shape) are message-identical in
-both modes. Routing tuple selfs through the modelability check ahead of the use-site read is a
-possible follow-up (improvement queue); no code change is made here.
+verdict (reject) is identical in every mode and for every self shape. The message is identical too
+for direct arrows and nominal carriers (a record, variant, or alias over a function), with one
+recorded class of exception: **anonymous structural carriers of functions** — a tuple, `option`, or
+`list` of a function, e.g. `(int -> int) option`, `(int -> int) list`, `(int -> int) * int` — reject
+in both modes but via different errors. In default batch the `Refinement_self_not_modelable` error
+fires; under `-principal` the pre-existing use-site mode error ("logical but expected physical")
+fires first, before lowering and hence before the modelability check. The cause is that
+`crossing_of_jkind_principal` is not universally principality-insensitive: the ikind solver consults
+the global `Clflags.principal` rather than the always-principal context passed to it (typing/ikind.ml
+`is_principal_type`), so for a parametric/structural carrier the totality crossing — and thus which
+error is reported — still tracks the flag. Under the ruling that principality/message parity is not
+required and both reviewers confirmed no soundness issue, no code change is made here; routing
+structural-carrier selfs through the modelability check ahead of the use-site read is a possible
+follow-up (improvement queue). Default-batch carrier regressions
+(`refined_function_carrier_reject.ml`) pin the reject-with-modelability-error behavior.
