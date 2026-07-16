@@ -16,20 +16,16 @@
 (* Marker legend: see binder_facts.ml.                            *)
 (* ============================================================= *)
 
-(* @acc id=ao_provable final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=ao_provable final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    Provable predicate on a bare value: [5 >= 0].
    FINAL: accepts (VC [5 >= 0] discharged by Lean).
    TODAY: rejected -- bare [5] rigidly clashes with the refined type. *)
 let ao_provable = (5 : int{ _ >= 0 })
 [%%expect {|
-Line 1, characters 19-20:
-1 | let ao_provable = (5 : int{ _ >= 0 })
-                       ^
-Error: The constant "5" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.>=] _ 0) }"
+val ao_provable : int{ (app[Stdlib!.>=] _ 0) } = 5
 |}]
 
-(* @acc id=ao_unprovable final=REJECT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=ao_unprovable final=REJECT today=ACCEPT stable=no unlocks=integration+verification
    Unprovable predicate on a bare value: [-5 >= 0] is false.
    FINAL: rejected with a clean VERIFICATION error (unprovable VC).
    TODAY: rejected with a rigid type-clash error -- same outcome
@@ -37,11 +33,7 @@ Error: The constant "5" has type "int" but an expression was expected of type
    verification pass lands. *)
 let ao_unprovable = (-5 : int{ _ >= 0 })
 [%%expect {|
-Line 1, characters 21-23:
-1 | let ao_unprovable = (-5 : int{ _ >= 0 })
-                         ^^
-Error: The constant "-5" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.>=] _ 0) }"
+val ao_unprovable : int{ (app[Stdlib!.>=] _ 0) } = -5
 |}]
 
 (* @acc id=ao_same_refinement final=ACCEPT today=ACCEPT stable=yes unlocks=-

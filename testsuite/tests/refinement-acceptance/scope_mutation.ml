@@ -15,7 +15,7 @@
 (* Marker legend: see binder_facts.ml.                            *)
 (* ============================================================= *)
 
-(* @acc id=scope_fact_in_scope final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=scope_fact_in_scope final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    A fact is available where its binder is in scope: the inner
    annotation [(x : int{ _ = 7 })] is proved from the fact [x = 7]
    recorded at the inner binder. The outer result just forwards it at
@@ -28,14 +28,10 @@ let scope_fact_in_scope () =
   in
   outer
 [%%expect {|
-Line 3, characters 13-14:
-3 |     let x = (7 : int{ _ = 7 }) in
-                 ^
-Error: The constant "7" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 7) }"
+val scope_fact_in_scope : unit -> int = <fun>
 |}]
 
-(* @acc id=scope_fact_dropped final=REJECT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=scope_fact_dropped final=REJECT today=ACCEPT stable=no unlocks=integration+verification
    A fact goes OUT OF SCOPE: [x = 7] holds only inside the inner let.
    Once [r] escapes, the fact mentioning [x] is dropped, so the
    obligation [r = 7] is NOT provable (dropping only weakens; it
@@ -50,14 +46,10 @@ let scope_fact_dropped () =
   in
   (r : int{ _ = 7 })
 [%%expect {|
-Line 3, characters 13-14:
-3 |     let x = (7 : int{ _ = 7 }) in
-                 ^
-Error: The constant "7" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 7) }"
+val scope_fact_dropped : unit -> int{ (app[Stdlib!.=] _ 7) } = <fun>
 |}]
 
-(* @acc id=mut_binder_exempt final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=mut_binder_exempt final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    A mutable refined binder: the initializer obligation ([1 = 1]) is
    discharged, but the binder contributes NO persistent fact. Merely
    declaring and reading it is fine.
@@ -66,11 +58,12 @@ let mut_binder_exempt () =
   let mutable x : int{ _ = 1 } = 1 in
   x
 [%%expect {|
-Line 2, characters 33-34:
+Line 2, characters 14-15:
 2 |   let mutable x : int{ _ = 1 } = 1 in
-                                     ^
-Error: The constant "1" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 1) }"
+                  ^
+Warning 186 [unmutated-mutable]: mutable variable "x" was never mutated.
+
+val mut_binder_exempt : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
 |}]
 
 (* @acc id=mut_no_persistent_fact final=REJECT today=REJECT stable=no unlocks=integration+verification
@@ -87,9 +80,9 @@ let mut_no_persistent_fact () =
   x <- 2;
   (x : int{ _ = 1 })
 [%%expect {|
-Line 2, characters 33-34:
-2 |   let mutable x : int{ _ = 1 } = 1 in
-                                     ^
-Error: The constant "1" has type "int" but an expression was expected of type
+Line 3, characters 7-8:
+3 |   x <- 2;
+           ^
+Error: The constant "2" has type "int" but an expression was expected of type
          "int{ (app[Stdlib!.=] _ 1) }"
 |}]

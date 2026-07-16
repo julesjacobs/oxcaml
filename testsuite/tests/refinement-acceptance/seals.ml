@@ -93,9 +93,20 @@ end = struct
   let f (x : int) = (x * x : int{ _ >= 0 })
 end
 [%%expect {|
-Line 4, characters 21-26:
+Lines 3-5, characters 6-3:
+3 | ......struct
 4 |   let f (x : int) = (x * x : int{ _ >= 0 })
-                         ^^^^^
-Error: This expression has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.>=] _ 0) }"
+5 | end
+Error: Signature mismatch:
+       Modules do not match:
+         sig val f : int -> int{ (app[Stdlib!.>=] _ 0) } end
+       is not included in
+         sig val f : int -> int end
+       Values do not match:
+         val f : int -> int{ (app[Stdlib!.>=] _ 0) }
+       is not included in
+         val f : int -> int
+       The type "int -> int{ (app[Stdlib!.>=] _ 0) }"
+       is not compatible with the type "int -> int"
+       Type "int{ (app[Stdlib!.>=] _ 0) }" is not compatible with type "int"
 |}]

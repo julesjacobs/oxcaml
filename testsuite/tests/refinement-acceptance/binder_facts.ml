@@ -29,7 +29,7 @@
 (* value is a rigid clash -- the feature fails closed.            *)
 (* ============================================================= *)
 
-(* @acc id=bf_use_fact final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=bf_use_fact final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    A refined let-binder records its predicate as a fact; the same
    predicate is then re-imposed downstream and discharged trivially.
    FINAL: accepts (fact [x = 1] entails the obligation [x = 1]).
@@ -39,14 +39,10 @@ let bf_use_fact () =
   let x = (1 : int{ _ = 1 }) in
   (x : int{ _ = 1 })
 [%%expect {|
-Line 2, characters 11-12:
-2 |   let x = (1 : int{ _ = 1 }) in
-               ^
-Error: The constant "1" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 1) }"
+val bf_use_fact : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
 |}]
 
-(* @acc id=bf_skeleton_use final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=bf_skeleton_use final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    The refined binder is USED at its skeleton: [x + 1] needs [x : int].
    FINAL: accepts (use is skeleton-typed; the binder fact is irrelevant
    to a bare arithmetic use).
@@ -55,14 +51,10 @@ let bf_skeleton_use () =
   let x = (1 : int{ _ = 1 }) in
   x + 1
 [%%expect {|
-Line 2, characters 11-12:
-2 |   let x = (1 : int{ _ = 1 }) in
-               ^
-Error: The constant "1" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 1) }"
+val bf_skeleton_use : unit -> int = <fun>
 |}]
 
-(* @acc id=bf_needs_fact final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=bf_needs_fact final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    Correctness DEPENDS on the binder fact: the downstream obligation
    [x > 0] is only provable from the recorded fact [x = 7]. Drop the
    fact and the condition is unprovable -- this is the case that fails
@@ -72,11 +64,7 @@ let bf_needs_fact () =
   let x = (7 : int{ _ = 7 }) in
   (x : int{ _ > 0 })
 [%%expect {|
-Line 2, characters 11-12:
-2 |   let x = (7 : int{ _ = 7 }) in
-               ^
-Error: The constant "7" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 7) }"
+val bf_needs_fact : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
 |}]
 
 (* @acc id=bf_param_fact final=ACCEPT today=REJECT stable=no unlocks=integration+verification
@@ -90,6 +78,6 @@ let bf_param_fact (n : int{ _ = 5 }) : int{ _ > 0 } = n
 Line 1, characters 54-55:
 1 | let bf_param_fact (n : int{ _ = 5 }) : int{ _ > 0 } = n
                                                           ^
-Error: The value "n" has type "int{ (app[Stdlib!.=] _ 5) }"
-       but an expression was expected of type "int{ (app[Stdlib!.>] _ 0) }"
+Error: The value "n" has type "int" but an expression was expected of type
+         "int{ (app[Stdlib!.>] _ 0) }"
 |}]

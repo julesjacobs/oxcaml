@@ -23,33 +23,25 @@
 (* Marker legend: see binder_facts.ml.                            *)
 (* ============================================================= *)
 
-(* @acc id=sw_annot_to_skeleton final=ACCEPT today=REJECT stable=no unlocks=integration
+(* @acc id=sw_annot_to_skeleton final=ACCEPT today=ACCEPT stable=no unlocks=integration
    A refined value annotated at its own skeleton. Weakening in the
    expected-type path: accepts, no obligation (the target is bare).
    TODAY: rejected -- the base does not yet strip/weaken on use. *)
 let sw_annot_to_skeleton (x : int{ _ = 1 }) = (x : int)
 [%%expect {|
-Line 1, characters 47-48:
-1 | let sw_annot_to_skeleton (x : int{ _ = 1 }) = (x : int)
-                                                   ^
-Error: The value "x" has type "int{ (app[Stdlib!.=] _ 1) }"
-       but an expression was expected of type "int"
+val sw_annot_to_skeleton : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
 |}]
 
-(* @acc id=sw_use_in_arith final=ACCEPT today=REJECT stable=no unlocks=integration
+(* @acc id=sw_use_in_arith final=ACCEPT today=ACCEPT stable=no unlocks=integration
    The most common use: a refined value in bare arithmetic. [x] is
    used at [int], so [x + 1] type-checks.
    FINAL: accepts. TODAY: rejected. *)
 let sw_use_in_arith (x : int{ _ = 1 }) = x + 1
 [%%expect {|
-Line 1, characters 41-42:
-1 | let sw_use_in_arith (x : int{ _ = 1 }) = x + 1
-                                             ^
-Error: The value "x" has type "int{ (app[Stdlib!.=] _ 1) }"
-       but an expression was expected of type "int"
+val sw_use_in_arith : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
 |}]
 
-(* @acc id=sw_pass_to_bare_param final=ACCEPT today=REJECT stable=no unlocks=integration
+(* @acc id=sw_pass_to_bare_param final=ACCEPT today=ACCEPT stable=no unlocks=integration
    A refined value passed where a BARE parameter is expected: the use
    weakens to the skeleton, so no contract obligation arises.
    FINAL: accepts. TODAY: rejected. *)
@@ -57,23 +49,16 @@ let sink (y : int) = y
 let sw_pass_to_bare_param (x : int{ _ = 1 }) = sink x
 [%%expect {|
 val sink : int -> int = <fun>
-Line 2, characters 52-53:
-2 | let sw_pass_to_bare_param (x : int{ _ = 1 }) = sink x
-                                                        ^
-Error: The value "x" has type "int{ (app[Stdlib!.=] _ 1) }"
-       but an expression was expected of type "int"
+val sw_pass_to_bare_param : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
 |}]
 
-(* @acc id=sw_neutral_if_branches final=ACCEPT today=REJECT stable=no unlocks=integration
+(* @acc id=sw_neutral_if_branches final=ACCEPT today=ACCEPT stable=no unlocks=integration
    Neutral unification site (if-branches) with a refined and a bare
    branch: both weaken to [int], so the [if] has type [int].
    FINAL: accepts. TODAY: rejected (branches meet refined-vs-bare
    before any stripping). Contrast ru_* where nesting keeps it rigid. *)
 let sw_neutral_if_branches b (x : int{ _ = 1 }) = if b then x else 0
 [%%expect {|
-Line 1, characters 67-68:
-1 | let sw_neutral_if_branches b (x : int{ _ = 1 }) = if b then x else 0
-                                                                       ^
-Error: The constant "0" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 1) }"
+val sw_neutral_if_branches : bool -> int{ (app[Stdlib!.=] _ 1) } -> int =
+  <fun>
 |}]
