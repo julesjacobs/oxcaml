@@ -100,15 +100,15 @@ let rec fib = function | 0 | 1 -> 1 | n -> (fib (n - 1)) + (fib (n - 2))
         pattern 
           Tpat_var "fib"
           sort value
-          value_mode global,many,portable,partial,forkable,unyielding,stateful;meet(unique,uncontended,program,read_write,static,imply(unique,uncontended,program,read_write,static)(modevar#3[aliased,contended,logic,immutable,dynamic .. unique,uncontended,program,read_write,static]))
+          value_mode global,many,portable,partial,forkable,unyielding,stateful;meet(unique,uncontended,physical,read_write,static,imply(unique,uncontended,physical,read_write,static)(modevar#3[aliased,contended,logical,immutable,dynamic .. unique,uncontended,physical,read_write,static]))
         expression 
           Texp_function
-          alloc_mode global,many,portable,partial,forkable,unyielding,stateful;id(modevar#9[aliased,contended,logic,immutable,dynamic .. unique,uncontended,program,read_write,static])
-          global,many,nonportable,partial,forkable,unyielding,stateful;aliased,uncontended,program,read_write,dynamic
+          alloc_mode global,many,portable,partial,forkable,unyielding,stateful;id(modevar#9[aliased,contended,logical,immutable,dynamic .. unique,uncontended,physical,read_write,static])
+          global,many,nonportable,partial,forkable,unyielding,stateful;aliased,uncontended,physical,read_write,dynamic
           []
           []
           Tfunction_cases 
-            alloc_mode global,many,nonportable,partial,forkable,unyielding,stateful;aliased,uncontended,program,read_write,dynamic
+            alloc_mode global,many,nonportable,partial,forkable,unyielding,stateful;aliased,uncontended,physical,read_write,dynamic
             value
             [
               <case>
@@ -124,7 +124,7 @@ let rec fib = function | 0 | 1 -> 1 | n -> (fib (n - 1)) + (fib (n - 2))
                 pattern 
                   Tpat_var "n"
                   sort value
-                  value_mode global,many,portable,total,forkable,unyielding,stateless;unique,uncontended,program,read_write,dynamic
+                  value_mode global,many,portable,total,forkable,unyielding,stateless;unique,uncontended,physical,read_write,dynamic
                 expression 
                   Texp_apply
                   apply_mode Tail

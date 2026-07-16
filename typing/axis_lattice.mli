@@ -48,7 +48,7 @@ val create :
   portability:Mode.Portability.Const.t ->
   contention:Mode.Contention.Const.t ->
   totality:Mode.Totality.Const.t ->
-  ghostness:Mode.Ghostness.Const.t ->
+  logicality:Mode.Logicality.Const.t ->
   forkable:Mode.Forkable.Const.t ->
   yielding:Mode.Yielding.Const.t ->
   statefulness:Mode.Statefulness.Const.t ->
@@ -69,7 +69,7 @@ val contention : t -> Mode.Contention.Const.t
 
 val totality : t -> Mode.Totality.Const.t
 
-val ghostness : t -> Mode.Ghostness.Const.t
+val logicality : t -> Mode.Logicality.Const.t
 
 val forkable : t -> Mode.Forkable.Const.t
 

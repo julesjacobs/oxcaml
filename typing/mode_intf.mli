@@ -501,11 +501,11 @@ module type S = sig
     include Common_axis_neg with module Const := Const
   end
 
-  module Ghostness : sig
+  module Logicality : sig
     module Const : sig
       type t =
-        | Program
-        | Logic
+        | Physical
+        | Logical
 
       include Const with type t := t
     end
@@ -617,7 +617,7 @@ module type S = sig
   type monadic =
     { uniqueness : Uniqueness.Const.t;
       contention : Contention.Const.t;
-      ghostness : Ghostness.Const.t;
+      logicality : Logicality.Const.t;
       visibility : Visibility.Const.t;
       staticity : Staticity.Const.t
     }
@@ -638,7 +638,7 @@ module type S = sig
       | Uniqueness : (monadic, Uniqueness.Const.t) t
       | Visibility : (monadic, Visibility.Const.t) t
       | Contention : (monadic, Contention.Const.t) t
-      | Ghostness : (monadic, Ghostness.Const.t) t
+      | Logicality : (monadic, Logicality.Const.t) t
       | Staticity : (monadic, Staticity.Const.t) t
 
     val print : Fmt.formatter -> ('p, 'r) t -> unit
@@ -711,7 +711,7 @@ module type S = sig
         visibility : 'i;
         staticity : 'j;
         totality : 'k;
-        ghostness : 'l
+        logicality : 'l
       }
 
     module Const : sig
@@ -729,7 +729,7 @@ module type S = sig
               Visibility.Const.t,
               Staticity.Const.t,
               Totality.Const.t,
-              Ghostness.Const.t )
+              Logicality.Const.t )
             modes
 
       module Option : sig
@@ -747,7 +747,7 @@ module type S = sig
             Visibility.Const.t option,
             Staticity.Const.t option,
             Totality.Const.t option,
-            Ghostness.Const.t option )
+            Logicality.Const.t option )
           modes
 
         val none : t
@@ -1152,7 +1152,7 @@ module type S = sig
       val create :
         uniqueness:Uniqueness.Const.t Atom.t ->
         contention:Contention.Const.t Atom.t ->
-        ghostness:Ghostness.Const.t Atom.t ->
+        logicality:Logicality.Const.t Atom.t ->
         visibility:Visibility.Const.t Atom.t ->
         staticity:Staticity.Const.t Atom.t ->
         t
@@ -1224,7 +1224,7 @@ module type S = sig
       portability:bool ->
       contention:bool ->
       totality:bool ->
-      ghostness:bool ->
+      logicality:bool ->
       forkable:bool ->
       yielding:bool ->
       statefulness:bool ->

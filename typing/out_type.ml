@@ -1361,7 +1361,7 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
     ; print_to_string_opt Mode.Portability.Const.print diff.portability
     ; print_to_string_opt Mode.Totality.Const.print diff.totality
     ; print_to_string_opt Mode.Contention.Const.print diff.contention
-    ; print_to_string_opt Mode.Ghostness.Const.print diff.ghostness
+    ; print_to_string_opt Mode.Logicality.Const.print diff.logicality
     ; print_to_string_opt Mode.Forkable.Const.print diff.forkable
     ; print_to_string_opt Mode.Yielding.Const.print diff.yielding
     ; print_to_string_opt Mode.Statefulness.Const.print diff.statefulness

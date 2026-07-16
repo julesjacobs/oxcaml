@@ -86,8 +86,8 @@ module Mode_axis_pair = struct
     | "corrupted" -> monadic Contention Corrupted
     | "shared" -> monadic Contention Shared
     | "uncontended" -> monadic Contention Uncontended
-    | "program" -> monadic Ghostness Program
-    | "logic" -> monadic Ghostness Logic
+    | "physical" -> monadic Logicality Physical
+    | "logical" -> monadic Logicality Logical
     | "unforkable" -> comonadic Forkable Unforkable
     | "forkable" -> comonadic Forkable Forkable
     | "yielding" -> comonadic Yielding Yielding
@@ -113,7 +113,7 @@ module Modality_axis_pair = struct
       Mode_axis_pair.to_value (Mode_axis_pair.of_string s)
     with
     | Atom (Comonadic Totality, _) -> raise Not_found
-    | Atom (Monadic Ghostness, _) -> raise Not_found
+    | Atom (Monadic Logicality, _) -> raise Not_found
     | Atom (Monadic ax, mode) -> Atom (Monadic ax, Join_const mode)
     | Atom (Comonadic ax, mode) -> Atom (Comonadic ax, Meet_const mode)
 end
@@ -148,7 +148,7 @@ module Transled_modifiers = struct
         Mode.Portability.Const.t Comonadic.Atom.t Location.loc option;
       totality : Mode.Totality.Const.t Comonadic.Atom.t Location.loc option;
       contention : Mode.Contention.Const.t Monadic.Atom.t Location.loc option;
-      ghostness : Mode.Ghostness.Const.t Monadic.Atom.t Location.loc option;
+      logicality : Mode.Logicality.Const.t Monadic.Atom.t Location.loc option;
       forkable : Mode.Forkable.Const.t Comonadic.Atom.t Location.loc option;
       yielding : Mode.Yielding.Const.t Comonadic.Atom.t Location.loc option;
       statefulness :
@@ -171,7 +171,7 @@ module Transled_modifiers = struct
       portability = None;
       totality = None;
       contention = None;
-      ghostness = None;
+      logicality = None;
       forkable = None;
       yielding = None;
       statefulness = None;
@@ -190,7 +190,7 @@ module Transled_modifiers = struct
     | Modal (Comonadic Portability) -> t.portability
     | Modal (Comonadic Totality) -> t.totality
     | Modal (Monadic Contention) -> t.contention
-    | Modal (Monadic Ghostness) -> t.ghostness
+    | Modal (Monadic Logicality) -> t.logicality
     | Modal (Comonadic Forkable) -> t.forkable
     | Modal (Comonadic Yielding) -> t.yielding
     | Modal (Comonadic Statefulness) -> t.statefulness
@@ -207,7 +207,7 @@ module Transled_modifiers = struct
     | Modal (Comonadic Portability) -> { t with portability = value }
     | Modal (Comonadic Totality) -> { t with totality = value }
     | Modal (Monadic Contention) -> { t with contention = value }
-    | Modal (Monadic Ghostness) -> { t with ghostness = value }
+    | Modal (Monadic Logicality) -> { t with logicality = value }
     | Modal (Comonadic Forkable) -> { t with forkable = value }
     | Modal (Comonadic Yielding) -> { t with yielding = value }
     | Modal (Comonadic Statefulness) -> { t with statefulness = value }
@@ -340,7 +340,7 @@ let transl_mod_bounds annots =
               Some { txt = Per_axis.min (Modal (Comonadic Totality)); loc };
             contention =
               Some { txt = Per_axis.min (Modal (Monadic Contention)); loc };
-            ghostness = None;
+            logicality = None;
             forkable =
               Some { txt = Per_axis.min (Modal (Comonadic Forkable)); loc };
             yielding =

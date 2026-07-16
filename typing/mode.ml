@@ -1,15 +1,15 @@
 (**************************************************************************)
-(*                                                                        *)
-(*                                 OCaml                                  *)
-(*                                                                        *)
-(*                    Zesen Qian, Jane Street, London                     *)
-(*                                                                        *)
-(*   Copyright 2024 Jane Street Group LLC                                 *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
+(* *)
+(* OCaml *)
+(* *)
+(* Zesen Qian, Jane Street, London *)
+(* *)
+(* Copyright 2024 Jane Street Group LLC *)
+(* *)
+(* All rights reserved. This file is distributed under the terms of *)
+(* the GNU Lesser General Public License version 2.1, with the *)
+(* special exception on linking described in the file LICENSE. *)
+(* *)
 (**************************************************************************)
 
 (* warn on fragile matches *)
@@ -298,8 +298,8 @@ module type CoHeyting = sig
   val subtract : t -> t -> t
 end
 
-(* Even though our lattices are all bi-heyting algebras, that knowledge is
-   internal to this module. Externally they are seen as normal lattices. *)
+(* Even though our lattices are all bi-heyting algebras, that knowledge is internal to
+   this module. Externally they are seen as normal lattices. *)
 module Lattices = struct
   module Total (L : Total) = struct
     let min = L.min
@@ -316,23 +316,24 @@ module Lattices = struct
 
     let meet a b = if L.ord a < L.ord b then a else b
 
-    (* A total lattice has a co-heyting structure.
-       Prove the [subtract] below is the left adjoint of [join].
-        - If [subtract a c <= b], by the definition of [subtract] below,
-          that could mean one of two things:
-          - Took the branch [a <= c], and [min <= b]. In this case, we have [a <= c <= join c b].
-          - Took the other branch, and [a <= b]. In this case, we have [a <= b <= join c b].
+    (* A total lattice has a co-heyting structure. Prove the [subtract] below is the left
+       adjoint of [join].
+       - If [subtract a c <= b], by the definition of [subtract] below, that could mean
+         one of two things:
+         - Took the branch [a <= c], and [min <= b]. In this case, we have
+           [a <= c <= join c b].
+         - Took the other branch, and [a <= b]. In this case, we have
+           [a <= b <= join c b].
 
-        - In the other direction: Given [a <= join c b], compare [c] and [b]:
-          - if [c <= b], then [a <= join c b = b], and:
-            - either [a <= c], then [subtract a c = min <= b]
-            - or the other branch, then [subtract a c = a <= b]
-          - if [b <= c], then [a <= join c b = c], then [subtract a c = min <= b]
+       - In the other direction: Given [a <= join c b], compare [c] and [b]:
+         - if [c <= b], then [a <= join c b = b], and:
+           - either [a <= c], then [subtract a c = min <= b]
+           - or the other branch, then [subtract a c = a <= b]
+         - if [b <= c], then [a <= join c b = c], then [subtract a c = min <= b]
     *)
     let subtract a c = if le a c then L.min else a
 
-    (* A total lattice has a heyting structure. The proof for [imply] is dual
-       and omitted. *)
+    (* A total lattice has a heyting structure. The proof for [imply] is dual and omitted. *)
     let imply c b = if le c b then L.max else b
   end
   [@@inline]
@@ -399,18 +400,14 @@ module Lattices = struct
 
     let le a b = meet a b = a
 
-    (* We can treat [fst] and [snd] as independent axes.
-       0b0 land (lnot 0b0) = 0b0 (min = min => min)
-       0b0 land (lnot 0b1) = 0b0 (min < max => min)
-       0b1 land (lnot 0b0) = 0b1 (max > min => max)
-       0b1 land (lnot 0b1) = 0b0 (max = max => min) *)
+    (* We can treat [fst] and [snd] as independent axes. 0b0 land (lnot 0b0) = 0b0 (min =
+       min => min) 0b0 land (lnot 0b1) = 0b0 (min < max => min) 0b1 land (lnot 0b0) = 0b1
+       (max > min => max) 0b1 land (lnot 0b1) = 0b0 (max = max => min) *)
     let subtract a c = l_of_int (l_to_int a land lnot (l_to_int c))
 
-    (* We can treat [fst] and [snd] as independent axes.
-       (lnot 0b0) lor 0b0 = 0b1 (min = min => max)
-       (lnot 0b0) lor 0b1 = 0b1 (min < max => max)
-       (lnot 0b1) lor 0b0 = 0b0 (max > min => min)
-       (lnot 0b1) lor 0b1 = 0b1 (max = max => max)
+    (* We can treat [fst] and [snd] as independent axes. (lnot 0b0) lor 0b0 = 0b1 (min =
+       min => max) (lnot 0b0) lor 0b1 = 0b1 (min < max => max) (lnot 0b1) lor 0b0 = 0b0
+       (max > min => min) (lnot 0b1) lor 0b1 = 0b1 (max = max => max)
 
        [lnot c lor b] sets the top 61 bits to 1, so we must mask them out. *)
     let imply c b = l_of_int (lnot (l_to_int c) lor l_to_int b land mask)
@@ -641,28 +638,28 @@ module Lattices = struct
       | Uncontended -> Fmt.fprintf ppf "uncontended"
   end
 
-  module Ghostness = struct
+  module Logicality = struct
     type t =
-      | Program
-      | Logic
+      | Physical
+      | Logical
 
     include Total (struct
       type nonrec t = t
 
-      let min = Program
+      let min = Physical
 
-      let max = Logic
+      let max = Logical
 
-      let ord = function Program -> 0 | Logic -> 1
+      let ord = function Physical -> 0 | Logical -> 1
     end)
 
-    let legacy = Program
+    let legacy = Physical
 
-    let all = lazy [Program; Logic]
+    let all = lazy [Physical; Logical]
 
     let print ppf = function
-      | Program -> Fmt.fprintf ppf "program"
-      | Logic -> Fmt.fprintf ppf "logic"
+      | Physical -> Fmt.fprintf ppf "physical"
+      | Logical -> Fmt.fprintf ppf "logical"
   end
 
   module Forkable = struct
@@ -802,7 +799,7 @@ module Lattices = struct
   type monadic =
     { uniqueness : Uniqueness.t;
       contention : Contention.t;
-      ghostness : Ghostness.t;
+      logicality : Logicality.t;
       visibility : Visibility.t;
       staticity : Staticity.t
     }
@@ -813,26 +810,26 @@ module Lattices = struct
     let min =
       let uniqueness = Uniqueness.min in
       let contention = Contention.min in
-      let ghostness = Ghostness.min in
+      let logicality = Logicality.min in
       let visibility = Visibility.min in
       let staticity = Staticity.min in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let max =
       let uniqueness = Uniqueness.max in
       let contention = Contention.max in
-      let ghostness = Ghostness.max in
+      let logicality = Logicality.max in
       let visibility = Visibility.max in
       let staticity = Staticity.max in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let legacy =
       let uniqueness = Uniqueness.legacy in
       let contention = Contention.legacy in
-      let ghostness = Ghostness.legacy in
+      let logicality = Logicality.legacy in
       let visibility = Visibility.legacy in
       let staticity = Staticity.legacy in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     (** All product values, including every combination of axis values. *)
     let all =
@@ -841,10 +838,10 @@ module Lattices = struct
          let ( let+ ) xs f = List.map f xs in
          let* uniqueness = Lazy.force Uniqueness.all in
          let* contention = Lazy.force Contention.all in
-         let* ghostness = Lazy.force Ghostness.all in
+         let* logicality = Lazy.force Logicality.all in
          let* visibility = Lazy.force Visibility.all in
          let+ staticity = Lazy.force Staticity.all in
-         { uniqueness; contention; ghostness; visibility; staticity })
+         { uniqueness; contention; logicality; visibility; staticity })
 
     (* CR-someday ageorges: the following code manually enumerates axes. It would be nice
        to use the later definition of Lattices.Monadic.Axis.all *)
@@ -860,8 +857,8 @@ module Lattices = struct
                 { base with uniqueness });
                (let+ contention = Lazy.force Contention.all in
                 { base with contention });
-               (let+ ghostness = Lazy.force Ghostness.all in
-                { base with ghostness });
+               (let+ logicality = Lazy.force Logicality.all in
+                { base with logicality });
                (let+ visibility = Lazy.force Visibility.all in
                 { base with visibility });
                (let+ staticity = Lazy.force Staticity.all in
@@ -872,7 +869,7 @@ module Lattices = struct
     let le m1 m2 =
       let { uniqueness = uniqueness1;
             contention = contention1;
-            ghostness = ghostness1;
+            logicality = logicality1;
             visibility = visibility1;
             staticity = staticity1
           } =
@@ -880,7 +877,7 @@ module Lattices = struct
       in
       let { uniqueness = uniqueness2;
             contention = contention2;
-            ghostness = ghostness2;
+            logicality = logicality2;
             visibility = visibility2;
             staticity = staticity2
           } =
@@ -888,14 +885,14 @@ module Lattices = struct
       in
       Uniqueness.le uniqueness1 uniqueness2
       && Contention.le contention1 contention2
-      && Ghostness.le ghostness1 ghostness2
+      && Logicality.le logicality1 logicality2
       && Visibility.le visibility1 visibility2
       && Staticity.le staticity1 staticity2
 
     let equal m1 m2 =
       let { uniqueness = uniqueness1;
             contention = contention1;
-            ghostness = ghostness1;
+            logicality = logicality1;
             visibility = visibility1;
             staticity = staticity1
           } =
@@ -903,7 +900,7 @@ module Lattices = struct
       in
       let { uniqueness = uniqueness2;
             contention = contention2;
-            ghostness = ghostness2;
+            logicality = logicality2;
             visibility = visibility2;
             staticity = staticity2
           } =
@@ -911,7 +908,7 @@ module Lattices = struct
       in
       Uniqueness.equal uniqueness1 uniqueness2
       && Contention.equal contention1 contention2
-      && Ghostness.equal ghostness1 ghostness2
+      && Logicality.equal logicality1 logicality2
       && Visibility.equal visibility1 visibility2
       && Staticity.equal staticity1 staticity2
 
@@ -924,7 +921,7 @@ module Lattices = struct
         if c <> 0
         then c
         else
-          let c = Ghostness.compare_total m1.ghostness m2.ghostness in
+          let c = Logicality.compare_total m1.logicality m2.logicality in
           if c <> 0
           then c
           else
@@ -936,30 +933,30 @@ module Lattices = struct
     let join m1 m2 =
       let uniqueness = Uniqueness.join m1.uniqueness m2.uniqueness in
       let contention = Contention.join m1.contention m2.contention in
-      let ghostness = Ghostness.join m1.ghostness m2.ghostness in
+      let logicality = Logicality.join m1.logicality m2.logicality in
       let visibility = Visibility.join m1.visibility m2.visibility in
       let staticity = Staticity.join m1.staticity m2.staticity in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let meet m1 m2 =
       let uniqueness = Uniqueness.meet m1.uniqueness m2.uniqueness in
       let contention = Contention.meet m1.contention m2.contention in
-      let ghostness = Ghostness.meet m1.ghostness m2.ghostness in
+      let logicality = Logicality.meet m1.logicality m2.logicality in
       let visibility = Visibility.meet m1.visibility m2.visibility in
       let staticity = Staticity.meet m1.staticity m2.staticity in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let subtract m1 m2 =
       let uniqueness = Uniqueness.subtract m1.uniqueness m2.uniqueness in
       let contention = Contention.subtract m1.contention m2.contention in
-      let ghostness = Ghostness.subtract m1.ghostness m2.ghostness in
+      let logicality = Logicality.subtract m1.logicality m2.logicality in
       let visibility = Visibility.subtract m1.visibility m2.visibility in
       let staticity = Staticity.subtract m1.staticity m2.staticity in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let print ppf m =
       Fmt.fprintf ppf "%a,%a,%a,%a,%a" Uniqueness.print m.uniqueness
-        Contention.print m.contention Ghostness.print m.ghostness
+        Contention.print m.contention Logicality.print m.logicality
         Visibility.print m.visibility Staticity.print m.staticity
   end
 
@@ -1243,24 +1240,23 @@ module Lattices = struct
 
   (* Notes on flipping
 
-     Our lattices are split into two opposite fragments: monadic and comonadic.
-     Moreover:
+     Our lattices are split into two opposite fragments: monadic and comonadic. Moreover:
      - Morphisms between lattices in the same fragment are always monotone.
      - Morphisms between lattices from opposite fragments are always antitone.
 
-     [Solver_mono] only supports monotone morphisms. Due to this limitation,
-     here, we flip all lattices in the monadic fragment, which makes morphisms
-     between opposite fragments monotone. We submit this category of lattices
-     (original comonadic lattices + flipped monadic lattices) to [Solver_mono].
+     [Solver_mono] only supports monotone morphisms. Due to this limitation, here, we flip
+     all lattices in the monadic fragment, which makes morphisms between opposite
+     fragments monotone. We submit this category of lattices (original comonadic
+     lattices + flipped monadic lattices) to [Solver_mono].
 
-     The resulted interface given by [Solver_mono] therefore has the monadic
-     lattices flipped. We build on top of that and provide an interface to the
-     downstream code where monadic lattices are flipped back to its original
-     ordering. See [module Monadic_gen] and [module Monadic].
+     The resulted interface given by [Solver_mono] therefore has the monadic lattices
+     flipped. We build on top of that and provide an interface to the downstream code
+     where monadic lattices are flipped back to its original ordering. See
+     [module Monadic_gen] and [module Monadic].
   *)
   module Uniqueness_op = Opposite (Uniqueness)
   module Contention_op = Opposite (Contention)
-  module Ghostness_op = Opposite (Ghostness)
+  module Logicality_op = Opposite (Logicality)
   module Visibility_op = Opposite (Visibility)
   module Staticity_op = Opposite (Staticity)
   module Monadic_op = Opposite (Monadic)
@@ -1278,7 +1274,7 @@ module Lattices = struct
     | Yielding : Yielding.t obj
     | Statefulness : Statefulness.t obj
     | Contention_op : Contention_op.t obj
-    | Ghostness_op : Ghostness_op.t obj
+    | Logicality_op : Logicality_op.t obj
     | Visibility_op : Visibility_op.t obj
     | Staticity_op : Staticity_op.t obj
     | Monadic_op : Monadic_op.t obj
@@ -1299,7 +1295,7 @@ module Lattices = struct
     | Locality -> Locality
     | Regionality -> Regionality
     | Uniqueness_op | Linearity | Monadic_op | Comonadic_with_regionality
-    | Comonadic_with_locality | Contention_op | Ghostness_op | Visibility_op
+    | Comonadic_with_locality | Contention_op | Logicality_op | Visibility_op
     | Portability | Totality | Forkable | Yielding | Statefulness | Staticity_op
       ->
       assert false
@@ -1318,7 +1314,7 @@ module Lattices = struct
     | Yielding -> false
     | Statefulness -> false
     | Contention_op -> true
-    | Ghostness_op -> true
+    | Logicality_op -> true
     | Visibility_op -> true
     | Staticity_op -> true
     | Monadic_op -> true
@@ -1337,7 +1333,7 @@ module Lattices = struct
     | Yielding -> Fmt.fprintf ppf "Yielding"
     | Statefulness -> Fmt.fprintf ppf "Statefulness"
     | Contention_op -> Fmt.fprintf ppf "Contention_op"
-    | Ghostness_op -> Fmt.fprintf ppf "Ghostness_op"
+    | Logicality_op -> Fmt.fprintf ppf "Logicality_op"
     | Visibility_op -> Fmt.fprintf ppf "Visibility_op"
     | Staticity_op -> Fmt.fprintf ppf "Staticity_op"
     | Monadic_op -> Fmt.fprintf ppf "Monadic_op"
@@ -1349,7 +1345,7 @@ module Lattices = struct
     | Regionality -> Regionality.min
     | Uniqueness_op -> Uniqueness_op.min
     | Contention_op -> Contention_op.min
-    | Ghostness_op -> Ghostness_op.min
+    | Logicality_op -> Logicality_op.min
     | Visibility_op -> Visibility_op.min
     | Forkable -> Forkable.min
     | Yielding -> Yielding.min
@@ -1367,7 +1363,7 @@ module Lattices = struct
     | Regionality -> Regionality.max
     | Uniqueness_op -> Uniqueness_op.max
     | Contention_op -> Contention_op.max
-    | Ghostness_op -> Ghostness_op.max
+    | Logicality_op -> Logicality_op.max
     | Visibility_op -> Visibility_op.max
     | Linearity -> Linearity.max
     | Portability -> Portability.max
@@ -1387,7 +1383,7 @@ module Lattices = struct
     | Regionality -> Regionality.le a b
     | Uniqueness_op -> Uniqueness_op.le a b
     | Contention_op -> Contention_op.le a b
-    | Ghostness_op -> Ghostness_op.le a b
+    | Logicality_op -> Logicality_op.le a b
     | Visibility_op -> Visibility_op.le a b
     | Linearity -> Linearity.le a b
     | Portability -> Portability.le a b
@@ -1407,7 +1403,7 @@ module Lattices = struct
     | Regionality -> Regionality.compare_total a b
     | Uniqueness_op -> Uniqueness_op.compare_total a b
     | Contention_op -> Contention_op.compare_total a b
-    | Ghostness_op -> Ghostness_op.compare_total a b
+    | Logicality_op -> Logicality_op.compare_total a b
     | Visibility_op -> Visibility_op.compare_total a b
     | Linearity -> Linearity.compare_total a b
     | Portability -> Portability.compare_total a b
@@ -1427,7 +1423,7 @@ module Lattices = struct
     | Regionality -> Regionality.equal a b
     | Uniqueness_op -> Uniqueness_op.equal a b
     | Contention_op -> Contention_op.equal a b
-    | Ghostness_op -> Ghostness_op.equal a b
+    | Logicality_op -> Logicality_op.equal a b
     | Visibility_op -> Visibility_op.equal a b
     | Linearity -> Linearity.equal a b
     | Portability -> Portability.equal a b
@@ -1447,7 +1443,7 @@ module Lattices = struct
     | Regionality -> Regionality.join a b
     | Uniqueness_op -> Uniqueness_op.join a b
     | Contention_op -> Contention_op.join a b
-    | Ghostness_op -> Ghostness_op.join a b
+    | Logicality_op -> Logicality_op.join a b
     | Visibility_op -> Visibility_op.join a b
     | Linearity -> Linearity.join a b
     | Portability -> Portability.join a b
@@ -1467,7 +1463,7 @@ module Lattices = struct
     | Regionality -> Regionality.meet a b
     | Uniqueness_op -> Uniqueness_op.meet a b
     | Contention_op -> Contention_op.meet a b
-    | Ghostness_op -> Ghostness_op.meet a b
+    | Logicality_op -> Logicality_op.meet a b
     | Visibility_op -> Visibility_op.meet a b
     | Linearity -> Linearity.meet a b
     | Portability -> Portability.meet a b
@@ -1487,7 +1483,7 @@ module Lattices = struct
     | Regionality -> Regionality.imply a b
     | Uniqueness_op -> Uniqueness_op.imply a b
     | Contention_op -> Contention_op.imply a b
-    | Ghostness_op -> Ghostness_op.imply a b
+    | Logicality_op -> Logicality_op.imply a b
     | Visibility_op -> Visibility_op.imply a b
     | Linearity -> Linearity.imply a b
     | Portability -> Portability.imply a b
@@ -1506,7 +1502,7 @@ module Lattices = struct
     | Regionality -> Regionality.print
     | Uniqueness_op -> Uniqueness_op.print
     | Contention_op -> Contention_op.print
-    | Ghostness_op -> Ghostness_op.print
+    | Logicality_op -> Logicality_op.print
     | Visibility_op -> Visibility_op.print
     | Linearity -> Linearity.print
     | Portability -> Portability.print
@@ -1525,7 +1521,7 @@ module Lattices = struct
     | Regionality -> Regionality.min
     | Uniqueness_op -> Uniqueness_op.min
     | Contention_op -> Contention_op.min
-    | Ghostness_op -> Ghostness_op.min
+    | Logicality_op -> Logicality_op.min
     | Visibility_op -> Visibility_op.min
     | Linearity -> Linearity.min
     | Portability -> Portability.min
@@ -1571,9 +1567,9 @@ module Lattices = struct
     | Contention_op, Contention_op -> 0
     | Contention_op, _ -> -1
     | _, Contention_op -> 1
-    | Ghostness_op, Ghostness_op -> 0
-    | Ghostness_op, _ -> -1
-    | _, Ghostness_op -> 1
+    | Logicality_op, Logicality_op -> 0
+    | Logicality_op, _ -> -1
+    | _, Logicality_op -> 1
     | Visibility_op, Visibility_op -> 0
     | Visibility_op, _ -> -1
     | _, Visibility_op -> 1
@@ -1601,7 +1597,7 @@ module Lattices = struct
     | Yielding, Yielding -> Misc.Is_eq
     | Statefulness, Statefulness -> Misc.Is_eq
     | Contention_op, Contention_op -> Misc.Is_eq
-    | Ghostness_op, Ghostness_op -> Misc.Is_eq
+    | Logicality_op, Logicality_op -> Misc.Is_eq
     | Visibility_op, Visibility_op -> Misc.Is_eq
     | Staticity_op, Staticity_op -> Misc.Is_eq
     | Monadic_op, Monadic_op -> Misc.Is_eq
@@ -1609,7 +1605,7 @@ module Lattices = struct
     | Comonadic_with_locality, Comonadic_with_locality -> Misc.Is_eq
     | ( ( Locality | Regionality | Uniqueness_op | Linearity | Portability
         | Totality | Forkable | Yielding | Statefulness | Contention_op
-        | Ghostness_op | Visibility_op | Staticity_op | Monadic_op
+        | Logicality_op | Visibility_op | Staticity_op | Monadic_op
         | Comonadic_with_regionality | Comonadic_with_locality ),
         _ ) ->
       Misc.Is_not_eq
@@ -1630,7 +1626,7 @@ module Lattices_mono = struct
       | Uniqueness : (Monadic_op.t, Uniqueness_op.t) t
       | Visibility : (Monadic_op.t, Visibility_op.t) t
       | Contention : (Monadic_op.t, Contention_op.t) t
-      | Ghostness : (Monadic_op.t, Ghostness_op.t) t
+      | Logicality : (Monadic_op.t, Logicality_op.t) t
       | Staticity : (Monadic_op.t, Staticity_op.t) t
 
     let print : type p r. _ -> (p, r) t -> unit =
@@ -1641,7 +1637,7 @@ module Lattices_mono = struct
       | Totality -> Fmt.fprintf ppf "totality"
       | Uniqueness -> Fmt.fprintf ppf "uniqueness"
       | Contention -> Fmt.fprintf ppf "contention"
-      | Ghostness -> Fmt.fprintf ppf "ghostness"
+      | Logicality -> Fmt.fprintf ppf "logicality"
       | Forkable -> Fmt.fprintf ppf "forkable"
       | Yielding -> Fmt.fprintf ppf "yielding"
       | Statefulness -> Fmt.fprintf ppf "statefulness"
@@ -1657,14 +1653,14 @@ module Lattices_mono = struct
       | Totality, Totality -> Is_eq
       | Uniqueness, Uniqueness -> Is_eq
       | Contention, Contention -> Is_eq
-      | Ghostness, Ghostness -> Is_eq
+      | Logicality, Logicality -> Is_eq
       | Forkable, Forkable -> Is_eq
       | Yielding, Yielding -> Is_eq
       | Statefulness, Statefulness -> Is_eq
       | Visibility, Visibility -> Is_eq
       | Staticity, Staticity -> Is_eq
       | ( ( Areality | Linearity | Uniqueness | Portability | Totality
-          | Contention | Ghostness | Forkable | Yielding | Statefulness
+          | Contention | Logicality | Forkable | Yielding | Statefulness
           | Visibility | Staticity ),
           _ ) ->
         Is_not_eq
@@ -1680,7 +1676,7 @@ module Lattices_mono = struct
       | Uniqueness -> 7
       | Visibility -> 8
       | Contention -> 9
-      | Ghostness -> 10
+      | Logicality -> 10
       | Staticity -> 11
 
     let compare : type p r1 r2. (p, r1) t -> (p, r2) t -> int =
@@ -1698,7 +1694,7 @@ module Lattices_mono = struct
       | Statefulness -> t.statefulness
       | Uniqueness -> t.uniqueness
       | Contention -> t.contention
-      | Ghostness -> t.ghostness
+      | Logicality -> t.logicality
       | Visibility -> t.visibility
       | Staticity -> t.staticity
 
@@ -1714,7 +1710,7 @@ module Lattices_mono = struct
       | Statefulness -> { t with statefulness = r }
       | Uniqueness -> { t with uniqueness = r }
       | Contention -> { t with contention = r }
-      | Ghostness -> { t with ghostness = r }
+      | Logicality -> { t with logicality = r }
       | Visibility -> { t with visibility = r }
       | Staticity -> { t with staticity = r }
 
@@ -1741,11 +1737,11 @@ module Lattices_mono = struct
         [ From Uniqueness;
           From Visibility;
           From Contention;
-          From Ghostness;
+          From Logicality;
           From Staticity ]
       | Locality | Regionality | Uniqueness_op | Linearity | Portability
       | Totality | Forkable | Yielding | Statefulness | Contention_op
-      | Ghostness_op | Visibility_op | Staticity_op ->
+      | Logicality_op | Visibility_op | Staticity_op ->
         []
 
     type 'b to_ = To : 'a obj * ('a, 'b) t -> 'b to_
@@ -1776,7 +1772,7 @@ module Lattices_mono = struct
         [ To (Comonadic_with_locality, Statefulness);
           To (Comonadic_with_regionality, Statefulness) ]
       | Contention_op -> [To (Monadic_op, Contention)]
-      | Ghostness_op -> [To (Monadic_op, Ghostness)]
+      | Logicality_op -> [To (Monadic_op, Logicality)]
       | Visibility_op -> [To (Monadic_op, Visibility)]
       | Staticity_op -> [To (Monadic_op, Staticity)]
 
@@ -1799,7 +1795,7 @@ module Lattices_mono = struct
       | Uniqueness -> Monadic ax
       | Visibility -> Monadic ax
       | Contention -> Monadic ax
-      | Ghostness -> Monadic ax
+      | Logicality -> Monadic ax
       | Staticity -> Monadic ax
   end
 
@@ -1816,7 +1812,7 @@ module Lattices_mono = struct
       Obj Yielding;
       Obj Statefulness;
       Obj Contention_op;
-      Obj Ghostness_op;
+      Obj Logicality_op;
       Obj Visibility_op;
       Obj Staticity_op;
       Obj Monadic_op;
@@ -1837,7 +1833,7 @@ module Lattices_mono = struct
       | Yielding -> Yielding.all
       | Statefulness -> Statefulness.all
       | Contention_op -> Contention.all
-      | Ghostness_op -> Ghostness.all
+      | Logicality_op -> Logicality.all
       | Visibility_op -> Visibility.all
       | Staticity_op -> Staticity.all
       | Monadic_op -> if full then Monadic.all else Monadic.spanning_elements
@@ -1853,8 +1849,8 @@ module Lattices_mono = struct
     Lazy.force elements
 
   module Locality_morph = struct
-    (* Following is a chain of adjunctions (this can be extended one
-	       further, but we never need the missing operation). *)
+    (* Following is a chain of adjunctions (this can be extended one further, but we never
+       need the missing operation). *)
     (* New morphisms must be added to [left_to] and [right_to]. *)
     type ('a, 'b, 'd) t =
       | Local_to_regional : (Locality.t, Regionality.t, 'l * disallowed) t
@@ -2183,6 +2179,8 @@ module Lattices_mono = struct
           (Visibility_op.t, Statefulness.t, 'l * 'r) t
       | Statefulness_to_visibility_op :
           (Statefulness.t, Visibility_op.t, 'l * 'r) t
+      | Totality_to_logicality_op : (Totality.t, Logicality_op.t, 'l * 'r) t
+      | Logicality_op_to_totality : (Logicality_op.t, Totality.t, 'l * 'r) t
       | Monadic_op_to_comonadic_min :
           (Monadic_op.t, 'a comonadic_with, 'l * disallowed) t
           (** Dualize the monadic fragment to the comonadic fragment. The
@@ -2213,6 +2211,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Portability_to_contention_op
       | Visibility_op_to_statefulness -> Visibility_op_to_statefulness
       | Statefulness_to_visibility_op -> Statefulness_to_visibility_op
+      | Totality_to_logicality_op -> Totality_to_logicality_op
+      | Logicality_op_to_totality -> Logicality_op_to_totality
       | Monadic_op_to_comonadic_min -> Monadic_op_to_comonadic_min
       | Comonadic_to_monadic_op_min a -> Comonadic_to_monadic_op_min a
 
@@ -2227,6 +2227,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Portability_to_contention_op
       | Visibility_op_to_statefulness -> Visibility_op_to_statefulness
       | Statefulness_to_visibility_op -> Statefulness_to_visibility_op
+      | Totality_to_logicality_op -> Totality_to_logicality_op
+      | Logicality_op_to_totality -> Logicality_op_to_totality
       | Comonadic_to_monadic_op_max a -> Comonadic_to_monadic_op_max a
       | Monadic_op_to_comonadic_max -> Monadic_op_to_comonadic_max
 
@@ -2241,6 +2243,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Portability_to_contention_op
       | Visibility_op_to_statefulness -> Visibility_op_to_statefulness
       | Statefulness_to_visibility_op -> Statefulness_to_visibility_op
+      | Totality_to_logicality_op -> Totality_to_logicality_op
+      | Logicality_op_to_totality -> Logicality_op_to_totality
       | Monadic_op_to_comonadic_min -> Monadic_op_to_comonadic_min
       | Comonadic_to_monadic_op_min a -> Comonadic_to_monadic_op_min a
       | Monadic_op_to_comonadic_max -> Monadic_op_to_comonadic_max
@@ -2257,6 +2261,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Portability_to_contention_op
       | Visibility_op_to_statefulness -> Visibility_op_to_statefulness
       | Statefulness_to_visibility_op -> Statefulness_to_visibility_op
+      | Totality_to_logicality_op -> Totality_to_logicality_op
+      | Logicality_op_to_totality -> Logicality_op_to_totality
       | Monadic_op_to_comonadic_min -> Monadic_op_to_comonadic_min
       | Comonadic_to_monadic_op_min a -> Comonadic_to_monadic_op_min a
       | Monadic_op_to_comonadic_max -> Monadic_op_to_comonadic_max
@@ -2271,6 +2277,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Portability
       | Visibility_op_to_statefulness -> Visibility_op
       | Statefulness_to_visibility_op -> Statefulness
+      | Totality_to_logicality_op -> Totality
+      | Logicality_op_to_totality -> Logicality_op
       | Monadic_op_to_comonadic_min -> Monadic_op
       | Comonadic_to_monadic_op_min ar -> areality_comonadic_obj ar
       | Monadic_op_to_comonadic_max -> Monadic_op
@@ -2305,6 +2313,12 @@ module Lattices_mono = struct
       | Statefulness_to_visibility_op, Statefulness_to_visibility_op -> 0
       | Statefulness_to_visibility_op, _ -> .
       | _, Statefulness_to_visibility_op -> .
+      | Totality_to_logicality_op, Totality_to_logicality_op -> 0
+      | Totality_to_logicality_op, _ -> .
+      | _, Totality_to_logicality_op -> .
+      | Logicality_op_to_totality, Logicality_op_to_totality -> 0
+      | Logicality_op_to_totality, _ -> .
+      | _, Logicality_op_to_totality -> .
       | Monadic_op_to_comonadic_min, Monadic_op_to_comonadic_min -> 0
       | Monadic_op_to_comonadic_min, _ -> -1
       | _, Monadic_op_to_comonadic_min -> 1
@@ -2352,6 +2366,12 @@ module Lattices_mono = struct
         Misc.Is_eq
       | Statefulness_to_visibility_op, _ -> .
       | _, Statefulness_to_visibility_op -> .
+      | Totality_to_logicality_op, Totality_to_logicality_op -> Misc.Is_eq
+      | Totality_to_logicality_op, _ -> .
+      | _, Totality_to_logicality_op -> .
+      | Logicality_op_to_totality, Logicality_op_to_totality -> Misc.Is_eq
+      | Logicality_op_to_totality, _ -> .
+      | _, Logicality_op_to_totality -> .
       | Monadic_op_to_comonadic_min, Monadic_op_to_comonadic_min -> Misc.Is_eq
       | Monadic_op_to_comonadic_min, _ -> Misc.Is_not_eq
       | _, Monadic_op_to_comonadic_min -> Misc.Is_not_eq
@@ -2387,6 +2407,8 @@ module Lattices_mono = struct
         Fmt.fprintf ppf "visibility_op_to_statefulness"
       | Statefulness_to_visibility_op ->
         Fmt.fprintf ppf "statefulnes_to_visibility_op"
+      | Totality_to_logicality_op -> Fmt.fprintf ppf "totality_to_logicality_op"
+      | Logicality_op_to_totality -> Fmt.fprintf ppf "logicality_op_to_totality"
       | Monadic_op_to_comonadic_min ->
         Fmt.fprintf ppf "monadic_op_to_comonadic_min"
       | Comonadic_to_monadic_op_min _ ->
@@ -2428,6 +2450,14 @@ module Lattices_mono = struct
       | Statefulness.Reading -> Visibility.Read
       | Statefulness.Stateful -> Visibility.Read_write
 
+    let totality_to_logicality_op = function
+      | Totality.Total -> Logicality.Logical
+      | Totality.Partial -> Logicality.Physical
+
+    let logicality_op_to_totality = function
+      | Logicality.Logical -> Totality.Total
+      | Logicality.Physical -> Totality.Partial
+
     let monadic_op_to_comonadic_min : type a.
         a comonadic_with obj -> Monadic_op.t -> a comonadic_with =
      fun obj m ->
@@ -2438,7 +2468,7 @@ module Lattices_mono = struct
       in
       let linearity = uniqueness_op_to_linearity m.uniqueness in
       let portability = contention_op_to_portability m.contention in
-      let totality = Totality.min in
+      let totality = logicality_op_to_totality m.logicality in
       let forkable = Forkable.min in
       let yielding = Yielding.min in
       let statefulness = visibility_op_to_statefulness m.visibility in
@@ -2456,10 +2486,10 @@ module Lattices_mono = struct
      fun _ m ->
       let uniqueness = linearity_to_uniqueness_op m.linearity in
       let contention = portability_to_contention_op m.portability in
-      let ghostness = Ghostness_op.min in
+      let logicality = totality_to_logicality_op m.totality in
       let visibility = statefulness_to_visibility_op m.statefulness in
       let staticity = Staticity_op.min in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let monadic_op_to_comonadic_max : type a.
         a comonadic_with obj -> Monadic_op.t -> a comonadic_with =
@@ -2471,7 +2501,7 @@ module Lattices_mono = struct
       in
       let linearity = uniqueness_op_to_linearity m.uniqueness in
       let portability = contention_op_to_portability m.contention in
-      let totality = Totality.max in
+      let totality = logicality_op_to_totality m.logicality in
       let forkable = Forkable.max in
       let yielding = Yielding.max in
       let statefulness = visibility_op_to_statefulness m.visibility in
@@ -2489,10 +2519,10 @@ module Lattices_mono = struct
      fun _ m ->
       let uniqueness = linearity_to_uniqueness_op m.linearity in
       let contention = portability_to_contention_op m.portability in
-      let ghostness = Ghostness_op.max in
+      let logicality = totality_to_logicality_op m.totality in
       let visibility = statefulness_to_visibility_op m.statefulness in
       let staticity = Staticity_op.max in
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
 
     let apply : type a b d. b obj -> (a, b, d) t -> a -> b =
      fun dst f a ->
@@ -2507,6 +2537,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> portability_to_contention_op a
       | Visibility_op_to_statefulness -> visibility_op_to_statefulness a
       | Statefulness_to_visibility_op -> statefulness_to_visibility_op a
+      | Totality_to_logicality_op -> totality_to_logicality_op a
+      | Logicality_op_to_totality -> logicality_op_to_totality a
       | Monadic_op_to_comonadic_min -> monadic_op_to_comonadic_min dst a
       | Comonadic_to_monadic_op_min ar -> comonadic_to_monadic_op_min ar a
       | Monadic_op_to_comonadic_max -> monadic_op_to_comonadic_max dst a
@@ -2524,6 +2556,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Contention_op_to_portability
       | Visibility_op_to_statefulness -> Statefulness_to_visibility_op
       | Statefulness_to_visibility_op -> Visibility_op_to_statefulness
+      | Totality_to_logicality_op -> Logicality_op_to_totality
+      | Logicality_op_to_totality -> Totality_to_logicality_op
       | Monadic_op_to_comonadic_min ->
         Comonadic_to_monadic_op_max (comonadic_obj_areality dst)
       | Comonadic_to_monadic_op_min _ -> Monadic_op_to_comonadic_max
@@ -2540,6 +2574,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op -> Contention_op_to_portability
       | Visibility_op_to_statefulness -> Statefulness_to_visibility_op
       | Statefulness_to_visibility_op -> Visibility_op_to_statefulness
+      | Totality_to_logicality_op -> Logicality_op_to_totality
+      | Logicality_op_to_totality -> Totality_to_logicality_op
       | Monadic_op_to_comonadic_max ->
         Comonadic_to_monadic_op_min (comonadic_obj_areality dst)
       | Comonadic_to_monadic_op_max _ -> Monadic_op_to_comonadic_min
@@ -2552,22 +2588,22 @@ module Lattices_mono = struct
 
     let maybe_allowed_right : type a b d.
         (a, b, d) t -> (a, b, d) maybe_allowed_right = function
-      | Locality_restricted lm ->
-        begin match Locality_morph.maybe_allowed_right lm with
+      | Locality_restricted lm -> (
+        match Locality_morph.maybe_allowed_right lm with
         | Allowed_right lm -> Allowed_right (Locality_restricted lm)
-        | Not_allowed_right -> Not_allowed_right
-        end
-      | Locality_full lm ->
-        begin match Locality_morph.maybe_allowed_right lm with
+        | Not_allowed_right -> Not_allowed_right)
+      | Locality_full lm -> (
+        match Locality_morph.maybe_allowed_right lm with
         | Allowed_right lm -> Allowed_right (Locality_full lm)
-        | Not_allowed_right -> Not_allowed_right
-        end
+        | Not_allowed_right -> Not_allowed_right)
       | Uniqueness_op_to_linearity as m -> Allowed_right m
       | Linearity_to_uniqueness_op as m -> Allowed_right m
       | Contention_op_to_portability as m -> Allowed_right m
       | Portability_to_contention_op as m -> Allowed_right m
       | Visibility_op_to_statefulness as m -> Allowed_right m
       | Statefulness_to_visibility_op as m -> Allowed_right m
+      | Totality_to_logicality_op as m -> Allowed_right m
+      | Logicality_op_to_totality as m -> Allowed_right m
       | Monadic_op_to_comonadic_min -> Not_allowed_right
       | Comonadic_to_monadic_op_min _ -> Not_allowed_right
       | Monadic_op_to_comonadic_max as m -> Allowed_right m
@@ -2582,22 +2618,22 @@ module Lattices_mono = struct
 
     let maybe_allowed_left : type a b d.
         (a, b, d) t -> (a, b, d) maybe_allowed_left = function
-      | Locality_restricted lm ->
-        begin match Locality_morph.maybe_allowed_left lm with
+      | Locality_restricted lm -> (
+        match Locality_morph.maybe_allowed_left lm with
         | Allowed_left lm -> Allowed_left (Locality_restricted lm)
-        | Not_allowed_left -> Not_allowed_left
-        end
-      | Locality_full lm ->
-        begin match Locality_morph.maybe_allowed_left lm with
+        | Not_allowed_left -> Not_allowed_left)
+      | Locality_full lm -> (
+        match Locality_morph.maybe_allowed_left lm with
         | Allowed_left lm -> Allowed_left (Locality_full lm)
-        | Not_allowed_left -> Not_allowed_left
-        end
+        | Not_allowed_left -> Not_allowed_left)
       | Uniqueness_op_to_linearity as m -> Allowed_left m
       | Linearity_to_uniqueness_op as m -> Allowed_left m
       | Contention_op_to_portability as m -> Allowed_left m
       | Portability_to_contention_op as m -> Allowed_left m
       | Visibility_op_to_statefulness as m -> Allowed_left m
       | Statefulness_to_visibility_op as m -> Allowed_left m
+      | Totality_to_logicality_op as m -> Allowed_left m
+      | Logicality_op_to_totality as m -> Allowed_left m
       | Monadic_op_to_comonadic_min as m -> Allowed_left m
       | Comonadic_to_monadic_op_min a ->
         Allowed_left (Comonadic_to_monadic_op_min a)
@@ -2625,6 +2661,7 @@ module Lattices_mono = struct
       | Uniqueness_op_to_linearity | Linearity_to_uniqueness_op
       | Contention_op_to_portability | Portability_to_contention_op
       | Visibility_op_to_statefulness | Statefulness_to_visibility_op
+      | Totality_to_logicality_op | Logicality_op_to_totality
       | Monadic_op_to_comonadic_min | Comonadic_to_monadic_op_min _
       | Monadic_op_to_comonadic_max | Comonadic_to_monadic_op_max _ ->
         (* The following proof depends on the fact that [Core_morph.t] preserves binary
@@ -2634,18 +2671,14 @@ module Lattices_mono = struct
            implementable, and we will need to change the implementation of
            [Simple_morph.compose], as well as add the missing cases in [Simple_morph.t].
 
-           If all morphisms preserve binary meets, the correctness argument
-           goes as follows:
+           If all morphisms preserve binary meets, the correctness argument goes as
+           follows:
 
-           Consider [apply dst m (meet_const c x)].
-           [apply dst m (meet_const c x)]
-           == meet (apply dst m c) (apply dst m x) ;; [m] preserves binary
-           meets
-           == meet_const (apply dst m c) (apply dst m x) ;; by definition of
-           meet_const
+           Consider [apply dst m (meet_const c x)]. [apply dst m (meet_const c x)] == meet
+           (apply dst m c) (apply dst m x) ;; [m] preserves binary meets == meet_const
+           (apply dst m c) (apply dst m x) ;; by definition of meet_const
 
-           The correct result for [commute_meet_const_from_right] is thus
-           [apply dst m c]. *)
+           The correct result for [commute_meet_const_from_right] is thus [apply dst m c]. *)
         apply dst m c
 
     (* Commutes an implication through a morphism from the left, such that:
@@ -2660,17 +2693,17 @@ module Lattices_mono = struct
 
          Consider [imply_const c (apply dst m x)]. Recall that [imply_const] is only
          allowed on the right-hand side of a constraint; say
-         [y < imply_const c (apply dst m x)]
-         <=> [meet_const c y < apply dst m x] ;; the left adjoint of imply is meet.
-         <=> [apply src m' (meet_const c y) < x] ;; where [m'] is the left adoint of [m]
+         [y < imply_const c (apply dst m x)] <=> [meet_const c y < apply dst m x] ;; the
+         left adjoint of imply is meet. <=> [apply src m' (meet_const c y) < x] ;; where
+         [m'] is the left adoint of [m]
 
          We can now apply the correctness criteria of [commute_meet_const_from_right] and
-         commute the meet through [m']:
-         <=> [meet_const (commute_meet_const_from_right src m' c) (apply src m' y) < x]
-         <=> [apply src m' y < imply_const (commute_meet_const_from_right src m' c) x]
-          ;; the right adjoint of meet is imply
-         <=> [y < apply dst m (imply_const (commute_meet_const_from_right src m' c) x)]
-          ;; the right adjoint of [m'] is [m]
+         commute the meet through [m']: <=>
+         [meet_const (commute_meet_const_from_right src m' c) (apply src m' y) < x] <=>
+         [apply src m' y < imply_const (commute_meet_const_from_right src m' c) x] ;; the
+         right adjoint of meet is imply <=>
+         [y < apply dst m (imply_const (commute_meet_const_from_right src m' c) x)] ;; the
+         right adjoint of [m'] is [m]
 
          We have [apply dst m (imply_const (commute_meet_const_from_right src m' c) x)]
          equivalent to [imply_const c (apply dst m x)] as desired.
@@ -2715,7 +2748,8 @@ module Lattices_mono = struct
         Proj_core (Visibility_op_to_statefulness, Visibility, Monadic_op)
       | Monadic_op_to_comonadic_min, Portability ->
         Proj_core (Contention_op_to_portability, Contention, Monadic_op)
-      | Monadic_op_to_comonadic_min, Totality -> Proj_const_min Monadic_op
+      | Monadic_op_to_comonadic_min, Totality ->
+        Proj_core (Logicality_op_to_totality, Logicality, Monadic_op)
       | Comonadic_to_monadic_op_min areality, Uniqueness ->
         Proj_core
           ( Linearity_to_uniqueness_op,
@@ -2731,8 +2765,9 @@ module Lattices_mono = struct
           ( Portability_to_contention_op,
             Portability,
             areality_comonadic_obj areality )
-      | Comonadic_to_monadic_op_min areality, Ghostness ->
-        Proj_const_min (areality_comonadic_obj areality)
+      | Comonadic_to_monadic_op_min areality, Logicality ->
+        Proj_core
+          (Totality_to_logicality_op, Totality, areality_comonadic_obj areality)
       | Comonadic_to_monadic_op_min areality, Staticity ->
         Proj_const_min (areality_comonadic_obj areality)
       | Monadic_op_to_comonadic_max, Areality -> Proj_const_max Monadic_op
@@ -2744,7 +2779,8 @@ module Lattices_mono = struct
         Proj_core (Visibility_op_to_statefulness, Visibility, Monadic_op)
       | Monadic_op_to_comonadic_max, Portability ->
         Proj_core (Contention_op_to_portability, Contention, Monadic_op)
-      | Monadic_op_to_comonadic_max, Totality -> Proj_const_max Monadic_op
+      | Monadic_op_to_comonadic_max, Totality ->
+        Proj_core (Logicality_op_to_totality, Logicality, Monadic_op)
       | Comonadic_to_monadic_op_max areality, Uniqueness ->
         Proj_core
           ( Linearity_to_uniqueness_op,
@@ -2760,8 +2796,9 @@ module Lattices_mono = struct
           ( Portability_to_contention_op,
             Portability,
             areality_comonadic_obj areality )
-      | Comonadic_to_monadic_op_max areality, Ghostness ->
-        Proj_const_max (areality_comonadic_obj areality)
+      | Comonadic_to_monadic_op_max areality, Logicality ->
+        Proj_core
+          (Totality_to_logicality_op, Totality, areality_comonadic_obj areality)
       | Comonadic_to_monadic_op_max areality, Staticity ->
         Proj_const_max (areality_comonadic_obj areality)
       | Locality_full lm, (_ as ax0) -> compose_projection_locality_full ax0 lm
@@ -2836,7 +2873,8 @@ module Lattices_mono = struct
       match (m0 : (b, c, disallowed * r) t), (ax1 : (b, q) Axis.t) with
       | Comonadic_to_monadic_op_max _, Portability ->
         And_max_core (Contention, Portability_to_contention_op)
-      | Comonadic_to_monadic_op_max _, Totality -> Const_max_core
+      | Comonadic_to_monadic_op_max _, Totality ->
+        And_max_core (Logicality, Totality_to_logicality_op)
       | Comonadic_to_monadic_op_max _, Statefulness ->
         And_max_core (Visibility, Statefulness_to_visibility_op)
       | Comonadic_to_monadic_op_max _, Linearity ->
@@ -2847,7 +2885,8 @@ module Lattices_mono = struct
       | Monadic_op_to_comonadic_max, Staticity -> Const_max_core
       | Monadic_op_to_comonadic_max, Contention ->
         And_max_core (Portability, Contention_op_to_portability)
-      | Monadic_op_to_comonadic_max, Ghostness -> Const_max_core
+      | Monadic_op_to_comonadic_max, Logicality ->
+        And_max_core (Totality, Logicality_op_to_totality)
       | Monadic_op_to_comonadic_max, Visibility ->
         And_max_core (Statefulness, Visibility_op_to_statefulness)
       | Monadic_op_to_comonadic_max, Uniqueness ->
@@ -2890,7 +2929,8 @@ module Lattices_mono = struct
       match (m0 : (b, c, l * disallowed) t), (ax1 : (b, q) Axis.t) with
       | Comonadic_to_monadic_op_min _, Portability ->
         And_min_core (Contention, Portability_to_contention_op)
-      | Comonadic_to_monadic_op_min _, Totality -> Const_min_core
+      | Comonadic_to_monadic_op_min _, Totality ->
+        And_min_core (Logicality, Totality_to_logicality_op)
       | Comonadic_to_monadic_op_min _, Statefulness ->
         And_min_core (Visibility, Statefulness_to_visibility_op)
       | Comonadic_to_monadic_op_min _, Linearity ->
@@ -2901,7 +2941,8 @@ module Lattices_mono = struct
       | Monadic_op_to_comonadic_min, Staticity -> Const_min_core
       | Monadic_op_to_comonadic_min, Contention ->
         And_min_core (Portability, Contention_op_to_portability)
-      | Monadic_op_to_comonadic_min, Ghostness -> Const_min_core
+      | Monadic_op_to_comonadic_min, Logicality ->
+        And_min_core (Totality, Logicality_op_to_totality)
       | Monadic_op_to_comonadic_min, Visibility ->
         And_min_core (Statefulness, Visibility_op_to_statefulness)
       | Monadic_op_to_comonadic_min, Uniqueness ->
@@ -2966,6 +3007,10 @@ module Lattices_mono = struct
         Morph Monadic_op_to_comonadic_max
       | Statefulness_to_visibility_op, Statefulness, Visibility, _, _ ->
         Morph (Comonadic_to_monadic_op_max (comonadic_obj_areality src))
+      | Totality_to_logicality_op, Totality, Logicality, _, _ ->
+        Morph (Comonadic_to_monadic_op_max (comonadic_obj_areality src))
+      | Logicality_op_to_totality, Logicality, Totality, _, _ ->
+        Morph Monadic_op_to_comonadic_max
       | Locality_restricted lm, Areality, Areality, _, _ ->
         Morph (Locality_full (Locality_morph.disallow_left lm))
       | _, _, _, _, _ -> .
@@ -2996,6 +3041,10 @@ module Lattices_mono = struct
         Morph Monadic_op_to_comonadic_min
       | Statefulness_to_visibility_op, Statefulness, Visibility, _, _ ->
         Morph (Comonadic_to_monadic_op_min (comonadic_obj_areality src))
+      | Totality_to_logicality_op, Totality, Logicality, _, _ ->
+        Morph (Comonadic_to_monadic_op_min (comonadic_obj_areality src))
+      | Logicality_op_to_totality, Logicality, Totality, _, _ ->
+        Morph Monadic_op_to_comonadic_min
       | Locality_restricted lm, Areality, Areality, _, _ ->
         Morph (Locality_full (Locality_morph.disallow_right lm))
       | _, _, _, _, _ -> .
@@ -3015,12 +3064,12 @@ module Lattices_mono = struct
       | Uniqueness_op -> [To Linearity_to_uniqueness_op]
       | Linearity -> [To Uniqueness_op_to_linearity]
       | Portability -> [To Contention_op_to_portability]
-      | Totality -> []
+      | Totality -> [To Logicality_op_to_totality]
       | Forkable -> []
       | Yielding -> []
       | Statefulness -> [To Visibility_op_to_statefulness]
       | Contention_op -> [To Portability_to_contention_op]
-      | Ghostness_op -> []
+      | Logicality_op -> [To Totality_to_logicality_op]
       | Visibility_op -> [To Statefulness_to_visibility_op]
       | Staticity_op -> []
       | Monadic_op ->
@@ -3045,12 +3094,12 @@ module Lattices_mono = struct
       | Uniqueness_op -> [To Linearity_to_uniqueness_op]
       | Linearity -> [To Uniqueness_op_to_linearity]
       | Portability -> [To Contention_op_to_portability]
-      | Totality -> []
+      | Totality -> [To Logicality_op_to_totality]
       | Forkable -> []
       | Yielding -> []
       | Statefulness -> [To Visibility_op_to_statefulness]
       | Contention_op -> [To Portability_to_contention_op]
-      | Ghostness_op -> []
+      | Logicality_op -> [To Totality_to_logicality_op]
       | Visibility_op -> [To Statefulness_to_visibility_op]
       | Staticity_op -> []
       | Monadic_op ->
@@ -3085,7 +3134,7 @@ module Lattices_mono = struct
     | Statefulness, Comonadic_with_regionality -> Statefulness
     | Uniqueness, Monadic_op -> Uniqueness_op
     | Contention, Monadic_op -> Contention_op
-    | Ghostness, Monadic_op -> Ghostness_op
+    | Logicality, Monadic_op -> Logicality_op
     | Visibility, Monadic_op -> Visibility_op
     | Staticity, Monadic_op -> Staticity_op
 
@@ -3309,19 +3358,17 @@ module Lattices_mono = struct
     let maybe_allowed_right : type a b l r.
         (a, b, l * r) t -> (a, b, l * r) maybe_allowed_right = function
       | Id -> Allowed_right Id
-      | Core m ->
-        begin match Core_morph.maybe_allowed_right m with
+      | Core m -> (
+        match Core_morph.maybe_allowed_right m with
         | Allowed_right m -> Allowed_right (Core m)
-        | Not_allowed_right -> Not_allowed_right
-        end
+        | Not_allowed_right -> Not_allowed_right)
       | Meet_const _ -> Not_allowed_right
       | Imply_const c -> Allowed_right (Imply_const c)
       | Meet_const_core _ -> Not_allowed_right
-      | Core_imply_const (m, c) ->
-        begin match Core_morph.maybe_allowed_right m with
+      | Core_imply_const (m, c) -> (
+        match Core_morph.maybe_allowed_right m with
         | Allowed_right m -> Allowed_right (Core_imply_const (m, c))
-        | Not_allowed_right -> Not_allowed_right
-        end
+        | Not_allowed_right -> Not_allowed_right)
       | Compose _ -> Not_allowed_right
 
     type ('a, 'b, 'd) maybe_allowed_left =
@@ -3333,18 +3380,16 @@ module Lattices_mono = struct
     let maybe_allowed_left : type a b l r.
         (a, b, l * r) t -> (a, b, l * r) maybe_allowed_left = function
       | Id -> Allowed_left Id
-      | Core m ->
-        begin match Core_morph.maybe_allowed_left m with
+      | Core m -> (
+        match Core_morph.maybe_allowed_left m with
         | Allowed_left m -> Allowed_left (Core m)
-        | Not_allowed_left -> Not_allowed_left
-        end
+        | Not_allowed_left -> Not_allowed_left)
       | Meet_const c -> Allowed_left (Meet_const c)
       | Imply_const _ -> Not_allowed_left
-      | Meet_const_core (c, m) ->
-        begin match Core_morph.maybe_allowed_left m with
+      | Meet_const_core (c, m) -> (
+        match Core_morph.maybe_allowed_left m with
         | Allowed_left m -> Allowed_left (Meet_const_core (c, m))
-        | Not_allowed_left -> Not_allowed_left
-        end
+        | Not_allowed_left -> Not_allowed_left)
       | Core_imply_const _ -> Not_allowed_left
       | Compose _ -> Not_allowed_left
 
@@ -3394,21 +3439,19 @@ module Lattices_mono = struct
      fun dst c m ->
       match m with
       | Id -> Imply_const c
-      | Core m ->
-        begin match Core_morph.maybe_allowed_right m with
+      | Core m -> (
+        match Core_morph.maybe_allowed_right m with
         | Not_allowed_right -> Compose (Imply_const c, Core m)
         | Allowed_right m' ->
           let c = Core_morph.commute_imply_from_left dst c m' in
-          Core_imply_const (m, c)
-        end
+          Core_imply_const (m, c))
       | Imply_const c' -> Imply_const (meet dst c c')
-      | Core_imply_const (m, c') ->
-        begin match Core_morph.maybe_allowed_right m with
+      | Core_imply_const (m, c') -> (
+        match Core_morph.maybe_allowed_right m with
         | Not_allowed_right -> Compose (Imply_const c, Core_imply_const (m, c'))
         | Allowed_right m' ->
           let c = Core_morph.commute_imply_from_left dst c m' in
-          Core_imply_const (m, meet (Core_morph.src m) c c')
-        end
+          Core_imply_const (m, meet (Core_morph.src m) c c'))
       | Meet_const _ as m -> Compose (Imply_const c, m)
       | Meet_const_core _ as m -> Compose (Imply_const c, m)
       | Compose _ as m -> Compose (Imply_const c, m)
@@ -3418,24 +3461,24 @@ module Lattices_mono = struct
         =
      fun dst m1 m2 ->
       match m1, m2 with
-      | Locality_restricted lm1, Locality_restricted lm2 ->
-        begin match Locality_morph.compose lm1 lm2 with
+      | Locality_restricted lm1, Locality_restricted lm2 -> (
+        match Locality_morph.compose lm1 lm2 with
         | Id -> Id
         | Morph lm -> Core (Locality_restricted lm)
-        | Disallowed -> Compose (Core m1, Core m2)
-        end
-      | Locality_full lm1, Locality_full lm2 ->
-        begin match Locality_morph.compose lm1 lm2 with
+        | Disallowed -> Compose (Core m1, Core m2))
+      | Locality_full lm1, Locality_full lm2 -> (
+        match Locality_morph.compose lm1 lm2 with
         | Id -> Id
         | Morph lm -> Core (Locality_full lm)
-        | Disallowed -> Compose (Core m1, Core m2)
-        end
+        | Disallowed -> Compose (Core m1, Core m2))
       | Uniqueness_op_to_linearity, Linearity_to_uniqueness_op -> Id
       | Linearity_to_uniqueness_op, Uniqueness_op_to_linearity -> Id
       | Contention_op_to_portability, Portability_to_contention_op -> Id
       | Portability_to_contention_op, Contention_op_to_portability -> Id
       | Visibility_op_to_statefulness, Statefulness_to_visibility_op -> Id
       | Statefulness_to_visibility_op, Visibility_op_to_statefulness -> Id
+      | Totality_to_logicality_op, Logicality_op_to_totality -> Id
+      | Logicality_op_to_totality, Totality_to_logicality_op -> Id
       | Comonadic_to_monadic_op_min areality, Monadic_op_to_comonadic_min ->
         let c =
           match areality with
@@ -3447,8 +3490,7 @@ module Lattices_mono = struct
               Comonadic_with_regionality.max
         in
         Meet_const c
-      | Monadic_op_to_comonadic_min, Comonadic_to_monadic_op_min areality ->
-        begin
+      | Monadic_op_to_comonadic_min, Comonadic_to_monadic_op_min areality -> (
         let c =
           Core_morph.apply dst Monadic_op_to_comonadic_min Monadic_op.max
         in
@@ -3458,10 +3500,8 @@ module Lattices_mono = struct
           Meet_const_core (c, Locality_full Regional_to_local)
         | Locality, Comonadic_with_regionality ->
           Meet_const_core (c, Locality_full Locality_as_regionality)
-        | Regionality, Comonadic_with_regionality -> Meet_const c
-        end
-      | Monadic_op_to_comonadic_max, Comonadic_to_monadic_op_max areality ->
-        begin
+        | Regionality, Comonadic_with_regionality -> Meet_const c)
+      | Monadic_op_to_comonadic_max, Comonadic_to_monadic_op_max areality -> (
         let src = areality_comonadic_obj areality in
         let c =
           Core_morph.apply src Monadic_op_to_comonadic_min Monadic_op.max
@@ -3472,8 +3512,7 @@ module Lattices_mono = struct
           Core_imply_const (Locality_full Regional_to_local, c)
         | Locality, Comonadic_with_regionality ->
           Core_imply_const (Locality_full Locality_as_regionality, c)
-        | Regionality, Comonadic_with_regionality -> Imply_const c
-        end
+        | Regionality, Comonadic_with_regionality -> Imply_const c)
       | Comonadic_to_monadic_op_max areality, Monadic_op_to_comonadic_max ->
         let c =
           match areality with
@@ -3499,21 +3538,20 @@ module Lattices_mono = struct
       | Comonadic_to_monadic_op_max _, Locality_full m2 ->
         let src = Locality_morph.src_full m2 in
         Core (Comonadic_to_monadic_op_max (comonadic_obj_areality src))
-      | Locality_full lm1, Monadic_op_to_comonadic_min ->
-        begin match Locality_morph.maybe_allowed_left lm1 with
+      | Locality_full lm1, Monadic_op_to_comonadic_min -> (
+        match Locality_morph.maybe_allowed_left lm1 with
         | Allowed_left _ ->
           (* Has a right adjoint so it preserves min *)
           Core Monadic_op_to_comonadic_min
         | Not_allowed_left -> Compose (Core m1, Core Monadic_op_to_comonadic_min)
-        end
-      | Locality_full lm1, Monadic_op_to_comonadic_max ->
-        begin match Locality_morph.maybe_allowed_right lm1 with
+        )
+      | Locality_full lm1, Monadic_op_to_comonadic_max -> (
+        match Locality_morph.maybe_allowed_right lm1 with
         | Allowed_right _ ->
           (* Has a left adjoint so it preserves max *)
           Core Monadic_op_to_comonadic_max
         | Not_allowed_right ->
-          Compose (Core m1, Core Monadic_op_to_comonadic_max)
-        end
+          Compose (Core m1, Core Monadic_op_to_comonadic_max))
       | Locality_restricted _, _ -> .
       | _, Locality_restricted _ -> .
       | Locality_full _, _ -> .
@@ -3525,22 +3563,20 @@ module Lattices_mono = struct
       match m1 with
       | Id -> Core m2
       | Core m1 -> compose_core dst m1 m2
-      | Imply_const c1 ->
-        begin match Core_morph.maybe_allowed_right m2 with
+      | Imply_const c1 -> (
+        match Core_morph.maybe_allowed_right m2 with
         | Not_allowed_right -> Compose (Imply_const c1, Core m2)
         | Allowed_right m2' ->
           let c1 = Core_morph.commute_imply_from_left dst c1 m2' in
-          Core_imply_const (m2, c1)
-        end
-      | Core_imply_const (m1, c1) ->
-        begin match Core_morph.maybe_allowed_right m2 with
+          Core_imply_const (m2, c1))
+      | Core_imply_const (m1, c1) -> (
+        match Core_morph.maybe_allowed_right m2 with
         | Not_allowed_right -> Compose (Core_imply_const (m1, c1), Core m2)
         | Allowed_right m2' ->
           let mid = Core_morph.src m1 in
           let c1 = Core_morph.commute_imply_from_left mid c1 m2' in
           let m = compose_core dst m1 m2 in
-          compose_imply_const_right dst m c1
-        end
+          compose_imply_const_right dst m c1)
       | Meet_const c1 -> Meet_const_core (c1, m2)
       | Meet_const_core (c1, m1) ->
         compose_meet_const_left dst c1 (compose_core dst m1 m2)
@@ -4086,20 +4122,19 @@ module Lattices_mono = struct
     let a_obj = src b_obj (Max_with_simple (ax1, m1)) in
     match sm0 with
     | Id -> Max_with_simple (ax1, m1)
-    | Core m0 ->
-      begin match Core_morph.compose_core_max_with m0 ax1 with
+    | Core m0 -> (
+      match Core_morph.compose_core_max_with m0 ax1 with
       | And_max_core (ax1, m0) ->
         let obj0 = proj_obj ax1 dst in
         Max_with_simple (ax1, Simple_morph.compose obj0 (Core m0) m1)
       | Const_max_core -> Const_max a_obj
       | And_max_id ax1 -> Max_with_simple (ax1, m1)
-      | Disallowed -> Compose (Simple sm0, Max_with_simple (ax1, m1))
-      end
+      | Disallowed -> Compose (Simple sm0, Max_with_simple (ax1, m1)))
     | Imply_const c0 ->
       let c0 = Axis.proj ax1 c0 in
       let obj0 = proj_obj ax1 dst in
       Max_with_simple (ax1, Simple_morph.compose obj0 (Imply_const c0) m1)
-    | Core_imply_const (m0, c0) -> begin
+    | Core_imply_const (m0, c0) -> (
       let c0 = Axis.proj ax1 c0 in
       match Core_morph.compose_core_max_with m0 ax1 with
       | And_max_core (ax1, m0) ->
@@ -4110,8 +4145,7 @@ module Lattices_mono = struct
       | And_max_id ax1 ->
         let obj0 = proj_obj ax1 dst in
         Max_with_simple (ax1, Simple_morph.compose obj0 (Imply_const c0) m1)
-      | Disallowed -> Compose (Simple sm0, Max_with_simple (ax1, m1))
-      end
+      | Disallowed -> Compose (Simple sm0, Max_with_simple (ax1, m1)))
     | Meet_const_core _ -> Compose (Simple sm0, Max_with_simple (ax1, m1))
     | Meet_const _ -> Compose (Simple sm0, Max_with_simple (ax1, m1))
     | Compose _ -> Compose (Simple sm0, Max_with_simple (ax1, m1))
@@ -4127,21 +4161,20 @@ module Lattices_mono = struct
     let a_obj = src b_obj (Min_with_simple (ax1, m1)) in
     match sm0 with
     | Id -> Min_with_simple (ax1, m1)
-    | Core m0 ->
-      begin match Core_morph.compose_core_min_with m0 ax1 with
+    | Core m0 -> (
+      match Core_morph.compose_core_min_with m0 ax1 with
       | And_min_core (ax1, m0) ->
         let obj0 = proj_obj ax1 dst in
         Min_with_simple (ax1, Simple_morph.compose obj0 (Core m0) m1)
       | Const_min_core -> Const_min a_obj
       | And_min_id ax1 -> Min_with_simple (ax1, m1)
-      | Disallowed -> Compose (Simple sm0, Min_with_simple (ax1, m1))
-      end
+      | Disallowed -> Compose (Simple sm0, Min_with_simple (ax1, m1)))
     | Meet_const c0 ->
       let c0 = Axis.proj ax1 c0 in
       let obj0 = proj_obj ax1 dst in
       Min_with_simple (ax1, Simple_morph.compose obj0 (Meet_const c0) m1)
-    | Meet_const_core (c0, m0) ->
-      begin match Core_morph.compose_core_min_with m0 ax1 with
+    | Meet_const_core (c0, m0) -> (
+      match Core_morph.compose_core_min_with m0 ax1 with
       | And_min_core (ax1, m0) ->
         let obj0 = proj_obj ax1 dst in
         let c0 = Axis.proj ax1 c0 in
@@ -4152,8 +4185,7 @@ module Lattices_mono = struct
         let obj0 = proj_obj ax1 dst in
         let c0 = Axis.proj ax1 c0 in
         Min_with_simple (ax1, Simple_morph.compose obj0 (Meet_const c0) m1)
-      | Disallowed -> Compose (Simple sm0, Min_with_simple (ax1, m1))
-      end
+      | Disallowed -> Compose (Simple sm0, Min_with_simple (ax1, m1)))
     | Imply_const _ -> Compose (Simple sm0, Min_with_simple (ax1, m1))
     | Core_imply_const _ -> Compose (Simple sm0, Min_with_simple (ax1, m1))
     | Compose _ -> Compose (Simple sm0, Min_with_simple (ax1, m1))
@@ -4197,44 +4229,40 @@ module Lattices_mono = struct
       Min_with_simple (ax0, Simple_morph.compose dst m0 m1)
     | Simple m0, Min_with_simple (ax1, m1) ->
       compose_simple_min_with_simple dst m0 ax1 m1
-    | Simple_proj (m0, ax0, obj1), Max_with_simple (ax1, m1) ->
-      begin match Axis.equal ax0 ax1 with
+    | Simple_proj (m0, ax0, obj1), Max_with_simple (ax1, m1) -> (
+      match Axis.equal ax0 ax1 with
       | Misc.Is_eq -> Simple (Simple_morph.compose dst m0 m1)
       | Misc.Is_not_eq ->
         let b_obj = src dst (Simple_proj (m0, ax0, obj1)) in
         let a_obj = src b_obj (Max_with_simple (ax1, m1)) in
-        const_max_or_apply dst m0 a_obj
-      end
-    | Simple_proj (m0, ax0, obj1), Min_with_simple (ax1, m1) ->
-      begin match Axis.equal ax0 ax1 with
+        const_max_or_apply dst m0 a_obj)
+    | Simple_proj (m0, ax0, obj1), Min_with_simple (ax1, m1) -> (
+      match Axis.equal ax0 ax1 with
       | Misc.Is_eq -> Simple (Simple_morph.compose dst m0 m1)
       | Misc.Is_not_eq ->
         let b_obj = src dst (Simple_proj (m0, ax0, obj1)) in
         let a_obj = src b_obj (Min_with_simple (ax1, m1)) in
-        const_min_or_apply dst m0 a_obj
-      end
+        const_min_or_apply dst m0 a_obj)
     | (Max_with_simple (ax0, m0) as m0'), (Simple_proj (m1, ax1, obj1) as m1')
-      ->
+      -> (
       let q_obj = proj_obj ax0 dst in
       let b_obj = src dst (Max_with_simple (ax0, m0)) in
       let a_obj = src b_obj (Simple_proj (m1, ax1, obj1)) in
       let m0m1 = Simple_morph.compose q_obj m0 m1 in
-      begin match Simple_morph.maybe_allowed_right m0m1 with
+      match Simple_morph.maybe_allowed_right m0m1 with
       | Allowed_right m0m1 ->
         allow_right (Simple (Simple_morph.lift_max a_obj dst m0m1 ax1 ax0))
-      | Not_allowed_right -> Compose (m0', m1')
-      end
+      | Not_allowed_right -> Compose (m0', m1'))
     | (Min_with_simple (ax0, m0) as m0'), (Simple_proj (m1, ax1, obj1) as m1')
-      ->
+      -> (
       let q_obj = proj_obj ax0 dst in
       let b_obj = src dst (Min_with_simple (ax0, m0)) in
       let a_obj = src b_obj (Simple_proj (m1, ax1, obj1)) in
       let m0m1 = Simple_morph.compose q_obj m0 m1 in
-      begin match Simple_morph.maybe_allowed_left m0m1 with
+      match Simple_morph.maybe_allowed_left m0m1 with
       | Allowed_left m0m1 ->
         allow_left (Simple (Simple_morph.lift_min a_obj dst m0m1 ax1 ax0))
-      | Not_allowed_left -> Compose (m0', m1')
-      end
+      | Not_allowed_left -> Compose (m0', m1'))
     | Simple m0, Const_max a_obj -> const_max_or_apply dst m0 a_obj
     | Simple m0, Const_min a_obj -> const_min_or_apply dst m0 a_obj
     | Simple_proj (m0, _ax0, _obj0), Const_max obj1 ->
@@ -4245,22 +4273,22 @@ module Lattices_mono = struct
       let q_obj = proj_obj ax0 dst in
       let b_obj = Simple_morph.src q_obj m0 in
       Const (obj1, min_with dst ax0 (Simple_morph.apply q_obj m0 (max b_obj)))
-    | Min_with_simple (ax0, m0), Const_min obj1 ->
-      begin match Simple_morph.maybe_allowed_left m0 with
+    | Min_with_simple (ax0, m0), Const_min obj1 -> (
+      match Simple_morph.maybe_allowed_left m0 with
       | Allowed_left _ -> Const_min obj1
       | Not_allowed_left ->
         let q_obj = proj_obj ax0 dst in
         let b_obj = Simple_morph.src q_obj m0 in
         Const (obj1, min_with dst ax0 (Simple_morph.apply q_obj m0 (min b_obj)))
-      end
-    | Max_with_simple (ax0, m0), Const_max obj1 ->
-      begin match Simple_morph.maybe_allowed_right m0 with
+      )
+    | Max_with_simple (ax0, m0), Const_max obj1 -> (
+      match Simple_morph.maybe_allowed_right m0 with
       | Allowed_right _ -> Const_max obj1
       | Not_allowed_right ->
         let q_obj = proj_obj ax0 dst in
         let b_obj = Simple_morph.src q_obj m0 in
         Const (obj1, max_with dst ax0 (Simple_morph.apply q_obj m0 (max b_obj)))
-      end
+      )
     | Max_with_simple (ax0, m0), Const_min obj1 ->
       let q_obj = proj_obj ax0 dst in
       let b_obj = Simple_morph.src q_obj m0 in
@@ -4375,7 +4403,7 @@ module Lattices_mono = struct
 
   let morphs_to_contention_op = morphs_to_obj Contention_op
 
-  let morphs_to_ghostness_op = morphs_to_obj Ghostness_op
+  let morphs_to_logicality_op = morphs_to_obj Logicality_op
 
   let morphs_to_visibility_op = morphs_to_obj Visibility_op
 
@@ -4400,7 +4428,7 @@ module Lattices_mono = struct
     | Yielding -> force_by_coverage ~full morphs_to_yielding
     | Statefulness -> force_by_coverage ~full morphs_to_statefulness
     | Contention_op -> force_by_coverage ~full morphs_to_contention_op
-    | Ghostness_op -> force_by_coverage ~full morphs_to_ghostness_op
+    | Logicality_op -> force_by_coverage ~full morphs_to_logicality_op
     | Visibility_op -> force_by_coverage ~full morphs_to_visibility_op
     | Staticity_op -> force_by_coverage ~full morphs_to_staticity_op
     | Monadic_op -> force_by_coverage ~full morphs_to_monadic_op
@@ -4426,10 +4454,10 @@ module Lattices_mono = struct
        the information are already in [apply]. A general and simpler apporach would work
        like this: Say we have [b = f a] on RHS, and we want to figure out which axis of
        [a] is responsible for a specific axis [ax] of [b] being low. We will iterate
-       through all axes; for each axis, set that to [max] and get [a'], and calculate [b'
-       = f a']. If [b'] is not strictly higher than [b] on [ax], then the current axis of
-       [a] is not responsible for the [ax] of [b] being low. The iteration might end with
-       no axis of [a] being responsible, in which case the morphism is solely
+       through all axes; for each axis, set that to [max] and get [a'], and calculate
+       [b' = f a']. If [b'] is not strictly higher than [b] on [ax], then the current axis
+       of [a] is not responsible for the [ax] of [b] being low. The iteration might end
+       with no axis of [a] being responsible, in which case the morphism is solely
        respoonsible. *)
 
     let find_responsible_axis_proj_core : type a b b_ax l r.
@@ -4443,6 +4471,8 @@ module Lattices_mono = struct
       | Portability_to_contention_op, _ -> .
       | Visibility_op_to_statefulness, _ -> .
       | Statefulness_to_visibility_op, _ -> .
+      | Totality_to_logicality_op, _ -> .
+      | Logicality_op_to_totality, _ -> .
       | Locality_full _, (Areality as ax) -> Axis ax
       | Locality_full _, (Forkable as ax) -> Axis ax
       | Locality_full _, (Yielding as ax) -> Axis ax
@@ -4457,11 +4487,11 @@ module Lattices_mono = struct
       | Monadic_op_to_comonadic_min, Linearity -> Axis Uniqueness
       | Monadic_op_to_comonadic_min, Statefulness -> Axis Visibility
       | Monadic_op_to_comonadic_min, Portability -> Axis Contention
-      | Monadic_op_to_comonadic_min, Totality -> None_responsible
+      | Monadic_op_to_comonadic_min, Totality -> Axis Logicality
       | Comonadic_to_monadic_op_min _, Uniqueness -> Axis Linearity
       | Comonadic_to_monadic_op_min _, Visibility -> Axis Statefulness
       | Comonadic_to_monadic_op_min _, Contention -> Axis Portability
-      | Comonadic_to_monadic_op_min _, Ghostness -> None_responsible
+      | Comonadic_to_monadic_op_min _, Logicality -> Axis Totality
       | Comonadic_to_monadic_op_min _, Staticity -> None_responsible
       | Monadic_op_to_comonadic_max, Areality -> None_responsible
       | Monadic_op_to_comonadic_max, Forkable -> None_responsible
@@ -4469,11 +4499,11 @@ module Lattices_mono = struct
       | Monadic_op_to_comonadic_max, Linearity -> Axis Uniqueness
       | Monadic_op_to_comonadic_max, Statefulness -> Axis Visibility
       | Monadic_op_to_comonadic_max, Portability -> Axis Contention
-      | Monadic_op_to_comonadic_max, Totality -> None_responsible
+      | Monadic_op_to_comonadic_max, Totality -> Axis Logicality
       | Comonadic_to_monadic_op_max _, Uniqueness -> Axis Linearity
       | Comonadic_to_monadic_op_max _, Visibility -> Axis Statefulness
       | Comonadic_to_monadic_op_max _, Contention -> Axis Portability
-      | Comonadic_to_monadic_op_max _, Ghostness -> None_responsible
+      | Comonadic_to_monadic_op_max _, Logicality -> Axis Totality
       | Comonadic_to_monadic_op_max _, Staticity -> None_responsible
 
     let rec find_responsible_axis_proj_simple : type a b b_ax l r.
@@ -4487,12 +4517,11 @@ module Lattices_mono = struct
       | Meet_const_core (_, (m : (_, _, l * r) Core_morph.t))
       | Core_imply_const ((m : (_, _, l * r) Core_morph.t), _) ->
         find_responsible_axis_proj_core m ax
-      | Compose (mb, ma) ->
-        begin match find_responsible_axis_proj_simple mb ax with
+      | Compose (mb, ma) -> (
+        match find_responsible_axis_proj_simple mb ax with
         | None_responsible -> None_responsible
         | All_responsible -> All_responsible
-        | Axis ax -> find_responsible_axis_proj_simple ma ax
-        end
+        | Axis ax -> find_responsible_axis_proj_simple ma ax)
 
     (** Given a morphism and an axis, return the portion of the input that's
         responsible for the specified axis of the output. *)
@@ -4502,23 +4531,20 @@ module Lattices_mono = struct
       match m with
       | Simple m -> find_responsible_axis_proj_simple m ax
       | Simple_proj (_, ax, _) -> Axis ax
-      | Max_with_simple (m_ax, _) ->
-        begin match Axis.equal m_ax ax with
+      | Max_with_simple (m_ax, _) -> (
+        match Axis.equal m_ax ax with
         | Misc.Is_not_eq -> None_responsible
-        | Misc.Is_eq -> All_responsible
-        end
-      | Min_with_simple (m_ax, _) ->
-        begin match Axis.equal m_ax ax with
+        | Misc.Is_eq -> All_responsible)
+      | Min_with_simple (m_ax, _) -> (
+        match Axis.equal m_ax ax with
         | Misc.Is_not_eq -> None_responsible
-        | Misc.Is_eq -> All_responsible
-        end
+        | Misc.Is_eq -> All_responsible)
       | Const_max _ | Const_min _ | Const _ -> None_responsible
-      | Compose (mb, ma) ->
-        begin match find_responsible_axis_proj mb ax with
+      | Compose (mb, ma) -> (
+        match find_responsible_axis_proj mb ax with
         | None_responsible -> None_responsible
         | All_responsible -> All_responsible
-        | Axis ax -> find_responsible_axis_proj ma ax
-        end
+        | Axis ax -> find_responsible_axis_proj ma ax)
 
     (** Given a morphism return the portion of the input that's responsible for
         all of the output. *)
@@ -4616,12 +4642,11 @@ module For_testing = struct
     fun () ->
       let rec check_morphs = function
         | [] -> Ok ()
-        | To g :: morphs ->
+        | To g :: morphs -> (
           let src = src mid g in
-          begin match check_compose ~full src mid dst f g with
+          match check_compose ~full src mid dst f g with
           | Ok () -> check_morphs morphs
-          | Error _ as error -> error
-          end
+          | Error _ as error -> error)
       in
       check_morphs morphs_to_mid
 end
@@ -4634,7 +4659,7 @@ let erase_hints () = S.erase_hints ()
 type monadic = C.monadic =
   { uniqueness : C.Uniqueness.t;
     contention : C.Contention.t;
-    ghostness : C.Ghostness.t;
+    logicality : C.Logicality.t;
     visibility : C.Visibility.t;
     staticity : C.Staticity.t
   }
@@ -4711,26 +4736,23 @@ module Report = struct
         other:a ->
         [`First | `Second] =
      fun b a_obj x y ~other ->
-      (* CR-someday zqian: in the case where each of [x] and [y] can be
-         responsible independently, for not satisfying [~other], we currently
-         arbitrarily prioritize `Second. In the future we might want to
-         prioritize for better error messages. For example, prioritize the first
-         element in a [join]. This requires inspecting the [solver.ml] to ensure
-         the ordering in the [join] list is preserved. *)
+      (* CR-someday zqian: in the case where each of [x] and [y] can be responsible
+         independently, for not satisfying [~other], we currently arbitrarily prioritize
+         `Second. In the future we might want to prioritize for better error messages. For
+         example, prioritize the first element in a [join]. This requires inspecting the
+         [solver.ml] to ensure the ordering in the [join] list is preserved. *)
       match b with
       | Meet ->
         if C.le a_obj other x
-        then begin
+        then (
           if C.le a_obj other y then print_bug_stderr ();
-          `Second
-        end
+          `Second)
         else `First
       | Join ->
         if C.le a_obj x other
-        then begin
+        then (
           if C.le a_obj y other then print_bug_stderr ();
-          `Second
-        end
+          `Second)
         else `First
 
     type 'd side =
@@ -4750,7 +4772,7 @@ module Report = struct
       | Right -> C.left_adjoint obj morph
 
     (** Given a solver hint on a product lattice, and an axis in that product
-        that we are interested in, returns a human-readible hint.*)
+        that we are interested in, returns a human-readible hint. *)
     let rec hint_apply : type a b l r.
         a C.obj ->
         (l * r) side ->
@@ -5045,13 +5067,13 @@ module Report = struct
   let modality_if_relevant ~fixpoint pp =
     if
       fixpoint
-      (* if the modality doesn't change the bound, we omit the modality and
-          print the remaining chain. *)
+      (* if the modality doesn't change the bound, we omit the modality and print the
+          remaining chain. *)
     then (fun _ppf Modality -> ()), pp
     else
-      (* if the modality change the bound, we signal that. Moreover, since each
-         axis is total ordering, the modality is solely responsible for the
-         bound, and we omit the remaining chain. *)
+      (* if the modality change the bound, we signal that. Moreover, since each axis is
+         total ordering, the modality is solely responsible for the bound, and we omit the
+         remaining chain. *)
       (* CR-someday zqian: print the modality on the offending axis. *)
       ( (fun ppf Modality -> Fmt.fprintf ppf " (with some modality)"),
         (Location.none, Unknown : pinpoint) )
@@ -5116,9 +5138,9 @@ module Report = struct
       fixpoint:bool -> is_contained_by -> (Fmt.formatter -> unit) * pinpoint =
    fun ~fixpoint { containing; container } ->
     let maybe_modality, pp = modality_if_relevant ~fixpoint container in
-    (* CR-someday zqian: Use the full [container] to improve the printing below.
-       E.g., insted of printing "the tuple at XXX", we can print "the tuple
-       pattern at XXX" or "the tuple expression at XXX". *)
+    (* CR-someday zqian: Use the full [container] to improve the printing below. E.g.,
+       insted of printing "the tuple at XXX", we can print "the tuple pattern at XXX" or
+       "the tuple expression at XXX". *)
     let pr = print_containing maybe_modality { containing; container } in
     pr, pp
 
@@ -5253,8 +5275,8 @@ module Report = struct
       Fmt.fprintf ppf "%a to the parent region" mode_printer C.Regionality.Local
       (* CR-someday zqian: treat the following cases generally. *)
     | `Expected, Contention_op, Shared ->
-      (* When "shared" is expected, we tell the user that either shared or
-         uncontended is expected. *)
+      (* When "shared" is expected, we tell the user that either shared or uncontended is
+         expected. *)
       Fmt.fprintf ppf "%a or %a" mode_printer C.Contention.Shared mode_printer
         C.Contention.Uncontended
     | `Expected, Contention_op, Corrupted ->
@@ -5380,8 +5402,8 @@ module Report = struct
       ( ~is_skip:(implements_alloc_to_value Locality_as_regionality obj src b a),
         ~fixpoint )
     | Allocation _ ->
-      (* We always want to skip an Allocation hint. Report if the hint was not
-         applied to an alloc_as_value morphism. *)
+      (* We always want to skip an Allocation hint. Report if the hint was not applied to
+         an alloc_as_value morphism. *)
       if not (implements_alloc_to_value Locality_as_regionality src obj a b)
       then print_bug_stderr ();
       ~is_skip:true, ~fixpoint
@@ -5440,11 +5462,10 @@ module Report = struct
       print_error_result option =
    fun side pp obj ppf loosening ahint ->
     (match loosening with
-    | Loosened ->
-      begin match adjust_side obj side with
+    | Loosened -> (
+      match adjust_side obj side with
       | `Actual -> Fmt.fprintf ppf "weaker than "
-      | `Expected -> Fmt.fprintf ppf "stronger than "
-      end
+      | `Expected -> Fmt.fprintf ppf "stronger than ")
     | Not_loosened -> ());
     print_ahint side pp obj ppf ahint
 
@@ -6045,13 +6066,13 @@ module Contention = struct
     | Visibility.Const.Immutable -> zap_to_ceil
 end
 
-module Ghostness = struct
-  module Const = C.Ghostness
+module Logicality = struct
+  module Const = C.Logicality
 
   module Obj = struct
     type const = Const.t
 
-    let obj = C.Ghostness_op
+    let obj = C.Logicality_op
   end
 
   include Monadic_gen (Obj)
@@ -6085,8 +6106,8 @@ module Forkable = struct
 
   let legacy = of_const Const.legacy
 
-  (* [forkable] is the default for [global]s and [unforkable] for [local]
-     or [regional] values, so we vary [zap_to_legacy] accordingly. *)
+  (* [forkable] is the default for [global]s and [unforkable] for [local] or [regional]
+     values, so we vary [zap_to_legacy] accordingly. *)
   let zap_to_legacy ~global =
     match global with true -> zap_to_floor | false -> zap_to_ceil
 end
@@ -6108,8 +6129,8 @@ module Yielding = struct
 
   let legacy = of_const Const.legacy
 
-  (* [unyielding] is the default for [global]s and [yielding] for [local]
-     or [regional] values, so we vary [zap_to_legacy] accordingly. *)
+  (* [unyielding] is the default for [global]s and [yielding] for [local] or [regional]
+     values, so we vary [zap_to_legacy] accordingly. *)
   let zap_to_legacy ~global =
     match global with true -> zap_to_floor | false -> zap_to_ceil
 end
@@ -6329,7 +6350,7 @@ module Monadic = struct
     let proj = Axis.proj
 
     let all =
-      [P Uniqueness; P Contention; P Ghostness; P Visibility; P Staticity]
+      [P Uniqueness; P Contention; P Logicality; P Visibility; P Staticity]
       |> List.sort (fun (P ax1) (P ax2) -> compare ax1 ax2)
   end
 
@@ -6414,9 +6435,9 @@ module Monadic = struct
     let contention =
       proj Contention m |> Contention.zap_to_legacy ~visibility
     in
-    let ghostness = proj Ghostness m |> Ghostness.zap_to_legacy in
+    let logicality = proj Logicality m |> Logicality.zap_to_legacy in
     let staticity = proj Staticity m |> Staticity.zap_to_legacy in
-    { uniqueness; contention; ghostness; visibility; staticity }
+    { uniqueness; contention; logicality; visibility; staticity }
 
   let legacy = of_const Const.legacy
 
@@ -6513,7 +6534,7 @@ module Value_with (Areality : Areality) = struct
       visibility : 'i;
       staticity : 'j;
       totality : 'k;
-      ghostness : 'l
+      logicality : 'l
     }
 
   let split
@@ -6526,12 +6547,12 @@ module Value_with (Areality : Areality) = struct
         statefulness;
         uniqueness;
         contention;
-        ghostness;
+        logicality;
         visibility;
         staticity
       } =
     let monadic : Monadic.Const.t =
-      { uniqueness; contention; ghostness; visibility; staticity }
+      { uniqueness; contention; logicality; visibility; staticity }
     in
     let comonadic : Comonadic.Const.t =
       { areality;
@@ -6557,7 +6578,7 @@ module Value_with (Areality : Areality) = struct
           : Comonadic.Const.t) =
       comonadic
     in
-    let ({ uniqueness; contention; ghostness; visibility; staticity }
+    let ({ uniqueness; contention; logicality; visibility; staticity }
           : Monadic.Const.t) =
       monadic
     in
@@ -6570,7 +6591,7 @@ module Value_with (Areality : Areality) = struct
       statefulness;
       uniqueness;
       contention;
-      ghostness;
+      logicality;
       visibility;
       staticity
     }
@@ -6619,7 +6640,7 @@ module Value_with (Areality : Areality) = struct
         Visibility.Const.t,
         Staticity.Const.t,
         Totality.Const.t,
-        Ghostness.Const.t )
+        Logicality.Const.t )
       modes
 
     let min =
@@ -6686,7 +6707,7 @@ module Value_with (Areality : Areality) = struct
           Visibility.Const.t option,
           Staticity.Const.t option,
           Totality.Const.t option,
-          Ghostness.Const.t option )
+          Logicality.Const.t option )
         modes
 
       let none =
@@ -6701,7 +6722,7 @@ module Value_with (Areality : Areality) = struct
           visibility = None;
           staticity = None;
           totality = None;
-          ghostness = None
+          logicality = None
         }
 
       let value opt ~default =
@@ -6717,7 +6738,9 @@ module Value_with (Areality : Areality) = struct
         let contention =
           Option.value opt.contention ~default:default.contention
         in
-        let ghostness = Option.value opt.ghostness ~default:default.ghostness in
+        let logicality =
+          Option.value opt.logicality ~default:default.logicality
+        in
         let yielding = Option.value opt.yielding ~default:default.yielding in
         let forkable = Option.value opt.forkable ~default:default.forkable in
         let statefulness =
@@ -6733,7 +6756,7 @@ module Value_with (Areality : Areality) = struct
           portability;
           totality;
           contention;
-          ghostness;
+          logicality;
           forkable;
           yielding;
           statefulness;
@@ -6747,7 +6770,7 @@ module Value_with (Areality : Areality) = struct
           match ax with
           | Uniqueness -> t.uniqueness
           | Contention -> t.contention
-          | Ghostness -> t.ghostness
+          | Logicality -> t.logicality
           | Visibility -> t.visibility
           | Staticity -> t.staticity)
         | Comonadic ax -> (
@@ -6766,7 +6789,7 @@ module Value_with (Areality : Areality) = struct
           match ax with
           | Uniqueness -> { t with uniqueness = a }
           | Contention -> { t with contention = a }
-          | Ghostness -> { t with ghostness = a }
+          | Logicality -> { t with logicality = a }
           | Visibility -> { t with visibility = a }
           | Staticity -> { t with staticity = a })
         | Comonadic ax -> (
@@ -6791,7 +6814,7 @@ module Value_with (Areality : Areality) = struct
             visibility;
             staticity;
             totality;
-            ghostness
+            logicality
           } =
         let option_print print ppf = function
           | None -> Fmt.fprintf ppf "None"
@@ -6820,8 +6843,8 @@ module Value_with (Areality : Areality) = struct
           staticity
           (option_print Totality.Const.print)
           totality
-          (option_print Ghostness.Const.print)
-          ghostness
+          (option_print Logicality.Const.print)
+          logicality
     end
 
     let diff m1 m2 =
@@ -6834,7 +6857,7 @@ module Value_with (Areality : Areality) = struct
       in
       let contention = diff Contention.Const.le m1.contention m2.contention in
       let totality = diff Totality.Const.le m1.totality m2.totality in
-      let ghostness = diff Ghostness.Const.le m1.ghostness m2.ghostness in
+      let logicality = diff Logicality.Const.le m1.logicality m2.logicality in
       let forkable = diff Forkable.Const.le m1.forkable m2.forkable in
       let yielding = diff Yielding.Const.le m1.yielding m2.yielding in
       let statefulness =
@@ -6848,7 +6871,7 @@ module Value_with (Areality : Areality) = struct
         portability;
         contention;
         totality;
-        ghostness;
+        logicality;
         forkable;
         yielding;
         statefulness;
@@ -6971,8 +6994,8 @@ module Value_with (Areality : Areality) = struct
 
   let submode_log ?pp { monadic = monadic1; comonadic = comonadic1 }
       { monadic = monadic2; comonadic = comonadic2 } ~log : (_, error) result =
-    (* comonadic before monadic, so that locality errors dominate
-       (error message backward compatibility) *)
+    (* comonadic before monadic, so that locality errors dominate (error message backward
+       compatibility) *)
     match Comonadic.submode_log ?pp comonadic1 comonadic2 ~log with
     | Error e -> Error (Comonadic e)
     | Ok () -> (
@@ -7097,21 +7120,21 @@ module Value_with (Areality : Areality) = struct
       need to give the lower bound mode of [B -> C]. *)
   let close_over { comonadic; monadic } =
     let comonadic = Comonadic.disallow_right comonadic in
-    (* The comonadic of the returned function is constrained by the monadic of the closed argument via the dualizing morphism. *)
+    (* The comonadic of the returned function is constrained by the monadic of the closed
+       argument via the dualizing morphism. *)
     let comonadic_dual = monadic_to_comonadic_min monadic in
     (* It's also constrained by the comonadic of the closed argument. *)
     let comonadic = Comonadic.join [comonadic; comonadic_dual] in
-    (* The closure will access [A] at the specified monadic modes, and thus the
-       monadic mode of the closure itself is not constrained by it. *)
+    (* The closure will access [A] at the specified monadic modes, and thus the monadic
+       mode of the closure itself is not constrained by it. *)
     let monadic = Monadic.disallow_right Monadic.min in
     { comonadic; monadic }
 
   (** Similar to above, but we are given the mode of [A -> B -> C], and need to
       give the lower bound mode of [B -> C]. *)
   let partial_apply { comonadic; _ } =
-    (* The closure will invoke the original function at the specified monadic
-       modes, and thus the monadic mode of the closure itself is not constrained by
-       it. *)
+    (* The closure will invoke the original function at the specified monadic modes, and
+       thus the monadic mode of the closure itself is not constrained by it. *)
     let monadic = Monadic.disallow_right Monadic.min in
     let comonadic = Comonadic.disallow_right comonadic in
     { comonadic; monadic }
@@ -7147,7 +7170,7 @@ module Const = struct
          totality;
          uniqueness;
          contention;
-         ghostness;
+         logicality;
          forkable;
          yielding;
          statefulness;
@@ -7162,7 +7185,7 @@ module Const = struct
       totality;
       uniqueness;
       contention;
-      ghostness;
+      logicality;
       forkable;
       yielding;
       statefulness;
@@ -7183,7 +7206,7 @@ module Const = struct
       | Comonadic Statefulness -> Right (Comonadic Statefulness)
       | Monadic Uniqueness -> Right (Monadic Uniqueness)
       | Monadic Contention -> Right (Monadic Contention)
-      | Monadic Ghostness -> Right (Monadic Ghostness)
+      | Monadic Logicality -> Right (Monadic Logicality)
       | Monadic Visibility -> Right (Monadic Visibility)
       | Monadic Staticity -> Right (Monadic Staticity)
 
@@ -7234,58 +7257,53 @@ let value_to_alloc_r2l { comonadic; monadic } =
 module Modality = struct
   (* Inferred modalities
 
-      Similar to constant modalities, an inferred modality maps the mode of a
-      record/structure to the mode of a value therein. An inferred modality [f]
-      is inferred from the structure/record mode [mm] and the value mode [m]. It
-      will only be applied on some [x >= mm]: That is, it will only be applied
-      on the original module.
+     Similar to constant modalities, an inferred modality maps the mode of a
+     record/structure to the mode of a value therein. An inferred modality [f] is inferred
+     from the structure/record mode [mm] and the value mode [m]. It will only be applied
+     on some [x >= mm]: That is, it will only be applied on the original module.
 
-      It should satisfy the following conditions:
+     It should satisfy the following conditions:
 
-      Zapping: [f] should be of the form [join_c] for monadic axes, or [meet_c]
-      for comonadic axes.
+     Zapping: [f] should be of the form [join_c] for monadic axes, or [meet_c] for
+     comonadic axes.
 
-      Soundness: You should not get a value from a record/structure at a mode
-      strictly stronger than how it was put in. That is, for any [x >= mm], [f x
-      >= m].
+     Soundness: You should not get a value from a record/structure at a mode strictly
+     stronger than how it was put in. That is, for any [x >= mm], [f x >= m].
 
-      Completeness: Ideally we also want [f mm <= m].
+     Completeness: Ideally we also want [f mm <= m].
 
-      Monadic axes
+     Monadic axes
 
-      Soundness condition says [join_c x >= m] for any [x >= mm]. Equivalently,
-      [join_c mm >= m]. By adjunction, [c >= subtract_mm m]. We take the lower
-      bound [c := subtract_mm m]. Note that this is equivalent to taking [c := m
-      >= subtract_mm m]. Proof:
+     Soundness condition says [join_c x >= m] for any [x >= mm]. Equivalently,
+     [join_c mm >= m]. By adjunction, [c >= subtract_mm m]. We take the lower bound
+     [c := subtract_mm m]. Note that this is equivalent to taking
+     [c := m >= subtract_mm m]. Proof:
 
-      - [join_m x >= join_(subtract_mm m) x] is trivial since [m >= subtract_mm
-        m].
-      - [join_m x <= join_(subtract_mm m) x], or equivalently [m <=
-      join_(subtract_mm m) x], or equivalently [subtract_x m <= subtract_mm m],
-      which is trivial since [x >= mm].
+     - [join_m x >= join_(subtract_mm m) x] is trivial since [m >= subtract_mm m].
+     - [join_m x <= join_(subtract_mm m) x], or equivalently
+       [m <= join_(subtract_mm m) x], or equivalently [subtract_x m <= subtract_mm m],
+       which is trivial since [x >= mm].
 
-      Taking [c := subtract_mm m] is better for zapping since it's lower and
-      thus closer to identity modality. Taking [c := m] is easier for [apply]
-      and [sub].
+     Taking [c := subtract_mm m] is better for zapping since it's lower and thus closer to
+     identity modality. Taking [c := m] is easier for [apply] and [sub].
 
-      Comonadic axes
+     Comonadic axes
 
-      Soundness condition says [meet_c x >= m] for any [x >= mm]. Equivalently,
-      [meet_c mm >= m]. By def. of [meet], we have both [c >= m] and [mm >= m].
-      The latter is guaranteed by the user of [infer]. We guarantee the former
-      by taking [c := imply_mm m >= m]. One might worry that this is too relaxed
-      and will be "less complete" than taking [c := m]; however, note that
-      [imply_mm m <= imply_mm m] and thus by adjunction [meet_(imply_mm m) mm <=
-      m], which means the chosen [c] is complete.
+     Soundness condition says [meet_c x >= m] for any [x >= mm]. Equivalently,
+     [meet_c mm >= m]. By def. of [meet], we have both [c >= m] and [mm >= m]. The latter
+     is guaranteed by the user of [infer]. We guarantee the former by taking
+     [c := imply_mm m >= m]. One might worry that this is too relaxed and will be "less
+     complete" than taking [c := m]; however, note that [imply_mm m <= imply_mm m] and
+     thus by adjunction [meet_(imply_mm m) mm <= m], which means the chosen [c] is
+     complete.
 
-      Taking [c := m] is easier for [apply] and [sub]. Taking [c := imply_mm m]
-      is better for zapping since it's higher and thus closer to identity
-      modality. However, note that we DON'T have [meet_m x = meet_(imply_mm m)
-      x], which means [apply/sub] and [zap] might behave in a confusing (albeit
-      sound) manner.
+     Taking [c := m] is easier for [apply] and [sub]. Taking [c := imply_mm m] is better
+     for zapping since it's higher and thus closer to identity modality. However, note
+     that we DON'T have [meet_m x = meet_(imply_mm m) x], which means [apply/sub] and
+     [zap] might behave in a confusing (albeit sound) manner.
 
-      CR zqian: once we support binary mode solver, [c := imply_mm m] will be
-      used uniformly by [apply] [sub] and [zap].
+     CR zqian: once we support binary mode solver, [c := imply_mm m] will be used
+     uniformly by [apply] [sub] and [zap].
   *)
 
   module Monadic = struct
@@ -7380,9 +7398,9 @@ module Modality = struct
       match left, right with
       | Const c1, Const c2 -> Const.sub c1 c2
       | Diff (mm, m), Const (Join_const c) -> (
-        (* Check that for any x >= mm, join(x, m) <= join(x, c), which (by
-           definition of join) is equivalent to m <= join(x, c). This has to
-           hold for all x >= mm, so we check m <= join(mm, c). *)
+        (* Check that for any x >= mm, join(x, m) <= join(x, c), which (by definition of
+           join) is equivalent to m <= join(x, c). This has to hold for all x >= mm, so we
+           check m <= join(mm, c). *)
         match
           Mode.submode_log m (Mode.join_const c (Mode.disallow_left mm)) ~log
         with
@@ -7395,10 +7413,9 @@ module Modality = struct
                  { left = Join_const left; right = Join_const (Axis.proj ax c) }
                )))
       | Diff (_, _m1), Diff (_, _m2) ->
-        (* [m1] is a left mode so it cannot appear on the right. So we can't do
-           a proper check. However, this branch is only hit by
-           [wrap_constraint_with_shape], in which case LHS and RHS should be
-           physically equal. *)
+        (* [m1] is a left mode so it cannot appear on the right. So we can't do a proper
+           check. However, this branch is only hit by [wrap_constraint_with_shape], in
+           which case LHS and RHS should be physically equal. *)
         assert (left == right);
         Ok ()
       | Const _, Diff _ ->
@@ -7424,29 +7441,29 @@ module Modality = struct
       | Undefined -> Fmt.fprintf ppf "undefined"
       | Diff _ -> Fmt.fprintf ppf "diff"
 
-    (* All zapping functions mutate [mm] and [m] to the degree that's sufficient
-       to fix [subtract_mm m], and return it. [subtract] is antitone for [mm]
-       and monotone for [m]. *)
+    (* All zapping functions mutate [mm] and [m] to the degree that's sufficient to fix
+       [subtract_mm m], and return it. [subtract] is antitone for [mm] and monotone for
+       [m]. *)
 
     let zap_to_floor = function
       | Const c -> c
       | Undefined -> Misc.fatal_error "modality Undefined should not be zapped."
       | Diff (mm, m) ->
-        (* Ideally we will take [c = subtract_mm m] and zap it to floor.
-           However, [subtract] requires [mm] to be constant. We get the ceil of
-           [mm] to construct the floor of [c]. *)
+        (* Ideally we will take [c = subtract_mm m] and zap it to floor. However,
+           [subtract] requires [mm] to be constant. We get the ceil of [mm] to construct
+           the floor of [c]. *)
         let cc = Mode.Guts.get_ceil mm in
         let c = Mode.subtract_const cc m in
         let c = Mode.zap_to_floor c in
-        (* Note that we did not mutate [mm] but simply took its ceil, which
-           might be mutated later. To satisfy the coherence condition (see the
-           comment in the mli), we want to:
+        (* Note that we did not mutate [mm] but simply took its ceil, which might be
+           mutated later. To satisfy the coherence condition (see the comment in the mli),
+           we want to:
 
            - make it impossible that [subtract_mm m < c], which is trivial since
-           [mm <= cc] and thus [subtract_mm m >= subtract_cc m = c].
+             [mm <= cc] and thus [subtract_mm m >= subtract_cc m = c].
            - make it impossible that [subtract_mm m > c], which is to ensure
-           [subtract_mm m <= c], equivalently [m <= join_mm c], which is
-           achieved by the following [submode].
+             [subtract_mm m <= c], equivalently [m <= join_mm c], which is achieved by the
+             following [submode].
         *)
         Mode.submode_exn m (Mode.join_const c (Mode.disallow_left mm));
         Const.Join_const c
@@ -7558,10 +7575,9 @@ module Modality = struct
       match left, right with
       | Const c1, Const c2 -> Const.sub c1 c2
       | Exactly (_mm, m), Const (Meet_const c) -> (
-        (* Check for all [x >= mm], [meet_(imply_mm m) x <= meet_c x], or
-           equivalently [meet_(imply_mm m) x <= c], or equivalently [meet_(imply_mm
-           m) max <= c], or equivalently [imply_mm m <= c]. We can't check this
-           without binary mode solver.
+        (* Check for all [x >= mm], [meet_(imply_mm m) x <= meet_c x], or equivalently
+           [meet_(imply_mm m) x <= c], or equivalently [meet_(imply_mm m) max <= c], or
+           equivalently [imply_mm m <= c]. We can't check this without binary mode solver.
 
            So instead we check [meet_m x <= meet_c x] (See "Inferred modalities"
            comments), which amounts to [m <= c]. *)
@@ -7575,9 +7591,9 @@ module Modality = struct
                  { left = Meet_const left; right = Meet_const (Axis.proj ax c) }
                )))
       | Exactly (_, _m1), Exactly (_, _m2) ->
-        (* [m1] is a left mode, so there is no good way to check.
-           However, this branch only hit by [wrap_constraint_with_shape],
-           in which case LHS and RHS should be physically equal. *)
+        (* [m1] is a left mode, so there is no good way to check. However, this branch
+           only hit by [wrap_constraint_with_shape], in which case LHS and RHS should be
+           physically equal. *)
         assert (left == right);
         Ok ()
       | Const _, Exactly _ ->
@@ -7597,10 +7613,9 @@ module Modality = struct
       | Undefined ->
         Misc.fatal_error "modality Undefined should not be applied."
       | Exactly (_mm, m) ->
-        (* Ideally want to return [meet_(imply_mm m) x], which we can't do
-           without binary mode solver, so instead we return [meet_m x] (See
-           "Inferred modalities" comments), which because of [x >= mm >= m] is
-           equal to [m]. *)
+        (* Ideally want to return [meet_(imply_mm m) x], which we can't do without binary
+           mode solver, so instead we return [meet_m x] (See "Inferred modalities"
+           comments), which because of [x >= mm >= m] is equal to [m]. *)
         Mode.disallow_right m
 
     let print ppf = function
@@ -7612,29 +7627,28 @@ module Modality = struct
 
     let max = Const Const.max
 
-    (* All zapping functions mutate [mm] and [m] to the degree that's sufficient
-       to fix [imply_mm m], and return it. [imply] is antitone for [mm] and
-       monotone for [m]. *)
+    (* All zapping functions mutate [mm] and [m] to the degree that's sufficient to fix
+       [imply_mm m], and return it. [imply] is antitone for [mm] and monotone for [m]. *)
 
     let zap_to_ceil = function
       | Const c -> c
       | Undefined -> Misc.fatal_error "modality Undefined should not be zapped."
       | Exactly (mm, m) ->
-        (* Ideally we will take [c = imply_mm m] and zap it to ceil. However,
-           [imply] requires [mm] to be constant. We get the floor of [mm] to
-           construct the ceil of [c]. *)
+        (* Ideally we will take [c = imply_mm m] and zap it to ceil. However, [imply]
+           requires [mm] to be constant. We get the floor of [mm] to construct the ceil of
+           [c]. *)
         let cc = Mode.Guts.get_floor mm in
         let c = Mode.imply_const cc m in
         let c = Mode.zap_to_ceil c in
-        (* Note that we did not mutate [mm] but simply took its floor, which
-           might be mutated later. To satisfy the coherence condition (see the
-           comment in the mli), we want to:
+        (* Note that we did not mutate [mm] but simply took its floor, which might be
+           mutated later. To satisfy the coherence condition (see the comment in the mli),
+           we want to:
 
-           - make it impossible that [imply_mm m > c], which is trivial since
-           [mm >= cc] and thus [imply_mm m <= imply_cc m = c].
+           - make it impossible that [imply_mm m > c], which is trivial since [mm >= cc]
+             and thus [imply_mm m <= imply_cc m = c].
            - make it impossible that [imply_mm m < c], which is to ensure
-           [imply_mm m >= c], equivalently [m >= meet_mm c], which is achieved
-           by the following [submode].
+             [imply_mm m >= c], equivalently [m >= meet_mm c], which is achieved by the
+             following [submode].
         *)
         Mode.submode_exn (Mode.meet_const c (Mode.disallow_right mm)) m;
         Const.Meet_const c
@@ -7645,9 +7659,8 @@ module Modality = struct
       | Const c -> c
       | Undefined -> Misc.fatal_error "modality Undefined should not be zapped."
       | Exactly (mm, m) ->
-        (* The following zaps [mm] to ceil, which might conflict with future
-           mode constraints on [mm]. We find constraining [mm] to [legacy] a
-           good workaround. *)
+        (* The following zaps [mm] to ceil, which might conflict with future mode
+           constraints on [mm]. We find constraining [mm] to [legacy] a good workaround. *)
         (* CR zqian: Find a better solution *)
         Mode.submode mm Mode.legacy |> ignore;
         let m = Mode.zap_to_floor m in
@@ -7856,33 +7869,31 @@ module Modality = struct
 end
 
 module Crossing = struct
-  (* The mode crossing capability of a type [t] is characterized by a monotone
-     function [f] from modes to some lattice [L], in the following way:
+  (* The mode crossing capability of a type [t] is characterized by a monotone function
+     [f] from modes to some lattice [L], in the following way:
 
-     To check [e : t @ m1 <= m2], we should instead check [f m1 <= f m2] to
-     allow more programs.
+     To check [e : t @ m1 <= m2], we should instead check [f m1 <= f m2] to allow more
+     programs.
 
-     For example, if [f] is the identity function, then [t] does not cross modes
-     at all. If [f] maps to the unit lattice (containing only one element), [f
-     m1 <= f m2] always succeeds, which means [t] crosses modes fully.
+     For example, if [f] is the identity function, then [t] does not cross modes at all.
+     If [f] maps to the unit lattice (containing only one element), [f m1 <= f m2] always
+     succeeds, which means [t] crosses modes fully.
 
-     In practice, during mode checking we usually have either [m1] or [m2], but
-     not both. In order to perform mode crossing one-sided, we require [f] to
-     have left adjoint [fl] and right adjoint [fr], which gives:
+     In practice, during mode checking we usually have either [m1] or [m2], but not both.
+     In order to perform mode crossing one-sided, we require [f] to have left adjoint [fl]
+     and right adjoint [fr], which gives:
 
-     [f m1 <= f m2] is equivalent to [fl (f m1) <= m2] is equivalent to [m1 <=
-     fr (f m2)]
+     [f m1 <= f m2] is equivalent to [fl (f m1) <= m2] is equivalent to [m1 <= fr (f m2)]
 
      Therefore, we can perform any of the following for mode crossing:
      - Apply [f] on both [m1] and [m2]
      - Apply [fl ∘ f] on [m1]
      - Apply [fr ∘ f] on [m2]
 
-     Mode crossing forms a lattice: [f1 <= f2] iff [f1] allows more mode
-     crossing than [f2]. Concretely:
+     Mode crossing forms a lattice: [f1 <= f2] iff [f1] allows more mode crossing than
+     [f2]. Concretely:
 
-     [f1 <= f2] iff, for any [m1, m2], if [f2 m1 <= f2 m2],
-     then [f1 m1 <= f1 m2].
+     [f1 <= f2] iff, for any [m1, m2], if [f2 m1 <= f2 m2], then [f1 m1 <= f1 m2].
   *)
 
   module Monadic = struct
@@ -7892,20 +7903,17 @@ module Crossing = struct
     module Atom = struct
       type 'a t = Modality of 'a Modality.Atom.t [@@unboxed]
 
-      (* By the ordering of crossings (see comments above) [join_c1 <= join_c2]
-         iff the following holds:
-         For all [a,b], if [join_c2 a <= join_c2 b](E1), then [join_c1 a <=
-         join_c1 b](E2)
+      (* By the ordering of crossings (see comments above) [join_c1 <= join_c2] iff the
+         following holds: For all [a,b], if [join_c2 a <= join_c2 b](E1), then
+         [join_c1 a <= join_c1 b](E2)
 
          Case analysis by the relation between [c1] and [c2]:
-         - If [c1 >= c2], then [c1] can be written as [join c2 k] for some [k].
-           Then apply [join k] to E1 and we get E2 (by monotonicity of join).
+         - If [c1 >= c2], then [c1] can be written as [join c2 k] for some [k]. Then apply
+           [join k] to E1 and we get E2 (by monotonicity of join).
          - If [c1 <= c2], take [a := c2] and [b := c1]. E1 holds but E2 doesn't.
-         - If neither, then we take [a := c2] and [b := meet a c1]. E1 is
-           satisfied:
-           [join_c2 a = c2 <= c2 = join_c2 (meet a c1) = join_c2 b]. But E2 is
-           not satisfied:
-           [join_c1 a = join c1 c2 </= c1 = join_c1 (meet c1 c2) = join_c1 b]
+         - If neither, then we take [a := c2] and [b := meet a c1]. E1 is satisfied:
+           [join_c2 a = c2 <= c2 = join_c2 (meet a c1) = join_c2 b]. But E2 is not
+           satisfied: [join_c1 a = join c1 c2 </= c1 = join_c1 (meet c1 c2) = join_c1 b]
 
          Therefore, [join_c1 <= join_c2] iff [c1 >= c2]. *)
 
@@ -7936,11 +7944,12 @@ module Crossing = struct
 
     let create ~uniqueness:(Atom.Modality (Join_const uniqueness))
         ~contention:(Atom.Modality (Join_const contention))
-        ~ghostness:(Atom.Modality (Join_const ghostness))
+        ~logicality:(Atom.Modality (Join_const logicality))
         ~visibility:(Atom.Modality (Join_const visibility))
         ~staticity:(Atom.Modality (Join_const staticity)) =
       Modality
-        (Join_const { uniqueness; contention; ghostness; visibility; staticity })
+        (Join_const
+           { uniqueness; contention; logicality; visibility; staticity })
 
     let modality m (Modality t) = Modality (Modality.Const.concat ~then_:t m)
 
@@ -7987,8 +7996,8 @@ module Crossing = struct
     module Atom = struct
       type 'a t = Modality of 'a Modality.Atom.t [@@unboxed]
 
-      (* The ordering of crossing here is derived similarly to the monadic
-         fragment. See comments there. *)
+      (* The ordering of crossing here is derived similarly to the monadic fragment. See
+         comments there. *)
 
       let min ax =
         Modality (Meet_const ((Mode.Const.Per_axis.min [@inlined hint]) ax))
@@ -8183,18 +8192,16 @@ module Crossing = struct
     Value.hint ~monadic:Crossing ~comonadic:Crossing
       (apply_right_unhint t (Value.disallow_left m))
 
-  (* Our mode crossing is for [Value] modes, but can be extended to [Alloc]
-     modes via [alloc_as_value], defined as follows:
+  (* Our mode crossing is for [Value] modes, but can be extended to [Alloc] modes via
+     [alloc_as_value], defined as follows:
 
      Given a mode crossing [f] for [Value], and we are to check [Alloc] submoding
-     [m1 <= m2], we will instead check
-     [f (alloc_as_value m1) <= f (alloc_as_value m2)].
+     [m1 <= m2], we will instead check [f (alloc_as_value m1) <= f (alloc_as_value m2)].
 
      By adjunction tricks, this is equivalent to
      - [ m1 <= regional_to_global ∘ fr ∘ f ∘ alloc_as_value m2 ]
-     - [ regional_to_local ∘ fl ∘ f ∘ alloc_as_value m1 <= m2 ]
-     where [regional_to_global] is the right adjoint of [alloc_as_value], and
-     [regional_to_local] the left adjoint. *)
+     - [ regional_to_local ∘ fl ∘ f ∘ alloc_as_value m1 <= m2 ] where [regional_to_global]
+       is the right adjoint of [alloc_as_value], and [regional_to_local] the left adjoint. *)
 
   let value_to_alloc_r2l_unhint m =
     let { comonadic; monadic } = m in
@@ -8235,7 +8242,7 @@ module Crossing = struct
       comonadic |> comonadic_locality_as_regionality
       |> Comonadic.apply_left t.comonadic
       |> comonadic_regional_to_local
-      (* the left adjoint of [locality_as_regionality]*)
+      (* the left adjoint of [locality_as_regionality] *)
     in
     Alloc.hint ~monadic:Crossing ~comonadic:Crossing { monadic; comonadic }
 
@@ -8273,7 +8280,7 @@ module Crossing = struct
       { monadic; comonadic = (Comonadic.set [@inlined hint]) ax a comonadic }
 
   let create ~regionality ~linearity ~uniqueness ~portability ~contention
-      ~totality ~ghostness ~forkable ~yielding ~statefulness ~visibility
+      ~totality ~logicality ~forkable ~yielding ~statefulness ~visibility
       ~staticity =
     let comonadic b ax =
       if b then Per_axis.min (Comonadic ax) else Per_axis.max (Comonadic ax)
@@ -8287,14 +8294,14 @@ module Crossing = struct
     let portability = comonadic portability Portability in
     let contention = monadic contention Contention in
     let totality = comonadic totality Totality in
-    let ghostness = monadic ghostness Ghostness in
+    let logicality = monadic logicality Logicality in
     let forkable = comonadic forkable Forkable in
     let yielding = comonadic yielding Yielding in
     let statefulness = comonadic statefulness Statefulness in
     let visibility = monadic visibility Visibility in
     let staticity = monadic staticity Staticity in
     let monadic =
-      Monadic.create ~uniqueness ~contention ~ghostness ~visibility ~staticity
+      Monadic.create ~uniqueness ~contention ~logicality ~visibility ~staticity
     in
     let comonadic =
       Comonadic.create ~regionality ~linearity ~portability ~totality ~yielding

@@ -950,7 +950,7 @@ module Jkind0 = struct
     let portability = Crossing.Axis.Comonadic Portability
     let contention = Crossing.Axis.Monadic Contention
     let totality = Crossing.Axis.Comonadic Totality
-    let ghostness = Crossing.Axis.Monadic Ghostness
+    let logicality = Crossing.Axis.Monadic Logicality
     let forkable = Crossing.Axis.Comonadic Forkable
     let yielding = Crossing.Axis.Comonadic Yielding
     let statefulness = Crossing.Axis.Comonadic Statefulness
@@ -984,7 +984,7 @@ module Jkind0 = struct
       let portability = modal portability in
       let contention = modal contention in
       let totality = modal totality in
-      let ghostness = modal ghostness in
+      let logicality = modal logicality in
       let forkable = modal forkable in
       let yielding = modal yielding in
       let statefulness = modal statefulness in
@@ -996,7 +996,7 @@ module Jkind0 = struct
         else t.externality
       in
       let monadic =
-        Crossing.Monadic.create ~uniqueness ~contention ~ghostness ~visibility
+        Crossing.Monadic.create ~uniqueness ~contention ~logicality ~visibility
           ~staticity
       in
       let comonadic =
@@ -1024,7 +1024,7 @@ module Jkind0 = struct
       let portability = modal portability in
       let contention = modal contention in
       let totality = modal totality in
-      let ghostness = modal ghostness in
+      let logicality = modal logicality in
       let forkable = modal forkable in
       let yielding = modal yielding in
       let statefulness = modal statefulness in
@@ -1036,7 +1036,7 @@ module Jkind0 = struct
         else t.externality
       in
       let monadic =
-        Crossing.Monadic.create ~uniqueness ~contention ~ghostness ~visibility
+        Crossing.Monadic.create ~uniqueness ~contention ~logicality ~visibility
           ~staticity
       in
       let comonadic =
@@ -1062,7 +1062,7 @@ module Jkind0 = struct
       modal portability &&
       modal contention &&
       modal totality &&
-      modal ghostness &&
+      modal logicality &&
       modal forkable &&
       modal yielding &&
       modal statefulness &&
@@ -1080,7 +1080,7 @@ module Jkind0 = struct
     let for_arrow =
       let crossing =
         Crossing.create ~linearity:false ~regionality:false ~uniqueness:true
-          ~portability:false ~totality:false ~contention:true ~ghostness:false
+          ~portability:false ~totality:false ~contention:true ~logicality:true
           ~forkable:false ~yielding:false ~statefulness:false ~visibility:true
           ~staticity:false
       in
@@ -1126,7 +1126,7 @@ module Jkind0 = struct
 
     let totality_const t = extract_comonadic totality t
 
-    let ghostness_const t = extract_monadic ghostness t
+    let logicality_const t = extract_monadic logicality t
 
     let forkable_const t = extract_comonadic forkable t
 
@@ -1142,7 +1142,7 @@ module Jkind0 = struct
       Axis_lattice.create ~areality:(areality_const t)
         ~linearity:(linearity_const t) ~uniqueness:(uniqueness_const t)
         ~portability:(portability_const t) ~contention:(contention_const t)
-        ~totality:(totality_const t) ~ghostness:(ghostness_const t)
+        ~totality:(totality_const t) ~logicality:(logicality_const t)
         ~forkable:(forkable_const t) ~yielding:(yielding_const t)
         ~statefulness:(statefulness_const t) ~visibility:(visibility_const t)
         ~staticity:(staticity_const t) ~externality:(externality t)
@@ -1389,14 +1389,11 @@ module Jkind0 = struct
           name : string
         }
 
-      (* Mode crossing that crosses everything except staticity and
-         ghostness. *)
+      (* Mode crossing that crosses everything except staticity. *)
       let cross_all_except_staticity =
         let staticity : _ Mode.Crossing.Axis.t = Monadic Staticity in
-        let ghostness : _ Mode.Crossing.Axis.t = Monadic Ghostness in
         Mode.Crossing.min
         |> Mode.Crossing.set staticity (Mode.Crossing.Per_axis.max staticity)
-        |> Mode.Crossing.set ghostness (Mode.Crossing.Per_axis.max ghostness)
 
       let mk_jkind ~crossing ~externality (layout : Layout.Const.t) =
         let mod_bounds = Mod_bounds.create crossing ~externality in
@@ -1492,7 +1489,7 @@ module Jkind0 = struct
         let crossing =
           Crossing.create ~regionality:false ~linearity:true ~portability:true
             ~totality:true ~forkable:true ~yielding:true ~uniqueness:false
-            ~contention:true ~ghostness:false ~statefulness:true
+            ~contention:true ~logicality:true ~statefulness:true
             ~visibility:true ~staticity:false
         in
         create crossing ~externality:Externality.max
@@ -1536,7 +1533,7 @@ module Jkind0 = struct
                    Crossing.create ~regionality:false ~linearity:false
                      ~portability:true ~totality:true ~forkable:false
                      ~yielding:false ~uniqueness:false ~contention:true
-                     ~ghostness:false ~statefulness:true ~visibility:true
+                     ~logicality:true ~statefulness:true ~visibility:true
                      ~staticity:false
                  in
                  create crossing ~externality:Externality.max);
@@ -1550,7 +1547,7 @@ module Jkind0 = struct
         let crossing =
           Crossing.create ~regionality:false ~linearity:true ~portability:true
             ~totality:true ~forkable:true ~yielding:true ~uniqueness:false
-            ~contention:true ~ghostness:false ~statefulness:true
+            ~contention:true ~logicality:false ~statefulness:true
             ~visibility:false ~staticity:false
         in
         create crossing ~externality:Externality.max
@@ -1586,7 +1583,7 @@ module Jkind0 = struct
         let crossing =
           Crossing.create ~regionality:false ~linearity:true ~portability:true
             ~totality:true ~forkable:true ~yielding:true ~contention:false
-            ~ghostness:false ~uniqueness:false ~statefulness:true
+            ~logicality:false ~uniqueness:false ~statefulness:true
             ~visibility:false ~staticity:false
         in
         create crossing ~externality:Externality.max
@@ -2603,7 +2600,7 @@ module Jkind0 = struct
       let crossing =
         Mode.Crossing.create ~regionality:false ~linearity:true
           ~portability:true ~totality:true ~forkable:true ~yielding:true
-          ~uniqueness:false ~contention:true ~ghostness:false ~statefulness:true
+          ~uniqueness:false ~contention:true ~logicality:true ~statefulness:true
           ~visibility:true ~staticity:false
       in
       let mod_bounds =
