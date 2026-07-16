@@ -577,9 +577,7 @@ val enter_unbound_module : string -> module_unbound_reason -> t -> t
 
 (* Lock the environment *)
 
-val add_closure_lock :
-  ?logicality:('l * Mode.allowed) Mode.Logicality.t ->
-  ?lock_logical:bool -> Mode.Hint.pinpoint
+val add_closure_lock : Mode.Hint.pinpoint
   -> ('l * Mode.allowed) Mode.Value.Comonadic.t -> t -> t
 
 (** A variant of [add_closure_lock] where the mode of the closure is a constant

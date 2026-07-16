@@ -196,12 +196,172 @@ let capture_inferred_total () =
 val capture_inferred_total : unit -> unit = <fun>
 |}]
 
+(* Boundary spec-bug fix (ruled 2026-07-16): a total closure may declare a
+   partial arrow-typed PARAMETER.  Parameters are left alone, exactly as
+   portability/contention leave them; only captures are constrained.  So this
+   is accepted. *)
 let _ @ total = fun (f @ partial) -> f
 [%%expect{|
-Line 1, characters 16-38:
-1 | let _ @ total = fun (f @ partial) -> f
-                    ^^^^^^^^^^^^^^^^^^^^^^
-Error: The function is "partial" but is expected to be "total".
+- : 'a -> 'a = <fun>
+|}]
+
+(* Boundary and Ops remain live when a function earns totality after its body
+   has been typed. *)
+let late_partial_parameter (ignored @ partial) = 0
+let _ = expects_total late_partial_parameter
+[%%expect{|
+val late_partial_parameter : 'a -> int = <fun>
+Line 2, characters 22-44:
+2 | let _ = expects_total late_partial_parameter
+                          ^^^^^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_partial_local () =
+  let _local @ partial = fun x -> x in
+  0
+let _ = expects_total late_partial_local
+[%%expect{|
+val late_partial_local : unit -> int = <fun>
+Line 4, characters 22-40:
+4 | let _ = expects_total late_partial_local
+                          ^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_array () = [| 0 |]
+let _ = expects_total late_array
+[%%expect{|
+val late_array : unit -> int array = <fun>
+Line 2, characters 22-32:
+2 | let _ = expects_total late_array
+                          ^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_mutable_record () = { immutable_field = 0; mutable_field = 0 }
+let _ = expects_total late_mutable_record
+[%%expect{|
+val late_mutable_record : unit -> mixed_record = <fun>
+Line 2, characters 22-41:
+2 | let _ = expects_total late_mutable_record
+                          ^^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_loop () = while false do () done
+let _ = expects_total late_loop
+[%%expect{|
+val late_loop : unit -> unit = <fun>
+Line 2, characters 22-31:
+2 | let _ = expects_total late_loop
+                          ^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* Late-inference regression guard (spec Ops): a residue construct inside a
+   let-in closure whose totality is still an inference variable, then forced
+   total by use, must be REJECTED.  The rejection is a submode edge on the
+   closure's totality variable, never a snapshot of a momentary context; the
+   let-in position (unlike a top-level binding) has no structure boundary to
+   fall back on, so this is exactly the case a snapshot check would leak. *)
+let _ = let bad () = while true do () done in expects_total bad
+[%%expect{|
+Line 1, characters 60-63:
+1 | let _ = let bad () = while true do () done in expects_total bad
+                                                                ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = for _i = 0 to 1 do () done in expects_total bad
+[%%expect{|
+Line 1, characters 65-68:
+1 | let _ = let bad () = for _i = 0 to 1 do () done in expects_total bad
+                                                                     ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = { immutable_field = 0; mutable_field = 0 } in
+        expects_total bad
+[%%expect{|
+Line 2, characters 22-25:
+2 |         expects_total bad
+                          ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = [| 0 |] in expects_total bad
+[%%expect{|
+Line 1, characters 46-49:
+1 | let _ = let bad () = [| 0 |] in expects_total bad
+                                                  ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* try and local exceptions are allowed (not partial operations), so these are
+   accepted even in the same let-in-then-force-total position. *)
+let _ = let good () = try 1 with _ -> 2 in expects_total good
+[%%expect{|
+Line 1, characters 43-61:
+1 | let _ = let good () = try 1 with _ -> 2 in expects_total good
+                                               ^^^^^^^^^^^^^^^^^^
+Warning 5 [ignored-partial-application]: this function application is partial,
+  maybe some arguments are missing.
+
+- : unit -> int = <fun>
+|}]
+
+let _ = let good () = let exception E in 0 in expects_total good
+[%%expect{|
+Line 1, characters 46-64:
+1 | let _ = let good () = let exception E in 0 in expects_total good
+                                                  ^^^^^^^^^^^^^^^^^^
+Warning 5 [ignored-partial-application]: this function application is partial,
+  maybe some arguments are missing.
+
+- : unit -> int = <fun>
+|}]
+
+(* Lock also remains live when totality is earned later. *)
+let late_return_captured_ref () = captured_ref
+let _ = expects_total late_return_captured_ref
+let _ = expects_physical_ref (late_return_captured_ref ())
+[%%expect{|
+val late_return_captured_ref : unit -> int ref = <fun>
+Line 2, characters 22-46:
+2 | let _ = expects_total late_return_captured_ref
+                          ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let late_return_passed_ref (r : int ref) = r
+let _ = expects_total late_return_passed_ref
+let _ = expects_physical_ref (late_return_passed_ref (ref 0))
+[%%expect{|
+val late_return_passed_ref : int ref -> int ref = <fun>
+Line 2, characters 22-44:
+2 | let _ = expects_total late_return_passed_ref
+                          ^^^^^^^^^^^^^^^^^^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* Parameters are NOT locked (spec-bug fix, ruled 2026-07-16): mirroring
+   portability/contention, a total closure's parameters are unconstrained and
+   viewed at physical, so these functions print with plain parameter and
+   return types (no [@ total] argument, no [@ logical] return). *)
+exception Total_try
+let (total_apply @ total) g = g 0
+let (total_identity @ total) x = x
+let (total_project @ total) (x, _) = x
+let total_apply_it @ total = fun g -> g 0
+let (total_try @ total) x = try x with Total_try -> x
+[%%expect{|
+exception Total_try
+val total_apply : (int -> 'a) -> 'a = <fun>
+val total_identity : 'a -> 'a = <fun>
+val total_project : 'a * 'b -> 'a = <fun>
+val total_apply_it : (int -> 'a) -> 'a = <fun>
+val total_try : 'a -> 'a = <fun>
 |}]
 
 (* Hereditary: nested function literals in total bodies must be total. *)
@@ -210,9 +370,9 @@ let _ @ total =
     let local @ partial = fun x -> x in
     local
 [%%expect{|
-Lines 3-4, characters 4-9:
-3 | ....let local @ partial = fun x -> x in
-4 |     local
+Line 3, characters 26-36:
+3 |     let local @ partial = fun x -> x in
+                              ^^^^^^^^^^
 Error: The function is "partial" but is expected to be "total".
 |}]
 
@@ -318,12 +478,63 @@ Error: The value "print_string" is "partial"
          which is expected to be "total".
 |}]
 
-let _ @ total = fun (f : int -> int) -> f == f
+(* All comparison primitives are partial, independently of operand type or
+   whether the primitive is used directly or through an alias. *)
+let _ @ total = fun (x : string) -> x < x
 [%%expect{|
-Line 1, characters 42-44:
-1 | let _ @ total = fun (f : int -> int) -> f == f
-                                              ^^
-Error: This expression is not allowed at mode total: physical comparison on non-immediate values is not permitted in total code.
+Line 1, characters 38-39:
+1 | let _ @ total = fun (x : string) -> x < x
+                                          ^
+Error: The value "(<)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 16-41
+         which is expected to be "total".
+|}]
+
+let _ @ total = fun (xs : int list) -> xs = xs
+[%%expect{|
+Line 1, characters 42-43:
+1 | let _ @ total = fun (xs : int list) -> xs = xs
+                                              ^
+Error: The value "(=)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 16-46
+         which is expected to be "total".
+|}]
+
+let _ @ total = fun (x : int) -> x == x
+[%%expect{|
+Line 1, characters 35-37:
+1 | let _ @ total = fun (x : int) -> x == x
+                                       ^^
+Error: The value "(==)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 16-39
+         which is expected to be "total".
+|}]
+
+let _ @ total = fun (x : int) -> x < x
+[%%expect{|
+Line 1, characters 35-36:
+1 | let _ @ total = fun (x : int) -> x < x
+                                       ^
+Error: The value "(<)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 16-38
+         which is expected to be "total".
+|}]
+
+let physical_equal = ( == )
+let _ @ total = fun (x : int) -> physical_equal x x
+[%%expect{|
+val physical_equal : 'a -> 'a -> bool = <fun>
+Line 2, characters 33-47:
+2 | let _ @ total = fun (x : int) -> physical_equal x x
+                                     ^^^^^^^^^^^^^^
+Error: The value "physical_equal" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 2, characters 16-51
+         which is expected to be "total".
 |}]
 
 let _ @ total = fun () -> while false do () done
@@ -331,7 +542,7 @@ let _ @ total = fun () -> while false do () done
 Line 1, characters 26-48:
 1 | let _ @ total = fun () -> while false do () done
                               ^^^^^^^^^^^^^^^^^^^^^^
-Error: This expression is not allowed at mode total: loops are not permitted in total code.
+Error: The function is "partial" but is expected to be "total".
 |}]
 
 (* Exception constructs themselves are allowed. *)

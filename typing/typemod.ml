@@ -3193,7 +3193,6 @@ and type_module_aux ~alias ~hold_locks ~strengthen ~funct_body anchor env
       in
       let newenv =
         Env.add_closure_lock
-          ~logicality:(Value.proj_monadic Logicality closed_over_mode)
           (smod.pmod_loc, Functor)
           closed_over_mode.comonadic env
       in
