@@ -93,7 +93,8 @@ let cg_max_cuts =
    Default: reject iff the cut uses EVERY tight row ([ant_count ≥ m], i.e.
    [ants_pct = 100]) — the crisp measured separator. The coefficient-density knob is
    disabled by default ([nnz_pct = 101] ⇒ [nnz > 1.01·n], never true). All three tunable
-   for the A/B: [OXSMT_CG_CUT_GATE=0] disables the gate (= pre-policy B3);
+   for the A/B: [OXSMT_CG_CUT_GATE=0] disables the gate (= pre-policy B3 on verdict+search;
+   an always-true gate still runs the support scan + callback, so not allocation-identical);
    [OXSMT_CG_ANTS_PCT] / [OXSMT_CG_NNZ_PCT] set the density thresholds (percent). *)
 let cut_gate_on =
   match Sys.getenv_opt "OXSMT_CG_CUT_GATE" with

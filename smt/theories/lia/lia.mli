@@ -151,8 +151,9 @@ val hnf_cut : 'tok t -> (Term.t * 'tok list) option
     [cut_gate] (task #60 cut-policy) is an optional emission filter on the selected best
     candidate: it is called with the cut's coefficient count [nnz], its antecedent-row
     support size [ants], and the tight system's [m] rows / [n] cols, and the cut is
-    emitted only if it returns [true]. The default always emits — byte-identical to
-    callers that do not pass it. Rejecting a cut yields [None] (the caller branches
+    emitted only if it returns [true]. The default always emits — verdict+search-identical
+    to callers that do not pass it (not allocation-identical: the support scan + gate
+    callback still run). Rejecting a cut yields [None] (the caller branches
     instead), a strictly weaker action, so the gate is soundness-neutral. *)
 val cg_cut
   :  ?cut_gate:(nnz:int -> ants:int -> m:int -> n:int -> bool)

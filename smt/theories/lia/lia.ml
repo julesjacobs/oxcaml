@@ -1268,8 +1268,9 @@ let cg_cut ?(cut_gate = fun ~nnz:_ ~ants:_ ~m:_ ~n:_ -> true) t
          in
          (* SPARSITY GATE (task #60): a caller-supplied predicate decides whether this
             best-candidate cut is worth emitting. The default (no [cut_gate] arg) always
-            emits — byte-identical to the pre-policy behaviour and to every existing
-            caller / unit test. The adapter supplies the density policy when CG cuts are
+            emits — VERDICT+SEARCH-identical to the pre-policy behaviour and to every
+            existing caller / unit test (not allocation-identical: the [nnz]/[ant_count]
+            support scan and the always-true gate callback still run). The adapter supplies the density policy when CG cuts are
             on. Rejecting a cut here makes {!hnf_lemma} return [None], so the adapter
             falls back to the B&B branch — a strictly weaker action, so soundness is
             unaffected (the gate can only forgo an optimisation, never change a verdict). *)
