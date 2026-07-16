@@ -2976,7 +2976,7 @@ let check_recmodule_inclusion env bindings =
       in
       List.map check_inclusion bindings
     end
-  in check_incl true (List.length bindings) env Subst.identity
+  in check_incl true (min 1 (List.length bindings)) env Subst.identity
 
 (* Helper for unpack *)
 
