@@ -265,10 +265,17 @@ let var_shift t a b ~dir_left ~fill =
     cur := Array.init w (fun j -> mk_ite t bi shifted.(j) !cur.(j));
     incr i
   done;
-  (* any set shift-amount bit at position i with 2^i >= w means amount >= w -> fill *)
+  (* [!i] is the smallest position with 2^i >= w: the stages above cover exactly the
+     shift-amount bits below it, and any SET bit AT OR ABOVE it means amount >= w -> fill.
+     Testing [1 lsl k >= w] directly would be wrong for wide vectors: [1 lsl k] overflows
+     OCaml's native int for k >= 63 (e.g. width-250 shift amounts have 250 bits), so those
+     high bits would be silently dropped from the overflow term — an under-constrained
+     circuit that admits spurious models (census task #78 bucket: the log-slicing/bvashr_*
+     soundness benchmarks, all >= 234-bit). Comparing positions avoids the overflow. *)
+  let stages = !i in
   let overflow = ref (Sat.neg_lit t.tru) in
-  for k = 0 to Array.length b - 1 do
-    if 1 lsl k >= w then overflow := mk_or2 t !overflow b.(k)
+  for k = stages to Array.length b - 1 do
+    overflow := mk_or2 t !overflow b.(k)
   done;
   let filled = Array.make w fill in
   Array.init w (fun j -> mk_ite t !overflow filled.(j) !cur.(j))
