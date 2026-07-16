@@ -9,7 +9,24 @@
    - [Unknown] expected (out-of-fragment): must be [unknown]. *)
 
 module Engine = Oxsmt_chc.Chc_engine
+module Pdr = Oxsmt_chc.Chc_pdr
 module Parse = Oxsmt_chc.Chc_parse
+
+(* Dispatch exactly as the CLI does: single-predicate -> transition-system engine,
+   multi-predicate -> multi-predicate linear PDR. *)
+let dispatch sys =
+  if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1
+  then Engine.solve ~budget:4000 ~max_frames:40 sys
+  else (
+    let r = Pdr.solve ~budget:4000 ~max_frames:40 sys in
+    { Engine.verdict =
+        (match r.Pdr.verdict with
+         | Pdr.Safe -> Engine.Safe
+         | Pdr.Unsafe -> Engine.Unsafe
+         | Pdr.Unknown m -> Engine.Unknown m)
+    ; detail = r.Pdr.detail
+    })
+;;
 
 type expect =
   | Safe_must
@@ -20,7 +37,7 @@ type expect =
 
 let solve src =
   match Parse.parse src with
-  | sys -> Engine.solve ~budget:4000 ~max_frames:40 sys
+  | sys -> dispatch sys
   | exception Parse.Unsupported m -> { Engine.verdict = Engine.Unknown m; detail = m }
   | exception Parse.Malformed m ->
     { Engine.verdict = Engine.Unknown ("malformed: " ^ m); detail = m }
@@ -142,10 +159,10 @@ let () =
       (assert (forall ((x Int)) (=> (= x 0) (P x))))
       (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 1))) (P y))))
       (assert (forall ((x Int)) (=> (and (P x)(= x 7)) false)))|};
-  (* 10. out of fragment: two predicates -> unknown in v1 *)
+  (* 10. two-predicate chain P->Q, safe (x stays 0) -> multi-pred PDR solves it *)
   check
-    "two-preds-unknown"
-    Unknown_expected
+    "two-preds-safe"
+    Safe_must
     {|(set-logic HORN)
       (declare-fun P (Int) Bool)
       (declare-fun Q (Int) Bool)
@@ -171,6 +188,54 @@ let () =
       (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 5)) (P x y))))
       (assert (forall ((x Int)(y Int)(a Int)) (=> (and (P x y)(= a (+ x 1))) (P a y))))
       (assert (forall ((x Int)(y Int)) (=> (and (P x y)(> x y)) false)))|};
+  (* 13. multi-predicate ping-pong P<->Q counting up, safe (never negative) *)
+  check
+    "mp-pingpong-safe"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (declare-fun Q (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 1))) (Q y))))
+      (assert (forall ((x Int)(y Int)) (=> (and (Q x)(= y (+ x 1))) (P y))))
+      (assert (forall ((x Int)) (=> (and (Q x)(< x 0)) false)))|};
+  (* 14. multi-predicate ping-pong reaching a bad bound -> unsafe (replay-confirmed) *)
+  check
+    "mp-pingpong-unsafe"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (declare-fun Q (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 1))) (Q y))))
+      (assert (forall ((x Int)(y Int)) (=> (and (Q x)(= y (+ x 1))) (P y))))
+      (assert (forall ((x Int)) (=> (and (Q x)(>= x 4)) false)))|};
+  (* 15b. NONLINEAR clause (two body predicates) -> out of the linear fragment -> unknown *)
+  check
+    "nonlinear-unknown"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int)(z Int))
+        (=> (and (P x)(P y)(= z (+ x y))) (P z))))
+      (assert (forall ((x Int)) (=> (and (P x)(< x 0)) false)))|};
+  (* 15. three-predicate chain, safe. Invariant C =
+     {0}
+     is TWO-SIDED (x<=0 /\ x>=0), which dumb interval generalization can't reach across
+     the chain in budget -> soft miss (the interpolation lever, same root cause as
+     two-var-eq). *)
+  check
+    "mp-chain3-safe"
+    Safe_ok
+    {|(set-logic HORN)
+      (declare-fun A (Int) Bool)
+      (declare-fun B (Int) Bool)
+      (declare-fun C (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (A x))))
+      (assert (forall ((x Int)) (=> (A x) (B x))))
+      (assert (forall ((x Int)) (=> (B x) (C x))))
+      (assert (forall ((x Int)) (=> (and (C x)(not (= x 0))) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;

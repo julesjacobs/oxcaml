@@ -24,14 +24,26 @@ let () =
     exit 2
   | Some path ->
     let src = read_file path in
-    let result =
+    (* Dispatch: a single-predicate system goes to the proven transition-system engine
+       (Chc_engine); multiple predicates go to the multi-predicate linear PDR (Chc_pdr).
+       Both are guarded by independent re-verification, so either path is sound. *)
+    let smt, detail =
       match Oxsmt_chc.Chc_parse.parse src with
-      | sys -> Oxsmt_chc.Chc_engine.solve sys
-      | exception Oxsmt_chc.Chc_parse.Unsupported m ->
-        { Oxsmt_chc.Chc_engine.verdict = Oxsmt_chc.Chc_engine.Unknown ("unsupported: " ^ m); detail = m }
-      | exception Oxsmt_chc.Chc_parse.Malformed m ->
-        { Oxsmt_chc.Chc_engine.verdict = Oxsmt_chc.Chc_engine.Unknown ("malformed: " ^ m); detail = m }
+      | sys ->
+        if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1
+        then (
+          let r = Oxsmt_chc.Chc_engine.solve sys in
+          Oxsmt_chc.Chc_engine.verdict_to_smtlib r.Oxsmt_chc.Chc_engine.verdict, r.detail)
+        else (
+          let r = Oxsmt_chc.Chc_pdr.solve sys in
+          ( (match r.Oxsmt_chc.Chc_pdr.verdict with
+             | Oxsmt_chc.Chc_pdr.Safe -> "sat"
+             | Oxsmt_chc.Chc_pdr.Unsafe -> "unsat"
+             | Oxsmt_chc.Chc_pdr.Unknown _ -> "unknown")
+          , r.detail ))
+      | exception Oxsmt_chc.Chc_parse.Unsupported m -> "unknown", "unsupported: " ^ m
+      | exception Oxsmt_chc.Chc_parse.Malformed m -> "unknown", "malformed: " ^ m
     in
-    print_endline (Oxsmt_chc.Chc_engine.verdict_to_smtlib result.Oxsmt_chc.Chc_engine.verdict);
-    if !verbose then prerr_endline ("; " ^ result.Oxsmt_chc.Chc_engine.detail)
+    print_endline smt;
+    if !verbose then prerr_endline ("; " ^ detail)
 ;;
