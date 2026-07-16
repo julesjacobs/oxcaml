@@ -141,10 +141,9 @@ module Naive = struct
             let all = ref true in
             List.iteri
               (fun k arg ->
-                 let bj = Iarr.get aj k in
-                 if
-                   find t (Term.Table.find t.idx arg) <> find t (Term.Table.find t.idx bj)
-                 then all := false)
+                let bj = Iarr.get aj k in
+                if find t (Term.Table.find t.idx arg) <> find t (Term.Table.find t.idx bj)
+                then all := false)
               (Iarr.to_list ai);
             if !all
             then (
@@ -268,11 +267,11 @@ let test_chain_orders () =
   let ok = ref true in
   Array.iter
     (fun s ->
-       Array.iter
-         (fun t ->
-            if Euf.are_equal e s t <> Naive.equal nz (Naive.index nz s) (Naive.index nz t)
-            then ok := false)
-         univ)
+      Array.iter
+        (fun t ->
+          if Euf.are_equal e s t <> Naive.equal nz (Naive.index nz s) (Naive.index nz t)
+          then ok := false)
+        univ)
     univ;
   check "orders: classes match naive oracle" !ok
 ;;
@@ -699,12 +698,12 @@ let test_propagate_pushpop_vs_full () =
     let status (i, j) =
       if Euf.are_equal e univ.(i) univ.(j)
       then 1
-      else if
-        List.exists
-          (fun (c, d) ->
-             (Euf.are_equal e univ.(i) univ.(c) && Euf.are_equal e univ.(j) univ.(d))
-             || (Euf.are_equal e univ.(i) univ.(d) && Euf.are_equal e univ.(j) univ.(c)))
-          !active_diseqs
+      else if List.exists
+                (fun (c, d) ->
+                  (Euf.are_equal e univ.(i) univ.(c) && Euf.are_equal e univ.(j) univ.(d))
+                  || (Euf.are_equal e univ.(i) univ.(d)
+                      && Euf.are_equal e univ.(j) univ.(c)))
+                !active_diseqs
       then 0
       else -1
     in
@@ -712,19 +711,19 @@ let test_propagate_pushpop_vs_full () =
       let engine_out =
         List.filter_map
           (fun (imp : Euf.implied) ->
-             match Term.Table.find_opt reported imp.Euf.atom with
-             | Some _ -> Some (imp.Euf.atom.Term.tag, imp.Euf.value)
-             | None -> None)
+            match Term.Table.find_opt reported imp.Euf.atom with
+            | Some _ -> Some (imp.Euf.atom.Term.tag, imp.Euf.value)
+            | None -> None)
           (Euf.propagate e)
       in
       let ref_out = ref [] in
       List.iter
         (fun (a, p) ->
-           let s = status p in
-           if s <> -1 && s <> Term.Table.find reported a
-           then (
-             Term.Table.replace reported a s;
-             ref_out := (a.Term.tag, s = 1) :: !ref_out))
+          let s = status p in
+          if s <> -1 && s <> Term.Table.find reported a
+          then (
+            Term.Table.replace reported a s;
+            ref_out := (a.Term.tag, s = 1) :: !ref_out))
         watch;
       let srt l = List.sort compare l in
       check
@@ -844,12 +843,12 @@ let test_predicate_propagate_pushpop_vs_full () =
     let status (i, j) =
       if Euf.are_equal e univ.(i) univ.(j)
       then 1
-      else if
-        List.exists
-          (fun (c, d) ->
-             (Euf.are_equal e univ.(i) univ.(c) && Euf.are_equal e univ.(j) univ.(d))
-             || (Euf.are_equal e univ.(i) univ.(d) && Euf.are_equal e univ.(j) univ.(c)))
-          !active_diseqs
+      else if List.exists
+                (fun (c, d) ->
+                  (Euf.are_equal e univ.(i) univ.(c) && Euf.are_equal e univ.(j) univ.(d))
+                  || (Euf.are_equal e univ.(i) univ.(d)
+                      && Euf.are_equal e univ.(j) univ.(c)))
+                !active_diseqs
       then 0
       else -1
     in
@@ -857,19 +856,19 @@ let test_predicate_propagate_pushpop_vs_full () =
       let engine_out =
         List.filter_map
           (fun (imp : Euf.implied) ->
-             match Term.Table.find_opt reported imp.Euf.atom with
-             | Some _ -> Some (imp.Euf.atom.Term.tag, imp.Euf.value)
-             | None -> None)
+            match Term.Table.find_opt reported imp.Euf.atom with
+            | Some _ -> Some (imp.Euf.atom.Term.tag, imp.Euf.value)
+            | None -> None)
           (Euf.propagate e)
       in
       let ref_out = ref [] in
       List.iter
         (fun (a, pr) ->
-           let s = status pr in
-           if s <> -1 && s <> Term.Table.find reported a
-           then (
-             Term.Table.replace reported a s;
-             ref_out := (a.Term.tag, s = 1) :: !ref_out))
+          let s = status pr in
+          if s <> -1 && s <> Term.Table.find reported a
+          then (
+            Term.Table.replace reported a s;
+            ref_out := (a.Term.tag, s = 1) :: !ref_out))
         watch;
       let srt l = List.sort compare l in
       check
@@ -965,11 +964,11 @@ let scripted_run ctx univ watch script =
   let props = ref [] in
   List.iter
     (fun (i, j, p) ->
-       Euf.assert_eq e ~premise:p univ.(i) univ.(j);
-       let step =
-         List.map (fun imp -> imp.Euf.atom.Term.tag, imp.Euf.value) (Euf.propagate e)
-       in
-       props := step :: !props)
+      Euf.assert_eq e ~premise:p univ.(i) univ.(j);
+      let step =
+        List.map (fun imp -> imp.Euf.atom.Term.tag, imp.Euf.value) (Euf.propagate e)
+      in
+      props := step :: !props)
     script;
   (* also a fixed explanation, if the pair is equal *)
   let expl =
@@ -1056,11 +1055,11 @@ let test_query_api_nonmutating () =
   for _ = 1 to 1000 do
     List.iter
       (fun t ->
-         ignore (Euf.app_terms_by_symbol e f : Term.t list);
-         ignore (Euf.app_terms_by_symbol e g : Term.t list);
-         ignore (Euf.find_class_opt e t : int option);
-         ignore (Euf.class_members e t : Term.t list);
-         List.iter (fun t2 -> ignore (Euf.equal_if_registered e t t2 : bool)) terms)
+        ignore (Euf.app_terms_by_symbol e f : Term.t list);
+        ignore (Euf.app_terms_by_symbol e g : Term.t list);
+        ignore (Euf.find_class_opt e t : int option);
+        ignore (Euf.class_members e t : Term.t list);
+        List.iter (fun t2 -> ignore (Euf.equal_if_registered e t t2 : bool)) terms)
       terms
   done;
   check
@@ -1072,9 +1071,9 @@ let test_query_api_nonmutating () =
     "query-api: equal_if_registered agrees with are_equal on registered terms"
     (List.for_all
        (fun t1 ->
-          List.for_all
-            (fun t2 -> Euf.equal_if_registered e t1 t2 = Euf.are_equal e t1 t2)
-            terms)
+         List.for_all
+           (fun t2 -> Euf.equal_if_registered e t1 t2 = Euf.are_equal e t1 t2)
+           terms)
        terms);
   (* app_terms_by_symbol returns exactly the registered f-apps in id order *)
   check
@@ -1119,8 +1118,8 @@ let test_stage2_merge_log () =
   let has ms u v =
     List.exists
       (fun (m : Euf.merge_event) ->
-         (Term.equal m.kept u && Term.equal m.merged v)
-         || (Term.equal m.kept v && Term.equal m.merged u))
+        (Term.equal m.kept u && Term.equal m.merged v)
+        || (Term.equal m.kept v && Term.equal m.merged u))
       ms
   in
   (* default OFF ⇒ no recording, zero cost, byte-identical to trunk. *)
@@ -1194,10 +1193,10 @@ let test_stage3_class_tag () =
   let saw_collision =
     List.exists
       (fun (m : Euf.merge_event) ->
-         match m.kept_tag, m.merged_tag with
-         | Some x, Some y ->
-           (Term.equal x cA && Term.equal y cB) || (Term.equal x cB && Term.equal y cA)
-         | _ -> false)
+        match m.kept_tag, m.merged_tag with
+        | Some x, Some y ->
+          (Term.equal x cA && Term.equal y cB) || (Term.equal x cB && Term.equal y cA)
+        | _ -> false)
       evs
   in
   check
@@ -1296,6 +1295,61 @@ let test_sig_pack_injective () =
     (not !collision)
 ;;
 
+(* H2 (fix #4 watch_index guard): [rearm_watch] looks up [watch_index]([term]) in O(1) and
+   guards it with (idx in range AND [watched].(idx).w_atom = term), so a STALE entry — one
+   left past a [pop] truncation, or pointing at a slot a later registration REUSED for a
+   different atom — is a correct no-op, exactly as the old full [Dynarray.iteri] scan was.
+   The adapter never reads a stale entry (it re-registers a term, refreshing the map,
+   before re-arming), so this drives the ENGINE directly to manufacture both stale shapes
+   and pin the guard. *)
+let test_watch_index_stale_slot () =
+  let env, usort, _unary, konst = make_env () in
+  let p = Env.declare_fun env "p" (Rank.create [ usort ] Sort.bool) in
+  let ctx = Context.create env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c = Context.const ctx (konst "c") in
+  let pa = Context.app ctx p [ a ]
+  and pb = Context.app ctx p [ b ]
+  and pc = Context.app ctx p [ c ] in
+  let tt = Context.bool_const ctx true in
+  let e = Euf.create ctx in
+  (* p(a) at base -> watch slot 0, watch_index[p(a)] = 0. *)
+  Euf.register_term e pa;
+  Euf.push e;
+  (* p(b) in a pushed frame -> watch slot 1, watch_index[p(b)] = 1. *)
+  Euf.register_term e pb;
+  Euf.pop e 1;
+  (* (i) OUT-OF-RANGE: p(b)'s watch was truncated (watched length back to 1) but the
+     watch_index[p(b)] = 1 entry survives (never cleaned on pop). rearm must reject it (1
+     not < 1) — a safe no-op rather than an out-of-bounds read. *)
+  Euf.rearm_watch e pb;
+  check "stale-slot: out-of-range entry is a no-op (no crash)" true;
+  (* (ii) REUSED-SLOT: registering p(c) reuses the freed slot 1, so watch_index[p(b)] = 1
+     now points at p(c)'s watch. Make p(c) true and drain that self-report; then rearm the
+     STALE p(b): the [w_atom] guard must NOT re-arm p(c)'s slot. *)
+  Euf.register_term e pc;
+  Euf.assert_eq e ~premise:1 pc tt;
+  (match
+     List.filter (fun (i : Euf.implied) -> Term.equal i.Euf.atom pc) (Euf.propagate e)
+   with
+   | [ imp ] -> check "stale-slot: p(c) self-implied true" imp.Euf.value
+   | _ -> check "stale-slot: exactly one p(c) self-report" false);
+  check "stale-slot: nothing new before rearm" (Euf.propagate e = []);
+  Euf.rearm_watch e pb;
+  check
+    "stale-slot: rearm of truncated p(b) does not re-report the reused-slot p(c)"
+    (Euf.propagate e = []);
+  (* control: rearming the LIVE p(c) DOES re-report it, proving rearm is otherwise
+     effective — the no-op above is the guard rejecting a stale entry, not a dead rearm. *)
+  Euf.rearm_watch e pc;
+  match
+    List.filter (fun (i : Euf.implied) -> Term.equal i.Euf.atom pc) (Euf.propagate e)
+  with
+  | [ imp ] -> check "stale-slot: rearm of live p(c) re-reports it" imp.Euf.value
+  | _ -> check "stale-slot: live rearm re-reports exactly p(c)" false
+;;
+
 let () =
   print_endline "euf self-test:";
   test_textbook ();
@@ -1304,6 +1358,7 @@ let () =
   test_propagation ();
   test_distinct_witness_first_wins ();
   test_predicate_propagation ();
+  test_watch_index_stale_slot ();
   test_errors ();
   test_random_crosscheck ();
   test_explanation_soundness ();

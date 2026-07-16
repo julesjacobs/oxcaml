@@ -166,11 +166,11 @@ type 'p t =
        inert. *)
     watch_sides : (Term.t * Term.t) Term.Table.t
   ; (* w_atom -> its index in [watched], for O(1) {!rearm_watch} instead of a full scan.
-       Written in [add_watch] (one watch per term: [register] is idempotent, so a term is
-       watched at most once). Like [watch_sides] it is never cleaned on [pop]; a stale
-       entry (index past the truncated [watched], or a reused slot now holding a different
-       atom) is rejected by the read-side guard in [rearm_watch] (range + [w_atom]
-       re-check), so a lookup returns exactly the watch a full scan would find. *)
+       Written in [add_watch] (one watch per term: [register] is idempotent, so a term has
+       at most one LIVE watch at a time). Like [watch_sides] it is never cleaned on [pop];
+       a stale entry (index past the truncated [watched], or a reused slot now holding a
+       different atom) is rejected by the read-side guard in [rearm_watch] (range +
+       [w_atom] re-check), so a lookup returns exactly the watch a full scan would find. *)
     watch_index : int Term.Table.t
   ; diseqs : 'p diseq Dynarray.t
   ; (* The int-packed typed undo trail (kept as-is — the hottest path in the solver) rides
@@ -1183,9 +1183,10 @@ let explain_implied t imp =
 let rearm_watch t term =
   (* O(1) via [watch_index] instead of the old O(#watches) [Dynarray.iteri] scan. The
      guard (index in range AND [w_atom] still equals [term]) makes this byte-identical to
-     the scan even when the map holds a stale entry: since a term is watched at most once,
-     the scan would act on exactly the watch this lookup returns (same [set_reported] /
-     [mark_touched] endpoints), and returns nothing exactly when no live watch matches. *)
+     the scan even when the map holds a stale entry: since a term has at most one live
+     watch, the scan would act on exactly the watch this lookup returns (same
+     [set_reported] / [mark_touched] endpoints), and returns nothing exactly when no live
+     watch matches. *)
   match Term.Table.find_opt t.watch_index term with
   | None -> ()
   | Some idx ->

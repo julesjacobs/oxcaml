@@ -207,6 +207,26 @@ FIX #5 (dark OXSMT_FOREST_BALANCE) — per-family ON-vs-OFF, effort 30000, 40 fi
   reroot-a there; the lever only bites where class sizes are imbalanced (QF_AX here).
 
 STATUS: FROZEN for dual review. #4 is flagless byte-identical (land candidate). #3 and #5 are
-DARK (ship inert; default build byte-identical, proven by the 141-file broad identity). #3's
-per-mutant RED obligation is PARTIAL — awaiting lead ruling (mega-RED + by-construction vs.
-synthetic-input hunt). Do NOT land before review.
+DARK (ship inert; default build byte-identical, proven by the 141-file broad identity).
+
+## Review riders (APPROVE-WITH-HEDGE @ee2d6b2f05 → this rider freeze)
+Review returned APPROVE-WITH-HEDGE (all five fixes sound). Three riders folded in ONE pass on
+top of 24e5084c1b, all test/doc-only (approval carries; comment-only + test-only = no code path
+changed, so the freeze's identity results stand):
+- #3 merge-window RED (lead ruling): make arr-store-idx-test — see §Fix #3 RED-MUTANT RESULT.
+- H2 [#4]: focused engine-level unit test for the watch_index stale-slot guard,
+  test_watch_index_stale_slot in smt/theories/euf/test/euf_test.ml (make euf-test). Drives
+  Euf directly (the adapter never reads a stale entry — it re-registers first) to manufacture
+  BOTH stale shapes: (i) OUT-OF-RANGE (entry survives a pop that truncated the watch) and
+  (ii) REUSED-SLOT (a later registration reuses the freed slot for a different atom). Pins that
+  rearm_watch is a correct no-op on each (matching the old scan). RED-verified: dropping the
+  [w_atom] re-check makes case (ii) re-report the reused-slot atom → test FAILS (mutant killed).
+  euf-test 6440→6445 checks, 0 failures.
+- H3 [doc, 5 sites]: euf.ml watch_index field + rearm_watch doc "watched at most once" → "at
+  most one LIVE watch"; arr.ml rebuild_selects_idx + rebuild_stores_idx headers scope the
+  "rebuilt every/each call" wording to the OFF path (ON caches); arr.ml an_distinct_premise
+  comment narrowed (the "only when a propagation commits" claim scoped to the ROW2 path, noting
+  the an_distinct/weq wrapper also calls it).
+GATES at rider freeze: make test EXIT 0 (check-frozen 14/14, cert 33/33 VALID, euf 6445/0,
+euf-adapter 1493/0, array-sat 14/0, arr-store-idx 2/0, sat 112/0, satpre 41/0). Clean tree.
+Do NOT land before the reviewer delta-verifies the rider commits.

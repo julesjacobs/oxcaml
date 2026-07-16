@@ -594,8 +594,9 @@ let assert_lit t lit =
    resp. [class_of base]. Grouping the selects by [class_of arr] once (O(selects)) lets
    each store look up only the relevant selects instead of scanning the full selects x
    stores product, which is the dominant per-decision cost on deep store chains (~130
-   selects x ~22 stores). Rebuilt each call because e-classes change as the search merges
-   classes. *)
+   selects x ~22 stores). This from-scratch rebuild is run every call on the OFF path
+   ([occidx_on] false); on the ON path [selects_by_arr_class] runs it only when the cache
+   is invalidated — e-classes change as the search merges classes. *)
 let rebuild_selects_idx t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
@@ -699,9 +700,11 @@ let an_distinct_witness t (i : Term.t) (j : Term.t) : (Term.t * Term.t * Lit.t) 
 
 (* Build the deduped premise for an ORIENTED witness ([i ~ x], [j ~ y]): the diseq's own
    literal plus the congruence chains linking [i] to [x] and [j] to [y]. This is where the
-   two [Euf.explain] walks happen, so it is called ONLY when a propagation is actually
-   emitted (never on the no-op / already-propagated paths). Byte-identical to the list the
-   old [an_distinct]/[an_distinct_idx] returned for the same (oriented) match. *)
+   two [Euf.explain] walks happen. In the ROW2 path ([row_round], fix #2) it is reached
+   ONLY after the [build_select]/[are_equal] no-op guard, i.e. only when a propagation
+   actually commits (never on the no-op / already-propagated paths); the [an_distinct]
+   wrapper below also calls it for the weq premise consumer. Byte-identical to the list
+   the old [an_distinct]/[an_distinct_idx] returned for the same (oriented) match. *)
 let an_distinct_premise
   t
   ((x, y, lit) : Term.t * Term.t * Lit.t)
@@ -892,10 +895,12 @@ let saturate t : prem list option =
    where [guard] is [arr <> st] when [arr] is only congruent to (not syntactically) [st]
    (so the clause is unconditionally array-valid). Two/three distinct atoms, not a
    propositional tautology, so the SAT core keeps it. *)
-(* Per-call index: array e-class id -> the registered stores in that class. Mirror of
-   [selects_by_arr_class] for the store side, so [row_split] can enumerate the stores
-   congruent to a select's array ([Euf.are_equal arr st] = [class_of arr = class_of st])
-   without scanning every store. *)
+(* From-scratch index rebuild: array e-class id -> the registered stores in that class.
+   Mirror of [rebuild_selects_idx] for the store side, so [row_split] can enumerate the
+   stores congruent to a select's array ([Euf.are_equal arr st] =
+   [class_of arr = class_of st]) without scanning every store. Run every call on the OFF
+   path ([occidx_on] false); on the ON path [stores_by_class] runs it only on cache
+   invalidation. *)
 let rebuild_stores_idx t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
