@@ -1,0 +1,95 @@
+(* TEST
+ expect;
+*)
+
+(* ============================================================= *)
+(* ACCEPTANCE CORPUS: scope and mutation guards                   *)
+(*                                                                *)
+(* plan.html "How checking works" (afterwards pass): "Facts that  *)
+(* mention out-of-scope variables are dropped (which only weakens *)
+(* conditions), mutable state is versioned and havocked on writes" *)
+(* and (typechecker) "mutable binders are exempt" from becoming    *)
+(* facts, because "a persistent fact about a mutable would survive *)
+(* assignment".                                                    *)
+(*                                                                *)
+(* Marker legend: see binder_facts.ml.                            *)
+(* ============================================================= *)
+
+(* @acc id=scope_fact_in_scope final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+   A fact is available where its binder is in scope: the inner
+   annotation [(x : int{ _ = 7 })] is proved from the fact [x = 7]
+   recorded at the inner binder. The outer result just forwards it at
+   the skeleton.
+   FINAL: accepts. TODAY: rejected at the inner introduction. *)
+let scope_fact_in_scope () =
+  let outer =
+    let x = (7 : int{ _ = 7 }) in
+    (x : int{ _ = 7 })
+  in
+  outer
+[%%expect {|
+Line 3, characters 13-14:
+3 |     let x = (7 : int{ _ = 7 }) in
+                 ^
+Error: The constant "7" has type "int" but an expression was expected of type
+         "int{ (app[Stdlib!.=] _ 7) }"
+|}]
+
+(* @acc id=scope_fact_dropped final=REJECT today=REJECT stable=no unlocks=integration+verification
+   A fact goes OUT OF SCOPE: [x = 7] holds only inside the inner let.
+   Once [r] escapes, the fact mentioning [x] is dropped, so the
+   obligation [r = 7] is NOT provable (dropping only weakens; it
+   never lets an unprovable condition through).
+   FINAL: rejected with a verification error (unprovable VC).
+   TODAY: rejected at the inner introduction -- same outcome, message
+   tightens to a VC failure. *)
+let scope_fact_dropped () =
+  let r =
+    let x = (7 : int{ _ = 7 }) in
+    x + 0
+  in
+  (r : int{ _ = 7 })
+[%%expect {|
+Line 3, characters 13-14:
+3 |     let x = (7 : int{ _ = 7 }) in
+                 ^
+Error: The constant "7" has type "int" but an expression was expected of type
+         "int{ (app[Stdlib!.=] _ 7) }"
+|}]
+
+(* @acc id=mut_binder_exempt final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+   A mutable refined binder: the initializer obligation ([1 = 1]) is
+   discharged, but the binder contributes NO persistent fact. Merely
+   declaring and reading it is fine.
+   FINAL: accepts. TODAY: rejected at the initializer. *)
+let mut_binder_exempt () =
+  let mutable x : int{ _ = 1 } = 1 in
+  x
+[%%expect {|
+Line 2, characters 33-34:
+2 |   let mutable x : int{ _ = 1 } = 1 in
+                                     ^
+Error: The constant "1" has type "int" but an expression was expected of type
+         "int{ (app[Stdlib!.=] _ 1) }"
+|}]
+
+(* @acc id=mut_no_persistent_fact final=REJECT today=REJECT stable=no unlocks=integration+verification
+   The reason mutables are exempt: after [x <- 2] the original
+   refinement must not survive. Re-imposing [int{ _ = 1 }] after the
+   write must fail -- the fact is havocked on assignment, so there is
+   no standing [x = 1] to discharge it.
+   FINAL: rejected with a verification error.
+   TODAY: rejected at the initializer -- same outcome, message
+   tightens. (This case is the guard against a mutable fact
+   surviving an assignment.) *)
+let mut_no_persistent_fact () =
+  let mutable x : int{ _ = 1 } = 1 in
+  x <- 2;
+  (x : int{ _ = 1 })
+[%%expect {|
+Line 2, characters 33-34:
+2 |   let mutable x : int{ _ = 1 } = 1 in
+                                     ^
+Error: The constant "1" has type "int" but an expression was expected of type
+         "int{ (app[Stdlib!.=] _ 1) }"
+|}]
