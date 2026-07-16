@@ -14,10 +14,14 @@ The predicate is elaborated inside `with_refinement_typing_frame` / `type_refine
    (`Env.add_const_closure_lock ~ghost:true` with a comonadic const that pins totality to `Total`
    and leaves the other comonadic axes at `max`), followed by the existing region lock. This makes
    the predicate a total closure: a captured partial value — an effectful/IO value, a partial
-   function, `raise`, a dereference primitive, `while`/`for` — fails the totality boundary, and the
-   lock presents the captured values at `logical`. So a captured `ref` may be *mentioned* but not
-   *dereferenced* (`!` rejects: "this value is logical but is expected to be physical"), which is
-   the logical view of captures.
+   function, `raise`, a dereference primitive, `while`/`for` — fails the totality boundary. So a
+   captured `ref` may be *mentioned* (a `ref` crosses totality) but not *dereferenced*: the
+   dereference primitive `!` is partial, and a total predicate rejects it — the probe reports
+   "the value (!) is partial but is expected to be total". Separately, the same lock presents the
+   captured values at `logical` (its monadic component), which is the logical view of captures: a
+   value that crosses totality but not logicality (a `ref`, an `Atomic.t`) is observable only at
+   its denotation, so a mutable/atomic *access* through it is blocked even though a partial-operation
+   boundary would not fire.
 
 2. **Self bound at logical.** The refined value (the `_` hole) is added to the environment at a
    logical mode, then given its type-directed crossing computed from the skeleton's jkind. A self
@@ -61,11 +65,13 @@ without changing its meaning).
 - **`refined_in_total_closure` (refinement-acceptance/refined_annotation_in_total.ml): REJECT →
   ACCEPT.** A refined annotation `(2 : int{ _ > 0 })` inside a closure required `total` is now
   accepted: the comparison is admitted inside the predicate, so the predicate's `>` no longer makes
-  the host closure partial. The closure is written `let refined_in_total @ total = ...` rather than
-  relying on the later `expects_total` consumer, because under `-principal` a top-level binding's
-  totality is defaulted at the structure boundary before a later consumer can constrain it — the
-  same late-inference class this campaign closed earlier. The annotation states the intended
-  condition directly and passes in both normal and `-principal` checking; a comment records why.
+  the host closure partial. The closure is written `let refined_in_total @ total = ...`, imposing
+  totality on the binding directly, rather than leaving it to the later `expects_total` consumer.
+  The two-phrase consumer form is accepted under ordinary checking but rejected under `-principal`:
+  a top-level binding's totality is fixed at its structure item, so a consumer in a later phrase can
+  no longer constrain a binding that has already defaulted to partial. The annotation therefore
+  makes the test pass identically in normal and `-principal` checking; an in-test comment records
+  this. (This is the structure-boundary defaulting of top-level bindings, not a new rule.)
 
 - **`fp_impure_expr_in_pred` (refinement-acceptance/fact_pollution.ml): ACCEPT → REJECT.** The
   predicate `(read_int () : int{ _ = read_int () })` now rejects: `read_int` is a partial IO value,
@@ -79,20 +85,27 @@ without changing its meaning).
 predicate, `fun (x : int) -> x > 0` fed to a `total` consumer still rejects ("closes over the value
 (>) ... which is partial"). This guards that comparison stays partial in ordinary program code.
 
-### Stage-move class (six tests, same cause, same unlock)
+### Stage-move class (five prelude examples, same cause, same unlock)
 
-Making predicates genuinely total surfaces a class of tests whose predicates call a *partial user
-function or prelude wrapper* rather than an admitted primitive. In each the verdict is unchanged
-(still REJECT) and the marker is unchanged; only the rejection *stage* moved, from a verification
-failure ("not-proved" / "cannot yet be represented") to a totality mode error ("the value X is
-partial but is expected to be total"), and the prose was rewritten to describe that. These are
-`refinement-examples/abs.ml`, `fib.ml`, `max.ml`, `list_length.ml`, `sealed_module.ml` (all via
-`Vox_spec.int_ge` / `int_le` / `list_length`) and `refinement-lean/identity_guards.ml` (via a user
-`add`). Their `unlocks` tags already record the dependency (`total-comparisons` /
-`recursive-totality` / `verification`): once that feature makes the wrapper total-annotatable, the
-predicate will again flow through to verification-stage coverage. For the total-comparisons /
-recursive-totality lane: these six flip back to verification-stage behaviour when the wrappers
-become total; nothing else about them changes.
+Making predicates genuinely total surfaces a class of tests whose predicates call a *partial prelude
+wrapper* rather than an admitted primitive. In each the verdict is unchanged (still REJECT) and the
+`@ex` marker is unchanged; only the rejection *stage* moved, from a verification failure
+("not-proved" / "cannot yet be represented") to a totality mode error ("the value X is partial but
+is expected to be total"), and the prose was rewritten to describe that. These are
+`refinement-examples/abs.ml`, `fib.ml`, `max.ml`, `sealed_module.ml` (via `Vox_spec.int_ge` /
+`int_le`, `unlocks=total-comparisons+verification`) and `refinement-examples/list_length.ml` (via
+`Vox_spec.list_length`, `unlocks=recursive-totality+modes+verification`). Their `unlocks` tags
+already record the dependency; once that feature makes the wrapper total-annotatable, the predicate
+flows through to verification-stage coverage again, with nothing else about the test changing. For
+the total-comparisons / recursive-totality lane: these five flip back to verification-stage
+behaviour when the wrappers become total.
+
+`refinement-lean/identity_guards.ml` moves the same way (verification "not-proved" → "the value add
+is partial") for the same reason, but is a distinct case: it is a plain expect test with no `@`
+marker, and its predicate calls an *arbitrary user function* `add`, not a comparison wrapper. Its
+natural unlock is therefore the ability to declare a user function total/pure (checked effect
+contracts), not total-comparisons; its second case (`_ = 1 + 2`, a modelled arithmetic primitive)
+still accepts unchanged.
 
 ### Documented restriction (elaboration.ml)
 
@@ -102,9 +115,16 @@ become total; nothing else about them changes.
   in its own predicate. This is sound and per-design; it is deferred, unlocked by the same
   kind-constrained-declarations feature that unlocks total comparisons (a `('a : immediate)` self
   would cross and work). A comment states the restriction.
+- `type fn_reentrant = (int -> int){ (_ : int -> int) = _ }` REJECTS the same way. A function self
+  crosses logicality (arrows do cross logicality) but is not modelable, so comparing it would only
+  fail later as a solver error. The self is comparable only if its kind crosses logicality AND is
+  modelable — first-order, i.e. crossing totality (no arrows) — so a function (or any arrow-bearing)
+  self stays logical and is rejected at elaboration with the same message, rather than admitted and
+  failing at discharge. Same deferral and unlock as the polymorphic case.
 - `type int_reentrant = int{ (_ : int) = _ }` is added and ACCEPTS, preserving the original
   parametric-refinement elaboration coverage with a concrete immediate self. The pre-existing `rich`
-  case (int-self comparisons) continues to accept.
+  case (int-self comparisons) continues to accept. (A `ref` self, which crosses totality but not
+  logicality, is rejected by the logicality half of the gate, unchanged.)
 
 ## Verification record
 

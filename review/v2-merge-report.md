@@ -21,8 +21,8 @@ One **semantic** reconciliation (clean text, broken meaning) was needed:
 
 - **typing/typecore.ml `with_refinement_typing_frame`** (~line 4702). This helper +
   `type_refinement` are net-new in the refinement line. The frame saved/reset/restored FOUR
-  global refs; two of them -- `ambient_total_context`, `ambient_primitive_application` --
-  are base-era totality refs that v2's spec-v2 adaptation (a51b54c37b) DELETED entirely,
+  global refs; two of them -- the base-era ambient totality globals (the old snapshot-style
+  totality/primitive refs) -- were DELETED entirely by v2's spec-v2 adaptation (a51b54c37b),
   replacing the mechanism with the functionally-threaded `expected_mode.enclosing_totality`
   field. v2 has 0 references to the old globals. The clean merge left the refinement helper
   referencing the deleted globals -> build break.
@@ -37,9 +37,9 @@ One **semantic** reconciliation (clean text, broken meaning) was needed:
   ACCEPTED redesign); map onto `enclosing_totality` here (= that IS modes-integration work,
   out of merge scope). Escalated to main before finalizing; the merge commit is amendable.
 
-No other orphaned references: scanned every v2-deleted symbol (the `total_context` /
-`total_context_violation` types + `Total_context_violation` constructor from typecore.mli,
-and the ambient refs) -- 0 surviving references in the merged tree.
+No other orphaned references: scanned every v2-deleted symbol (the deleted total-context types
+and their violation constructor from typecore.mli, and the ambient totality globals) -- 0 surviving
+references in the merged tree.
 
 ## Build
 `make -s boot-compiler`: **clean, exit 0** (first combined build of the full refinement
@@ -131,7 +131,7 @@ capture/totality analysis. Landing that lock is what flips the refined_in_total_
 anchor from REJECT to ACCEPT.
 
 ### Note on the merge resolution (for the record)
-The dropped globals (`ambient_total_context`/`ambient_primitive_application`) were the
+The dropped globals (the base-era ambient totality refs) were the
 SNAPSHOT-era totality machinery that the v2 redesign deliberately deleted under the
 binding-constraint-based ruling; re-adding them would resurrect banned machinery. Under v2
 the totality context is functionally threaded (`expected_mode` + env ambient locks), so a
