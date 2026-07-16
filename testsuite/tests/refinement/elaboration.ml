@@ -36,13 +36,17 @@ type rich =
    Comparing the self reads its representation, which requires [physical]
    access.  For a self whose type CROSSES logicality (an immediate such as
    [int], see [int_reentrant] below) that is fine.  For a POLYMORPHIC self the
-   type is not known to cross, so the comparison is rejected: a polymorphic self
-   cannot be compared in its own predicate until the self's kind is known to
-   cross logicality.  A function self also remains logical because arrows do not
-   cross totality and so are not modelable.  Restriction deferred, unlocked by
-   kind-constrained declarations (the same feature that unlocks total
-   comparisons); the sibling [int_reentrant] keeps the parametric-refinement
-   elaboration coverage. *)
+   type is not known to cross, so the self stays [logical] and the comparison
+   is rejected: a polymorphic self cannot be compared in its own predicate
+   until the self's kind is known to cross logicality.  A function self is
+   different: its type DOES cross logicality (so a mode-only rejection would be
+   masked in default compilation and only appear under [-principal]), but a
+   function value is not modelable, so reading it in its own predicate is
+   rejected explicitly and identically in every mode (the batch-mode
+   regression is [refined_function_self_reject.ml]).  Both restrictions are
+   deferred, unlocked by kind-constrained declarations (the same feature that
+   unlocks total comparisons); the sibling [int_reentrant] keeps the
+   parametric-refinement elaboration coverage. *)
 type 'a reentrant = 'a{ ((_ : 'a) = _) }
 
 [%%expect {|
@@ -55,10 +59,12 @@ Error: This value is "logical" but is expected to be "physical".
 type fn_reentrant = (int -> int){ ((_ : int -> int) = _) }
 
 [%%expect {|
-Line 1, characters 54-55:
+Line 1, characters 20-58:
 1 | type fn_reentrant = (int -> int){ ((_ : int -> int) = _) }
-                                                          ^
-Error: This value is "logical" but is expected to be "physical".
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The value refined by this predicate has type "int -> int",
+       which is not modelable: it contains a function type,
+       and a function value cannot be read in its own refinement predicate.
 |}]
 
 type int_reentrant = int{ ((_ : int) = _) }

@@ -322,6 +322,7 @@ type error =
   | Refinement_expression_not_supported of string
   | Refinement_unresolved_type_variable of type_expr
   | Refinement_value_not_representable of type_expr * Jkind.Violation.t
+  | Refinement_self_not_modelable of type_expr
   | Invalid_refinement_expression of Refinement.validation_error
   | Let_poly_not_yet_implemented
   | Let_poly_not_syntactic_value
@@ -13885,6 +13886,12 @@ let report_error ~loc env =
         (Jkind.Violation.report_with_offender
            ~offender:(fun ppf -> Printtyp.type_expr ppf ty)
            env) violation
+  | Refinement_self_not_modelable ty ->
+      Location.errorf ~loc
+        "The value refined by this predicate has type %a,@ which is not \
+         modelable:@ it contains a function type,@ and a function value \
+         cannot be read in its own refinement predicate."
+        (Style.as_inline_code Printtyp.type_expr) ty
   | Invalid_refinement_expression validation_error ->
       Location.errorf ~loc
         "Invalid lowered refinement predicate: %s"
@@ -14155,23 +14162,45 @@ let type_refinement env loc skeleton predicate =
             logicality = Mode.Logicality.Const.Logical;
           }
       in
-      (* Refinement skeletons are not generalized yet, so cross using their
-         jkind rather than the type's principality-sensitive crossing. *)
+      (* The refined self is viewed [logical] so a predicate cannot read
+         mutable state through it: reading the self (for instance comparing it)
+         needs [physical] access, which the self's logicality crossing grants
+         only when its type crosses logicality.  So a self that does NOT cross
+         logicality (a polymorphic/abstract self, or one over mutable state)
+         stays [logical] and any read is rejected -- identically in every mode,
+         because a non-crossing logicality is not erased at the use site.
+
+         Totality is a separate concern: even when the self crosses logicality
+         (so reads are mode-legal), a self whose type does NOT cross totality
+         -- i.e. one that contains a function type -- is not modelable, because
+         the Lean backend cannot model a function value as a proposition
+         argument.  We reject a read of such a self explicitly (see below),
+         rather than through modes: the mode system erases a crossing
+         logicality at the use site principality-sensitively (a function read
+         is admitted in default mode but rejected under [-principal]), which
+         would mask the error in batch compilation.
+
+         The crossing is computed with a principality-insensitive
+         (always-principal) context so both decisions are the same in batch and
+         [-principal] mode. *)
       let crossing =
         Ctype.type_jkind_purely env skeleton
-        |> Ctype.crossing_of_jkind env
+        |> Ctype.crossing_of_jkind_principal env
       in
-      let totality_axis =
-        Mode.Crossing.Axis.Comonadic Mode.Axis.Totality
+      let crosses_axis axis =
+        let proj = Mode.Crossing.proj axis crossing in
+        Mode.Crossing.Per_axis.equal axis proj
+          (Mode.Crossing.Per_axis.min axis)
       in
       let crosses_totality =
-        let totality = Mode.Crossing.proj totality_axis crossing in
-        Mode.Crossing.Per_axis.equal totality_axis totality
-          (Mode.Crossing.Per_axis.min totality_axis)
+        crosses_axis (Mode.Crossing.Axis.Comonadic Mode.Axis.Totality)
+      in
+      let crosses_logicality =
+        crosses_axis (Mode.Crossing.Axis.Monadic Mode.Axis.Logicality)
       in
       let self_mode =
         let logical_mode = Mode.Value.disallow_right logical_mode in
-        if crosses_totality
+        if crosses_logicality
         then logical_mode |> Mode.Crossing.apply_left crossing
         else logical_mode
       in
@@ -14192,6 +14221,15 @@ let type_refinement env loc skeleton predicate =
       let ref_pred =
         lower_refinement_expression ~view:ref_view typed_predicate
       in
+      (* Modelability: a predicate that actually reads a self whose type is not
+         modelable (crosses logicality but not totality -- it contains a
+         function type) is rejected here, identically in batch and [-principal]
+         mode.  A refinement that never mentions its self (for example
+         [(int -> int){ true }]) has nothing to model and is left alone. *)
+      if crosses_logicality && not crosses_totality
+         && Ident.Set.mem ref_view.rb_id
+              (Refinement.free_bound_identifiers ref_pred)
+      then raise (Error (loc, env, Refinement_self_not_modelable skeleton));
       begin
         match reject_unresolved_refinement_types skeleton ref_pred with
         | () -> ()
