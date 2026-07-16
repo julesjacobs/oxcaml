@@ -1606,9 +1606,82 @@ let test_cg_cut () =
   run_cut_sweep ~label:"cg sweep" ~seed:[| 0xC63B; 11; 43 |] ~producer:Lia.cg_cut
 ;;
 
+(* Slack-key injectivity (soundness-critical): [Lia.sort_key] must map two DISTINCT
+   canonical combos to DISTINCT strings — a collision would conflate them onto one slack
+   (wrong reuse ⇒ possible wrong verdict). Hammers the varid/coefficient boundary that a
+   naive delimiter-free or non-length-prefixed encoding would confuse, plus a randomized
+   differential over many combos. Also checks the dedup direction: reordered inputs of the
+   SAME combo yield the SAME key (sort_key sorts by varid). *)
+let test_sort_key_injective () =
+  let key = Lia.sort_key in
+  (* Order-invariance / dedup: same canonical combo, permuted input → identical key. *)
+  check
+    "sort_key order-invariant"
+    (String.equal
+       (key [ 3, q 4; 1, q 2; 40, q (-7) ])
+       (key [ 40, q (-7); 1, q 2; 3, q 4 ]));
+  (* Adversarial near-collisions that a NAIVE separator-free concatenation would merge
+     ("123" ≡ "123", "1234" ≡ "1234") but which are genuinely different combos. *)
+  check
+    "digit run-on (1,23) vs (12,3)"
+    (not (String.equal (key [ 1, q 23 ]) (key [ 12, q 3 ])));
+  check
+    "multi-pair boundary (1,2)(3,4) vs (12,34)"
+    (not (String.equal (key [ 1, q 2; 3, q 4 ]) (key [ 12, q 34 ])));
+  check
+    "coeff-length boundary (1,2)(3,45) vs (1,23)(4,5)"
+    (not (String.equal (key [ 1, q 2; 3, q 45 ]) (key [ 1, q 23; 4, q 5 ])));
+  (* Fractions / negatives (Rational.to_string emits '/' and '-'): still distinct. *)
+  check "fraction vs integer" (not (String.equal (key [ 1, qf 1 2 ]) (key [ 1, q 1 ])));
+  check
+    "negative vs positive coeff"
+    (not (String.equal (key [ 5, q (-3) ]) (key [ 5, q 3 ])));
+  (* Randomized differential: many distinct canonical combos ⇒ no two share a key. Build a
+     table key→canonical-combo; a repeat key with a DIFFERENT canonical combo is a
+     collision (soundness bug); a repeat with the SAME canonical combo is legitimate
+     dedup. *)
+  let st = Random.State.make [| 0x51AC; 0x9E37; 7 |] in
+  let by_key : (string, (int * string) list) Hashtbl.t = Hashtbl.create 4096 in
+  let collisions = ref 0 in
+  for _ = 1 to 20000 do
+    (* 1..4 distinct varids in [0,30], coeffs int in [-15,15]\{0} or a small fraction. *)
+    let n = 1 + Random.State.int st 4 in
+    let rec pick_vars acc k =
+      if k = 0
+      then acc
+      else (
+        let v = Random.State.int st 31 in
+        if List.mem_assoc v acc
+        then pick_vars acc k
+        else pick_vars ((v, ()) :: acc) (k - 1))
+    in
+    let vars = List.map fst (pick_vars [] n) in
+    let mk_coeff () =
+      if Random.State.bool st
+      then (
+        let c = Random.State.int st 31 - 15 in
+        q (if c = 0 then 1 else c))
+      else qf (Random.State.int st 9 + 1) (Random.State.int st 8 + 2)
+    in
+    let combo = List.map (fun v -> v, mk_coeff ()) vars in
+    let k = key combo in
+    let canon =
+      List.sort (fun (a, _) (b, _) -> Int.compare a b) combo
+      |> List.map (fun (v, c) -> v, Rational.to_string c)
+    in
+    match Hashtbl.find_opt by_key k with
+    | Some prev when prev <> canon -> incr collisions
+    | _ -> Hashtbl.replace by_key k canon
+  done;
+  check
+    "sort_key randomized differential: 0 collisions over 20000 combos"
+    (!collisions = 0)
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
+  test_sort_key_injective ();
   test_delta ();
   test_hand_cases ();
   test_strict_delta ();

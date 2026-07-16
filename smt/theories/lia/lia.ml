@@ -43,7 +43,7 @@ type 'tok t =
   ; simplex : 'tok reason Simplex.t
   ; var_of_term : int Term.Table.t (* problem-var term -> simplex id *)
   ; problem_vars : (int * Term.t) Dynarray.t (* (simplex id, term), creation order *)
-  ; slacks : ((int * string) list, int) Hashtbl.t
+  ; slacks : (string, int) Hashtbl.t
       (* sorted (varid, canonical-coeff-string) key -> slack id; the coeff is stringified
          via [Rational.to_string] because coefficients are now arbitrary-precision
          [Rational.t] (core-bignum W2) and must not be keyed by a polymorphic hash of the
@@ -166,11 +166,42 @@ let combo_of_term t (term : Term.t) : (int * Rational.t) list * Rational.t =
   | _ -> [ problem_var t term, Rational.one ], Rational.zero
 ;;
 
-(* Canonical dedup key for a slack definition: sort by varid, stringify the coefficient
-   (value-canonical, so it does not depend on the [Rational] tier). *)
-let sort_key (pairs : (int * Rational.t) list) : (int * string) list =
-  List.sort (fun (a, _) (b, _) -> Int.compare a b) pairs
-  |> List.map (fun (x, c) -> x, Rational.to_string c)
+(* Canonical dedup key for a slack definition, serialized to ONE flat [string]: sort by
+   varid, stringify each coefficient (value-canonical, so it does not depend on the
+   [Rational] tier), and emit each pair as [varid "," len ":" coeff-string] where [len] is
+   the byte length of the coefficient string. A flat-string key makes the slack [Hashtbl]
+   hash and compare a single monomorphic string op (one [memcmp] on a collision) instead
+   of the deep polymorphic [caml_hash]/[compare_val] over a nested [(int * string) list] —
+   the per-atom slack-registration and search hot path on large linear residuals.
+
+   INJECTIVE (soundness-critical: a collision would silently merge two DISTINCT combos
+   onto one slack ⇒ wrong reuse ⇒ possible wrong verdict). The serialization is uniquely
+   decodable for ANY field contents, with no assumption on the coefficient charset:
+   - each record is [varid "," len ":" cs];
+   - [varid = string_of_int _] and [len = string_of_int (String.length cs)] are drawn from
+     [{'-','0'..'9'}], so the FIRST ',' ends the varid field and the FIRST ':' after it
+     ends the length field unambiguously (neither ',' nor ':' occurs in a [string_of_int]
+     output);
+   - [cs] is then read as EXACTLY [len] bytes, so it is recovered verbatim even if it were
+     to contain ',' or ':'. Hence the flat string determines the sorted
+     [(varid, coeff-string)] sequence uniquely. Distinct canonical combos have distinct
+     such sequences (varids are distinct after the equality-merge and sorted here;
+     [Rational.to_string] is value-canonical), so they map to distinct keys. The dedup —
+     hence every created slack variable, all downstream simplex behaviour, and the
+     reported counters — is therefore byte-identical to the old list key. *)
+let sort_key (pairs : (int * Rational.t) list) : string =
+  let sorted = List.sort (fun (a, _) (b, _) -> Int.compare a b) pairs in
+  let buf = Buffer.create 32 in
+  List.iter
+    (fun (x, c) ->
+      let cs = Rational.to_string c in
+      Buffer.add_string buf (string_of_int x);
+      Buffer.add_char buf ',';
+      Buffer.add_string buf (string_of_int (String.length cs));
+      Buffer.add_char buf ':';
+      Buffer.add_string buf cs)
+    sorted;
+  Buffer.contents buf
 ;;
 
 (* The simplex variable carrying a linear combination, and whether the reported bound is a
@@ -1270,10 +1301,11 @@ let cg_cut ?(cut_gate = fun ~nnz:_ ~ants:_ ~m:_ ~n:_ -> true) t
             best-candidate cut is worth emitting. The default (no [cut_gate] arg) always
             emits — VERDICT+SEARCH-identical to the pre-policy behaviour and to every
             existing caller / unit test (not allocation-identical: the [nnz]/[ant_count]
-            support scan and the always-true gate callback still run). The adapter supplies the density policy when CG cuts are
-            on. Rejecting a cut here makes {!hnf_lemma} return [None], so the adapter
-            falls back to the B&B branch — a strictly weaker action, so soundness is
-            unaffected (the gate can only forgo an optimisation, never change a verdict). *)
+            support scan and the always-true gate callback still run). The adapter
+            supplies the density policy when CG cuts are on. Rejecting a cut here makes
+            {!hnf_lemma} return [None], so the adapter falls back to the B&B branch — a
+            strictly weaker action, so soundness is unaffected (the gate can only forgo an
+            optimisation, never change a verdict). *)
          if not (cut_gate ~nnz ~ants:ant_count ~m ~n)
          then None
          else (

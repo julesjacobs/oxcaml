@@ -153,8 +153,8 @@ val hnf_cut : 'tok t -> (Term.t * 'tok list) option
     support size [ants], and the tight system's [m] rows / [n] cols, and the cut is
     emitted only if it returns [true]. The default always emits — verdict+search-identical
     to callers that do not pass it (not allocation-identical: the support scan + gate
-    callback still run). Rejecting a cut yields [None] (the caller branches
-    instead), a strictly weaker action, so the gate is soundness-neutral. *)
+    callback still run). Rejecting a cut yields [None] (the caller branches instead), a
+    strictly weaker action, so the gate is soundness-neutral. *)
 val cg_cut
   :  ?cut_gate:(nnz:int -> ants:int -> m:int -> n:int -> bool)
   -> 'tok t
@@ -249,3 +249,10 @@ val overflow_count : 'tok t -> int
 (** [true] once an escaped overflow has bricked the instance (see the "Poisoned instances"
     note); safe to call at any time, never raises {!Poisoned}. *)
 val is_poisoned : 'tok t -> bool
+
+(** [sort_key pairs] is the canonical dedup key for a slack definition [Σ coeff·varid]: a
+    flat string that is INJECTIVE on canonical combos (distinct sorted (varid, canonical-
+    coefficient) sequences map to distinct strings). Exposed only for the injectivity unit
+    test (the soundness-critical property: two DISTINCT combos must never share a key,
+    else they would be conflated onto one slack). Pure, total, deterministic. *)
+val sort_key : (int * Rational.t) list -> string
