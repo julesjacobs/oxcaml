@@ -96,9 +96,11 @@ let fabric_callbacks_off =
    equality (a disequality [x <> c]) is routed to the congruence child ONLY
    ([Uflia_router.assert_to], "Both when not positive -> A") because {!Lia} raises
    [Unsupported] on a negated equality (lia.mli). The pair-shaped [find_disagreement] net
-   that is supposed to make that narrowing complete only fires for a shared VARIABLE pair
-   both models value differently -- it never returns a variable-vs-CONSTANT disequality
-   (the nec-smt ITE-condition shape [i <> 0]), so LIA never hears the disequality and its
+   that is supposed to make that narrowing complete ranges over the Int-sorted, both-valued
+   INTERFACE members -- it never forms a variable-vs-CONSTANT disequality
+   (the nec-smt ITE-condition shape [i <> 0]) because the variable is EUF-only-used (not a
+   both-used interface member) and the constant is not an interface node, so LIA never
+   hears the disequality and its
    candidate model can set [x = c], a point R1 then rejects (logs/nec-probe-report.md).
    When ON, {!repair_split} closes that gap by scanning the negatively-pinned pairs LIA's
    candidate model equates and emitting the existing trichotomy split. Read-once; OFF
