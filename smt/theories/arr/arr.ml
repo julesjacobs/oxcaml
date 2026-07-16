@@ -223,8 +223,18 @@ type t =
          (see [occ_cursor] / select registration / [pop]). Always [None] when [occidx_on]
          is off. *)
   ; occ_cursor : Euf.merge_cursor option
-  (* Private merge cursor (only allocated when [occidx_on]); a non-empty drain means an
-     Euf union changed some class since [occ_idx] was built, so the cache is invalidated. *)
+      (* Private merge cursor (only allocated when [occidx_on]); a non-empty drain means
+         an Euf union changed some class since [occ_idx] was built, so the cache is
+         invalidated. *)
+  ; mutable store_idx : (int, Term.t) Hashtbl.t option
+      (* W5 Lever A store-side twin: the cached [stores_by_class] index (store term -> its
+         own e-class), or [None] when it must be rebuilt. Dropped on any
+         store-class-changing event (an Euf union via [store_cursor], a new store
+         registration, or a [pop]). Always [None] when [occidx_on] is off. *)
+  ; store_cursor : Euf.merge_cursor option
+  (* Private merge cursor for [store_idx] (only allocated when [occidx_on]); SEPARATE from
+     [occ_cursor] so both caches see every merge (a shared cursor would let the first
+     drainer consume the other's events). *)
   }
 
 let max_iters = 1_000_000
@@ -283,6 +293,9 @@ let create ctx env cap reg =
       Some (Euf.add_merge_consumer engine))
     else None
   in
+  (* Store-side cache cursor: a second, independent consumer (see [store_cursor]). Merge
+     recording is already enabled by the [occ_cursor] branch above under [occidx_on]. *)
+  let store_cursor = if occidx_on then Some (Euf.add_merge_consumer engine) else None in
   { ctx
   ; env
   ; cap
@@ -310,6 +323,8 @@ let create ctx env cap reg =
   ; weq_dirty = true
   ; occ_idx = None
   ; occ_cursor
+  ; store_idx = None
+  ; store_cursor
   }
 ;;
 
@@ -369,6 +384,8 @@ let rec catalog t (term : Term.t) =
       (match role_of t term with
        | Some { Defs.role = Defs.Store; _ } ->
          t.store_terms <- term :: t.store_terms;
+         (* new store ⇒ the cached store-class index is stale (W5 Lever A, store side) *)
+         if occidx_on then t.store_idx <- None;
          (* record the permanent store edge in the weak-equivalence graph (W0, dark). The
             [Array.length args = 3] guard is load-bearing exactly as in the ROW consuming
             sites: a store-role symbol can be registered at a non-3 arity via the public
@@ -879,7 +896,7 @@ let saturate t : prem list option =
    [selects_by_arr_class] for the store side, so [row_split] can enumerate the stores
    congruent to a select's array ([Euf.are_equal arr st] = [class_of arr = class_of st])
    without scanning every store. *)
-let stores_by_class t : (int, Term.t) Hashtbl.t =
+let rebuild_stores_idx t : (int, Term.t) Hashtbl.t =
   let idx = Hashtbl.create 64 in
   List.iter
     (fun st ->
@@ -889,6 +906,31 @@ let stores_by_class t : (int, Term.t) Hashtbl.t =
       | _ -> ())
     t.store_terms;
   idx
+;;
+
+(* The per-class store occurrence index. OFF ([occidx_on] false): rebuilt every call,
+   byte-identical to trunk. ON (W5 Lever A, store side): returns the cached index,
+   rebuilding only when invalidated. Invalidation is by REBUILD (never key-remap):
+   draining the private [store_cursor] detects any Euf union since the last build (a
+   store's own e-class may have changed) and drops the cache; store registration
+   ([catalog]) and [pop] also drop it. So a cache hit means the store set AND every
+   store's e-class are unchanged since the build — the rebuilt index would be identical
+   (same [Hashtbl.add] insertion order ⇒ identical [find_all] order), preserving
+   counted-identity. Rebuilt at most once per [row_split]/[Final], a lower frequency than
+   the selects side. *)
+let stores_by_class t : (int, Term.t) Hashtbl.t =
+  if not occidx_on
+  then rebuild_stores_idx t
+  else (
+    (match t.store_cursor with
+     | Some c -> if Euf.drain_merges t.engine c <> [] then t.store_idx <- None
+     | None -> ());
+    match t.store_idx with
+    | Some idx -> idx
+    | None ->
+      let idx = rebuild_stores_idx t in
+      t.store_idx <- Some idx;
+      idx)
 ;;
 
 let row_split t : Term.t list option =
@@ -1556,6 +1598,11 @@ let pop t n =
      this line flips 14/30 swap files sat→unknown under the counted-identity sweep (RED,
      mutant- verified 2026-07-15 — stale-across-pop cache ⇒ wrong verdict). *)
   if occidx_on then t.occ_idx <- None;
+  (* likewise the store-class index: a pop reverts store e-classes, so the cached
+     [store_idx] is stale; drop it (rebuilt fresh on next use). W5 Lever A, store side.
+     Load-bearing exactly as the [occ_idx] drop above — a stale-across-pop store index
+     misroutes [row_split]'s congruent-store enumeration. *)
+  if occidx_on then t.store_idx <- None;
   let rec drop k frames =
     if k = 0
     then frames
