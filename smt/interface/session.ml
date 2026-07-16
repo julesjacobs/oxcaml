@@ -116,7 +116,7 @@ type t =
   ; mutable degraded_reason : string
       (* census (task #78): the FIRST cause that set [degraded] (first-wins, sticky, never
          reset), consulted at the pre-solve degraded gate. Empty until [degrade] fires.
-         Diagnostic-only (OXSMT_UNKNOWN_REASON); no verdict/counter effect. *)
+         Diagnostic-only (surfaced by the dev CLI on stderr); no verdict/counter effect. *)
   ; mutable unknown_reason : string
       (* census (task #78): the resolved cause of the MOST RECENT check_sat's [Unknown],
          reset to "" at each check_sat entry and set at every giveup site. Surfaced by
@@ -1857,8 +1857,8 @@ let get_model t =
 
 (* census (task #78): the tag identifying WHY the most recent [check_sat] returned
    [Unknown] (empty when the verdict was not [Unknown]). Diagnostic introspection only —
-   never consulted by the solver, so it cannot affect a verdict. Surfaced by the dev CLI
-   under OXSMT_UNKNOWN_REASON to bucket structural unknowns by cause. *)
+   never consulted by the solver, so it cannot affect a verdict. Surfaced unconditionally
+   by the dev CLI on stderr to bucket structural unknowns by cause. *)
 let last_unknown_reason t = t.unknown_reason
 let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.elim_defs
 

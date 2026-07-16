@@ -35,7 +35,7 @@ type block =
   ; propagations : int
   ; reason : string
   (* census (task #78): WHY an [unknown] verdict was returned; "" for sat/unsat. Printed
-     to STDERR only under OXSMT_UNKNOWN_REASON so stdout stays byte-identical. *)
+     unconditionally to STDERR (loud, no env gate) while stdout stays SMT-LIB-clean. *)
   }
 
 let unknown_block_with reason =
@@ -321,19 +321,17 @@ let () =
     else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve sexps ]
   in
   List.iter print_block blocks;
-  (* census (task #78): when OXSMT_UNKNOWN_REASON is set (to any non-empty,
-     non-[0/false/no] value), emit one [(unknown-reason <tag>)] line to STDERR per
-     [unknown] block. STDOUT is byte-identical whether or not the flag is set (the sweep
-     reads reasons off stderr). *)
-  match Sys.getenv_opt "OXSMT_UNKNOWN_REASON" with
-  | None | Some ("" | "0" | "false" | "no") -> ()
-  | Some _ ->
-    List.iter
-      (fun b ->
-        if b.verdict = "unknown"
-        then
-          Printf.eprintf
-            "(unknown-reason %s)\n"
-            (if String.length b.reason = 0 then "unclassified" else b.reason))
-      blocks
+  (* census (task #78, USER directive): the unknown-reason is LOUD and UNCONDITIONAL — no
+     env gate. STDOUT stays SMT-LIB-clean (bare [(result (verdict unknown) ...)] via
+     [print_block] above), and every self-returned [unknown] ALWAYS emits one stable
+     [(unknown-reason <tag>)] line to STDERR. Verdict-parsing harnesses read stdout and
+     are unaffected; the census sweep reads reasons off stderr. *)
+  List.iter
+    (fun b ->
+      if b.verdict = "unknown"
+      then
+        Printf.eprintf
+          "(unknown-reason %s)\n"
+          (if String.length b.reason = 0 then "unclassified" else b.reason))
+    blocks
 ;;

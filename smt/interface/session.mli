@@ -373,7 +373,7 @@ val get_model : t -> model option
     [Unknown] (e.g. ["r1-model-check-failed"], ["effort-budget"], ["lemma-saturated"],
     ["combine-incomplete-solve"]). Empty string when the last verdict was not [Unknown].
     Diagnostic introspection only — the solver never reads it, so it cannot influence a
-    verdict; the dev CLI surfaces it under [OXSMT_UNKNOWN_REASON] to bucket structural
+    verdict; the dev CLI surfaces it unconditionally on stderr to bucket structural
     unknowns by cause. *)
 val last_unknown_reason : t -> string
 
