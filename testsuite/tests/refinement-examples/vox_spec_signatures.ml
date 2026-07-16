@@ -15,8 +15,6 @@
 include Vox_spec
 
 [%%expect {|
-val forall_ : ('a : any). ('a -> bool) @ total -> bool = <fun>
-val exists_ : ('a : any). ('a -> bool) @ total -> bool = <fun>
 val implies : bool -> bool -> bool = <fun>
 val conjunction : bool -> bool -> bool = <fun>
 val int_lt : int -> int -> bool = <fun>
