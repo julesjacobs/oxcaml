@@ -11,15 +11,14 @@ let (implies @ total) premise conclusion = (not premise) || conclusion
 let (conjunction @ total) left right = left && right
 
 (* VOX2_AWAITS_TOTAL_COMPARISONS: these int-comparison wrappers are kept PARTIAL
-   deliberately, to match the ruled end-state -- NOT because the compiler forbids it. The
-   base actually accepts a monomorphic [int_lt @ total] today (int comparison is on the
-   pure-primitive allowlist at this tip). But TASK-SPEC.md (Ops) and the canonical plan
-   ("Comparisons in specs") RULE all comparison primitives partial for now: the
+   to match the ruled end-state.  Comparison primitives are NOT on the general total
+   allowlist: after modes integration they are admitted only INSIDE a refinement
+   predicate (predicate-scoped), so a top-level [int_lt @ total] annotation is REJECTED
+   today ("The value (<) is partial but is expected to be total").  The canonical plan
+   ("Comparisons in specs") rules all comparison primitives partial for now; the
    immediate-comparison question is deferred, and making comparison total safely needs
-   either a banned-application-site rule or future kind-constrained declarations. The
-   modes-integration step will tighten the totality allowlist to match the ruling, at
-   which point an [int_lt @ total] annotation would break; so we keep them partial and
-   these definitions become the single substitution point when total comparisons land. *)
+   future kind-constrained declarations.  These definitions are the single substitution
+   point when total comparisons land. *)
 
 (* @pre id=int_lt final=ACCEPT today=ACCEPT stable=no unlocks=total-comparisons *)
 let int_lt (left : int) (right : int) = left < right

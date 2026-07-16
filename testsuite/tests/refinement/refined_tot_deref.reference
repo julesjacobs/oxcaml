@@ -1,0 +1,7 @@
+File "refined_tot_deref.ml", line 2, characters 21-22:
+2 | let (g @ total) () = !r
+                         ^
+Error: The value (!) is partial
+       but is expected to be total
+         because it is used inside the function at file "refined_tot_deref.ml", line 2, characters 16-23
+         which is expected to be total.

@@ -1,0 +1,7 @@
+File "refined_tot_read_int.ml", line 1, characters 21-29:
+1 | let (f @ total) () = read_int ()
+                         ^^^^^^^^
+Error: The value read_int is partial
+       but is expected to be total
+         because it is used inside the function at file "refined_tot_read_int.ml", line 1, characters 16-32
+         which is expected to be total.
