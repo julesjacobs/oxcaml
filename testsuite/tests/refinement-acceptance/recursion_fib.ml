@@ -30,10 +30,10 @@
 let rec rec_fib_nonneg (n : int{ _ >= 0 }) : int{ _ >= 0 } =
   if n <= 1 then n else rec_fib_nonneg (n - 1) + rec_fib_nonneg (n - 2)
 [%%expect {|
-Line 2, characters 10-11:
+Line 2, characters 17-18:
 2 |   if n <= 1 then n else rec_fib_nonneg (n - 1) + rec_fib_nonneg (n - 2)
-              ^
-Error: The constant "1" has type "int" but an expression was expected of type
+                     ^
+Error: The value "n" has type "int" but an expression was expected of type
          "int{ (app[Stdlib!.>=] _ 0) }"
 |}]
 
@@ -47,9 +47,9 @@ Error: The constant "1" has type "int" but an expression was expected of type
 let rec rec_sum_to (n : int{ _ >= 0 }) : int{ _ >= 0 } =
   if n = 0 then 0 else n + rec_sum_to (n - 1)
 [%%expect {|
-Line 2, characters 9-10:
+Line 2, characters 16-17:
 2 |   if n = 0 then 0 else n + rec_sum_to (n - 1)
-             ^
+                    ^
 Error: The constant "0" has type "int" but an expression was expected of type
          "int{ (app[Stdlib!.>=] _ 0) }"
 |}]
