@@ -1,0 +1,3 @@
+substitution: string heads preserved, path head rewritten
+save/load: stamps preserved then freshened, string heads intact
+marshal round-trip: string heads intact
