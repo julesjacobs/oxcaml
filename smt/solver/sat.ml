@@ -904,6 +904,17 @@ let cla_decay_bump t = t.cla_inc <- t.cla_inc /. cla_decay
    allocation (the old Array.init/Array.map/Array.copy path). Indexed by decision level
    (< [nvars]); grown lazily. *)
 let lbd_begin t =
+  (* Rollover guard (cold path): [lbd_gen] is a monotone generation tag; a stamp entry
+     equal to the live [lbd_gen] means "already counted for the current clause".
+     Incrementing past [max_int] would wrap [lbd_gen] negative and could alias a stale
+     stamp, so on the (2^62-unreachable) wrap we zero the stamp array and restart the
+     generation. This makes the distinct-level count UNCONDITIONALLY identical to
+     [Search_heuristics.lbd_of_levels], not merely up to the first wrap. The hot
+     [lbd_count_level] reads are untouched. *)
+  if t.lbd_gen = max_int
+  then (
+    Array.fill t.lbd_stamp 0 (Array.length t.lbd_stamp) 0;
+    t.lbd_gen <- 0);
   t.lbd_gen <- t.lbd_gen + 1;
   t.lbd_gen
 ;;
