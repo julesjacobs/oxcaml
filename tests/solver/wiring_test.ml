@@ -1972,17 +1972,17 @@ let test_skolem_fun_antecedent_exists_not_skolemized () =
      | Session.Unsat | Session.Unknown -> true)
 ;;
 
-(* CHUNK 2c end-to-end: trigger preference for ground-occurring heads un-inerts a Skolem
-   universal. [forall x. (p x) => (exists y. (and (r x y) (g x)))] Skolemizes (2b) to
+(* CHUNK 2c end-to-end: demoting the inert Skolem head un-inerts a Skolem universal.
+   [forall x. (p x) => (exists y. (and (r x y) (g x)))] Skolemizes (2b) to
    [forall x. (p x) => (and (r x (f x)) (g x))]. The consequent does NOT fold (r x (f x)
    is a live UF app), so the candidate triggers are p(x), g(x), f(x), all covering x; f(x)
    is created first and — WITHOUT 2c — wins the size/tag tiebreak, so the trigger is the
-   Skolem head f(x), which never matches (no ground f term) and the lemma stays inert ->
-   unknown. WITH 2c, p and g have ground occurrences ([p a], [not (g a)]) and f has none,
-   so the trigger is a ground-matchable head; the lemma fires on [p a], forcing [g a],
-   which contradicts [not (g a)] -> UNSAT (single instantiation round). This is the
-   discriminating case: a mutant that ignores ~ground_occurrences leaves the trigger on
-   f(x) and returns unknown, failing this check. *)
+   Skolem head f(x), which can never match (the only source of a ground f-term is this
+   lemma firing, which needs one — a deadlock) and the lemma stays inert -> unknown. WITH
+   2c the loader marks f inert, so inference demotes it and picks a firable head; the
+   lemma fires on [p a], forcing [g a], which contradicts [not (g a)] -> UNSAT (single
+   instantiation round). Discriminating: a mutant that ignores ~inert_head leaves the
+   trigger on f(x) and returns unknown, failing this check. *)
 let test_skolem_fun_trigger_prefers_ground () =
   let s = Session.create () in
   let text =

@@ -902,15 +902,14 @@ let ti_zero () =
     (Trigger.infer ~qvars:[||] (Context.const sc.ctx p) = [])
 ;;
 
-(* TI-GROUND-PREF (lemmas-climb chunk 2c): trigger selection prefers a candidate whose
-   head has GROUND occurrences over one that does not (a head that never occurs in a
-   ground term can never match — the failure mode of a Skolem function minted for a nested
-   existential). Body [f(x) = g(x)]: [f(x)] and [g(x)] tie on size, and [f] is created
-   first so wins the tag tiebreak by DEFAULT. Supplying [~ground_occurrences] that reports
-   a ground occurrence of [g] (only) must flip the inferred trigger to [g(x)]; a mutant
-   that ignores the new key leaves it [f(x)] and fails. The symmetric case (ground
-   occurrence of [f]) must keep [f(x)], guarding against an always-flip mutant. *)
-let ti_ground_preference () =
+(* TI-INERT-DEMOTE (lemmas-climb chunk 2c): trigger selection DEMOTES a candidate whose
+   head is marked inert (provably unable to seed matching — a Skolem function minted for a
+   nested existential), choosing a non-inert trigger instead. Body [f(x) = g(x)]: [f(x)]
+   and [g(x)] tie on size, and [f] is created first so wins the tag tiebreak by DEFAULT.
+   Marking [f] inert via [~inert_head] must flip the inferred trigger to [g(x)]; a mutant
+   that ignores the key leaves it [f(x)] and fails. The symmetric case (mark [g] inert)
+   must keep [f(x)], guarding against an always-flip mutant. *)
+let ti_inert_demote () =
   let sc = scaffold () in
   let f = Env.declare_fun sc.env "f" int_to_int in
   let g = Env.declare_fun sc.env "g" int_to_int in
@@ -920,23 +919,17 @@ let ti_ground_preference () =
   and gx = Context.app sc.ctx g [ x ] in
   let body = Context.eq sc.ctx fx gx in
   check
-    "TI-GROUND-PREF default: size/tag tiebreak picks f(x)"
+    "TI-INERT-DEMOTE default: size/tag tiebreak picks f(x)"
     (trigger_is (Trigger.infer ~qvars:qv body) [ fx ]);
   check
-    "TI-GROUND-PREF: a ground occurrence of g flips the trigger to g(x)"
+    "TI-INERT-DEMOTE: marking f inert flips the trigger to g(x)"
     (trigger_is
-       (Trigger.infer
-          ~ground_occurrences:(fun sym -> if Symbol.equal sym g then 1 else 0)
-          ~qvars:qv
-          body)
+       (Trigger.infer ~inert_head:(fun sym -> Symbol.equal sym f) ~qvars:qv body)
        [ gx ]);
   check
-    "TI-GROUND-PREF: a ground occurrence of f keeps the trigger f(x)"
+    "TI-INERT-DEMOTE: marking g inert keeps the trigger f(x)"
     (trigger_is
-       (Trigger.infer
-          ~ground_occurrences:(fun sym -> if Symbol.equal sym f then 1 else 0)
-          ~qvars:qv
-          body)
+       (Trigger.infer ~inert_head:(fun sym -> Symbol.equal sym g) ~qvars:qv body)
        [ fx ])
 ;;
 
@@ -969,7 +962,7 @@ let () =
   ti_multi ();
   ti_unreachable ();
   ti_zero ();
-  ti_ground_preference ();
+  ti_inert_demote ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;
   if !failures > 0 then exit 1
 ;;
