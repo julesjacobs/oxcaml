@@ -19,12 +19,16 @@ val is_pure_bv : Term.t list -> bool
 
 type result =
   | Unsat
-  | Unknown
+  | Unknown of string
+  (** why the eager BV path gave up: the [Blast.Unsupported_bv] message (an out-of-QF_BV
+      or unencodable construct), or a completed-model re-check failure. Diagnostic string
+      only (census task #78 bv-blast bucket); it never affects the verdict — [Unknown]
+      stays [Unknown]. *)
   | Sat of
       { bv_vars : (string * Bigint.t * int) list
-        (** one entry per free bit-vector variable: [(name, unsigned_value, width)] *)
+      (** one entry per free bit-vector variable: [(name, unsigned_value, width)] *)
       ; bool_vars : (string * bool) list
-        (** one entry per free Boolean variable: [(name, truth_value)] *)
+      (** one entry per free Boolean variable: [(name, truth_value)] *)
       }
 
 (** Eager-bit-blast the (pure-QF_BV) assertion set. Only call when {!is_pure_bv} holds. A

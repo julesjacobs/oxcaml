@@ -1769,8 +1769,8 @@ let check_sat t =
     | Bv_dispatch.Unsat ->
       t.last_verdict <- Unsat;
       Unsat
-    | Bv_dispatch.Unknown ->
-      t.unknown_reason <- "bv-blast-unknown";
+    | Bv_dispatch.Unknown msg ->
+      t.unknown_reason <- "bv-blast-unknown:" ^ san_token msg;
       Unknown
     | Bv_dispatch.Sat { bv_vars; bool_vars } ->
       t.last_verdict <- Sat;

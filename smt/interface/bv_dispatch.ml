@@ -97,7 +97,7 @@ let free_user_vars (terms : Term.t list) =
 
 type result =
   | Unsat
-  | Unknown
+  | Unknown of string
   | Sat of
       { bv_vars : (string * Bigint.t * int) list
       ; bool_vars : (string * bool) list
@@ -116,7 +116,7 @@ let solve ctx mint (asserted : Term.t list) : result =
   let simplified = Bv_simplify.simplify ctx mint asserted in
   match Bv_solve.solve Bv_adapter.defs simplified with
   | Bv_solve.Unsat -> Unsat
-  | Bv_solve.Unknown _ -> Unknown
+  | Bv_solve.Unknown msg -> Unknown msg
   | Bv_solve.Sat (model, bool_model) ->
     (* Model COMPLETION for rewrite-eliminated variables: a pre-blast rewrite can
        eliminate a variable's only occurrence, so the blaster never binds it and a [sat]
@@ -134,7 +134,7 @@ let solve ctx mint (asserted : Term.t list) : result =
     let extra_bv =
       List.filter_map
         (fun (t, w) ->
-           if Term.Table.mem present t then None else Some (t, (Bigint.zero, w)))
+          if Term.Table.mem present t then None else Some (t, (Bigint.zero, w)))
         orig_bv
     in
     let extra_bool =
@@ -169,14 +169,14 @@ let solve ctx mint (asserted : Term.t list) : result =
       | Bv_eval.Eval_error _ -> false
     in
     if not recheck_ok
-    then Unknown
+    then Unknown "sat-model-recheck-failed"
     else (
       let named f xs =
         List.filter_map
           (fun (t, r) ->
-             match name_of_var t with
-             | Some n -> Some (f n r)
-             | None -> None)
+            match name_of_var t with
+            | Some n -> Some (f n r)
+            | None -> None)
           xs
       in
       Sat
