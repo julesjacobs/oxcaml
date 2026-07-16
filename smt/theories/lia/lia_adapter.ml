@@ -251,8 +251,9 @@ let hnf_lemma t : Fabric.check_result option =
 
 (* At an integer-infeasible [Final] the fallback is the B&B split [x<=v ; x>=v+1]. With
    HNF cuts ON, on every [hnf_cut_period]-th such Final try a lattice cut and emit it as a
-   [Lemma] instead; a miss falls back to the branch. OFF (or a non-period Final) touches
-   no counter and returns the plain branch — byte-identical to trunk. *)
+   [Lemma] instead; a miss falls back to the branch. OFF returns the plain branch and
+   touches no counter — byte-identical to trunk. ON at a non-period Final increments
+   [hnf_final_cuttable] only, then returns the plain branch. *)
 let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
   let branch () = Fabric.Split [ le_atom; ge_atom ] in
   if not hnf_cuts_on
