@@ -1299,6 +1299,21 @@ let test_hnf_cut () =
         check "hnf hand: emitted cut removes no integer solution (valid)" (!bad = 0)
       | None -> check "hnf hand: cut emitted (multi-row lattice infeasibility)" false)
    | _ -> check "hnf hand: rational relaxation feasible" false);
+  (* Guard RED (deterministic, permanent): an integer-FEASIBLE equality system
+     [x0 + x1 = 2, x0 - x1 = 0] (solution x0=x1=1) must yield NO cut. This is the direct
+     tripwire for the β-non-integer gate + the μ-recheck self-check: emitting here would
+     be a SPURIOUS cut that could exclude the real solution (the unsoundness vector). If
+     the guard is bypassed (verified: the sweep below goes RED), a cut is emitted and this
+     fires. *)
+  let fxs = make_fixture 2 in
+  let _ = assert_eq_rec fxs (ref []) [ 0, 1; 1, 1 ] 2 in
+  let _ = assert_eq_rec fxs (ref []) [ 0, 1; 1, -1 ] 0 in
+  (match Lia.check fxs.solver with
+   | Lia.Sat_candidate ->
+     check
+       "hnf guard: NO cut on an integer-feasible equality system (β-gate + self-check)"
+       (Lia.hnf_cut fxs.solver = None)
+   | _ -> check "hnf guard: feasible relaxation" false);
   (* Random sweep: small equality systems, both ℤ-sat and ℤ-unsat. Every emitted cut is
      brute-force VALID (removes no integer eq-solution); no cut is ever emitted on a
      system that HAS an integer solution in the box (a spurious cut would exclude it). *)
