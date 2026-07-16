@@ -39,13 +39,25 @@ let tester_name_of cname = "is-" ^ cname
    order, and [build] reads the body (and any [:pattern] triggers) with each binder name
    bound to its qvar image. The body is read lazily inside [build] rather than eagerly,
    because it is only well-sorted once the qvar images exist. *)
+(* A driver-supplied Skolem-FUNCTION minter (lemmas-climb chunk 2b). [skolem ~cod ~args]
+   declares a FRESH uninterpreted function of rank [(sorts of args) -> cod] and returns it
+   applied to [args]. It Skolemizes a POSITIVE-position [exists] nested in a [forall]
+   body: each existential binder becomes a fresh function of the enclosing universals
+   ([args] is the forall's qvar images), so the lemma stays universal and EQUISATISFIABLE
+   with the original (standard Skolemization: an existential dominated only by universals
+   [x] becomes a function [f x]). The parser cannot mint the fresh, collision-proof symbol
+   itself (that authority is the driver's {!Oxsmt_interface.Session}), so it is threaded
+   into [build] like the qvar images. *)
+type skolemizer = cod:Sort.t -> args:Term.t list -> Term.t
+
 type lemma_src =
   { qvars :
       (string * Sort.t) list (* forall binders, outer-first then inner (flattened) *)
-  ; build : Term.t array -> Term.t * Term.t list list
-  (* [build qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
-     substitute for the k-th binder. May raise {!Malformed}/{!Unsupported} (a body op
-     outside the subset), which the driver maps to a sound [unknown]. *)
+  ; build : skolem:skolemizer -> Term.t array -> Term.t * Term.t list list
+  (* [build ~skolem qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
+     substitute for the k-th binder; [skolem] mints a fresh Skolem function for a positive
+     [exists] in the body (lemmas-climb chunk 2b). May raise {!Malformed}/{!Unsupported}
+     (a body op outside the subset), which the driver maps to a sound [unknown]. *)
   }
 
 (* A top-level EXISTENTIAL assertion, [(assert (exists (binders) body))] in a POSITIVE
@@ -1004,9 +1016,10 @@ let rec extract_patterns (attrs : Sexp.t list) : Sexp.t list list =
 
 (* Peel nested [forall]s into one flat binder list (forall x. forall y. P == forall
    x y. P) and return the innermost body together with its trigger groups. Only universal
-   quantifiers are flattened; an [exists] anywhere (including alternation under a forall)
-   is out of the fragment. [(! body :pattern ...)] on the innermost body supplies the
-   triggers. *)
+   quantifiers are flattened here; an [exists] in the body is NOT rejected any more
+   (lemmas-climb chunk 2b): it is returned as the body and Skolemized by [read_lemma_body]
+   if it sits in a positive position. [(! body :pattern ...)] on the innermost body
+   supplies the triggers. *)
 let rec collect_forall st acc (tail : Sexp.t list) =
   match tail with
   | [ binders; body ] ->
@@ -1014,42 +1027,18 @@ let rec collect_forall st acc (tail : Sexp.t list) =
     (match body with
      | Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: inner) ->
        collect_forall st acc inner
-     | Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: _) ->
-       unsupportedf "existential quantifier is not supported (universal lemmas only)"
      | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: core :: attrs) ->
        acc, core, extract_patterns attrs
      | _ -> acc, body, [])
   | _ -> malformedf "malformed forall (expected (forall (binders) body))"
 ;;
 
-(* Parse [(assert (forall ...))] into a {!lemma_src}. The binders are read now; the body
-   and triggers are read lazily by [build], with each binder name bound (innermost-first,
-   so an inner binder shadows an outer one of the same name) to its minted qvar image. *)
-let read_forall st (tail : Sexp.t list) : lemma_src =
-  let qvars, body_sexp, trigger_sexps = collect_forall st [] tail in
-  let build qvar_images =
-    (* [qvars] is outer-to-inner; adding each in that order lets an inner binder overwrite
-       (shadow) an outer one of the same name — matching the old innermost-first list. *)
-    let scope =
-      List.fold_left
-        (fun acc (i, name) -> Scope.add name qvar_images.(i) acc)
-        Scope.empty
-        (List.mapi (fun i (name, _sort) -> i, name) qvars)
-    in
-    let body = read_term st scope body_sexp in
-    let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
-    body, triggers
-  in
-  { qvars; build }
-;;
-
 (* Peel nested [exists]s into one flat binder list (exists x. exists y. P == exists
-   x y. P) and return the innermost body. All existentials are POSITIVE here (the caller
-   only enters this on an [exists] at a positive assertion position), so flattening is
-   sound. A [(! body ...)] wrapper on the innermost body is unwrapped (its attributes —
-   [:pattern] has no meaning for a Skolemized existential — are validated then dropped). A
-   [forall] (or anything else) as the body is left for [read_term] in [ex_build] to accept
-   or reject. *)
+   x y. P) and return the innermost body. All existentials reaching here are POSITIVE (the
+   caller only enters on an [exists] at a positive position), so flattening is sound. A
+   [(! body ...)] wrapper on the innermost body is unwrapped (its attributes — [:pattern]
+   has no meaning for a Skolemized existential — are validated then dropped). A [forall]
+   (or anything else) as the body is left for the caller to read. *)
 let rec collect_exists st acc (tail : Sexp.t list) =
   match tail with
   | [ binders; body ] ->
@@ -1062,6 +1051,89 @@ let rec collect_exists st acc (tail : Sexp.t list) =
        acc, core
      | _ -> acc, body)
   | _ -> malformedf "malformed exists (expected (exists (binders) body))"
+;;
+
+(* Read a [forall] lemma body known to sit in POSITIVE polarity, Skolemizing every
+   positive-position nested [exists] into a fresh function of the enclosing universals
+   (lemmas-climb chunk 2b). It descends ONLY through the polarity-preserving skeleton that
+   keeps a sub-formula positive — [and], [or], the CONSEQUENT of [=>], and a [(! ...)]
+   wrapper — and delegates every other node (including [not], the ANTECEDENTS of [=>],
+   [ite], [=]/[distinct], and all leaves) to {!read_term}. That delegation is the
+   soundness boundary: read_term REJECTS any [exists] it meets ([Unsupported] -> the whole
+   lemma is dropped with the sat-degrade sentinel), so a NON-positive existential is never
+   Skolemized (Skolemizing a [forall]-in-disguise to a function would be unsound). A
+   positive [exists] is replaced by its body with each binder bound to
+   [skolem_witness sort] — a fresh function applied to the enclosing universals — leaving
+   a genuine universal lemma that is equisatisfiable with the original. A connective name
+   shadowed by a binder ([Scope.mem]) is NOT treated as the core op — it falls to
+   read_term, which rejects the ill-sorted application, exactly as {!read_app} does. *)
+let rec read_lemma_body st scope ~skolem_witness (s : Sexp.t) : Term.t =
+  let recur = read_lemma_body st scope ~skolem_witness in
+  match s with
+  | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
+    validate_bang_attrs attrs;
+    recur body
+  | Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ->
+    (* POSITIVE-position existential: Skolemize each (flattened) binder to a fresh
+       function of the enclosing universals, bind it, and read the still-positive body.
+       Reading the binders may raise [Malformed] (degenerate/bad binder — hard fail, per
+       the reader's contract) or [Unsupported] (out-of-subset binder sort, e.g. [Real])
+       which drops the whole lemma via the caller's handler — both sound. *)
+    let binders, body = collect_exists st [] tail in
+    let scope =
+      List.fold_left
+        (fun acc (name, sort) -> Scope.add name (skolem_witness sort) acc)
+        scope
+        binders
+    in
+    read_lemma_body st scope ~skolem_witness body
+  | Sexp.List (Sexp.Atom (Tok.Symbol { text = "and"; quoted = false }) :: args)
+    when not (Scope.mem "and" scope) -> Context.and_ st.ctx (List.map recur args)
+  | Sexp.List (Sexp.Atom (Tok.Symbol { text = "or"; quoted = false }) :: args)
+    when not (Scope.mem "or" scope) -> Context.or_ st.ctx (List.map recur args)
+  | Sexp.List
+      (Sexp.Atom (Tok.Symbol { text = "=>"; quoted = false }) :: (_ :: _ :: _ as args))
+    when not (Scope.mem "=>" scope) ->
+    (* [(=> a1 .. an c)] is right-associative [a1 => (.. => c)]: only the final CONSEQUENT
+       [c] stays positive; every antecedent flips to negative, so it is read by
+       [read_term] (which rejects any [exists] in it). Matches {!read_implies}'s
+       associativity. *)
+    (match List.rev args with
+     | consequent :: rev_antecedents ->
+       List.fold_left
+         (fun acc a -> Context.implies st.ctx (read_term st scope a) acc)
+         (recur consequent)
+         rev_antecedents
+     | [] -> malformedf "=> expects arguments")
+  | _ -> read_term st scope s
+;;
+
+(* Parse [(assert (forall ...))] into a {!lemma_src}. The binders are read now; the body
+   and triggers are read lazily by [build], with each binder name bound (innermost-first,
+   so an inner binder shadows an outer one of the same name) to its minted qvar image. The
+   body goes through {!read_lemma_body} so a positive nested [exists] is Skolemized to a
+   fresh function of the qvar images via the driver-supplied [skolem]. *)
+let read_forall st (tail : Sexp.t list) : lemma_src =
+  let qvars, body_sexp, trigger_sexps = collect_forall st [] tail in
+  let build ~skolem qvar_images =
+    (* [qvars] is outer-to-inner; adding each in that order lets an inner binder overwrite
+       (shadow) an outer one of the same name — matching the old innermost-first list. *)
+    let scope =
+      List.fold_left
+        (fun acc (i, name) -> Scope.add name qvar_images.(i) acc)
+        Scope.empty
+        (List.mapi (fun i (name, _sort) -> i, name) qvars)
+    in
+    (* Every Skolem function of a nested existential takes ALL the forall's universals as
+       arguments — a sound over-approximation of the existential's true dependencies
+       (standard Skolemization only requires the DOMINATING universals, which are a subset
+       of these). *)
+    let skolem_witness cod = skolem ~cod ~args:(Array.to_list qvar_images) in
+    let body = read_lemma_body st scope ~skolem_witness body_sexp in
+    let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
+    body, triggers
+  in
+  { qvars; build }
 ;;
 
 (* Parse [(assert (exists ...))] at a POSITIVE position into an {!exists_src}. Binders are

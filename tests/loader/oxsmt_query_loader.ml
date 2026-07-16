@@ -12,6 +12,7 @@ module Term = Oxsmt_core.Term
 module Context = Oxsmt_core.Context
 module Sort = Oxsmt_core.Sort
 module Symbol = Oxsmt_core.Symbol
+module Rank = Oxsmt_core.Rank
 module Env = Oxsmt_core.Env
 
 (* Is [name] already declared (any rank) in [env]? [Env.rank] raises when the symbol has
@@ -56,11 +57,33 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
     if presolve
     then Session.assert_presolved s parsed.Parser.assertions
     else List.iter (Session.assert_term s) parsed.Parser.assertions;
+    (* Skolem-FUNCTION minter for positive existentials nested in a [forall] body
+       (lemmas-climb chunk 2b): each such binder becomes a FRESH uninterpreted function of
+       the enclosing universals ([args] = the lemma's qvar images), so the lemma stays
+       universal and EQUISATISFIABLE with the original (standard Skolemization). Freshness
+       is load-bearing exactly as for the ground witnesses below — a name colliding with a
+       same-rank user symbol would be silently reused ([declare_fun] is idempotent),
+       constraining the Skolem function to that symbol (unsound) — so each [skf!N] name is
+       checked against the env and bumped, then declared through the ordinary user door
+       (never the reserved namespace). The [skf!]/[sk!] prefixes are disjoint, so the two
+       minters cannot collide. *)
+    let skf_counter = ref 0 in
+    let skolem ~cod ~args =
+      let env = Session.env s in
+      let rec pick () =
+        let name = Printf.sprintf "skf!%d" !skf_counter in
+        incr skf_counter;
+        if is_declared env name then pick () else name
+      in
+      let dom = List.map (fun (t : Term.t) -> t.Term.sort) args in
+      let sym = Session.declare_fun s (pick ()) (Rank.create dom cod) in
+      Context.app (Session.context s) sym args
+    in
     List.iter
       (fun (lem : Parser.lemma_src) ->
         match
           Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
-            let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
+            let body, triggers = lem.Parser.build ~skolem (Array.map Qvar.to_term qv) in
             (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
                lemma the file gave NO [:pattern] (the common case — the public quantified
                sets rarely ship patterns) gets one inferred from the body (smallest

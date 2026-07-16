@@ -29,13 +29,28 @@ exception Unsupported of string
     records the binders and a deferred [build]: the driver mints one qvar per binder and
     passes their {!Oxsmt_core.Term.t} images (in binder order) to [build], which reads the
     body and any [:pattern] triggers with each binder bound to its qvar image. Nested
-    [forall]s are flattened into one binder list; an [exists] is out of the fragment. *)
+    [forall]s are flattened into one binder list; a positive nested [exists] is Skolemized
+    to a fresh function of the binders (via [skolem]), a negative one is out of fragment. *)
+
+(** A driver-supplied Skolem-FUNCTION minter (lemmas-climb chunk 2b): [skolem ~cod ~args]
+    declares a FRESH uninterpreted function of rank [(sorts of args) -> cod] and returns
+    it applied to [args]. Used to Skolemize a positive [exists] nested in a [forall] body
+    — each binder becomes a fresh function of the enclosing universals ([args] = the qvar
+    images), keeping the lemma universal and equisatisfiable. The fresh, collision-proof
+    symbol comes from the driver's {!Oxsmt_interface.Session}, not the parser. *)
+type skolemizer =
+  cod:Oxsmt_core.Sort.t -> args:Oxsmt_core.Term.t list -> Oxsmt_core.Term.t
+
 type lemma_src =
   { qvars : (string * Oxsmt_core.Sort.t) list (* forall binders, flattened, outer-first *)
-  ; build : Oxsmt_core.Term.t array -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
-  (** [build qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for the
-      k-th binder. May raise {!Malformed}/{!Unsupported} when the body is outside the
-      subset — the driver maps that to a sound [unknown]. *)
+  ; build :
+      skolem:skolemizer
+      -> Oxsmt_core.Term.t array
+      -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
+  (** [build ~skolem qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for
+      the k-th binder and [skolem] mints a fresh function for a positive nested [exists]
+      (lemmas-climb chunk 2b). May raise {!Malformed}/{!Unsupported} when the body is
+      outside the subset — the driver maps that to a sound [unknown]. *)
   }
 
 (** A top-level POSITIVE existential [(assert (exists (binders) body))] (lemmas-climb

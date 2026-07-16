@@ -1876,6 +1876,66 @@ let test_exists_negated_not_skolemized () =
      | Session.Unsat | Session.Unknown -> true)
 ;;
 
+(* Skolem-FUNCTION Skolemization of a positive [exists] nested in a [forall] body
+   (lemmas-climb chunk 2b). [forall x. (p x) => (exists y. y < y)] Skolemizes the positive
+   nested existential to a fresh function [f x], giving the genuine universal lemma
+   [forall x. (p x) => (f x) < (f x)] — whose consequent is arithmetically false, so with
+   the ground [p a] the instance [(p a) => f(a) < f(a)] forces [not (p a)], closing to
+   UNSAT. Before 2b the body's [exists] made [read_term] reject the whole lemma (dropped
+   -> sat-degrade sentinel -> unknown); the Skolem function makes it a live, refuting
+   universal. The consequent [f(x) < f(x)] folds to [false], so the lemma body collapses
+   to [not (p x)] and the auto-trigger lands on the ground-matchable [p x] (the Skolem
+   term is gone) — the lemma fires on [p a]. *)
+let test_skolem_fun_under_forall_unsat () =
+  let s = Session.create () in
+  let text =
+    "(set-logic UFLIA)\n\
+     (declare-fun p (Int) Bool)\n\
+     (declare-fun a () Int)\n\
+     (assert (p a))\n\
+     (assert (forall ((x Int)) (=> (p x) (exists ((y Int)) (< y y)))))\n\
+     (check-sat)\n"
+  in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+  ignore (Loader.assert_all s parsed : bool);
+  check
+    "skolem-fun: positive exists under forall Skolemizes to a refuting universal (unsat)"
+    (match Session.check_sat s with
+     | Session.Unsat -> true
+     | _ -> false)
+;;
+
+(* POLARITY LANDMINE for chunk 2b: a nested [exists] in NEGATIVE position inside a
+   [forall] body must NEVER be Skolemized to a function. [forall x. not (exists y. p x y)]
+   is [forall x y. not (p x y)]; with the ground [p a a] it is UNSAT. Skolemizing the
+   negative existential to a function [f] would give the WEAKER
+   [forall x. not (p x (f x))], which is consistent with [p a a] (take [f a <> a]) — a
+   wrong [sat]. [read_lemma_body] does not descend through [not] (only [and]/[or]/the [=>]
+   consequent stay positive), so the [exists] falls to [read_term], which rejects it ->
+   the whole lemma is dropped (sentinel armed) -> a sound [unknown]. Uses an uninterpreted
+   [p] so the EUF+LIA e-graph is active (a live sentinel over a pure-LIA problem has no
+   e-graph view; this white-box test calls [check_sat] directly, bypassing the driver's
+   [unknown] wrap). The check asserts the verdict is NEVER the wrong [sat]. *)
+let test_skolem_fun_negated_not_skolemized () =
+  let s = Session.create () in
+  let text =
+    "(set-logic UFLIA)\n\
+     (declare-fun p (Int Int) Bool)\n\
+     (declare-fun a () Int)\n\
+     (assert (p a a))\n\
+     (assert (forall ((x Int)) (not (exists ((y Int)) (p x y)))))\n\
+     (check-sat)\n"
+  in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+  ignore (Loader.assert_all s parsed : bool);
+  check
+    "skolem-fun POLARITY GUARD: a negative nested exists is never Skolemized (no wrong \
+     sat)"
+    (match Session.check_sat s with
+     | Session.Sat -> false
+     | Session.Unsat | Session.Unknown -> true)
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -2560,6 +2620,8 @@ let () =
   test_exists_skolem_unsat ();
   test_exists_skolem_sat ();
   test_exists_negated_not_skolemized ();
+  test_skolem_fun_under_forall_unsat ();
+  test_skolem_fun_negated_not_skolemized ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   test_ctx_simp_eq_subst_sat ();
