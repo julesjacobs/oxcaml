@@ -29,21 +29,15 @@ module type B =
 Line 11, characters 31-32:
 11 | module Different (X : A) : B = X
                                     ^
-Error: Signature mismatch:
-       Modules do not match:
-         sig
-           val base : int
-           val g : int{ (app[Stdlib!.=] _ sibling[base]) }
-         end
-       is not included in
-         B
-       Values do not match:
-         val g : int{ (app[Stdlib!.=] _ sibling[base]) }
-       is not included in
-         val g : int{ (app[Stdlib!.=] _ (app[Stdlib!.+] sibling[base] 1)) }
-       The type "int{ (app[Stdlib!.=] _ sibling[base]) }"
-       is not compatible with the type
-         "int{ (app[Stdlib!.=] _ (app[Stdlib!.+] sibling[base] 1)) }"
+Error: Refinement verification failed at module seal for value "g" (disproved)
+Line 8, characters 2-29:
+8 |   val g : int{ _ = base + 1 }
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value g
+Line 3, characters 2-25:
+3 |   val g : int{ _ = base }
+      ^^^^^^^^^^^^^^^^^^^^^^^
+  Implementation declaration for value g
 |}]
 
 (* Bare implementation behind a refined interface must not be accepted. *)

@@ -388,6 +388,25 @@ val moregeneral: Env.t -> bool ->
            Returns, for each pattern sort variable (in order), the sort it was
            constrained to during the check, or [None] if unconstrained. Sorts
            in the result may contain subject sort variables. *)
+
+type refinement_seal_obligation =
+  { rso_skeleton : type_expr;
+    rso_hypothesis : refinement_desc;
+    rso_conclusion : refinement_desc;
+    rso_value_name : string;
+    rso_implementation_location : Location.t;
+    rso_interface_location : Location.t;
+  }
+
+val with_refinement_seal :
+  value_name:string ->
+  implementation_location:Location.t ->
+  interface_location:Location.t ->
+  (unit -> 'a) ->
+  'a * refinement_seal_obligation list
+(** Enable directed refinement implication only while checking one value at an
+    explicit signature seal.  All other uses of [moregeneral] remain rigid. *)
+
 val deep_occur: type_expr -> type_expr -> bool
         (* Check whether a type occurs structurally within another. *)
 val deep_occur_list: type_expr -> type_expr list -> bool
