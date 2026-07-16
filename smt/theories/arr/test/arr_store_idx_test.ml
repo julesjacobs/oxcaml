@@ -113,6 +113,7 @@ let () =
     | Theory.Split _ -> "Split"
     | Theory.Conflict _ -> "Conflict"
     | Theory.Propagations _ -> "Propagations"
+    | Theory.Lemma _ -> "Lemma"
   in
   (* Final #1: builds + caches the store index. [st] is not congruent to [a] yet, so there
      is no ROW obligation for [select a j] -> Sat (no split). *)
