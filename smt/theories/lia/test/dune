@@ -48,3 +48,12 @@
  (name hnf_test)
  (modules hnf_test)
  (libraries oxsmt_core oxsmt_lia))
+
+; Adapter-level per-query CG-cut budget + reset test (task #53 H3). Run via
+; `make cut-budget-test` with OXSMT_CG_CUTS=1 set (the cut site's flag is fixed at module
+; load); skips cleanly if the flag is off. Same I3 firewall (oxsmt_core + oxsmt_lia only).
+
+(executable
+ (name cut_budget_test)
+ (modules cut_budget_test)
+ (libraries oxsmt_core oxsmt_lia))

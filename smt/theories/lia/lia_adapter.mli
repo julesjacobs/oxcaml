@@ -80,3 +80,17 @@ val pivot_count : t -> int
     since creation — the dark-lever instrumentation (0 when [OXSMT_HNF_CUTS] is off, so
     OFF is byte-identical). *)
 val hnf_cuts_emitted : t -> int
+
+(** Reset the per-query CG-cut attempt budget (task #53 H3): zeroes {!cut_attempts} so the
+    [OXSMT_CG_MAX_CUTS] cap starts fresh for a new query. The budget is already fresh per
+    query on the corpus/reset paths (fresh adapter; [Cdclt.reset_for_new_query] recreates
+    the theory); this is the mechanism for the residual persisting-theory incremental
+    case. NOT wired into the solve path (no per-check-sat theory hook exists in the frozen
+    interfaces — a documented follow-up), so it changes no solver behavior; exercised by
+    [cut_budget_test]. *)
+val reset_cut_budget : t -> unit
+
+(** CG-cut attempts consumed since the last {!reset_cut_budget} (0 at creation). Bounded
+    by [OXSMT_CG_MAX_CUTS]. Test-observability accessor, symmetric with
+    {!hnf_cuts_emitted}. *)
+val cut_attempts : t -> int

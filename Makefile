@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -549,6 +549,14 @@ lia-test:
 hnf-test:
 	$(DUNE) exec smt/theories/lia/test/hnf_test.exe
 
+## cut-budget-test — adapter-level per-query CG-cut budget + reset mechanism (task #53 H3).
+##   Runs with OXSMT_CG_CUTS=1 (the cut site's flag is fixed at module load) and a small
+##   OXSMT_CG_MAX_CUTS so the cap is observable; drives cuttable Finals to exhaust the
+##   budget, resets it via Lia_adapter.reset_cut_budget, and confirms cuts are attempted
+##   again. Nonzero exit on any failed check.
+cut-budget-test:
+	OXSMT_CG_CUTS=1 OXSMT_CG_MAX_CUTS=2 $(DUNE) exec smt/theories/lia/test/cut_budget_test.exe
+
 ## cdclt-lemma-test — H1 seam coverage (adr-0005-contract-lemma-erratum): the cdclt
 ##   CONTRACT-LEMMA / CONTRACT-SPLIT desugar (split_lit) exercised through the real
 ##   Cdclt.desugar_result_for_test — multi-antecedent, per-disjunct sign, Not-peeling, and
@@ -723,6 +731,7 @@ test: check-frozen
 	$(MAKE) lia-test
 	$(MAKE) lia-adapter-test
 	$(MAKE) hnf-test
+	$(MAKE) cut-budget-test
 	$(MAKE) cdclt-lemma-test
 	$(MAKE) bigint-test
 	$(MAKE) euf-test

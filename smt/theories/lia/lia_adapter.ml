@@ -454,3 +454,21 @@ let is_poisoned t = Lia.is_poisoned t.lia
 let overflows_to_unknown t = t.overflows
 let pivot_count t = Lia.pivot_count t.lia
 let hnf_cuts_emitted t = t.hnf_cuts_emitted
+
+(* Reset the per-query CG-cut attempt budget (task #53 H3). Zeroes [cg_attempts] so the
+   [cg_max_cuts] cap starts fresh — the intent is one budget per top-level query. It is
+   ALREADY fresh on the corpus/reset paths (fresh adapter per query;
+   [Cdclt.reset_for_new_query] nulls+recreates the theory), so this is the mechanism for
+   the residual PERSISTING-theory INCREMENTAL case, where the adapter survives across
+   check-sats. Wiring a per-check-sat call reaching the theory is a documented follow-up
+   (neither the frozen [Theory] interface nor the [Sat.theory] callback record exposes a
+   "new query" hook; a decision-level-0/restart-based proxy would over-fire mid-solve).
+   This is proven by the direct adapter-level test [cut_budget_test] and is otherwise
+   unwired, so it changes no solver behavior (OFF and ON byte-identical — never called in
+   the solve path). *)
+let reset_cut_budget t = t.cg_attempts <- 0
+
+(* CG-cut attempts consumed on the current budget (task #53 H3 test observability,
+   symmetric with {!hnf_cuts_emitted}). Bounded by [cg_max_cuts] between
+   {!reset_cut_budget}s. *)
+let cut_attempts t = t.cg_attempts
