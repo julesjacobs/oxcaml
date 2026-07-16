@@ -203,3 +203,55 @@ required and both reviewers confirmed no soundness issue, no code change is made
 structural-carrier selfs through the modelability check ahead of the use-site read is a possible
 follow-up (improvement queue). Default-batch carrier regressions
 (`refined_function_carrier_reject.ml`) pin the reject-with-modelability-error behavior.
+
+## Tier-1 hygiene addendum
+
+A follow-up hygiene batch landed as children on the modes chain (design/impl-risk and expect-audit
+findings). Two items warrant recording here.
+
+**Embedded-location digest leak (`Const_string`).** An earlier hygiene child normalized every
+predicate node's `rexp_loc` under `Prepare_for_saving`, so that under `-no-keep-locs` a refined
+value's cmi digest stops tracking source locations (matching the treatment of bare declarations).
+It missed one embedded location: `Types.constant` has `Const_string of string * Location.t * string
+option`, so a predicate containing a string literal still perturbed the interface digest across a
+comment shift. The fix child extends `Refinement.map_locs` to map the location inside `Const_string`.
+A sweep of the predicate AST confirms this closes the whole class rather than one instance:
+`Const_string` is the only constant carrying a location, and `rexp_loc` is the only other embedded
+`Location.t` anywhere (binders carry `Ident.t`/`type_expr`; constructors and fields carry
+`Path.t`/`string`; references carry paths/strings — none carry source locations). Verified with a
+boot-compiler self-CRC experiment across a comment shift: under `-no-keep-locs` the string case, both
+int cases, bare int, and string literals nested inside `if`/apply/lambda are all stable; reverting
+the `Const_string` arm and rebuilding reproduces the string case as unstable while int cases stay
+stable (the reviewer's repro), so the fix is load-bearing; under the default `-keep-locs` everything
+still tracks locations (unchanged). Both hygiene reviewers found this same `Const_string` gap
+independently; severity is benign (spurious rebuilds only — never unsound, never a missed rebuild).
+
+Two comment nits rode the same fix child: the `mcomp` one-sided-refinement guard comment referenced
+"the seal-context arms above", but `mcomp` has no seal arm (only `moregen` does) — corrected; and the
+`vox_spec.ml` `List.length` comment still said the int wrappers "WOULD accept `@ total`",
+contradicting the corrected top comment — aligned (both are non-total today, for different reasons:
+comparison primitives are admitted total only inside a predicate, so a top-level `int_lt @ total` is
+rejected; `List.length` is a recursion-partial stdlib function).
+
+**One-sided-refinement guard, `subtype_rec` (fold-in from the fable verdict).** The Tier-1 guard
+child added an explicit one-sided-`Trefine` clash arm to five ctype relations. Worth stating more
+plainly than the guard child's own message did: in `subtype_rec` the change is not merely a defensive
+net over an unreachable path — it changes the relation's *default* behavior for a one-sided refined
+type from **defer-constraint to immediate error**. Previously a `(Trefine _, _)`/`(_, Trefine _)`
+pair fell through to the `(_, _)` arm, which appends the pair to `cstrs` for later discharge by
+unification; that deferred discharge then reached `unify3`'s one-sided-`Trefine` case, whose old
+default was a silent `link_type` (the contravariantly-unsound weakening this batch removed). The new
+`subtype_rec` arm raises `subtype_error` at the coercion site instead. Design-correct under the rigid
+discipline (a one-sided refinement is always a clash); the fable battery corroborated no legitimate
+path trips it.
+
+**Freshen-on-import test imprecision (fold-in, known-imprecise).** The freshen-on-import regression
+(`freshen_import_manifest.ml`) pins the right *behavior* — a copied refined manifest through
+module-type-of and a functor keeps its refinement and stays distinct — but its witness is loose. The
+`F(M)` copy goes through `add_module` (the alias path), and the distinctness case separates the two
+predicates by a differing constant (`k = 1` vs `k = 0`), so they would compare unequal regardless of
+binder-stamp freshening; the test therefore does not actually exercise the stamp-freshening it is
+nominally about. A tighter witness that forces distinctness to depend on freshened stamps (same
+constant, different binders) is welcome as a low-priority follow-up child; recorded here as
+known-imprecise. (This does not change the item-3 finding, which was "no gap": freshening on import
+is in place and correct.)
