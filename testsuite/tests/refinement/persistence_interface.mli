@@ -1,0 +1,6 @@
+type record = { field : int }
+
+val preserved : record{
+  let same = fun x -> x = _.field in
+  same 1 && Some _.field = Some 1
+}

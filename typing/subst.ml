@@ -66,12 +66,14 @@ type sort_map =
 
 type s =
   { types: type_replacement Path.Map.t;
+    values: Path.t Path.Map.t;
     modules: Path.t Path.Map.t;
     modtypes: module_type Path.Map.t;
     jkinds: kind_replacement Path.Map.t;
 
     additional_action: additional_action;
     sort_var_mapping: sort_map;
+    freshen_refinement_binders: bool;
 
     loc: Location.t option;
     mutable last_compose: (s * s) option  (* Memoized composition *)
@@ -103,17 +105,22 @@ end
 
 let identity =
   { types = Path.Map.empty;
+    values = Path.Map.empty;
     modules = Path.Map.empty;
     modtypes = Path.Map.empty;
     jkinds = Path.Map.empty;
     additional_action = No_action;
     sort_var_mapping = Nothing;
+    freshen_refinement_binders = false;
     loc = None;
     last_compose = None;
   }
 
 let for_loading_cmi () =
-  { identity with sort_var_mapping = Loading (Hashtbl.create 17) }
+  { identity with
+    sort_var_mapping = Loading (Hashtbl.create 17);
+    freshen_refinement_binders = true;
+  }
 
 (* Add a replacement for both a path and its unboxed version, even if that
    unboxed version doesn't exist (as we can't tell here whether it exists).
@@ -146,8 +153,19 @@ let add_type id p s =
   let types = add_type_replacement s.types (Pident id) (Path p) in
   { s with types; last_compose = None }
 
+let add_value id p s =
+  { s with
+    values = Path.Map.add (Pident id) p s.values;
+    freshen_refinement_binders = true;
+    last_compose = None;
+  }
+
 let add_module id p s =
-  { s with modules = Path.Map.add (Pident id) p s.modules; last_compose = None }
+  { s with
+    modules = Path.Map.add (Pident id) p s.modules;
+    freshen_refinement_binders = true;
+    last_compose = None;
+  }
 
 let add_modtype_gen p ty s =
   { s with modtypes = Path.Map.add p ty s.modtypes; last_compose = None }
@@ -400,10 +418,13 @@ let jkind_path s path =
 
 (* For values, extension constructors, classes and class types *)
 let value_path s path =
-  match path with
-  | Pident _ -> path
-  | Pdot(p, n) -> Pdot(module_path s p, n)
-  | Papply _ | Pextra_ty _ -> fatal_error "Subst.value_path"
+  match Path.Map.find path s.values with
+  | path -> path
+  | exception Not_found ->
+    match path with
+    | Pident _ -> path
+    | Pdot(p, n) -> Pdot(module_path s p, n)
+    | Papply _ | Pextra_ty _ -> fatal_error "Subst.value_path"
 
 let rec type_path s path =
   match Path.Map.find path s.types with
@@ -753,18 +774,35 @@ let rec typexp copy_scope s ty =
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret), arg, ret, comm)
       | Trefine refinement ->
-          (* W3 maps the complete embedded type graph while preserving paths
-             and binder stamps.  W5 adds value-path rewriting and
-             unconditional freshening at the import boundary. *)
           let map_type = typexp copy_scope s in
-          Trefine
+          let map_type_path path =
+            if to_subst_by_type_function s path
+            then path
+            else type_path s path
+          in
+          let refinement =
             { ref_skeleton = map_type refinement.ref_skeleton;
               ref_view =
                 { refinement.ref_view with
                   rb_type = map_type refinement.ref_view.rb_type
                 };
-              ref_pred = Refinement.map_types map_type refinement.ref_pred;
+              ref_pred =
+                refinement.ref_pred
+                |> Refinement.map_types map_type
+                |> Refinement.map_paths
+                     ~value_path:(value_path s)
+                     ~type_path:map_type_path;
             }
+          in
+          let refinement =
+            match s.additional_action with
+            | Prepare_for_saving _ -> refinement
+            | Duplicate_variables | No_action ->
+              if s.freshen_refinement_binders
+              then Refinement.freshen_desc_binders refinement
+              else refinement
+          in
+          Trefine refinement
       | Tof_kind jk -> Tof_kind (jkind copy_scope s jk)
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
@@ -1149,7 +1187,10 @@ let rename_bound_idents scoping s sg =
     | Sig_value(id, vd, vis) :: rest ->
         (* scope doesn't matter for value identifiers. *)
         let id' = Ident.rename id in
-        rename_bound_idents s (Sig_value(id', vd, vis) :: sg) rest
+        rename_bound_idents
+          (add_value id (Pident id') s)
+          (Sig_value(id', vd, vis) :: sg)
+          rest
     | Sig_typext(id, ec, es, vis) :: rest ->
         let id' = rename id in
         rename_bound_idents s (Sig_typext(id',ec,es,vis) :: sg) rest
@@ -1329,6 +1370,7 @@ and compose s1 s2 =
   | _ ->
       let s =
         { types = merge_type_path_maps (type_replacement s2) s1.types s2.types;
+          values = merge_path_maps (value_path s2) s1.values s2.values;
           modules = merge_path_maps (module_path s2) s1.modules s2.modules;
           modtypes = merge_path_maps (modtype Keep s2) s1.modtypes s2.modtypes;
           jkinds = merge_path_maps (jkind_replacement s2) s1.jkinds s2.jkinds;
@@ -1363,6 +1405,9 @@ and compose s1 s2 =
             | Loading _, Saving _ ->
               fatal_error "compose: composing Saving and Loading"
           end;
+          freshen_refinement_binders =
+            s1.freshen_refinement_binders
+            || s2.freshen_refinement_binders;
           loc = keep_latest_loc s1.loc s2.loc;
           last_compose = None
         }

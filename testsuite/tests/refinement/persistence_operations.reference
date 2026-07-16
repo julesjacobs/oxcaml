@@ -1,0 +1,4 @@
+substitution: value/type paths rewritten
+functor applications: binder stamps disjoint
+signature renaming: value path recorded
+cmi loading: all predicate binders freshened
