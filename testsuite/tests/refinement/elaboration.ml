@@ -38,15 +38,26 @@ type rich =
    [int], see [int_reentrant] below) that is fine.  For a POLYMORPHIC self the
    type is not known to cross, so the comparison is rejected: a polymorphic self
    cannot be compared in its own predicate until the self's kind is known to
-   cross logicality.  Restriction deferred, unlocked by kind-constrained
-   declarations (the same feature that unlocks total comparisons); the sibling
-   [int_reentrant] keeps the parametric-refinement elaboration coverage. *)
+   cross logicality.  A function self also remains logical because arrows do not
+   cross totality and so are not modelable.  Restriction deferred, unlocked by
+   kind-constrained declarations (the same feature that unlocks total
+   comparisons); the sibling [int_reentrant] keeps the parametric-refinement
+   elaboration coverage. *)
 type 'a reentrant = 'a{ ((_ : 'a) = _) }
 
 [%%expect {|
 Line 1, characters 26-27:
 1 | type 'a reentrant = 'a{ ((_ : 'a) = _) }
                               ^
+Error: This value is "logical" but is expected to be "physical".
+|}]
+
+type fn_reentrant = (int -> int){ ((_ : int -> int) = _) }
+
+[%%expect {|
+Line 1, characters 54-55:
+1 | type fn_reentrant = (int -> int){ ((_ : int -> int) = _) }
+                                                          ^
 Error: This value is "logical" but is expected to be "physical".
 |}]
 

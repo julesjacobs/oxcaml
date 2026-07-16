@@ -555,8 +555,14 @@ let primitive_is_total = function
   | "%apply" | "%revapply" -> true
   | _ -> false
 
-(* This must stay in sync with [Vox_lean.primitive_builtin]: these comparisons
-   are the same audited pure, deterministic proposition constructors. *)
+(* Invariant: [primitive_is_total] together with this comparison list must
+   COVER [Vox_lean.primitive_builtin] -- every primitive the Lean backend models
+   as a proposition constructor must be admissible inside a predicate.  The
+   discipline fails closed: a [primitive_builtin] entry that is in neither set is
+   simply partial inside predicates too, so a predicate using it is rejected at
+   totality rather than admitted unmodelled.  (Arithmetic and the boolean
+   connectives are already in [primitive_is_total]; only the comparisons are new
+   here.) *)
 let primitive_is_refinement_comparison = function
   | "%equal" | "%notequal"
   | "%lessthan" | "%lessequal"
@@ -14144,28 +14150,30 @@ let type_refinement env loc skeleton predicate =
         }
       in
       let logical_mode =
-        let logical_lower_bound =
-          Mode.Value.of_const
+        Mode.Value.of_const
           { Mode.Value.Const.legacy with
             logicality = Mode.Logicality.Const.Logical;
           }
-        in
-        let logical_upper_bound =
-          Mode.Value.legacy
-          |> Mode.Value.join_const_with Logicality
-               Mode.Logicality.Const.Logical
-        in
-        let mode, _ = Mode.Value.newvar_below logical_upper_bound in
-        Mode.Value.submode_exn logical_lower_bound mode;
-        mode
       in
       (* Refinement skeletons are not generalized yet, so cross using their
          jkind rather than the type's principality-sensitive crossing. *)
+      let crossing =
+        Ctype.type_jkind_purely env skeleton
+        |> Ctype.crossing_of_jkind env
+      in
+      let totality_axis =
+        Mode.Crossing.Axis.Comonadic Mode.Axis.Totality
+      in
+      let crosses_totality =
+        let totality = Mode.Crossing.proj totality_axis crossing in
+        Mode.Crossing.Per_axis.equal totality_axis totality
+          (Mode.Crossing.Per_axis.min totality_axis)
+      in
       let self_mode =
-        logical_mode
-        |> Mode.Crossing.apply_left
-             (Ctype.type_jkind_purely env skeleton
-              |> Ctype.crossing_of_jkind env)
+        let logical_mode = Mode.Value.disallow_right logical_mode in
+        if crosses_totality
+        then logical_mode |> Mode.Crossing.apply_left crossing
+        else logical_mode
       in
       let env =
         Env.add_value ~mode:self_mode ref_view.rb_id description env
