@@ -5,9 +5,20 @@ exception Eval_error of string
 let err fmt = Printf.ksprintf (fun s -> raise (Eval_error s)) fmt
 let two = Bigint.of_int 2
 
+(* [2^k], memoized in a monotonic cache filled incrementally (each power is one [mul] from
+   its predecessor). Was an O(k) recompute per call; since [bit]/[to_bits] call [pow2 i]
+   for every bit i in a per-bit loop, an And/Or/Xor/Ashr node was Sum_i O(i) = O(w^2)
+   Bigint work. The cache makes each distinct power O(1) after first fill. BYTE-IDENTICAL:
+   [pow2 k] returns the same value as before (a pure function of k); only its cost
+   changes. *)
+let pow2_tbl = Dynarray.create ()
+let () = Dynarray.add_last pow2_tbl Bigint.one
+
 let pow2 k =
-  let rec go acc i = if i <= 0 then acc else go (Bigint.mul acc two) (i - 1) in
-  go Bigint.one k
+  while Dynarray.length pow2_tbl <= k do
+    Dynarray.add_last pow2_tbl (Bigint.mul (Dynarray.get_last pow2_tbl) two)
+  done;
+  Dynarray.get pow2_tbl k
 ;;
 
 (* [v] assumed nonneg; reduce to [0, 2^w). *)

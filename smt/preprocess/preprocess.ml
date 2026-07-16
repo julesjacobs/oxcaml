@@ -17,7 +17,7 @@ type t =
   { env : Env.t
   ; ctx : Context.t
   ; cap : Env.reserved_cap
-    (* ADR-0012 R1: fresh reserved symbols are minted through the cap-gated
+      (* ADR-0012 R1: fresh reserved symbols are minted through the cap-gated
          [Env.declare_reserved], since the public [Env.declare_fun] now rejects
          [.oxsmt.*]. *)
   ; mutable counter : int
@@ -59,18 +59,22 @@ let same_tag (a : Term.t) (b : Term.t) = a.Term.tag = b.Term.tag
    node as its input (nothing under this list was rewritten), letting the caller reuse its
    original hash-consed node instead of paying a reconstruction (list/array allocation + a
    hash-cons lookup) that would only re-derive the same node. Every element is still
-   visited, in order, so any fresh-symbol side effect fires exactly as before. *)
-let map_go f xs =
-  let changed = ref false in
-  let ys =
-    map_lr
-      (fun x ->
-         let y = f x in
-         if not (same_tag x y) then changed := true;
-         y)
-      xs
-  in
-  if !changed then Some ys else None
+   visited, in order, so any fresh-symbol side effect fires exactly as before.
+
+   Allocation: [None] (the common unchanged fast path) now conses NOTHING — [f] is applied
+   to every element (side effects in order) but no result list is built. When something
+   changed, the rebuilt list shares the unchanged suffix with the original [xs] (the
+   changed prefix is freshly consed, so total conses <= the former full [map_lr]). Result
+   is byte-identical: [Some ys]'s element tags equal the former all-fresh list's tags (an
+   unchanged element re-derives the identical hash-consed node), so the caller rebuilds
+   the same node either way. *)
+let rec map_go f = function
+  | [] -> None
+  | x :: rest ->
+    let y = f x in
+    (match map_go f rest with
+     | None -> if same_tag x y then None else Some (y :: rest)
+     | Some rest' -> Some (y :: rest'))
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -100,9 +104,9 @@ let ite_removal t root =
       let coeffs' =
         map_lr
           (fun (tm, c) ->
-             let tm' = go tm in
-             if not (same_tag tm tm') then changed := true;
-             c, tm')
+            let tm' = go tm in
+            if not (same_tag tm tm') then changed := true;
+            c, tm')
           (Iarr.to_list l.coeffs)
       in
       if !changed then Context.linear_combination_big ctx coeffs' l.const else term
@@ -242,9 +246,9 @@ let div_mod_elimination t root =
       let coeffs' =
         map_lr
           (fun (tm, c) ->
-             let tm' = go tm in
-             if not (same_tag tm tm') then changed := true;
-             c, tm')
+            let tm' = go tm in
+            if not (same_tag tm tm') then changed := true;
+            c, tm')
           (Iarr.to_list l.coeffs)
       in
       if !changed then Context.linear_combination_big ctx coeffs' l.const else term
