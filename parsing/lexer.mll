@@ -71,8 +71,6 @@ let all_keywords =
     "fun", FUN, always;
     "function", FUNCTION, always;
     "functor", FUNCTOR, always;
-    "assume_", ASSUME, oxcaml;
-    "assume_unchecked_", ASSUME_UNCHECKED, oxcaml;
     "global_", GLOBAL, oxcaml;
     "if", IF, always;
     "in", IN, always;
@@ -101,7 +99,6 @@ let all_keywords =
     "poly_", POLY, oxcaml;
     "private", PRIVATE, v1_0;
     "rec", REC, always;
-    "refine_", REFINE, oxcaml;
     "repr_", REPR, oxcaml;
     "sig", SIG, always;
     "stack_", STACK, oxcaml;
