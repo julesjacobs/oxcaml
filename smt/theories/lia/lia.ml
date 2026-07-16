@@ -1143,11 +1143,14 @@ let hnf_cut t : (Term.t * 'tok list) option =
 
    NOTE (env scope): [cg_cut] is env-INDEPENDENT public API -- the [OXSMT_CG_CUTS] gating
    lives in the adapter ([Lia_adapter], guarded by [cg_cuts_on]; default-ON since #68),
-   NOT here. The forced-OFF ([OXSMT_CG_CUTS=0], [false], or [no]) byte-identity is therefore
-   scoped to the shipped SOLVE PATH (which never reaches this function when the flag is off);
-   a direct
-   API caller invoking [cg_cut] regardless still gets the rank-selection behaviour. *)
-let cg_cut t : (Term.t * 'tok list) option =
+   NOT here. The forced-OFF ([OXSMT_CG_CUTS=0], [false], or [no]) byte-identity is
+   therefore scoped to the shipped SOLVE PATH (which never reaches this function when the
+   flag is off); a direct API caller invoking [cg_cut] regardless still gets the
+   rank-selection behaviour. The optional [cut_gate] (task #60) filters the selected best
+   cut; default always-emit. *)
+let cg_cut ?(cut_gate = fun ~nnz:_ ~ants:_ ~m:_ ~n:_ -> true) t
+  : (Term.t * 'tok list) option
+  =
   ensure_live t;
   if Simplex.is_poisoned t.simplex
   then None
@@ -1253,20 +1256,39 @@ let cg_cut t : (Term.t * 'tok list) option =
       done;
       (match !best with
        | None -> None
-       | Some (coeffs, k_bound, bigW, _) ->
-         let pol = Context.linear_combination_big t.ctx coeffs Bigint.zero in
-         let cut_atom = Context.le t.ctx pol (Context.int_const_big t.ctx k_bound) in
-         let ants =
-           let acc = ref [] in
-           for k = m - 1 downto 0 do
-             if not (Bigint.is_zero bigW.(k))
-             then (
-               let _, _, _, toks = rowsA.(k) in
-               acc := List.rev_append (List.rev toks) !acc)
-           done;
-           !acc
+       | Some (coeffs, k_bound, bigW, _l1) ->
+         let nnz = List.length coeffs in
+         (* antecedent support size: # of tight rows with a nonzero multiplier W_k. A cut
+            that combines ALL rows ([ant_count = m]) or most coefficients ([nnz] near [n])
+            is a DENSE/global cut — task #60 measured these as the unproductive
+            search-lengthening cuts (cut_lemmas), whereas the productive ring cuts are
+            sparse (few rows, few coeffs). *)
+         let ant_count =
+           Array.fold_left (fun a w -> if Bigint.is_zero w then a else a + 1) 0 bigW
          in
-         Some (cut_atom, ants)))
+         (* SPARSITY GATE (task #60): a caller-supplied predicate decides whether this
+            best-candidate cut is worth emitting. The default (no [cut_gate] arg) always
+            emits — byte-identical to the pre-policy behaviour and to every existing
+            caller / unit test. The adapter supplies the density policy when CG cuts are
+            on. Rejecting a cut here makes {!hnf_lemma} return [None], so the adapter
+            falls back to the B&B branch — a strictly weaker action, so soundness is
+            unaffected (the gate can only forgo an optimisation, never change a verdict). *)
+         if not (cut_gate ~nnz ~ants:ant_count ~m ~n)
+         then None
+         else (
+           let pol = Context.linear_combination_big t.ctx coeffs Bigint.zero in
+           let cut_atom = Context.le t.ctx pol (Context.int_const_big t.ctx k_bound) in
+           let ants =
+             let acc = ref [] in
+             for k = m - 1 downto 0 do
+               if not (Bigint.is_zero bigW.(k))
+               then (
+                 let _, _, _, toks = rowsA.(k) in
+                 acc := List.rev_append (List.rev toks) !acc)
+             done;
+             !acc
+           in
+           Some (cut_atom, ants))))
 ;;
 
 let suggest_branch t =

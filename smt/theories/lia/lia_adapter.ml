@@ -78,6 +78,50 @@ let cg_max_cuts =
   | _ -> 12
 ;;
 
+(* task #60 cut-policy SPARSITY GATE. The rings prize is carried by SPARSE cuts (few rows,
+   few coefficients); the broad-QF_LIA losers (cut_lemmas, rings_preproc tail) are DENSE
+   GLOBAL cuts — measured (logs/cut-policy-diagnosis.md, counted): every losing cut
+   combines ALL tight rows ([ant_count = m]) with [nnz ≈ 0.5–0.8·n], and each such lemma
+   lengthens search (cut_lemma_02_002: OFF 2054 → ON 3552 counted effort; suppressing the
+   cuts recovers OFF exactly) without changing the verdict. Winners never use all rows
+   ([ant_count < m], ≤ 0.65·m observed) and stay sparse ([nnz ≤ ~0.25·n]). The gate
+   REJECTS a dense best-cut so the adapter branches instead — SOUNDNESS-NEUTRAL (a branch
+   is a strictly weaker action; the cut is only forgone). Only consulted on the B3
+   [cg_cut] path (byte-identical to trunk when [cg_cuts_on] is off, and unused by the B2
+   [hnf_cut] path).
+
+   Default: reject iff the cut uses EVERY tight row ([ant_count ≥ m], i.e.
+   [ants_pct = 100]) — the crisp measured separator. The coefficient-density knob is
+   disabled by default ([nnz_pct = 101] ⇒ [nnz > 1.01·n], never true). All three tunable
+   for the A/B: [OXSMT_CG_CUT_GATE=0] disables the gate (= pre-policy B3);
+   [OXSMT_CG_ANTS_PCT] / [OXSMT_CG_NNZ_PCT] set the density thresholds (percent). *)
+let cut_gate_on =
+  match Sys.getenv_opt "OXSMT_CG_CUT_GATE" with
+  | Some ("0" | "false" | "no" | "off") -> false
+  | _ -> true
+;;
+
+let cut_gate_ants_pct =
+  match Option.bind (Sys.getenv_opt "OXSMT_CG_ANTS_PCT") int_of_string_opt with
+  | Some n when n >= 0 -> n
+  | _ -> 100
+;;
+
+let cut_gate_nnz_pct =
+  match Option.bind (Sys.getenv_opt "OXSMT_CG_NNZ_PCT") int_of_string_opt with
+  | Some n when n >= 0 -> n
+  | _ -> 101
+;;
+
+(* [true] = EMIT the cut, [false] = reject (branch). A cut is dense — hence rejected —
+   when its antecedent support reaches [ants_pct]% of the rows OR its coefficient count
+   exceeds [nnz_pct]% of the columns. *)
+let cut_gate ~nnz ~ants ~m ~n =
+  let dense_ants = ants * 100 >= cut_gate_ants_pct * m in
+  let dense_nnz = nnz * 100 > cut_gate_nnz_pct * n in
+  not (dense_ants || dense_nnz)
+;;
+
 type t =
   { lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
@@ -271,7 +315,14 @@ let propagations t =
 let hnf_lemma t : Fabric.check_result option =
   (* B3 (CG separation) is a strict superset of B2's cut-finding, so it takes precedence
      when its flag is set; otherwise the B2 HNF-row cut. *)
-  let cut = if cg_cuts_on then Lia.cg_cut t.lia else Lia.hnf_cut t.lia in
+  let cut =
+    if cg_cuts_on
+    then
+      Lia.cg_cut
+        ~cut_gate:(if cut_gate_on then cut_gate else fun ~nnz:_ ~ants:_ ~m:_ ~n:_ -> true)
+        t.lia
+    else Lia.hnf_cut t.lia
+  in
   match cut with
   | None -> None
   | Some (cut_atom, ant_tokens) ->

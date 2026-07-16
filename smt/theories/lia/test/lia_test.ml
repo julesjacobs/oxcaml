@@ -1414,9 +1414,10 @@ let run_cut_sweep ~label ~seed ~producer =
    vertex, and (unlike the ℤ-infeasible lattice hand case, whose antecedents have NO
    integer points so any validity oracle over them is vacuous) it HAS integer points
    (0,0),(1,0), (0,1). A CG/HNF cut here must genuinely PRESERVE those points, so the
-   validity oracle is non-vacuous. [producer] is the cut under test. A [None] from [producer]
-   here is acceptable (it is not obligated to cut this one system); the randomized sweep
-   carries the fired-count floor, so this hand check gates cut VALIDITY only, not firing. *)
+   validity oracle is non-vacuous. [producer] is the cut under test. A [None] from
+   [producer] here is acceptable (it is not obligated to cut this one system); the
+   randomized sweep carries the fired-count floor, so this hand check gates cut VALIDITY
+   only, not firing. *)
 let check_nonvacuous_hand ~label ~producer =
   let fx = make_fixture 2 in
   ignore (assert_le fx [ 0, -1 ] 0 ~polarity:true : int) (* -x0 <= 0 i.e. x0 >= 0 *);
@@ -1572,6 +1573,30 @@ let test_cg_cut () =
        "cg guard: NO cut on an integer-feasible equality system (β-gate + self-check)"
        (Lia.cg_cut fxs.solver = None)
    | _ -> check "cg guard: feasible relaxation" false);
+  (* task #60 SPARSITY-GATE plumbing: [?cut_gate] filters the selected best cut. On the
+     same multi-row ℤ-infeasible lattice that emits a cut by default, a reject-all gate
+     must suppress it (the adapter then branches — soundness-neutral); an accept-all gate
+     is identical to the default. cg_cut is read-only, so both calls share one fixture. *)
+  let fxg = make_fixture 2 in
+  let eqsg = ref [] in
+  assert_eq_rec fxg eqsg [ 0, 1; 1, 2 ] 0;
+  assert_eq_rec fxg eqsg [ 0, 2; 1, 1 ] 1;
+  (match Lia.check fxg.solver with
+   | Lia.Sat_candidate ->
+     check
+       "cg gate: accept-all gate emits (= default behaviour)"
+       (match Lia.cg_cut ~cut_gate:(fun ~nnz:_ ~ants:_ ~m:_ ~n:_ -> true) fxg.solver with
+        | Some _ -> true
+        | None -> false);
+     check
+       "cg gate: reject-all gate suppresses the cut (branch fallback)"
+       (Lia.cg_cut ~cut_gate:(fun ~nnz:_ ~ants:_ ~m:_ ~n:_ -> false) fxg.solver = None);
+     check
+       "cg gate: default (no gate arg) still emits"
+       (match Lia.cg_cut fxg.solver with
+        | Some _ -> true
+        | None -> false)
+   | _ -> check "cg gate: feasible relaxation for gate fixture" false);
   (* NON-VACUOUS hand cut: integer points exist and must be preserved. *)
   check_nonvacuous_hand ~label:"cg" ~producer:Lia.cg_cut;
   (* Random MIXED sweep through the shared hardened sweep (full-system AND
