@@ -644,7 +644,7 @@ module Refinement : sig
     t ->
     t ->
     bool
-  (** Structural equality modulo threaded binder pairs. *)
+  (** Structural equality modulo a threaded bijection between binders. *)
 
   val equal_desc :
     equal_type:(type_expr -> type_expr -> bool) ->
@@ -659,9 +659,19 @@ module Refinement : sig
   val validate :
     equal_type:(type_expr -> type_expr -> bool) ->
     bool_type:type_expr ->
+    ?unit_type:type_expr ->
     ?binders:refinement_binder list ->
     t ->
     (unit, validation_error) result
+  (** Checks binder scope and uniqueness, resolved-name structure, and the
+      locally decidable type relationships for functions, applications, lets,
+      tuples, and conditionals.  An else-less conditional is accepted only
+      when [unit_type] is supplied and matches its result type.
+
+      This is not authentication of an arbitrary typed tree: constants and
+      resolved constructors and fields require typing-environment information
+      unavailable in [Types].  Imported or otherwise untrusted trees must be
+      authenticated before they are relied upon. *)
 
   val print_validation_error :
     Format.formatter -> validation_error -> unit

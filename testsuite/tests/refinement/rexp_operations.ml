@@ -40,10 +40,16 @@ let tuple_type fields =
 
 let int_type = named_type "int"
 let bool_type = named_type "bool"
+let unit_type = named_type "unit"
 let pair_type = tuple_type [None, int_type; None, int_type]
 
 let bool_path =
   match get_desc bool_type with
+  | Tconstr (path, [], _) -> path
+  | _ -> assert false
+
+let unit_path =
+  match get_desc unit_type with
   | Tconstr (path, [], _) -> path
   | _ -> assert false
 
@@ -61,6 +67,11 @@ let bool value =
     (Rexp_construct
        ({ rconstr_type_path = bool_path; rconstr_name = name }, []))
 
+let unit =
+  node unit_type
+    (Rexp_construct
+       ({ rconstr_type_path = unit_path; rconstr_name = "()" }, []))
+
 let bound binder = node binder.rb_type (Rexp_ident (Rbound binder.rb_id))
 
 let free type_ reference = node type_ (Rexp_ident (Rfree reference))
@@ -76,7 +87,7 @@ let eq_int = free eq_int_type (Rfun "eq_int")
 let equal_int left right = apply bool_type eq_int [left; right]
 
 let validate expression =
-  R.validate ~equal_type:eq_type ~bool_type expression
+  R.validate ~equal_type:eq_type ~bool_type ~unit_type expression
 
 let expect_valid name expression =
   match validate expression with
@@ -130,6 +141,19 @@ let quantified_predicate =
 let () =
   expect_valid "let/tuple/field/apply/if/construct" predicate;
   expect_valid "single-parameter function" quantified_predicate;
+  let conditional_binder =
+    { rb_id = Ident.create_scoped ~scope:1 "conditional";
+      rb_type = unit_type;
+    }
+  in
+  let missing_else =
+    node unit_type (Rexp_ifthenelse (bool true, unit, None))
+  in
+  expect_valid "else-less if with unit result"
+    (node bool_type
+       (Rexp_let
+          ([{ rbind_binder = conditional_binder; rbind_expr = missing_else }],
+           bool true)));
   print_endline
     "constructors: ident constant let function apply tuple construct field ifthenelse";
   Format.printf "printer: %a@." R.print (equal_int (int 1) (int 2))
@@ -195,7 +219,12 @@ let () =
   let wrong = make_shadowing right_outer right_inner false in
   assert (R.alpha_equal ~equal_type:eq_type left right);
   assert (not (R.alpha_equal ~equal_type:eq_type left wrong));
-  print_endline "alpha-equality: threaded shadowing pairs"
+  print_endline "alpha-equality: threaded shadowing pairs";
+  let reused_right = make_shadowing right_outer right_outer true in
+  let reused_left = make_shadowing left_outer left_outer true in
+  assert (not (R.alpha_equal ~equal_type:eq_type left reused_right));
+  assert (not (R.alpha_equal ~equal_type:eq_type reused_left right));
+  print_endline "alpha-equality: binder pairing is bijective"
 
 let () =
   let freshened = R.freshen_binders lambda in
@@ -237,4 +266,18 @@ let () =
            node bool_type (Rexp_ident (Rbound lambda_binder.rb_id)) ))
   in
   expect_error "bound occurrence type" mismatched;
-  expect_error "empty sibling name" (free bool_type (Rsibling ""))
+  expect_error "empty sibling name" (free bool_type (Rsibling ""));
+  let missing_else =
+    node bool_type (Rexp_ifthenelse (bool true, bool false, None))
+  in
+  let bad_conditional =
+    let binder =
+      { rb_id = Ident.create_scoped ~scope:1 "conditional";
+        rb_type = bool_type;
+      }
+    in
+    node bool_type
+      (Rexp_let
+         ([{ rbind_binder = binder; rbind_expr = missing_else }], bool true))
+  in
+  expect_error "else-less if with non-unit result" bad_conditional

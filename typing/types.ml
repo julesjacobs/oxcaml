@@ -1714,6 +1714,17 @@ module Refinement = struct
     | _ -> left = right
 
   let alpha_equal ~equal_type ?(binders = []) left right =
+    let add_pair pairs left right =
+      match
+        List.find_opt (fun (id, _) -> Ident.same id left) pairs,
+        List.find_opt (fun (_, id) -> Ident.same id right) pairs
+      with
+      | None, None -> Some ((left, right) :: pairs)
+      | Some (_, paired_right), Some (paired_left, _)
+        when Ident.same paired_right right && Ident.same paired_left left ->
+        Some pairs
+      | Some _, _ | _, Some _ -> None
+    in
     let paired pairs left right =
       match
         List.find_opt (fun (id, _) -> Ident.same id left) pairs,
@@ -1754,9 +1765,9 @@ module Refinement = struct
             if equal_type left_binder.rb_type right_binder.rb_type
                && equal pairs left.rbind_expr right.rbind_expr
             then
-              bindings
-                ((left_binder.rb_id, right_binder.rb_id) :: pairs)
-                left_rest right_rest
+              Option.bind
+                (add_pair pairs left_binder.rb_id right_binder.rb_id)
+                (fun pairs -> bindings pairs left_rest right_rest)
             else None
           | [], _ :: _ | _ :: _, [] -> None
         in
@@ -1767,9 +1778,10 @@ module Refinement = struct
       | Rexp_function left, Rexp_function right ->
         left.arg_label = right.arg_label
         && equal_type left.param.rb_type right.param.rb_type
-        && equal
-             ((left.param.rb_id, right.param.rb_id) :: pairs)
-             left.body right.body
+        && Option.fold
+             ~none:false
+             ~some:(fun pairs -> equal pairs left.body right.body)
+             (add_pair pairs left.param.rb_id right.param.rb_id)
       | Rexp_apply (left_function, left_arguments),
         Rexp_apply (right_function, right_arguments) ->
         equal pairs left_function right_function
@@ -1818,7 +1830,10 @@ module Refinement = struct
       | [] -> Some pairs
       | (left, right) :: rest ->
         if equal_type left.rb_type right.rb_type
-        then add_binders ((left.rb_id, right.rb_id) :: pairs) rest
+        then
+          Option.bind
+            (add_pair pairs left.rb_id right.rb_id)
+            (fun pairs -> add_binders pairs rest)
         else None
     in
     Option.fold
@@ -1933,7 +1948,7 @@ module Refinement = struct
 
   exception Invalid of validation_error
 
-  let validate ~equal_type ~bool_type ?(binders = []) expression =
+  let validate ~equal_type ~bool_type ?unit_type ?(binders = []) expression =
     let invalid error = raise (Invalid error) in
     let same_type left right = equal_type left right in
     let strip_mono type_ =
@@ -2060,7 +2075,11 @@ module Refinement = struct
            || not (same_type ifso.rexp_type expression.rexp_type)
            || not
                 (Option.fold
-                   ~none:true
+                   ~none:
+                     (Option.fold
+                        ~none:false
+                        ~some:(same_type expression.rexp_type)
+                        unit_type)
                    ~some:(fun ifnot ->
                      same_type ifnot.rexp_type expression.rexp_type)
                    ifnot)
