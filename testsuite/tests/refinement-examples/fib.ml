@@ -9,9 +9,11 @@
 *)
 
 (* FINAL: recursive results provide induction hypotheses, while the argument
-   contract proves recursive calls stay nonnegative.  CURRENT: typing reaches
-   the refined result but rejects a bare branch result; no verification pass
-   exists to discharge it. *)
+   contract proves recursive calls stay nonnegative.  CURRENT: the verification
+   pass generates the result obligation, but the comparison wrappers
+   [Vox_spec.int_le]/[Vox_spec.int_ge] are partial and therefore opaque to the
+   solver, so the guard and the nonnegativity goal cannot be related; the
+   obligation is not proved until total comparisons land. *)
 
 #load "vox_spec.cmo";;
 
@@ -26,9 +28,11 @@ let rec fib (n : int{ Vox_spec.int_ge _ 0 })
   else fib (n - 1) + fib (n - 2)
 
 [%%expect {|
-Line 5, characters 7-8:
+Lines 4-8, characters 2-32:
+4 | ..if Vox_spec.int_le n 0
 5 |   then 0
-           ^
-Error: The constant "0" has type "int" but an expression was expected of type
-         "int{ (app[Vox_spec!.int_ge] _ 0) }"
+6 |   else if n = 1
+7 |   then 1
+8 |   else fib (n - 1) + fib (n - 2)
+Error: Refinement verification failed (not-proved)
 |}]

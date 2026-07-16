@@ -13,8 +13,9 @@
    equality, and application of the prelude measure.
 
    FINAL: once recursive measures can be total, the recursive call's refined
-   result is the induction hypothesis for the cons case.  CURRENT: the bare
-   nil-case result is rejected against the refined result type. *)
+   result is the induction hypothesis for the cons case.  CURRENT: the
+   verification pass reaches the obligation but cannot yet represent the [match]
+   expression form in a verification condition, so it rejects the body. *)
 
 #load "vox_spec.cmo";;
 
@@ -27,11 +28,9 @@ let rec length (values : int list)
   | _head :: tail -> 1 + length tail
 
 [%%expect {|
-Line 5, characters 10-11:
+Lines 4-6, characters 2-36:
+4 | ..match values with
 5 |   | [] -> 0
-              ^
-Error: The constant "0" has type "int" but an expression was expected of type
-         "int{
-          (app[Stdlib!.=] _ (app[Vox_spec!.list_length] global[values/290]))
-          }"
+6 |   | _head :: tail -> 1 + length tail
+Error: Refinement verification failed: this expression form cannot yet be represented in a verification condition
 |}]
