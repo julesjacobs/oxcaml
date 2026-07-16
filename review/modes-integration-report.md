@@ -24,12 +24,14 @@ The predicate is elaborated inside `with_refinement_typing_frame` / `type_refine
    boundary would not fire.
 
 2. **Self bound at logical.** The refined value (the `_` hole) is added to the environment at a
-   logical mode, then given its type-directed crossing computed from the skeleton's jkind. A self
-   whose type crosses logicality (an immediate such as `int`, or an immutable type) can therefore
-   still be read by a comparison, while a self of a non-crossing type (a `ref`, or a polymorphic
-   type not known to cross) stays logical. The skeleton's jkind is used directly rather than the
-   type's principality-sensitive crossing because refinement skeletons are not generalized at this
-   point.
+   logical mode. A self whose type crosses logicality (an immediate such as `int`, or an immutable
+   type, or an arrow) is then given its skeleton crossing, so a read is mode-legal; a self of a type
+   that does *not* cross logicality (a `ref`, or a polymorphic type not known to cross) stays
+   logical, so any read is rejected — identically in every mode, since a non-crossing logicality is
+   not erased at the use site. The crossing is computed with a principality-insensitive
+   (always-principal) context (`Ctype.crossing_of_jkind_principal`): refinement skeletons are not
+   generalized here, and the ordinary crossing leaves an arrow's totality with-bound unresolved in
+   default compilation, which would make the modelability decision below depend on `-principal`.
 
 3. **Predicate checked at total.** The predicate expression is typed at an expected mode whose
    totality is `Total`. The closure lock does the capture enforcement; pinning the expected mode is
@@ -115,16 +117,22 @@ still accepts unchanged.
   in its own predicate. This is sound and per-design; it is deferred, unlocked by the same
   kind-constrained-declarations feature that unlocks total comparisons (a `('a : immediate)` self
   would cross and work). A comment states the restriction.
-- `type fn_reentrant = (int -> int){ (_ : int -> int) = _ }` REJECTS the same way. A function self
-  crosses logicality (arrows do cross logicality) but is not modelable, so comparing it would only
-  fail later as a solver error. The self is comparable only if its kind crosses logicality AND is
-  modelable — first-order, i.e. crossing totality (no arrows) — so a function (or any arrow-bearing)
-  self stays logical and is rejected at elaboration with the same message, rather than admitted and
-  failing at discharge. Same deferral and unlock as the polymorphic case.
+- `type fn_reentrant = (int -> int){ (_ : int -> int) = _ }` REJECTS, but by a different route,
+  because a function self *does* cross logicality: its logical mode is erased when it is read, so a
+  mode-only rejection would be masked in default compilation and appear only under `-principal`
+  (the batch-vs-toplevel masking class). A function value is not modelable — the Lean backend cannot
+  model it as a proposition argument — so a predicate that actually *reads* a self which crosses
+  logicality but not totality (i.e. contains an arrow) is rejected explicitly, identically in batch
+  and `-principal`, with a dedicated `Refinement_self_not_modelable` error. A refinement that never
+  mentions its self, such as `(int -> int){ true }`, has nothing to model and is left alone
+  (exercised by `refined_arrow_backend.ml`). Same deferral and unlock as the polymorphic case. The
+  batch-mode regression is the new `refinement/refined_function_self_reject.ml`, which pins the
+  rejection under plain `ocamlc.byte`; the `elaboration.ml` `%%expect` covers the principal-like
+  toplevel and the harness's `-principal` pass.
 - `type int_reentrant = int{ (_ : int) = _ }` is added and ACCEPTS, preserving the original
   parametric-refinement elaboration coverage with a concrete immediate self. The pre-existing `rich`
-  case (int-self comparisons) continues to accept. (A `ref` self, which crosses totality but not
-  logicality, is rejected by the logicality half of the gate, unchanged.)
+  case (int-self comparisons) continues to accept. (A `ref` self, which does not cross logicality,
+  stays logical and is rejected by the mode mechanism, unchanged.)
 
 ## Verification record
 
@@ -133,7 +141,7 @@ clean, whole-tree marker grep zero, no snapshot-era totality mechanism present.
 
 | suite | passed | failed |
 |---|---|---|
-| refinement | 12 | 0 |
+| refinement | 13 | 0 |
 | refinement-acceptance | 14 | 0 |
 | refinement-lean | 2 | 0 |
 | refinement-examples | 6 | 0 |
@@ -151,6 +159,14 @@ present, plus the new scoping guard). Every non-refinement suite matches its pre
 — the admission flag is inert outside predicate elaboration, so there are no regressions in the mode
 machinery itself.
 
-Direct probes (installed compiler, normal and `-principal`): a total closure mentioning a captured
-`ref` is accepted; dereferencing it rejects ("logical but expected physical"); `read_int` in a
-predicate rejects; `>` in an ordinary total closure still rejects.
+The principality-insensitivity child re-ran the refinement set, `typing-modes`, and
+`typing-jkind-bounds` against a freshly built final compiler (all green above); the remaining
+suites are unaffected because the change is confined to refinement predicate elaboration plus a
+printer-only new error message.
+
+Direct probes (normal and `-principal`, identical outcome in each): a total closure mentioning a
+captured `ref` is accepted; dereferencing it rejects ("logical but expected physical"); `read_int`
+in a predicate rejects; `>` in an ordinary total closure still rejects. For the modelability gate:
+`(int -> int){ (_ = _) }` rejects in both batch and `-principal` (not modelable); `(int -> int){
+true }` compiles (self never read); `int`/`string` selfs accept; `ref` and polymorphic selfs reject
+with the unchanged "logical but expected physical" message.

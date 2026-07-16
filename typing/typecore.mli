@@ -377,6 +377,7 @@ type error =
   | Refinement_expression_not_supported of string
   | Refinement_unresolved_type_variable of type_expr
   | Refinement_value_not_representable of type_expr * Jkind.Violation.t
+  | Refinement_self_not_modelable of type_expr
   | Invalid_refinement_expression of Refinement.validation_error
   | Let_poly_not_yet_implemented
   | Let_poly_not_syntactic_value

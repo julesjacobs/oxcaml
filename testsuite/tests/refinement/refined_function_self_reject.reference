@@ -1,0 +1,6 @@
+File "refined_function_self_reject.ml", line 19, characters 20-58:
+19 | type fn_reentrant = (int -> int){ ((_ : int -> int) = _) }
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The value refined by this predicate has type int -> int,
+       which is not modelable: it contains a function type,
+       and a function value cannot be read in its own refinement predicate.
