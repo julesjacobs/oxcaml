@@ -248,6 +248,14 @@ module Directionality = struct
        | Positive | Strictly_positive -> true
        | Negative -> false)
   ;;
+
+  let is_negative d =
+    match d.pos with
+    | Negative -> true
+    | Positive | Strictly_positive -> false
+  ;;
+
+  let is_in_equality d = d.in_eq
 end
 
 let modes_toplevel = Specific ((toplevel_mode, None), toplevel_mode)
@@ -262,7 +270,31 @@ module Core_inclusion = struct
   let value_descriptions ~loc env ~direction subst id ~mmodes vd1 vd2 =
     if Directionality.mark_as_used direction then Env.mark_value_used vd1.val_uid;
     let vd2 = Subst.value_description subst vd2 in
-    try Ok (Includecore.value_descriptions ~loc env (Ident.name id) ~mmodes vd1 vd2) with
+    let swapped = Directionality.is_negative direction in
+    let implementation_location, interface_location =
+      if swapped then vd2.val_loc, vd1.val_loc else vd1.val_loc, vd2.val_loc
+    in
+    try
+      let check () =
+        Includecore.value_descriptions
+          ~loc env (Ident.name id) ~mmodes vd1 vd2
+      in
+      let coercion =
+        if Directionality.is_in_equality direction
+        then check ()
+        else begin
+          let coercion, obligations =
+            Ctype.with_refinement_seal
+              ~value_name:(Ident.name id)
+              ~implementation_location ~interface_location check
+          in
+          Vox_verify.verify_seal_obligations
+            ~env ~seal_location:loc obligations;
+          coercion
+        end
+      in
+      Ok coercion
+    with
     | Includecore.Dont_match err ->
       Error Error.(Core (Value_descriptions (mdiff vd1 vd2 mmodes err)))
   ;;

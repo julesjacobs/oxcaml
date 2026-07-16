@@ -6200,6 +6200,53 @@ type moregen_variance =
   | Contravariant
   | Bivariant
 
+type refinement_seal_obligation =
+  { rso_skeleton : type_expr;
+    rso_hypothesis : refinement_desc;
+    rso_conclusion : refinement_desc;
+    rso_value_name : string;
+    rso_implementation_location : Location.t;
+    rso_interface_location : Location.t;
+  }
+
+type refinement_seal_context =
+  { value_name : string;
+    implementation_location : Location.t;
+    interface_location : Location.t;
+  }
+
+let refinement_seal_context = ref None
+let refinement_seal_obligations = ref []
+
+let with_refinement_seal
+    ~value_name ~implementation_location ~interface_location f =
+  let old_context = !refinement_seal_context in
+  let old_obligations = !refinement_seal_obligations in
+  refinement_seal_context :=
+    Some { value_name; implementation_location; interface_location };
+  refinement_seal_obligations := [];
+  Misc.try_finally
+    (fun () ->
+      let result = f () in
+      result, List.rev !refinement_seal_obligations)
+    ~always:(fun () ->
+      refinement_seal_context := old_context;
+      refinement_seal_obligations := old_obligations)
+
+let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion =
+  match !refinement_seal_context with
+  | None -> ()
+  | Some context ->
+    refinement_seal_obligations :=
+      { rso_skeleton = skeleton;
+        rso_hypothesis = hypothesis;
+        rso_conclusion = conclusion;
+        rso_value_name = context.value_name;
+        rso_implementation_location = context.implementation_location;
+        rso_interface_location = context.interface_location;
+      }
+      :: !refinement_seal_obligations
+
 let neg_variance = function
   | Invariant -> Invariant
   | Covariant -> Contravariant
@@ -6478,14 +6525,52 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
           | (Tbox t1, Tbox t2) ->
               moregen inst_nongen variance type_pairs env t1 t2
           | (Trefine refinement1, Trefine refinement2) ->
-              if not
-                   (Refinement.equal_desc
-                      ~equal_type:(fun type1 type2 ->
-                        moregen inst_nongen Invariant type_pairs env
-                          type1 type2;
-                        true)
-                      refinement1 refinement2)
-              then raise_unexplained_for Moregen
+              begin match !refinement_seal_context, variance with
+              | Some _, (Covariant | Contravariant) ->
+                let predicates_equal =
+                  Refinement.alpha_equal
+                    ~equal_type:(fun type1 type2 ->
+                      moregen inst_nongen Invariant type_pairs env
+                        type1 type2;
+                      true)
+                    ~binders:[refinement1.ref_view, refinement2.ref_view]
+                    refinement1.ref_pred refinement2.ref_pred
+                in
+                if not predicates_equal then begin
+                  let hypothesis, conclusion =
+                    match variance with
+                    | Covariant -> refinement1, refinement2
+                    | Contravariant -> refinement2, refinement1
+                    | Invariant | Bivariant ->
+                      raise_unexplained_for Moregen
+                  in
+                  record_refinement_seal_obligation
+                    ~skeleton:refinement1.ref_skeleton
+                    ~hypothesis ~conclusion
+                end;
+                moregen inst_nongen variance type_pairs env
+                  refinement1.ref_skeleton refinement2.ref_skeleton
+              | (None, _) | (Some _, (Invariant | Bivariant)) ->
+                if not
+                     (Refinement.equal_desc
+                        ~equal_type:(fun type1 type2 ->
+                          moregen inst_nongen Invariant type_pairs env
+                            type1 type2;
+                          true)
+                        refinement1 refinement2)
+                then raise_unexplained_for Moregen
+              end
+          | (Trefine refinement, _)
+            when Option.is_some !refinement_seal_context
+                 && variance = Covariant ->
+              moregen inst_nongen variance type_pairs env
+                refinement.ref_skeleton t2'
+          | (_, Trefine _)
+            when Option.is_some !refinement_seal_context
+                 && variance = Covariant ->
+              (* Bare implementations do not acquire interface refinements at
+                 a seal.  Q-001 can change this fail-closed site locally. *)
+              raise_unexplained_for Moregen
           | (Tbox t, _) when is_unboxable_ty env t2' ->
               moregen inst_nongen variance type_pairs
                 env t (unbox_ty_exn env t2')
