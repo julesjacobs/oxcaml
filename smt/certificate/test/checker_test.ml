@@ -556,6 +556,37 @@ let satisfied_but_no_conflict : Checker.events =
   }
 ;;
 
+(* task #47 E1/E2 CITED-CLAUSE FALLBACK. A Level0_conflict whose cited clause is NOT
+   falsified by the closure, but the closure IS globally inconsistent → VALID via the
+   [refutes_under []] fallback. Inputs [a] and [¬a] are UP-inconsistent; the terminal
+   cites id10=[a], which the closure (a:=true) SATISFIES, not falsifies — mirroring the
+   rings id-7866 shape where the emitter's cited witness is satisfied under the checker's
+   batch closure yet the closure still derives ⊥. Pre-fix (no fallback) this is INVALID;
+   the fix accepts it. *)
+let e2_fallback_closure_inconsistent : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| na_ |] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 10 })
+  ; assumptions = []
+  }
+;;
+
+(* task #47 negative: cited clause NOT falsified AND the closure CONSISTENT → INVALID. The
+   fallback is gated on GENUINE inconsistency, not a blanket pass. Query [a] alone is SAT;
+   a Level0_conflict citing the satisfied [a] must be rejected — the accept-invalid north
+   star. (Rejects pre- and post-fix; the point is that the fallback did NOT open a hole.) *)
+let e2_cited_not_falsified_closure_consistent : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 10 })
+  ; assumptions = []
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 
 let () =
@@ -712,6 +743,17 @@ let () =
     "corrupt: satisfied hint but chain derives no conflict -> INVALID"
     `Invalid
     satisfied_but_no_conflict;
+  (* task #47 E1/E2 cited-clause fallback: cited clause not falsified but closure globally
+     inconsistent -> VALID; and the gate — cited not falsified AND closure consistent (a
+     SAT query) -> INVALID (fallback fires only on genuine inconsistency). *)
+  expect
+    "positive: E2 cited clause satisfied but closure inconsistent -> VALID"
+    `Valid
+    e2_fallback_closure_inconsistent;
+  expect
+    "corrupt: E2 cited not falsified AND closure consistent (sat query) -> INVALID"
+    `Invalid
+    e2_cited_not_falsified_closure_consistent;
   (* H4 (codex, HIGH->CRITICAL): ambiguous content id admitted to the DB (never cited) ->
      a SAT query VALID. Must be rejected at stream admission. Also the M6 clean
      discriminator of the #153a ambiguity guard (only ambiguity triggers). *)

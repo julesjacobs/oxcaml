@@ -495,6 +495,21 @@ let check ev =
              reason)
       ev.learned;
     (* terminal conclusion (§4.0 E1–E4). *)
+    (* E1/E2 CITED-CLAUSE FALLBACK (fix task #47). The E1/E2 witness is normally the cited
+       clause being falsified by the level-0 closure. But the emitter records the clause
+       that was falsified in the SOLVER's incremental level-0 state, and the checker's
+       batch closure over the full theory-leaf union can reach ⊥ through a DIFFERENT
+       clause and, in doing so, force a variable that SATISFIES the cited one (rings
+       id-7866, task #46). So when the cited clause is not falsified, FALL BACK to
+       [Bcp.refutes_under bcp []] — the level-0 closure derives ⊥ unconditionally. This is
+       exactly the E3 [refutes_under] idiom with no assumptions; it unifies the three
+       terminals. SOUND: the closure is built only from admitted axioms (guarded inputs +
+       theory leaves trusted at this stage) and RUP-verified learned clauses, so a
+       BCP-derived ⊥ over them is a genuine level-0 refutation regardless of which clause
+       is the syntactic witness. The cited id therefore becomes ADVISORY for E1/E2 (same
+       relaxation philosophy as the #42 non-minimal chains); the acceptance criterion
+       stays "a genuine unit-propagation derivation of ⊥ from validated clauses". A
+       consistent closure still fails both disjuncts and is rejected. *)
     (match conclusion with
      | Sat.Root_empty { input_id } ->
        (* E1 (Query) / E4 (Theory_lemma): a clause that filtered to [] under the level-0
@@ -505,11 +520,11 @@ let check ev =
            ~allowed:[ Kinput Sat.Query; Kinput Sat.Theory_lemma ]
            input_id
        in
-       if not (falsified bcp.Bcp.assign clause)
+       if not (falsified bcp.Bcp.assign clause || Bcp.refutes_under bcp [])
        then
          rejectf
-           "Root_empty cites id %d, but that clause is not falsified by the level-0 \
-            closure"
+           "Root_empty cites id %d, and the level-0 closure is not inconsistent (neither \
+            the cited clause is falsified nor does BCP over the closure derive ⊥)"
            input_id
      | Sat.Level0_conflict { conflict_id } ->
        (* E2: a level-0 conflict clause — a Boolean input/learned clause or a theory
@@ -521,11 +536,12 @@ let check ev =
              [ Kinput Sat.Query; Kinput Sat.Theory_lemma; Klearned; Ktheory Sat.Conflict ]
            conflict_id
        in
-       if not (falsified bcp.Bcp.assign clause)
+       if not (falsified bcp.Bcp.assign clause || Bcp.refutes_under bcp [])
        then
          rejectf
-           "Level0_conflict cites id %d, but that clause is not falsified by the level-0 \
-            closure"
+           "Level0_conflict cites id %d, and the level-0 closure is not inconsistent \
+            (neither the cited clause is falsified nor does BCP over the closure derive \
+            ⊥)"
            conflict_id
      | Sat.Failed_assumption { antecedents } ->
        (* E3, the universal session exit. The recorded antecedents are the assumption-

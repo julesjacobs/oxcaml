@@ -19,8 +19,9 @@
       cannot spuriously reject — the closure is a superset of any declared unit).
     - {b Learned-clause ordered RUP (§1.4).} Each learned clause replays by
       {e ordered, hint-restricted} RUP over its recorded antecedents [rₙ..r₁; conflict] —
-      each cited clause must be unit (or falsified) at its turn; the checker never
-      SEARCHES for a propagation. A dropped, permuted, or wrong-set hint chain fails.
+      each cited clause must be unit, falsified, or already satisfied (skipped) at its
+      turn — see the appendix below; the checker never SEARCHES for a propagation. A
+      dropped, permuted, or wrong-set hint chain fails.
 
     {b ADR-0013 appendix (satisfied-hint skip, task #42).} A cited clause that is already
     SATISFIED at its turn is a no-op and is SKIPPED, not rejected — the checker accepts
@@ -44,7 +45,19 @@
       [T_conflict []], ADR-0013 Rev 6) has NO v1 leaf witness for ⊥-from-∅ and is reported
       [Unsupported], not [Valid].
     - {b Terminal conclusion (§4.0 E1–E4).} [Root_empty] / [Level0_conflict] check the
-      cited clause is falsified by the level-0 closure; [Failed_assumption] replays the
+      cited clause is falsified by the level-0 closure, OR —
+      {b ADR-0013 appendix (E1/E2 cited-clause fallback, task #47)} — that the level-0
+      closure is GLOBALLY INCONSISTENT (BCP over the whole closure derives ⊥, i.e.
+      [refutes_under] with no assumptions). The fallback is needed because the emitter
+      cites the clause falsified in the SOLVER's incremental level-0 state, while the
+      checker's batch closure over the full theory-leaf union can reach ⊥ through a
+      different clause and force a variable that SATISFIES the cited one (rings id-7866).
+      The cited id is therefore ADVISORY for E1/E2 (the same relaxation philosophy as the
+      non-minimal ordered chains above); the acceptance criterion stays "a genuine
+      unit-propagation derivation of ⊥ from validated clauses", identical to the trust the
+      checker already places in the closure for the forward falsification check and for
+      E3. A consistent closure still fails both disjuncts and is rejected. This unifies
+      E1/E2 with the E3 [refutes_under] idiom. [Failed_assumption] replays the
       assumption-forcing chain by ordered RUP seeded with the solve's assumption literals
       true (the OCaml-side equivalent of the §1.0 selector strip: an assumed-true
       selector's [¬sel] literal is false throughout, so ordered RUP over the guarded
