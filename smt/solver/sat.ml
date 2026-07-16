@@ -951,8 +951,8 @@ let wl_push ws ~cref ~blocker =
   ws.wn <- ws.wn + 1
 ;;
 
-(* Add a watch entry (cref + cached blocker) to literal [l]'s list, keeping the parallel
-   arrays in lockstep. *)
+(* Add a watch entry (cref + cached blocker) to literal [l]'s list — one interleaved
+   [cref, blocker] pair appended to the single backing array [ws.w]. *)
 let watch_add t l ~cref ~blocker =
   let ws = Dynarray.get t.watches l in
   wl_reserve ws;
