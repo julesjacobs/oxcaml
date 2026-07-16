@@ -504,9 +504,17 @@ let check t =
      [Conflict] before (and regardless of) the simplex scan; it persists until the frame
      is popped, exactly like a simplex infeasibility. Empty when {!trivial_eq_fix_on} is
      off, so this branch is inert on the OFF path (trunk). *)
-  match List.concat t.false_frames with
-  | premise :: _ -> Conflict { premises = [ premise ]; farkas = [] }
-  | [] ->
+  (* Non-allocating scan for the first recorded [Trivially_false] premise (allocation on
+     the hot [check] path would tax near-wall files). All-empty (the common ON case, and
+     always on OFF) walks the shallow frame list and returns [None] with no allocation. *)
+  let rec first_false = function
+    | [] -> None
+    | [] :: rest -> first_false rest
+    | (premise :: _) :: _ -> Some premise
+  in
+  match first_false t.false_frames with
+  | Some premise -> Conflict { premises = [ premise ]; farkas = [] }
+  | None ->
     (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
        feasible check. The tableau/assignment the previous [check] certified feasible is
        still current (no assert/pop happened), so returning [Sat_candidate] re-certifies
