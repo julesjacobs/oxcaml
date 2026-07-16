@@ -254,5 +254,19 @@ end = struct
   let x = Obj.magic 0
 end
 [%%expect {|
-module Seal_launder : sig val x : int{ (app[Stdlib!.=] _ 1) } end
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   let x = Obj.magic 0
+5 | end
+Error: Signature mismatch:
+       Modules do not match:
+         sig val x : 'a end
+       is not included in
+         sig val x : int{ (app[Stdlib!.=] _ 1) } end
+       Values do not match:
+         val x : 'a
+       is not included in
+         val x : int{ (app[Stdlib!.=] _ 1) }
+       The type "'a" is not compatible with the type
+         "int{ (app[Stdlib!.=] _ 1) }"
 |}]

@@ -27,32 +27,13 @@ Lines 3-5, characters 6-3:
 3 | ......struct
 4 |   let square (x : int) = (x * x : int{ _ = x * x })
 5 | end
-Error: Signature mismatch:
-       Modules do not match:
-         sig
-           val square :
-             int ->
-             int{
-              (app[Stdlib!.=] _ (app[Stdlib!.*] global[x/291] global[x/291]))
-              }
-         end
-       is not included in
-         sig val square : int -> int{ (app[Vox_spec!.int_ge] _ 0) } end
-       Values do not match:
-         val square :
-           int ->
-           int{
-            (app[Stdlib!.=] _ (app[Stdlib!.*] global[x/291] global[x/291])) }
-       is not included in
-         val square : int -> int{ (app[Vox_spec!.int_ge] _ 0) }
-       The type
-         "int ->
-         int{ (app[Stdlib!.=] _ (app[Stdlib!.*] global[x/291] global[x/291]))
-          }"
-       is not compatible with the type
-         "int -> int{ (app[Vox_spec!.int_ge] _ 0) }"
-       Type
-         "int{ (app[Stdlib!.=] _ (app[Stdlib!.*] global[x/291] global[x/291]))
-          }"
-       is not compatible with type "int{ (app[Vox_spec!.int_ge] _ 0) }"
+Error: Refinement verification failed at module seal for value "square" (not-proved)
+Line 2, characters 2-48:
+2 |   val square : int -> int{ Vox_spec.int_ge _ 0 }
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value square
+Line 4, characters 6-12:
+4 |   let square (x : int) = (x * x : int{ _ = x * x })
+          ^^^^^^
+  Implementation declaration for value square
 |}]
