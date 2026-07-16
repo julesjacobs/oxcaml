@@ -258,5 +258,9 @@ let parse (src : string) : system =
          | None, _ -> malformed "malformed command: %s" (Sexp.to_string sx))
       | _ -> malformed "malformed top-level form: %s" (Sexp.to_string sx))
     sexps;
-  { env; ctx; preds = List.rev !preds; clauses = List.rev !clauses }
+  (* Eliminate mod/div into fresh quotient/remainder variables + linear defining
+     constraints, so the LIA oracle never sees a reserved div/mod symbol (whose SAT model
+     self-check would degrade a satisfiable query to unknown). *)
+  let clauses = List.rev_map Chc_ast.elim_moddiv_clause !clauses in
+  { env; ctx; preds = List.rev !preds; clauses }
 ;;

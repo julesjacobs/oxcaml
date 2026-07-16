@@ -165,3 +165,81 @@ let build_bool ctx venv es =
   | [ e ] -> build ctx venv e
   | _ -> Context.and_ ctx (List.map (build ctx venv) es)
 ;;
+
+(* ------------------------------------------------------------------ *)
+(* mod/div elimination (CHC front-end preprocessing). *)
+(* ------------------------------------------------------------------ *)
+
+(* Replace every [(mod a d)] / [(div a d)] with a constant divisor [d] by a fresh
+   quotient/remainder variable [q]/[r] plus the Euclidean defining constraints
+   [a = d*q + r], [0 <= r], [r < |d|] (SMT-LIB Ints semantics, matching z3). This keeps
+   the clause purely linear (the coefficient [d] is a literal) and — crucially — routes
+   the query AWAY from the reserved div/mod symbols, whose SAT-direction model self-check
+   in the shipped Session degrades a satisfiable query to [unknown] (the LIA-oracle gap
+   that made PDR's satisfiability-seeking predecessor/CTI queries bail). A non-constant
+   divisor is genuinely nonlinear and left untouched (it will degrade downstream,
+   soundly). *)
+let elim_moddiv_clause (c : clause) : clause =
+  let ctr = ref 0 in
+  let fresh_vars = ref [] in
+  let new_constrs = ref [] in
+  let fresh prefix =
+    (* A plain (non-reserved) identifier, prefixed to avoid colliding with user variables. *)
+    let n = Printf.sprintf "chcmd_%s%d" prefix !ctr in
+    incr ctr;
+    fresh_vars := (n, Sort.int) :: !fresh_vars;
+    n
+  in
+  let zero = Int_lit Bigint.zero in
+  let rec go (e : expr) : expr =
+    match e with
+    | Var _ | Int_lit _ | Bool_lit _ -> e
+    | Neg a -> Neg (go a)
+    | Add es -> Add (List.map go es)
+    | Sub es -> Sub (List.map go es)
+    | Mul (a, b) -> Mul (go a, go b)
+    | Mod (a, d) -> elim `Mod (go a) (go d)
+    | Div (a, d) -> elim `Div (go a) (go d)
+    | Eq (a, b) -> Eq (go a, go b)
+    | Le (a, b) -> Le (go a, go b)
+    | Lt (a, b) -> Lt (go a, go b)
+    | Ge (a, b) -> Ge (go a, go b)
+    | Gt (a, b) -> Gt (go a, go b)
+    | Not a -> Not (go a)
+    | And es -> And (List.map go es)
+    | Or es -> Or (List.map go es)
+    | Implies (a, b) -> Implies (go a, go b)
+    | Iff (a, b) -> Iff (go a, go b)
+    | Ite (a, b, c) -> Ite (go a, go b, go c)
+    | Distinct es -> Distinct (List.map go es)
+    | Pred_app (n, es) -> Pred_app (n, List.map go es)
+  and elim which a d =
+    match const_of_expr d with
+    | Some k when not (Bigint.is_zero k) ->
+      let q = fresh "q"
+      and r = fresh "r" in
+      let kd = Int_lit k in
+      let absk = Int_lit (Bigint.abs k) in
+      (* a = d*q + r ; 0 <= r ; r < |d| *)
+      new_constrs
+      := Eq (a, Add [ Mul (kd, Var q); Var r ])
+         :: Ge (Var r, zero)
+         :: Lt (Var r, absk)
+         :: !new_constrs;
+      (match which with
+       | `Mod -> Var r
+       | `Div -> Var q)
+    | _ ->
+      (match which with
+       | `Mod -> Mod (a, d)
+       | `Div -> Div (a, d))
+  in
+  let constr = List.map go c.constr in
+  let body_apps = List.map (fun a -> { a with args = List.map go a.args }) c.body_apps in
+  let head =
+    match c.head with
+    | H_false -> H_false
+    | H_pred a -> H_pred { a with args = List.map go a.args }
+  in
+  { vars = c.vars @ !fresh_vars; body_apps; constr = !new_constrs @ constr; head }
+;;

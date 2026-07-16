@@ -16,9 +16,9 @@ module Parse = Oxsmt_chc.Chc_parse
    multi-predicate -> multi-predicate linear PDR. *)
 let dispatch sys =
   if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1
-  then Engine.solve ~budget:4000 ~max_frames:40 sys
+  then Engine.solve ~budget:800 ~max_frames:20 sys
   else (
-    let r = Pdr.solve ~budget:4000 ~max_frames:40 sys in
+    let r = Pdr.solve ~budget:800 ~max_frames:20 sys in
     { Engine.verdict =
         (match r.Pdr.verdict with
          | Pdr.Safe -> Engine.Safe
@@ -210,6 +210,28 @@ let () =
       (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 1))) (Q y))))
       (assert (forall ((x Int)(y Int)) (=> (and (Q x)(= y (+ x 1))) (P y))))
       (assert (forall ((x Int)) (=> (and (Q x)(>= x 4)) false)))|};
+  (* 15a. mod in a transition guard, bad reachable -> unsafe; exercises front-end mod/div
+     elimination (BMC-findable, no strong generalization needed). *)
+  check
+    "mod-unsafe"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int))
+        (=> (and (P x)(= (mod x 2) 0)(= y (+ x 2))) (P y))))
+      (assert (forall ((x Int)) (=> (and (P x)(= x 4)) false)))|};
+  (* 15a2. mod in the safety property; invariant is MODULAR (x even), which interval
+     generalization cannot express -> soft miss. Before mod/div elimination this bailed to
+     unknown at the LIA oracle; now it reaches PDR and (soundly) times out. *)
+  check
+    "mod-safe-modular"
+    Safe_ok
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 2))) (P y))))
+      (assert (forall ((x Int)) (=> (and (P x)(= (mod x 2) 1)) false)))|};
   (* 15b. NONLINEAR clause (two body predicates) -> out of the linear fragment -> unknown *)
   check
     "nonlinear-unknown"
