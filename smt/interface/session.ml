@@ -58,21 +58,21 @@ type model = sort_card list * model_binding list
 type t =
   { env : Env.t
   ; cap : Env.reserved_cap
-    (* ADR-0012 R1: the reserved-minting capability for [env], kept private (never
+      (* ADR-0012 R1: the reserved-minting capability for [env], kept private (never
          returned by [Session.env]) and threaded only to the legitimate minters —
          preprocessing and the lemma tier's [Qvar.mint]. *)
   ; ctx : Context.t
   ; registry : Oxsmt_core.Datatype_defs.t ref
-    (* datatype declarations (GOALS Datatypes); empty unless [set_datatypes] was called.
+      (* datatype declarations (GOALS Datatypes); empty unless [set_datatypes] was called.
          A ref SHARED with [cdclt] (same ref), so a [set_datatypes] after [create] is
          visible when cdclt reads it lazily at the first theory-atom intern to pick the
          standalone DT theory over the EUF+LIA combined stack. *)
   ; array_registry : Oxsmt_core.Array_defs.t ref
-    (* array select/store symbols (arrays lane); empty unless [set_arrays] was called. A
+      (* array select/store symbols (arrays lane); empty unless [set_arrays] was called. A
          ref SHARED with [cdclt] (same ref), read lazily at the first theory-atom intern
          to pick the standalone arrays theory. *)
   ; mutable has_arrays : bool
-    (* [set_arrays] installed a non-empty array registry. A [Final]->[Sat] on an array
+      (* [set_arrays] installed a non-empty array registry. A [Final]->[Sat] on an array
          problem degrades to [Unknown] in v1: the ROW/extensionality saturation is sound
          for refutation but the model is not self-checked, so [sat] is withheld rather
          than risk a wrong-[sat]. UNSAT flows through unchanged. *)
@@ -80,19 +80,19 @@ type t =
   ; sat : Sat.t
   ; cdclt : Cdclt.t
   ; mgr : Manager.t
-    (* ADR-0012 lemma tier: the store + instantiation manager, threaded alongside the
+      (* ADR-0012 lemma tier: the store + instantiation manager, threaded alongside the
          Context/Cdclt. Frame-scoped in lockstep with [frames] via [Manager.on_pop]. *)
   ; prop_to_var : Sat.var Term.Table.t
-    (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
+      (* one SAT var per distinct propositional-variable term (nullary Bool [App]);
          auxiliary Tseitin variables are per-formula. Shared via hash-cons identity. *)
   ; mutable bool_consts : (string * Sat.var) list
-    (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
+      (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
          [get_model] *)
   ; mutable frames : Sat.var list
-    (* selector stack, innermost first; base always present (the outermost / last
+      (* selector stack, innermost first; base always present (the outermost / last
          element) *)
   ; base_at_level0 : bool
-    (* OXSMT_BASE_L0 (DEFAULT-ON; set to 0/false/no to opt out): the unpoppable base
+      (* OXSMT_BASE_L0 (DEFAULT-ON; set to 0/false/no to opt out): the unpoppable base
          frame is forced TRUE by a permanent unit clause at level 0 instead of being
          ASSUMED positive on every solve. Removes the artificial level-1 [base] decision
          and keeps [not base] out of learned clauses (a sound search/encoding change — NOT
@@ -101,70 +101,70 @@ type t =
          activation selector are unaffected. *)
   ; base_var : Sat.var (* the base-frame selector, for the level-0 forcing unit *)
   ; mutable base_unit_emitted : bool
-    (* under [base_at_level0], the permanent [base] unit is added LAZILY on the first
+      (* under [base_at_level0], the permanent [base] unit is added LAZILY on the first
          [check_sat] rather than at [create] — so that if a certificate trace was
          installed (which happens on a pristine session, after [create] but before any
          solve) the unit is captured as a genuine cert Input (the definitional
          selector-unit), and the checker DERIVES [base] by BCP over inputs. Emitted
          exactly once. *)
   ; mutable has_theory : bool
-    (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
+      (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
          verdict's model comes from the theory, and a Sat is theory-validated *)
   ; mutable degraded : bool
-    (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
+      (* Overflow/Unsupported/poison/budget seen: verdict must be Unknown (I8,
          CONTRACT-POISON) *)
   ; mutable last_verdict : verdict
-    (* verdict of the most recent check_sat, for get_model *)
+      (* verdict of the most recent check_sat, for get_model *)
   ; mutable last_model : model option
-    (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+      (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
   ; mutable asserted : Term.t list
-    (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
+      (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
          model self-check. Frame-scoped in lockstep with [frames] (F3): a [push] snapshots
          it onto [asserted_saved] and a [pop] restores that snapshot, so a retracted
          frame's assertions do NOT linger — [Model_check] evaluates the current active
          set, never a popped assertion (which would spuriously reject a valid post-pop
          [Sat]). *)
   ; mutable asserted_saved : Term.t list list
-    (* [asserted] snapshots saved at each [push], innermost first; one per non-base
+      (* [asserted] snapshots saved at each [push], innermost first; one per non-base
          frame (so [length asserted_saved = length frames - 1]). Restored by [pop]. *)
   ; mutable last_splits : int (* splits used by the most recent check_sat (stat) *)
   ; mutable budget_exhausted : bool (* the most recent check_sat hit the split budget *)
   ; mutable last_effort : int
-    (* effort consumed by the most recent check_sat (board #60) *)
+      (* effort consumed by the most recent check_sat (board #60) *)
   ; mutable effort_exhausted : bool
-    (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
+      (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
          poison-free: distinct from [degraded]/[budget_exhausted], NOT sticky. *)
   ; mutable elim_defs : Presolve.def list
-    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated,
+      (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated,
          in elimination order. [build_model] re-derives each one's value from its
          definition and splices it into the model so the R1 checker (which evaluates the
          ORIGINAL assertions in [asserted]) and [get_model] both bind it. Empty unless the
          batch {!assert_presolved} path eliminated something. *)
   ; relevancy : Relevancy.t option
-    (* dynamic relevancy driver (task #24, QF_UF), [None] unless the [OXSMT_RELEVANCY]
+      (* dynamic relevancy driver (task #24, QF_UF), [None] unless the [OXSMT_RELEVANCY]
          gate is on (or {!create} is told to enable it). When [Some], {!assert_clausified}
          feeds it the boolean-skeleton graph and the SAT core's branch filter consults it;
          when [None] the whole feature is dark and byte-identical to trunk. *)
   ; mutable cert_active : bool
-    (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
+      (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
          (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
          would otherwise enter the cert as a trusted [Input], laundering a preprocessing
          consequence into the query and blinding the gate (codex MED-3/4). Cert corpus
          runs are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is
          free. *)
   ; sym_counter : int ref
-    (* symmetry breaking (task #25): a PER-SESSION monotone counter for the reserved
+      (* symmetry breaking (task #25): a PER-SESSION monotone counter for the reserved
          [.oxsmt.sym.*] aux-var names, so a second [assert_presolved] emission does not
          reuse a name from the first (F2: idempotent [declare_reserved] would rebind it to
          a conflicting definition). *)
   ; mutable lemmas_registered : bool
-    (* symmetry breaking (task #25, R2/codex B2): set once any lemma is registered. The
+      (* symmetry breaking (task #25, R2/codex B2): set once any lemma is registered. The
          emission restriction refuses to emit when true — a during-solve lemma instance
          ([assert_instance_at_frame]) extends the formula and can break the detected
          symmetry, and [check_sat] builds its assumption list once, so an emission could
          not be retracted mid-solve. *)
   ; mutable sym_sel : Sat.var option
-    (* symmetry breaking (task #25, F1): the ACTIVATION SELECTOR guarding the current
+      (* symmetry breaking (task #25, F1): the ACTIVATION SELECTOR guarding the current
          emission's lex clauses. The clauses are asserted as [(¬sym_sel ∨ C)] (via
          [assert_clausified ~sel]); [check_sat] assumes [sym_sel] POSITIVE while [Some],
          so the clauses are active. [sym_sel] occurs only negatively (a pure literal), so
@@ -173,7 +173,7 @@ type t =
          assertion after emission (assert_term / a further assert_presolved / push) clears
          it. *)
   ; mutable sym_sel_in_core : Sat.var option
-    (* symmetry breaking (task #25, R3 minor): the activation selector assumed by the MOST
+  (* symmetry breaking (task #25, R3 minor): the activation selector assumed by the MOST
      RECENT [check_sat], captured at solve time. [failed_assumptions] filters by THIS, not
      the live [sym_sel] — a later assertion clears [sym_sel] to [None] while the SAT core
      still holds the selector from the previous solve, so a read-time filter keyed on the
@@ -181,11 +181,11 @@ type t =
   }
 
 let create
-      ?(split_budget = default_split_budget)
-      ?max_effort
-      ?lemma_gen_budget
-      ?(enable_relevancy = Relevancy.enabled_from_env ())
-      ()
+  ?(split_budget = default_split_budget)
+  ?max_effort
+  ?lemma_gen_budget
+  ?(enable_relevancy = Relevancy.enabled_from_env ())
+  ()
   =
   (* ADR-0012 R1: the session is the SOLE caller of [create_with_cap] in solver code (the
      documented convention); it keeps the cap private and threads it to the
@@ -487,11 +487,10 @@ let invalidate_theory_for_registry_change t =
          like a live assertion: the registry replacement raises rather than resetting
          under it. The self-contained-VC pattern (declare -> assert -> check -> pop, no
          live lemma) reaches here clean and resets. *)
-  if
-    (match t.asserted with
-     | [] -> false
-     | _ :: _ -> true)
-    || Manager.has_live_lemma t.mgr
+  if (match t.asserted with
+      | [] -> false
+      | _ :: _ -> true)
+     || Manager.has_live_lemma t.mgr
   then
     invalid_arg
       "Session: datatype/array registry replaced with live assertions or a live \
@@ -539,11 +538,10 @@ let set_datatypes t defs =
      involves datatypes (new or currently-installed) — never on a pure-logic no-op
      ([set_datatypes empty] on a session with no datatypes), which keeps the batched
      pure-logic path byte-identical (the #51 interim guard wrongly degraded it too). *)
-  if
-    Cdclt.theory_instantiated t.cdclt
-    && not
-         (Oxsmt_core.Datatype_defs.is_empty defs
-          && Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+  if Cdclt.theory_instantiated t.cdclt
+     && not
+          (Oxsmt_core.Datatype_defs.is_empty defs
+           && Oxsmt_core.Datatype_defs.is_empty !(t.registry))
   then invalidate_theory_for_registry_change t;
   t.registry := defs
 ;;
@@ -573,11 +571,10 @@ let set_arrays t defs =
      the live array registry (still the OLD one at that point); the line below then
      overwrites it from [defs], so a non-array query following an array query is not left
      with a stale [has_arrays]. *)
-  if
-    Cdclt.theory_instantiated t.cdclt
-    && not
-         (Oxsmt_core.Array_defs.is_empty defs
-          && Oxsmt_core.Array_defs.is_empty !(t.array_registry))
+  if Cdclt.theory_instantiated t.cdclt
+     && not
+          (Oxsmt_core.Array_defs.is_empty defs
+           && Oxsmt_core.Array_defs.is_empty !(t.array_registry))
   then invalidate_theory_for_registry_change t;
   t.array_registry := defs;
   t.has_arrays <- not (Oxsmt_core.Array_defs.is_empty defs)
@@ -609,23 +606,21 @@ let declare_datatype t sort constructors =
   let ctors =
     List.map
       (fun { ctor_name; fields } ->
-         let ctor_sym =
-           declare_fun t ctor_name (Rank.create (List.map snd fields) sort)
-         in
-         let selectors =
-           List.mapi
-             (fun i (sel_name, field_sort) ->
-                let sym = declare_fun t sel_name (Rank.create [ sort ] field_sort) in
-                { Oxsmt_core.Datatype_defs.sym; index = i; field_sort })
-             fields
-         in
-         (* Reserved tester: minted through the session's private cap so its
+        let ctor_sym = declare_fun t ctor_name (Rank.create (List.map snd fields) sort) in
+        let selectors =
+          List.mapi
+            (fun i (sel_name, field_sort) ->
+              let sym = declare_fun t sel_name (Rank.create [ sort ] field_sort) in
+              { Oxsmt_core.Datatype_defs.sym; index = i; field_sort })
+            fields
+        in
+        (* Reserved tester: minted through the session's private cap so its
            [.oxsmt.is-<C>] name is un-forgeable on the public declaration doors. *)
-         let tester_name = Printf.sprintf "%sis-%s" Env.reserved_prefix ctor_name in
-         let tester =
-           Env.declare_reserved t.cap t.env tester_name (Rank.create [ sort ] Sort.bool)
-         in
-         { Oxsmt_core.Datatype_defs.sym = ctor_sym; selectors; tester })
+        let tester_name = Printf.sprintf "%sis-%s" Env.reserved_prefix ctor_name in
+        let tester =
+          Env.declare_reserved t.cap t.env tester_name (Rank.create [ sort ] Sort.bool)
+        in
+        { Oxsmt_core.Datatype_defs.sym = ctor_sym; selectors; tester })
       constructors
   in
   let dt = { Oxsmt_core.Datatype_defs.sort_sym; constructors = ctors } in
@@ -734,8 +729,8 @@ let assert_clausified ?sel ~root t cnf =
   in
   Cnf.iter_clauses
     (fun clause ->
-       (* frame activation: clause holds only when the frame selector is assumed true *)
-       Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
+      (* frame activation: clause holds only when the frame selector is assumed true *)
+      Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
     cnf;
   (* Dynamic relevancy graph (task #24): recover the boolean-skeleton And/Or/iff/Ite DAG
      over PERSISTENT SAT vars and hand it to the driver. Built AFTER clause emission so
@@ -1255,9 +1250,9 @@ let assert_lemma t ~qvars ~build =
     Array.to_list
       (Array.map
          (fun q ->
-            match (Qvar.to_term q).Term.node with
-            | App (s, _) -> s
-            | _ -> assert false (* a qvar is a nullary App by construction *))
+           match (Qvar.to_term q).Term.node with
+           | App (s, _) -> s
+           | _ -> assert false (* a qvar is a nullary App by construction *))
          qv)
   in
   let foreign tm = term_has_reserved ~allowed:qvar_syms tm in
@@ -1459,13 +1454,13 @@ let splice_elim_defs t (sort_cards, bindings) =
     in
     List.iter
       (fun (d : Presolve.def) ->
-         List.iter
-           (fun (name, sort) ->
-              if not (Hashtbl.mem bound name) then add_const name (default_value sort))
-           (free_var_leaves d.Presolve.value);
-         match Model_check.eval_in tbls d.Presolve.value with
-         | Some v -> add_const d.Presolve.name v
-         | None -> ())
+        List.iter
+          (fun (name, sort) ->
+            if not (Hashtbl.mem bound name) then add_const name (default_value sort))
+          (free_var_leaves d.Presolve.value);
+        match Model_check.eval_in tbls d.Presolve.value with
+        | Some v -> add_const d.Presolve.name v
+        | None -> ())
       (List.rev t.elim_defs);
     sort_cards, !acc
 ;;
@@ -1476,17 +1471,27 @@ let build_model t =
   let bool_bindings =
     List.filter_map
       (fun (name, sv) ->
-         if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
+        if keep name then Some (Const (name, VBool (Sat.value t.sat sv))) else None)
       t.bool_consts
   in
-  let bool_names = List.map name_of bool_bindings in
+  (* Membership set for the bool-const dedup: O(1) lookups instead of the former
+     [List.mem] over [bool_names] (which made [assemble] O(theory_bindings x bool_consts)
+     — the same SMPT quadratic {!splice_elim_defs} above avoids). *)
+  let bool_name_set : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+  List.iter (fun b -> Hashtbl.replace bool_name_set (name_of b) ()) bool_bindings;
   let assemble sort_cards theory_bindings =
     let theory_bindings =
       List.filter
-        (fun b -> keep (name_of b) && not (List.mem (name_of b) bool_names))
+        (fun b ->
+          let n = name_of b in
+          keep n && not (Hashtbl.mem bool_name_set n))
         theory_bindings
     in
-    sort_cards, List.sort by_name (theory_bindings @ bool_bindings)
+    (* No sort here: [assemble] always flows through [finalize], which sorts by [by_name];
+       binding names are unique so [by_name] is tie-free and [splice_elim_defs]'s output
+       set is order-independent, so the single final sort is byte-identical to the former
+       assemble+finalize double sort. *)
+    sort_cards, theory_bindings @ bool_bindings
   in
   (* W1b: splice the eliminated variables (and any defaulted free variable) into the
      assembled model, then re-sort so the external model stays name-sorted. A no-op when
