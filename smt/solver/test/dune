@@ -53,3 +53,12 @@
  (name satcore_test)
  (modules satcore_test)
  (libraries oxsmt_solver unix))
+
+; lemma_backjump_test toggles OXSMT_LEMMA_BACKJUMP per solver via Unix.putenv to exercise
+; the dark asserting-lemma partial-backjump seam (real HNF cuts are non-asserting, so this
+; is the ON path's only permanent exerciser). [unix] is test-only (I3 firewall).
+
+(executable
+ (name lemma_backjump_test)
+ (modules lemma_backjump_test)
+ (libraries oxsmt_solver unix))
