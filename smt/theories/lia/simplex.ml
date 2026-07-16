@@ -25,11 +25,11 @@ module IntSet = Set.Make (Int)
    premise/multiplier order) are unchanged.
 
    Why a MUTABLE row (this lane): a basic variable's [row] is updated incrementally on
-   every pivot ([add_scaled] merge, [remove]). A persistent Map allocates O(log n) tree
-   nodes per update; a fresh sorted array allocates O(n) per update (the sparse-array
-   park's regression on wide rows). Here the hot incremental ops mutate the row IN PLACE
-   into its own backing arrays (growing capacity only when it must), so an incremental
-   update allocates nothing beyond an occasional doubling.
+   every pivot ([add_scaled_in_place] merge, [remove_in_place]). A persistent Map
+   allocates O(log n) tree nodes per update; a fresh sorted array allocates O(n) per
+   update (the sparse-array park's regression on wide rows). Here the hot incremental ops
+   mutate the row IN PLACE into its own backing arrays (growing capacity only when it
+   must), so an incremental update allocates nothing beyond an occasional doubling.
 
    Ownership discipline (soundness-critical — an in-place write to a shared row would
    corrupt the tableau and mis-verdict): the ONLY mutated destinations are (a) a var's own
@@ -408,7 +408,7 @@ let eval_def t (def : linexp) =
 let expand t (def : linexp) : linexp =
   (* [acc] is a fresh row uniquely owned here, so it is a legal in-place destination; each
      [vj.row]/singleton is read-only. Same accumulated map as the former fold of
-     [add_scaled], built without a fresh array per step. *)
+     add_scaled (the pre-in-place merge), built without a fresh array per step. *)
   Lx.fold
     (fun j c acc ->
       let vj = get t j in
