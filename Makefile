@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -304,6 +304,27 @@ lia-trivial-eq-test:
 	  if [ "$$off" != "unknown" ]; then \
 	    echo "lia-trivial-eq-test: FAIL OXSMT_LIA_TRIVIAL_EQ=0: want unknown, got $${off:-<none>}"; fail=1; \
 	  else echo "lia-trivial-eq-test: OK OXSMT_LIA_TRIVIAL_EQ=0 -> unknown (trunk raise path)"; fi; \
+	  test $$fail -eq 0
+
+## lia-gcd-cut-test (task #128) — the multi-row integer-elimination gcd cut
+##   (OXSMT_LIA_GCD_CUT) refutes a parity/lattice infeasibility that raw B&B cannot: the
+##   two rows [x=2q] and [x=2q'+1] each are ℤ-feasible alone, so the single-row diophantine
+##   test misses them and B&B diverges. Runs the real CLI on the fixture with presolve OFF
+##   (the search path) in BOTH flag states: default (dark, OFF) budget-degrades to unknown
+##   under a low effort cap (trunk behaviour); ON refutes it -> unsat. RED against trunk
+##   (OFF gives unknown, not unsat); nonzero exit on any mismatch.
+lia-gcd-cut-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; \
+	  f=tests/cases/lia_gcd_parity_unsat.smt2; fail=0; \
+	  off=$$($$cli --no-presolve --max-effort 100 $$f 2>/dev/null | grep -o 'verdict [a-z]*' | awk '{print $$2}'); \
+	  on=$$(OXSMT_LIA_GCD_CUT=1 $$cli --no-presolve --max-effort 100 $$f 2>/dev/null | grep -o 'verdict [a-z]*' | awk '{print $$2}'); \
+	  if [ "$$off" != "unknown" ]; then \
+	    echo "lia-gcd-cut-test: FAIL OFF: want unknown (trunk B&B diverges), got $${off:-<none>}"; fail=1; \
+	  else echo "lia-gcd-cut-test: OK OFF -> unknown (trunk B&B diverges)"; fi; \
+	  if [ "$$on" != "unsat" ]; then \
+	    echo "lia-gcd-cut-test: FAIL OXSMT_LIA_GCD_CUT=1: want unsat, got $${on:-<none>}"; fail=1; \
+	  else echo "lia-gcd-cut-test: OK OXSMT_LIA_GCD_CUT=1 -> unsat (multi-row gcd cut)"; fi; \
 	  test $$fail -eq 0
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
@@ -774,6 +795,7 @@ test: check-frozen
 	@# already bounded (fixed-seed, small N; ~0.04s) so no separate smoke variant is needed.
 	$(MAKE) lia-test
 	$(MAKE) lia-trivial-eq-test
+	$(MAKE) lia-gcd-cut-test
 	$(MAKE) lia-adapter-test
 	$(MAKE) hnf-test
 	$(MAKE) cut-budget-test

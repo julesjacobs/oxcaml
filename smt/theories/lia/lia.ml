@@ -98,6 +98,15 @@ type 'tok t =
          [pop]; carries no simplex state). Only ever populated when {!trivial_eq_fix_on};
          stays empty otherwise, so the OFF path is byte-for-byte trunk. *)
   ; mutable cube_tried : bool
+  ; mutable gcd_cut_tried : bool
+    (* task #128: the multi-row gcd cut runs at most ONCE per instance. The lattice
+       infeasibility it tests depends only on the asserted EQUALITY rows (eq_frames),
+       which B&B branching never changes (it adds inequality bounds), so re-running it at
+       every Final is pure overhead (observed 14x on a big SAT SMPT file). Once per
+       instance, exactly like [cube_tried]; the batch reader rejects push/pop so eq_frames
+       is fixed. An incremental generation that pushed new equalities would not be
+       re-tested — incompleteness, never unsoundness (a missed conflict, not a wrong one);
+       acceptable for this dark prototype. *)
   (* the cube test runs at most ONCE per instance — the first non-integral Final, which
      for a batch query is the b&b root (fat feasible regions are cracked there). This
      bounds its extra LP solve to one per query, so it cannot accumulate overhead on a
@@ -123,6 +132,27 @@ let trivial_eq_fix_on =
   | Some _ | None -> true
 ;;
 
+(* Multi-row integer-elimination gcd cut (task #128). Dark: default OFF, so the extra pass
+   in {!diophantine_conflict} is skipped and behaviour is byte-identical to trunk. Set
+   OXSMT_LIA_GCD_CUT=1 to eliminate a shared variable across asserted equality rows and
+   gcd-test the integer combination — catching a parity/lattice infeasibility (e.g.
+   [x=2q] and [x=2q'+1] give [2q-2q'=1], gcd 2 does not divide 1) that the single-row
+   test cannot see. *)
+let gcd_cut_on =
+  match Sys.getenv_opt "OXSMT_LIA_GCD_CUT" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | _ -> false
+;;
+
+(* A residual equality row over the still-free integer variables, used by the multi-row
+   gcd cut: [gc] is the (var-id, integer-valued coefficient) list, [gr] the residual, [gp]
+   the accumulated trail-literal premises of every asserted equality combined into it. *)
+type 'tok gcd_row =
+  { mutable gc : (int * Rational.t) list
+  ; mutable gr : Rational.t
+  ; mutable gp : 'tok list
+  }
+
 let create ctx =
   { ctx
   ; simplex = Simplex.create ()
@@ -141,6 +171,7 @@ let create ctx =
   ; eq_frames = [ [] ]
   ; false_frames = [ [] ]
   ; cube_tried = false
+  ; gcd_cut_tried = false
   }
 ;;
 
@@ -793,7 +824,122 @@ let diophantine_conflict t : 'tok conflict option =
     in
     (* Iterate to a fixpoint (bounded: [fixed] only grows, ≤ #vars) or first conflict. *)
     let rec loop () = if !conflict = None && sweep () then loop () in
+    (* Multi-row integer-elimination gcd cut (task #128, dark OXSMT_LIA_GCD_CUT). The
+       [sweep] fixpoint above is per-row; it misses a lattice infeasibility that only
+       appears after ELIMINATING a shared variable between two rows. This pass integer-row-
+       reduces the residual free system: for each pivot variable it cancels that variable
+       from every other row by the integer combination [rowj := ap*rowj - aj*rowp] (ap/aj
+       the pivot/other coefficients; premises unioned) and gcd-tests each combined row. All
+       arithmetic is [Rational] so a coefficient blow-up raises [Rational.Overflow] and
+       aborts the pass SOUNDLY (no conflict claimed) rather than wrapping a native int.
+       Sound: each reduced row is an integer linear combination of asserted equalities, so
+       a row with [gcd(coeffs) ∤ residual] (or all-zero coeffs and a nonzero residual) is a
+       genuine ℤ-infeasibility of exactly the cited premises. Bounded: ≤ #free-vars pivots,
+       each a single linear scan. *)
+    let multi_row_gcd_cut () =
+      try
+        let erows =
+          List.filter_map
+            (fun row ->
+              let residual, free, prems = split_row row in
+              if Rational.is_int residual
+                 && List.for_all (fun (_, c) -> Rational.is_int c) free
+              then Some { gc = free; gr = residual; gp = prems }
+              else None)
+            rows
+          |> Array.of_list
+        in
+        let n = Array.length erows in
+        let coeff r id =
+          match List.assoc_opt id r.gc with
+          | Some c -> c
+          | None -> Rational.zero
+        in
+        let scale k xs =
+          List.filter_map
+            (fun (id, c) ->
+              let c = Rational.mul k c in
+              if Rational.is_zero c then None else Some (id, c))
+            xs
+        in
+        let merge xs ys =
+          List.fold_left
+            (fun acc (id, c) ->
+              match List.assoc_opt id acc with
+              | None -> (id, c) :: acc
+              | Some c0 ->
+                let s = Rational.add c0 c in
+                let acc = List.remove_assoc id acc in
+                if Rational.is_zero s then acc else (id, s) :: acc)
+            xs
+            ys
+        in
+        let test r =
+          if !conflict = None
+          then (
+            match r.gc with
+            | [] ->
+              if not (Rational.is_zero r.gr)
+              then conflict := Some { premises = r.gp; farkas = [] }
+            | _ ->
+              let g =
+                List.fold_left (fun a (_, c) -> gcd_int a (Rational.num c)) 0 r.gc
+              in
+              if g <> 0 && Rational.num r.gr mod g <> 0
+              then conflict := Some { premises = r.gp; farkas = [] })
+        in
+        let used = Array.make n false in
+        let vars =
+          let seen = Hashtbl.create 64 in
+          let acc = ref [] in
+          Array.iter
+            (fun r ->
+              List.iter
+                (fun (id, _) ->
+                  if not (Hashtbl.mem seen id)
+                  then (
+                    Hashtbl.add seen id ();
+                    acc := id :: !acc))
+                r.gc)
+            erows;
+          List.rev !acc
+        in
+        List.iter
+          (fun p ->
+            if !conflict = None
+            then (
+              let piv = ref (-1) in
+              for i = 0 to n - 1 do
+                if !piv < 0 && (not used.(i)) && not (Rational.is_zero (coeff erows.(i) p))
+                then piv := i
+              done;
+              if !piv >= 0
+              then (
+                let pv = erows.(!piv) in
+                used.(!piv) <- true;
+                let ap = coeff pv p in
+                for j = 0 to n - 1 do
+                  if !conflict = None && j <> !piv
+                  then (
+                    let aj = coeff erows.(j) p in
+                    if not (Rational.is_zero aj)
+                    then (
+                      let r = erows.(j) in
+                      r.gc <- merge (scale ap r.gc) (scale (Rational.neg aj) pv.gc);
+                      r.gr <- Rational.sub (Rational.mul ap r.gr) (Rational.mul aj pv.gr);
+                      r.gp <- List.rev_append pv.gp r.gp;
+                      test r)
+                  )
+                done)))
+          vars
+      with
+      | Exit | Rational.Overflow -> ()
+    in
     loop ();
+    if !conflict = None && gcd_cut_on && not t.gcd_cut_tried
+    then (
+      t.gcd_cut_tried <- true;
+      multi_row_gcd_cut ());
     !conflict)
 ;;
 
