@@ -1795,9 +1795,12 @@ let test_default_value_datatype_fail_closed () =
    [f], so the body [(not (= (f 0) (f 0)))] built to [not true] = [false] — a refuting
    lemma that drove a WRONG unsat. Post-fix, [read_app] consults [scope]: the bound [f] in
    head position is ill-sorted -> Malformed -> the loader's [build] raises -> [assert_all]
-   returns false (a sound degrade, never a dropped/mis-built quantifier). The let form is
-   covered by roundtrip_test.F1-let-shadow-head; this is the same binder-agnostic fix via
-   a qvar. *)
+   returns false (a sound degrade, never a dropped/mis-built quantifier). Partial
+   assertion (lemmas-climb) does NOT weaken this: it salvages only out-of-fragment
+   [Unsupported] content (nested quantifiers / [exists]); a [Malformed] lemma body (this
+   ill-sorted shadow) is never caught per-lemma, so it still degrades the whole load. The
+   let form is covered by roundtrip_test.F1-let-shadow-head; this is the same
+   binder-agnostic fix via a qvar. *)
 let test_f1_qvar_shadow_head () =
   let s = Session.create () in
   let text =

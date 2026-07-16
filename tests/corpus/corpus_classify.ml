@@ -126,23 +126,23 @@ let label_of src =
 let scan_commands sexps =
   List.fold_left
     (fun (n_checks, incr) sx ->
-      (* Command keywords are UNQUOTED symbol heads; dispatch on that text, exactly as the
+       (* Command keywords are UNQUOTED symbol heads; dispatch on that text, exactly as the
          parser/CLI do since the tokenizer landed ([Atom] carries a [Lexer.token], not a
          string — [Sexp.simple] extracts an unquoted symbol's text). *)
-      match sx with
-      | Sexp.List (head :: _) ->
-        (match Sexp.simple head with
-         | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
-         (* push/pop AND reset/reset-assertions are stateful commands v1 does not support.
+       match sx with
+       | Sexp.List (head :: _) ->
+         (match Sexp.simple head with
+          | Some ("check-sat" | "check-sat-assuming") -> n_checks + 1, incr
+          (* push/pop AND reset/reset-assertions are stateful commands v1 does not support.
             The parser silently no-ops reset* (parser.ml), so a file that resets away a
             contradictory assertion would otherwise be solved on its STALE assertion set
             and report a false verdict; degrade it to unknown-incremental here, exactly as
             push/pop. Dispatch is on the Sexp command HEAD (whitespace-robust:
             [( reset ... )] is caught, unlike a raw substring scan) and only a top-level
             command head, so a user symbol named [reset] inside a term never trips it. *)
-         | Some ("push" | "pop" | "reset" | "reset-assertions") -> n_checks, true
-         | _ -> n_checks, incr)
-      | _ -> n_checks, incr)
+          | Some ("push" | "pop" | "reset" | "reset-assertions") -> n_checks, true
+          | _ -> n_checks, incr)
+       | _ -> n_checks, incr)
     (0, false)
     sexps
 ;;
@@ -238,7 +238,16 @@ let () =
           if not (Oxsmt_query_loader.assert_all s parsed)
           then "unknown", 0
           else (
-            let v = Session.check_sat s in
+            (* I8 fail-closed: [check_sat] must never crash the driver on untrusted corpus
+               input. A live lemma over the arrays/datatypes theories reaches a code path
+               with no EUF+LIA e-graph view ([Cdclt.egraph_view] failure); any such
+               unmapped exception degrades to a sound [unknown] rather than an [error]
+               (matches the parse path's [exception _] degrade). Sound: an aborted check
+               yields no verdict, so it can never contradict a label. *)
+            let v =
+              try Session.check_sat s with
+              | _ -> Session.Unknown
+            in
             let label = label_of src in
             let tok =
               match v with

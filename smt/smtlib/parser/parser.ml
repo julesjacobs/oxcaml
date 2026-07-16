@@ -43,7 +43,7 @@ type lemma_src =
   { qvars :
       (string * Sort.t) list (* forall binders, outer-first then inner (flattened) *)
   ; build : Term.t array -> Term.t * Term.t list list
-  (* [build qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
+    (* [build qvar_images] is [(body, triggers)]: [qvar_images.(k)] is the term to
      substitute for the k-th binder. May raise {!Malformed}/{!Unsupported} (a body op
      outside the subset), which the driver maps to a sound [unknown]. *)
   }
@@ -55,12 +55,15 @@ type t =
   ; status : Oxsmt_smtlib.Status.t option
   ; assertions : Term.t list
   ; datatypes : Datatype_defs.t
-      (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
+    (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
          theory; empty when the query declares none *)
   ; arrays : Array_defs.t
-      (* the array [select]/[store] symbols used, for the arrays theory; empty when the
+    (* the array [select]/[store] symbols used, for the arrays theory; empty when the
          query uses no arrays *)
   ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
+  ; dropped : int
+    (* count of assertion content the reader could not represent and dropped via partial
+     assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade sentinel *)
   }
 
 type fundecl =
@@ -86,17 +89,17 @@ type pstate =
   ; expanding :
       (string, unit) Hashtbl.t (* define names currently mid-expansion (cycle guard) *)
   ; memo : (string * int list, Term.t) Hashtbl.t
-      (* expansion cache keyed by (define name, argument-term tags). A define with the
+    (* expansion cache keyed by (define name, argument-term tags). A define with the
          same arguments always expands to the same hash-consed term, so this turns the
          exponential body re-read on nested chains (e.g. [f_{i+1}(x) = f_i(x) + f_i(x)])
          into linear work. Tags are the [Context] hash-cons identity, so the key is exact
          and cheap. *)
   ; dt_names : (string, unit) Hashtbl.t
-      (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
+    (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
          [Sort.datatype_] rather than [Sort.uninterpreted] *)
   ; mutable datatypes : Datatype_defs.t (* the accumulated datatype shape registry *)
   ; internal_mint : Internal_minter.t option
-      (* board #58 O-MINTER: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*])
+    (* board #58 O-MINTER: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*])
          mid-parse. Some internal symbols cannot be pre-minted at a declaration site:
          arrays op symbols are per-(index sort, element sort) instantiations discovered
          only at the first [select]/[store] use. Supplied by the parser's OWNER as an
@@ -110,7 +113,7 @@ type pstate =
          ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] markers through this and the arrays
          [array_op_sym] its [.oxsmt.arr.*] ones. *)
   ; array_ops : (string, Symbol.t) Hashtbl.t
-      (* the monomorphic [select]/[store] symbols minted per (role, index, element)
+    (* the monomorphic [select]/[store] symbols minted per (role, index, element)
          instantiation, keyed by a deterministic string; arrays are polymorphic so each
          instantiation gets its own symbol with a concrete rank *)
   ; mutable arrays : Array_defs.t (* the accumulated array select/store symbol registry *)
@@ -431,12 +434,12 @@ and read_let st scope rest =
     let new_scope =
       List.map
         (fun b ->
-          match b with
-          | Sexp.List [ name; def ] ->
-            (match Sexp.symbol_name name with
-             | Some n -> n, read_term st scope def
-             | None -> malformedf "malformed let binding name: %s" (Sexp.to_string name))
-          | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
+           match b with
+           | Sexp.List [ name; def ] ->
+             (match Sexp.symbol_name name with
+              | Some n -> n, read_term st scope def
+              | None -> malformedf "malformed let binding name: %s" (Sexp.to_string name))
+           | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
     (* Extend the scope map with this let's bindings, shadowing the outer scope. Folding
@@ -837,10 +840,10 @@ and expand st scope name (def : definition) arg_sexps =
   let bindings =
     List.map2
       (fun (pname, psort) arg ->
-        let t = read_term st scope arg in
-        if not (Sort.equal t.Term.sort psort)
-        then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
-        pname, t)
+         let t = read_term st scope arg in
+         if not (Sort.equal t.Term.sort psort)
+         then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
+         pname, t)
       def.params
       arg_sexps
   in
@@ -877,9 +880,9 @@ and read_mul st scope args =
   let consts, nonconsts =
     List.partition_map
       (fun (t : Term.t) ->
-        match t.node with
-        | Term.Int_const k -> Either.Left k
-        | _ -> Either.Right t)
+         match t.node with
+         | Term.Int_const k -> Either.Left k
+         | _ -> Either.Right t)
       ts
   in
   match nonconsts with
@@ -918,12 +921,13 @@ let read_binders st (binders : Sexp.t) : (string * Sort.t) list =
   | Sexp.List bs ->
     List.map
       (fun b ->
-        match b with
-        | Sexp.List [ nm; srt ] ->
-          (match Sexp.symbol_name nm with
-           | Some n -> n, sort_of_sexp st srt
-           | None -> malformedf "malformed quantifier binder name: %s" (Sexp.to_string nm))
-        | _ -> malformedf "malformed quantifier binder: %s" (Sexp.to_string b))
+         match b with
+         | Sexp.List [ nm; srt ] ->
+           (match Sexp.symbol_name nm with
+            | Some n -> n, sort_of_sexp st srt
+            | None ->
+              malformedf "malformed quantifier binder name: %s" (Sexp.to_string nm))
+         | _ -> malformedf "malformed quantifier binder: %s" (Sexp.to_string b))
       bs
   | _ -> malformedf "quantifier binder list must be a list"
 ;;
@@ -1028,13 +1032,13 @@ let define_fun st name params_sexp ret_sexp body =
   let params =
     List.map
       (fun p ->
-        match p with
-        | Sexp.List [ pn; psort ] ->
-          (match Sexp.symbol_name pn with
-           | Some pn -> pn, sort_of_sexp st psort
-           | None ->
-             malformedf "malformed define-fun parameter name: %s" (Sexp.to_string pn))
-        | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
+         match p with
+         | Sexp.List [ pn; psort ] ->
+           (match Sexp.symbol_name pn with
+            | Some pn -> pn, sort_of_sexp st psort
+            | None ->
+              malformedf "malformed define-fun parameter name: %s" (Sexp.to_string pn))
+         | _ -> malformedf "malformed define-fun parameter: %s" (Sexp.to_string p))
       params_sexp
   in
   let ret = sort_of_sexp st ret_sexp in
@@ -1083,14 +1087,14 @@ let parse_constructor st dt_sort (cdef : Sexp.t) : Datatype_defs.constructor =
     let selectors =
       List.mapi
         (fun index sel ->
-          match sel with
-          | Sexp.List [ sname_s; ssort_s ] ->
-            name_of sname_s, index, sort_of_sexp st ssort_s
-          | _ ->
-            malformedf
-              "malformed selector in constructor %s: %s"
-              cname
-              (Sexp.to_string sel))
+           match sel with
+           | Sexp.List [ sname_s; ssort_s ] ->
+             name_of sname_s, index, sort_of_sexp st ssort_s
+           | _ ->
+             malformedf
+               "malformed selector in constructor %s: %s"
+               cname
+               (Sexp.to_string sel))
         sel_sexps
     in
     let dom = List.map (fun (_, _, fs) -> fs) selectors in
@@ -1098,8 +1102,8 @@ let parse_constructor st dt_sort (cdef : Sexp.t) : Datatype_defs.constructor =
     let sel_records =
       List.map
         (fun (sname, index, field_sort) ->
-          let sel_sym = declare_fun_sym st sname [ dt_sort ] field_sort in
-          { Datatype_defs.sym = sel_sym; index; field_sort })
+           let sel_sym = declare_fun_sym st sname [ dt_sort ] field_sort in
+           { Datatype_defs.sym = sel_sym; index; field_sort })
         selectors
     in
     let tester_sym = declare_fun_sym st (tester_name_of cname) [ dt_sort ] Sort.bool in
@@ -1121,28 +1125,28 @@ let process_datatypes st sort_decls ctor_lists =
   let sort_syms =
     List.map
       (fun (name, arity) ->
-        (match arity with
-         | Sexp.Atom (Tok.Numeral "0") -> ()
-         | _ ->
-           unsupportedf "parametric datatype %s (nonzero arity) is not supported" name);
-        name, declare_datatype_sort st name)
+         (match arity with
+          | Sexp.Atom (Tok.Numeral "0") -> ()
+          | _ ->
+            unsupportedf "parametric datatype %s (nonzero arity) is not supported" name);
+         name, declare_datatype_sort st name)
       sort_decls
   in
   List.iter2
     (fun (name, sort_sym) ctor_list ->
-      let dt_sort = Sort.datatype_ sort_sym in
-      let constructors =
-        match ctor_list with
-        (* A datatype with zero constructors is uninhabited and not well-formed SMT-LIB
+       let dt_sort = Sort.datatype_ sort_sym in
+       let constructors =
+         match ctor_list with
+         (* A datatype with zero constructors is uninhabited and not well-formed SMT-LIB
            (SMT-LIB 2.6 requires >= 1 constructor); reject rather than register an empty,
            value-less datatype. *)
-        | Sexp.List [] -> malformedf "datatype %s has no constructors" name
-        | Sexp.List cs -> List.map (parse_constructor st dt_sort) cs
-        | _ -> malformedf "malformed constructor list for datatype %s" name
-      in
-      match Datatype_defs.add st.datatypes { sort_sym; constructors } with
-      | dts -> st.datatypes <- dts
-      | exception Invalid_argument m -> malformedf "%s" m)
+         | Sexp.List [] -> malformedf "datatype %s has no constructors" name
+         | Sexp.List cs -> List.map (parse_constructor st dt_sort) cs
+         | _ -> malformedf "malformed constructor list for datatype %s" name
+       in
+       match Datatype_defs.add st.datatypes { sort_sym; constructors } with
+       | dts -> st.datatypes <- dts
+       | exception Invalid_argument m -> malformedf "%s" m)
     sort_syms
     ctor_lists
 ;;
@@ -1153,9 +1157,9 @@ let parse_sort_decls (s : Sexp.t) =
   | Sexp.List decls ->
     List.map
       (fun d ->
-        match d with
-        | Sexp.List [ n; a ] -> name_of n, a
-        | _ -> malformedf "malformed datatype sort declaration: %s" (Sexp.to_string d))
+         match d with
+         | Sexp.List [ n; a ] -> name_of n, a
+         | _ -> malformedf "malformed datatype sort declaration: %s" (Sexp.to_string d))
       decls
   | _ -> malformedf "declare-datatypes sort list must be a list: %s" (Sexp.to_string s)
 ;;
@@ -1212,6 +1216,12 @@ let run st sexps =
   let status = ref None in
   let asserts = ref [] in
   let lemmas = ref [] in
+  (* Count of assertion content the reader could not represent and DROPPED (partial
+     assertion, below). Surfaced on {!t} so the shared loader arms a sentinel lemma when
+     [dropped > 0] — the live-lemma soundness rule then degrades any [Sat] to [Unknown],
+     so a dropped conjunct can never yield a wrong [sat] (dropping only WEAKENS the set,
+     sound for [unsat]). *)
+  let dropped = ref 0 in
   (* Classify an assertion body: a top-level [forall] (optionally wrapped in a [(! ...)]
      annotation, e.g. [:named]) becomes a lemma; anything else is a ground term. A
      [forall] nested INSIDE a term (not the assertion root) stays out of the fragment —
@@ -1231,6 +1241,40 @@ let run st sexps =
       if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
       `Ground t
   in
+  (* Does the s-expression syntactically contain a [forall]/[exists]? Gates partial
+     assertion (below) to quantifier-bearing assertions only, so a NON-quantifier reader
+     rejection (recursion, arity/sort mismatch) still fails the file exactly as before. *)
+  let rec contains_quantifier (s : Sexp.t) =
+    match s with
+    | Sexp.Atom (Tok.Reserved ("forall" | "exists")) -> true
+    | Sexp.Atom _ -> false
+    | Sexp.List items -> List.exists contains_quantifier items
+  in
+  (* Partial assertion (lemmas-climb). Only invoked when {!classify} of a
+     QUANTIFIER-bearing assertion RAISED [Unsupported] (i.e. the file would otherwise
+     parse-fail on an out-of-fragment quantifier): salvage the representable core instead
+     of dropping the whole file. A top-level [(and c1 c2 ...)] is split so a representable
+     conjunct survives a sibling outside the fragment ([and] is a core operator, never
+     user-redefinable, so splitting a Boolean conjunction is always sound); a [(! ...)]
+     wrapper is unwrapped (its tail still VALIDATED — a [Malformed] tail propagates, never
+     silently dropped); a root [forall] becomes a lemma; anything else is read as a ground
+     term. A conjunct/leaf that is [Unsupported] (out of fragment) is DROPPED and counted
+     — never fatal to the rest of the file, and never silently unsound (the [dropped]
+     sentinel forces [Sat] -> [Unknown]). [Malformed] (genuinely ill-formed) is NOT
+     caught: it propagates and fails the file, exactly as without partial assertion. *)
+  let rec take (b : Sexp.t) =
+    match b with
+    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: inner :: attrs) ->
+      validate_bang_attrs attrs;
+      take inner
+    | Sexp.List (head :: (_ :: _ :: _ as conjs)) when Sexp.simple head = Some "and" ->
+      List.iter take conjs
+    | _ ->
+      (match classify b with
+       | `Ground t -> asserts := t :: !asserts
+       | `Lemma l -> lemmas := l :: !lemmas
+       | exception Unsupported _ -> incr dropped)
+  in
   (* Extract a declared name (any symbol atom, quoted or not). *)
   let name_of s =
     match Sexp.symbol_name s with
@@ -1239,70 +1283,79 @@ let run st sexps =
   in
   List.iter
     (fun (cmd : Sexp.t) ->
-      (* Command keywords are UNQUOTED symbol heads; dispatch on that text. *)
-      match cmd with
-      | Sexp.Atom _ -> malformedf "unexpected top-level atom: %s" (Sexp.to_string cmd)
-      | Sexp.List [] -> malformedf "malformed command: ()"
-      | Sexp.List (head :: rest) ->
-        (match Sexp.simple head, rest with
-         | Some "set-logic", [ l ] ->
-           (match Sexp.simple l with
-            | Some l when known_logic l -> logic := Some l
-            | Some l ->
-              unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
-            | None -> malformedf "malformed set-logic argument")
-         | Some "set-info", _ ->
-           (match rest with
-            | [ Sexp.Atom (Tok.Keyword "status"); v ] ->
-              (match Sexp.simple v with
-               | Some v ->
-                 (match Oxsmt_smtlib.Status.of_string v with
-                  | Some s -> status := Some s
-                  | None -> malformedf "unknown :status value: %s" v)
-               | None -> malformedf "malformed :status value")
-            | _ -> () (* ignore other :info, incl. multi-line |...| / string values *))
-         | Some "declare-sort", [ n; arity ] ->
-           (match arity with
-            | Sexp.Atom (Tok.Numeral "0") -> declare_sort st (name_of n)
-            | _ -> unsupportedf "declare-sort %s with nonzero arity" (name_of n))
-         | Some "declare-const", [ n; ret ] ->
-           declare_fun st (name_of n) [] (sort_of_sexp st ret)
-         | Some "declare-fun", [ n; params; ret ] ->
-           let dom, cod = read_signature st params ret in
-           declare_fun st (name_of n) dom cod
-         (* [(declare-datatypes ((T0 a0) ...) (ctor-list0 ...))] — mutually recursive. *)
-         | Some "declare-datatypes", [ sort_decls; Sexp.List ctor_lists ] ->
-           process_datatypes st (parse_sort_decls sort_decls) ctor_lists
-         | Some "declare-datatypes", _ ->
-           malformedf "malformed declare-datatypes: %s" (Sexp.to_string cmd)
-         (* [(declare-datatype T (ctor ...))] — the single-datatype (arity 0) form. *)
-         | Some "declare-datatype", [ n; Sexp.List ctors ] ->
-           process_datatypes
-             st
-             [ name_of n, Sexp.Atom (Tok.Numeral "0") ]
-             [ Sexp.List ctors ]
-         | Some "declare-datatype", _ ->
-           malformedf "malformed declare-datatype: %s" (Sexp.to_string cmd)
-         | Some "define-fun", [ n; Sexp.List params; ret; body ] ->
-           define_fun st (name_of n) params ret body
-         | Some ("define-fun-rec" | "define-funs-rec"), _ ->
-           unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
-         | Some "define-fun", _ ->
-           malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
-         | Some "assert", [ body ] ->
-           (match classify body with
-            | `Ground t -> asserts := t :: !asserts
-            | `Lemma l -> lemmas := l :: !lemmas)
-         | Some "check-sat", _ -> ()
-         | Some "exit", _ -> ()
-         | Some ("push" | "pop"), _ ->
-           unsupportedf "incremental push/pop is not supported"
-         | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()
-         (* Output-only / non-stateful directives: ignoring them cannot change the
+       (* Command keywords are UNQUOTED symbol heads; dispatch on that text. *)
+       match cmd with
+       | Sexp.Atom _ -> malformedf "unexpected top-level atom: %s" (Sexp.to_string cmd)
+       | Sexp.List [] -> malformedf "malformed command: ()"
+       | Sexp.List (head :: rest) ->
+         (match Sexp.simple head, rest with
+          | Some "set-logic", [ l ] ->
+            (match Sexp.simple l with
+             | Some l when known_logic l -> logic := Some l
+             | Some l ->
+               unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
+             | None -> malformedf "malformed set-logic argument")
+          | Some "set-info", _ ->
+            (match rest with
+             | [ Sexp.Atom (Tok.Keyword "status"); v ] ->
+               (match Sexp.simple v with
+                | Some v ->
+                  (match Oxsmt_smtlib.Status.of_string v with
+                   | Some s -> status := Some s
+                   | None -> malformedf "unknown :status value: %s" v)
+                | None -> malformedf "malformed :status value")
+             | _ -> () (* ignore other :info, incl. multi-line |...| / string values *))
+          | Some "declare-sort", [ n; arity ] ->
+            (match arity with
+             | Sexp.Atom (Tok.Numeral "0") -> declare_sort st (name_of n)
+             | _ -> unsupportedf "declare-sort %s with nonzero arity" (name_of n))
+          | Some "declare-const", [ n; ret ] ->
+            declare_fun st (name_of n) [] (sort_of_sexp st ret)
+          | Some "declare-fun", [ n; params; ret ] ->
+            let dom, cod = read_signature st params ret in
+            declare_fun st (name_of n) dom cod
+          (* [(declare-datatypes ((T0 a0) ...) (ctor-list0 ...))] — mutually recursive. *)
+          | Some "declare-datatypes", [ sort_decls; Sexp.List ctor_lists ] ->
+            process_datatypes st (parse_sort_decls sort_decls) ctor_lists
+          | Some "declare-datatypes", _ ->
+            malformedf "malformed declare-datatypes: %s" (Sexp.to_string cmd)
+          (* [(declare-datatype T (ctor ...))] — the single-datatype (arity 0) form. *)
+          | Some "declare-datatype", [ n; Sexp.List ctors ] ->
+            process_datatypes
+              st
+              [ name_of n, Sexp.Atom (Tok.Numeral "0") ]
+              [ Sexp.List ctors ]
+          | Some "declare-datatype", _ ->
+            malformedf "malformed declare-datatype: %s" (Sexp.to_string cmd)
+          | Some "define-fun", [ n; Sexp.List params; ret; body ] ->
+            define_fun st (name_of n) params ret body
+          | Some ("define-fun-rec" | "define-funs-rec"), _ ->
+            unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
+          | Some "define-fun", _ ->
+            malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
+          | Some "assert", [ body ] ->
+            (match classify body with
+             | `Ground t -> asserts := t :: !asserts
+             | `Lemma l -> lemmas := l :: !lemmas
+             (* A QUANTIFIER-bearing assertion that classify could not represent: rather
+               than fail the whole file, salvage its representable core via partial
+               assertion (only [Unsupported] leaves are dropped; [Malformed] still
+               propagates). A non-quantifier rejection re-raises unchanged — recursion /
+               arity / sort errors fail the file exactly as before.
+               Currently-representable assertions never reach this arm, so their behaviour
+               is byte-identical. *)
+             | exception ((Malformed _ | Unsupported _) as e) ->
+               if contains_quantifier body then take body else raise e)
+          | Some "check-sat", _ -> ()
+          | Some "exit", _ -> ()
+          | Some ("push" | "pop"), _ ->
+            unsupportedf "incremental push/pop is not supported"
+          | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()
+          (* Output-only / non-stateful directives: ignoring them cannot change the
             assertion set, hence cannot flip a verdict. *)
-         | Some "set-option", _ -> ()
-         | Some (("reset" | "reset-assertions") as c), _ ->
-           (* Fail CLOSED — NOT a silent no-op. This reader folds every [assert] into ONE
+          | Some "set-option", _ -> ()
+          | Some (("reset" | "reset-assertions") as c), _ ->
+            (* Fail CLOSED — NOT a silent no-op. This reader folds every [assert] into ONE
               assertion set for a single [check-sat], so it cannot honour [reset] /
               [reset-assertions] clearing that set mid-script. Silently ignoring them left
               the pre-reset assertions live and FLIPPED the verdict (e.g.
@@ -1310,11 +1363,11 @@ let run st sexps =
               [unsat]). Raising degrades the query to [unknown] (I8), never a wrong
               verdict; incremental support is a documented follow-up (see the CLI's
               push/pop degrade). *)
-           unsupportedf "%s is not supported by the batch (single-check) reader" c
-         | Some other, _ -> unsupportedf "unsupported command: %s" other
-         | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
+            unsupportedf "%s is not supported by the batch (single-check) reader" c
+          | Some other, _ -> unsupportedf "unsupported command: %s" other
+          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
-  !logic, !status, List.rev !asserts, List.rev !lemmas
+  !logic, !status, List.rev !asserts, List.rev !lemmas, !dropped
 ;;
 
 let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
@@ -1333,7 +1386,7 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
     ; arrays = Array_defs.empty
     }
   in
-  let logic, status, assertions, lemmas =
+  let logic, status, assertions, lemmas, dropped =
     try run st sexps with
     | Term.Sort_error m -> raise (Malformed ("sort error: " ^ m))
     | Term.Unsupported m -> raise (Unsupported m)
@@ -1347,6 +1400,7 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
   ; datatypes = st.datatypes
   ; arrays = st.arrays
   ; lemmas
+  ; dropped
   }
 ;;
 

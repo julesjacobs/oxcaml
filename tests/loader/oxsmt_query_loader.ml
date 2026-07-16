@@ -9,6 +9,8 @@ module Parser = Oxsmt_smtlib_parser.Parser
 module Qvar = Oxsmt_ematch.Qvar
 module Trigger = Oxsmt_ematch.Trigger
 module Term = Oxsmt_core.Term
+module Context = Oxsmt_core.Context
+module Sort = Oxsmt_core.Sort
 
 (* Assert a parsed document into [s]: the ground batch through the W1b
    equality-elimination presolve (or the per-term [assert_term] stream when
@@ -25,6 +27,10 @@ module Term = Oxsmt_core.Term
    any ground [Sat] to [Unknown] automatically (§2). Returns [true] iff every lemma
    loaded. *)
 let assert_all ?(presolve = true) s (parsed : Parser.t) =
+  (* Total dropped assertion content: what partial assertion dropped at PARSE
+     ([parsed.dropped]) plus any lemma dropped HERE because its body/trigger is outside
+     the fragment (e.g. an [exists] in the body, discovered only when [build] runs). *)
+  let dropped = ref parsed.Parser.dropped in
   try
     (* Install any datatype shapes BEFORE asserting, so the theory stack selects the DT
        theory when the file declared a datatype (empty registry = no-op, byte-identical on
@@ -39,30 +45,57 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
     else List.iter (Session.assert_term s) parsed.Parser.assertions;
     List.iter
       (fun (lem : Parser.lemma_src) ->
-         ignore
-           (Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
-              let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
-              (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
-                lemma the file gave NO [:pattern] (the common case — the public quantified
-                sets rarely ship patterns) gets one inferred from the body (smallest
-                UF-application subterms covering every qvar). Purely a completeness
-                heuristic — every instance is a valid consequence, so it never changes a
-                verdict — and an unreachable qvar just yields no trigger (the lemma does
-                not fire; a live lemma then degrades to a sound [unknown]). Inference is a
-                front-end policy, NOT a change to [assert_lemma]: an explicit empty
-                trigger through the programmatic API still means "do not fire". *)
-              let triggers =
-                if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
-              in
-              { Session.body; triggers })
-            : Session.lemma))
+         match
+           Session.assert_lemma s ~qvars:lem.Parser.qvars ~build:(fun qv ->
+             let body, triggers = lem.Parser.build (Array.map Qvar.to_term qv) in
+             (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
+               lemma the file gave NO [:pattern] (the common case — the public quantified
+               sets rarely ship patterns) gets one inferred from the body (smallest
+               UF-application subterms covering every qvar). Purely a completeness
+               heuristic — every instance is a valid consequence, so it never changes a
+               verdict — and an unreachable qvar just yields no trigger (the lemma does
+               not fire; a live lemma then degrades to a sound [unknown]). Inference is a
+               front-end policy, NOT a change to [assert_lemma]: an explicit empty trigger
+               through the programmatic API still means "do not fire". *)
+             let triggers =
+               if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
+             in
+             { Session.body; triggers })
+         with
+         | (_ : Session.lemma) -> ()
+         (* Partial assertion (lemmas-climb): a SINGLE lemma OUT OF FRAGMENT (an [exists]
+           in the body -> [Unsupported]; an unsupported op; an over-precision literal) is
+           DROPPED and counted rather than failing the whole file. Dropping only weakens
+           the set (sound for [unsat]); the sentinel below reinstates soundness for the
+           [sat] direction. A genuinely ILL-FORMED / ill-typed lemma ([Malformed],
+           [Sort_error], or assert_lemma's own [Invalid_argument] well-formedness
+           rejection — e.g. the F1 head-shadow wrong-unsat guard) is NOT dropped here: it
+           propagates to the outer handler and degrades the WHOLE query to [unknown],
+           preserving that contract. *)
+         | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
+           incr dropped)
       parsed.Parser.lemmas;
+    (* If ANY assertion content was dropped, arm a trivial always-live universal lemma so
+       THE SOUNDNESS RULE degrades a [Sat] to [Unknown]: a dropped conjunct can then never
+       yield a wrong [sat], while [Unsat] of the asserted (weaker) subset stays sound.
+       Body [forall x. x = x] is trivially valid; the empty trigger means it never
+       instantiates (zero effort). Arming the sentinel MUST succeed — if it raises, the
+       outer handler's [false] degrades the whole query to a sound [unknown], so a drop is
+       never left un-guarded. *)
+    if !dropped > 0
+    then
+      ignore
+        (Session.assert_lemma
+           s
+           ~qvars:[ "x", Sort.int ]
+           ~build:(fun qv ->
+             let x = Qvar.to_term qv.(0) in
+             { Session.body = Context.eq (Session.context s) x x; triggers = [] })
+         : Session.lemma);
     true
   with
-  (* A lemma body / trigger outside the reader's subset (an unsupported op, an overflowing
-     literal, an ill-sorted or ill-formed lemma) -> a sound degrade, never a dropped
-     quantifier. [Invalid_argument] covers assert_lemma's own well-formedness rejections
-     (non-Bool body, arith-headed trigger, foreign reserved symbol). *)
+  (* A hard failure on the GROUND batch (or arming the sentinel) — degrade the whole query
+     to a sound [unknown]. *)
   | Parser.Malformed _
   | Parser.Unsupported _
   | Term.Unsupported _

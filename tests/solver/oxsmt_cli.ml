@@ -194,8 +194,15 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
   | _loaded ->
     (* Assertions (ground batch + [forall] lemmas) were loaded into [s] by the guard
        above; solve the ground core once. THE SOUNDNESS RULE (a live lemma degrades [Sat]
-       to [Unknown]) is enforced inside {!Session.check_sat}. *)
-    let v = Session.check_sat s in
+       to [Unknown]) is enforced inside {!Session.check_sat}. I8 fail-closed: a live lemma
+       over the arrays/datatypes theories can reach a path with no EUF+LIA e-graph view
+       ([Cdclt.egraph_view] failure); degrade any such unmapped exception to a sound
+       [unknown] rather than crash the CLI (mirrors corpus_classify, keeping the two
+       drivers equivalent). *)
+    let v =
+      try Session.check_sat s with
+      | _ -> Session.Unknown
+    in
     let st = Session.stats s in
     let block verdict model =
       { verdict
