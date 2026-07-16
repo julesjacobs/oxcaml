@@ -565,6 +565,83 @@ val pure_eager_record : unit -> eager_record = <fun>
 val pure_eager_assert : unit -> int = <fun>
 |}]
 
+(* Cross-lane residue guard (codex delta re-review probes B1-B9): residue in
+   match scrutinee (direct / sequenced / array), tuple component (sequenced /
+   discarded-let), and when-guard positions must reject; residue in a match-arm
+   body, an if-branch, and a try body reject too. All are caught by the
+   position-independent env channel. *)
+let b1_scrutinee_direct @ total = fun () -> match while true do () done with () -> 0
+[%%expect{|
+Line 1, characters 50-71:
+1 | let b1_scrutinee_direct @ total = fun () -> match while true do () done with () -> 0
+                                                      ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b2_scrutinee_seq @ total = fun () -> match (while true do () done); 0 with _ -> 0
+[%%expect{|
+Line 1, characters 47-70:
+1 | let b2_scrutinee_seq @ total = fun () -> match (while true do () done); 0 with _ -> 0
+                                                   ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b3_scrutinee_array @ total = fun () -> match ([| 0 |]; 0) with _ -> 0
+[%%expect{|
+Line 1, characters 50-57:
+1 | let b3_scrutinee_array @ total = fun () -> match ([| 0 |]; 0) with _ -> 0
+                                                      ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b4_tuple_seq @ total = fun () -> ((while true do () done); 0), 0
+[%%expect{|
+Line 1, characters 38-61:
+1 | let b4_tuple_seq @ total = fun () -> ((while true do () done); 0), 0
+                                          ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b5_tuple_discard @ total = fun () -> (let _ = while true do () done in 0), 0
+[%%expect{|
+Line 1, characters 50-71:
+1 | let b5_tuple_discard @ total = fun () -> (let _ = while true do () done in 0), 0
+                                                      ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b6_when_guard @ total = fun () -> match 0 with _ when (while true do () done; true) -> 0 | _ -> 1
+[%%expect{|
+Line 1, characters 59-80:
+1 | let b6_when_guard @ total = fun () -> match 0 with _ when (while true do () done; true) -> 0 | _ -> 1
+                                                               ^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b7_arm_body @ total = fun () -> match 0 with _ -> (while true do () done); 0
+[%%expect{|
+Line 1, characters 54-77:
+1 | let b7_arm_body @ total = fun () -> match 0 with _ -> (while true do () done); 0
+                                                          ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b8_if_branch @ total = fun () -> if true then ((while true do () done); 0) else 0
+[%%expect{|
+Line 1, characters 51-74:
+1 | let b8_if_branch @ total = fun () -> if true then ((while true do () done); 0) else 0
+                                                       ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let b9_try_body @ total = fun () -> try (while true do () done); 0 with _ -> 0
+[%%expect{|
+Line 1, characters 40-63:
+1 | let b9_try_body @ total = fun () -> try (while true do () done); 0 with _ -> 0
+                                            ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
 (* Pure discarded expressions and exception handling remain total. *)
 type irec = { i : int }
 let pure_sequence @ total = fun () -> (); 0
