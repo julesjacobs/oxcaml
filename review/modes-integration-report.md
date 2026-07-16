@@ -234,16 +234,29 @@ comparison primitives are admitted total only inside a predicate, so a top-level
 rejected; `List.length` is a recursion-partial stdlib function).
 
 **One-sided-refinement guard, `subtype_rec` (fold-in from the fable verdict).** The Tier-1 guard
-child added an explicit one-sided-`Trefine` clash arm to five ctype relations. Worth stating more
-plainly than the guard child's own message did: in `subtype_rec` the change is not merely a defensive
-net over an unreachable path — it changes the relation's *default* behavior for a one-sided refined
-type from **defer-constraint to immediate error**. Previously a `(Trefine _, _)`/`(_, Trefine _)`
-pair fell through to the `(_, _)` arm, which appends the pair to `cstrs` for later discharge by
-unification; that deferred discharge then reached `unify3`'s one-sided-`Trefine` case, whose old
-default was a silent `link_type` (the contravariantly-unsound weakening this batch removed). The new
-`subtype_rec` arm raises `subtype_error` at the coercion site instead. Design-correct under the rigid
-discipline (a one-sided refinement is always a clash); the fable battery corroborated no legitimate
-path trips it.
+child added an explicit one-sided-`Trefine` clash arm to five ctype relations. In `subtype_rec` the
+change is real, not a defensive net over an unreachable path: it changes the relation's *default*
+behavior for a one-sided refined type from **defer-constraint to immediate error**. Previously a
+`(Trefine _, _)`/`(_, Trefine _)` pair fell through to the `(_, _)` arm, which appends the pair to
+`cstrs` for later discharge by unification.
+
+A first account of this report described that deferred discharge as reaching a "silent,
+contravariantly-unsound `link_type`" in `unify3` — i.e. a silent acceptance the guard converted to a
+rejection. The fable review refined this, and a direct read of `unify3` confirms the refinement: the
+old one-sided handling there was **not** a silent acceptance. `unify3` captures the two type
+descriptors *before* it links (`d1`, `d2` are read at entry; the `_ ->` arm then does
+`link_type t1' t2`), and the post-link `match (d1, d2)` runs on those captured descriptors, which has
+**no `Trefine` arm**. So in normal mode a one-sided `Trefine` pair falls through that inner match to
+its `(_, _) -> raise_unexplained_for Unify` clash, and the link — never reachable by the captured
+descriptors — is transient and is backtracked when the enclosing unification fails. The link was
+therefore *transient*, and both one-sided witness shapes already **rejected** at the parent (fable
+probed both). The guard's value in normal mode is thus **hygiene**: a loud, immediate, non-transient
+clash at the coercion site, replacing a defer-then-transient-link-then-clash — not the conversion of a
+silent acceptance into a rejection. The one plausibly genuinely-latent one-sided path is the
+equation-generating (GADT / pattern-equation) mode, where a bare `Tconstr` side can reach
+`record_equation` (the `(_, Tconstr (path, [], _)) when can_generate_equations && is_instantiable`
+arm); the guard forecloses that too. Design-correct under the rigid discipline (a one-sided
+refinement is always a clash); the fable battery corroborated no legitimate path trips it.
 
 **Freshen-on-import test imprecision (fold-in, known-imprecise).** The freshen-on-import regression
 (`freshen_import_manifest.ml`) pins the right *behavior* — a copied refined manifest through
