@@ -36,10 +36,18 @@ let owner term =
      [Euf_adapter.assert_lit] on a foreign atom raises, so it must never be asserted
      there.
    - A NEGATIVE shared (Int) equality routes to EUF only (codex S1): LIA raises
-     [Unsupported] on a disequality (lia.mli). Sound (EUF handles diseq natively) and
-     complete — if LIA's candidate model later equates the pair, the shared-pair
-     disagreement splits into the ℤ-trichotomy, whose [<]/[>] branches carry the ordering
-     to LIA. Every other atom/polarity asserts as [owner]. *)
+     [Unsupported] on a disequality (lia.mli). Sound (EUF handles diseq natively). The
+     intended completeness net is that if LIA's candidate model later equates the pair, the
+     shared-pair disagreement splits into the ℤ-trichotomy, whose [<]/[>] branches carry the
+     ordering to LIA. That net is INCOMPLETE for a variable-vs-CONSTANT disequality
+     ([x <> c], the nec-smt ITE-condition shape): [Combine.find_disagreement] returns only a
+     shared VARIABLE pair both models value differently, never a var-vs-constant pair, so LIA
+     never hears such a disequality and its model may set [x = c] — a spurious candidate R1
+     then rejects (→ unknown; task #30, logs/nec-probe-report.md). The dark flag
+     [OXSMT_LIA_MODEL_REPAIR] (combine.ml [repair_split]) closes the gap by scanning the
+     negatively-pinned pairs LIA's model equates at Final and emitting the same ℤ-trichotomy;
+     OFF (default) this narrowing stays incomplete-but-sound as before. Every other
+     atom/polarity asserts as [owner]. *)
 let assert_to term ~positive =
   match Theory_view.atom term with
   | Theory_view.Le_zero _ -> B

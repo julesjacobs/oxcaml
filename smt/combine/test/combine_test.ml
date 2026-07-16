@@ -530,6 +530,61 @@ let test_final_disagree_split () =
     check "final: split's first atom is the equality x=y" false
 ;;
 
+(* Truthiness of the dark repair flag, mirrored from combine.ml's read-once. *)
+let repair_flag_on =
+  match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
+  | None | Some ("0" | "false" | "no" | "") -> false
+  | Some _ -> true
+;;
+
+(* SITE-SPECIFIC RED for [Combine.repair_split] (task #30). A DISEQUALITY over a variable
+   and a CONSTANT ([x <> 0]) routes to the congruence child A only (negative Both), so it is
+   NOT a shared VARIABLE pair [find_disagreement] can return — the exact gap the flag closes.
+   Setup: assert [not (x = 0)] (a negative pin, psign=false); A's model holds the disequality
+   (x=5, so [check_pins] passes); B's (LIA) model EQUATES the pair (x=0), violating it.
+   [find_disagreement] returns None (x is not an interface variable pair), so control reaches
+   the repair site. Flag ON ⇒ the combinator must emit the ℤ-trichotomy Split on (x, 0);
+   flag OFF ⇒ the trunk path certifies Sat unchanged (OFF byte-identity). Mutating
+   [repair_split] to never emit flips the ON assertion Split→Sat and fails this test — the
+   mutation kill is isolated to this one site (no OR-aggregation). *)
+let test_final_diseq_repair () =
+  reset_mocks ();
+  let f = fixture () in
+  let x = const f "x" in
+  let zero = Context.int_const f.ctx 0 in
+  let eq_atom = Context.eq f.ctx x zero in
+  Ctrl_router.set_owner eq_atom Ctrl_router.Both;
+  let t = Cmock.create f.ctx f.env in
+  let atom = fresh_atom f in
+  Cmock.register_atom t atom eq_atom;
+  (* assert the NEGATIVE literal (the disequality x <> 0) *)
+  Cmock.assert_lit t (Lit.make atom false);
+  (* A (congruence) holds x <> 0 (x=5); B (LIA) equates x=0, violating the diseq. *)
+  (MockA.model_fn := fun () -> [ x, Model.Int (Bigint.of_int 5) ]);
+  (MockB.model_fn := fun () -> [ x, Model.Int (Bigint.of_int 0) ]);
+  match Cmock.check t Th.Final with
+  | Th.Split terms when repair_flag_on ->
+    let distinct =
+      match terms with
+      | [ a; b; c ] ->
+        (not (Term.equal a b)) && (not (Term.equal a c)) && not (Term.equal b c)
+      | _ -> false
+    in
+    check "repair ON: LIA model violating a var<>const diseq ⇒ Split" true;
+    check "repair ON: split is the 3-atom ℤ-trichotomy on (x, 0)" distinct;
+    check
+      "repair ON: split's first atom is x = 0"
+      (match terms with
+       | a :: _ -> Term.equal a (Context.eq f.ctx x zero)
+       | [] -> false)
+  | Th.Sat when not repair_flag_on ->
+    check "repair OFF: trunk path certifies Sat unchanged (OFF byte-identity)" true
+  | Th.Split _ ->
+    check "repair OFF: expected Sat, got Split (flag leaked into OFF path)" false
+  | Th.Sat -> check "repair ON: expected Split, got Sat (repair_split did not fire)" false
+  | _ -> check "repair: unexpected verdict (want Split ON / Sat OFF)" false
+;;
+
 let test_model_merge_sort_directed () =
   reset_mocks ();
   let f = fixture () in
@@ -3081,6 +3136,7 @@ let () =
   test_explain_routing ();
   test_final_agree_sat ();
   test_final_disagree_split ();
+  test_final_diseq_repair ();
   test_model_merge_sort_directed ();
   test_poison_on_pinned_disagreement ();
   test_pin_unwinds_on_pop ();

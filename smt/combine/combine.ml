@@ -92,6 +92,23 @@ let fabric_callbacks_off =
   | Some _ -> true
 ;;
 
+(* Lane A (task #30, dark): LIA-model disequality repair at Final. A negative shared Int
+   equality (a disequality [x <> c]) is routed to the congruence child ONLY
+   ([Uflia_router.assert_to], "Both when not positive -> A") because {!Lia} raises
+   [Unsupported] on a negated equality (lia.mli). The pair-shaped [find_disagreement] net
+   that is supposed to make that narrowing complete only fires for a shared VARIABLE pair
+   both models value differently -- it never returns a variable-vs-CONSTANT disequality
+   (the nec-smt ITE-condition shape [i <> 0]), so LIA never hears the disequality and its
+   candidate model can set [x = c], a point R1 then rejects (logs/nec-probe-report.md).
+   When ON, {!repair_split} closes that gap by scanning the negatively-pinned pairs LIA's
+   candidate model equates and emitting the existing trichotomy split. Read-once; OFF
+   (default, and any non-truthy value) takes the byte-for-byte trunk path -- no scan. *)
+let model_repair_on =
+  match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
+  | None | Some ("0" | "false" | "no" | "") -> false
+  | Some _ -> true
+;;
+
 module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig
   include Theory.THEORY
 
@@ -806,6 +823,42 @@ end = struct
       t.all_terms
   ;;
 
+  (* Final-time disequality repair (task #30, dark; guarded by {!model_repair_on}). Scans
+     the negatively-pinned Int pairs (disequalities [px <> py], including the var-vs-constant
+     shape [find_disagreement] cannot return) that the LIA candidate model [mb] nonetheless
+     EQUATES, and returns the first such pair's trichotomy split. That pair is a genuine
+     EUF/LIA disagreement -- EUF asserts [px <> py] (it holds the disequality), LIA's model
+     sets [px = py] -- so splitting it is sound and drives progress:
+     - the [px = py] branch is refuted by EUF's native disequality (a conflict), and
+     - the [px < py] / [px > py] branches reach LIA as [Le] bounds it enforces, so the SAME
+       pin cannot recur equated (LIA's next model separates px, py). Each disequality pin
+       fires at most as the existing shared-pair trichotomy does -- termination is the
+       standard Nelson-Oppen split argument (finitely many pins; each split strictly forbids
+       [px = py] on the branch LIA sees). A pin whose sides LIA does not value ([model_eval]
+       = [None]) is skipped (LIA does not constrain the pair; R1 remains the backstop).
+     Completeness-only: a spurious LIA model becomes a split, never a wrong verdict.
+
+     COST GUARD: O(#pins) [model_eval]s over LIA leaves at Final only. Above [repair_pin_cap]
+     pins it is skipped entirely (falls through to the trunk path, where R1 catches any
+     spurious model -> unknown, no worse than OFF). *)
+  let repair_pin_cap = 4096
+
+  let repair_split t mb =
+    if (not model_repair_on) || Dynarray.length t.pins > repair_pin_cap
+    then None
+    else
+      List.find_map
+        (fun p ->
+          if p.psign
+          then None (* only disequalities *)
+          else (
+            match model_eval mb p.px, model_eval mb p.py with
+            | Some vx, Some vy when value_equal vx vy ->
+              Some (R.equality_split t.ctx p.px p.py)
+            | _ -> None))
+        (all_pins t)
+  ;;
+
   (* Both children have just certified [Final]→[Sat] (codex C4): consume their models. *)
   let combine_models t : Theory.check_result =
     let ma = A.model t.a in
@@ -814,12 +867,15 @@ end = struct
     match find_disagreement t ma mb with
     | Some (x, y) -> Theory.Split (R.equality_split t.ctx x y)
     | None ->
-      (* Int arrangement agrees; about to certify Sat — now require every buried Bool UF
-         argument to be bound (else a wrong-SAT would leak, codex H2). *)
-      require_bool_args_bound t ma;
-      require_no_datatype_terms t;
-      require_no_bitvec_terms t;
-      Theory.Sat
+      (match repair_split t mb with
+       | Some split -> Theory.Split split
+       | None ->
+         (* Int arrangement agrees; about to certify Sat — now require every buried Bool
+            UF argument to be bound (else a wrong-SAT would leak, codex H2). *)
+         require_bool_args_bound t ma;
+         require_no_datatype_terms t;
+         require_no_bitvec_terms t;
+         Theory.Sat)
   ;;
 
   let check_b_propagate t la : Theory.check_result =
@@ -1208,10 +1264,13 @@ end = struct
     check_pins t ma mb;
     match find_disagreement t ma mb with
     | None ->
-      require_bool_args_bound t ma;
-      require_no_datatype_terms t;
-      require_no_bitvec_terms t;
-      Theory.Sat
+      (match repair_split t mb with
+       | Some split -> Theory.Split split
+       | None ->
+         require_bool_args_bound t ma;
+         require_no_datatype_terms t;
+         require_no_bitvec_terms t;
+         Theory.Sat)
     | Some (x, y) ->
       if try_inject_pair t x y
       then (
