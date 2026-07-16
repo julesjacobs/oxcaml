@@ -18,8 +18,8 @@
 
    CG cuts are default-ON since #68, so the cut site is live by default; the make target
    sets a small OXSMT_CG_MAX_CUTS so the cap is observable. If CG is forced off
-   ([OXSMT_CG_CUTS=0]) the cut site is never entered and the test SKIPS (reports so, exits
-   0), because [cg_cuts_on] is fixed at module load. *)
+   ([OXSMT_CG_CUTS=0], [false], or [no]) the cut site is never entered and the test SKIPS
+   (reports so, exits 0), because [cg_cuts_on] is fixed at module load. *)
 
 open Oxsmt_core
 open Oxsmt_lia
@@ -75,7 +75,7 @@ let final_is_cuttable fx =
 ;;
 
 (* Mirrors {!Lia_adapter.cg_cuts_on} — tri-state, default-ON since #68. The cut site is
-   live unless [OXSMT_CG_CUTS=0] forces the pre-flip OFF path. *)
+   live unless [OXSMT_CG_CUTS=0] (or [false]/[no]) forces the pre-flip OFF path. *)
 let cg_on =
   match Sys.getenv_opt "OXSMT_CG_CUTS" with
   | Some ("0" | "false" | "no") -> false
