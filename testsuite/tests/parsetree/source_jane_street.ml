@@ -761,7 +761,6 @@ module (G @ portable) () = F
 
 [%%expect{|
 module G : functor () -> (functor () -> sig end) @ contended @@ portable
-  total
 |}]
 
 module (G @ portable) (F : (S @ unique -> S @ once) @ local) @ contended = struct end
