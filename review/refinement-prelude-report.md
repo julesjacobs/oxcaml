@@ -13,8 +13,8 @@ green run is **6/6 passed** (the five examples plus the prelude signature test;
 
 | Example | Final behavior | Today | Unlocking stage |
 |---|---|---|---|
-| `abs_nonnegative` | ACCEPT: prove the selected result is nonnegative | ACCEPT with an undischarged marked annotation | total comparisons + verification |
-| `max_upper_bound` | ACCEPT: prove the result is at least both inputs | ACCEPT with an undischarged marked annotation | total comparisons + verification |
+| `abs_nonnegative` | ACCEPT: prove the selected result is nonnegative | ACCEPT: body skeleton-checked, refined type assigned, no VC stored yet | total comparisons + verification |
+| `max_upper_bound` | ACCEPT: prove the result is at least both inputs | ACCEPT: body skeleton-checked, refined type assigned, no VC stored yet | total comparisons + verification |
 | `fib_nonnegative` | ACCEPT using refined recursive results as induction hypotheses | REJECT at the bare zero branch against the refined result | total comparisons + verification |
 | `list_length_measure` | ACCEPT using the recursive result as the length induction hypothesis | REJECT at the bare nil-branch zero against the refined result | recursive totality + modes + verification |
 | `seal_square_nonnegative` | ACCEPT by the directed implication from `result = x * x` to `result >= 0` | REJECT with rigid signature mismatch | total comparisons + seals + verification |
@@ -24,12 +24,31 @@ green run is **6/6 passed** (the five examples plus the prelude signature test;
 `implies` and `conjunction` are `@ total` functions over plain boolean
 operations.  There are no quantifier combinators (see the ruling above).
 
-The four typed integer ordering wrappers are deliberately partial today.
-`VOX2_AWAITS_TOTAL_COMPARISONS` marks their single future substitution point.
-`list_length` is likewise partial because the current mode checker cannot
-express structural recursive totality.  The promoted `vox_spec_signatures.ml`
-expect block pins the inferred surface and the harness explicitly compiles and
-loads `vox_spec.ml` for every client example.
+Two DISTINCT reasons keep prelude entries partial, and they must not be
+conflated:
+
+- **Ruled partial (not compiler-forbidden).** The four monomorphic integer
+  ordering wrappers (`int_lt`/`int_le`/`int_gt`/`int_ge`) would compile with an
+  `@ total` annotation on this base — int comparison is on the pure-primitive
+  allowlist at this tip — but `TASK-SPEC.md` (Ops) and the canonical plan
+  ("Comparisons in specs") RULE all comparison primitives partial for now (the
+  immediate-comparison question is deferred; making comparison total safely
+  needs either a banned-application-site rule or future kind-constrained
+  declarations). So the prelude deliberately keeps them partial to match the
+  ruled end-state. Annotating them `@ total` would be forward-wrong: the
+  modes-integration step tightens the totality allowlist to the ruling and such
+  an annotation would then break. `VOX2_AWAITS_TOTAL_COMPARISONS` marks the
+  single substitution point for when total comparisons land.
+- **Genuinely not total yet.** `list_length` wraps the recursive stdlib
+  `List.length`, whose structural recursive totality the current mode checker
+  cannot establish, so it is partial as a fact about today's checker (not by
+  ruling). Polymorphic comparison would be the other case here — it is off the
+  pure-primitive totality allowlist entirely — but the prelude uses only the
+  monomorphic int wrappers, so no polymorphic-comparison entry exists.
+
+`implies`/`conjunction` are genuinely `@ total` (plain boolean operations). The
+promoted `vox_spec_signatures.ml` expect block pins the inferred surface and the
+harness explicitly compiles and loads `vox_spec.ml` for every client example.
 
 ## Verification commands
 
