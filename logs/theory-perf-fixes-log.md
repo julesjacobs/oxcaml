@@ -80,4 +80,16 @@ Specs (from logs/perf-audit-theories-fable.md + the lead's ordering):
 - euf.ml:918 per-check disequality rescan Θ(D)/round — untraced.
 - arr.ml:626 upward-read introduction Θ(d²) — untraced.
 - dt.ml:675 field-relevance Θ(depth²); dt.ml:715 constructor-split re-sort — untraced.
-- simplex.ml:267 column-scan Θ(P·V) — DEDUPE pending with row-inplace owner (messaged unboxed-builder).
+- simplex.ml:267 column-scan Θ(P·V) — DEDUPE RESOLVED with row-inplace owner (unboxed-builder,
+  task/row-inplace @f9c6da0f2e): SEPARATE lane, out of row-inplace scope, worth doing.
+  row-inplace changed only ROW STORAGE (linexp Map → mutable sparse Lx, in-place
+  add_scaled/remove); it modified the BODIES of the pivot scans but left the scan-all-vars
+  iteration untouched. The Θ(P·V) column axis is the three global `Dynarray.iter t.vars` scans
+  that probe `coeff k.row col` per var — update (post-row-inplace simplex.ml:518), pivot subst
+  (simplex.ml:620), pivot_and_update (simplex.ml:642). Lx is row-major (no column→rows index),
+  so storage layout and column-incidence traversal are separable. SEQUENCING: a
+  column→(basic rows containing it) incidence index must be maintained incrementally exactly
+  where column membership changes — inside row-inplace's add_scaled_in_place/remove_in_place
+  (id entering/leaving a row) and pivot — so the column-incidence lane is a clean follow-ON:
+  build it on top of row-inplace (or land after), NOT in parallel on trunk, to avoid
+  re-plumbing the same mutation sites twice. Not a blocker; sequencing only.
