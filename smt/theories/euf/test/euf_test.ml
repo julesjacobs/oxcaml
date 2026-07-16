@@ -1350,8 +1350,77 @@ let test_watch_index_stale_slot () =
   | _ -> check "stale-slot: live rearm re-reports exactly p(c)" false
 ;;
 
+(* ADR-0014 Stage 4.2: sub-frame checkpoint / rewind OBS-EQ. The earliest-removed
+   incremental-undo oracle. Assert a PREFIX, [checkpoint], assert a SUFFIX, then
+   [rewind_to_checkpoint]: the engine's classes + consistency must match a from-scratch
+   closure of ONLY the prefix (rewind reverses exactly the suffix, sub-frame). Then replay
+   a survivor subset of the suffix and re-check against prefix++survivors — i.e.
+   rewind(checkpoint)+replay(survivors) == full rebuild of prefix++survivors, which is the
+   OBS-EQ contract the SAT-core chrono incremental undo relies on. Cross-checked against
+   the INDEPENDENT naive quadratic closure (no shared code with the engine's undo trail). *)
+let test_checkpoint_obs_eq () =
+  set_seed 0x5242C0DE;
+  for _ = 1 to 300 do
+    let ctx, univ = build_universe () in
+    let n = Array.length univ in
+    let e = Euf.create ctx in
+    Array.iter (Euf.register_term e) univ;
+    let rand_lit () =
+      let i = rand_int n
+      and j = rand_int n in
+      if rand_int 10 < 7 then `Eq (i, j) else `Neq (i, j)
+    in
+    let assert_lit = function
+      | `Eq (i, j) -> Euf.assert_eq e ~premise:(fresh_prem ()) univ.(i) univ.(j)
+      | `Neq (i, j) -> Euf.assert_neq e ~premise:(fresh_prem ()) univ.(i) univ.(j)
+    in
+    let eqs_of =
+      List.filter_map (function
+        | `Eq (i, j) -> Some (i, j)
+        | `Neq _ -> None)
+    in
+    let diseqs_of =
+      List.filter_map (function
+        | `Neq (i, j) -> Some (i, j)
+        | `Eq _ -> None)
+    in
+    let verify_against label lits =
+      let nz = Naive.build univ in
+      Naive.saturate nz (eqs_of lits);
+      let ok = ref true in
+      for i = 0 to n - 1 do
+        for j = i + 1 to n - 1 do
+          if Euf.are_equal e univ.(i) univ.(j) <> Naive.equal nz i j then ok := false
+        done
+      done;
+      check (label ^ ": classes match scratch") !ok;
+      let naive_ok =
+        List.for_all (fun (i, j) -> not (Naive.equal nz i j)) (diseqs_of lits)
+      in
+      let euf_ok =
+        match Euf.check e with
+        | Euf.Consistent -> true
+        | Euf.Conflict _ -> false
+      in
+      check (label ^ ": consistency matches scratch") (naive_ok = euf_ok)
+    in
+    let prefix = List.init (rand_int 10) (fun _ -> rand_lit ()) in
+    List.iter assert_lit prefix;
+    let c = Euf.checkpoint e in
+    let suffix = List.init (1 + rand_int 12) (fun _ -> rand_lit ()) in
+    List.iter assert_lit suffix;
+    Euf.rewind_to_checkpoint e c;
+    verify_against "checkpoint-rewind" prefix;
+    (* replay a survivor subset of the suffix; state must match prefix ++ survivors. *)
+    let survivors = List.filter (fun _ -> rand_int 2 = 0) suffix in
+    List.iter assert_lit survivors;
+    verify_against "checkpoint-rewind+replay" (prefix @ survivors)
+  done
+;;
+
 let () =
   print_endline "euf self-test:";
+  test_checkpoint_obs_eq ();
   test_textbook ();
   test_chain_selfloop ();
   test_chain_orders ();

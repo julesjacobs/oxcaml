@@ -249,6 +249,20 @@ val push : 'p t -> unit
     [Invalid_argument] if [n] exceeds the open frame count. *)
 val pop : 'p t -> int -> unit
 
+(** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (the chrono earliest-removed
+    incremental undo substrate). A {!checkpoint} captures the state at a point WITHIN the
+    current frame (the typed-undo trail length + the append-only aux-array watermarks); it
+    is an opaque token. [rewind_to_checkpoint t c] restores [t] exactly to the state
+    captured by [c], draining the undo trail newest-first (reversing each recorded
+    mutation) and truncating the aux arrays — the same restoration a {!pop} performs, but
+    addressed by an absolute intra-frame watermark rather than a frame count, and WITHOUT
+    touching the frame stack. Sound only for a [c] taken on THIS [t] with no intervening
+    {!pop} below [c]'s point (LIFO); the caller keeps [c]s in stack order. *)
+type checkpoint
+
+val checkpoint : 'p t -> checkpoint
+val rewind_to_checkpoint : 'p t -> checkpoint -> unit
+
 (** [num_terms t] is the count of currently-registered e-nodes (introspection/metrics). *)
 val num_terms : 'p t -> int
 

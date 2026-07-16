@@ -1336,6 +1336,41 @@ let pop t n =
   clear_merges t
 ;;
 
+(* ADR-0014 Stage 4.2 (chrono earliest-removed incremental undo): sub-frame
+   checkpoint/rewind. A [checkpoint] captures the exact watermarks (typed-undo trail
+   length + the five auxiliary-array lengths + [prop_mark]) at a point WITHIN a frame.
+   [rewind_to_checkpoint] restores to it by draining the undo trail newest-first
+   (reversing every union/sig/reported/tag mutation via [apply_undo], as [pop] does) and
+   truncating the append-only aux arrays to the captured lengths ([restore_aux]) —
+   identical in effect to the trail suffix a [pop] would reverse, but addressed by an
+   ABSOLUTE intra-frame watermark rather than a frame count. It does NOT touch the frame
+   stack (the CB caller drives undo purely by checkpoint). OBS-EQ: for any assertion
+   sequence, [checkpoint] then further asserts then [rewind_to_checkpoint] yields the
+   byte-identical state a re-assertion of only the pre-checkpoint prefix would (see euf
+   test [test_checkpoint_obs_eq]). *)
+type checkpoint =
+  { c_trail : int
+  ; c_aux : level
+  }
+
+let checkpoint t =
+  { c_trail = Trail.mark t.trail
+  ; c_aux =
+      { l_enodes = Dynarray.length t.enodes
+      ; l_watched = Dynarray.length t.watched
+      ; l_diseqs = Dynarray.length t.diseqs
+      ; l_touched = Dynarray.length t.touched
+      ; l_prop_mark = t.prop_mark
+      }
+  }
+;;
+
+let rewind_to_checkpoint t c =
+  Trail.rewind_to t.trail ~apply:(apply_undo t) c.c_trail;
+  restore_aux t c.c_aux;
+  clear_merges t
+;;
+
 module Debug = struct
   let self_check = self_check
 
