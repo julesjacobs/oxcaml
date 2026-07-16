@@ -21,11 +21,15 @@ LOCK=/usr/local/home/jujacobs/oxsmt/logs/.wall-ab-lock
 WALL="$1"; CAP="$2"; STRIDE="$3"; shift 3
 FAMS=("$@")
 
-if ! mkdir "$LOCK" 2>/dev/null; then
-  echo "WALL LOCK held ($LOCK) by: $(cat "$LOCK"/owner 2>/dev/null) — aborting." >&2
-  exit 3
-fi
+# WAIT-LOOP for the shared lock (fleet convention: never force-remove another lane's lock).
+waited=0
+while ! mkdir "$LOCK" 2>/dev/null; do
+  if (( waited == 0 )); then echo "waiting for wall lock, held by: $(cat "$LOCK"/owner 2>/dev/null)"; fi
+  sleep 15; waited=$((waited+15))
+  if (( waited > 5400 )); then echo "wall lock still held after 90m — aborting." >&2; exit 3; fi
+done
 echo "lgcflip-builder lgc-arm-ab $(date)" > "$LOCK/owner"
+echo "acquired wall lock after ${waited}s"
 trap 'rm -rf "$LOCK" 2>/dev/null' EXIT
 
 verdict() { grep -oE '(sat|unsat|unknown)' | head -1; }
