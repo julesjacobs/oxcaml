@@ -21,11 +21,21 @@
 (* evaluation.  So using such a fact at another occurrence is sound *)
 (* even for an impure function: both evaluations differ in value    *)
 (* but satisfy the same proven contract (fp_impure_definable /      *)
-(* fp_impure_xocc).  A FALSE result contract cannot be held without *)
-(* an unsafe cast -- an impure body cannot prove an exact-value     *)
-(* contract (fp_impure_no_false_contract) -- so the only bogus fact *)
-(* about an opaque occurrence comes from [Obj.magic]                *)
-(* (fp_magic_combined), i.e. the accepted hole.                    *)
+(* fp_impure_xocc).  A FALSE or VALUE-VARYING exact contract cannot *)
+(* be held without an unsafe cast: a deterministic-constant body    *)
+(* proves an exact contract soundly even when it is impure          *)
+(* (fp_impure_const), whereas a value-varying body cannot           *)
+(* (fp_impure_no_false_contract).  So the only bogus fact about an  *)
+(* opaque occurrence comes from [Obj.magic] (fp_magic_combined),    *)
+(* i.e. the accepted hole.                                          *)
+(*                                                                 *)
+(* Impurity and representability are ORTHOGONAL: an impure function *)
+(* can have a proved refined result (above), while a function whose *)
+(* body is a SEQUENCE (e.g. [incr r; !r]) is rejected not because   *)
+(* it is impure but because a sequence is not yet representable as  *)
+(* a verification-condition subject (the [unsupported] arms in      *)
+(* vox_verify.ml).  Representability is a completeness limit, not a  *)
+(* soundness one.                                                    *)
 (*                                                                 *)
 (* The one residual unsoundness is an IMPURE EXPRESSION used        *)
 (* DIRECTLY in a predicate, where two occurrences are identified as *)
@@ -73,6 +83,19 @@ let fp_impure_xocc () =
   (g_impure () : int{ _ > 0 })
 [%%expect {|
 val fp_impure_xocc : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+|}]
+
+(* @acc id=fp_impure_const final=ACCEPT today=ACCEPT stable=yes unlocks=verification
+   An impure body CAN prove an exact-value contract when the returned value
+   is a deterministic constant: the [read_int ()] side effect does not change
+   the result [5], so [_ = 5] holds for every evaluation.  Impurity alone does
+   not block an exact contract; a value-varying body does
+   (fp_impure_no_false_contract). *)
+let fp_impure_const () : int{ _ = 5 } =
+  let _x = read_int () in
+  5
+[%%expect {|
+val fp_impure_const : unit -> int{ (app[Stdlib!.=] _ 5) } = <fun>
 |}]
 
 (* @acc id=fp_impure_no_false_contract final=REJECT today=REJECT stable=yes unlocks=verification

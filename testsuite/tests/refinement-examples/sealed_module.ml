@@ -10,12 +10,14 @@
 
 (* This avoids the unresolved bare-implementation direction.  The
    implementation result [_ = x * x] and interface result [_ >= 0] are both
-   refined; FINAL sealing proves the directed implication.  CURRENT rigid
-   signature inclusion rejects the different predicates. *)
+   refined; FINAL sealing proves the directed implication.  The Seals merge made
+   the seal-VC engage here, so rejection is now the directed-implication VC
+   (structural mismatch -> not-proved), as this example predicted; the VC still
+   awaits total-comparisons to reach the final ACCEPT. *)
 
 #load "vox_spec.cmo";;
 
-(* @ex id=seal_square_nonnegative final=ACCEPT today=REJECT stable=no unlocks=total-comparisons+seals+verification *)
+(* @ex id=seal_square_nonnegative final=ACCEPT today=REJECT stable=no unlocks=total-comparisons+verification *)
 module Square : sig
   val square : int -> int{ Vox_spec.int_ge _ 0 }
 end = struct
