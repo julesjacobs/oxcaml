@@ -23,9 +23,10 @@
     [x <> c]: [Combine.find_disagreement] ranges over the both-valued INTERFACE members, so a
     bare [x] used only inside EUF (not a shared interface member) paired with a literal [c]
     (not an interface node) is never formed, LIA never hears [x <> c], and its model may set
-    [x = c] — a spurious point R1 rejects (→ unknown). The dark flag [OXSMT_LIA_MODEL_REPAIR]
-    (combine.ml [repair_split]) closes this at Final; OFF (default) the narrowing stays
-    incomplete-but-sound.
+    [x = c] — a spurious point R1 rejects (→ unknown). The flag [OXSMT_LIA_MODEL_REPAIR]
+    (combine.ml [repair_split]) closes this at Final; default-ON since task #59, forced OFF
+    by [OXSMT_LIA_MODEL_REPAIR=0] (the byte-for-byte trunk path, narrowing stays
+    incomplete-but-sound).
 
     The equality split is the ℤ-trichotomy [x = y ∨ x < y ∨ x > y] (three DISTINCT atoms,
     valid over ℤ), never the [A ∨ ¬A] tautology the SAT core would drop (ADR-0005 §1a /

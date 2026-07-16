@@ -103,12 +103,15 @@ let fabric_callbacks_off =
    hears the disequality and its
    candidate model can set [x = c], a point R1 then rejects (logs/nec-probe-report.md).
    When ON, {!repair_split} closes that gap by scanning the negatively-pinned pairs LIA's
-   candidate model equates and emitting the existing trichotomy split. Read-once; OFF
-   (default, and any non-truthy value) takes the byte-for-byte trunk path -- no scan. *)
+   candidate model equates and emitting the existing trichotomy split. Read-once, tri-state
+   (default-ON flip, task #59): unset -> ON (the new default), [=0/false/no] -> OFF (the
+   byte-for-byte trunk path -- no scan), any other value (incl. [=1/true/yes]) -> ON. The
+   forced-OFF ([=0]) path is the pre-flip default bit-for-bit, so the flip is an isolated
+   default change: nothing in the scan itself moved. *)
 let model_repair_on =
   match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
-  | None | Some ("0" | "false" | "no" | "") -> false
-  | Some _ -> true
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig

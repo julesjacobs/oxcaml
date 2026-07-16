@@ -626,6 +626,10 @@ lia-adapter-test:
 combine-test:
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/combine/test/combine_test.exe
 	OXSMT_EUF_SELF_CHECK=1 OXSMT_NO_FABRIC=1 $(DUNE) exec smt/combine/test/combine_test.exe
+## Third run pins OXSMT_LIA_MODEL_REPAIR=0 to gate the forced-OFF (trunk-exact) repair
+## path after the #59 default-ON flip: the two runs above now exercise repair ON
+## (Split); this run exercises the byte-for-byte OFF path (test_final_diseq_repair Sat).
+	OXSMT_EUF_SELF_CHECK=1 OXSMT_LIA_MODEL_REPAIR=0 $(DUNE) exec smt/combine/test/combine_test.exe
 
 ## stage0-test — ADR-0014 Stage 0 backtracking substrate: [Trail] unit tests, the
 ##   pop-ordering oracle that kills the swap-drain-order mutant, and the machine-checkable

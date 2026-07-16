@@ -530,11 +530,14 @@ let test_final_disagree_split () =
     check "final: split's first atom is the equality x=y" false
 ;;
 
-(* Truthiness of the dark repair flag, mirrored from combine.ml's read-once. *)
+(* Truthiness of the repair flag, mirrored EXACTLY from combine.ml's read-once tri-state
+   (default-ON flip, task #59): unset -> ON, [=0/false/no] -> OFF, anything else -> ON. The
+   test asserts whichever branch the harness env selects: [combine-test] runs it at the
+   default (ON, Split) and once forced [=0] (OFF, Sat -- the trunk-exact path). *)
 let repair_flag_on =
   match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
-  | None | Some ("0" | "false" | "no" | "") -> false
-  | Some _ -> true
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
 ;;
 
 (* SITE-SPECIFIC RED for [Combine.repair_split] (task #30). A DISEQUALITY over a variable

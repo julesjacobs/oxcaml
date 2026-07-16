@@ -44,11 +44,11 @@ let owner term =
      Int-sorted, both-valued INTERFACE members and misses [x <> c] because the variable is
      EUF-only-used (not a both-used interface member) and the constant is not an interface
      node, so LIA never hears such a disequality and its model may set [x = c] — a spurious candidate R1
-     then rejects (→ unknown; task #30, logs/nec-probe-report.md). The dark flag
+     then rejects (→ unknown; task #30, logs/nec-probe-report.md). The flag
      [OXSMT_LIA_MODEL_REPAIR] (combine.ml [repair_split]) closes the gap by scanning the
      negatively-pinned pairs LIA's model equates at Final and emitting the same ℤ-trichotomy;
-     OFF (default) this narrowing stays incomplete-but-sound as before. Every other
-     atom/polarity asserts as [owner]. *)
+     default-ON since task #59, forced OFF by [OXSMT_LIA_MODEL_REPAIR=0] (this narrowing
+     stays incomplete-but-sound as before). Every other atom/polarity asserts as [owner]. *)
 let assert_to term ~positive =
   match Theory_view.atom term with
   | Theory_view.Le_zero _ -> B
