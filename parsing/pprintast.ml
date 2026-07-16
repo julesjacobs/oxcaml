@@ -43,25 +43,6 @@ let refinement_type_payload = function
       Some (skeleton, predicate)
   | _ -> None
 
-let refinement_expression_intro = function
-  | ({ txt; _ }, PStr [{ pstr_desc = Pstr_eval (body, []); _ }]) ->
-    let keyword =
-      match txt with
-      | "vox2.refinement.intro.prove" -> Some "refine_"
-      | "vox2.refinement.intro.assume" -> Some "assume_"
-      | "vox2.refinement.intro.assume_unchecked" ->
-        Some "assume_unchecked_"
-      | _ -> None
-    in
-    Option.map (fun keyword -> keyword, body) keyword
-  | _ -> None
-
-let refinement_pattern_intro = function
-  | ({ txt = "vox2.refinement.intro.pattern"; _ },
-     PPat (pattern, None)) ->
-    Some pattern
-  | _ -> None
-
 let prefix_symbols  = [ '!'; '?'; '~' ]
 let infix_symbols = [ '='; '<'; '>'; '@'; '^'; '|'; '&'; '+'; '-'; '*'; '/';
                       '$'; '%'; '#' ]
@@ -896,12 +877,7 @@ and simple_pattern ctxt (f:Format.formatter) (x:pattern) : unit =
         pp f "@[<2>exception@;%a@]" (pattern1 ctxt) p
     | Ppat_effect(p1, p2) ->
         pp f "@[<2>effect@;%a, @;%a@]" (pattern1 ctxt) p1 (pattern1 ctxt) p2
-    | Ppat_extension e ->
-        begin match refinement_pattern_intro e with
-        | Some pattern ->
-          pp f "@[<2>refine_@;%a@]" (simple_pattern ctxt) pattern
-        | None -> extension ctxt f e
-        end
+    | Ppat_extension e -> extension ctxt f e
     | Ppat_open (lid, p) ->
         let with_paren =
         match p.ppat_desc with
@@ -1233,14 +1209,7 @@ and expression ctxt f x =
           (binding_op ctxt) let_
           (list ~sep:"@," (binding_op ctxt)) ands
           (expression ctxt) body
-    | Pexp_extension e ->
-        begin match refinement_expression_intro e with
-        | Some _ when ctxt.semi ->
-          paren true (expression reset_ctxt) f x
-        | Some (keyword, body) ->
-          pp f "@[<2>%s@;%a@]" keyword (expression reset_ctxt) body
-        | None -> extension ctxt f e
-        end
+    | Pexp_extension e -> extension ctxt f e
     | Pexp_unreachable -> pp f "."
     | Pexp_overwrite (e1, e2) ->
         (* Similar to the case of [Pexp_stack] *)

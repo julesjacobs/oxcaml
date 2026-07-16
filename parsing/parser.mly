@@ -1037,8 +1037,6 @@ let maybe_pmod_constraint mode expr =
 %token FUN                    "fun"
 %token FUNCTION               "function"
 %token FUNCTOR                "functor"
-%token ASSUME                 "assume_"
-%token ASSUME_UNCHECKED       "assume_unchecked_"
 %token GLOBAL                 "global_"
 %token GREATER                ">"
 %token GREATERRBRACE          ">}"
@@ -1117,7 +1115,6 @@ let maybe_pmod_constraint mode expr =
 %token RBRACKET               "]"
 %token RBRACKETGREATER        "]>"
 %token REC                    "rec"
-%token REFINE                 "refine_"
 %token REPR                   "repr_"
 %token RPAREN                 ")"
 %token SEMI                   ";"
@@ -2896,24 +2893,6 @@ fun_expr:
      { mkexp_constraint ~loc:$sloc ~exp ~cty:None ~modes:[mode] }
   | EXCLAVE seq_expr
      { mkexp_exclave ~loc:$sloc ~kwd_loc:($loc($1)) $2 }
-  | REFINE seq_expr
-     { mkexp ~loc:$sloc
-         (Pexp_extension
-            ({ txt = "vox2.refinement.intro.prove";
-               loc = make_loc $loc($1) },
-             PStr [ Str.eval $2 ])) }
-  | ASSUME seq_expr
-     { mkexp ~loc:$sloc
-         (Pexp_extension
-            ({ txt = "vox2.refinement.intro.assume";
-               loc = make_loc $loc($1) },
-             PStr [ Str.eval $2 ])) }
-  | ASSUME_UNCHECKED seq_expr
-     { mkexp ~loc:$sloc
-         (Pexp_extension
-            ({ txt = "vox2.refinement.intro.assume_unchecked";
-               loc = make_loc $loc($1) },
-             PStr [ Str.eval $2 ])) }
 ;
 %inline expr:
   | or_function(fun_expr) { $1 }
@@ -3765,12 +3744,6 @@ pattern_gen:
     ) { $1 }
   | LAZY ext_attributes simple_pattern
       { mkpat_attrs ~loc:$sloc (Ppat_lazy $3) $2}
-  | REFINE simple_pattern
-      { mkpat ~loc:$sloc
-          (Ppat_extension
-             ({ txt = "vox2.refinement.intro.pattern";
-                loc = make_loc $loc($1) },
-              PPat ($2, None))) }
 ;
 
 simple_pattern:

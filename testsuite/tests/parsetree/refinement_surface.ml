@@ -40,11 +40,9 @@ type rich = int{
   | _ -> false
 }
 
-let proved = refine_ (1 + 2)
-let checked = assume_ (if true then proved else 0)
-let trusted = assume_unchecked_ (fun x -> x)
-let refine_ unpacked = trusted
-let sequence = (refine_ print_endline "a"); print_endline "b"
+let refine_ value = value
+let assume_ = refine_ 1
+let assume_unchecked_ = refine_ 2
 |}
 
 let extension_names = ref []
@@ -69,13 +67,6 @@ let iterator =
           | Pexp_hole -> incr holes
           | _ -> ());
          super.expr self expr);
-    pat =
-      (fun self pat ->
-         (match pat.ppat_desc with
-          | Ppat_extension ({ txt; _ }, _) ->
-            extension_names := txt :: !extension_names
-          | _ -> ());
-         super.pat self pat)
   }
 
 let () =
@@ -83,7 +74,6 @@ let () =
   iterator.Ast_iterator.structure iterator parsed;
   let printed = print parsed in
   if not (contains printed "int{ _ > 0 }")
-     || not (contains printed "refine_")
      || contains printed "[%vox2.refinement"
   then
     failwith "Pprintast did not preserve the refinement surface syntax";
@@ -92,7 +82,8 @@ let () =
     failwith "parse -> print -> parse changed the refinement parsetree";
   List.rev !extension_names |> List.iter print_endline;
   Printf.printf "refined-value holes: %d\n" !holes;
-  print_endline "surface printer: postfix braces and intro forms";
+  print_endline "surface printer: postfix braces";
+  print_endline "former intro names: ordinary identifiers";
   print_endline "round-trip: stable"
 
 let malformed source =
