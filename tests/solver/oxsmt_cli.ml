@@ -48,6 +48,24 @@ let unknown_block_with reason =
   }
 ;;
 
+(* census (task #78): flatten an exception message into a short reason-safe token (the
+   reason grammar is one line, stops at ')'). Keeps the sub-cause visible for buckets. *)
+let san_token s =
+  let b = Buffer.create 32 in
+  (try
+     String.iter
+       (fun c ->
+         if Buffer.length b >= 40 then raise Exit;
+         match c with
+         | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '.' | '-' -> Buffer.add_char b c
+         | ' ' | '(' -> raise Exit
+         | _ -> ())
+       s
+   with
+   | Exit -> ());
+  Buffer.contents b
+;;
+
 let print_block b =
   let buf = Buffer.create 128 in
   Buffer.add_string buf "(result";
@@ -181,9 +199,12 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
       (Session.context s)
       sexps
   with
-  | exception (Parser.Malformed _ | Parser.Unsupported _) ->
-    (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
-    unknown_block_with "cli-parse-unsupported"
+  | exception Parser.Unsupported msg ->
+    (* out-of-subset construct -> sound unknown (I8); tag the construct for the census. *)
+    unknown_block_with ("cli-parse-unsupported:" ^ san_token msg)
+  | exception Parser.Malformed msg ->
+    (* unparseable as a query -> sound unknown (I8). *)
+    unknown_block_with ("cli-parse-malformed:" ^ san_token msg)
   | exception _ ->
     (* ROBUSTNESS / fail-closed (I8): the reader maps its expected rejections to
        [Malformed]/[Unsupported], but an unmapped exception on untrusted corpus input

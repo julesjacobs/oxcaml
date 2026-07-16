@@ -620,6 +620,26 @@ and read_bv_op st scope op args orig =
     | [ a; b ] -> f (rd a) (rd b)
     | _ -> malformedf "%s expects 2 arguments: %s" op (Sexp.to_string orig)
   in
+  (* SMT-LIB FixedSizeBitVectors declares bvand/bvor/bvxor/bvadd/bvmul as [:left-assoc],
+     so [(bvor a b c ...)] is legal and means [(bvor (bvor a b) c) ...]. The prior [bin]
+     rejected any arity != 2 as malformed — the census's single largest structural-unknown
+     bucket (task #78: 104 QF_BV files, all n-ary bvor/bvadd/bvxor, mostly the
+     20230221-oisc-gurtner unsat family). The 2-argument arm is the LITERAL [bin] body
+     [f (rd a) (rd b)] — same operand read order (OCaml evaluates the two [rd] calls
+     right-to-left, exactly as [bin] did), so a 2-arg application is byte-for-byte
+     identical to trunk including the printed [sat] model (review B1: a [List.map rd] fold
+     would read left-to-right and swap the hash-cons / SAT-var order, perturbing the —
+     still valid — model bytes). Only the >2-arg case is new behavior (no trunk baseline
+     to match, since trunk rejected it). *)
+  let left_assoc f =
+    match args with
+    | [ a; b ] -> f (rd a) (rd b)
+    | a :: b :: rest ->
+      (* fold left: ((a op b) op c) ... — the [rd a]/[rd b] seed keeps the trunk read
+         order for the first pair, then each further operand is read in argument order. *)
+      List.fold_left (fun acc x -> f acc (rd x)) (f (rd a) (rd b)) rest
+    | _ -> malformedf "%s expects >= 2 arguments: %s" op (Sexp.to_string orig)
+  in
   let un f =
     match args with
     | [ a ] -> f (rd a)
@@ -701,12 +721,12 @@ and read_bv_op st scope op args orig =
   match op with
   | "bvnot" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvnot)
   | "bvneg" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvneg)
-  | "bvand" -> bin (b Bv.Bvand)
-  | "bvor" -> bin (b Bv.Bvor)
-  | "bvxor" -> bin (b Bv.Bvxor)
-  | "bvadd" -> bin (b Bv.Bvadd)
+  | "bvand" -> left_assoc (b Bv.Bvand)
+  | "bvor" -> left_assoc (b Bv.Bvor)
+  | "bvxor" -> left_assoc (b Bv.Bvxor)
+  | "bvadd" -> left_assoc (b Bv.Bvadd)
   | "bvsub" -> bin (b Bv.Bvsub)
-  | "bvmul" -> bin (b Bv.Bvmul)
+  | "bvmul" -> left_assoc (b Bv.Bvmul)
   | "bvudiv" -> bin (b Bv.Bvudiv)
   | "bvurem" -> bin (b Bv.Bvurem)
   | "bvshl" -> bin (b Bv.Bvshl)

@@ -302,6 +302,27 @@ let degrade t reason =
   if String.length t.degraded_reason = 0 then t.degraded_reason <- reason
 ;;
 
+(* census (task #78): sanitize an exception string into a short reason-safe token — the
+   first identifier-ish run, no spaces / parens / newlines (the CLI's reason grammar stops
+   at ')' and one line). Keeps the poison sub-cause visible without leaking payloads. *)
+let san_token s =
+  let b = Buffer.create 32 in
+  (try
+     String.iter
+       (fun c ->
+         if Buffer.length b >= 40 then raise Exit;
+         match c with
+         | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '_' | '.' | '-' -> Buffer.add_char b c
+         | ' ' | '(' -> raise Exit
+         | _ -> ())
+       s
+   with
+   | Exit -> ());
+  Buffer.contents b
+;;
+
+let exn_tag e = san_token (Printexc.to_string e)
+
 (* Pass A (task #7 entailed-equality extraction) toggle. Default ON (both review legs
    cleared default-ON; the win is ~84-95 eq_diamond files and OFF forfeits it).
    [OXSMT_PRESOLVE_EQ=0] turns it OFF for the A/B baseline. Cert-OFF gating (below) is
@@ -897,7 +918,7 @@ let assert_bool_at ?sel t pterm =
           atom degrades identically to a clause-borne one. *)
        register_bool_terms t pterm
      with
-     | Combine.Incomplete _ -> degrade t "combine-incomplete-register"
+     | Combine.Incomplete msg -> degrade t ("combine-incomplete-register:" ^ san_token msg)
      | Term.Overflow
      | Term.Unsupported _
      | Rational.Overflow
@@ -1570,21 +1591,24 @@ let raw_solve t assumptions =
     t.effort_exhausted <- true;
     t.unknown_reason <- "effort-budget";
     Unknown
-  | exception Combine.Incomplete _ ->
+  | exception Combine.Incomplete msg ->
     (* DELIBERATE completeness degrade (ADR-0010 §3.6 case (ii)); a NAMED arm, not the
        catch-all. register_atom can raise it mid-solve. Sticky → Unknown. *)
-    degrade t "combine-incomplete-solve";
-    t.unknown_reason <- "combine-incomplete-solve";
+    let tag = "combine-incomplete-solve:" ^ san_token msg in
+    degrade t tag;
+    t.unknown_reason <- tag;
     Unknown
   | exception ((Out_of_memory | Stack_overflow) as e) ->
     (* Resource-exhaustion / async control-flow: process state untrustworthy — re-raise. *)
     raise e
-  | exception _ ->
+  | exception e ->
     (* CONTRACT-POISON firewall (I8), catch-all over the untrusted theory callbacks driven
        by [Sat.solve]: any escaping poison / unforeseen exception bricks this query to
-       [Unknown]. Sticky. *)
-    degrade t "poison-solve";
-    t.unknown_reason <- "poison-solve";
+       [Unknown]. Sticky. The census tags the sub-cause with the exception name so the
+       poison bucket is not opaque (diagnostic string only; verdict unchanged). *)
+    let tag = "poison-solve:" ^ exn_tag e in
+    degrade t tag;
+    t.unknown_reason <- tag;
     Unknown
 ;;
 
