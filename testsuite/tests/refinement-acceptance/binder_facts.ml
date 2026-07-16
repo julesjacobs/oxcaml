@@ -33,8 +33,7 @@
    A refined let-binder records its predicate as a fact; the same
    predicate is then re-imposed downstream and discharged trivially.
    FINAL: accepts (fact [x = 1] entails the obligation [x = 1]).
-   TODAY: rejected at the binder-introduction annotation, because a
-   bare [1] cannot rigidly acquire [int{ _ = 1 }] yet. *)
+   TODAY: accepts via binder-fact collection and verification. *)
 let bf_use_fact () =
   let x = (1 : int{ _ = 1 }) in
   (x : int{ _ = 1 })
@@ -46,7 +45,7 @@ val bf_use_fact : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
    The refined binder is USED at its skeleton: [x + 1] needs [x : int].
    FINAL: accepts (use is skeleton-typed; the binder fact is irrelevant
    to a bare arithmetic use).
-   TODAY: rejected at the introduction annotation. *)
+   TODAY: accepts. *)
 let bf_skeleton_use () =
   let x = (1 : int{ _ = 1 }) in
   x + 1
@@ -59,7 +58,7 @@ val bf_skeleton_use : unit -> int = <fun>
    [x > 0] is only provable from the recorded fact [x = 7]. Drop the
    fact and the condition is unprovable -- this is the case that fails
    if binder facts are not carried.
-   FINAL: accepts. TODAY: rejected at the introduction annotation. *)
+   FINAL and TODAY: accepts. *)
 let bf_needs_fact () =
   let x = (7 : int{ _ = 7 }) in
   (x : int{ _ > 0 })
@@ -67,17 +66,13 @@ let bf_needs_fact () =
 val bf_needs_fact : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
 |}]
 
-(* @acc id=bf_param_fact final=ACCEPT today=REJECT stable=no unlocks=integration+verification
+(* @acc id=bf_param_fact final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    A function PARAMETER binder contributes its contract as a fact for
    the body: from [n = 5] the result obligation [n > 0] discharges.
    The parameter binds at the skeleton; the arrow domain keeps [int{_=5}].
-   FINAL: accepts. TODAY: rejected -- the body's result annotation
-   [int{ _ > 0 }] is a rigid clash against the skeleton-typed [n]. *)
+   FINAL and TODAY: accepts. *)
 let bf_param_fact (n : int{ _ = 5 }) : int{ _ > 0 } = n
 [%%expect {|
-Line 1, characters 54-55:
-1 | let bf_param_fact (n : int{ _ = 5 }) : int{ _ > 0 } = n
-                                                          ^
-Error: The value "n" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.>] _ 0) }"
+val bf_param_fact :
+  int{ (app[Stdlib!.=] _ 5) } -> int{ (app[Stdlib!.>] _ 0) } = <fun>
 |}]

@@ -1,11 +1,10 @@
 (* TEST include ocamlcommon;
 *)
 
-(* String-headed references (Rsibling/Rfun) are not produced end-to-end yet; their
-   production lands with the verification pass and is fail-closed until then. This test
-   builds predicates carrying them by hand and pushes them through module substitution,
-   the save/load (cmi) boundary, and a literal marshal round-trip, so the four-head
-   rewriting is exercised now rather than discovered broken when production starts. *)
+(* String-headed references are now produced by lowering.  This test also
+   builds them directly and pushes them through module substitution, the
+   save/load (cmi) boundary, and a literal marshal round-trip, so the four-head
+   rewriting remains covered. *)
 
 open Types
 module R = Types.Refinement

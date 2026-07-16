@@ -19,21 +19,22 @@
 (* @acc id=ao_provable final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
    Provable predicate on a bare value: [5 >= 0].
    FINAL: accepts (VC [5 >= 0] discharged by Lean).
-   TODAY: rejected -- bare [5] rigidly clashes with the refined type. *)
+   TODAY: accepts via the verification pass. *)
 let ao_provable = (5 : int{ _ >= 0 })
 [%%expect {|
 val ao_provable : int{ (app[Stdlib!.>=] _ 0) } = 5
 |}]
 
-(* @acc id=ao_unprovable final=REJECT today=ACCEPT stable=no unlocks=integration+verification
+(* @acc id=ao_unprovable final=REJECT today=REJECT stable=no unlocks=integration+verification
    Unprovable predicate on a bare value: [-5 >= 0] is false.
    FINAL: rejected with a clean VERIFICATION error (unprovable VC).
-   TODAY: rejected with a rigid type-clash error -- same outcome
-   (reject) but the message must change to a VC failure when the
-   verification pass lands. *)
+   TODAY: rejected with the final verification error. *)
 let ao_unprovable = (-5 : int{ _ >= 0 })
 [%%expect {|
-val ao_unprovable : int{ (app[Stdlib!.>=] _ 0) } = -5
+Line 1, characters 20-40:
+1 | let ao_unprovable = (-5 : int{ _ >= 0 })
+                        ^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
 |}]
 
 (* @acc id=ao_same_refinement final=ACCEPT today=ACCEPT stable=yes unlocks=-

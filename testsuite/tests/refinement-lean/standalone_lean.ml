@@ -28,6 +28,9 @@ let int_type = Predef.type_int
 let bool_type = Predef.type_bool
 let option_type = Predef.type_option int_type
 let loc = Location.in_file "standalone_lean.ml"
+let env =
+  Compmisc.init_path ();
+  Compmisc.initial_env ()
 
 let node type_ rexp_desc = R.create ~loc ~type_ rexp_desc
 let int value = node int_type (Rexp_constant (Const_int value))
@@ -43,6 +46,11 @@ let bool value =
 
 let free type_ name = node type_ (Rexp_ident (Rfree (Rfun name)))
 
+let primitive type_ name =
+  let stdlib = Path.Pident (Ident.create_persistent "Stdlib") in
+  let path = Path.Pdot (stdlib, name) in
+  node type_ (Rexp_ident (Rfree (Rapp path)))
+
 let apply type_ function_ arguments =
   node type_
     (Rexp_apply
@@ -50,11 +58,11 @@ let apply type_ function_ arguments =
 
 let binary name argument_type result_type left right =
   let function_type = arrow argument_type (arrow argument_type result_type) in
-  apply result_type (free function_type name) [left; right]
+  apply result_type (primitive function_type name) [left; right]
 
-let equal type_ left right = binary "eq" type_ bool_type left right
-let greater left right = binary "gt_int" int_type bool_type left right
-let greater_equal left right = binary "ge_int" int_type bool_type left right
+let equal type_ left right = binary "=" type_ bool_type left right
+let greater left right = binary ">" int_type bool_type left right
+let greater_equal left right = binary ">=" int_type bool_type left right
 
 let x =
   { rb_id = Ident.create_scoped ~scope:1 "x";
@@ -154,12 +162,10 @@ let compound =
       (Rexp_ifthenelse (bool true, tuple_equality, Some (bool false)))
   in
   let conjunction left right =
-    binary "and_bool" bool_type bool_type left right
+    binary "&&" bool_type bool_type left right
   in
   vc (conjunction let_expression
         (conjunction lambda_application conditional))
-
-let env = Lazy.force Env.initial
 
 let emit condition =
   match Vox_lean.emit ~env condition with
@@ -191,6 +197,53 @@ let () =
     check Vox_lean.Proved compound
   end;
   print_endline "real Lean subprocess cases: completed or skipped"
+
+let () =
+  let function_type = arrow int_type (arrow int_type int_type) in
+  let user_add = free function_type "add" in
+  let user_result = apply int_type user_add [int 1; int 2] in
+  let user_add_condition = vc (equal int_type user_result (int 3)) in
+  let emitted = emit user_add_condition in
+  assert (not (String.contains emitted '+'));
+  let left = Ident.create_local "same_name" in
+  let right = Ident.create_local "same_name" in
+  let global id =
+    node int_type (Rexp_ident (Rfree (Rglobal (Path.Pident id))))
+  in
+  let distinct_condition = vc (equal int_type (global left) (global right)) in
+  let emitted = emit distinct_condition in
+  assert (String.contains emitted '0');
+  assert (String.contains emitted '1');
+  if Vox_lean.lean_available () then begin
+    check Vox_lean.Not_proved user_add_condition;
+    check Vox_lean.Not_proved distinct_condition
+  end;
+  let parameter =
+    { rb_id = Ident.create_local "quantified";
+      rb_type = int_type;
+    }
+  in
+  let predicate =
+    node (arrow int_type bool_type)
+      (Rexp_function
+         { arg_label = Nolabel;
+           param = parameter;
+           body = bool true;
+         })
+  in
+  let quantifier =
+    apply bool_type
+      (free (arrow predicate.rexp_type bool_type) "forall_")
+      [predicate]
+  in
+  begin
+    match Vox_lean.emit ~env (vc quantifier) with
+    | Error { message; _ }
+      when String.starts_with ~prefix:"quantifier combinator" message -> ()
+    | Error error -> failwith error.message
+    | Ok _ -> failwith "quantifier combinator was silently emitted"
+  end;
+  print_endline "reference identity and quantifier guards: checked"
 
 let () =
   assert ((emit tautology |> String.length) > 0);

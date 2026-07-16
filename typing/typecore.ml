@@ -1797,6 +1797,18 @@ let refinement_skeleton type_ =
   | Trefine { ref_skeleton; _ } -> ref_skeleton
   | _ -> type_
 
+let type_contains_refinement type_ =
+  with_type_mark (fun mark ->
+    let found = ref false in
+    let rec visit type_ =
+      if not !found && try_mark_node mark type_ then
+        match get_desc type_ with
+        | Trefine _ -> found := true
+        | _ -> iter_type_expr visit type_
+    in
+    visit type_;
+    !found)
+
 let add_pattern_variables ?check ?check_as ?(strip_refinement = false) env pv =
   List.fold_right
     (fun {pv_id; pv_mode; pv_value_kind; pv_type; pv_loc; pv_kind;
@@ -6808,6 +6820,57 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
     (Cmt_format.Partial_expression exp :: previous_saved_types);
   exp
 
+and type_refinement_annotation
+    ?(overwrite = No_overwrite) env expected_mode ~loc ~explanation sarg
+    refined_type refinement =
+  let with_explanation = with_explanation explanation in
+  let refined_type = instance refined_type in
+  let skeleton = instance refinement.ref_skeleton in
+  let mark arg = { arg with exp_type = refined_type }, true in
+  if not (is_refinement_inferred_head sarg)
+  then
+    let arg = type_expect env expected_mode sarg (mk_expected skeleton) in
+    mark arg
+  else
+    let arg = type_exp ~overwrite env expected_mode sarg in
+    match get_desc arg.exp_type with
+    | Trefine actual ->
+      let same =
+        Refinement.equal_desc
+          ~equal_type:(fun left right ->
+            Ctype.is_equal env false [left] [right])
+          actual refinement
+      in
+      if same
+      then begin
+        with_explanation (fun () ->
+          unify_exp_types loc env arg.exp_type refined_type);
+        { arg with exp_type = refined_type }, false
+      end
+      else begin
+        begin match sarg.pexp_desc with
+        | Pexp_ident _ | Pexp_apply _ -> ()
+        | _ ->
+          Location.raise_errorf ~loc
+            "This expression's refined type differs from the refinement \
+             expected here; let-bind it before applying a new refinement"
+        end;
+        with_explanation (fun () ->
+          unify_exp_types loc env
+            actual.ref_skeleton (instance refinement.ref_skeleton));
+        mark arg
+      end
+    | Tvar _ | Tunivar _ ->
+      (* An unconstrained result (notably [Obj.magic]) must not acquire a
+         refinement without leaving an obligation mark. *)
+      with_explanation (fun () ->
+        unify_exp_types loc env arg.exp_type skeleton);
+      mark arg
+    | _ ->
+      with_explanation (fun () ->
+        unify_exp_types loc env arg.exp_type skeleton);
+      mark arg
+
 and type_expect_
     ?(recarg=Rejected) ?(overwrite=No_overwrite)
     env (expected_mode : expected_mode) sexp ty_expected_explained =
@@ -6821,58 +6884,6 @@ and type_expect_
     with_explanation (fun () ->
       unify_exp ~sexp env (re exp) (instance ty_expected));
     exp
-  in
-  let type_refinement_annotation sarg refined_type refinement =
-    let refined_type = instance refined_type in
-    let skeleton = instance refinement.ref_skeleton in
-    let mark arg = { arg with exp_type = refined_type }, true in
-    if not (is_refinement_inferred_head sarg)
-    then
-      let arg =
-        type_expect env expected_mode sarg (mk_expected skeleton)
-      in
-      mark arg
-    else
-      let arg = type_exp ~overwrite env expected_mode sarg in
-      match get_desc arg.exp_type with
-      | Trefine actual ->
-        let same =
-          Refinement.equal_desc
-            ~equal_type:(fun left right ->
-              Ctype.is_equal env false [left] [right])
-            actual refinement
-        in
-        if same
-        then begin
-          with_explanation (fun () ->
-            unify_exp_types loc env arg.exp_type refined_type);
-          { arg with exp_type = refined_type }, false
-        end
-        else begin
-          begin match sarg.pexp_desc with
-          | Pexp_ident _ | Pexp_apply _ -> ()
-          | _ ->
-            Location.raise_errorf ~loc
-              "This expression's refined type differs from the refinement \
-               expected here; let-bind it before applying a new refinement"
-          end;
-          with_explanation (fun () ->
-            unify_exp_types loc env
-              actual.ref_skeleton (instance refinement.ref_skeleton));
-          mark arg
-        end
-      | Tvar _ | Tunivar _ ->
-        if eq_type arg.exp_type skeleton
-        then mark arg
-        else begin
-          with_explanation (fun () ->
-            unify_exp_types loc env arg.exp_type refined_type);
-          { arg with exp_type = refined_type }, false
-        end
-      | _ ->
-        with_explanation (fun () ->
-          unify_exp_types loc env arg.exp_type skeleton);
-        mark arg
   in
   let type_expect_record (type rep) ~overwrite (record_form : rep record_form)
         (lid_sexp_list: (Longident.t loc * Parsetree.expression) list)
@@ -8327,7 +8338,8 @@ and type_expect_
       let arg, retain_constraint =
         match overwrite, get_desc ty with
         | No_overwrite, Trefine refinement ->
-          type_refinement_annotation sarg ty refinement
+          type_refinement_annotation ~overwrite env expected_mode ~loc
+            ~explanation sarg ty refinement
         | _ ->
           ( type_argument ~overwrite ?explanation env expected_mode sarg ty
               (instance ty),
@@ -8365,7 +8377,8 @@ and type_expect_
       let arg, retain_constraint =
         match overwrite, get_desc ty with
         | No_overwrite, Trefine refinement ->
-          type_refinement_annotation sarg ty refinement
+          type_refinement_annotation ~overwrite env expected_mode ~loc
+            ~explanation sarg ty refinement
         | _ ->
           ( type_argument ~overwrite ?explanation env expected_mode sarg ty
               (instance ty),
@@ -9784,7 +9797,8 @@ and type_function
             ty_default_arg, Some (default_arg, arg_label, default_arg_sort),
               default_arg_sort
       in
-      let (pat, params, body, ret_info, newtypes, contains_gadt, curry), partial =
+      let (pat, suffix_type, params, body, ret_info, newtypes,
+           contains_gadt, curry), partial =
         (* Check everything else in the scope of the parameter. *)
         map_half_typed_cases Value env expected_pat_mode
           ty_arg_internal sort_arg_internal ty_ret pat.ppat_loc
@@ -9794,7 +9808,7 @@ and type_function
           ~type_body:begin
             fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
               ~contains_gadt:param_contains_gadt ->
-              let { function_ = _, params_suffix, body;
+              let { function_ = suffix_type, params_suffix, body;
                     newtypes; params_contain_gadt = suffix_contains_gadt;
                     fun_alloc_mode; ret_info;
                   }
@@ -9847,7 +9861,8 @@ and type_function
                   end;
                   More_args {partial_mode = Alloc.disallow_right fun_alloc_mode}
               in
-              pat, params_suffix, body, ret_info, newtypes, contains_gadt, curry
+              pat, suffix_type, params_suffix, body, ret_info, newtypes,
+              contains_gadt, curry
           end
         |> function
           (* The result must be a singleton because we passed a singleton
@@ -9855,18 +9870,31 @@ and type_function
         | [ result ], partial -> result, partial
         | ([] | _ :: _ :: _), _ -> assert false
       in
-      let exp_type =
+      let exp_type_for_unification =
         instance
           (newgenty
              (Tarrow
                 ((typed_arg_label, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+      in
+      let exp_type =
+        if not (type_contains_refinement suffix_type)
+        then exp_type_for_unification
+        else
+          instance
+            (newgenty
+               (Tarrow
+                  ( (typed_arg_label, arg_mode, ret_mode),
+                    ty_arg,
+                    suffix_type,
+                    commu_ok )))
       in
       (* This is quadratic, as it operates over the entire tail of the
          type for each new parameter. Now that functions are n-ary, we
          could possibly run this once.
       *)
       with_explanation ty_fun.explanation (fun () ->
-          unify_exp_types loc env exp_type (instance ty_expected));
+          unify_exp_types loc env exp_type_for_unification
+            (instance ty_expected));
       (* This is quadratic, as it extracts all of the parameters from an arrow
          type for each parameter that's added. Now that functions are n-ary,
          there might be an opportunity to improve this.
@@ -9962,9 +9990,40 @@ and type_function
             | Some constraint_ ->
             let body_loc = body.pexp_loc in
             let body, exp_type, exp_extra =
-              type_constraint_expect (expression_constraint body)
-                env expected_mode body_loc ~loc_arg:body_loc
-                type_mode.mode_modes constraint_ ty_expected
+              match constraint_ with
+              | Pconstraint ty_constrain ->
+                let alloc_mode =
+                  Alloc.Const.Option.value
+                    ~default:Alloc.Const.legacy type_mode.mode_modes
+                in
+                let ty, exp_extra =
+                  type_constraint env ty_constrain alloc_mode
+                in
+                begin match get_desc ty with
+                | Trefine refinement ->
+                  let body, retain_constraint =
+                    type_refinement_annotation env expected_mode
+                      ~loc:body_loc ~explanation:None body ty refinement
+                  in
+                  unify_exp_types body_loc env
+                    refinement.ref_skeleton (instance ty_expected);
+                  body, ty,
+                  (if retain_constraint then Some exp_extra else None)
+                | _ ->
+                  let body, exp_type, exp_extra =
+                    type_constraint_expect (expression_constraint body)
+                      env expected_mode body_loc ~loc_arg:body_loc
+                      type_mode.mode_modes constraint_ ty_expected
+                  in
+                  body, exp_type, Some exp_extra
+                end
+              | Pcoerce _ ->
+                let body, exp_type, exp_extra =
+                  type_constraint_expect (expression_constraint body)
+                    env expected_mode body_loc ~loc_arg:body_loc
+                    type_mode.mode_modes constraint_ ty_expected
+                in
+                body, exp_type, Some exp_extra
             in
             let texp_mode =
               match type_mode.mode_desc with
@@ -9974,7 +10033,12 @@ and type_function
             in
             { body with
                 exp_extra =
-                  texp_mode @ (exp_extra, body_loc, []) :: body.exp_extra;
+                  texp_mode
+                  @ Option.fold ~none:[]
+                      ~some:(fun exp_extra ->
+                        [exp_extra, body_loc, []])
+                      exp_extra
+                  @ body.exp_extra;
                 exp_type;
             }
           in
@@ -11922,6 +11986,13 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         (* We check for [zero_alloc] attributes written on the [let] and move
            them to the function. *)
         let e = add_zero_alloc_attribute e pvb.pvb_attributes in
+        let p =
+          match p.pat_desc, e.exp_desc with
+          | Tpat_var _, Texp_function _
+            when type_contains_refinement e.exp_type ->
+            { p with pat_type = e.exp_type }
+          | _ -> p
+        in
         (* vb_rec_kind will be computed later for recursive bindings *)
         {vb_pat=p; vb_expr=e; vb_sort = s; vb_attributes=pvb.pvb_attributes;
          vb_loc=pvb.pvb_loc; vb_rec_kind = Dynamic;
@@ -11944,10 +12015,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
      Re-enter it after generalization so the continuation sees the skeleton;
      the typed pattern remains the refinement record for verification. *)
   let new_env =
-    if not strip_refinement
-    then new_env
-    else
-      List.fold_left
+    List.fold_left
         (fun env pv ->
           match pv.pv_value_kind with
           | Val_mut _ -> env
@@ -11957,12 +12025,30 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
               let description =
                 Subst.Lazy.force_value_description lazy_description
               in
-              let val_type = refinement_skeleton description.val_type in
-              if eq_type val_type description.val_type
+              let bound_type =
+                List.find_map
+                  (fun binding ->
+                    match binding.vb_pat.pat_desc with
+                    | Tpat_var { id; _ } when Ident.same id pv.pv_id ->
+                      Some binding.vb_pat.pat_type
+                    | _ -> None)
+                  l
+                |> Option.value ~default:description.val_type
+              in
+              if not (type_contains_refinement bound_type)
               then env
-              else
-                Env.add_value ~mode:pv.pv_mode pv.pv_id
-                  { description with val_type } env
+              else begin
+                let val_type =
+                  if strip_refinement
+                  then refinement_skeleton bound_type
+                  else bound_type
+                in
+                if eq_type val_type description.val_type
+                then env
+                else
+                  Env.add_value ~mode:pv.pv_mode pv.pv_id
+                    { description with val_type } env
+              end
             | exception Not_found -> env
             end)
         new_env pvs
@@ -14083,6 +14169,12 @@ let lower_refinement_expression ~view expression =
     match expression.exp_desc with
     | Texp_ident { path = Pident id; _ } when Ident.Set.mem id bound ->
       create (Rexp_ident (Rbound id))
+    | Texp_ident { path = Pident id; _ }
+      when Env.is_in_signature expression.exp_env ->
+      (* A value mentioned by another declaration in the same signature is
+         signature-relative.  Its source name, unlike its transient stamp,
+         survives signature copying, sealing, and functor instantiation. *)
+      create (Rexp_ident (Rfree (Rsibling (Ident.name id))))
     | Texp_ident { path; _ } ->
       let reference = if function_head then Rapp path else Rglobal path in
       create (Rexp_ident (Rfree reference))
