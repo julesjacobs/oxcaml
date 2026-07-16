@@ -41,15 +41,10 @@
 (* whose fact was identified across evaluations -- is CLOSED by   *)
 (* the Q-003 purity gate (branch_condition_facts.ml,              *)
 (* bcf_impure_condition records no fact for a non-total           *)
-(* condition).  The remaining residual unsoundness is an IMPURE   *)
-(* EXPRESSION used                                                *)
-(* DIRECTLY in a predicate, where two occurrences are identified as *)
-(* EQUAL (fp_impure_expr_in_pred): this is not specific to any      *)
-(* imposition channel and is the pre-existing "unsound until the    *)
-(* totality/logicality modes merge" stub (plan.html) -- a predicate *)
-(* is currently checked as an ordinary expression, so a partial     *)
-(* impure [read_int ()] is not yet rejected.  It flips when the     *)
-(* mode discipline lands.                                           *)
+(* condition).  An IMPURE EXPRESSION used DIRECTLY in a predicate *)
+(* is also closed: the total/logical predicate mode discipline     *)
+(* rejects the partial [read_int ()] before its two occurrences    *)
+(* could be identified as equal (fp_impure_expr_in_pred).          *)
 (*                                                                 *)
 (* Marker legend: see binder_facts.ml.  Calls that would block on   *)
 (* stdin are guarded under functions so the toplevel does not run   *)
@@ -115,18 +110,18 @@ Line 1, characters 52-63:
 Error: Refinement verification failed (not-proved)
 |}]
 
-(* @acc id=fp_impure_expr_in_pred final=REJECT today=ACCEPT stable=no unlocks=modes
-   RESIDUAL, pre-existing modes-stub unsoundness (NOT an imposition-channel
-   issue): an impure expression used directly in a predicate has its two
-   occurrences identified as equal, so [read_int () = read_int ()] proves
-   although the two reads differ at runtime.  Flips to REJECT when the
-   total/logical mode discipline on predicates lands. *)
+(* @acc id=fp_impure_expr_in_pred final=REJECT today=REJECT stable=yes
+   An impure expression used directly in a predicate is rejected by the
+   total/logical mode discipline, before its two occurrences could be
+   identified as equal. *)
 let fp_impure_expr_in_pred () = (read_int () : int{ _ = read_int () })
 [%%expect {|
-val fp_impure_expr_in_pred :
-  unit ->
-  int{ (app[Stdlib!.=] _ (app[Stdlib!.read_int] constructor[unit/7!.()])) } =
-  <fun>
+Line 1, characters 56-64:
+1 | let fp_impure_expr_in_pred () = (read_int () : int{ _ = read_int () })
+                                                            ^^^^^^^^
+Error: The value "read_int" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 47-69).
 |}]
 
 (* @acc id=fp_magic_combined final=ACCEPT today=ACCEPT stable=no unlocks=none

@@ -9,11 +9,13 @@
 *)
 
 (* FINAL: verification proves that either branch is nonnegative.
-   CURRENT: the verification pass now generates the result obligation, but the
-   comparison wrapper [Vox_spec.int_ge] is partial and therefore opaque to the
-   solver, so it cannot relate the negated branch [0 - x] to the guard.  The
-   obligation is honestly not proved until total comparisons give the wrapper a
-   logical meaning. *)
+   CURRENT: the predicate is written through the prelude wrapper
+   [Vox_spec.int_ge], an ordinary (partial) user function -- not one of the
+   comparison primitives admitted inside a predicate.  A predicate is checked at
+   [total], so calling the partial wrapper is rejected at totality, before any
+   verification obligation is generated.  When total comparisons make the
+   wrapper total-annotatable the predicate flows through to verification again;
+   the [unlocks] tag records that dependency. *)
 
 #load "vox_spec.cmo";;
 
@@ -23,8 +25,10 @@ let abs (x : int) =
     : int{ Vox_spec.int_ge _ 0 })
 
 [%%expect {|
-Lines 2-3, characters 2-33:
-2 | ..(if Vox_spec.int_ge x 0 then x else 0 - x
+Line 3, characters 11-26:
 3 |     : int{ Vox_spec.int_ge _ 0 })
-Error: Refinement verification failed (not-proved)
+               ^^^^^^^^^^^^^^^
+Error: The value "Vox_spec.int_ge" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 3, characters 6-32).
 |}]

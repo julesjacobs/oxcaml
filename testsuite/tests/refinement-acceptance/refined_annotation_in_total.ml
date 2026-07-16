@@ -13,15 +13,11 @@
 (* total with the variables it mentions presented @ logical -- so *)
 (* the predicate belongs to a LOGICAL context and must be isolated *)
 (* from the host closure's capture/totality analysis. That        *)
-(* isolation is the "logical closure lock" that                   *)
-(* [with_refinement_typing_frame] (typing/typecore.ml) still      *)
-(* leaves as a VOX2_MODES_TODO: today the frame elaborates the     *)
-(* predicate without the lock, so a predicate mentioning a         *)
-(* comparison (partial in the totality axis) is seen as a partial  *)
-(* value CAPTURED by an enclosing total closure, and the closure   *)
-(* over-rejects.  This is conservative (sound): it rejects a       *)
-(* program that will be accepted once modes integration wires the  *)
-(* logical closure lock at that marker.                            *)
+(* isolation is the "logical closure lock" supplied by           *)
+(* [with_refinement_typing_frame] (typing/typecore.ml).           *)
+(* Comparison primitives are admitted only while checking the     *)
+(* predicate, and the lock prevents them from polluting the host   *)
+(* closure's capture and totality analysis.                        *)
 (*                                                                *)
 (* Marker legend: see binder_facts.ml.                            *)
 (* ============================================================= *)
@@ -49,21 +45,22 @@ let ordinary = fun () -> (2 : int{ _ > 0 })
 val ordinary : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
 |}]
 
-(* @acc id=refined_in_total_closure final=ACCEPT today=REJECT stable=no unlocks=modes
+(* @acc id=refined_in_total_closure final=ACCEPT today=ACCEPT stable=yes
    THE INTERACTION: the same refined annotation inside a closure that is
-   required to be [total].  FINAL: accepts -- the predicate is checked in
+   required to be [total].  The predicate is checked in
    a logical context, isolated from the closure's capture analysis by the
-   logical closure lock (the second VOX2_MODES_TODO in
-   [with_refinement_typing_frame]).  TODAY: over-rejects, because that lock
-   is not yet wired, so the predicate's [>] is seen as a partial value
-   captured by the total closure.  Sound (conservative); flips to ACCEPT
-   when modes integration lands. *)
-let refined_in_total = fun () -> (2 : int{ _ > 0 })
+   logical closure lock in [with_refinement_typing_frame], so its comparison
+   does not make the host closure partial.  (The closure is annotated
+   [@ total] rather than relying on the later consumer, because under
+   -principal a top-level binding's totality is defaulted at the structure
+   boundary before the consumer can constrain it.) *)
+let refined_in_total @ total = fun () -> (2 : int{ _ > 0 })
 let () = ignore (expects_total refined_in_total)
 [%%expect {|
 val refined_in_total : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
-Line 2, characters 31-47:
+Line 2, characters 16-48:
 2 | let () = ignore (expects_total refined_in_total)
-                                   ^^^^^^^^^^^^^^^^
-Error: This value is "partial" but is expected to be "total".
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 5 [ignored-partial-application]: this function application is partial,
+  maybe some arguments are missing.
 |}]

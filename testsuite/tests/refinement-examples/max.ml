@@ -9,12 +9,14 @@
 *)
 
 (* FINAL: verification uses the branch condition to prove that the result is
-   at least both arguments.  CURRENT: the verification pass now generates the
-   conjunction obligation, but the comparison wrapper [Vox_spec.int_ge] is
-   partial and therefore opaque to the solver, so it cannot prove [int_ge _ x]
-   holds in the branch that returns [y].  The conjunction is the ordinary
-   boolean [&&], which the solver does interpret; discharge waits on total
-   comparisons giving the wrapper a logical meaning. *)
+   at least both arguments.  CURRENT: the predicate is written through the
+   prelude wrapper [Vox_spec.int_ge], an ordinary (partial) user function -- not
+   one of the comparison primitives admitted inside a predicate.  A predicate is
+   checked at [total], so calling the partial wrapper is rejected at totality,
+   before the conjunction obligation is generated.  (The connective [&&] IS an
+   admitted primitive; it is the wrapper that is partial.)  When total
+   comparisons make the wrapper total-annotatable the predicate flows through to
+   verification again; the [unlocks] tag records that dependency. *)
 
 #load "vox_spec.cmo";;
 
@@ -27,11 +29,10 @@ let max (x : int) (y : int) =
       })
 
 [%%expect {|
-Lines 2-6, characters 2-8:
-2 | ..(if Vox_spec.int_ge x y then x else y
-3 |     : int{
+Line 4, characters 8-23:
 4 |         Vox_spec.int_ge _ x
-5 |         && Vox_spec.int_ge _ y
-6 |       })
-Error: Refinement verification failed (not-proved)
+            ^^^^^^^^^^^^^^^
+Error: The value "Vox_spec.int_ge" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at lines 3-6, characters 6-7).
 |}]
