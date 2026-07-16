@@ -1,6 +1,6 @@
 (* TEST
    include stdlib_stable;
-   flags = "-w -220";
+   flags = "-w -220 -extension comprehensions";
    expect;
 *)
 
@@ -563,6 +563,92 @@ val pure_eager_condition : unit -> int = <fun>
 val pure_eager_guard : bool -> int = <fun>
 val pure_eager_record : unit -> eager_record = <fun>
 val pure_eager_assert : unit -> int = <fun>
+|}]
+
+(* Residue typed by Typeclass still constrains the ambient Typecore closure. *)
+let bad_object_initializer_while @ total = fun () -> object initializer (while true do () done) end
+[%%expect{|
+Line 1, characters 72-95:
+1 | let bad_object_initializer_while @ total = fun () -> object initializer (while true do () done) end
+                                                                            ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_object_initializer_for @ total = fun () -> object initializer (for _i = 0 to 1 do () done) end
+[%%expect{|
+Line 1, characters 70-98:
+1 | let bad_object_initializer_for @ total = fun () -> object initializer (for _i = 0 to 1 do () done) end
+                                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_object_initializer_array @ total = fun () -> object initializer (let _ = [| 0 |] in ()) end
+[%%expect{|
+Line 1, characters 81-88:
+1 | let bad_object_initializer_array @ total = fun () -> object initializer (let _ = [| 0 |] in ()) end
+                                                                                     ^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_object_initializer_record @ total = fun () -> object initializer (let _ = { immutable_field = 0; mutable_field = 0 } in ()) end
+[%%expect{|
+Line 1, characters 82-124:
+1 | let bad_object_initializer_record @ total = fun () -> object initializer (let _ = { immutable_field = 0; mutable_field = 0 } in ()) end
+                                                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_object_initializer_tuple @ total = fun () -> (object initializer (while true do () done) end, 0)
+[%%expect{|
+Line 1, characters 73-96:
+1 | let bad_object_initializer_tuple @ total = fun () -> (object initializer (while true do () done) end, 0)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_object_initializer_constructor @ total = fun () -> Some (object initializer (while true do () done) end)
+[%%expect{|
+Line 1, characters 84-107:
+1 | let bad_object_initializer_constructor @ total = fun () -> Some (object initializer (while true do () done) end)
+                                                                                        ^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let _ = let bad () = object initializer (while true do () done) end in expects_total bad
+[%%expect{|
+Line 1, characters 85-88:
+1 | let _ = let bad () = object initializer (while true do () done) end in expects_total bad
+                                                                                         ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+(* Mutable array comprehension construction is residue; list and immutable
+   array comprehensions are not. *)
+let bad_array_comprehension @ total = fun () -> [| x for x = 0 to 1 |]
+[%%expect{|
+Line 1, characters 48-70:
+1 | let bad_array_comprehension @ total = fun () -> [| x for x = 0 to 1 |]
+                                                    ^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let bad_array_comprehension_body @ total = fun () -> [| (while true do () done; x) for x = 0 to 1 |]
+[%%expect{|
+Line 1, characters 53-100:
+1 | let bad_array_comprehension_body @ total = fun () -> [| (while true do () done; x) for x = 0 to 1 |]
+                                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The function is "partial" but is expected to be "total".
+|}]
+
+let pure_object_method @ total = fun () -> object method m = 0 end
+let pure_object_val @ total = fun () -> object val x = 0 method m = x end
+let pure_list_comprehension @ total = fun () -> [x for x = 0 to 1]
+let pure_iarray_comprehension @ total = fun () -> [:x for x = 0 to 1:]
+[%%expect{|
+val pure_object_method : unit -> < m : int > = <fun>
+val pure_object_val : unit -> < m : int > = <fun>
+val pure_list_comprehension : unit -> int list = <fun>
+val pure_iarray_comprehension : unit -> int iarray = <fun>
 |}]
 
 (* Cross-lane residue guard (codex delta re-review probes B1-B9): residue in

@@ -674,12 +674,7 @@ let mode_coerce mode expected_mode =
   mode_morph (fun m -> Value.meet [m; mode]) expected_mode
 
 let constrain_enclosing_totality ~loc env =
-  Option.iter
-    (fun enclosing_totality ->
-       Totality.submode_err (loc, Function)
-         (Totality.of_const Totality.Const.Partial)
-         enclosing_totality)
-    (Env.enclosing_totality env)
+  Env.constrain_enclosing_totality_partial ~env (loc, Function)
 
 let mode_lazy expected_mode =
   let mode =
@@ -6350,7 +6345,6 @@ let split_function_ty
         in
         Env.add_region_lock env
   in
-  let env = Env.set_enclosing_totality (Some closure_totality) env in
   let ret_value_mode = alloc_as_value ret_mode in
   let expected_inner_mode =
     if not is_final_val_param then
@@ -12049,6 +12043,7 @@ and type_comprehension_expr ~loc ~env ~ty_expected ~attributes cexpr =
     | Pcomp_array_comprehension (amut, comp) ->
         let container_type, mut = match amut with
         | Mutable   ->
+          constrain_enclosing_totality ~loc env;
           Predef.type_array, Mutable {
             mode = Value.Comonadic.legacy;
             (* CR aspsmith: Revisit once we support atomic arrays *)

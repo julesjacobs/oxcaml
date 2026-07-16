@@ -680,7 +680,6 @@ type t = {
   implicit_jkinds: jkind_lr loc String.Map.t;
   flags: int;
   stage: stage;
-  enclosing_totality: Mode.Totality.r option;
   toplevel_scope: int
 }
 
@@ -986,7 +985,6 @@ let empty = {
   functor_args = Ident.empty;
   jkinds = IdTbl.empty;
   stage = 0;
-  enclosing_totality = None;
   toplevel_scope = Ident.lowest_scope
  }
 
@@ -3144,11 +3142,6 @@ let add_closure_lock closure_context comonadic env =
   in
   add_lock lock env
 
-let set_enclosing_totality enclosing_totality env =
-  { env with enclosing_totality }
-
-let enclosing_totality env = env.enclosing_totality
-
 let add_region_lock env = add_lock Region_lock env
 
 let add_exclave_lock env = add_lock Exclave_lock env
@@ -3840,6 +3833,18 @@ let walk_locks_for_legacy_construct ~env pp =
        (Mode.Value.disallow_right Mode.Value.legacy) None locks
       : Mode.Value.l)
 
+let constrain_enclosing_totality_partial ~env pp =
+  let locks = IdTbl.get_all_locks env.values in
+  let _stage_locks, locks = partition_locks locks in
+  List.iter
+    (function
+      | Closure_lock (_, comonadic) ->
+        Mode.Totality.submode_err pp
+          (Mode.Totality.of_const Mode.Totality.Const.Partial)
+          (Mode.Value.Comonadic.proj Mode.Axis.Totality comonadic)
+      | Const_closure_lock _ | Region_lock | Exclave_lock | Unboxed_lock -> ())
+    locks
+
 (** Takes [m0] which is the parameter of [let mutable x] at declaration site,
   and [locks] which is the locks between the declaration and the usage (either
   reading or writing) of [x], and:
@@ -4319,7 +4324,6 @@ let add_components slot root env0 comps (locks : locks) =
     implicit_jkinds = env0.implicit_jkinds;
     flags = env0.flags;
     stage = env0.stage;
-    enclosing_totality = env0.enclosing_totality;
     toplevel_scope = env0.toplevel_scope;
   }
 
