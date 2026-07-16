@@ -157,7 +157,8 @@ type t =
   ; (* Watch lists indexed by literal (length [2 * nvars]). *)
     watches : watchlist Dynarray.t
   ; (* The assignment trail and its per-decision-level boundaries. *)
-    trail : lit Dynarray.t
+    mutable trail : int array
+  ; mutable trail_n : int (* used length; entries valid in [0, trail_n) *)
   ; trail_lim : int Dynarray.t
   ; mutable qhead : int (* propagation cursor into [trail] *)
   ; (* Flat clause arena, RAW growable arrays (not [Dynarray]: without flambda a
@@ -537,7 +538,8 @@ let create ?(base_l0_cert_mode = false) () =
   ; heap = Dynarray.create ()
   ; heap_pos = Dynarray.create ()
   ; watches = Dynarray.create ()
-  ; trail = Dynarray.create ()
+  ; trail = [||]
+  ; trail_n = 0
   ; trail_lim = Dynarray.create ()
   ; qhead = 0
   ; a_lits = Array.make 16 0
@@ -642,7 +644,7 @@ let set_theory t th =
   if (not t.ok)
      || Dynarray.length t.clauses <> 0
      || Dynarray.length t.learnts <> 0
-     || Dynarray.length t.trail <> 0
+     || t.trail_n <> 0
   then
     invalid_arg
       "Sat.set_theory: a theory may only be (de)attached on a pristine solver (ok, no \
@@ -1037,7 +1039,7 @@ let attach t (cr : cref) =
 (* ------------------------------------------------------------------ *)
 (* Trail. *)
 
-let new_decision_level t = Dynarray.add_last t.trail_lim (Dynarray.length t.trail)
+let new_decision_level t = Dynarray.add_last t.trail_lim (t.trail_n)
 
 (* The decision level to stamp on a literal being enqueued (task #41 §10.1). Without CB
    ([not t.chrono]) it is always the current [decision_level] — byte-identical to the
@@ -1071,9 +1073,11 @@ let unchecked_enqueue t lit reason =
   let v = var_of_lit lit in
   t.assigns.(v) <- (if sign_of_lit lit then 1 else -1);
   t.level.(v) <- (enqueue_level t reason);
-  t.trail_pos.(v) <- (Dynarray.length t.trail);
+  t.trail_pos.(v) <- (t.trail_n);
   t.reason.(v) <- reason;
-  Dynarray.add_last t.trail lit;
+  t.trail <- grow_int t.trail (t.trail_n + 1);
+  t.trail.(t.trail_n) <- lit;
+  t.trail_n <- t.trail_n + 1;
   (* Trail-extension notify (ADR-0005 §3 on_assign): every literal placed on the trail —
      decision, propagation, assumption, learned unit — streams to the theory, which
      filters for its own atoms. Fires in trail order. We push [lit]'s TRUE level (the
@@ -1116,8 +1120,8 @@ let cancel_until t level =
     if not t.chrono
     then (
       let target = Dynarray.get t.trail_lim level in
-      for i = Dynarray.length t.trail - 1 downto target do
-        let l = Dynarray.get t.trail i in
+      for i = t.trail_n - 1 downto target do
+        let l = t.trail.(i) in
         let v = var_of_lit l in
         (* Phase to save = "was the var false" = [assigns v = -1]. [l] is the trail literal,
            hence the TRUE literal for [v] ([lit_val t l = 1] by the trail invariant); by
@@ -1129,7 +1133,7 @@ let cancel_until t level =
         t.reason.(v) <- r_decision;
         heap_insert t v
       done;
-      Dynarray.truncate t.trail target;
+      t.trail_n <- target;
       Dynarray.truncate t.trail_lim level;
       t.qhead <- target;
       (* Backjump notify (ADR-0005 §3 on_backtrack): the trail is now unwound to decision
@@ -1140,10 +1144,10 @@ let cancel_until t level =
       | Some th -> th.on_backtrack ~level)
     else (
       (* Scattered removal + in-place compaction of survivors (level <= [level]). *)
-      let n = Dynarray.length t.trail in
+      let n = t.trail_n in
       let w = ref 0 in
       for i = 0 to n - 1 do
-        let l = Dynarray.get t.trail i in
+        let l = t.trail.(i) in
         let v = var_of_lit l in
         if t.level.(v) > level
         then (
@@ -1155,11 +1159,11 @@ let cancel_until t level =
           Hashtbl.remove t.chrono_reason v;
           heap_insert t v)
         else (
-          Dynarray.set t.trail !w l;
+          t.trail.(!w) <- l;
           t.trail_pos.(v) <- !w;
           incr w)
       done;
-      Dynarray.truncate t.trail !w;
+      t.trail_n <- !w;
       Dynarray.truncate t.trail_lim level;
       (* F1 — explanation provenance for surviving theory-PROPAGATED literals. The
          theory-seam rebuild below pops the theory to base ([on_backtrack ~level:0]) and
@@ -1182,8 +1186,8 @@ let cancel_until t level =
       (match t.theory with
        | None -> ()
        | Some th ->
-         for i = 0 to Dynarray.length t.trail - 1 do
-           let l = Dynarray.get t.trail i in
+         for i = 0 to t.trail_n - 1 do
+           let l = t.trail.(i) in
            let v = var_of_lit l in
            if t.reason.(v) = r_theory
            then
@@ -1241,9 +1245,10 @@ let cancel_until t level =
            true-level scoping even though this loop still re-drives from base (the
            earliest-removed incremental undo that would exploit the true level is the
            fabric S4 follow-up, not this stage). *)
-        Dynarray.iter
-          (fun l -> th.on_assign l ~level:(t.level.(var_of_lit l)))
-          t.trail)
+        for i = 0 to t.trail_n - 1 do
+          let l = t.trail.(i) in
+          th.on_assign l ~level:(t.level.(var_of_lit l))
+        done)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -1251,8 +1256,8 @@ let cancel_until t level =
 
 let propagate t =
   let confl = ref None in
-  while Option.is_none !confl && t.qhead < Dynarray.length t.trail do
-    let p = Dynarray.get t.trail t.qhead in
+  while Option.is_none !confl && t.qhead < t.trail_n do
+    let p = t.trail.(t.qhead) in
     t.qhead <- t.qhead + 1;
     t.propagations <- t.propagations + 1;
     (* Clauses in [watches.(p)] watch [neg_lit p], which is now false. The list is ONE
@@ -1555,7 +1560,7 @@ let analyze t confl =
   in
   let path_c = ref 0 in
   let p = ref (-1) in
-  let index = ref (Dynarray.length t.trail - 1) in
+  let index = ref (t.trail_n - 1) in
   let c = ref confl in
   (* The level 1UIP resolves down to. Without CB it is the current [decision_level]; under
      CB (task #41 §10.3, Möhle–Biere corrected 1UIP) the conflict clause can be falsified
@@ -1616,16 +1621,16 @@ let analyze t confl =
     if t.chrono
     then
       while
-        let v = var_of_lit (Dynarray.get t.trail !index) in
+        let v = var_of_lit (t.trail.(!index)) in
         not (t.seen.(v) && t.level.(v) = conflict_level)
       do
         decr index
       done
     else
-      while not (t.seen.(var_of_lit (Dynarray.get t.trail !index))) do
+      while not (t.seen.(var_of_lit (t.trail.(!index)))) do
         decr index
       done;
-    let pl = Dynarray.get t.trail !index in
+    let pl = t.trail.(!index) in
     decr index;
     p := pl;
     let vp = var_of_lit pl in
@@ -1787,8 +1792,8 @@ let analyze_final t p =
        core, so skipping them is correct; the [Implied_by]/[Theory_prop] arms already mark
        only [level > 0] premises. *)
     let start = if t.chrono then 0 else Dynarray.get t.trail_lim 0 in
-    for i = Dynarray.length t.trail - 1 downto start do
-      let l = Dynarray.get t.trail i in
+    for i = t.trail_n - 1 downto start do
+      let l = t.trail.(i) in
       let v = var_of_lit l in
       if t.seen.(v) && ((not t.chrono) || t.level.(v) > 0)
       then (
@@ -2357,12 +2362,12 @@ let propagate_theory t =
    vars keep their prior best_phase. Called at a conflict, where the trail is at a local
    maximum. *)
 let update_best_trail t =
-  let tl = Dynarray.length t.trail in
+  let tl = t.trail_n in
   if tl > t.best_trail_len
   then (
     t.best_trail_len <- tl;
     for i = 0 to tl - 1 do
-      let l = Dynarray.get t.trail i in
+      let l = t.trail.(i) in
       (* value true ⇒ decide positive ⇒ polarity false; value false ⇒ polarity true. The
          literal on the trail is the true one, so [not (sign_of_lit l)] is the polarity. *)
       Dynarray.set t.best_phase (var_of_lit l) (not (sign_of_lit l))
@@ -2379,7 +2384,7 @@ let update_best_trail t =
    firehose) blocking never fires, so the rephase impulse is free to search there. *)
 let blocking t =
   t.conflicts - t.conflicts_at_solve_start >= restart_min_conflicts
-  && float_of_int (Dynarray.length t.trail) > block_margin *. t.trail_ema
+  && float_of_int (t.trail_n) > block_margin *. t.trail_ema
 ;;
 
 (* Glucose-style adaptive restart: recent learned-clause LBD (fast EMA) running worse than
@@ -2443,7 +2448,7 @@ let search t assumps conflict_limit =
     (* Best-trail memory + trail-length EMA at the conflict point (the trail is at a local
        maximum), before any realignment/backjump unwinds it (S3/#155). *)
     update_best_trail t;
-    let trail_len = float_of_int (Dynarray.length t.trail) in
+    let trail_len = float_of_int (t.trail_n) in
     t.trail_ema
     <- (if first_conflict
         then trail_len
