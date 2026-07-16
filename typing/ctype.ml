@@ -6420,12 +6420,22 @@ let may_instantiate inst_nongen t1 =
   if inst_nongen then level <> subject_level
                  else level =  generic_level
 
+let is_refined_covariant_seal_target env variance ty =
+  Option.is_some !refinement_seal_context
+  && variance = Covariant
+  && match get_desc (expand_head env ty) with
+     | Trefine _ -> true
+     | _ -> false
+
 let rec moregen inst_nongen variance type_pairs env t1 t2 =
   if eq_type t1 t2 then () else
 
   try
     match (get_desc t1, get_desc t2) with
       (Tvar { jkind }, _) when may_instantiate inst_nongen t1
+                            && not
+                                 (is_refined_covariant_seal_target
+                                    env variance t2)
                             && not (deep_occur t1 t2) ->
         moregen_occur env (get_level t1) t2;
         update_scope_for Moregen (get_scope t1) t2;
@@ -6444,7 +6454,10 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
         if not (TypePairs.mem pairs (t1', t2')) then begin
           TypePairs.add pairs (t1', t2');
           match (get_desc t1', get_desc t2') with
-            (Tvar { jkind }, _) when may_instantiate inst_nongen t1' ->
+            (Tvar { jkind }, _) when may_instantiate inst_nongen t1'
+                                  && not
+                                       (is_refined_covariant_seal_target
+                                          env variance t2') ->
               let t2 = reduce_head ~expand_reducible_abbrevs:false env t2 in
               moregen_occur env (get_level t1') t2;
               update_scope_for Moregen (get_scope t1') t2;
@@ -6564,6 +6577,9 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
             when Option.is_some !refinement_seal_context
                  && variance = Covariant ->
               moregen inst_nongen variance type_pairs env
+              (* Covariant-only: the contravariant analog (bare interface
+                 domain against a refined implementation domain) falls
+                 through and rejects conservatively. *)
                 refinement.ref_skeleton t2'
           | (_, Trefine _)
             when Option.is_some !refinement_seal_context

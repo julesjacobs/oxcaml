@@ -1,0 +1,19 @@
+File "seal_bare_tautology.ml", lines 3-5, characters 6-3:
+3 | ......struct
+4 |   let x = 1
+5 | end
+Error: Signature mismatch:
+       Modules do not match:
+         sig val x : int end
+       is not included in
+         sig val x : int{ (app[Stdlib!.=] _ _) } end
+       Values do not match:
+         val x : int
+       is not included in
+         val x : int{ (app[Stdlib!.=] _ _) }
+       The type int is not compatible with the type
+         int{ (app[Stdlib!.=] _ _) }
+       File "seal_bare_tautology.ml", line 2, characters 2-22:
+         Expected declaration
+       File "seal_bare_tautology.ml", line 4, characters 6-7:
+         Actual declaration
