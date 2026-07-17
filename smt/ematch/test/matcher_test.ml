@@ -487,6 +487,69 @@ let e_multi () =
     (verdict = Session.Unsat)
 ;;
 
+(* E-TRIGGER-COVER: prefer one pattern that covers both binders over the Cartesian
+   product of two one-binder patterns. The 12 f-terms by 12 g-terms exhaust the fixed
+   generation budget under the old {f(x), g(y)} inferred trigger before any instance is
+   returned. Coverage-first inference chooses h(x,y), generates the one relevant instance,
+   and refutes the ground disequality. *)
+let e_trigger_cover_avoids_product () =
+  let s = Session.create ~lemma_gen_budget:100 ~seed_lemmas:false () in
+  let ctx = Session.context s in
+  let u = Sort.uninterpreted (Session.declare_sort s "cover-U") in
+  let unary = Rank.create [ u ] u in
+  let binary = Rank.create [ u; u ] u in
+  let f = Session.declare_fun s "cover-f" unary in
+  let g = Session.declare_fun s "cover-g" unary in
+  let h = Session.declare_fun s "cover-h" binary in
+  let pair = Session.declare_fun s "cover-pair" binary in
+  let a =
+    Array.init 12 (fun i ->
+      Context.const ctx (Session.declare_const s (Printf.sprintf "cover-a-%d" i) u))
+  in
+  let b =
+    Array.init 12 (fun i ->
+      Context.const ctx (Session.declare_const s (Printf.sprintf "cover-b-%d" i) u))
+  in
+  Array.iteri
+    (fun i ai ->
+       Session.assert_term s (Context.eq ctx (Context.app ctx f [ ai ]) ai);
+       Session.assert_term s (Context.eq ctx (Context.app ctx g [ b.(i) ]) b.(i)))
+    a;
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", u; "y", u ]
+       ~build:(fun qv ->
+         let x = Qvar.to_term qv.(0)
+         and y = Qvar.to_term qv.(1) in
+         let fx = Context.app ctx f [ x ] in
+         let gy = Context.app ctx g [ y ] in
+         let body =
+           Context.eq
+             ctx
+             (Context.app ctx h [ x; y ])
+             (Context.app ctx pair [ fx; gy ])
+         in
+         { Session.body; triggers = Trigger.infer ~qvars:qv body })
+     : Session.lemma);
+  let ground_body =
+    Context.eq
+      ctx
+      (Context.app ctx h [ a.(0); b.(0) ])
+      (Context.app
+         ctx
+         pair
+         [ Context.app ctx f [ a.(0) ]; Context.app ctx g [ b.(0) ] ])
+  in
+  Session.assert_term s (Context.not_ ctx ground_body);
+  let verdict = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-TRIGGER-COVER: one covering pattern avoids product budget (got %s)"
+       (verdict_str verdict))
+    (verdict = Session.Unsat)
+;;
+
 (* E-SOUND: the matcher must NOT over-generate a refutation where none exists. forall x.
    f(x) > 0 with trigger f(x); ground f(a) = 5 (consistent with the lemma). The matcher
    generates f(a)>0, consistent, no refutation -> ground sat -> live lemma degrades to
@@ -971,6 +1034,26 @@ let ti_multi () =
     (trigger_is (Trigger.infer ~qvars:qv body) [ fx; gy ])
 ;;
 
+(* TI-COVER: when h(x,y), f(x), and g(y) are all candidates, prefer the one application
+   that covers both binders. The old smallest-first cover chose {f(x), g(y)} and made
+   matching build their Cartesian product. *)
+let ti_cover () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "cover-f" int_to_int in
+  let g = Env.declare_fun sc.env "cover-g" int_to_int in
+  let h = Env.declare_fun sc.env "cover-h" int_int_to_int in
+  let qv = mk_qvars sc ~id:0 2 in
+  let x = Qvar.to_term qv.(0)
+  and y = Qvar.to_term qv.(1) in
+  let fx = Context.app sc.ctx f [ x ] in
+  let gy = Context.app sc.ctx g [ y ] in
+  let hxy = Context.app sc.ctx h [ x; y ] in
+  let body = Context.eq sc.ctx hxy (Context.add sc.ctx fx gy) in
+  check
+    "TI-COVER: infers one all-binder pattern h(x,y)"
+    (trigger_is (Trigger.infer ~qvars:qv body) [ hxy ])
+;;
+
 (* TI-UNREACHABLE: body x + 1 <= 0 — x occurs only inside arithmetic, no UF app covers it,
    so no trigger is inferable ([]). This is the soundness-preserving no-fire case: the
    lemma stays live and a ground Sat degrades to unknown, never a dropped forall. *)
@@ -1015,6 +1098,7 @@ let () =
   e_congruence_snapshot ();
   e_nested ();
   e_multi ();
+  e_trigger_cover_avoids_product ();
   e_sound ();
   e_no_trigger_no_fire ();
   e_det ();
@@ -1027,6 +1111,7 @@ let () =
   ti_single ();
   ti_nested ();
   ti_multi ();
+  ti_cover ();
   ti_unreachable ();
   ti_zero ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;

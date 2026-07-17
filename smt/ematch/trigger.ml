@@ -1,7 +1,8 @@
 (* Auto-trigger inference (ADR-0012 L3, tranche 3). When a lemma carries no explicit
-   [:pattern], infer a trigger from the body by the standard recipe: the SMALLEST
-   uninterpreted-function-headed subterms that together COVER every bound variable. See
-   trigger.mli.
+   [:pattern], infer a trigger from the body by the standard recipe: select
+   uninterpreted-function-headed applications that together cover every bound variable,
+   preferring candidates that reduce the number of conjunctive joins before using term
+   size as the selectivity tie-break. See trigger.mli.
 
    This is purely a COMPLETENESS heuristic (§3): a trigger only decides WHICH ground
    instances the matcher generates, and every instance is a valid consequence of the
@@ -106,35 +107,62 @@ let infer ~qvars body =
   if n = 0
   then [] (* zero-qvar lemma is a ground fact; the matcher fires it without a trigger *)
   else (
-    (* Smallest-first, tag-tiebroken for determinism (I6). *)
+    (* Precompute deterministic static tie-break costs. Coverage is chosen dynamically
+       below; size and tag only decide between candidates with equal marginal coverage. *)
     let cands =
-      List.map (fun c -> c, qvars_in qvars c) (candidates qvars body)
-      |> List.sort (fun (a, _) (b, _) ->
-        let c = Int.compare (size a) (size b) in
+      List.map (fun c -> c, qvars_in qvars c, size c) (candidates qvars body)
+      |> List.sort (fun (a, _, asize) (b, _, bsize) ->
+        let c = Int.compare asize bsize in
         if c <> 0 then c else Int.compare a.Term.tag b.Term.tag)
     in
-    (* Greedy minimal cover: add a candidate only when it covers a still-uncovered qvar. *)
     let covered = Array.make n false in
     let n_covered = ref 0 in
-    let chosen = ref [] in
-    List.iter
-      (fun (c, idxs) ->
-         if !n_covered < n
-         then (
-           let helps = List.exists (fun i -> not covered.(i)) idxs in
-           if helps
-           then (
-             chosen := c :: !chosen;
-             List.iter
-               (fun i ->
-                  if not covered.(i)
-                  then (
-                    covered.(i) <- true;
-                    incr n_covered))
-               idxs)))
-      cands;
+    let gain idxs =
+      List.fold_left (fun count i -> if covered.(i) then count else count + 1) 0 idxs
+    in
+    (* Greedy set cover with the objective in the right order for E-matching: reduce
+       conjunctive joins first by covering as many unbound variables as possible; among
+       equal-coverage candidates prefer the smaller, more selective term. *)
+    let rec choose chosen =
+      if !n_covered = n
+      then Some (List.rev chosen)
+      else (
+        let best =
+          List.fold_left
+            (fun best ((candidate_term, idxs, candidate_size) as candidate) ->
+               let candidate_gain = gain idxs in
+               if candidate_gain = 0
+               then best
+               else (
+                 match best with
+                 | None -> Some (candidate, candidate_gain)
+                 | Some ((best_term, _, best_size), best_gain) ->
+                   if candidate_gain > best_gain
+                      || (candidate_gain = best_gain
+                          && (candidate_size < best_size
+                              || (candidate_size = best_size
+                                  && candidate_term.Term.tag < best_term.Term.tag)))
+                   then Some (candidate, candidate_gain)
+                   else best))
+            None
+            cands
+        in
+        match best with
+        | None -> None
+        | Some ((term, idxs, _), _) ->
+          List.iter
+            (fun i ->
+               if not covered.(i)
+               then (
+                 covered.(i) <- true;
+                 incr n_covered))
+            idxs;
+          choose (term :: chosen))
+    in
     (* Only a trigger that covers EVERY qvar is usable; a partial cover would leave a qvar
        unbound, so the matcher emits nothing anyway (matcher.mli). Return one conjunctive
        multi-trigger, or [] when some qvar is unreachable through UF applications. *)
-    if !n_covered = n then [ List.rev !chosen ] else [])
+    match choose [] with
+    | Some chosen -> [ chosen ]
+    | None -> [])
 ;;

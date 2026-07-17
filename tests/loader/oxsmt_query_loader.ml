@@ -86,7 +86,7 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
             let body, triggers = lem.Parser.build ~skolem (Array.map Qvar.to_term qv) in
             (* ADR-0012 L3 auto-trigger inference, applied at the SMT-LIB front end: a
                lemma the file gave NO [:pattern] (the common case — the public quantified
-               sets rarely ship patterns) gets one inferred from the body (smallest
+               sets rarely ship patterns) gets one inferred from the body (coverage-first
                UF-application subterms covering every qvar). Purely a completeness
                heuristic — every instance is a valid consequence, so it never changes a
                verdict — and an unreachable qvar just yields no trigger (the lemma does

@@ -8,12 +8,14 @@ open Oxsmt_core
 
 (** [infer ~qvars body] is the inferred trigger set for a lemma with binders [qvars] and
     Bool body [body], in the [triggers] shape ({!Lemma.t.triggers}: outer = alternatives,
-    inner = one conjunctive multi-trigger). The recipe: the SMALLEST uninterpreted-
-    function-headed ([App], arity >= 1) subterms of [body] that together cover every qvar,
-    chosen greedily smallest-first (deeper, more specific patterns fire on fewer terms,
-    curbing runaway matching), tag-tiebroken for determinism (I6). Arithmetic/order/
-    equality/boolean nodes are never trigger roots (matcher fragment), though inference
-    recurses THROUGH them to reach UF applications nested inside.
+    inner = one conjunctive multi-trigger). Repeatedly choose the uninterpreted-function-
+    headed ([App], arity >= 1) subterm covering the most not-yet-covered qvars. Ties prefer
+    the smallest term, then its tag for determinism (I6). This favors a single all-binder
+    application over several one-binder applications whose matcher join would construct
+    a Cartesian product, while retaining the smallest nested trigger when candidates
+    cover the same variables. Arithmetic/order/equality/boolean nodes are never trigger
+    roots (matcher fragment), though inference recurses THROUGH them to reach UF
+    applications nested inside.
 
     Returns a single conjunctive multi-trigger [[ t1; ...; tk ]] wrapped as one
     alternative, or [[]] (no trigger) when some qvar occurs only outside any UF
