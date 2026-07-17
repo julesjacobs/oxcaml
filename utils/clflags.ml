@@ -181,7 +181,7 @@ let as_parameter = ref false            (* -as-parameter *)
 let as_argument_for = ref None          (* -as-argument-for *)
 let instantiate = ref false             (* -instantiate *)
 let dump_source = ref false             (* -dsource *)
-let vox_dump_vc_json = ref false        (* -vox-dump-vc-json *)
+let vox_dump_vc_json = ref None         (* -vox-dump-vc-json *)
 let vox_type_only = ref false           (* -vox-type-only *)
 let dump_parsetree = ref false          (* -dparsetree *)
 and dump_typedtree = ref false          (* -dtypedtree *)
@@ -828,7 +828,9 @@ end
 let stop_after = ref None (* -stop-after *)
 
 let should_stop_after pass =
-  if Compiler_pass.(rank Typing <= rank pass) && !print_types then true
+  if Compiler_pass.(rank Typing <= rank pass)
+     && (!print_types || !vox_type_only)
+  then true
   else
     match !stop_after with
     | None -> false
