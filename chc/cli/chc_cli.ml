@@ -46,11 +46,12 @@ let () =
   | Some path ->
     let src = read_file path in
     (* Engine selection (env [OXSMT_CHC_ENGINE]):
-       - [pdr] (or unset legacy): the proven backward search — single-predicate system to
+       - [pdr] OR UNSET (DEFAULT): the proven backward search — single-predicate system to
          the transition-system engine (Chc_engine), multi-predicate to the linear PDR
-         (Chc_pdr);
+         (Chc_pdr). This is the pre-existing dispatch; the new engine is DARK by default
+         so adding this lane does not change the CLI's default verdict on any file;
        - [cegis]: the syntax-guided (Houdini/CEGIS) synthesis engine (Chc_cegis) only;
-       - [portfolio] (DEFAULT): run Chc_cegis first (it catches the
+       - [portfolio] (EXPLICIT opt-in only): run Chc_cegis first (it catches the
          sum/conjunctive-invariant SAFE class that backward PDR generalization diverges
          on) and, if it does not return a definite verdict, fall through to the PDR path.
          Every path is gated by the same independent re-verification firewall, so any
@@ -98,9 +99,9 @@ let () =
     let pf_cegis_effort = env_int "OXSMT_CHC_CEGIS_EFFORT" 6000 in
     let mode =
       match Sys.getenv_opt "OXSMT_CHC_ENGINE" with
-      | Some "pdr" -> `Pdr
+      | Some "pdr" | None -> `Pdr
       | Some "cegis" -> `Cegis
-      | Some "portfolio" | None -> `Portfolio
+      | Some "portfolio" -> `Portfolio
       | Some other -> failwith ("unknown OXSMT_CHC_ENGINE: " ^ other)
     in
     let smt, detail =
