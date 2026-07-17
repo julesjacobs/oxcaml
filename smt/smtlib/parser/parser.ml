@@ -1418,10 +1418,21 @@ and quantifier st ~lets ~qscope ~mk binders body =
   mk (List.map snd fbs) (formula_of_sexp st ~lets ~qscope:qscope' body)
 ;;
 
-(* Read a deferred leaf into a [Term.t] given a binder-id resolver. *)
-let read_qleaf st resolve (q : qleaf) : Term.t =
+(* Read a deferred leaf into a [Term.t]. [lookup] maps a binder id to its image; a binder
+   in the leaf's [q_scope] but NOT referenced by the leaf's s-expression has no image
+   ([None]) and is simply omitted from the read scope — it can never be looked up by
+   [read_term] (its name does not appear), and the clause only mints images for referenced
+   binders. A referenced binder's name DOES appear, so its id is in [q_refs] hence in the
+   clause's universals/Skolems, so [lookup] returns [Some]. *)
+let read_qleaf st lookup (q : qleaf) : Term.t =
   let scope =
-    List.fold_left (fun acc (n, id) -> Scope.add n (resolve id) acc) Scope.empty q.q_scope
+    List.fold_left
+      (fun acc (n, id) ->
+        match lookup id with
+        | Some t -> Scope.add n t acc
+        | None -> acc)
+      Scope.empty
+      q.q_scope
   in
   read_term st scope q.q_sexp
 ;;
@@ -1454,20 +1465,25 @@ let clauses_of_assertion st (s : Sexp.t) : clause list =
         List.iteri
           (fun i (b : Fol.binder) -> Hashtbl.replace tbl b.Fol.id qvar_images.(i))
           cl.Fol.univ;
-        let resolve id =
-          match Hashtbl.find_opt tbl id with
+        let lookup id = Hashtbl.find_opt tbl id in
+        (* A Skolem dependency is a dominating universal, always present in [cl.univ] (the
+           clause keeps every universal a referenced Skolem depends on), so this lookup is
+           total by construction. *)
+        let resolve_dep id =
+          match lookup id with
           | Some t -> t
-          | None -> failwith "Fol lowering: unresolved binder id (internal invariant)"
+          | None ->
+            failwith "Fol lowering: unresolved Skolem dependency (internal invariant)"
         in
         (* Skolem functions/constants resolve AFTER universals (their deps are universals,
            never other Skolems — standard Skolemization), so one pass suffices. *)
         List.iter
           (fun (d : Fol.skolem_descr) ->
-            let args = List.map resolve d.Fol.sk_deps in
+            let args = List.map resolve_dep d.Fol.sk_deps in
             let t = skolem ~cod:d.Fol.sk_binder.Fol.sort ~args in
             Hashtbl.replace tbl d.Fol.sk_binder.Fol.id t)
           cl.Fol.skolems;
-        let term_matrix = Fol.map_atoms (read_qleaf st resolve) cl.Fol.matrix in
+        let term_matrix = Fol.map_atoms (read_qleaf st lookup) cl.Fol.matrix in
         fold_matrix st term_matrix, []
       in
       { cl_qvars; cl_build })
