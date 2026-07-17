@@ -596,6 +596,19 @@ let rec bind_scope_references scope expression =
         Rexp_ifthenelse (recur condition, recur ifso, Option.map recur ifnot);
     }
 
+(* The companion lemma generated for a [let[@vox.def] ...] binding carries a
+   TRUSTED refinement (the compiler asserts [f p1 ... pn = rhs] from [f]'s own
+   checked, total body; the unit body [()] does not prove it).  Its body must
+   therefore not be verified -- doing so would emit an unprovable obligation.
+   The equation still reaches callers as an ordinary fact: the lemma is
+   registered as a dependent definition, so [check_application] deposits the
+   instantiated equation at each [f_def a1 ... an] call site. *)
+let is_def_axiom_binding binding =
+  List.exists
+    (fun (attribute : Parsetree.attribute) ->
+      String.equal attribute.attr_name.txt Vox_defeq.axiom_attribute)
+    binding.vb_attributes
+
 let verification_error ~loc verdict =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"
     (Vox_lean.string_of_verdict verdict)
@@ -850,7 +863,11 @@ let rec walk_expression state expression =
         (List.map (fun binding -> binding.vb_pat) bindings);
       List.iter (register_definition state) bindings
     end;
-    List.iter (fun binding -> walk_expression state binding.vb_expr) bindings;
+    List.iter
+      (fun binding ->
+        if not (is_def_axiom_binding binding) then
+          walk_expression state binding.vb_expr)
+      bindings;
     if rec_flag = Nonrecursive then
       List.iter (register_definition state) bindings;
     List.iter
@@ -1080,7 +1097,11 @@ and walk_value_bindings state ~persist rec_flag bindings =
       bindings;
     List.iter (register_definition state) bindings
   end;
-  List.iter (fun binding -> walk_expression state binding.vb_expr) bindings;
+  List.iter
+    (fun binding ->
+      if not (is_def_axiom_binding binding) then
+        walk_expression state binding.vb_expr)
+    bindings;
   if rec_flag = Nonrecursive then
     List.iter (register_definition state) bindings;
   List.iter

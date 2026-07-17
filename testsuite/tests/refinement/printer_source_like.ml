@@ -40,15 +40,28 @@ type arith = int{ (_ + 1) * 2 = 6 }
 type arith = int{ (_ + 1) * 2 = 6 }
 |}]
 
-(* [mod], [/] and the bitwise operators render infix, not prefix. *)
+(* The bitwise operators render infix, not prefix.  Integer [mod] and [/] are
+   now PARTIAL in the totality mode (definitional-equations Part 1: they trap
+   on a zero divisor), so a predicate using them is rejected at [total] before
+   any printing -- pinned here as the totality-tightening witness. *)
 type modulo = int{ _ mod 2 = 0 }
 [%%expect {|
-type modulo = int{ _ mod 2 = 0 }
+Line 1, characters 21-24:
+1 | type modulo = int{ _ mod 2 = 0 }
+                         ^^^
+Error: The value "\#mod" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 14-32).
 |}]
 
 type divide = int{ _ / 3 = 1 }
 [%%expect {|
-type divide = int{ _ / 3 = 1 }
+Line 1, characters 21-22:
+1 | type divide = int{ _ / 3 = 1 }
+                         ^
+Error: The value "(/)" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 14-30).
 |}]
 
 type bitand = int{ _ land 1 = 1 }

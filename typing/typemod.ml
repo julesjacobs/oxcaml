@@ -3648,6 +3648,7 @@ and type_open_decl_aux ?used_slot ?toplevel ~funct_body names env od =
     open_descr, mode, sg, newenv
 
 and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
+  let sstr = Vox_defeq.expand_structure sstr in
   let names = Signature_names.create () in
   let loc_md = location_of_structure sstr in
   let _, md_mode = register_allocation loc_md in

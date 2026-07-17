@@ -271,6 +271,7 @@
   typeopt
   value_rec_check
   typecore
+  vox_defeq
   solver_intf
   solver
   mode_hint
