@@ -697,6 +697,20 @@ let parser_fail_closed_cases () =
      ^ "(declare-fun p (Int) Bool)\n\
         (assert (or (p 0) (exists ((x Int)) (p x))))\n\
         (check-sat)\n");
+  (* Command-state boundary: the parser returns one assertion batch. Before this guard it
+     accepted all three scripts and the real CLI reported [unsat]: junk arguments still
+     counted as a check, a post-check assertion was moved before the check, and a post-exit
+     assertion was executed even though SMT-LIB terminates at [exit]. Each must instead
+     reach the CLI's parse-failure -> [unknown] path. *)
+  check_malformed
+    ~name:"check-sat-arguments"
+    (hdr ^ "(assert false)\n(check-sat unexpected)\n");
+  check_unsupported
+    ~name:"assert-after-check-sat"
+    (hdr ^ "(check-sat)\n(assert false)\n");
+  check_malformed
+    ~name:"command-after-exit"
+    (hdr ^ "(exit)\n(assert false)\n(check-sat)\n");
   (* Tester-name collision (parser path). A datatype constructor [zero] mints the tester
      function [is-zero]. On the PARSER path a user symbol of that same name can never
      coexist with the tester — [declare_fun]'s redeclaration guard rejects whichever comes

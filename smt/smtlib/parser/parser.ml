@@ -2109,6 +2109,14 @@ let run st sexps =
      instead of to {!lemmas}/{!existentials}; ground (non-quantifier) assertions still
      take the ordinary {!asserts} path. *)
   let clauses = ref [] in
+  (* This reader produces one assertion batch, not an execution trace. Once a check has
+     occurred, accepting another state-changing command would move that command before the
+     check in the returned batch. Likewise, commands after [exit] are never executed by an
+     SMT-LIB interpreter. Track both boundaries so the batch cannot describe a different
+     query from the source document. Declaration/assertion fragments with no [check-sat]
+     remain supported for programmatic parser clients. *)
+  let checked = ref false in
+  let exited = ref false in
   (* Count of assertion content the reader could not represent and DROPPED (partial
      assertion, below). Surfaced on {!t} so the shared loader arms a sentinel lemma when
      [dropped > 0] — the live-lemma soundness rule then degrades any [Sat] to [Unknown],
@@ -2216,6 +2224,27 @@ let run st sexps =
       | Sexp.Atom _ -> malformedf "unexpected top-level atom: %s" (Sexp.to_string cmd)
       | Sexp.List [] -> malformedf "malformed command: ()"
       | Sexp.List (head :: rest) ->
+        if !exited
+        then
+          malformedf
+            "command after (exit): a conformant solver never executes it: %s"
+            (Sexp.to_string cmd);
+        if !checked
+        then (
+          match Sexp.simple head with
+          | Some
+              ( "check-sat"
+              | "exit"
+              | "get-model"
+              | "get-value"
+              | "get-unsat-core"
+              | "set-info"
+              | "set-option" ) -> ()
+          | _ ->
+            unsupportedf
+              "state-changing command after check-sat is not supported by the batch \
+               reader: %s"
+              (Sexp.to_string cmd));
         (match Sexp.simple head, rest with
          | Some "set-logic", [ l ] ->
            (match Sexp.simple l with
@@ -2285,8 +2314,15 @@ let run st sexps =
                is byte-identical. *)
             | exception ((Malformed _ | Unsupported _) as e) ->
               if contains_quantifier body then take body else raise e)
-         | Some "check-sat", _ -> ()
-         | Some "exit", _ -> ()
+         | Some "check-sat", [] ->
+           if !checked
+           then
+             unsupportedf
+               "multiple check-sat commands are not supported by the batch reader";
+           checked := true
+         | Some "check-sat", _ -> malformedf "check-sat expects no arguments"
+         | Some "exit", [] -> exited := true
+         | Some "exit", _ -> malformedf "exit expects no arguments"
          | Some ("push" | "pop"), _ ->
            unsupportedf "incremental push/pop is not supported"
          | Some ("get-model" | "get-value" | "get-unsat-core"), _ -> ()

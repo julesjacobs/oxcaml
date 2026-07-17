@@ -13,6 +13,12 @@
     ground parser additionally accepts exact QF_LRA/QF_UFLRA terms; Real quantification
     remains unsupported.
 
+    The returned assertion list is a single batch, not an execution trace. Documents may
+    omit [check-sat] when used as parser fragments, but after a [check-sat] only inert
+    output/metadata commands and [exit] are accepted; a second check or a state-changing
+    command is {!Unsupported}. [check-sat] and [exit] take no arguments, and no command may
+    follow [exit].
+
     Two failure modes, deliberately distinct (mirroring the gate reader):
     - {!Malformed}: input the reader cannot make sense of as a query — bad s-expr, unknown
       command shape, ill-sorted term, undeclared symbol, wrong arity, a [define-fun]
