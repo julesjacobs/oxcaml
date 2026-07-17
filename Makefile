@@ -852,7 +852,7 @@ test: check-frozen
 ##   miss. Deterministic, budget-bounded (self-terminating).
 chc-test:
 	$(DUNE) build chc/test/chc_test.exe
-	$(DUNE) exec chc/test/chc_test.exe
+	OXSMT_LIA_GCD_CUT=1 $(DUNE) exec chc/test/chc_test.exe
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

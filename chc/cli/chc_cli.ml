@@ -11,7 +11,28 @@ let read_file path =
   s
 ;;
 
+(* Enable the multi-row integer-elimination gcd cut (task #128, [OXSMT_LIA_GCD_CUT]) in
+   every oracle Session this process creates. The shipped LIA theory reads that flag ONCE
+   at module initialization — before [main] runs and before any Session exists — so there
+   is no per-Session knob and a runtime [putenv] cannot take effect in this process. The
+   only freeze-respecting way to turn it on from inside the binary is to set it and
+   re-exec self once (guarded so it happens at most once). The cut closes the raw-Session
+   parity/GCD wall (e.g. the [2q = 2q'+1]-class obligation) whose branch-and-bound
+   otherwise diverges — the oracle wall the modular template was blocked on. *)
+let ensure_gcd_cut () =
+  match Sys.getenv_opt "OXSMT_LIA_GCD_CUT" with
+  | Some _ -> ()
+  | None ->
+    (try
+       Unix.putenv "OXSMT_LIA_GCD_CUT" "1";
+       Unix.execv Sys.executable_name Sys.argv
+     with
+     | Unix.Unix_error _ ->
+       () (* re-exec unavailable: continue with the cut OFF (sound) *))
+;;
+
 let () =
+  ensure_gcd_cut ();
   let verbose = ref false in
   let file = ref None in
   Array.iteri

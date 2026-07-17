@@ -4,4 +4,4 @@
 (executable
  (name chc_cli)
  (modules chc_cli)
- (libraries oxsmt_chc))
+ (libraries oxsmt_chc unix))
