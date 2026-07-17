@@ -1,0 +1,4 @@
+File "cup_neg_result.ml", line 4, characters 35-58:
+4 | let bad (x : int) : int{ _ = x } = Cup_provider.identity 0
+                                       ^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

@@ -1,0 +1,4 @@
+File "cup_neg_sibling.ml", line 5, characters 4-42:
+5 | let bad : int{ _ = 0 } = Cup_provider.fk 0
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

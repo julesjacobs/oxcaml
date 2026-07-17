@@ -1,6 +1,13 @@
+type fact_origin =
+  { kind : string;
+    name : string option;
+    span : Location.t option;
+  }
+
 type fact =
   { expression : Types.refinement_expression;
     location : Location.t option;
+    origin : fact_origin;
   }
 
 type t =
@@ -38,7 +45,11 @@ module Fact_env : sig
   val in_scope : Ident.t -> t -> bool
 
   val add :
-    ?loc:Location.t -> Types.refinement_expression -> t -> t
+    origin:fact_origin ->
+    ?loc:Location.t ->
+    Types.refinement_expression ->
+    t ->
+    t
 
   val facts : t -> fact list
   val scope : t -> Ident.Set.t

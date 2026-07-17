@@ -150,7 +150,8 @@ let interface ~hook_parse_tree ~hook_typed_tree info =
   if Clflags.(should_stop_after Compiler_pass.Parsing) then () else begin
     let alerts, tsg = typecheck_intf info ast in
     hook_typed_tree tsg;
-    if not !Clflags.print_types then begin
+    Vox_verify.finish_dump ();
+    if not (!Clflags.print_types || !Clflags.vox_type_only) then begin
       emit_signature info alerts tsg
     end
   end
@@ -193,6 +194,7 @@ let implementation ~hook_parse_tree ~hook_typed_tree info ~backend =
     if Clflags.(should_stop_after Compiler_pass.Parsing) then () else begin
       let typed = typecheck_impl info parsed in
       hook_typed_tree typed;
+      Vox_verify.finish_dump ();
       if Clflags.(should_stop_after Compiler_pass.Typing) then () else begin
         backend info typed;
       end;

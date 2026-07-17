@@ -638,11 +638,16 @@ module Refinement : sig
       do not perturb interface digests. *)
 
   val map_paths :
+    ?sibling_prefix:Path.t ->
     value_path:(Path.t -> Path.t) ->
     type_path:(Path.t -> Path.t) ->
     t ->
     t
-  (** Rewrite value-reference heads and constructor/field type paths. *)
+  (** Rewrite value-reference heads and constructor/field type paths.
+      [sibling_prefix], when given, requalifies signature-relative sibling
+      references ([Rsibling]/[Rfun]) to that module path -- used when a
+      signature is projected under a module prefix.  Omitted for in-instance
+      substitutions, where siblings stay bare (name-keyed). *)
 
   val subst : id:Ident.t -> by:t -> t -> t
   (** Capture-avoiding substitution of a bound value identifier. *)
@@ -652,6 +657,14 @@ module Refinement : sig
 
   val freshen_desc_binders : refinement_desc -> refinement_desc
   (** Unconditionally freshen the view binder and every predicate binder. *)
+
+  val freshen_free_local_refs : refinement_desc -> refinement_desc
+  (** Freshen every free reference to a bare local [Pident] (a function
+      parameter or unit-local value a predicate mentions) to a globally fresh
+      [Scoped] ident, consistently within the predicate.  Applied on import from
+      a .cmi so a foreign parameter's local stamp cannot collide with a
+      caller-local binder.  [Rsibling]/[Rfun] and module-qualified [Pdot]
+      references are left unchanged. *)
 
   val alpha_equal :
     equal_type:(type_expr -> type_expr -> bool) ->

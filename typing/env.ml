@@ -2405,7 +2405,15 @@ let rec components_of_module_maker
       List.iter (fun ((item : Subst.Lazy.signature_item), path) ->
         match item with
           Sig_value(id, decl, _) ->
-            let decl' = Subst.Lazy.value_description sub decl in
+            (* Requalify signature-relative sibling references in this value's
+               refinement to the module being projected ([cm_path]).  Scoped to
+               this value substitution only: nested modules recurse through
+               [components_of_module] with their own [cm_path], so their siblings
+               get their own deeper prefix rather than this level's. *)
+            let decl' =
+              Subst.Lazy.value_description
+                (Subst.with_sibling_prefix cm_path sub) decl
+            in
             let addr =
               match decl.val_kind with
               | Val_prim _ -> Lazy_backtrack.create_failed primitive_address_error

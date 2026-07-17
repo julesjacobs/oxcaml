@@ -48,6 +48,12 @@ val unsafe : t -> unsafe subst
 val add_type : Ident.t -> Path.t -> 'k subst -> 'k subst
 val add_value : Ident.t -> Path.t -> 'k subst -> 'k subst
 val add_module : Ident.t -> Path.t -> 'k subst -> 'k subst
+
+(** [with_sibling_prefix root s] makes [s] requalify signature-relative sibling
+    references in refinements to [root] (see [Types.Refinement.map_paths]).  Set
+    only at module-projection boundaries; omitted elsewhere so in-instance
+    siblings stay bare. *)
+val with_sibling_prefix : Path.t -> 'k subst -> 'k subst
 val add_modtype : Ident.t -> Path.t -> 'k subst -> 'k subst
 val add_jkind : Ident.t -> Path.t -> t -> t
 

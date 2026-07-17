@@ -1525,11 +1525,27 @@ module Refinement = struct
     in
     map expression
 
-  let map_paths ~value_path ~type_path expression =
+  let map_paths ?sibling_prefix ~value_path ~type_path expression =
+    (* [sibling_prefix] is set only when the enclosing signature is being
+       projected under a module path (see [Subst]/[Env.components_of_module]).
+       A sibling reference is signature-relative -- a bare name in whatever
+       module instance the refinement lives in -- so on projection it must be
+       requalified to that instance's path, exactly as [Rglobal]/[Rapp] paths
+       are; otherwise two instances of one signature (or two signatures sharing
+       a value name) conflate their siblings into a single symbol.  Bare when
+       there is no projection prefix (in-instance verification), where
+       single-context name-keying is already sound. *)
     let map_reference = function
       | Rapp path -> Rapp (value_path path)
       | Rglobal path -> Rglobal (value_path path)
-      | (Rfun _ | Rsibling _) as reference -> reference
+      | Rsibling name ->
+        (match sibling_prefix with
+         | Some root -> Rglobal (Path.Pdot (root, name))
+         | None -> Rsibling name)
+      | Rfun name ->
+        (match sibling_prefix with
+         | Some root -> Rapp (Path.Pdot (root, name))
+         | None -> Rfun name)
     in
     let rec map expression =
       let rexp_desc =
@@ -1852,6 +1868,70 @@ module Refinement = struct
           [refinement.ref_view.rb_id, fresh_view]
           refinement.ref_pred;
     }
+
+  (* Freshen the free references to bare local [Pident]s in a predicate.  Such a
+     reference is a function parameter (or other unit-local value) that a
+     structure-level predicate mentions; it is lowered as [Rfree (Rglobal/Rapp
+     (Pident id))] carrying that unit's local stamp.  Local stamps are only
+     unique within a compilation unit, so when a refinement is imported from
+     another unit its foreign parameter stamp can coincide with a caller-local
+     binder stamp -- and because [Ident.same] compares locals by stamp, the two
+     distinct values would be conflated (a cross-unit soundness hole).  Renaming
+     each such reference to a globally fresh [Scoped] ident on import makes the
+     foreign parameter a unique opaque symbol that cannot be [Ident.same] to any
+     current-unit binder (a [Scoped] ident is never [same] as a [Local] one, and
+     its stamp is fresh regardless), so it can neither be rewritten to a caller
+     binder nor conflated by [Path.same].  [Rsibling]/[Rfun] (name-keyed) and
+     module-qualified [Pdot] references are left untouched.  Renaming is
+     consistent within the predicate (every mention of one foreign parameter
+     maps to the same fresh ident), and it is applied once at import, where the
+     loaded signature is cached, so a unit's parameter reference is stable across
+     all uses in the importing compilation. *)
+  let freshen_free_local_refs refinement =
+    let renaming = ref [] in
+    let fresh_for id =
+      match List.find_opt (fun (old, _) -> Ident.same old id) !renaming with
+      | Some (_, fresh) -> fresh
+      | None ->
+        let fresh = fresh_id id in
+        renaming := (id, fresh) :: !renaming;
+        fresh
+    in
+    let rename_reference = function
+      | Rglobal (Path.Pident id) -> Rglobal (Path.Pident (fresh_for id))
+      | Rapp (Path.Pident id) -> Rapp (Path.Pident (fresh_for id))
+      | (Rglobal _ | Rapp _ | Rfun _ | Rsibling _) as reference -> reference
+    in
+    let rec walk expression =
+      let rexp_desc =
+        match expression.rexp_desc with
+        | Rexp_ident (Rfree reference) ->
+          Rexp_ident (Rfree (rename_reference reference))
+        | (Rexp_ident (Rbound _) | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          Rexp_let
+            ( List.map
+                (fun binding ->
+                  { binding with rbind_expr = walk binding.rbind_expr })
+                bindings,
+              walk body )
+        | Rexp_function function_ ->
+          Rexp_function { function_ with body = walk function_.body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            (walk function_,
+             List.map (fun (label, argument) -> label, walk argument) arguments)
+        | Rexp_tuple fields ->
+          Rexp_tuple (List.map (fun (label, field) -> label, walk field) fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct (constructor, List.map walk arguments)
+        | Rexp_field (record, field) -> Rexp_field (walk record, field)
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse (walk condition, walk ifso, Option.map walk ifnot)
+      in
+      with_desc expression rexp_desc
+    in
+    { refinement with ref_pred = walk refinement.ref_pred }
 
   let equal_constant left right =
     match left, right with

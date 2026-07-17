@@ -4147,7 +4147,8 @@ let type_toplevel_phrase env sig_acc s =
   Typecore.reset_allocations ();
   let (str, sg, mode, to_remove_from_sg, shape, env) =
     type_structure ~toplevel:(Some sig_acc) ~funct_body:false None env s in
-  Vox_verify.verify_structure ~toplevel:true str;
+  if not !Clflags.vox_type_only then
+    Vox_verify.verify_structure ~toplevel:true str;
   Value.submode_err (Location.none, Structure) mode toplevel_mode;
   remove_mode_and_jkind_variables env sg;
   remove_mode_and_jkind_variables_for_toplevel str;
@@ -4467,7 +4468,7 @@ let type_implementation target modulename initial_env ast =
         Profile.record_call "infer" (fun () -> type_structure initial_env ast)
       in
       Profile.record_call "refinement verification" (fun () ->
-        Vox_verify.verify_structure str);
+        if not !Clflags.vox_type_only then Vox_verify.verify_structure str);
       Value.submode_err (Location.in_file sourcefile, Structure)
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
       let uid = Uid.of_compilation_unit_id modulename in
@@ -4475,7 +4476,7 @@ let type_implementation target modulename initial_env ast =
       if !Clflags.binary_annotations_cms then
         cms_register_toplevel_struct_attributes ~sourcefile ~uid ast;
       let simple_sg = Signature_names.simplify finalenv names sg in
-      if !Clflags.print_types then begin
+      if !Clflags.print_types || !Clflags.vox_type_only then begin
         remove_mode_and_jkind_variables finalenv sg;
         let zap_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
@@ -4490,11 +4491,12 @@ let type_implementation target modulename initial_env ast =
         Mode.erase_hints ();
         Typecore.optimise_allocations ();
         let shape = Shape_reduce.local_reduce Env.empty shape in
-        Printtyp.wrap_printing_env ~error:false initial_env
-          Format.(fun () -> fprintf std_formatter "%a@."
-              (Printtyp.printed_signature sourcefile)
-              simple_sg
-          );
+        if !Clflags.print_types then
+          Printtyp.wrap_printing_env ~error:false initial_env
+            Format.(fun () -> fprintf std_formatter "%a@."
+                (Printtyp.printed_signature sourcefile)
+                simple_sg
+            );
         gen_annot target (Cmt_format.Implementation str);
         { structure = str;
           coercion = Tcoerce_none;
@@ -4573,10 +4575,11 @@ let type_implementation target modulename initial_env ast =
           (* It is important to run these checks after the inclusion test above,
              so that value declarations which are not used internally but
              exported are not reported as being unused. *)
-          Profile.record_call "save_cmt" (fun () ->
-            let shape = Shape_reduce.local_reduce Env.empty shape in
-            let annots = Cmt_format.Implementation str in
-            save_cmt_and_cms target annots initial_env None (Some shape));
+          if not !Clflags.vox_dump_vc then
+            Profile.record_call "save_cmt" (fun () ->
+              let shape = Shape_reduce.local_reduce Env.empty shape in
+              let annots = Cmt_format.Implementation str in
+              save_cmt_and_cms target annots initial_env None (Some shape));
           { structure = str;
             coercion;
             shape;
@@ -4623,7 +4626,9 @@ let type_implementation target modulename initial_env ast =
              case, the inferred signature contains only the last declaration. *)
           let shape = Shape_reduce.local_reduce Env.empty shape in
           let alerts = Builtin_attributes.alerts_of_str ~mark:true ast in
-          if not !Clflags.dont_write_files then begin
+          if not !Clflags.dont_write_files
+             && not !Clflags.vox_dump_vc
+          then begin
             let name = Compilation_unit.name modulename in
             let kind =
               Cmi_format.Normal { cmi_impl = modulename; cmi_arg_for = arg_type }
@@ -4647,6 +4652,7 @@ let type_implementation target modulename initial_env ast =
       end
     )
     ~exceptionally:(fun () ->
+      if not !Clflags.vox_type_only then
         Profile.record_call "save_cmt" (fun () ->
           let annots =
             Cmt_format.Partial_implementation
