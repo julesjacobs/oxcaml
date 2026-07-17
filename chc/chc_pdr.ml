@@ -235,11 +235,12 @@ let budget_ref = ref max_int
    query to [Unknown] (budget) so the PDR solve bails to unknown instead of hanging. *)
 let effort_cap = ref 1_000_000
 
-(* Model-based projection predecessor generalization (dark lever [OXSMT_CHC_MBP]). When
-   on, the predecessor cube in [block] (and the initial bad cube in [solve]) is a
-   model-based projection region instead of a model point + octagon differences. Set from
-   the environment once per [solve]; sound in both states (the MBP result is
-   under-approximating and every verdict is independently re-verified). *)
+(* Model-based projection predecessor generalization ([OXSMT_CHC_MBP], default ON;
+   [OXSMT_CHC_MBP=0|false|no] disables). When on, the predecessor cube in [block] (and the
+   initial bad cube in [solve]) is a model-based projection region instead of a model
+   point + octagon differences. Set from the environment once per [solve]; sound in both
+   states (the MBP result is under-approximating and every verdict is independently
+   re-verified). *)
 let use_mbp = ref false
 
 exception Give_up of string
@@ -1556,8 +1557,8 @@ let solve
       | Some b -> b
       | None ->
         (match Sys.getenv_opt "OXSMT_CHC_MBP" with
-         | Some ("0" | "false" | "") | None -> false
-         | Some _ -> true));
+         | Some ("0" | "false" | "no") -> false
+         | _ -> true));
   match build_sys s with
   | exception Not_linear r -> { verdict = Unknown ("not linear: " ^ r); detail = r }
   | sy ->
