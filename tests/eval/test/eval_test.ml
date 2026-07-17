@@ -290,11 +290,129 @@ let overflow_cases () =
     outcome_of "(declare-const x Int)(assert (= (* 2 x) 0))" model)
 ;;
 
+(* --- fixed-width bitvectors: independent denotation + strict model typing ----------- *)
+
+let bitvector_cases () =
+  let inverse =
+    "(set-logic QF_BV)(declare-const x (_ BitVec 8))\n(assert (= (bvadd x #x01) #x00))"
+  in
+  (* The load-bearing model discrimination: the solver's real satisfying assignment is
+     accepted, while changing only its BV payload by one falsifies the ORIGINAL
+     assertion. Before BV evaluator support both models were merely UNSUPPORTED. *)
+  expect_satisfies "bv/model-correct" inverse "(model (const x 255))";
+  expect_fails "bv/model-corrupt" inverse "(model (const x 254))" ~index:0;
+  (* Model values are typed by the declared width. They are never reduced modulo 2^w:
+     both an overflow and a negative payload are loud MALFORMED artifacts. *)
+  expect_malformed "bv/model-out-of-range" inverse "(model (const x 256))";
+  expect_malformed "bv/model-negative" inverse "(model (const x (- 1)))";
+  expect_malformed "bv/model-wrong-type" inverse "(model (const x true))";
+  (* No ordering can launder a conflicting duplicate binding into a valid artifact. *)
+  expect_malformed
+    "bv/model-duplicate-bad-then-good"
+    inverse
+    "(model (const x 254) (const x 255))";
+  expect_malformed
+    "bv/model-duplicate-good-then-bad"
+    inverse
+    "(model (const x 255) (const x 254))";
+  let typed_query =
+    Reader.read_string
+      "(set-logic QF_BV)(declare-const x (_ BitVec 8))(assert (= x #x00))"
+  in
+  let typed_assertion = List.hd typed_query.Reader.assertions in
+  expect_raises "bv/eval-term-wrong-width-is-loud" (fun () ->
+    Eval.eval_term
+      ~env:(fun _ -> Some (Value.BitVec { width = 4; bits = Bigint.zero }))
+      typed_assertion);
+  expect_raises "bv/eval-term-out-of-range-is-loud" (fun () ->
+    Eval.eval_term
+      ~env:(fun _ -> Some (Value.BitVec { width = 8; bits = Bigint.of_int 256 }))
+      typed_assertion);
+  (* Width-changing structure, with a second deliberate corruption. *)
+  let concat_extract =
+    "(set-logic QF_UFBV)\n\
+     (declare-const hi (_ BitVec 4))(declare-const lo (_ BitVec 4))\n\
+     (assert (= (concat hi lo) #xab))\n\
+     (assert (= ((_ extract 7 4) (concat hi lo)) hi))\n\
+     (assert (= ((_ extract 3 0) (concat hi lo)) lo))"
+  in
+  expect_satisfies
+    "bv/concat-extract-correct"
+    concat_extract
+    "(model (const hi 10) (const lo 11))";
+  expect_fails
+    "bv/concat-extract-corrupt"
+    concat_extract
+    "(model (const hi 10) (const lo 10))"
+    ~index:0;
+  (* Operator coverage uses only constants, so a model reader bug cannot mask a semantic
+     bug. These pin modular arithmetic, total division, signed order, and indexed sugar. *)
+  expect_satisfies
+    "bv/bitwise-and-modular"
+    "(set-logic QF_BV)\n\
+     (assert (= (bvnot #x0f) #xf0))\n\
+     (assert (= (bvand #xcc #xaa) #x88))\n\
+     (assert (= (bvor #xcc #xaa) #xee))\n\
+     (assert (= (bvxor #xcc #xaa) #x66))\n\
+     (assert (= (bvnand #xcc #xaa) #x77))\n\
+     (assert (= (bvnor #xcc #xaa) #x11))\n\
+     (assert (= (bvxnor #xcc #xaa) #x99))\n\
+     (assert (= (bvneg #x01) #xff))\n\
+     (assert (= (bvadd #xff #x02) #x01))\n\
+     (assert (= (bvsub #x00 #x02) #xfe))\n\
+     (assert (= (bvmul #x81 #x02) #x02))\n\
+     (assert (= (bvshl #x81 #x01) #x02))\n\
+     (assert (= (bvor #x01 #x02 #x04 #x08) #x0f))"
+    "(model)";
+  expect_satisfies
+    "bv/division-total-and-signed"
+    "(set-logic QF_BV)\n\
+     (assert (= (bvudiv #x12 #x00) #xff))\n\
+     (assert (= (bvurem #x12 #x00) #x12))\n\
+     (assert (= (bvudiv #x13 #x04) #x04))\n\
+     (assert (= (bvurem #x13 #x04) #x03))\n\
+     (assert (= (bvsdiv #x80 #x00) #x01))\n\
+     (assert (= (bvsdiv #xfa #x02) #xfd))\n\
+     (assert (= (bvsrem #xf9 #x03) #xff))\n\
+     (assert (= (bvsmod #xf9 #x03) #x02))\n\
+     (assert (= (bvcomp #x12 #x12) #b1))\n\
+     (assert (= (bvcomp #x12 #x13) #b0))\n\
+     (assert (bvult #x01 #xff))\n\
+     (assert (bvule #x01 #x01))\n\
+     (assert (bvugt #xff #x01))\n\
+     (assert (bvuge #x01 #x01))\n\
+     (assert (bvslt #x80 #x7f))\n\
+     (assert (bvsle #x80 #x80))\n\
+     (assert (bvsgt #x7f #x80))\n\
+     (assert (bvsge #x80 #x80))"
+    "(model)";
+  (* The amount has bit 63 set and does not fit a nonnegative native int. SMT-LIB says
+     it is simply >= width, so logical shifts yield zero and arithmetic shift fills with
+     the sign bit. This is the native-int-trap discrimination for the evaluator. *)
+  expect_satisfies
+    "bv/wide-shift-amount"
+    "(set-logic QF_BV)\n\
+     (assert (= (bvlshr #xffffffffffffffff (_ bv9223372036854775808 \
+     64))#x0000000000000000))\n\
+     (assert (= (bvashr #x8000000000000000 (_ bv9223372036854775808 \
+     64))#xffffffffffffffff))"
+    "(model)";
+  expect_satisfies
+    "bv/indexed-operators"
+    "(set-logic QF_BV)\n\
+     (assert (= ((_ zero_extend 4) #xa) #x0a))\n\
+     (assert (= ((_ sign_extend 4) #xa) #xfa))\n\
+     (assert (= ((_ rotate_left 1) #x81) #x03))\n\
+     (assert (= ((_ rotate_right 1) #x81) #xc0))\n\
+     (assert (= ((_ repeat 2) #b10) #xa))"
+    "(model)"
+;;
+
 (* --- reject-don't-guess (reader / model errors) ----------------------------------- *)
 
 let rejection_cases () =
   expect_raises "reject-unsupported-logic" (fun () ->
-    Reader.read_string "(set-logic QF_BV)");
+    Reader.read_string "(set-logic QF_FP)");
   expect_raises "reject-quantifier" (fun () ->
     Reader.read_string "(declare-const x Int)(assert (forall ((y Int)) (>= y x)))");
   expect_raises "reject-nonlinear" (fun () ->
@@ -473,7 +591,28 @@ let table_format_cases () =
   expect_malformed
     "table/missing-default"
     "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(assert (= (f a) a))"
-    "(model (sort S 1) (const a 0) (fun f (case (0) 0)))"
+    "(model (sort S 1) (const a 0) (fun f (case (0) 0)))";
+  (* Ambiguous table/cardinality artifacts are rejected independently of entry order. *)
+  let f_query =
+    "(declare-sort S 0)(declare-fun f (S) S)(declare-const a S)(assert (= (f a) a))"
+  in
+  expect_malformed
+    "table/duplicate-sort-cardinality"
+    f_query
+    "(model (sort S 1) (sort S 1) (const a 0) (fun f (default 0)))";
+  expect_malformed
+    "table/duplicate-function-binding"
+    f_query
+    "(model (sort S 1) (const a 0) (fun f (default 0)) (fun f (default 0)))";
+  expect_malformed
+    "table/duplicate-function-default"
+    f_query
+    "(model (sort S 1) (const a 0) (fun f (default 0) (default 0)))";
+  expect_malformed
+    "table/duplicate-function-case"
+    f_query
+    "(model (sort S 1) (const a 0)\
+    \  (fun f (default 0) (case (0) 0) (case (0) 0)))"
 ;;
 
 (* --- define-fun as a non-recursive macro (SMT-LIB 2.6 §4.2.2; board #93) ----------- *)
@@ -650,6 +789,7 @@ let () =
   div_mod_matrix ();
   div_mod_boundary ();
   overflow_cases ();
+  bitvector_cases ();
   rejection_cases ();
   r7_completeness_cases ();
   minint_reingest_cases ();

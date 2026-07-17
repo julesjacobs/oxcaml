@@ -17,7 +17,10 @@ open Oxsmt_core
     - [App] with the reserved [div]/[mod] symbols is euclidean:
       [x = d·q + r ∧ 0 ≤ r < |d|]. Any other [App] is looked up in the model — a nullary
       symbol via its constant binding, an applied function via its finite table (first
-      matching case, else the mandatory default).
+      matching case, else the mandatory default). Evaluator-private bitvector [App]s
+      instead use the SMT-LIB fixed-width semantics directly: pointwise bit operations,
+      modular arithmetic, total division/remainder and shifts, signed/unsigned
+      comparisons, concat/extract/extensions, rotations, and repeat.
     - A symbol the model does not define, or a type mismatch, is a loud {!Eval_error} — it
       is never silently defaulted. *)
 

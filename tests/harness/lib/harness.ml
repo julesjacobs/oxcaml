@@ -93,12 +93,19 @@ let int_or_clamp k n =
 
 let parse_counters vs =
   let t =
-    List.filter_map
+    List.map
       (function
-        | Sexp.List [ Sexp.Atom k; Sexp.Atom n ] -> Some (k, int_or_clamp k n)
-        | _ -> None)
+        | Sexp.List [ Sexp.Atom k; Sexp.Atom n ] -> k, int_or_clamp k n
+        | _ -> raise (Bad_output "malformed counter entry"))
       vs
   in
+  let seen = Hashtbl.create 8 in
+  List.iter
+    (fun (key, _) ->
+       if Hashtbl.mem seen key
+       then raise (Bad_output ("duplicate counter " ^ key));
+       Hashtbl.add seen key ())
+    t;
   let get k =
     match List.assoc_opt k t with
     | Some v -> v
@@ -114,12 +121,19 @@ let parse_result sx =
   match sx with
   | Sexp.List (Sexp.Atom "result" :: fields) ->
     let tbl =
-      List.filter_map
+      List.map
         (function
-          | Sexp.List (Sexp.Atom k :: vs) -> Some (k, vs)
-          | _ -> None)
+          | Sexp.List (Sexp.Atom k :: vs) -> k, vs
+          | _ -> raise (Bad_output "malformed result field"))
         fields
     in
+    let seen = Hashtbl.create 8 in
+    List.iter
+      (fun (key, _) ->
+         if Hashtbl.mem seen key
+         then raise (Bad_output ("duplicate result field " ^ key));
+         Hashtbl.add seen key ())
+      tbl;
     let get k = List.assoc_opt k tbl in
     let verdict =
       match get "verdict" with

@@ -13,6 +13,19 @@ type t =
 
 exception Malformed of string
 
+let pow2 width =
+  let rec loop acc base n =
+    if n = 0
+    then acc
+    else
+      loop
+        (if n land 1 = 1 then Bigint.mul acc base else acc)
+        (if n = 1 then base else Bigint.mul base base)
+        (n lsr 1)
+  in
+  loop Bigint.one (Bigint.of_int 2) width
+;;
+
 (* Interpret a raw sidecar token against a target sort. *)
 let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
   let int_of s =
@@ -31,6 +44,16 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
        does not. Anything genuinely out of range (e.g. one past [min_int]) still fails. *)
     | Sexp.List [ Sexp.Atom "-"; Sexp.Atom a ] -> int_of ("-" ^ a)
     | Sexp.Quoted _ | Sexp.List _ -> raise (Malformed "expected an integer value")
+  in
+  let as_nonnegative_bigint = function
+    | Sexp.Atom a ->
+      (match Bigint.of_string a with
+       | n when Bigint.sign n >= 0 -> n
+       | _ -> raise (Malformed "bitvector value must be non-negative")
+       | exception Invalid_argument _ ->
+         raise (Malformed ("not a canonical bitvector numeral: " ^ a)))
+    | Sexp.Quoted _ | Sexp.List _ ->
+      raise (Malformed "expected an unsigned decimal bitvector value")
   in
   match sort with
   | Sort.Bool ->
@@ -52,8 +75,17 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
      into a model for this reader; an array value would be a function graph, not a scalar
      token. Reject rather than mis-parse. *)
   | Sort.Array _ -> raise (Malformed "array-sorted model values are not supported yet")
-  | Sort.BitVec _ ->
-    raise (Malformed "bitvector-sorted model values are not supported yet")
+  | Sort.BitVec width ->
+    let bits = as_nonnegative_bigint s in
+    if Bigint.compare bits (pow2 width) >= 0
+    then
+      raise
+        (Malformed
+           (Printf.sprintf
+              "bitvector value %s is out of range for width %d"
+              (Bigint.to_string bits)
+              width));
+    Value.BitVec { width; bits }
 ;;
 
 let card_check t (sort : Sort.t) (v : Value.t) =
@@ -73,15 +105,19 @@ let card_check t (sort : Sort.t) (v : Value.t) =
 ;;
 
 let parse_const t decls name value_s =
+  if Hashtbl.mem t.consts name || Hashtbl.mem t.funs name
+  then raise (Malformed ("duplicate model binding for " ^ name));
   match Reader.Decls.const_sort decls name with
   | None -> raise (Malformed ("model defines undeclared / non-nullary symbol: " ^ name))
   | Some sort ->
     let v = value_of_token sort value_s in
     card_check t sort v;
-    Hashtbl.replace t.consts name v
+    Hashtbl.add t.consts name v
 ;;
 
 let parse_fun t decls name entries =
+  if Hashtbl.mem t.consts name || Hashtbl.mem t.funs name
+  then raise (Malformed ("duplicate model binding for " ^ name));
   match Reader.Decls.fun_rank decls name with
   | None -> raise (Malformed ("model defines undeclared / non-function symbol: " ^ name))
   | Some rank ->
@@ -101,11 +137,16 @@ let parse_fun t decls name entries =
       let res = value_of_token cod res_s in
       List.iter2 (fun sort v -> card_check t sort v) dom args;
       card_check t cod res;
+      if List.exists (fun (prior, _) -> List.for_all2 Value.equal prior args) !cases
+      then raise (Malformed ("duplicate case arguments for function " ^ name));
       cases := (args, res) :: !cases
     in
     List.iter
       (function
-        | Sexp.List [ Sexp.Atom "default"; v ] -> default := Some (value_of_token cod v)
+        | Sexp.List [ Sexp.Atom "default"; v ] ->
+          if Option.is_some !default
+          then raise (Malformed ("function " ^ name ^ " has duplicate defaults"));
+          default := Some (value_of_token cod v)
         | Sexp.List [ Sexp.Atom "case"; args_s; res_s ] -> parse_case args_s res_s
         | _ -> raise (Malformed ("malformed fun entry for " ^ name)))
       entries;
@@ -113,7 +154,7 @@ let parse_fun t decls name entries =
      | None -> raise (Malformed ("function " ^ name ^ " has no (default ...)"))
      | Some default ->
        card_check t cod default;
-       Hashtbl.replace t.funs name { default; cases = List.rev !cases })
+       Hashtbl.add t.funs name { default; cases = List.rev !cases })
 ;;
 
 let of_string decls (src : string) : t =
@@ -138,8 +179,10 @@ let of_string decls (src : string) : t =
           | Sexp.Atom s | Sexp.Quoted s -> s
           | Sexp.List _ -> raise (Malformed "sort name must be an atom")
         in
+        if Hashtbl.mem t.sort_card name
+        then raise (Malformed ("duplicate cardinality entry for sort " ^ name));
         (match int_of_string_opt card with
-         | Some k when k > 0 -> Hashtbl.replace t.sort_card name k
+         | Some k when k > 0 -> Hashtbl.add t.sort_card name k
          | _ -> raise (Malformed ("sort cardinality must be a positive integer: " ^ card)))
       | _ -> ())
     entries;

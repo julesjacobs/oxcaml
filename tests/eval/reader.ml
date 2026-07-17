@@ -24,17 +24,19 @@ module Decls = struct
     ; funs : (string, Symbol.t * Rank.t) Hashtbl.t
     ; sorts : (string, Sort.t) Hashtbl.t
     ; macros : (string, macro) Hashtbl.t
+    ; bv_mint : Bv_term.minter
       (* [define-fun] names currently mid-expansion — the recursion guard: a macro
            re-entered while already on the expansion stack is a rejected recursive
            definition (define-fun is non-recursive). *)
     ; expanding : (string, unit) Hashtbl.t
     }
 
-  let create () =
+  let create bv_mint =
     { consts = Hashtbl.create 32
     ; funs = Hashtbl.create 32
     ; sorts = Hashtbl.create 16
     ; macros = Hashtbl.create 16
+    ; bv_mint
     ; expanding = Hashtbl.create 8
     }
   ;;
@@ -80,6 +82,79 @@ let is_numeral s =
        s
 ;;
 
+(* The independent evaluator deliberately bounds allocations before constructing a
+   bit-vector term. This matches the shipped parser's default ceiling but is not shared
+   with it: the N-version reader derives and enforces the bound itself. *)
+let max_bv_width = 1 lsl 20
+
+let check_bv_width what width =
+  if width < 1 || width > max_bv_width
+  then
+    raise
+      (Unsupported
+         (Printf.sprintf
+            "%s: bitvector width %d is outside [1,%d]"
+            what
+            width
+            max_bv_width))
+;;
+
+let checked_bv_sum what a b =
+  if a < 1 || b < 0 || b > max_bv_width || a > max_bv_width - b
+  then raise (Unsupported (what ^ ": result width exceeds evaluator limit"));
+  a + b
+;;
+
+let checked_bv_product what a b =
+  if a < 1 || b < 1 || a > max_bv_width / b
+  then raise (Unsupported (what ^ ": result width exceeds evaluator limit"));
+  a * b
+;;
+
+let bv_width_of_term what (t : Term.t) =
+  match t.sort with
+  | Sort.BitVec width -> width
+  | _ -> raise (Malformed (what ^ ": expected a bitvector operand"))
+;;
+
+let bigint_of_radix_digits ~radix ~digit s =
+  let base = Bigint.of_int radix in
+  String.fold_left
+    (fun acc c -> Bigint.add (Bigint.mul acc base) (Bigint.of_int (digit c)))
+    Bigint.zero
+    s
+;;
+
+let bin_digit = function
+  | '0' -> 0
+  | '1' -> 1
+  | c -> raise (Malformed (Printf.sprintf "invalid binary digit %c" c))
+;;
+
+let hex_digit = function
+  | '0' .. '9' as c -> Char.code c - Char.code '0'
+  | 'a' .. 'f' as c -> Char.code c - Char.code 'a' + 10
+  | 'A' .. 'F' as c -> Char.code c - Char.code 'A' + 10
+  | c -> raise (Malformed (Printf.sprintf "invalid hexadecimal digit %c" c))
+;;
+
+let parse_bv_atom ctx decls s =
+  let length = String.length s in
+  if length <= 2 then raise (Malformed "empty bitvector literal");
+  let digits = String.sub s 2 (length - 2) in
+  let bits_per_digit, radix, digit =
+    match s.[1] with
+    | 'b' -> 1, 2, bin_digit
+    | 'x' -> 4, 16, hex_digit
+    | _ -> raise (Malformed ("invalid bitvector literal " ^ s))
+  in
+  let width =
+    checked_bv_product "bitvector literal" (String.length digits) bits_per_digit
+  in
+  let bits = bigint_of_radix_digits ~radix ~digit digits in
+  Bv_term.const ctx decls.Decls.bv_mint ~bits ~width
+;;
+
 (* Build an integer-constant term from a decimal string: native fast path, then
    arbitrary-precision (core-bignum W2) so a >int63 numeral reads without loss. [s] may
    carry a leading '-'. *)
@@ -92,13 +167,52 @@ let const_of_decimal ctx s =
      | exception Invalid_argument _ -> raise (Unsupported ("malformed numeral: " ^ s)))
 ;;
 
-(* Resolve a sort s-expression (Atom name; compound sorts are unsupported). *)
+(* Resolve a sort s-expression. BitVec is the sole supported indexed sort. *)
 let parse_sort decls = function
   | Sexp.Atom name | Sexp.Quoted name ->
     (match Decls.sort_by_name decls name with
      | Some s -> s
      | None -> raise (Malformed ("unknown sort: " ^ name)))
+  | Sexp.List [ Sexp.Atom "_"; Sexp.Atom "BitVec"; Sexp.Atom width_s ] ->
+    (match int_of_string_opt width_s with
+     | Some width ->
+       check_bv_width "(_ BitVec w)" width;
+       Sort.bitvec width
+     | None -> raise (Unsupported "bitvector width does not fit a native integer"))
   | Sexp.List _ -> raise (Unsupported "compound sort")
+;;
+
+let is_bv_operator = function
+  | "bvnot"
+  | "bvand"
+  | "bvor"
+  | "bvxor"
+  | "bvnand"
+  | "bvnor"
+  | "bvxnor"
+  | "bvneg"
+  | "bvadd"
+  | "bvsub"
+  | "bvmul"
+  | "bvudiv"
+  | "bvurem"
+  | "bvsdiv"
+  | "bvsrem"
+  | "bvsmod"
+  | "bvshl"
+  | "bvlshr"
+  | "bvashr"
+  | "bvult"
+  | "bvule"
+  | "bvugt"
+  | "bvuge"
+  | "bvslt"
+  | "bvsle"
+  | "bvsgt"
+  | "bvsge"
+  | "bvcomp"
+  | "concat" -> true
+  | _ -> false
 ;;
 
 let is_operator = function
@@ -141,6 +255,25 @@ let rec parse_term ctx decls (env : (string * Term.t) list) (s : Sexp.t) : Term.
   | Sexp.Atom name -> parse_atom ctx decls env name
   | Sexp.Quoted name -> parse_symbol_ref ctx decls name []
   | Sexp.List [] -> raise (Malformed "empty application ()")
+  | Sexp.List [ Sexp.Atom "_"; Sexp.Atom name; Sexp.Atom width_s ]
+    when String.length name > 2
+         && String.sub name 0 2 = "bv"
+         && is_numeral (String.sub name 2 (String.length name - 2)) ->
+    let width =
+      match int_of_string_opt width_s with
+      | Some width ->
+        check_bv_width "(_ bvN w)" width;
+        width
+      | None ->
+        raise (Unsupported "bitvector literal width does not fit a native integer")
+    in
+    let bits =
+      match Bigint.of_string (String.sub name 2 (String.length name - 2)) with
+      | bits -> bits
+      | exception Invalid_argument _ ->
+        raise (Malformed "invalid decimal bitvector literal")
+    in
+    Bv_term.const ctx decls.Decls.bv_mint ~bits ~width
   | Sexp.List (head :: args) -> parse_app ctx decls env head args
 
 and parse_atom ctx decls env name =
@@ -150,6 +283,8 @@ and parse_atom ctx decls env name =
     (match name with
      | "true" -> Context.bool_const ctx true
      | "false" -> Context.bool_const ctx false
+     | _ when String.starts_with ~prefix:"#b" name || String.starts_with ~prefix:"#x" name
+       -> parse_bv_atom ctx decls name
      | _ when is_numeral name -> const_of_decimal ctx name
      | _ -> parse_symbol_ref ctx decls name [])
 
@@ -231,10 +366,120 @@ and parse_app ctx decls env head args =
   match head with
   | Sexp.Quoted name ->
     parse_symbol_ref ctx decls name (List.map (parse_term ctx decls env) args)
-  | Sexp.List _ -> raise (Malformed "application head is not a symbol")
+  | Sexp.List indexed -> parse_bv_indexed ctx decls env indexed args
+  | Sexp.Atom op when is_bv_operator op -> parse_bv_operator ctx decls env op args
   | Sexp.Atom op when is_operator op -> parse_operator ctx decls env op args
   | Sexp.Atom name ->
     parse_symbol_ref ctx decls name (List.map (parse_term ctx decls env) args)
+
+and parse_bv_indexed ctx decls env indexed args =
+  let one_arg what f =
+    match args with
+    | [ arg ] -> f (parse_term ctx decls env arg)
+    | _ -> raise (Malformed (what ^ " expects one argument"))
+  in
+  let nonnegative what s =
+    match int_of_string_opt s with
+    | Some n when n >= 0 -> n
+    | Some _ -> raise (Malformed (what ^ " index must be non-negative"))
+    | None -> raise (Unsupported (what ^ " index does not fit a native integer"))
+  in
+  match indexed with
+  | [ Sexp.Atom "_"; Sexp.Atom "extract"; Sexp.Atom hi_s; Sexp.Atom lo_s ] ->
+    let hi = nonnegative "extract" hi_s
+    and lo = nonnegative "extract" lo_s in
+    one_arg "extract" (Bv_term.extract ctx decls.Decls.bv_mint ~i:hi ~j:lo)
+  | [ Sexp.Atom "_"; Sexp.Atom "zero_extend"; Sexp.Atom n_s ] ->
+    let n = nonnegative "zero_extend" n_s in
+    one_arg "zero_extend" (fun x ->
+      let width = bv_width_of_term "zero_extend" x in
+      ignore (checked_bv_sum "zero_extend" width n : int);
+      Bv_term.zero_extend ctx decls.Decls.bv_mint ~n x)
+  | [ Sexp.Atom "_"; Sexp.Atom "sign_extend"; Sexp.Atom n_s ] ->
+    let n = nonnegative "sign_extend" n_s in
+    one_arg "sign_extend" (fun x ->
+      let width = bv_width_of_term "sign_extend" x in
+      ignore (checked_bv_sum "sign_extend" width n : int);
+      Bv_term.sign_extend ctx decls.Decls.bv_mint ~n x)
+  | [ Sexp.Atom "_"; Sexp.Atom "rotate_left"; Sexp.Atom n_s ] ->
+    let n = nonnegative "rotate_left" n_s in
+    one_arg "rotate_left" (Bv_term.rotate_left ctx decls.Decls.bv_mint ~n)
+  | [ Sexp.Atom "_"; Sexp.Atom "rotate_right"; Sexp.Atom n_s ] ->
+    let n = nonnegative "rotate_right" n_s in
+    one_arg "rotate_right" (Bv_term.rotate_right ctx decls.Decls.bv_mint ~n)
+  | [ Sexp.Atom "_"; Sexp.Atom "repeat"; Sexp.Atom n_s ] ->
+    let n = nonnegative "repeat" n_s in
+    if n < 1 then raise (Malformed "repeat count must be at least one");
+    one_arg "repeat" (fun x ->
+      let width = bv_width_of_term "repeat" x in
+      ignore (checked_bv_product "repeat" width n : int);
+      Bv_term.repeat ctx decls.Decls.bv_mint ~n x)
+  | _ -> raise (Unsupported "indexed operator is outside the evaluator's BV subset")
+
+and parse_bv_operator ctx decls env op args =
+  let parse = parse_term ctx decls env in
+  let unary bvop =
+    match args with
+    | [ a ] -> Bv_term.unop ctx decls.Decls.bv_mint bvop (parse a)
+    | _ -> raise (Malformed (op ^ " expects one argument"))
+  in
+  let binary bvop =
+    match args with
+    | [ a; b ] -> Bv_term.binop ctx decls.Decls.bv_mint bvop (parse a) (parse b)
+    | _ -> raise (Malformed (op ^ " expects two arguments"))
+  in
+  let left_assoc bvop =
+    match args with
+    | a :: b :: rest ->
+      List.fold_left
+        (fun acc x -> Bv_term.binop ctx decls.Decls.bv_mint bvop acc (parse x))
+        (Bv_term.binop ctx decls.Decls.bv_mint bvop (parse a) (parse b))
+        rest
+    | _ -> raise (Malformed (op ^ " expects at least two arguments"))
+  in
+  match op with
+  | "bvnot" -> unary Bv_term.Not
+  | "bvneg" -> unary Bv_term.Neg
+  | "bvand" -> left_assoc Bv_term.And
+  | "bvor" -> left_assoc Bv_term.Or
+  | "bvxor" -> left_assoc Bv_term.Xor
+  | "bvadd" -> left_assoc Bv_term.Add
+  | "bvmul" -> left_assoc Bv_term.Mul
+  | "bvsub" -> binary Bv_term.Sub
+  | "bvudiv" -> binary Bv_term.Udiv
+  | "bvurem" -> binary Bv_term.Urem
+  | "bvsdiv" -> binary Bv_term.Sdiv
+  | "bvsrem" -> binary Bv_term.Srem
+  | "bvsmod" -> binary Bv_term.Smod
+  | "bvshl" -> binary Bv_term.Shl
+  | "bvlshr" -> binary Bv_term.Lshr
+  | "bvashr" -> binary Bv_term.Ashr
+  | "bvult" -> binary Bv_term.Ult
+  | "bvule" -> binary Bv_term.Ule
+  | "bvugt" -> binary Bv_term.Ugt
+  | "bvuge" -> binary Bv_term.Uge
+  | "bvslt" -> binary Bv_term.Slt
+  | "bvsle" -> binary Bv_term.Sle
+  | "bvsgt" -> binary Bv_term.Sgt
+  | "bvsge" -> binary Bv_term.Sge
+  | "bvcomp" -> binary Bv_term.Comp
+  | "bvnand" -> binary Bv_term.Nand
+  | "bvnor" -> binary Bv_term.Nor
+  | "bvxnor" -> binary Bv_term.Xnor
+  | "concat" ->
+    (match args with
+     | [ hi; lo ] ->
+       let hi = parse hi
+       and lo = parse lo in
+       ignore
+         (checked_bv_sum
+            "concat"
+            (bv_width_of_term "concat" hi)
+            (bv_width_of_term "concat" lo)
+          : int);
+       Bv_term.concat ctx decls.Decls.bv_mint hi lo
+     | _ -> raise (Malformed "concat expects two arguments"))
+  | _ -> raise (Unsupported ("bitvector operator " ^ op))
 
 and parse_operator ctx decls env op args =
   let p = parse_term ctx decls env in
@@ -341,7 +586,7 @@ type query =
   }
 
 let logic_ok = function
-  | "QF_UF" | "QF_LIA" | "QF_UFLIA" | "QF_IDL" | "QF_RDL" -> true
+  | "QF_UF" | "QF_LIA" | "QF_UFLIA" | "QF_IDL" | "QF_RDL" | "QF_BV" | "QF_UFBV" -> true
   | _ -> false
 ;;
 
@@ -354,9 +599,12 @@ let status_of_string = function
 
 let read_string (src : string) : query =
   let sexps = Sexp.parse_all src in
-  let env = Env.create () in
+  let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  let decls = Decls.create () in
+  let bv_minter =
+    Internal_minter.create ~admit:Bv_term.is_name cap env |> Internal_minter.mint
+  in
+  let decls = Decls.create bv_minter in
   let assertions = ref [] in
   let status = ref No_status in
   let stopped = ref false in

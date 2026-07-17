@@ -852,8 +852,10 @@ spine:
 test: check-frozen
 	$(DUNE) build tests/harness/run_harness.exe tests/harness/stub_solver.exe \
 	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
-	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
+	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- \
+	  $(EVAL) $(CASES)/bool_or_sat.smt2 $(FIXTURES)/bv_model_sat.smt2
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
+	$(MAKE) eval-test
 	$(MAKE) core-test
 	$(MAKE) combine-test
 	$(MAKE) chrono-test

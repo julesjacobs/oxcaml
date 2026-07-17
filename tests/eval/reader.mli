@@ -1,7 +1,8 @@
 open Oxsmt_core
 
-(** An independent, fresh-from-grammar SMT-LIB2 reader for the QF_UFLIA subset (N-version
-    redundancy, task #74 — deliberately NOT the shipped [oxsmt_smtlib] parser nor the
+(** An independent, fresh-from-grammar SMT-LIB2 reader for the QF_UFLIA and QF_BV
+    subsets (N-version redundancy, task #74 — deliberately NOT the shipped
+    [oxsmt_smtlib] parser nor the
     gate's reader; it shares no code with them). It builds frozen-API {!Term.t}s through
     {!Context}'s smart constructors, so every term it returns is well-sorted and
     hash-consed by construction, and records enough declaration info for {!Eval_model} to
@@ -11,7 +12,8 @@ open Oxsmt_core
     ill-formed / ill-sorted / undeclared input raises {!Malformed}. Nothing is silently
     reinterpreted.
 
-    Subset. Commands: [set-logic] (QF_UF / QF_LIA / QF_UFLIA / QF_IDL / QF_RDL),
+    Subset. Commands: [set-logic] (QF_UF / QF_LIA / QF_UFLIA / QF_IDL / QF_RDL /
+    QF_BV / QF_UFBV),
     [set-info :status], [declare-sort] (arity 0), [declare-fun], [declare-const],
     [assert], [check-sat], [exit]; [set-option] and non-[:status] [set-info] are ignored.
     [define-fun] is supported as a non-recursive macro (SMT-LIB 2.6 §4.2.2): its body is
@@ -28,8 +30,12 @@ open Oxsmt_core
     Terms: [true]/[false], numerals, [and]/[or]/[not]/[=>], [ite], [=]/[distinct],
     chainable [<=]/[<]/[>=]/[>], [+]/[-]/[*] (linear only), [div]/[mod]/[abs], parallel
     [let], [(! t ...)] annotations (attributes dropped), [|quoted symbols|], declared
-    symbols, and [define-fun] applications. Quantifiers, [push]/[pop], and compound sorts
-    are {!Unsupported}. *)
+    symbols, and [define-fun] applications. The fixed-width subset adds [(_ BitVec w)],
+    [#b]/[#x]/[(_ bvN w)] literals, bitwise and modular arithmetic, total shifts and
+    division/remainder, signed and unsigned comparisons, concat/extract/extensions,
+    rotations, and repeat. These terms use an evaluator-private symbol vocabulary and do
+    not consult the solver's parser, bitvector classifier, or evaluator. Quantifiers,
+    [push]/[pop], and compound sorts other than [BitVec] are {!Unsupported}. *)
 
 type status =
   | Sat

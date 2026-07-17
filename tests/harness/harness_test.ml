@@ -361,6 +361,33 @@ let () =
     (match parse_solver_output "(result (verdict sat))" with
      | Error _ -> true
      | Ok _ -> false);
+  check
+    "parse_solver_output rejects duplicate model fields"
+    (match
+       parse_solver_output
+         "(result (verdict sat) (model ((x 255))) (model ((x 254)))\
+          (counters (conflicts 0) (decisions 0) (propagations 0)))"
+     with
+     | Error _ -> true
+     | Ok _ -> false);
+  check
+    "parse_solver_output rejects duplicate verdict fields"
+    (match
+       parse_solver_output
+         "(result (verdict sat) (verdict unsat)\
+          (counters (conflicts 0) (decisions 0) (propagations 0)))"
+     with
+     | Error _ -> true
+     | Ok _ -> false);
+  check
+    "parse_solver_output rejects duplicate counters"
+    (match
+       parse_solver_output
+         "(result (verdict sat)\
+          (counters (conflicts 0) (conflicts 1) (decisions 0) (propagations 0)))"
+     with
+     | Error _ -> true
+     | Ok _ -> false);
   (* expected_statuses tracks the in-effect :status per check-sat. *)
   check
     "expected_statuses reads status + counts check-sats"
@@ -376,7 +403,7 @@ let () =
      emits sat with the wrong model — is driven RED through evaluate. Skipped (with a
      note) for a bare `dune exec` without args, so the pure checks still stand alone. *)
   (match Array.to_list Sys.argv with
-   | _ :: eval_bin :: case_smt2 :: _ ->
+   | _ :: eval_bin :: case_smt2 :: rest ->
      (* bool_or_sat: (or p q) and (not q); q=true violates (not q). *)
      let good = Flat [ "p", "true"; "q", "false" ] in
      let bad = Flat [ "p", "false"; "q", "true" ] in
@@ -409,7 +436,38 @@ let () =
              ~solver_result:(Ok [ sat_of bad ])
              ~eval_outcomes:[ eo_bad ]
              ())
-            .outcome)
+            .outcome);
+     (* Same full path at the BV seam. The correct 8-bit assignment is 255; changing
+        only the transported payload to 254 must make the independent evaluator reject
+        it and the harness classify the solver output as unsound. *)
+     (match rest with
+      | bv_case_smt2 :: _ ->
+        let good = Flat [ "x", "255" ] in
+        let bad = Flat [ "x", "254" ] in
+        let good_eval = Harness.run_eval ~eval_bin ~smt2:bv_case_smt2 ~model:good in
+        let bad_eval = Harness.run_eval ~eval_bin ~smt2:bv_case_smt2 ~model:bad in
+        check
+          "e2e-bv: eval accepts the correct fixed-width model"
+          (match good_eval with
+           | Eval_satisfies -> true
+           | _ -> false);
+        check
+          "e2e-bv: eval rejects the one-bit-corrupted model"
+          (match bad_eval with
+           | Eval_fails _ -> true
+           | _ -> false);
+        check
+          "e2e-bv: harness rejects a sat carrying the corrupted BV model"
+          (is_unsound
+             (evaluate
+                ~path:bv_case_smt2
+                ~expected_statuses:[ Some Sat ]
+                ~golden:(Some (produced_text [ sat_of bad ]))
+                ~solver_result:(Ok [ sat_of bad ])
+                ~eval_outcomes:[ bad_eval ]
+                ())
+               .outcome)
+      | [] -> Printf.printf "  note: BV e2e eval checks skipped (no BV case arg)\n")
    | _ -> Printf.printf "  note: e2e eval checks skipped (no eval-bin/case args)\n");
   if !failures = 0
   then Printf.printf "harness self-test: all checks passed\n"

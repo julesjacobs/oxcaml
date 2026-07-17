@@ -5,9 +5,9 @@
     Lexical rules covered (the QF_UFLIA subset + the model sidecar): parentheses,
     whitespace separation, [;]-to-end-of-line comments, and [|quoted symbols|]. A quoted
     symbol is kept distinct from an ordinary atom so a symbol literally named [and] or
-    [Int] can never be read as the operator/sort of the same spelling. Strings, [#]-radix
-    numerals, and [:] keywords-with-values beyond bare [:kw] tokens are out of scope
-    (rejected loudly). *)
+    [Int] can never be read as the operator/sort of the same spelling. Bitvector [#b]/[#x]
+    literals remain ordinary atoms and are validated by {!Reader}. Strings and
+    [:] keywords-with-values beyond bare [:kw] tokens are out of scope (rejected loudly). *)
 
 type t =
   | Atom of string (* an unquoted token: operator, keyword, numeral, or plain symbol *)

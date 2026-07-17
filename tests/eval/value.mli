@@ -1,11 +1,15 @@
 open Oxsmt_core
 
-(** A semantic value in the model domain (task board #74). Three kinds, one per {!Sort.t}
+(** A semantic value in the model domain (task board #74). Four kinds, one per supported
+    {!Sort.t}
     family:
 
     - [Bool] for [Sort.bool];
     - [Int] for [Sort.int] (mathematical ℤ, held in a native [int]; arithmetic that would
       leave native range is a loud failure in {!Eval}, never a wraparound — I8 spirit);
+    - [BitVec { width; bits }] for [Sort.BitVec width], with [bits] the canonical unsigned
+      value in [[0, 2^width)]. Model parsing rejects an out-of-range value rather than
+      reducing it modulo the width;
     - [Uninterp (sort, id)] for an [Uninterpreted] sort of cardinality [k]: [id] is the
       element index in [0, k). Two uninterpreted values are equal iff they share the sort
       and the index. *)
@@ -13,6 +17,10 @@ open Oxsmt_core
 type t =
   | Bool of bool
   | Int of int
+  | BitVec of
+      { width : int
+      ; bits : Bigint.t
+      }
   | Uninterp of Sort.t * int
 
 (** Structural value equality. Distinct constructors compare unequal (well-sorted terms

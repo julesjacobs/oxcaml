@@ -4,7 +4,9 @@ open Oxsmt_core
     and the gate's [.model] shape). A model assigns:
 
     - each nullary symbol a value: [(const x 3)], [(const p true)], [(const a 0)] (the
-      last an element index of an uninterpreted sort);
+      last an element index of an uninterpreted sort). A bitvector binding uses its
+      canonical unsigned decimal value and is checked against the symbol's declared
+      width; it is never silently reduced modulo that width;
     - each function symbol a finite table with a mandatory default:
       [(fun f (default 0) (case (0) 0) (case (1) 0))];
     - optionally, uninterpreted-sort cardinalities: [(sort S 2)] (recorded for range
@@ -36,7 +38,9 @@ val lookup_fun : t -> Symbol.t -> fun_table option
 
 (** Declared cardinality of an uninterpreted sort by name, if the model supplies a
     [(sort S k)] entry. Present entries always have [k >= 1] (a [(sort S 0)] is rejected
-    at parse time per the ADR empty-sort rule); [None] means no entry was supplied. Used
+    at parse time per the ADR empty-sort rule); [None] means no entry was supplied.
+    Duplicate bindings, defaults, function cases, or sort-cardinality entries are
+    malformed rather than silently resolved by ordering. Used
     by the formula-completeness check ({!Eval.check}) to require a cardinality entry for
     every uninterpreted sort the assertions use. *)
 val sort_card : t -> string -> int option
