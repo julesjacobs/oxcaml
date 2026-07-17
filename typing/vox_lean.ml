@@ -17,6 +17,10 @@ type result =
   { verdict : verdict;
     location : Location.t;
     detail : string option;
+    (* Display-only: fact indices the discharged proof did not reference (from
+       Lean's [unusedVariables] linter).  Empty on any non-proved verdict, and
+       whenever the linter is silent -- so a fact defaults to "used". *)
+    unused_facts : int list;
   }
 
 let string_of_verdict = function
@@ -1045,11 +1049,20 @@ let emit_data context buffer data =
       fields;
     Buffer.add_string buffer "deriving DecidableEq\n\n"
 
-let emit_internal ~negated ~env (vc : Vox_vc.t) =
+let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   let context = { env; data = []; references = [] } in
   let variables = collect context vc in
   let buffer = Buffer.create 1024 in
-  Buffer.add_string buffer "set_option autoImplicit false\n\n";
+  Buffer.add_string buffer "set_option autoImplicit false\n";
+  (* Enabling the linter only affects diagnostics, never the exit status, so
+     the verdict is unchanged; the captured warnings feed the display-only
+     unused-fact fade.  The option replaces the blank separator line (rather
+     than adding a line) so the theorem keeps its line number: any Lean line
+     numbers embedded in a failure detail are unperturbed, and the [linter =
+     false] emission stays byte-identical to before. *)
+  if linter then
+    Buffer.add_string buffer "set_option linter.unusedVariables true\n"
+  else Buffer.add_char buffer '\n';
   List.sort
     (fun left right -> String.compare left.data_key right.data_key)
     context.data
@@ -1133,7 +1146,7 @@ let read_output filename =
       really_input_string channel length)
 
 type process_result =
-  | Process_succeeded
+  | Process_succeeded of string
   | Process_failed of string
   | Process_timed_out of string
 
@@ -1158,7 +1171,7 @@ let run_lean ~lean ~timeout_seconds contents =
       let status = Sys.command command in
       let detail = read_output output in
       match status with
-      | 0 -> Process_succeeded
+      | 0 -> Process_succeeded detail
       | 124 | 137 -> Process_timed_out detail
       | _ -> Process_failed detail)
 
@@ -1176,9 +1189,44 @@ let automation_failed detail =
   contains detail "`grind` failed"
   || contains detail "tactic 'grind' failed"
 
+(* Scan Lean's [unusedVariables] linter warnings for fact binders the proof
+   did not reference.  Each fact is emitted as [(h_N : ...)] and the linter
+   prints [Variable name `h_N` is not explicitly referenced.] when grind closed
+   the goal without it.  We match [h_<digits>] strictly (scope variables and
+   other binders are never faded) and require the exact suffix so an unrelated
+   warning can never fade a used fact -- when in doubt the fact stays used. *)
+let parse_unused_facts output =
+  let marker = "Variable name `h_" in
+  let marker_length = String.length marker in
+  let suffix = "` is not explicitly referenced" in
+  let suffix_length = String.length suffix in
+  let length = String.length output in
+  let rec loop index acc =
+    if index + marker_length > length then List.rev acc
+    else if String.sub output index marker_length = marker then begin
+      let digits_start = index + marker_length in
+      let cursor = ref digits_start in
+      while
+        !cursor < length && output.[!cursor] >= '0' && output.[!cursor] <= '9'
+      do
+        incr cursor
+      done;
+      if
+        !cursor > digits_start
+        && !cursor + suffix_length <= length
+        && String.sub output !cursor suffix_length = suffix
+      then
+        let n = int_of_string (String.sub output digits_start (!cursor - digits_start)) in
+        loop (!cursor + suffix_length) (n :: acc)
+      else loop (index + 1) acc
+    end
+    else loop (index + 1) acc
+  in
+  loop 0 []
+
 let discharge ?lean ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
-  let result verdict ?detail () =
-    { verdict; location = vc.Vox_vc.location; detail }
+  let result verdict ?detail ?(unused_facts = []) () =
+    { verdict; location = vc.Vox_vc.location; detail; unused_facts }
   in
   if timeout_seconds <= 0 then
     result Solver_error ~detail:"timeout must be positive" ()
@@ -1190,18 +1238,19 @@ let discharge ?lean ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
     | Some lean ->
       begin
         try
-          match emit_internal ~negated:false ~env vc with
+          match emit_internal ~negated:false ~linter:true ~env vc with
           | contents ->
             begin
               match run_lean ~lean ~timeout_seconds contents with
-              | Process_succeeded -> result Proved ()
+              | Process_succeeded detail ->
+                result Proved ~unused_facts:(parse_unused_facts detail) ()
               | Process_timed_out detail ->
                 result Solver_error ~detail ()
               | Process_failed detail when automation_failed detail ->
                 let negated = emit_internal ~negated:true ~env vc in
                 begin
                   match run_lean ~lean ~timeout_seconds negated with
-                  | Process_succeeded -> result Disproved ~detail ()
+                  | Process_succeeded _ -> result Disproved ~detail ()
                   | Process_failed negated_detail
                     when automation_failed negated_detail ->
                     result Not_proved ~detail ()
@@ -1217,6 +1266,7 @@ let discharge ?lean ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
           { verdict = Solver_error;
             location = error.location;
             detail = Some error.message;
+            unused_facts = [];
           }
         | exception_ ->
           result Solver_error ~detail:(Printexc.to_string exception_) ()
