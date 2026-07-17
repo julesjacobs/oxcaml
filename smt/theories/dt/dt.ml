@@ -395,6 +395,49 @@ let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
       r)
 ;;
 
+(* Recover only the constructor-distinctness conflict that {!build_witnesses_raw} would
+   choose in the current class structure. The scan deliberately uses the same
+   registration order, canonical witness choice, and first-clash stop as the production
+   check. Even then it makes no claim unless the e-graph explanation, flattened and
+   deduplicated exactly as {!conflict_of} does, is byte-for-byte the caller's emitted
+   premise list. Thus an injectivity, tester, selector, occurs-check, or unrelated EUF
+   conflict remains unwitnessed rather than being mislabeled as constructor
+   distinctness. *)
+let constructor_clash_for_premises t premises =
+  let witnesses = Hashtbl.create 64 in
+  let stopped = ref false in
+  let result = ref None in
+  List.iter
+    (fun cterm ->
+       if not !stopped
+       then (
+         let k = Euf.class_of t.engine cterm in
+         match Hashtbl.find_opt witnesses k with
+         | None -> Hashtbl.replace witnesses k cterm
+         | Some wterm ->
+           let cs = fst (Option.get (head_args cterm)) in
+           let ws = fst (Option.get (head_args wterm)) in
+           if not (Symbol.equal cs ws)
+           then (
+             stopped := true;
+             match
+               Defs.constructor_of_sym !(t.reg) cs,
+               Defs.constructor_of_sym !(t.reg) ws
+             with
+             | Some (cdt, _), Some (wdt, _)
+               when Symbol.equal cdt.Defs.sort_sym wdt.Defs.sort_sym ->
+               let explained =
+                 dedup_lits (lits_of_prems (Euf.explain t.engine cterm wterm))
+               in
+               if List.equal Lit.equal explained premises
+               then result := Some (cterm, wterm)
+             | Some _, Some _ | None, _ | _, None -> ())
+           else if cterm.Term.tag < wterm.Term.tag
+           then Hashtbl.replace witnesses k cterm))
+    (List.rev t.ctor_terms);
+  !result
+;;
+
 let witness_of t witnesses x = Hashtbl.find_opt witnesses (Euf.class_of t.engine x)
 
 (* One saturation round: inject field equalities (injectivity), selector evaluations, and

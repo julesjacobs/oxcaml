@@ -46,6 +46,17 @@ val push : t -> unit
 val pop : t -> int -> unit
 val model : t -> Model.t
 
+(** [constructor_clash_for_premises t premises] returns two applications of distinct
+    constructors of the same datatype when they are equal in [t]'s current congruence
+    closure and the engine's explanation for that equality is exactly [premises] after
+    the same deduplication used by {!check}. This is a conservative certificate query:
+    it returns [None] for every other datatype conflict, including injectivity and
+    acyclicity. It does not mutate the theory. *)
+val constructor_clash_for_premises
+  :  t
+  -> Lit.t list
+  -> (Term.t * Term.t) option
+
 (** A model value for a datatype term, as a constructor tree the §8 self-check evaluator
     checks against the formula (GOALS: "a model with actual constructor trees"). A leaf is
     a non-datatype value (an [Int]/[Bool]/uninterpreted witness) or a nullary constructor;

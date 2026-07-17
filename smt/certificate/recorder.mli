@@ -35,6 +35,17 @@ type lia_conflict_witness = { premises : lia_premise list }
     re-derives EUF validity from the separate {!atom_event} statement map. *)
 type euf_leaf_witness = { clause : Sat.lit list }
 
+(** A datatype constructor-distinctness claim for one materialized [Conflict] leaf.
+    [left]/[right] are the two constructor applications claimed equal by the negated
+    clause. The datatype declaration that gives those symbols their constructor meaning
+    is stored separately in {!theory_event.dt_registry}; the checker re-derives equality
+    from the authoritative {!atom_event} statement map. *)
+type dt_distinctness_witness =
+  { clause : Sat.lit list
+  ; left : Oxsmt_core.Term.t
+  ; right : Oxsmt_core.Term.t
+  }
+
 (** The arithmetic meaning assigned to one SAT theory variable. This belongs to the
     certificate statement, not to an individual Farkas proof: the checker rejects
     duplicate/rebound variables and requires every witness premise to resolve here. *)
@@ -67,6 +78,8 @@ type theory_event =
   ; role : Sat.theory_clause_role
   ; lia_witness : lia_conflict_witness option
   ; euf_witness : euf_leaf_witness option
+  ; dt_registry : Oxsmt_core.Datatype_defs.t option
+  ; dt_witness : dt_distinctness_witness option
   }
 
 type t
@@ -91,6 +104,18 @@ val record_lia_conflict
     matched to frozen-seam theory events by exact clause content; the checker treats every
     attached claim as a hard proof obligation. *)
 val record_euf_leaf : t -> clause:Sat.lit list -> unit
+
+(** Record a conservative claim that [clause] is contradictory because [left] and
+    [right] are distinct constructors of one datatype. [registry] is certificate
+    statement data, kept outside the witness. Claims bind to frozen-seam events by exact
+    clause content, as EUF claims do. *)
+val record_dt_distinctness
+  :  t
+  -> registry:Oxsmt_core.Datatype_defs.t
+  -> clause:Sat.lit list
+  -> left:Oxsmt_core.Term.t
+  -> right:Oxsmt_core.Term.t
+  -> unit
 
 (** Record a theory atom's authoritative SAT-variable binding at internalization time. *)
 val record_theory_atom : t -> var:Sat.var -> atom:Oxsmt_core.Term.t -> unit

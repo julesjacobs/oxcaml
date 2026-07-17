@@ -26,6 +26,7 @@ module Env = Oxsmt_core.Env
 module Rank = Oxsmt_core.Rank
 module Sort = Oxsmt_core.Sort
 module Term = Oxsmt_core.Term
+module Defs = Oxsmt_core.Datatype_defs
 module Rational = Oxsmt_lia.Rational
 
 let checks = ref 0
@@ -360,6 +361,9 @@ let lia_farkas_conflict () =
        { Cdclt.on_theory_atom =
            (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -415,6 +419,9 @@ let euf_congruence_conflict () =
        { Cdclt.on_theory_atom =
            (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -453,6 +460,9 @@ let euf_congruence_reason () =
        { Cdclt.on_theory_atom =
            (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -473,6 +483,169 @@ let euf_congruence_reason () =
     (Context.or_ ctx [ Context.not_ ctx fab; Context.not_ ctx p ]);
   check "euf-reason: solve unsat" (Session.check_sat s = Session.Unsat);
   Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+(* End-to-end datatype constructor-distinctness leaf. The asserted equality [red=green]
+   is a genuine DT Conflict, not an EUF conflict: Cdclt conservatively records the two
+   constructor terms, while Checker independently rebuilds equality/congruence from the
+   atom statement and reads distinctness from the separately recorded DT declaration. *)
+let dt_distinctness_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let color = Sort.datatype_ (Session.declare_sort s "cert_dt_color") in
+  let datatype =
+    Session.declare_datatype
+      s
+      color
+      [ { Session.ctor_name = "cert_dt_red"; fields = [] }
+      ; { Session.ctor_name = "cert_dt_green"; fields = [] }
+      ]
+  in
+  let constructor index =
+    let descriptor = List.nth datatype.Defs.constructors index in
+    Context.const ctx descriptor.Defs.sym
+  in
+  let red = constructor 0
+  and green = constructor 1 in
+  let equality = Context.eq ctx red green in
+  Session.assert_term s equality;
+  check "dt-distinctness: solve unsat" (Session.check_sat s = Session.Unsat);
+  ( Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+  , equality
+  , Context.eq ctx red red )
+;;
+
+let strip_dt_witnesses (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+           { event with Recorder.dt_witness = None })
+        ev.theory
+  }
+;;
+
+let collapse_dt_witness_pair (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+           match event.Recorder.dt_witness with
+           | None -> event
+           | Some witness ->
+             { event with
+               Recorder.dt_witness =
+                 Some { witness with Recorder.right = witness.Recorder.left }
+             })
+        ev.theory
+  }
+;;
+
+let replace_dt_equality_statement (ev : Checker.events) ~from ~to_ =
+  { ev with
+    atoms =
+      List.map
+        (fun (event : Recorder.atom_event) ->
+           if Term.equal event.Recorder.atom from
+           then { event with Recorder.atom = to_ }
+           else event)
+        ev.atoms
+  }
+;;
+
+let erase_dt_constructor_declaration (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+           match event.Recorder.dt_witness with
+           | None -> event
+           | Some _ -> { event with Recorder.dt_registry = Some Defs.empty })
+        ev.theory
+  }
+;;
+
+(* Cross-Context tag-alias discriminator. Both Contexts allocate their first two
+   constructor constants at the same numeric tags, but the nodes and declarations are
+   unrelated. A checker that admits only atom statements into its tag-collision preflight
+   lets these foreign witness endpoints alias the genuine statement terms in Term.Table
+   and incorrectly inherit their equality class. *)
+let foreign_dt_witness_context (ev : Checker.events) =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let color = Sort.datatype_ (Session.declare_sort s "cert_dt_foreign_color") in
+  let datatype =
+    Session.declare_datatype
+      s
+      color
+      [ { Session.ctor_name = "cert_dt_foreign_red"; fields = [] }
+      ; { Session.ctor_name = "cert_dt_foreign_green"; fields = [] }
+      ]
+  in
+  let constructor index =
+    let descriptor = List.nth datatype.Defs.constructors index in
+    Context.const ctx descriptor.Defs.sym
+  in
+  let foreign_first = constructor 0
+  and foreign_second = constructor 1 in
+  let registry = Defs.add Defs.empty datatype in
+  let original =
+    List.find_map
+      (fun (event : Recorder.theory_event) -> event.Recorder.dt_witness)
+      ev.theory
+    |> Option.get
+  in
+  let foreign_at_tag tag =
+    if foreign_first.Term.tag = tag
+    then foreign_first
+    else if foreign_second.Term.tag = tag
+    then foreign_second
+    else foreign_first
+  in
+  let foreign_left = foreign_at_tag original.Recorder.left.Term.tag
+  and foreign_right = foreign_at_tag original.Recorder.right.Term.tag in
+  let tags_collide =
+    original.Recorder.left.Term.tag = foreign_left.Term.tag
+    && original.Recorder.right.Term.tag = foreign_right.Term.tag
+    && original.Recorder.left != foreign_left
+    && original.Recorder.right != foreign_right
+  in
+  let corrupted =
+    { ev with
+      theory =
+        List.map
+          (fun (event : Recorder.theory_event) ->
+             match event.Recorder.dt_witness with
+             | None -> event
+             | Some witness ->
+               { event with
+                 Recorder.dt_registry = Some registry
+               ; dt_witness =
+                   Some
+                     { witness with
+                       Recorder.left = foreign_left
+                     ; right = foreign_right
+                     }
+               })
+          ev.theory
+    }
+  in
+  corrupted, tags_collide
 ;;
 
 let strip_euf_witnesses (ev : Checker.events) =
@@ -576,6 +749,8 @@ let mixed_context_euf_leaf () : Checker.events =
          ; role = Sat.Conflict
          ; lia_witness = None
          ; euf_witness = Some { Recorder.clause }
+         ; dt_registry = None
+         ; dt_witness = None
          }
           : Recorder.theory_event)
       ]
@@ -616,6 +791,8 @@ let mixed_context_rank_euf_leaf () : Checker.events =
          ; role = Sat.Conflict
          ; lia_witness = None
          ; euf_witness = Some { Recorder.clause }
+         ; dt_registry = None
+         ; dt_witness = None
          }
           : Recorder.theory_event)
       ]
@@ -705,6 +882,8 @@ let exploit_empty_reason : Checker.events =
          ; role = Sat.Reason
          ; lia_witness = None
          ; euf_witness = None
+         ; dt_registry = None
+         ; dt_witness = None
          }
           : Recorder.theory_event)
       ]
@@ -812,6 +991,8 @@ let bogus_theory_conflict_empty_core_e3 : Checker.events =
          ; role = Sat.Conflict
          ; lia_witness = None
          ; euf_witness = None
+         ; dt_registry = None
+         ; dt_witness = None
          }
           : Recorder.theory_event)
       ]
@@ -1048,6 +1229,42 @@ let () =
     "positive: EUF Reason leaf replay -> fully VALID"
     `Fully_valid
     euf_reason_ev;
+  let dt_ev, dt_equality, dt_reflexive = dt_distinctness_conflict () in
+  check
+    "positive: DT stream carries a distinct-constructor witness"
+    (List.exists
+       (fun (event : Recorder.theory_event) ->
+          Option.is_some event.Recorder.dt_registry
+          && Option.is_some event.Recorder.dt_witness)
+       dt_ev.Checker.theory);
+  expect
+    "positive: DT constructor-distinctness leaf -> fully VALID"
+    `Fully_valid
+    dt_ev;
+  expect
+    "coverage: stripping valid DT witness stays conditional"
+    `Modulo
+    (strip_dt_witnesses dt_ev);
+  expect
+    "corrupt: same constructor on both DT witness sides -> INVALID"
+    `Invalid
+    (collapse_dt_witness_pair dt_ev);
+  expect
+    "corrupt: DT atom statement no longer equates constructors -> INVALID"
+    `Invalid
+    (replace_dt_equality_statement dt_ev ~from:dt_equality ~to_:dt_reflexive);
+  expect
+    "corrupt: DT declaration no longer names witness constructors -> INVALID"
+    `Invalid
+    (erase_dt_constructor_declaration dt_ev);
+  let foreign_dt_ev, foreign_tags_collide = foreign_dt_witness_context dt_ev in
+  check
+    "mixed-context DT discriminator has colliding tags on distinct physical terms"
+    foreign_tags_collide;
+  expect
+    "corrupt: mixed-Context DT witness endpoints -> INVALID"
+    `Invalid
+    foreign_dt_ev;
   (* board #153b — EXACT antecedent-SET (and order) on a real chain, not length-only. The
      order scenario learns [¬b] from [¬b∨c] then the conflict [¬b∨¬c]; the frozen contract
      order [rₙ..r₁; conflict] is exactly [ {¬b,c}; {¬b,¬c} ] = [ [-2;3]; [-3;-2] ]. *)
@@ -1242,6 +1459,8 @@ let () =
            ; role = Sat.Conflict
            ; lia_witness = None
            ; euf_witness = None
+           ; dt_registry = None
+           ; dt_witness = None
            }
             : Recorder.theory_event)
         ]

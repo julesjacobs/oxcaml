@@ -58,6 +58,9 @@ let run_file path : outcome * outcome option =
          { Oxsmt_interface.Cdclt.on_theory_atom =
              (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
          ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+         ; on_dt_distinctness =
+             (fun ~registry ~clause ~left ~right ->
+                Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
          ; on_lia_conflict =
              (fun ~premise_lits ~multipliers ->
                Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)

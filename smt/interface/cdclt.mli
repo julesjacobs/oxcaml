@@ -13,12 +13,21 @@ type t
 (** Off-frozen-seam theory-leaf certificate evidence. [on_theory_atom] records the
     statement's authoritative SAT-variable meanings as they are internalized.
     [on_euf_leaf] reports the exact materialized clause claimed to follow from pure EUF
-    congruence. For LIA, [premise_lits] are the true SAT literals whose negations form a
-    conflict clause and [multipliers] are index-aligned with them. The callbacks are
-    observational. *)
+    congruence. [on_dt_distinctness] reports a conservative standalone-datatype claim:
+    [left] and [right] are applications of distinct constructors whose exact equality
+    explanation forms [clause], and [registry] is the declaration statement that gives
+    those symbols their datatype meaning. For LIA, [premise_lits] are the true SAT
+    literals whose negations form a conflict clause and [multipliers] are index-aligned
+    with them. The callbacks are observational. *)
 type leaf_certificate_trace =
   { on_theory_atom : var:Oxsmt_solver.Sat.var -> atom:Oxsmt_core.Term.t -> unit
   ; on_euf_leaf : clause:Oxsmt_solver.Sat.lit list -> unit
+  ; on_dt_distinctness :
+      registry:Oxsmt_core.Datatype_defs.t
+      -> clause:Oxsmt_solver.Sat.lit list
+      -> left:Oxsmt_core.Term.t
+      -> right:Oxsmt_core.Term.t
+      -> unit
   ; on_lia_conflict :
       premise_lits:Oxsmt_solver.Sat.lit list
       -> multipliers:Oxsmt_lia.Rational.t list

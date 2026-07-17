@@ -170,6 +170,12 @@ let incr_undo = lazy (env_on "OXSMT_CHRONO_INCR_UNDO" && env_on "OXSMT_CHRONO")
 type leaf_certificate_trace =
   { on_theory_atom : var:Sat.var -> atom:Term.t -> unit
   ; on_euf_leaf : clause:Sat.lit list -> unit
+  ; on_dt_distinctness :
+      registry:Datatype_defs.t
+      -> clause:Sat.lit list
+      -> left:Term.t
+      -> right:Term.t
+      -> unit
   ; on_lia_conflict :
       premise_lits:Sat.lit list
       -> multipliers:Oxsmt_lia.Rational.t list
@@ -276,6 +282,34 @@ let is_euf_atom_term term =
   | Theory_view.Le_zero _ -> false
 ;;
 
+(* The exact structural subterm closure of a set of certificate statement atoms. This is
+   intentionally local rather than [t.subterms]: the latter contains every registered
+   atom in the query and would let an unrelated constructor term authorize a witness for
+   this leaf. *)
+let statement_subterms roots =
+  let seen = Term.Table.create 32 in
+  let rec add (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.replace seen term ();
+      match term.Term.node with
+      | Term.Bool_const _ | Term.Int_const _ -> ()
+      | Term.App (_, args) -> Iarr.iter add args
+      | Term.Arith { coeffs; _ } -> Iarr.iter (fun (child, _) -> add child) coeffs
+      | Term.Le child | Term.Not child -> add child
+      | Term.Eq (a, b) ->
+        add a;
+        add b
+      | Term.And children | Term.Or children -> Iarr.iter add children
+      | Term.Ite (c, a, b) ->
+        add c;
+        add a;
+        add b)
+  in
+  List.iter add roots;
+  seen
+;;
+
 (* Preserve an [Euf_congruence] leaf only when it is genuinely a pure congruence proof.
    The rule tag is shared by the standalone datatype/array engines, so require the real
    combined EUF+LIA stack. The theory fabric also retains the tag after expanding an EUF
@@ -295,6 +329,45 @@ let record_euf_leaf t ~rule ~clause =
               clause ->
     trace.on_euf_leaf ~clause
   | Some _, _, _ | None, _, _ -> ()
+;;
+
+(* Preserve a datatype constructor-distinctness claim only on the standalone DT stack.
+   The generic [Euf_congruence] rule tag is also used by array and combined-theory
+   conflicts, so it is not a discriminator. Instead the DT engine must recover the exact
+   constructor pair whose congruence explanation equals this emitted premise list.
+
+   The remaining gates bind the claim to the certificate statement: every premise must
+   be a positive equality SAT literal, and both claimed constructor terms must occur in
+   the structural closure of those exact equality atoms. A negative premise, foreign
+   atom, missing SAT-var binding, or unrelated term leaves the leaf conditional. *)
+let record_dt_distinctness t ~premises ~premise_lits ~clause =
+  match t.leaf_certificate_trace, t.theory with
+  | Some trace, Some (TDt dt) ->
+    let rec equality_atoms acc = function
+      | [] -> Some (List.rev acc)
+      | lit :: rest ->
+        if not (Sat.sign_of_lit lit)
+        then None
+        else (
+          match Vartbl.find_opt t.v2term (Sat.var_of_lit lit) with
+          | Some atom when Theory_view.is_atom atom ->
+            (match Theory_view.atom atom with
+             | Theory_view.Equality _ -> equality_atoms (atom :: acc) rest
+             | Theory_view.Predicate _
+             | Theory_view.Bool_lit _
+             | Theory_view.Le_zero _ -> None)
+          | Some _ | None -> None)
+    in
+    (match equality_atoms [] premise_lits with
+     | None -> ()
+     | Some atoms ->
+       (match Dt.constructor_clash_for_premises dt premises with
+        | None -> ()
+        | Some (left, right) ->
+          let closure = statement_subterms atoms in
+          if Term.Table.mem closure left && Term.Table.mem closure right
+          then trace.on_dt_distinctness ~registry:!(t.registry) ~clause ~left ~right))
+  | Some _, Some (TCombined _ | TArr _) | Some _, None | None, _ -> ()
 ;;
 
 let set_leaf_certificate_trace t tr =
@@ -318,6 +391,8 @@ let set_lia_certificate_trace t tr =
        (fun (trace : lia_certificate_trace) ->
           { on_theory_atom = trace.on_theory_atom
           ; on_euf_leaf = (fun ~clause:_ -> ())
+          ; on_dt_distinctness =
+              (fun ~registry:_ ~clause:_ ~left:_ ~right:_ -> ())
           ; on_lia_conflict = trace.on_lia_conflict
           })
        tr)
@@ -632,7 +707,12 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
      | None -> ()
      | Some _ ->
        let clause = List.map Sat.neg_lit premise_lits in
-       record_euf_leaf t ~rule:e.Explanation.rule ~clause);
+       record_euf_leaf t ~rule:e.Explanation.rule ~clause;
+       record_dt_distinctness
+         t
+         ~premises:e.Explanation.premises
+         ~premise_lits
+         ~clause);
     (* The frozen SAT trace deliberately carries only the materialized clause. When a
        certificate recorder explicitly installed the off-seam channel, preserve the
        Farkas evidence HERE, before [T_conflict] drops the rule tag and term meanings.

@@ -8,6 +8,7 @@ module Term = Oxsmt_core.Term
 module Theory_view = Oxsmt_core.Theory_view
 module Symbol = Oxsmt_core.Symbol
 module Sort = Oxsmt_core.Sort
+module Datatype_defs = Oxsmt_core.Datatype_defs
 module Rational = Oxsmt_lia.Rational
 
 type verdict =
@@ -692,6 +693,191 @@ let verify_lia_conflict
   | exn -> Error ("Farkas replay raised: " ^ Printexc.to_string exn)
 ;;
 
+(* Independent datatype constructor-distinctness replay. The negation of the leaf clause
+   must consist solely of positive equality atoms. Rebuild equality + congruence closure
+   from those statements, then require it to merge the witness pair. The separate
+   datatype registry must identify the pair as two different constructors of the SAME
+   datatype, with applications whose argument/result sorts match their declarations.
+   This deliberately calls no DT or EUF production code: constructor distinctness is
+   re-derived from the datatype declaration and congruence from its definition. *)
+let verify_dt_distinctness
+      ~resolve_atom
+      (event : Recorder.theory_event)
+      (registry : Datatype_defs.t)
+      (witness : Recorder.dt_distinctness_witness)
+  =
+  try
+    if event.Recorder.role <> Sat.Conflict
+    then Error "datatype distinctness witness is attached to a Reason leaf"
+    else if witness.Recorder.clause <> Array.to_list event.Recorder.clause
+    then Error "datatype witness clause does not exactly match the emitted theory clause"
+    else (
+      let rec decode_equalities acc = function
+        | [] -> Ok (List.rev acc)
+        | clause_lit :: rest ->
+          let premise = Sat.neg_lit clause_lit in
+          if not (Sat.sign_of_lit premise)
+          then Error "datatype distinctness premise is not a positive equality"
+          else (
+            match resolve_atom (Sat.var_of_lit premise) with
+            | None -> Error "datatype leaf literal has no theory-atom declaration"
+            | Some atom ->
+              if not (Theory_view.is_atom atom)
+              then Error "datatype leaf declaration is not a theory atom"
+              else (
+                match Theory_view.atom atom with
+                | Theory_view.Equality (left, right) ->
+                  decode_equalities ((left, right) :: acc) rest
+                | Theory_view.Predicate _
+                | Theory_view.Bool_lit _
+                | Theory_view.Le_zero _ ->
+                  Error "datatype distinctness premise is not an equality atom"))
+      in
+      match decode_equalities [] witness.Recorder.clause with
+      | Error _ as error -> error
+      | Ok equalities ->
+        let term_ids = Term.Table.create 64 in
+        let terms_rev = ref [] in
+        let next_id = ref 0 in
+        let children (term : Term.t) =
+          match term.Term.node with
+          | Term.Bool_const _ | Term.Int_const _ -> []
+          | Term.App (_, args) -> Iarr.to_list args
+          | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+          | Term.Le child | Term.Not child -> [ child ]
+          | Term.Eq (left, right) -> [ left; right ]
+          | Term.And children | Term.Or children -> Iarr.to_list children
+          | Term.Ite (cond, yes, no) -> [ cond; yes; no ]
+        in
+        let rec add_term (term : Term.t) =
+          if not (Term.Table.mem term_ids term)
+          then (
+            List.iter add_term (children term);
+            let id = !next_id in
+            incr next_id;
+            Term.Table.replace term_ids term id;
+            terms_rev := term :: !terms_rev)
+        in
+        List.iter
+          (fun (left, right) ->
+             add_term left;
+             add_term right)
+          equalities;
+        let left = witness.Recorder.left
+        and right = witness.Recorder.right in
+        if not (Term.Table.mem term_ids left && Term.Table.mem term_ids right)
+        then Error "datatype witness constructor is absent from the premise statements"
+        else (
+          let constructor_application (term : Term.t) =
+            match term.Term.node with
+            | Term.App (symbol, args) ->
+              (match Datatype_defs.constructor_of_sym registry symbol with
+               | None -> Error "datatype witness term is not a declared constructor"
+               | Some (datatype, constructor) ->
+                 let args = Iarr.to_list args in
+                 if
+                   not
+                     (Sort.equal
+                        term.Term.sort
+                        (Sort.datatype_ datatype.Datatype_defs.sort_sym))
+                 then Error "datatype constructor result sort disagrees with its declaration"
+                 else if List.length args <> List.length constructor.selectors
+                 then Error "datatype constructor arity disagrees with its declaration"
+                 else if
+                   not
+                     (List.for_all2
+                        (fun (arg : Term.t) (selector : Datatype_defs.selector) ->
+                           Sort.equal arg.Term.sort selector.field_sort)
+                        args
+                        constructor.selectors)
+                 then Error "datatype constructor argument sort disagrees with its declaration"
+                 else Ok (symbol, datatype))
+            | _ -> Error "datatype witness endpoint is not a constructor application"
+          in
+          match constructor_application left, constructor_application right with
+          | Error reason, _ | _, Error reason -> Error reason
+          | Ok (left_symbol, left_datatype), Ok (right_symbol, right_datatype) ->
+            if Symbol.equal left_symbol right_symbol
+            then Error "datatype witness names the same constructor twice"
+            else if
+              not
+                (Symbol.equal
+                   left_datatype.Datatype_defs.sort_sym
+                   right_datatype.Datatype_defs.sort_sym)
+            then Error "datatype witness constructors belong to different datatypes"
+            else (
+              let parent = Array.init !next_id Fun.id in
+              let rec root id =
+                let p = parent.(id) in
+                if p = id
+                then id
+                else (
+                  let r = root p in
+                  parent.(id) <- r;
+                  r)
+              in
+              let union a b =
+                let a = root a
+                and b = root b in
+                if a = b
+                then false
+                else (
+                  parent.(b) <- a;
+                  true)
+              in
+              List.iter
+                (fun (a, b) ->
+                   ignore
+                     (union (Term.Table.find term_ids a) (Term.Table.find term_ids b)
+                      : bool))
+                equalities;
+              let apps =
+                List.filter_map
+                  (fun (term : Term.t) ->
+                     match term.Term.node with
+                     | Term.App (symbol, args) ->
+                       Some
+                         ( Term.Table.find term_ids term
+                         , symbol
+                         , term.Term.sort
+                         , Array.of_list
+                             (List.map
+                                (fun arg -> Term.Table.find term_ids arg)
+                                (Iarr.to_list args))
+                         , Array.of_list
+                             (List.map
+                                (fun (arg : Term.t) -> arg.Term.sort)
+                                (Iarr.to_list args)) )
+                     | _ -> None)
+                  !terms_rev
+              in
+              let changed = ref true in
+              while !changed do
+                changed := false;
+                List.iter
+                  (fun (id_a, symbol_a, result_sort_a, args_a, arg_sorts_a) ->
+                     List.iter
+                       (fun (id_b, symbol_b, result_sort_b, args_b, arg_sorts_b) ->
+                          if id_a <> id_b
+                             && Symbol.equal symbol_a symbol_b
+                             && Sort.equal result_sort_a result_sort_b
+                             && Array.length args_a = Array.length args_b
+                             && Array.for_all2 Sort.equal arg_sorts_a arg_sorts_b
+                             && Array.for_all2 (fun a b -> root a = root b) args_a args_b
+                             && union id_a id_b
+                          then changed := true)
+                       apps)
+                  apps
+              done;
+              if
+                root (Term.Table.find term_ids left)
+                = root (Term.Table.find term_ids right)
+              then Ok ()
+              else Error "datatype witness constructors are not congruent under the premises")))
+  with
+  | exn -> Error ("datatype distinctness replay raised: " ^ Printexc.to_string exn)
+;;
+
 let check ev =
   try
     let resolve, ambiguous_ids = build_index ev in
@@ -730,6 +916,31 @@ let check ev =
            admit_term b)
     in
     List.iter (fun (event : Recorder.atom_event) -> admit_term event.Recorder.atom) ev.atoms;
+    (* Witness endpoints are untrusted artifact terms too. Admit them into the SAME
+       physical-node/tag preflight before the local DT replay uses Term.Table: otherwise
+       a constructor from another Context can reuse a statement subterm's numeric tag,
+       pass [mem], and inherit that unrelated subterm's congruence class. *)
+    List.iter
+      (fun (event : Recorder.theory_event) ->
+         match event.Recorder.dt_witness with
+         | None -> ()
+         | Some witness ->
+           admit_term witness.Recorder.left;
+           admit_term witness.Recorder.right)
+      ev.theory;
+    (* A query has one datatype declaration environment. Per-leaf copies are statement
+       data, not proof data, but they must still agree globally: accepting different
+       constructor classifications leaf-by-leaf would prove no single SMT problem. *)
+    let dt_registries =
+      List.filter_map
+        (fun (event : Recorder.theory_event) -> event.Recorder.dt_registry)
+        ev.theory
+    in
+    (match dt_registries with
+     | [] -> ()
+     | first :: rest ->
+       if List.exists (fun registry -> registry <> first) rest
+       then rejectf "datatype theory leaves carry inconsistent declaration registries");
     (* Theory-atom declarations are the certificate statement. A proof witness may cite
        them but may not redefine them leaf-locally. Duplicate declarations are rejected
        even when textually equal: exactly one internalization event must own each SAT
@@ -821,8 +1032,23 @@ let check ev =
                  e.id
                  reason)
           | (Sat.Reason | Sat.Conflict), None -> ());
+         (match e.Recorder.dt_witness, e.Recorder.dt_registry with
+          | None, _ -> ()
+          | Some _, None ->
+            rejectf
+              "datatype theory leaf id %d has a witness but no datatype declaration"
+              e.id
+          | Some witness, Some registry ->
+            (match verify_dt_distinctness ~resolve_atom e registry witness with
+             | Ok () -> ()
+             | Error reason ->
+               rejectf
+                 "datatype theory leaf id %d has an invalid distinctness witness: %s"
+                 e.id
+                 reason));
          if Option.is_none e.Recorder.euf_witness
             && Option.is_none e.Recorder.lia_witness
+            && Option.is_none e.Recorder.dt_witness
          then has_unverified_theory_leaf := true)
       ev.theory;
     (* the closure engine: axioms (inputs both origins + theory leaves) then verified

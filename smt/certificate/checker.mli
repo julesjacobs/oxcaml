@@ -97,8 +97,11 @@
       [Reason]/[Conflict] witness is checked by negating its exact clause and rebuilding
       congruence closure from the cited atom statements: reflexivity/symmetry/transitivity
       plus congruence over matching applications must collapse a cited disequality. A
-      claimed but bad witness is [Invalid], never silently trusted. Unwitnessed theory
-      leaves and [Theory_lemma] inputs remain trusted axioms and force
+      datatype constructor-distinctness [Conflict] is checked from its separate datatype
+      declaration and atom statements: equality/congruence must merge two well-sorted
+      applications of different constructors of the same datatype. A claimed but bad
+      witness is [Invalid], never silently trusted. Unwitnessed theory leaves and
+      [Theory_lemma] inputs remain trusted axioms and force
       [Valid_modulo_theory_leaves]. An empty [Conflict] clause
       (an unconditional
       [T_conflict []], ADR-0013 Rev 6) has NO v1 leaf witness for ⊥-from-∅ and is reported
@@ -140,7 +143,8 @@ type verdict =
   | Valid
   (** the skeleton closes and every theory leaf is checked. This includes theory-free
       propositional certificates and certificates whose theory leaves are verified pure
-      EUF clauses or LIA Farkas [Conflict] clauses. *)
+      EUF clauses, LIA Farkas [Conflict] clauses, or datatype constructor-distinctness
+      [Conflict] clauses. *)
   | Invalid of string (** an artifact-attributable rejection (ADR-0013 §3.3) *)
   | Unsupported of string
   (** a well-formed leaf/feature this checker version cannot witness (coverage gap) *)

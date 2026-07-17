@@ -14,6 +14,12 @@ type lia_conflict_witness = { premises : lia_premise list }
 
 type euf_leaf_witness = { clause : Sat.lit list }
 
+type dt_distinctness_witness =
+  { clause : Sat.lit list
+  ; left : Oxsmt_core.Term.t
+  ; right : Oxsmt_core.Term.t
+  }
+
 type atom_event =
   { var : Sat.var
   ; atom : Oxsmt_core.Term.t
@@ -43,6 +49,13 @@ type theory_event =
   ; role : Sat.theory_clause_role
   ; lia_witness : lia_conflict_witness option
   ; euf_witness : euf_leaf_witness option
+  ; dt_registry : Oxsmt_core.Datatype_defs.t option
+  ; dt_witness : dt_distinctness_witness option
+  }
+
+type dt_claim =
+  { registry : Oxsmt_core.Datatype_defs.t
+  ; witness : dt_distinctness_witness
   }
 
 (* Events are accumulated newest-first (O(1) append) and reversed by the accessors. *)
@@ -54,6 +67,7 @@ type t =
   ; mutable theory_rev : theory_event list
   ; mutable pending_lia : lia_conflict_witness list
   ; mutable euf_claims : euf_leaf_witness list
+  ; mutable dt_claims : dt_claim list
   ; mutable conclusion : Sat.unsat_conclusion option
   }
 
@@ -65,6 +79,7 @@ let create () =
   ; theory_rev = []
   ; pending_lia = []
   ; euf_claims = []
+  ; dt_claims = []
   ; conclusion = None
   }
 ;;
@@ -91,6 +106,11 @@ let record_euf_leaf t ~clause =
   t.euf_claims <- { clause } :: t.euf_claims
 ;;
 
+let record_dt_distinctness t ~registry ~clause ~left ~right =
+  let witness = { clause; left; right } in
+  t.dt_claims <- { registry; witness } :: t.dt_claims
+;;
+
 let record_theory_atom t ~var ~atom = t.atoms_rev <- { var; atom } :: t.atoms_rev
 
 let trace t : Sat.trace =
@@ -114,7 +134,27 @@ let trace t : Sat.trace =
             (fun (witness : euf_leaf_witness) -> witness.clause = Array.to_list clause)
             t.euf_claims
         in
-        t.theory_rev <- { id; clause; role; lia_witness; euf_witness } :: t.theory_rev)
+        let dt_claim =
+          List.find_opt
+            (fun (claim : dt_claim) ->
+               claim.witness.clause = Array.to_list clause)
+            t.dt_claims
+        in
+        let dt_registry, dt_witness =
+          match dt_claim with
+          | None -> None, None
+          | Some claim -> Some claim.registry, Some claim.witness
+        in
+        t.theory_rev
+        <- { id
+           ; clause
+           ; role
+           ; lia_witness
+           ; euf_witness
+           ; dt_registry
+           ; dt_witness
+           }
+           :: t.theory_rev)
   ; on_unsat = (fun c -> t.conclusion <- Some c)
   }
 ;;
