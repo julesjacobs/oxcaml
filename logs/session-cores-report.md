@@ -9,8 +9,8 @@ An additive, **observational** public Session surface exposing the most recent L
 conflict's evidence after an UNSAT `check_sat`:
 
 ```
-Session.last_unsat_core : t -> Term.t list option
-Session.last_farkas     : t -> (Oxsmt_lia.Rational.t * Term.t) list option
+Session.last_unsat_core : t -> (Term.t * bool) list option
+Session.last_farkas     : t -> (Oxsmt_lia.Rational.t * (Term.t * bool)) list option
 ```
 
 - `last_unsat_core` — the premise literals of the refuting LIA conflict, each rendered as
@@ -33,7 +33,9 @@ separate read-only channel is populated at conflict-production time:
 2. `smt/combine/combine.ml{,i}` — `arith_state : t -> B.t`, symmetric to the existing
    `congruence_state`, to reach the LIA child inside the combinator.
 3. `smt/interface/cdclt.ml{,i}` — `last_conflict_core` passthrough (only the EUF+LIA stack
-   carries it; DT/arrays → `None`); `begin_check` clears the stash per check-sat.
+   carries it; DT/arrays → `None`); the stash is cleared unconditionally at the top of
+   `check_sat` (via `clear_last_conflict`, so the pure-BV fast path that bypasses
+   `begin_check` cannot leak a stale core).
 4. `smt/interface/session.ml{,i}` — the two public functions, gated on `last_verdict =
    Unsat`.
 

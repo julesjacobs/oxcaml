@@ -539,7 +539,9 @@ let hnf_cuts_emitted t = t.hnf_cuts_emitted
 
 (* task #106 observational core. Reset the stash at the start of each check-sat (so a
    stale conflict from a prior check cannot masquerade as this one's core) and read it
-   back, mapped from the engine premise tokens to [Term.t]s. Neither touches solver state. *)
+   back, mapped from the engine premise tokens to [Term.t]s. [clear_last_conflict]
+   mutates only the observational [last_conflict] stash; neither touches the solver's
+   verdict/search state. *)
 let clear_last_conflict t = t.last_conflict <- None
 
 let last_conflict_core t : conflict_core option =

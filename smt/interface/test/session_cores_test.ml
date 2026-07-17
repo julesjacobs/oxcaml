@@ -330,7 +330,7 @@ let () =
 
 let () =
   (* STALENESS: a theory conflict in check #1 must NOT leak into a later purely
-     propositional Unsat ([begin_check] clears the stash). *)
+     propositional Unsat (the top of [check_sat] clears the stash). *)
   let s = Session.create () in
   let x = int_var s "sx" in
   Session.push s;
