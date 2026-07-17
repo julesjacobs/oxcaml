@@ -74,6 +74,7 @@ type s =
   ; sort_var_mapping : sort_map
   ; freshen_refinement_binders : bool
   ; freshen_refinement_free_refs : bool
+  ; sibling_prefix : Path.t option
   ; loc : Location.t option
   ; mutable last_compose : (s * s) option (* Memoized composition *)
   }
@@ -117,6 +118,7 @@ let identity =
   ; sort_var_mapping = Nothing
   ; freshen_refinement_binders = false
   ; freshen_refinement_free_refs = false
+  ; sibling_prefix = None
   ; loc = None
   ; last_compose = None
   }
@@ -177,6 +179,15 @@ let add_value id p s =
   ; freshen_refinement_binders = true
   ; last_compose = None
   }
+;;
+
+(* Record the module path under which a signature is being projected, so that
+   [Refinement.map_paths] can requalify signature-relative sibling references to
+   that instance (see the sibling arm there).  Set only at genuine projection
+   boundaries (see [Env.components_of_module]); left [None] for in-instance and
+   copying substitutions, where siblings stay bare. *)
+let with_sibling_prefix root s =
+  { s with sibling_prefix = Some root; last_compose = None }
 ;;
 
 let add_module id p s =
@@ -795,6 +806,7 @@ let rec typexp copy_scope s ty =
                 refinement.ref_pred
                 |> Refinement.map_types map_type
                 |> Refinement.map_paths
+                     ?sibling_prefix:s.sibling_prefix
                      ~value_path:(value_path s)
                      ~type_path:map_type_path
             }
@@ -1424,6 +1436,10 @@ and compose s1 s2 =
             s1.freshen_refinement_binders || s2.freshen_refinement_binders
         ; freshen_refinement_free_refs =
             s1.freshen_refinement_free_refs || s2.freshen_refinement_free_refs
+        ; sibling_prefix =
+            (match s2.sibling_prefix with
+             | Some _ as p -> p
+             | None -> s1.sibling_prefix)
         ; loc = keep_latest_loc s1.loc s2.loc
         ; last_compose = None
         }

@@ -1525,11 +1525,27 @@ module Refinement = struct
     in
     map expression
 
-  let map_paths ~value_path ~type_path expression =
+  let map_paths ?sibling_prefix ~value_path ~type_path expression =
+    (* [sibling_prefix] is set only when the enclosing signature is being
+       projected under a module path (see [Subst]/[Env.components_of_module]).
+       A sibling reference is signature-relative -- a bare name in whatever
+       module instance the refinement lives in -- so on projection it must be
+       requalified to that instance's path, exactly as [Rglobal]/[Rapp] paths
+       are; otherwise two instances of one signature (or two signatures sharing
+       a value name) conflate their siblings into a single symbol.  Bare when
+       there is no projection prefix (in-instance verification), where
+       single-context name-keying is already sound. *)
     let map_reference = function
       | Rapp path -> Rapp (value_path path)
       | Rglobal path -> Rglobal (value_path path)
-      | (Rfun _ | Rsibling _) as reference -> reference
+      | Rsibling name ->
+        (match sibling_prefix with
+         | Some root -> Rglobal (Path.Pdot (root, name))
+         | None -> Rsibling name)
+      | Rfun name ->
+        (match sibling_prefix with
+         | Some root -> Rapp (Path.Pdot (root, name))
+         | None -> Rfun name)
     in
     let rec map expression =
       let rexp_desc =

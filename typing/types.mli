@@ -638,11 +638,16 @@ module Refinement : sig
       do not perturb interface digests. *)
 
   val map_paths :
+    ?sibling_prefix:Path.t ->
     value_path:(Path.t -> Path.t) ->
     type_path:(Path.t -> Path.t) ->
     t ->
     t
-  (** Rewrite value-reference heads and constructor/field type paths. *)
+  (** Rewrite value-reference heads and constructor/field type paths.
+      [sibling_prefix], when given, requalifies signature-relative sibling
+      references ([Rsibling]/[Rfun]) to that module path -- used when a
+      signature is projected under a module prefix.  Omitted for in-instance
+      substitutions, where siblings stay bare (name-keyed). *)
 
   val subst : id:Ident.t -> by:t -> t -> t
   (** Capture-avoiding substitution of a bound value identifier. *)
