@@ -78,10 +78,24 @@ let () =
         let r = Oxsmt_chc.Chc_pdr.solve sys in
         pdr_verdict_str r.Oxsmt_chc.Chc_pdr.verdict, r.detail)
     in
-    let run_cegis sys =
-      let r = Oxsmt_chc.Chc_cegis.solve sys in
+    let run_cegis ?budget ?max_effort sys =
+      let r = Oxsmt_chc.Chc_cegis.solve ?budget ?max_effort sys in
       pdr_verdict_str r.Oxsmt_chc.Chc_cegis.verdict, r.detail
     in
+    let env_int name default =
+      match Sys.getenv_opt name with
+      | Some s ->
+        (try int_of_string s with
+         | _ -> default)
+      | None -> default
+    in
+    (* In the portfolio, cegis is TIME-BOXED: its wins are cheap (all observed <0.1s), so
+       a tight query/effort cap captures them while bailing fast enough to leave the PDR
+       leg its full wall. Without this cap, cegis's slow-but-eventual successes (5-20s)
+       would starve PDR of the 2s wall and net-REGRESS the portfolio (measured).
+       Env-tunable. *)
+    let pf_cegis_budget = env_int "OXSMT_CHC_CEGIS_BUDGET" 600 in
+    let pf_cegis_effort = env_int "OXSMT_CHC_CEGIS_EFFORT" 6000 in
     let mode =
       match Sys.getenv_opt "OXSMT_CHC_ENGINE" with
       | Some "pdr" -> `Pdr
@@ -94,9 +108,11 @@ let () =
       | sys ->
         (match mode with
          | `Pdr -> run_pdr sys
-         | `Cegis -> run_cegis sys
+         | `Cegis -> run_cegis ~budget:pf_cegis_budget ~max_effort:pf_cegis_effort sys
          | `Portfolio ->
-           let smt, detail = run_cegis sys in
+           let smt, detail =
+             run_cegis ~budget:pf_cegis_budget ~max_effort:pf_cegis_effort sys
+           in
            if String.equal smt "unknown" then run_pdr sys else smt, detail)
       | exception Oxsmt_chc.Chc_parse.Unsupported m -> "unknown", "unsupported: " ^ m
       | exception Oxsmt_chc.Chc_parse.Malformed m -> "unknown", "malformed: " ^ m
