@@ -1,0 +1,4 @@
+File "cup_incomplete.ml", line 5, characters 4-46:
+5 | let g : int{ _ = 3 } = Cup_provider.identity 3
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

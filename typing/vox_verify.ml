@@ -309,37 +309,6 @@ let rec bind_scope_references scope expression =
         Rexp_ifthenelse (recur condition, recur ifso, Option.map recur ifnot);
     }
 
-(* Collect the distinct free references to bare local [Pident]s in a predicate
-   (a callee's own parameters, as [Rfree (Rglobal/Rapp (Pident id))]).  Used to
-   recognise the unambiguous arity-1 dependent-result case for imported callees,
-   where the single such parameter is substituted by the actual argument. *)
-let free_local_refs expression =
-  let acc = ref [] in
-  let note id =
-    if not (List.exists (fun other -> Ident.same other id) !acc)
-    then acc := id :: !acc
-  in
-  let rec walk expression =
-    match expression.rexp_desc with
-    | Rexp_ident (Rfree (Rglobal (Pident id)))
-    | Rexp_ident (Rfree (Rapp (Pident id))) -> note id
-    | Rexp_ident _ | Rexp_constant _ -> ()
-    | Rexp_let (bindings, body) ->
-      List.iter (fun binding -> walk binding.rbind_expr) bindings;
-      walk body
-    | Rexp_function { body; _ } -> walk body
-    | Rexp_apply (function_, arguments) ->
-      walk function_;
-      List.iter (fun (_, argument) -> walk argument) arguments
-    | Rexp_tuple fields -> List.iter (fun (_, field) -> walk field) fields
-    | Rexp_construct (_, arguments) -> List.iter walk arguments
-    | Rexp_field (record, _) -> walk record
-    | Rexp_ifthenelse (condition, ifso, ifnot) ->
-      walk condition; walk ifso; Option.iter walk ifnot
-  in
-  walk expression;
-  !acc
-
 let verification_error ~loc verdict =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"
     (Vox_lean.string_of_verdict verdict)
@@ -659,35 +628,6 @@ and check_application state application function_ arguments =
   in
   let result_type, replacements =
     loop function_type parameters [] arguments
-  in
-  (* Cross-unit dependent results: an imported callee's parameters are not in
-     [state.definitions], so [replace_parameters] above is empty and the result
-     refinement keeps the callee's parameter (freshened to a fresh opaque symbol
-     on import).  For the unambiguous single-argument case whose result
-     refinement mentions exactly one such free parameter, substitute it by the
-     actual argument -- e.g. [A.identity 3 : int{ _ = 3 }] verifies.  Restricted
-     to arity 1: the arrow type carries no parameter-to-position mapping for an
-     imported callee, so a multi-parameter result cannot be soundly assigned and
-     is left opaque (sound, incomplete). *)
-  let replacements =
-    match definition, replacements, refinement result_type with
-    | None, [], Some result_refinement ->
-      let argument_subjects =
-        List.filter_map
-          (function
-            | _, Arg (argument, _) ->
-              (match subject state argument with
-               | subject -> Some subject
-               | exception Unsupported_subject _ -> None)
-            | _, Omitted _ -> None)
-          arguments
-      in
-      begin match argument_subjects, free_local_refs result_refinement.ref_pred with
-      | [argument_subject], [parameter] ->
-        (parameter, argument_subject) :: replacements
-      | _ -> replacements
-      end
-    | _ -> replacements
   in
   Option.iter
     (fun refinement ->

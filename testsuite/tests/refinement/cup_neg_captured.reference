@@ -1,0 +1,4 @@
+File "cup_neg_captured.ml", line 4, characters 4-44:
+4 | let bad : int{ _ = 0 } = Cup_provider.capf 0
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
