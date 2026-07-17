@@ -632,6 +632,11 @@ module Refinement : sig
   (** Traverse every node and binder annotation.  Paths and binder identities
       are unchanged. *)
 
+  val map_locs : (Location.t -> Location.t) -> t -> t
+  (** Traverse every node, applying the function to its source location.  Used
+      to normalize predicate locations for marshaling so cosmetic .mli changes
+      do not perturb interface digests. *)
+
   val map_paths :
     value_path:(Path.t -> Path.t) ->
     type_path:(Path.t -> Path.t) ->

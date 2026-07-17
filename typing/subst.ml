@@ -798,7 +798,19 @@ let rec typexp copy_scope s ty =
           in
           let refinement =
             match s.additional_action with
-            | Prepare_for_saving _ -> refinement
+            | Prepare_for_saving _ ->
+              (* Normalize predicate source locations before marshaling so that
+                 cosmetic .mli changes (which shift a predicate's location) do
+                 not perturb the interface digest.  Matches the location
+                 zeroing done for the rest of the saved tree, and is likewise
+                 suppressed under [-keep-locs]. *)
+              if !Clflags.keep_locs then refinement
+              else
+                { refinement with
+                  ref_pred =
+                    Refinement.map_locs
+                      (fun _ -> Location.none) refinement.ref_pred
+                }
             | Duplicate_variables | No_action ->
               if s.freshen_refinement_binders
               then Refinement.freshen_desc_binders refinement
