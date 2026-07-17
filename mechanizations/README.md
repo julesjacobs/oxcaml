@@ -9,3 +9,6 @@ Check (Lean 4.31, no mathlib):
 
     lean PifoStatement.lean -o PifoStatement.olean
     LEAN_PATH=. lean Answer.lean
+
+The English prose proof (refereed; the Lean development follows its structure)
+is in pifo-theorem.md.
