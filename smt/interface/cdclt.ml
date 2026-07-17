@@ -313,9 +313,10 @@ let statement_subterms roots =
     then (
       Term.Table.replace seen term ();
       match term.Term.node with
-      | Term.Bool_const _ | Term.Int_const _ -> ()
+      | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ()
       | Term.App (_, args) -> Iarr.iter add args
       | Term.Arith { coeffs; _ } -> Iarr.iter (fun (child, _) -> add child) coeffs
+      | Term.Real_arith { coeffs; _ } -> Iarr.iter (fun (child, _) -> add child) coeffs
       | Term.Le child | Term.Not child -> add child
       | Term.Eq (a, b) ->
         add a;
@@ -383,7 +384,7 @@ let record_dt_distinctness t ~premises ~premise_lits ~clause =
           let closure = statement_subterms atoms in
           if Term.Table.mem closure left && Term.Table.mem closure right
           then trace.on_dt_distinctness ~registry:!(t.registry) ~clause ~left ~right))
-  | Some _, Some (TCombined _ | TArr _) | Some _, None | None, _ -> ()
+  | Some _, Some (TCombined _ | TCombinedReal _ | TArr _) | Some _, None | None, _ -> ()
 ;;
 
 let set_leaf_certificate_trace t tr =

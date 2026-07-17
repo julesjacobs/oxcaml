@@ -477,9 +477,10 @@ let verify_euf_leaf
         let next_id = ref 2 in
         let term_children (term : Term.t) =
           match term.Term.node with
-          | Term.Bool_const _ | Term.Int_const _ -> []
+          | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> []
           | Term.App (_, args) -> Iarr.to_list args
           | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+          | Term.Real_arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
           | Term.Le child | Term.Not child -> [ child ]
           | Term.Eq (a, b) -> [ a; b ]
           | Term.And children | Term.Or children -> Iarr.to_list children
@@ -752,9 +753,10 @@ let verify_dt_distinctness
         let next_id = ref 0 in
         let children (term : Term.t) =
           match term.Term.node with
-          | Term.Bool_const _ | Term.Int_const _ -> []
+          | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> []
           | Term.App (_, args) -> Iarr.to_list args
           | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+          | Term.Real_arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
           | Term.Le child | Term.Not child -> [ child ]
           | Term.Eq (left, right) -> [ left; right ]
           | Term.And children | Term.Or children -> Iarr.to_list children
@@ -911,9 +913,11 @@ let check ev =
       | None ->
         Hashtbl.replace term_by_tag term.Term.tag term;
         (match term.Term.node with
-         | Term.Bool_const _ | Term.Int_const _ -> ()
+         | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ()
          | Term.App (_, args) -> List.iter admit_term (Iarr.to_list args)
          | Term.Arith { coeffs; _ } ->
+           List.iter (fun (child, _) -> admit_term child) (Iarr.to_list coeffs)
+         | Term.Real_arith { coeffs; _ } ->
            List.iter (fun (child, _) -> admit_term child) (Iarr.to_list coeffs)
          | Term.Le child | Term.Not child -> admit_term child
          | Term.Eq (a, b) ->
