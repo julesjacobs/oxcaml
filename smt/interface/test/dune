@@ -29,6 +29,16 @@
  (modules optimize_test)
  (libraries oxsmt_core oxsmt_interface))
 
+; Certified linear-Int OMT consumer proof: exhaustive objective oracle in both
+; directions, returned-model and strict-bound certificates, off-by-one discrimination,
+; hard-unsat, scoped cleanup, arbitrary precision, and fail-closed budgets. Run via
+; `make omt-test`; included in `make test`.
+
+(executable
+ (name omt_test)
+ (modules omt_test)
+ (libraries oxsmt_core oxsmt_interface))
+
 ; ADR-0014 S4.2 chrono incremental-undo driver REDs (H1 zero-removal wipe, H2 cross-query
 ; index skew) — reproduce the two TCB land blockers against the REAL cdclt driver + Combined
 ; theory via the Cdclt test re-exports. Arms OXSMT_CHRONO / OXSMT_CHRONO_INCR_UNDO in-process

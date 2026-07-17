@@ -238,3 +238,202 @@ let max_smt ?max_checks session softs =
         in
         loop [])
 ;;
+
+module Omt = struct
+  type optimum =
+    { value : Bigint.t
+    ; model : Session.model
+    }
+
+  type result =
+    | Optimal of optimum
+    | Hard_unsat
+    | Unbounded
+    | Unknown
+
+  type direction =
+    | Minimize
+    | Maximize
+
+  type candidate =
+    { score : Bigint.t
+    ; optimum : optimum
+    }
+
+  type probe =
+    | Feasible of candidate
+    | Infeasible
+    | Probe_unknown
+
+  let default_max_checks = 256
+  let objective_prefix = "@oxsmt.optimize.objective."
+
+  (* Core arithmetic is already normalized into [Arith]. Its leaves must be nullary
+     integer symbols: an [Ite] or any non-nullary application is not a linear objective. *)
+  let rec affine_int_term (term : Term.t) =
+    match term.Term.node with
+    | Term.Int_const _ -> true
+    | Term.App (_, arguments) -> Iarr.length arguments = 0
+    | Term.Arith linear ->
+      Iarr.fold
+        (fun affine (child, _) -> affine && affine_int_term child)
+        true
+        linear.coeffs
+    | Term.Ite _
+    | Term.Bool_const _
+    | Term.Le _
+    | Term.Eq _
+    | Term.Not _
+    | Term.And _
+    | Term.Or _ -> false
+  ;;
+
+  let validate_objective objective =
+    if not (Sort.equal objective.Term.sort Sort.int)
+    then invalid_arg "Optimize.Omt: objective must be Int-sorted";
+    if not (affine_int_term objective)
+    then invalid_arg "Optimize.Omt: objective must be affine over nullary Int symbols"
+  ;;
+
+  let fresh_objective session =
+    let env = Session.env session in
+    let rec choose n =
+      let name = objective_prefix ^ string_of_int n in
+      match Env.rank env (Symbol.intern name) with
+      | (_ : Rank.t) -> choose (n + 1)
+      | exception Not_found ->
+        let symbol = Session.declare_const session name Sort.int in
+        name, Context.const (Session.context session) symbol
+    in
+    choose 0
+  ;;
+
+  let score direction value =
+    match direction with
+    | Minimize -> value
+    | Maximize -> Bigint.neg value
+  ;;
+
+  (* The scoped equality [anchor = objective] is included in Session's obligatory model
+     self-check. Consequently, after this shape check, [value] is independently tied to
+     the objective. Removing only the fresh binding preserves a user model witnessing it. *)
+  let candidate_of_model ~direction ~anchor_name ((sorts, bindings) : Session.model) =
+    let value = ref None in
+    let valid = ref true in
+    List.iter
+      (function
+        | Session.Const (name, Session.VInt n) when String.equal name anchor_name ->
+          (match !value with
+           | None -> value := Some n
+           | Some _ -> valid := false)
+        | (Session.Const (name, _) | Session.Fun (name, _))
+          when String.equal name anchor_name -> valid := false
+        | Session.Const _ | Session.Fun _ -> ())
+      bindings;
+    match !valid, !value with
+    | true, Some value ->
+      let bindings =
+        List.filter
+          (fun binding -> not (String.equal (binding_name binding) anchor_name))
+          bindings
+      in
+      Some { score = score direction value; optimum = { value; model = sorts, bindings } }
+    | false, _ | true, None -> None
+  ;;
+
+  let optimize ?max_checks direction session objective =
+    let max_checks = Option.value max_checks ~default:default_max_checks in
+    if max_checks < 0 then invalid_arg "Optimize.Omt: max_checks must be nonnegative";
+    validate_objective objective;
+    if max_checks = 0
+    then Unknown
+    else (
+      let anchor_name, anchor = fresh_objective session in
+      let ctx = Session.context session in
+      let normalized_anchor =
+        match direction with
+        | Minimize -> anchor
+        | Maximize -> Context.neg ctx anchor
+      in
+      let checks = ref 0 in
+      let can_check () = !checks < max_checks in
+      let checked () =
+        incr checks;
+        Session.check_sat session
+      in
+      let read_candidate () =
+        match Session.get_model session with
+        | None -> None
+        | Some model -> candidate_of_model ~direction ~anchor_name model
+      in
+      let probe_bound bound =
+        if not (can_check ())
+        then Probe_unknown
+        else (
+          let bound_term = Context.int_const_big ctx bound in
+          let constraint_ = Context.le ctx normalized_anchor bound_term in
+          Session.push session;
+          Fun.protect
+            ~finally:(fun () -> Session.pop session)
+            (fun () ->
+               Session.assert_term session constraint_;
+               match checked () with
+               | Session.Unknown -> Probe_unknown
+               | Session.Unsat -> Infeasible
+               | Session.Sat ->
+                 (match read_candidate () with
+                  | Some candidate when Bigint.compare candidate.score bound <= 0 ->
+                    Feasible candidate
+                  | Some _ | None -> Probe_unknown)))
+      in
+      let midpoint low high =
+        let distance = Bigint.sub high low in
+        let half, _ = Bigint.divmod distance (Bigint.of_int 2) in
+        Bigint.add low half
+      in
+      let rec refine infeasible candidate =
+        let distance = Bigint.sub candidate.score infeasible in
+        if Bigint.sign distance <= 0
+        then Unknown
+        else if Bigint.equal distance Bigint.one
+        then Optimal candidate.optimum
+        else (
+          let bound = midpoint infeasible candidate.score in
+          match probe_bound bound with
+          | Probe_unknown -> Unknown
+          | Infeasible -> refine bound candidate
+          | Feasible better when Bigint.compare better.score infeasible > 0 ->
+            refine infeasible better
+          | Feasible _ -> Unknown)
+      in
+      let rec bracket step candidate =
+        let bound = Bigint.sub candidate.score step in
+        match probe_bound bound with
+        | Probe_unknown -> Unknown
+        | Infeasible -> refine bound candidate
+        | Feasible better when Bigint.compare better.score candidate.score < 0 ->
+          bracket (Bigint.add step step) better
+        | Feasible _ -> Unknown
+      in
+      Session.push session;
+      Fun.protect
+        ~finally:(fun () -> Session.pop session)
+        (fun () ->
+           Session.assert_term session (Context.eq ctx anchor objective);
+           match checked () with
+           | Session.Unknown -> Unknown
+           | Session.Unsat -> Hard_unsat
+           | Session.Sat ->
+             (match read_candidate () with
+              | None -> Unknown
+              | Some candidate -> bracket Bigint.one candidate)))
+  ;;
+
+  let minimize ?max_checks session objective =
+    optimize ?max_checks Minimize session objective
+  ;;
+
+  let maximize ?max_checks session objective =
+    optimize ?max_checks Maximize session objective
+  ;;
+end
