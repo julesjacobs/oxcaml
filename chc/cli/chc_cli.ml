@@ -48,10 +48,15 @@ let () =
     (* Dispatch: a single-predicate system goes to the proven transition-system engine
        (Chc_engine); multiple predicates go to the multi-predicate linear PDR (Chc_pdr).
        Both are guarded by independent re-verification, so either path is sound. *)
+    let all_pdr =
+      match Sys.getenv_opt "OXSMT_CHC_ALLPDR" with
+      | Some ("0" | "false" | "") | None -> false
+      | Some _ -> true
+    in
     let smt, detail =
       match Oxsmt_chc.Chc_parse.parse src with
       | sys ->
-        if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1
+        if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1 && not all_pdr
         then (
           let r = Oxsmt_chc.Chc_engine.solve sys in
           Oxsmt_chc.Chc_engine.verdict_to_smtlib r.Oxsmt_chc.Chc_engine.verdict, r.detail)
