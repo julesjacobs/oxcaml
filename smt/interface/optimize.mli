@@ -39,13 +39,13 @@ type result =
     Any underlying [Unknown], absent model, or malformed core/model evidence returns
     [Unknown], never an uncertified optimum. If [max_checks] is supplied, it is a
     deterministic cap on calls to {!Session.check_sat_assuming}; reaching it also returns
-    [Unknown]. A negative cap raises [Invalid_argument]. Without a cap, termination follows
-    from finite progress: every nonempty core rules out the current hitting set, of which
-    there are at most [2^length softs].
+    [Unknown]. A negative cap raises [Invalid_argument]. Without a cap, termination
+    follows from finite progress: every nonempty core rules out the current hitting set,
+    of which there are at most [2^length softs].
 
     The optimizer scopes its selector definitions with {!Session.push}/[Session.pop]. The
-    fresh nullary selector declarations necessarily remain in the session environment,
-    but are not active constraints after this function returns. *)
+    fresh nullary selector declarations necessarily remain in the session environment, but
+    are not active constraints after this function returns. *)
 val max_smt : ?max_checks:int -> Session.t -> soft list -> result
 
 (** Optimization of one linear integer objective over a {!Session}'s active assertions.
@@ -63,26 +63,26 @@ module Omt : sig
   type result =
     | Optimal of optimum
     | Hard_unsat
-    | Unbounded
     | Unknown
 
-  (** [minimize ?max_checks session objective] minimizes [objective] subject to the
-      active assertions in [session]. [maximize] is the analogous maximization query.
-      [objective] must be an affine combination of integer literals and nullary integer
-      symbols, built in [Session.context session]. An Int-sorted [Ite] or non-nullary
-      application (including [div] and [mod]) is rejected with [Invalid_argument] before
-      the session is changed.
+  (** [minimize ?max_checks session objective] minimizes [objective] subject to the active
+      assertions in [session]. [maximize] is the analogous maximization query. [objective]
+      must be an affine combination of integer literals and nullary integer symbols, built
+      in [Session.context session]. An Int-sorted [Ite] or non-nullary application
+      (including [div] and [mod]) is rejected with [Invalid_argument] before the session
+      is changed.
 
-      [Optimal { value; model }] is returned only after a model witnesses [objective =
-      value] and an [Unsat] query certifies [objective < value] for [minimize], or
-      [objective > value] for [maximize]. The fresh objective binding is removed from
-      [model]. [Hard_unsat] means the hard assertions were proved unsatisfiable.
+      [Optimal { value; model }] is returned only after a model witnesses
+      [objective = value] and an [Unsat] query certifies [objective < value] for
+      [minimize], or [objective > value] for [maximize]. The fresh objective binding is
+      removed from [model]. [Hard_unsat] means the hard assertions were proved
+      unsatisfiable.
 
       [max_checks] caps calls to {!Session.check_sat}; it defaults to 256, and zero
       returns [Unknown]. A negative cap raises [Invalid_argument]. The finite default
       makes every query terminate, including an objective unbounded in the requested
       direction. The public session API cannot certify an unbounded ray, so this version
-      never guesses [Unbounded]: failure to find an infeasible bound within the budget
+      never reports unboundedness: failure to find an infeasible bound within the budget
       returns [Unknown]. Any underlying [Unknown], missing model, or malformed model
       evidence also returns [Unknown].
 

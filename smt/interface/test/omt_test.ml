@@ -1,11 +1,11 @@
 (* Consumer proof for integer objective optimization.
 
    The main problem is small enough to enumerate completely. The test checks both
-   optimization directions, negative optima, a nontrivial linear combination, the
-   returned model, and a fresh-session UNSAT certificate immediately past the reported
-   value. Additional cases pin the query budget, initial-model certification, hard
-   infeasibility, temporary-scope cleanup, arbitrary-precision values, and fail-closed
-   behavior on an unbounded objective and an underlying Unknown. *)
+   optimization directions, negative optima, a nontrivial linear combination, the returned
+   model, and a fresh-session UNSAT certificate immediately past the reported value.
+   Additional cases pin the query budget, initial-model certification, hard infeasibility,
+   temporary-scope cleanup, arbitrary-precision values, and fail-closed behavior on an
+   unbounded objective and an underlying Unknown. *)
 
 open Oxsmt_core
 module Session = Oxsmt_interface.Session
@@ -64,12 +64,12 @@ let feasible_points () =
 let brute_force direction points =
   List.fold_left
     (fun best point ->
-       let value = point_objective point in
-       match best, direction with
-       | None, _ -> Some value
-       | Some prior, Minimize when value < prior -> Some value
-       | Some prior, Maximize when value > prior -> Some value
-       | Some _, (Minimize | Maximize) -> best)
+      let value = point_objective point in
+      match best, direction with
+      | None, _ -> Some value
+      | Some prior, Minimize when value < prior -> Some value
+      | Some prior, Maximize when value > prior -> Some value
+      | Some _, (Minimize | Maximize) -> best)
     None
     points
 ;;
@@ -173,7 +173,6 @@ let check_problem direction expected =
   let problem = build_problem () in
   match optimize direction problem with
   | Optimize.Omt.Hard_unsat -> fail label "reported feasible hard constraints as unsat"
-  | Optimize.Omt.Unbounded -> fail label "reported a bounded objective as unbounded"
   | Optimize.Omt.Unknown -> fail label "returned unknown for a small bounded problem"
   | Optimize.Omt.Optimal optimum ->
     check_bigint (label ^ ": brute-force optimum") (Bigint.of_int expected) optimum.value;
@@ -253,7 +252,7 @@ let check_range direction =
       (match model_int "range_x" optimum.model with
        | Some value -> Bigint.equal value optimum.value
        | None -> false)
-  | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded | Optimize.Omt.Unknown ->
+  | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown ->
     fail "early-stop" "did not return the brute-force optimum"
 ;;
 
@@ -276,7 +275,7 @@ let () =
     "initial-optimal witness alone is not a certificate"
     (match Optimize.Omt.minimize ~max_checks:1 session x with
      | Optimize.Omt.Unknown -> true
-     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat -> false);
   let session, x = fixed_problem (-4) in
   check
     "initial-optimal needs exactly one certifying check"
@@ -287,7 +286,7 @@ let () =
          (match model_int "fixed_x" optimum.model with
          | Some value -> Bigint.equal value optimum.value
          | None -> false)
-     | Optimize.Omt.Unknown | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded -> false)
+     | Optimize.Omt.Unknown | Optimize.Omt.Hard_unsat -> false)
 ;;
 
 let () =
@@ -303,7 +302,7 @@ let () =
     "hard infeasibility"
     (match Optimize.Omt.minimize session x with
      | Optimize.Omt.Hard_unsat -> true
-     | Optimize.Omt.Optimal _ | Optimize.Omt.Unbounded | Optimize.Omt.Unknown -> false)
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Unknown -> false)
 ;;
 
 let () =
@@ -315,7 +314,7 @@ let () =
     (match Optimize.Omt.minimize ~max_checks:2 session objective with
      | Optimize.Omt.Optimal optimum ->
        Bigint.equal optimum.value huge && helper_bindings_absent optimum.model
-     | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded | Optimize.Omt.Unknown -> false)
+     | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown -> false)
 ;;
 
 let () =
@@ -325,7 +324,7 @@ let () =
     "unbounded search exhausts deterministic budget"
     (match Optimize.Omt.minimize ~max_checks:4 session x with
      | Optimize.Omt.Unknown -> true
-     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat -> false);
   let ctx = Session.context session in
   Session.assert_term session (Context.eq ctx x (Context.int_const ctx 0));
   check
@@ -345,7 +344,7 @@ let () =
     "underlying unknown fails closed"
     (match Optimize.Omt.minimize session x with
      | Optimize.Omt.Unknown -> true
-     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded -> false)
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat -> false)
 ;;
 
 let () =
@@ -358,24 +357,18 @@ let () =
     "Boolean objective rejected"
     (match Optimize.Omt.minimize session bool_objective with
      | exception Invalid_argument _ -> true
-     | Optimize.Omt.Optimal _
-     | Optimize.Omt.Hard_unsat
-     | Optimize.Omt.Unbounded
-     | Optimize.Omt.Unknown -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown -> false);
   let int_objective = int_var session "negative_budget_x" in
   check
     "negative optimizer budget rejected"
     (match Optimize.Omt.minimize ~max_checks:(-1) session int_objective with
      | exception Invalid_argument _ -> true
-     | Optimize.Omt.Optimal _
-     | Optimize.Omt.Hard_unsat
-     | Optimize.Omt.Unbounded
-     | Optimize.Omt.Unknown -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown -> false);
   check
     "zero optimizer budget fails closed"
     (match Optimize.Omt.minimize ~max_checks:0 session int_objective with
      | Optimize.Omt.Unknown -> true
-     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unbounded -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat -> false);
   let condition =
     Context.const ctx (Session.declare_const session "ite_condition" Sort.bool)
   in
@@ -384,27 +377,18 @@ let () =
     "integer Ite objective rejected"
     (match Optimize.Omt.minimize session ite_objective with
      | exception Invalid_argument _ -> true
-     | Optimize.Omt.Optimal _
-     | Optimize.Omt.Hard_unsat
-     | Optimize.Omt.Unbounded
-     | Optimize.Omt.Unknown -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown -> false);
   let divisor = Context.int_const ctx 2 in
   check
     "div objective rejected"
     (match Optimize.Omt.minimize session (Context.div ctx int_objective divisor) with
      | exception Invalid_argument _ -> true
-     | Optimize.Omt.Optimal _
-     | Optimize.Omt.Hard_unsat
-     | Optimize.Omt.Unbounded
-     | Optimize.Omt.Unknown -> false);
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown -> false);
   check
     "mod objective rejected"
     (match Optimize.Omt.minimize session (Context.mod_ ctx int_objective divisor) with
      | exception Invalid_argument _ -> true
-     | Optimize.Omt.Optimal _
-     | Optimize.Omt.Hard_unsat
-     | Optimize.Omt.Unbounded
-     | Optimize.Omt.Unknown -> false)
+     | Optimize.Omt.Optimal _ | Optimize.Omt.Hard_unsat | Optimize.Omt.Unknown -> false)
 ;;
 
 let () =

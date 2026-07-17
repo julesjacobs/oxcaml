@@ -94,7 +94,7 @@ let indices_of_core ~index_by_atom ~disabled core =
     | [] -> Some (List.rev acc)
     | (atom, polarity) :: rest ->
       (match Term.Map.find_opt atom index_by_atom with
-       | Some index when polarity && not disabled.(index) && not seen.(index) ->
+       | Some index when polarity && (not disabled.(index)) && not seen.(index) ->
          seen.(index) <- true;
          collect (index :: acc) rest
        | Some _ | None -> None)
@@ -140,11 +140,13 @@ let check_and_strip_model selectors disabled cost ((sorts, bindings) as _model) 
         then witnessed_cost := Bigint.add !witnessed_cost selector.soft.weight
       | Some _ | None -> valid := false)
     selectors;
-  if not !valid || not (Bigint.equal !witnessed_cost cost)
+  if (not !valid) || not (Bigint.equal !witnessed_cost cost)
   then None
   else (
     let bindings =
-      List.filter (fun binding -> not (Hashtbl.mem by_name (binding_name binding))) bindings
+      List.filter
+        (fun binding -> not (Hashtbl.mem by_name (binding_name binding)))
+        bindings
     in
     Some (sorts, bindings))
 ;;
@@ -224,10 +226,7 @@ let max_smt ?max_checks session softs =
                     | None -> Unknown
                     | Some model ->
                       Optimal
-                        { cost
-                        ; model
-                        ; violated = violated_softs selectors disabled
-                        }))
+                        { cost; model; violated = violated_softs selectors disabled }))
               | Session.Sat, Some _ -> Unknown
               | Session.Unsat, None -> Unknown
               | Session.Unsat, Some [] -> Hard_unsat
@@ -248,7 +247,6 @@ module Omt = struct
   type result =
     | Optimal of optimum
     | Hard_unsat
-    | Unbounded
     | Unknown
 
   type direction =
@@ -376,15 +374,15 @@ module Omt = struct
           Fun.protect
             ~finally:(fun () -> Session.pop session)
             (fun () ->
-               Session.assert_term session constraint_;
-               match checked () with
-               | Session.Unknown -> Probe_unknown
-               | Session.Unsat -> Infeasible
-               | Session.Sat ->
-                 (match read_candidate () with
-                  | Some candidate when Bigint.compare candidate.score bound <= 0 ->
-                    Feasible candidate
-                  | Some _ | None -> Probe_unknown)))
+              Session.assert_term session constraint_;
+              match checked () with
+              | Session.Unknown -> Probe_unknown
+              | Session.Unsat -> Infeasible
+              | Session.Sat ->
+                (match read_candidate () with
+                 | Some candidate when Bigint.compare candidate.score bound <= 0 ->
+                   Feasible candidate
+                 | Some _ | None -> Probe_unknown)))
       in
       let midpoint low high =
         let distance = Bigint.sub high low in
@@ -419,14 +417,14 @@ module Omt = struct
       Fun.protect
         ~finally:(fun () -> Session.pop session)
         (fun () ->
-           Session.assert_term session (Context.eq ctx anchor objective);
-           match checked () with
-           | Session.Unknown -> Unknown
-           | Session.Unsat -> Hard_unsat
-           | Session.Sat ->
-             (match read_candidate () with
-              | None -> Unknown
-              | Some candidate -> bracket Bigint.one candidate)))
+          Session.assert_term session (Context.eq ctx anchor objective);
+          match checked () with
+          | Session.Unknown -> Unknown
+          | Session.Unsat -> Hard_unsat
+          | Session.Sat ->
+            (match read_candidate () with
+             | None -> Unknown
+             | Some candidate -> bracket Bigint.one candidate)))
   ;;
 
   let minimize ?max_checks session objective =

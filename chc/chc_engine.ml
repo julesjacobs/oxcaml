@@ -391,9 +391,9 @@ let interp_on =
 
 (* Direct equality-premise interpolation is deliberately dark by default. The public
    interpolation module handles signed equality coefficients, but retaining the legacy
-   Eq-to-Le query shape keeps the shipped CHC solve path unchanged. The dedicated
-   consumer test enables this flag and proves the generalized path reaches a checked,
-   admitted lemma. *)
+   Eq-to-Le query shape keeps the shipped CHC solve path unchanged. The dedicated consumer
+   test enables this flag and proves the generalized path reaches a checked, admitted
+   lemma. *)
 let interp_eq_on =
   match Sys.getenv_opt "OXSMT_CHC_INTERP_EQ" with
   | Some ("1" | "true" | "yes" | "on") -> true
@@ -415,13 +415,16 @@ let post_index_of_var (v : Term.t) : int option =
   | _ -> None
 ;;
 
-let expr_is_int (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : bool =
+let rec expr_is_int (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : bool =
   match e with
   | Int_lit _ | Add _ | Sub _ | Mul _ | Neg _ | Mod _ | Div _ -> true
   | Var x ->
     (match Hashtbl.find_opt sorts x with
      | Some s -> Sort.equal s Sort.int
      | None -> true)
+  (* An [Ite] is Int-sorted exactly when its branches are; both branches share a sort, so
+     either being provably Int classifies the whole conditional. *)
+  | Ite (_, a, b) -> expr_is_int sorts a || expr_is_int sorts b
   | _ -> false
 ;;
 
@@ -460,13 +463,13 @@ let interp_environment (ts : ts) session exprs =
   let variables = Hashtbl.create 64 in
   SS.iter
     (fun name ->
-       let sort =
-         match Hashtbl.find_opt ts.sorts name with
-         | Some sort -> sort
-         | None -> Sort.int
-       in
-       let symbol = Session.declare_const session name sort in
-       Hashtbl.replace variables name (Context.const context symbol))
+      let sort =
+        match Hashtbl.find_opt ts.sorts name with
+        | Some sort -> sort
+        | None -> Sort.int
+      in
+      let symbol = Session.declare_const session name sort in
+      Hashtbl.replace variables name (Context.const context symbol))
     (free_vars_list exprs);
   let resolve name =
     match Hashtbl.find_opt variables name with
@@ -672,8 +675,8 @@ let generalize (p : pdr) (i : int) (s : cube) : cube =
    replacement for the template {!generalize} that can express invariants neither interval
    nor difference-bound generalization reaches (e.g. [x + y = 10]). The blocking CTI query
    is split A = [R_{i-1} /\ T], B = [s'] (the goal cube over the post-state). The A-side
-   of the returned Farkas certificate sums to a McMillan
-   interpolant [I], and [¬I] is the generalized blocked cube.
+   of the returned Farkas certificate sums to a McMillan interpolant [I], and [¬I] is the
+   generalized blocked cube.
 
    FAIL-CLOSED at every step (→ [None], caller falls back to {!generalize}): no Farkas
    certificate, a malformed certificate, a trivial split, an interpolant mentioning an
@@ -681,9 +684,8 @@ let generalize (p : pdr) (i : int) (s : cube) : cube =
    unsat. {!Interpolation.interpolate} owns all of those checks and creates a fresh
    Session for each obligation. The final invariant is re-verified independently too. *)
 let interpolant_lemma (p : pdr) (i : int) (s : cube) : cube option =
-  if
-    List.exists
-      (fun l ->
+  if List.exists
+       (fun l ->
          match l.v with
          | VBool _ -> true
          | _ -> false)
@@ -708,48 +710,48 @@ let interpolant_lemma (p : pdr) (i : int) (s : cube) : cube option =
       (match Session.last_farkas session with
        | None -> None
        | Some certificate ->
-        if
-          List.exists
-            (fun (coefficient, (atom, polarity)) ->
-              (not (Oxsmt_lia.Rational.is_zero coefficient))
-              && polarity
-              &&
-              match atom.Term.node with
-              | Term.Eq (left, right) ->
-                Sort.equal left.Term.sort Sort.int && Sort.equal right.Term.sort Sort.int
-              | _ -> false)
-            certificate
-        then incr interp_eq_farkas;
-        incr interp_farkas;
-        let create () =
-          incr query_count;
-          check_budget ();
-          Session.create ~max_effort:!effort_cap ()
-        in
-        let candidate =
-          Interpolation.interpolate
-            session
-            ~side_of:(fun (atom, _) ->
-              if Term.Set.mem atom b_atoms
-              then Some Interpolation.B
-              else Some Interpolation.A)
-            ~project_shared:post_index_of_var
-            ~create
-            ~build:(build_interp_replay p.ts ~a_exprs ~b_exprs)
-            ~is_shared:(fun index -> index >= 0 && index < p.ts.arity)
-        in
-        match candidate with
-        | None -> None
-        | Some interpolant ->
-          incr interp_verified;
-          Some
-            [ { idx = 0
-              ; jdx = None
-              ; rel = Rge
-              ; v = VInt (Bigint.sub Bigint.one interpolant.constant)
-              ; lin = interpolant.coefficients
-              }
-            ])
+         if List.exists
+              (fun (coefficient, (atom, polarity)) ->
+                (not (Oxsmt_lia.Rational.is_zero coefficient))
+                && polarity
+                &&
+                match atom.Term.node with
+                | Term.Eq (left, right) ->
+                  Sort.equal left.Term.sort Sort.int
+                  && Sort.equal right.Term.sort Sort.int
+                | _ -> false)
+              certificate
+         then incr interp_eq_farkas;
+         incr interp_farkas;
+         let create () =
+           incr query_count;
+           check_budget ();
+           Session.create ~max_effort:!effort_cap ()
+         in
+         let candidate =
+           Interpolation.interpolate
+             session
+             ~side_of:(fun (atom, _) ->
+               if Term.Set.mem atom b_atoms
+               then Some Interpolation.B
+               else Some Interpolation.A)
+             ~project_shared:post_index_of_var
+             ~create
+             ~build:(build_interp_replay p.ts ~a_exprs ~b_exprs)
+             ~is_shared:(fun index -> index >= 0 && index < p.ts.arity)
+         in
+         (match candidate with
+          | None -> None
+          | Some interpolant ->
+            incr interp_verified;
+            Some
+              [ { idx = 0
+                ; jdx = None
+                ; rel = Rge
+                ; v = VInt (Bigint.sub Bigint.one interpolant.constant)
+                ; lin = interpolant.coefficients
+                }
+              ]))
     | _ -> None)
 ;;
 
