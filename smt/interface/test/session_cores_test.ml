@@ -8,9 +8,10 @@
       consumer.
 
    2. FARKAS CERTIFICATE — the returned coefficients ARE a Farkas certificate: recombining
-      [Σ coeffᵢ · half-plane(litᵢ)] over the rationals yields a variable-free STRICTLY-
-      POSITIVE constant (every variable coefficient cancels), i.e. the "0 < c"
-      contradiction. Positive-premise and negative-premise (ℤ-complement) conflicts both.
+      inequality half-planes and signed equality equations yields a variable-free
+      STRICTLY-POSITIVE constant (every variable coefficient cancels), i.e. the "0 < c"
+      contradiction. Positive-premise, negative-premise (ℤ-complement), and equality
+      conflicts are covered.
 
    3. FARKAS INTERPOLATION (the decisive CHC use) — on a
       counterexample-to-induction-shaped UNSAT query split into a frame side [A] and a bad
@@ -81,7 +82,9 @@ let bneg b = Bigint.mul (Bigint.of_int (-1)) b
    [e <= 0] for a returned core premise (task #106 carries polarity OUT OF BAND — the atom
    is never a negated term):
    - [(Le arg, true)] was asserted [arg <= 0] -> e = arg
-   - [(Le arg, false)] was asserted ¬(arg<=0) = arg>=1 -> e = -arg + 1 (ℤ-complement) *)
+   - [(Le arg, false)] was asserted ¬(arg<=0) = arg>=1 -> e = -arg + 1 (ℤ-complement)
+   - [(Eq(a,b), true)] is the equation basis [a-b = 0]; its certificate coefficient is
+     signed and therefore unrestricted. *)
 let half_plane ((atom, polarity) : Term.t * bool) : (Term.t * Bigint.t) list * Bigint.t =
   match atom.Term.node with
   | Term.Le arg ->
@@ -90,8 +93,11 @@ let half_plane ((atom, polarity) : Term.t * bool) : (Term.t * Bigint.t) list * B
     else (
       let pairs, c = linear_of arg in
       List.map (fun (v, b) -> v, bneg b) pairs, Bigint.add (bneg c) Bigint.one)
-  | _ ->
-    failwith "half_plane: atom is not an Le (an equality premise carries no Farkas cert)"
+  | Term.Eq (a, b) when polarity && Sort.equal a.Term.sort Sort.int ->
+    let a_vars, a_const = linear_of a in
+    let b_vars, b_const = linear_of b in
+    a_vars @ List.map (fun (v, c) -> v, bneg c) b_vars, Bigint.sub a_const b_const
+  | _ -> failwith "half_plane: unsupported Farkas premise"
 ;;
 
 (* A plainly-asserted (positive) [Term.t] read as its half-plane — for the in-test atoms
@@ -382,52 +388,71 @@ let () =
 (* ========================================================================= Finding #1
    (codex review) — EQUALITY-PREMISE Farkas orientation.
 
-   An Int equality [x = k] is lowered into BOTH an upper and a lower bound sharing one
-   premise token, so a Farkas multiplier paired with it has no single half-plane
-   orientation and [Σ coeffᵢ·half-plane] cannot be reconstructed. [last_farkas] now
-   returns [None] whenever a premise is an equality (fail-closed); the core itself stays
-   valid and re-checkable. RED before the fix: [last_farkas] returned a coefficient paired
-   with the unoriented [x = k].
+   An Int equality [x = k] is lowered into upper and lower bounds. The evidence boundary
+   now preserves which side contributed: upper is a positive multiplier on [x-k=0],
+   lower a negative one. The mirror cases below force both orientations and independently
+   recombine the public certificate. RED before the fix: [last_farkas] was [None].
    ========================================================================= *)
 
-let () =
-  let name = "eq-premise" in
+let check_equality_orientation name ~eq_value ~bound ~expected_sign =
   let s = Session.create () in
-  (* x = y && x <= 0 && y >= 1 : the equality is a genuine conflict premise (x = y forces
-     y <= 0, clashing with y >= 1). Two vars keep the equality from being eliminated to a
-     constant relation. *)
   let build sess =
-    let c = Session.context sess in
-    let xv = int_var sess "ex" in
-    let yv = int_var sess "ey" in
-    [ Context.eq c xv yv; le sess xv (ic sess 0); le sess (ic sess 1) yv ]
+    let context = Session.context sess in
+    let x = int_var sess (name ^ "_x") in
+    [ Context.eq context x (ic sess eq_value); bound sess x ]
   in
   List.iter (Session.assert_term s) (build s);
-  match Session.check_sat s with
-  | Session.Unsat ->
-    (match Session.last_unsat_core s with
-     | None -> fail name "core = None on an equality-premise LIA conflict"
-     | Some core ->
-       check_true (name ^ ": core nonempty") (core <> []);
-       check_true
-         (name ^ ": core has an equality premise")
-         (List.exists
-            (fun (atom, _) ->
-              match atom.Term.node with
-              | Term.Eq (a, _) -> not (Sort.equal a.Term.sort Sort.bool)
-              | _ -> false)
-            core);
-       let s2 = Session.create () in
-       List.iter (Session.assert_term s2) (build s2);
-       expect_verdict
-         (name ^ ": core re-check unsat")
-         (Session.check_sat s2)
-         Session.Unsat);
+  expect_verdict (name ^ ": unsat") (Session.check_sat s) Session.Unsat;
+  (match Session.last_unsat_core s with
+   | None -> fail name "core = None on an equality-premise LIA conflict"
+   | Some core ->
+     check_true (name ^ ": core nonempty") (core <> []);
+     check_true
+       (name ^ ": core has an equality premise")
+       (List.exists
+          (fun (atom, _) ->
+            match atom.Term.node with
+            | Term.Eq (a, _) -> Sort.equal a.Term.sort Sort.int
+            | _ -> false)
+          core));
+  let s2 = Session.create () in
+  List.iter (Session.assert_term s2) (build s2);
+  expect_verdict (name ^ ": core re-check unsat") (Session.check_sat s2) Session.Unsat;
+  match Session.last_farkas s with
+  | None -> fail name "last_farkas = None on an equality-premise conflict"
+  | Some certificate ->
+    let equality_coefficients =
+      List.filter_map
+        (fun (coefficient, (atom, _)) ->
+          match atom.Term.node with
+          | Term.Eq (a, _) when Sort.equal a.Term.sort Sort.int -> Some coefficient
+          | _ -> None)
+        certificate
+    in
+    check_true (name ^ ": equality coefficient present") (equality_coefficients <> []);
     check_true
-      (name ^ ": farkas absent (equality orientation ambiguous)")
-      (Session.last_farkas s = None)
-  | Session.Unknown -> ok (name ^ ": unknown tolerated")
-  | Session.Sat -> fail name "x=y & x<=0 & y>=1 reported Sat (unsound)"
+      (name ^ ": equality coefficient orientation")
+      (List.exists
+         (fun coefficient -> Rational.sign coefficient = expected_sign)
+         equality_coefficients);
+    let map, constant = accumulate certificate in
+    check_true (name ^ ": certificate variables cancel") (nonzero_bindings map = []);
+    check_true (name ^ ": certificate constant positive") (Rational.sign constant > 0)
+;;
+
+let () =
+  (* [x = 1] contributes its lower half-plane against [x <= 0], hence coefficient -1
+     on the equation [x-1=0]. The mirror uses the upper half-plane and coefficient +1. *)
+  check_equality_orientation
+    "eq-lower"
+    ~eq_value:1
+    ~bound:(fun sess x -> le sess x (ic sess 0))
+    ~expected_sign:(-1);
+  check_equality_orientation
+    "eq-upper"
+    ~eq_value:0
+    ~bound:(fun sess x -> le sess (ic sess 1) x)
+    ~expected_sign:1
 ;;
 
 (* ========================================================================= Finding #3

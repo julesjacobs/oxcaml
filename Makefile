@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -649,6 +649,12 @@ cdclt-lemma-test:
 session-cores-test:
 	$(DUNE) exec smt/interface/test/session_cores_test.exe
 
+## interpolation-test — public equality-aware interpolation consumer. Requires a signed
+## equality certificate, fresh-session checks of A=>I and I&B unsat, shared vocabulary,
+## and rejection of independent weaken/strengthen corruptions.
+interpolation-test:
+	$(DUNE) exec smt/interface/test/interpolation_test.exe
+
 ## optimize-test — certified weighted MaxSMT consumer proof: exhaustive Boolean oracle,
 ## returned-model objective check, weighted multi-core discrimination, duplicate soft
 ## occurrences, hard-unsat, and fail-closed optimizer budget. Stdlib-only, deterministic.
@@ -907,6 +913,7 @@ test: check-frozen
 	$(MAKE) cut-budget-test
 	$(MAKE) cdclt-lemma-test
 	$(MAKE) session-cores-test
+	$(MAKE) interpolation-test
 	$(MAKE) optimize-test
 	$(MAKE) omt-test
 	$(MAKE) chrono-incr-undo-test
@@ -939,6 +946,7 @@ test: check-frozen
 	$(MAKE) satpre-test
 	$(MAKE) satcore-test
 	$(MAKE) lemma-backjump-test
+	$(MAKE) chc-interp-test
 	$(MAKE) chc-test
 
 ## chc-test — CHC (Constrained Horn Clause) solver self-tests: a graded suite of
@@ -949,6 +957,13 @@ test: check-frozen
 chc-test:
 	$(DUNE) build chc/test/chc_test.exe
 	OXSMT_LIA_GCD_CUT=1 $(DUNE) exec chc/test/chc_test.exe
+
+## chc-interp-test — direct Int-equality interpolation through the real CHC PDR loop.
+## The generalized query shape is dark by default; this gate enables it and requires a
+## Farkas candidate to be independently verified and admitted as a lemma.
+chc-interp-test:
+	$(DUNE) build chc/test/chc_interp_test.exe
+	OXSMT_LIA_GCD_CUT=1 OXSMT_CHC_INTERP_EQ=1 $(DUNE) exec chc/test/chc_interp_test.exe
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

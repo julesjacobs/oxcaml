@@ -132,10 +132,11 @@ let cut_gate ~nnz ~ants ~m ~n =
 type conflict_core =
   { farkas : Rational.t list option
       (* [Some coeffs] for a Farkas-certified rational-infeasibility conflict, index-
-         aligned with [atoms] ([coeffᵢ >= 0] the multiplier for [atomsᵢ]'s half-plane);
-         [None] for a Diophantine / divisibility conflict, whose engine [farkas] vector is
-         empty (the cert is the GCD argument, not a rational multiplier — see
-         {!Lia.diophantine_conflict}). *)
+         aligned with [atoms]. Inequality coefficients are nonnegative half-plane
+         multipliers; a positive Int equality's coefficient is signed and multiplies its
+         equation. [None] for a Diophantine / divisibility conflict, whose engine
+         [farkas] vector is empty (the cert is the GCD argument, not a rational
+         multiplier — see {!Lia.diophantine_conflict}). *)
   ; atoms :
       (Term.t * bool) list (* each premise atom's [Term.t] + its asserted polarity *)
   }
@@ -626,31 +627,26 @@ let last_conflict_core t : conflict_core option =
     (match map [] premises with
      | None -> None
      | Some atoms ->
-       (* An Int equality premise ([x = k]) is lowered into BOTH an upper and a lower
-          bound on the same var ({!Lia.equality_reading}), both attributed to the SAME
-          premise token. A Farkas multiplier paired with that token therefore has no
-          single half-plane orientation: the proof used one side ([x >= k] or [x <= k]),
-          but the surfaced atom [x = k] cannot say which, so [Σ coeffᵢ·half-plane(atomᵢ)]
-          cannot be honestly reconstructed by a consumer. Fail-closed: emit NO Farkas
-          certificate when any premise is an equality. The core itself ([atoms]) stays
-          valid and is still surfaced — an equality is a sound member of a T-unsat core. *)
-       let has_equality_premise =
-         List.exists
-           (fun (tm, _) ->
-             match tm.Term.node with
-             | Term.Eq (a, _) -> not (Sort.equal a.Term.sort Sort.bool)
-             | _ -> false)
-           atoms
+       (* [farkas] is either empty (a Diophantine/divisibility conflict → no rational
+          multiplier vector) or index-aligned and equal in length to the premises. The
+          LIA boundary preserves which bound of an equality contributed: its upper bound
+          becomes a positive equation coefficient and its lower bound a negative one.
+          Reject every malformed sign/atom combination here rather than exposing an
+          ambiguous certificate. *)
+       let valid_coefficient coeff (tm, polarity) =
+         match tm.Term.node with
+         | Term.Le _ -> Rational.sign coeff >= 0
+         | Term.Eq (a, b)
+           when Sort.equal a.Term.sort Sort.int && Sort.equal b.Term.sort Sort.int ->
+           polarity
+         | _ -> false
        in
-       (* [farkas] is otherwise either empty (a Diophantine/divisibility conflict → no
-          rational multiplier vector) or index-aligned and equal in length to the premises
-          (a Farkas conflict). A length mismatch is not a shape we produce; surface no
-          coefficients rather than misalign them. *)
        let farkas =
          match farkas with
-         | _ when has_equality_premise -> None
          | [] -> None
-         | fs when List.compare_lengths fs atoms = 0 -> Some fs
+         | fs
+           when List.compare_lengths fs atoms = 0
+                && List.for_all2 valid_coefficient fs atoms -> Some fs
          | _ -> None
        in
        Some { farkas; atoms })

@@ -85,15 +85,14 @@ val propagation_reason : Lit.t list -> Explanation.t
 (** The Farkas / premise evidence of one theory conflict, mapped to terms. *)
 type conflict_core =
   { farkas : Rational.t list option
-  (** [Some coeffs] (index-aligned with [atoms], [coeffᵢ >= 0] the multiplier for
-      [atomsᵢ]'s asserted half-plane, [Σ coeffᵢ·half-planeᵢ] a false constant) for a
-      Farkas-certified rational-infeasibility conflict. [None] when: (a) the conflict is
-      Diophantine / divisibility (empty engine [farkas] vector — certified by GCD, not a
-      rational multiplier), or (b) any premise is an Int equality [x = k], whose token
-      covers both an upper and a lower bound so a coefficient paired with it has no single
-      half-plane orientation (fail-closed — the equality-free [atoms] core stays valid). *)
+    (** [Some coeffs] for a Farkas-certified rational-infeasibility conflict, index-aligned
+      with [atoms]. An inequality coefficient is nonnegative and multiplies its asserted
+      half-plane. A positive Int equality coefficient is signed and multiplies [a - b =
+      0]. Their sum is a variable-free false constant. [None] for a Diophantine /
+      divisibility conflict (empty engine vector), a shape/sign mismatch, or unsupported
+      premises. *)
   ; atoms : (Term.t * bool) list
-  (** each premise atom's [Term.t] and its asserted polarity, in premise order. *)
+    (** each premise atom's [Term.t] and its asserted polarity, in premise order. *)
   }
 
 (** [last_conflict_core t] is the {!conflict_core} of the MOST RECENT conflict this

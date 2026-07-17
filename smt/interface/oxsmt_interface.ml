@@ -12,6 +12,9 @@
 
 module Session = Session
 
+(** Checked QF_LIA interpolation over the public Session evidence API. *)
+module Interpolation = Interpolation
+
 (** Certified weighted MaxSMT over the public {!Session} API. *)
 module Optimize = Optimize
 

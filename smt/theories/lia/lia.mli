@@ -43,8 +43,10 @@ open Oxsmt_core
 
 type 'tok t
 
-(** A Farkas-certified infeasible core: [farkasᵢ >= 0] is the multiplier for [premisesᵢ]'s
-    half-plane; [Σ farkasᵢ · half-planeᵢ] is a variable-free positive constant. *)
+(** A Farkas-certified infeasible core. For an inequality premise, [farkasᵢ >= 0] is
+    its asserted half-plane multiplier. For a positive Int equality [a = b], [farkasᵢ]
+    is an unrestricted signed multiplier on the equation [a - b = 0]. Their sum is a
+    variable-free positive constant. *)
 type 'tok conflict =
   { premises : 'tok list
   ; farkas : Rational.t list

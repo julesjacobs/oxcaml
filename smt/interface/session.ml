@@ -2253,8 +2253,9 @@ let last_farkas t =
      | None | Some { farkas = None; _ } -> None
      | Some { farkas = Some coeffs; atoms } ->
        (* [coeffs] is index-aligned and equal-length with [atoms] (the adapter drops a
-          mismatch, and any equality-premise ambiguity, to [None]); pair each Farkas
-          multiplier with its [(atom, polarity)] half-plane. *)
+          mismatch or invalid atom/sign shape to [None]); pair each Farkas multiplier
+          with its [(atom, polarity)] premise. Equality coefficients are signed equation
+          multipliers; inequality coefficients are nonnegative half-plane multipliers. *)
        Some (List.map2 (fun c a -> c, a) coeffs atoms))
 ;;
 

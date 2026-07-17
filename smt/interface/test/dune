@@ -20,6 +20,15 @@
  (modules session_cores_test)
  (libraries oxsmt_core oxsmt_lia oxsmt_interface))
 
+; Equality-aware, checked interpolation consumer proof: a direct Int equality premise,
+; both fresh-session obligations, shared vocabulary, and two corruptions that isolate the
+; obligation checks. Run via `make interpolation-test`; included in `make test`.
+
+(executable
+ (name interpolation_test)
+ (modules interpolation_test)
+ (libraries oxsmt_core oxsmt_lia oxsmt_interface))
+
 ; Certified weighted MaxSMT consumer proof: exhaustive Boolean optimum oracle, returned-
 ; model cost check, weighted multi-core discrimination, duplicates, hard-unsat, and
 ; fail-closed budget paths. Run via `make optimize-test`; included in `make test`.

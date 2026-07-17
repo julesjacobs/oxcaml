@@ -11,10 +11,19 @@ exception Unsupported of string
 exception Poisoned
 
 (* Simplex premise tokens: user atoms carry the caller's ['tok]; B&B branch bounds carry
-   an internal marker so they never masquerade as an input-core premise. *)
+   an internal marker so they never masquerade as an input-core premise. An Int equality
+   is asserted as an upper and a lower bound. The lower-bound marker preserves which half
+   of the equation a Farkas conflict used, so {!externalize} can expose its unrestricted
+   equation multiplier with the correct sign. *)
 type 'tok reason =
   | User of 'tok
+  | Equality_lower of 'tok
   | Branch of int
+
+let user_token = function
+  | User tok | Equality_lower tok -> Some tok
+  | Branch _ -> None
+;;
 
 type 'tok conflict =
   { premises : 'tok list
@@ -416,17 +425,22 @@ let constraints_of_atom t (atom : Term.t) ~polarity
    [premise]. Marks each touched var dirty for the next propagate delta. Callers wrap this
    in {!guard_overflow} so a coefficient overflow during the preceding combo computation
    poisons cleanly. *)
-let apply_bounds t cs ~premise =
+let apply_bounds t cs ~premise ~equality =
   List.iter
     (fun (var, sense, rhs) ->
       (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
          mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
          already-entailed bound is harmless: the delta skips its already-reported atoms.) *)
       Hashtbl.replace t.dirty var ();
+      let reason =
+        match equality, sense with
+        | true, `Lower -> Equality_lower premise
+        | _ -> User premise
+      in
       let _ : _ Simplex.conflict option =
         match sense with
-        | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
-        | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
+        | `Upper -> Simplex.assert_upper t.simplex var rhs reason
+        | `Lower -> Simplex.assert_lower t.simplex var rhs reason
       in
       ())
     cs
@@ -461,8 +475,10 @@ let assert_atom t atom ~polarity ~premise =
          (match t.false_frames with
           | fr :: rest -> t.false_frames <- (premise :: fr) :: rest
           | [] -> t.false_frames <- [ [ premise ] ])
-       | Bounds cs -> apply_bounds t cs ~premise)
-    | _ -> apply_bounds t (constraints_of_atom t atom ~polarity) ~premise)
+       | Bounds cs -> apply_bounds t cs ~premise ~equality:true)
+    | Eq (a, _) when polarity && not (Sort.equal a.sort Sort.bool) ->
+      apply_bounds t (constraints_of_atom t atom ~polarity) ~premise ~equality:true
+    | _ -> apply_bounds t (constraints_of_atom t atom ~polarity) ~premise ~equality:false)
 ;;
 
 (* ADR-0014 Stage 2 fabric [new_eq] entry: assert an EUF-entailed positive Int equality
@@ -513,7 +529,7 @@ let notify_equality t (eq : Term.t) ~premise =
         if trivial_eq_fix_on
         then record_false ()
         else raise (Unsupported "LIA: trivial equality (should be folded)")
-      | Bounds cs -> apply_bounds t cs ~premise)
+      | Bounds cs -> apply_bounds t cs ~premise ~equality:true)
   | Bool_const true ->
     () (* [Context.eq] folded a true equality: tautology, no constraint *)
   | Bool_const false ->
@@ -685,13 +701,17 @@ let activate_pending_equalities t =
 ;;
 
 (* Map an internal simplex conflict to the public one, dropping any [Branch] premise
-   (which only appears inside {!solve_integer}'s branches). *)
+   (which only appears inside {!solve_integer}'s branches). A simplex multiplier is
+   nonnegative for either bound of an equality [a = b]. Its upper bound is [a - b <= 0],
+   while its lower bound is [b - a <= 0], so the latter becomes a negative coefficient on
+   the public equation [a - b = 0]. *)
 let externalize (c : _ Simplex.conflict) : 'tok conflict =
   let premises, farkas =
     List.fold_right2
       (fun p f (ps, fs) ->
         match p with
         | User tok -> tok :: ps, f :: fs
+        | Equality_lower tok -> tok :: ps, Rational.neg f :: fs
         | Branch _ -> ps, fs)
       c.premises
       c.farkas
@@ -805,8 +825,8 @@ let tightest_oriented t (term : Term.t) (which : [ `Lower | `Upper ]) =
   | Some (pairs, const) ->
     let take_user b =
       match b with
-      | Some (User tok, (d : Delta.t)) -> Some (d, tok)
-      | Some (Branch _, _) | None -> None
+      | Some (reason, (d : Delta.t)) -> Option.map (fun tok -> d, tok) (user_token reason)
+      | None -> None
     in
     let flip = function
       | Some (d, tok) -> Some (Delta.neg d, tok)
@@ -1139,13 +1159,13 @@ let oriented_bound_value t (term : Term.t) (which : [ `Lower | `Upper ]) =
   | Some (pairs, const) ->
     let user_lower v =
       match Simplex.get_lower t.simplex v with
-      | Some (User tok, d) -> Some (tok, d)
-      | Some (Branch _, _) | None -> None
+      | Some (reason, d) -> Option.map (fun tok -> tok, d) (user_token reason)
+      | None -> None
     in
     let user_upper v =
       match Simplex.get_upper t.simplex v with
-      | Some (User tok, d) -> Some (tok, d)
-      | Some (Branch _, _) | None -> None
+      | Some (reason, d) -> Option.map (fun tok -> tok, d) (user_token reason)
+      | None -> None
     in
     let pos = existing_combo_var t pairs in
     let neg = existing_combo_var t (negate_pairs pairs) in
@@ -1370,11 +1390,7 @@ let assemble_tight_system ?(max_rows = Hnf.max_rows) ?(select_rank = false) t
       in
       Hashtbl.replace by_var r.Simplex.row_var (r :: prev))
     (Simplex.tight_rows t.simplex);
-  let user_tok (r : _ Simplex.tight_row) =
-    match r.Simplex.row_reason with
-    | User tok -> Some tok
-    | Branch _ -> None
-  in
+  let user_tok (r : _ Simplex.tight_row) = user_token r.Simplex.row_reason in
   let rows =
     Hashtbl.fold
       (fun _ rs acc ->
@@ -1927,6 +1943,15 @@ let propagate t =
            All reasons are active [User] premises, hence valid trail antecedents. *)
         let up = Simplex.get_upper t.simplex r.var in
         let lo = Simplex.get_lower t.simplex r.var in
+        (* R4 threads the observational [Equality_lower] tag through the simplex; read
+           every bound via [user_bound] so an equality's retagged lower bound is still
+           seen by propagation exactly as when it was a plain [User] bound (the tag is
+           stripped by [user_token]). This keeps gap4's [Reg_equal] two-premise emission
+           byte-identical. *)
+        let user_bound = function
+          | Some (reason, d) -> Option.map (fun tok -> tok, d) (user_token reason)
+          | None -> None
+        in
         let emit polarity premises =
           out := (r.atom, polarity, premises) :: !out;
           Dynarray.set t.reported i true;
@@ -1937,28 +1962,24 @@ let propagate t =
         match r.kind with
         | Reg_upper rhs ->
           (* atom: var <= rhs *)
-          (match up with
-           | Some (User tok, u) when Delta.le u rhs -> emit true [ tok ]
+          (match user_bound up with
+           | Some (tok, u) when Delta.le u rhs -> emit true [ tok ]
            | _ ->
-             (match lo with
-              | Some (User tok, l) when Delta.lt rhs l -> emit false [ tok ]
+             (match user_bound lo with
+              | Some (tok, l) when Delta.lt rhs l -> emit false [ tok ]
               | _ -> ()))
         | Reg_lower rhs ->
           (* atom: var >= rhs *)
-          (match lo with
-           | Some (User tok, l) when Delta.le rhs l -> emit true [ tok ]
+          (match user_bound lo with
+           | Some (tok, l) when Delta.le rhs l -> emit true [ tok ]
            | _ ->
-             (match up with
-              | Some (User tok, u) when Delta.lt u rhs -> emit false [ tok ]
+             (match user_bound up with
+              | Some (tok, u) when Delta.lt u rhs -> emit false [ tok ]
               | _ -> ()))
         | Reg_equal { neg_var; rhs } ->
           (* A bound on [-var] is an oppositely-oriented bound on [var]. Select the
-             tightest active User bound on each side, preserving positive-var precedence
+             tightest active user bound on each side, preserving positive-var precedence
              on ties for determinism. *)
-          let user = function
-            | Some (User tok, d) -> Some (tok, d)
-            | Some (Branch _, _) | None -> None
-          in
           let flip = function
             | Some (tok, d) -> Some (tok, Delta.neg d)
             | None -> None
@@ -1976,13 +1997,13 @@ let propagate t =
           let eq_up =
             List.filter_map
               Fun.id
-              [ user up; flip (user (Simplex.get_lower t.simplex neg_var)) ]
+              [ user_bound up; flip (user_bound (Simplex.get_lower t.simplex neg_var)) ]
             |> tightest Delta.lt
           in
           let eq_lo =
             List.filter_map
               Fun.id
-              [ user lo; flip (user (Simplex.get_upper t.simplex neg_var)) ]
+              [ user_bound lo; flip (user_bound (Simplex.get_upper t.simplex neg_var)) ]
             |> tightest (fun d best -> Delta.lt best d)
           in
           (match eq_up, eq_lo with

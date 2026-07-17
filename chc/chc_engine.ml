@@ -23,13 +23,13 @@
    (BMC/PDR generalization to per-predicate frames is a later stage). *)
 
 module Session = Oxsmt_interface.Session
+module Interpolation = Oxsmt_interface.Interpolation
 module Context = Oxsmt_core.Context
 module Sort = Oxsmt_core.Sort
 module Bigint = Oxsmt_core.Bigint
 module Term = Oxsmt_core.Term
 module Iarr = Oxsmt_core.Iarr
 module Symbol = Oxsmt_core.Symbol
-module Rational = Oxsmt_lia.Rational
 open Chc_ast
 
 type verdict =
@@ -366,17 +366,20 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
    verified interpolants that were also admissible and admitted as a lemma. *)
 let interp_attempts = ref 0
 let interp_farkas = ref 0
+let interp_eq_farkas = ref 0
 let interp_verified = ref 0
 let interp_used = ref 0
 
 let reset_interp_stats () =
   interp_attempts := 0;
   interp_farkas := 0;
+  interp_eq_farkas := 0;
   interp_verified := 0;
   interp_used := 0
 ;;
 
 let interp_stats () = !interp_attempts, !interp_farkas, !interp_verified, !interp_used
+let interp_eq_farkas_count () = !interp_eq_farkas
 
 (* Farkas-interpolant generalization is ON by default; [OXSMT_CHC_INTERP=0] disables it
    (falls back to template generalization only) — an A/B lever for measuring its impact. *)
@@ -386,58 +389,15 @@ let interp_on =
   | _ -> true
 ;;
 
-let rec igcd a b = if b = 0 then abs a else igcd b (a mod b)
-let ilcm a b = if a = 0 || b = 0 then 0 else abs (a / igcd a b * b)
-
-(* Linear form [(var, coeff) list, const] of an [Int]-sorted [Le]-atom argument
-   ([arg <= 0]). Mirrors the #106 consumer proof (session_cores_test.ml). *)
-let linear_of (arg : Term.t) : (Term.t * Bigint.t) list * Bigint.t =
-  match arg.Term.node with
-  | Term.Arith { coeffs; const } -> Iarr.to_list coeffs, const
-  | Term.Int_const c -> [], c
-  | _ -> [ arg, Bigint.one ], Bigint.zero
-;;
-
-let bneg b = Bigint.mul (Bigint.of_int (-1)) b
-
-(* Linear form [e] of the ASSERTED half-plane [e <= 0] for a returned core premise. #106
-   carries polarity OUT OF BAND (the atom is never a negated term): a positive [Le arg]
-   was asserted [arg <= 0]; a negative one was asserted [not (arg <= 0)] = [arg >= 1],
-   i.e. [-arg + 1 <= 0] (ℤ-complement). Raises {!Give_up} on a non-[Le] premise (an
-   equality premise has no single-half-plane orientation — #106 already returns [None] for
-   those). *)
-let half_plane ((atom, polarity) : Term.t * bool) : (Term.t * Bigint.t) list * Bigint.t =
-  match atom.Term.node with
-  | Term.Le arg ->
-    if polarity
-    then linear_of arg
-    else (
-      let pairs, c = linear_of arg in
-      List.map (fun (v, b) -> v, bneg b) pairs, Bigint.add (bneg c) Bigint.one)
-  | _ -> raise (Give_up "interp: non-Le premise")
-;;
-
-(* Accumulate [Σ coeffᵢ · half-plane(litᵢ)] over the rationals into a (var -> coeff) map +
-   constant — the summed half-plane [I = (Σ map·var + const) <= 0]. *)
-let accumulate (pairs : (Rational.t * (Term.t * bool)) list) =
-  let map = ref Term.Map.empty in
-  let const = ref Rational.zero in
-  List.iter
-    (fun (coeff, lit) ->
-      let vars, c = half_plane lit in
-      List.iter
-        (fun (v, b) ->
-          let contrib = Rational.mul coeff (Rational.of_bigint b) in
-          let prev =
-            match Term.Map.find_opt v !map with
-            | Some r -> r
-            | None -> Rational.zero
-          in
-          map := Term.Map.add v (Rational.add prev contrib) !map)
-        vars;
-      const := Rational.add !const (Rational.mul coeff (Rational.of_bigint c)))
-    pairs;
-  !map, !const
+(* Direct equality-premise interpolation is deliberately dark by default. The public
+   interpolation module handles signed equality coefficients, but retaining the legacy
+   Eq-to-Le query shape keeps the shipped CHC solve path unchanged. The dedicated
+   consumer test enables this flag and proves the generalized path reaches a checked,
+   admitted lemma. *)
+let interp_eq_on =
+  match Sys.getenv_opt "OXSMT_CHC_INTERP_EQ" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | _ -> false
 ;;
 
 (* Recover the post-state index [k] of a shared variable named ["y{k}"]; [None] for a
@@ -455,47 +415,6 @@ let post_index_of_var (v : Term.t) : int option =
   | _ -> None
 ;;
 
-(* Build the blocked cube [¬I] over the UNPRIMED state from the A-side of a Farkas
-   certificate: [I = (Σ_k c_k·x_k + c0) <= 0] is the summed A-part half-plane; its integer
-   complement [Σ_k c_k·x_k >= 1 - c0] is a single general-linear cube literal. Returns
-   [None] (fall back) when the sum mentions any A-local (non-shared) variable, is a pure
-   constant, or the denominators degenerate — i.e. it is not a shared-vocabulary
-   interpolant. Independent re-verification (caller) is the actual soundness gate. *)
-let interp_cube_of_a_part (a_part : (Rational.t * (Term.t * bool)) list) : cube option =
-  match
-    let map, cst = accumulate a_part in
-    let entries =
-      Term.Map.bindings map |> List.filter (fun (_, r) -> not (Rational.is_zero r))
-    in
-    let ks =
-      List.map
-        (fun (v, r) ->
-          match post_index_of_var v with
-          | Some k -> k, r
-          | None -> raise Exit)
-        entries
-    in
-    if ks = [] then raise Exit;
-    let d =
-      List.fold_left (fun acc (_, r) -> ilcm acc (Rational.den r)) (Rational.den cst) ks
-    in
-    if d = 0 then raise Exit;
-    let scale r =
-      Bigint.mul (Rational.num_bigint r) (Bigint.of_int (d / Rational.den r))
-    in
-    let lin = List.map (fun (k, r) -> k, scale r) ks in
-    let cst_b = scale cst in
-    Some
-      [ { idx = 0; jdx = None; rel = Rge; v = VInt (Bigint.sub Bigint.one cst_b); lin } ]
-  with
-  | result -> result
-  | exception Exit -> None
-  | exception _ -> None
-;;
-
-(* Is [e] an Int-sorted expression? Arithmetic shapes are Int; a variable's sort is read
-   from the registered [sorts] table (defaulting Int, matching {!solve_exprs}); everything
-   else (Bool literals, comparisons, connectives) is Bool. *)
 let expr_is_int (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : bool =
   match e with
   | Int_lit _ | Add _ | Sub _ | Mul _ | Neg _ | Mod _ | Div _ -> true
@@ -506,73 +425,87 @@ let expr_is_int (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : bool =
   | _ -> false
 ;;
 
-(* Rewrite every INT-sorted equality [a = b] into [a <= b /\ b <= a] (a semantics-
-   preserving rewrite for Int equalities, and correct under negation: [¬(a=b)] becomes
-   [a>b ∨ b>a]). Transition systems express init/trans as equalities; leaving them as [Eq]
-   atoms makes {!Session.last_farkas} return [None] for the whole certificate (#106 F1: an
-   equality premise has no single-half-plane orientation). Splitting them keeps every
-   premise a [Le] atom so a Farkas interpolant is available. Bool equalities (iff) are
-   left untouched. *)
+(* The legacy CHC evidence query split Int equalities into their two half-planes. Keep it
+   for the default path; [OXSMT_CHC_INTERP_EQ=1] bypasses this workaround and exercises
+   the public signed-equality evidence directly. *)
 let rec split_int_eqs (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : expr =
-  let r = split_int_eqs sorts in
+  let recurse = split_int_eqs sorts in
   match e with
   | Eq (a, b) when expr_is_int sorts a || expr_is_int sorts b ->
-    And [ Le (r a, r b); Le (r b, r a) ]
-  | Eq (a, b) -> Eq (r a, r b)
+    And [ Le (recurse a, recurse b); Le (recurse b, recurse a) ]
+  | Eq (a, b) -> Eq (recurse a, recurse b)
   | Var _ | Int_lit _ | Bool_lit _ -> e
-  | Neg a -> Neg (r a)
-  | Not a -> Not (r a)
-  | Add es -> Add (List.map r es)
-  | Sub es -> Sub (List.map r es)
-  | And es -> And (List.map r es)
-  | Or es -> Or (List.map r es)
-  | Distinct es -> Distinct (List.map r es)
-  | Mul (a, b) -> Mul (r a, r b)
-  | Div (a, b) -> Div (r a, r b)
-  | Mod (a, b) -> Mod (r a, r b)
-  | Le (a, b) -> Le (r a, r b)
-  | Lt (a, b) -> Lt (r a, r b)
-  | Ge (a, b) -> Ge (r a, r b)
-  | Gt (a, b) -> Gt (r a, r b)
-  | Implies (a, b) -> Implies (r a, r b)
-  | Iff (a, b) -> Iff (r a, r b)
-  | Ite (a, b, c) -> Ite (r a, r b, r c)
-  | Pred_app (n, es) -> Pred_app (n, List.map r es)
+  | Neg a -> Neg (recurse a)
+  | Not a -> Not (recurse a)
+  | Add expressions -> Add (List.map recurse expressions)
+  | Sub expressions -> Sub (List.map recurse expressions)
+  | And expressions -> And (List.map recurse expressions)
+  | Or expressions -> Or (List.map recurse expressions)
+  | Distinct expressions -> Distinct (List.map recurse expressions)
+  | Mul (a, b) -> Mul (recurse a, recurse b)
+  | Div (a, b) -> Div (recurse a, recurse b)
+  | Mod (a, b) -> Mod (recurse a, recurse b)
+  | Le (a, b) -> Le (recurse a, recurse b)
+  | Lt (a, b) -> Lt (recurse a, recurse b)
+  | Ge (a, b) -> Ge (recurse a, recurse b)
+  | Gt (a, b) -> Gt (recurse a, recurse b)
+  | Implies (a, b) -> Implies (recurse a, recurse b)
+  | Iff (a, b) -> Iff (recurse a, recurse b)
+  | Ite (a, b, c) -> Ite (recurse a, recurse b, recurse c)
+  | Pred_app (name, expressions) -> Pred_app (name, List.map recurse expressions)
+;;
+
+let interp_environment (ts : ts) session exprs =
+  let context = Session.context session in
+  let variables = Hashtbl.create 64 in
+  SS.iter
+    (fun name ->
+       let sort =
+         match Hashtbl.find_opt ts.sorts name with
+         | Some sort -> sort
+         | None -> Sort.int
+       in
+       let symbol = Session.declare_const session name sort in
+       Hashtbl.replace variables name (Context.const context symbol))
+    (free_vars_list exprs);
+  let resolve name =
+    match Hashtbl.find_opt variables name with
+    | Some term -> term
+    | None -> failwith ("unbound variable in interpolation build: " ^ name)
+  in
+  context, resolve
+;;
+
+let build_interp_replay ts ~a_exprs ~b_exprs side session =
+  let expressions =
+    match side with
+    | Interpolation.A -> a_exprs
+    | Interpolation.B -> b_exprs
+  in
+  let context, resolve = interp_environment ts session expressions in
+  { Interpolation.assertions = List.map (Chc_ast.build context resolve) expressions
+  ; resolve = (fun index -> resolve (yname index))
+  }
 ;;
 
 (* Run the interpolation query [A /\ B] on a fresh Session, returning its verdict, the
-   Farkas certificate ([Some] iff the query was rational-infeasible), and the set of
-   B-side atom terms (used to partition the certificate into its A- and B-parts).
+   solved session, and the set of B-side atom terms used to partition its evidence.
    [b_exprs] are asserted as INDIVIDUAL atoms so each is a partitionable premise; the
    exact interned [Term.t] of each is collected (hash-consing makes [Term.equal] against a
-   returned premise reliable, as in the #106 consumer proof). Every [a_exprs] Int equality
-   is split into two [Le] atoms first (see {!split_int_eqs}) so the certificate exists. *)
+   returned premise reliable). With [OXSMT_CHC_INTERP_EQ=1], Int equalities are left
+   intact for the public interpolation seam's signed equation multipliers; the default
+   retains the legacy A-side split. *)
 let interp_query (ts : ts) ~(a_exprs : expr list) ~(b_exprs : expr list)
-  : smt * (Rational.t * (Term.t * bool)) list option * Term.Set.t
+  : smt * (Session.t * Term.Set.t) option
   =
   incr query_count;
   check_budget ();
   let sess = Session.create ~max_effort:!effort_cap () in
-  let ctx = Session.context sess in
-  let fvs = free_vars_list (a_exprs @ b_exprs) in
-  let vmap = Hashtbl.create 64 in
-  SS.iter
-    (fun name ->
-      let sort =
-        match Hashtbl.find_opt ts.sorts name with
-        | Some s -> s
-        | None -> Sort.int
-      in
-      let sym = Session.declare_const sess name sort in
-      Hashtbl.replace vmap name (Context.const ctx sym))
-    fvs;
-  let venv name =
-    match Hashtbl.find_opt vmap name with
-    | Some t -> t
-    | None -> failwith ("unbound variable in interp build: " ^ name)
+  let a_exprs =
+    if interp_eq_on then a_exprs else List.map (split_int_eqs ts.sorts) a_exprs
   in
+  let ctx, venv = interp_environment ts sess (a_exprs @ b_exprs) in
   let b_atoms = ref Term.Set.empty in
-  let a_exprs = List.map (split_int_eqs ts.sorts) a_exprs in
   match
     List.iter (fun e -> Session.assert_term sess (Chc_ast.build ctx venv e)) a_exprs;
     List.iter
@@ -589,12 +522,11 @@ let interp_query (ts : ts) ~(a_exprs : expr list) ~(b_exprs : expr list)
       | Session.Unsat -> R_unsat
       | Session.Unknown -> R_unknown
     in
-    let fk = if r = R_unsat then Session.last_farkas sess else None in
-    r, fk, !b_atoms
-  | exception Oxsmt_core.Term.Sort_error _ -> R_unknown, None, Term.Set.empty
-  | exception Oxsmt_core.Term.Unsupported _ -> R_unknown, None, Term.Set.empty
-  | exception Oxsmt_core.Term.Overflow -> R_unknown, None, Term.Set.empty
-  | exception Chc_ast.Build_error _ -> R_unknown, None, Term.Set.empty
+    r, Some (sess, !b_atoms)
+  | exception Oxsmt_core.Term.Sort_error _ -> R_unknown, None
+  | exception Oxsmt_core.Term.Unsupported _ -> R_unknown, None
+  | exception Oxsmt_core.Term.Overflow -> R_unknown, None
+  | exception Chc_ast.Build_error _ -> R_unknown, None
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -629,11 +561,9 @@ let cube_expr ~prime (s : cube) : expr = And (List.map (lit_expr ~prime) s)
    an empty CTI cube means the model pinned no state var, handled by the caller). *)
 let clause_expr (s : cube) : expr = Not (cube_expr ~prime:false s)
 
-(* Express cube literal [l] as a list of individual [Le] INEQUALITY atoms — an equality
-   [e = v] as the pair [e <= v], [v <= e] — so each becomes a partitionable Farkas premise
-   for interpolation (an equality atom carries no single-half-plane orientation, and #106
-   returns [None] on such a premise). A Bool literal has no linear half-plane: [[]] (the
-   caller declines interpolation for cubes with any Bool literal). *)
+(* Legacy B-side rendering for byte-stable default queries: an equality cube literal is
+   asserted as its two [Le] half-planes. The direct equality form is selected only by
+   [OXSMT_CHC_INTERP_EQ=1]. *)
 let cube_lit_ineqs ~prime (l : lit) : expr list =
   let nm k = if prime then yname k else xname k in
   let lhs =
@@ -741,19 +671,19 @@ let generalize (p : pdr) (i : int) (s : cube) : cube =
 (* Attempt a Farkas-interpolant lemma to block cube [s] at level [i], a strictly stronger
    replacement for the template {!generalize} that can express invariants neither interval
    nor difference-bound generalization reaches (e.g. [x + y = 10]). The blocking CTI query
-   is split A = [R_{i-1} /\ T], B = [s'] (the goal cube over the post-state, asserted as
-   inequalities); the A-side of the returned Farkas certificate sums to a McMillan
+   is split A = [R_{i-1} /\ T], B = [s'] (the goal cube over the post-state). The A-side
+   of the returned Farkas certificate sums to a McMillan
    interpolant [I], and [¬I] is the generalized blocked cube.
 
    FAIL-CLOSED at every step (→ [None], caller falls back to {!generalize}): no Farkas
-   certificate (equality/fabric/mismatch premise), a trivial (non-cross-cutting) split, an
-   interpolant mentioning an A-local variable, or — the real soundness gate — a failed
-   INDEPENDENT re-verification of [A |= I] and [I /\ B] unsat, each on a fresh Session.
-   The interpolant is CHECKED, never trusted; a bad one can only cost a fallback, never a
-   wrong verdict (the final invariant is re-verified regardless). *)
+   certificate, a malformed certificate, a trivial split, an interpolant mentioning an
+   A-local variable, or a failed independent re-verification of [A |= I] and [I /\ B]
+   unsat. {!Interpolation.interpolate} owns all of those checks and creates a fresh
+   Session for each obligation. The final invariant is re-verified independently too. *)
 let interpolant_lemma (p : pdr) (i : int) (s : cube) : cube option =
-  if List.exists
-       (fun l ->
+  if
+    List.exists
+      (fun l ->
          match l.v with
          | VBool _ -> true
          | _ -> false)
@@ -768,33 +698,58 @@ let interpolant_lemma (p : pdr) (i : int) (s : cube) : cube option =
        invariant; excluding them lets the certificate combine the genuine variable bounds
        (e.g. into [x + y <= 10]). *)
     let b_lits = List.filter (fun l -> l.jdx = None && l.lin = []) s in
-    let b_exprs = List.concat_map (cube_lit_ineqs ~prime:true) b_lits in
+    let b_exprs =
+      if interp_eq_on
+      then List.map (lit_expr ~prime:true) b_lits
+      else List.concat_map (cube_lit_ineqs ~prime:true) b_lits
+    in
     match interp_query p.ts ~a_exprs ~b_exprs with
-    | R_unsat, Some cert, b_atoms when cert <> [] ->
-      incr interp_farkas;
-      let is_b (atom, _) = Term.Set.mem atom b_atoms in
-      let a_part = List.filter (fun (_, lit) -> not (is_b lit)) cert in
-      let b_part = List.filter (fun (_, lit) -> is_b lit) cert in
-      (* A pure A- or pure B-certificate interpolates to a trivial [⊤]/[⊥] — no lemma. *)
-      if a_part = [] || b_part = []
-      then None
-      else (
-        match interp_cube_of_a_part a_part with
-        | exception Give_up _ -> None (* non-Le premise during the sum *)
+    | R_unsat, Some (session, b_atoms) ->
+      (match Session.last_farkas session with
+       | None -> None
+       | Some certificate ->
+        if
+          List.exists
+            (fun (coefficient, (atom, polarity)) ->
+              (not (Oxsmt_lia.Rational.is_zero coefficient))
+              && polarity
+              &&
+              match atom.Term.node with
+              | Term.Eq (left, right) ->
+                Sort.equal left.Term.sort Sort.int && Sort.equal right.Term.sort Sort.int
+              | _ -> false)
+            certificate
+        then incr interp_eq_farkas;
+        incr interp_farkas;
+        let create () =
+          incr query_count;
+          check_budget ();
+          Session.create ~max_effort:!effort_cap ()
+        in
+        let candidate =
+          Interpolation.interpolate
+            session
+            ~side_of:(fun (atom, _) ->
+              if Term.Set.mem atom b_atoms
+              then Some Interpolation.B
+              else Some Interpolation.A)
+            ~project_shared:post_index_of_var
+            ~create
+            ~build:(build_interp_replay p.ts ~a_exprs ~b_exprs)
+            ~is_shared:(fun index -> index >= 0 && index < p.ts.arity)
+        in
+        match candidate with
         | None -> None
-        | Some lemma_cube ->
-          (* [cube_expr ~prime:true lemma_cube] = ¬I over the post-state; its negation is
-             I over the post-state. Re-verify both interpolant obligations on fresh
-             Sessions before trusting the lemma. *)
-          let not_i_post = cube_expr ~prime:true lemma_cube in
-          let i_post = Not not_i_post in
-          let a_implies_i = check_exprs p.ts (a_exprs @ [ not_i_post ]) = R_unsat in
-          let i_and_b = check_exprs p.ts (i_post :: b_exprs) = R_unsat in
-          if a_implies_i && i_and_b
-          then (
-            incr interp_verified;
-            Some lemma_cube)
-          else None)
+        | Some interpolant ->
+          incr interp_verified;
+          Some
+            [ { idx = 0
+              ; jdx = None
+              ; rel = Rge
+              ; v = VInt (Bigint.sub Bigint.one interpolant.constant)
+              ; lin = interpolant.coefficients
+              }
+            ])
     | _ -> None)
 ;;
 

@@ -8,3 +8,10 @@
  (name chc_test)
  (modules chc_test)
  (libraries oxsmt_chc))
+
+; Direct equality-premise interpolation consumer. The Makefile enables the dark equality
+; path; the executable requires a checked interpolant to be admitted by the CHC loop.
+(executable
+ (name chc_interp_test)
+ (modules chc_interp_test)
+ (libraries oxsmt_chc))

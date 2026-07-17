@@ -478,15 +478,12 @@ val last_unsat_core : t -> (Oxsmt_core.Term.t * bool) list option
 
 (** [last_farkas t] is the Farkas certificate of the most recent {!check_sat} or
     {!check_sat_assuming} refutation: [(coeffᵢ, (atomᵢ, polarityᵢ))] pairs where
-    [coeffᵢ >= 0] is the dual
-    multiplier for the asserted half-plane of [(atomᵢ, polarityᵢ)] (same rendering as
-    {!last_unsat_core}, index-aligned), and [Σ coeffᵢ · half-plane(atomᵢ, polarityᵢ)] is a
-    variable-free false constant — the rational-infeasibility proof. [None] when
-    {!last_unsat_core} is [None]; OR the refutation was a Diophantine / divisibility
-    conflict (certified by a GCD argument, not a rational multiplier vector); OR any
-    premise is an Int equality [x = k], whose token covers both a [<=] and a [>=] bound so
-    the paired coefficient has no single half-plane orientation (fail-closed — the core is
-    still available via {!last_unsat_core}). The coefficient type is
+    an inequality's [coeffᵢ >= 0] multiplies its asserted half-plane, while a positive Int
+    equality's unrestricted signed [coeffᵢ] multiplies the equation [a - b = 0]. The
+    resulting sum is a variable-free false constant — the rational-infeasibility proof.
+    Premises use the same rendering as {!last_unsat_core} and are index-aligned. [None]
+    when {!last_unsat_core} is [None], the refutation was a Diophantine/divisibility
+    conflict, or the evidence has an unsupported shape. The coefficient type is
     {!Oxsmt_lia.Rational.t}. *)
 val last_farkas : t -> (Oxsmt_lia.Rational.t * (Oxsmt_core.Term.t * bool)) list option
 
