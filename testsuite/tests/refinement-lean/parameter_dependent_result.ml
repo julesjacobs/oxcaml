@@ -51,3 +51,27 @@ Line 1, characters 37-42:
                                          ^^^^^
 Error: Refinement verification failed (disproved)
 |}]
+
+(* Dependent-hypothesis (binder-fact) witness.  A parameter [y] whose refinement
+   [_ > x] mentions an earlier parameter [x] records a binder fact [y > x] at
+   [enter_pattern]; that fact must bind the SAME [x] as the result goal [_ > x].
+   This exercises the binder-fact half of the reconciliation specifically.
+   Returning [y] verifies (goal [y > x] is exactly the hypothesis). *)
+let dependent_ok (x : int) (y : int{ _ > x }) : int{ _ > x } = y
+[%%expect {|
+val dependent_ok :
+  int ->
+  int{ (app[Stdlib!.>] _ global[x/313]) } ->
+  int{ (app[Stdlib!.>] _ global[x/313]) } = <fun>
+|}]
+
+(* Returning [x] is disproved: the goal becomes [x > x], which does not follow
+   from the hypothesis [y > x] -- the hypothesis and goal share the same [x], so
+   the fix does not spuriously discharge it. *)
+let dependent_bad (x : int) (y : int{ _ > x }) : int{ _ > x } = x
+[%%expect {|
+Line 1, characters 64-65:
+1 | let dependent_bad (x : int) (y : int{ _ > x }) : int{ _ > x } = x
+                                                                    ^
+Error: Refinement verification failed (disproved)
+|}]
