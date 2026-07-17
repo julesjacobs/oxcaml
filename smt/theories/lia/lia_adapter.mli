@@ -79,9 +79,11 @@ type conflict_core =
   { farkas : Rational.t list option
   (** [Some coeffs] (index-aligned with [atoms], [coeffᵢ >= 0] the multiplier for
       [atomsᵢ]'s asserted half-plane, [Σ coeffᵢ·half-planeᵢ] a false constant) for a
-      Farkas-certified rational-infeasibility conflict; [None] for a Diophantine /
-      divisibility conflict (empty engine [farkas] vector — certified by GCD, not a
-      rational multiplier). *)
+      Farkas-certified rational-infeasibility conflict. [None] when: (a) the conflict is
+      Diophantine / divisibility (empty engine [farkas] vector — certified by GCD, not a
+      rational multiplier), or (b) any premise is an Int equality [x = k], whose token
+      covers both an upper and a lower bound so a coefficient paired with it has no single
+      half-plane orientation (fail-closed — the equality-free [atoms] core stays valid). *)
   ; atoms : (Term.t * bool) list
   (** each premise atom's [Term.t] and its asserted polarity, in premise order. *)
   }
@@ -93,8 +95,10 @@ type conflict_core =
     (at their polarities) is theory-unsatisfiable. *)
 val last_conflict_core : t -> conflict_core option
 
-(** Reset the {!last_conflict_core} stash (called by {!Cdclt.begin_check} per check-sat so
-    a stale conflict cannot masquerade as the current query's core). *)
+(** Reset the {!last_conflict_core} stash. Called once per check-sat by
+    {!Cdclt.clear_last_conflict} at the TOP of {!Session.check_sat} — before any dispatch
+    path (including the pure-BV fast path that bypasses {!Cdclt.begin_check}) — so a stale
+    conflict from a prior check cannot masquerade as the current query's core. *)
 val clear_last_conflict : t -> unit
 
 (** [true] once an overflow has bricked the underlying {!Lia} instance; never raises. *)

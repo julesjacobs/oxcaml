@@ -561,12 +561,29 @@ let last_conflict_core t : conflict_core option =
     (match map [] premises with
      | None -> None
      | Some atoms ->
-       (* [farkas] is either empty (a Diophantine/divisibility conflict → no rational
-          multiplier vector) or index-aligned and equal in length to the premises (a
-          Farkas conflict). A length mismatch is not a shape we produce; surface no
+       (* An Int equality premise ([x = k]) is lowered into BOTH an upper and a lower
+          bound on the same var ({!Lia.equality_reading}), both attributed to the SAME
+          premise token. A Farkas multiplier paired with that token therefore has no
+          single half-plane orientation: the proof used one side ([x >= k] or [x <= k]),
+          but the surfaced atom [x = k] cannot say which, so [Σ coeffᵢ·half-plane(atomᵢ)]
+          cannot be honestly reconstructed by a consumer. Fail-closed: emit NO Farkas
+          certificate when any premise is an equality. The core itself ([atoms]) stays
+          valid and is still surfaced — an equality is a sound member of a T-unsat core. *)
+       let has_equality_premise =
+         List.exists
+           (fun (tm, _) ->
+             match tm.Term.node with
+             | Term.Eq (a, _) -> not (Sort.equal a.Term.sort Sort.bool)
+             | _ -> false)
+           atoms
+       in
+       (* [farkas] is otherwise either empty (a Diophantine/divisibility conflict → no
+          rational multiplier vector) or index-aligned and equal in length to the premises
+          (a Farkas conflict). A length mismatch is not a shape we produce; surface no
           coefficients rather than misalign them. *)
        let farkas =
          match farkas with
+         | _ when has_equality_premise -> None
          | [] -> None
          | fs when List.compare_lengths fs atoms = 0 -> Some fs
          | _ -> None

@@ -1741,6 +1741,14 @@ let commit_sat t =
 
 let check_sat t =
   t.last_verdict <- Unknown;
+  (* task #106: clear the observational LIA conflict stash HERE, at the single mandatory
+     top of check_sat, so it is fresh before ANY path can set [last_verdict]. This covers
+     every dispatch outcome below — the degraded early-[Unknown], the pure-BV fast path
+     ([Unsat]/[Sat]/[Unknown], which bypasses [Cdclt.begin_check]), and the combinator
+     path (which also calls [begin_check]). A single dominating clear, rather than one per
+     verdict site, is why a stale core cannot leak (the original per-path claim missed the
+     pure-BV [Unsat] arm). *)
+  Cdclt.clear_last_conflict t.cdclt;
   t.last_model <- None;
   t.budget_exhausted <- false;
   t.effort_exhausted <- false;
@@ -1933,18 +1941,26 @@ let failed_assumptions t =
   | Some sel -> List.filter (fun lit -> Sat.var_of_lit lit <> sel) failed
 ;;
 
-(* task #106: theory infeasibility evidence for the most recent UNSAT check_sat. Purely
-   observational — it reads the LIA adapter's conflict stash (populated at conflict-
-   production time, off the frozen [Explanation]) and never influences a verdict. Gated on
+(* task #106: theory infeasibility evidence for the most recent UNSAT check_sat.
+   Observational — it reads the LIA adapter's conflict stash (populated at conflict-
+   production time, off the frozen [Explanation]) and never feeds a verdict, search
+   counter, or CNF ordering back into solving (the stash write allocates on a conflict, so
+   this is not allocation-free, but no logical feedback path exists). Gated on
    [last_verdict = Unsat]: a Sat/Unknown/pre-check state has no refutation to expose, and
-   [begin_check] cleared the stash so a stale conflict cannot leak across checks. *)
+   [check_sat] cleared the stash at its top (before any dispatch path) so a stale conflict
+   cannot leak across checks. *)
 
-(* A premise (atom, polarity) rendered as the Bool [Term.t] that was asserted true: the
-   atom for a positive premise, its negation for a negative one. The conjunction of these
-   is the theory-unsat core. Built through the session context (D6). *)
-let signed_atom_term t (atom, polarity) =
-  if polarity then atom else Context.not_ t.ctx atom
-;;
+(* A premise is surfaced as a [(atom, polarity)] pair: [polarity] is [true] when the atom
+   was asserted true, [false] when asserted false (a ℤ-complemented half-plane). The
+   conjunction of the premises at their polarities is the theory-unsat core.
+
+   Polarity is carried OUT OF BAND rather than folded into a negated [Term.t]: rendering a
+   negative premise as [Context.not_ ctx atom] would, on a cache miss (a negative theory
+   assignment reached via Boolean structure with no interned [Not] node — e.g. [a] forced
+   false through [a iff false]), INTERN a fresh term and bump the context tag counter.
+   That would let a read of this observational API perturb subsequent term tags / CNF
+   ordering. Returning the pair reads nothing but the existing stash and interns nothing,
+   so the accessors leave [Context.term_count] and all solver-visible state unchanged. *)
 
 let last_unsat_core t =
   match t.last_verdict with
@@ -1952,7 +1968,7 @@ let last_unsat_core t =
   | Unsat ->
     (match Cdclt.last_conflict_core t.cdclt with
      | None -> None
-     | Some { atoms; _ } -> Some (List.map (signed_atom_term t) atoms))
+     | Some { atoms; _ } -> Some atoms)
 ;;
 
 let last_farkas t =
@@ -1963,8 +1979,9 @@ let last_farkas t =
      | None | Some { farkas = None; _ } -> None
      | Some { farkas = Some coeffs; atoms } ->
        (* [coeffs] is index-aligned and equal-length with [atoms] (the adapter drops a
-          mismatch to [None]); pair each Farkas multiplier with its asserted half-plane. *)
-       Some (List.map2 (fun c a -> c, signed_atom_term t a) coeffs atoms))
+          mismatch, and any equality-premise ambiguity, to [None]); pair each Farkas
+          multiplier with its [(atom, polarity)] half-plane. *)
+       Some (List.map2 (fun c a -> c, a) coeffs atoms))
 ;;
 
 (* Test-only introspection (task #25): is a symmetry-breaking emission currently active

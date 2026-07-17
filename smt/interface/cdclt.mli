@@ -116,6 +116,13 @@ val bind_bool_var_atom : t -> Oxsmt_core.Term.t -> Oxsmt_solver.Sat.var -> unit
     start of each check-sat. *)
 val begin_check : t -> unit
 
+(** task #106: reset the observational LIA conflict-evidence stash (see
+    {!last_conflict_core}). Separate from {!begin_check} so {!Session.check_sat} can call
+    it unconditionally at its top — including on the pure-BV fast path that never reaches
+    {!begin_check} — guaranteeing no stale core leaks across checks. Observational only;
+    never affects solving. *)
+val clear_last_conflict : t -> unit
+
 (** Splits emitted during the last check-sat (stat / determinism witness). *)
 val splits_used : t -> int
 
@@ -132,7 +139,7 @@ type conflict_core = Oxsmt_lia.Lia_adapter.conflict_core =
   }
 
 (** [last_conflict_core t] is the {!conflict_core} of the most recent theory conflict
-    since the last {!begin_check}, or [None] if there was none / it is not
+    since the last {!clear_last_conflict}, or [None] if there was none / it is not
     term-representable. Observational — never affects solving. *)
 val last_conflict_core : t -> conflict_core option
 

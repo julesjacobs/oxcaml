@@ -39,9 +39,14 @@ separate read-only channel is populated at conflict-production time:
 
 ## Soundness
 
-- **Observational / non-perturbing.** The only always-on changes are (a) a write to a new
-  mutable field at conflict production and (b) a `None` reset in `begin_check`. Neither is
-  read during solving; no counter, no control flow changes. Confirmed empirically (below).
+- **Observational / non-perturbing.** The always-on changes are (a) a write to a new
+  mutable field at conflict production and (b) a `None` reset per check-sat. This is NOT
+  allocation-free — the stash allocates a `Some`/pair/lists on every conflict, and the
+  reset adds a small amount of control flow (so an adversarial tight-memory run could
+  differ). What IS true and is the load-bearing guarantee: the stash is never read during
+  solving, so no verdict, search counter, or CNF ordering feeds back — the byte-identity
+  gate below (verdict + all counters) holds. The read accessors intern nothing (polarity
+  carried out of band; see fixes report).
 - **The core is a genuine theory-unsat core** by construction (a conflict's premises are
   T-infeasible). Consumers must still re-check on a fresh Session (the test does); a wrong
   core cannot arise but the discipline guards against consumer misuse.
@@ -71,8 +76,9 @@ Run: `make session-cores-test` (wired into `make test`).
    `None` (certified by the GCD/divisibility argument, no rational multiplier vector).
 5. **Gating**: `None` before any check, on `Sat`, and on a purely propositional `Unsat`.
 6. **Staleness**: a check-1 theory conflict does NOT leak into a later check-2 propositional
-   `Unsat` (`begin_check` clears the stash) — the decisive test that discriminates the
-   per-check reset.
+   `Unsat` (the stash is cleared at the top of `check_sat`) — the decisive test that
+   discriminates the per-check reset. (Post-review: also covered for the pure-BV fast path;
+   see the fixes report.)
 
 ## Byte-identity measurement (observational neutrality)
 

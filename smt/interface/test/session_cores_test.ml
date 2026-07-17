@@ -77,24 +77,30 @@ let linear_of (arg : Term.t) : (Term.t * Bigint.t) list * Bigint.t =
 
 let bneg b = Bigint.mul (Bigint.of_int (-1)) b
 
-(* [half_plane lit] is the linear form [e] of the ASSERTED half-plane [e <= 0] for a
-   returned core literal:
-   - [Le arg] was asserted [arg <= 0] -> e = arg
-   - [Not (Le arg)] was asserted ¬(arg<=0) = arg>=1 -> e = -arg + 1 (ℤ-complement) *)
-let half_plane (lit : Term.t) : (Term.t * Bigint.t) list * Bigint.t =
-  match lit.Term.node with
-  | Term.Le arg -> linear_of arg
-  | Term.Not inner ->
-    (match inner.Term.node with
-     | Term.Le arg ->
-       let pairs, c = linear_of arg in
-       List.map (fun (v, b) -> v, bneg b) pairs, Bigint.add (bneg c) Bigint.one
-     | _ -> failwith "half_plane: Not of non-Le")
-  | _ -> failwith "half_plane: literal is neither Le nor Not(Le)"
+(* [half_plane (atom, polarity)] is the linear form [e] of the ASSERTED half-plane
+   [e <= 0] for a returned core premise (task #106 carries polarity OUT OF BAND — the atom
+   is never a negated term):
+   - [(Le arg, true)] was asserted [arg <= 0] -> e = arg
+   - [(Le arg, false)] was asserted ¬(arg<=0) = arg>=1 -> e = -arg + 1 (ℤ-complement) *)
+let half_plane ((atom, polarity) : Term.t * bool) : (Term.t * Bigint.t) list * Bigint.t =
+  match atom.Term.node with
+  | Term.Le arg ->
+    if polarity
+    then linear_of arg
+    else (
+      let pairs, c = linear_of arg in
+      List.map (fun (v, b) -> v, bneg b) pairs, Bigint.add (bneg c) Bigint.one)
+  | _ ->
+    failwith "half_plane: atom is not an Le (an equality premise carries no Farkas cert)"
 ;;
 
-(* Accumulate [Σ coeffᵢ · half-plane(litᵢ)] into a rational (var -> coeff) map + constant. *)
-let accumulate (pairs : (Rational.t * Term.t) list) =
+(* A plainly-asserted (positive) [Term.t] read as its half-plane — for the in-test atoms
+   and interpolants, which are always asserted positively. *)
+let half_plane_pos (t : Term.t) = half_plane (t, true)
+
+(* Accumulate [Σ coeffᵢ · half-plane(atomᵢ, polᵢ)] into a rational (var -> coeff) map +
+   constant. *)
+let accumulate (pairs : (Rational.t * (Term.t * bool)) list) =
   let map = ref Term.Map.empty in
   let const = ref Rational.zero in
   List.iter
@@ -120,7 +126,7 @@ let nonzero_bindings map =
 ;;
 
 let vars_of lit =
-  let vars, _ = half_plane lit in
+  let vars, _ = half_plane_pos lit in
   List.fold_left (fun acc (v, _) -> Term.Set.add v acc) Term.Set.empty vars
 ;;
 
@@ -178,7 +184,7 @@ let lcm a b = if a = 0 || b = 0 then 0 else abs (a / gcd a b * b)
 (* Read I's integer coefficients as (var-name, coeff) + constant, so it can be rebuilt
    verbatim in another session's context (matched by declared name). *)
 let named_linear (i_term : Term.t) =
-  let vars, c = half_plane i_term in
+  let vars, c = half_plane_pos i_term in
   let named =
     List.map
       (fun (v, b) ->
@@ -214,16 +220,17 @@ let () =
   match Session.last_farkas s with
   | None -> fail name "last_farkas = None (expected a Farkas certificate)"
   | Some cert ->
-    (* Partition by origin: a positive-premise literal is Term.equal to the asserted atom. *)
-    let is_a lit = List.exists (fun a -> Term.equal a lit) a_atoms in
-    let a_part = List.filter (fun (_, lit) -> is_a lit) cert in
-    let b_part = List.filter (fun (_, lit) -> not (is_a lit)) cert in
+    (* Partition by origin: a positive-premise atom is Term.equal to an asserted A atom. *)
+    let is_a (atom, _polarity) = List.exists (fun a -> Term.equal a atom) a_atoms in
+    let a_part = List.filter (fun (_, ap) -> is_a ap) cert in
+    let b_part = List.filter (fun (_, ap) -> not (is_a ap)) cert in
     check_true (name ^ ": cert spans A") (a_part <> []);
     check_true (name ^ ": cert spans B") (b_part <> []);
     check_true
       (name ^ ": core terms are asserted atoms")
       (List.for_all
-         (fun (_, lit) -> List.exists (fun a -> Term.equal a lit) (a_atoms @ b_atoms))
+         (fun (_, (atom, _)) ->
+           List.exists (fun a -> Term.equal a atom) (a_atoms @ b_atoms))
          cert);
     (* I = Σ over the A-part of the certificate. *)
     let map, const = accumulate a_part in
@@ -337,6 +344,130 @@ let () =
   Session.assert_term s (Context.not_ (Session.context s) q);
   expect_verdict "stale: check2 propositional unsat" (Session.check_sat s) Session.Unsat;
   check_true "stale: no leaked core in check2" (Session.last_unsat_core s = None)
+;;
+
+(* ========================================================================= Finding #2
+   (codex review) — STALE LIA EVIDENCE via the pure-BV fast path.
+
+   [check_sat] dispatches pure QF_BV BEFORE [Cdclt.begin_check], and its [Unsat] arm sets
+   [last_verdict <- Unsat]. The stash is now cleared at the TOP of [check_sat] (not only
+   in [begin_check]), so a prior LIA conflict cannot leak into a later pure-BV refutation.
+   RED before the fix: [last_unsat_core] returned the earlier LIA core.
+   ========================================================================= *)
+
+let () =
+  let name = "bv-stale" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = int_var s "bvx" in
+  Session.push s;
+  Session.assert_term s (le s x (ic s 5));
+  Session.assert_term s (le s (ic s 6) x);
+  expect_verdict (name ^ ": check1 LIA unsat") (Session.check_sat s) Session.Unsat;
+  check_true (name ^ ": check1 core present") (Session.last_unsat_core s <> None);
+  Session.pop s;
+  (* check #2: pure QF_BV, unsatisfiable ([b0 = b1] and [b0 <> b1]), NO Int term — so
+     [is_pure_bv] holds and the fast path (which bypasses [begin_check]) is taken. *)
+  let w = 8 in
+  let b0 = Context.const ctx (Session.declare_const s "bvb0" (Sort.bitvec w)) in
+  let b1 = Context.const ctx (Session.declare_const s "bvb1" (Sort.bitvec w)) in
+  let eq01 = Context.eq ctx b0 b1 in
+  Session.assert_term s eq01;
+  Session.assert_term s (Context.not_ ctx eq01);
+  expect_verdict (name ^ ": check2 pure-BV unsat") (Session.check_sat s) Session.Unsat;
+  check_true (name ^ ": no leaked core in check2") (Session.last_unsat_core s = None);
+  check_true (name ^ ": no leaked farkas in check2") (Session.last_farkas s = None)
+;;
+
+(* ========================================================================= Finding #1
+   (codex review) — EQUALITY-PREMISE Farkas orientation.
+
+   An Int equality [x = k] is lowered into BOTH an upper and a lower bound sharing one
+   premise token, so a Farkas multiplier paired with it has no single half-plane
+   orientation and [Σ coeffᵢ·half-plane] cannot be reconstructed. [last_farkas] now
+   returns [None] whenever a premise is an equality (fail-closed); the core itself stays
+   valid and re-checkable. RED before the fix: [last_farkas] returned a coefficient paired
+   with the unoriented [x = k].
+   ========================================================================= *)
+
+let () =
+  let name = "eq-premise" in
+  let s = Session.create () in
+  (* x = y && x <= 0 && y >= 1 : the equality is a genuine conflict premise (x = y forces
+     y <= 0, clashing with y >= 1). Two vars keep the equality from being eliminated to a
+     constant relation. *)
+  let build sess =
+    let c = Session.context sess in
+    let xv = int_var sess "ex" in
+    let yv = int_var sess "ey" in
+    [ Context.eq c xv yv; le sess xv (ic sess 0); le sess (ic sess 1) yv ]
+  in
+  List.iter (Session.assert_term s) (build s);
+  match Session.check_sat s with
+  | Session.Unsat ->
+    (match Session.last_unsat_core s with
+     | None -> fail name "core = None on an equality-premise LIA conflict"
+     | Some core ->
+       check_true (name ^ ": core nonempty") (core <> []);
+       check_true
+         (name ^ ": core has an equality premise")
+         (List.exists
+            (fun (atom, _) ->
+              match atom.Term.node with
+              | Term.Eq (a, _) -> not (Sort.equal a.Term.sort Sort.bool)
+              | _ -> false)
+            core);
+       let s2 = Session.create () in
+       List.iter (Session.assert_term s2) (build s2);
+       expect_verdict
+         (name ^ ": core re-check unsat")
+         (Session.check_sat s2)
+         Session.Unsat);
+    check_true
+      (name ^ ": farkas absent (equality orientation ambiguous)")
+      (Session.last_farkas s = None)
+  | Session.Unknown -> ok (name ^ ": unknown tolerated")
+  | Session.Sat -> fail name "x=y & x<=0 & y>=1 reported Sat (unsound)"
+;;
+
+(* ========================================================================= Finding #3
+   (codex review) — READING THE API MUST NOT MUTATE SOLVER STATE.
+
+   A negative theory premise can arise through Boolean structure with NO interned [Not]
+   node (here [q <-> (x<=1)] with [q] false forces [x<=1] false, but [Not (x<=1)] is never
+   built). The old accessors rendered it via [Context.not_], which on a cache miss
+   interned a fresh term and bumped the tag counter — perturbing later term tags / CNF
+   ordering. Polarity is now carried out of band, so reading interns nothing.
+   ========================================================================= *)
+
+let () =
+  let name = "read-purity" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = int_var s "px" in
+  let q = bool_var s "pq" in
+  let a = le s x (ic s 1) in
+  Session.assert_term s (Context.eq ctx q a);
+  Session.assert_term s (Context.not_ ctx q);
+  Session.assert_term s (le s x (ic s 0));
+  match Session.check_sat s with
+  | Session.Unsat ->
+    (* record AFTER the solve (which may still intern), then prove the reads add nothing *)
+    let before = Context.term_count ctx in
+    let core = Session.last_unsat_core s in
+    let farkas = Session.last_farkas s in
+    let after = Context.term_count ctx in
+    check_true (name ^ ": reading accessors interns nothing") (before = after);
+    (* and the core is genuinely surfaced with a NEGATIVE premise (out-of-band polarity) *)
+    (match core with
+     | Some prems ->
+       check_true
+         (name ^ ": core carries a negative premise")
+         (List.exists (fun (_, polarity) -> not polarity) prems)
+     | None -> ok (name ^ ": core None tolerated"));
+    ignore farkas
+  | Session.Unknown -> ok (name ^ ": unknown tolerated")
+  | Session.Sat -> fail name "q<->(x<=1), ~q, x<=0 reported Sat (unsound)"
 ;;
 
 let () =

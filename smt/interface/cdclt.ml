@@ -540,9 +540,15 @@ let begin_check t =
   Budget.reset t.budget;
   t.last_model <- None;
   t.last_dt_model <- None;
-  t.last_array_model <- None;
-  (* task #106: reset the LIA conflict-evidence stash so [last_conflict_core] reflects
-     only THIS check-sat (only the EUF+LIA stack carries it; DT/arrays have none). *)
+  t.last_array_model <- None
+;;
+
+(* task #106: reset the LIA conflict-evidence stash so [last_conflict_core] reflects only
+   the CURRENT check-sat (only the EUF+LIA stack carries it; DT/arrays have none). Kept
+   SEPARATE from [begin_check] and called by {!Session.check_sat} at its very top so it
+   also runs on the pure-BV fast path, which bypasses [begin_check] entirely — otherwise a
+   pure-BV Unsat could surface a prior LIA check's stale core. *)
+let clear_last_conflict t =
   match t.theory with
   | Some (TCombined th) ->
     Oxsmt_lia.Lia_adapter.clear_last_conflict (Combined.arith_state th)
