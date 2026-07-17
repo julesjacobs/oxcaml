@@ -894,6 +894,43 @@ let test_codex_findings () =
    let _ = Simplex.assert_upper s sl (Delta.of_rat Rational.zero) "sl<=0" in
    let _ = Simplex.assert_lower s y (Delta.of_rat Rational.one) "y>=1" in
    check "L1: explicit zero coefficient is dropped" (Simplex.check s <> None));
+  (* The initial-row fast path copies an all-nonbasic definition directly. Its row must
+     still enforce the same equation as the general expansion: x>=1, y>=1, x+y<=1 is
+     inconsistent. This also exercises the copied row through feasibility restoration. *)
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let y = Simplex.new_problem_var s in
+   let sum = Simplex.new_slack s [ x, Rational.one; y, Rational.one ] in
+   let _ = Simplex.assert_lower s x (Delta.of_rat Rational.one) "x>=1" in
+   let _ = Simplex.assert_lower s y (Delta.of_rat Rational.one) "y>=1" in
+   let _ = Simplex.assert_upper s sum (Delta.of_rat Rational.one) "x+y<=1" in
+   check "initial slack row copy preserves x+y" (Simplex.check s <> None));
+  (* A copied row must not alias its immutable definition. This inconsistent pair of
+     copied rows drives pivot substitution through [diff.row]; if that mutation also
+     changed [diff.def], Farkas construction would see a slack id in a problem-variable
+     definition and fail instead of producing the conflict. *)
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let y = Simplex.new_problem_var s in
+   let sum = Simplex.new_slack s [ x, Rational.one; y, Rational.one ] in
+   let diff = Simplex.new_slack s [ x, Rational.one; y, q (-1) ] in
+   let _ = Simplex.assert_lower s sum (Delta.of_rat Rational.one) "x+y>=1" in
+   let _ = Simplex.assert_upper s y Delta.zero "y<=0" in
+   let _ = Simplex.assert_upper s diff Delta.zero "x-y<=0" in
+   check "copied slack row is independent of its definition" (Simplex.check s <> None));
+  (* Once a pivot makes a referenced problem variable basic, [new_slack] must take the
+     general expansion path. The second x+y row then expands through the existing [sum]
+     row, so [sum>=1] and [again<=0] conflict. *)
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let y = Simplex.new_problem_var s in
+   let sum = Simplex.new_slack s [ x, Rational.one; y, Rational.one ] in
+   let _ = Simplex.assert_lower s sum (Delta.of_rat Rational.one) "x+y>=1" in
+   check "post-pivot slack precondition is feasible" (Simplex.check s = None);
+   check "post-pivot slack precondition performed a pivot" (Simplex.pivot_count s > 0);
+   let again = Simplex.new_slack s [ x, Rational.one; y, Rational.one ] in
+   let _ = Simplex.assert_upper s again Delta.zero "x+y<=0" in
+   check "post-pivot slack takes the expansion fallback" (Simplex.check s <> None));
   (* L3 (false-sat): a conflict recorded at root must SURVIVE a push/pop that does not
      undo its triggering bound. x<=0 ∧ x>=1 (same var => pending), then push, pop. *)
   (let fx = make_fixture 1 in

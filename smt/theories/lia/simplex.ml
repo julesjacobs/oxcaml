@@ -55,6 +55,13 @@ module Lx = struct
   (* precondition: [c] nonzero (callers pass Rational.one / a checked coeff). *)
   let singleton i c = { ids = [| i |]; cs = [| c |]; len = 1 }
 
+  let copy (m : t) =
+    { ids = Array.sub m.ids 0 m.len
+    ; cs = Array.sub m.cs 0 m.len
+    ; len = m.len
+    }
+  ;;
+
   (* Index of [i] in [ids.(0..len-1)], or -1. *)
   let find_idx (m : t) i =
     let lo = ref 0
@@ -470,7 +477,15 @@ let new_slack t (pairs : (int * Rational.t) list) =
       }
     in
     Dynarray.add_last t.vars v;
-    v.row <- expand t def;
+    (* Before solving starts, every problem variable is still nonbasic, so expanding the
+       new row by merging one singleton at a time can only reproduce [def]. Copy it in one
+       pass. Keep [def] and [row] physically separate: pivoting mutates [row], while [def]
+       is the immutable meaning of the slack. A definition that references a variable made
+       basic by pivoting falls back to the general substitution path. *)
+    v.row
+    <- (if Lx.for_all (fun j _ -> not (get t j).basic) def
+        then Lx.copy def
+        else expand t def);
     v.value <- eval_def t def;
     id)
 ;;
