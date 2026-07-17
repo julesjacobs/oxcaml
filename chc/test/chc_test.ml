@@ -10,6 +10,7 @@
 
 module Engine = Oxsmt_chc.Chc_engine
 module Pdr = Oxsmt_chc.Chc_pdr
+module Cegis = Oxsmt_chc.Chc_cegis
 module Parse = Oxsmt_chc.Chc_parse
 
 (* Dispatch exactly as the CLI does: single-predicate -> transition-system engine,
@@ -475,6 +476,110 @@ let () =
       (declare-fun P (Int) Bool)
       (assert (forall ((x Int)) (=> (= x 0) (P x))))
       (assert (forall ((x Int)) (=> (> x 0) false)))|};
+  ()
+;;
+
+(* ---- Chc_cegis (syntax-guided synthesis engine) discrimination tests ---- *)
+
+let solve_cegis src =
+  match Parse.parse src with
+  | sys -> Cegis.solve ~budget:20_000 sys
+  | exception Parse.Unsupported m -> { Pdr.verdict = Pdr.Unknown m; detail = m }
+  | exception Parse.Malformed m ->
+    { Pdr.verdict = Pdr.Unknown ("malformed: " ^ m); detail = m }
+;;
+
+(* [expect] semantics for cegis: [Safe_must] the synthesis engine is required to prove
+   (regression guard for the sum/conjunctive class); the [_ok] forms tolerate [unknown];
+   [Unsafe_must] must be caught by the shared instant checks. A cegis run reporting the
+   OPPOSITE definite verdict is a soundness failure. *)
+let check_cegis name expect src =
+  let r = solve_cegis src in
+  let v = r.Pdr.verdict in
+  let smt =
+    match v with
+    | Pdr.Safe -> "sat"
+    | Pdr.Unsafe -> "unsat"
+    | Pdr.Unknown _ -> "unknown"
+  in
+  let ok, tag =
+    match expect, v with
+    | (Safe_must | Safe_ok), Pdr.Safe -> true, "OK"
+    | (Unsafe_must | Unsafe_ok), Pdr.Unsafe -> true, "OK"
+    | Unknown_expected, Pdr.Unknown _ -> true, "OK"
+    | (Safe_must | Safe_ok), Pdr.Unsafe -> false, "UNSOUND(safe reported unsafe)"
+    | (Unsafe_must | Unsafe_ok), Pdr.Safe -> false, "UNSOUND(unsafe reported safe)"
+    | Unknown_expected, (Pdr.Safe | Pdr.Unsafe) ->
+      false, "UNEXPECTED-DEFINITE(should be unknown)"
+    | (Safe_must | Unsafe_must), Pdr.Unknown _ -> false, "MISS(must-solve got unknown)"
+    | (Safe_ok | Unsafe_ok), Pdr.Unknown _ -> true, "soft-miss(unknown)"
+  in
+  if not ok then incr failures;
+  (match expect, v with
+   | (Safe_ok | Unsafe_ok), Pdr.Unknown _ -> incr soft
+   | _ -> ());
+  Printf.printf "%-28s %-8s %s\n" ("cegis:" ^ name) smt tag
+;;
+
+let () =
+  (* SUM invariant [x + y = 10] with point init [x=0,y=10] and bad [x+y<>10]. This is the
+     class backward PDR cube-generalization provably diverges on (the [safe_rel_sum]
+     analysis in the chc-v2 report): every minimal LIA conflict under point init is
+     single-variable, so the interpolant excludes init and the engine diverges. The
+     data-driven full-sum candidate [x+y=10], learned from the observed constant sum and
+     certified by [verify], closes it. MUST-solve regression guard for the headline lever. *)
+  check_cegis
+    "sum-safe"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 10)) (P x y))))
+      (assert (forall ((x Int)(y Int)(a Int)(b Int))
+        (=> (and (P x y)(= a (+ x 1))(= b (- y 1))) (P a b))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x y)(not (= (+ x y) 10))) false)))|};
+  (* Relational equality [x = y] (octagon difference candidate). *)
+  check_cegis
+    "rel-eq-safe"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 0)) (P x y))))
+      (assert (forall ((x Int)(y Int)(a Int)(b Int))
+        (=> (and (P x y)(= a (+ x 1))(= b (+ y 1))) (P a b))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x y)(not (= x y))) false)))|};
+  (* Single-variable lower bound [x >= 0]. *)
+  check_cegis
+    "single-bound-safe"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 1))) (P y))))
+      (assert (forall ((x Int)) (=> (and (P x)(< x 0)) false)))|};
+  (* SOUNDNESS discrimination: a genuinely UNSAFE system whose reachable states are
+     [x = y] but the bad edge [x + y = 6] (reachable at x=y=3) is INSIDE the reachable
+     set. Data-driven sampling will observe the bad state, so no learned atom excludes it
+     and the candidate cannot certify Safe. The engine must therefore NOT report Safe — a
+     synthesis that trusted its own too-weak guess would flip this to a wrong Safe. (cegis
+     leaves the definite UNSAFE verdict to the PDR path, so [unknown] here is the correct
+     cegis outcome; the portfolio's PDR leg proves the counterexample.) *)
+  check_cegis
+    "reachable-bad-not-safe"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 0)) (P x y))))
+      (assert (forall ((x Int)(y Int)(a Int)(b Int))
+        (=> (and (P x y)(= a (+ x 1))(= b (+ y 1))) (P a b))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x y)(= (+ x y) 6)) false)))|};
+  (* Instant UNSAFE (init already bad) must be caught by the shared depth-0 check. *)
+  check_cegis
+    "init-bad-unsafe"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 3) (P x))))
+      (assert (forall ((x Int)) (=> (and (P x)(= x 3)) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;

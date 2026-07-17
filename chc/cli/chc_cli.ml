@@ -45,28 +45,59 @@ let () =
     exit 2
   | Some path ->
     let src = read_file path in
-    (* Dispatch: a single-predicate system goes to the proven transition-system engine
-       (Chc_engine); multiple predicates go to the multi-predicate linear PDR (Chc_pdr).
-       Both are guarded by independent re-verification, so either path is sound. *)
+    (* Engine selection (env [OXSMT_CHC_ENGINE]):
+       - [pdr] (or unset legacy): the proven backward search — single-predicate system to
+         the transition-system engine (Chc_engine), multi-predicate to the linear PDR
+         (Chc_pdr);
+       - [cegis]: the syntax-guided (Houdini/CEGIS) synthesis engine (Chc_cegis) only;
+       - [portfolio] (DEFAULT): run Chc_cegis first (it catches the
+         sum/conjunctive-invariant SAFE class that backward PDR generalization diverges
+         on) and, if it does not return a definite verdict, fall through to the PDR path.
+         Every path is gated by the same independent re-verification firewall, so any
+         combination is sound. *)
+    (* [OXSMT_CHC_ALLPDR] (landed with the MBP-PDR stack): when set, route even a
+       single-predicate system to the multi-predicate PDR instead of the transition-system
+       engine. Folded into [run_pdr] so the PDR path honors it and the portfolio/cegis
+       modes inherit it. *)
     let all_pdr =
       match Sys.getenv_opt "OXSMT_CHC_ALLPDR" with
       | Some ("0" | "false" | "") | None -> false
       | Some _ -> true
     in
+    let pdr_verdict_str = function
+      | Oxsmt_chc.Chc_pdr.Safe -> "sat"
+      | Oxsmt_chc.Chc_pdr.Unsafe -> "unsat"
+      | Oxsmt_chc.Chc_pdr.Unknown _ -> "unknown"
+    in
+    let run_pdr sys =
+      if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1 && not all_pdr
+      then (
+        let r = Oxsmt_chc.Chc_engine.solve sys in
+        Oxsmt_chc.Chc_engine.verdict_to_smtlib r.Oxsmt_chc.Chc_engine.verdict, r.detail)
+      else (
+        let r = Oxsmt_chc.Chc_pdr.solve sys in
+        pdr_verdict_str r.Oxsmt_chc.Chc_pdr.verdict, r.detail)
+    in
+    let run_cegis sys =
+      let r = Oxsmt_chc.Chc_cegis.solve sys in
+      pdr_verdict_str r.Oxsmt_chc.Chc_cegis.verdict, r.detail
+    in
+    let mode =
+      match Sys.getenv_opt "OXSMT_CHC_ENGINE" with
+      | Some "pdr" -> `Pdr
+      | Some "cegis" -> `Cegis
+      | Some "portfolio" | None -> `Portfolio
+      | Some other -> failwith ("unknown OXSMT_CHC_ENGINE: " ^ other)
+    in
     let smt, detail =
       match Oxsmt_chc.Chc_parse.parse src with
       | sys ->
-        if List.length sys.Oxsmt_chc.Chc_ast.preds <= 1 && not all_pdr
-        then (
-          let r = Oxsmt_chc.Chc_engine.solve sys in
-          Oxsmt_chc.Chc_engine.verdict_to_smtlib r.Oxsmt_chc.Chc_engine.verdict, r.detail)
-        else (
-          let r = Oxsmt_chc.Chc_pdr.solve sys in
-          ( (match r.Oxsmt_chc.Chc_pdr.verdict with
-             | Oxsmt_chc.Chc_pdr.Safe -> "sat"
-             | Oxsmt_chc.Chc_pdr.Unsafe -> "unsat"
-             | Oxsmt_chc.Chc_pdr.Unknown _ -> "unknown")
-          , r.detail ))
+        (match mode with
+         | `Pdr -> run_pdr sys
+         | `Cegis -> run_cegis sys
+         | `Portfolio ->
+           let smt, detail = run_cegis sys in
+           if String.equal smt "unknown" then run_pdr sys else smt, detail)
       | exception Oxsmt_chc.Chc_parse.Unsupported m -> "unknown", "unsupported: " ^ m
       | exception Oxsmt_chc.Chc_parse.Malformed m -> "unknown", "malformed: " ^ m
     in
