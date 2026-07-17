@@ -85,15 +85,19 @@ let positive_x =
 
 let nonnegative_x = greater_equal (bound x) (int 0)
 
-let fact expression = Vox_vc.{ expression; location = Some loc }
+let test_origin =
+  Vox_vc.{ kind = "binder"; name = Some "x"; span = Some loc }
+
+let fact expression =
+  Vox_vc.{ expression; location = Some loc; origin = test_origin }
 
 let vc ?(facts = []) goal = Vox_vc.create ~loc ~facts ~goal
 
 let () =
   let outer = Facts.empty in
-  let premature = Facts.add ~loc positive_x outer in
+  let premature = Facts.add ~origin:test_origin ~loc positive_x outer in
   let with_x = Facts.enter x.rb_id outer in
-  let with_fact = Facts.add ~loc positive_x with_x in
+  let with_fact = Facts.add ~origin:test_origin ~loc positive_x with_x in
   assert (Facts.facts outer = []);
   assert (Facts.facts (Facts.enter x.rb_id premature) = []);
   assert (List.length (Facts.facts with_fact) = 1);
@@ -112,10 +116,52 @@ let () =
   print_endline "fact environment: by-value scope filtering";
   print_endline "escaped goal: rejected"
 
-let tautology = vc (equal int_type (bound x) (bound x))
-let entailment = vc ~facts:[fact positive_x] nonnegative_x
-let not_proved = vc (greater (bound x) (int 0))
-let disproved = vc (equal int_type (int 1) (int 2))
+type parsed_term =
+  | Name of string
+  | Integer of string
+  | Apply of string * parsed_term list
+
+let refinement_predicate source =
+  let lexbuf = Lexing.from_string ("int{ " ^ source ^ " }") in
+  match (Parse.core_type lexbuf).ptyp_desc with
+  | Ptyp_extension
+      (_, PStr [{ pstr_desc = Pstr_eval (expression, _); _ }]) ->
+    begin match expression.pexp_desc with
+    | Pexp_constraint (predicate, _, _) -> predicate
+    | _ -> failwith "unexpected refinement constraint"
+    end
+  | _ -> failwith "unexpected refinement parse tree"
+
+let rec parsed_term (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_hole -> Name "_"
+  | Pexp_ident { txt = Lident name; _ } -> Name name
+  | Pexp_construct ({ txt = Lident name; _ }, None)
+    when String.equal name "true" || String.equal name "false" ->
+    Name name
+  | Pexp_construct ({ txt = Lident name; _ }, Some argument) ->
+    Apply (name, [parsed_term argument])
+  | Pexp_constant { pconst_desc = Pconst_integer (value, None); _ } ->
+    Integer value
+  | Pexp_apply
+      ({ pexp_desc = Pexp_ident { txt = Lident name; _ }; _ }, arguments) ->
+    Apply (name, List.map (fun (_, argument) -> parsed_term argument) arguments)
+  | _ -> failwith "unexpected displayed predicate"
+
+let check_display expected expression expected_term =
+  let display = Vox_verify.render_display ~env expression in
+  assert (String.equal display expected);
+  assert (parsed_term (refinement_predicate display) = expected_term)
+
+let op name left right = Apply (name, [left; right])
+let name name = Name name
+let integer value = Integer value
+
+let less left right = binary "<" int_type bool_type left right
+let add left right = binary "+" int_type int_type left right
+let multiply left right = binary "*" int_type int_type left right
+let conjunction left right = binary "&&" bool_type bool_type left right
+let disjunction left right = binary "||" bool_type bool_type left right
 
 let some value =
   node option_type
@@ -124,6 +170,57 @@ let some value =
            rconstr_name = "Some";
          },
          [value] ))
+
+let negate argument =
+  apply bool_type (primitive (arrow bool_type bool_type) "not") [argument]
+
+let () =
+  let hole =
+    { rb_id = Ident.create_scoped ~scope:4 "_";
+      rb_type = int_type;
+    }
+  in
+  let comparison =
+    conjunction (greater (bound hole) (int 0)) (less (bound x) (int 3))
+  in
+  check_display "_ > 0 && x < 3" comparison
+    (op "&&" (op ">" (name "_") (integer "0"))
+       (op "<" (name "x") (integer "3")));
+  let arithmetic = multiply (add (bound x) (int 1)) (int 2) in
+  check_display "(x + 1) * 2" arithmetic
+    (op "*" (op "+" (name "x") (integer "1")) (integer "2"));
+  let mixed = conjunction (disjunction (bool true) (bool false)) (bool true) in
+  check_display "(true || false) && true" mixed
+    (op "&&" (op "||" (name "true") (name "false")) (name "true"));
+  let negated = negate comparison in
+  check_display "not (_ > 0 && x < 3)" negated
+    (Apply ("not",
+       [op "&&" (op ">" (name "_") (integer "0"))
+          (op "<" (name "x") (integer "3"))]));
+  let grouped_addition = add (bound x) (add (int 1) (int 2)) in
+  check_display "x + (1 + 2)" grouped_addition
+    (op "+" (name "x") (op "+" (integer "1") (integer "2")));
+  let pred = free (arrow option_type bool_type) "pred" in
+  let constructed = some (bound x) in
+  let raw_construct = Vox_verify.render_display ~env constructed in
+  let prefix_construct = apply bool_type pred [constructed] in
+  let display = Vox_verify.render_display ~env prefix_construct in
+  assert (String.equal display ("pred (" ^ raw_construct ^ ")"));
+  assert (
+    parsed_term (refinement_predicate "pred (Some x)")
+    = Apply ("pred", [Apply ("Some", [Name "x"])]));
+  let operator =
+    { rb_id = Ident.create_scoped ~scope:5 "++";
+      rb_type = arrow int_type int_type;
+    }
+  in
+  check_display "(++)" (bound operator) (name "++");
+  print_endline "source display: precedence round trips"
+
+let tautology = vc (equal int_type (bound x) (bound x))
+let entailment = vc ~facts:[fact positive_x] nonnegative_x
+let not_proved = vc (greater (bound x) (int 0))
+let disproved = vc (equal int_type (int 1) (int 2))
 
 let datatype =
   let value = some (int 7) in
