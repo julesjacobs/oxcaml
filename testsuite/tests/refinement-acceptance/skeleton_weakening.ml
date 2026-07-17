@@ -29,7 +29,7 @@
    TODAY: rejected -- the base does not yet strip/weaken on use. *)
 let sw_annot_to_skeleton (x : int{ _ = 1 }) = (x : int)
 [%%expect {|
-val sw_annot_to_skeleton : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
+val sw_annot_to_skeleton : int{ _ = 1 } -> int = <fun>
 |}]
 
 (* @acc id=sw_use_in_arith final=ACCEPT today=ACCEPT stable=no unlocks=integration
@@ -38,7 +38,7 @@ val sw_annot_to_skeleton : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
    FINAL: accepts. TODAY: rejected. *)
 let sw_use_in_arith (x : int{ _ = 1 }) = x + 1
 [%%expect {|
-val sw_use_in_arith : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
+val sw_use_in_arith : int{ _ = 1 } -> int = <fun>
 |}]
 
 (* @acc id=sw_pass_to_bare_param final=ACCEPT today=ACCEPT stable=no unlocks=integration
@@ -49,7 +49,7 @@ let sink (y : int) = y
 let sw_pass_to_bare_param (x : int{ _ = 1 }) = sink x
 [%%expect {|
 val sink : int -> int = <fun>
-val sw_pass_to_bare_param : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
+val sw_pass_to_bare_param : int{ _ = 1 } -> int = <fun>
 |}]
 
 (* @acc id=sw_neutral_if_branches final=ACCEPT today=ACCEPT stable=no unlocks=integration
@@ -59,8 +59,7 @@ val sw_pass_to_bare_param : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
    before any stripping). Contrast ru_* where nesting keeps it rigid. *)
 let sw_neutral_if_branches b (x : int{ _ = 1 }) = if b then x else 0
 [%%expect {|
-val sw_neutral_if_branches : bool -> int{ (app[Stdlib!.=] _ 1) } -> int =
-  <fun>
+val sw_neutral_if_branches : bool -> int{ _ = 1 } -> int = <fun>
 |}]
 
 (* A refined CALL RESULT (not a variable use, which already binds at the
@@ -70,7 +69,7 @@ val sw_neutral_if_branches : bool -> int{ (app[Stdlib!.=] _ 1) } -> int =
    the review flagged as failing to compile before the weakening was added. *)
 let mk () : int{ _ = 3 } = 3
 [%%expect {|
-val mk : unit -> int{ (app[Stdlib!.=] _ 3) } = <fun>
+val mk : unit -> int{ _ = 3 } = <fun>
 |}]
 
 (* @acc id=sw_result_in_arith final=ACCEPT today=ACCEPT stable=yes unlocks=integration

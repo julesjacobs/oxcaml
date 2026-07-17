@@ -57,9 +57,9 @@ let g_pure () : int{ _ = 1 } = 1
 let fp_pure_xocc_a = (g_pure () : int{ _ = 1 })
 let fp_pure_xocc_b = (g_pure () : int{ _ = 1 })
 [%%expect {|
-val g_pure : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
-val fp_pure_xocc_a : int{ (app[Stdlib!.=] _ 1) } = 1
-val fp_pure_xocc_b : int{ (app[Stdlib!.=] _ 1) } = 1
+val g_pure : unit -> int{ _ = 1 } = <fun>
+val fp_pure_xocc_a : int{ _ = 1 } = 1
+val fp_pure_xocc_b : int{ _ = 1 } = 1
 |}]
 
 (* @acc id=fp_impure_definable final=ACCEPT today=ACCEPT stable=yes unlocks=verification
@@ -70,7 +70,7 @@ let g_impure () : int{ _ > 0 } =
   let x = read_int () in
   if x > 0 then x else 1
 [%%expect {|
-val g_impure : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val g_impure : unit -> int{ _ > 0 } = <fun>
 |}]
 
 (* @acc id=fp_impure_xocc final=ACCEPT today=ACCEPT stable=yes unlocks=verification
@@ -82,7 +82,7 @@ let fp_impure_xocc () =
   let _first = (g_impure () : int{ _ > 0 }) in
   (g_impure () : int{ _ > 0 })
 [%%expect {|
-val fp_impure_xocc : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val fp_impure_xocc : unit -> int{ _ > 0 } = <fun>
 |}]
 
 (* @acc id=fp_impure_const final=ACCEPT today=ACCEPT stable=yes unlocks=verification
@@ -95,7 +95,7 @@ let fp_impure_const () : int{ _ = 5 } =
   let _x = read_int () in
   5
 [%%expect {|
-val fp_impure_const : unit -> int{ (app[Stdlib!.=] _ 5) } = <fun>
+val fp_impure_const : unit -> int{ _ = 5 } = <fun>
 |}]
 
 (* @acc id=fp_impure_no_false_contract final=REJECT today=REJECT stable=yes unlocks=verification
@@ -132,7 +132,7 @@ type r = { f : int{ _ > 0 } }
 let fp_launder = { f = Obj.magic 0 }
 let fp_magic_combined = (Obj.magic 0 : int{ _ > 0 })
 [%%expect {|
-type r = { f : int{ (app[Stdlib!.>] _ 0) }; }
+type r = { f : int{ _ > 0 }; }
 val fp_launder : r = {f = 0}
-val fp_magic_combined : int{ (app[Stdlib!.>] _ 0) } = 0
+val fp_magic_combined : int{ _ > 0 } = 0
 |}]

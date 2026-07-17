@@ -9,7 +9,7 @@ end = struct
   let x = (2 : int{ _ = 2 })
 end
 [%%expect {|
-module Equal : sig val x : int{ (app[Stdlib!.=] _ 2) } end
+module Equal : sig val x : int{ _ = 2 } end
 |}]
 
 (* A stronger implementation contract may be weakened at the seal. *)
@@ -19,7 +19,7 @@ end = struct
   let x = (2 : int{ _ = 2 })
 end
 [%%expect {|
-module Stronger : sig val x : int{ (app[Stdlib!.>=] _ 0) } end
+module Stronger : sig val x : int{ _ >= 0 } end
 |}]
 
 (* The reverse implication is false and must be rejected by verification. *)
@@ -70,13 +70,12 @@ Error: Signature mismatch:
        Modules do not match:
          sig val x : int end
        is not included in
-         sig val x : int{ (app[Stdlib!.=] _ 2) } end
+         sig val x : int{ _ = 2 } end
        Values do not match:
          val x : int
        is not included in
-         val x : int{ (app[Stdlib!.=] _ 2) }
-       The type "int" is not compatible with the type
-         "int{ (app[Stdlib!.=] _ 2) }"
+         val x : int{ _ = 2 }
+       The type "int" is not compatible with the type "int{ _ = 2 }"
 |}]
 
 module type Positive = sig
@@ -93,8 +92,8 @@ module Accepts_nonnegative (X : Nonnegative) = struct end
 module Functor_direction_accept
     : functor (X : Positive) -> sig end = Accepts_nonnegative
 [%%expect {|
-module type Positive = sig val x : int{ (app[Stdlib!.>] _ 0) } end
-module type Nonnegative = sig val x : int{ (app[Stdlib!.>=] _ 0) } end
+module type Positive = sig val x : int{ _ > 0 } end
+module type Nonnegative = sig val x : int{ _ >= 0 } end
 module Accepts_nonnegative : functor (X : Nonnegative) -> sig end
 module Functor_direction_accept : functor (X : Positive) -> sig end
 |}]
@@ -133,10 +132,9 @@ end
 (* Rename-immune sibling heads participate in a true seal implication. *)
 module Sibling_true (X : Sibling_equal) : Sibling_lower_bound = X
 [%%expect {|
-module type Sibling_equal =
-  sig val base : int val x : int{ (app[Stdlib!.=] _ sibling[base]) } end
+module type Sibling_equal = sig val base : int val x : int{ _ = base } end
 module type Sibling_lower_bound =
-  sig val base : int val x : int{ (app[Stdlib!.>=] _ sibling[base]) } end
+  sig val base : int val x : int{ _ >= base } end
 module Sibling_true : functor (X : Sibling_equal) -> Sibling_lower_bound
 |}]
 
@@ -177,25 +175,24 @@ Lines 5-9, characters 6-3:
 9 | end
 Error: Signature mismatch:
        Modules do not match:
-         sig module type T = sig val x : int{ (app[Stdlib!.=] _ 2) } end end
+         sig module type T = sig val x : int{ _ = 2 } end end
        is not included in
-         sig module type T = sig val x : int{ (app[Stdlib!.>=] _ 0) } end end
+         sig module type T = sig val x : int{ _ >= 0 } end end
        Module type declarations do not match:
-         module type T = sig val x : int{ (app[Stdlib!.=] _ 2) } end
+         module type T = sig val x : int{ _ = 2 } end
        does not match
-         module type T = sig val x : int{ (app[Stdlib!.>=] _ 0) } end
+         module type T = sig val x : int{ _ >= 0 } end
        At position "module type T = <here>"
        Module types do not match:
-         sig val x : int{ (app[Stdlib!.=] _ 2) } end
+         sig val x : int{ _ = 2 } end
        is not equal to
-         sig val x : int{ (app[Stdlib!.>=] _ 0) } end
+         sig val x : int{ _ >= 0 } end
        At position "module type T = <here>"
        Values do not match:
-         val x : int{ (app[Stdlib!.=] _ 2) }
+         val x : int{ _ = 2 }
        is not included in
-         val x : int{ (app[Stdlib!.>=] _ 0) }
-       The type "int{ (app[Stdlib!.=] _ 2) }" is not compatible with the type
-         "int{ (app[Stdlib!.>=] _ 0) }"
+         val x : int{ _ >= 0 }
+       The type "int{ _ = 2 }" is not compatible with the type "int{ _ >= 0 }"
 |}]
 
 module type Fun_dom_strong = sig
@@ -213,9 +210,8 @@ end
    domain ([_ > 5] |- [_ > 0]). *)
 module Fun_dom_accept (X : Fun_dom_weak) : Fun_dom_strong = X
 [%%expect {|
-module type Fun_dom_strong =
-  sig val f : int{ (app[Stdlib!.>] _ 5) } -> int end
-module type Fun_dom_weak = sig val f : int{ (app[Stdlib!.>] _ 0) } -> int end
+module type Fun_dom_strong = sig val f : int{ _ > 5 } -> int end
+module type Fun_dom_weak = sig val f : int{ _ > 0 } -> int end
 module Fun_dom_accept : functor (X : Fun_dom_weak) -> Fun_dom_strong
 |}]
 
@@ -263,11 +259,10 @@ Error: Signature mismatch:
        Modules do not match:
          sig val x : 'a end
        is not included in
-         sig val x : int{ (app[Stdlib!.=] _ 1) } end
+         sig val x : int{ _ = 1 } end
        Values do not match:
          val x : 'a
        is not included in
-         val x : int{ (app[Stdlib!.=] _ 1) }
-       The type "'a" is not compatible with the type
-         "int{ (app[Stdlib!.=] _ 1) }"
+         val x : int{ _ = 1 }
+       The type "'a" is not compatible with the type "int{ _ = 1 }"
 |}]

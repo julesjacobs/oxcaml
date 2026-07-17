@@ -25,6 +25,6 @@ Error: The value "add" is "partial"
 let real_addition =
   (3 : int{ _ = 1 + 2 })
 [%%expect {|
-val real_addition : int{ (app[Stdlib!.=] _ (app[Stdlib!.+] 1 2)) } = 3
+val real_addition : int{ _ = 1 + 2 } = 3
 |}]
 

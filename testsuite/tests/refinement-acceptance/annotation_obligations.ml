@@ -22,7 +22,7 @@
    TODAY: accepts via the verification pass. *)
 let ao_provable = (5 : int{ _ >= 0 })
 [%%expect {|
-val ao_provable : int{ (app[Stdlib!.>=] _ 0) } = 5
+val ao_provable : int{ _ >= 0 } = 5
 |}]
 
 (* @acc id=ao_unprovable final=REJECT today=REJECT stable=no unlocks=integration+verification
@@ -48,6 +48,5 @@ Error: Refinement verification failed (disproved)
    printed signature are stable: accepts.) *)
 let ao_same_refinement (x : int{ _ = 1 }) = (x : int{ _ = 1 })
 [%%expect {|
-val ao_same_refinement :
-  int{ (app[Stdlib!.=] _ 1) } -> int{ (app[Stdlib!.=] _ 1) } = <fun>
+val ao_same_refinement : int{ _ = 1 } -> int{ _ = 1 } = <fun>
 |}]

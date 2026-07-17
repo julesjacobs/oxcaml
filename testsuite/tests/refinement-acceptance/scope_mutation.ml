@@ -65,7 +65,7 @@ Line 2, characters 14-15:
                   ^
 Warning 186 [unmutated-mutable]: mutable variable "x" was never mutated.
 
-val mut_binder_exempt : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
+val mut_binder_exempt : unit -> int{ _ = 1 } = <fun>
 |}]
 
 (* @acc id=mut_no_persistent_fact final=REJECT today=REJECT stable=yes unlocks=integration+verification
@@ -88,5 +88,5 @@ Line 3, characters 7-8:
 3 |   x <- 2;
            ^
 Error: The constant "2" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 1) }"
+         "int{ _ = 1 }"
 |}]

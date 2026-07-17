@@ -4,9 +4,8 @@ Error: The implementation seal_tvar_failwith.ml
        Values do not match:
          val x : 'a
        is not included in
-         val x : int{ (app[Stdlib!.>] _ 0) }
-       The type 'a is not compatible with the type
-         int{ (app[Stdlib!.>] _ 0) }
+         val x : int{ _ > 0 }
+       The type 'a is not compatible with the type int{ _ > 0 }
        File "seal_tvar_failwith.mli", line 1, characters 0-20:
          Expected declaration
        File "seal_tvar_failwith.ml", line 1, characters 4-5:

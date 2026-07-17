@@ -33,7 +33,7 @@ val expects_total : 'a @ total -> 'a = <fun>
    refinement behavior "as before"; the mode axes do not touch it. *)
 let toplevel = (2 : int{ _ > 0 })
 [%%expect {|
-val toplevel : int{ (app[Stdlib!.>] _ 0) } = 2
+val toplevel : int{ _ > 0 } = 2
 |}]
 
 (* @acc id=refined_in_ordinary_closure final=ACCEPT today=ACCEPT stable=yes unlocks=verification
@@ -42,7 +42,7 @@ val toplevel : int{ (app[Stdlib!.>] _ 0) } = 2
    comparison is irrelevant to capture analysis. *)
 let ordinary = fun () -> (2 : int{ _ > 0 })
 [%%expect {|
-val ordinary : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val ordinary : unit -> int{ _ > 0 } = <fun>
 |}]
 
 (* @acc id=refined_in_total_closure final=ACCEPT today=ACCEPT stable=yes
@@ -57,7 +57,7 @@ val ordinary : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
 let refined_in_total @ total = fun () -> (2 : int{ _ > 0 })
 let () = ignore (expects_total refined_in_total)
 [%%expect {|
-val refined_in_total : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val refined_in_total : unit -> int{ _ > 0 } = <fun>
 Line 2, characters 16-48:
 2 | let () = ignore (expects_total refined_in_total)
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

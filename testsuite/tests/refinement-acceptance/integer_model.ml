@@ -30,6 +30,5 @@
    integer model is ever changed. *)
 let int_overflow_unsound = (max_int + 1 : int{ _ > max_int })
 [%%expect {|
-val int_overflow_unsound : int{ (app[Stdlib!.>] _ global[Stdlib!.max_int]) } =
-  -4611686018427387904
+val int_overflow_unsound : int{ _ > max_int } = -4611686018427387904
 |}]

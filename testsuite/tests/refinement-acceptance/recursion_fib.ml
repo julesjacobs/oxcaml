@@ -29,8 +29,7 @@
 let rec rec_fib_nonneg (n : int{ _ >= 0 }) : int{ _ >= 0 } =
   if n <= 1 then n else rec_fib_nonneg (n - 1) + rec_fib_nonneg (n - 2)
 [%%expect {|
-val rec_fib_nonneg :
-  int{ (app[Stdlib!.>=] _ 0) } -> int{ (app[Stdlib!.>=] _ 0) } = <fun>
+val rec_fib_nonneg : int{ _ >= 0 } -> int{ _ >= 0 } = <fun>
 |}]
 
 (* @acc id=rec_sum_to final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
@@ -42,6 +41,5 @@ val rec_fib_nonneg :
 let rec rec_sum_to (n : int{ _ >= 0 }) : int{ _ >= 0 } =
   if n = 0 then 0 else n + rec_sum_to (n - 1)
 [%%expect {|
-val rec_sum_to : int{ (app[Stdlib!.>=] _ 0) } -> int{ (app[Stdlib!.>=] _ 0) } =
-  <fun>
+val rec_sum_to : int{ _ >= 0 } -> int{ _ >= 0 } = <fun>
 |}]
