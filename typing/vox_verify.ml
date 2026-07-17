@@ -871,7 +871,7 @@ let rec walk_expression state expression =
           annotation_provenance ~annotation_location:loc
             ~subject_location:ifso.exp_loc
         in
-        prove_refinement state ~env:expression.exp_env ~loc
+        prove_refinement state ~env:expression.exp_env ~loc:ifso.exp_loc
           ~kind:"annotation" ~program_point:expression.exp_loc ~provenance
           ~subject:(subject state ifso) refinement [])
       marks;
@@ -899,7 +899,7 @@ let rec walk_expression state expression =
             annotation_provenance ~annotation_location:loc
               ~subject_location:ifnot.exp_loc
           in
-          prove_refinement state ~env:expression.exp_env ~loc
+          prove_refinement state ~env:expression.exp_env ~loc:ifnot.exp_loc
             ~kind:"annotation" ~program_point:expression.exp_loc ~provenance
             ~subject:(subject state ifnot) refinement [])
         marks;
