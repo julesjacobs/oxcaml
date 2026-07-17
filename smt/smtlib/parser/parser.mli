@@ -22,11 +22,19 @@
 exception Malformed of string
 exception Unsupported of string
 
-(** A universally-quantified assertion, either [(assert (forall (binders) body))] or
-    the equivalent [(assert (not (exists (binders) body)))], in the ADR-0012 lemma tier.
-    The parser cannot construct the lemma itself — the bound variables must be
-    minted as cap-gated placeholder qvars through {!Oxsmt_interface.Session} (mint-before-
-    build, §1.3), which lives in a library this test-only parser must not depend on. So it
+(** Whether the front-end quantified pipeline (typed formula IR -> NNF/polarity ->
+    Skolemization + definitional clausification -> lowering) is enabled, from the dark
+    flag [OXSMT_QUANT_PIPELINE] (read once). Default OFF = the current hand-coded
+    quantifier-shape classification, byte-identical. ON (stage 2) routes quantified
+    assertions through {!Fol}. Exposed so a driver can report the active mode; the routing
+    itself is internal to the parser. *)
+val quant_pipeline_enabled : bool Lazy.t
+
+(** A universally-quantified assertion, either [(assert (forall (binders) body))] or the
+    equivalent [(assert (not (exists (binders) body)))], in the ADR-0012 lemma tier. The
+    parser cannot construct the lemma itself — the bound variables must be minted as
+    cap-gated placeholder qvars through {!Oxsmt_interface.Session} (mint-before- build,
+    §1.3), which lives in a library this test-only parser must not depend on. So it
     records the binders and a deferred [build]: the driver mints one qvar per binder and
     passes their {!Oxsmt_core.Term.t} images (in binder order) to [build], which reads the
     body and any [:pattern] triggers with each binder bound to its qvar image. Nested
@@ -54,9 +62,9 @@ type lemma_src =
       outside the subset — the driver maps that to a sound [unknown]. *)
   }
 
-(** A top-level existential: either a positive [(assert (exists (binders) body))] or
-    the equivalent [(assert (not (forall (binders) body)))]. Skolemized by the driver:
-    the binders become fresh ground witnesses and [ex_build] reads the body over them,
+(** A top-level existential: either a positive [(assert (exists (binders) body))] or the
+    equivalent [(assert (not (forall (binders) body)))]. Skolemized by the driver: the
+    binders become fresh ground witnesses and [ex_build] reads the body over them,
     asserted as a ground formula — equisatisfiable with the original (sound in both
     directions). A negated existential is represented as a universal {!lemma_src}; it is
     never Skolemized to a constant. *)

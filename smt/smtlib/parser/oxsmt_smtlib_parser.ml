@@ -8,3 +8,8 @@
 
 module Sexp = Sexp
 module Parser = Parser
+
+(** Typed first-order formula IR for the front-end quantified pipeline (dark behind
+    [OXSMT_QUANT_PIPELINE]). Pure; exposed so its NNF/rename-apart transforms are
+    unit-testable in isolation. *)
+module Fol = Fol

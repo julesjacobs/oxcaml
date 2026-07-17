@@ -23,3 +23,11 @@
  (name fuzz_lex)
  (modules fuzz_lex)
  (libraries oxsmt_core oxsmt_lexical oxsmt_smtlib oxsmt_smtlib_parser))
+
+; fol_test: front-end quantified-pipeline formula IR (NNF/polarity, rename-apart, canonical
+; exemplars). Pure, stdlib-only over oxsmt_core + the test-only parser (make fol-test).
+
+(executable
+ (name fol_test)
+ (modules fol_test)
+ (libraries oxsmt_core oxsmt_smtlib_parser))

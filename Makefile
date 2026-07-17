@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex fol-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -740,6 +740,13 @@ smtlib-test:
 	  tests/dt-goldens-sat tests/arr-goldens tests/arr-goldens-sat tests/bv-goldens
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
+## fol-test — front-end quantified-pipeline formula IR self-test: NNF/polarity table,
+##   binder rename-apart, and the two canonical clausification exemplars at the NNF level.
+##   Pure (no Session/Context), deterministic, <0.05s. Nonzero exit on any failed check.
+fol-test:
+	$(DUNE) build smt/smtlib/test/fol_test.exe
+	$(DUNE) exec smt/smtlib/test/fol_test.exe
+
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
 ##   Deterministic (fixed seeds). Checks printer<->lexer kind preservation, print->parse
 ##   round-trip, and lexer idempotence over token-boundary-adversarial inputs. A smaller
@@ -823,6 +830,7 @@ test: check-frozen
 	$(MAKE) stage0-test
 	$(MAKE) wiring-test
 	$(MAKE) smtlib-test
+	$(MAKE) fol-test
 	$(MAKE) lemma-test
 	$(MAKE) cert-test
 	$(MAKE) checker-test

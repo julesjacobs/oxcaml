@@ -10,6 +10,20 @@ exception Unsupported of string
 let malformedf fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
+(* Dark flag for the front-end quantified pipeline (design basis: typed formula IR ->
+   NNF/polarity -> Skolemization + definitional clausification -> lowering into the
+   ground/lemma APIs). Read ONCE, so a process's routing is stable. Default OFF (unset or
+   any non-truthy value) keeps the current hand-coded quantifier-shape classification,
+   i.e. BYTE-IDENTICAL behavior; ON routes quantified assertions through {!Fol} (stage 2).
+   RUNG 1 only defines the switch and the pure IR engine — no consumer yet, so ON = OFF
+   for now. *)
+let quant_pipeline_enabled =
+  lazy
+    (match Sys.getenv_opt "OXSMT_QUANT_PIPELINE" with
+     | Some ("1" | "true" | "yes" | "on") -> true
+     | Some _ | None -> false)
+;;
+
 (* Let-/qvar-binding scope. A persistent [String] map, NOT an association list: a deeply
    nested [let]-chain (thousands deep in the TPTP first-order model-finding families)
    makes an assoc-list scope O(references x nesting-depth) — the whole formula's term
@@ -1153,12 +1167,12 @@ let read_exists st (tail : Sexp.t list) : exists_src =
   { ex_qvars; ex_build }
 ;;
 
-(* Quantifier duals at a positive assertion position:
-   [not (exists x. p)] is [forall x. not p], so it must become a lemma rather than a
-   Skolem constant (which would be an unsound weakening); [not (forall x. p)] is
-   [exists x. not p], so the ordinary fresh-witness path is equisatisfiable. The bodies
-   are read with [read_term], not [read_lemma_body]: a further nested quantifier remains
-   outside the fragment and is dropped under the existing sentinel discipline. *)
+(* Quantifier duals at a positive assertion position: [not (exists x. p)] is
+   [forall x. not p], so it must become a lemma rather than a Skolem constant (which would
+   be an unsound weakening); [not (forall x. p)] is [exists x. not p], so the ordinary
+   fresh-witness path is equisatisfiable. The bodies are read with [read_term], not
+   [read_lemma_body]: a further nested quantifier remains outside the fragment and is
+   dropped under the existing sentinel discipline. *)
 let read_negated_exists st (tail : Sexp.t list) : lemma_src =
   let qvars, body_sexp = collect_exists st [] tail in
   let build ~skolem:_ qvar_images =
@@ -1477,14 +1491,12 @@ let run st sexps =
       (match read_exists st tail with
        | ex -> existentials := ex :: !existentials
        | exception Unsupported _ -> incr dropped)
-    | Sexp.List
-        [ head; Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ]
+    | Sexp.List [ head; Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ]
       when Sexp.simple head = Some "not" ->
       (match read_negated_exists st tail with
        | lemma -> lemmas := lemma :: !lemmas
        | exception Unsupported _ -> incr dropped)
-    | Sexp.List
-        [ head; Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ]
+    | Sexp.List [ head; Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ]
       when Sexp.simple head = Some "not" ->
       (match read_negated_forall st tail with
        | ex -> existentials := ex :: !existentials
