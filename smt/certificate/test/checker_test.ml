@@ -118,7 +118,7 @@ let make_mock _st config =
       let props =
         List.filter_map
           (fun (ants, cons) ->
-             if all_true ants && not (is_true cons) then Some cons else None)
+            if all_true ants && not (is_true cons) then Some cons else None)
           config.implications
       in
       let props = List.sort_uniq compare props in
@@ -363,7 +363,7 @@ let lia_farkas_conflict () =
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
        ; on_dt_distinctness =
            (fun ~registry ~clause ~left ~right ->
-              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -373,6 +373,38 @@ let lia_farkas_conflict () =
   Session.assert_term s (Context.le ctx x (Context.int_const ctx 0));
   Session.assert_term s (Context.le ctx (Context.int_const ctx 1) x);
   check "lia-farkas: solve unsat" (Session.check_sat s = Session.Unsat);
+  Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+(* Post-LAND-29b equality-premise Farkas conflict: [2x = 4] forces [x = 2], contradicting
+   [x <> 2]. The eq-aware emitter records the [2x = 4] EQUALITY as a Farkas premise with a
+   signed / fractional multiplier ([-1/2] here), which the checker must accept (equalities
+   admit any-sign multipliers) while still independently re-deriving the [0 < c]
+   contradiction. This is exactly the shape the fork-base review never saw. *)
+let lia_farkas_equality_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "cert_eqx" Sort.int) in
+  Session.assert_term
+    s
+    (Context.eq ctx (Context.mul_const ctx 2 x) (Context.int_const ctx 4));
+  Session.assert_term s (Context.distinct ctx [ x; Context.int_const ctx 2 ]);
+  check "lia-farkas-eq: solve unsat" (Session.check_sat s = Session.Unsat);
   Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
 ;;
 
@@ -390,25 +422,23 @@ let zero_lia_multipliers (ev : Checker.events) =
     theory =
       List.map
         (fun (e : Recorder.theory_event) ->
-           match e.Recorder.lia_witness with
-           | None -> e
-           | Some witness ->
-             let premises =
-               List.map
-                 (fun (p : Recorder.lia_premise) ->
-                    { p with Recorder.multiplier = Rational.zero })
-                 witness.Recorder.premises
-             in
-             { e with
-               Recorder.lia_witness = Some { Recorder.premises = premises }
-             })
+          match e.Recorder.lia_witness with
+          | None -> e
+          | Some witness ->
+            let premises =
+              List.map
+                (fun (p : Recorder.lia_premise) ->
+                  { p with Recorder.multiplier = Rational.zero })
+                witness.Recorder.premises
+            in
+            { e with Recorder.lia_witness = Some { Recorder.premises } })
         ev.theory
   }
 ;;
 
-(* End-to-end EUF leaf witness. The contradiction needs both transitivity and
-   congruence: a=b, b=c, but f(a)<>f(c). Cdclt preserves the pure-EUF rule before the
-   frozen seam drops it; Checker then rebuilds closure without calling the EUF engine. *)
+(* End-to-end EUF leaf witness. The contradiction needs both transitivity and congruence:
+   a=b, b=c, but f(a)<>f(c). Cdclt preserves the pure-EUF rule before the frozen seam
+   drops it; Checker then rebuilds closure without calling the EUF engine. *)
 let euf_congruence_conflict () =
   let s = Session.create () in
   let rec_ = Recorder.create () in
@@ -421,7 +451,7 @@ let euf_congruence_conflict () =
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
        ; on_dt_distinctness =
            (fun ~registry ~clause ~left ~right ->
-              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -462,7 +492,7 @@ let euf_congruence_reason () =
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
        ; on_dt_distinctness =
            (fun ~registry ~clause ~left ~right ->
-              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -478,15 +508,13 @@ let euf_congruence_reason () =
   let fab = Context.eq ctx (Context.app ctx f [ a ]) (Context.app ctx f [ b ]) in
   Session.assert_term s ab;
   Session.assert_term s (Context.or_ ctx [ Context.not_ ctx fab; p ]);
-  Session.assert_term
-    s
-    (Context.or_ ctx [ Context.not_ ctx fab; Context.not_ ctx p ]);
+  Session.assert_term s (Context.or_ ctx [ Context.not_ ctx fab; Context.not_ ctx p ]);
   check "euf-reason: solve unsat" (Session.check_sat s = Session.Unsat);
   Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
 ;;
 
-(* End-to-end datatype constructor-distinctness leaf. The asserted equality [red=green]
-   is a genuine DT Conflict, not an EUF conflict: Cdclt conservatively records the two
+(* End-to-end datatype constructor-distinctness leaf. The asserted equality [red=green] is
+   a genuine DT Conflict, not an EUF conflict: Cdclt conservatively records the two
    constructor terms, while Checker independently rebuilds equality/congruence from the
    atom statement and reads distinctness from the separately recorded DT declaration. *)
 let dt_distinctness_conflict () =
@@ -501,7 +529,7 @@ let dt_distinctness_conflict () =
        ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
        ; on_dt_distinctness =
            (fun ~registry ~clause ~left ~right ->
-              Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -534,8 +562,7 @@ let strip_dt_witnesses (ev : Checker.events) =
   { ev with
     theory =
       List.map
-        (fun (event : Recorder.theory_event) ->
-           { event with Recorder.dt_witness = None })
+        (fun (event : Recorder.theory_event) -> { event with Recorder.dt_witness = None })
         ev.theory
   }
 ;;
@@ -545,13 +572,13 @@ let collapse_dt_witness_pair (ev : Checker.events) =
     theory =
       List.map
         (fun (event : Recorder.theory_event) ->
-           match event.Recorder.dt_witness with
-           | None -> event
-           | Some witness ->
-             { event with
-               Recorder.dt_witness =
-                 Some { witness with Recorder.right = witness.Recorder.left }
-             })
+          match event.Recorder.dt_witness with
+          | None -> event
+          | Some witness ->
+            { event with
+              Recorder.dt_witness =
+                Some { witness with Recorder.right = witness.Recorder.left }
+            })
         ev.theory
   }
 ;;
@@ -561,9 +588,9 @@ let replace_dt_equality_statement (ev : Checker.events) ~from ~to_ =
     atoms =
       List.map
         (fun (event : Recorder.atom_event) ->
-           if Term.equal event.Recorder.atom from
-           then { event with Recorder.atom = to_ }
-           else event)
+          if Term.equal event.Recorder.atom from
+          then { event with Recorder.atom = to_ }
+          else event)
         ev.atoms
   }
 ;;
@@ -573,9 +600,9 @@ let erase_dt_constructor_declaration (ev : Checker.events) =
     theory =
       List.map
         (fun (event : Recorder.theory_event) ->
-           match event.Recorder.dt_witness with
-           | None -> event
-           | Some _ -> { event with Recorder.dt_registry = Some Defs.empty })
+          match event.Recorder.dt_witness with
+          | None -> event
+          | Some _ -> { event with Recorder.dt_registry = Some Defs.empty })
         ev.theory
   }
 ;;
@@ -630,18 +657,15 @@ let foreign_dt_witness_context (ev : Checker.events) =
       theory =
         List.map
           (fun (event : Recorder.theory_event) ->
-             match event.Recorder.dt_witness with
-             | None -> event
-             | Some witness ->
-               { event with
-                 Recorder.dt_registry = Some registry
-               ; dt_witness =
-                   Some
-                     { witness with
-                       Recorder.left = foreign_left
-                     ; right = foreign_right
-                     }
-               })
+            match event.Recorder.dt_witness with
+            | None -> event
+            | Some witness ->
+              { event with
+                Recorder.dt_registry = Some registry
+              ; dt_witness =
+                  Some
+                    { witness with Recorder.left = foreign_left; right = foreign_right }
+              })
           ev.theory
     }
   in
@@ -653,7 +677,7 @@ let strip_euf_witnesses (ev : Checker.events) =
     theory =
       List.map
         (fun (event : Recorder.theory_event) ->
-           { event with Recorder.euf_witness = None })
+          { event with Recorder.euf_witness = None })
         ev.theory
   }
 ;;
@@ -672,16 +696,16 @@ let drop_euf_equality (ev : Checker.events) equality =
     theory =
       List.map
         (fun (event : Recorder.theory_event) ->
-           match event.Recorder.euf_witness with
-           | None -> event
-           | Some witness ->
-             let clause =
-               List.filter (fun lit -> Sat.var_of_lit lit <> var) witness.Recorder.clause
-             in
-             { event with
-               Recorder.clause = Array.of_list clause
-             ; euf_witness = Some { Recorder.clause }
-             })
+          match event.Recorder.euf_witness with
+          | None -> event
+          | Some witness ->
+            let clause =
+              List.filter (fun lit -> Sat.var_of_lit lit <> var) witness.Recorder.clause
+            in
+            { event with
+              Recorder.clause = Array.of_list clause
+            ; euf_witness = Some { Recorder.clause }
+            })
         ev.theory
   }
 ;;
@@ -691,9 +715,9 @@ let replace_euf_equality_statement (ev : Checker.events) ~from ~to_ =
     atoms =
       List.map
         (fun (event : Recorder.atom_event) ->
-           if Term.equal event.Recorder.atom from
-           then { event with Recorder.atom = to_ }
-           else event)
+          if Term.equal event.Recorder.atom from
+          then { event with Recorder.atom = to_ }
+          else event)
         ev.atoms
   }
 ;;
@@ -728,9 +752,7 @@ let mixed_context_euf_leaf () : Checker.events =
     let env = Env.create () in
     let ctx = Context.create env in
     let u = Sort.uninterpreted (Env.declare_sort env "cert_cross_context_u") in
-    let const name =
-      Context.const ctx (Env.declare_fun env name (Rank.create [] u))
-    in
+    let const name = Context.const ctx (Env.declare_fun env name (Rank.create [] u)) in
     Context.eq ctx (const "cert_cross_context_a") (const "cert_cross_context_b")
   in
   let first = make_equality () in
@@ -752,7 +774,7 @@ let mixed_context_euf_leaf () : Checker.events =
          ; dt_registry = None
          ; dt_witness = None
          }
-          : Recorder.theory_event)
+         : Recorder.theory_event)
       ]
   ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
   ; assumptions = []
@@ -770,9 +792,7 @@ let mixed_context_rank_euf_leaf () : Checker.events =
       ignore (Context.int_const ctx i : Term.t)
     done;
     let sort = Sort.uninterpreted (Env.declare_sort env sort_name) in
-    let const name =
-      Context.const ctx (Env.declare_fun env name (Rank.create [] sort))
-    in
+    let const name = Context.const ctx (Env.declare_fun env name (Rank.create [] sort)) in
     Context.eq ctx (const "cert_cross_rank_f") (const "cert_cross_rank_g")
   in
   let first = make_equality ~sort_name:"cert_cross_rank_u" ~pad:0 in
@@ -794,7 +814,7 @@ let mixed_context_rank_euf_leaf () : Checker.events =
          ; dt_registry = None
          ; dt_witness = None
          }
-          : Recorder.theory_event)
+         : Recorder.theory_event)
       ]
   ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
   ; assumptions = []
@@ -885,7 +905,7 @@ let exploit_empty_reason : Checker.events =
          ; dt_registry = None
          ; dt_witness = None
          }
-          : Recorder.theory_event)
+         : Recorder.theory_event)
       ]
   ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
   ; assumptions = []
@@ -994,7 +1014,7 @@ let bogus_theory_conflict_empty_core_e3 : Checker.events =
          ; dt_registry = None
          ; dt_witness = None
          }
-          : Recorder.theory_event)
+         : Recorder.theory_event)
       ]
   ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
   ; assumptions = []
@@ -1172,10 +1192,7 @@ let () =
     (List.exists
        (fun (e : Recorder.theory_event) -> Option.is_some e.Recorder.lia_witness)
        lia_ev.Checker.theory);
-  expect
-    "positive: all theory leaves witnessed -> fully VALID"
-    `Fully_valid
-    lia_ev;
+  expect "positive: all theory leaves witnessed -> fully VALID" `Fully_valid lia_ev;
   expect
     "coverage: stripping a valid LIA witness stays conditional"
     `Modulo
@@ -1184,17 +1201,26 @@ let () =
     "corrupt: zeroed Farkas multipliers -> INVALID"
     `Invalid
     (zero_lia_multipliers lia_ev);
+  let lia_eq_ev = lia_farkas_equality_conflict () in
+  (* [`Valid] accepts VALID or VALID-modulo: the point is the equality-premise Farkas leaf
+     is ACCEPTED (pre-fix it was INVALID — negative/fractional multiplier on the [2x = 4]
+     equality). The cert stays modulo here because the disequality split leaves a separate
+     unwitnessed leaf, which is fine. *)
+  expect
+    "positive: equality-premise (signed-multiplier) Farkas conflict accepted"
+    `Valid
+    lia_eq_ev;
+  expect
+    "corrupt: zeroed multipliers on an equality-premise witness -> INVALID"
+    `Invalid
+    (zero_lia_multipliers lia_eq_ev);
   let euf_ev, chain_equality, replacement_equality = euf_congruence_conflict () in
   check
     "positive: EUF stream carries a congruence witness"
     (List.exists
-       (fun (event : Recorder.theory_event) ->
-          Option.is_some event.Recorder.euf_witness)
+       (fun (event : Recorder.theory_event) -> Option.is_some event.Recorder.euf_witness)
        euf_ev.Checker.theory);
-  expect
-    "positive: every EUF theory leaf witnessed -> fully VALID"
-    `Fully_valid
-    euf_ev;
+  expect "positive: every EUF theory leaf witnessed -> fully VALID" `Fully_valid euf_ev;
   expect
     "coverage: stripping valid EUF witnesses stays conditional"
     `Modulo
@@ -1206,10 +1232,7 @@ let () =
   expect
     "corrupt: replaced equality statement breaks EUF chain -> INVALID"
     `Invalid
-    (replace_euf_equality_statement
-       euf_ev
-       ~from:chain_equality
-       ~to_:replacement_equality);
+    (replace_euf_equality_statement euf_ev ~from:chain_equality ~to_:replacement_equality);
   expect
     "corrupt: mixed-Context term-tag alias in EUF statement -> INVALID"
     `Invalid
@@ -1223,24 +1246,18 @@ let () =
     "positive: propagated EUF equality carries a witnessed Reason leaf"
     (List.exists
        (fun (event : Recorder.theory_event) ->
-          event.Recorder.role = Sat.Reason && Option.is_some event.Recorder.euf_witness)
+         event.Recorder.role = Sat.Reason && Option.is_some event.Recorder.euf_witness)
        euf_reason_ev.Checker.theory);
-  expect
-    "positive: EUF Reason leaf replay -> fully VALID"
-    `Fully_valid
-    euf_reason_ev;
+  expect "positive: EUF Reason leaf replay -> fully VALID" `Fully_valid euf_reason_ev;
   let dt_ev, dt_equality, dt_reflexive = dt_distinctness_conflict () in
   check
     "positive: DT stream carries a distinct-constructor witness"
     (List.exists
        (fun (event : Recorder.theory_event) ->
-          Option.is_some event.Recorder.dt_registry
-          && Option.is_some event.Recorder.dt_witness)
+         Option.is_some event.Recorder.dt_registry
+         && Option.is_some event.Recorder.dt_witness)
        dt_ev.Checker.theory);
-  expect
-    "positive: DT constructor-distinctness leaf -> fully VALID"
-    `Fully_valid
-    dt_ev;
+  expect "positive: DT constructor-distinctness leaf -> fully VALID" `Fully_valid dt_ev;
   expect
     "coverage: stripping valid DT witness stays conditional"
     `Modulo
@@ -1261,10 +1278,7 @@ let () =
   check
     "mixed-context DT discriminator has colliding tags on distinct physical terms"
     foreign_tags_collide;
-  expect
-    "corrupt: mixed-Context DT witness endpoints -> INVALID"
-    `Invalid
-    foreign_dt_ev;
+  expect "corrupt: mixed-Context DT witness endpoints -> INVALID" `Invalid foreign_dt_ev;
   (* board #153b — EXACT antecedent-SET (and order) on a real chain, not length-only. The
      order scenario learns [¬b] from [¬b∨c] then the conflict [¬b∨¬c]; the frozen contract
      order [rₙ..r₁; conflict] is exactly [ {¬b,c}; {¬b,¬c} ] = [ [-2;3]; [-3;-2] ]. *)
@@ -1273,7 +1287,7 @@ let () =
     let input_clause_of id =
       List.find_map
         (fun (i : Recorder.input_event) ->
-           if i.Recorder.id = id then Some (clause_set i.Recorder.clause) else None)
+          if i.Recorder.id = id then Some (clause_set i.Recorder.clause) else None)
         ev.Checker.inputs
     in
     match ev.Checker.learned with
@@ -1462,7 +1476,7 @@ let () =
            ; dt_registry = None
            ; dt_witness = None
            }
-            : Recorder.theory_event)
+           : Recorder.theory_event)
         ]
     ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
     ; assumptions = []

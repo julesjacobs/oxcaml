@@ -108,15 +108,15 @@ let build_index ev =
   in
   List.iter
     (fun (e : Recorder.input_event) ->
-       add e.Recorder.id (Kinput e.Recorder.origin, dedup_clause e.Recorder.clause))
+      add e.Recorder.id (Kinput e.Recorder.origin, dedup_clause e.Recorder.clause))
     ev.inputs;
   List.iter
     (fun (e : Recorder.learned_event) ->
-       add e.Recorder.id (Klearned, dedup_clause e.Recorder.clause))
+      add e.Recorder.id (Klearned, dedup_clause e.Recorder.clause))
     ev.learned;
   List.iter
     (fun (e : Recorder.theory_event) ->
-       add e.Recorder.id (Ktheory e.Recorder.role, dedup_clause e.Recorder.clause))
+      add e.Recorder.id (Ktheory e.Recorder.role, dedup_clause e.Recorder.clause))
     ev.theory;
   let resolve id =
     if Hashtbl.mem ambiguous id
@@ -189,26 +189,26 @@ module Bcp = struct
       changed := false;
       List.iter
         (fun clause ->
-           if not !conflict
-           then (
-             let satisfied = ref false
-             and unassigned = ref [] in
-             Array.iter
-               (fun l ->
-                  match lit_status a l with
-                  | LTrue -> satisfied := true
-                  | LFalse -> ()
-                  | LUnassigned -> unassigned := l :: !unassigned)
-               clause;
-             if not !satisfied
-             then (
-               match !unassigned with
-               | [] -> conflict := true
-               | [ l ] ->
-                 (match set_true a l with
-                  | `Ok -> changed := true
-                  | `Conflict -> conflict := true)
-               | _ -> ())))
+          if not !conflict
+          then (
+            let satisfied = ref false
+            and unassigned = ref [] in
+            Array.iter
+              (fun l ->
+                match lit_status a l with
+                | LTrue -> satisfied := true
+                | LFalse -> ()
+                | LUnassigned -> unassigned := l :: !unassigned)
+              clause;
+            if not !satisfied
+            then (
+              match !unassigned with
+              | [] -> conflict := true
+              | [ l ] ->
+                (match set_true a l with
+                 | `Ok -> changed := true
+                 | `Conflict -> conflict := true)
+              | _ -> ())))
         db
     done;
     !conflict
@@ -228,10 +228,10 @@ module Bcp = struct
     and unassigned = ref [] in
     Array.iter
       (fun l ->
-         match lit_status t.assign l with
-         | LTrue -> satisfied := true
-         | LFalse -> ()
-         | LUnassigned -> unassigned := l :: !unassigned)
+        match lit_status t.assign l with
+        | LTrue -> satisfied := true
+        | LFalse -> ()
+        | LUnassigned -> unassigned := l :: !unassigned)
       clause;
     if not !satisfied
     then (
@@ -307,9 +307,9 @@ let ordered_rup base ~clause ~antecedents ~resolve ~learned_verified =
   match
     List.find_map
       (fun id ->
-         match validate_id id with
-         | Error e -> Some e
-         | Ok () -> None)
+        match validate_id id with
+        | Error e -> Some e
+        | Ok () -> None)
       antecedents
   with
   | Some e -> Error e
@@ -318,8 +318,7 @@ let ordered_rup base ~clause ~antecedents ~resolve ~learned_verified =
     let conflict = ref false in
     List.iter
       (fun l ->
-         if (not !conflict) && set_true a (Sat.neg_lit l) = `Conflict
-         then conflict := true)
+        if (not !conflict) && set_true a (Sat.neg_lit l) = `Conflict then conflict := true)
       (Array.to_list clause);
     if !conflict
     then Ok () (* negating the clause already contradicts the closure: it is entailed *)
@@ -336,10 +335,10 @@ let ordered_rup base ~clause ~antecedents ~resolve ~learned_verified =
              and unassigned = ref [] in
              Array.iter
                (fun l ->
-                  match lit_status a l with
-                  | LTrue -> satisfied := true
-                  | LFalse -> ()
-                  | LUnassigned -> unassigned := l :: !unassigned)
+                 match lit_status a l with
+                 | LTrue -> satisfied := true
+                 | LFalse -> ()
+                 | LUnassigned -> unassigned := l :: !unassigned)
                hint;
              if !satisfied
              then
@@ -422,18 +421,18 @@ type euf_statement =
   | Euf_eq of euf_endpoint * euf_endpoint
   | Euf_neq of euf_endpoint * euf_endpoint
 
-(* Independent EUF leaf replay. A clause is EUF-valid exactly when the conjunction of
-   its negated literals is inconsistent. Decode those signed propositions through the
-   certificate's separate atom map, seed only their asserted equalities/disequalities,
-   and rebuild congruence closure from the definition: reflexive union-find gives
+(* Independent EUF leaf replay. A clause is EUF-valid exactly when the conjunction of its
+   negated literals is inconsistent. Decode those signed propositions through the
+   certificate's separate atom map, seed only their asserted equalities/disequalities, and
+   rebuild congruence closure from the definition: reflexive union-find gives
    symmetry/transitivity, and two [App] terms merge only when their symbols, arities, and
    corresponding argument classes match. This calls no production EUF code or proof
    forest. Boolean predicates are applications equated with true/false; true != false is
    the sole background axiom. *)
 let verify_euf_leaf
-      ~resolve_atom
-      (event : Recorder.theory_event)
-      (witness : Recorder.euf_leaf_witness)
+  ~resolve_atom
+  (event : Recorder.theory_event)
+  (witness : Recorder.euf_leaf_witness)
   =
   try
     if witness.Recorder.clause <> Array.to_list event.Recorder.clause
@@ -454,15 +453,11 @@ let verify_euf_leaf
               then Ok (Euf_eq (Euf_term a, Euf_term b))
               else Ok (Euf_neq (Euf_term a, Euf_term b))
             | Theory_view.Predicate _ ->
-              Ok
-                (Euf_eq
-                   (Euf_term atom, if positive then Euf_true else Euf_false))
+              Ok (Euf_eq (Euf_term atom, if positive then Euf_true else Euf_false))
             | Theory_view.Bool_lit value ->
               Ok
-                (Euf_eq
-                   (endpoint_of_bool value, if positive then Euf_true else Euf_false))
-            | Theory_view.Le_zero _ ->
-              Error "EUF witness cites a non-EUF arithmetic atom")
+                (Euf_eq (endpoint_of_bool value, if positive then Euf_true else Euf_false))
+            | Theory_view.Le_zero _ -> Error "EUF witness cites a non-EUF arithmetic atom")
       in
       let rec decode_all acc = function
         | [] -> Ok (List.rev acc)
@@ -492,7 +487,7 @@ let verify_euf_leaf
         in
         let rec add_term (term : Term.t) =
           if not (Term.Table.mem term_ids term)
-          then
+          then (
             match term.Term.node with
             | Term.Bool_const value ->
               (* The adapter's distinguished endpoints are the core Boolean constants
@@ -504,7 +499,7 @@ let verify_euf_leaf
               let id = !next_id in
               incr next_id;
               Term.Table.replace term_ids term id;
-              terms_rev := term :: !terms_rev
+              terms_rev := term :: !terms_rev)
         in
         let add_endpoint = function
           | Euf_term term -> add_term term
@@ -543,27 +538,27 @@ let verify_euf_leaf
         let disequalities = ref [ 0, 1 ] in
         List.iter
           (function
-            | Euf_eq (a, b) ->
-              ignore (union (id_of_endpoint a) (id_of_endpoint b) : bool)
+            | Euf_eq (a, b) -> ignore (union (id_of_endpoint a) (id_of_endpoint b) : bool)
             | Euf_neq (a, b) ->
               disequalities := (id_of_endpoint a, id_of_endpoint b) :: !disequalities)
           statements;
         let apps =
           List.filter_map
             (fun (term : Term.t) ->
-               match term.Term.node with
-               | Term.App (symbol, args) ->
-                 Some
-                   ( Term.Table.find term_ids term
-                   , symbol
-                   , term.Term.sort
-                   , Array.of_list
-                       (List.map
-                          (fun arg -> Term.Table.find term_ids arg)
-                          (Iarr.to_list args))
-                   , Array.of_list
-                       (List.map (fun (arg : Term.t) -> arg.Term.sort) (Iarr.to_list args)) )
-               | _ -> None)
+              match term.Term.node with
+              | Term.App (symbol, args) ->
+                Some
+                  ( Term.Table.find term_ids term
+                  , symbol
+                  , term.Term.sort
+                  , Array.of_list
+                      (List.map
+                         (fun arg -> Term.Table.find term_ids arg)
+                         (Iarr.to_list args))
+                  , Array.of_list
+                      (List.map (fun (arg : Term.t) -> arg.Term.sort) (Iarr.to_list args))
+                  )
+              | _ -> None)
             !terms_rev
         in
         let changed = ref true in
@@ -571,17 +566,17 @@ let verify_euf_leaf
           changed := false;
           List.iter
             (fun (id_a, symbol_a, result_sort_a, args_a, arg_sorts_a) ->
-               List.iter
-                 (fun (id_b, symbol_b, result_sort_b, args_b, arg_sorts_b) ->
-                    if id_a <> id_b
-                       && Symbol.equal symbol_a symbol_b
-                       && Sort.equal result_sort_a result_sort_b
-                       && Array.length args_a = Array.length args_b
-                       && Array.for_all2 Sort.equal arg_sorts_a arg_sorts_b
-                       && Array.for_all2 (fun a b -> root a = root b) args_a args_b
-                       && union id_a id_b
-                    then changed := true)
-                 apps)
+              List.iter
+                (fun (id_b, symbol_b, result_sort_b, args_b, arg_sorts_b) ->
+                  if id_a <> id_b
+                     && Symbol.equal symbol_a symbol_b
+                     && Sort.equal result_sort_a result_sort_b
+                     && Array.length args_a = Array.length args_b
+                     && Array.for_all2 Sort.equal arg_sorts_a arg_sorts_b
+                     && Array.for_all2 (fun a b -> root a = root b) args_a args_b
+                     && union id_a id_b
+                  then changed := true)
+                apps)
             apps
         done;
         if List.exists (fun (a, b) -> root a = root b) !disequalities
@@ -595,23 +590,21 @@ let verify_euf_leaf
    production self-check: it reconstructs each asserted integer half-plane from the
    recorded atom and checks the Farkas equation from the definition.
 
-   For a positive [(e <= 0)] premise the row is [e <= 0]. For a negative premise,
-   integer semantics gives [not (e <= 0)] iff [-e + 1 <= 0]. A valid witness has only
-   nonnegative multipliers and sums these rows to [0 < c] (all variable coefficients
-   zero, constant [c > 0]). *)
+   For a positive [(e <= 0)] premise the row is [e <= 0]. For a negative premise, integer
+   semantics gives [not (e <= 0)] iff [-e + 1 <= 0]. A valid witness has only nonnegative
+   multipliers and sums these rows to [0 < c] (all variable coefficients zero, constant
+   [c > 0]). *)
 let verify_lia_conflict
-      ~resolve_atom
-      (event : Recorder.theory_event)
-      (witness : Recorder.lia_conflict_witness)
+  ~resolve_atom
+  (event : Recorder.theory_event)
+  (witness : Recorder.lia_conflict_witness)
   =
   try
     let rows = witness.Recorder.premises in
     if rows = []
     then Error "empty Farkas witness"
     else (
-      let actual_clause =
-        Array.to_list event.Recorder.clause |> List.sort_uniq compare
-      in
+      let actual_clause = Array.to_list event.Recorder.clause |> List.sort_uniq compare in
       let witnessed_clause =
         List.map (fun (p : Recorder.lia_premise) -> Sat.neg_lit p.Recorder.lit) rows
         |> List.sort_uniq compare
@@ -619,92 +612,112 @@ let verify_lia_conflict
       if actual_clause <> witnessed_clause
       then Error "Farkas premises are not exactly the emitted conflict clause's negation"
       else (
-          let coeffs = ref Term.Map.empty in
-          let constant = ref Rational.zero in
-          let add_coeff term value =
-            let old =
-              match Term.Map.find_opt term !coeffs with
-              | Some value -> value
-              | None -> Rational.zero
-            in
-            coeffs := Term.Map.add term (Rational.add old value) !coeffs
+        let coeffs = ref Term.Map.empty in
+        let constant = ref Rational.zero in
+        let add_coeff term value =
+          let old =
+            match Term.Map.find_opt term !coeffs with
+            | Some value -> value
+            | None -> Rational.zero
           in
-          let bigint_neg value = Bigint.mul (Bigint.of_int (-1)) value in
-          let linear_of (term : Term.t) =
-            match term.Term.node with
-            | Term.Arith { coeffs; const } -> Iarr.to_list coeffs, const
-            | Term.Int_const const -> [], const
-            | _ -> [ term, Bigint.one ], Bigint.zero
+          coeffs := Term.Map.add term (Rational.add old value) !coeffs
+        in
+        let bigint_neg value = Bigint.mul (Bigint.of_int (-1)) value in
+        let linear_of (term : Term.t) =
+          match term.Term.node with
+          | Term.Arith { coeffs; const } -> Iarr.to_list coeffs, const
+          | Term.Int_const const -> [], const
+          | _ -> [ term, Bigint.one ], Bigint.zero
+        in
+        let accumulate ~mult ~vars ~const =
+          List.iter
+            (fun (var, coeff) ->
+              add_coeff var (Rational.mul mult (Rational.of_bigint coeff)))
+            vars;
+          constant
+          := Rational.add !constant (Rational.mul mult (Rational.of_bigint const))
+        in
+        let add_row (p : Recorder.lia_premise) =
+          let polarity = Sat.sign_of_lit p.Recorder.lit in
+          let mult = p.Recorder.multiplier in
+          match resolve_atom (Sat.var_of_lit p.Recorder.lit) with
+          | None -> Error "Farkas premise has no theory-atom declaration"
+          | Some atom ->
+            (match atom.Term.node with
+             | Term.Le arg ->
+               (* An inequality half-plane [e <= 0] requires a NON-NEGATIVE multiplier. *)
+               if Rational.sign mult < 0
+               then Error "negative Farkas multiplier on an inequality premise"
+               else if polarity
+               then (
+                 let vars, const = linear_of arg in
+                 accumulate ~mult ~vars ~const;
+                 Ok ())
+               else if not (Sort.equal arg.Term.sort Sort.int)
+               then
+                 (* [not (e <= 0)] strengthens to [-e + 1 <= 0] ONLY over the integers; a
+                    Real [Le] has no [+1] step, so claiming it here would be unsound (the
+                    LIA x LRA Farkas-witness collision guard, rider #134). Fail closed. *)
+                 Error "negated <= premise over a non-integer sort (LRA Farkas guard)"
+               else (
+                 let vars, const = linear_of arg in
+                 let vars = List.map (fun (var, coeff) -> var, bigint_neg coeff) vars in
+                 let const = Bigint.add (bigint_neg const) Bigint.one in
+                 accumulate ~mult ~vars ~const;
+                 Ok ())
+             | Term.Eq (a, b) ->
+               (* An equality [a = b] (i.e. [a - b = 0]) admits an ANY-SIGN multiplier —
+                  the standard Farkas treatment of equalities. Post-LAND-29b the eq-aware
+                  emitter records such equality premises (with signed / fractional
+                  multipliers) in the conflict; the [a - b = 0] row contributes [= 0], so
+                  it needs no sign constraint and does not perturb the [<= 0] direction
+                  the inequality rows establish. A negative-polarity [Eq] is a
+                  DISEQUALITY, which is not a linear half-plane and cannot appear in a
+                  Farkas sum. *)
+               if not polarity
+               then Error "disequality premise is not a Farkas half-plane"
+               else (
+                 let va, ca = linear_of a in
+                 let vb, cb = linear_of b in
+                 accumulate ~mult ~vars:va ~const:ca;
+                 accumulate ~mult:(Rational.neg mult) ~vars:vb ~const:cb;
+                 Ok ())
+             | _ -> Error "Farkas premise is not an integer <= or = atom")
+        in
+        match
+          List.find_map
+            (fun row ->
+              match add_row row with
+              | Ok () -> None
+              | Error reason -> Some reason)
+            rows
+        with
+        | Some reason -> Error reason
+        | None ->
+          let variables_cancel =
+            Term.Map.for_all (fun _ coeff -> Rational.is_zero coeff) !coeffs
           in
-          let add_row (p : Recorder.lia_premise) =
-            let polarity = Sat.sign_of_lit p.Recorder.lit in
-            if Rational.sign p.Recorder.multiplier < 0
-            then Error "negative Farkas multiplier"
-            else (
-              match resolve_atom (Sat.var_of_lit p.Recorder.lit) with
-              | None -> Error "Farkas premise has no theory-atom declaration"
-              | Some atom ->
-              (match atom.Term.node with
-              | Term.Le arg ->
-                let vars, const = linear_of arg in
-                let vars, const =
-                  if polarity
-                  then vars, const
-                  else
-                    ( List.map (fun (var, coeff) -> var, bigint_neg coeff) vars
-                    , Bigint.add (bigint_neg const) Bigint.one )
-                in
-                List.iter
-                  (fun (var, coeff) ->
-                     add_coeff
-                       var
-                       (Rational.mul
-                          p.Recorder.multiplier
-                          (Rational.of_bigint coeff)))
-                  vars;
-                constant
-                := Rational.add
-                     !constant
-                     (Rational.mul
-                        p.Recorder.multiplier
-                        (Rational.of_bigint const));
-                Ok ()
-              | _ -> Error "Farkas premise is not an integer <= atom"))
-          in
-          match
-            List.find_map
-              (fun row ->
-                 match add_row row with
-                 | Ok () -> None
-                 | Error reason -> Some reason)
-              rows
-          with
-          | Some reason -> Error reason
-          | None ->
-            let variables_cancel =
-              Term.Map.for_all (fun _ coeff -> Rational.is_zero coeff) !coeffs
-            in
-            if not variables_cancel
-            then Error "Farkas combination does not cancel every variable"
-            else if Rational.sign !constant <= 0
-            then Error "Farkas combination does not leave a strictly positive constant"
-            else Ok ()))
+          if not variables_cancel
+          then Error "Farkas combination does not cancel every variable"
+          else if Rational.sign !constant <= 0
+          then Error "Farkas combination does not leave a strictly positive constant"
+          else Ok ()))
   with
   | exn -> Error ("Farkas replay raised: " ^ Printexc.to_string exn)
 ;;
 
 (* Independent datatype constructor-distinctness replay. The negation of the leaf clause
    must consist solely of positive equality atoms. Rebuild equality + congruence closure
-   from those statements, then require it to merge the witness pair. The separate
-   datatype registry must identify the pair as two different constructors of the SAME
-   datatype, with applications whose argument/result sorts match their declarations.
-   This deliberately calls no DT or EUF production code: constructor distinctness is
-   re-derived from the datatype declaration and congruence from its definition. *)
+   from those statements, then require it to merge the witness pair. The separate datatype
+   registry must identify the pair as two different constructors of the SAME datatype,
+   with applications whose argument/result sorts match their declarations. This
+   deliberately calls no DT or EUF production code: constructor distinctness is re-derived
+   from the datatype declaration and congruence from its definition. *)
 let verify_dt_distinctness
-      ~resolve_atom
-      (event : Recorder.theory_event)
-      (registry : Datatype_defs.t)
-      (witness : Recorder.dt_distinctness_witness)
+  ~resolve_atom
+  (event : Recorder.theory_event)
+  (registry : Datatype_defs.t)
+  (witness : Recorder.dt_distinctness_witness)
   =
   try
     if event.Recorder.role <> Sat.Conflict
@@ -728,10 +741,8 @@ let verify_dt_distinctness
                 match Theory_view.atom atom with
                 | Theory_view.Equality (left, right) ->
                   decode_equalities ((left, right) :: acc) rest
-                | Theory_view.Predicate _
-                | Theory_view.Bool_lit _
-                | Theory_view.Le_zero _ ->
-                  Error "datatype distinctness premise is not an equality atom"))
+                | Theory_view.Predicate _ | Theory_view.Bool_lit _ | Theory_view.Le_zero _
+                  -> Error "datatype distinctness premise is not an equality atom"))
       in
       match decode_equalities [] witness.Recorder.clause with
       | Error _ as error -> error
@@ -760,8 +771,8 @@ let verify_dt_distinctness
         in
         List.iter
           (fun (left, right) ->
-             add_term left;
-             add_term right)
+            add_term left;
+            add_term right)
           equalities;
         let left = witness.Recorder.left
         and right = witness.Recorder.right in
@@ -775,22 +786,23 @@ let verify_dt_distinctness
                | None -> Error "datatype witness term is not a declared constructor"
                | Some (datatype, constructor) ->
                  let args = Iarr.to_list args in
-                 if
-                   not
-                     (Sort.equal
-                        term.Term.sort
-                        (Sort.datatype_ datatype.Datatype_defs.sort_sym))
-                 then Error "datatype constructor result sort disagrees with its declaration"
+                 if not
+                      (Sort.equal
+                         term.Term.sort
+                         (Sort.datatype_ datatype.Datatype_defs.sort_sym))
+                 then
+                   Error "datatype constructor result sort disagrees with its declaration"
                  else if List.length args <> List.length constructor.selectors
                  then Error "datatype constructor arity disagrees with its declaration"
-                 else if
-                   not
-                     (List.for_all2
-                        (fun (arg : Term.t) (selector : Datatype_defs.selector) ->
-                           Sort.equal arg.Term.sort selector.field_sort)
-                        args
-                        constructor.selectors)
-                 then Error "datatype constructor argument sort disagrees with its declaration"
+                 else if not
+                           (List.for_all2
+                              (fun (arg : Term.t) (selector : Datatype_defs.selector) ->
+                                Sort.equal arg.Term.sort selector.field_sort)
+                              args
+                              constructor.selectors)
+                 then
+                   Error
+                     "datatype constructor argument sort disagrees with its declaration"
                  else Ok (symbol, datatype))
             | _ -> Error "datatype witness endpoint is not a constructor application"
           in
@@ -799,11 +811,10 @@ let verify_dt_distinctness
           | Ok (left_symbol, left_datatype), Ok (right_symbol, right_datatype) ->
             if Symbol.equal left_symbol right_symbol
             then Error "datatype witness names the same constructor twice"
-            else if
-              not
-                (Symbol.equal
-                   left_datatype.Datatype_defs.sort_sym
-                   right_datatype.Datatype_defs.sort_sym)
+            else if not
+                      (Symbol.equal
+                         left_datatype.Datatype_defs.sort_sym
+                         right_datatype.Datatype_defs.sort_sym)
             then Error "datatype witness constructors belong to different datatypes"
             else (
               let parent = Array.init !next_id Fun.id in
@@ -827,28 +838,28 @@ let verify_dt_distinctness
               in
               List.iter
                 (fun (a, b) ->
-                   ignore
-                     (union (Term.Table.find term_ids a) (Term.Table.find term_ids b)
-                      : bool))
+                  ignore
+                    (union (Term.Table.find term_ids a) (Term.Table.find term_ids b)
+                     : bool))
                 equalities;
               let apps =
                 List.filter_map
                   (fun (term : Term.t) ->
-                     match term.Term.node with
-                     | Term.App (symbol, args) ->
-                       Some
-                         ( Term.Table.find term_ids term
-                         , symbol
-                         , term.Term.sort
-                         , Array.of_list
-                             (List.map
-                                (fun arg -> Term.Table.find term_ids arg)
-                                (Iarr.to_list args))
-                         , Array.of_list
-                             (List.map
-                                (fun (arg : Term.t) -> arg.Term.sort)
-                                (Iarr.to_list args)) )
-                     | _ -> None)
+                    match term.Term.node with
+                    | Term.App (symbol, args) ->
+                      Some
+                        ( Term.Table.find term_ids term
+                        , symbol
+                        , term.Term.sort
+                        , Array.of_list
+                            (List.map
+                               (fun arg -> Term.Table.find term_ids arg)
+                               (Iarr.to_list args))
+                        , Array.of_list
+                            (List.map
+                               (fun (arg : Term.t) -> arg.Term.sort)
+                               (Iarr.to_list args)) )
+                    | _ -> None)
                   !terms_rev
               in
               let changed = ref true in
@@ -856,24 +867,24 @@ let verify_dt_distinctness
                 changed := false;
                 List.iter
                   (fun (id_a, symbol_a, result_sort_a, args_a, arg_sorts_a) ->
-                     List.iter
-                       (fun (id_b, symbol_b, result_sort_b, args_b, arg_sorts_b) ->
-                          if id_a <> id_b
-                             && Symbol.equal symbol_a symbol_b
-                             && Sort.equal result_sort_a result_sort_b
-                             && Array.length args_a = Array.length args_b
-                             && Array.for_all2 Sort.equal arg_sorts_a arg_sorts_b
-                             && Array.for_all2 (fun a b -> root a = root b) args_a args_b
-                             && union id_a id_b
-                          then changed := true)
-                       apps)
+                    List.iter
+                      (fun (id_b, symbol_b, result_sort_b, args_b, arg_sorts_b) ->
+                        if id_a <> id_b
+                           && Symbol.equal symbol_a symbol_b
+                           && Sort.equal result_sort_a result_sort_b
+                           && Array.length args_a = Array.length args_b
+                           && Array.for_all2 Sort.equal arg_sorts_a arg_sorts_b
+                           && Array.for_all2 (fun a b -> root a = root b) args_a args_b
+                           && union id_a id_b
+                        then changed := true)
+                      apps)
                   apps
               done;
-              if
-                root (Term.Table.find term_ids left)
-                = root (Term.Table.find term_ids right)
+              if root (Term.Table.find term_ids left)
+                 = root (Term.Table.find term_ids right)
               then Ok ()
-              else Error "datatype witness constructors are not congruent under the premises")))
+              else
+                Error "datatype witness constructors are not congruent under the premises")))
   with
   | exn -> Error ("datatype distinctness replay raised: " ^ Printexc.to_string exn)
 ;;
@@ -883,12 +894,12 @@ let check ev =
     let resolve, ambiguous_ids = build_index ev in
     (* Core term identity is tag-based within one Context, but tags restart in every
        Context. A malformed in-memory artifact could otherwise combine atom statements
-       from two Contexts whose unrelated terms share tags; Term.Table/Map would alias
-       them and an invalid EUF/Farkas witness could be accepted. Reject such collisions
-       before any tag-keyed collection sees a term. Hash-consing makes equal same-Context
-       terms physically identical, so one tag naming two different physical nodes is
-       exactly the fail-closed collision to reject. EUF congruence also checks application
-       sorts explicitly, covering mixed contexts whose selected tag ranges are disjoint. *)
+       from two Contexts whose unrelated terms share tags; Term.Table/Map would alias them
+       and an invalid EUF/Farkas witness could be accepted. Reject such collisions before
+       any tag-keyed collection sees a term. Hash-consing makes equal same-Context terms
+       physically identical, so one tag naming two different physical nodes is exactly the
+       fail-closed collision to reject. EUF congruence also checks application sorts
+       explicitly, covering mixed contexts whose selected tag ranges are disjoint. *)
     let term_by_tag = Hashtbl.create (4 * List.length ev.atoms) in
     let rec admit_term (term : Term.t) =
       match Hashtbl.find_opt term_by_tag term.Term.tag with
@@ -915,18 +926,20 @@ let check ev =
            admit_term a;
            admit_term b)
     in
-    List.iter (fun (event : Recorder.atom_event) -> admit_term event.Recorder.atom) ev.atoms;
+    List.iter
+      (fun (event : Recorder.atom_event) -> admit_term event.Recorder.atom)
+      ev.atoms;
     (* Witness endpoints are untrusted artifact terms too. Admit them into the SAME
-       physical-node/tag preflight before the local DT replay uses Term.Table: otherwise
-       a constructor from another Context can reuse a statement subterm's numeric tag,
-       pass [mem], and inherit that unrelated subterm's congruence class. *)
+       physical-node/tag preflight before the local DT replay uses Term.Table: otherwise a
+       constructor from another Context can reuse a statement subterm's numeric tag, pass
+       [mem], and inherit that unrelated subterm's congruence class. *)
     List.iter
       (fun (event : Recorder.theory_event) ->
-         match event.Recorder.dt_witness with
-         | None -> ()
-         | Some witness ->
-           admit_term witness.Recorder.left;
-           admit_term witness.Recorder.right)
+        match event.Recorder.dt_witness with
+        | None -> ()
+        | Some witness ->
+          admit_term witness.Recorder.left;
+          admit_term witness.Recorder.right)
       ev.theory;
     (* A query has one datatype declaration environment. Per-leaf copies are statement
        data, not proof data, but they must still agree globally: accepting different
@@ -948,9 +961,9 @@ let check ev =
     let atom_by_var = Hashtbl.create (List.length ev.atoms) in
     List.iter
       (fun (e : Recorder.atom_event) ->
-         if Hashtbl.mem atom_by_var e.Recorder.var
-         then rejectf "duplicate theory-atom declaration for SAT var %d" e.Recorder.var;
-         Hashtbl.replace atom_by_var e.Recorder.var e.Recorder.atom)
+        if Hashtbl.mem atom_by_var e.Recorder.var
+        then rejectf "duplicate theory-atom declaration for SAT var %d" e.Recorder.var;
+        Hashtbl.replace atom_by_var e.Recorder.var e.Recorder.atom)
       ev.atoms;
     let resolve_atom var = Hashtbl.find_opt atom_by_var var in
     (* codex H4: reject ambiguity at STREAM ADMISSION — an id shared by two content
@@ -990,7 +1003,7 @@ let check ev =
     (* an empty theory Conflict leaf anywhere is loud-uncertified (Rev 6 / fabric ext pt). *)
     List.iter
       (fun (e : Recorder.theory_event) ->
-         guard_theory_leaf (Ktheory e.Recorder.role) e.Recorder.clause)
+        guard_theory_leaf (Ktheory e.Recorder.role) e.Recorder.clause)
       ev.theory;
     (* codex (this round): guard every INPUT at ADMISSION too — a raw-empty Theory_lemma
        input is a fabricated ⊥ that certifies a SAT query unsat through ALL THREE
@@ -1000,7 +1013,7 @@ let check ev =
        miss. An empty Query input falls through and stays the legitimate E1 unsat. *)
     List.iter
       (fun (e : Recorder.input_event) ->
-         guard_theory_leaf (Kinput e.Recorder.origin) e.Recorder.clause)
+        guard_theory_leaf (Kinput e.Recorder.origin) e.Recorder.clause)
       ev.inputs;
     (* Leaf coverage accounting. Every claimed EUF or Farkas witness is a hard proof
        obligation: corruption is [Invalid], never silently demoted to the trusted-leaf
@@ -1009,47 +1022,49 @@ let check ev =
     let has_unverified_theory_leaf = ref false in
     List.iter
       (fun (e : Recorder.input_event) ->
-         if e.Recorder.origin = Sat.Theory_lemma then has_unverified_theory_leaf := true)
+        if e.Recorder.origin = Sat.Theory_lemma then has_unverified_theory_leaf := true)
       ev.inputs;
     List.iter
       (fun (e : Recorder.theory_event) ->
-         (match e.Recorder.euf_witness with
-          | None -> ()
-          | Some witness ->
-            (match verify_euf_leaf ~resolve_atom e witness with
-             | Ok () -> ()
-             | Error reason ->
-               rejectf "EUF theory leaf id %d has an invalid witness: %s" e.id reason));
-         (match e.Recorder.role, e.Recorder.lia_witness with
-          | Sat.Reason, Some _ ->
-            rejectf "theory Reason clause id %d carries a Conflict-only Farkas witness" e.id
-          | Sat.Conflict, Some witness ->
-            (match verify_lia_conflict ~resolve_atom e witness with
-             | Ok () -> ()
-             | Error reason ->
-               rejectf
-                 "LIA Conflict leaf id %d has an invalid Farkas witness: %s"
-                 e.id
-                 reason)
-          | (Sat.Reason | Sat.Conflict), None -> ());
-         (match e.Recorder.dt_witness, e.Recorder.dt_registry with
-          | None, _ -> ()
-          | Some _, None ->
-            rejectf
-              "datatype theory leaf id %d has a witness but no datatype declaration"
-              e.id
-          | Some witness, Some registry ->
-            (match verify_dt_distinctness ~resolve_atom e registry witness with
-             | Ok () -> ()
-             | Error reason ->
-               rejectf
-                 "datatype theory leaf id %d has an invalid distinctness witness: %s"
-                 e.id
-                 reason));
-         if Option.is_none e.Recorder.euf_witness
-            && Option.is_none e.Recorder.lia_witness
-            && Option.is_none e.Recorder.dt_witness
-         then has_unverified_theory_leaf := true)
+        (match e.Recorder.euf_witness with
+         | None -> ()
+         | Some witness ->
+           (match verify_euf_leaf ~resolve_atom e witness with
+            | Ok () -> ()
+            | Error reason ->
+              rejectf "EUF theory leaf id %d has an invalid witness: %s" e.id reason));
+        (match e.Recorder.role, e.Recorder.lia_witness with
+         | Sat.Reason, Some _ ->
+           rejectf
+             "theory Reason clause id %d carries a Conflict-only Farkas witness"
+             e.id
+         | Sat.Conflict, Some witness ->
+           (match verify_lia_conflict ~resolve_atom e witness with
+            | Ok () -> ()
+            | Error reason ->
+              rejectf
+                "LIA Conflict leaf id %d has an invalid Farkas witness: %s"
+                e.id
+                reason)
+         | (Sat.Reason | Sat.Conflict), None -> ());
+        (match e.Recorder.dt_witness, e.Recorder.dt_registry with
+         | None, _ -> ()
+         | Some _, None ->
+           rejectf
+             "datatype theory leaf id %d has a witness but no datatype declaration"
+             e.id
+         | Some witness, Some registry ->
+           (match verify_dt_distinctness ~resolve_atom e registry witness with
+            | Ok () -> ()
+            | Error reason ->
+              rejectf
+                "datatype theory leaf id %d has an invalid distinctness witness: %s"
+                e.id
+                reason));
+        if Option.is_none e.Recorder.euf_witness
+           && Option.is_none e.Recorder.lia_witness
+           && Option.is_none e.Recorder.dt_witness
+        then has_unverified_theory_leaf := true)
       ev.theory;
     (* the closure engine: axioms (inputs both origins + theory leaves) then verified
        learned clauses, folded incrementally. *)
@@ -1068,12 +1083,12 @@ let check ev =
     (* (b) every declared level-0 unit is inside the re-derived axiom closure. *)
     List.iter
       (fun (u : Recorder.unit_event) ->
-         match lit_status bcp.Bcp.assign u.Recorder.lit with
-         | LTrue -> ()
-         | LFalse | LUnassigned ->
-           rejectf
-             "declared level-0 unit (id %d) is not entailed by BCP over the inputs"
-             u.Recorder.id)
+        match lit_status bcp.Bcp.assign u.Recorder.lit with
+        | LTrue -> ()
+        | LFalse | LUnassigned ->
+          rejectf
+            "declared level-0 unit (id %d) is not entailed by BCP over the inputs"
+            u.Recorder.id)
       ev.units;
     (* (c) each learned clause replays by ordered RUP over its recorded antecedents, then
        is folded into the closure for the clauses that cite it downstream. [verified]
@@ -1106,22 +1121,22 @@ let check ev =
     let learned_verified id = Hashtbl.mem verified id in
     List.iter
       (fun (le : Recorder.learned_event) ->
-         let cl = dedup_clause le.Recorder.clause in
-         let accept () =
-           Hashtbl.replace verified le.Recorder.id ();
-           Bcp.add_learned bcp cl
-         in
-         match
-           ordered_rup
-             (Bcp.snapshot bcp)
-             ~clause:cl
-             ~antecedents:le.Recorder.antecedents
-             ~resolve
-             ~learned_verified
-         with
-         | Ok () -> accept ()
-         | Error reason ->
-           (* Fallback fires ONLY on the ordered-RUP Error; the hinted fast path above is
+        let cl = dedup_clause le.Recorder.clause in
+        let accept () =
+          Hashtbl.replace verified le.Recorder.id ();
+          Bcp.add_learned bcp cl
+        in
+        match
+          ordered_rup
+            (Bcp.snapshot bcp)
+            ~clause:cl
+            ~antecedents:le.Recorder.antecedents
+            ~resolve
+            ~learned_verified
+        with
+        | Ok () -> accept ()
+        | Error reason ->
+          (* Fallback fires ONLY on the ordered-RUP Error; the hinted fast path above is
              byte-unchanged. The fallback relaxes the ORDERING/sufficiency of the cited
              chain, but citation WELL-FORMEDNESS stays a hard gate: every cited id must
              still resolve to a real content clause and, if learned, be ALREADY verified
@@ -1129,27 +1144,26 @@ let check ev =
              depth, not left to rely solely on "an unentailed clause derives no ⊥"). A
              dangling/ambiguous/forward-or-self learned citation is a malformed stream and
              is rejected regardless of entailment. *)
-           let citations_wellformed =
-             List.for_all
-               (fun id ->
-                  match (resolve id : resolution) with
-                  | Found (Klearned, _) -> learned_verified id
-                  | Found _ -> true
-                  | Ambiguous | Dangling -> false)
-               le.Recorder.antecedents
-           in
-           if
-             citations_wellformed
+          let citations_wellformed =
+            List.for_all
+              (fun id ->
+                match (resolve id : resolution) with
+                | Found (Klearned, _) -> learned_verified id
+                | Found _ -> true
+                | Ambiguous | Dangling -> false)
+              le.Recorder.antecedents
+          in
+          if citations_wellformed
              && Bcp.refutes_under bcp (List.map Sat.neg_lit (Array.to_list cl))
-           then (
-             incr fallback_firings;
-             accept ())
-           else
-             rejectf
-               "learned clause (id %d) fails ordered-RUP replay (%s) AND the verified \
-                closure does not entail it (base + ¬clause derives no ⊥)"
-               le.Recorder.id
-               reason)
+          then (
+            incr fallback_firings;
+            accept ())
+          else
+            rejectf
+              "learned clause (id %d) fails ordered-RUP replay (%s) AND the verified \
+               closure does not entail it (base + ¬clause derives no ⊥)"
+              le.Recorder.id
+              reason)
       ev.learned;
     (* terminal conclusion (§4.0 E1–E4). *)
     (* E1/E2 CITED-CLAUSE FALLBACK (fix task #47). The E1/E2 witness is normally the cited
@@ -1211,17 +1225,17 @@ let check ev =
           forcing. *)
        List.iter
          (fun id ->
-            ignore
-              (resolve_as
-                 ~what:"Failed_assumption antecedent"
-                 ~allowed:
-                   [ Kinput Sat.Query
-                   ; Kinput Sat.Theory_lemma
-                   ; Klearned
-                   ; Ktheory Sat.Reason
-                   ]
-                 id
-               : kind * Sat.lit array))
+           ignore
+             (resolve_as
+                ~what:"Failed_assumption antecedent"
+                ~allowed:
+                  [ Kinput Sat.Query
+                  ; Kinput Sat.Theory_lemma
+                  ; Klearned
+                  ; Ktheory Sat.Reason
+                  ]
+                id
+              : kind * Sat.lit array))
          antecedents;
        if not (Bcp.refutes_under bcp ev.assumptions)
        then

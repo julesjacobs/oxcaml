@@ -92,20 +92,25 @@
     full-closure fallback is the correct resolution.
     - {b Theory leaves (§1.5).} A LIA [Conflict] carrying a Farkas witness is checked
       independently: its premise literals must be exactly the emitted clause's negation,
-      every multiplier must be nonnegative, and the weighted integer half-planes must
-      cancel every variable and leave a strictly positive constant. A pure-EUF
-      [Reason]/[Conflict] witness is checked by negating its exact clause and rebuilding
-      congruence closure from the cited atom statements: reflexivity/symmetry/transitivity
-      plus congruence over matching applications must collapse a cited disequality. A
-      datatype constructor-distinctness [Conflict] is checked from its separate datatype
+      and the weighted rows must cancel every variable and leave a strictly positive
+      constant. An {e inequality} premise ([Le], the [e <= 0] half-planes) requires a
+      NON-NEGATIVE multiplier; an {e equality} premise ([Eq], [a = b] i.e. [a - b = 0], as
+      the post-LAND-29b eq-aware emitter records) admits an ANY-SIGN multiplier — the
+      standard Farkas treatment, since an equality row contributes [= 0] and so cannot
+      perturb the [<= 0] direction the inequalities establish. The integer strengthening
+      of a negated inequality ([not (e <= 0)] becomes [-e + 1 <= 0]) is claimed ONLY when
+      [e] is [Int]-sorted; a non-integer (e.g. LRA [Real]) [Le] premise there is [Invalid]
+      (the LIA x LRA Farkas-witness collision guard). A pure-EUF [Reason]/[Conflict]
+      witness is checked by negating its exact clause and rebuilding congruence closure
+      from the cited atom statements: reflexivity/symmetry/transitivity plus congruence
+      over matching applications must collapse a cited disequality. A datatype
+      constructor-distinctness [Conflict] is checked from its separate datatype
       declaration and atom statements: equality/congruence must merge two well-sorted
       applications of different constructors of the same datatype. A claimed but bad
       witness is [Invalid], never silently trusted. Unwitnessed theory leaves and
-      [Theory_lemma] inputs remain trusted axioms and force
-      [Valid_modulo_theory_leaves]. An empty [Conflict] clause
-      (an unconditional
-      [T_conflict []], ADR-0013 Rev 6) has NO v1 leaf witness for ⊥-from-∅ and is reported
-      [Unsupported], not [Valid].
+      [Theory_lemma] inputs remain trusted axioms and force [Valid_modulo_theory_leaves].
+      An empty [Conflict] clause (an unconditional [T_conflict []], ADR-0013 Rev 6) has NO
+      v1 leaf witness for ⊥-from-∅ and is reported [Unsupported], not [Valid].
     - {b Terminal conclusion (§4.0 E1–E4).} [Root_empty] / [Level0_conflict] check the
       cited clause is falsified by the level-0 closure, OR —
       {b ADR-0013 appendix (E1/E2 cited-clause fallback, task #47)} — that the level-0
@@ -153,8 +158,8 @@ type verdict =
     (ADR-0013 step 1) plus the assumption literals the traced solve ran under.
 
     [atoms] is the off-frozen-seam statement map from SAT theory variables to their
-    immutable atom terms. It is separate from leaf witnesses so a corrupted EUF or
-    Farkas proof cannot redefine the proposition it claims to prove; duplicate variable
+    immutable atom terms. It is separate from leaf witnesses so a corrupted EUF or Farkas
+    proof cannot redefine the proposition it claims to prove; duplicate variable
     declarations are [Invalid].
 
     [assumptions] are the literals passed true to {!Sat.solve} (for a session solve, the
@@ -173,8 +178,8 @@ type events =
 (** Snapshot a recorder's accessors into an {!events}. [assumptions] as above. *)
 val of_recorder : Recorder.t -> assumptions:Sat.lit list -> events
 
-(** Validate the recorded refutation. See {!verdict} for full versus conditional
-    validity. Total (never raises on a malformed stream). *)
+(** Validate the recorded refutation. See {!verdict} for full versus conditional validity.
+    Total (never raises on a malformed stream). *)
 val check : events -> verdict
 
 val string_of_verdict : verdict -> string
