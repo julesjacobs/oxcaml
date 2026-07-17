@@ -545,7 +545,7 @@ let mode_default mode =
 let primitive_is_total = function
   | "%identity"
   | "%negint" | "%succint" | "%predint"
-  | "%addint" | "%subint" | "%mulint" | "%divint" | "%modint"
+  | "%addint" | "%subint" | "%mulint"
   | "%andint" | "%orint" | "%xorint"
   | "%lslint" | "%lsrint" | "%asrint"
   | "%negfloat" | "%absfloat"

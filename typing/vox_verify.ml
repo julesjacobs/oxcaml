@@ -336,6 +336,33 @@ let bool_node ~loc value =
          },
          [] ))
 
+(* Negation of a boolean [subject], used for the else-branch fact.  When [not]
+   resolves to the [%boolnot] primitive (the usual case) we emit a real
+   application of it, so the fact renders as [not c] and the Lean backend
+   interprets it as boolean negation.  If [not] is shadowed or unresolvable we
+   fall back to the semantically identical [if c then false else true], so the
+   branch fact is never lost. *)
+let negate_condition ~env ~loc condition_subject =
+  let fallback () =
+    Refinement.create ~loc ~type_:Predef.type_bool
+      (Rexp_ifthenelse
+         ( condition_subject,
+           bool_node ~loc false,
+           Some (bool_node ~loc true) ))
+  in
+  match Env.find_value_by_name (Longident.Lident "not") env with
+  | exception Not_found -> fallback ()
+  | path, description ->
+    match description.val_kind with
+    | Val_prim primitive when String.equal primitive.prim_name "%boolnot" ->
+      let head =
+        Refinement.create ~loc ~type_:description.val_type
+          (Rexp_ident (Rfree (Rapp path)))
+      in
+      Refinement.create ~loc ~type_:Predef.type_bool
+        (Rexp_apply (head, [ Nolabel, condition_subject ]))
+    | _ -> fallback ()
+
 let unsupported expression what =
   raise (Unsupported_subject (expression.exp_loc, what))
 
@@ -596,6 +623,21 @@ let rec bind_scope_references scope expression =
         Rexp_ifthenelse (recur condition, recur ifso, Option.map recur ifnot);
     }
 
+(* The companion lemma generated for a [let[@vox.def] ...] binding carries a
+   TRUSTED refinement (the compiler asserts [f p1 ... pn = rhs] from [f]'s own
+   checked, total body; the unit body [()] does not prove it).  Its body must
+   therefore not be verified -- doing so would emit an unprovable obligation.
+   The equation still reaches callers as an ordinary fact: the lemma is
+   registered as a dependent definition, so [check_application] deposits the
+   instantiated equation at each [f_def a1 ... an] call site.
+
+   Recognition is by expander provenance -- the physical identity of the ghost
+   location [Vox_defeq] minted for the lemma -- NOT by any spellable attribute:
+   a hand-written binding cannot carry that location object, so it is always
+   verified normally (a forged [@@vox.def.axiom] does not skip verification). *)
+let is_def_axiom_binding binding =
+  Vox_defeq.is_generated_lemma_loc binding.vb_loc
+
 let verification_error ~loc verdict =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"
     (Vox_lean.string_of_verdict verdict)
@@ -850,7 +892,11 @@ let rec walk_expression state expression =
         (List.map (fun binding -> binding.vb_pat) bindings);
       List.iter (register_definition state) bindings
     end;
-    List.iter (fun binding -> walk_expression state binding.vb_expr) bindings;
+    List.iter
+      (fun binding ->
+        if not (is_def_axiom_binding binding) then
+          walk_expression state binding.vb_expr)
+      bindings;
     if rec_flag = Nonrecursive then
       List.iter (register_definition state) bindings;
     List.iter
@@ -933,11 +979,8 @@ let rec walk_expression state expression =
       Option.iter
         (fun condition_subject ->
           let negated =
-            Refinement.create ~loc:condition.exp_loc ~type_:Predef.type_bool
-              (Rexp_ifthenelse
-                 ( condition_subject,
-                   bool_node ~loc:condition.exp_loc false,
-                   Some (bool_node ~loc:condition.exp_loc true) ))
+            negate_condition ~env:condition.exp_env
+              ~loc:condition.exp_loc condition_subject
           in
           let origin = fact_origin ~kind:"branch" condition.exp_loc in
           state.facts <-
@@ -1080,7 +1123,11 @@ and walk_value_bindings state ~persist rec_flag bindings =
       bindings;
     List.iter (register_definition state) bindings
   end;
-  List.iter (fun binding -> walk_expression state binding.vb_expr) bindings;
+  List.iter
+    (fun binding ->
+      if not (is_def_axiom_binding binding) then
+        walk_expression state binding.vb_expr)
+    bindings;
   if rec_flag = Nonrecursive then
     List.iter (register_definition state) bindings;
   List.iter
