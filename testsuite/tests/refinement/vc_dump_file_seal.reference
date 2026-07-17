@@ -1,8 +1,8 @@
 VC annotation at vc_dump_file_seal.ml:18:15-33
 |- 1 = 1
 
-VC seal-implication at vc_dump_file_seal.ml:0:-1--1
-  _seal_value = 1
-|- _seal_value > 0
+VC seal-implication at vc_dump_file_seal.ml:18:25-30
+  value = 1
+|- value > 0
 
 Error: VCs dumped, not discharged.

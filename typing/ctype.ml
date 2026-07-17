@@ -6221,6 +6221,7 @@ type refinement_seal_obligation =
     rso_conclusion : refinement_desc;
     rso_value_name : string;
     rso_implementation_location : Location.t;
+    rso_implementation_predicate_location : Location.t;
     rso_interface_location : Location.t;
   }
 
@@ -6248,7 +6249,8 @@ let with_refinement_seal
       refinement_seal_context := old_context;
       refinement_seal_obligations := old_obligations)
 
-let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion =
+let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion
+    ~implementation_predicate_location =
   match !refinement_seal_context with
   | None -> ()
   | Some context ->
@@ -6258,6 +6260,8 @@ let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion =
         rso_conclusion = conclusion;
         rso_value_name = context.value_name;
         rso_implementation_location = context.implementation_location;
+        rso_implementation_predicate_location =
+          implementation_predicate_location;
         rso_interface_location = context.interface_location;
       }
       :: !refinement_seal_obligations
@@ -6588,6 +6592,8 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                   record_refinement_seal_obligation
                     ~skeleton:refinement1.ref_skeleton
                     ~hypothesis ~conclusion
+                    ~implementation_predicate_location:
+                      refinement1.ref_pred.rexp_loc
                 end;
                 moregen inst_nongen variance type_pairs env
                   refinement1.ref_skeleton refinement2.ref_skeleton
