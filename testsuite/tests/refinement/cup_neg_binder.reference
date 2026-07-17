@@ -1,0 +1,4 @@
+File "cup_neg_binder.ml", line 5, characters 2-20:
+5 |   (a : int{ _ = x })
+      ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

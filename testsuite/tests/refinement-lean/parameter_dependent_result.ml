@@ -75,3 +75,27 @@ Line 1, characters 64-65:
                                                                     ^
 Error: Refinement verification failed (disproved)
 |}]
+
+(* Distinct parameters must NOT be unified: [two] returns [y] but claims its
+   result equals [x].  Disproved (they are independent). *)
+let two (x : int) (y : int) : int{ _ = x } = y
+[%%expect {|
+Line 1, characters 45-46:
+1 | let two (x : int) (y : int) : int{ _ = x } = y
+                                                 ^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* A call that CONSUMES a parameter-dependent result fact (exercises the
+   check_application result-fact reconciliation for a local callee): [id] has a
+   dependent result, and [use] returns [id z] while claiming [_ = z]; the
+   recorded fact [id z = z] discharges the goal. *)
+let id (x : int) : int{ _ = x } = x
+[%%expect {|
+val id : int -> int{ (app[Stdlib!.=] _ global[x/332]) } = <fun>
+|}]
+
+let use (z : int) : int{ _ = z } = id z
+[%%expect {|
+val use : int -> int{ (app[Stdlib!.=] _ global[z/337]) } = <fun>
+|}]

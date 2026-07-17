@@ -73,6 +73,7 @@ type s =
   ; additional_action : additional_action
   ; sort_var_mapping : sort_map
   ; freshen_refinement_binders : bool
+  ; freshen_refinement_free_refs : bool
   ; loc : Location.t option
   ; mutable last_compose : (s * s) option (* Memoized composition *)
   }
@@ -115,6 +116,7 @@ let identity =
   ; additional_action = No_action
   ; sort_var_mapping = Nothing
   ; freshen_refinement_binders = false
+  ; freshen_refinement_free_refs = false
   ; loc = None
   ; last_compose = None
   }
@@ -124,6 +126,7 @@ let for_loading_cmi () =
   { identity with
     sort_var_mapping = Loading (Hashtbl.create 17)
   ; freshen_refinement_binders = true
+  ; freshen_refinement_free_refs = true
   }
 ;;
 
@@ -812,8 +815,19 @@ let rec typexp copy_scope s ty =
                       (fun _ -> Location.none) refinement.ref_pred
                 }
             | Duplicate_variables | No_action ->
-              if s.freshen_refinement_binders
-              then Refinement.freshen_desc_binders refinement
+              let refinement =
+                if s.freshen_refinement_binders
+                then Refinement.freshen_desc_binders refinement
+                else refinement
+              in
+              (* On import from another unit, freshen the predicate's free
+                 references to bare local [Pident]s (foreign parameters), whose
+                 stamps are only unit-unique, so they cannot collide with a
+                 caller-local binder.  Load-only (not set by [add_value] etc.):
+                 the loaded signature is cached, so the fresh stamp is stable
+                 across all uses in the importing compilation. *)
+              if s.freshen_refinement_free_refs
+              then Refinement.freshen_free_local_refs refinement
               else refinement
           in
           Trefine refinement
@@ -1408,6 +1422,8 @@ and compose s1 s2 =
                fatal_error "compose: composing Saving and Loading")
         ; freshen_refinement_binders =
             s1.freshen_refinement_binders || s2.freshen_refinement_binders
+        ; freshen_refinement_free_refs =
+            s1.freshen_refinement_free_refs || s2.freshen_refinement_free_refs
         ; loc = keep_latest_loc s1.loc s2.loc
         ; last_compose = None
         }

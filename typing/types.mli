@@ -653,6 +653,14 @@ module Refinement : sig
   val freshen_desc_binders : refinement_desc -> refinement_desc
   (** Unconditionally freshen the view binder and every predicate binder. *)
 
+  val freshen_free_local_refs : refinement_desc -> refinement_desc
+  (** Freshen every free reference to a bare local [Pident] (a function
+      parameter or unit-local value a predicate mentions) to a globally fresh
+      [Scoped] ident, consistently within the predicate.  Applied on import from
+      a .cmi so a foreign parameter's local stamp cannot collide with a
+      caller-local binder.  [Rsibling]/[Rfun] and module-qualified [Pdot]
+      references are left unchanged. *)
+
   val alpha_equal :
     equal_type:(type_expr -> type_expr -> bool) ->
     ?binders:(refinement_binder * refinement_binder) list ->
