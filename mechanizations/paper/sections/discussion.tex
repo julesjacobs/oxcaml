@@ -1,0 +1,100 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8; pifo-nbe.md=5f7efd28922efc5dedad29a375f030ad6e3fe29f96ba94e77ec308f521541f14; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7; pifo-eta-decision.md=50159fe6aaf8273fc1d811f941de4e2246f7ec84e2270fefc1144c0a890e2ec9; pifo-confluence.md=58274d7fa628cbd04ae265a415cd11bce671e950d53a1653c6e23fe5ee1342ec; pifo-noinduction-codex2.md=97eef33723fdd15eff0003d02ce1cd387a1b1dcd86a42f89302421f0fa614933; pifo-verify-all/VERIFICATION.md=c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887.
+\section{What a stateless PIFO tree is}
+\label{sec:discussion}
+
+The proof suggests an extensional reading that is simpler than the concrete
+queue state.  A stateless PIFO tree is an \emph{arbitration hierarchy}.  Each
+internal PIFO arbitrates among child colors; its selected reference grants one
+service to a child, whose own queue decides which packet that service releases.
+The parent reference and the emitted packet need not come from the same push.
+This distinction is not an implementation corner case: it drives both the
+three-cell diamond and the stateful example.
+
+\paragraph{Pairwise orders live at first divergence.}
+For two types, all nodes above their first different child choice are merely
+forwarders.  Their effective order is the rank comparison at that first
+divergence, or at their common leaf if they never diverge.  In tree language,
+this is the decisive queue at the pair's lowest shared routing point.  The
+binary recovery table observes exactly that comparison, including equality.
+Thus a complicated topology has a simple two-type projection.
+
+Pairwise comparisons do not mean that an entire tree is one flat priority
+queue.  Different pairs may be decided at different queues, and a parent's
+choice names only a subtree.  Inside the chosen subtree, another type may be
+released first.  The meet proof is precisely the argument that the
+cross-block comparisons needed to reconcile \emph{two} flush-equivalent
+hierarchies have no cyclic obstruction.  It does not claim that an arbitrary
+scheduler's entire semantics can be read from an unconstrained global table of
+pair comparisons.
+
+\paragraph{Partitions are structural witnesses, not observables.}
+The proof takes the top partitions \(P\) and \(Q\) from the two supplied trees.
+It never reconstructs either partition from the common flush transformer
+\(F\).  This matters when strict comparisons happen to align across a hidden
+boundary, or when tied blocks can be merged without affecting a drain.  The
+construction is pair-dependent: it refines the two known partitions to
+\(P\wedge Q\) and builds only the common preorder required for this pair of
+schedulers.
+
+\paragraph{Depth is not itself observable.}
+The phrase requires care.  Arbitrary changes to a tree's hierarchy can change
+behavior, but several forms of depth have no extensional content:
+
+\begin{itemize}
+\item a chain of nodes through which every active type chooses one child is an
+      online-inert forwarding chain and can be contracted;
+\item a terminal leaf can be expanded into a root with the leaf's ranks and
+      FIFO singleton children, occurrence-for-occurrence; and
+\item two consecutive selector levels over the same type preorder collapse to
+      one level because all three relevant queues choose the same unique
+      \((\rank,\arr)\)-minimum.
+\end{itemize}
+
+Accordingly the main induction is on alphabet size, not topology height.  The
+tree supplies a recursive partition of types; raw distance from the root is
+not part of the observation.
+
+\paragraph{Why statelessness changes the observational theory.}
+A fixed annotated path gives every occurrence of one type the same ranks and
+routing choices.  Same-type occurrences therefore retain source order, so a
+type trace also determines the identity trace.  More importantly, restricting
+to a block or cell yields another scheduler on a smaller alphabet, suitable
+for induction.  With a stateful assigner, two occurrences carrying the same
+label can be sent to different leaves or assigned different ranks.  A prefix
+pop can then remove the packet that a future root reference would have caused
+a child to release.  The counterexample exploits this residual-state change.
+
+The result should therefore be read as a class theorem.  Stateless PIFO trees
+admit no flush-equivalent but interleaving-distinct pair; once arrival- or
+state-dependent assignment is admitted, such pairs exist.  This does not say
+that every stateful scheduler has a distinguishable partner, only that the
+unqualified implication is false for the enlarged class.
+
+\paragraph{What ``testing by flushes'' guarantees.}
+Suppose two valid stateless implementations are known to agree on the drain of
+every finite packet word.  The theorem guarantees agreement for mixed command
+traces, including failed over-pops and arbitrarily sparse arrivals to a child.
+That implication alone does not provide an effective test.  The separate
+structural analysis in \autoref{sec:normalization-canonical} and
+\autoref{sec:deciding-equivalence} supplies a canonical component tree as a
+complete invariant, an \(O(k^3h)\) decision procedure on a unit-cost RAM, and
+a two-or-three-push suite whose \(\Theta(k^3)\) triple-support count is optimal
+among tests using at most three types.  The pair-dependent comparator in
+\autoref{sec:eta-decision} gives a
+second decision route that constructs no normal form and returns either a
+small flush witness or an equivalence proof DAG.
+
+\paragraph{Normalization is semantic, not rewrite irreducibility.}
+The active rank-swap, collapse/regrouping, and leaf-explosion equations are
+useful proof moves, but their bidirectional relation is nonterminating and a
+canonical tree can still take a regrouping step.  The bottom-up normalizer of
+\autoref{sec:confluence-bottom-up} succeeds by carrying exact restriction-ready
+pair/triple summaries and reconstructing the canonical tree, not by seeking an
+irreducible term.  The NbE construction of \autoref{sec:nbe} gives a different
+semantic organization: it evaluates to the whole flush transformer and
+reifies factor partitions, yielding another finite-alphabet proof but no
+effective factor test.  Finally, meet promotion in
+\autoref{sec:infinite-alphabets} removes alphabet-size induction; its
+topology-recursive theorem extends the main observational result to arbitrary
+alphabets one finite operation support at a time, without claiming a global
+infinite-alphabet normal form.

@@ -1,0 +1,414 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-noinduction-codex2.md=97eef33723fdd15eff0003d02ce1cd387a1b1dcd86a42f89302421f0fa614933; pifo-noinduction-codex.md=6aea2cf52bbeb98c855054543edc53531d6b458509b27e176f8690bec97e0a25; pifo-noinduction-fable.md=c90151cf07b362c8f49068920f68dba03fb6ca99723354d717e186ecdb068cd2.
+\section{Eliminating alphabet induction and infinite alphabets}
+\label{sec:infinite-alphabets}
+
+The proof in \autoref{sec:induction} uses strong induction on the number of
+packet types.  That dependency is eliminable.  In this section we give a
+second organization in which the main theorem is proved simultaneously for
+all finite alphabets by well-founded recursion on the two supplied finite
+topologies.  The argument still uses ordinary structural induction to prove a
+single-scheduler promotion lemma; what disappears is every appeal to the main
+theorem merely because a type set is smaller.
+
+The new ingredient is that a flush decomposition may be promoted all the way
+to an online root interface.  A direct induction on tree height would not
+establish this: the target partition can cross the actual child partition, so
+its rank cannot simply be installed at the actual root.  At each internal
+node we instead pass through the meet of the actual and target partitions.
+
+\subsection{Reduced restrictions and selector laws}
+
+For a nonempty set of types \(B\), let \(M[B]\) be the \emph{reduced
+restriction} of \(M\) to \(B\).  Begin with the literal restriction, delete
+inactive children, reindex the remaining child values, and recursively
+suppress every internal node having only one active child.  These operations
+preserve every interleaved trace.  In particular, a unary active root contains
+only one child value, so each successful root pop makes exactly one anonymous
+call to that child; \lemref{lem:balance} supplies the same success and failure
+pattern.  Write \(\nu(M)\) for the number of nodes in this reduced topology.
+
+It is useful to make the root construction explicit.  Let
+\begin{equation}
+ \mathcal C(P,r,(M_B)_{B\in P})
+ \label{eq:selector-construction}
+\end{equation}
+denote an \(r\)-ranked root whose child selected by a type is its \(P\)-block
+and whose scheduler below block \(B\) is \(M_B\).  If reduced \(M\) has an
+internal root, then
+\begin{equation}
+ M=\mathcal C(P,r,(M_B)_{B\in P})
+ \label{eq:reduced-root-presentation}
+\end{equation}
+up to the harmless reductions above; its actual root pair \((P,r)\)
+decomposes \(F_M\).  If \(\varnothing\ne D\subseteq B\), then
+\(M[D]=M_B[D]\), and this restriction has strictly smaller reduced topology
+than \(M\).
+
+We will use two consequences of the operational lemmas already proved.  First,
+interleaved-equivalent corresponding children may be substituted below an
+unchanged root.  The root supplies the same projected pushes and anonymous
+child-pop calls, and \lemref{lem:compression} accounts for their sparse global
+timestamps.  Second, if \(K\) refines \(P\), then equal selector levels
+collapse:
+\begin{equation}
+ \mathcal C\bigl(P,u,
+   (\mathcal C(K|_B,u|_B,
+      (X_E)_{E\in K,\ E\subseteq B}))_{B\in P}\bigr)
+ \intereq
+ \mathcal C(K,u,(X_E)_{E\in K}).
+ \label{eq:selector-tandem-law}
+\end{equation}
+Indeed, ghost-tag the references by source occurrence.  If the pending set of
+the outer selector is \(\Omega\), the pending set of its inner selector below
+\(B\) is \(\restrict{\Omega}{B}\), while the flat selector also has
+\(\Omega\).  The outer \(u\)-minimum occurrence in \(B\) is the minimum of
+\(\restrict{\Omega}{B}\); all three selectors therefore remove the same
+occurrence, including when ranks tie, and invoke the same \(K\)-child.  This
+is an exact occurrence coupling only because the two selector levels were
+deliberately given identical \((u,\arr)\) keys.
+
+\subsection{A finite meet that is itself a decomposition}
+
+Recall that \((P,r)\) decomposes \(F\) when block filtering commutes with \(F\)
+and the root-block word is the stable \(r\)-sorted block word, as in
+\autoref{eq:block-projection} and \autoref{eq:root-pattern}.  The meet construction used in the
+main proof has the following strengthened conclusion.
+
+\begin{lemma}[Finite meet decomposition]
+\label{lem:finite-meet-decomposition}
+Let \(A\) be finite.  If \((P,r)\) and \((Q,s)\) decompose the same transformer
+\(F:A^*\to A^*\), put
+\[
+ R=P\wedge Q
+   =\{B\cap C:B\in P,\ C\in Q,\ B\cap C\ne\varnothing\}.
+\]
+There is a natural-valued total preorder \(t\) such that \((R,t)\) decomposes
+\(F\), and, with equality included among the three comparison outcomes,
+\begin{align}
+ \cmp_t(x,y)&=\cmp_r(x,y)
+   &&\text{if \(x,y\) lie in distinct \(P\)-blocks},\notag\\
+ \cmp_t(x,y)&=\cmp_s(x,y)
+   &&\text{if \(x,y\) lie in distinct \(Q\)-blocks}.
+ \label{eq:finite-meet-interfaces}
+\end{align}
+The lemma uses no instance of flush-implies-interleaved equivalence.
+\end{lemma}
+
+\begin{proof}
+For a cell \(D=B\cap C\), successive applications of block autonomy through
+\(P\) and \(Q\) give
+\begin{equation}
+ \restrict{F(w)}{D}=F(\restrict{w}{D}).
+ \label{eq:finite-meet-cell-autonomy}
+\end{equation}
+For types in distinct meet cells, prescribe the effective binary comparison
+recovered by \lemref{lem:two-type}.  If \(P\) separates a pair, the
+prescription is its \(r\)-comparison; if \(Q\) separates it, the prescription
+is its \(s\)-comparison.  When both apply they agree because both are recovered
+from the same two binary flushes.
+
+The three-cell diamond in \lemref{lem:diamond} shows that, for any choice of
+one representative from each of three distinct cells, these comparisons form
+a total preorder.  Equivalently, put
+oppositely directed weak edges for a prescribed tie and a marked directed
+edge for a prescribed strict comparison.  The fixed-head-chord argument of
+\lemref{lem:meet-preorder} excludes every directed cycle containing a marked
+edge.  After collapsing the strongly connected components, a
+topological ordering of the finite quotient realizes all prescriptions by
+natural ranks.  This gives \(t\) and
+\autoref{eq:finite-meet-interfaces}.
+
+It remains to record the strengthening beyond
+\lemref{lem:meet-preorder}.  Colored-PIFO congruence first compares \(r\) with
+\(t\), using \(P\)-blocks as colors, and yields
+\[
+ \proj{P}(F(w))=\proj{P}(\sort_t(w)).
+\]
+Within a fixed \(P\)-block \(B\), apply its autonomy and compare \(s\) with
+\(t\), now using \(Q\)-blocks as colors.  This yields equality of the
+\(Q\)-subword inside each \(B\) between \(F(w)\) and \(\sort_t(w)\).  The
+global \(P\)-word together with these per-\(P\)-block \(Q\)-subwords uniquely
+reconstructs the sequence of intersections \(B\cap C\).  Hence
+\begin{equation}
+ \proj{R}(F(w))=\proj{R}(\sort_t(w)).
+ \label{eq:finite-meet-root-pattern}
+\end{equation}
+Equations \eqref{eq:finite-meet-cell-autonomy} and
+\eqref{eq:finite-meet-root-pattern} say exactly that \((R,t)\) decomposes
+\(F\).  Unary partitions are harmless degenerate cases: their meet is the
+other partition and its preorder may be used directly.
+\end{proof}
+
+\subsection{Promoting one supplied decomposition}
+
+The next lemma is the point at which alphabet-size induction is avoided.
+
+\begin{lemma}[Single-scheduler meet promotion]
+\label{lem:meet-promotion}
+Let \(M\) be a valid stateless scheduler on a nonempty finite alphabet, and
+suppose that \((R,t)\) decomposes \(F_M\).  Then
+\begin{equation}
+ M\intereq \operatorname{Ref}(M;R,t)
+ :=\mathcal C(R,t,(M[D])_{D\in R}).
+ \label{eq:meet-promotion}
+\end{equation}
+This is a statement about one scheduler and one supplied decomposition; it
+does not assume the main theorem on a smaller alphabet.
+\end{lemma}
+
+\begin{proof}
+Proceed by well-founded induction on the reduced topology of \(M\), with the
+induction statement quantified over every finite alphabet and every supplied
+decomposition.
+
+Suppose first that \(M\) is a leaf with type preorder \(\lambda\).  Its flush
+transformer is \(\sort_\lambda\).  Applying the root-pattern equation for
+\((R,t)\) to the words \(xy\) and \(yx\) shows that, across distinct
+\(R\)-blocks,
+\begin{equation}
+ \cmp_t(x,y)=\cmp_\lambda(x,y),
+ \label{eq:leaf-promotion-interface}
+\end{equation}
+including the rank-tie case.  Color the original \(\lambda\)-queue and the
+new \(t\)-root by \(R\).  By \lemref{lem:colored} they select the same block
+at every pop.  Below a selected block \(D\), maintain that the restricted leaf
+\(M[D]\) contains exactly the \(D\)-projection of the original leaf queue.
+The original global \(\lambda\)-minimum is also the minimum of that
+projection, so the two leaves remove and emit the same occurrence.  The
+residue of the \(t\)-root need not equal the residue of the original leaf;
+only its block trace is coupled.
+
+Now let \(M\) have the actual root presentation
+\begin{equation}
+ M=\mathcal C(P,r,(M_B)_{B\in P}).
+ \label{eq:promotion-actual-root}
+\end{equation}
+Apply \lemref{lem:finite-meet-decomposition} to the actual decomposition
+\((P,r)\) and the target decomposition \((R,t)\).  It supplies
+\begin{equation}
+ K=P\wedge R,\qquad u,
+ \label{eq:promotion-common-meet}
+\end{equation}
+where \((K,u)\) decomposes \(F_M\), \(u\) agrees with \(r\) across distinct
+\(P\)-blocks, and \(u\) agrees with \(t\) across distinct \(R\)-blocks.  Put
+\begin{equation}
+ W=\mathcal C(K,u,(M[E])_{E\in K}).
+ \label{eq:promotion-W}
+\end{equation}
+
+We first compare \(M\) with \(W\).  For every \(B\in P\), restrict the two
+decomposition equations for \((K,u)\) to words over \(B\).  They say precisely
+that
+\begin{equation}
+ (K|_B,u|_B)\text{ decomposes }F_{M_B}.
+ \label{eq:promotion-child-decomposition}
+\end{equation}
+Because \(M_B\) is an actual child, its reduced topology is strictly smaller
+than that of \(M\).  The structural induction hypothesis, applied only here,
+therefore gives
+\begin{equation}
+ M_B\intereq
+ \mathcal C(K|_B,u|_B,(M[E])_{E\in K,\ E\subseteq B}).
+ \label{eq:promotion-child-recursion}
+\end{equation}
+Substitute these schedulers below the \(P\)-root.  Change the outer root from
+\(r\) to \(u\) by \lemref{lem:colored}, coloring by \(P\); only the sequence of
+\(P\)-services is asserted equal.  Both selector levels now carry the same
+preorder \(u\), so \autoref{eq:selector-tandem-law} collapses them to \(W\).
+Thus
+\begin{equation}
+ M\intereq W.
+ \label{eq:promotion-left-W}
+\end{equation}
+
+For the other comparison, fix \(D\in R\) and define
+\begin{align}
+ K_D&=\{B\cap D:B\in P,\ B\cap D\ne\varnothing\},\notag\\
+ Z_D&=\mathcal C(K_D,u|_D,(M[E])_{E\in K_D}).
+ \label{eq:promotion-ZD}
+\end{align}
+There is a direct online equivalence
+\begin{equation}
+ M[D]\intereq Z_D.
+ \label{eq:promotion-restriction-direct}
+\end{equation}
+If \(D\) meets at least two \(P\)-blocks, the reduced restriction \(M[D]\)
+has root partition \(K_D\), actual root preorder \(r|_D\), and child
+\(M_B[B\cap D]=M[B\cap D]\) in each cell.  The \(r\)- and \(u\)-comparisons
+agree across these actual child colors, so \lemref{lem:colored} changes only
+that root.  If \(D\) meets one \(P\)-block, \(Z_D\) is a unary root over
+\(M[D]\) and unary suppression proves the same claim.  No child rank is
+lifted in either branch, and no recursive hypothesis is used.
+
+Substitute \eqref{eq:promotion-restriction-direct} below the outer \(t\)-root
+of \(\operatorname{Ref}(M;R,t)\).  Change that root from \(t\) to \(u\), now
+coloring by \(R\), and collapse the two identical \(u\)-selector levels.  The
+result is again \(W\), so
+\begin{equation}
+ \operatorname{Ref}(M;R,t)\intereq W.
+ \label{eq:promotion-right-W}
+\end{equation}
+Together with \eqref{eq:promotion-left-W}, this proves
+\eqref{eq:meet-promotion}.  The induction terminates because its sole
+recursive call, \eqref{eq:promotion-child-recursion}, is on an actual child
+topology.  Constructed refinements such as \(W\) and \(Z_D\) are never used as
+induction arguments.
+\end{proof}
+
+This factorization also pinpoints why naive height induction fails.  A target
+cell may contain types belonging to different actual \(P\)-children, so the
+target \(t\)-comparison need not control their actual root comparison.
+Meet-promotion uses \(K=P\wedge R\) and a new \(u\) with two safe interfaces:
+\(r\) to \(u\) only across \(P\)-colors, and \(t\) to \(u\) only across
+\(R\)-colors.  Residues may drift within a color.  Exact parent/inner
+occurrence equality is invoked only by the equal-\(u\) tandem law.
+
+\subsection{The main theorem by reduced-topology size}
+
+\begin{theorem}[Topology-recursive flush sufficiency]
+\label{thm:topology-recursive-flush-sufficiency}
+For every finite alphabet \(A\) and all valid stateless schedulers \(S,T\) on
+\(A\),
+\[
+ S\flusheq T\quad\Longrightarrow\quad S\intereq T.
+\]
+The proof uses no induction on \(|A|\).
+\end{theorem}
+
+\begin{proof}
+Prove the statement simultaneously for all finite alphabets by well-founded
+recursion on
+\begin{equation}
+ \nu(S)+\nu(T),
+ \label{eq:topology-recursion-measure}
+\end{equation}
+where both schedulers have first been reduced.  Thus the recursive hypothesis
+at a smaller value of \eqref{eq:topology-recursion-measure} is available for
+every finite alphabet, not only a smaller subset of the present one.  If
+\(A=\varnothing\), every operation is a failed pop, so assume \(A\) nonempty
+and write \(F\) for the common flush transformer.
+
+If both reduced schedulers are leaves, let their preorders be
+\(\lambda\) and \(\mu\).  The two binary flushes of
+\autoref{tab:binary-recovery} give
+\[
+ \cmp_\lambda(x,y)=\cmp_\mu(x,y)
+ \qquad\text{for every \(x,y\in A\)}.
+\]
+Different types therefore have the same comparison, while occurrences of one
+type tie on rank and use the same arrival order.  The two queues couple
+occurrence-for-occurrence under every operation word.
+
+Suppose next that \(S\) is a \(\lambda\)-leaf and
+\begin{equation}
+ T=\mathcal C(Q,s,(T_C)_{C\in Q})
+ \label{eq:topology-leaf-internal}
+\end{equation}
+has an internal root.  Since \(F=\sort_\lambda\), the pair
+\((Q,\lambda)\) decomposes \(F\): stable sorting commutes with restriction, and
+its root-pattern equation is tautological.  Apply
+\lemref{lem:meet-promotion} to both schedulers with this same supplied
+decomposition:
+\begin{align}
+ S&\intereq \mathcal C(Q,\lambda,(S[C])_{C\in Q}),\notag\\
+ T&\intereq \mathcal C(Q,\lambda,(T[C])_{C\in Q}).
+ \label{eq:topology-leaf-promotions}
+\end{align}
+For every \(C\in Q\) and word \(w\in C^*\), literal restriction and unary
+reduction give
+\[
+ F_{S[C]}(w)=F(w)=F_{T[C]}(w).
+\]
+The restriction \(S[C]\) is a leaf, while \(T[C]\) lies strictly below
+\(T\)'s root.  Consequently their topology-size sum is strictly smaller than
+\eqref{eq:topology-recursion-measure}.  The recursive hypothesis gives
+\(S[C]\intereq T[C]\), and child substitution in
+\eqref{eq:topology-leaf-promotions} proves \(S\intereq T\).  The case in which
+\(T\) is the leaf is symmetric.
+
+Finally suppose both reduced roots are internal:
+\begin{equation}
+ S=\mathcal C(P,r,(S_B)_{B\in P}),
+ \qquad
+ T=\mathcal C(Q,s,(T_C)_{C\in Q}).
+ \label{eq:topology-both-internal}
+\end{equation}
+Apply \lemref{lem:finite-meet-decomposition} to their actual decompositions of
+\(F\).  It supplies \(R=P\wedge Q\) and \(t\) such that \((R,t)\) decomposes
+\(F\).  Meet-promotion gives
+\begin{align}
+ S&\intereq \mathcal C(R,t,(S[D])_{D\in R}),\notag\\
+ T&\intereq \mathcal C(R,t,(T[D])_{D\in R}).
+ \label{eq:topology-both-promoted}
+\end{align}
+Every \(D\in R\) lies in one \(P\)-block and one \(Q\)-block.  Hence both
+\(S[D]\) and \(T[D]\) lie strictly below the corresponding original roots,
+and for \(w\in D^*\),
+\[
+ F_{S[D]}(w)=F_S(w)=F_T(w)=F_{T[D]}(w).
+\]
+Their topology-size sum is strictly smaller than
+\eqref{eq:topology-recursion-measure}; the recursive hypothesis yields
+\(S[D]\intereq T[D]\).  Substitution into the literally identical outer
+\(t\)-selectors in \eqref{eq:topology-both-promoted} completes the proof.
+
+The only recursive arguments in the last two cases are restrictions lying
+strictly below at least one original internal root (below both roots in the
+internal--internal case).  No constructed refinement is measured, and no
+inequality of the form \(|D|<|A|\) is used.  Transporting a finite \(A\) along
+a bijection with \(\Fin(|A|)\) recovers \autoref{thm:main} exactly.
+\end{proof}
+
+\begin{remark}[Alternative constructions]
+\label{rem:alternative-no-induction}
+A decomposition--realization route first realizes a finite behavioral
+decomposition of one scheduler by structural recursion on its concrete
+topology, then builds a pair-dependent common laminar refinement of the two
+schedulers.  Its proof deliberately separates measures: raw internal-node count,
+including inactive and active-unary nodes, decreases during realization,
+whereas the two-scheduler recursion uses the sum of the internal-node counts
+of the active, unary-contracted topologies.
+
+A second route is asymmetric: refine \(S\) by the entire topology of \(T\),
+flatten the residual \(S\)-subtrees against \(T\)'s leaves, and reconcile
+ranks bottom-up.  Its termination measure is lexicographic in the current
+\(T\)- and \(S\)-topology sizes, with \(T\) first; because its meet-rank step
+uses finiteness, this construction is scoped to finite alphabets and does not
+extend verbatim to infinite alphabets.  The extension below is instead a
+finite-support reduction and constructs no global infinite intermediate
+scheduler.
+\end{remark}
+
+\subsection{Arbitrary alphabets by finite support}
+
+The topology-recursive formulation also makes the following finite-support
+consequence transparent.
+
+\begin{corollary}[Finite-support extension]
+\label{cor:infinite-alphabet-finite-support}
+Let \(A\) be an arbitrary type set, finite or infinite, and let \(S,T\) be
+valid stateless schedulers with finite topologies.  If their flush outputs
+agree on every finite word over \(A\), then their observations agree on every
+finite interleaved operation word over \(A\).
+\end{corollary}
+
+\begin{proof}
+Fix a finite operation word \(o\), and let \(B\subseteq A\) be the finite set
+of types pushed in it.  The literal restrictions \(S|_B\) and \(T|_B\) are
+valid finite-alphabet schedulers, and their flushes agree on every word over
+\(B\) by hypothesis.  Transport \(B\) to \(\Fin(|B|)\) and apply
+\autoref{thm:topology-recursive-flush-sufficiency}.  Running \(o\) in either
+restriction is exactly its run in the original scheduler because no type
+outside \(B\) occurs.  Thus the two observations on \(o\) agree.  Since \(o\)
+was arbitrary, the result follows.
+\end{proof}
+
+The scope of \corref{cor:infinite-alphabet-finite-support} is deliberately
+local to each finite experiment.  The finite meet lemma realizes a finite
+constraint graph by natural ranks.  On an infinite alphabet, consistency of
+all finite constraint sets does not by itself supply one global
+natural-valued rank: an infinite acyclic order can have the wrong order type.
+Accordingly the corollary neither constructs nor claims a single
+finite-topology canonical form, or a globally chosen meet rank, for the whole
+infinite scheduler.  No global canonical form is needed for the observational
+conclusion.

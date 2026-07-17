@@ -1,0 +1,576 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-eta-decision.md=50159fe6aaf8273fc1d811f941de4e2246f7ec84e2270fefc1144c0a890e2ec9; pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8; pifo-verify-all/VERIFICATION.md=c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887.
+\section{An eta-style decision procedure}
+\label{sec:eta-decision}
+
+The decision procedure in \autoref{sec:deciding-equivalence} follows the
+normalization route: it computes scheduler-independent pair and triple data
+from which the canonical tree is determined.  There is also a direct,
+pair-dependent route.  It recursively compares restrictions of the two input
+schedulers and constructs only the meet preorders needed for that pair; it
+never computes either scheduler's normal form.  The analogy with eta-equality
+of functions is deliberately limited but useful: equality is established
+extensionally, by comparing behavior at the arguments exposed by the two
+objects, rather than by first normalizing their bodies.
+
+Throughout this section \(A\) is a finite named alphabet, transported to
+\(\Fin(k)\) when interfacing with the frozen statement, and all schedulers are
+valid.  We retain the paper's notation \(F_S\) for the flush output with
+\(\Some\) erased.  By \lemref{lem:balance}, every pop in a flush succeeds, so
+inequality of these packet words is equivalent to inequality of the exact
+\(\lean{List (Option (Fin k))}\) values returned by \(\run\).
+
+Four operational facts support the recursion.  A run mentioning only
+\(X\subseteq A\) is unchanged when performed in the restriction \(S|_X\), so
+interleaved equivalence is hereditary under restriction.  A selector with one
+active child is online-transparent.  Finally, an online-equivalent child may
+be substituted below a fixed selector: the child receives projected pushes
+and anonymous pops, and \lemref{lem:compression} accounts for gaps in its
+global arrival stamps.  These facts preserve exact failed-pop behavior as
+well as successful outputs.
+
+At every recursive support \(X\) with \(|X|>1\), apply
+\lemref{lem:decomposition} to expose
+\begin{equation}
+ \begin{aligned}
+  S|_X&\intereq (P,r,(S_B)_{B\in P}),
+  &S_B&\intereq S|_B,\\
+  T|_X&\intereq (Q,s,(T_C)_{C\in Q}),
+  &T_C&\intereq T|_C,
+ \end{aligned}
+ \label{eq:eta-exposures}
+\end{equation}
+where \(P,Q\) are proper partitions of \(X\).  Write
+\(e_S(x,y)=\mathsf{eff}_S(x,y)\) for the effective comparison computed by
+following the two assigned paths to their first decisive queue.  It can be
+read directly from the finite paths or recovered from the two flushes \(xy\)
+and \(yx\) by \autoref{tab:binary-recovery}; both arrival orders are needed to
+distinguish a FIFO tie from either strict order.
+
+\subsection{The pair-dependent local meet test}
+\label{sec:eta-local}
+
+Form the incidence meet
+\begin{equation}
+ R=P\wedge Q
+   =\{B\cap C:B\in P,\ C\in Q,\ B\cap C\ne\varnothing\}.
+ \label{eq:eta-meet}
+\end{equation}
+The local test first compares \(e_S(x,y)\) and \(e_T(x,y)\) for every pair in
+distinct \(R\)-cells.  If they differ, one of \(xy\) and \(yx\) has different
+flush output by \autoref{tab:binary-recovery}; the test runs both and returns the
+one that differs.  Testing every cross-cell pair is essential.  On an
+L-shaped triple one edge can be internal to a \(P\)-block and another internal
+to a \(Q\)-block, so testing only pairs separated by both roots would assume
+the very equivalence being decided.
+
+Suppose all binary tests pass, and write \(e(x,y)\) for their common value.
+Build a directed constraint graph using only pairs in distinct \(R\)-cells:
+\begin{itemize}
+\item a strict comparison \(x<_e y\) contributes a marked edge
+      \(x\to y\);
+\item a tie \(x\sim_e y\) contributes unmarked edges in both directions.
+\end{itemize}
+These constraints extend to a total preorder exactly when no strongly
+connected component contains a marked edge.  In that case, collapse the
+components, linearly extend the resulting DAG, and assign one natural rank to
+each component.  Members of one component must receive the same rank: merely
+placing them consecutively would incorrectly turn a required FIFO tie into a
+strict comparison.  The resulting preorder \(t\) satisfies
+\begin{equation}
+ \begin{aligned}
+  \cmp_t(x,y)&=\cmp_r(x,y)
+    &&\text{if }P(x)\ne P(y),\\
+  \cmp_t(x,y)&=\cmp_s(x,y)
+    &&\text{if }Q(x)\ne Q(y).
+ \end{aligned}
+ \label{eq:eta-root-compatibility}
+\end{equation}
+Indeed, a \(P\)-separated pair is decided at \(S\)'s exposed root and a
+\(Q\)-separated pair at \(T\)'s; the preceding binary phase makes the two
+prescriptions agree whenever both roots separate the pair.
+
+If a marked edge lies in an SCC, the cycle itself is only a graph failure, not
+yet an observational certificate.  The shortest-marked-cycle argument behind
+\lemref{lem:meet-preorder} has the following constructive adaptation.  Shorten
+a marked closed walk whenever vertices two steps apart occupy distinct cells
+and their three-cell comparisons are transitive.  A failed shortcut exposes
+three distinct cells on which \(e\) is not a preorder.  If no shortcut and no
+such triple existed, the walk would alternate between two cells.  All
+comparisons between those fixed cells come from one genuine root preorder---
+from \(r\) if their \(P\)-blocks differ, and otherwise from \(s\)---so a
+marked alternating cycle is impossible.
+
+The resulting bad triple must form an L in the \(P\times Q\) incidence grid.
+If all three \(P\)-coordinates were distinct, \(r\) would govern every edge;
+if all three \(Q\)-coordinates were distinct, \(s\) would.  Nontransitivity
+therefore gives distinct \(a,b,c\) with
+\begin{equation}
+  a\le_e b,\qquad b\le_e c,\qquad c<_e a.
+ \label{eq:eta-bad-triple}
+\end{equation}
+Use the arrival word \(\sigma=abc\), whose order orients either of the first
+two ties forward.  Let \(\prec_\sigma\) denote the resulting stable pairwise
+precedence.  After possibly exchanging \((S,P)\) with \((T,Q)\), cyclically
+name the L's common corner \(x\) so that
+\(x\prec_\sigma y\prec_\sigma z\prec_\sigma x\), without changing
+\(\sigma\).  The possible exchange ensures that \(y\), rather than \(z\), is
+the neighbor sharing \(x\)'s \(P\)-block.  Thus the \(P\)-decomposition groups
+\(\{x,y\}\mid\{z\}\): its root slots are
+\(\{x,y\},z,\{x,y\}\), its pair child emits \(x,y\), and its output is
+\(xzy\).  The \(Q\)-decomposition groups
+\(\{x,z\}\mid\{y\}\): its slots are
+\(\{x,z\},y,\{x,z\}\), its pair child emits \(z,x\), and its output is
+\(zyx\).  This is the L-diamond calculation of \lemref{lem:diamond}, now used
+after actual binary agreement rather than under an assumed common flush
+transformer.  An implementation need not reconstruct the orientation: it can
+run all six permutations of the extracted triple and return the first unequal
+one.
+
+\begin{lemma}[Local extension or witness]
+\label{lem:eta-local-alternative}
+At a recursive support, the finite local test returns exactly one of:
+\begin{enumerate}
+\item a total preorder \(t\) satisfying
+      \autoref{eq:eta-root-compatibility}; or
+\item an injective packet word \(w\), with \(|w|=2\) or \(3\), such that
+      \(F_S(w)\ne F_T(w)\).
+\end{enumerate}
+\end{lemma}
+
+\begin{proof}
+A binary mismatch gives the second alternative on one of the two arrival
+orders.  After binary agreement, the SCC criterion either constructs \(t\) or
+the marked-walk shortening produces the L-diamond witness above.  These are
+the exhaustive, mutually exclusive branches of the local test.
+\end{proof}
+
+\subsection{Recursive comparison without normal forms}
+
+The procedure \(\mathsf{Compare}(X)\) always compares the two original input
+schedulers restricted to \(X\); equal subsets are memoized.
+\begin{enumerate}
+\item If \(|X|\le1\), return an equivalence base certificate.
+\item Otherwise expose \(S|_X\) and \(T|_X\) as in
+      \autoref{eq:eta-exposures}, form \(R=P\wedge Q\), and run the local test.
+\item Return immediately if the local test found a distinguishing word.
+      Otherwise retain its preorder \(t\).
+\item Recursively compare every distinct block occurring in \(P\cup Q\).
+      A word returned by a child remains a witness at \(X\) by restriction
+      exactness.
+\item If all children succeed, return a proof node recording \(P,Q,R,t\) and
+      references to their certificates.
+\end{enumerate}
+Both top partitions are proper, so every recursive block is smaller than
+\(X\).  Strong recursion therefore terminates even without memoization; the
+memo table is needed for the polynomial implementation analyzed below.
+
+Equivalently, for \(|X|>1\) the procedure establishes the exact recursive
+characterization
+\begin{equation}
+\boxed{
+ S|_X\intereq T|_X
+ \quad\Longleftrightarrow\quad
+ \begin{array}{l}
+ e_S=e_T\text{ on pairs in distinct }P\wedge Q\text{-cells},\\
+ \text{those comparisons extend to a total preorder }t,\\
+ S|_Y\intereq T|_Y\text{ for every distinct }Y\in P\cup Q.
+ \end{array}}
+\label{eq:eta-recursive-characterization}
+\end{equation}
+The partition, extension, and proof bridge are chosen for this pair at this
+recursive support.  None is a normal form for either input.
+
+\subsection{The refinement bridge}
+\label{sec:eta-bridge}
+
+The successful local node is sufficient because it supports a one-sided
+refinement that does not assume the two schedulers equivalent.  For every
+\(D\in R\), choose
+\begin{equation}
+ U_D=S|_D,
+ \qquad
+ U=(R,t,(U_D)_{D\in R}).
+ \label{eq:eta-bridge-U}
+\end{equation}
+For \(C\in Q\), let \(W_C=U|_C\): after inactive children are removed, this
+is a \(t|_C\)-root over the nonempty cells \(D=B\cap C\), with child \(U_D\).
+
+\begin{lemma}[One-sided refinement]
+\label{lem:eta-one-sided-refinement}
+If the local test returns \(t\), then, for every \(C\in Q\),
+\begin{equation}
+  S|_C\intereq W_C.
+ \label{eq:eta-one-sided-refinement}
+\end{equation}
+This conclusion does not assume \(S\intereq T\).
+\end{lemma}
+
+\begin{proof}
+Restrict the exposed \(P\)-root of \(S\) to \(C\).  Its active colors are
+exactly the nonempty cells \(D=B\cap C\).  Below color \(D\), its child is
+\(S_B|_D\).  The exposure equivalence in
+\autoref{eq:eta-exposures}, heredity, and restriction idempotence give
+\begin{equation}
+  S_B|_D\intereq (S|_B)|_D=S|_D=U_D.
+ \label{eq:eta-cell-child}
+\end{equation}
+This also covers the unary-prefix and terminal-leaf-expansion cases used to
+obtain the exposure; unary transparency alone would not justify the displayed
+child equivalence.
+
+Two distinct cells inside the fixed \(Q\)-block \(C\) lie in distinct
+\(P\)-blocks.  Hence \autoref{eq:eta-root-compatibility} says that \(r\) and
+\(t\) have the same exact comparison between their colors, including ties.
+Apply \lemref{lem:colored} and then substitute the equivalent children from
+\autoref{eq:eta-cell-child}.  The resulting scheduler is \(W_C\), proving
+\autoref{eq:eta-one-sided-refinement}.  Balance gives common \(\None\) outputs
+on over-pops.
+\end{proof}
+
+\begin{lemma}[Successful-node sufficiency]
+\label{lem:eta-successful-node}
+Suppose the local test returns \(t\) and recursive certificates prove
+\begin{equation}
+ E_Y:S|_Y\intereq T|_Y
+ \qquad\text{for every distinct }Y\in P\cup Q.
+ \label{eq:eta-child-certificates}
+\end{equation}
+Then \(S|_X\intereq T|_X\).
+\end{lemma}
+
+\begin{proof}
+First transform \(T|_X\) into the bridge \(U\).  For each \(C\in Q\), the
+exposure, recursive certificate, and one-sided refinement give
+\begin{equation}
+ T_C\intereq T|_C\intereq S|_C\intereq W_C.
+ \label{eq:eta-T-child-chain}
+\end{equation}
+Substitute \(W_C\) below the exposed \(s\)-root.  This leaves an outer
+\(s\)-selector over \(Q\) and, inside each block, a \(t\)-selector over the
+\(R\)-cells.  By \autoref{eq:eta-root-compatibility} and
+\lemref{lem:colored}, recolor the outer selector from \(s\) to \(t\) without
+changing its \(Q\)-trace.  The two selector levels now use identical
+\((t,\arr)\) keys and collapse occurrence-for-occurrence as in
+\autoref{sec:induction}.  Thus
+\begin{equation}
+  T|_X\intereq U.
+ \label{eq:eta-T-to-U}
+\end{equation}
+
+For each \(B\in P\), restrict \autoref{eq:eta-T-to-U} to \(B\) and use the
+recursive certificate:
+\begin{equation}
+ S_B\intereq S|_B\intereq T|_B\intereq U|_B.
+ \label{eq:eta-S-child-chain}
+\end{equation}
+After inactive children are deleted, \(U|_B\) is the \(t|_B\)-root over the
+cells \(D\subseteq B\).  Substitute these restrictions below \(S\)'s exposed
+\(r\)-root, recolor \(r\) to \(t\), and collapse the duplicated \(t\)-levels.
+This gives \(S|_X\intereq U\), which combines with
+\autoref{eq:eta-T-to-U} to prove the claim.
+
+The collapse couples pending source occurrences, not merely packet labels:
+the outer queue, the relevant inner queue, and the flat queue choose the same
+unique \((t,\arr)\)-minimum.  It therefore covers FIFO ties and repeated
+packet types.  Balance makes selected children nonempty; a common over-pop
+returns \(\None\) and changes neither state.
+\end{proof}
+
+Necessity in \autoref{eq:eta-recursive-characterization} is direct.  If the two
+restrictions are interleaved-equivalent, heredity supplies every block
+equivalence, their two-type restrictions agree, and a marked SCC is
+impossible because \lemref{lem:eta-local-alternative} would replay an unequal
+three-push flush.  This argument does not reconstruct either top partition
+from observations.
+
+The successful-node proof also does not derive refined child transformers from
+a globally common flush function.  Recursive certificates directly supply
+equivalence on every original \(P\)- and \(Q\)-block, while
+\lemref{lem:eta-one-sided-refinement} supplies the missing bridge.  Thus a full
+cell-autonomy or meet control-word calculation for constructing the refined
+children is not an implicit premise of this comparator.
+
+\subsection{Correctness and small counterexamples}
+
+\begin{theorem}[Eta-style comparison]
+\label{thm:eta-comparison}
+For every finite \(X\), \(\mathsf{Compare}(X)\) terminates and returns exactly
+one of:
+\begin{itemize}
+\item \(\mathsf{Equivalent}(c)\), where \(c\) proves
+      \(S|_X\intereq T|_X\); or
+\item \(\mathsf{Distinguishing}(w)\), where \(w\) is injective,
+      \(|w|\in\{2,3\}\), and \(F_S(w)\ne F_T(w)\).
+\end{itemize}
+In particular,
+\begin{equation}
+ \mathsf{Compare}(X)=\mathsf{Equivalent}
+ \quad\Longleftrightarrow\quad
+ S|_X\intereq T|_X.
+ \label{eq:eta-comparison-correct}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Use joint strong induction on \(|X|\), proving termination and the stated
+semantic alternative simultaneously.  For \(|X|=0\), every operation is a
+failed pop.  For \(|X|=1\), every successful pop emits the unique type and
+success depends only on the pending count.
+
+For \(|X|>1\), a binary mismatch is a correct two-letter witness by
+\autoref{tab:binary-recovery}; a graph failure is a correct three-letter witness
+by the L-diamond branch of \lemref{lem:eta-local-alternative}.  A word returned
+from a proper block remains unequal in the original restrictions because it
+contains no outside pushes, so even its arrival stamps are unchanged.  If all
+recursive calls succeed, \lemref{lem:eta-successful-node} constructs the
+equivalence proof.  Every call is on a smaller support, completing the joint
+induction.  Thus no equivalent pair can take a negative branch, since every
+such branch contains a replayed unequal run, and every positive branch has the
+bridge proof above.
+\end{proof}
+
+Let
+\begin{equation}
+ \mathcal W_3(A)=
+ \{w\in A^*:w\text{ is injective and }|w|\in\{2,3\}\}.
+ \label{eq:eta-W3}
+\end{equation}
+
+\begin{corollary}[Two- or three-push counterexamples]
+\label{cor:eta-small-counterexample}
+For valid stateless schedulers over \(A\),
+\begin{equation}
+ S\intereq T
+ \quad\Longleftrightarrow\quad
+ \forall w\in\mathcal W_3(A).\ F_S(w)=F_T(w).
+ \label{eq:eta-finite-observation}
+\end{equation}
+Consequently, if \(S\not\intereq T\), there is a differing flush word with
+exactly two or three pushes of pairwise-distinct packet types.
+\end{corollary}
+
+\begin{proof}
+The forward implication is immediate.  For the reverse implication, apply
+the induction in \autoref{thm:eta-comparison}.  Binary equality supplies the
+common cross-meet comparisons; if they did not extend, the L-diamond would
+give a word in \(\mathcal W_3(A)\).  Every proper \(P\)- or \(Q\)-block
+inherits the same hypothesis, so its recursive comparison succeeds, and
+\lemref{lem:eta-successful-node} finishes.  Equivalently, run the comparator:
+its only negative leaves are words in \(\mathcal W_3(A)\).
+\end{proof}
+
+A simple streaming implementation may therefore test
+\begin{equation}
+ 2\binom{k}{2}+6\binom{k}{3}=k(k-1)^2
+ \label{eq:eta-stream-count}
+\end{equation}
+words and stop on the first difference.  This observational implementation
+does not materialize a profile, but its correctness proof is the recursive
+meet argument above.  The structural comparator can do less work on shallow
+inputs.
+
+\subsection{Memoized complexity}
+\label{sec:eta-complexity}
+
+A machine bound requires a representation for the mathematical assignment
+function.  Assume the topology and all assigned paths are finite encoded data;
+let \(N\) be their read and tabulation cost, measured in words for a word-RAM
+bound and in bits for a bit-cost bound.  Validity is promised or checked during
+preprocessing.  Type and cluster identifiers and compressed rank classes fit
+one word, and \(b\) is the maximum bit length of an input rank when bit cost is
+charged.  Thus inactive topology and long common unary paths are included in
+\(N\), rather than treated as free.  The asymptotic discussion below assumes
+\(k\ge2\); the cases \(k=0,1\) terminate at the base case after the input is
+read.
+
+For each input scheduler, contract active unary nodes and apply the terminal
+leaf expansion from \lemref{lem:decomposition} recursively.  The result is an
+\emph{active support hierarchy}: a rooted laminar tree with the \(k\) types as
+singleton leaves and no unary internal node.  It has at most \(k-1\) internal
+nodes for \(k\ge1\).  This is syntax-directed indexing of the input, not a
+semantic canonical form.  At every active selector, retain the rank class of
+each descendant type.  For input \(i\in\{1,2\}\), put
+\begin{equation}
+ a_i(x)=\#\{\text{active support clusters on \(x\)'s ancestor chain}\},
+ \qquad
+ L_i=\sum_x a_i(x).
+ \label{eq:eta-L}
+\end{equation}
+Up to the harmless convention for singleton clusters,
+\begin{equation}
+  k\le L_i\le k^2.
+ \label{eq:eta-L-range}
+\end{equation}
+Rank compression at the selectors costs
+\(O(bL_i\log k)\) bit operations by comparison sorting.  LCA and
+selector/type lookup tables then make an effective two-type comparison
+constant-time.
+
+Every subset reached by the recursion has the form
+\begin{equation}
+  X'=X_1\cap X_2,
+ \label{eq:eta-cluster-intersection}
+\end{equation}
+where \(X_i\) is a cluster in input \(i\)'s active hierarchy.  Indeed, the
+exposed top of \(S|_{X'}\) is the least first-hierarchy cluster containing
+\(X'\), and its blocks are intersections of \(X'\) with that cluster's
+children; the second hierarchy is symmetric.  Starting from the full
+alphabet, recursion on a \(P\)- or \(Q\)-block therefore preserves the
+intersection form.
+
+Replacing \(X_1,X_2\) by the least clusters containing \(X'\) gives a
+canonical memo key and preserves the intersection.  If
+\(X'=X_1^0\cap X_2^0\), the two least clusters satisfy
+\(X_i\subseteq X_i^0\) while still containing \(X'\), so their intersection
+is exactly \(X'\).  Each hierarchy has \(O(k)\) clusters, so there are only
+\(O(k^2)\) nonempty memo states.  Memoization is crucial:
+opposite combs can expose two different \((m-1)\)-blocks and make the unfolded
+recurrence satisfy
+\begin{equation}
+  T(m)\ge2T(m-1)+O(m),
+ \label{eq:eta-unmemoized}
+\end{equation}
+so the literal recursive call tree can be exponential even for equivalent
+inputs.
+
+Scanning every pair independently in every state gives the safe but loose
+bound \(O(N+k^4)\).  Instead enumerate exactly the pairs separated by the
+current \(P\) or \(Q\), which are the pairs in distinct meet cells.  In the
+sums below, \(x<y\) uses the fixed alphabet enumeration only to select each
+unordered pair once.  Fix types \(x,y\).  At a state where \(P\) separates
+them, the first hierarchy's
+cluster coordinate is forced to \(\operatorname{lca}_1(x,y)\); the other
+coordinate can be only a common ancestor of \(x,y\), giving at most
+\(\min(a_2(x),a_2(y))\) choices.  The symmetric charge applies when \(Q\)
+separates them.  Hence the total number of generated pair constraints is
+\begin{equation}
+\begin{aligned}
+ E_{\mathrm{all}}
+ &=O\!\left(
+   \sum_{x<y}\min(a_1(x),a_1(y))
+   +\sum_{x<y}\min(a_2(x),a_2(y))\right)\\
+ &=O\bigl(k(L_1+L_2)\bigr).
+\end{aligned}
+\label{eq:eta-edge-charge}
+\end{equation}
+The last step uses \(\min(u,v)\le(u+v)/2\); in the unordered-pair sum each
+\(a_i(x)\) occurs \(k-1\) times.  The total number of type occurrences over
+all memo states also satisfies
+\begin{equation}
+ Z\le\sum_x a_1(x)a_2(x)
+   \le k\min(L_1,L_2).
+ \label{eq:eta-vertex-charge}
+\end{equation}
+Partition construction, pair checking, SCCs, and topological extension are
+linear in these state vertices and edges.  Shortening a marked cycle to its
+bad triple costs \(O(|X'|^2)\) within the single failing state and remains
+within the same aggregate bound.  A simpler implementation may enumerate
+triples instead; this adds \(O(k^3)\), preserves the cubic worst-case bound,
+but can lose the sharper quadratic bound on a shallow failing input.
+
+\begin{theorem}[Eta comparator complexity]
+\label{thm:eta-complexity}
+After input and rank preprocessing, the optimized memoized comparator uses
+\begin{equation}
+ O\bigl(k(L_1+L_2)\bigr)\subseteq O(k^3)
+ \label{eq:eta-word-time}
+\end{equation}
+word-RAM operations.  Its working decision space, including the encoded
+input but excluding a retained positive certificate, can be \(O(N+k^2)\) by
+storing the memo keys and one local graph at a time.
+\end{theorem}
+
+The word bound assumes that an identifier, graph endpoint, memo key, and
+compressed rank class occupy \(O(\log k)\) bits.  Charging their bit
+operations and the comparison sorting gives the conservative combined bound
+\begin{equation}
+ O\bigl(
+   N+b(L_1+L_2)\log k
+    +k(L_1+L_2)\log k
+ \bigr),
+ \label{eq:eta-bit-time}
+\end{equation}
+where \(N\) is measured in bits.  In particular, the structural word term in
+\autoref{eq:eta-word-time} acquires a \(\log k\) factor; unbounded natural ranks
+are not silently unit-cost.  When both hierarchies are shallow,
+\(L_1+L_2=\Theta(k)\), the direct structural work is \(O(k^2)\).  Opposite
+combs can make \(L_i=\Theta(k^2)\) and attain the cubic charge.
+
+This adaptive improvement is not a subcubic worst-case claim.  For comparison,
+one can store one three-valued code for every unordered pair and six flush
+outputs, one for each input permutation of every unordered triple, for
+\begin{equation}
+ \binom{k}{2}+6\binom{k}{3}=\Theta(k^3)
+ \label{eq:eta-dense-profile-size}
+\end{equation}
+constant-size codes.  After the same hierarchy and LCA preprocessing, a
+two- or three-type restriction has only constantly many active branching
+selectors, reached by jumping to the LCA of the selected types and, when
+needed, of the remaining pair.  Its drain therefore uses \(O(1)\)
+compressed-rank comparisons.  The scheduler-independent profile takes
+\(O(k^3)\) additional time to write and is reusable in later comparisons.
+The direct comparator has the same cubic
+worst-case exponent, but avoids materializing two dense profiles, may stop at
+the first witness, and can take only quadratic structural work on shallow
+pairs.  The \(\Omega(k^3)\) output cost applies only when that explicit dense
+profile is written, and the opposite-comb charge analyzes this implementation;
+neither is a lower bound for every exact algorithm or canonical syntax.  In
+particular, no claim is made that worst-case \(o(k^3)\) decision or
+representation after input reading and rank compression is impossible.
+
+\subsection{Certificates in both directions}
+
+On inequivalence, the returned \(w\) is injective and has two or three
+letters.  The certificate is the operation word \(\flushOps(w)\), of length
+four or six.  A checker simply runs both original schedulers and verifies that
+their exact \(\lean{List (Option (Fin k))}\) outputs differ.  Once replayed,
+this certificate is independent of the comparator's correctness proof.  Its
+constant operation length follows because primitive failures are binary-table
+failures or L-diamonds and restriction lifting never changes the word.  Its
+two or three type identifiers still occupy \(O(\log k)\) bits each.
+
+There is no single positive test word.  An equivalence certificate is a
+finite, pair-dependent proof DAG keyed by the reachable cluster intersections
+in \autoref{eq:eta-cluster-intersection}.  Every non-base node records
+\begin{itemize}
+\item its partitions \(P,Q,R\);
+\item rank classes for \(t\), preserving every required cross-cell strict
+      comparison and tie; and
+\item references to certificate nodes for every distinct block in
+      \(P\cup Q\).
+\end{itemize}
+The checker recomputes both exposures, checks the recorded
+\(R=P\wedge Q\), and recomputes both effective comparisons for every required
+cross-cell pair.  It checks equality, verifies \(t\) against the common
+strict-or-tie value, checks that every required proper block is referenced,
+and applies the fixed
+one-sided-refinement, substitution, recoloring, and collapse inference from
+\autoref{sec:eta-bridge}.  Supplying \(t\) avoids constructing an extension but
+not checking its constraints.  It scans the same \(Z\) occurrences and
+\(E_{\mathrm{all}}\) pair constraints as successful decision, so its checking
+cost after preprocessing is
+\begin{equation}
+ O(Z+E_{\mathrm{all}})=O\bigl(k(L_1+L_2)\bigr)
+ \label{eq:eta-certificate-check}
+\end{equation}
+word operations, cubic for opposite combs.  Storing every chosen \(t\) and
+the DAG metadata takes \(O(Z\log k)\) bits, at most \(O(k^3\log k)\).
+
+The two certificate directions have different modes of checking.  The negative
+word is independently replayable against the frozen \(\run\) definition.
+Development~16 of the pinned verification manifest encodes the comparator as a
+terminating computable definition and kernel-checks its soundness,
+completeness, and two-or-three-push witness-size theorem; its soundness and
+witness-size gates use only \(\{\lean{propext},\lean{Quot.sound}\}\).  Its
+trust-level-zero audit passes, and its \lean{\#eval} probes execute the
+comparator and replay separating witnesses through the frozen semantics.  In
+the positive direction, \lean{etaCompare\_complete} validates the comparator's
+equivalent outcome.  A positive proof DAG cannot be validated merely by
+replaying scheduler outputs; its recursive inference is instead covered by
+that kernel-checked completeness theorem.  A common dense profile of
+\autoref{eq:eta-dense-profile-size}, together with replay of all its entries and
+\corref{cor:eta-small-counterexample}, is an alternative canonical positive
+certificate.  The proof DAG, like the comparator itself, remains pair-dependent.
+This is the precise eta-style advantage: it decides
+equivalence without first computing normal forms, while making no claim of a
+better worst-case exponent.

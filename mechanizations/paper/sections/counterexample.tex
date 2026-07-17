@@ -1,0 +1,146 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-verify-all/VERIFICATION.md=c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887 (artifact audit; the universal calculation is proved below).
+\section{A stateful separation}
+\label{sec:stateful}
+
+The fixed type-to-path assignment in \autoref{thm:main} is essential.  We now
+work through two flat three-leaf trees whose assignment may inspect the
+persistent arrival counter.  They agree on every flush word but disagree on a
+five-operation interleaving.
+
+For this example only, let a transaction for push number \(j\) choose a triple
+\[
+  \mathsf{tx}(j)=(\text{leaf},\text{leaf rank},\text{root rank}).
+\]
+The choice is independent of the packet label but depends on \(j\).  A pop does
+not reset the arrival counter.  In \autoref{tab:stateful-assignments}, notation
+\(C(1,1)\) means leaf \(C\), leaf rank \(1\), root rank \(1\).
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}c@{\qquad}l@{\qquad}l@{}}
+\toprule
+push number & scheduler \(S_1\) & scheduler \(S_2\)\\
+\midrule
+\(1\) & \(C(1,1)\) & \(E(1,3)\)\\
+\(2\) & \(B(1,3)\) & \(E(2,1)\)\\
+\(3\) & \(C(2,2)\) & \(F(1,2)\)\\
+\(j\ge4\) & \(G(j,100+j)\) & \(G(j,100+j)\)\\
+\bottomrule
+\end{tabular}
+\caption{Arrival-dependent assignments for the counterexample.  Leaf names
+are local to a scheduler; both trees have three leaves.}
+\label{tab:stateful-assignments}
+\end{table}
+
+\begin{proposition}[Stateful flush/interleaving separation]
+\label{prop:stateful-separation}
+The schedulers in \autoref{tab:stateful-assignments} have identical flush output
+for every finite packet word.  They are not interleaved-equivalent.
+\end{proposition}
+
+\begin{proof}
+First label packet occurrences by their source arrival numbers.  After pushes
+\(1,2,3\), scheduler \(S_1\)'s root priority order is
+\[
+  C_1,\ C_3,\ B_2,
+\]
+because the respective root ranks are \(1,2,3\).  Leaf \(C\) contains
+occurrences \(1,3\) at leaf ranks \(1,2\), while \(B\) contains occurrence
+\(2\).  The drain is therefore \(1,3,2\).
+
+Scheduler \(S_2\)'s root priority order is instead
+\[
+  E_2,\ F_3,\ E_1.
+\]
+Leaf \(E\) contains occurrence \(1\) at rank \(1\) and occurrence \(2\) at
+rank \(2\); \(F\) contains occurrence \(3\).  The first root reference,
+\(E_2\), selects leaf \(E\), but that leaf emits occurrence \(1\), not the
+occurrence that created the root reference.  Then \(F\) emits \(3\), and the
+last \(E\)-service emits \(2\).  The drain is again \(1,3,2\).  This is the
+indirection visible in \autoref{fig:counterexample-hijack}.
+
+For \(j\ge4\), both schedulers insert into the common tail leaf \(G\), with
+root ranks \(100+j\) and leaf ranks \(j\).  These entries follow the first
+three and are ordered increasingly, so both append \(4,5,\ldots,n\).  Directly
+checking the shorter prefixes gives
+\begin{equation}
+ \begin{array}{c|c}
+ n & \text{identity drain}\ \\
+ \hline
+ 0 & \epsilon\\
+ 1 & 1\\
+ 2 & 1,2\\
+ n\ge3 & 1,3,2,4,5,\ldots,n.
+ \end{array}
+ \label{eq:stateful-flush-pattern}
+\end{equation}
+Now take an arbitrary label word \(x_1\cdots x_n\).  The transactions ignore
+labels, so replacing each identity in \autoref{eq:stateful-flush-pattern} by its
+source label shows that both schedulers return
+\(x_1x_3x_2x_4\cdots x_n\), with the displayed short cases.  Thus they agree
+on every flush word, not merely on words with distinct labels.
+
+For the interleaving
+\begin{equation}
+  \push;\ \popop;\ \push;\ \push;\ \popop,
+  \label{eq:diverging-ops}
+\end{equation}
+the first push/pop emits occurrence \(1\) and empties both trees, but leaves
+the counter at one.  Scheduler \(S_1\) then inserts occurrence \(2\) into
+\(B\) at root rank \(3\) and occurrence \(3\) into \(C\) at root rank \(2\),
+so the final pop emits \(3\).  Scheduler \(S_2\) inserts occurrence \(2\) into
+\(E\) at root rank \(1\) and occurrence \(3\) into \(F\) at root rank \(2\).
+The old rank-\(1\) packet in \(E\) is gone; the selected \(E\) leaf therefore
+emits occurrence \(2\).  The identity traces are \(1,3\) and \(1,2\).
+
+This is observable with a two-type alphabet.  Choose labels
+\(x_1=0,x_2=0,x_3=1\).  The operation word
+\(\push(0);\popop;\push(0);\push(1);\popop\) produces type traces
+\(0,1\) for \(S_1\) and \(0,0\) for \(S_2\).  Hence interleaved equivalence
+fails.
+\end{proof}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  q/.style={draw,rounded corners,minimum width=3.25cm,minimum height=.72cm,
+            align=center,font=\small},
+  leaf/.style={draw,minimum width=1.7cm,minimum height=.62cm,font=\small},
+  arr/.style={-{Stealth[length=2mm]}},
+  note/.style={font=\scriptsize,align=center}]
+  \node[q] (r1) at (-3.5,1.5) {$S_1$ root: $C_1,C_3,B_2$};
+  \node[leaf] (c) at (-4.7,0) {$C:[1,3]$};
+  \node[leaf] (b) at (-2.3,0) {$B:[2]$};
+  \draw[arr] (r1) -- (c);
+  \draw[arr] (r1) -- (b);
+  \node[note,below=.22cm of c] {services $C,C$\\emit $1,3$};
+  \node[q] (r2) at (3.5,1.5) {$S_2$ root: $E_2,F_3,E_1$};
+  \node[leaf] (e) at (2.3,0) {$E:[1,2]$};
+  \node[leaf] (f) at (4.7,0) {$F:[3]$};
+  \draw[arr,very thick,pifored] (r2) --
+    node[left,note,text=pifored] {$E_2$ selects $E$} (e);
+  \draw[arr] (r2) -- (f);
+  \node[note,below=.22cm of e,text=pifored] {first $E$ service\\emits $1$, not $2$};
+\end{tikzpicture}
+\caption{The three-push flush.  A root entry selects a child queue, not its
+source packet.  The \(E_2\) reference can therefore release occurrence \(1\),
+allowing the two different trees to realize the same permutation.}
+\label{fig:counterexample-hijack}
+\end{figure}
+
+The artifact's executable model stores packet identity as the arrival number,
+which is a stronger observation than type alone.  Lean kernel-checks the
+separating interleaving and the flush equations through \(n=8\) in
+\lean{Pifo.lean} using \lean{decide}; a separate \lean{native\_decide}
+theorem in \lean{Extended.lean} checks them through \(n=30\).  The universal
+flush claim in
+\propref{prop:stateful-separation} is established by the symbolic calculation
+\autoref{eq:stateful-flush-pattern}; the artifact explicitly does not contain an
+all-\(n\) induction.  This boundary is recorded again in
+\autoref{sec:mechanization}.
+
+The standalone checker records only successful pop outputs, whereas the frozen
+model records a failed pop as \(\None\).  Instrumenting it with observable
+failures embeds the example in the paper's observation convention: every pop
+in every flush and in the separating trace succeeds, so none of the displayed
+outputs changes.

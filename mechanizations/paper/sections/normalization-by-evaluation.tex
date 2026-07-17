@@ -1,0 +1,507 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-nbe.md=5f7efd28922efc5dedad29a375f030ad6e3fe29f96ba94e77ec308f521541f14 (direct source); pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7 (semantic dependencies).
+\section{Normalization by evaluation}
+\label{sec:nbe}
+
+We now give a second proof of \autoref{thm:main}, organized as normalization by
+evaluation (NbE).  The semantic value of a scheduler is its literal flush
+transformer; no topology is retained.  Semantic factor partitions then support
+a canonical reification, and a common-refinement argument proves that
+reification preserves every interleaved observation.
+
+Throughout this section \(A\) is finite and carries a fixed enumeration; in the
+frozen statement, \(A=\Fin(k)\).  We use the notation from
+\autoref{sec:main-proof}: \(F_S:A^*\to A^*\) is the drain of a valid scheduler
+\(S\), \(\restrict{w}{B}\) filters a word to \(B\subseteq A\),
+\(\proj{P}(w)\) is its word of blocks for a partition \(P\), and
+\(\sort_a(w)\) stably sorts occurrences by type rank \(a:A\to\Nat\) and
+source arrival.  By \lemref{lem:balance},
+\[
+  \run(S,\flushOps(w))=\operatorname{map}(\Some,F_S(w)).
+\]
+Thus \(F_S(w)\) is a content-preserving permutation of the occurrences of
+\(w\).  Occurrence identities need not be stored separately: equal-type
+occurrences have identical paths and ranks and emerge in arrival order, so the
+\(j\)-th output occurrence of a type is its \(j\)-th input occurrence.
+
+\subsection{Drain semantics and factors}
+
+\begin{definition}[Semantic domain and evaluation]
+\label{def:nbe-semantics}
+Define the realizable semantic domain by
+\begin{equation}
+ \mathsf{Sem}(A)
+ =\{F:A^*\to A^*:F=F_S\text{ for some valid stateless scheduler }S\}.
+ \label{eq:nbe-semantic-domain}
+\end{equation}
+Evaluation is literal draining:
+\begin{equation}
+  \denote{S}=F_S.
+  \label{eq:nbe-evaluation}
+\end{equation}
+Consequently, for valid schedulers,
+\[
+  \denote{S}=\denote{T}
+  \quad\Longleftrightarrow\quad S\flusheq T.
+\]
+\end{definition}
+
+The reification phase must recover enough hierarchy from an extensional
+\(F\in\mathsf{Sem}(A)\).  Its basic units are the following semantic
+partitions.  For a partition \(P\), write \(P(x)\) for the unique block
+containing \(x\).
+
+\begin{definition}[Factor partition]
+\label{def:nbe-factor}
+A partition \(P\) of \(A\) is a \emph{factor} of \(F\in\mathsf{Sem}(A)\) when
+both of the following hold.
+\begin{enumerate}
+\item \emph{Block locality}: for every \(B\in P\) and \(w\in A^*\),
+\begin{equation}
+  \restrict{F(w)}{B}=F(\restrict{w}{B}).
+  \label{eq:factor-locality}
+\end{equation}
+\item \emph{Stable control}: some \(a:A\to\Nat\) satisfies, for every \(w\),
+\begin{equation}
+  \proj{P}(F(w))=\proj{P}(\sort_a(w)).
+  \label{eq:factor-control}
+\end{equation}
+We call \(a\) a control witness.  It need not be constant within a block.
+\end{enumerate}
+\end{definition}
+
+The indiscrete partition is always a factor; on the empty alphabet it is the
+unique empty partition.  At an internal root, the partition into used children
+is a factor.  Indeed, the root ranks give the control witness, and its stable
+drain fixes the word of child invocations.  Because every push precedes every
+pop, the subsequence emitted from a child is exactly the full drain of the
+input subword routed there, which gives locality.  The child's global arrival
+stamps may have gaps, but their order is unchanged.  A leaf will be treated as
+its online-equivalent presentation with a ranked root and singleton children,
+as in \lemref{lem:decomposition}.
+
+\subsection{The factor meet}
+
+The central semantic fact is stronger than merely amalgamating two particular
+root decompositions: factors are closed under common refinement.
+
+\begin{lemma}[Factor meet]
+\label{lem:factor-meet}
+Let \(F\in\mathsf{Sem}(A)\), and let \(P,Q\) be factors of \(F\).  Then
+\begin{equation}
+ R=P\wedge Q
+   =\{B\cap C:B\in P,\ C\in Q,\ B\cap C\ne\varnothing\}
+ \label{eq:factor-meet}
+\end{equation}
+is also a factor of \(F\).
+\end{lemma}
+
+\begin{proof}
+\smallskip\noindent\emph{Locality.}
+For \(D=B\cap C\in R\), filters commute, and the two factor-locality equations
+give
+\begin{equation}
+\begin{aligned}
+ \restrict{F(w)}{D}
+ &=\restrict{(\restrict{F(w)}{B})}{C}
+  =\restrict{F(\restrict{w}{B})}{C}\\
+ &=F(\restrict{(\restrict{w}{B})}{C})
+  =F(\restrict{w}{D}).
+\end{aligned}
+\label{eq:factor-meet-locality}
+\end{equation}
+
+\smallskip\noindent\emph{The two controls.}
+Let \(a\) witness \(P\) and \(b\) witness \(Q\).  Identify each nonempty
+\(R\)-cell with its pair of containing blocks.  Position by position,
+\begin{equation}
+ \proj{R}(F(w))
+ =\operatorname{zip}\bigl(
+      \proj{P}(\sort_a(w)),
+      \proj{Q}(\sort_b(w))\bigr).
+ \label{eq:factor-control-zip}
+\end{equation}
+The zip is not an arbitrary pairing: its two coordinates are the \(P\)- and
+\(Q\)-projections, at the same positions, of the single permutation \(F(w)\).
+It therefore has exactly the multiset of nonempty \(R\)-cells occurring in
+\(w\), for every word and every choice of multiplicities.
+
+For types in distinct \(R\)-cells, impose the exact comparison of \(a(x)\) and
+\(a(y)\) when \(P\) separates \(x,y\), and the exact comparison of \(b(x)\) and
+\(b(y)\) when \(Q\) separates them.  Exactness includes \(<,=,>\).  If both
+partitions separate the pair, the two requirements agree.  Otherwise one of
+the two arrival orders \(xy,yx\) in \autoref{eq:factor-control-zip} would pair
+the diagonal coordinates into an absent off-diagonal cell, including when one
+control ties the pair and the other orders it strictly.
+
+\smallskip\noindent\emph{No finite obstruction.}
+Represent a strict requirement \(x<y\) by a flagged edge \(x\to y\), and a
+required tie by unflagged edges in both directions.  These constraints extend
+to a weak order precisely when there is no closed directed walk containing a
+flagged edge.  Suppose there is one and choose a shortest such walk.  It is a
+simple cycle apart from its repeated endpoint.  A two-cycle is the pairwise
+conflict just excluded.
+
+For a longer shortest cycle, two nonconsecutive vertices in distinct
+\(R\)-cells have a comparison chord.  A strict chord and the oppositely
+directed cycle arc give a shorter flagged cycle; for a tie chord, choose the
+arc containing the original flagged edge.  Thus every two nonconsecutive
+vertices of a shortest obstruction must occupy one \(R\)-cell.  A cycle of
+length at least five is then impossible: \(x_0,x_2,x_3\) would occupy one
+cell, contradicting the comparison edge \(x_2\to x_3\).  In a four-cycle,
+the opposite vertices form two cells.  Either \(P\) separates these cells, in
+which case all four edges come from \(a\), or \(Q\) does, in which case they
+all come from \(b\).  Neither weak order contains a flagged cycle.
+
+It remains to exclude a triangle.  If either partition separates all three
+pairs, one of \(a,b\) governs the triangle.  The only remaining incidence
+shape, up to relabeling, is the L
+\begin{equation}
+ P(x)=P(y)\ne P(z),
+ \qquad
+ Q(y)=Q(z)\ne Q(x).
+ \label{eq:factor-l-shape}
+\end{equation}
+Put
+\begin{equation}
+ (u,v,t)=
+ \bigl(\cmp_b(x,y),\ \cmp_a(y,z),\ \cmp(z,x)\bigr),
+ \label{eq:factor-l-comparisons}
+\end{equation}
+where the last comparison is common to \(a\) and \(b\).  Of the \(27\)
+triples, \(13\) are compatible with a weak order.  For each of the other
+\(14\), \autoref{tab:factor-l-obstructions} gives an arrival word for which the
+zip in \autoref{eq:factor-control-zip} contains the missing fourth
+\(P\times Q\) cell, or has the wrong cell multiplicity.  This contradicts the
+all-arity content condition following \autoref{eq:factor-control-zip}.
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabular}{@{}cc@{\qquad\qquad}cc@{}}
+\toprule
+\((u,v,t)\) & arrival word & \((u,v,t)\) & arrival word\\
+\midrule
+\((<,<,<)\) & \(xyz\) & \((>,>,>)\) & \(xyz\)\\
+\((<,<,=)\) & \(yzx\) & \((>,>,=)\) & \(xyz\)\\
+\((<,=,<)\) & \(xyz\) & \((>,=,>)\) & \(xzy\)\\
+\((<,=,=)\) & \(yzx\) & \((>,=,=)\) & \(xzy\)\\
+\((=,<,<)\) & \(xyz\) & \((=,>,>)\) & \(yxz\)\\
+\((=,<,=)\) & \(zxy\) & \((=,>,=)\) & \(yxz\)\\
+\((=,=,<)\) & \(xyz\) & \((=,=,>)\) & \(zyx\)\\
+\bottomrule
+\end{tabular}
+\caption{The fourteen inconsistent L-shaped controls.  Changing the arrival
+word is essential in the rows involving FIFO ties.}
+\label{tab:factor-l-obstructions}
+\end{table}
+
+There is no flagged cycle.  Collapse the tie strongly connected components
+and topologically order the resulting strict DAG; natural ranks for this order
+give a weak priority \(g\) satisfying every imposed comparison.  Exact
+cross-block comparisons determine a colored stable sort, so
+\begin{equation}
+ \proj{P}(\sort_g(w))=\proj{P}(\sort_a(w)),
+ \qquad
+ \proj{Q}(\sort_g(w))=\proj{Q}(\sort_b(w)).
+ \label{eq:factor-amalgamated-controls}
+\end{equation}
+Zipping these equalities and using \autoref{eq:factor-control-zip} yields
+\[
+  \proj{R}(F(w))=\proj{R}(\sort_g(w)),
+\]
+which is stable control for \(R\).  Together with
+\autoref{eq:factor-meet-locality}, this proves that \(R\) is a factor.
+\end{proof}
+
+The all-word condition in this proof cannot be replaced by the collection of
+two-type restrictions.
+
+\begin{example}[Pairwise flush data is insufficient]
+\label{ex:pairwise-insufficient}
+On types \(A,B,C\), consider the two two-leaf schedulers
+\begin{equation}
+\begin{array}{@{}c|c|c@{}}
+ & \text{root routing and ranks} & \text{ranks in nonsingleton child}\\
+\hline
+ S_1 & \{A,B\}\mid\{C\},\quad A=1,\ B=C=2
+     & A=B\\
+ S_2 & \{A,C\}\mid\{B\},\quad A=B=C
+     & A<C.
+\end{array}
+\label{eq:pairwise-witness-schedulers}
+\end{equation}
+All leaf ranks of \(S_1\) tie; the singleton leaf ranks are immaterial.  On
+every word over each displayed pair, repetitions included, their drains agree:
+\begin{equation}
+ \{A,B\}:\mathrm{FIFO},
+ \qquad
+ \{A,C\}:\text{\(A\) stably before \(C\)},
+ \qquad
+ \{B,C\}:\mathrm{FIFO}.
+ \label{eq:pairwise-witness-restrictions}
+\end{equation}
+Nevertheless the ternary word distinguishes them:
+\begin{equation}
+  F_{S_1}(CBA)=BCA,
+  \qquad
+  F_{S_2}(CBA)=ABC.
+  \label{eq:pairwise-witness-ternary}
+\end{equation}
+Thus complete pairwise flush behavior does not determine a flush transformer;
+the arbitrary-multiplicity content constraint in the factor-meet proof is
+essential.
+\end{example}
+
+\subsection{Reification and adequacy}
+
+There are finitely many partitions of finite \(A\).  The indiscrete partition
+is a factor, and repeated application of \lemref{lem:factor-meet} shows that
+the meet of all factors is a factor.  Call this finest factor \(P_F\).  When
+\(A\ne\varnothing\), among the control witnesses whose ranks have been
+replaced by consecutive rank classes, choose the lexicographically least
+compressed weak-order witness
+\[
+ g_F:A\to\{0,\ldots,m-1\}.
+\]
+Here \(m\) is its number of nonempty rank classes.  This choice is from a
+finite set and depends only on \(F\).  On the empty alphabet take the unique
+empty function.
+
+If \(|A|>1\), \(P_F\) is proper.  To see this, take any scheduler realizing
+\(F\), discard unused children, and contract roots with only one used child.
+A branching root supplies a proper root factor.  If the first live node is a
+leaf, then \(F=\sort_a\) for its leaf ranks \(a\), and the discrete singleton
+partition is a proper factor.  Since \(P_F\) refines every factor, it is proper
+as well.
+
+We may therefore define \(\mathsf{reify}_A(F)\) by recursion on \(|A|\).
+For \(|A|\le1\), use a rank-zero leaf, with the vacuous assignment when \(A\)
+is empty.  Otherwise, make a root with one canonically ordered child for every
+\(B\in P_F\), and give type \(x\) root rank \(g_F(x)\).  The child for \(B\)
+is
+\[
+  \mathsf{reify}_B(F|_B),
+  \qquad
+  F|_B:B^*\to B^*,
+  \qquad
+  F|_B(v)=F(v).
+\]
+Factor locality and content preservation make the displayed restriction
+well typed.  It is realizable by restricting any witness for \(F\) to types
+in \(B\), and the recursive call is smaller because \(P_F\) is proper.  The
+root annotation followed by the recursively produced path is well formed, so
+the result is a valid scheduler.
+
+\begin{lemma}[Increasing arrival renaming]
+\label{lem:nbe-arrival-renaming}
+In a queue or tree computation, replace the global arrival stamps of source
+pushes by any strictly increasing relabeling, using the same new stamp at every
+node visited by one push.  Every emitted type is unchanged.
+\end{lemma}
+
+\begin{proof}
+Ranks are unchanged, and a strictly increasing relabeling preserves every
+lexicographic \((\rank,\arr)\) comparison.  Structural induction through the
+queue pop and recursive tree pop therefore preserves each selection and
+emitted type.  This is the structural fact needed for embedded child states.
+\end{proof}
+
+\begin{theorem}[Reification adequacy]
+\label{thm:nbe-adequacy}
+For every \(F\in\mathsf{Sem}(A)\),
+\begin{equation}
+  F_{\mathsf{reify}_A(F)}=F.
+  \label{eq:nbe-adequacy}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Proceed by induction on \(|A|\).  The base cases are immediate.  For a word
+\(w\), the reified root invokes blocks in the order
+\begin{equation}
+ \proj{P_F}(\sort_{g_F}(w))=\proj{P_F}(F(w)).
+ \label{eq:nbe-root-skeleton}
+\end{equation}
+For \(B\in P_F\), let \(h_B(j)\) be the one-based global position in \(w\) of
+the \(j\)-th letter of \(\restrict{w}{B}\).  After all pushes, the embedded
+child state is its standalone state with local arrival \(j\) replaced by the
+strictly increasing \(h_B(j)\).  Apply
+\lemref{lem:nbe-arrival-renaming} before the induction hypothesis.  The child
+then supplies the output subsequence
+\[
+ F(\restrict{w}{B})=\restrict{F(w)}{B},
+\]
+where the equality is factor locality.  The block skeleton in
+\autoref{eq:nbe-root-skeleton}, together with all of these block subsequences,
+uniquely reconstructs \(F(w)\).  This proves \autoref{eq:nbe-adequacy}.
+\end{proof}
+
+\subsection{From batch control to online control}
+
+One queue-level fact upgrades factor control to arbitrary interleavings.  It
+is the semantic form of \lemref{lem:colored}.
+
+\begin{lemma}[Batch skeletons determine online colors]
+\label{lem:nbe-colored}
+Let \(c:A\to C\) be a coloring and let \(a,g:A\to\Nat\) be weak priorities.
+Extend \(c\) pointwise to words.
+If
+\begin{equation}
+ c(\sort_a(w))=c(\sort_g(w))
+ \label{eq:nbe-colored-batch}
+\end{equation}
+for every word \(w\), then two priority queues ranked by \(a\) and \(g\),
+driven from empty by the same arbitrary push/pop word, emit the same color on
+every pop, including \(\None\) when empty.
+\end{lemma}
+
+\begin{proof}
+The two two-letter arrival orders show that
+\autoref{eq:nbe-colored-batch} is equivalent to equality of the exact comparison
+on every pair of differently colored types.  Normalize either weak order into
+\emph{observable bands}.  Retain a rank level containing multiple colors as a
+mixed FIFO band, whose abstract state is its FIFO color word.  Collapse every
+maximal consecutive run of levels containing only one color into a
+monochromatic band, whose state is only its pending count.
+
+The exact comparisons with types of other colors give each type an external
+signature.  These signatures, together with forced cross-color ties,
+reconstruct the same ordered bands for \(a\) and \(g\); a boundary invisible
+to all cross-color comparisons can occur only inside one monochromatic band.
+A push therefore increments the same count or appends the same color to a
+mixed FIFO word.  A pop uses the first nonempty band and performs the same
+abstract transition.  If all bands are empty, both queues emit \(\None\).
+
+The concrete queues may remove different types of one color only within a
+monochromatic band having one external comparison profile.  If the band ties
+an external color, it is mixed instead, and the common global arrival order
+selects the same oldest occurrence.  Thus the abstract coupling covers both
+hidden same-color identities and FIFO ties.
+\end{proof}
+
+\subsection{Soundness through a common semantic refinement}
+
+We prove a statement stronger than the reification equation: any two valid
+schedulers with one semantic value have identical online behavior.  This is
+an alternative route to \autoref{thm:main}.
+
+\begin{theorem}[Common-refinement soundness]
+\label{thm:nbe-common-refinement}
+If valid stateless schedulers \(S,T\) over finite \(A\) satisfy
+\(F_S=F_T\), then \(S\intereq T\).
+\end{theorem}
+
+\begin{proof}
+Use strong induction on \(|A|\); the cases \(|A|\le1\) are immediate.  First
+apply two online-preserving presentation changes.  A node with one used child
+can be contracted because its queue only counts child calls.  A leaf with
+type ranks \(a\) can be expanded to an \(a\)-ranked root routing to singleton
+children: root and child select the same occurrence, including on FIFO ties.
+Thus both schedulers may be presented with proper used-child root factors.
+
+Let the common flush function be \(F\), and write those root factors as
+\((P,a)\) for \(S\) and \((Q,b)\) for \(T\).  By
+\lemref{lem:factor-meet}, \(R=P\wedge Q\) has a control witness \(g\).  For
+each \(D\in R\), choose one scheduler \(U_D\) realizing \(F|_D\), for example
+\(\mathsf{reify}_D(F|_D)\).
+
+Fix \(B\in P\).  Build \(V_B\) with a \(g|_B\)-ranked root whose children are
+the cells \(D\subseteq B\), and put \(U_D\) below the corresponding child.
+The factor equations give
+\begin{equation}
+  F_{V_B}=F|_B.
+  \label{eq:nbe-block-refinement}
+\end{equation}
+Indeed, the \(R\)-control equation supplies the output cell skeleton, and
+factor locality supplies the output subsequence in every cell; together they
+reconstruct the word.  The actual \(B\)-child of \(S\) has the same flush
+function \(F|_B\).
+
+To use the induction hypothesis in the frozen statement's finite-alphabet
+presentation, reindex the subtype \(B\) by a bijection
+\(\Fin(|B|)\cong B\).  Runs commute with this transport because queue
+selection inspects ranks and arrivals, never packet values.  Since \(P\) is
+proper, \(|B|<|A|\), so the induction hypothesis makes the actual child and
+\(V_B\) interleaved-equivalent.  Substitute every such child under the
+unchanged root.  Corresponding children receive the same local operation
+words.  Their global arrival stamps form a strictly increasing, possibly
+gapped subsequence; apply \lemref{lem:nbe-arrival-renaming} before the
+induction hypothesis.  The contextual substitutions therefore preserve the
+complete observation trace.
+
+The resulting presentation of \(S\) has an outer \(a\)-queue routing to
+\(P\), followed inside every block by a \(g\)-queue routing to \(R\).  Since
+\(P\) coarsens \(R\), factor control gives, for every \(w\),
+\begin{equation}
+ \proj{P}(\sort_a(w))
+ =\proj{P}(F(w))
+ =\proj{P}(\sort_g(w)).
+ \label{eq:nbe-root-swap}
+\end{equation}
+By \lemref{lem:nbe-colored}, the outer queue can be replaced, in the system
+built from empty, by a \(g\)-queue without changing the stream of \(P\)-child
+calls.  This constructs a new coupled run; it does not mutate a live queue
+while retaining state ordered by incompatible ranks.
+
+The consecutive \(g\)-levels now collapse occurrence-for-occurrence.  Tag
+root references by global arrival and maintain that the inner queue for \(B\)
+is the \(B\)-projection of the outer queue.  A push preserves this invariant.
+If the outer queue removes the unique minimum
+\((g(x),\arr)\) lying in \(B\), that occurrence is also the unique minimum of
+the projected inner queue.  Removing both levels therefore gives one
+\(g\)-ranked root routing directly to \(R\), with the fixed children \(U_D\).
+
+Repeating the construction from \(T\), using \(Q,b\), produces the identical
+one-level scheduler.  Hence \(S\intereq T\).  Every recursive call was on a
+proper root block; arrival renaming was a structural queue fact, so there is
+no circular appeal to the theorem.  Finally, validity makes recursive child
+pops succeed whenever a root reference is present.  Root emptiness depends
+only on the preceding pushes and successful pops, so excess pops emit
+\(\None\) on both sides.
+\end{proof}
+
+Combining adequacy with common-refinement soundness gives the NbE equation
+\begin{equation}
+ S\intereq
+ \mathsf{reify}_A(\denote{S}).
+ \label{eq:nbe-soundness}
+\end{equation}
+If \(S\flusheq T\), their semantic values are equal, so the deterministic
+choices above give the same canonical reification.  Applying
+\autoref{eq:nbe-soundness} on both sides yields \(S\intereq T\), proving
+\autoref{thm:main} by this second route.  This is normalization by evaluation,
+not a scheduler rewrite system: evaluation forgets topology, factors are
+properties of the denoted function, and soundness joins two presentations
+through a semantic common refinement.
+
+\subsection{Scope}
+
+\paragraph{No decision procedure from this construction.}
+The semantic object in \autoref{eq:nbe-semantic-domain} is an extensional function
+on all words.  Testing factor locality and stable control, finding all factors,
+and selecting \(P_F\) quantify over infinitely many words.  The reification
+above is therefore a classical mathematical map, not an algorithm supplied by
+this proof.  For fixed \(k>0\), pruning unused children, erasing unary used
+nodes, and compressing ranks leaves finitely many reduced presentations, with
+at most \(k-1\) internal nodes because every internal node splits a nonempty
+support into proper supports.  For \(k=0\), the unused root collapses to a leaf.
+This finiteness supplies neither an effective factor test nor a computable
+normalizer or bound on a distinguishing word.  Searching words enumerates
+non-equivalence, but this argument does not terminate on equivalent
+schedulers.  Thus this NbE construction by itself proves no algorithmic
+decidability result for \(\intereq\); the finite structural procedure in
+\autoref{sec:deciding-equivalence} uses the separate pair-and-triple invariant.
+
+\paragraph{Infinite alphabets by finite support.}
+The implication itself extends propositionally to an arbitrary packet-type
+alphabet \(\alpha\).  Given one finite interleaved operation word, let \(B\)
+be the finite set of types it pushes and enumerate \(B\) as \(\Fin(n)\), using
+a classical enumeration of this finite image (or decidable equality on the
+support), not a global enumeration of \(\alpha\).
+Restrict both fixed assignment maps to \(B\).  Validity is preserved, and
+flush equivalence over \(\alpha\) implies flush equivalence of the restricted
+schedulers.  The finite theorem gives equality on the restricted operation
+word; every emitted type lies in \(B\), so transporting back gives equality
+over \(\alpha\).  This is a finite-support corollary.  It constructs neither
+one global canonical scheduler on an infinite alphabet nor a decision
+procedure there.

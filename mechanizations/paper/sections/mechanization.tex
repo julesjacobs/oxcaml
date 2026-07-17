@@ -1,0 +1,228 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8; pifo-nbe.md=5f7efd28922efc5dedad29a375f030ad6e3fe29f96ba94e77ec308f521541f14; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7; pifo-eta-decision.md=50159fe6aaf8273fc1d811f941de4e2246f7ec84e2270fefc1144c0a890e2ec9; pifo-confluence.md=58274d7fa628cbd04ae265a415cd11bce671e950d53a1653c6e23fe5ee1342ec; pifo-noinduction-codex2.md=97eef33723fdd15eff0003d02ce1cd387a1b1dcd86a42f89302421f0fa614933; pifo-noinduction-codex.md=6aea2cf52bbeb98c855054543edc53531d6b458509b27e176f8690bec97e0a25; pifo-noinduction-fable.md=c90151cf07b362c8f49068920f68dba03fb6ca99723354d717e186ecdb068cd2; pifo-verify-all/VERIFICATION.md=c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887.
+\section{Mechanization and source discipline}
+\label{sec:mechanization}
+
+The formal development separates the proposition being decided from every
+attempt to prove it.  The frozen file \lean{PifoStatement.lean} contains only
+definitions: entries, queues, topology and state, annotated paths, atomic push
+and pop, schedulers, runs, the two equivalences, and finally
+\lean{statelessFlushImpliesInterleaved : Prop}.  It contains no imports,
+theorems, proofs, \lean{sorry}, or proof-specific helper definitions.  Its
+SHA-256 digest is
+\[
+\sourcehash{fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e},
+\]
+which exactly matches its accompanying \lean{FROZEN.sha256} entry.
+
+This arrangement makes statement drift mechanically visible.  An independent
+proof must target the same final proposition over the same definitions; a
+change to an operational convention---for example, whether a failed recursive
+pop rolls back or whether \(\None\) is observable---changes the frozen digest.
+The paper follows that file even where a more abstract presentation might have
+hidden these choices.  \autoref{tab:lean-map} records the definition-level
+correspondence.
+
+The consolidated clean-slate verification manifest, \lean{VERIFICATION.md},
+has SHA-256
+\[
+\sourcehash{c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887}.
+\]
+Its inventory records entries 1--16, with cleaned and compressed variants
+recorded separately as 7b and 8b, and reports 19 gated results.  It records
+eleven gated main-theorem artifacts across eight distinct architectures,
+credits seven certificate-free main-theorem proofs, and records two executable
+deciders.
+Development 14, the NbE route, comprises 13,732 lines across 43 files:
+41 proof modules under \lean{PifoNbe/} (13,582 lines), the 21-line root
+umbrella \lean{PifoNbe.lean}, and the 129-line \lean{PifoNbe/Audit.lean}; its
+answer and all 89 audited declarations are standard-gated or axiom-free.
+
+The manifest's \lean{std} gate permits subsets of
+\(\{\lean{propext},\lean{Classical.choice},\lean{Quot.sound}\}\); its
+\lean{nat} gate additionally permits the documented \lean{native\_decide}
+certification mechanism.  Numbered general developments 7, 8, 9, and 12--16
+are \lean{std}-gated, while developments 10 and 11 are \lean{nat}-gated
+through the documented L3 certificate; variants 7b and 8b are also
+\lean{std}-gated.  Independence is tracked per artifact, and development 7 is
+explicitly not counted as independent.  No blanket independence or common
+axiom-footprint claim is made.
+
+Development~15 adds a 72-module, 25,260-line canonical-form/normalization
+route.  All seven gated endpoints report exactly
+\(\{\lean{propext},\lean{Classical.choice},\lean{Quot.sound}\}\), including
+\lean{interEquiv\_normalForm}, which proves \(S\intereq N(S)\) for valid
+\(S\), \lean{structuralDecision\_correct}, \lean{smallFlushTests\_suffice},
+and a tenth gated proof of the frozen main theorem.  Here the structural
+procedure of \autoref{sec:structural-decision}, \lean{structuralDecision}, is a
+plain executable
+\lean{Bool} definition; its correctness for valid schedulers is
+kernel-checked, and concrete \lean{\#eval} probes return the expected results.
+
+Development~16 adds a 61-module, 16,323-line eta-comparator route.
+\lean{etaCompare} is a plain computable definition whose recursive termination
+is kernel-checked by Lean; the clean-slate gate checks its soundness,
+completeness, equivalence characterization, and the theorem that every witness
+word is duplicate-free and has length two or three.  The soundness and
+witness-size theorems use only \(\{\lean{propext},\lean{Quot.sound}\}\).
+Its trust-level-zero audit passes, and concrete \lean{\#eval} probes execute the
+comparator and replay its separating witnesses through the frozen
+\lean{run}/\lean{flushOps} semantics for flat and two-child scheduler pairs.
+The gated \lean{PifoEta.answer} is the eleventh main-theorem artifact, the eighth
+architecture, the seventh certificate-free answer, and the second executable
+decider.
+
+The prose proof assembled here was pinned separately.  Its final dual-refereed
+source, \lean{pifo-elegant-v4.md}, has SHA-256
+\[
+\sourcehash{356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8}.
+\]
+The final revision retains the v2 architecture throughout: the argmin proof of
+colored congruence, the deterministic diamond, fixed-head chords with counting
+linearization, and swap-before-refine.
+
+The mathematical result sources integrated here are pinned independently.  The
+canonical-form and decision development, \lean{pifo-normalization.md}, has
+SHA-256
+\[
+\sourcehash{2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7}
+\]
+and 669 lines.  The topology-recursive proof,
+\lean{pifo-noinduction-codex2.md}, has SHA-256
+\[
+\sourcehash{97eef33723fdd15eff0003d02ce1cd387a1b1dcd86a42f89302421f0fa614933}
+\]
+and 583 lines.  The eta-style decision development,
+\lean{pifo-eta-decision.md}, has SHA-256
+\[
+\sourcehash{50159fe6aaf8273fc1d811f941de4e2246f7ec84e2270fefc1144c0a890e2ec9}
+\]
+and 546 lines.  All three are the supplied dual-refereed SOUND revisions.  The
+first scopes the claims in \autoref{sec:normalization-canonical} and
+\autoref{sec:deciding-equivalence}; the second scopes those in
+\autoref{sec:infinite-alphabets}; and the third scopes the pair-dependent
+algorithm, bounds, and certificates in \autoref{sec:eta-decision}.  The eta
+source document predates development~16: that development now encodes and
+kernel-checks the recursive comparator, including its termination, soundness,
+completeness, and witness-size theorem, as described above.
+
+The confluence and bottom-up development, \lean{pifo-confluence.md}, has
+SHA-256
+\[
+\sourcehash{58274d7fa628cbd04ae265a415cd11bce671e950d53a1653c6e23fe5ee1342ec}
+\]
+and 698 lines.  It is the source for both the nontermination result and the
+summary-carrying normalizer in \autoref{sec:confluence-bottom-up}.  The two
+additional construction sketches cited in
+\remref{rem:alternative-no-induction} are pinned separately.
+
+The first, \lean{pifo-noinduction-codex.md}, has SHA-256
+\[
+\sourcehash{6aea2cf52bbeb98c855054543edc53531d6b458509b27e176f8690bec97e0a25}.
+\]
+The second, \lean{pifo-noinduction-fable.md}, has SHA-256
+\[
+\sourcehash{c90151cf07b362c8f49068920f68dba03fb6ca99723354d717e186ecdb068cd2}.
+\]
+The direct source for \autoref{sec:nbe}, \lean{pifo-nbe.md}, has SHA-256
+\[
+\sourcehash{5f7efd28922efc5dedad29a375f030ad6e3fe29f96ba94e77ec308f521541f14}.
+\]
+The clean-slate manifest's development 14 records the corresponding NbE-route
+kernel check and its exact scope.
+
+The correspondence between individual prose arguments and kernel artifacts is
+scoped.  For the global extension, \lean{KConstruct.lean}'s
+\lean{no\_chain}, \lean{triangle}, \lean{K}, and \lean{K\_iff} check the
+fixed-head argument only for flat normal forms: those theorems assume both
+topologies are \lean{flatTopo}.  Exact arbitrary-composite coverage is instead
+provided by \lean{Ultra2Extend.preorder\_extension} and
+\lean{Ultra2Flush.composite\_extension}, via a different walk-normalization
+argument.  Likewise, \lean{Ultra2Main.lean}'s \lean{block\_two\_level},
+\lean{block\_flush\_eq}, and \lean{reconstruct} formalize the ingredients of
+block reconstruction and the analogous side-derived-family route.  The
+compiled \lean{Ultra2Main.step} collapses the two side-derived families
+separately and then uses cellwise induction; it does not literally formalize
+the prose organization around one arbitrarily preselected common family
+\((U_D)_{D\in R}\).
+
+\begin{table}[H]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}
+  >{\raggedright\arraybackslash}p{.34\textwidth}
+  >{\raggedright\arraybackslash}p{.31\textwidth}
+  >{\raggedright\arraybackslash}X@{}}
+\toprule
+Paper result & Pinned source & Location in source\\
+\midrule
+Operational balance, timestamp compression, ghost occurrences, strict keys
+  & elegant v4 & \S1\\
+Two-type reduction and recovery table
+  & elegant v4 & \S1, ``Two-type lemma''\\
+Colored-PIFO argmin coupling
+  & elegant v4 & \S1, ``Colored-PIFO lemma''\\
+Proper top decomposition and flush equations
+  & elegant v4 & \S2\\
+Cell autonomy and cross-cell comparison recovery
+  & elegant v4 & \S3\\
+Three-cell diamond
+  & elegant v4 & \S3, ``The three-cell diamond''\\
+Fixed-head chords and counting linearization
+  & elegant v4 & \S3, ``Global extension''\\
+Swap, block refinement, and strict-key collapse
+  & elegant v4 & \S4\\
+Main finite-alphabet theorem
+  & frozen statement; elegant v4 & final definition; \S4\\
+Canonical tree, flush determination, and complete invariant
+  & normalization v3 & \S\S0--1\\
+Structural decision, two- and three-push tests, support lower bound, and closing results
+  & normalization v3 & \S\S2--3.4\\
+Eta comparator, observation theorem, bounds, and certificates
+  & eta decision; consolidated verification manifest & \S\S1--7; Development 16\\
+Finite meet decomposition, meet promotion, topology recursion, and finite support
+  & \lean{pifo-noinduction-codex2.md} & \S\S2--5\\
+Rewrite inventory, nontermination, and equational local confluence
+  & \lean{pifo-confluence.md} & \S\S1--3\\
+Bottom-up summary algebra, smart constructors, reblocking, and costs
+  & \lean{pifo-confluence.md} & \S\S4--8\\
+Two alternative alphabet-size-induction-free, topology-recursive constructions
+  & \lean{pifo-noinduction-codex.md}; \lean{pifo-noinduction-fable.md}
+  & construction summaries\\
+Normalization by evaluation and common semantic refinement
+  & \lean{pifo-nbe.md} (direct); frozen statement; elegant v4; normalization v3
+  & \S\S1--10; semantic dependencies\\
+Clean-slate builds, theorem identities, independence, line counts, and axiom gates
+  & consolidated verification manifest & Developments 1--16\\
+Stateful separation
+  & consolidated verification manifest
+  & Development 2; \lean{Pifo.lean} and \lean{Extended.lean}\\
+\bottomrule
+\end{tabularx}
+\caption{Result-level traceability for the main proof and integrated sources.}
+\label{tab:proof-traceability}
+\end{table}
+
+\paragraph{Reproducibility boundary.}
+Because pdf\TeX{} embeds build metadata, \lean{paper.pdf} is not
+byte-reproducible.  Provenance pins therefore attach to \lean{main.tex},
+\lean{sections/*.tex}, and the cited sources; the rendered page count is a
+build check, not a PDF-digest content pin.
+
+\paragraph{Counterexample audit.}
+The stateful artifact uses a small standalone flat-tree model with packet
+identities equal to arrival numbers.  In \lean{Pifo.lean}, the theorems
+\lean{diverge\_S1} and \lean{diverge\_S2} kernel-check the two outputs of
+\autoref{eq:diverging-ops};
+\lean{schedulers\_\allowbreak diverge\_\allowbreak interleaved} records their
+inequality, all using \lean{decide}.  The theorem
+\lean{flush\_agree\_le\_8} checks both drains and the expected pattern through
+length eight, also using \lean{decide}; those core checks report only
+\lean{propext}.  In the sibling \lean{Extended.lean},
+\lean{flush\_agree\_le\_30} is an additional bounded
+\lean{native\_decide} check and therefore carries the expected native-reduction
+axiom.  The verification manifest explicitly labels that sweep supporting
+evidence rather than a proof for all \(n\).
+For that reason, we describe the separating trace and bounded checks as
+machine-checked, while the universal flush equivalence in
+\propref{prop:stateful-separation} rests on the direct calculation in
+\autoref{eq:stateful-flush-pattern}.

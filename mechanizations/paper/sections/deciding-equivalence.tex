@@ -1,0 +1,366 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7.
+\section{Deciding equivalence}
+\label{sec:deciding-equivalence}
+
+The canonical characterization turns universal operational equivalence into a
+finite structural comparison.  This section gives the extractor, accounts for
+its cost, and then identifies an asymptotically optimal finite-support test
+class.
+
+\subsection{Structural extraction}
+\label{sec:structural-decision}
+
+An effective comparison is obtained by scanning two assigned paths.  Advance
+while both paths choose the same child.  If they reach a common leaf, compare
+their leaf ranks; at their first different child, compare their reference
+ranks at that node.  The scan takes time linear in the path length and returns
+\(\mathsf{eff}_S(x,y)\).
+
+The rooted-triple extractor must do more than suppress a common unary prefix.
+For pairwise-distinct \(x,y,z\), define
+\(\mathsf{TripleDescriptor}(S;x,y,z)\) as follows.
+\begin{enumerate}
+\item Advance the three path cursors while all three select the same child.
+      If they end in one common leaf, return a one-leaf flat descriptor with
+      the three encountered leaf ranks.
+\item At the first node where their selected children are not all equal,
+      retain the three reference ranks at that node as synthetic root ranks.
+\item For a \(1+1+1\) child split, route the three types to three synthetic
+      singleton leaves.
+\item For a \(2+1\) split, suppose \(u,v\) select the shared child.  Replace
+      their entire residual subtrees by \emph{one} synthetic shared leaf.  Use
+      leaf ranks
+      \begin{equation}
+        (r_u,r_v)=
+        \begin{cases}
+          (0,1),&\text{if }\mathsf{eff}_S(u,v)\text{ is }<,\\
+          (0,0),&\text{if }\mathsf{eff}_S(u,v)\text{ is }=,\\
+          (1,0),&\text{if }\mathsf{eff}_S(u,v)\text{ is }>.
+        \end{cases}
+        \label{eq:synthetic-pair-ranks}
+      \end{equation}
+      Route the remaining type to another singleton leaf; its leaf rank is
+      immaterial.
+\end{enumerate}
+Evaluate \autoref{eq:rooted-obstruction} on this constant-size flat descriptor.
+The result is \(R_S(x,y\mid z)\).  Unary transparency justifies the initial
+scan, the two-type lemma justifies the synthetic shared leaf, and the
+triple-flattening lemma identifies the descriptor's obstruction bit with that
+of the original restriction.
+
+\begin{example}[Why the residual pair must be collapsed]
+\label{ex:residual-pair-collapse}
+Take topology
+\(\mathsf{node}[\mathsf{node}[\mathsf{leaf},\mathsf{leaf}],
+\mathsf{leaf}]\) and paths
+\begin{equation}
+\begin{array}{c|cc|c}
+ & \text{root }(\text{child},\text{rank})
+ & \text{inner }(\text{child},\text{rank})
+ & \text{leaf rank}\\
+\hline
+x&(0,0)&(0,2)&0\\
+y&(0,2)&(1,0)&0\\
+z&(1,1)&\text{--}&0
+\end{array}
+\label{eq:residual-pair-example}
+\end{equation}
+The first split is \(2+1\), but \(x\) and \(y\) end at different terminal
+leaves.  Their residual effective comparison is \(>\), so the shared
+synthetic leaf receives ranks \((1,0)\), while its flat root receives ranks
+\((0,2,1)\) for \(x,y,z\).  Hence
+\[
+ \mathsf{eff}(x,z)=<,\qquad
+ \mathsf{eff}(z,y)=<,\qquad
+ \operatorname{comp}(<,<)=<\ne\mathsf{eff}(x,y),
+\]
+and \(R_S(x,y\mid z)\) is true.  Directly, \(F_S(xyz)=yzx\): the root removes
+the reference inserted by \(x\), but the selected inner queue emits \(y\).
+Looking only at terminal-leaf equality would incorrectly return false.
+\end{example}
+
+For valid input schedulers \(S,T\), the Boolean decision procedure streams
+these local invariants.
+\begin{enumerate}
+\item For every unordered pair \(\{x,y\}\), compute and cache one orientation
+      of \(\mathsf{eff}_S(x,y)\) and \(\mathsf{eff}_T(x,y)\); reject on the
+      first mismatch.  The reverse orientation is determined automatically.
+\item For every ordered pairwise-distinct triple \((x,y,z)\), compute
+      \(R_S(x,y\mid z)\) and \(R_T(x,y\mid z)\) with the descriptor above and
+      compare the bits immediately.  Reject on a mismatch; do not store the
+      cubic tables.
+\item Accept if both loops finish.
+\end{enumerate}
+For \(k=0\) or \(k=1\), the relevant loops are empty, as required by the base
+cases of the canonical form.
+
+\begin{theorem}[Structural decision]
+\label{thm:structural-decision}
+For valid schedulers \(S,T\), the procedure accepts exactly the
+interleaved-equivalent pairs:
+\begin{equation}
+ \mathsf{Decide}(S,T)=\mathsf{true}
+ \quad\Longleftrightarrow\quad
+ S\intereq T.
+ \label{eq:structural-decision-correct}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+Acceptance says exactly that the effective-comparison tables and all rooted
+obstruction bits agree.  Apply \autoref{thm:canonical-characterization}.  The
+two finite loops also prove termination.
+\end{proof}
+
+\begin{theorem}[Decision complexity]
+\label{thm:decision-complexity}
+For valid input schedulers \(S,T\), let \(h\) be the larger of \(1\) and the
+maximum number of constructors in an assigned path of either input, including
+its terminal leaf; thus \(h=1\) when \(k=0\).  On a unit-cost RAM, structural
+equivalence is decidable in
+\begin{equation}
+  O(k^3h)\ \text{time}
+  \qquad\text{and}\qquad
+  O(k^2)\ \text{working space}
+  \label{eq:decision-complexity}
+\end{equation}
+beyond the immutable input.
+\end{theorem}
+
+\begin{proof}
+There are \(\Theta(k^2)\) pair scans, each of length at most \(h\), and their
+ternary results occupy \(O(k^2)\) entries.  There are
+\(\Theta(k^3)\) triple scans.  A common-prefix scan, together with at most one
+pair-suffix scan if the cache were absent, visits \(O(h)\) path cells; with the
+cache, \autoref{eq:synthetic-pair-ranks} is constant time.  Each pair of
+obstruction bits is discarded after comparison, so no cubic table is stored.
+An iterative cursor implementation uses constant transient space; a recursive
+one adds an \(O(h)\) call stack.
+\end{proof}
+
+If ranks and child indices have maximum bit width \(B\), charging comparison
+by bit complexity gives the conservative time bound \(O(k^3hB)\).  The bound
+in \autoref{thm:decision-complexity} is for the Boolean decision only: it does
+not hide construction of \(\mathcal N\) or synthesis of concrete ranks.  For
+comparison, if all \(R\)-bits are first stored, a direct decomposition-tree
+construction scans
+\begin{equation}
+  O\!\left(k^3h+\sum_X |X|^3\right)
+  \subseteq O(k^3h+k^4)
+  \label{eq:normal-form-construction-cost}
+\end{equation}
+over the laminar family of canonical blocks \(X\), using
+\(\Theta(k^3)\) extra storage.  There are at most \(k-1\) non-singleton
+blocks, which gives the displayed \(O(k^4)\) summand.  Re-extracting rather
+than storing the bits gives the looser \(O(k^4h)\) bound.  No separate
+complexity claim is made for choosing integer witnesses to cell feasibility.
+
+\subsection{Two- and three-push tests suffice}
+
+Define the finite suite
+\begin{equation}
+ \mathcal T(A)=
+ \{\flushOps(w): w\text{ is injective and }2\le |w|\le3\}.
+ \label{eq:three-push-suite}
+\end{equation}
+It has
+\begin{equation}
+ k(k-1)+k(k-1)(k-2)=\Theta(k^3)
+ \label{eq:three-push-suite-size}
+\end{equation}
+tests, each with at most three pushes and three pops.  Singleton drains are
+fixed by packet conservation and supply no test information.
+
+\begin{theorem}[Two- and three-push sufficiency]
+\label{thm:three-push-sufficiency}
+Suppose valid \(S,T\) agree on every test in \(\mathcal T(A)\).  Then
+\(S\intereq T\).
+\end{theorem}
+
+\begin{proof}
+Fix distinct \(x,y\).  The tests \(xy\) and \(yx\), after restricting and
+consistently relabelling the two types, recover
+\(\mathsf{eff}(x,y)\) by \autoref{tab:binary-recovery}.  Thus the two effective
+tables agree.
+
+Now fix distinct \(x,y,z\).  Restrict and relabel these types as \(\Fin(3)\).
+The triple-flattening lemma supplies a valid flat representative for each
+restriction; this is a semantic replacement, not an assertion that the
+original restrictions are flat.  Their length-two and length-three injective
+drains agree by hypothesis, and their singleton drains agree automatically.
+The finite three-label recovery lemma says that these fifteen nonempty
+injective drains determine the effective table and all labelled obstruction
+bits of a flat realization.  Transporting back gives
+\(R_S(x,y\mid z)=R_T(x,y\mid z)\).  Varying the pair and triple gives equal
+\((\mathsf{eff},R)\), so \autoref{thm:canonical-characterization} applies.  When
+\(k<2\), the empty or singleton canonical base case gives the conclusion.
+\end{proof}
+
+Thus repetitions are unnecessary: one occurrence of each of at most three
+types recovers the complete invariant.
+
+\subsection{A cubic support lower bound}
+
+Pair data alone is insufficient.  The following explicit family will also
+force every unordered triple support to appear in any universal suite whose
+tests use at most three types.
+
+\begin{example}[Equal pair behavior, different triple behavior]
+\label{ex:cubic-support-witness}
+On types \(x,y,z\), use the flat topology
+\(\mathsf{node}[\mathsf{leaf},\mathsf{leaf},\mathsf{leaf}]\).  In type order
+\(x,y,z\), let \(\ell\), \(\rho\), and \(\lambda\) denote the leaf, root-rank,
+and leaf-rank vectors:
+\begin{equation}
+\begin{array}{c|ccc}
+ & \ell & \rho & \lambda\\
+\hline
+ S  &(0,0,1)&(0,2,1)&(1,0,0)\\
+ S' &(0,1,1)&(1,0,2)&(0,1,0)
+\end{array}
+\label{eq:cubic-support-witness}
+\end{equation}
+The third leaf is initially unused.  Both schedulers have
+\begin{equation}
+ \bigl(\mathsf{eff}(x,y),\mathsf{eff}(x,z),
+       \mathsf{eff}(z,y)\bigr)=(>,<,<).
+ \label{eq:cubic-support-effective}
+\end{equation}
+Consequently their restrictions to every pair agree on all operation words.
+However, \(R_S(x,y\mid z)\) is true and
+\(R_{S'}(z,y\mid x)\) is true, giving component partitions
+\(\{\{x,y\},\{z\}\}\) and \(\{\{x\},\{y,z\}\}\), respectively.  The
+distinction is visible in one flush:
+\begin{equation}
+  F_S(xyz)=yzx,
+  \qquad
+  F_{S'}(xyz)=zxy.
+  \label{eq:cubic-support-distinguishing-flush}
+\end{equation}
+For example, \(S\)'s root first selects the reference inserted by \(x\), but
+the shared child emits \(y\); this is the same reference-hijacking phenomenon
+as in \exref{ex:residual-pair-collapse}.
+\end{example}
+
+\begin{theorem}[Support-level optimality]
+\label{thm:support-lower-bound}
+For test suites whose individual tests use at most three packet types, every
+universal equivalence suite over \(k\) types needs at least
+\begin{equation}
+  \binom{k}{3}=\Omega(k^3)
+  \label{eq:support-lower-bound}
+\end{equation}
+distinct triple supports.  Together with \autoref{eq:three-push-suite}, the
+support complexity is \(\Theta(k^3)\).
+\end{theorem}
+
+\begin{proof}
+Embed \exref{ex:cubic-support-witness} on an arbitrary target triple
+\(\{a,b,c\}\).  Route every outsider identically in both schedulers to the
+common unused third leaf, give it root rank \(3\), and give it leaf rank \(0\);
+retain target ranks \(0,1,2\).  The choice \(3\) is load-bearing.  Every
+target--outsider effective comparison is identical, and an outsider cannot
+obstruct a shared target pair because the two comparisons through it have
+opposite strict signs.  A target likewise cannot obstruct a pair of
+outsiders.
+
+Therefore the two extended schedulers agree on every restriction omitting at
+least one of \(a,b,c\), while their target-triple flush still differs.  A test
+using at most three types can cover only one unordered triple, so a universal
+suite must cover every one of the \(\binom{k}{3}\) choices.
+\end{proof}
+
+This is a lower bound on supports.  It does not say that a particular order of
+each triple is sufficient, that every pair word is indispensable, or that
+\(\mathcal T(A)\) is inclusion-minimal.
+
+\subsection{Orientations and shortened drains}
+
+The six orders of one triple cannot be replaced by a fixed choice of three.
+In fact, any selected orientation can be the only distinguishing one.
+
+\begin{example}[A uniquely distinguishing triple orientation]
+\label{ex:missing-orientation}
+Consider the following flat realizations, with all vectors in type order
+\(0,1,2\):
+\begin{equation}
+\begin{array}{c|ccc}
+ & \text{leaf} & \text{root rank} & \text{leaf rank}\\
+\hline
+ U&(0,0,2)&(2,1,1)&(2,2,2)\\
+ V&(0,1,0)&(0,0,0)&(1,0,0)
+\end{array}
+\label{eq:missing-orientation-pair}
+\end{equation}
+Both have effective table
+\((\mathsf{eff}_{01},\mathsf{eff}_{02},\mathsf{eff}_{12})=(=,>,=)\), while
+their obstruction-edge tuples \((01,02,12)\) are
+\((\mathsf{true},\mathsf{false},\mathsf{false})\) and
+\((\mathsf{false},\mathsf{true},\mathsf{false})\).  All ordered-pair drains
+agree:
+\begin{equation}
+  01\mapsto01,\quad 02\mapsto20,\quad 10\mapsto10,\quad
+  12\mapsto12,\quad 20\mapsto20,\quad 21\mapsto21.
+  \label{eq:missing-orientation-pairs}
+\end{equation}
+Five of the six triple drains also agree; exactly \(012\) differs:
+\begin{equation}
+\begin{array}{c|cc}
+\hline
+\text{push order}&F_U&F_V\\
+\hline
+012&021&210\\
+021&201&201\\
+102&120&120\\
+120&120&120\\
+201&201&201\\
+210&210&210\\
+\hline
+\end{array}
+\label{eq:missing-orientation-drains}
+\end{equation}
+\end{example}
+
+\begin{proposition}[No three-orientation subfamily]
+\label{prop:no-three-orientations}
+For each of the six orders of three fixed types, there are valid flat
+schedulers that differ on exactly that triple drain while agreeing on the
+other five and on all ordered-pair drains.  Hence no fixed choice of three
+triple orientations, even together with all pair drains, is universally
+sufficient.
+\end{proposition}
+
+\begin{proof}
+Relabelling types by a permutation relabels every successful output, by an
+induction on \(\run\).  It can therefore move the sole differing word \(012\)
+in \exref{ex:missing-orientation} to any chosen orientation while preserving
+agreement on the other five and on every pair observation.
+\end{proof}
+
+Thus each orientation is individually indispensable when the other five and
+all pair observations are retained.  This is a statement about the
+triple-orientation subfamily, not inclusion-minimality of a mixed global
+suite.
+
+One observation in every full drain is nevertheless redundant.
+
+\begin{proposition}[One-pop redundancy]
+\label{prop:one-pop-redundancy}
+Let \(w\) be an injective push word of length \(n>0\).  For valid schedulers,
+agreement after pushing \(w\) and performing \(n-1\) pops is equivalent to
+agreement on the full \(n\)-pop flush.  For \(n=1\), no observed pop is needed.
+\end{proposition}
+
+\begin{proof}
+Every valid push adds one leaf packet and one matching reference at each
+internal node on its path.  The balance invariant makes all \(n\) drain pops
+succeed, with outputs a permutation of the known input types.  After the
+first \(n-1\) outputs, the last output is the unique input type not yet
+emitted.  Thus the prefix determines the full drain, and equality of prefixes
+is equivalent to equality of full drains.  When \(n=1\), the sole output is
+already determined by the input.
+\end{proof}
+
+Consequently every test in \(\mathcal T(A)\) may omit its final pop without
+losing information.  No claim is made about the globally sparsest mixture of
+orientations, pair tests, and still shorter prefixes.

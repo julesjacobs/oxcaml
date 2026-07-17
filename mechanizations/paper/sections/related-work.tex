@@ -1,0 +1,14 @@
+% Source pin (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e.
+\section{Related work}
+\label{sec:related-work}
+
+The frozen statement places this work in the PIFO-tree setting associated with
+Mohan, Liu, Foster, Kapp{\'e}, and Kozen's \emph{Formal Abstractions for Packet
+Scheduling}~\cite{mohan-oopsla23}.  Our model uses the corresponding basic
+ingredients: ranked queues with FIFO tie breaking, a queue at each tree node,
+annotated root-to-leaf pushes, and recursive pops.  The present paper asks a
+narrower observational question inside that setting: whether equality of all
+batch drains entails equality for arbitrarily interleaved operations when the
+assignment is stateless.  Beyond the shared PIFO-tree context recorded by the
+frozen source, we make no claim here about the results or proof methods of that
+work; the comparison is intentionally limited to the common model setting.

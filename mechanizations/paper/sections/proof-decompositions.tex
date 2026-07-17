@@ -1,0 +1,233 @@
+% Source pin (SHA-256): pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8.
+\subsection{Proper flush decompositions}
+\label{sec:decompositions}
+
+For induction on the alphabet, we expose the first queue that makes a
+nontrivial routing decision.
+
+\begin{lemma}[Proper top decomposition]
+\label{lem:decomposition}
+If \(|A|>1\), every valid stateless scheduler is online-equivalent to a
+scheduler of the form
+\begin{equation}
+ M=(P,r,(M_B)_{B\in P}),
+ \label{eq:decomposition-shape}
+\end{equation}
+where \(P\) is a proper partition of \(A\) into active root children, \(r\) is
+the total preorder induced by root ranks, and \(M_B\) is the child scheduler
+restricted to types in \(B\).  Its flush transformer satisfies
+\begin{align}
+ \restrict{F_M(w)}{B}
+   &=F_{M_B}(\restrict{w}{B})
+    =F_M(\restrict{w}{B}),
+    \label{eq:block-projection}\\
+ \proj{P}(F_M(w))
+   &=\proj{P}(\sort_r(w)).
+    \label{eq:root-pattern}
+\end{align}
+\end{lemma}
+
+\begin{proof}
+Starting at the root, follow the unique active child used by all types for as
+long as one exists.  Each skipped queue contains only that child value and
+therefore forwards exactly one service per successful pop; removing such a
+node preserves every online trace.  The walk ends either at the first node with
+at least two active children or at a leaf.  In the former case, partition types
+by the chosen child.  Every block is nonempty and, because at least two are
+active, proper.
+
+In the leaf case, replace the leaf by an internal root having the old leaf rank
+for each type and one FIFO singleton child per type.  The new root queue mirrors
+the old leaf queue occurrence-for-occurrence, while a singleton child has no
+choice to make.  Since \(|A|>1\), the singleton partition is proper.  This
+establishes \autoref{eq:decomposition-shape} without changing online behavior.
+
+During a flush, child \(B\) receives all pushes in
+\(\restrict{w}{B}\) before it receives service, and the root calls it exactly
+\(|\restrict{w}{B}|\) times.  Its complete output is therefore
+\(F_{M_B}(\restrict{w}{B})\), proving the first equality of
+\autoref{eq:block-projection}.  On a word confined to \(B\), all root references
+select \(B\), which proves the second.  Finally the root drains its reference
+occurrences by the stable \((r,\arr)\) order.  Replacing their source types by
+their child blocks yields \autoref{eq:root-pattern}.
+\end{proof}
+
+We call \((P,r)\) a \emph{decomposition} of a word transformer \(F\) when
+\autoref{eq:block-projection} and \autoref{eq:root-pattern} hold.  Two consequences will be used
+without further comment:
+\begin{align}
+  F(v)&=F_{M_B}(v) &&\text{if every letter of \(v\) lies in \(B\)},
+  \label{eq:block-autonomy-simple}\\
+  \restrict{F(w)}{B}&=F(\restrict{w}{B}) &&\text{for arbitrary \(w\)}.
+  \label{eq:block-filter-simple}
+\end{align}
+The first is \emph{block autonomy}; the second says that deleting other blocks
+commutes with the transformer.
+
+\subsection{Combining two decompositions}
+\label{sec:meet}
+
+Suppose \((P,r)\) and \((Q,s)\) decompose one common flush transformer \(F\).
+Their meet partition is the set of nonempty incidence cells
+\begin{equation}
+ R=P\wedge Q
+  =\{B\cap C\ne\varnothing:B\in P,\ C\in Q\}.
+ \label{eq:meet-partition}
+\end{equation}
+We will construct a total preorder that agrees with \(r\) across \(P\)-blocks
+and with \(s\) across \(Q\)-blocks.  We do \emph{not} need to claim that the
+resulting pair \((R,t)\) itself decomposes \(F\).
+
+First, every cell inherits autonomy.  For \(D=B\cap C\), repeated use of
+\autoref{eq:block-filter-simple} gives
+\begin{equation}
+\begin{aligned}
+ \restrict{F(w)}{D}
+ &=\restrict{(\restrict{F(w)}{B})}{C}
+  =\restrict{F(\restrict{w}{B})}{C}\\
+ &=F(\restrict{(\restrict{w}{B})}{C})
+  =F(\restrict{w}{D}).
+\end{aligned}
+\label{eq:cell-autonomy}
+\end{equation}
+
+For types in distinct \(R\)-cells, prescribe the effective comparison
+\(e(x,y)\) recovered by \lemref{lem:two-type}.  If \(P\) separates the pair, its
+two-type restriction is chosen at the \(P\)-root, and therefore
+\begin{equation}
+ e(x,y)=\cmp_r(x,y).
+ \label{eq:e-from-r}
+\end{equation}
+Likewise, if \(Q\) separates it,
+\begin{equation}
+ e(x,y)=\cmp_s(x,y).
+ \label{eq:e-from-s}
+\end{equation}
+The prescriptions agree when both partitions separate the pair because both
+are recovered from the same two flushes of \(F\).
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  cell/.style={minimum width=2.0cm,minimum height=1.2cm,draw},
+  pt/.style={circle,fill=pifogray,text=white,inner sep=2.1pt,font=\small},
+  every node/.style={font=\small}]
+  \draw[step=2cm] (0,0) grid (4,2.4);
+  \node[pt] (x) at (1,1.8) {$x$};
+  \node[pt] (y) at (3,1.8) {$y$};
+  \node[pt] (z) at (1,.6) {$z$};
+  \node[above] at (1,2.4) {$C_1$};
+  \node[above] at (3,2.4) {$C_2$};
+  \node[left] at (0,1.8) {$B_1$};
+  \node[left] at (0,.6) {$B_2$};
+  \node[draw=pifored,very thick,rounded corners,fit=(x)(y),inner sep=10pt] {};
+  \node[draw=pifoblue,very thick,rounded corners,fit=(x)(z),inner sep=10pt] {};
+  \node[pifored,anchor=west] at (4.18,1.78) {$P$-block};
+  \node[pifoblue,anchor=east] at (-.18,.32) {$Q$-block};
+  \node[align=left,anchor=west] at (5.35,.62)
+    {rows expose $\{x,y\}\mid\{z\}$;\\
+     columns expose $\{x,z\}\mid\{y\}$};
+\end{tikzpicture}
+\caption{The only nontrivial three-cell incidence shape.  Three meet cells
+form an L when neither all \(P\)-coordinates nor all \(Q\)-coordinates are
+distinct.  Its two visible decompositions form the diamond used below.}
+\label{fig:meet-diamond}
+\end{figure}
+
+\begin{lemma}[Three-cell diamond]
+\label{lem:diamond}
+On one representative type from each of any three distinct meet cells, the
+pairwise comparisons \(e\) form a total preorder.
+\end{lemma}
+
+\begin{proof}
+View the cells as occupied positions in the \(P\times Q\) incidence grid.  If
+the three \(P\)-coordinates are distinct, all comparisons come from the genuine
+preorder \(r\) by \autoref{eq:e-from-r}.  If their \(Q\)-coordinates are distinct,
+they all come from \(s\) by \autoref{eq:e-from-s}.  Otherwise the three positions
+form an L as in \autoref{fig:meet-diamond}; naming its corner \(x\), the restricted
+transformer has both decompositions
+\begin{equation}
+  \{x,y\}\mid\{z\},
+  \qquad
+  \{x,z\}\mid\{y\}.
+  \label{eq:l-decompositions}
+\end{equation}
+
+Assume that the non-strict relation induced by \(e\) is not transitive.  Since
+each pair is totally compared, there are distinct \(a,b,c\) with
+\begin{equation}
+  a\le_e b,
+  \qquad b\le_e c,
+  \qquad c<_e a.
+  \label{eq:bad-triple}
+\end{equation}
+Push one occurrence of each in the cycle order \(a,b,c\), then flush.  The
+arrival stamps are distinct, so every queue computation has a unique least
+\((\rank,\arr)\) key.  The cycle inequalities determine every strict or weak
+root comparison, and the fixed arrival order resolves any remaining rank tie;
+no separate tie case split is needed.
+
+Consider in full the L orientation whose grouped pairs are \(\{b,c\}\) and
+\(\{c,a\}\).  In the decomposition
+\(\{b,c\}\mid\{a\}\), separated-pair comparisons give root ranks
+\(\rho_a\le\rho_b\) and \(\rho_c<\rho_a\).  Thus
+\(\rho_c<\rho_b\), and the root drains references in the order
+\(c,a,b\): if \(\rho_a=\rho_b\), arrival puts \(a\) first.  The resulting
+child slots are
+\[
+  \{b,c\},\ a,\ \{b,c\}.
+\]
+Within the pair child, \(b\) arrived before \(c\) and \(b\le_e c\), so the
+binary recovery table says that its output is \(b,c\).  The complete output is
+therefore \(b,a,c\).
+
+In the decomposition \(\{c,a\}\mid\{b\}\), separated comparisons give
+\(\sigma_a\le\sigma_b\le\sigma_c\).  With arrival order \(a,b,c\), the root
+drains references in that same order, producing slots
+\[
+  \{c,a\},\ b,\ \{c,a\}.
+\]
+The pair child outputs \(c,a\), since \(c<_e a\), and the complete output is
+\(c,b,a\).  The first letters differ, contradicting that both decompositions
+compute the same \(F(abc)\).
+
+Cyclic renaming covers the other two placements of the two grouped edges in
+the comparison cycle.  Exchanging the roles of the two decompositions covers
+the three reflected L orientations.  These exhaust the incidence shape, so no
+failure of transitivity is possible.  Reflexivity and totality are already
+built into the pair comparisons; hence the restriction is a total preorder.
+\end{proof}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  panel/.style={draw,rounded corners,minimum width=6.1cm,minimum height=2.85cm,
+                align=left,inner sep=8pt},
+  title/.style={font=\bfseries}]
+  \node[panel] (l) at (-3.35,0) {};
+  \node[title,anchor=north] at (l.north) {$\{b,c\}\mid\{a\}$};
+  \node[align=left,anchor=north west] at ($(l.north west)+(.18,-.48)$)
+    {$\rho_c<\rho_a\le\rho_b$\\
+     root sources: $c,a,b$\\
+     slots: $[\{b,c\}], [a], [\{b,c\}]$\\
+     inner output: $b,c$\\
+     final output: $\mathbf{b,a,c}$};
+  \node[panel] (r) at (3.35,0) {};
+  \node[title,anchor=north] at (r.north) {$\{c,a\}\mid\{b\}$};
+  \node[align=left,anchor=north west] at ($(r.north west)+(.18,-.48)$)
+    {$\sigma_a\le\sigma_b\le\sigma_c$\\
+     root sources: $a,b,c$\\
+     slots: $[\{c,a\}], [b], [\{c,a\}]$\\
+     inner output: $c,a$\\
+     final output: $\mathbf{c,b,a}$};
+  \draw[-{Stealth},very thick,pifored] ($(l.south)+(0,-.2)$) --
+    node[below,font=\small] {contradict a common flush transformer}
+    ($(r.south)+(0,-.2)$);
+\end{tikzpicture}
+\caption{The representative diamond computation for
+\(a\le_e b\le_e c<_e a\), using one common arrival order \(a,b,c\).
+Internal references choose child slots; the selected pair child may emit a
+different source occurrence.}
+\label{fig:diamond-computation}
+\end{figure}

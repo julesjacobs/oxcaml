@@ -1,0 +1,110 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8; pifo-nbe.md=5f7efd28922efc5dedad29a375f030ad6e3fe29f96ba94e77ec308f521541f14; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7; pifo-eta-decision.md=50159fe6aaf8273fc1d811f941de4e2246f7ec84e2270fefc1144c0a890e2ec9; pifo-confluence.md=58274d7fa628cbd04ae265a415cd11bce671e950d53a1653c6e23fe5ee1342ec; pifo-noinduction-codex2.md=97eef33723fdd15eff0003d02ce1cd387a1b1dcd86a42f89302421f0fa614933; pifo-verify-all/VERIFICATION.md=c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887.
+\section{Introduction}
+\label{sec:introduction}
+
+A scheduler can be questioned in two ways.  A \emph{flush} experiment first
+pushes a finite word of packets and then pops until every pushed packet has
+been returned.  An \emph{interleaved} experiment may alternate pushes and pops
+arbitrarily.  Interleaving is apparently more informative: an early pop can
+change which packets remain together, and later arrivals then meet a residual
+state that no batch drain exposes directly.  This raises a basic extensional
+question for packet schedulers:
+
+\begin{quote}
+If two schedulers produce the same drain for every input word, must they
+produce the same observations for every interleaving of pushes and pops?
+\end{quote}
+
+For arbitrary stateful assignment policies, the answer is no.  For stateless
+PIFO trees, the answer is yes.  Here a PIFO is a priority queue ordered by rank,
+with FIFO order among equal ranks.  A PIFO tree places such a queue at every
+node: an internal queue chooses a child, and a leaf queue chooses a packet.  A
+push follows a root-to-leaf path and inserts one ranked entry at every visited
+node.  \emph{Stateless} means that the packet type alone fixes this entire
+annotated path.  It may not depend on the current queues, the arrival number,
+or earlier operations.
+
+Our main theorem says that, over every finite packet alphabet and arbitrary
+finite tree topologies, flush equivalence implies interleaved equivalence for
+valid stateless assignments.  Since a flush is itself an operation word, the
+reverse implication is immediate.  Thus flushes and general interleavings
+coincide extensionally on this class.
+
+This result gives precise content to the practice of testing a scheduler by
+batch drains.  As stated, its premise quantifies over all finite input words:
+the implication first says that no additional observational principle is
+gained by admitting residual-state experiments once all batch behavior is
+known.  The later canonical analysis strengthens this with a finite test
+theorem.  This distinction matters both conceptually and formally.  The main
+proof reduces an operational equivalence over mixed commands to equality of a
+pure word transformer, without assuming that either scheduler's hidden
+topology or root partition can be reconstructed from observations.
+
+The proof has four ingredients.
+
+\begin{enumerate}
+\item On two packet types, a stateless PIFO tree is a single stable comparison.
+      Two orderings of the binary flush distinguish strict priority in either
+      direction from a FIFO tie.
+\item A colored-PIFO coupling shows that changing ranks within colors preserves
+      the complete online color trace whenever all cross-color comparisons are
+      unchanged.
+\item The top partitions of two flush-equivalent trees induce an incidence
+      grid.  Binary comparisons agree wherever both partitions separate a
+      pair.  A three-cell diamond rules out local comparison cycles, and a
+      fixed-head-chord induction rules out cycles of every length.  The result
+      is one total preorder compatible with both roots across their blocks.
+\item Both roots are first swapped to this common preorder.  Each proper block
+      is then refined into meet cells and discharged by strong induction on the
+      alphabet.  The remaining two selector levels use identical keys and
+      collapse occurrence-for-occurrence.
+\end{enumerate}
+
+The same local structure yields more than the implication.  Effective
+comparisons on pairs and rooted obstruction bits on triples generate a
+canonical component-decomposition tree, which is a complete invariant for
+interleaved behavior.  On a unit-cost RAM, they give an \(O(k^3h)\) structural
+decision procedure, an injective test suite using at most three pushes, and a matching
+\(\Theta(k^3)\) lower bound on triple supports among suites whose tests use at
+most three types.  An independent eta-style comparator decides equivalence
+directly through pair-dependent meet obligations, without constructing either
+normal form; it returns a two- or three-push counterexample or a finite
+equivalence proof DAG.  The natural active rewrite equations do not provide a
+rewrite normal form: collapse/regrouping and leaf explosion create cycles, and
+even a canonical tree is reducible.  Nevertheless a compositional bottom-up
+fold over restriction-ready pair/triple summaries computes exactly the
+canonical form.  A normalization-by-evaluation argument instead evaluates to
+the literal flush transformer, reifies its finest factor hierarchy, and gives
+a second semantic proof, not a decision algorithm.  Finally, a separate
+meet-promotion argument removes induction on the number of packet types; by
+finite support, the observational theorem applies to arbitrary type alphabets
+over finite topologies, without asserting a global infinite-alphabet normal
+form.
+
+Statelessness is sharp as a hypothesis on the class.  We exhibit two flat,
+arrival-dependent assignment policies whose flush transformer is identical on
+every word but whose outputs differ after
+\(\push;\popop;\push;\push;\popop\).  The example isolates the failure mode:
+an internal reference selects a leaf, not the packet occurrence that created
+that reference.  A prior pop can remove the packet that would otherwise have
+been ``hijacked'' by a later reference.  A fixed type-to-path assignment rules
+out exactly the overtaking freedom used by this construction.
+
+Besides proving the equivalence theorem, the argument gives a useful semantic
+picture of stateless PIFO trees.  They are arbitration hierarchies.  Each pair
+of types meets at a first decisive queue, while the higher queues schedule only
+coarser child colors.  Unary forwarding depth is operationally invisible, and
+consecutive selectors with the same preorder can be collapsed.  This picture
+is developed in \autoref{sec:discussion} after the formal proof.
+
+The mathematical model in \autoref{sec:model} is a direct presentation of the
+frozen Lean statement.  \autoref{sec:main-proof} gives the complete proof,
+including the binary recovery table, colored coupling, meet construction, and
+collapse.  \autoref{sec:stateful} works through the stateful separation.
+The later mechanization section records statement hashes, clean-slate proof
+checking, per-artifact independence, axiom audits, and the exact scope of the
+kernel witnesses.  The
+subsequent sections develop canonical normalization, structural and eta-style
+decision, the negative rewrite result and positive bottom-up normalizer,
+normalization by evaluation, and topology-recursive proofs with their
+finite-support extension.

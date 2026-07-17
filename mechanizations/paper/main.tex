@@ -1,0 +1,148 @@
+\documentclass[10pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs,array,tabularx}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,calc,fit,matrix,positioning,shapes.geometric}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{pifoblue}{HTML}{245A9C}
+\definecolor{pifored}{HTML}{A33A32}
+\definecolor{pifogreen}{HTML}{397548}
+\definecolor{pifogray}{HTML}{5B6470}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\newcommand{\lemref}[1]{\hyperref[#1]{Lemma~\ref*{#1}}}
+\newcommand{\propref}[1]{\hyperref[#1]{Proposition~\ref*{#1}}}
+\newcommand{\corref}[1]{\hyperref[#1]{Corollary~\ref*{#1}}}
+\newcommand{\defref}[1]{\hyperref[#1]{Definition~\ref*{#1}}}
+\newcommand{\exref}[1]{\hyperref[#1]{Example~\ref*{#1}}}
+\newcommand{\remref}[1]{\hyperref[#1]{Remark~\ref*{#1}}}
+\def\sectionautorefname{Section}
+\def\subsectionautorefname{Section}
+\def\figureautorefname{Figure}
+\def\tableautorefname{Table}
+\def\equationautorefname{Equation}
+\providecommand*{\theoremautorefname}{Theorem}
+\providecommand*{\lemmaautorefname}{Lemma}
+\providecommand*{\propositionautorefname}{Proposition}
+\providecommand*{\corollaryautorefname}{Corollary}
+\providecommand*{\definitionautorefname}{Definition}
+\providecommand*{\exampleautorefname}{Example}
+\providecommand*{\remarkautorefname}{Remark}
+
+\newcommand{\Nat}{\mathbb{N}}
+\newcommand{\Fin}{\operatorname{Fin}}
+\newcommand{\Some}{\mathsf{some}}
+\newcommand{\None}{\mathsf{none}}
+\newcommand{\push}{\mathsf{push}}
+\newcommand{\popop}{\mathsf{pop}}
+\newcommand{\run}{\mathsf{run}}
+\newcommand{\flushOps}{\mathsf{flushOps}}
+\newcommand{\sort}{\operatorname{sort}}
+\newcommand{\cmp}{\operatorname{cmp}}
+\newcommand{\arr}{\operatorname{arr}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\val}{\operatorname{val}}
+\newcommand{\intereq}{\mathrel{\simeq_{\mathrm{int}}}}
+\newcommand{\flusheq}{\mathrel{\simeq_{\mathrm{flush}}}}
+\newcommand{\restrict}[2]{#1\mathord{|}_{#2}}
+\newcommand{\proj}[1]{\pi_{#1}}
+\newcommand{\word}[1]{\mathord{#1}}
+\newcommand{\denote}[1]{\mathopen{[\![}#1\mathclose{]\!]}}
+\newcommand{\lean}[1]{\texttt{#1}}
+\newcommand{\sourcehash}[1]{\texttt{#1}}
+
+\setlist[itemize]{leftmargin=1.5em,itemsep=.25em,topsep=.35em}
+\setlist[enumerate]{leftmargin=1.7em,itemsep=.25em,topsep=.35em}
+\setlength{\parskip}{0.35em}
+\setlength{\parindent}{1.2em}
+\allowdisplaybreaks
+
+\title{Flushes Suffice:\\A Theory of Stateless PIFO Trees}
+\author{Codex \and Claude\thanks{Authored by Codex and Claude.}}
+\date{July 2026}
+\hypersetup{
+  pdftitle={Flushes Suffice: A Theory of Stateless PIFO Trees},
+  pdfauthor={Codex and Claude}
+}
+
+\begin{document}
+\maketitle
+
+% Abstract source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8; pifo-nbe.md=5f7efd28922efc5dedad29a375f030ad6e3fe29f96ba94e77ec308f521541f14; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7; pifo-eta-decision.md=50159fe6aaf8273fc1d811f941de4e2246f7ec84e2270fefc1144c0a890e2ec9; pifo-confluence.md=58274d7fa628cbd04ae265a415cd11bce671e950d53a1653c6e23fe5ee1342ec; pifo-noinduction-codex2.md=97eef33723fdd15eff0003d02ce1cd387a1b1dcd86a42f89302421f0fa614933; pifo-verify-all/VERIFICATION.md=c97ed5daa11c97f71a5d0e3867f96ddabe74438f1f598c049050c735a96b1887.
+\begin{abstract}
+A packet scheduler is often easiest to observe in a batch experiment: enqueue a
+word of packets and then drain the scheduler.  A stronger experiment may
+interleave enqueues and dequeues.  For finite, stateless schedulers assembled
+from push-in first-out (PIFO) trees, we prove that the two observations have
+exactly the same discriminating power.  If two valid schedulers agree on every
+flush experiment, then they agree on every interleaved operation word.  The
+converse is immediate.
+
+The proof exposes the extensional structure of a stateless PIFO tree.  Binary
+flushes recover pair comparisons; a colored-PIFO coupling, a three-cell
+diamond, and fixed-head chords produce a meet-compatible preorder; swapping
+before refinement and collapsing equal selector levels completes the
+alphabet-inductive proof.  A small stateful construction agrees on every flush
+but is separated by a five-operation interleaving, showing that fixed
+assignment is load-bearing.  A canonical obstruction-component tree is a
+complete invariant.  On a unit-cost RAM, it yields an \(O(k^3h)\) structural
+decision procedure and a \(\Theta(k^3)\) two-or-three-push test family whose
+triple-support count is optimal among suites using at most three types per
+test.  A pair-dependent
+eta-style comparator instead avoids normal forms and returns either a two- or
+three-push witness or a finite proof DAG.  The natural bidirectional rewrite
+inventory is equationally locally confluent but nonterminating---even a
+canonical tree is reducible---whereas a summary-carrying bottom-up fold
+computes the canonical form.  Meet promotion removes induction on alphabet
+size and, by finite support, extends the observational theorem to arbitrary
+alphabets.  Normalization by evaluation reifies the literal flush transformer
+and gives another finite-alphabet proof, though not an algorithmic normalizer.
+A pinned clean-slate manifest records kernel-checked Lean artifacts for the
+main result over a frozen statement, with per-artifact independence and axiom
+scopes.
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/model}
+\input{sections/proof}
+\input{sections/counterexample}
+\input{sections/discussion}
+
+\input{sections/normalization-canonical}
+\input{sections/deciding-equivalence}
+\input{sections/eta-style-decision}
+\input{sections/confluence-bottom-up}
+\input{sections/normalization-by-evaluation}
+\input{sections/eliminating-induction}
+
+\input{sections/mechanization}
+\input{sections/related-work}
+
+\begin{thebibliography}{1}
+\bibitem{mohan-oopsla23}
+Mohan, Liu, Foster, Kapp{\'e}, and Kozen.
+\newblock Formal abstractions for packet scheduling.
+\newblock In \emph{OOPSLA}, 2023.  arXiv:2211.11659.
+\end{thebibliography}
+
+\end{document}

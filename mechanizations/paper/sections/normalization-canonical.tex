@@ -1,0 +1,251 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-normalization.md=2d287de7924aa30479218da3e0a9a31577ecb97c5a34395c089f7abed98f61e7.
+\section{Normalization and canonical forms}
+\label{sec:normalization-canonical}
+
+The proof of \autoref{thm:main} joins two schedulers through a decomposition
+chosen from both of them.  A stronger consequence is that each scheduler has
+its own canonical decomposition tree.  The tree is finite, is recoverable from
+flush behavior, and completely characterizes interleaved behavior.
+
+Throughout this section \(A=\Fin(k)\), with its fixed enumeration, and all
+schedulers are valid.  For \(X\subseteq A\), write \(S|_X\) for the scheduler
+obtained by retaining only the types in \(X\).  Runs whose pushes lie in \(X\)
+are unchanged by this restriction.
+
+\subsection{The local data}
+
+For distinct \(x,y\in A\), let
+\[
+  \mathsf{eff}_S(x,y)\in\{<,=,>\}
+\]
+be the effective comparison of their two-type restriction.  Concretely,
+follow their assigned paths together through every common child.  At their
+first different child, compare the two reference ranks; if they instead end
+at one leaf, compare their leaf ranks.  By \lemref{lem:two-type}, this one
+comparison determines the restricted scheduler on every operation word.  It
+is local under restriction and is recovered from the two drains in
+\autoref{tab:binary-recovery}.
+
+Triples carry one further bit.  For comparisons \(c,d\in\{<,=,>\}\), let
+\(\operatorname{comp}(c,d)\) be their transitive composition: composing with
+\(=\) returns the other comparison, two \(<\)'s compose to \(<\), two
+\(>\)'s compose to \(>\), and opposite strict signs give \(\None\).
+
+\begin{definition}[Rooted-triple obstruction]
+\label{def:rooted-obstruction}
+For pairwise-distinct \(x,y,z\), restrict \(S\) to these three types and use
+the triple-flattening lemma to replace that restriction by an
+interleaved-equivalent flat scheduler.  Write \(\ell(u)\) for the leaf of
+type \(u\) in this representative.  Then \(R_S(x,y\mid z)\) holds when
+\begin{equation}
+\begin{split}
+  &\ell(x)=\ell(y)\ne\ell(z),\\
+  &\operatorname{comp}
+      \bigl(\mathsf{eff}_S(x,z),\mathsf{eff}_S(z,y)\bigr)=\Some(c),
+    \qquad c\ne\mathsf{eff}_S(x,y).
+\end{split}
+\label{eq:rooted-obstruction}
+\end{equation}
+The triple lemma makes this predicate independent of the chosen flat
+representative.  It is also local under every further restriction containing
+\(x,y,z\).
+\end{definition}
+
+The structural construction of the required flat representative is given in
+\autoref{sec:structural-decision}; its \(2+1\) case is important because the two
+types in the shared branch must be collapsed to one synthetic leaf.
+
+For \(X\subseteq A\), form an undirected graph \(G_S(X)\) on \(X\) by putting
+an edge between distinct \(x,y\) exactly when some
+\(z\in X\setminus\{x,y\}\) satisfies
+\begin{equation}
+  R_S(x,y\mid z)\ \lor\ R_S(y,x\mid z).
+  \label{eq:obstruction-edge}
+\end{equation}
+Let \(\Pi_S(X)\) be the partition of \(X\) into connected components of this
+graph.
+
+\begin{lemma}[Locality and properness]
+\label{lem:canonical-properness}
+The data \(\mathsf{eff}_S\) and \(R_S\) on \(X\) agree with the corresponding
+data of \(S|_X\).  If \(|X|>1\), every block of \(\Pi_S(X)\) is a proper
+subset of \(X\).
+\end{lemma}
+
+\begin{proof}
+Pair locality follows by suppressing path prefixes used by both types; triple
+locality follows from the same common-prefix suppression and the
+triple-flattening lemma.  For properness, descend through every node at which
+all types in \(X\) use one child.  If this reaches a leaf, every triple lies in
+one flat leaf and \autoref{eq:rooted-obstruction} is false, so the graph has no
+edges.  Otherwise the first branching node partitions \(X\) into at least two
+nonempty child alphabets, and no obstruction edge crosses those alphabets.
+Thus \(G_S(X)\) is disconnected in either case.
+\end{proof}
+
+The component partition has exactly the compatibility needed at a canonical
+root.
+
+\begin{lemma}[Cell feasibility]
+\label{lem:canonical-cell-feasibility}
+For every \(X\subseteq A\) with \(|X|>1\), there is a rank function
+\(q_X:X\to\Nat\) such that
+\begin{equation}
+  \cmp_{q_X}(x,y)=\mathsf{eff}_S(x,y)
+  \qquad
+  \text{whenever \(x,y\) lie in different \(\Pi_S(X)\)-blocks.}
+  \label{eq:canonical-cell-feasibility}
+\end{equation}
+There is no constraint on the root comparison of two types in one block.
+\end{lemma}
+
+The lemma is the cell-feasibility part of the top-decomposition argument: one
+normalizes each child order in turn, while the strong preservation clause
+keeps all previously treated components fixed.  The resulting finite total
+preorder is represented by natural ranks.  The absence of a within-block
+constraint is essential---that comparison is resolved by the child and is
+not an observable root invariant.
+
+\subsection{The component-decomposition normal form}
+
+\begin{definition}[Abstract canonical tree]
+\label{def:abstract-canonical-tree}
+Define \(\mathcal N_X(S)\) by strong recursion on \(|X|\).
+\begin{itemize}
+\item If \(X=\varnothing\), it is the empty tree, represented by a zero-child
+      node.
+\item If \(X=\{x\}\), it is one leaf carrying \(x\).
+\item If \(|X|>1\), let
+      \(\Pi_S(X)=\{C_1,\ldots,C_m\}\).  The root is labelled by this
+      partition and by the table
+      \begin{equation}
+        \mathsf{eff}_S\bigm|_{
+          \{(x,y):[x]_{\Pi_S(X)}\ne[y]_{\Pi_S(X)}\}},
+        \label{eq:canonical-node-label}
+      \end{equation}
+      and its children are
+      \(\mathcal N_{C_i}(S|_{C_i})\), one for each block.
+\end{itemize}
+Put \(\mathcal N(S)=\mathcal N_A(S)\).  The recursion terminates by
+\lemref{lem:canonical-properness}.
+\end{definition}
+
+For \(k>0\), a concrete normal form \(N(S)\) is any scheduler realizing
+\(\mathcal N(S)\): list siblings in a fixed order, use a witness from
+\lemref{lem:canonical-cell-feasibility} at each internal node, and continue
+through the recursively assigned child to the singleton leaf, where the
+irrelevant leaf rank may be set to zero.  Such a scheduler is valid by
+construction.
+
+The empty alphabet needs a separate concrete convention.  Let
+\begin{equation}
+  E_0.\mathsf{topo}=\mathsf{node}[\,],
+  \qquad
+  E_0.\mathsf{assign}:\Fin(0)\to\mathsf{Path}
+  \text{ the unique empty function},
+  \qquad N(S)=E_0.
+  \label{eq:empty-canonical-scheduler}
+\end{equation}
+This is valid vacuously.  Since an operation over \(\Fin(0)\) cannot push,
+every operation is a pop and every pop from the initial state returns
+\(\None\).  Hence all zero-type schedulers are interleaved-equivalent to
+\(E_0\).
+
+The concrete representative is canonical only up to inessential
+presentation.  Equality of normal forms below means literal equality of the
+labelled abstract trees \(\mathcal N\), or, equivalently, equality of concrete
+realizations after identifying:
+\begin{enumerate}
+\item a permutation of sibling blocks together with the corresponding
+      remapping of child indices;
+\item any root-rank reparametrization preserving all cross-block comparisons,
+      with within-block root ranks left free; and
+\item any leaf-rank reparametrization preserving the induced weak order.
+\end{enumerate}
+Child indices do not break ties, so the first identification is operationally
+invisible; queues inspect only ranks and arrival stamps.
+
+\begin{theorem}[Canonical normalization]
+\label{thm:canonical-normalization}
+For every valid scheduler \(S\),
+\begin{equation}
+  S\intereq N(S).
+  \label{eq:canonical-normalization}
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+The \(k=0\) case was just proved.  If \(k=1\), unary active nodes merely
+forward service, and the lone type is FIFO at its leaf; contracting those
+nodes and setting the irrelevant leaf rank to zero gives the singleton leaf
+\(N(S)\).  For \(k>1\), use strong induction on the support size and suppress
+every unary active node.  If the reduced scheduler is a leaf, expand it to a
+root ordered by the old leaf ranks and route each type to a singleton child;
+this preserves every run.  Otherwise the canonical top-decomposition lemma
+replaces the root by one child for each
+\(C\in\Pi_S(A)\), uses a feasible root order satisfying
+\autoref{eq:canonical-cell-feasibility}, and gives that child the behavior of
+\(S|_C\).  Colored root congruence and stable child projection make this
+replacement online-invisible.
+
+Every \(C\) is proper, so the induction hypothesis replaces \(S|_C\) by
+\(N(S|_C)\).  Interleaved equivalence is a congruence for the node
+construction: the root couples only the component color, and paired children
+then emit the same packets.  The resulting scheduler is \(N(S)\).
+\end{proof}
+
+\subsection{Flush determination and completeness}
+
+\begin{lemma}[Flush determination]
+\label{lem:canonical-flush-determination}
+The pair \((\mathsf{eff}_S,R_S)\), and therefore \(\mathcal N(S)\), is
+determined by the flush transformer \(F_S\).
+\end{lemma}
+
+\begin{proof}
+For each distinct pair, the two drains of \(xy\) and \(yx\) recover the exact
+comparison by \autoref{tab:binary-recovery}; both arrival orders are needed.  For
+each distinct triple, restrict and relabel its types, flatten the restriction,
+and use the finite three-label recovery lemma.  The drains of the injective
+words of lengths two and three determine every rooted obstruction bit; the
+singleton drains are fixed.  Thus all of \(\mathsf{eff}_S\) and \(R_S\) are
+functions of \(F_S\).
+
+At every recursive support \(X\), locality makes \(G_S(X)\), and hence
+\(\Pi_S(X)\), a function of the restricted \(R_S\)-table.  The node label then
+uses only the corresponding cross-block part of \(\mathsf{eff}_S\).  Strong
+recursion therefore reconstructs the whole labelled tree.
+\end{proof}
+
+\begin{theorem}[Canonical characterization]
+\label{thm:canonical-characterization}
+For valid schedulers \(S,T\) over \(A\),
+\begin{equation}
+  S\intereq T
+  \quad\Longleftrightarrow\quad
+  \mathcal N(S)=\mathcal N(T)
+  \quad\Longleftrightarrow\quad
+  \bigl(\mathsf{eff}_S=\mathsf{eff}_T
+        \ \land\ R_S=R_T\bigr).
+  \label{eq:canonical-characterization}
+\end{equation}
+In particular, the canonical normal form is determined by flush behavior.
+\end{theorem}
+
+\begin{proof}
+Equality of the two data tables forces equal canonical trees: locality gives
+the same graph and component partition on every recursively reached support,
+and equality of \(\mathsf{eff}\) gives the same cross-block label.  Conversely,
+if the canonical trees agree, choose one concrete realization \(N_0\) of
+their common tree.  By \autoref{thm:canonical-normalization},
+\(S\intereq N_0\intereq T\).  This implies flush equivalence, so
+\lemref{lem:canonical-flush-determination} recovers equal data tables.  This
+semantic argument is important: an arbitrary triple need not itself occur as
+a support in the canonical recursion, so \(R\) cannot in general be read
+directly from one node of the tree.
+
+Finally, interleaved equivalence implies flush equivalence and hence equal
+data and equal trees.  The reverse implication is the common-realization
+argument above.  These implications establish both equivalences in
+\autoref{eq:canonical-characterization}.
+\end{proof}

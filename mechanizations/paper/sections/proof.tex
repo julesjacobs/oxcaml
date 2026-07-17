@@ -1,0 +1,532 @@
+% Source pins (SHA-256): PifoStatement.lean=fe9475ebfa2c462d27cb0a99781926074e1281396f2c9e8d32d6dfca788d814e; pifo-elegant-v4.md=356ea38146ced437e20200db04e2ce220c73f9ac9fa892b746f783b8a2d49ab8.
+\section{Flushes determine every interleaving}
+\label{sec:main-proof}
+
+We prove \autoref{thm:main}.  It is convenient to work over an arbitrary finite
+set \(A\); transporting schedulers and operation words along a bijection
+\(A\cong\Fin(k)\) gives the frozen statement.
+
+For \(B\subseteq A\), write \(\restrict{w}{B}\) for the subsequence of a word
+\(w\) whose letters lie in \(B\).  A natural-valued rank function induces a
+total preorder.  For such a preorder \(r\), \(\sort_r(w)\) is the stable sort
+of the \emph{occurrences} in \(w\) by
+\((r(a),\text{source arrival})\).  For a partition \(P\) of \(A\),
+\(\proj{P}(w)\) replaces each letter by its \(P\)-block.  If \(M\) is a
+scheduler, \(F_M:A^*\to A^*\) denotes its flush transformer, with the
+\(\Some\) constructors erased.  Validity ensures that a flush of \(n\) pushes
+has \(n\) successful pops.
+
+\subsection{Operational facts}
+
+The following elementary invariant connects the atomic formal semantics with
+the queue-level reasoning used later.
+
+\begin{lemma}[Reference balance]
+\label{lem:balance}
+At every valid reachable state, for every internal node and each of its
+children \(c\),
+\begin{equation}
+ \#\{\text{queued references to }c\}
+ =
+ \#\{\text{pending packets in the subtree of }c\}.
+ \label{eq:balance}
+\end{equation}
+Consequently a root pop fails exactly when the total pending-packet count is
+zero; after an internal queue selects a child, recursive failure is impossible.
+\end{lemma}
+
+\begin{proof}
+Initially both sides of \autoref{eq:balance} are zero at every node.  A valid
+push through child \(c\) appends exactly one reference to \(c\) and exactly one
+packet somewhere below \(c\); it does not affect the equality for another
+child.  A successful pop selecting \(c\) removes one such reference and,
+recursively, one packet below \(c\).  Induction down the selected path gives a
+successful leaf pop.  Hence a positive root count supplies a complete
+root-to-leaf pop, while count zero means the root queue is empty.  The atomic
+partial-failure branch exists in the definition but is unreachable from a
+valid reachable state.
+\end{proof}
+
+
+In particular, for a fixed operation word, the \(\None/\Some\) pattern depends
+only on the number of preceding pushes and successful pops, not on ranks or
+topology.  Two valid schedulers therefore have identical definedness patterns.
+
+\begin{lemma}[Timestamp compression]
+\label{lem:compression}
+Replace the arrival stamps occurring in any embedded queue computation by
+\(1,2,\ldots\) in their existing strict order.  Every queue selection, and
+hence every emitted value, is unchanged.
+\end{lemma}
+
+\begin{proof}
+Ranks are unchanged.  Equal-rank entries are compared only by the order of
+their arrival stamps, which a strictly increasing replacement preserves.
+Every choice of a least \((\rank,\arr)\) key is therefore the same.  Induction
+over the operation word gives the claim.
+\end{proof}
+
+This lemma allows a child invoked at sparse global timestamps to be compared
+with a standalone run whose pushes are consecutively stamped.  We will also
+attach a ghost source-occurrence tag to every entry when couplings need to
+identify an insertion.  The tag is not part of the model and is never
+observed; erasing it commutes with every transition because queue ordering uses
+only rank and arrival.  Within every reachable queue, and within every abstract
+pending-occurrence list used below, arrival stamps are pairwise distinct.  The
+same source push may deliberately occur at several selector levels with the
+same stamp.  Consequently \((\rank,\arr)\) is a strict key within each
+selector: every selection has a unique minimum.  Arrival injectivity is used
+in the colored-PIFO coupling, while the strict-key consequence is used in the
+diamond and collapse arguments.
+
+\subsection{What two types reveal}
+
+\begin{lemma}[Two-type reduction]
+\label{lem:two-type}
+For distinct types \(x,y\), the restriction of a stateless PIFO tree to
+operation words over \(\{x,y\}\) behaves as one stable PIFO with an effective
+comparison
+\[
+  e(x,y)\in\{x<y,\ x\sim_e y,\ y<x\},
+\]
+where \(\sim_e\) denotes a rank tie rather than equality of types.
+The comparison is determined by the two binary flushes in
+\autoref{tab:binary-recovery}.
+\end{lemma}
+
+\begin{proof}
+Follow the assigned paths of \(x\) and \(y\) together.  Stop at their first
+internal node with different child indices, or at their common leaf if their
+indices never differ.  At every earlier node all relevant references carry the
+same child value.  Such a node forwards one anonymous service for each
+successful pop and cannot choose between the two types.
+
+At a decisive internal node, its selected child identifies \(x\) or \(y\), and
+the selected child's restricted subtree is monochromatic.  At a decisive leaf,
+the queue emits \(x\) or \(y\) directly.  In either case one rank comparison at
+this node, with FIFO order on equality, determines every restricted operation
+word.  If \(x\) is strictly earlier, both two-letter arrival orders drain as
+\(xy\); if the ranks tie, each arrival order is retained; and if \(y\) is
+strictly earlier, both drain as \(yx\).  These are exactly the three rows of
+\autoref{tab:binary-recovery}.
+\end{proof}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}c@{\qquad}cc@{}}
+\toprule
+effective comparison \(e(x,y)\) & \(F(xy)\) & \(F(yx)\)\\
+\midrule
+\(x<y\) & \(xy\) & \(xy\)\\
+\(x\sim_e y\) & \(xy\) & \(yx\)\\
+\(y<x\) & \(yx\) & \(yx\)\\
+\bottomrule
+\end{tabular}
+\caption{Recovery of the effective binary comparison.  Both arrival orders are
+needed to distinguish a rank tie from either strict order.}
+\label{tab:binary-recovery}
+\end{table}
+
+Notice that \(e(x,y)\) is an extensional fact about the restricted scheduler;
+it need not be read from a particular syntactic node.  Flush-equivalent
+schedulers have the same \(e\) for every pair by
+\autoref{tab:binary-recovery}.
+
+\subsection{A colored-PIFO coupling}
+
+The induction will replace a root preorder while retaining only the sequence
+of selected children.  The next lemma justifies that replacement for arbitrary
+interleavings, including exact cross-color rank ties.
+
+\begin{lemma}[Colored PIFOs]
+\label{lem:colored}
+Let \(p,q\) be total preorders on a finite set of types, and let
+\(\gamma\) color those types.  Suppose
+\begin{equation}
+ \gamma(x)\ne\gamma(y)
+ \quad\Longrightarrow\quad
+ \cmp_p(x,y)=\cmp_q(x,y),
+ \label{eq:cross-color-agree}
+\end{equation}
+where comparison has the three values less, equal, and greater.  PIFO queues
+ordered by \(p\) and \(q\), subjected to identical pushes and pops, emit
+identical color traces.
+\end{lemma}
+
+\begin{proof}
+Refine each color into \emph{cross-profile classes}.  Define
+\begin{equation}
+ x\sim y
+ \quad\Longleftrightarrow\quad
+ \gamma(x)=\gamma(y)
+ \ \land\ 
+ \forall z\text{ of another color}.\ 
+   \cmp_p(x,z)=\cmp_p(y,z).
+ \label{eq:profile-class}
+\end{equation}
+By \autoref{eq:cross-color-agree}, the same classes are obtained from \(q\).
+We use three consequences of totality and transitivity.
+
+First, two distinct classes of one color are strictly separated in the same
+direction by both preorders.  Indeed, an outside type witnessing the difference
+between their profiles lies weakly on different sides of them; transitivity
+rules out reversing that separation.  Second, if a class ties a type of another
+color, it is \emph{value-pinned}: every member ties that witness and therefore
+all members tie one another, under both \(p\) and \(q\).  Third, comparisons
+between differently colored occurrences agree outright by hypothesis.
+
+Couple the two queues while maintaining the following invariant:
+\begin{enumerate}
+\item every profile class has the same pending count on both sides; and
+\item every class that ties another class has literally the same pending list
+      of ghost-tagged occurrences on both sides.
+\end{enumerate}
+The invariant holds initially and identical pushes extend both copies in the
+same class.
+
+Consider a pop.  Suppose the \(p\)-queue selects occurrence \(o_1\) in class
+\(K_1\), while the \(q\)-queue selects \(o_2\) in a different class \(K_2\).
+Equal class counts provide a pending \(K_2\)-occurrence on the \(p\)-side and a
+pending \(K_1\)-occurrence on the \(q\)-side.  Minimality of the selected
+entries implies, member-wise,
+\[
+  K_1\le_p K_2
+  \qquad\text{and}\qquad
+  K_2\le_q K_1.
+\]
+The classes cannot have one color: their strict, same-direction separation
+would contradict these inequalities.  They have different colors, so their
+constant cross-class comparison is common to \(p\) and \(q\).  The two
+inequalities force that comparison to be a tie in both directions.
+
+Both classes are therefore value-pinned.  By the invariant, each class's
+pending occurrence list is identical across the queues.  Thus \(o_1\) and
+\(o_2\) are pending in both queues, and their rank components tie within each
+queue.  Minimality on the \(p\)-side gives
+\(\arr(o_1)\le\arr(o_2)\); minimality on the \(q\)-side gives the reverse, so
+the stamps are equal.  Both occurrences lie in each queue, where arrival
+stamps are injective, hence \(o_1=o_2\), contradicting \(K_1\ne K_2\).
+
+Both pops therefore select one profile class and emit the same color.  Its
+pending count decreases on both sides.  If the class ties another class, it is
+value-pinned, so both queues remove its arrival-least pending occurrence---the
+same occurrence---and the identical-list clause survives.  Other lists are
+untouched.  Empty pops agree because total pending counts agree.  Induction on
+the common operation word completes the coupling.
+\end{proof}
+
+\input{sections/proof-decompositions}
+
+The diamond controls triples of cells.  The next argument shows that no
+higher-arity obstruction remains.
+
+\begin{lemma}[Meet-compatible preorder]
+\label{lem:meet-preorder}
+If \((P,r)\) and \((Q,s)\) decompose \(F\), there is a natural-valued total
+preorder \(t\) such that
+\begin{equation}
+ \begin{aligned}
+  \cmp_t(x,y)&=\cmp_r(x,y)
+    &&\text{whenever \(x,y\) lie in distinct \(P\)-blocks},\\
+  \cmp_t(x,y)&=\cmp_s(x,y)
+    &&\text{whenever \(x,y\) lie in distinct \(Q\)-blocks}.
+ \end{aligned}
+ \label{eq:meet-compatibility}
+\end{equation}
+\end{lemma}
+
+\begin{proof}
+Build a directed constraint graph on the types.  Between distinct meet cells,
+each relation \(x\le_e y\) contributes a weak edge \(x\to y\), marked exactly
+when \(x<_e y\).  Thus a preorder tie contributes unmarked edges in both
+directions.  It is enough to prove that no directed cycle contains a marked
+edge.
+
+Suppose otherwise.  Choose a marked edge \(a\to b\) as the head of such a
+cycle and argue by strong induction on its length.  Let \(c,d\) be the next
+vertices after \(b\) when present.  Only the three fixed chord positions
+\((a,c)\), \((b,d)\), and \((a,d)\) are needed; they are shown in
+\autoref{fig:fixed-chords}.
+
+For length two, the return edge \(b\to a\) contradicts the strict comparison
+on the marked head.  For length three, the consecutive edges join three
+distinct cells, and \lemref{lem:diamond} supplies a genuine total preorder on
+the triple; such a preorder cannot contain a marked directed triangle.
+
+Consider a length-four cycle \((a,b,c,d)\).  If \(a\) and \(c\) occupy
+distinct cells, compare that chord.  An edge \(c\to a\) closes the marked
+triangle \(a\to b\to c\to a\).  Otherwise totality gives \(a\to c\), and it
+is marked: in the three-cell preorder, \(a<_e b\le_e c\) implies
+\(a<_e c\).  The cycle \(a\to c\to d\to a\) is then a marked triangle.
+Likewise, if \(b,d\) occupy distinct cells, an edge \(b\to d\) yields the
+marked triangle \(a\to b\to d\to a\), which retains the original marked
+head; if that edge is unavailable, totality makes \(d\to b\) strict, yielding
+the marked triangle \(b\to c\to d\to b\).  If both diagonals are intra-cell,
+the cycle alternates between two meet cells.
+All four cross-cell comparisons then come from one genuine preorder: from
+\(r\) when \(P\) separates those cells, and otherwise from \(s\), since \(Q\)
+must separate them.  Its ranks would have to satisfy
+\[
+ \rho_a\le\rho_b\le\rho_c\le\rho_d\le\rho_a
+ \quad\text{while}\quad
+ \rho_b\le\rho_a\text{ is false},
+\]
+which is impossible.
+
+Now let the length be at least five.  If \(a,c\) lie in distinct cells, an
+edge \(c\to a\) closes the marked triangle through \(a,b,c\).  Otherwise the
+forward chord \(a\to c\) is strict by the same three-cell argument, and
+replacing \(a\to b\to c\) by this marked head shortens the cycle.  Strong
+induction excludes it.
+
+We may therefore assume \(a,c\) are in one cell.  If \(b,d\) are in distinct
+cells and the forward edge \(b\to d\) exists, replacing
+\(b\to c\to d\) by it shortens the cycle while retaining the original marked
+head \(a\to b\).  If the forward edge is unavailable, totality makes the
+reverse edge \(d\to b\) strict, closing a marked triangle through \(b,c,d\).
+Thus \(b,d\) must also be in one cell.
+
+Now \(a,d\) lie in distinct cells: otherwise \(a,c,d\) would share a cell,
+contradicting the cross-cell edge \(c\to d\).  If the chord \(d\to a\) exists,
+it closes the already excluded length-four marked cycle
+\(a\to b\to c\to d\to a\).  In the other orientation, all four cross-cell
+comparisons come from one original root preorder because \(a,c\) share one
+cell and \(b,d\) share another.  In that preorder,
+\(a<_e b\le_e c\le_e d\), so \(a\to d\) is strict.  Replacing the three-edge
+prefix by this marked head produces a shorter marked cycle.  Strong induction
+excludes every case, so no marked cycle exists.
+
+It remains to realize all constraints by natural ranks.  Write \(z\leadsto x\)
+for reflexive graph reachability, allowing a path of length zero, and set
+\begin{equation}
+ t(x)=
+ \#\{z:z\leadsto x\ \land\ x\not\leadsto z\}.
+ \label{eq:counting-linearization}
+\end{equation}
+Let \(L_x=\{z:z\leadsto x\land x\not\leadsto z\}\).  If \(x\to y\) is a weak
+edge and \(z\in L_x\), then \(z\leadsto x\to y\).  A return path
+\(y\leadsto z\) would imply \(x\leadsto z\), a contradiction; hence
+\(z\in L_y\), and \(L_x\subseteq L_y\).  If \(x\to y\) is marked, no path
+returns from \(y\) to \(x\), since it would complete a marked cycle.  Thus
+\(x\in L_y\), whereas reflexivity gives \(x\notin L_x\).  The inclusion is
+strict and finiteness gives \(t(x)<t(y)\).  A prescribed tie contributes weak
+edges both ways, so the two inclusions give equal predecessor sets and equal
+ranks.  Thus \(t\) realizes every prescribed \(e\)-comparison.  The constraints in
+\autoref{eq:e-from-r} and \autoref{eq:e-from-s} give exactly
+\autoref{eq:meet-compatibility}.
+\end{proof}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  v/.style={circle,draw,minimum size=6.5mm,inner sep=0pt,font=\small},
+  arr/.style={-{Stealth[length=2mm]}},
+  chord/.style={dashed,pifoblue,thick}]
+  \node[v] (a) at (150:2.15) {$a$};
+  \node[v] (b) at (90:2.15) {$b$};
+  \node[v] (c) at (30:2.15) {$c$};
+  \node[v] (d) at (-30:2.15) {$d$};
+  \node[v] (e) at (-90:2.15) {$\cdots$};
+  \node[v] (f) at (-150:2.15) {};
+  \draw[arr,very thick,pifored] (a) -- node[above left,font=\small,
+    text=pifored] {marked head} (b);
+  \draw[arr] (b) -- (c);
+  \draw[arr] (c) -- (d);
+  \draw[arr] (d) -- (e);
+  \draw[arr] (e) -- (f);
+  \draw[arr] (f) -- (a);
+  \draw[chord] (a) -- node[below,font=\scriptsize] {$(a,c)$} (c);
+  \draw[chord] (b) -- node[right,font=\scriptsize] {$(b,d)$} (d);
+  \draw[chord] (a) to[bend right=18]
+    node[below,font=\scriptsize] {$(a,d)$} (d);
+  \node[draw,rounded corners,align=left,font=\small,anchor=west]
+    at (3.05,.35) {length $4$, both diagonals intra-cell:\
+      $a,c\in D_0$ and $b,d\in D_1$\\
+      $\Rightarrow$ one genuine preorder governs all edges};
+\end{tikzpicture}
+\caption{The fixed-head-chord induction.  A longer marked cycle is shortened
+or reduced to a three-cell diamond using only the displayed chord positions;
+the alternating length-four case is controlled by one original root preorder.}
+\label{fig:fixed-chords}
+\end{figure}
+
+\subsection{Strong induction: swap, refine, and collapse}
+\label{sec:induction}
+
+We now prove \autoref{thm:main} simultaneously for every finite alphabet by
+strong induction on \(|A|\).  If \(A\) is empty, every operation is a failed
+pop.  If \(|A|=1\), each successful pop emits the sole type, and
+\lemref{lem:balance} says that success is determined only by the push/pop count.
+
+Assume \(|A|>1\), and let \(S,T\) be flush-equivalent valid stateless
+schedulers.  By \lemref{lem:decomposition}, normalize them online to proper top
+decompositions
+\begin{equation}
+  S=(P,r,(S_B)_{B\in P}),
+  \qquad
+  T=(Q,s,(T_C)_{C\in Q}),
+  \label{eq:two-top-decompositions}
+\end{equation}
+with common flush transformer \(F\).  Form \(R=P\wedge Q\) and choose the
+meet-compatible preorder \(t\) from \lemref{lem:meet-preorder}.
+
+\paragraph{Swap before refining.}
+Replace \(S\)'s root order \(r\) by \(t\), leaving its partition and children
+unchanged.  Across distinct \(P\)-blocks the two root preorders agree by
+\autoref{eq:meet-compatibility}.  Apply \lemref{lem:colored} with colors \(P\).
+The root has the same complete online \(P\)-token trace, so every child receives
+the same driven word.  Thus
+\begin{equation}
+  S\intereq S^t
+  \qquad\text{and}\qquad
+  F_{S^t}=F.
+  \label{eq:s-root-swap}
+\end{equation}
+Symmetrically \(T\intereq T^t\).  Applying
+\autoref{eq:root-pattern} directly to the two swapped schedulers gives both pattern
+facts, for every \(w\),
+\begin{equation}
+ \proj{P}(F(w))=\proj{P}(\sort_t(w)),
+ \qquad
+ \proj{Q}(F(w))=\proj{Q}(\sort_t(w)).
+ \label{eq:both-patterns}
+\end{equation}
+This order of operations is important: after the swaps, no separate meet-cell
+control-word construction is needed.
+
+\paragraph{Refine one proper block.}
+For every meet cell \(D\in R\), choose a valid scheduler \(U_D\) realizing the
+restricted transformer \(F\) on \(D\).  For example, restrict \(S\)'s fixed
+assignment to types in \(D\); cell autonomy
+\autoref{eq:cell-autonomy} identifies its flush transformer with
+\(\restrict{F}{D}\).
+
+Fix \(B\in P\).  Let \(V_B\) have a \(t\)-ordered root routing to the nonempty
+cells \(D=B\cap C\) below \(B\), with child \(U_D\) at cell \(D\).  We claim
+\begin{equation}
+  F_{S_B}=F_{V_B}.
+  \label{eq:block-flush-equality}
+\end{equation}
+Take a word \(v\) over \(B\).  A word over \(B\) is uniquely reconstructed
+from its \(Q\)-block pattern and its subsequence in every \(Q\)-block.  By block
+autonomy, \(F_{S_B}(v)=F(v)\), whose \(Q\)-pattern is
+\(\proj{Q}(\sort_t(v))\) by \autoref{eq:both-patterns}.  The root-pattern equation
+for \(V_B\) gives the same pattern.
+
+Fix a block \(C\in Q\) and set \(D=B\cap C\).  If \(D=\varnothing\), both
+\(C\)-subsequences are empty because both output words lie in \(B\).  If
+\(D\ne\varnothing\), then \(D\in R\), so \(U_D\) is defined.  Because \(v\)
+is a \(B\)-word, \(\restrict{v}{C}=\restrict{v}{D}\), and
+\begin{equation}
+\begin{aligned}
+ \restrict{F(v)}{C}
+ &=F(\restrict{v}{C})
+  =F(\restrict{v}{D})\\
+ &=F_{U_D}(\restrict{v}{D})
+  =\restrict{F_{V_B}(v)}{C}.
+\end{aligned}
+\label{eq:block-subsequences}
+\end{equation}
+Here the first equality is autonomy for the \(Q\)-decomposition, the third is
+the choice of \(U_D\), and the last is
+\autoref{eq:block-projection} for \(V_B\); filtering by \(C\) and by \(D\) agrees
+because every output of \(V_B\) lies in \(B\).  Equal pattern and equal
+subsequences prove \autoref{eq:block-flush-equality}.
+
+The partition \(P\) is proper, so \(|B|<|A|\).  The induction hypothesis
+applied to \autoref{eq:block-flush-equality} gives
+\begin{equation}
+  S_B\intereq V_B.
+  \label{eq:block-inter-equality}
+\end{equation}
+Substitute \(V_B\) for every child \(S_B\) under the already swapped
+\(t\)-root.  The root reference queue is unchanged.  Child \(B\) receives its
+projected pushes and one anonymous pop whenever a \(B\)-token is selected, so
+the driven operation word is the same on both sides.  Its global arrival stamps
+may have gaps; \lemref{lem:compression} converts them monotonically to the
+standalone instance of \autoref{eq:block-inter-equality}.  Child substitution
+therefore preserves the entire online trace.
+
+\paragraph{Collapse equal selector levels.}
+After substitution, the scheduler has two routing levels: an outer root over
+the \(P\)-blocks and, inside each \(B\), a root over its \(R\)-cells.  Both
+levels use preorder \(t\).  Let \(U\) instead have one \(t\)-root routing
+directly to the same children \(U_D\).
+
+Couple these schedulers with a set \(\Omega\) of pending ghost-tagged
+selector-reference occurrences.  Maintain:
+\begin{enumerate}
+\item the two-level outer queue is \(\Omega\), labeled by \(P\)-block;
+\item \(U\)'s root queue is \(\Omega\), labeled by \(R\)-cell;
+\item the inner queue below \(B\) is \(\restrict{\Omega}{B}\), labeled by
+      \(R\)-cell; and
+\item corresponding \(U_D\) states are identical.
+\end{enumerate}
+Pushes extend exactly the corresponding queues and child state.  On a pop, let
+the outer queue select occurrence \(o\in B\).  Every selector uses the same key
+\((t,\arr)\), and arrival stamps within \(\Omega\) are pairwise distinct, so
+\(o\) is the unique minimum of \(\Omega\) and therefore also of
+\(\restrict{\Omega}{B}\).  The inner queue selects the same occurrence; the
+one-level root, holding the same \(\Omega\) with the same keys, also selects
+\(o\).  There is no full-key tie case.  Both sides call the same \(U_D\) state.
+A successful lower pop removes \(o\) from all corresponding selectors.  An
+atomic lower failure rolls both sides back identically.  The invariant
+survives, and
+\begin{equation}
+  S\intereq U.
+  \label{eq:s-to-u}
+\end{equation}
+
+Starting from \(T\), swap its root to \(t\), refine each proper
+\(C\in Q\) into a \(t\)-root over the same meet-cell schedulers \(U_D\), and
+collapse.  The proof of block flush equality is the mirror image of
+\autoref{eq:block-flush-equality}: use the \(P\)-pattern in
+\autoref{eq:both-patterns} and autonomy from the \(S\)-side.  It gives
+\begin{equation}
+  T\intereq U.
+  \label{eq:t-to-u}
+\end{equation}
+Transitivity of equality of run outputs yields \(S\intereq T\).  The argument
+has coupled successful outputs; \lemref{lem:balance} restores the identical
+\(\None\) positions for over-pops.  This proves \autoref{thm:main}.
+
+\begin{figure}[t]
+\centering
+\resizebox{.98\textwidth}{!}{%
+\begin{tikzpicture}[
+  box/.style={draw,rounded corners,align=center,minimum width=2.8cm,
+              minimum height=1.0cm,font=\small},
+  arr/.style={-{Stealth[length=2mm]},thick},
+  lab/.style={font=\scriptsize,align=center,fill=white,inner sep=1.5pt}]
+  \node[box] (s) at (0,1.7) {$S$\\$r\to P\to S_B$};
+  \node[box] (st) at (4.35,1.7) {$S^t$\\$t\to P\to S_B$};
+  \node[box,minimum width=3.6cm] (sr) at (9.0,1.7)
+    {$\widehat S$\\$t\to P\to t\to R\to U_D$};
+  \node[box] (t0) at (0,-1.7) {$T$\\$s\to Q\to T_C$};
+  \node[box] (tt) at (4.35,-1.7) {$T^t$\\$t\to Q\to T_C$};
+  \node[box,minimum width=3.6cm] (tr) at (9.0,-1.7)
+    {$\widehat T$\\$t\to Q\to t\to R\to U_D$};
+  \node[box,minimum width=3.1cm,very thick,pifogreen] (u) at (14.0,0)
+    {$U$\\$t\to R\to U_D$};
+  \draw[arr] (s) -- node[lab,above=2pt] {colored-PIFO\\swap} (st);
+  \draw[arr] (st) -- node[lab,above=2pt] {induction in\\each proper $B$} (sr);
+  \draw[arr,pifogreen] (sr) -- node[lab,above right] {strict-key\\collapse} (u);
+  \draw[arr] (t0) -- node[lab,below=2pt] {colored-PIFO\\swap} (tt);
+  \draw[arr] (tt) -- node[lab,below=2pt] {induction in\\each proper $C$} (tr);
+  \draw[arr,pifogreen] (tr) -- node[lab,below right] {strict-key\\collapse} (u);
+\end{tikzpicture}%
+}
+\caption{Proof architecture.  The common preorder \(t\) is installed before
+the children are refined.  Strong induction produces the same meet-cell
+children on both sides, and identical selector levels collapse to one common
+scheduler \(U\).}
+\label{fig:proof-architecture}
+\end{figure}
+
+\paragraph{Why the induction is well founded.}
+Only the original blocks \(B\in P\) and \(C\in Q\) are recursive arguments,
+and both top partitions are proper.  A meet cell may equal an entire original
+block, and \(V_B\) may consequently have just one active cell, but the measure
+is still \(|B|<|A|\), not tree height or the size of an introduced child.
+Repeated packet types cause no problem: every projection, stable sort, and
+reconstruction above is a computation on occurrences.
