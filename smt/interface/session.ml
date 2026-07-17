@@ -33,6 +33,13 @@ type verdict =
   | Unsat
   | Unknown
 
+type assumption = Term.t * bool
+
+type assumption_check =
+  { verdict : verdict
+  ; unsat_core : assumption list option
+  }
+
 type model_value = Cdclt.value =
   | VBool of bool
   | VInt of Bigint.t
@@ -160,6 +167,11 @@ type t =
          consequence into the query and blinding the gate (codex MED-3/4). Cert corpus
          runs are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is
          free. *)
+  ; mutable assumption_query_started : bool
+      (* A nonempty [check_sat_assuming] reached SAT-state internalization. Certificate
+         tracing may not be installed afterwards: its recorder must observe the clause
+         database from the pristine start, including units and learned clauses produced
+         by an assumption query. *)
   ; sym_counter : int ref
       (* symmetry breaking (task #25): a PER-SESSION monotone counter for the reserved
          [.oxsmt.sym.*] aux-var names, so a second [assert_presolved] emission does not
@@ -180,12 +192,11 @@ type t =
          retraction of a NON-MONOTONIC break without touching the permanent clause DB. Any
          assertion after emission (assert_term / a further assert_presolved / push) clears
          it. *)
-  ; mutable sym_sel_in_core : Sat.var option
-  (* symmetry breaking (task #25, R3 minor): the activation selector assumed by the MOST
-     RECENT [check_sat], captured at solve time. [failed_assumptions] filters by THIS, not
-     the live [sym_sel] — a later assertion clears [sym_sel] to [None] while the SAT core
-     still holds the selector from the previous solve, so a read-time filter keyed on the
-     live [sym_sel] would leak it. *)
+  ; mutable last_failed_frame_assumptions : Sat.lit list option
+      (* The exact frame assumptions of the most recent ordinary [check_sat] that ended
+         [Unsat] through the incremental SAT core. [failed_assumptions] intersects the
+         raw core with this snapshot, so user literals, stale cores after another
+         dispatch, and the private symmetry selector never leak. *)
   }
 
 let create
@@ -301,10 +312,11 @@ let create
   ; elim_defs = []
   ; relevancy
   ; cert_active = false
+  ; assumption_query_started = false
   ; sym_counter = ref 0
   ; sym_sel = None
   ; lemmas_registered = false
-  ; sym_sel_in_core = None
+  ; last_failed_frame_assumptions = None
   }
 ;;
 
@@ -1741,6 +1753,7 @@ let commit_sat t =
 
 let check_sat t =
   t.last_verdict <- Unknown;
+  t.last_failed_frame_assumptions <- None;
   (* task #106: clear the observational LIA conflict stash HERE, at the single mandatory
      top of check_sat, so it is fresh before ANY path can set [last_verdict]. This covers
      every dispatch outcome below — the degraded early-[Unknown], the pure-BV fast path
@@ -1754,10 +1767,6 @@ let check_sat t =
   t.effort_exhausted <- false;
   (* census (task #78): fresh per-check reason slot; set at each giveup site below. *)
   t.unknown_reason <- "";
-  (* R3 minor: capture the activation selector this solve will assume, so a post-solve
-     [failed_assumptions] strips it from the core even after a later assertion clears
-     [sym_sel]. *)
-  t.sym_sel_in_core <- t.sym_sel;
   (* OXSMT_BASE_L0: add the permanent [base] forcing unit on the first solve (not at
      [create]), so a certificate trace installed on the pristine session records it as a
      genuine Input and the checker derives [base] by BCP over inputs. Added exactly once,
@@ -1815,10 +1824,10 @@ let check_sat t =
        (retracted). Under assumptions this stays sound: an [Unsat] means unsat given the
        frame + activation assumptions, and the activation clauses are equisatisfiable, so
        the query is unsat. *)
+    (* When [base_at_level0], [base] (the outermost / last frame) is forced true by a
+       permanent unit, so it is NOT assumed here; pushed frame selectors are kept. *)
+    let frame_asms = List.map Sat.pos (assumed_frames t) in
     let assumptions =
-      (* When [base_at_level0], [base] (the outermost / last frame) is forced true by a
-         permanent unit, so it is NOT assumed here; pushed frame selectors are kept. *)
-      let frame_asms = List.map Sat.pos (assumed_frames t) in
       match t.sym_sel with
       | Some sel -> Sat.pos sel :: frame_asms
       | None -> frame_asms
@@ -1871,7 +1880,261 @@ let check_sat t =
     t.last_splits <- Cdclt.splits_used t.cdclt;
     t.last_effort <- Cdclt.effort_used t.cdclt;
     t.last_verdict <- v;
+    t.last_failed_frame_assumptions <- (if v = Unsat then Some frame_asms else None);
     v)
+;;
+
+(* A prepared user assumption. [source] is returned verbatim in a core; [signed_term] is
+   used only by the independent model checker on a satisfiable probe; [lit] is the
+   persistent SAT literal actually assumed. *)
+type prepared_assumption =
+  { source : assumption
+  ; signed_term : Term.t
+  ; lit : Sat.lit
+  }
+
+let sat_lit_key lit = Sat.var_of_lit lit, Sat.sign_of_lit lit
+
+let validate_assumption (atom, _polarity) =
+  if not (Sort.equal atom.Term.sort Sort.bool)
+  then invalid_arg "Session.check_sat_assuming: assumption atom must be Bool-sorted";
+  if not (Theory_view.is_atom atom)
+  then
+    invalid_arg
+      "Session.check_sat_assuming: expected a Boolean atom, not a connective"
+;;
+
+(* Map one preprocessed Boolean literal through the same persistent atom mapping used by
+   [assert_clausified]. Preprocessing is allowed to rewrite inside the atom, but if it
+   introduces a Boolean side condition the result is no longer one assumption literal;
+   that unsupported case declines rather than silently changing its meaning. *)
+let prepare_assumption t (((source_atom, source_polarity) as source) : assumption) =
+  let signed_term =
+    if source_polarity then source_atom else Context.not_ t.ctx source_atom
+  in
+  match Preprocess.run t.pp signed_term with
+  | exception Term.Overflow ->
+    degrade t "assumption-preprocess-overflow";
+    None
+  | exception Term.Unsupported _ ->
+    degrade t "assumption-preprocess-unsupported";
+    None
+  | pterm ->
+    let literal =
+      match pterm.Term.node with
+      | Not atom when Theory_view.is_atom atom -> Some (atom, false)
+      | _ when Theory_view.is_atom pterm -> Some (pterm, true)
+      | _ -> None
+    in
+    (match literal with
+     | None ->
+       t.unknown_reason <- "assumption-preprocess-nonliteral";
+       None
+     | Some (atom, positive) ->
+       (try
+          (* This walk is needed for a Bool term buried in an applied predicate's
+             arguments. It is idempotent and keeps the propositional and EUF truth
+             channels on the same SAT variable. *)
+          register_bool_terms t atom;
+          let var =
+            if is_theory_atom atom
+            then (
+              t.has_theory <- true;
+              Cdclt.intern_atom t.cdclt atom)
+            else prop_var_of t atom
+          in
+          (* Bool constants are atoms too. Give their persistent variable its semantic
+             value at level 0; this clause is valid independently of the assumption and
+             therefore safe to retain after the call. *)
+          (match atom.Term.node with
+           | Bool_const value ->
+             Sat.add_clause t.sat [ if value then Sat.pos var else Sat.neg var ]
+           | _ -> ());
+          (match t.relevancy with
+           | None -> ()
+           | Some rel -> Relevancy.register_atom rel var);
+          let lit = if positive then Sat.pos var else Sat.neg var in
+          Some { source; signed_term; lit }
+        with
+        | Combine.Incomplete msg ->
+          degrade t ("combine-incomplete-register:" ^ san_token msg);
+          None
+        | Term.Overflow
+        | Term.Unsupported _
+        | Rational.Overflow
+        | Lia.Poisoned
+        | Lia.Unsupported _
+        | Invalid_argument _ ->
+          degrade t "assumption-register-poison";
+          None))
+;;
+
+let dedup_assumptions assumptions =
+  let seen = Hashtbl.create ((2 * List.length assumptions) + 1) in
+  List.filter
+    (fun assumption ->
+      let key = sat_lit_key assumption.lit in
+      if Hashtbl.mem seen key
+      then false
+      else (
+        Hashtbl.add seen key ();
+        true))
+    assumptions
+;;
+
+let reset_assumption_check t =
+  t.last_verdict <- Unknown;
+  t.last_failed_frame_assumptions <- None;
+  Cdclt.clear_last_conflict t.cdclt;
+  t.last_model <- None;
+  t.budget_exhausted <- false;
+  t.effort_exhausted <- false;
+  t.unknown_reason <- ""
+;;
+
+let emit_base_unit_if_needed t =
+  if t.base_at_level0 && not t.base_unit_emitted
+  then (
+    Sat.add_clause t.sat [ Sat.pos t.base_var ];
+    t.base_unit_emitted <- true)
+;;
+
+(* [commit_sat] checks the original active assertions. A user-assumption probe must also
+   check the signed literals whose SAT assignment it relied on. The temporary extension
+   is exception-safe and visible only to the independent model checker. *)
+let commit_sat_assuming t assumptions =
+  let saved_asserted = t.asserted in
+  t.asserted <- List.rev_append (List.map (fun a -> a.signed_term) assumptions) saved_asserted;
+  Fun.protect ~finally:(fun () -> t.asserted <- saved_asserted) (fun () -> commit_sat t)
+;;
+
+(* One complete, client-grade ground query for a minimization probe. Unlike [raw_solve],
+   a [Sat] result passes through model reconstruction and the independent model checker.
+   Per-probe [begin_check] gives each semantic deletion check its configured effort
+   budget; learned clauses remain shared in the incremental SAT core. *)
+let solve_prepared_assumptions t ~fixed assumptions =
+  Cdclt.clear_last_conflict t.cdclt;
+  t.last_model <- None;
+  t.budget_exhausted <- false;
+  t.effort_exhausted <- false;
+  t.unknown_reason <- "";
+  Cdclt.begin_check t.cdclt ~capture_egraph:false;
+  Manager.begin_check t.mgr;
+  let lits = List.map (fun a -> a.lit) assumptions in
+  let verdict =
+    match raw_solve t (fixed @ lits) with
+    | Sat -> commit_sat_assuming t assumptions
+    | Unsat -> Unsat
+    | Unknown -> Unknown
+  in
+  t.last_splits <- Cdclt.splits_used t.cdclt;
+  t.last_effort <- Cdclt.effort_used t.cdclt;
+  t.last_verdict <- verdict;
+  verdict
+;;
+
+let check_sat_assuming t assumptions =
+  match assumptions with
+  | [] ->
+    let verdict = check_sat t in
+    { verdict; unsat_core = (if verdict = Unsat then Some [] else None) }
+  | _ :: _ ->
+    (* Validate the entire public input before interning a negation or touching query
+       evidence, so a malformed later element cannot leave a half-started check. *)
+    List.iter validate_assumption assumptions;
+    reset_assumption_check t;
+    let signed_terms =
+      List.map
+        (fun (atom, polarity) -> if polarity then atom else Context.not_ t.ctx atom)
+        assumptions
+    in
+    if t.degraded
+    then (
+      t.unknown_reason
+      <- (if String.length t.degraded_reason = 0 then "degraded" else t.degraded_reason);
+      { verdict = Unknown; unsat_core = None })
+    else if List.exists (fun (atom, _) -> term_has_reserved atom) assumptions
+    then (
+      degrade t "reserved-symbol";
+      t.unknown_reason <- t.degraded_reason;
+      { verdict = Unknown; unsat_core = None })
+    else if t.cert_active
+    then (
+      t.unknown_reason <- "assumptions-with-certificate-trace";
+      { verdict = Unknown; unsat_core = None })
+    else if Manager.has_live_lemma t.mgr
+    then (
+      t.unknown_reason <- "assumptions-with-live-lemma";
+      { verdict = Unknown; unsat_core = None })
+    else if Bv_dispatch.is_pure_bv (signed_terms @ t.asserted)
+    then (
+      t.unknown_reason <- "assumptions-pure-bv-unsupported";
+      { verdict = Unknown; unsat_core = None })
+    else (
+      t.assumption_query_started <- true;
+      emit_base_unit_if_needed t;
+      let rec prepare acc = function
+        | [] -> Some (dedup_assumptions (List.rev acc))
+        | assumption :: rest ->
+          (match prepare_assumption t assumption with
+           | None -> None
+           | Some prepared -> prepare (prepared :: acc) rest)
+      in
+      match prepare [] assumptions with
+      | None ->
+        t.last_verdict <- Unknown;
+        if String.length t.unknown_reason = 0
+        then
+          t.unknown_reason
+          <- (if String.length t.degraded_reason = 0
+              then "assumption-internalization"
+              else t.degraded_reason);
+        { verdict = Unknown; unsat_core = None }
+      | Some prepared ->
+        (* Frame selectors are fixed hard background. The symmetry selector is
+           intentionally absent: arbitrary assumptions need not respect its chosen
+           representative. *)
+        let fixed = List.map Sat.pos (assumed_frames t) in
+        (match solve_prepared_assumptions t ~fixed prepared with
+         | Sat -> { verdict = Sat; unsat_core = None }
+         | Unknown -> { verdict = Unknown; unsat_core = None }
+         | Unsat ->
+           (* The frozen SAT core provides a cheap proof-dependent over-approximation.
+              Restore every fixed selector, then minimize only the user literals. *)
+           let failed = Hashtbl.create ((2 * List.length prepared) + 1) in
+           List.iter
+             (fun lit -> Hashtbl.replace failed (sat_lit_key lit) ())
+             (Sat.failed_assumptions t.sat);
+           let initial_core =
+             List.filter (fun a -> Hashtbl.mem failed (sat_lit_key a.lit)) prepared
+           in
+           let without target xs = List.filter (fun a -> a != target) xs in
+           let rec minimize core = function
+             | [] -> Some core
+             | assumption :: rest ->
+               let candidate = without assumption core in
+               (match solve_prepared_assumptions t ~fixed candidate with
+                | Unsat -> minimize candidate rest
+                | Sat -> minimize core rest
+                | Unknown -> None)
+           in
+           (match minimize initial_core initial_core with
+            | None -> { verdict = Unknown; unsat_core = None }
+            | Some core ->
+              (* Replay the final core even when the last deletion happened to be an
+                 Unsat probe. This makes evidence, failed assumptions, stats, and model
+                 state describe exactly the public result. *)
+              (match solve_prepared_assumptions t ~fixed core with
+               | Unsat ->
+                 { verdict = Unsat
+                 ; unsat_core = Some (List.map (fun a -> a.source) core)
+                 }
+               | Unknown -> { verdict = Unknown; unsat_core = None }
+               | Sat ->
+                 t.last_verdict <- Unknown;
+                 t.last_model <- None;
+                 t.unknown_reason <- "assumption-core-recheck-sat";
+                 { verdict = Unknown; unsat_core = None }))))
 ;;
 
 let get_model t =
@@ -1922,7 +2185,12 @@ let install_cert_trace t tr =
        invalid_arg
          "Session.install_cert_trace: must be installed before the first check_sat (the \
           OXSMT_BASE_L0 base-forcing unit is emitted there and would otherwise be \
-          untraced)"
+          untraced)";
+     if t.assumption_query_started
+     then
+       invalid_arg
+         "Session.install_cert_trace: must be installed before the first nonempty \
+          check_sat_assuming (the trace must observe every prior clause)"
    | None -> ());
   (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
      entailed-equality unit must not enter the cert as a trusted [Input]. *)
@@ -1932,15 +2200,19 @@ let install_cert_trace t tr =
 
 let cert_assumptions t = List.map Sat.pos (assumed_frames t)
 
-(* The failed-selector core, with the internal symmetry-breaking activation selector
-   filtered out (Rider 1): [sym_sel] is assumed positive during a solve, so it can appear
-   in the SAT core, but it is a private aux var and must never surface to a caller's
-   assumption core. *)
+(* The failed-selector core of the most recent ordinary [check_sat]. Intersecting with
+   its exact frame snapshot excludes the private symmetry selector and every user literal
+   from [check_sat_assuming]. [None] also gates stale SAT-core state after a pure-BV or
+   early-Unknown path, neither of which calls [Sat.solve] to clear it. *)
 let failed_assumptions t =
-  let failed = Sat.failed_assumptions t.sat in
-  match t.sym_sel_in_core with
-  | None -> failed
-  | Some sel -> List.filter (fun lit -> Sat.var_of_lit lit <> sel) failed
+  match t.last_failed_frame_assumptions with
+  | None -> []
+  | Some frames ->
+    let frame_keys = Hashtbl.create ((2 * List.length frames) + 1) in
+    List.iter (fun lit -> Hashtbl.replace frame_keys (sat_lit_key lit) ()) frames;
+    List.filter
+      (fun lit -> Hashtbl.mem frame_keys (sat_lit_key lit))
+      (Sat.failed_assumptions t.sat)
 ;;
 
 (* task #106: theory infeasibility evidence for the most recent UNSAT check_sat.

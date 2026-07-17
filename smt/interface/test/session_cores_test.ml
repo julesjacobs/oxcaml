@@ -470,6 +470,106 @@ let () =
   | Session.Sat -> fail name "q<->(x<=1), ~q, x<=0 reported Sat (unsound)"
 ;;
 
+(* =========================================================================
+   First-class assumption solving.
+
+   The Boolean instance has a deliberately NON-MINIMAL proof core. Under assumptions
+   [~c, ~a, ~b], the current SAT failed-assumption walk returns all three literals, but
+   the last four hard clauses already make [~a, ~b] inconsistent for every assignment
+   of [x,y]. Thus this test is red if [check_sat_assuming] merely relabels the raw failed
+   set and skips deletion minimization. Negative assumptions also pin polarity mapping.
+
+   The LIA instance separately proves that previously-unasserted theory atoms are
+   internalized as assumptions and that the returned core is genuinely T-unsat. In both
+   cases the core is re-solved and every one-element deletion must be Sat. A final plain
+   [check_sat] proves that assumptions did not become permanent assertions. =========== *)
+
+let assumption_equal (a, ap) (b, bp) = ap = bp && Term.equal a b
+
+let assumption_mem assumption assumptions =
+  List.exists (assumption_equal assumption) assumptions
+;;
+
+let remove_assumption target assumptions =
+  List.filter (fun assumption -> not (assumption_equal target assumption)) assumptions
+;;
+
+let expect_assumption_verdict name result want = expect_verdict name result.Session.verdict want
+
+let require_minimal_core name session result expected =
+  expect_assumption_verdict (name ^ ": unsat") result Session.Unsat;
+  match result.Session.unsat_core with
+  | None ->
+    fail (name ^ ": core") "unsat_core = None";
+    []
+  | Some core ->
+    check_true (name ^ ": expected cardinality") (List.length core = List.length expected);
+    check_true
+      (name ^ ": expected literals")
+      (List.for_all (fun assumption -> assumption_mem assumption core) expected);
+    let replay = Session.check_sat_assuming session core in
+    expect_assumption_verdict (name ^ ": core replay") replay Session.Unsat;
+    List.iter
+      (fun assumption ->
+        let residual = remove_assumption assumption core in
+        let probe = Session.check_sat_assuming session residual in
+        expect_assumption_verdict (name ^ ": deletion is sat") probe Session.Sat)
+      core;
+    core
+;;
+
+let () =
+  let name = "assuming-bool-min" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let a = bool_var s "aa" in
+  let b = bool_var s "ab" in
+  let c = bool_var s "ac" in
+  let x = bool_var s "ax" in
+  let y = bool_var s "ay" in
+  let neg t = Context.not_ ctx t in
+  let clause terms = Session.assert_term s (Context.or_ ctx terms) in
+  clause [ c; a; b ];
+  clause [ a; b; x; y ];
+  clause [ a; b; x; neg y ];
+  clause [ a; b; neg x; y ];
+  clause [ a; b; neg x; neg y ];
+  let redundant = c, false in
+  let essential_a = a, false in
+  let essential_b = b, false in
+  let result =
+    Session.check_sat_assuming s [ redundant; essential_a; essential_b ]
+  in
+  let core = require_minimal_core name s result [ essential_a; essential_b ] in
+  check_true
+    (name ^ ": raw-core redundancy removed")
+    (not (assumption_mem redundant core));
+  check_true
+    (name ^ ": user literals do not leak as frame selectors")
+    (Session.failed_assumptions s = []);
+  expect_verdict (name ^ ": assumptions do not persist") (Session.check_sat s) Session.Sat;
+  check_true
+    (name ^ ": failed frame core cleared by sat")
+    (Session.failed_assumptions s = [])
+;;
+
+let () =
+  let name = "assuming-lia-min" in
+  let s = Session.create () in
+  let x = int_var s "assume_x" in
+  let y = int_var s "assume_y" in
+  let noise = le s y (ic s 7), true in
+  let lo = le s x (ic s 0), true in
+  let hi = le s (ic s 1) x, true in
+  let result = Session.check_sat_assuming s [ noise; lo; hi ] in
+  let core = require_minimal_core name s result [ lo; hi ] in
+  check_true (name ^ ": noise removed") (not (assumption_mem noise core));
+  check_true
+    (name ^ ": user theory literals do not leak as frame selectors")
+    (Session.failed_assumptions s = []);
+  expect_verdict (name ^ ": assumptions do not persist") (Session.check_sat s) Session.Sat
+;;
+
 let () =
   if !failures > 0
   then (
