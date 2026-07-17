@@ -43,11 +43,30 @@ let solve src =
     { Engine.verdict = Engine.Unknown ("malformed: " ^ m); detail = m }
 ;;
 
+(* MBP-on solver: force the model-based-projection predecessor lever ([OXSMT_CHC_MBP]) and
+   give it a little more room, for the multi-predicate relational cases that octagon
+   generalization diverges on. *)
+let solve_mbp src =
+  match Parse.parse src with
+  | sys ->
+    let r = Pdr.solve ~mbp:true ~budget:30_000 ~max_frames:40 sys in
+    { Engine.verdict =
+        (match r.Pdr.verdict with
+         | Pdr.Safe -> Engine.Safe
+         | Pdr.Unsafe -> Engine.Unsafe
+         | Pdr.Unknown m -> Engine.Unknown m)
+    ; detail = r.Pdr.detail
+    }
+  | exception Parse.Unsupported m -> { Engine.verdict = Engine.Unknown m; detail = m }
+  | exception Parse.Malformed m ->
+    { Engine.verdict = Engine.Unknown ("malformed: " ^ m); detail = m }
+;;
+
 let failures = ref 0
 let soft = ref 0
 
-let check name expect src =
-  let r = solve src in
+let check_with solver name expect src =
+  let r = solver src in
   let v = r.Engine.verdict in
   let smt = Engine.verdict_to_smtlib v in
   let ok, tag =
@@ -70,6 +89,9 @@ let check name expect src =
    | _ -> ());
   Printf.printf "%-28s %-8s %s\n" name smt tag
 ;;
+
+let check = check_with solve
+let check_mbp = check_with solve_mbp
 
 (* ---- graded problems ---- *)
 
@@ -383,6 +405,42 @@ let () =
       (declare-fun P (Int) Bool)
       (assert (forall ((x Int)) (=> (> x 0) false)))
       (assert (forall ((y Int)) (=> (and (> y 0) (< y 0)) false)))|};
+  (* ---- model-based projection (MBP) predecessor lever ([OXSMT_CHC_MBP]) ---- *)
+  (* MBP-SAFE (must-solve with MBP, diverges without): a two-predicate chain that
+     maintains the RELATIONAL invariant [x + y = 10] — a SUM, outside the octagon
+     (difference-bound) template the default generalization uses. The safety query is a
+     DISEQUALITY ([x + y <> 10]); MBP's model-based disequality split turns it into the
+     strict half-space the model takes, and the model-based predecessor projection keeps
+     the [x + y] relation, so PDR converges to [x + y = 10]. RED: with MBP off (octagon
+     only) this runs to the frame/budget limit -> unknown (verified: [off=timeout] on the
+     CLI). *)
+  check_mbp
+    "mbp-rel-sum-safe"
+    Safe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (declare-fun Q (Int Int) Bool)
+      (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 10)) (P x y))))
+      (assert (forall ((x Int)(y Int)(a Int)(b Int))
+        (=> (and (P x y)(= a (+ x 1))(= b (- y 1))) (Q a b))))
+      (assert (forall ((x Int)(y Int)) (=> (Q x y) (P x y))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x y)(not (= (+ x y) 10))) false)))|};
+  (* MBP-UNSAFE (soundness discrimination): the SAME shape but the transition breaks the
+     relation ([y] is carried unchanged while [x] grows), so [x + y] increases and the
+     [x + y <> 10] query IS reachable. A model-based projection that over-generalized the
+     predecessor (claimed states reach the POB that do not) could mask this into a wrong
+     Safe; the independent replay firewall + a correct under-approximating MBP keep it
+     Unsafe. Agrees with z3 (unsat). *)
+  check_mbp
+    "mbp-rel-sum-unsafe"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (declare-fun Q (Int Int) Bool)
+      (assert (forall ((x Int)(y Int)) (=> (and (= x 0)(= y 10)) (P x y))))
+      (assert (forall ((x Int)(y Int)(a Int)) (=> (and (P x y)(= a (+ x 1))) (Q a y))))
+      (assert (forall ((x Int)(y Int)) (=> (Q x y) (P x y))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x y)(not (= (+ x y) 10))) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;
