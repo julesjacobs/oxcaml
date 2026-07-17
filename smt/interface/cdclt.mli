@@ -112,9 +112,10 @@ val intern_atom : t -> Term.t -> Oxsmt_solver.Sat.var
     no-op if [term] is already a theory atom or [v] already owns one. *)
 val bind_bool_var_atom : t -> Oxsmt_core.Term.t -> Oxsmt_solver.Sat.var -> unit
 
-(** Reset the split counter, the effort budget, and the stale model snapshot; call at the
-    start of each check-sat. *)
-val begin_check : t -> unit
+(** Reset the split counter, effort budget, and stale model/e-graph snapshots.
+    [capture_egraph] requests an immutable accepting-Final congruence snapshot for a live
+    universal lemma. Keep it false for QF checks to avoid copying an unused e-graph. *)
+val begin_check : t -> capture_egraph:bool -> unit
 
 (** task #106: reset the observational LIA conflict-evidence stash (see
     {!last_conflict_core}). Separate from {!begin_check} so {!Session.check_sat} can call
@@ -199,14 +200,12 @@ val on_chrono_rewind_for_test : t -> int -> unit
 val check_for_test : t -> final:bool -> Oxsmt_solver.Sat.theory_result
 val ckpt_log_length_for_test : t -> int
 
-(** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
-    L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
-    matcher reads the e-graph without mutating it (R6). It is a {b live} surface, NOT a
-    snapshot. The combined EUF+LIA, standalone datatype, and standalone array theory
-    implementations all expose their owned congruence closure through this same view.
-    snapshot: each accessor reflects the engine's current state at the moment it is
-    called, so the caller must rebuild it (call [egraph_view] again) after any state
-    change and must not cache results across a [check_sat]/push/pop. {!Session.check_sat}
-    rebuilds it per instantiation round; see {!Oxsmt_ematch.Egraph_view} for the full
-    validity window. *)
+(** [egraph_view t] is the immutable congruence snapshot captured at the most recent
+    accepting theory [Final], for the lemma tier's E-matcher. Capturing before [Sat.solve]
+    backtracks preserves the candidate assignment's equalities for congruence-dependent
+    trigger joins. The combined EUF+LIA, standalone datatype, and standalone array
+    theories all expose their owned congruence closure through this same view. Before a
+    Final snapshot exists it returns a live, non-registering engine view. {!begin_check}
+    and {!reset_for_new_query} clear any old snapshot, so no class relation can leak
+    across a later solve or registry replacement. *)
 val egraph_view : t -> Oxsmt_ematch.Egraph_view.t

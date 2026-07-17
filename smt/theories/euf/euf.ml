@@ -1273,6 +1273,12 @@ let class_members t term =
     !out
 ;;
 
+(* Every registered term in registration (e-node id) order. This is the exact finite
+   universe used to build an immutable accepting-Final snapshot for E-matching. *)
+let registered_terms t =
+  List.init (Dynarray.length t.enodes) (fun id -> (get t id).term)
+;;
+
 (* Registered terms whose sort is [sort], in registration (id) order. Non-registering: it
    only reads the [enodes] Dynarray (never [register]), like the other four query
    accessors — the E-matcher's seeding producer (ADR-0012 tranche 3, chunk 3) reads the

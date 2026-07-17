@@ -2026,6 +2026,49 @@ let test_seed_closes_inert_skolem_unsat () =
   check "seed RED: seeding disabled generates zero seed instances" (seeds_off = 0)
 ;;
 
+(* Pure-LIA atoms do not register their arithmetic closure in the congruence
+   engine, but those ground terms are still part of the accepting query universe.
+   The totality lemma's inferred Skolem trigger is ground-less; seeding i at n produces
+   [p n (skf n)], which the negated-existential lemma refutes. *)
+let test_seed_uses_pure_lia_ground_term () =
+  let text =
+    {|(set-logic AUFLIA)
+(declare-sort U 0)
+(declare-fun p (Int U) Bool)
+(declare-fun n () Int)
+(assert (<= 0 n))
+(assert (forall ((i Int)) (exists ((u U)) (p i u))))
+(assert (not (exists ((u U)) (p n u))))
+(check-sat)
+|}
+  in
+  let solve ~seed_lemmas =
+    let s = Session.create ~seed_lemmas () in
+    let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+    ignore (Loader.assert_all s parsed : bool);
+    let verdict = Session.check_sat s in
+    verdict, (Session.lemma_stats s).Session.seeds
+  in
+  let verdict_on, seeds_on = solve ~seed_lemmas:true in
+  check
+    "Final ground universe: a pure-LIA term seeds the totality refutation"
+    (match verdict_on with
+     | Session.Unsat -> true
+     | Session.Sat | Session.Unknown -> false);
+  check
+    (Printf.sprintf "Final ground universe: the inert lemma fired (seeds=%d)" seeds_on)
+    (seeds_on > 0);
+  let verdict_off, seeds_off = solve ~seed_lemmas:false in
+  check
+    "Final ground universe RED: without seeding the live lemmas saturate"
+    (match verdict_off with
+     | Session.Unknown -> true
+     | Session.Sat | Session.Unsat -> false);
+  check
+    "Final ground universe RED: disabled seeding emits no seed instances"
+    (seeds_off = 0)
+;;
+
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
    conjunct, so it must NOT be eliminated — (not (= x 5)) /\ x >= 6 is sat (x = 6). A
    flatten that descended into Not would eliminate x -> 5 and flip to unsat (5 >= 6).
@@ -2715,6 +2758,7 @@ let () =
   test_skolem_fun_negated_not_skolemized ();
   test_skolem_fun_antecedent_exists_not_skolemized ();
   test_seed_closes_inert_skolem_unsat ();
+  test_seed_uses_pure_lia_ground_term ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   test_ctx_simp_eq_subst_sat ();

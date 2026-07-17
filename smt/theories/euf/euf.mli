@@ -233,6 +233,11 @@ val equal_if_registered : 'p t -> Term.t -> Term.t -> bool
     [[term]]. Never registers. *)
 val class_members : 'p t -> Term.t -> Term.t list
 
+(** [registered_terms t] is every registered ground term in registration (e-node id)
+    order. Non-registering; used to copy an accepting-Final e-graph without retaining live
+    engine closures. *)
+val registered_terms : 'p t -> Term.t list
+
 (** [registered_terms_by_sort t sort] is the registered ground terms (App or Leaf) whose
     sort is [sort], in registration (id) order — the ground-term seed pool the E-matcher's
     seeding producer draws from (ADR-0012 tranche 3, chunk 3: budget-capped instantiation

@@ -10,19 +10,13 @@
     a singleton class matched by tag-equality only, so a stale/missing class yields either
     a valid universal instance or no instance, never a wrong refutation (§3 M3).
 
-    {b VALIDITY WINDOW (soundness-adjacent — read before caching).} A view is a {e live}
-    query surface over the engine at the instant each closure is called: it reflects the
-    engine's {b current} trail/registration state, NOT a snapshot. A caller MUST NOT
-    retain results (class members, representatives, candidate lists) across any state
-    change — another [assert]/[check_sat], a [push], or a [pop]. Between rounds the
-    session rebuilds the view from the live engine ({!Oxsmt_interface}), and the matcher
-    holds nothing across rounds — it re-queries from scratch each {!Matcher.substitutions}
-    call. This is load-bearing: instantiating from a class that a [pop] has retracted is
-    the wrong-lemma-instance path. (Registered {e terms} are grow-only across the
-    session's frame selectors, so a term can outlive the assertion that introduced it; but
-    an instance is only ever asserted guarded by its {e live} lemma's frame, and the
-    manager matches only lemmas still in the live store — so a popped lemma is never
-    instantiated.) Validity window pinned by the E-STALE-POP acceptance test. *)
+    {b VALIDITY WINDOW (soundness-adjacent — read before caching).} A concrete engine
+    view is live: each closure reflects the engine's current trail/registration state.
+    A caller must not retain its results across an engine state change. The exception is
+    a view returned by {!snapshot}: it owns immutable term/class tables from one accepting
+    Final state and remains valid after the SAT trail is backtracked. Session overwrites
+    it at every accepting ground solve and clears it before a later [check_sat], so the
+    matcher never reuses it across a later [push] or [pop]. *)
 
 open Oxsmt_core
 
@@ -48,3 +42,11 @@ type t =
     and [equal_if_registered] falls back to [Term.equal]. For tests / a session with no
     theory atoms. The matcher over this view generates no instances. *)
 val empty : t
+
+(** [snapshot view ~ground_terms] eagerly records [view]'s equality classes over the
+    deterministic [ground_terms] universe and returns an immutable view. Terms
+    unregistered in [view] remain singleton classes but stay available to
+    [ground_terms_by_sort], which lets the quantifier seed producer use ground arithmetic
+    terms that the congruence engine deliberately does not internalize. The snapshot
+    never calls [view] after construction. *)
+val snapshot : t -> ground_terms:Term.t list -> t

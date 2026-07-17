@@ -1804,7 +1804,9 @@ let check_sat t =
              @ List.map (fun (n, b) -> Const (n, VBool b)) bool_vars );
       Sat)
   else (
-    Cdclt.begin_check t.cdclt;
+    Cdclt.begin_check
+      t.cdclt
+      ~capture_egraph:(Manager.has_live_lemma t.mgr);
     Manager.begin_check t.mgr (* fresh generation budget for this check_sat (§1.4) *);
     (* F1: while a symmetry-breaking emission is active, assume its activation selector
        POSITIVE so the (selector-guarded) lex clauses constrain this solve. Once a later

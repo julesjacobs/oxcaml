@@ -471,4 +471,5 @@ let app_terms_by_symbol t sym = Euf.app_terms_by_symbol t.engine sym
 let find_class_opt t term = Euf.find_class_opt t.engine term
 let equal_if_registered t a b = Euf.equal_if_registered t.engine a b
 let class_members t term = Euf.class_members t.engine term
+let registered_terms t = Euf.registered_terms t.engine
 let registered_terms_by_sort t sort = Euf.registered_terms_by_sort t.engine sort

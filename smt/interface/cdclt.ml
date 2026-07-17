@@ -33,6 +33,7 @@
 
 open Oxsmt_core
 module Sat = Oxsmt_solver.Sat
+module Egraph_view = Oxsmt_ematch.Egraph_view
 
 module Combined =
   Oxsmt_combine.Combine.Combine (Oxsmt_combine.Uflia_router) (Oxsmt_euf.Euf_adapter)
@@ -194,6 +195,13 @@ type t =
   ; mutable splits : int (* splits emitted in the current check-sat *)
   ; budget : Budget.t (* shared effort budget (board #60): SAT ticks it, we tick Final *)
   ; mutable last_model : Model.t option (* snapshot taken at the accepting Final->Sat *)
+  ; mutable capture_egraph : bool
+      (* Set per check when a live universal lemma can consume a Final snapshot. Keeping
+         it false on QF checks avoids an otherwise pointless full e-graph copy. *)
+  ; mutable last_egraph_view : Egraph_view.t option
+      (* Immutable congruence classes and ground-term universe from the accepting Final.
+         SAT backtracks its trail before Session runs E-matching, so the live engine no
+         longer contains the equalities that made that candidate model consistent. *)
   ; mutable last_dt_model : (Term.t * Dt.ctor_tree) list option
       (* DT constructor-tree checker model, snapshotted at the accepting Final->Sat when
          the installed theory is the standalone DT theory (else [None]); read by
@@ -306,7 +314,9 @@ let reset_for_new_query t =
   t.theory <- None;
   t.level <- 0;
   t.splits <- 0;
+  t.capture_egraph <- false;
   t.last_model <- None;
+  t.last_egraph_view <- None;
   t.last_dt_model <- None;
   t.last_array_model <- None;
   (* S4.2 (dark, H2): the logged checkpoints belong to the dropped theory instance, but
@@ -556,6 +566,55 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
    both-efforts delivery (a [Lemma] is not dropped at Propagate, a [Split] is). *)
 let desugar_result_for_test = desugar_result
 
+let live_egraph_view t : Egraph_view.t =
+  match t.theory with
+  | Some (TCombined th) ->
+    let cs = Combined.congruence_state th in
+    { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)
+    ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
+    ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
+    ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
+    ; ground_terms_by_sort =
+        (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
+    }
+  | Some (TDt th) ->
+    { app_terms_by_symbol = Dt.app_terms_by_symbol th
+    ; find_class_opt = Dt.find_class_opt th
+    ; equal_if_registered = Dt.equal_if_registered th
+    ; class_members = Dt.class_members th
+    ; ground_terms_by_sort = Dt.registered_terms_by_sort th
+    }
+  | Some (TArr th) ->
+    { app_terms_by_symbol = Arr.app_terms_by_symbol th
+    ; find_class_opt = Arr.find_class_opt th
+    ; equal_if_registered = Arr.equal_if_registered th
+    ; class_members = Arr.class_members th
+    ; ground_terms_by_sort = Arr.registered_terms_by_sort th
+    }
+  | None -> Egraph_view.empty
+;;
+
+let live_registered_terms t =
+  match t.theory with
+  | Some (TCombined th) ->
+    Oxsmt_euf.Euf_adapter.registered_terms (Combined.congruence_state th)
+  | Some (TDt th) -> Dt.registered_terms th
+  | Some (TArr th) -> Arr.registered_terms th
+  | None -> []
+;;
+
+(* Capture the accepting candidate's equality classes before Sat.solve backtracks the
+   theory trail. The engine supplies its exact registration-order universe; Cdclt's
+   tag-sorted atom closure supplements it with pure-theory terms (notably LIA constants)
+   that are valid quantifier substitutions but deliberately absent from congruence
+   closure. Registered terms come first, preserving the existing candidate order;
+   [Egraph_view.snapshot] closes and deduplicates the union. *)
+let snapshot_egraph_view t =
+  let live = live_egraph_view t in
+  let ground_terms = live_registered_terms t @ subterms_sorted t in
+  Egraph_view.snapshot live ~ground_terms
+;;
+
 let check t ~final =
   match t.theory with
   | None ->
@@ -584,6 +643,8 @@ let check t ~final =
         <- (match impl with
             | TArr th -> Arr.array_model th
             | TCombined _ | TDt _ -> None);
+        t.last_egraph_view
+        <- (if t.capture_egraph then Some (snapshot_egraph_view t) else None);
         desugar_result t ~final:true r
       | r -> desugar_result t ~final:true r)
     else desugar_result t ~final:false (th_check impl Theory.Propagate)
@@ -633,6 +694,8 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; splits = 0
     ; budget
     ; last_model = None
+    ; capture_egraph = false
+    ; last_egraph_view = None
     ; last_dt_model = None
     ; last_array_model = None
     ; relevancy = None
@@ -658,10 +721,12 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
 ;;
 
 (* Reset the per-check-sat split counter, effort budget, and stale model snapshot. *)
-let begin_check t =
+let begin_check t ~capture_egraph =
   t.splits <- 0;
   Budget.reset t.budget;
+  t.capture_egraph <- capture_egraph;
   t.last_model <- None;
+  t.last_egraph_view <- None;
   t.last_dt_model <- None;
   t.last_array_model <- None
 ;;
@@ -997,39 +1062,12 @@ let dt_model t = t.last_dt_model
    branch and validated by [Array_model_check] before any [sat] is reported. *)
 let array_model t = t.last_array_model
 
-(* ADR-0012 L2/O3 (tranche 2): a read-only e-graph query view over the live congruence
-   child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the
-   concrete [Euf_adapter.t] (the combinator's own additive accessor, not a THEORY method),
-   while the standalone datatype and array theories forward to their owned Euf engines.
-   whose query functions forward to the engine's NON-REGISTERING accessors — so the
-   matcher reads the congruence closure without growing it (R6). Rebuilt per [round] by
-   [Session], since the e-graph changes as instances are asserted. *)
-let egraph_view t : Oxsmt_ematch.Egraph_view.t =
-  match t.theory with
-  | Some (TCombined th) ->
-    let cs = Combined.congruence_state th in
-    { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)
-    ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
-    ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
-    ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
-    ; ground_terms_by_sort =
-        (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
-    }
-  | Some (TDt th) ->
-    { app_terms_by_symbol = Dt.app_terms_by_symbol th
-    ; find_class_opt = Dt.find_class_opt th
-    ; equal_if_registered = Dt.equal_if_registered th
-    ; class_members = Dt.class_members th
-    ; ground_terms_by_sort = Dt.registered_terms_by_sort th
-    }
-  | Some (TArr th) ->
-    { app_terms_by_symbol = Arr.app_terms_by_symbol th
-    ; find_class_opt = Arr.find_class_opt th
-    ; equal_if_registered = Arr.equal_if_registered th
-    ; class_members = Arr.class_members th
-    ; ground_terms_by_sort = Arr.registered_terms_by_sort th
-    }
-  | None ->
-    (* No registered theory terms means there are no candidates to match. *)
-    Oxsmt_ematch.Egraph_view.empty
+(* After an accepting Final, expose its immutable congruence snapshot: Sat.solve has
+   already backtracked the live theory to level zero by the time Session asks the matcher
+   for a view. Before any accepting candidate (or after begin_check cleared it), retain
+   the live non-registering view for test-only/direct callers. *)
+let egraph_view t =
+  match t.last_egraph_view with
+  | Some snapshot -> snapshot
+  | None -> live_egraph_view t
 ;;

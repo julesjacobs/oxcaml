@@ -169,6 +169,55 @@ let u_congruence () =
     (subst_to_names sigmas = [ [ "a" ] ])
 ;;
 
+(* U-SNAPSHOT-IMMUTABLE: snapshot accessors must never retain a closure over the
+   live engine. Simulate a pop by separating a and b after capture; the snapshot keeps the
+   accepting class while the backing view changes. *)
+let u_snapshot_immutable () =
+  let sc = scaffold () in
+  let a =
+    Context.const sc.ctx (Env.declare_fun sc.env "snap-a" (Rank.create [] Sort.int))
+  in
+  let b =
+    Context.const sc.ctx (Env.declare_fun sc.env "snap-b" (Rank.create [] Sort.int))
+  in
+  let merged = ref true in
+  let root term =
+    if Term.equal term a
+    then Some 0
+    else if Term.equal term b
+    then Some (if !merged then 0 else 1)
+    else None
+  in
+  let live : Egraph_view.t =
+    { app_terms_by_symbol = (fun _ -> [])
+    ; find_class_opt = root
+    ; equal_if_registered =
+        (fun x y ->
+           match root x, root y with
+           | Some rx, Some ry -> Int.equal rx ry
+           | _ -> Term.equal x y)
+    ; class_members =
+        (fun term ->
+           if !merged && (Term.equal term a || Term.equal term b)
+           then [ a; b ]
+           else [ term ])
+    ; ground_terms_by_sort =
+        (fun sort -> if Sort.equal sort Sort.int then [ a; b ] else [])
+    }
+  in
+  let snapshot = Egraph_view.snapshot live ~ground_terms:[ a; b ] in
+  merged := false;
+  check
+    "U-SNAPSHOT-IMMUTABLE: equality survives backing-view pop"
+    (snapshot.equal_if_registered a b);
+  check
+    "U-SNAPSHOT-IMMUTABLE: class members survive backing-view pop"
+    (snapshot.class_members a = [ a; b ]);
+  check
+    "U-SNAPSHOT-IMMUTABLE: backing view really changed"
+    (not (live.equal_if_registered a b))
+;;
+
 (* U-MULTI: a conjunctive multi-trigger [{f(x), g(y)}] over f(a) and g(b) must bind BOTH
    qvars under one substitution. Discrimination: a matcher that ignores the second
    conjunct leaves y unbound -> the substitution is incomplete -> dropped -> []. *)
@@ -322,20 +371,58 @@ let e_find () =
   check "E-FIND: exactly one instance generated" (st.instances = 1)
 ;;
 
+(* E-CONGRUENCE-SNAPSHOT: matching runs after Sat.solve has backtracked its trail,
+   but it must use the equality classes of the candidate that just passed theory Final.
+   The conjunctive trigger [f(x), g(x)] joins f(a) with g(b) only modulo the asserted
+   [a=b]. Its instance f(a)=g(a), together with congruence and the ground equalities,
+   contradicts u<>v. With the old post-backtrack live view the join is absent and the
+   live lemma degrades the satisfiable ground core to unknown. Seeding is disabled so the
+   test discriminates the snapshot-based E-matching path. *)
+let e_congruence_snapshot () =
+  let s = Session.create ~seed_lemmas:false () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "snapshot-f" int_to_int in
+  let g = Session.declare_fun s "snapshot-g" int_to_int in
+  let a = Context.const ctx (Session.declare_const s "snapshot-a" Sort.int) in
+  let b = Context.const ctx (Session.declare_const s "snapshot-b" Sort.int) in
+  let u = Context.const ctx (Session.declare_const s "snapshot-u" Sort.int) in
+  let v = Context.const ctx (Session.declare_const s "snapshot-v" Sort.int) in
+  let fa = Context.app ctx f [ a ] in
+  let gb = Context.app ctx g [ b ] in
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", Sort.int ]
+       ~build:(fun qv ->
+         let x = Qvar.to_term qv.(0) in
+         let fx = Context.app ctx f [ x ] in
+         let gx = Context.app ctx g [ x ] in
+         { Session.body = Context.eq ctx fx gx; triggers = [ [ fx; gx ] ] })
+     : Session.lemma);
+  Session.assert_term s (Context.eq ctx a b);
+  Session.assert_term s (Context.eq ctx fa u);
+  Session.assert_term s (Context.eq ctx gb v);
+  Session.assert_term s (Context.not_ ctx (Context.eq ctx u v));
+  let verdict = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-CONGRUENCE-SNAPSHOT: Final equality classes close multi-trigger goal (got %s)"
+       (verdict_str verdict))
+    (verdict = Session.Unsat);
+  check
+    "E-CONGRUENCE-SNAPSHOT: matcher emitted an instance"
+    ((Session.lemma_stats s).instances > 0)
+;;
+
 (* E-NESTED: forall x. f(g(x)) > 0 with the NESTED trigger f(g(x)); ground f(g(a)) < 0.
    The matcher must recurse through the trigger's structure — root App f, then the
    argument pattern g(x) against the registered g(a) — to bind x|->a, and the instance
    f(g(a))>0 closes the goal. Discrimination: a matcher that only matches a flat top-level
    App (no recursion into arguments) never binds x -> [unknown].
 
-   (Modulo-EUF-CONGRUENCE argument matching — matching a pattern arg against a term
-   reached via an asserted equality rather than present structurally — is pinned at the
-   unit level by U-CONGRUENCE with a hand-rolled view carrying a non-trivial class. It is
-   NOT tested end-to-end here because the outer loop queries the e-graph at decision level
-   0, where the frame-selector assumptions have been backtracked away, so
-   asserted-equality merges are not reflected in the batch view. That is a sound
-   completeness scope, §3/M3; the richer in-search congruence is the deferred O2 path. See
-   logs/lemma-tranche2-log.md.) *)
+   Modulo-congruence joins are pinned at the unit level by U-CONGRUENCE and
+   end-to-end by E-CONGRUENCE-SNAPSHOT, which preserves the accepting Final classes after
+   the SAT trail is backtracked. *)
 let e_nested () =
   let s = Session.create () in
   let ctx = Session.context s in
@@ -916,6 +1003,7 @@ let () =
   ignore int_to_bool;
   u_find ();
   u_congruence ();
+  u_snapshot_immutable ();
   u_multi ();
   u_empty_trigger ();
   u_cap ();
@@ -924,6 +1012,7 @@ let () =
   u_dedup_rollback ();
   u_seed_rollback ();
   e_find ();
+  e_congruence_snapshot ();
   e_nested ();
   e_multi ();
   e_sound ();

@@ -76,4 +76,5 @@ val app_terms_by_symbol : t -> Symbol.t -> Term.t list
 val find_class_opt : t -> Term.t -> int option
 val equal_if_registered : t -> Term.t -> Term.t -> bool
 val class_members : t -> Term.t -> Term.t list
+val registered_terms : t -> Term.t list
 val registered_terms_by_sort : t -> Sort.t -> Term.t list
