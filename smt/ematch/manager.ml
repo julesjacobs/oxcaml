@@ -255,17 +255,32 @@ let round t view =
      (* [t.lemmas] is newest-first (add_lemma prepends); [List.rev] gives ascending id
         order — deterministic. Each live lemma is matched against the read-only e-graph
         view. *)
+     let ascending = List.rev t.lemmas in
+     (* Phase 1: E-matching over every live lemma. Track (a) whether ANY new instance was
+        emitted this round from the matcher, and (b) the lemmas the matcher found nothing
+        for (subs = [] — trigger-inert, the seed candidates). *)
+     let matcher_emitted = ref 0 in
+     let inert = ref [] in
      List.iter
        (fun (lemma : Lemma.t) ->
          let subs = Matcher.substitutions view lemma ~budget in
-         List.iter (fun sigma -> ignore (process lemma sigma : bool)) subs;
-         (* Chunk 3: E-matching found NOTHING for this lemma (its trigger is ground-less —
-            the inert 2b Skolem population). Seed it with existing ground terms of each
-            qvar's sort, capped [seed_cap] NEW instances per lemma per check. A lemma the
-            matcher DID fire is left to E-matching (no seed): keeps seeding scoped to the
-            population that needs it and avoids completeness-theater on the rest. *)
-         if t.seed_enabled && subs = []
-         then (
+         List.iter (fun sigma -> if process lemma sigma then incr matcher_emitted) subs;
+         if subs = [] then inert := lemma :: !inert)
+       ascending;
+     (* Phase 2 (chunk 3, MBQI-lite): seed ONLY when E-matching has GLOBALLY saturated
+        this round ([matcher_emitted = 0]) — the charter's "when E-matching saturates"
+        trigger. Seeding while the matcher is still productive (some other lemma
+        advancing) is pure churn that competes for the generation budget and, empirically,
+        degrades previously-solved files to [unknown] (the −60 UFDT regression of the
+        per-lemma variant). Gating on global saturation confines seeding to the
+        genuinely-stuck rounds: the trigger-inert lemmas get ground seeds only as a last
+        resort before the loop would otherwise degrade to [unknown]. Seeds are capped
+        [seed_cap] NEW instances per lemma per check and feed the same dedup+budget+assert
+        pipeline. *)
+     if t.seed_enabled && !matcher_emitted = 0
+     then
+       List.iter
+         (fun (lemma : Lemma.t) ->
            let emitted () =
              Option.value (Hashtbl.find_opt t.seeded lemma.Lemma.id) ~default:0
            in
@@ -282,8 +297,8 @@ let round t view =
                   view
                   lemma
                   ~pool_cap:t.pool_cap
-                  ~max_tuples:seed_enum_ceiling)))
-       (List.rev t.lemmas);
+                  ~max_tuples:seed_enum_ceiling))
+         (List.rev !inert);
      (* Drain the manual seed queue (tranche-1 scaffold). Record each popped seed BEFORE
         processing so an abort mid-drain can restore the ones this round consumed. *)
      while not (Queue.is_empty t.seeds) do

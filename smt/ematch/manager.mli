@@ -91,16 +91,18 @@ val begin_check : t -> unit
     AND drains the manual seed queue — both feed one dedup + budget pipeline (a seeded
     instance the matcher also finds dedups).
 
-    Chunk 3 (MBQI-lite): when E-matching finds NO substitution for a live lemma (its
-    triggers are ground-less — the inert Skolem-function population), [round] additionally
-    seeds that lemma with existing ground terms of each qvar's sort drawn from [view]
-    ({!Egraph_view.ground_terms_by_sort}), capped at [seed_cap] NEW instances per lemma
-    per [check_sat]. Every seed instance is a ground consequence of the (valid) lemma, so
-    this is universally sound; it feeds the same dedup + budget + assert pipeline. Returns
-    [(frame, instance)] pairs; each instance must be asserted guarded by its lemma's
-    [frame] selector (§1.4). Deterministic order (matcher output, then seed FIFO). []
-    means saturated (no NEW instance this round). On budget exhaustion the round stops
-    early and {!budget_exhausted} is set. *)
+    Chunk 3 (MBQI-lite): only when E-matching has GLOBALLY saturated this round (no live
+    lemma emitted a new instance), [round] seeds each trigger-inert lemma (matcher found
+    no substitution — the ground-less Skolem-function population) with existing ground
+    terms of each qvar's sort drawn from [view] ({!Egraph_view.ground_terms_by_sort}),
+    capped at [seed_cap] NEW instances per lemma per [check_sat]. Gating on global
+    saturation (not per-lemma emptiness) confines seeding to genuinely-stuck rounds so it
+    does not churn the budget while E-matching is still productive. Every seed instance is
+    a ground consequence of the (valid) lemma, so this is universally sound; it feeds the
+    same pipeline. Returns [(frame, instance)] pairs; each instance must be asserted
+    guarded by its lemma's [frame] selector (§1.4). Deterministic order (matcher output,
+    then seed FIFO). [] means saturated (no NEW instance this round). On budget exhaustion
+    the round stops early and {!budget_exhausted} is set. *)
 val round : t -> Egraph_view.t -> (Sat.var * Instance.t) list
 
 (** [budget_exhausted t] is [true] iff the most recent {!round} stopped on the generation
