@@ -1,0 +1,357 @@
+\documentclass{amsart}
+\usepackage{amsmath,amsthm,amssymb}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+\title{Flush Equivalence Implies Interleaved Equivalence for Stateless PIFO-Tree Schedulers}
+\author{Codex and Claude}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{The model}
+
+\begin{definition}[PIFO]
+A \emph{PIFO} is a priority queue of entries, each carrying a value, a natural-number rank, and a
+global arrival index. Its \emph{pop} removes the entry of least rank, ties broken by least arrival
+index (FIFO); within any one queue all arrival indices are distinct, so tie-breaking is unambiguous.
+\end{definition}
+
+\begin{definition}[Topology and state]
+A \emph{topology} is a finite rooted tree: a leaf, or an internal node with an ordered list of child
+topologies. A \emph{state} assigns a PIFO to every node; leaf PIFOs hold packets, internal-node PIFOs
+hold child indices.
+\end{definition}
+
+\begin{definition}[Path]
+A \emph{path} is a root-to-leaf walk with a rank at every node: at each internal node a child index to
+descend into and the rank of the reference enqueued there, and at the leaf the rank of the packet.
+\end{definition}
+
+\begin{definition}[Stateless scheduler]
+A \emph{stateless scheduler} over a finite alphabet $A$ consists of a topology together with a fixed
+path $\operatorname{assign}(t)$ for each type $t\in A$: every push of type $t$ uses the same path. It
+is \emph{valid} if every $\operatorname{assign}(t)$ fits the topology.
+\end{definition}
+
+\begin{definition}[Push and pop]
+A \emph{push} of type $t$ with arrival index $n$ walks $\operatorname{assign}(t)$ from the root,
+appending one entry to each node on the walk: a (child index, rank, $n$) reference at each internal
+node and a (packet, rank, $n$) entry at the leaf. A \emph{pop} pops the root PIFO to obtain a child
+index, recurses into that child, and continues to a leaf, which emits its popped packet's type. Pop is
+\emph{atomic}: if any queue along the way is empty it fails, emits \texttt{none}, and leaves the state
+unchanged.
+\end{definition}
+
+\begin{definition}[Operation words and runs]
+An \emph{operation} is a push of some type or a pop. Running a word of operations from the empty state
+yields the list of pop results, one per pop in order: the emitted type, or \texttt{none} when the pop
+was undefined.
+\end{definition}
+
+\begin{definition}[Flush words and the two equivalences]
+The \emph{flush word} of $w\in A^{*}$ pushes the letters of $w$ in order and then pops $|w|$ times.
+Schedulers $S,S'$ are \emph{flush-equivalent}, written $S\simeq_{\mathrm{flush}}S'$, if they produce
+identical outputs on every flush word, and \emph{interleaved-equivalent}, written
+$S\simeq_{\mathrm{inter}}S'$, if they produce identical outputs on every word of operations.
+\end{definition}
+
+\section{The theorem}
+
+\begin{theorem}
+For every finite packet alphabet and every two valid stateless schedulers $S,T$ over PIFO trees of
+arbitrary, possibly different, topologies, flush-equivalence implies interleaved-equivalence:
+\[
+S\simeq_{\mathrm{flush}}T \implies S\simeq_{\mathrm{inter}}T.
+\]
+\end{theorem}
+
+Let $A$ be a finite type set; transporting along a bijection gives the stated $A=\mathrm{Fin}(k)$
+theorem. For $B\subseteq A$, write $w|_B$ for projection. For a rank preorder $r$, let
+$\operatorname{sort}_r(w)$ be the stable sort by $(r(a),\text{arrival})$. For a partition $P$, let
+$\pi_P(w)$ replace each type by its $P$-block. The remainder of the paper proves the theorem.
+
+\section{Operational facts}
+
+At every reachable valid state and every internal-node child $c$,
+\begin{equation*}
+\#\{\text{references to }c\}
+=
+\#\{\text{packets below }c\}. \tag{1}
+\end{equation*}
+
+A valid push increments both sides; a successful pop decrements both. Hence a selected reference always points to a nonempty subtree, so the partial-failure branch of atomic \texttt{treePop} is unreachable. A pop fails exactly when the total packet count is zero. Therefore the \texttt{none}/\texttt{some} pattern depends only on the operation word.
+
+Only comparisons of arrival stamps matter. Replacing any increasing subsequence of global timestamps by $1,2,\ldots$ preserves every queue decision. Thus embedded child runs with timestamp gaps equal their standalone runs after timestamp compression.
+
+We may ghost-tag an entry by its source push. This tag is not observable and is not stored in the entry's value; erasing it commutes with every transition because queue ordering uses only rank and arrival.
+
+\begin{lemma}[Two types]
+For distinct $x,y$, every operation word over $\{x,y\}$ behaves as one stable PIFO under a single
+comparison $e(x,y)\in\{x<y,\ x=y,\ y<x\}$, and the two binary flushes recover it exactly.
+\end{lemma}
+
+\begin{proof}
+Follow the paths of $x,y$ to the first internal node where their child indices differ, or to their common leaf if they never differ. Before that decisive node, every reference has the same child value, so those nodes merely forward one anonymous service per successful pop. At the decisive node:
+\begin{itemize}
+\item if it is internal, its selected child identifies $x$ or $y$, and that child's restricted subtree is monochromatic;
+\item if it is a leaf, the queue directly emits $x$ or $y$.
+\end{itemize}
+Thus every operation word over $\{x,y\}$ behaves as one stable PIFO with the decisive comparison $e(x,y)$. The two binary flushes recover it exactly:
+\begin{equation*}
+\begin{array}{c|cc}
+e(x,y)&F(xy)&F(yx)\\ \hline
+x<y&xy&xy\\
+x=y&xy&yx\\
+y<x&yx&yx.
+\end{array} \tag{2}
+\end{equation*}
+This includes FIFO ties.
+\end{proof}
+
+\begin{lemma}[Colored PIFO]
+Let $p,q$ be two total preorders on types, colored by $\gamma$, and suppose
+\begin{equation*}
+\gamma(x)\ne\gamma(y)
+\implies
+\operatorname{cmp}_p(x,y)=\operatorname{cmp}_q(x,y), \tag{3}
+\end{equation*}
+including equality. Then queues ordered by $p,q$, receiving identical pushes and pops, emit identical
+color traces.
+\end{lemma}
+
+\begin{proof}
+Partition each color into cross-profile classes:
+\[
+x\sim y
+\iff
+\gamma(x)=\gamma(y)
+\ \land\
+\forall z\text{ of another color},\
+\operatorname{cmp}_p(x,z)=\operatorname{cmp}_p(y,z).
+\]
+These classes are common to $p,q$. Distinct classes have a common quotient preorder:
+\begin{itemize}
+\item differently colored classes are ordered identically by (3);
+\item if same-colored classes have different profiles, a witnessing outside type places one class strictly before the other in both preorders.
+\end{itemize}
+If a class ties another class, the other has a different color, and transitivity forces every member of the first class to tie every other member under both $p,q$.
+
+Maintain equal pending counts in every profile class, and identical pending occurrence sets in every class tied with another class. A pop chooses the same least quotient class. If several classes tie, FIFO chooses the same globally earliest occurrence. If the least class is an isolated monochromatic class, the queues may remove different types inside it, but emit the same color and leave equal counts. The invariant survives later pushes and pops. Empty pops agree as well.
+\end{proof}
+
+\section{Flush decompositions}
+
+For $|A|>1$, follow the unique child used by all types until reaching either the first node with at least two active children or a leaf.
+
+Nodes skipped this way are online-inert: every reference has the same child value. At a terminal leaf, replace it by a root carrying the old leaf ranks and one FIFO singleton child per type. The expanded root mirrors the old leaf queue occurrence-for-occurrence.
+
+Consequently every scheduler is online-equivalent to
+\begin{equation*}
+M=(P,r,(M_B)_{B\in P}), \tag{4}
+\end{equation*}
+where $P$ is a proper partition of $A$ into active root children and $r$ is the root preorder.
+
+Let $F_M(w)$ be the type word produced by flushing $w$. Then
+\begin{equation*}
+F_M(w)|_B=F_{M_B}(w|_B)=F_M(w|_B), \tag{5}
+\end{equation*}
+because child $B$ receives all of $w|_B$ before any service and is called exactly $|w|_B$ times. Also,
+\begin{equation*}
+\pi_P(F_M(w))
+=
+\pi_P(\operatorname{sort}_r(w)), \tag{6}
+\end{equation*}
+because the root drains its references in stable $r$-order.
+
+Call $(P,r)$ a \emph{decomposition} of $F$ when (5)--(6) hold.
+
+\section{The meet lemma}
+
+\begin{lemma}[Meet]
+\begin{equation*}
+(P,r)\text{ and }(Q,s)\text{ decompose }F
+\Longrightarrow
+(P\wedge Q,t)\text{ decomposes }F
+\tag{7}
+\end{equation*}
+for some total preorder $t$.
+\end{lemma}
+
+\begin{proof}
+Let
+\[
+R=P\wedge Q
+=\{B\cap C\ne\varnothing:B\in P,\ C\in Q\}.
+\]
+
+\smallskip\noindent\textit{Cell autonomy.} For $D=B\cap C$,
+\begin{equation*}
+\begin{aligned}
+F(w)|_D
+&=(F(w)|_B)|_C\\
+&=F(w|_B)|_C\\
+&=F((w|_B)|_C)\\
+&=F(w|_D).
+\end{aligned} \tag{8}
+\end{equation*}
+Thus every meet cell is autonomous.
+
+\smallskip\noindent\textit{Cross-cell comparisons.} For types in distinct $R$-cells, prescribe the binary effective comparison $e(x,y)$ from (2). If $P$ separates $x,y$, then their pair restriction is selected at the $P$-root, so
+\begin{equation*}
+e(x,y)=\operatorname{cmp}_r(x,y). \tag{9}
+\end{equation*}
+Likewise, if $Q$ separates them,
+\begin{equation*}
+e(x,y)=\operatorname{cmp}_s(x,y). \tag{10}
+\end{equation*}
+Hence the prescriptions agree whenever both partitions separate the pair.
+
+\smallskip\noindent\textit{The three-cell diamond.} Take one type from each of three distinct cells, viewed as points in the $P\times Q$ incidence grid.
+\begin{itemize}
+\item If their $P$-coordinates are distinct, all comparisons come from $r$.
+\item If their $Q$-coordinates are distinct, all come from $s$.
+\item Otherwise the three points form an L. After naming its common corner $x$, the restricted transformer has both decompositions
+\begin{equation*}
+\{x,y\}\mid\{z\},
+\qquad
+\{x,z\}\mid\{y\}. \tag{11}
+\end{equation*}
+\end{itemize}
+We prove that $e$ on this triple is a total preorder. Otherwise its non-strict relation is not transitive, so there are distinct $a,b,c$ with
+\[
+a\le_e b,\qquad b\le_e c,\qquad c<_e a.
+\]
+Push them in the single arrival order $\sigma=abc$. This orients any tie on $a,b$ or $b,c$ forward, producing a stable precedence cycle. Rotate its names around the common corner so that
+\begin{equation*}
+x\prec_\sigma y\prec_\sigma z\prec_\sigma x. \tag{12}
+\end{equation*}
+Crucially, $\sigma$ is retained; it need not be the word $xyz$.
+
+For the first decomposition in (11), the outer occurrence order is $y,z,x$, giving slots
+\[
+\{x,y\},z,\{x,y\}.
+\]
+The inner pair outputs $x,y$, so the flush output is
+\[
+x,z,y.
+\]
+For the second decomposition, the outer order is $x,y,z$, giving slots
+\[
+\{x,z\},y,\{x,z\}.
+\]
+Its inner pair outputs $z,x$, so the result is
+\[
+z,y,x.
+\]
+This contradicts the fact that both are decompositions of the same $F$. Thus every three-cell restriction is a total preorder.
+
+\smallskip\noindent\textit{Global extension.} Build a directed constraint graph on types:
+\begin{itemize}
+\item $x<_e y$ contributes a marked edge $x\to y$;
+\item $x=_e y$ contributes unmarked edges both ways.
+\end{itemize}
+These comparisons extend to a total preorder exactly when there is no directed cycle containing a marked edge. Indeed, if no such cycle exists, no marked edge lies inside a strongly connected component. Collapse SCCs, linearly extend the resulting DAG, and assign successive natural ranks; ties lie inside SCCs and strict comparisons go between them.
+
+Suppose a shortest marked closed walk existed. It may be taken simple. If vertices two steps apart belonged to distinct cells, the total preorder on those three cells would provide a shortcut, marked whenever either replaced edge was marked. This would give a shorter marked closed walk.
+
+Therefore every second vertex lies in the same cell. An odd cycle is then impossible, and an even cycle alternates between two cells. But all comparisons between two fixed cells come from one genuine preorder:
+\begin{itemize}
+\item from $r$ if their $P$-blocks differ;
+\item otherwise from $s$, since their $Q$-blocks differ.
+\end{itemize}
+No genuine preorder contains such a cycle. Hence the required total preorder $t$ exists and is realizable by natural ranks. Moreover,
+\begin{equation*}
+t=r\quad\text{across distinct $P$-blocks},\qquad
+t=s\quad\text{across distinct $Q$-blocks}. \tag{13}
+\end{equation*}
+
+\smallskip\noindent\textit{The meet-cell control word.} By colored congruence, with colors $P$,
+\begin{equation*}
+\pi_P(F(w))
+=\pi_P(\operatorname{sort}_r(w))
+=\pi_P(\operatorname{sort}_t(w)). \tag{14}
+\end{equation*}
+Fix $B\in P$. Inside $B$, its $R$-cells are its intersections with $Q$-blocks. Therefore
+\begin{equation*}
+\begin{aligned}
+\pi_Q(F(w)|_B)
+&=\pi_Q(F(w|_B))\\
+&=\pi_Q(\operatorname{sort}_s(w|_B))\\
+&=\pi_Q(\operatorname{sort}_t(w|_B))\\
+&=\pi_Q(\operatorname{sort}_t(w)|_B).
+\end{aligned} \tag{15}
+\end{equation*}
+The middle equality is colored congruence using (13). The last is stable-sort projection: deleting occurrences outside $B$ changes no retained pairwise order; compressing timestamps is strictly increasing.
+
+The global $P$-word together with every per-$B$ $Q$-subword uniquely determines the $R$-word. Scanning the $P$-word, at each $B$-position take the next $Q$-symbol for that $B$. Thus
+\begin{equation*}
+\pi_R(F(w))
+=
+\pi_R(\operatorname{sort}_t(w)). \tag{16}
+\end{equation*}
+
+Equations (8) and (16) prove the meet lemma. Equivalently, $F$ can be realized by a $t$-root routing to the $R$-cells, with child transformer $F|_D$ in cell $D$. A word is uniquely reconstructed from its cell skeleton and its subsequence in every cell.
+\end{proof}
+
+\section{Proof of the theorem}
+
+\begin{proof}
+We prove the theorem simultaneously for all finite alphabets, by strong induction on $|A|$.
+
+For $|A|=0$, every operation is a failed pop. For $|A|=1$, each successful pop emits the sole type, and success is determined by the packet count.
+
+Let $|A|>1$, and normalize two flush-equivalent schedulers $S,T$ as above. Let their proper top decompositions be
+\[
+(P,r,(S_B)),\qquad (Q,s,(T_C)),
+\]
+with common flush transformer $F$.
+
+Apply the meet lemma, obtaining $R=P\wedge Q$ and $t$. For each $D\in R$, choose a valid scheduler $U_D$ realizing $F|_D$, for example the restriction $S|D$. Let $U$ be the scheduler with a $t$-root routing directly to the $U_D$. By (8) and (16),
+\begin{equation*}
+F_U=F. \tag{17}
+\end{equation*}
+
+\smallskip\noindent\textit{Transforming $S$ into $U$.} For $B\in P$, let $V_B$ be a $t|_B$-root routing to the cells $D\subseteq B$, with children $U_D$. Then
+\begin{equation*}
+F_{S_B}=F|_B=F_{V_B}. \tag{18}
+\end{equation*}
+Since $B\subsetneq A$, the induction hypothesis gives
+\begin{equation*}
+S_B\simeq_{\mathrm{inter}}V_B. \tag{19}
+\end{equation*}
+Substitute every $V_B$ for $S_B$. This preserves the whole scheduler online: the root's reference queue is unaffected, and child $B$ receives the same driven word---its projected pushes and one anonymous pop for every $B$-token. Sparse timestamps compress monotonically, so (19) applies.
+
+The resulting scheduler has two selector levels:
+\begin{itemize}
+\item an outer $r$-selector routing to $P$;
+\item an inner $t$-selector routing to $R$.
+\end{itemize}
+Replace the outer $r$ by $t$. By (13) and colored congruence, the entire online $P$-token trace is unchanged. The children therefore receive identical driven words.
+
+Now both selector levels use exactly $t$. They collapse occurrence-for-occurrence. More precisely, maintain a pending set $\Omega$ of history-tagged pushes such that:
+\begin{itemize}
+\item the two-level outer queue is $\Omega$, labeled by $P$-block;
+\item $U$'s root queue is $\Omega$, labeled by $R$-cell;
+\item the inner queue for $B$ is $\Omega|_B$, labeled by $R$-cell;
+\item corresponding $U_D$ states are identical.
+\end{itemize}
+All selector keys are the same $(t,\text{arrival})$. If the outer queue selects $o\in B$, then $o$ is also the minimum of $\Omega|_B$, so the inner queue selects the same occurrence, including FIFO ties. Both schedulers then call the same $U_D$ state. A successful lower pop deletes $o$ from all corresponding selectors; an atomic lower failure rolls both sides back identically.
+
+Thus the two levels collapse exactly to $U$, and
+\begin{equation*}
+S\simeq_{\mathrm{inter}}U. \tag{20}
+\end{equation*}
+The symmetric argument, using $Q,s$, gives
+\begin{equation*}
+T\simeq_{\mathrm{inter}}U. \tag{21}
+\end{equation*}
+Therefore $S\simeq_{\mathrm{inter}}T$. Restoring the universally identical \texttt{none} positions proves equality of the exact \texttt{run} outputs on every operation word.
+\end{proof}
+
+\end{document}
