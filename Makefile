@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -638,6 +638,13 @@ cdclt-lemma-test:
 session-cores-test:
 	$(DUNE) exec smt/interface/test/session_cores_test.exe
 
+## chrono-incr-undo-test — ADR-0014 S4.2 chrono incremental-undo DRIVER REDs (H1 zero-removal
+##   wipe, H2 cross-query index skew): reproduce the two TCB land blockers against the REAL
+##   cdclt driver + Combined theory via the Cdclt test re-exports. Arms
+##   OXSMT_CHRONO / OXSMT_CHRONO_INCR_UNDO in-process. Nonzero exit on any failed check.
+chrono-incr-undo-test:
+	$(DUNE) exec smt/interface/test/chrono_incr_undo_test.exe
+
 ## bv-blast-test — smt/bitblast QF_BV bit-blaster adversarial self-test (stdlib-only,
 ##   deterministic). Exhaustive small-width oracle (widths 3-4, every operator, ALL input
 ##   assignments) comparing each Tseitin circuit against an INDEPENDENT value-arithmetic
@@ -809,6 +816,7 @@ test: check-frozen
 	$(MAKE) cut-budget-test
 	$(MAKE) cdclt-lemma-test
 	$(MAKE) session-cores-test
+	$(MAKE) chrono-incr-undo-test
 	$(MAKE) bigint-test
 	$(MAKE) euf-test
 	$(MAKE) euf-adapter-test

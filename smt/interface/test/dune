@@ -19,3 +19,14 @@
  (name session_cores_test)
  (modules session_cores_test)
  (libraries oxsmt_core oxsmt_lia oxsmt_interface))
+
+; ADR-0014 S4.2 chrono incremental-undo driver REDs (H1 zero-removal wipe, H2 cross-query
+; index skew) — reproduce the two TCB land blockers against the REAL cdclt driver + Combined
+; theory via the Cdclt test re-exports. Arms OXSMT_CHRONO / OXSMT_CHRONO_INCR_UNDO in-process
+; (Unix.putenv), so it needs [unix] (test-only, I3 firewall). Run via
+; `make chrono-incr-undo-test`; also built by `make build`.
+
+(executable
+ (name chrono_incr_undo_test)
+ (modules chrono_incr_undo_test)
+ (libraries oxsmt_core oxsmt_solver oxsmt_interface unix))

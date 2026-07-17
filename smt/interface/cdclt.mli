@@ -184,6 +184,21 @@ val desugar_result_for_test
   -> Theory.check_result
   -> Oxsmt_solver.Sat.theory_result
 
+(** Test-only re-exports of the seam callbacks the SAT core drives internally, exposed for
+    the S4.2 chrono incremental-undo REDs (H1 zero-removal wipe / H2 cross-query index
+    skew): they reproduce the exact driver behaviour against a REAL Combined theory
+    without staging a full chrono solve. [on_assign_for_test] /
+    [on_chrono_rewind_for_test] are the very closures {!create} installs; [check_for_test]
+    runs the theory check; and [ckpt_log_length_for_test] reads the driver's
+    absolute-trail-indexed checkpoint log so a test can assert the index-alignment
+    invariant directly. Not part of the shipping contract; only exercised under
+    [OXSMT_CHRONO_INCR_UNDO]+[OXSMT_CHRONO]. *)
+val on_assign_for_test : t -> Oxsmt_solver.Sat.lit -> level:int -> unit
+
+val on_chrono_rewind_for_test : t -> int -> unit
+val check_for_test : t -> final:bool -> Oxsmt_solver.Sat.theory_result
+val ckpt_log_length_for_test : t -> int
+
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
     matcher reads the e-graph without mutating it (R6). It is a {b live} surface, NOT a

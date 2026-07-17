@@ -153,8 +153,8 @@ module Vartbl = Hashtbl.Make (struct
 (* ADR-0014 Stage 4.2 DARK flag: earliest-removed incremental theory undo under
    chronological backtracking. OFF (default, unset) => the driver installs
    [on_chrono_rewind = None] and the SAT core takes its byte-identical full-rebuild chrono
-   arm; the [ckpt_log]/[base_ckpt] machinery below is never touched (and [on_assign] keeps
-   its exact pre-S4.2 [sync_level] behaviour). Requires BOTH this flag AND [OXSMT_CHRONO]:
+   arm; the [ckpt_log] machinery below is never touched (and [on_assign] keeps its exact
+   pre-S4.2 [sync_level] behaviour). Requires BOTH this flag AND [OXSMT_CHRONO]:
    incremental undo is meaningless without chrono, and only the chrono scattered-removal
    arm ever invokes the hook (the monotone arm always uses [on_backtrack ~level]). Same
    on-value vocabulary as the SAT core's [OXSMT_CHRONO]. *)
@@ -211,17 +211,24 @@ type t =
          [None] arm is behaviourally inert — the theory glue is byte-identical with
          relevancy off. *)
   ; ckpt_log : Combined.checkpoint option Dynarray.t
-      (* ADR-0014 S4.2 (dark, [incr_undo] only): one Combined sub-frame checkpoint per
-         [on_assign], in trail-stream order — [ckpt_log.(i)] is the theory watermark just
-         BEFORE trail literal [i] was asserted, so [rewind i] restores it and undoes
-         literals [i..]. The seam contract fires exactly one [on_assign] per trail
-         placement, so stream index == trail index. [None] entry = an [on_assign] with no
-         [Combined] theory. Grows with the trail; truncated to [w] on a chrono rewind;
-         empty and unused when the flag is off. *)
-  ; mutable base_ckpt : Combined.checkpoint option
-  (* ADR-0014 S4.2 (dark): the Combined checkpoint captured at theory creation
-     ([ensure_theory]), before ANY assertion — the [rewind 0] target when the earliest-
-     removed prefix has no logged checkpoint. [None] until a Combined theory exists. *)
+  (* ADR-0014 S4.2 (dark, [incr_undo] only): one Combined sub-frame checkpoint per
+     [on_assign], keyed by ABSOLUTE SAT-trail index — [ckpt_log.(i)] is the theory
+     watermark just BEFORE trail literal [i] was asserted, so [rewind i] restores it and
+     undoes literals [i..]. The seam fires exactly one [on_assign] per trail placement, so
+     [Dynarray.length ckpt_log] tracks the SAT trail length exactly and the core's
+     absolute rewind index [w] indexes this vector directly.
+
+     INVARIANT (index alignment): the log is kept the SAME length as the SAT trail at
+     every quiescent point — grown one entry per [on_assign], truncated to [w] on a chrono
+     rewind (the survivors [w..] re-appended by the core's replay), and (crucially)
+     NEITHER cleared NOR shrunk across a query boundary, because the SAT core RETAINS its
+     level-0 trail prefix across [check_sat]s. {!reset_for_new_query} therefore
+     invalidates each retained entry to [None] (a fail-closed spacer — level-0 literals
+     are never removed, so it is never a legitimate rewind target) but PRESERVES the entry
+     count, so a query-2 [on_assign] lands at its true absolute trail index (H2). A [None]
+     entry is any [on_assign] made with no live [Combined] theory (a pure-Boolean prefix
+     or a retained cross-query spacer); {!on_chrono_rewind} fails closed if the core ever
+     names one as a target. Empty and unused when the flag is off. *)
   }
 
 let sign_lit = Sat.sign_of_lit
@@ -302,9 +309,17 @@ let reset_for_new_query t =
   t.last_model <- None;
   t.last_dt_model <- None;
   t.last_array_model <- None;
-  (* S4.2 (dark): the checkpoint log/base belong to the dropped theory instance. *)
-  Dynarray.clear t.ckpt_log;
-  t.base_ckpt <- None
+  (* S4.2 (dark, H2): the logged checkpoints belong to the dropped theory instance, but
+     the SAT core RETAINS its level-0 trail prefix across the query boundary, so the log
+     must stay index-aligned with that retained prefix. Invalidate every retained entry to
+     a fail-closed [None] spacer (never a legitimate rewind target — level-0 literals are
+     never removed by [cancel_until]) while PRESERVING the entry count, so the next
+     query's [on_assign] appends at its true absolute trail index. Clearing the log here
+     would shift every subsequent absolute index by the retained-prefix length and
+     mis-target rewinds. *)
+  for i = 0 to Dynarray.length t.ckpt_log - 1 do
+    Dynarray.set t.ckpt_log i None
+  done
 ;;
 
 let ensure_theory t =
@@ -319,15 +334,6 @@ let ensure_theory t =
       else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;
-    (* S4.2 (dark): capture the before-any-assertion Combined watermark, the [rewind 0]
-       target. Only the Combined stack carries the sub-frame trail incr_undo needs; a
-       standalone DT/array theory leaves [base_ckpt = None] and the rewind arm fails loud
-       (see {!on_chrono_rewind}) rather than mis-undoing. *)
-    if Lazy.force incr_undo
-    then (
-      match impl with
-      | TCombined th -> t.base_ckpt <- Some (Combined.checkpoint th)
-      | TDt _ | TArr _ -> ());
     impl
 ;;
 
@@ -462,27 +468,41 @@ let on_backtrack t ~level =
    [on_assign] (each re-logs its checkpoint into the truncated [ckpt_log]). OBS-EQ to the
    pop-to-base + replay-all rebuild arm.
 
+   [w] indexes [ckpt_log] ABSOLUTELY ([ckpt_log] length tracks the trail length; see the
+   field's index-alignment invariant). Three cases, by design (H1):
+   - [w >= length]: nothing at trail index [>= w] was removed — the log points at or past
+     its end, so the current theory state ALREADY reflects exactly the retained prefix.
+     NO-OP. This is the zero-removal chrono [cancel_until] ([w = trail_n], reachable when
+     an already-true assumption opens a dummy decision level with no trail literal): keep
+     everything, replay nothing. It must NEVER wipe live theory state.
+   - [w < length] with [ckpt_log.(w) = Some c]: the normal case — rewind to [c], then drop
+     the log suffix (the core replays [w..]).
+   - [w < length] with [ckpt_log.(w) = None]: the stream==trail invariant is broken (in
+     the Combined arm every [on_assign] logs a [Some]; a [None] here would be a retained
+     cross-query spacer, never a legitimate rewind target). Fail CLOSED (raise -> the I8
+     firewall -> unknown) rather than fall back to a state-wiping default.
+
    Fails loud on a standalone DT/array theory: incremental undo is only sound over the
-   Combined stack's sub-frame trail, and [base_ckpt] was not captured for those (a silent
-   no-undo would be a soundness break, so we raise rather than degrade). *)
+   Combined stack's sub-frame trail (a silent no-undo would be a soundness break, so we
+   raise rather than degrade). *)
 let on_chrono_rewind t w =
-  match t.theory with
-  | None -> ()
-  | Some (TDt _ | TArr _) ->
-    failwith "cdclt.on_chrono_rewind: OXSMT_CHRONO_INCR_UNDO requires the Combined theory"
-  | Some (TCombined th) ->
-    let logged =
-      if w < Dynarray.length t.ckpt_log then Dynarray.get t.ckpt_log w else None
-    in
-    let target =
-      match logged, t.base_ckpt with
-      | Some c, _ -> c
-      | None, Some c -> c (* w = 0 (or an unlogged prefix): rewind to before-any-assert *)
-      | None, None -> Combined.checkpoint th (* no theory activity yet: current == base *)
-    in
-    Combined.rewind_to_checkpoint th target;
-    (* Drop the log suffix; the core's replay loop re-appends checkpoints for [w..]. *)
-    if w < Dynarray.length t.ckpt_log then Dynarray.truncate t.ckpt_log w
+  (match t.theory with
+   | None -> () (* pure-Boolean: no theory to rewind (the log is still truncated below) *)
+   | Some (TDt _ | TArr _) ->
+     failwith
+       "cdclt.on_chrono_rewind: OXSMT_CHRONO_INCR_UNDO requires the Combined theory"
+   | Some (TCombined th) ->
+     if w < Dynarray.length t.ckpt_log
+     then (
+       match Dynarray.get t.ckpt_log w with
+       | Some target -> Combined.rewind_to_checkpoint th target
+       | None ->
+         failwith
+           "cdclt.on_chrono_rewind: unlogged prefix at retained trail index \
+            (stream/trail desync)"));
+  (* Keep [ckpt_log] trail-aligned: drop the suffix the core's replay re-appends. A no-op
+     when [w >= length] (the zero-removal NO-OP case above — nothing to drop). *)
+  if w < Dynarray.length t.ckpt_log then Dynarray.truncate t.ckpt_log w
 ;;
 
 (* Clausify one disjunct of a theory [Split] into a signed SAT literal (CONTRACT-SPLIT). A
@@ -576,6 +596,18 @@ let explain t l =
   List.map (satlit_of_lit t) e.Explanation.premises
 ;;
 
+(* Test-only re-exports of the seam callbacks the SAT core drives internally, so the S4.2
+   incremental-undo REDs (H1 zero-removal wipe, H2 cross-query index skew) can reproduce
+   the exact driver behaviour against a REAL Combined theory without staging a full chrono
+   solve — same discipline as {!desugar_result_for_test} (no re-implemented copy).
+   [on_assign] and [on_chrono_rewind] are the very closures installed in {!create};
+   [ckpt_log_length] reads the driver's trail-shadow so a test can assert the
+   index-alignment invariant directly. *)
+let on_assign_for_test = on_assign
+let on_chrono_rewind_for_test = on_chrono_rewind
+let check_for_test = check
+let ckpt_log_length_for_test t = Dynarray.length t.ckpt_log
+
 (* Install the seam callbacks into a pristine [sat] (no clauses, empty trail — the seam's
    set_theory contract). Must be called before any clause is added. The theory itself is
    created lazily at the first [intern] (see {!ensure_theory}) from the datatype
@@ -605,7 +637,6 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; last_array_model = None
     ; relevancy = None
     ; ckpt_log = Dynarray.create ()
-    ; base_ckpt = None
     }
   in
   Sat.set_theory
