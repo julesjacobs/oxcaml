@@ -77,18 +77,27 @@ type exists_src =
       subset (e.g. a nested [forall]); the driver drops it with the sat-degrade sentinel. *)
   }
 
+(** A binder-keyed Skolem minter for the pipeline: [skolem ~key ~cod ~args] mints (or
+    REUSES, memoized by [~key] = the eliminated existential's binder id) a Skolem function
+    of the [args] sorts applied to [args] (0-ary => a witness constant). Keying by binder
+    id is load-bearing: one existential referenced by several clauses must share ONE
+    symbol — otherwise a split [exists x. (p x /\ q x)] gets two witnesses, weakening the
+    assertion (a wrong [sat]). Distinct from {!skolemizer} (the OFF seam, deliberately
+    fresh-per-call). *)
+type keyed_skolemizer =
+  key:int -> cod:Oxsmt_core.Sort.t -> args:Oxsmt_core.Term.t list -> Oxsmt_core.Term.t
+
 (** A lowered clause from the front-end quantified pipeline (dark:
     [OXSMT_QUANT_PIPELINE]). [cl_qvars] are the universal binders ([] = a GROUND clause,
     lowered via a plain assert, not a live lemma); [cl_build ~skolem qvar_images] is
-    [(body, triggers)] over the qvar images. It reuses the {!skolemizer} seam: an
-    existential binder dominated by universals [U] becomes
-    [skolem ~cod ~args:(images of U)] (0-ary => a fresh witness constant). May raise
-    {!Malformed}/{!Unsupported} (or the {!Oxsmt_core.Term} equivalents) when a leaf is
-    outside the fragment — the loader drops that clause and arms the sat-degrade sentinel. *)
+    [(body, triggers)] over the qvar images, minting Skolem symbols through the
+    {!keyed_skolemizer} seam. May raise {!Malformed}/{!Unsupported} (or the
+    {!Oxsmt_core.Term} equivalents) when a leaf is outside the fragment — the loader drops
+    that clause and arms the sat-degrade sentinel. *)
 type clause =
   { cl_qvars : (string * Oxsmt_core.Sort.t) list
   ; cl_build :
-      skolem:skolemizer
+      skolem:keyed_skolemizer
       -> Oxsmt_core.Term.t array
       -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
   ; cl_source : Sexp.t

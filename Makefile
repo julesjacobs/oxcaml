@@ -755,7 +755,7 @@ fol-test:
 quant-pipeline-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	@cli=_build/default/tests/solver/oxsmt_cli.exe; fail=0; \
-	  for f in quant_pipeline_rodin_unsat quant_pipeline_ufdt_iff_unsat quant_pipeline_polarity_honeypot_unsat; do \
+	  for f in quant_pipeline_rodin_unsat quant_pipeline_ufdt_iff_unsat quant_pipeline_polarity_honeypot_unsat quant_pipeline_shared_exists_unsat; do \
 	    off=$$($$cli tests/cases/$$f.smt2 2>/dev/null); \
 	    on=$$(OXSMT_QUANT_PIPELINE=1 $$cli tests/cases/$$f.smt2 2>/dev/null); \
 	    case "$$off" in *"verdict unknown"*) : ;; *) \
@@ -769,6 +769,11 @@ quant-pipeline-test:
 	      echo "quant-pipeline-test: FAIL polarity honeypot $$hp flipped to SAT under pipeline (unsound): [$$on]"; fail=1;; *) \
 	      echo "quant-pipeline-test: OK polarity honeypot $$hp sound under pipeline (not sat)";; esac; \
 	  done; \
+	  ls=tests/cases/quant_pipeline_let_shadow_sat.smt2; \
+	  on=$$(OXSMT_QUANT_PIPELINE=1 $$cli $$ls 2>/dev/null); \
+	  case "$$on" in *"verdict unsat"*) \
+	    echo "quant-pipeline-test: FAIL let-shadow honeypot flipped to UNSAT under pipeline (unsound; z3=sat): [$$on]"; fail=1;; *) \
+	    echo "quant-pipeline-test: OK let-shadow honeypot sound under pipeline (not unsat)";; esac; \
 	  test $$fail -eq 0
 
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).

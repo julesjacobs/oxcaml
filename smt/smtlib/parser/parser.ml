@@ -92,16 +92,24 @@ type exists_src =
      subset (e.g. a nested [forall]); the driver drops it with the sat-degrade sentinel. *)
   }
 
+(* A binder-keyed Skolem minter for the pipeline: [skolem ~key ~cod ~args] mints (or
+   REUSES, memoized by [~key] = the eliminated existential's binder id) a Skolem function
+   of the [args] sorts applied to [args] (0-ary => a witness constant). Keying by binder
+   id is load-bearing: one existential referenced by several clauses must share ONE symbol
+   (a split [exists x. (p x /\ q x)] otherwise gets two witnesses -> wrong sat). Distinct
+   from {!skolemizer} (the OFF chunk-2b seam, deliberately fresh-per-call). *)
+type keyed_skolemizer = key:int -> cod:Sort.t -> args:Term.t list -> Term.t
+
 (* A lowered clause from the front-end quantified pipeline (dark: [OXSMT_QUANT_PIPELINE]).
    [cl_qvars] are the universal binders ([] = a GROUND clause, lowered via a plain assert,
-   not a live lemma); [cl_build ~skolem qvar_images] is [(body, triggers)]. It reuses the
-   existing {!skolemizer} seam: an existential binder dominated by universals [U] becomes
-   [skolem ~cod ~args:(images of U)] (0-ary => a fresh witness constant). May raise
+   not a live lemma); [cl_build ~skolem qvar_images] is [(body, triggers)]. Skolem symbols
+   come from the {!keyed_skolemizer} seam (memoized by binder id, so a split existential
+   shares one witness). May raise
    {!Malformed}/{!Unsupported}/{!Term.Unsupported}/{!Term.Overflow} when a leaf is outside
    the fragment — the loader drops that clause and arms the sentinel. *)
 type clause =
   { cl_qvars : (string * Sort.t) list
-  ; cl_build : skolem:skolemizer -> Term.t array -> Term.t * Term.t list list
+  ; cl_build : skolem:keyed_skolemizer -> Term.t array -> Term.t * Term.t list list
   ; cl_source : Sexp.t
       (* the source assertion body this clause was clausified from — the provenance root
          for an audit dump / certificate replay (ADR-0013 seam). *)
@@ -1301,8 +1309,11 @@ let qleaf_refs q = q.q_refs
 (* Is [s] PROVABLY Bool-sorted? Conservative — [false] on any uncertainty. A false
    NEGATIVE only costs coverage (the [=]/[distinct]/[ite] becomes a leaf, and a quantifier
    buried in it then drops soundly); a false POSITIVE would structurally decompose a
-   theory operator, which is unsound, so we never guess Bool. *)
-let rec definitely_bool st ~qscope (s : Sexp.t) : bool =
+   theory operator, which is unsound, so we never guess Bool. [lets] is the in-scope
+   [let]-binding environment (name -> is-the-bound-value-provably-Bool); a [let]-bound
+   name SHADOWS a same-named global, so a shadowed non-Bool value (e.g.
+   [(let ((p 0)) ...)] with a global [p : Bool]) is correctly NOT provably Bool. *)
+let rec definitely_bool st ~qscope ~lets (s : Sexp.t) : bool =
   let cod_is_bool name =
     match Hashtbl.find_opt st.funs name with
     | Some { sym; _ } ->
@@ -1314,30 +1325,53 @@ let rec definitely_bool st ~qscope (s : Sexp.t) : bool =
        | Some d -> Sort.equal d.ret Sort.bool
        | None -> false)
   in
+  (* name resolution: an inner [let] binding shadows a quantifier binder shadows a global. *)
+  let name_is_bool name =
+    match List.assoc_opt name lets with
+    | Some b -> b
+    | None ->
+      (match List.assoc_opt name qscope with
+       | Some (b : Fol.binder) -> Sort.equal b.Fol.sort Sort.bool
+       | None -> cod_is_bool name)
+  in
   match s with
   | Sexp.Atom (Tok.Symbol { text = "true" | "false"; quoted = false }) -> true
-  | Sexp.Atom (Tok.Symbol { text; _ }) ->
-    (match List.assoc_opt text qscope with
-     | Some (b : Fol.binder) -> Sort.equal b.Fol.sort Sort.bool
-     | None -> cod_is_bool text)
+  | Sexp.Atom (Tok.Symbol { text; _ }) -> name_is_bool text
   | Sexp.Atom _ -> false
   | Sexp.List (Sexp.Atom (Tok.Reserved ("forall" | "exists")) :: _) -> true
   | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: _) ->
-    definitely_bool st ~qscope body
-  | Sexp.List [ Sexp.Atom (Tok.Reserved "let"); _; body ] ->
-    definitely_bool st ~qscope body
+    definitely_bool st ~qscope ~lets body
+  | Sexp.List [ Sexp.Atom (Tok.Reserved "let"); Sexp.List bindings; body ] ->
+    (* SMT [let] is PARALLEL: each bound value is classified in the OUTER [lets]; the body
+       sees them all. A binding whose value is not provably Bool records [false], so a
+       name it shadows can no longer be taken as Bool. *)
+    let lets' =
+      List.fold_left
+        (fun acc b ->
+          match b with
+          | Sexp.List [ nm; v ] ->
+            (match Sexp.symbol_name nm with
+             | Some n -> (n, definitely_bool st ~qscope ~lets v) :: acc
+             | None -> acc)
+          | _ -> acc)
+        lets
+        bindings
+    in
+    definitely_bool st ~qscope ~lets:lets' body
   | Sexp.List (head :: args) ->
     (match Sexp.simple head with
      | Some ("and" | "or" | "not" | "=>" | "xor") -> true
      | Some ("=" | "distinct" | "<" | "<=" | ">" | ">=") -> true
      | Some "ite" ->
        (match args with
-        | _ :: t :: _ -> definitely_bool st ~qscope t
+        | _ :: t :: _ -> definitely_bool st ~qscope ~lets t
         | _ -> false)
      | Some name ->
-       (match List.assoc_opt name qscope with
-        | Some _ -> false (* a bound scalar heading an application is ill-sorted *)
-        | None -> cod_is_bool name)
+       (* a let-/qvar-bound scalar heading an application is ill-sorted (not a function),
+          so it is never a Bool-headed operator; only a global function's codomain counts. *)
+       if List.mem_assoc name lets || List.mem_assoc name qscope
+       then false
+       else cod_is_bool name
      | None -> false)
   | Sexp.List [] -> false
 ;;
@@ -1425,14 +1459,20 @@ let rec formula_of_sexp st ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
               (Fol.Xor (recur a, recur b))
               rest
           | _ -> malformedf "xor expects >= 2 arguments")
+       (* Classify [=]/[distinct]/[ite] Bool-vs-theory: wrap the arg in the ENCLOSING lets
+          first so [definitely_bool] sees (and shadows through) let bindings active here —
+          a shadowed non-Bool value must not be read as its same-named Bool global
+          (wrong-unsat landmine). *)
        | Some (("=" | "distinct") as op)
-         when (not (bound op)) && List.exists (definitely_bool st ~qscope) args ->
-         bool_eq_or_distinct ~op recur args
+         when (not (bound op))
+              && List.exists
+                   (fun a -> definitely_bool st ~qscope ~lets:[] (wrap_lets lets a))
+                   args -> bool_eq_or_distinct ~op recur args
        | Some "ite"
          when (not (bound "ite"))
               &&
               match args with
-              | [ _; t; _ ] -> definitely_bool st ~qscope t
+              | [ _; t; _ ] -> definitely_bool st ~qscope ~lets:[] (wrap_lets lets t)
               | _ -> false ->
          (match args with
           | [ c; t; e ] -> Fol.Ite (recur c, recur t, recur e)
@@ -1542,11 +1582,19 @@ let clauses_of_assertion st (s : Sexp.t) : clause list =
             failwith "Fol lowering: unresolved Skolem dependency (internal invariant)"
         in
         (* Skolem functions/constants resolve AFTER universals (their deps are universals,
-           never other Skolems — standard Skolemization), so one pass suffices. *)
+           never other Skolems — standard Skolemization), so one pass suffices. The binder
+           id is the memo [~key]: a single existential referenced by SEVERAL clauses (e.g.
+           [exists x. (p x /\ q x)] splitting into ground clauses [p k] and [q k]) MUST
+           get ONE witness symbol, not a fresh one per clause — [~key] makes the driver
+           reuse the symbol across those clauses (distinct binders keep distinct keys,
+           hence fresh symbols). Without it the split weakens the assertion (two
+           witnesses) -> wrong sat. *)
         List.iter
           (fun (d : Fol.skolem_descr) ->
             let args = List.map resolve_dep d.Fol.sk_deps in
-            let t = skolem ~cod:d.Fol.sk_binder.Fol.sort ~args in
+            let t =
+              skolem ~key:d.Fol.sk_binder.Fol.id ~cod:d.Fol.sk_binder.Fol.sort ~args
+            in
             Hashtbl.replace tbl d.Fol.sk_binder.Fol.id t)
           cl.Fol.skolems;
         (* Explicit [:pattern] hints carried by the matrix leaves (empty for a ground

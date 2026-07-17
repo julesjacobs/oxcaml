@@ -160,17 +160,46 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
        GROUND clause (empty qvars — an assertion over fresh Skolem constants, sound in
        both directions, so a plain [assert_term], NOT a live lemma) or a universal clause
        (a real [assert_lemma], which makes [has_live_lemma] true and degrades a ground
-       [Sat] to [Unknown] automatically). Both resolve their Skolem functions/constants
-       through the SAME [skolem] minter used for chunk-2b nested existentials above, so
-       freshness is identical. A clause whose body is outside the fragment (a leaf
-       [read_term] rejects, an overflow) is DROPPED and counted (the sentinel below then
-       guards the [sat] direction); [Malformed]/[Invalid_argument] propagate to the outer
-       handler (whole query -> unknown), exactly as for the lemma/existential paths. *)
+       [Sat] to [Unknown] automatically). A clause whose body is outside the fragment (a
+       leaf [read_term] rejects, an overflow) is DROPPED and counted (the sentinel below
+       then guards the [sat] direction); [Malformed]/[Invalid_argument] propagate to the
+       outer handler (whole query -> unknown), exactly as for the lemma/existential paths. *)
+    (* Skolem minter keyed by the eliminated binder id and MEMOIZED across clauses: one
+       existential referenced by several clauses (e.g. [exists x. (p x /\ q x)] splitting
+       into ground clauses [p k] and [q k]) must share ONE witness symbol — a fresh symbol
+       per clause would weaken the assertion set (two witnesses) into a WRONG [sat].
+       Binder ids are globally unique (fresh per {!Parser} clausification), so a single
+       table keyed by id is correct: same existential -> same symbol, distinct
+       existentials -> distinct (freshly minted) symbols. The symbol's rank is fixed by
+       the FIRST call's arg sorts, which are stable across clauses (a binder's Skolem
+       dependencies never change). Uses the [skf!] namespace, disjoint from the chunk-2b
+       [skf!] counter above only by being a separate stream — so pick names that avoid
+       both, via the shared [skf_counter]. *)
+    let pipe_sk_memo : (int, Symbol.t) Hashtbl.t = Hashtbl.create 16 in
+    let pipe_skolem ~key ~cod ~args =
+      let ctx = Session.context s in
+      let sym =
+        match Hashtbl.find_opt pipe_sk_memo key with
+        | Some sym -> sym
+        | None ->
+          let env = Session.env s in
+          let rec pick () =
+            let name = Printf.sprintf "skf!%d" !skf_counter in
+            incr skf_counter;
+            if is_declared env name then pick () else name
+          in
+          let dom = List.map (fun (t : Term.t) -> t.Term.sort) args in
+          let sym = Session.declare_fun s (pick ()) (Rank.create dom cod) in
+          Hashtbl.replace pipe_sk_memo key sym;
+          sym
+      in
+      Context.app ctx sym args
+    in
     List.iter
       (fun (cl : Parser.clause) ->
         if List.is_empty cl.Parser.cl_qvars
         then (
-          match cl.Parser.cl_build ~skolem [||] with
+          match cl.Parser.cl_build ~skolem:pipe_skolem [||] with
           | body, _triggers -> Session.assert_term s body
           | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
             incr dropped)
@@ -178,7 +207,7 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
           match
             Session.assert_lemma s ~qvars:cl.Parser.cl_qvars ~build:(fun qv ->
               let body, triggers =
-                cl.Parser.cl_build ~skolem (Array.map Qvar.to_term qv)
+                cl.Parser.cl_build ~skolem:pipe_skolem (Array.map Qvar.to_term qv)
               in
               let triggers =
                 if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
