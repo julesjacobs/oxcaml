@@ -6,6 +6,7 @@ type value =
   | Int of Bigint.t
   | Bool of bool
   | Uninterp of int
+  | Real of Term.rational
 
 type t = value Term.Map.t
 

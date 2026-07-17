@@ -185,7 +185,7 @@ let head_args (term : Term.t) : (Symbol.t * Term.t array) option =
 let dt_sort_sym (sort : Sort.t) : Symbol.t option =
   match sort with
   | Sort.Datatype s -> Some s
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Array _ | Sort.BitVec _ -> None
+  | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Uninterpreted _ | Sort.Array _ | Sort.BitVec _ -> None
 ;;
 
 let is_dt_sort t (sort : Sort.t) =
@@ -268,7 +268,9 @@ let rec catalog t ~input (term : Term.t) =
          catalog t ~input c
        | Term.Arith lin ->
          List.iter (fun (c, _) -> catalog t ~input c) (Iarr.to_list lin.Term.coeffs)
-       | Term.Bool_const _ | Term.Int_const _ -> ()
+       | Term.Real_arith lin ->
+         List.iter (fun (c, _) -> catalog t ~input c) (Iarr.to_list lin.Term.coeffs)
+       | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ()
        | Term.App _ -> () (* unreachable: head_args returned None *)))
 ;;
 
@@ -860,9 +862,10 @@ let pop t n =
 
 let children (term : Term.t) : Term.t list =
   match term.Term.node with
-  | Term.Bool_const _ | Term.Int_const _ -> []
+  | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> []
   | Term.App (_, args) -> Iarr.to_list args
   | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+  | Term.Real_arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
   | Term.Le a | Term.Not a -> [ a ]
   | Term.Eq (a, b) -> [ a; b ]
   | Term.And a | Term.Or a -> Iarr.to_list a
@@ -887,6 +890,8 @@ let model t =
             else if Euf.are_equal t.engine term t.false_const
             then Model.Bool false
             else Model.Uninterp (Euf.class_of t.engine term)
+          else if Sort.equal term.Term.sort Sort.real
+          then raise (Term.Unsupported "Real mixed with datatypes")
           else Model.Uninterp (Euf.class_of t.engine term)
       in
       acc := (term, v) :: !acc;
@@ -943,6 +948,7 @@ let leaf_value t (x : Term.t) : Model.value =
        bit-blaster before the combinator, and any BV term that reached the combinator
        degrades via [require_no_bitvec_terms] before model extraction. Fold into the
        generic opaque-class fallback for exhaustiveness. *)
+    | Sort.Real -> raise (Term.Unsupported "Real mixed with datatypes")
     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
       Model.Uninterp (Euf.class_of t.engine x))
 ;;
@@ -969,6 +975,7 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
       match sort with
       | Sort.Bool -> Model.Bool false
       | Sort.Int _ -> Model.Int Bigint.zero
+      | Sort.Real -> raise (Term.Unsupported "Real datatype field model is unsupported")
       | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
         Model.Uninterp 0
     in

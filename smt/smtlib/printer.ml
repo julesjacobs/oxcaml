@@ -51,6 +51,14 @@ let predefined_funs =
    the function namespace — a *function* named [Int] is legal and not refused.) *)
 let predefined_sorts = [ "Int"; "Bool" ]
 
+let is_predefined_fun name =
+  List.mem name predefined_funs || (Lra_config.enabled () && String.equal name "/")
+;;
+
+let is_predefined_sort name =
+  List.mem name predefined_sorts || (Lra_config.enabled () && String.equal name "Real")
+;;
+
 let refuse name why =
   raise (Unsupported (Printf.sprintf "symbol %S cannot be printed: %s" name why))
 ;;
@@ -81,7 +89,7 @@ let quote_lexical name =
 
 let quote_symbol name =
   check_representable name;
-  if List.mem name predefined_funs
+  if is_predefined_fun name
   then
     refuse
       name
@@ -93,7 +101,7 @@ let quote_symbol name =
 (* Uninterpreted-sort name: same rules, but the refused set is the predefined SORTS. *)
 let quote_sort_symbol name =
   check_representable name;
-  if List.mem name predefined_sorts
+  if is_predefined_sort name
   then refuse name "collides with a predefined SMT-LIB sort";
   quote_lexical name
 ;;
@@ -110,6 +118,32 @@ let add_int_lit buf n =
     Buffer.add_string buf "(- ";
     Buffer.add_string buf (Bigint.to_string (Bigint.neg n));
     Buffer.add_char buf ')')
+;;
+
+let require_lra () =
+  if not (Lra_config.enabled ())
+  then raise (Unsupported "Real arithmetic printing requires OXSMT_LRA")
+;;
+
+(* A canonical exact Real literal.  Integral values retain their Real sort by carrying a
+   decimal point.  Fractions use SMT-LIB prefix division, with unary negation outside the
+   positive fraction so the signed-integer grammar is unambiguous. *)
+let add_real_lit buf (q : Term.rational) =
+  require_lra ();
+  let negative = Bigint.sign q.num < 0 in
+  let magnitude = if negative then Bigint.neg q.num else q.num in
+  if negative then Buffer.add_string buf "(- ";
+  if Bigint.equal q.den Bigint.one
+  then (
+    Buffer.add_string buf (Bigint.to_string magnitude);
+    Buffer.add_string buf ".0")
+  else (
+    Buffer.add_string buf "(/ ";
+    Buffer.add_string buf (Bigint.to_string magnitude);
+    Buffer.add_char buf ' ';
+    Buffer.add_string buf (Bigint.to_string q.den);
+    Buffer.add_char buf ')');
+  if negative then Buffer.add_char buf ')'
 ;;
 
 (* The render family closes over the datatype registry [dts] so a tester application
@@ -154,9 +188,11 @@ let bv_const_string ~value ~width =
 
 let render_family dts arrs =
   let rec render buf (t : Term.t) =
+    if Sort.equal t.sort Sort.real then require_lra ();
     match t.node with
     | Bool_const b -> Buffer.add_string buf (if b then "true" else "false")
     | Int_const n -> add_int_lit buf n
+    | Real_const q -> add_real_lit buf q
     | App (sym, _args) when Bv.is_bv_sym sym ->
       (match Bv.view t with
        | Some v -> render_bv buf v
@@ -211,10 +247,11 @@ let render_family dts arrs =
                 args;
               Buffer.add_char buf ')')))
     | Arith l -> render_arith buf l
+    | Real_arith l -> render_real_arith buf l
     | Le arg ->
       Buffer.add_string buf "(<= ";
       render buf arg;
-      Buffer.add_string buf " 0)"
+      Buffer.add_string buf (if Sort.equal arg.sort Sort.real then " 0.0)" else " 0)")
     | Eq (a, b) -> render_bin buf "=" a b
     | Not a ->
       Buffer.add_string buf "(not ";
@@ -326,6 +363,41 @@ let render_family dts arrs =
       Buffer.add_string buf "(+ ";
       Buffer.add_string buf (String.concat " " parts);
       Buffer.add_char buf ')'
+  and render_real_arith buf (l : Term.real_linear) =
+    require_lra ();
+    let summands =
+      Iarr.fold
+        (fun acc (term, (coefficient : Term.rational)) ->
+           let part = Buffer.create 32 in
+           if
+             Bigint.equal coefficient.num Bigint.one
+             && Bigint.equal coefficient.den Bigint.one
+           then render part term
+           else (
+             Buffer.add_string part "(* ";
+             add_real_lit part coefficient;
+             Buffer.add_char part ' ';
+             render part term;
+             Buffer.add_char part ')');
+           Buffer.contents part :: acc)
+        []
+        l.coeffs
+    in
+    let summands = List.rev summands in
+    let parts =
+      if Bigint.is_zero l.const.num
+      then summands
+      else (
+        let part = Buffer.create 16 in
+        add_real_lit part l.const;
+        summands @ [ Buffer.contents part ])
+    in
+    match parts with
+    | [ only ] -> Buffer.add_string buf only
+    | _ ->
+      Buffer.add_string buf "(+ ";
+      Buffer.add_string buf (String.concat " " parts);
+      Buffer.add_char buf ')'
   in
   render
 ;;
@@ -354,6 +426,9 @@ type decls =
   ; datatypes : Symbol.t list (* datatype sort symbols, first-use order *)
   ; funs : Symbol.t list (* function/const symbols, first-use order *)
   ; uses_bitvec : bool (* any bitvector sort/term appears — selects a BV logic label *)
+  ; uses_array_sort : bool
+  ; uses_int : bool
+  ; uses_real : bool
   }
 
 let collect_decls dts arrs env assertions =
@@ -364,17 +439,25 @@ let collect_decls dts arrs env assertions =
   let datatypes = ref [] in
   let funs = ref [] in
   let uses_bitvec = ref false in
+  let uses_array_sort = ref false in
+  let uses_int = ref false in
+  let uses_real = ref false in
   let div_sym = Env.div_sym env in
   let mod_sym = Env.mod_sym env in
   let rec visit_sort (s : Sort.t) =
     match s with
-    | Sort.Bool | Sort.Int _ -> ()
+    | Sort.Bool -> ()
+    | Sort.Int _ -> uses_int := true
+    | Sort.Real ->
+      require_lra ();
+      uses_real := true
     (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, but its presence
        selects a bitvector logic label. *)
     | Sort.BitVec _ -> uses_bitvec := true
     (* An [(Array I E)] sort is built-in — no [declare-sort] of its own — but its index
        and element sorts must still be collected so an uninterpreted [I]/[E] is declared. *)
     | Sort.Array (index, element) ->
+      uses_array_sort := true;
       visit_sort index;
       visit_sort element
     | Sort.Uninterpreted sym ->
@@ -438,13 +521,15 @@ let collect_decls dts arrs env assertions =
         then funs := sym :: !funs)
   in
   let rec visit (t : Term.t) =
+    visit_sort t.sort;
     match t.node with
-    | Bool_const _ | Int_const _ -> ()
+    | Bool_const _ | Int_const _ | Real_const _ -> ()
     | App (sym, args) ->
       if Bv.is_bv_sym sym then uses_bitvec := true;
       register_fun sym;
       Iarr.iter visit args
     | Arith l -> Iarr.iter (fun (t, _) -> visit t) l.coeffs
+    | Real_arith l -> Iarr.iter (fun (t, _) -> visit t) l.coeffs
     | Le a | Not a -> visit a
     | Eq (a, b) ->
       visit a;
@@ -460,6 +545,9 @@ let collect_decls dts arrs env assertions =
   ; datatypes = List.rev !datatypes
   ; funs = List.rev !funs
   ; uses_bitvec = !uses_bitvec
+  ; uses_array_sort = !uses_array_sort
+  ; uses_int = !uses_int
+  ; uses_real = !uses_real
   }
 ;;
 
@@ -470,6 +558,9 @@ let rec sort_string (s : Sort.t) =
   match s with
   | Sort.Bool -> "Bool"
   | Sort.Int _ -> "Int"
+  | Sort.Real ->
+    require_lra ();
+    "Real"
   (* A datatype sort prints by its name, the same as an uninterpreted sort; the datatype's
      shape is emitted separately in the [(declare-datatypes ...)] block. *)
   | Sort.Uninterpreted sym | Sort.Datatype sym -> quote_sort_symbol (Symbol.name sym)
@@ -508,7 +599,16 @@ let print_session
     Buffer.add_string buf s;
     Buffer.add_char buf '\n'
   in
-  let { sorts; datatypes = dt_syms; funs; uses_bitvec } =
+  let
+    { sorts
+    ; datatypes = dt_syms
+    ; funs
+    ; uses_bitvec
+    ; uses_array_sort
+    ; uses_int
+    ; uses_real
+    }
+    =
     collect_decls datatypes arrays env assertions
   in
   let render = render_family datatypes arrays in
@@ -529,7 +629,18 @@ let print_session
      [QF_AUFLIA] (the broad UF+arrays+LIA superset our reader accepts); otherwise the base
      [QF_UFLIA]. Datatypes take precedence in the (not-yet-produced) mixed cases. *)
   let logic =
-    if dt_syms <> []
+    if uses_real
+    then (
+      if uses_int || dt_syms <> [] || uses_bitvec || uses_array_sort
+      then raise (Unsupported "mixed Real with Int/BV/array/datatype is not supported");
+      let uses_uf =
+        sorts <> []
+        || List.exists
+             (fun sym -> Iarr.length (Env.rank env sym).Rank.domain > 0)
+             funs
+      in
+      if uses_uf then "QF_UFLRA" else "QF_LRA")
+    else if dt_syms <> []
     then "QF_UFDTLIA"
     else if uses_bitvec
     then "QF_UFBV"

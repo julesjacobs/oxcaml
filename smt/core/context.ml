@@ -16,13 +16,25 @@ let term_count t = Node.term_count t.state
    parser's big numerals, the presolve substitution rebuild). *)
 let int_const_big t n = Node.int_const t.state n
 let int_const t n = Node.int_const t.state (Bigint.of_int n)
+let real_const_big t ~num ~den = Node.real_const_big t.state ~num ~den
 let bool_const t b = Node.bool_const t.state b
 let add t a b = Node.add t.state a b
 let sub t a b = Node.sub t.state a b
 let neg t a = Node.neg t.state a
 let mul_const_big t c a = Node.mul_const t.state c a
+let mul_real_const_big t ~num ~den a =
+  Node.mul_real_const
+    t.state
+    (Term.rational_of_frac_big ~num ~den)
+    a
+;;
+
 let mul_const t c a = Node.mul_const t.state (Bigint.of_int c) a
 let linear_combination_big t pairs const = Node.linear_combination t.state pairs const
+
+let real_linear_combination_big t pairs const =
+  Node.real_linear_combination t.state pairs const
+;;
 
 let linear_combination t pairs const =
   Node.linear_combination

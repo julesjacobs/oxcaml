@@ -43,6 +43,7 @@ type assumption_check =
 type model_value = Cdclt.value =
   | VBool of bool
   | VInt of Bigint.t
+  | VReal of Rational.t
   | VUninterp of int
 
 type fun_table = Cdclt.fun_table =
@@ -78,6 +79,8 @@ type t =
       (* array select/store symbols (arrays lane); empty unless [set_arrays] was called. A
          ref SHARED with [cdclt] (same ref), read lazily at the first theory-atom intern
          to pick the standalone arrays theory. *)
+  ; arithmetic_family : Cdclt.arithmetic_family ref
+  ; mutable arithmetic_blocked : bool
   ; mutable has_arrays : bool
       (* [set_arrays] installed a non-empty array registry. A [Final]->[Sat] on an array
          problem degrades to [Unknown] in v1: the ROW/extensionality saturation is sound
@@ -256,11 +259,21 @@ let create
   let budget = Budget.create ?max:max_effort () in
   let registry = ref Oxsmt_core.Datatype_defs.empty in
   let array_registry = ref Oxsmt_core.Array_defs.empty in
+  let arithmetic_family = ref Cdclt.None_seen in
   (* Install the seam callbacks on the pristine core BEFORE any clause (pristine-attach);
      the theory itself is chosen lazily from [registry] / [array_registry] at the first
      intern. The refs are shared with [cdclt]. *)
   let cdclt =
-    Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap
+    Cdclt.create
+      ctx
+      env
+      sat
+      ~split_budget
+      ~budget
+      ~registry
+      ~array_registry
+      ~arithmetic_family
+      ~cap
   in
   let base = Sat.new_var sat in
   (* [base_at_level0] is read above (before [Sat.create]). The base forcing-unit is NOT
@@ -286,6 +299,8 @@ let create
   ; ctx
   ; registry
   ; array_registry
+  ; arithmetic_family
+  ; arithmetic_blocked = false
   ; has_arrays = false
   ; pp = Preprocess.create cap env ctx
   ; sat
@@ -327,6 +342,87 @@ let create
 let degrade t reason =
   t.degraded <- true;
   if String.length t.degraded_reason = 0 then t.degraded_reason <- reason
+;;
+
+let preselect_arithmetic t terms =
+  let has_int = ref false in
+  let has_real = ref false in
+  let seen = Term.Table.create 256 in
+  let rec scan_sort = function
+    | Sort.Int _ -> has_int := true
+    | Sort.Real -> has_real := true
+    | Sort.Array (index, element) ->
+      scan_sort index;
+      scan_sort element
+    | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ -> ()
+  in
+  let rec scan (term : Term.t) =
+    if not (Term.Table.mem seen term)
+    then (
+      Term.Table.replace seen term ();
+      scan_sort term.sort;
+      match term.node with
+      | App (_, args) | And args | Or args -> Iarr.iter scan args
+      | Arith lin -> Iarr.iter (fun (child, _) -> scan child) lin.coeffs
+      | Real_arith lin -> Iarr.iter (fun (child, _) -> scan child) lin.coeffs
+      | Le child | Not child -> scan child
+      | Eq (a, b) ->
+        scan a;
+        scan b
+      | Ite (c, a, b) ->
+        scan c;
+        scan a;
+        scan b
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
+  in
+  List.iter scan terms;
+  if !has_real && not (Lra_config.enabled ())
+  then (
+    t.arithmetic_blocked <- true;
+    degrade t "lra-disabled")
+  else if Lra_config.enabled ()
+  then (
+    let observed =
+      match !has_int, !has_real with
+      | false, false -> Cdclt.None_seen
+      | true, false -> Cdclt.Integer
+      | false, true -> Cdclt.Real
+      | true, true -> Cdclt.Mixed
+    in
+    let before = !(t.arithmetic_family) in
+    let joined =
+      match before, observed with
+      | Cdclt.Mixed, _ | _, Cdclt.Mixed -> Cdclt.Mixed
+      | Cdclt.None_seen, x -> x
+      | x, Cdclt.None_seen -> x
+      | Cdclt.Integer, Cdclt.Integer -> Cdclt.Integer
+      | Cdclt.Real, Cdclt.Real -> Cdclt.Real
+      | Cdclt.Integer, Cdclt.Real | Cdclt.Real, Cdclt.Integer -> Cdclt.Mixed
+    in
+    t.arithmetic_family := joined;
+    let theory_swap =
+      Cdclt.theory_instantiated t.cdclt
+      &&
+      match before, joined with
+      | (Cdclt.None_seen | Cdclt.Integer), Cdclt.Real -> true
+      | Cdclt.Real, (Cdclt.Integer | Cdclt.Mixed) -> true
+      | _ -> false
+    in
+    let real_with_foreign_theory =
+      joined = Cdclt.Real
+      && (not (Array_defs.is_empty !(t.array_registry))
+          || not (Datatype_defs.is_empty !(t.registry)))
+    in
+    if joined = Cdclt.Mixed || theory_swap || real_with_foreign_theory
+    then (
+      t.arithmetic_blocked <- true;
+      degrade
+        t
+        (if joined = Cdclt.Mixed
+         then "mixed-int-real"
+         else if theory_swap
+         then "arithmetic-theory-swap"
+         else "real-with-array-or-datatype")))
 ;;
 
 (* census (task #78): sanitize an exception string into a short reason-safe token — the
@@ -667,7 +763,7 @@ let declare_datatype t sort constructors =
   let sort_sym =
     match (sort : Oxsmt_core.Sort.t) with
     | Datatype s -> s
-    | Bool | Int _ | Uninterpreted _ | Array _ | BitVec _ ->
+    | Bool | Int _ | Real | Uninterpreted _ | Array _ | BitVec _ ->
       invalid_arg "Session.declare_datatype: sort must be a Sort.Datatype"
   in
   let ctors =
@@ -713,7 +809,8 @@ let is_theory_atom (a : Term.t) =
   | Eq _ -> true (* atom Eq always has non-Bool args (Bool-Eq is a connective) *)
   | App (_, args) -> Iarr.length args > 0
   | Bool_const _ -> false
-  | Int_const _ | Arith _ | Not _ | And _ | Or _ | Ite _ -> false
+  | Int_const _ | Real_const _ | Arith _ | Real_arith _ | Not _ | And _ | Or _ | Ite _ ->
+    false
 ;;
 
 let current_selector t = List.hd t.frames
@@ -835,7 +932,14 @@ let assert_clausified ?sel ~root t cnf =
           | Or xs -> Some Relevancy.KOr, Iarr.to_list xs
           | Eq (a, b) -> Some Relevancy.KIff, [ a; b ]
           | Ite (c, a, b) -> Some Relevancy.KIte, [ c; a; b ]
-          | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ | Not _ -> None, []
+          | Bool_const _
+          | Int_const _
+          | Real_const _
+          | App _
+          | Arith _
+          | Real_arith _
+          | Le _
+          | Not _ -> None, []
         in
         match kind with
         | None -> ()
@@ -917,7 +1021,8 @@ let register_bool_terms t (pterm : Term.t) =
         go ~under_uf:false a;
         go ~under_uf:false b
       | Arith l -> Iarr.iter (fun (tm, _c) -> go ~under_uf:false tm) l.coeffs
-      | Bool_const _ | Int_const _ -> ())
+      | Real_arith l -> Iarr.iter (fun (tm, _c) -> go ~under_uf:false tm) l.coeffs
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
   in
   go ~under_uf:false pterm
 ;;
@@ -1013,7 +1118,7 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
     (* An array sort carries its index/element sorts; recurse so a reserved symbol buried
        in one is caught. *)
     | Sort.Array (index, element) -> bad_sort index || bad_sort element
-    | Sort.Bool | Sort.Int _ | Sort.BitVec _ -> false
+    | Sort.Bool | Sort.Int _ | Sort.Real | Sort.BitVec _ -> false
   in
   (* Every subterm's own sort is checked here, so a reserved sort appearing anywhere in
      the term — in result OR argument position — is caught (an argument is itself a
@@ -1028,11 +1133,12 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
         match t.node with
         | App (sym, args) -> bad_sym sym || Iarr.exists rec_ args
         | Arith l -> Iarr.exists (fun (tm, _c) -> rec_ tm) l.coeffs
+        | Real_arith l -> Iarr.exists (fun (tm, _c) -> rec_ tm) l.coeffs
         | Le a | Not a -> rec_ a
         | Eq (a, b) -> rec_ a || rec_ b
         | And xs | Or xs -> Iarr.exists rec_ xs
         | Ite (c, a, b) -> rec_ c || rec_ a || rec_ b
-        | Bool_const _ | Int_const _ -> false
+        | Bool_const _ | Int_const _ | Real_const _ -> false
       in
       if not r then Hashtbl.replace visited t.Term.tag ();
       r)
@@ -1049,7 +1155,7 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
    permanent clause DB. *)
 let deactivate_symbreak t = t.sym_sel <- None
 
-let assert_term t term =
+let assert_term_selected t term =
   (* F1: an assertion after a symmetry-breaking emission may break the detected symmetry;
      retract the (non-monotonic) lex clauses first. *)
   deactivate_symbreak t;
@@ -1065,6 +1171,11 @@ let assert_term t term =
     | exception Term.Overflow -> degrade t "preprocess-overflow"
     | exception Term.Unsupported _ -> degrade t "preprocess-unsupported"
     | pterm -> assert_bool_at t pterm)
+;;
+
+let assert_term t term =
+  preselect_arithmetic t [ term ];
+  if not t.arithmetic_blocked then assert_term_selected t term
 ;;
 
 (* Internalize a single (already-presolved) term WITHOUT recording it in [t.asserted]:
@@ -1098,7 +1209,7 @@ let internalize_reduced_at ~sel t term =
    reserved-symbol gate (R1 / codex C1) applies per term exactly as in {!assert_term}. On
    a zero-alias input the pass is a no-op ([reduced = originals], [defs = []]) and this is
    byte-identical to asserting each original with {!assert_term}. *)
-let assert_presolved t terms =
+let assert_presolved_selected t terms =
   (* F1: a further batch after a prior emission may break that symmetry; retract the prior
      lex clauses before this batch (possibly) emits its own. *)
   deactivate_symbreak t;
@@ -1247,6 +1358,11 @@ let assert_presolved t terms =
          let sel = Sat.new_var t.sat in
          t.sym_sel <- Some sel;
          List.iter (internalize_reduced_at ~sel t) sym_extra))
+;;
+
+let assert_presolved t terms =
+  preselect_arithmetic t terms;
+  if not t.arithmetic_blocked then assert_presolved_selected t terms
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
@@ -1442,6 +1558,7 @@ let free_var_leaves (term : Term.t) =
         acc := (n, u.sort) :: !acc)
     | App (_, args) -> Iarr.iter go args
     | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+    | Real_arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
     | Le a | Not a -> go a
     | Eq (a, b) ->
       go a;
@@ -1451,7 +1568,7 @@ let free_var_leaves (term : Term.t) =
       go c;
       go a;
       go b
-    | Bool_const _ | Int_const _ -> ()
+    | Bool_const _ | Int_const _ | Real_const _ -> ()
   in
   go term;
   !acc
@@ -1478,6 +1595,7 @@ let default_value (sort : Sort.t) : model_value =
   match sort with
   | Sort.Bool -> VBool false
   | Sort.Int _ -> VInt Bigint.zero
+  | Sort.Real -> VReal Rational.zero
   | Sort.Uninterpreted _ -> VUninterp 0
   | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise No_default_value
 ;;

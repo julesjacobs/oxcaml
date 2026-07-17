@@ -30,11 +30,13 @@ type t = private
   | Datatype of Symbol.t
   | Array of t * t
   | BitVec of int (* fixed-width bitvector, width >= 1 (GOALS: bitvectors) *)
+  | Real
 
 and int_kind = Mathematical
 
 val bool : t
 val int : t
+val real : t
 val uninterpreted : Symbol.t -> t
 
 (** [bitvec width] is the bitvector sort of the given [width]. Raises [Invalid_argument]

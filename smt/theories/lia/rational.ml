@@ -132,6 +132,11 @@ let of_int n = W.of_int_unchecked n
    coefficients that exceed int63. *)
 let of_bigint n = bnorm_demote n Bigint.one
 
+let of_big_frac ~num ~den =
+  if Bigint.is_zero den then invalid_arg "Rational.of_big_frac: zero denominator";
+  bnorm_demote num den
+;;
+
 let make num den =
   if den = 0 then invalid_arg "Rational: zero denominator";
   try small_make_raise num den with
@@ -153,6 +158,7 @@ let num x =
 ;;
 
 let num_bigint x = fst (to_big x)
+let den_bigint x = snd (to_big x)
 
 (* Floor as an arbitrary-precision [Bigint.t] — {!floor} without the int63 output
    projection, so a >int63 value (a uint256 branch point) does not overflow. Uniform over

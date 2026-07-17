@@ -2486,7 +2486,8 @@ let has_eq_over_ite_or_bool_ite (t : Term.t) =
     | And xs | Or xs -> Iarr.exists go xs
     | App (_, args) -> Iarr.exists go args
     | Arith lin -> Iarr.exists (fun (tm, _c) -> go tm) lin.coeffs
-    | Bool_const _ | Int_const _ -> false
+    | Real_arith lin -> Iarr.exists (fun (tm, _c) -> go tm) lin.coeffs
+    | Bool_const _ | Int_const _ | Real_const _ -> false
   in
   go t
 ;;

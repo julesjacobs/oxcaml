@@ -34,6 +34,10 @@ val of_int : int -> t
     fits int63). The ingestion path for core term coefficients that exceed int63. *)
 val of_bigint : Oxsmt_core.Bigint.t -> t
 
+(** [of_big_frac ~num ~den] is the exact normalized fraction [num/den].  It never projects
+    either component to a native integer.  [den <> 0] is required. *)
+val of_big_frac : num:Oxsmt_core.Bigint.t -> den:Oxsmt_core.Bigint.t -> t
+
 (** [of_frac num den] is [num/den] normalized; [den <> 0] required ([Invalid_argument]
     otherwise). Never raises {!Overflow} (promotes to [Big] if the native normalization
     would wrap). *)
@@ -49,6 +53,9 @@ val num : t -> int
     {!Overflow}, so a model value exceeding int63 (e.g. a uint256 constant) is
     representable. Used at the Bigint model sink ({!Lia.model_bigint}). *)
 val num_bigint : t -> Oxsmt_core.Bigint.t
+
+(** [den_bigint t] is the positive denominator without an int63 projection. *)
+val den_bigint : t -> Oxsmt_core.Bigint.t
 
 (** [floor_bigint t] is [floor t] as an arbitrary-precision {!Oxsmt_core.Bigint.t} —
     without {!floor}'s int63 output projection, so a >int63 branch point does not raise

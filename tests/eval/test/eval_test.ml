@@ -750,6 +750,49 @@ let define_fun_cases () =
     "an unused ill-formed macro should be accepted (lazy validation)"
 ;;
 
+let real_cases () =
+  let qf = "(set-logic QF_LRA)(declare-const x Real)" in
+  expect_satisfies
+    "real/exact-fraction"
+    (qf ^ "(assert (= x (/ 1 3)))")
+    "(model (const x (/ 1 3)))";
+  expect_satisfies
+    "real/decimal-and-coercion"
+    (qf ^ "(assert (= (+ x 2) 2.5))")
+    "(model (const x (/ 1 2)))";
+  expect_fails
+    "real/strict-boundary-rejected"
+    ~index:0
+    (qf ^ "(assert (> x 0))")
+    "(model (const x 0.0))";
+  expect_fails
+    "real/wrong-numerator-rejected"
+    ~index:0
+    (qf ^ "(assert (= x (/ 1 3)))")
+    "(model (const x (/ 2 3)))";
+  expect_malformed
+    "real/negative-denominator-rejected"
+    (qf ^ "(assert (= x (/ 1 3)))")
+    "(model (const x (/ 1 (- 3))))";
+  expect_malformed
+    "real/uninterp-shaped-value-rejected"
+    (qf ^ "(assert (= x 0.0))")
+    "(model (const x 0))";
+  expect_satisfies
+    "real/bigint-exact"
+    (qf
+     ^ "(assert (= x (/ 123456789012345678901234567890123456789 \
+                        100000000000000000000000000000000000003)))")
+    "(model (const x (/ 123456789012345678901234567890123456789 \
+                         100000000000000000000000000000000000003)))";
+  expect_satisfies
+    "real/uf-table-agreement"
+    "(set-logic QF_UFLRA)(declare-fun f (Real) Real)(declare-const x Real)\
+     (assert (= x (/ 1 3)))(assert (= (f x) 2.5))"
+    "(model (const x (/ 1 3)) \
+       (fun f (default 0.0) (case ((/ 1 3)) 2.5)))"
+;;
+
 (* --- the gate's real sat cases: every .model sidecar must MODEL-SATISFIES ---------- *)
 
 let read_file path =
@@ -795,6 +838,7 @@ let () =
   minint_reingest_cases ();
   table_format_cases ();
   define_fun_cases ();
+  real_cases ();
   gate_cases dir;
   (* explicit deliberately-corrupted models: a wrong value must MODEL-FAIL *)
   expect_fails

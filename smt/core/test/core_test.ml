@@ -975,6 +975,80 @@ let test_intern_grow_reintern_red () =
 ;;
 
 (* ================================================================== *)
+let test_real_core () =
+  print_endline "Real exact core:";
+  check "Real sort is distinct from Int" (not (Sort.equal Sort.real Sort.int));
+  check "Real sort is self-equal" (Sort.equal Sort.real Sort.real);
+  let rsym = Env.declare_fun env "real-x" (Rank.create [] Sort.real) in
+  let c = Context.create env in
+  let x = Context.const c rsym in
+  let q = Term.rational_of_frac_big ~num:(Bigint.of_int (-6)) ~den:(Bigint.of_int (-8)) in
+  check
+    "rational signs and gcd normalize exactly"
+    (Bigint.equal q.num (Bigint.of_int 3) && Bigint.equal q.den (Bigint.of_int 4));
+  let z =
+    Term.rational_of_frac_big ~num:Bigint.zero ~den:(Bigint.of_int (-999))
+  in
+  check
+    "rational zero has the unique 0/1 representation"
+    (Bigint.equal z.num Bigint.zero && Bigint.equal z.den Bigint.one);
+  check_raises "zero rational denominator rejected" (fun () ->
+    Term.rational_of_frac_big ~num:Bigint.one ~den:Bigint.zero);
+  let three_quarters =
+    Context.real_const_big c ~num:(Bigint.of_int 6) ~den:(Bigint.of_int 8)
+  in
+  let normalized_three_quarters =
+    Context.real_const_big c ~num:(Bigint.of_int 3) ~den:(Bigint.of_int 4)
+  in
+  check
+    "normalized Real constants hash-cons"
+    (Term.equal three_quarters normalized_three_quarters);
+  let half_x =
+    Context.mul_real_const_big c ~num:Bigint.one ~den:(Bigint.of_int 2) x
+  in
+  check
+    "rational coefficient retained in Real_arith"
+    (match half_x.node with
+     | Term.Real_arith l ->
+       let _, coeff = Iarr.get l.coeffs 0 in
+       Bigint.equal coeff.num Bigint.one && Bigint.equal coeff.den (Bigint.of_int 2)
+     | _ -> false);
+  let one = Context.real_const_big c ~num:Bigint.one ~den:Bigint.one in
+  let two = Context.real_const_big c ~num:(Bigint.of_int 2) ~den:Bigint.one in
+  let le_scaled = Context.le c (Context.mul_const c 2 x) two in
+  let le_unscaled = Context.le c x one in
+  check
+    "Real Le does not apply integer gcd tightening"
+    (not (Term.equal le_scaled le_unscaled));
+  check
+    "Real strict order is the negation of the reversed non-strict atom"
+    (Term.equal (Context.lt c x one) (Context.not_ c (Context.le c one x)));
+  check
+    "Real Debug.check accepts exact linear order terms"
+    (match Term.Debug.check le_scaled with
+     | () -> true
+     | exception _ -> false);
+  let real_ite =
+    Context.ite c (Context.const c bool_vars.(0)) x (Context.add c x one)
+  in
+  check_raises "Real-Ite rejected in Pipeline mode" (fun () ->
+    Term.Debug.check ~mode:Term.Debug.Pipeline real_ite);
+  check_sort_error "mixed Int/Real add rejected" (fun () ->
+    Context.add c x (Context.int_const c 1));
+  let one_third = Context.real_const_big c ~num:Bigint.one ~den:(Bigint.of_int 3) in
+  let one_half = Context.real_const_big c ~num:Bigint.one ~den:(Bigint.of_int 2) in
+  check
+    "Real_const numerator participates in hash-cons equality"
+    (not (For_test.equal_node one_third one_half));
+  let two_thirds =
+    Context.mul_real_const_big c ~num:(Bigint.of_int 2) ~den:(Bigint.of_int 3) x
+  in
+  check
+    "Real_arith coefficient participates in hash-cons equality"
+    (not (For_test.equal_node half_x two_thirds))
+;;
+
+(* ================================================================== *)
 let () =
   print_endline "core self-test:";
   test_iarr ();
@@ -994,6 +1068,7 @@ let () =
   test_brute_gcd_and_compare ();
   test_determinism ();
   test_debug_pipeline_red ();
+  test_real_core ();
   Printf.printf "\ncore self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

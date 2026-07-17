@@ -130,7 +130,7 @@ let children (t : Term.t) : Term.t list =
   | Ite (c, a, b) -> [ c; a; b ]
   | Eq (a, b) -> [ a; b ]
   | App (_, args) -> Iarr.to_list args
-  | Bool_const _ | Int_const _ | Arith _ -> []
+  | Bool_const _ | Int_const _ | Real_const _ | Arith _ | Real_arith _ -> []
 ;;
 
 (* Occurrence count over the asserted DAG: for each node, how many parent edges point to
@@ -613,7 +613,7 @@ let simplify ctx mint (terms : Term.t list) : Term.t list =
         if eqsplit && bvwidth a' >= 1
         then split_eq_concat ctx mint a' b'
         else Context.eq ctx a' b'
-      | Bool_const _ | Int_const _ | Arith _ | Le _ -> t
+      | Bool_const _ | Int_const _ | Real_const _ | Arith _ | Real_arith _ | Le _ -> t
       | App (sym, orig_args) ->
         (match Bv.view t with
          | Some (Bv.Op { op = Bv.Bvadd | Bv.Bvsub | Bv.Bvneg; _ }) ->

@@ -158,7 +158,8 @@ let eval_bool_body ~ev_bv ~ev_bool defs ~lookup (term : Term.t) : bool =
        (match lookup term with
         | Some v -> not (Bigint.is_zero v)
         | None -> err "unbound Boolean variable"))
-  | Le _ | Arith _ | Int_const _ -> err "eval: arithmetic atom (not QF_BV)"
+  | Le _ | Arith _ | Real_arith _ | Int_const _ | Real_const _ ->
+    err "eval: arithmetic atom (not QF_BV)"
 ;;
 
 (* MEMOIZED entry points. The cache is a per-call FRESH [Term.Table] created here and

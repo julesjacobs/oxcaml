@@ -793,8 +793,8 @@ let existing_combo t (term : Term.t) : ((int * Rational.t) list * Rational.t) op
     (match gather [] (Iarr.to_list coeffs) with
      | None -> None
      | Some pairs -> Some (pairs, Rational.of_bigint const))
-  | Int_const _ -> None
-  | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> None
+  | Int_const _ | Real_const _ -> None
+  | Real_arith _ | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> None
 ;;
 
 (* Lookup-only [var_for_combo]: the existing simplex variable carrying [pairs], if any. A

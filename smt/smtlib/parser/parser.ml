@@ -260,6 +260,7 @@ let rec sort_of_sexp st (s : Sexp.t) : Sort.t =
   (* [Bool]/[Int] are the builtin sorts regardless of quoting (quoting is lexical). *)
   | Some "Bool" -> Sort.bool
   | Some "Int" -> Sort.int
+  | Some "Real" when Lra_config.enabled () -> Sort.real
   | Some name ->
     (match Hashtbl.find_opt st.sorts name with
      | Some sym ->
@@ -330,6 +331,34 @@ let int_lit st a =
     (match Bigint.of_string a with
      | b -> Context.int_const_big st.ctx b
      | exception Invalid_argument _ -> malformedf "malformed integer literal: %s" a)
+;;
+
+let real_decimal_lit st d =
+  match Rational_syntax.decimal d with
+  | Some (num, den) -> Context.real_const_big st.ctx ~num ~den
+  | None -> malformedf "malformed decimal literal: %s" d
+;;
+
+(* The exact fraction grammar is shared with the independent model reader through
+   [Rational_syntax].  The callbacks deliberately accept only lexer-classified numerals
+   and unquoted unary [-]/binary [/] applications: a quoted [|-|] or [|/|] is a user
+   symbol, never literal syntax. *)
+let rational_atom = function
+  | Sexp.Atom (Tok.Numeral n) -> Some n
+  | _ -> None
+;;
+
+let rational_minus = function
+  | Sexp.List [ Sexp.Atom (Tok.Symbol { text = "-"; quoted = false }); magnitude ] ->
+    Some magnitude
+  | _ -> None
+;;
+
+let rational_divide = function
+  | Sexp.List
+      [ Sexp.Atom (Tok.Symbol { text = "/"; quoted = false }); numerator; denominator ]
+    -> Some (numerator, denominator)
+  | _ -> None
 ;;
 
 (* ---- bitvector literals ---- *)
@@ -463,30 +492,88 @@ let rec validate_bang_attrs = function
       (Sexp.to_string other)
 ;;
 
-let rec read_term st scope (s : Sexp.t) : Term.t =
-  match s with
-  | Sexp.Atom tok -> read_atom st scope tok
-  | Sexp.List (Sexp.Atom (Tok.Reserved "let") :: rest) -> read_let st scope rest
-  (* [(! t :attr ...)] annotation: validate the attribute tail (F2), then keep the term
-     and drop the (well-formed) attributes (e.g. :named). *)
-  | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
-    validate_bang_attrs attrs;
-    read_term st scope body
-  (* [(_ bvN W)] decimal bitvector literal — a nullary indexed identifier (a constant
-     term, never applied), so it resolves here rather than through [read_app]. *)
-  | Sexp.List
-      [ Sexp.Atom (Tok.Reserved "_")
-      ; Sexp.Atom (Tok.Symbol { text; _ })
-      ; Sexp.Atom (Tok.Numeral width_s)
-      ]
-    when is_bv_dec_name text -> read_bv_dec_literal st ~text ~width_s
-  | Sexp.List (head :: args) -> read_app st scope head args s
-  | Sexp.List [] -> malformedf "empty application ()"
+let rational_integer n = Term.rational_of_frac_big ~num:n ~den:Bigint.one
+let rational_zero = rational_integer Bigint.zero
+let rational_one = rational_integer Bigint.one
+let rational_minus_one = rational_integer (Bigint.neg Bigint.one)
+
+(* SMT-LIB numerals default to Int.  The sole implicit widening is an [Int_const] used
+   where this same application establishes an expected Real sort.  In particular, an
+   Int variable or residual Int arithmetic term is never silently converted. *)
+let coerce_to_sort st expected (term : Term.t) =
+  if Sort.equal term.sort expected
+  then term
+  else if
+    Lra_config.enabled ()
+    && Sort.equal expected Sort.real
+    && Sort.equal term.sort Sort.int
+  then (
+    match term.node with
+    | Term.Int_const num -> Context.real_const_big st.ctx ~num ~den:Bigint.one
+    | _ -> malformedf "a nonconstant Int term cannot be implicitly coerced to Real")
+  else term
+;;
+
+let term_contains_real root =
+  let seen = Term.Table.create 32 in
+  let rec loop = function
+    | [] -> false
+    | (term : Term.t) :: rest when Term.Table.mem seen term -> loop rest
+    | (term : Term.t) :: rest ->
+      Term.Table.add seen term ();
+      if Sort.equal term.sort Sort.real
+      then true
+      else (
+        let children =
+          match term.node with
+          | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> []
+          | Term.App (_, args) | Term.And args | Term.Or args -> Iarr.to_list args
+          | Term.Arith linear ->
+            Iarr.fold (fun acc (child, _) -> child :: acc) [] linear.coeffs
+          | Term.Real_arith linear ->
+            Iarr.fold (fun acc (child, _) -> child :: acc) [] linear.coeffs
+          | Term.Le child | Term.Not child -> [ child ]
+          | Term.Eq (left, right) -> [ left; right ]
+          | Term.Ite (cond, then_, else_) -> [ cond; then_; else_ ]
+        in
+        loop (List.rev_append children rest))
+  in
+  loop [ root ]
+;;
+
+let rec read_term ?expected st scope (s : Sexp.t) : Term.t =
+  let term =
+    match s with
+    | Sexp.Atom tok -> read_atom st scope tok
+    | Sexp.List (Sexp.Atom (Tok.Reserved "let") :: rest) ->
+      read_let ?expected st scope rest
+    (* [(! t :attr ...)] annotation: validate the attribute tail (F2), then keep the term
+       and drop the (well-formed) attributes (e.g. :named). *)
+    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
+      validate_bang_attrs attrs;
+      read_term ?expected st scope body
+    (* [(_ bvN W)] decimal bitvector literal — a nullary indexed identifier (a constant
+       term, never applied), so it resolves here rather than through [read_app]. *)
+    | Sexp.List
+        [ Sexp.Atom (Tok.Reserved "_")
+        ; Sexp.Atom (Tok.Symbol { text; _ })
+        ; Sexp.Atom (Tok.Numeral width_s)
+        ]
+      when is_bv_dec_name text -> read_bv_dec_literal st ~text ~width_s
+    | Sexp.List (head :: args) -> read_app ?expected st scope head args s
+    | Sexp.List [] -> malformedf "empty application ()"
+  in
+  match expected with
+  | Some sort -> coerce_to_sort st sort term
+  | None -> term
 
 and read_atom st scope (tok : Tok.token) : Term.t =
   match tok with
   | Tok.Numeral n -> int_lit st n
-  | Tok.Decimal d -> unsupportedf "decimal (real) literal is not in QF_UFLIA: %s" d
+  | Tok.Decimal d ->
+    if Lra_config.enabled ()
+    then real_decimal_lit st d
+    else unsupportedf "decimal (real) literal is not in QF_UFLIA: %s" d
   | Tok.Hex h -> bv_literal st ~digits:h ~bits_per_digit:4 ~value_of_digit:hex_digit_value
   | Tok.Binary b ->
     bv_literal st ~digits:b ~bits_per_digit:1 ~value_of_digit:bin_digit_value
@@ -510,7 +597,7 @@ and read_atom st scope (tok : Tok.token) : Term.t =
              malformedf "function %s used without arguments" name
            | None -> malformedf "undeclared symbol: %s" name)))
 
-and read_let st scope rest =
+and read_let ?expected st scope rest =
   match rest with
   | [ Sexp.List bindings; body ] ->
     (* parallel let: definitions see the outer scope, then all extend it at once *)
@@ -529,12 +616,12 @@ and read_let st scope rest =
        right (first-listed binding added last) preserves the old assoc-list's first-match
        resolution of an intra-let duplicate name (ill-formed input either way). *)
     let scope = List.fold_right (fun (n, t) acc -> Scope.add n t acc) new_scope scope in
-    read_term st scope body
+    read_term ?expected st scope body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
 (* The application head selects interpretation. Only an UNQUOTED symbol can be a builtin
    operator; a quoted [|+|] head (or a reserved word) is never an operator. *)
-and read_app st scope head args orig =
+and read_app ?expected st scope head args orig =
   match head with
   (* F1 (codex): a let-/qvar-bound variable in HEAD position. [scope] must be consulted
      for the head, not just [read_atom] — SMT-LIB scoping shadows a global function of the
@@ -545,7 +632,8 @@ and read_app st scope head args orig =
      Binder-agnostic (any scope entry: [let] or a lemma qvar). *)
   | Sexp.Atom (Tok.Symbol { text; _ }) when Scope.mem text scope ->
     malformedf "bound variable %s cannot head an application (ill-sorted)" text
-  | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
+  | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) ->
+    read_op ?expected st scope op args orig
   | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
     apply_named st scope op args orig
   (* [(as t Sort)] sort ascription (e.g. [(as nil nat)]): read the term and CHECK the
@@ -556,8 +644,13 @@ and read_app st scope head args orig =
   | Sexp.Atom (Tok.Reserved "as") ->
     (match args with
      | [ t; sort_s ] ->
-       let term = read_term st scope t in
-       let ascribed = sort_of_sexp st sort_s in
+       let term, ascribed =
+         if Lra_config.enabled ()
+         then (
+           let ascribed = sort_of_sexp st sort_s in
+           coerce_to_sort st ascribed (read_term st scope t), ascribed)
+         else read_term st scope t, sort_of_sexp st sort_s
+       in
        if not (Sort.equal term.Term.sort ascribed)
        then
          malformedf
@@ -862,13 +955,37 @@ and apply_named st scope op args orig =
        and n_got = List.length args in
        if n_expect <> n_got
        then malformedf "%s applied to %d args, expected %d" op n_got n_expect;
-       Context.app st.ctx sym (List.map (read_term st scope) args)
+       Context.app
+         st.ctx
+         sym
+         (List.map2 (fun sort arg -> read_term ~expected:sort st scope arg) dom args)
      | None ->
        malformedf "undeclared function or unknown operator: %s" (Sexp.to_string orig))
 
-and read_op st scope op args orig =
+and read_op ?expected st scope op args orig =
   let rd = read_term st scope in
   let rds () = List.map rd args in
+  let same_sort_terms () =
+    let parsed = rds () in
+    if
+      Lra_config.enabled ()
+      && List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) parsed
+    then
+      List.map2
+        (fun arg (term : Term.t) ->
+           if Sort.equal term.sort Sort.real
+           then term
+           else read_term ~expected:Sort.real st scope arg)
+        args
+        parsed
+    else parsed
+  in
+  let numeric_terms () =
+    match expected with
+    | Some sort when Lra_config.enabled () && Sort.equal sort Sort.real ->
+      List.map (read_term ~expected:Sort.real st scope) args
+    | _ -> same_sort_terms ()
+  in
   match op, args with
   | "not", [ a ] -> Context.not_ st.ctx (rd a)
   | "not", _ -> malformedf "not expects 1 argument"
@@ -876,30 +993,91 @@ and read_op st scope op args orig =
   | "or", _ -> Context.or_ st.ctx (rds ())
   | "=>", _ :: _ :: _ -> read_implies st scope args
   | "=>", _ -> malformedf "=> expects >= 2 arguments"
-  | "ite", [ c; th; el ] -> Context.ite st.ctx (rd c) (rd th) (rd el)
+  | "ite", [ c; th_s; el_s ] when not (Lra_config.enabled ()) ->
+    Context.ite st.ctx (rd c) (rd th_s) (rd el_s)
+  | "ite", [ c; th_s; el_s ] ->
+    (* Match OCaml's evaluation order for the old constructor call above, so enabling
+       LRA does not perturb term tags for an Int-only [ite]. *)
+    let branch_expected =
+      match expected with
+      | Some sort when Sort.equal sort Sort.real -> Some Sort.real
+      | _ -> None
+    in
+    let read_branch branch = read_term ?expected:branch_expected st scope branch in
+    let el = read_branch el_s in
+    let th = read_branch th_s in
+    let c = rd c in
+    let branches =
+      if Option.is_some branch_expected
+      then [ th; el ]
+      else if Sort.equal th.sort Sort.real || Sort.equal el.sort Sort.real
+      then
+        [ read_term ~expected:Sort.real st scope th_s
+        ; read_term ~expected:Sort.real st scope el_s
+        ]
+      else [ th; el ]
+    in
+    (match branches with
+     | [ th; el ] -> Context.ite st.ctx c th el
+     | _ -> assert false)
   | "ite", _ -> malformedf "ite expects 3 arguments"
-  | "=", _ :: _ :: _ -> chain st (fun a b -> Context.eq st.ctx a b) (rds ())
+  | "=", _ :: _ :: _ ->
+    chain st (fun a b -> Context.eq st.ctx a b) (same_sort_terms ())
   | "=", _ -> malformedf "= expects >= 2 arguments"
-  | "distinct", _ :: _ :: _ -> Context.distinct st.ctx (rds ())
+  | "distinct", _ :: _ :: _ -> Context.distinct st.ctx (same_sort_terms ())
   | "distinct", _ -> malformedf "distinct expects >= 2 arguments"
-  | "<=", _ :: _ :: _ -> chain st (fun a b -> Context.le st.ctx a b) (rds ())
-  | "<", _ :: _ :: _ -> chain st (fun a b -> Context.lt st.ctx a b) (rds ())
-  | ">=", _ :: _ :: _ -> chain st (fun a b -> Context.ge st.ctx a b) (rds ())
-  | ">", _ :: _ :: _ -> chain st (fun a b -> Context.gt st.ctx a b) (rds ())
+  | "<=", _ :: _ :: _ ->
+    chain st (fun a b -> Context.le st.ctx a b) (same_sort_terms ())
+  | "<", _ :: _ :: _ ->
+    chain st (fun a b -> Context.lt st.ctx a b) (same_sort_terms ())
+  | ">=", _ :: _ :: _ ->
+    chain st (fun a b -> Context.ge st.ctx a b) (same_sort_terms ())
+  | ">", _ :: _ :: _ ->
+    chain st (fun a b -> Context.gt st.ctx a b) (same_sort_terms ())
   | ("<=" | "<" | ">=" | ">"), _ -> malformedf "%s expects >= 2 arguments" op
   (* Build sums in one [linear_combination] pass rather than left-folding [add]/[sub]: a
      left fold re-normalizes and hash-conses every partial sum (O(n^2) work AND O(n^2)
      interned intermediates — a real memory blowup on wide sums), while
      [linear_combination] merges once. The normalized result is identical. *)
-  | "+", _ :: _ -> Context.linear_combination st.ctx (List.map (fun a -> 1, rd a) args) 0
+  | "+", _ :: _ ->
+    let terms = numeric_terms () in
+    if List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) terms
+    then
+      Context.real_linear_combination_big
+        st.ctx
+        (List.map (fun term -> rational_one, term) terms)
+        rational_zero
+    else Context.linear_combination st.ctx (List.map (fun term -> 1, term) terms) 0
   | "+", [] -> malformedf "+ expects >= 1 argument"
   | "-", [ a ] -> Context.neg st.ctx (rd a)
-  | "-", x :: rest ->
+  | "-", _ :: _ ->
     (* a - b - c ... = 1*a + (-1)*b + (-1)*c ... *)
-    Context.linear_combination st.ctx ((1, rd x) :: List.map (fun a -> -1, rd a) rest) 0
+    let terms = numeric_terms () in
+    (match terms with
+     | first :: rest when Sort.equal first.sort Sort.real ->
+       Context.real_linear_combination_big
+         st.ctx
+         ((rational_one, first)
+          :: List.map (fun term -> rational_minus_one, term) rest)
+         rational_zero
+     | first :: rest ->
+       Context.linear_combination st.ctx ((1, first) :: List.map (fun term -> -1, term) rest) 0
+     | [] -> assert false)
   | "-", [] -> malformedf "- expects >= 1 argument"
-  | "*", _ :: _ -> read_mul st scope args
+  | "*", _ :: _ -> read_mul ?expected st scope args
   | "*", [] -> malformedf "* expects >= 1 argument"
+  | "/", _ when Lra_config.enabled () ->
+    (match
+       Rational_syntax.fraction
+         ~atom:rational_atom
+         ~minus:rational_minus
+         ~divide:rational_divide
+         orig
+     with
+     | Ok (num, den) -> Context.real_const_big st.ctx ~num ~den
+     | Error Rational_syntax.Zero_denominator -> malformedf "real literal division by zero"
+     | Error (Rational_syntax.Not_a_fraction | Rational_syntax.Invalid_signed_integer) ->
+       unsupportedf "nonconstant Real division is outside linear arithmetic")
   | "div", [ a; b ] -> Context.div st.ctx (rd a) (rd b)
   | "mod", [ a; b ] -> Context.mod_ st.ctx (rd a) (rd b)
   | ("div" | "mod"), _ -> malformedf "%s expects 2 arguments" op
@@ -959,7 +1137,7 @@ and expand st scope name (def : definition) arg_sexps =
   let bindings =
     List.map2
       (fun (pname, psort) arg ->
-        let t = read_term st scope arg in
+        let t = read_term ~expected:psort st scope arg in
         if not (Sort.equal t.Term.sort psort)
         then malformedf "define-fun %s: argument for %s has the wrong sort" name pname;
         pname, t)
@@ -978,7 +1156,7 @@ and expand st scope name (def : definition) arg_sexps =
     let param_scope =
       List.fold_right (fun (n, t) acc -> Scope.add n t acc) bindings Scope.empty
     in
-    let body = read_term st param_scope def.body in
+    let body = read_term ~expected:def.ret st param_scope def.body in
     Hashtbl.remove st.expanding name;
     if not (Sort.equal body.Term.sort def.ret)
     then malformedf "define-fun %s body sort differs from declared result sort" name;
@@ -994,27 +1172,71 @@ and read_implies st scope args =
 (* Linear multiplication only: at most one non-constant factor (DESIGN §1). Constant
    factors fold into a coefficient via [mul_const]; two or more non-constants is nonlinear
    and unsupported. *)
-and read_mul st scope args =
-  let ts = List.map (read_term st scope) args in
-  let consts, nonconsts =
-    List.partition_map
-      (fun (t : Term.t) ->
-        match t.node with
-        | Term.Int_const k -> Either.Left k
-        | _ -> Either.Right t)
-      ts
+and read_mul ?expected st scope args =
+  let parsed =
+    match expected with
+    | Some sort when Lra_config.enabled () && Sort.equal sort Sort.real ->
+      List.map (read_term ~expected:Sort.real st scope) args
+    | _ -> List.map (read_term st scope) args
   in
-  match nonconsts with
-  | _ :: _ :: _ -> unsupportedf "nonlinear multiplication (>= 2 non-constant factors)"
-  | _ ->
-    let base =
-      match nonconsts with
-      | [ t ] -> t
-      | _ -> Context.int_const st.ctx 1
+  let ts =
+    if
+      Lra_config.enabled ()
+      && List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) parsed
+    then
+      List.map2
+        (fun arg (term : Term.t) ->
+           if Sort.equal term.sort Sort.real
+           then term
+           else read_term ~expected:Sort.real st scope arg)
+        args
+        parsed
+    else parsed
+  in
+  if List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) ts
+  then (
+    let constants, nonconstants =
+      List.partition_map
+        (fun (term : Term.t) ->
+           match term.node with
+           | Term.Real_const q -> Either.Left q
+           | _ -> Either.Right term)
+        ts
     in
-    (* [k] is a [Bigint.t] coefficient (possibly > int63); fold with the
-       arbitrary-precision [mul_const_big]. *)
-    List.fold_left (fun acc k -> Context.mul_const_big st.ctx k acc) base consts
+    match nonconstants with
+    | _ :: _ :: _ -> unsupportedf "nonlinear multiplication (>= 2 non-constant factors)"
+    | _ ->
+      let num, den =
+        List.fold_left
+          (fun (num, den) (q : Term.rational) ->
+             Bigint.mul num q.num, Bigint.mul den q.den)
+          (Bigint.one, Bigint.one)
+          constants
+      in
+      (match nonconstants with
+       | [] -> Context.real_const_big st.ctx ~num ~den
+       | [ term ] -> Context.mul_real_const_big st.ctx ~num ~den term
+       | _ :: _ :: _ -> assert false))
+  else (
+    let consts, nonconsts =
+      List.partition_map
+        (fun (t : Term.t) ->
+           match t.node with
+           | Term.Int_const k -> Either.Left k
+           | _ -> Either.Right t)
+        ts
+    in
+    match nonconsts with
+    | _ :: _ :: _ -> unsupportedf "nonlinear multiplication (>= 2 non-constant factors)"
+    | _ ->
+      let base =
+        match nonconsts with
+        | [ t ] -> t
+        | _ -> Context.int_const st.ctx 1
+      in
+      (* [k] is a [Bigint.t] coefficient (possibly > int63); fold with the
+         arbitrary-precision [mul_const_big]. *)
+      List.fold_left (fun acc k -> Context.mul_const_big st.ctx k acc) base consts)
 
 (* [(rel a b c ...)] means the conjunction of consecutive pairs. *)
 and chain st mk ts =
@@ -1043,7 +1265,11 @@ let read_binders st (binders : Sexp.t) : (string * Sort.t) list =
         match b with
         | Sexp.List [ nm; srt ] ->
           (match Sexp.symbol_name nm with
-           | Some n -> n, sort_of_sexp st srt
+           | Some n ->
+             let sort = sort_of_sexp st srt in
+             if Lra_config.enabled () && Sort.equal sort Sort.real
+             then unsupportedf "quantification over Real is not supported";
+             n, sort
            | None -> malformedf "malformed quantifier binder name: %s" (Sexp.to_string nm))
         | _ -> malformedf "malformed quantifier binder: %s" (Sexp.to_string b))
       bs
@@ -1181,6 +1407,10 @@ let read_forall st (tail : Sexp.t list) : lemma_src =
     let skolem_witness cod = skolem ~cod ~args:(Array.to_list qvar_images) in
     let body = read_lemma_body st scope ~skolem_witness body_sexp in
     let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
+    if
+      Lra_config.enabled ()
+      && List.exists term_contains_real (body :: List.concat triggers)
+    then unsupportedf "a quantified body containing Real terms is not supported";
     body, triggers
   in
   { qvars; build }
@@ -1198,7 +1428,10 @@ let read_exists st (tail : Sexp.t list) : exists_src =
         Scope.empty
         (List.mapi (fun i (name, _sort) -> i, name) ex_qvars)
     in
-    read_term st scope body_sexp
+    let body = read_term st scope body_sexp in
+    if Lra_config.enabled () && term_contains_real body
+    then unsupportedf "a quantified body containing Real terms is not supported";
+    body
   in
   { ex_qvars; ex_build }
 ;;
@@ -1218,7 +1451,10 @@ let read_negated_exists st (tail : Sexp.t list) : lemma_src =
         Scope.empty
         (List.mapi (fun i (name, _sort) -> i, name) qvars)
     in
-    Context.not_ st.ctx (read_term st scope body_sexp), []
+    let body = read_term st scope body_sexp in
+    if Lra_config.enabled () && term_contains_real body
+    then unsupportedf "a quantified body containing Real terms is not supported";
+    Context.not_ st.ctx body, []
   in
   { qvars; build }
 ;;
@@ -1232,7 +1468,10 @@ let read_negated_forall st (tail : Sexp.t list) : exists_src =
         Scope.empty
         (List.mapi (fun i (name, _sort) -> i, name) ex_qvars)
     in
-    Context.not_ st.ctx (read_term st scope body_sexp)
+    let body = read_term st scope body_sexp in
+    if Lra_config.enabled () && term_contains_real body
+    then unsupportedf "a quantified body containing Real terms is not supported";
+    Context.not_ st.ctx body
   in
   { ex_qvars; ex_build }
 ;;
@@ -1638,6 +1877,8 @@ let check_not_reserved name =
 
 let declare_sort st name =
   check_not_reserved name;
+  if Lra_config.enabled () && String.equal name "Real"
+  then malformedf "cannot redeclare builtin sort Real";
   if Hashtbl.mem st.sorts name then malformedf "redeclaration of sort %s" name;
   match Env.declare_sort st.env name with
   | sym -> Hashtbl.replace st.sorts name sym
@@ -1646,6 +1887,8 @@ let declare_sort st name =
 
 let declare_fun st name dom cod =
   check_not_reserved name;
+  if Lra_config.enabled () && String.equal name "/"
+  then malformedf "cannot declare reserved symbol %s" name;
   if Hashtbl.mem st.funs name || Hashtbl.mem st.defines name
   then malformedf "redeclaration of symbol %s" name;
   match Env.declare_fun st.env name (Rank.create dom cod) with
@@ -1660,7 +1903,10 @@ let declare_fun st name dom cod =
 let define_fun st name params_sexp ret_sexp body =
   if Hashtbl.mem st.funs name || Hashtbl.mem st.defines name
   then malformedf "redeclaration of symbol %s" name;
-  if String.equal name "div" || String.equal name "mod"
+  if
+    String.equal name "div"
+    || String.equal name "mod"
+    || (Lra_config.enabled () && String.equal name "/")
   then malformedf "cannot define reserved symbol %s" name;
   let params =
     List.map
@@ -1807,6 +2053,7 @@ let parse_sort_decls (s : Sexp.t) =
    only UF + linear integers + universals solves; an AUFLIA file touching arrays degrades.
    Universals only: an [exists] in the body is rejected as {!Unsupported} regardless. *)
 let known_logic = function
+  | "QF_LRA" | "QF_UFLRA" -> Lra_config.enabled ()
   | "QF_UFLIA"
   | "QF_UF"
   | "QF_LIA"
@@ -1967,7 +2214,12 @@ let run st sexps =
            (match Sexp.simple l with
             | Some l when known_logic l -> logic := Some l
             | Some l ->
-              unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
+              if Lra_config.enabled ()
+              then
+                unsupportedf
+                  "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA/QF_LRA/QF_UFLRA)"
+                  l
+              else unsupportedf "unsupported logic: %s (need QF_UF/QF_LIA/QF_UFLIA)" l
             | None -> malformedf "malformed set-logic argument")
          | Some "set-info", _ ->
            (match rest with

@@ -48,8 +48,17 @@ val linear_combination : t -> (int * Term.t) list -> int -> Term.t
     numerals and by presolve when rebuilding a substituted linear term. *)
 val int_const_big : t -> Bigint.t -> Term.t
 
+val real_const_big : t -> num:Bigint.t -> den:Bigint.t -> Term.t
+
 val mul_const_big : t -> Bigint.t -> Term.t -> Term.t
+
+val mul_real_const_big :
+  t -> num:Bigint.t -> den:Bigint.t -> Term.t -> Term.t
+
 val linear_combination_big : t -> (Bigint.t * Term.t) list -> Bigint.t -> Term.t
+
+val real_linear_combination_big :
+  t -> (Term.rational * Term.t) list -> Term.rational -> Term.t
 
 (** [div t x d] / [mod_ t x d]: [d] must be a nonzero [Int_const], else
     {!Term.Unsupported} (a documented v1 limitation). Built on the reserved [div]/[mod]
@@ -63,7 +72,8 @@ val abs : t -> Term.t -> Term.t
 
 val eq : t -> Term.t -> Term.t -> Term.t
 
-(** [le]/[lt]/[ge]/[gt] all lower to a single gcd-normalized [Le] atom. *)
+(** [le]/[lt]/[ge]/[gt] lower to a single [Le] atom. Integer comparisons retain their
+    gcd/ceil normalization; Real comparisons preserve their exact rational bound. *)
 val le : t -> Term.t -> Term.t -> Term.t
 
 val lt : t -> Term.t -> Term.t -> Term.t

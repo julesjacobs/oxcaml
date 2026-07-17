@@ -345,7 +345,7 @@ let role_of t (term : Term.t) : Defs.entry option =
 let array_sort (sort : Sort.t) : (Sort.t * Sort.t) option =
   match sort with
   | Sort.Array (i, e) -> Some (i, e)
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
+  | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
     None
 ;;
 
@@ -414,7 +414,9 @@ let rec catalog t (term : Term.t) =
          catalog t c
        | Term.Arith lin ->
          List.iter (fun (c, _) -> catalog t c) (Iarr.to_list lin.Term.coeffs)
-       | Term.Bool_const _ | Term.Int_const _ -> ()
+       | Term.Real_arith lin ->
+         List.iter (fun (c, _) -> catalog t c) (Iarr.to_list lin.Term.coeffs)
+       | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ()
        | Term.App _ -> ()))
 ;;
 
@@ -1647,9 +1649,10 @@ let pop t n =
 
 let children (term : Term.t) : Term.t list =
   match term.Term.node with
-  | Term.Bool_const _ | Term.Int_const _ -> []
+  | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> []
   | Term.App (_, args) -> Iarr.to_list args
   | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+  | Term.Real_arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
   | Term.Le a | Term.Not a -> [ a ]
   | Term.Eq (a, b) -> [ a; b ]
   | Term.And a | Term.Or a -> Iarr.to_list a
@@ -1674,6 +1677,8 @@ let model t =
             else if Euf.are_equal t.engine term t.false_const
             then Model.Bool false
             else Model.Uninterp (Euf.class_of t.engine term)
+          else if Sort.equal term.Term.sort Sort.real
+          then raise (Term.Unsupported "Real mixed with arrays")
           else Model.Uninterp (Euf.class_of t.engine term)
       in
       acc := (term, v) :: !acc;
@@ -1729,7 +1734,9 @@ let array_model t : (Term.t * value) list option =
          with
          | Some n -> Model.Int n
          | None -> Model.Uninterp (Euf.class_of t.engine x))
-      | _ -> Model.Uninterp (Euf.class_of t.engine x))
+      | Sort.Real -> raise (Term.Unsupported "Real mixed with arrays")
+      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
+        Model.Uninterp (Euf.class_of t.engine x))
   in
   (* Group every registered [select b j] by the e-class of its array argument [b], so an
      array class's model map lists (value of j -> value of that select) for every read of
@@ -1775,6 +1782,7 @@ let array_model t : (Term.t * value) list option =
       | Sort.Array (_, e2) -> Array { entries = []; default = default_of e2 (depth + 1) }
       | Sort.Bool -> Scalar (Model.Bool false)
       | Sort.Int _ -> Scalar (Model.Int Bigint.zero)
+      | Sort.Real -> raise (Term.Unsupported "Real array element model is unsupported")
       | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
         Scalar (Model.Uninterp 0))
   and value_of (x : Term.t) (depth : int) : value =

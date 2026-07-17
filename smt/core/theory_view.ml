@@ -13,7 +13,8 @@ let is_atom (t : Term.t) =
   | Eq (a, _) -> not (Sort.equal a.sort Sort.bool)
   | App (_, _) -> Sort.equal t.sort Sort.bool
   | Bool_const _ -> true
-  | And _ | Or _ | Not _ | Ite _ | Arith _ | Int_const _ -> false
+  | And _ | Or _ | Not _ | Ite _ | Arith _ | Real_arith _ | Int_const _ | Real_const _ ->
+    false
 ;;
 
 let atom (t : Term.t) =
@@ -34,5 +35,15 @@ let is_app (t : Term.t) =
 let linear (t : Term.t) =
   match t.node with
   | Arith l -> Some l
-  | _ -> None
+  | ( Bool_const _
+    | Int_const _
+    | Real_const _
+    | App _
+    | Real_arith _
+    | Le _
+    | Eq _
+    | Not _
+    | And _
+    | Or _
+    | Ite _ ) -> None
 ;;

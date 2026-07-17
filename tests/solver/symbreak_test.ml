@@ -242,7 +242,8 @@ let value_precedence_mutant ctx (assertions : Term.t list) =
         walk a;
         walk b
       | Arith lin -> Iarr.iter (fun (tm, _) -> walk tm) lin.Term.coeffs
-      | Bool_const _ | Int_const _ -> ())
+      | Real_arith lin -> Iarr.iter (fun (tm, _) -> walk tm) lin.Term.coeffs
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
   in
   List.iter walk assertions;
   let cs = Array.of_list (Term.Set.elements !consts) in
@@ -369,7 +370,8 @@ let sym_aux_names terms =
         walk a;
         walk b
       | Arith lin -> Iarr.iter (fun (tm, _) -> walk tm) lin.Term.coeffs
-      | Bool_const _ | Int_const _ -> ())
+      | Real_arith lin -> Iarr.iter (fun (tm, _) -> walk tm) lin.Term.coeffs
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
   in
   List.iter walk terms;
   !names
@@ -402,7 +404,8 @@ let test_f1_incremental () =
       w a;
       w b
     | Arith lin -> Iarr.iter (fun (tm, _) -> w tm) lin.Term.coeffs
-    | Bool_const _ | Int_const _ -> ()
+    | Real_arith lin -> Iarr.iter (fun (tm, _) -> w tm) lin.Term.coeffs
+    | Bool_const _ | Int_const _ | Real_const _ -> ()
   in
   List.iter w parsed.Parser.assertions;
   let c n = Context.app ctx (Hashtbl.find symtab n) [] in
@@ -589,7 +592,8 @@ let test_b4_prior_assertion () =
       w a;
       w b
     | Arith lin -> Iarr.iter (fun (tm, _) -> w tm) lin.Term.coeffs
-    | Bool_const _ | Int_const _ -> ()
+    | Real_arith lin -> Iarr.iter (fun (tm, _) -> w tm) lin.Term.coeffs
+    | Bool_const _ | Int_const _ | Real_const _ -> ()
   in
   List.iter w parsed.Parser.assertions;
   let c n = Context.app ctx (Hashtbl.find symtab n) [] in

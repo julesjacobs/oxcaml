@@ -20,6 +20,12 @@ type result =
    unchanged returns the identical node. *)
 let same_tag (a : Term.t) (b : Term.t) = a.Term.tag = b.Term.tag
 
+let zero_for_numeric_sort ctx = function
+  | Sort.Int _ -> Context.int_const ctx 0
+  | Sort.Real -> Context.real_const_big ctx ~num:Bigint.zero ~den:Bigint.one
+  | _ -> invalid_arg "Presolve.zero_for_numeric_sort: non-numeric sort"
+;;
+
 (* Map [f] left-to-right; return [None] when every result is the identical node as its
    input, so the caller can reuse its original hash-consed node instead of rebuilding it
    (which would only re-derive the same node). *)
@@ -54,11 +60,12 @@ let rec occurs (x : Term.t) (t : Term.t) =
   match t.node with
   | App (_, args) -> Iarr.exists (occurs x) args
   | Arith lin -> Iarr.exists (fun (tm, _c) -> occurs x tm) lin.coeffs
+  | Real_arith lin -> Iarr.exists (fun (tm, _c) -> occurs x tm) lin.coeffs
   | Le a | Not a -> occurs x a
   | Eq (a, b) -> occurs x a || occurs x b
   | And xs | Or xs -> Iarr.exists (occurs x) xs
   | Ite (c, a, b) -> occurs x c || occurs x a || occurs x b
-  | Bool_const _ | Int_const _ -> false
+  | Bool_const _ | Int_const _ | Real_const _ -> false
 ;;
 
 (* [t] contains no applied (arity >= 1) function/predicate — i.e. no EUF-owned node. A
@@ -70,11 +77,12 @@ let rec uf_free (t : Term.t) =
   match t.node with
   | App (_, args) -> Iarr.length args = 0
   | Arith lin -> Iarr.for_all (fun (tm, _c) -> uf_free tm) lin.coeffs
+  | Real_arith lin -> Iarr.for_all (fun (tm, _c) -> uf_free tm) lin.coeffs
   | Le a | Not a -> uf_free a
   | Eq (a, b) -> uf_free a && uf_free b
   | And xs | Or xs -> Iarr.for_all uf_free xs
   | Ite (c, a, b) -> uf_free c && uf_free a && uf_free b
-  | Bool_const _ | Int_const _ -> true
+  | Bool_const _ | Int_const _ | Real_const _ -> true
 ;;
 
 (* The nullary variables that occur UNDER an uninterpreted-function application anywhere
@@ -102,6 +110,7 @@ let under_uf_vars (assertions : Term.t list) =
       | App (_, args) when Iarr.length args > 0 -> Iarr.iter (walk ~under_uf:true) args
       | App (_, _) -> if under_uf then acc := Term.Set.add t !acc
       | Arith lin -> Iarr.iter (fun (tm, _c) -> walk ~under_uf tm) lin.coeffs
+      | Real_arith lin -> Iarr.iter (fun (tm, _c) -> walk ~under_uf tm) lin.coeffs
       | Le a | Not a -> walk ~under_uf a
       | Eq (a, b) ->
         walk ~under_uf a;
@@ -111,7 +120,7 @@ let under_uf_vars (assertions : Term.t list) =
         walk ~under_uf c;
         walk ~under_uf a;
         walk ~under_uf b
-      | Bool_const _ | Int_const _ -> ())
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
   in
   List.iter (walk ~under_uf:false) assertions;
   !acc
@@ -175,6 +184,7 @@ let reaches visited sigma ~target (t : Term.t) =
           | None -> ())
       | App (_, args) -> Iarr.iter go args
       | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+      | Real_arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
       | Le a | Not a -> go a
       | Eq (a, b) ->
         go a;
@@ -184,7 +194,7 @@ let reaches visited sigma ~target (t : Term.t) =
         go c;
         go a;
         go b
-      | Bool_const _ | Int_const _ -> ())
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
   in
   go t;
   !found
@@ -407,7 +417,7 @@ let run ctx assertions =
          hash-cons lookup). Prunes the rebuild to only the paths that actually mention an
          alias. *)
       match t.node with
-      | Bool_const _ | Int_const _ -> t
+      | Bool_const _ | Int_const _ | Real_const _ -> t
       | App (sym, args) ->
         if Iarr.length args = 0
         then t (* a surviving variable — unchanged (preserves hash-cons identity) *)
@@ -426,6 +436,7 @@ let run ctx assertions =
             (Iarr.to_list lin.coeffs)
         in
         if !changed then Context.linear_combination_big ctx coeffs' lin.const else t
+      | Real_arith _ -> t
       | Le a ->
         (* Preserve the OLD rebuild's [Int_const 0] interning at the same point (right-to-
            left arg eval interns it before [subst a]): it is an orphan here but LIA search
@@ -527,8 +538,8 @@ type ctx_env =
 (* An Int or Bool literal — the only right-hand side admitted for equality substitution. *)
 let is_literal (t : Term.t) =
   match t.node with
-  | Int_const _ | Bool_const _ -> true
-  | App _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
+  | Int_const _ | Real_const _ | Bool_const _ -> true
+  | App _ | Arith _ | Real_arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
 ;;
 
 (* A bare non-reserved nullary variable — the only admissible substitution left-hand side.
@@ -537,7 +548,17 @@ let is_bare_var (t : Term.t) =
   match t.node with
   | App (sym, args) ->
     Iarr.length args = 0 && not (Env.is_reserved_name (Symbol.name sym))
-  | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ | Bool_const _ ->
+  | Int_const _
+  | Real_const _
+  | Arith _
+  | Real_arith _
+  | Le _
+  | Eq _
+  | Not _
+  | And _
+  | Or _
+  | Ite _
+  | Bool_const _ ->
     false
 ;;
 
@@ -580,9 +601,10 @@ let simplify_contextual ctx assertions =
       let b =
         match t.node with
         | Ite _ -> true
-        | Bool_const _ | Int_const _ -> false
+        | Bool_const _ | Int_const _ | Real_const _ -> false
         | App (_, args) -> Iarr.exists has_ite args
         | Arith lin -> Iarr.exists (fun (tm, _c) -> has_ite tm) lin.coeffs
+        | Real_arith lin -> Iarr.exists (fun (tm, _c) -> has_ite tm) lin.coeffs
         | Le a | Not a -> has_ite a
         | Eq (a, b) -> has_ite a || has_ite b
         | And xs | Or xs -> Iarr.exists has_ite xs
@@ -599,7 +621,17 @@ let simplify_contextual ctx assertions =
   let rec assume env (atom : Term.t) ~truth =
     match atom.node with
     | Not d -> assume env d ~truth:(not truth)
-    | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ | Eq _ | And _ | Or _ | Ite _ ->
+    | Bool_const _
+    | Int_const _
+    | Real_const _
+    | App _
+    | Arith _
+    | Real_arith _
+    | Le _
+    | Eq _
+    | And _
+    | Or _
+    | Ite _ ->
       let atoms = Term.Map.add atom truth env.atoms in
       let subst =
         if truth
@@ -613,8 +645,10 @@ let simplify_contextual ctx assertions =
             else env.subst
           | Bool_const _
           | Int_const _
+          | Real_const _
           | App _
           | Arith _
+          | Real_arith _
           | Le _
           | Not _
           | And _
@@ -659,6 +693,7 @@ let simplify_contextual ctx assertions =
     match t.node with
     | Bool_const b -> Context.bool_const ctx b
     | Int_const n -> Context.int_const_big ctx n
+    | Real_const q -> Context.real_const_big ctx ~num:q.num ~den:q.den
     | App (sym, args) ->
       if Iarr.length args = 0
       then t (* a variable — unchanged (preserves hash-cons identity) *)
@@ -668,7 +703,12 @@ let simplify_contextual ctx assertions =
         ctx
         (List.map (fun (tm, co) -> co, simp env tm) (Iarr.to_list lin.coeffs))
         lin.const
-    | Le a -> Context.le ctx (simp env a) (Context.int_const ctx 0)
+    | Real_arith lin ->
+      Context.real_linear_combination_big
+        ctx
+        (List.map (fun (tm, co) -> co, simp env tm) (Iarr.to_list lin.coeffs))
+        lin.const
+    | Le a -> Context.le ctx (simp env a) (zero_for_numeric_sort ctx a.sort)
     | Eq (a, b) -> Context.eq ctx (simp env a) (simp env b)
     | Not a -> Context.not_ ctx (simp env a)
     | And xs -> Context.and_ ctx (List.map (simp env) (Iarr.to_list xs))
@@ -678,7 +718,17 @@ let simplify_contextual ctx assertions =
       (match c'.node with
        | Bool_const true -> simp env a
        | Bool_const false -> simp env b
-       | App _ | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ ->
+       | App _
+       | Int_const _
+       | Real_const _
+       | Arith _
+       | Real_arith _
+       | Le _
+       | Eq _
+       | Not _
+       | And _
+       | Or _
+       | Ite _ ->
          let env_then = assume env c' ~truth:true in
          let env_else = assume env c' ~truth:false in
          let a' = simp env_then a in
@@ -793,9 +843,9 @@ exception Proj_budget
    size-1-bounded so the projection cannot blow up term size. *)
 let proj_is_leaf (t : Term.t) =
   match t.node with
-  | Int_const _ | Bool_const _ -> true
+  | Int_const _ | Real_const _ | Bool_const _ -> true
   | App (_, args) -> Iarr.length args = 0
-  | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
+  | Arith _ | Real_arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
 ;;
 
 (* Build a Bool-sorted [(ite c x y)] collapsing the forms the {!Node} constructor leaves
@@ -847,7 +897,7 @@ let simplify_projection ctx assertions =
       r
   and rewrite (t : Term.t) : Term.t =
     match t.node with
-    | Bool_const _ | Int_const _ -> t
+    | Bool_const _ | Int_const _ | Real_const _ -> t
     | App (sym, args) ->
       if Iarr.length args = 0
       then t (* a variable — unchanged (preserves hash-cons identity) *)
@@ -857,7 +907,12 @@ let simplify_projection ctx assertions =
         ctx
         (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
         lin.const
-    | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+    | Real_arith lin ->
+      Context.real_linear_combination_big
+        ctx
+        (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+        lin.const
+    | Le a -> Context.le ctx (go a) (zero_for_numeric_sort ctx a.sort)
     | Not a -> Context.not_ ctx (go a)
     | And xs -> Context.and_ ctx (List.map go (Iarr.to_list xs))
     | Or xs -> Context.or_ ctx (List.map go (Iarr.to_list xs))
@@ -941,9 +996,10 @@ let simplify_projection ctx assertions =
       let b =
         match t.node with
         | Ite _ -> true
-        | Bool_const _ | Int_const _ -> false
+        | Bool_const _ | Int_const _ | Real_const _ -> false
         | App (_, args) -> Iarr.exists has_ite args
         | Arith lin -> Iarr.exists (fun (tm, _c) -> has_ite tm) lin.coeffs
+        | Real_arith lin -> Iarr.exists (fun (tm, _c) -> has_ite tm) lin.coeffs
         | Le a | Not a -> has_ite a
         | Eq (a, b) -> has_ite a || has_ite b
         | And xs | Or xs -> Iarr.exists has_ite xs
@@ -1085,6 +1141,7 @@ let symbreak_rebuild ctx sigma bump terms =
           (match t.node with
            | Bool_const b -> Context.bool_const ctx b
            | Int_const n -> Context.int_const_big ctx n
+           | Real_const q -> Context.real_const_big ctx ~num:q.num ~den:q.den
            | App (sym, args) ->
              if Iarr.length args = 0
              then t
@@ -1094,7 +1151,12 @@ let symbreak_rebuild ctx sigma bump terms =
                ctx
                (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
                lin.const
-           | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+           | Real_arith lin ->
+             Context.real_linear_combination_big
+               ctx
+               (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+               lin.const
+           | Le a -> Context.le ctx (go a) (zero_for_numeric_sort ctx a.sort)
            | Eq (a, b) -> Context.eq ctx (go a) (go b)
            | Not a -> Context.not_ ctx (go a)
            | And xs -> Context.and_ ctx (List.map go (Iarr.to_list xs))
@@ -1268,6 +1330,7 @@ let symmetry_break ~counter cap env ctx assertions =
                harvest a)
             args
         | Arith lin -> Iarr.iter (fun (tm, _c) -> harvest tm) lin.coeffs
+        | Real_arith lin -> Iarr.iter (fun (tm, _c) -> harvest tm) lin.coeffs
         | Le a | Not a -> harvest a
         | Eq (a, b) ->
           harvest a;
@@ -1277,7 +1340,7 @@ let symmetry_break ~counter cap env ctx assertions =
           harvest c;
           harvest a;
           harvest b
-        | Bool_const _ | Int_const _ -> ())
+        | Bool_const _ | Int_const _ | Real_const _ -> ())
     in
     List.iter harvest conjuncts;
     let sig_of c =

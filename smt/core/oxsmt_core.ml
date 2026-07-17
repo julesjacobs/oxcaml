@@ -11,6 +11,8 @@
     outside; likewise the no-copy [Iarr_unsafe] cast. *)
 
 module Bigint = Bigint
+module Lra_config = Lra_config
+module Rational_syntax = Rational_syntax
 module Iarr = Iarr
 module Symbol = Symbol
 module Sort = Sort

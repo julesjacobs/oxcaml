@@ -112,7 +112,8 @@ let rec eval_int interp (t : Term.t) : int =
       | Some def -> eval_int interp def
       | None -> SymTbl.find interp.ints sym)
     else func_int sym (List.map (eval_int interp) (Iarr.to_list args))
-  | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ -> failwith "eval_int: non-Int node"
+  | Real_const _ | Real_arith _ | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ ->
+    failwith "eval_int: non-Int node"
 
 and eval_bool interp (t : Term.t) : bool =
   match t.node with
@@ -133,7 +134,8 @@ and eval_bool interp (t : Term.t) : bool =
       | Some def -> eval_bool interp def
       | None -> SymTbl.find interp.bools sym)
     else func_bool sym (List.map (eval_int interp) (Iarr.to_list args))
-  | Int_const _ | Arith _ -> failwith "eval_bool: non-Bool node"
+  | Int_const _ | Real_const _ | Arith _ | Real_arith _ ->
+    failwith "eval_bool: non-Bool node"
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -156,9 +158,10 @@ and has_divmod_app (t : Term.t) =
 
 and children (t : Term.t) =
   match t.node with
-  | Bool_const _ | Int_const _ -> []
+  | Bool_const _ | Int_const _ | Real_const _ -> []
   | App (_, xs) | And xs | Or xs -> Iarr.to_list xs
   | Arith l -> List.map fst (Iarr.to_list l.Term.coeffs)
+  | Real_arith l -> List.map fst (Iarr.to_list l.Term.coeffs)
   | Le a | Not a -> [ a ]
   | Eq (a, b) -> [ a; b ]
   | Ite (a, b, c) -> [ a; b; c ]

@@ -54,7 +54,8 @@ let is_bv_sym sym = is_bv_name (Symbol.name sym)
 let width_of_sort (s : Sort.t) =
   match s with
   | Sort.BitVec w -> Some w
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ -> None
+  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.Real ->
+    None
 ;;
 
 let pow2 w =
@@ -197,7 +198,9 @@ let view (t : Term.t) =
       | _ -> None)
   | Term.Bool_const _
   | Term.Int_const _
+  | Term.Real_const _
   | Term.Arith _
+  | Term.Real_arith _
   | Term.Le _
   | Term.Eq _
   | Term.Not _
@@ -226,7 +229,7 @@ let build_app ctx mint name domain codomain args =
 let width_exn (x : Term.t) ~what =
   match x.Term.sort with
   | Sort.BitVec w -> w
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ ->
+  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.Real ->
     raise (Term.Sort_error (Printf.sprintf "Bv.%s: operand is not a bitvector" what))
 ;;
 

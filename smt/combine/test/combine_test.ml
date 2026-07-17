@@ -255,12 +255,18 @@ module Ctrl_router = struct
     | o -> o
   ;;
 
+  let arithmetic_sort = function
+    | Sort.Int _ -> true
+    | _ -> false
+  ;;
+
   let equality_split ctx x y =
     [ Context.eq ctx x y; Context.lt ctx x y; Context.gt ctx x y ]
   ;;
 end
 
 module Cmock = Cmb.Combine (Ctrl_router) (MockA) (MockB)
+module Cmock_real = Cmb.Combine (Oxsmt_combine.Uflra_router) (MockA) (MockB)
 
 let reset_mocks () =
   clear_log ();
@@ -1055,6 +1061,55 @@ let test_router_polarity_contract () =
      | _ -> false)
 ;;
 
+let test_real_router_and_model () =
+  reset_mocks ();
+  let f = fixture () in
+  let real name =
+    Context.const f.ctx (Env.declare_fun f.env name (Rank.create [] Sort.real))
+  in
+  let x = real "real-router-x" in
+  let y = real "real-router-y" in
+  let zero = Context.real_const_big f.ctx ~num:Bigint.zero ~den:Bigint.one in
+  let le = Context.le f.ctx x zero in
+  let eq = Context.eq f.ctx x y in
+  let module R = Oxsmt_combine.Uflra_router in
+  check "real router: Real order atom routes to LRA" (R.owner le = R.B);
+  check "real router: Real equality registers with both children" (R.owner eq = R.Both);
+  check
+    "real router: negative Real equality reaches both children"
+    (R.assert_to eq ~positive:false = R.Both);
+  (match R.equality_split f.ctx x y with
+   | head :: _ :: _ :: [] ->
+     check "real router: trichotomy retains equality guard" (Term.equal head eq)
+   | _ -> check "real router: trichotomy retains equality guard" false);
+  let ix = const f "real-router-int-x" in
+  let izero = Context.int_const f.ctx 0 in
+  let foreign = Context.le f.ctx ix izero in
+  let rejected =
+    try
+      ignore (R.owner foreign : R.owner);
+      false
+    with
+    | Cmb.Combination_unsound _ -> true
+  in
+  check "real router: foreign Int order atom fails closed" rejected;
+  let atom = fresh_atom f in
+  let value = Term.rational_of_frac_big ~num:(Bigint.of_int 7) ~den:(Bigint.of_int 3) in
+  (MockA.model_fn := fun () -> [ x, Model.Uninterp 9; y, Model.Uninterp 9 ]);
+  (MockB.model_fn := fun () -> [ x, Model.Real value ]);
+  let combined = Cmock_real.create f.ctx f.env in
+  Cmock_real.register_atom combined atom eq;
+  let model = Cmock_real.model combined in
+  let inherited term =
+    match Model.value model term with
+    | Some (Model.Real q) ->
+      Bigint.equal q.num value.num && Bigint.equal q.den value.den
+    | _ -> false
+  in
+  check "real model merge: LRA value reaches source class member" (inherited x);
+  check "real model merge: LRA value propagates across EUF class" (inherited y)
+;;
+
 (* ================================================================================== *)
 (* Part 2 — INTEGRATION: toy EUF + toy LIA + a mini DPLL(T) driver. *)
 (* ================================================================================== *)
@@ -1089,9 +1144,11 @@ let eval_atom (asg : int Term.Map.t) (t : Term.t) : bool =
 let rec lia_atoms (acc : Term.Set.t) (t : Term.t) : Term.Set.t =
   match t.Term.node with
   | Term.Int_const _ -> Term.Set.add t acc
+  | Term.Real_const _ -> acc
   | Term.App (_, _) -> Term.Set.add t acc
   | Term.Arith lin ->
     Iarr.fold (fun acc (child, _) -> lia_atoms acc child) acc lin.Term.coeffs
+  | Term.Real_arith _ -> acc
   | Term.Le a -> lia_atoms acc a
   | Term.Eq (a, b) -> lia_atoms (lia_atoms acc a) b
   | Term.Not a -> lia_atoms acc a
@@ -1266,10 +1323,12 @@ module Toy_euf = struct
     | Term.Le a -> add_subterms acc a
     | Term.Arith lin ->
       Iarr.fold (fun acc (c, _) -> add_subterms acc c) acc lin.Term.coeffs
+    | Term.Real_arith lin ->
+      Iarr.fold (fun acc (c, _) -> add_subterms acc c) acc lin.Term.coeffs
     | Term.Not a -> add_subterms acc a
     | Term.And xs | Term.Or xs -> Iarr.fold add_subterms acc xs
     | Term.Ite (a, b, c) -> add_subterms (add_subterms (add_subterms acc a) b) c
-    | Term.Bool_const _ | Term.Int_const _ -> acc
+    | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> acc
   ;;
 
   let register_atom t a term =
@@ -3173,6 +3232,7 @@ let () =
   test_explain_fallback ();
   test_compact_dag_registration ();
   test_router_polarity_contract ();
+  test_real_router_and_model ();
   Printf.printf "\n== combine integration (toy EUF + toy LIA + mini DPLL(T)) ==\n";
   test_integration_sat ();
   test_integration_unsat_direct ();

@@ -26,3 +26,4 @@ module Hnf = Hnf
 module Lia = Lia
 module Lra = Lra
 module Lia_adapter = Lia_adapter
+module Lra_adapter = Lra_adapter

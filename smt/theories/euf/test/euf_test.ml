@@ -81,9 +81,10 @@ let closure (seeds : Term.t list) : Term.t array =
       let kids =
         Term.(
           match t.node with
-          | Bool_const _ | Int_const _ -> []
+          | Bool_const _ | Int_const _ | Real_const _ -> []
           | App (_, a) -> Iarr.to_list a
           | Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+          | Real_arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
           | Le a -> [ a ]
           | Eq (a, b) -> [ a; b ]
           | Not a -> [ a ]

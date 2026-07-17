@@ -1,10 +1,11 @@
 (** How the solver reads a term for theory dispatch (ADR-0003 Decision 2). The [App] vs
-    [Arith]/[Le] split is the load-bearing signal: EUF congruence-closes only [App];
-    [Arith]/[Le] are opaque leaves owned by LIA. *)
+    arithmetic/[Le] split is the load-bearing signal: EUF congruence-closes only [App];
+    [Arith], [Real_arith], and [Le] are opaque leaves owned by LIA or LRA according to
+    their sort. *)
 
 type atom =
   | Equality of Term.t * Term.t (* non-Bool Eq: uninterpreted / shared equality *)
-  | Le_zero of Term.t (* LIA: [term <= 0] *)
+  | Le_zero of Term.t (* LIA/LRA: [term <= 0] *)
   | Predicate of Symbol.t * Term.t Iarr.t (* Bool-codomain App *)
   | Bool_lit of bool
 

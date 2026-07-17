@@ -51,12 +51,19 @@ val set_leaf_certificate_trace : t -> leaf_certificate_trace option -> unit
 (** Backward-compatible LIA-only installation. *)
 val set_lia_certificate_trace : t -> lia_certificate_trace option -> unit
 
+type arithmetic_family =
+  | None_seen
+  | Integer
+  | Real
+  | Mixed
+
 (** A model value / table cell (eval-agnostic; the CLI renders it to the §8 self-check
     sidecar grammar). [VUninterp i] is a 0-based ELEMENT INDEX into its uninterpreted
     sort's finite universe (not the raw e-graph class id — {!model} remaps). *)
 type value =
   | VBool of bool
   | VInt of Bigint.t (* arbitrary precision (core-bignum W2) *)
+  | VReal of Oxsmt_lia.Rational.t
   | VUninterp of int
 
 (** A total interpretation of one uninterpreted function/predicate: [cases] maps
@@ -104,6 +111,7 @@ val create
   -> budget:Budget.t
   -> registry:Oxsmt_core.Datatype_defs.t ref
   -> array_registry:Oxsmt_core.Array_defs.t ref
+  -> arithmetic_family:arithmetic_family ref
   -> cap:Oxsmt_core.Env.reserved_cap
   -> t
 
@@ -175,7 +183,7 @@ val effort_used : t -> int
 (** task #106: the LIA adapter's observational conflict evidence, re-exported so
     {!Session} can surface it. Only the EUF+LIA stack carries it (DT/arrays give [None]).
     See {!Oxsmt_lia.Lia_adapter.conflict_core}. *)
-type conflict_core = Oxsmt_lia.Lia_adapter.conflict_core =
+type conflict_core =
   { farkas : Oxsmt_lia.Rational.t list option
   ; atoms : (Term.t * bool) list
   }

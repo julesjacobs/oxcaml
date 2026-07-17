@@ -8,6 +8,7 @@ module type ROUTER = sig
 
   val owner : Term.t -> owner
   val assert_to : Term.t -> positive:bool -> owner
+  val arithmetic_sort : Sort.t -> bool
   val equality_split : Context.t -> Term.t -> Term.t -> Term.t list
 end
 
@@ -337,12 +338,14 @@ end = struct
       | Term.App (_, args) -> Iarr.fold add_subterms acc args
       | Term.Arith lin ->
         Iarr.fold (fun acc (c, _) -> add_subterms acc c) acc lin.Term.coeffs
+      | Term.Real_arith lin ->
+        Iarr.fold (fun acc (c, _) -> add_subterms acc c) acc lin.Term.coeffs
       | Term.Le a -> add_subterms acc a
       | Term.Eq (a, b) -> add_subterms (add_subterms acc a) b
       | Term.Not a -> add_subterms acc a
       | Term.And xs | Term.Or xs -> Iarr.fold add_subterms acc xs
       | Term.Ite (a, b, c) -> add_subterms (add_subterms (add_subterms acc a) b) c
-      | Term.Bool_const _ | Term.Int_const _ -> acc)
+      | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> acc)
   ;;
 
   (* A shared equality atom [Eq (x, y)] over non-Bool sides: record the pair for pinning. *)
@@ -370,7 +373,8 @@ end = struct
   let node_owner (term : Term.t) =
     match term.Term.node with
     | Term.App (_, args) -> if Iarr.length args > 0 then O_euf else O_neutral
-    | Term.Arith _ | Term.Le _ | Term.Int_const _ -> O_lia
+    | Term.Arith _ | Term.Real_arith _ | Term.Le _ | Term.Int_const _
+    | Term.Real_const _ -> O_lia
     | Term.Bool_const _ -> O_euf
     | Term.Eq _ | Term.Not _ | Term.And _ | Term.Or _ | Term.Ite _ -> O_neutral
   ;;
@@ -387,9 +391,10 @@ end = struct
      buried crossing — ADR §3.1 C2 / the mixed-equality totality test). *)
   let walk_children (term : Term.t) : Term.t list =
     match term.Term.node with
-    | Term.Bool_const _ | Term.Int_const _ -> []
+    | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> []
     | Term.App (_, args) -> Iarr.to_list args
     | Term.Arith lin -> List.map fst (Iarr.to_list lin.Term.coeffs)
+    | Term.Real_arith lin -> List.map fst (Iarr.to_list lin.Term.coeffs)
     | Term.Le a -> [ a ]
     | Term.Eq (a, b) -> [ a; b ]
     | Term.Not a -> [ a ]
@@ -428,15 +433,7 @@ end = struct
       then (
         Hashtbl.replace visited key ();
         let o = node_owner term in
-        let is_int =
-          match term.Term.sort with
-          | Sort.Int _ -> true
-          | Sort.Bool
-          | Sort.Uninterpreted _
-          | Sort.Datatype _
-          | Sort.Array _
-          | Sort.BitVec _ -> false
-        in
+        let is_arithmetic = R.arithmetic_sort term.Term.sort in
         (* PRECONDITION defensive check (codex): preprocessing lifts every Int-sorted
            [Ite] before assertion (ADR-0003 invariant 10); a residual one would take no
            use-bit for its neutral-parented Int branches and silently under-approximate.
@@ -444,7 +441,7 @@ end = struct
            release [-noassert] build (codex AP4), so raise [Combination_unsound] (→ engine
            CONTRACT-POISON → [unknown]) rather than let a residual Int-[Ite] pass. *)
         (match term.Term.node with
-         | Term.Ite _ when is_int ->
+         | Term.Ite _ when is_arithmetic ->
            raise
              (Combination_unsound
                 "residual Int-Ite in interface walk: preprocessing must lift it \
@@ -459,10 +456,10 @@ end = struct
            merged model can leak an EUF-inconsistent LIA arrangement. Neutral parent still
            bounds nothing on its own — a neutral CHILD (bare var) is never a boundary (no
            owner to differ); it enters only via the both-used clause below. *)
-        if is_int && o <> O_neutral && o <> parent_owner
+        if is_arithmetic && o <> O_neutral && o <> parent_owner
         then t.interface <- Term.Set.add term t.interface;
         (* neutral Int variable: record the per-owner use bit; both bits set ⇒ interface *)
-        if is_int && o = O_neutral && parent_owner <> O_neutral
+        if is_arithmetic && o = O_neutral && parent_owner <> O_neutral
         then mark_use term parent_owner;
         (* H1 (codex): the congruence child DECIDES every equality (merge for [=], diseq
            for [≠]), so a bare Int variable that is an OPERAND of an equality atom is
@@ -477,7 +474,8 @@ end = struct
            List.iter
              (fun (side : Term.t) ->
                match side.Term.node, side.Term.sort with
-               | Term.App (_, sa), Sort.Int _ when Iarr.length sa = 0 ->
+               | Term.App (_, sa), sort
+                 when Iarr.length sa = 0 && R.arithmetic_sort sort ->
                  mark_use side O_euf
                | _ -> ())
              [ a; b ]
@@ -507,9 +505,11 @@ end = struct
                 (Incomplete
                    "structured Bool compound as an uninterpreted-function argument")
             (* Int-sorted nodes are unreachable under [Sort.Bool] (frozen 9-node set). *)
-            | Term.Int_const _ | Term.Arith _ -> ())
+            | Term.Int_const _ | Term.Real_const _ | Term.Arith _ | Term.Real_arith _ ->
+              ())
          | ( ( Sort.Bool
              | Sort.Int _
+             | Sort.Real
              | Sort.Uninterpreted _
              | Sort.Datatype _
              | Sort.Array _
@@ -674,9 +674,24 @@ end = struct
   let value_equal (u : Model.value) (v : Model.value) =
     match u, v with
     | Model.Int a, Model.Int b -> Bigint.equal a b
+    | Model.Real a, Model.Real b ->
+      Bigint.equal a.Term.num b.Term.num && Bigint.equal a.Term.den b.Term.den
     | Model.Bool a, Model.Bool b -> Bool.equal a b
     | Model.Uninterp a, Model.Uninterp b -> a = b
     | _ -> false
+  ;;
+
+  let rational_add (a : Term.rational) (b : Term.rational) =
+    Term.rational_of_frac_big
+      ~num:
+        (Bigint.add (Bigint.mul a.num b.den) (Bigint.mul b.num a.den))
+      ~den:(Bigint.mul a.den b.den)
+  ;;
+
+  let rational_mul (a : Term.rational) (b : Term.rational) =
+    Term.rational_of_frac_big
+      ~num:(Bigint.mul a.num b.num)
+      ~den:(Bigint.mul a.den b.den)
   ;;
 
   (* EVALUATE a term through a child's model. A child (esp. the arithmetic one) keys only
@@ -700,6 +715,17 @@ end = struct
            | (child, coeff) :: rest ->
              (match model_eval model child with
               | Some (Model.Int v) -> fold (Bigint.add acc (Bigint.mul coeff v)) rest
+              | _ -> None)
+         in
+         fold lin.Term.const (Iarr.to_list lin.Term.coeffs)
+       | Term.Real_const q -> Some (Model.Real q)
+       | Term.Real_arith lin ->
+         let rec fold acc = function
+           | [] -> Some (Model.Real acc)
+           | (child, coeff) :: rest ->
+             (match model_eval model child with
+              | Some (Model.Real value) ->
+                fold (rational_add acc (rational_mul coeff value)) rest
               | _ -> None)
          in
          fold lin.Term.const (Iarr.to_list lin.Term.coeffs)
@@ -750,9 +776,12 @@ end = struct
   let find_disagreement t ma mb =
     let candidate (term : Term.t) =
       match term.Term.sort with
-      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _
-        -> false
-      | Sort.Int _ -> true
+      | Sort.Bool
+      | Sort.Uninterpreted _
+      | Sort.Datatype _
+      | Sort.Array _
+      | Sort.BitVec _ -> false
+      | (Sort.Int _ | Sort.Real) as sort -> R.arithmetic_sort sort
     in
     let valued =
       Term.Set.elements t.interface
@@ -827,7 +856,7 @@ end = struct
             (Incomplete
                "array-sorted term live at Sat certification: handled by the standalone \
                 arrays theory, not this combinator")
-        | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.BitVec _ -> ())
+        | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Uninterpreted _ | Sort.BitVec _ -> ())
       t.all_terms
   ;;
 
@@ -847,8 +876,31 @@ end = struct
             (Incomplete
                "bitvector-sorted term live at Sat certification: decided by \
                 bit-blasting, not the combinator")
-        | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _
+        | Sort.Bool
+        | Sort.Int _
+        | Sort.Real
+        | Sort.Uninterpreted _
+        | Sort.Datatype _
+        | Sort.Array _
           -> ())
+      t.all_terms
+  ;;
+
+  let require_no_foreign_arithmetic t =
+    Term.Set.iter
+      (fun (term : Term.t) ->
+        match term.Term.sort with
+        | (Sort.Int _ | Sort.Real) as sort when not (R.arithmetic_sort sort) ->
+          raise
+            (Incomplete
+               "term belongs to an arithmetic sort not handled by this combination")
+        | Sort.Bool
+        | Sort.Int _
+        | Sort.Real
+        | Sort.Uninterpreted _
+        | Sort.Datatype _
+        | Sort.Array _
+        | Sort.BitVec _ -> ())
       t.all_terms
   ;;
 
@@ -904,6 +956,7 @@ end = struct
          (* Int arrangement agrees; about to certify Sat — now require every buried Bool
             UF argument to be bound (else a wrong-SAT would leak, codex H2). *)
          require_bool_args_bound t ma;
+         require_no_foreign_arithmetic t;
          require_no_datatype_terms t;
          require_no_bitvec_terms t;
          Theory.Sat)
@@ -1182,11 +1235,7 @@ end = struct
      non-boundary (pure-EUF) Int merge is filtered out (sound to skip; it is not LIA's
      business). *)
   let notify_candidate t (term : Term.t) =
-    (match term.Term.sort with
-     | Sort.Int _ -> true
-     | Sort.Bool | Sort.Uninterpreted _ -> false
-     | _ -> false)
-    && Term.Set.mem term t.interface
+    R.arithmetic_sort term.Term.sort && Term.Set.mem term t.interface
   ;;
 
   (* Try to notify LIA of one hub merge [s = u] (F1c notify-OUT). Registers a
@@ -1299,6 +1348,7 @@ end = struct
        | Some split -> Theory.Split split
        | None ->
          require_bool_args_bound t ma;
+         require_no_foreign_arithmetic t;
          require_no_datatype_terms t;
          require_no_bitvec_terms t;
          Theory.Sat)
@@ -1483,11 +1533,56 @@ end = struct
               | _ -> Hashtbl.replace class_int cid n)
            | _ -> ())
         | Sort.Bool
+        | Sort.Real
         | Sort.Uninterpreted _
         | Sort.Datatype _
         | Sort.Array _
         | Sort.BitVec _ -> ())
       t.all_terms;
+    let rational_compare (a : Term.rational) (b : Term.rational) =
+      Bigint.compare (Bigint.mul a.num b.den) (Bigint.mul b.num a.den)
+    in
+    let rational_key (q : Term.rational) =
+      Bigint.to_string q.num ^ "/" ^ Bigint.to_string q.den
+    in
+    let class_real : (int, Term.rational) Hashtbl.t = Hashtbl.create 64 in
+    let used_real : (string, unit) Hashtbl.t = Hashtbl.create 64 in
+    if R.arithmetic_sort Sort.real
+    then (
+      Term.Set.iter
+        (fun term ->
+          match model_eval mb term with
+          | Some (Model.Real q) -> Hashtbl.replace used_real (rational_key q) ()
+          | _ -> ())
+        t.all_terms;
+      Term.Set.iter
+        (fun (term : Term.t) ->
+          match term.sort, model_eval mb term, model_eval ma term with
+          | Sort.Real, Some (Model.Real q), Some (Model.Uninterp cid) ->
+            (match Hashtbl.find_opt class_real cid with
+             | Some old when rational_compare old q <= 0 -> ()
+             | _ -> Hashtbl.replace class_real cid q)
+          | _ -> ())
+        t.all_terms;
+      let next = ref Bigint.zero in
+      let fresh () =
+        let rec loop () =
+          let q = Term.rational_of_frac_big ~num:!next ~den:Bigint.one in
+          next := Bigint.add !next Bigint.one;
+          if Hashtbl.mem used_real (rational_key q) then loop () else q
+        in
+        loop ()
+      in
+      Term.Set.iter
+        (fun (term : Term.t) ->
+          match term.sort, model_eval ma term with
+          | Sort.Real, Some (Model.Uninterp cid)
+            when not (Hashtbl.mem class_real cid) ->
+            let q = fresh () in
+            Hashtbl.add class_real cid q;
+            Hashtbl.replace used_real (rational_key q) ()
+          | _ -> ())
+        t.all_terms);
     let int_variant term =
       match model_eval mb term, model_eval ma term with
       | Some (Model.Int _ as v), _ | _, Some (Model.Int _ as v) -> Some v
@@ -1514,6 +1609,13 @@ end = struct
             | None -> Some v)
          | _ -> None)
     in
+    let real_variant term =
+      match model_eval mb term, model_eval ma term with
+      | Some (Model.Real _ as value), _ | _, Some (Model.Real _ as value) -> Some value
+      | _, Some (Model.Uninterp cid) ->
+        Option.map (fun q -> Model.Real q) (Hashtbl.find_opt class_real cid)
+      | _ -> None
+    in
     let variant term matches =
       match model_eval ma term, model_eval mb term with
       | Some v, _ when matches v -> Some v
@@ -1526,6 +1628,7 @@ end = struct
         let value =
           match term.Term.sort with
           | Sort.Int _ -> int_variant term
+          | Sort.Real -> real_variant term
           | Sort.Bool ->
             variant term (function
               | Model.Bool _ -> true

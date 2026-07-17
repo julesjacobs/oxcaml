@@ -32,13 +32,24 @@ let subst ctx lookup body =
         ctx
         (List.map (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
         l.const
-    | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+    | Real_arith l ->
+      Context.real_linear_combination_big
+        ctx
+        (List.map (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
+        l.const
+    | Le a ->
+      let zero =
+        if Sort.equal a.sort Sort.real
+        then Context.real_const_big ctx ~num:Bigint.zero ~den:Bigint.one
+        else Context.int_const ctx 0
+      in
+      Context.le ctx (go a) zero
     | Eq (a, b) -> Context.eq ctx (go a) (go b)
     | Not a -> Context.not_ ctx (go a)
     | And xs -> Context.and_ ctx (List.map go (Iarr.to_list xs))
     | Or xs -> Context.or_ ctx (List.map go (Iarr.to_list xs))
     | Ite (c, a, b) -> Context.ite ctx (go c) (go a) (go b)
-    | Bool_const _ | Int_const _ -> term
+    | Bool_const _ | Int_const _ | Real_const _ -> term
   in
   go body
 ;;

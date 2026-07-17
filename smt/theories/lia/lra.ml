@@ -304,6 +304,48 @@ let value t v =
   List.assoc v (model t)
 ;;
 
+let existing_row_for_coeffs t coeffs =
+  let coeffs = normalize_coeffs t coeffs in
+  match coeffs with
+  | [ v, q ] when Rational.equal q Rational.one -> Some v
+  | _ ->
+    let key = List.map (fun (v, q) -> v, Rational.to_string q) coeffs in
+    Hashtbl.find_opt t.slacks key
+;;
+
+let fixed_value t ~coeffs ~constant =
+  ensure_live t;
+  match existing_row_for_coeffs t coeffs with
+  | None -> None
+  | Some row ->
+    (match Simplex.get_lower t.simplex row, Simplex.get_upper t.simplex row with
+     | Some (lower_reason, lower), Some (upper_reason, upper)
+       when Delta.is_rational lower
+            && Delta.is_rational upper
+            && Rational.equal (Delta.c_part lower) (Delta.c_part upper) ->
+       Some
+         ( Rational.add (Delta.c_part lower) constant
+         , lower_reason.premise
+         , upper_reason.premise )
+     | _ -> None)
+;;
+
+let oriented_bound t ~coeffs ~constant which =
+  ensure_live t;
+  match existing_row_for_coeffs t coeffs with
+  | None -> None
+  | Some row ->
+    let bound =
+      match which with
+      | `Lower -> Simplex.get_lower t.simplex row
+      | `Upper -> Simplex.get_upper t.simplex row
+    in
+    (match bound with
+     | Some (reason, delta) when Delta.is_rational delta ->
+       Some (reason.premise, Rational.add (Delta.c_part delta) constant)
+     | Some _ | None -> None)
+;;
+
 let push t =
   ensure_live t;
   Simplex.push t.simplex;
@@ -328,4 +370,21 @@ let pop t n =
   if n > 0 then t.model_ready <- false
 ;;
 
-let pivot_count t = Simplex.pivot_count t.simplex
+type checkpoint =
+  { simplex : int
+  ; asserted : int
+  }
+
+let checkpoint t =
+  ensure_live t;
+  { simplex = Simplex.checkpoint t.simplex; asserted = Dynarray.length t.asserted }
+;;
+
+let rewind_to_checkpoint t checkpoint =
+  ensure_live t;
+  Simplex.rewind_to_checkpoint t.simplex checkpoint.simplex;
+  Dynarray.truncate t.asserted checkpoint.asserted;
+  t.model_ready <- false
+;;
+
+let pivot_count (t : 'premise t) = Simplex.pivot_count t.simplex

@@ -9,6 +9,7 @@
  (modules oxsmt_cli)
  (libraries
   oxsmt_core
+  oxsmt_lia
   oxsmt_interface
   oxsmt_smtlib_parser
   oxsmt_smtlib
@@ -24,6 +25,14 @@
   oxsmt_interface
   oxsmt_smtlib_parser
   oxsmt_query_loader))
+
+; Exact QF_LRA/QF_UFLRA Session wiring and model-check discrimination tests
+; (make lra-wiring-test).
+
+(executable
+ (name lra_wiring_test)
+ (modules lra_wiring_test)
+ (libraries oxsmt_core oxsmt_lia oxsmt_interface unix))
 
 ; Online symmetry-breaking unit + discrimination tests (make symbreak-test).
 

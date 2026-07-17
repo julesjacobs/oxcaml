@@ -27,10 +27,11 @@ let rec term_contains_qvar (t : Term.t) =
   | App (sym, args) ->
     is_qvar_name (Symbol.name sym) || Iarr.exists term_contains_qvar args
   | Arith l -> Iarr.exists (fun (tm, _c) -> term_contains_qvar tm) l.coeffs
+  | Real_arith l -> Iarr.exists (fun (tm, _c) -> term_contains_qvar tm) l.coeffs
   | Le a -> term_contains_qvar a
   | Eq (a, b) -> term_contains_qvar a || term_contains_qvar b
   | Not a -> term_contains_qvar a
   | And xs | Or xs -> Iarr.exists term_contains_qvar xs
   | Ite (c, a, b) -> term_contains_qvar c || term_contains_qvar a || term_contains_qvar b
-  | Bool_const _ | Int_const _ -> false
+  | Bool_const _ | Int_const _ | Real_const _ -> false
 ;;

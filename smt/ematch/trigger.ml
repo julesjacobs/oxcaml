@@ -48,8 +48,8 @@ let qvars_in qvars t =
        | None -> ())
     | App (_, args) -> Iarr.iter go args
     (* Not an [App] descent: a ground leaf to the matcher, so no binding site inside. *)
-    | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ | Bool_const _ | Int_const _ ->
-      ()
+    | Arith _ | Real_arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ | Bool_const _
+    | Int_const _ | Real_const _ -> ()
   in
   go t;
   List.sort Int.compare (Hashtbl.fold (fun i () acc -> i :: acc) seen [])
@@ -61,11 +61,12 @@ let rec size (t : Term.t) =
   match t.node with
   | App (_, args) -> Iarr.fold (fun n a -> n + size a) 1 args
   | Arith l -> Iarr.fold (fun n (tm, _c) -> n + size tm) 1 l.coeffs
+  | Real_arith l -> Iarr.fold (fun n (tm, _c) -> n + size tm) 1 l.coeffs
   | Le a | Not a -> 1 + size a
   | Eq (a, b) -> 1 + size a + size b
   | And xs | Or xs -> Iarr.fold (fun n a -> n + size a) 1 xs
   | Ite (c, a, b) -> 1 + size c + size a + size b
-  | Bool_const _ | Int_const _ -> 1
+  | Bool_const _ | Int_const _ | Real_const _ -> 1
 ;;
 
 (* Every uninterpreted-application subterm ([App] with arity >= 1) of [body] that binds at
@@ -88,6 +89,7 @@ let candidates qvars body =
     match t.node with
     | App (_, args) -> Iarr.iter go args
     | Arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
+    | Real_arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
     | Le a | Not a -> go a
     | Eq (a, b) ->
       go a;
@@ -97,7 +99,7 @@ let candidates qvars body =
       go c;
       go a;
       go b
-    | Bool_const _ | Int_const _ -> ()
+    | Bool_const _ | Int_const _ | Real_const _ -> ()
   in
   go body;
   !out

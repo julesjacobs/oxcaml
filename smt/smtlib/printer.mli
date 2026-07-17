@@ -1,6 +1,7 @@
 (** SMT-LIB2 printer (SHIPPED code). Renders a session — an {!Env.t}, an ordered list of
     assertion {!Term.t}s, and an optional expected {!Status.t} — as a complete SMT-LIB2
-    script over the [QF_UFLIA] logic.
+    script. Integer sessions retain the existing [QF_UFLIA] output. With [OXSMT_LRA]
+    enabled, Real sessions select [QF_LRA] or [QF_UFLRA] from their term contents.
 
     Stdlib-only (INVARIANTS.md I3): depends on {!Oxsmt_core}, nothing else. This is the
     stable interchange format for the Lean oracle and the public benchmark corpora
@@ -10,6 +11,8 @@
     {b Rendering choices} (documented so standard tools and our own parser agree):
     - Integer constants: [n >= 0] as the numeral; [n < 0] as [(- N)] with [N] the absolute
       value (so [min_int] is handled without a negation overflow).
+    - Exact Real constants: an integral value is a decimal such as [3.0]; a non-integral
+      value is [(/ p q)] with positive [q], and a negative value uses outer unary minus.
     - [Arith] linear forms render as a sum whose summands are [(<STAR> c t)] products
       (with [<STAR>] the multiplication operator): a coefficient of 1 renders the term
       bare, a nonzero constant is the final summand (omitted when 0), and a lone product
@@ -30,8 +33,9 @@
     unrepresentable and are refused rather than mis-rendered:
     - names containing [|] or [\\] ([|...|] has no escape);
     - names equal to a predefined function/operator symbol ([+ - * abs <= < >= > = distinct
-      => and or not xor ite true false]) — [|+|] is still the operator [+]; and, in sort
-      position, names equal to a predefined sort ([Int]/[Bool]);
+      => and or not xor ite true false], plus [/] when LRA is enabled) — [|+|] is still
+      the operator [+]; and, in sort position, names equal to a predefined sort
+      ([Int]/[Bool], plus [Real] when LRA is enabled);
     - the empty name.
     A name that is merely a reserved {e word} ([let], [as], [forall], [_], [!], …) is
     representable and is emitted [|quoted|], not refused. *)
@@ -62,7 +66,7 @@ val print_term
 
     {[
       (set-info :status STATUS)   ; only when [status] is given
-      (set-logic QF_UFLIA)
+      (set-logic QF_UFLIA)        ; or QF_LRA/QF_UFLRA for Real content
       (declare-sort S 0)          ; uninterpreted sorts, first-use order
       (declare-fun f (Int) Int)   ; arity >= 1 symbols, first-use order
       (declare-const x Int)       ; arity 0 symbols

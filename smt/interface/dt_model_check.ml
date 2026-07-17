@@ -141,7 +141,8 @@ let make_inhabits reg : Sort.t -> v -> bool =
         | Sort.Uninterpreted _
         | Sort.Datatype _
         | Sort.Array _
-        | Sort.BitVec _ )
+        | Sort.BitVec _
+        | Sort.Real )
       , _ ) -> false
   in
   inhabits
@@ -215,7 +216,7 @@ let ev_with (reg : Defs.t) (env : v Term.Table.t) =
     | Term.Or xs ->
       Leaf (Model.Bool (Iarr.fold (fun acc x -> acc || as_bool (ev x)) false xs))
     | Term.Ite (c, a, b) -> if as_bool (ev c) then ev a else ev b
-    | Term.Le _ | Term.Arith _ ->
+    | Term.Le _ | Term.Arith _ | Term.Real_const _ | Term.Real_arith _ ->
       (* arithmetic is not in the pure-DT fragment (a datatype+LIA problem degrades to
          [unknown] at solve time before this runs); no faithful value here => fail closed. *)
       raise Bad

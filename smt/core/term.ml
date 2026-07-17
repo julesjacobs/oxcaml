@@ -3,6 +3,11 @@
    builders are library-private), so this module cannot forge terms either — only match on
    them. *)
 
+type rational = Node.rational =
+  { num : Bigint.t
+  ; den : Bigint.t
+  }
+
 type t = Node.t =
   { node : node
   ; sort : Sort.t
@@ -20,15 +25,24 @@ and node = Node.node =
   | And of t Iarr.t
   | Or of t Iarr.t
   | Ite of t * t * t
+  | Real_const of rational
+  | Real_arith of real_linear
 
 and linear = Node.linear =
   { coeffs : (t * Bigint.t) Iarr.t
   ; const : Bigint.t
   }
 
+and real_linear = Node.real_linear =
+  { coeffs : (t * rational) Iarr.t
+  ; const : rational
+  }
+
 exception Overflow = Node.Overflow
 exception Sort_error = Node.Sort_error
 exception Unsupported = Node.Unsupported
+
+let rational_of_frac_big ~num ~den = Node.rational_of_frac_big ~num ~den
 
 let equal (a : t) (b : t) = a.tag = b.tag
 let compare (a : t) (b : t) = Int.compare a.tag b.tag
@@ -88,6 +102,41 @@ module Debug = struct
       cs
   ;;
 
+  let check_rational what q =
+    if Bigint.sign q.den <= 0 then fail "%s has a non-positive denominator" what;
+    if Bigint.is_zero q.num
+    then (
+      if not (Bigint.equal q.den Bigint.one) then fail "%s zero is not 0/1" what)
+    else if not (Bigint.equal (Bigint.gcd q.num q.den) Bigint.one)
+    then fail "%s is not reduced" what
+  ;;
+
+  let check_real_arith (l : real_linear) =
+    check_rational "Real_arith constant" l.const;
+    let cs = Iarr.to_list l.coeffs in
+    if cs = [] then fail "Real_arith with empty coeffs should be Real_const";
+    (match cs with
+     | [ (_, c) ]
+       when Bigint.equal c.num Bigint.one
+            && Bigint.equal c.den Bigint.one
+            && Bigint.is_zero l.const.num ->
+       fail "Real_arith {[(a,1)];0} should have unwrapped to a"
+     | _ -> ());
+    let prev = ref min_int in
+    List.iter
+      (fun (t, c) ->
+         check_rational "Real_arith coefficient" c;
+         if Bigint.is_zero c.num then fail "Real_arith has a zero coefficient";
+         if not (Sort.equal t.sort Sort.real)
+         then fail "Real_arith coefficient term is not Real";
+         (match t.node with
+          | Real_arith _ -> fail "Real_arith coefficient term is itself a Real_arith"
+          | _ -> ());
+         if t.tag <= !prev then fail "Real_arith coeffs not strictly tag-increasing";
+         prev := t.tag)
+      cs
+  ;;
+
   let gcd_of_coeffs (l : linear) =
     Iarr.fold (fun g (_, c) -> Bigint.gcd g c) Bigint.zero l.coeffs
   ;;
@@ -100,6 +149,9 @@ module Debug = struct
       | Bool_const _ ->
         if not (Sort.equal t.sort Sort.bool) then fail "Bool_const not Bool"
       | Int_const _ -> if not (Sort.equal t.sort Sort.int) then fail "Int_const not Int"
+      | Real_const q ->
+        if not (Sort.equal t.sort Sort.real) then fail "Real_const not Real";
+        check_rational "Real_const" q
       | App (sym, args) ->
         if mode = Pipeline && is_reserved_divmod sym
         then fail "reserved div/mod App survived to pipeline";
@@ -122,12 +174,17 @@ module Debug = struct
       | Arith l ->
         if not (Sort.equal t.sort Sort.int) then fail "Arith not Int";
         check_arith l
+      | Real_arith l ->
+        if not (Sort.equal t.sort Sort.real) then fail "Real_arith not Real";
+        check_real_arith l
       | Le arg ->
         if not (Sort.equal t.sort Sort.bool) then fail "Le not Bool";
-        if not (Sort.equal arg.sort Sort.int) then fail "Le arg not Int";
+        if not (Sort.equal arg.sort Sort.int || Sort.equal arg.sort Sort.real)
+        then fail "Le arg is neither Int nor Real";
         (match arg.node with
          | Int_const _ -> fail "Le arg is a constant (should have folded)"
-         | Arith l ->
+         | Real_const _ -> fail "Le arg is a constant (should have folded)"
+         | Arith l when Sort.equal arg.sort Sort.int ->
            if not (Bigint.equal (gcd_of_coeffs l) Bigint.one)
            then fail "Le not gcd-normalized (gcd <> 1)"
          | _ -> () (* bare term: single coeff 1, gcd = 1 *))
@@ -170,8 +227,9 @@ module Debug = struct
          | Bool_const _ -> fail "Ite condition is constant (should have folded)"
          | _ -> ());
         if a.tag = b.tag then fail "Ite(_,a,a) not folded";
-        if mode = Pipeline && Sort.equal t.sort Sort.int
-        then fail "Int-sorted Ite survived to pipeline"
+        if mode = Pipeline
+           && (Sort.equal t.sort Sort.int || Sort.equal t.sort Sort.real)
+        then fail "arithmetic-sorted Ite survived to pipeline"
     in
     let rec visit (t : t) =
       match Hashtbl.find_opt seen t.tag with
@@ -184,9 +242,10 @@ module Debug = struct
         List.iter visit (children t)
     and children (t : t) =
       match t.node with
-      | Bool_const _ | Int_const _ -> []
+      | Bool_const _ | Int_const _ | Real_const _ -> []
       | App (_, xs) | And xs | Or xs -> Iarr.to_list xs
       | Arith l -> List.map fst (Iarr.to_list l.coeffs)
+      | Real_arith l -> List.map fst (Iarr.to_list l.coeffs)
       | Le a | Not a -> [ a ]
       | Eq (a, b) -> [ a; b ]
       | Ite (a, b, c) -> [ a; b; c ]

@@ -59,7 +59,7 @@ let connective_children (t : Term.t) =
   | And xs | Or xs -> Iarr.to_list xs
   | Eq (a, b) -> [ a; b ]
   | Ite (c, a, b) -> [ c; a; b ]
-  | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ ->
+  | Bool_const _ | Int_const _ | Real_const _ | App _ | Arith _ | Real_arith _ | Le _ ->
     invalid_arg "Cnf: connective_children on a non-connective"
 ;;
 
@@ -161,7 +161,14 @@ let clausify (formula : Term.t) =
            emit [ Lit.negate lc; Lit.negate la; pos g ];
            emit [ lc; neg g; lb ];
            emit [ lc; Lit.negate lb; pos g ]
-         | Bool_const _ | Le _ | App _ | Int_const _ | Arith _ | Not _ ->
+         | Bool_const _
+         | Le _
+         | App _
+         | Int_const _
+         | Real_const _
+         | Arith _
+         | Real_arith _
+         | Not _ ->
            (* not reachable: non-atoms are exactly And/Or/Eq(bool)/Ite; Not has no var *)
            invalid_arg "Cnf.clausify: unexpected non-connective in phase B"))
     ordered;

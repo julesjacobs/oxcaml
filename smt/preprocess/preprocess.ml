@@ -94,7 +94,7 @@ let ite_removal t root =
       r
   and rewrite (term : Term.t) =
     match term.node with
-    | Bool_const _ | Int_const _ -> term
+    | Bool_const _ | Int_const _ | Real_const _ -> term
     | App (sym, args) ->
       (match map_go go (Iarr.to_list args) with
        | None -> term
@@ -110,7 +110,18 @@ let ite_removal t root =
           (Iarr.to_list l.coeffs)
       in
       if !changed then Context.linear_combination_big ctx coeffs' l.const else term
-    | Le a ->
+    | Real_arith l ->
+      let changed = ref false in
+      let coeffs' =
+        map_lr
+          (fun (tm, c) ->
+            let tm' = go tm in
+            if not (same_tag tm tm') then changed := true;
+            c, tm')
+          (Iarr.to_list l.coeffs)
+      in
+      if !changed then Context.real_linear_combination_big ctx coeffs' l.const else term
+    | Le a when Sort.equal a.sort Sort.int ->
       (* Preserve the OLD unconditional rebuild's side effect: [Context.int_const ctx 0]
          first-interns the standalone [Int_const 0] term. It is an orphan here, but LIA
          search may later reuse it and its hash-cons tag must match trunk; skipping it
@@ -118,6 +129,10 @@ let ite_removal t root =
          [go a] to match OCaml's right-to-left argument evaluation of the old
          [Context.le ctx (go a) (Context.int_const ctx 0)]. *)
       let zero = Context.int_const ctx 0 in
+      let a' = go a in
+      if same_tag a a' then term else Context.le ctx a' zero
+    | Le a ->
+      let zero = Context.real_const_big ctx ~num:Bigint.zero ~den:Bigint.one in
       let a' = go a in
       if same_tag a a' then term else Context.le ctx a' zero
     | Eq (a, b) ->
@@ -236,7 +251,7 @@ let div_mod_elimination t root =
       in
       let q, r = get_qr x' dv in
       if Symbol.equal sym div_sym then q else r
-    | Bool_const _ | Int_const _ -> term
+    | Bool_const _ | Int_const _ | Real_const _ -> term
     | App (sym, args) ->
       (match map_go go (Iarr.to_list args) with
        | None -> term
@@ -252,11 +267,26 @@ let div_mod_elimination t root =
           (Iarr.to_list l.coeffs)
       in
       if !changed then Context.linear_combination_big ctx coeffs' l.const else term
-    | Le a ->
+    | Real_arith l ->
+      let changed = ref false in
+      let coeffs' =
+        map_lr
+          (fun (tm, c) ->
+            let tm' = go tm in
+            if not (same_tag tm tm') then changed := true;
+            c, tm')
+          (Iarr.to_list l.coeffs)
+      in
+      if !changed then Context.real_linear_combination_big ctx coeffs' l.const else term
+    | Le a when Sort.equal a.sort Sort.int ->
       (* Preserve the OLD rebuild's [Int_const 0] interning at the same point
          (right-to-left arg eval interns it before [go a]); see the matching note in
          [ite_removal]. *)
       let zero = Context.int_const ctx 0 in
+      let a' = go a in
+      if same_tag a a' then term else Context.le ctx a' zero
+    | Le a ->
+      let zero = Context.real_const_big ctx ~num:Bigint.zero ~den:Bigint.one in
       let a' = go a in
       if same_tag a a' then term else Context.le ctx a' zero
     | Eq (a, b) ->

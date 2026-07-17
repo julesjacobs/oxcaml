@@ -92,7 +92,8 @@ let rec inhabits (sort : Sort.t) (value : v) : bool =
       | Sort.Uninterpreted _
       | Sort.Array _
       | Sort.Datatype _
-      | Sort.BitVec _ )
+      | Sort.BitVec _
+      | Sort.Real )
     , _ ) -> false
 ;;
 
@@ -108,7 +109,8 @@ let ev_with (reg : Adefs.t) (env : v Term.Table.t) =
     | Term.Or xs ->
       Scalar (Model.Bool (Iarr.fold (fun acc x -> acc || as_bool (ev x)) false xs))
     | Term.Ite (c, a, b) -> if as_bool (ev c) then ev a else ev b
-    | Term.Le _ | Term.Arith _ -> raise Bad (* no arithmetic in the QF_AX fragment *)
+    | Term.Le _ | Term.Arith _ | Term.Real_const _ | Term.Real_arith _ ->
+      raise Bad (* no arithmetic in the QF_AX fragment *)
     | Term.App (sym, args) ->
       let args = Array.of_list (Iarr.to_list args) in
       (match Adefs.role_of_sym reg sym with

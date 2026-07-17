@@ -125,6 +125,9 @@ module type ROUTER = sig
       assertion match). *)
   val assert_to : Term.t -> positive:bool -> owner
 
+  (** The single arithmetic sort owned by child B. *)
+  val arithmetic_sort : Sort.t -> bool
+
   (** [equality_split ctx x y] is the disjunction the combinator emits as a
       {!Oxsmt_core.Theory.Split} when the two candidate models disagree on [x = y]: a
       clausified, genuinely-constraining set of {b ≥2 DISTINCT} atoms whose disjunction is

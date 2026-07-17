@@ -1,12 +1,26 @@
 open Oxsmt_core
 
-(** A semantic value in the model domain (task board #74). Four kinds, one per supported
+module Rational : sig
+  type t
+
+  val zero : t
+  val of_big_frac : num:Bigint.t -> den:Bigint.t -> t
+  val of_term : Term.rational -> t
+  val add : t -> t -> t
+  val mul : t -> t -> t
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+  val to_string : t -> string
+end
+
+(** A semantic value in the model domain (task board #74). Five kinds, one per supported
     {!Sort.t}
     family:
 
     - [Bool] for [Sort.bool];
     - [Int] for [Sort.int] (mathematical ℤ, held in a native [int]; arithmetic that would
       leave native range is a loud failure in {!Eval}, never a wraparound — I8 spirit);
+    - [Real] for [Sort.real] (exact ℚ, held as a normalized {!Rational.t});
     - [BitVec { width; bits }] for [Sort.BitVec width], with [bits] the canonical unsigned
       value in [[0, 2^width)]. Model parsing rejects an out-of-range value rather than
       reducing it modulo the width;
@@ -17,6 +31,7 @@ open Oxsmt_core
 type t =
   | Bool of bool
   | Int of int
+  | Real of Rational.t
   | BitVec of
       { width : int
       ; bits : Bigint.t

@@ -39,7 +39,7 @@ let is_pure_bv (asserted : Term.t list) =
              (* not a bit-vector operator/literal: admissible only as a nullary Bool or BV
                 variable; an applied uninterpreted symbol is out of pure QF_BV *)
              Iarr.length args = 0 && bool_or_bv t.sort)
-        | Le _ | Arith _ | Int_const _ -> false
+        | Le _ | Arith _ | Real_arith _ | Int_const _ | Real_const _ -> false
       in
       Term.Table.replace seen t r;
       r
@@ -89,7 +89,7 @@ let free_user_vars (terms : Term.t list) =
          walk a;
          walk b
        | App (_, args) -> List.iter walk (Iarr.to_list args)
-       | Bool_const _ | Int_const _ | Arith _ -> ())
+       | Bool_const _ | Int_const _ | Real_const _ | Arith _ | Real_arith _ -> ())
   in
   List.iter walk terms;
   List.rev !bv, List.rev !bool

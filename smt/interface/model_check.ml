@@ -13,6 +13,7 @@
    [unknown]. *)
 
 open Oxsmt_core
+module Rational = Oxsmt_lia.Rational
 
 (* Fail-closed sentinel: the model cannot self-certify this assertion. *)
 exception Bad
@@ -21,6 +22,7 @@ let value_eq (a : Cdclt.value) (b : Cdclt.value) =
   match a, b with
   | VBool x, VBool y -> Bool.equal x y
   | VInt x, VInt y -> Bigint.equal x y
+  | VReal x, VReal y -> Rational.equal x y
   | VUninterp x, VUninterp y -> x = y
   | _ -> raise Bad
 ;;
@@ -33,6 +35,15 @@ let as_bool = function
 let as_int = function
   | Cdclt.VInt n -> n
   | _ -> raise Bad
+;;
+
+let as_real = function
+  | Cdclt.VReal q -> q
+  | _ -> raise Bad
+;;
+
+let real_of_term_rational (q : Term.rational) =
+  Rational.of_big_frac ~num:q.num ~den:q.den
 ;;
 
 (* Evaluate [t] under the model tables ([consts]/[funs]); raises {!Bad} on any fault
@@ -63,6 +74,7 @@ let ev_with
     match t.Term.node with
     | Term.Bool_const b -> VBool b
     | Term.Int_const n -> VInt n
+    | Term.Real_const q -> VReal (real_of_term_rational q)
     | Term.App (sym, args) ->
       let name = Symbol.name sym in
       if Iarr.length args = 0
@@ -92,7 +104,20 @@ let ev_with
           lin.Term.coeffs
       in
       VInt s
-    | Term.Le a -> VBool (Bigint.compare (as_int (ev a)) Bigint.zero <= 0)
+    | Term.Real_arith lin ->
+      let s =
+        Iarr.fold
+          (fun acc (c, coeff) ->
+             Rational.add acc (Rational.mul (real_of_term_rational coeff) (as_real (ev c))))
+          (real_of_term_rational lin.Term.const)
+          lin.Term.coeffs
+      in
+      VReal s
+    | Term.Le a ->
+      (match a.sort with
+       | Sort.Int _ -> VBool (Bigint.compare (as_int (ev a)) Bigint.zero <= 0)
+       | Sort.Real -> VBool (Rational.compare (as_real (ev a)) Rational.zero <= 0)
+       | _ -> raise Bad)
     | Term.Eq (a, b) -> VBool (value_eq (ev a) (ev b))
     | Term.Not a -> VBool (not (as_bool (ev a)))
     | Term.And xs -> VBool (Iarr.fold (fun acc x -> acc && as_bool (ev x)) true xs)

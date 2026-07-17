@@ -106,6 +106,7 @@ type assumption_check =
 type model_value = Cdclt.value =
   | VBool of bool
   | VInt of Oxsmt_core.Bigint.t (* arbitrary precision (core-bignum W2) *)
+  | VReal of Oxsmt_lia.Rational.t
   | VUninterp of int
 
 (** A total interpretation of one uninterpreted function/predicate (re-exported). *)
@@ -290,6 +291,11 @@ val declare_datatype
     [Overflow]/[Unsupported]/rejected atom degrades the session to [Unknown] (I8). Legal
     before or after {!check_sat} (assert-after-check). *)
 val assert_term : t -> Oxsmt_core.Term.t -> unit
+
+(** Scan a complete assertion batch before preprocessing and select its actual arithmetic
+    family. Mixed Int/Real content, Real with arrays/datatypes, a live-theory swap, or Real
+    while [OXSMT_LRA] is disabled degrades the session to [unknown]. Idempotent. *)
+val preselect_arithmetic : t -> Oxsmt_core.Term.t list -> unit
 
 (** [assert_presolved t terms] asserts a WHOLE batch of terms through the W1b
     equality-elimination presolve (logs/w1b-design.md): it runs the {!Oxsmt_interface}

@@ -39,6 +39,10 @@ module Combined =
   Oxsmt_combine.Combine.Combine (Oxsmt_combine.Uflia_router) (Oxsmt_euf.Euf_adapter)
     (Oxsmt_lia.Lia_adapter)
 
+module Combined_real =
+  Oxsmt_combine.Combine.Combine (Oxsmt_combine.Uflra_router) (Oxsmt_euf.Euf_adapter)
+    (Oxsmt_lia.Lra_adapter)
+
 module Dt = Oxsmt_dt.Dt
 module Arr = Oxsmt_arr.Arr
 
@@ -51,12 +55,20 @@ module Arr = Oxsmt_arr.Arr
    per-term relevance guess. *)
 type theory_impl =
   | TCombined of Combined.t
+  | TCombinedReal of Combined_real.t
   | TDt of Dt.t
   | TArr of Arr.t
+
+type arithmetic_family =
+  | None_seen
+  | Integer
+  | Real
+  | Mixed
 
 let th_register impl a term =
   match impl with
   | TCombined th -> Combined.register_atom th a term
+  | TCombinedReal th -> Combined_real.register_atom th a term
   | TDt th -> Dt.register_atom th a term
   | TArr th -> Arr.register_atom th a term
 ;;
@@ -64,6 +76,7 @@ let th_register impl a term =
 let th_assert impl lit =
   match impl with
   | TCombined th -> Combined.assert_lit th lit
+  | TCombinedReal th -> Combined_real.assert_lit th lit
   | TDt th -> Dt.assert_lit th lit
   | TArr th -> Arr.assert_lit th lit
 ;;
@@ -71,6 +84,7 @@ let th_assert impl lit =
 let th_check impl effort =
   match impl with
   | TCombined th -> Combined.check th effort
+  | TCombinedReal th -> Combined_real.check th effort
   | TDt th -> Dt.check th effort
   | TArr th -> Arr.check th effort
 ;;
@@ -78,6 +92,7 @@ let th_check impl effort =
 let th_explain impl lit =
   match impl with
   | TCombined th -> Combined.explain th lit
+  | TCombinedReal th -> Combined_real.explain th lit
   | TDt th -> Dt.explain th lit
   | TArr th -> Arr.explain th lit
 ;;
@@ -85,6 +100,7 @@ let th_explain impl lit =
 let th_push impl =
   match impl with
   | TCombined th -> Combined.push th
+  | TCombinedReal th -> Combined_real.push th
   | TDt th -> Dt.push th
   | TArr th -> Arr.push th
 ;;
@@ -92,6 +108,7 @@ let th_push impl =
 let th_pop impl n =
   match impl with
   | TCombined th -> Combined.pop th n
+  | TCombinedReal th -> Combined_real.pop th n
   | TDt th -> Dt.pop th n
   | TArr th -> Arr.pop th n
 ;;
@@ -99,6 +116,7 @@ let th_pop impl n =
 let th_model impl =
   match impl with
   | TCombined th -> Combined.model th
+  | TCombinedReal th -> Combined_real.model th
   | TDt th -> Dt.model th
   | TArr th -> Arr.model th
 ;;
@@ -111,6 +129,7 @@ type value =
   | VBool of bool
   | VInt of
       Bigint.t (* arbitrary precision (core-bignum W2): a term value can exceed int63 *)
+  | VReal of Oxsmt_lia.Rational.t
   | VUninterp of int
 
 (* A total interpretation of one uninterpreted function/predicate symbol (ADR-UF-models
@@ -177,18 +196,18 @@ type leaf_certificate_trace =
       -> right:Term.t
       -> unit
   ; on_lia_conflict :
-      premise_lits:Sat.lit list
-      -> multipliers:Oxsmt_lia.Rational.t list
-      -> unit
+      premise_lits:Sat.lit list -> multipliers:Oxsmt_lia.Rational.t list -> unit
   }
 
 type lia_certificate_trace =
   { on_theory_atom : var:Sat.var -> atom:Term.t -> unit
   ; on_lia_conflict :
-      premise_lits:Sat.lit list
-      -> multipliers:Oxsmt_lia.Rational.t list
-      -> unit
+      premise_lits:Sat.lit list -> multipliers:Oxsmt_lia.Rational.t list -> unit
   }
+
+type combined_checkpoint =
+  | CInt of Combined.checkpoint
+  | CReal of Combined_real.checkpoint
 
 type t =
   { mutable theory : theory_impl option
@@ -205,6 +224,7 @@ type t =
   ; array_registry : Oxsmt_core.Array_defs.t ref
       (* array select/store symbols (shared ref with Session); empty for a non-array
          problem. Checked before [registry] in [ensure_theory]. *)
+  ; arithmetic_family : arithmetic_family ref
   ; sat : Sat.t
   ; alloc : Atom.allocator
   ; v2a : Atom.t Vartbl.t (* SAT var -> theory atom (theory atoms only) *)
@@ -244,7 +264,7 @@ type t =
   ; mutable leaf_certificate_trace : leaf_certificate_trace option
       (* Off-seam theory-leaf evidence for the certificate recorder. [None] in every
          normal solve; the observational callbacks cannot affect search. *)
-  ; ckpt_log : Combined.checkpoint option Dynarray.t
+  ; ckpt_log : combined_checkpoint option Dynarray.t
   (* ADR-0014 S4.2 (dark, [incr_undo] only): one Combined sub-frame checkpoint per
      [on_assign], keyed by ABSOLUTE SAT-trail index — [ckpt_log.(i)] is the theory
      watermark just BEFORE trail literal [i] was asserted, so [rewind i] restores it and
@@ -283,9 +303,9 @@ let is_euf_atom_term term =
 ;;
 
 (* The exact structural subterm closure of a set of certificate statement atoms. This is
-   intentionally local rather than [t.subterms]: the latter contains every registered
-   atom in the query and would let an unrelated constructor term authorize a witness for
-   this leaf. *)
+   intentionally local rather than [t.subterms]: the latter contains every registered atom
+   in the query and would let an unrelated constructor term authorize a witness for this
+   leaf. *)
 let statement_subterms roots =
   let seen = Term.Table.create 32 in
   let rec add (term : Term.t) =
@@ -317,29 +337,26 @@ let statement_subterms roots =
    literal must resolve through the authoritative SAT-var map to an EUF proposition. *)
 let record_euf_leaf t ~rule ~clause =
   match t.leaf_certificate_trace, rule, t.theory with
-  | ( Some trace
-    , Explanation.Rule_tag.Euf_congruence
-    , Some (TCombined combined) )
+  | Some trace, Explanation.Rule_tag.Euf_congruence, Some (TCombined combined)
     when (not (Combined.has_live_fabric_edges combined))
          && List.for_all
               (fun lit ->
-                 match Vartbl.find_opt t.v2term (Sat.var_of_lit lit) with
-                 | Some term -> is_euf_atom_term term
-                 | None -> false)
-              clause ->
-    trace.on_euf_leaf ~clause
+                match Vartbl.find_opt t.v2term (Sat.var_of_lit lit) with
+                | Some term -> is_euf_atom_term term
+                | None -> false)
+              clause -> trace.on_euf_leaf ~clause
   | Some _, _, _ | None, _, _ -> ()
 ;;
 
-(* Preserve a datatype constructor-distinctness claim only on the standalone DT stack.
-   The generic [Euf_congruence] rule tag is also used by array and combined-theory
-   conflicts, so it is not a discriminator. Instead the DT engine must recover the exact
-   constructor pair whose congruence explanation equals this emitted premise list.
+(* Preserve a datatype constructor-distinctness claim only on the standalone DT stack. The
+   generic [Euf_congruence] rule tag is also used by array and combined-theory conflicts,
+   so it is not a discriminator. Instead the DT engine must recover the exact constructor
+   pair whose congruence explanation equals this emitted premise list.
 
-   The remaining gates bind the claim to the certificate statement: every premise must
-   be a positive equality SAT literal, and both claimed constructor terms must occur in
-   the structural closure of those exact equality atoms. A negative premise, foreign
-   atom, missing SAT-var binding, or unrelated term leaves the leaf conditional. *)
+   The remaining gates bind the claim to the certificate statement: every premise must be
+   a positive equality SAT literal, and both claimed constructor terms must occur in the
+   structural closure of those exact equality atoms. A negative premise, foreign atom,
+   missing SAT-var binding, or unrelated term leaves the leaf conditional. *)
 let record_dt_distinctness t ~premises ~premise_lits ~clause =
   match t.leaf_certificate_trace, t.theory with
   | Some trace, Some (TDt dt) ->
@@ -353,9 +370,8 @@ let record_dt_distinctness t ~premises ~premise_lits ~clause =
           | Some atom when Theory_view.is_atom atom ->
             (match Theory_view.atom atom with
              | Theory_view.Equality _ -> equality_atoms (atom :: acc) rest
-             | Theory_view.Predicate _
-             | Theory_view.Bool_lit _
-             | Theory_view.Le_zero _ -> None)
+             | Theory_view.Predicate _ | Theory_view.Bool_lit _ | Theory_view.Le_zero _ ->
+               None)
           | Some _ | None -> None)
     in
     (match equality_atoms [] premise_lits with
@@ -389,12 +405,11 @@ let set_lia_certificate_trace t tr =
     t
     (Option.map
        (fun (trace : lia_certificate_trace) ->
-          { on_theory_atom = trace.on_theory_atom
-          ; on_euf_leaf = (fun ~clause:_ -> ())
-          ; on_dt_distinctness =
-              (fun ~registry:_ ~clause:_ ~left:_ ~right:_ -> ())
-          ; on_lia_conflict = trace.on_lia_conflict
-          })
+         { on_theory_atom = trace.on_theory_atom
+         ; on_euf_leaf = (fun ~clause:_ -> ())
+         ; on_dt_distinctness = (fun ~registry:_ ~clause:_ ~left:_ ~right:_ -> ())
+         ; on_lia_conflict = trace.on_lia_conflict
+         })
        tr)
 ;;
 
@@ -407,9 +422,10 @@ let rec collect t (term : Term.t) =
   then (
     Term.Table.replace t.subterms term ();
     match term.Term.node with
-    | Term.Bool_const _ | Term.Int_const _ -> ()
+    | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ()
     | Term.App (_, args) -> Iarr.iter (collect t) args
     | Term.Arith lin -> Iarr.iter (fun (c, _) -> collect t c) lin.Term.coeffs
+    | Term.Real_arith lin -> Iarr.iter (fun (c, _) -> collect t c) lin.Term.coeffs
     | Term.Le a | Term.Not a -> collect t a
     | Term.Eq (a, b) ->
       collect t a;
@@ -487,11 +503,22 @@ let ensure_theory t =
   | Some impl -> impl
   | None ->
     let impl =
-      if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
-      then TArr (Arr.create t.ctx t.env t.cap !(t.array_registry))
-      else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
-      then TDt (Dt.create t.ctx t.env t.registry)
-      else TCombined (Combined.create t.ctx t.env)
+      match !(t.arithmetic_family) with
+      | Mixed -> failwith "cdclt.ensure_theory: mixed Int/Real arithmetic is unsupported"
+      | Real when not (Oxsmt_core.Lra_config.enabled ()) ->
+        failwith "cdclt.ensure_theory: Real arithmetic is disabled"
+      | Real
+        when (not (Oxsmt_core.Array_defs.is_empty !(t.array_registry)))
+             || not (Oxsmt_core.Datatype_defs.is_empty !(t.registry)) ->
+        failwith
+          "cdclt.ensure_theory: arrays/datatypes combined with Real are unsupported"
+      | Real -> TCombinedReal (Combined_real.create t.ctx t.env)
+      | Integer | None_seen ->
+        if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
+        then TArr (Arr.create t.ctx t.env t.cap !(t.array_registry))
+        else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+        then TDt (Dt.create t.ctx t.env t.registry)
+        else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;
     impl
@@ -599,7 +626,8 @@ let on_assign t l ~level =
     Dynarray.add_last
       t.ckpt_log
       (match t.theory with
-       | Some (TCombined th) -> Some (Combined.checkpoint th)
+       | Some (TCombined th) -> Some (CInt (Combined.checkpoint th))
+       | Some (TCombinedReal th) -> Some (CReal (Combined_real.checkpoint th))
        | Some (TDt _ | TArr _) | None -> None)
   else sync_level t;
   let v = Sat.var_of_lit l in
@@ -661,7 +689,20 @@ let on_chrono_rewind t w =
      if w < Dynarray.length t.ckpt_log
      then (
        match Dynarray.get t.ckpt_log w with
-       | Some target -> Combined.rewind_to_checkpoint th target
+       | Some (CInt target) -> Combined.rewind_to_checkpoint th target
+       | Some (CReal _) ->
+         failwith "cdclt.on_chrono_rewind: Real checkpoint with Integer theory"
+       | None ->
+         failwith
+           "cdclt.on_chrono_rewind: unlogged prefix at retained trail index \
+            (stream/trail desync)")
+   | Some (TCombinedReal th) ->
+     if w < Dynarray.length t.ckpt_log
+     then (
+       match Dynarray.get t.ckpt_log w with
+       | Some (CReal target) -> Combined_real.rewind_to_checkpoint th target
+       | Some (CInt _) ->
+         failwith "cdclt.on_chrono_rewind: Integer checkpoint with Real theory"
        | None ->
          failwith
            "cdclt.on_chrono_rewind: unlogged prefix at retained trail index \
@@ -708,24 +749,20 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
      | Some _ ->
        let clause = List.map Sat.neg_lit premise_lits in
        record_euf_leaf t ~rule:e.Explanation.rule ~clause;
-       record_dt_distinctness
-         t
-         ~premises:e.Explanation.premises
-         ~premise_lits
-         ~clause);
+       record_dt_distinctness t ~premises:e.Explanation.premises ~premise_lits ~clause);
     (* The frozen SAT trace deliberately carries only the materialized clause. When a
-       certificate recorder explicitly installed the off-seam channel, preserve the
-       Farkas evidence HERE, before [T_conflict] drops the rule tag and term meanings.
+       certificate recorder explicitly installed the off-seam channel, preserve the Farkas
+       evidence HERE, before [T_conflict] drops the rule tag and term meanings.
 
        Binding check: the adapter's observational core is accepted only when mapping its
        [(atom, polarity)] list through this driver's authoritative term->SAT table gives
        exactly the Explanation premise list. A stale/misaligned core therefore emits no
        witness (the leaf remains conditional), never a witness for the wrong clause. *)
     (match t.leaf_certificate_trace, e.Explanation.rule, t.theory with
-     | ( Some tr
-       , Explanation.Rule_tag.Lia_farkas
-       , Some (TCombined combined) ) ->
-       (match Oxsmt_lia.Lia_adapter.last_conflict_core (Combined.arith_state combined) with
+     | Some tr, Explanation.Rule_tag.Lia_farkas, Some (TCombined combined) ->
+       (match
+          Oxsmt_lia.Lia_adapter.last_conflict_core (Combined.arith_state combined)
+        with
         | Some { farkas = Some multipliers; atoms } ->
           let rec map_atoms acc = function
             | [] -> Some (List.rev acc)
@@ -773,6 +810,15 @@ let live_egraph_view t : Egraph_view.t =
     ; ground_terms_by_sort =
         (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
     }
+  | Some (TCombinedReal th) ->
+    let cs = Combined_real.congruence_state th in
+    { app_terms_by_symbol = (fun sym -> Oxsmt_euf.Euf_adapter.app_terms_by_symbol cs sym)
+    ; find_class_opt = (fun term -> Oxsmt_euf.Euf_adapter.find_class_opt cs term)
+    ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
+    ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
+    ; ground_terms_by_sort =
+        (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
+    }
   | Some (TDt th) ->
     { app_terms_by_symbol = Dt.app_terms_by_symbol th
     ; find_class_opt = Dt.find_class_opt th
@@ -794,6 +840,8 @@ let live_registered_terms t =
   match t.theory with
   | Some (TCombined th) ->
     Oxsmt_euf.Euf_adapter.registered_terms (Combined.congruence_state th)
+  | Some (TCombinedReal th) ->
+    Oxsmt_euf.Euf_adapter.registered_terms (Combined_real.congruence_state th)
   | Some (TDt th) -> Dt.registered_terms th
   | Some (TArr th) -> Arr.registered_terms th
   | None -> []
@@ -834,11 +882,11 @@ let check t ~final =
         t.last_dt_model
         <- (match impl with
             | TDt th -> Dt.check_model th
-            | TCombined _ | TArr _ -> None);
+            | TCombined _ | TCombinedReal _ | TArr _ -> None);
         t.last_array_model
         <- (match impl with
             | TArr th -> Arr.array_model th
-            | TCombined _ | TDt _ -> None);
+            | TCombined _ | TCombinedReal _ | TDt _ -> None);
         t.last_egraph_view
         <- (if t.capture_egraph then Some (snapshot_egraph_view t) else None);
         desugar_result t ~final:true r
@@ -875,7 +923,17 @@ let ckpt_log_length_for_test t = Dynarray.length t.ckpt_log
    set_theory contract). Must be called before any clause is added. The theory itself is
    created lazily at the first [intern] (see {!ensure_theory}) from the datatype
    [registry] (empty => the EUF+LIA stack), so a non-datatype session is byte-identical. *)
-let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
+let create
+  ctx
+  env
+  sat
+  ~split_budget
+  ~budget
+  ~registry
+  ~array_registry
+  ~arithmetic_family
+  ~cap
+  =
   let t =
     { theory = None
     ; ctx
@@ -883,6 +941,7 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; cap
     ; registry
     ; array_registry
+    ; arithmetic_family
     ; sat
     ; alloc = Atom.create_allocator ()
     ; v2a = Vartbl.create 256
@@ -943,6 +1002,8 @@ let clear_last_conflict t =
   match t.theory with
   | Some (TCombined th) ->
     Oxsmt_lia.Lia_adapter.clear_last_conflict (Combined.arith_state th)
+  | Some (TCombinedReal th) ->
+    Oxsmt_lia.Lra_adapter.clear_last_conflict (Combined_real.arith_state th)
   | Some (TDt _) | Some (TArr _) | None -> ()
 ;;
 
@@ -952,7 +1013,7 @@ let effort_used t = Budget.used t.budget
 (* task #106: passthrough of the LIA adapter's observational conflict evidence.
    Re-exported record so {!Session} can read the fields. Only the EUF+LIA stack carries
    it. *)
-type conflict_core = Oxsmt_lia.Lia_adapter.conflict_core =
+type conflict_core =
   { farkas : Oxsmt_lia.Rational.t list option
   ; atoms : (Term.t * bool) list
   }
@@ -960,7 +1021,15 @@ type conflict_core = Oxsmt_lia.Lia_adapter.conflict_core =
 let last_conflict_core t : conflict_core option =
   match t.theory with
   | Some (TCombined th) ->
-    Oxsmt_lia.Lia_adapter.last_conflict_core (Combined.arith_state th)
+    Option.map
+      (fun (core : Oxsmt_lia.Lia_adapter.conflict_core) ->
+        { farkas = core.farkas; atoms = core.atoms })
+      (Oxsmt_lia.Lia_adapter.last_conflict_core (Combined.arith_state th))
+  | Some (TCombinedReal th) ->
+    Option.map
+      (fun (core : Oxsmt_lia.Lra_adapter.conflict_core) ->
+        { farkas = core.farkas; atoms = core.atoms })
+      (Oxsmt_lia.Lra_adapter.last_conflict_core (Combined_real.arith_state th))
   | Some (TDt _) | Some (TArr _) | None -> None
 ;;
 
@@ -969,6 +1038,7 @@ let value_of (v : Model.value) =
   match v with
   | Model.Bool b -> VBool b
   | Model.Int n -> VInt n
+  | Model.Real q -> VReal (Oxsmt_lia.Rational.of_big_frac ~num:q.Term.num ~den:q.Term.den)
   | Model.Uninterp i -> VUninterp i
 ;;
 
@@ -1005,7 +1075,8 @@ let model_bindings t =
      | Needs_table -> None)
 ;;
 
-(* Total order on model values (VBool < VInt < VUninterp), for canonical case ordering. *)
+(* Total order on model values (VBool < VInt < VReal < VUninterp), for canonical case
+   ordering. *)
 let value_compare (a : value) (b : value) =
   match a, b with
   | VBool x, VBool y -> Bool.compare x y
@@ -1014,6 +1085,9 @@ let value_compare (a : value) (b : value) =
   | VInt x, VInt y -> Bigint.compare x y
   | VInt _, _ -> -1
   | _, VInt _ -> 1
+  | VReal x, VReal y -> Oxsmt_lia.Rational.compare x y
+  | VReal _, _ -> -1
+  | _, VReal _ -> 1
   | VUninterp x, VUninterp y -> Int.compare x y
 ;;
 
@@ -1068,7 +1142,12 @@ let model t =
                 in
                 Hashtbl.replace sort_ids name (cid :: prev)
               | _ -> ())
-           | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> ())
+           | Sort.Bool
+           | Sort.Int _
+           | Sort.Real
+           | Sort.Datatype _
+           | Sort.Array _
+           | Sort.BitVec _ -> ())
          terms;
        let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let sort_cards = ref [] in
@@ -1126,11 +1205,51 @@ let model t =
                  | _ -> int_classes := cid :: !int_classes)
               | _ -> ())
            | Sort.Bool
+           | Sort.Real
            | Sort.Uninterpreted _
            | Sort.Datatype _
            | Sort.Array _
            | Sort.BitVec _ -> ())
          terms;
+       (* Real realization mirrors the integer realization above, but stays exact and
+          never projects a witness through a native integer. A pure-EUF Real class is
+          absent from every LRA atom, so any fresh rational distinct from all LRA-used
+          values and other classes is a legal witness. *)
+       let real_used = ref [] in
+       let real_classes = ref [] in
+       List.iter
+         (fun (term : Term.t) ->
+           if Sort.equal term.sort Sort.real
+           then (
+             match Model.value m term with
+             | Some (Model.Real q) ->
+               let q = Oxsmt_lia.Rational.of_big_frac ~num:q.Term.num ~den:q.Term.den in
+               if not (List.exists (Oxsmt_lia.Rational.equal q) !real_used)
+               then real_used := q :: !real_used
+             | Some (Model.Uninterp cid) ->
+               (match term.node with
+                | Term.Real_arith _ -> ()
+                | _ -> real_classes := cid :: !real_classes)
+             | Some (Model.Bool _ | Model.Int _) | None -> ())
+           else ())
+         terms;
+       let real_realize : (int, Oxsmt_lia.Rational.t) Hashtbl.t = Hashtbl.create 64 in
+       let next_real = ref Bigint.zero in
+       let fresh_real () =
+         let rec choose () =
+           let q = Oxsmt_lia.Rational.of_bigint !next_real in
+           next_real := Bigint.add !next_real Bigint.one;
+           if List.exists (Oxsmt_lia.Rational.equal q) !real_used then choose () else q
+         in
+         let q = choose () in
+         real_used := q :: !real_used;
+         q
+       in
+       List.iter
+         (fun cid ->
+           if not (Hashtbl.mem real_realize cid)
+           then Hashtbl.replace real_realize cid (fresh_real ()))
+         (List.sort_uniq Int.compare !real_classes);
        let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let next = ref 0 in
        let fresh () =
@@ -1151,6 +1270,8 @@ let model t =
          match Model.value m term, term.Term.node with
          | Some (Model.Bool b), _ -> VBool b
          | Some (Model.Int n), _ -> VInt n
+         | Some (Model.Real q), _ ->
+           VReal (Oxsmt_lia.Rational.of_big_frac ~num:q.Term.num ~den:q.Term.den)
          | _, Term.Arith lin ->
            (* §10 v2 gap B (task #117): a pure-EUF Int [Arith] term (LIA never numerically
               valued it — else the [Model.Int] arm above caught it, tier 1) is EVALUATED
@@ -1168,6 +1289,22 @@ let model t =
              | _ -> raise Degrade
            in
            VInt (Iarr.fold step lin.Term.const lin.Term.coeffs)
+         | _, Term.Real_arith lin ->
+           let step acc (child, coeff) =
+             match value_of child with
+             | VReal cv ->
+               let coeff =
+                 Oxsmt_lia.Rational.of_big_frac ~num:coeff.Term.num ~den:coeff.Term.den
+               in
+               Oxsmt_lia.Rational.add acc (Oxsmt_lia.Rational.mul coeff cv)
+             | _ -> raise Degrade
+           in
+           let const =
+             Oxsmt_lia.Rational.of_big_frac
+               ~num:lin.Term.const.Term.num
+               ~den:lin.Term.const.Term.den
+           in
+           VReal (Iarr.fold step const lin.Term.coeffs)
          | Some (Model.Uninterp cid), _ ->
            (* An [Uninterp] value on an Int-sorted term is the §10 realize-me signal (pass
               1b); on an uninterpreted-sorted term it is the dense element index (pass 1). *)
@@ -1180,6 +1317,10 @@ let model t =
               (match Hashtbl.find_opt index cid with
                | Some i -> VUninterp i
                | None -> raise Degrade)
+            | Sort.Real ->
+              (match Hashtbl.find_opt real_realize cid with
+               | Some q -> VReal q
+               | None -> raise Degrade)
             (* A datatype-sorted term reaching extraction has no certified value ([Model]
                offers no constructor-tree witness yet); combine already refuses to certify
                such a Sat, so this is a defensive backstop — degrade to no-model. *)
@@ -1190,6 +1331,7 @@ let model t =
          match sort with
          | Sort.Bool -> VBool false
          | Sort.Int _ -> VInt Bigint.zero
+         | Sort.Real -> VReal Oxsmt_lia.Rational.zero
          | Sort.Uninterpreted _ -> VUninterp 0
          | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise Degrade
        in
@@ -1206,6 +1348,7 @@ let model t =
               | Sort.Bool ->
                 () (* propositional variable: session's bool_consts owns it *)
               | Sort.Int _
+              | Sort.Real
               | Sort.Uninterpreted _
               | Sort.Datatype _
               | Sort.Array _

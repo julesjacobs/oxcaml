@@ -62,7 +62,16 @@ let make () =
   let registry = ref Oxsmt_core.Datatype_defs.empty in
   let array_registry = ref Oxsmt_core.Array_defs.empty in
   let cdclt =
-    Cdclt.create ctx env sat ~split_budget:10_000 ~budget ~registry ~array_registry ~cap
+    Cdclt.create
+      ctx
+      env
+      sat
+      ~split_budget:10_000
+      ~budget
+      ~registry
+      ~array_registry
+      ~arithmetic_family:(ref Cdclt.None_seen)
+      ~cap
   in
   { cdclt; ctx; xs = Array.map (Context.const ctx) xsyms }
 ;;

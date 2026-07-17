@@ -9,7 +9,9 @@
     [define-fun] macros are supported: parameters/result sort are read at definition time,
     the body is expanded by capture-avoiding substitution at each use site (macros, not
     recursive functions). Recursion — direct or mutual — and [define-fun-rec]/
-    [define-funs-rec] are rejected as {!Unsupported}.
+    [define-funs-rec] are rejected as {!Unsupported}. With [OXSMT_LRA] enabled, the
+    ground parser additionally accepts exact QF_LRA/QF_UFLRA terms; Real quantification
+    remains unsupported.
 
     Two failure modes, deliberately distinct (mirroring the gate reader):
     - {!Malformed}: input the reader cannot make sense of as a query — bad s-expr, unknown

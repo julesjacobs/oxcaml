@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -540,6 +540,12 @@ wiring-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	OXSMT_PRESOLVE_CTX=1 OXSMT_PRESOLVE_PROJ=1 $(DUNE) exec tests/solver/wiring_test.exe
 
+## lra-wiring-test — exact Real arithmetic through the shipped Session: strict bounds,
+##   permanent guarded disequality splits, EUF/LRA agreement, Bigint rationals, and R1
+##   model-mutation rejection. The test also sets the gate before forcing its lazy read.
+lra-wiring-test:
+	OXSMT_LRA=1 $(DUNE) exec tests/solver/lra_wiring_test.exe
+
 ## symbreak-test — online symmetry-breaking presolve (task #25, OXSMT_SYMBREAK, default ON
 ##   as of the quiesced A/B). Detector fires on a symmetric quasigroup and REJECTS a broken
 ##   (cyclic-only) symmetry; the sound lex-leader preserves SAT and UNSAT; and a test-only
@@ -779,10 +785,11 @@ stage0-test:
 ##   nesting) and round-trip B (parse->print->parse over tests/cases + harness fixtures +
 ##   gate honeypots). Nonzero exit on any round-trip mismatch or lost :status.
 smtlib-test:
-	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
+	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/lra_roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
 	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens \
 	  tests/dt-goldens-sat tests/arr-goldens tests/arr-goldens-sat tests/bv-goldens
+	OXSMT_LRA=1 $(DUNE) exec smt/smtlib/test/lra_roundtrip_test.exe
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fol-test — front-end quantified-pipeline formula IR self-test: NNF/polarity table,
@@ -914,6 +921,7 @@ test: check-frozen
 	@# already bounded (fixed-seed, small N; ~0.04s) so no separate smoke variant is needed.
 	$(MAKE) lia-test
 	$(MAKE) lra-test
+	$(MAKE) lra-wiring-test
 	$(MAKE) lia-trivial-eq-test
 	$(MAKE) lia-gcd-cut-test
 	$(MAKE) lia-adapter-test

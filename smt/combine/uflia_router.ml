@@ -5,6 +5,24 @@ type owner =
   | B
   | Both
 
+let arithmetic_sort = function
+  | Sort.Int _ -> true
+  | Sort.Bool
+  | Sort.Real
+  | Sort.Uninterpreted _
+  | Sort.Datatype _
+  | Sort.Array _
+  | Sort.BitVec _ -> false
+;;
+
+let require_arithmetic_sort where (term : Term.t) =
+  if not (arithmetic_sort term.sort)
+  then
+    raise
+      (Combine.Combination_unsound
+         (where ^ ": order atom belongs to a different arithmetic theory"))
+;;
+
 (* [owner] is the REGISTER fan-out (combine.mli: the union of children that receive the
    atom at register time), which is NOT the same as who asserts it. A LIA order atom
    ([Le_zero]) is [B] (LIA only): under internalization the combinator no longer registers
@@ -16,7 +34,9 @@ type owner =
    to the combinator's internalize step. *)
 let owner term =
   match Theory_view.atom term with
-  | Theory_view.Le_zero _ -> B
+  | Theory_view.Le_zero arg ->
+    require_arithmetic_sort "Uflia_router.owner" arg;
+    B
   | Theory_view.Predicate _ -> A
   | Theory_view.Bool_lit _ -> A
   | Theory_view.Equality (x, _) ->
@@ -26,7 +46,12 @@ let owner term =
         are e-graph clients alongside EUF), so it routes to EUF like an uninterpreted-sort
         equality — no arithmetic arrangement. The bit-blasting engine supplies the bit-level
         semantics separately at the propositional layer. *)
-     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _
+     | Sort.Bool
+     | Sort.Real
+     | Sort.Uninterpreted _
+     | Sort.Datatype _
+     | Sort.Array _
+     | Sort.BitVec _
        -> A)
 ;;
 
@@ -51,7 +76,9 @@ let owner term =
      stays incomplete-but-sound as before). Every other atom/polarity asserts as [owner]. *)
 let assert_to term ~positive =
   match Theory_view.atom term with
-  | Theory_view.Le_zero _ -> B
+  | Theory_view.Le_zero arg ->
+    require_arithmetic_sort "Uflia_router.assert_to" arg;
+    B
   | Theory_view.Predicate _ | Theory_view.Bool_lit _ | Theory_view.Equality _ ->
     (match owner term with
      | Both when not positive -> A

@@ -695,6 +695,74 @@ let test_determinism () =
   check "identical infeasible input has identical proof and pivot count" (unsat1 = unsat2)
 ;;
 
+let test_adapter () =
+  let open Oxsmt_core in
+  print_endline "adapter:";
+  let env = Env.create () in
+  let ctx = Context.create env in
+  let x =
+    Context.const ctx (Env.declare_fun env "lra-adapter-x" (Rank.create [] Sort.real))
+  in
+  let zero = Context.real_const_big ctx ~num:Bigint.zero ~den:Bigint.one in
+  let one = Context.real_const_big ctx ~num:Bigint.one ~den:Bigint.one in
+  let alloc = Atom.create_allocator () in
+  let adapter = Lra_adapter.create ctx env in
+  let register_signed term =
+    let atom_term, positive =
+      match term.Term.node with
+      | Term.Not atom -> atom, false
+      | _ -> term, true
+    in
+    let atom = Atom.fresh alloc in
+    Lra_adapter.register_atom adapter atom atom_term;
+    Lit.make atom positive
+  in
+  let gt_zero = register_signed (Context.gt ctx x zero) in
+  let lt_one = register_signed (Context.lt ctx x one) in
+  Lra_adapter.assert_lit adapter gt_zero;
+  Lra_adapter.assert_lit adapter lt_one;
+  check
+    "strict open interval is satisfiable"
+    (match Lra_adapter.check adapter Theory.Final with
+     | Theory.Sat -> true
+     | Theory.Propagations _
+     | Theory.Conflict _
+     | Theory.Split _
+     | Theory.Lemma _ -> false);
+  let inside =
+    match Model.value (Lra_adapter.model adapter) x with
+    | Some (Model.Real value) ->
+      let value = Rational.of_big_frac ~num:value.num ~den:value.den in
+      Rational.compare Rational.zero value < 0 && Rational.compare value Rational.one < 0
+    | Some (Model.Int _ | Model.Bool _ | Model.Uninterp _) | None -> false
+  in
+  check "strict open interval model is strictly interior" inside;
+  let diseq_adapter = Lra_adapter.create ctx env in
+  let eq = Context.eq ctx x zero in
+  let eq_atom = Atom.fresh alloc in
+  Lra_adapter.register_atom diseq_adapter eq_atom eq;
+  Lra_adapter.push diseq_adapter;
+  Lra_adapter.assert_lit diseq_adapter (Lit.make eq_atom false);
+  check
+    "violated disequality emits equality-guarded real trichotomy"
+    (match Lra_adapter.check diseq_adapter Theory.Final with
+     | Theory.Split [ guard; _; _ ] -> Term.equal guard eq
+     | Theory.Sat
+     | Theory.Propagations _
+     | Theory.Conflict _
+     | Theory.Split _
+     | Theory.Lemma _ -> false);
+  Lra_adapter.pop diseq_adapter 1;
+  check
+    "popping disequality permits equality again"
+    (match Lra_adapter.check diseq_adapter Theory.Final with
+     | Theory.Sat -> true
+     | Theory.Propagations _
+     | Theory.Conflict _
+     | Theory.Split _
+     | Theory.Lemma _ -> false)
+;;
+
 let () =
   print_endline "lra self-test:";
   test_hand_cases ();
@@ -703,6 +771,7 @@ let () =
   test_model_readiness ();
   test_random_cross_check ();
   test_determinism ();
+  test_adapter ();
   Printf.printf "\nlra self-test: %d checks, %d failure(s)\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

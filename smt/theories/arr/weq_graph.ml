@@ -68,13 +68,14 @@ let create view =
 let index_of_array_sort (s : Sort.t) : Sort.t option =
   match s with
   | Sort.Array (index, _element) -> Some index
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
+  | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.BitVec _ ->
     None
 ;;
 
 let index_sort_stably_infinite (s : Sort.t) : bool =
   match s with
   | Sort.Int _ -> true (* mathematical integers: the whole of ℤ, infinite *)
+  | Sort.Real -> true (* mathematical reals are infinite *)
   | Sort.Uninterpreted _ ->
     true (* uninterpreted sorts are stably infinite by convention *)
   | Sort.Bool -> false (* a finite two-element domain *)

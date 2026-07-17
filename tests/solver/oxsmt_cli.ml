@@ -106,6 +106,24 @@ let scan_commands sexps =
    overflow (mirrors the shipped printer's [add_int_lit]): [-n] would wrap for [min_int]
    and emit the malformed [(- -4611686018427387904)]. The value is always renderable —
    never degrade. *)
+let real_token q =
+  let num = Oxsmt_lia.Rational.num_bigint q in
+  let den = Oxsmt_lia.Rational.den_bigint q in
+  let negative = Oxsmt_core.Bigint.sign num < 0 in
+  let num = if negative then Oxsmt_core.Bigint.neg num else num in
+  let body =
+    if Oxsmt_core.Bigint.equal den Oxsmt_core.Bigint.one
+    then Oxsmt_core.Bigint.to_string num ^ ".0"
+    else
+      "(/ "
+      ^ Oxsmt_core.Bigint.to_string num
+      ^ " "
+      ^ Oxsmt_core.Bigint.to_string den
+      ^ ")"
+  in
+  if negative then "(- " ^ body ^ ")" else body
+;;
+
 let token_of_value = function
   | Session.VBool b -> if b then "true" else "false"
   | Session.VInt n ->
@@ -114,6 +132,7 @@ let token_of_value = function
     if Oxsmt_core.Bigint.sign n >= 0
     then Oxsmt_core.Bigint.to_string n
     else "(- " ^ Oxsmt_core.Bigint.to_string (Oxsmt_core.Bigint.neg n) ^ ")"
+  | Session.VReal q -> real_token q
   | Session.VUninterp i -> string_of_int i
 ;;
 

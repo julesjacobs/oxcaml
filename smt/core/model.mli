@@ -22,6 +22,8 @@ type value =
   | Uninterp of int
   (** an opaque, per-model class id for an uninterpreted-sort term (equal terms share it);
       the exact encoding is pinned at M2 (open q3). *)
+  | Real of Term.rational
+  (** an exact normalized value for a Real term. *)
 
 type t
 

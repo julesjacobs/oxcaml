@@ -646,9 +646,10 @@ let insert_congruence t id =
 
 let children (term : Term.t) : Term.t list =
   match term.node with
-  | Bool_const _ | Int_const _ -> []
+  | Bool_const _ | Int_const _ | Real_const _ -> []
   | App (_, args) -> Iarr.to_list args
   | Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+  | Real_arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
   | Le a -> [ a ]
   | Eq (a, b) -> [ a; b ]
   | Not a -> [ a ]

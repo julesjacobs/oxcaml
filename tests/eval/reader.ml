@@ -25,7 +25,7 @@ module Decls = struct
     ; sorts : (string, Sort.t) Hashtbl.t
     ; macros : (string, macro) Hashtbl.t
     ; bv_mint : Bv_term.minter
-      (* [define-fun] names currently mid-expansion — the recursion guard: a macro
+        (* [define-fun] names currently mid-expansion — the recursion guard: a macro
            re-entered while already on the expansion stack is a rejected recursive
            definition (define-fun is non-recursive). *)
     ; expanding : (string, unit) Hashtbl.t
@@ -53,6 +53,7 @@ module Decls = struct
   let sort_by_name t name =
     match name with
     | "Int" -> Some Sort.int
+    | "Real" -> Some Sort.real
     | "Bool" -> Some Sort.bool
     | _ -> Hashtbl.find_opt t.sorts name
   ;;
@@ -167,6 +168,47 @@ let const_of_decimal ctx s =
      | exception Invalid_argument _ -> raise (Unsupported ("malformed numeral: " ^ s)))
 ;;
 
+let real_const_of_frac ctx ~num ~den = Context.real_const_big ctx ~num ~den
+
+let coerce_to_sort ctx (sort : Sort.t) (term : Term.t) =
+  if Sort.equal term.sort sort
+  then term
+  else (
+    match sort, term.node with
+    | Sort.Real, Term.Int_const n -> real_const_of_frac ctx ~num:n ~den:Bigint.one
+    | _ -> raise (Malformed "numeric operands have incompatible sorts"))
+;;
+
+let coerce_same_sort ctx terms =
+  let target =
+    if List.exists (fun (t : Term.t) -> Sort.equal t.sort Sort.real) terms
+    then Some Sort.real
+    else None
+  in
+  match target with
+  | None -> terms
+  | Some sort -> List.map (coerce_to_sort ctx sort) terms
+;;
+
+let atom_string = function
+  | Sexp.Atom s -> Some s
+  | Sexp.Quoted _ | Sexp.List _ -> None
+;;
+
+let unary_minus = function
+  | Sexp.List [ Sexp.Atom "-"; x ] -> Some x
+  | Sexp.Atom _ | Sexp.Quoted _ | Sexp.List _ -> None
+;;
+
+let binary_divide = function
+  | Sexp.List [ Sexp.Atom "/"; p; q ] -> Some (p, q)
+  | Sexp.Atom _ | Sexp.Quoted _ | Sexp.List _ -> None
+;;
+
+let exact_fraction =
+  Rational_syntax.fraction ~atom:atom_string ~minus:unary_minus ~divide:binary_divide
+;;
+
 (* Resolve a sort s-expression. BitVec is the sole supported indexed sort. *)
 let parse_sort decls = function
   | Sexp.Atom name | Sexp.Quoted name ->
@@ -230,6 +272,7 @@ let is_operator = function
   | "+"
   | "-"
   | "*"
+  | "/"
   | "div"
   | "mod"
   | "abs"
@@ -286,7 +329,10 @@ and parse_atom ctx decls env name =
      | _ when String.starts_with ~prefix:"#b" name || String.starts_with ~prefix:"#x" name
        -> parse_bv_atom ctx decls name
      | _ when is_numeral name -> const_of_decimal ctx name
-     | _ -> parse_symbol_ref ctx decls name [])
+     | _ ->
+       (match Rational_syntax.decimal name with
+        | Some (num, den) -> real_const_of_frac ctx ~num ~den
+        | None -> parse_symbol_ref ctx decls name []))
 
 and parse_symbol_ref ctx decls name args =
   (* A reference to a define-fun macro, a declared symbol, or (applied) function. Macros
@@ -301,7 +347,11 @@ and parse_symbol_ref ctx decls name args =
        else raise (Malformed ("constant applied to arguments: " ^ name))
      | None ->
        (match Hashtbl.find_opt decls.Decls.funs name with
-        | Some (sym, _) -> Context.app ctx sym args
+        | Some (sym, rank) ->
+          let domain = Iarr.to_list rank.Rank.domain in
+          if List.length domain <> List.length args
+          then raise (Malformed ("function applied at wrong arity: " ^ name));
+          Context.app ctx sym (List.map2 (coerce_to_sort ctx) domain args)
         | None -> raise (Malformed ("undeclared symbol: " ^ name))))
 
 (* Expand a [define-fun] application by capture-free substitution (SMT-LIB 2.6 §4.2.2).
@@ -335,15 +385,17 @@ and expand_macro ctx decls name (m : Decls.macro) (args : Term.t list) =
   let env =
     List.map2
       (fun (pname, psort) (arg : Term.t) ->
-         if not (Sort.equal arg.sort psort)
-         then
-           raise
-             (Malformed
-                (Printf.sprintf
-                   "define-fun %s: argument for parameter %s has the wrong sort"
-                   name
-                   pname));
-         pname, arg)
+        let arg =
+          try coerce_to_sort ctx psort arg with
+          | Malformed _ ->
+            raise
+              (Malformed
+                 (Printf.sprintf
+                    "define-fun %s: argument for parameter %s has the wrong sort"
+                    name
+                    pname))
+        in
+        pname, arg)
       m.Decls.params
       args
   in
@@ -351,7 +403,8 @@ and expand_macro ctx decls name (m : Decls.macro) (args : Term.t list) =
   let body =
     Fun.protect
       ~finally:(fun () -> Hashtbl.remove decls.Decls.expanding name)
-      (fun () -> parse_term ctx decls env m.Decls.body)
+      (fun () ->
+        coerce_to_sort ctx m.Decls.result_sort (parse_term ctx decls env m.Decls.body))
   in
   if not (Sort.equal body.sort m.Decls.result_sort)
   then
@@ -502,24 +555,26 @@ and parse_operator ctx decls env op args =
     fold ts
   | "=>", _ -> raise (Malformed "=> expects at least two arguments")
   | "=", first :: (_ :: _ as rest) ->
-    let first = p first in
+    let parsed = coerce_same_sort ctx (List.map p (first :: rest)) in
+    let first = List.hd parsed in
     let rec go prev = function
       | [] -> []
-      | x :: tl ->
-        let x = p x in
-        Context.eq ctx prev x :: go x tl
+      | x :: tl -> Context.eq ctx prev x :: go x tl
     in
-    Context.and_ ctx (go first rest)
+    Context.and_ ctx (go first (List.tl parsed))
   | "=", _ -> raise (Malformed "= expects at least two arguments")
-  | "distinct", _ :: _ :: _ -> Context.distinct ctx (List.map p args)
+  | "distinct", _ :: _ :: _ ->
+    Context.distinct ctx (coerce_same_sort ctx (List.map p args))
   | "distinct", _ -> raise (Malformed "distinct expects at least two arguments")
-  | "<=", _ -> chain ctx Context.le (List.map p args)
-  | "<", _ -> chain ctx Context.lt (List.map p args)
-  | ">=", _ -> chain ctx Context.ge (List.map p args)
-  | ">", _ -> chain ctx Context.gt (List.map p args)
+  | "<=", _ -> chain ctx Context.le (coerce_same_sort ctx (List.map p args))
+  | "<", _ -> chain ctx Context.lt (coerce_same_sort ctx (List.map p args))
+  | ">=", _ -> chain ctx Context.ge (coerce_same_sort ctx (List.map p args))
+  | ">", _ -> chain ctx Context.gt (coerce_same_sort ctx (List.map p args))
   | "+", [ a ] -> p a
   | "+", first :: rest ->
-    List.fold_left (fun acc x -> Context.add ctx acc (p x)) (p first) rest
+    (match coerce_same_sort ctx (List.map p (first :: rest)) with
+     | first :: rest -> List.fold_left (Context.add ctx) first rest
+     | [] -> assert false)
   | "+", [] -> raise (Malformed "+ expects at least one argument")
   | "-", [ Sexp.Atom s ] when is_numeral s ->
     (* Signed integer literal [(- n)]: parse ["-" ^ n] directly rather than negating a
@@ -530,35 +585,71 @@ and parse_operator ctx decls env op args =
     const_of_decimal ctx ("-" ^ s)
   | "-", [ a ] -> Context.neg ctx (p a)
   | "-", first :: (_ :: _ as rest) ->
-    List.fold_left (fun acc x -> Context.sub ctx acc (p x)) (p first) rest
+    (match coerce_same_sort ctx (List.map p (first :: rest)) with
+     | first :: rest -> List.fold_left (Context.sub ctx) first rest
+     | [] -> assert false)
   | "-", [] -> raise (Malformed "- expects at least one argument")
   | "*", _ -> parse_mul ctx (List.map p args)
+  | "/", _ ->
+    (match exact_fraction (Sexp.List (Sexp.Atom "/" :: args)) with
+     | Ok (num, den) -> real_const_of_frac ctx ~num ~den
+     | Error Rational_syntax.Not_a_fraction ->
+       raise (Unsupported "nonconstant real division")
+     | Error Rational_syntax.Invalid_signed_integer ->
+       raise (Unsupported "fraction operands must be signed integer literals")
+     | Error Rational_syntax.Zero_denominator ->
+       raise (Unsupported "real fraction has zero denominator"))
   | "div", [ a; b ] -> Context.div ctx (p a) (p b)
   | "div", _ -> raise (Malformed "div expects two arguments")
   | "mod", [ a; b ] -> Context.mod_ ctx (p a) (p b)
   | "mod", _ -> raise (Malformed "mod expects two arguments")
   | "abs", [ a ] -> Context.abs ctx (p a)
   | "abs", _ -> raise (Malformed "abs expects one argument")
-  | "ite", [ c; a; b ] -> Context.ite ctx (p c) (p a) (p b)
+  | "ite", [ c; a; b ] ->
+    (match coerce_same_sort ctx [ p a; p b ] with
+     | [ a; b ] -> Context.ite ctx (p c) a b
+     | _ -> assert false)
   | "ite", _ -> raise (Malformed "ite expects three arguments")
   | _ -> raise (Malformed ("misapplied operator: " ^ op))
 
 and parse_mul ctx factors =
   (* Linear multiplication: at most one non-constant factor (ADR-0003 Decision 1). *)
-  let consts, nonconsts =
+  let target_real =
+    List.exists (fun (t : Term.t) -> Sort.equal t.sort Sort.real) factors
+  in
+  let factors = if target_real then coerce_same_sort ctx factors else factors in
+  let int_consts, real_consts, nonconsts =
     List.partition_map
       (fun (t : Term.t) ->
-         match t.node with
-         | Term.Int_const k -> Left k
-         | _ -> Right t)
+        match t.node with
+        | Term.Int_const k -> Left (`Int k)
+        | Term.Real_const q -> Left (`Real q)
+        | _ -> Right t)
       factors
+    |> fun (consts, nonconsts) ->
+    let ints, reals =
+      List.partition_map
+        (function
+          | `Int k -> Left k
+          | `Real q -> Right q)
+        consts
+    in
+    ints, reals, nonconsts
   in
   (* Constant factors fold in arbitrary precision (core-bignum W2); never overflows. *)
-  let c = List.fold_left Bigint.mul Bigint.one consts in
-  match nonconsts with
-  | [] -> Context.int_const_big ctx c
-  | [ t ] -> Context.mul_const_big ctx c t
-  | _ :: _ :: _ ->
+  let ic = List.fold_left Bigint.mul Bigint.one int_consts in
+  let rc =
+    List.fold_left
+      (fun (n, d) (q : Term.rational) -> Bigint.mul n q.num, Bigint.mul d q.den)
+      (ic, Bigint.one)
+      real_consts
+  in
+  match nonconsts, target_real || real_consts <> [] with
+  | [], false -> Context.int_const_big ctx ic
+  | [], true -> real_const_of_frac ctx ~num:(fst rc) ~den:(snd rc)
+  | [ t ], false -> Context.mul_const_big ctx ic t
+  | [ t ], true -> Context.mul_real_const_big ctx ~num:(fst rc) ~den:(snd rc) t
+  | _ :: _ :: _, _ ->
     raise (Unsupported "nonlinear multiplication (>= 2 non-constant factors)")
 
 and parse_let ctx decls env bindings body =
@@ -586,7 +677,15 @@ type query =
   }
 
 let logic_ok = function
-  | "QF_UF" | "QF_LIA" | "QF_UFLIA" | "QF_IDL" | "QF_RDL" | "QF_BV" | "QF_UFBV" -> true
+  | "QF_UF"
+  | "QF_LIA"
+  | "QF_UFLIA"
+  | "QF_LRA"
+  | "QF_UFLRA"
+  | "QF_IDL"
+  | "QF_RDL"
+  | "QF_BV"
+  | "QF_UFBV" -> true
   | _ -> false
 ;;
 
@@ -703,7 +802,7 @@ let read_file path =
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)
     (fun () ->
-       let len = in_channel_length ic in
-       let s = really_input_string ic len in
-       read_string s)
+      let len = in_channel_length ic in
+      let s = really_input_string ic len in
+      read_string s)
 ;;

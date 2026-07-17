@@ -72,6 +72,11 @@ let as_int = function
   | v -> raise (Eval_error ("expected Int, got " ^ Value.to_string v))
 ;;
 
+let as_real = function
+  | Value.Real q -> q
+  | v -> raise (Eval_error ("expected Real, got " ^ Value.to_string v))
+;;
+
 let as_bool = function
   | Value.Bool b -> b
   | v -> raise (Eval_error ("expected Bool, got " ^ Value.to_string v))
@@ -105,8 +110,7 @@ let pow2 width =
 
 let as_bv = function
   | Value.BitVec { width; bits } ->
-    if width < 1
-    then raise (Eval_error "bitvector value has a non-positive width");
+    if width < 1 then raise (Eval_error "bitvector value has a non-positive width");
     if Bigint.sign bits < 0 || Bigint.compare bits (pow2 width) >= 0
     then raise (Eval_error "bitvector value is outside its declared width");
     width, bits
@@ -130,19 +134,23 @@ let ensure_value_sort (sort : Sort.t) value =
     match sort, value with
     | Sort.Bool, Value.Bool _ -> true
     | Sort.Int _, Value.Int _ -> true
+    | Sort.Real, Value.Real _ -> true
     | Sort.Uninterpreted expected, Value.Uninterp (actual, _) ->
       Sort.equal (Sort.uninterpreted expected) actual
     | Sort.BitVec expected, Value.BitVec _ ->
       let actual, _ = as_bv value in
       expected = actual
-    | (Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _
-      | Sort.BitVec _), _ -> false
+    | ( ( Sort.Bool
+        | Sort.Int _
+        | Sort.Real
+        | Sort.Uninterpreted _
+        | Sort.Datatype _
+        | Sort.Array _
+        | Sort.BitVec _ )
+      , _ ) -> false
   in
   if not matches
-  then
-    raise
-      (Eval_error
-         ("value does not match term sort: " ^ Value.to_string value))
+  then raise (Eval_error ("value does not match term sort: " ^ Value.to_string value))
 ;;
 
 let reduce_bv bits width =
@@ -233,9 +241,7 @@ let rotate ~left value amount =
   let output =
     Array.init width (fun index ->
       if left
-      then
-        input.
-          (if index >= amount then index - amount else width - (amount - index))
+      then input.(if index >= amount then index - amount else width - (amount - index))
       else (
         let source = add_nonnegative "rotate index" index amount in
         input.(if source >= width then source - width else source)))
@@ -291,27 +297,33 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
       match t.node with
       | Term.Bool_const b -> Value.Bool b
       | Term.Int_const n -> Value.Int (int_of_big n)
+      | Term.Real_const q -> Value.Real (Value.Rational.of_term q)
       | Term.Not a -> Value.Bool (not (as_bool (go a)))
       | Term.And xs ->
         (* fold so every operand is forced (model errors stay loud past a false one) *)
         Value.Bool
           (Iarr.fold
              (fun acc x ->
-                let b = as_bool (go x) in
-                acc && b)
+               let b = as_bool (go x) in
+               acc && b)
              true
              xs)
       | Term.Or xs ->
         Value.Bool
           (Iarr.fold
              (fun acc x ->
-                let b = as_bool (go x) in
-                acc || b)
+               let b = as_bool (go x) in
+               acc || b)
              false
              xs)
       | Term.Ite (c, a, b) -> if as_bool (go c) then go a else go b
       | Term.Eq (a, b) -> Value.Bool (Value.equal (go a) (go b))
-      | Term.Le arg -> Value.Bool (as_int (go arg) <= 0)
+      | Term.Le arg ->
+        (match arg.sort with
+         | Sort.Int _ -> Value.Bool (as_int (go arg) <= 0)
+         | Sort.Real ->
+           Value.Bool (Value.Rational.compare (as_real (go arg)) Value.Rational.zero <= 0)
+         | _ -> raise (Eval_error "Le argument is not numeric"))
       | Term.Arith { coeffs; const } ->
         let sum =
           Iarr.fold
@@ -320,6 +332,17 @@ let eval_general ~consts ~funs (root : Term.t) : Value.t =
             coeffs
         in
         Value.Int sum
+      | Term.Real_arith { coeffs; const } ->
+        let sum =
+          Iarr.fold
+            (fun acc (ti, ci) ->
+              Value.Rational.add
+                acc
+                (Value.Rational.mul (Value.Rational.of_term ci) (as_real (go ti))))
+            (Value.Rational.of_term const)
+            coeffs
+        in
+        Value.Real sum
       | Term.App (sym, args) ->
         (match Bv_term.view t with
          | Some view -> eval_bv view
@@ -502,6 +525,7 @@ let head_and_children (t : Term.t) : string * Term.t list =
   match t.node with
   | Term.Bool_const b -> Bool.to_string b, []
   | Term.Int_const n -> Bigint.to_string n, []
+  | Term.Real_const q -> Value.Rational.to_string (Value.Rational.of_term q), []
   | Term.Not a -> "(not _)", [ a ]
   | Term.And xs -> "(and ...)", Iarr.to_list xs
   | Term.Or xs -> "(or ...)", Iarr.to_list xs
@@ -510,6 +534,11 @@ let head_and_children (t : Term.t) : string * Term.t list =
   | Term.Le a -> "(<= _ 0)", [ a ]
   | Term.Arith { coeffs; const } ->
     ( Printf.sprintf "(linear +%s ...)" (Bigint.to_string const)
+    , List.map fst (Iarr.to_list coeffs) )
+  | Term.Real_arith { coeffs; const } ->
+    ( Printf.sprintf
+        "(real-linear +%s ...)"
+        (Value.Rational.to_string (Value.Rational.of_term const))
     , List.map fst (Iarr.to_list coeffs) )
   | Term.App (sym, args) ->
     let name = Symbol.name sym in
@@ -570,7 +599,8 @@ let require_formula_complete (model : Eval_model.t) (assertions : Term.t list) :
       then note (Printf.sprintf "cardinality entry for sort %s" name)
     (* No datatype-sorted model completeness obligation yet: the datatype theory emits no
        model values, so a datatype query never reaches [Sat]-with-model here. *)
-    | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> ()
+    | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _
+      -> ()
   in
   let check_app sym arity =
     let name = Symbol.name sym in
@@ -589,7 +619,7 @@ let require_formula_complete (model : Eval_model.t) (assertions : Term.t list) :
       Hashtbl.add seen t.tag ();
       check_sort t.sort;
       match t.node with
-      | Term.Bool_const _ | Term.Int_const _ -> ()
+      | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ()
       | Term.Not a -> walk a
       | Term.And xs | Term.Or xs -> Iarr.iter walk xs
       | Term.Ite (c, a, b) ->
@@ -601,6 +631,7 @@ let require_formula_complete (model : Eval_model.t) (assertions : Term.t list) :
         walk b
       | Term.Le a -> walk a
       | Term.Arith { coeffs; _ } -> Iarr.iter (fun (ti, _) -> walk ti) coeffs
+      | Term.Real_arith { coeffs; _ } -> Iarr.iter (fun (ti, _) -> walk ti) coeffs
       | Term.App (sym, args) ->
         (match Bv_term.view t with
          | Some _ -> ()

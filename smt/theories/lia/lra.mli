@@ -101,11 +101,36 @@ val model : 'premise t -> (var * Rational.t) list
 (** [value t v] is [v]'s entry in {!model}, with the same validity precondition. *)
 val value : 'premise t -> var -> Rational.t
 
+(** [fixed_value t ~coeffs ~constant] returns the exact value of
+    [sum coeffs + constant], together with the premises for its active lower and upper
+    bounds, exactly when both bounds are non-strict and coincide. *)
+val fixed_value
+  :  'premise t
+  -> coeffs:(var * Rational.t) list
+  -> constant:Rational.t
+  -> (Rational.t * 'premise * 'premise) option
+
+(** Read one active non-strict oriented bound of [sum coeffs + constant].  Strict delta
+    bounds do not constitute exact-value witnesses. *)
+val oriented_bound
+  :  'premise t
+  -> coeffs:(var * Rational.t) list
+  -> constant:Rational.t
+  -> [ `Lower | `Upper ]
+  -> ('premise * Rational.t) option
+
 (** Backtracking affects asserted bounds and the active-constraint set.  Allocated
     variables and internal slack rows persist. *)
 val push : 'premise t -> unit
 
 val pop : 'premise t -> int -> unit
+
+(** A sub-frame watermark for chronological rewind.  It restores simplex bounds and the
+    active-constraint log without changing the ordinary push/pop frame stack. *)
+type checkpoint
+
+val checkpoint : 'premise t -> checkpoint
+val rewind_to_checkpoint : 'premise t -> checkpoint -> unit
 
 (** Deterministic cumulative simplex pivot count. *)
 val pivot_count : 'premise t -> int

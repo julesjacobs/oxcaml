@@ -474,7 +474,8 @@ and blast_bool_uncached t (term : Term.t) : Sat.lit =
          t.bool_vars <- (term, l) :: t.bool_vars;
          l)
        else unsupported "uninterpreted predicate (out of QF_BV)")
-  | Le _ | Arith _ | Int_const _ -> unsupported "arithmetic atom (not QF_BV)"
+  | Le _ | Arith _ | Real_arith _ | Int_const _ | Real_const _ ->
+    unsupported "arithmetic atom (not QF_BV)"
 
 and is_bv t (term : Term.t) =
   match t.defs.width_of_sort term.sort with

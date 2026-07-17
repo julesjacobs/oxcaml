@@ -20,6 +20,11 @@ exception Overflow
 exception Sort_error of string
 exception Unsupported of string
 
+type rational =
+  { num : Bigint.t
+  ; den : Bigint.t
+  }
+
 type t =
   { node : node
   ; sort : Sort.t
@@ -37,10 +42,17 @@ and node =
   | And of t Iarr.t
   | Or of t Iarr.t
   | Ite of t * t * t
+  | Real_const of rational
+  | Real_arith of real_linear
 
 and linear =
   { coeffs : (t * Bigint.t) Iarr.t
   ; const : Bigint.t
+  }
+
+and real_linear =
+  { coeffs : (t * rational) Iarr.t
+  ; const : rational
   }
 
 (* ------------------------------------------------------------------ *)
@@ -52,15 +64,24 @@ and linear =
 
 let same_children xs ys = Iarr.equal (fun a b -> a.tag = b.tag) xs ys
 
+let equal_rational x y = Bigint.equal x.num y.num && Bigint.equal x.den y.den
+
 let equal_node (a : node) (b : node) =
   match a, b with
   | Bool_const x, Bool_const y -> Bool.equal x y
   | Int_const x, Int_const y -> Bigint.equal x y
+  | Real_const x, Real_const y -> equal_rational x y
   | App (f, xs), App (g, ys) -> Symbol.equal f g && same_children xs ys
   | Arith l1, Arith l2 ->
     Bigint.equal l1.const l2.const
     && Iarr.equal
          (fun (t1, c1) (t2, c2) -> t1.tag = t2.tag && Bigint.equal c1 c2)
+         l1.coeffs
+         l2.coeffs
+  | Real_arith l1, Real_arith l2 ->
+    equal_rational l1.const l2.const
+    && Iarr.equal
+         (fun (t1, c1) (t2, c2) -> t1.tag = t2.tag && equal_rational c1 c2)
          l1.coeffs
          l2.coeffs
   | Le x, Le y -> x.tag = y.tag
@@ -72,8 +93,10 @@ let equal_node (a : node) (b : node) =
     a1.tag = b1.tag && a2.tag = b2.tag && a3.tag = b3.tag
   | ( ( Bool_const _
       | Int_const _
+      | Real_const _
       | App _
       | Arith _
+      | Real_arith _
       | Le _
       | Eq _
       | Not _
@@ -96,11 +119,17 @@ let hash_node (n : node) : int =
   match n with
   | Bool_const b -> mix 0 (Bool.to_int b)
   | Int_const k -> mix 1 (Bigint.hash k)
+  | Real_const q -> mix (mix 10 (Bigint.hash q.num)) (Bigint.hash q.den)
   | App (s, xs) -> tags (mix 2 (Symbol.hash s)) xs
   | Arith l ->
     Iarr.hash_fold
       (fun acc (t, c) -> mix (mix acc t.tag) (Bigint.hash c))
       (mix 3 (Bigint.hash l.const))
+      l.coeffs
+  | Real_arith l ->
+    Iarr.hash_fold
+      (fun acc (t, c) -> mix (mix (mix acc t.tag) (Bigint.hash c.num)) (Bigint.hash c.den))
+      (mix (mix 11 (Bigint.hash l.const.num)) (Bigint.hash l.const.den))
       l.coeffs
   | Le a -> mix 4 a.tag
   | Eq (a, b) -> mix (mix 5 a.tag) b.tag
@@ -221,6 +250,30 @@ let bmul = Bigint.mul
 let bneg = Bigint.neg
 let bis_zero = Bigint.is_zero
 
+let rational_of_frac_big ~num ~den =
+  if bis_zero den then invalid_arg "Term.rational_of_frac_big: zero denominator";
+  if bis_zero num
+  then { num = bzero; den = bone }
+  else (
+    let num, den = if Bigint.sign den < 0 then bneg num, bneg den else num, den in
+    let gcd = Bigint.gcd num den in
+    { num = fst (Bigint.divmod num gcd); den = fst (Bigint.divmod den gcd) })
+;;
+
+let rzero = { num = bzero; den = bone }
+let rone = { num = bone; den = bone }
+let ris_zero q = bis_zero q.num
+let rneg q = if ris_zero q then rzero else { q with num = bneg q.num }
+
+let radd a b =
+  rational_of_frac_big
+    ~num:(badd (bmul a.num b.den) (bmul b.num a.den))
+    ~den:(bmul a.den b.den)
+;;
+
+let rsub a b = radd a (rneg b)
+let rmul a b = rational_of_frac_big ~num:(bmul a.num b.num) ~den:(bmul a.den b.den)
+
 (* Exact division [a / b] when [b] divides [a] (the gcd-reduction case): the remainder is
    zero, so truncation-toward-zero is exact. *)
 let bdiv_exact a b = fst (Bigint.divmod a b)
@@ -239,6 +292,11 @@ let bceil_div k g =
 let require_int what t =
   if not (Sort.equal t.sort Sort.int)
   then raise (Sort_error (Printf.sprintf "%s expects an Int operand" what))
+;;
+
+let require_real what t =
+  if not (Sort.equal t.sort Sort.real)
+  then raise (Sort_error (Printf.sprintf "%s expects a Real operand" what))
 ;;
 
 let require_bool what t =
@@ -283,7 +341,7 @@ let build_linear st terms const =
 let int_const st n = hashcons st (Int_const n) Sort.int
 let bool_const st b = hashcons st (Bool_const b) Sort.bool
 
-let add st a b =
+let add_int st a b =
   require_int "add" a;
   require_int "add" b;
   let ta, ka = terms_of a
@@ -291,13 +349,13 @@ let add st a b =
   build_linear st (ta @ tb) (badd ka kb)
 ;;
 
-let neg st a =
+let neg_int st a =
   require_int "neg" a;
   let ta, ka = terms_of a in
   build_linear st (List.map (fun (t, c) -> t, bneg c) ta) (bneg ka)
 ;;
 
-let sub st a b =
+let sub_int st a b =
   require_int "sub" a;
   require_int "sub" b;
   let ta, ka = terms_of a
@@ -305,7 +363,7 @@ let sub st a b =
   build_linear st (ta @ List.map (fun (t, c) -> t, bneg c) tb) (bsub ka kb)
 ;;
 
-let mul_const st c a =
+let mul_const_int st c a =
   require_int "mul_const" a;
   if bis_zero c
   then int_const st bzero
@@ -314,7 +372,7 @@ let mul_const st c a =
     build_linear st (List.map (fun (t, ci) -> t, bmul ci c) ta) (bmul ka c))
 ;;
 
-let linear_combination st pairs const =
+let linear_combination_int st pairs const =
   let terms, k =
     List.fold_left
       (fun (acc, k) (c, term) ->
@@ -326,6 +384,121 @@ let linear_combination st pairs const =
       pairs
   in
   build_linear st terms k
+;;
+
+(* Real linear forms mirror the integer representation, but every scalar operation is
+   exact rational arithmetic and order atoms are never gcd/ceil-tightened. *)
+let real_terms_of t =
+  match t.node with
+  | Real_const q -> [], q
+  | Real_arith l -> Iarr.to_list l.coeffs, l.const
+  | _ -> [ t, rone ], rzero
+;;
+
+let merge_real_terms terms =
+  let sorted = List.stable_sort (fun (a, _) (b, _) -> Int.compare a.tag b.tag) terms in
+  let rec go = function
+    | [] -> []
+    | (t1, c1) :: (t2, c2) :: rest when t1.tag = t2.tag ->
+      go ((t1, radd c1 c2) :: rest)
+    | (t, c) :: rest -> if ris_zero c then go rest else (t, c) :: go rest
+  in
+  go sorted
+;;
+
+let build_real_linear st terms const =
+  let coeffs = merge_real_terms terms in
+  match coeffs with
+  | [] -> hashcons st (Real_const const) Sort.real
+  | [ (t, c) ] when equal_rational c rone && ris_zero const -> t
+  | _ ->
+    hashcons st (Real_arith { coeffs = Iarr.of_list coeffs; const }) Sort.real
+;;
+
+let real_const st q = hashcons st (Real_const q) Sort.real
+
+let real_const_big st ~num ~den =
+  real_const st (rational_of_frac_big ~num ~den)
+;;
+
+let add_real st a b =
+  require_real "add" a;
+  require_real "add" b;
+  let ta, ka = real_terms_of a
+  and tb, kb = real_terms_of b in
+  build_real_linear st (ta @ tb) (radd ka kb)
+;;
+
+let neg_real st a =
+  require_real "neg" a;
+  let terms, const = real_terms_of a in
+  build_real_linear st (List.map (fun (t, c) -> t, rneg c) terms) (rneg const)
+;;
+
+let sub_real st a b =
+  require_real "sub" a;
+  require_real "sub" b;
+  let ta, ka = real_terms_of a
+  and tb, kb = real_terms_of b in
+  build_real_linear st (ta @ List.map (fun (t, c) -> t, rneg c) tb) (rsub ka kb)
+;;
+
+let mul_real_const st c a =
+  require_real "mul_real_const" a;
+  if ris_zero c
+  then real_const st rzero
+  else (
+    let terms, const = real_terms_of a in
+    build_real_linear
+      st
+      (List.map (fun (t, ci) -> t, rmul ci c) terms)
+      (rmul const c))
+;;
+
+let real_linear_combination st pairs const =
+  let terms, const =
+    List.fold_left
+      (fun (acc, k) (c, term) ->
+         require_real "real_linear_combination" term;
+         let terms, const = real_terms_of term in
+         ( List.rev_append (List.map (fun (t, ci) -> t, rmul ci c) terms) acc
+         , radd k (rmul const c) ))
+      ([], const)
+      pairs
+  in
+  build_real_linear st terms const
+;;
+
+let add st a b =
+  if Sort.equal a.sort Sort.real && Sort.equal b.sort Sort.real
+  then add_real st a b
+  else add_int st a b
+;;
+
+let neg st a = if Sort.equal a.sort Sort.real then neg_real st a else neg_int st a
+
+let sub st a b =
+  if Sort.equal a.sort Sort.real && Sort.equal b.sort Sort.real
+  then sub_real st a b
+  else sub_int st a b
+;;
+
+let mul_const st c a =
+  if Sort.equal a.sort Sort.real
+  then mul_real_const st (rational_of_frac_big ~num:c ~den:bone) a
+  else mul_const_int st c a
+;;
+
+let linear_combination st pairs const =
+  match pairs with
+  | (_, term) :: _ when Sort.equal term.sort Sort.real ->
+    real_linear_combination
+      st
+      (List.map
+         (fun (c, term) -> rational_of_frac_big ~num:c ~den:bone, term)
+         pairs)
+      (rational_of_frac_big ~num:const ~den:bone)
+  | _ -> linear_combination_int st pairs const
 ;;
 
 (* Order atom: build [expr <= 0] from (terms, const) already representing [expr]. Divide
@@ -343,7 +516,7 @@ let mk_le st terms const =
     hashcons st (Le arg) Sort.bool
 ;;
 
-let le st a b =
+let le_int st a b =
   require_int "le" a;
   require_int "le" b;
   let ta, ka = terms_of a
@@ -351,7 +524,7 @@ let le st a b =
   mk_le st (ta @ List.map (fun (t, c) -> t, bneg c) tb) (bsub ka kb)
 ;;
 
-let lt st a b =
+let lt_int st a b =
   require_int "lt" a;
   require_int "lt" b;
   let ta, ka = terms_of a
@@ -360,8 +533,17 @@ let lt st a b =
   mk_le st (ta @ List.map (fun (t, c) -> t, bneg c) tb) (badd (bsub ka kb) bone)
 ;;
 
-let ge st a b = le st b a
-let gt st a b = lt st b a
+let le_real st a b =
+  require_real "le" a;
+  require_real "le" b;
+  let ta, ka = real_terms_of a
+  and tb, kb = real_terms_of b in
+  let terms = ta @ List.map (fun (t, c) -> t, rneg c) tb in
+  let const = rsub ka kb in
+  match merge_real_terms terms with
+  | [] -> bool_const st (Bigint.compare const.num bzero <= 0)
+  | terms -> hashcons st (Le (build_real_linear st terms const)) Sort.bool
+;;
 
 let eq st a b =
   if not (Sort.equal a.sort b.sort)
@@ -371,6 +553,7 @@ let eq st a b =
   else (
     match a.node, b.node with
     | Int_const x, Int_const y -> bool_const st (Bigint.equal x y)
+    | Real_const x, Real_const y -> bool_const st (equal_rational x y)
     | Bool_const x, Bool_const y -> bool_const st (Bool.equal x y)
     | _ ->
       let lo, hi = if a.tag < b.tag then a, b else b, a in
@@ -384,6 +567,21 @@ let not_ st a =
   | Bool_const v -> bool_const st (not v)
   | _ -> hashcons st (Not a) Sort.bool
 ;;
+
+let le st a b =
+  if Sort.equal a.sort Sort.real && Sort.equal b.sort Sort.real
+  then le_real st a b
+  else le_int st a b
+;;
+
+let lt st a b =
+  if Sort.equal a.sort Sort.real && Sort.equal b.sort Sort.real
+  then not_ st (le_real st b a)
+  else lt_int st a b
+;;
+
+let ge st a b = le st b a
+let gt st a b = lt st b a
 
 (* n-ary And/Or: flatten same connective, constant-fold, dedup + tag-sort.
    [absorbing]/[identity] are the short-circuit and drop values. *)

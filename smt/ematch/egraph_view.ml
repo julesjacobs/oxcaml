@@ -37,9 +37,10 @@ let snapshot view ~ground_terms =
     let term = Queue.pop pending in
     captured := term :: !captured;
     (match (term : Term.t).node with
-     | Bool_const _ | Int_const _ -> ()
+     | Bool_const _ | Int_const _ | Real_const _ -> ()
      | App (_, args) -> Iarr.iter add args
      | Arith lin -> Iarr.iter (fun (child, _) -> add child) lin.coeffs
+     | Real_arith lin -> Iarr.iter (fun (child, _) -> add child) lin.coeffs
      | Le child | Not child -> add child
      | Eq (a, b) ->
        add a;
@@ -65,8 +66,8 @@ let snapshot view ~ground_terms =
            (fun (term : Term.t) ->
               match term.node with
               | App (head, _) -> Symbol.equal head sym
-              | Bool_const _ | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _
-              | Or _ | Ite _ -> false)
+              | Bool_const _ | Int_const _ | Real_const _ | Arith _ | Real_arith _ | Le _
+              | Eq _ | Not _ | And _ | Or _ | Ite _ -> false)
            ground_terms)
   ; find_class_opt = root
   ; equal_if_registered =

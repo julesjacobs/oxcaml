@@ -26,6 +26,36 @@ let pow2 width =
   loop Bigint.one (Bigint.of_int 2) width
 ;;
 
+let atom_string = function
+  | Sexp.Atom s -> Some s
+  | Sexp.Quoted _ | Sexp.List _ -> None
+;;
+
+let unary_minus = function
+  | Sexp.List [ Sexp.Atom "-"; x ] -> Some x
+  | Sexp.Atom _ | Sexp.Quoted _ | Sexp.List _ -> None
+;;
+
+let binary_divide = function
+  | Sexp.List [ Sexp.Atom "/"; p; q ] -> Some (p, q)
+  | Sexp.Atom _ | Sexp.Quoted _ | Sexp.List _ -> None
+;;
+
+let rec real_parts = function
+  | Sexp.Atom s ->
+    (match Rational_syntax.decimal s with
+     | Some q -> Ok q
+     | None -> Error Rational_syntax.Not_a_fraction)
+  | Sexp.List [ Sexp.Atom "-"; inner ] ->
+    Result.map (fun (num, den) -> Bigint.neg num, den) (real_parts inner)
+  | sexp ->
+    Rational_syntax.fraction
+      ~atom:atom_string
+      ~minus:unary_minus
+      ~divide:binary_divide
+      sexp
+;;
+
 (* Interpret a raw sidecar token against a target sort. *)
 let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
   let int_of s =
@@ -62,6 +92,14 @@ let value_of_token (sort : Sort.t) (s : Sexp.t) : Value.t =
      | Sexp.Atom "false" -> Value.Bool false
      | _ -> raise (Malformed "expected true/false for a Bool value"))
   | Sort.Int _ -> Value.Int (as_int s)
+  | Sort.Real ->
+    (match real_parts s with
+     | Ok (num, den) when Bigint.sign den > 0 ->
+       (match Value.Rational.of_big_frac ~num ~den with
+        | q -> Value.Real q
+        | exception Invalid_argument _ -> raise (Malformed "invalid Real value"))
+     | Ok _ -> raise (Malformed "Real model denominator must be positive")
+     | Error _ -> raise (Malformed "expected an exact Real decimal or fraction"))
   | Sort.Uninterpreted _ ->
     let id = as_int s in
     if id < 0 then raise (Malformed "uninterpreted element index must be non-negative");
@@ -213,8 +251,8 @@ let of_file decls path =
   Fun.protect
     ~finally:(fun () -> close_in_noerr ic)
     (fun () ->
-       let len = in_channel_length ic in
-       of_string decls (really_input_string ic len))
+      let len = in_channel_length ic in
+      of_string decls (really_input_string ic len))
 ;;
 
 let lookup_const t sym = Hashtbl.find_opt t.consts (Symbol.name sym)

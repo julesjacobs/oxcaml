@@ -317,6 +317,7 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
           (match v with
            | Session.VInt n -> Hashtbl.replace tbl name (VInt n)
            | Session.VBool b -> Hashtbl.replace tbl name (VBool b)
+           | Session.VReal _ -> ()
            | Session.VUninterp _ -> ())
         | Session.Fun _ -> ())
       bindings;
