@@ -99,3 +99,26 @@ Line 1, characters 0-33:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: vox: [@vox.def] requires a function binding with explicit parameters
 |}]
+
+(* Forgeability guard: the verify-skip is keyed on expander provenance, NOT on a
+   spellable attribute.  A hand-written [@@vox.def.axiom] on a false-refinement
+   unit body is verified normally and REJECTED -- it does not deposit anything. *)
+let[@vox.def.axiom] forged (x : int) = (() : unit{ 0 = 1 })
+[%%expect {|
+Line 1, characters 39-59:
+1 | let[@vox.def.axiom] forged (x : int) = (() : unit{ 0 = 1 })
+                                           ^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* The verifier's exploit program: forge the axiom marker, "unpack" it, and try
+   to prove a falsehood.  It must be rejected at the forged binding itself. *)
+let bad (x : int) = (() : unit{ 0 = 1 }) [@@vox.def.axiom]
+let () = bad 0
+let exploit = (7 : int{ _ = 99 })
+[%%expect {|
+Line 1, characters 20-40:
+1 | let bad (x : int) = (() : unit{ 0 = 1 }) [@@vox.def.axiom]
+                        ^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]

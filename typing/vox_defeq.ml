@@ -27,8 +27,20 @@
 open Parsetree
 
 let def_attribute = "vox.def"
-let axiom_attribute = "vox.def.axiom"
 let refinement_type_extension = "vox2.refinement.type"
+
+(* Provenance of generated companion-lemma bindings, tracked out-of-band so the
+   verification-skip can NEVER be triggered by user-written surface syntax.  The
+   expander mints a fresh ghost location for each lemma and records the physical
+   location object; [Vox_verify] recognises a generated lemma by PHYSICAL
+   identity of its [vb_loc] against this set.  A hand-written binding cannot
+   carry one of these objects, so it is always verified normally.  A false
+   negative (identity lost to a copy) would only over-reject a genuine lemma --
+   never admit an unverified one -- so the channel fails closed. *)
+let generated_lemma_locations : Location.t list ref = ref []
+
+let is_generated_lemma_loc loc =
+  List.exists (fun recorded -> recorded == loc) !generated_lemma_locations
 
 let has_attribute name attributes =
   List.exists
@@ -99,13 +111,12 @@ let make_lemma_binding ~loc ~function_name ~parameters ~parameter_names ~body =
     Ast_helper.Exp.function_ ~loc parameters no_function_constraint
       (Pfunction_body lemma_body)
   in
-  let axiom =
-    { attr_name = { txt = axiom_attribute; loc };
-      attr_payload = PStr [];
-      attr_loc = loc;
-    }
-  in
-  Ast_helper.Vb.mk ~loc ~attrs:[axiom]
+  (* Mint a fresh ghost location for the lemma binding and record it, so the
+     verification-skip is keyed on expander provenance rather than any
+     user-writable attribute. *)
+  let lemma_loc = { loc with Location.loc_ghost = true } in
+  generated_lemma_locations := lemma_loc :: !generated_lemma_locations;
+  Ast_helper.Vb.mk ~loc:lemma_loc
     (Ast_helper.Pat.var ~loc { txt = function_name ^ "_def"; loc })
     lemma_function
 

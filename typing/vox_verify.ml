@@ -602,12 +602,14 @@ let rec bind_scope_references scope expression =
    therefore not be verified -- doing so would emit an unprovable obligation.
    The equation still reaches callers as an ordinary fact: the lemma is
    registered as a dependent definition, so [check_application] deposits the
-   instantiated equation at each [f_def a1 ... an] call site. *)
+   instantiated equation at each [f_def a1 ... an] call site.
+
+   Recognition is by expander provenance -- the physical identity of the ghost
+   location [Vox_defeq] minted for the lemma -- NOT by any spellable attribute:
+   a hand-written binding cannot carry that location object, so it is always
+   verified normally (a forged [@@vox.def.axiom] does not skip verification). *)
 let is_def_axiom_binding binding =
-  List.exists
-    (fun (attribute : Parsetree.attribute) ->
-      String.equal attribute.attr_name.txt Vox_defeq.axiom_attribute)
-    binding.vb_attributes
+  Vox_defeq.is_generated_lemma_loc binding.vb_loc
 
 let verification_error ~loc verdict =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"

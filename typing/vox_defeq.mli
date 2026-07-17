@@ -7,7 +7,10 @@
    unchanged. *)
 val expand_structure : Parsetree.structure -> Parsetree.structure
 
-(* Marker attribute placed on the generated companion lemma binding, so that
-   [Vox_verify] treats its refinement as a trusted axiom and does not re-verify
-   its body. *)
-val axiom_attribute : string
+(* True for a binding produced by [expand_structure] as a companion lemma:
+   recognised by the physical identity of the fresh ghost location the expander
+   minted for it, an out-of-band channel that user surface syntax cannot forge.
+   [Vox_verify] consults this to treat such a lemma's refinement as a trusted
+   axiom (skipping verification of its unit body); every other binding, however
+   attributed, is verified normally. *)
+val is_generated_lemma_loc : Location.t -> bool
