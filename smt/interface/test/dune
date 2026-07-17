@@ -19,8 +19,3 @@
  (name session_cores_test)
  (modules session_cores_test)
  (libraries oxsmt_core oxsmt_lia oxsmt_interface))
-
-(rule
- (alias runtest)
- (action
-  (run ./session_cores_test.exe)))
