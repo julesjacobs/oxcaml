@@ -96,3 +96,42 @@ val binder_ids : 'a t -> int list
     atom), binders shown by source [name]. For test readability and audit dumps; not a
     parser input. *)
 val to_string : ('a -> string) -> 'a t -> string
+
+(** A Skolem function eliminated from an existential binder (stage 2). [sk_binder] is the
+    original existential binder — its [id] is the reference atoms still carry (resolved to
+    a Skolem term at lowering) and its [sort] is the Skolem function's codomain. [sk_deps]
+    is the list of {e dominating universal} binder ids, in binding order — EXACTLY the
+    universals whose scope encloses the existential (standard Skolemization; wrong args
+    are unsound). A lowering mints a fresh function of the [sk_deps] sorts and applies it
+    to their images; an empty [sk_deps] yields a Skolem {e constant} (fresh witness). *)
+type skolem_descr =
+  { sk_binder : binder
+  ; sk_deps : int list
+  }
+
+(** A clausified universal from {!clausify}. [univ] are the universal binders the clause
+    quantifies (restricted to those the [matrix] actually references, directly or as a
+    Skolem dependency); an empty [univ] is a GROUND clause (lower via a ground assert, not
+    a live lemma). [skolems] are the Skolem descriptors the [matrix] references. [matrix]
+    is quantifier-free ([True]/[False]/[Atom]/[Not (Atom ..)]/[And]/[Or]) over leaf atoms
+    that reference [univ] binder ids and [skolems] binder ids. *)
+type 'a clause =
+  { univ : binder list
+  ; skolems : skolem_descr list
+  ; matrix : 'a t
+  }
+
+(** [clausify ~rename_atom ~atom_refs phi] is the full stage-1/2 clausification: NNF,
+    rename-apart, Skolemize each existential (with exactly its dominating universals as
+    arguments), prenex the remaining universals, and split the top-level conjunction into
+    one clause per conjunct. The result is a set of clauses whose conjunction is
+    equisatisfiable with [phi] (Skolemization is equisatisfiable, not equivalent).
+    [rename_atom] rewrites an atom's binder references under a remap (see
+    {!rename_apart}); [atom_refs] lists the binder ids an atom references (used to
+    restrict each clause's [univ]/[skolems] to what it needs — an over-approximation is
+    sound, a miss is a bug). A trivially-[True] conjunct is dropped. *)
+val clausify
+  :  rename_atom:((int -> int) -> 'a -> 'a)
+  -> atom_refs:('a -> int list)
+  -> 'a t
+  -> 'a clause list

@@ -92,6 +92,18 @@ type exists_src =
      subset (e.g. a nested [forall]); the driver drops it with the sat-degrade sentinel. *)
   }
 
+(* A lowered clause from the front-end quantified pipeline (dark: [OXSMT_QUANT_PIPELINE]).
+   [cl_qvars] are the universal binders ([] = a GROUND clause, lowered via a plain assert,
+   not a live lemma); [cl_build ~skolem qvar_images] is [(body, triggers)]. It reuses the
+   existing {!skolemizer} seam: an existential binder dominated by universals [U] becomes
+   [skolem ~cod ~args:(images of U)] (0-ary => a fresh witness constant). May raise
+   {!Malformed}/{!Unsupported}/{!Term.Unsupported}/{!Term.Overflow} when a leaf is outside
+   the fragment — the loader drops that clause and arms the sentinel. *)
+type clause =
+  { cl_qvars : (string * Sort.t) list
+  ; cl_build : skolem:skolemizer -> Term.t array -> Term.t * Term.t list list
+  }
+
 type t =
   { env : Env.t
   ; ctx : Context.t
@@ -108,6 +120,11 @@ type t =
   ; existentials : exists_src list
       (* top-level POSITIVE [(assert (exists ...))] assertions the loader Skolemizes into
          fresh ground witnesses (lemmas-climb chunk 2a), in file order *)
+  ; clauses : clause list
+      (* front-end quantified pipeline (dark: [OXSMT_QUANT_PIPELINE]) output: the clauses
+         a quantifier-bearing assertion was clausified into (NNF -> Skolemize -> lower).
+         Empty when the flag is OFF (byte-identical) — quantifiers then take {!lemmas}/
+         {!existentials}. Ground (non-quantifier) assertions always take {!assertions}. *)
   ; dropped : int
   (* count of assertion content the reader could not represent and dropped via partial
      assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade sentinel *)
@@ -1201,6 +1218,262 @@ let read_negated_forall st (tail : Sexp.t list) : exists_src =
   { ex_qvars; ex_build }
 ;;
 
+(* ---- front-end quantified pipeline (dark: OXSMT_QUANT_PIPELINE) ---- *)
+
+(* Does [s] syntactically contain a [forall]/[exists]? Gates pipeline routing and the
+   leaf/structure split inside {!formula_of_sexp}. *)
+let rec has_quantifier (s : Sexp.t) =
+  match s with
+  | Sexp.Atom (Tok.Reserved ("forall" | "exists")) -> true
+  | Sexp.Atom _ -> false
+  | Sexp.List items -> List.exists has_quantifier items
+;;
+
+(* The symbol names appearing anywhere in [s] (used to compute a leaf's referenced binder
+   ids — an over-approximation is sound: it can only keep an unused qvar, never miss one). *)
+let symbol_names s =
+  let tbl = Hashtbl.create 16 in
+  let rec go = function
+    | Sexp.Atom (Tok.Symbol { text; _ }) -> Hashtbl.replace tbl text ()
+    | Sexp.Atom _ -> ()
+    | Sexp.List items -> List.iter go items
+  in
+  go s;
+  tbl
+;;
+
+(* Wrap a leaf s-expression in the enclosing let-nesting ([lets] outermost-first), so a
+   leaf split out of a [let] body still resolves its let-bound names. Sound because [let]
+   is pure sharing; re-reading the (quantifier-free) bindings at each leaf recomputes the
+   same term. A binding whose VALUE contains a quantifier makes the wrapped read raise
+   [Unsupported] -> the assertion is dropped (sound). *)
+let wrap_lets lets leaf =
+  List.fold_right
+    (fun bindings body ->
+      Sexp.List [ Sexp.Atom (Tok.Reserved "let"); Sexp.List bindings; body ])
+    lets
+    leaf
+;;
+
+(* A deferred leaf reader: a quantifier-free Bool sub-formula, captured with its enclosing
+   lets and the quantifier-binder scope active at its position. Term construction is
+   deferred to lowering, when the binder images (qvar / Skolem terms) exist. *)
+type qleaf =
+  { q_sexp : Sexp.t (* leaf content, wrapped in enclosing lets *)
+  ; q_scope : (string * int) list (* quantifier binder name -> id, OUTERMOST-first *)
+  ; q_refs : int list (* binder ids the sexp mentions (subset of q_scope ids) *)
+  }
+
+let make_leaf ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
+  let q_sexp = wrap_lets lets s in
+  let names = symbol_names q_sexp in
+  let q_scope = List.map (fun (n, (b : Fol.binder)) -> n, b.Fol.id) qscope in
+  let q_refs =
+    List.filter_map (fun (n, id) -> if Hashtbl.mem names n then Some id else None) q_scope
+  in
+  Fol.Atom { q_sexp; q_scope; q_refs }
+;;
+
+let rename_qleaf remap q =
+  { q with
+    q_scope = List.map (fun (n, i) -> n, remap i) q.q_scope
+  ; q_refs = List.map remap q.q_refs
+  }
+;;
+
+let qleaf_refs q = q.q_refs
+
+(* Is [s] PROVABLY Bool-sorted? Conservative — [false] on any uncertainty. A false
+   NEGATIVE only costs coverage (the [=]/[distinct]/[ite] becomes a leaf, and a quantifier
+   buried in it then drops soundly); a false POSITIVE would structurally decompose a
+   theory operator, which is unsound, so we never guess Bool. *)
+let rec definitely_bool st ~qscope (s : Sexp.t) : bool =
+  let cod_is_bool name =
+    match Hashtbl.find_opt st.funs name with
+    | Some { sym; _ } ->
+      (match Env.rank st.env sym with
+       | r -> Sort.equal r.Rank.codomain Sort.bool
+       | exception _ -> false)
+    | None ->
+      (match Hashtbl.find_opt st.defines name with
+       | Some d -> Sort.equal d.ret Sort.bool
+       | None -> false)
+  in
+  match s with
+  | Sexp.Atom (Tok.Symbol { text = "true" | "false"; quoted = false }) -> true
+  | Sexp.Atom (Tok.Symbol { text; _ }) ->
+    (match List.assoc_opt text qscope with
+     | Some (b : Fol.binder) -> Sort.equal b.Fol.sort Sort.bool
+     | None -> cod_is_bool text)
+  | Sexp.Atom _ -> false
+  | Sexp.List (Sexp.Atom (Tok.Reserved ("forall" | "exists")) :: _) -> true
+  | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: _) ->
+    definitely_bool st ~qscope body
+  | Sexp.List [ Sexp.Atom (Tok.Reserved "let"); _; body ] ->
+    definitely_bool st ~qscope body
+  | Sexp.List (head :: args) ->
+    (match Sexp.simple head with
+     | Some ("and" | "or" | "not" | "=>" | "xor") -> true
+     | Some ("=" | "distinct" | "<" | "<=" | ">" | ">=") -> true
+     | Some "ite" ->
+       (match args with
+        | _ :: t :: _ -> definitely_bool st ~qscope t
+        | _ -> false)
+     | Some name ->
+       (match List.assoc_opt name qscope with
+        | Some _ -> false (* a bound scalar heading an application is ill-sorted *)
+        | None -> cod_is_bool name)
+     | None -> false)
+  | Sexp.List [] -> false
+;;
+
+(* n-ary Boolean [=] (all-equal, a chain of adjacent iffs) / [distinct]. Only entered when
+   an argument is provably Bool. *)
+let bool_eq_or_distinct ~op recur args =
+  match op with
+  | "=" ->
+    let rec chain = function
+      | a :: (b :: _ as rest) -> Fol.Iff (recur a, recur b) :: chain rest
+      | _ -> []
+    in
+    (match chain args with
+     | [ single ] -> single
+     | cs -> Fol.And cs)
+  | _ ->
+    (match args with
+     | [ a; b ] -> Fol.Xor (recur a, recur b)
+     | _ :: _ :: _ -> Fol.False (* >2 Bool values cannot be pairwise distinct *)
+     | _ -> malformedf "distinct expects >= 2 arguments")
+;;
+
+(* Build the formula IR for a quantifier-bearing assertion body. A maximal quantifier-free
+   subterm becomes ONE deferred leaf; only the skeleton on the path to a quantifier is
+   structural. Raises [Unsupported] for content the IR cannot faithfully represent (a
+   quantifier under a theory operator, or a theory-sorted [=]/[ite]/[let]-value), so the
+   caller DROPS it under the sentinel discipline — never an unsound over-approximation. A
+   [Malformed] body still propagates (hard fail -> unknown). *)
+let rec formula_of_sexp st ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
+  if not (has_quantifier s)
+  then make_leaf ~lets ~qscope s
+  else (
+    let recur = formula_of_sexp st ~lets ~qscope in
+    let bound name = List.mem_assoc name qscope in
+    match s with
+    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
+      (* :pattern hints are discarded at stage 2 (RUNG 3 threads them); the tail is still
+         VALIDATED so a malformed annotation cannot silently drop content. *)
+      validate_bang_attrs attrs;
+      formula_of_sexp st ~lets ~qscope body
+    | Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ->
+      let binders, body, _patterns = collect_forall st [] tail in
+      quantifier st ~lets ~qscope ~mk:(fun bs g -> Fol.Forall (bs, g)) binders body
+    | Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ->
+      let binders, body = collect_exists st [] tail in
+      quantifier st ~lets ~qscope ~mk:(fun bs g -> Fol.Exists (bs, g)) binders body
+    | Sexp.List [ Sexp.Atom (Tok.Reserved "let"); Sexp.List bindings; body ] ->
+      formula_of_sexp st ~lets:(lets @ [ bindings ]) ~qscope body
+    | Sexp.List (head :: args) ->
+      (match Sexp.simple head with
+       | Some "and" when not (bound "and") -> Fol.And (List.map recur args)
+       | Some "or" when not (bound "or") -> Fol.Or (List.map recur args)
+       | Some "not" when not (bound "not") ->
+         (match args with
+          | [ a ] -> Fol.Not (recur a)
+          | _ -> malformedf "not expects exactly one argument")
+       | Some "=>" when not (bound "=>") ->
+         (match List.rev args with
+          | consequent :: rev_ante ->
+            List.fold_left
+              (fun acc a -> Fol.Implies (recur a, acc))
+              (recur consequent)
+              rev_ante
+          | [] -> malformedf "=> expects arguments")
+       | Some "xor" when not (bound "xor") ->
+         (match args with
+          | a :: b :: rest ->
+            List.fold_left
+              (fun acc x -> Fol.Xor (acc, recur x))
+              (Fol.Xor (recur a, recur b))
+              rest
+          | _ -> malformedf "xor expects >= 2 arguments")
+       | Some (("=" | "distinct") as op)
+         when (not (bound op)) && List.exists (definitely_bool st ~qscope) args ->
+         bool_eq_or_distinct ~op recur args
+       | Some "ite"
+         when (not (bound "ite"))
+              &&
+              match args with
+              | [ _; t; _ ] -> definitely_bool st ~qscope t
+              | _ -> false ->
+         (match args with
+          | [ c; t; e ] -> Fol.Ite (recur c, recur t, recur e)
+          | _ -> malformedf "ite expects three arguments")
+       | Some _ | None ->
+         unsupportedf "quantifier under an unsupported operator or theory position")
+    | _ -> unsupportedf "quantifier in an unsupported position")
+
+and quantifier st ~lets ~qscope ~mk binders body =
+  let fbs = List.map (fun (n, srt) -> n, Fol.fresh_binder ~name:n ~sort:srt) binders in
+  let qscope' = qscope @ fbs in
+  mk (List.map snd fbs) (formula_of_sexp st ~lets ~qscope:qscope' body)
+;;
+
+(* Read a deferred leaf into a [Term.t] given a binder-id resolver. *)
+let read_qleaf st resolve (q : qleaf) : Term.t =
+  let scope =
+    List.fold_left (fun acc (n, id) -> Scope.add n (resolve id) acc) Scope.empty q.q_scope
+  in
+  read_term st scope q.q_sexp
+;;
+
+(* Fold a clausal matrix (True/False/Atom/Not(Atom)/And/Or over built [Term.t]s) into one
+   [Term.t] through the shared [Context]. *)
+let rec fold_matrix st = function
+  | Fol.True -> Context.bool_const st.ctx true
+  | Fol.False -> Context.bool_const st.ctx false
+  | Fol.Atom t -> t
+  | Fol.Not g -> Context.not_ st.ctx (fold_matrix st g)
+  | Fol.And gs -> Context.and_ st.ctx (List.map (fold_matrix st) gs)
+  | Fol.Or gs -> Context.or_ st.ctx (List.map (fold_matrix st) gs)
+  | Fol.Implies _ | Fol.Iff _ | Fol.Xor _ | Fol.Ite _ | Fol.Forall _ | Fol.Exists _ ->
+    failwith "Fol lowering: matrix is not clausal (internal invariant)"
+;;
+
+(* Clausify one assertion body into lowering clauses (NNF -> rename-apart -> Skolemize ->
+   prenex -> split). Raises {!Unsupported}/{!Malformed} exactly as {!formula_of_sexp}. *)
+let clauses_of_assertion st (s : Sexp.t) : clause list =
+  let phi = formula_of_sexp st ~lets:[] ~qscope:[] s in
+  let fol_clauses = Fol.clausify ~rename_atom:rename_qleaf ~atom_refs:qleaf_refs phi in
+  List.map
+    (fun (cl : qleaf Fol.clause) ->
+      let cl_qvars =
+        List.map (fun (b : Fol.binder) -> b.Fol.name, b.Fol.sort) cl.Fol.univ
+      in
+      let cl_build ~skolem qvar_images =
+        let tbl = Hashtbl.create 16 in
+        List.iteri
+          (fun i (b : Fol.binder) -> Hashtbl.replace tbl b.Fol.id qvar_images.(i))
+          cl.Fol.univ;
+        let resolve id =
+          match Hashtbl.find_opt tbl id with
+          | Some t -> t
+          | None -> failwith "Fol lowering: unresolved binder id (internal invariant)"
+        in
+        (* Skolem functions/constants resolve AFTER universals (their deps are universals,
+           never other Skolems — standard Skolemization), so one pass suffices. *)
+        List.iter
+          (fun (d : Fol.skolem_descr) ->
+            let args = List.map resolve d.Fol.sk_deps in
+            let t = skolem ~cod:d.Fol.sk_binder.Fol.sort ~args in
+            Hashtbl.replace tbl d.Fol.sk_binder.Fol.id t)
+          cl.Fol.skolems;
+        let term_matrix = Fol.map_atoms (read_qleaf st resolve) cl.Fol.matrix in
+        fold_matrix st term_matrix, []
+      in
+      { cl_qvars; cl_build })
+    fol_clauses
+;;
+
 (* ---- commands ---- *)
 
 (* Reject user declarations in the reserved fresh-symbol namespace (board #48): a user
@@ -1431,6 +1704,11 @@ let run st sexps =
   let asserts = ref [] in
   let lemmas = ref [] in
   let existentials = ref [] in
+  (* Clauses from the front-end quantified pipeline (dark: [OXSMT_QUANT_PIPELINE]). Empty
+     unless the flag is ON, in which case a quantifier-bearing assertion routes here
+     instead of to {!lemmas}/{!existentials}; ground (non-quantifier) assertions still
+     take the ordinary {!asserts} path. *)
+  let clauses = ref [] in
   (* Count of assertion content the reader could not represent and DROPPED (partial
      assertion, below). Surfaced on {!t} so the shared loader arms a sentinel lemma when
      [dropped > 0] — the live-lemma soundness rule then degrades any [Sat] to [Unknown],
@@ -1507,6 +1785,24 @@ let run st sexps =
        | `Lemma l -> lemmas := l :: !lemmas
        | exception Unsupported _ -> incr dropped)
   in
+  (* Pipeline routing (dark: [OXSMT_QUANT_PIPELINE]) for a quantifier-bearing assertion.
+     Splits a top-level [(and ...)] and unwraps [(! ...)] first — same partial-assertion
+     granularity as {!take}, so one out-of-fragment conjunct drops alone rather than
+     sinking its representable siblings. Each piece is clausified (NNF -> Skolemize ->
+     lower); an [Unsupported] piece is dropped and counted (sentinel), a [Malformed] piece
+     propagates as a hard fail (-> unknown), exactly as {!take}. *)
+  let rec take_ir (b : Sexp.t) =
+    match b with
+    | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: inner :: attrs) ->
+      validate_bang_attrs attrs;
+      take_ir inner
+    | Sexp.List (head :: (_ :: _ :: _ as conjs)) when Sexp.simple head = Some "and" ->
+      List.iter take_ir conjs
+    | _ ->
+      (match clauses_of_assertion st b with
+       | cls -> List.iter (fun c -> clauses := c :: !clauses) cls
+       | exception (Unsupported _ | Term.Unsupported _ | Term.Overflow) -> incr dropped)
+  in
   (* Extract a declared name (any symbol atom, quoted or not). *)
   let name_of s =
     match Sexp.symbol_name s with
@@ -1565,6 +1861,12 @@ let run st sexps =
            unsupportedf "recursive define-fun-rec / define-funs-rec is not supported"
          | Some "define-fun", _ ->
            malformedf "malformed define-fun: %s" (Sexp.to_string cmd)
+         | Some "assert", [ body ]
+           when Lazy.force quant_pipeline_enabled && has_quantifier body ->
+           (* Front-end quantified pipeline (dark): route quantifier-bearing assertions
+              through the typed formula IR. Non-quantifier assertions (and the whole file
+              when the flag is OFF) take the byte-identical path below. *)
+           take_ir body
          | Some "assert", [ body ] ->
            (match classify body with
             | `Ground t -> asserts := t :: !asserts
@@ -1599,7 +1901,13 @@ let run st sexps =
          | Some other, _ -> unsupportedf "unsupported command: %s" other
          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
-  !logic, !status, List.rev !asserts, List.rev !lemmas, List.rev !existentials, !dropped
+  ( !logic
+  , !status
+  , List.rev !asserts
+  , List.rev !lemmas
+  , List.rev !existentials
+  , List.rev !clauses
+  , !dropped )
 ;;
 
 let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
@@ -1618,7 +1926,7 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
     ; arrays = Array_defs.empty
     }
   in
-  let logic, status, assertions, lemmas, existentials, dropped =
+  let logic, status, assertions, lemmas, existentials, clauses, dropped =
     try run st sexps with
     | Term.Sort_error m -> raise (Malformed ("sort error: " ^ m))
     | Term.Unsupported m -> raise (Unsupported m)
@@ -1633,6 +1941,7 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
   ; arrays = st.arrays
   ; lemmas
   ; existentials
+  ; clauses
   ; dropped
   }
 ;;

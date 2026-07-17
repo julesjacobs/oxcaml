@@ -224,3 +224,90 @@ let to_string leaf phi =
   go phi;
   Buffer.contents buf
 ;;
+
+type skolem_descr =
+  { sk_binder : binder
+  ; sk_deps : int list
+  }
+
+type 'a clause =
+  { univ : binder list
+  ; skolems : skolem_descr list
+  ; matrix : 'a t
+  }
+
+(* Eliminate every [Exists], recording a Skolem descriptor per binder whose dependency
+   list is the enclosing universal binder ids (in binding order). Requires NNF input, so
+   [Not] wraps only atoms and every [Exists] is a genuine existential (polarity is
+   explicit); [Implies]/[Iff]/[Xor]/[Ite] are already gone. Atoms keep referencing the
+   eliminated binder id — a lowering resolves it to the Skolem term via the descriptor. *)
+let skolemize phi =
+  let descrs = ref [] in
+  let rec go us = function
+    | True -> True
+    | False -> False
+    | Atom a -> Atom a
+    | Not g -> Not (go us g)
+    | And gs -> And (List.map (go us) gs)
+    | Or gs -> Or (List.map (go us) gs)
+    | Forall (bs, g) -> Forall (bs, go (us @ List.map (fun b -> b.id) bs) g)
+    | Exists (bs, g) ->
+      List.iter (fun b -> descrs := { sk_binder = b; sk_deps = us } :: !descrs) bs;
+      go us g
+    | Implies _ | Iff _ | Xor _ | Ite _ ->
+      invalid_arg "Fol.skolemize: input is not in NNF"
+  in
+  let phi' = go [] phi in
+  List.rev !descrs, phi'
+;;
+
+(* Prenex all universals to the front. After [skolemize] no existentials remain, so a
+   universal commutes out of both [And] and [Or] (binders are unique after rename-apart,
+   so no capture): [(forall x. p) \/ q == forall x. (p \/ q)]. Returns
+   [(all_univ, matrix)] with [matrix] quantifier-free. *)
+let rec prenex = function
+  | Forall (bs, g) ->
+    let us, m = prenex g in
+    bs @ us, m
+  | And gs ->
+    let uss, ms = List.split (List.map prenex gs) in
+    List.concat uss, And ms
+  | Or gs ->
+    let uss, ms = List.split (List.map prenex gs) in
+    List.concat uss, Or ms
+  | (True | False | Atom _ | Not _) as m -> [], m
+  | Exists _ | Implies _ | Iff _ | Xor _ | Ite _ ->
+    invalid_arg "Fol.prenex: input still has existentials or non-NNF nodes"
+;;
+
+let rec conjuncts = function
+  | And gs -> List.concat_map conjuncts gs
+  | True -> []
+  | m -> [ m ]
+;;
+
+let clausify ~rename_atom ~atom_refs phi =
+  let n = rename_apart ~rename_atom (nnf phi) in
+  let descrs, sk = skolemize n in
+  let all_univ, matrix = prenex sk in
+  let univ_ids = List.map (fun b -> b.id) all_univ in
+  let descr_by_id = List.map (fun d -> d.sk_binder.id, d) descrs in
+  List.filter_map
+    (fun conj ->
+      match conj with
+      | True -> None
+      | _ ->
+        let refs = ref [] in
+        iter_atoms (fun a -> refs := atom_refs a @ !refs) conj;
+        let refs = List.sort_uniq compare !refs in
+        let sks = List.filter_map (fun id -> List.assoc_opt id descr_by_id) refs in
+        let needed =
+          List.sort_uniq
+            compare
+            (List.filter (fun id -> List.mem id univ_ids) refs
+             @ List.concat_map (fun d -> d.sk_deps) sks)
+        in
+        let univ = List.filter (fun b -> List.mem b.id needed) all_univ in
+        Some { univ; skolems = sks; matrix = conj })
+    (conjuncts matrix)
+;;

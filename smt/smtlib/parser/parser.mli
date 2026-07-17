@@ -77,6 +77,22 @@ type exists_src =
       subset (e.g. a nested [forall]); the driver drops it with the sat-degrade sentinel. *)
   }
 
+(** A lowered clause from the front-end quantified pipeline (dark:
+    [OXSMT_QUANT_PIPELINE]). [cl_qvars] are the universal binders ([] = a GROUND clause,
+    lowered via a plain assert, not a live lemma); [cl_build ~skolem qvar_images] is
+    [(body, triggers)] over the qvar images. It reuses the {!skolemizer} seam: an
+    existential binder dominated by universals [U] becomes
+    [skolem ~cod ~args:(images of U)] (0-ary => a fresh witness constant). May raise
+    {!Malformed}/{!Unsupported} (or the {!Oxsmt_core.Term} equivalents) when a leaf is
+    outside the fragment — the loader drops that clause and arms the sat-degrade sentinel. *)
+type clause =
+  { cl_qvars : (string * Oxsmt_core.Sort.t) list
+  ; cl_build :
+      skolem:skolemizer
+      -> Oxsmt_core.Term.t array
+      -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
+  }
+
 type t =
   { env : Oxsmt_core.Env.t
   ; ctx : Oxsmt_core.Context.t
@@ -95,6 +111,10 @@ type t =
   ; existentials : exists_src list
       (* top-level existential assertions the loader Skolemizes into fresh ground
          witnesses, in file order *)
+  ; clauses : clause list
+      (* front-end quantified pipeline (dark: [OXSMT_QUANT_PIPELINE]) output: the clauses
+         a quantifier-bearing assertion was clausified into. Empty when the flag is OFF
+         (byte-identical) — quantifiers then take [lemmas]/[existentials]. *)
   ; dropped : int
   (* count of assertion content outside the reader's fragment that partial assertion
      DROPPED rather than failing the whole file (lemmas-climb). [> 0] obliges the loader

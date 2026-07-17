@@ -35,8 +35,8 @@ let is_declared env name =
 
    Universally-quantified lemmas then go through the cap-gated mint-before-build
    {!Session.assert_lemma} (ADR-0012 §1.3). One qvar is minted per binder and its
-   {!Term.t} image handed to the parser's deferred [build], which reads
-   the lemma body and [:pattern] triggers with the binders bound.
+   {!Term.t} image handed to the parser's deferred [build], which reads the lemma body and
+   [:pattern] triggers with the binders bound.
 
    SOUNDNESS: dropping a lemma would WEAKEN the assertion set — sound for [unsat] but NOT
    for [sat] (a model of the weaker set may violate the quantifier). So a lemma the reader
@@ -52,8 +52,9 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
   let dropped = ref parsed.Parser.dropped in
   let has_deferred_quantifiers =
     parsed.Parser.dropped > 0
-    || not (List.is_empty parsed.Parser.lemmas)
-    || not (List.is_empty parsed.Parser.existentials)
+    || (not (List.is_empty parsed.Parser.lemmas))
+    || (not (List.is_empty parsed.Parser.existentials))
+    || not (List.is_empty parsed.Parser.clauses)
   in
   try
     (* Install any datatype shapes BEFORE asserting, so the theory stack selects the DT
@@ -155,6 +156,39 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
         | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
           incr dropped)
       parsed.Parser.existentials;
+    (* Front-end quantified pipeline (dark: OXSMT_QUANT_PIPELINE). Each clause is either a
+       GROUND clause (empty qvars — an assertion over fresh Skolem constants, sound in
+       both directions, so a plain [assert_term], NOT a live lemma) or a universal clause
+       (a real [assert_lemma], which makes [has_live_lemma] true and degrades a ground
+       [Sat] to [Unknown] automatically). Both resolve their Skolem functions/constants
+       through the SAME [skolem] minter used for chunk-2b nested existentials above, so
+       freshness is identical. A clause whose body is outside the fragment (a leaf
+       [read_term] rejects, an overflow) is DROPPED and counted (the sentinel below then
+       guards the [sat] direction); [Malformed]/[Invalid_argument] propagate to the outer
+       handler (whole query -> unknown), exactly as for the lemma/existential paths. *)
+    List.iter
+      (fun (cl : Parser.clause) ->
+        if List.is_empty cl.Parser.cl_qvars
+        then (
+          match cl.Parser.cl_build ~skolem [||] with
+          | body, _triggers -> Session.assert_term s body
+          | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
+            incr dropped)
+        else (
+          match
+            Session.assert_lemma s ~qvars:cl.Parser.cl_qvars ~build:(fun qv ->
+              let body, triggers =
+                cl.Parser.cl_build ~skolem (Array.map Qvar.to_term qv)
+              in
+              let triggers =
+                if List.is_empty triggers then Trigger.infer ~qvars:qv body else triggers
+              in
+              { Session.body; triggers })
+          with
+          | (_ : Session.lemma) -> ()
+          | exception (Parser.Unsupported _ | Term.Unsupported _ | Term.Overflow) ->
+            incr dropped))
+      parsed.Parser.clauses;
     (* If ANY assertion content was dropped, arm a trivial always-live universal lemma so
        THE SOUNDNESS RULE degrades a [Sat] to [Unknown]: a dropped conjunct can then never
        yield a wrong [sat], while [Unsat] of the asserted (weaker) subset stays sound.

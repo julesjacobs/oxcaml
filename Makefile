@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex fol-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -747,6 +747,29 @@ fol-test:
 	$(DUNE) build smt/smtlib/test/fol_test.exe
 	$(DUNE) exec smt/smtlib/test/fol_test.exe
 
+## quant-pipeline-test — front-end quantified pipeline (OXSMT_QUANT_PIPELINE) end-to-end.
+##   Locks the exemplar flips (a term-nested quantifier the hand-coded classifier DROPS is
+##   fully represented ON): Rodin `not(and(forall)(forall))` and the UFDT iff both go
+##   unknown (OFF) -> unsat (ON). Plus a SOUNDNESS guard: the negative-polarity-exists
+##   honeypot must never become `sat` under the pipeline.
+quant-pipeline-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; fail=0; \
+	  for f in quant_pipeline_rodin_unsat quant_pipeline_ufdt_iff_unsat; do \
+	    off=$$($$cli tests/cases/$$f.smt2 2>/dev/null); \
+	    on=$$(OXSMT_QUANT_PIPELINE=1 $$cli tests/cases/$$f.smt2 2>/dev/null); \
+	    case "$$off" in *"verdict unknown"*) : ;; *) \
+	      echo "quant-pipeline-test: FAIL $$f OFF not unknown: [$$off]"; fail=1;; esac; \
+	    case "$$on" in *"verdict unsat"*) echo "quant-pipeline-test: OK $$f unknown(OFF)->unsat(ON)" ;; *) \
+	      echo "quant-pipeline-test: FAIL $$f ON not unsat: [$$on]"; fail=1;; esac; \
+	  done; \
+	  hp=tests/cases/lemma_partial_drop_sat_degrades_unknown.smt2; \
+	  on=$$(OXSMT_QUANT_PIPELINE=1 $$cli $$hp 2>/dev/null); \
+	  case "$$on" in *"verdict sat"*) \
+	    echo "quant-pipeline-test: FAIL polarity honeypot flipped to SAT under pipeline (unsound): [$$on]"; fail=1;; *) \
+	    echo "quant-pipeline-test: OK polarity honeypot sound under pipeline (not sat)";; esac; \
+	  test $$fail -eq 0
+
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
 ##   Deterministic (fixed seeds). Checks printer<->lexer kind preservation, print->parse
 ##   round-trip, and lexer idempotence over token-boundary-adversarial inputs. A smaller
@@ -831,6 +854,7 @@ test: check-frozen
 	$(MAKE) wiring-test
 	$(MAKE) smtlib-test
 	$(MAKE) fol-test
+	$(MAKE) quant-pipeline-test
 	$(MAKE) lemma-test
 	$(MAKE) cert-test
 	$(MAKE) checker-test

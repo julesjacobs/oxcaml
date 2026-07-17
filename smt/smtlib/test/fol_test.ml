@@ -198,12 +198,96 @@ let test_canonical_ufdt () =
     ~got:(show (nnf phi))
 ;;
 
+let atom_refs a = a.refs
+let clausify phi = Fol.clausify ~rename_atom ~atom_refs phi
+
+(* Render a clause as "forall (names) [sk: name<-deps ...] matrix" for readable golden
+   comparison; deps rendered as the count (ids are non-deterministic across runs). *)
+let clause_str (cl : leaf Fol.clause) =
+  let us = String.concat " " (List.map (fun (b : Fol.binder) -> b.name) cl.univ) in
+  let sks =
+    String.concat
+      " "
+      (List.map
+         (fun (d : Fol.skolem_descr) ->
+           Printf.sprintf "%s<-%d" d.sk_binder.name (List.length d.sk_deps))
+         cl.skolems)
+  in
+  Printf.sprintf "(forall (%s) [%s] %s)" us sks (show cl.matrix)
+;;
+
+let clauses_str phi = String.concat "\n" (List.map clause_str (clausify phi))
+
+(* ------------------------------------------------------------------ *)
+(* Skolem-argument correctness: exactly the preceding (dominating) universals. *)
+
+let test_skolem_args () =
+  let s = Fol.fresh_binder ~name:"s" ~sort:Sort.int in
+  let y = Fol.fresh_binder ~name:"y" ~sort:Sort.int in
+  (* forall s. exists y. P(s,y) : y's Skolem depends on exactly [s] *)
+  let phi = Fol.Forall ([ s ], Exists ([ y ], atom "P" ~refs:[ s.id; y.id ])) in
+  let cls = clausify phi in
+  check "skolem-args: one clause" (List.length cls = 1);
+  let cl = List.hd cls in
+  check "skolem-args: univ = [s]" (List.length cl.univ = 1);
+  check "skolem-args: one skolem" (List.length cl.skolems = 1);
+  check
+    "skolem-args: y's Skolem depends on exactly 1 universal (s)"
+    (List.length (List.hd cl.skolems).sk_deps = 1);
+  (* a top-level exists (no enclosing universal) Skolemizes to a CONSTANT: deps = [] *)
+  let z = Fol.fresh_binder ~name:"z" ~sort:Sort.int in
+  let phi2 = Fol.Exists ([ z ], atom "Q" ~refs:[ z.id ]) in
+  let cl2 = List.hd (clausify phi2) in
+  check "skolem-const: no universals" (List.length cl2.univ = 0);
+  check
+    "skolem-const: deps = [] (a fresh witness constant)"
+    ((List.hd cl2.skolems).sk_deps = [])
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Canonical exemplars, fully clausified (Skolemized + prenexed + split). *)
+
+let test_clausify_rodin () =
+  (* ¬(∀x.P(x) ∧ ∀y.Q(y)) → ONE ground clause ¬P(k1) ∨ ¬Q(k2), two Skolem constants. *)
+  let x = Fol.fresh_binder ~name:"x" ~sort:Sort.int in
+  let y = Fol.fresh_binder ~name:"y" ~sort:Sort.int in
+  let phi =
+    Fol.Not
+      (And
+         [ Forall ([ x ], atom "P" ~refs:[ x.id ])
+         ; Forall ([ y ], atom "Q" ~refs:[ y.id ])
+         ])
+  in
+  check_str
+    "clausify Rodin"
+    ~expected:"(forall () [x<-0 y<-0] (or (not P) (not Q)))"
+    ~got:(clauses_str phi)
+;;
+
+let test_clausify_ufdt () =
+  (* ∀s. A(s) ↔ ∀n.P(s,n) → two clauses: ∀s,n. ¬A(s) ∨ P(s,n) and ∀s. ¬P(s,k(s)) ∨ A(s) (k
+     depends on s). *)
+  let s = Fol.fresh_binder ~name:"s" ~sort:Sort.int in
+  let n = Fol.fresh_binder ~name:"n" ~sort:Sort.int in
+  let phi =
+    Fol.Forall
+      ([ s ], Iff (atom "A" ~refs:[ s.id ], Forall ([ n ], atom "P" ~refs:[ s.id; n.id ])))
+  in
+  check_str
+    "clausify UFDT iff"
+    ~expected:"(forall (s n) [] (or (not A) P))\n(forall (s) [n<-1] (or (not P) A))"
+    ~got:(clauses_str phi)
+;;
+
 let () =
   test_nnf_table ();
   test_quantifier_duals ();
   test_rename_apart ();
   test_canonical_rodin ();
   test_canonical_ufdt ();
+  test_skolem_args ();
+  test_clausify_rodin ();
+  test_clausify_ufdt ();
   Printf.printf "fol_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;
