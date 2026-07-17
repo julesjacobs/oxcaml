@@ -202,6 +202,8 @@ val ckpt_log_length_for_test : t -> int
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the
     matcher reads the e-graph without mutating it (R6). It is a {b live} surface, NOT a
+    snapshot. The combined EUF+LIA, standalone datatype, and standalone array theory
+    implementations all expose their owned congruence closure through this same view.
     snapshot: each accessor reflects the engine's current state at the moment it is
     called, so the caller must rebuild it (call [egraph_view] again) after any state
     change and must not cache results across a [check_sat]/push/pop. {!Session.check_sat}

@@ -5,7 +5,9 @@
 open Oxsmt_core
 module Sat = Oxsmt_solver.Sat
 
-let default_gen_budget = 100_000
+(* Large UFDT axiom sets need just over two million matcher steps to expose their
+   refuting instance, and complete within the 2-second corpus limit at this cap. *)
+let default_gen_budget = 2_100_000
 
 (* Chunk 3 (MBQI-lite seeding) knobs. A lemma whose triggers are ground-less — the inert
    2b Skolem-function population — never E-matches; [round] then seeds it with existing

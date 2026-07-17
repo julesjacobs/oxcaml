@@ -69,3 +69,11 @@ val constructor_model : t -> (Term.t * ctor_tree) list option
     {!constructor_model} degrades (fail-closed). Valid after a [check Final] returned
     [Sat]. *)
 val check_model : t -> (Term.t * ctor_tree) list option
+
+(** Non-registering queries over the DT theory's congruence closure, used by quantified
+    lemma matching. See the corresponding accessors in {!Oxsmt_euf.Euf}. *)
+val app_terms_by_symbol : t -> Symbol.t -> Term.t list
+val find_class_opt : t -> Term.t -> int option
+val equal_if_registered : t -> Term.t -> Term.t -> bool
+val class_members : t -> Term.t -> Term.t list
+val registered_terms_by_sort : t -> Sort.t -> Term.t list

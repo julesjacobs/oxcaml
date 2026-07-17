@@ -1000,6 +1000,7 @@ let array_model t = t.last_array_model
 (* ADR-0012 L2/O3 (tranche 2): a read-only e-graph query view over the live congruence
    child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the
    concrete [Euf_adapter.t] (the combinator's own additive accessor, not a THEORY method),
+   while the standalone datatype and array theories forward to their owned Euf engines.
    whose query functions forward to the engine's NON-REGISTERING accessors — so the
    matcher reads the congruence closure without growing it (R6). Rebuilt per [round] by
    [Session], since the e-graph changes as instances are asserted. *)
@@ -1014,9 +1015,21 @@ let egraph_view t : Oxsmt_ematch.Egraph_view.t =
     ; ground_terms_by_sort =
         (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
     }
-  | Some (TDt _) | Some (TArr _) | None ->
-    (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype / arrays
-       (or theory-free) session never reaches here (no quantified lemmas in that
-       fragment). *)
-    failwith "Cdclt.egraph_view: e-graph view is only available for the EUF+LIA theory"
+  | Some (TDt th) ->
+    { app_terms_by_symbol = Dt.app_terms_by_symbol th
+    ; find_class_opt = Dt.find_class_opt th
+    ; equal_if_registered = Dt.equal_if_registered th
+    ; class_members = Dt.class_members th
+    ; ground_terms_by_sort = Dt.registered_terms_by_sort th
+    }
+  | Some (TArr th) ->
+    { app_terms_by_symbol = Arr.app_terms_by_symbol th
+    ; find_class_opt = Arr.find_class_opt th
+    ; equal_if_registered = Arr.equal_if_registered th
+    ; class_members = Arr.class_members th
+    ; ground_terms_by_sort = Arr.registered_terms_by_sort th
+    }
+  | None ->
+    (* No registered theory terms means there are no candidates to match. *)
+    Oxsmt_ematch.Egraph_view.empty
 ;;

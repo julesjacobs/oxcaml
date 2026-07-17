@@ -75,3 +75,11 @@ type value =
     computing [select]/[store]/equality itself, and the session reports [sat] only if all
     hold — so a satisfiable array query becomes a CHECKED sat, never a guessed one. *)
 val array_model : t -> (Term.t * value) list option
+
+(** Non-registering queries over the array theory's congruence closure, used by quantified
+    lemma matching. See the corresponding accessors in {!Oxsmt_euf.Euf}. *)
+val app_terms_by_symbol : t -> Symbol.t -> Term.t list
+val find_class_opt : t -> Term.t -> int option
+val equal_if_registered : t -> Term.t -> Term.t -> bool
+val class_members : t -> Term.t -> Term.t list
+val registered_terms_by_sort : t -> Sort.t -> Term.t list
