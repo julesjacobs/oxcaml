@@ -44,17 +44,17 @@
 
 let mk_pos () : int{ _ > 0 } = 1
 [%%expect {|
-val mk_pos : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val mk_pos : unit -> int{ _ > 0 } = <fun>
 |}]
 
 type r = { f : int{ _ > 0 } }
 [%%expect {|
-type r = { f : int{ (app[Stdlib!.>] _ 0) }; }
+type r = { f : int{ _ > 0 }; }
 |}]
 
 type w = Wrap of int{ _ > 0 }
 [%%expect {|
-type w = Wrap of int{ (app[Stdlib!.>] _ 0) }
+type w = Wrap of int{ _ > 0 }
 |}]
 
 (* --- concrete: rigid clash (magic-free, sound) --- *)
@@ -66,7 +66,7 @@ Line 1, characters 31-32:
 1 | let imp_concrete_field = { f = 0 }
                                    ^
 Error: The constant "0" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.>] _ 0) }"
+         "int{ _ > 0 }"
 |}]
 
 (* @acc id=imp_concrete_ctor final=REJECT today=REJECT stable=yes unlocks=verification *)
@@ -76,7 +76,7 @@ Line 1, characters 29-30:
 1 | let imp_concrete_ctor = Wrap 0
                                  ^
 Error: The constant "0" has type "int" but an expression was expected of type
-         "int{ (app[Stdlib!.>] _ 0) }"
+         "int{ _ > 0 }"
 |}]
 
 (* --- parameter propagation: obligation moves to call sites (sound) --- *)
@@ -85,7 +85,7 @@ Error: The constant "0" has type "int" but an expression was expected of type
    The field infers the parameter as refined: [mk : int{ _ > 0 } -> r]. *)
 let mk x = { f = x }
 [%%expect {|
-val mk : int{ (app[Stdlib!.>] _ 0) } -> r = <fun>
+val mk : int{ _ > 0 } -> r = <fun>
 |}]
 
 (* @acc id=imp_propagate_badcall final=REJECT today=REJECT stable=yes unlocks=verification
@@ -152,7 +152,7 @@ val imp_magic_ctor : w = Wrap 0
 (* @acc id=imp_magic_array final=ACCEPT today=ACCEPT stable=no unlocks=none *)
 let imp_magic_array : int{ _ > 0 } array = [| Obj.magic 0 |]
 [%%expect {|
-val imp_magic_array : int{ (app[Stdlib!.>] _ 0) } array = [|0|]
+val imp_magic_array : int{ _ > 0 } array = [|0|]
 |}]
 
 (* @acc id=imp_magic_mutassign final=ACCEPT today=ACCEPT stable=no unlocks=none *)
@@ -161,5 +161,5 @@ let imp_magic_mutassign () =
   x <- Obj.magic 0;
   x
 [%%expect {|
-val imp_magic_mutassign : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val imp_magic_mutassign : unit -> int{ _ > 0 } = <fun>
 |}]

@@ -11,13 +11,13 @@
 
 let identity (x : int) : int{ _ = x } = x
 [%%expect {|
-val identity : int -> int{ (app[Stdlib!.=] _ global[x/291]) } = <fun>
+val identity : int -> int{ _ = x } = <fun>
 |}]
 
 (* An inequality result predicate mentioning the parameter also verifies. *)
 let at_least (x : int) : int{ _ >= x } = x
 [%%expect {|
-val at_least : int -> int{ (app[Stdlib!.>=] _ global[x/296]) } = <fun>
+val at_least : int -> int{ _ >= x } = <fun>
 |}]
 
 (* Contract-argument variant: a parameter's refinement mentions another
@@ -25,7 +25,7 @@ val at_least : int -> int{ (app[Stdlib!.>=] _ global[x/296]) } = <fun>
    argument verifies and a mismatching one is disproved. *)
 let dep (n : int) (a : int{ _ = n }) = a
 [%%expect {|
-val dep : int -> int{ (app[Stdlib!.=] _ global[n/301]) } -> int = <fun>
+val dep : int -> int{ _ = n } -> int = <fun>
 |}]
 
 let matching = dep 3 3
@@ -59,10 +59,7 @@ Error: Refinement verification failed (disproved)
    Returning [y] verifies (goal [y > x] is exactly the hypothesis). *)
 let dependent_ok (x : int) (y : int{ _ > x }) : int{ _ > x } = y
 [%%expect {|
-val dependent_ok :
-  int ->
-  int{ (app[Stdlib!.>] _ global[x/313]) } ->
-  int{ (app[Stdlib!.>] _ global[x/313]) } = <fun>
+val dependent_ok : int -> int{ _ > x } -> int{ _ > x } = <fun>
 |}]
 
 (* Returning [x] is disproved: the goal becomes [x > x], which does not follow
@@ -92,10 +89,10 @@ Error: Refinement verification failed (not-proved)
    recorded fact [id z = z] discharges the goal. *)
 let id (x : int) : int{ _ = x } = x
 [%%expect {|
-val id : int -> int{ (app[Stdlib!.=] _ global[x/332]) } = <fun>
+val id : int -> int{ _ = x } = <fun>
 |}]
 
 let use (z : int) : int{ _ = z } = id z
 [%%expect {|
-val use : int -> int{ (app[Stdlib!.=] _ global[z/337]) } = <fun>
+val use : int -> int{ _ = z } = <fun>
 |}]

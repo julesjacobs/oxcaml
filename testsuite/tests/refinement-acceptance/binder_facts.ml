@@ -38,7 +38,7 @@ let bf_use_fact () =
   let x = (1 : int{ _ = 1 }) in
   (x : int{ _ = 1 })
 [%%expect {|
-val bf_use_fact : unit -> int{ (app[Stdlib!.=] _ 1) } = <fun>
+val bf_use_fact : unit -> int{ _ = 1 } = <fun>
 |}]
 
 (* @acc id=bf_skeleton_use final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
@@ -63,7 +63,7 @@ let bf_needs_fact () =
   let x = (7 : int{ _ = 7 }) in
   (x : int{ _ > 0 })
 [%%expect {|
-val bf_needs_fact : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val bf_needs_fact : unit -> int{ _ > 0 } = <fun>
 |}]
 
 (* @acc id=bf_param_fact final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
@@ -73,6 +73,5 @@ val bf_needs_fact : unit -> int{ (app[Stdlib!.>] _ 0) } = <fun>
    FINAL and TODAY: accepts. *)
 let bf_param_fact (n : int{ _ = 5 }) : int{ _ > 0 } = n
 [%%expect {|
-val bf_param_fact :
-  int{ (app[Stdlib!.=] _ 5) } -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val bf_param_fact : int{ _ = 5 } -> int{ _ > 0 } = <fun>
 |}]

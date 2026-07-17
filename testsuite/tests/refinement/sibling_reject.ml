@@ -19,13 +19,8 @@ end
 
 module Different (X : A) : B = X
 [%%expect {|
-module type A =
-  sig val base : int val g : int{ (app[Stdlib!.=] _ sibling[base]) } end
-module type B =
-  sig
-    val base : int
-    val g : int{ (app[Stdlib!.=] _ (app[Stdlib!.+] sibling[base] 1)) }
-  end
+module type A = sig val base : int val g : int{ _ = base } end
+module type B = sig val base : int val g : int{ _ = base + 1 } end
 Line 11, characters 31-32:
 11 | module Different (X : A) : B = X
                                     ^
@@ -54,8 +49,7 @@ end
 module Bare (X : C) : Refined = X
 [%%expect {|
 module type C = sig val base : int val g : int end
-module type Refined =
-  sig val base : int val g : int{ (app[Stdlib!.=] _ sibling[base]) } end
+module type Refined = sig val base : int val g : int{ _ = base } end
 Line 11, characters 32-33:
 11 | module Bare (X : C) : Refined = X
                                      ^
@@ -67,7 +61,6 @@ Error: Signature mismatch:
        Values do not match:
          val g : int
        is not included in
-         val g : int{ (app[Stdlib!.=] _ sibling[base]) }
-       The type "int" is not compatible with the type
-         "int{ (app[Stdlib!.=] _ sibling[base]) }"
+         val g : int{ _ = base }
+       The type "int" is not compatible with the type "int{ _ = base }"
 |}]

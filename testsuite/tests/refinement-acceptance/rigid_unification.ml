@@ -37,9 +37,9 @@ let ru_nested_refined_to_bare (xs : int{ _ = 1 } list) = (xs : int list)
 Line 1, characters 58-60:
 1 | let ru_nested_refined_to_bare (xs : int{ _ = 1 } list) = (xs : int list)
                                                               ^^
-Error: The value "xs" has type "int{ (app[Stdlib!.=] _ 1) } list"
+Error: The value "xs" has type "int{ _ = 1 } list"
        but an expression was expected of type "int list"
-       Type "int{ (app[Stdlib!.=] _ 1) }" is not compatible with type "int"
+       Type "int{ _ = 1 }" is not compatible with type "int"
 |}]
 
 (* @acc id=ru_nested_bare_to_refined final=REJECT today=REJECT stable=yes unlocks=-
@@ -52,8 +52,8 @@ Line 1, characters 49-51:
 1 | let ru_nested_bare_to_refined (xs : int list) = (xs : int{ _ = 1 } list)
                                                      ^^
 Error: The value "xs" has type "int list" but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 1) } list"
-       Type "int" is not compatible with type "int{ (app[Stdlib!.=] _ 1) }"
+         "int{ _ = 1 } list"
+       Type "int" is not compatible with type "int{ _ = 1 }"
 |}]
 
 (* @acc id=ru_nested_unequal_preds final=REJECT today=REJECT stable=yes unlocks=-
@@ -64,11 +64,9 @@ let ru_nested_unequal_preds (xs : int{ _ = 1 } list) = (xs : int{ _ = 2 } list)
 Line 1, characters 56-58:
 1 | let ru_nested_unequal_preds (xs : int{ _ = 1 } list) = (xs : int{ _ = 2 } list)
                                                             ^^
-Error: The value "xs" has type "int{ (app[Stdlib!.=] _ 1) } list"
-       but an expression was expected of type
-         "int{ (app[Stdlib!.=] _ 2) } list"
-       Type "int{ (app[Stdlib!.=] _ 1) }" is not compatible with type
-         "int{ (app[Stdlib!.=] _ 2) }"
+Error: The value "xs" has type "int{ _ = 1 } list"
+       but an expression was expected of type "int{ _ = 2 } list"
+       Type "int{ _ = 1 }" is not compatible with type "int{ _ = 2 }"
 |}]
 
 (* @acc id=ru_syntactically_distinct_preds final=REJECT today=REJECT stable=yes unlocks=-
@@ -82,11 +80,9 @@ let ru_syntactically_distinct_preds (xs : int{ _ > 0 } list) =
 Line 2, characters 3-5:
 2 |   (xs : int{ 0 < _ } list)
        ^^
-Error: The value "xs" has type "int{ (app[Stdlib!.>] _ 0) } list"
-       but an expression was expected of type
-         "int{ (app[Stdlib!.<] 0 _) } list"
-       Type "int{ (app[Stdlib!.>] _ 0) }" is not compatible with type
-         "int{ (app[Stdlib!.<] 0 _) }"
+Error: The value "xs" has type "int{ _ > 0 } list"
+       but an expression was expected of type "int{ 0 < _ } list"
+       Type "int{ _ > 0 }" is not compatible with type "int{ 0 < _ }"
 |}]
 
 (* @acc id=ru_tuple_nested final=REJECT today=REJECT stable=yes unlocks=-
@@ -96,7 +92,7 @@ let ru_tuple_nested (p : int{ _ = 1 } * int) = (p : int * int)
 Line 1, characters 48-49:
 1 | let ru_tuple_nested (p : int{ _ = 1 } * int) = (p : int * int)
                                                     ^
-Error: The value "p" has type "int{ (app[Stdlib!.=] _ 1) } * int"
+Error: The value "p" has type "int{ _ = 1 } * int"
        but an expression was expected of type "int * int"
-       Type "int{ (app[Stdlib!.=] _ 1) }" is not compatible with type "int"
+       Type "int{ _ = 1 }" is not compatible with type "int"
 |}]

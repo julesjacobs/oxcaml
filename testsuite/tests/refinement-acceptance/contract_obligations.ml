@@ -19,7 +19,7 @@
    obligation. *)
 let c_eq1 (x : int{ _ = 1 }) = x
 [%%expect {|
-val c_eq1 : int{ (app[Stdlib!.=] _ 1) } -> int = <fun>
+val c_eq1 : int{ _ = 1 } -> int = <fun>
 |}]
 
 (* @acc id=co_provable final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
@@ -52,7 +52,7 @@ Error: Refinement verification failed (disproved)
    TODAY: accepts. *)
 let dep (n : int) (a : int{ _ = n }) = a
 [%%expect {|
-val dep : int -> int{ (app[Stdlib!.=] _ global[n/298]) } -> int = <fun>
+val dep : int -> int{ _ = n } -> int = <fun>
 |}]
 
 let co_dependent = dep 3 3

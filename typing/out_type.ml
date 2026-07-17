@@ -126,6 +126,17 @@ type bound_ident = { hide:bool; ident:Ident.t }
 (* printing environment for path shortening and naming *)
 let printing_env = ref Env.empty
 
+(* Source-like rendering of a refinement predicate.  The default reproduces
+   the raw [Types.Refinement.print] AST syntax; the full type-checker installs
+   an [env]-aware, source-like renderer (see [Vox_lean.render_predicate]) at
+   startup.  A hook is required because [out_type] is also linked into the
+   [dynlink] library, which does not include the refinement/verification
+   modules. *)
+let refinement_predicate_printer :
+    (env:Env.t -> Types.refinement_expression -> string) ref =
+  ref (fun ~env:_ predicate ->
+    Format.asprintf "%a" Types.Refinement.print predicate)
+
 (* When printing, it is important to only observe the
    current printing environment, without reading any new
    cmi present on the file system *)
@@ -1598,7 +1609,8 @@ let rec tree_of_modal_typexp mode modal ty =
     | Trefine refinement ->
       Otyp_refine
         ( tree_of_typexp mode alloc_mode refinement.ref_skeleton,
-          Format.asprintf "%a" Refinement.print refinement.ref_pred )
+          !refinement_predicate_printer ~env:!printing_env
+            refinement.ref_pred )
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;

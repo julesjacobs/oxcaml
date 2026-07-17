@@ -6,13 +6,12 @@ Error: Signature mismatch:
        Modules do not match:
          sig val x : 'a end
        is not included in
-         sig val x : int{ (app[Stdlib!.>] _ 0) } end
+         sig val x : int{ _ > 0 } end
        Values do not match:
          val x : 'a
        is not included in
-         val x : int{ (app[Stdlib!.>] _ 0) }
-       The type 'a is not compatible with the type
-         int{ (app[Stdlib!.>] _ 0) }
+         val x : int{ _ > 0 }
+       The type 'a is not compatible with the type int{ _ > 0 }
        File "seal_tvar_module.ml", line 2, characters 2-22:
          Expected declaration
        File "seal_tvar_module.ml", line 4, characters 6-7: Actual declaration

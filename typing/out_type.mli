@@ -39,6 +39,13 @@ open Outcometree
 
 (** {1 Wrapping functions}*)
 
+(** Renders a refinement predicate to a string for the [int{ ... }] shown in
+    printed types.  Defaults to the raw AST syntax; the full compiler installs
+    a source-like, [env]-aware renderer at startup (the [dynlink] library keeps
+    the default because it cannot depend on the verification modules). *)
+val refinement_predicate_printer :
+  (env:Env.t -> Types.refinement_expression -> string) ref
+
 val wrap_printing_env: error:bool -> Env.t -> (unit -> 'a) -> 'a
 (** Call the function using the environment for type path shortening
     This affects all the printing and tree cration functions functions below

@@ -24,7 +24,7 @@
 
 let needs_pos (x : int{ _ > 0 }) = x
 [%%expect {|
-val needs_pos : int{ (app[Stdlib!.>] _ 0) } -> int = <fun>
+val needs_pos : int{ _ > 0 } -> int = <fun>
 |}]
 
 (* @acc id=bcf_then_guard final=ACCEPT today=ACCEPT stable=yes unlocks=verification
@@ -59,7 +59,7 @@ Error: Refinement verification failed (not-proved)
    the annotation under its own condition fact. *)
 let bcf_marked_if (y : int) = (if y > 0 then y else 1 : int{ _ > 0 })
 [%%expect {|
-val bcf_marked_if : int -> int{ (app[Stdlib!.>] _ 0) } = <fun>
+val bcf_marked_if : int -> int{ _ > 0 } = <fun>
 |}]
 
 (* An opaque, effectful helper for the purity-gate control below. *)

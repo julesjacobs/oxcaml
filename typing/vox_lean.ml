@@ -272,6 +272,228 @@ let primitive_builtin = function
   | "%boolnot" -> Some `Not
   | _ -> None
 
+(* Source-like rendering of a refinement predicate, for user-facing display:
+   the [int{ ... }] predicate shown in signatures ([-i]), type-at-cursor and
+   error messages, and the [display] field of the VC dump.  The raw
+   [Types.Refinement.print] form ([app[Stdlib!.>] _ 0], [constructor[...]],
+   ...) is retained only for the debug [text] field.  Operator recognition
+   uses [env] to resolve which primitive a reference denotes, exactly as the
+   Lean backend does; if a reference cannot be resolved (e.g. [env] lacks it),
+   the fallback is ordinary prefix application, never the raw AST syntax. *)
+
+type display_associativity =
+  | Left
+  | Right
+
+type display_operator =
+  { op_text : string;
+    op_precedence : int;
+    op_associativity : display_associativity;
+  }
+
+type displayed =
+  { text : string;
+    precedence : int;
+  }
+
+let display_operator = function
+  | `Or -> { op_text = "||"; op_precedence = 10; op_associativity = Right }
+  | `And -> { op_text = "&&"; op_precedence = 20; op_associativity = Right }
+  | `Equal -> { op_text = "="; op_precedence = 30; op_associativity = Left }
+  | `Not_equal ->
+    { op_text = "<>"; op_precedence = 30; op_associativity = Left }
+  | `Less -> { op_text = "<"; op_precedence = 30; op_associativity = Left }
+  | `Less_equal ->
+    { op_text = "<="; op_precedence = 30; op_associativity = Left }
+  | `Greater -> { op_text = ">"; op_precedence = 30; op_associativity = Left }
+  | `Greater_equal ->
+    { op_text = ">="; op_precedence = 30; op_associativity = Left }
+  | `Add -> { op_text = "+"; op_precedence = 40; op_associativity = Left }
+  | `Subtract -> { op_text = "-"; op_precedence = 40; op_associativity = Left }
+  | `Multiply -> { op_text = "*"; op_precedence = 50; op_associativity = Left }
+
+let display_reference_name = function
+  | Rfun name | Rsibling name -> name
+  | Rapp path | Rglobal path -> Path.last path
+
+let display_builtin ~env = function
+  | Rfun _ | Rsibling _ -> None
+  | Rapp path | Rglobal path ->
+    begin
+      match Subst.Lazy.force_value_description (Env.find_value path env) with
+      | { val_kind = Val_prim primitive; _ } ->
+        primitive_builtin primitive.prim_name
+      | _ -> None
+      | exception Not_found -> None
+    end
+
+let display_constant constant =
+  constant
+  |> Untypeast.constant
+  |> Ast_helper.Exp.constant
+  |> Pprintast.string_of_expression
+
+let display_function_name name =
+  if String.length name = 0 then name
+  else
+    match name.[0] with
+    | 'a' .. 'z' | 'A' .. 'Z' | '_' -> name
+    | _ -> "(" ^ name ^ ")"
+
+let display_label = function
+  | Nolabel -> ""
+  | Labelled label -> "~" ^ label ^ ":"
+  | Optional label -> "?" ^ label ^ ":"
+  | Position label -> "@" ^ label ^ ":"
+
+let render_predicate ~env expression =
+  let parenthesize displayed = "(" ^ displayed.text ^ ")" in
+  let paren_if displayed threshold =
+    if displayed.precedence < threshold then parenthesize displayed
+    else displayed.text
+  in
+  let rec render expression =
+    match expression.rexp_desc with
+    | Rexp_ident (Rbound id) ->
+      { text = display_function_name (Ident.name id); precedence = 100 }
+    | Rexp_ident (Rfree reference) ->
+      { text = display_function_name (display_reference_name reference);
+        precedence = 100;
+      }
+    | Rexp_constant constant ->
+      { text = display_constant constant; precedence = 100 }
+    | Rexp_construct (constructor, arguments) ->
+      render_construct constructor arguments
+    | Rexp_field (record, field) ->
+      { text = paren_if (render record) 90 ^ "." ^ field.rfield_name;
+        precedence = 90;
+      }
+    | Rexp_tuple fields ->
+      let field (label, field) =
+        match label with
+        | None -> (render field).text
+        | Some label -> "~" ^ label ^ ":" ^ (render field).text
+      in
+      { text = "(" ^ String.concat ", " (List.map field fields) ^ ")";
+        precedence = 100;
+      }
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      let condition = (render condition).text in
+      let ifso = paren_if (render ifso) 6 in
+      let text =
+        match ifnot with
+        | None -> Printf.sprintf "if %s then %s" condition ifso
+        | Some ifnot ->
+          Printf.sprintf "if %s then %s else %s" condition ifso
+            (paren_if (render ifnot) 6)
+      in
+      { text; precedence = 5 }
+    | Rexp_let (bindings, body) ->
+      let binding binding =
+        Printf.sprintf "%s = %s"
+          (Ident.name binding.rbind_binder.rb_id)
+          (render binding.rbind_expr).text
+      in
+      { text =
+          Printf.sprintf "let %s in %s"
+            (String.concat " and " (List.map binding bindings))
+            (render body).text;
+        precedence = 5;
+      }
+    | Rexp_function { arg_label; param; body } ->
+      { text =
+          Printf.sprintf "fun %s%s -> %s" (display_label arg_label)
+            (Ident.name param.rb_id) (render body).text;
+        precedence = 5;
+      }
+    | Rexp_apply (function_, arguments) -> render_apply function_ arguments
+  and render_apply function_ arguments =
+    match function_.rexp_desc, arguments with
+    | Rexp_ident (Rfree reference), [Nolabel, argument] ->
+      begin
+        match display_builtin ~env reference with
+        | Some `Not ->
+          { text = "not " ^ paren_if (render argument) 71; precedence = 70 }
+        | Some
+            (`Add | `And | `Equal | `Greater | `Greater_equal | `Less
+            | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+        | None ->
+          render_prefix (head_of_reference reference) [Nolabel, argument]
+      end
+    | Rexp_ident (Rfree reference), [Nolabel, left; Nolabel, right] ->
+      begin
+        match display_builtin ~env reference with
+        | Some
+            ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
+             | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+             as builtin) ->
+          render_binary builtin left right
+        | Some `Not | None ->
+          render_prefix (head_of_reference reference)
+            [Nolabel, left; Nolabel, right]
+      end
+    | Rexp_ident (Rfree reference), arguments ->
+      render_prefix (head_of_reference reference) arguments
+    | Rexp_ident (Rbound id), arguments ->
+      render_prefix (display_function_name (Ident.name id)) arguments
+    | _, arguments -> render_prefix (paren_if (render function_) 71) arguments
+  and head_of_reference reference =
+    match display_builtin ~env reference with
+    | Some `Not -> "not"
+    | Some
+        ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
+         | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+         as builtin) ->
+      display_function_name (display_operator builtin).op_text
+    | None -> display_function_name (display_reference_name reference)
+  and render_binary builtin left right =
+    let operator = display_operator builtin in
+    let operand side expression =
+      let displayed = render expression in
+      let needs_parentheses =
+        displayed.precedence < operator.op_precedence
+        || (displayed.precedence = operator.op_precedence
+            && match operator.op_associativity, side with
+               | Left, `Right | Right, `Left -> true
+               | Left, `Left | Right, `Right -> false)
+      in
+      if needs_parentheses then parenthesize displayed else displayed.text
+    in
+    { text =
+        operand `Left left ^ " " ^ operator.op_text ^ " "
+        ^ operand `Right right;
+      precedence = operator.op_precedence;
+    }
+  and render_prefix head arguments =
+    let argument (label, expression) =
+      display_label label ^ paren_if (render expression) 71
+    in
+    { text = String.concat " " (head :: List.map argument arguments);
+      precedence = 70;
+    }
+  and render_construct constructor arguments =
+    let name = constructor.rconstr_name in
+    match arguments with
+    | [] -> { text = name; precedence = 100 }
+    | [left; right] when String.equal name "::" ->
+      { text = paren_if (render left) 36 ^ " :: " ^ paren_if (render right) 35;
+        precedence = 35;
+      }
+    | [argument] ->
+      { text = display_function_name name ^ " " ^ paren_if (render argument) 71;
+        precedence = 70;
+      }
+    | arguments ->
+      let tuple =
+        "("
+        ^ String.concat ", " (List.map (fun a -> (render a).text) arguments)
+        ^ ")"
+      in
+      { text = display_function_name name ^ " " ^ tuple; precedence = 70 }
+  in
+  (render expression).text
+
+
 let builtin_name context = function
   | (Rfun _ | Rsibling _) -> None
   | (Rapp path | Rglobal path) ->
@@ -962,3 +1184,9 @@ let discharge ?lean ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
         | exception_ ->
           result Solver_error ~detail:(Printexc.to_string exception_) ()
       end
+
+(* Install the source-like refinement predicate renderer into the type printer.
+   [Out_type] is also linked into the [dynlink] library, which cannot depend on
+   this module, so it defaults to the raw AST syntax and the full compiler
+   overrides it here at startup. *)
+let () = Out_type.refinement_predicate_printer := render_predicate

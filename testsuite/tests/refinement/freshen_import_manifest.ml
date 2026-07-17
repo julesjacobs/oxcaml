@@ -17,9 +17,8 @@ module F (X : HasK) = struct type u = X.t end
 module A = F (M)
 
 [%%expect {|
-module type HasK =
-  sig type t = int{ (let k = 0 in (app[Stdlib!.>=] _ k)) } end
-module M : sig type t = int{ (let k = 0 in (app[Stdlib!.>=] _ k)) } end
+module type HasK = sig type t = int{ let k = 0 in _ >= k } end
+module M : sig type t = int{ let k = 0 in _ >= k } end
 module F : functor (X : HasK) -> sig type u = X.t end
 module A : sig type u = M.t end
 |}]
@@ -33,7 +32,7 @@ Line 1, characters 26-27:
 1 | let bad (x : int) : A.u = x
                               ^
 Error: The value "x" has type "int" but an expression was expected of type
-         "A.u" = "int{ (let k = 0 in (app[Stdlib!.>=] _ k)) }"
+         "A.u" = "int{ let k = 0 in _ >= k }"
 |}]
 
 (* Distinctness survives copying: a different predicate does not unify with the
@@ -45,5 +44,5 @@ Line 1, characters 54-55:
 1 | let mismatch (x : int{ let k = 1 in _ >= k }) : A.u = x
                                                           ^
 Error: The value "x" has type "int" but an expression was expected of type
-         "A.u" = "int{ (let k = 0 in (app[Stdlib!.>=] _ k)) }"
+         "A.u" = "int{ let k = 0 in _ >= k }"
 |}]

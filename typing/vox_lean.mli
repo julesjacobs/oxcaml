@@ -38,6 +38,14 @@ val primitive_builtin :
   | `Subtract ]
     option
 
+(* Renders a refinement predicate to source-like syntax (infix operators,
+   [true]/[false], [()], constructor and field application) for user-facing
+   display: the [int{ ... }] predicate in signatures, type-at-cursor and
+   error messages, and the [display] field of the VC dump.  [env] resolves
+   which primitive a reference denotes; unresolved references degrade to
+   prefix application, never the raw [Types.Refinement.print] AST syntax. *)
+val render_predicate : env:Env.t -> Types.refinement_expression -> string
+
 val emit :
   env:Env.t -> Vox_vc.t -> (string, emission_error) Stdlib.result
 
