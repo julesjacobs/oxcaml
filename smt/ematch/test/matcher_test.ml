@@ -877,6 +877,56 @@ let e_arith_trigger_reject () =
            })))
 ;;
 
+(* E-BINDSITE: an arith-buried qvar must not count as covered by trigger selection, or an
+   INERT trigger wins and the lemma never fires. [forall x y. h(x+1, y) = f(x) + k(y)];
+   ground [f(a)=3], [k(b)=4], [h(a+1,b)=0]. The matcher binds a qvar only at an App-argument
+   placeholder and treats the x+1 argument as a ground leaf, so [h(x+1, y)] can bind y but
+   never x. The pre-fix coverage counted [h(x+1, y)] as covering {x, y} and chose it as the
+   sole trigger — matching nothing, the lemma stays live -> unknown. The binding-site count
+   credits [h(x+1, y)] with {y} only, so selection picks the working {f(x), k(y)}: x|->a via
+   the registered f(a), y|->b via k(b), instantiating [h(a+1,b) = f(a)+k(b) = 7], which
+   contradicts [h(a+1,b) = 0] -> unsat. Seeding disabled to isolate the matcher (MBQI-lite
+   seeding would otherwise close this from the registered f(a)/k(b)). Discrimination:
+   reverting [qvars_in] to recurse through Arith flips the verdict unsat -> unknown. *)
+let e_bindsite_arith_poison () =
+  let s = Session.create ~seed_lemmas:false () in
+  let ctx = Session.context s in
+  let f = Session.declare_fun s "bs-f" int_to_int in
+  let k = Session.declare_fun s "bs-k" int_to_int in
+  let h = Session.declare_fun s "bs-h" int_int_to_int in
+  let a = Context.const ctx (Session.declare_const s "bs-a" Sort.int) in
+  let b = Context.const ctx (Session.declare_const s "bs-b" Sort.int) in
+  ignore
+    (Session.assert_lemma
+       s
+       ~qvars:[ "x", Sort.int; "y", Sort.int ]
+       ~build:(fun qv ->
+         let x = Qvar.to_term qv.(0)
+         and y = Qvar.to_term qv.(1) in
+         let fx = Context.app ctx f [ x ] in
+         let ky = Context.app ctx k [ y ] in
+         let hxy =
+           Context.app ctx h [ Context.add ctx x (Context.int_const ctx 1); y ]
+         in
+         let body = Context.eq ctx hxy (Context.add ctx fx ky) in
+         { Session.body; triggers = Trigger.infer ~qvars:qv body })
+     : Session.lemma);
+  Session.assert_term
+    s
+    (Context.eq ctx (Context.app ctx f [ a ]) (Context.int_const ctx 3));
+  Session.assert_term
+    s
+    (Context.eq ctx (Context.app ctx k [ b ]) (Context.int_const ctx 4));
+  let hab = Context.app ctx h [ Context.add ctx a (Context.int_const ctx 1); b ] in
+  Session.assert_term s (Context.eq ctx hab (Context.int_const ctx 0));
+  let verdict = Session.check_sat s in
+  check
+    (Printf.sprintf
+       "E-BINDSITE: inert arith-poisoned trigger avoided -> unsat (got %s)"
+       (verdict_str verdict))
+    (verdict = Session.Unsat)
+;;
+
 (* E-LOOP: a matching-loop lemma hits its generation budget and returns [unknown] — it
    never hangs (GOALS Lemmas; ADR-0012 §1.4/§3). [forall x. f(x) = f(g(x))] with trigger
    [f(x)] is a runaway: matching [f(a)] yields [f(a)=f(g(a))], which registers [f(g(a))],
@@ -1054,6 +1104,34 @@ let ti_cover () =
     (trigger_is (Trigger.infer ~qvars:qv body) [ hxy ])
 ;;
 
+(* TI-BINDSITE: the matcher binds a qvar ONLY through App-argument placeholders, treating an
+   arithmetic argument like x+1 as a single ground leaf (matcher.ml). So in body
+   [h(x+1, y) = f(x) + k(y)] the candidate [h(x+1, y)] is a real binding site for y ONLY,
+   not x. The pre-fix coverage counting credited [h(x+1, y)] with {x, y} and chose the single
+   trigger [[h(x+1, y)]] — but x can never bind through x+1, so that trigger matches nothing
+   and the lemma never fires. The binding-site count credits it with {y} alone, so selection
+   covers x via [f(x)] and y via the smaller [k(y)], yielding the working multi-trigger
+   {f(x), k(y)}. Discrimination: reverting [qvars_in] to recurse through Arith flips the
+   inferred trigger to the inert single [h(x+1, y)] and fails this exact-set check. *)
+let ti_bindsite () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "bs-f" int_to_int in
+  let k = Env.declare_fun sc.env "bs-k" int_to_int in
+  let h = Env.declare_fun sc.env "bs-h" int_int_to_int in
+  let qv = mk_qvars sc ~id:0 2 in
+  let x = Qvar.to_term qv.(0)
+  and y = Qvar.to_term qv.(1) in
+  let fx = Context.app sc.ctx f [ x ] in
+  let ky = Context.app sc.ctx k [ y ] in
+  let hxy =
+    Context.app sc.ctx h [ Context.add sc.ctx x (Context.int_const sc.ctx 1); y ]
+  in
+  let body = Context.eq sc.ctx hxy (Context.add sc.ctx fx ky) in
+  check
+    "TI-BINDSITE: arith-buried x uncounted -> picks bindable {f(x), k(y)} not inert h(x+1,y)"
+    (trigger_is (Trigger.infer ~qvars:qv body) [ fx; ky ])
+;;
+
 (* TI-UNREACHABLE: body x + 1 <= 0 — x occurs only inside arithmetic, no UF app covers it,
    so no trigger is inferable ([]). This is the soundness-preserving no-fire case: the
    lemma stays live and a ground Sat degrades to unknown, never a dropped forall. *)
@@ -1106,12 +1184,14 @@ let () =
   e_zero_qvar ();
   e_frame ();
   e_arith_trigger_reject ();
+  e_bindsite_arith_poison ();
   e_loop ();
   e_provenance ();
   ti_single ();
   ti_nested ();
   ti_multi ();
   ti_cover ();
+  ti_bindsite ();
   ti_unreachable ();
   ti_zero ();
   Printf.printf "\n%d passed, %d failed\n" !passes !failures;

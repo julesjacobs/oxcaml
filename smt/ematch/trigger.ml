@@ -28,8 +28,16 @@ let qvar_index qvars sym =
   go 0
 ;;
 
-(* The set of qvar indices occurring in [t], as a sorted int list. A qvar is a nullary
-   [App] whose head is one of [qvars]; anything else is walked structurally. *)
+(* The qvar indices the MATCHER can actually bind from pattern [t] ("the binding sites of
+   [t]"), as a sorted int list. This MUST mirror {!Matcher.match_term} exactly: the matcher
+   binds a qvar only at a nullary-[App] placeholder reached by descending through [App]
+   argument positions (the [App (f, pargs)] arm), and matches every non-[App] node —
+   arithmetic, order, equality, boolean, [Ite], constants — as a single ground leaf via
+   [equal_if_registered], never recursing into it. So a qvar buried under such a node (e.g.
+   the [x] in [h(x + 1, y)]) is NOT a binding site: the matcher can never bind it there, so
+   it must not count toward trigger coverage. Counting it would let an inert trigger win
+   coverage-first selection and the lemma would never fire — a completeness defect, never
+   soundness (trigger.mli). Recurse through [App] only. *)
 let qvars_in qvars t =
   let seen = Hashtbl.create 8 in
   let rec go (t : Term.t) =
@@ -39,18 +47,9 @@ let qvars_in qvars t =
        | Some i -> Hashtbl.replace seen i ()
        | None -> ())
     | App (_, args) -> Iarr.iter go args
-    | Arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
-    | Le a -> go a
-    | Eq (a, b) ->
-      go a;
-      go b
-    | Not a -> go a
-    | And xs | Or xs -> Iarr.iter go xs
-    | Ite (c, a, b) ->
-      go c;
-      go a;
-      go b
-    | Bool_const _ | Int_const _ -> ()
+    (* Not an [App] descent: a ground leaf to the matcher, so no binding site inside. *)
+    | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ | Bool_const _ | Int_const _ ->
+      ()
   in
   go t;
   List.sort Int.compare (Hashtbl.fold (fun i () acc -> i :: acc) seen [])
@@ -69,10 +68,12 @@ let rec size (t : Term.t) =
   | Bool_const _ | Int_const _ -> 1
 ;;
 
-(* Every uninterpreted-application subterm ([App] with arity >= 1) of [body] that contains
-   at least one qvar, deduplicated by hash-cons tag. Arithmetic/order/equality/boolean
-   nodes are NOT trigger roots (matcher fragment, L3) — but we still recurse THROUGH them
-   to reach UF applications nested inside (e.g. [f(x)] inside [f(x) + 1 > 0]). *)
+(* Every uninterpreted-application subterm ([App] with arity >= 1) of [body] that binds at
+   least one qvar (a nonempty [qvars_in] — a real binding site, not merely a qvar buried
+   under arithmetic the matcher cannot reach), deduplicated by hash-cons tag.
+   Arithmetic/order/equality/boolean nodes are NOT trigger roots (matcher fragment, L3) —
+   but we still recurse THROUGH them to reach UF applications nested inside (e.g. [f(x)]
+   inside [f(x) + 1 > 0]). *)
 let candidates qvars body =
   let out = ref [] in
   let seen = Hashtbl.create 32 in
