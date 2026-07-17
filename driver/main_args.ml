@@ -933,7 +933,8 @@ let mk_vox_dump_vc_json f =
 let mk_vox_type_only f =
   ( "-vox-type-only",
     Arg.Unit f,
-    " Type-check without generating or discharging refinement VCs" )
+    " Type-check one unit without refinement VCs or .cmi/.cmo/.cmt files; "
+    ^ "skip .ml/.mli conformance checking" )
 
 let mk_dtlambda f =
   "-dtlambda", Arg.Unit f, " (undocumented)"
