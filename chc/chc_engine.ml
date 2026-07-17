@@ -943,6 +943,16 @@ let bmc (ts : ts) ~(max_depth : int) : int option =
 
 (* Confirm [inv] is a genuine safe inductive invariant: init => inv, inv /\ T => inv', inv
    /\ bad unsat. Returns [true] only if all three discharge. *)
+(* A SAFE verdict requires EVERY fact-free [constr => false] body to be provably
+   unsatisfiable. These bodies constrain no predicate, so the (init/trans/bad) invariant
+   machinery never touches them; without this check a satisfiable (real counterexample) or
+   oracle-undecidable ([R_unknown], e.g. a nonlinear body) constraint-only query is
+   silently reported SAFE. [<> R_unsat] fails closed on both [R_sat] and [R_unknown] — an
+   undecidable body degrades SAFE to Unknown, never to a wrong SAFE. *)
+let triv_all_refuted (ts : ts) : bool =
+  List.for_all (fun c -> check_exprs ts [ c ] = R_unsat) ts.trivially_unsafe
+;;
+
 let verify_invariant (ts : ts) (inv : expr list) : bool =
   let prime_inv =
     List.map
@@ -963,7 +973,7 @@ let verify_invariant (ts : ts) (inv : expr list) : bool =
       prime_inv
   in
   let safe = check_exprs ts (inv @ [ ts.bad ]) = R_unsat in
-  init_implies && consec && safe
+  init_implies && consec && safe && triv_all_refuted ts
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -1165,7 +1175,8 @@ let solve
        if check_exprs ts [ ts.init; ts.bad ] = R_sat then raise (Give_up "__unsafe_0");
        (* Modular-residue invariant (independently verified): a cheap early SAFE for the
           "x is even"-style invariants PDR's numeric templates cannot reach. *)
-       if modular_on && modular_invariant ts then raise (Give_up "__safe_modular");
+       if modular_on && modular_invariant ts && triv_all_refuted ts
+       then raise (Give_up "__safe_modular");
        (* PDR frame loop with interleaved BMC confirmation of any counterexample. *)
        let p = { ts; frontier = 1; lemmas = Array.make 4 [] } in
        let result = ref None in

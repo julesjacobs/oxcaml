@@ -441,6 +441,40 @@ let () =
       (assert (forall ((x Int)(y Int)(a Int)) (=> (and (P x y)(= a (+ x 1))) (Q a y))))
       (assert (forall ((x Int)(y Int)) (=> (Q x y) (P x y))))
       (assert (forall ((x Int)(y Int)) (=> (and (P x y)(not (= (+ x y) 10))) false)))|};
+  (* ---- trivially-unsafe (fact-free constr => false) SAFE-firewall soundness ---- *)
+  (* A fact-free [x*x = 0 => false] body is a genuine query (x=0 makes it satisfiable ->
+     UNSAFE), but our LIA oracle cannot decide the nonlinear constraint -> R_unknown. The
+     correct verdict is Unknown (we cannot prove it either way); reporting SAFE is
+     UNSOUND. RED before fix (both engines): neither the up-front check (tested [= R_sat],
+     swallowing R_unknown) nor the SAFE re-verification (never discharged
+     trivially_unsafe) caught it, so the invariant path reported [sat]. Fix: SAFE requires
+     every trivially_unsafe body provably R_unsat. Two variants exercise BOTH engines via
+     the pred-count dispatch. *)
+  check
+    "triv-nonlinear-unknown-1pred"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (= (* x x) 0) false)))|};
+  check
+    "triv-nonlinear-unknown-2pred"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (declare-fun Q (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (P x) (Q x))))
+      (assert (forall ((x Int)) (=> (= (* x x) 0) false)))|};
+  (* Control: a LINEAR fact-free query stays decidable and must remain UNSAFE (the fix
+     must not over-suppress genuine constraint-only counterexamples to Unknown). *)
+  check
+    "triv-linear-unsafe-control"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (> x 0) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;

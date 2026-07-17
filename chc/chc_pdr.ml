@@ -1221,6 +1221,16 @@ let verify (sy : sys) (inv : expr list array) : bool =
     Array.iter
       (fun (src, g) -> if check sy (inv.(src) @ g) <> R_unsat then ok := false)
       sy.bad;
+  (* trivially-unsafe (fact-free [constr => false]) bodies: a SAFE verdict requires EVERY
+     such body to be provably unsatisfiable. These constrain no predicate (no invariant
+     can exclude them), so the frame/[verify] machinery above never touches them —
+     omitting this check silently reports SAFE on a satisfiable (real counterexample) or
+     oracle-undecidable ([R_unknown], e.g. a nonlinear body) constraint-only query.
+     [<> R_unsat] fails closed on both [R_sat] and [R_unknown]: an undecidable body cannot
+     certify SAFE (degrades to Unknown), never a wrong SAFE. *)
+  if !ok
+  then
+    List.iter (fun c -> if check sy [ c ] <> R_unsat then ok := false) sy.trivially_unsafe;
   !ok
 ;;
 
