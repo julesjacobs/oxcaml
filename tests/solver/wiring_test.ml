@@ -2026,10 +2026,10 @@ let test_seed_closes_inert_skolem_unsat () =
   check "seed RED: seeding disabled generates zero seed instances" (seeds_off = 0)
 ;;
 
-(* Pure-LIA atoms do not register their arithmetic closure in the congruence
-   engine, but those ground terms are still part of the accepting query universe.
-   The totality lemma's inferred Skolem trigger is ground-less; seeding i at n produces
-   [p n (skf n)], which the negated-existential lemma refutes. *)
+(* Pure-LIA atoms do not register their arithmetic closure in the congruence engine, but
+   those ground terms are still part of the accepting query universe. The totality lemma's
+   inferred Skolem trigger is ground-less; seeding i at n produces [p n (skf n)], which
+   the negated-existential lemma refutes. *)
 let test_seed_uses_pure_lia_ground_term () =
   let text =
     {|(set-logic AUFLIA)
@@ -2067,6 +2067,52 @@ let test_seed_uses_pure_lia_ground_term () =
   check
     "Final ground universe RED: disabled seeding emits no seed instances"
     (seeds_off = 0)
+;;
+
+(* Ground alias elimination cannot rewrite the parser's deferred quantifier bodies.
+   Eliminating [n = r + 1] from only the ground batch leaves the lemma's [n]
+   unconstrained, and the refutation is missed. The shared loader therefore keeps ground
+   aliases when a document has quantified content, while retaining presolve for QF
+   documents. *)
+let test_loader_presolve_quantifier_boundary () =
+  let quantified =
+    {|(set-logic UFLIA)
+(declare-fun n () Int)
+(declare-fun r () Int)
+(declare-fun p (Int) Bool)
+(assert (= n (+ r 1)))
+(assert (forall ((x Int)) (=> (= x n) (p x))))
+(assert (not (p (+ r 1))))
+(check-sat)
+|}
+  in
+  let s = Session.create () in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) quantified in
+  ignore (Loader.assert_all s parsed : bool);
+  check "quantified loader: ground alias is retained" (Session.eliminated_vars s = []);
+  check
+    "quantified loader: retained alias connects the lemma refutation"
+    (match Session.check_sat s with
+     | Session.Unsat -> true
+     | Session.Sat | Session.Unknown -> false);
+  let ground_only =
+    {|(set-logic QF_LIA)
+(declare-fun x () Int)
+(assert (= x 5))
+(assert (>= x 0))
+(check-sat)
+|}
+  in
+  let s = Session.create () in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) ground_only in
+  ignore (Loader.assert_all s parsed : bool);
+  check
+    "ground-only loader: presolve still eliminates aliases"
+    (Session.eliminated_vars s = [ "x" ]);
+  check_verdict
+    "ground-only loader: presolved batch stays sat"
+    Session.Sat
+    (Session.check_sat s)
 ;;
 
 (* codex M2 (the wrong-unsat surface): an equality UNDER a Not is not a top-level
@@ -2759,6 +2805,7 @@ let () =
   test_skolem_fun_antecedent_exists_not_skolemized ();
   test_seed_closes_inert_skolem_unsat ();
   test_seed_uses_pure_lia_ground_term ();
+  test_loader_presolve_quantifier_boundary ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
   test_ctx_simp_eq_subst_sat ();

@@ -26,11 +26,16 @@ let is_declared env name =
   | exception _ -> false
 ;;
 
-(* Assert a parsed document into [s]: the ground batch through the W1b
-   equality-elimination presolve (or the per-term [assert_term] stream when
-   [presolve = false], for A/B), then each universally-quantified lemma through the
-   cap-gated mint-before-build {!Session.assert_lemma} (ADR-0012 §1.3). One qvar is minted
-   per binder and its {!Term.t} image handed to the parser's deferred [build], which reads
+(* Assert a parsed document into [s]: a ground-only batch goes through the W1b
+   equality-elimination presolve. A document with deferred quantified content uses the
+   per-term [assert_term] stream even when [presolve] is requested: presolve rewrites only
+   the parsed ground batch, not lemma/existential bodies built later, so eliminating an
+   alias from only the ground side can disconnect it from a quantifier body. Explicit
+   [presolve = false] uses the same per-term path for A/B.
+
+   Universally-quantified lemmas then go through the cap-gated mint-before-build
+   {!Session.assert_lemma} (ADR-0012 §1.3). One qvar is minted per binder and its
+   {!Term.t} image handed to the parser's deferred [build], which reads
    the lemma body and [:pattern] triggers with the binders bound.
 
    SOUNDNESS: dropping a lemma would WEAKEN the assertion set — sound for [unsat] but NOT
@@ -45,6 +50,11 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
      ([parsed.dropped]) plus any lemma dropped HERE because its body/trigger is outside
      the fragment (e.g. an [exists] in the body, discovered only when [build] runs). *)
   let dropped = ref parsed.Parser.dropped in
+  let has_deferred_quantifiers =
+    parsed.Parser.dropped > 0
+    || not (List.is_empty parsed.Parser.lemmas)
+    || not (List.is_empty parsed.Parser.existentials)
+  in
   try
     (* Install any datatype shapes BEFORE asserting, so the theory stack selects the DT
        theory when the file declared a datatype (empty registry = no-op, byte-identical on
@@ -54,7 +64,7 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
     (* Likewise install the array select/store registry (arrays lane) BEFORE asserting, so
        an array file routes onto the standalone arrays theory. No-op on non-array files. *)
     Session.set_arrays s parsed.Parser.arrays;
-    if presolve
+    if presolve && not has_deferred_quantifiers
     then Session.assert_presolved s parsed.Parser.assertions
     else List.iter (Session.assert_term s) parsed.Parser.assertions;
     (* Skolem-FUNCTION minter for positive existentials nested in a [forall] body
