@@ -4414,6 +4414,14 @@ let rec mcomp type_pairs env t1 t2 =
                       with Incompatible -> false)
                     refinement1 refinement2)
             then raise Incompatible
+        | (Trefine _, _, _, _) | (_, Trefine _, _, _) ->
+            (* Loud one-sided-refinement guard: a refined type meeting a bare
+               type must never be silently related here.  The rigid discipline
+               says this is always a clash; the sanctioned one-sided sites (the
+               expected-type weakening, which strips to the skeleton before
+               unification, and the seal-context arms above) are handled
+               earlier, so reaching this point is a forgotten/mis-added path. *)
+            raise Incompatible
         | (Tbox t, _, _, _) when is_unboxable_ty env t2' ->
           mcomp type_pairs env t (unbox_ty_exn env t2')
         | (_, Tbox t, _, _) when is_unboxable_ty env t1' ->
@@ -5088,6 +5096,12 @@ and unify3 uenv t1 t1' t2 t2' =
         if linked then Transient_expr.set_desc tt1' d1;
         raise_trace_for Unify trace
       end
+  | (Trefine _, _) | (_, Trefine _) ->
+      (* Loud one-sided-refinement guard: never silently [link_type] a
+         refined type to a bare one (the default below would).  Rigid clash;
+         sanctioned one-sided sites are the expected-type weakening (strips to
+         skeleton before unification) and the seal arms in [moregen]. *)
+      raise_unexplained_for Unify
   | (_, Tbox t2) when is_unboxable_ty (get_env uenv) t1' ->
       unify uenv (unbox_ty_exn (get_env uenv) t1') t2
   | (Tbox t1, _) when is_unboxable_ty (get_env uenv) t2' ->
@@ -6600,6 +6614,10 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               (* Bare implementations do not acquire interface refinements at
                  a seal.  Q-001 can change this fail-closed site locally. *)
               raise_unexplained_for Moregen
+          | (Trefine _, _) | (_, Trefine _) ->
+              (* Loud one-sided-refinement guard (outside the seal-context arms
+                 above and the expected-type weakening): rigid clash. *)
+              raise_unexplained_for Moregen
           | (Tbox t, _) when is_unboxable_ty env t2' ->
               moregen inst_nongen variance type_pairs
                 env t (unbox_ty_exn env t2')
@@ -7122,6 +7140,10 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
                         true)
                       refinement1 refinement2)
               then raise_unexplained_for Equality
+          | (Trefine _, _) | (_, Trefine _) ->
+              (* Loud one-sided-refinement guard: rigid clash (sanctioned
+                 one-sided sites handled before reaching here). *)
+              raise_unexplained_for Equality
           | (_, _) ->
               raise_unexplained_for Equality
         end
@@ -8065,6 +8087,12 @@ let rec subtype_rec env trace t1 t2 cstrs =
                is_equal env false [type1] [type2])
              refinement1 refinement2 ->
         cstrs
+    | (Trefine _, _) | (_, Trefine _) ->
+        (* Loud one-sided-refinement guard: a refined type facing a bare one in
+           a subtype coercion is a rigid clash, not a silent weakening.  The
+           sanctioned one-sided sites are the expected-type weakening (strips to
+           the skeleton before this) and the seal-context arms in [moregen]. *)
+        subtype_error ~env ~trace ~unification_trace:[]
     | (_, _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
   end
