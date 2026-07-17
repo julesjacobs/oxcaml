@@ -30,6 +30,39 @@ type 'tok integer_result =
   | Int_unsat of 'tok conflict option
   | Int_unknown
 
+(* Canonical slack definitions are sorted by variable id before lookup. Hash and compare
+   that sequence directly, using the value operations for [Rational.t]; never invoke
+   polymorphic hash/compare on its mixed representation. A hash collision is only a
+   bucket collision: [equal] still distinguishes every variable id and coefficient, so
+   distinct linear forms can never share a slack. *)
+module Slack_key = struct
+  type t = (int * Rational.t) list
+
+  let rec equal a b =
+    match a, b with
+    | [], [] -> true
+    | (va, ca) :: ra, (vb, cb) :: rb ->
+      va = vb && Rational.equal ca cb && equal ra rb
+    | [], _ :: _ | _ :: _, [] -> false
+  ;;
+
+  let hash pairs =
+    let avalanche n =
+      let n = (n lxor (n lsr 16)) * 0x45d9f3b in
+      let n = (n lxor (n lsr 16)) * 0x45d9f3b in
+      n lxor (n lsr 16)
+    in
+    let mix h n = avalanche (h lxor (n + 0x9e3779b9 + (h lsl 6) + (h lsr 2))) in
+    List.fold_left
+      (fun h (var, coeff) -> mix (mix h var) (Rational.hash coeff))
+      0
+      pairs
+    land max_int
+  ;;
+end
+
+module Slack_table = Hashtbl.Make (Slack_key)
+
 (* A registered atom's positive-polarity reading: a bound [var <sense> rhs]. *)
 type reg =
   { atom : Term.t
@@ -43,11 +76,9 @@ type 'tok t =
   ; simplex : 'tok reason Simplex.t
   ; var_of_term : int Term.Table.t (* problem-var term -> simplex id *)
   ; problem_vars : (int * Term.t) Dynarray.t (* (simplex id, term), creation order *)
-  ; slacks : (string, int) Hashtbl.t
-      (* sorted (varid, canonical-coeff-string) key -> slack id; the coeff is stringified
-         via [Rational.to_string] because coefficients are now arbitrary-precision
-         [Rational.t] (core-bignum W2) and must not be keyed by a polymorphic hash of the
-         two-tier value. *)
+  ; slacks : int Slack_table.t
+      (* canonical sorted (varid, coefficient) sequence -> slack id; custom monomorphic
+         hash/equality above is value-correct for the mixed-tier [Rational.t]. *)
   ; registered : reg Dynarray.t
   ; reg_index :
       int Term.Table.t (* registered atom term -> its index in [registered]; O(1) dedup *)
@@ -158,7 +189,7 @@ let create ctx =
   ; simplex = Simplex.create ()
   ; var_of_term = Term.Table.create 64
   ; problem_vars = Dynarray.create ()
-  ; slacks = Hashtbl.create 64
+  ; slacks = Slack_table.create 64
   ; registered = Dynarray.create ()
   ; reg_index = Term.Table.create 64
   ; reg_by_var = Hashtbl.create 64
@@ -224,43 +255,28 @@ let combo_of_term t (term : Term.t) : (int * Rational.t) list * Rational.t =
   | _ -> [ problem_var t term, Rational.one ], Rational.zero
 ;;
 
-(* Canonical dedup key for a slack definition, serialized to ONE flat [string]: sort by
-   varid, stringify each coefficient (value-canonical, so it does not depend on the
-   [Rational] tier), and emit each pair as [varid "," len ":" coeff-string] where [len] is
-   the byte length of the coefficient string. A flat-string key makes the slack [Hashtbl]
-   hash and compare a single monomorphic string op (one [memcmp] on a collision) instead
-   of the deep polymorphic [caml_hash]/[compare_val] over a nested [(int * string) list] —
-   the per-atom slack-registration and search hot path on large linear residuals.
-
-   INJECTIVE (soundness-critical: a collision would silently merge two DISTINCT combos
-   onto one slack ⇒ wrong reuse ⇒ possible wrong verdict). The serialization is uniquely
-   decodable for ANY field contents, with no assumption on the coefficient charset:
-   - each record is [varid "," len ":" cs];
-   - [varid = string_of_int _] and [len = string_of_int (String.length cs)] are drawn from
-     [{'-','0'..'9'}], so the FIRST ',' ends the varid field and the FIRST ':' after it
-     ends the length field unambiguously (neither ',' nor ':' occurs in a [string_of_int]
-     output);
-   - [cs] is then read as EXACTLY [len] bytes, so it is recovered verbatim even if it were
-     to contain ',' or ':'. Hence the flat string determines the sorted
-     [(varid, coeff-string)] sequence uniquely. Distinct canonical combos have distinct
-     such sequences (varids are distinct after the equality-merge and sorted here;
-     [Rational.to_string] is value-canonical), so they map to distinct keys. The dedup —
-     hence every created slack variable, all downstream simplex behaviour, and the
-     reported counters — is therefore byte-identical to the old list key. *)
-let sort_key (pairs : (int * Rational.t) list) : string =
-  let sorted = List.sort (fun (a, _) (b, _) -> Int.compare a b) pairs in
-  let buf = Buffer.create 32 in
-  List.iter
-    (fun (x, c) ->
-      let cs = Rational.to_string c in
-      Buffer.add_string buf (string_of_int x);
-      Buffer.add_char buf ',';
-      Buffer.add_string buf (string_of_int (String.length cs));
-      Buffer.add_char buf ':';
-      Buffer.add_string buf cs)
-    sorted;
-  Buffer.contents buf
+(* Return [pairs] itself when it is already in the canonical order. [combo_of_term]
+   visits a normalized arithmetic node's tag-sorted coefficients, and problem variables
+   are normally allocated in that same first-use order, so this is the common ingest
+   path. The fallback keeps the API's order-independence for equality merges and clients
+   that construct terms before asserting them in a different order. *)
+let canonical_pairs pairs =
+  let rec strictly_increasing previous = function
+    | [] -> true
+    | (var, _) :: rest -> previous < var && strictly_increasing var rest
+  in
+  match pairs with
+  | [] | [ _ ] -> pairs
+  | (var, _) :: rest ->
+    if strictly_increasing var rest
+    then pairs
+    else List.sort (fun (a, _) (b, _) -> Int.compare a b) pairs
 ;;
+
+module For_testing = struct
+  let slack_key_equal a b = Slack_key.equal (canonical_pairs a) (canonical_pairs b)
+  let slack_key_hash pairs = Slack_key.hash (canonical_pairs pairs)
+end
 
 (* The simplex variable carrying a linear combination, and whether the reported bound is a
    direct problem-var bound. Coeff-1 singletons bound their variable directly (DdM);
@@ -269,12 +285,15 @@ let var_for_combo t (pairs : (int * Rational.t) list) =
   match pairs with
   | [ (x, c) ] when Rational.equal c Rational.one -> x
   | _ ->
-    let key = sort_key pairs in
-    (match Hashtbl.find_opt t.slacks key with
+    (* Sort once for both the dedup key and the simplex row. [Simplex.new_slack]'s
+       sorted-input fast path then copies this canonical sequence directly instead of
+       sorting it a second time. *)
+    let pairs = canonical_pairs pairs in
+    (match Slack_table.find_opt t.slacks pairs with
      | Some s -> s
      | None ->
        let s = Simplex.new_slack t.simplex pairs in
-       Hashtbl.replace t.slacks key s;
+       Slack_table.replace t.slacks pairs s;
        s)
 ;;
 
@@ -581,9 +600,9 @@ let rational_value t (term : Term.t) =
    a problem var or slack (a fabric scan must not mutate the tableau merely by asking
    whether a shared term is fixed). [None] if any leaf has no simplex var yet.
    Coefficients/const are arbitrary-precision [Rational.t] (core-bignum W2), mirroring
-   {!combo_of_term} exactly so the [sort_key] slack lookup below hits the SAME key the
-   real ingest recorded (a native-int projection here would compute a different key and
-   silently miss the slack). *)
+   {!combo_of_term} exactly so the canonical slack-table lookup below hits the SAME key
+   the real ingest recorded (a native-int projection here would compute a different key
+   and silently miss the slack). *)
 let existing_combo t (term : Term.t) : ((int * Rational.t) list * Rational.t) option =
   let existing_problem tm = Term.Table.find_opt t.var_of_term tm in
   match term.node with
@@ -611,7 +630,7 @@ let existing_combo t (term : Term.t) : ((int * Rational.t) list * Rational.t) op
 let existing_combo_var t pairs =
   match pairs with
   | [ (x, c) ] when Rational.equal c Rational.one -> Some x
-  | _ -> Hashtbl.find_opt t.slacks (sort_key pairs)
+  | _ -> Slack_table.find_opt t.slacks (canonical_pairs pairs)
 ;;
 
 let negate_pairs pairs = List.map (fun (v, c) -> v, Rational.neg c) pairs

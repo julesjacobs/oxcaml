@@ -179,36 +179,66 @@ module Lx = struct
 
   let remove i (m : t) = add i Rational.zero m
 
-  (* Build from unsorted (id,coeff) pairs: sum coefficients on repeated ids, drop zeros,
-     produce a sorted FRESH row. Same abstract map (and same summed values) as folding
-     [add]/[remove] over the list. *)
+  (* Copy an already canonical input directly. The LIA ingest path has already sorted the
+     list to build its slack-dedup key, so sorting again here used to dominate
+     registration on wide linear atoms. *)
+  let of_sorted_unique pairs =
+    let len = List.length pairs in
+    let ids = Array.make len 0
+    and cs = Array.make len Rational.zero in
+    List.iteri
+      (fun k (id, coeff) ->
+        ids.(k) <- id;
+        cs.(k) <- coeff)
+      pairs;
+    { ids; cs; len }
+  ;;
+
+  let rec is_sorted_unique_nonzero previous = function
+    | [] -> true
+    | (id, coeff) :: rest ->
+      previous < id
+      && not (Rational.is_zero coeff)
+      && is_sorted_unique_nonzero id rest
+  ;;
+
+  (* Build from (id,coeff) pairs: on the canonical input supplied by [Lia], copy directly;
+     otherwise sum repeated ids, drop zeros, and sort. Same abstract map (and same summed
+     coefficient values) as folding [add]/[remove] over the list. *)
   let of_list pairs =
-    let sorted = List.stable_sort (fun (a, _) (b, _) -> Int.compare a b) pairs in
-    let rids = ref []
-    and rcs = ref [] in
-    let cur_id = ref 0
-    and cur_c = ref Rational.zero
-    and have = ref false in
-    let flush () =
-      if !have && not (Rational.is_zero !cur_c)
-      then (
-        rids := !cur_id :: !rids;
-        rcs := !cur_c :: !rcs)
-    in
-    List.iter
-      (fun (i, c) ->
-        if !have && i = !cur_id
-        then cur_c := Rational.add !cur_c c
-        else (
-          flush ();
-          cur_id := i;
-          cur_c := c;
-          have := true))
-      sorted;
-    flush ();
-    let ids = Array.of_list (List.rev !rids)
-    and cs = Array.of_list (List.rev !rcs) in
-    { ids; cs; len = Array.length ids }
+    match pairs with
+    | [] -> create ()
+    | (first_id, first_coeff) :: rest
+      when not (Rational.is_zero first_coeff)
+           && is_sorted_unique_nonzero first_id rest ->
+      of_sorted_unique pairs
+    | _ ->
+      let sorted = List.stable_sort (fun (a, _) (b, _) -> Int.compare a b) pairs in
+      let rids = ref []
+      and rcs = ref [] in
+      let cur_id = ref 0
+      and cur_c = ref Rational.zero
+      and have = ref false in
+      let flush () =
+        if !have && not (Rational.is_zero !cur_c)
+        then (
+          rids := !cur_id :: !rids;
+          rcs := !cur_c :: !rcs)
+      in
+      List.iter
+        (fun (i, c) ->
+          if !have && i = !cur_id
+          then cur_c := Rational.add !cur_c c
+          else (
+            flush ();
+            cur_id := i;
+            cur_c := c;
+            have := true))
+        sorted;
+      flush ();
+      let ids = Array.of_list (List.rev !rids)
+      and cs = Array.of_list (List.rev !rcs) in
+      { ids; cs; len = Array.length ids }
   ;;
 
   (* Reusable scratch for the [add_scaled_in_place] merge. A single global buffer is safe:

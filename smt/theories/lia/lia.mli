@@ -261,9 +261,13 @@ val overflow_count : 'tok t -> int
     note); safe to call at any time, never raises {!Poisoned}. *)
 val is_poisoned : 'tok t -> bool
 
-(** [sort_key pairs] is the canonical dedup key for a slack definition [Σ coeff·varid]: a
-    flat string that is INJECTIVE on canonical combos (distinct sorted (varid, canonical-
-    coefficient) sequences map to distinct strings). Exposed only for the injectivity unit
-    test (the soundness-critical property: two DISTINCT combos must never share a key,
-    else they would be conflated onto one slack). Pure, total, deterministic. *)
-val sort_key : (int * Rational.t) list -> string
+module For_testing : sig
+  (** The equality and hash used by the slack-dedup table, including canonical ordering.
+      Exposed only for the soundness-critical key discrimination test. *)
+  val slack_key_equal
+    :  (int * Rational.t) list
+    -> (int * Rational.t) list
+    -> bool
+
+  val slack_key_hash : (int * Rational.t) list -> int
+end

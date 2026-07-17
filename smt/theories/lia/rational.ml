@@ -460,6 +460,28 @@ let equal x y =
   else compare x y = 0
 ;;
 
+(* Value hash matching {!equal}. Canonical demotion gives each rational exactly one tier,
+   so hashing that tier's normalized numerator/denominator is representation-independent.
+   Kept here, next to the representation boundary: callers must not use polymorphic hash
+   on the immediate-or-pointer {!W.t}. *)
+let hash x =
+  let avalanche n =
+    let n = (n lxor (n lsr 16)) * 0x45d9f3b in
+    let n = (n lxor (n lsr 16)) * 0x45d9f3b in
+    n lxor (n lsr 16)
+  in
+  let mix h n = avalanche (h lxor (n + 0x9e3779b9 + (h lsl 6) + (h lsr 2))) in
+  let h =
+    if W.is_immediate x
+    then mix 1 (W.to_int_unchecked x)
+    else (
+      match W.to_block x with
+      | W.Frac { n; d } -> mix (mix 2 n) d
+      | W.Big { num; den } -> mix (mix 3 (Bigint.hash num)) (Bigint.hash den))
+  in
+  h land max_int
+;;
+
 let min x y = if compare x y <= 0 then x else y
 let max x y = if compare x y >= 0 then x else y
 

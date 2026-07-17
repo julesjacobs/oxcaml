@@ -64,6 +64,19 @@ let test_rational () =
   print_endline "Rational:";
   check "1/2 + 1/3 = 5/6" (Rational.equal (Rational.add (qf 1 2) (qf 1 3)) (qf 5 6));
   check "2/4 normalizes to 1/2" (Rational.equal (qf 2 4) (qf 1 2));
+  check "equal rationals hash equally" (Rational.hash (qf 2 4) = Rational.hash (qf 1 2));
+  let big_int = Rational.of_string "4611686018427387904" in
+  let big_int_again = Rational.add (q max_int) Rational.one in
+  check
+    "equal Big integers hash equally"
+    (Rational.equal big_int big_int_again
+     && Rational.hash big_int = Rational.hash big_int_again);
+  let big_frac = Rational.of_string "4611686018427387904/3" in
+  let big_frac_again = Rational.div big_int (q 3) in
+  check
+    "equal Big fractions hash equally"
+    (Rational.equal big_frac big_frac_again
+     && Rational.hash big_frac = Rational.hash big_frac_again);
   check "-1/-2 normalizes to 1/2" (Rational.equal (qf (-1) (-2)) (qf 1 2));
   check "3/6 - 1/6 = 1/3" (Rational.equal (Rational.sub (qf 3 6) (qf 1 6)) (qf 1 3));
   check "2/3 * 3/4 = 1/2" (Rational.equal (Rational.mul (qf 2 3) (qf 3 4)) (qf 1 2));
@@ -829,14 +842,14 @@ let test_push_pop () =
 
 (* core-bignum W2 cube/fabric migration (existing_combo / existing_combo_var): the fabric
    fixed-value path was migrated off native-int coeffs onto arbitrary-precision Rational
-   (Rational.of_bigint), with the slack lookup keyed by the same Rational.to_string
-   sort_key the real ingest records. This pins that it STILL FIRES on a small-coefficient
-   combo (the Bromberger more_slacked cube anchor is small-coeff/den=1): a 2-var combo
-   [x+y] pinned to a single integer by two ACTIVE USER bounds must be found by
-   [fixed_bounds]. Discriminating: if the migrated slack keying diverged from the ingest,
-   the lookup would miss and [fixed_bounds] would return [None] — i.e. the cube win would
-   be silently disabled. (Corpus confirmation: Bromberger more_slacked cut_lemmas solve
-   fast, logged in bignum-log.md.) *)
+   (Rational.of_bigint), with lookup using the same canonical coefficient vector the real
+   ingest records. This pins that it STILL FIRES on a small-coefficient combo (the
+   Bromberger more_slacked cube anchor is small-coeff/den=1): a 2-var combo [x+y] pinned
+   to a single integer by two ACTIVE USER bounds must be found by [fixed_bounds].
+   Discriminating: if lookup keying diverged from ingest, the lookup would miss and
+   [fixed_bounds] would return [None] — i.e. the cube win would be silently disabled.
+   (Corpus confirmation: Bromberger more_slacked cut_lemmas solve fast, logged in
+   bignum-log.md.) *)
 let test_cube_still_fires () =
   print_endline "cube/fabric fix-path still fires (W2 cube migration):";
   let fx = make_fixture 2 in
@@ -872,6 +885,15 @@ let test_codex_findings () =
    let _ = Simplex.assert_upper s sl (Delta.of_rat Rational.zero) "sl<=0" in
    let _ = Simplex.assert_lower s sl (Delta.of_rat Rational.zero) "sl>=0" in
    check "L1: sl=0 is feasible with no x-dependence" (Simplex.check s = None));
+  (* An explicit zero in an otherwise sorted list must take the fallback and disappear:
+     [s = 0·x + y], so [s <= 0 ∧ y >= 1] is inconsistent. *)
+  (let s = Simplex.create () in
+   let x = Simplex.new_problem_var s in
+   let y = Simplex.new_problem_var s in
+   let sl = Simplex.new_slack s [ x, Rational.zero; y, Rational.one ] in
+   let _ = Simplex.assert_upper s sl (Delta.of_rat Rational.zero) "sl<=0" in
+   let _ = Simplex.assert_lower s y (Delta.of_rat Rational.one) "y>=1" in
+   check "L1: explicit zero coefficient is dropped" (Simplex.check s <> None));
   (* L3 (false-sat): a conflict recorded at root must SURVIVE a push/pop that does not
      undo its triggering bound. x<=0 ∧ x>=1 (same var => pending), then push, pop. *)
   (let fx = make_fixture 1 in
@@ -1634,43 +1656,58 @@ let test_cg_cut () =
   run_cut_sweep ~label:"cg sweep" ~seed:[| 0xC63B; 11; 43 |] ~producer:Lia.cg_cut
 ;;
 
-(* Slack-key injectivity (soundness-critical): [Lia.sort_key] must map two DISTINCT
-   canonical combos to DISTINCT strings — a collision would conflate them onto one slack
-   (wrong reuse ⇒ possible wrong verdict). Hammers the varid/coefficient boundary that a
-   naive delimiter-free or non-length-prefixed encoding would confuse, plus a randomized
-   differential over many combos. Also checks the dedup direction: reordered inputs of the
-   SAME combo yield the SAME key (sort_key sorts by varid). *)
-let test_sort_key_injective () =
-  let key = Lia.sort_key in
+(* Slack-key discrimination (soundness-critical): distinct canonical coefficient vectors
+   must compare unequal, while permutations of one vector compare equal and hash equal.
+   A broken equality could conflate distinct forms onto one slack (wrong reuse ⇒ possible
+   wrong verdict); a broken equal⇒same-hash contract could miss legitimate dedup. Test the
+   production table operations directly, including a randomized differential. *)
+let test_slack_key () =
+  let equal = Lia.For_testing.slack_key_equal in
+  let hash = Lia.For_testing.slack_key_hash in
   (* Order-invariance / dedup: same canonical combo, permuted input → identical key. *)
+  let ordered = [ 3, q 4; 1, q 2; 40, q (-7) ] in
+  let permuted = [ 40, q (-7); 1, q 2; 3, q 4 ] in
   check
-    "sort_key order-invariant"
-    (String.equal
-       (key [ 3, q 4; 1, q 2; 40, q (-7) ])
-       (key [ 40, q (-7); 1, q 2; 3, q 4 ]));
-  (* Adversarial near-collisions that a NAIVE separator-free concatenation would merge
-     ("123" ≡ "123", "1234" ≡ "1234") but which are genuinely different combos. *)
+    "slack key order-invariant"
+    (equal ordered permuted && hash ordered = hash permuted);
+  (* Adversarial vector boundaries that are genuinely different combos. *)
   check
     "digit run-on (1,23) vs (12,3)"
-    (not (String.equal (key [ 1, q 23 ]) (key [ 12, q 3 ])));
+    (not (equal [ 1, q 23 ] [ 12, q 3 ]));
   check
     "multi-pair boundary (1,2)(3,4) vs (12,34)"
-    (not (String.equal (key [ 1, q 2; 3, q 4 ]) (key [ 12, q 34 ])));
+    (not (equal [ 1, q 2; 3, q 4 ] [ 12, q 34 ]));
   check
     "coeff-length boundary (1,2)(3,45) vs (1,23)(4,5)"
-    (not (String.equal (key [ 1, q 2; 3, q 45 ]) (key [ 1, q 23; 4, q 5 ])));
-  (* Fractions / negatives (Rational.to_string emits '/' and '-'): still distinct. *)
-  check "fraction vs integer" (not (String.equal (key [ 1, qf 1 2 ]) (key [ 1, q 1 ])));
+    (not (equal [ 1, q 2; 3, q 45 ] [ 1, q 23; 4, q 5 ]));
+  check "fraction vs integer" (not (equal [ 1, qf 1 2 ] [ 1, q 1 ]));
   check
     "negative vs positive coeff"
-    (not (String.equal (key [ 5, q (-3) ]) (key [ 5, q 3 ])));
-  (* Randomized differential: many distinct canonical combos ⇒ no two share a key. Build a
-     table key→canonical-combo; a repeat key with a DIFFERENT canonical combo is a
-     collision (soundness bug); a repeat with the SAME canonical combo is legitimate
-     dedup. *)
+    (not (equal [ 5, q (-3) ] [ 5, q 3 ]));
+  check
+    "duplicate coefficients remain distinct from their sum"
+    (not (equal [ 1, q 1; 1, q 1 ] [ 1, q 2 ]));
+  check "explicit zero remains distinct from empty" (not (equal [ 1, q 0 ] []));
+  check
+    "duplicate-id order remains significant"
+    (not (equal [ 1, q 1; 1, q 2 ] [ 1, q 2; 1, q 1 ]));
+  (* Regression for the former linear mixer: these singletons all collided at hash 0. *)
+  let crafted_hashes =
+    List.init 32 (fun i ->
+      let var = i + 2 in
+      hash [ var, q ((31 * var) lxor 31) ])
+  in
+  check
+    "crafted singleton family does not collapse into one hash bucket"
+    (List.length (List.sort_uniq Int.compare crafted_hashes) >= 30);
+  (* Randomized differential against a canonical string oracle. Hash collisions are
+     legal, so compare every pair sharing a bucket and require the production equality to
+     agree with the oracle. Also reverse every generated vector to pin equal⇒same-hash. *)
   let st = Random.State.make [| 0x51AC; 0x9E37; 7 |] in
-  let by_key : (string, (int * string) list) Hashtbl.t = Hashtbl.create 4096 in
-  let collisions = ref 0 in
+  let by_hash : (int, ((int * Rational.t) list * (int * string) list) list) Hashtbl.t =
+    Hashtbl.create 4096
+  in
+  let mismatches = ref 0 in
   for _ = 1 to 20000 do
     (* 1..4 distinct varids in [0,30], coeffs int in [-15,15]\{0} or a small fraction. *)
     let n = 1 + Random.State.int st 4 in
@@ -1692,18 +1729,28 @@ let test_sort_key_injective () =
       else qf (Random.State.int st 9 + 1) (Random.State.int st 8 + 2)
     in
     let combo = List.map (fun v -> v, mk_coeff ()) vars in
-    let k = key combo in
     let canon =
       List.sort (fun (a, _) (b, _) -> Int.compare a b) combo
       |> List.map (fun (v, c) -> v, Rational.to_string c)
     in
-    match Hashtbl.find_opt by_key k with
-    | Some prev when prev <> canon -> incr collisions
-    | _ -> Hashtbl.replace by_key k canon
+    let h = hash combo in
+    if not (equal combo (List.rev combo) && h = hash (List.rev combo))
+    then incr mismatches;
+    let bucket =
+      match Hashtbl.find_opt by_hash h with
+      | Some entries -> entries
+      | None -> []
+    in
+    List.iter
+      (fun (previous, previous_canon) ->
+        if not (Bool.equal (equal combo previous) (canon = previous_canon))
+        then incr mismatches)
+      bucket;
+    Hashtbl.replace by_hash h ((combo, canon) :: bucket)
   done;
   check
-    "sort_key randomized differential: 0 collisions over 20000 combos"
-    (!collisions = 0)
+    "slack key randomized differential: 0 mismatches over 20000 combos"
+    (!mismatches = 0)
 ;;
 
 (* H6 (fabric S4.2 train foundation fix): [checkpoint]/[rewind_to_checkpoint] must retract
@@ -1760,7 +1807,7 @@ let test_h6_false_frames_checkpoint () =
 let () =
   print_endline "lia self-test:";
   test_rational ();
-  test_sort_key_injective ();
+  test_slack_key ();
   test_delta ();
   test_hand_cases ();
   test_strict_delta ();

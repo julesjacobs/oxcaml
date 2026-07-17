@@ -71,6 +71,10 @@ val compare : t -> t -> int
 
 val equal : t -> t -> bool
 
+(** Value-based hash matching {!equal}; deterministic and safe for the mixed
+    immediate-or-pointer representation. *)
+val hash : t -> int
+
 (** [sign t] is [-1], [0], or [1]. *)
 val sign : t -> int
 
