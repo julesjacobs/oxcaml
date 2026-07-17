@@ -12,9 +12,9 @@
 
     Public submodules: {!Bigint} (stdlib arbitrary-precision ints, the [Rational] Big-tier
     fallback — core-bignum W2), {!Rational} (exact ℚ, two-tier Small/Big), {!Delta}
-    (δ-rationals), {!Simplex} (the DdM tableau), {!Lia} (the atom-facing decision
-    procedure), and {!Lia_adapter} (the frozen {!Oxsmt_core.Theory.THEORY} binding,
-    ADR-0005 M4). *)
+    (δ-rationals), {!Simplex} (the DdM tableau), {!Lia} (the integer decision procedure),
+    {!Lra} (the linear-real decision procedure), and {!Lia_adapter} (the frozen
+    {!Oxsmt_core.Theory.THEORY} binding, ADR-0005 M4). *)
 
 (* [Bigint] moved down into [oxsmt_core] (it now also backs the core term coefficients);
    re-exported here so [Oxsmt_lia.Bigint] keeps naming it for existing consumers/tests. *)
@@ -24,4 +24,5 @@ module Delta = Delta
 module Simplex = Simplex
 module Hnf = Hnf
 module Lia = Lia
+module Lra = Lra
 module Lia_adapter = Lia_adapter

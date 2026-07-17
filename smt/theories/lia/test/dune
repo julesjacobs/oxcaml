@@ -11,6 +11,15 @@
  (modules lia_test)
  (libraries oxsmt_core oxsmt_lia))
 
+; Direct linear-real-arithmetic engine self-test.  It uses an independent exact
+; Fourier--Motzkin oracle and a public-output Farkas verifier; no frozen Real-sort term
+; support is needed for this additive engine-level suite.
+
+(executable
+ (name lra_test)
+ (modules lra_test)
+ (libraries oxsmt_core oxsmt_lia))
+
 ; The THEORY-adapter test (ADR-0005 M4). Same firewall: oxsmt_core + oxsmt_lia only. Its
 ; independent Farkas verifier reconstructs half-planes from the adapter's PUBLIC premise
 ; literals (no engine internals), per DESIGN §10.

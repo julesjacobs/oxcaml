@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -616,6 +616,14 @@ rational-word-test:
 lia-test:
 	$(DUNE) exec smt/theories/lia/test/lia_test.exe
 
+## lra-test — direct linear-real-arithmetic engine self-test (stdlib-only, deterministic).
+##   Exact fractional/strict/equality hand cases; exact returned-model validation; 3000
+##   random rational systems cross-checked against an independent Fourier--Motzkin
+##   decision procedure; every infeasible result checked from its public oriented Farkas
+##   rows; disequality split, push/pop, and run-twice determinism. Nonzero on failure.
+lra-test:
+	$(DUNE) exec smt/theories/lia/test/lra_test.exe
+
 ## hnf-test — standalone exact-integer Hermite Normal Form kernel self-test (Stage B lattice
 ##   kernel, charter logs/lia-cuts-charter.md). Hand matrices with a hand-computed HNF; a
 ##   random property sweep checking the always-on self-check [Hnf.verify] AND an INDEPENDENT
@@ -905,6 +913,7 @@ test: check-frozen
 	@# euf-test/euf-adapter-test run their OXSMT_EUF_SELF_CHECK oracle cross-check, which is
 	@# already bounded (fixed-seed, small N; ~0.04s) so no separate smoke variant is needed.
 	$(MAKE) lia-test
+	$(MAKE) lra-test
 	$(MAKE) lia-trivial-eq-test
 	$(MAKE) lia-gcd-cut-test
 	$(MAKE) lia-adapter-test
