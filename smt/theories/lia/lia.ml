@@ -613,7 +613,15 @@ let existing_equality_combo t (term : Term.t) =
     in
     gather [] (Iarr.to_list coeffs)
   | Int_const k -> Some ([], Rational.of_bigint k)
-  | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> None
+  | Real_const _
+  | Real_arith _
+  | Bool_const _
+  | Le _
+  | Eq _
+  | Not _
+  | And _
+  | Or _
+  | Ite _ -> None
 ;;
 
 (* Equality is invariant under division by a common positive coefficient factor. Reduce

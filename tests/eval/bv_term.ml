@@ -127,7 +127,7 @@ let mul_opt a b = if a < 1 || b < 1 || a > max_int / b then None else Some (a * 
 let width_exn ~what (term : Term.t) =
   match term.sort with
   | Sort.BitVec width -> width
-  | Bool | Int _ | Uninterpreted _ | Datatype _ | Array _ ->
+  | Bool | Int _ | Real | Uninterpreted _ | Datatype _ | Array _ ->
     raise (Term.Sort_error (what ^ ": operand is not a bit-vector"))
 ;;
 
@@ -297,8 +297,8 @@ let repeat ctx mint ~n arg =
   build_app ctx mint name [ Sort.bitvec width ] (Sort.bitvec result_width) [ arg ]
 ;;
 
-(* The decoder is deliberately stricter than the namespace admission predicate.  A
-   marker is meaningful only when every encoded field agrees with the actual term. *)
+(* The decoder is deliberately stricter than the namespace admission predicate. A marker
+   is meaningful only when every encoded field agrees with the actual term. *)
 
 let int_fields fields = List.map int_of_string_opt fields
 
@@ -389,9 +389,8 @@ let decode_extract fields args result =
   | [ Some high; Some low; Some width ], [ (arg : Term.t) ]
     when width >= 1 && high >= low && low >= 0 && high < width ->
     let result_width = high - low + 1 in
-    if
-      Sort.equal arg.sort (Sort.bitvec width)
-      && Sort.equal result (Sort.bitvec result_width)
+    if Sort.equal arg.sort (Sort.bitvec width)
+       && Sort.equal result (Sort.bitvec result_width)
     then Some (Op { op = Extract (high, low); args })
     else None
   | _ -> None
@@ -464,6 +463,15 @@ let view (term : Term.t) =
          | "repeat" -> decode_repeat fields args term.sort
          | _ -> decode_simple keyword fields args term.sort)
       | _ -> None)
-  | Bool_const _ | Int_const _ | Arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ ->
-    None
+  | Bool_const _
+  | Int_const _
+  | Real_const _
+  | Arith _
+  | Real_arith _
+  | Le _
+  | Eq _
+  | Not _
+  | And _
+  | Or _
+  | Ite _ -> None
 ;;

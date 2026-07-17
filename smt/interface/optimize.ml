@@ -277,6 +277,8 @@ module Omt = struct
         (fun affine (child, _) -> affine && affine_int_term child)
         true
         linear.coeffs
+    | Term.Real_const _
+    | Term.Real_arith _
     | Term.Ite _
     | Term.Bool_const _
     | Term.Le _
