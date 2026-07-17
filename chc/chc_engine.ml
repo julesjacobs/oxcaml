@@ -142,7 +142,10 @@ type ts =
   ; init : expr (* over x0..x{n-1} *)
   ; trans : expr (* over x0..x{n-1} (pre) and y0..y{n-1} (post) *)
   ; bad : expr (* over x0..x{n-1} *)
-  ; trivially_unsafe : expr option (* a fact-free "constr => false" body, if any *)
+  ; trivially_unsafe : expr list
+  (* every fact-free "constr => false" body (an ACCUMULATOR, not a single slot: the system
+     is UNSAFE if ANY of these constraints is satisfiable — overwriting would mask an
+     earlier genuine query) *)
   }
 
 let xname i = Printf.sprintf "x%d" i
@@ -186,7 +189,7 @@ let extract_ts (sys : system) : ts =
     let inits = ref [] in
     let transs = ref [] in
     let bads = ref [] in
-    let triv = ref None in
+    let triv = ref [] in
     List.iter
       (fun (c : clause) ->
         (match c.body_apps with
@@ -208,9 +211,10 @@ let extract_ts (sys : system) : ts =
           let bargs = List.map (rename f) bargs in
           bads := And (constr @ eq_bindings ~name:xname bargs) :: !bads
         | [], H_false ->
-          (* A fact-free "constr => false": the system is unsatisfiable iff [constr] is
-             satisfiable (a derivation of false using no predicate). *)
-          triv := Some (And constr)
+          (* A fact-free "constr => false": the system is unsafe iff [constr] is
+             satisfiable (a derivation of false using no predicate). ACCUMULATE — multiple
+             such queries must all be kept (overwriting would mask an earlier unsafe one). *)
+          triv := And constr :: !triv
         | _ -> raise (Not_ts "unexpected clause shape"))
       sys.clauses;
     let disj = function
@@ -223,7 +227,7 @@ let extract_ts (sys : system) : ts =
     ; init = disj !inits
     ; trans = disj !transs
     ; bad = disj !bads
-    ; trivially_unsafe = !triv
+    ; trivially_unsafe = List.rev !triv
     }
 ;;
 
@@ -1195,10 +1199,10 @@ let solve
     }
   | ts ->
     (try
-       (* Depth-0 trivial unsafety: a fact-free "constr => false" with satisfiable constr. *)
-       (match ts.trivially_unsafe with
-        | Some c when check_exprs ts [ c ] = R_sat -> raise (Give_up "__unsafe_trivial")
-        | _ -> ());
+       (* Depth-0 trivial unsafety: UNSAFE if ANY fact-free "constr => false" body has a
+          satisfiable constraint (accumulator — every such query is checked). *)
+       if List.exists (fun c -> check_exprs ts [ c ] = R_sat) ts.trivially_unsafe
+       then raise (Give_up "__unsafe_trivial");
        (* Depth-0: init /\ bad. *)
        if check_exprs ts [ ts.init; ts.bad ] = R_sat then raise (Give_up "__unsafe_0");
        (* Modular-residue invariant (independently verified): a cheap early SAFE for the

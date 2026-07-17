@@ -188,9 +188,14 @@ let clause_of_impl ~vars ~antecedent ~consequent : clause =
   | other -> { vars; body_apps; constr = Not other :: constr; head = H_false }
 ;;
 
-(* Parse one asserted formula into a clause. Handles [forall]-quantified implications,
-   bare facts, and (as a fallback) a top-level [or] read as a CNF Horn clause. *)
-let clause_of_assert (sx : Sexp.t) : clause =
+(* Parse one asserted formula into a clause, or [None] if it is a TAUTOLOGY (a vacuously
+   true assertion — a bare [true], an implication with a [true] consequent, or an [or]
+   with a [true] disjunct). A tautology constrains nothing and must produce NO clause:
+   encoding it as a query-shaped [[],H_false] clause would (via the trivially-unsafe slot)
+   either overwrite a genuine fact-free query or, if that slot ever admitted a satisfiable
+   constraint, fabricate an UNSAFE. Handles [forall]-quantified implications, bare facts,
+   and (as a fallback) a top-level [or] read as a CNF Horn clause. *)
+let clause_of_assert (sx : Sexp.t) : clause option =
   let rec strip_forall vars sx =
     match sx with
     | Sexp.List [ head; Sexp.List binders; body ] when atom_text head = Some "forall" ->
@@ -201,7 +206,9 @@ let clause_of_assert (sx : Sexp.t) : clause =
   let vars, body = strip_forall [] sx in
   let e = parse_expr Env.empty body in
   match e with
-  | Implies (a, c) -> clause_of_impl ~vars ~antecedent:a ~consequent:c
+  | Bool_lit true -> None (* (assert true): tautology, no clause *)
+  | Implies (_, Bool_lit true) -> None (* antecedent ⇒ ⊤: tautology *)
+  | Implies (a, c) -> Some (clause_of_impl ~vars ~antecedent:a ~consequent:c)
   | Or disjuncts ->
     (* CNF Horn clause [l1 ∨ ... ∨ ln] ≡ [(⋀ ¬l_body) ⇒ head], where the ONE positive
        pred-app literal is the head and every other literal moves to the antecedent
@@ -211,9 +218,11 @@ let clause_of_assert (sx : Sexp.t) : clause =
        - [¬c] (negative interpreted) → antecedent constraint [c];
        - [c] (positive interpreted) → antecedent constraint [¬c];
        - [false] disjunct → dropped (⊥ contributes nothing);
-       - [true] disjunct → the whole clause is a tautology (vacuous [false ⇒ false]). (The
+       - [true] disjunct → the whole clause is a TAUTOLOGY → [None] (no clause). (The
          prior implementation misrouted [¬(P a)] into the antecedent and treated a [false]
-         disjunct as the head, dropping the query and yielding a spurious SAFE.) *)
+         disjunct as the head, dropping the query and yielding a spurious SAFE; and it
+         encoded the tautology as a query-shaped clause, overwriting the trivially-unsafe
+         slot.) *)
     let heads = ref [] in
     let body_apps = ref [] in
     let constr = ref [] in
@@ -228,19 +237,20 @@ let clause_of_assert (sx : Sexp.t) : clause =
         | other -> constr := Not other :: !constr)
       disjuncts;
     if !tautology
-    then { vars; body_apps = []; constr = [ Bool_lit false ]; head = H_false }
+    then None
     else (
       let body_apps = List.rev !body_apps
       and constr = List.rev !constr in
       match List.rev !heads with
-      | [] -> { vars; body_apps; constr; head = H_false }
-      | [ h ] -> { vars; body_apps; constr; head = H_pred h }
+      | [] -> Some { vars; body_apps; constr; head = H_false }
+      | [ h ] -> Some { vars; body_apps; constr; head = H_pred h }
       | _ -> unsupported "non-Horn clause (multiple positive literals)")
-  | Pred_app _ -> clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:e
-  | Bool_lit false -> clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:e
+  | Pred_app _ -> Some (clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:e)
+  | Bool_lit false ->
+    Some (clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:e)
   | Not (Pred_app _ as p) ->
-    clause_of_impl ~vars ~antecedent:p ~consequent:(Bool_lit false)
-  | other -> clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:other
+    Some (clause_of_impl ~vars ~antecedent:p ~consequent:(Bool_lit false))
+  | other -> Some (clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:other)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -282,7 +292,10 @@ let parse (src : string) : system =
             | _ -> malformed "malformed declare-fun");
            let arg_sorts = List.map parse_sort argsorts in
            preds := { name = n; arg_sorts } :: !preds
-         | Some "assert", [ body ] -> clauses := clause_of_assert body :: !clauses
+         | Some "assert", [ body ] ->
+           (match clause_of_assert body with
+            | Some c -> clauses := c :: !clauses
+            | None -> () (* tautology: contributes no clause *))
          | Some cmd, _ -> unsupported "unsupported command: %s" cmd
          | None, _ -> malformed "malformed command: %s" (Sexp.to_string sx))
       | _ -> malformed "malformed top-level form: %s" (Sexp.to_string sx))

@@ -358,6 +358,31 @@ let () =
       (assert (forall ((x Int)) (=> (= x 1) (P x))))
       (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (* x x))) (P y))))
       (assert (forall ((x Int)) (=> (and (P x)(= x 0)) false)))|};
+  (* ---- v2 review-fixes-2: trivially-unsafe slot family (D-E, D-F) ---- *)
+  (* D-E (WRONG-SAFE, introduced by the D-B fix): a tautological or-clause ([true]
+     disjunct) was encoded as a query-shaped [[],H_false] clause and OVERWROTE the single
+     trivially-unsafe slot, dropping a co-occurring genuine fact-free query. Fix:
+     tautology clauses produce NO clause, and the slot is an accumulator. The genuine
+     query [x>0 => false] is satisfiable -> UNSAFE. RED before fix: reports Safe
+     (UNSOUND). *)
+  check
+    "v2-D-E-taut-after-query"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (> x 0) false)))
+      (assert (or true (P 0)))|};
+  (* D-F (WRONG-SAFE, pre-existing): MULTIPLE fact-free queries overwrote the single slot,
+     masking an earlier unsafe one. Here the first query [x>0 => false] is satisfiable
+     (UNSAFE) but the second [y>0 /\ y<0 => false] is not; the old overwrite kept only the
+     second -> Safe. Fix: accumulator checks every query. RED before fix: reports Safe. *)
+  check
+    "v2-D-F-two-queries"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (> x 0) false)))
+      (assert (forall ((y Int)) (=> (and (> y 0) (< y 0)) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;

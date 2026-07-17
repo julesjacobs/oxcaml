@@ -129,7 +129,9 @@ type sys =
   ; init : expr array (* init.(p): the initial-state set of predicate p, over [pre p] *)
   ; edges : edge array
   ; bad : (int * expr list) array (* (src predicate, guard over [pre src]) *)
-  ; trivially_unsafe : expr option
+  ; trivially_unsafe : expr list
+  (* every fact-free "constr => false" body; UNSAFE if ANY is satisfiable (accumulator,
+     not a single slot — overwriting would mask an earlier genuine query) *)
   }
 
 exception Not_linear of string
@@ -156,7 +158,7 @@ let build_sys (s : system) : sys =
   let inits = Array.make n [] in
   let edges = ref [] in
   let bads = ref [] in
-  let triv = ref None in
+  let triv = ref [] in
   let ctr = ref 0 in
   let freshen (c : clause) =
     let cid = !ctr in
@@ -197,7 +199,7 @@ let build_sys (s : system) : sys =
         let src = get_pid bp in
         let bargs = List.map (rename f) bargs in
         bads := (src, constr @ eqs ~name:(pre src) bargs) :: !bads
-      | [], H_false -> triv := Some (And constr)
+      | [], H_false -> triv := And constr :: !triv
       | _ -> raise (Not_linear "unexpected clause shape"))
     s.clauses;
   let init =
@@ -214,7 +216,7 @@ let build_sys (s : system) : sys =
   ; init
   ; edges = Array.of_list (List.rev !edges)
   ; bad = Array.of_list (List.rev !bads)
-  ; trivially_unsafe = !triv
+  ; trivially_unsafe = List.rev !triv
   }
 ;;
 
@@ -886,9 +888,9 @@ let solve ?(max_frames = 60) ?(budget = 200_000) ?(max_effort = 1_000_000) (s : 
   | exception Not_linear r -> { verdict = Unknown ("not linear: " ^ r); detail = r }
   | sy ->
     (try
-       (match sy.trivially_unsafe with
-        | Some c when check sy [ c ] = R_sat -> raise (Give_up "__unsafe_trivial")
-        | _ -> ());
+       (* UNSAFE if ANY fact-free "constr => false" body is satisfiable (accumulator). *)
+       if List.exists (fun c -> check sy [ c ] = R_sat) sy.trivially_unsafe
+       then raise (Give_up "__unsafe_trivial");
        (* depth-0: any bad guard satisfiable directly from init of its source *)
        Array.iter
          (fun (src, g) ->
