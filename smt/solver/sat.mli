@@ -164,16 +164,16 @@ type unsat_conclusion =
 
 type trace =
   { on_input : id:int -> clause:lit array -> origin:origin -> unit
-    (** fires for every asserted input clause with a stable [id], {e before} level-0
+  (** fires for every asserted input clause with a stable [id], {e before} level-0
       filtering — including a clause that filters to [] and is therefore not retained
       (E1/E4 [Root_empty] id-resolvability depends on this: the terminal step cites that
       clause's [id]). [origin] splits genuine query inputs from theory Split/lemma
       clauses. *)
   ; on_unit : id:int -> lit:lit -> unit
-    (** fires once per standing level-0 unit; the checker re-derives the unit closure by
+  (** fires once per standing level-0 unit; the checker re-derives the unit closure by
       propagation, so no forcing-clause provenance is carried. *)
   ; on_learned : id:int -> clause:lit array -> antecedents:int list -> btlevel:int -> unit
-    (** fires once per learned clause with a fresh clause [id], the learned [clause]
+  (** fires once per learned clause with a fresh clause [id], the learned [clause]
       (asserting literal at index 0), the [antecedents] resolved to derive it, and the
       [btlevel] the solver then backjumps to. Contract (ADR-0013 §1.4): [antecedents] in
       ordered-RUP order (the reason clauses in reverse-resolution order, conflict last),
@@ -181,12 +181,12 @@ type trace =
       clause. Learned units fire it too. Zero cost when no trace is set — antecedents are
       not even accumulated. *)
   ; on_theory_clause : id:int -> clause:lit array -> role:theory_clause_role -> unit
-    (** fires when a lazy theory reason / conflict clause is materialized, surfacing its id
+  (** fires when a lazy theory reason / conflict clause is materialized, surfacing its id
       ↔ clause so any hint that cites a theory transient (in {!field-on_learned}'s
       antecedents or an {!unsat_conclusion}) resolves to an emitted leaf. The theory-side
       witness (EUF proof tree / LIA multipliers) is attached off-seam by the adapter. *)
   ; on_unsat : unsat_conclusion -> unit
-    (** fires at whichever [Sat] [Unsat] exit fires, carrying the terminal [||]-step data. *)
+  (** fires at whichever [Sat] [Unsat] exit fires, carrying the terminal [||]-step data. *)
   }
 
 (** Install (or, with [None], remove) the trace; see the bit-identical-when-unset note
@@ -233,7 +233,7 @@ type theory_result =
 
 type theory =
   { on_assign : lit -> level:int -> unit
-    (** trail-extension notify: [lit] was just placed on the trail (decision, propagation,
+  (** trail-extension notify: [lit] was just placed on the trail (decision, propagation,
       assumption, or learned unit) at its TRUE decision level [level]. Fires in trail
       order. The adapter forwards its own atoms to [THEORY.assert_lit] and ignores the
       rest.
@@ -247,19 +247,39 @@ type theory =
       a monotone trail [level = decision_level t] exactly, so every existing adapter is
       byte-identical. *)
   ; on_backtrack : level:int -> unit
-    (** backjump notify: the trail has just been unwound to decision [level]. The adapter
+  (** backjump notify: the trail has just been unwound to decision [level]. The adapter
       forwards to [THEORY.pop], discarding theory state asserted above [level]. Fires on
       every real unwind (backjump, restart, split, end of solve). *)
   ; check : final:bool -> theory_result
-    (** [~final:false]: cheap in-search check (ADR-0005 [Propagate] effort), driven to a
+  (** [~final:false]: cheap in-search check (ADR-0005 [Propagate] effort), driven to a
       fixpoint interleaved with Boolean propagation. [~final:true]: a complete check at a
       full Boolean model (ADR-0005 [Final]: B&B integrality, model-based N-O) —
       [T_consistent []] here means the theory accepts the model (the query is SAT). *)
   ; explain : lit -> lit list
-    (** the lazy, precedence-valid reason for a literal this theory propagated via
+  (** the lazy, precedence-valid reason for a literal this theory propagated via
       [T_consistent] (CONTRACT-EX: every returned lit must be currently true and asserted
       STRICTLY before [lit] on the trail). Called only during conflict analysis; a
       violation raises {!Theory_contract_violation} rather than corrupting 1UIP. *)
+  ; on_chrono_rewind : (int -> unit) option
+  (** OPTIONAL incremental-undo hook for the chronological-backtracking rebuild (fabric
+      S4.2, one-TCB-window seam extension). [None] — every pre-S4.2 adapter — leaves the
+      CB scattered-removal path byte-identical to the pre-S4.2 core: rebuild from base via
+      [on_backtrack ~level:0] + [on_assign] replay of EVERY survivor. With [Some rewind]
+      the core instead calls [rewind w], where [w] is this backtrack's EARLIEST-REMOVED
+      pre-compaction trail position, then replays via [on_assign] only the survivors that
+      sat at/above [w] (after compaction they occupy positions [w .. trail_n-1], in order
+      — everything below [w] is untouched).
+
+      Adapter contract: the core fires exactly one [on_assign] per trail placement, in
+      trail order, so when [rewind w] fires the adapter's assertion stream since its last
+      base rebuild corresponds 1:1 to the pre-removal trail prefix; [rewind w] must
+      discard exactly the held assertions with stream position [>= w] — a SUB-FRAME rewind
+      to an absolute watermark, NOT a frame pop (under CB theory frames do not correspond
+      to true levels; a frame-count undo reverses the wrong assertions — the S4.1 OBS-EQ
+      wrong-verdict hazard). Only the CB scattered arm ever invokes it; the monotone arm
+      always uses [on_backtrack ~level]. Surviving theory-propagated literals' reasons
+      remain served from the core's pre-rewind snapshot exactly as on the rebuild path
+      (F1), so the hook does not change explanation provenance. *)
   }
 
 (** Raised when a plugged theory violates a seam soundness contract the core cannot

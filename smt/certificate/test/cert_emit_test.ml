@@ -80,7 +80,7 @@ let make_mock _st config =
     | Some (ants, _) -> ants
     | None -> []
   in
-  { Sat.on_assign; on_backtrack; check; explain }
+  { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None }
 ;;
 
 (* ------------------------------------------------------------------ *)

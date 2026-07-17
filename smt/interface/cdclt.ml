@@ -527,6 +527,7 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
        ; on_backtrack = on_backtrack t
        ; check = check t
        ; explain = explain t
+       ; on_chrono_rewind = None
        });
   (* Effort seam (board #60): the SAT core ticks the shared budget at each conflict /
      decision through this opaque closure, keeping [oxsmt_solver] budget-agnostic. *)

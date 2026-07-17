@@ -147,6 +147,7 @@ let noop_theory : Sat.theory =
   ; on_backtrack = (fun ~level:_ -> ())
   ; check = (fun ~final:_ -> Sat.T_consistent [])
   ; explain = (fun _ -> [])
+  ; on_chrono_rewind = None
   }
 ;;
 

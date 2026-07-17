@@ -366,7 +366,7 @@ let build_conflict_mock num_vars clauses constraints =
     in
     go constraints
   in
-  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []) });
+  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []); on_chrono_rewind = None });
   List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
   s
 ;;
@@ -536,7 +536,7 @@ let build_prop_mock num_vars clauses constraints =
     | Some prem -> prem
     | None -> raise Mock_frame_popped
   in
-  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain });
+  Sat.set_theory s (Some { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None });
   List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
   s
 ;;
@@ -650,7 +650,7 @@ let test_true_level_delivery n =
     in
     Sat.set_theory
       s
-      (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []) });
+      (Some { Sat.on_assign; on_backtrack; check; explain = (fun _ -> []); on_chrono_rewind = None });
     List.iter (fun cl -> Sat.add_clause s (List.map (lit_of_dimacs s) cl)) clauses;
     ignore (Sat.solve s : Sat.result)
   done;

@@ -126,6 +126,9 @@ type theory =
   ; on_backtrack : level:int -> unit
   ; check : final:bool -> theory_result
   ; explain : lit -> lit list
+  ; on_chrono_rewind : (int -> unit) option
+  (* S4.2 sub-frame incremental undo for the CB rebuild; [None] = pre-S4.2
+     rebuild-from-base, byte-identical. See sat.mli for the full contract. *)
   }
 
 (* Raised when a plugged theory violates a seam soundness contract the core cannot
@@ -1282,11 +1285,17 @@ let cancel_until t level =
       (* Scattered removal + in-place compaction of survivors (level <= [level]). *)
       let n = t.trail_n in
       let w = ref 0 in
+      (* S4.2: earliest-removed pre-compaction trail index — the watermark handed to
+         [on_chrono_rewind] below. Stays [n] only if nothing is removed (unreachable under
+         the [decision_level t > level] guard: the level+1 decision literal is always
+         removed), but the code is total either way. *)
+      let first_removed = ref n in
       for i = 0 to n - 1 do
         let l = t.trail.(i) in
         let v = var_of_lit l in
         if t.level.(v) > level
         then (
+          if !first_removed = n then first_removed := i;
           (* Phase from the trail literal [l], not an [assigns] read (see the monotone
              arm). *)
           Dynarray.set t.polarity v (not (sign_of_lit l));
@@ -1373,18 +1382,34 @@ let cancel_until t level =
       match t.theory with
       | None -> ()
       | Some th ->
-        th.on_backtrack ~level:0;
-        (* Replay each survivor with its TRUE level (from [t.level], preserved by the
-           compaction above — the compaction never rewrites [t.level]). On a monotone
-           trail this equals the level in force at replay time; under CB it is the
-           survivor's own backjump level, so a scope-aware adapter reconstructs its
-           true-level scoping even though this loop still re-drives from base (the
-           earliest-removed incremental undo that would exploit the true level is the
-           fabric S4 follow-up, not this stage). *)
-        for i = 0 to t.trail_n - 1 do
-          let l = t.trail.(i) in
-          th.on_assign l ~level:t.level.(var_of_lit l)
-        done)
+        (match th.on_chrono_rewind with
+         | Some rewind ->
+           (* S4.2 INCREMENTAL ARM: rewind the theory to the earliest-removed watermark (a
+              sub-frame absolute-position rewind — never a frame pop; see the sat.mli
+              contract) and replay ONLY the survivors at/above it. The compaction placed
+              exactly those survivors at positions [!first_removed .. t.trail_n-1], in
+              order, and never rewrites [t.level], so each is re-asserted with its TRUE
+              level. Survivors below the watermark keep their in-adapter state and reason
+              caches untouched; the F1 snapshot above remains valid for all survivors on
+              both arms. *)
+           rewind !first_removed;
+           for i = !first_removed to t.trail_n - 1 do
+             let l = t.trail.(i) in
+             th.on_assign l ~level:t.level.(var_of_lit l)
+           done
+         | None ->
+           th.on_backtrack ~level:0;
+           (* Replay each survivor with its TRUE level (from [t.level], preserved by the
+              compaction above — the compaction never rewrites [t.level]). On a monotone
+              trail this equals the level in force at replay time; under CB it is the
+              survivor's own backjump level, so a scope-aware adapter reconstructs its
+              true-level scoping even though this loop still re-drives from base (the
+              earliest-removed incremental undo that exploits the true level is the
+              [Some on_chrono_rewind] arm above — fabric S4.2). *)
+           for i = 0 to t.trail_n - 1 do
+             let l = t.trail.(i) in
+             th.on_assign l ~level:t.level.(var_of_lit l)
+           done))
 ;;
 
 (* ------------------------------------------------------------------ *)

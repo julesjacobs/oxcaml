@@ -80,7 +80,7 @@ let make_mock ~a ~b ~c ~h =
     else Sat.T_consistent []
   in
   let explain _ = [] in
-  ( { Sat.on_assign; on_backtrack; check; explain }
+  ( { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None }
   , bt_levels
   , head_level
   , fun () -> !emitted )

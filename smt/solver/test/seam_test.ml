@@ -184,7 +184,7 @@ let make_mock st config =
        | None -> [])
   in
   ignore is_false;
-  { theory = { Sat.on_assign; on_backtrack; check; explain }
+  { theory = { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None }
   ; explain_calls
   ; backtracks
   ; splits_emitted
