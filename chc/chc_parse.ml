@@ -19,6 +19,20 @@ exception Unsupported of string
 let malformed fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupported fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
+(* The mod/div elimination ({!Chc_ast.elim_moddiv_clause}) MINTS fresh quotient/remainder
+   variables with this prefix. It is therefore RESERVED: a user identifier that shares it
+   could be captured by a minted name (a silent transition-system corruption → wrong
+   verdict). Following the project's reserved-vocabulary / fresh-witness precedent, any
+   user variable using the prefix is rejected loudly at parse time rather than
+   alpha-renamed. *)
+let reserved_var_prefix = "chcmd_"
+
+let check_var_name (name : string) : unit =
+  let p = reserved_var_prefix in
+  if String.length name >= String.length p && String.sub name 0 (String.length p) = p
+  then malformed "reserved variable prefix %S is not allowed in input: %s" p name
+;;
+
 (* Strip SMT-LIB leading-zero-lenient numerals down to the strict {!Bigint.of_string}
    grammar (no leading zeros; "0" for zero). *)
 let bigint_of_numeral (s : string) : Bigint.t =
@@ -49,7 +63,9 @@ let parse_binder (sx : Sexp.t) : string * Sort.t =
   match sx with
   | Sexp.List [ name; sort ] ->
     (match atom_text name with
-     | Some n -> n, parse_sort sort
+     | Some n ->
+       check_var_name n;
+       n, parse_sort sort
      | None -> malformed "malformed binder name: %s" (Sexp.to_string name))
   | _ -> malformed "malformed binder: %s" (Sexp.to_string sx)
 ;;
@@ -76,7 +92,9 @@ and parse_atom lenv tok =
   | Lexer.Symbol { text; _ } ->
     (match Env.find_opt text lenv with
      | Some e -> e
-     | None -> Var text)
+     | None ->
+       check_var_name text;
+       Var text)
   | Lexer.Decimal _ -> unsupported "decimal literal (real arithmetic)"
   | _ -> malformed "unexpected atom: %s" (Sexp.to_string (Sexp.Atom tok))
 
@@ -185,28 +203,39 @@ let clause_of_assert (sx : Sexp.t) : clause =
   match e with
   | Implies (a, c) -> clause_of_impl ~vars ~antecedent:a ~consequent:c
   | Or disjuncts ->
-    (* CNF form: negative pred-app literals + negated interpreted literals form the body;
-       a single positive literal is the head. *)
-    let heads, body_lits =
-      List.partition_map
-        (function
-          | Not (Pred_app _ as p) -> Right p
-          | Not other -> Right (Not other) (* becomes a positive antecedent constraint *)
-          | positive -> Left positive)
-        disjuncts
-    in
-    let antecedent =
-      And
-        (List.map
-           (function
-             | Not x -> x
-             | x -> Not x)
-           body_lits)
-    in
-    (match heads with
-     | [] -> clause_of_impl ~vars ~antecedent ~consequent:(Bool_lit false)
-     | [ h ] -> clause_of_impl ~vars ~antecedent ~consequent:h
-     | _ -> unsupported "non-Horn clause (multiple positive literals)")
+    (* CNF Horn clause [l1 ∨ ... ∨ ln] ≡ [(⋀ ¬l_body) ⇒ head], where the ONE positive
+       pred-app literal is the head and every other literal moves to the antecedent
+       negated:
+       - [¬(P a)] (negative pred-app) → a BODY predicate application [P a];
+       - [P a] (positive pred-app) → the head (at most one; >1 is non-Horn);
+       - [¬c] (negative interpreted) → antecedent constraint [c];
+       - [c] (positive interpreted) → antecedent constraint [¬c];
+       - [false] disjunct → dropped (⊥ contributes nothing);
+       - [true] disjunct → the whole clause is a tautology (vacuous [false ⇒ false]). (The
+         prior implementation misrouted [¬(P a)] into the antecedent and treated a [false]
+         disjunct as the head, dropping the query and yielding a spurious SAFE.) *)
+    let heads = ref [] in
+    let body_apps = ref [] in
+    let constr = ref [] in
+    let tautology = ref false in
+    List.iter
+      (function
+        | Pred_app (name, args) -> heads := { pred = name; args } :: !heads
+        | Not (Pred_app (name, args)) -> body_apps := { pred = name; args } :: !body_apps
+        | Bool_lit false -> ()
+        | Bool_lit true -> tautology := true
+        | Not other -> constr := other :: !constr
+        | other -> constr := Not other :: !constr)
+      disjuncts;
+    if !tautology
+    then { vars; body_apps = []; constr = [ Bool_lit false ]; head = H_false }
+    else (
+      let body_apps = List.rev !body_apps
+      and constr = List.rev !constr in
+      match List.rev !heads with
+      | [] -> { vars; body_apps; constr; head = H_false }
+      | [ h ] -> { vars; body_apps; constr; head = H_pred h }
+      | _ -> unsupported "non-Horn clause (multiple positive literals)")
   | Pred_app _ -> clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:e
   | Bool_lit false -> clause_of_impl ~vars ~antecedent:(Bool_lit true) ~consequent:e
   | Not (Pred_app _ as p) ->
@@ -258,6 +287,25 @@ let parse (src : string) : system =
          | None, _ -> malformed "malformed command: %s" (Sexp.to_string sx))
       | _ -> malformed "malformed top-level form: %s" (Sexp.to_string sx))
     sexps;
+  (* Reject a clause that APPLIES an undeclared predicate. The transition-system
+     extraction is name-agnostic (it keys on clause shape, not the applied predicate's
+     name), so an undeclared predicate would silently be conflated with a declared one and
+     yield a wrong verdict instead of the error z3 raises. Fail loud here (before any
+     solving). *)
+  let declared =
+    List.fold_left (fun acc (p : pred) -> Env.add p.name () acc) Env.empty !preds
+  in
+  let check_app (a : app) =
+    if not (Env.mem a.pred declared)
+    then malformed "application of undeclared predicate: %s" a.pred
+  in
+  List.iter
+    (fun (c : clause) ->
+      List.iter check_app c.body_apps;
+      match c.head with
+      | H_pred a -> check_app a
+      | H_false -> ())
+    !clauses;
   (* Eliminate mod/div into fresh quotient/remainder variables + linear defining
      constraints, so the LIA oracle never sees a reserved div/mod symbol (whose SAT model
      self-check would degrade a satisfiable query to unknown). *)

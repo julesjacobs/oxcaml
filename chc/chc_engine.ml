@@ -935,16 +935,27 @@ let bmc_at (ts : ts) (k : int) : smt * Session.t =
     let venv name = decl name in
     Session.assert_term sess (Chc_ast.build ctx venv e')
   in
-  assert_at 0 ts.init;
-  for c = 0 to k - 1 do
-    assert_at c ts.trans
-  done;
-  assert_at k ts.bad;
+  (* Term construction runs OUTSIDE the Session firewall; degrade any ill-sorted /
+     unsupported / overflow build on this unrolling to [R_unknown] rather than crashing
+     (mirrors {!solve_exprs}) — e.g. a nonlinear single-predicate transition reaches BMC
+     and would otherwise raise out of the process. *)
   let r =
-    match Session.check_sat sess with
-    | Session.Sat -> R_sat
-    | Session.Unsat -> R_unsat
-    | Session.Unknown -> R_unknown
+    match
+      assert_at 0 ts.init;
+      for c = 0 to k - 1 do
+        assert_at c ts.trans
+      done;
+      assert_at k ts.bad
+    with
+    | () ->
+      (match Session.check_sat sess with
+       | Session.Sat -> R_sat
+       | Session.Unsat -> R_unsat
+       | Session.Unknown -> R_unknown)
+    | exception Oxsmt_core.Term.Sort_error _ -> R_unknown
+    | exception Oxsmt_core.Term.Unsupported _ -> R_unknown
+    | exception Oxsmt_core.Term.Overflow -> R_unknown
+    | exception Chc_ast.Build_error _ -> R_unknown
   in
   r, sess
 ;;

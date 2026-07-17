@@ -302,6 +302,62 @@ let () =
       (assert (forall ((x Int)(y Int)) (=> (and (A x)(= y (+ x 1))) (B y))))
       (assert (forall ((x Int)(y Int)) (=> (and (B x)(= y (+ x 1))) (C y))))
       (assert (forall ((x Int)) (=> (and (C x)(= x 2)) false)))|};
+  (* ---- v2 review front-end findings (discrimination tests) ---- *)
+  (* D-B (WRONG-SAFE): a CNF (or-form) Horn clause with a NEGATIVE predicate literal. The
+     clause [(or (not (P 0)) false)] is [P(0) => false]; with the fact [P(0)] the system
+     is UNSAFE. The pre-fix parser misrouted the negative literal and treated the [false]
+     disjunct as the head, dropping the query -> spurious SAFE. RED before fix: reports
+     Safe (UNSOUND). *)
+  check
+    "v2-D-B-cnf-neg-literal"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (P 0))
+      (assert (or (not (P 0)) false))|};
+  (* D-B control: the =>-form of the same clause must agree (UNSAFE). *)
+  check
+    "v2-D-B-imp-control"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (P 0))
+      (assert (=> (P 0) false))|};
+  (* D-C (WRONG-SAFE via capture): a user variable using the reserved [chcmd_] prefix that
+     the mod/div elimination mints into. Must be REJECTED at parse time (-> unknown),
+     never captured. RED before fix: the minted quotient/remainder collides with the user
+     var and corrupts the transition system -> a definite (wrong) verdict. *)
+  check
+    "v2-D-C-reserved-prefix"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((chcmd_q0 Int)) (=> (= chcmd_q0 0) (P chcmd_q0))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (+ x 2))) (P y))))
+      (assert (forall ((x Int)) (=> (and (P x)(= (mod x 2) 1)) false)))|};
+  (* D-A (wrong verdict): a clause applying an UNDECLARED predicate [Q]. Extraction is
+     name-agnostic and would conflate [Q] with the declared [P]; z3 errors. Must fail loud
+     (-> unknown). RED before fix: [Q] silently treated as [P] -> a definite (wrong)
+     verdict. *)
+  check
+    "v2-D-A-undeclared-pred"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (Q x) false)))|};
+  (* D-D (crash): a nonlinear single-predicate transition ([y = x*x]) reaches BMC, whose
+     term construction lacked the firewall [solve_exprs] has. Must degrade to a sound
+     [unknown]. RED before fix: [Build_error] escapes BMC and crashes the process (exit
+     2), taking the whole self-test down. *)
+  check
+    "v2-D-D-nonlinear-bmc"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 1) (P x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (* x x))) (P y))))
+      (assert (forall ((x Int)) (=> (and (P x)(= x 0)) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;
