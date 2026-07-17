@@ -336,6 +336,33 @@ let bool_node ~loc value =
          },
          [] ))
 
+(* Negation of a boolean [subject], used for the else-branch fact.  When [not]
+   resolves to the [%boolnot] primitive (the usual case) we emit a real
+   application of it, so the fact renders as [not c] and the Lean backend
+   interprets it as boolean negation.  If [not] is shadowed or unresolvable we
+   fall back to the semantically identical [if c then false else true], so the
+   branch fact is never lost. *)
+let negate_condition ~env ~loc condition_subject =
+  let fallback () =
+    Refinement.create ~loc ~type_:Predef.type_bool
+      (Rexp_ifthenelse
+         ( condition_subject,
+           bool_node ~loc false,
+           Some (bool_node ~loc true) ))
+  in
+  match Env.find_value_by_name (Longident.Lident "not") env with
+  | exception Not_found -> fallback ()
+  | path, description ->
+    match description.val_kind with
+    | Val_prim primitive when String.equal primitive.prim_name "%boolnot" ->
+      let head =
+        Refinement.create ~loc ~type_:description.val_type
+          (Rexp_ident (Rfree (Rapp path)))
+      in
+      Refinement.create ~loc ~type_:Predef.type_bool
+        (Rexp_apply (head, [ Nolabel, condition_subject ]))
+    | _ -> fallback ()
+
 let unsupported expression what =
   raise (Unsupported_subject (expression.exp_loc, what))
 
@@ -952,11 +979,8 @@ let rec walk_expression state expression =
       Option.iter
         (fun condition_subject ->
           let negated =
-            Refinement.create ~loc:condition.exp_loc ~type_:Predef.type_bool
-              (Rexp_ifthenelse
-                 ( condition_subject,
-                   bool_node ~loc:condition.exp_loc false,
-                   Some (bool_node ~loc:condition.exp_loc true) ))
+            negate_condition ~env:condition.exp_env
+              ~loc:condition.exp_loc condition_subject
           in
           let origin = fact_origin ~kind:"branch" condition.exp_loc in
           state.facts <-

@@ -3,7 +3,7 @@ VC annotation at branch_span.ml:16:37-38
 |- n >= 0
 
 VC annotation at branch_span.ml:16:44-47
-  if n > 0 then false else true
+  not (n > 0)
 |- 100 >= 0
 
 Error: VCs dumped, not discharged.
