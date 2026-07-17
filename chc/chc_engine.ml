@@ -27,6 +27,9 @@ module Context = Oxsmt_core.Context
 module Sort = Oxsmt_core.Sort
 module Bigint = Oxsmt_core.Bigint
 module Term = Oxsmt_core.Term
+module Iarr = Oxsmt_core.Iarr
+module Symbol = Oxsmt_core.Symbol
+module Rational = Oxsmt_lia.Rational
 open Chc_ast
 
 type verdict =
@@ -112,17 +115,22 @@ type rel =
   | Rle
   | Rge
 
-(* A cube literal. [jdx = None] is a single-variable literal [x_idx rel v]; [jdx = Some j]
-   is a DIFFERENCE (octagon-style) literal [(x_idx - x_j) rel v], the template that lets
-   generalization express a RELATIONAL invariant (e.g. [x - y = 0], i.e. [x = y]) — the
-   class one-sided single-variable interval widening cannot reach, and the proxy for true
-   Farkas interpolants (the public Session API exposes no theory unsat-core / LP dual, so
-   real interpolant extraction needs a main-solver API addition; see logs report). *)
+(* A cube literal. [lin = []] is the template form: [jdx = None] is a single-variable
+   literal [x_idx rel v]; [jdx = Some j] is a DIFFERENCE (octagon-style) literal
+   [(x_idx - x_j) rel v], the template that lets generalization express a difference-bound
+   RELATIONAL invariant (e.g. [x - y = 0], i.e. [x = y]).
+
+   [lin = (k_0,c_0);...] (nonempty) is a GENERAL-LINEAR literal [Σ c_i · x_{k_i} rel v]
+   (idx/jdx ignored) — the shape that carries a true {b Farkas interpolant} extracted from
+   the [#106] [Session.last_farkas] certificate. This closes the invariant class neither
+   interval nor difference-bound generalization can express (e.g. [x + y = 10], a two-var
+   equality that is not a difference), the last remaining generalization-strength wall. *)
 type lit =
   { idx : int
   ; jdx : int option
   ; rel : rel
   ; v : value
+  ; lin : (int * Bigint.t) list
   }
 
 (* A cube is a conjunction of literals over the state variables. *)
@@ -314,7 +322,7 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
     for i = ts.arity - 1 downto 0 do
       match Hashtbl.find_opt tbl (xname i) with
       | Some v ->
-        acc := { idx = i; jdx = None; rel = Req; v } :: !acc;
+        acc := { idx = i; jdx = None; rel = Req; v; lin = [] } :: !acc;
         (match v with
          | VInt n -> ints := (i, n) :: !ints
          | VBool _ -> ())
@@ -331,11 +339,258 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
             if i < j
             then
               diffs
-              := { idx = i; jdx = Some j; rel = Req; v = VInt (Bigint.sub vi vj) }
+              := { idx = i
+                 ; jdx = Some j
+                 ; rel = Req
+                 ; v = VInt (Bigint.sub vi vj)
+                 ; lin = []
+                 }
                  :: !diffs)
           !ints)
       !ints;
     !acc @ !diffs
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Farkas interpolation (task #88), via the #106 Session.last_farkas API. *)
+(* ------------------------------------------------------------------ *)
+
+(* Per-solve interpolation statistics (reset in {!solve}): [attempts] predecessor-unsat
+   block points where an interpolant was tried; [farkas] attempts where
+   {!Session.last_farkas} returned a certificate; [verified] candidate interpolants that
+   passed BOTH independent re-checks (A |= I and I /\ B unsat) on fresh Sessions; [used]
+   verified interpolants that were also admissible and admitted as a lemma. *)
+let interp_attempts = ref 0
+let interp_farkas = ref 0
+let interp_verified = ref 0
+let interp_used = ref 0
+
+let reset_interp_stats () =
+  interp_attempts := 0;
+  interp_farkas := 0;
+  interp_verified := 0;
+  interp_used := 0
+;;
+
+let interp_stats () = !interp_attempts, !interp_farkas, !interp_verified, !interp_used
+
+(* Farkas-interpolant generalization is ON by default; [OXSMT_CHC_INTERP=0] disables it
+   (falls back to template generalization only) — an A/B lever for measuring its impact. *)
+let interp_on =
+  match Sys.getenv_opt "OXSMT_CHC_INTERP" with
+  | Some ("0" | "false" | "no" | "off") -> false
+  | _ -> true
+;;
+
+let rec igcd a b = if b = 0 then abs a else igcd b (a mod b)
+let ilcm a b = if a = 0 || b = 0 then 0 else abs (a / igcd a b * b)
+
+(* Linear form [(var, coeff) list, const] of an [Int]-sorted [Le]-atom argument
+   ([arg <= 0]). Mirrors the #106 consumer proof (session_cores_test.ml). *)
+let linear_of (arg : Term.t) : (Term.t * Bigint.t) list * Bigint.t =
+  match arg.Term.node with
+  | Term.Arith { coeffs; const } -> Iarr.to_list coeffs, const
+  | Term.Int_const c -> [], c
+  | _ -> [ arg, Bigint.one ], Bigint.zero
+;;
+
+let bneg b = Bigint.mul (Bigint.of_int (-1)) b
+
+(* Linear form [e] of the ASSERTED half-plane [e <= 0] for a returned core premise. #106
+   carries polarity OUT OF BAND (the atom is never a negated term): a positive [Le arg]
+   was asserted [arg <= 0]; a negative one was asserted [not (arg <= 0)] = [arg >= 1],
+   i.e. [-arg + 1 <= 0] (ℤ-complement). Raises {!Give_up} on a non-[Le] premise (an
+   equality premise has no single-half-plane orientation — #106 already returns [None] for
+   those). *)
+let half_plane ((atom, polarity) : Term.t * bool) : (Term.t * Bigint.t) list * Bigint.t =
+  match atom.Term.node with
+  | Term.Le arg ->
+    if polarity
+    then linear_of arg
+    else (
+      let pairs, c = linear_of arg in
+      List.map (fun (v, b) -> v, bneg b) pairs, Bigint.add (bneg c) Bigint.one)
+  | _ -> raise (Give_up "interp: non-Le premise")
+;;
+
+(* Accumulate [Σ coeffᵢ · half-plane(litᵢ)] over the rationals into a (var -> coeff) map +
+   constant — the summed half-plane [I = (Σ map·var + const) <= 0]. *)
+let accumulate (pairs : (Rational.t * (Term.t * bool)) list) =
+  let map = ref Term.Map.empty in
+  let const = ref Rational.zero in
+  List.iter
+    (fun (coeff, lit) ->
+      let vars, c = half_plane lit in
+      List.iter
+        (fun (v, b) ->
+          let contrib = Rational.mul coeff (Rational.of_bigint b) in
+          let prev =
+            match Term.Map.find_opt v !map with
+            | Some r -> r
+            | None -> Rational.zero
+          in
+          map := Term.Map.add v (Rational.add prev contrib) !map)
+        vars;
+      const := Rational.add !const (Rational.mul coeff (Rational.of_bigint c)))
+    pairs;
+  !map, !const
+;;
+
+(* Recover the post-state index [k] of a shared variable named ["y{k}"]; [None] for a
+   pre-state ([x]) or auxiliary variable — those are A-LOCAL, so a valid interpolant over
+   the shared vocabulary must not carry them with a nonzero coefficient. *)
+let post_index_of_var (v : Term.t) : int option =
+  match v.Term.node with
+  | Term.App (sym, args) when Iarr.to_list args = [] ->
+    let nm = Symbol.name sym in
+    if String.length nm >= 2 && nm.[0] = 'y'
+    then (
+      try Some (int_of_string (String.sub nm 1 (String.length nm - 1))) with
+      | _ -> None)
+    else None
+  | _ -> None
+;;
+
+(* Build the blocked cube [¬I] over the UNPRIMED state from the A-side of a Farkas
+   certificate: [I = (Σ_k c_k·x_k + c0) <= 0] is the summed A-part half-plane; its integer
+   complement [Σ_k c_k·x_k >= 1 - c0] is a single general-linear cube literal. Returns
+   [None] (fall back) when the sum mentions any A-local (non-shared) variable, is a pure
+   constant, or the denominators degenerate — i.e. it is not a shared-vocabulary
+   interpolant. Independent re-verification (caller) is the actual soundness gate. *)
+let interp_cube_of_a_part (a_part : (Rational.t * (Term.t * bool)) list) : cube option =
+  match
+    let map, cst = accumulate a_part in
+    let entries =
+      Term.Map.bindings map |> List.filter (fun (_, r) -> not (Rational.is_zero r))
+    in
+    let ks =
+      List.map
+        (fun (v, r) ->
+          match post_index_of_var v with
+          | Some k -> k, r
+          | None -> raise Exit)
+        entries
+    in
+    if ks = [] then raise Exit;
+    let d =
+      List.fold_left (fun acc (_, r) -> ilcm acc (Rational.den r)) (Rational.den cst) ks
+    in
+    if d = 0 then raise Exit;
+    let scale r =
+      Bigint.mul (Rational.num_bigint r) (Bigint.of_int (d / Rational.den r))
+    in
+    let lin = List.map (fun (k, r) -> k, scale r) ks in
+    let cst_b = scale cst in
+    Some
+      [ { idx = 0; jdx = None; rel = Rge; v = VInt (Bigint.sub Bigint.one cst_b); lin } ]
+  with
+  | result -> result
+  | exception Exit -> None
+  | exception _ -> None
+;;
+
+(* Is [e] an Int-sorted expression? Arithmetic shapes are Int; a variable's sort is read
+   from the registered [sorts] table (defaulting Int, matching {!solve_exprs}); everything
+   else (Bool literals, comparisons, connectives) is Bool. *)
+let expr_is_int (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : bool =
+  match e with
+  | Int_lit _ | Add _ | Sub _ | Mul _ | Neg _ | Mod _ | Div _ -> true
+  | Var x ->
+    (match Hashtbl.find_opt sorts x with
+     | Some s -> Sort.equal s Sort.int
+     | None -> true)
+  | _ -> false
+;;
+
+(* Rewrite every INT-sorted equality [a = b] into [a <= b /\ b <= a] (a semantics-
+   preserving rewrite for Int equalities, and correct under negation: [¬(a=b)] becomes
+   [a>b ∨ b>a]). Transition systems express init/trans as equalities; leaving them as [Eq]
+   atoms makes {!Session.last_farkas} return [None] for the whole certificate (#106 F1: an
+   equality premise has no single-half-plane orientation). Splitting them keeps every
+   premise a [Le] atom so a Farkas interpolant is available. Bool equalities (iff) are
+   left untouched. *)
+let rec split_int_eqs (sorts : (string, Sort.t) Hashtbl.t) (e : expr) : expr =
+  let r = split_int_eqs sorts in
+  match e with
+  | Eq (a, b) when expr_is_int sorts a || expr_is_int sorts b ->
+    And [ Le (r a, r b); Le (r b, r a) ]
+  | Eq (a, b) -> Eq (r a, r b)
+  | Var _ | Int_lit _ | Bool_lit _ -> e
+  | Neg a -> Neg (r a)
+  | Not a -> Not (r a)
+  | Add es -> Add (List.map r es)
+  | Sub es -> Sub (List.map r es)
+  | And es -> And (List.map r es)
+  | Or es -> Or (List.map r es)
+  | Distinct es -> Distinct (List.map r es)
+  | Mul (a, b) -> Mul (r a, r b)
+  | Div (a, b) -> Div (r a, r b)
+  | Mod (a, b) -> Mod (r a, r b)
+  | Le (a, b) -> Le (r a, r b)
+  | Lt (a, b) -> Lt (r a, r b)
+  | Ge (a, b) -> Ge (r a, r b)
+  | Gt (a, b) -> Gt (r a, r b)
+  | Implies (a, b) -> Implies (r a, r b)
+  | Iff (a, b) -> Iff (r a, r b)
+  | Ite (a, b, c) -> Ite (r a, r b, r c)
+  | Pred_app (n, es) -> Pred_app (n, List.map r es)
+;;
+
+(* Run the interpolation query [A /\ B] on a fresh Session, returning its verdict, the
+   Farkas certificate ([Some] iff the query was rational-infeasible), and the set of
+   B-side atom terms (used to partition the certificate into its A- and B-parts).
+   [b_exprs] are asserted as INDIVIDUAL atoms so each is a partitionable premise; the
+   exact interned [Term.t] of each is collected (hash-consing makes [Term.equal] against a
+   returned premise reliable, as in the #106 consumer proof). Every [a_exprs] Int equality
+   is split into two [Le] atoms first (see {!split_int_eqs}) so the certificate exists. *)
+let interp_query (ts : ts) ~(a_exprs : expr list) ~(b_exprs : expr list)
+  : smt * (Rational.t * (Term.t * bool)) list option * Term.Set.t
+  =
+  incr query_count;
+  check_budget ();
+  let sess = Session.create ~max_effort:!effort_cap () in
+  let ctx = Session.context sess in
+  let fvs = free_vars_list (a_exprs @ b_exprs) in
+  let vmap = Hashtbl.create 64 in
+  SS.iter
+    (fun name ->
+      let sort =
+        match Hashtbl.find_opt ts.sorts name with
+        | Some s -> s
+        | None -> Sort.int
+      in
+      let sym = Session.declare_const sess name sort in
+      Hashtbl.replace vmap name (Context.const ctx sym))
+    fvs;
+  let venv name =
+    match Hashtbl.find_opt vmap name with
+    | Some t -> t
+    | None -> failwith ("unbound variable in interp build: " ^ name)
+  in
+  let b_atoms = ref Term.Set.empty in
+  let a_exprs = List.map (split_int_eqs ts.sorts) a_exprs in
+  match
+    List.iter (fun e -> Session.assert_term sess (Chc_ast.build ctx venv e)) a_exprs;
+    List.iter
+      (fun e ->
+        let t = Chc_ast.build ctx venv e in
+        b_atoms := Term.Set.add t !b_atoms;
+        Session.assert_term sess t)
+      b_exprs
+  with
+  | () ->
+    let r =
+      match Session.check_sat sess with
+      | Session.Sat -> R_sat
+      | Session.Unsat -> R_unsat
+      | Session.Unknown -> R_unknown
+    in
+    let fk = if r = R_unsat then Session.last_farkas sess else None in
+    r, fk, !b_atoms
+  | exception Oxsmt_core.Term.Sort_error _ -> R_unknown, None, Term.Set.empty
+  | exception Oxsmt_core.Term.Unsupported _ -> R_unknown, None, Term.Set.empty
+  | exception Oxsmt_core.Term.Overflow -> R_unknown, None, Term.Set.empty
+  | exception Chc_ast.Build_error _ -> R_unknown, None, Term.Set.empty
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -344,11 +599,15 @@ let model_cube (ts : ts) (sess : Session.t) : cube =
 
 let lit_expr ~prime (l : lit) : expr =
   let nm k = if prime then yname k else xname k in
-  (* term the relation constrains: x_i, or (x_i - x_j) for a difference literal *)
+  (* term the relation constrains: a general linear form [Σ c_i·x_{k_i}] for an
+     interpolant literal, else [x_i] / [(x_i - x_j)] for the template literals. *)
   let lhs =
-    match l.jdx with
-    | None -> Var (nm l.idx)
-    | Some j -> Sub [ Var (nm l.idx); Var (nm j) ]
+    match l.lin with
+    | _ :: _ -> Add (List.map (fun (k, c) -> Mul (Int_lit c, Var (nm k))) l.lin)
+    | [] ->
+      (match l.jdx with
+       | None -> Var (nm l.idx)
+       | Some j -> Sub [ Var (nm l.idx); Var (nm j) ])
   in
   match l.v, l.rel with
   | VInt n, Req -> Eq (lhs, Int_lit n)
@@ -365,6 +624,28 @@ let cube_expr ~prime (s : cube) : expr = And (List.map (lit_expr ~prime) s)
    "exclude every state in [s]". Empty cube -> [false] (excludes nothing is meaningless;
    an empty CTI cube means the model pinned no state var, handled by the caller). *)
 let clause_expr (s : cube) : expr = Not (cube_expr ~prime:false s)
+
+(* Express cube literal [l] as a list of individual [Le] INEQUALITY atoms — an equality
+   [e = v] as the pair [e <= v], [v <= e] — so each becomes a partitionable Farkas premise
+   for interpolation (an equality atom carries no single-half-plane orientation, and #106
+   returns [None] on such a premise). A Bool literal has no linear half-plane: [[]] (the
+   caller declines interpolation for cubes with any Bool literal). *)
+let cube_lit_ineqs ~prime (l : lit) : expr list =
+  let nm k = if prime then yname k else xname k in
+  let lhs =
+    match l.lin with
+    | _ :: _ -> Add (List.map (fun (k, c) -> Mul (Int_lit c, Var (nm k))) l.lin)
+    | [] ->
+      (match l.jdx with
+       | None -> Var (nm l.idx)
+       | Some j -> Sub [ Var (nm l.idx); Var (nm j) ])
+  in
+  match l.v, l.rel with
+  | VInt n, Req -> [ Le (lhs, Int_lit n); Le (Int_lit n, lhs) ]
+  | VInt n, Rle -> [ Le (lhs, Int_lit n) ]
+  | VInt n, Rge -> [ Le (Int_lit n, lhs) ]
+  | VBool _, _ -> []
+;;
 
 (* ------------------------------------------------------------------ *)
 (* PDR (IC3) frame loop. *)
@@ -453,6 +734,66 @@ let generalize (p : pdr) (i : int) (s : cube) : cube =
   List.fold_left step s s
 ;;
 
+(* Attempt a Farkas-interpolant lemma to block cube [s] at level [i], a strictly stronger
+   replacement for the template {!generalize} that can express invariants neither interval
+   nor difference-bound generalization reaches (e.g. [x + y = 10]). The blocking CTI query
+   is split A = [R_{i-1} /\ T], B = [s'] (the goal cube over the post-state, asserted as
+   inequalities); the A-side of the returned Farkas certificate sums to a McMillan
+   interpolant [I], and [¬I] is the generalized blocked cube.
+
+   FAIL-CLOSED at every step (→ [None], caller falls back to {!generalize}): no Farkas
+   certificate (equality/fabric/mismatch premise), a trivial (non-cross-cutting) split, an
+   interpolant mentioning an A-local variable, or — the real soundness gate — a failed
+   INDEPENDENT re-verification of [A |= I] and [I /\ B] unsat, each on a fresh Session.
+   The interpolant is CHECKED, never trusted; a bad one can only cost a fallback, never a
+   wrong verdict (the final invariant is re-verified regardless). *)
+let interpolant_lemma (p : pdr) (i : int) (s : cube) : cube option =
+  if List.exists
+       (fun l ->
+         match l.v with
+         | VBool _ -> true
+         | _ -> false)
+       s
+  then None
+  else (
+    incr interp_attempts;
+    let a_exprs = frame_formula p (i - 1) @ [ p.ts.trans ] in
+    (* Interpolate against only the TRUE single-variable state literals of the CTI point.
+       The octagon difference literals ([jdx = Some _]) drive the Farkas conflict onto a
+       difference bound ([x_i - x_j]) that diverges instead of capturing the relational
+       invariant; excluding them lets the certificate combine the genuine variable bounds
+       (e.g. into [x + y <= 10]). *)
+    let b_lits = List.filter (fun l -> l.jdx = None && l.lin = []) s in
+    let b_exprs = List.concat_map (cube_lit_ineqs ~prime:true) b_lits in
+    match interp_query p.ts ~a_exprs ~b_exprs with
+    | R_unsat, Some cert, b_atoms when cert <> [] ->
+      incr interp_farkas;
+      let is_b (atom, _) = Term.Set.mem atom b_atoms in
+      let a_part = List.filter (fun (_, lit) -> not (is_b lit)) cert in
+      let b_part = List.filter (fun (_, lit) -> is_b lit) cert in
+      (* A pure A- or pure B-certificate interpolates to a trivial [⊤]/[⊥] — no lemma. *)
+      if a_part = [] || b_part = []
+      then None
+      else (
+        match interp_cube_of_a_part a_part with
+        | exception Give_up _ -> None (* non-Le premise during the sum *)
+        | None -> None
+        | Some lemma_cube ->
+          (* [cube_expr ~prime:true lemma_cube] = ¬I over the post-state; its negation is
+             I over the post-state. Re-verify both interpolant obligations on fresh
+             Sessions before trusting the lemma. *)
+          let not_i_post = cube_expr ~prime:true lemma_cube in
+          let i_post = Not not_i_post in
+          let a_implies_i = check_exprs p.ts (a_exprs @ [ not_i_post ]) = R_unsat in
+          let i_and_b = check_exprs p.ts (i_post :: b_exprs) = R_unsat in
+          if a_implies_i && i_and_b
+          then (
+            incr interp_verified;
+            Some lemma_cube)
+          else None)
+    | _ -> None)
+;;
+
 (* Recursively block cube [s] at level [i]. Returns [true] if blocked (added a lemma),
    [false] if [s] is reachable from init (a genuine counterexample chain exists). *)
 let rec rec_block (p : pdr) (s : cube) (i : int) : bool =
@@ -470,8 +811,18 @@ let rec rec_block (p : pdr) (s : cube) (i : int) : bool =
       match r with
       | R_unknown -> raise (Give_up "predecessor query unknown")
       | R_unsat ->
-        (* No predecessor: s is unreachable at level i. Generalize and record. *)
-        let g = if s = [] then s else generalize p i s in
+        (* No predecessor: s is unreachable at level i. Prefer a verified Farkas
+           interpolant (relational/general-linear); fall back to template generalization. *)
+        let g =
+          if s = []
+          then s
+          else (
+            match if interp_on then interpolant_lemma p i s else None with
+            | Some interp when admissible p i interp ->
+              incr interp_used;
+              interp
+            | _ -> generalize p i s)
+        in
         add_lemma p i g;
         true
       | R_sat ->
@@ -643,6 +994,171 @@ let verify_invariant (ts : ts) (inv : expr list) : bool =
 ;;
 
 (* ------------------------------------------------------------------ *)
+(* Modular-residue invariant template (task #88 lever, unblocked by the #128 gcd cut). *)
+(* ------------------------------------------------------------------ *)
+
+(* Modular-congruence template is ON by default; [OXSMT_CHC_MODULAR=0] disables it. *)
+let modular_on =
+  match Sys.getenv_opt "OXSMT_CHC_MODULAR" with
+  | Some ("0" | "false" | "no" | "off") -> false
+  | _ -> true
+;;
+
+(* Read the Int-valued constants of a Sat model into a name -> value table. *)
+let model_ints (sess : Session.t) : (string, Bigint.t) Hashtbl.t =
+  let tbl = Hashtbl.create 16 in
+  (match Session.get_model sess with
+   | Some (_, bindings) ->
+     List.iter
+       (function
+         | Session.Const (nm, Session.VInt n) -> Hashtbl.replace tbl nm n
+         | _ -> ())
+       bindings
+   | None -> ());
+  tbl
+;;
+
+(* Normalize [v mod k] into the residue range [0, k) (k > 0). *)
+let residue (v : Bigint.t) (k : Bigint.t) : Bigint.t =
+  let _, m = Bigint.divmod v k in
+  if Bigint.sign m < 0 then Bigint.add m k else m
+;;
+
+(* Attempt a MODULAR-RESIDUE inductive invariant [⋀_i x_i ≡ r_i (mod k_i)] — the class
+   neither interval nor difference-bound generalization can express (e.g. "x is even").
+   The moduli/residues are GUESSED by sampling an init state and one successor (per int
+   var, [k_i] = |successor − init| is the observed step, [r_i = init mod k_i]); the guess
+   is then discharged by the standard three inductiveness obligations, each on a fresh
+   Session, so a wrong guess only ever returns [false] (SOUND — the invariant is checked,
+   never trusted).
+
+   Congruences are encoded MOD-FREE so the reserved [mod]/[div] symbols never reach the
+   oracle: a positive [x ≡ r (mod k)] as [x = k*q + r] (fresh [q]); its negation as
+   [x = k*q + s ∧ 0 ≤ s < k ∧ s ≠ r]. Every obligation reduces to a quantifier-free linear
+   query — a parity/lattice infeasibility (e.g. [2q = 2q'+1]) that the #128 gcd cut
+   (enabled process-wide by the CLI) discharges instead of diverging. Returns [true] iff a
+   nonempty congruence invariant verifies. *)
+(* Does this system involve modular reasoning? The parser's mod/div elimination
+   ({!Chc_ast.elim_moddiv_clause}) introduces fresh quotient/remainder variables prefixed
+   ["chcmd_"] (further renamed with a per-clause prefix by {!extract_ts}), so their
+   presence in the registered sorts is the signature that the ORIGINAL problem used
+   [mod]/[div] — the only place a modular-residue invariant is ever needed. Gating on it
+   keeps the modular template OFF for the vast majority of files, where a spurious
+   congruence guess (e.g. [x ≡ 2 (mod 3)] for a plain interval system) would produce a
+   verification query whose LIA search diverges in propagations (unbounded by the
+   conflict/decision effort cap). *)
+let has_moddiv (ts : ts) : bool =
+  Hashtbl.fold
+    (fun name _ acc ->
+      acc
+      ||
+      let re = "chcmd_" in
+      let n = String.length name
+      and m = String.length re in
+      let rec scan i = i + m <= n && (String.sub name i m = re || scan (i + 1)) in
+      scan 0)
+    ts.sorts
+    false
+;;
+
+let modular_invariant_inner (ts : ts) : bool =
+  if not (has_moddiv ts)
+  then false
+  else (
+    let int_idxs =
+      List.filter
+        (fun i ->
+          match Hashtbl.find_opt ts.sorts (xname i) with
+          | Some s -> Sort.equal s Sort.int
+          | None -> false)
+        (List.init ts.arity (fun i -> i))
+    in
+    if int_idxs = []
+    then false
+    else (
+      match solve_exprs ts [ ts.init ], solve_exprs ts [ ts.init; ts.trans ] with
+      | (R_sat, s0), (R_sat, s1) ->
+        let m0 = model_ints s0
+        and m1 = model_ints s1 in
+        (* (idx, modulus k, residue r) for each int var with an observed step > 1. *)
+        let congs =
+          List.filter_map
+            (fun i ->
+              match Hashtbl.find_opt m0 (xname i), Hashtbl.find_opt m1 (yname i) with
+              | Some v0, Some v1 ->
+                let k = Bigint.abs (Bigint.sub v1 v0) in
+                (* step 0 gives no congruence; step 1 is the trivial [mod 1] tautology. *)
+                if Bigint.is_zero k || Bigint.equal k Bigint.one
+                then None
+                else Some (i, k, residue v0 k)
+              | _ -> None)
+            int_idxs
+        in
+        if congs = []
+        then false
+        else (
+          let pos ~name ~tag (i, k, r) =
+            Eq
+              ( Var (name i)
+              , Add
+                  [ Mul (Int_lit k, Var (Printf.sprintf "modq_%s_%d" tag i)); Int_lit r ]
+              )
+          in
+          let neg ~name ~tag (i, k, r) =
+            let s = Printf.sprintf "modns_%s_%d" tag i in
+            And
+              [ Eq
+                  ( Var (name i)
+                  , Add
+                      [ Mul (Int_lit k, Var (Printf.sprintf "modnq_%s_%d" tag i)); Var s ]
+                  )
+              ; Ge (Var s, Int_lit Bigint.zero)
+              ; Lt (Var s, Int_lit k)
+              ; Not (Eq (Var s, Int_lit r))
+              ]
+          in
+          let pos_all = List.map (pos ~name:xname ~tag:"c") congs in
+          (* (1) init ⊨ inv : init ∧ ¬(x_i ≡ r_i) unsat, per congruence. *)
+          let init_ok =
+            List.for_all
+              (fun c ->
+                check_exprs ts [ ts.init; neg ~name:xname ~tag:"init" c ] = R_unsat)
+              congs
+          in
+          (* (2) inv ∧ T ⊨ inv' : inv ∧ T ∧ ¬(y_i ≡ r_i) unsat, per congruence. *)
+          let consec_ok =
+            init_ok
+            && List.for_all
+                 (fun c ->
+                   check_exprs ts (pos_all @ [ ts.trans; neg ~name:yname ~tag:"cons" c ])
+                   = R_unsat)
+                 congs
+          in
+          (* (3) inv ∧ bad unsat. *)
+          let safe_ok = consec_ok && check_exprs ts (pos_all @ [ ts.bad ]) = R_unsat in
+          init_ok && consec_ok && safe_ok)
+      | _ -> false))
+;;
+
+(* The modular attempt runs on EVERY single-predicate solve before PDR, so it must be
+   cheap: it caps the per-query effort tightly. A genuine congruence obligation discharges
+   in ~1 conflict (the gcd cut fires immediately); a non-modular guess whose obligation
+   the raw LIA search cannot close fast then bails to [Unknown] (→ [false]) instead of
+   burning the wall — the failure mode that regressed non-modular files at the full 1M
+   cap. *)
+let modular_effort_cap = 20_000
+
+let modular_invariant (ts : ts) : bool =
+  let saved = !effort_cap in
+  effort_cap := min saved modular_effort_cap;
+  Fun.protect
+    ~finally:(fun () -> effort_cap := saved)
+    (fun () ->
+      try modular_invariant_inner ts with
+      | _ -> false)
+;;
+
+(* ------------------------------------------------------------------ *)
 (* Top-level solve. *)
 (* ------------------------------------------------------------------ *)
 
@@ -657,6 +1173,7 @@ let solve
   : result
   =
   query_count := 0;
+  reset_interp_stats ();
   budget_ref := budget;
   effort_cap := max_effort;
   let over_budget () = !query_count > budget in
@@ -673,6 +1190,9 @@ let solve
         | _ -> ());
        (* Depth-0: init /\ bad. *)
        if check_exprs ts [ ts.init; ts.bad ] = R_sat then raise (Give_up "__unsafe_0");
+       (* Modular-residue invariant (independently verified): a cheap early SAFE for the
+          "x is even"-style invariants PDR's numeric templates cannot reach. *)
+       if modular_on && modular_invariant ts then raise (Give_up "__safe_modular");
        (* PDR frame loop with interleaved BMC confirmation of any counterexample. *)
        let p = { ts; frontier = 1; lemmas = Array.make 4 [] } in
        let result = ref None in
@@ -725,6 +1245,8 @@ let solve
        | Some (Unknown m) -> { verdict = Unknown m; detail = m }
        | None -> { verdict = Unknown "no result"; detail = "" }
      with
+     | Give_up "__safe_modular" ->
+       { verdict = Safe; detail = "modular-residue inductive invariant, verified" }
      | Give_up "__unsafe_trivial" ->
        { verdict = Unsafe; detail = "trivial (constraint-only) counterexample" }
      | Give_up "__unsafe_0" ->

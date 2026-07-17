@@ -7,4 +7,10 @@
 
 (library
  (name oxsmt_chc)
- (libraries oxsmt_core oxsmt_interface oxsmt_smtlib oxsmt_smtlib_parser oxsmt_lexical))
+ (libraries
+  oxsmt_core
+  oxsmt_lia
+  oxsmt_interface
+  oxsmt_smtlib
+  oxsmt_smtlib_parser
+  oxsmt_lexical))
