@@ -66,5 +66,14 @@ let () =
       | exception Oxsmt_chc.Chc_parse.Malformed m -> "unknown", "malformed: " ^ m
     in
     print_endline smt;
-    if !verbose then prerr_endline ("; " ^ detail)
+    if !verbose
+    then (
+      prerr_endline ("; " ^ detail);
+      let a, f, v, u = Oxsmt_chc.Chc_engine.interp_stats () in
+      Printf.eprintf
+        "; interp-stats attempts=%d farkas=%d verified=%d used=%d\n%!"
+        a
+        f
+        v
+        u)
 ;;
