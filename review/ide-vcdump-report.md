@@ -168,7 +168,10 @@ exposed by schema version 2.
 GENERATION behavior (the way typing expect tests pin inference), independently
 of the solver. It is separate from `-vox-dump-vc-json` (machine JSON, whole-run,
 written to a file at process exit): the text dump is human-readable, streamed in
-source order to stderr, and Lean-independent.
+source order to stderr, and Lean-independent. Annotation, contract-argument,
+inline module-seal, and file-level `.ml`-vs-`.mli` seal VCs are all included;
+the final not-discharged error is deferred until after compilation-unit
+inclusion has generated the file-level obligations.
 
 ### Block format
 
@@ -198,15 +201,17 @@ This is the cleaner design for expect tests: a single flag makes the dump fast
 and hermetic (no Lean process, no network, works with Lean absent). To emit the
 FULL VC set deterministically without a solver, each VC's goal is ASSUMED to
 hold and added to the fact context (mirroring what `prove` does on `Proved`), so
-downstream VCs still see it as a hypothesis and the emitted set matches what
-real verification would walk.
+downstream VCs still see it as a hypothesis. Consequently, a dump can emit more
+VCs than a real aborting verification run: VCs after the first goal that would
+fail are still reached. The emitted set matches what real verification would
+walk only for runs in which every VC would prove.
 
 Because nothing is actually discharged, the mode must never be mistaken for a
 passing verification. It is therefore loud: after all blocks are printed,
 `Vox_verify.finish_dump` writes `Error: VCs dumped, not discharged.` and raises,
-so compilation exits non-zero (2) and writes no `.cmi`/`.cmo`/`.cmt` artifacts —
-exactly like a failed compile. An editor or CI cannot read a dry dump as
-"verified".
+so compilation exits non-zero (2) and writes no `.cmi`/`.cmo`; a partial `.cmt`
+may be left under `-bin-annot`, like any failed compile. An editor or CI cannot
+read a dry dump as "verified".
 
 ### Determinism
 
@@ -263,8 +268,11 @@ including prefix applications such as `(app[Stdlib!.>] _ 5)`. The additive
 primitive table shared with `Vox_lean`, strips module qualifiers, and renders
 operators with precedence- and associativity-correct parentheses. Unsupported
 subterms retain a faithful prefix fallback instead of being guessed into a
-different source term. The positive theorem emitted for the VC remains
-independently available in `generated_lean`.
+different source term. Raw fallbacks have the lowest display precedence, so a
+compound fallback in operator or prefix-argument position is parenthesized and
+cannot visually change the term's structure; standalone bound operator names
+are parenthesized as function names. The positive theorem emitted for the VC
+remains independently available in `generated_lean`.
 
 This vox-local printer is a candidate for the compiler's own type/error
 printing later; those diagnostics currently show forms such as
@@ -354,7 +362,11 @@ On the four-binding demonstration above, `ocamlc -vox-dump-vc -c d.ml`:
   unchanged, and by construction the `-vox-dump-vc` branch of `prove` /
   `verify_seal_obligation` never calls `Vox_lean.discharge`.
 - the regression test `testsuite/tests/refinement/vc_dump.ml` passes (the
-  `refinement` suite is 15 tests with it).
+  `refinement` suite is 16 tests with it and the file-level seal regression
+  `vc_dump_file_seal.ml`).
+- a refined implementation behind a compiled `.mli` emits both its annotation
+  block and a file-level `VC seal-implication` block before the final error.
+- an `.mli`-only dump exits 2 with the same final not-discharged error.
 
 ### Why the default path is byte-identical (by construction)
 
@@ -372,4 +384,6 @@ On the four-binding demonstration above, `ocamlc -vox-dump-vc -c d.ml`:
   before, and the existing save/backend paths are unchanged.
 - `vox_dump_vc` defaults to `false`, so `prove` / `verify_seal_obligation` take
   the unchanged `Vox_lean.discharge` path, and `Vox_verify.finish_dump` (called
-  after typecheck in `compile_common`) is a no-op.
+  after typecheck in `compile_common`) is a no-op. The dump-only artifact-save
+  gates in `Typemod.type_implementation` are therefore inert on the default
+  path.

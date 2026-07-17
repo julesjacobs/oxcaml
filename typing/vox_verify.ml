@@ -177,14 +177,14 @@ let display_function_name name =
     | _ -> "(" ^ name ^ ")"
 
 let display_raw expression =
-  { text = render_expression expression; precedence = 100 }
+  { text = render_expression expression; precedence = 0 }
 
 let render_display ~env expression =
   let parenthesize displayed = "(" ^ displayed.text ^ ")" in
   let rec render expression =
     match expression.rexp_desc with
     | Rexp_ident (Rbound id) ->
-      { text = Ident.name id; precedence = 100 }
+      { text = display_function_name (Ident.name id); precedence = 100 }
     | Rexp_ident (Rfree reference) ->
       { text = display_function_name (display_reference_name reference);
         precedence = 100;
@@ -1174,5 +1174,4 @@ let verify_structure ?(toplevel = false) structure =
       "Refinement verification failed: %s cannot yet be represented in a \
        verification condition"
       what
-  end;
-  finish_dump ()
+  end

@@ -139,6 +139,8 @@ let rec parsed_term (expression : Parsetree.expression) =
   | Pexp_construct ({ txt = Lident name; _ }, None)
     when String.equal name "true" || String.equal name "false" ->
     Name name
+  | Pexp_construct ({ txt = Lident name; _ }, Some argument) ->
+    Apply (name, [parsed_term argument])
   | Pexp_constant { pconst_desc = Pconst_integer (value, None); _ } ->
     Integer value
   | Pexp_apply
@@ -160,6 +162,14 @@ let add left right = binary "+" int_type int_type left right
 let multiply left right = binary "*" int_type int_type left right
 let conjunction left right = binary "&&" bool_type bool_type left right
 let disjunction left right = binary "||" bool_type bool_type left right
+
+let some value =
+  node option_type
+    (Rexp_construct
+       ( { rconstr_type_path = Predef.path_option;
+           rconstr_name = "Some";
+         },
+         [value] ))
 
 let negate argument =
   apply bool_type (primitive (arrow bool_type bool_type) "not") [argument]
@@ -190,20 +200,27 @@ let () =
   let grouped_addition = add (bound x) (add (int 1) (int 2)) in
   check_display "x + (1 + 2)" grouped_addition
     (op "+" (name "x") (op "+" (integer "1") (integer "2")));
+  let pred = free (arrow option_type bool_type) "pred" in
+  let constructed = some (bound x) in
+  let raw_construct = Vox_verify.render_display ~env constructed in
+  let prefix_construct = apply bool_type pred [constructed] in
+  let display = Vox_verify.render_display ~env prefix_construct in
+  assert (String.equal display ("pred (" ^ raw_construct ^ ")"));
+  assert (
+    parsed_term (refinement_predicate "pred (Some x)")
+    = Apply ("pred", [Apply ("Some", [Name "x"])]));
+  let operator =
+    { rb_id = Ident.create_scoped ~scope:5 "++";
+      rb_type = arrow int_type int_type;
+    }
+  in
+  check_display "(++)" (bound operator) (name "++");
   print_endline "source display: precedence round trips"
 
 let tautology = vc (equal int_type (bound x) (bound x))
 let entailment = vc ~facts:[fact positive_x] nonnegative_x
 let not_proved = vc (greater (bound x) (int 0))
 let disproved = vc (equal int_type (int 1) (int 2))
-
-let some value =
-  node option_type
-    (Rexp_construct
-       ( { rconstr_type_path = Predef.path_option;
-           rconstr_name = "Some";
-         },
-         [value] ))
 
 let datatype =
   let value = some (int 7) in

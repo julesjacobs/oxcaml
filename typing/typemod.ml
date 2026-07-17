@@ -4575,10 +4575,11 @@ let type_implementation target modulename initial_env ast =
           (* It is important to run these checks after the inclusion test above,
              so that value declarations which are not used internally but
              exported are not reported as being unused. *)
-          Profile.record_call "save_cmt" (fun () ->
-            let shape = Shape_reduce.local_reduce Env.empty shape in
-            let annots = Cmt_format.Implementation str in
-            save_cmt_and_cms target annots initial_env None (Some shape));
+          if not !Clflags.vox_dump_vc then
+            Profile.record_call "save_cmt" (fun () ->
+              let shape = Shape_reduce.local_reduce Env.empty shape in
+              let annots = Cmt_format.Implementation str in
+              save_cmt_and_cms target annots initial_env None (Some shape));
           { structure = str;
             coercion;
             shape;
@@ -4625,7 +4626,9 @@ let type_implementation target modulename initial_env ast =
              case, the inferred signature contains only the last declaration. *)
           let shape = Shape_reduce.local_reduce Env.empty shape in
           let alerts = Builtin_attributes.alerts_of_str ~mark:true ast in
-          if not !Clflags.dont_write_files then begin
+          if not !Clflags.dont_write_files
+             && not !Clflags.vox_dump_vc
+          then begin
             let name = Compilation_unit.name modulename in
             let kind =
               Cmi_format.Normal { cmi_impl = modulename; cmi_arg_for = arg_type }
