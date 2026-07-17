@@ -1153,6 +1153,40 @@ let read_exists st (tail : Sexp.t list) : exists_src =
   { ex_qvars; ex_build }
 ;;
 
+(* Quantifier duals at a positive assertion position:
+   [not (exists x. p)] is [forall x. not p], so it must become a lemma rather than a
+   Skolem constant (which would be an unsound weakening); [not (forall x. p)] is
+   [exists x. not p], so the ordinary fresh-witness path is equisatisfiable. The bodies
+   are read with [read_term], not [read_lemma_body]: a further nested quantifier remains
+   outside the fragment and is dropped under the existing sentinel discipline. *)
+let read_negated_exists st (tail : Sexp.t list) : lemma_src =
+  let qvars, body_sexp = collect_exists st [] tail in
+  let build ~skolem:_ qvar_images =
+    let scope =
+      List.fold_left
+        (fun acc (i, name) -> Scope.add name qvar_images.(i) acc)
+        Scope.empty
+        (List.mapi (fun i (name, _sort) -> i, name) qvars)
+    in
+    Context.not_ st.ctx (read_term st scope body_sexp), []
+  in
+  { qvars; build }
+;;
+
+let read_negated_forall st (tail : Sexp.t list) : exists_src =
+  let ex_qvars, body_sexp, _triggers = collect_forall st [] tail in
+  let ex_build witnesses =
+    let scope =
+      List.fold_left
+        (fun acc (i, name) -> Scope.add name witnesses.(i) acc)
+        Scope.empty
+        (List.mapi (fun i (name, _sort) -> i, name) ex_qvars)
+    in
+    Context.not_ st.ctx (read_term st scope body_sexp)
+  in
+  { ex_qvars; ex_build }
+;;
+
 (* ---- commands ---- *)
 
 (* Reject user declarations in the reserved fresh-symbol namespace (board #48): a user
@@ -1437,14 +1471,22 @@ let run st sexps =
     | Sexp.List (head :: (_ :: _ :: _ as conjs)) when Sexp.simple head = Some "and" ->
       List.iter take conjs
     | Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ->
-      (* POSITIVE-position existential (assertion root or top-level [(and ...)] conjunct,
-         or under a [(! ...)] — all polarity-positive). Skolemize: record it so the loader
-         binds the binders to fresh ground witnesses and asserts the body. A NEGATED
-         existential never reaches here — [(not (exists ...))] falls to the [_] arm below
-         (read as a term, [Unsupported], dropped), so we never Skolemize under a negation
-         (which would be unsound). Reading the binders may raise [Malformed] (bad binder)
-         — propagate as a hard fail; [Unsupported] (out-of-subset binder sort) is a drop. *)
+      (* Positive existential: record it for fresh-witness Skolemization. Reading the
+         binders may raise [Malformed] (bad binder), which propagates as a hard fail;
+         [Unsupported] (out-of-subset binder sort) is a drop. *)
       (match read_exists st tail with
+       | ex -> existentials := ex :: !existentials
+       | exception Unsupported _ -> incr dropped)
+    | Sexp.List
+        [ head; Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ]
+      when Sexp.simple head = Some "not" ->
+      (match read_negated_exists st tail with
+       | lemma -> lemmas := lemma :: !lemmas
+       | exception Unsupported _ -> incr dropped)
+    | Sexp.List
+        [ head; Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ]
+      when Sexp.simple head = Some "not" ->
+      (match read_negated_forall st tail with
        | ex -> existentials := ex :: !existentials
        | exception Unsupported _ -> incr dropped)
     | _ ->

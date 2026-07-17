@@ -1816,21 +1816,11 @@ let test_f1_qvar_shadow_head () =
     (not (Loader.assert_all s parsed))
 ;;
 
-(* Exists Skolemization (lemmas-climb chunk 2a). A top-level POSITIVE existential is
-   Skolemized to a fresh ground witness and asserted. Three checks:
-   - a positive [exists] that CONTRADICTS the ground core closes it (unsat): here the
-     witness x0 must satisfy both [= x0 5] and [= x0 6];
-   - a positive [exists] alone is SAT (the witness realizes it) — a correct definite
-     [sat], since no live lemma is armed to degrade it;
-   - THE POLARITY SOUNDNESS GUARD: with [(assert (p a))] and
-     [(assert (not (exists x. p x)))] (the latter = [forall x. not p x], which with [p a]
-     is UNSAT), the negated existential must NEVER be Skolemized to a constant — that
-     would assert [not (p c)] for a fresh [c], consistent with [p a] ([c] <> [a]),
-     FLIPPING the true [unsat] to a wrong [sat]. It stays dropped (a sound [unknown] via
-     the sentinel); the check asserts the verdict is NOT the wrong [sat]. Uses an
-     uninterpreted [p] so the EUF+LIA e-graph is active — a live sentinel lemma over a
-     pure-LIA problem has no e-graph view (the drivers wrap that to [unknown], but this
-     white-box test calls [check_sat] directly). *)
+(* Top-level existential handling. Positive [exists] binders become fresh ground
+   witnesses. The two quantifier duals are normalized without weakening:
+   [not (exists x. p)] becomes [forall x. not p], while [not (forall x. p)] becomes
+   [exists x. not p] and uses the same fresh-witness path. The first dual must not use a
+   constant: [not (p c)] for one fresh [c] is weaker than [forall x. not (p x)]. *)
 let test_exists_skolem_unsat () =
   let s = Session.create () in
   let text =
@@ -1857,23 +1847,43 @@ let test_exists_skolem_sat () =
      | _ -> false)
 ;;
 
-let test_exists_negated_not_skolemized () =
+let test_negated_exists_as_forall () =
   let s = Session.create () in
   let text =
-    "(set-logic UFLIA)\n\
-     (declare-fun p (Int) Bool)\n\
-     (declare-fun a () Int)\n\
-     (assert (p a))\n\
-     (assert (not (exists ((x Int)) (p x))))\n\
-     (check-sat)\n"
+    {|(set-logic UFLIA)
+(declare-fun p (Int) Bool)
+(declare-fun a () Int)
+(assert (p a))
+(assert (not (exists ((x Int)) (p x))))
+(check-sat)
+|}
   in
   let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
   ignore (Loader.assert_all s parsed : bool);
   check
-    "exists-skolem POLARITY GUARD: a negated exists is never Skolemized (no wrong sat)"
+    "quantifier dual: not-exists becomes a refuting universal"
     (match Session.check_sat s with
-     | Session.Sat -> false
-     | Session.Unsat | Session.Unknown -> true)
+     | Session.Unsat -> true
+     | Session.Sat | Session.Unknown -> false)
+;;
+
+let test_negated_forall_as_exists () =
+  let s = Session.create () in
+  let text =
+    {|(set-logic UFLIA)
+(declare-fun p (Int) Bool)
+(assert (forall ((x Int)) (p x)))
+(assert (not (forall ((x Int)) (p x))))
+(check-sat)
+|}
+  in
+  let parsed = Parser.parse_into (Session.env s) (Session.context s) text in
+  ignore (Loader.assert_all s parsed : bool);
+  check
+    "quantifier dual: not-forall becomes a refuting existential witness"
+    (match Session.check_sat s with
+     | Session.Unsat -> true
+     | Session.Sat | Session.Unknown -> false)
 ;;
 
 (* Skolem-FUNCTION Skolemization of a positive [exists] nested in a [forall] body
@@ -2699,7 +2709,8 @@ let () =
   test_f1_qvar_shadow_head ();
   test_exists_skolem_unsat ();
   test_exists_skolem_sat ();
-  test_exists_negated_not_skolemized ();
+  test_negated_exists_as_forall ();
+  test_negated_forall_as_exists ();
   test_skolem_fun_under_forall_unsat ();
   test_skolem_fun_negated_not_skolemized ();
   test_skolem_fun_antecedent_exists_not_skolemized ();

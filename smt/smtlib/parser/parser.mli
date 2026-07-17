@@ -22,8 +22,9 @@
 exception Malformed of string
 exception Unsupported of string
 
-(** A universally-quantified assertion, [(assert (forall (binders) body))] (ADR-0012 lemma
-    tier). The parser cannot construct the lemma itself — the bound variables must be
+(** A universally-quantified assertion, either [(assert (forall (binders) body))] or
+    the equivalent [(assert (not (exists (binders) body)))], in the ADR-0012 lemma tier.
+    The parser cannot construct the lemma itself — the bound variables must be
     minted as cap-gated placeholder qvars through {!Oxsmt_interface.Session} (mint-before-
     build, §1.3), which lives in a library this test-only parser must not depend on. So it
     records the binders and a deferred [build]: the driver mints one qvar per binder and
@@ -53,13 +54,12 @@ type lemma_src =
       outside the subset — the driver maps that to a sound [unknown]. *)
   }
 
-(** A top-level POSITIVE existential [(assert (exists (binders) body))] (lemmas-climb
-    chunk 2a). Skolemized by the driver: the binders become fresh ground witnesses
-    (uninterpreted constants) and [ex_build] reads the body over them, asserted as a
-    ground formula — equisatisfiable with the original (sound in both directions). Only
-    produced for an [exists] at a positive assertion position (root or a top-level
-    [(and ...)] conjunct); a negated existential is never Skolemized (it is dropped
-    instead). *)
+(** A top-level existential: either a positive [(assert (exists (binders) body))] or
+    the equivalent [(assert (not (forall (binders) body)))]. Skolemized by the driver:
+    the binders become fresh ground witnesses and [ex_build] reads the body over them,
+    asserted as a ground formula — equisatisfiable with the original (sound in both
+    directions). A negated existential is represented as a universal {!lemma_src}; it is
+    never Skolemized to a constant. *)
 type exists_src =
   { ex_qvars :
       (string * Oxsmt_core.Sort.t) list (* exists binders, flattened, outer-first *)
@@ -83,10 +83,10 @@ type t =
       (* the [select]/[store] operator symbols minted for the array instantiations the
          query uses, keyed by symbol, for the arrays theory. [empty] when the query uses
          no arrays. *)
-  ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
+  ; lemmas : lemma_src list (* top-level universal assertions, in file order *)
   ; existentials : exists_src list
-      (* top-level POSITIVE [(assert (exists ...))] assertions the loader Skolemizes into
-         fresh ground witnesses (lemmas-climb chunk 2a), in file order *)
+      (* top-level existential assertions the loader Skolemizes into fresh ground
+         witnesses, in file order *)
   ; dropped : int
   (* count of assertion content outside the reader's fragment that partial assertion
      DROPPED rather than failing the whole file (lemmas-climb). [> 0] obliges the loader
