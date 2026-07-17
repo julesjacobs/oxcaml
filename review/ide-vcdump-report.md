@@ -22,6 +22,13 @@ JSON samples are confirmed (see Verification evidence below).
   prints the inferred signature when `-i` is present. It does not write
   `.cmi`, `.cmti`, `.cmo`, `.cmt`, `.cms`, or `.cmsi` files, including for
   `.mli` inputs and partial typed trees on type errors.
+- `-vox-dump-vc` streams a compact, human-readable block for each VC to stderr
+  as compilation proceeds (in source order), for expect/`.reference` testing of
+  VC generation. It is a dump mode, not verification: it does NOT invoke the
+  solver (Lean-independent, so the suite is fast and hermetic), and it ends the
+  compile with a distinctive `Error: VCs dumped, not discharged.` and a non-zero
+  exit so a dry dump can never be mistaken for a passing verification. See "VC
+  text dump" below.
 
 `-vox-type-only` intentionally does not check `.ml`-vs-`.mli` conformance: it
 takes the single-unit no-save path before an adjacent `.mli` is loaded and
@@ -155,6 +162,99 @@ null. The
 `location`, `program_point`, and provenance spans carry the source locations
 exposed by schema version 2.
 
+## VC text dump (`-vox-dump-vc`)
+
+`-vox-dump-vc` exists so testsuite `.reference` files can pin down VC
+GENERATION behavior (the way typing expect tests pin inference), independently
+of the solver. It is separate from `-vox-dump-vc-json` (machine JSON, whole-run,
+written to a file at process exit): the text dump is human-readable, streamed in
+source order to stderr, and Lean-independent.
+
+### Block format
+
+For each VC, at the point it is generated, one block is written to stderr:
+
+```text
+VC <kind> at <file>:<line>:<startcol>-<endcol>
+  <hypothesis-1 display>
+  <hypothesis-2 display>
+  ...
+|- <goal display>
+```
+
+`<kind>` is `annotation`, `contract-argument`, or `seal-implication`. Each
+hypothesis line and the goal line are rendered by the source-like `display`
+printer (the same one used for the JSON `display` field), two-space indented for
+hypotheses; the goal is introduced by an ASCII turnstile `|-` (chosen over the
+Unicode `⊢` for `.reference` friendliness). A blank line separates blocks. When
+a VC's location spans multiple lines the header is
+`<file>:<line>:<col>-<endline>:<endcol>`. The file component is the basename, so
+output does not depend on the absolute build path.
+
+### Hermeticity and the "not discharged" outcome (design)
+
+`-vox-dump-vc` implies skipping discharge; there is no separate dry-run flag.
+This is the cleaner design for expect tests: a single flag makes the dump fast
+and hermetic (no Lean process, no network, works with Lean absent). To emit the
+FULL VC set deterministically without a solver, each VC's goal is ASSUMED to
+hold and added to the fact context (mirroring what `prove` does on `Proved`), so
+downstream VCs still see it as a hypothesis and the emitted set matches what
+real verification would walk.
+
+Because nothing is actually discharged, the mode must never be mistaken for a
+passing verification. It is therefore loud: after all blocks are printed,
+`Vox_verify.finish_dump` writes `Error: VCs dumped, not discharged.` and raises,
+so compilation exits non-zero (2) and writes no `.cmi`/`.cmo`/`.cmt` artifacts —
+exactly like a failed compile. An editor or CI cannot read a dry dump as
+"verified".
+
+### Determinism
+
+Output is deterministic across runs: the `display` printer uses binder NAMES,
+not stamps; the file component is a basename; blocks are emitted in source-walk
+order; no hash/set iteration order is exposed. No residual nondeterminism was
+observed. (If a predicate node falls back to the raw prefix printer, that raw
+form can include reference stamps like `global[x/281]`; the source-like infix
+path used for the common comparison/arithmetic predicates does not.)
+
+### Demonstration
+
+For:
+
+```ocaml
+let positive (x : int{ _ > 0 }) = x
+let annotation = (3 : int{ _ >= 3 })
+let contract = positive 1
+let branch y = if y > 0 then positive y else 0
+```
+
+`ocamlc -vox-dump-vc -c` writes (exit 2):
+
+```text
+VC annotation at d.ml:2:17-36
+|- 3 >= 3
+
+VC contract-argument at d.ml:3:24-25
+  3 >= 3
+  annotation >= 3
+|- 1 > 0
+
+VC contract-argument at d.ml:4:38-39
+  3 >= 3
+  annotation >= 3
+  1 > 0
+  y > 0
+|- y > 0
+
+Error: VCs dumped, not discharged.
+```
+
+This shows an annotation VC, contract-argument VCs, and (third block) a
+branch-condition hypothesis `y > 0` carried into the fact context from
+`if y > 0 then ...`. The `annotation >= 3` hypothesis is the top-level refined
+binder `annotation` contributing its refinement to later VCs. The regression
+test is `testsuite/tests/refinement/vc_dump.ml` / `.reference`.
+
 ## Predicate rendering
 
 The `text` field remains the unchanged raw `Types.Refinement.print` rendering,
@@ -244,6 +344,18 @@ generated or discharged. Manual checks confirmed:
 - Combined with `-vox-dump-vc-json FILE`: exit 0, silent, and produces a valid
   document with an empty `verification_conditions` array.
 
+### VC text dump
+
+On the four-binding demonstration above, `ocamlc -vox-dump-vc -c d.ml`:
+- exits 2 and prints the three blocks shown in "VC text dump", ending with
+  `Error: VCs dumped, not discharged.`; it writes no `.cmi`/`.cmo`.
+- is deterministic: two runs produce byte-identical output (`diff` empty).
+- is Lean-independent: with `VOX_LEAN=/nonexistent/lean` the output and exit are
+  unchanged, and by construction the `-vox-dump-vc` branch of `prove` /
+  `verify_seal_obligation` never calls `Vox_lean.discharge`.
+- the regression test `testsuite/tests/refinement/vc_dump.ml` passes (the
+  `refinement` suite is 15 tests with it).
+
 ### Why the default path is byte-identical (by construction)
 
 - `record_vc` is called only when `Clflags.vox_dump_vc_json` is `Some _` in
@@ -258,3 +370,6 @@ generated or discharged. Manual checks confirmed:
   call sites have no effect when the flag is off.
 - `vox_type_only` defaults to `false`, so both verify gates run exactly as
   before, and the existing save/backend paths are unchanged.
+- `vox_dump_vc` defaults to `false`, so `prove` / `verify_seal_obligation` take
+  the unchanged `Vox_lean.discharge` path, and `Vox_verify.finish_dump` (called
+  after typecheck in `compile_common`) is a no-op.

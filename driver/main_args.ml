@@ -925,6 +925,11 @@ let mk_dlocations f =
 let mk_dsource f =
   "-dsource", Arg.Unit f, " (undocumented)"
 
+let mk_vox_dump_vc f =
+  ( "-vox-dump-vc",
+    Arg.Unit f,
+    " Dump refinement VCs without discharging them" )
+
 let mk_vox_dump_vc_json f =
   ( "-vox-dump-vc-json",
     Arg.String f,
@@ -1220,6 +1225,7 @@ module type Core_options = sig
   val _dlocations : unit -> unit
 
   val _dsource : unit -> unit
+  val _vox_dump_vc : unit -> unit
   val _vox_dump_vc_json : string -> unit
   val _vox_type_only : unit -> unit
   val _dparsetree : unit -> unit
@@ -1621,6 +1627,7 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
@@ -1732,6 +1739,7 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
@@ -1918,6 +1926,7 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
@@ -2085,6 +2094,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
@@ -2234,6 +2244,7 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
@@ -2481,8 +2492,16 @@ module Default = struct
     let _dparsetree_loc_ghost_invariants = set parsetree_ghost_loc_invariant
     let _drawlambda = set dump_rawlambda
     let _dsource = set dump_source
+    let _vox_dump_vc () =
+      if !vox_type_only then
+        raise (Arg.Bad "-vox-dump-vc and -vox-type-only are incompatible");
+      vox_dump_vc := true;
+      unique_ids := false
     let _vox_dump_vc_json file = vox_dump_vc_json := Some file
-    let _vox_type_only = set vox_type_only
+    let _vox_type_only () =
+      if !vox_dump_vc then
+        raise (Arg.Bad "-vox-type-only and -vox-dump-vc are incompatible");
+      vox_type_only := true
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
     let _dmatchcomp = set dump_matchcomp

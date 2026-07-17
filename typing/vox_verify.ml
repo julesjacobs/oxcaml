@@ -287,6 +287,36 @@ let render_display ~env expression =
   in
   (render expression).text
 
+let display_location location =
+  let start = location.Location.loc_start in
+  let end_ = location.Location.loc_end in
+  let file =
+    if String.equal start.pos_fname "" then "<unknown>"
+    else Filename.basename start.pos_fname
+  in
+  let start_column = start.pos_cnum - start.pos_bol in
+  let end_column = end_.pos_cnum - end_.pos_bol in
+  if start.pos_lnum = end_.pos_lnum then
+    Printf.sprintf "%s:%d:%d-%d" file start.pos_lnum start_column end_column
+  else
+    Printf.sprintf "%s:%d:%d-%d:%d" file start.pos_lnum start_column
+      end_.pos_lnum end_column
+
+let dump_vc ~kind ~env (condition : Vox_vc.t) =
+  Format.eprintf "VC %s at %s@." kind
+    (display_location condition.Vox_vc.location);
+  List.iter
+    (fun (fact : Vox_vc.fact) ->
+      Format.eprintf "  %s@." (render_display ~env fact.expression))
+    condition.Vox_vc.facts;
+  Format.eprintf "|- %s@.@." (render_display ~env condition.Vox_vc.goal)
+
+let not_discharged_result (condition : Vox_vc.t) : Vox_lean.result =
+  { verdict = Not_proved;
+    location = condition.location;
+    detail = Some "not discharged (-vox-dump-vc)";
+  }
+
 let json_fact ~env (fact : Vox_vc.fact) =
   let origin = fact.origin in
   Json.object_
@@ -663,18 +693,29 @@ let prove state ~env ~loc ~kind ~program_point ~provenance goal =
       (String.concat ", " (List.map Ident.name escaped))
   | Ok condition ->
     let provenance = lazy (provenance ()) in
-    let result = Vox_lean.discharge ~env condition in
-    if Option.is_some !Clflags.vox_dump_vc_json then
-      record_vc ~kind ~program_point ~provenance:(Lazy.force provenance) ~env
-        condition result;
-    begin match result.verdict with
-    | Vox_lean.Proved ->
+    if !Clflags.vox_dump_vc then begin
+      dump_vc ~kind ~env condition;
       let origin =
         fact_origin_of_provenance (Lazy.force provenance)
       in
+      if Option.is_some !Clflags.vox_dump_vc_json then
+        record_vc ~kind ~program_point
+          ~provenance:(Lazy.force provenance) ~env condition
+          (not_discharged_result condition);
       state.facts <- Facts.add ~origin ~loc goal state.facts
-    | (Not_proved | Disproved | Solver_error) as verdict ->
-      verification_error ~loc verdict
+    end else begin
+      let result = Vox_lean.discharge ~env condition in
+      if Option.is_some !Clflags.vox_dump_vc_json then
+        record_vc ~kind ~program_point
+          ~provenance:(Lazy.force provenance) ~env condition result;
+      match result.verdict with
+      | Vox_lean.Proved ->
+        let origin =
+          fact_origin_of_provenance (Lazy.force provenance)
+        in
+        state.facts <- Facts.add ~origin ~loc goal state.facts
+      | (Not_proved | Disproved | Solver_error) as verdict ->
+        verification_error ~loc verdict
     end
 
 let prove_refinement state ~env ~loc ~kind ~program_point ~provenance
@@ -708,36 +749,42 @@ let verify_seal_obligation ~env ~seal_location
          }]
       ~goal
   in
-  let result = Vox_lean.discharge ~env condition in
-  if Option.is_some !Clflags.vox_dump_vc_json then begin
-    let provenance =
-      { kind = "seal-implication";
-        name = Some obligation.rso_value_name;
-        source_span = Some seal_location;
-        related_spans =
-          [ "interface", obligation.rso_interface_location;
-            "implementation", obligation.rso_implementation_location;
-          ];
-      }
-    in
-    record_vc ~kind:"seal-implication" ~program_point:seal_location
-      ~provenance ~env condition result
-  end;
-  match result.verdict with
-  | Vox_lean.Proved -> ()
-  | (Not_proved | Disproved | Solver_error) as verdict ->
-    let sub =
-      [ Location.msg ~loc:obligation.rso_interface_location
-          "Interface declaration for value %s"
-          obligation.rso_value_name;
-        Location.msg ~loc:obligation.rso_implementation_location
-          "Implementation declaration for value %s"
-          obligation.rso_value_name;
-      ]
-    in
-    Location.raise_errorf ~loc:seal_location ~sub
-      "Refinement verification failed at module seal for value %S (%s)"
-      obligation.rso_value_name (Vox_lean.string_of_verdict verdict)
+  let provenance =
+    { kind = "seal-implication";
+      name = Some obligation.rso_value_name;
+      source_span = Some seal_location;
+      related_spans =
+        [ "interface", obligation.rso_interface_location;
+          "implementation", obligation.rso_implementation_location;
+        ];
+    }
+  in
+  if !Clflags.vox_dump_vc then begin
+    dump_vc ~kind:"seal-implication" ~env condition;
+    if Option.is_some !Clflags.vox_dump_vc_json then
+      record_vc ~kind:"seal-implication" ~program_point:seal_location
+        ~provenance ~env condition (not_discharged_result condition)
+  end else begin
+    let result = Vox_lean.discharge ~env condition in
+    if Option.is_some !Clflags.vox_dump_vc_json then
+      record_vc ~kind:"seal-implication" ~program_point:seal_location
+        ~provenance ~env condition result;
+    match result.verdict with
+    | Vox_lean.Proved -> ()
+    | (Not_proved | Disproved | Solver_error) as verdict ->
+      let sub =
+        [ Location.msg ~loc:obligation.rso_interface_location
+            "Interface declaration for value %s"
+            obligation.rso_value_name;
+          Location.msg ~loc:obligation.rso_implementation_location
+            "Implementation declaration for value %s"
+            obligation.rso_value_name;
+        ]
+      in
+      Location.raise_errorf ~loc:seal_location ~sub
+        "Refinement verification failed at module seal for value %S (%s)"
+        obligation.rso_value_name (Vox_lean.string_of_verdict verdict)
+  end
 
 let verify_seal_obligations ~env ~seal_location obligations =
   if not !Clflags.vox_type_only then
@@ -1099,6 +1146,12 @@ and walk_structure state structure =
 let toplevel_facts = ref Facts.empty
 let toplevel_definitions = ref []
 
+let finish_dump () =
+  if !Clflags.vox_dump_vc then begin
+    Format.eprintf "Error: VCs dumped, not discharged.@.";
+    raise Location.Already_displayed_error
+  end
+
 let verify_structure ?(toplevel = false) structure =
   let state =
     if toplevel
@@ -1115,9 +1168,11 @@ let verify_structure ?(toplevel = false) structure =
       toplevel_definitions := state.definitions
     end
   in
-  try walk_root () with
+  begin try walk_root () with
   | Unsupported_subject (loc, what) ->
     Location.raise_errorf ~loc
       "Refinement verification failed: %s cannot yet be represented in a \
        verification condition"
       what
+  end;
+  finish_dump ()

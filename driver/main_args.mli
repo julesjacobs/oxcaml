@@ -90,6 +90,7 @@ module type Core_options = sig
   val _dno_locations : unit -> unit
   val _dlocations : unit -> unit
   val _dsource : unit -> unit
+  val _vox_dump_vc : unit -> unit
   val _vox_dump_vc_json : string -> unit
   val _vox_type_only : unit -> unit
   val _dparsetree : unit -> unit
