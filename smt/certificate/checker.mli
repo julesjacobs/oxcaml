@@ -90,11 +90,14 @@
     statically-emitted antecedent chain can be simultaneously ordered-RUP under both the
     solver's state and the checker's recomputed batch closure. The checker-side
     full-closure fallback is the correct resolution.
-    - {b Theory leaves = accepted axioms AT THIS STAGE (§1.5, deferred witness).} A
-      [Reason] / [Conflict] theory clause is a leaf shell taken as a valid axiom here —
-      its EUF/LIA witness (proof tree / Farkas multipliers) is a later leaf-checking
-      tranche. Its {e premises still resolve} (kind-keyed) and it participates soundly in
-      BCP/RUP as a T-valid clause. An empty [Conflict] clause (an unconditional
+    - {b Theory leaves (§1.5).} A LIA [Conflict] carrying a Farkas witness is checked
+      independently: its premise literals must be exactly the emitted clause's negation,
+      every multiplier must be nonnegative, and the weighted integer half-planes must
+      cancel every variable and leave a strictly positive constant. A claimed but bad
+      witness is [Invalid], never silently trusted. Unwitnessed [Reason]/[Conflict]
+      clauses (including EUF and non-Farkas LIA leaves) and [Theory_lemma] inputs remain
+      trusted axioms and force [Valid_modulo_theory_leaves]. An empty [Conflict] clause
+      (an unconditional
       [T_conflict []], ADR-0013 Rev 6) has NO v1 leaf witness for ⊥-from-∅ and is reported
       [Unsupported], not [Valid].
     - {b Terminal conclusion (§4.0 E1–E4).} [Root_empty] / [Level0_conflict] check the
@@ -129,16 +132,12 @@ module Sat = Oxsmt_solver.Sat
 
 type verdict =
   | Valid_modulo_theory_leaves
-  (** the resolution SKELETON replays and the propositional refutation closes, but the
-      theory leaves ([Reason]/[Conflict] clauses, [Theory_lemma] inputs) are TRUSTED as
-      T-valid axioms at this stage — their EUF/LIA witness (proof tree / Farkas
-      multipliers) is a later leaf-checking tranche. This is the verdict today's checker
-      returns on a good cert; it is deliberately NOT plain [Valid] so a gate cannot
-      silently book a skeleton-only pass as fully certified (reviewer MED-1). *)
+  (** the resolution skeleton closes, but at least one [Reason]/[Conflict] clause or
+      [Theory_lemma] input has no checked witness and is still trusted as T-valid. *)
   | Valid
-  (** RESERVED — the full pass incl. verified leaf witnesses. Not returned until the
-      leaf-checker tranche lands; present so the eventual promotion is a type-level event
-      a consumer must handle, not a silent semantics change. *)
+  (** the skeleton closes and every theory leaf is checked. This includes theory-free
+      propositional certificates and certificates whose only theory leaves are verified
+      LIA Farkas [Conflict] clauses. *)
   | Invalid of string (** an artifact-attributable rejection (ADR-0013 §3.3) *)
   | Unsupported of string
   (** a well-formed leaf/feature this checker version cannot witness (coverage gap) *)
@@ -146,11 +145,17 @@ type verdict =
 (** The self-contained refutation the checker consumes: exactly the recorded event stream
     (ADR-0013 step 1) plus the assumption literals the traced solve ran under.
 
+    [atoms] is the off-frozen-seam statement map from SAT theory variables to their
+    immutable atom terms. It is separate from leaf witnesses so a corrupted Farkas proof
+    cannot redefine the proposition it claims to prove; duplicate variable declarations
+    are [Invalid].
+
     [assumptions] are the literals passed true to {!Sat.solve} (for a session solve, the
     active frame selectors [List.map Sat.pos frames]); they seed the [Failed_assumption]
     (E3) terminal RUP. Empty for an assumption-free solve (E1/E2/E4). *)
 type events =
   { inputs : Recorder.input_event list
+  ; atoms : Recorder.atom_event list
   ; units : Recorder.unit_event list
   ; learned : Recorder.learned_event list
   ; theory : Recorder.theory_event list
@@ -161,8 +166,8 @@ type events =
 (** Snapshot a recorder's accessors into an {!events}. [assumptions] as above. *)
 val of_recorder : Recorder.t -> assumptions:Sat.lit list -> events
 
-(** Validate the recorded refutation. [Valid] iff the whole skeleton replays; see the
-    module doc for the rejection taxonomy. Total (never raises on a malformed stream). *)
+(** Validate the recorded refutation. See {!verdict} for full versus conditional
+    validity. Total (never raises on a malformed stream). *)
 val check : events -> verdict
 
 val string_of_verdict : verdict -> string

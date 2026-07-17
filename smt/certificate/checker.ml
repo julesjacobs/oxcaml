@@ -1,7 +1,11 @@
 (* Certificate replay checker (ADR-0013 step 2). See checker.mli. Stdlib-only over the
-   recorder + the frozen Sat lit algebra. *)
+   recorder, frozen Sat lit algebra, immutable core terms, and exact LIA rationals. *)
 
 module Sat = Oxsmt_solver.Sat
+module Bigint = Oxsmt_core.Bigint
+module Iarr = Oxsmt_core.Iarr
+module Term = Oxsmt_core.Term
+module Rational = Oxsmt_lia.Rational
 
 type verdict =
   | Valid_modulo_theory_leaves
@@ -11,6 +15,7 @@ type verdict =
 
 type events =
   { inputs : Recorder.input_event list
+  ; atoms : Recorder.atom_event list
   ; units : Recorder.unit_event list
   ; learned : Recorder.learned_event list
   ; theory : Recorder.theory_event list
@@ -20,6 +25,7 @@ type events =
 
 let of_recorder r ~assumptions =
   { inputs = Recorder.inputs r
+  ; atoms = Recorder.atoms r
   ; units = Recorder.units r
   ; learned = Recorder.learned r
   ; theory = Recorder.theory_clauses r
@@ -403,9 +409,123 @@ let guard_theory_leaf kind clause =
   | _ -> ()
 ;;
 
+(* Independent LIA Conflict-leaf replay. This deliberately does not call the simplex's
+   production self-check: it reconstructs each asserted integer half-plane from the
+   recorded atom and checks the Farkas equation from the definition.
+
+   For a positive [(e <= 0)] premise the row is [e <= 0]. For a negative premise,
+   integer semantics gives [not (e <= 0)] iff [-e + 1 <= 0]. A valid witness has only
+   nonnegative multipliers and sums these rows to [0 < c] (all variable coefficients
+   zero, constant [c > 0]). *)
+let verify_lia_conflict
+      ~resolve_atom
+      (event : Recorder.theory_event)
+      (witness : Recorder.lia_conflict_witness)
+  =
+  try
+    let rows = witness.Recorder.premises in
+    if rows = []
+    then Error "empty Farkas witness"
+    else (
+      let actual_clause =
+        Array.to_list event.Recorder.clause |> List.sort_uniq compare
+      in
+      let witnessed_clause =
+        List.map (fun (p : Recorder.lia_premise) -> Sat.neg_lit p.Recorder.lit) rows
+        |> List.sort_uniq compare
+      in
+      if actual_clause <> witnessed_clause
+      then Error "Farkas premises are not exactly the emitted conflict clause's negation"
+      else (
+          let coeffs = ref Term.Map.empty in
+          let constant = ref Rational.zero in
+          let add_coeff term value =
+            let old =
+              match Term.Map.find_opt term !coeffs with
+              | Some value -> value
+              | None -> Rational.zero
+            in
+            coeffs := Term.Map.add term (Rational.add old value) !coeffs
+          in
+          let bigint_neg value = Bigint.mul (Bigint.of_int (-1)) value in
+          let linear_of (term : Term.t) =
+            match term.Term.node with
+            | Term.Arith { coeffs; const } -> Iarr.to_list coeffs, const
+            | Term.Int_const const -> [], const
+            | _ -> [ term, Bigint.one ], Bigint.zero
+          in
+          let add_row (p : Recorder.lia_premise) =
+            let polarity = Sat.sign_of_lit p.Recorder.lit in
+            if Rational.sign p.Recorder.multiplier < 0
+            then Error "negative Farkas multiplier"
+            else (
+              match resolve_atom (Sat.var_of_lit p.Recorder.lit) with
+              | None -> Error "Farkas premise has no theory-atom declaration"
+              | Some atom ->
+              (match atom.Term.node with
+              | Term.Le arg ->
+                let vars, const = linear_of arg in
+                let vars, const =
+                  if polarity
+                  then vars, const
+                  else
+                    ( List.map (fun (var, coeff) -> var, bigint_neg coeff) vars
+                    , Bigint.add (bigint_neg const) Bigint.one )
+                in
+                List.iter
+                  (fun (var, coeff) ->
+                     add_coeff
+                       var
+                       (Rational.mul
+                          p.Recorder.multiplier
+                          (Rational.of_bigint coeff)))
+                  vars;
+                constant
+                := Rational.add
+                     !constant
+                     (Rational.mul
+                        p.Recorder.multiplier
+                        (Rational.of_bigint const));
+                Ok ()
+              | _ -> Error "Farkas premise is not an integer <= atom"))
+          in
+          match
+            List.find_map
+              (fun row ->
+                 match add_row row with
+                 | Ok () -> None
+                 | Error reason -> Some reason)
+              rows
+          with
+          | Some reason -> Error reason
+          | None ->
+            let variables_cancel =
+              Term.Map.for_all (fun _ coeff -> Rational.is_zero coeff) !coeffs
+            in
+            if not variables_cancel
+            then Error "Farkas combination does not cancel every variable"
+            else if Rational.sign !constant <= 0
+            then Error "Farkas combination does not leave a strictly positive constant"
+            else Ok ()))
+  with
+  | exn -> Error ("Farkas replay raised: " ^ Printexc.to_string exn)
+;;
+
 let check ev =
   try
     let resolve, ambiguous_ids = build_index ev in
+    (* Theory-atom declarations are the certificate statement. A proof witness may cite
+       them but may not redefine them leaf-locally. Duplicate declarations are rejected
+       even when textually equal: exactly one internalization event must own each SAT
+       variable, matching the driver's 1:1 atom invariant. *)
+    let atom_by_var = Hashtbl.create (List.length ev.atoms) in
+    List.iter
+      (fun (e : Recorder.atom_event) ->
+         if Hashtbl.mem atom_by_var e.Recorder.var
+         then rejectf "duplicate theory-atom declaration for SAT var %d" e.Recorder.var;
+         Hashtbl.replace atom_by_var e.Recorder.var e.Recorder.atom)
+      ev.atoms;
+    let resolve_atom var = Hashtbl.find_opt atom_by_var var in
     (* codex H4: reject ambiguity at STREAM ADMISSION — an id shared by two content
        clauses makes BOTH untrustworthy, and one would otherwise be admitted to the axiom
        DB and poison BCP even if its id is never cited. Fail closed before anything is
@@ -455,6 +575,28 @@ let check ev =
       (fun (e : Recorder.input_event) ->
          guard_theory_leaf (Kinput e.Recorder.origin) e.Recorder.clause)
       ev.inputs;
+    (* Leaf coverage accounting. A claimed Farkas witness is a hard proof obligation:
+       corruption is [Invalid], never silently demoted to the trusted-leaf verdict.
+       Unwitnessed Reason/Conflict leaves and Theory_lemma inputs retain the existing
+       conditional verdict. Query inputs are the formula axioms, not theory leaves. *)
+    let has_unverified_theory_leaf = ref false in
+    List.iter
+      (fun (e : Recorder.input_event) ->
+         if e.Recorder.origin = Sat.Theory_lemma then has_unverified_theory_leaf := true)
+      ev.inputs;
+    List.iter
+      (fun (e : Recorder.theory_event) ->
+         match e.Recorder.role, e.Recorder.lia_witness with
+         | Sat.Reason, None -> has_unverified_theory_leaf := true
+         | Sat.Reason, Some _ ->
+           rejectf "theory Reason clause id %d carries a Conflict-only Farkas witness" e.id
+         | Sat.Conflict, None -> has_unverified_theory_leaf := true
+         | Sat.Conflict, Some witness ->
+           (match verify_lia_conflict ~resolve_atom e witness with
+            | Ok () -> ()
+            | Error reason ->
+              rejectf "LIA Conflict leaf id %d has an invalid Farkas witness: %s" e.id reason))
+      ev.theory;
     (* the closure engine: axioms (inputs both origins + theory leaves) then verified
        learned clauses, folded incrementally. *)
     let bcp = Bcp.create () in
@@ -632,8 +774,9 @@ let check ev =
          rejectf
            "Failed_assumption: seeding the assumptions true does not refute the verified \
             clause DB by BCP");
-    (* the skeleton closes; theory leaves are trusted axioms this tranche (MED-1). *)
-    Valid_modulo_theory_leaves
+    (* Promote only a proof whose every theory leaf was checked. Missing witness classes
+       stay explicitly conditional; a bad claimed witness was rejected above. *)
+    if !has_unverified_theory_leaf then Valid_modulo_theory_leaves else Valid
   with
   | Reject v -> v
 ;;

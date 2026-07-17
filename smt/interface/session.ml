@@ -2195,7 +2195,23 @@ let install_cert_trace t tr =
   (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
      entailed-equality unit must not enter the cert as a trusted [Input]. *)
   t.cert_active <- Option.is_some tr;
+  if Option.is_none tr then Cdclt.set_lia_certificate_trace t.cdclt None;
   Sat.set_trace t.sat tr
+;;
+
+let install_lia_certificate_trace t tr =
+  (match tr with
+   | Some _ ->
+     if not t.cert_active
+     then
+       invalid_arg
+         "Session.install_lia_certificate_trace: install the SAT certificate trace first";
+     if t.asserted <> [] || t.base_unit_emitted
+     then
+       invalid_arg
+         "Session.install_lia_certificate_trace: must be installed on a pristine session"
+   | None -> ());
+  Cdclt.set_lia_certificate_trace t.cdclt tr
 ;;
 
 let cert_assumptions t = List.map Sat.pos (assumed_frames t)

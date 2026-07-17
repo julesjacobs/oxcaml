@@ -430,6 +430,13 @@ val last_unknown_reason : t -> string
     but counters may differ from an untraced run. *)
 val install_cert_trace : t -> Oxsmt_solver.Sat.trace option -> unit
 
+(** The off-frozen-seam companion to {!install_cert_trace}: carries each LIA conflict's
+    Farkas multipliers and atom meanings to the certificate recorder immediately before
+    the SAT trace materializes the corresponding [Conflict] clause. Install it after a
+    non-[None] SAT certificate trace and before assertions. [None] is the inert default.
+    This channel is observational and never feeds solving. *)
+val install_lia_certificate_trace : t -> Cdclt.lia_certificate_trace option -> unit
+
 (** The active frame-selector assumptions the most recent (and next) {!check_sat} solves
     under ([List.map Sat.pos frames]). The certificate's terminal [Failed_assumption] (E3)
     step is conditioned on these being true — the checker seeds them to realize the §1.0

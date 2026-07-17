@@ -10,6 +10,22 @@ open Oxsmt_core
 
 type t
 
+(** Off-frozen-seam certificate evidence. [on_theory_atom] records the statement's
+    authoritative SAT-variable meanings as they are internalized. [premise_lits] are the
+    true SAT literals whose negations form a materialized LIA conflict clause, and
+    [multipliers] are index-aligned with them. The callbacks are observational. *)
+type lia_certificate_trace =
+  { on_theory_atom : var:Oxsmt_solver.Sat.var -> atom:Oxsmt_core.Term.t -> unit
+  ; on_lia_conflict :
+      premise_lits:Oxsmt_solver.Sat.lit list
+      -> multipliers:Oxsmt_lia.Rational.t list
+      -> unit
+  }
+
+(** Install the LIA leaf-evidence channel. [None] is the inert default. A non-[None]
+    trace may be installed only once and before any theory atom is internalized. *)
+val set_lia_certificate_trace : t -> lia_certificate_trace option -> unit
+
 (** A model value / table cell (eval-agnostic; the CLI renders it to the §8 self-check
     sidecar grammar). [VUninterp i] is a 0-based ELEMENT INDEX into its uninterpreted
     sort's finite universe (not the raw e-graph class id — {!model} remaps). *)

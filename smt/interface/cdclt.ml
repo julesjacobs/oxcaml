@@ -167,6 +167,14 @@ let env_on name =
 
 let incr_undo = lazy (env_on "OXSMT_CHRONO_INCR_UNDO" && env_on "OXSMT_CHRONO")
 
+type lia_certificate_trace =
+  { on_theory_atom : var:Sat.var -> atom:Term.t -> unit
+  ; on_lia_conflict :
+      premise_lits:Sat.lit list
+      -> multipliers:Oxsmt_lia.Rational.t list
+      -> unit
+  }
+
 type t =
   { mutable theory : theory_impl option
       (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
@@ -218,6 +226,9 @@ type t =
          branch filter itself is installed directly on the SAT core by {!Session}. A
          [None] arm is behaviourally inert — the theory glue is byte-identical with
          relevancy off. *)
+  ; mutable lia_certificate_trace : lia_certificate_trace option
+      (* Off-seam Farkas evidence for the certificate recorder. [None] in every normal
+         solve; the one branch at LIA conflict emission cannot affect search. *)
   ; ckpt_log : Combined.checkpoint option Dynarray.t
   (* ADR-0014 S4.2 (dark, [incr_undo] only): one Combined sub-frame checkpoint per
      [on_assign], keyed by ABSOLUTE SAT-trail index — [ckpt_log.(i)] is the theory
@@ -246,6 +257,20 @@ let sign_lit = Sat.sign_of_lit
 let satlit_of_lit t (lit : Lit.t) =
   let v = Atom.Table.find t.a2v (Lit.atom lit) in
   if Lit.sign lit then Sat.pos v else Sat.neg v
+;;
+
+let set_lia_certificate_trace t tr =
+  (match tr with
+   | Some _ ->
+     if Option.is_some t.lia_certificate_trace
+     then invalid_arg "Cdclt.set_lia_certificate_trace: already installed";
+     if Term.Table.length t.t2v <> 0
+     then
+       invalid_arg
+         "Cdclt.set_lia_certificate_trace: must be installed before theory atoms are \
+          internalized"
+   | None -> ());
+  t.lia_certificate_trace <- tr
 ;;
 
 (* Collect [term] and every subterm (all sorts), for reconstructing the model. Membership
@@ -361,6 +386,9 @@ let intern t ~split term =
     if split then Vartbl.replace t.is_split v ();
     collect t term;
     th_register impl a term;
+    (match t.lia_certificate_trace with
+     | Some tr -> tr.on_theory_atom ~var:v ~atom:term
+     | None -> ());
     v
 ;;
 
@@ -393,7 +421,10 @@ let bind_bool_var_atom t term v =
     Vartbl.replace t.v2term v term;
     Atom.Table.replace t.a2v a v;
     collect t term;
-    th_register impl a term)
+    th_register impl a term;
+    match t.lia_certificate_trace with
+    | Some tr -> tr.on_theory_atom ~var:v ~atom:term
+    | None -> ())
 ;;
 
 (* Keep one theory frame per SAT decision level (I push lazily as levels open; a dummy
@@ -546,7 +577,37 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
   | Theory.Sat -> Sat.T_consistent [] (* Final: caller snapshots the model separately *)
   | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
   | Theory.Conflict e ->
-    Sat.T_conflict (List.map (satlit_of_lit t) e.Explanation.premises)
+    let premise_lits = List.map (satlit_of_lit t) e.Explanation.premises in
+    (* The frozen SAT trace deliberately carries only the materialized clause. When a
+       certificate recorder explicitly installed the off-seam channel, preserve the
+       Farkas evidence HERE, before [T_conflict] drops the rule tag and term meanings.
+
+       Binding check: the adapter's observational core is accepted only when mapping its
+       [(atom, polarity)] list through this driver's authoritative term->SAT table gives
+       exactly the Explanation premise list. A stale/misaligned core therefore emits no
+       witness (the leaf remains conditional), never a witness for the wrong clause. *)
+    (match t.lia_certificate_trace, e.Explanation.rule, t.theory with
+     | ( Some tr
+       , Explanation.Rule_tag.Lia_farkas
+       , Some (TCombined combined) ) ->
+       (match Oxsmt_lia.Lia_adapter.last_conflict_core (Combined.arith_state combined) with
+        | Some { farkas = Some multipliers; atoms } ->
+          let rec map_atoms acc = function
+            | [] -> Some (List.rev acc)
+            | (atom, polarity) :: rest ->
+              (match Term.Table.find_opt t.t2v atom with
+               | None -> None
+               | Some var ->
+                 let lit = if polarity then Sat.pos var else Sat.neg var in
+                 map_atoms (lit :: acc) rest)
+          in
+          (match map_atoms [] atoms with
+           | Some mapped when mapped = premise_lits ->
+             tr.on_lia_conflict ~premise_lits ~multipliers
+           | Some _ | None -> ())
+        | Some { farkas = None; _ } | None -> ())
+     | Some _, _, _ | None, _, _ -> ());
+    Sat.T_conflict premise_lits
   | Theory.Split terms ->
     if not final
     then Sat.T_consistent [] (* CONTRACT-SPLIT: a Split is illegal/dropped at Propagate *)
@@ -699,6 +760,7 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; last_dt_model = None
     ; last_array_model = None
     ; relevancy = None
+    ; lia_certificate_trace = None
     ; ckpt_log = Dynarray.create ()
     }
   in

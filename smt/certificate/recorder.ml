@@ -5,6 +5,18 @@
 
 module Sat = Oxsmt_solver.Sat
 
+type lia_premise =
+  { lit : Sat.lit
+  ; multiplier : Oxsmt_lia.Rational.t
+  }
+
+type lia_conflict_witness = { premises : lia_premise list }
+
+type atom_event =
+  { var : Sat.var
+  ; atom : Oxsmt_core.Term.t
+  }
+
 type input_event =
   { id : int
   ; clause : Sat.lit array
@@ -27,25 +39,46 @@ type theory_event =
   { id : int
   ; clause : Sat.lit array
   ; role : Sat.theory_clause_role
+  ; lia_witness : lia_conflict_witness option
   }
 
 (* Events are accumulated newest-first (O(1) append) and reversed by the accessors. *)
 type t =
   { mutable inputs_rev : input_event list
+  ; mutable atoms_rev : atom_event list
   ; mutable units_rev : unit_event list
   ; mutable learned_rev : learned_event list
   ; mutable theory_rev : theory_event list
+  ; mutable pending_lia : lia_conflict_witness list
   ; mutable conclusion : Sat.unsat_conclusion option
   }
 
 let create () =
   { inputs_rev = []
+  ; atoms_rev = []
   ; units_rev = []
   ; learned_rev = []
   ; theory_rev = []
+  ; pending_lia = []
   ; conclusion = None
   }
 ;;
+
+let record_lia_conflict t ~premise_lits ~multipliers =
+  let premises =
+    match List.combine premise_lits multipliers with
+    | exception Invalid_argument _ -> []
+    | rows -> List.map (fun (lit, multiplier) -> { lit; multiplier }) rows
+  in
+  (* Even a malformed length combination remains a CLAIMED witness. Attaching an empty
+     witness makes the checker reject it; silently dropping to the trusted-leaf verdict
+     would turn corrupt evidence into a pass. Correct production has equal, nonzero
+     lengths, and at most one item waits because SAT materializes the conflict
+     synchronously after the callback returns. *)
+  t.pending_lia <- t.pending_lia @ [ { premises } ]
+;;
+
+let record_theory_atom t ~var ~atom = t.atoms_rev <- { var; atom } :: t.atoms_rev
 
 let trace t : Sat.trace =
   { Sat.on_input =
@@ -55,12 +88,21 @@ let trace t : Sat.trace =
       (fun ~id ~clause ~antecedents ~btlevel ->
         t.learned_rev <- { id; clause; antecedents; btlevel } :: t.learned_rev)
   ; on_theory_clause =
-      (fun ~id ~clause ~role -> t.theory_rev <- { id; clause; role } :: t.theory_rev)
+      (fun ~id ~clause ~role ->
+        let lia_witness =
+          match role, t.pending_lia with
+          | Sat.Conflict, witness :: rest ->
+            t.pending_lia <- rest;
+            Some witness
+          | (Sat.Conflict | Sat.Reason), _ -> None
+        in
+        t.theory_rev <- { id; clause; role; lia_witness } :: t.theory_rev)
   ; on_unsat = (fun c -> t.conclusion <- Some c)
   }
 ;;
 
 let inputs t = List.rev t.inputs_rev
+let atoms t = List.rev t.atoms_rev
 let units t = List.rev t.units_rev
 let learned t = List.rev t.learned_rev
 let theory_clauses t = List.rev t.theory_rev

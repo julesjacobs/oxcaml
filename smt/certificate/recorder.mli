@@ -10,10 +10,31 @@
     [||]-step conclusion for whichever of the four [Unsat] exits fired).
 
     Install {!trace} on a PRISTINE solver before the first [add_clause] (the seam
-    lifecycle contract) via {!Oxsmt_solver.Sat.set_trace}. Stdlib-only; depends only on
-    [oxsmt_solver] (dependency firewall I3). *)
+    lifecycle contract) via {!Oxsmt_solver.Sat.set_trace}. The optional LIA witness
+    channel additionally uses immutable core terms and exact rationals; all dependencies
+    remain stdlib-only. *)
 
 module Sat = Oxsmt_solver.Sat
+
+type lia_premise =
+  { lit : Sat.lit
+  ; multiplier : Oxsmt_lia.Rational.t
+  }
+
+(** A Farkas witness for a LIA [Conflict] leaf. Each entry binds one true theory-premise
+    literal to its nonnegative multiplier; its atom meaning resolves independently
+    through the certificate's unique {!atom_event} table. The checker requires the leaf
+    clause to be exactly the negation of these literals and independently recomputes the
+    weighted half-plane sum. *)
+type lia_conflict_witness = { premises : lia_premise list }
+
+(** The arithmetic meaning assigned to one SAT theory variable. This belongs to the
+    certificate statement, not to an individual Farkas proof: the checker rejects
+    duplicate/rebound variables and requires every witness premise to resolve here. *)
+type atom_event =
+  { var : Sat.var
+  ; atom : Oxsmt_core.Term.t
+  }
 
 type input_event =
   { id : int
@@ -37,6 +58,7 @@ type theory_event =
   { id : int
   ; clause : Sat.lit array
   ; role : Sat.theory_clause_role
+  ; lia_witness : lia_conflict_witness option
   }
 
 type t
@@ -46,9 +68,24 @@ val create : unit -> t
 (** A trace that records into [t]. Attach with {!Sat.set_trace} before any clause. *)
 val trace : t -> Sat.trace
 
+(** Record the off-SAT-seam evidence for the next materialized theory [Conflict] clause.
+    The LIA adapter produces this immediately before returning [T_conflict]; the frozen
+    SAT trace then supplies the clause id. The recorder pairs the two streams in order.
+    A claimed witness is never silently discarded: the checker rechecks that its premise
+    literals are exactly the emitted clause's negation. *)
+val record_lia_conflict
+  :  t
+  -> premise_lits:Sat.lit list
+  -> multipliers:Oxsmt_lia.Rational.t list
+  -> unit
+
+(** Record a theory atom's authoritative SAT-variable binding at internalization time. *)
+val record_theory_atom : t -> var:Sat.var -> atom:Oxsmt_core.Term.t -> unit
+
 (** {2 Accessors — recorded events in chronological (emission) order} *)
 
 val inputs : t -> input_event list
+val atoms : t -> atom_event list
 val units : t -> unit_event list
 val learned : t -> learned_event list
 val theory_clauses : t -> theory_event list

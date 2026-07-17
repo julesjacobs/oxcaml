@@ -19,6 +19,11 @@
 module Sat = Oxsmt_solver.Sat
 module Recorder = Oxsmt_certificate.Recorder
 module Checker = Oxsmt_certificate.Checker
+module Cdclt = Oxsmt_interface.Cdclt
+module Session = Oxsmt_interface.Session
+module Context = Oxsmt_core.Context
+module Sort = Oxsmt_core.Sort
+module Rational = Oxsmt_lia.Rational
 
 let checks = ref 0
 let failures = ref 0
@@ -52,9 +57,9 @@ let expect name kind ev =
   let v = Checker.check ev in
   let ok =
     match kind, v with
-    (* today's good-cert verdict is the theory-leaf-conditional one (MED-1); plain [Valid]
-       is reserved for the leaf-checker tranche. *)
-    | `Valid, Checker.Valid_modulo_theory_leaves -> true
+    | `Valid, (Checker.Valid_modulo_theory_leaves | Checker.Valid) -> true
+    | `Fully_valid, Checker.Valid -> true
+    | `Modulo, Checker.Valid_modulo_theory_leaves -> true
     | `Invalid, Checker.Invalid _ -> true
     | `Unsupported, Checker.Unsupported _ -> true
     | _ -> false
@@ -74,7 +79,7 @@ let expect_via_fallback name ev =
   let v = Checker.check ev in
   let fired = Checker.fallback_firing_count () in
   match v with
-  | Checker.Valid_modulo_theory_leaves when fired > 0 -> ()
+  | (Checker.Valid_modulo_theory_leaves | Checker.Valid) when fired > 0 -> ()
   | _ ->
     incr failures;
     Printf.printf
@@ -338,6 +343,61 @@ let high4_ambiguous () =
   Checker.of_recorder rec_ ~assumptions:[]
 ;;
 
+(* End-to-end LIA leaf witness: [x <= 0] and [x >= 1] produce one Farkas-backed theory
+   Conflict. Cdclt records the SAT-var->atom statement separately from the multiplier
+   witness, Recorder binds the latter to the next frozen-seam Conflict id, and Checker
+   independently recomputes the contradiction. *)
+let lia_farkas_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_lia_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "cert_x" Sort.int) in
+  Session.assert_term s (Context.le ctx x (Context.int_const ctx 0));
+  Session.assert_term s (Context.le ctx (Context.int_const ctx 1) x);
+  check "lia-farkas: solve unsat" (Session.check_sat s = Session.Unsat);
+  Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+let strip_lia_witnesses (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (e : Recorder.theory_event) -> { e with Recorder.lia_witness = None })
+        ev.theory
+  }
+;;
+
+let zero_lia_multipliers (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (e : Recorder.theory_event) ->
+           match e.Recorder.lia_witness with
+           | None -> e
+           | Some witness ->
+             let premises =
+               List.map
+                 (fun (p : Recorder.lia_premise) ->
+                    { p with Recorder.multiplier = Rational.zero })
+                 witness.Recorder.premises
+             in
+             { e with
+               Recorder.lia_witness = Some { Recorder.premises = premises }
+             })
+        ev.theory
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 (* A HAND-BUILT, order-sensitive learned-clause chain (full control for the ordered-RUP
    discrimination). Inputs (all Query): id10 [a∨b], id11 [¬a∨c], id12 [¬a∨¬c] entail b;
@@ -361,6 +421,7 @@ let mk_learned id clause antecedents : Recorder.learned_event =
 let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
   { Checker.inputs =
       [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] learned_ants ]
   ; theory = []
@@ -380,6 +441,7 @@ let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
 let handbuilt_unentailed ?(learned_ants = [ 10; 11; 12 ]) () : Checker.events =
   { Checker.inputs =
       [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| c_ |] learned_ants ]
   ; theory = []
@@ -400,6 +462,7 @@ let exploit_self_cite : Checker.events =
   let x = Sat.pos 3
   and nx = Sat.neg 3 in
   { Checker.inputs = []
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| x |] [ 20 ]; mk_learned 21 [| nx |] [ 21 ] ]
   ; theory = []
@@ -412,6 +475,7 @@ let exploit_self_cite : Checker.events =
    is sat, a=true) as unsat. id20 cites id21 and id21 cites id20; pre-fix both "verify". *)
 let exploit_mutual : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| na_ |] [ 21 ]; mk_learned 21 [| na_ |] [ 20 ] ]
   ; theory = []
@@ -426,9 +490,13 @@ let exploit_mutual : Checker.events =
    slot 0 — an empty Reason is malformed → INVALID. Query [{a}] is SAT. *)
 let exploit_empty_reason : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = []
-  ; theory = [ ({ id = 30; clause = [||]; role = Sat.Reason } : Recorder.theory_event) ]
+  ; theory =
+      [ ({ id = 30; clause = [||]; role = Sat.Reason; lia_witness = None }
+          : Recorder.theory_event)
+      ]
   ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
   ; assumptions = []
   }
@@ -442,6 +510,7 @@ let exploit_empty_reason : Checker.events =
    ambiguity (M6: a clean discriminator of the #153a admission guard). *)
 let exploit_ambiguous_admission : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 10 [| na_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -456,6 +525,7 @@ let exploit_ambiguous_admission : Checker.events =
    (dedup at ingest) this is VALID. *)
 let overreject_dup_lit : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_; a_ |]; mk_input 11 [| na_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -480,6 +550,7 @@ let mk_lemma_input id clause : Recorder.input_event =
 
 let exploit_empty_lemma_root_empty : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -490,6 +561,7 @@ let exploit_empty_lemma_root_empty : Checker.events =
 
 let exploit_empty_lemma_level0 : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -500,6 +572,7 @@ let exploit_empty_lemma_level0 : Checker.events =
 
 let exploit_empty_lemma_failed_assumption : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -519,10 +592,13 @@ let exploit_empty_lemma_failed_assumption : Checker.events =
    refutes. *)
 let bogus_theory_conflict_empty_core_e3 : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory =
-      [ ({ id = 30; clause = [| b_ |]; role = Sat.Conflict } : Recorder.theory_event) ]
+      [ ({ id = 30; clause = [| b_ |]; role = Sat.Conflict; lia_witness = None }
+          : Recorder.theory_event)
+      ]
   ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
   ; assumptions = []
   }
@@ -532,6 +608,7 @@ let bogus_theory_conflict_empty_core_e3 : Checker.events =
    the empty clause = false, which is legitimately unsat. Stays VALID pre- and post-fix. *)
 let empty_query_input_ok : Checker.events =
   { Checker.inputs = [ mk_input 1 [||] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -553,6 +630,7 @@ let id162_satisfied_skip : Checker.events =
       ; mk_input 12 [| na_; c_ |]
       ; mk_input 13 [| na_; nc_ |]
       ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12; 13 ] ]
   ; theory = []
@@ -568,6 +646,7 @@ let id162_satisfied_skip : Checker.events =
 let neither_unit_nor_satisfied : Checker.events =
   let d_ = Sat.pos 3 in
   { Checker.inputs = [ mk_input 10 [| a_; b_ |]; mk_input 11 [| c_; d_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10; 11 ] ]
   ; theory = []
@@ -583,6 +662,7 @@ let neither_unit_nor_satisfied : Checker.events =
 let satisfied_but_no_conflict : Checker.events =
   { Checker.inputs =
       [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; c_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12 ] ]
   ; theory = []
@@ -600,6 +680,7 @@ let satisfied_but_no_conflict : Checker.events =
    the fix accepts it. *)
 let e2_fallback_closure_inconsistent : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| na_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -614,6 +695,7 @@ let e2_fallback_closure_inconsistent : Checker.events =
    star. (Rejects pre- and post-fix; the point is that the fallback did NOT open a hole.) *)
 let e2_cited_not_falsified_closure_consistent : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = []
   ; theory = []
@@ -639,6 +721,7 @@ let learned_fallback_entailed : Checker.events =
       ; mk_input 13 [| d_ |]
       ; mk_input 14 [| d_; b_ |]
       ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 14 ] ]
   ; theory = []
@@ -654,6 +737,7 @@ let learned_fallback_entailed : Checker.events =
    NO conflict → INVALID. *)
 let learned_unentailed : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10 ] ]
   ; theory = []
@@ -685,6 +769,24 @@ let () =
   expect "positive: CRIT-3 first solve" `Valid ev1;
   expect "positive: CRIT-3 repeated-solve re-emit" `Valid ev2;
   expect "positive: hand-built order-sensitive chain" `Valid (handbuilt ());
+  let lia_ev = lia_farkas_conflict () in
+  check
+    "positive: LIA stream carries a Farkas-witnessed Conflict leaf"
+    (List.exists
+       (fun (e : Recorder.theory_event) -> Option.is_some e.Recorder.lia_witness)
+       lia_ev.Checker.theory);
+  expect
+    "positive: all theory leaves witnessed -> fully VALID"
+    `Fully_valid
+    lia_ev;
+  expect
+    "coverage: stripping a valid LIA witness stays conditional"
+    `Modulo
+    (strip_lia_witnesses lia_ev);
+  expect
+    "corrupt: zeroed Farkas multipliers -> INVALID"
+    `Invalid
+    (zero_lia_multipliers lia_ev);
   (* board #153b — EXACT antecedent-SET (and order) on a real chain, not length-only. The
      order scenario learns [¬b] from [¬b∨c] then the conflict [¬b∨¬c]; the frozen contract
      order [rₙ..r₁; conflict] is exactly [ {¬b,c}; {¬b,¬c} ] = [ [-2;3]; [-3;-2] ]. *)
@@ -870,10 +972,13 @@ let () =
      UNSUPPORTED, never VALID. Hand-built: the terminal cites the empty theory conflict. *)
   let unsupported_empty_conflict : Checker.events =
     { Checker.inputs = [ mk_input 10 [| a_ |] ]
+    ; atoms = []
     ; units = []
     ; learned = []
     ; theory =
-        [ ({ id = 30; clause = [||]; role = Sat.Conflict } : Recorder.theory_event) ]
+        [ ({ id = 30; clause = [||]; role = Sat.Conflict; lia_witness = None }
+            : Recorder.theory_event)
+        ]
     ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
     ; assumptions = []
     }

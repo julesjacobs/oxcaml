@@ -5,4 +5,4 @@
 
 (library
  (name oxsmt_certificate)
- (libraries oxsmt_solver))
+ (libraries oxsmt_core oxsmt_lia oxsmt_solver))
