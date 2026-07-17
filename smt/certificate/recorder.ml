@@ -11,13 +11,50 @@ type lia_premise =
   }
 
 type lia_conflict_witness = { premises : lia_premise list }
-
 type euf_leaf_witness = { clause : Sat.lit list }
 
 type dt_distinctness_witness =
   { clause : Sat.lit list
   ; left : Oxsmt_core.Term.t
   ; right : Oxsmt_core.Term.t
+  }
+
+type rewrite_statement =
+  { id : int
+  ; context : Oxsmt_core.Context.t
+  ; original : Oxsmt_core.Term.t list
+  ; reduced : Oxsmt_core.Term.t list
+  }
+
+type equality_definition =
+  { name : string
+  ; sort : Oxsmt_core.Sort.t
+  ; value : Oxsmt_core.Term.t
+  }
+
+type equality_elimination_witness =
+  { statement_id : int
+  ; definitions : equality_definition list
+  }
+
+type clausify_group =
+  { id : int
+  ; statement_id : int
+  ; source : Oxsmt_core.Term.t
+  ; preprocessed : Oxsmt_core.Term.t
+  ; selector : Sat.var option
+  ; bindings : (Oxsmt_core.Term.t * Sat.var) list option
+  ; input_ids : int list
+  }
+
+type pending_clausify =
+  { id : int
+  ; statement_id : int
+  ; source : Oxsmt_core.Term.t
+  ; preprocessed : Oxsmt_core.Term.t
+  ; mutable selector : Sat.var option
+  ; mutable bindings : (Oxsmt_core.Term.t * Sat.var) list option
+  ; mutable input_ids_rev : int list
   }
 
 type atom_event =
@@ -29,6 +66,7 @@ type input_event =
   { id : int
   ; clause : Sat.lit array
   ; origin : Sat.origin
+  ; clausify_group : int option
   }
 
 type unit_event =
@@ -61,6 +99,12 @@ type dt_claim =
 (* Events are accumulated newest-first (O(1) append) and reversed by the accessors. *)
 type t =
   { mutable inputs_rev : input_event list
+  ; mutable rewrite_statements_rev : rewrite_statement list
+  ; mutable equality_witnesses_rev : equality_elimination_witness list
+  ; mutable clausify_groups_rev : clausify_group list
+  ; mutable next_statement_id : int
+  ; mutable next_clausify_id : int
+  ; mutable pending_clausify : pending_clausify option
   ; mutable atoms_rev : atom_event list
   ; mutable units_rev : unit_event list
   ; mutable learned_rev : learned_event list
@@ -73,6 +117,12 @@ type t =
 
 let create () =
   { inputs_rev = []
+  ; rewrite_statements_rev = []
+  ; equality_witnesses_rev = []
+  ; clausify_groups_rev = []
+  ; next_statement_id = 0
+  ; next_clausify_id = 0
+  ; pending_clausify = None
   ; atoms_rev = []
   ; units_rev = []
   ; learned_rev = []
@@ -82,6 +132,60 @@ let create () =
   ; dt_claims = []
   ; conclusion = None
   }
+;;
+
+let record_equality_elimination t ~context ~original ~reduced ~definitions =
+  let id = t.next_statement_id in
+  t.next_statement_id <- id + 1;
+  t.rewrite_statements_rev
+  <- { id; context; original; reduced } :: t.rewrite_statements_rev;
+  t.equality_witnesses_rev
+  <- { statement_id = id; definitions } :: t.equality_witnesses_rev;
+  id
+;;
+
+let begin_clausify t ~statement_id ~source ~preprocessed =
+  if Option.is_some t.pending_clausify
+  then invalid_arg "Recorder.begin_clausify: nested clausification group";
+  let id = t.next_clausify_id in
+  t.next_clausify_id <- id + 1;
+  t.pending_clausify
+  <- Some
+       { id
+       ; statement_id
+       ; source
+       ; preprocessed
+       ; selector = None
+       ; bindings = None
+       ; input_ids_rev = []
+       }
+;;
+
+let record_clausify_bindings t ~selector ~bindings =
+  match t.pending_clausify with
+  | None -> ()
+  | Some pending ->
+    if Option.is_some pending.bindings
+    then invalid_arg "Recorder.record_clausify_bindings: duplicate binding map";
+    pending.selector <- Some selector;
+    pending.bindings <- Some bindings
+;;
+
+let end_clausify t =
+  match t.pending_clausify with
+  | None -> invalid_arg "Recorder.end_clausify: no open clausification group"
+  | Some pending ->
+    t.clausify_groups_rev
+    <- { id = pending.id
+       ; statement_id = pending.statement_id
+       ; source = pending.source
+       ; preprocessed = pending.preprocessed
+       ; selector = pending.selector
+       ; bindings = pending.bindings
+       ; input_ids = List.rev pending.input_ids_rev
+       }
+       :: t.clausify_groups_rev;
+    t.pending_clausify <- None
 ;;
 
 let record_lia_conflict t ~premise_lits ~multipliers =
@@ -115,7 +219,14 @@ let record_theory_atom t ~var ~atom = t.atoms_rev <- { var; atom } :: t.atoms_re
 
 let trace t : Sat.trace =
   { Sat.on_input =
-      (fun ~id ~clause ~origin -> t.inputs_rev <- { id; clause; origin } :: t.inputs_rev)
+      (fun ~id ~clause ~origin ->
+        let clausify_group =
+          Option.map (fun (pending : pending_clausify) -> pending.id) t.pending_clausify
+        in
+        t.inputs_rev <- { id; clause; origin; clausify_group } :: t.inputs_rev;
+        match origin, t.pending_clausify with
+        | Sat.Query, Some pending -> pending.input_ids_rev <- id :: pending.input_ids_rev
+        | (Sat.Query | Sat.Theory_lemma), (None | Some _) -> ())
   ; on_unit = (fun ~id ~lit -> t.units_rev <- { id; lit } :: t.units_rev)
   ; on_learned =
       (fun ~id ~clause ~antecedents ~btlevel ->
@@ -136,8 +247,7 @@ let trace t : Sat.trace =
         in
         let dt_claim =
           List.find_opt
-            (fun (claim : dt_claim) ->
-               claim.witness.clause = Array.to_list clause)
+            (fun (claim : dt_claim) -> claim.witness.clause = Array.to_list clause)
             t.dt_claims
         in
         let dt_registry, dt_witness =
@@ -146,20 +256,16 @@ let trace t : Sat.trace =
           | Some claim -> Some claim.registry, Some claim.witness
         in
         t.theory_rev
-        <- { id
-           ; clause
-           ; role
-           ; lia_witness
-           ; euf_witness
-           ; dt_registry
-           ; dt_witness
-           }
+        <- { id; clause; role; lia_witness; euf_witness; dt_registry; dt_witness }
            :: t.theory_rev)
   ; on_unsat = (fun c -> t.conclusion <- Some c)
   }
 ;;
 
 let inputs t = List.rev t.inputs_rev
+let rewrite_statements t = List.rev t.rewrite_statements_rev
+let equality_witnesses t = List.rev t.equality_witnesses_rev
+let clausify_groups t = List.rev t.clausify_groups_rev
 let atoms t = List.rev t.atoms_rev
 let units t = List.rev t.units_rev
 let learned t = List.rev t.learned_rev

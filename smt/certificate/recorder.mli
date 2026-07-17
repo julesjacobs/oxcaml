@@ -46,6 +46,34 @@ type dt_distinctness_witness =
   ; right : Oxsmt_core.Term.t
   }
 
+type rewrite_statement =
+  { id : int
+  ; context : Oxsmt_core.Context.t
+  ; original : Oxsmt_core.Term.t list
+  ; reduced : Oxsmt_core.Term.t list
+  }
+
+type equality_definition =
+  { name : string
+  ; sort : Oxsmt_core.Sort.t
+  ; value : Oxsmt_core.Term.t
+  }
+
+type equality_elimination_witness =
+  { statement_id : int
+  ; definitions : equality_definition list
+  }
+
+type clausify_group =
+  { id : int
+  ; statement_id : int
+  ; source : Oxsmt_core.Term.t
+  ; preprocessed : Oxsmt_core.Term.t
+  ; selector : Sat.var option
+  ; bindings : (Oxsmt_core.Term.t * Sat.var) list option
+  ; input_ids : int list
+  }
+
 (** The arithmetic meaning assigned to one SAT theory variable. This belongs to the
     certificate statement, not to an individual Farkas proof: the checker rejects
     duplicate/rebound variables and requires every witness premise to resolve here. *)
@@ -58,6 +86,7 @@ type input_event =
   { id : int
   ; clause : Sat.lit array (** the RAW clause, before level-0 filtering *)
   ; origin : Sat.origin
+  ; clausify_group : int option
   }
 
 type unit_event =
@@ -117,12 +146,40 @@ val record_dt_distinctness
   -> right:Oxsmt_core.Term.t
   -> unit
 
+(** Record the original/reduced W1b statement and its separate definition witness. The
+    returned id is an opaque group key for the session-side clausification callbacks. *)
+val record_equality_elimination
+  :  t
+  -> context:Oxsmt_core.Context.t
+  -> original:Oxsmt_core.Term.t list
+  -> reduced:Oxsmt_core.Term.t list
+  -> definitions:equality_definition list
+  -> int
+
+val begin_clausify
+  :  t
+  -> statement_id:int
+  -> source:Oxsmt_core.Term.t
+  -> preprocessed:Oxsmt_core.Term.t
+  -> unit
+
+val record_clausify_bindings
+  :  t
+  -> selector:Sat.var
+  -> bindings:(Oxsmt_core.Term.t * Sat.var) list
+  -> unit
+
+val end_clausify : t -> unit
+
 (** Record a theory atom's authoritative SAT-variable binding at internalization time. *)
 val record_theory_atom : t -> var:Sat.var -> atom:Oxsmt_core.Term.t -> unit
 
 (** {2 Accessors — recorded events in chronological (emission) order} *)
 
 val inputs : t -> input_event list
+val rewrite_statements : t -> rewrite_statement list
+val equality_witnesses : t -> equality_elimination_witness list
+val clausify_groups : t -> clausify_group list
 val atoms : t -> atom_event list
 val units : t -> unit_event list
 val learned : t -> learned_event list

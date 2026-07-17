@@ -8,17 +8,23 @@ module Term = Oxsmt_core.Term
 module Theory_view = Oxsmt_core.Theory_view
 module Symbol = Oxsmt_core.Symbol
 module Sort = Oxsmt_core.Sort
+module Env = Oxsmt_core.Env
+module Context = Oxsmt_core.Context
+module Cnf = Oxsmt_preprocess.Cnf
 module Datatype_defs = Oxsmt_core.Datatype_defs
 module Rational = Oxsmt_lia.Rational
 
 type verdict =
-  | Valid_modulo_theory_leaves
+  | Valid_modulo_unchecked_steps
   | Valid
   | Invalid of string
   | Unsupported of string
 
 type events =
   { inputs : Recorder.input_event list
+  ; rewrite_statements : Recorder.rewrite_statement list
+  ; equality_witnesses : Recorder.equality_elimination_witness list
+  ; clausify_groups : Recorder.clausify_group list
   ; atoms : Recorder.atom_event list
   ; units : Recorder.unit_event list
   ; learned : Recorder.learned_event list
@@ -29,6 +35,9 @@ type events =
 
 let of_recorder r ~assumptions =
   { inputs = Recorder.inputs r
+  ; rewrite_statements = Recorder.rewrite_statements r
+  ; equality_witnesses = Recorder.equality_witnesses r
+  ; clausify_groups = Recorder.clausify_groups r
   ; atoms = Recorder.atoms r
   ; units = Recorder.units r
   ; learned = Recorder.learned r
@@ -39,7 +48,7 @@ let of_recorder r ~assumptions =
 ;;
 
 let string_of_verdict = function
-  | Valid_modulo_theory_leaves -> "VALID(modulo theory leaves)"
+  | Valid_modulo_unchecked_steps -> "VALID(modulo unchecked steps)"
   | Valid -> "VALID"
   | Invalid reason -> "INVALID(" ^ reason ^ ")"
   | Unsupported feature -> "UNSUPPORTED(" ^ feature ^ ")"
@@ -891,7 +900,291 @@ let verify_dt_distinctness
   | exn -> Error ("datatype distinctness replay raised: " ^ Printexc.to_string exn)
 ;;
 
-let check ev =
+(* Independent replay of the always-on W1b equality-elimination presolve. This is a
+   definition-level reimplementation: it does not call [Presolve.run]. The recorded
+   original/reduced terms are the statement; [definitions] is the witness. Exact output
+   comparison is physical because the statement carries the Session Context and every term
+   is first proven to belong to it in [check]. *)
+let verify_equality_elimination
+  (statement : Recorder.rewrite_statement)
+  (witness : Recorder.equality_elimination_witness)
+  =
+  try
+    let ctx = statement.Recorder.context in
+    let same a b = a == b in
+    let rec flatten (term : Term.t) =
+      match term.Term.node with
+      | Term.And children -> List.concat_map flatten (Iarr.to_list children)
+      | _ -> [ term ]
+    in
+    let rec occurs variable (term : Term.t) =
+      same variable term
+      ||
+      match term.Term.node with
+      | Term.App (_, args) -> Iarr.exists (occurs variable) args
+      | Term.Arith linear ->
+        Iarr.exists (fun (child, _) -> occurs variable child) linear.coeffs
+      | Term.Real_arith linear ->
+        Iarr.exists (fun (child, _) -> occurs variable child) linear.coeffs
+      | Term.Le child | Term.Not child -> occurs variable child
+      | Term.Eq (left, right) -> occurs variable left || occurs variable right
+      | Term.And children | Term.Or children -> Iarr.exists (occurs variable) children
+      | Term.Ite (condition, yes, no) ->
+        occurs variable condition || occurs variable yes || occurs variable no
+      | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> false
+    in
+    let rec uf_free (term : Term.t) =
+      match term.Term.node with
+      | Term.App (_, args) -> Iarr.length args = 0
+      | Term.Arith linear -> Iarr.for_all (fun (child, _) -> uf_free child) linear.coeffs
+      | Term.Real_arith linear ->
+        Iarr.for_all (fun (child, _) -> uf_free child) linear.coeffs
+      | Term.Le child | Term.Not child -> uf_free child
+      | Term.Eq (left, right) -> uf_free left && uf_free right
+      | Term.And children | Term.Or children -> Iarr.for_all uf_free children
+      | Term.Ite (condition, yes, no) -> uf_free condition && uf_free yes && uf_free no
+      | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> true
+    in
+    let under_uf_vars assertions =
+      let vars = ref Term.Set.empty in
+      let visited : (int * bool, unit) Hashtbl.t = Hashtbl.create 256 in
+      let rec walk ~under_uf (term : Term.t) =
+        let key = term.Term.tag, under_uf in
+        if not (Hashtbl.mem visited key)
+        then (
+          Hashtbl.replace visited key ();
+          match term.Term.node with
+          | Term.App (_, args) when Iarr.length args > 0 ->
+            Iarr.iter (walk ~under_uf:true) args
+          | Term.App (_, _) -> if under_uf then vars := Term.Set.add term !vars
+          | Term.Arith linear ->
+            Iarr.iter (fun (child, _) -> walk ~under_uf child) linear.coeffs
+          | Term.Real_arith linear ->
+            Iarr.iter (fun (child, _) -> walk ~under_uf child) linear.coeffs
+          | Term.Le child | Term.Not child -> walk ~under_uf child
+          | Term.Eq (left, right) ->
+            walk ~under_uf left;
+            walk ~under_uf right
+          | Term.And children | Term.Or children -> Iarr.iter (walk ~under_uf) children
+          | Term.Ite (condition, yes, no) ->
+            walk ~under_uf condition;
+            walk ~under_uf yes;
+            walk ~under_uf no
+          | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ())
+      in
+      List.iter (walk ~under_uf:false) assertions;
+      !vars
+    in
+    let bare_int_variable (term : Term.t) =
+      match term.Term.node with
+      | Term.App (symbol, args) ->
+        Iarr.length args = 0
+        && Sort.equal term.Term.sort Sort.int
+        && not (Env.is_reserved_name (Symbol.name symbol))
+      | _ -> false
+    in
+    let candidate (term : Term.t) =
+      match term.Term.node with
+      | Term.Eq (left, right) when Sort.equal left.Term.sort Sort.int ->
+        if bare_int_variable left && not (occurs left right)
+        then Some (left, right)
+        else if bare_int_variable right && not (occurs right left)
+        then Some (right, left)
+        else None
+      | _ -> None
+    in
+    let reaches visited substitution ~target term =
+      Term.Table.clear visited;
+      let found = ref false in
+      let rec walk (term : Term.t) =
+        if not !found
+        then (
+          match term.Term.node with
+          | Term.App (_, args) when Iarr.length args = 0 ->
+            if same term target
+            then found := true
+            else if not (Term.Table.mem visited term)
+            then (
+              Term.Table.replace visited term ();
+              match Term.Map.find_opt term substitution with
+              | Some value -> walk value
+              | None -> ())
+          | Term.App (_, args) -> Iarr.iter walk args
+          | Term.Arith linear -> Iarr.iter (fun (child, _) -> walk child) linear.coeffs
+          | Term.Real_arith linear ->
+            Iarr.iter (fun (child, _) -> walk child) linear.coeffs
+          | Term.Le child | Term.Not child -> walk child
+          | Term.Eq (left, right) ->
+            walk left;
+            walk right
+          | Term.And children | Term.Or children -> Iarr.iter walk children
+          | Term.Ite (condition, yes, no) ->
+            walk condition;
+            walk yes;
+            walk no
+          | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> ())
+      in
+      walk term;
+      !found
+    in
+    let conjuncts = List.concat_map flatten statement.Recorder.original in
+    let interface_variables = under_uf_vars statement.Recorder.original in
+    let substitution = ref Term.Map.empty in
+    let order = ref [] in
+    let reach_visited = Term.Table.create 256 in
+    let tagged =
+      List.map
+        (fun conjunct ->
+          match candidate conjunct with
+          | Some (variable, value)
+            when (not (Term.Map.mem variable !substitution))
+                 && (not (Term.Set.mem variable interface_variables))
+                 && uf_free value
+                 && not (reaches reach_visited !substitution ~target:variable value) ->
+            substitution := Term.Map.add variable value !substitution;
+            order := variable :: !order;
+            `Definition
+          | _ -> `Keep conjunct)
+        conjuncts
+    in
+    let expected_reduced, expected_definitions =
+      if Term.Map.is_empty !substitution
+      then statement.Recorder.original, []
+      else (
+        let substitution = !substitution in
+        let memo = Term.Table.create 256 in
+        let map_changed rewrite items =
+          let changed = ref false in
+          let rewritten =
+            List.map
+              (fun item ->
+                let item' = rewrite item in
+                if not (same item item') then changed := true;
+                item')
+              items
+          in
+          if !changed then Some rewritten else None
+        in
+        let rec substitute (term : Term.t) =
+          match Term.Table.find_opt memo term with
+          | Some result -> result
+          | None ->
+            let result =
+              match Term.Map.find_opt term substitution with
+              | Some value -> substitute value
+              | None -> rebuild term
+            in
+            Term.Table.add memo term result;
+            result
+        and rebuild (term : Term.t) =
+          match term.Term.node with
+          | Term.Bool_const _ | Term.Int_const _ | Term.Real_const _ -> term
+          | Term.App (symbol, args) ->
+            if Iarr.length args = 0
+            then term
+            else (
+              match map_changed substitute (Iarr.to_list args) with
+              | None -> term
+              | Some args -> Context.app ctx symbol args)
+          | Term.Arith linear ->
+            let changed = ref false in
+            let coefficients =
+              List.map
+                (fun (child, coefficient) ->
+                  let child' = substitute child in
+                  if not (same child child') then changed := true;
+                  coefficient, child')
+                (Iarr.to_list linear.coeffs)
+            in
+            if !changed
+            then Context.linear_combination_big ctx coefficients linear.const
+            else term
+          | Term.Real_arith linear ->
+            let changed = ref false in
+            let coefficients =
+              List.map
+                (fun (child, coefficient) ->
+                  let child' = substitute child in
+                  if not (same child child') then changed := true;
+                  coefficient, child')
+                (Iarr.to_list linear.coeffs)
+            in
+            if !changed
+            then Context.real_linear_combination_big ctx coefficients linear.const
+            else term
+          | Term.Le child ->
+            let zero = Context.int_const ctx 0 in
+            let child' = substitute child in
+            if same child child' then term else Context.le ctx child' zero
+          | Term.Eq (left, right) ->
+            let left' = substitute left
+            and right' = substitute right in
+            if same left left' && same right right'
+            then term
+            else Context.eq ctx left' right'
+          | Term.Not child ->
+            let child' = substitute child in
+            if same child child' then term else Context.not_ ctx child'
+          | Term.And children ->
+            (match map_changed substitute (Iarr.to_list children) with
+             | None -> term
+             | Some children -> Context.and_ ctx children)
+          | Term.Or children ->
+            (match map_changed substitute (Iarr.to_list children) with
+             | None -> term
+             | Some children -> Context.or_ ctx children)
+          | Term.Ite (condition, yes, no) ->
+            let condition' = substitute condition
+            and yes' = substitute yes
+            and no' = substitute no in
+            if same condition condition' && same yes yes' && same no no'
+            then term
+            else Context.ite ctx condition' yes' no'
+        in
+        let reduced =
+          List.filter_map
+            (function
+              | `Definition -> None
+              | `Keep conjunct -> Some (substitute conjunct))
+            tagged
+        in
+        let definitions =
+          List.rev_map
+            (fun variable ->
+              let name =
+                match variable.Term.node with
+                | Term.App (symbol, _) -> Symbol.name symbol
+                | _ -> assert false
+              in
+              name, variable.Term.sort, substitute variable)
+            !order
+        in
+        reduced, definitions)
+    in
+    let physical_list_equal left right =
+      List.length left = List.length right && List.for_all2 same left right
+    in
+    if not (physical_list_equal expected_reduced statement.Recorder.reduced)
+    then Error "recorded reduced assertions differ from independent W1b replay"
+    else (
+      let actual = witness.Recorder.definitions in
+      if List.length actual <> List.length expected_definitions
+      then Error "equality-elimination definition count differs from independent replay"
+      else if not
+                (List.for_all2
+                   (fun (name, sort, value) (definition : Recorder.equality_definition) ->
+                     String.equal name definition.Recorder.name
+                     && Sort.equal sort definition.Recorder.sort
+                     && same value definition.Recorder.value)
+                   expected_definitions
+                   actual)
+      then Error "equality-elimination definitions differ from independent replay"
+      else Ok ())
+  with
+  | exn -> Error ("equality-elimination replay raised: " ^ Printexc.to_string exn)
+;;
+
+let check_internal expected_original ev =
   try
     let resolve, ambiguous_ids = build_index ev in
     (* Core term identity is tag-based within one Context, but tags restart in every
@@ -945,6 +1238,117 @@ let check ev =
           admit_term witness.Recorder.left;
           admit_term witness.Recorder.right)
       ev.theory;
+    List.iter
+      (fun (statement : Recorder.rewrite_statement) ->
+        List.iter admit_term statement.Recorder.original;
+        List.iter admit_term statement.Recorder.reduced)
+      ev.rewrite_statements;
+    List.iter
+      (fun (witness : Recorder.equality_elimination_witness) ->
+        List.iter
+          (fun (definition : Recorder.equality_definition) ->
+            admit_term definition.Recorder.value)
+          witness.Recorder.definitions)
+      ev.equality_witnesses;
+    List.iter
+      (fun (group : Recorder.clausify_group) ->
+        admit_term group.Recorder.source;
+        admit_term group.Recorder.preprocessed;
+        match group.Recorder.bindings with
+        | None -> ()
+        | Some bindings -> List.iter (fun (term, _) -> admit_term term) bindings)
+      ev.clausify_groups;
+    (* A statement's [Context.t] is part of the independent W1b replay environment. Prove
+       ownership before any tag-keyed replay table is used: rebuilding each artifact term
+       through that Context must return the identical hash-consed node. This catches both
+       same-tag cross-Context aliases and disjoint-tag/same-Symbol rank mismatches. *)
+    (match ev.rewrite_statements with
+     | [] -> ()
+     | first :: rest ->
+       if List.exists
+            (fun (statement : Recorder.rewrite_statement) ->
+              statement.Recorder.context != first.Recorder.context)
+            rest
+       then rejectf "rewrite statements mix Context values";
+       let context = first.Recorder.context in
+       let memo = Term.Table.create 256 in
+       let rec require_owned (term : Term.t) =
+         if not (Term.Table.mem memo term)
+         then (
+           let rebuilt =
+             match term.Term.node with
+             | Term.Bool_const value -> Context.bool_const context value
+             | Term.Int_const value -> Context.int_const_big context value
+             | Term.Real_const value ->
+               Context.real_const_big context ~num:value.Term.num ~den:value.Term.den
+             | Term.App (symbol, args) ->
+               Context.app context symbol (List.map owned (Iarr.to_list args))
+             | Term.Arith linear ->
+               Context.linear_combination_big
+                 context
+                 (List.map
+                    (fun (child, coefficient) -> coefficient, owned child)
+                    (Iarr.to_list linear.coeffs))
+                 linear.const
+             | Term.Real_arith linear ->
+               Context.real_linear_combination_big
+                 context
+                 (List.map
+                    (fun (child, coefficient) -> coefficient, owned child)
+                    (Iarr.to_list linear.coeffs))
+                 linear.const
+             | Term.Le child ->
+               Context.le context (owned child) (Context.int_const context 0)
+             | Term.Eq (left, right) -> Context.eq context (owned left) (owned right)
+             | Term.Not child -> Context.not_ context (owned child)
+             | Term.And children ->
+               Context.and_ context (List.map owned (Iarr.to_list children))
+             | Term.Or children ->
+               Context.or_ context (List.map owned (Iarr.to_list children))
+             | Term.Ite (condition, yes, no) ->
+               Context.ite context (owned condition) (owned yes) (owned no)
+           in
+           if rebuilt != term
+           then
+             rejectf
+               "rewrite artifact term tag %d does not belong to its recorded Context"
+               term.Term.tag;
+           Term.Table.replace memo term ())
+       and owned term =
+         require_owned term;
+         term
+       in
+       List.iter
+         (fun (event : Recorder.atom_event) -> require_owned event.Recorder.atom)
+         ev.atoms;
+       List.iter
+         (fun (event : Recorder.theory_event) ->
+           match event.Recorder.dt_witness with
+           | None -> ()
+           | Some witness ->
+             require_owned witness.Recorder.left;
+             require_owned witness.Recorder.right)
+         ev.theory;
+       List.iter
+         (fun (statement : Recorder.rewrite_statement) ->
+           List.iter require_owned statement.Recorder.original;
+           List.iter require_owned statement.Recorder.reduced)
+         ev.rewrite_statements;
+       List.iter
+         (fun (witness : Recorder.equality_elimination_witness) ->
+           List.iter
+             (fun (definition : Recorder.equality_definition) ->
+               require_owned definition.Recorder.value)
+             witness.Recorder.definitions)
+         ev.equality_witnesses;
+       List.iter
+         (fun (group : Recorder.clausify_group) ->
+           require_owned group.Recorder.source;
+           require_owned group.Recorder.preprocessed;
+           match group.Recorder.bindings with
+           | None -> ()
+           | Some bindings -> List.iter (fun (term, _) -> require_owned term) bindings)
+         ev.clausify_groups);
     (* A query has one datatype declaration environment. Per-leaf copies are statement
        data, not proof data, but they must still agree globally: accepting different
        constructor classifications leaf-by-leaf would prove no single SMT problem. *)
@@ -963,10 +1367,14 @@ let check ev =
        even when textually equal: exactly one internalization event must own each SAT
        variable, matching the driver's 1:1 atom invariant. *)
     let atom_by_var = Hashtbl.create (List.length ev.atoms) in
+    let atom_var_by_term = Term.Table.create (List.length ev.atoms) in
     List.iter
       (fun (e : Recorder.atom_event) ->
         if Hashtbl.mem atom_by_var e.Recorder.var
         then rejectf "duplicate theory-atom declaration for SAT var %d" e.Recorder.var;
+        if Term.Table.mem atom_var_by_term e.Recorder.atom
+        then rejectf "duplicate theory-atom declaration for one statement term";
+        Term.Table.replace atom_var_by_term e.Recorder.atom e.Recorder.var;
         Hashtbl.replace atom_by_var e.Recorder.var e.Recorder.atom)
       ev.atoms;
     let resolve_atom var = Hashtbl.find_opt atom_by_var var in
@@ -998,6 +1406,344 @@ let check ev =
         guard_theory_leaf kind clause;
         kind, clause
     in
+    (* W1b statement/witness replay. Statement ids are separate from SAT clause ids. A
+       missing witness leaves coverage conditional; a claimed witness is a hard proof
+       obligation. Clausification groups bind every reduced term, in order, to the actual
+       Query input ids observed by the recorder while that term was internalized. The
+       subsequent [Preprocess.run]/CNF edge remains a separate trusted class. *)
+    let has_unverified_preprocessing = ref false in
+    let statements_by_id = Hashtbl.create (List.length ev.rewrite_statements) in
+    List.iter
+      (fun (statement : Recorder.rewrite_statement) ->
+        if Hashtbl.mem statements_by_id statement.Recorder.id
+        then rejectf "duplicate rewrite statement id %d" statement.Recorder.id;
+        Hashtbl.replace statements_by_id statement.Recorder.id statement)
+      ev.rewrite_statements;
+    (match expected_original with
+     | None -> ()
+     | Some original ->
+       let recorded_originals =
+         List.concat_map
+           (fun (statement : Recorder.rewrite_statement) -> statement.Recorder.original)
+           ev.rewrite_statements
+       in
+       if List.length recorded_originals <> List.length original
+          || not (List.for_all2 ( == ) recorded_originals original)
+       then
+         rejectf
+           "rewrite statement map does not exactly cover the caller-supplied original \
+            assertions");
+    let witnesses_by_id = Hashtbl.create (List.length ev.equality_witnesses) in
+    List.iter
+      (fun (witness : Recorder.equality_elimination_witness) ->
+        if not (Hashtbl.mem statements_by_id witness.Recorder.statement_id)
+        then
+          rejectf
+            "equality-elimination witness cites missing statement id %d"
+            witness.Recorder.statement_id;
+        if Hashtbl.mem witnesses_by_id witness.Recorder.statement_id
+        then
+          rejectf
+            "duplicate equality-elimination witness for statement id %d"
+            witness.Recorder.statement_id;
+        Hashtbl.replace witnesses_by_id witness.Recorder.statement_id witness)
+      ev.equality_witnesses;
+    let groups_by_id = Hashtbl.create (List.length ev.clausify_groups) in
+    List.iter
+      (fun (group : Recorder.clausify_group) ->
+        if Hashtbl.mem groups_by_id group.Recorder.id
+        then rejectf "duplicate clausification group id %d" group.Recorder.id;
+        Hashtbl.replace groups_by_id group.Recorder.id group)
+      ev.clausify_groups;
+    List.iter
+      (fun (input : Recorder.input_event) ->
+        match input.Recorder.clausify_group with
+        | None -> ()
+        | Some group_id ->
+          if input.Recorder.origin <> Sat.Query
+          then
+            rejectf
+              "non-Query input id %d claims clausification group %d"
+              input.Recorder.id
+              group_id;
+          if not (Hashtbl.mem groups_by_id group_id)
+          then
+            rejectf
+              "Query input id %d cites missing clausification group %d"
+              input.Recorder.id
+              group_id)
+      ev.inputs;
+    let grouped_input_ids = Hashtbl.create 256 in
+    let bound_term_by_var = Hashtbl.create 256 in
+    let persistent_var_by_term = Term.Table.create 256 in
+    let bound_vars = Hashtbl.create 256 in
+    let selectors = Hashtbl.create 16 in
+    List.iter
+      (fun (group : Recorder.clausify_group) ->
+        if not (Hashtbl.mem statements_by_id group.Recorder.statement_id)
+        then
+          rejectf
+            "clausification group cites missing rewrite statement id %d"
+            group.Recorder.statement_id;
+        if group.Recorder.input_ids = []
+        then
+          rejectf
+            "rewrite statement id %d has an empty clausification group"
+            group.Recorder.statement_id;
+        let backlinked_ids =
+          List.filter_map
+            (fun (input : Recorder.input_event) ->
+              match input.Recorder.clausify_group with
+              | Some group_id when group_id = group.Recorder.id -> Some input.Recorder.id
+              | None | Some _ -> None)
+            ev.inputs
+        in
+        if backlinked_ids <> group.Recorder.input_ids
+        then
+          rejectf
+            "clausification group id %d input list disagrees with the input-event \
+             backlinks"
+            group.Recorder.id;
+        (match group.Recorder.selector, group.Recorder.bindings with
+         | None, _ | _, None ->
+           rejectf
+             "clausification group id %d has no selector/local-variable binding map"
+             group.Recorder.id
+         | Some selector, Some bindings ->
+           let cnf = Cnf.clausify group.Recorder.preprocessed in
+           if List.length bindings <> Cnf.num_vars cnf
+           then
+             rejectf
+               "clausification group id %d binding count differs from re-clausification"
+               group.Recorder.id;
+           if Hashtbl.mem bound_vars selector
+           then
+             rejectf
+               "clausification group id %d selector aliases a bound CNF variable"
+               group.Recorder.id;
+           if Hashtbl.mem atom_by_var selector
+           then
+             rejectf
+               "clausification group id %d selector is declared as a theory atom"
+               group.Recorder.id;
+           Hashtbl.replace selectors selector ();
+           let local_vars = Hashtbl.create (List.length bindings) in
+           List.iteri
+             (fun index (term, variable) ->
+               let local_var = index + 1 in
+               if term != Cnf.subterm_of_var cnf local_var
+               then
+                 rejectf
+                   "clausification group id %d rebinds local CNF variable %d to a \
+                    different term"
+                   group.Recorder.id
+                   local_var;
+               if variable = selector
+               then
+                 rejectf
+                   "clausification group id %d maps local variable %d to its selector"
+                   group.Recorder.id
+                   local_var;
+               if Hashtbl.mem local_vars variable
+               then
+                 rejectf
+                   "clausification group id %d maps two local variables to SAT var %d"
+                   group.Recorder.id
+                   variable;
+               if Hashtbl.mem selectors variable
+               then
+                 rejectf
+                   "clausification group id %d maps a local variable to another group's \
+                    selector"
+                   group.Recorder.id;
+               Hashtbl.replace local_vars variable ();
+               Hashtbl.replace bound_vars variable ();
+               (match Hashtbl.find_opt bound_term_by_var variable with
+                | Some previous when previous != term ->
+                  rejectf
+                    "SAT var %d denotes two different terms across clausification groups"
+                    variable
+                | Some _ -> ()
+                | None -> Hashtbl.replace bound_term_by_var variable term);
+               if Cnf.is_atom_var cnf local_var
+               then (
+                 (match Term.Table.find_opt persistent_var_by_term term with
+                  | Some previous when previous <> variable ->
+                    rejectf
+                      "one persistent CNF atom maps to SAT vars %d and %d"
+                      previous
+                      variable
+                  | Some _ -> ()
+                  | None -> Term.Table.replace persistent_var_by_term term variable);
+                 (match Term.Table.find_opt atom_var_by_term term with
+                  | Some declared when declared <> variable ->
+                    rejectf
+                      "theory atom binding disagrees with its authoritative SAT-var \
+                       declaration"
+                  | Some _ | None -> ());
+                 let requires_theory_declaration =
+                   match term.Term.node with
+                   | Term.Le _ | Term.Eq _ -> true
+                   | Term.App (_, args) -> Iarr.length args > 0
+                   | Term.Bool_const _
+                   | Term.Int_const _
+                   | Term.Real_const _
+                   | Term.Arith _
+                   | Term.Real_arith _
+                   | Term.Not _
+                   | Term.And _
+                   | Term.Or _
+                   | Term.Ite _ -> false
+                 in
+                 match requires_theory_declaration, resolve_atom variable with
+                 | true, None ->
+                   rejectf
+                     "bound theory atom for SAT var %d has no authoritative declaration"
+                     variable
+                 | true, Some declared when declared != term ->
+                   rejectf "SAT var %d is declared for a different theory atom" variable
+                 | false, Some declared when declared != term ->
+                   rejectf
+                     "propositional CNF atom SAT var %d is also declared as a theory \
+                      atom for a different term"
+                     variable
+                 | true, Some _ | false, Some _ | false, None -> ())
+               else if Option.is_some (resolve_atom variable)
+               then
+                 rejectf "Tseitin SAT var %d is also declared as a theory atom" variable)
+             bindings;
+           let binding_array = Array.of_list bindings in
+           let map_literal literal =
+             let _, variable = binding_array.(Cnf.Lit.var literal - 1) in
+             if Cnf.Lit.is_positive literal then Sat.pos variable else Sat.neg variable
+           in
+           let expected_clauses_rev = ref [] in
+           Cnf.iter_clauses
+             (fun clause ->
+               expected_clauses_rev
+               := Array.of_list (Sat.neg selector :: List.map map_literal clause)
+                  :: !expected_clauses_rev)
+             cnf;
+           let expected_clauses = List.rev !expected_clauses_rev in
+           let actual_clauses =
+             List.map
+               (fun input_id ->
+                 match
+                   List.find_opt
+                     (fun (input : Recorder.input_event) -> input.Recorder.id = input_id)
+                     ev.inputs
+                 with
+                 | Some input -> input.Recorder.clause
+                 | None -> assert false)
+               group.Recorder.input_ids
+           in
+           if expected_clauses <> actual_clauses
+           then
+             rejectf
+               "clausification group id %d Query clauses differ from exact \
+                re-clausification"
+               group.Recorder.id);
+        List.iter
+          (fun input_id ->
+            if Hashtbl.mem grouped_input_ids input_id
+            then rejectf "Query input id %d belongs to two clausification groups" input_id;
+            Hashtbl.replace grouped_input_ids input_id ();
+            ignore
+              (resolve_as
+                 ~what:"rewrite clausification group"
+                 ~allowed:[ Kinput Sat.Query ]
+                 input_id
+               : kind * Sat.lit array))
+          group.Recorder.input_ids)
+      ev.clausify_groups;
+    (match expected_original with
+     | None -> ()
+     | Some _ ->
+       let forcing_units = Hashtbl.create 16 in
+       List.iter
+         (fun (input : Recorder.input_event) ->
+           match input.Recorder.origin, input.Recorder.clausify_group with
+           | Sat.Theory_lemma, _ | Sat.Query, Some _ -> ()
+           | Sat.Query, None ->
+             (match Array.to_list input.Recorder.clause with
+              | [ literal ]
+                when Sat.sign_of_lit literal
+                     && Hashtbl.mem selectors (Sat.var_of_lit literal) ->
+                let selector = Sat.var_of_lit literal in
+                if Hashtbl.mem forcing_units selector
+                then rejectf "duplicate ungrouped forcing unit for selector %d" selector;
+                Hashtbl.replace forcing_units selector ()
+              | _ ->
+                rejectf
+                  "caller-anchored Session certificate has an ungrouped Query input id \
+                   %d that is not a recorded selector-forcing unit"
+                  input.Recorder.id))
+         ev.inputs;
+       let seen_assumptions = Hashtbl.create 16 in
+       List.iter
+         (fun literal ->
+           let selector = Sat.var_of_lit literal in
+           if not (Sat.sign_of_lit literal && Hashtbl.mem selectors selector)
+           then
+             rejectf
+               "caller-anchored Session certificate carries a non-selector or negative \
+                assumption";
+           if Hashtbl.mem seen_assumptions selector
+           then rejectf "duplicate selector assumption for SAT var %d" selector;
+           Hashtbl.replace seen_assumptions selector ())
+         ev.assumptions;
+       Hashtbl.iter
+         (fun selector () ->
+           if not
+                (Hashtbl.mem forcing_units selector
+                 || List.mem (Sat.pos selector) ev.assumptions)
+           then
+             rejectf
+               "clausification selector %d is neither forced by an input unit nor \
+                supplied as an assumption"
+               selector)
+         selectors);
+    List.iter
+      (fun (statement : Recorder.rewrite_statement) ->
+        let groups =
+          List.filter
+            (fun (group : Recorder.clausify_group) ->
+              group.Recorder.statement_id = statement.Recorder.id)
+            ev.clausify_groups
+        in
+        if List.length groups <> List.length statement.Recorder.reduced
+        then
+          rejectf
+            "rewrite statement id %d has %d reduced terms but %d clausification groups"
+            statement.Recorder.id
+            (List.length statement.Recorder.reduced)
+            (List.length groups);
+        List.iter2
+          (fun (source : Term.t) (group : Recorder.clausify_group) ->
+            if source != group.Recorder.source
+            then
+              rejectf
+                "rewrite statement id %d clausifies a term other than its recorded \
+                 reduced output"
+                statement.Recorder.id)
+          statement.Recorder.reduced
+          groups;
+        if List.exists
+             (fun (group : Recorder.clausify_group) ->
+               group.Recorder.source != group.Recorder.preprocessed)
+             groups
+        then has_unverified_preprocessing := true;
+        match Hashtbl.find_opt witnesses_by_id statement.Recorder.id with
+        | None -> has_unverified_preprocessing := true
+        | Some witness ->
+          (match verify_equality_elimination statement witness with
+           | Ok () -> ()
+           | Error reason ->
+             rejectf
+               "rewrite statement id %d has an invalid equality-elimination witness: %s"
+               statement.Recorder.id
+               reason))
+      ev.rewrite_statements;
     (* terminal conclusion must be present (a truncated stream drops it). *)
     let conclusion =
       match ev.conclusion with
@@ -1248,7 +1994,13 @@ let check ev =
             clause DB by BCP");
     (* Promote only a proof whose every theory leaf was checked. Missing witness classes
        stay explicitly conditional; a bad claimed witness was rejected above. *)
-    if !has_unverified_theory_leaf then Valid_modulo_theory_leaves else Valid
+    if !has_unverified_theory_leaf || !has_unverified_preprocessing
+    then Valid_modulo_unchecked_steps
+    else Valid
   with
   | Reject v -> v
+  | exn -> Invalid ("certificate replay raised: " ^ Printexc.to_string exn)
 ;;
+
+let check events = check_internal None events
+let check_assertions ~original events = check_internal (Some original) events

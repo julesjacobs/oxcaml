@@ -426,6 +426,28 @@ val last_unknown_reason : t -> string
 (** {2 Certificate emission (ADR-0013)}
     — additive, compile-out-able side channel. *)
 
+type certificate_presolve_definition =
+  { name : string
+  ; sort : Oxsmt_core.Sort.t
+  ; value : Oxsmt_core.Term.t
+  }
+
+type presolve_certificate_trace =
+  { on_equality_elimination :
+      context:Oxsmt_core.Context.t
+      -> original:Oxsmt_core.Term.t list
+      -> reduced:Oxsmt_core.Term.t list
+      -> definitions:certificate_presolve_definition list
+      -> int
+  ; on_clausify_begin :
+      rewrite_id:int -> source:Oxsmt_core.Term.t -> preprocessed:Oxsmt_core.Term.t -> unit
+  ; on_clausify_bindings :
+      selector:Oxsmt_solver.Sat.var
+      -> bindings:(Oxsmt_core.Term.t * Oxsmt_solver.Sat.var) list
+      -> unit
+  ; on_clausify_end : unit -> unit
+  }
+
 (** Install (or, with [None], remove) a certificate-emission trace on the inner SAT core.
     {b Must be called on a PRISTINE session} — before the first {!assert_term}/{!push} or
     nonempty {!check_sat_assuming} —
@@ -441,6 +463,13 @@ val install_cert_trace : t -> Oxsmt_solver.Sat.trace option -> unit
     after a non-[None] SAT certificate trace and before assertions. [None] is the inert
     default. This channel is observational and never feeds solving. *)
 val install_leaf_certificate_trace : t -> Cdclt.leaf_certificate_trace option -> unit
+
+(** Off-seam evidence for W1b equality-elimination replay. The first callback records the
+    original/reduced term statement separately from its eliminated definitions; the
+    begin/end callbacks associate each reduced term with the SAT Query inputs emitted by
+    its later preprocessing and clausification. Install after {!install_cert_trace}, on a
+    pristine session. [None] is inert. *)
+val install_presolve_certificate_trace : t -> presolve_certificate_trace option -> unit
 
 (** Backward-compatible LIA-only companion to {!install_leaf_certificate_trace}. *)
 val install_lia_certificate_trace : t -> Cdclt.lia_certificate_trace option -> unit

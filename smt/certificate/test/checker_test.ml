@@ -28,6 +28,7 @@ module Sort = Oxsmt_core.Sort
 module Term = Oxsmt_core.Term
 module Defs = Oxsmt_core.Datatype_defs
 module Rational = Oxsmt_lia.Rational
+module Cnf = Oxsmt_preprocess.Cnf
 
 let checks = ref 0
 let failures = ref 0
@@ -61,9 +62,9 @@ let expect name kind ev =
   let v = Checker.check ev in
   let ok =
     match kind, v with
-    | `Valid, (Checker.Valid_modulo_theory_leaves | Checker.Valid) -> true
+    | `Valid, (Checker.Valid_modulo_unchecked_steps | Checker.Valid) -> true
     | `Fully_valid, Checker.Valid -> true
-    | `Modulo, Checker.Valid_modulo_theory_leaves -> true
+    | `Modulo, Checker.Valid_modulo_unchecked_steps -> true
     | `Invalid, Checker.Invalid _ -> true
     | `Unsupported, Checker.Unsupported _ -> true
     | _ -> false
@@ -72,6 +73,22 @@ let expect name kind ev =
   then (
     incr failures;
     Printf.printf "  FAIL %s: got %s\n" name (Checker.string_of_verdict v))
+;;
+
+let expect_assertions name kind ~original ev =
+  incr checks;
+  let verdict = Checker.check_assertions ~original ev in
+  let ok =
+    match kind, verdict with
+    | `Fully_valid, Checker.Valid -> true
+    | `Modulo, Checker.Valid_modulo_unchecked_steps -> true
+    | `Invalid, Checker.Invalid _ -> true
+    | _ -> false
+  in
+  if not ok
+  then (
+    incr failures;
+    Printf.printf "  FAIL %s: got %s\n" name (Checker.string_of_verdict verdict))
 ;;
 
 (* Assert VALID *and* that the learned-clause full-closure RUP fallback (task #56)
@@ -83,7 +100,7 @@ let expect_via_fallback name ev =
   let v = Checker.check ev in
   let fired = Checker.fallback_firing_count () in
   match v with
-  | (Checker.Valid_modulo_theory_leaves | Checker.Valid) when fired > 0 -> ()
+  | (Checker.Valid_modulo_unchecked_steps | Checker.Valid) when fired > 0 -> ()
   | _ ->
     incr failures;
     Printf.printf
@@ -91,6 +108,55 @@ let expect_via_fallback name ev =
       name
       (Checker.string_of_verdict v)
       fired
+;;
+
+let install_presolve_trace session recorder =
+  Session.install_presolve_certificate_trace
+    session
+    (Some
+       { Session.on_equality_elimination =
+           (fun ~context ~original ~reduced ~definitions ->
+             Recorder.record_equality_elimination
+               recorder
+               ~context
+               ~original
+               ~reduced
+               ~definitions:
+                 (List.map
+                    (fun (definition : Session.certificate_presolve_definition) ->
+                       { Recorder.name = definition.name
+                       ; sort = definition.sort
+                       ; value = definition.value
+                       })
+                    definitions))
+       ; on_clausify_begin =
+           (fun ~rewrite_id ~source ~preprocessed ->
+             Recorder.begin_clausify
+               recorder
+               ~statement_id:rewrite_id
+               ~source
+               ~preprocessed)
+       ; on_clausify_bindings =
+           (fun ~selector ~bindings ->
+             Recorder.record_clausify_bindings recorder ~selector ~bindings)
+       ; on_clausify_end = (fun () -> Recorder.end_clausify recorder)
+       })
+;;
+
+let install_leaf_trace session recorder =
+  Session.install_leaf_certificate_trace
+    session
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom recorder ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf recorder ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness recorder ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict recorder ~premise_lits ~multipliers)
+       })
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -345,6 +411,264 @@ let high4_ambiguous () =
   let r = Sat.solve s2 in
   check "high4: solver-2 unsat" (r = Sat.Unsat);
   Checker.of_recorder rec_ ~assumptions:[]
+;;
+
+(* End-to-end W1b replay. The first equality defines [x]; the second becomes [false]
+   after substitution, so the SAT proof is propositional and every independent obligation
+   can reach fully VALID. The recorder keeps original/reduced statement data separate
+   from the definition witness and groups the emitted Query inputs under the reduced
+   term. *)
+let equality_elimination_replay () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_presolve_x" Sort.int)
+  in
+  let one = Context.int_const context 1
+  and two = Context.int_const context 2 in
+  let assertions = [ Context.eq context x one; Context.eq context x two ] in
+  Session.assert_presolved session assertions;
+  check "presolve-replay: solve unsat" (Session.check_sat session = Session.Unsat);
+  ( Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session)
+  , assertions
+  , two )
+;;
+
+let replace_equality_definition_value (events : Checker.events) value =
+  { events with
+    equality_witnesses =
+      List.map
+        (fun (witness : Recorder.equality_elimination_witness) ->
+           { witness with
+             Recorder.definitions =
+               List.map
+                 (fun (definition : Recorder.equality_definition) ->
+                    { definition with Recorder.value })
+                 witness.Recorder.definitions
+           })
+        events.equality_witnesses
+  }
+;;
+
+let replace_reduced_statement (events : Checker.events) replacement =
+  { events with
+    rewrite_statements =
+      List.map
+        (fun (statement : Recorder.rewrite_statement) ->
+           { statement with Recorder.reduced = [ replacement ] })
+        events.rewrite_statements
+  ; clausify_groups =
+      List.map
+        (fun (group : Recorder.clausify_group) ->
+           { group with Recorder.source = replacement })
+        events.clausify_groups
+  }
+;;
+
+let drop_grouped_input (events : Checker.events) =
+  { events with
+    clausify_groups =
+      List.mapi
+        (fun index (group : Recorder.clausify_group) ->
+           if index = 0
+           then
+             { group with
+               Recorder.input_ids =
+                 (match group.Recorder.input_ids with
+                  | _ :: rest -> rest
+                  | [] -> [])
+             }
+           else group)
+        events.clausify_groups
+  }
+;;
+
+let erase_presolve_channel (events : Checker.events) =
+  { events with
+    inputs =
+      List.map
+        (fun (input : Recorder.input_event) ->
+           { input with Recorder.clausify_group = None })
+        events.inputs
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  }
+;;
+
+let foreign_definition_value (events : Checker.events) =
+  let original =
+    List.find_map
+      (fun (witness : Recorder.equality_elimination_witness) ->
+         match witness.Recorder.definitions with
+         | definition :: _ -> Some definition.Recorder.value
+         | [] -> None)
+      events.equality_witnesses
+    |> Option.get
+  in
+  let environment = Env.create () in
+  let context = Context.create environment in
+  let rec make index =
+    let candidate = Context.int_const context (1000 + index) in
+    if candidate.Term.tag = original.Term.tag
+    then candidate
+    else if candidate.Term.tag > original.Term.tag + 8
+    then failwith "presolve mixed-Context discriminator could not align tags"
+    else make (index + 1)
+  in
+  let foreign = make 0 in
+  replace_equality_definition_value events foreign, foreign.Term.tag = original.Term.tag
+;;
+
+let alias_cnf_binding_to_selector (events : Checker.events) =
+  let group = List.hd events.clausify_groups in
+  let selector = Option.get group.Recorder.selector in
+  let bindings =
+    Option.get group.Recorder.bindings |> List.map (fun (term, _) -> term, selector)
+  in
+  let cnf = Cnf.clausify group.Recorder.preprocessed in
+  let binding_array = Array.of_list bindings in
+  let map_literal literal =
+    let _, variable = binding_array.(Cnf.Lit.var literal - 1) in
+    if Cnf.Lit.is_positive literal then Sat.pos variable else Sat.neg variable
+  in
+  let clauses_rev = ref [] in
+  Cnf.iter_clauses
+    (fun clause ->
+       clauses_rev
+       := Array.of_list (Sat.neg selector :: List.map map_literal clause) :: !clauses_rev)
+    cnf;
+  let clauses = List.rev !clauses_rev in
+  let clause_by_id = List.combine group.Recorder.input_ids clauses in
+  { events with
+    inputs =
+      List.map
+        (fun (input : Recorder.input_event) ->
+           match List.assoc_opt input.Recorder.id clause_by_id with
+           | None -> input
+           | Some clause -> { input with Recorder.clause })
+        events.inputs
+  ; clausify_groups = [ { group with Recorder.bindings = Some bindings } ]
+  }
+;;
+
+let presolve_trace_lifecycle () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_presolve_trace session recorder;
+  let second_install_rejected =
+    match install_presolve_trace session recorder with
+    | () -> false
+    | exception Invalid_argument _ -> true
+  in
+  check "presolve trace: second companion install rejected" second_install_rejected;
+  Session.install_cert_trace session None;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_trace_off_x" Sort.int)
+  in
+  Session.assert_presolved session [ Context.eq context x (Context.int_const context 1) ];
+  check
+    "presolve trace: uninstalling parent clears companion callbacks"
+    (Recorder.rewrite_statements recorder = [])
+;;
+
+let satisfiable_equality_elimination_artifact () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_presolve_sat_x" Sort.int)
+  in
+  let one = Context.int_const context 1 in
+  let assertions = [ Context.eq context x one; Context.le context x one ] in
+  Session.assert_presolved session assertions;
+  check
+    "presolve anchored-negative: baseline is sat"
+    (Session.check_sat session = Session.Sat);
+  Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session), assertions
+;;
+
+let add_ungrouped_empty_input (events : Checker.events) =
+  let id =
+    1
+    + List.fold_left
+        (fun maximum (input : Recorder.input_event) -> max maximum input.Recorder.id)
+        0
+        events.inputs
+  in
+  let input : Recorder.input_event =
+    { id; clause = [||]; origin = Sat.Query; clausify_group = None }
+  in
+  { events with
+    inputs = events.inputs @ [ input ]
+  ; conclusion = Some (Sat.Root_empty { input_id = id })
+  }
+;;
+
+let add_negative_selector_assumption (events : Checker.events) =
+  let selector =
+    List.hd events.clausify_groups |> fun group -> Option.get group.Recorder.selector
+  in
+  { events with
+    conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = [ Sat.neg selector ]
+  }
+;;
+
+let presolved_lia_farkas_conflict () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_leaf_trace session recorder;
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_bound_lia_x" Sort.int)
+  in
+  let zero = Context.int_const context 0
+  and one = Context.int_const context 1
+  and two = Context.int_const context 2 in
+  let assertions = [ Context.le context x zero; Context.le context one x ] in
+  Session.assert_presolved session assertions;
+  check "presolve binding/atom: solve unsat" (Session.check_sat session = Session.Unsat);
+  ( Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session)
+  , assertions
+  , Context.le context two x )
+;;
+
+let replace_first_atom_statement (events : Checker.events) replacement =
+  { events with
+    atoms =
+      List.mapi
+        (fun index (event : Recorder.atom_event) ->
+           if index = 0 then { event with Recorder.atom = replacement } else event)
+        events.atoms
+  }
+;;
+
+let lower_preprocess_unchecked () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_leaf_trace session recorder;
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let zero = Context.int_const context 0
+  and two = Context.int_const context 2 in
+  let quotient = Context.div context zero two in
+  let assertions = [ Context.not_ context (Context.eq context quotient zero) ] in
+  Session.assert_presolved session assertions;
+  check
+    "lower preprocess conditional: solve unsat"
+    (Session.check_sat session = Session.Unsat);
+  Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session), assertions
 ;;
 
 (* End-to-end LIA leaf witness: [x <= 0] and [x >= 1] produce one Farkas-backed theory
@@ -736,7 +1060,9 @@ and nb_ = Sat.neg 1
 and c_ = Sat.pos 2
 and nc_ = Sat.neg 2
 
-let mk_input id clause : Recorder.input_event = { id; clause; origin = Sat.Query }
+let mk_input id clause : Recorder.input_event =
+  { id; clause; origin = Sat.Query; clausify_group = None }
+;;
 
 let mk_learned id clause antecedents : Recorder.learned_event =
   { id; clause; antecedents; btlevel = 0 }
@@ -759,6 +1085,9 @@ let mixed_context_euf_leaf () : Checker.events =
   let second = make_equality () in
   let clause = [ Sat.neg_lit a_; b_ ] in
   { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| nb_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms =
       [ ({ var = Sat.var_of_lit a_; atom = first } : Recorder.atom_event)
       ; ({ var = Sat.var_of_lit b_; atom = second } : Recorder.atom_event)
@@ -799,6 +1128,9 @@ let mixed_context_rank_euf_leaf () : Checker.events =
   let second = make_equality ~sort_name:"cert_cross_rank_v" ~pad:3 in
   let clause = [ Sat.neg_lit a_; b_ ] in
   { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| nb_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms =
       [ ({ var = Sat.var_of_lit a_; atom = first } : Recorder.atom_event)
       ; ({ var = Sat.var_of_lit b_; atom = second } : Recorder.atom_event)
@@ -824,6 +1156,9 @@ let mixed_context_rank_euf_leaf () : Checker.events =
 let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
   { Checker.inputs =
       [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] learned_ants ]
@@ -844,6 +1179,9 @@ let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
 let handbuilt_unentailed ?(learned_ants = [ 10; 11; 12 ]) () : Checker.events =
   { Checker.inputs =
       [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| c_ |] learned_ants ]
@@ -865,6 +1203,9 @@ let exploit_self_cite : Checker.events =
   let x = Sat.pos 3
   and nx = Sat.neg 3 in
   { Checker.inputs = []
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| x |] [ 20 ]; mk_learned 21 [| nx |] [ 21 ] ]
@@ -878,6 +1219,9 @@ let exploit_self_cite : Checker.events =
    is sat, a=true) as unsat. id20 cites id21 and id21 cites id20; pre-fix both "verify". *)
 let exploit_mutual : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| na_ |] [ 21 ]; mk_learned 21 [| na_ |] [ 20 ] ]
@@ -893,6 +1237,9 @@ let exploit_mutual : Checker.events =
    slot 0 — an empty Reason is malformed → INVALID. Query [{a}] is SAT. *)
 let exploit_empty_reason : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -920,6 +1267,9 @@ let exploit_empty_reason : Checker.events =
    ambiguity (M6: a clean discriminator of the #153a admission guard). *)
 let exploit_ambiguous_admission : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 10 [| na_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -935,6 +1285,9 @@ let exploit_ambiguous_admission : Checker.events =
    (dedup at ingest) this is VALID. *)
 let overreject_dup_lit : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_; a_ |]; mk_input 11 [| na_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -955,11 +1308,14 @@ let overreject_dup_lit : Checker.events =
    so all three go INVALID. Contrast [empty_query_input_ok]: an empty QUERY input is the
    legitimate E1 opposite and stays VALID. *)
 let mk_lemma_input id clause : Recorder.input_event =
-  { id; clause; origin = Sat.Theory_lemma }
+  { id; clause; origin = Sat.Theory_lemma; clausify_group = None }
 ;;
 
 let exploit_empty_lemma_root_empty : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -971,6 +1327,9 @@ let exploit_empty_lemma_root_empty : Checker.events =
 
 let exploit_empty_lemma_level0 : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -982,6 +1341,9 @@ let exploit_empty_lemma_level0 : Checker.events =
 
 let exploit_empty_lemma_failed_assumption : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -1002,6 +1364,9 @@ let exploit_empty_lemma_failed_assumption : Checker.events =
    refutes. *)
 let bogus_theory_conflict_empty_core_e3 : Checker.events =
   { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -1025,6 +1390,9 @@ let bogus_theory_conflict_empty_core_e3 : Checker.events =
    the empty clause = false, which is legitimately unsat. Stays VALID pre- and post-fix. *)
 let empty_query_input_ok : Checker.events =
   { Checker.inputs = [ mk_input 1 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -1047,6 +1415,9 @@ let id162_satisfied_skip : Checker.events =
       ; mk_input 12 [| na_; c_ |]
       ; mk_input 13 [| na_; nc_ |]
       ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12; 13 ] ]
@@ -1063,6 +1434,9 @@ let id162_satisfied_skip : Checker.events =
 let neither_unit_nor_satisfied : Checker.events =
   let d_ = Sat.pos 3 in
   { Checker.inputs = [ mk_input 10 [| a_; b_ |]; mk_input 11 [| c_; d_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10; 11 ] ]
@@ -1079,6 +1453,9 @@ let neither_unit_nor_satisfied : Checker.events =
 let satisfied_but_no_conflict : Checker.events =
   { Checker.inputs =
       [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; c_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12 ] ]
@@ -1097,6 +1474,9 @@ let satisfied_but_no_conflict : Checker.events =
    the fix accepts it. *)
 let e2_fallback_closure_inconsistent : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| na_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -1112,6 +1492,9 @@ let e2_fallback_closure_inconsistent : Checker.events =
    star. (Rejects pre- and post-fix; the point is that the fallback did NOT open a hole.) *)
 let e2_cited_not_falsified_closure_consistent : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = []
@@ -1138,6 +1521,9 @@ let learned_fallback_entailed : Checker.events =
       ; mk_input 13 [| d_ |]
       ; mk_input 14 [| d_; b_ |]
       ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 14 ] ]
@@ -1154,6 +1540,9 @@ let learned_fallback_entailed : Checker.events =
    NO conflict → INVALID. *)
 let learned_unentailed : Checker.events =
   { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
   ; atoms = []
   ; units = []
   ; learned = [ mk_learned 20 [| b_ |] [ 10 ] ]
@@ -1167,6 +1556,7 @@ let learned_unentailed : Checker.events =
 
 let () =
   (* (1) POSITIVE — every honest stream is VALID. *)
+  presolve_trace_lifecycle ();
   expect "positive: E1 Root_empty (query filter-to-[])" `Valid (e1_root_empty ());
   expect "positive: E2 Level0_conflict" `Valid (e2_level0_conflict ());
   expect
@@ -1186,6 +1576,102 @@ let () =
   expect "positive: CRIT-3 first solve" `Valid ev1;
   expect "positive: CRIT-3 repeated-solve re-emit" `Valid ev2;
   expect "positive: hand-built order-sensitive chain" `Valid (handbuilt ());
+  let presolve_events, presolve_original, presolve_two = equality_elimination_replay () in
+  check
+    "positive: W1b statement has one separate equality-elimination witness"
+    (List.length presolve_events.Checker.rewrite_statements = 1
+     && List.length presolve_events.Checker.equality_witnesses = 1
+     && List.length presolve_events.Checker.clausify_groups = 1);
+  expect_assertions
+    "positive: independently replayed W1b equality elimination -> fully VALID"
+    `Fully_valid
+    ~original:presolve_original
+    presolve_events;
+  expect_assertions
+    "coverage: stripping W1b witness stays conditional"
+    `Modulo
+    ~original:presolve_original
+    { presolve_events with equality_witnesses = [] };
+  expect_assertions
+    "corrupt: wrong W1b definition value -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (replace_equality_definition_value presolve_events presolve_two);
+  expect_assertions
+    "corrupt: wrong W1b reduced term -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (replace_reduced_statement
+       presolve_events
+       (Context.bool_const
+          (List.hd presolve_events.rewrite_statements).Recorder.context
+          true));
+  expect_assertions
+    "corrupt: dropped W1b Query-input group member -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (drop_grouped_input presolve_events);
+  expect_assertions
+    "corrupt: W1b CNF variable aliases its activation selector -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (alias_cnf_binding_to_selector presolve_events);
+  expect_assertions
+    "corrupt: erased W1b statement/witness/input channel -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (erase_presolve_channel presolve_events);
+  let foreign_presolve_events, foreign_presolve_tags_collide =
+    foreign_definition_value presolve_events
+  in
+  check
+    "mixed-context W1b discriminator has colliding tags on distinct physical terms"
+    foreign_presolve_tags_collide;
+  expect_assertions
+    "corrupt: mixed-Context W1b witness value -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    foreign_presolve_events;
+  let satisfiable_presolve_events, satisfiable_presolve_original =
+    satisfiable_equality_elimination_artifact ()
+  in
+  expect_assertions
+    "corrupt: extra ungrouped Query contradiction on satisfiable original -> INVALID"
+    `Invalid
+    ~original:satisfiable_presolve_original
+    (add_ungrouped_empty_input satisfiable_presolve_events);
+  expect_assertions
+    "corrupt: negative activation-selector assumption on satisfiable original -> INVALID"
+    `Invalid
+    ~original:satisfiable_presolve_original
+    (add_negative_selector_assumption satisfiable_presolve_events);
+  let bound_lia_events, bound_lia_original, bound_lia_replacement =
+    presolved_lia_farkas_conflict ()
+  in
+  expect_assertions
+    "positive: W1b/CNF binding agrees with theory atom map -> fully VALID"
+    `Fully_valid
+    ~original:bound_lia_original
+    bound_lia_events;
+  expect_assertions
+    "corrupt: theory atom statement disagrees with W1b CNF binding -> INVALID"
+    `Invalid
+    ~original:bound_lia_original
+    (replace_first_atom_statement bound_lia_events bound_lia_replacement);
+  let lower_preprocess_events, lower_preprocess_original =
+    lower_preprocess_unchecked ()
+  in
+  check
+    "coverage: lower Preprocess.run changed at least one W1b output term"
+    (List.exists
+       (fun (group : Recorder.clausify_group) ->
+          group.Recorder.source != group.Recorder.preprocessed)
+       lower_preprocess_events.clausify_groups);
+  expect_assertions
+    "coverage: unreplayed lower Preprocess.run rewrite stays conditional"
+    `Modulo
+    ~original:lower_preprocess_original
+    lower_preprocess_events;
   let lia_ev = lia_farkas_conflict () in
   check
     "positive: LIA stream carries a Farkas-witnessed Conflict leaf"
@@ -1464,6 +1950,9 @@ let () =
      UNSUPPORTED, never VALID. Hand-built: the terminal cites the empty theory conflict. *)
   let unsupported_empty_conflict : Checker.events =
     { Checker.inputs = [ mk_input 10 [| a_ |] ]
+    ; rewrite_statements = []
+    ; equality_witnesses = []
+    ; clausify_groups = []
     ; atoms = []
     ; units = []
     ; learned = []

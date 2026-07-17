@@ -1,8 +1,8 @@
-; Shipped certificate library (ADR-0013). stdlib-only over oxsmt_solver (dependency
-; firewall I3): it reads the frozen Sat trace seam and nothing else. Step 1 is the
-; emission recorder; the serializer + fail-closed reader + OCaml resolution checker land
-; here in step 2 (core-read-only per ADR-0013 §5).
+; Shipped certificate library (ADR-0013), stdlib-only. The checker independently replays
+; W1b equality elimination; it uses the existing CNF encoder only to bind the recorded
+; post-Preprocess term to the raw Sat Query clauses. CNF and the lower Preprocess rewrite
+; remain explicit trusted boundaries for this tranche.
 
 (library
  (name oxsmt_certificate)
- (libraries oxsmt_core oxsmt_lia oxsmt_solver))
+ (libraries oxsmt_core oxsmt_preprocess oxsmt_lia oxsmt_solver))

@@ -65,6 +65,32 @@ let run_file path : outcome * outcome option =
              (fun ~premise_lits ~multipliers ->
                Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
          });
+    Session.install_presolve_certificate_trace
+      s
+      (Some
+         { Session.on_equality_elimination =
+             (fun ~context ~original ~reduced ~definitions ->
+               Recorder.record_equality_elimination
+                 rec_
+                 ~context
+                 ~original
+                 ~reduced
+                 ~definitions:
+                   (List.map
+                      (fun (definition : Session.certificate_presolve_definition) ->
+                         { Recorder.name = definition.name
+                         ; sort = definition.sort
+                         ; value = definition.value
+                         })
+                      definitions))
+         ; on_clausify_begin =
+             (fun ~rewrite_id ~source ~preprocessed ->
+               Recorder.begin_clausify rec_ ~statement_id:rewrite_id ~source ~preprocessed)
+         ; on_clausify_bindings =
+             (fun ~selector ~bindings ->
+               Recorder.record_clausify_bindings rec_ ~selector ~bindings)
+         ; on_clausify_end = (fun () -> Recorder.end_clausify rec_)
+         });
     (match
        Parser.parse_into
          ~internal_mint:(Session.parse_minter s)
@@ -86,10 +112,10 @@ let run_file path : outcome * outcome option =
         | () ->
           let check_after () =
             let ev = Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s) in
-            match Checker.check ev with
+            match Checker.check_assertions ~original:parsed.Parser.assertions ev with
             (* skeleton-valid, theory leaves trusted this tranche (MED-1); plain [Valid]
                is reserved for the leaf-checker tranche and treated identically here. *)
-            | Checker.Valid_modulo_theory_leaves | Checker.Valid -> Cert_valid
+            | Checker.Valid_modulo_unchecked_steps | Checker.Valid -> Cert_valid
             | Checker.Invalid r -> Cert_invalid r
             | Checker.Unsupported f -> Cert_unsupported f
           in

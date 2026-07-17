@@ -108,9 +108,11 @@
       declaration and atom statements: equality/congruence must merge two well-sorted
       applications of different constructors of the same datatype. A claimed but bad
       witness is [Invalid], never silently trusted. Unwitnessed theory leaves and
-      [Theory_lemma] inputs remain trusted axioms and force [Valid_modulo_theory_leaves].
-      An empty [Conflict] clause (an unconditional [T_conflict []], ADR-0013 Rev 6) has NO
-      v1 leaf witness for ⊥-from-∅ and is reported [Unsupported], not [Valid].
+      [Theory_lemma] inputs remain trusted axioms and force
+      [Valid_modulo_unchecked_steps]. An empty [Conflict] clause
+      (an unconditional
+      [T_conflict []], ADR-0013 Rev 6) has NO v1 leaf witness for ⊥-from-∅ and is reported
+      [Unsupported], not [Valid].
     - {b Terminal conclusion (§4.0 E1–E4).} [Root_empty] / [Level0_conflict] check the
       cited clause is falsified by the level-0 closure, OR —
       {b ADR-0013 appendix (E1/E2 cited-clause fallback, task #47)} — that the level-0
@@ -136,20 +138,19 @@
     unreplayable is [Invalid] (or [Unsupported] for a well-formed feature this checker
     version cannot witness) — never skipped-as-valid.
 
-    Stdlib-only; reads only the recorder's accessors + the frozen {!Oxsmt_solver.Sat} lit
-    algebra (dependency firewall I3). Independent of the solver's search. *)
+    Stdlib-only. W1b replay is independent of the production presolver. Its output is
+    connected to SAT Query inputs by re-running the existing CNF encoder over the recorded
+    post-[Preprocess.run] term; that lower preprocessing step and the CNF encoder remain
+    explicit trusted boundaries, not part of the W1b coverage claim. Independent of the
+    solver's search. *)
 
 module Sat = Oxsmt_solver.Sat
 
 type verdict =
-  | Valid_modulo_theory_leaves
-  (** the resolution skeleton closes, but at least one [Reason]/[Conflict] clause or
-      [Theory_lemma] input has no checked witness and is still trusted as T-valid. *)
-  | Valid
-  (** the skeleton closes and every theory leaf is checked. This includes theory-free
-      propositional certificates and certificates whose theory leaves are verified pure
-      EUF clauses, LIA Farkas [Conflict] clauses, or datatype constructor-distinctness
-      [Conflict] clauses. *)
+  | Valid_modulo_unchecked_steps
+  (** the resolution skeleton closes, but at least one theory leaf, theory-lemma input,
+      or preprocessing rewrite has no checked witness and remains trusted. *)
+  | Valid (** the skeleton closes and every recorded leaf/rewrite step is checked. *)
   | Invalid of string (** an artifact-attributable rejection (ADR-0013 §3.3) *)
   | Unsupported of string
   (** a well-formed leaf/feature this checker version cannot witness (coverage gap) *)
@@ -167,6 +168,9 @@ type verdict =
     (E3) terminal RUP. Empty for an assumption-free solve (E1/E2/E4). *)
 type events =
   { inputs : Recorder.input_event list
+  ; rewrite_statements : Recorder.rewrite_statement list
+  ; equality_witnesses : Recorder.equality_elimination_witness list
+  ; clausify_groups : Recorder.clausify_group list
   ; atoms : Recorder.atom_event list
   ; units : Recorder.unit_event list
   ; learned : Recorder.learned_event list
@@ -181,6 +185,13 @@ val of_recorder : Recorder.t -> assumptions:Sat.lit list -> events
 (** Validate the recorded refutation. See {!verdict} for full versus conditional validity.
     Total (never raises on a malformed stream). *)
 val check : events -> verdict
+
+(** Validate a Session certificate against the caller-supplied original assertion batch.
+    Unlike {!check}, which also supports raw-SAT certificates with no term statement,
+    this requires the rewrite statement map to cover [original] exactly. Deleting the
+    whole preprocessing channel therefore rejects instead of silently changing the
+    certified statement to the reduced SAT inputs. *)
+val check_assertions : original:Oxsmt_core.Term.t list -> events -> verdict
 
 val string_of_verdict : verdict -> string
 

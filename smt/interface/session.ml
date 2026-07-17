@@ -63,6 +63,24 @@ type sort_card = Cdclt.sort_card =
 (* The full reconstructed model: uninterpreted-sort cardinalities + symbol bindings. *)
 type model = sort_card list * model_binding list
 
+type certificate_presolve_definition =
+  { name : string
+  ; sort : Sort.t
+  ; value : Term.t
+  }
+
+type presolve_certificate_trace =
+  { on_equality_elimination :
+      context:Context.t
+      -> original:Term.t list
+      -> reduced:Term.t list
+      -> definitions:certificate_presolve_definition list
+      -> int
+  ; on_clausify_begin : rewrite_id:int -> source:Term.t -> preprocessed:Term.t -> unit
+  ; on_clausify_bindings : selector:Sat.var -> bindings:(Term.t * Sat.var) list -> unit
+  ; on_clausify_end : unit -> unit
+  }
+
 type t =
   { env : Env.t
   ; cap : Env.reserved_cap
@@ -173,8 +191,11 @@ type t =
   ; mutable assumption_query_started : bool
       (* A nonempty [check_sat_assuming] reached SAT-state internalization. Certificate
          tracing may not be installed afterwards: its recorder must observe the clause
-         database from the pristine start, including units and learned clauses produced
-         by an assumption query. *)
+         database from the pristine start, including units and learned clauses produced by
+         an assumption query. *)
+  ; mutable presolve_certificate_trace : presolve_certificate_trace option
+      (* Off-seam statement/witness channel for W1b equality elimination. [None] in every
+         ordinary solve. Callback results are recorder ids and never feed search. *)
   ; sym_counter : int ref
       (* symmetry breaking (task #25): a PER-SESSION monotone counter for the reserved
          [.oxsmt.sym.*] aux-var names, so a second [assert_presolved] emission does not
@@ -196,10 +217,10 @@ type t =
          assertion after emission (assert_term / a further assert_presolved / push) clears
          it. *)
   ; mutable last_failed_frame_assumptions : Sat.lit list option
-      (* The exact frame assumptions of the most recent ordinary [check_sat] that ended
-         [Unsat] through the incremental SAT core. [failed_assumptions] intersects the
-         raw core with this snapshot, so user literals, stale cores after another
-         dispatch, and the private symmetry selector never leak. *)
+  (* The exact frame assumptions of the most recent ordinary [check_sat] that ended
+     [Unsat] through the incremental SAT core. [failed_assumptions] intersects the raw
+     core with this snapshot, so user literals, stale cores after another dispatch, and
+     the private symmetry selector never leak. *)
   }
 
 let create
@@ -328,6 +349,7 @@ let create
   ; relevancy
   ; cert_active = false
   ; assumption_query_started = false
+  ; presolve_certificate_trace = None
   ; sym_counter = ref 0
   ; sym_sel = None
   ; lemmas_registered = false
@@ -860,7 +882,7 @@ let prop_var_of t (atom : Term.t) =
    through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
    theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
    term; auxiliary Tseitin variables are fresh per formula (kept in [local]). *)
-let assert_clausified ?sel ~root t cnf =
+let assert_clausified ?sel ?(record_presolve = false) ~root t cnf =
   let n = Cnf.num_vars cnf in
   let local = Array.make (n + 1) None in
   let sat_var v =
@@ -905,6 +927,15 @@ let assert_clausified ?sel ~root t cnf =
       (* frame activation: clause holds only when the frame selector is assumed true *)
       Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
     cnf;
+  (match record_presolve, t.presolve_certificate_trace with
+   | false, _ | true, None -> ()
+   | true, Some trace ->
+     trace.on_clausify_bindings
+       ~selector:sel
+       ~bindings:
+         (List.init n (fun index ->
+            let local_var = index + 1 in
+            Cnf.subterm_of_var cnf local_var, sat_var local_var)));
   (* Dynamic relevancy graph (task #24): recover the boolean-skeleton And/Or/iff/Ite DAG
      over PERSISTENT SAT vars and hand it to the driver. Built AFTER clause emission so
      every var already exists (via [lit_of] above) and [sat_var] is a pure lookup here —
@@ -1040,7 +1071,7 @@ let register_bool_terms t (pterm : Term.t) =
    (default: the current innermost frame). Shared by [assert_term] and
    [assert_instance_at_frame]; the exception handling is the I8/CONTRACT-POISON
    assert-time discipline. *)
-let assert_bool_at ?sel t pterm =
+let assert_bool_at ?sel ?(record_presolve = false) t pterm =
   match Cnf.clausify pterm with
   | exception _ -> degrade t "clausify-fail"
   | cnf ->
@@ -1052,7 +1083,7 @@ let assert_bool_at ?sel t pterm =
        it surfaces HERE at assert-time registration, so it must be caught on this ingress
        path too. *)
     (try
-       assert_clausified ?sel ~root:pterm t cnf;
+       assert_clausified ?sel ~record_presolve ~root:pterm t cnf;
        (* Bool-cardinality rule: surface every buried Bool-sorted predicate application as
           its own SAT atom so the finite Bool sort is decided, not left opaque (see
           {!register_bool_terms}). Same term, same try-block, so an out-of-fragment buried
@@ -1197,11 +1228,17 @@ let assert_term t term =
    preprocess -> clausify -> register, with the same I8/CONTRACT-POISON assert-time
    discipline as [assert_term]. Used by [assert_presolved] for the REDUCED conjuncts —
    [t.asserted] holds the ORIGINAL assertions (for R1), not the reduced ones. *)
-let internalize_reduced t term =
+let internalize_reduced ?certificate_source t term =
   match Preprocess.run t.pp term with
   | exception Term.Overflow -> degrade t "overflow"
   | exception Term.Unsupported _ -> degrade t "unsupported"
-  | pterm -> assert_bool_at t pterm
+  | pterm ->
+    (match t.presolve_certificate_trace, certificate_source with
+     | Some trace, Some (rewrite_id, source) ->
+       trace.on_clausify_begin ~rewrite_id ~source ~preprocessed:pterm;
+       Fun.protect ~finally:trace.on_clausify_end (fun () ->
+         assert_bool_at ~record_presolve:true t pterm)
+     | (None | Some _), (None | Some _) -> assert_bool_at t pterm)
 ;;
 
 (* Like {!internalize_reduced} but guards every emitted clause with [sel] (task #25 F1:
@@ -1315,6 +1352,23 @@ let assert_presolved_selected t terms =
     | exception Term.Unsupported _ -> degrade t "presolve-unsupported"
     | { Presolve.reduced; defs } ->
       t.elim_defs <- defs;
+      let rewrite_id =
+        match t.presolve_certificate_trace with
+        | None -> None
+        | Some trace ->
+          let definitions =
+            List.map
+              (fun (def : Presolve.def) ->
+                { name = def.name; sort = def.sort; value = def.value })
+              defs
+          in
+          Some
+            (trace.on_equality_elimination
+               ~context:t.ctx
+               ~original:terms
+               ~reduced
+               ~definitions)
+      in
       (* Equality-over-ITE projection (task #34, gated: flag + cert-OFF): a
          model-preserving local DAG rewrite over the reduced conjuncts —
          [(= (ite c x y) d)] projected into the branches, plus Bool-ITE and local selector
@@ -1357,7 +1411,14 @@ let assert_presolved_selected t terms =
           | simplified -> simplified)
         else reduced
       in
-      List.iter (internalize_reduced t) reduced;
+      List.iter
+        (fun source ->
+          internalize_reduced
+            ?certificate_source:
+              (Option.map (fun rewrite_id -> rewrite_id, source) rewrite_id)
+            t
+            source)
+        reduced;
       List.iter (internalize_reduced t) extra;
       (* F1: guard the symmetry-breaking clauses with a fresh activation selector so a
          later incremental assertion can retract them soundly (they are non-monotonic).
@@ -2034,16 +2095,14 @@ let validate_assumption (atom, _polarity) =
   if not (Sort.equal atom.Term.sort Sort.bool)
   then invalid_arg "Session.check_sat_assuming: assumption atom must be Bool-sorted";
   if not (Theory_view.is_atom atom)
-  then
-    invalid_arg
-      "Session.check_sat_assuming: expected a Boolean atom, not a connective"
+  then invalid_arg "Session.check_sat_assuming: expected a Boolean atom, not a connective"
 ;;
 
 (* Map one preprocessed Boolean literal through the same persistent atom mapping used by
    [assert_clausified]. Preprocessing is allowed to rewrite inside the atom, but if it
    introduces a Boolean side condition the result is no longer one assumption literal;
    that unsupported case declines rather than silently changing its meaning. *)
-let prepare_assumption t (((source_atom, source_polarity) as source) : assumption) =
+let prepare_assumption t ((source_atom, source_polarity) as source : assumption) =
   let signed_term =
     if source_polarity then source_atom else Context.not_ t.ctx source_atom
   in
@@ -2083,7 +2142,7 @@ let prepare_assumption t (((source_atom, source_polarity) as source) : assumptio
              therefore safe to retain after the call. *)
           (match atom.Term.node with
            | Bool_const value ->
-             Sat.add_clause t.sat [ if value then Sat.pos var else Sat.neg var ]
+             Sat.add_clause t.sat [ (if value then Sat.pos var else Sat.neg var) ]
            | _ -> ());
           (match t.relevancy with
            | None -> ()
@@ -2135,16 +2194,17 @@ let emit_base_unit_if_needed t =
 ;;
 
 (* [commit_sat] checks the original active assertions. A user-assumption probe must also
-   check the signed literals whose SAT assignment it relied on. The temporary extension
-   is exception-safe and visible only to the independent model checker. *)
+   check the signed literals whose SAT assignment it relied on. The temporary extension is
+   exception-safe and visible only to the independent model checker. *)
 let commit_sat_assuming t assumptions =
   let saved_asserted = t.asserted in
-  t.asserted <- List.rev_append (List.map (fun a -> a.signed_term) assumptions) saved_asserted;
+  t.asserted
+  <- List.rev_append (List.map (fun a -> a.signed_term) assumptions) saved_asserted;
   Fun.protect ~finally:(fun () -> t.asserted <- saved_asserted) (fun () -> commit_sat t)
 ;;
 
-(* One complete, client-grade ground query for a minimization probe. Unlike [raw_solve],
-   a [Sat] result passes through model reconstruction and the independent model checker.
+(* One complete, client-grade ground query for a minimization probe. Unlike [raw_solve], a
+   [Sat] result passes through model reconstruction and the independent model checker.
    Per-probe [begin_check] gives each semantic deletion check its configured effort
    budget; learned clauses remain shared in the incremental SAT core. *)
 let solve_prepared_assumptions t ~fixed assumptions =
@@ -2256,9 +2316,9 @@ let check_sat_assuming t assumptions =
            (match minimize initial_core initial_core with
             | None -> { verdict = Unknown; unsat_core = None }
             | Some core ->
-              (* Replay the final core even when the last deletion happened to be an
-                 Unsat probe. This makes evidence, failed assumptions, stats, and model
-                 state describe exactly the public result. *)
+              (* Replay the final core even when the last deletion happened to be an Unsat
+                 probe. This makes evidence, failed assumptions, stats, and model state
+                 describe exactly the public result. *)
               (match solve_prepared_assumptions t ~fixed core with
                | Unsat ->
                  { verdict = Unsat
@@ -2330,7 +2390,10 @@ let install_cert_trace t tr =
   (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
      entailed-equality unit must not enter the cert as a trusted [Input]. *)
   t.cert_active <- Option.is_some tr;
-  if Option.is_none tr then Cdclt.set_leaf_certificate_trace t.cdclt None;
+  if Option.is_none tr
+  then (
+    Cdclt.set_leaf_certificate_trace t.cdclt None;
+    t.presolve_certificate_trace <- None);
   Sat.set_trace t.sat tr
 ;;
 
@@ -2347,6 +2410,28 @@ let install_leaf_certificate_trace t tr =
          "Session.install_leaf_certificate_trace: must be installed on a pristine session"
    | None -> ());
   Cdclt.set_leaf_certificate_trace t.cdclt tr
+;;
+
+let install_presolve_certificate_trace t tr =
+  (match tr with
+   | Some _ ->
+     if not t.cert_active
+     then
+       invalid_arg
+         "Session.install_presolve_certificate_trace: install the SAT certificate trace \
+          first";
+     if Option.is_some t.presolve_certificate_trace
+     then
+       invalid_arg
+         "Session.install_presolve_certificate_trace: a trace is already installed \
+          (set-once)";
+     if t.asserted <> [] || t.base_unit_emitted
+     then
+       invalid_arg
+         "Session.install_presolve_certificate_trace: must be installed on a pristine \
+          session"
+   | None -> ());
+  t.presolve_certificate_trace <- tr
 ;;
 
 let install_lia_certificate_trace t tr =
@@ -2366,9 +2451,9 @@ let install_lia_certificate_trace t tr =
 
 let cert_assumptions t = List.map Sat.pos (assumed_frames t)
 
-(* The failed-selector core of the most recent ordinary [check_sat]. Intersecting with
-   its exact frame snapshot excludes the private symmetry selector and every user literal
-   from [check_sat_assuming]. [None] also gates stale SAT-core state after a pure-BV or
+(* The failed-selector core of the most recent ordinary [check_sat]. Intersecting with its
+   exact frame snapshot excludes the private symmetry selector and every user literal from
+   [check_sat_assuming]. [None] also gates stale SAT-core state after a pure-BV or
    early-Unknown path, neither of which calls [Sat.solve] to clear it. *)
 let failed_assumptions t =
   match t.last_failed_frame_assumptions with
@@ -2419,8 +2504,8 @@ let last_farkas t =
      | None | Some { farkas = None; _ } -> None
      | Some { farkas = Some coeffs; atoms } ->
        (* [coeffs] is index-aligned and equal-length with [atoms] (the adapter drops a
-          mismatch or invalid atom/sign shape to [None]); pair each Farkas multiplier
-          with its [(atom, polarity)] premise. Equality coefficients are signed equation
+          mismatch or invalid atom/sign shape to [None]); pair each Farkas multiplier with
+          its [(atom, polarity)] premise. Equality coefficients are signed equation
           multipliers; inequality coefficients are nonnegative half-plane multipliers. *)
        Some (List.map2 (fun c a -> c, a) coeffs atoms))
 ;;

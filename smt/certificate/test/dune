@@ -11,4 +11,10 @@
 (executable
  (name checker_test)
  (modules checker_test)
- (libraries oxsmt_core oxsmt_lia oxsmt_solver oxsmt_interface oxsmt_certificate))
+ (libraries
+  oxsmt_core
+  oxsmt_preprocess
+  oxsmt_lia
+  oxsmt_solver
+  oxsmt_interface
+  oxsmt_certificate))
