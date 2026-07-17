@@ -102,6 +102,14 @@ type exists_src =
 type clause =
   { cl_qvars : (string * Sort.t) list
   ; cl_build : skolem:skolemizer -> Term.t array -> Term.t * Term.t list list
+  ; cl_source : Sexp.t
+      (* the source assertion body this clause was clausified from — the provenance root
+         for an audit dump / certificate replay (ADR-0013 seam). *)
+  ; cl_skolems : (string * int list) list
+  (* Skolem provenance: each eliminated existential's source binder name paired with its
+     dependency list (the dominating universal binder ids it is a function of). Together
+     with {!cl_qvars} and {!cl_source} this records why the clause is equisatisfiable with
+     the source (Skolemization witness), for the cert-replay seam. *)
   }
 
 type t =
@@ -1262,6 +1270,11 @@ type qleaf =
   { q_sexp : Sexp.t (* leaf content, wrapped in enclosing lets *)
   ; q_scope : (string * int) list (* quantifier binder name -> id, OUTERMOST-first *)
   ; q_refs : int list (* binder ids the sexp mentions (subset of q_scope ids) *)
+  ; q_patterns : Sexp.t list list
+  (* explicit [:pattern] multi-triggers (HINTS ONLY) attached to this leaf when it is a
+     whole [forall] body (the common lemma shape); raw s-expressions over the qvar NAMES —
+     resolved through the leaf's read scope at lowering, so no id-rename is needed. Empty
+     for a non-body leaf, or when clausification could not attach them cleanly. *)
   }
 
 let make_leaf ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
@@ -1271,9 +1284,11 @@ let make_leaf ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
   let q_refs =
     List.filter_map (fun (n, id) -> if Hashtbl.mem names n then Some id else None) q_scope
   in
-  Fol.Atom { q_sexp; q_scope; q_refs }
+  Fol.Atom { q_sexp; q_scope; q_refs; q_patterns = [] }
 ;;
 
+(* [:pattern] terms are name-based (resolved through the leaf's read scope at lowering),
+   so rename-apart — which only rewrites binder IDS — leaves them untouched. *)
 let rename_qleaf remap q =
   { q with
     q_scope = List.map (fun (n, i) -> n, remap i) q.q_scope
@@ -1365,11 +1380,25 @@ let rec formula_of_sexp st ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
       validate_bang_attrs attrs;
       formula_of_sexp st ~lets ~qscope body
     | Sexp.List (Sexp.Atom (Tok.Reserved "forall") :: tail) ->
-      let binders, body, _patterns = collect_forall st [] tail in
-      quantifier st ~lets ~qscope ~mk:(fun bs g -> Fol.Forall (bs, g)) binders body
+      let binders, body, patterns = collect_forall st [] tail in
+      quantifier
+        st
+        ~lets
+        ~qscope
+        ~patterns
+        ~mk:(fun bs g -> Fol.Forall (bs, g))
+        binders
+        body
     | Sexp.List (Sexp.Atom (Tok.Reserved "exists") :: tail) ->
       let binders, body = collect_exists st [] tail in
-      quantifier st ~lets ~qscope ~mk:(fun bs g -> Fol.Exists (bs, g)) binders body
+      quantifier
+        st
+        ~lets
+        ~qscope
+        ~patterns:[]
+        ~mk:(fun bs g -> Fol.Exists (bs, g))
+        binders
+        body
     | Sexp.List [ Sexp.Atom (Tok.Reserved "let"); Sexp.List bindings; body ] ->
       formula_of_sexp st ~lets:(lets @ [ bindings ]) ~qscope body
     | Sexp.List (head :: args) ->
@@ -1412,10 +1441,22 @@ let rec formula_of_sexp st ~lets ~qscope (s : Sexp.t) : qleaf Fol.t =
          unsupportedf "quantifier under an unsupported operator or theory position")
     | _ -> unsupportedf "quantifier in an unsupported position")
 
-and quantifier st ~lets ~qscope ~mk binders body =
+and quantifier st ~lets ~qscope ~patterns ~mk binders body =
   let fbs = List.map (fun (n, srt) -> n, Fol.fresh_binder ~name:n ~sort:srt) binders in
   let qscope' = qscope @ fbs in
-  mk (List.map snd fbs) (formula_of_sexp st ~lets ~qscope:qscope' body)
+  let g = formula_of_sexp st ~lets ~qscope:qscope' body in
+  (* Attach explicit [:pattern] hints only when the body is a SINGLE leaf (the common
+     [forall qvars. QF-body] lemma), so the multi-triggers map cleanly to the one clause
+     this forall produces. A structured body (and/or/nested quantifier) splits into
+     several clauses across which a whole-body pattern is no longer well-defined — discard
+     it (clausification invalidated it); the loader then infers a trigger. Patterns are
+     hints, so either choice is sound. *)
+  let g =
+    match patterns, g with
+    | _ :: _, Fol.Atom leaf -> Fol.Atom { leaf with q_patterns = patterns }
+    | _ -> g
+  in
+  mk (List.map snd fbs) g
 ;;
 
 (* Read a deferred leaf into a [Term.t]. [lookup] maps a binder id to its image; a binder
@@ -1424,17 +1465,42 @@ and quantifier st ~lets ~qscope ~mk binders body =
    [read_term] (its name does not appear), and the clause only mints images for referenced
    binders. A referenced binder's name DOES appear, so its id is in [q_refs] hence in the
    clause's universals/Skolems, so [lookup] returns [Some]. *)
+let qleaf_scope lookup (q : qleaf) : Term.t Scope.t =
+  List.fold_left
+    (fun acc (n, id) ->
+      match lookup id with
+      | Some t -> Scope.add n t acc
+      | None -> acc)
+    Scope.empty
+    q.q_scope
+;;
+
 let read_qleaf st lookup (q : qleaf) : Term.t =
-  let scope =
-    List.fold_left
-      (fun acc (n, id) ->
-        match lookup id with
-        | Some t -> Scope.add n t acc
-        | None -> acc)
-      Scope.empty
-      q.q_scope
-  in
-  read_term st scope q.q_sexp
+  read_term st (qleaf_scope lookup q) q.q_sexp
+;;
+
+(* Build the explicit [:pattern] multi-triggers a leaf carries (HINTS ONLY). Each pattern
+   group is read over the leaf's own binder scope (qvar names -> images); a group whose
+   terms all build is kept, one that references a name not in scope (a binder
+   clausification moved to another clause) or is otherwise out of the reader's fragment is
+   DISCARDED — a pattern never affects soundness, only which instances the matcher
+   generates. *)
+let leaf_triggers st lookup (q : qleaf) : Term.t list list =
+  match q.q_patterns with
+  | [] -> []
+  | groups ->
+    let scope = qleaf_scope lookup q in
+    List.filter_map
+      (fun grp ->
+        match List.map (read_term st scope) grp with
+        | terms -> Some terms
+        | exception
+            ( Malformed _
+            | Unsupported _
+            | Term.Sort_error _
+            | Term.Unsupported _
+            | Term.Overflow ) -> None)
+      groups
 ;;
 
 (* Fold a clausal matrix (True/False/Atom/Not(Atom)/And/Or over built [Term.t]s) into one
@@ -1483,10 +1549,23 @@ let clauses_of_assertion st (s : Sexp.t) : clause list =
             let t = skolem ~cod:d.Fol.sk_binder.Fol.sort ~args in
             Hashtbl.replace tbl d.Fol.sk_binder.Fol.id t)
           cl.Fol.skolems;
+        (* Explicit [:pattern] hints carried by the matrix leaves (empty for a ground
+           clause or a clause whose foralls shipped no pattern). Empty triggers make the
+           loader infer one; non-empty preserves the author's hint. *)
+        let triggers =
+          let acc = ref [] in
+          Fol.iter_atoms (fun q -> acc := leaf_triggers st lookup q @ !acc) cl.Fol.matrix;
+          List.rev !acc
+        in
         let term_matrix = Fol.map_atoms (read_qleaf st lookup) cl.Fol.matrix in
-        fold_matrix st term_matrix, []
+        fold_matrix st term_matrix, triggers
       in
-      { cl_qvars; cl_build })
+      let cl_skolems =
+        List.map
+          (fun (d : Fol.skolem_descr) -> d.Fol.sk_binder.Fol.name, d.Fol.sk_deps)
+          cl.Fol.skolems
+      in
+      { cl_qvars; cl_build; cl_source = s; cl_skolems })
     fol_clauses
 ;;
 

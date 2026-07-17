@@ -91,6 +91,14 @@ type clause =
       skolem:skolemizer
       -> Oxsmt_core.Term.t array
       -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
+  ; cl_source : Sexp.t
+  (** the source assertion body this clause was clausified from — provenance root for an
+      audit dump / certificate replay (ADR-0013 seam). *)
+  ; cl_skolems : (string * int list) list
+  (** Skolem provenance: each eliminated existential's source binder name with its
+      dependency list (dominating universal binder ids). With [cl_qvars] and [cl_source]
+      this records the Skolemization witness — why the clause is equisatisfiable with the
+      source — for the cert-replay seam. *)
   }
 
 type t =
