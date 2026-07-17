@@ -20,6 +20,15 @@
  (modules session_cores_test)
  (libraries oxsmt_core oxsmt_lia oxsmt_interface))
 
+; Certified weighted MaxSMT consumer proof: exhaustive Boolean optimum oracle, returned-
+; model cost check, weighted multi-core discrimination, duplicates, hard-unsat, and
+; fail-closed budget paths. Run via `make optimize-test`; included in `make test`.
+
+(executable
+ (name optimize_test)
+ (modules optimize_test)
+ (libraries oxsmt_core oxsmt_interface))
+
 ; ADR-0014 S4.2 chrono incremental-undo driver REDs (H1 zero-removal wipe, H2 cross-query
 ; index skew) — reproduce the two TCB land blockers against the REAL cdclt driver + Combined
 ; theory via the Cdclt test re-exports. Arms OXSMT_CHRONO / OXSMT_CHRONO_INCR_UNDO in-process

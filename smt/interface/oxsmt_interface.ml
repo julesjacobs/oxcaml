@@ -12,6 +12,9 @@
 
 module Session = Session
 
+(** Certified weighted MaxSMT over the public {!Session} API. *)
+module Optimize = Optimize
+
 (** The R1 in-process model self-check (ADR-UF-models §3), exposed so the test suite can
     unit-test the TCB guard directly (e.g. the [min_int * -1] fail-closed case, which no
     solver path reaches but the invariant must uphold). [oxsmt_core]-only; not part of the
