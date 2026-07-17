@@ -4649,6 +4649,7 @@ let type_implementation target modulename initial_env ast =
       end
     )
     ~exceptionally:(fun () ->
+      if not !Clflags.vox_type_only then
         Profile.record_call "save_cmt" (fun () ->
           let annots =
             Cmt_format.Partial_implementation

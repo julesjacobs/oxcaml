@@ -14,6 +14,67 @@ open Data_types
 module Facts = Vox_vc.Fact_env
 module Json = Misc.Json
 
+let json_string string =
+  let buffer = Buffer.create (String.length string + 2) in
+  let add_byte_escape byte =
+    Printf.bprintf buffer "\\u00%02X" byte
+  in
+  let continuation byte = byte land 0xc0 = 0x80 in
+  let valid_utf8_length index =
+    let length = String.length string in
+    let byte offset = Char.code string.[index + offset] in
+    let first = byte 0 in
+    if first >= 0xc2 && first <= 0xdf
+       && index + 1 < length && continuation (byte 1)
+    then 2
+    else if index + 2 < length && continuation (byte 2)
+            && ((first = 0xe0 && byte 1 >= 0xa0 && byte 1 <= 0xbf)
+                || ((first >= 0xe1 && first <= 0xec
+                     || first >= 0xee && first <= 0xef)
+                    && continuation (byte 1))
+                || (first = 0xed && byte 1 >= 0x80 && byte 1 <= 0x9f))
+    then 3
+    else if index + 3 < length
+            && continuation (byte 2) && continuation (byte 3)
+            && ((first = 0xf0 && byte 1 >= 0x90 && byte 1 <= 0xbf)
+                || (first >= 0xf1 && first <= 0xf3
+                    && continuation (byte 1))
+                || (first = 0xf4 && byte 1 >= 0x80 && byte 1 <= 0x8f))
+    then 4
+    else 0
+  in
+  Buffer.add_char buffer '"';
+  let rec loop index =
+    if index < String.length string then begin
+      let byte = Char.code string.[index] in
+      let consumed =
+        match string.[index] with
+        | '"' -> Buffer.add_string buffer "\\\""; 1
+        | '\\' -> Buffer.add_string buffer "\\\\"; 1
+        | '\b' -> Buffer.add_string buffer "\\b"; 1
+        | '\012' -> Buffer.add_string buffer "\\f"; 1
+        | '\n' -> Buffer.add_string buffer "\\n"; 1
+        | '\r' -> Buffer.add_string buffer "\\r"; 1
+        | '\t' -> Buffer.add_string buffer "\\t"; 1
+        | _ when byte < 0x20 -> add_byte_escape byte; 1
+        | _ when byte < 0x80 -> Buffer.add_char buffer string.[index]; 1
+        | _ ->
+          let length = valid_utf8_length index in
+          if length = 0 then begin
+            add_byte_escape byte;
+            1
+          end else begin
+            Buffer.add_substring buffer string index length;
+            length
+          end
+      in
+      loop (index + consumed)
+    end
+  in
+  loop 0;
+  Buffer.add_char buffer '"';
+  Buffer.contents buffer
+
 type vc_provenance =
   { kind : string;
     name : string option;
@@ -32,7 +93,7 @@ let json_position (position : Lexing.position) =
 
 let json_span (location : Location.t) =
   Json.object_
-    [ Json.field "file" (Json.string location.loc_start.pos_fname);
+    [ Json.field "file" (json_string location.loc_start.pos_fname);
       Json.field "start" (json_position location.loc_start);
       Json.field "end" (json_position location.loc_end);
       Json.field "ghost" (string_of_bool location.loc_ghost);
@@ -40,14 +101,14 @@ let json_span (location : Location.t) =
 
 let json_related_span (role, location) =
   Json.object_
-    [ Json.field "role" (Json.string role);
+    [ Json.field "role" (json_string role);
       Json.field "span" (json_span location);
     ]
 
 let json_provenance provenance =
   Json.object_
-    [ Json.field "kind" (Json.string provenance.kind);
-      Json.field "name" (Json.option Json.string provenance.name);
+    [ Json.field "kind" (json_string provenance.kind);
+      Json.field "name" (Json.option json_string provenance.name);
       Json.field "source_span"
         (Json.option json_span provenance.source_span);
       Json.field "related_spans"
@@ -59,7 +120,7 @@ let render_expression expression =
 
 let json_fact (fact : Vox_vc.fact) =
   Json.object_
-    [ Json.field "text" (Json.string (render_expression fact.expression));
+    [ Json.field "text" (json_string (render_expression fact.expression));
       Json.field "source_span" (Json.option json_span fact.location);
     ]
 
@@ -84,7 +145,7 @@ let counterexample (result : Vox_lean.result) =
 
 let json_emission_error (error : Vox_lean.emission_error) =
   Json.object_
-    [ Json.field "message" (Json.string error.message);
+    [ Json.field "message" (json_string error.message);
       Json.field "location" (json_span error.location);
     ]
 
@@ -98,7 +159,7 @@ let record_vc ~kind ~program_point ~provenance ~env
   let goal =
     Json.object_
       [ Json.field "text"
-          (Json.string (render_expression condition.Vox_vc.goal));
+          (json_string (render_expression condition.Vox_vc.goal));
         Json.field "source_span"
           (json_span condition.Vox_vc.goal.rexp_loc);
       ]
@@ -106,23 +167,23 @@ let record_vc ~kind ~program_point ~provenance ~env
   let discharge =
     Json.object_
       [ Json.field "status"
-          (Json.string (Vox_lean.string_of_verdict result.verdict));
-        Json.field "detail" (Json.option Json.string result.detail);
+          (json_string (Vox_lean.string_of_verdict result.verdict));
+        Json.field "detail" (Json.option json_string result.detail);
         Json.field "counterexample"
-          (Json.option Json.string (counterexample result));
+          (Json.option json_string (counterexample result));
       ]
   in
   let json =
     Json.object_
       [ Json.field "location" (json_span condition.Vox_vc.location);
         Json.field "program_point" (json_span program_point);
-        Json.field "kind" (Json.string kind);
+        Json.field "kind" (json_string kind);
         Json.field "goal" goal;
         Json.field "facts"
           (Json.array (List.map json_fact condition.Vox_vc.facts));
         Json.field "discharge" discharge;
         Json.field "generated_lean"
-          (Json.option Json.string generated_lean);
+          (Json.option json_string generated_lean);
         Json.field "emission_error"
           (Json.option json_emission_error emission_error);
         Json.field "provenance" (json_provenance provenance);
@@ -135,17 +196,30 @@ let () =
     match !Clflags.vox_dump_vc_json with
     | None -> ()
     | Some file ->
-      let document =
-        Json.object_
-          [ Json.field "schema_version" (Json.int 1);
-            Json.field "verification_conditions"
-              (Json.array (List.rev !dumped_vcs));
-          ]
-      in
-      let channel = open_out file in
-      output_string channel document;
-      output_char channel '\n';
-      close_out channel)
+      begin
+        try
+          let document =
+            Json.object_
+              [ Json.field "schema_version" (Json.int 1);
+                Json.field "verification_conditions"
+                  (Json.array (List.rev !dumped_vcs));
+              ]
+          in
+          let channel = open_out file in
+          Misc.try_finally
+            ~always:(fun () -> close_out_noerr channel)
+            (fun () ->
+              output_string channel document;
+              output_char channel '\n';
+              close_out channel)
+        with exception_ ->
+          begin
+            try
+              Format.eprintf "Warning: could not write VC dump to %S: %s@."
+                file (Printexc.to_string exception_)
+            with _ -> ()
+          end
+      end)
 
 type definition =
   { id : Ident.t;

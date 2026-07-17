@@ -4,21 +4,29 @@
 
 Complete. Flag plumbing, per-VC capture, JSON serialization,
 annotation/contract/seal provenance, and the type-only gate are implemented and
-verified. The boot compiler builds; all required suites are green; the
-byte-identical default and live JSON samples are confirmed (see Verification
-evidence below).
+verified, including the round-2 UTF-8, sidecar-I/O, and artifact-edge fixes.
+The boot compiler builds; all required suites are green; the unchanged default
+output and live JSON samples are confirmed (see Verification evidence below).
 
 ## Flags and mechanism
 
 - `-vox-dump-vc-json FILE` writes one JSON document to `FILE` at process exit.
-  It does not write JSON to stdout or stderr. It records every VC actually
-  passed to `Vox_lean.discharge`, including VCs processed before a later
-  verification error aborts compilation.
+  It does not write JSON to stdout or stderr. If the sidecar cannot be written,
+  it emits a warning on stderr and preserves the compile's normal exit status.
+  It records every VC actually passed to `Vox_lean.discharge`, including VCs
+  processed before a later verification error aborts compilation.
 - `-vox-type-only` skips both `Vox_verify.verify_structure` calls in
   `typing/typemod.ml` and skips seal-obligation verification.  It therefore
-  generates and discharges no refinement VCs. It performs full typechecking,
-  emits `.annot` when `-annot` is present, and prints the inferred signature
-  when `-i` is present, but never writes `.cmi`, `.cmo`, or `.cmt` artifacts.
+  generates and discharges no refinement VCs. It typechecks the requested unit
+  in isolation, emits `.annot` only when `-annot` is explicitly present, and
+  prints the inferred signature when `-i` is present. It does not write
+  `.cmi`, `.cmti`, `.cmo`, `.cmt`, `.cms`, or `.cmsi` files, including for
+  `.mli` inputs and partial typed trees on type errors.
+
+`-vox-type-only` intentionally does not check `.ml`-vs-`.mli` conformance: it
+takes the single-unit no-save path before an adjacent `.mli` is loaded and
+checked. This is the intended single-buffer editor dry-run behavior; a
+conformance-checking dry run is outside this mode's scope.
 
 The flags are independent.  Combining them produces a valid document whose
 `verification_conditions` array is empty.
@@ -84,11 +92,12 @@ synthesized facts.  `Span` is:
 ```
 
 Lines are 1-based and columns are 0-based byte offsets, matching OCaml
-locations. `Misc.Json.string` encodes every string: quotes and backslashes use
-the standard JSON escapes, and every byte outside printable ASCII (0x20-0x7e)
-is encoded separately as `\u00HH`. This deliberately turns the UTF-8 bytes of
-non-ASCII Lean output such as `⊢` and `→` into sequences of `\u00HH` escapes,
-so arbitrary solver bytes (including invalid UTF-8) still produce valid JSON.
+locations. A VOX-local encoder handles string values; `Misc.Json` still builds
+the object/array structure and escapes the ASCII field names. The local encoder
+uses standard JSON escapes for quotes, backslashes, and controls, passes
+well-formed UTF-8 through unchanged, and represents each ill-formed UTF-8 byte
+as `\u00HH`. Thus Lean text such as `⊢`, `¬`, and `→` remains readable UTF-8,
+while arbitrary solver bytes still produce JSON accepted by a strict parser.
 
 Provenance details by kind:
 
@@ -106,9 +115,11 @@ Provenance details by kind:
 `Vox_lean.emit`; it does not include the negated theorem that `discharge`
 constructs internally while checking for a disproof. It is null only when
 `Vox_lean.emit` fails; in that case `emission_error` contains the failure.
-`detail` is the unmodified solver diagnostic. For a `disproved` result,
-`counterexample` repeats that diagnostic when it explicitly contains a
-`counterexample` or `witness` marker; otherwise it is null. The
+For valid UTF-8, `detail` decodes to the solver diagnostic unchanged; malformed
+input bytes decode as the corresponding U+00HH characters described above.
+For a `disproved` result, `counterexample` repeats that encoded diagnostic when
+it explicitly contains a `counterexample` or `witness` marker; otherwise it is
+null. The
 `Vox_lean.result.location` field is intentionally not serialized; the VC's
 `location`, `program_point`, and provenance spans carry the source locations
 exposed by schema version 1.
@@ -125,17 +136,15 @@ positive theorem emitted for the VC is independently available in
 
 ### Build
 
-`make -s boot-compiler` builds clean with the change applied. `make -s fmt` was
-also attempted, but the repository-wide target could not obtain its sandboxed
-`patdiff` executable and reported unrelated pre-existing line-length failures;
-it left no unrelated source changes, and `git diff --check` passes.
+`make -s boot-compiler` builds clean with the round-2 changes applied.
+`git diff --check` also passes. The known-broken sandbox `make -s fmt` target
+was not used.
 
 ### Test suites (all green, no new flags in play)
 
-Because these expect-tests run the compiler with no new flags and compare its
-exact output against checked-in expected output, their passing is itself the
-byte-identical-default proof: any perturbation of the default path would break
-them.
+These expect-tests run the compiler with no new flags and compare its output
+against checked-in expected output. The separate byte-level default experiment
+below covers the exact proved/disproved cases required by this review.
 
 | suite | result |
 |---|---|
@@ -151,9 +160,6 @@ Compiler used: `_build/_bootinstall/bin/ocamlc`.
 
 `vcok.ml` = `let ok = (2 : int{ _ = 2 })` (VC proves):
 - `ocamlc -c vcok.ml` (no flag): exit 0, **0 bytes** of output.
-- `ocamlc -vox-dump-vc-json vcok.json -c vcok.ml`: exit 0, **0 bytes** on
-  stdout and stderr, and well-formed JSON in `vcok.json` with one `annotation`
-  VC. The file contains only ASCII bytes.
 
 `vcbad.ml` = `let bad = (1 : int{ _ = 2 })` (VC disproves):
 - `ocamlc -c vcbad.ml` (no flag): exit 2, exactly the standard located error
@@ -161,8 +167,17 @@ Compiler used: `_build/_bootinstall/bin/ocamlc`.
 - `ocamlc -vox-dump-vc-json vcbad.json -c vcbad.ml`: exit 2. The 159-byte
   standard located error on stderr is **byte-for-byte unchanged** and stdout is
   empty. `vcbad.json` is nevertheless written by the `at_exit` handler and
-  parses as JSON with one `disproved` VC. It contains only ASCII bytes; Lean's
-  UTF-8 `⊢` bytes appear as `\u00E2\u008A\u00A2`.
+  parses strictly as JSON with one `disproved` VC. Its decoded `detail` contains
+  the real `⊢` character, and the file contains the corresponding UTF-8 bytes.
+
+A fake solver diagnostic beginning with a lone byte `0xFF` also produced a
+strictly parseable document: the raw JSON contains `\u00FF`, not the malformed
+byte. This covers the arbitrary-byte invariant independently of the live Lean
+sample.
+
+With `/nonexistent-dir/out.json` as the dump path, the proved input still exits
+0 and the disproved input still exits 2. Both print one sidecar-write warning;
+the I/O failure does not replace the compile result.
 
 `grep -c schema_version` on both no-flag outputs is 0: the dump never appears
 without the flag.
@@ -171,10 +186,18 @@ without the flag.
 
 `-vox-type-only` short-circuits both `Vox_verify.verify_structure` calls
 (typemod.ml:4151, :4471) and the `verify_seal_obligations` body, so no VC is
-generated or discharged. Manual checks with `vcok.ml` confirmed:
+generated or discharged. Manual checks confirmed:
 
-- `-vox-type-only -c`: exit 0, silent, no `.cmi`, `.cmo`, `.cmt`, or `.annot`.
-- `-vox-type-only -annot -c`: exit 0, silent, only `.annot` is produced.
+- An `.ml` with `-vox-type-only -c`: exit 0, silent, no output artifact.
+- The same mode with explicit `-annot`: exit 0, silent, only `.annot` is
+  produced.
+- An `.mli` with `-vox-type-only -c`: exit 0 and no `.cmi`; its normal compile
+  writes `.cmi`.
+- A type-error `.ml` with `-vox-type-only -bin-annot -c`: normal exit 2 and no
+  partial `.cmt`; its normal compile writes the partial `.cmt`.
+- An `.ml` that disagrees with its compiled `.mli`: type-only exits 0 after
+  checking the implementation alone; a normal compile reports the expected
+  conformance error and exits 2.
 - `-vox-type-only -i`: exit 0, prints
   `val ok : int{ (app[Stdlib!.=] _ 2) }` and produces no compiled artifacts.
 - Combined with `-vox-dump-vc-json FILE`: exit 0, silent, and produces a valid
@@ -187,7 +210,8 @@ generated or discharged. Manual checks with `vcok.ml` confirmed:
   verdict-matching / error-raising logic are unchanged and run in the same
   order.
 - The `at_exit` handler is registered unconditionally but emits nothing unless
-  a dump file was supplied; when supplied, it writes only to that file.
+  a dump file was supplied; a supplied path receives the JSON document or
+  causes a swallowed warning if the write fails.
 - Provenance records are built by thunks forced only on the dump path; the
   new labeled arguments threaded through `prove`/`prove_refinement` and the
   call sites have no effect when the flag is off.

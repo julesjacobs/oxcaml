@@ -150,7 +150,7 @@ let interface ~hook_parse_tree ~hook_typed_tree info =
   if Clflags.(should_stop_after Compiler_pass.Parsing) then () else begin
     let alerts, tsg = typecheck_intf info ast in
     hook_typed_tree tsg;
-    if not !Clflags.print_types then begin
+    if not (!Clflags.print_types || !Clflags.vox_type_only) then begin
       emit_signature info alerts tsg
     end
   end
