@@ -1,5 +1,6 @@
 fact environment: by-value scope filtering
 escaped goal: rejected
+source display: precedence round trips
 Lean emission: byte-identical
 real Lean subprocess cases: completed or skipped
 reference identity and quantifier guards: checked

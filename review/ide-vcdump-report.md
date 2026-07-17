@@ -3,10 +3,10 @@
 ## Status
 
 Complete. Flag plumbing, per-VC capture, JSON serialization,
-annotation/contract/seal provenance, and the type-only gate are implemented and
-verified, including the round-2 UTF-8, sidecar-I/O, and artifact-edge fixes.
-The boot compiler builds; all required suites are green; the unchanged default
-output and live JSON samples are confirmed (see Verification evidence below).
+annotation/contract/seal provenance, source-like predicate displays, per-fact
+origins, and the type-only gate are implemented and verified. The boot compiler
+builds; all required suites are green; the unchanged default output and live
+JSON samples are confirmed (see Verification evidence below).
 
 ## Flags and mechanism
 
@@ -37,13 +37,13 @@ are facts in an enclosing VC, not separately discharged VCs, and therefore
 appear in `facts` with their spans instead of being assigned an invented VC
 kind.
 
-## JSON schema (version 1)
+## JSON schema (version 2)
 
 The top-level document is:
 
 ```text
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "verification_conditions": [ VC, ... ]
 }
 ```
@@ -55,8 +55,8 @@ Each `VC` has exactly these fields:
   "location": Span,
   "program_point": Span,
   "kind": "annotation" | "contract-argument" | "seal-implication",
-  "goal": Predicate,
-  "facts": [ Predicate, ... ],
+  "goal": GoalPredicate,
+  "facts": [ FactPredicate, ... ],
   "discharge": {
     "status": "proved" | "not-proved" | "disproved" | "solver-error",
     "detail": string | null,
@@ -73,14 +73,29 @@ Each `VC` has exactly these fields:
 }
 ```
 
-`Predicate` is:
+`GoalPredicate` is:
 
 ```text
-{ "text": string, "source_span": Span | null }
+{ "text": string, "display": string, "source_span": Span }
+```
+
+`FactPredicate` is:
+
+```text
+{
+  "text": string,
+  "display": string,
+  "source_span": Span | null,
+  "origin": {
+    "kind": string,
+    "name": string | null,
+    "span": Span | null
+  }
+}
 ```
 
 The goal always has a concrete `source_span`; fact spans can be `null` for
-synthesized facts.  `Span` is:
+synthesized facts. `Span` is:
 
 ```text
 {
@@ -99,7 +114,7 @@ well-formed UTF-8 through unchanged, and represents each ill-formed UTF-8 byte
 as `\u00HH`. Thus Lean text such as `⊢`, `¬`, and `→` remains readable UTF-8,
 while arbitrary solver bytes still produce JSON accepted by a strict parser.
 
-Provenance details by kind:
+VC provenance details by kind:
 
 - `annotation`: `name` is null, `source_span` is the annotation span, and a
   `subject` related span identifies the checked expression.
@@ -110,6 +125,22 @@ Provenance details by kind:
 - `seal-implication`: `name` is the sealed value name, `source_span` is the
   seal point, and `interface` and `implementation` related spans identify the
   two declarations.
+
+Fact origin details by kind:
+
+- `binder`: `name` is the refined binder name and `span` is its pattern.
+- `branch`: `name` is always null because a branch condition has no binder;
+  `span` is the condition expression for both the positive and negated fact.
+- `application`: for a refined application-result fact, `name` is the callee
+  when the callee is a direct identifier and otherwise null; `span` is the
+  call/result site.
+- `annotation`: for a proved annotation retained as a later hypothesis,
+  `name` is null and `span` is the annotation.
+- `contract-argument`: for a proved argument contract retained as a later
+  hypothesis, `name` is the parameter or refinement-view name and `span` is
+  the contract predicate.
+- `seal-implication`: `name` is the sealed value name and `span` is the
+  implementation declaration supplying the hypothesis.
 
 `generated_lean` is exactly the positive, non-negated theorem returned by
 `Vox_lean.emit`; it does not include the negated theorem that `discharge`
@@ -122,15 +153,25 @@ it explicitly contains a `counterexample` or `witness` marker; otherwise it is
 null. The
 `Vox_lean.result.location` field is intentionally not serialized; the VC's
 `location`, `program_point`, and provenance spans carry the source locations
-exposed by schema version 1.
+exposed by schema version 2.
 
 ## Predicate rendering
 
-Goals and facts use the existing `Types.Refinement.print` source-like printer.
-This preserves refinement references and binder names and is easier for an IDE
-user to read than extracting a term from an entire generated theorem.  The
-positive theorem emitted for the VC is independently available in
-`generated_lean`; as noted above, the internal negated disproof variant is not.
+The `text` field remains the unchanged raw `Types.Refinement.print` rendering,
+including prefix applications such as `(app[Stdlib!.>] _ 5)`. The additive
+`display` field uses a new vox-local source-like printer: it resolves only the
+primitive table shared with `Vox_lean`, strips module qualifiers, and renders
+operators with precedence- and associativity-correct parentheses. Unsupported
+subterms retain a faithful prefix fallback instead of being guessed into a
+different source term. The positive theorem emitted for the VC remains
+independently available in `generated_lean`.
+
+This vox-local printer is a candidate for the compiler's own type/error
+printing later; those diagnostics currently show forms such as
+`int{ (app[Stdlib!.>] _ 5) }`. Wiring it into compiler diagnostics is
+deliberately out of scope for this child because it would churn suite-wide
+baselines and requires a separate user decision. No `out_type.ml` or error
+printing path is changed here.
 
 ## Verification evidence
 

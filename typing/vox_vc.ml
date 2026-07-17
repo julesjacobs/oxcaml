@@ -1,6 +1,13 @@
+type fact_origin =
+  { kind : string;
+    name : string option;
+    span : Location.t option;
+  }
+
 type fact =
   { expression : Types.refinement_expression;
     location : Location.t option;
+    origin : fact_origin;
   }
 
 type t =
@@ -55,9 +62,11 @@ module Fact_env = struct
   let leave_many ids env =
     List.fold_left (fun env id -> leave id env) env ids
 
-  let add ?loc expression env =
+  let add ~origin ?loc expression env =
     if expression_in_scope env.scope expression then
-      { env with facts_rev = { expression; location = loc } :: env.facts_rev }
+      { env with
+        facts_rev = { expression; location = loc; origin } :: env.facts_rev;
+      }
     else env
 
   let facts env = List.rev env.facts_rev

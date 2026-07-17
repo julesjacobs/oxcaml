@@ -118,10 +118,188 @@ let json_provenance provenance =
 let render_expression expression =
   Format.asprintf "%a" Types.Refinement.print expression
 
-let json_fact (fact : Vox_vc.fact) =
+type display_associativity =
+  | Left
+  | Right
+
+type display_operator =
+  { text : string;
+    precedence : int;
+    associativity : display_associativity;
+  }
+
+type displayed_expression =
+  { text : string;
+    precedence : int;
+  }
+
+let display_operator = function
+  | `Or -> { text = "||"; precedence = 10; associativity = Right }
+  | `And -> { text = "&&"; precedence = 20; associativity = Right }
+  | `Equal -> { text = "="; precedence = 30; associativity = Left }
+  | `Not_equal -> { text = "<>"; precedence = 30; associativity = Left }
+  | `Less -> { text = "<"; precedence = 30; associativity = Left }
+  | `Less_equal -> { text = "<="; precedence = 30; associativity = Left }
+  | `Greater -> { text = ">"; precedence = 30; associativity = Left }
+  | `Greater_equal -> { text = ">="; precedence = 30; associativity = Left }
+  | `Add -> { text = "+"; precedence = 40; associativity = Left }
+  | `Subtract -> { text = "-"; precedence = 40; associativity = Left }
+  | `Multiply -> { text = "*"; precedence = 50; associativity = Left }
+
+let display_reference_name = function
+  | Rfun name | Rsibling name -> name
+  | Rapp path | Rglobal path -> Path.last path
+
+let display_builtin env = function
+  | Rfun _ | Rsibling _ -> None
+  | Rapp path | Rglobal path ->
+    begin
+      match
+        Subst.Lazy.force_value_description (Env.find_value path env)
+      with
+      | { val_kind = Val_prim primitive; _ } ->
+        Vox_lean.primitive_builtin primitive.prim_name
+      | _ -> None
+      | exception Not_found -> None
+    end
+
+let display_constant constant =
+  constant
+  |> Untypeast.constant
+  |> Ast_helper.Exp.constant
+  |> Pprintast.string_of_expression
+
+let display_function_name name =
+  if String.length name = 0 then name
+  else
+    match name.[0] with
+    | 'a'..'z' | 'A'..'Z' | '_' -> name
+    | _ -> "(" ^ name ^ ")"
+
+let display_raw expression =
+  { text = render_expression expression; precedence = 100 }
+
+let render_display ~env expression =
+  let parenthesize displayed = "(" ^ displayed.text ^ ")" in
+  let rec render expression =
+    match expression.rexp_desc with
+    | Rexp_ident (Rbound id) ->
+      { text = Ident.name id; precedence = 100 }
+    | Rexp_ident (Rfree reference) ->
+      { text = display_function_name (display_reference_name reference);
+        precedence = 100;
+      }
+    | Rexp_constant constant ->
+      { text = display_constant constant; precedence = 100 }
+    | Rexp_construct (constructor, [])
+      when Path.same constructor.rconstr_type_path Predef.path_bool
+           && (String.equal constructor.rconstr_name "true"
+               || String.equal constructor.rconstr_name "false") ->
+      { text = constructor.rconstr_name; precedence = 100 }
+    | Rexp_apply
+        ( { rexp_desc = Rexp_ident (Rfree reference); _ },
+          [Nolabel, argument] ) ->
+      begin match display_builtin env reference with
+      | Some `Not ->
+        let argument = render argument in
+        let argument =
+          if argument.precedence <= 70 then parenthesize argument
+          else argument.text
+        in
+        { text = "not " ^ argument; precedence = 70 }
+      | Some (`Add | `And | `Equal | `Greater | `Greater_equal | `Less
+             | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+      | None -> render_application expression reference [Nolabel, argument]
+      end
+    | Rexp_apply
+        ( { rexp_desc = Rexp_ident (Rfree reference); _ },
+          [Nolabel, left; Nolabel, right] ) ->
+      begin match display_builtin env reference with
+      | Some `Not ->
+        render_application expression reference
+          [Nolabel, left; Nolabel, right]
+      | Some ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
+              | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+              as builtin) ->
+        render_binary builtin left right
+      | None ->
+        render_application expression reference
+          [Nolabel, left; Nolabel, right]
+      end
+    | Rexp_apply
+        ({ rexp_desc = Rexp_ident (Rfree reference); _ }, arguments) ->
+      render_application expression reference arguments
+    | Rexp_apply
+        ({ rexp_desc = Rexp_ident (Rbound id); _ }, arguments) ->
+      render_prefix_application expression (Ident.name id) arguments
+    | Rexp_let _ | Rexp_function _ | Rexp_apply _ | Rexp_tuple _
+    | Rexp_construct _ | Rexp_field _ | Rexp_ifthenelse _ ->
+      display_raw expression
+  and render_binary builtin left right =
+    let operator = display_operator builtin in
+    let operand side expression =
+      let displayed = render expression in
+      let needs_parentheses =
+        displayed.precedence < operator.precedence
+        || (displayed.precedence = operator.precedence
+            && match operator.associativity, side with
+               | Left, `Right | Right, `Left -> true
+               | Left, `Left | Right, `Right -> false)
+      in
+      if needs_parentheses then parenthesize displayed else displayed.text
+    in
+    { text =
+        operand `Left left ^ " " ^ operator.text ^ " "
+        ^ operand `Right right;
+      precedence = operator.precedence;
+    }
+  and render_application whole reference arguments =
+    let head =
+      match display_builtin env reference with
+      | Some `Not -> "not"
+      | Some ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
+              | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+              as builtin) ->
+        (display_operator builtin).text
+      | None -> display_reference_name reference
+    in
+    render_prefix_application whole head arguments
+  and render_prefix_application whole head arguments =
+    if arguments = [] then display_raw whole
+    else
+      let head = display_function_name head in
+      let argument (label, expression) =
+        let displayed = render expression in
+        let text =
+          if displayed.precedence <= 70 then parenthesize displayed
+          else displayed.text
+        in
+        match label with
+        | Nolabel -> text
+        | Labelled label -> "~" ^ label ^ ":" ^ text
+        | Optional label -> "?" ^ label ^ ":" ^ text
+        | Position label -> "@" ^ label ^ ":" ^ text
+      in
+      { text =
+          String.concat " " (head :: List.map argument arguments);
+        precedence = 70;
+      }
+  in
+  (render expression).text
+
+let json_fact ~env (fact : Vox_vc.fact) =
+  let origin = fact.origin in
   Json.object_
     [ Json.field "text" (json_string (render_expression fact.expression));
+      Json.field "display"
+        (json_string (render_display ~env fact.expression));
       Json.field "source_span" (Json.option json_span fact.location);
+      Json.field "origin"
+        (Json.object_
+           [ Json.field "kind" (json_string origin.kind);
+             Json.field "name" (Json.option json_string origin.name);
+             Json.field "span" (Json.option json_span origin.span);
+           ]);
     ]
 
 let contains text needle =
@@ -160,6 +338,8 @@ let record_vc ~kind ~program_point ~provenance ~env
     Json.object_
       [ Json.field "text"
           (json_string (render_expression condition.Vox_vc.goal));
+        Json.field "display"
+          (json_string (render_display ~env condition.Vox_vc.goal));
         Json.field "source_span"
           (json_span condition.Vox_vc.goal.rexp_loc);
       ]
@@ -180,7 +360,7 @@ let record_vc ~kind ~program_point ~provenance ~env
         Json.field "kind" (json_string kind);
         Json.field "goal" goal;
         Json.field "facts"
-          (Json.array (List.map json_fact condition.Vox_vc.facts));
+          (Json.array (List.map (json_fact ~env) condition.Vox_vc.facts));
         Json.field "discharge" discharge;
         Json.field "generated_lean"
           (Json.option json_string generated_lean);
@@ -200,7 +380,7 @@ let () =
         try
           let document =
             Json.object_
-              [ Json.field "schema_version" (Json.int 1);
+              [ Json.field "schema_version" (Json.int 2);
                 Json.field "verification_conditions"
                   (Json.array (List.rev !dumped_vcs));
               ]
@@ -465,6 +645,15 @@ let verification_error ~loc verdict =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"
     (Vox_lean.string_of_verdict verdict)
 
+let fact_origin ?name ~kind span : Vox_vc.fact_origin =
+  { kind; name; span = Some span }
+
+let fact_origin_of_provenance provenance : Vox_vc.fact_origin =
+  { kind = provenance.kind;
+    name = provenance.name;
+    span = provenance.source_span;
+  }
+
 let prove state ~env ~loc ~kind ~program_point ~provenance goal =
   match Facts.snapshot ~loc ~goal state.facts with
   | Error { escaped; _ } ->
@@ -473,12 +662,17 @@ let prove state ~env ~loc ~kind ~program_point ~provenance goal =
       (if List.length escaped = 1 then "" else "s")
       (String.concat ", " (List.map Ident.name escaped))
   | Ok condition ->
+    let provenance = lazy (provenance ()) in
     let result = Vox_lean.discharge ~env condition in
     if Option.is_some !Clflags.vox_dump_vc_json then
-      record_vc ~kind ~program_point ~provenance:(provenance ()) ~env
+      record_vc ~kind ~program_point ~provenance:(Lazy.force provenance) ~env
         condition result;
     begin match result.verdict with
-    | Vox_lean.Proved -> state.facts <- Facts.add ~loc goal state.facts
+    | Vox_lean.Proved ->
+      let origin =
+        fact_origin_of_provenance (Lazy.force provenance)
+      in
+      state.facts <- Facts.add ~origin ~loc goal state.facts
     | (Not_proved | Disproved | Solver_error) as verdict ->
       verification_error ~loc verdict
     end
@@ -507,6 +701,10 @@ let verify_seal_obligation ~env ~seal_location
       ~facts:
         [{ Vox_vc.expression = hypothesis;
            location = Some obligation.rso_implementation_location;
+           origin =
+             fact_origin ~kind:"seal-implication"
+               ~name:obligation.rso_value_name
+               obligation.rso_implementation_location;
          }]
       ~goal
   in
@@ -572,7 +770,12 @@ let rec enter_pattern
               ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
           in
           let expression = Vox_vc.instantiate ~refinement ~with_ in
-          state.facts <- Facts.add ~loc:pattern.pat_loc expression state.facts)
+          let origin =
+            fact_origin ~kind:"binder" ~name:(Ident.name id)
+              pattern.pat_loc
+          in
+          state.facts <-
+            Facts.add ~origin ~loc:pattern.pat_loc expression state.facts)
         (refinement pattern.pat_type)
   | Tpat_alias { pattern; id; _ } ->
     enter_pattern state ~fact pattern;
@@ -703,8 +906,10 @@ let rec walk_expression state expression =
     let saved_facts = state.facts in
     Option.iter
       (fun condition_subject ->
+        let origin = fact_origin ~kind:"branch" condition.exp_loc in
         state.facts <-
-          Facts.add ~loc:condition.exp_loc condition_subject state.facts)
+          Facts.add ~origin ~loc:condition.exp_loc condition_subject
+            state.facts)
       condition_fact;
     walk_expression state ifso;
     List.iter
@@ -730,7 +935,9 @@ let rec walk_expression state expression =
                    bool_node ~loc:condition.exp_loc false,
                    Some (bool_node ~loc:condition.exp_loc true) ))
           in
-          state.facts <- Facts.add ~loc:condition.exp_loc negated state.facts)
+          let origin = fact_origin ~kind:"branch" condition.exp_loc in
+          state.facts <-
+            Facts.add ~origin ~loc:condition.exp_loc negated state.facts)
         condition_fact;
       walk_expression state ifnot;
       List.iter
@@ -834,7 +1041,14 @@ and check_application state application function_ arguments =
       let result_subject = subject state application in
       let fact = Vox_vc.instantiate ~refinement ~with_:result_subject in
       let fact = replace_parameters replacements fact in
-      state.facts <- Facts.add ~loc:application.exp_loc fact state.facts)
+      let name =
+        match function_.exp_desc with
+        | Texp_ident { path; _ } -> Some (Path.last path)
+        | _ -> None
+      in
+      let origin = fact_origin ?name ~kind:"application" application.exp_loc in
+      state.facts <-
+        Facts.add ~origin ~loc:application.exp_loc fact state.facts)
     (refinement result_type)
 
 and walk_default_expression state expression =
