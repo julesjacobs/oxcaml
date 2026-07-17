@@ -1706,6 +1706,57 @@ let test_sort_key_injective () =
     (!collisions = 0)
 ;;
 
+(* H6 (fabric S4.2 train foundation fix): [checkpoint]/[rewind_to_checkpoint] must retract
+   a [Trivially_false] equality's premise exactly as [pop] does. The foundation checkpoint
+   predated [false_frames] (the default-ON trivial_eq fix, task #78) and auto-merged over
+   it, so a stale tautologically-false premise survived a rewind and [check] kept
+   reporting the retracted conflict — completeness-only (over-report, never a wrong
+   verdict), but it broke the primitive's OBS-EQ-with-[pop] contract. RED: assert
+   [x0 + 1 = x0] (which cancels to [1 = 0] -> [Trivially_false], recording a
+   [false_frames] premise) inside a checkpoint window; after rewind [check] must be
+   [Sat_candidate], matching the pop-path. Pre-fix the rewind left the premise and [check]
+   stayed [Conflict]. *)
+let test_h6_false_frames_checkpoint () =
+  let fx = make_fixture 2 in
+  let x = fx.vars.(0) in
+  let eq_false = Context.eq fx.ctx (Context.linear_combination fx.ctx [ 1, x ] 1) x in
+  check
+    "h6: x0+1=x0 is a live Eq atom (not constant-folded)"
+    (match eq_false.Term.node with
+     | Term.Eq _ -> true
+     | _ -> false);
+  check "h6: fresh solver -> Sat_candidate" (Lia.check fx.solver = Lia.Sat_candidate);
+  let cp = Lia.checkpoint fx.solver in
+  Lia.assert_atom fx.solver eq_false ~polarity:true ~premise:0;
+  check
+    "h6: trivially-false eq asserted -> Conflict"
+    (match Lia.check fx.solver with
+     | Lia.Conflict _ -> true
+     | Lia.Sat_candidate -> false);
+  Lia.rewind_to_checkpoint fx.solver cp;
+  (* THE RED: rewind must retract the false premise (pop-path parity) -> Sat_candidate.
+     Pre-fix: [false_frames] not restored -> stale premise -> still Conflict. *)
+  check
+    "h6: rewind retracts the false premise -> Sat_candidate (checkpoint/pop parity)"
+    (Lia.check fx.solver = Lia.Sat_candidate);
+  (* Cross-check the reference behaviour on the [pop] path: the SAME trivially-false eq
+     inside a push/pop window ends [Sat_candidate], confirming rewind now matches pop. *)
+  let fx2 = make_fixture 2 in
+  let x2 = fx2.vars.(0) in
+  let eq2 = Context.eq fx2.ctx (Context.linear_combination fx2.ctx [ 1, x2 ] 1) x2 in
+  Lia.push fx2.solver;
+  Lia.assert_atom fx2.solver eq2 ~polarity:true ~premise:0;
+  check
+    "h6: pop-path trivially-false eq -> Conflict"
+    (match Lia.check fx2.solver with
+     | Lia.Conflict _ -> true
+     | Lia.Sat_candidate -> false);
+  Lia.pop fx2.solver 1;
+  check
+    "h6: pop retracts the false premise -> Sat_candidate"
+    (Lia.check fx2.solver = Lia.Sat_candidate)
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -1724,6 +1775,7 @@ let () =
   test_determinism ();
   test_determinism_big ();
   test_notify_equality ();
+  test_h6_false_frames_checkpoint ();
   test_diophantine ();
   test_hnf_cut ();
   test_cg_cut ();

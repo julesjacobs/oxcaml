@@ -239,7 +239,7 @@ val push : 'tok t -> unit
 val pop : 'tok t -> int -> unit
 
 (** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
-    undo). [checkpoint t] captures the simplex bound watermark plus the reported/eq
+    undo). [checkpoint t] captures the simplex bound watermark plus the reported/eq/false
     bookkeeping counts; [rewind_to_checkpoint t c] restores exactly to it (draining the
     simplex bound trail and un-reporting the atoms recorded since, as {!pop} does),
     without touching the frame stack. Requires the theory to be at a single base frame

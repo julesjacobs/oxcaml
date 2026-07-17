@@ -99,14 +99,14 @@ type 'tok t =
          stays empty otherwise, so the OFF path is byte-for-byte trunk. *)
   ; mutable cube_tried : bool
   ; mutable gcd_cut_tried : bool
-    (* task #128: the multi-row gcd cut runs at most ONCE per instance. The lattice
-       infeasibility it tests depends only on the asserted EQUALITY rows (eq_frames),
-       which B&B branching never changes (it adds inequality bounds), so re-running it at
-       every Final is pure overhead (observed 14x on a big SAT SMPT file). Once per
-       instance, exactly like [cube_tried]; the batch reader rejects push/pop so eq_frames
-       is fixed. An incremental generation that pushed new equalities would not be
-       re-tested — incompleteness, never unsoundness (a missed conflict, not a wrong one);
-       acceptable for this dark prototype. *)
+  (* task #128: the multi-row gcd cut runs at most ONCE per instance. The lattice
+     infeasibility it tests depends only on the asserted EQUALITY rows (eq_frames), which
+     B&B branching never changes (it adds inequality bounds), so re-running it at every
+     Final is pure overhead (observed 14x on a big SAT SMPT file). Once per instance,
+     exactly like [cube_tried]; the batch reader rejects push/pop so eq_frames is fixed.
+     An incremental generation that pushed new equalities would not be re-tested —
+     incompleteness, never unsoundness (a missed conflict, not a wrong one); acceptable
+     for this dark prototype. *)
   (* the cube test runs at most ONCE per instance — the first non-integral Final, which
      for a batch query is the b&b root (fat feasible regions are cracked there). This
      bounds its extra LP solve to one per query, so it cannot accumulate overhead on a
@@ -135,9 +135,9 @@ let trivial_eq_fix_on =
 (* Multi-row integer-elimination gcd cut (task #128). Dark: default OFF, so the extra pass
    in {!diophantine_conflict} is skipped and behaviour is byte-identical to trunk. Set
    OXSMT_LIA_GCD_CUT=1 to eliminate a shared variable across asserted equality rows and
-   gcd-test the integer combination — catching a parity/lattice infeasibility (e.g.
-   [x=2q] and [x=2q'+1] give [2q-2q'=1], gcd 2 does not divide 1) that the single-row
-   test cannot see. *)
+   gcd-test the integer combination — catching a parity/lattice infeasibility (e.g. [x=2q]
+   and [x=2q'+1] give [2q-2q'=1], gcd 2 does not divide 1) that the single-row test cannot
+   see. *)
 let gcd_cut_on =
   match Sys.getenv_opt "OXSMT_LIA_GCD_CUT" with
   | Some ("1" | "true" | "yes" | "on") -> true
@@ -826,16 +826,16 @@ let diophantine_conflict t : 'tok conflict option =
     let rec loop () = if !conflict = None && sweep () then loop () in
     (* Multi-row integer-elimination gcd cut (task #128, dark OXSMT_LIA_GCD_CUT). The
        [sweep] fixpoint above is per-row; it misses a lattice infeasibility that only
-       appears after ELIMINATING a shared variable between two rows. This pass integer-row-
-       reduces the residual free system: for each pivot variable it cancels that variable
-       from every other row by the integer combination [rowj := ap*rowj - aj*rowp] (ap/aj
-       the pivot/other coefficients; premises unioned) and gcd-tests each combined row. All
-       arithmetic is [Rational] so a coefficient blow-up raises [Rational.Overflow] and
-       aborts the pass SOUNDLY (no conflict claimed) rather than wrapping a native int.
-       Sound: each reduced row is an integer linear combination of asserted equalities, so
-       a row with [gcd(coeffs) ∤ residual] (or all-zero coeffs and a nonzero residual) is a
-       genuine ℤ-infeasibility of exactly the cited premises. Bounded: ≤ #free-vars pivots,
-       each a single linear scan. *)
+       appears after ELIMINATING a shared variable between two rows. This pass
+       integer-row- reduces the residual free system: for each pivot variable it cancels
+       that variable from every other row by the integer combination
+       [rowj := ap*rowj - aj*rowp] (ap/aj the pivot/other coefficients; premises unioned)
+       and gcd-tests each combined row. All arithmetic is [Rational] so a coefficient
+       blow-up raises [Rational.Overflow] and aborts the pass SOUNDLY (no conflict
+       claimed) rather than wrapping a native int. Sound: each reduced row is an integer
+       linear combination of asserted equalities, so a row with [gcd(coeffs) ∤ residual]
+       (or all-zero coeffs and a nonzero residual) is a genuine ℤ-infeasibility of exactly
+       the cited premises. Bounded: ≤ #free-vars pivots, each a single linear scan. *)
     let multi_row_gcd_cut () =
       try
         let erows =
@@ -910,7 +910,9 @@ let diophantine_conflict t : 'tok conflict option =
             then (
               let piv = ref (-1) in
               for i = 0 to n - 1 do
-                if !piv < 0 && (not used.(i)) && not (Rational.is_zero (coeff erows.(i) p))
+                if !piv < 0
+                   && (not used.(i))
+                   && not (Rational.is_zero (coeff erows.(i) p))
                 then piv := i
               done;
               if !piv >= 0
@@ -928,8 +930,7 @@ let diophantine_conflict t : 'tok conflict option =
                       r.gc <- merge (scale ap r.gc) (scale (Rational.neg aj) pv.gc);
                       r.gr <- Rational.sub (Rational.mul ap r.gr) (Rational.mul aj pv.gr);
                       r.gp <- List.rev_append pv.gp r.gp;
-                      test r)
-                  )
+                      test r))
                 done)))
           vars
       with
@@ -1846,15 +1847,24 @@ let pop t n =
    the [reported]/[eq] bookkeeping is framed as in [pop]. The chrono checkpoint-driver
    holds the theory at a SINGLE base frame (no per-decision-level frames under CB), so
    both frame lists have exactly one frame here. [checkpoint] captures the simplex
-   watermark + the base frame's reported/eq counts; [rewind_to_checkpoint] restores the
-   simplex bounds and drops the newest reported/eq entries recorded since the checkpoint —
-   un-reporting + re-dirtying each reported atom exactly as [pop] does (CONTRACT-EX),
-   addressed by an absolute count rather than a frame boundary. Fails LOUD if a non-base
-   frame is open, rather than silently mis-restoring. *)
+   watermark + the base frame's reported/eq/false counts; [rewind_to_checkpoint] restores
+   the simplex bounds and drops the newest reported/eq/false entries recorded since the
+   checkpoint — un-reporting + re-dirtying each reported atom exactly as [pop] does
+   (CONTRACT-EX), addressed by an absolute count rather than a frame boundary. Fails LOUD
+   if a non-base frame is open, rather than silently mis-restoring.
+
+   H6: [false_frames] (the [Trivially_false] premises recorded under the default-ON
+   [trivial_eq_fix], task #78) is backtrackable — [pop] drops it in lockstep with
+   [eq_frames] — so it MUST ride the checkpoint too. Omitting it (the foundation predated
+   [false_frames] and auto-merged over it) is completeness-only — a stale
+   tautologically-false premise can only over-report (fail-closed unknown / redundant
+   valid lemma), never a wrong verdict — but it breaks the primitive's OBS-EQ contract, so
+   it is framed identically to [eq_frames] below. *)
 type checkpoint =
   { c_simplex : int
   ; c_reported : int
   ; c_eq : int
+  ; c_false : int
   }
 
 let single_base_frame = function
@@ -1869,6 +1879,7 @@ let checkpoint t =
   { c_simplex = Simplex.checkpoint t.simplex
   ; c_reported = List.length (single_base_frame t.report_frames)
   ; c_eq = List.length (single_base_frame t.eq_frames)
+  ; c_false = List.length (single_base_frame t.false_frames)
   }
 ;;
 
@@ -1898,7 +1909,13 @@ let rewind_to_checkpoint t c =
       | [] -> []
       | _ :: tl -> drop_first (k - 1) tl)
   in
-  t.eq_frames <- [ drop_first (List.length efr - c.c_eq) efr ]
+  t.eq_frames <- [ drop_first (List.length efr - c.c_eq) efr ];
+  (* H6: drop the [Trivially_false] premises recorded since the checkpoint, exactly as
+     [pop] retracts them (lia.ml [pop] drops [false_frames] in lockstep with [eq_frames]).
+     Same shape (a single base [_ list]), same newest-first absolute-count drop as
+     [eq_frames]. *)
+  let ffr = single_base_frame t.false_frames in
+  t.false_frames <- [ drop_first (List.length ffr - c.c_false) ffr ]
 ;;
 
 (* Diagnostics stay readable after poisoning (you need [overflow_count] precisely to
