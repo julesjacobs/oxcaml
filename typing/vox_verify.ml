@@ -84,6 +84,15 @@ type vc_provenance =
 
 let dumped_vcs = ref []
 
+(* Types of refinement-predicate sub-expressions, keyed by source span, for
+   the IDE's "type at cursor" readout inside a refinement like
+   [int{ _ > 0 }].  Gathered per refinement type encountered during
+   translation (see [collect_refinement_types]), independent of VC
+   generation, so a refined parameter that produces no obligation still
+   contributes cursor types.  Populated and emitted only when
+   [-vox-dump-vc-json] is set. *)
+let refinement_expression_types = ref []
+
 let json_position (position : Lexing.position) =
   Json.object_
     [ Json.field "line" (Json.int position.pos_lnum);
@@ -122,6 +131,14 @@ let render_expression expression =
    ([Out_type]) can share it; see [Vox_lean.render_predicate]. *)
 let render_display ~env expression =
   Vox_lean.render_predicate ~env expression
+
+(* Render a sub-expression's type source-like, in [env] for path
+   shortening.  Refinement types render as [int{ _ > 0 }] (never the raw
+   AST) because [Printtyp]/[Out_type] use the source-like predicate printer
+   installed by [Vox_lean]. *)
+let render_type ~env type_ =
+  Printtyp.wrap_printing_env ~error:true env (fun () ->
+    Format.asprintf "%a" Printtyp.type_expr type_)
 
 let display_location location =
   let start = location.Location.loc_start in
@@ -244,12 +261,19 @@ let () =
     | Some file ->
       begin
         try
+          let refinement_expression_types_field =
+            match List.rev !refinement_expression_types with
+            | [] -> []
+            | entries ->
+              [ Json.field "refinement_expression_types" (Json.array entries) ]
+          in
           let document =
             Json.object_
-              [ Json.field "schema_version" (Json.int 2);
-                Json.field "verification_conditions"
-                  (Json.array (List.rev !dumped_vcs));
-              ]
+              ([ Json.field "schema_version" (Json.int 2);
+                 Json.field "verification_conditions"
+                   (Json.array (List.rev !dumped_vcs));
+               ]
+               @ refinement_expression_types_field)
           in
           let channel = open_out file in
           Misc.try_finally
@@ -1053,6 +1077,65 @@ and walk_structure state structure =
 let toplevel_facts = ref Facts.empty
 let toplevel_definitions = ref []
 
+(* Walk a refinement predicate, recording [{location, type}] for every
+   sub-expression node, using its stored [rexp_loc]/[rexp_type].  The hole [_]
+   appears as an [Rexp_ident] node, so it contributes its own entry. *)
+let rec collect_refinement_expression ~env (expression : refinement_expression)
+    =
+  let json =
+    Json.object_
+      [ Json.field "location" (json_span expression.rexp_loc);
+        Json.field "type" (json_string (render_type ~env expression.rexp_type));
+      ]
+  in
+  refinement_expression_types := json :: !refinement_expression_types;
+  match expression.rexp_desc with
+  | Rexp_ident _ | Rexp_constant _ -> ()
+  | Rexp_let (bindings, body) ->
+    List.iter
+      (fun binding -> collect_refinement_expression ~env binding.rbind_expr)
+      bindings;
+    collect_refinement_expression ~env body
+  | Rexp_function { body; _ } -> collect_refinement_expression ~env body
+  | Rexp_apply (function_, arguments) ->
+    collect_refinement_expression ~env function_;
+    List.iter
+      (fun (_, argument) -> collect_refinement_expression ~env argument)
+      arguments
+  | Rexp_tuple fields ->
+    List.iter
+      (fun (_, field) -> collect_refinement_expression ~env field)
+      fields
+  | Rexp_construct (_, arguments) ->
+    List.iter (collect_refinement_expression ~env) arguments
+  | Rexp_field (record, _) -> collect_refinement_expression ~env record
+  | Rexp_ifthenelse (condition, ifso, ifnot) ->
+    collect_refinement_expression ~env condition;
+    collect_refinement_expression ~env ifso;
+    Option.iter (collect_refinement_expression ~env) ifnot
+
+(* Record the predicate subterm types of every refinement type written in the
+   structure.  Refinement annotations survive as core types whose [ctyp_type]
+   is a [Trefine] (the predicate expression itself is dropped during lowering);
+   we walk all core types with the default iterator so every syntactic
+   refinement -- including refined parameters that generate no obligation -- is
+   covered.  Only invoked when [-vox-dump-vc-json] is set. *)
+let collect_refinement_types structure =
+  let super = Tast_iterator.default_iterator in
+  let iterator =
+    { super with
+      typ =
+        (fun sub (core_type : core_type) ->
+          (match get_desc core_type.ctyp_type with
+           | Trefine refinement ->
+             collect_refinement_expression ~env:core_type.ctyp_env
+               refinement.ref_pred
+           | _ -> ());
+          super.typ sub core_type);
+    }
+  in
+  List.iter (iterator.structure_item iterator) structure.str_items
+
 let finish_dump () =
   if !Clflags.vox_dump_vc then begin
     Format.eprintf "Error: VCs dumped, not discharged.@.";
@@ -1066,6 +1149,8 @@ let verify_structure ?(toplevel = false) structure =
     else { facts = Facts.empty; definitions = [] }
   in
   let walk_root () =
+    if Option.is_some !Clflags.vox_dump_vc_json then
+      collect_refinement_types structure;
     let iterator = iterator state in
     List.iter
       (Tast_iterator.default_iterator.structure_item iterator)
