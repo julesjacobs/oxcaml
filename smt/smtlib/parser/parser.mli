@@ -23,11 +23,11 @@ exception Malformed of string
 exception Unsupported of string
 
 (** Whether the front-end quantified pipeline (typed formula IR -> NNF/polarity ->
-    Skolemization + definitional clausification -> lowering) is enabled, from the dark
-    flag [OXSMT_QUANT_PIPELINE] (read once). Default OFF = the current hand-coded
-    quantifier-shape classification, byte-identical. ON (stage 2) routes quantified
-    assertions through {!Fol}. Exposed so a driver can report the active mode; the routing
-    itself is internal to the parser. *)
+    Skolemization + definitional clausification -> lowering) is enabled, from the flag
+    [OXSMT_QUANT_PIPELINE] (read once). Default ON (stage 2) routes quantified assertions
+    through {!Fol}; [OXSMT_QUANT_PIPELINE=0]/false/no forces OFF = the current hand-coded
+    quantifier-shape classification, byte-identical to the pre-flip trunk. Exposed so a
+    driver can report the active mode; the routing itself is internal to the parser. *)
 val quant_pipeline_enabled : bool Lazy.t
 
 (** A universally-quantified assertion, either [(assert (forall (binders) body))] or the

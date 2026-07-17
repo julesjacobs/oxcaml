@@ -10,18 +10,21 @@ exception Unsupported of string
 let malformedf fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
-(* Dark flag for the front-end quantified pipeline (design basis: typed formula IR ->
+(* Flag for the front-end quantified pipeline (design basis: typed formula IR ->
    NNF/polarity -> Skolemization + definitional clausification -> lowering into the
-   ground/lemma APIs). Read ONCE, so a process's routing is stable. Default OFF (unset or
-   any non-truthy value) keeps the current hand-coded quantifier-shape classification,
-   i.e. BYTE-IDENTICAL behavior; ON routes quantified assertions through {!Fol} (stage 2).
-   RUNG 1 only defines the switch and the pure IR engine — no consumer yet, so ON = OFF
-   for now. *)
+   ground/lemma APIs). Read ONCE, so a process's routing is stable. ON routes quantified
+   assertions through {!Fol} (stage 2).
+
+   Tri-state (established flip family, mirrors {!Combine.model_repair_on} /
+   {!Lia_adapter.cg_cuts_on}): unset -> ON (the new default); [OXSMT_QUANT_PIPELINE=0]/
+   false/no -> OFF, the byte-for-byte pre-flip path (the current hand-coded
+   quantifier-shape classification, BYTE-IDENTICAL to trunk); anything else -> ON. Only
+   this env->bool read changed at the flip; the pipeline machinery is untouched. *)
 let quant_pipeline_enabled =
   lazy
     (match Sys.getenv_opt "OXSMT_QUANT_PIPELINE" with
-     | Some ("1" | "true" | "yes" | "on") -> true
-     | Some _ | None -> false)
+     | Some ("0" | "false" | "no") -> false
+     | Some _ | None -> true)
 ;;
 
 (* Let-/qvar-binding scope. A persistent [String] map, NOT an association list: a deeply

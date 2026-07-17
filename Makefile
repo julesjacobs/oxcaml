@@ -779,27 +779,48 @@ fol-test:
 	$(DUNE) exec smt/smtlib/test/fol_test.exe
 
 ## quant-pipeline-test — front-end quantified pipeline (OXSMT_QUANT_PIPELINE) end-to-end.
-##   Locks the exemplar flips (a term-nested quantifier the hand-coded classifier DROPS is
-##   fully represented ON): Rodin `not(and(forall)(forall))` and the UFDT iff both go
-##   unknown (OFF) -> unsat (ON). Plus a SOUNDNESS guard: the negative-polarity-exists
-##   honeypot must never become `sat` under the pipeline.
+##   Default is now ON (the flip): unset routes quantified assertions through the pipeline;
+##   OXSMT_QUANT_PIPELINE=0 recovers the byte-identical hand-coded OFF path. Locks the
+##   exemplar flips (a term-nested quantifier the hand-coded classifier DROPS is fully
+##   represented ON): Rodin `not(and(forall)(forall))` and the UFDT iff go unknown (=0) ->
+##   unsat (=1), and the DEFAULT (unset) must equal ON (=unsat). Plus SOUNDNESS guards: the
+##   negative-polarity-exists honeypot must never become `sat` under the pipeline; the
+##   OFF-path drop-sentinel (=0) and the ON-path drop-sentinel (unrepresentable content
+##   under the pipeline) must each degrade a sat ground core to `unknown`, never `sat`.
 quant-pipeline-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	@cli=_build/default/tests/solver/oxsmt_cli.exe; fail=0; \
 	  for f in quant_pipeline_rodin_unsat quant_pipeline_ufdt_iff_unsat quant_pipeline_polarity_honeypot_unsat quant_pipeline_shared_exists_unsat; do \
-	    off=$$($$cli tests/cases/$$f.smt2 2>/dev/null); \
+	    off=$$(OXSMT_QUANT_PIPELINE=0 $$cli tests/cases/$$f.smt2 2>/dev/null); \
 	    on=$$(OXSMT_QUANT_PIPELINE=1 $$cli tests/cases/$$f.smt2 2>/dev/null); \
+	    def=$$($$cli tests/cases/$$f.smt2 2>/dev/null); \
 	    case "$$off" in *"verdict unknown"*) : ;; *) \
-	      echo "quant-pipeline-test: FAIL $$f OFF not unknown: [$$off]"; fail=1;; esac; \
-	    case "$$on" in *"verdict unsat"*) echo "quant-pipeline-test: OK $$f unknown(OFF)->unsat(ON)" ;; *) \
-	      echo "quant-pipeline-test: FAIL $$f ON not unsat: [$$on]"; fail=1;; esac; \
+	      echo "quant-pipeline-test: FAIL $$f =0 not unknown: [$$off]"; fail=1;; esac; \
+	    case "$$on" in *"verdict unsat"*) : ;; *) \
+	      echo "quant-pipeline-test: FAIL $$f =1 not unsat: [$$on]"; fail=1;; esac; \
+	    case "$$def" in *"verdict unsat"*) echo "quant-pipeline-test: OK $$f unknown(=0)->unsat(=1); default(unset)=unsat" ;; *) \
+	      echo "quant-pipeline-test: FAIL $$f default(unset) not unsat -- flip not ON: [$$def]"; fail=1;; esac; \
 	  done; \
 	  for hp in lemma_partial_drop_sat_degrades_unknown quant_pipeline_polarity_honeypot_unsat; do \
 	    on=$$(OXSMT_QUANT_PIPELINE=1 $$cli tests/cases/$$hp.smt2 2>/dev/null); \
-	    case "$$on" in *"verdict sat"*) \
-	      echo "quant-pipeline-test: FAIL polarity honeypot $$hp flipped to SAT under pipeline (unsound): [$$on]"; fail=1;; *) \
+	    def=$$($$cli tests/cases/$$hp.smt2 2>/dev/null); \
+	    case "$$on$$def" in *"verdict sat"*) \
+	      echo "quant-pipeline-test: FAIL polarity honeypot $$hp flipped to SAT under pipeline (unsound): on=[$$on] default=[$$def]"; fail=1;; *) \
 	      echo "quant-pipeline-test: OK polarity honeypot $$hp sound under pipeline (not sat)";; esac; \
 	  done; \
+	  sg=lemma_partial_drop_sat_degrades_unknown; \
+	  off=$$(OXSMT_QUANT_PIPELINE=0 $$cli tests/cases/$$sg.smt2 2>/dev/null); \
+	  case "$$off" in *"verdict sat"*) \
+	    echo "quant-pipeline-test: FAIL OFF-path drop-sentinel $$sg =0 gave SAT (sentinel disarmed, unsound): [$$off]"; fail=1;; \
+	    *"verdict unknown"*) echo "quant-pipeline-test: OK OFF-path drop-sentinel $$sg =0 degrades sat->unknown" ;; *) \
+	    echo "quant-pipeline-test: FAIL OFF-path drop-sentinel $$sg =0 not unknown: [$$off]"; fail=1;; esac; \
+	  og=quant_pipeline_ondrop_sentinel_unknown; \
+	  on=$$(OXSMT_QUANT_PIPELINE=1 $$cli tests/cases/$$og.smt2 2>/dev/null); \
+	  def=$$($$cli tests/cases/$$og.smt2 2>/dev/null); \
+	  case "$$on$$def" in *"verdict sat"*) \
+	    echo "quant-pipeline-test: FAIL ON-path drop-sentinel $$og gave SAT under pipeline (unsound): on=[$$on] default=[$$def]"; fail=1;; *) \
+	    case "$$def" in *"verdict unknown"*) echo "quant-pipeline-test: OK ON-path drop-sentinel $$og degrades sat->unknown (not sat)" ;; *) \
+	      echo "quant-pipeline-test: FAIL ON-path drop-sentinel $$og default not unknown: [$$def]"; fail=1;; esac;; esac; \
 	  ls=tests/cases/quant_pipeline_let_shadow_sat.smt2; \
 	  on=$$(OXSMT_QUANT_PIPELINE=1 $$cli $$ls 2>/dev/null); \
 	  case "$$on" in *"verdict unsat"*) \
