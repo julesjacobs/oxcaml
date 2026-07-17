@@ -14,6 +14,8 @@ open Data_types
 module Facts = Vox_vc.Fact_env
 module Json = Misc.Json
 
+let json_bool value = if value then "true" else "false"
+
 let json_string string =
   let buffer = Buffer.create (String.length string + 2) in
   let add_byte_escape byte =
@@ -168,9 +170,10 @@ let not_discharged_result (condition : Vox_vc.t) : Vox_lean.result =
   { verdict = Not_proved;
     location = condition.location;
     detail = Some "not discharged (-vox-dump-vc)";
+    unused_facts = [];
   }
 
-let json_fact ~env (fact : Vox_vc.fact) =
+let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
   let origin = fact.origin in
   Json.object_
     [ Json.field "text" (json_string (render_expression fact.expression));
@@ -183,6 +186,9 @@ let json_fact ~env (fact : Vox_vc.fact) =
              Json.field "name" (Json.option json_string origin.name);
              Json.field "span" (Json.option json_span origin.span);
            ]);
+      (* Display-only fade signal: false only when the discharged proof did not
+         reference this fact (per Lean's linter); defaults to used otherwise. *)
+      Json.field "used" (json_bool (not (List.mem index unused_facts)));
     ]
 
 let contains text needle =
@@ -243,7 +249,10 @@ let record_vc ~kind ~program_point ~provenance ~env
         Json.field "kind" (json_string kind);
         Json.field "goal" goal;
         Json.field "facts"
-          (Json.array (List.map (json_fact ~env) condition.Vox_vc.facts));
+          (Json.array
+             (List.mapi
+                (json_fact ~env ~unused_facts:result.unused_facts)
+                condition.Vox_vc.facts));
         Json.field "discharge" discharge;
         Json.field "generated_lean"
           (Json.option json_string generated_lean);

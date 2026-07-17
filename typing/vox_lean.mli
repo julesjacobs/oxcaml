@@ -13,6 +13,10 @@ type result =
   { verdict : verdict;
     location : Location.t;
     detail : string option;
+    (* Display-only: fact indices the discharged proof did not reference (from
+       Lean's [unusedVariables] linter).  Empty on any non-proved verdict and
+       whenever the linter is silent, so a fact defaults to "used". *)
+    unused_facts : int list;
   }
 
 val string_of_verdict : verdict -> string
