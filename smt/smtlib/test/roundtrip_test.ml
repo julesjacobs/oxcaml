@@ -222,7 +222,53 @@ let const env ctx name sort =
 let fn env name dom cod = Env.declare_fun env name (Rank.create dom cod)
 let usort env name = Sort.uninterpreted (Env.declare_sort env name)
 
+(* First occurrence of [a] strictly precedes first occurrence of [b] (both present). *)
+let first_before text a b =
+  let find sub =
+    let n = String.length text
+    and m = String.length sub in
+    let rec go i =
+      if i + m > n then -1 else if String.sub text i m = sub then i else go (i + 1)
+    in
+    go 0
+  in
+  let ia = find a
+  and ib = find b in
+  ia >= 0 && ib >= 0 && ia < ib
+;;
+
+(* F3 (LRA review bounce, flag-OFF byte-id): [collect_decls] must emit declare-sort in
+   domain-before-codomain order for a multi-sort UF, as trunk did. The regressed printer
+   collected an application's RESULT sort first (an unconditional [visit_sort t.sort]),
+   flipping the order for existing UF inputs. This is invisible to parse->print->parse
+   round-trips (a reordered but complete declaration set re-parses fine), so it needs an
+   explicit order assertion. Runs with OXSMT_LRA unset (the fixed line is flag-gated). *)
+let check_f3_declare_sort_order () =
+  incr checks;
+  let env = Env.create () in
+  let ctx = Context.create env in
+  let a_sort = usort env "F3domain" in
+  let b_sort = usort env "F3codomain" in
+  let f = fn env "f3f" [ a_sort ] b_sort in
+  (* Only DOMAIN-sorted leaves (a1,a2); both Eq operands are codomain-sorted applications
+     and there is NO codomain-sorted leaf. So the first sort collected comes solely from
+     the first-visited [f]-application's [register_fun] (domain-then-codomain) — trunk
+     order is F3domain,F3codomain; the regressed [visit_sort t.sort] collects the
+     application's result sort F3codomain first, flipping to F3codomain,F3domain. (A
+     codomain-sorted leaf would mask the effect since it would collect the codomain first
+     regardless.) *)
+  let a1 = const env ctx "f3a1" a_sort in
+  let a2 = const env ctx "f3a2" a_sort in
+  let assertion = Context.eq ctx (Context.app ctx f [ a1 ]) (Context.app ctx f [ a2 ]) in
+  match Printer.print_session env [ assertion ] with
+  | text ->
+    if not (first_before text "F3domain" "F3codomain")
+    then fail "F3: declare-sort order must be domain-before-codomain (flag OFF):\n%s" text
+  | exception Printer.Unsupported m -> fail "F3: printer Unsupported: %s" m
+;;
+
 let sessions () =
+  check_f3_declare_sort_order ();
   let i = Sort.int
   and b = Sort.bool in
   check_a ~name:"bool-true" (fun _ ctx -> [ Context.bool_const ctx true ]);

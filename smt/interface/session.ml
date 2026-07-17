@@ -410,7 +410,7 @@ let preselect_arithmetic t terms =
     in
     let real_with_foreign_theory =
       joined = Cdclt.Real
-      && (not (Array_defs.is_empty !(t.array_registry))
+      && ((not (Array_defs.is_empty !(t.array_registry)))
           || not (Datatype_defs.is_empty !(t.registry)))
     in
     if joined = Cdclt.Mixed || theory_swap || real_with_foreign_theory
@@ -674,6 +674,15 @@ let invalidate_theory_for_registry_change t =
      [defs] on the line after this call. *)
   t.has_arrays <- not (Oxsmt_core.Array_defs.is_empty !(t.array_registry));
   t.degraded <- false;
+  (* F1 (LRA review bounce): [arithmetic_blocked] gates whether assertions are silently
+     DROPPED; it must be reset in lockstep with [degraded] on a registry-change reset, and
+     [arithmetic_family] re-derived from the fresh query. Otherwise a stale [blocked=true]
+     survives while [degraded] is cleared, so a later [(assert false)] is dropped with
+     [degraded=false] and [check_sat] returns a wrong [sat] for an [unsat] problem. The
+     drop sites also fail-closed to [degrade] (below) so the two states can never
+     decouple. *)
+  t.arithmetic_blocked <- false;
+  t.arithmetic_family := Cdclt.None_seen;
   t.last_model <- None;
   t.last_verdict <- Unknown;
   t.elim_defs <- [];
@@ -1175,7 +1184,13 @@ let assert_term_selected t term =
 
 let assert_term t term =
   preselect_arithmetic t [ term ];
-  if not t.arithmetic_blocked then assert_term_selected t term
+  (* F1: dropping an assertion MUST force [degrade] (invariant: a dropped assert ⇒
+     unknown, never a reduced query reported [sat]). In the normal path
+     [preselect_arithmetic] already degraded when it set [arithmetic_blocked]; this
+     else-arm closes the stale-blocked window at the point of consequence. *)
+  if not t.arithmetic_blocked
+  then assert_term_selected t term
+  else degrade t "arithmetic-blocked"
 ;;
 
 (* Internalize a single (already-presolved) term WITHOUT recording it in [t.asserted]:
@@ -1362,7 +1377,11 @@ let assert_presolved_selected t terms =
 
 let assert_presolved t terms =
   preselect_arithmetic t terms;
-  if not t.arithmetic_blocked then assert_presolved_selected t terms
+  (* F1: see [assert_term] — a dropped batch MUST degrade, never silently reduce the
+     query. *)
+  if not t.arithmetic_blocked
+  then assert_presolved_selected t terms
+  else degrade t "arithmetic-blocked"
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
@@ -1931,9 +1950,7 @@ let check_sat t =
              @ List.map (fun (n, b) -> Const (n, VBool b)) bool_vars );
       Sat)
   else (
-    Cdclt.begin_check
-      t.cdclt
-      ~capture_egraph:(Manager.has_live_lemma t.mgr);
+    Cdclt.begin_check t.cdclt ~capture_egraph:(Manager.has_live_lemma t.mgr);
     Manager.begin_check t.mgr (* fresh generation budget for this check_sat (§1.4) *);
     (* F1: while a symmetry-breaking emission is active, assume its activation selector
        POSITIVE so the (selector-guarded) lex clauses constrain this solve. Once a later

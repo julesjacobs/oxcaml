@@ -1,0 +1,4 @@
+(goal 1
+  (verdict sat)
+  (model ((a 0) (b (- 3)) (c 7) (d 0)))
+  (counters (conflicts <10) (decisions <10) (propagations <10)))

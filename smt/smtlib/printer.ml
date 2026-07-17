@@ -67,8 +67,8 @@ let check_representable name =
   if String.length name = 0 then refuse name "the empty symbol is not representable";
   String.iter
     (fun c ->
-       if Char.equal c '|' || Char.equal c '\\'
-       then refuse name (Printf.sprintf "contains %c, which |...| cannot escape" c))
+      if Char.equal c '|' || Char.equal c '\\'
+      then refuse name (Printf.sprintf "contains %c, which |...| cannot escape" c))
     name
 ;;
 
@@ -101,8 +101,7 @@ let quote_symbol name =
 (* Uninterpreted-sort name: same rules, but the refused set is the predefined SORTS. *)
 let quote_sort_symbol name =
   check_representable name;
-  if is_predefined_sort name
-  then refuse name "collides with a predefined SMT-LIB sort";
+  if is_predefined_sort name then refuse name "collides with a predefined SMT-LIB sort";
   quote_lexical name
 ;;
 
@@ -125,8 +124,8 @@ let require_lra () =
   then raise (Unsupported "Real arithmetic printing requires OXSMT_LRA")
 ;;
 
-(* A canonical exact Real literal.  Integral values retain their Real sort by carrying a
-   decimal point.  Fractions use SMT-LIB prefix division, with unary negation outside the
+(* A canonical exact Real literal. Integral values retain their Real sort by carrying a
+   decimal point. Fractions use SMT-LIB prefix division, with unary negation outside the
    positive fraction so the signed-integer grammar is unambiguous. *)
 let add_real_lit buf (q : Term.rational) =
   require_lra ();
@@ -217,8 +216,8 @@ let render_family dts arrs =
          Buffer.add_string buf op;
          Iarr.iter
            (fun a ->
-              Buffer.add_char buf ' ';
-              render buf a)
+             Buffer.add_char buf ' ';
+             render buf a)
            args;
          Buffer.add_char buf ')'
        | None ->
@@ -230,8 +229,8 @@ let render_family dts arrs =
             Buffer.add_char buf ')';
             Iarr.iter
               (fun a ->
-                 Buffer.add_char buf ' ';
-                 render buf a)
+                Buffer.add_char buf ' ';
+                render buf a)
               args;
             Buffer.add_char buf ')'
           | None ->
@@ -242,8 +241,8 @@ let render_family dts arrs =
               Buffer.add_string buf (quote_symbol (Symbol.name sym));
               Iarr.iter
                 (fun a ->
-                   Buffer.add_char buf ' ';
-                   render buf a)
+                  Buffer.add_char buf ' ';
+                  render buf a)
                 args;
               Buffer.add_char buf ')')))
     | Arith l -> render_arith buf l
@@ -280,8 +279,8 @@ let render_family dts arrs =
     Buffer.add_string buf op;
     Iarr.iter
       (fun x ->
-         Buffer.add_char buf ' ';
-         render buf x)
+        Buffer.add_char buf ' ';
+        render buf x)
       xs;
     Buffer.add_char buf ')'
   and render_bv buf (v : Bv.view) =
@@ -291,8 +290,8 @@ let render_family dts arrs =
       let render_args () =
         List.iter
           (fun a ->
-             Buffer.add_char buf ' ';
-             render buf a)
+            Buffer.add_char buf ' ';
+            render buf a)
           args
       in
       let indexed head =
@@ -335,16 +334,16 @@ let render_family dts arrs =
     let summands =
       Iarr.fold
         (fun acc (t, c) ->
-           let b = Buffer.create 32 in
-           if Bigint.equal c Bigint.one
-           then render b t
-           else (
-             Buffer.add_string b "(* ";
-             add_int_lit b c;
-             Buffer.add_char b ' ';
-             render b t;
-             Buffer.add_char b ')');
-           Buffer.contents b :: acc)
+          let b = Buffer.create 32 in
+          if Bigint.equal c Bigint.one
+          then render b t
+          else (
+            Buffer.add_string b "(* ";
+            add_int_lit b c;
+            Buffer.add_char b ' ';
+            render b t;
+            Buffer.add_char b ')');
+          Buffer.contents b :: acc)
         []
         l.coeffs
     in
@@ -368,18 +367,17 @@ let render_family dts arrs =
     let summands =
       Iarr.fold
         (fun acc (term, (coefficient : Term.rational)) ->
-           let part = Buffer.create 32 in
-           if
-             Bigint.equal coefficient.num Bigint.one
+          let part = Buffer.create 32 in
+          if Bigint.equal coefficient.num Bigint.one
              && Bigint.equal coefficient.den Bigint.one
-           then render part term
-           else (
-             Buffer.add_string part "(* ";
-             add_real_lit part coefficient;
-             Buffer.add_char part ' ';
-             render part term;
-             Buffer.add_char part ')');
-           Buffer.contents part :: acc)
+          then render part term
+          else (
+            Buffer.add_string part "(* ";
+            add_real_lit part coefficient;
+            Buffer.add_char part ' ';
+            render part term;
+            Buffer.add_char part ')');
+          Buffer.contents part :: acc)
         []
         l.coeffs
     in
@@ -451,8 +449,8 @@ let collect_decls dts arrs env assertions =
     | Sort.Real ->
       require_lra ();
       uses_real := true
-    (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, but its presence
-       selects a bitvector logic label. *)
+    (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, but its
+       presence selects a bitvector logic label. *)
     | Sort.BitVec _ -> uses_bitvec := true
     (* An [(Array I E)] sort is built-in — no [declare-sort] of its own — but its index
        and element sorts must still be collected so an uninterpreted [I]/[E] is declared. *)
@@ -477,9 +475,9 @@ let collect_decls dts arrs env assertions =
         | Some dt ->
           List.iter
             (fun (c : Datatype_defs.constructor) ->
-               List.iter
-                 (fun (sel : Datatype_defs.selector) -> visit_sort sel.field_sort)
-                 c.selectors)
+              List.iter
+                (fun (sel : Datatype_defs.selector) -> visit_sort sel.field_sort)
+                c.selectors)
             dt.constructors
         | None ->
           raise
@@ -504,10 +502,9 @@ let collect_decls dts arrs env assertions =
   let register_fun sym =
     (* reserved div/mod, and the bitvector operator/literal symbols, are built-ins: never
        emitted as [declare-fun] (their sorts are built-in and need no declaration). *)
-    if
-      (not (Symbol.equal sym div_sym))
-      && (not (Symbol.equal sym mod_sym))
-      && not (Bv.is_bv_sym sym)
+    if (not (Symbol.equal sym div_sym))
+       && (not (Symbol.equal sym mod_sym))
+       && not (Bv.is_bv_sym sym)
     then
       if not (Sym_tbl.mem fun_seen sym)
       then (
@@ -521,7 +518,14 @@ let collect_decls dts arrs env assertions =
         then funs := sym :: !funs)
   in
   let rec visit (t : Term.t) =
-    visit_sort t.sort;
+    (* F3 (LRA review bounce): flag-OFF byte-identity. Trunk's [visit] collected sorts
+       only via [register_fun] (domain then codomain), giving domain-before-codomain
+       declare-sort order. An unconditional [visit_sort t.sort] here collects an
+       application's RESULT sort first, reversing that order (A,B -> B,A) for existing
+       multi-sort UF. Gate it on the flag: flag-OFF reverts to trunk exactly; flag-ON
+       keeps it so a Real term's sort (e.g. a [Real_const] leaf) is still
+       marked/collected. *)
+    if Lra_config.enabled () then visit_sort t.sort;
     match t.node with
     | Bool_const _ | Int_const _ | Real_const _ -> ()
     | App (sym, args) ->
@@ -577,37 +581,36 @@ let constructor_string (c : Datatype_defs.constructor) =
   Buffer.add_string buf (quote_symbol (Symbol.name c.sym));
   List.iter
     (fun (sel : Datatype_defs.selector) ->
-       Buffer.add_string buf " (";
-       Buffer.add_string buf (quote_symbol (Symbol.name sel.sym));
-       Buffer.add_char buf ' ';
-       Buffer.add_string buf (sort_string sel.field_sort);
-       Buffer.add_char buf ')')
+      Buffer.add_string buf " (";
+      Buffer.add_string buf (quote_symbol (Symbol.name sel.sym));
+      Buffer.add_char buf ' ';
+      Buffer.add_string buf (sort_string sel.field_sort);
+      Buffer.add_char buf ')')
     c.selectors;
   Buffer.add_char buf ')';
   Buffer.contents buf
 ;;
 
 let print_session
-      ?status
-      ?(datatypes = Datatype_defs.empty)
-      ?(arrays = Array_defs.empty)
-      env
-      assertions
+  ?status
+  ?(datatypes = Datatype_defs.empty)
+  ?(arrays = Array_defs.empty)
+  env
+  assertions
   =
   let buf = Buffer.create 1024 in
   let line s =
     Buffer.add_string buf s;
     Buffer.add_char buf '\n'
   in
-  let
-    { sorts
-    ; datatypes = dt_syms
-    ; funs
-    ; uses_bitvec
-    ; uses_array_sort
-    ; uses_int
-    ; uses_real
-    }
+  let { sorts
+      ; datatypes = dt_syms
+      ; funs
+      ; uses_bitvec
+      ; uses_array_sort
+      ; uses_int
+      ; uses_real
+      }
     =
     collect_decls datatypes arrays env assertions
   in
@@ -635,9 +638,7 @@ let print_session
       then raise (Unsupported "mixed Real with Int/BV/array/datatype is not supported");
       let uses_uf =
         sorts <> []
-        || List.exists
-             (fun sym -> Iarr.length (Env.rank env sym).Rank.domain > 0)
-             funs
+        || List.exists (fun sym -> Iarr.length (Env.rank env sym).Rank.domain > 0) funs
       in
       if uses_uf then "QF_UFLRA" else "QF_LRA")
     else if dt_syms <> []
@@ -651,7 +652,7 @@ let print_session
   line (Printf.sprintf "(set-logic %s)" logic);
   List.iter
     (fun sym ->
-       line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))
+      line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))
     sorts;
   (* All datatypes in one [(declare-datatypes ...)] block: SMT-LIB declares every sort
      name before any constructor list, so mutual recursion needs no ordering among them. *)
@@ -668,15 +669,15 @@ let print_session
      let ctor_lists =
        List.map
          (fun s ->
-            match Datatype_defs.datatype_of_sort datatypes s with
-            | Some dt ->
-              "(" ^ String.concat " " (List.map constructor_string dt.constructors) ^ ")"
-            | None ->
-              raise
-                (Unsupported
-                   (Printf.sprintf
-                      "datatype sort %s has no registry entry to print"
-                      (Symbol.name s))))
+           match Datatype_defs.datatype_of_sort datatypes s with
+           | Some dt ->
+             "(" ^ String.concat " " (List.map constructor_string dt.constructors) ^ ")"
+           | None ->
+             raise
+               (Unsupported
+                  (Printf.sprintf
+                     "datatype sort %s has no registry entry to print"
+                     (Symbol.name s))))
          dt_syms
      in
      line
@@ -686,21 +687,21 @@ let print_session
           (String.concat " " ctor_lists)));
   List.iter
     (fun sym ->
-       let name = quote_symbol (Symbol.name sym) in
-       let rank = Env.rank env sym in
-       let dom = Iarr.to_list rank.Rank.domain in
-       let cod = sort_string rank.Rank.codomain in
-       match dom with
-       | [] -> line (Printf.sprintf "(declare-const %s %s)" name cod)
-       | _ ->
-         let dom_s = String.concat " " (List.map sort_string dom) in
-         line (Printf.sprintf "(declare-fun %s (%s) %s)" name dom_s cod))
+      let name = quote_symbol (Symbol.name sym) in
+      let rank = Env.rank env sym in
+      let dom = Iarr.to_list rank.Rank.domain in
+      let cod = sort_string rank.Rank.codomain in
+      match dom with
+      | [] -> line (Printf.sprintf "(declare-const %s %s)" name cod)
+      | _ ->
+        let dom_s = String.concat " " (List.map sort_string dom) in
+        line (Printf.sprintf "(declare-fun %s (%s) %s)" name dom_s cod))
     funs;
   List.iter
     (fun t ->
-       Buffer.add_string buf "(assert ";
-       render buf t;
-       line ")")
+      Buffer.add_string buf "(assert ";
+      render buf t;
+      line ")")
     assertions;
   line "(check-sat)";
   Buffer.contents buf

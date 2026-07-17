@@ -340,9 +340,9 @@ let real_decimal_lit st d =
 ;;
 
 (* The exact fraction grammar is shared with the independent model reader through
-   [Rational_syntax].  The callbacks deliberately accept only lexer-classified numerals
-   and unquoted unary [-]/binary [/] applications: a quoted [|-|] or [|/|] is a user
-   symbol, never literal syntax. *)
+   [Rational_syntax]. The callbacks deliberately accept only lexer-classified numerals and
+   unquoted unary [-]/binary [/] applications: a quoted [|-|] or [|/|] is a user symbol,
+   never literal syntax. *)
 let rational_atom = function
   | Sexp.Atom (Tok.Numeral n) -> Some n
   | _ -> None
@@ -356,8 +356,8 @@ let rational_minus = function
 
 let rational_divide = function
   | Sexp.List
-      [ Sexp.Atom (Tok.Symbol { text = "/"; quoted = false }); numerator; denominator ]
-    -> Some (numerator, denominator)
+      [ Sexp.Atom (Tok.Symbol { text = "/"; quoted = false }); numerator; denominator ] ->
+    Some (numerator, denominator)
   | _ -> None
 ;;
 
@@ -497,16 +497,15 @@ let rational_zero = rational_integer Bigint.zero
 let rational_one = rational_integer Bigint.one
 let rational_minus_one = rational_integer (Bigint.neg Bigint.one)
 
-(* SMT-LIB numerals default to Int.  The sole implicit widening is an [Int_const] used
-   where this same application establishes an expected Real sort.  In particular, an
-   Int variable or residual Int arithmetic term is never silently converted. *)
+(* SMT-LIB numerals default to Int. The sole implicit widening is an [Int_const] used
+   where this same application establishes an expected Real sort. In particular, an Int
+   variable or residual Int arithmetic term is never silently converted. *)
 let coerce_to_sort st expected (term : Term.t) =
   if Sort.equal term.sort expected
   then term
-  else if
-    Lra_config.enabled ()
-    && Sort.equal expected Sort.real
-    && Sort.equal term.sort Sort.int
+  else if Lra_config.enabled ()
+          && Sort.equal expected Sort.real
+          && Sort.equal term.sort Sort.int
   then (
     match term.node with
     | Term.Int_const num -> Context.real_const_big st.ctx ~num ~den:Bigint.one
@@ -967,15 +966,14 @@ and read_op ?expected st scope op args orig =
   let rds () = List.map rd args in
   let same_sort_terms () =
     let parsed = rds () in
-    if
-      Lra_config.enabled ()
-      && List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) parsed
+    if Lra_config.enabled ()
+       && List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) parsed
     then
       List.map2
         (fun arg (term : Term.t) ->
-           if Sort.equal term.sort Sort.real
-           then term
-           else read_term ~expected:Sort.real st scope arg)
+          if Sort.equal term.sort Sort.real
+          then term
+          else read_term ~expected:Sort.real st scope arg)
         args
         parsed
     else parsed
@@ -996,8 +994,8 @@ and read_op ?expected st scope op args orig =
   | "ite", [ c; th_s; el_s ] when not (Lra_config.enabled ()) ->
     Context.ite st.ctx (rd c) (rd th_s) (rd el_s)
   | "ite", [ c; th_s; el_s ] ->
-    (* Match OCaml's evaluation order for the old constructor call above, so enabling
-       LRA does not perturb term tags for an Int-only [ite]. *)
+    (* Match OCaml's evaluation order for the old constructor call above, so enabling LRA
+       does not perturb term tags for an Int-only [ite]. *)
     let branch_expected =
       match expected with
       | Some sort when Sort.equal sort Sort.real -> Some Sort.real
@@ -1021,19 +1019,14 @@ and read_op ?expected st scope op args orig =
      | [ th; el ] -> Context.ite st.ctx c th el
      | _ -> assert false)
   | "ite", _ -> malformedf "ite expects 3 arguments"
-  | "=", _ :: _ :: _ ->
-    chain st (fun a b -> Context.eq st.ctx a b) (same_sort_terms ())
+  | "=", _ :: _ :: _ -> chain st (fun a b -> Context.eq st.ctx a b) (same_sort_terms ())
   | "=", _ -> malformedf "= expects >= 2 arguments"
   | "distinct", _ :: _ :: _ -> Context.distinct st.ctx (same_sort_terms ())
   | "distinct", _ -> malformedf "distinct expects >= 2 arguments"
-  | "<=", _ :: _ :: _ ->
-    chain st (fun a b -> Context.le st.ctx a b) (same_sort_terms ())
-  | "<", _ :: _ :: _ ->
-    chain st (fun a b -> Context.lt st.ctx a b) (same_sort_terms ())
-  | ">=", _ :: _ :: _ ->
-    chain st (fun a b -> Context.ge st.ctx a b) (same_sort_terms ())
-  | ">", _ :: _ :: _ ->
-    chain st (fun a b -> Context.gt st.ctx a b) (same_sort_terms ())
+  | "<=", _ :: _ :: _ -> chain st (fun a b -> Context.le st.ctx a b) (same_sort_terms ())
+  | "<", _ :: _ :: _ -> chain st (fun a b -> Context.lt st.ctx a b) (same_sort_terms ())
+  | ">=", _ :: _ :: _ -> chain st (fun a b -> Context.ge st.ctx a b) (same_sort_terms ())
+  | ">", _ :: _ :: _ -> chain st (fun a b -> Context.gt st.ctx a b) (same_sort_terms ())
   | ("<=" | "<" | ">=" | ">"), _ -> malformedf "%s expects >= 2 arguments" op
   (* Build sums in one [linear_combination] pass rather than left-folding [add]/[sub]: a
      left fold re-normalizes and hash-conses every partial sum (O(n^2) work AND O(n^2)
@@ -1050,18 +1043,34 @@ and read_op ?expected st scope op args orig =
     else Context.linear_combination st.ctx (List.map (fun term -> 1, term) terms) 0
   | "+", [] -> malformedf "+ expects >= 1 argument"
   | "-", [ a ] -> Context.neg st.ctx (rd a)
+  | "-", _ :: _ when not (Lra_config.enabled ()) ->
+    (* F2 (LRA review bounce): flag-OFF byte-identity. Trunk's [-] arm was
+       [(1, rd x) :: List.map (fun a -> -1, rd a) rest], and OCaml evaluates [::]
+       right-to-left, so trunk interned the subtrahends [rest] BEFORE the head [x]. The
+       shared [numeric_terms] reads left-to-right ([List.map rd args]), which flips the
+       head's term tag and perturbs the (still valid) printed model. Reproduce trunk's
+       exact expression and read order here for the flag-OFF integer path. *)
+    (match args with
+     | first_arg :: rest_args ->
+       Context.linear_combination
+         st.ctx
+         ((1, rd first_arg) :: List.map (fun a -> -1, rd a) rest_args)
+         0
+     | [] -> assert false)
   | "-", _ :: _ ->
-    (* a - b - c ... = 1*a + (-1)*b + (-1)*c ... *)
+    (* a - b - c ... = 1*a + (-1)*b + (-1)*c ... (flag ON: Real or Int) *)
     let terms = numeric_terms () in
     (match terms with
      | first :: rest when Sort.equal first.sort Sort.real ->
        Context.real_linear_combination_big
          st.ctx
-         ((rational_one, first)
-          :: List.map (fun term -> rational_minus_one, term) rest)
+         ((rational_one, first) :: List.map (fun term -> rational_minus_one, term) rest)
          rational_zero
      | first :: rest ->
-       Context.linear_combination st.ctx ((1, first) :: List.map (fun term -> -1, term) rest) 0
+       Context.linear_combination
+         st.ctx
+         ((1, first) :: List.map (fun term -> -1, term) rest)
+         0
      | [] -> assert false)
   | "-", [] -> malformedf "- expects >= 1 argument"
   | "*", _ :: _ -> read_mul ?expected st scope args
@@ -1075,7 +1084,8 @@ and read_op ?expected st scope op args orig =
          orig
      with
      | Ok (num, den) -> Context.real_const_big st.ctx ~num ~den
-     | Error Rational_syntax.Zero_denominator -> malformedf "real literal division by zero"
+     | Error Rational_syntax.Zero_denominator ->
+       malformedf "real literal division by zero"
      | Error (Rational_syntax.Not_a_fraction | Rational_syntax.Invalid_signed_integer) ->
        unsupportedf "nonconstant Real division is outside linear arithmetic")
   | "div", [ a; b ] -> Context.div st.ctx (rd a) (rd b)
@@ -1180,15 +1190,14 @@ and read_mul ?expected st scope args =
     | _ -> List.map (read_term st scope) args
   in
   let ts =
-    if
-      Lra_config.enabled ()
-      && List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) parsed
+    if Lra_config.enabled ()
+       && List.exists (fun (term : Term.t) -> Sort.equal term.sort Sort.real) parsed
     then
       List.map2
         (fun arg (term : Term.t) ->
-           if Sort.equal term.sort Sort.real
-           then term
-           else read_term ~expected:Sort.real st scope arg)
+          if Sort.equal term.sort Sort.real
+          then term
+          else read_term ~expected:Sort.real st scope arg)
         args
         parsed
     else parsed
@@ -1198,9 +1207,9 @@ and read_mul ?expected st scope args =
     let constants, nonconstants =
       List.partition_map
         (fun (term : Term.t) ->
-           match term.node with
-           | Term.Real_const q -> Either.Left q
-           | _ -> Either.Right term)
+          match term.node with
+          | Term.Real_const q -> Either.Left q
+          | _ -> Either.Right term)
         ts
     in
     match nonconstants with
@@ -1209,7 +1218,7 @@ and read_mul ?expected st scope args =
       let num, den =
         List.fold_left
           (fun (num, den) (q : Term.rational) ->
-             Bigint.mul num q.num, Bigint.mul den q.den)
+            Bigint.mul num q.num, Bigint.mul den q.den)
           (Bigint.one, Bigint.one)
           constants
       in
@@ -1221,9 +1230,9 @@ and read_mul ?expected st scope args =
     let consts, nonconsts =
       List.partition_map
         (fun (t : Term.t) ->
-           match t.node with
-           | Term.Int_const k -> Either.Left k
-           | _ -> Either.Right t)
+          match t.node with
+          | Term.Int_const k -> Either.Left k
+          | _ -> Either.Right t)
         ts
     in
     match nonconsts with
@@ -1407,9 +1416,8 @@ let read_forall st (tail : Sexp.t list) : lemma_src =
     let skolem_witness cod = skolem ~cod ~args:(Array.to_list qvar_images) in
     let body = read_lemma_body st scope ~skolem_witness body_sexp in
     let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
-    if
-      Lra_config.enabled ()
-      && List.exists term_contains_real (body :: List.concat triggers)
+    if Lra_config.enabled ()
+       && List.exists term_contains_real (body :: List.concat triggers)
     then unsupportedf "a quantified body containing Real terms is not supported";
     body, triggers
   in
@@ -1903,10 +1911,9 @@ let declare_fun st name dom cod =
 let define_fun st name params_sexp ret_sexp body =
   if Hashtbl.mem st.funs name || Hashtbl.mem st.defines name
   then malformedf "redeclaration of symbol %s" name;
-  if
-    String.equal name "div"
-    || String.equal name "mod"
-    || (Lra_config.enabled () && String.equal name "/")
+  if String.equal name "div"
+     || String.equal name "mod"
+     || (Lra_config.enabled () && String.equal name "/")
   then malformedf "cannot define reserved symbol %s" name;
   let params =
     List.map
