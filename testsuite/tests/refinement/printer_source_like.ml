@@ -40,6 +40,27 @@ type arith = int{ (_ + 1) * 2 = 6 }
 type arith = int{ (_ + 1) * 2 = 6 }
 |}]
 
+(* [mod], [/] and the bitwise operators render infix, not prefix. *)
+type modulo = int{ _ mod 2 = 0 }
+[%%expect {|
+type modulo = int{ _ mod 2 = 0 }
+|}]
+
+type divide = int{ _ / 3 = 1 }
+[%%expect {|
+type divide = int{ _ / 3 = 1 }
+|}]
+
+type bitand = int{ _ land 1 = 1 }
+[%%expect {|
+type bitand = int{ _ land 1 = 1 }
+|}]
+
+type shift = int{ _ lsl 1 = 4 }
+[%%expect {|
+type shift = int{ _ lsl 1 = 4 }
+|}]
+
 (* If-then-else and boolean literals (as in branch-condition facts). *)
 type cond = int{ if _ > 0 then true else false }
 [%%expect {|
@@ -50,4 +71,26 @@ type cond = int{ if _ > 0 then true else false }
 type is_unit = unit{ _ = () }
 [%%expect {|
 type is_unit = unit{ _ = () }
+|}]
+
+(* Record field access renders [_.a], with no type-path stamp. *)
+type r = { a : int; b : int }
+[%%expect {|
+type r = { a : int; b : int; }
+|}]
+
+type field_ref = r{ _.a > 0 }
+[%%expect {|
+type field_ref = r{ _.a > 0 }
+|}]
+
+(* A cross-module value reference keeps its module qualifier ([Lib.bound]). *)
+module Lib = struct let bound = 0 end
+[%%expect {|
+module Lib : sig val bound : int end
+|}]
+
+type qualified = int{ _ >= Lib.bound }
+[%%expect {|
+type qualified = int{ _ >= Lib.bound }
 |}]

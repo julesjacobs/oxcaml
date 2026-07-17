@@ -312,9 +312,36 @@ let display_operator = function
   | `Subtract -> { op_text = "-"; op_precedence = 40; op_associativity = Left }
   | `Multiply -> { op_text = "*"; op_precedence = 50; op_associativity = Left }
 
+(* [Path.name] keeps the module qualifier ([Lib.pos]) and drops stamps; a
+   cross-module reference must not collapse to its bare last component.  The
+   [Stdlib] prefix is dropped because it is always in scope, so a stdlib
+   value prints as written in source ([fst], not [Stdlib.fst]). *)
+let display_path path =
+  let name = Path.name path in
+  match String.index_opt name '.' with
+  | Some dot when String.sub name 0 dot = "Stdlib" ->
+    String.sub name (dot + 1) (String.length name - dot - 1)
+  | _ -> name
+
 let display_reference_name = function
   | Rfun name | Rsibling name -> name
-  | Rapp path | Rglobal path -> Path.last path
+  | Rapp path | Rglobal path -> display_path path
+
+(* Infix operators recognized for display by source name.  These are absent
+   from [primitive_builtin] (the Lean backend does not interpret them), so
+   they are matched separately; precedence and associativity follow OCaml's
+   rules for the operator. *)
+let display_infix_operator = function
+  | "mod" | "/" | "land" | "lor" | "lxor" ->
+    Some { op_text = ""; op_precedence = 50; op_associativity = Left }
+  | "lsl" | "lsr" | "asr" ->
+    Some { op_text = ""; op_precedence = 60; op_associativity = Right }
+  | _ -> None
+
+let display_infix_operator name =
+  match display_infix_operator name with
+  | Some operator -> Some { operator with op_text = name }
+  | None -> None
 
 let display_builtin ~env = function
   | Rfun _ | Rsibling _ -> None
@@ -326,6 +353,21 @@ let display_builtin ~env = function
       | _ -> None
       | exception Not_found -> None
     end
+
+(* Resolves a two-argument application head to an infix operator for display:
+   first the Lean-interpreted primitives (via [env]), then the display-only
+   infix operators recognized by source name.  [None] means render as an
+   ordinary prefix application. *)
+let binary_operator ~env reference =
+  match display_builtin ~env reference with
+  | Some
+      ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less | `Less_equal
+       | `Multiply | `Not_equal | `Or | `Subtract) as builtin) ->
+    Some (display_operator builtin)
+  | Some `Not | None ->
+    (match reference with
+     | Rfun _ | Rsibling _ -> None
+     | Rapp path | Rglobal path -> display_infix_operator (Path.last path))
 
 let display_constant constant =
   constant
@@ -422,13 +464,9 @@ let render_predicate ~env expression =
       end
     | Rexp_ident (Rfree reference), [Nolabel, left; Nolabel, right] ->
       begin
-        match display_builtin ~env reference with
-        | Some
-            ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
-             | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
-             as builtin) ->
-          render_binary builtin left right
-        | Some `Not | None ->
+        match binary_operator ~env reference with
+        | Some operator -> render_binary operator left right
+        | None ->
           render_prefix (head_of_reference reference)
             [Nolabel, left; Nolabel, right]
       end
@@ -446,8 +484,7 @@ let render_predicate ~env expression =
          as builtin) ->
       display_function_name (display_operator builtin).op_text
     | None -> display_function_name (display_reference_name reference)
-  and render_binary builtin left right =
-    let operator = display_operator builtin in
+  and render_binary operator left right =
     let operand side expression =
       let displayed = render expression in
       let needs_parentheses =
