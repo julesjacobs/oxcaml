@@ -16,3 +16,8 @@
  (name combine_test)
  (modules combine_test)
  (libraries oxsmt_core oxsmt_combine oxsmt_euf oxsmt_lia))
+
+(executable
+ (name lia_eq_prop_combine_test)
+ (modules lia_eq_prop_combine_test)
+ (libraries oxsmt_core oxsmt_combine oxsmt_euf oxsmt_lia))

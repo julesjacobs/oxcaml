@@ -32,44 +32,60 @@ type 'tok integer_result =
 
 (* Canonical slack definitions are sorted by variable id before lookup. Hash and compare
    that sequence directly, using the value operations for [Rational.t]; never invoke
-   polymorphic hash/compare on its mixed representation. A hash collision is only a
-   bucket collision: [equal] still distinguishes every variable id and coefficient, so
-   distinct linear forms can never share a slack. *)
+   polymorphic hash/compare on its mixed representation. A hash collision is only a bucket
+   collision: [equal] still distinguishes every variable id and coefficient, so distinct
+   linear forms can never share a slack. *)
 module Slack_key = struct
   type t = (int * Rational.t) list
 
   let rec equal a b =
     match a, b with
     | [], [] -> true
-    | (va, ca) :: ra, (vb, cb) :: rb ->
-      va = vb && Rational.equal ca cb && equal ra rb
+    | (va, ca) :: ra, (vb, cb) :: rb -> va = vb && Rational.equal ca cb && equal ra rb
     | [], _ :: _ | _ :: _, [] -> false
   ;;
 
   let hash pairs =
     let avalanche n =
-      let n = (n lxor (n lsr 16)) * 0x45d9f3b in
-      let n = (n lxor (n lsr 16)) * 0x45d9f3b in
+      let n = n lxor (n lsr 16) * 0x45d9f3b in
+      let n = n lxor (n lsr 16) * 0x45d9f3b in
       n lxor (n lsr 16)
     in
     let mix h n = avalanche (h lxor (n + 0x9e3779b9 + (h lsl 6) + (h lsr 2))) in
-    List.fold_left
-      (fun h (var, coeff) -> mix (mix h var) (Rational.hash coeff))
-      0
-      pairs
+    List.fold_left (fun h (var, coeff) -> mix (mix h var) (Rational.hash coeff)) 0 pairs
     land max_int
   ;;
 end
 
 module Slack_table = Hashtbl.Make (Slack_key)
 
-(* A registered atom's positive-polarity reading: a bound [var <sense> rhs]. *)
+(* A registered atom's positive-polarity reading over one simplex variable. An equality is
+   the conjunction of its upper and lower reading at the same right-hand side. *)
+type reg_kind =
+  | Reg_upper of Delta.t
+  | Reg_lower of Delta.t
+  | Reg_equal of
+      { neg_var : int
+      ; rhs : Delta.t
+      }
+
 type reg =
   { atom : Term.t
   ; var : int
-  ; is_upper : bool
-  ; rhs : Delta.t
+  ; kind : reg_kind
   }
+
+(* DARK: propagate registered Int equalities from the simplex's active bounds. A positive
+   equality uses the two exact oriented bounds as its reason; an excluding bound implies
+   its negation with one premise. Besides strengthening pure LIA search, the propagated
+   shared equality reaches EUF through the normal Combined/SAT trail and can trigger
+   congruence before Final. OFF does not register equalities and follows the old Le-only
+   path exactly. Read once, deterministic. *)
+let equality_propagation_on =
+  match Sys.getenv_opt "OXSMT_LIA_EQ_PROP" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
 
 type 'tok t =
   { ctx : Context.t
@@ -82,16 +98,24 @@ type 'tok t =
   ; registered : reg Dynarray.t
   ; reg_index :
       int Term.Table.t (* registered atom term -> its index in [registered]; O(1) dedup *)
+  ; mutable pending_equalities : Term.t list
+      (* Int equality atoms awaiting a propagation target. Registration itself must not
+         create arithmetic variables for an otherwise EUF-only term: that would enlarge
+         LIA's model domain and perturb Nelson-Oppen arrangements. Targets are activated
+         at propagation time once all their leaves already occur in arithmetic. *)
+  ; pending_equality_set : unit Term.Table.t
+  ; mutable pending_equalities_dirty : bool
   ; reg_by_var : (int, int list) Hashtbl.t
       (* simplex var id -> indices into [registered] of atoms whose bound is on that var.
          [propagate] visits only atoms on a [dirty] var, so this is the reverse lookup. *)
   ; dirty : (int, unit) Hashtbl.t
       (* vars whose simplex bound MAY have changed since the last [propagate] (set on
          every [assert_atom]/[register_atom] and on [pop] for un-reported atoms).
-         Bound-to-bound entailment reads a var's own bounds only, and those bounds change
-         only via those ops, so a var absent here cannot have any newly-entailed
-         registered atom — the [propagate] delta scans exactly [dirty]. Cleared each
-         [propagate]. *)
+         Bound-to-bound entailment reads a var's own bounds; equality propagation also
+         reads the negated-combination var so both orientations of an input inequality
+         participate. Those bounds change only via these ops, so a var absent here cannot
+         have any newly-entailed registered atom — the [propagate] delta scans exactly
+         [dirty]. Cleared each [propagate]. *)
   ; reported : bool Dynarray.t
       (* parallel to [registered]: [true] once the atom has been emitted by [propagate] at
          a still-live frame (INVARIANT P: reported ⟺ currently bound-entailed). Skipped by
@@ -192,6 +216,9 @@ let create ctx =
   ; slacks = Slack_table.create 64
   ; registered = Dynarray.create ()
   ; reg_index = Term.Table.create 64
+  ; pending_equalities = []
+  ; pending_equality_set = Term.Table.create 64
+  ; pending_equalities_dirty = false
   ; reg_by_var = Hashtbl.create 64
   ; dirty = Hashtbl.create 64
   ; reported = Dynarray.create ()
@@ -204,6 +231,13 @@ let create ctx =
   ; cube_tried = false
   ; gcd_cut_tried = false
   }
+;;
+
+let mark_reg_dirty t r =
+  Hashtbl.replace t.dirty r.var ();
+  match r.kind with
+  | Reg_equal { neg_var; _ } when neg_var <> r.var -> Hashtbl.replace t.dirty neg_var ()
+  | Reg_upper _ | Reg_lower _ | Reg_equal _ -> ()
 ;;
 
 (* Refuse to reason on a bricked instance (an overflow left the tableau mid-pivot, so any
@@ -230,6 +264,8 @@ let problem_var t (term : Term.t) =
     let id = Simplex.new_problem_var t.simplex in
     Term.Table.replace t.var_of_term term id;
     Dynarray.add_last t.problem_vars (id, term);
+    if equality_propagation_on && t.pending_equalities <> []
+    then t.pending_equalities_dirty <- true;
     id
 ;;
 
@@ -255,11 +291,11 @@ let combo_of_term t (term : Term.t) : (int * Rational.t) list * Rational.t =
   | _ -> [ problem_var t term, Rational.one ], Rational.zero
 ;;
 
-(* Return [pairs] itself when it is already in the canonical order. [combo_of_term]
-   visits a normalized arithmetic node's tag-sorted coefficients, and problem variables
-   are normally allocated in that same first-use order, so this is the common ingest
-   path. The fallback keeps the API's order-independence for equality merges and clients
-   that construct terms before asserting them in a different order. *)
+(* Return [pairs] itself when it is already in the canonical order. [combo_of_term] visits
+   a normalized arithmetic node's tag-sorted coefficients, and problem variables are
+   normally allocated in that same first-use order, so this is the common ingest path. The
+   fallback keeps the API's order-independence for equality merges and clients that
+   construct terms before asserting them in a different order. *)
 let canonical_pairs pairs =
   let rec strictly_increasing previous = function
     | [] -> true
@@ -499,16 +535,17 @@ let notify_equality t (eq : Term.t) ~premise =
 
 let register_atom t (atom : Term.t) =
   ensure_live t;
-  (* Record the positive reading of a [Le] atom for bound-propagation. Equality atoms are
-     not propagation targets in v1. *)
-  match atom.node with
-  | Le _ ->
-    if not (Term.Table.mem t.reg_index atom)
-    then
+  (* Record a [Le] atom's one bound, plus (under the dark flag) an Int equality's paired
+     bounds. Both are indexed by the simplex variable whose active bounds decide the atom,
+     so the existing dirty-variable delta remains complete. *)
+  if not (Term.Table.mem t.reg_index atom)
+  then (
+    match atom.node with
+    | Le _ ->
       guard_overflow t (fun () ->
-        let add var is_upper rhs =
+        let add var kind =
           let i = Dynarray.length t.registered in
-          Dynarray.add_last t.registered { atom; var; is_upper; rhs };
+          Dynarray.add_last t.registered { atom; var; kind };
           Dynarray.add_last t.reported false;
           Term.Table.replace t.reg_index atom i;
           Hashtbl.replace
@@ -526,10 +563,125 @@ let register_atom t (atom : Term.t) =
           Hashtbl.replace t.dirty var ()
         in
         match constraints_of_atom t atom ~polarity:true with
-        | [ (var, `Upper, rhs) ] -> add var true rhs
-        | [ (var, `Lower, rhs) ] -> add var false rhs
+        | [ (var, `Upper, rhs) ] -> add var (Reg_upper rhs)
+        | [ (var, `Lower, rhs) ] -> add var (Reg_lower rhs)
         | _ -> ())
-  | _ -> ()
+    | Eq (a, _) when equality_propagation_on && not (Sort.equal a.sort Sort.bool) ->
+      if not (Term.Table.mem t.pending_equality_set atom)
+      then (
+        t.pending_equalities <- atom :: t.pending_equalities;
+        Term.Table.replace t.pending_equality_set atom ();
+        t.pending_equalities_dirty <- true)
+    | _ -> ())
+;;
+
+(* Lookup-only linearization for a pending equality. Unlike [combo_of_term], a miss does
+   not allocate a problem variable: equality propagation may observe only terms already
+   present in arithmetic constraints, or it would change the combined model merely by
+   registering an EUF-owned disequality. Constants are retained here because they shift
+   the equality right-hand side. *)
+let existing_equality_combo t (term : Term.t) =
+  let existing tm = Term.Table.find_opt t.var_of_term tm in
+  match term.node with
+  | App _ ->
+    (match existing term with
+     | Some id -> Some ([ id, Rational.one ], Rational.zero)
+     | None -> None)
+  | Arith { coeffs; const } ->
+    let rec gather acc = function
+      | [] -> Some (List.rev acc, Rational.of_bigint const)
+      | (tm, c) :: rest ->
+        (match existing tm with
+         | Some id -> gather ((id, Rational.of_bigint c) :: acc) rest
+         | None -> None)
+    in
+    gather [] (Iarr.to_list coeffs)
+  | Int_const k -> Some ([], Rational.of_bigint k)
+  | Bool_const _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> None
+;;
+
+(* Equality is invariant under division by a common positive coefficient factor. Reduce
+   the watched form to the same primitive coefficient scale as core-normalized [Le] atoms,
+   so bounds on [x] can decide a registered target such as [2*x = 2]. A non-integral
+   coefficient is outside the normal term representation; keep the exact raw form
+   defensively rather than project it through an integer GCD. *)
+let primitive_equality_form pairs rhs =
+  if List.for_all (fun (_, c) -> Rational.is_int c) pairs
+  then (
+    let gcd =
+      List.fold_left
+        (fun g (_, c) -> Bigint.gcd g (Bigint.abs (Rational.num_bigint c)))
+        Bigint.zero
+        pairs
+    in
+    if Bigint.equal gcd Bigint.zero || Bigint.equal gcd Bigint.one
+    then pairs, rhs
+    else (
+      let divisor = Rational.of_bigint gcd in
+      List.map (fun (v, c) -> v, Rational.div c divisor) pairs, Rational.div rhs divisor))
+  else pairs, rhs
+;;
+
+let activate_pending_equalities t =
+  if equality_propagation_on && t.pending_equalities_dirty
+  then (
+    t.pending_equalities_dirty <- false;
+    let retained = ref [] in
+    List.iter
+      (fun (atom : Term.t) ->
+        match atom.node with
+        | Eq (a, b) ->
+          (match existing_equality_combo t a, existing_equality_combo t b with
+           | Some (pa, ca), Some (pb, cb) ->
+             let coeffs = Hashtbl.create 16 in
+             let current v =
+               match Hashtbl.find_opt coeffs v with
+               | Some c -> c
+               | None -> Rational.zero
+             in
+             List.iter
+               (fun (v, c) -> Hashtbl.replace coeffs v (Rational.add (current v) c))
+               pa;
+             List.iter
+               (fun (v, c) -> Hashtbl.replace coeffs v (Rational.sub (current v) c))
+               pb;
+             let pairs =
+               Hashtbl.fold
+                 (fun v c out -> if Rational.is_zero c then out else (v, c) :: out)
+                 coeffs
+                 []
+             in
+             let pairs, rhs_rat = primitive_equality_form pairs (Rational.sub cb ca) in
+             Term.Table.remove t.pending_equality_set atom;
+             (match pairs with
+              | [] -> ()
+              | _ :: _ ->
+                let pos_var = var_for_combo t pairs in
+                let neg_pairs = List.map (fun (v, c) -> v, Rational.neg c) pairs in
+                let neg_var = var_for_combo t neg_pairs in
+                let rhs = Delta.of_rat rhs_rat in
+                let i = Dynarray.length t.registered in
+                let r = { atom; var = pos_var; kind = Reg_equal { neg_var; rhs } } in
+                Dynarray.add_last t.registered r;
+                Dynarray.add_last t.reported false;
+                Term.Table.replace t.reg_index atom i;
+                let index_under var =
+                  Hashtbl.replace
+                    t.reg_by_var
+                    var
+                    (i
+                     ::
+                     (match Hashtbl.find_opt t.reg_by_var var with
+                      | Some is -> is
+                      | None -> []))
+                in
+                index_under pos_var;
+                if neg_var <> pos_var then index_under neg_var;
+                mark_reg_dirty t r)
+           | None, _ | _, None -> retained := atom :: !retained)
+        | _ -> Term.Table.remove t.pending_equality_set atom)
+      (List.rev t.pending_equalities);
+    t.pending_equalities <- !retained)
 ;;
 
 (* Map an internal simplex conflict to the public one, dropping any [Branch] premise
@@ -1752,6 +1904,7 @@ let solve_integer ?(budget = default_budget) t =
    [pop] restores that invariant by un-reporting the atoms of the frames it unwinds. *)
 let propagate t =
   ensure_live t;
+  activate_pending_equalities t;
   let out = ref [] in
   let cands =
     Hashtbl.fold
@@ -1769,35 +1922,79 @@ let propagate t =
       if not (Dynarray.get t.reported i)
       then (
         let r = Dynarray.get t.registered i in
-        (* atom's positive reading is [var <sense> rhs]. TRUE if the current bound already
-           entails it; FALSE if the current opposite bound refutes it. Explanation = the
-           single entailing bound (Lia_bound). *)
+        (* A one-sided atom needs one entailing/excluding bound. Equality needs both
+           oriented bounds to prove true, but only one strict exclusion to prove false.
+           All reasons are active [User] premises, hence valid trail antecedents. *)
         let up = Simplex.get_upper t.simplex r.var in
         let lo = Simplex.get_lower t.simplex r.var in
-        let emit polarity prem =
-          out := (r.atom, polarity, [ prem ]) :: !out;
+        let emit polarity premises =
+          out := (r.atom, polarity, premises) :: !out;
           Dynarray.set t.reported i true;
           match t.report_frames with
           | fr :: rest -> t.report_frames <- (i :: fr) :: rest
           | [] -> t.report_frames <- [ [ i ] ]
         in
-        if r.is_upper
-        then (
+        match r.kind with
+        | Reg_upper rhs ->
           (* atom: var <= rhs *)
-          match up with
-          | Some (User tok, u) when Delta.le u r.rhs -> emit true tok
-          | _ ->
-            (match lo with
-             | Some (User tok, l) when Delta.lt r.rhs l -> emit false tok
-             | _ -> ()))
-        else (
+          (match up with
+           | Some (User tok, u) when Delta.le u rhs -> emit true [ tok ]
+           | _ ->
+             (match lo with
+              | Some (User tok, l) when Delta.lt rhs l -> emit false [ tok ]
+              | _ -> ()))
+        | Reg_lower rhs ->
           (* atom: var >= rhs *)
-          match lo with
-          | Some (User tok, l) when Delta.le r.rhs l -> emit true tok
-          | _ ->
-            (match up with
-             | Some (User tok, u) when Delta.lt u r.rhs -> emit false tok
-             | _ -> ()))))
+          (match lo with
+           | Some (User tok, l) when Delta.le rhs l -> emit true [ tok ]
+           | _ ->
+             (match up with
+              | Some (User tok, u) when Delta.lt u rhs -> emit false [ tok ]
+              | _ -> ()))
+        | Reg_equal { neg_var; rhs } ->
+          (* A bound on [-var] is an oppositely-oriented bound on [var]. Select the
+             tightest active User bound on each side, preserving positive-var precedence
+             on ties for determinism. *)
+          let user = function
+            | Some (User tok, d) -> Some (tok, d)
+            | Some (Branch _, _) | None -> None
+          in
+          let flip = function
+            | Some (tok, d) -> Some (tok, Delta.neg d)
+            | None -> None
+          in
+          let tightest better = function
+            | [] -> None
+            | first :: rest ->
+              Some
+                (List.fold_left
+                   (fun ((_, best_d) as best) ((_, d) as candidate) ->
+                     if better d best_d then candidate else best)
+                   first
+                   rest)
+          in
+          let eq_up =
+            List.filter_map
+              Fun.id
+              [ user up; flip (user (Simplex.get_lower t.simplex neg_var)) ]
+            |> tightest Delta.lt
+          in
+          let eq_lo =
+            List.filter_map
+              Fun.id
+              [ user lo; flip (user (Simplex.get_upper t.simplex neg_var)) ]
+            |> tightest (fun d best -> Delta.lt best d)
+          in
+          (match eq_up, eq_lo with
+           | Some (up_tok, u), Some (lo_tok, l) when Delta.le u rhs && Delta.le rhs l ->
+             emit true [ lo_tok; up_tok ]
+           | _ ->
+             (match eq_up with
+              | Some (tok, u) when Delta.lt u rhs -> emit false [ tok ]
+              | _ ->
+                (match eq_lo with
+                 | Some (tok, l) when Delta.lt rhs l -> emit false [ tok ]
+                 | _ -> ())))))
     cands;
   List.rev !out
 ;;
@@ -1829,7 +2026,7 @@ let pop t n =
         List.iter
           (fun i ->
             Dynarray.set t.reported i false;
-            Hashtbl.replace t.dirty (Dynarray.get t.registered i).var ())
+            mark_reg_dirty t (Dynarray.get t.registered i))
           fr;
         drop (k - 1) rest
       | [] -> [])
@@ -1915,7 +2112,7 @@ let rewind_to_checkpoint t c =
       | [] -> []
       | i :: tl ->
         Dynarray.set t.reported i false;
-        Hashtbl.replace t.dirty (Dynarray.get t.registered i).var ();
+        mark_reg_dirty t (Dynarray.get t.registered i);
         drop_reported (k - 1) tl)
   in
   t.report_frames <- [ drop_reported (List.length fr - c.c_reported) fr ];

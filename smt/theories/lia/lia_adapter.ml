@@ -194,8 +194,7 @@ let guard t thunk =
 let register_atom t atom term =
   guard t (fun () ->
     (* Idempotent (C7): record the atom<->term maps once; re-register is a no-op on them.
-       [Lia.register_atom] is itself idempotent and only records [Le] atoms for
-       propagation (equalities are not propagation targets in v1). *)
+       [Lia.register_atom] is itself idempotent. *)
     if not (Atom.Table.mem t.term_of_atom atom)
     then (
       Atom.Table.replace t.term_of_atom atom term;
@@ -276,6 +275,26 @@ let fabric_conflict_explanation t (c : Fabric.justification Lia.conflict)
   { premises; rule = Explanation.Rule_tag.Lia_farkas }
 ;;
 
+let same_justification a b =
+  match a, b with
+  | Fabric.Real x, Fabric.Real y -> Lit.equal x y
+  | Fabric.Fabric x, Fabric.Fabric y -> Int.equal x y
+  | Fabric.Real _, Fabric.Fabric _ | Fabric.Fabric _, Fabric.Real _ -> false
+;;
+
+(* An asserted equality installs its upper and lower simplex bounds with the same source
+   premise. If those bounds imply a different registered equality, the engine naturally
+   returns that source twice. Theory reasons are premise sets; keep first occurrence so
+   the SAT analyzer never sees a duplicate variable in the transient reason clause. This
+   path is reached only for equality propagation, which is dark by default. *)
+let dedup_justifications premises =
+  List.fold_left
+    (fun out p ->
+       if List.exists (same_justification p) out then out else out @ [ p ])
+    []
+    premises
+;;
+
 let fabric_propagation_reason premises : Fabric.Explanation.t =
   { premises = checked_premises "propagation reason" premises
   ; rule = Explanation.Rule_tag.Lia_bound
@@ -317,8 +336,9 @@ let cache_reason t lit expl =
 ;;
 
 (* Bound-to-bound propagations the engine has not yet assigned, each cached with its
-   single entailing bound as reason ([Lia_bound]). A propagated term with no atom mapping
-   is skipped (sound: fewer propagations, the SAT core will decide it). *)
+   sparse entailing bounds as reason ([Lia_bound]): one for an inequality or excluded
+   equality, two for an equality fixed from both sides. A propagated term with no atom
+   mapping is skipped (sound: fewer propagations, the SAT core will decide it). *)
 let propagations t =
   Lia.propagate t.lia
   |> List.filter_map (fun (term, polarity, premises) ->
@@ -326,6 +346,11 @@ let propagations t =
     | None -> None
     | Some atom ->
       let lit = Lit.make atom polarity in
+      let premises =
+        match term.Term.node with
+        | Term.Eq _ -> dedup_justifications premises
+        | _ -> premises
+      in
       cache_reason t lit (fabric_propagation_reason premises);
       Some lit)
 ;;

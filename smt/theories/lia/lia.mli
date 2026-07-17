@@ -84,7 +84,8 @@ val create : Context.t -> 'tok t
 val assert_atom : 'tok t -> Term.t -> polarity:bool -> premise:'tok -> unit
 
 (** [register_atom t atom] pre-declares [atom]'s variable/bound structure without
-    asserting it, so {!propagate} can later report it as theory-implied. Idempotent. *)
+    asserting it, so {!propagate} can later report it as theory-implied. This covers
+    [Le] atoms, and under [OXSMT_LIA_EQ_PROP=1] also Int equalities. Idempotent. *)
 val register_atom : 'tok t -> Term.t -> unit
 
 (** [check t] tests rational (δ) feasibility of the asserted atoms. *)
@@ -169,8 +170,10 @@ val suggest_branch : 'tok t -> (Term.t * Term.t) option
 
 (** [propagate t] returns atoms (with polarity and premise witnesses) that the currently
     asserted bounds theory-imply but that are not yet asserted — bound-to-bound
-    propagation with lazy explanations (ADR-0005 D3, [Lia_bound]). Registered atoms only
-    ({!register_atom}). *)
+    propagation with lazy explanations (ADR-0005 D3, [Lia_bound]). Under
+    [OXSMT_LIA_EQ_PROP=1], coincident lower/upper bounds propagate registered Int
+    equalities with both premises, and an excluding bound propagates their negation with
+    one premise. Registered atoms only ({!register_atom}). *)
 val propagate : 'tok t -> (Term.t * bool * 'tok list) list
 
 (** [cube_model t] — after a {!Sat_candidate} whose ℚ-model is not integral — runs the

@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -711,6 +711,14 @@ bv-op-coverage-test:
 lia-adapter-test:
 	$(DUNE) exec smt/theories/lia/test/lia_adapter_test.exe
 
+## lia-eq-prop-test — OXSMT_LIA_EQ_PROP sparse equality propagation. The OFF run pins
+##   the Le-only baseline; the ON run checks positive equality from two oriented bounds,
+##   disequality from one excluding bound, duplicate-premise removal, and pop/re-derive.
+lia-eq-prop-test:
+	OXSMT_LIA_EQ_PROP=0 $(DUNE) exec smt/theories/lia/test/lia_eq_prop_test.exe -- off
+	OXSMT_LIA_EQ_PROP=1 $(DUNE) exec smt/theories/lia/test/lia_eq_prop_test.exe -- on
+	OXSMT_LIA_EQ_PROP=1 $(DUNE) exec smt/combine/test/lia_eq_prop_combine_test.exe
+
 ## combine-test — smt/combine Nelson-Oppen model-based combination by INTERNALIZATION
 ##   (internalization ADR). Three layers, all stdlib-only + deterministic: (1) MECHANICS
 ##   over a programmable mock theory (routing incl. internalize-into-A fan-out, push/pop
@@ -860,6 +868,7 @@ test: check-frozen
 	$(MAKE) lia-trivial-eq-test
 	$(MAKE) lia-gcd-cut-test
 	$(MAKE) lia-adapter-test
+	$(MAKE) lia-eq-prop-test
 	$(MAKE) hnf-test
 	$(MAKE) cut-budget-test
 	$(MAKE) cdclt-lemma-test
