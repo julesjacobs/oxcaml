@@ -12,3 +12,14 @@ Check (Lean 4.31, no mathlib):
 
 The English prose proof (refereed; the Lean development follows its structure)
 is in pifo-theorem.md.
+
+## Stateful counterexample
+
+For STATEFUL schedulers the two equivalences differ: stateful-counterexample/
+contains a machine-checked pair that agrees on every flush word but diverges
+on an interleaved word (Pifo.lean; standard axioms). Extended.lean adds a
+bounded n<=30 sweep via native_decide as supporting evidence.
+
+    cd stateful-counterexample
+    lean Pifo.lean -o Pifo.olean
+    LEAN_PATH=. lean Extended.lean
