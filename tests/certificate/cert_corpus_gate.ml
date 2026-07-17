@@ -52,11 +52,12 @@ let run_file path : outcome * outcome option =
     let s = Session.create ~max_effort:200_000 () in
     let rec_ = Recorder.create () in
     Session.install_cert_trace s (Some (Recorder.trace rec_));
-    Session.install_lia_certificate_trace
+    Session.install_leaf_certificate_trace
       s
       (Some
          { Oxsmt_interface.Cdclt.on_theory_atom =
              (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+         ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
          ; on_lia_conflict =
              (fun ~premise_lits ~multipliers ->
                Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)

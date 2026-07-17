@@ -93,10 +93,13 @@
     - {b Theory leaves (§1.5).} A LIA [Conflict] carrying a Farkas witness is checked
       independently: its premise literals must be exactly the emitted clause's negation,
       every multiplier must be nonnegative, and the weighted integer half-planes must
-      cancel every variable and leave a strictly positive constant. A claimed but bad
-      witness is [Invalid], never silently trusted. Unwitnessed [Reason]/[Conflict]
-      clauses (including EUF and non-Farkas LIA leaves) and [Theory_lemma] inputs remain
-      trusted axioms and force [Valid_modulo_theory_leaves]. An empty [Conflict] clause
+      cancel every variable and leave a strictly positive constant. A pure-EUF
+      [Reason]/[Conflict] witness is checked by negating its exact clause and rebuilding
+      congruence closure from the cited atom statements: reflexivity/symmetry/transitivity
+      plus congruence over matching applications must collapse a cited disequality. A
+      claimed but bad witness is [Invalid], never silently trusted. Unwitnessed theory
+      leaves and [Theory_lemma] inputs remain trusted axioms and force
+      [Valid_modulo_theory_leaves]. An empty [Conflict] clause
       (an unconditional
       [T_conflict []], ADR-0013 Rev 6) has NO v1 leaf witness for ⊥-from-∅ and is reported
       [Unsupported], not [Valid].
@@ -136,8 +139,8 @@ type verdict =
       [Theory_lemma] input has no checked witness and is still trusted as T-valid. *)
   | Valid
   (** the skeleton closes and every theory leaf is checked. This includes theory-free
-      propositional certificates and certificates whose only theory leaves are verified
-      LIA Farkas [Conflict] clauses. *)
+      propositional certificates and certificates whose theory leaves are verified pure
+      EUF clauses or LIA Farkas [Conflict] clauses. *)
   | Invalid of string (** an artifact-attributable rejection (ADR-0013 §3.3) *)
   | Unsupported of string
   (** a well-formed leaf/feature this checker version cannot witness (coverage gap) *)
@@ -146,9 +149,9 @@ type verdict =
     (ADR-0013 step 1) plus the assumption literals the traced solve ran under.
 
     [atoms] is the off-frozen-seam statement map from SAT theory variables to their
-    immutable atom terms. It is separate from leaf witnesses so a corrupted Farkas proof
-    cannot redefine the proposition it claims to prove; duplicate variable declarations
-    are [Invalid].
+    immutable atom terms. It is separate from leaf witnesses so a corrupted EUF or
+    Farkas proof cannot redefine the proposition it claims to prove; duplicate variable
+    declarations are [Invalid].
 
     [assumptions] are the literals passed true to {!Sat.solve} (for a session solve, the
     active frame selectors [List.map Sat.pos frames]); they seed the [Failed_assumption]

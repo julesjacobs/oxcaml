@@ -673,9 +673,44 @@ let test_base_l0_e3_gate () =
      | _ -> false)
 ;;
 
+(* EUF claims are matched by exact content, not FIFO, because chrono can snapshot a
+   reason well before SAT materializes it. A claim remains reusable when the same reason
+   is materialized again. *)
+let test_euf_claim_content_binding () =
+  let rec_ = Recorder.create () in
+  let clause = [ Sat.pos 0; Sat.neg 1 ] in
+  Recorder.record_euf_leaf rec_ ~clause;
+  Recorder.record_euf_leaf rec_ ~clause:[ Sat.pos 2 ];
+  let trace = Recorder.trace rec_ in
+  trace.Sat.on_theory_clause
+    ~id:10
+    ~clause:(Array.of_list clause)
+    ~role:Sat.Reason;
+  trace.Sat.on_theory_clause
+    ~id:11
+    ~clause:(Array.of_list clause)
+    ~role:Sat.Reason;
+  match Recorder.theory_clauses rec_ with
+  | [ first; second ] ->
+    check
+      "euf-bind: older exact claim selected ahead of unrelated newer claim"
+      (Option.map
+         (fun (witness : Recorder.euf_leaf_witness) -> witness.Recorder.clause)
+         first.Recorder.euf_witness
+       = Some clause);
+    check
+      "euf-bind: exact claim remains reusable for repeated materialization"
+      (Option.map
+         (fun (witness : Recorder.euf_leaf_witness) -> witness.Recorder.clause)
+         second.Recorder.euf_witness
+       = Some clause)
+  | _ -> check "euf-bind: two theory clauses recorded" false
+;;
+
 let () =
   test_on_input_and_unit ();
   test_base_l0_e3_gate ();
+  test_euf_claim_content_binding ();
   test_e1_root_empty ();
   test_e2_level0_conflict ();
   test_e3_failed_assumption_theory_prop ();

@@ -279,6 +279,11 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
 
+  (** Whether a cross-theory justification edge is currently live. An EUF certificate
+      leaf may be claimed as pure congruence only while this is false; once an edge is
+      live, an [Euf_congruence] explanation can contain expanded arithmetic evidence. *)
+  val has_live_fabric_edges : t -> bool
+
   (** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
       undo): capture both children's checkpoints + the pin/fabric trail watermarks;
       [rewind_to_checkpoint] restores all four to an absolute watermark without touching

@@ -10,10 +10,23 @@ open Oxsmt_core
 
 type t
 
-(** Off-frozen-seam certificate evidence. [on_theory_atom] records the statement's
-    authoritative SAT-variable meanings as they are internalized. [premise_lits] are the
-    true SAT literals whose negations form a materialized LIA conflict clause, and
-    [multipliers] are index-aligned with them. The callbacks are observational. *)
+(** Off-frozen-seam theory-leaf certificate evidence. [on_theory_atom] records the
+    statement's authoritative SAT-variable meanings as they are internalized.
+    [on_euf_leaf] reports the exact materialized clause claimed to follow from pure EUF
+    congruence. For LIA, [premise_lits] are the true SAT literals whose negations form a
+    conflict clause and [multipliers] are index-aligned with them. The callbacks are
+    observational. *)
+type leaf_certificate_trace =
+  { on_theory_atom : var:Oxsmt_solver.Sat.var -> atom:Oxsmt_core.Term.t -> unit
+  ; on_euf_leaf : clause:Oxsmt_solver.Sat.lit list -> unit
+  ; on_lia_conflict :
+      premise_lits:Oxsmt_solver.Sat.lit list
+      -> multipliers:Oxsmt_lia.Rational.t list
+      -> unit
+  }
+
+(** Compatibility surface for LIA-only certificate consumers. New consumers should use
+    {!leaf_certificate_trace}; this form records no EUF claims. *)
 type lia_certificate_trace =
   { on_theory_atom : var:Oxsmt_solver.Sat.var -> atom:Oxsmt_core.Term.t -> unit
   ; on_lia_conflict :
@@ -22,8 +35,11 @@ type lia_certificate_trace =
       -> unit
   }
 
-(** Install the LIA leaf-evidence channel. [None] is the inert default. A non-[None]
+(** Install the theory leaf-evidence channel. [None] is the inert default. A non-[None]
     trace may be installed only once and before any theory atom is internalized. *)
+val set_leaf_certificate_trace : t -> leaf_certificate_trace option -> unit
+
+(** Backward-compatible LIA-only installation. *)
 val set_lia_certificate_trace : t -> lia_certificate_trace option -> unit
 
 (** A model value / table cell (eval-agnostic; the CLI renders it to the §8 self-check

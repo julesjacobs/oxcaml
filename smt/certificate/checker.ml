@@ -5,6 +5,9 @@ module Sat = Oxsmt_solver.Sat
 module Bigint = Oxsmt_core.Bigint
 module Iarr = Oxsmt_core.Iarr
 module Term = Oxsmt_core.Term
+module Theory_view = Oxsmt_core.Theory_view
+module Symbol = Oxsmt_core.Symbol
+module Sort = Oxsmt_core.Sort
 module Rational = Oxsmt_lia.Rational
 
 type verdict =
@@ -409,6 +412,184 @@ let guard_theory_leaf kind clause =
   | _ -> ()
 ;;
 
+type euf_endpoint =
+  | Euf_term of Term.t
+  | Euf_true
+  | Euf_false
+
+type euf_statement =
+  | Euf_eq of euf_endpoint * euf_endpoint
+  | Euf_neq of euf_endpoint * euf_endpoint
+
+(* Independent EUF leaf replay. A clause is EUF-valid exactly when the conjunction of
+   its negated literals is inconsistent. Decode those signed propositions through the
+   certificate's separate atom map, seed only their asserted equalities/disequalities,
+   and rebuild congruence closure from the definition: reflexive union-find gives
+   symmetry/transitivity, and two [App] terms merge only when their symbols, arities, and
+   corresponding argument classes match. This calls no production EUF code or proof
+   forest. Boolean predicates are applications equated with true/false; true != false is
+   the sole background axiom. *)
+let verify_euf_leaf
+      ~resolve_atom
+      (event : Recorder.theory_event)
+      (witness : Recorder.euf_leaf_witness)
+  =
+  try
+    if witness.Recorder.clause <> Array.to_list event.Recorder.clause
+    then Error "EUF witness clause does not exactly match the emitted theory clause"
+    else (
+      let endpoint_of_bool b = if b then Euf_true else Euf_false in
+      let decode asserted_lit =
+        match resolve_atom (Sat.var_of_lit asserted_lit) with
+        | None -> Error "EUF leaf literal has no theory-atom declaration"
+        | Some atom ->
+          if not (Theory_view.is_atom atom)
+          then Error "EUF leaf declaration is not a theory atom"
+          else (
+            let positive = Sat.sign_of_lit asserted_lit in
+            match Theory_view.atom atom with
+            | Theory_view.Equality (a, b) ->
+              if positive
+              then Ok (Euf_eq (Euf_term a, Euf_term b))
+              else Ok (Euf_neq (Euf_term a, Euf_term b))
+            | Theory_view.Predicate _ ->
+              Ok
+                (Euf_eq
+                   (Euf_term atom, if positive then Euf_true else Euf_false))
+            | Theory_view.Bool_lit value ->
+              Ok
+                (Euf_eq
+                   (endpoint_of_bool value, if positive then Euf_true else Euf_false))
+            | Theory_view.Le_zero _ ->
+              Error "EUF witness cites a non-EUF arithmetic atom")
+      in
+      let rec decode_all acc = function
+        | [] -> Ok (List.rev acc)
+        | clause_lit :: rest ->
+          (match decode (Sat.neg_lit clause_lit) with
+           | Error _ as error -> error
+           | Ok statement -> decode_all (statement :: acc) rest)
+      in
+      match decode_all [] witness.Recorder.clause with
+      | Error _ as error -> error
+      | Ok statements ->
+        (* Assign local node ids after a complete structural walk. Non-App constructors
+           are opaque to congruence but their children are still registered, matching
+           first-order term closure without interpreting arithmetic/connectives. *)
+        let term_ids = Term.Table.create 64 in
+        let terms_rev = ref [] in
+        let next_id = ref 2 in
+        let term_children (term : Term.t) =
+          match term.Term.node with
+          | Term.Bool_const _ | Term.Int_const _ -> []
+          | Term.App (_, args) -> Iarr.to_list args
+          | Term.Arith { coeffs; _ } -> List.map fst (Iarr.to_list coeffs)
+          | Term.Le child | Term.Not child -> [ child ]
+          | Term.Eq (a, b) -> [ a; b ]
+          | Term.And children | Term.Or children -> Iarr.to_list children
+          | Term.Ite (c, a, b) -> [ c; a; b ]
+        in
+        let rec add_term (term : Term.t) =
+          if not (Term.Table.mem term_ids term)
+          then
+            match term.Term.node with
+            | Term.Bool_const value ->
+              (* The adapter's distinguished endpoints are the core Boolean constants
+                 themselves. Preserve that identity when a constant also occurs as an
+                 argument, e.g. [p] and [f(true)]. *)
+              Term.Table.replace term_ids term (if value then 0 else 1)
+            | _ ->
+              List.iter add_term (term_children term);
+              let id = !next_id in
+              incr next_id;
+              Term.Table.replace term_ids term id;
+              terms_rev := term :: !terms_rev
+        in
+        let add_endpoint = function
+          | Euf_term term -> add_term term
+          | Euf_true | Euf_false -> ()
+        in
+        List.iter
+          (function
+            | Euf_eq (a, b) | Euf_neq (a, b) ->
+              add_endpoint a;
+              add_endpoint b)
+          statements;
+        let id_of_endpoint = function
+          | Euf_true -> 0
+          | Euf_false -> 1
+          | Euf_term term -> Term.Table.find term_ids term
+        in
+        let parent = Array.init !next_id (fun id -> id) in
+        let rec root id =
+          let p = parent.(id) in
+          if p = id
+          then id
+          else (
+            let r = root p in
+            parent.(id) <- r;
+            r)
+        in
+        let union a b =
+          let ra = root a
+          and rb = root b in
+          if ra = rb
+          then false
+          else (
+            parent.(rb) <- ra;
+            true)
+        in
+        let disequalities = ref [ 0, 1 ] in
+        List.iter
+          (function
+            | Euf_eq (a, b) ->
+              ignore (union (id_of_endpoint a) (id_of_endpoint b) : bool)
+            | Euf_neq (a, b) ->
+              disequalities := (id_of_endpoint a, id_of_endpoint b) :: !disequalities)
+          statements;
+        let apps =
+          List.filter_map
+            (fun (term : Term.t) ->
+               match term.Term.node with
+               | Term.App (symbol, args) ->
+                 Some
+                   ( Term.Table.find term_ids term
+                   , symbol
+                   , term.Term.sort
+                   , Array.of_list
+                       (List.map
+                          (fun arg -> Term.Table.find term_ids arg)
+                          (Iarr.to_list args))
+                   , Array.of_list
+                       (List.map (fun (arg : Term.t) -> arg.Term.sort) (Iarr.to_list args)) )
+               | _ -> None)
+            !terms_rev
+        in
+        let changed = ref true in
+        while !changed do
+          changed := false;
+          List.iter
+            (fun (id_a, symbol_a, result_sort_a, args_a, arg_sorts_a) ->
+               List.iter
+                 (fun (id_b, symbol_b, result_sort_b, args_b, arg_sorts_b) ->
+                    if id_a <> id_b
+                       && Symbol.equal symbol_a symbol_b
+                       && Sort.equal result_sort_a result_sort_b
+                       && Array.length args_a = Array.length args_b
+                       && Array.for_all2 Sort.equal arg_sorts_a arg_sorts_b
+                       && Array.for_all2 (fun a b -> root a = root b) args_a args_b
+                       && union id_a id_b
+                    then changed := true)
+                 apps)
+            apps
+        done;
+        if List.exists (fun (a, b) -> root a = root b) !disequalities
+        then Ok ()
+        else Error "negated EUF leaf remains congruence-consistent")
+  with
+  | exn -> Error ("EUF replay raised: " ^ Printexc.to_string exn)
+;;
+
 (* Independent LIA Conflict-leaf replay. This deliberately does not call the simplex's
    production self-check: it reconstructs each asserted integer half-plane from the
    recorded atom and checks the Farkas equation from the definition.
@@ -514,6 +695,41 @@ let verify_lia_conflict
 let check ev =
   try
     let resolve, ambiguous_ids = build_index ev in
+    (* Core term identity is tag-based within one Context, but tags restart in every
+       Context. A malformed in-memory artifact could otherwise combine atom statements
+       from two Contexts whose unrelated terms share tags; Term.Table/Map would alias
+       them and an invalid EUF/Farkas witness could be accepted. Reject such collisions
+       before any tag-keyed collection sees a term. Hash-consing makes equal same-Context
+       terms physically identical, so one tag naming two different physical nodes is
+       exactly the fail-closed collision to reject. EUF congruence also checks application
+       sorts explicitly, covering mixed contexts whose selected tag ranges are disjoint. *)
+    let term_by_tag = Hashtbl.create (4 * List.length ev.atoms) in
+    let rec admit_term (term : Term.t) =
+      match Hashtbl.find_opt term_by_tag term.Term.tag with
+      | Some existing when existing != term ->
+        rejectf
+          "theory-atom statement mixes term contexts (tag %d names two different terms)"
+          term.Term.tag
+      | Some _ -> ()
+      | None ->
+        Hashtbl.replace term_by_tag term.Term.tag term;
+        (match term.Term.node with
+         | Term.Bool_const _ | Term.Int_const _ -> ()
+         | Term.App (_, args) -> List.iter admit_term (Iarr.to_list args)
+         | Term.Arith { coeffs; _ } ->
+           List.iter (fun (child, _) -> admit_term child) (Iarr.to_list coeffs)
+         | Term.Le child | Term.Not child -> admit_term child
+         | Term.Eq (a, b) ->
+           admit_term a;
+           admit_term b
+         | Term.And children | Term.Or children ->
+           List.iter admit_term (Iarr.to_list children)
+         | Term.Ite (c, a, b) ->
+           admit_term c;
+           admit_term a;
+           admit_term b)
+    in
+    List.iter (fun (event : Recorder.atom_event) -> admit_term event.Recorder.atom) ev.atoms;
     (* Theory-atom declarations are the certificate statement. A proof witness may cite
        them but may not redefine them leaf-locally. Duplicate declarations are rejected
        even when textually equal: exactly one internalization event must own each SAT
@@ -575,10 +791,10 @@ let check ev =
       (fun (e : Recorder.input_event) ->
          guard_theory_leaf (Kinput e.Recorder.origin) e.Recorder.clause)
       ev.inputs;
-    (* Leaf coverage accounting. A claimed Farkas witness is a hard proof obligation:
-       corruption is [Invalid], never silently demoted to the trusted-leaf verdict.
-       Unwitnessed Reason/Conflict leaves and Theory_lemma inputs retain the existing
-       conditional verdict. Query inputs are the formula axioms, not theory leaves. *)
+    (* Leaf coverage accounting. Every claimed EUF or Farkas witness is a hard proof
+       obligation: corruption is [Invalid], never silently demoted to the trusted-leaf
+       verdict. Unwitnessed Reason/Conflict leaves and Theory_lemma inputs retain the
+       existing conditional verdict. Query inputs are formula axioms, not theory leaves. *)
     let has_unverified_theory_leaf = ref false in
     List.iter
       (fun (e : Recorder.input_event) ->
@@ -586,16 +802,28 @@ let check ev =
       ev.inputs;
     List.iter
       (fun (e : Recorder.theory_event) ->
-         match e.Recorder.role, e.Recorder.lia_witness with
-         | Sat.Reason, None -> has_unverified_theory_leaf := true
-         | Sat.Reason, Some _ ->
-           rejectf "theory Reason clause id %d carries a Conflict-only Farkas witness" e.id
-         | Sat.Conflict, None -> has_unverified_theory_leaf := true
-         | Sat.Conflict, Some witness ->
-           (match verify_lia_conflict ~resolve_atom e witness with
-            | Ok () -> ()
-            | Error reason ->
-              rejectf "LIA Conflict leaf id %d has an invalid Farkas witness: %s" e.id reason))
+         (match e.Recorder.euf_witness with
+          | None -> ()
+          | Some witness ->
+            (match verify_euf_leaf ~resolve_atom e witness with
+             | Ok () -> ()
+             | Error reason ->
+               rejectf "EUF theory leaf id %d has an invalid witness: %s" e.id reason));
+         (match e.Recorder.role, e.Recorder.lia_witness with
+          | Sat.Reason, Some _ ->
+            rejectf "theory Reason clause id %d carries a Conflict-only Farkas witness" e.id
+          | Sat.Conflict, Some witness ->
+            (match verify_lia_conflict ~resolve_atom e witness with
+             | Ok () -> ()
+             | Error reason ->
+               rejectf
+                 "LIA Conflict leaf id %d has an invalid Farkas witness: %s"
+                 e.id
+                 reason)
+          | (Sat.Reason | Sat.Conflict), None -> ());
+         if Option.is_none e.Recorder.euf_witness
+            && Option.is_none e.Recorder.lia_witness
+         then has_unverified_theory_leaf := true)
       ev.theory;
     (* the closure engine: axioms (inputs both origins + theory leaves) then verified
        learned clauses, folded incrementally. *)

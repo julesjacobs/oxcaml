@@ -22,7 +22,10 @@ module Checker = Oxsmt_certificate.Checker
 module Cdclt = Oxsmt_interface.Cdclt
 module Session = Oxsmt_interface.Session
 module Context = Oxsmt_core.Context
+module Env = Oxsmt_core.Env
+module Rank = Oxsmt_core.Rank
 module Sort = Oxsmt_core.Sort
+module Term = Oxsmt_core.Term
 module Rational = Oxsmt_lia.Rational
 
 let checks = ref 0
@@ -351,11 +354,12 @@ let lia_farkas_conflict () =
   let s = Session.create () in
   let rec_ = Recorder.create () in
   Session.install_cert_trace s (Some (Recorder.trace rec_));
-  Session.install_lia_certificate_trace
+  Session.install_leaf_certificate_trace
     s
     (Some
        { Cdclt.on_theory_atom =
            (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
        ; on_lia_conflict =
            (fun ~premise_lits ~multipliers ->
              Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
@@ -398,6 +402,129 @@ let zero_lia_multipliers (ev : Checker.events) =
   }
 ;;
 
+(* End-to-end EUF leaf witness. The contradiction needs both transitivity and
+   congruence: a=b, b=c, but f(a)<>f(c). Cdclt preserves the pure-EUF rule before the
+   frozen seam drops it; Checker then rebuilds closure without calling the EUF engine. *)
+let euf_congruence_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let u = Sort.uninterpreted (Session.declare_sort s "cert_euf_u") in
+  let const name = Context.const ctx (Session.declare_const s name u) in
+  let a = const "cert_euf_a"
+  and b = const "cert_euf_b"
+  and c = const "cert_euf_c"
+  and d = const "cert_euf_d"
+  and e = const "cert_euf_e" in
+  let f = Session.declare_fun s "cert_euf_f" (Rank.create [ u ] u) in
+  let ab = Context.eq ctx a b in
+  let bc = Context.eq ctx b c in
+  let fac = Context.eq ctx (Context.app ctx f [ a ]) (Context.app ctx f [ c ]) in
+  Session.assert_term s ab;
+  Session.assert_term s bc;
+  Session.assert_term s (Context.not_ ctx fac);
+  check "euf-leaf: solve unsat" (Session.check_sat s = Session.Unsat);
+  ( Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+  , bc
+  , Context.eq ctx d e )
+;;
+
+(* The separate lazy-reason path: a=b lets EUF propagate f(a)=f(b); the two Boolean
+   clauses then conflict only after consuming that propagated equality, so 1UIP must
+   materialize its [Reason] leaf through [Cdclt.explain]. *)
+let euf_congruence_reason () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let u = Sort.uninterpreted (Session.declare_sort s "cert_euf_reason_u") in
+  let const name = Context.const ctx (Session.declare_const s name u) in
+  let a = const "cert_euf_reason_a"
+  and b = const "cert_euf_reason_b" in
+  let f = Session.declare_fun s "cert_euf_reason_f" (Rank.create [ u ] u) in
+  let p = Context.const ctx (Session.declare_const s "cert_euf_reason_p" Sort.bool) in
+  let ab = Context.eq ctx a b in
+  let fab = Context.eq ctx (Context.app ctx f [ a ]) (Context.app ctx f [ b ]) in
+  Session.assert_term s ab;
+  Session.assert_term s (Context.or_ ctx [ Context.not_ ctx fab; p ]);
+  Session.assert_term
+    s
+    (Context.or_ ctx [ Context.not_ ctx fab; Context.not_ ctx p ]);
+  check "euf-reason: solve unsat" (Session.check_sat s = Session.Unsat);
+  Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+let strip_euf_witnesses (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+           { event with Recorder.euf_witness = None })
+        ev.theory
+  }
+;;
+
+let drop_euf_equality (ev : Checker.events) equality =
+  let var =
+    match
+      List.find_opt
+        (fun (event : Recorder.atom_event) -> Term.equal event.Recorder.atom equality)
+        ev.atoms
+    with
+    | Some event -> event.Recorder.var
+    | None -> failwith "EUF discrimination: equality has no atom declaration"
+  in
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+           match event.Recorder.euf_witness with
+           | None -> event
+           | Some witness ->
+             let clause =
+               List.filter (fun lit -> Sat.var_of_lit lit <> var) witness.Recorder.clause
+             in
+             { event with
+               Recorder.clause = Array.of_list clause
+             ; euf_witness = Some { Recorder.clause }
+             })
+        ev.theory
+  }
+;;
+
+let replace_euf_equality_statement (ev : Checker.events) ~from ~to_ =
+  { ev with
+    atoms =
+      List.map
+        (fun (event : Recorder.atom_event) ->
+           if Term.equal event.Recorder.atom from
+           then { event with Recorder.atom = to_ }
+           else event)
+        ev.atoms
+  }
+;;
+
 (* ------------------------------------------------------------------ *)
 (* A HAND-BUILT, order-sensitive learned-clause chain (full control for the ordered-RUP
    discrimination). Inputs (all Query): id10 [a∨b], id11 [¬a∨c], id12 [¬a∨¬c] entail b;
@@ -416,6 +543,85 @@ let mk_input id clause : Recorder.input_event = { id; clause; origin = Sat.Query
 
 let mk_learned id clause antecedents : Recorder.learned_event =
   { id; clause; antecedents; btlevel = 0 }
+;;
+
+(* A malformed in-memory artifact can combine terms from two Contexts, whose tag streams
+   both start at zero. Without the checker's physical-node collision preflight, its
+   tag-keyed Term.Table aliases the unrelated equality endpoints and accepts this invalid
+   EUF leaf. Real recorder streams are single-Context; the negative pins fail-closed input
+   handling at the public [Checker.events] boundary. *)
+let mixed_context_euf_leaf () : Checker.events =
+  let make_equality () =
+    let env = Env.create () in
+    let ctx = Context.create env in
+    let u = Sort.uninterpreted (Env.declare_sort env "cert_cross_context_u") in
+    let const name =
+      Context.const ctx (Env.declare_fun env name (Rank.create [] u))
+    in
+    Context.eq ctx (const "cert_cross_context_a") (const "cert_cross_context_b")
+  in
+  let first = make_equality () in
+  let second = make_equality () in
+  let clause = [ Sat.neg_lit a_; b_ ] in
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| nb_ |] ]
+  ; atoms =
+      [ ({ var = Sat.var_of_lit a_; atom = first } : Recorder.atom_event)
+      ; ({ var = Sat.var_of_lit b_; atom = second } : Recorder.atom_event)
+      ]
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30
+         ; clause = Array.of_list clause
+         ; role = Sat.Conflict
+         ; lia_witness = None
+         ; euf_witness = Some { Recorder.clause }
+         }
+          : Recorder.theory_event)
+      ]
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+(* Tags can be disjoint yet global Symbol ids can be redeclared at incompatible Env-local
+   ranks. Congruence must compare the observed result/argument sorts as well as symbol and
+   arity, or the U- and V-sorted constants below collapse across contexts. *)
+let mixed_context_rank_euf_leaf () : Checker.events =
+  let make_equality ~sort_name ~pad =
+    let env = Env.create () in
+    let ctx = Context.create env in
+    for i = 0 to pad - 1 do
+      ignore (Context.int_const ctx i : Term.t)
+    done;
+    let sort = Sort.uninterpreted (Env.declare_sort env sort_name) in
+    let const name =
+      Context.const ctx (Env.declare_fun env name (Rank.create [] sort))
+    in
+    Context.eq ctx (const "cert_cross_rank_f") (const "cert_cross_rank_g")
+  in
+  let first = make_equality ~sort_name:"cert_cross_rank_u" ~pad:0 in
+  let second = make_equality ~sort_name:"cert_cross_rank_v" ~pad:3 in
+  let clause = [ Sat.neg_lit a_; b_ ] in
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| nb_ |] ]
+  ; atoms =
+      [ ({ var = Sat.var_of_lit a_; atom = first } : Recorder.atom_event)
+      ; ({ var = Sat.var_of_lit b_; atom = second } : Recorder.atom_event)
+      ]
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30
+         ; clause = Array.of_list clause
+         ; role = Sat.Conflict
+         ; lia_witness = None
+         ; euf_witness = Some { Recorder.clause }
+         }
+          : Recorder.theory_event)
+      ]
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+  ; assumptions = []
+  }
 ;;
 
 let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
@@ -494,7 +700,12 @@ let exploit_empty_reason : Checker.events =
   ; units = []
   ; learned = []
   ; theory =
-      [ ({ id = 30; clause = [||]; role = Sat.Reason; lia_witness = None }
+      [ ({ id = 30
+         ; clause = [||]
+         ; role = Sat.Reason
+         ; lia_witness = None
+         ; euf_witness = None
+         }
           : Recorder.theory_event)
       ]
   ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
@@ -596,7 +807,12 @@ let bogus_theory_conflict_empty_core_e3 : Checker.events =
   ; units = []
   ; learned = []
   ; theory =
-      [ ({ id = 30; clause = [| b_ |]; role = Sat.Conflict; lia_witness = None }
+      [ ({ id = 30
+         ; clause = [| b_ |]
+         ; role = Sat.Conflict
+         ; lia_witness = None
+         ; euf_witness = None
+         }
           : Recorder.theory_event)
       ]
   ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
@@ -787,6 +1003,51 @@ let () =
     "corrupt: zeroed Farkas multipliers -> INVALID"
     `Invalid
     (zero_lia_multipliers lia_ev);
+  let euf_ev, chain_equality, replacement_equality = euf_congruence_conflict () in
+  check
+    "positive: EUF stream carries a congruence witness"
+    (List.exists
+       (fun (event : Recorder.theory_event) ->
+          Option.is_some event.Recorder.euf_witness)
+       euf_ev.Checker.theory);
+  expect
+    "positive: every EUF theory leaf witnessed -> fully VALID"
+    `Fully_valid
+    euf_ev;
+  expect
+    "coverage: stripping valid EUF witnesses stays conditional"
+    `Modulo
+    (strip_euf_witnesses euf_ev);
+  expect
+    "corrupt: dropped equality from EUF witness -> INVALID"
+    `Invalid
+    (drop_euf_equality euf_ev chain_equality);
+  expect
+    "corrupt: replaced equality statement breaks EUF chain -> INVALID"
+    `Invalid
+    (replace_euf_equality_statement
+       euf_ev
+       ~from:chain_equality
+       ~to_:replacement_equality);
+  expect
+    "corrupt: mixed-Context term-tag alias in EUF statement -> INVALID"
+    `Invalid
+    (mixed_context_euf_leaf ());
+  expect
+    "corrupt: mixed-Context symbol rank mismatch in EUF statement -> INVALID"
+    `Invalid
+    (mixed_context_rank_euf_leaf ());
+  let euf_reason_ev = euf_congruence_reason () in
+  check
+    "positive: propagated EUF equality carries a witnessed Reason leaf"
+    (List.exists
+       (fun (event : Recorder.theory_event) ->
+          event.Recorder.role = Sat.Reason && Option.is_some event.Recorder.euf_witness)
+       euf_reason_ev.Checker.theory);
+  expect
+    "positive: EUF Reason leaf replay -> fully VALID"
+    `Fully_valid
+    euf_reason_ev;
   (* board #153b — EXACT antecedent-SET (and order) on a real chain, not length-only. The
      order scenario learns [¬b] from [¬b∨c] then the conflict [¬b∨¬c]; the frozen contract
      order [rₙ..r₁; conflict] is exactly [ {¬b,c}; {¬b,¬c} ] = [ [-2;3]; [-3;-2] ]. *)
@@ -976,7 +1237,12 @@ let () =
     ; units = []
     ; learned = []
     ; theory =
-        [ ({ id = 30; clause = [||]; role = Sat.Conflict; lia_witness = None }
+        [ ({ id = 30
+           ; clause = [||]
+           ; role = Sat.Conflict
+           ; lia_witness = None
+           ; euf_witness = None
+           }
             : Recorder.theory_event)
         ]
     ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })

@@ -167,6 +167,15 @@ let env_on name =
 
 let incr_undo = lazy (env_on "OXSMT_CHRONO_INCR_UNDO" && env_on "OXSMT_CHRONO")
 
+type leaf_certificate_trace =
+  { on_theory_atom : var:Sat.var -> atom:Term.t -> unit
+  ; on_euf_leaf : clause:Sat.lit list -> unit
+  ; on_lia_conflict :
+      premise_lits:Sat.lit list
+      -> multipliers:Oxsmt_lia.Rational.t list
+      -> unit
+  }
+
 type lia_certificate_trace =
   { on_theory_atom : var:Sat.var -> atom:Term.t -> unit
   ; on_lia_conflict :
@@ -226,9 +235,9 @@ type t =
          branch filter itself is installed directly on the SAT core by {!Session}. A
          [None] arm is behaviourally inert — the theory glue is byte-identical with
          relevancy off. *)
-  ; mutable lia_certificate_trace : lia_certificate_trace option
-      (* Off-seam Farkas evidence for the certificate recorder. [None] in every normal
-         solve; the one branch at LIA conflict emission cannot affect search. *)
+  ; mutable leaf_certificate_trace : leaf_certificate_trace option
+      (* Off-seam theory-leaf evidence for the certificate recorder. [None] in every
+         normal solve; the observational callbacks cannot affect search. *)
   ; ckpt_log : Combined.checkpoint option Dynarray.t
   (* ADR-0014 S4.2 (dark, [incr_undo] only): one Combined sub-frame checkpoint per
      [on_assign], keyed by ABSOLUTE SAT-trail index — [ckpt_log.(i)] is the theory
@@ -259,18 +268,59 @@ let satlit_of_lit t (lit : Lit.t) =
   if Lit.sign lit then Sat.pos v else Sat.neg v
 ;;
 
-let set_lia_certificate_trace t tr =
+let is_euf_atom_term term =
+  Theory_view.is_atom term
+  &&
+  match Theory_view.atom term with
+  | Theory_view.Equality _ | Theory_view.Predicate _ | Theory_view.Bool_lit _ -> true
+  | Theory_view.Le_zero _ -> false
+;;
+
+(* Preserve an [Euf_congruence] leaf only when it is genuinely a pure congruence proof.
+   The rule tag is shared by the standalone datatype/array engines, so require the real
+   combined EUF+LIA stack. The theory fabric also retains the tag after expanding an EUF
+   edge to arithmetic premises, so a live edge makes the leaf conditional. Finally every
+   literal must resolve through the authoritative SAT-var map to an EUF proposition. *)
+let record_euf_leaf t ~rule ~clause =
+  match t.leaf_certificate_trace, rule, t.theory with
+  | ( Some trace
+    , Explanation.Rule_tag.Euf_congruence
+    , Some (TCombined combined) )
+    when (not (Combined.has_live_fabric_edges combined))
+         && List.for_all
+              (fun lit ->
+                 match Vartbl.find_opt t.v2term (Sat.var_of_lit lit) with
+                 | Some term -> is_euf_atom_term term
+                 | None -> false)
+              clause ->
+    trace.on_euf_leaf ~clause
+  | Some _, _, _ | None, _, _ -> ()
+;;
+
+let set_leaf_certificate_trace t tr =
   (match tr with
    | Some _ ->
-     if Option.is_some t.lia_certificate_trace
-     then invalid_arg "Cdclt.set_lia_certificate_trace: already installed";
+     if Option.is_some t.leaf_certificate_trace
+     then invalid_arg "Cdclt.set_leaf_certificate_trace: already installed";
      if Term.Table.length t.t2v <> 0
      then
        invalid_arg
-         "Cdclt.set_lia_certificate_trace: must be installed before theory atoms are \
+         "Cdclt.set_leaf_certificate_trace: must be installed before theory atoms are \
           internalized"
    | None -> ());
-  t.lia_certificate_trace <- tr
+  t.leaf_certificate_trace <- tr
+;;
+
+let set_lia_certificate_trace t tr =
+  set_leaf_certificate_trace
+    t
+    (Option.map
+       (fun (trace : lia_certificate_trace) ->
+          { on_theory_atom = trace.on_theory_atom
+          ; on_euf_leaf = (fun ~clause:_ -> ())
+          ; on_lia_conflict = trace.on_lia_conflict
+          })
+       tr)
 ;;
 
 (* Collect [term] and every subterm (all sorts), for reconstructing the model. Membership
@@ -386,7 +436,7 @@ let intern t ~split term =
     if split then Vartbl.replace t.is_split v ();
     collect t term;
     th_register impl a term;
-    (match t.lia_certificate_trace with
+    (match t.leaf_certificate_trace with
      | Some tr -> tr.on_theory_atom ~var:v ~atom:term
      | None -> ());
     v
@@ -422,7 +472,7 @@ let bind_bool_var_atom t term v =
     Atom.Table.replace t.a2v a v;
     collect t term;
     th_register impl a term;
-    match t.lia_certificate_trace with
+    match t.leaf_certificate_trace with
     | Some tr -> tr.on_theory_atom ~var:v ~atom:term
     | None -> ())
 ;;
@@ -578,6 +628,11 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
   | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
   | Theory.Conflict e ->
     let premise_lits = List.map (satlit_of_lit t) e.Explanation.premises in
+    (match t.leaf_certificate_trace with
+     | None -> ()
+     | Some _ ->
+       let clause = List.map Sat.neg_lit premise_lits in
+       record_euf_leaf t ~rule:e.Explanation.rule ~clause);
     (* The frozen SAT trace deliberately carries only the materialized clause. When a
        certificate recorder explicitly installed the off-seam channel, preserve the
        Farkas evidence HERE, before [T_conflict] drops the rule tag and term meanings.
@@ -586,7 +641,7 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
        [(atom, polarity)] list through this driver's authoritative term->SAT table gives
        exactly the Explanation premise list. A stale/misaligned core therefore emits no
        witness (the leaf remains conditional), never a witness for the wrong clause. *)
-    (match t.lia_certificate_trace, e.Explanation.rule, t.theory with
+    (match t.leaf_certificate_trace, e.Explanation.rule, t.theory with
      | ( Some tr
        , Explanation.Rule_tag.Lia_farkas
        , Some (TCombined combined) ) ->
@@ -715,7 +770,13 @@ let explain t l =
   let a = Vartbl.find t.v2a (Sat.var_of_lit l) in
   let impl = ensure_theory t in
   let e = th_explain impl (Lit.make a (sign_lit l)) in
-  List.map (satlit_of_lit t) e.Explanation.premises
+  let premise_lits = List.map (satlit_of_lit t) e.Explanation.premises in
+  (match t.leaf_certificate_trace with
+   | None -> ()
+   | Some _ ->
+     let clause = l :: List.map Sat.neg_lit premise_lits in
+     record_euf_leaf t ~rule:e.Explanation.rule ~clause);
+  premise_lits
 ;;
 
 (* Test-only re-exports of the seam callbacks the SAT core drives internally, so the S4.2
@@ -760,7 +821,7 @@ let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
     ; last_dt_model = None
     ; last_array_model = None
     ; relevancy = None
-    ; lia_certificate_trace = None
+    ; leaf_certificate_trace = None
     ; ckpt_log = Dynarray.create ()
     }
   in

@@ -12,6 +12,8 @@ type lia_premise =
 
 type lia_conflict_witness = { premises : lia_premise list }
 
+type euf_leaf_witness = { clause : Sat.lit list }
+
 type atom_event =
   { var : Sat.var
   ; atom : Oxsmt_core.Term.t
@@ -40,6 +42,7 @@ type theory_event =
   ; clause : Sat.lit array
   ; role : Sat.theory_clause_role
   ; lia_witness : lia_conflict_witness option
+  ; euf_witness : euf_leaf_witness option
   }
 
 (* Events are accumulated newest-first (O(1) append) and reversed by the accessors. *)
@@ -50,6 +53,7 @@ type t =
   ; mutable learned_rev : learned_event list
   ; mutable theory_rev : theory_event list
   ; mutable pending_lia : lia_conflict_witness list
+  ; mutable euf_claims : euf_leaf_witness list
   ; mutable conclusion : Sat.unsat_conclusion option
   }
 
@@ -60,6 +64,7 @@ let create () =
   ; learned_rev = []
   ; theory_rev = []
   ; pending_lia = []
+  ; euf_claims = []
   ; conclusion = None
   }
 ;;
@@ -76,6 +81,14 @@ let record_lia_conflict t ~premise_lits ~multipliers =
      lengths, and at most one item waits because SAT materializes the conflict
      synchronously after the callback returns. *)
   t.pending_lia <- t.pending_lia @ [ { premises } ]
+;;
+
+let record_euf_leaf t ~clause =
+  (* Do not consume these claims FIFO. Under chronological backtracking the SAT core can
+     ask the theory for a reason, snapshot it, and materialize the clause only later. An
+     exact content match is stable across that delay; retaining the claim also covers a
+     repeated materialization of the same valid implication. *)
+  t.euf_claims <- { clause } :: t.euf_claims
 ;;
 
 let record_theory_atom t ~var ~atom = t.atoms_rev <- { var; atom } :: t.atoms_rev
@@ -96,7 +109,12 @@ let trace t : Sat.trace =
             Some witness
           | (Sat.Conflict | Sat.Reason), _ -> None
         in
-        t.theory_rev <- { id; clause; role; lia_witness } :: t.theory_rev)
+        let euf_witness =
+          List.find_opt
+            (fun (witness : euf_leaf_witness) -> witness.clause = Array.to_list clause)
+            t.euf_claims
+        in
+        t.theory_rev <- { id; clause; role; lia_witness; euf_witness } :: t.theory_rev)
   ; on_unsat = (fun c -> t.conclusion <- Some c)
   }
 ;;

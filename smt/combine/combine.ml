@@ -146,6 +146,7 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+  val has_live_fabric_edges : t -> bool
 
   (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind (chrono earliest-removed incremental
      undo). Captures both children's checkpoints plus the fabric pin/edge trail
@@ -1599,6 +1600,7 @@ end = struct
   ;;
 
   let set_fabric_trace t tr = t.trace <- tr
+  let has_live_fabric_edges t = Hashtbl.length t.registry <> 0
 
   (* Test-only access to the fabric edge registry + expansion, so the codex #2
      shared-ancestor / genuine-cycle behaviours can be driven on a hand-built diamond

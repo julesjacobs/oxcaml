@@ -10,9 +10,9 @@
     [||]-step conclusion for whichever of the four [Unsat] exits fired).
 
     Install {!trace} on a PRISTINE solver before the first [add_clause] (the seam
-    lifecycle contract) via {!Oxsmt_solver.Sat.set_trace}. The optional LIA witness
-    channel additionally uses immutable core terms and exact rationals; all dependencies
-    remain stdlib-only. *)
+    lifecycle contract) via {!Oxsmt_solver.Sat.set_trace}. The optional theory-leaf
+    channel additionally uses immutable core terms and exact LIA rationals; all
+    dependencies remain stdlib-only. *)
 
 module Sat = Oxsmt_solver.Sat
 
@@ -27,6 +27,13 @@ type lia_premise =
     clause to be exactly the negation of these literals and independently recomputes the
     weighted half-plane sum. *)
 type lia_conflict_witness = { premises : lia_premise list }
+
+(** An EUF proof claim for one materialized theory leaf. [clause] is repeated here so the
+    recorder can bind off-frozen-seam evidence to the matching SAT trace event by content,
+    rather than by timing: chronological backtracking may ask for an explanation before
+    the SAT core materializes its reason clause. The checker requires an exact match and
+    re-derives EUF validity from the separate {!atom_event} statement map. *)
+type euf_leaf_witness = { clause : Sat.lit list }
 
 (** The arithmetic meaning assigned to one SAT theory variable. This belongs to the
     certificate statement, not to an individual Farkas proof: the checker rejects
@@ -59,6 +66,7 @@ type theory_event =
   ; clause : Sat.lit array
   ; role : Sat.theory_clause_role
   ; lia_witness : lia_conflict_witness option
+  ; euf_witness : euf_leaf_witness option
   }
 
 type t
@@ -78,6 +86,11 @@ val record_lia_conflict
   -> premise_lits:Sat.lit list
   -> multipliers:Oxsmt_lia.Rational.t list
   -> unit
+
+(** Record a claim that [clause] follows by pure EUF congruence. Claims are reusable and
+    matched to frozen-seam theory events by exact clause content; the checker treats every
+    attached claim as a hard proof obligation. *)
+val record_euf_leaf : t -> clause:Sat.lit list -> unit
 
 (** Record a theory atom's authoritative SAT-variable binding at internalization time. *)
 val record_theory_atom : t -> var:Sat.var -> atom:Oxsmt_core.Term.t -> unit
