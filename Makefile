@@ -789,7 +789,12 @@ smtlib-test:
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
 	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens \
 	  tests/dt-goldens-sat tests/arr-goldens tests/arr-goldens-sat tests/bv-goldens
-	OXSMT_LRA=1 $(DUNE) exec smt/smtlib/test/lra_roundtrip_test.exe
+	# OXSMT_QUANT_PIPELINE=0 pins the legacy quantifier front-end so this parser unit test
+	# exercises the deferred-universal-lemma Real-degradation path it was written for. That
+	# path is only reachable when the (default-ON since LAND 31) Fol pipeline is off; under
+	# the default the same inputs degrade soundly downstream (loader reject / ground-collapse),
+	# which is a CLI/loader-level concern rather than this parser unit's.
+	OXSMT_QUANT_PIPELINE=0 OXSMT_LRA=1 $(DUNE) exec smt/smtlib/test/lra_roundtrip_test.exe
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fol-test — front-end quantified-pipeline formula IR self-test: NNF/polarity table,
