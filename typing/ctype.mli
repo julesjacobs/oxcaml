@@ -395,6 +395,7 @@ type refinement_seal_obligation =
     rso_conclusion : refinement_desc;
     rso_value_name : string;
     rso_implementation_location : Location.t;
+    rso_implementation_predicate_location : Location.t;
     rso_interface_location : Location.t;
   }
 

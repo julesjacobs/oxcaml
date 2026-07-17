@@ -652,9 +652,22 @@ let prove_refinement state ~env ~loc ~kind ~program_point ~provenance
 
 let verify_seal_obligation ~env ~seal_location
     (obligation : Ctype.refinement_seal_obligation) =
-  let subject_id = Ident.create_local "_seal_value" in
+  (* Surface the seal obligation on the implementation's refined-type
+     annotation (the [.ml]'s [int{ _ > 0 }]), because that refinement must
+     entail the interface's -- mirroring how editors show [.ml]/[.mli]
+     conformance in the [.ml].  Fall back to the implementation binding
+     location when the annotation predicate has no real span (e.g. an
+     inferred refinement).  [seal_location] (the interface site) is retained
+     only as the failure-message anchor. *)
+  let anchor =
+    let predicate_loc = obligation.rso_implementation_predicate_location in
+    if predicate_loc.Location.loc_ghost
+    then obligation.rso_implementation_location
+    else predicate_loc
+  in
+  let subject_id = Ident.create_local "value" in
   let subject =
-    Refinement.create ~loc:seal_location ~type_:obligation.rso_skeleton
+    Refinement.create ~loc:anchor ~type_:obligation.rso_skeleton
       (Rexp_ident (Rbound subject_id))
   in
   let hypothesis =
@@ -663,8 +676,13 @@ let verify_seal_obligation ~env ~seal_location
   let goal =
     Vox_vc.instantiate ~refinement:obligation.rso_conclusion ~with_:subject
   in
+  (* Anchor the goal's own span to the implementation annotation so a click on
+     the obligation jumps into the [.ml].  This is display-only: the emitted
+     Lean uses positional names ([v_0], [h_0]) and reads no source span, so
+     the generated proof obligation stays byte-identical. *)
+  let goal = { goal with rexp_loc = anchor } in
   let condition =
-    Vox_vc.create ~loc:seal_location
+    Vox_vc.create ~loc:anchor
       ~facts:
         [{ Vox_vc.expression = hypothesis;
            location = Some obligation.rso_implementation_location;
@@ -678,7 +696,7 @@ let verify_seal_obligation ~env ~seal_location
   let provenance =
     { kind = "seal-implication";
       name = Some obligation.rso_value_name;
-      source_span = Some seal_location;
+      source_span = Some anchor;
       related_spans =
         [ "interface", obligation.rso_interface_location;
           "implementation", obligation.rso_implementation_location;
@@ -688,12 +706,12 @@ let verify_seal_obligation ~env ~seal_location
   if !Clflags.vox_dump_vc then begin
     dump_vc ~kind:"seal-implication" ~env condition;
     if Option.is_some !Clflags.vox_dump_vc_json then
-      record_vc ~kind:"seal-implication" ~program_point:seal_location
+      record_vc ~kind:"seal-implication" ~program_point:anchor
         ~provenance ~env condition (not_discharged_result condition)
   end else begin
     let result = Vox_lean.discharge ~env condition in
     if Option.is_some !Clflags.vox_dump_vc_json then
-      record_vc ~kind:"seal-implication" ~program_point:seal_location
+      record_vc ~kind:"seal-implication" ~program_point:anchor
         ~provenance ~env condition result;
     match result.verdict with
     | Vox_lean.Proved -> ()
