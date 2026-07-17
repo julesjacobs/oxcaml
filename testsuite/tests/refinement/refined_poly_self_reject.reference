@@ -1,0 +1,4 @@
+File "refined_poly_self_reject.ml", line 1, characters 26-27:
+1 | type 'a reentrant = 'a{ ((_ : 'a) = _) }
+                              ^
+Error: This value is logical but is expected to be physical.

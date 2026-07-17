@@ -331,6 +331,16 @@ let marked_refinements expression =
         -> None)
     expression.exp_extra
 
+(* Binder facts are recorded UNCONDITIONALLY (no purity gate), unlike the
+   branch-condition facts below.  The asymmetry is sound and deliberate
+   (SHOULD-1 ruling): a refined binder's predicate is a PROVEN contract --
+   discharged as an obligation at the value's definition -- so the fact is a
+   property of the specific value now bound to the identifier, not a claim about
+   re-evaluating an expression.  Re-reading that identifier yields the same
+   value, so the fact stays valid however impure the surrounding code.  A branch
+   condition, by contrast, records a fact about an *expression's* value, which
+   only stays valid across occurrences when the expression is pure -- hence the
+   [condition_is_total] gate below. *)
 let rec enter_pattern
     : type k. state -> fact:bool -> k general_pattern -> unit =
   fun state ~fact pattern ->

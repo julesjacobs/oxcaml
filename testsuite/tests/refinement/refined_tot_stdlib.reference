@@ -1,0 +1,7 @@
+File "refined_tot_stdlib.ml", line 1, characters 34-42:
+1 | let (h @ total) (xs : int list) = List.map (fun x -> x + 1) xs
+                                      ^^^^^^^^
+Error: The value List.map is partial
+       but is expected to be total
+         because it is used inside the function at file "refined_tot_stdlib.ml", line 1, characters 16-62
+         which is expected to be total.
