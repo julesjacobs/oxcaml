@@ -925,6 +925,16 @@ let mk_dlocations f =
 let mk_dsource f =
   "-dsource", Arg.Unit f, " (undocumented)"
 
+let mk_vox_dump_vc_json f =
+  ( "-vox-dump-vc-json",
+    Arg.Unit f,
+    " Emit processed refinement verification conditions as JSON to stderr" )
+
+let mk_vox_type_only f =
+  ( "-vox-type-only",
+    Arg.Unit f,
+    " Type-check without generating or discharging refinement VCs" )
+
 let mk_dtlambda f =
   "-dtlambda", Arg.Unit f, " (undocumented)"
 
@@ -1209,6 +1219,8 @@ module type Core_options = sig
   val _dlocations : unit -> unit
 
   val _dsource : unit -> unit
+  val _vox_dump_vc_json : unit -> unit
+  val _vox_type_only : unit -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit
@@ -1608,6 +1620,8 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1717,6 +1731,8 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1901,6 +1917,8 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2066,6 +2084,8 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2213,6 +2233,8 @@ struct
     mk_dno_locations F._dno_locations;
     mk_dlocations F._dlocations;
     mk_dsource F._dsource;
+    mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_type_only F._vox_type_only;
     mk_dparsetree F._dparsetree;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
@@ -2458,6 +2480,8 @@ module Default = struct
     let _dparsetree_loc_ghost_invariants = set parsetree_ghost_loc_invariant
     let _drawlambda = set dump_rawlambda
     let _dsource = set dump_source
+    let _vox_dump_vc_json = set vox_dump_vc_json
+    let _vox_type_only = set vox_type_only
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
     let _dmatchcomp = set dump_matchcomp
