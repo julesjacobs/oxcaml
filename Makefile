@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -513,6 +513,17 @@ row2-red-gate:
 arr-store-idx-test:
 	OXSMT_AX_OCCIDX=1 $(DUNE) exec smt/theories/arr/test/arr_store_idx_test.exe
 
+## arr-foreign-atom-test — poison-47 robustness regression (logs/poison47-report.md). An
+##   AUFLIA problem is routed WHOLE to the standalone arrays theory, so its LIA [Le_zero]
+##   atoms ride along as [K_foreign]; the CDCL(T) seam still forwards their assignment to
+##   [assert_lit]. The old code answered with [invalid_arg] there, which escaped [Sat.solve]
+##   and hit the session CONTRACT-POISON firewall — degrading 47 files to an opaque unknown.
+##   This drives the arr THEORY surface to assert a foreign [Le_zero] literal (both signs)
+##   and pins that (1) it does not raise and (2) the array/EUF fragment still settles to a
+##   sound [Sat] (no bogus conflict). RED against the pre-fix [invalid_arg]. Nonzero on fail.
+arr-foreign-atom-test:
+	$(DUNE) exec smt/theories/arr/test/arr_foreign_atom_test.exe
+
 ## weq-graph-test — unit tests for the W0 dark weak-equivalence graph substrate
 ##   (ADR-weakeq / DESIGN.md A12): the O9 index-sort-stability gate, store-edge permanence,
 ##   equality-edge folding + Trail-undo on pop, deterministic path finding, and the
@@ -900,6 +911,7 @@ test: check-frozen
 	$(MAKE) array-sat-gate
 	$(MAKE) row2-red-gate
 	$(MAKE) arr-store-idx-test
+	$(MAKE) arr-foreign-atom-test
 	$(MAKE) weq-graph-test
 	$(MAKE) regress-test
 	$(MAKE) sat-test

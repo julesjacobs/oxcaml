@@ -546,7 +546,26 @@ let assert_lit t lit =
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
   | Some { kind = K_foreign; _ } ->
-    invalid_arg "Arr.assert_lit: a foreign (non-array/EUF) atom must not be asserted"
+    (* A foreign (non-array/EUF) atom — an arithmetic [Le_zero] literal in an AUFLIA
+       problem, which the standalone arrays theory ({!ensure_theory} routes an array
+       problem here in full, so LIA content rides along) registered as [K_foreign] but
+       does not own. IGNORE its assertion rather than raise: the arrays theory reasons
+       only over the array/EUF fragment, treating the foreign atom as an unconstrained
+       proposition. This is SOUND in both directions.
+       - UNSAT: any refutation the arrays/EUF fragment derives is valid regardless of the
+         dropped arithmetic constraint (dropping a constraint only enlarges the model set,
+         so it can never manufacture a spurious conflict). The learned T-lemmas are
+         array-valid, and the propositional core must refute for BOTH truth values of the
+         free foreign atom, so an UNSAT of the weakened problem entails UNSAT of the full.
+       - SAT: a candidate array model is re-checked by
+         {!Oxsmt_interface.Array_model_check} against EVERY original assertion; it raises
+         [Bad] on any arithmetic term (arr/array_model_check.ml:
+         [Term.Le _ | Term.Arith _ -> raise Bad]) and fail-closes to [unknown], so a model
+         that ignores the arithmetic can never be reported [sat]. Previously this arm
+         raised [Invalid_argument], which the session's CONTRACT-POISON firewall degraded
+         to a sound-but-opaque [unknown]; handling it here removes the crash and lets
+         array-only refutations close (unknown -> unsat). *)
+    ()
 ;;
 
 (* --- read-over-write saturation --- *)
@@ -1827,6 +1846,4 @@ let find_class_opt t term = Euf.find_class_opt t.engine term
 let equal_if_registered t a b = Euf.equal_if_registered t.engine a b
 let class_members t term = Euf.class_members t.engine term
 let registered_terms t = Euf.registered_terms t.engine
-
-let registered_terms_by_sort t sort =
-  Euf.registered_terms_by_sort t.engine sort
+let registered_terms_by_sort t sort = Euf.registered_terms_by_sort t.engine sort

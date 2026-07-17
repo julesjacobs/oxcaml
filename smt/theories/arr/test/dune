@@ -2,7 +2,7 @@
 ; merge-cursor invalidation. Drives the frozen THEORY surface only; depends on oxsmt_core
 ; and oxsmt_arr, honoring the dependency firewall (I3). Run via `make arr-store-idx-test`.
 
-(executable
- (name arr_store_idx_test)
- (modules arr_store_idx_test)
+(executables
+ (names arr_store_idx_test arr_foreign_atom_test)
+ (modules arr_store_idx_test arr_foreign_atom_test)
  (libraries oxsmt_core oxsmt_arr))
