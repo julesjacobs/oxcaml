@@ -253,6 +253,62 @@ let rec replace_parameters replacements expression =
           (replace condition, replace ifso, Option.map replace ifnot);
     }
 
+(* Reconcile a predicate's references to in-scope variables with the way the
+   [subject] lowering represents them.  A parameter (or other in-scope local)
+   mentioned in a predicate is lowered at elaboration as a free reference
+   [Rfree (Rglobal/Rapp (Pident id))] (Lean: an opaque [VoxRef_N]), whereas the
+   [subject] here lowers the same in-scope [Pident id] as [Rbound id] (Lean: a
+   universally-fixed variable [v_N]).  Left unreconciled the two become distinct
+   Lean symbols, so a goal like [_ = x] over parameter [x] is unprovable.
+   Rewrite every free reference to an in-scope [Pident id] into [Rbound id],
+   preserving the node, so identical references collapse to one symbol.  This
+   connects identical references only: a subject [x + 1] against predicate [x]
+   still yields [v_0 + 1 = v_0], correctly disproved. *)
+let rec bind_scope_references scope expression =
+  let recur = bind_scope_references scope in
+  match expression.rexp_desc with
+  | Rexp_ident (Rfree (Rglobal (Pident id) | Rapp (Pident id)))
+    when Ident.Set.mem id scope ->
+    { expression with rexp_desc = Rexp_ident (Rbound id) }
+  | Rexp_ident _ | Rexp_constant _ -> expression
+  | Rexp_let (bindings, body) ->
+    { expression with
+      rexp_desc =
+        Rexp_let
+          ( List.map
+              (fun binding ->
+                { binding with rbind_expr = recur binding.rbind_expr })
+              bindings,
+            recur body );
+    }
+  | Rexp_function function_ ->
+    { expression with
+      rexp_desc = Rexp_function { function_ with body = recur function_.body };
+    }
+  | Rexp_apply (function_, arguments) ->
+    { expression with
+      rexp_desc =
+        Rexp_apply
+          (recur function_,
+           List.map (fun (label, argument) -> label, recur argument) arguments);
+    }
+  | Rexp_tuple fields ->
+    { expression with
+      rexp_desc =
+        Rexp_tuple (List.map (fun (label, field) -> label, recur field) fields);
+    }
+  | Rexp_construct (constructor, arguments) ->
+    { expression with
+      rexp_desc = Rexp_construct (constructor, List.map recur arguments);
+    }
+  | Rexp_field (record, field) ->
+    { expression with rexp_desc = Rexp_field (recur record, field) }
+  | Rexp_ifthenelse (condition, ifso, ifnot) ->
+    { expression with
+      rexp_desc =
+        Rexp_ifthenelse (recur condition, recur ifso, Option.map recur ifnot);
+    }
+
 let verification_error ~loc verdict =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"
     (Vox_lean.string_of_verdict verdict)
@@ -275,6 +331,7 @@ let prove state ~env ~loc goal =
 let prove_refinement state ~env ~loc ~subject refinement replacements =
   let goal = Vox_vc.instantiate ~refinement ~with_:subject in
   let goal = replace_parameters replacements goal in
+  let goal = bind_scope_references (Facts.scope state.facts) goal in
   prove state ~env ~loc goal
 
 let verify_seal_obligation ~env ~seal_location
@@ -355,6 +412,9 @@ let rec enter_pattern
               ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
           in
           let expression = Vox_vc.instantiate ~refinement ~with_ in
+          let expression =
+            bind_scope_references (Facts.scope state.facts) expression
+          in
           state.facts <- Facts.add ~loc:pattern.pat_loc expression state.facts)
         (refinement pattern.pat_type)
   | Tpat_alias { pattern; id; _ } ->
@@ -574,6 +634,7 @@ and check_application state application function_ arguments =
       let result_subject = subject state application in
       let fact = Vox_vc.instantiate ~refinement ~with_:result_subject in
       let fact = replace_parameters replacements fact in
+      let fact = bind_scope_references (Facts.scope state.facts) fact in
       state.facts <- Facts.add ~loc:application.exp_loc fact state.facts)
     (refinement result_type)
 
