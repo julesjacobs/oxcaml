@@ -94,7 +94,7 @@ Attribution A/B + corpus A/B on the QF_AX 551: OFF vs ROW2 vs ROW2+NOINDEX (+ la
 +NOFINGERPRINT), W=1 AND W=24 spot + counted-effort. The NOINDEX/NOFINGERPRINT toggles let ONE
 run split the −59 across scan / regeneration / materialization and decide which ladder rungs are
 needed. Kill rule: no regression anywhere (storecomm W=1+W=24), net positive, no family names,
-no global tuned threshold. Handed to the pair-runner / lockbox with a sha-stamped binary.
+no global tuned threshold. Handed to the pair-runner with a sha-stamped binary.
 
 ## FIX ROUND (codex BOUNCE on b3d4a76e72 → guard, new commit on top; never amend)
 Codex found `an_distinct_idx`'s branches ASSUMED an orientation half without checking (the

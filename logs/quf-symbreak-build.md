@@ -74,7 +74,7 @@ node that does not re-flatten) restored the O(n) encoding: same sample went to q
 
 Same freshly-built `--profile release` binary, OFF then ON back-to-back per file.
 **Load conditions: shared 64-core box, P=32, load avg ~24-26** (not a quiesced lock-box
-run — so the MAGNITUDE is a load-affected estimate; a quiesced tandcperf sweep is the
+run — so the MAGNITUDE is a load-affected estimate; a quiesced dedicated-box sweep is the
 promotable follow-up. The SIGN and the soundness result are load-independent.)
 
 - **Soundness: 0 OFF/ON definite disagreements. 0 ON-verdict-vs-`:status` contradictions
