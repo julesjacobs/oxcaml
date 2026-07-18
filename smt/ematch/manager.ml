@@ -18,6 +18,20 @@ let default_seed_cap = 32
 let default_pool_cap = 16
 let seed_enum_ceiling = 512
 
+(* Model-guided instantiation (quant-mgi, dark OXSMT_EMATCH_MGI). Once a [check_sat] has
+   spent at least [default_mgi_threshold] generation steps with a live lemma — i.e. it is
+   FLOODING toward the [lemma-gen-budget] Unknown — the round stops emitting matcher
+   instances whose ground body is ALREADY SATISFIED by the current model (pure churn the
+   SAT/theory solver will not act on), keeping only the model-falsified (conflict) and
+   model-undetermined (novel / reachability) ones. Below the threshold the round is
+   byte-identical to legacy, so a file that refutes quickly never engages the filter
+   (respecting the trajectory-fragility law). Calibrated to 100k = 10% of the 1M budget
+   floor: engaging earlier (measured at 5k) diverts files that refute in the 100k..1M step
+   range (4 deterministic board regressions); at 100k those clear (0 deterministic
+   regressions) while the deep floods — which spend the full 1M — still cross it and get the
+   filter for the remaining ~900k. *)
+let default_mgi_threshold = 100_000
+
 type stats =
   { live_lemmas : int
   ; instances : int
@@ -49,6 +63,8 @@ type t =
       (* Default-off experiment: bound each lemma's share of one matching pass so a
          prolific early lemma cannot starve every later lemma. Implies streaming. *)
   ; seed_enabled : bool (* chunk 3: seeding on (default); the OFF mutant is the RED *)
+  ; model_guided : bool (* quant-mgi: model-guided flood filter (dark OXSMT_EMATCH_MGI) *)
+  ; mgi_threshold : int (* generation steps this check before the MGI filter engages *)
   ; seed_cap : int (* NEW seed instances per lemma per [check_sat] *)
   ; pool_cap : int (* candidate ground terms per qvar sort *)
   ; seeded : (int, int) Hashtbl.t
@@ -73,6 +89,8 @@ type t =
 let create
   ?(gen_budget = default_gen_budget)
   ?(seed = true)
+  ?(model_guided = false)
+  ?(mgi_threshold = default_mgi_threshold)
   ?(seed_cap = default_seed_cap)
   ?(pool_cap = default_pool_cap)
   ?streaming_partial:streaming_override
@@ -112,6 +130,8 @@ let create
   ; streaming_partial
   ; fair_slices
   ; seed_enabled = seed
+  ; model_guided
+  ; mgi_threshold
   ; seed_cap
   ; pool_cap
   ; seeded = Hashtbl.create 16
@@ -230,6 +250,46 @@ let seed_substitutions view (lemma : Lemma.t) ~pool_cap ~max_tuples =
       List.rev !out))
 ;;
 
+(* Three-valued (Kleene) evaluation of a ground instance body under the CURRENT MODEL
+   (quant-mgi). Leaf atoms ([Eq]/[Le]/Bool-sorted [App]/[Bool_const]) are read from
+   [view.atom_value] (the SAT solver's saved assignment; [None] for a NEW atom this
+   instance introduces). Connectives combine 3-valued: [And]/[Or] short-circuit on a
+   determining child, [Ite] follows a determined condition else joins the branches.
+   [Some true] only when the WHOLE body is determined satisfied, [Some false] when
+   determined violated, [None] when any needed atom is unknown. Used ONLY to DROP
+   model-satisfied churn during a flood; a [None]/wrong answer keeps the instance, so it
+   can never suppress a refutation instance (selection-only, sound). *)
+let rec eval_under_model view (term : Term.t) : bool option =
+  match term.node with
+  | Bool_const b -> Some b
+  | Not a -> Option.map not (eval_under_model view a)
+  | And xs ->
+    let vs = List.map (eval_under_model view) (Iarr.to_list xs) in
+    if List.exists (fun v -> v = Some false) vs
+    then Some false
+    else if List.for_all (fun v -> v = Some true) vs
+    then Some true
+    else None
+  | Or xs ->
+    let vs = List.map (eval_under_model view) (Iarr.to_list xs) in
+    if List.exists (fun v -> v = Some true) vs
+    then Some true
+    else if List.for_all (fun v -> v = Some false) vs
+    then Some false
+    else None
+  | Ite (c, a, b) ->
+    (match eval_under_model view c with
+     | Some true -> eval_under_model view a
+     | Some false -> eval_under_model view b
+     | None ->
+       let va = eval_under_model view a
+       and vb = eval_under_model view b in
+       if va = vb then va else None)
+  | Eq _ | Le _ -> view.Egraph_view.atom_value term
+  | App (_, _) when Sort.equal term.sort Sort.bool -> view.Egraph_view.atom_value term
+  | App _ | Int_const _ | Real_const _ | Arith _ | Real_arith _ -> None
+;;
+
 (* Produce the next batch of ground instances (ADR-0012 §1.4, tranche 2). Two producers
    feed ONE dedup + budget + assert pipeline:
    1. the E-matcher ({!Matcher.substitutions}) over every live lemma, in deterministic
@@ -263,17 +323,30 @@ let round t view =
      abort (like [added] for [total_instances]), so the stat tracks only asserted seed
      instances. *)
   let seeds_this_round = ref 0 in
+  (* Model-guided flood filter (quant-mgi): engages once this [check_sat] has spent at
+     least [mgi_threshold] generation steps with a live lemma (flooding toward the
+     [lemma-gen-budget] Unknown). Computed once per round from the budget spent BEFORE
+     this round, so a check byte-identically follows legacy until it floods. *)
+  let mgi_filtering =
+    t.model_guided && t.gen_budget - t.budget_remaining >= t.mgi_threshold
+  in
   (* Turn a (lemma, sigma) into a deduped, budget-debited instance. Dedup is keyed
      (owning-frame selector, instance body tag): a duplicate (already-active clause) costs
-     no budget and emits nothing (redundancy filter, §L5). *)
+     no budget and emits nothing (redundancy filter, §L5). [~filter] applies the
+     model-guided drop (matcher phase only): during a flood, an instance whose ground body
+     is ALREADY SATISFIED by the current model is churn the solver will not act on, so it
+     is skipped (not deduped — re-evaluated next round in case the model changes).
+     Selection-only: a model-falsified or model-undetermined instance is always kept. *)
   (* [true] iff this call EMITTED a new instance (dedup miss); [false] on a dedup hit. The
      seeding producer uses the result to charge its per-lemma seed cap only on real
      emissions (a re-seeded duplicate costs nothing and must not consume the cap). *)
-  let process debit (lemma : Lemma.t) sigma =
+  let process ?(filter = false) debit (lemma : Lemma.t) sigma =
     let inst = Instance.of_subst t.ctx ~qvars:lemma.qvars ~body:lemma.body sigma in
     let key = lemma.frame, (Instance.to_term inst).Term.tag in
     if Hashtbl.mem t.dedup key
     then false
+    else if filter && eval_under_model view (Instance.to_term inst) = Some true
+    then false (* model already satisfies this instance: skip the churn (quant-mgi) *)
     else (
       spend debit;
       Hashtbl.replace t.dedup key ();
@@ -314,7 +387,7 @@ let round t view =
            (try
               Matcher.iter_substitutions view lemma ~budget:local ~yield:(fun sigma ->
                 matched := true;
-                if process local lemma sigma then incr matcher_emitted)
+                if process ~filter:mgi_filtering local lemma sigma then incr matcher_emitted)
             with
             | Matcher.Budget_exhausted -> fair_exhausted := true);
            budget := !budget - (initial - !local);
@@ -324,12 +397,13 @@ let round t view =
            let matched = ref false in
            Matcher.iter_substitutions view lemma ~budget ~yield:(fun sigma ->
              matched := true;
-             if process budget lemma sigma then incr matcher_emitted);
+             if process ~filter:mgi_filtering budget lemma sigma then incr matcher_emitted);
            if not !matched then inert := lemma :: !inert)
          else (
            let subs = Matcher.substitutions view lemma ~budget in
            List.iter
-             (fun sigma -> if process budget lemma sigma then incr matcher_emitted)
+             (fun sigma ->
+               if process ~filter:mgi_filtering budget lemma sigma then incr matcher_emitted)
              subs;
            if subs = [] then inert := lemma :: !inert))
        ascending;

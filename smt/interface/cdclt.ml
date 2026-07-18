@@ -801,6 +801,13 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
 let desugar_result_for_test = desugar_result
 
 let live_egraph_view t : Egraph_view.t =
+  (* Boolean value of a ground atom in the CURRENT MODEL (the satisfying assignment of
+     the theory [Sat] the instantiation loop is refining), for the model-guided
+     instantiation selector. Reads the SAT solver's saved model via the theory-atom <->
+     SAT-var bijection [t2v]; an atom never interned ([None]). Non-registering. *)
+  let atom_value term =
+    Option.map (fun v -> Sat.value t.sat v) (Term.Table.find_opt t.t2v term)
+  in
   match t.theory with
   | Some (TCombined th) ->
     let cs = Combined.congruence_state th in
@@ -810,6 +817,7 @@ let live_egraph_view t : Egraph_view.t =
     ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
     ; ground_terms_by_sort =
         (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
+    ; atom_value
     }
   | Some (TCombinedReal th) ->
     let cs = Combined_real.congruence_state th in
@@ -819,6 +827,7 @@ let live_egraph_view t : Egraph_view.t =
     ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
     ; ground_terms_by_sort =
         (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
+    ; atom_value
     }
   | Some (TDt th) ->
     { app_terms_by_symbol = Dt.app_terms_by_symbol th
@@ -826,6 +835,7 @@ let live_egraph_view t : Egraph_view.t =
     ; equal_if_registered = Dt.equal_if_registered th
     ; class_members = Dt.class_members th
     ; ground_terms_by_sort = Dt.registered_terms_by_sort th
+    ; atom_value
     }
   | Some (TArr th) ->
     { app_terms_by_symbol = Arr.app_terms_by_symbol th
@@ -833,6 +843,7 @@ let live_egraph_view t : Egraph_view.t =
     ; equal_if_registered = Arr.equal_if_registered th
     ; class_members = Arr.class_members th
     ; ground_terms_by_sort = Arr.registered_terms_by_sort th
+    ; atom_value
     }
   | None -> Egraph_view.empty
 ;;

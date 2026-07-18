@@ -286,6 +286,24 @@ let create
      unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
      counter effect. The opt-out (not base-l0) keeps every declaration => byte-identical
      to the pre-flip trunk. *)
+  (* OXSMT_EMATCH_MGI (DEFAULT-OFF, dark, quant-mgi): model-guided instantiation. When
+     on, {!Manager.round} drops matcher instances already satisfied by the current model
+     once a [check_sat] is flooding toward the [lemma-gen-budget] Unknown, spending the
+     budget/wall on the model-relevant (conflict / novel) instances instead. OFF is
+     byte-identical (the filter never engages). Opt-in token set (only [=1]/[=true]/
+     [=yes]); selection-only, never changes a verdict unsoundly. *)
+  let model_guided_lemmas =
+    match Sys.getenv_opt "OXSMT_EMATCH_MGI" with
+    | Some ("1" | "true" | "yes") -> true
+    | Some _ | None -> false
+  in
+  (* quant-mgi threshold sweep knob: gen-steps this check before the MGI filter engages.
+     Unset => Manager's default. *)
+  let mgi_threshold_override =
+    match Sys.getenv_opt "OXSMT_EMATCH_MGI_THRESHOLD" with
+    | Some s -> int_of_string_opt s
+    | None -> None
+  in
   let sat = Sat.create ~base_l0_cert_mode:base_at_level0 () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
@@ -339,7 +357,14 @@ let create
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
-  ; mgr = Manager.create ?gen_budget:lemma_gen_budget ~seed:seed_lemmas ctx env
+  ; mgr =
+      Manager.create
+        ?gen_budget:lemma_gen_budget
+        ~seed:seed_lemmas
+        ~model_guided:model_guided_lemmas
+        ?mgi_threshold:mgi_threshold_override
+        ctx
+        env
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]

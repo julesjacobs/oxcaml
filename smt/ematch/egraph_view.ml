@@ -18,6 +18,7 @@ type t =
   ; equal_if_registered : Term.t -> Term.t -> bool
   ; class_members : Term.t -> Term.t list
   ; ground_terms_by_sort : Sort.t -> Term.t list
+  ; atom_value : Term.t -> bool option
   }
 
 let empty =
@@ -26,6 +27,7 @@ let empty =
   ; equal_if_registered = (fun a b -> Term.equal a b)
   ; class_members = (fun t -> [ t ])
   ; ground_terms_by_sort = (fun _ -> [])
+  ; atom_value = (fun _ -> None)
   }
 ;;
 
@@ -113,6 +115,7 @@ let snapshot ?indexed view ~ground_terms =
            List.filter
              (fun (term : Term.t) -> Sort.equal term.sort sort)
              ground_terms)
+    ; atom_value = view.atom_value
     }
   else (
     (* Iterate in reverse and prepend so each bucket retains [ground_terms]' exact order.
@@ -154,5 +157,6 @@ let snapshot ?indexed view ~ground_terms =
            | Some class_id -> Option.value (Int_table.find_opt classes class_id) ~default:[])
     ; ground_terms_by_sort =
         (fun sort -> Option.value (Sort_table.find_opt sorts sort) ~default:[])
+    ; atom_value = view.atom_value
     })
 ;;
