@@ -30,6 +30,8 @@ module Recorder = Oxsmt_certificate.Recorder
 module Checker = Oxsmt_certificate.Checker
 module Term = Oxsmt_core.Term
 module Sort = Oxsmt_core.Sort
+module Symbol = Oxsmt_core.Symbol
+module Datatype_defs = Oxsmt_core.Datatype_defs
 module Bigint = Oxsmt_core.Bigint
 module Iarr = Oxsmt_core.Iarr
 module Rational = Oxsmt_lia.Rational
@@ -124,13 +126,19 @@ let render_reflrow (ai : atom_index) (f : linform) : string =
    outside the supported fragment (non-equality atom, Real/Array/BitVec sort, arithmetic
    inside an EUF term) makes the whole leaf a trusted hypothesis (honest Valid_modulo). *)
 type euf_ctx =
-  { sorts : (string, string) Hashtbl.t (* sort key -> Lean type name *)
-  ; sort_dec : (string, unit) Hashtbl.t (* type names needing DecidableEq *)
+  { sorts :
+      (string, string) Hashtbl.t (* uninterpreted sort key -> Lean Type-param name *)
+  ; sort_dec : (string, unit) Hashtbl.t (* type-param names needing DecidableEq *)
   ; mutable sort_order : string list (* Lean type-param names, first-seen order *)
   ; mutable sort_next : int
-  ; syms : (int, string) Hashtbl.t (* Symbol id -> Lean value-param name *)
+  ; syms : (int, string) Hashtbl.t (* uninterpreted Symbol id -> Lean value-param name *)
   ; mutable sym_order : (string * string) list (* (name, Lean type), first-seen order *)
   ; mutable sym_next : int
+  ; mutable registry : Datatype_defs.t option (* datatype shapes, if the solve had any *)
+  ; dt_names : (string, string) Hashtbl.t (* datatype sort key -> inductive Lean name *)
+  ; ctors : (int, string) Hashtbl.t (* constructor Symbol id -> "Ind.fn_name" *)
+  ; mutable dt_defs : string list (* emitted [inductive] decls, in dependency order *)
+  ; mutable dt_next : int
   }
 
 let euf_ctx_create () =
@@ -141,26 +149,35 @@ let euf_ctx_create () =
   ; syms = Hashtbl.create 16
   ; sym_order = []
   ; sym_next = 0
+  ; registry = None
+  ; dt_names = Hashtbl.create 8
+  ; ctors = Hashtbl.create 16
+  ; dt_defs = []
+  ; dt_next = 0
   }
 ;;
 
-let sort_key (s : Sort.t) : string =
+let sanitize (s : string) : string =
+  String.map
+    (fun c ->
+      if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+      then c
+      else '_')
+    s
+;;
+
+(* Lean type name for a sort, and (for datatypes) emit the backing [inductive] on first
+   sight. Concrete Int/Bool map to themselves; uninterpreted sorts become fresh [Type]
+   parameters; datatype sorts become a generated [inductive] (with
+   [deriving DecidableEq]), its constructors registered in [ctors]. Real/Array/BitVec, or
+   a datatype the registry cannot model (e.g. an uninterpreted-sort field), are a loud
+   Gap. *)
+let rec sort_ty (ctx : euf_ctx) (s : Sort.t) : string =
   match s with
   | Sort.Bool -> "Bool"
   | Sort.Int _ -> "Int"
-  | Sort.Uninterpreted sym -> "U:" ^ Oxsmt_core.Symbol.name sym
-  | Sort.Datatype sym -> "D:" ^ Oxsmt_core.Symbol.name sym
-  | Sort.Real | Sort.Array _ | Sort.BitVec _ -> gapf "EUF: unsupported sort"
-;;
-
-(* Lean type name for a sort. Concrete Int/Bool map to themselves; uninterpreted and
-   datatype sorts become fresh [Type] parameters. *)
-let sort_ty (ctx : euf_ctx) (s : Sort.t) : string =
-  let key = sort_key s in
-  match key with
-  | "Bool" -> "Bool"
-  | "Int" -> "Int"
-  | _ ->
+  | Sort.Uninterpreted sym ->
+    let key = "U:" ^ Symbol.name sym in
     (match Hashtbl.find_opt ctx.sorts key with
      | Some n -> n
      | None ->
@@ -169,18 +186,82 @@ let sort_ty (ctx : euf_ctx) (s : Sort.t) : string =
        Hashtbl.replace ctx.sorts key n;
        ctx.sort_order <- ctx.sort_order @ [ n ];
        n)
+  | Sort.Datatype sym -> register_dt ctx sym
+  | Sort.Real | Sort.Array _ | Sort.BitVec _ -> gapf "EUF: unsupported sort"
+
+(* Register a datatype: assign an inductive name, register its constructors, and emit the
+   [inductive] declaration (fields rendered via [sort_ty], recursion for self/other
+   datatypes). Idempotent. *)
+and register_dt (ctx : euf_ctx) (sym : Symbol.t) : string =
+  let key = "D:" ^ Symbol.name sym in
+  match Hashtbl.find_opt ctx.dt_names key with
+  | Some n -> n
+  | None ->
+    let reg =
+      match ctx.registry with
+      | Some r -> r
+      | None -> gapf "EUF: datatype term but no registry recorded"
+    in
+    let dt =
+      match Datatype_defs.datatype_of_sort reg sym with
+      | Some d -> d
+      | None -> gapf "EUF: unregistered datatype sort"
+    in
+    let ind = Printf.sprintf "Dt%d" ctx.dt_next in
+    ctx.dt_next <- ctx.dt_next + 1;
+    Hashtbl.replace ctx.dt_names key ind;
+    (* fields rendered now (may recurse into this same [ind] for self-referential fields,
+       which is fine — [ind] is already registered). *)
+    let ctor_decls =
+      List.map
+        (fun (c : Datatype_defs.constructor) ->
+          let cname = "fn_" ^ sanitize (Symbol.name c.Datatype_defs.sym) in
+          Hashtbl.replace ctx.ctors (c.Datatype_defs.sym :> int) (ind ^ "." ^ cname);
+          let fields =
+            List.sort
+              (fun (a : Datatype_defs.selector) b ->
+                compare a.Datatype_defs.index b.Datatype_defs.index)
+              c.Datatype_defs.selectors
+            |> List.mapi (fun i (sel : Datatype_defs.selector) ->
+              Printf.sprintf "(f%d : %s)" i (sort_ty ctx sel.Datatype_defs.field_sort))
+          in
+          match fields with
+          | [] -> Printf.sprintf "  | %s" cname
+          | _ -> Printf.sprintf "  | %s %s" cname (String.concat " " fields))
+        dt.Datatype_defs.constructors
+    in
+    let decl =
+      Printf.sprintf
+        "inductive %s where\n%s\n  deriving DecidableEq\n"
+        ind
+        (String.concat "\n" ctor_decls)
+    in
+    ctx.dt_defs <- ctx.dt_defs @ [ decl ];
+    ind
 ;;
 
-(* Mark a sort as needing DecidableEq (it appears as the sort of an equated pair).
-   Int/Bool already have it; only uninterpreted/datatype type params get an added instance
-   binder. *)
+(* Mark a sort as needing DecidableEq (it appears as the sort of an equated pair): only
+   uninterpreted [Type] params get an added instance binder. Int/Bool are built-in;
+   datatypes derive it. Still calls [sort_ty] to register the sort. *)
 let mark_dec (ctx : euf_ctx) (s : Sort.t) : unit =
-  let ty = sort_ty ctx s in
-  if ty <> "Int" && ty <> "Bool" then Hashtbl.replace ctx.sort_dec ty ()
+  let _ = sort_ty ctx s in
+  match s with
+  | Sort.Uninterpreted _ -> Hashtbl.replace ctx.sort_dec (sort_ty ctx s) ()
+  | _ -> ()
 ;;
 
-(* Render an EUF term as a Lean expression over the context's parameters. Registers each
-   symbol's value parameter (constant or function) on first sight. Non-EUF shapes -> Gap. *)
+(* Is [sym] a datatype constructor per the recorded registry? *)
+let constructor_of ctx (sym : Symbol.t)
+  : (Datatype_defs.datatype * Datatype_defs.constructor) option
+  =
+  match ctx.registry with
+  | Some reg -> Datatype_defs.constructor_of_sym reg sym
+  | None -> None
+;;
+
+(* Render an EUF term as a Lean expression over the context's parameters. Datatype
+   constructor applications render as [Ind.fn_ctor …] (registering the inductive); other
+   applications register a value parameter on first sight. Non-EUF shapes -> Gap. *)
 let rec render_term (ctx : euf_ctx) (t : Term.t) : string =
   match t.Term.node with
   | Term.Bool_const b -> if b then "true" else "false"
@@ -188,23 +269,31 @@ let rec render_term (ctx : euf_ctx) (t : Term.t) : string =
   | Term.App (sym, args) ->
     let args = Iarr.to_list args in
     let name =
-      let id = (sym :> int) in
-      match Hashtbl.find_opt ctx.syms id with
-      | Some n -> n
+      match constructor_of ctx sym with
+      | Some _ ->
+        (* ensure the inductive (and its [ctors] entries) is registered *)
+        let _ = sort_ty ctx t.Term.sort in
+        (match Hashtbl.find_opt ctx.ctors (sym :> int) with
+         | Some n -> n
+         | None -> gapf "EUF: constructor not registered")
       | None ->
-        let n = Printf.sprintf "fn%d" ctx.sym_next in
-        ctx.sym_next <- ctx.sym_next + 1;
-        Hashtbl.replace ctx.syms id n;
-        let ty =
-          let res = sort_ty ctx t.Term.sort in
-          match args with
-          | [] -> res
-          | _ ->
-            let argtys = List.map (fun a -> sort_ty ctx a.Term.sort) args in
-            String.concat " -> " (argtys @ [ res ])
-        in
-        ctx.sym_order <- ctx.sym_order @ [ n, ty ];
-        n
+        let id = (sym :> int) in
+        (match Hashtbl.find_opt ctx.syms id with
+         | Some n -> n
+         | None ->
+           let n = Printf.sprintf "fn%d" ctx.sym_next in
+           ctx.sym_next <- ctx.sym_next + 1;
+           Hashtbl.replace ctx.syms id n;
+           let ty =
+             let res = sort_ty ctx t.Term.sort in
+             match args with
+             | [] -> res
+             | _ ->
+               let argtys = List.map (fun a -> sort_ty ctx a.Term.sort) args in
+               String.concat " -> " (argtys @ [ res ])
+           in
+           ctx.sym_order <- ctx.sym_order @ [ n, ty ];
+           n)
     in
     (match args with
      | [] -> name
@@ -512,17 +601,16 @@ type euf_prem =
   ; ety : string
   }
 
-(* An EUF leaf the emitter can DISCHARGE. [used] are the literal positions whose Prop fact
-   the contradiction references; [close] is the position of the disequality it
-   contradicts; [eqproof] is the emitter-reconstructed congruence proof that the closing
-   disequality's two sides are equal, over the [he_<pos>] equality-fact names. rho is
-   substituted in phase B. *)
+(* An EUF/DT leaf the emitter can DISCHARGE. [used] are the literal positions whose Prop
+   fact the contradiction references (each bound as [he_<pos>] for a negative equality
+   literal or [hne_<pos>] for a positive one, by clause sign); [contra] is the final
+   emitter-reconstructed [False] term over those names (congruence [absurd …] for EUF, or
+   [Ind.noConfusion …] for a datatype constructor clash). rho is substituted in phase B. *)
 type euf_discharged =
   { eleaf : lit list
   ; eprems : euf_prem list
   ; used : int list
-  ; close : int
-  ; eqproof : string
+  ; contra : string
   }
 
 (* Try to discharge an EUF theory leaf. Atoms are parsed as equalities [Eq(a,b)] or as
@@ -687,15 +775,18 @@ let try_discharge_euf
           | _ -> ())
         nodes
     done;
-    (* Close either from an equality disequality whose sides are congruent, or from two
-       predicate atoms of opposite polarity over congruent arguments. *)
-    let closing_eq =
+    (* Close the leaf, returning the [False] term. Three shapes, tried in order: (eq) a
+       disequality atom (positive equality literal) whose sides are congruent:
+       [absurd <eqproof> hne_close]; (pred) two predicate atoms of opposite polarity over
+       congruent args: [absurd (Eq.trans (Eq.symm <cong>) he_i) hne_j]; (dt) a negative
+       equality literal between DISTINCT datatype constructors: [Ind.noConfusion he_i]. *)
+    let closing_eq () =
       List.find_map
         (fun (i, (_, s), kind, _) ->
           match kind with
           | `Eq (a, b) when s ->
             (match get a b with
-             | Some pf -> Some (i, pf)
+             | Some pf -> Some (Printf.sprintf "absurd %s hne_%d" pf i)
              | None -> None)
           | _ -> None)
         parsed
@@ -710,40 +801,81 @@ let try_discharge_euf
                 match kindi with
                 | `Pred (symi, argsi, _)
                   when (not si)
-                       && Oxsmt_core.Symbol.equal symi symj
+                       && Symbol.equal symi symj
                        && List.length argsi = List.length argsj ->
                   let fname = Hashtbl.find ctx.syms (symi :> int) in
                   (* he_i : (p argsi) = true; cong : (p argsi) = (p argsj); so (p argsj) =
                      true via Eq.trans (Eq.symm cong) he_i, contradicting hne_j. *)
                   (match cong_proof fname argsi argsj with
                    | Some cong ->
-                     Some (j, Printf.sprintf "(Eq.trans (Eq.symm %s) he_%d)" cong i)
+                     Some
+                       (Printf.sprintf
+                          "absurd (Eq.trans (Eq.symm %s) he_%d) hne_%d"
+                          cong
+                          i
+                          j)
                    | None -> None)
                 | _ -> None)
               parsed
           | _ -> None)
         parsed
     in
+    let closing_dt () =
+      (* a negative equality literal C1(..) = C2(..) between distinct constructors: the
+         admitted equality contradicts the inductive's noConfusion. *)
+      List.find_map
+        (fun (i, (_, s), kind, _) ->
+          match kind with
+          | `Eq (a, b) when not s ->
+            (match a.Term.node, b.Term.node with
+             | Term.App (ca, _), Term.App (cb, _) ->
+               (match constructor_of ctx ca, constructor_of ctx cb with
+                | Some (dta, _), Some (dtb, _)
+                  when Symbol.equal dta.Datatype_defs.sort_sym dtb.Datatype_defs.sort_sym
+                       && not (Symbol.equal ca cb) ->
+                  let ind = sort_ty ctx a.Term.sort in
+                  Some (Printf.sprintf "%s.noConfusion he_%d" ind i)
+                | _ -> None)
+             | _ -> None)
+          | _ -> None)
+        parsed
+    in
     let closing =
-      match closing_eq with
-      | Some _ -> closing_eq
-      | None -> closing_pred ()
+      match closing_eq () with
+      | Some _ as r -> r
+      | None ->
+        (match closing_pred () with
+         | Some _ as r -> r
+         | None -> closing_dt ())
     in
     match closing with
     | None -> None
-    | Some (close, eqproof) ->
-      (* which he_<pos> names does the proof reference? plus the closing hne. *)
+    | Some contra ->
+      (* [used] = exactly the fact names the contradiction references (boundary-aware so
+         he_1 does not match he_10). Each is bound in phase B as he_/hne_ per its sign. *)
+      let refs tok =
+        let tl = String.length tok
+        and cl = String.length contra in
+        let rec loop i =
+          if i + tl > cl
+          then false
+          else if String.sub contra i tl = tok
+                  && (i + tl >= cl
+                      || not (contra.[i + tl] >= '0' && contra.[i + tl] <= '9'))
+          then true
+          else loop (i + 1)
+        in
+        loop 0
+      in
       let used =
         List.filter_map
-          (fun (i, (_, s), _, _) ->
-            if i = close
-            then Some i
-            else if (not s) && find_sub_str eqproof (Printf.sprintf "he_%d" i)
-            then Some i
+          (fun (k, _, _, _) ->
+            if refs (Printf.sprintf "he_%d" k) || refs (Printf.sprintf "hne_%d" k)
+            then Some k
             else None)
           parsed
       in
-      Some { eleaf = leaf; eprems; used; close; eqproof }
+      Some { eleaf = leaf; eprems; used; contra }
   with
   | Skip -> None
 ;;
@@ -761,8 +893,16 @@ let emit_refutation (ev : Checker.events) : string =
       Hashtbl.replace atom_tbl a.Recorder.var a.Recorder.atom)
     ev.Checker.atoms;
   let resolve_atom v = Hashtbl.find_opt atom_tbl v in
-  (* classify theory leaves: LIA Farkas discharge (3b), else EUF congruence discharge,
-     else trusted hypothesis (honest Valid_modulo). *)
+  (* record the datatype registry (if any theory leaf carries one) so EUF/DT rendering can
+     recognize constructors and emit backing inductives. *)
+  List.iter
+    (fun (t : Recorder.theory_event) ->
+      match t.Recorder.dt_registry with
+      | Some r -> ectx.registry <- Some r
+      | None -> ())
+    ev.Checker.theory;
+  (* classify theory leaves: LIA Farkas discharge (3b), else EUF/DT discharge, else
+     trusted hypothesis (honest Valid_modulo). *)
   let discharged = ref [] in
   let euf_discharged = ref [] in
   let hyp_leaves = ref [] in
@@ -965,15 +1105,14 @@ let emit_refutation (ev : Checker.events) : string =
            "  have %s : satClause %s %s = true :=\n\
            \    OxsmtBridge.euf_leaf_sat %s %s (fun hc =>\n\
             %s\n\
-           \    absurd %s hne_%d)\n"
+           \    %s)\n"
            name
            rho
            (render_clause d.eleaf)
            (render_clause d.eleaf)
            rho
            (String.concat "\n" bindings)
-           d.eqproof
-           d.close);
+           d.contra);
       admitted := { name; lits = d.eleaf } :: !admitted)
     euf_discharged;
   let admitted0 = List.rev !admitted in
@@ -995,6 +1134,8 @@ let emit_refutation (ev : Checker.events) : string =
   Buffer.add_string
     defs
     "open OxsmtRes\nopen OxsmtFarkas\n\nset_option maxRecDepth 10000\n\n";
+  (* backing inductives for any datatype leaves (before rhoB, which references them) *)
+  List.iter (fun d -> Buffer.add_string defs (d ^ "\n")) ectx.dt_defs;
   let rhoF_params =
     if nvars = 0
     then ""

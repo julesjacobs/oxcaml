@@ -201,14 +201,22 @@ let drop_premise (src : string) : string option =
       | _ -> None)
 ;;
 
-(* Tamper C (broken EUF congruence chain): the emitter discharges an EUF leaf with an
-   explicit congruence proof [absurd <eqproof> hne_k], where [eqproof] chains [he_i]
-   equality facts through [Eq.trans]/[congrArg]. Replace the FIRST equality fact [he_i]
-   USED in that proof (the first [he_] after an [absurd]) with [rfl]: the reconstructed
-   equality now proves the wrong thing, so [absurd] no longer typechecks and the kernel
-   must REJECT. [None] when the body has no EUF discharge to break. *)
+(* Tamper C (broken EUF/DT theory chain): the emitter discharges an EUF/DT leaf with an
+   explicit contradiction term over [he_i] equality facts — [absurd <congruence> hne_k]
+   for EUF, or [Ind.noConfusion he_i] for a datatype constructor clash. Replace the FIRST
+   equality fact [he_i] USED in that contradiction (the first [he_] after the [absurd] /
+   [noConfusion] head) with [rfl]: the reconstructed equality now proves the wrong thing,
+   so the contradiction no longer typechecks and the kernel must REJECT. [None] when the
+   body has no EUF/DT discharge to break. *)
 let tamper_euf (src : string) : string option =
-  match find_sub src "absurd " with
+  let anchor =
+    match find_sub src "absurd ", find_sub src "noConfusion " with
+    | Some a, Some b -> Some (min a b)
+    | Some a, None -> Some a
+    | None, Some b -> Some b
+    | None, None -> None
+  in
+  match anchor with
   | None -> None
   | Some a ->
     (match find_sub ~from:a src "he_" with
