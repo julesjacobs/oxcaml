@@ -4,15 +4,18 @@
 
 (library
  (name oxsmt_lean_export)
- (modules lean_export)
+ (modules lean_export lean_lia_leaf)
  (libraries oxsmt_core oxsmt_interface oxsmt_lia oxsmt_solver oxsmt_certificate))
 
-(executable
- (name lean_sat_gate)
- (modules lean_sat_gate)
+(executables
+ (names lean_sat_gate lean_leaf_gate)
+ (modules lean_sat_gate lean_leaf_gate)
  (libraries
   unix
   oxsmt_core
   oxsmt_interface
+  oxsmt_lia
+  oxsmt_solver
+  oxsmt_certificate
   oxsmt_smtlib_parser
   oxsmt_lean_export))
