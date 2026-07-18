@@ -1571,6 +1571,24 @@ let solve
          (fun (src, g) ->
            if check sy (sy.init.(src) :: g) = R_sat then raise (Give_up "__unsafe0"))
          sy.bad;
+       (* No predicates (#155): with zero uninterpreted predicates every clause is a
+          fact-free [constr => false] (a body_app or an [H_pred] head both require a
+          declared predicate), so [edges]/[bad]/[init] are all empty and the ONLY safety
+          obligations are the trivially-unsafe bodies. Report SAFE only after POSITIVELY
+          confirming every such body is definitely [R_unsat]. An [R_unknown] body — a
+          hard/nonlinear/oracle- undecidable constraint, reachable under default effort
+          via the [solve_exprs] construction-fault and effort-cap degradations — must be
+          [Unknown], never Safe: treating "not R_sat" as UNSAT here would report a
+          possibly-Unsafe system Safe (a wrong-`unsat`-class soundness bug). This also
+          prevents the empty-predicate-array crash in [mk_pdr]/[ensure] that this
+          degenerate entry hits without a guard. It guards the degenerate case a future
+          ALLPDR/portfolio default-on flip routes through [Chc_pdr.solve] (the CLI
+          otherwise dispatches <=1 predicate to [Chc_engine]). *)
+       if sy.npreds = 0
+       then
+         if List.for_all (fun c -> check sy [ c ] = R_unsat) sy.trivially_unsafe
+         then raise (Give_up "__safe_no_preds")
+         else raise (Give_up "__unknown_no_preds");
        (* Cheap forward two-sided interval propagation: if it produces a candidate that
           the independent {!verify} firewall certifies, we are done (this reaches
           chain-propagated bounds like [x = 0] that one-sided PDR generalization diverges
@@ -1636,6 +1654,16 @@ let solve
      | Give_up "__unsafe_trivial" ->
        { verdict = Unsafe; detail = "trivial constraint-only counterexample" }
      | Give_up "__unsafe0" -> { verdict = Unsafe; detail = "counterexample at depth 0" }
+     | Give_up "__safe_no_preds" ->
+       { verdict = Safe
+       ; detail = "no predicates: every trivially-unsafe body confirmed unsat"
+       }
+     | Give_up "__unknown_no_preds" ->
+       { verdict =
+           Unknown
+             "no predicates: a trivially-unsafe body is oracle-undecidable (unknown)"
+       ; detail = "no predicates: trivially-unsafe body not confirmed unsat"
+       }
      | Give_up "__safe_interval" ->
        { verdict = Safe; detail = "forward interval invariant, verified" }
      | Give_up r -> { verdict = Unknown r; detail = r }

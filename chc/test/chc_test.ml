@@ -94,6 +94,59 @@ let check_with solver name expect src =
 let check = check_with solve
 let check_mbp = check_with solve_mbp
 
+(* Force the multi-predicate PDR engine DIRECTLY, bypassing the CLI's
+   [<=1 predicate -> Engine] dispatch — the path a future ALLPDR / portfolio default-on
+   flip takes for every system, and how the [Chc_pdr] npreds=0 guard (#155) is exercised.
+   [max_effort] is exposed so a test can force the oracle to [R_unknown] (the wrong-Safe
+   reproducer). *)
+let solve_pdr_direct ?(max_effort = 1_000_000) src =
+  match Parse.parse src with
+  | sys ->
+    let r = Pdr.solve ~budget:800 ~max_frames:20 ~max_effort sys in
+    { Engine.verdict =
+        (match r.Pdr.verdict with
+         | Pdr.Safe -> Engine.Safe
+         | Pdr.Unsafe -> Engine.Unsafe
+         | Pdr.Unknown m -> Engine.Unknown m)
+    ; detail = r.Pdr.detail
+    }
+  | exception Parse.Unsupported m -> { Engine.verdict = Engine.Unknown m; detail = m }
+  | exception Parse.Malformed m ->
+    { Engine.verdict = Engine.Unknown ("malformed: " ^ m); detail = m }
+;;
+
+let check_pdr_direct = check_with (solve_pdr_direct ~max_effort:1_000_000)
+let check_pdr_effort0 = check_with (solve_pdr_direct ~max_effort:0)
+
+(* npreds=0 guard (#155), routed directly through Chc_pdr.solve. *)
+let () =
+  (* decidably-UNSAT trivially-unsafe body -> SAFE. *)
+  check_pdr_direct
+    "no-pred-safe"
+    Safe_must
+    {|(set-logic HORN)
+      (assert (forall ((x Int)) (=> (and (= x 0)(< x 0)) false)))|};
+  (* satisfiable trivially-unsafe body -> UNSAFE (the accumulator fires first). *)
+  check_pdr_direct
+    "no-pred-unsafe"
+    Unsafe_must
+    {|(set-logic HORN)
+      (assert (forall ((x Int)) (=> (= x 3) false)))|};
+  (* #155 wrong-Safe REPRODUCER (review finding C4), and the guard's discriminating RED
+     test: an oracle-undecidable trivially-unsafe body must be UNKNOWN, never Safe. Forced
+     to R_unknown with max_effort:0; the body [x = 0] is actually SAT (so the system is
+     Unsafe), hence a Safe verdict would be a wrong-`unsat`-class soundness bug. The
+     unsound "not R_sat => Safe" guard returns Safe here (test FAILS); no guard crashes
+     (Invalid_argument in mk_pdr/ensure on the empty predicate array); only the sound
+     guard (positively confirm every body R_unsat, else Unknown) returns Unknown (test
+     PASSES). *)
+  check_pdr_effort0
+    "no-pred-unknown-body"
+    Unknown_expected
+    {|(set-logic HORN)
+      (assert (forall ((x Int)) (=> (= x 0) false)))|}
+;;
+
 (* ---- graded problems ---- *)
 
 let () =
