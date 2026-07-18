@@ -201,6 +201,31 @@ let drop_premise (src : string) : string option =
       | _ -> None)
 ;;
 
+(* MECHANICAL NO-AUTOMATION GUARD (team-lead ruling 2026-07-17): the EMITTED
+   per-certificate body must never contain a proof-search / decision-procedure tactic —
+   omega, simp, grind, native_decide, linarith, etc. (omega is permitted ONLY in the
+   once-proved prelude substrate, never per-cert). The emitter only ever produces `by
+   decide`, `rfl`, and term-mode applications; this scan turns that invariant into
+   enforced evidence. Returns [Some tok] if a banned token appears in [body]. *)
+let banned_automation_token (body : string) : string option =
+  let banned =
+    [ "omega"
+    ; "simp"
+    ; "grind"
+    ; "native_decide"
+    ; "linarith"
+    ; "nlinarith"
+    ; "polyrith"
+    ; "aesop"
+    ; "norm_num"
+    ; "tauto"
+    ; "decide!"
+    ; "bv_decide"
+    ]
+  in
+  List.find_opt (fun tok -> find_sub body tok <> None) banned
+;;
+
 let cnt = ref 0
 let cnt_verified = ref 0
 let cnt_broken = ref 0
@@ -267,6 +292,12 @@ let process_file ~prelude ~timeout ~logdir path : unit =
               | exception Lean_res.Gap g ->
                 incr cnt_unsupported;
                 Printf.printf "UNSUPPORTED  %s :: %s\n%!" base g
+              | body when banned_automation_token body <> None ->
+                incr cnt_broken;
+                Printf.printf
+                  "BROKEN       %s :: emitted per-cert automation tactic: %s\n%!"
+                  base
+                  (Option.get (banned_automation_token body))
               | body ->
                 let full = prelude ^ "\n" ^ body in
                 let f = Filename.concat logdir (name ^ ".lean") in
