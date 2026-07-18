@@ -719,6 +719,67 @@ let () =
       (declare-fun P (Int) Bool)
       (assert (forall ((x Int)) (=> (= x 0) (P x))))
       (assert (forall ((x Int)) (=> (> x 0) false)))|};
+  (* ---- SAFE-frontier levers: disjunctive-DNF fallback + affine-equality mining ---- *)
+  (* Each lever is exercised RED/GREEN: OFF must leave the problem [unknown] (proving the
+     lever is load-bearing, not incidentally solved by the base grammar), ON must prove it
+     [Safe] — and the ON verdict is [verify]-gated, so it is a genuine invariant. *)
+  let solve_cegis_ex ?disj ?affine src =
+    match Parse.parse src with
+    | sys -> Cegis.solve ~budget:20_000 ?disj ?affine sys
+    | exception Parse.Unsupported m -> { Pdr.verdict = Pdr.Unknown m; detail = m }
+    | exception Parse.Malformed m ->
+      { Pdr.verdict = Pdr.Unknown ("malformed: " ^ m); detail = m }
+  in
+  let check_cegis_ex ?disj ?affine name expect src =
+    let r = solve_cegis_ex ?disj ?affine src in
+    let v = r.Pdr.verdict in
+    let smt =
+      match v with
+      | Pdr.Safe -> "sat"
+      | Pdr.Unsafe -> "unsat"
+      | Pdr.Unknown _ -> "unknown"
+    in
+    let ok, tag =
+      match expect, v with
+      | (Safe_must | Safe_ok), Pdr.Safe -> true, "OK"
+      | (Unsafe_must | Unsafe_ok), Pdr.Unsafe -> true, "OK"
+      | Unknown_expected, Pdr.Unknown _ -> true, "OK"
+      | (Safe_must | Safe_ok), Pdr.Unsafe -> false, "UNSOUND(safe reported unsafe)"
+      | (Unsafe_must | Unsafe_ok), Pdr.Safe -> false, "UNSOUND(unsafe reported safe)"
+      | Unknown_expected, (Pdr.Safe | Pdr.Unsafe) ->
+        false, "UNEXPECTED-DEFINITE(should be unknown)"
+      | (Safe_must | Unsafe_must), Pdr.Unknown _ -> false, "MISS(must-solve got unknown)"
+      | (Safe_ok | Unsafe_ok), Pdr.Unknown _ -> true, "soft-miss(unknown)"
+    in
+    if not ok then incr failures;
+    Printf.printf "%-32s %-8s %s\n" ("cegis:" ^ name) smt tag
+  in
+  (* Non-convex SAFE: reachable states are [{x=0, x=2}] (a 2-cycle), and the bad state x=1
+     sits INSIDE the convex hull [0,2]. The conjunctive Houdini hull cannot exclude x=1,
+     so the disjunctive fallback (x=0) \/ (x=2) is required — and its negative-example
+     guard keeps x=1 out. *)
+  let nonconvex =
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)(y Int)) (=> (and (P x)(= y (- 2 x))) (P y))))
+      (assert (forall ((x Int)) (=> (and (P x)(= x 1)) false)))|}
+  in
+  check_cegis_ex ~disj:false ~affine:false "disj-nonconvex-off" Unknown_expected nonconvex;
+  check_cegis_ex ~disj:true ~affine:false "disj-nonconvex-safe" Safe_must nonconvex;
+  (* Non-unit affine SAFE: the invariant is [2*i = j] (i steps by 1, j by 2 from the
+     origin). The fixed unit/octagon grammar cannot express a coefficient of 2;
+     data-driven affine mining recovers [2*i - j = 0] from the collinear samples. *)
+  let two_to_one =
+    {|(set-logic HORN)
+      (declare-fun P (Int Int) Bool)
+      (assert (forall ((i Int)(j Int)) (=> (and (= i 0)(= j 0)) (P i j))))
+      (assert (forall ((i Int)(j Int)(a Int)(b Int))
+        (=> (and (P i j)(= a (+ i 1))(= b (+ j 2))) (P a b))))
+      (assert (forall ((i Int)(j Int)) (=> (and (P i j)(not (= j (* 2 i)))) false)))|}
+  in
+  check_cegis_ex ~disj:false ~affine:false "affine-2to1-off" Unknown_expected two_to_one;
+  check_cegis_ex ~disj:false ~affine:true "affine-2to1-safe" Safe_must two_to_one;
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;
