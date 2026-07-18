@@ -969,3 +969,43 @@ clear — a lemma is user input, not a derived consequence). The MEDIUM: a DT-tr
 dropped a still-valid `has_arrays`; remedied by re-deriving it from the live array registry.
 No new frozen surface (`Manager` gains nothing; the guard reads the existing
 `Manager.has_live_lemma`).
+
+### A16 — CNF-boundary trust: `Cnf.clausify` is a trusted input boundary (rider #151, 2026-07-18)
+
+DECISION RECORD (ADR-0013-adjacent; the ADR home is the untracked sibling `../logs/`, this
+is the committed decision record). This documents — it does not change — an existing trust
+boundary that the certificate stack (and the lean-proofs kernel-checked path built on it)
+relies on, so that a future reader does not mistake a kernel-checked refutation for an
+end-to-end verification of the original SMT query.
+
+**Boundary.** The input clauses a refutation proof reasons over are the CNF produced by
+`Preprocess` + `Cnf.clausify` (`smt/preprocess/cnf.mli`): a plain-Tseitin equisatisfiable
+encoding of the preprocessed, Bool-sorted assertion into `{atom var, Tseitin var}` clauses.
+The certificate `Recorder` records these input clauses (and, via `clausify_group`, the
+Tseitin grouping) but does NOT re-derive them from the SMT-LIB source; the `Checker` and the
+lean-proofs emitter (`Lean_res.emit_refutation`) take the recorded input clauses as GIVEN
+hypotheses. Equivalently: the translation "SMT-LIB assertions ⟶ preprocessed term ⟶ CNF
+clauses" (the recorder's rung-3c) is TRUSTED, not proof-checked.
+
+**What this means for a VERIFIED verdict.** A kernel-checked (or `Checker`-checked) UNSAT
+refutation proves: *the recorded input CNF clauses, together with the trusted (undischarged)
+theory leaves, are jointly unsatisfiable by resolution*. It does NOT independently prove that
+those clauses faithfully encode the original assertions. Soundness of the end-to-end verdict
+therefore rests on three trusted links, stated so they can be attacked deliberately:
+1. `Preprocess` + `Cnf.clausify` is equisatisfiability-preserving (the trusted encoder);
+2. the `Recorder` atom/leaf events faithfully name the encoded atoms (the trusted recorder);
+3. the SAT model lowering used by the SAT-direction gate (`Lean_export.emit_sat`) is faithful.
+
+**Why trust rather than prove (for now).** Proof-carrying clausification (rung-3c) — emitting
+a checkable equisatisfiability certificate for the Tseitin encoding — is a strictly larger
+build than the resolution/theory-leaf layers already delivered, and the clausifier is a
+small, structure-only, term-constructing-free function (`cnf.mli`: "reads structure and
+constructs no terms"). The fail-closed posture holds regardless: dropping or mis-encoding an
+input clause only makes the refutation HARDER to close (a missing hypothesis cannot be
+resolved away), so the boundary can cause a false UNKNOWN, never a false VERIFIED, on the
+UNSAT side. The residual exposure is a clausifier bug that produces a STRONGER (over-)encoding;
+that is the item a future rung-3c ADR would close.
+
+**Scope.** Documentation only; no code or frozen-surface change. Consistent with the
+lean-proofs trust-boundary disclosure (rider R5) and A15's "user input is not a derived
+consequence" stance.
