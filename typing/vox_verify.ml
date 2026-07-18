@@ -310,6 +310,8 @@ type state =
   { mutable facts : Facts.t;
     mutable definitions : definition list;
     mutable resume_facts : (Ident.t * Facts.t) list;
+    total_functions : unit Types.Uid.Tbl.t;
+    call_subjects : (Location.t, Ident.t) Hashtbl.t;
   }
 
 exception Unsupported_subject of Location.t * string
@@ -458,10 +460,94 @@ let contains_refinement type_ =
     visit type_;
     !found)
 
+let totality_is_total totality =
+  match Mode.Totality.Guts.check_const_conservative totality with
+  | Some Mode.Totality.Const.Total -> true
+  | Some Mode.Totality.Const.Partial | None -> false
+
+let expression_has_total_mode expression =
+  List.exists
+    (fun (extra, _, _) ->
+      match extra with
+      | Texp_mode modes ->
+        begin match modes.mode_modes.totality with
+        | Some Mode.Totality.Const.Total -> true
+        | Some Mode.Totality.Const.Partial | None -> false
+        end
+      | _ -> false)
+    expression.exp_extra
+
+(* A call can be represented structurally only when evaluating its head is
+   deterministic and the resulting function is known total.  Identifier
+   identity comes from the typechecker's [val_uid], so aliases and qualified
+   paths do not depend on their surface syntax.  Non-identifier heads must
+   carry a total mode and themselves have a structural, stable evaluation. *)
+let rec call_head_is_stable state expression =
+  match expression.exp_desc with
+  | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ }
+    when Option.is_some (Vox_lean.primitive_builtin primitive.prim_name)
+         || String.equal primitive.prim_name "%identity"
+         || String.equal primitive.prim_name "%obj_magic" ->
+    true
+  | Texp_ident { desc; mode; _ } ->
+    expression_has_total_mode expression
+    || Types.Uid.Tbl.mem state.total_functions desc.val_uid
+    || totality_is_total
+         (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
+  | Texp_function { alloc_mode; _ } ->
+    expression_has_total_mode expression
+    || totality_is_total
+         (Mode.Alloc.proj_comonadic Mode.Axis.Totality alloc_mode)
+  | Texp_let (Nonrecursive, bindings, body) ->
+    (expression_has_total_mode expression
+     && expression_is_stable state expression)
+    || (List.for_all
+          (fun binding -> expression_is_stable state binding.vb_expr)
+          bindings
+        && call_head_is_stable state body)
+  | Texp_ifthenelse (condition, ifso, Some ifnot) ->
+    expression_is_stable state condition
+    && (expression_has_total_mode expression
+        || (call_head_is_stable state ifso
+            && call_head_is_stable state ifnot))
+  | _ ->
+    expression_has_total_mode expression
+    && expression_is_stable state expression
+
+and expression_is_stable state expression =
+  let stable = expression_is_stable state in
+  match expression.exp_desc with
+  | Texp_constant _ | Texp_ident _ | Texp_function _ -> true
+  | Texp_let (Nonrecursive, bindings, body) ->
+    List.for_all (fun binding -> stable binding.vb_expr) bindings
+    && stable body
+  | Texp_apply (function_, arguments, _, _, _) ->
+    call_head_is_stable state function_
+    && List.for_all
+         (function
+           | _, Arg (argument, _) -> stable argument
+           | _, Omitted _ -> false)
+         arguments
+  | Texp_tuple (fields, _) ->
+    List.for_all (fun (_, field) -> stable field) fields
+  | Texp_construct (_, _, _, arguments, _) ->
+    List.for_all (fun (_, argument) -> stable argument) arguments
+  | Texp_field { record; label; _ } when label.lbl_mut = Immutable ->
+    stable record
+  | Texp_ifthenelse (condition, ifso, ifnot) ->
+    stable condition && stable ifso && Option.fold ~none:true ~some:stable ifnot
+  | _ -> false
+
 let register_definition state binding =
   match pattern_variable binding.vb_pat with
   | None -> ()
   | Some id ->
+    if call_head_is_stable state binding.vb_expr then begin
+      match binding.vb_pat.pat_desc with
+      | Tpat_var { uid; _ } | Tpat_alias { uid; _ } ->
+        Types.Uid.Tbl.replace state.total_functions uid ()
+      | _ -> ()
+    end;
     let parameters = definition_parameters binding.vb_expr in
     if parameters <> [] && contains_refinement binding.vb_pat.pat_type then
       state.definitions <-
@@ -474,6 +560,21 @@ let find_definition state = function
       (fun definition -> Ident.same definition.id id)
       state.definitions
   | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> None
+
+(* A non-stable call has no structural image: two evaluations of the
+   same syntax may return different values.  Give each source occurrence a
+   fresh logical name, memoized because the same occurrence is lowered more
+   than once while checking dependent arguments and recording result facts. *)
+let opaque_call_subject state expression =
+  let id =
+    match Hashtbl.find_opt state.call_subjects expression.exp_loc with
+    | Some id -> id
+    | None ->
+      let id = Ident.create_local "call_result" in
+      Hashtbl.add state.call_subjects expression.exp_loc id;
+      id
+  in
+  node expression (Rexp_ident (Rfree (Rglobal (Pident id))))
 
 let rec subject state ?(function_head = false) expression =
   let lower = subject state in
@@ -523,6 +624,9 @@ let rec subject state ?(function_head = false) expression =
     end
   | Texp_function _ ->
     unsupported expression "a multi-parameter or case function"
+  | Texp_apply (function_, _, _, _, _)
+    when not (call_head_is_stable state function_) ->
+    opaque_call_subject state expression
   | Texp_apply (function_, arguments, _, _, _) ->
     let function_ = subject state ~function_head:true function_ in
     let arguments =
@@ -1397,6 +1501,7 @@ and walk_structure state structure =
 
 let toplevel_facts = ref Facts.empty
 let toplevel_definitions = ref []
+let toplevel_total_functions = Types.Uid.Tbl.create 16
 
 (* Walk a refinement predicate, recording [{location, type}] for every
    sub-expression node, using its stored [rexp_loc]/[rexp_type].  The hole [_]
@@ -1470,8 +1575,16 @@ let verify_structure ?(toplevel = false) structure =
       { facts = !toplevel_facts;
         definitions = !toplevel_definitions;
         resume_facts = [];
+        total_functions = toplevel_total_functions;
+        call_subjects = Hashtbl.create 16;
       }
-    else { facts = Facts.empty; definitions = []; resume_facts = [] }
+    else
+      { facts = Facts.empty;
+        definitions = [];
+        resume_facts = [];
+        total_functions = Types.Uid.Tbl.create 16;
+        call_subjects = Hashtbl.create 16;
+      }
   in
   let walk_root () =
     if Option.is_some !Clflags.vox_dump_vc_json then
