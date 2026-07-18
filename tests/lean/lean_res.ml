@@ -525,11 +525,13 @@ type euf_discharged =
   ; eqproof : string
   }
 
-(* Try to discharge an EUF theory leaf: parse each literal's atom as an equality, run
-   congruence closure over the equality premises (negative literals), and find a
-   disequality (positive literal) whose two sides are forced equal. Any non-equality atom,
-   unsupported sort, or non-congruent leaf makes the whole leaf a trusted hypothesis
-   (returns None). *)
+(* Try to discharge an EUF theory leaf. Atoms are parsed as equalities [Eq(a,b)] or as
+   predicate applications [p(args) : Bool] (modeled as the equality [p(args) = true]). The
+   emitter runs congruence closure over the equality premises (negative literals) and
+   closes the leaf either from a disequality atom whose two sides are forced equal, or
+   from two predicate atoms of opposite polarity over congruent arguments (so [p x = true]
+   and [p y = true] cannot both fail while [p x = p y]). Any other atom shape, unsupported
+   sort, or non-congruent leaf makes the whole leaf a trusted hypothesis (returns None). *)
 let try_discharge_euf
   (ctx : euf_ctx)
   ~(resolve_atom : int -> Term.t option)
@@ -538,7 +540,8 @@ let try_discharge_euf
   =
   let leaf = clause_of_sat t.Recorder.clause in
   let exception Skip in
-  (* per-position: (lit, var, sign, term_a, term_b, rendered_a, rendered_b) *)
+  (* per-position: (index, lit, atom-kind, prem). An atom is `Eq (a, b) or a `Pred
+     (symbol, args, app-term) modeled as [app = true]. *)
   let parse_pos i (v, s) =
     match resolve_atom v with
     | None -> raise Skip
@@ -551,15 +554,25 @@ let try_discharge_euf
          let prem =
            { elit = v, s; evar = v; elhs = ra; erhs = rb; ety = sort_ty ctx a.Term.sort }
          in
-         i, (v, s), a, b, prem
+         i, (v, s), `Eq (a, b), prem
+       | Term.App (sym, args) when Sort.equal atom.Term.sort Sort.bool ->
+         let rapp = render_term ctx atom in
+         let prem = { elit = v, s; evar = v; elhs = rapp; erhs = "true"; ety = "Bool" } in
+         i, (v, s), `Pred (sym, Iarr.to_list args, atom), prem
        | _ -> raise Skip)
   in
   try
     let parsed = List.mapi parse_pos leaf in
-    let eprems = List.map (fun (_, _, _, _, p) -> p) parsed in
-    (* CC node set: every subterm of every atom side. *)
+    let eprems = List.map (fun (_, _, _, p) -> p) parsed in
+    (* CC node set: every subterm of every atom side / predicate application. *)
     let nodes =
-      List.fold_left (fun acc (_, _, a, b, _) -> subterms (subterms acc a) b) [] parsed
+      List.fold_left
+        (fun acc (_, _, kind, _) ->
+          match kind with
+          | `Eq (a, b) -> subterms (subterms acc a) b
+          | `Pred (_, _, app) -> subterms acc app)
+        []
+        parsed
     in
     let nodes =
       (* dedup by tag *)
@@ -586,9 +599,12 @@ let try_discharge_euf
         Hashtbl.replace known (x.Term.tag, y.Term.tag) pf;
         Hashtbl.replace known (y.Term.tag, x.Term.tag) (Printf.sprintf "(Eq.symm %s)" pf))
     in
-    (* seed with the equality premises (negative literals in the clause). *)
+    (* seed with the equality premises (negative equality literals in the clause). *)
     List.iter
-      (fun (i, (_, s), a, b, _) -> if not s then add a b (Printf.sprintf "he_%d" i))
+      (fun (i, (_, s), kind, _) ->
+        match kind with
+        | `Eq (a, b) -> if not s then add a b (Printf.sprintf "he_%d" i)
+        | `Pred _ -> ())
       parsed;
     (* congruence chain proof for [App(_,us) = App(_,ws)] given per-arg proofs. *)
     let cong_proof fname (us : Term.t list) (ws : Term.t list) : string option =
@@ -671,17 +687,47 @@ let try_discharge_euf
           | _ -> ())
         nodes
     done;
-    (* find a disequality (positive literal) whose sides are now congruent. *)
-    let closing =
+    (* Close either from an equality disequality whose sides are congruent, or from two
+       predicate atoms of opposite polarity over congruent arguments. *)
+    let closing_eq =
       List.find_map
-        (fun (i, (_, s), a, b, _) ->
-          if s
-          then (
-            match get a b with
-            | Some pf -> Some (i, pf)
-            | None -> None)
-          else None)
+        (fun (i, (_, s), kind, _) ->
+          match kind with
+          | `Eq (a, b) when s ->
+            (match get a b with
+             | Some pf -> Some (i, pf)
+             | None -> None)
+          | _ -> None)
         parsed
+    in
+    let closing_pred () =
+      List.find_map
+        (fun (j, (_, sj), kindj, _) ->
+          match kindj with
+          | `Pred (symj, argsj, _) when sj ->
+            List.find_map
+              (fun (i, (_, si), kindi, _) ->
+                match kindi with
+                | `Pred (symi, argsi, _)
+                  when (not si)
+                       && Oxsmt_core.Symbol.equal symi symj
+                       && List.length argsi = List.length argsj ->
+                  let fname = Hashtbl.find ctx.syms (symi :> int) in
+                  (* he_i : (p argsi) = true; cong : (p argsi) = (p argsj); so (p argsj) =
+                     true via Eq.trans (Eq.symm cong) he_i, contradicting hne_j. *)
+                  (match cong_proof fname argsi argsj with
+                   | Some cong ->
+                     Some (j, Printf.sprintf "(Eq.trans (Eq.symm %s) he_%d)" cong i)
+                   | None -> None)
+                | _ -> None)
+              parsed
+          | _ -> None)
+        parsed
+    in
+    let closing =
+      match closing_eq with
+      | Some _ -> closing_eq
+      | None -> closing_pred ()
     in
     match closing with
     | None -> None
@@ -689,7 +735,7 @@ let try_discharge_euf
       (* which he_<pos> names does the proof reference? plus the closing hne. *)
       let used =
         List.filter_map
-          (fun (i, (_, s), _, _, _) ->
+          (fun (i, (_, s), _, _) ->
             if i = close
             then Some i
             else if (not s) && find_sub_str eqproof (Printf.sprintf "he_%d" i)
