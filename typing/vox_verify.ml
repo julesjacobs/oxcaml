@@ -377,47 +377,88 @@ let find_stdlib_value env name =
   | exception Not_found ->
     Env.find_value_by_name (Longident.Lident name) env
 
+let primitive_type ~env description primitive =
+  let type_, _, _, _ =
+    Ctype.instance_prim env primitive description.val_type
+  in
+  Ctype.instance type_
+
+let equality_arrow_shapes ~env description primitive =
+  let type_ = primitive_type ~env description primitive in
+  match get_desc type_ with
+  | Tarrow (first, _, rest, first_commutable) ->
+    begin match get_desc rest with
+    | Tarrow (second, _, _, second_commutable) ->
+      Some (first, first_commutable, second, second_commutable)
+    | _ -> None
+    end
+  | _ -> None
+
+let equality_types ~env description primitive argument_type =
+  Option.map
+    (fun (first, first_commutable, second, second_commutable) ->
+      let argument_type = Ctype.duplicate_type argument_type in
+      let result_type = Predef.type_bool in
+      let after_first =
+        Btype.newgenty
+          (Tarrow
+             ( second,
+               Ctype.duplicate_type argument_type,
+               result_type,
+               Btype.copy_commu second_commutable ))
+      in
+      let head_type =
+        Btype.newgenty
+          (Tarrow
+             ( first,
+               argument_type,
+               after_first,
+               Btype.copy_commu first_commutable ))
+      in
+      head_type, after_first, result_type)
+    (equality_arrow_shapes ~env description primitive)
+
 let equality ~env ~loc left right =
   match find_stdlib_value env "=" with
   | exception Not_found -> None
   | path, description ->
     begin match description.val_kind with
     | Val_prim primitive when String.equal primitive.prim_name "%equal" ->
-      let type_, _, _, _ =
-        Ctype.instance_prim env primitive description.val_type
-      in
-      begin match get_desc (Ctype.instance type_) with
-      | Tarrow (first, _, rest, first_commutable) ->
-        begin match get_desc rest with
-        | Tarrow (second, _, _, second_commutable) ->
-          let argument_type = Ctype.duplicate_type left.rexp_type in
-          let result_type = Predef.type_bool in
-          let after_first =
-            Btype.newgenty
-              (Tarrow
-                 ( second,
-                   Ctype.duplicate_type argument_type,
-                   result_type,
-                   Btype.copy_commu second_commutable ))
-          in
-          let head_type =
-            Btype.newgenty
-              (Tarrow
-                 ( first,
-                   argument_type,
-                   after_first,
-                   Btype.copy_commu first_commutable ))
-          in
+      begin match
+        equality_types ~env description primitive left.rexp_type
+      with
+      | None -> None
+      | Some (head_type, _, result_type) ->
+        let head =
+          Refinement.create ~loc ~type_:head_type
+            (Rexp_ident (Rfree (Rapp path)))
+        in
+        Some
+          (Refinement.create ~loc ~type_:result_type
+             (Rexp_apply (head, [Nolabel, left; Nolabel, right])))
+      end
+    | _ -> None
+    end
+
+let constructor_mismatch ~env ~loc ~constructor subject =
+  match find_stdlib_value env "=" with
+  | exception Not_found -> None
+  | _, description ->
+    begin match description.val_kind with
+    | Val_prim primitive when String.equal primitive.prim_name "%equal" ->
+      begin match
+        equality_types ~env description primitive subject.rexp_type
+      with
+      | None -> None
+      | Some (_, test_type, result_type) ->
+          let name = Vox_lean.constructor_mismatch_name constructor in
           let head =
-            Refinement.create ~loc ~type_:head_type
-              (Rexp_ident (Rfree (Rapp path)))
+            Refinement.create ~loc ~type_:test_type
+              (Rexp_ident (Rfree (Rfun name)))
           in
           Some
             (Refinement.create ~loc ~type_:result_type
-               (Rexp_apply (head, [Nolabel, left; Nolabel, right])))
-        | _ -> None
-        end
-      | _ -> None
+               (Rexp_apply (head, [Nolabel, subject])))
       end
     | _ -> None
     end
@@ -537,6 +578,32 @@ and expression_is_stable state expression =
   | Texp_ifthenelse (condition, ifso, ifnot) ->
     stable condition && stable ifso && Option.fold ~none:true ~some:stable ifnot
   | _ -> false
+
+(* Avoid manufacturing logical equality types while walking ordinary OCaml
+   that cannot produce a refinement VC.  Besides saving work, this keeps the
+   verification pass observational: instantiating polymorphic primitives for
+   an irrelevant match must not perturb layout variables in the typedtree. *)
+let expression_contains_refinement expression =
+  let found = ref false in
+  let super = Tast_iterator.default_iterator in
+  let iterator =
+    { super with
+      expr =
+        (fun iterator expression ->
+          if contains_refinement expression.exp_type then found := true
+          else super.expr iterator expression);
+      pat =
+        (fun iterator pattern ->
+          if contains_refinement pattern.pat_type then found := true
+          else super.pat iterator pattern);
+      typ =
+        (fun iterator core_type ->
+          if contains_refinement core_type.ctyp_type then found := true
+          else super.typ iterator core_type);
+    }
+  in
+  iterator.expr iterator expression;
+  !found
 
 let register_definition state binding =
   match pattern_variable binding.vb_pat with
@@ -960,34 +1027,250 @@ let marked_refinements expression =
    condition, by contrast, records a fact about an *expression's* value, which
    only stays valid across occurrences when the expression is pure -- hence the
    [condition_is_total] gate below. *)
-let rec enter_pattern
+let add_refinement_fact state ~kind ?name ~loc ~subject type_ =
+  Option.iter
+    (fun refinement ->
+      let expression = Vox_vc.instantiate ~refinement ~with_:subject in
+      let expression =
+        bind_scope_references (Facts.scope state.facts) expression
+      in
+      let origin = fact_origin ~kind ?name loc in
+      state.facts <- Facts.add ~origin ~loc expression state.facts)
+    (refinement type_)
+
+let pattern_bindings pattern =
+  let seen = ref Ident.Set.empty in
+  let bindings = ref [] in
+  let add id name type_ =
+    if not (Ident.Set.mem id !seen) then begin
+      seen := Ident.Set.add id !seen;
+      bindings := (id, name, type_) :: !bindings
+    end
+  in
+  let collect : type k. k general_pattern -> unit =
+    fun pattern ->
+    match pattern.pat_desc with
+    | Tpat_var { id; name; _ }
+    | Tpat_fun_layout { id; name; _ } ->
+      add id name pattern.pat_type
+    | Tpat_alias { id; name; type_expr; _ } ->
+      add id name type_expr
+    | _ -> ()
+  in
+  Typedtree.iter_general_pattern
+    { f = collect }
+    pattern;
+  List.rev !bindings
+
+let enter_pattern
     : type k. state -> fact:bool -> k general_pattern -> unit =
   fun state ~fact pattern ->
+  let bindings = pattern_bindings pattern in
+  state.facts <-
+    Facts.enter_many (List.map (fun (id, _, _) -> id) bindings)
+      state.facts;
+  if fact then
+    List.iter
+      (fun (id, name, type_) ->
+        let subject =
+          Refinement.create ~loc:name.loc ~type_:(carrier type_)
+            (Rexp_ident (Rbound id))
+        in
+        add_refinement_fact state ~kind:"binder"
+          ~name:(Ident.name id) ~loc:name.loc ~subject type_)
+      bindings
+
+let add_match_fact state ~loc expression =
+  let origin = fact_origin ~kind:"match" loc in
+  state.facts <- Facts.add ~origin ~loc expression state.facts
+
+let fresh_match_subject state ~loc type_ =
+  let id = Ident.create_local "*match-component*" in
+  state.facts <- Facts.enter id state.facts;
+  Refinement.create ~loc ~type_:(carrier type_) (Rexp_ident (Rbound id))
+
+let value_pattern_subject state (pattern : value general_pattern) =
   match pattern.pat_desc with
+  | Tpat_var { id; _ } | Tpat_alias { id; _ } ->
+    Refinement.create ~loc:pattern.pat_loc
+      ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
+  | Tpat_constant (Const_int _ as constant) ->
+    Refinement.create ~loc:pattern.pat_loc
+      ~type_:(carrier pattern.pat_type) (Rexp_constant constant)
+  | _ -> fresh_match_subject state ~loc:pattern.pat_loc pattern.pat_type
+
+let rec add_value_pattern_facts state ~subject
+    (pattern : value general_pattern) =
+  add_refinement_fact state ~kind:"match" ~loc:pattern.pat_loc ~subject
+    pattern.pat_type;
+  let add_equality left right =
+    Option.iter (add_match_fact state ~loc:pattern.pat_loc)
+      (equality ~env:pattern.pat_env ~loc:pattern.pat_loc left right)
+  in
+  match pattern.pat_desc with
+  | Tpat_any -> ()
   | Tpat_var { id; _ } ->
-    state.facts <- Facts.enter id state.facts;
-    if fact then
-      Option.iter
-        (fun refinement ->
-          let with_ =
-            Refinement.create ~loc:pattern.pat_loc
-              ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
+    let variable =
+      Refinement.create ~loc:pattern.pat_loc
+        ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
+    in
+    add_equality variable subject
+  | Tpat_alias { pattern = subpattern; id; _ } ->
+    let alias =
+      Refinement.create ~loc:pattern.pat_loc
+        ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
+    in
+    add_equality alias subject;
+    add_value_pattern_facts state ~subject subpattern
+  | Tpat_constant (Const_int _ as constant) ->
+    let constant =
+      Refinement.create ~loc:pattern.pat_loc
+        ~type_:(carrier pattern.pat_type) (Rexp_constant constant)
+    in
+    add_equality subject constant
+  | Tpat_construct (_, constructor, _, arguments, _)
+    when Vox_lean.supports_match_facts ~env:pattern.pat_env
+           pattern.pat_type ->
+    let components =
+      List.map
+        (fun (_, pattern) -> value_pattern_subject state pattern, pattern)
+        arguments
+    in
+    let constructor =
+      { rconstr_type_path = cstr_res_type_path constructor;
+        rconstr_name = constructor.cstr_name;
+      }
+    in
+    let constructed =
+      Refinement.create ~loc:pattern.pat_loc
+        ~type_:(carrier pattern.pat_type)
+        (Rexp_construct (constructor, List.map fst components))
+    in
+    add_equality subject constructed;
+    List.iter
+      (fun (component, pattern) ->
+        add_value_pattern_facts state ~subject:component pattern)
+      components
+  | Tpat_tuple fields
+    when List.for_all (fun (label, _) -> Option.is_none label) fields
+         && Vox_lean.supports_match_facts ~env:pattern.pat_env
+              pattern.pat_type ->
+    let components =
+      List.map
+        (fun (label, pattern) ->
+          label, value_pattern_subject state pattern, pattern)
+        fields
+    in
+    let tuple =
+      Refinement.create ~loc:pattern.pat_loc
+        ~type_:(carrier pattern.pat_type)
+        (Rexp_tuple
+           (List.map (fun (label, component, _) -> label, component)
+              components))
+    in
+    add_equality subject tuple;
+    List.iter
+      (fun (_, component, pattern) ->
+        add_value_pattern_facts state ~subject:component pattern)
+      components
+  | Tpat_record (fields, _, _, _)
+    when Vox_lean.supports_match_facts ~env:pattern.pat_env
+           pattern.pat_type ->
+    List.iter
+      (fun (_, label, field_pattern) ->
+        if label.lbl_mut = Immutable then begin
+          let field =
+            { rfield_type_path = lbl_res_type_path label;
+              rfield_name = label.lbl_name;
+            }
           in
-          let expression = Vox_vc.instantiate ~refinement ~with_ in
-          let expression =
-            bind_scope_references (Facts.scope state.facts) expression
+          let projection =
+            Refinement.create ~loc:field_pattern.pat_loc
+              ~type_:(carrier field_pattern.pat_type)
+              (Rexp_field (subject, field))
           in
-          let origin =
-            fact_origin ~kind:"binder" ~name:(Ident.name id)
-              pattern.pat_loc
-          in
-          state.facts <-
-            Facts.add ~origin ~loc:pattern.pat_loc expression state.facts)
-        (refinement pattern.pat_type)
-  | Tpat_alias { pattern; id; _ } ->
-    enter_pattern state ~fact pattern;
-    state.facts <- Facts.enter id state.facts
-  | _ -> ()
+          add_value_pattern_facts state ~subject:projection field_pattern
+        end)
+      fields
+  | Tpat_or _ | Tpat_fun_layout _ | Tpat_unboxed_unit
+  | Tpat_unboxed_bool _ | Tpat_unboxed_tuple _ | Tpat_variant _
+  | Tpat_record_unboxed_product _ | Tpat_array _ | Tpat_lazy _
+  | Tpat_constant _ | Tpat_construct _ | Tpat_tuple _ | Tpat_record _ -> ()
+
+let rec ground_pattern_term (pattern : value general_pattern) =
+  let make desc =
+    Refinement.create ~loc:pattern.pat_loc
+      ~type_:(carrier pattern.pat_type) desc
+  in
+  match pattern.pat_desc with
+  | Tpat_constant (Const_int _ as constant) ->
+    Some (make (Rexp_constant constant))
+  | Tpat_alias { pattern; _ } -> ground_pattern_term pattern
+  | Tpat_construct (_, constructor, _, arguments, _)
+    when Vox_lean.supports_match_facts ~env:pattern.pat_env
+           pattern.pat_type ->
+    let arguments =
+      List.map (fun (_, pattern) -> ground_pattern_term pattern) arguments
+    in
+    if List.for_all Option.is_some arguments then
+      let constructor =
+        { rconstr_type_path = cstr_res_type_path constructor;
+          rconstr_name = constructor.cstr_name;
+        }
+      in
+      Some
+        (make
+           (Rexp_construct
+              (constructor, List.map Option.get arguments)))
+    else None
+  | Tpat_tuple fields
+    when List.for_all (fun (label, _) -> Option.is_none label) fields
+         && Vox_lean.supports_match_facts ~env:pattern.pat_env
+              pattern.pat_type ->
+    let fields =
+      List.map
+        (fun (label, pattern) ->
+          Option.map (fun term -> label, term) (ground_pattern_term pattern))
+        fields
+    in
+    if List.for_all Option.is_some fields then
+      Some (make (Rexp_tuple (List.map Option.get fields)))
+    else None
+  | _ -> None
+
+let rec irrefutable_pattern (pattern : value general_pattern) =
+  match pattern.pat_desc with
+  | Tpat_any | Tpat_var _ -> true
+  | Tpat_alias { pattern; _ } -> irrefutable_pattern pattern
+  | _ -> false
+
+let rec constructor_head (pattern : value general_pattern) =
+  match pattern.pat_desc with
+  | Tpat_alias { pattern; _ } -> constructor_head pattern
+  | Tpat_construct (_, constructor, _, arguments, _)
+    when List.for_all
+           (fun (_, pattern) -> irrefutable_pattern pattern)
+           arguments
+         && Vox_lean.supports_match_facts ~env:pattern.pat_env
+              pattern.pat_type ->
+    Some constructor.cstr_name
+  | _ -> None
+
+let pattern_negation ~subject (pattern : value general_pattern) =
+  match ground_pattern_term pattern with
+  | Some term ->
+    Option.map
+      (negate_condition ~env:pattern.pat_env ~loc:pattern.pat_loc)
+      (equality ~env:pattern.pat_env ~loc:pattern.pat_loc subject term)
+  | None ->
+    Option.bind (constructor_head pattern) (fun constructor ->
+      constructor_mismatch ~env:pattern.pat_env ~loc:pattern.pat_loc
+        ~constructor subject)
+
+let computation_value_pattern pattern =
+  match pattern.pat_desc with
+  | Tpat_value pattern -> Some (pattern :> value general_pattern)
+  | _ -> None
 
 (* Q-003 purity gate for branch-condition facts.  A condition fact is stable
    across occurrences -- and so sound to identify structurally in the
@@ -1043,7 +1326,9 @@ let contract_argument_provenance ~application_location ~argument_location
 
 let rec walk_expression state expression =
   let marks = marked_refinements expression in
-  match expression.exp_desc with
+  if marks = [] && not (expression_contains_refinement expression) then
+    walk_default_expression state expression
+  else match expression.exp_desc with
   | Texp_let (rec_flag, bindings, body) ->
     let saved_facts = state.facts in
     let saved_definitions = state.definitions in
@@ -1176,6 +1461,9 @@ let rec walk_expression state expression =
     ignore
       (walk_try state expression tried cases effect_cases marks
         : (Facts.t * expression) list)
+  | Texp_match (scrutinee, _, cases, effect_cases, _) ->
+    walk_match state scrutinee cases effect_cases;
+    check_marks state expression marks
   | _ ->
     walk_default_expression state expression;
     check_marks state expression marks
@@ -1373,6 +1661,86 @@ and add_resumed_facts state function_ arguments =
              if Ident.same continuation other then Some facts else None)
            state.resume_facts))
     (continued_continuation function_ arguments)
+
+and walk_match state scrutinee cases effect_cases =
+  let pre_scrutinee_facts = state.facts in
+  walk_expression state scrutinee;
+  let normal_scrutinee_facts = state.facts in
+  let scrutinee_subject, synthetic =
+    match scrutinee.exp_desc with
+    | Texp_ident _ ->
+      begin match subject state scrutinee with
+      | subject -> subject, None
+      | exception Unsupported_subject _ ->
+        let id = Ident.create_local "*match-scrutinee*" in
+        ( Refinement.create ~loc:scrutinee.exp_loc
+            ~type_:(carrier scrutinee.exp_type)
+            (Rexp_ident (Rbound id)),
+          Some id )
+      end
+    | _ ->
+      let id = Ident.create_local "*match-scrutinee*" in
+      ( Refinement.create ~loc:scrutinee.exp_loc
+          ~type_:(carrier scrutinee.exp_type)
+          (Rexp_ident (Rbound id)),
+        Some id )
+  in
+  let walk_value_case negatives case pattern =
+    state.facts <- normal_scrutinee_facts;
+    Option.iter
+      (fun id -> state.facts <- Facts.enter id state.facts)
+      synthetic;
+    enter_pattern state ~fact:true case.c_lhs;
+    add_refinement_fact state ~kind:"match" ~loc:scrutinee.exp_loc
+      ~subject:scrutinee_subject scrutinee.exp_type;
+    List.iter
+      (fun (fact, loc) -> add_match_fact state ~loc fact)
+      negatives;
+    add_value_pattern_facts state ~subject:scrutinee_subject pattern;
+    Option.iter (walk_expression state) case.c_guard;
+    walk_expression state case.c_rhs;
+    state.facts <- normal_scrutinee_facts
+  in
+  let has_interrupted_case = ref false in
+  let negatives =
+    List.fold_left
+      (fun negatives case ->
+        match computation_value_pattern case.c_lhs with
+        | None ->
+          has_interrupted_case := true;
+          state.facts <- pre_scrutinee_facts;
+          walk_case state case;
+          negatives
+        | Some pattern ->
+          walk_value_case negatives case pattern;
+          begin match case.c_guard with
+          | Some _ -> negatives
+          | None ->
+            begin match pattern_negation ~subject:scrutinee_subject pattern with
+            | None -> negatives
+            | Some negation ->
+              negatives @ [negation, pattern.pat_loc]
+            end
+          end)
+      [] cases
+  in
+  ignore (negatives : (refinement_expression * Location.t) list);
+  if effect_cases <> [] then has_interrupted_case := true;
+  List.iter
+    (fun case ->
+      state.facts <- pre_scrutinee_facts;
+      walk_case state case)
+    effect_cases;
+  (* A value arm runs only after the scrutinee has returned normally, whereas
+     exception, mixed value/exception, and effect arms can run before that
+     normal result exists.  The latter therefore restart from the
+     pre-scrutinee environment.  If such an arm can reach the match join, the
+     join must use that environment too; otherwise every path to the join has
+     completed the scrutinee and its normal-return facts remain valid. *)
+  state.facts <-
+    if !has_interrupted_case
+    then pre_scrutinee_facts
+    else normal_scrutinee_facts
 
 and check_application state application function_ arguments =
   let definition =

@@ -42,6 +42,16 @@ val primitive_builtin :
   | `Subtract ]
     option
 
+(* Internal logical predicate used by the verifier for the negative fact
+   contributed by an earlier constructor arm.  The returned name cannot be
+   written as an OCaml value identifier; the Lean emitter recognizes it and
+   lowers the application to a constructor-head test. *)
+val constructor_mismatch_name : string -> string
+
+(* Whether values of this type have the structural Lean model needed by
+   match-arm equalities and projections. *)
+val supports_match_facts : env:Env.t -> Types.type_expr -> bool
+
 (* Renders a refinement predicate to source-like syntax (infix operators,
    [true]/[false], [()], constructor and field application) for user-facing
    display: the [int{ ... }] predicate in signatures, type-at-cursor and

@@ -257,6 +257,18 @@ and register_data context location path arguments declaration =
     data.data_definition <- Some definition;
     Sdata key
 
+let supports_match_facts ~env type_ =
+  let context = { env; data = []; references = [] } in
+  match sort_of_type context Location.none type_ with
+  | Sint | Sbool | Stuple _ -> true
+  | Sdata key ->
+    begin match (data_for_key context Location.none key).data_definition with
+    | Some (Variant _ | Record _) -> true
+    | None -> false
+    end
+  | Sarrow _ -> false
+  | exception Emission_error _ -> false
+
 let reference_basename = function
   | Rfun name | Rsibling name -> name
   | Rapp path | Rglobal path -> Path.last path
@@ -275,6 +287,20 @@ let primitive_builtin = function
   | "%sequor" -> Some `Or
   | "%boolnot" -> Some `Not
   | _ -> None
+
+let constructor_mismatch_prefix = "*vox-match-constructor-mismatch*:"
+
+let constructor_mismatch_name constructor =
+  constructor_mismatch_prefix ^ constructor
+
+let constructor_mismatch name =
+  let prefix_length = String.length constructor_mismatch_prefix in
+  if String.length name >= prefix_length
+     && String.sub name 0 prefix_length = constructor_mismatch_prefix
+  then
+    Some
+      (String.sub name prefix_length (String.length name - prefix_length))
+  else None
 
 (* Source-like rendering of a refinement predicate, for user-facing display:
    the [int{ ... }] predicate shown in signatures ([-i]), type-at-cursor and
@@ -455,6 +481,13 @@ let render_predicate ~env expression =
     | Rexp_apply (function_, arguments) -> render_apply function_ arguments
   and render_apply function_ arguments =
     match function_.rexp_desc, arguments with
+    | Rexp_ident (Rfree (Rfun name)), [Nolabel, argument]
+      when Option.is_some (constructor_mismatch name) ->
+      { text =
+          "is not " ^ Option.get (constructor_mismatch name) ^ " "
+          ^ paren_if (render argument) 71;
+        precedence = 70;
+      }
     | Rexp_ident (Rfree reference), [Nolabel, argument] ->
       begin
         match display_builtin ~env reference with
@@ -536,7 +569,9 @@ let render_predicate ~env expression =
 
 
 let builtin_name context = function
-  | (Rfun _ | Rsibling _) -> None
+  | Rfun name -> Option.map (fun name -> `Constructor_mismatch name)
+      (constructor_mismatch name)
+  | Rsibling _ -> None
   | (Rapp path | Rglobal path) ->
     begin
       match
@@ -706,7 +741,7 @@ let expect_bool location = function
   | Sbool -> ()
   | _ -> error location "boolean operation used at a non-bool type"
 
-let emit_builtin location builtin arguments =
+let emit_builtin context location builtin arguments =
   let terms = List.map fst arguments in
   let sorts = List.map snd arguments in
   let binary operation check =
@@ -718,6 +753,44 @@ let emit_builtin location builtin arguments =
     | _ -> error location "binary builtin used with the wrong arity"
   in
   match builtin with
+  | `Constructor_mismatch constructor_name ->
+    begin
+      match terms, sorts with
+      | [subject], [Sdata key] ->
+        let data = data_for_key context location key in
+        let constructor =
+          match data.data_definition with
+          | Some (Variant constructors) ->
+            begin match
+              List.find_opt
+                (fun constructor ->
+                  String.equal constructor.constructor_name constructor_name)
+                constructors
+            with
+            | Some constructor -> constructor
+            | None ->
+              error location "constructor %s does not belong to type %s"
+                constructor_name (Path.name data.data_path)
+            end
+          | Some (Record _) ->
+            error location "%s is a record type" (Path.name data.data_path)
+          | None ->
+            error location "recursive datatype registration did not finish"
+        in
+        let fields =
+          List.map (fun _ -> "_") constructor.constructor_fields
+        in
+        let pattern =
+          String.concat " "
+            ((data.data_name ^ "." ^ sanitize constructor_name) :: fields)
+        in
+        "(match " ^ subject ^ " with | " ^ pattern
+        ^ " => false | _ => true)"
+      | [_], [_] ->
+        error location "constructor test used at a non-datatype type"
+      | _ ->
+        error location "constructor test used with the wrong arity"
+    end
   | `Equal | `Not_equal ->
     begin
       match terms, sorts with
@@ -911,7 +984,7 @@ let emit_expression context variables expression =
         let arguments =
           List.map (fun (_, argument) -> emit locals argument) arguments
         in
-        emit_builtin expression.rexp_loc
+        emit_builtin context expression.rexp_loc
           (Option.get (builtin_name context reference_identifier)) arguments
       | Rexp_apply (function_expression, arguments) ->
         let function_term, function_sort = emit locals function_expression in
@@ -1049,6 +1122,14 @@ let emit_data context buffer data =
       fields;
     Buffer.add_string buffer "deriving DecidableEq\n\n"
 
+let constructor_mismatch_subject expression =
+  match expression.rexp_desc with
+  | Rexp_apply
+      ( { rexp_desc = Rexp_ident (Rfree (Rfun name)); _ },
+        [Nolabel, subject] )
+    when Option.is_some (constructor_mismatch name) -> Some subject
+  | _ -> None
+
 let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   let context = { env; data = []; references = [] } in
   let variables = collect context vc in
@@ -1096,7 +1177,25 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   expect_bool vc.goal.rexp_loc goal_sort;
   Buffer.add_string buffer ": ";
   if negated then Buffer.add_string buffer "¬ ";
-  Buffer.add_string buffer ("(" ^ goal ^ " = true) := by\n  grind\n");
+  Buffer.add_string buffer ("(" ^ goal ^ " = true) := by\n");
+  let mismatch_subjects =
+    List.filter_map
+      (fun (fact : Vox_vc.fact) ->
+        Option.map
+          (fun subject -> fst (emit_expression context variables subject))
+          (constructor_mismatch_subject fact.expression))
+      vc.facts
+    |> List.sort_uniq String.compare
+  in
+  begin match mismatch_subjects with
+  | [] -> Buffer.add_string buffer "  grind\n"
+  | subjects ->
+    Buffer.add_string buffer "  first | grind | (";
+    List.iter
+      (fun subject -> Buffer.add_string buffer ("cases " ^ subject ^ " <;> "))
+      subjects;
+    Buffer.add_string buffer "grind)\n"
+  end;
   Buffer.contents buffer
 
 let emit ~env (vc : Vox_vc.t) =
