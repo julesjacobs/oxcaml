@@ -203,7 +203,7 @@ let call_linker ?(native_toplevel = false) mode output_name files extra =
           (quote_files ~response_files:true (remove_Wl files))
           extra
       else
-        Printf.sprintf "%s -o %s %s %s %s %s %s %s"
+        Printf.sprintf "%s %s -o %s %s %s %s %s %s %s"
           (match !Clflags.c_compiler, mode with
           | Some cc, _ -> cc
           | None, Exe -> Config.mkexe
@@ -211,6 +211,15 @@ let call_linker ?(native_toplevel = false) mode output_name files extra =
           | None, MainDll -> Config.mkmaindll
           | None, Partial -> assert false
           )
+          (* Experiment (bench branch): let lld parallelize within the
+             link action, opt-in via OXCAML_LLD_THREADS=N (the flag is
+             fatal on GNU bfd ld, so it must not be unconditional; the
+             bench harness sets the variable for the fleet toolchain,
+             whose linker is lld). *)
+          (match Sys.getenv_opt "OXCAML_LLD_THREADS" with
+           | Some n when n <> "" && int_of_string_opt n <> None ->
+             "-Wl,--threads=" ^ n
+           | _ -> "")
           (Filename.quote output_name)
           ""  (*(Clflags.std_include_flag "-I")*)
           (if native_toplevel then ""
