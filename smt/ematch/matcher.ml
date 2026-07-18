@@ -134,3 +134,70 @@ let substitutions view (lemma : Lemma.t) ~budget =
       lemma.triggers;
     List.rev !out)
 ;;
+
+(* Streaming form of [substitutions].  The legacy entry point above deliberately stays
+   unchanged: [OXSMT_LEMMA_STREAM] is an A/B gate, and its OFF arm must retain the exact
+   eager-list behavior.  The continuation form exposes each complete substitution as
+   soon as it is found.  In particular, substitutions already handed to [yield] remain
+   available to the manager if a later enumeration step raises [Budget_exhausted]. *)
+let iter_substitutions view (lemma : Lemma.t) ~budget ~yield =
+  let rec iter_match_term p (g : Term.t) sigma k =
+    spend budget;
+    match (p : Term.t).node with
+    | App (sym, args) when Iarr.length args = 0 && qvar_index lemma sym <> None ->
+      let i = Option.get (qvar_index lemma sym) in
+      (match List.assoc_opt i sigma with
+       | Some g' -> if view.Egraph_view.equal_if_registered g' g then k sigma
+       | None -> k ((i, g) :: sigma))
+    | App (f, pargs) when Iarr.length pargs > 0 ->
+      let plist = Iarr.to_list pargs in
+      List.iter
+        (fun (m : Term.t) ->
+           spend budget;
+           match m.node with
+           | App (f', cargs)
+             when Symbol.equal f f' && Iarr.length cargs = Iarr.length pargs ->
+             iter_match_args plist (Iarr.to_list cargs) sigma k
+           | _ -> ())
+        (view.Egraph_view.class_members g)
+    | _ -> if view.Egraph_view.equal_if_registered p g then k sigma
+
+  and iter_match_args ps cs sigma k =
+    match ps, cs with
+    | [], [] -> k sigma
+    | p :: ps', c :: cs' ->
+      iter_match_term p c sigma (fun sigma' -> iter_match_args ps' cs' sigma' k)
+    | _, _ -> ()
+  in
+  let iter_pattern (pat : Term.t) sigma k =
+    match pat.node with
+    | App (f, pargs) when Iarr.length pargs > 0 ->
+      let plist = Iarr.to_list pargs in
+      List.iter
+        (fun (cand : Term.t) ->
+           spend budget;
+           match cand.node with
+           | App (f', cargs)
+             when Symbol.equal f f' && Iarr.length cargs = Iarr.length pargs ->
+             iter_match_args plist (Iarr.to_list cargs) sigma k
+           | _ -> ())
+        (view.Egraph_view.app_terms_by_symbol f)
+    | _ -> ()
+  in
+  let rec iter_conjunctive patterns sigma k =
+    match patterns with
+    | [] -> k sigma
+    | pattern :: rest ->
+      iter_pattern pattern sigma (fun sigma' -> iter_conjunctive rest sigma' k)
+  in
+  let n = Array.length lemma.qvars in
+  if n = 0
+  then yield [||]
+  else
+    List.iter
+      (fun alternative ->
+         iter_conjunctive alternative [] (fun sigma ->
+           if List.length sigma = n
+           then yield (Array.init n (fun i -> List.assoc i sigma))))
+      lemma.triggers
+;;

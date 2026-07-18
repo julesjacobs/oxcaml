@@ -42,6 +42,12 @@ type t =
   { ctx : Context.t
   ; env : Env.t
   ; gen_budget : int
+  ; streaming_partial : bool
+      (* Default-off experiment: stream matches and retain the sound prefix on budget
+         exhaustion instead of transactionally discarding the entire round. *)
+  ; fair_slices : bool
+      (* Default-off experiment: bound each lemma's share of one matching pass so a
+         prolific early lemma cannot starve every later lemma. Implies streaming. *)
   ; seed_enabled : bool (* chunk 3: seeding on (default); the OFF mutant is the RED *)
   ; seed_cap : int (* NEW seed instances per lemma per [check_sat] *)
   ; pool_cap : int (* candidate ground terms per qvar sort *)
@@ -69,12 +75,33 @@ let create
   ?(seed = true)
   ?(seed_cap = default_seed_cap)
   ?(pool_cap = default_pool_cap)
+  ?streaming_partial:streaming_override
+  ?fair_slices:fair_override
   ctx
   env
   =
+  let stream_requested =
+    match streaming_override with
+    | Some value -> value
+    | None ->
+      (match Sys.getenv_opt "OXSMT_LEMMA_STREAM" with
+       | Some ("1" | "true" | "yes") -> true
+       | Some _ | None -> false)
+  in
+  let fair_slices =
+    match fair_override with
+    | Some value -> value
+    | None ->
+      (match Sys.getenv_opt "OXSMT_LEMMA_FAIR" with
+       | Some ("1" | "true" | "yes") -> true
+       | Some _ | None -> false)
+  in
+  let streaming_partial = stream_requested || fair_slices in
   { ctx
   ; env
   ; gen_budget
+  ; streaming_partial
+  ; fair_slices
   ; seed_enabled = seed
   ; seed_cap
   ; pool_cap
@@ -126,6 +153,7 @@ let begin_check t =
 ;;
 
 let budget_exhausted t = t.budget_hit
+let retains_partial_batch t = t.streaming_partial
 
 (* Debit one generation-budget step; raise [Matcher.Budget_exhausted] the instant the
    budget is spent (R4). Shared with the matcher (which debits its own enumeration steps
@@ -232,13 +260,13 @@ let round t view =
   (* [true] iff this call EMITTED a new instance (dedup miss); [false] on a dedup hit. The
      seeding producer uses the result to charge its per-lemma seed cap only on real
      emissions (a re-seeded duplicate costs nothing and must not consume the cap). *)
-  let process (lemma : Lemma.t) sigma =
+  let process debit (lemma : Lemma.t) sigma =
     let inst = Instance.of_subst t.ctx ~qvars:lemma.qvars ~body:lemma.body sigma in
     let key = lemma.frame, (Instance.to_term inst).Term.tag in
     if Hashtbl.mem t.dedup key
     then false
     else (
-      spend budget;
+      spend debit;
       Hashtbl.replace t.dedup key ();
       added := key :: !added;
       t.total_instances <- t.total_instances + 1;
@@ -261,11 +289,40 @@ let round t view =
         for (subs = [] — trigger-inert, the seed candidates). *)
      let matcher_emitted = ref 0 in
      let inert = ref [] in
+     let fair_exhausted = ref false in
+     let lemma_count = max 1 (List.length ascending) in
      List.iter
        (fun (lemma : Lemma.t) ->
-         let subs = Matcher.substitutions view lemma ~budget in
-         List.iter (fun sigma -> if process lemma sigma then incr matcher_emitted) subs;
-         if subs = [] then inert := lemma :: !inert)
+         if t.fair_slices
+         then (
+           (* Spend at most one deterministic slice on this lemma.  Enumeration and new
+              instance emission share the slice, exactly as they share the legacy global
+              budget.  Charge the used slice back to the global per-check balance. *)
+           let quota = max 64 (min 4096 (t.gen_budget / lemma_count)) in
+           let initial = min quota !budget in
+           let local = ref initial in
+           let matched = ref false in
+           (try
+              Matcher.iter_substitutions view lemma ~budget:local ~yield:(fun sigma ->
+                matched := true;
+                if process local lemma sigma then incr matcher_emitted)
+            with
+            | Matcher.Budget_exhausted -> fair_exhausted := true);
+           budget := !budget - (initial - !local);
+           if not !matched then inert := lemma :: !inert)
+         else if t.streaming_partial
+         then (
+           let matched = ref false in
+           Matcher.iter_substitutions view lemma ~budget ~yield:(fun sigma ->
+             matched := true;
+             if process budget lemma sigma then incr matcher_emitted);
+           if not !matched then inert := lemma :: !inert)
+         else (
+           let subs = Matcher.substitutions view lemma ~budget in
+           List.iter
+             (fun sigma -> if process budget lemma sigma then incr matcher_emitted)
+             subs;
+           if subs = [] then inert := lemma :: !inert))
        ascending;
      (* Phase 2 (chunk 3, MBQI-lite): seed ONLY when E-matching has GLOBALLY saturated
         this round ([matcher_emitted = 0]) — the charter's "when E-matching saturates"
@@ -277,7 +334,7 @@ let round t view =
         resort before the loop would otherwise degrade to [unknown]. Seeds are capped
         [seed_cap] NEW instances per lemma per check and feed the same dedup+budget+assert
         pipeline. *)
-     if t.seed_enabled && !matcher_emitted = 0
+     if t.seed_enabled && !matcher_emitted = 0 && not !fair_exhausted
      then
        List.iter
          (fun (lemma : Lemma.t) ->
@@ -288,7 +345,7 @@ let round t view =
            then
              List.iter
                (fun sigma ->
-                 if emitted () < t.seed_cap && process lemma sigma
+                 if emitted () < t.seed_cap && process budget lemma sigma
                  then (
                    Hashtbl.replace t.seeded lemma.Lemma.id (emitted () + 1);
                    t.total_seeds <- t.total_seeds + 1;
@@ -305,31 +362,28 @@ let round t view =
        let seed = Queue.pop t.seeds in
        consumed_seeds := seed :: !consumed_seeds;
        let lemma, sigma = seed in
-       ignore (process lemma sigma : bool)
-     done
+       ignore (process budget lemma sigma : bool)
+     done;
+     if !fair_exhausted then t.budget_hit <- true
    with
    | Matcher.Budget_exhausted ->
      t.budget_hit <- true;
-     (* Roll back this round's dedup entries + counters: the session will NOT assert the
-        aborted batch, so none of these instances become active clauses. *)
-     List.iter (Hashtbl.remove t.dedup) !added;
-     t.total_instances <- t.total_instances - List.length !added;
-     (* Same roll-back for the seed stat: an aborted round asserts nothing. (The per-lemma
-        [seeded] cap counter is left as-is — the check is over and [begin_check] resets
-        it.) *)
-     t.total_seeds <- t.total_seeds - !seeds_this_round;
-     (* Drop this round's provenance records (the newest [List.length !added], since each
-        new instance appended exactly one) — they are never asserted. *)
-     let rec drop n l =
-       if n <= 0
-       then l
-       else (
-         match l with
-         | [] -> []
-         | _ :: tl -> drop (n - 1) tl)
-     in
-     t.provenance <- drop (List.length !added) t.provenance;
-     out := [];
+     if not t.streaming_partial
+     then (
+       (* Legacy all-or-nothing transaction: OFF stays byte-identical. *)
+       List.iter (Hashtbl.remove t.dedup) !added;
+       t.total_instances <- t.total_instances - List.length !added;
+       t.total_seeds <- t.total_seeds - !seeds_this_round;
+       let rec drop n l =
+         if n <= 0
+         then l
+         else (
+           match l with
+           | [] -> []
+           | _ :: tl -> drop (n - 1) tl)
+       in
+       t.provenance <- drop (List.length !added) t.provenance;
+       out := []);
      (* Restore the seeds this aborted round consumed, at the FRONT of the queue in
         original FIFO order (the not-yet-consumed remainder stays after them), so no
         manual seed is dropped by an aborted round. *)

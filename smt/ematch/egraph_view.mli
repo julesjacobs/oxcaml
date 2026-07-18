@@ -48,5 +48,7 @@ val empty : t
     unregistered in [view] remain singleton classes but stay available to
     [ground_terms_by_sort], which lets the quantifier seed producer use ground arithmetic
     terms that the congruence engine deliberately does not internalize. The snapshot
-    never calls [view] after construction. *)
-val snapshot : t -> ground_terms:Term.t list -> t
+    never calls [view] after construction. [indexed] overrides the default-off
+    [OXSMT_LEMMA_INDEX] experiment, which pre-indexes applications, classes, and sorts
+    while preserving the scan implementation's exact result order. *)
+val snapshot : ?indexed:bool -> t -> ground_terms:Term.t list -> t

@@ -41,3 +41,14 @@ exception Budget_exhausted
     - a lemma with {e ≥1 qvar} and {b empty} [triggers] yields [[]] (no matching;
       auto-trigger selection is tranche 3). May raise {!Budget_exhausted}. *)
 val substitutions : Egraph_view.t -> Lemma.t -> budget:int ref -> Term.t array list
+
+(** [iter_substitutions view lemma ~budget ~yield] enumerates the same substitutions in
+    the same order as {!substitutions}, but calls [yield] as soon as each complete
+    substitution is found instead of first materializing the whole result.  Thus a caller
+    may retain the already-yielded prefix if a later step raises {!Budget_exhausted}. *)
+val iter_substitutions
+  :  Egraph_view.t
+  -> Lemma.t
+  -> budget:int ref
+  -> yield:(Term.t array -> unit)
+  -> unit

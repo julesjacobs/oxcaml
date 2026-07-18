@@ -2049,6 +2049,7 @@ let check_sat t =
              Non-registering (R6): matching never perturbs the congruence closure. *)
           let insts = Manager.round t.mgr (Cdclt.egraph_view t.cdclt) in
           if Manager.budget_exhausted t.mgr
+             && (insts = [] || not (Manager.retains_partial_batch t.mgr))
           then (
             t.unknown_reason <- "lemma-gen-budget";
             Unknown (* generation budget spent with a live lemma (§3) *))

@@ -46,12 +46,15 @@ type instantiation =
     passes [~seed:false] to build the seeding-disabled mutant (the RED baseline).
     [seed_cap] bounds NEW seed instances per lemma per [check_sat]; [pool_cap] bounds the
     ground-term candidate pool per qvar sort. Both are deterministic and additionally
-    clamped by [gen_budget]. *)
+    clamped by [gen_budget]. [streaming_partial] and [fair_slices] override their
+    default-off environment gates for focused tests. *)
 val create
   :  ?gen_budget:int
   -> ?seed:bool
   -> ?seed_cap:int
   -> ?pool_cap:int
+  -> ?streaming_partial:bool
+  -> ?fair_slices:bool
   -> Context.t
   -> Env.t
   -> t
@@ -108,6 +111,11 @@ val round : t -> Egraph_view.t -> (Sat.var * Instance.t) list
 (** [budget_exhausted t] is [true] iff the most recent {!round} stopped on the generation
     budget (→ [unknown], §3). Reset by {!begin_check}. *)
 val budget_exhausted : t -> bool
+
+(** [retains_partial_batch t] reports the default-off [OXSMT_LEMMA_STREAM] experiment or
+    its [OXSMT_LEMMA_FAIR] sliced extension. When true, a budget-exhausted {!round} may
+    return the valid prefix it generated. *)
+val retains_partial_batch : t -> bool
 
 (** [on_pop t selector] drops every lemma, dedup entry, and pending seed owned by the
     frame whose selector is [selector] (§1.5). Called by [Session.pop]. *)

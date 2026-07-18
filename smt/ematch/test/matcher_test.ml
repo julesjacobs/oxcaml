@@ -206,6 +206,7 @@ let u_snapshot_immutable () =
     }
   in
   let snapshot = Egraph_view.snapshot live ~ground_terms:[ a; b ] in
+  let indexed = Egraph_view.snapshot ~indexed:true live ~ground_terms:[ a; b ] in
   merged := false;
   check
     "U-SNAPSHOT-IMMUTABLE: equality survives backing-view pop"
@@ -215,7 +216,13 @@ let u_snapshot_immutable () =
     (snapshot.class_members a = [ a; b ]);
   check
     "U-SNAPSHOT-IMMUTABLE: backing view really changed"
-    (not (live.equal_if_registered a b))
+    (not (live.equal_if_registered a b));
+  check
+    "U-SNAPSHOT-INDEX: indexed equality and member order equal scan snapshot"
+    (indexed.equal_if_registered a b && indexed.class_members a = snapshot.class_members a);
+  check
+    "U-SNAPSHOT-INDEX: indexed sort pool order equals scan snapshot"
+    (indexed.ground_terms_by_sort Sort.int = snapshot.ground_terms_by_sort Sort.int)
 ;;
 
 (* U-MULTI: a conjunctive multi-trigger [{f(x), g(y)}] over f(a) and g(b) must bind BOTH
@@ -326,13 +333,96 @@ let u_manager_cap () =
       ( Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0)
       , [ [ Context.app sc.ctx f [ q.(0) ] ] ] ))
   in
-  let mgr = Manager.create ~gen_budget:3 sc.ctx sc.env in
+  let mgr =
+    Manager.create
+      ~gen_budget:3
+      ~streaming_partial:false
+      ~fair_slices:false
+      sc.ctx
+      sc.env
+  in
   Manager.add_lemma mgr lemma;
   Manager.begin_check mgr;
   let view = view_of ~apps:[ f, cands ] ~classes:[] in
   let insts = Manager.round mgr view in
   check "U-MANAGER-CAP: budget_exhausted set" (Manager.budget_exhausted mgr);
   check "U-MANAGER-CAP: at most budget instances emitted" (List.length insts <= 3)
+;;
+
+(* U-STREAM-PREFIX: the streaming entry point exposes a complete match before later
+   enumeration spends the budget.  With two f-candidates and fuel for exactly one
+   complete match plus the next root visit, the callback must observe one substitution
+   before [Budget_exhausted].  The legacy eager entry point cannot return that prefix
+   because it materializes the entire substitution list first. *)
+let u_stream_prefix () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "stream-f" int_to_int in
+  let mk name =
+    Context.const sc.ctx (Env.declare_fun sc.env name (Rank.create [] Sort.int))
+  in
+  let a = mk "stream-a" in
+  let b = mk "stream-b" in
+  let lemma =
+    make_lemma sc ~id:0 ~arity:1 (fun q ->
+      ( Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0)
+      , [ [ Context.app sc.ctx f [ q.(0) ] ] ] ))
+  in
+  let view =
+    view_of
+      ~apps:[ f, [ Context.app sc.ctx f [ a ]; Context.app sc.ctx f [ b ] ] ]
+      ~classes:[]
+  in
+  let yielded = ref [] in
+  let raised =
+    match
+      Matcher.iter_substitutions view lemma ~budget:(ref 3) ~yield:(fun sigma ->
+        yielded := sigma :: !yielded)
+    with
+    | () -> false
+    | exception Matcher.Budget_exhausted -> true
+  in
+  check "U-STREAM-PREFIX: later enumeration exhausts the budget" raised;
+  check "U-STREAM-PREFIX: one completed substitution survives" (List.length !yielded = 1)
+;;
+
+(* U-FAIR-SLICES: an explosive first lemma must not consume the pass before a later
+   lemma is visited.  With two lemmas, the fair quota is 64 steps: thirty f-candidates
+   exhaust lemma 0's slice, then lemma 1 still emits its g(a) instance. *)
+let u_fair_slices () =
+  let sc = scaffold () in
+  let f = Env.declare_fun sc.env "fair-f" int_to_int in
+  let g = Env.declare_fun sc.env "fair-g" int_to_int in
+  let mk name =
+    Context.const sc.ctx (Env.declare_fun sc.env name (Rank.create [] Sort.int))
+  in
+  let f_cands =
+    List.init 30 (fun i -> Context.app sc.ctx f [ mk (Printf.sprintf "fair-%d" i) ])
+  in
+  let a = mk "fair-late" in
+  let first =
+    make_lemma sc ~id:0 ~arity:1 (fun q ->
+      ( Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0)
+      , [ [ Context.app sc.ctx f [ q.(0) ] ] ] ))
+  in
+  let later =
+    make_lemma sc ~id:1 ~arity:1 (fun q ->
+      ( Context.gt sc.ctx (Context.app sc.ctx g [ q.(0) ]) (Context.int_const sc.ctx 0)
+      , [ [ Context.app sc.ctx g [ q.(0) ] ] ] ))
+  in
+  let mgr = Manager.create ~gen_budget:100 ~fair_slices:true sc.ctx sc.env in
+  Manager.add_lemma mgr first;
+  Manager.add_lemma mgr later;
+  Manager.begin_check mgr;
+  let view =
+    view_of ~apps:[ f, f_cands; g, [ Context.app sc.ctx g [ a ] ] ] ~classes:[]
+  in
+  ignore (Manager.round mgr view : (Sat.var * Oxsmt_ematch.Instance.t) list);
+  check "U-FAIR-SLICES: prolific lemma reports a sliced stop" (Manager.budget_exhausted mgr);
+  check
+    "U-FAIR-SLICES: later lemma receives budget"
+    (List.exists
+       (fun (inst : Manager.instantiation) -> inst.lemma_id = 1)
+       (Manager.instantiations mgr))
 ;;
 
 (* ================================================================== *)
@@ -727,7 +817,14 @@ let u_dedup_rollback () =
     make_lemma sc ~id:0 ~arity:1 (fun q ->
       Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0), [])
   in
-  let mgr = Manager.create ~gen_budget:3 sc.ctx sc.env in
+  let mgr =
+    Manager.create
+      ~gen_budget:3
+      ~streaming_partial:false
+      ~fair_slices:false
+      sc.ctx
+      sc.env
+  in
   Manager.add_lemma mgr lemma;
   List.iter
     (fun i -> Manager.seed_instance mgr lemma [| mk (Printf.sprintf "a%d" i) |])
@@ -769,7 +866,14 @@ let u_seed_rollback () =
     make_lemma sc ~id:0 ~arity:1 (fun q ->
       Context.gt sc.ctx (Context.app sc.ctx f [ q.(0) ]) (Context.int_const sc.ctx 0), [])
   in
-  let mgr = Manager.create ~gen_budget:3 sc.ctx sc.env in
+  let mgr =
+    Manager.create
+      ~gen_budget:3
+      ~streaming_partial:false
+      ~fair_slices:false
+      sc.ctx
+      sc.env
+  in
   Manager.add_lemma mgr lemma;
   List.iter
     (fun i -> Manager.seed_instance mgr lemma [| mk (Printf.sprintf "a%d" i) |])
@@ -1170,6 +1274,8 @@ let () =
   u_cap ();
   u_det ();
   u_manager_cap ();
+  u_stream_prefix ();
+  u_fair_slices ();
   u_dedup_rollback ();
   u_seed_rollback ();
   e_find ();
