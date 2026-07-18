@@ -1,0 +1,7 @@
+; stdlib-only + oxsmt_core + oxsmt_euf (AGENTS.md dependency firewall, INVARIANTS.md I3):
+; no opam packages, no Base/Core, no ppx. The datatypes theory is an e-graph client — it
+; owns an Euf congruence-closure engine and layers the DT axioms on top.
+
+(library
+ (name oxsmt_dt)
+ (libraries oxsmt_core oxsmt_euf))

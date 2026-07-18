@@ -1,0 +1,10 @@
+; stdlib-only + oxsmt_core (AGENTS.md dependency firewall, INVARIANTS.md I3):
+; no opam packages, no Base/Core, no ppx. The desugaring passes (ADR-0003 §5
+; preprocessing obligations) and the Tseitin clausifier live here. The CNF this
+; produces is ABSTRACT: its own Lit/Clause/Cnf over its own var ids plus an
+; atom map, so it does not depend on smt/solver (the SAT core is wired in at
+; M1-end).
+
+(library
+ (name oxsmt_preprocess)
+ (libraries oxsmt_core))

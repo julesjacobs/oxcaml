@@ -116,7 +116,8 @@ runtime-stdlib-hacking: boot-compiler
 	$(dune) build -w $(ws_runstd) --only-package=ocaml_runtime_stdlib @install
 
 compiler: runtime-stdlib
-	SYSTEM=$(SYSTEM) MODEL=$(MODEL) \
+	CAML_LD_LIBRARY_PATH=$(CURDIR)/_build/main \
+	  SYSTEM=$(SYSTEM) MODEL=$(MODEL) \
           ASPP="$(ASPP)" ASPPFLAGS="$(ASPPFLAGS)" \
           $(dune) build $(ws_main) \
           --only-package=ocaml @install \

@@ -37,7 +37,9 @@ let () =
       | _, _ -> Some prefix
     in
     let tgt_dir_prefix =
-      if String.starts_with ~prefix:"external/" path
+      if
+        String.starts_with ~prefix:"external/" path
+        && not (String.starts_with ~prefix:"external/oxsmt/" path)
       then ""
       else "compiler-libs/"
     in

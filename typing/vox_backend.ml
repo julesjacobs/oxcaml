@@ -112,6 +112,19 @@ let oxsmt_command explicit =
         (Filename.quote
            (Filename.concat root "_build/vox_oxsmt_runner.exe")))
 
+let legacy_oxsmt_external () =
+  match Sys.getenv_opt "VOX_OXSMT_LEGACY_EXTERNAL" with
+  | Some "1" -> true
+  | Some _ | None -> false
+
+let oxsmt_timeout_seconds () =
+  match Sys.getenv_opt "VOX_OXSMT_TIMEOUT_SECONDS" with
+  | None -> 30
+  | Some timeout ->
+    let timeout = int_of_string timeout in
+    if timeout <= 0 then invalid_arg "VOX_OXSMT_TIMEOUT_SECONDS";
+    timeout
+
 let result ~backend ~verdict ~location ?detail ?unused_facts () =
   { backend;
     capabilities = capabilities backend;
@@ -177,8 +190,13 @@ module Oxsmt_backend = struct
 
   let discharge ~command { env; condition } =
     let smt =
-      Vox_smt.discharge ~backend:`Oxsmt ~command:(oxsmt_command command)
-        ~input_mode:Vox_smt.Stdin ~env condition
+      if legacy_oxsmt_external () then
+        Vox_smt.discharge ~backend:`Oxsmt
+          ~command:(oxsmt_command command) ~input_mode:Vox_smt.Stdin ~env
+          condition
+      else
+        Vox_smt.discharge_oxsmt
+          ~timeout_seconds:(oxsmt_timeout_seconds ()) ~env condition
     in
     { backend;
       capabilities;

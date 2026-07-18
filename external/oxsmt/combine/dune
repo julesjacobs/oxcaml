@@ -1,0 +1,10 @@
+; stdlib-only + oxsmt_core (AGENTS.md dependency firewall, INVARIANTS.md I3): no opam
+; packages, no Base/Core, no ppx, no solver dep. Nelson–Oppen model-based combination
+; (DESIGN §6): a functor packaging two THEORY children as one THEORY. It sits behind the
+; ADR-0005 THEORY seam alongside the EUF/LIA adapters, so it depends only on the frozen
+; core vocabulary (Atom/Lit/Explanation/Theory/Model/Term/Context) — never on the concrete
+; engines, which keeps it testable against hand-rolled child theories.
+
+(library
+ (name oxsmt_combine)
+ (libraries oxsmt_core))
