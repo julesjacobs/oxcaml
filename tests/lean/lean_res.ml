@@ -279,17 +279,30 @@ let refute_under
 (* A LIA theory leaf the emitter can DISCHARGE (Rung 3b): its recorded clause, the Lean
    [prems] list for [OxsmtBridge.leaf_sat], and the [(satvar, reflrow)] bindings [rhoB]
    needs (each satvar mapped to [decide (eval reflrow rhoF ≤ 0)]). *)
-type discharged =
-  { leaf : lit list
-  ; prems_lean : string
-  ; bindings : (int * string) list
+(* A premise's kind determines its Farkas ≤0 row, its [rhoB] decide body, and which bridge
+   helper discharges it. Row strings are reflective [LinExpr] literals over [ai]. *)
+type pkind =
+  | Pos of string (* positive Le: atom row r = farkas row; rhoB v = decide (eval r ≤ 0) *)
+  | Neg of string (* negative Le: atom row r; farkas row = negbump r *)
+  | Eqk of string * string (* equality a=b: rows a,b; farkas row = subL a b *)
+
+type dprem =
+  { lit : lit
+  ; var : int
+  ; mult : Bigint.t
+  ; kind : pkind
   }
 
-(* Try to build a discharge for a LIA Farkas leaf. Succeeds ONLY when every premise is a
-   POSITIVE integer [Le] atom (so the leaf clause is all-negative literals and the
-   reflective row is the atom's own arg); otherwise [None] and the leaf stays a trusted
-   hypothesis (honest Valid_modulo). Rational multipliers are cleared to integers (Farkas
-   is scale-invariant). *)
+type discharged =
+  { leaf : lit list
+  ; prems : dprem list
+  }
+
+(* Try to build a discharge for a LIA Farkas leaf. Handles positive [Le], negative [Le]
+   (integer-strengthened cut), and positive-multiplier equality premises; anything else
+   (disequality, negative-multiplier equality, non-Int, missing atom) makes the whole leaf
+   a trusted hypothesis (honest Valid_modulo). Rational multipliers are cleared to
+   integers (Farkas is scale-invariant). *)
 let try_discharge
   (ai : atom_index)
   ~(resolve_atom : int -> Term.t option)
@@ -314,48 +327,53 @@ let try_discharge
     in
     let exception Skip in
     try
-      (* var -> (int_mult, reflrow) *)
+      (* var -> (mult, kind), built for each premise. *)
       let info = Hashtbl.create 8 in
       List.iteri
         (fun i (p : Recorder.lia_premise) ->
-          if not (Sat.sign_of_lit p.Recorder.lit) then raise Skip;
+          let polarity = Sat.sign_of_lit p.Recorder.lit in
           let v = Sat.var_of_lit p.Recorder.lit in
+          let m = Bigint.mul (Rational.num_bigint p.Recorder.multiplier) (prod_but i) in
           match resolve_atom v with
           | None -> raise Skip
           | Some atom ->
             (match atom.Term.node with
              | Term.Le arg ->
                if not (Sort.equal arg.Term.sort Sort.int) then raise Skip;
-               let m =
-                 Bigint.mul (Rational.num_bigint p.Recorder.multiplier) (prod_but i)
-               in
                if Bigint.compare m Bigint.zero < 0 then raise Skip;
-               Hashtbl.replace info v (m, render_reflrow ai (linear_of arg))
+               let row = render_reflrow ai (linear_of arg) in
+               Hashtbl.replace info v (m, if polarity then Pos row else Neg row)
+             | Term.Eq (a, b) ->
+               if not polarity then raise Skip;
+               if not (Sort.equal a.Term.sort Sort.int) then raise Skip;
+               if Bigint.compare m Bigint.zero < 0 then raise Skip;
+               let ra = render_reflrow ai (linear_of a) in
+               let rb = render_reflrow ai (linear_of b) in
+               Hashtbl.replace info v (m, Eqk (ra, rb))
              | _ -> raise Skip))
         premlist;
-      (* order by the recorded leaf clause; every lit must be a negative literal of a var
-         we have an entry for (a positive premise). *)
+      (* order by the recorded leaf clause; each literal must be the NEGATION of a premise
+         we have an entry for (positive premise -> negative leaf lit, and vice versa). *)
       let leaf = clause_of_sat t.Recorder.clause in
-      let ordered =
+      let prems =
         List.map
           (fun (v, s) ->
-            if s then raise Skip;
             match Hashtbl.find_opt info v with
-            | Some (m, row) -> v, m, row
+            | Some (m, kind) ->
+              (* the leaf literal must be the negation of the premise literal: a Pos/Eqk
+                 premise is positive so its leaf lit is negative (s=false); a Neg
+                 premise's leaf lit is positive (s=true). *)
+              let expect_sign =
+                match kind with
+                | Neg _ -> true
+                | Pos _ | Eqk _ -> false
+              in
+              if s <> expect_sign then raise Skip;
+              { lit = v, s; var = v; mult = m; kind }
             | None -> raise Skip)
           leaf
       in
-      let prems_lean =
-        "["
-        ^ String.concat
-            ", "
-            (List.map
-               (fun (v, m, row) -> Printf.sprintf "(%d, (%s, %s))" v (lean_int m) row)
-               ordered)
-        ^ "]"
-      in
-      let bindings = List.map (fun (v, _, row) -> v, row) ordered in
-      Some { leaf; prems_lean; bindings }
+      Some { leaf; prems }
     with
     | Skip -> None)
 ;;
@@ -417,37 +435,88 @@ let emit_refutation (ev : Checker.events) : string =
     ev.Checker.inputs;
   List.iter (fun leaf -> add_hyp leaf) hyp_leaves;
   let hyps = List.rev !hyps in
+  (* per-premise Lean pieces (depend on rhoF_applied / rho, now fixed). *)
+  let farkas_row_of = function
+    | Pos r -> r
+    | Neg r -> Printf.sprintf "(OxsmtBridge.negbump %s)" r
+    | Eqk (a, b) -> Printf.sprintf "(OxsmtBridge.subL %s %s)" a b
+  in
+  let bind_body_of = function
+    | Pos r | Neg r -> Printf.sprintf "decide (OxsmtFarkas.eval %s %s ≤ 0)" r rhoF_applied
+    | Eqk (a, b) ->
+      Printf.sprintf
+        "decide (OxsmtFarkas.eval %s %s = OxsmtFarkas.eval %s %s)"
+        a
+        rhoF_applied
+        b
+        rhoF_applied
+  in
+  (* hlink head: a TERM proving [satLit rho ℓ = false → eval row rho ≤ 0] via the matching
+     bridge helper (its [rhoB v = decide …] side condition is [rfl]). *)
+  let head_of (p : dprem) =
+    match p.kind with
+    | Pos r ->
+      Printf.sprintf
+        "(fun h => OxsmtBridge.prem_pos %s %s %s %d rfl h)"
+        r
+        rhoF_applied
+        rho
+        p.var
+    | Neg r ->
+      Printf.sprintf
+        "(fun h => OxsmtBridge.prem_neg %s %s %s %d rfl h)"
+        r
+        rhoF_applied
+        rho
+        p.var
+    | Eqk (a, b) ->
+      Printf.sprintf
+        "(fun h => OxsmtBridge.prem_eq %s %s %s %s %d rfl h)"
+        a
+        b
+        rhoF_applied
+        rho
+        p.var
+  in
+  let prems_lean (d : discharged) =
+    "["
+    ^ String.concat
+        ", "
+        (List.map
+           (fun (p : dprem) ->
+             Printf.sprintf
+               "(%s, (%s, %s))"
+               (render_lit p.lit)
+               (lean_int p.mult)
+               (farkas_row_of p.kind))
+           d.prems)
+    ^ "]"
+  in
+  (* hlink : ∀ p ∈ prems, satLit rho p.1 = false → eval p.2.2 rho ≤ 0, as a NESTED
+     [List.forall_mem_cons] term (no tactic; guard-safe). *)
+  let rec hlink_of = function
+    | [] -> "(List.forall_mem_nil _)"
+    | p :: rest ->
+      Printf.sprintf "(List.forall_mem_cons.mpr ⟨%s, %s⟩)" (head_of p) (hlink_of rest)
+  in
   (* body: discharged-leaf bridge haves first (usable by the skeleton) *)
   List.iter
     (fun (d : discharged) ->
       let name = fresh e "hleaf" in
-      (* hlink : ∀ p ∈ prems, rhoB p.1 = decide (eval p.2.2 rhoF ≤ 0) — a flat chain of
-         [List.forall_mem_cons] with each head [rfl] (rhoB reduces at each premise var).
-         Automation-free. *)
-      let hlink =
-        let b = Buffer.create 128 in
-        Buffer.add_string b "by\n";
-        List.iter
-          (fun _ ->
-            Buffer.add_string b "      refine List.forall_mem_cons.mpr ⟨rfl, ?_⟩\n")
-          d.bindings;
-        Buffer.add_string b "      exact List.forall_mem_nil _";
-        Buffer.contents b
-      in
       Buffer.add_string
         e.buf
         (Printf.sprintf
            "  have %s : satClause %s %s = true :=\n\
            \    OxsmtBridge.leaf_sat %s %s %s\n\
-           \      (%s)\n\
+           \      %s\n\
            \      (by decide) (by decide) (by decide)\n"
            name
            rho
            (render_clause d.leaf)
-           d.prems_lean
+           (prems_lean d)
            rho
            rhoF_applied
-           hlink);
+           (hlink_of d.prems));
       admitted := { name; lits = d.leaf } :: !admitted)
     discharged;
   let admitted0 = List.rev !admitted in
@@ -506,18 +575,14 @@ let emit_refutation (ev : Checker.events) : string =
   List.iter
     (fun (d : discharged) ->
       List.iter
-        (fun (v, row) ->
-          if not (Hashtbl.mem seen v)
+        (fun (p : dprem) ->
+          if not (Hashtbl.mem seen p.var)
           then (
-            Hashtbl.replace seen v ();
+            Hashtbl.replace seen p.var ();
             Buffer.add_string
               defs
-              (Printf.sprintf
-                 "  if v = %d then decide (OxsmtFarkas.eval %s %s ≤ 0) else\n"
-                 v
-                 row
-                 rhoF_applied)))
-        d.bindings)
+              (Printf.sprintf "  if v = %d then %s else\n" p.var (bind_body_of p.kind))))
+        d.prems)
     discharged;
   Buffer.add_string defs "  barb v\n\n";
   let theorem_params =
