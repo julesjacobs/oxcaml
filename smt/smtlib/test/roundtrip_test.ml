@@ -673,7 +673,12 @@ let xor_cases () =
     (hdr ^ decls ^ "(assert (xor a b c))\n")
     (hdr ^ decls ^ "(assert (not (= (not (= a b)) c)))\n");
   (* arity: unary xor is malformed (>= 2 operands required) *)
-  check_malformed ~name:"xor-unary" (hdr ^ decls ^ "(assert (xor a))\n")
+  check_malformed ~name:"xor-unary" (hdr ^ decls ^ "(assert (xor a))\n");
+  (* Bool-guard: xor over non-Bool operands is ill-typed and must be rejected, not
+     silently accepted as [not (= i j)] ([Node.eq] only checks operands share a sort). *)
+  check_malformed
+    ~name:"xor-non-bool"
+    (hdr ^ "(declare-const i Int)\n(declare-const j Int)\n(assert (xor i j))\n")
 ;;
 
 (* Parser fail-closed guards (codex rider): the parser must ERROR/degrade on ill-typed or

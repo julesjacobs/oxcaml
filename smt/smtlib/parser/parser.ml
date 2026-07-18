@@ -1186,9 +1186,21 @@ and read_implies st scope args =
    the n-ary [:left-assoc] form. The quantifier IR path ({!formula_of_sexp}) already
    builds [Fol.Xor]; this is the ground/quantifier-free counterpart, previously missing (a
    bare [(xor ...)] fell through to [apply_named] and was rejected as an unknown
-   operator). *)
+   operator).
+
+   Operands MUST be Bool: [xor] reuses [Eq]/[Not] (ADR-0003 Decision 2), and [Node.eq]
+   only checks that its operands SHARE a sort, so a bare [not (= a b)] would silently
+   accept an ill-typed [(xor r1 r2)] over Reals as [not (r1 = r2)]. Guard each operand's
+   sort so ill-typed input degrades to a sound [unknown] rather than mis-parsing to a
+   verdict (the parser fail-closed discipline). *)
 and read_xor st scope args =
-  match List.map (read_term st scope) args with
+  let read_bool a =
+    let term = read_term st scope a in
+    if not (Sort.equal term.Term.sort Sort.bool)
+    then malformedf "xor expects Boolean operands";
+    term
+  in
+  match List.map read_bool args with
   | first :: (_ :: _ as rest) ->
     List.fold_left (fun acc a -> Context.not_ st.ctx (Context.eq st.ctx acc a)) first rest
   | _ -> malformedf "xor expects >= 2 arguments"
