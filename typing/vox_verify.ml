@@ -95,6 +95,43 @@ let dumped_vcs = ref []
    [-vox-dump-vc-json] is set. *)
 let refinement_expression_types = ref []
 
+let expression_type_judgments = ref []
+
+type lexical_binding =
+  { id : Ident.t;
+    name : string;
+    declaration_span : Location.t;
+    scope : Location.t;
+  }
+
+let lexical_bindings = ref []
+
+let valid_local_span (location : Location.t) =
+  let start = location.loc_start in
+  let end_ = location.loc_end in
+  let valid_position (position : Lexing.position) =
+    position.Lexing.pos_lnum >= 1
+    && position.pos_bol >= 0
+    && position.pos_cnum >= position.pos_bol
+  in
+  let ordered =
+    start.pos_lnum < end_.pos_lnum
+    || (start.pos_lnum = end_.pos_lnum
+        && start.pos_cnum - start.pos_bol
+           <= end_.pos_cnum - end_.pos_bol)
+  in
+  not location.loc_ghost
+  && valid_position start
+  && valid_position end_
+  && ordered
+  && String.equal start.pos_fname !Location.input_name
+  && String.equal end_.pos_fname !Location.input_name
+
+let same_span (left : Location.t) (right : Location.t) =
+  left.loc_ghost = right.loc_ghost
+  && left.loc_start = right.loc_start
+  && left.loc_end = right.loc_end
+
 let json_position (position : Lexing.position) =
   Json.object_
     [ Json.field "line" (Json.int position.pos_lnum);
@@ -116,7 +153,7 @@ let json_related_span (role, location) =
       Json.field "span" (json_span location);
     ]
 
-let json_provenance provenance =
+let json_provenance (provenance : vc_provenance) =
   Json.object_
     [ Json.field "kind" (json_string provenance.kind);
       Json.field "name" (Json.option json_string provenance.name);
@@ -206,7 +243,28 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
     | Some unused_facts ->
       [ Json.field "used" (json_bool (not (List.mem index unused_facts))) ]
   in
-  Json.object_ (fields @ usage)
+  let scope =
+    match fact.scope with
+    | Some scope when valid_local_span scope ->
+      [Json.field "scope" (json_span scope)]
+    | None | Some _ -> []
+  in
+  let bound_identifiers =
+    Types.Refinement.free_bound_identifiers fact.expression
+    |> Ident.Set.elements
+    |> List.map (fun id ->
+      Json.object_
+        [ Json.field "name" (json_string (Ident.name id));
+          Json.field "id" (json_string (Ident.unique_name id));
+        ])
+  in
+  let bound_identifiers =
+    match bound_identifiers with
+    | [] -> []
+    | identifiers ->
+      [Json.field "bound_identifiers" (Json.array identifiers)]
+  in
+  Json.object_ (fields @ usage @ scope @ bound_identifiers)
 
 let contains text needle =
   let text_length = String.length text in
@@ -249,7 +307,25 @@ let json_backend_result (result : Vox_backend.backend_result) =
       Json.field "fact_usage" (json_bool fact_usage);
     ]
 
-let record_vc ~kind ~program_point ~provenance ~env
+let witness_relevance_fields ~env condition =
+  match Vox_lean.witness_variables ~env condition with
+  | Error _ -> []
+  | Ok variables ->
+    let json_variable (variable : Vox_lean.witness_variable) =
+      Json.object_
+        [ Json.field "name" (json_string variable.source_name);
+          Json.field "model_name" (json_string variable.model_name);
+        ]
+    in
+    [ Json.field "witness_relevance"
+        (Json.object_
+           [ Json.field "relevant" (json_bool (variables <> []));
+             Json.field "goal_variables"
+               (Json.array (List.map json_variable variables));
+           ]);
+    ]
+
+let record_vc ~kind ~program_point ?result_span ~provenance ~env
     (condition : Vox_vc.t) (result : Vox_backend.result) =
   let generated_lean, emission_error =
     match Vox_lean.emit ~env condition with
@@ -284,9 +360,16 @@ let record_vc ~kind ~program_point ~provenance ~env
       ]
       @ backend_results)
   in
+  let result_span_field =
+    match result_span with
+    | Some span when valid_local_span span ->
+      [Json.field "result_span" (json_span span)]
+    | None | Some _ -> []
+  in
+  let witness_relevance_fields = witness_relevance_fields ~env condition in
   let json =
     Json.object_
-      [ Json.field "location" (json_span condition.Vox_vc.location);
+      ([ Json.field "location" (json_span condition.Vox_vc.location);
         Json.field "program_point" (json_span program_point);
         Json.field "kind" (json_string kind);
         Json.field "goal" goal;
@@ -302,6 +385,8 @@ let record_vc ~kind ~program_point ~provenance ~env
           (Json.option json_emission_error emission_error);
         Json.field "provenance" (json_provenance provenance);
       ]
+      @ result_span_field
+      @ witness_relevance_fields)
   in
   dumped_vcs := json :: !dumped_vcs
 
@@ -318,13 +403,46 @@ let () =
             | entries ->
               [ Json.field "refinement_expression_types" (Json.array entries) ]
           in
+          let expression_type_judgments_field =
+            match List.rev !expression_type_judgments with
+            | [] -> []
+            | entries ->
+              [ Json.field "expression_type_judgments"
+                  (Json.array entries) ]
+          in
+          let lexical_bindings_field =
+            let entries =
+              List.rev !lexical_bindings
+              |> List.filter_map (fun binding ->
+                if
+                  valid_local_span binding.declaration_span
+                  && valid_local_span binding.scope
+                then
+                  Some
+                    (Json.object_
+                       [ Json.field "name" (json_string binding.name);
+                         Json.field "id"
+                           (json_string (Ident.unique_name binding.id));
+                         Json.field "declaration_span"
+                           (json_span binding.declaration_span);
+                         Json.field "scope" (json_span binding.scope);
+                       ])
+                else None)
+            in
+            match entries with
+            | [] -> []
+            | entries ->
+              [Json.field "lexical_bindings" (Json.array entries)]
+          in
           let document =
             Json.object_
               ([ Json.field "schema_version" (Json.int 2);
                  Json.field "verification_conditions"
                    (Json.array (List.rev !dumped_vcs));
                ]
-               @ refinement_expression_types_field)
+               @ refinement_expression_types_field
+               @ expression_type_judgments_field
+               @ lexical_bindings_field)
           in
           let channel = open_out file in
           Misc.try_finally
@@ -995,13 +1113,14 @@ let verification_error ~loc result =
 let fact_origin ?name ~kind span : Vox_vc.fact_origin =
   { kind; name; span = Some span }
 
-let fact_origin_of_provenance provenance : Vox_vc.fact_origin =
+let fact_origin_of_provenance
+    (provenance : vc_provenance) : Vox_vc.fact_origin =
   { kind = provenance.kind;
     name = provenance.name;
     span = provenance.source_span;
   }
 
-let prove state ~env ~loc ~kind ~program_point ~provenance goal =
+let prove state ~env ~loc ~kind ~program_point ?result_span ~provenance goal =
   match Facts.snapshot ~loc ~goal state.facts with
   | Error { escaped; _ } ->
     Location.raise_errorf ~loc
@@ -1016,14 +1135,14 @@ let prove state ~env ~loc ~kind ~program_point ~provenance goal =
         fact_origin_of_provenance (Lazy.force provenance)
       in
       if Option.is_some !Clflags.vox_dump_vc_json then
-        record_vc ~kind ~program_point
+        record_vc ~kind ~program_point ?result_span
           ~provenance:(Lazy.force provenance) ~env condition
           (not_discharged_result condition);
       state.facts <- Facts.add ~origin ~loc goal state.facts
     end else begin
       let result = discharge ~env condition in
       if Option.is_some !Clflags.vox_dump_vc_json then
-        record_vc ~kind ~program_point
+        record_vc ~kind ~program_point ?result_span
           ~provenance:(Lazy.force provenance) ~env condition result;
       match result.verdict with
       | Vox_backend.Proved ->
@@ -1036,12 +1155,12 @@ let prove state ~env ~loc ~kind ~program_point ~provenance goal =
         verification_error ~loc result
     end
 
-let prove_refinement state ~env ~loc ~kind ~program_point ~provenance
-    ~subject refinement replacements =
+let prove_refinement state ~env ~loc ~kind ~program_point ?result_span
+    ~provenance ~subject refinement replacements =
   let goal = Vox_vc.instantiate ~refinement ~with_:subject in
   let goal = replace_parameters replacements goal in
   let goal = bind_scope_references (Facts.scope state.facts) goal in
-  prove state ~env ~loc ~kind ~program_point ~provenance goal
+  prove state ~env ~loc ~kind ~program_point ?result_span ~provenance goal
 
 let verify_seal_obligation ~env ~seal_location
     (obligation : Ctype.refinement_seal_obligation) =
@@ -1079,6 +1198,7 @@ let verify_seal_obligation ~env ~seal_location
       ~facts:
         [{ Vox_vc.expression = hypothesis;
            location = Some obligation.rso_implementation_location;
+           scope = None;
            origin =
              fact_origin ~kind:"seal-implication"
                ~name:obligation.rso_value_name
@@ -1151,7 +1271,7 @@ let marked_refinements expression =
    condition, by contrast, records a fact about an *expression's* value, which
    only stays valid across occurrences when the expression is pure -- hence the
    [condition_is_total] gate below. *)
-let add_refinement_fact state ~kind ?name ~loc ~subject type_ =
+let add_refinement_fact state ~kind ?name ~loc ?scope ~subject type_ =
   Option.iter
     (fun refinement ->
       let expression = Vox_vc.instantiate ~refinement ~with_:subject in
@@ -1159,7 +1279,7 @@ let add_refinement_fact state ~kind ?name ~loc ~subject type_ =
         bind_scope_references (Facts.scope state.facts) expression
       in
       let origin = fact_origin ~kind ?name loc in
-      state.facts <- Facts.add ~origin ~loc expression state.facts)
+      state.facts <- Facts.add ~origin ~loc ?scope expression state.facts)
     (refinement type_)
 
 let pattern_bindings pattern =
@@ -1187,9 +1307,30 @@ let pattern_bindings pattern =
   List.rev !bindings
 
 let enter_pattern
-    : type k. state -> fact:bool -> k general_pattern -> unit =
-  fun state ~fact pattern ->
+    : type k.
+      state -> fact:bool -> ?scope:Location.t -> k general_pattern -> unit =
+  fun state ~fact ?scope pattern ->
   let bindings = pattern_bindings pattern in
+  Option.iter
+    (fun scope ->
+      List.iter
+        (fun (id, name, _) ->
+          if
+            not
+              (List.exists
+                 (fun (binding : lexical_binding) ->
+                   Ident.same binding.id id)
+                 !lexical_bindings)
+          then
+            lexical_bindings :=
+              { id;
+                name = Ident.name id;
+                declaration_span = name.loc;
+                scope;
+              }
+              :: !lexical_bindings)
+        bindings)
+    scope;
   state.facts <-
     Facts.enter_many (List.map (fun (id, _, _) -> id) bindings)
       state.facts;
@@ -1201,12 +1342,12 @@ let enter_pattern
             (Rexp_ident (Rbound id))
         in
         add_refinement_fact state ~kind:"binder"
-          ~name:(Ident.name id) ~loc:name.loc ~subject type_)
+          ~name:(Ident.name id) ~loc:name.loc ?scope ~subject type_)
       bindings
 
-let add_match_fact state ~loc expression =
+let add_match_fact state ~loc ?scope expression =
   let origin = fact_origin ~kind:"match" loc in
-  state.facts <- Facts.add ~origin ~loc expression state.facts
+  state.facts <- Facts.add ~origin ~loc ?scope expression state.facts
 
 let fresh_match_subject state ~loc type_ =
   let id = Ident.create_local "*match-component*" in
@@ -1223,12 +1364,12 @@ let value_pattern_subject state (pattern : value general_pattern) =
       ~type_:(carrier pattern.pat_type) (Rexp_constant constant)
   | _ -> fresh_match_subject state ~loc:pattern.pat_loc pattern.pat_type
 
-let rec add_value_pattern_facts state ~subject
+let rec add_value_pattern_facts state ~subject ?scope
     (pattern : value general_pattern) =
-  add_refinement_fact state ~kind:"match" ~loc:pattern.pat_loc ~subject
-    pattern.pat_type;
+  add_refinement_fact state ~kind:"match" ~loc:pattern.pat_loc ?scope
+    ~subject pattern.pat_type;
   let add_equality left right =
-    Option.iter (add_match_fact state ~loc:pattern.pat_loc)
+    Option.iter (add_match_fact state ~loc:pattern.pat_loc ?scope)
       (equality ~env:pattern.pat_env ~loc:pattern.pat_loc left right)
   in
   match pattern.pat_desc with
@@ -1245,7 +1386,7 @@ let rec add_value_pattern_facts state ~subject
         ~type_:(carrier pattern.pat_type) (Rexp_ident (Rbound id))
     in
     add_equality alias subject;
-    add_value_pattern_facts state ~subject subpattern
+    add_value_pattern_facts state ~subject ?scope subpattern
   | Tpat_constant (Const_int _ as constant) ->
     let constant =
       Refinement.create ~loc:pattern.pat_loc
@@ -1273,7 +1414,7 @@ let rec add_value_pattern_facts state ~subject
     add_equality subject constructed;
     List.iter
       (fun (component, pattern) ->
-        add_value_pattern_facts state ~subject:component pattern)
+        add_value_pattern_facts state ~subject:component ?scope pattern)
       components
   | Tpat_tuple fields
     when List.for_all (fun (label, _) -> Option.is_none label) fields
@@ -1295,7 +1436,7 @@ let rec add_value_pattern_facts state ~subject
     add_equality subject tuple;
     List.iter
       (fun (_, component, pattern) ->
-        add_value_pattern_facts state ~subject:component pattern)
+        add_value_pattern_facts state ~subject:component ?scope pattern)
       components
   | Tpat_record (fields, _, _, _)
     when Vox_lean.supports_match_facts ~env:pattern.pat_env
@@ -1313,7 +1454,7 @@ let rec add_value_pattern_facts state ~subject
               ~type_:(carrier field_pattern.pat_type)
               (Rexp_field (subject, field))
           in
-          add_value_pattern_facts state ~subject:projection field_pattern
+          add_value_pattern_facts state ~subject:projection ?scope field_pattern
         end)
       fields
   | Tpat_or _ | Tpat_fun_layout _ | Tpat_unboxed_unit
@@ -1425,7 +1566,7 @@ and total_builtin_head expression =
     Option.is_some (Vox_lean.primitive_builtin primitive.prim_name)
   | _ -> false
 
-let selfification_fact state binding =
+let selfification_fact state ?scope binding =
   match binding.vb_pat.pat_desc with
   | Tpat_var { id; _ } when stable_expression binding.vb_expr ->
     let loc = binding.vb_loc in
@@ -1463,7 +1604,7 @@ let selfification_fact state binding =
       let origin =
         fact_origin ~kind:"selfification" ~name:(Ident.name id) loc
       in
-      state.facts <- Facts.add ~origin ~loc equality state.facts
+      state.facts <- Facts.add ~origin ~loc ?scope equality state.facts
     | exception Not_found -> ()
     end
   | _ -> ()
@@ -1521,13 +1662,13 @@ let rec walk_expression state expression =
     if rec_flag = Nonrecursive then
       List.iter (register_definition state) bindings;
     List.iter
-      (enter_pattern state ~fact:true)
+      (enter_pattern state ~fact:true ~scope:body.exp_loc)
       (List.map (fun binding -> binding.vb_pat) bindings);
     List.iter
       (fun (pattern, paths) -> add_try_result_fact state pattern paths)
       (List.rev !try_summaries);
     if rec_flag = Nonrecursive then
-      List.iter (selfification_fact state) bindings;
+      List.iter (selfification_fact state ~scope:body.exp_loc) bindings;
     walk_expression state body;
     state.facts <- saved_facts;
     state.definitions <- saved_definitions;
@@ -1535,19 +1676,25 @@ let rec walk_expression state expression =
   | Texp_letmutable (binding, body) ->
     walk_expression state binding.vb_expr;
     let saved_facts = state.facts in
-    enter_pattern state ~fact:false binding.vb_pat;
+    enter_pattern state ~fact:false ~scope:body.exp_loc binding.vb_pat;
     walk_expression state body;
     state.facts <- saved_facts;
     check_marks state expression marks
   | Texp_function { params; body; _ } ->
     let saved_facts = state.facts in
+    let parameter_scope =
+      match body with
+      | Tfunction_body body -> Some body.exp_loc
+      | Tfunction_cases _ -> None
+    in
     List.iter
       (fun parameter ->
         match parameter.fp_kind with
-        | Tparam_pat pattern -> enter_pattern state ~fact:true pattern
+        | Tparam_pat pattern ->
+          enter_pattern state ~fact:true ?scope:parameter_scope pattern
         | Tparam_optional_default (pattern, default, _) ->
           walk_expression state default;
-          enter_pattern state ~fact:true pattern)
+          enter_pattern state ~fact:true ?scope:parameter_scope pattern)
       params;
     begin match body with
     | Tfunction_body body -> walk_expression state body
@@ -1585,8 +1732,8 @@ let rec walk_expression state expression =
       (fun condition_subject ->
         let origin = fact_origin ~kind:"branch" condition.exp_loc in
         state.facts <-
-          Facts.add ~origin ~loc:condition.exp_loc condition_subject
-            state.facts)
+          Facts.add ~origin ~loc:condition.exp_loc ~scope:ifso.exp_loc
+            condition_subject state.facts)
       condition_fact;
     walk_expression state ifso;
     List.iter
@@ -1596,7 +1743,8 @@ let rec walk_expression state expression =
             ~subject_location:ifso.exp_loc
         in
         prove_refinement state ~env:expression.exp_env ~loc:ifso.exp_loc
-          ~kind:"annotation" ~program_point:expression.exp_loc ~provenance
+          ~kind:"annotation" ~program_point:expression.exp_loc
+          ~result_span:ifso.exp_loc ~provenance
           ~subject:(subject state ifso) refinement [])
       marks;
     state.facts <- saved_facts;
@@ -1611,7 +1759,8 @@ let rec walk_expression state expression =
           in
           let origin = fact_origin ~kind:"branch" condition.exp_loc in
           state.facts <-
-            Facts.add ~origin ~loc:condition.exp_loc negated state.facts)
+            Facts.add ~origin ~loc:condition.exp_loc ~scope:ifnot.exp_loc
+              negated state.facts)
         condition_fact;
       walk_expression state ifnot;
       List.iter
@@ -1621,7 +1770,8 @@ let rec walk_expression state expression =
               ~subject_location:ifnot.exp_loc
           in
           prove_refinement state ~env:expression.exp_env ~loc:ifnot.exp_loc
-            ~kind:"annotation" ~program_point:expression.exp_loc ~provenance
+            ~kind:"annotation" ~program_point:expression.exp_loc
+            ~result_span:ifnot.exp_loc ~provenance
             ~subject:(subject state ifnot) refinement [])
         marks;
       state.facts <- saved_facts
@@ -1736,8 +1886,16 @@ and check_marks state expression marks =
           ~subject_location:expression.exp_loc
       in
       prove_refinement state ~env:expression.exp_env ~loc ~subject refinement
-        ~kind:"annotation" ~program_point:expression.exp_loc ~provenance [])
+        ~kind:"annotation" ~program_point:expression.exp_loc
+        ~result_span:expression.exp_loc ~provenance [])
     marks
+
+and case_scope : type k. k case -> Location.t =
+  fun case ->
+  match case.c_guard with
+  | None -> case.c_rhs.exp_loc
+  | Some guard ->
+    Location.merge ~ghost:false [guard.exp_loc; case.c_rhs.exp_loc]
 
 and walk_case : type k. state -> k case -> unit =
   fun state case ->
@@ -1746,7 +1904,7 @@ and walk_case : type k. state -> k case -> unit =
 and walk_case_facts : type k. state -> k case -> Facts.t =
   fun state case ->
   let saved_facts = state.facts in
-  enter_pattern state ~fact:true case.c_lhs;
+  enter_pattern state ~fact:true ~scope:(case_scope case) case.c_lhs;
   Option.iter (walk_expression state) case.c_guard;
   walk_expression state case.c_rhs;
   let case_facts = state.facts in
@@ -1855,17 +2013,18 @@ and walk_match state scrutinee cases effect_cases =
         Some id )
   in
   let walk_value_case negatives case pattern =
+    let scope = case_scope case in
     state.facts <- normal_scrutinee_facts;
     Option.iter
       (fun id -> state.facts <- Facts.enter id state.facts)
       synthetic;
-    enter_pattern state ~fact:true case.c_lhs;
+    enter_pattern state ~fact:true ~scope case.c_lhs;
     add_refinement_fact state ~kind:"match" ~loc:scrutinee.exp_loc
-      ~subject:scrutinee_subject scrutinee.exp_type;
+      ~scope ~subject:scrutinee_subject scrutinee.exp_type;
     List.iter
-      (fun (fact, loc) -> add_match_fact state ~loc fact)
+      (fun (fact, loc) -> add_match_fact state ~loc ~scope fact)
       negatives;
-    add_value_pattern_facts state ~subject:scrutinee_subject pattern;
+    add_value_pattern_facts state ~subject:scrutinee_subject ~scope pattern;
     Option.iter (walk_expression state) case.c_guard;
     walk_expression state case.c_rhs;
     state.facts <- normal_scrutinee_facts
@@ -1954,7 +2113,8 @@ and check_application state application function_ arguments =
                   in
                   prove_refinement state ~env:application.exp_env
                     ~loc:argument.exp_loc ~kind:"contract-argument"
-                    ~program_point:application.exp_loc ~provenance
+                    ~program_point:application.exp_loc
+                    ~result_span:argument.exp_loc ~provenance
                     ~subject:argument_subject refinement replacements)
                 domain_refinement;
               begin match parameter with
@@ -2101,6 +2261,65 @@ let collect_refinement_types structure =
   in
   List.iter (iterator.structure_item iterator) structure.str_items
 
+let add_expression_type_judgment ~env ~location ~provenance ?source_span
+    type_ =
+  if valid_local_span location then
+    match source_span with
+    | Some source_span when not (valid_local_span source_span) -> ()
+    | None | Some _ ->
+      let source_span_field =
+        match source_span with
+        | None -> []
+        | Some source_span ->
+          [Json.field "source_span" (json_span source_span)]
+      in
+      expression_type_judgments :=
+        Json.object_
+          ([ Json.field "location" (json_span location);
+             Json.field "type" (json_string (render_type ~env type_));
+             Json.field "provenance" (json_string provenance);
+           ]
+           @ source_span_field)
+        :: !expression_type_judgments
+
+let collect_imposition_type_judgments () =
+  let judgments = Typecore.take_refinement_imposition_judgments () in
+  List.iter
+    (fun (judgment : Typecore.refinement_imposition_judgment) ->
+      Option.iter
+        (add_expression_type_judgment ~env:judgment.env
+           ~location:judgment.location ~provenance:"checked")
+        judgment.checked_type;
+      add_expression_type_judgment ~env:judgment.env
+        ~location:judgment.location ~provenance:"imposed"
+        ~source_span:judgment.annotation_location judgment.imposed_type)
+    judgments;
+  List.map
+    (fun (judgment : Typecore.refinement_imposition_judgment) ->
+      judgment.location)
+    judgments
+
+let collect_checked_expression_types ~imposition_locations structure =
+  let seen = ref imposition_locations in
+  let super = Tast_iterator.default_iterator in
+  let iterator =
+    { super with
+      expr =
+        (fun sub expression ->
+          if
+            valid_local_span expression.exp_loc
+            && not (List.exists (same_span expression.exp_loc) !seen)
+          then begin
+            seen := expression.exp_loc :: !seen;
+            add_expression_type_judgment ~env:expression.exp_env
+              ~location:expression.exp_loc ~provenance:"checked"
+              expression.exp_type
+          end;
+          super.expr sub expression);
+    }
+  in
+  List.iter (iterator.structure_item iterator) structure.str_items
+
 let finish_dump () =
   if !Clflags.vox_dump_vc then begin
     Format.eprintf "Error: VCs dumped, not discharged.@.";
@@ -2126,8 +2345,12 @@ let verify_structure ?(toplevel = false) structure =
       }
   in
   let walk_root () =
-    if Option.is_some !Clflags.vox_dump_vc_json then
+    if Option.is_some !Clflags.vox_dump_vc_json then begin
+      let imposition_locations = collect_imposition_type_judgments () in
+      collect_checked_expression_types ~imposition_locations structure;
       collect_refinement_types structure;
+    end else
+      ignore (Typecore.take_refinement_imposition_judgments ());
     let iterator = iterator state in
     List.iter
       (Tast_iterator.default_iterator.structure_item iterator)

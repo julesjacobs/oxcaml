@@ -7,6 +7,7 @@ type fact_origin =
 type fact =
   { expression : Types.refinement_expression;
     location : Location.t option;
+    scope : Location.t option;
     origin : fact_origin;
   }
 
@@ -47,6 +48,7 @@ module Fact_env : sig
   val add :
     origin:fact_origin ->
     ?loc:Location.t ->
+    ?scope:Location.t ->
     Types.refinement_expression ->
     t ->
     t

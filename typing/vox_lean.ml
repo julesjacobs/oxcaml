@@ -785,6 +785,70 @@ let collect context vc =
     expressions;
   !variables
 
+type witness_variable =
+  { source_name : string;
+    model_name : string;
+  }
+
+let witness_variables ~env (vc : Vox_vc.t) =
+  try
+    let context = { env; data = []; references = [] } in
+    let variables = collect context vc in
+    let free = Types.Refinement.free_bound_identifiers vc.goal in
+    let result = ref [] in
+    let add source_name model_name =
+      if
+        not
+          (List.exists
+             (fun variable -> String.equal variable.model_name model_name)
+             !result)
+      then result := !result @ [{ source_name; model_name }]
+    in
+    iter_expression
+      (fun node ->
+        match node.rexp_desc with
+        | Rexp_ident (Rbound id) when Ident.Set.mem id free ->
+          begin match find_variable id variables with
+          | Some variable -> add (Ident.name id) variable.variable_name
+          | None ->
+            error node.rexp_loc
+              "identifier %s is neither locally bound nor in VC scope"
+              (Ident.name id)
+          end
+        | Rexp_ident (Rfree reference_identifier) ->
+          begin match builtin_name context reference_identifier with
+          | Some _ -> ()
+          | None ->
+            let reference =
+              match
+                List.find_opt
+                  (fun existing ->
+                    same_reference existing.reference_head
+                      reference_identifier)
+                  context.references
+              with
+              | Some reference -> reference
+              | None ->
+                error node.rexp_loc
+                  "internal error: missing Lean reference %s"
+                  (reference_description reference_identifier)
+            in
+            add (reference_basename reference_identifier)
+              reference.reference_name
+          end
+        | Rexp_ident (Rbound _) | Rexp_constant _ | Rexp_let _
+        | Rexp_function _ | Rexp_apply _ | Rexp_tuple _ | Rexp_construct _
+        | Rexp_field _ | Rexp_ifthenelse _ -> ())
+      vc.goal;
+    Ok !result
+  with
+  | Emission_error error -> Error error
+  | exception_ ->
+    Error
+      { location = vc.Vox_vc.location;
+        message = Printexc.to_string exception_;
+      }
+
 let expect_sort location expected actual =
   if not (String.equal (sort_key expected) (sort_key actual)) then
     error location "refinement expression has an inconsistent type"
