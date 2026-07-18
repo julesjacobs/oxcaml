@@ -18,3 +18,10 @@
   oxsmt_solver
   oxsmt_interface
   oxsmt_certificate))
+
+; lra_cert_test = Real (LRA) certificate soundness under the OXSMT_LRA flip (riders
+; #162/#134). Links unix so it can set OXSMT_LRA before the lazy Lra_config gate is forced.
+(executable
+ (name lra_cert_test)
+ (modules lra_cert_test)
+ (libraries unix oxsmt_core oxsmt_solver oxsmt_interface oxsmt_certificate))

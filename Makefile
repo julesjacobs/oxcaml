@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -209,6 +209,16 @@ cert-test:
 ##   Nonzero exit on any failed check.
 checker-test:
 	$(DUNE) exec smt/certificate/test/checker_test.exe
+
+## lra-cert-test — Real (LRA) certificate soundness under the OXSMT_LRA flip (riders
+##   #162/#134): live Real UNSAT solves (strict cycle, equality+conflict, transitive chain)
+##   recorded and replayed through Oxsmt_certificate.Checker; asserts each cert verdict is
+##   Valid / Valid-modulo (never a wrong Valid) AND that no Real theory leaf carries a Farkas
+##   witness (the #134 collision re-confirm: the Real path never reaches the Int-only
+##   Sort.int guard in verify_lia_conflict). The test sets OXSMT_LRA itself. Nonzero on any
+##   failed check.
+lra-cert-test:
+	$(DUNE) exec smt/certificate/test/lra_cert_test.exe
 
 ## cert-corpus-gate — end-to-end (ADR-0013 §4.1 step-1 acceptance, checker side): drives the
 ##   committed tests/cases .smt2 files through the shipped Session with a recorder installed,
@@ -927,6 +937,7 @@ test: check-frozen
 	$(MAKE) lia-test
 	$(MAKE) lra-test
 	$(MAKE) lra-wiring-test
+	$(MAKE) lra-cert-test
 	$(MAKE) lia-trivial-eq-test
 	$(MAKE) lia-gcd-cut-test
 	$(MAKE) lia-adapter-test
