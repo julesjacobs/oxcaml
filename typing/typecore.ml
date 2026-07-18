@@ -3414,8 +3414,29 @@ let rec type_pat
       expected_ty sort ->
   Builtin_attributes.warning_scope sp.ppat_attributes
     (fun () ->
-       type_pat_aux tps category ~no_existentials
-         ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
+       (* A destructuring pattern may forget a refinement while taking the
+          value apart.  Keep the refinement on the typed pattern so that the
+          verification pass can still use it. *)
+       let refined =
+         match sp.ppat_desc with
+         | Ppat_constant _ | Ppat_construct _ | Ppat_tuple _ | Ppat_record _ ->
+           let expanded = expand_head !!penv (instance expected_ty) in
+           begin match get_desc expanded with
+           | Trefine refinement -> Some (expanded, refinement.ref_skeleton)
+           | _ -> None
+           end
+         | _ -> None
+       in
+       match refined with
+       | Some (refined, skeleton) ->
+         let pattern =
+           type_pat_aux tps category ~no_existentials ~alloc_mode
+             ~mutable_flag ~penv sp skeleton sort
+         in
+         { pattern with pat_type = refined }
+       | None ->
+         type_pat_aux tps category ~no_existentials
+           ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
     )
 
 and type_pat_aux

@@ -33,6 +33,40 @@ let after_def_is_proved = (double 5 : int{ _ = 10 })
 val after_def_is_proved : int{ _ = 10 } = 10
 |}]
 
+(* A refined proof value can be destructured by a plain constructor pattern
+   inside an expression [let], while its equation is still deposited. *)
+let inner_constructor_is_proved =
+  let () = double_def 6 in
+  (double 6 : int{ _ = 12 })
+[%%expect {|
+val inner_constructor_is_proved : int{ _ = 12 } = 12
+|}]
+
+(* Binder-shaped local patterns continue to deposit the same equation. *)
+let inner_wildcard_is_proved =
+  let _ = double_def 7 in
+  (double 7 : int{ _ = 14 })
+let inner_variable_is_proved =
+  let _proof = double_def 8 in
+  (double 8 : int{ _ = 16 })
+[%%expect {|
+val inner_wildcard_is_proved : int{ _ = 14 } = 14
+val inner_variable_is_proved : int{ _ = 16 } = 16
+|}]
+
+(* The reverse direction remains rigid: a plain value does not acquire a
+   refinement merely because the pattern expects one. *)
+let reverse_direction_is_rejected =
+  let (() : unit{ false }) = () in
+  ()
+[%%expect {|
+Line 2, characters 6-26:
+2 |   let (() : unit{ false }) = () in
+          ^^^^^^^^^^^^^^^^^^^^
+Error: This pattern matches values of type "unit{ false }"
+       but a pattern was expected which matches values of type "unit"
+|}]
+
 (* A false consequence of the deposited equation is disproved. *)
 let () = double_def 5
 let false_consequence = (double 5 : int{ _ = 11 })
