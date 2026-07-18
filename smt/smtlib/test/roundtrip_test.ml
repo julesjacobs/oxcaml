@@ -652,6 +652,30 @@ let define_fun_cases () =
     (hdr ^ "(declare-fun f (Int) Int)\n(define-fun f ((x Int)) Int x)\n(assert true)\n")
 ;;
 
+(* Ground [xor] desugaring (n-ary, left-assoc): each [xor] step is [not (= acc a)]. The
+   quantifier IR already builds [Fol.Xor]; these guard the quantifier-free [read_op] path
+   that a bare [(xor ...)] takes (previously rejected as an unknown operator — the
+   QF_LRA/sc benchmark family, 31 xor/file, could not parse). Checked against the
+   hand-expanded form by tag identity, so a wrong desugar (arity/associativity) fails. *)
+let xor_cases () =
+  let hdr = "(set-logic QF_UFLIA)\n" in
+  let decls =
+    "(declare-const a Bool)\n(declare-const b Bool)\n(declare-const c Bool)\n"
+  in
+  (* binary: (xor a b) == (not (= a b)) *)
+  check_same
+    ~name:"xor-binary"
+    (hdr ^ decls ^ "(assert (xor a b))\n")
+    (hdr ^ decls ^ "(assert (not (= a b)))\n");
+  (* ternary, left-assoc: (xor a b c) == (not (= (not (= a b)) c)) *)
+  check_same
+    ~name:"xor-ternary-left-assoc"
+    (hdr ^ decls ^ "(assert (xor a b c))\n")
+    (hdr ^ decls ^ "(assert (not (= (not (= a b)) c)))\n");
+  (* arity: unary xor is malformed (>= 2 operands required) *)
+  check_malformed ~name:"xor-unary" (hdr ^ decls ^ "(assert (xor a))\n")
+;;
+
 (* Parser fail-closed guards (codex rider): the parser must ERROR/degrade on ill-typed or
    malformed input, never mis-parse to a definite verdict. Each was a wrong-verdict bug. *)
 let parser_fail_closed_cases () =
@@ -699,15 +723,13 @@ let parser_fail_closed_cases () =
         (check-sat)\n");
   (* Command-state boundary: the parser returns one assertion batch. Before this guard it
      accepted all three scripts and the real CLI reported [unsat]: junk arguments still
-     counted as a check, a post-check assertion was moved before the check, and a post-exit
-     assertion was executed even though SMT-LIB terminates at [exit]. Each must instead
-     reach the CLI's parse-failure -> [unknown] path. *)
+     counted as a check, a post-check assertion was moved before the check, and a
+     post-exit assertion was executed even though SMT-LIB terminates at [exit]. Each must
+     instead reach the CLI's parse-failure -> [unknown] path. *)
   check_malformed
     ~name:"check-sat-arguments"
     (hdr ^ "(assert false)\n(check-sat unexpected)\n");
-  check_unsupported
-    ~name:"assert-after-check-sat"
-    (hdr ^ "(check-sat)\n(assert false)\n");
+  check_unsupported ~name:"assert-after-check-sat" (hdr ^ "(check-sat)\n(assert false)\n");
   check_malformed
     ~name:"command-after-exit"
     (hdr ^ "(exit)\n(assert false)\n(check-sat)\n");
@@ -1179,6 +1201,8 @@ let () =
   command_gate_cases ();
   print_endline "== define-fun macro expansion ==";
   define_fun_cases ();
+  print_endline "== ground xor desugaring ==";
+  xor_cases ();
   parser_fail_closed_cases ();
   printer_programmatic_tester_collision ();
   printer_byte_oracle ();

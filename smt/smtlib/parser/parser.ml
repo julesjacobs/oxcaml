@@ -991,6 +991,8 @@ and read_op ?expected st scope op args orig =
   | "or", _ -> Context.or_ st.ctx (rds ())
   | "=>", _ :: _ :: _ -> read_implies st scope args
   | "=>", _ -> malformedf "=> expects >= 2 arguments"
+  | "xor", _ :: _ :: _ -> read_xor st scope args
+  | "xor", _ -> malformedf "xor expects >= 2 arguments"
   | "ite", [ c; th_s; el_s ] when not (Lra_config.enabled ()) ->
     Context.ite st.ctx (rd c) (rd th_s) (rd el_s)
   | "ite", [ c; th_s; el_s ] ->
@@ -1178,6 +1180,18 @@ and read_implies st scope args =
   match List.rev_map (read_term st scope) args with
   | last :: rest -> List.fold_left (fun acc a -> Context.implies st.ctx a acc) last rest
   | [] -> malformedf "=> expects arguments"
+
+(* [xor] is left-associative Boolean parity, desugared to [not (= acc a)] per step: for
+   Booleans [a xor b = not (a = b)], and the left fold reproduces the SMT-LIB semantics of
+   the n-ary [:left-assoc] form. The quantifier IR path ({!formula_of_sexp}) already
+   builds [Fol.Xor]; this is the ground/quantifier-free counterpart, previously missing (a
+   bare [(xor ...)] fell through to [apply_named] and was rejected as an unknown
+   operator). *)
+and read_xor st scope args =
+  match List.map (read_term st scope) args with
+  | first :: (_ :: _ as rest) ->
+    List.fold_left (fun acc a -> Context.not_ st.ctx (Context.eq st.ctx acc a)) first rest
+  | _ -> malformedf "xor expects >= 2 arguments"
 
 (* Linear multiplication only: at most one non-constant factor (DESIGN §1). Constant
    factors fold into a coefficient via [mul_const]; two or more non-constants is nonlinear
