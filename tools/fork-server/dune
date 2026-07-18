@@ -1,0 +1,31 @@
+; Warm fork-server for ocamlopt.opt: exec the compiler once, fork a warm child
+; per compile request. Standalone tool; not wired into any build system. See
+; README.md for the design, safety model, and how a build system would adopt it.
+
+(executable
+ (name fork_server)
+ (modes native)
+ (ocamlopt_flags
+  (:standard -runtime-variant nnp))
+ (foreign_stubs
+  (language c)
+  (names fdpass_stubs))
+ (libraries
+  memtrace
+  flambda2
+  flambda2_ui
+  flambda2_to_cmm
+  gc_timings
+  ocamloptcomp
+  ocamlcommon
+  unix)
+ (modules fork_server))
+
+; The drop-in shim (installed as `ocamlopt.opt` on PATH) is a freestanding C
+; program: it forwards argv/cwd/env + its own stdio fds to the daemon and fails
+; open to the real compiler on any problem.
+(rule
+ (targets ocamlopt-forkserver-shim)
+ (deps shim.c)
+ (action
+  (run %{cc} -O2 -Wall -o %{targets} shim.c)))
