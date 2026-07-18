@@ -92,9 +92,18 @@ let create
     match fair_override with
     | Some value -> value
     | None ->
+      (* DEFAULT-ON flip (LAND 45 reviewed +255 lever: full board 2912->3171, 18:1
+         win:regr, 0 soundness). Unset => ON. The opt-out tokens [0/false/no] plus any
+         UNRECOGNIZED value => OFF: [OXSMT_LEMMA_FAIR=0] byte-recovers the pre-flip trunk,
+         and a typo cannot silently turn a reviewed lever on/off surprisingly.
+         Garbage=>OFF is the conservative side, matching the [OXSMT_LRA] flip lever this
+         mirrors. FAIR implies streaming
+         ([streaming_partial = stream_requested || fair_slices]), so the whole reviewed
+         mechanism turns on together. *)
       (match Sys.getenv_opt "OXSMT_LEMMA_FAIR" with
        | Some ("1" | "true" | "yes") -> true
-       | Some _ | None -> false)
+       | Some _ -> false
+       | None -> true)
   in
   let streaming_partial = stream_requested || fair_slices in
   { ctx
@@ -295,9 +304,9 @@ let round t view =
        (fun (lemma : Lemma.t) ->
          if t.fair_slices
          then (
-           (* Spend at most one deterministic slice on this lemma.  Enumeration and new
+           (* Spend at most one deterministic slice on this lemma. Enumeration and new
               instance emission share the slice, exactly as they share the legacy global
-              budget.  Charge the used slice back to the global per-check balance. *)
+              budget. Charge the used slice back to the global per-check balance. *)
            let quota = max 64 (min 4096 (t.gen_budget / lemma_count)) in
            let initial = min quota !budget in
            let local = ref initial in
