@@ -269,6 +269,17 @@ let supports_match_facts ~env type_ =
   | Sarrow _ -> false
   | exception Emission_error _ -> false
 
+let supports_equality ~env type_ =
+  let context = { env; data = []; references = [] } in
+  let rec supported = function
+    | Sint | Sbool | Sdata _ -> true
+    | Stuple fields -> List.for_all supported fields
+    | Sarrow _ -> false
+  in
+  match supported (sort_of_type context Location.none type_) with
+  | supported -> supported
+  | exception Emission_error _ -> false
+
 let reference_basename = function
   | Rfun name | Rsibling name -> name
   | Rapp path | Rglobal path -> Path.last path
@@ -1040,24 +1051,32 @@ let emit_expression context variables expression =
             then
               error expression.rexp_loc
                 "constructor path does not match its result type";
-            let constructor =
-              constructor expression.rexp_loc data
-                constructor_description.rconstr_name
-            in
             let arguments = List.map (emit locals) arguments in
-            if
-              List.length constructor.constructor_fields
-              <> List.length arguments
-            then
+            let name, fields =
+              match definition expression.rexp_loc data with
+              | Variant _ ->
+                let constructor =
+                  constructor expression.rexp_loc data
+                    constructor_description.rconstr_name
+                in
+                constructor.constructor_name,
+                constructor.constructor_fields
+              | Record fields ->
+                if
+                  not
+                    (String.equal constructor_description.rconstr_name "mk")
+                then
+                  error expression.rexp_loc
+                    "record construction must use the structure constructor";
+                "mk", List.map snd fields
+            in
+            if List.length fields <> List.length arguments then
               error expression.rexp_loc "constructor arity mismatch";
             List.iter2
               (fun expected (_, actual) ->
                 expect_sort expression.rexp_loc expected actual)
-              constructor.constructor_fields arguments;
-            let head =
-              data.data_name ^ "."
-              ^ sanitize constructor.constructor_name
-            in
+              fields arguments;
+            let head = data.data_name ^ "." ^ sanitize name in
             "(" ^ String.concat " " (head :: List.map fst arguments) ^ ")"
           | _ ->
             error expression.rexp_loc

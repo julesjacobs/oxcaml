@@ -642,6 +642,45 @@ let opaque_call_subject state expression =
       id
   in
   node expression (Rexp_ident (Rfree (Rglobal (Pident id))))
+(* The selfification fragment is deliberately narrower than [subject].  Every
+   accepted expression denotes the same immutable value whenever it is named:
+   variables and integer/boolean constants, and immutable products built from
+   or projected out of other expressions in the fragment.  In particular,
+   ordinary applications, conditionals, sequences, and mutable records stay
+   out even when [subject] happens to be able to lower them. *)
+let rec stable_expression expression =
+  let stable = stable_expression in
+  let immutable_labels labels =
+    Array.for_all
+      (fun (label : label_description) -> label.lbl_mut = Immutable)
+      labels
+  in
+  Vox_lean.supports_equality ~env:expression.exp_env expression.exp_type
+  &&
+  match expression.exp_desc with
+  | Texp_ident _ | Texp_constant (Const_int _) -> true
+  | Texp_construct (_, _, _, arguments, _) ->
+    List.for_all (fun (_, argument) -> stable argument) arguments
+  | Texp_record { fields; extended_expression; _ } ->
+    immutable_labels
+      (Array.map (fun (label, _, _) -> label) fields)
+    &&
+    (match extended_expression with
+     | None -> true
+     | Some (record, _, _) -> stable record)
+    && Array.for_all
+         (fun (_, _, definition) ->
+           match definition with
+           | Kept _ -> true
+           | Overridden (_, field) -> stable field)
+         fields
+  | Texp_tuple (fields, _) ->
+    List.for_all
+      (fun (label, field) -> Option.is_none label && stable field)
+      fields
+  | Texp_field { record; label; _ } ->
+    immutable_labels label.lbl_all && stable record
+  | _ -> false
 
 let rec subject state ?(function_head = false) expression =
   let lower = subject state in
@@ -717,6 +756,32 @@ let rec subject state ?(function_head = false) expression =
       (Rexp_construct
          ( constructor,
            List.map (fun (_, argument) -> lower argument) arguments ))
+  | Texp_record { fields; extended_expression; _ }
+    when stable_expression expression ->
+    let path =
+      let label, _, _ = fields.(0) in
+      lbl_res_type_path label
+    in
+    let base =
+      Option.map (fun (record, _, _) -> lower record) extended_expression
+    in
+    let field (label, _, definition) =
+      match definition, base with
+      | Overridden (_, expression), _ -> lower expression
+      | Kept _, Some record ->
+        let field =
+          { rfield_type_path = path; rfield_name = label.lbl_name }
+        in
+        Refinement.create ~loc:expression.exp_loc
+          ~type_:(carrier label.lbl_arg) (Rexp_field (record, field))
+      | Kept _, None ->
+        unsupported expression "a record with a kept field but no base"
+    in
+    let constructor =
+      { rconstr_type_path = path; rconstr_name = "mk" }
+    in
+    node expression
+      (Rexp_construct (constructor, List.map field (Array.to_list fields)))
   | Texp_field { record; label; _ } when label.lbl_mut = Immutable ->
     let field =
       { rfield_type_path = lbl_res_type_path label;
@@ -1301,6 +1366,49 @@ and total_builtin_head expression =
     Option.is_some (Vox_lean.primitive_builtin primitive.prim_name)
   | _ -> false
 
+let selfification_fact state binding =
+  match binding.vb_pat.pat_desc with
+  | Tpat_var { id; _ } when stable_expression binding.vb_expr ->
+    let loc = binding.vb_loc in
+    let right = subject state binding.vb_expr in
+    let left =
+      Refinement.create ~loc ~type_:right.rexp_type
+        (Rexp_ident (Rbound id))
+    in
+    let equality_name =
+      Longident.Ldot
+        ( Location.mknoloc (Longident.Lident "Stdlib"),
+          Location.mknoloc "=" )
+    in
+    begin match Env.find_value_by_name equality_name binding.vb_expr.exp_env with
+    | path, _ ->
+      let arrow argument result =
+        Btype.newgenty
+          (Tarrow
+             ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+               argument,
+               result,
+               commu_ok ))
+      in
+      let function_type =
+        arrow right.rexp_type (arrow right.rexp_type Predef.type_bool)
+      in
+      let function_ =
+        Refinement.create ~loc ~type_:function_type
+          (Rexp_ident (Rfree (Rapp path)))
+      in
+      let equality =
+        Refinement.create ~loc ~type_:Predef.type_bool
+          (Rexp_apply (function_, [ Nolabel, left; Nolabel, right ]))
+      in
+      let origin =
+        fact_origin ~kind:"selfification" ~name:(Ident.name id) loc
+      in
+      state.facts <- Facts.add ~origin ~loc equality state.facts
+    | exception Not_found -> ()
+    end
+  | _ -> ()
+
 let annotation_provenance ~annotation_location ~subject_location =
   { kind = "annotation";
     name = None;
@@ -1359,6 +1467,8 @@ let rec walk_expression state expression =
     List.iter
       (fun (pattern, paths) -> add_try_result_fact state pattern paths)
       (List.rev !try_summaries);
+    if rec_flag = Nonrecursive then
+      List.iter (selfification_fact state) bindings;
     walk_expression state body;
     state.facts <- saved_facts;
     state.definitions <- saved_definitions;
@@ -1852,6 +1962,8 @@ and walk_value_bindings state ~persist rec_flag bindings =
   List.iter
     (fun binding -> enter_pattern state ~fact:true binding.vb_pat)
     bindings;
+  if rec_flag = Nonrecursive then
+    List.iter (selfification_fact state) bindings;
   if not persist then begin
     state.facts <- saved_facts;
     state.definitions <- saved_definitions

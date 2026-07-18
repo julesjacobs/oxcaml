@@ -51,6 +51,10 @@ val constructor_mismatch_name : string -> string
 (* Whether values of this type have the structural Lean model needed by
    match-arm equalities and projections. *)
 val supports_match_facts : env:Env.t -> Types.type_expr -> bool
+(* Whether equality at this type can be represented by the Lean backend.
+   Selfification uses this to avoid adding facts that would make an otherwise
+   unrelated verification condition fail during emission. *)
+val supports_equality : env:Env.t -> Types.type_expr -> bool
 
 (* Renders a refinement predicate to source-like syntax (infix operators,
    [true]/[false], [()], constructor and field application) for user-facing

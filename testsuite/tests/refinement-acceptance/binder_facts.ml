@@ -75,3 +75,65 @@ let bf_param_fact (n : int{ _ = 5 }) : int{ _ > 0 } = n
 [%%expect {|
 val bf_param_fact : int{ _ = 5 } -> int{ _ > 0 } = <fun>
 |}]
+
+(* A stable RHS selfifies without an explicit refinement on the binder.  The
+   downstream exact-value obligation is provable only from [x = 7]. *)
+let bf_stable_selfification () =
+  let x = 7 in
+  (x : int{ _ = 7 })
+[%%expect {|
+val bf_stable_selfification : unit -> int{ _ = 7 } = <fun>
+|}]
+
+(* Module-level values and exact aliases retain their equations for later
+   structure items. *)
+let bf_module_source = 9
+let bf_module_alias = bf_module_source
+let bf_module_alias_proof = (bf_module_alias : int{ _ = 9 })
+[%%expect {|
+val bf_module_source : int = 9
+val bf_module_alias : int = 9
+val bf_module_alias_proof : int{ _ = 9 } = 9
+|}]
+
+(* The value returned by this sequence happens to be [1], but the RHS is
+   impure and therefore contributes no selfification equation. *)
+let bf_no_impure_selfification () =
+  let x = (ignore (read_int ()); 1) in
+  (x : int{ _ = 1 })
+[%%expect {|
+Line 3, characters 2-20:
+3 |   (x : int{ _ = 1 })
+      ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+type bf_record = { left : int; right : int }
+
+(* Stable record components may still be lowered for an annotation subject. *)
+let bf_stable_record_annotation () =
+  ({ left = 1; right = 1 } : bf_record{ _.left = _.right })
+[%%expect {|
+type bf_record = { left : int; right : int; }
+val bf_stable_record_annotation : unit -> bf_record{ _.left = _.right } =
+  <fun>
+|}]
+
+let bf_record_counter = ref 0
+
+let bf_record_next () =
+  incr bf_record_counter;
+  !bf_record_counter
+
+(* Distinct effectful evaluations must not be identified by subject lowering. *)
+let bf_no_impure_record_annotation () =
+  ({ left = bf_record_next (); right = bf_record_next () } :
+    bf_record{ _.left = _.right })
+[%%expect {|
+val bf_record_counter : int ref = {contents = 0}
+val bf_record_next : unit -> int = <fun>
+Line 9, characters 3-58:
+9 |   ({ left = bf_record_next (); right = bf_record_next () } :
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed: this expression form cannot yet be represented in a verification condition
+|}]
