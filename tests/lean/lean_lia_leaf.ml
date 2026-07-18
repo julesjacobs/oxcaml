@@ -190,12 +190,14 @@ let emit_theorem ~(name : string) (entries : entry list) : string =
     \  intro me hme\n\
     \  simp only [List.mem_cons, List.not_mem_nil, or_false] at hme\n\
     \  rcases hme with %s\n\
-     %s\n"
+     %s\n\
+     #print axioms %s\n"
     name
     (String.concat "\n" hyps)
     (String.concat ", " list_elems)
     rcases
     arms
+    name
 ;;
 
 (* Full emitted file body (open + theorem); the prelude is prepended by the driver. *)

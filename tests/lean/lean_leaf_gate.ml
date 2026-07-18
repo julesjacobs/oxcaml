@@ -212,8 +212,17 @@ let process_file ~prelude ~timeout ~logdir path : unit =
                           base
                           i)
                       else (
-                        incr cnt_verified;
-                        Printf.printf "VERIFIED     %s#%d\n%!" base i)))
+                        match Oxsmt_lean_export.Lean_export.check_axioms out with
+                        | Error m ->
+                          incr cnt_broken;
+                          Printf.printf
+                            "BROKEN       %s#%d :: axiom-whitelist violation: %s\n%!"
+                            base
+                            i
+                            m
+                        | Ok () ->
+                          incr cnt_verified;
+                          Printf.printf "VERIFIED     %s#%d\n%!" base i)))
                (Recorder.theory_clauses rec_))))
 ;;
 

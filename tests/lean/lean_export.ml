@@ -326,6 +326,65 @@ let emit_fun_def (fi : fun_info) : string =
   Printf.sprintf "def %s %s : %s := %s\n" fi.lean_name (String.concat " " params) ret body
 ;;
 
+(* Axiom-whitelist gate. Parse the [#print axioms NAME] output and require the proof to
+   depend on NOTHING outside [{propext, Quot.sound}]. Any of sorryAx / Classical.choice /
+   Lean.ofReduceBool / ofReduceNat (or any other axiom) is a HARD FAIL — this is what
+   keeps a `sorry`, a native-`decide` oracle, or a smuggled classical axiom out of the
+   proofs. Returns [Ok ()] if the axioms are within the whitelist (including "does not
+   depend on any axioms"), else [Error msg]. *)
+let allowed_axioms = [ "propext"; "Quot.sound" ]
+
+let check_axioms (lean_output : string) : (unit, string) result =
+  let lines = String.split_on_char '\n' lean_output in
+  match
+    List.find_opt
+      (fun l ->
+        let sub needle =
+          let nl = String.length needle
+          and hl = String.length l in
+          let rec loop i =
+            if i + nl > hl
+            then false
+            else if String.sub l i nl = needle
+            then true
+            else loop (i + 1)
+          in
+          nl = 0 || loop 0
+        in
+        sub "does not depend on any axioms" || sub "depends on axioms")
+      lines
+  with
+  | None -> Error "no `#print axioms` line found (proof may not have elaborated)"
+  | Some line ->
+    let is_sub hay needle =
+      let nl = String.length needle
+      and hl = String.length hay in
+      let rec loop i =
+        if i + nl > hl
+        then false
+        else if String.sub hay i nl = needle
+        then true
+        else loop (i + 1)
+      in
+      nl = 0 || loop 0
+    in
+    if is_sub line "does not depend on any axioms"
+    then Ok ()
+    else (
+      (* extract the [...] list *)
+      match String.index_opt line '[', String.rindex_opt line ']' with
+      | Some i, Some j when j > i ->
+        let inner = String.sub line (i + 1) (j - i - 1) in
+        let names =
+          String.split_on_char ',' inner
+          |> List.map String.trim
+          |> List.filter (fun s -> s <> "")
+        in
+        let bad = List.filter (fun n -> not (List.mem n allowed_axioms)) names in
+        if bad = [] then Ok () else Error ("forbidden axiom(s): " ^ String.concat " " bad)
+      | _ -> Error ("unparseable axioms line: " ^ line))
+;;
+
 type sat_source =
   { positive : string (* proves the assertions hold under the model *)
   ; refutation_control : string (* claims the NEGATION; MUST be rejected by the kernel *)
@@ -359,7 +418,12 @@ let emit_sat ~(model : Session.model) ~(assertions : Term.t list) : sat_source =
      search.\n\
      set_option maxRecDepth 8000\n"
   in
-  { positive = Printf.sprintf "%s%sexample : %s = true := by decide\n" header defs conj
+  { positive =
+      Printf.sprintf
+        "%s%stheorem oxsmt_sat : %s = true := by decide\n#print axioms oxsmt_sat\n"
+        header
+        defs
+        conj
   ; refutation_control =
       Printf.sprintf
         "%s%s-- NEGATIVE CONTROL: the model satisfies the assertions, so the conjunction \

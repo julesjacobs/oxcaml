@@ -116,6 +116,37 @@ let solve_and_model path : (Session.model * Oxsmt_core.Term.t list) option * str
            | exception ex -> None, "solve: " ^ Printexc.to_string ex)))
 ;;
 
+(* Corrupt a model by tweaking the FIRST constant binding by one minimal step (flip a
+   Bool, +1 an Int, +1 an element index). Used for the wrong-model discrimination arm. *)
+let corrupt_model ((cards, bindings) : Session.model) : Session.model =
+  let done_ = ref false in
+  let bindings =
+    List.map
+      (fun (b : Session.model_binding) ->
+        match b with
+        | Session.Const (n, v) when not !done_ ->
+          let v' =
+            match v with
+            | Session.VBool x -> Some (Session.VBool (not x))
+            | Session.VInt x ->
+              Some (Session.VInt (Oxsmt_core.Bigint.add x Oxsmt_core.Bigint.one))
+            | Session.VUninterp i -> Some (Session.VUninterp (i + 1))
+            | Session.VReal _ -> None
+          in
+          (match v' with
+           | Some v' ->
+             done_ := true;
+             Session.Const (n, v')
+           | None -> b)
+        | _ -> b)
+      bindings
+  in
+  cards, bindings
+;;
+
+let corrupt_caught = ref 0
+let corrupt_total = ref 0
+
 let run_file ~timeout ~logdir path : outcome =
   match solve_and_model path with
   | None, why -> Not_sat why
@@ -134,7 +165,22 @@ let run_file ~timeout ~logdir path : outcome =
        then Broken (Printf.sprintf "positive rejected: %s" (String.trim pos_out))
        else if neg_ok
        then Broken "refutation control ACCEPTED (kernel proved a false model true)"
-       else Verified)
+       else (
+         match Lean_export.check_axioms pos_out with
+         | Error m -> Broken ("axiom-whitelist violation: " ^ m)
+         | Ok () ->
+           (* wrong-model discrimination: tweak one value; the corrupted positive should
+              be REJECTED. A tweak that still satisfies (another valid model) is not a
+              soundness break, so this is a REPORTED metric (caught/total), not a hard
+              gate; the guaranteed per-file discrimination is the refutation control
+              above. *)
+           (match Lean_export.emit_sat ~model:(corrupt_model model) ~assertions with
+            | exception Lean_export.Gap _ -> ()
+            | { positive = cpos; _ } ->
+              incr corrupt_total;
+              let cok, _ = run_lean ~timeout ~src:cpos ~tag:(base ^ ".corrupt") ~logdir in
+              if not cok then incr corrupt_caught);
+           Verified))
 ;;
 
 let expand_arg arg =
@@ -197,13 +243,15 @@ let () =
   Printf.printf
     "\n\
      lean_sat_gate: %d files | sat-solves=%d (VERIFIED=%d BROKEN=%d UNSUPPORTED=%d) \
-     non-sat=%d\n\
+     non-sat=%d | wrong-model-rejected=%d/%d\n\
      %!"
     (List.length files)
     !n_sat
     !n_verified
     !n_broken
     !n_unsupported
-    !n_notsat;
+    !n_notsat
+    !corrupt_caught
+    !corrupt_total;
   if !n_broken > 0 then exit 1
 ;;
