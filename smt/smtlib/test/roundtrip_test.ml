@@ -678,7 +678,11 @@ let xor_cases () =
      silently accepted as [not (= i j)] ([Node.eq] only checks operands share a sort). *)
   check_malformed
     ~name:"xor-non-bool"
-    (hdr ^ "(declare-const i Int)\n(declare-const j Int)\n(assert (xor i j))\n")
+    (hdr ^ "(declare-const i Int)\n(declare-const j Int)\n(assert (xor i j))\n");
+  (* The exact review repro: [(xor 1 2)] was mis-parsed to a definite [sat] (and
+     [(xor 1 1)] to [unsat]) before the guard; both Int-literal operands are non-Bool ->
+     malformed. *)
+  check_malformed ~name:"xor-int-literals" (hdr ^ "(assert (xor 1 2))\n")
 ;;
 
 (* Parser fail-closed guards (codex rider): the parser must ERROR/degrade on ill-typed or
