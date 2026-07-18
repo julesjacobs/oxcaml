@@ -73,5 +73,14 @@ example (ρ : Assign) (h1 : satClause ρ [(true, 0)] = true) (h2 : satClause ρ 
   simp only [List.erase_cons_head, List.append_nil] at hr
   exact empty_absurd ρ hr
 
+-- Monotonicity: a clause entailed by a satisfied SUBSET is satisfied. Lets the emitter
+-- reconcile a computed resolvent with the certificate's learned clause (same literals up to
+-- order/duplication): the subset check is ground `by decide` at each use site.
+theorem sat_mono (ρ : Assign) (a b : Clause)
+    (hsub : ∀ l ∈ a, l ∈ b) (h : satClause ρ a = true) : satClause ρ b = true := by
+  simp only [satClause, List.any_eq_true] at h ⊢
+  rcases h with ⟨l, hla, hl⟩
+  exact ⟨l, hsub l hla, hl⟩
+
 end OxsmtRes
 
