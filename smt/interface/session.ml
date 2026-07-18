@@ -267,6 +267,19 @@ let create
        | Some ("0" | "false" | "no") -> false
        | Some _ | None -> true)
   in
+  (* Lemma generation budget per [check_sat]: [OXSMT_LEMMA_GEN_BUDGET] env override
+     (quant-mgi tuning knob). The explicit [lemma_gen_budget] param wins; else the env
+     override; else [None] => the manager's default (100k). Byte-identical to trunk when
+     unset. FAIR (the landed streaming/fair instantiation, LAND 45) supersedes a raised
+     DEFAULT for the quantified board, so this ships only the knob, not a default change. *)
+  let lemma_gen_budget =
+    match lemma_gen_budget with
+    | Some _ as b -> b
+    | None ->
+      (match Sys.getenv_opt "OXSMT_LEMMA_GEN_BUDGET" with
+       | Some s -> int_of_string_opt s
+       | None -> None)
+  in
   (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
      (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
      checker's contradictory closure would otherwise spuriously fail the "declared level-0
