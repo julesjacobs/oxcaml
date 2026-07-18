@@ -509,22 +509,33 @@ let rational_minus_one = rational_integer (Bigint.neg Bigint.one)
    identical to what the branch re-read would have produced; a genuinely non-constant Int
    leaf (an Int variable/arithmetic) still raises (a real mixed-Int/Real problem, which
    the session degrades on separately). *)
-let rec coerce_to_sort st expected (term : Term.t) =
+let coerce_to_sort st expected (term : Term.t) =
   if Sort.equal term.sort expected
   then term
   else if Lra_config.enabled ()
           && Sort.equal expected Sort.real
           && Sort.equal term.sort Sort.int
   then (
-    match term.node with
-    | Term.Int_const num -> Context.real_const_big st.ctx ~num ~den:Bigint.one
-    | Term.Ite (cond, then_, else_) ->
-      Context.ite
-        st.ctx
-        cond
-        (coerce_to_sort st Sort.real then_)
-        (coerce_to_sort st Sort.real else_)
-    | _ -> malformedf "a nonconstant Int term cannot be implicitly coerced to Real")
+    (* Memoize by hash-consed term so a DAG-shared int-ite is widened once per distinct
+       node, not once per path (the naive recursion is O(2^depth) on such sharing). Only
+       Int-sorted terms reach [widen]: an Int-sorted [ite] has Int-sorted branches, so the
+       recursion never leaves Int. Purely a perf fix — the widened term is identical. *)
+    let memo = Term.Table.create 64 in
+    let rec widen (t : Term.t) =
+      match Term.Table.find_opt memo t with
+      | Some r -> r
+      | None ->
+        let r =
+          match t.node with
+          | Term.Int_const num -> Context.real_const_big st.ctx ~num ~den:Bigint.one
+          | Term.Ite (cond, then_, else_) ->
+            Context.ite st.ctx cond (widen then_) (widen else_)
+          | _ -> malformedf "a nonconstant Int term cannot be implicitly coerced to Real"
+        in
+        Term.Table.add memo t r;
+        r
+    in
+    widen term)
   else term
 ;;
 

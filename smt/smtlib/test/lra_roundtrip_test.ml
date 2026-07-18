@@ -91,8 +91,56 @@ let check_quantified_body_degrades ~name source =
     fail "%s: parse failed unexpectedly: %s" name (Printexc.to_string exn)
 ;;
 
+(* Perf guard (task #13): the DAG-shared int-ite widening in [coerce_to_sort] must be
+   memoized. A [define-fun] chain [x{i} = (ite p x{i-1} y{i-1})] / [y{i} = (ite q ...)]
+   references each predecessor twice per level, so an un-memoized coercion performs
+   O(2^depth) recursive visits — reviewer-verified to hang >15s at depth 26. Bound the
+   parse with a 3s alarm: the memoized form widens each distinct node once (~10ms here);
+   an un-memoized regression is killed by the alarm and fails RED (bounded, never a CI
+   hang). *)
+let check_coerce_memo_perf () =
+  incr checks;
+  let depth = 40 in
+  let buf = Buffer.create 8192 in
+  Buffer.add_string
+    buf
+    "(set-logic QF_UFLRA)\n\
+     (declare-const p Bool)\n\
+     (declare-const q Bool)\n\
+     (declare-const r Real)\n\
+     (define-fun x0 () Int (ite p 1 2))\n\
+     (define-fun y0 () Int (ite q 3 4))\n";
+  for i = 1 to depth do
+    Printf.bprintf buf "(define-fun x%d () Int (ite p x%d y%d))\n" i (i - 1) (i - 1);
+    Printf.bprintf buf "(define-fun y%d () Int (ite q x%d y%d))\n" i (i - 1) (i - 1)
+  done;
+  Printf.bprintf buf "(assert (= r x%d))\n(check-sat)\n" depth;
+  let source = Buffer.contents buf in
+  let exception Timeout in
+  let prev = Sys.signal Sys.sigalrm (Sys.Signal_handle (fun _ -> raise Timeout)) in
+  let restore () =
+    ignore (Unix.alarm 0);
+    Sys.set_signal Sys.sigalrm prev
+  in
+  match
+    ignore (Unix.alarm 3);
+    Parser.parse source
+  with
+  | _ -> restore ()
+  | exception Timeout ->
+    restore ();
+    fail
+      "coerce-memo-perf: depth-%d parse exceeded 3s (coerce_to_sort not memoized? \
+       O(2^depth))"
+      depth
+  | exception exn ->
+    restore ();
+    fail "coerce-memo-perf: unexpected %s" (Printexc.to_string exn)
+;;
+
 let () =
   if not (Lra_config.enabled ()) then fail "lra_roundtrip_test must run with OXSMT_LRA=1";
+  check_coerce_memo_perf ();
   check_roundtrip
     ~name:"exact-literals-and-strict"
     ~logic:"QF_LRA"

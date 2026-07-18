@@ -19,7 +19,7 @@
 (executable
  (name lra_roundtrip_test)
  (modules lra_roundtrip_test)
- (libraries oxsmt_core oxsmt_smtlib oxsmt_smtlib_parser))
+ (libraries oxsmt_core oxsmt_smtlib oxsmt_smtlib_parser unix))
 
 ; fuzz_lex: standing adversarial round-trip fuzzer for the shared lexer (make fuzz-lex).
 ; Deterministic; also run with a small iteration count inside make smtlib-test.
