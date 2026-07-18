@@ -201,6 +201,29 @@ let drop_premise (src : string) : string option =
       | _ -> None)
 ;;
 
+(* Tamper C (broken EUF congruence chain): the emitter discharges an EUF leaf with an
+   explicit congruence proof [absurd <eqproof> hne_k], where [eqproof] chains [he_i]
+   equality facts through [Eq.trans]/[congrArg]. Replace the FIRST equality fact [he_i]
+   USED in that proof (the first [he_] after an [absurd]) with [rfl]: the reconstructed
+   equality now proves the wrong thing, so [absurd] no longer typechecks and the kernel
+   must REJECT. [None] when the body has no EUF discharge to break. *)
+let tamper_euf (src : string) : string option =
+  match find_sub src "absurd " with
+  | None -> None
+  | Some a ->
+    (match find_sub ~from:a src "he_" with
+     | None -> None
+     | Some j ->
+       let hl = String.length src in
+       let k = ref (j + 3) in
+       while !k < hl && src.[!k] >= '0' && src.[!k] <= '9' do
+         incr k
+       done;
+       if !k = j + 3
+       then None
+       else Some (String.sub src 0 j ^ "rfl" ^ String.sub src !k (hl - !k)))
+;;
+
 (* MECHANICAL NO-AUTOMATION GUARD (team-lead ruling 2026-07-17): the EMITTED
    per-certificate body must never contain a proof-search / decision-procedure tactic —
    omega, simp, grind, native_decide, linarith, etc. (omega is permitted ONLY in the
@@ -311,7 +334,8 @@ let process_file ~prelude ~timeout ~logdir path : unit =
                 in
                 let pivot_ok = tamper_accepts "pivot" tamper_pivot in
                 let drop_ok = tamper_accepts "drop" drop_premise in
-                let tampered_ok = pivot_ok || drop_ok in
+                let euf_ok = tamper_accepts "euf" tamper_euf in
+                let tampered_ok = pivot_ok || drop_ok || euf_ok in
                 if not ok
                 then (
                   incr cnt_broken;
@@ -330,7 +354,11 @@ let process_file ~prelude ~timeout ~logdir path : unit =
                   Printf.printf
                     "BROKEN       %s :: TAMPERED refutation ACCEPTED (%s)\n%!"
                     base
-                    (if pivot_ok then "swapped-pivot" else "dropped-premise"))
+                    (if pivot_ok
+                     then "swapped-pivot"
+                     else if drop_ok
+                     then "dropped-premise"
+                     else "broken-euf-chain"))
                 else (
                   match Oxsmt_lean_export.Lean_export.check_axioms out with
                   | Error m ->

@@ -105,4 +105,56 @@ theorem leaf_sat
       | false => rfl
     exact hlink p hp hfalse
 
+/- ---- EUF theory-leaf discharge (emitter-reconstructed congruence) ----
+   The certificate stores only the leaf clause for an EUF conflict (no proof chain), so the
+   emitter runs congruence closure itself and emits an explicit [Eq.trans]/[congrArg] proof
+   term; the kernel judges it. These lemmas bridge that Prop-level congruence contradiction
+   back to the Boolean [satClause] the resolution skeleton consumes — every emitted per-cert
+   use is pure term application + ground [by decide] (no tactic), so the automation guard
+   holds. -/
+
+/- Close a leaf clause from a proof that it CANNOT be all-false. The emitter supplies
+   [hcon] as a term: assume the clause is false, extract each literal's Prop meaning, run
+   the congruence contradiction. -/
+theorem euf_leaf_sat (leaf : OxsmtRes.Clause) (ρb : OxsmtRes.Assign)
+    (hcon : OxsmtRes.satClause ρb leaf = false → False) :
+    OxsmtRes.satClause ρb leaf = true := by
+  cases hc : OxsmtRes.satClause ρb leaf with
+  | true => rfl
+  | false => exact (hcon hc).elim
+
+/- From an unsatisfied clause, each of its literals is false. -/
+theorem lit_false_of_clause_false (ρb : OxsmtRes.Assign) (leaf : OxsmtRes.Clause)
+    (l : OxsmtRes.Lit) (hmem : l ∈ leaf) (hc : OxsmtRes.satClause ρb leaf = false) :
+    OxsmtRes.satLit ρb l = false := by
+  rw [OxsmtRes.satClause, List.any_eq_false] at hc
+  have hnt : ¬ OxsmtRes.satLit ρb l = true := hc l hmem
+  cases hh : OxsmtRes.satLit ρb l with
+  | true => exact absurd hh hnt
+  | false => rfl
+
+/- A negative leaf literal [(false, v)] over an equality atom, unsatisfied, forces the
+   equality to hold. [decide] uses the sort's supplied [DecidableEq] instance; it never has
+   to reduce (the atom sort is an abstract parameter), only be judged equal by [rfl] to the
+   emitter's [ρb v] definition. -/
+theorem euf_eq_of {α : Type} [DecidableEq α] (x y : α) (ρb : OxsmtRes.Assign) (v : Nat)
+    (hv : ρb v = decide (x = y)) (h : OxsmtRes.satLit ρb (false, v) = false) : x = y := by
+  have hbt : ρb v = true := by
+    cases hh : ρb v with
+    | true => rfl
+    | false => simp [OxsmtRes.satLit, hh] at h
+  rw [hv] at hbt
+  exact of_decide_eq_true hbt
+
+/- A positive leaf literal [(true, v)] over an equality atom, unsatisfied, forces the
+   disequality. -/
+theorem euf_ne_of {α : Type} [DecidableEq α] (x y : α) (ρb : OxsmtRes.Assign) (v : Nat)
+    (hv : ρb v = decide (x = y)) (h : OxsmtRes.satLit ρb (true, v) = false) : x ≠ y := by
+  have hbf : ρb v = false := by
+    cases hh : ρb v with
+    | true => simp [OxsmtRes.satLit, hh] at h
+    | false => rfl
+  rw [hv] at hbf
+  exact of_decide_eq_false hbf
+
 end OxsmtBridge
