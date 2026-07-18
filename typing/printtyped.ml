@@ -327,20 +327,16 @@ let value_modes_var i ppf ms =
   modes ~pr:print_value_modes_var i ppf ms
 
 let moda_desc i ppf modalities_annot =
-  let modality_as_mode (Mode.Modality.Atom (ax, modality)) : Mode.Value.atom =
-    match ax, modality with
-    | Comonadic ax, Meet_const mode -> Atom (Comonadic ax, mode)
-    | Monadic ax, Join_const mode -> Atom (Monadic ax, mode)
-  in
-  let as_modes_annot =
-    List.map (Location.map modality_as_mode) modalities_annot
-  in
-  let print_mode_annot i ppf { txt = (Mode.Value.Atom (ax, mode)); loc = _ } =
+  let print_modality_annot i ppf
+      { txt = (Mode.Modality.Atom (ax, modality)); loc = _ } =
+    let (Mode.Value.Axis.P value_axis) =
+      Mode.Modality.Axis.to_value (Mode.Modality.Axis.P ax)
+    in
     line i ppf "%a: %a\n"
-      (Format_doc.compat Mode.Value.Axis.print) ax
-      (Format_doc.compat (Mode.Value.Const.print_axis ax)) mode
+      (Format_doc.compat Mode.Value.Axis.print) value_axis
+      (Format_doc.compat (Mode.Modality.Per_axis.print ax)) modality
   in
-  list i print_mode_annot ppf as_modes_annot
+  list i print_modality_annot ppf modalities_annot
 
 let modalities i ppf { moda_modalities = mm; moda_desc = md } =
   line i ppf "%a\n" (Format_doc.compat Mode.Modality.Const.print) mm;

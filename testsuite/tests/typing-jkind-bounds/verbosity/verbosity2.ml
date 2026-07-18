@@ -65,7 +65,7 @@ type t
           unique
           read_write
           uncontended
-          physical
+          nonlogical
           static
 |}]
 
@@ -83,7 +83,7 @@ type t
           unique
           read_write
           uncontended
-          physical
+          nonlogical
           static
           internal
 |}]
@@ -102,7 +102,7 @@ type t
           unique
           read_write
           uncontended
-          physical
+          nonlogical
           static
           internal
 |}]
@@ -121,7 +121,7 @@ type t
           unique
           read_write
           uncontended
-          physical
+          nonlogical
           static
           internal
 |}]
@@ -180,7 +180,7 @@ type ('a
              unique
              read_write
              uncontended
-             physical
+             nonlogical
              static
              internal)
      t
@@ -201,7 +201,7 @@ type 'a t
           unique
           read_write
           uncontended
-          physical
+          nonlogical
           static
       with 'a @@ external_
 |}]
@@ -221,7 +221,7 @@ type 'a t
           unique
           read_write
           uncontended
-          physical
+          nonlogical
           static
       with 'a @@ external_
 |}]

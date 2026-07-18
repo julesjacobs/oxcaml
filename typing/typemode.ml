@@ -109,13 +109,19 @@ module Modality_axis_pair = struct
   type t = Modality.atom
 
   let of_string s : t =
-    match[@warning "-18"]
-      Mode_axis_pair.to_value (Mode_axis_pair.of_string s)
-    with
-    | Atom (Comonadic Totality, _) -> raise Not_found
-    | Atom (Monadic Logicality, _) -> raise Not_found
-    | Atom (Monadic ax, mode) -> Atom (Monadic ax, Join_const mode)
-    | Atom (Comonadic ax, mode) -> Atom (Comonadic ax, Meet_const mode)
+    match[@warning "-18"] s with
+    | "total" -> Atom (Comonadic Totality, Meet_const Total)
+    | "partial" -> Atom (Comonadic Totality, Meet_const Partial)
+    | "logical" -> Atom (Monadic Logicality, Join_const Logical)
+    | "nonlogical" -> Atom (Monadic Logicality, Join_const Physical)
+    | _ -> (
+      match[@warning "-18"]
+        Mode_axis_pair.to_value (Mode_axis_pair.of_string s)
+      with
+      | Atom (Monadic Logicality, _) -> raise Not_found
+      | Atom (Monadic ax, mode) -> Atom (Monadic ax, Join_const mode)
+      | Atom (Comonadic Totality, _) -> raise Not_found
+      | Atom (Comonadic ax, mode) -> Atom (Comonadic ax, Meet_const mode))
 end
 
 module Modifier_axis_pair = struct

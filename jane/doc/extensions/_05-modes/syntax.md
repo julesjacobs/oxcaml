@@ -262,6 +262,14 @@ Similarly, so can an `external` signature item:
 external id : 'a -> 'a @@ modalities = "%identity"
 ```
 
+An `external` declaration in a structure converts its syntactic modality list
+to the value mode at which the primitive is available.  All modality spellings
+are accepted in this position and denote their corresponding value modes; in
+particular, `nonlogical` denotes the `physical` value mode:
+```ocaml
+external id : 'a -> 'a @@ total nonlogical = "%identity"
+```
+
 A signature can have default modalities that each item can override:
 ```ocaml
 sig @@ portable
