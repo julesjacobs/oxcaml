@@ -521,6 +521,58 @@ let check_cegis name expect src =
   Printf.printf "%-28s %-8s %s\n" ("cegis:" ^ name) smt tag
 ;;
 
+(* The portfolio composition exactly as the CLI runs it: Chc_cegis first (time-boxed), and
+   on [Unknown] fall through to the pdr dispatch. Used to prove the inherited hardened
+   [Chc_pdr.verify] closes the trivially-unsafe wrong-SAFE on BOTH the cegis-explicit and
+   the portfolio paths. *)
+let solve_portfolio src =
+  match Parse.parse src with
+  | sys ->
+    let r = Cegis.solve ~budget:600 ~max_effort:6000 sys in
+    (match r.Pdr.verdict with
+     | Pdr.Safe | Pdr.Unsafe -> r
+     | Pdr.Unknown _ ->
+       let e = dispatch sys in
+       { Pdr.verdict =
+           (match e.Engine.verdict with
+            | Engine.Safe -> Pdr.Safe
+            | Engine.Unsafe -> Pdr.Unsafe
+            | Engine.Unknown m -> Pdr.Unknown m)
+       ; detail = e.Engine.detail
+       })
+  | exception Parse.Unsupported m -> { Pdr.verdict = Pdr.Unknown m; detail = m }
+  | exception Parse.Malformed m ->
+    { Pdr.verdict = Pdr.Unknown ("malformed: " ^ m); detail = m }
+;;
+
+let check_portfolio name expect src =
+  let r = solve_portfolio src in
+  let v = r.Pdr.verdict in
+  let smt =
+    match v with
+    | Pdr.Safe -> "sat"
+    | Pdr.Unsafe -> "unsat"
+    | Pdr.Unknown _ -> "unknown"
+  in
+  let ok, tag =
+    match expect, v with
+    | (Safe_must | Safe_ok), Pdr.Safe -> true, "OK"
+    | (Unsafe_must | Unsafe_ok), Pdr.Unsafe -> true, "OK"
+    | Unknown_expected, Pdr.Unknown _ -> true, "OK"
+    | (Safe_must | Safe_ok), Pdr.Unsafe -> false, "UNSOUND(safe reported unsafe)"
+    | (Unsafe_must | Unsafe_ok), Pdr.Safe -> false, "UNSOUND(unsafe reported safe)"
+    | Unknown_expected, (Pdr.Safe | Pdr.Unsafe) ->
+      false, "UNEXPECTED-DEFINITE(should be unknown)"
+    | (Safe_must | Unsafe_must), Pdr.Unknown _ -> false, "MISS(must-solve got unknown)"
+    | (Safe_ok | Unsafe_ok), Pdr.Unknown _ -> true, "soft-miss(unknown)"
+  in
+  if not ok then incr failures;
+  (match expect, v with
+   | (Safe_ok | Unsafe_ok), Pdr.Unknown _ -> incr soft
+   | _ -> ());
+  Printf.printf "%-28s %-8s %s\n" ("portfolio:" ^ name) smt tag
+;;
+
 let () =
   (* SUM invariant [x + y = 10] with point init [x=0,y=10] and bad [x+y<>10]. This is the
      class backward PDR cube-generalization provably diverges on (the [safe_rel_sum]
@@ -580,6 +632,40 @@ let () =
       (declare-fun P (Int) Bool)
       (assert (forall ((x Int)) (=> (= x 3) (P x))))
       (assert (forall ((x Int)) (=> (and (P x)(= x 3)) false)))|};
+  (* B-2 inherited-firewall reproducer through the CEGIS path. A fact-free NONLINEAR query
+     [x*x = 0 => false] is a genuine trivially-unsafe obligation the LIA oracle cannot
+     decide (R_unknown). cegis's up-front unsafe check tests [= R_sat] (so R_unknown is
+     NOT flagged unsafe), then it synthesizes a candidate invariant for [P] and hands it
+     to the SHARED Chc_pdr.verify. Before the landed verify hardening (trivially_unsafe
+     obligations were never discharged + R_unknown swallowed), a verified P-invariant
+     returned a wrong SAFE; with the hardened verify — which cegis INHERITS unchanged via
+     [P.verify] — SAFE now requires every trivially_unsafe body provably R_unsat, so this
+     is [unknown]. Must be unknown via BOTH the cegis-explicit engine and the portfolio
+     composition. *)
+  check_cegis
+    "triv-nonlinear-unknown"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (= (* x x) 0) false)))|};
+  check_portfolio
+    "triv-nonlinear-unknown"
+    Unknown_expected
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (= (* x x) 0) false)))|};
+  (* Control: a LINEAR fact-free query stays a decidable genuine counterexample; the
+     shared depth-0/trivially-unsafe check must still catch it as UNSAFE through the
+     portfolio. *)
+  check_portfolio
+    "triv-linear-unsafe-control"
+    Unsafe_must
+    {|(set-logic HORN)
+      (declare-fun P (Int) Bool)
+      (assert (forall ((x Int)) (=> (= x 0) (P x))))
+      (assert (forall ((x Int)) (=> (> x 0) false)))|};
   Printf.printf "\n%d hard failure(s), %d soft miss(es)\n" !failures !soft;
   if !failures > 0 then exit 1
 ;;
