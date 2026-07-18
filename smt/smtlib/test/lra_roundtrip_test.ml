@@ -1,5 +1,4 @@
 open Oxsmt_core
-
 module Parser = Oxsmt_smtlib_parser.Parser
 module Printer = Oxsmt_smtlib.Printer
 
@@ -9,8 +8,8 @@ let checks = ref 0
 let fail fmt =
   Printf.ksprintf
     (fun message ->
-       incr failures;
-       Printf.eprintf "FAIL: %s\n" message)
+      incr failures;
+      Printf.eprintf "FAIL: %s\n" message)
     fmt
 ;;
 
@@ -19,8 +18,8 @@ let contains text fragment =
   let fragment_length = String.length fragment in
   let rec loop offset =
     offset + fragment_length <= text_length
-    && (String.equal (String.sub text offset fragment_length) fragment
-        || loop (offset + 1))
+    && (String.equal (String.sub text offset fragment_length) fragment || loop (offset + 1)
+       )
   in
   fragment_length = 0 || loop 0
 ;;
@@ -39,20 +38,24 @@ let check_roundtrip ~name ?logic ?(fragments = []) source =
      | printed ->
        Option.iter
          (fun expected ->
-            if not (contains printed ("(set-logic " ^ expected ^ ")"))
-            then fail "%s: expected logic %s in\n%s" name expected printed)
+           if not (contains printed ("(set-logic " ^ expected ^ ")"))
+           then fail "%s: expected logic %s in\n%s" name expected printed)
          logic;
        List.iter
          (fun fragment ->
-            if not (contains printed fragment)
-            then fail "%s: expected %S in\n%s" name fragment printed)
+           if not (contains printed fragment)
+           then fail "%s: expected %S in\n%s" name fragment printed)
          fragments;
        (match Parser.parse_into env context printed with
         | reparsed ->
           if not (terms_equal parsed.assertions reparsed.assertions)
           then fail "%s: assertions changed across print/reparse\n%s" name printed
         | exception exn ->
-          fail "%s: printed output did not reparse: %s\n%s" name (Printexc.to_string exn) printed)
+          fail
+            "%s: printed output did not reparse: %s\n%s"
+            name
+            (Printexc.to_string exn)
+            printed)
      | exception exn -> fail "%s: printing failed: %s" name (Printexc.to_string exn))
   | exception exn -> fail "%s: parsing failed: %s" name (Printexc.to_string exn)
 ;;
@@ -84,12 +87,12 @@ let check_quantified_body_degrades ~name source =
      | exception Parser.Unsupported _ -> ()
      | exception exn -> fail "%s: unexpected exception %s" name (Printexc.to_string exn))
   | _ -> fail "%s: expected one deferred universal lemma" name
-  | exception exn -> fail "%s: parse failed unexpectedly: %s" name (Printexc.to_string exn)
+  | exception exn ->
+    fail "%s: parse failed unexpectedly: %s" name (Printexc.to_string exn)
 ;;
 
 let () =
-  if not (Lra_config.enabled ())
-  then fail "lra_roundtrip_test must run with OXSMT_LRA=1";
+  if not (Lra_config.enabled ()) then fail "lra_roundtrip_test must run with OXSMT_LRA=1";
   check_roundtrip
     ~name:"exact-literals-and-strict"
     ~logic:"QF_LRA"
@@ -135,6 +138,29 @@ let () =
     "(set-logic QF_LRA)\n\
      (declare-const x Real)\n\
      (assert (= x 123456789012345678901234567890123456789.0))\n";
+  (* A let-bound Int-sorted [ite] is parsed once; a later use in a Real context sees the
+     already-built Int term and cannot re-read its branches, so [coerce_to_sort] must
+     widen the [ite] structurally (bottoming out at the Int-const leaves). Nested ites too
+     (the QF_LRA/spider_benchmarks shape). *)
+  check_roundtrip
+    ~name:"let-bound-int-ite-coerced-to-real"
+    ~logic:"QF_LRA"
+    ~fragments:[ "(ite p 1.0 2.0)"; "(ite p (ite q 3.0 2.0) 1.0)" ]
+    "(set-logic QF_UFLRA)\n\
+     (declare-const x Real)\n\
+     (declare-const p Bool)\n\
+     (declare-const q Bool)\n\
+     (assert (let ((v (ite p 1 2))) (<= v x)))\n\
+     (assert (let ((v (ite p (ite q 3 2) 1))) (= v x)))\n";
+  (* Boundary: a genuinely non-constant Int leaf (an Int variable) inside the ite is NOT
+     silently widened — still rejected (a real mixed-Int/Real problem). *)
+  check_rejected
+    ~name:"let-bound-int-var-in-ite-not-coerced"
+    "(set-logic QF_UFLRA)\n\
+     (declare-const x Real)\n\
+     (declare-const n Int)\n\
+     (declare-const p Bool)\n\
+     (assert (let ((v (ite p n 2))) (<= v x)))\n";
   check_rejected
     ~name:"nonconstant-int-not-coerced"
     "(set-logic QF_UFLRA)\n\
@@ -143,9 +169,7 @@ let () =
      (assert (= x n))\n";
   check_rejected
     ~name:"nonconstant-real-division"
-    "(set-logic QF_LRA)\n\
-     (declare-const x Real)\n\
-     (assert (= (/ x 2) 1.0))\n";
+    "(set-logic QF_LRA)\n(declare-const x Real)\n(assert (= (/ x 2) 1.0))\n";
   check_rejected
     ~name:"zero-real-denominator"
     "(set-logic QF_LRA)\n(assert (= (/ 1 0) 0.0))\n";
@@ -154,9 +178,7 @@ let () =
     "(set-logic LRA)\n(assert (forall ((x Real)) (= x x)))\n";
   check_quantified_body_degrades
     ~name:"real-in-quantified-body"
-    "(set-logic UFLRA)\n\
-     (declare-const x Real)\n\
-     (assert (forall ((n Int)) (= x 0)))\n";
+    "(set-logic UFLRA)\n(declare-const x Real)\n(assert (forall ((n Int)) (= x 0)))\n";
   Printf.printf "lra smtlib: %d checks, %d failures\n" !checks !failures;
   if !failures <> 0 then exit 1
 ;;

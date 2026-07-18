@@ -499,8 +499,17 @@ let rational_minus_one = rational_integer (Bigint.neg Bigint.one)
 
 (* SMT-LIB numerals default to Int. The sole implicit widening is an [Int_const] used
    where this same application establishes an expected Real sort. In particular, an Int
-   variable or residual Int arithmetic term is never silently converted. *)
-let coerce_to_sort st expected (term : Term.t) =
+   variable or residual Int arithmetic term is never silently converted.
+
+   An Int-sorted [ite] is widened by pushing the coercion into its branches. This is the
+   only structural case: unlike a freshly parsed [ite] (whose branches [read_op] re-reads
+   with an expected Real sort), an [ite] bound to a [let] variable is parsed ONCE, so a
+   later use of that variable in a Real context sees the already-built Int term and cannot
+   re-read from the s-expression. Recursing bottoms out at [Int_const] leaves and is
+   identical to what the branch re-read would have produced; a genuinely non-constant Int
+   leaf (an Int variable/arithmetic) still raises (a real mixed-Int/Real problem, which
+   the session degrades on separately). *)
+let rec coerce_to_sort st expected (term : Term.t) =
   if Sort.equal term.sort expected
   then term
   else if Lra_config.enabled ()
@@ -509,6 +518,12 @@ let coerce_to_sort st expected (term : Term.t) =
   then (
     match term.node with
     | Term.Int_const num -> Context.real_const_big st.ctx ~num ~den:Bigint.one
+    | Term.Ite (cond, then_, else_) ->
+      Context.ite
+        st.ctx
+        cond
+        (coerce_to_sort st Sort.real then_)
+        (coerce_to_sort st Sort.real else_)
     | _ -> malformedf "a nonconstant Int term cannot be implicitly coerced to Real")
   else term
 ;;
