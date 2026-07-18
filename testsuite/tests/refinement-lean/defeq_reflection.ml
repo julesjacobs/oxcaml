@@ -81,14 +81,134 @@ Error: Refinement verification failed (disproved)
 let[@vox.def] add3 x y = x + y + 3
 [%%expect {|
 val add3 : int @ total logical -> int -> int = <fun>
-val add3_def : int @ total -> int @ total -> unit{ add3 x y = x + y + 3 } =
-  <fun>
+val add3_def :
+  int @ total logical -> int @ total -> unit{ add3 x y = x + y + 3 } = <fun>
 |}]
 
 let () = add3_def 10 20
 let add3_used = (add3 10 20 : int{ _ = 33 })
 [%%expect {|
 val add3_used : int{ _ = 33 } = 33
+|}]
+
+(* Recursive definitional equations use the same structural-totality verdict as
+   recursive mode checking.  Instantiation remains explicit and ground: each
+   [length_def] call contributes exactly one constructor equation. *)
+type lst = Nil | Cons of int * lst
+
+let[@vox.def] rec length l =
+  match l with
+  | Nil -> 0
+  | Cons (_, tail) -> 1 + length tail
+
+[%%expect {|
+type lst = Nil | Cons of int * lst
+val length : lst -> int = <fun>
+val length_def :
+  lst @ total ->
+  unit{ length l = (match l with | Nil -> 0 | Cons _ tail -> 1 + length tail)
+   } =
+  <fun>
+|}]
+
+let () = length_def Nil
+let () = length_def (Cons (2, Nil))
+let () = length_def (Cons (1, Cons (2, Nil)))
+
+let recursive_ground =
+  (length (Cons (1, Cons (2, Nil))) : int{ _ = 2 })
+
+[%%expect {|
+val recursive_ground : int{ _ = 2 } = 2
+|}]
+
+let recursive_ground_false =
+  (length (Cons (1, Cons (2, Nil))) : int{ _ = 3 })
+
+[%%expect {|
+Line 2, characters 2-51:
+2 |   (length (Cons (1, Cons (2, Nil))) : int{ _ = 3 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Variant A: the structurally smaller [append tail l2] call contributes the
+   instantiated declared result refinement as its induction hypothesis.  The
+   length equations are still requested manually. *)
+let[@vox.def] rec append (l1 : lst) (l2 : lst)
+    : lst{ length _ = length l1 + length l2 } =
+  match l1 with
+  | Nil ->
+    let _ = length_def Nil in
+    l2
+  | Cons (head, tail) ->
+    let result = append tail l2 in
+    let _ = length_def (Cons (head, result)) in
+    let _ = length_def (Cons (head, tail)) in
+    Cons (head, result)
+
+[%%expect {|
+val append :
+  lst @ total logical -> lst -> lst{ length _ = length l1 + length l2 } =
+  <fun>
+val append_def :
+  lst @ total logical ->
+  lst ->
+  unit{
+   append l1 l2 = (match l1 with | Nil -> let *ignored-refinement-let* = length_def Nil in l2 | Cons head tail -> let result = append tail l2 in let *ignored-refinement-let* = length_def (Cons (head, result)) in let *ignored-refinement-let* = length_def (Cons (head, tail)) in Cons (head, result))
+   } =
+  <fun>
+|}]
+
+(* Variant B: a separate structural lemma about the same [append]. *)
+let rec append_length (l1 : lst) (l2 : lst)
+    : unit{
+        length (append l1 l2)
+        = length l1 + length l2
+      } =
+  match l1 with
+  | Nil ->
+    let _ = append_def Nil l2 in
+    let _ = length_def Nil in
+    ()
+  | Cons (head, tail) ->
+    let _ = append_length tail l2 in
+    let _ = append_def (Cons (head, tail)) l2 in
+    let _ = length_def (Cons (head, append tail l2)) in
+    let _ = length_def (Cons (head, tail)) in
+    ()
+
+[%%expect {|
+val append_length :
+  lst -> lst -> unit{ length (append l1 l2) = length l1 + length l2 } = <fun>
+|}]
+
+(* A structurally total recursive body still has to prove its own result
+   contract.  The Nil arm makes this false claim unprovable. *)
+let rec append_wrong (l1 : lst) (l2 : lst)
+    : lst{ length _ = length l1 } =
+  match l1 with
+  | Nil ->
+    let _ = length_def Nil in
+    l2
+  | Cons (head, tail) ->
+    let result = append_wrong tail l2 in
+    let _ = length_def (Cons (head, result)) in
+    let _ = length_def (Cons (head, tail)) in
+    Cons (head, result)
+
+[%%expect {|
+Lines 3-11, characters 2-23:
+ 3 | ..match l1 with
+ 4 |   | Nil ->
+ 5 |     let _ = length_def Nil in
+ 6 |     l2
+ 7 |   | Cons (head, tail) ->
+ 8 |     let result = append_wrong tail l2 in
+ 9 |     let _ = length_def (Cons (head, result)) in
+10 |     let _ = length_def (Cons (head, tail)) in
+11 |     Cons (head, result)
+Error: Refinement verification failed (not-proved)
 |}]
 
 (* Fail-closed: a body using integer division is partial, so it cannot be
@@ -116,13 +236,13 @@ Error: The value "raise" is "partial"
          which is expected to be "total".
 |}]
 
-(* Fail-closed: recursion is not total, so it cannot be reflected. *)
+(* Fail-closed: non-structural recursion cannot be reflected. *)
 let[@vox.def] rec bad_rec x = bad_rec x
 [%%expect {|
 Line 1, characters 0-39:
 1 | let[@vox.def] rec bad_rec x = bad_rec x
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: vox: [@vox.def] cannot be used on a recursive binding (recursion is not total, so it cannot be reflected)
+Error: vox: [@vox.def] cannot be used on this recursive binding: its recursive group is not structurally total
 |}]
 
 (* Fail-closed: a [@vox.def] binding must be a function with parameters. *)

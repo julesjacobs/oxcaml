@@ -360,6 +360,14 @@ let rec normalize expression =
          ( normalize condition,
            normalize ifso,
            Option.map normalize ifnot ))
+  | Rexp_match (scrutinee, cases) ->
+    with_desc
+      (Rexp_match
+         ( normalize scrutinee,
+           List.map
+             (fun case ->
+               { case with rcase_body = normalize case.rcase_body })
+             cases ))
 
 and reduce_application outer function_ arguments =
   match function_.rexp_desc, arguments with
@@ -481,6 +489,11 @@ let rec iter_expression function_ expression =
     iter_expression function_ condition;
     iter_expression function_ ifso;
     Option.iter (iter_expression function_) ifnot
+  | Rexp_match (scrutinee, cases) ->
+    iter_expression function_ scrutinee;
+    List.iter
+      (fun case -> iter_expression function_ case.rcase_body)
+      cases
 
 let reject_quantifiers expressions =
   List.iter
@@ -977,6 +990,62 @@ let emit_expression context variables expression =
           | _ ->
             error expression.rexp_loc
               "field applied to a non-record type"
+        end
+      | Rexp_match (scrutinee, cases) ->
+        let scrutinee, scrutinee_sort = emit locals scrutinee in
+        begin match scrutinee_sort with
+        | Sdata key ->
+          let data = data_for_key context expression.rexp_loc key in
+          let render_case case =
+            if
+              not
+                (Path.same data.data_path
+                   case.rcase_constructor.rconstr_type_path)
+            then
+              error expression.rexp_loc
+                "match constructor path does not match its scrutinee type";
+            let index, constructor =
+              constructor expression.rexp_loc data
+                case.rcase_constructor.rconstr_name
+            in
+            if
+              List.length constructor.constructor_fields
+              <> List.length case.rcase_arguments
+            then error expression.rexp_loc "match constructor arity mismatch";
+            let arguments, case_locals =
+              List.fold_left2
+                (fun (arguments, locals) field argument ->
+                  let name = fresh_local () in
+                  let locals =
+                    match argument with
+                    | None -> locals
+                    | Some binder ->
+                      let binder_sort =
+                        sort_of_type context expression.rexp_loc binder.rb_type
+                      in
+                      expect_sort expression.rexp_loc field binder_sort;
+                      (binder.rb_id, (name, field)) :: locals
+                  in
+                  name :: arguments, locals)
+                ([], locals) constructor.constructor_fields
+                case.rcase_arguments
+            in
+            let body, body_sort = emit case_locals case.rcase_body in
+            expect_sort expression.rexp_loc result_sort body_sort;
+            let head = variant_constructor_name data index constructor in
+            let pattern =
+              match List.rev arguments with
+              | [] -> head
+              | arguments ->
+                "(" ^ String.concat " " (head :: arguments) ^ ")"
+            in
+            "(" ^ pattern ^ " " ^ body ^ ")"
+          in
+          if cases = [] then error expression.rexp_loc "empty match";
+          "(match " ^ scrutinee ^ " ("
+          ^ String.concat " " (List.map render_case cases)
+          ^ "))"
+        | _ -> error expression.rexp_loc "match scrutinee is not a datatype"
         end
       | Rexp_ifthenelse (condition, ifso, Some ifnot) ->
         let condition, condition_sort = emit locals condition in

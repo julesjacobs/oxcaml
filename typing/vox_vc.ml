@@ -16,6 +16,16 @@ type t =
     goal : Types.refinement_expression;
   }
 
+module Recursive_binding = struct
+  let defeq_locations : Location.t list ref = ref []
+
+  let memq loc locations =
+    List.exists (fun recorded -> recorded == loc) !locations
+
+  let request_defeq loc = defeq_locations := loc :: !defeq_locations
+  let defeq_requested loc = memq loc defeq_locations
+end
+
 let create ~loc ~facts ~goal = { location = loc; facts; goal }
 
 let instantiate ~(refinement : Types.refinement_desc) ~with_ =

@@ -332,6 +332,7 @@ and refinement_expression_desc =
   | Rexp_ifthenelse of
       refinement_expression * refinement_expression *
         refinement_expression option
+  | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_identifier =
   | Rbound of Ident.t
@@ -351,6 +352,12 @@ and refinement_binder =
 and refinement_binding =
   { rbind_binder : refinement_binder;
     rbind_expr : refinement_expression;
+  }
+
+and refinement_case =
+  { rcase_constructor : refinement_constructor;
+    rcase_arguments : refinement_binder option list;
+    rcase_body : refinement_expression;
   }
 
 and refinement_constructor =
@@ -619,6 +626,7 @@ module Refinement : sig
     | Apply_type_mismatch
     | Let_type_mismatch
     | If_type_mismatch
+    | Match_type_mismatch
     | Tuple_type_mismatch
 
   val create :

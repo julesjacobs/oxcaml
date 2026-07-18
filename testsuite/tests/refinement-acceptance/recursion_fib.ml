@@ -19,27 +19,82 @@
 (* Marker legend: see binder_facts.ml.                            *)
 (* ============================================================= *)
 
-(* @acc id=rec_fib_nonneg final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
-   Fibonacci with a non-negativity result contract. Each recursive
-   call [fib (n - 1)] / [fib (n - 2)] returns [int{ _ >= 0 }] (the IH);
-   the sum of two non-negatives is non-negative, discharging the
-   result obligation. The parameter contract [n >= 0] flows to the
-   recursive-call arguments as contract obligations.
-   FINAL and TODAY: accepts. *)
+(* Numeric recursion is not structurally total, but result refinements are
+   partial-correctness contracts and remain available on return paths. *)
 let rec rec_fib_nonneg (n : int{ _ >= 0 }) : int{ _ >= 0 } =
   if n <= 1 then n else rec_fib_nonneg (n - 1) + rec_fib_nonneg (n - 2)
 [%%expect {|
 val rec_fib_nonneg : int{ _ >= 0 } -> int{ _ >= 0 } = <fun>
 |}]
 
-(* @acc id=rec_sum_to final=ACCEPT today=ACCEPT stable=no unlocks=integration+verification
-   Triangular sum, a cleaner IH witness: the recursive call
-   [rec_sum_to (n - 1)] carries a CONTRACT obligation [n - 1 >= 0]
-   (provable from [n >= 0] and [n <> 0]) and an IH [result >= 0], and
-   [n + <ih>] is then >= 0.
-   FINAL and TODAY: accepts. *)
 let rec rec_sum_to (n : int{ _ >= 0 }) : int{ _ >= 0 } =
   if n = 0 then 0 else n + rec_sum_to (n - 1)
 [%%expect {|
 val rec_sum_to : int{ _ >= 0 } -> int{ _ >= 0 } = <fun>
+|}]
+
+(* A diverging self-call vacuously satisfies any returned-result contract. *)
+let rec partial_false (x : int) : int{ false } = partial_false x
+[%%expect {|
+val partial_false : int -> int{ false } = <fun>
+|}]
+
+let rec mutual_partial_left (x : int) : int{ false } =
+  mutual_partial_right x
+and mutual_partial_right (x : int) : int{ false } =
+  mutual_partial_left x
+[%%expect {|
+val mutual_partial_left : int -> int{ false } = <fun>
+val mutual_partial_right : int -> int{ false } = <fun>
+|}]
+
+let dead_continuation () =
+  let _ = partial_false 0 in
+  (0 : int{ false })
+[%%expect {|
+val dead_continuation : unit -> int{ false } = <fun>
+|}]
+
+(* A handler can return without the call returning, so its result fact cannot
+   escape into this reachable continuation. *)
+let caught_continuation =
+  let () = try ignore (partial_false 0) with _ -> () in
+  (0 : int{ false })
+[%%expect {|
+Line 3, characters 2-20:
+3 |   (0 : int{ false })
+      ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Requiring the same non-structural recursion to be total still rejects. *)
+let rec partial_false_total @ total =
+  fun (x : int) -> (partial_false_total x : int{ false })
+[%%expect {|
+Line 2, characters 20-39:
+2 |   fun (x : int) -> (partial_false_total x : int{ false })
+                        ^^^^^^^^^^^^^^^^^^^
+Error: The value "partial_false_total" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 2, characters 2-57
+         which is expected to be "total".
+|}]
+
+(* Mutual-group calls receive IH facts when one common structural position
+   decreases throughout the group. *)
+type mutual_lst = MNil | MCons of mutual_lst
+
+let rec mutual_left (value : mutual_lst) : int{ _ >= 0 } =
+  match value with
+  | MNil -> 0
+  | MCons tail -> 1 + mutual_right tail
+and mutual_right (value : mutual_lst) : int{ _ >= 0 } =
+  match value with
+  | MNil -> 0
+  | MCons tail -> 1 + mutual_left tail
+
+[%%expect {|
+type mutual_lst = MNil | MCons of mutual_lst
+val mutual_left : mutual_lst -> int{ _ >= 0 } = <fun>
+val mutual_right : mutual_lst -> int{ _ >= 0 } = <fun>
 |}]

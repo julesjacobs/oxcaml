@@ -670,6 +670,15 @@ let find_definition state = function
       state.definitions
   | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> None
 
+let application_uses_refined_definition state expression =
+  match expression.exp_desc with
+  | Texp_apply ({ exp_desc = Texp_ident { path; _ }; _ }, _, _, _, _) ->
+    begin match find_definition state path with
+    | Some definition -> contains_refinement definition.type_
+    | None -> false
+    end
+  | _ -> false
+
 (* A non-stable call has no structural image: two evaluations of the
    same syntax may return different values.  Give each source occurrence a
    fresh logical name, memoized because the same occurrence is lowered more
@@ -684,12 +693,9 @@ let opaque_call_subject state expression =
       id
   in
   node expression (Rexp_ident (Rfree (Rglobal (Pident id))))
-(* The selfification fragment is deliberately narrower than [subject].  Every
-   accepted expression denotes the same immutable value whenever it is named:
-   variables and integer/boolean constants, and immutable products built from
-   or projected out of other expressions in the fragment.  In particular,
-   ordinary applications, conditionals, sequences, and mutable records stay
-   out even when [subject] happens to be able to lower them. *)
+(* The syntactic selfification fragment is deliberately narrower than
+   [subject].  Applications are handled separately below, only when the call
+   is stable and its result has solver-supported equality. *)
 let rec stable_expression expression =
   let stable = stable_expression in
   let immutable_labels labels =
@@ -901,6 +907,16 @@ let rec replace_parameters replacements expression =
         Rexp_ifthenelse
           (replace condition, replace ifso, Option.map replace ifnot);
     }
+  | Rexp_match (scrutinee, cases) ->
+    { expression with
+      rexp_desc =
+        Rexp_match
+          ( replace scrutinee,
+            List.map
+              (fun case ->
+                { case with rcase_body = replace case.rcase_body })
+              cases );
+    }
 
 (* Reconcile a predicate's references to in-scope variables with the way the
    [subject] lowering represents them.  A parameter (or other in-scope local)
@@ -956,6 +972,16 @@ let rec bind_scope_references scope expression =
     { expression with
       rexp_desc =
         Rexp_ifthenelse (recur condition, recur ifso, Option.map recur ifnot);
+    }
+  | Rexp_match (scrutinee, cases) ->
+    { expression with
+      rexp_desc =
+        Rexp_match
+          ( recur scrutinee,
+            List.map
+              (fun case ->
+                { case with rcase_body = recur case.rcase_body })
+              cases );
     }
 
 (* The companion lemma generated for a [let[@vox.def] ...] binding carries a
@@ -1423,7 +1449,14 @@ and total_builtin_head expression =
 
 let selfification_fact state binding =
   match binding.vb_pat.pat_desc with
-  | Tpat_var { id; _ } when stable_expression binding.vb_expr ->
+  | Tpat_var { id; _ }
+    when stable_expression binding.vb_expr
+         || (match binding.vb_expr.exp_desc with
+             | Texp_apply _ ->
+               expression_is_stable state binding.vb_expr
+               && Vox_lean.supports_equality
+                    ~env:binding.vb_expr.exp_env binding.vb_expr.exp_type
+             | _ -> false) ->
     let loc = binding.vb_loc in
     let right = subject state binding.vb_expr in
     let left =
@@ -1487,9 +1520,12 @@ let contract_argument_provenance ~application_location ~argument_location
       ];
   }
 
-let rec walk_expression state expression =
-  let marks = marked_refinements expression in
-  if marks = [] && not (expression_contains_refinement expression) then
+let rec walk_expression ?(inherited_marks = []) state expression =
+  let marks = inherited_marks @ marked_refinements expression in
+  if marks = []
+     && not (expression_contains_refinement expression)
+     && not (application_uses_refined_definition state expression)
+  then
     walk_default_expression state expression
   else match expression.exp_desc with
   | Texp_let (rec_flag, bindings, body) ->
@@ -1524,10 +1560,9 @@ let rec walk_expression state expression =
       (List.rev !try_summaries);
     if rec_flag = Nonrecursive then
       List.iter (selfification_fact state) bindings;
-    walk_expression state body;
+    walk_expression ~inherited_marks:marks state body;
     state.facts <- saved_facts;
-    state.definitions <- saved_definitions;
-    check_marks state expression marks
+    state.definitions <- saved_definitions
   | Texp_letmutable (binding, body) ->
     walk_expression state binding.vb_expr;
     let saved_facts = state.facts in
@@ -1627,8 +1662,16 @@ let rec walk_expression state expression =
       (walk_try state expression tried cases effect_cases marks
         : (Facts.t * expression) list)
   | Texp_match (scrutinee, _, cases, effect_cases, _) ->
-    walk_match state scrutinee cases effect_cases;
-    check_marks state expression marks
+    let value_cases_only =
+      effect_cases = []
+      && List.for_all
+           (fun case ->
+             Option.is_some (computation_value_pattern case.c_lhs))
+           cases
+    in
+    walk_match state scrutinee cases effect_cases
+      (if value_cases_only then marks else []);
+    if not value_cases_only then check_marks state expression marks
   | _ ->
     walk_default_expression state expression;
     check_marks state expression marks
@@ -1827,7 +1870,7 @@ and add_resumed_facts state function_ arguments =
            state.resume_facts))
     (continued_continuation function_ arguments)
 
-and walk_match state scrutinee cases effect_cases =
+and walk_match state scrutinee cases effect_cases marks =
   let pre_scrutinee_facts = state.facts in
   walk_expression state scrutinee;
   let normal_scrutinee_facts = state.facts in
@@ -1863,7 +1906,7 @@ and walk_match state scrutinee cases effect_cases =
       negatives;
     add_value_pattern_facts state ~subject:scrutinee_subject pattern;
     Option.iter (walk_expression state) case.c_guard;
-    walk_expression state case.c_rhs;
+    walk_expression ~inherited_marks:marks state case.c_rhs;
     state.facts <- normal_scrutinee_facts
   in
   let has_interrupted_case = ref false in
@@ -2074,6 +2117,11 @@ let rec collect_refinement_expression ~env (expression : refinement_expression)
     collect_refinement_expression ~env condition;
     collect_refinement_expression ~env ifso;
     Option.iter (collect_refinement_expression ~env) ifnot
+  | Rexp_match (scrutinee, cases) ->
+    collect_refinement_expression ~env scrutinee;
+    List.iter
+      (fun case -> collect_refinement_expression ~env case.rcase_body)
+      cases
 
 (* Record the predicate subterm types of every refinement type written in the
    structure.  Refinement annotations survive as core types whose [ctyp_type]
