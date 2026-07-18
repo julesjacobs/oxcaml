@@ -50,6 +50,11 @@ let sanitize text =
     | '0' .. '9' -> "n_" ^ result
     | _ -> result
 
+let lean_constructor_name = function
+  | "[]" -> "nil"
+  | "::" -> "cons"
+  | name -> sanitize name
+
 let digest text = Digest.to_hex (Digest.string text)
 
 type sort =
@@ -124,16 +129,12 @@ let instantiate context location declaration arguments type_ =
   | Ctype.Cannot_apply ->
     error location "cannot instantiate datatype field type"
 
-let ensure_no_nested_data location owner sort =
+let ensure_no_function_field location sort =
   let rec loop = function
-    | Sint | Sbool -> ()
+    | Sint | Sbool | Sdata _ -> ()
     | Stuple sorts -> List.iter loop sorts
     | Sarrow _ ->
       error location "function-valued datatype fields are not supported"
-    | Sdata nested ->
-      error location
-        "recursive or mutually nested datatype %s in %s is not supported"
-        nested owner
   in
   loop sort
 
@@ -209,7 +210,7 @@ and register_data context location path arguments declaration =
         instantiate context location declaration arguments type_
       in
       let sort = sort_of_type context location type_ in
-      ensure_no_nested_data location key sort;
+      ensure_no_function_field location sort;
       sort
     in
     let definition =
@@ -1076,7 +1077,7 @@ let emit_expression context variables expression =
               (fun expected (_, actual) ->
                 expect_sort expression.rexp_loc expected actual)
               fields arguments;
-            let head = data.data_name ^ "." ^ sanitize name in
+            let head = data.data_name ^ "." ^ lean_constructor_name name in
             "(" ^ String.concat " " (head :: List.map fst arguments) ^ ")"
           | _ ->
             error expression.rexp_loc
@@ -1114,6 +1115,166 @@ let emit_expression context variables expression =
   in
   emit [] expression
 
+let equality_function_name data = "vox_decEq_" ^ data.data_name
+
+(* Lean's stock mutual [DecidableEq] derivation cannot follow a recursive
+   occurrence through a product.  Compare tuple leaves directly and make the
+   datatype comparisons mutually recursive instead; [simp_all] only proves
+   that these executable comparisons agree with constructor equality. *)
+let equality_decision context location sort left right =
+  match sort with
+  | Sint | Sbool -> "decEq " ^ left ^ " " ^ right
+  | Sdata key ->
+    equality_function_name (data_for_key context location key) ^ " " ^ left
+    ^ " " ^ right
+  | Stuple _ -> error location "internal error: unexpanded equality tuple"
+  | Sarrow _ -> error location "internal error: equality on function field"
+
+let equality_patterns context location next sort =
+  let rec loop sort =
+    match sort with
+    | Stuple sorts ->
+      let fields = List.map loop sorts in
+      ( "(" ^ String.concat ", " (List.map (fun (left, _, _) -> left) fields)
+        ^ ")",
+        "("
+        ^ String.concat ", " (List.map (fun (_, right, _) -> right) fields)
+        ^ ")",
+        List.concat_map (fun (_, _, comparisons) -> comparisons) fields )
+    | sort ->
+      let index = next () in
+      let left = "left_" ^ string_of_int index in
+      let right = "right_" ^ string_of_int index in
+      left, right, [equality_decision context location sort left right]
+  in
+  loop sort
+
+let emit_equality_result buffer comparisons =
+  match comparisons with
+  | [] -> Buffer.add_string buffer "    isTrue rfl\n"
+  | _ ->
+    Buffer.add_string buffer
+      ("    match " ^ String.concat ", " comparisons ^ " with\n");
+    Buffer.add_string buffer
+      ("    | "
+      ^ String.concat ", "
+          (List.mapi
+             (fun index _ -> "isTrue equal_" ^ string_of_int index)
+             comparisons)
+      ^ " => isTrue (by simp_all)\n");
+    List.iteri
+      (fun false_index _ ->
+        Buffer.add_string buffer "    | ";
+        List.iteri
+          (fun index _ ->
+            if index > 0 then Buffer.add_string buffer ", ";
+            if index = false_index then
+              Buffer.add_string buffer
+                ("isFalse not_equal_" ^ string_of_int index)
+            else Buffer.add_char buffer '_')
+          comparisons;
+        Buffer.add_string buffer " => isFalse (by simp_all)\n")
+      comparisons
+
+let constructor_pattern name fields =
+  "." ^ lean_constructor_name name
+  ^
+  (match fields with
+  | [] -> ""
+  | _ -> " " ^ String.concat " " fields)
+
+let emit_variant_equality context buffer constructors =
+  match constructors with
+  | [] -> Buffer.add_string buffer "  | left, _ => nomatch left\n"
+  | constructors ->
+    List.iter
+      (fun left_constructor ->
+        List.iter
+          (fun right_constructor ->
+            let next =
+              let index = ref 0 in
+              fun () ->
+                let result = !index in
+                incr index;
+                result
+            in
+            let same_constructor =
+              String.equal left_constructor.constructor_name
+                right_constructor.constructor_name
+            in
+            let patterns =
+              if same_constructor
+              then
+                List.map
+                  (equality_patterns context Location.none next)
+                  left_constructor.constructor_fields
+              else []
+            in
+            let left_fields, right_fields, comparisons =
+              if not same_constructor then
+                ( List.map (fun _ -> "_") left_constructor.constructor_fields,
+                  List.map (fun _ -> "_")
+                    right_constructor.constructor_fields,
+                  [] )
+              else
+                ( List.map (fun (left, _, _) -> left) patterns,
+                  List.map (fun (_, right, _) -> right) patterns,
+                  List.concat_map
+                    (fun (_, _, comparisons) -> comparisons)
+                    patterns )
+            in
+            Buffer.add_string buffer
+              ("  | "
+              ^ constructor_pattern left_constructor.constructor_name
+                  left_fields
+              ^ ", "
+              ^ constructor_pattern right_constructor.constructor_name
+                  right_fields
+              ^ " =>\n");
+            if same_constructor then emit_equality_result buffer comparisons
+            else Buffer.add_string buffer "    isFalse (by simp)\n")
+          constructors)
+      constructors
+
+let emit_record_equality context buffer fields =
+  let next =
+    let index = ref 0 in
+    fun () ->
+      let result = !index in
+      incr index;
+      result
+  in
+  let patterns =
+    List.map
+      (fun (_, sort) -> equality_patterns context Location.none next sort)
+      fields
+  in
+  Buffer.add_string buffer
+    ("  | .mk "
+    ^ String.concat " " (List.map (fun (left, _, _) -> left) patterns)
+    ^ ", .mk "
+    ^ String.concat " " (List.map (fun (_, right, _) -> right) patterns)
+    ^ " =>\n");
+  emit_equality_result buffer
+    (List.concat_map (fun (_, _, comparisons) -> comparisons) patterns)
+
+let emit_decidable_equality context buffer data =
+  Buffer.add_string buffer
+    ("def " ^ equality_function_name data ^ " : (left right : "
+    ^ data.data_name ^ ") -> Decidable (left = right)\n");
+  begin
+    match definition Location.none data with
+    | Variant constructors ->
+      emit_variant_equality context buffer constructors
+    | Record fields -> emit_record_equality context buffer fields
+  end;
+  Buffer.add_char buffer '\n'
+
+let emit_equality_instance buffer data =
+  Buffer.add_string buffer
+    ("instance : DecidableEq " ^ data.data_name ^ " := "
+    ^ equality_function_name data ^ "\n")
+
 let emit_data context buffer data =
   match definition Location.none data with
   | Variant constructors ->
@@ -1121,7 +1282,7 @@ let emit_data context buffer data =
     List.iter
       (fun constructor ->
         Buffer.add_string buffer
-          ("  | " ^ sanitize constructor.constructor_name);
+          ("  | " ^ lean_constructor_name constructor.constructor_name);
         List.iteri
           (fun index sort ->
             Buffer.add_string buffer
@@ -1130,7 +1291,7 @@ let emit_data context buffer data =
           constructor.constructor_fields;
         Buffer.add_char buffer '\n')
       constructors;
-    Buffer.add_string buffer "deriving DecidableEq\n\n"
+    Buffer.add_char buffer '\n'
   | Record fields ->
     Buffer.add_string buffer ("structure " ^ data.data_name ^ " where\n");
     List.iter
@@ -1139,7 +1300,7 @@ let emit_data context buffer data =
           ("  " ^ sanitize name ^ " : "
           ^ lean_sort context Location.none sort ^ "\n"))
       fields;
-    Buffer.add_string buffer "deriving DecidableEq\n\n"
+    Buffer.add_char buffer '\n'
 
 let constructor_mismatch_subject expression =
   match expression.rexp_desc with
@@ -1163,10 +1324,21 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   if linter then
     Buffer.add_string buffer "set_option linter.unusedVariables true\n"
   else Buffer.add_char buffer '\n';
-  List.sort
-    (fun left right -> String.compare left.data_key right.data_key)
-    context.data
-  |> List.iter (emit_data context buffer);
+  let data =
+    List.sort
+      (fun left right -> String.compare left.data_key right.data_key)
+      context.data
+  in
+  (* Monomorphizing a nested recursive field can turn it into mutual
+     recursion between the owner and the instantiated field datatype. *)
+  if List.length data > 1 then Buffer.add_string buffer "mutual\n";
+  List.iter (emit_data context buffer) data;
+  if List.length data > 1 then Buffer.add_string buffer "end\n\n";
+  if List.length data > 1 then Buffer.add_string buffer "mutual\n";
+  List.iter (emit_decidable_equality context buffer) data;
+  if List.length data > 1 then Buffer.add_string buffer "end\n\n";
+  List.iter (emit_equality_instance buffer) data;
+  if data <> [] then Buffer.add_char buffer '\n';
   List.sort
     (fun left right -> String.compare left.reference_name right.reference_name)
     context.references
