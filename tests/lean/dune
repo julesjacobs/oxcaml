@@ -1,0 +1,18 @@
+; lean-proofs lane: certificate/model -> Lean 4 translation (kernel-checked verdict
+; verification). The emitter library is pure/stdlib-only over the smt/ libraries; the gate
+; executable additionally links the test-only parser and drives the external `lean` binary.
+
+(library
+ (name oxsmt_lean_export)
+ (modules lean_export)
+ (libraries oxsmt_core oxsmt_interface oxsmt_lia oxsmt_solver oxsmt_certificate))
+
+(executable
+ (name lean_sat_gate)
+ (modules lean_sat_gate)
+ (libraries
+  unix
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_lean_export))
