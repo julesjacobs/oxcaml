@@ -692,19 +692,22 @@ let opaque_call_subject state expression =
    out even when [subject] happens to be able to lower them. *)
 let rec stable_expression expression =
   let stable = stable_expression in
+  let supports_equality () =
+    Vox_lean.supports_equality ~env:expression.exp_env expression.exp_type
+  in
   let immutable_labels labels =
     Array.for_all
       (fun (label : label_description) -> label.lbl_mut = Immutable)
       labels
   in
-  Vox_lean.supports_equality ~env:expression.exp_env expression.exp_type
-  &&
   match expression.exp_desc with
-  | Texp_ident _ | Texp_constant (Const_int _) -> true
+  | Texp_ident _ | Texp_constant (Const_int _) -> supports_equality ()
   | Texp_construct (_, _, _, arguments, _) ->
-    List.for_all (fun (_, argument) -> stable argument) arguments
+    supports_equality ()
+    && List.for_all (fun (_, argument) -> stable argument) arguments
   | Texp_record { fields; extended_expression; _ } ->
-    immutable_labels
+    supports_equality ()
+    && immutable_labels
       (Array.map (fun (label, _, _) -> label) fields)
     &&
     (match extended_expression with
@@ -717,11 +720,12 @@ let rec stable_expression expression =
            | Overridden (_, field) -> stable field)
          fields
   | Texp_tuple (fields, _) ->
-    List.for_all
+    supports_equality ()
+    && List.for_all
       (fun (label, field) -> Option.is_none label && stable field)
       fields
   | Texp_field { record; label; _ } ->
-    immutable_labels label.lbl_all && stable record
+    supports_equality () && immutable_labels label.lbl_all && stable record
   | _ -> false
 
 let rec subject state ?(function_head = false) expression =

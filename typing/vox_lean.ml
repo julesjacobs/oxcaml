@@ -77,6 +77,7 @@ type data_instance =
   { data_key : string;
     data_name : string;
     data_path : Path.t;
+    data_arguments : sort list;
     mutable data_definition : data_definition option;
   }
 
@@ -110,6 +111,37 @@ let data_for_key context location key =
   match find_data context key with
   | Some data -> data
   | None -> error location "internal error: missing Lean datatype %s" key
+
+let sort_contains context ~needle sort =
+  let rec loop seen sort =
+    if String.equal (sort_key needle) (sort_key sort)
+    then true
+    else
+      match sort with
+      | Sint | Sbool -> false
+      | Stuple sorts -> List.exists (loop seen) sorts
+      | Sarrow (argument, result) -> loop seen argument || loop seen result
+      | Sdata key ->
+        if List.mem key seen
+        then false
+        else
+          let data = data_for_key context Location.none key in
+          List.exists (loop (key :: seen)) data.data_arguments
+  in
+  loop [] sort
+
+let growing_instantiation context previous current =
+  let contains previous =
+    List.exists (sort_contains context ~needle:previous) current
+  in
+  let strictly_contains previous current =
+    not (String.equal (sort_key previous) (sort_key current))
+    && sort_contains context ~needle:previous current
+  in
+  List.for_all contains previous
+  && List.exists
+       (fun previous -> List.exists (strictly_contains previous) current)
+       previous
 
 let rec lean_sort context location = function
   | Sint -> "Int"
@@ -194,6 +226,17 @@ and register_data context location path arguments declaration =
   match find_data context key with
   | Some _ -> Sdata key
   | None ->
+    if
+      List.exists
+        (fun data ->
+          Path.same data.data_path path
+          && Option.is_none data.data_definition
+          && growing_instantiation context data.data_arguments argument_sorts)
+        context.data
+    then
+      error location
+        "non-regular recursive datatype %s is not supported"
+        (Path.name path);
     if List.length arguments <> declaration.type_arity then
       error location "datatype %s has the wrong number of arguments"
         (Path.name path);
@@ -201,6 +244,7 @@ and register_data context location path arguments declaration =
       { data_key = key;
         data_name = "VoxData_" ^ digest key;
         data_path = path;
+        data_arguments = argument_sorts;
         data_definition = None;
       }
     in
