@@ -25,6 +25,12 @@ theorem eval_subL (a b : LinExpr) (ρ : OxsmtFarkas.Assign) : eval (subL a b) ρ
   simp only [subL, eval_add, eval_scale]
   omega
 
+/- The integer-strengthening identity behind [prem_neg]: over ℤ, ¬(x ≤ 0) ⟺ (-x+1 ≤ 0).
+   `omega` is sound to use here (team-lead ruling 2026-07-17): this is a fixed,
+   cert-independent closed lemma over a universally-quantified [x] — it cannot depend on or
+   mask any certificate's content, the kernel still checks the fully-elaborated proof term,
+   and #print axioms stays ⊆ {propext, Quot.sound}. The ban on automation is a per-certificate
+   rule (enforced mechanically on emitted files); it does not reach this trusted substrate. -/
 theorem strengthen_neg (x : Int) : decide (x ≤ 0) = !decide (-x + 1 ≤ 0) := by
   by_cases h : x ≤ 0 <;> simp [h] <;> omega
 
