@@ -234,6 +234,14 @@ let lib_ccobjs t = t.lib_ccobjs
 
 let lib_ccopts t = t.lib_ccopts
 
+(* The whole [t] is composed of the same immutable value types the linker
+   already round-trips through [.cmxa] unmarshaling (Compilation_unit.t,
+   Import_info.t, Digest.t) held in Hashtbl/Set/Consistbl, so it marshals and
+   restores faithfully. *)
+let snapshot t = Marshal.to_string t []
+
+let restore (s : string) : t = (Marshal.from_string s 0 : t)
+
 (* Error report *)
 
 open Format_doc

@@ -256,6 +256,88 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
         Backend.link_shared ml_objfiles output_name ~ppf_dump ~genfns
           ~units_tolink)
 
+  (* Link-plan cache (prototype).
+
+     The first scan pass re-opens and re-parses every [.cmxa] on the command
+     line on every relink (~2.75s / ~4.71s on two large exes, pure CPU: unmarshal
+     + redundant interface-CRC consistency checks; see cmxaspike/CMXA.md). When
+     [OCAMLOPT_LINK_PLAN_CACHE_DIR] is set, memoize the whole pass-1 result
+     keyed on the identity of the inputs, and skip the scan on a hit.
+
+     Key = digest of: cmxa magic + scan-affecting flags + load path + the
+     ordered input paths + a CONTENT DIGEST of each [.cmxa] input's bytes. The
+     content digest (rather than inode/mtime/size) makes the key independent of
+     dune's artifact-materialization behavior at the cost of reading the cmxa
+     bytes (~0.4s MD5 warm; a stat-memoized or BLAKE3 digest is the future
+     optimization). Non-[.cmxa] inputs (the executable's own .cmx/.o) are keyed
+     by path only, not content — see the applicability note in E2E.md. *)
+  module Link_plan_cache = struct
+    type plan =
+      { full_paths : string list;
+        ml_objfiles : string list;
+        units_tolink : unit_link_info list;
+        cached_genfns_imports : Generic_fns.Partition.Set.t;
+        genfns_entries : Cmx_format.generic_fns;
+        linkenv_snapshot : string
+      }
+
+    let cache_dir () =
+      match Sys.getenv_opt "OCAMLOPT_LINK_PLAN_CACHE_DIR" with
+      | Some d when String.length d > 0 -> Some d
+      | _ -> None
+
+    let is_library path = Filename.check_suffix path Backend.ext_flambda_lib
+
+    let compute_key ~objfiles =
+      let b = Buffer.create 4096 in
+      let add s =
+        Buffer.add_string b s;
+        Buffer.add_char b '\000'
+      in
+      add Config.cmxa_magic_number;
+      add (string_of_bool !Clflags.nopervasives);
+      add (string_of_bool !Clflags.link_everything);
+      add (string_of_bool !Clflags.no_auto_link);
+      add (string_of_bool !Clflags.uses_metaprogramming);
+      add (string_of_bool !Clflags.output_c_object);
+      add (string_of_bool !Clflags.shared);
+      add (string_of_bool !Oxcaml_flags.manual_module_init);
+      add "|loadpath|";
+      List.iter add (Load_path.get_path_list ());
+      add "|inputs|";
+      List.iter
+        (fun file ->
+          let path = try Load_path.find file with Not_found -> file in
+          add path;
+          if is_library path then add (Digest.to_hex (Digest.file path)))
+        objfiles;
+      Digest.to_hex (Digest.string (Buffer.contents b))
+
+    let entry_path ~dir key = Filename.concat dir (key ^ ".linkplan")
+
+    let load ~dir key : plan option =
+      let path = entry_path ~dir key in
+      if not (Sys.file_exists path)
+      then None
+      else (
+        try
+          let ic = open_in_bin path in
+          Misc.try_finally
+            (fun () -> Some (Marshal.from_channel ic : plan))
+            ~always:(fun () -> close_in ic)
+        with _ -> None)
+
+    let store ~dir key (plan : plan) =
+      try
+        let tmp = Filename.temp_file ~temp_dir:dir "linkplan" ".tmp" in
+        let oc = open_out_bin tmp in
+        Misc.try_finally
+          (fun () -> Marshal.to_channel oc plan [])
+          ~always:(fun () -> close_out oc);
+        Sys.rename tmp (entry_path ~dir key)
+      with _ -> ()
+  end
+
   (* Main entry point *)
 
   let link ~ppf_dump objfiles output_name =
@@ -278,10 +360,55 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
             objfiles
             ([], [], [], Generic_fns.Partition.Set.empty)
         in
-        let linkenv = Linkenv.create () in
-        let full_paths, ml_objfiles, units_tolink, cached_genfns_imports =
-          Profile.record_call "link/scan/user_files_pass1" (fun () ->
-              scan_user_supplied_files linkenv ~genfns ~objfiles)
+        let ( linkenv,
+              full_paths,
+              ml_objfiles,
+              units_tolink,
+              cached_genfns_imports,
+              genfns ) =
+          let run_pass1 () =
+            let linkenv = Linkenv.create () in
+            let full_paths, ml_objfiles, units_tolink, cached_genfns_imports =
+              Profile.record_call "link/scan/user_files_pass1" (fun () ->
+                  scan_user_supplied_files linkenv ~genfns ~objfiles)
+            in
+            ( linkenv,
+              full_paths,
+              ml_objfiles,
+              units_tolink,
+              cached_genfns_imports )
+          in
+          match Link_plan_cache.cache_dir () with
+          | None ->
+            let linkenv, fp, mo, ut, cgi = run_pass1 () in
+            linkenv, fp, mo, ut, cgi, genfns
+          | Some dir ->
+            let key = Link_plan_cache.compute_key ~objfiles in
+            (match
+               Profile.record_call "link/scan/plan_cache_load" (fun () ->
+                   Link_plan_cache.load ~dir key)
+             with
+            | Some plan ->
+              Profile.record_call "link/scan/plan_cache_hit" (fun () -> ());
+              let linkenv = Linkenv.restore plan.linkenv_snapshot in
+              let genfns = Generic_fns.Tbl.of_fns plan.genfns_entries in
+              ( linkenv,
+                plan.full_paths,
+                plan.ml_objfiles,
+                plan.units_tolink,
+                plan.cached_genfns_imports,
+                genfns )
+            | None ->
+              let linkenv, fp, mo, ut, cgi = run_pass1 () in
+              Link_plan_cache.store ~dir key
+                { full_paths = fp;
+                  ml_objfiles = mo;
+                  units_tolink = ut;
+                  cached_genfns_imports = cgi;
+                  genfns_entries = Generic_fns.Tbl.entries genfns;
+                  linkenv_snapshot = Linkenv.snapshot linkenv
+                };
+              linkenv, fp, mo, ut, cgi, genfns)
         in
         let uses_eval = !Clflags.uses_metaprogramming in
         if uses_eval && not Backend.supports_metaprogramming
