@@ -309,6 +309,7 @@ type definition =
 type state =
   { mutable facts : Facts.t;
     mutable definitions : definition list;
+    mutable resume_facts : (Ident.t * Facts.t) list;
   }
 
 exception Unsupported_subject of Location.t * string
@@ -362,6 +363,62 @@ let negate_condition ~env ~loc condition_subject =
       Refinement.create ~loc ~type_:Predef.type_bool
         (Rexp_apply (head, [ Nolabel, condition_subject ]))
     | _ -> fallback ()
+
+let find_stdlib_value env name =
+  let qualified =
+    Longident.Ldot
+      ( Location.mknoloc (Longident.Lident "Stdlib"),
+        Location.mknoloc name )
+  in
+  match Env.find_value_by_name qualified env with
+  | value -> value
+  | exception Not_found ->
+    Env.find_value_by_name (Longident.Lident name) env
+
+let equality ~env ~loc left right =
+  match find_stdlib_value env "=" with
+  | exception Not_found -> None
+  | path, description ->
+    begin match description.val_kind with
+    | Val_prim primitive when String.equal primitive.prim_name "%equal" ->
+      let type_, _, _, _ =
+        Ctype.instance_prim env primitive description.val_type
+      in
+      begin match get_desc (Ctype.instance type_) with
+      | Tarrow (first, _, rest, first_commutable) ->
+        begin match get_desc rest with
+        | Tarrow (second, _, _, second_commutable) ->
+          let argument_type = Ctype.duplicate_type left.rexp_type in
+          let result_type = Predef.type_bool in
+          let after_first =
+            Btype.newgenty
+              (Tarrow
+                 ( second,
+                   Ctype.duplicate_type argument_type,
+                   result_type,
+                   Btype.copy_commu second_commutable ))
+          in
+          let head_type =
+            Btype.newgenty
+              (Tarrow
+                 ( first,
+                   argument_type,
+                   after_first,
+                   Btype.copy_commu first_commutable ))
+          in
+          let head =
+            Refinement.create ~loc ~type_:head_type
+              (Rexp_ident (Rfree (Rapp path)))
+          in
+          Some
+            (Refinement.create ~loc ~type_:result_type
+               (Rexp_apply (head, [Nolabel, left; Nolabel, right])))
+        | _ -> None
+        end
+      | _ -> None
+      end
+    | _ -> None
+    end
 
 let unsupported expression what =
   raise (Unsupported_subject (expression.exp_loc, what))
@@ -886,6 +943,7 @@ let rec walk_expression state expression =
   | Texp_let (rec_flag, bindings, body) ->
     let saved_facts = state.facts in
     let saved_definitions = state.definitions in
+    let try_summaries = ref [] in
     if rec_flag = Recursive then begin
       List.iter
         (enter_pattern state ~fact:false)
@@ -895,13 +953,23 @@ let rec walk_expression state expression =
     List.iter
       (fun binding ->
         if not (is_def_axiom_binding binding) then
-          walk_expression state binding.vb_expr)
+          match pattern_variable binding.vb_pat, binding.vb_expr.exp_desc with
+          | Some _, Texp_try (tried, cases, effect_cases) ->
+            let paths =
+              walk_try state binding.vb_expr tried cases effect_cases
+                (marked_refinements binding.vb_expr)
+            in
+            try_summaries := (binding.vb_pat, paths) :: !try_summaries
+          | _, _ -> walk_expression state binding.vb_expr)
       bindings;
     if rec_flag = Nonrecursive then
       List.iter (register_definition state) bindings;
     List.iter
       (enter_pattern state ~fact:true)
       (List.map (fun binding -> binding.vb_pat) bindings);
+    List.iter
+      (fun (pattern, paths) -> add_try_result_fact state pattern paths)
+      (List.rev !try_summaries);
     walk_expression state body;
     state.facts <- saved_facts;
     state.definitions <- saved_definitions;
@@ -938,6 +1006,7 @@ let rec walk_expression state expression =
         | _, Omitted _ -> ())
       arguments;
     check_application state expression function_ arguments;
+    add_resumed_facts state function_ arguments;
     check_marks state expression marks
   | Texp_ifthenelse (condition, ifso, ifnot) ->
     walk_expression state condition;
@@ -999,9 +1068,103 @@ let rec walk_expression state expression =
         marks;
       state.facts <- saved_facts
     end
+  | Texp_try (tried, cases, effect_cases) ->
+    ignore
+      (walk_try state expression tried cases effect_cases marks
+        : (Facts.t * expression) list)
   | _ ->
     walk_default_expression state expression;
     check_marks state expression marks
+
+and walk_try state expression tried cases effect_cases marks =
+  (* A handler starts before [tried] has completed, so it cannot inherit
+     facts from that evaluation.  At the join, however, keep facts common to
+     every path that can complete: the normal path, returning handlers, and
+     a resumed effect path (which completes the captured computation). *)
+  let pre_try_facts = state.facts in
+  walk_expression state tried;
+  let normal_try_facts = state.facts in
+  let returning_handler_facts case =
+    state.facts <- pre_try_facts;
+    let saved_resume_facts = state.resume_facts in
+    Option.iter
+      (fun continuation ->
+        state.resume_facts <-
+          (continuation, normal_try_facts) :: state.resume_facts)
+      case.c_cont;
+    let handler_facts = walk_case_facts state case in
+    state.resume_facts <- saved_resume_facts;
+    if not (expression_may_complete case.c_rhs) then None
+    else if effect_case_resumes case then Some (normal_try_facts, tried)
+    else Some (handler_facts, case.c_rhs)
+  in
+  let returning_handlers =
+    List.filter_map returning_handler_facts (cases @ effect_cases)
+  in
+  state.facts <-
+    List.fold_left
+      (fun facts (handler_facts, _) ->
+        Facts.intersect facts handler_facts)
+      normal_try_facts returning_handlers;
+  check_marks state expression marks;
+  (normal_try_facts, tried) :: returning_handlers
+
+and add_try_result_fact state pattern paths =
+  match pattern_variable pattern with
+  | None -> ()
+  | Some id ->
+    let loc = pattern.pat_loc in
+    let result =
+      Refinement.create ~loc ~type_:(carrier pattern.pat_type)
+        (Rexp_ident (Rbound id))
+    in
+    let outer_scope = Facts.scope state.facts in
+    let rec completed_result expression =
+      match expression.exp_desc with
+      | Texp_sequence (_, _, result) -> completed_result result
+      | Texp_let (_, _, body) | Texp_letmutable (_, body)
+      | Texp_open (_, body) | Texp_exclave body | Texp_quotation body ->
+        completed_result body
+      | _ -> expression
+    in
+    let conjoin left right =
+      Refinement.create ~loc ~type_:Predef.type_bool
+        (Rexp_ifthenelse (left, right, Some (bool_node ~loc false)))
+    in
+    let disjoin left right =
+      Refinement.create ~loc ~type_:Predef.type_bool
+        (Rexp_ifthenelse (left, bool_node ~loc true, Some right))
+    in
+    let path_fact (facts, expression) =
+      let expression = completed_result expression in
+      let path_state = { state with facts } in
+      match condition_is_total expression, subject path_state expression with
+      | false, _ -> None
+      | exception Unsupported_subject _ -> None
+      | true, path_result ->
+        Option.map
+          (fun result_equality ->
+            let path_facts =
+              List.filter
+                (fun (fact : Vox_vc.fact) ->
+                  Ident.Set.subset
+                    (Refinement.free_bound_identifiers fact.expression)
+                    outer_scope)
+                (Facts.facts facts)
+            in
+            List.fold_right
+              (fun (fact : Vox_vc.fact) formula ->
+                conjoin fact.expression formula)
+              path_facts result_equality)
+          (equality ~env:pattern.pat_env ~loc result path_result)
+    in
+    begin match List.filter_map path_fact paths with
+    | [] -> ()
+    | first :: rest ->
+      let summary = List.fold_left disjoin first rest in
+      let origin = fact_origin ~kind:"try-result" loc in
+      state.facts <- Facts.add ~origin ~loc summary state.facts
+    end
 
 and check_marks state expression marks =
   List.iter
@@ -1017,11 +1180,95 @@ and check_marks state expression marks =
 
 and walk_case : type k. state -> k case -> unit =
   fun state case ->
+  ignore (walk_case_facts state case : Facts.t)
+
+and walk_case_facts : type k. state -> k case -> Facts.t =
+  fun state case ->
   let saved_facts = state.facts in
   enter_pattern state ~fact:true case.c_lhs;
   Option.iter (walk_expression state) case.c_guard;
   walk_expression state case.c_rhs;
-  state.facts <- saved_facts
+  let case_facts = state.facts in
+  state.facts <- saved_facts;
+  case_facts
+
+and expression_may_complete expression =
+  match expression.exp_desc with
+  | Texp_apply
+      ( { exp_desc =
+            Texp_ident
+              { desc =
+                  { val_kind = Val_prim primitive;
+                    _
+                  };
+                _
+              };
+          _
+        },
+        _, _, _, _ )
+    when List.mem primitive.prim_name
+           ["%raise"; "%reraise"; "%raise_notrace"] ->
+    false
+  | Texp_unreachable -> false
+  | Texp_sequence (first, _, second) ->
+    expression_may_complete first && expression_may_complete second
+  | Texp_let (_, bindings, body) ->
+    List.for_all
+      (fun binding -> expression_may_complete binding.vb_expr)
+      bindings
+    && expression_may_complete body
+  | Texp_letmutable (binding, body) ->
+    expression_may_complete binding.vb_expr
+    && expression_may_complete body
+  | Texp_ifthenelse (_, ifso, Some ifnot) ->
+    expression_may_complete ifso || expression_may_complete ifnot
+  | Texp_match (_, _, cases, effect_cases, _) ->
+    List.exists
+      (fun case -> expression_may_complete case.c_rhs)
+      cases
+    || List.exists
+         (fun case -> expression_may_complete case.c_rhs)
+         effect_cases
+  | Texp_try (tried, cases, effect_cases) ->
+    expression_may_complete tried
+    || List.exists
+         (fun case -> expression_may_complete case.c_rhs)
+         (cases @ effect_cases)
+  | Texp_open (_, body) | Texp_exclave body | Texp_quotation body ->
+    expression_may_complete body
+  | _ -> true
+
+and effect_case_resumes case =
+  match case.c_cont, case.c_rhs.exp_desc with
+  | Some continuation, Texp_apply (function_, arguments, _, _, _) ->
+    begin match continued_continuation function_ arguments with
+    | Some resumed -> Ident.same continuation resumed
+    | None -> false
+    end
+  | None, _ | Some _, _ -> false
+
+and continued_continuation function_ arguments =
+  match function_.exp_desc, arguments with
+  | ( Texp_ident { path; _ },
+      ( _,
+        Arg
+          ( { exp_desc = Texp_ident { path = Pident continuation; _ }; _ },
+            _ ) )
+      :: _ )
+    when String.equal (Path.name path) "Stdlib.Effect.Deep.continue" ->
+    Some continuation
+  | _, _ -> None
+
+and add_resumed_facts state function_ arguments =
+  Option.iter
+    (fun continuation ->
+      Option.iter
+        (fun resumed -> state.facts <- Facts.union state.facts resumed)
+        (List.find_map
+           (fun (other, facts) ->
+             if Ident.same continuation other then Some facts else None)
+           state.resume_facts))
+    (continued_continuation function_ arguments)
 
 and check_application state application function_ arguments =
   let definition =
@@ -1219,8 +1466,12 @@ let finish_dump () =
 let verify_structure ?(toplevel = false) structure =
   let state =
     if toplevel
-    then { facts = !toplevel_facts; definitions = !toplevel_definitions }
-    else { facts = Facts.empty; definitions = [] }
+    then
+      { facts = !toplevel_facts;
+        definitions = !toplevel_definitions;
+        resume_facts = [];
+      }
+    else { facts = Facts.empty; definitions = []; resume_facts = [] }
   in
   let walk_root () =
     if Option.is_some !Clflags.vox_dump_vc_json then

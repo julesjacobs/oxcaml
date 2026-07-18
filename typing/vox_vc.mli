@@ -54,6 +54,12 @@ module Fact_env : sig
   val facts : t -> fact list
   val scope : t -> Ident.Set.t
 
+  val intersect : t -> t -> t
+  (** Keep the facts, and only the scope, shared by both environments. *)
+
+  val union : t -> t -> t
+  (** Combine facts and scope from two environments. *)
+
   val snapshot :
     loc:Location.t ->
     goal:Types.refinement_expression ->

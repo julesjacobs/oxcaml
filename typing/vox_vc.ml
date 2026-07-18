@@ -72,6 +72,32 @@ module Fact_env = struct
   let facts env = List.rev env.facts_rev
   let scope env = env.scope
 
+  let intersect left right =
+    let scope = Ident.Set.inter left.scope right.scope in
+    let same_expression left right =
+      (* Imported refinements are freshened at each use, including their
+         internal type nodes.  Facts are boolean predicates with resolved
+         value paths, so their typed expression structure is the stable key
+         at a control-flow join. *)
+      Types.Refinement.alpha_equal ~equal_type:(fun _ _ -> true) left right
+    in
+    { facts_rev =
+        List.filter
+          (fun fact ->
+            expression_in_scope scope fact.expression
+            && List.exists
+                 (fun other ->
+                   same_expression fact.expression other.expression)
+                 right.facts_rev)
+          left.facts_rev;
+      scope;
+    }
+
+  let union left right =
+    { facts_rev = right.facts_rev @ left.facts_rev;
+      scope = Ident.Set.union left.scope right.scope;
+    }
+
   let snapshot ~loc ~goal env =
     let escaped =
       Ident.Set.diff
