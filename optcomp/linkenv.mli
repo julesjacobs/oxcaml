@@ -45,6 +45,12 @@ type t
 
 val create : unit -> t
 
+(* Marshal/unmarshal the full link environment, used by the link-plan cache to
+   restore post-scan state on a cache hit. *)
+val snapshot : t -> string
+
+val restore : string -> t
+
 val extract_crc_interfaces : t -> Import_info.t list
 
 val extract_crc_implementations : t -> Import_info.t list
