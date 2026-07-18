@@ -6749,6 +6749,345 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
+type structural_relation =
+  | Structural_root
+  | Structural_subterm
+
+module Structural_string = Misc.Stdlib.String
+
+type structural_env =
+  { bound : Structural_string.Set.t;
+    relations : structural_relation Structural_string.Map.t
+  }
+
+let structural_pattern_bound_names pat =
+  let names = ref Structural_string.Set.empty in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      pat =
+        (fun iterator pat ->
+          (match pat.ppat_desc with
+           | Ppat_var { txt = name; _ }
+           | Ppat_alias (_, { txt = name; _ }) ->
+             names := Structural_string.Set.add name !names
+           | _ -> ());
+          Ast_iterator.default_iterator.pat iterator pat)
+    }
+  in
+  iterator.pat iterator pat;
+  !names
+
+(* Return the variables whose values are the root represented by [pat], or
+   strict constructor sub-terms of it.  In particular, record and array
+   projections are deliberately absent: they may cross mutable indirections. *)
+let rec structural_pattern_relations relation pat =
+  let singleton name relation = Structural_string.Map.singleton name relation in
+  let union left right =
+    Structural_string.Map.union (fun _ left _ -> Some left) left right
+  in
+  let strict pat = structural_pattern_relations Structural_subterm pat in
+  match pat.ppat_desc with
+  | Ppat_var { txt = name; _ } -> singleton name relation
+  | Ppat_alias (pat, { txt = name; _ }) ->
+    union (singleton name relation) (structural_pattern_relations relation pat)
+  | Ppat_construct (_, Some (_, pat))
+  | Ppat_variant (_, Some pat) ->
+    strict pat
+  | Ppat_tuple (pats, _)
+  | Ppat_unboxed_tuple (pats, _) ->
+    List.fold_left
+      (fun relations (_, pat) -> union relations (strict pat))
+      Structural_string.Map.empty pats
+  | Ppat_or (left, right) ->
+    let left = structural_pattern_relations relation left in
+    let right = structural_pattern_relations relation right in
+    Structural_string.Map.merge
+      (fun _ left right ->
+        match left, right with
+        | Some left, Some right when left = right -> Some left
+        | _ -> None)
+      left right
+  | Ppat_constraint (pat, _, _)
+  | Ppat_open (_, pat) ->
+    structural_pattern_relations relation pat
+  | Ppat_any
+  | Ppat_constant _
+  | Ppat_interval _
+  | Ppat_unboxed_unit
+  | Ppat_unboxed_bool _
+  | Ppat_construct (_, None)
+  | Ppat_variant (_, None)
+  | Ppat_record _
+  | Ppat_record_unboxed_product _
+  | Ppat_array _
+  | Ppat_type _
+  | Ppat_lazy _
+  | Ppat_unpack _
+  | Ppat_exception _
+  | Ppat_effect _
+  | Ppat_extension _ ->
+    Structural_string.Map.empty
+
+let structural_bind_pattern env relation pat =
+  let names = structural_pattern_bound_names pat in
+  let relations =
+    Structural_string.Set.fold Structural_string.Map.remove names env.relations
+  in
+  let relations =
+    match relation with
+    | None -> relations
+    | Some relation ->
+      Structural_string.Map.union
+        (fun _ relation _ -> Some relation)
+        (structural_pattern_relations relation pat) relations
+  in
+  { bound = Structural_string.Set.union names env.bound; relations }
+
+let rec structural_function_labels exp =
+  match exp.pexp_desc with
+  | Pexp_constraint (exp, _, _)
+  | Pexp_coerce (exp, _, _)
+  | Pexp_newtype (_, _, exp) ->
+    structural_function_labels exp
+  | Pexp_function (params, _, body) ->
+    if List.exists
+         (fun { pparam_desc; _ } ->
+           match pparam_desc with
+           | Pparam_val (_, Some _, _) -> true
+           | Pparam_val (_, None, _)
+           | Pparam_newtype _ -> false)
+         params
+    then []
+    else
+      let labels =
+        List.filter_map
+          (fun { pparam_desc; _ } ->
+            match pparam_desc with
+            | Pparam_val (label, None, _) -> Some label
+            | Pparam_val (_, Some _, _)
+            | Pparam_newtype _ -> None)
+          params
+      in
+      let body_labels =
+        match body with
+        | Pfunction_body body -> structural_function_labels body
+        | Pfunction_cases _ -> [Asttypes.Nolabel]
+      in
+      labels @ body_labels
+  | _ -> []
+
+let structural_binding_name { pvb_pat; _ } =
+  match Structural_string.Set.elements
+          (structural_pattern_bound_names pvb_pat)
+  with
+  | [name] -> Some name
+  | _ -> None
+
+let structurally_terminating_group bindings =
+  let binding_info =
+    List.map
+      (fun binding ->
+        Option.map
+          (fun name -> name, structural_function_labels binding.pvb_expr)
+          (structural_binding_name binding))
+      bindings
+  in
+  if List.exists Option.is_none binding_info
+  then false
+  else
+    let binding_info = List.map Option.get binding_info in
+    let group_names =
+      List.fold_left
+        (fun names (name, _) -> Structural_string.Set.add name names)
+        Structural_string.Set.empty binding_info
+    in
+    let target_labels =
+      List.fold_left
+        (fun labels (name, function_labels) ->
+          Structural_string.Map.add name function_labels labels)
+        Structural_string.Map.empty binding_info
+    in
+    let max_common_position =
+      List.fold_left
+        (fun minimum (_, labels) -> min minimum (List.length labels))
+        max_int binding_info
+    in
+    let check_position position =
+      let valid = ref true in
+      let is_group_reference env lid =
+        match lid.txt with
+        | Longident.Lident name ->
+          Structural_string.Set.mem name group_names
+          && not (Structural_string.Set.mem name env.bound)
+        | Longident.Ldot _ | Longident.Lapply _ -> false
+      in
+      let relation_of_expression env exp =
+        let rec loop exp =
+          match exp.pexp_desc with
+          | Pexp_ident { txt = Longident.Lident name; _ } ->
+            Structural_string.Map.find_opt name env.relations
+          | Pexp_constraint (exp, _, _)
+          | Pexp_coerce (exp, _, _)
+          | Pexp_newtype (_, _, exp) -> loop exp
+          | _ -> None
+        in
+        loop exp
+      in
+      let call_argument name args =
+        match Structural_string.Map.find_opt name target_labels with
+        | None -> None
+        | Some labels ->
+          begin match List.nth_opt labels position with
+          | None -> None
+          | Some Asttypes.Nolabel ->
+            let nolabel_index =
+              List.fold_left
+                (fun index label ->
+                  if label = Asttypes.Nolabel then index + 1 else index)
+                0 (List.filteri (fun index _ -> index < position) labels)
+            in
+            List.filter_map
+              (fun (label, exp) ->
+                if label = Asttypes.Nolabel then Some exp else None)
+              args
+            |> Fun.flip List.nth_opt nolabel_index
+          | Some target_label ->
+            List.find_map
+              (fun (label, exp) ->
+                if label = target_label then Some exp else None)
+              args
+          end
+      in
+      let rec expression env exp =
+        let default () =
+          let iterator =
+            { Ast_iterator.default_iterator with
+              expr = (fun _ exp -> expression env exp)
+            }
+          in
+          Ast_iterator.default_iterator.expr iterator exp
+        in
+        match exp.pexp_desc with
+        | Pexp_ident lid ->
+          if is_group_reference env lid then valid := false
+        | Pexp_apply
+            ({ pexp_desc =
+                 Pexp_ident ({ txt = Longident.Lident name; _ } as lid);
+               _ },
+             args)
+          when is_group_reference env lid ->
+          (match call_argument name args with
+           | Some argument
+             when relation_of_expression env argument
+                  = Some Structural_subterm -> ()
+           | None | Some _ -> valid := false);
+          List.iter (fun (_, argument) -> expression env argument) args
+        | Pexp_function (params, _, body) ->
+          let env =
+            List.fold_left
+              (fun env { pparam_desc; _ } ->
+                match pparam_desc with
+                | Pparam_newtype _ -> env
+                | Pparam_val (_, default, pat) ->
+                  Option.iter (expression env) default;
+                  structural_bind_pattern env None pat)
+              env params
+          in
+          begin match body with
+          | Pfunction_body body -> expression env body
+          | Pfunction_cases (cases, _, _) -> cases_with_relation env None cases
+          end
+        | Pexp_match (scrutinee, cases) ->
+          expression env scrutinee;
+          cases_with_relation env (relation_of_expression env scrutinee) cases
+        | Pexp_try (body, cases) ->
+          expression env body;
+          cases_with_relation env None cases
+        | Pexp_let (_, recursive, bindings, body) ->
+          let body_env =
+            List.fold_left
+              (fun env { pvb_pat; _ } ->
+                structural_bind_pattern env None pvb_pat)
+              env bindings
+          in
+          let rhs_env = if recursive = Recursive then body_env else env in
+          List.iter
+            (fun { pvb_expr; _ } -> expression rhs_env pvb_expr)
+            bindings;
+          expression body_env body
+        | Pexp_for (pat, start, stop, _, body) ->
+          expression env start;
+          expression env stop;
+          expression (structural_bind_pattern env None pat) body
+        | Pexp_letmodule _
+        | Pexp_object _
+        | Pexp_pack _
+        | Pexp_letop _
+        | Pexp_comprehension _ ->
+          valid := false
+        | _ -> default ()
+      and cases_with_relation env relation cases =
+        List.iter
+          (fun { pc_lhs; pc_guard; pc_rhs } ->
+            let env = structural_bind_pattern env relation pc_lhs in
+            Option.iter (expression env) pc_guard;
+            expression env pc_rhs)
+          cases
+      and top_function env parameter_index exp =
+        match exp.pexp_desc with
+        | Pexp_constraint (exp, _, _)
+        | Pexp_coerce (exp, _, _)
+        | Pexp_newtype (_, _, exp) ->
+          top_function env parameter_index exp
+        | Pexp_function (params, _, body) ->
+          let env, parameter_index =
+            List.fold_left
+              (fun (env, parameter_index) { pparam_desc; _ } ->
+                match pparam_desc with
+                | Pparam_newtype _ -> env, parameter_index
+                | Pparam_val (_, default, pat) ->
+                  Option.iter (expression env) default;
+                  let relation =
+                    if parameter_index = position
+                    then Some Structural_root
+                    else None
+                  in
+                  structural_bind_pattern env relation pat,
+                  parameter_index + 1)
+              (env, parameter_index) params
+          in
+          begin match body with
+          | Pfunction_body body ->
+            begin match structural_function_labels body with
+            | [] -> expression env body
+            | _ :: _ -> top_function env parameter_index body
+            end
+          | Pfunction_cases (cases, _, _) ->
+            let relation =
+              if parameter_index = position
+              then Some Structural_root
+              else None
+            in
+            cases_with_relation env relation cases
+          end
+        | _ -> valid := false
+      in
+      List.iter
+        (fun { pvb_expr; _ } ->
+          top_function
+            { bound = Structural_string.Set.empty;
+              relations = Structural_string.Map.empty
+            }
+            0 pvb_expr)
+        bindings;
+      !valid
+    in
+    let rec try_position position =
+      position < max_common_position
+      && (check_position position || try_position (position + 1))
+    in
+    try_position 0
+
 let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
   (* We now delegate everything to type_expect *)
   type_expect ?recarg ~overwrite env expected_mode sexp
@@ -11725,8 +12064,11 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
          we type-checked expressions before patterns, then we could call
          [add_module_variables] here.
       *)
+      let structurally_terminating =
+        is_recursive && structurally_terminating_group spat_sexp_list
+      in
       let rhs_pvs =
-        if is_recursive
+        if is_recursive && not structurally_terminating
         then
           let partial =
             Value.of_const

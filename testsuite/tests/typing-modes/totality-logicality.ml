@@ -890,6 +890,68 @@ Line 1, characters 22-25:
 Error: This value is "partial" but is expected to be "total".
 |}]
 
+(* Structural recursion: constructor fields exposed by matching are strict
+   sub-terms, so list recursion can be total without an annotation naming a
+   measure.  The decreasing position is fixed for all recursive calls. *)
+let rec structural_length @ total = function
+  | [] -> 0
+  | _ :: tail -> 1 + structural_length tail
+
+let rec structural_map @ total = fun (f @ total logical) -> function
+  | [] -> []
+  | head :: tail -> f head :: structural_map f tail
+
+[%%expect{|
+val structural_length : 'a list -> int = <fun>
+val structural_map : ('a -> 'b) @ total logical -> 'a list -> 'b list = <fun>
+|}]
+
+(* Mutual recursion uses one common decreasing argument position and is
+   admitted only when every member and every group call passes. *)
+type structural_tree = Leaf | Node of structural_tree
+
+let rec structural_even @ total = function
+  | Leaf -> true
+  | Node child -> structural_odd child
+and structural_odd @ total = function
+  | Leaf -> false
+  | Node child -> structural_even child
+
+let structural_even_is_total = expects_total structural_even
+let structural_odd_is_total = expects_total structural_odd
+[%%expect{|
+type structural_tree = Leaf | Node of structural_tree
+val structural_even : structural_tree -> bool = <fun>
+val structural_odd : structural_tree -> bool = <fun>
+val structural_even_is_total : structural_tree -> bool = <fun>
+val structural_odd_is_total : structural_tree -> bool = <fun>
+|}]
+
+(* Unchanged, arithmetic, and merely eta-expanded recursion are not
+   structural descent and must remain partial. *)
+let rec bad_same_argument @ total = fun x -> bad_same_argument x + 1
+[%%expect{|
+Line 1, characters 45-62:
+1 | let rec bad_same_argument @ total = fun x -> bad_same_argument x + 1
+                                                 ^^^^^^^^^^^^^^^^^
+Error: The value "bad_same_argument" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 36-68
+         which is expected to be "total".
+|}]
+
+let rec bad_numeric_decrease @ total = fun n ->
+  bad_numeric_decrease (n - 1)
+[%%expect{|
+Line 2, characters 2-22:
+2 |   bad_numeric_decrease (n - 1)
+      ^^^^^^^^^^^^^^^^^^^^
+Error: The value "bad_numeric_decrease" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-2, characters 39-30
+         which is expected to be "total".
+|}]
+
 (* Ops: impure primitives and externals are partial values at the boundary. *)
 let _ @ total = fun x -> ref x
 [%%expect{|
