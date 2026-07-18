@@ -28,6 +28,11 @@
 module Sat = Oxsmt_solver.Sat
 module Recorder = Oxsmt_certificate.Recorder
 module Checker = Oxsmt_certificate.Checker
+module Term = Oxsmt_core.Term
+module Sort = Oxsmt_core.Sort
+module Bigint = Oxsmt_core.Bigint
+module Iarr = Oxsmt_core.Iarr
+module Rational = Oxsmt_lia.Rational
 
 exception Gap of string
 
@@ -46,6 +51,54 @@ let render_clause (c : lit list) : string =
   "[" ^ String.concat ", " (List.map render_lit c) ^ "]"
 ;;
 
+(* ---- Rung 3b: LIA theory-leaf discharge (theory<->Boolean bridge) ---- *)
+
+(* A global map from an atomic arithmetic term (an uninterpreted Int/element const or
+   application) to a reflective variable index, shared by every discharged leaf in the
+   file so one [rhoF] serves all of them. First-seen order. *)
+type atom_index =
+  { tbl : (Term.t, int) Hashtbl.t
+  ; mutable next : int
+  }
+
+let atom_index_create () = { tbl = Hashtbl.create 32; next = 0 }
+
+let atom_idx (ai : atom_index) (t : Term.t) : int =
+  match Hashtbl.find_opt ai.tbl t with
+  | Some i -> i
+  | None ->
+    let i = ai.next in
+    Hashtbl.replace ai.tbl t i;
+    ai.next <- i + 1;
+    i
+;;
+
+(* Linear form of an Int-sorted term: (coeff, atomic-term) pairs + a constant. Mirrors the
+   Farkas leaf emitter's [linear_of]. *)
+type linform =
+  { terms : (Term.t * Bigint.t) list
+  ; const : Bigint.t
+  }
+
+let linear_of (t : Term.t) : linform =
+  match t.Term.node with
+  | Term.Arith { coeffs; const } -> { terms = Iarr.to_list coeffs; const }
+  | Term.Int_const c -> { terms = []; const = c }
+  | _ -> { terms = [ t, Bigint.one ]; const = Bigint.zero }
+;;
+
+let lean_int b = Printf.sprintf "(%s : Int)" (Bigint.to_string b)
+
+(* Render a linform as a reflective [LinExpr] literal over the global atom index. *)
+let render_reflrow (ai : atom_index) (f : linform) : string =
+  let ts =
+    List.map
+      (fun (t, c) -> Printf.sprintf "(%s, %d)" (lean_int c) (atom_idx ai t))
+      f.terms
+  in
+  Printf.sprintf "([%s], %s)" (String.concat ", " ts) (lean_int f.const)
+;;
+
 (* A proof handle: the Lean identifier that proves [satClause rho <lits> = true]. *)
 type handle =
   { name : string
@@ -57,6 +110,7 @@ type handle =
 type emitter =
   { buf : Buffer.t
   ; mutable counter : int
+  ; rho : string (* the Lean expression for the Boolean assignment used everywhere *)
   }
 
 let fresh e prefix =
@@ -69,10 +123,10 @@ let fresh e prefix =
    against another clause proved by [oh] (its var [v] literal has sign [not dsign]) on
    pivot [v]. Returns the raw resolve EXPRESSION (clause args are holes inferred from the
    two proof terms). The positive-[v] side is c1, the negative-[v] side is c2. *)
-let resolve_expr ~pivot ~dsign ~(dexpr : string) ~(oexpr : string) : string =
+let resolve_expr ~rho ~pivot ~dsign ~(dexpr : string) ~(oexpr : string) : string =
   if dsign
-  then Printf.sprintf "(resolve rho %d _ _ %s %s)" pivot dexpr oexpr
-  else Printf.sprintf "(resolve rho %d _ _ %s %s)" pivot oexpr dexpr
+  then Printf.sprintf "(resolve %s %d _ _ %s %s)" rho pivot dexpr oexpr
+  else Printf.sprintf "(resolve %s %d _ _ %s %s)" rho pivot oexpr dexpr
 ;;
 
 (* ---- trail-based propagation helpers ---- *)
@@ -117,7 +171,7 @@ let emit_resolve_out
   let expr =
     List.fold_left
       (fun dexpr ((v, s), (uh : handle)) ->
-        resolve_expr ~pivot:v ~dsign:s ~dexpr ~oexpr:uh.name)
+        resolve_expr ~rho:e.rho ~pivot:v ~dsign:s ~dexpr ~oexpr:uh.name)
       base_name
       removals
   in
@@ -125,9 +179,11 @@ let emit_resolve_out
   Buffer.add_string
     e.buf
     (Printf.sprintf
-       "  have %s : satClause rho %s = true := sat_mono rho _ %s (by decide) %s\n"
+       "  have %s : satClause %s %s = true := sat_mono %s _ %s (by decide) %s\n"
        name
+       e.rho
        (render_clause target)
+       e.rho
        (render_clause target)
        expr);
   { name; lits = target }
@@ -220,54 +276,259 @@ let refute_under
 
 (* ---- top-level ---- *)
 
-(* Build the admitted-clause hypotheses (query + theory-lemma inputs, and theory leaves).
-   Returns (hyp declarations, ordered admitted handles). In Rung 3a every theory leaf is a
-   TRUSTED hypothesis — the Boolean refutation modulo unchecked theory steps. *)
-let build_axioms (ev : Checker.events) : string list * handle list =
+(* A LIA theory leaf the emitter can DISCHARGE (Rung 3b): its recorded clause, the Lean
+   [prems] list for [OxsmtBridge.leaf_sat], and the [(satvar, reflrow)] bindings [rhoB]
+   needs (each satvar mapped to [decide (eval reflrow rhoF ≤ 0)]). *)
+type discharged =
+  { leaf : lit list
+  ; prems_lean : string
+  ; bindings : (int * string) list
+  }
+
+(* Try to build a discharge for a LIA Farkas leaf. Succeeds ONLY when every premise is a
+   POSITIVE integer [Le] atom (so the leaf clause is all-negative literals and the
+   reflective row is the atom's own arg); otherwise [None] and the leaf stays a trusted
+   hypothesis (honest Valid_modulo). Rational multipliers are cleared to integers (Farkas
+   is scale-invariant). *)
+let try_discharge
+  (ai : atom_index)
+  ~(resolve_atom : int -> Term.t option)
+  (t : Recorder.theory_event)
+  (w : Recorder.lia_conflict_witness)
+  : discharged option
+  =
+  let premlist = w.Recorder.premises in
+  if premlist = []
+  then None
+  else (
+    let dens =
+      List.map
+        (fun (p : Recorder.lia_premise) -> Rational.den_bigint p.Recorder.multiplier)
+        premlist
+    in
+    let prod_but i =
+      List.fold_left
+        (fun acc (j, d) -> if j = i then acc else Bigint.mul acc d)
+        Bigint.one
+        (List.mapi (fun j d -> j, d) dens)
+    in
+    let exception Skip in
+    try
+      (* var -> (int_mult, reflrow) *)
+      let info = Hashtbl.create 8 in
+      List.iteri
+        (fun i (p : Recorder.lia_premise) ->
+          if not (Sat.sign_of_lit p.Recorder.lit) then raise Skip;
+          let v = Sat.var_of_lit p.Recorder.lit in
+          match resolve_atom v with
+          | None -> raise Skip
+          | Some atom ->
+            (match atom.Term.node with
+             | Term.Le arg ->
+               if not (Sort.equal arg.Term.sort Sort.int) then raise Skip;
+               let m =
+                 Bigint.mul (Rational.num_bigint p.Recorder.multiplier) (prod_but i)
+               in
+               if Bigint.compare m Bigint.zero < 0 then raise Skip;
+               Hashtbl.replace info v (m, render_reflrow ai (linear_of arg))
+             | _ -> raise Skip))
+        premlist;
+      (* order by the recorded leaf clause; every lit must be a negative literal of a var
+         we have an entry for (a positive premise). *)
+      let leaf = clause_of_sat t.Recorder.clause in
+      let ordered =
+        List.map
+          (fun (v, s) ->
+            if s then raise Skip;
+            match Hashtbl.find_opt info v with
+            | Some (m, row) -> v, m, row
+            | None -> raise Skip)
+          leaf
+      in
+      let prems_lean =
+        "["
+        ^ String.concat
+            ", "
+            (List.map
+               (fun (v, m, row) -> Printf.sprintf "(%d, (%s, %s))" v (lean_int m) row)
+               ordered)
+        ^ "]"
+      in
+      let bindings = List.map (fun (v, _, row) -> v, row) ordered in
+      Some { leaf; prems_lean; bindings }
+    with
+    | Skip -> None)
+;;
+
+(* Emit the full Lean file body: the [rhoF]/[rhoB] theory<->Boolean bridge definitions,
+   then [theorem refute] instantiated at [rhoB]. Discharged LIA leaves become proved
+   [have]s via {!OxsmtBridge.leaf_sat}; every other input/leaf clause is a trusted
+   hypothesis. The res/farkas/bridge preludes are prepended by the driver. *)
+let emit_refutation (ev : Checker.events) : string =
+  let ai = atom_index_create () in
+  let atom_tbl = Hashtbl.create 64 in
+  List.iter
+    (fun (a : Recorder.atom_event) ->
+      Hashtbl.replace atom_tbl a.Recorder.var a.Recorder.atom)
+    ev.Checker.atoms;
+  let resolve_atom v = Hashtbl.find_opt atom_tbl v in
+  (* classify theory leaves into discharged (3b) vs trusted hypothesis *)
+  let discharged = ref [] in
+  let hyp_leaves = ref [] in
+  List.iter
+    (fun (t : Recorder.theory_event) ->
+      let leaf = clause_of_sat t.Recorder.clause in
+      match t.Recorder.lia_witness with
+      | Some w ->
+        (match try_discharge ai ~resolve_atom t w with
+         | Some d -> discharged := d :: !discharged
+         | None -> hyp_leaves := leaf :: !hyp_leaves)
+      | None -> hyp_leaves := leaf :: !hyp_leaves)
+    ev.Checker.theory;
+  let discharged = List.rev !discharged in
+  let hyp_leaves = List.rev !hyp_leaves in
+  (* ai is now fully populated; build rhoF over its indices and rhoB over the discharged
+     leaves' bindings. *)
+  let nvars = ai.next in
+  let int_params =
+    List.init nvars (fun i -> Printf.sprintf "a%d" i) |> String.concat " "
+  in
+  let rhoF_applied =
+    if nvars = 0 then "rhoF" else Printf.sprintf "(rhoF %s)" int_params
+  in
+  let rho =
+    if nvars = 0 then "(rhoB barb)" else Printf.sprintf "(rhoB %s barb)" int_params
+  in
+  let e = { buf = Buffer.create 4096; counter = 0; rho } in
+  (* input + trusted-leaf hypotheses *)
   let hyps = ref [] in
   let admitted = ref [] in
-  let idx = ref 0 in
-  let add_hyp ~lits =
-    let name = Printf.sprintf "hax%d" !idx in
-    incr idx;
+  let hidx = ref 0 in
+  let add_hyp lits =
+    let name = Printf.sprintf "hax%d" !hidx in
+    incr hidx;
     hyps
-    := Printf.sprintf "  (%s : satClause rho %s = true)" name (render_clause lits)
+    := Printf.sprintf "  (%s : satClause %s %s = true)" name rho (render_clause lits)
        :: !hyps;
     admitted := { name; lits } :: !admitted
   in
   List.iter
-    (fun (i : Recorder.input_event) -> add_hyp ~lits:(clause_of_sat i.Recorder.clause))
+    (fun (i : Recorder.input_event) -> add_hyp (clause_of_sat i.Recorder.clause))
     ev.Checker.inputs;
+  List.iter (fun leaf -> add_hyp leaf) hyp_leaves;
+  let hyps = List.rev !hyps in
+  (* body: discharged-leaf bridge haves first (usable by the skeleton) *)
   List.iter
-    (fun (t : Recorder.theory_event) -> add_hyp ~lits:(clause_of_sat t.Recorder.clause))
-    ev.Checker.theory;
-  List.rev !hyps, List.rev !admitted
-;;
-
-(* Emit the full Lean file body (theorem [refute] + axiom print). The res_prelude text is
-   prepended by the driver, which also opens [OxsmtRes]. *)
-let emit_refutation (ev : Checker.events) : string =
-  let hyps, admitted = build_axioms ev in
-  let e = { buf = Buffer.create 4096; counter = 0 } in
-  (* Derive each learned clause in event order (RUP under its own negation over the
-     axioms + earlier-derived learned clauses), growing the usable clause pool. *)
+    (fun (d : discharged) ->
+      let name = fresh e "hleaf" in
+      (* hlink : ∀ p ∈ prems, rhoB p.1 = decide (eval p.2.2 rhoF ≤ 0) — a flat chain of
+         [List.forall_mem_cons] with each head [rfl] (rhoB reduces at each premise var).
+         Automation-free. *)
+      let hlink =
+        let b = Buffer.create 128 in
+        Buffer.add_string b "by\n";
+        List.iter
+          (fun _ ->
+            Buffer.add_string b "      refine List.forall_mem_cons.mpr ⟨rfl, ?_⟩\n")
+          d.bindings;
+        Buffer.add_string b "      exact List.forall_mem_nil _";
+        Buffer.contents b
+      in
+      Buffer.add_string
+        e.buf
+        (Printf.sprintf
+           "  have %s : satClause %s %s = true :=\n\
+           \    OxsmtBridge.leaf_sat %s %s %s\n\
+           \      (%s)\n\
+           \      (by decide) (by decide) (by decide)\n"
+           name
+           rho
+           (render_clause d.leaf)
+           d.prems_lean
+           rho
+           rhoF_applied
+           hlink);
+      admitted := { name; lits = d.leaf } :: !admitted)
+    discharged;
+  let admitted0 = List.rev !admitted in
+  (* Derive each learned clause in event order (RUP under its own negation over axioms +
+     discharged leaves + earlier-derived learned clauses). *)
   let derived = ref [] in
   List.iter
     (fun (l : Recorder.learned_event) ->
       let learned_lits = clause_of_sat l.Recorder.clause in
-      let clauses = admitted @ List.rev !derived in
+      let clauses = admitted0 @ List.rev !derived in
       let h = refute_under e ~clauses ~assumed_false:learned_lits ~target:learned_lits in
       derived := h :: !derived)
     ev.Checker.learned;
-  let all_clauses = admitted @ List.rev !derived in
+  let all_clauses = admitted0 @ List.rev !derived in
   let bot = refute_under e ~clauses:all_clauses ~assumed_false:[] ~target:[] in
-  Buffer.add_string e.buf (Printf.sprintf "  exact empty_absurd rho %s\n" bot.name);
-  let header =
-    "open OxsmtRes\n\nset_option maxRecDepth 10000\n\ntheorem refute (rho : Assign)\n"
+  Buffer.add_string e.buf (Printf.sprintf "  exact empty_absurd %s %s\n" rho bot.name);
+  (* rhoF / rhoB definitions *)
+  let defs = Buffer.create 1024 in
+  Buffer.add_string
+    defs
+    "open OxsmtRes\nopen OxsmtFarkas\n\nset_option maxRecDepth 10000\n\n";
+  let rhoF_params =
+    if nvars = 0
+    then ""
+    else
+      Printf.sprintf
+        " (%s : Int)"
+        (String.concat " " (List.init nvars (fun i -> Printf.sprintf "a%d" i)))
+  in
+  Buffer.add_string
+    defs
+    (Printf.sprintf "def rhoF%s : OxsmtFarkas.Assign := fun n =>\n" rhoF_params);
+  if nvars = 0
+  then Buffer.add_string defs "  0\n"
+  else (
+    List.init nvars (fun i -> i)
+    |> List.iter (fun i ->
+      Buffer.add_string defs (Printf.sprintf "  if n = %d then a%d else\n" i i));
+    Buffer.add_string defs "  0\n");
+  Buffer.add_string defs "\n";
+  let rhoB_params =
+    if nvars = 0
+    then ""
+    else
+      Printf.sprintf
+        " (%s : Int)"
+        (String.concat " " (List.init nvars (fun i -> Printf.sprintf "a%d" i)))
+  in
+  Buffer.add_string
+    defs
+    (Printf.sprintf
+       "def rhoB%s (barb : OxsmtRes.Assign) : OxsmtRes.Assign := fun v =>\n"
+       rhoB_params);
+  (* dedup bindings by var *)
+  let seen = Hashtbl.create 16 in
+  List.iter
+    (fun (d : discharged) ->
+      List.iter
+        (fun (v, row) ->
+          if not (Hashtbl.mem seen v)
+          then (
+            Hashtbl.replace seen v ();
+            Buffer.add_string
+              defs
+              (Printf.sprintf
+                 "  if v = %d then decide (OxsmtFarkas.eval %s %s ≤ 0) else\n"
+                 v
+                 row
+                 rhoF_applied)))
+        d.bindings)
+    discharged;
+  Buffer.add_string defs "  barb v\n\n";
+  let theorem_params =
+    if nvars = 0
+    then "(barb : OxsmtRes.Assign)"
+    else Printf.sprintf "(%s : Int) (barb : OxsmtRes.Assign)" int_params
   in
   Printf.sprintf
-    "%s%s\n    : False := by\n%s#print axioms refute\n"
-    header
+    "%stheorem refute %s\n%s\n    : False := by\n%s#print axioms refute\n"
+    (Buffer.contents defs)
+    theorem_params
     (String.concat "\n" hyps)
     (Buffer.contents e.buf)
 ;;

@@ -39,14 +39,24 @@ let lean_bin () =
       ".dispatch/bin/lean"
 ;;
 
+(* The emitted refutation is checked over the res + Farkas + bridge preludes (Rung 3b
+   discharges LIA leaves through {!OxsmtBridge.leaf_sat}; the Farkas prelude backs it). *)
 let prelude_text () =
-  let path =
-    match Sys.getenv_opt "OXSMT_RES_PRELUDE" with
-    | Some p -> p
-    | None -> "tests/lean/res_prelude.lean"
+  let read env dflt =
+    let path =
+      match Sys.getenv_opt env with
+      | Some p -> p
+      | None -> dflt
+    in
+    try read_file path with
+    | _ -> failwith ("cannot read prelude at " ^ path ^ " (set " ^ env ^ ")")
   in
-  try read_file path with
-  | _ -> failwith ("cannot read res prelude at " ^ path ^ " (set OXSMT_RES_PRELUDE)")
+  String.concat
+    "\n"
+    [ read "OXSMT_RES_PRELUDE" "tests/lean/res_prelude.lean"
+    ; read "OXSMT_FARKAS_PRELUDE" "tests/lean/farkas_prelude.lean"
+    ; read "OXSMT_BRIDGE_PRELUDE" "tests/lean/bridge_prelude.lean"
+    ]
 ;;
 
 (* Spawn lean with an in-process wall-clock cap. Returns (exit_ok, output). *)
@@ -89,24 +99,47 @@ let run_lean ~timeout ~src ~file : bool * string =
   wait ()
 ;;
 
-(* Tamper: rewrite the FIRST [resolve rho N] pivot to an unused-looking var (999999). That
-   resolution then no longer cancels its pivot, so the derived clause stops reducing to []
-   (or a [sat_mono] subset [by decide] fails) and the kernel must REJECT. *)
-let tamper (src : string) : string option =
-  let needle = "resolve rho " in
-  let nl = String.length needle in
-  let hl = String.length src in
-  let rec find i =
+let find_sub ?(from = 0) (hay : string) (needle : string) : int option =
+  let nl = String.length needle
+  and hl = String.length hay in
+  let rec loop i =
     if i + nl > hl
     then None
-    else if String.sub src i nl = needle
-    then Some (i + nl)
-    else find (i + 1)
+    else if String.sub hay i nl = needle
+    then Some i
+    else loop (i + 1)
   in
-  match find 0 with
+  loop from
+;;
+
+(* Tamper A (swapped pivot): rewrite the FIRST resolution pivot to an unused-looking var
+   (999999). That resolution no longer cancels its pivot, so the derived clause stops
+   reducing to [] (or a [sat_mono] subset [by decide] fails) and the kernel must REJECT.
+   The emitted form is [(resolve <rho> N _ _ ...)]; skip the balanced [<rho>] to reach N. *)
+let tamper_pivot (src : string) : string option =
+  let hl = String.length src in
+  match find_sub src "resolve " with
   | None -> None
-  | Some j ->
-    (* j points at the first digit of the pivot; find the end of the number *)
+  | Some i ->
+    let p = ref (i + String.length "resolve ") in
+    (* skip the rho argument: a balanced (...) group, else a bare token *)
+    if !p < hl && src.[!p] = '('
+    then (
+      let depth = ref 0 in
+      let continue = ref true in
+      while !continue && !p < hl do
+        if src.[!p] = '(' then incr depth else if src.[!p] = ')' then decr depth;
+        incr p;
+        if !depth = 0 then continue := false
+      done)
+    else
+      while !p < hl && src.[!p] <> ' ' do
+        incr p
+      done;
+    while !p < hl && src.[!p] = ' ' do
+      incr p
+    done;
+    let j = !p in
     let k = ref j in
     while !k < hl && src.[!k] >= '0' && src.[!k] <= '9' do
       incr k
@@ -114,6 +147,58 @@ let tamper (src : string) : string option =
     if !k = j
     then None
     else Some (String.sub src 0 j ^ "999999" ^ String.sub src !k (hl - !k))
+;;
+
+(* Tamper B (dropped premise): replace the FIRST resolution [(resolve <rho> N _ _ A B)] in
+   the proof body with just its first antecedent [A], dropping premise [B] and the pivot
+   step. The derived clause is then wrong, so the refutation no longer reduces to [] (or a
+   [sat_mono] subset [by decide] fails) and the kernel must REJECT. [None] if there is no
+   resolution to drop. *)
+let drop_premise (src : string) : string option =
+  let hl = String.length src in
+  (* index just past the ')' matching the '(' at [g0]. *)
+  let scan_group g0 =
+    let depth = ref 0
+    and p = ref g0
+    and stop = ref (-1) in
+    while !stop < 0 && !p < hl do
+      if src.[!p] = '(' then incr depth else if src.[!p] = ')' then decr depth;
+      incr p;
+      if !depth = 0 then stop := !p
+    done;
+    !stop
+  in
+  match find_sub src "(resolve " with
+  | None -> None
+  | Some g0 ->
+    let g1 = scan_group g0 in
+    if g1 < 0
+    then None
+    else (
+      match find_sub ~from:g0 src "_ _ " with
+      | Some m when m < g1 ->
+        let a0 = ref (m + 4) in
+        while !a0 < g1 && src.[!a0] = ' ' do
+          incr a0
+        done;
+        let a1 =
+          if !a0 < g1 && src.[!a0] = '('
+          then scan_group !a0
+          else (
+            let p = ref !a0 in
+            while !p < g1 && src.[!p] <> ' ' do
+              incr p
+            done;
+            !p)
+        in
+        if a1 <= !a0
+        then None
+        else
+          Some
+            (String.sub src 0 g0
+             ^ String.sub src !a0 (a1 - !a0)
+             ^ String.sub src g1 (hl - g1))
+      | _ -> None)
 ;;
 
 let cnt = ref 0
@@ -186,13 +271,16 @@ let process_file ~prelude ~timeout ~logdir path : unit =
                 let full = prelude ^ "\n" ^ body in
                 let f = Filename.concat logdir (name ^ ".lean") in
                 let ok, out = run_lean ~timeout ~src:full ~file:f in
-                let tampered_ok =
-                  match tamper body with
+                let tamper_accepts label f_tamper =
+                  match f_tamper body with
                   | None -> false (* nothing to tamper => treat as rejected (safe) *)
                   | Some tbody ->
-                    let tf = Filename.concat logdir (name ^ ".tamper.lean") in
+                    let tf = Filename.concat logdir (name ^ "." ^ label ^ ".lean") in
                     fst (run_lean ~timeout ~src:(prelude ^ "\n" ^ tbody) ~file:tf)
                 in
+                let pivot_ok = tamper_accepts "pivot" tamper_pivot in
+                let drop_ok = tamper_accepts "drop" drop_premise in
+                let tampered_ok = pivot_ok || drop_ok in
                 if not ok
                 then (
                   incr cnt_broken;
@@ -208,7 +296,10 @@ let process_file ~prelude ~timeout ~logdir path : unit =
                 else if tampered_ok
                 then (
                   incr cnt_broken;
-                  Printf.printf "BROKEN       %s :: TAMPERED refutation ACCEPTED\n%!" base)
+                  Printf.printf
+                    "BROKEN       %s :: TAMPERED refutation ACCEPTED (%s)\n%!"
+                    base
+                    (if pivot_ok then "swapped-pivot" else "dropped-premise"))
                 else (
                   match Oxsmt_lean_export.Lean_export.check_axioms out with
                   | Error m ->
