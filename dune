@@ -238,6 +238,8 @@
   ctype
   vox_vc
   vox_lean
+  vox_smt
+  vox_backend
   printtyp
   rawprinttyp
   gprinttyp

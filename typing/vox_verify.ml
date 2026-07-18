@@ -166,16 +166,28 @@ let dump_vc ~kind ~env (condition : Vox_vc.t) =
     condition.Vox_vc.facts;
   Format.eprintf "|- %s@.@." (render_display ~env condition.Vox_vc.goal)
 
-let not_discharged_result (condition : Vox_vc.t) : Vox_lean.result =
+let backend_selection () =
+  match Vox_backend.selection_of_string !Clflags.vox_backend with
+  | Ok selection -> selection
+  | Error message -> invalid_arg message
+
+let not_discharged_result (condition : Vox_vc.t) : Vox_backend.result =
+  let unused_facts =
+    match backend_selection () with
+    | Vox_backend.Single Vox_backend.Lean -> Some []
+    | Vox_backend.Cross -> None
+    | Vox_backend.Single (Vox_backend.Z3 | Vox_backend.Oxsmt) -> None
+  in
   { verdict = Not_proved;
     location = condition.location;
     detail = Some "not discharged (-vox-dump-vc)";
-    unused_facts = [];
+    unused_facts;
+    backend_results = [];
   }
 
 let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
   let origin = fact.origin in
-  Json.object_
+  let fields =
     [ Json.field "text" (json_string (render_expression fact.expression));
       Json.field "display"
         (json_string (render_display ~env fact.expression));
@@ -186,10 +198,15 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
              Json.field "name" (Json.option json_string origin.name);
              Json.field "span" (Json.option json_span origin.span);
            ]);
-      (* Display-only fade signal: false only when the discharged proof did not
-         reference this fact (per Lean's linter); defaults to used otherwise. *)
-      Json.field "used" (json_bool (not (List.mem index unused_facts)));
     ]
+  in
+  let usage =
+    match unused_facts with
+    | None -> []
+    | Some unused_facts ->
+      [ Json.field "used" (json_bool (not (List.mem index unused_facts))) ]
+  in
+  Json.object_ (fields @ usage)
 
 let contains text needle =
   let text_length = String.length text in
@@ -201,14 +218,15 @@ let contains text needle =
   in
   needle_length = 0 || loop 0
 
-let counterexample (result : Vox_lean.result) =
+let counterexample (result : Vox_backend.result) =
   match result.verdict, result.detail with
-  | Disproved, Some detail ->
+  | Vox_backend.Disproved, Some detail ->
     let lower = String.lowercase_ascii detail in
     if contains lower "counterexample" || contains lower "witness"
     then Some detail
     else None
-  | (Proved | Not_proved | Solver_error), _ | Disproved, None -> None
+  | (Proved | Not_proved | Unknown | Solver_error | Unavailable), _
+  | Disproved, None -> None
 
 let json_emission_error (error : Vox_lean.emission_error) =
   Json.object_
@@ -216,8 +234,23 @@ let json_emission_error (error : Vox_lean.emission_error) =
       Json.field "location" (json_span error.location);
     ]
 
+let json_backend_result (result : Vox_backend.backend_result) =
+  let fact_usage =
+    match result.capabilities.fact_usage with
+    | Vox_backend.Fact_usage -> true
+    | Vox_backend.No_fact_usage -> false
+  in
+  Json.object_
+    [ Json.field "backend"
+        (json_string (Vox_backend.string_of_backend result.backend));
+      Json.field "status"
+        (json_string (Vox_backend.string_of_verdict result.verdict));
+      Json.field "detail" (Json.option json_string result.detail);
+      Json.field "fact_usage" (json_bool fact_usage);
+    ]
+
 let record_vc ~kind ~program_point ~provenance ~env
-    (condition : Vox_vc.t) (result : Vox_lean.result) =
+    (condition : Vox_vc.t) (result : Vox_backend.result) =
   let generated_lean, emission_error =
     match Vox_lean.emit ~env condition with
     | Ok source -> Some source, None
@@ -233,14 +266,23 @@ let record_vc ~kind ~program_point ~provenance ~env
           (json_span condition.Vox_vc.goal.rexp_loc);
       ]
   in
+  let backend_results =
+    match backend_selection () with
+    | Vox_backend.Cross ->
+      [ Json.field "backends"
+          (Json.array (List.map json_backend_result result.backend_results)) ]
+    | Vox_backend.Single _ -> []
+  in
   let discharge =
     Json.object_
+      (
       [ Json.field "status"
-          (json_string (Vox_lean.string_of_verdict result.verdict));
+          (json_string (Vox_backend.string_of_verdict result.verdict));
         Json.field "detail" (Json.option json_string result.detail);
         Json.field "counterexample"
           (Json.option json_string (counterexample result));
       ]
+      @ backend_results)
   in
   let json =
     Json.object_
@@ -931,9 +973,20 @@ let rec bind_scope_references scope expression =
 let is_def_axiom_binding binding =
   Vox_defeq.is_generated_lemma_loc binding.vb_loc
 
-let verification_error ~loc verdict =
+let discharge ~env condition =
+  Vox_backend.discharge ~selection:(backend_selection ())
+    ~smt_solver:!Clflags.vox_smt_solver
+    ~oxsmt_solver:!Clflags.vox_oxsmt_solver ~env condition
+
+let failure_text (result : Vox_backend.result) =
+  match backend_selection (), result.detail with
+  | Vox_backend.Cross, Some detail -> detail
+  | Vox_backend.Cross, None | Vox_backend.Single _, _ ->
+    Vox_backend.string_of_verdict result.verdict
+
+let verification_error ~loc result =
   Location.raise_errorf ~loc "Refinement verification failed (%s)"
-    (Vox_lean.string_of_verdict verdict)
+    (failure_text result)
 
 let fact_origin ?name ~kind span : Vox_vc.fact_origin =
   { kind; name; span = Some span }
@@ -964,18 +1017,19 @@ let prove state ~env ~loc ~kind ~program_point ~provenance goal =
           (not_discharged_result condition);
       state.facts <- Facts.add ~origin ~loc goal state.facts
     end else begin
-      let result = Vox_lean.discharge ~env condition in
+      let result = discharge ~env condition in
       if Option.is_some !Clflags.vox_dump_vc_json then
         record_vc ~kind ~program_point
           ~provenance:(Lazy.force provenance) ~env condition result;
       match result.verdict with
-      | Vox_lean.Proved ->
+      | Vox_backend.Proved ->
         let origin =
           fact_origin_of_provenance (Lazy.force provenance)
         in
         state.facts <- Facts.add ~origin ~loc goal state.facts
-      | (Not_proved | Disproved | Solver_error) as verdict ->
-        verification_error ~loc verdict
+      | (Vox_backend.Not_proved | Disproved | Unknown | Solver_error
+        | Unavailable) ->
+        verification_error ~loc result
     end
 
 let prove_refinement state ~env ~loc ~kind ~program_point ~provenance
@@ -1044,13 +1098,14 @@ let verify_seal_obligation ~env ~seal_location
       record_vc ~kind:"seal-implication" ~program_point:anchor
         ~provenance ~env condition (not_discharged_result condition)
   end else begin
-    let result = Vox_lean.discharge ~env condition in
+    let result = discharge ~env condition in
     if Option.is_some !Clflags.vox_dump_vc_json then
       record_vc ~kind:"seal-implication" ~program_point:anchor
         ~provenance ~env condition result;
     match result.verdict with
-    | Vox_lean.Proved -> ()
-    | (Not_proved | Disproved | Solver_error) as verdict ->
+    | Vox_backend.Proved -> ()
+    | (Vox_backend.Not_proved | Disproved | Unknown | Solver_error
+      | Unavailable) ->
       let sub =
         [ Location.msg ~loc:obligation.rso_interface_location
             "Interface declaration for value %s"
@@ -1062,7 +1117,7 @@ let verify_seal_obligation ~env ~seal_location
       in
       Location.raise_errorf ~loc:seal_location ~sub
         "Refinement verification failed at module seal for value %S (%s)"
-        obligation.rso_value_name (Vox_lean.string_of_verdict verdict)
+        obligation.rso_value_name (failure_text result)
   end
 
 let verify_seal_obligations ~env ~seal_location obligations =

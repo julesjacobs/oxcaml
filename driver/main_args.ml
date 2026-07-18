@@ -941,6 +941,21 @@ let mk_vox_type_only f =
     " Type-check one unit without refinement VCs or .cmi/.cmo/.cmt files; "
     ^ "skip .ml/.mli conformance checking" )
 
+let mk_vox_backend f =
+  ( "-vox-backend",
+    Arg.Symbol (["lean"; "z3"; "oxsmt"; "cross"], f),
+    " Select the refinement discharge backend" )
+
+let mk_vox_smt_solver f =
+  ( "-vox-smt-solver",
+    Arg.String f,
+    "<command>  External SMT solver command for the z3 backend" )
+
+let mk_vox_oxsmt_solver f =
+  ( "-vox-oxsmt-solver",
+    Arg.String f,
+    "<command>  External stdin runner command for the oxsmt backend" )
+
 let mk_dtlambda f =
   "-dtlambda", Arg.Unit f, " (undocumented)"
 
@@ -1228,6 +1243,9 @@ module type Core_options = sig
   val _vox_dump_vc : unit -> unit
   val _vox_dump_vc_json : string -> unit
   val _vox_type_only : unit -> unit
+  val _vox_backend : string -> unit
+  val _vox_smt_solver : string -> unit
+  val _vox_oxsmt_solver : string -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit
@@ -1630,6 +1648,9 @@ struct
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_backend F._vox_backend;
+    mk_vox_smt_solver F._vox_smt_solver;
+    mk_vox_oxsmt_solver F._vox_oxsmt_solver;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1742,6 +1763,9 @@ struct
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_backend F._vox_backend;
+    mk_vox_smt_solver F._vox_smt_solver;
+    mk_vox_oxsmt_solver F._vox_oxsmt_solver;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -1929,6 +1953,9 @@ struct
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_backend F._vox_backend;
+    mk_vox_smt_solver F._vox_smt_solver;
+    mk_vox_oxsmt_solver F._vox_oxsmt_solver;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2097,6 +2124,9 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_backend F._vox_backend;
+    mk_vox_smt_solver F._vox_smt_solver;
+    mk_vox_oxsmt_solver F._vox_oxsmt_solver;
     mk_dparsetree F._dparsetree;
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
@@ -2247,6 +2277,9 @@ struct
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_backend F._vox_backend;
+    mk_vox_smt_solver F._vox_smt_solver;
+    mk_vox_oxsmt_solver F._vox_oxsmt_solver;
     mk_dparsetree F._dparsetree;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
@@ -2498,6 +2531,9 @@ module Default = struct
       vox_dump_vc := true;
       unique_ids := false
     let _vox_dump_vc_json file = vox_dump_vc_json := Some file
+    let _vox_backend backend = vox_backend := backend
+    let _vox_smt_solver command = vox_smt_solver := Some command
+    let _vox_oxsmt_solver command = vox_oxsmt_solver := Some command
     let _vox_type_only () =
       if !vox_dump_vc then
         raise (Arg.Bad "-vox-type-only and -vox-dump-vc are incompatible");

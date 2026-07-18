@@ -1,0 +1,35 @@
+=== arithmetic-and-booleans ===
+(declare-const v_0 Int)
+(assert (= (= v_0 4) true))
+(assert (not (= (and (<= (- (* (+ v_0 2) 3) 1) 20) (or (not false) (and true (> v_0 (- 1))))) true)))
+(check-sat)
+=== ground-defeq-shape ===
+(declare-fun VoxRef_0 (Int) Int)
+(assert (= (= (VoxRef_0 4) 5) true))
+(assert (not (= (> (VoxRef_0 4) 0) true)))
+(check-sat)
+=== bound-function-symbol ===
+(declare-fun v_0 (Int) Int)
+(assert (= (= (v_0 9) 10) true))
+(assert (not (= (> (v_0 9) 0) true)))
+(check-sat)
+=== tuple ===
+(declare-datatypes ((VoxTuple_3ed53b2f34c01c85898d9e62568b48db 0)) (((VoxTuple_3ed53b2f34c01c85898d9e62568b48db_tuple (VoxTuple_3ed53b2f34c01c85898d9e62568b48db_p_0 Int) (VoxTuple_3ed53b2f34c01c85898d9e62568b48db_p_1 Bool)))))
+(assert (not (= (= (VoxTuple_3ed53b2f34c01c85898d9e62568b48db_tuple 7 true) (VoxTuple_3ed53b2f34c01c85898d9e62568b48db_tuple 7 true)) true)))
+(check-sat)
+=== datatype ===
+(declare-datatypes ((VoxData_9e95b208c17b28cd510d1b4a094ad589 0)) (((VoxData_9e95b208c17b28cd510d1b4a094ad589_c_0_None) (VoxData_9e95b208c17b28cd510d1b4a094ad589_c_1_Some (VoxData_9e95b208c17b28cd510d1b4a094ad589_s_1_0 Int)))))
+(assert (not (= (= (VoxData_9e95b208c17b28cd510d1b4a094ad589_c_1_Some 7) (VoxData_9e95b208c17b28cd510d1b4a094ad589_c_1_Some 7)) true)))
+(check-sat)
+=== let-ite-lambda-beta ===
+(assert (not (= (and (ite true (let ((l_0 3)) (= l_0 3)) false) (= 4 4)) true)))
+(check-sat)
+quantifier guard: no forall/exists/pattern/quantifier
+rejection guards: erased quantifier and residual lambda
+disprove query: positive goal asserted
+status parser: sat/unsat/unknown/malformed checked
+verdicts: proved/disproved/unknown/error/unavailable distinguished
+oxsmt exits: unsupported is unknown; malformed is solver-error
+backend selection and usage capabilities checked
+cross aggregation: ordered divergence and unanimity checked
+z3 subprocess: SKIPPED (VOX_SMT_TEST_SOLVER is not provisioned)
