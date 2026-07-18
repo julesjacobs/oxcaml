@@ -86,7 +86,7 @@ type drv =
   ; alloc : Atom.allocator
   }
 
-let make b = { dt = Dt.create b.ctx b.env b.reg; alloc = Atom.create_allocator () }
+let make b = { dt = Dt.create b.ctx b.env (ref b.reg); alloc = Atom.create_allocator () }
 
 (* register [phi] as an atom and assert it at [positive] polarity *)
 let assert_atom d (phi : Term.t) ~positive =

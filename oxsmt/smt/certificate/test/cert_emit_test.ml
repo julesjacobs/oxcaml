@@ -630,8 +630,52 @@ let test_high4_ambiguous_id () =
 
 (* ------------------------------------------------------------------ *)
 
+(* Base #53 GATE PIN (codex bounce): a level-0 THEORY conflict's terminal is gated on
+   base-l0 cert mode. The product OFF path can never reach a level-0 theory conflict (OFF
+   keeps [base] assumed at level 1, so theory conflicts are level >= 1), so the corpus
+   can't exercise the gate — this pins it directly at the raw-Sat layer. A lit forced TRUE
+   by a level-0 unit, with the mock configured to conflict on it and NO assumptions,
+   yields a level-0 theory conflict. STRICT OFF ([base_l0_cert_mode = false], default) ⇒
+   the PRE-#53 E2 [Level0_conflict] (byte-identical to trunk). BASE-L0 cert mode
+   ([base_l0_cert_mode = true]) ⇒ the empty-core E3 [Failed_assumption]. *)
+let level0_theory_conflict_conclusion ~base_l0_cert_mode =
+  let s = Sat.create ~base_l0_cert_mode () in
+  let a = Sat.new_var s in
+  let la = Sat.pos a in
+  let mock = make_mock s { empty_config with conflicts = [ [ la ] ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ la ] (* la true at level 0 (unit) *);
+  let r =
+    Sat.solve s
+    (* no assumptions: theory conflicts on la at level 0 *)
+  in
+  r, Recorder.conclusion rec_
+;;
+
+let test_base_l0_e3_gate () =
+  (* strict OFF: E2 Level0_conflict (pre-#53, trunk-identical). *)
+  let r_off, concl_off = level0_theory_conflict_conclusion ~base_l0_cert_mode:false in
+  check "gate/off: unsat" (r_off = Sat.Unsat);
+  check
+    "gate/off (strict): level-0 theory conflict stays E2 Level0_conflict"
+    (match concl_off with
+     | Some (Sat.Level0_conflict _) -> true
+     | _ -> false);
+  (* base-l0 cert mode: empty-core E3 Failed_assumption. *)
+  let r_on, concl_on = level0_theory_conflict_conclusion ~base_l0_cert_mode:true in
+  check "gate/on: unsat" (r_on = Sat.Unsat);
+  check
+    "gate/on (base-l0): level-0 theory conflict routes to E3 Failed_assumption []"
+    (match concl_on with
+     | Some (Sat.Failed_assumption { antecedents = [] }) -> true
+     | _ -> false)
+;;
+
 let () =
   test_on_input_and_unit ();
+  test_base_l0_e3_gate ();
   test_e1_root_empty ();
   test_e2_level0_conflict ();
   test_e3_failed_assumption_theory_prop ();

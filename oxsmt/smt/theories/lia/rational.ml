@@ -152,6 +152,18 @@ let num x =
        | None -> raise Overflow))
 ;;
 
+let num_bigint x = fst (to_big x)
+
+(* Floor as an arbitrary-precision [Bigint.t] — {!floor} without the int63 output
+   projection, so a >int63 value (a uint256 branch point) does not overflow. Uniform over
+   tiers via [to_big]; [den > 0] by normalization, so flooring is [num div den] adjusted
+   down when the remainder is negative (truncation is toward zero). *)
+let floor_bigint x =
+  let num, den = to_big x in
+  let q, r = Bigint.divmod num den in
+  if Bigint.sign r < 0 then Bigint.sub q Bigint.one else q
+;;
+
 let den x =
   if W.is_immediate x
   then 1

@@ -127,14 +127,9 @@ let () =
    and v2 = k s "w2" cs
    and v3 = k s "w3" cs in
    Session.assert_term s (Context.distinct ctx [ v1; v2; v3 ]);
-   let v = Session.check_sat s in
-   (* sat model may degrade to unknown (constructor-tree model is a follow-up); the
-      soundness requirement is only that it is NOT unsat. *)
-   incr checks;
-   if v = Session.Unsat
-   then (
-     incr failures;
-     Printf.printf "  FAIL enum-sat: 3 distinct colors reported unsat\n"));
+   (* model construction (this lane): three distinct Colors is satisfiable AND the
+      constructor-tree model is now built + self-checked, so the verdict is checked-Sat. *)
+   expect "enum-sat: 3 distinct colors" (Session.check_sat s) Session.Sat);
   (* codex fix 1 — bounded-enum FIELD pigeonhole. wrap injects a 2-value enum; three
      distinct wraps force three distinct fields, impossible over two values: unsat. Before
      the field-relevance fix this returned Sat (the fields were never case-split). *)
@@ -184,11 +179,9 @@ let () =
    let ctx = Session.context s in
    let w a = Context.app ctx wrap [ k s a bit ] in
    Session.assert_term s (Context.distinct ctx [ w "f1"; w "f2" ]);
-   incr checks;
-   if Session.check_sat s = Session.Unsat
-   then (
-     incr failures;
-     Printf.printf "  FAIL enum-field-sat: 2 distinct wraps reported unsat\n"));
+   (* two distinct wraps of a 2-value field is satisfiable, and the field-split model is
+      built + self-checked: checked-Sat (was "not unsat" before model construction). *)
+   expect "enum-field-sat: 2 distinct wraps" (Session.check_sat s) Session.Sat);
   (* codex fix 2 — single-constructor record: fst p = fst q ∧ snd p = snd q ∧ p ≠ q is
      unsat (forcing p = mk(fst p, snd p), q = mk(fst q, snd q), then congruence equates
      them ⟹ p = q). Before the single-ctor forcing this returned Sat. *)
@@ -223,12 +216,9 @@ let () =
    and y = k s "dc_y" ls in
    (* only a positive equality (a merge) — no selector, tester, or diseq touches x/y *)
    Session.assert_term s (Context.eq ctx x y);
-   let v = Session.check_sat s in
-   incr checks;
-   if v = Session.Unsat
-   then (
-     incr failures;
-     Printf.printf "  FAIL laziness: don't-care positive eq reported unsat\n");
+   (* a don't-care positive equality over a recursive List is satisfiable; the model gives
+      both x,y the sort's terminating constructor (nil) — checked-Sat with ZERO splits. *)
+   expect "laziness: don't-care positive eq" (Session.check_sat s) Session.Sat;
    incr checks;
    if Session.splits s <> 0
    then (
@@ -255,12 +245,10 @@ let () =
    let x = k s "rx" ls
    and y = k s "ry" ls in
    Session.assert_term s (Context.not_ ctx (Context.eq ctx x y));
-   let v = Session.check_sat s in
-   incr checks;
-   if v = Session.Unsat
-   then (
-     incr failures;
-     Printf.printf "  FAIL cascade-bound: recursive x<>y reported unsat\n");
+   (* a disequality over a recursive list is trivially sat (differ at the top
+      constructor); the bounded cascade resolves it in a few splits and the model
+      self-checks: Sat. *)
+   expect "cascade-bound: recursive x<>y" (Session.check_sat s) Session.Sat;
    incr checks;
    if Session.budget_exhausted s
    then (

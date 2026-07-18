@@ -39,57 +39,67 @@ module Combined =
     (Oxsmt_lia.Lia_adapter)
 
 module Dt = Oxsmt_dt.Dt
+module Arr = Oxsmt_arr.Arr
 
 (* The theory the seam drives. A problem that declares an algebraic datatype installs the
-   standalone DT theory (an e-graph client — EUF congruence + the datatype axioms; GOALS
-   Datatypes); every other problem keeps the Nelson-Oppen EUF+LIA {!Combined} stack,
-   byte-identical to before. The choice is made lazily at the first [intern] (after the
-   session's declarations, so the datatype registry is populated by then) and is total,
-   syntactic, assert-time — never a per-term relevance guess. *)
+   standalone DT theory, one that uses arrays the standalone arrays theory (both e-graph
+   clients — EUF congruence plus their own axioms); every other problem keeps the
+   Nelson-Oppen EUF+LIA {!Combined} stack, byte-identical to before. The choice is made
+   lazily at the first [intern] (after the session's declarations, so the datatype / array
+   registries are populated by then) and is total, syntactic, assert-time — never a
+   per-term relevance guess. *)
 type theory_impl =
   | TCombined of Combined.t
   | TDt of Dt.t
+  | TArr of Arr.t
 
 let th_register impl a term =
   match impl with
   | TCombined th -> Combined.register_atom th a term
   | TDt th -> Dt.register_atom th a term
+  | TArr th -> Arr.register_atom th a term
 ;;
 
 let th_assert impl lit =
   match impl with
   | TCombined th -> Combined.assert_lit th lit
   | TDt th -> Dt.assert_lit th lit
+  | TArr th -> Arr.assert_lit th lit
 ;;
 
 let th_check impl effort =
   match impl with
   | TCombined th -> Combined.check th effort
   | TDt th -> Dt.check th effort
+  | TArr th -> Arr.check th effort
 ;;
 
 let th_explain impl lit =
   match impl with
   | TCombined th -> Combined.explain th lit
   | TDt th -> Dt.explain th lit
+  | TArr th -> Arr.explain th lit
 ;;
 
 let th_push impl =
   match impl with
   | TCombined th -> Combined.push th
   | TDt th -> Dt.push th
+  | TArr th -> Arr.push th
 ;;
 
 let th_pop impl n =
   match impl with
   | TCombined th -> Combined.pop th n
   | TDt th -> Dt.pop th n
+  | TArr th -> Arr.pop th n
 ;;
 
 let th_model impl =
   match impl with
   | TCombined th -> Combined.model th
   | TDt th -> Dt.model th
+  | TArr th -> Arr.model th
 ;;
 
 (* A model value for a symbol / table cell, in the eval-agnostic vocabulary the CLI
@@ -129,28 +139,60 @@ type sort_card =
    from an unfinished search). Caught at the {!Session} boundary. *)
 exception Split_budget_exceeded
 
+(* Monomorphic [Sat.var]-keyed table ([Sat.var = int]): avoids the polymorphic
+   [caml_hash]/[compare_val] the default [Hashtbl] runs on every intern-path lookup. None
+   of the tables below ([v2a]/[v2term]/[is_split]) is ever iterated, so bucket layout is
+   not observable. *)
+module Vartbl = Hashtbl.Make (struct
+    type t = int
+
+    let equal = Int.equal
+    let hash (x : int) = x
+  end)
+
 type t =
   { mutable theory : theory_impl option
     (* chosen lazily at the first [intern] from [registry] (empty => Combined). [None]
          until then, and forever for a pure-propositional problem with no theory atom. *)
   ; ctx : Context.t
   ; env : Env.t
+  ; cap : Env.reserved_cap
+    (* ADR-0012 R1 reserved-minting capability for [env] (threaded from Session, the
+         sole holder). Handed to the standalone arrays theory, which mints unforgeable
+         reserved extensionality witnesses; unused by the other theories. *)
   ; registry : Oxsmt_core.Datatype_defs.t ref
     (* datatype declarations (shared ref with Session); empty for a non-DT problem *)
+  ; array_registry : Oxsmt_core.Array_defs.t ref
+    (* array select/store symbols (shared ref with Session); empty for a non-array
+         problem. Checked before [registry] in [ensure_theory]. *)
   ; sat : Sat.t
   ; alloc : Atom.allocator
-  ; v2a : (Sat.var, Atom.t) Hashtbl.t (* SAT var -> theory atom (theory atoms only) *)
-  ; v2term : (Sat.var, Term.t) Hashtbl.t (* SAT var -> its atom term *)
+  ; v2a : Atom.t Vartbl.t (* SAT var -> theory atom (theory atoms only) *)
+  ; v2term : Term.t Vartbl.t (* SAT var -> its atom term *)
   ; a2v : Sat.var Atom.Table.t (* theory atom -> SAT var *)
   ; t2v : Sat.var Term.Table.t (* atom term -> SAT var (hash-cons sharing) *)
-  ; is_split :
-      (Sat.var, unit) Hashtbl.t (* atoms minted from a Split (need re-register) *)
-  ; mutable subterms : Term.Set.t (* every subterm of a registered atom, for the model *)
+  ; is_split : unit Vartbl.t (* atoms minted from a Split (need re-register) *)
+  ; subterms : unit Term.Table.t (* every subterm of a registered atom, for the model *)
   ; mutable level : int (* theory frames pushed above the base (= SAT decision level) *)
   ; split_budget : int
   ; mutable splits : int (* splits emitted in the current check-sat *)
   ; budget : Budget.t (* shared effort budget (board #60): SAT ticks it, we tick Final *)
   ; mutable last_model : Model.t option (* snapshot taken at the accepting Final->Sat *)
+  ; mutable last_dt_model : (Term.t * Dt.ctor_tree) list option
+    (* DT constructor-tree checker model, snapshotted at the accepting Final->Sat when
+         the installed theory is the standalone DT theory (else [None]); read by
+         {!Session}'s DT-branch commit through {!dt_model} and checked by
+         [Dt_model_check]. *)
+  ; mutable last_array_model : (Term.t * Arr.value) list option
+    (* arrays checker model, snapshotted at the accepting Final->Sat when the installed
+         theory is the standalone arrays theory (else [None]); read by {!Session}'s arrays
+         commit through {!array_model} and checked by [Array_model_check]. *)
+  ; mutable relevancy : Relevancy.t option
+    (* dynamic relevancy driver (task #24), [None] unless {!Session} installed one from the
+     [OXSMT_RELEVANCY] gate. When [Some], the two trail seam events below stream to it so
+     it can maintain relevancy marks in lockstep with the SAT trail; the branch filter
+     itself is installed directly on the SAT core by {!Session}. A [None] arm is
+     behaviourally inert — the theory glue is byte-identical with relevancy off. *)
   }
 
 let sign_lit = Sat.sign_of_lit
@@ -162,11 +204,14 @@ let satlit_of_lit t (lit : Lit.t) =
   if Lit.sign lit then Sat.pos v else Sat.neg v
 ;;
 
-(* Collect [term] and every subterm (all sorts), for reconstructing the model. *)
+(* Collect [term] and every subterm (all sorts), for reconstructing the model. Membership
+   is a monotonic imperative table keyed on [Term] tag (O(1), monomorphic) rather than a
+   balanced [Term.Set] whose per-op closure-dispatched compare dominated the intern path;
+   [subterms_sorted] recovers the old tag-ascending [Set.elements] order at model time. *)
 let rec collect t (term : Term.t) =
-  if not (Term.Set.mem term t.subterms)
+  if not (Term.Table.mem t.subterms term)
   then (
-    t.subterms <- Term.Set.add term t.subterms;
+    Term.Table.replace t.subterms term ();
     match term.Term.node with
     | Term.Bool_const _ | Term.Int_const _ -> ()
     | Term.App (_, args) -> Iarr.iter (collect t) args
@@ -182,17 +227,64 @@ let rec collect t (term : Term.t) =
       collect t c)
 ;;
 
+(* The collected subterms in tag-ascending order — identical to the old
+   [Term.Set.elements t.subterms], so every downstream model-extraction order is preserved
+   (I6). [Term.compare] is [Int.compare] on the tag. *)
+let subterms_sorted t =
+  List.sort Term.compare (Term.Table.fold (fun k () acc -> k :: acc) t.subterms [])
+;;
+
 (* Get-or-create the SAT var for a theory-atom [term], registering it with the combined
    theory on first sight (CONTRACT-REG). [split] flags an atom minted mid-solve from a
    [Split], whose e-node registration may later be truncated by a backjump. *)
+let theory_instantiated t = t.theory <> None
+
+(* Reset-per-query theory invalidation (task #54). When {!Session} REPLACES the datatype /
+   array registry after a prior query has already instantiated + cached a theory, that
+   cached theory (and the whole SAT-var<->theory-atom bijection it registered) is stale
+   against the new registry — the #51 landmine: the session-lifetime
+   [ctor_terms]/[seen_cat] the old [Dt.t] accumulated would meet a differently-populated
+   registry and drive a false constructor-clash (the codex wrong-[unsat]). Rather than
+   fail-close to [unknown] (the #51 interim guard), DROP the entire theory instance and
+   the bijection, so the NEXT [intern] rebuilds the theory fresh from the new registry
+   ([ensure_theory]) and re-interns every term against it — no stale classification can
+   survive, because the old [Dt.t] (with its [ctor_terms]) is gone and every re-used
+   [Term.t] mints a brand-new atom.
+
+   PRECONDITION (enforced by {!Session}): called only between queries, with the SAT core
+   at decision level 0 and NO live assertions bound to the dropped bijection. {!Session}
+   raises fail-LOUD when a registry replacement is attempted with live assertions above
+   base (the contract-A ruling), so this never strands an in-flight atom. The SAT core's
+   vars/clauses from the prior (already-popped) query stay allocated but inert — their
+   frame selector is free to be false, so they are trivially satisfiable and, being absent
+   from the cleared [v2a], are ignored by [on_assign]; re-interned terms get fresh vars
+   that never collide. Keeps [alloc] / [sat] / [budget] / the shared registry refs; only
+   the per-session theory choice and the interning tables are reset. *)
+let reset_for_new_query t =
+  Vartbl.clear t.v2a;
+  Vartbl.clear t.v2term;
+  Atom.Table.clear t.a2v;
+  Term.Table.clear t.t2v;
+  Vartbl.clear t.is_split;
+  Term.Table.clear t.subterms;
+  t.theory <- None;
+  t.level <- 0;
+  t.splits <- 0;
+  t.last_model <- None;
+  t.last_dt_model <- None;
+  t.last_array_model <- None
+;;
+
 let ensure_theory t =
   match t.theory with
   | Some impl -> impl
   | None ->
     let impl =
-      if Oxsmt_core.Datatype_defs.is_empty !(t.registry)
-      then TCombined (Combined.create t.ctx t.env)
-      else TDt (Dt.create t.ctx t.env !(t.registry))
+      if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
+      then TArr (Arr.create t.ctx t.env t.cap !(t.array_registry))
+      else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+      then TDt (Dt.create t.ctx t.env t.registry)
+      else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;
     impl
@@ -206,10 +298,10 @@ let intern t ~split term =
     let v = Sat.new_var t.sat in
     let a = Atom.fresh t.alloc in
     Term.Table.replace t.t2v term v;
-    Hashtbl.replace t.v2a v a;
-    Hashtbl.replace t.v2term v term;
+    Vartbl.replace t.v2a v a;
+    Vartbl.replace t.v2term v term;
     Atom.Table.replace t.a2v a v;
-    if split then Hashtbl.replace t.is_split v ();
+    if split then Vartbl.replace t.is_split v ();
     collect t term;
     th_register impl a term;
     v
@@ -217,6 +309,35 @@ let intern t ~split term =
 
 (* Public wrapper used by {!Session} during clausification (base-frame registration). *)
 let intern_atom t term = intern t ~split:false term
+
+(* Bind an ALREADY-ALLOCATED SAT var [v] (a nullary Bool variable's PROPOSITIONAL var,
+   minted by {!Session} in [prop_to_var]/[bool_consts]) as an EUF [K_bool] theory atom for
+   [term], so the congruence engine merges [term] with [true_const]/[false_const] when the
+   SAT core assigns [v]. This is the completeness half of the Bool-cardinality rule for a
+   BARE Bool variable used as an uninterpreted-function argument (combine.ml's H2 guard):
+   unlike an applied predicate [p(x…)] — which {!Session.register_bool_terms} routes
+   through {!intern_atom} and whose truth EUF can also propagate by congruence — a bare
+   buried Bool variable surfaces in NO clause, so without an atom binding EUF never learns
+   its truth and leaves it a third opaque Boolean class
+   ([h(b) ≠ h(true) ∧ h(b) ≠ h(false)] then wrong-degrades to [unknown]). Reusing the SAME
+   [v] as the propositional variable (rather than minting a fresh one via {!intern}) keeps
+   a single SAT variable per term: the model still reads its value from [bool_consts], and
+   EUF and the propositional skeleton can never disagree on [term]. The var is on the SAT
+   decision heap ([Sat.new_var] inserts it), so it is decided even when it occurs in no
+   clause, and [on_assign] then asserts it to EUF. Idempotent: a no-op if [term] is
+   already a theory atom or [v] already owns one. *)
+let bind_bool_var_atom t term v =
+  if (not (Term.Table.mem t.t2v term)) && not (Vartbl.mem t.v2a v)
+  then (
+    let impl = ensure_theory t in
+    let a = Atom.fresh t.alloc in
+    Term.Table.replace t.t2v term v;
+    Vartbl.replace t.v2a v a;
+    Vartbl.replace t.v2term v term;
+    Atom.Table.replace t.a2v a v;
+    collect t term;
+    th_register impl a term)
+;;
 
 (* Keep one theory frame per SAT decision level (I push lazily as levels open; a dummy
    assumption level can jump the level by more than one, hence the loop). *)
@@ -231,20 +352,36 @@ let sync_level t =
     done
 ;;
 
+(* Install the dynamic relevancy driver (task #24). [None] restores the byte-identical
+   default. The branch filter itself is installed on the SAT core by {!Session}; this only
+   routes the trail seam events below to the driver. *)
+let set_relevancy t r = t.relevancy <- r
+
 let on_assign t l =
+  (match t.relevancy with
+   | None -> ()
+   | Some rel ->
+     Relevancy.on_assign
+       rel
+       ~var:(Sat.var_of_lit l)
+       ~value:(sign_lit l)
+       ~level:(Sat.decision_level t.sat));
   sync_level t;
   let v = Sat.var_of_lit l in
-  match Hashtbl.find_opt t.v2a v with
+  match Vartbl.find_opt t.v2a v with
   | None -> () (* an aux / selector / boolean-variable literal: not a theory atom *)
   | Some a ->
     let impl = ensure_theory t in
     (* a Split-minted atom's e-nodes may have been truncated by a pop; re-register
        (idempotent) so the child engines hold it before we assert. *)
-    if Hashtbl.mem t.is_split v then th_register impl a (Hashtbl.find t.v2term v);
+    if Vartbl.mem t.is_split v then th_register impl a (Vartbl.find t.v2term v);
     th_assert impl (Lit.make a (sign_lit l))
 ;;
 
 let on_backtrack t ~level =
+  (match t.relevancy with
+   | None -> ()
+   | Some rel -> Relevancy.on_backtrack rel ~level);
   let n = t.level - level in
   if n > 0
   then (
@@ -283,6 +420,18 @@ let check t ~final =
       match th_check impl Theory.Final with
       | Theory.Sat ->
         t.last_model <- Some (th_model impl);
+        (* At the accepting Final the engine holds the satisfying assignment — the valid
+           point to extract a checker model. For the standalone DT theory, snapshot its
+           constructor-tree model (Dt_model_check re-derives the verdict from it); other
+           theories have no tree model. *)
+        t.last_dt_model
+        <- (match impl with
+            | TDt th -> Dt.check_model th
+            | TCombined _ | TArr _ -> None);
+        t.last_array_model
+        <- (match impl with
+            | TArr th -> Arr.array_model th
+            | TCombined _ | TDt _ -> None);
         Sat.T_consistent []
       | Theory.Propagations lits -> Sat.T_consistent (List.map (satlit_of_lit t) lits)
       | Theory.Conflict e ->
@@ -303,7 +452,7 @@ let check t ~final =
 ;;
 
 let explain t l =
-  let a = Hashtbl.find t.v2a (Sat.var_of_lit l) in
+  let a = Vartbl.find t.v2a (Sat.var_of_lit l) in
   let impl = ensure_theory t in
   let e = th_explain impl (Lit.make a (sign_lit l)) in
   List.map (satlit_of_lit t) e.Explanation.premises
@@ -313,25 +462,30 @@ let explain t l =
    set_theory contract). Must be called before any clause is added. The theory itself is
    created lazily at the first [intern] (see {!ensure_theory}) from the datatype
    [registry] (empty => the EUF+LIA stack), so a non-datatype session is byte-identical. *)
-let create ctx env sat ~split_budget ~budget ~registry =
+let create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap =
   let t =
     { theory = None
     ; ctx
     ; env
+    ; cap
     ; registry
+    ; array_registry
     ; sat
     ; alloc = Atom.create_allocator ()
-    ; v2a = Hashtbl.create 256
-    ; v2term = Hashtbl.create 256
+    ; v2a = Vartbl.create 256
+    ; v2term = Vartbl.create 256
     ; a2v = Atom.Table.create 256
     ; t2v = Term.Table.create 256
-    ; is_split = Hashtbl.create 16
-    ; subterms = Term.Set.empty
+    ; is_split = Vartbl.create 16
+    ; subterms = Term.Table.create 256
     ; level = 0
     ; split_budget
     ; splits = 0
     ; budget
     ; last_model = None
+    ; last_dt_model = None
+    ; last_array_model = None
+    ; relevancy = None
     }
   in
   Sat.set_theory
@@ -352,7 +506,9 @@ let create ctx env sat ~split_budget ~budget ~registry =
 let begin_check t =
   t.splits <- 0;
   Budget.reset t.budget;
-  t.last_model <- None
+  t.last_model <- None;
+  t.last_dt_model <- None;
+  t.last_array_model <- None
 ;;
 
 let splits_used t = t.splits
@@ -362,7 +518,7 @@ let effort_used t = Budget.used t.budget
 let value_of (v : Model.value) =
   match v with
   | Model.Bool b -> VBool b
-  | Model.Int n -> VInt (Bigint.of_int n)
+  | Model.Int n -> VInt n
   | Model.Uninterp i -> VUninterp i
 ;;
 
@@ -379,7 +535,7 @@ let model_bindings t =
     let exception Needs_table in
     (try
        let bindings =
-         Term.Set.elements t.subterms
+         subterms_sorted t
          |> List.filter_map (fun (term : Term.t) ->
            match term.Term.node with
            | Term.App (sym, args) when Iarr.length args = 0 ->
@@ -445,7 +601,7 @@ let model t =
   | Some m ->
     let exception Degrade in
     (try
-       let terms = Term.Set.elements t.subterms in
+       let terms = subterms_sorted t in
        (* pass 1: per uninterpreted sort, gather distinct class ids -> dense 0-based index *)
        let sort_ids : (string, int list) Hashtbl.t = Hashtbl.create 16 in
        List.iter
@@ -462,7 +618,8 @@ let model t =
                  in
                  Hashtbl.replace sort_ids name (cid :: prev)
                | _ -> ())
-            | Sort.Bool | Sort.Int _ | Sort.Datatype _ -> ())
+            | Sort.Bool | Sort.Int _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
+              ())
          terms;
        let index : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let sort_cards = ref [] in
@@ -497,7 +654,13 @@ let model t =
             match term.Term.sort with
             | Sort.Int _ ->
               (match Model.value m term with
-               | Some (Model.Int n) -> Hashtbl.replace int_used n ()
+               | Some (Model.Int n) ->
+                 (* Record only values that fit int63: the fresh witnesses [fresh] mints
+                   are small non-negative ints, so a >int63 used value (a uint256
+                   constant) cannot collide with any witness and need not be excluded. *)
+                 (match Bigint.to_int_opt n with
+                  | Some i -> Hashtbl.replace int_used i ()
+                  | None -> ())
                | Some (Model.Uninterp cid) ->
                  (* §10 v2 gap B (task #117): an [Arith] term (a linear composite used only
                    as a UF argument) is NOT realized to a fresh per-class integer — it is
@@ -513,7 +676,11 @@ let model t =
                   | Term.Arith _ -> ()
                   | _ -> int_classes := cid :: !int_classes)
                | _ -> ())
-            | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> ())
+            | Sort.Bool
+            | Sort.Uninterpreted _
+            | Sort.Datatype _
+            | Sort.Array _
+            | Sort.BitVec _ -> ())
          terms;
        let int_realize : (int, int) Hashtbl.t = Hashtbl.create 64 in
        let next = ref 0 in
@@ -534,7 +701,7 @@ let model t =
        let rec value_of (term : Term.t) =
          match Model.value m term, term.Term.node with
          | Some (Model.Bool b), _ -> VBool b
-         | Some (Model.Int n), _ -> VInt (Bigint.of_int n)
+         | Some (Model.Int n), _ -> VInt n
          | _, Term.Arith lin ->
            (* §10 v2 gap B (task #117): a pure-EUF Int [Arith] term (LIA never numerically
               valued it — else the [Model.Int] arm above caught it, tier 1) is EVALUATED
@@ -567,7 +734,7 @@ let model t =
             (* A datatype-sorted term reaching extraction has no certified value ([Model]
                offers no constructor-tree witness yet); combine already refuses to certify
                such a Sat, so this is a defensive backstop — degrade to no-model. *)
-            | Sort.Bool | Sort.Datatype _ -> raise Degrade)
+            | Sort.Bool | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise Degrade)
          | None, _ -> raise Degrade
        in
        let default_for (sort : Sort.t) =
@@ -575,7 +742,7 @@ let model t =
          | Sort.Bool -> VBool false
          | Sort.Int _ -> VInt Bigint.zero
          | Sort.Uninterpreted _ -> VUninterp 0
-         | Sort.Datatype _ -> raise Degrade
+         | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise Degrade
        in
        (* pass 2: non-Bool nullary consts + function/predicate table rows (per symbol) *)
        let consts = ref [] in
@@ -589,7 +756,11 @@ let model t =
               (match term.Term.sort with
                | Sort.Bool ->
                  () (* propositional variable: session's bool_consts owns it *)
-               | Sort.Int _ | Sort.Uninterpreted _ | Sort.Datatype _ ->
+               | Sort.Int _
+               | Sort.Uninterpreted _
+               | Sort.Datatype _
+               | Sort.Array _
+               | Sort.BitVec _ ->
                  consts := Const (Symbol.name sym, value_of term) :: !consts)
             | Term.App (sym, args) ->
               let row = List.map value_of (Iarr.to_list args), value_of term in
@@ -635,6 +806,16 @@ let model t =
      | Degrade -> None)
 ;;
 
+(* The DT constructor-tree checker model snapshotted at the accepting Final->Sat, or
+   [None] when the last check-sat was not a DT-theory [Sat]. Read by {!Session}'s DT
+   commit branch and validated by [Dt_model_check] before any [sat] is reported. *)
+let dt_model t = t.last_dt_model
+
+(* The arrays checker model snapshotted at the accepting Final->Sat, or [None] when the
+   last check-sat was not an arrays-theory [Sat]. Read by {!Session}'s arrays commit
+   branch and validated by [Array_model_check] before any [sat] is reported. *)
+let array_model t = t.last_array_model
+
 (* ADR-0012 L2/O3 (tranche 2): a read-only e-graph query view over the live congruence
    child, for the lemma tier's E-matcher. [Combined.congruence_state] hands back the
    concrete [Euf_adapter.t] (the combinator's own additive accessor, not a THEORY method),
@@ -650,8 +831,9 @@ let egraph_view t : Oxsmt_ematch.Egraph_view.t =
     ; equal_if_registered = (fun a b -> Oxsmt_euf.Euf_adapter.equal_if_registered cs a b)
     ; class_members = (fun term -> Oxsmt_euf.Euf_adapter.class_members cs term)
     }
-  | Some (TDt _) | None ->
-    (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype (or
-       theory-free) session never reaches here (no quantified lemmas in that fragment). *)
+  | Some (TDt _) | Some (TArr _) | None ->
+    (* the lemma tier's E-matcher runs only over the EUF+LIA stack; a datatype / arrays
+       (or theory-free) session never reaches here (no quantified lemmas in that
+       fragment). *)
     failwith "Cdclt.egraph_view: e-graph view is only available for the EUF+LIA theory"
 ;;

@@ -50,9 +50,11 @@ exception Split_budget_exceeded
     [Sat.solve] at the cap; {!Session} catches it. [budget] is reset per check by
     {!begin_check}.
 
-    [registry] carries the session's datatype declarations (empty for a non-datatype
-    problem). The theory the seam drives is chosen lazily at the first [intern_atom]: the
-    standalone DT theory when [registry] is non-empty, else the EUF+LIA combined stack. *)
+    [registry] / [array_registry] carry the session's datatype / array declarations (each
+    empty for a problem not using that theory). The theory the seam drives is chosen
+    lazily at the first [intern_atom]: the standalone arrays theory when [array_registry]
+    is non-empty, else the standalone DT theory when [registry] is non-empty, else the
+    EUF+LIA combined stack. *)
 val create
   :  Context.t
   -> Env.t
@@ -60,12 +62,55 @@ val create
   -> split_budget:int
   -> budget:Budget.t
   -> registry:Oxsmt_core.Datatype_defs.t ref
+  -> array_registry:Oxsmt_core.Array_defs.t ref
+  -> cap:Oxsmt_core.Env.reserved_cap
   -> t
+
+(** [theory_instantiated t] is [true] once the standalone/combined theory has been chosen
+    (at the first [intern_atom]) and cached. While [false], no theory atom has been
+    interned or cataloged, so replacing the datatype/array registry is safe; once [true],
+    the theory has classified terms against the current registry, so a NON-MONOTONIC
+    registry replacement invalidates it (see {!reset_for_new_query} and
+    {!Session.set_datatypes}). *)
+val theory_instantiated : t -> bool
+
+(** [reset_for_new_query t] drops the cached theory instance and the SAT-var<->theory-atom
+    bijection (task #54, reset-per-query), so the next [intern] rebuilds the theory fresh
+    from the (just-replaced) registry and re-interns every term against it. This is the
+    correct-everywhere replacement for the #51 interim fail-closed guard: it turns the
+    none->DT / DT->arrays / loader-overwrite degrade patterns into correct verdicts
+    instead of [unknown], and dissolves the #51 stranded-[ctor_terms] wrong-[unsat]
+    landmine (the old [Dt.t] carrying those tables is discarded entirely). PRECONDITION:
+    called by {!Session} only between queries — SAT core at decision level 0, no live
+    assertions bound to the dropped bijection (Session fail-LOUDs a mid-query
+    replacement). The prior query's now-inert SAT vars/clauses stay allocated but cannot
+    affect a later solve (their frame selector is free, they are absent from the cleared
+    bijection). *)
+val reset_for_new_query : t -> unit
+
+(** Install (or, with [None], detach) the dynamic relevancy driver (task #24). When set,
+    the theory-seam trail events ([on_assign]/[on_backtrack]) are also streamed to it so
+    it can maintain relevancy marks in lockstep with the SAT trail. The branch filter that
+    consults the driver is installed on the SAT core directly by {!Session}. [None] (the
+    default) is byte-identical to the pre-relevancy glue. *)
+val set_relevancy : t -> Relevancy.t option -> unit
 
 (** [intern_atom t term] returns the SAT var 1:1 with theory atom [term], registering it
     with the combined theory on first sight (base frame — survives backjumps). The
     clausifier calls this for each theory atom before solving. Idempotent by hash-cons. *)
 val intern_atom : t -> Term.t -> Oxsmt_solver.Sat.var
+
+(** [bind_bool_var_atom t term v] registers [term] — a bare nullary Bool-sorted variable
+    used as an uninterpreted-function argument — as an EUF [K_bool] theory atom bound to
+    the ALREADY-ALLOCATED SAT var [v] (its propositional variable from {!Session}), so EUF
+    binds it to true/false when [v] is assigned. Unlike {!intern_atom} it reuses [v]
+    instead of minting a fresh var, keeping ONE SAT variable per term (the model reads its
+    value from the propositional side, EUF from the same var — they cannot diverge). This
+    closes the completeness half of the Bool-cardinality rule for buried bare Bool
+    variables (combine's H2 guard), the applied-predicate analogue of which
+    {!Session.register_bool_terms} already routes through {!intern_atom}. Idempotent: a
+    no-op if [term] is already a theory atom or [v] already owns one. *)
+val bind_bool_var_atom : t -> Oxsmt_core.Term.t -> Oxsmt_solver.Sat.var -> unit
 
 (** Reset the split counter, the effort budget, and the stale model snapshot; call at the
     start of each check-sat. *)
@@ -92,6 +137,19 @@ val model_bindings : t -> binding list option
     needed value is missing, or a buried (unbound) Bool-codomain predicate cell would have
     to be guessed. Deterministic (R10). *)
 val model : t -> (sort_card list * binding list) option
+
+(** [dt_model t] is the datatypes theory's constructor-tree checker model, snapshotted at
+    the accepting Final->Sat when the installed theory is the standalone DT theory (GOALS
+    Datatypes model construction); [None] otherwise or when it degraded (fail-closed).
+    Read by {!Session}'s DT commit branch and validated by [Dt_model_check] before a [sat]
+    is reported. Deterministic. *)
+val dt_model : t -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list option
+
+(** [array_model t] is the arrays theory's checker model, snapshotted at the accepting
+    Final->Sat when the installed theory is the standalone arrays theory (QF_AX model
+    construction); [None] otherwise. Read by {!Session}'s arrays commit branch and
+    validated by [Array_model_check] before a [sat] is reported. Deterministic. *)
+val array_model : t -> (Term.t * Oxsmt_arr.Arr.value) list option
 
 (** [egraph_view t] is a read-only query view of the live congruence closure (ADR-0012
     L2/O3), for the lemma tier's E-matcher. Its accessors are non-registering — the

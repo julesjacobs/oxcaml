@@ -48,16 +48,52 @@ type t =
     (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
          and testers, keyed by symbol, for the datatype theory. [empty] when none
          declared. *)
+  ; arrays : Oxsmt_core.Array_defs.t
+    (* the [select]/[store] operator symbols minted for the array instantiations the
+         query uses, keyed by symbol, for the arrays theory. [empty] when the query uses
+         no arrays. *)
   ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
   }
 
 (** [parse src] parses a whole SMT-LIB2 document, creating a fresh {!Oxsmt_core.Env.t} and
-    {!Oxsmt_core.Context.t}. *)
+    {!Oxsmt_core.Context.t}. It owns that env, so it holds the reserved-minting capability
+    itself (never exposed) and threads its own [internal_mint]: a theory that mints a
+    reserved symbol mid-parse (bit-vectors, arrays) resolves. Sound because the cap and
+    env are local to the parse and never leave it. *)
 val parse : string -> t
 
 (** [parse_into env ctx src] parses using a caller-supplied env and context, so the
     resulting terms share the tag stream (hash-cons identity) with terms already built in
     [ctx]. Used by the round-trip tests to compare via {!Oxsmt_core.Term.equal} within one
     context (the single-Context contract, ADR-0003). Re-declaring an already-known symbol
-    is idempotent. *)
-val parse_into : Oxsmt_core.Env.t -> Oxsmt_core.Context.t -> string -> t
+    is idempotent.
+
+    [?internal_mint] (board #58 O-MINTER) is the opaque cap-backed minter for
+    theory-internal reserved symbols ([.oxsmt.<theory>.*]) that must be minted mid-parse —
+    arrays op symbols are per-(index sort, element sort) instantiations discovered only at
+    the first [select]/[store] use, so they cannot be pre-minted at a declaration site. A
+    [Session]-driven parse threads {!Oxsmt_interface.Session.parse_minter}, an opaque
+    {!Oxsmt_core.Internal_minter.t} wrapping [Env.declare_reserved] over the session's
+    private cap behind an [admit] gate: the parser mints a collision-proof sanctioned
+    marker without ever holding the cap or a general closure (ADR-0012: only [Session]
+    holds it). Omitting it (a standalone {!parse}, or a driver with no theory that mints
+    at parse time) makes any mid-parse mint request raise {!Malformed} — never a silent
+    success. *)
+val parse_into
+  :  ?internal_mint:Oxsmt_core.Internal_minter.t
+  -> Oxsmt_core.Env.t
+  -> Oxsmt_core.Context.t
+  -> string
+  -> t
+
+(** [parse_into_sexps] is [parse_into] on an already-parsed s-expression forest, so a
+    driver that must inspect the top-level commands before solving (e.g. counting
+    [check-sat]s) parses the source ONCE and reuses the result, rather than building the
+    full {!Sexp.t} tree a second time. Identical to [parse_into] on [Sexp.parse_many src]
+    for any [src]; the only difference is who owns the (single) parse. *)
+val parse_into_sexps
+  :  ?internal_mint:Oxsmt_core.Internal_minter.t
+  -> Oxsmt_core.Env.t
+  -> Oxsmt_core.Context.t
+  -> Sexp.t list
+  -> t

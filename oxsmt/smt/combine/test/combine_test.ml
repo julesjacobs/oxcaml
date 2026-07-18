@@ -460,8 +460,10 @@ let test_final_agree_sat () =
   and y = const f "y" in
   let t = Cmock.create f.ctx f.env in
   setup_shared f t x y;
-  (MockA.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 1 ]);
-  (MockB.model_fn := fun () -> [ x, Model.Int 5; y, Model.Int 5 ]);
+  (MockA.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 1) ]);
+  (MockB.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 5); y, Model.Int (Bigint.of_int 5) ]);
   match Cmock.check t Th.Final with
   | Th.Sat -> check "final: agreeing arrangements (differing values) ⇒ Sat" true
   | _ -> check "final: agreeing arrangements (differing values) ⇒ Sat" false
@@ -474,8 +476,10 @@ let test_final_disagree_split () =
   and y = const f "y" in
   let t = Cmock.create f.ctx f.env in
   setup_shared f t x y;
-  (MockA.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 1 ]);
-  (MockB.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 2 ]);
+  (MockA.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 1) ]);
+  (MockB.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 2) ]);
   match Cmock.check t Th.Final with
   | Th.Split terms ->
     let distinct =
@@ -505,7 +509,8 @@ let test_model_merge_sort_directed () =
   let t = Cmock.create f.ctx f.env in
   setup_shared f t x y;
   (MockA.model_fn := fun () -> [ x, Model.Uninterp 7; y, Model.Uninterp 7 ]);
-  (MockB.model_fn := fun () -> [ x, Model.Int 42; y, Model.Int 42 ]);
+  (MockB.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 42); y, Model.Int (Bigint.of_int 42) ]);
   (match Cmock.check t Th.Final with
    | Th.Sat -> ()
    | _ -> ());
@@ -513,7 +518,7 @@ let test_model_merge_sort_directed () =
   check
     "merge: Int-sorted term takes the arithmetic child's Int value"
     (match Model.value m x with
-     | Some (Model.Int 42) -> true
+     | Some (Model.Int n) -> Bigint.equal n (Bigint.of_int 42)
      | _ -> false)
 ;;
 
@@ -528,8 +533,10 @@ let test_poison_on_pinned_disagreement () =
   let a = fresh_atom f in
   Cmock.register_atom t a eq_atom;
   Cmock.assert_lit t (Lit.make a true);
-  (MockA.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 1 ]);
-  (MockB.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 2 ]);
+  (MockA.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 1) ]);
+  (MockB.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 2) ]);
   let raised =
     try
       ignore (Cmock.check t Th.Final);
@@ -555,8 +562,10 @@ let test_pin_unwinds_on_pop () =
   Ctrl_router.set_owner eq_atom Ctrl_router.Both;
   let a = fresh_atom f in
   Cmock.register_atom t a eq_atom;
-  (MockA.model_fn := fun () -> [ fx, Model.Int 1; fy, Model.Int 1 ]);
-  (MockB.model_fn := fun () -> [ fx, Model.Int 1; fy, Model.Int 2 ]);
+  (MockA.model_fn
+   := fun () -> [ fx, Model.Int (Bigint.of_int 1); fy, Model.Int (Bigint.of_int 1) ]);
+  (MockB.model_fn
+   := fun () -> [ fx, Model.Int (Bigint.of_int 1); fy, Model.Int (Bigint.of_int 2) ]);
   Cmock.push t;
   Cmock.assert_lit t (Lit.make a true);
   Cmock.pop t 1;
@@ -627,9 +636,11 @@ let test_pin_satisfaction () =
   Cmock.register_atom t a e;
   Cmock.assert_lit t (Lit.make a true);
   (* +e to both *)
-  (MockA.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 1 ]);
+  (MockA.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 1) ]);
   (* A: x=y ✓ *)
-  (MockB.model_fn := fun () -> [ x, Model.Int 1; y, Model.Int 2 ]);
+  (MockB.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 2) ]);
   (* B: x≠y ✗ *)
   let raised =
     try
@@ -654,9 +665,11 @@ let test_pin_satisfaction () =
   Cmock.register_atom t a e;
   Cmock.assert_lit t (Lit.make a false);
   (* -e → A only *)
-  (MockA.model_fn := fun () -> [ fx, Model.Int 1; fy, Model.Int 2 ]);
+  (MockA.model_fn
+   := fun () -> [ fx, Model.Int (Bigint.of_int 1); fy, Model.Int (Bigint.of_int 2) ]);
   (* A: fx≠fy ✓ satisfies -e *)
-  (MockB.model_fn := fun () -> [ fx, Model.Int 5; fy, Model.Int 5 ]);
+  (MockB.model_fn
+   := fun () -> [ fx, Model.Int (Bigint.of_int 5); fy, Model.Int (Bigint.of_int 5) ]);
   (* B: fx=fy, but B wasn't told -e *)
   match Cmock.check t Th.Final with
   | Th.Split _ ->
@@ -688,7 +701,8 @@ let test_model_domain_and_sort () =
   Cmock.register_atom t a e;
   (MockA.model_fn
    := fun () -> [ gp, Model.Uninterp 3; c, Model.Uninterp 3; p, Model.Uninterp 9 ]);
-  (MockB.model_fn := fun () -> [ gp, Model.Int 7; c, Model.Int 7 ]);
+  (MockB.model_fn
+   := fun () -> [ gp, Model.Int (Bigint.of_int 7); c, Model.Int (Bigint.of_int 7) ]);
   (match Cmock.check t Th.Final with
    | Th.Sat -> ()
    | _ -> ());
@@ -696,7 +710,7 @@ let test_model_domain_and_sort () =
   check
     "C3: Int-sorted g(p) takes the Int-variant (LIA), not EUF's opaque class"
     (match Model.value m gp with
-     | Some (Model.Int 7) -> true
+     | Some (Model.Int n) -> Bigint.equal n (Bigint.of_int 7)
      | _ -> false);
   check
     "C3: uninterpreted-sorted p is included in the witness as Uninterp"
@@ -787,7 +801,12 @@ let test_disagreement_domain_is_model_valued () =
         ; fy, Model.Uninterp 5
         ]);
   (MockB.model_fn
-   := fun () -> [ x, Model.Int 0; y, Model.Int 0; fx, Model.Int 1; fy, Model.Int 2 ]);
+   := fun () ->
+        [ x, Model.Int (Bigint.of_int 0)
+        ; y, Model.Int (Bigint.of_int 0)
+        ; fx, Model.Int (Bigint.of_int 1)
+        ; fy, Model.Int (Bigint.of_int 2)
+        ]);
   match Cmock.check t Th.Final with
   | Th.Split _ ->
     check
@@ -819,7 +838,8 @@ let test_compound_disagreement_lookup () =
   Cmock.register_atom t (fresh_atom f) e;
   (* EUF: f(w) and (x+1) distinct classes. LIA: keys x (=4) and f(w) (=5); x+1 folds to 5. *)
   (MockA.model_fn := fun () -> [ fw, Model.Uninterp 1; xp1, Model.Uninterp 2 ]);
-  (MockB.model_fn := fun () -> [ fw, Model.Int 5; x, Model.Int 4 ]);
+  (MockB.model_fn
+   := fun () -> [ fw, Model.Int (Bigint.of_int 5); x, Model.Int (Bigint.of_int 4) ]);
   match Cmock.check t Th.Final with
   | Th.Split _ ->
     check "W1-lookup: disagreement on a compound (x+1) via model_eval ⇒ Split" true
@@ -842,8 +862,8 @@ let test_overflow_guarded_fold () =
   Cmock.register_atom t a e;
   Cmock.assert_lit t (Lit.make a true);
   (* pins [max_int * x = 0]; x↦2 makes the fold overflow *)
-  (MockA.model_fn := fun () -> [ x, Model.Int 2 ]);
-  (MockB.model_fn := fun () -> [ x, Model.Int 2 ]);
+  (MockA.model_fn := fun () -> [ x, Model.Int (Bigint.of_int 2) ]);
+  (MockB.model_fn := fun () -> [ x, Model.Int (Bigint.of_int 2) ]);
   let raised =
     try
       ignore (Cmock.check t Th.Final);
@@ -1103,7 +1123,10 @@ module Toy_lia = struct
 
   let model t =
     Model.of_alist
-      (Term.Map.fold (fun k v acc -> (k, Model.Int v) :: acc) t.last_model [])
+      (Term.Map.fold
+         (fun k v acc -> (k, Model.Int (Bigint.of_int v)) :: acc)
+         t.last_model
+         [])
   ;;
 
   (* FABRIC seam (arithmetic child): the brute-force toy tracks no simplex bounds, so it
@@ -1415,20 +1438,20 @@ let solve ?cells f formula = Driver_toy.solve ?cells f formula
    the raw model values of the two sides, so it also handles uninterpreted-sort equalities
    (opaque-class identity), whose sides the witness keys as [Uninterp]. *)
 let model_satisfies (m : Model.t) (formula : (Term.t * bool) list) : bool =
-  let rec ev_int tm : int option =
+  let rec ev_int tm : Bigint.t option =
     match Model.value m tm with
     | Some (Model.Int n) -> Some n
     | Some _ -> None
     | None ->
       (match tm.Term.node with
-       | Term.Int_const n -> Some (bi_to_int n)
+       | Term.Int_const n -> Some n
        | Term.Arith lin ->
          Iarr.fold
            (fun acc (child, c) ->
               match acc, ev_int child with
-              | Some a, Some v -> Some (a + (bi_to_int c * v))
+              | Some a, Some v -> Some (Bigint.add a (Bigint.mul c v))
               | _ -> None)
-           (Some (bi_to_int lin.Term.const))
+           (Some lin.Term.const)
            lin.Term.coeffs
        | _ -> None)
   in
@@ -1440,7 +1463,7 @@ let model_satisfies (m : Model.t) (formula : (Term.t * bool) list) : bool =
   in
   let val_eq u v =
     match u, v with
-    | Model.Int a, Model.Int b -> a = b
+    | Model.Int a, Model.Int b -> Bigint.equal a b
     | Model.Bool a, Model.Bool b -> Bool.equal a b
     | Model.Uninterp a, Model.Uninterp b -> a = b
     | _ -> false
@@ -1451,7 +1474,7 @@ let model_satisfies (m : Model.t) (formula : (Term.t * bool) list) : bool =
          match term.Term.node with
          | Term.Le a ->
            (match ev_int a with
-            | Some n -> Some (n <= 0)
+            | Some n -> Some (Bigint.compare n Bigint.zero <= 0)
             | None -> None)
          | Term.Eq (a, b) ->
            (match eq_val a, eq_val b with
@@ -2786,7 +2809,8 @@ let test_owner_strand_whitebox () =
         else None);
   (MockB.fabric_verify_fn := fun _ _ _ _ -> true);
   (MockA.model_fn := fun () -> [ x, Model.Uninterp 0; y, Model.Uninterp 1 ]);
-  (MockB.model_fn := fun () -> [ x, Model.Int 5; y, Model.Int 5 ]);
+  (MockB.model_fn
+   := fun () -> [ x, Model.Int (Bigint.of_int 5); y, Model.Int (Bigint.of_int 5) ]);
   (MockA.explain_fn
    := fun l ->
         if Lit.equal l e_lit

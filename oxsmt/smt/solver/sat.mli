@@ -37,8 +37,22 @@ type result =
   | Sat
   | Unsat
 
-(** A fresh solver with no variables and no clauses. *)
-val create : unit -> t
+(** A fresh solver with no variables and no clauses.
+
+    [base_l0_cert_mode] (default [false]) is the base-l0 CERTIFICATE-EMITTER mode bit. It
+    is a pure emitter knob — never read by search, so it has NO effect on verdicts,
+    models, or the conflicts/decisions/propagations counters (base #53). Default [false]
+    keeps every emitter behaviour byte-identical to the pre-#53 build. A caller running
+    base-frame-at-level-0 (session-side OXSMT_BASE_L0) passes [true], which drives two
+    coupled cert-mode behaviours: (1) {!add_clause} SUPPRESSES the redundant level-0-unit
+    DECLARATION ([on_unit]) — the checker re-derives every level-0 unit from the raw
+    [Input] clause by BCP (verified-not-trusted); and (2) a level-0 theory conflict
+    concludes via the empty-core E3 route rather than E2. Both address the same base-l0
+    hazard: a base-frame input unit that a level-0 theory conflict retracts in the
+    checker's (legitimately contradictory) closure would otherwise spuriously fail the
+    "declared level-0 unit entailed" check even though the E3 refutation over the whole
+    clause DB is valid. *)
+val create : ?base_l0_cert_mode:bool -> unit -> t
 
 (** Allocate and return the next variable. Variables are also auto-allocated on demand by
     {!add_clause} and {!solve} when a literal names one not yet created, so explicit calls
@@ -94,6 +108,16 @@ module Stats : sig
 end
 
 val stats : t -> Stats.t
+
+(** [var_activity t v] is the current VSIDS activity of variable [v] ([0.0] for a variable
+    not yet allocated or never bumped). A read-only side channel — reading it never
+    mutates the solver and has no effect on search; a client that does not call it is
+    unaffected. Its intended use is a {!set_branch_filter} / relevancy driver that wants
+    to align its own choices (e.g. which candidate atom to make branchable) with the
+    solver's activity order rather than an arbitrary tie-break. Only the ordinal
+    comparison of activities is meaningful across a run — the absolute value drifts with
+    the global rescaling. *)
+val var_activity : t -> var -> float
 
 (** {2 Proof-readiness / certificate-emission hooks (§7; ADR-0013 §4.0)}
 
@@ -264,3 +288,93 @@ val set_budget_tick : t -> (unit -> unit) option -> unit
     asserted — the level {!field-on_backtrack} later references to undo trail-synchronized
     theory state. Reading it inside [on_assign] is a pure query (no re-entrancy). *)
 val decision_level : t -> int
+
+(** {2 Decision branch-filter hook (relevancy)}
+
+    A settable [var -> bool] predicate, same [None]-by-default side-channel discipline as
+    {!set_trace}/{!set_theory}/{!set_budget_tick}: with the hook unset the branching
+    engine is {b bit-identical} to today (verdicts, models, and the conflicts/decisions/
+    propagations trio unchanged) — one [None] branch of overhead in {!field-pick}.
+
+    When set, the branching heuristic will not {b decide} an unassigned variable [v] for
+    which [filter v] is [false]; such a variable is skipped and kept as a future candidate
+    (re-inserted into the activity order), so once [filter v] becomes [true] it is
+    branched again. When every remaining unassigned variable is filtered out, branching
+    yields no decision — the search reports a complete assignment over the {e branchable}
+    variables and hands off to the theory's [Final] check exactly as it does when the
+    VSIDS order is exhausted. The intended client is a relevancy driver that maintains,
+    over the assignment trail (via {!field-on_assign}/{!field-on_backtrack}), which atoms
+    are relevant to satisfying the top-level formula under the current partial model, and
+    filters out the irrelevant ones (z3's [smt_relevancy]): a satisfied [(or a1 … a5)]
+    makes its unset disjuncts irrelevant, so they are not decided and cannot spuriously
+    over-constrain.
+
+    {b Soundness — what the core does and does not guarantee.} The filter adds no literal
+    to the trail and no clause, so it cannot manufacture a conflict: an [Unsat] the
+    filtered search reaches is over genuinely-asserted literals, exactly as without the
+    filter — {b no wrong [Unsat]}, unconditionally. It is {b not}, however, safe to trust
+    a filtered [Sat] without a model check. When only filtered-out variables remain,
+    branching yields no decision and the core reports the current {e partial} assignment
+    as complete WITHOUT checking that every clause is satisfied (it hands off exactly as
+    on an exhausted VSIDS order — via the theory [Final] check, or, with no theory,
+    directly). So a filter that leaves all of some clause's literals unassigned can drive
+    the core to report [Sat] on an assignment that falsifies that clause (a wrong-[Sat]
+    reachable from this API — codex S1). Therefore any client that installs a filter MUST
+    re-validate a [Sat] against the original formula with a full (total) model check and
+    treat a failure as [unknown]; the core does not itself certify that the
+    branchable-only assignment models the clause set. oxsmt's session does this —
+    [commit_sat]'s in-process [Model_check] gates every reported [Sat], fail-closed — so a
+    filter that wrongly marks a needed atom irrelevant costs at most a query degraded to
+    [unknown], never a wrong verdict, {e for that consumer}.
+
+    {b Filter totality / exception-safety.} The filter is called mid-scan in [pick_branch]
+    on a variable already popped from the decision heap. The core is exception-safe: on
+    any exit — including the filter {e raising} — every variable popped in that call (the
+    stashed ones and the one in flight) is re-inserted into the heap before the exception
+    propagates, so no variable is lost and the heap remains complete for the next solve
+    (untrailed popped vars would otherwise NOT be restored by [cancel_until 0]). The
+    filter SHOULD nonetheless be total (a pure lookup into precomputed marks); a raise
+    degrades the surrounding solve, it does not corrupt the core.
+
+    {b Certificate independence.} The trace/certificate machinery (ADR-0013 §4.0)
+    validates the {e clauses} learned and the input/unit closure, never the {e order} in
+    which decisions were taken; a branch-filter changes only which variable is decided
+    next, so an installed filter leaves every {!trace} hook's contract and the replayed
+    proof unaffected. A pure side channel: it never feeds conflict analysis and never
+    alters a learned clause. *)
+val set_branch_filter : t -> (var -> bool) option -> unit
+
+(** {2 CNF preprocessing / inprocessing — eliminable-variable marking (DESIGN.md A10)}
+
+    Mark variable [v] as eligible for CNF-level variable elimination (bounded variable
+    elimination / blocked-clause elimination, Jacobs 2021 "Bounded clause elimination").
+    The core DEFAULTS every variable {b frozen} — never eliminated — so a client that
+    never calls this (the default) leaves the whole feature inert: preprocessing
+    eliminates nothing and the search is {b bit-identical} to today (verdicts, models, and
+    the conflicts/decisions/propagations trio unchanged). This is the "when in doubt,
+    freeze" discipline made structural: only a variable a client has {e explicitly}
+    certified as invisible outside the SAT core — a pure auxiliary (Tseitin) structure
+    variable that no model path reads, that is not a theory-seam atom, an
+    assumption/selector literal, or a variable any re-added clause can name — may be
+    marked eliminable, and a forgotten marking costs only effectiveness, never soundness.
+
+    Preprocessing itself is env-gated ([OXSMT_SATPRE], default OFF) and runs at [solve]
+    entry (decision level 0); it is additionally disabled whenever a {!set_trace}
+    certificate trace is installed (the added resolvents / deleted clauses are not yet
+    routed through certificate emission). When it eliminates a marked variable [v] it
+    records the deleted clauses on a per-instance reconstruction stack; the model snapshot
+    taken at [Sat] reconstructs [v]'s value (flip-to-satisfy, per the note's Lemma 1)
+    before {!value}/{!model} read it, so a reported model is correct over {e every}
+    variable including eliminated ones — unconditionally, with no downstream check
+    required (the raw-SAT-API contract). Marking is idempotent and legal at any time. The
+    two elimination forms differ on the incremental re-add of a clause naming an
+    eliminated variable: {b bounded variable elimination} RESTORES the variable (its
+    deleted clauses are re-added) so the elimination stays sound under incremental
+    additions, whereas {b equivalent-literal substitution} instead RAISES
+    [Invalid_argument] on such a re-reference — its equivalence-establishing clauses were
+    rewritten away, so sound reactivation would need incremental-ELS machinery
+    (Fazekas–Biere–Scholl, SAT 2019) that is not built, and failing loud is preferred over
+    a silent wrong result. Both cases are contractually unreachable for a conforming
+    client, because an eliminable variable is by the paragraph above one that no re-added
+    clause can name. *)
+val set_eliminable : t -> var -> unit

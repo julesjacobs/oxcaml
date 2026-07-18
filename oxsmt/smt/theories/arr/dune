@@ -1,0 +1,8 @@
+; stdlib-only + oxsmt_core + oxsmt_euf (AGENTS.md dependency firewall, INVARIANTS.md I3):
+; no opam packages, no Base/Core, no ppx. The arrays theory is an e-graph client — it owns
+; an Euf congruence-closure engine and layers the array (ROW + extensionality) axioms on
+; top, mirroring the datatypes theory.
+
+(library
+ (name oxsmt_arr)
+ (libraries oxsmt_core oxsmt_euf))

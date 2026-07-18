@@ -38,6 +38,28 @@ let reserved_words =
   ]
 ;;
 
+(* Membership in [reserved_words], but as a constant-time [match] rather than a linear
+   [List.mem] (which does a polymorphic string compare against up to 13 entries for EVERY
+   symbol token). The compiler lowers this to a length/byte decision tree. This MUST list
+   exactly the strings in [reserved_words] above; a divergence changes the token stream
+   and is caught by the lexer round-trip/fuzz tests and any counted-identity A/B. *)
+let is_reserved_word = function
+  | "_"
+  | "!"
+  | "as"
+  | "let"
+  | "exists"
+  | "forall"
+  | "match"
+  | "par"
+  | "BINARY"
+  | "DECIMAL"
+  | "HEXADECIMAL"
+  | "NUMERAL"
+  | "STRING" -> true
+  | _ -> false
+;;
+
 (* §3.1 ⟨symbol⟩ constituent characters of a simple symbol. *)
 let is_symbol_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
@@ -187,7 +209,7 @@ let read_symbolish s pos =
     | _ -> Buffer.contents buf
   in
   let text = loop () in
-  if List.mem text reserved_words then Reserved text else Symbol { text; quoted = false }
+  if is_reserved_word text then Reserved text else Symbol { text; quoted = false }
 ;;
 
 (* Digit-leading: §3.1 ⟨numeral⟩ / ⟨decimal⟩. Read digits, then optional [.] digits. A

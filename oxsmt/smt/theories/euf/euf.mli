@@ -258,4 +258,15 @@ module Debug : sig
       Defaults to [false] (perf); opt in via the [OXSMT_EUF_SELF_CHECK] environment
       variable (read at module init), as the test/CI configuration does. *)
   val self_check : bool ref
+
+  (** Task #47 packed small-arity congruence-signature core, exposed for the collision RED
+      unit test only (never on a solve path). [pack_signature_fields ~n ~s ~a0 ~a1] is the
+      PURE injective packer: [n] = arity (0..2), [s] = symbol id, [a0]/[a1] = arg-rep ids
+      (unused args pass 0); returns the packed [int] key or [-1] when any field is out of
+      its bitfield range (the fallback-not-truncate firewall). [sig_pack_sym_bits] /
+      [sig_pack_arg_bits] are the field widths a broken (narrowed) packer would shrink. *)
+  val pack_signature_fields : n:int -> s:int -> a0:int -> a1:int -> int
+
+  val sig_pack_sym_bits : int
+  val sig_pack_arg_bits : int
 end

@@ -80,6 +80,47 @@ let check_a ~name ?status build =
   | exception e -> fail "A/%s: build raised %s" name (Printexc.to_string e)
 ;;
 
+(* Direction A for bit-vectors (board #58). Identical to {!check_a} but the env carries
+   the reserved-minting cap and the reparse threads its [internal_mint], because
+   bit-vector operator/literal symbols live in the reserved [.oxsmt.bv.*] namespace: the
+   [build] receives a {!Bv.minter} to construct them, and the printed text reparses
+   through the SAME minter (same cap + env) so a round-tripped bit-vector symbol interns
+   to the very same node and [Term.equal] still holds. *)
+let check_a_bv ~name ?status build =
+  incr checks;
+  let env, cap = Env.create_with_cap () in
+  let ctx = Context.create env in
+  (* board #58 O-MINTER: the reprint reparses through the SAME opaque minter (bv admit
+     grammar); [build] gets the [Internal_minter.mint] closure to construct terms. *)
+  let minter = Internal_minter.create ~admit:Bv.is_bv_name cap env in
+  let mint = Internal_minter.mint minter in
+  match build env ctx mint with
+  | assertions ->
+    (match Printer.print_session ?status env assertions with
+     | text ->
+       (match Parser.parse_into ~internal_mint:minter env ctx text with
+        | parsed ->
+          if not (terms_equal assertions parsed.assertions)
+          then
+            fail
+              "A/%s: assertions differ after round-trip\n--- printed ---\n%s---"
+              name
+              text
+          else if not (status_equal status parsed.status)
+          then
+            fail
+              "A/%s: status %s -> %s"
+              name
+              (status_str status)
+              (status_str parsed.status)
+        | exception Parser.Malformed m ->
+          fail "A/%s: reparse Malformed: %s\n%s" name m text
+        | exception Parser.Unsupported m ->
+          fail "A/%s: reparse Unsupported: %s\n%s" name m text)
+     | exception Printer.Unsupported m -> fail "A/%s: printer Unsupported: %s" name m)
+  | exception e -> fail "A/%s: build raised %s" name (Printexc.to_string e)
+;;
+
 (* Print-only check: the printed text must contain [expect]. For rendering that is correct
    SMT-LIB but outside our native-int reingest range (e.g. min_int). *)
 let check_print ~name ?status ~expect build =
@@ -120,11 +161,15 @@ let check_refused ~name build =
    hand-written term. *)
 let check_same ~name a b =
   incr checks;
-  let env = Env.create () in
+  (* Self-capped + [internal_mint] threaded (board #58) so a theory that mints a reserved
+     symbol mid-parse — e.g. the bit-vector sugar cases — resolves rather than hitting the
+     [no_internal_mint] default. Inert for the non-bit-vector define-fun cases. *)
+  let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  match Parser.parse_into env ctx a with
+  let internal_mint = Internal_minter.create ~admit:Bv.is_bv_name cap env in
+  match Parser.parse_into ~internal_mint env ctx a with
   | pa ->
-    (match Parser.parse_into env ctx b with
+    (match Parser.parse_into ~internal_mint env ctx b with
      | pb ->
        if not (terms_equal pa.assertions pb.assertions)
        then fail "expand/%s: macro form differs from hand-expanded form" name
@@ -839,7 +884,24 @@ let b_unprintable_seen = ref []
 
 let check_b path =
   let text = read_file path in
-  match Parser.parse text with
+  (* board #58: a committed file may mint arrays [.oxsmt.arr.*] or bit-vector [.oxsmt.bv|*]
+     op/marker symbols mid-parse through the cap-backed [?internal_mint] door, so this
+     direction-B check owns a throwaway env with its own capability (the analogue of what a
+     [Session] hands the product drivers). The env is private to this parse, so there is no
+     cross-context aliasing risk; the SAME minter/env backs the reprint reparse below, so a
+     round-tripped reserved symbol interns to one identity. *)
+  let env, cap = Env.create_with_cap () in
+  let ctx = Context.create env in
+  (* Admit BOTH theory grammars (the same narrowing [Session.parse_minter] applies in the
+     combined tree), so this local parse can intern arrays op symbols and bit-vector markers
+     and nothing else. *)
+  let internal_mint =
+    Internal_minter.create
+      ~admit:(fun name -> Array_defs.is_op_name name || Bv.is_bv_name name)
+      cap
+      env
+  in
+  match Parser.parse_into ~internal_mint env ctx text with
   | exception Parser.Malformed m ->
     incr b_skip;
     Printf.printf "  skip (malformed): %s (%s)\n" path m
@@ -859,6 +921,7 @@ let check_b path =
        Printer.print_session
          ?status:parsed.status
          ~datatypes:parsed.datatypes
+         ~arrays:parsed.arrays
          parsed.env
          parsed.assertions
      with
@@ -868,7 +931,7 @@ let check_b path =
        Printf.printf "  skip (unprintable): %s (%s)\n" path m
      | out ->
        incr checks;
-       (match Parser.parse_into parsed.env parsed.ctx out with
+       (match Parser.parse_into ~internal_mint parsed.env parsed.ctx out with
         | parsed2 ->
           if not (terms_equal parsed.assertions parsed2.assertions)
           then fail "B/%s: assertions differ after reprint\n%s" path out
@@ -918,9 +981,117 @@ let command_gate_cases () =
         (get-model)\n")
 ;;
 
+(* Bitvectors (GOALS: bitvectors). Direction-A round-trips build terms via the [Bv] smart
+   constructors, print (set-logic QF_UFBV, [(_ BitVec w)] sorts, [#b...] literals,
+   prefix/indexed operators), reparse into the SAME context, and compare by [Term.equal] —
+   so parser + printer + sort-checking are all exercised at once. Plus parse-only cases
+   for the sugar duals, and malformed cases for the width/index errors (fail-closed). *)
+let bv_cases () =
+  let bvc env ctx name w = const env ctx name (Sort.bitvec w) in
+  let lit ctx mint v w = Bv.const ctx mint ~value:(Bigint.of_int v) ~width:w in
+  check_a_bv ~name:"bv-literal-eq" ~status:Status.Sat (fun env ctx mint ->
+    let x = bvc env ctx "x" 4 in
+    [ Context.eq ctx x (lit ctx mint 5 4) ]);
+  check_a_bv ~name:"bv-hex-literal" (fun env ctx mint ->
+    let x = bvc env ctx "x" 8 in
+    [ Context.eq ctx x (lit ctx mint 0xa3 8) ]);
+  check_a_bv ~name:"bv-bitwise" (fun env ctx mint ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.eq
+        ctx
+        (Bv.binop ctx mint Bv.Bvand x y)
+        (Bv.binop ctx mint Bv.Bvor x (Bv.unop ctx mint Bv.Bvnot y))
+    ]);
+  check_a_bv ~name:"bv-arith" (fun env ctx mint ->
+    let x = bvc env ctx "x" 16
+    and y = bvc env ctx "y" 16 in
+    [ Context.eq
+        ctx
+        (Bv.binop
+           ctx
+           mint
+           Bv.Bvadd
+           (Bv.binop ctx mint Bv.Bvmul x y)
+           (Bv.unop ctx mint Bv.Bvneg x))
+        (Bv.binop ctx mint Bv.Bvsub x y)
+    ]);
+  check_a_bv ~name:"bv-shifts" (fun env ctx mint ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.eq
+        ctx
+        (Bv.binop ctx mint Bv.Bvshl x y)
+        (Bv.binop ctx mint Bv.Bvashr (Bv.binop ctx mint Bv.Bvlshr x y) y)
+    ]);
+  check_a_bv ~name:"bv-compares" (fun env ctx mint ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.and_
+        ctx
+        [ Bv.binop ctx mint Bv.Bvult x y
+        ; Bv.binop ctx mint Bv.Bvule x y
+        ; Bv.binop ctx mint Bv.Bvslt x y
+        ; Bv.binop ctx mint Bv.Bvsle x y
+        ]
+    ]);
+  check_a_bv ~name:"bv-concat-extract" (fun env ctx mint ->
+    let x = bvc env ctx "x" 4
+    and y = bvc env ctx "y" 4 in
+    let c = Bv.concat ctx mint x y in
+    (* extract the high nibble back out; it must equal x *)
+    [ Context.eq ctx (Bv.extract ctx mint ~i:7 ~j:4 c) x ]);
+  check_a_bv ~name:"bv-extends" (fun env ctx mint ->
+    let x = bvc env ctx "x" 8 in
+    [ Context.eq ctx (Bv.zero_extend ctx mint ~n:8 x) (Bv.sign_extend ctx mint ~n:8 x) ]);
+  check_a_bv ~name:"bv-udiv-urem" (fun env ctx mint ->
+    let x = bvc env ctx "x" 8
+    and y = bvc env ctx "y" 8 in
+    [ Context.eq ctx (Bv.binop ctx mint Bv.Bvudiv x y) (Bv.binop ctx mint Bv.Bvurem x y) ]);
+  (* sugar: (bvugt x y) parses to (bvult y x); prove the rewrite by comparing to the
+     hand-written swapped form in one context. *)
+  let bv_hdr =
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (declare-const y (_ BitVec 8))\n"
+  in
+  check_same
+    ~name:"bv-ugt-sugar"
+    (bv_hdr ^ "(assert (bvugt x y))\n")
+    (bv_hdr ^ "(assert (bvult y x))\n");
+  check_same
+    ~name:"bv-sge-sugar"
+    (bv_hdr ^ "(assert (bvsge x y))\n")
+    (bv_hdr ^ "(assert (bvsle y x))\n");
+  check_parse_ok ~name:"bv-all-ops" (bv_hdr ^ "(assert (bvuge (bvadd x #x01) y))\n");
+  (* width errors are parse-time failures (Malformed), fail-closed *)
+  check_malformed
+    ~name:"bv-width-mismatch"
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (declare-const y (_ BitVec 4))\n\
+     (assert (= (bvadd x y) x))\n";
+  check_malformed
+    ~name:"bv-extract-oob"
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (assert (= ((_ extract 8 0) x) x))\n";
+  check_malformed
+    ~name:"bv-compare-non-bv"
+    "(set-logic QF_UFBV)\n\
+     (declare-const x (_ BitVec 8))\n\
+     (declare-const n Int)\n\
+     (assert (bvult x n))\n";
+  check_malformed
+    ~name:"bv-bad-width-sort"
+    "(set-logic QF_UFBV)\n(declare-const x (_ BitVec 0))\n(assert (= x x))\n"
+;;
+
 let () =
   print_endline "== round-trip A (print -> parse), programmatic sessions ==";
   sessions ();
+  print_endline "== bitvectors (round-trip + sugar + width errors) ==";
+  bv_cases ();
   print_endline
     "== naming classes (reserved words quoted; operators/sorts/empty refused) ==";
   naming_classes ();

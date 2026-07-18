@@ -116,6 +116,8 @@ type 'p undo =
   | U_fedge of int * int * 'p reason
   | U_sig_add of (int * int array)
   | U_sig_del of (int * int array) * int
+  | U_psig_add of int (* packed-signature key added to [packtbl] (task #47) *)
+  | U_psig_del of int * int (* packed key + prior value restored to [packtbl] *)
   | U_reported of int * int
   | U_tag of int * Term.t option (* ADR-0014 Stage 3: restore a root's per-class tag *)
 
@@ -147,6 +149,14 @@ type 'p t =
     mutable parents : int array
   ; index : int Term.Table.t (* Term -> e-node id *)
   ; sigtbl : int Sig.t
+  ; (* Packed small-arity congruence signatures (task #47): a signature whose (sym, <=2
+       arg-rep ids) all fit their bitfields is stored here under a single injective [int]
+       key (identity hash, no array alloc, no generic array hash/compare) instead of in
+       [sigtbl]. Large arity / out-of-range ids fall back to [sigtbl] — the packing
+       decision is a deterministic function of the (sym, arg-rep) VALUES, so a given
+       signature always resolves to exactly one table and the two never collide. Never
+       iterated -> no Hashtbl-order in any observable path (C8). *)
+    packtbl : int Int_set.t
   ; watched : watched Dynarray.t
   ; (* w_atom -> its two watched side TERMS, for [explain_implied]. Write-once and stable
        (an atom's sides never change): a non-Bool [Eq(a,b)] maps to [(a, b)]; a predicate
@@ -188,6 +198,62 @@ type 'p t =
     mutable record_merges : bool
   ; merges : Fabric.merge_event Dynarray.t
   ; mutable merge_cursors : int ref list
+  ; (* Per-call scratch dirty-root set for {!propagate}, owned by this engine instance and
+       cleared (not reallocated) at the head of every call. An int-identity-hashed
+       {!Int_set} replaces the former per-call generic [Hashtbl.create 64]: the membership
+       test runs once per watched atom per propagate call (the hot [caml_hash] on int
+       keys, ~7% of QF_UF/QF_AX wall — EUF-internal), and a fresh [Hashtbl] every call
+       also churned the minor heap. Reusing one cleared table drops both. Not trailed: it
+       is rebuilt from [touched] on every call, so [push]/[pop] never touch it. *)
+    dirty : unit Int_set.t
+  ; (* Separated-root-pair -> a witness disequality, rebuilt by {!propagate} (it already
+       scans every diseq to build its membership set, so recording the witness diseq
+       instead of [()] is free). {!distinct_witness} — called per distinct-propagation by
+       [explain_implied] to cite a separating diseq (fun_2309, ~17% of QF_AX instructions:
+       an O(#diseqs) scan PER call) — consults this for an O(1) hit instead of rescanning.
+       [sep_wit_m] is the e-node count at the last build ([0] = invalid): the packing key
+       [lo*m+hi] uses it, and equality with the current e-node count proves no [register]
+       (count grows) or [pop] (count shrinks, and would leave popped ids unsafe to [find])
+       has happened since — so every stored diseq id is still in bounds. INVALIDATION is
+       the load-bearing correctness mechanism: [merge] (roots move) and [pop] set
+       [sep_wit_m <- 0], and the count-equality gate catches [register]/[pop], so the
+       cache is only ever consulted in the propagate→explain window where it holds the
+       current, earliest-asserted witness. The per-hit re-verify ([find] of the cached
+       diseq's endpoints must still equal the queried roots, else full-scan fallback) is
+       DEFENSE-IN-DEPTH over that invalidation, not load-bearing: with the invalidation
+       the cache is never consulted stale, so no functional/public-API test can
+       distinguish dropping the re-verify (fable's review executed that mutant — euf-test,
+       counted-identity, and a randomized push/pop oracle all stayed green), which is
+       itself the proof it is non-load-bearing. It is kept as a cheap fail-safe on the
+       wrong-verdict surface, guarding against a future root-mutating path added without
+       invalidation. Not trailed. *)
+    sep_wit : 'p diseq Int_set.t
+  ; mutable sep_wit_m : int
+  ; (* Per-call scratch for {!explain_core}, owned by this engine instance and cleared
+       (not reallocated) at the head of every call — the same reuse discipline as
+       {!dirty}. [explain_core] runs on every conflict/implied-explanation (112K–307K
+       calls per solve on the QG/AX/UFLIA exemplars) and freshly allocated these three
+       structures each call (~13% of EUF-core minor-heap churn, measured). It is never
+       re-entrant: {!explain_implied} calls it twice in sequence and consumes each result
+       (a [premises] list) before the next, and the [self_check] replay uses the
+       independent [Naive] module — so a single shared, cleared instance is safe.
+       [ex_out_seen] keys on the forest-child e-node id; [ex_explained] on the packed
+       unordered pair; [ex_pending] is the congruence-expansion work queue. Not trailed:
+       rebuilt from the queried pair on every call. *)
+    ex_out_seen : unit Int_set.t
+  ; ex_explained : unit Int_set.t
+  ; ex_pending : (int * int) Queue.t
+  ; (* Per-call scratch for {!merge} and {!dedup_int}, cleared (not reallocated) at entry
+       — same reuse discipline as {!dirty}/{!ex_pending}. [merge_q] is the
+       congruence-closure pending-merge fixpoint queue; [merge] is not re-entrant (its
+       loop only enqueues onto the same queue — it never calls [merge], [register], or
+       {!insert_congruence}). [dedup_seen] backs {!dedup_int}, called once per union in
+       [merge] and once per {!register}; the two never overlap ([register] binds its
+       [dedup_int] result before calling [insert_congruence], and nothing in [merge]'s
+       loop calls [register]), so one shared cleared set is safe. Not trailed: pure
+       per-call scratch. *)
+    merge_q : (int * int * 'p reason) Queue.t
+  ; dedup_seen : unit Int_set.t
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
@@ -199,6 +265,7 @@ let create ctx =
   ; parents = [||]
   ; index = Term.Table.create 256
   ; sigtbl = Sig.create 256
+  ; packtbl = Int_set.create 256
   ; watched = Dynarray.create ()
   ; watch_sides = Term.Table.create 256
   ; diseqs = Dynarray.create ()
@@ -209,6 +276,14 @@ let create ctx =
   ; record_merges = false
   ; merges = Dynarray.create ()
   ; merge_cursors = []
+  ; dirty = Int_set.create 64
+  ; sep_wit = Int_set.create 64
+  ; sep_wit_m = 0
+  ; ex_out_seen = Int_set.create 32
+  ; ex_explained = Int_set.create 32
+  ; ex_pending = Queue.create ()
+  ; merge_q = Queue.create ()
+  ; dedup_seen = Int_set.create 16
   }
 ;;
 
@@ -254,14 +329,18 @@ let rec find_go parents i =
 
 let find t i = find_go t.parents i
 
-let dedup_int lst =
-  let seen = Hashtbl.create 16 in
+let dedup_int seen lst =
+  (* [Int_set] (int-identity hash) rather than a generic [Hashtbl]: the keys are e-node
+     ids, so this drops the polymorphic [caml_hash]/[compare_val] on the merge/register
+     hot path (called on a merged class's [uses] every union). Same semantics — a set of
+     seen ints. [seen] is the caller's reusable scratch set, cleared here. *)
+  Int_set.clear seen;
   List.filter
     (fun x ->
-       if Hashtbl.mem seen x
+       if Int_set.mem seen x
        then false
        else (
-         Hashtbl.add seen x ();
+         Int_set.replace seen x ();
          true))
     lst
 ;;
@@ -300,19 +379,6 @@ let set_reported t idx v =
   w.w_reported <- v
 ;;
 
-let sig_add t key v =
-  Sig.replace t.sigtbl key v;
-  push_undo t (U_sig_add key)
-;;
-
-let sig_del t key =
-  match Sig.find_opt t.sigtbl key with
-  | Some v ->
-    Sig.remove t.sigtbl key;
-    push_undo t (U_sig_del (key, v))
-  | None -> ()
-;;
-
 let apply_undo t = function
   | U_parent (i, old) -> Array.unsafe_set t.parents i old
   | U_size (i, old) -> (get t i).size <- old
@@ -323,16 +389,101 @@ let apply_undo t = function
     n.freason <- orr
   | U_sig_add key -> Sig.remove t.sigtbl key
   | U_sig_del (key, v) -> Sig.replace t.sigtbl key v
+  | U_psig_add key -> Int_set.remove t.packtbl key
+  | U_psig_del (key, v) -> Int_set.replace t.packtbl key v
   | U_reported (idx, old) -> (Dynarray.get t.watched idx).w_reported <- old
   | U_tag (i, old) -> (get t i).tag <- old
 ;;
 
 (* --- congruence signatures ----------------------------------------------- *)
 
-let sig_key t id =
+(* --- packed small-arity signature keys (task #47) ------------------------- Bitfield
+   layout in a 63-bit OCaml [int] (max positive [2^62 - 1], so 62 usable bits): [61..60]
+   arity tag (0|1|2) [59..40] sym (20b) [39..20] a0 (20b) [19..0] a1 (20b) Each field is
+   range-CHECKED before it is shifted in; if [arity > 2], [sym >= 2^20], or any arg-rep
+   [>= 2^20] the signature does NOT pack and [pack_sig] returns the sentinel [-1] (all
+   packed keys are [>= 0]), routing the caller to the unpacked [sigtbl]. The disjoint bit
+   ranges plus the arity tag make the map INJECTIVE by construction — distinct
+   [(sym, arg-reps)] tuples (of packable shape) map to distinct ints, and a field that
+   would overflow is never truncated into a shared key (it falls back instead). This
+   injectivity is the wrong-congruence firewall: a lossy pack would merge two distinct App
+   terms => wrong-UNSAT (the collision RED). *)
+let sig_pack_sym_bits = 20
+let sig_pack_arg_bits = 20
+let sig_pack_sym_max = 1 lsl sig_pack_sym_bits
+let sig_pack_arg_max = 1 lsl sig_pack_arg_bits
+
+(* PURE packing core (testable in isolation — the collision RED targets exactly this).
+   Given the arity [n] and the (already-resolved) symbol id [s] and arg-rep ids [a0]/[a1]
+   (unused fields pass [0]), return the injective packed key, or [-1] if any field is out
+   of its bitfield range. The range checks are the firewall: a field that would overflow
+   forces [-1] (unpacked fallback), NEVER a truncated/aliased key. NB [a1] is only
+   consulted for [n = 2] and [a0] only for [n >= 1], so the arity tag keeps the arities
+   disjoint even when the ignored args happen to collide. *)
+let pack_signature_fields ~n ~s ~a0 ~a1 =
+  (* Fail-closed on ANY out-of-range field, including NEGATIVE (rider LOW): ids are
+     non-negative in production (enode/symbol ids), so the [< 0] guards are counted-
+     identity-safe, but on a TCB helper fail-closed beats a doc caveat — a negative field
+     would otherwise [lsl] into a sign/adjacent-field position and alias. Matches the
+     doc's "any out-of-range field → -1". *)
+  if n < 0 || n > 2 || s < 0 || s >= sig_pack_sym_max
+  then -1
+  else if n = 0
+  then (* tag 0 *) s lsl 40
+  else if n = 1
+  then
+    if a0 < 0 || a0 >= sig_pack_arg_max
+    then -1
+    else (1 lsl 60) lor (s lsl 40) lor (a0 lsl 20)
+  else if a0 < 0 || a0 >= sig_pack_arg_max || a1 < 0 || a1 >= sig_pack_arg_max
+  then -1
+  else (2 lsl 60) lor (s lsl 40) lor (a0 lsl 20) lor a1
+;;
+
+let pack_sig t id =
+  match (get t id).kind with
+  | Leaf -> invalid_arg "Euf: pack_sig on a non-App e-node"
+  | Fun (sym, args) ->
+    let s = (sym :> int) in
+    (match Array.length args with
+     | 0 -> pack_signature_fields ~n:0 ~s ~a0:0 ~a1:0
+     | 1 -> pack_signature_fields ~n:1 ~s ~a0:(find t args.(0)) ~a1:0
+     | 2 -> pack_signature_fields ~n:2 ~s ~a0:(find t args.(0)) ~a1:(find t args.(1))
+     | _ -> -1)
+;;
+
+(* The unpacked fallback key (identical to the pre-#47 [sig_key]): materialize the arg-rep
+   array. Only reached when [pack_sig] returned [-1] (large arity / out-of-range ids). *)
+let unpacked_key t id =
   match (get t id).kind with
   | Fun (sym, args) -> (sym :> int), Array.map (fun a -> find t a) args
-  | Leaf -> invalid_arg "Euf: sig_key on a non-App e-node"
+  | Leaf -> invalid_arg "Euf: unpacked_key on a non-App e-node"
+;;
+
+(* Value stored under [id]'s signature, or [-1] if absent. [pk = pack_sig t id]
+   (caller-computed once, so the packed hot path recomputes no [find]s). *)
+let sig_lookup t id pk =
+  if pk >= 0
+  then (
+    match Int_set.find_opt t.packtbl pk with
+    | Some v -> v
+    | None -> -1)
+  else (
+    match Sig.find_opt t.sigtbl (unpacked_key t id) with
+    | Some v -> v
+    | None -> -1)
+;;
+
+(* Store [v] under [id]'s signature (trailed). [pk = pack_sig t id]. *)
+let sig_store t id pk v =
+  if pk >= 0
+  then (
+    Int_set.replace t.packtbl pk v;
+    push_undo t (U_psig_add pk))
+  else (
+    let key = unpacked_key t id in
+    Sig.replace t.sigtbl key v;
+    push_undo t (U_sig_add key))
 ;;
 
 let add_use t root id =
@@ -343,10 +494,21 @@ let add_use t root id =
 (* Remove [p]'s current-signature table entry, but only if it is the representative
    (identity by e-node id) — a congruence-merged non-representative has no entry. *)
 let sig_remove_if t p =
-  let key = sig_key t p in
-  match Sig.find_opt t.sigtbl key with
-  | Some v when v = p -> sig_del t key
-  | _ -> ()
+  let pk = pack_sig t p in
+  if pk >= 0
+  then (
+    match Int_set.find_opt t.packtbl pk with
+    | Some v when v = p ->
+      Int_set.remove t.packtbl pk;
+      push_undo t (U_psig_del (pk, v))
+    | _ -> ())
+  else (
+    let key = unpacked_key t p in
+    match Sig.find_opt t.sigtbl key with
+    | Some v when v = p ->
+      Sig.remove t.sigtbl key;
+      push_undo t (U_sig_del (key, v))
+    | _ -> ())
 ;;
 
 (* --- explanation forest -------------------------------------------------- *)
@@ -373,7 +535,15 @@ let add_forest_edge t a b reason =
 (* --- merge + congruence closure (pending queue to fixpoint) -------------- *)
 
 let merge t a0 b0 reason0 =
-  let q = Queue.create () in
+  (* Invalidate the {!distinct_witness} witness cache: a merge moves class roots, so its
+     packed keys and stored witnesses are stale. {!propagate} rebuilds it (and no merge
+     happens inside a [propagate]), so the cache is only ever consulted in the
+     propagate→explain window; this keeps that invariant true for any caller (not just the
+     CDCL(T) drive order), so the served witness is always the earliest-asserted one —
+     same as the full scan (counted-metric identity). One int write per [merge] call. *)
+  t.sep_wit_m <- 0;
+  let q = t.merge_q in
+  Queue.clear q;
   Queue.add (a0, b0, reason0) q;
   while not (Queue.is_empty q) do
     let a, b, reason = Queue.pop q in
@@ -405,7 +575,7 @@ let merge t a0 b0 reason0 =
           };
       (* forest edge between the ORIGINAL endpoints, carrying [reason] *)
       add_forest_edge t a b reason;
-      let parents = dedup_int (get t child).uses in
+      let parents = dedup_int t.dedup_seen (get t child).uses in
       (* remove parents from the table under their pre-union signatures *)
       List.iter (fun p -> sig_remove_if t p) parents;
       (* union child under root *)
@@ -423,21 +593,21 @@ let merge t a0 b0 reason0 =
       (* recompute parent signatures; schedule congruences *)
       List.iter
         (fun p ->
-           let key = sig_key t p in
-           match Sig.find_opt t.sigtbl key with
-           | Some qq when find t qq <> find t p -> Queue.add (p, qq, R_cong (p, qq)) q
-           | Some _ -> ()
-           | None -> sig_add t key p)
+           let pk = pack_sig t p in
+           let qq = sig_lookup t p pk in
+           if qq >= 0
+           then (if find t qq <> find t p then Queue.add (p, qq, R_cong (p, qq)) q)
+           else sig_store t p pk p)
         parents)
   done
 ;;
 
 let insert_congruence t id =
-  let key = sig_key t id in
-  match Sig.find_opt t.sigtbl key with
-  | Some qq when find t qq <> find t id -> merge t id qq (R_cong (id, qq))
-  | Some _ -> ()
-  | None -> sig_add t key id
+  let pk = pack_sig t id in
+  let qq = sig_lookup t id pk in
+  if qq >= 0
+  then (if find t qq <> find t id then merge t id qq (R_cong (id, qq)))
+  else sig_store t id pk id
 ;;
 
 (* --- registration (CONTRACT-REG) ----------------------------------------- *)
@@ -493,7 +663,9 @@ let rec register t (term : Term.t) : int =
     Term.Table.replace t.index term id;
     (match kind with
      | Fun (_, args) ->
-       let roots = dedup_int (Array.to_list (Array.map (fun a -> find t a) args)) in
+       let roots =
+         dedup_int t.dedup_seen (Array.to_list (Array.map (fun a -> find t a) args))
+       in
        List.iter (fun r -> add_use t r id) roots;
        insert_congruence t id
      | Leaf -> ());
@@ -617,18 +789,38 @@ let nca t x y =
    to their arguments' equalities (pushed back onto [pending]). *)
 let explain_core t a b =
   let out = ref [] in
-  let out_seen = Hashtbl.create 32 in
-  let explained = Hashtbl.create 32 in
-  let pending = Queue.create () in
+  (* [Int_set] (int-identity hash) for both seen-sets, replacing generic [Hashtbl]s: the
+     [caml_hash]/[compare_val] here is EUF-internal (fired per conflict/implied
+     explanation). [out_seen] keys on the forest-child e-node id directly. [explained]
+     normalizes each visited unordered pair [{x,y}] and packs it into one [int] key
+     [lo*m+hi] — the same injective packing the separated-class index uses ([m] = e-node
+     count, stable because [explain_core] never merges or registers). Distinct pairs give
+     distinct keys while [m <= 2^31] (guarded below by an explicit fail-closed raise; the
+     bound is physically unreachable — ~155 GB of e-nodes). Same semantics. Reuse the
+     engine-owned scratch sets (cleared, not reallocated); see the [ex_*] field docs. *)
+  let out_seen = t.ex_out_seen in
+  let explained = t.ex_explained in
+  Int_set.clear out_seen;
+  Int_set.clear explained;
+  let m = Dynarray.length t.enodes in
+  (* Fail CLOSED if the packing precondition is ever violated: [assert] is elided under
+     the release [-noassert] build, so an explicit raise is used instead — an overflowed
+     [lo*m+hi] could alias two pairs and mis-deduplicate the explanation walk. The raise
+     degrades to a sound [Unknown] via the solve firewall's catch-all
+     ({!Session.raw_solve}), never a silently wrong explanation. Unreachable in practice. *)
+  if m > 1 lsl 31 then invalid_arg "Euf.explain_core: e-node count exceeds packing bound";
+  let pack lo hi = (lo * m) + hi in
+  let pending = t.ex_pending in
+  Queue.clear pending;
   Queue.add (a, b) pending;
   while not (Queue.is_empty pending) do
     let x, y = Queue.pop pending in
     if x <> y
     then (
-      let key = if x < y then x, y else y, x in
-      if not (Hashtbl.mem explained key)
+      let key = if x < y then pack x y else pack y x in
+      if not (Int_set.mem explained key)
       then (
-        Hashtbl.add explained key ();
+        Int_set.replace explained key ();
         let c = nca t x y in
         let walk start =
           let cur = ref start in
@@ -637,9 +829,9 @@ let explain_core t a b =
             let child = !cur in
             (match n.freason with
              | R_given (prem, u, v) ->
-               if not (Hashtbl.mem out_seen child)
+               if not (Int_set.mem out_seen child)
                then (
-                 Hashtbl.add out_seen child ();
+                 Int_set.replace out_seen child ();
                  out := (child, prem, u, v) :: !out)
              | R_cong (f, g) ->
                (match (get t f).kind, (get t g).kind with
@@ -745,25 +937,52 @@ let check t =
 
 (* --- disequality propagation + Nelson-Oppen sharing ---------------------- *)
 
-(* An asserted disequality separating the classes of [a] and [b], if any (C: fixed
-   assertion-order scan). Returned so [explain_implied] can cite it and its endpoints. *)
+(* An asserted disequality separating the classes of [a] and [b], if any. Returned so
+   [explain_implied] can cite it and its endpoints.
+
+   Fast path (fun_2309 was ~17% of QF_AX instructions as a raw O(#diseqs) scan run per
+   distinct-propagation): consult [t.sep_wit], the witness index {!propagate} builds while
+   scanning every diseq. It is usable only when its build-time e-node count still matches
+   (no [register]/[pop] since, so every stored id is in bounds and the [lo*m+hi] key is
+   the one it was stored under) and both queried roots are [< m]. Correctness rests on the
+   INVALIDATION ([merge]/[pop] zero [sep_wit_m]; the count gate catches [register]/[pop]):
+   the cache is only ever consulted fresh, holding the earliest-asserted witness, so it
+   returns exactly what the scan would. The per-hit re-verify (cached diseq's endpoints
+   must still [find] to the queried roots, else fall back) is DEFENSE-IN-DEPTH over that
+   invalidation, not load-bearing — see the [sep_wit] field doc. Any miss/verify-fail/
+   gate-fail falls back to the authoritative full scan (which also covers a diseq asserted
+   since the build, which the index would lack). Same result as the scan in every case (a
+   fast path over a sound fallback), so output is unchanged. *)
 let distinct_witness t a b =
   let ra = find t a
   and rb = find t b in
-  let w = ref None in
-  (try
-     Dynarray.iter
-       (fun d ->
-          let du = find t d.d_a
-          and dv = find t d.d_b in
-          if (du = ra && dv = rb) || (du = rb && dv = ra)
-          then (
-            w := Some d;
-            raise Exit))
-       t.diseqs
-   with
-   | Exit -> ());
-  !w
+  let full_scan () =
+    let w = ref None in
+    (try
+       Dynarray.iter
+         (fun d ->
+            let du = find t d.d_a
+            and dv = find t d.d_b in
+            if (du = ra && dv = rb) || (du = rb && dv = ra)
+            then (
+              w := Some d;
+              raise Exit))
+         t.diseqs
+     with
+     | Exit -> ());
+    !w
+  in
+  let m = t.sep_wit_m in
+  if m > 0 && Dynarray.length t.enodes = m && ra < m && rb < m
+  then (
+    let key = if ra <= rb then (ra * m) + rb else (rb * m) + ra in
+    match Int_set.find_opt t.sep_wit key with
+    | Some d ->
+      let du = find t d.d_a
+      and dv = find t d.d_b in
+      if (du = ra && dv = rb) || (du = rb && dv = ra) then Some d else full_scan ()
+    | None -> full_scan ())
+  else full_scan ()
 ;;
 
 type implied =
@@ -782,13 +1001,19 @@ type implied =
    report nothing for it either. Iteration stays in watched-index (registration) order, so
    the reported list is byte-identical run to run. Empty dirty set ⇒ no work. *)
 let propagate t =
-  let dirty = Hashtbl.create 64 in
+  (* Reuse the engine-owned scratch set (int-identity hash, cleared not reallocated): the
+     dirty-membership test below runs once per watched atom per call, so a generic
+     [Hashtbl] over int keys paid [caml_hash]/[compare_val] there (EUF-internal, ~7% of
+     QF_UF/QF_AX wall) and a fresh table every call churned the minor heap. Semantics
+     unchanged — a set of dirty class roots for this call. *)
+  let dirty = t.dirty in
+  Int_set.clear dirty;
   for i = t.prop_mark to Dynarray.length t.touched - 1 do
-    Hashtbl.replace dirty (Dynarray.get t.touched i) ()
+    Int_set.replace dirty (Dynarray.get t.touched i) ()
   done;
   t.prop_mark <- Dynarray.length t.touched;
   let acc = ref [] in
-  if Hashtbl.length dirty > 0
+  if Int_set.length dirty > 0
   then (
     (* Separated-class index, built ONCE per [propagate] call. No merge happens inside a
        [propagate], so every representative is stable here: the unordered root-pair
@@ -816,38 +1041,50 @@ let propagate t =
        to catch a spurious propagation; the [test_propagate_pushpop_vs_full] oracle checks
        byte-identical output against an independent full scan, forbidding BOTH directions
        (mutants [euf_propagate_sep_stale_reps] / [euf_propagate_sep_skip_rebuild]). *)
-    let sep = Int_set.create (Dynarray.length t.diseqs) in
+    (* Reuse the engine-owned witness index (cleared, not reallocated). It maps each
+       separated root pair to a WITNESS diseq (not just [()]); {!propagate} needs only the
+       membership test, but recording the witness is free here (we already scan every
+       diseq) and lets {!distinct_witness} skip its own O(#diseqs) rescan. *)
+    let sep = t.sep_wit in
+    Int_set.clear sep;
     (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
        [m = #e-nodes]. Every rep is an e-node id in [0, m), so distinct pairs give distinct
        keys UNLESS the packing wraps: OCaml [int] arithmetic is mod 2^63, so injectivity
-       holds only for [m < floor (sqrt (2^63)) ~ 3.037e9]; the [assert] below enforces the
-       stricter [m <= 2^31], well inside that bound, so a wrap can never alias two pairs
-       (see the assert's fail-closed note). No merge happens inside [propagate], so [m] and
+       holds only for [m < floor (sqrt (2^63)) ~ 3.037e9]; the fail-closed check below
+       enforces the stricter [m <= 2^31], well inside that bound, so a wrap can never alias
+       two pairs. No merge happens inside [propagate], so [m] and
        every [find] are stable for the whole call; the build and lookup loops therefore use
        the same [m]. *)
     let m = Dynarray.length t.enodes in
     (* [m] is fixed for the whole call (no merge inside [propagate]). Guard the packing's
        injectivity precondition once here: keys alias only once [lo*m+hi] wraps mod 2^63,
-       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We assert the STRICTER [m <= 2^31] as
-       a DEV/DEBUG-profile guard (fail closed: raise, never a wrong distinct-propagation).
-       Under release, [main/dune] passes [-noassert], so this assert is COMPILED OUT of
-       the promotable binary; release-binary safety rests on the PHYSICAL UNREACHABILITY
-       of the bound — [m > 2^31] e-nodes would need ~155 GB, unreachable in any real solve
-       — not on the assert firing. *)
-    assert (m <= 1 lsl 31);
+       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We enforce the STRICTER [m <= 2^31]
+       with an EXPLICIT fail-closed raise (NOT [assert], which [main/dune]'s release
+       [-noassert] would compile out of the promotable binary): an overflowed key could
+       alias two pairs and yield a wrong distinct-propagation (the wrong-verdict
+       direction), so we raise instead — degrading to a sound [Unknown] via the solve
+       firewall's catch-all ({!Session.raw_solve}) — rather than relying on the assert
+       firing. The bound is also physically unreachable ([m > 2^31] e-nodes ~ 155 GB). *)
+    if m > 1 lsl 31 then invalid_arg "Euf.propagate: e-node count exceeds packing bound";
+    t.sep_wit_m <- m;
     let pack lo hi = (lo * m) + hi in
     Dynarray.iter
       (fun d ->
          let du = find t d.d_a
          and dv = find t d.d_b in
          let key = if du <= dv then pack du dv else pack dv du in
-         Int_set.replace sep key ())
+         (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
+           so the witness {!distinct_witness} serves is byte-identical to what its full
+           assertion-order scan would return (same premise token ⇒ identical learned
+           clauses ⇒ counted-metric identity). [Dynarray.iter] visits diseqs in assertion
+           order. *)
+         if not (Int_set.mem sep key) then Int_set.replace sep key d)
       t.diseqs;
     Dynarray.iteri
       (fun idx w ->
          let ra = find t w.w_a
          and rb = find t w.w_b in
-         if Hashtbl.mem dirty ra || Hashtbl.mem dirty rb
+         if Int_set.mem dirty ra || Int_set.mem dirty rb
          then (
            let cur =
              if ra = rb
@@ -1022,7 +1259,14 @@ let restore_aux t lv =
   for i = Dynarray.length t.enodes - 1 downto lv.l_enodes do
     Term.Table.remove t.index (get t i).term
   done;
-  Dynarray.truncate t.enodes lv.l_enodes
+  Dynarray.truncate t.enodes lv.l_enodes;
+  (* Invalidate the {!distinct_witness} cache: a pop truncates [enodes]/[diseqs], so
+     cached diseq endpoint ids may now be out of bounds. Belt-and-suspenders — the
+     count-equality gate in {!distinct_witness} already fails after a pop changes the
+     e-node count, but a pop+re-register back to the same count between a [propagate] and
+     a [distinct_witness] (not the normal drive order) would slip past it; zeroing
+     [sep_wit_m] closes that. *)
+  t.sep_wit_m <- 0
 ;;
 
 let pop t n =
@@ -1037,4 +1281,10 @@ let pop t n =
 
 module Debug = struct
   let self_check = self_check
+
+  (* Task #47: the PURE packed-signature core + its field widths, exposed for the
+     collision RED unit test (euf_test.ml). Not on any solve path. *)
+  let pack_signature_fields = pack_signature_fields
+  let sig_pack_sym_bits = sig_pack_sym_bits
+  let sig_pack_arg_bits = sig_pack_arg_bits
 end

@@ -20,6 +20,25 @@
  (libraries oxsmt_solver))
 
 (executable
+ (name satpre_test)
+ (modules satpre_test)
+ (libraries oxsmt_solver))
+
+(executable
+ (name chrono_test)
+ (modules chrono_test)
+ (libraries oxsmt_solver))
+
+; lgc_test toggles OXSMT_LGC_FIXED / OXSMT_LGC_INITIAL per solver via Unix.putenv, so it
+; compares the reduceDB schedules OFF vs ON in one process. [unix] is test-only (never
+; linked into the shipped solver, which stays stdlib-only per the I3 firewall).
+
+(executable
+ (name lgc_test)
+ (modules lgc_test)
+ (libraries oxsmt_solver unix))
+
+(executable
  (name sat_bench)
  (modules sat_bench)
  (libraries oxsmt_solver oxsmt_dimacs))

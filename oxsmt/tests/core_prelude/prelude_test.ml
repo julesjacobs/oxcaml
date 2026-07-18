@@ -45,10 +45,18 @@ let () =
   let ctx = Context.create env in
   let xt = Context.const ctx x in
   let yt = Context.const ctx y in
-  let m = Model.of_alist [ xt, Model.Int 42; yt, Model.Int (-7) ] in
+  let m =
+    Model.of_alist
+      [ xt, Model.Int (Bigint.of_int 42); yt, Model.Int (Bigint.of_int (-7)) ]
+  in
+  let is_int v n =
+    match v with
+    | Some (Model.Int b) -> Bigint.equal b (Bigint.of_int n)
+    | _ -> false
+  in
   check
     "Oxsmt_core.Model.of_alist: value round-trip"
-    (Model.value m xt = Some (Model.Int 42) && Model.value m yt = Some (Model.Int (-7)));
+    (is_int (Model.value m xt) 42 && is_int (Model.value m yt) (-7));
   check
     "Model.value None for an unconstrained term"
     (Model.value m (Context.int_const ctx 0) = None);
@@ -56,7 +64,9 @@ let () =
      last-wins). *)
   check
     "Model.of_alist raises Invalid_argument on a duplicate term"
-    (match Model.of_alist [ xt, Model.Int 1; xt, Model.Int 2 ] with
+    (match
+       Model.of_alist [ xt, Model.Int (Bigint.of_int 1); xt, Model.Int (Bigint.of_int 2) ]
+     with
      | (_ : Model.t) -> false
      | exception Invalid_argument _ -> true);
   Printf.printf "\n%d checks, %d failures\n" !checks !failures;

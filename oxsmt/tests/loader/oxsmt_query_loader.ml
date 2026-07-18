@@ -30,6 +30,9 @@ let assert_all ?(presolve = true) s (parsed : Parser.t) =
        non-DT files). Single point for BOTH drivers + the cert gate (all route through
        this loader), superseding the per-driver set_datatypes threading. *)
     Session.set_datatypes s parsed.Parser.datatypes;
+    (* Likewise install the array select/store registry (arrays lane) BEFORE asserting, so
+       an array file routes onto the standalone arrays theory. No-op on non-array files. *)
+    Session.set_arrays s parsed.Parser.arrays;
     if presolve
     then Session.assert_presolved s parsed.Parser.assertions
     else List.iter (Session.assert_term s) parsed.Parser.assertions;

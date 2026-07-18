@@ -67,6 +67,15 @@ type t =
          A ref SHARED with [cdclt] (same ref), so a [set_datatypes] after [create] is
          visible when cdclt reads it lazily at the first theory-atom intern to pick the
          standalone DT theory over the EUF+LIA combined stack. *)
+  ; array_registry : Oxsmt_core.Array_defs.t ref
+    (* array select/store symbols (arrays lane); empty unless [set_arrays] was called. A
+         ref SHARED with [cdclt] (same ref), read lazily at the first theory-atom intern
+         to pick the standalone arrays theory. *)
+  ; mutable has_arrays : bool
+    (* [set_arrays] installed a non-empty array registry. A [Final]->[Sat] on an array
+         problem degrades to [Unknown] in v1: the ROW/extensionality saturation is sound
+         for refutation but the model is not self-checked, so [sat] is withheld rather
+         than risk a wrong-[sat]. UNSAT flows through unchanged. *)
   ; pp : Preprocess.t
   ; sat : Sat.t
   ; cdclt : Cdclt.t
@@ -80,7 +89,24 @@ type t =
     (* nullary Bool-App atoms (propositional variables), for the pure-Boolean
          [get_model] *)
   ; mutable frames : Sat.var list
-    (* selector stack, innermost first; base always present *)
+    (* selector stack, innermost first; base always present (the outermost / last
+         element) *)
+  ; base_at_level0 : bool
+    (* OXSMT_BASE_L0 (DEFAULT-ON; set to 0/false/no to opt out): the unpoppable base
+         frame is forced TRUE by a permanent unit clause at level 0 instead of being
+         ASSUMED positive on every solve. Removes the artificial level-1 [base] decision
+         and keeps [not base] out of learned clauses (a sound search/encoding change — NOT
+         a no-op: it shifts decisions/LBD). When true, [base] is omitted from the solve
+         and certificate assumption sets; pushed frame selectors and the symmetry
+         activation selector are unaffected. *)
+  ; base_var : Sat.var (* the base-frame selector, for the level-0 forcing unit *)
+  ; mutable base_unit_emitted : bool
+    (* under [base_at_level0], the permanent [base] unit is added LAZILY on the first
+         [check_sat] rather than at [create] — so that if a certificate trace was
+         installed (which happens on a pristine session, after [create] but before any
+         solve) the unit is captured as a genuine cert Input (the definitional
+         selector-unit), and the checker DERIVES [base] by BCP over inputs. Emitted
+         exactly once. *)
   ; mutable has_theory : bool
     (* any theory atom (Le / non-Bool Eq / applied predicate) has been asserted: the
          verdict's model comes from the theory, and a Sat is theory-validated *)
@@ -109,34 +135,124 @@ type t =
     (* the most recent check_sat hit the effort budget (BUDGET tag). Per-check,
          poison-free: distinct from [degraded]/[budget_exhausted], NOT sticky. *)
   ; mutable elim_defs : Presolve.def list
-    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated, in
-     elimination order. [build_model] re-derives each one's value from its definition and
-     splices it into the model so the R1 checker (which evaluates the ORIGINAL assertions
-     in [asserted]) and [get_model] both bind it. Empty unless the batch
-     {!assert_presolved} path eliminated something. *)
+    (* W1b equality-elimination presolve: the variables {!assert_presolved} eliminated,
+         in elimination order. [build_model] re-derives each one's value from its
+         definition and splices it into the model so the R1 checker (which evaluates the
+         ORIGINAL assertions in [asserted]) and [get_model] both bind it. Empty unless the
+         batch {!assert_presolved} path eliminated something. *)
+  ; relevancy : Relevancy.t option
+    (* dynamic relevancy driver (task #24, QF_UF), [None] unless the [OXSMT_RELEVANCY]
+         gate is on (or {!create} is told to enable it). When [Some], {!assert_clausified}
+         feeds it the boolean-skeleton graph and the SAT core's branch filter consults it;
+         when [None] the whole feature is dark and byte-identical to trunk. *)
+  ; mutable cert_active : bool
+    (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
+         (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
+         would otherwise enter the cert as a trusted [Input], laundering a preprocessing
+         consequence into the query and blinding the gate (codex MED-3/4). Cert corpus
+         runs are a SOUNDNESS gate, not a solve-rate target, so forgoing Pass A there is
+         free. *)
+  ; sym_counter : int ref
+    (* symmetry breaking (task #25): a PER-SESSION monotone counter for the reserved
+         [.oxsmt.sym.*] aux-var names, so a second [assert_presolved] emission does not
+         reuse a name from the first (F2: idempotent [declare_reserved] would rebind it to
+         a conflicting definition). *)
+  ; mutable lemmas_registered : bool
+    (* symmetry breaking (task #25, R2/codex B2): set once any lemma is registered. The
+         emission restriction refuses to emit when true — a during-solve lemma instance
+         ([assert_instance_at_frame]) extends the formula and can break the detected
+         symmetry, and [check_sat] builds its assumption list once, so an emission could
+         not be retracted mid-solve. *)
+  ; mutable sym_sel : Sat.var option
+    (* symmetry breaking (task #25, F1): the ACTIVATION SELECTOR guarding the current
+         emission's lex clauses. The clauses are asserted as [(¬sym_sel ∨ C)] (via
+         [assert_clausified ~sel]); [check_sat] assumes [sym_sel] POSITIVE while [Some],
+         so the clauses are active. [sym_sel] occurs only negatively (a pure literal), so
+         once a later assertion clears it to [None] the clauses become vacuous — sound
+         retraction of a NON-MONOTONIC break without touching the permanent clause DB. Any
+         assertion after emission (assert_term / a further assert_presolved / push) clears
+         it. *)
+  ; mutable sym_sel_in_core : Sat.var option
+    (* symmetry breaking (task #25, R3 minor): the activation selector assumed by the MOST
+     RECENT [check_sat], captured at solve time. [failed_assumptions] filters by THIS, not
+     the live [sym_sel] — a later assertion clears [sym_sel] to [None] while the SAT core
+     still holds the selector from the previous solve, so a read-time filter keyed on the
+     live [sym_sel] would leak it. *)
   }
 
-let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget () =
+let create
+      ?(split_budget = default_split_budget)
+      ?max_effort
+      ?lemma_gen_budget
+      ?(enable_relevancy = Relevancy.enabled_from_env ())
+      ()
+  =
   (* ADR-0012 R1: the session is the SOLE caller of [create_with_cap] in solver code (the
      documented convention); it keeps the cap private and threads it to the
      reserved-symbol minters. [Session.env] returns only the [env], never the cap. *)
   let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  let sat = Sat.create () in
+  (* OXSMT_BASE_L0 (DEFAULT-ON): force the unpoppable base frame TRUE with a permanent
+     level-0 unit rather than assuming it every solve. Read the gate ONCE here (before
+     [Sat.create] so the emitter knob can be set); [check_sat] / [cert_assumptions]
+     consult [base_at_level0] to omit [base] from their assumption sets. [OXSMT_BASE_L0]
+     set to 0/false/no opts out and is byte-identical to the pre-flip trunk. *)
+  let base_at_level0 =
+    (* DEFAULT-ON (pair-measured +113 on main; QF_LIA +87 / QF_UF +29 / UFLIA −3, 0 flips,
+       0 z3 disagreements). [OXSMT_BASE_L0] set to 0/false/no opts out (byte-identical to
+       the pre-flip trunk); any other value / unset ⇒ ON. The opt-out token set is the
+       SAME as [OXSMT_SYMBREAK] (whose flip precedent this mirrors), so [=false] / [=no]
+       behave as expected rather than surprisingly turning the flag ON. The cert-emitter
+       (#53) makes the ON path 33/33 cert-VALID, so default-ON is safe for the certificate
+       pipeline. *)
+    match Sys.getenv_opt "OXSMT_BASE_L0" with
+    | Some ("0" | "false" | "no") -> false
+    | Some _ | None -> true
+  in
+  (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
+     (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
+     checker's contradictory closure would otherwise spuriously fail the "declared level-0
+     unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
+     counter effect. The opt-out (not base-l0) keeps every declaration => byte-identical
+     to the pre-flip trunk. *)
+  let sat = Sat.create ~base_l0_cert_mode:base_at_level0 () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
      / interactive / [make test] path is byte-identical (the count is never printed). *)
   let budget = Budget.create ?max:max_effort () in
   let registry = ref Oxsmt_core.Datatype_defs.empty in
+  let array_registry = ref Oxsmt_core.Array_defs.empty in
   (* Install the seam callbacks on the pristine core BEFORE any clause (pristine-attach);
-     the theory itself is chosen lazily from [registry] at the first intern. The ref is
-     shared with [cdclt]. *)
-  let cdclt = Cdclt.create ctx env sat ~split_budget ~budget ~registry in
+     the theory itself is chosen lazily from [registry] / [array_registry] at the first
+     intern. The refs are shared with [cdclt]. *)
+  let cdclt =
+    Cdclt.create ctx env sat ~split_budget ~budget ~registry ~array_registry ~cap
+  in
   let base = Sat.new_var sat in
+  (* [base_at_level0] is read above (before [Sat.create]). The base forcing-unit is NOT
+     added here — it is deferred to the first [check_sat] (see [base_unit_emitted]) so a
+     certificate trace, installed after [create] on the pristine session, records it as a
+     genuine Input. *)
+  (* Dynamic relevancy (task #24): when enabled, create the driver, route the trail seam
+     events through [cdclt] to it, and install the SAT branch filter that consults it.
+     Disabled by default => the filter is never installed and the glue is byte-identical
+     to trunk. *)
+  let relevancy =
+    if enable_relevancy
+    then Some (Relevancy.create ~activity:(fun v -> Sat.var_activity sat v) ())
+    else None
+  in
+  (match relevancy with
+   | None -> ()
+   | Some rel ->
+     Cdclt.set_relevancy cdclt (Some rel);
+     Sat.set_branch_filter sat (Some (fun v -> Relevancy.should_branch rel v)));
   { env
   ; cap
   ; ctx
   ; registry
+  ; array_registry
+  ; has_arrays = false
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
@@ -144,6 +260,9 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
+  ; base_at_level0
+  ; base_var = base
+  ; base_unit_emitted = false
   ; has_theory = false
   ; degraded = false
   ; last_verdict = Unknown
@@ -155,19 +274,169 @@ let create ?(split_budget = default_split_budget) ?max_effort ?lemma_gen_budget 
   ; last_effort = 0
   ; effort_exhausted = false
   ; elim_defs = []
+  ; relevancy
+  ; cert_active = false
+  ; sym_counter = ref 0
+  ; sym_sel = None
+  ; lemmas_registered = false
+  ; sym_sel_in_core = None
   }
 ;;
 
+(* Pass A (task #7 entailed-equality extraction) toggle. Default ON (both review legs
+   cleared default-ON; the win is ~84-95 eq_diamond files and OFF forfeits it).
+   [OXSMT_PRESOLVE_EQ=0] turns it OFF for the A/B baseline. Cert-OFF gating (below) is
+   INDEPENDENT of this flag: a live cert trace disables Pass A regardless. Read once. *)
+let pass_a_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_PRESOLVE_EQ" with
+     | Some ("0" | "false" | "no") -> false
+     | _ -> true)
+;;
+
+(* Pass A runs only when enabled AND no certificate trace is installed (§cert-OFF gating,
+   team-lead ruling): a derived unit must never enter a cert as a trusted [Input]. *)
+let pass_a_enabled t = Lazy.force pass_a_flag && not t.cert_active
+
+(* Contextual simplification (task #13) toggle. Default OFF (both review legs concur): the
+   pass collapses the nested-ITE verification conditions (nec-smt / Dartagnan) that
+   CDCL(T) otherwise thrashes on, and its win direction is UNSAT where the R1 self-check
+   does not run — so, matching the Pass A precedent, it ships OFF (byte-identical to
+   trunk) until a fires-inclusive ON/OFF 0-mismatch corpus sweep is recorded; a follow-up
+   then flips the default. [OXSMT_PRESOLVE_CTX=1] turns it ON (the A/B ON leg and the
+   wiring-test gate). Read once. *)
+let ctx_simp_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_PRESOLVE_CTX" with
+     | Some ("1" | "true" | "yes") -> true
+     | Some _ | None -> false)
+;;
+
+(* Contextual simplification runs only when enabled AND no certificate trace is installed:
+   the certificate measures the UNSIMPLIFIED assertion path, so the rewrite must be off
+   while a trace is live (the same cert-OFF discipline as Pass A). The rewrite is
+   model-preserving, so this gate protects the certificate contract, not verdict
+   soundness. *)
+let ctx_simp_enabled t = Lazy.force ctx_simp_flag && not t.cert_active
+
+(* Equality-over-ITE projection (task #34) toggle. Default ON as of the recorded A/B.
+   MEASURED BASIS (builder-cc-incremental, quiesced box, 2s W=1, 101-file tier-weighted
+   nec sample, OXSMT_PRESOLVE_PROJ 0 vs 1 interleaved): OFF solved=2 -> ON solved=9 (NET
+   +7), 0 verdict disagreements, 0 regressions; all conversions fast timeout->unsat, and
+   oxsmt(ON) beats z3 4.8.5 on 2 of them (int_from_list/prp-39-34,
+   handler_sigchld/prp-22-47: z3 times out at 2s, we prove unsat). Zero regressions
+   confirms the neutral-abort keeps the deepest ITE-chain files (which the 500K budget
+   forfeits) at OFF-equivalent behaviour. (The proj: fire-count on the large tier is
+   under-observed because a still-timing-out file is SIGKILL'd before the once-per-solve
+   stderr line flushes — measurement-only; verdicts/net come off stdout and are
+   unaffected.) [OXSMT_PRESOLVE_PROJ=0] turns it OFF (byte-identical to trunk); read once.
+   Distinct flag from OXSMT_PRESOLVE_CTX so the two ITE passes stay independent (the
+   contextual pass is a banked negative). *)
+let proj_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ" with
+     | Some ("0" | "false" | "no") -> false
+     | Some _ | None -> true)
+;;
+
+(* Runs only when enabled AND no certificate trace is installed: the certificate measures
+   the UNSIMPLIFIED assertion path (the same cert-OFF discipline as Pass A / ctx). The
+   rewrite is model-preserving, so this gate protects the certificate contract, not
+   verdict soundness. *)
+let proj_enabled t = Lazy.force proj_flag && not t.cert_active
+
+(* Symmetry breaking (task #25, quf-symmetry-experiment.md §6) toggle. Default ON as of
+   the quiesced A/B (logs/symbreak-arbiter.md, be8e516b8b binary): the SOUND size-capped
+   lex-leader gives NET +972 on QF_UF (81.5% -> 94.4%), 0 verdict disagreements, 0
+   verdict-vs-:status contradictions; ON lost only 12 files, all near-wall Goel-BMC
+   timeouts (none wrong) — a known follow-up (a GENERAL detection-cost budget, NOT a
+   family/shape guard). Mirrors the ITE-projection flip precedent. [OXSMT_SYMBREAK=0]
+   turns it OFF (byte-identical to pre-flip trunk). Read once. *)
+let symbreak_flag =
+  lazy
+    (match Sys.getenv_opt "OXSMT_SYMBREAK" with
+     | Some ("0" | "false" | "no") -> false
+     | Some _ | None -> true)
+;;
+
+(* Runs only when enabled AND no certificate trace is installed: the breaking constraints
+   REMOVE symmetric models (equisatisfiable, not equivalent), so a lex-leader clause is
+   not resolution-derivable — it must never enter a cert as a trusted input (the same
+   cert-OFF discipline as Pass A). Cert-OFF here protects soundness of the certificate,
+   not the verdict (the added constraints are equisatisfiable). *)
+let symbreak_enabled t = Lazy.force symbreak_flag && not t.cert_active
 let env t = t.env
 let context t = t.ctx
 
-(* Declarations reject the reserved fresh-symbol namespace (board #48), so a user symbol
-   can never collide with one preprocessing invents. *)
+(* board #58 O-MINTER — the MARKER-GRAMMAR REGISTRATION SITE.
+   [parse_sanctioned_marker name] is the [admit] gate for the front-end minter
+   {!parse_minter}: exactly the parse-time theory-internal names a session lets the
+   SMT-LIB parser mint. It admits the arrays and bit-vector marker grammars (below); a
+   caller holding only a [Session.t] can mint those names and nothing else (the O-MINTER
+   close).
+
+   {b PAIRING CONTRACT — a theory migration widening this MUST read it (see
+     Oxsmt_core.Internal_minter.create).}
+   Admitting a marker grammar here lets any [Session.t] holder mint those names via
+   [Internal_minter.mint]. That is sound ONLY IF the theory's CONSUMING side classifies
+   its markers by something the holder cannot forge to a harmful effect — REGISTRY
+   MEMBERSHIP (arrays: a marker-shaped-but-unregistered op gets no ROW) or RANK AGREEMENT
+   (bv: a mis-ranked marker is inert) — so a forged-but-admitted marker degrades to
+   [unknown], never a wrong verdict. Banked lesson (mint-exemption-tcb-hole): an admission
+   is a wrong-[unsat] hole precisely when the consuming theory classifies on the SAME
+   forgeable thing it admits. So DO NOT add a grammar arm here without a paired
+   consuming-side inertness check, and NEVER admit the sensitive reserved namespaces
+   ([.oxsmt.arr.ext.*], datatype testers [.oxsmt.is-*]/[.oxsmt.dt.*], qvars
+   [.oxsmt.qvar.*], preprocessing witnesses [.oxsmt.ite/q/r.*]) — those are minted
+   directly via [Env.declare_reserved] by trusted code and have no inertness guard.
+
+   ADMITTED GRAMMARS (one predicate per line; each PAIRED with its consuming-side
+   inertness check per the contract above):
+   - arrays op symbols ({!Array_defs.is_op_name}: the [.oxsmt.arr.] prefix with a [|]
+     sort-key separator). PAIRED check = REGISTRY MEMBERSHIP: the theory classifies an
+     [App] head only via {!Array_defs.role_of_sym}, and {!Array_defs.add} refuses any
+     entry whose name is not the canonical [op_symbol_name], so an
+     admitted-but-unregistered op-shaped mint is inert. EXCLUDES the ext witness
+     [.oxsmt.arr.ext.N] (no [|]).
+   - bit-vector markers ({!Oxsmt_core.Bv.is_bv_name}: the [.oxsmt.bv|...] prefix). PAIRED
+     check = RANK AGREEMENT: {!Oxsmt_core.Bv.view} verifies the decoded op's
+     operand/result sorts and arity against the term's actual sorts, so a mis-ranked
+     admitted marker decodes to [None] (ordinary uninterpreted, at worst [unknown]), never
+     reinterpreted. *)
+let parse_sanctioned_marker name = Array_defs.is_op_name name || Bv.is_bv_name name
+let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
+
+(* Declarations reject the reserved fresh-symbol namespace (board #48 / #58): every
+   theory-internal symbol — a preprocessing witness, a coerced qvar, and (board #58) the
+   bit-vector vocabulary's [.oxsmt.bv.*] operator/literal symbols ({!Oxsmt_core.Bv}) —
+   lives under the [.oxsmt.] prefix, which [Preprocess.is_reserved_name] rejects here.
+   This is the PRIMARY guard: a user symbol can never collide with an internal one, and
+   the only door that mints a reserved name is the cap-gated {!Env.declare_reserved} (the
+   bit-vector builders mint through it), which the public [Env] door below this guard
+   cannot reach.
+
+   They ALSO reject any name containing '\' or '|' (F2, codex BLOCKER) — retained as
+   DEFENSE IN DEPTH. No SMT-LIB symbol form (simple or [|...|]-quoted) can contain either
+   byte (the lexer forbids them), so a name carrying one can only arrive programmatically;
+   this second, independent barrier covers the ['|'] field separator inside a bit-vector
+   or arrays marker name and any future marker scheme, even were the [.oxsmt.] prefix
+   guard ever weakened. The same rejection lives at the root [Env] door (board #58), so
+   both the Session and raw-[Env] programmatic paths are closed. *)
+let has_marker_byte name =
+  String.exists (fun c -> Char.equal c '\\' || Char.equal c '|') name
+;;
+
 let guard_name name =
   if Preprocess.is_reserved_name name
   then
     invalid_arg
-      (Printf.sprintf "Session: cannot declare reserved internal symbol %s" name)
+      (Printf.sprintf "Session: cannot declare reserved internal symbol %s" name);
+  if has_marker_byte name
+  then
+    invalid_arg
+      (Printf.sprintf
+         "Session: cannot declare symbol %s (contains a reserved marker byte '\\' or '|')"
+         name)
 ;;
 
 let declare_sort t name =
@@ -182,12 +451,137 @@ let declare_fun t name rank =
 
 let declare_const t name sort = declare_fun t name (Rank.create [] sort)
 
+(* RESET-PER-QUERY theory invalidation (task #54, contract-A ruling — the
+   correct-everywhere replacement for the #51 interim fail-closed guard). A datatype/array
+   registry mutation after a prior query has already instantiated + cached a theory means
+   the cached theory is stale for the new query (none->DT, DT->arrays, or a loader
+   overwrite that re-ranks a symbol — the #51 codex wrong-[unsat] landmine). Invalidate
+   it: drop the theory instance and the SAT-var<->atom bijection
+   ({!Cdclt.reset_for_new_query}) plus the session-side per-query interning/model state,
+   so the next [intern] rebuilds the theory fresh from the new registry and re-interns
+   every (possibly re-used) term against it — no stale classification can survive, and the
+   old [Dt.t]'s session-lifetime [ctor_terms] are discarded rather than met by a
+   differently-populated registry.
+
+   FAIL-LOUD, never a silent rebuild under live state: the reset is sound only BETWEEN
+   self-contained queries. Any live state BOUND to the bijection we would drop makes the
+   reset unsound, so we raise a documented [Invalid_argument] rather than reset under it.
+   TWO such channels, both treated identically: (1) live ground assertions
+   ([asserted <> []]); (2) a live quantified lemma ([Manager.has_live_lemma]) — the lemma
+   Manager is USER-INPUT state (the ADR-0012 store fed by {!assert_lemma}), NOT a derived
+   consequence, and it lives OUTSIDE [asserted] (a base-frame lemma is never added to
+   [asserted] and survives [pop]), so silently dropping it in the new era would be a
+   wrong-[sat] channel. The self-contained-VC pattern (declare -> assert -> check -> pop,
+   no live lemma) reaches here clean and resets; the SAT core is at level 0 between
+   queries and the prior query's now-inert vars/clauses cannot affect a later solve (their
+   frame selector is free, and they are absent from the cleared bijection). *)
+let invalidate_theory_for_registry_change t =
+  (* FAIL-LOUD on ANY live state bound to the bijection we are about to drop. Two
+     channels:
+     (1) live ground assertions ([asserted <> []]); (2) a live quantified lemma
+         ([Manager.has_live_lemma]) — the codex/fable CRITICAL. The lemma Manager is the
+         ADR-0012 lemma store fed by {!assert_lemma}: USER-INPUT state, NOT a derived
+         consequence, and it is OUTSIDE [asserted] (a base-frame lemma is never added to
+         [asserted] and survives [pop]). Silently dropping a user-asserted quantifier in
+         the new era would be a wrong-[sat] channel, so a live lemma is treated EXACTLY
+         like a live assertion: the registry replacement raises rather than resetting
+         under it. The self-contained-VC pattern (declare -> assert -> check -> pop, no
+         live lemma) reaches here clean and resets. *)
+  if
+    (match t.asserted with
+     | [] -> false
+     | _ :: _ -> true)
+    || Manager.has_live_lemma t.mgr
+  then
+    invalid_arg
+      "Session: datatype/array registry replaced with live assertions or a live \
+       quantified lemma (task #54 contract-A: each query's declarations must precede its \
+       assertions / lemmas; pop the prior query before redeclaring for a new one)";
+  Cdclt.reset_for_new_query t.cdclt;
+  (* Session-side per-query state that maps terms -> SAT vars or caches the last verdict:
+     cleared so a re-used term re-interns fresh and the new query starts unpoisoned.
+     Frames / [asserted] / [asserted_saved] are NOT touched — an empty pushed frame is
+     legitimate and its matching [pop] must still balance. *)
+  Term.Table.clear t.prop_to_var;
+  t.bool_consts <- [];
+  t.has_theory <- false;
+  (* Re-DERIVE [has_arrays] from the LIVE array registry rather than forcing it false: a
+     DT-triggered reset must not drop a still-valid array mode (codex MEDIUM). The array
+     registry is unchanged by a datatype mutation, so this preserves [has_arrays] across a
+     [set_datatypes]/[declare_datatype] reset; [set_arrays] overwrites it from its own
+     [defs] on the line after this call. *)
+  t.has_arrays <- not (Oxsmt_core.Array_defs.is_empty !(t.array_registry));
+  t.degraded <- false;
+  t.last_model <- None;
+  t.last_verdict <- Unknown;
+  t.elim_defs <- [];
+  t.sym_sel <- None;
+  t.lemmas_registered <- false
+;;
+
 (* Install the algebraic-datatype shapes (GOALS Datatypes) the front end parsed. The
    caller has already declared the sorts/constructors/selectors/testers as ordinary
    symbols in {!env}; this records their datatype structure into the shared registry ref,
    which flips the session onto the DT theory at its first check-sat. Must precede
    [assert_term] (a datatype must be known before its atoms are interned). *)
-let set_datatypes t defs = t.registry := defs
+let set_datatypes t defs =
+  (* Install-door defense (mirrors [set_arrays] / [Array_defs.validate_ranks]): reject a
+     registry that marks a symbol as a constructor/selector/tester without that role's
+     canonical datatype rank in the env — e.g. a forged registry marking an
+     uninterpreted-sort constant as a constructor, which would otherwise slip the
+     symmetry-breaking free-constant test and drive other DT wrong-verdicts. Every
+     well-formed registry (parser / [declare_datatype]) installs cleanly. *)
+  Oxsmt_core.Datatype_defs.validate_ranks defs ~rank_of:(fun sym ->
+    match Oxsmt_core.Env.rank t.env sym with
+    | r -> Some r
+    | exception Not_found -> None);
+  (* Task #54 reset-per-query. Invalidate the cached theory when this REPLACE actually
+     involves datatypes (new or currently-installed) — never on a pure-logic no-op
+     ([set_datatypes empty] on a session with no datatypes), which keeps the batched
+     pure-logic path byte-identical (the #51 interim guard wrongly degraded it too). *)
+  if
+    Cdclt.theory_instantiated t.cdclt
+    && not
+         (Oxsmt_core.Datatype_defs.is_empty defs
+          && Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+  then invalidate_theory_for_registry_change t;
+  t.registry := defs
+;;
+
+let uses_datatypes t = not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+let uses_arrays t = t.has_arrays
+
+(* Install the array [select]/[store] symbol registry (arrays lane) the front end parsed.
+   Records it into the shared registry ref, which flips the session onto the standalone
+   arrays theory at its first theory-atom intern. Must precede [assert_term]. A non-empty
+   registry also arms the v1 sat-degrade ([has_arrays]). *)
+let set_arrays t defs =
+  (* Defence in depth: reject a registry whose operators were minted at a non-canonical
+     rank (a canonical [.oxsmt.arr.*] NAME can be minted at any arity via the internal
+     minter, whose admit gate is name-shape only, and [Array_defs.add] validates the name
+     but not the rank). Without this the arrays theory could apply read-over-write to an
+     extended-arity uninterpreted function — a wrong verdict. The arrays theory's
+     consuming-side arity guards are the second layer. *)
+  Oxsmt_core.Array_defs.validate_ranks defs ~rank_of:(fun sym ->
+    match Oxsmt_core.Env.rank t.env sym with
+    | r -> Some r
+    | exception Not_found -> None);
+  (* Task #54 reset-per-query (same as [set_datatypes]): invalidate the cached theory when
+     this REPLACE actually involves arrays (new or currently-installed); a pure-logic
+     no-op ([set_arrays empty] on a session with no arrays) resets nothing and stays
+     byte-identical. [invalidate_theory_for_registry_change] RE-DERIVES [has_arrays] from
+     the live array registry (still the OLD one at that point); the line below then
+     overwrites it from [defs], so a non-array query following an array query is not left
+     with a stale [has_arrays]. *)
+  if
+    Cdclt.theory_instantiated t.cdclt
+    && not
+         (Oxsmt_core.Array_defs.is_empty defs
+          && Oxsmt_core.Array_defs.is_empty !(t.array_registry))
+  then invalidate_theory_for_registry_change t;
+  t.array_registry := defs;
+  t.has_arrays <- not (Oxsmt_core.Array_defs.is_empty defs)
+;;
 
 (* One constructor for the programmatic {!declare_datatype} door: its name and each
    field's (selector name, sort). A nullary constructor (an enum case) has [fields = []]. *)
@@ -209,7 +603,7 @@ let declare_datatype t sort constructors =
   let sort_sym =
     match (sort : Oxsmt_core.Sort.t) with
     | Datatype s -> s
-    | Bool | Int _ | Uninterpreted _ ->
+    | Bool | Int _ | Uninterpreted _ | Array _ | BitVec _ ->
       invalid_arg "Session.declare_datatype: sort must be a Sort.Datatype"
   in
   let ctors =
@@ -235,6 +629,14 @@ let declare_datatype t sort constructors =
       constructors
   in
   let dt = { Oxsmt_core.Datatype_defs.sort_sym; constructors = ctors } in
+  (* Task #54 reset-per-query. The additive door also invalidates a stale cached theory:
+     adding the FIRST datatype after a pure-logic query instantiated the combined theory
+     (none->DT), or a further datatype after the DT theory was cached (the #51 accumulate
+     pattern), leaves the cached theory unable to serve the new query. A fresh reset
+     re-picks the DT theory against the grown registry at the next intern. Only fires once
+     a theory is instantiated (i.e. between queries — a single query declares before its
+     first [check_sat], so this is inert there and single-query behavior is unchanged). *)
+  if Cdclt.theory_instantiated t.cdclt then invalidate_theory_for_registry_change t;
   t.registry := Oxsmt_core.Datatype_defs.add !(t.registry) dt;
   dt
 ;;
@@ -254,11 +656,43 @@ let is_theory_atom (a : Term.t) =
 
 let current_selector t = List.hd t.frames
 
+(* The frame selectors to ASSUME positive on a solve. Normally all of [frames]; under
+   [base_at_level0] the base frame (the last / outermost element) is forced true by a
+   permanent unit at level 0 (see [create]) and is therefore NOT assumed — dropping it
+   removes the artificial [base] decision level. Pushed frame selectors are always kept,
+   so their retraction-on-[pop] contract is unchanged. *)
+let assumed_frames t =
+  if t.base_at_level0
+  then (
+    match List.rev t.frames with
+    | _base :: pushed_rev -> List.rev pushed_rev
+    | [] -> [])
+  else t.frames
+;;
+
+(* The persistent propositional SAT var for a NON-theory atom (a nullary Bool [App] / a
+   [Bool_const]), shared per distinct hash-consed term via [prop_to_var]. A nullary Bool
+   variable is also recorded in [bool_consts] so the model carries its value. Extracted so
+   {!register_bool_terms} can obtain (or mint) the SAME var it later binds into EUF —
+   keeping one SAT variable per term. *)
+let prop_var_of t (atom : Term.t) =
+  match Term.Table.find_opt t.prop_to_var atom with
+  | Some sv -> sv
+  | None ->
+    let sv = Sat.new_var t.sat in
+    Term.Table.add t.prop_to_var atom sv;
+    (match atom.node with
+     | App (sym, args) when Iarr.length args = 0 && Sort.equal atom.sort Sort.bool ->
+       t.bool_consts <- (Symbol.name sym, sv) :: t.bool_consts
+     | _ -> ());
+    sv
+;;
+
 (* Map a clausified formula's local variable to a persistent SAT variable. Theory atoms go
    through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
    theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
    term; auxiliary Tseitin variables are fresh per formula (kept in [local]). *)
-let assert_clausified ?sel t cnf =
+let assert_clausified ?sel ~root t cnf =
   let n = Cnf.num_vars cnf in
   let local = Array.make (n + 1) None in
   let sat_var v =
@@ -269,22 +703,19 @@ let assert_clausified ?sel t cnf =
       then (
         t.has_theory <- true;
         Cdclt.intern_atom t.cdclt atom)
-      else (
-        match Term.Table.find_opt t.prop_to_var atom with
-        | Some sv -> sv
-        | None ->
-          let sv = Sat.new_var t.sat in
-          Term.Table.add t.prop_to_var atom sv;
-          (match atom.node with
-           | App (sym, args) when Iarr.length args = 0 && Sort.equal atom.sort Sort.bool
-             -> t.bool_consts <- (Symbol.name sym, sv) :: t.bool_consts
-           | _ -> ());
-          sv))
+      else prop_var_of t atom)
     else (
       match local.(v) with
       | Some sv -> sv
       | None ->
         let sv = Sat.new_var t.sat in
+        (* A10: this is the SOLE site that mints a pure Tseitin auxiliary variable — fresh
+           per formula, never recorded in [prop_to_var]/[bool_consts]/[frames], never a
+           theory-seam atom (those go through [Cdclt.intern_atom] above), never named by a
+           later clause or a theory lemma. Mark it eliminable so SAT preprocessing may
+           eliminate it (no-op unless OXSMT_SATPRE is on). Every other [Sat.new_var] in
+           the session stays frozen by default (read by a model path or the theory seam). *)
+        Sat.set_eliminable t.sat sv;
         local.(v) <- Some sv;
         sv)
   in
@@ -305,52 +736,128 @@ let assert_clausified ?sel t cnf =
     (fun clause ->
        (* frame activation: clause holds only when the frame selector is assumed true *)
        Sat.add_clause t.sat (Sat.neg sel :: List.map lit_of clause))
-    cnf
+    cnf;
+  (* Dynamic relevancy graph (task #24): recover the boolean-skeleton And/Or/iff/Ite DAG
+     over PERSISTENT SAT vars and hand it to the driver. Built AFTER clause emission so
+     every var already exists (via [lit_of] above) and [sat_var] is a pure lookup here —
+     the SAT var numbering is therefore identical to relevancy-off; only the branch order
+     differs. A no-op when relevancy is disabled. *)
+  match t.relevancy with
+  | None -> ()
+  | Some rel ->
+    (* Invert [subterm_of_var] so a compound's Bool children resolve to their vars. *)
+    let rev = Term.Table.create ((2 * n) + 1) in
+    for v = 1 to n do
+      Term.Table.replace rev (Cnf.subterm_of_var cnf v) v
+    done;
+    (* The (persistent SAT var, polarity) of a Bool child term, peeling [Not] for parity;
+       [None] only if a child never took a var (not reachable for a well-formed skeleton —
+       defensive). *)
+    let rec child_lit (tm : Term.t) positive =
+      match tm.node with
+      | Not a -> child_lit a (not positive)
+      | _ ->
+        (match Term.Table.find_opt rev tm with
+         | Some cv -> Some (sat_var cv, positive)
+         | None -> None)
+    in
+    for v = 1 to n do
+      let sv = sat_var v in
+      if Cnf.is_atom_var cnf v
+      then Relevancy.register_atom rel sv
+      else (
+        let node = Cnf.subterm_of_var cnf v in
+        let kind, child_terms =
+          match node.node with
+          | And xs -> Some Relevancy.KAnd, Iarr.to_list xs
+          | Or xs -> Some Relevancy.KOr, Iarr.to_list xs
+          | Eq (a, b) -> Some Relevancy.KIff, [ a; b ]
+          | Ite (c, a, b) -> Some Relevancy.KIte, [ c; a; b ]
+          | Bool_const _ | Int_const _ | App _ | Arith _ | Le _ | Not _ -> None, []
+        in
+        match kind with
+        | None -> ()
+        | Some kind ->
+          let opt_children = List.map (fun ct -> child_lit ct true) child_terms in
+          if List.for_all Option.is_some opt_children
+          then (
+            let children = List.map Option.get opt_children in
+            Relevancy.register_node rel ~var:sv ~kind ~children))
+    done;
+    (* Seed the top-level formula's root var relevant at level 0. *)
+    (match child_lit root true with
+     | Some (rv, _) -> Relevancy.seed_root rel rv
+     | None -> ())
 ;;
 
 (* Bool-cardinality rule (TODO Predicates §2; the one sanctioned finite sort). [Bool] has
    exactly two values, so every Bool-sorted term is true or false in every model. The
    clausifier ({!Cnf.clausify}) only surfaces Bool-sorted terms it reaches through the
-   Boolean skeleton (top-level atoms + connective children); a Bool-sorted PREDICATE
-   application [p(x…)] that occurs ONLY buried in an argument position (e.g. [g (f a)]
-   with [f : S -> Bool]) gets NO SAT variable, so the SAT core never case-splits it and
-   EUF never binds it to [true_const]/[false_const] — it stays a third opaque Boolean
-   class. [n >= 3] such terms forced pairwise-distinct by congruence are then
-   pigeonhole-impossible yet the engine cannot see it: {!Combine}'s H2 guard degrades that
-   to [unknown] (sound, never wrong-SAT), but it is INCOMPLETE. This walk closes the
-   completeness half by interning every Bool-sorted [App] (arity >= 1) subterm as its own
-   theory atom, so the SAT core case-splits it (each interned var lands in the decision
-   heap) and EUF binds it — pigeonhole over the two values is then discharged by
-   congruence + the [true <> false] axiom. Interning is idempotent ([Cdclt] [t2v]), so a
-   predicate that already surfaced as a clause literal is a no-op; the only new vars are
-   the buried ones. Runs under the same try/CONTRACT-POISON discipline as clause
-   registration (an out-of-fragment atom degrades, never crashes). *)
+   Boolean skeleton (top-level atoms + connective children); a Bool-sorted term that
+   occurs ONLY buried in an uninterpreted-function ARGUMENT position gets no truth channel
+   into EUF, so it stays a third opaque Boolean class distinct from
+   [true_const]/[false_const]. When [n >= 3] such classes are forced pairwise-distinct by
+   congruence the instance is pigeonhole-impossible, yet EUF cannot see it: {!Combine}'s
+   H2 guard ([require_bool_args_bound]) degrades that to [unknown] (sound, never
+   wrong-SAT), but it is INCOMPLETE. This walk closes the completeness half by giving
+   every such buried Bool term a truth channel:
+
+   - an APPLIED Bool predicate [p(x…)] (arity >= 1) becomes its own theory atom via
+     {!Cdclt.intern_atom} (a fresh SAT var on the decision heap; EUF also propagates its
+     truth by congruence). This is the original rule.
+
+   - a BARE nullary Bool variable [b] used as a UF argument (e.g. [Concat (b, x)]) gets no
+     fresh var — it is bound via {!Cdclt.bind_bool_var_atom} to the SAME [prop_to_var] SAT
+     var that carries it propositionally, so the model reads its value from [bool_consts]
+     while EUF binds it from the identical var (one variable per term, no
+     propositional/EUF divergence). [prop_var_of] mints that var here if the variable
+     never surfaced at top level. This is the bare-variable analogue the original rule
+     missed — a nullary [App] is not a theory atom ({!is_theory_atom}), so it never
+     reached [intern_atom], and a fresh theory var would have collided with the
+     propositional one.
+
+   Pigeonhole over the two Bool values is then discharged by congruence + the
+   [true <> false] axiom. Both operations are idempotent, so a term that already surfaced
+   is a no-op. UF-argument position is tracked top-down ([~under_uf], set when descending
+   into an applied [App]'s arguments); the [seen] key includes it so a term reached both
+   buried and at top level is visited in both contexts. Runs under the same
+   try/CONTRACT-POISON discipline as clause registration (an out-of-fragment atom
+   degrades, never crashes). *)
 let register_bool_terms t (pterm : Term.t) =
-  let seen = Term.Table.create 64 in
-  let rec go (term : Term.t) =
-    if not (Term.Table.mem seen term)
+  let seen : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+  let rec go ~under_uf (term : Term.t) =
+    let key = (term.Term.tag lsl 1) lor Bool.to_int under_uf in
+    if not (Hashtbl.mem seen key)
     then (
-      Term.Table.add seen term ();
+      Hashtbl.add seen key ();
       match term.node with
       | App (_, args) ->
-        if Iarr.length args >= 1 && Sort.equal term.sort Sort.bool
-        then (
-          t.has_theory <- true;
-          ignore (Cdclt.intern_atom t.cdclt term : Oxsmt_solver.Sat.var));
-        Iarr.iter go args
+        let is_uf = Iarr.length args >= 1 in
+        if Sort.equal term.sort Sort.bool
+        then
+          if is_uf
+          then (
+            t.has_theory <- true;
+            ignore (Cdclt.intern_atom t.cdclt term : Oxsmt_solver.Sat.var))
+          else if under_uf
+          then (
+            t.has_theory <- true;
+            Cdclt.bind_bool_var_atom t.cdclt term (prop_var_of t term));
+        (* The arguments of an uninterpreted application are in UF-argument position. *)
+        Iarr.iter (go ~under_uf:is_uf) args
       | Eq (a, b) ->
-        go a;
-        go b
-      | Le a | Not a -> go a
-      | And xs | Or xs -> Iarr.iter go xs
+        go ~under_uf:false a;
+        go ~under_uf:false b
+      | Le a | Not a -> go ~under_uf:false a
+      | And xs | Or xs -> Iarr.iter (go ~under_uf:false) xs
       | Ite (c, a, b) ->
-        go c;
-        go a;
-        go b
-      | Arith l -> Iarr.iter (fun (tm, _c) -> go tm) l.coeffs
+        go ~under_uf:false c;
+        go ~under_uf:false a;
+        go ~under_uf:false b
+      | Arith l -> Iarr.iter (fun (tm, _c) -> go ~under_uf:false tm) l.coeffs
       | Bool_const _ | Int_const _ -> ())
   in
-  go pterm
+  go ~under_uf:false pterm
 ;;
 
 (* Preprocess -> clausify -> register a Bool term into the frame guarded by [sel]
@@ -369,7 +876,7 @@ let assert_bool_at ?sel t pterm =
        it surfaces HERE at assert-time registration, so it must be caught on this ingress
        path too. *)
     (try
-       assert_clausified ?sel t cnf;
+       assert_clausified ?sel ~root:pterm t cnf;
        (* Bool-cardinality rule: surface every buried Bool-sorted predicate application as
           its own SAT atom so the finite Bool sort is decided, not left opaque (see
           {!register_bool_terms}). Same term, same try-block, so an out-of-fragment buried
@@ -392,7 +899,16 @@ let assert_bool_at ?sel t pterm =
    wrong verdict (codex's ite-capture trigger). The single source of truth for the
    reservation is [Env.is_reserved_name]. [allowed] whitelists a specific lemma's own qvar
    symbols — the ONLY reserved symbols legitimately present in a lemma body/trigger (a
-   ground user assertion whitelists nothing). *)
+   ground user assertion whitelists nothing).
+
+   board #58: array [select]/[store] op symbols also live in the reserved namespace
+   ([.oxsmt.arr.<op>|<sortkey>|<sortkey>]) and DO appear as App heads in ordinary parsed
+   assertions, so they must pass this gate: [bad_sym] exempts [Array_defs.is_op_sym]. That
+   exemption is a name-shape test, sound because provenance is enforced at the minting
+   door — only the cap-gated [Env.declare_reserved] grants a [.oxsmt.arr.*] name a rank,
+   so an op-named symbol that reaches a built term is one the parser/theory minted, never
+   a user alias (see [Array_defs.is_op_sym]). It does not touch the qvar/witness
+   namespaces. *)
 let term_has_reserved ?(allowed = []) (t0 : Term.t) =
   (* MEMOIZED over the hash-cons DAG. A user term is a maximally-shared DAG (the SMT-LIB
      [let] reader binds each value to one hash-consed node and reuses it by reference), so
@@ -403,8 +919,23 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
      circuits immediately (never cached). The sibling engine walks (Cdclt.collect,
      Combine.add_subterms / interface_walk) all guard the same way. *)
   let visited : (int, unit) Hashtbl.t = Hashtbl.create 256 in
+  (* The bit-vector operator/literal symbols live in the reserved [.oxsmt.bv.*] namespace
+     (board #58) but, unlike a preprocessing witness or a coerced qvar, they are theory
+     VOCABULARY that legitimately appears in a user assertion — the interpreted-symbol
+     analogue of [div]/[mod] (which [is_reserved_name] also excludes). They cannot be
+     user-forged: the public declaration doors reject [.oxsmt.*], and a bare
+     [Symbol.intern] of a bit-vector name has no rank so {!Context.app} refuses it — the
+     only door that grants one is the cap-gated {!Env.declare_reserved} the bit-vector
+     builders mint through. So exempting them here is sound and restores the pre-#58
+     behaviour (before the migration these names were outside [.oxsmt.*], so the gate
+     already let them through); it is what routes a pure-[QF_BV] assertion to the
+     bit-blaster instead of degrading it. A mixed bit-vector/uninterpreted term still
+     degrades at the combinator ([Combine.require_no_bitvec_terms], sort-keyed). *)
   let bad_sym s =
-    Env.is_reserved_name (Symbol.name s) && not (List.exists (Symbol.equal s) allowed)
+    Env.is_reserved_name (Symbol.name s)
+    && (not (Bv.is_bv_sym s))
+    && (not (Array_defs.is_op_sym s))
+    && not (List.exists (Symbol.equal s) allowed)
   in
   (* A SORT carries a symbol too: an [Uninterpreted] sort over a reserved [.oxsmt.*] name,
      minted via the public [Symbol.intern] / [Sort.uninterpreted] doors, captures an
@@ -414,10 +945,13 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
      walk. No [allowed] whitelist for sorts: [allowed] whitelists a lemma's own qvar
      App-head symbols, and a reserved uninterpreted sort is never a legitimate qvar (nor
      is one ever minted internally). *)
-  let bad_sort (s : Sort.t) =
+  let rec bad_sort (s : Sort.t) =
     match s with
     | Sort.Uninterpreted sym | Sort.Datatype sym -> Env.is_reserved_name (Symbol.name sym)
-    | Sort.Bool | Sort.Int _ -> false
+    (* An array sort carries its index/element sorts; recurse so a reserved symbol buried
+       in one is caught. *)
+    | Sort.Array (index, element) -> bad_sort index || bad_sort element
+    | Sort.Bool | Sort.Int _ | Sort.BitVec _ -> false
   in
   (* Every subterm's own sort is checked here, so a reserved sort appearing anywhere in
      the term — in result OR argument position — is caught (an argument is itself a
@@ -444,7 +978,19 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
   rec_ t0
 ;;
 
+(* Symmetry breaking (task #25, F1): drop the current activation selector so its lex
+   clauses go vacuous on every future solve. Every assertion entry point that can EXTEND
+   the formula after an emission calls this: a later assertion may break the detected
+   symmetry, and the (permanent) lex clauses would then be NON-MONOTONIC — a wrong-unsat.
+   The selector occurs only negatively in the clauses, so once it is no longer assumed
+   positive the clauses are trivially satisfiable — sound retraction without touching the
+   permanent clause DB. *)
+let deactivate_symbreak t = t.sym_sel <- None
+
 let assert_term t term =
+  (* F1: an assertion after a symmetry-breaking emission may break the detected symmetry;
+     retract the (non-monotonic) lex clauses first. *)
+  deactivate_symbreak t;
   (* Load-bearing assert-side gate (R1 POINT 4 + codex C1): a user term carrying ANY
      reserved [.oxsmt.*] symbol (a coerced/interned qvar OR a captured preprocessing
      witness) degrades to a clean [Unknown] via the I8 Unsupported discipline (NOT a raw
@@ -470,6 +1016,15 @@ let internalize_reduced t term =
   | pterm -> assert_bool_at t pterm
 ;;
 
+(* Like {!internalize_reduced} but guards every emitted clause with [sel] (task #25 F1:
+   the symmetry-breaking activation selector). *)
+let internalize_reduced_at ~sel t term =
+  match Preprocess.run t.pp term with
+  | exception Term.Overflow -> t.degraded <- true
+  | exception Term.Unsupported _ -> t.degraded <- true
+  | pterm -> assert_bool_at ~sel t pterm
+;;
+
 (* W1b equality-elimination presolve (logs/w1b-design.md). The BATCH entry point: given
    the whole asserted set at once (the CLI's parse result), run the {!Presolve} pass, then
    internalize the REDUCED set while keeping the ORIGINAL terms in [t.asserted] for the R1
@@ -482,6 +1037,17 @@ let internalize_reduced t term =
    a zero-alias input the pass is a no-op ([reduced = originals], [defs = []]) and this is
    byte-identical to asserting each original with {!assert_term}. *)
 let assert_presolved t terms =
+  (* F1: a further batch after a prior emission may break that symmetry; retract the prior
+     lex clauses before this batch (possibly) emits its own. *)
+  deactivate_symbreak t;
+  (* B4: capture whether the formula is EMPTY before this batch. Symmetry detection sees
+     only [terms]; if prior assertions exist, a symmetry of the batch need not be a
+     symmetry of [prior ∧ batch]. Captured before the originals below are recorded. *)
+  let no_prior_assertions =
+    match t.asserted with
+    | [] -> true
+    | _ -> false
+  in
   if List.exists term_has_reserved terms
   then t.degraded <- true
   else (
@@ -493,12 +1059,132 @@ let assert_presolved t terms =
        [x = 2y] substituted into [C·x = 0] with [2·C] out of int63) — or an [Unsupported]
        operand. That must degrade to a clean [Unknown], never escape [assert_presolved] as
        a crash. Same discipline as {!internalize_reduced}. *)
+    (* Pass A (task #7, gated: flag + cert-OFF): the equalities entailed by top-level
+       disjunctions, added as extra top-level unit assertions. They are equisatisfiable
+       consequences of [terms], so they are NOT recorded in [t.asserted] (the R1 set stays
+       the ORIGINAL assertions); they are internalized alongside the reduced conjuncts. On
+       eq_diamond these units chain [x0=…=xn] at the EUF level 0, refuting [x0≠xn] with no
+       search. Bypassed entirely when OFF (byte-identical to trunk — no augmentation, so
+       the LOW-7 zero-alias early-return in [Presolve.run] is unaffected). *)
+    let extra =
+      if pass_a_enabled t
+      then (
+        match Presolve.entailed_equalities t.ctx terms with
+        | exception Term.Overflow -> []
+        | exception Term.Unsupported _ -> []
+        | eqs -> eqs)
+      else []
+    in
+    (* Symmetry breaking (task #25, gated: flag + cert-OFF): full-action lex-leader
+       constraints over interchangeable same-sort constants, added as extra top-level
+       assertions. They are equisatisfiable (they REMOVE symmetric models, keeping >=1 per
+       orbit), so — like Pass A — they are NOT recorded in [t.asserted] (the R1 set stays
+       the ORIGINAL assertions; any found model still satisfies them). Bypassed entirely
+       when OFF (byte-identical to trunk). Neutral-abort inside [symmetry_break] returns
+       [[]]; the Overflow/Unsupported firewall matches Pass A. *)
+    let sym_extra =
+      (* R2/R3 EMISSION RESTRICTION (codex B1/B2/B4): emit ONLY when the formula being
+         solved is EXACTLY this batch — the base frame, no lemmas registered, and no prior
+         assertions. Then a symmetry of [terms] is a symmetry of the whole formula, which
+         is the entire soundness story:
+         - B1: under a pushed frame the lex clauses (guarded by [sym_sel], not the frame
+           selector) would survive the [pop] that retracts the assertions making the batch
+           symmetric;
+         - B2: with lemmas a during-solve instance would extend the formula un-retractably
+           ([check_sat] fixes its assumptions once);
+         - B4: with prior assertions a symmetry of [terms] need not be one of
+           [prior ∧ terms]. The post-emission incremental case is still handled by
+           [deactivate_symbreak] at every assertion entry. *)
+      let formula_is_exactly_this_batch =
+        (match t.frames with
+         | [ _ ] -> true
+         | _ -> false)
+        && (not t.lemmas_registered)
+        && no_prior_assertions
+        (* Belt (task #63 pre-ON): decouple symmetry breaking from the datatype registry /
+           Env well-formedness entirely — never emit on a datatype-using session. B3
+           already excludes datatype-sorted candidates, so this only skips the free
+           (uninterpreted) constants of a mixed QF_UFDT problem; the measured win is pure
+           QF_UF (no datatypes), so this costs nothing while removing any dependence of
+           symmetry soundness on DT registry correctness. *)
+        && not (uses_datatypes t)
+      in
+      if symbreak_enabled t && formula_is_exactly_this_batch
+      then (
+        (* F2: per-session name counter (persists across batches). F3 FINAL: catch ONLY
+           the expected fragment exceptions ([Sort_error] from a would-be cross-sort
+           candidate, [Overflow]/[Unsupported] from arithmetic rebuild) → "no breaking".
+           Everything else — Out_of_memory, Stack_overflow (the DAG rebuild is
+           non-tail-recursive), Sys.Break, any unexpected soundness raise — PROPAGATES; it
+           must never be swallowed into a silent no-op. *)
+        match Presolve.symmetry_break ~counter:t.sym_counter t.cap t.env t.ctx terms with
+        | cs -> cs
+        | exception (Term.Sort_error _ | Term.Overflow | Term.Unsupported _) -> [])
+      else []
+    in
     match Presolve.run t.ctx terms with
     | exception Term.Overflow -> t.degraded <- true
     | exception Term.Unsupported _ -> t.degraded <- true
     | { Presolve.reduced; defs } ->
       t.elim_defs <- defs;
-      List.iter (internalize_reduced t) reduced)
+      (* Equality-over-ITE projection (task #34, gated: flag + cert-OFF): a
+         model-preserving local DAG rewrite over the reduced conjuncts —
+         [(= (ite c x y) d)] projected into the branches, plus Bool-ITE and local selector
+         collapse — turning nec-smt [(= chain_ite literal)] conditions into boolean
+         functions of the original atoms before clausification. Eliminates no variable, so
+         [t.elim_defs] / model reconstruction and the R1 set (the ORIGINAL [t.asserted])
+         are untouched. On the hard budget it neutral-aborts to [reduced] unchanged.
+         Builds through [t.ctx]'s smart constructors, so the same Overflow/Unsupported
+         firewall as {!internalize_reduced} applies. *)
+      let reduced =
+        if proj_enabled t
+        then (
+          match Presolve.simplify_projection t.ctx reduced with
+          | exception Term.Overflow ->
+            t.degraded <- true;
+            reduced
+          | exception Term.Unsupported _ ->
+            t.degraded <- true;
+            reduced
+          | simplified -> simplified)
+        else reduced
+      in
+      (* Contextual simplification (task #13, gated: flag + cert-OFF): a model-preserving
+         term rewrite over the reduced conjuncts (assume each ITE condition within its own
+         branch), collapsing the nested-ITE VCs before clausification. It eliminates no
+         variable, so [t.elim_defs] / model reconstruction and the R1 set (the ORIGINAL
+         [t.asserted]) are untouched. On the hard budget it neutral-aborts to [reduced]
+         unchanged. It builds through [t.ctx]'s smart constructors, so the same
+         Overflow/Unsupported firewall as {!internalize_reduced} applies. *)
+      let reduced =
+        if ctx_simp_enabled t
+        then (
+          match Presolve.simplify_contextual t.ctx reduced with
+          | exception Term.Overflow ->
+            t.degraded <- true;
+            reduced
+          | exception Term.Unsupported _ ->
+            t.degraded <- true;
+            reduced
+          | simplified -> simplified)
+        else reduced
+      in
+      List.iter (internalize_reduced t) reduced;
+      List.iter (internalize_reduced t) extra;
+      (* F1: guard the symmetry-breaking clauses with a fresh activation selector so a
+         later incremental assertion can retract them soundly (they are non-monotonic).
+         The selector is assumed positive by [check_sat] while [t.sym_sel = Some _]; it
+         occurs only negatively in the clauses, so clearing it makes them vacuous.
+         CONTRACT: emission is expected at the BASE frame (the batch [assert_presolved]
+         path runs before any [push]). The clauses are guarded by [sym_sel] alone, not the
+         frame selector, so retraction relies on [deactivate_symbreak] at every assertion
+         entry AND at [pop] (see [pop]) — not on frame scoping. *)
+      (match sym_extra with
+       | [] -> ()
+       | _ :: _ ->
+         let sel = Sat.new_var t.sat in
+         t.sym_sel <- Some sel;
+         List.iter (internalize_reduced_at ~sel t) sym_extra))
 ;;
 
 (* ADR-0012 §1.4 (R2 / codex POINT 6): assert a ground lemma instance guarded by its
@@ -512,6 +1198,11 @@ let assert_presolved t terms =
    client-reported [Sat] only ever occurs with NO live lemma, hence with no active
    instance. *)
 let assert_instance_at_frame t ~frame (inst : Instance.t) =
+  (* R2 defensive belt: an instance extends the formula mid-solve. The emission
+     restriction already forbids emitting when lemmas are registered (and an instance only
+     exists under a registered lemma), so [sym_sel] is always [None] here — but clearing
+     it keeps the invariant local rather than relying on that reasoning. *)
+  deactivate_symbreak t;
   match Preprocess.run t.pp (Instance.to_term inst) with
   | exception Term.Overflow -> t.degraded <- true
   | exception Term.Unsupported _ -> t.degraded <- true
@@ -541,6 +1232,11 @@ type lemma_def =
    [unit] is widened additively so the tranche-1 manual path — {!instantiate} — can name
    the lemma; a caller may ignore it). *)
 let assert_lemma t ~qvars ~build =
+  (* F1/R2: a lemma extends the formula (its instances assert during solve). Retract any
+     active emission, and mark lemmas registered so a LATER [assert_presolved] refuses to
+     emit (codex B2 — instances would break the symmetry mid-solve, un-retractably). *)
+  deactivate_symbreak t;
+  t.lemmas_registered <- true;
   let id = Manager.fresh_id t.mgr in
   let qv =
     Array.of_list
@@ -609,6 +1305,10 @@ let assert_lemma t ~qvars ~build =
 let instantiate t lemma sigma = Manager.seed_instance t.mgr lemma sigma
 
 let push t =
+  (* F1: a new frame's assertions may break a prior emission's symmetry; retract its lex
+     clauses. (A later [pop] does not resurrect them — a re-emission would be needed,
+     which the batch path does not do; sound, only forgoes the bonus.) *)
+  deactivate_symbreak t;
   (* Snapshot the active assertion set BEFORE opening the frame, so the matching [pop]
      restores exactly the pre-frame set (F3: keeps [asserted] = the active set). *)
   t.asserted_saved <- t.asserted :: t.asserted_saved;
@@ -620,6 +1320,13 @@ let pop t =
   | [ _ ] | [] -> invalid_arg "Session.pop: no matching push"
   | popped :: rest ->
     t.frames <- rest;
+    (* F1 defensive: the symmetry-breaking lex clauses are guarded by [sym_sel], NOT by a
+       frame selector, so a [pop] would not retract an emission made inside the popped
+       frame. The batch-once contract (assert_presolved runs at the base frame, before any
+       push) makes that unreachable in the shipped path, but clearing [sym_sel] here makes
+       the F1 soundness independent of that contract: after any pop the lex clauses go
+       vacuous. *)
+    deactivate_symbreak t;
     (* ADR-0012 §1.5: retract the lemmas added in this frame AND every instance drawn from
        them together (dedup entries + pending seeds owned by [popped] are dropped too), by
        disabling the frame's selector. Soundness-load-bearing (a stranded pushed-frame
@@ -710,7 +1417,7 @@ let default_value (sort : Sort.t) : model_value =
   | Sort.Bool -> VBool false
   | Sort.Int _ -> VInt Bigint.zero
   | Sort.Uninterpreted _ -> VUninterp 0
-  | Sort.Datatype _ -> raise No_default_value
+  | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ -> raise No_default_value
 ;;
 
 (* W1b model reconstruction (logs/w1b-design.md, constraint 4). Splice the eliminated
@@ -729,21 +1436,35 @@ let splice_elim_defs t (sort_cards, bindings) =
   match t.elim_defs with
   | [] -> sort_cards, bindings
   | _ :: _ ->
+    (* Every re-derivation evaluates [d.value] under the model built so far. Rather than
+       rebuild the evaluator's tables from the growing binding list per def (O(defs x
+       bindings) — the SMPT quadratic), build them ONCE and mutate them in lockstep with
+       [acc]: each Const added to [acc] is also written into [tbls], so [eval_in] reads
+       the same model [(sort_cards, !acc)] would. Only Const bindings are ever added here
+       (free-variable defaults and re-derived def values are both nullary), so [add_const]
+       covers every mutation; [bound] still tracks membership for the default guard. Names
+       across the originals and the added bindings are unique — an eliminated def
+       references only SURVIVING variables (w1b design note), so a def name never
+       coincides with a free-variable default, and the default guard makes each default
+       at-most-once — so the last-writer-wins table is unaffected by the incremental order
+       (byte-identical model to the former per-def rebuild). *)
     let bound = Hashtbl.create 64 in
     List.iter (fun b -> Hashtbl.replace bound (name_of b) ()) bindings;
+    let tbls = Model_check.tables_of_bindings bindings in
     let acc = ref bindings in
-    let add b =
-      acc := b :: !acc;
-      Hashtbl.replace bound (name_of b) ()
+    let add_const name v =
+      acc := Const (name, v) :: !acc;
+      Hashtbl.replace bound name ();
+      Model_check.add_const tbls name v
     in
     List.iter
       (fun (d : Presolve.def) ->
          List.iter
            (fun (name, sort) ->
-              if not (Hashtbl.mem bound name) then add (Const (name, default_value sort)))
+              if not (Hashtbl.mem bound name) then add_const name (default_value sort))
            (free_var_leaves d.Presolve.value);
-         match Model_check.eval_value (sort_cards, !acc) d.Presolve.value with
-         | Some v -> add (Const (d.Presolve.name, v))
+         match Model_check.eval_in tbls d.Presolve.value with
+         | Some v -> add_const d.Presolve.name v
          | None -> ())
       (List.rev t.elim_defs);
     sort_cards, !acc
@@ -846,15 +1567,97 @@ let raw_solve t assumptions =
    build is [None] -> [Unknown]; a checker rejection fail-closes to [Unknown]. Runs
    OUTSIDE the [raw_solve] firewall, so a bug here surfaces as a crash, not a silent
    [Unknown]. *)
+(* TEST-ONLY fault-injection seam (F1 obligation, logs/dt-models-review-fable.md): the DT
+   commit consults its model self-checker through this indirection so a test can
+   substitute a stub and PIN that a DT [Sat] is GATED on the checker verdict. A regression
+   that bypassed the checker (e.g. rewriting the arm to [| Some _ -> Sat]) would ignore an
+   injected reject-all stub and report [Sat] where the test demands [Unknown] — the
+   missing coverage the reviewer flagged. [None] in every production path => the real
+   {!Dt_model_check.check}, so soundness is NEVER routed through a stub outside a test.
+   Set only via {!For_test.set_dt_checker}. *)
+let dt_checker_override
+  : (Oxsmt_core.Datatype_defs.t
+     -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list
+     -> Term.t list
+     -> bool)
+      option
+      ref
+  =
+  ref None
+;;
+
+(* TEST-ONLY fault-injection seam for the arrays commit, mirroring {!dt_checker_override}:
+   pins that an array [Sat] is GATED on the checker verdict. [None] in production => the
+   real {!Array_model_check.check}. Set only via {!For_test.set_array_checker}. *)
+let array_checker_override
+  : (Oxsmt_core.Array_defs.t
+     -> (Term.t * Oxsmt_arr.Arr.value) list
+     -> Term.t list
+     -> bool)
+      option
+      ref
+  =
+  ref None
+;;
+
 let commit_sat t =
-  match build_model t with
-  | Some m ->
-    if Model_check.check m t.asserted
-    then (
-      t.last_model <- Some m;
-      Sat)
-    else Unknown
-  | None -> Unknown
+  (* ARRAYS (QF_AX model construction, task #14): the standalone arrays theory is
+     installed, so soundness rests on the array self-check, not the UF [Model_check]
+     (which treats [select]/[store] as opaque functions with no array semantics). Validate
+     the array model extracted at Final ([Cdclt.array_model]) against the ORIGINAL
+     assertions with the independent [Array_model_check] (which computes
+     [select]/[store]/extensional-equality itself); report [Sat] only if it passes, else
+     [Unknown]. The scalar [model] type cannot carry array values, so [get_model] stays
+     [None] for an array [Sat] (surfacing the map model is a follow-up); the verdict flips
+     unknown -> checked-[Sat]. *)
+  if t.has_arrays
+  then (
+    match Cdclt.array_model t.cdclt with
+    | Some model ->
+      let check =
+        match !array_checker_override with
+        | Some f -> f
+        | None -> Array_model_check.check
+      in
+      if check !(t.array_registry) model t.asserted
+      then (
+        t.last_model <- None;
+        Sat)
+      else Unknown
+    | None -> Unknown)
+  else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+  then (
+    (* DATATYPES (GOALS Datatypes model construction): the standalone DT theory is
+       installed, so soundness rests on the DT constructor-tree self-check, not the UF
+       [Model_check]/[Cdclt.model] reconstruction (which fails closed on a
+       [Sort.Datatype]). Validate the tree model extracted at Final ([Cdclt.dt_model])
+       against the ORIGINAL assertions with the independent [Dt_model_check]; report [Sat]
+       only if it passes. The scalar [model] binding-list type cannot carry constructor
+       trees, so [get_model] stays [None] for a DT [Sat] in v1 (surfacing the tree model
+       to the CLI / external eval is a follow-up); the verdict itself flips unknown ->
+       checked-[Sat]. *)
+    match Cdclt.dt_model t.cdclt with
+    | Some model ->
+      let check =
+        match !dt_checker_override with
+        | Some f -> f
+        | None -> Dt_model_check.check
+      in
+      if check !(t.registry) model t.asserted
+      then (
+        t.last_model <- None;
+        Sat)
+      else Unknown
+    | None -> Unknown)
+  else (
+    match build_model t with
+    | Some m ->
+      if Model_check.check m t.asserted
+      then (
+        t.last_model <- Some m;
+        Sat)
+      else Unknown
+    | None -> Unknown)
 ;;
 
 let check_sat t =
@@ -862,12 +1665,67 @@ let check_sat t =
   t.last_model <- None;
   t.budget_exhausted <- false;
   t.effort_exhausted <- false;
+  (* R3 minor: capture the activation selector this solve will assume, so a post-solve
+     [failed_assumptions] strips it from the core even after a later assertion clears
+     [sym_sel]. *)
+  t.sym_sel_in_core <- t.sym_sel;
+  (* OXSMT_BASE_L0: add the permanent [base] forcing unit on the first solve (not at
+     [create]), so a certificate trace installed on the pristine session records it as a
+     genuine Input and the checker derives [base] by BCP over inputs. Added exactly once,
+     before any solve, with the default [Query] origin (routed to an [Input] intro). *)
+  if t.base_at_level0 && not t.base_unit_emitted
+  then (
+    Sat.add_clause t.sat [ Sat.pos t.base_var ];
+    t.base_unit_emitted <- true);
   if t.degraded
   then Unknown
+  else if Bv_dispatch.is_pure_bv t.asserted && not (Manager.has_live_lemma t.mgr)
+  then (
+    (* Pure QF_BV with NO live quantified lemma: resolve by eager bit-blasting BEFORE the
+       combinator (which fail-closed degrades any live bit-vector term to unknown,
+       combine.ml). Bv_solve re-checks every sat model with the independent evaluator, so
+       a Sat here is already self-certified — we surface its bindings directly rather than
+       through the BV-unaware R1 combinator checker. Unsat is the pure-propositional
+       SAT-core refutation; Unknown is the fail-closed door on any construct the blaster
+       does not encode.
+
+       The [not (has_live_lemma)] guard is a SOUNDNESS gate (F1): [is_pure_bv] inspects
+       only [t.asserted] (the ground set), so a live [forall] lemma (in [t.mgr]) is
+       invisible to it — bit-blasting the ground set alone would ignore the quantifier and
+       could report [Sat] for a model the lemma forbids (a wrong-[Sat]). A lemma'd session
+       therefore takes the combinator path below, where THE SOUNDNESS RULE degrades a
+       lemma-live ground [Sat] to [Unknown] (never a model that ignores a quantifier). *)
+    match Bv_dispatch.solve t.ctx (Internal_minter.mint (parse_minter t)) t.asserted with
+    | Bv_dispatch.Unsat ->
+      t.last_verdict <- Unsat;
+      Unsat
+    | Bv_dispatch.Unknown -> Unknown
+    | Bv_dispatch.Sat { bv_vars; bool_vars } ->
+      t.last_verdict <- Sat;
+      t.last_model
+      <- Some
+           ( []
+           , List.map (fun (n, v, _w) -> Const (n, VInt v)) bv_vars
+             @ List.map (fun (n, b) -> Const (n, VBool b)) bool_vars );
+      Sat)
   else (
     Cdclt.begin_check t.cdclt;
     Manager.begin_check t.mgr (* fresh generation budget for this check_sat (§1.4) *);
-    let assumptions = List.map Sat.pos t.frames in
+    (* F1: while a symmetry-breaking emission is active, assume its activation selector
+       POSITIVE so the (selector-guarded) lex clauses constrain this solve. Once a later
+       assertion cleared [sym_sel] to [None], the selector is no longer assumed and —
+       since it occurs only negatively — the clauses are trivially satisfiable
+       (retracted). Under assumptions this stays sound: an [Unsat] means unsat given the
+       frame + activation assumptions, and the activation clauses are equisatisfiable, so
+       the query is unsat. *)
+    let assumptions =
+      (* When [base_at_level0], [base] (the outermost / last frame) is forced true by a
+         permanent unit, so it is NOT assumed here; pushed frame selectors are kept. *)
+      let frame_asms = List.map Sat.pos (assumed_frames t) in
+      match t.sym_sel with
+      | Some sel -> Sat.pos sel :: frame_asms
+      | None -> frame_asms
+    in
     (* THE outer instantiation loop (ADR-0012 §1.4). There is exactly ONE [Sat] exit to
        the client — the [not (has_live_lemma)] line — so THE SOUNDNESS RULE (§2) is an
        unconditional wrapper over EVERY ground [Sat] (H1+H2), never a per-arm edit: while
@@ -924,9 +1782,59 @@ let eliminated_vars t = List.map (fun (d : Presolve.def) -> d.Presolve.name) t.e
    [cert_assumptions] is the active selector-assumption set the terminal E3 step is
    conditioned on (the certificate's selector strip is checked by seeding these true);
    [failed_assumptions] is the failed-selector core of the most recent [Unsat]. *)
-let install_cert_trace t tr = Sat.set_trace t.sat tr
-let cert_assumptions t = List.map Sat.pos t.frames
-let failed_assumptions t = Sat.failed_assumptions t.sat
+let install_cert_trace t tr =
+  (* Set-once / pristine hardening (task #7 rider, defense-in-depth): a cert trace must be
+     installed on a PRISTINE session (before any assert) and only once. Enforcing it makes
+     the cert-OFF Pass-A gate ([cert_active] set here, read by [assert_presolved]'s
+     [pass_a_enabled]) robust to a caller that would otherwise install a trace AFTER Pass
+     A already fired — the interleave that could launder a derived unit into the cert. The
+     interleave was verified unreachable in shipped callers; this fails it closed anyway.
+     Uninstall ([None]) is always allowed. *)
+  (match tr with
+   | Some _ ->
+     if t.cert_active
+     then
+       invalid_arg "Session.install_cert_trace: a trace is already installed (set-once)";
+     if t.asserted <> []
+     then
+       invalid_arg
+         "Session.install_cert_trace: must be installed on a pristine session, before \
+          any assert";
+     (* OXSMT_BASE_L0 rider: the [base] forcing-unit is emitted lazily on the first
+        [check_sat] (see [base_unit_emitted]). A trace installed AFTER that first solve
+        would not record the unit as an Input, so a later refutation over it replays as a
+        (fail-safe) INVALID cert. Reject fail-loud. Inert when the flag is off:
+        [base_unit_emitted] is only ever set under [base_at_level0]. *)
+     if t.base_unit_emitted
+     then
+       invalid_arg
+         "Session.install_cert_trace: must be installed before the first check_sat (the \
+          OXSMT_BASE_L0 base-forcing unit is emitted there and would otherwise be \
+          untraced)"
+   | None -> ());
+  (* Gate Pass A OFF while a cert trace is live (task #7 cert-OFF ruling): a derived
+     entailed-equality unit must not enter the cert as a trusted [Input]. *)
+  t.cert_active <- Option.is_some tr;
+  Sat.set_trace t.sat tr
+;;
+
+let cert_assumptions t = List.map Sat.pos (assumed_frames t)
+
+(* The failed-selector core, with the internal symmetry-breaking activation selector
+   filtered out (Rider 1): [sym_sel] is assumed positive during a solve, so it can appear
+   in the SAT core, but it is a private aux var and must never surface to a caller's
+   assumption core. *)
+let failed_assumptions t =
+  let failed = Sat.failed_assumptions t.sat in
+  match t.sym_sel_in_core with
+  | None -> failed
+  | Some sel -> List.filter (fun lit -> Sat.var_of_lit lit <> sel) failed
+;;
+
+(* Test-only introspection (task #25): is a symmetry-breaking emission currently active
+   (its activation selector still assumed)? Lets [symbreak_test] assert the R2 emission
+   restriction directly (no emission under a frame / with lemmas registered). *)
+let symbreak_active_for_test t = Option.is_some t.sym_sel
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let budget_exhausted t = t.budget_exhausted
@@ -952,4 +1860,6 @@ let lemma_instantiations t = Manager.instantiations t.mgr
 
 module For_test = struct
   let default_value = default_value
+  let set_dt_checker f = dt_checker_override := f
+  let set_array_checker f = array_checker_override := f
 end

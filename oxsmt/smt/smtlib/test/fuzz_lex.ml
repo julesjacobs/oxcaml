@@ -190,8 +190,59 @@ let check_idempotent () =
        if not (toks_equal toks1 toks2) then fail "P3 not idempotent on %S -> %S" src reser)
 ;;
 
+(* Reserved-word recognizer sync (thr-term rider). The lexer classifies a symbol token
+   with a fast [is_reserved_word] [match] (lexer.ml); [reserved_words] is the documented
+   list the match must mirror. A silent drift on a rarely-exercised word
+   ([par]/[NUMERAL]/…) would mislex it as a plain symbol (or vice-versa). Checked
+   black-box through [tokenize] so it exercises the real lexer path, not just the
+   predicate. *)
+let check_reserved_word_sync () =
+  (* forward: every documented reserved word lexes to exactly one [Reserved] token (a
+     match that DROPPED/renamed the word would return a [Symbol] here — the dangerous
+     regression) *)
+  List.iter
+    (fun w ->
+       incr cases;
+       match Tok.tokenize w with
+       | [ Tok.Reserved w' ] when String.equal w' w -> ()
+       | toks ->
+         fail
+           "reserved word %S did not lex to [Reserved %S]: %s"
+           w
+           w
+           (String.concat " " (List.map unlex toks)))
+    Tok.reserved_words;
+  (* reverse: near-miss non-reserved symbols must NOT lex as [Reserved] (guards an
+     accidental extra/typo/case entry in the match that [reserved_words] does not
+     document) *)
+  List.iter
+    (fun w ->
+       incr cases;
+       match Tok.tokenize w with
+       | [ Tok.Symbol { text; quoted = false } ] when String.equal text w -> ()
+       | toks ->
+         fail
+           "non-reserved %S unexpectedly did not lex to a plain [Symbol]: %s"
+           w
+           (String.concat " " (List.map unlex toks)))
+    [ "lets"
+    ; "letx"
+    ; "asx"
+    ; "forall1"
+    ; "exist"
+    ; "matchy"
+    ; "PAR"
+    ; "par1"
+    ; "BINARYY"
+    ; "numeral"
+    ; "STRINGS"
+    ; "DECIMALX"
+    ]
+;;
+
 let () =
   let iters = if Array.length Sys.argv >= 2 then int_of_string Sys.argv.(1) else 20000 in
+  check_reserved_word_sync ();
   (* A few fixed seeds so the stream is broad but fully reproducible. *)
   List.iter
     (fun seed ->

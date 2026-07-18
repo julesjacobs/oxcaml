@@ -15,6 +15,28 @@ open Oxsmt_core
 module Euf = Oxsmt_euf.Euf
 module Defs = Datatype_defs
 
+let env_flag name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes") -> true
+  | _ -> false
+;;
+
+(* OXSMT_DT_INCR (W5 Lever B, dark, default OFF byte-identical): cache the per-check
+   datatype witness table ({!build_witnesses}) and the acyclicity ({!occurs_check}) result
+   across the redundant rebuilds a single [check] does (the fixpoint's final round, the
+   post-saturation build at [check], and every constructor-model build all recompute the
+   same table when no class changed since) and across a repeat [check] at the same state.
+   Sound-by-REBUILD (never key-remap → no #51 stale-class-key hazard,
+   [[dt-liveref-overwrite-wrong-unsat]]): the cache is DROPPED then rebuilt fresh on any
+   event that can change a constructor term's e-class — an Euf class union (detected via a
+   private merge cursor; recording MUST be enabled under this flag, the Lever-A war
+   story), a new constructor-term registration ([catalog]), or a push/pop (merge
+   retraction). A cache hit therefore means the constructor-term set AND every one's class
+   are unchanged since the build, so a rebuilt table would be identical (same insertion
+   order ⇒ identical witness selection and conflict premises), preserving
+   counted-identity. *)
+let incr_on = env_flag "OXSMT_DT_INCR"
+
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a DT-derived equality (field equality, selector
    evaluation, constructor instantiation) carries [P_derived reasons] — the trail literals
@@ -37,7 +59,12 @@ type info =
 
 type t =
   { ctx : Context.t
-  ; reg : Defs.t
+  ; reg : Defs.t ref
+    (* LIVE registry ref shared with the session/cdclt (NOT a snapshot): datatypes
+         declared AFTER this theory is instantiated (batched VC queries in one Session)
+         must be visible, or their terms fail classification -> unknown. The registry only
+         grows (monotonic [Datatype_defs.add]), so a live read never re-classifies an
+         existing term. *)
   ; engine : prem Euf.t
   ; true_const : Term.t
   ; false_const : Term.t
@@ -59,8 +86,28 @@ type t =
          instantiations) — the field-relevance cascade only crosses these, bounding it to
          the finite input structure (no runaway down a recursive spine of split-born
          selector terms). *)
+  ; mutable diseq_frames : (Term.t * Term.t) list list
+    (* datatype-sorted disequality operand pairs, a per-frame stack in lockstep with
+         [frames] (one list per push; [pop n] drops the popped frames' pairs). The guide
+         for disequality-aware model completion (a free field must not be filled with a
+         value that reproduces a forbidden term). Frame-scoped so it does not accumulate
+         across push/pop re-assertions and a popped disequality does not linger. Read
+         (flattened) at model build, additionally guarded by [not (are_equal a b)]; the §8
+         checker remains the authority, so this is completeness-steering only, never a
+         verdict. *)
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
+  ; merge_cursor : Euf.merge_cursor option
+    (* W5 Lever B (OXSMT_DT_INCR): a private cursor into the engine's merge-notification
+         log, allocated (and recording enabled) only when [incr_on]. A non-empty drain
+         means an Euf union changed some class since the last build, so [witness_cache] /
+         [occurs_cache] are invalidated. [None] when the flag is off (no cursor, no cost). *)
+  ; mutable witness_cache : ((int, Term.t) Hashtbl.t * prem list option) option
+    (* Cached {!build_witnesses} result, or [None] when invalidated. Always [None] when
+         [incr_on] is false. *)
+  ; mutable occurs_cache : prem list option option
+    (* Cached {!occurs_check} result (outer option = cache validity, inner = the
+     conflict-or-none the check returns), invalidated in lockstep with [witness_cache]. *)
   }
 
 let max_iters = 1_000_000
@@ -72,6 +119,18 @@ let create ctx _env reg =
   Euf.register_term engine true_const;
   Euf.register_term engine false_const;
   Euf.assert_neq engine ~premise:P_axiom true_const false_const;
+  (* W5 Lever B: enable merge recording and register a private cursor ONLY under the flag.
+     Recording is off by default in this engine (DT does not otherwise consume the log),
+     so without this the drain would return [] forever and the cache would never
+     invalidate on a merge — the exact Lever-A war story. OFF ⇒ no cursor, recording stays
+     off, byte- identical. *)
+  let merge_cursor =
+    if incr_on
+    then (
+      Euf.set_record_merges engine true;
+      Some (Euf.add_merge_consumer engine))
+    else None
+  in
   { ctx
   ; reg
   ; engine
@@ -88,9 +147,30 @@ let create ctx _env reg =
   ; split_relevant = Term.Table.create 64
   ; diseq_relevant = Term.Table.create 64
   ; input_dt = Term.Table.create 64
+  ; diseq_frames = [ [] ]
   ; explain_cache = Lit.Map.empty
   ; frames = [ [] ]
+  ; merge_cursor
+  ; witness_cache = None
+  ; occurs_cache = None
   }
+;;
+
+(* Drop the Lever-B caches (invalidate-by-rebuild). Called on every event that can change
+   a constructor term's e-class: a drained merge, a new constructor-term registration, and
+   push/pop. A no-op when the flag is off (caches stay [None]). *)
+let invalidate_incr t =
+  t.witness_cache <- None;
+  t.occurs_cache <- None
+;;
+
+(* Drain the private cursor and invalidate if any Euf union happened since the last drain.
+   Called at the single cache-read entry ([build_witnesses]); the cursor always advances
+   to the log's end, so no merge is ever missed between two builds. *)
+let sync_merges t =
+  match t.merge_cursor with
+  | Some c -> if Euf.drain_merges t.engine c <> [] then invalidate_incr t
+  | None -> ()
 ;;
 
 (* --- small helpers --- *)
@@ -105,18 +185,18 @@ let head_args (term : Term.t) : (Symbol.t * Term.t array) option =
 let dt_sort_sym (sort : Sort.t) : Symbol.t option =
   match sort with
   | Sort.Datatype s -> Some s
-  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ -> None
+  | Sort.Bool | Sort.Int _ | Sort.Uninterpreted _ | Sort.Array _ | Sort.BitVec _ -> None
 ;;
 
 let is_dt_sort t (sort : Sort.t) =
   match dt_sort_sym sort with
-  | Some s -> Defs.is_datatype_sym t.reg s
+  | Some s -> Defs.is_datatype_sym !(t.reg) s
   | None -> false
 ;;
 
 let datatype_of_sort t (sort : Sort.t) : Defs.datatype option =
   match dt_sort_sym sort with
-  | Some s -> Defs.datatype_of_sort t.reg s
+  | Some s -> Defs.datatype_of_sort !(t.reg) s
   | None -> None
 ;;
 
@@ -161,13 +241,16 @@ let rec catalog t ~input (term : Term.t) =
       if input then Term.Table.replace t.input_dt term ());
     match head_args term with
     | Some (sym, args) ->
-      if Defs.constructor_of_sym t.reg sym <> None
-      then t.ctor_terms <- term :: t.ctor_terms
-      else if Defs.selector_of_sym t.reg sym <> None
+      if Defs.constructor_of_sym !(t.reg) sym <> None
+      then (
+        t.ctor_terms <- term :: t.ctor_terms;
+        (* a new constructor term changes the witness table's domain — invalidate *)
+        if incr_on then invalidate_incr t)
+      else if Defs.selector_of_sym !(t.reg) sym <> None
       then (
         t.selector_terms <- term :: t.selector_terms;
         if Array.length args >= 1 then Term.Table.replace t.split_relevant args.(0) ())
-      else if Defs.tester_of_sym t.reg sym <> None
+      else if Defs.tester_of_sym !(t.reg) sym <> None
       then (
         t.tester_terms <- term :: t.tester_terms;
         if Array.length args >= 1 then Term.Table.replace t.split_relevant args.(0) ());
@@ -243,7 +326,10 @@ let assert_lit t lit =
         Term.Table.replace t.split_relevant a ();
         Term.Table.replace t.split_relevant b ();
         Term.Table.replace t.diseq_relevant a ();
-        Term.Table.replace t.diseq_relevant b ()))
+        Term.Table.replace t.diseq_relevant b ();
+        match t.diseq_frames with
+        | fr :: rest -> t.diseq_frames <- ((a, b) :: fr) :: rest
+        | [] -> t.diseq_frames <- [ [ a, b ] ]))
   | Some { kind = K_bool; term } ->
     let target = if positive then t.true_const else t.false_const in
     Euf.assert_eq t.engine ~premise:(P_lit lit) term target
@@ -268,7 +354,7 @@ let instantiate_ctor t (c : Defs.constructor) (x : Term.t) : Term.t =
 ;;
 
 (* class-id -> canonical (tag-least) witness constructor term; [Some prems] clash. *)
-let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
+let build_witnesses_raw t : (int, Term.t) Hashtbl.t * prem list option =
   let witnesses = Hashtbl.create 64 in
   let conflict = ref None in
   List.iter
@@ -287,6 +373,26 @@ let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
            then Hashtbl.replace witnesses k cterm))
     (List.rev t.ctor_terms);
   witnesses, !conflict
+;;
+
+(* W5 Lever B cache wrapper. OFF ([incr_on] false): recompute every call, byte-identical
+   to trunk. ON: drain the merge cursor first (a union since the last build invalidates),
+   then return the cached table if still valid, else rebuild and cache. A hit is only
+   reached when no merge, no new constructor term, and no push/pop happened since the
+   build, so the rebuilt table would be identical — the returned table is READ-ONLY at
+   every call site ([Hashtbl.find_opt] only), so sharing the physical object across calls
+   is safe. *)
+let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
+  if not incr_on
+  then build_witnesses_raw t
+  else (
+    sync_merges t;
+    match t.witness_cache with
+    | Some r -> r
+    | None ->
+      let r = build_witnesses_raw t in
+      t.witness_cache <- Some r;
+      r)
 ;;
 
 let witness_of t witnesses x = Hashtbl.find_opt witnesses (Euf.class_of t.engine x)
@@ -333,7 +439,7 @@ let saturate_round t ~changed : prem list option =
          then (
            match head_args st with
            | Some (sym, sargs) when Array.length sargs = 1 ->
-             (match Defs.selector_of_sym t.reg sym with
+             (match Defs.selector_of_sym !(t.reg) sym with
               | Some (_dt, c, sel) ->
                 let x = sargs.(0) in
                 (match witness_of t witnesses x with
@@ -361,7 +467,7 @@ let saturate_round t ~changed : prem list option =
          then (
            match head_args tt with
            | Some (sym, targs) when Array.length targs = 1 ->
-             (match Defs.tester_of_sym t.reg sym with
+             (match Defs.tester_of_sym !(t.reg) sym with
               | Some (_dt, c) ->
                 let x = targs.(0) in
                 let is_true = Euf.are_equal t.engine tt t.true_const in
@@ -443,7 +549,7 @@ let saturate t : prem list option =
 (* Acyclicity (occurs check): a constructor value cannot contain itself. Build the
    directed graph class -> class-of-each-DT-arg-of-its-witness and look for a cycle; a
    cycle's premises are the equalities placing each argument in the next class. *)
-let occurs_check t witnesses : prem list option =
+let occurs_check_raw t witnesses : prem list option =
   let color = Hashtbl.create 64 in
   (* class -> `Gray | `Black *)
   let parent = Hashtbl.create 64 in
@@ -502,6 +608,23 @@ let occurs_check t witnesses : prem list option =
        if Hashtbl.mem witnesses k && not (Hashtbl.mem color k) then dfs k)
     (List.rev t.ctor_terms);
   !result
+;;
+
+(* W5 Lever B cache wrapper for the acyclicity DFS. The result is a pure function of
+   [witnesses] + the current class structure, so it is valid exactly as long as
+   [witness_cache] is (both invalidated together by {!invalidate_incr}). Reached at
+   [check] right after {!build_witnesses}, which already drained the cursor, so no re-sync
+   here. OFF: recompute every call, byte-identical. *)
+let occurs_check t witnesses : prem list option =
+  if not incr_on
+  then occurs_check_raw t witnesses
+  else (
+    match t.occurs_cache with
+    | Some r -> r
+    | None ->
+      let r = occurs_check_raw t witnesses in
+      t.occurs_cache <- Some r;
+      r)
 ;;
 
 (* --- propagation reason caching (mirrors Euf_adapter) --- *)
@@ -648,11 +771,19 @@ let explain t lit =
 
 let push t =
   Euf.push t.engine;
-  t.frames <- [] :: t.frames
+  t.frames <- [] :: t.frames;
+  t.diseq_frames <- [] :: t.diseq_frames;
+  if incr_on then invalidate_incr t
 ;;
 
 let pop t n =
   Euf.pop t.engine n;
+  (* a pop retracts merges — class reps revert, so any cached witness table / occurs
+     result is stale (the exact #51-class stale-across-pop hazard the spec flags).
+     Invalidate. The Euf pop already cleared its merge log and reset cursors, so a
+     subsequent [sync_merges] will not see the popped-frame merges — the explicit
+     invalidation here is load-bearing (RED-verified). *)
+  if incr_on then invalidate_incr t;
   let rec drop k frames =
     if k = 0
     then frames
@@ -665,6 +796,19 @@ let pop t n =
   in
   t.frames
   <- (match drop n t.frames with
+      | [] -> [ [] ]
+      | fs -> fs);
+  (* keep the disequality-pair stack in lockstep: drop the popped frames' pairs *)
+  let rec drop_diseq k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | _ :: rest -> drop_diseq (k - 1) rest
+      | [] -> [])
+  in
+  t.diseq_frames
+  <- (match drop_diseq n t.diseq_frames with
       | [] -> [ [] ]
       | fs -> fs)
 ;;
@@ -715,7 +859,12 @@ type ctor_tree =
 
 (* A value for a non-datatype leaf: a bound Bool/Int if the class carries one, else an
    opaque uninterpreted witness (Int defaults to 0 when unconstrained — no arithmetic
-   theory is present in a pure-DT problem). *)
+   theory is present in a pure-DT problem). [Bool] is a FINITE 2-element sort, so it must
+   NEVER flow through the unbounded [Uninterp] bucket (codex B1: that admitted three
+   pairwise-distinct Bool datatype fields as sat): an unconstrained Bool leaf defaults to
+   [Model.Bool false]. Diseq-respecting bounded completion (so two disequal Bool classes
+   get DISTINCT values) is layered on in {!check_model}; this default keeps the standalone
+   / public path sound (never [Uninterp] in a Bool position). *)
 let leaf_value t (x : Term.t) : Model.value =
   if Sort.equal x.Term.sort Sort.bool
   then
@@ -723,7 +872,7 @@ let leaf_value t (x : Term.t) : Model.value =
     then Model.Bool true
     else if Euf.are_equal t.engine x t.false_const
     then Model.Bool false
-    else Model.Uninterp (Euf.class_of t.engine x)
+    else Model.Bool false
   else (
     match x.Term.sort with
     | Sort.Int _ ->
@@ -745,21 +894,41 @@ let leaf_value t (x : Term.t) : Model.value =
          matching sat-DT-degrades-to-unknown. FOLLOW-UP (constructor-tree sat models) owes
          real >int63 representation or must keep degrading here. *)
       (match int_const with
-       | None -> Model.Int 0
-       | Some n ->
-         (match Bigint.to_int_opt n with
-          | Some i -> Model.Int i
-          | None -> Model.Uninterp (Euf.class_of t.engine x)))
-    | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ ->
+       | None -> Model.Int Bigint.zero
+       | Some n -> Model.Int n)
+    (* BitVec is defensively unreachable here: a bit-vector term is resolved by the eager
+       bit-blaster before the combinator, and any BV term that reached the combinator
+       degrades via [require_no_bitvec_terms] before model extraction. Fold into the
+       generic opaque-class fallback for exhaustiveness. *)
+    | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
       Model.Uninterp (Euf.class_of t.engine x))
 ;;
 
-let constructor_model t : (Term.t * ctor_tree) list option =
+(* Shared model builder, parametrized on [leaf : Term.t -> Model.value] so a caller can
+   inject diseq-respecting completion for a finite scalar sort (e.g. [Bool]); the public
+   {!constructor_model} passes the plain per-class {!leaf_value}, {!check_model} passes a
+   Bool-completing wrapper (codex B1 fix). *)
+let constructor_model_gen t ~(leaf : Term.t -> Model.value)
+  : (Term.t * ctor_tree) list option
+  =
   let witnesses, clash = build_witnesses t in
   if clash <> None
   then None
   else (
     let memo : (int, ctor_tree) Hashtbl.t = Hashtbl.create 64 in
+    (* A sort-correct default scalar for a SYNTHESIZED (term-less) base field: a [Bool]
+       field must be [Model.Bool] (never [Uninterp]/[Int] — the checker's sort-inhabitance
+       would reject those), an [Int] field [0], an uninterpreted field element [0]. An
+       [Array]/[BitVec] field has no scalar model value here (a DT+arrays/BV mix is out of
+       the pure-DT fragment): return [Uninterp 0], which the checker's inhabitance rejects
+       for those sorts -> the sat degrades to [unknown] (sound). *)
+    let base_leaf (sort : Sort.t) : Model.value =
+      match sort with
+      | Sort.Bool -> Model.Bool false
+      | Sort.Int _ -> Model.Int Bigint.zero
+      | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _ ->
+        Model.Uninterp 0
+    in
     (* a terminating constructor for a datatype: prefer a nullary one, else fewest DT
        fields *)
     let dt_field_count (c : Defs.constructor) =
@@ -783,48 +952,516 @@ let constructor_model t : (Term.t * ctor_tree) list option =
                 c0
                 rest))
     in
+    (* Structural equality of two model trees (constructor name + fields, or scalar leaf).
+       Used only to steer completion away from forbidden values; the §8 checker's own
+       [v_eq] is the authority. *)
+    let mv_eq (a : Model.value) (b : Model.value) =
+      match a, b with
+      | Model.Int x, Model.Int y -> Bigint.equal x y
+      | Model.Bool x, Model.Bool y -> Bool.equal x y
+      | Model.Uninterp x, Model.Uninterp y -> Int.equal x y
+      | _ -> false
+    in
+    let rec tree_eq (x : ctor_tree) (y : ctor_tree) =
+      match x, y with
+      | Ctor (n1, k1), Ctor (n2, k2) ->
+        String.equal n1 n2
+        && List.length k1 = List.length k2
+        && List.for_all2 tree_eq k1 k2
+      | Leaf a, Leaf b -> mv_eq a b
+      | _ -> false
+    in
+    (* The value of [x] IF it is fully fixed by constructor witnesses down to constrained
+       leaves (no free datatype class on the way); [None] once a free class is reached.
+       This is the value a disequality [y <> x] must forbid on [y]'s class — computable up
+       front, independent of the free-class completion below. *)
+    (* [rep k] is a representative term of class [k], so the completion can MATERIALIZE
+       the tree of a disequal PEER class (a value it must avoid) by name. Seeded from
+       every datatype term the builder can see (the registered [dt_terms]/[ctor_terms]);
+       the disequality closure below registers disequality endpoints and
+       constructor-witness field arguments as it walks them. *)
+    let rep : (int, Term.t) Hashtbl.t = Hashtbl.create 64 in
+    let reg_rep (x : Term.t) =
+      let k = Euf.class_of t.engine x in
+      if not (Hashtbl.mem rep k) then Hashtbl.replace rep k x
+    in
+    List.iter reg_rep t.dt_terms;
+    List.iter reg_rep t.ctor_terms;
+    (* [witness_ca k] is the constructor + per-field [(class, term)] of a witnessed class,
+       or [None] for a free class. Registers each field arg into [rep] as a side effect. *)
+    let witness_ca k =
+      match Hashtbl.find_opt witnesses k with
+      | None -> None
+      | Some wterm ->
+        let sym, wargs = Option.get (head_args wterm) in
+        let _, c = Option.get (Defs.constructor_of_sym !(t.reg) sym) in
+        Array.iter reg_rep wargs;
+        Some (c, Array.map (fun (a : Term.t) -> Euf.class_of t.engine a, a) wargs)
+    in
+    (* Class-pair DISEQUALITY CLOSURE — the model-construction half of the Barrett
+       abstract decision procedure (gapdx-newtheories: the confirmed QF_DT root cause; the
+       previous [forbidden] machinery seeded only from FULLY-CONSTRAINED diseq sides and
+       propagated only through SINGLE-field constructors, so a diseq between two witnessed
+       classes with free descendants — [succ(succ f) <> succ g],
+       [cons(leaf f, n) <> cons(leaf g, n)] — was silently unenforced and the completion
+       could reproduce it).
+
+       [dis k] is the set of classes whose value [k]'s must differ from. Seeded from the
+       asserted disequalities (over classes), then pushed DOWN through same-constructor
+       witness chains: two classes with the SAME top constructor are disequal iff some
+       field differs — and a genuine diseq guarantees at least one field-class PAIR is
+       distinct (injectivity: equal field classes on every position would force the
+       parents equal, a contradiction), so we require the first distinct-class field
+       position to differ, UNLESS a position is already guaranteed distinct (its field
+       pair already in [dis], or its two field witnesses have different constructors).
+       Different top constructors need no propagation — the heads already differ. A pair
+       with a FREE side is left for the completion, which draws that free class a value
+       distinct from the peer's tree. Bounded fixpoint; deterministic (I5/I6): pairs are
+       processed in ascending class order. Sound irrespective of any imprecision — the
+       independent [Dt_model_check] gates every DT [sat], so an under-enforced diseq only
+       degrades to [unknown], never wrong. *)
+    let dis : (int, (int, unit) Hashtbl.t) Hashtbl.t = Hashtbl.create 64 in
+    let dis_set k =
+      match Hashtbl.find_opt dis k with
+      | Some s -> s
+      | None ->
+        let s = Hashtbl.create 8 in
+        Hashtbl.replace dis k s;
+        s
+    in
+    let mem_dis k1 k2 =
+      match Hashtbl.find_opt dis k1 with
+      | Some s -> Hashtbl.mem s k2
+      | None -> false
+    in
+    let add_dis k1 k2 =
+      if k1 = k2 || mem_dis k1 k2
+      then false
+      else (
+        Hashtbl.replace (dis_set k1) k2 ();
+        Hashtbl.replace (dis_set k2) k1 ();
+        true)
+    in
+    List.iter
+      (fun (a, b) ->
+         if not (Euf.are_equal t.engine a b)
+         then (
+           reg_rep a;
+           reg_rep b;
+           ignore (add_dis (Euf.class_of t.engine a) (Euf.class_of t.engine b) : bool)))
+      (List.concat t.diseq_frames);
+    let changed = ref true in
+    let rounds = ref 0 in
+    while !changed && !rounds < 100_000 do
+      changed := false;
+      incr rounds;
+      let pairs =
+        Hashtbl.fold
+          (fun k s acc ->
+             Hashtbl.fold (fun k2 () acc -> if k < k2 then (k, k2) :: acc else acc) s acc)
+          dis
+          []
+      in
+      List.iter
+        (fun (kx, ky) ->
+           match witness_ca kx, witness_ca ky with
+           | Some (cx, fx), Some (cy, fy) when Symbol.equal cx.Defs.sym cy.Defs.sym ->
+             let n = Array.length fx in
+             let guaranteed i =
+               let kxi, _ = fx.(i)
+               and kyi, _ = fy.(i) in
+               kxi <> kyi
+               && (mem_dis kxi kyi
+                   ||
+                   match witness_ca kxi, witness_ca kyi with
+                   | Some (ci, _), Some (cj, _) ->
+                     not (Symbol.equal ci.Defs.sym cj.Defs.sym)
+                   | _ -> false)
+             in
+             let already = ref false in
+             for i = 0 to n - 1 do
+               if guaranteed i then already := true
+             done;
+             if not !already
+             then (
+               let picked = ref false in
+               for i = 0 to n - 1 do
+                 if not !picked
+                 then (
+                   let kxi, _ = fx.(i)
+                   and kyi, _ = fy.(i) in
+                   if kxi <> kyi
+                   then (
+                     picked := true;
+                     if add_dis kxi kyi then changed := true))
+               done)
+           | _ -> ())
+        (List.sort compare pairs)
+    done;
+    (* Model COMPLETION for an unconstrained class. Distinct e-classes are never
+       asserted-equal (a positive equality would have MERGED them), so giving distinct
+       unconstrained classes DISTINCT witness values is always sound and, crucially,
+       satisfies disequalities ([x <> y] over an infinite/large-enough sort). Each
+       unconstrained class draws a fresh [idx] from [next_idx]; [distinct_base dt idx]
+       realizes the idx-th distinct value of the sort:
+       - [idx = 0]: the terminating base constructor (nil / zero / the fewest-DT-fields
+         constructor), recursive fields themselves based — the finite witness;
+       - enum sort (every constructor nullary): the idx-th constructor when [idx < k];
+       - a self-recursive sort (some constructor has a field of THIS sort): a spine of
+         that recursive constructor of length [idx] over the base (distinct lengths =>
+         distinct trees: nil, cons(_,nil), cons(_,cons(_,nil)), …);
+       - otherwise fall back to the base — the §8 checker then fails closed (a distinct
+         value it could not realize => [unknown], never a wrong sat). Determinism (I5/I6):
+         idx is assigned in the deterministic tag-ordered traversal of [dt_terms]. *)
+    (* Total node budget over the whole model build (codex review item (e)): a
+       constructor-tree model that would need more nodes than a satisfiable QF_DT witness
+       ever reasonably has is abandoned to [None] -> [unknown] (the checker never sees a
+       partial tree, so this is completeness-only). Belt to the algorithmic fixes below:
+       [base_tree] is memoized per sort (its value is context-free), and [distinct_base]
+       spines only ONE self-sorted field (recursing every self field of a
+       >=2-recursive-field constructor — e.g. [node(Tree, Tree)] — built a 2^idx-node
+       tree, an effective hang the depth guard alone did not prevent). *)
+    let exception Too_big in
+    let nodes = ref 0 in
+    let tick () =
+      incr nodes;
+      if !nodes > 2_000_000 then raise Too_big
+    in
+    let base_tree_memo : (string, ctor_tree) Hashtbl.t = Hashtbl.create 16 in
+    let next_idx = ref 0 in
+    (* classes whose [tree_of] is currently on the build stack — their shared [memo] entry
+       is still the [Uninterp] cycle-break placeholder, not a real value. *)
+    let in_progress : (int, unit) Hashtbl.t = Hashtbl.create 64 in
+    (* separate memo for the disequal-peer materialization ([fbd_tree]); kept apart from
+       the shared [memo] so peer steering never pollutes the real model build. *)
+    let fbd_memo : (int, ctor_tree) Hashtbl.t = Hashtbl.create 16 in
     let rec tree_of (x : Term.t) (depth : int) : ctor_tree =
       let k = Euf.class_of t.engine x in
       match Hashtbl.find_opt memo k with
       | Some tr -> tr
       | None ->
         Hashtbl.replace memo k (Leaf (Model.Uninterp k));
+        Hashtbl.replace in_progress k ();
         let tr =
           match Hashtbl.find_opt witnesses k with
           | Some wterm ->
             let sym, wargs = Option.get (head_args wterm) in
-            let _, c = Option.get (Defs.constructor_of_sym t.reg sym) in
-            Ctor
-              ( Symbol.name c.Defs.sym
-              , Array.to_list (Array.map (fun a -> field_tree a depth) wargs) )
+            let _, c = Option.get (Defs.constructor_of_sym !(t.reg) sym) in
+            let fields = Array.to_list (Array.map (fun a -> field_tree a depth) wargs) in
+            tick ();
+            Ctor (Symbol.name c.Defs.sym, fields)
           | None ->
             (match datatype_of_sort t x.Term.sort with
-             | Some dt -> base_tree dt depth
-             | None -> Leaf (leaf_value t x))
+             | Some dt ->
+               (* Complete this FREE class to a value distinct from every class it must
+                  differ from ([dis], the closure above): materialize each disequal peer's
+                  tree (by its [rep] term; memoized, and the [Uninterp k] placeholder set
+                  above breaks any cycle) and pick the least [distinct_base] index (from
+                  the shared [next_idx] up) whose tree avoids them all. Bounded — on
+                  exhaustion take the base and let the §8 checker fail closed ([unknown],
+                  never wrong). On a recursive sort [distinct_base] yields distinct-length
+                  spines, so a finite forbidden set is always avoidable; a MUTUALLY
+                  recursive sort with no direct self field (e.g. [tree] recurring only via
+                  [list]) is spined through the intermediate sort, so it too yields
+                  unboundedly many distinct values. A sort with no self-recursion at all
+                  (finite domain) can still exhaust its values — a forced-distinct peer
+                  beyond the domain then degrades to [unknown]. *)
+               let fbd =
+                 match Hashtbl.find_opt dis k with
+                 | None -> []
+                 | Some s ->
+                   let peers = Hashtbl.fold (fun k' () acc -> k' :: acc) s [] in
+                   List.filter_map
+                     (fun k' ->
+                        match Hashtbl.find_opt rep k' with
+                        | Some xr -> Some (fbd_tree xr depth)
+                        | None -> None)
+                     (List.sort compare peers)
+               in
+               let rec pick idx tries =
+                 let tr = distinct_base dt idx depth in
+                 if tries < 256 && List.exists (tree_eq tr) fbd
+                 then pick (idx + 1) (tries + 1)
+                 else (
+                   next_idx := idx + 1;
+                   tr)
+               in
+               pick !next_idx 0
+             | None -> Leaf (leaf x))
         in
         Hashtbl.replace memo k tr;
+        Hashtbl.remove in_progress k;
         tr
-    and field_tree (a : Term.t) depth =
-      if is_dt_sort t a.Term.sort then tree_of a (depth + 1) else Leaf (leaf_value t a)
-    and base_tree (dt : Defs.datatype) depth : ctor_tree =
-      if depth > 10_000
-      then Leaf (Model.Uninterp 0)
+    (* Materialize a disequal PEER's tree for collision-steering ONLY, on the SEPARATE
+       [fbd_memo] so it can never pollute the shared [memo] of the real model build. This
+       is the fix for the cyclic-witness unknowns: computing [fbd] through the shared
+       [tree_of] baked an in-progress class's [Uninterp] cycle-break placeholder into a
+       peer's memoized tree, which then surfaced in the REAL model at a datatype position
+       and failed the checker's sort-inhabitance -> unknown. A fully-built shared value is
+       reused; an IN-PROGRESS class (its shared entry is still the placeholder) or a free
+       peer is approximated by its sort's base. Sound: [fbd] only STEERS [distinct_base]
+       away from collisions and the §8 [Dt_model_check] remains the authority; free-free
+       distinctness is already guaranteed by [next_idx]; and a peer that structurally
+       contains the class being completed cannot equal it, so approximating that
+       descendant is harmless. Recursion is over witness fields only (the
+       occurs-check-verified acyclic DAG) and is [tick]-budgeted. *)
+    and fbd_tree (x : Term.t) depth : ctor_tree =
+      let k = Euf.class_of t.engine x in
+      if Hashtbl.mem memo k && not (Hashtbl.mem in_progress k)
+      then Hashtbl.find memo k
       else (
-        match base_ctor dt with
-        | None -> Leaf (Model.Uninterp 0)
-        | Some c ->
-          Ctor
-            ( Symbol.name c.Defs.sym
-            , List.map
+        match Hashtbl.find_opt fbd_memo k with
+        | Some tr -> tr
+        | None ->
+          (match datatype_of_sort t x.Term.sort with
+           | Some dt0 -> Hashtbl.replace fbd_memo k (base_tree dt0 depth)
+           | None -> Hashtbl.replace fbd_memo k (Leaf (leaf x)));
+          let tr =
+            match Hashtbl.find_opt witnesses k with
+            | Some wterm ->
+              let sym, wargs = Option.get (head_args wterm) in
+              let _, c = Option.get (Defs.constructor_of_sym !(t.reg) sym) in
+              tick ();
+              Ctor
+                ( Symbol.name c.Defs.sym
+                , Array.to_list
+                    (Array.map
+                       (fun a ->
+                          if is_dt_sort t a.Term.sort
+                          then fbd_tree a (depth + 1)
+                          else Leaf (leaf a))
+                       wargs) )
+            | None ->
+              (match datatype_of_sort t x.Term.sort with
+               | Some dt0 -> base_tree dt0 depth
+               | None -> Leaf (leaf x))
+          in
+          Hashtbl.replace fbd_memo k tr;
+          tr)
+    and field_tree (a : Term.t) depth =
+      if is_dt_sort t a.Term.sort then tree_of a (depth + 1) else Leaf (leaf a)
+    and base_tree (dt : Defs.datatype) depth : ctor_tree =
+      (* The base value of a sort is CONTEXT-FREE, so memoize it per sort: a shared
+         sub-base is computed once, not re-expanded at every occurrence (codex (e): a
+         >=2-DT-field base constructor re-expanded per field is 2^depth). The placeholder
+         installed on entry breaks a self-recursive base (a non-well-founded /
+         pathological shape SMT-LIB should not admit) — the resulting ill-sorted tree is
+         caught by the §8 checker -> [unknown], never wrong. *)
+      let key = Symbol.name dt.Defs.sort_sym in
+      match Hashtbl.find_opt base_tree_memo key with
+      | Some tr -> tr
+      | None ->
+        Hashtbl.replace base_tree_memo key (Leaf (Model.Uninterp 0));
+        let tr =
+          if depth > 10_000
+          then Leaf (Model.Uninterp 0)
+          else (
+            match base_ctor dt with
+            | None -> Leaf (Model.Uninterp 0)
+            | Some c ->
+              let fields =
+                List.map
+                  (fun (s : Defs.selector) ->
+                     if is_dt_sort t s.Defs.field_sort
+                     then (
+                       match datatype_of_sort t s.Defs.field_sort with
+                       | Some d -> base_tree d (depth + 1)
+                       | None -> Leaf (Model.Uninterp 0))
+                     else Leaf (base_leaf s.Defs.field_sort))
+                  c.Defs.selectors
+              in
+              tick ();
+              Ctor (Symbol.name c.Defs.sym, fields))
+        in
+        Hashtbl.replace base_tree_memo key tr;
+        tr
+    and distinct_base (dt : Defs.datatype) (idx : int) depth : ctor_tree =
+      if idx = 0 || depth > 10_000
+      then base_tree dt depth
+      else (
+        let ctors = dt.Defs.constructors in
+        let is_enum =
+          List.for_all (fun (c : Defs.constructor) -> c.Defs.selectors = []) ctors
+        in
+        if is_enum
+        then (
+          (* the idx-th nullary constructor, if the domain is large enough; else base (the
+             §8 checker fails closed on the remaining collision) *)
+          match List.nth_opt ctors idx with
+          | Some c ->
+            tick ();
+            Ctor (Symbol.name c.Defs.sym, [])
+          | None -> base_tree dt depth)
+        else (
+          (* a constructor with a field of THIS datatype's sort — build a spine of length
+             [idx] over it, so distinct idx give distinct-length (distinct) trees *)
+          let self_rec =
+            List.find_opt
+              (fun (c : Defs.constructor) ->
+                 List.exists
+                   (fun (s : Defs.selector) ->
+                      match dt_sort_sym s.Defs.field_sort with
+                      | Some a -> Symbol.equal a dt.Defs.sort_sym
+                      | None -> false)
+                   c.Defs.selectors)
+              ctors
+          in
+          match self_rec with
+          | Some c ->
+            (* Spine down ONE self-sorted field only; base the rest (codex (e): recursing
+               EVERY self field of a >=2-recursive-field constructor — e.g.
+               [node(Tree, Tree)] — builds a 2^idx-node tree). One recursing field still
+               gives distinct-length (hence distinct) trees per [idx], now O(idx) nodes. *)
+            let recursed = ref false in
+            let fields =
+              List.map
                 (fun (s : Defs.selector) ->
-                   if is_dt_sort t s.Defs.field_sort
-                   then (
-                     match datatype_of_sort t s.Defs.field_sort with
-                     | Some d -> base_tree d (depth + 1)
-                     | None -> Leaf (Model.Uninterp 0))
-                   else Leaf (Model.Int 0))
-                c.Defs.selectors ))
+                   match dt_sort_sym s.Defs.field_sort with
+                   | Some a when Symbol.equal a dt.Defs.sort_sym && not !recursed ->
+                     recursed := true;
+                     distinct_base dt (idx - 1) (depth + 1)
+                   | _ ->
+                     if is_dt_sort t s.Defs.field_sort
+                     then (
+                       match datatype_of_sort t s.Defs.field_sort with
+                       | Some d -> base_tree d (depth + 1)
+                       | None -> Leaf (Model.Uninterp 0))
+                     else Leaf (base_leaf s.Defs.field_sort))
+                c.Defs.selectors
+            in
+            tick ();
+            Ctor (Symbol.name c.Defs.sym, fields)
+          | None ->
+            (* No constructor has a DIRECT field of this sort, but the sort may still be
+               MUTUALLY recursive — reachable back to itself through ANOTHER datatype
+               (e.g. [tree = node(children:list) | leaf(data:nat)], where [tree] recurs
+               only via [list]). Spine through the first datatype-sorted field of the
+               first constructor that has one, recursing on THAT field's sort with the
+               same [idx]. Distinct [idx] then give distinct field values (when the
+               intermediate sort is productive) hence distinct trees; [idx = 0] already
+               took the [base_tree] guard above, so an [idx >= 1] tree differs from the
+               base too. If the intermediate sort is not productive the trees collide and
+               the §8 checker fails closed to [unknown] — never wrong. Cross-sort
+               recursion passes [depth + 1], so the [depth > 10_000] guard (with the node
+               budget) terminates any pathological non-well-founded mutual cycle. *)
+            let cross =
+              List.find_map
+                (fun (c : Defs.constructor) ->
+                   match
+                     List.find_opt
+                       (fun (s : Defs.selector) -> is_dt_sort t s.Defs.field_sort)
+                       c.Defs.selectors
+                   with
+                   | Some s -> Some (c, s)
+                   | None -> None)
+                ctors
+            in
+            (match cross with
+             | None -> base_tree dt depth
+             | Some (c, target) ->
+               let fields =
+                 List.map
+                   (fun (s : Defs.selector) ->
+                      if s.Defs.index = target.Defs.index
+                      then (
+                        match datatype_of_sort t s.Defs.field_sort with
+                        | Some d -> distinct_base d idx (depth + 1)
+                        | None -> Leaf (base_leaf s.Defs.field_sort))
+                      else if is_dt_sort t s.Defs.field_sort
+                      then (
+                        match datatype_of_sort t s.Defs.field_sort with
+                        | Some d -> base_tree d (depth + 1)
+                        | None -> Leaf (Model.Uninterp 0))
+                      else Leaf (base_leaf s.Defs.field_sort))
+                   c.Defs.selectors
+               in
+               tick ();
+               Ctor (Symbol.name c.Defs.sym, fields))))
     in
     let dt_terms = List.sort_uniq (fun a b -> compare a.Term.tag b.Term.tag) t.dt_terms in
-    Some (List.map (fun x -> x, tree_of x 0) dt_terms))
+    try Some (List.map (fun x -> x, tree_of x 0) dt_terms) with
+    | Too_big -> None)
+;;
+
+let constructor_model t = constructor_model_gen t ~leaf:(fun x -> leaf_value t x)
+
+(* Diseq-respecting bounded completion for the finite [Bool] sort (codex B1). [Bool] has
+   two inhabitants, so like an enum it must get a BOUNDED-domain assignment: a class equal
+   to the true/false constant takes that value; every other class draws the next of
+   [{false, true}] (deterministically, in first-seen order) and is memoized by class so
+   equal terms share it. Distinct disequal Bool classes thus get DISTINCT values (a 2-box
+   [distinct] stays sat), while a THIRD mutually-distinct Bool class necessarily reuses a
+   value — the trees then collide and the checker's structural [distinct] fails closed to
+   [unknown] (never the wrong-sat B1 admitted). A [Bool] leaf never becomes [Uninterp]. *)
+let bool_completion t : Term.t -> Model.value =
+  let memo : (int, bool) Hashtbl.t = Hashtbl.create 16 in
+  let next = ref 0 in
+  fun x ->
+    if Euf.are_equal t.engine x t.true_const
+    then Model.Bool true
+    else if Euf.are_equal t.engine x t.false_const
+    then Model.Bool false
+    else (
+      let k = Euf.class_of t.engine x in
+      match Hashtbl.find_opt memo k with
+      | Some b -> Model.Bool b
+      | None ->
+        (* 0 -> false, 1 -> true, >=2 -> false (collision; checker rejects a diseq) *)
+        let b = !next = 1 in
+        incr next;
+        Hashtbl.replace memo k b;
+        Model.Bool b)
+;;
+
+(* The full checker model: a [Term.t -> ctor_tree] assignment for every registered subterm
+   the §8 DT self-check needs (Dt_model_check). It is the union of
+
+   - [constructor_model_gen] — a constructor tree for every registered DATATYPE term (so a
+     datatype variable, a nested field, AND an underspecified selector term all have a
+     value the evaluator can look up); and
+
+   - a [Leaf] SCALAR for every registered NON-datatype atomic (nullary [App]) subterm — an
+     Int/Bool/uninterpreted-sort variable or nullary symbol — so a top-level Int/uninterp
+     equality (decided here by congruence) has operand values.
+
+   Both share ONE [leaf] function so a Bool field and a Bool scalar of the same class get
+   the same value: Bool leaves flow through the diseq-respecting {!bool_completion} (a
+   finite sort, bounded to 2 values — codex B1), all other leaves through {!leaf_value}.
+   Compound non-datatype terms (testers, equalities, connectives, constructor/selector
+   applications) are NOT listed: the evaluator computes them structurally. [None] iff the
+   tree build degrades (a cross-class constructor clash), so the caller fails closed to
+   [unknown]. Snapshotted at the accepting Final->Sat (see {!Cdclt}).
+
+   POSTURE (review F2): this extraction runs OUTSIDE the CONTRACT-POISON firewall (like
+   [Session.build_model] — the firewall wraps only [Sat.solve]), so a bug here surfaces as
+   a crash, never a silently-swallowed [unknown]. The tree walk needs NO explicit
+   recursion-depth guard for termination: assertion ASTs are finite hash-consed DAGs and
+   the model trees are finite ([base_tree]/[distinct_base] carry [depth > 10_000] caps,
+   and the occurs check refutes a cyclic assignment as UNSAT before any sat model is
+   built), so it always terminates. *)
+let check_model t : (Term.t * ctor_tree) list option =
+  let bool_of = bool_completion t in
+  let leaf (x : Term.t) : Model.value =
+    if Sort.equal x.Term.sort Sort.bool then bool_of x else leaf_value t x
+  in
+  match constructor_model_gen t ~leaf with
+  | None -> None
+  | Some trees ->
+    let seen = Term.Table.create 128 in
+    let scalars = ref [] in
+    let rec walk (term : Term.t) =
+      if not (Term.Table.mem seen term)
+      then (
+        Term.Table.replace seen term ();
+        (match term.Term.node with
+         | Term.App (_, args) when Iarr.length args = 0 ->
+           (* a nullary applied symbol: a datatype leaf is already covered by [trees];
+              collect a non-datatype leaf (Int/Bool/uninterpreted var) as a scalar *)
+           if not (is_dt_sort t term.Term.sort)
+           then scalars := (term, Leaf (leaf term)) :: !scalars
+         | _ -> ());
+        List.iter walk (children term))
+    in
+    List.iter walk (List.rev t.atom_terms);
+    Some (trees @ !scalars)
 ;;

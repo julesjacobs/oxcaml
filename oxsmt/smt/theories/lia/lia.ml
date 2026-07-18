@@ -82,6 +82,11 @@ type 'tok t =
          at the current Final; read once by [model] (the adapter reads it immediately
          after the Final->Sat). Cleared at the start of every [check] so it can never
          satisfy a later, non-cube Sat with a stale point. *)
+  ; mutable eq_frames : (Term.t * Term.t * 'tok) list list
+    (* push/pop stack (head = current frame) of asserted positive Int equalities as
+         [(lhs, rhs, premise)], mirroring [report_frames]' framing so a [pop] drops
+         exactly the equalities asserted in the unwound frames. Read by
+         {!diophantine_conflict}. *)
   ; mutable cube_tried : bool
     (* the cube test runs at most ONCE per instance — the first non-integral Final, which
      for a batch query is the b&b root (fat feasible regions are cracked there). This
@@ -107,6 +112,7 @@ let create ctx =
   ; check_dirty = true
   ; overflows = 0
   ; last_cube_model = None
+  ; eq_frames = [ [] ]
   ; cube_tried = false
   }
 ;;
@@ -183,6 +189,55 @@ let var_for_combo t (pairs : (int * Rational.t) list) =
        s)
 ;;
 
+(* The simplex reading of a positive Int equality [a = b]. When the variable combination
+   of [combo(a) - combo(b)] cancels, the equality is a CONSTANT RELATION with no simplex
+   variable to bound, and the two sub-cases are DISTINCT and must not be conflated:
+   - [Trivially_true] ([0 = 0], the constants also match): a tautology — no constraint.
+   - [Trivially_false] ([0 = k], k <> 0): an UNSATISFIABLE relation — a live constraint.
+     Otherwise [Bounds] carries the pair of bounds [Σ coeff·x = cb - ca]. Callers pick the
+     policy per sub-case (see {!constraints_of_atom} and {!notify_equality}); collapsing
+     the two constant cases into one is a soundness hazard (silently dropping a [0 = k] is
+     a wrong-verdict hole). Uses the same var-creating {!combo_of_term} as the assert
+     path, so the classification matches assertion exactly — a lookup-only test could
+     disagree when a leaf's variable is not registered yet. *)
+type equality_reading =
+  | Bounds of (int * [ `Upper | `Lower ] * Delta.t) list
+  | Trivially_true
+  | Trivially_false
+
+(* The merged linear form of [a = b]: [Σ coeff·x = rhs] with [rhs = cb - ca], over
+   problem-var ids, exact [Rational] coefficients (never wraps). Shared by
+   {!equality_reading} (the simplex bound translation) and {!diophantine_conflict} (the
+   integer-feasibility test), so both read the SAME normalized combo. *)
+let equality_merged t (a : Term.t) (b : Term.t) : (int * Rational.t) list * Rational.t =
+  let pa, ca = combo_of_term t a in
+  let pb, cb = combo_of_term t b in
+  let merged =
+    let tbl = Hashtbl.create 16 in
+    let cur x =
+      try Hashtbl.find tbl x with
+      | Not_found -> Rational.zero
+    in
+    List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.add (cur x) c)) pa;
+    List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.sub (cur x) c)) pb;
+    Hashtbl.fold (fun x c acc -> if Rational.is_zero c then acc else (x, c) :: acc) tbl []
+  in
+  merged, Rational.sub cb ca
+;;
+
+let equality_reading t (a : Term.t) (b : Term.t) : equality_reading =
+  (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
+  let merged, rhs_rat = equality_merged t a b in
+  match merged with
+  | [] ->
+    (* no variable term: the equality is the constant relation [0 = rhs] *)
+    if Rational.is_zero rhs_rat then Trivially_true else Trivially_false
+  | _ :: _ ->
+    let var = var_for_combo t merged in
+    let rhs = Delta.of_rat rhs_rat in
+    Bounds [ var, `Upper, rhs; var, `Lower, rhs ]
+;;
+
 (* Read [atom] (an [Le] or Int [Eq]) at [polarity] into simplex assertions [f]. [f] is
    [`Upper]/[`Lower] applied to (var, δ-rhs). Returns the list of (var, sense, rhs) so
    callers can either assert (setting bounds) or register (recording for propagation). *)
@@ -203,52 +258,100 @@ let constraints_of_atom t (atom : Term.t) ~polarity
       [ var, `Lower, Delta.of_rat (Rational.sub Rational.one const) ]
   | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
     if not polarity then raise (Unsupported "LIA: disequality needs a trichotomy split");
-    (* a = b ==> combo(a) - combo(b) = 0 ==> Σ coeff·x = -(const_a - const_b) *)
-    let pa, ca = combo_of_term t a in
-    let pb, cb = combo_of_term t b in
-    (* Coefficient merges are exact [Rational] arithmetic (never wraps, promotes to Big),
-       so a coefficient sum of any size stays a correct merged constraint (supersedes the
-       pre-W2 int-boundary degrade of codex L5). *)
-    let merged =
-      let tbl = Hashtbl.create 16 in
-      let cur x =
-        try Hashtbl.find tbl x with
-        | Not_found -> Rational.zero
-      in
-      List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.add (cur x) c)) pa;
-      List.iter (fun (x, c) -> Hashtbl.replace tbl x (Rational.sub (cur x) c)) pb;
-      Hashtbl.fold
-        (fun x c acc -> if Rational.is_zero c then acc else (x, c) :: acc)
-        tbl
-        []
-    in
-    if merged = [] then raise (Unsupported "LIA: trivial equality (should be folded)");
-    let var = var_for_combo t merged in
-    (* rhs = -(ca - cb) = cb - ca *)
-    let rhs = Delta.of_rat (Rational.sub cb ca) in
-    [ var, `Upper, rhs; var, `Lower, rhs ]
+    (* The user assert/register path raises on BOTH constant sub-cases, exactly as before:
+       a [0 = k] is a live constraint that must not be dropped, and a [0 = 0] should have
+       been folded by preprocessing — hitting either here is a contract violation. *)
+    (match equality_reading t a b with
+     | Bounds cs -> cs
+     | Trivially_true | Trivially_false ->
+       raise (Unsupported "LIA: trivial equality (should be folded)"))
   | _ -> raise (Unsupported "LIA: atom is neither Le nor an Int equality")
+;;
+
+(* Apply already-computed (var, sense, rhs) bounds to the simplex, attributing each to
+   [premise]. Marks each touched var dirty for the next propagate delta. Callers wrap this
+   in {!guard_overflow} so a coefficient overflow during the preceding combo computation
+   poisons cleanly. *)
+let apply_bounds t cs ~premise =
+  List.iter
+    (fun (var, sense, rhs) ->
+       (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
+         mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
+         already-entailed bound is harmless: the delta skips its already-reported atoms.) *)
+       Hashtbl.replace t.dirty var ();
+       let _ : _ Simplex.conflict option =
+         match sense with
+         | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
+         | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
+       in
+       ())
+    cs
 ;;
 
 let assert_atom t atom ~polarity ~premise =
   ensure_live t;
   (* A new/tightened bound can make the tableau infeasible -> the next [check] must run. *)
   t.check_dirty <- true;
+  (* Record a positive Int equality for the integer-feasibility (gcd) test. Only the
+     positive polarity is a genuine equation [a = b]; a negated equality raises
+     [Unsupported] below (it is resolved by a trichotomy split, never asserted here). The
+     record is framed like [report_frames] so [pop] drops exactly this scope's equations. *)
+  (match (atom : Term.t).node with
+   | Eq (a, b) when polarity && not (Sort.equal a.sort Sort.bool) ->
+     (match t.eq_frames with
+      | fr :: rest -> t.eq_frames <- ((a, b, premise) :: fr) :: rest
+      | [] -> t.eq_frames <- [ [ a, b, premise ] ])
+   | _ -> ());
   guard_overflow t (fun () ->
-    List.iter
-      (fun (var, sense, rhs) ->
-         (* [var]'s bound may tighten -> registered atoms on it may become newly entailed;
-           mark it for the next [propagate] delta. (Marking on a no-op re-assertion of an
-           already-entailed bound is harmless: the delta skips its already-reported
-           atoms.) *)
-         Hashtbl.replace t.dirty var ();
-         let _ : _ Simplex.conflict option =
-           match sense with
-           | `Upper -> Simplex.assert_upper t.simplex var rhs (User premise)
-           | `Lower -> Simplex.assert_lower t.simplex var rhs (User premise)
-         in
-         ())
-      (constraints_of_atom t atom ~polarity))
+    apply_bounds t (constraints_of_atom t atom ~polarity) ~premise)
+;;
+
+(* ADR-0014 Stage 2 fabric [new_eq] entry: assert an EUF-entailed positive Int equality
+   [eq] into the tableau, attributed to [premise]. Differs from {!assert_atom} for a
+   positive equality ONLY in the [Trivially_true] ([0 = 0]) case: the merge callback fires
+   whenever the e-graph unions two Int classes, and congruence can RE-SURFACE an equality
+   LIA already relates (its variable combination already cancels to [0 = 0]). That
+   re-notification is a tautology — no LIA constraint — so it is a NO-OP here instead of
+   the {!Unsupported} raise that would degrade the whole query to [unknown].
+
+   The [Trivially_false] ([0 = k], k <> 0) case is deliberately NOT no-oped: that relation
+   is UNSATISFIABLE, so silently dropping it would be a wrong-verdict hole. It keeps
+   raising {!Unsupported} exactly like {!assert_atom} — the same fail-closed [unknown] as
+   trunk, never a laundered [sat]. (A genuine [0 = k] merge means the branch is
+   inconsistent; the combinator's find_disagreement/model-agreement split still surfaces
+   and splits the pair, which reaches this same raise, so behaviour is unchanged and
+   sound.)
+
+   [Bounds] asserts as usual. When [Context.eq] already FOLDED the equality to a boolean
+   constant (it folds two equal constants to [true] and two unequal ones to [false]), the
+   [true] fold is a tautology (no-op) but the [false] fold is [Context.eq c1 c2] with
+   [c1 <> c2] — an UNSATISFIABLE equality — so it fails closed exactly like
+   [Trivially_false] (symmetric; a silent no-op there is the same wrong-verdict hole in
+   the folded path). *)
+let notify_equality t (eq : Term.t) ~premise =
+  ensure_live t;
+  match eq.node with
+  | Eq (a, b) when not (Sort.equal a.sort Sort.bool) ->
+    t.check_dirty <- true;
+    guard_overflow t (fun () ->
+      match equality_reading t a b with
+      | Trivially_true -> () (* [0 = 0] re-notification: no LIA constraint, skip *)
+      | Trivially_false ->
+        (* [0 = k], k <> 0: unsatisfiable — must NOT be silently dropped (wrong-verdict
+           hole). Fail closed, exactly like {!assert_atom}. *)
+        raise (Unsupported "LIA: trivial equality (should be folded)")
+      | Bounds cs -> apply_bounds t cs ~premise)
+  | Bool_const true ->
+    () (* [Context.eq] folded a true equality: tautology, no constraint *)
+  | Bool_const false ->
+    (* [Context.eq] folded [c1 = c2], c1 <> c2: an unsatisfiable equality. Fail closed
+       (symmetric with [Trivially_false]); never silently drop it. *)
+    raise (Unsupported "LIA: trivial equality (should be folded)")
+  | _ ->
+    (* Not an Int equality (defensive: the combinator only notifies Int-class merges);
+       fall back to the strict assert so any genuinely unhandled shape still degrades
+       loudly. *)
+    assert_atom t eq ~polarity:true ~premise
 ;;
 
 let register_atom t (atom : Term.t) =
@@ -450,6 +553,140 @@ let fixed_bounds t term =
   | _ -> None
 ;;
 
+(* Integer-feasibility (GCD / Diophantine) test on a single asserted equality.
+
+   The rational simplex certifies ℚ-feasibility, but an equation like [4·s + 4·x = 6] is
+   ℚ-feasible ([s=1.5]) while ℤ-INFEASIBLE (its integer combinations are multiples of
+   [gcd(4,4)=4], which does not divide 6). Without this test the b&b driver
+   ({!suggest_branch}) wanders indefinitely on such a row. This is a standard sound
+   integer-infeasibility certificate, ORTHOGONAL to the (refuted) cross-theory propagation
+   levers: it only ever REPORTS A CONFLICT on a genuinely ℤ-infeasible state; it never
+   merges classes, injects atoms, or otherwise perturbs the search.
+
+   For each recorded positive Int equality [Σ cᵢ·xᵢ = rhs], substitute every variable the
+   simplex has PINNED to a single integer value [vᵢ] (via {!fixed_bounds}, whose two
+   oriented-bound tokens prove [xᵢ = vᵢ]); the residual equation over the still-free
+   variables is [Σ_free cⱼ·xⱼ = rhs − Σ_fixed cᵢ·vᵢ]. All coefficients and the residual
+   are integer-valued (combo coefficients come from the normalized [Arith] form; fixed
+   values are integers). If [gcd(free cⱼ)] does not divide the residual, no integer
+   assignment of the free variables satisfies the equation: emit a conflict whose premises
+   are the equality literal together with the oriented-bound tokens of every substituted
+   variable (that conjunction is ℤ-unsatisfiable). A fully-fixed equation is left to the ℚ
+   simplex (an inconsistent constant relation is already a rational conflict). Any
+   [Rational] projection overflow or a non-integer coefficient (out of the integer
+   fragment) skips the row soundly (no conflict claimed).
+
+   [farkas] carries no rational multiplier here (the state is ℚ-feasible, so no Farkas
+   vector exists); the field is filled with a same-length placeholder and is never read on
+   this path (the adapter forwards only the premise set + rule tag, and {!externalize} —
+   the sole farkas consumer — is not on this path). The certificate/replay layer needs a
+   dedicated Diophantine rule tag; that is a follow-up (see the lane log). *)
+let diophantine_conflict t : 'tok conflict option =
+  ensure_live t;
+  if Simplex.is_poisoned t.simplex
+  then None
+  else (
+    let term_of_id = Hashtbl.create 64 in
+    Dynarray.iter (fun (id, term) -> Hashtbl.replace term_of_id id term) t.problem_vars;
+    let gcd_int a b =
+      let rec go a b = if b = 0 then a else go b (a mod b) in
+      go (abs a) (abs b)
+    in
+    (* [fixed]: var id -> (integer value, the trail-literal premises that pin it). Seeded
+       with the SIMPLEX-DIRECT fixings ([fixed_bounds], two oriented-bound tokens), then
+       extended by fixpoint over the asserted equations: a var determined transitively
+       through the equation system (e.g. [arg0 = fmt0 - distance] with [fmt0], [distance]
+       fixed) is NOT a direct simplex bound, so this equation-level closure is what makes
+       the substitution complete. Each closure entry's premises accumulate the equation's
+       literal plus the premises of every fixed var it was solved from — so a conflict
+       built from these premises cites only real trail literals whose conjunction is
+       ℤ-unsatisfiable. *)
+    let fixed : (int, Rational.t * 'tok list) Hashtbl.t = Hashtbl.create 64 in
+    Dynarray.iter
+      (fun (id, term) ->
+         match fixed_bounds t term with
+         | Some (v, lo, hi) -> Hashtbl.replace fixed id (v, [ lo; hi ])
+         | None -> ())
+      t.problem_vars;
+    (* Rows: each asserted equality's merged linear form + rhs + its literal. Malformed /
+       out-of-fragment rows are dropped soundly (no conflict claimed for them). *)
+    let rows =
+      List.filter_map
+        (fun (a, b, tok) ->
+           try
+             let merged, rhs = equality_merged t a b in
+             if
+               List.for_all (fun (_, c) -> Rational.is_int c) merged
+               && Rational.is_int rhs
+             then Some (merged, rhs, tok)
+             else None
+           with
+           | Exit | Rational.Overflow -> None)
+        (List.concat t.eq_frames)
+    in
+    let conflict = ref None in
+    (* Split a row by the current [fixed] map: residual (rhs minus the fixed
+       contributions), the free (var,coeff) list, and the accumulated premises (row
+       literal + every used fixed var's premises). *)
+    let split_row (merged, rhs, tok) =
+      let residual = ref rhs in
+      let prems = ref [ tok ] in
+      let free = ref [] in
+      List.iter
+        (fun (id, c) ->
+           match Hashtbl.find_opt fixed id with
+           | Some (v, ps) ->
+             residual := Rational.sub !residual (Rational.mul c v);
+             prems := List.rev_append ps !prems
+           | None -> free := (id, c) :: !free)
+        merged;
+      !residual, !free, !prems
+    in
+    (* One closure sweep: for each row solve/deduce, returning whether [fixed] grew. Sets
+       [conflict] on the first ℤ-infeasible row found. *)
+    let sweep () =
+      let changed = ref false in
+      List.iter
+        (fun row ->
+           if !conflict = None
+           then (
+             try
+               let residual, free, prems = split_row row in
+               match free with
+               | [] ->
+                 (* fully fixed: the equation must hold; a nonzero residual contradicts the
+                   substituted values. *)
+                 if not (Rational.is_zero residual)
+                 then conflict := Some { premises = prems; farkas = [] }
+               | [ (id, c) ] ->
+                 (* [c·x = residual] pins x. Non-integer quotient ⇒ no integer x ⇒
+                   conflict; else record x as fixed (premises = this row's). *)
+                 let q = Rational.div residual c in
+                 if not (Rational.is_int q)
+                 then conflict := Some { premises = prems; farkas = [] }
+                 else if not (Hashtbl.mem fixed id)
+                 then (
+                   Hashtbl.replace fixed id (q, prems);
+                   changed := true)
+               | _ ->
+                 (* ≥2 free vars: gcd test. Σ_free cⱼ·xⱼ = residual has an integer solution
+                   only if gcd(cⱼ) | residual. *)
+                 let g =
+                   List.fold_left (fun acc (_, c) -> gcd_int acc (Rational.num c)) 0 free
+                 in
+                 if g <> 0 && Rational.num residual mod g <> 0
+                 then conflict := Some { premises = prems; farkas = [] }
+             with
+             | Exit | Rational.Overflow -> ()))
+        rows;
+      !changed
+    in
+    (* Iterate to a fixpoint (bounded: [fixed] only grows, ≤ #vars) or first conflict. *)
+    let rec loop () = if !conflict = None && sweep () then loop () in
+    loop ();
+    !conflict)
+;;
+
 (* ADR-0014 Stage 1b F1-SEM independent oriented-bound accessor (§B.1 C1/Rev5-B3). Returns
    ONE oriented bound of [term] as [(token, value)] with NO cross-side equality bundling.
    The fabric's semantic re-verifier consumes it to re-derive, by a path independent of
@@ -549,15 +786,14 @@ let suggest_branch t =
   match first_non_integer t with
   | None -> None
   | Some (term, _, d) ->
-    let f = Rational.floor (Delta.c_part d) in
-    (* [f + 1] via [Rational] so a [max_int] floor degrades to [unknown] rather than
-       wrapping (the projection raises [Rational.Overflow], caught by [guard_overflow]). *)
-    let fp1 =
-      guard_overflow t (fun () ->
-        Rational.floor (Rational.add (Rational.of_int f) Rational.one))
-    in
-    let le_atom = Context.le t.ctx term (Context.int_const t.ctx f) in
-    let ge_atom = Context.ge t.ctx term (Context.int_const t.ctx fp1) in
+    (* Arbitrary-precision branch point (ADR-0018): [floor_bigint] never projects to
+       int63, so a uint256-range fractional value branches instead of degrading to
+       [unknown]. The branch bounds are built as [Bigint] constants
+       ([Context.int_const_big]); the term layer is already arbitrary-precision. *)
+    let f = Rational.floor_bigint (Delta.c_part d) in
+    let fp1 = Oxsmt_core.Bigint.add f Oxsmt_core.Bigint.one in
+    let le_atom = Context.le t.ctx term (Context.int_const_big t.ctx f) in
+    let ge_atom = Context.ge t.ctx term (Context.int_const_big t.ctx fp1) in
     Some (le_atom, ge_atom)
 ;;
 
@@ -578,6 +814,33 @@ let model t =
   match t.last_cube_model with
   | Some m -> m
   | None -> extract_model t
+;;
+
+(* Arbitrary-precision model extraction (ADR-0018): identical to {!extract_model} but the
+   integer value is projected via {!Rational.num_bigint}, which never raises on a >int63
+   value — so a model assigning a variable a uint256-range value is representable at the
+   [Bigint] model sink instead of overflowing to [unknown]. The int-tier drivers (B&B,
+   cube) keep {!extract_model}/{!model}; only the model boundary consumed by the
+   combinator ({!Lia_adapter.model} -> [Model.Int]) needs the Bigint form. *)
+let extract_model_bigint t =
+  Dynarray.fold_left
+    (fun acc (id, term) ->
+       let d = Simplex.value t.simplex id in
+       if not (value_is_integer d)
+       then failwith "Lia.model_bigint: variable is not integral (call after Int_sat)";
+       (term, Rational.num_bigint (Delta.c_part d)) :: acc)
+    []
+    t.problem_vars
+  |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
+;;
+
+let model_bigint t =
+  ensure_live t;
+  match t.last_cube_model with
+  (* A cube model's values are the Bromberger–Fleury rounded integers, already native and
+     small; widen them exactly. *)
+  | Some m -> List.map (fun (term, v) -> term, Oxsmt_core.Bigint.of_int v) m
+  | None -> extract_model_bigint t
 ;;
 
 (* Bromberger-Fleury unit cube test (see {!Simplex.cube_test}): after a {!Sat_candidate}
@@ -742,7 +1005,8 @@ let propagate t =
 let push t =
   ensure_live t;
   Simplex.push t.simplex;
-  t.report_frames <- [] :: t.report_frames
+  t.report_frames <- [] :: t.report_frames;
+  t.eq_frames <- [] :: t.eq_frames
 ;;
 
 let pop t n =
@@ -771,6 +1035,20 @@ let pop t n =
   in
   t.report_frames
   <- (match drop n t.report_frames with
+      | [] -> [ [] ]
+      | fs -> fs);
+  (* Drop the equalities recorded in the unwound frames (plain frame drop; no per-entry
+     undo needed — they carry no simplex state, only the recorded triple). *)
+  let rec drop_eq k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | _ :: rest -> drop_eq (k - 1) rest
+      | [] -> [])
+  in
+  t.eq_frames
+  <- (match drop_eq n t.eq_frames with
       | [] -> [ [] ]
       | fs -> fs)
 ;;

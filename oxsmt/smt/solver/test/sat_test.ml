@@ -741,7 +741,333 @@ let test_reducedb_engagement () =
     (c < 10000)
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* Flat clause arena — reduceDB RELOCATION stress (task #48 W3, the committed RED). The
+   arena identifies a clause by an integer cref; [reduce_db] rebuilds a fresh arena from
+   the kept clauses and must remap EVERY live cref — both holder classes: every watch list
+   AND every [Implied_by] reason. This test forces many reduceDB cycles with a full major
+   GC interleaved between them (via the budget-tick hook), so relocation runs under
+   collection, and pins verdict + the exact counter trio (counted-identical to the
+   pre-arena core) on a hard UNSAT instance, plus model validity on a hard SAT instance.
+
+   DISCRIMINATION (a regression test must fail against buggy code): a remap-class-skip
+   mutant in [reduce_db] — dropping the watch-list rewrite OR the reason-array rewrite —
+   leaves stale crefs after the first relocation. Propagation / conflict analysis then
+   reads a wrong or out-of-range clause, so the solve changes a counter, flips the
+   verdict, or crashes out-of-bounds — and this test goes RED. Verified against both
+   mutants; see logs/sat-arena-build-log.md. *)
+
+(* PHP(8,7) with ONE at-most-one clause dropped: satisfiable (the freed hole 0 takes two
+   pigeons) yet still conflict-heavy, so reduceDB fires. Returns the solver AND the clause
+   list (1-based DIMACS) so the reported model can be validated against every clause. *)
+let php_sat_minus_one n =
+  let s = Sat.create () in
+  let clauses = ref [] in
+  let pv = Array.make_matrix (n + 1) n 0 in
+  for i = 0 to n do
+    for h = 0 to n - 1 do
+      pv.(i).(h) <- Sat.new_var s
+    done
+  done;
+  let addc lits =
+    clauses := List.map (fun (v, pos) -> if pos then v + 1 else -(v + 1)) lits :: !clauses;
+    Sat.add_clause
+      s
+      (List.map (fun (v, pos) -> if pos then Sat.pos v else Sat.neg v) lits)
+  in
+  for i = 0 to n do
+    addc (List.init n (fun h -> pv.(i).(h), true))
+  done;
+  let dropped = ref false in
+  for h = 0 to n - 1 do
+    for i = 0 to n do
+      for j = i + 1 to n do
+        if !dropped
+        then addc [ pv.(i).(h), false; pv.(j).(h), false ]
+        else dropped := true (* skip the first at-most-one clause => SAT *)
+      done
+    done
+  done;
+  s, List.rev !clauses
+;;
+
+(* Digest of the FULL certificate event stream of a traced solve, in emission order and
+   exact per-event byte form (ids, literal order, origins/roles, terminal conclusion). A
+   relocation bug that corrupted a clause id or literal order — or a change to what the
+   arena emits — moves this digest; pinning it makes the committed test prove cert-byte
+   stability WITHOUT the external cert harness (rider 2). *)
+let cert_stream_digest build =
+  let buf = Buffer.create 4096 in
+  let cl a = show_ints (List.map dimacs_of_lit (Array.to_list a)) in
+  let s = build () in
+  Sat.set_trace
+    s
+    (Some
+       { Sat.on_input =
+           (fun ~id ~clause ~origin ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf
+                  "I %d %s %s\n"
+                  id
+                  (match origin with
+                   | Sat.Query -> "Q"
+                   | Sat.Theory_lemma -> "TL")
+                  (cl clause)))
+       ; on_unit =
+           (fun ~id ~lit ->
+             Buffer.add_string buf (Printf.sprintf "U %d %d\n" id (dimacs_of_lit lit)))
+       ; on_learned =
+           (fun ~id ~clause ~antecedents ~btlevel ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf
+                  "L %d bt=%d %s ants=%s\n"
+                  id
+                  btlevel
+                  (cl clause)
+                  (show_ints antecedents)))
+       ; on_theory_clause =
+           (fun ~id ~clause ~role ->
+             Buffer.add_string
+               buf
+               (Printf.sprintf
+                  "T %d %s %s\n"
+                  id
+                  (match role with
+                   | Sat.Reason -> "R"
+                   | Sat.Conflict -> "C")
+                  (cl clause)))
+       ; on_unsat =
+           (fun c ->
+             Buffer.add_string
+               buf
+               (match c with
+                | Sat.Root_empty { input_id } ->
+                  Printf.sprintf "X root_empty %d\n" input_id
+                | Sat.Level0_conflict { conflict_id } ->
+                  Printf.sprintf "X level0 %d\n" conflict_id
+                | Sat.Failed_assumption { antecedents } ->
+                  Printf.sprintf "X failed %s\n" (show_ints antecedents)))
+       });
+  ignore (Sat.solve s : Sat.result);
+  Digest.to_hex (Digest.string (Buffer.contents buf))
+;;
+
+let test_arena_reduce_db_stress () =
+  (* Interleave a full major GC every 500 conflicts, so the arena rebuild + cref remap in
+     [reduce_db] runs across a collection. *)
+  let with_gc_hook s =
+    let n = ref 0 in
+    Sat.set_budget_tick
+      s
+      (Some
+         (fun () ->
+           incr n;
+           if !n mod 500 = 0 then Gc.full_major ()))
+  in
+  (* UNSAT leg — PHP(8,7): >4000 conflicts, reduceDB fires ~10x. Pin verdict + exact
+     counters, and re-run to pin determinism under forced GC. *)
+  let run_unsat () =
+    let s = php_solver 7 in
+    with_gc_hook s;
+    let r = Sat.solve s in
+    let st = Sat.stats s in
+    r, st.Sat.Stats.conflicts, st.Sat.Stats.decisions, st.Sat.Stats.propagations
+  in
+  let r1, c1, d1, p1 = run_unsat () in
+  let r2, c2, d2, p2 = run_unsat () in
+  check "arena-stress: PHP(8,7) unsat under forced-GC reduceDB relocation" (r1 = Sat.Unsat);
+  (* EXACT counter pin (rider 2): the trunk-9052a55287 conflict/decision/propagation
+     counts for PHP(8,7) — 4141 conflicts is the documented trunk value (see
+     test_reducedb_engagement). The arena is counted-identical, so it must reproduce them
+     EXACTLY; reduceDB fires ~10x here, so a relocation bug that perturbed the search
+     moves a counter and goes RED. Update only alongside a deliberate search-heuristic
+     change. *)
+  check
+    (Printf.sprintf
+       "arena-stress: PHP(8,7) exact counters trunk-identical (c=%d d=%d p=%d)"
+       c1
+       d1
+       p1)
+    (c1 = 4141 && d1 = 5009 && p1 = 47786);
+  check
+    "arena-stress: deterministic verdict+counters across two forced-GC runs"
+    (r1 = r2 && c1 = c2 && d1 = d2 && p1 = p2);
+  (* CERT-BYTE pin (rider 2): the full certificate event stream of a traced PHP(8,7) solve
+     (which fires reduceDB relocation) digests to a value captured from the
+     dual-review-approved arena build (its 33/33 cert-byte match vs trunk was verified in
+     review). Any change to emitted ids, literal order, event order, or the terminal
+     conclusion — a relocation bug corrupting a clause id included — moves this digest. *)
+  let dg = cert_stream_digest (fun () -> php_solver 7) in
+  check
+    (Printf.sprintf "arena-stress: cert event-stream digest = pinned (got %s)" dg)
+    (String.equal dg "5c3e42f6284274caf63d6e114e8dba41");
+  (* SAT leg — PHP(8,7) minus one AMO clause: conflict-heavy sat. The reported model must
+     satisfy EVERY clause; a relocation bug that corrupts propagation drives a wrong-SAT
+     model that falsifies a clause (or a wrong verdict / crash). *)
+  let s, clauses = php_sat_minus_one 7 in
+  with_gc_hook s;
+  let r = Sat.solve s in
+  check "arena-stress: PHP(8,7)-minus-one is sat" (r = Sat.Sat);
+  match r with
+  | Sat.Sat ->
+    check
+      "arena-stress: sat model satisfies every clause"
+      (model_satisfies clauses (Sat.model s))
+  | Sat.Unsat -> ()
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Branch-filter hook (sat.mli set_branch_filter). Two discriminating checks the relevancy
+   lane rides on:
+   (a) FIRING oracle — a filter that forbids a set of otherwise-free decision vars
+       actually SUPPRESSES their decisions (the search stops branching once only forbidden
+       vars remain) while the verdict is unchanged. Must be RED against a no-op filter
+       (the vacuous-feature guard): a filter that changes nothing would leave the decision
+       count equal, so the strict inequality below fails.
+   (b) PARITY — installing an allow-all filter [fun _ -> true] reproduces the no-filter
+       search exactly (same verdict + conflicts/decisions/propagations + model), so the
+       [Some]-branch machinery (stash / re-insert) does not perturb search when nothing is
+       filtered; combined with [pick_branch]'s structural [None] arm this is the
+       bit-identical-when-unset contract. *)
+
+(* Three unit clauses (1)(2)(3) force vars 1..3 at level 0 (0 branch-decisions); vars
+   4,5,6 are allocated but appear in no clause, so the only branch-decisions are on
+   {4 ,5,6}
+   . *)
+let build_free_var_instance () =
+  let s = Sat.create () in
+  for _ = 1 to 6 do
+    ignore (Sat.new_var s : Sat.var)
+  done;
+  Sat.add_clause s [ lit 1 ];
+  Sat.add_clause s [ lit 2 ];
+  Sat.add_clause s [ lit 3 ];
+  s
+;;
+
+let test_branch_filter_firing () =
+  (* Baseline: no filter. The three free vars each get a branch-decision. *)
+  let s0 = build_free_var_instance () in
+  check "branch-filter firing: baseline sat" (Sat.solve s0 = Sat.Sat);
+  let d0 = (Sat.stats s0).Sat.Stats.decisions in
+  check "branch-filter firing: baseline decides the free vars" (d0 >= 3);
+  (* Filter forbids the three free vars (0-based 3,4,5). They must never be decided, so
+     the search stops branching and hands off with them unassigned. *)
+  let s1 = build_free_var_instance () in
+  Sat.set_branch_filter s1 (Some (fun v -> v < 3));
+  check "branch-filter firing: still sat" (Sat.solve s1 = Sat.Sat);
+  let d1 = (Sat.stats s1).Sat.Stats.decisions in
+  check
+    (Printf.sprintf "branch-filter firing: suppresses decisions (%d < %d)" d1 d0)
+    (d1 < d0);
+  check "branch-filter firing: forbidden vars undecided => zero branch-decisions" (d1 = 0)
+;;
+
+let test_branch_filter_parity () =
+  let mk () =
+    lcg := 0xC0FFEE1234;
+    build 12 (List.init 40 (fun _ -> random_clause 12))
+  in
+  let s_none = mk () in
+  let s_all = mk () in
+  Sat.set_branch_filter s_all (Some (fun _ -> true));
+  let r_none = Sat.solve s_none
+  and r_all = Sat.solve s_all in
+  check "branch-filter parity: same verdict" (r_none = r_all);
+  let a = Sat.stats s_none
+  and b = Sat.stats s_all in
+  check
+    "branch-filter parity: same conflicts"
+    (a.Sat.Stats.conflicts = b.Sat.Stats.conflicts);
+  check
+    "branch-filter parity: same decisions"
+    (a.Sat.Stats.decisions = b.Sat.Stats.decisions);
+  check
+    "branch-filter parity: same propagations"
+    (a.Sat.Stats.propagations = b.Sat.Stats.propagations);
+  if r_none = Sat.Sat
+  then check "branch-filter parity: same model" (Sat.model s_none = Sat.model s_all)
+;;
+
+(* (c) EXCEPTION-SAFETY (codex S1). The filter is called mid-scan on a var already popped
+   from the decision heap. If it RAISES, [pick_branch] must still re-insert every popped
+   var — the stashed ones AND the one in flight — before the exception propagates;
+   otherwise those vars are lost from the heap and, being untrailed, are NOT restored by
+   [cancel_until 0], so a later filter-free solve on the same core can return a model that
+   omits them and falsifies a clause over them (a wrong-SAT reachable from this public
+   API). RED against the pre-fix core (which re-inserts only after [go] returns normally). *)
+let test_branch_filter_exception_safe () =
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  let b = Sat.new_var s in
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  (* Stash the first var the filter is asked about, then raise on the second: against the
+     unfixed core this loses BOTH (the stashed [a] and the in-flight [b]). *)
+  let calls = ref 0 in
+  Sat.set_branch_filter
+    s
+    (Some
+       (fun _ ->
+         incr calls;
+         if !calls >= 2 then raise Exit else false));
+  (match Sat.solve s with
+   | (_ : Sat.result) ->
+     check "branch-filter exn-safe: filter raise propagates out of solve" false
+   | exception Exit -> ());
+  (* Clear the filter and re-solve. With the fix [a] and [b] are back in the heap, so the
+     core finds a genuine model of (a ∨ b). Against the unfixed core the heap is empty and
+     the no-theory path returns Sat with a = b = false, falsifying the clause. *)
+  Sat.set_branch_filter s None;
+  check "branch-filter exn-safe: re-solve sat" (Sat.solve s = Sat.Sat);
+  check "branch-filter exn-safe: model satisfies (a ∨ b)" (Sat.value s a || Sat.value s b)
+;;
+
+(* A10: with OXSMT_SATPRE off (the default this executable runs under), [set_eliminable]
+   is inert — marking variables must not change the verdict, model, or the counter trio
+   versus a run that never marks anything. Guards the "bit-identical when off" contract at
+   the unit level; the firing / reconstruction behaviour with the gate ON lives in
+   satpre_test.exe (run with OXSMT_SATPRE=1). *)
+let test_eliminable_inert_when_off () =
+  let clauses = [ [ -1; 2 ]; [ 1; -2; 3 ]; [ -3; 4 ]; [ 1; 2; -4 ]; [ -1; -3; 4 ] ] in
+  let run mark =
+    let s = build 4 clauses in
+    if mark then List.iter (fun v -> Sat.set_eliminable s v) [ 0; 1; 2; 3 ];
+    let r = Sat.solve s in
+    let st = Sat.stats s in
+    r, Array.to_list (Sat.model s), (st.conflicts, st.decisions, st.propagations)
+  in
+  let r0, m0, c0 = run false in
+  let r1, m1, c1 = run true in
+  check "eliminable-off: same verdict" (r0 = r1);
+  check "eliminable-off: same model" (m0 = m1);
+  check "eliminable-off: same counters" (c0 = c1)
+;;
+
+(* OXSMT_CHRONO and a decision branch filter (relevancy) are mutually exclusive at the
+   [Sat.solve] entry (task #41 Stage 1), so the branch-filter tests — which install a
+   filter and solve — must not run under chronological backtracking; they would trip that
+   guard and abort the whole executable. They exercise the DEFAULT (non-CB) relevancy
+   path, which is where the firing they catch actually happens, so skipping them under CB
+   loses no coverage. Same on-value vocabulary as [Sat]'s own [chrono_from_env]. *)
+let chrono_on =
+  match Sys.getenv_opt "OXSMT_CHRONO" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let () =
+  test_eliminable_inert_when_off ();
+  if chrono_on
+  then
+    Printf.printf
+      "sat_test: OXSMT_CHRONO set => skipping branch-filter tests (CB and a branch \
+       filter are mutually exclusive; they run in the default config)\n"
+  else (
+    test_branch_filter_firing ();
+    test_branch_filter_parity ();
+    test_branch_filter_exception_safe ());
   test_lbd_of_levels ();
   test_rephase_engagement ();
   test_reducedb_engagement ();
@@ -749,6 +1075,7 @@ let () =
   test_reduce_deletions_worst_half_and_locked ();
   test_rephase_schedule ();
   test_search_machinery_determinism ();
+  test_arena_reduce_db_stress ();
   test_dimacs_strict ();
   test_budget_tick_exception_safety ();
   test_analyze_multi ();

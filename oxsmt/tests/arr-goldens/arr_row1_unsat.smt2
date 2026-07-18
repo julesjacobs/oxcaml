@@ -1,0 +1,12 @@
+(set-info :smt-lib-version 2.6)
+(set-logic QF_AX)
+(set-info :status unsat)
+; ROW1: select (store a i v) i = v is a tautology, so its negation is unsat.
+(declare-sort I 0)
+(declare-sort E 0)
+(declare-fun a () (Array I E))
+(declare-fun i () I)
+(declare-fun v () E)
+(assert (not (= (select (store a i v) i) v)))
+(check-sat)
+(exit)

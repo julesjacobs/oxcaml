@@ -5,9 +5,14 @@
    per-failure reason — honest numbers (a checker that finds an emission/pipeline gap is a
    SUCCESS, not a failure to hide).
 
-   Session Unsat is always the E3 (failed-assumption / selector) exit — the base frame is
-   selector-guarded (session.ml), so E1/E2/E4 are unreachable here and are exercised by
-   the raw-Sat fixture suite (checker_test) instead. The checker realizes the §1.0
+   The Session Unsat exit depends on the base-frame encoding (session.ml). Under the
+   default base-l0 encoding (OXSMT_BASE_L0 default-ON) the base frame is forced TRUE by a
+   permanent level-0 unit, so a level-0 refutation concludes E2 (a Boolean level-0
+   conflict) or the base-l0 empty-core E3 (a theory level-0 conflict, base_l0_cert_mode),
+   while deeper refutations and any pushed-frame selectors give the E3 failed-assumption
+   exit. Under the opt-out (OXSMT_BASE_L0=0) the base frame is selector-assumed, so
+   Session Unsat is always the E3 failed-assumption / selector exit. E1/E4 are exercised
+   by the raw-Sat fixture suite (checker_test) instead. The checker realizes the §1.0
    selector strip by seeding the active selector assumptions true.
 
    Usage: cert_corpus_gate FILE.smt2 ... (each a single-check-sat, push/pop-free batch)
@@ -47,13 +52,22 @@ let run_file path : outcome * outcome option =
     let s = Session.create ~max_effort:200_000 () in
     let rec_ = Recorder.create () in
     Session.install_cert_trace s (Some (Recorder.trace rec_));
-    (match Parser.parse_into (Session.env s) (Session.context s) src with
+    (match
+       Parser.parse_into
+         ~internal_mint:(Session.parse_minter s)
+         (Session.env s)
+         (Session.context s)
+         src
+     with
      | exception ex -> Error ("parse: " ^ Printexc.to_string ex), None
      | parsed ->
        (* install datatype shapes before asserting, so a QF_DT/QF_UFDT file runs the DT
           theory on the cert path too (else it degrades to unknown here while the product
           CLI decides it — a latent driver divergence). Empty on a non-datatype file. *)
        Session.set_datatypes s parsed.Parser.datatypes;
+       (* likewise the arrays registry, so an array file's select/store atoms classify and
+          its unsat conflicts emit theory clauses that replay as theory leaves. *)
+       Session.set_arrays s parsed.Parser.arrays;
        (match Session.assert_presolved s parsed.Parser.assertions with
         | exception ex -> Error ("assert: " ^ Printexc.to_string ex), None
         | () ->

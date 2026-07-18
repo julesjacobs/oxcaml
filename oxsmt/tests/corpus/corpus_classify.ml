@@ -191,8 +191,19 @@ let () =
       then "unknown-incremental", 0
       else (
         let s = Session.create ?max_effort:!max_effort () in
-        match Parser.parse_into (Session.env s) (Session.context s) src with
+        match
+          Parser.parse_into
+            ~internal_mint:(Session.parse_minter s)
+            (Session.env s)
+            (Session.context s)
+            src
+        with
         | exception (Parser.Malformed _ | Parser.Unsupported _) -> "parse-fail", 0
+        (* ROBUSTNESS / fail-closed (I8): an unmapped reader exception on untrusted corpus
+           input ([Failure]/[Invalid_argument]/[Stack_overflow]/...) degrades to a clean
+           parse-fail rather than crashing (matches oxsmt_cli's [unknown] degrade — the
+           shared "error instead of degrade" fix; keeps the two drivers equivalent). *)
+        | exception _ -> "parse-fail", 0
         | parsed ->
           (* W1b: submit the whole assertion set through the equality-elimination
              presolve, exactly as the solver CLI's batch path does (oxsmt_cli.ml

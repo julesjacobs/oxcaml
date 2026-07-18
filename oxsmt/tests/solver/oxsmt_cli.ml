@@ -163,11 +163,24 @@ let render_model (sort_cards, bindings) =
    never emit a [sat] the harness cannot transport or the evaluator cannot self-certify.
    [max_effort] threads the board #60 counted cutoff (a cut-off goal is a plain [unknown]
    block, so the output format is unchanged). *)
-let solve_batch ?max_effort ?(presolve = true) src =
+let solve_batch ?max_effort ?(presolve = true) sexps =
   let s = Session.create ?max_effort () in
-  match Parser.parse_into (Session.env s) (Session.context s) src with
+  match
+    Parser.parse_into_sexps
+      ~internal_mint:(Session.parse_minter s)
+      (Session.env s)
+      (Session.context s)
+      sexps
+  with
   | exception (Parser.Malformed _ | Parser.Unsupported _) ->
     (* out-of-subset or unparseable as a query -> sound unknown (I8) *)
+    unknown_block
+  | exception _ ->
+    (* ROBUSTNESS / fail-closed (I8): the reader maps its expected rejections to
+       [Malformed]/[Unsupported], but an unmapped exception on untrusted corpus input
+       ([Failure]/[Invalid_argument]/[Stack_overflow]/...) must still degrade to a sound
+       [unknown] rather than crash the driver (the "error instead of degrade" robustness
+       item). [unknown] is always sound; a crash is never acceptable. *)
     unknown_block
   | parsed when not (Oxsmt_query_loader.assert_all ~presolve s parsed) ->
     (* W1b: the shared loader submits the ground batch through the equality-elimination
@@ -213,7 +226,17 @@ let solve_batch ?max_effort ?(presolve = true) src =
                 be malformed solver output; degrade this goal to a sound [unknown] with no
                 model rather than crash the CLI. *)
              block "unknown" None)
-        | None -> block "unknown" None)
+        | None ->
+          (* A DATATYPES or ARRAYS session self-checks its [Sat] with the in-process
+             constructor-tree / array-map checker (Session.commit_sat), but the scalar
+             [model] type cannot carry a tree or an array map, so [get_model] is [None]
+             here (model transport to the external eval is a follow-up). Report [sat] on
+             the verdict — matching the headline classifier, which decides on the verdict
+             alone — rather than downgrading to [unknown]. A modelless [Sat] from neither
+             theory (a UF table we could not render) stays the sound [unknown]. *)
+          if Session.uses_datatypes s || Session.uses_arrays s
+          then block "sat" None
+          else block "unknown" None)
      | Session.Unsat -> block "unsat" None
      | Session.Unknown -> block "unknown" None)
 ;;
@@ -257,7 +280,7 @@ let () =
   let blocks =
     if incremental || n_checks <> 1
     then List.init n_checks (fun _ -> unknown_block)
-    else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve src ]
+    else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve sexps ]
   in
   List.iter print_block blocks
 ;;

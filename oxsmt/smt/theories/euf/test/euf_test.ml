@@ -333,6 +333,45 @@ let test_propagation () =
   | _ -> check "prop-: exactly one implied" false
 ;;
 
+(* 3c. distinct_witness witness IDENTITY (task #33 O(1) witness index). When SEVERAL
+   disequalities separate the same class pair, the cited witness must be the
+   EARLIEST-asserted one — byte-identical to the old full assertion-order scan — so
+   explanation premises (hence learned clauses / counted-metric identity) are unchanged by
+   the cache. Here diseq [c1<>c2] (premise 20) is asserted first (then a=c1:21, b=c2:22)
+   and a redundant [a<>b] (premise 40) later; both separate class(a) from class(b).
+   [propagate] builds the witness index and the reported [a=b]-false explanation must cite
+   the FIRST witness — premises 20,21,22 — NOT premise 40. DISCRIMINATION: a
+   LAST-writer-wins index cites 40 and yields explanation [40]; this check goes RED
+   (verified RED against a last-wins mutation before landing). It does NOT catch a dropped
+   re-verify: with the merge/pop/count invalidation the cache is never consulted stale, so
+   the re-verify is defense-in-depth, not load-bearing — that a public-API discrimination
+   test for it cannot be built is itself the proof it is non-load-bearing (fable's review
+   executed the drop-re-verify mutant: euf-test + counted-identity + a randomized push/pop
+   oracle all stayed green). *)
+let test_distinct_witness_first_wins () =
+  let _env, _u, _unary, konst = make_env () in
+  let ctx = Context.create _env in
+  let a = Context.const ctx (konst "a") in
+  let b = Context.const ctx (konst "b") in
+  let c1 = Context.const ctx (konst "c1") in
+  let c2 = Context.const ctx (konst "c2") in
+  let ab = Context.eq ctx a b in
+  let e = Euf.create ctx in
+  Euf.register_term e ab;
+  Euf.assert_neq e ~premise:20 c1 c2;
+  Euf.assert_eq e ~premise:21 a c1;
+  Euf.assert_eq e ~premise:22 b c2;
+  Euf.assert_neq e ~premise:40 a b;
+  match Euf.propagate e with
+  | [ imp ] ->
+    check "witness-first: atom is (a=b)" (Term.equal imp.Euf.atom ab);
+    check "witness-first: value false" (not imp.Euf.value);
+    check
+      "witness-first: explanation = {20;21;22} (earliest witness, not {40})"
+      (List.sort compare (Euf.explain_implied e imp) = [ 20; 21; 22 ])
+  | _ -> check "witness-first: exactly one implied" false
+;;
+
 (* 3b. ⊤/⊥ bridge: a Bool-codomain predicate application is watched against [true_const],
    so a predicate truth entailed by congruence ([p(a), a = b |- p(b)]) surfaces as a
    {!propagate} flip — not merely as a reactive [true <> false] conflict on a wrong guess.
@@ -1173,12 +1212,97 @@ let test_stage3_class_tag () =
   check "stage3: tag restored (gone) after pop" (Euf.class_tag e2 a = None)
 ;;
 
+(* Task #47 COLLISION RED: the packed small-arity signature key must be INJECTIVE — two
+   distinct signatures must never pack to the same key. These assertions PASS on the real
+   packer and FAIL on a broken one (a narrowed arg/sym field, or a dropped arity tag); the
+   mutant demonstration (narrow [sig_pack_arg_bits] by one) reddens the near-collision and
+   arity-tag checks. See logs/euf-sigpack-log.md. *)
+let test_sig_pack_injective () =
+  let pack ~n ~s ~a0 ~a1 = Euf.Debug.pack_signature_fields ~n ~s ~a0 ~a1 in
+  let argb = Euf.Debug.sig_pack_arg_bits in
+  let symb = Euf.Debug.sig_pack_sym_bits in
+  (* (1) NEAR-COLLISION on the top arg bit: two arity-2 sigs differing ONLY in bit
+         [argb-1] of a0. In range for the real [argb]-bit field => distinct keys; a broken
+         [argb-1]-bit packer truncates that bit => same key (RED). *)
+  let top = 1 lsl (argb - 1) in
+  let k_lo = pack ~n:2 ~s:7 ~a0:0 ~a1:3 in
+  let k_hi = pack ~n:2 ~s:7 ~a0:top ~a1:3 in
+  check
+    "sigpack: near-collision top-arg-bit distinguished"
+    (k_lo >= 0 && k_hi >= 0 && k_lo <> k_hi);
+  (* same for a1's top bit *)
+  let k1_lo = pack ~n:2 ~s:7 ~a0:5 ~a1:0 in
+  let k1_hi = pack ~n:2 ~s:7 ~a0:5 ~a1:top in
+  check
+    "sigpack: near-collision top-a1-bit distinguished"
+    (k1_lo >= 0 && k1_hi >= 0 && k1_lo <> k1_hi);
+  (* top sym bit *)
+  let stop = 1 lsl (symb - 1) in
+  let ks_lo = pack ~n:2 ~s:1 ~a0:5 ~a1:3 in
+  let ks_hi = pack ~n:2 ~s:(1 lor stop) ~a0:5 ~a1:3 in
+  check
+    "sigpack: near-collision top-sym-bit distinguished"
+    (ks_lo >= 0 && ks_hi >= 0 && ks_lo <> ks_hi);
+  (* (2) ARITY-TAG disjointness: (n=1,s,a0) vs (n=2,s,a0,a1=0) must differ even though the
+     n=1 case ignores a1 (RED against a dropped tag). *)
+  let k_ar1 = pack ~n:1 ~s:9 ~a0:4 ~a1:0 in
+  let k_ar2 = pack ~n:2 ~s:9 ~a0:4 ~a1:0 in
+  let k_ar0 = pack ~n:0 ~s:9 ~a0:0 ~a1:0 in
+  check "sigpack: arity tags disjoint" (k_ar0 <> k_ar1 && k_ar1 <> k_ar2 && k_ar0 <> k_ar2);
+  (* (3) RANGE FALLBACK: an out-of-range field returns -1 (never a truncated key). *)
+  check "sigpack: sym overflow -> -1" (pack ~n:0 ~s:(1 lsl symb) ~a0:0 ~a1:0 = -1);
+  check "sigpack: a0 overflow -> -1" (pack ~n:1 ~s:1 ~a0:(1 lsl argb) ~a1:0 = -1);
+  check "sigpack: a1 overflow -> -1" (pack ~n:2 ~s:1 ~a0:1 ~a1:(1 lsl argb) = -1);
+  check "sigpack: arity>2 -> -1" (pack ~n:3 ~s:1 ~a0:1 ~a1:1 = -1);
+  (* (3b) OVERFLOW-ALIAS DISCRIMINATION (rider MEDIUM): a just-out-of-range arg (2^argb)
+     overflows into the NEXT field, aliasing a distinct in-range signature. The range
+     checks make the overflowing pack [-1] (distinct from the alias); DELETING the arity-2
+     bound check (euf.ml n=2 arm) makes both pack to the same key — this must be RED then.
+     - a0 overflow: (n=2,s=6,a0=2^argb,a1=3) [a0 spills into the sym field] vs
+       (n=2,s=7,a0=0,a1=3): with the a0 field 20-bit and sym at bit 40, a0=2^20 lands on
+       bit 40 = sym's low bit, so the broken packer reads it as sym=7,a0=0.
+     - a1 overflow: (n=2,s=6,a0=0,a1=2^argb) [a1's bit 20 spills into a0's low bit] vs
+       (n=2,s=6,a0=1,a1=0): a1=2^20 lands on bit 20 = a0=1's contribution. *)
+  let no_alias lhs rhs = not (lhs >= 0 && lhs = rhs) in
+  check
+    "sigpack: a0 overflow does not alias (RED w/o n=2 bound check)"
+    (no_alias (pack ~n:2 ~s:6 ~a0:(1 lsl argb) ~a1:3) (pack ~n:2 ~s:7 ~a0:0 ~a1:3));
+  check
+    "sigpack: a1 overflow does not alias (RED w/o n=2 bound check)"
+    (no_alias (pack ~n:2 ~s:6 ~a0:0 ~a1:(1 lsl argb)) (pack ~n:2 ~s:6 ~a0:1 ~a1:0));
+  (* (4) INJECTIVITY SWEEP over a grid of in-range tuples: all packed keys distinct, none
+     negative. A collision (broken packer) trips the table. *)
+  let seen = Hashtbl.create 4096 in
+  let collision = ref false in
+  let hi = 1 lsl (argb - 1) in
+  let vals = [ 0; 1; 2; hi - 1; hi; hi + 1; (1 lsl argb) - 1 ] in
+  let syms = [ 0; 1; 42; (1 lsl symb) - 1 ] in
+  (* Vary only the arity's MEANINGFUL fields (n=0 ignores a0/a1; n=1 ignores a1), holding
+     ignored fields at 0 — so a legitimate same-signature repeat is never mistaken for a
+     collision. *)
+  let record n s a0 a1 =
+    let k = pack ~n ~s ~a0 ~a1 in
+    if k >= 0
+    then
+      if Hashtbl.mem seen k then collision := true else Hashtbl.add seen k (n, s, a0, a1)
+  in
+  List.iter (fun s -> record 0 s 0 0) syms;
+  List.iter (fun s -> List.iter (fun a0 -> record 1 s a0 0) vals) syms;
+  List.iter
+    (fun s -> List.iter (fun a0 -> List.iter (fun a1 -> record 2 s a0 a1) vals) vals)
+    syms;
+  check
+    "sigpack: injective over in-range grid (no two tuples share a key)"
+    (not !collision)
+;;
+
 let () =
   print_endline "euf self-test:";
   test_textbook ();
   test_chain_selfloop ();
   test_chain_orders ();
   test_propagation ();
+  test_distinct_witness_first_wins ();
   test_predicate_propagation ();
   test_errors ();
   test_random_crosscheck ();
@@ -1191,6 +1315,7 @@ let () =
   test_query_api_nonmutating ();
   test_stage2_merge_log ();
   test_stage3_class_tag ();
+  test_sig_pack_injective ();
   Printf.printf
     "\neuf self-test: %d checks, %d randomized assert-cases, %d failure(s)\n"
     !checks

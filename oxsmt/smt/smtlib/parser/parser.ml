@@ -10,6 +10,15 @@ exception Unsupported of string
 let malformedf fmt = Printf.ksprintf (fun s -> raise (Malformed s)) fmt
 let unsupportedf fmt = Printf.ksprintf (fun s -> raise (Unsupported s)) fmt
 
+(* Let-/qvar-binding scope. A persistent [String] map, NOT an association list: a deeply
+   nested [let]-chain (thousands deep in the TPTP first-order model-finding families)
+   makes an assoc-list scope O(references x nesting-depth) — the whole formula's term
+   construction went quadratic (NEQ015_size6: 1.5MB / 32s just to build). A map keyed by
+   the bound name is O(references x log depth) and returns the identical term for every
+   well-formed input (innermost binding wins, exactly as first-match on the old prepended
+   list), so the constructed term — hence every downstream verdict — is unchanged. *)
+module Scope = Map.Make (String)
+
 let name_of s =
   match Sexp.symbol_name s with
   | Some n -> n
@@ -48,6 +57,9 @@ type t =
   ; datatypes : Datatype_defs.t
     (* the algebraic-datatype shape declared by [declare-datatype(s)], for the datatype
          theory; empty when the query declares none *)
+  ; arrays : Array_defs.t
+    (* the array [select]/[store] symbols used, for the arrays theory; empty when the
+         query uses no arrays *)
   ; lemmas : lemma_src list (* the [(assert (forall ...))] assertions, in file order *)
   }
 
@@ -83,13 +95,81 @@ type pstate =
     (* sort names introduced by [declare-datatype(s)]: [sort_of_sexp] resolves these to
          [Sort.datatype_] rather than [Sort.uninterpreted] *)
   ; mutable datatypes : Datatype_defs.t (* the accumulated datatype shape registry *)
+  ; internal_mint : Internal_minter.t option
+    (* board #58 O-MINTER: mints a theory-internal reserved symbol ([.oxsmt.<theory>.*])
+         mid-parse. Some internal symbols cannot be pre-minted at a declaration site:
+         arrays op symbols are per-(index sort, element sort) instantiations discovered
+         only at the first [select]/[store] use. Supplied by the parser's OWNER as an
+         OPAQUE {!Oxsmt_core.Internal_minter.t} — a [Session]-driven parse threads
+         [Oxsmt_interface.Session.parse_minter], which wraps [Env.declare_reserved] over
+         the session's private cap behind an [admit] gate, so the parser can mint a
+         collision-proof sanctioned marker WITHOUT ever holding the cap or a general
+         closure (ADR-0012: only [Session] holds the cap). [None] (a driver that threads
+         no [~internal_mint]) means no cap-backed minter: {!internal_mint} then raises
+         [Malformed] rather than silently succeeding. The bit-vector builders
+         ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] markers through this and the arrays
+         [array_op_sym] its [.oxsmt.arr.*] ones. *)
+  ; array_ops : (string, Symbol.t) Hashtbl.t
+    (* the monomorphic [select]/[store] symbols minted per (role, index, element)
+         instantiation, keyed by a deterministic string; arrays are polymorphic so each
+         instantiation gets its own symbol with a concrete rank *)
+  ; mutable arrays : Array_defs.t (* the accumulated array select/store symbol registry *)
   }
 
 module Tok = Oxsmt_lexical.Lexer
 
+(* Get-or-mint a theory-internal reserved symbol mid-parse via the owner-supplied opaque
+   {!Oxsmt_core.Internal_minter.t} (board #58 O-MINTER). Callers go through here instead
+   of [Env.declare_fun st.env], which rejects the reserved [.oxsmt.*] namespace: the
+   bit-vector builders ({!Oxsmt_core.Bv}) mint their [.oxsmt.bv.*] operator/literal
+   symbols through [(internal_mint st)], and the arrays branch's [array_op_sym] its
+   [.oxsmt.arr.*] ones. With no minter supplied, degrade to [Malformed] (a sound unknown),
+   never a silent success; [Internal_minter.mint] itself raises if the name is outside the
+   minter's [admit] grammar. *)
+let internal_mint st name rank =
+  match st.internal_mint with
+  | Some m -> Internal_minter.mint m name rank
+  | None ->
+    malformedf
+      "internal symbol %s requires a cap-backed minter (parse this through a Session)"
+      name
+;;
+
+(* ---- bit-vector width cap (rider #19) ---- *)
+
+(* Upper bound on any bit-vector width the reader will CONSTRUCT. The eager bit-blaster
+   allocates ~width SAT literals per bv term, and a repeat/extend/literal/BitVec width
+   comes straight from user numerals — so an adversarial [((_ repeat 500000000) x)] or
+   [(_ BitVec 1099511627776)] would allocate until the process is KILLED (an uncatchable
+   out-of-memory abort during GC, NOT an exception a parse-scoped handler can absorb —
+   fable MED-1). Bound it UP FRONT: a width over the cap degrades to [Malformed] ->
+   unknown BEFORE any allocation. Real bit-vectors are far below this (a few thousand bits
+   at most); the cap only rejects pathological inputs. Overridable via
+   [OXSMT_MAX_BV_WIDTH] so a test can drive the cap without allocating a crash-sized term. *)
+let max_bv_width =
+  match Sys.getenv_opt "OXSMT_MAX_BV_WIDTH" with
+  | Some s ->
+    (match int_of_string_opt s with
+     | Some n when n >= 1 -> n
+     | _ -> 1 lsl 20)
+  | None -> 1 lsl 20
+;;
+
+let check_bv_width what w =
+  if w < 1 || w > max_bv_width
+  then malformedf "%s: bitvector width %d out of range [1, %d]" what w max_bv_width
+;;
+
+(* [n*w] guarded against BOTH the cap and int overflow (an [(_ repeat n)] result width). *)
+let checked_product ~what ~n ~w =
+  if n < 1 || w < 1 || n > max_bv_width / w
+  then malformedf "%s: bitvector width %d*%d exceeds the max %d" what n w max_bv_width;
+  n * w
+;;
+
 (* ---- sorts ---- *)
 
-let sort_of_sexp st (s : Sexp.t) : Sort.t =
+let rec sort_of_sexp st (s : Sexp.t) : Sort.t =
   match Sexp.symbol_name s with
   (* [Bool]/[Int] are the builtin sorts regardless of quoting (quoting is lexical). *)
   | Some "Bool" -> Sort.bool
@@ -101,9 +181,55 @@ let sort_of_sexp st (s : Sexp.t) : Sort.t =
      | None -> malformedf "unknown sort: %s" name)
   | None ->
     (match s with
+     (* [(Array I E)] is the one compound sort v1 models: a functional, extensional array
+        from index sort [I] to element sort [E]. Both are read recursively (so a nested
+        [(Array I (Array J E))] works). Any other parametric/compound sort is out of the
+        fragment (fail-closed to unknown). *)
+     | Sexp.List [ head; i_s; e_s ] when Sexp.simple head = Some "Array" ->
+       Sort.array_ ~index:(sort_of_sexp st i_s) ~element:(sort_of_sexp st e_s)
+     (* [(_ BitVec n)] — the only indexed sort in the v1 subset. *)
+     | Sexp.List
+         [ Sexp.Atom (Tok.Reserved "_")
+         ; Sexp.Atom (Tok.Symbol { text = "BitVec"; _ })
+         ; Sexp.Atom (Tok.Numeral n)
+         ] ->
+       (match int_of_string_opt n with
+        | Some w when w >= 1 ->
+          check_bv_width "(_ BitVec n)" w;
+          Sort.bitvec w
+        | _ -> malformedf "(_ BitVec %s): width must be a positive integer" n)
      | Sexp.List _ ->
        unsupportedf "parametric/compound sorts are not supported: %s" (Sexp.to_string s)
      | _ -> malformedf "expected a sort, got %s" (Sexp.to_string s))
+;;
+
+(* Get-or-mint the monomorphic [select]/[store] symbol for one array instantiation and
+   record it in {!Array_defs} so the arrays theory can classify the [App] head. The
+   canonical name comes from {!Array_defs.op_symbol_name}, so the arrays theory minting a
+   fresh [select] mid-solve interns the {e same} symbol (identity is by name) and its
+   terms hash-cons with these. Ranks: [select] is [(Array(i,e), i) -> e]; [store] is
+   [(Array(i,e), i, e) -> Array(i,e)]. *)
+let array_op_sym st (role : Array_defs.role) ~index ~element : Symbol.t =
+  let name = Array_defs.op_symbol_name role ~index ~element in
+  match Hashtbl.find_opt st.array_ops name with
+  | Some sym -> sym
+  | None ->
+    let arr = Sort.array_ ~index ~element in
+    let dom, cod =
+      match role with
+      | Array_defs.Select -> [ arr; index ], element
+      | Array_defs.Store -> [ arr; index; element ], arr
+    in
+    (* board #58: mint through the cap-backed opaque internal minter, not
+       [Env.declare_fun]. The op name is a reserved [.oxsmt.arr.*] symbol bearing [|]
+       sort-key separators; the public door rejects both, so this is the only door that
+       can intern it (and the only one that should — it is a theory-internal symbol, not a
+       user declaration). The session's minter admits exactly this op-name grammar
+       (Session.parse_minter). *)
+    let sym = internal_mint st name (Rank.create dom cod) in
+    Hashtbl.replace st.array_ops name sym;
+    st.arrays <- Array_defs.add st.arrays sym role ~index ~element;
+    sym
 ;;
 
 (* ---- numerals ---- *)
@@ -120,9 +246,107 @@ let int_lit st a =
      | exception Invalid_argument _ -> malformedf "malformed integer literal: %s" a)
 ;;
 
+(* ---- bitvector literals ---- *)
+
+(* [#b<bits>] and [#x<hex>] (SMT-LIB §3.1). Width is the digit count times bits-per-digit;
+   the value is folded arbitrary-precision ({!Bigint}), so a literal wider than native
+   [int] is exact. The lexer already validated the digits, so an unexpected character here
+   is an internal error. *)
+let bv_literal st ~digits ~bits_per_digit ~value_of_digit =
+  let base = Bigint.of_int (1 lsl bits_per_digit) in
+  let value =
+    String.fold_left
+      (fun acc c -> Bigint.add (Bigint.mul acc base) (Bigint.of_int (value_of_digit c)))
+      Bigint.zero
+      digits
+  in
+  let width = String.length digits * bits_per_digit in
+  if width < 1 then malformedf "empty bitvector literal";
+  Bv.const st.ctx (internal_mint st) ~value ~width
+;;
+
+(* [(_ bvN W)] — the SMT-LIB decimal bitvector-literal indexed identifier (§3.1): the
+   nonnegative decimal value [N] at width [W]. This is the pervasive constant form emitted by
+   symbolic-execution generators (Sage/Sydr/Triton/…); we parse it into the same
+   {!Oxsmt_core.Bv} constant a [#x]/[#b] literal produces (value reduced into [0, 2^W)). *)
+let is_bv_dec_name text =
+  String.length text > 2
+  && Char.equal text.[0] 'b'
+  && Char.equal text.[1] 'v'
+  && String.for_all
+       (fun c -> c >= '0' && c <= '9')
+       (String.sub text 2 (String.length text - 2))
+;;
+
+let read_bv_dec_literal st ~text ~width_s =
+  let digits = String.sub text 2 (String.length text - 2) in
+  let value =
+    match Bigint.of_string digits with
+    | v -> v
+    | exception Invalid_argument _ ->
+      malformedf "malformed (_ bv%s W) literal value" digits
+  in
+  match int_of_string_opt width_s with
+  | Some width when width >= 1 ->
+    check_bv_width "(_ bvN W)" width;
+    Bv.const st.ctx (internal_mint st) ~value ~width
+  | _ -> malformedf "(_ bv%s %s): width must be a positive integer" digits width_s
+;;
+
+let hex_digit_value c =
+  match c with
+  | '0' .. '9' -> Char.code c - Char.code '0'
+  | 'a' .. 'f' -> Char.code c - Char.code 'a' + 10
+  | 'A' .. 'F' -> Char.code c - Char.code 'A' + 10
+  | _ -> malformedf "malformed hex digit %c" c
+;;
+
+let bin_digit_value c =
+  match c with
+  | '0' -> 0
+  | '1' -> 1
+  | _ -> malformedf "malformed binary digit %c" c
+;;
+
+(* The prefix-form bitvector operator names (see {!read_bv_op}); indexed operators
+   ([extract], the extends) and the literals arrive by other syntactic routes. *)
+let is_bv_keyword = function
+  | "bvnot"
+  | "bvand"
+  | "bvor"
+  | "bvxor"
+  | "bvneg"
+  | "bvadd"
+  | "bvsub"
+  | "bvmul"
+  | "bvudiv"
+  | "bvurem"
+  | "bvshl"
+  | "bvlshr"
+  | "bvashr"
+  | "bvult"
+  | "bvule"
+  | "bvslt"
+  | "bvsle"
+  | "bvugt"
+  | "bvuge"
+  | "bvsgt"
+  | "bvsge"
+  | "bvsdiv"
+  | "bvsrem"
+  | "bvsmod"
+  | "bvcomp"
+  | "bvnand"
+  | "bvnor"
+  | "bvxnor"
+  | "concat" -> true
+  | _ -> false
+;;
+
 (* ---- terms ---- *)
 
-(* [scope] is the let-binding stack, innermost first. Matching is on the shared lexer's
+(* [scope] is the let-/qvar-binding map ({!Scope}), keyed by bound name; an inner binding
+   overwrites (shadows) an outer one of the same name. Matching is on the shared lexer's
    token KINDS, so a quoted [|0|]/[|let|] is a symbol looked up by name — never the
    numeral [0] or the [let] keyword (the ADR-0008 boundary invariant, enforced
    end-to-end). *)
@@ -162,6 +386,14 @@ let rec read_term st scope (s : Sexp.t) : Term.t =
   | Sexp.List (Sexp.Atom (Tok.Reserved "!") :: body :: attrs) ->
     validate_bang_attrs attrs;
     read_term st scope body
+  (* [(_ bvN W)] decimal bitvector literal — a nullary indexed identifier (a constant
+     term, never applied), so it resolves here rather than through [read_app]. *)
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text; _ })
+      ; Sexp.Atom (Tok.Numeral width_s)
+      ]
+    when is_bv_dec_name text -> read_bv_dec_literal st ~text ~width_s
   | Sexp.List (head :: args) -> read_app st scope head args s
   | Sexp.List [] -> malformedf "empty application ()"
 
@@ -169,8 +401,9 @@ and read_atom st scope (tok : Tok.token) : Term.t =
   match tok with
   | Tok.Numeral n -> int_lit st n
   | Tok.Decimal d -> unsupportedf "decimal (real) literal is not in QF_UFLIA: %s" d
-  | Tok.Hex h -> unsupportedf "bitvector literal #x%s is not supported" h
-  | Tok.Binary b -> unsupportedf "bitvector literal #b%s is not supported" b
+  | Tok.Hex h -> bv_literal st ~digits:h ~bits_per_digit:4 ~value_of_digit:hex_digit_value
+  | Tok.Binary b ->
+    bv_literal st ~digits:b ~bits_per_digit:1 ~value_of_digit:bin_digit_value
   | Tok.String s -> malformedf "unexpected string literal in term position: %S" s
   | Tok.Keyword k -> malformedf "unexpected keyword :%s in term position" k
   | Tok.Reserved r -> malformedf "unexpected reserved word %s in term position" r
@@ -179,7 +412,7 @@ and read_atom st scope (tok : Tok.token) : Term.t =
   | Tok.Symbol { text = "true"; quoted = false } -> Context.bool_const st.ctx true
   | Tok.Symbol { text = "false"; quoted = false } -> Context.bool_const st.ctx false
   | Tok.Symbol { text = name; _ } ->
-    (match List.assoc_opt name scope with
+    (match Scope.find_opt name scope with
      | Some t -> t
      | None ->
        (match Hashtbl.find_opt st.defines name with
@@ -206,7 +439,11 @@ and read_let st scope rest =
            | _ -> malformedf "malformed let binding: %s" (Sexp.to_string b))
         bindings
     in
-    read_term st (new_scope @ scope) body
+    (* Extend the scope map with this let's bindings, shadowing the outer scope. Folding
+       right (first-listed binding added last) preserves the old assoc-list's first-match
+       resolution of an intra-let duplicate name (ill-formed input either way). *)
+    let scope = List.fold_right (fun (n, t) acc -> Scope.add n t acc) new_scope scope in
+    read_term st scope body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
 (* The application head selects interpretation. Only an UNQUOTED symbol can be a builtin
@@ -220,7 +457,7 @@ and read_app st scope head args orig =
      body and can yield a definite verdict on ill-typed input (a wrong [unsat] when a
      refuting lemma body is mis-built). Fail closed: reject -> Malformed -> unknown.
      Binder-agnostic (any scope entry: [let] or a lemma qvar). *)
-  | Sexp.Atom (Tok.Symbol { text; _ }) when List.mem_assoc text scope ->
+  | Sexp.Atom (Tok.Symbol { text; _ }) when Scope.mem text scope ->
     malformedf "bound variable %s cannot head an application (ill-sorted)" text
   | Sexp.Atom (Tok.Symbol { text = op; quoted = false }) -> read_op st scope op args orig
   | Sexp.Atom (Tok.Symbol { text = op; quoted = true }) ->
@@ -252,6 +489,29 @@ and read_app st scope head args orig =
   | Sexp.List
       [ Sexp.Atom (Tok.Reserved "_"); Sexp.Atom (Tok.Symbol { text = "is"; _ }); cname_s ]
     -> read_tester st scope (name_of cname_s) args orig
+  (* Indexed bitvector operators: [(_ extract i j)], [(_ zero_extend n)],
+     [(_ sign_extend n)]. Each heads a single-argument application. *)
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = "extract"; _ })
+      ; Sexp.Atom (Tok.Numeral i)
+      ; Sexp.Atom (Tok.Numeral j)
+      ] -> read_bv_extract st scope ~i ~j args orig
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = ("zero_extend" | "sign_extend") as ext; _ })
+      ; Sexp.Atom (Tok.Numeral n)
+      ] -> read_bv_extend st scope ~ext ~n args orig
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = ("rotate_left" | "rotate_right") as rot; _ })
+      ; Sexp.Atom (Tok.Numeral n)
+      ] -> read_bv_rotate st scope ~rot ~n args orig
+  | Sexp.List
+      [ Sexp.Atom (Tok.Reserved "_")
+      ; Sexp.Atom (Tok.Symbol { text = "repeat"; _ })
+      ; Sexp.Atom (Tok.Numeral n)
+      ] -> read_bv_repeat st scope ~n args orig
   | _ ->
     unsupportedf "higher-order / non-symbol application head: %s" (Sexp.to_string head)
 
@@ -266,6 +526,208 @@ and read_tester st scope cname args orig =
     if List.length args <> List.length dom
     then malformedf "tester (_ is %s) expects 1 argument" cname;
     Context.app st.ctx sym (List.map (read_term st scope) args)
+
+and read_bv_extract st scope ~i ~j args orig =
+  match args with
+  | [ a ] ->
+    (match int_of_string_opt i, int_of_string_opt j with
+     | Some i, Some j -> Bv.extract st.ctx (internal_mint st) ~i ~j (read_term st scope a)
+     | _ ->
+       malformedf "(_ extract i j): indices must be numerals: %s" (Sexp.to_string orig))
+  | _ -> malformedf "(_ extract i j) expects 1 argument: %s" (Sexp.to_string orig)
+
+and read_bv_extend st scope ~ext ~n args orig =
+  match args with
+  | [ a ] ->
+    (match int_of_string_opt n with
+     | Some n when n >= 0 ->
+       let x = read_term st scope a in
+       let w =
+         match Bv.width_of_sort x.Term.sort with
+         | Some w -> w
+         | None -> malformedf "(_ %s n): operand is not a bitvector" ext
+       in
+       (* result width is [w + n]; cap it before the blaster allocates (rider #19). The
+          [n > max_bv_width] short-circuit avoids overflowing [w + n]. *)
+       check_bv_width ext (if n > max_bv_width then max_bv_width + 1 else w + n);
+       if String.equal ext "zero_extend"
+       then Bv.zero_extend st.ctx (internal_mint st) ~n x
+       else Bv.sign_extend st.ctx (internal_mint st) ~n x
+     | _ ->
+       malformedf "(_ %s n): n must be a nonneg numeral: %s" ext (Sexp.to_string orig))
+  | _ -> malformedf "(_ %s n) expects 1 argument: %s" ext (Sexp.to_string orig)
+
+(* [(_ rotate_left n) x] / [(_ rotate_right n) x] — SUGAR via extract + concat over the
+   operand width [w]: rotate by [k = n mod w]. Both leaf ops are oracle-verified; the
+   expansion's semantics are oracle-checked against a direct rotate reference. *)
+and read_bv_rotate st scope ~rot ~n args orig =
+  match args, int_of_string_opt n with
+  | [ a ], Some n when n >= 0 ->
+    let x = read_term st scope a in
+    let ctx = st.ctx
+    and mint = internal_mint st in
+    let w =
+      match Bv.width_of_sort x.Term.sort with
+      | Some w -> w
+      | None -> malformedf "(_ %s n): operand is not a bitvector" rot
+    in
+    let k = n mod w in
+    if k = 0
+    then x
+    else (
+      let ext hi lo = Bv.extract ctx mint ~i:hi ~j:lo x in
+      let cat hi lo = Bv.concat ctx mint hi lo in
+      if String.equal rot "rotate_left"
+      then cat (ext (w - 1 - k) 0) (ext (w - 1) (w - k))
+      else cat (ext (k - 1) 0) (ext (w - 1) k))
+  | _ ->
+    malformedf
+      "(_ %s n) expects a nonneg numeral index and 1 argument: %s"
+      rot
+      (Sexp.to_string orig)
+
+(* [(_ repeat n) x] — SUGAR: [x] concatenated with itself [n >= 1] times. *)
+and read_bv_repeat st scope ~n args orig =
+  match args, int_of_string_opt n with
+  | [ a ], Some n when n >= 1 ->
+    let x = read_term st scope a in
+    let ctx = st.ctx
+    and mint = internal_mint st in
+    let w =
+      match Bv.width_of_sort x.Term.sort with
+      | Some w -> w
+      | None -> malformedf "(_ repeat n): operand is not a bitvector"
+    in
+    (* Cap the result width [n*w] BEFORE the fold, so an adversarial [n] cannot build a
+       crash-sized chain of concats (rider #19 / fable MED-1). *)
+    let (_ : int) = checked_product ~what:"(_ repeat n)" ~n ~w in
+    let rec go k acc = if k <= 1 then acc else go (k - 1) (Bv.concat ctx mint x acc) in
+    go n x
+  | _ -> malformedf "(_ repeat n) expects n >= 1 and 1 argument: %s" (Sexp.to_string orig)
+
+(* The equal-width prefix bitvector operators + [concat] + the four comparisons, plus the
+   "greater" sugar duals rewritten to the swapped "lesser" form. [None] for a name outside
+   the v1 bitvector subset. Membership decides routing in {!read_op} (user functions take
+   precedence, so a user symbol that happens to look like one of these is unaffected — the
+   bitvector names are all SMT-LIB-reserved theory symbols). *)
+and read_bv_op st scope op args orig =
+  let rd = read_term st scope in
+  let bin f =
+    match args with
+    | [ a; b ] -> f (rd a) (rd b)
+    | _ -> malformedf "%s expects 2 arguments: %s" op (Sexp.to_string orig)
+  in
+  let un f =
+    match args with
+    | [ a ] -> f (rd a)
+    | _ -> malformedf "%s expects 1 argument: %s" op (Sexp.to_string orig)
+  in
+  let b o x y = Bv.binop st.ctx (internal_mint st) o x y in
+  (* Signed division/remainder/modulo and [bvcomp] are SMT-LIB SUGAR over the unsigned
+     primitives (bvudiv/bvurem/bvneg/bvadd) plus sign-bit tests — the reference expansions
+     from the QF_BV theory. Building them here (rather than as new blaster circuits) keeps
+     the bit-blaster and its exhaustive oracle unchanged: every leaf op is already
+     oracle-verified, and the parser-side expansions are oracle-checked against a direct
+     signed reference (bv_blast_test). *)
+  let ctx = st.ctx in
+  let mint = internal_mint st in
+  let width x =
+    match Bv.width_of_sort x.Term.sort with
+    | Some w -> w
+    | None -> malformedf "%s: operand is not a bitvector" op
+  in
+  let neg x = Bv.unop ctx mint Bv.Bvneg x in
+  let bit1 v = Bv.const ctx mint ~value:(Bigint.of_int v) ~width:1 in
+  let msb_set x =
+    let w = width x in
+    Context.eq ctx (Bv.extract ctx mint ~i:(w - 1) ~j:(w - 1) x) (bit1 1)
+  in
+  let ite = Context.ite ctx in
+  let both p q = Context.and_ ctx [ p; q ] in
+  let notb = Context.not_ ctx in
+  (* bvsdiv/bvsrem: unsigned op on magnitudes, result sign per the four sign combinations. *)
+  let signed_divlike uop x y =
+    let ms = msb_set x
+    and mt = msb_set y in
+    ite
+      (both (notb ms) (notb mt))
+      (b uop x y)
+      (ite
+         (both ms (notb mt))
+         (neg (b uop (neg x) y))
+         (ite (both (notb ms) mt) (neg (b uop x (neg y))) (b uop (neg x) (neg y))))
+  in
+  (* bvsrem shares bvsdiv's shape EXCEPT the both-negative case is [bvneg (urem -x -y)]. *)
+  let bvsrem x y =
+    let ms = msb_set x
+    and mt = msb_set y in
+    ite
+      (both (notb ms) (notb mt))
+      (b Bv.Bvurem x y)
+      (ite
+         (both ms (notb mt))
+         (neg (b Bv.Bvurem (neg x) y))
+         (ite
+            (both (notb ms) mt)
+            (b Bv.Bvurem x (neg y))
+            (neg (b Bv.Bvurem (neg x) (neg y)))))
+  in
+  (* bvsmod: sign follows the DIVISOR (SMT-LIB); computed from the magnitude remainder
+     [u]. *)
+  let bvsmod x y =
+    let w = width x in
+    let ms = msb_set x
+    and mt = msb_set y in
+    let abs_x = ite ms (neg x) x
+    and abs_y = ite mt (neg y) y in
+    let u = b Bv.Bvurem abs_x abs_y in
+    let zero = Bv.const ctx mint ~value:Bigint.zero ~width:w in
+    ite
+      (Context.eq ctx u zero)
+      u
+      (ite
+         (both (notb ms) (notb mt))
+         u
+         (ite
+            (both ms (notb mt))
+            (b Bv.Bvadd (neg u) y)
+            (ite (both (notb ms) mt) (b Bv.Bvadd u y) (neg u))))
+  in
+  (* bvcomp: 1-bit result, all-ones iff the operands are bitwise equal. *)
+  let bvcomp x y = ite (Context.eq ctx x y) (bit1 1) (bit1 0) in
+  match op with
+  | "bvnot" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvnot)
+  | "bvneg" -> un (Bv.unop st.ctx (internal_mint st) Bv.Bvneg)
+  | "bvand" -> bin (b Bv.Bvand)
+  | "bvor" -> bin (b Bv.Bvor)
+  | "bvxor" -> bin (b Bv.Bvxor)
+  | "bvadd" -> bin (b Bv.Bvadd)
+  | "bvsub" -> bin (b Bv.Bvsub)
+  | "bvmul" -> bin (b Bv.Bvmul)
+  | "bvudiv" -> bin (b Bv.Bvudiv)
+  | "bvurem" -> bin (b Bv.Bvurem)
+  | "bvshl" -> bin (b Bv.Bvshl)
+  | "bvlshr" -> bin (b Bv.Bvlshr)
+  | "bvashr" -> bin (b Bv.Bvashr)
+  | "bvult" -> bin (b Bv.Bvult)
+  | "bvule" -> bin (b Bv.Bvule)
+  | "bvslt" -> bin (b Bv.Bvslt)
+  | "bvsle" -> bin (b Bv.Bvsle)
+  (* sugar: a "greater" op is the swapped "lesser" op *)
+  | "bvugt" -> bin (fun x y -> b Bv.Bvult y x)
+  | "bvuge" -> bin (fun x y -> b Bv.Bvule y x)
+  | "bvsgt" -> bin (fun x y -> b Bv.Bvslt y x)
+  | "bvsge" -> bin (fun x y -> b Bv.Bvsle y x)
+  | "concat" -> bin (Bv.concat st.ctx (internal_mint st))
+  | "bvsdiv" -> bin (signed_divlike Bv.Bvudiv)
+  | "bvsrem" -> bin bvsrem
+  | "bvsmod" -> bin bvsmod
+  | "bvcomp" -> bin bvcomp
+  (* Negated bitwise ops: SMT-LIB SUGAR = bvnot of the corresponding bitwise op. *)
+  | "bvnand" -> bin (fun x y -> Bv.unop ctx mint Bv.Bvnot (b Bv.Bvand x y))
+  | "bvnor" -> bin (fun x y -> Bv.unop ctx mint Bv.Bvnot (b Bv.Bvor x y))
+  | "bvxnor" -> bin (fun x y -> Bv.unop ctx mint Bv.Bvnot (b Bv.Bvxor x y))
+  | _ -> unsupportedf "bitvector operator %s is not in the v1 subset" op
 
 (* Apply a user-declared function or expand a define-fun (no builtin-operator meaning). *)
 and apply_named st scope op args orig =
@@ -321,7 +783,39 @@ and read_op st scope op args orig =
   | ("div" | "mod"), _ -> malformedf "%s expects 2 arguments" op
   | "abs", [ a ] -> Context.abs st.ctx (rd a)
   | "abs", _ -> malformedf "abs expects 1 argument"
-  (* not a builtin operator — a user-declared function or a define-fun *)
+  (* Array theory operators (QF_AX). The array argument is read first so its
+     [Sort.Array (index, element)] is known; the monomorphic [select]/[store] symbol for
+     that instantiation is minted/recorded ([array_op_sym]) and applied. [Context.app]
+     sort-checks the remaining arguments against the minted rank, so an ill-sorted index
+     or value fails closed to [Malformed] -> unknown. A [select]/[store] on a non-array
+     first argument is likewise rejected. *)
+  | "select", [ a; i ] ->
+    let arr = rd a in
+    (match arr.Term.sort with
+     | Sort.Array (index, element) ->
+       Context.app
+         st.ctx
+         (array_op_sym st Array_defs.Select ~index ~element)
+         [ arr; rd i ]
+     | _ -> malformedf "select applied to a non-array term")
+  | "select", _ -> malformedf "select expects 2 arguments"
+  | "store", [ a; i; v ] ->
+    let arr = rd a in
+    (match arr.Term.sort with
+     | Sort.Array (index, element) ->
+       Context.app
+         st.ctx
+         (array_op_sym st Array_defs.Store ~index ~element)
+         [ arr; rd i; rd v ]
+     | _ -> malformedf "store applied to a non-array term")
+  | "store", _ -> malformedf "store expects 3 arguments"
+  (* A user-declared function / define-fun takes precedence over the bitvector-operator
+     keywords (so a user symbol that happens to spell one of the reserved bitvector names
+     still resolves to the user's declaration); otherwise a bitvector keyword routes to
+     the bitvector builders, and anything else is an undeclared/unknown operator. *)
+  | _ when Hashtbl.mem st.defines op || Hashtbl.mem st.funs op ->
+    apply_named st scope op args orig
+  | _ when is_bv_keyword op -> read_bv_op st scope op args orig
   | _ -> apply_named st scope op args orig
 
 (* Expand a [define-fun] use site by capture-avoiding substitution: the argument
@@ -357,7 +851,12 @@ and expand st scope name (def : definition) arg_sexps =
     (* Cycle guard stays live across the body read: recursion re-enters [expand] with the
        same [name] before this key is cached, so it is caught here, not memoized. *)
     Hashtbl.replace st.expanding name ();
-    let body = read_term st bindings def.body in
+    (* Fresh scope containing ONLY the parameters (caller locals do not leak into the
+       body); [bindings] stays a list for the memo key above. *)
+    let param_scope =
+      List.fold_right (fun (n, t) acc -> Scope.add n t acc) bindings Scope.empty
+    in
+    let body = read_term st param_scope def.body in
     Hashtbl.remove st.expanding name;
     if not (Sort.equal body.Term.sort def.ret)
     then malformedf "define-fun %s body sort differs from declared result sort" name;
@@ -470,8 +969,13 @@ let rec collect_forall st acc (tail : Sexp.t list) =
 let read_forall st (tail : Sexp.t list) : lemma_src =
   let qvars, body_sexp, trigger_sexps = collect_forall st [] tail in
   let build qvar_images =
+    (* [qvars] is outer-to-inner; adding each in that order lets an inner binder overwrite
+       (shadow) an outer one of the same name — matching the old innermost-first list. *)
     let scope =
-      List.rev (List.mapi (fun i (name, _sort) -> name, qvar_images.(i)) qvars)
+      List.fold_left
+        (fun acc (i, name) -> Scope.add name qvar_images.(i) acc)
+        Scope.empty
+        (List.mapi (fun i (name, _sort) -> i, name) qvars)
     in
     let body = read_term st scope body_sexp in
     let triggers = List.map (List.map (read_term st scope)) trigger_sexps in
@@ -675,7 +1179,19 @@ let known_logic = function
   | "QF_DT"
   | "QF_UFDT"
   | "QF_DTLIA"
-  | "QF_UFDTLIA" -> true
+  | "QF_UFDTLIA"
+  (* quantifier-free arrays (select/store/extensionality). Arrays combined with arithmetic
+     (QF_ALIA/QF_AUFLIA) are accepted at the name level too, but arithmetic atoms fall
+     outside the standalone arrays theory and degrade to unknown per the fail-closed
+     CONSTRUCT discipline. *)
+  | "QF_AX"
+  | "QF_ALIA"
+  | "QF_AUFLIA"
+  (* bitvectors (bit-blasted); BV combined with arithmetic accepted at the name level. *)
+  | "QF_BV"
+  | "QF_UFBV"
+  | "QF_BVLIA"
+  | "QF_UFBVLIA" -> true
   (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
   | "UF"
   | "UFLIA"
@@ -712,7 +1228,7 @@ let run st sexps =
       validate_bang_attrs attrs;
       classify inner
     | _ ->
-      let t = read_term st [] b in
+      let t = read_term st Scope.empty b in
       if not (Sort.equal t.Term.sort Sort.bool) then malformedf "assertion is not Bool";
       `Ground t
   in
@@ -802,7 +1318,7 @@ let run st sexps =
   !logic, !status, List.rev !asserts, List.rev !lemmas
 ;;
 
-let parse_into env ctx src =
+let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
   let st =
     { ctx
     ; env
@@ -813,12 +1329,10 @@ let parse_into env ctx src =
     ; memo = Hashtbl.create 64
     ; dt_names = Hashtbl.create 8
     ; datatypes = Datatype_defs.empty
+    ; internal_mint
+    ; array_ops = Hashtbl.create 8
+    ; arrays = Array_defs.empty
     }
-  in
-  let sexps =
-    try Sexp.parse_many src with
-    | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))
-    | Tok.Error m -> raise (Malformed ("lexical: " ^ m))
   in
   let logic, status, assertions, lemmas =
     try run st sexps with
@@ -826,11 +1340,43 @@ let parse_into env ctx src =
     | Term.Unsupported m -> raise (Unsupported m)
     | Term.Overflow -> raise (Unsupported "arithmetic exceeds native int range")
   in
-  { env; ctx; logic; status; assertions; datatypes = st.datatypes; lemmas }
+  { env
+  ; ctx
+  ; logic
+  ; status
+  ; assertions
+  ; datatypes = st.datatypes
+  ; arrays = st.arrays
+  ; lemmas
+  }
+;;
+
+let parse_into ?internal_mint env ctx src =
+  let sexps =
+    try Sexp.parse_many src with
+    | Sexp.Malformed m -> raise (Malformed ("s-expression: " ^ m))
+    | Tok.Error m -> raise (Malformed ("lexical: " ^ m))
+  in
+  parse_into_sexps ?internal_mint env ctx sexps
 ;;
 
 let parse src =
-  let env = Env.create () in
+  (* A standalone parse owns its env, so it builds its OWN cap-backed [Internal_minter]
+     (board #58 O-MINTER) and threads it — a theory that mints a reserved marker mid-parse
+     (bit-vectors, arrays) resolves rather than raising [Malformed]. Sound because the cap
+     and env are local to this parse and never leave it (contrast a [Session]-driven
+     [parse_into], where the cap stays private to the Session and only its opaque
+     [parse_minter] token is threaded). The [admit] gate is the same parse-time theory
+     vocabulary the Session sanctions — the bit-vector marker grammar (one predicate per
+     line so a further theory ORs in merge-friendly); it is PAIRED with the consuming-side
+     rank/sort check ([Bv.view]) that keeps a mismatched mint inert. *)
+  let env, cap = Env.create_with_cap () in
   let ctx = Context.create env in
-  parse_into env ctx src
+  let minter =
+    Internal_minter.create
+      ~admit:(fun name -> Array_defs.is_op_name name || Bv.is_bv_name name)
+      cap
+      env
+  in
+  parse_into ~internal_mint:minter env ctx src
 ;;

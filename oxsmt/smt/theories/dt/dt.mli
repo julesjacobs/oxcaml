@@ -30,10 +30,11 @@ open Oxsmt_core
 type t
 
 (** [create ctx env registry] is an empty DT theory over session [ctx]/[env], reading
-    datatype structure from [registry] ({!Oxsmt_core.Datatype_defs}). With an empty
-    [registry] the theory is inert (pure congruence closure), so a non-datatype problem is
-    unaffected. *)
-val create : Context.t -> Env.t -> Datatype_defs.t -> t
+    datatype structure from the LIVE [registry] ref ({!Oxsmt_core.Datatype_defs}) — held
+    by reference, not snapshotted, so datatypes declared after this theory is instantiated
+    (batched queries in one session) are visible. With an empty [registry] the theory is
+    inert (pure congruence closure), so a non-datatype problem is unaffected. *)
+val create : Context.t -> Env.t -> Datatype_defs.t ref -> t
 
 (* The frozen {!Oxsmt_core.Theory.THEORY} operations, driven by the CDCL(T) seam. *)
 
@@ -58,3 +59,13 @@ type ctor_tree =
     unconstrained class is given its sort's first terminating constructor (so recursive
     sorts get a finite witness). [None] if a needed value is missing (fail-closed). *)
 val constructor_model : t -> (Term.t * ctor_tree) list option
+
+(** [check_model t] is the full candidate model the §8 DT self-check evaluates against the
+    formula: a [Term.t -> ctor_tree] assignment for every registered datatype term (via
+    {!constructor_model}, so datatype variables, nested fields, and underspecified
+    selector terms all resolve) UNIONED with a [Leaf] scalar for every registered
+    non-datatype atomic (nullary [App]) subterm (Int/Bool/uninterpreted-sort variable).
+    Compound terms are omitted — the evaluator computes them structurally. [None] iff
+    {!constructor_model} degrades (fail-closed). Valid after a [check Final] returned
+    [Sat]. *)
+val check_model : t -> (Term.t * ctor_tree) list option

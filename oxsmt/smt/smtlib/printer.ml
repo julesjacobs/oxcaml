@@ -117,18 +117,68 @@ let add_int_lit buf n =
    internal ["is-C"] function name. Constructor and selector applications are ordinary
    [App]s and print bare under their SMT-LIB names. [dts] is [Datatype_defs.empty] for the
    registry-free [print_term]. *)
-let render_family dts =
+(* The SMT-LIB keyword for a prefix-form bitvector operator ([(bvadd a b)] etc.); [None]
+   for the ops rendered with special syntax ([concat], indexed [extract]/extend). *)
+let bv_prefix_keyword (op : Bv.op) =
+  match op with
+  | Bvnot -> Some "bvnot"
+  | Bvand -> Some "bvand"
+  | Bvor -> Some "bvor"
+  | Bvxor -> Some "bvxor"
+  | Bvneg -> Some "bvneg"
+  | Bvadd -> Some "bvadd"
+  | Bvsub -> Some "bvsub"
+  | Bvmul -> Some "bvmul"
+  | Bvudiv -> Some "bvudiv"
+  | Bvurem -> Some "bvurem"
+  | Bvshl -> Some "bvshl"
+  | Bvlshr -> Some "bvlshr"
+  | Bvashr -> Some "bvashr"
+  | Bvult -> Some "bvult"
+  | Bvule -> Some "bvule"
+  | Bvslt -> Some "bvslt"
+  | Bvsle -> Some "bvsle"
+  | Concat | Extract _ | Zero_extend _ | Sign_extend _ -> None
+;;
+
+(* A bitvector literal renders as the binary form [#b<bits>] (MSB first), always exact. *)
+let bv_const_string ~value ~width =
+  let bits = Bv.bits_lsb value ~width in
+  let buf = Buffer.create (width + 2) in
+  Buffer.add_string buf "#b";
+  for i = width - 1 downto 0 do
+    Buffer.add_char buf (if bits.(i) then '1' else '0')
+  done;
+  Buffer.contents buf
+;;
+
+let render_family dts arrs =
   let rec render buf (t : Term.t) =
     match t.node with
     | Bool_const b -> Buffer.add_string buf (if b then "true" else "false")
     | Int_const n -> add_int_lit buf n
+    | App (sym, _args) when Bv.is_bv_sym sym ->
+      (match Bv.view t with
+       | Some v -> render_bv buf v
+       | None ->
+         (* A legitimately-built bit-vector term always views. [Bv.view] returns [None]
+            here only for a [.oxsmt.bv|] name whose recorded rank disagrees with its
+            decoded operator/widths (board #58: mintable only through the cap-gated
+            [Session.internal_minter]) — fail closed rather than render the operator over
+            mismatched operands (which would change the round-trip oracle formula). *)
+         raise (Unsupported "bitvector symbol did not decode (name/rank mismatch)"))
     | App (sym, args) ->
-      (match Datatype_defs.tester_of_sym dts sym with
-       | Some (_, ctor) ->
-         (* tester: ((_ is C) arg) *)
-         Buffer.add_string buf "((_ is ";
-         Buffer.add_string buf (quote_symbol (Symbol.name ctor.Datatype_defs.sym));
-         Buffer.add_char buf ')';
+      (match Array_defs.role_of_sym arrs sym with
+       | Some { Array_defs.role; _ } ->
+         (* An array operator prints as its SMT-LIB builtin name ([select]/[store]), never
+            the internal per-instantiation symbol name. *)
+         let op =
+           match role with
+           | Array_defs.Select -> "select"
+           | Array_defs.Store -> "store"
+         in
+         Buffer.add_char buf '(';
+         Buffer.add_string buf op;
          Iarr.iter
            (fun a ->
               Buffer.add_char buf ' ';
@@ -136,17 +186,30 @@ let render_family dts =
            args;
          Buffer.add_char buf ')'
        | None ->
-         if Iarr.length args = 0
-         then Buffer.add_string buf (quote_symbol (Symbol.name sym))
-         else (
-           Buffer.add_char buf '(';
-           Buffer.add_string buf (quote_symbol (Symbol.name sym));
-           Iarr.iter
-             (fun a ->
-                Buffer.add_char buf ' ';
-                render buf a)
-             args;
-           Buffer.add_char buf ')'))
+         (match Datatype_defs.tester_of_sym dts sym with
+          | Some (_, ctor) ->
+            (* tester: ((_ is C) arg) *)
+            Buffer.add_string buf "((_ is ";
+            Buffer.add_string buf (quote_symbol (Symbol.name ctor.Datatype_defs.sym));
+            Buffer.add_char buf ')';
+            Iarr.iter
+              (fun a ->
+                 Buffer.add_char buf ' ';
+                 render buf a)
+              args;
+            Buffer.add_char buf ')'
+          | None ->
+            if Iarr.length args = 0
+            then Buffer.add_string buf (quote_symbol (Symbol.name sym))
+            else (
+              Buffer.add_char buf '(';
+              Buffer.add_string buf (quote_symbol (Symbol.name sym));
+              Iarr.iter
+                (fun a ->
+                   Buffer.add_char buf ' ';
+                   render buf a)
+                args;
+              Buffer.add_char buf ')')))
     | Arith l -> render_arith buf l
     | Le arg ->
       Buffer.add_string buf "(<= ";
@@ -184,6 +247,49 @@ let render_family dts =
          render buf x)
       xs;
     Buffer.add_char buf ')'
+  and render_bv buf (v : Bv.view) =
+    match v with
+    | Bv.Const { value; width } -> Buffer.add_string buf (bv_const_string ~value ~width)
+    | Bv.Op { op; args; result_width = _ } ->
+      let render_args () =
+        List.iter
+          (fun a ->
+             Buffer.add_char buf ' ';
+             render buf a)
+          args
+      in
+      let indexed head =
+        Buffer.add_string buf "(";
+        Buffer.add_string buf head;
+        render_args ();
+        Buffer.add_char buf ')'
+      in
+      (match op, bv_prefix_keyword op with
+       | _, Some kw -> indexed kw
+       | Bv.Concat, None -> indexed "concat"
+       | Bv.Extract (i, j), None -> indexed (Printf.sprintf "(_ extract %d %d)" i j)
+       | Bv.Zero_extend n, None -> indexed (Printf.sprintf "(_ zero_extend %d)" n)
+       | Bv.Sign_extend n, None -> indexed (Printf.sprintf "(_ sign_extend %d)" n)
+       | ( ( Bv.Bvnot
+           | Bv.Bvand
+           | Bv.Bvor
+           | Bv.Bvxor
+           | Bv.Bvneg
+           | Bv.Bvadd
+           | Bv.Bvsub
+           | Bv.Bvmul
+           | Bv.Bvudiv
+           | Bv.Bvurem
+           | Bv.Bvshl
+           | Bv.Bvlshr
+           | Bv.Bvashr
+           | Bv.Bvult
+           | Bv.Bvule
+           | Bv.Bvslt
+           | Bv.Bvsle )
+         , None ) ->
+         (* [bv_prefix_keyword] returns [Some] for exactly these, so [None] is impossible. *)
+         raise (Unsupported "bitvector prefix operator without keyword"))
   (* [Arith] = sum of (coeff * term) plus a constant. Render each summand (the term bare
      when its coeff is 1, else a "( * coeff term )" product), append the constant when
      nonzero. One summand and no constant prints that summand alone (never a unary [+]);
@@ -224,9 +330,9 @@ let render_family dts =
   render
 ;;
 
-let print_term ?(datatypes = Datatype_defs.empty) t =
+let print_term ?(datatypes = Datatype_defs.empty) ?(arrays = Array_defs.empty) t =
   let buf = Buffer.create 64 in
-  render_family datatypes buf t;
+  render_family datatypes arrays buf t;
   Buffer.contents buf
 ;;
 
@@ -247,20 +353,30 @@ type decls =
   { sorts : Symbol.t list (* uninterpreted sort symbols, first-use order *)
   ; datatypes : Symbol.t list (* datatype sort symbols, first-use order *)
   ; funs : Symbol.t list (* function/const symbols, first-use order *)
+  ; uses_bitvec : bool (* any bitvector sort/term appears — selects a BV logic label *)
   }
 
-let collect_decls dts env assertions =
+let collect_decls dts arrs env assertions =
   let sort_seen = Sym_tbl.create 16 in
   let dt_seen = Sym_tbl.create 16 in
   let fun_seen = Sym_tbl.create 64 in
   let sorts = ref [] in
   let datatypes = ref [] in
   let funs = ref [] in
+  let uses_bitvec = ref false in
   let div_sym = Env.div_sym env in
   let mod_sym = Env.mod_sym env in
   let rec visit_sort (s : Sort.t) =
     match s with
     | Sort.Bool | Sort.Int _ -> ()
+    (* [BitVec] is a built-in indexed sort — no [declare-sort] to collect, but its presence
+       selects a bitvector logic label. *)
+    | Sort.BitVec _ -> uses_bitvec := true
+    (* An [(Array I E)] sort is built-in — no [declare-sort] of its own — but its index
+       and element sorts must still be collected so an uninterpreted [I]/[E] is declared. *)
+    | Sort.Array (index, element) ->
+      visit_sort index;
+      visit_sort element
     | Sort.Uninterpreted sym ->
       if not (Sym_tbl.mem sort_seen sym)
       then (
@@ -297,9 +413,18 @@ let collect_decls dts env assertions =
     || Option.is_some (Datatype_defs.selector_of_sym dts sym)
     || Option.is_some (Datatype_defs.tester_of_sym dts sym)
   in
+  (* An array [select]/[store] symbol is a theory builtin printed as [(select ...)] /
+     [(store ...)]; it is never emitted as a [declare-fun] (its internal per-instantiation
+     name is not even a legal SMT-LIB symbol). Its rank's sorts are still walked so the
+     index/element sorts get declared. *)
+  let is_array_symbol sym = Option.is_some (Array_defs.role_of_sym arrs sym) in
   let register_fun sym =
-    (* reserved div/mod are built-ins, never declared *)
-    if (not (Symbol.equal sym div_sym)) && not (Symbol.equal sym mod_sym)
+    (* reserved div/mod, and the bitvector operator/literal symbols, are built-ins: never
+       emitted as [declare-fun] (their sorts are built-in and need no declaration). *)
+    if
+      (not (Symbol.equal sym div_sym))
+      && (not (Symbol.equal sym mod_sym))
+      && not (Bv.is_bv_sym sym)
     then
       if not (Sym_tbl.mem fun_seen sym)
       then (
@@ -309,12 +434,14 @@ let collect_decls dts env assertions =
            Iarr.iter visit_sort rank.Rank.domain;
            visit_sort rank.Rank.codomain
          | exception Not_found -> ());
-        if not (is_datatype_symbol sym) then funs := sym :: !funs)
+        if (not (is_datatype_symbol sym)) && not (is_array_symbol sym)
+        then funs := sym :: !funs)
   in
   let rec visit (t : Term.t) =
     match t.node with
     | Bool_const _ | Int_const _ -> ()
     | App (sym, args) ->
+      if Bv.is_bv_sym sym then uses_bitvec := true;
       register_fun sym;
       Iarr.iter visit args
     | Arith l -> Iarr.iter (fun (t, _) -> visit t) l.coeffs
@@ -329,19 +456,26 @@ let collect_decls dts env assertions =
       visit b
   in
   List.iter visit assertions;
-  { sorts = List.rev !sorts; datatypes = List.rev !datatypes; funs = List.rev !funs }
+  { sorts = List.rev !sorts
+  ; datatypes = List.rev !datatypes
+  ; funs = List.rev !funs
+  ; uses_bitvec = !uses_bitvec
+  }
 ;;
 
 (* ------------------------------------------------------------------ *)
 (* Sort rendering (in declarations). *)
 
-let sort_string (s : Sort.t) =
+let rec sort_string (s : Sort.t) =
   match s with
   | Sort.Bool -> "Bool"
   | Sort.Int _ -> "Int"
   (* A datatype sort prints by its name, the same as an uninterpreted sort; the datatype's
      shape is emitted separately in the [(declare-datatypes ...)] block. *)
   | Sort.Uninterpreted sym | Sort.Datatype sym -> quote_sort_symbol (Symbol.name sym)
+  | Sort.Array (index, element) ->
+    Printf.sprintf "(Array %s %s)" (sort_string index) (sort_string element)
+  | Sort.BitVec w -> Printf.sprintf "(_ BitVec %d)" w
 ;;
 
 (* Render one constructor [(C (sel1 S1) ... (seln Sn))] for a declare-datatypes block;
@@ -362,14 +496,22 @@ let constructor_string (c : Datatype_defs.constructor) =
   Buffer.contents buf
 ;;
 
-let print_session ?status ?(datatypes = Datatype_defs.empty) env assertions =
+let print_session
+      ?status
+      ?(datatypes = Datatype_defs.empty)
+      ?(arrays = Array_defs.empty)
+      env
+      assertions
+  =
   let buf = Buffer.create 1024 in
   let line s =
     Buffer.add_string buf s;
     Buffer.add_char buf '\n'
   in
-  let { sorts; datatypes = dt_syms; funs } = collect_decls datatypes env assertions in
-  let render = render_family datatypes in
+  let { sorts; datatypes = dt_syms; funs; uses_bitvec } =
+    collect_decls datatypes arrays env assertions
+  in
+  let render = render_family datatypes arrays in
   (match status with
    | None -> ()
    | Some st -> line (Printf.sprintf "(set-info :status %s)" (Status.to_string st)));
@@ -382,7 +524,20 @@ let print_session ?status ?(datatypes = Datatype_defs.empty) env assertions =
      omit LIA, so a strict consumer (the Lean oracle) would reject the otherwise-faithful
      dump. The superset is always sound (a pure-DT problem is in QF_UFDTLIA), matching the
      base's always-superset convention. *)
-  line (if dt_syms = [] then "(set-logic QF_UFLIA)" else "(set-logic QF_UFDTLIA)");
+  (* Logic label (always a superset of the query's theories, hence sound): a datatype
+     session needs the DT superset; a bitvector session [QF_UFBV]; an array session
+     [QF_AUFLIA] (the broad UF+arrays+LIA superset our reader accepts); otherwise the base
+     [QF_UFLIA]. Datatypes take precedence in the (not-yet-produced) mixed cases. *)
+  let logic =
+    if dt_syms <> []
+    then "QF_UFDTLIA"
+    else if uses_bitvec
+    then "QF_UFBV"
+    else if not (Array_defs.is_empty arrays)
+    then "QF_AUFLIA"
+    else "QF_UFLIA"
+  in
+  line (Printf.sprintf "(set-logic %s)" logic);
   List.iter
     (fun sym ->
        line (Printf.sprintf "(declare-sort %s 0)" (quote_sort_symbol (Symbol.name sym))))

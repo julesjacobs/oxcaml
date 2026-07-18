@@ -51,6 +51,28 @@ let rec map_lr f = function
     y :: map_lr f xs
 ;;
 
+(* Hash-consing makes tag equality physical identity, so a rewrite that returns a child
+   unchanged returns the identical node. *)
+let same_tag (a : Term.t) (b : Term.t) = a.Term.tag = b.Term.tag
+
+(* Apply [f] left-to-right over [xs]; return [None] when every result is the identical
+   node as its input (nothing under this list was rewritten), letting the caller reuse its
+   original hash-consed node instead of paying a reconstruction (list/array allocation + a
+   hash-cons lookup) that would only re-derive the same node. Every element is still
+   visited, in order, so any fresh-symbol side effect fires exactly as before. *)
+let map_go f xs =
+  let changed = ref false in
+  let ys =
+    map_lr
+      (fun x ->
+         let y = f x in
+         if not (same_tag x y) then changed := true;
+         y)
+      xs
+  in
+  if !changed then Some ys else None
+;;
+
 (* ------------------------------------------------------------------ *)
 (* ite_removal. *)
 
@@ -69,26 +91,56 @@ let ite_removal t root =
   and rewrite (term : Term.t) =
     match term.node with
     | Bool_const _ | Int_const _ -> term
-    | App (sym, args) -> Context.app ctx sym (map_lr go (Iarr.to_list args))
+    | App (sym, args) ->
+      (match map_go go (Iarr.to_list args) with
+       | None -> term
+       | Some args' -> Context.app ctx sym args')
     | Arith l ->
-      Context.linear_combination_big
-        ctx
-        (map_lr (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
-        l.const
-    | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+      let changed = ref false in
+      let coeffs' =
+        map_lr
+          (fun (tm, c) ->
+             let tm' = go tm in
+             if not (same_tag tm tm') then changed := true;
+             c, tm')
+          (Iarr.to_list l.coeffs)
+      in
+      if !changed then Context.linear_combination_big ctx coeffs' l.const else term
+    | Le a ->
+      (* Preserve the OLD unconditional rebuild's side effect: [Context.int_const ctx 0]
+         first-interns the standalone [Int_const 0] term. It is an orphan here, but LIA
+         search may later reuse it and its hash-cons tag must match trunk; skipping it
+         would shift that tag on a formula with no explicit [0] literal. Interned BEFORE
+         [go a] to match OCaml's right-to-left argument evaluation of the old
+         [Context.le ctx (go a) (Context.int_const ctx 0)]. *)
+      let zero = Context.int_const ctx 0 in
+      let a' = go a in
+      if same_tag a a' then term else Context.le ctx a' zero
     | Eq (a, b) ->
       let a' = go a in
       let b' = go b in
-      Context.eq ctx a' b'
-    | Not a -> Context.not_ ctx (go a)
-    | And xs -> Context.and_ ctx (map_lr go (Iarr.to_list xs))
-    | Or xs -> Context.or_ ctx (map_lr go (Iarr.to_list xs))
+      if same_tag a a' && same_tag b b' then term else Context.eq ctx a' b'
+    | Not a ->
+      let a' = go a in
+      if same_tag a a' then term else Context.not_ ctx a'
+    | And xs ->
+      (match map_go go (Iarr.to_list xs) with
+       | None -> term
+       | Some xs' -> Context.and_ ctx xs')
+    | Or xs ->
+      (match map_go go (Iarr.to_list xs) with
+       | None -> term
+       | Some xs' -> Context.or_ ctx xs')
     | Ite (c, a, b) ->
       let c' = go c in
       let a' = go a in
       let b' = go b in
       if Sort.equal term.sort Sort.bool
-      then Context.ite ctx c' a' b' (* Bool-Ite: a connective, left for the clausifier *)
+      then
+        (* Bool-Ite: a connective, left for the clausifier *)
+        if same_tag c c' && same_tag a a' && same_tag b b'
+        then term
+        else Context.ite ctx c' a' b'
       else (
         (* non-Bool value-Ite: lift to a fresh constant with guarded equalities. *)
         let sym = fresh_symbol t ~kind:"ite" term.sort in
@@ -181,25 +233,50 @@ let div_mod_elimination t root =
       let q, r = get_qr x' dv in
       if Symbol.equal sym div_sym then q else r
     | Bool_const _ | Int_const _ -> term
-    | App (sym, args) -> Context.app ctx sym (map_lr go (Iarr.to_list args))
+    | App (sym, args) ->
+      (match map_go go (Iarr.to_list args) with
+       | None -> term
+       | Some args' -> Context.app ctx sym args')
     | Arith l ->
-      Context.linear_combination_big
-        ctx
-        (map_lr (fun (tm, c) -> c, go tm) (Iarr.to_list l.coeffs))
-        l.const
-    | Le a -> Context.le ctx (go a) (Context.int_const ctx 0)
+      let changed = ref false in
+      let coeffs' =
+        map_lr
+          (fun (tm, c) ->
+             let tm' = go tm in
+             if not (same_tag tm tm') then changed := true;
+             c, tm')
+          (Iarr.to_list l.coeffs)
+      in
+      if !changed then Context.linear_combination_big ctx coeffs' l.const else term
+    | Le a ->
+      (* Preserve the OLD rebuild's [Int_const 0] interning at the same point
+         (right-to-left arg eval interns it before [go a]); see the matching note in
+         [ite_removal]. *)
+      let zero = Context.int_const ctx 0 in
+      let a' = go a in
+      if same_tag a a' then term else Context.le ctx a' zero
     | Eq (a, b) ->
       let a' = go a in
       let b' = go b in
-      Context.eq ctx a' b'
-    | Not a -> Context.not_ ctx (go a)
-    | And xs -> Context.and_ ctx (map_lr go (Iarr.to_list xs))
-    | Or xs -> Context.or_ ctx (map_lr go (Iarr.to_list xs))
+      if same_tag a a' && same_tag b b' then term else Context.eq ctx a' b'
+    | Not a ->
+      let a' = go a in
+      if same_tag a a' then term else Context.not_ ctx a'
+    | And xs ->
+      (match map_go go (Iarr.to_list xs) with
+       | None -> term
+       | Some xs' -> Context.and_ ctx xs')
+    | Or xs ->
+      (match map_go go (Iarr.to_list xs) with
+       | None -> term
+       | Some xs' -> Context.or_ ctx xs')
     | Ite (c, a, b) ->
       let c' = go c in
       let a' = go a in
       let b' = go b in
-      Context.ite ctx c' a' b'
+      if same_tag c c' && same_tag a a' && same_tag b b'
+      then term
+      else Context.ite ctx c' a' b'
   in
   let root' = go root in
   let result =

@@ -22,10 +22,12 @@ let owner term =
   | Theory_view.Equality (x, _) ->
     (match x.Term.sort with
      | Sort.Int _ -> Both
-     (* A datatype equality/disequality is decided by congruence (the datatype theory is
-        an e-graph client alongside EUF), so it routes to EUF like an uninterpreted-sort
-        equality — no arithmetic arrangement. *)
-     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ -> A)
+     (* A datatype, array, or bitvector equality/disequality is decided by congruence (all
+        are e-graph clients alongside EUF), so it routes to EUF like an uninterpreted-sort
+        equality — no arithmetic arrangement. The bit-blasting engine supplies the bit-level
+        semantics separately at the propositional layer. *)
+     | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _
+       -> A)
 ;;
 
 (* The ASSERT fan-out — a subset of [owner] (combine.mli). Two narrowings:

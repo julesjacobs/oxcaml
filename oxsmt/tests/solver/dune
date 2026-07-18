@@ -24,3 +24,84 @@
   oxsmt_interface
   oxsmt_smtlib_parser
   oxsmt_query_loader))
+
+; Online symmetry-breaking unit + discrimination tests (make symbreak-test).
+
+(executable
+ (name symbreak_test)
+ (modules symbreak_test)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader
+  unix))
+
+; QF_BV end-to-end acceptance goldens driven through the real Session dispatch
+; (make bv-goldens-test).
+
+(executable
+ (name bv_goldens_test)
+ (modules bv_goldens_test)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
+
+; Durable exhaustive small-width oracle for the task-#11 operator sugar (make bv-op-coverage-test).
+
+(executable
+ (name bv_op_coverage_test)
+ (modules bv_op_coverage_test)
+ (libraries oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))
+
+; Datatypes sat-model gate (make dt-sat-gate): drives the tests/dt-goldens-sat sat goldens
+; through the real Session asserting a CHECKED sat, and proves Dt_model_check is RED against
+; a deliberately-wrong constructor tree (banked review rule).
+
+; dt-multi-query gate (make dt-multi-query-gate): the batched-VC-per-Session regression
+; (task #51). Declares multiple datatypes across push-scoped checks in one Session via the
+; accumulating declare_datatype API and asserts each stays checked-sat — RED before the DT
+; theory read its registry by live ref, GREEN after. Documents the task #54 none-then-DT gap.
+
+(executable
+ (name dt_multi_query_gate)
+ (modules dt_multi_query_gate)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
+
+(executable
+ (name dt_sat_gate)
+ (modules dt_sat_gate)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_dt
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
+
+; Arrays sat-model gate (make array-sat-gate): drives the tests/arr-goldens-sat sat goldens
+; through the real Session asserting a CHECKED sat, pins the commit -> Array_model_check
+; wiring via a fault-injection stub, and proves the checker rejects an unsatisfiable
+; storeinv-shape array query (RED against a checker bypass).
+
+(executable
+ (name array_sat_gate)
+ (modules array_sat_gate)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_arr
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
+
+; Unit tests for the W0 dark weak-equivalence graph substrate (make weq-graph-test).
+
+(executable
+ (name weq_graph_test)
+ (modules weq_graph_test)
+ (libraries oxsmt_core oxsmt_interface oxsmt_arr))

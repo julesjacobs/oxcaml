@@ -31,8 +31,9 @@ STATS    ?= $(LOGS)/stats
 CASES    ?= tests/cases
 FIXTURES ?= tests/harness/fixtures
 DT_GOLDENS ?= tests/dt-goldens
+ARR_GOLDENS ?= tests/arr-goldens
 HARNESS_ARGS := --solver $(SOLVER) --eval $(EVAL) --dir $(CASES) --dir $(FIXTURES) \
-                --dir $(DT_GOLDENS) --logs $(LOGS) --stats $(STATS)
+                --dir $(DT_GOLDENS) --dir $(ARR_GOLDENS) --logs $(LOGS) --stats $(STATS)
 
 # SAT bench corpus. Defaults to the uf50/uuf50 families (the M1 verdict-agreement
 # target, solved in seconds); GLOBs at runtime and tolerates absence. Override to
@@ -91,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test seam-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test euf-test euf-adapter-test combine-test stage0-test wiring-test smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test seam-test chrono-test chrono-session-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lia-adapter-test bv-blast-test bv-goldens-test bv-op-coverage-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate smtlib-test smtlib-corpus fuzz-lex eval-test bench gate promote check-frozen spine status status-fresh status-test mutants
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -143,6 +144,14 @@ core-prelude-test:
 sat-test:
 	$(DUNE) exec smt/solver/test/sat_test.exe
 
+## satpre-test — CNF preprocessing / bounded variable elimination (DESIGN.md A10). Run with
+##   OXSMT_SATPRE=1 so the gate is ON (the feature is read at Sat.create); the executable
+##   SKIPS with the gate off. Firing (marked run does fewer propagations than unmarked),
+##   reconstruction (every model satisfies the original clauses; forced-flip cases), and
+##   UNSAT preservation. Nonzero exit on any failed check.
+satpre-test:
+	OXSMT_SATPRE=1 OXSMT_SATPRE_INPROC_FIRST=1 $(DUNE) exec smt/solver/test/satpre_test.exe
+
 ## seam-test — CDCL(T) theory-callback seam (smt/solver, ADR-0005 §3) self-test via a
 ##   scripted MOCK theory: theory conflict at various trail depths, propagation-then-
 ##   conflict, lazy explain (called iff analysis resolves a theory literal), push/pop
@@ -179,6 +188,48 @@ checker-test:
 CORPUS_GATE_DIRS ?= tests/cases tests/dt-goldens
 cert-corpus-gate:
 	$(DUNE) exec tests/certificate/cert_corpus_gate.exe -- $(CORPUS_GATE_DIRS)
+
+## chrono-test — chronological-backtracking (task #41 Stage 1) adversarial self-test, RUN
+##   WITH OXSMT_CHRONO=1 so every solver built is a CB solver. Cross-checks CB verdicts
+##   against an INDEPENDENT DPLL oracle over thousands of conflict-dense + sparse random
+##   CNFs, self-checks every sat model (the §10.2 watch-repair crux is RED-verified: a
+##   naive scattered-removal core reports a model that falsifies a clause), plus a directed
+##   hazard family and run-twice determinism. Nonzero exit on any failed check.
+chrono-test:
+	$(DUNE) build smt/solver/test/chrono_test.exe
+	OXSMT_CHRONO=1 $(DUNE) exec smt/solver/test/chrono_test.exe
+	$(MAKE) chrono-session-test
+
+## lgc-test — OXSMT_LGC_FIXED reduceDB-schedule self-test. Toggles the gate per solver
+##   (Unix.putenv) to compare the conflict-count schedule (OFF) against z3's LGC_FIXED
+##   lemma-count schedule (ON) in one process: cross-checks soundness under aggressive GC
+##   against an INDEPENDENT DPLL oracle (the flat-arena rebuild/remap driven on the
+##   lemma-count trigger must stay sound), and RED-verifies the schedule is load-bearing
+##   (OFF vs ON reach different counter trios on high-LBD instances). Nonzero exit on any
+##   failed check. Sets nothing in the env itself — the suite arms the gate internally.
+lgc-test:
+	$(DUNE) build smt/solver/test/lgc_test.exe
+	$(DUNE) exec smt/solver/test/lgc_test.exe
+
+## chrono-session-test (task #41 F2) — CB must be REACHABLE THROUGH THE PRODUCT. Every
+##   [Session] solve passes [List.map Sat.pos t.frames] (a nonempty base selector) as SAT
+##   assumptions, so a CB+assumptions guard makes the CLI trip its solve firewall to
+##   `unknown` on EVERY query. This runs the real solver CLI under OXSMT_CHRONO=1 on a
+##   trivially-solvable EUF sat case and an EUF unsat case and asserts each returns ITS
+##   verdict (never `unknown`). RED against unfixed Phase 2 (both were `unknown`); nonzero
+##   exit on any wrong/unknown verdict.
+chrono-session-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; fail=0; \
+	  for c in "euf_sat sat" "euf_explain_eqdiamond_unsat unsat"; do \
+	    f=$${c%% *}; want=$${c##* }; \
+	    got=$$(OXSMT_CHRONO=1 $$cli tests/cases/$$f.smt2 2>/dev/null | grep -o 'verdict [a-z]*' | awk '{print $$2}'); \
+	    if [ "$$got" != "$$want" ]; then \
+	      echo "chrono-session-test: FAIL $$f under OXSMT_CHRONO=1: want $$want, got $${got:-<none>} (F2: CB unreachable through session)"; \
+	      fail=1; \
+	    else echo "chrono-session-test: OK $$f -> $$got (CB reached through session)"; fi; \
+	  done; \
+	  test $$fail -eq 0
 
 ## sat-bench — run the SAT core over a DIMACS corpus ($(SAT_CORPUS)). GLOBs
 ##   **/*.cnf at runtime, label-checks uf*/uuf* families, self-checks every sat
@@ -299,13 +350,87 @@ dev-release-check:
 preprocess-test:
 	$(DUNE) exec smt/preprocess/test/preprocess_test.exe
 
+## dt-sat-gate — datatypes SAT-direction gate (task/dt-models). Drives the
+##   tests/dt-goldens-sat [:status sat] goldens through the real Session and asserts a
+##   CHECKED sat (the constructor-tree model self-check passed), and proves Dt_model_check
+##   is RED against a deliberately-wrong constructor tree (the model self-check discriminates,
+##   never rubber-stamps). Kept off the harness (whose sat path runs the DT-unaware external
+##   eval); v1 DT soundness is the in-process constructor-tree checker. Nonzero on any failure.
+DT_SAT_GOLDENS ?= tests/dt-goldens-sat
+dt-sat-gate:
+	$(DUNE) build tests/solver/dt_sat_gate.exe
+	$(DUNE) exec tests/solver/dt_sat_gate.exe -- $(DT_SAT_GOLDENS)
+
+## dt-multi-query-gate — batched-VC-per-Session regression (task #51). Declares multiple
+##   datatypes across push-scoped checks in ONE Session via the accumulating
+##   declare_datatype API and asserts each stays checked-sat (RED before the DT theory read
+##   its registry by live ref). Documents the task #54 none-then-DT theory-choice gap.
+dt-multi-query-gate:
+	$(DUNE) build tests/solver/dt_multi_query_gate.exe
+	$(DUNE) exec tests/solver/dt_multi_query_gate.exe
+
+## array-sat-gate — arrays SAT-direction gate (task #14). Drives the tests/arr-goldens-sat
+##   [:status sat] goldens through the shipped CLI (one Session per process, the product
+##   path) asserting a CHECKED sat, proves the array checker rejects an unsatisfiable
+##   storeinv-shape query, and pins the commit -> Array_model_check wiring with a
+##   fault-injection override (RED against a checker bypass). Nonzero on any failure.
+ARR_SAT_GOLDENS ?= tests/arr-goldens-sat
+array-sat-gate:
+	$(DUNE) build tests/solver/array_sat_gate.exe tests/solver/oxsmt_cli.exe
+	$(DUNE) exec tests/solver/array_sat_gate.exe -- $(ARR_SAT_GOLDENS)
+
+## row2-red-gate — negative gate for definite ROW2 (OXSMT_ARR_ROW2) premise-completeness.
+##   The fixture is SATISFIABLE (z3 4.8.5 = sat) with a SAT-DECIDED [i<>j] as the SOLE carrier
+##   of [i<>j] (guarded by a Bool [d], so it is not level-0 / redundantly re-derived the way
+##   corpus diseqs are). The shipped code keeps the [i<>j] explanation in ROW2's propagation
+##   reason, so the sound verdict is [unknown] (never unsat; the flag-OFF path is unknown too).
+##   A commit that drops that premise makes it wrong-UNSAT (the M-storeidx class the fable
+##   review's RED targets). PASS iff the OXSMT_ARR_ROW2=1 verdict is NOT [unsat]; nonzero on
+##   wrong-UNSAT. See logs/ax-rowsort-log.md, logs/ax-row2-review-fable.md.
+## The same-sort (Array T T) fixture (rung-1a fix round) adds the codex boundary: index
+##   sort = element sort, so a ROW2 read-result merge touches an index-sort class mid-pass and
+##   can stale the an_diseqs class-pair index; the guarded [an_distinct_idx] (verify both
+##   orientations live, else None) keeps it NOT-unsat by construction. Both fixtures gate the
+##   same "must not be unsat under OXSMT_ARR_ROW2=1" invariant.
+ROW2_RED_FIXTURES ?= tests/arr-goldens-red/row2_premise_completeness_red.smt2 tests/arr-goldens-red/row2_samesort_red.smt2
+row2-red-gate:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@fail=0; for f in $(ROW2_RED_FIXTURES); do \
+	  out=`OXSMT_ARR_ROW2=1 $(DUNE) exec tests/solver/oxsmt_cli.exe -- $$f 2>/dev/null`; \
+	  echo "row2-red-gate [$$f]: $$out"; \
+	  case "$$out" in \
+	    *"verdict unsat"*) echo "  FAIL: ROW2 wrong-UNSAT on a satisfiable fixture"; fail=1 ;; \
+	    *) echo "  ok (verdict is not unsat)" ;; \
+	  esac; \
+	done; \
+	if [ $$fail -ne 0 ]; then exit 1; fi; \
+	echo "row2-red-gate: 2 checks, 0 failures"
+
+## weq-graph-test — unit tests for the W0 dark weak-equivalence graph substrate
+##   (ADR-weakeq / DESIGN.md A12): the O9 index-sort-stability gate, store-edge permanence,
+##   equality-edge folding + Trail-undo on pop, deterministic path finding, and the
+##   self-check tripwire. Nonzero on any failed check.
+weq-graph-test:
+	$(DUNE) build tests/solver/weq_graph_test.exe
+	$(DUNE) exec tests/solver/weq_graph_test.exe
+
 ## wiring-test — session layer (smt/interface) semantics + namespace guards. Push/pop
 ##   retraction, assert-after-check, THE SOUNDNESS RULE (theory atom -> unknown), model
 ##   extraction, and the reserved-namespace guard on both the session and the parser. Lives
 ##   under tests/solver (links the test-only parser). Nonzero exit on any failed check.
 wiring-test:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
-	$(DUNE) exec tests/solver/wiring_test.exe
+	OXSMT_PRESOLVE_CTX=1 OXSMT_PRESOLVE_PROJ=1 $(DUNE) exec tests/solver/wiring_test.exe
+
+## symbreak-test — online symmetry-breaking presolve (task #25, OXSMT_SYMBREAK, default ON
+##   as of the quiesced A/B). Detector fires on a symmetric quasigroup and REJECTS a broken
+##   (cyclic-only) symmetry; the sound lex-leader preserves SAT and UNSAT; and a test-only
+##   value-precedence MUTANT flips the SAT instance to UNSAT (discrimination — the
+##   SAT-preservation check is RED if the product ever regressed to value precedence). Sets
+##   OXSMT_SYMBREAK=1 explicitly (redundant with the default, robust to a future OFF flip).
+##   Nonzero exit on any failed check.
+symbreak-test:
+	OXSMT_SYMBREAK=1 $(DUNE) exec tests/solver/symbreak_test.exe
 
 ## driver-equiv-test — the driver-equivalence guard (task #133). Builds corpus_classify
 ##   (the headline measurement driver) and oxsmt_cli (the shipped batch path), then asserts
@@ -373,6 +498,50 @@ rational-word-test:
 lia-test:
 	$(DUNE) exec smt/theories/lia/test/lia_test.exe
 
+## bv-blast-test — smt/bitblast QF_BV bit-blaster adversarial self-test (stdlib-only,
+##   deterministic). Exhaustive small-width oracle (widths 3-4, every operator, ALL input
+##   assignments) comparing each Tseitin circuit against an INDEPENDENT value-arithmetic
+##   evaluator, in both directions (wrong-answer-UNSAT + right-answer-SAT); end-to-end
+##   sat/unsat via Bv_solve with every sat model re-checked; and the fail-closed door
+##   (unencoded op -> unknown). Nonzero exit on any failed check.
+bv-blast-test:
+	$(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+	@# task #36: the same exhaustive oracle must also certify the dark word-level rewrite
+	@# families (extract/concat/bitwise/shift) and the eq-concat sub-flag are
+	@# equivalence-preserving. Run the Layer-4 simplifier-equivalence oracle with the gates on.
+	OXSMT_BV_REWRITE2=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+	OXSMT_BV_REWRITE2=1 OXSMT_BV_REWRITE2_EQSPLIT=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+	@# bv-rw3 (word-level fold): certify the comparison-vs-bound + extract-into-op rewrites and
+	@# the bounded-fixpoint re-normalization (run_rw3_equiv). Without this run the rw3 oracle
+	@# executes as trivial identity (gate off). Composes with REWRITE2.
+	OXSMT_BV_RW3=1 OXSMT_BV_REWRITE2=1 $(DUNE) exec smt/bitblast/test/bv_blast_test.exe
+
+## bv-goldens-test — QF_BV end-to-end acceptance through the REAL Session dispatch: each
+##   tests/bv-goldens/*.smt2 is parsed + loaded + solved, and the verdict must equal the
+##   file's :status (two sat with surfaced self-checked models, two unsat, and the
+##   mixed-logic QF_UFBV door test that must degrade to unknown). Self-contained (no z3).
+##   Nonzero exit on any mismatch.
+bv-goldens-test:
+	$(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+	@# task #36: end-to-end acceptance with the dark rewrite gate on — verdicts must be
+	@# unchanged AND every sat must still surface a model. This is the RED-verified gate for
+	@# model COMPLETION: bv_concat_extract_sat rewrites (= (extract 7 4 (concat x y)) x) to
+	@# x=x, dropping x/y from the blast; without completion the sat loses its model and this
+	@# run fails ("sat but no surfaced model").
+	OXSMT_BV_REWRITE2=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+	OXSMT_BV_REWRITE2=1 OXSMT_BV_REWRITE2_EQSPLIT=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+	@# bv-rw3: end-to-end acceptance with the word-level fold gate on — verdicts unchanged, sat
+	@# models still surfaced (the bounded fixpoint is equivalence-preserving).
+	OXSMT_BV_RW3=1 OXSMT_BV_REWRITE2=1 $(DUNE) exec tests/solver/bv_goldens_test.exe -- tests/bv-goldens
+
+## bv-op-coverage-test — durable exhaustive small-width oracle for the task-#11 QF_BV
+##   operator sugar (signed div/rem/mod, bvcomp, negated-bitwise, rotates, repeat). For each
+##   op it enumerates small-width inputs, computes an INDEPENDENT OCaml reference, and asserts
+##   through the real parse -> check_sat dispatch that the built term matches. Self-contained
+##   (no z3). Nonzero exit on any mismatch.
+bv-op-coverage-test:
+	$(DUNE) exec tests/solver/bv_op_coverage_test.exe
+
 ## lia-adapter-test — smt/theories/lia THEORY-adapter (ADR-0005 M4) unit + property
 ##   self-test (stdlib-only, deterministic). Currency round-trip (Atom/Lit <-> Term),
 ##   conflict rule tags with a PUBLIC-OUTPUT Farkas verifier, bound propagation + lazy
@@ -410,7 +579,8 @@ stage0-test:
 smtlib-test:
 	$(DUNE) build smt/smtlib/test/roundtrip_test.exe smt/smtlib/test/fuzz_lex.exe
 	$(DUNE) exec smt/smtlib/test/roundtrip_test.exe -- \
-	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens
+	  tests/cases tests/harness/fixtures tests/gate/honeypots tests/dt-goldens \
+	  tests/dt-goldens-sat tests/arr-goldens tests/arr-goldens-sat tests/bv-goldens
 	$(DUNE) exec smt/smtlib/test/fuzz_lex.exe -- 500
 
 ## fuzz-lex — standing adversarial round-trip fuzzer for the shared lexer (ADR-0008).
@@ -471,16 +641,40 @@ test: check-frozen
 	  tests/solver/oxsmt_cli.exe tests/eval/eval_cli.exe
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/harness_test.exe -- $(EVAL) $(CASES)/bool_or_sat.smt2
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec tests/harness/run_harness.exe -- $(HARNESS_ARGS)
+	$(MAKE) core-test
 	$(MAKE) combine-test
+	$(MAKE) chrono-test
+	$(MAKE) lgc-test
+	$(MAKE) wiring-test
 	$(MAKE) rational-word-test
+	@# Fast deterministic theory self-tests, folded in so they cannot rot silently the way
+	@# the A13 lia_adapter_test case did (it was never in this set). All run <0.15s each;
+	@# euf-test/euf-adapter-test run their OXSMT_EUF_SELF_CHECK oracle cross-check, which is
+	@# already bounded (fixed-seed, small N; ~0.04s) so no separate smoke variant is needed.
+	$(MAKE) lia-test
+	$(MAKE) lia-adapter-test
+	$(MAKE) bigint-test
+	$(MAKE) euf-test
+	$(MAKE) euf-adapter-test
 	$(MAKE) stage0-test
+	$(MAKE) wiring-test
 	$(MAKE) smtlib-test
 	$(MAKE) lemma-test
 	$(MAKE) cert-test
 	$(MAKE) checker-test
 	$(MAKE) cert-corpus-gate
 	$(MAKE) driver-equiv-test
+	$(MAKE) bv-blast-test
+	$(MAKE) bv-goldens-test
+	$(MAKE) bv-op-coverage-test
+	$(MAKE) dt-sat-gate
+	$(MAKE) dt-multi-query-gate
+	$(MAKE) array-sat-gate
+	$(MAKE) row2-red-gate
+	$(MAKE) weq-graph-test
 	$(MAKE) regress-test
+	$(MAKE) sat-test
+	$(MAKE) satpre-test
 
 ## lemma-test — ADR-0012 lemma-tier tranche-1 acceptance: the soundness-rule honeypots
 ##   (H-SOUND / H-REFUTE / H-PUSHPOP / H-REPEAT-REFUTE) + gate/forge/cap negatives + the M1

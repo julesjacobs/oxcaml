@@ -304,16 +304,21 @@ let test_bignum_r1_session_degrade () =
         ctx
         (Context.add ctx (Context.mul_const ctx max_int x) y)
         (Context.int_const ctx 0));
+   (* DESIGN A13: [Model.value] is now [Int of Bigint.t], so a model value exceeding int63
+      (here y = -2*max_int) is represented rather than overflowing the extraction
+      projection. The query is genuinely SAT (x=2, y=-2*max_int is a valid integer model),
+      R1-checked. *)
    check_verdict
-     "F2(i): Big-model SAT degrades to Unknown via the eager-projection firewall"
-     Session.Unknown
+     "F2(i): Big-model SAT is solved (A13 Bigint model), no longer degraded"
+     Session.Sat
      (Session.check_sat s));
-  (* (ii) Big B&B BRANCH-BOUND: pin x0=0; promote x1 = x0+min_int = -2^62 and x2 =
-     x1+min_int = -2^63; then 2*x3 + 1 = x2, so the ℚ relaxation binds x3 = -(2^63+1)/2, a
-     Big non-integer. B&B branches on x3 and floors it (< min_int, exceeds int63) -> the
-     adapter guard catches the projection Overflow -> firewall -> Unknown (never a
-     truncated bound). Session mirror of lia_test's fixture (b), exercising
-     [suggest_branch]. *)
+  (* (ii) Big B&B BRANCH-BOUND: pin x0=0; promote x1 = x0+min_int and x2 = x1+min_int =
+     -2^63; then 2*x3 + 1 = x2, so the ℚ relaxation binds x3 = -(2^63+1)/2, a Big
+     non-integer. DESIGN A13: [suggest_branch] now floors it via [floor_bigint] +
+     [int_const_big] (no int63 projection), so B&B proceeds instead of degrading. The
+     system is ℤ-INFEASIBLE — 2*x3+1 (odd) can never equal x2 = -2^63 (even) — so the real
+     verdict is UNSAT. Session mirror of lia_test's fixture (b), exercising the
+     arbitrary-precision branch. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let mkv name = Context.const ctx (Session.declare_const s name Sort.int) in
@@ -329,8 +334,8 @@ let test_bignum_r1_session_degrade () =
     s
     (Context.eq ctx (Context.add ctx (Context.mul_const ctx 2 x3) (ic 1)) x2);
   check_verdict
-    "F2(ii): Big B&B branch-bound degrades to Unknown via the adapter guard"
-    Session.Unknown
+    "F2(ii): Big B&B branch-bound solved UNSAT (A13 arbitrary-precision branch)"
+    Session.Unsat
     (Session.check_sat s)
 ;;
 
@@ -467,18 +472,37 @@ let test_model_excludes_witnesses () =
   | v, _ -> check ("ite witness: expected sat+model, got " ^ verdict_str v) false
 ;;
 
-(* Split-budget exhaustion (W-2): 2x=1 forces a branch-and-bound split; a budget of 0
-   refuses the first split → sound [Unknown] with [budget_exhausted], and the session
-   stays degraded (sticky). Drives the exact budget firewall path deterministically. *)
+(* Split-budget exhaustion (W-2): a Nelson-Oppen combination split drives the firewall.
+   [x = y + 1 ∧ y = 0 ∧ g(x) ≠ g(1)]: LIA fixes x = 1 but does not propagate that to the
+   congruence child, so the models disagree on [x = 1] and the combinator emits a
+   trichotomy split; a [split_budget] of 0 refuses that first split → sound [Unknown] with
+   [budget_exhausted], and the session stays degraded (sticky).
+
+   (An earlier version used the pure-arithmetic [2x = 1]; that is now refuted before any
+   branch — as an equality by the Diophantine gcd test, or as a bound pair by the existing
+   gcd tightening of order atoms — so it no longer reaches the split path. A combination
+   split is independent of both and exercises the budget firewall deterministically.) *)
 
 let test_split_budget_exhaustion () =
   let s = Session.create ~split_budget:0 () in
   let ctx = Session.context s in
+  let g = Session.declare_fun s "g" (Rank.create [ Sort.int ] Sort.int) in
   let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  Session.assert_term s (Context.eq ctx x (Context.add ctx y (Context.int_const ctx 1)));
+  Session.assert_term s (Context.eq ctx y (Context.int_const ctx 0));
   Session.assert_term
     s
-    (Context.eq ctx (Context.mul_const ctx 2 x) (Context.int_const ctx 1));
-  check_verdict "budget 0: 2x=1 -> unknown" Session.Unknown (Session.check_sat s);
+    (Context.not_
+       ctx
+       (Context.eq
+          ctx
+          (Context.app ctx g [ x ])
+          (Context.app ctx g [ Context.int_const ctx 1 ])));
+  check_verdict
+    "budget 0: N-O split refused -> unknown"
+    Session.Unknown
+    (Session.check_sat s);
   check "budget_exhausted flag set" (Session.budget_exhausted s);
   check "no model after budget unknown" (Session.get_model s = None);
   (* sticky: a later check stays unknown even with a further (feasible) assertion. *)
@@ -632,7 +656,306 @@ let test_namespace_guard () =
     "parser accepts normal declaration"
     (match Parser.parse "(declare-const ok Bool)(assert ok)(check-sat)" with
      | _ -> true
+     | exception _ -> false);
+  (* board #58 defense-in-depth: a user cannot even WRITE an internal-marker byte in a
+     declaration. The shared lexer forbids [\] inside a quoted symbol and a [|] closes it,
+     so the parse path can never carry the [|]/[\] byte class to the Env door — the byte
+     class is closed at the lexer as well as the Env door. *)
+  check_raises "parser rejects a backslash inside a quoted-symbol declaration" (fun () ->
+    Parser.parse "(declare-const |a\\b| Int)(check-sat)")
+;;
+
+(* board #58: the internal-marker byte class ([|] 0x7C, [\] 0x5C) is rejected at the PUBLIC
+   Env declaration doors — the programmatic door the live wrong-unsat demonstration walked
+   through. No SMT-LIB symbol form (simple or quoted) can carry these bytes, so a name with
+   one can only arrive through this door; closing it shuts every internal-marker namespace
+   at the root. DISCRIMINATING: against the pre-fix door, [Env.declare_fun]/[declare_sort]
+   SUCCEED on these names (the aliasing bug), so [raises_reserved] returns false and each
+   check fails. *)
+let test_internal_marker_byte_class () =
+  let env = Env.create () in
+  let r = Rank.create [ Sort.int ] Sort.int in
+  let raises_reserved f =
+    match f () with
+    | _ -> false
+    | exception Env.Reserved_symbol _ -> true
+    | exception _ -> false
+  in
+  check
+    "Env.declare_fun rejects a bar-byte name (arrays op-symbol shape)"
+    (raises_reserved (fun () -> Env.declare_fun env "@arr.select|Int|Int" r));
+  check
+    "Env.declare_fun rejects a backslash-byte name (bv marker shape)"
+    (raises_reserved (fun () -> Env.declare_fun env "\\bv|8" r));
+  check
+    "Env.declare_sort rejects a bar-byte name"
+    (raises_reserved (fun () -> Env.declare_sort env "S|T"));
+  check
+    "Env.declare_sort rejects a backslash-byte name"
+    (raises_reserved (fun () -> Env.declare_sort env "S\\T"));
+  check
+    "Env.declare_fun still accepts a clean user name (guard is not over-broad)"
+    (match Env.declare_fun env "arr_select" r with
+     | _ -> true
      | exception _ -> false)
+;;
+
+(* board #58: the cap door still mints internal names, INCLUDING a sort-key-bearing name
+   that contains [|] (the arrays [.oxsmt.arr.select|<sortkey>] shape) — the byte-class
+   guard lives only on the PUBLIC doors; the cap door gates on the [.oxsmt.] prefix. A cap
+   from a different env is rejected (per-env), and a non-reserved name is refused. *)
+let test_cap_door_mints_internal () =
+  let env, cap = Env.create_with_cap () in
+  let r = Rank.create [ Sort.int ] Sort.int in
+  check
+    "cap door mints a plain .oxsmt.* name"
+    (match Env.declare_reserved cap env ".oxsmt.arr.k" r with
+     | _ -> true
+     | exception _ -> false);
+  check
+    "cap door mints a sort-key .oxsmt.* name containing a bar byte"
+    (match Env.declare_reserved cap env ".oxsmt.arr.select|Int|Int" r with
+     | _ -> true
+     | exception _ -> false);
+  check
+    "cap door refuses a NON-reserved (user-namespace) name"
+    (match Env.declare_reserved cap env "not_reserved" r with
+     | exception _ -> true
+     | _ -> false);
+  let _env2, cap2 = Env.create_with_cap () in
+  check
+    "a cap minted for a different env is rejected (per-env)"
+    (match Env.declare_reserved cap2 env ".oxsmt.arr.k2" r with
+     | exception _ -> true
+     | _ -> false)
+;;
+
+(* board #58 O-MINTER: [Session.parse_minter] returns an OPAQUE minter, not a bare general
+   [Env.declare_reserved] closure — the old [Session.internal_minter] general accessor is
+   GONE (compile-enforced by session.mli). Its [admit] gate
+   ([Session.parse_sanctioned_marker]) sanctions ONLY the parse-time theory vocabulary:
+   the arrays op-symbol grammar ({!Array_defs.is_op_name}: [.oxsmt.arr.] prefix + a [|]
+   separator) and the bit-vector marker grammar ({!Oxsmt_core.Bv.is_bv_name}:
+   [.oxsmt.bv|...]). Each admitted grammar is PAIRED with a consuming-side inertness check
+   (arrays: registry membership; bv: [Bv.view] rank/sort agreement), so an admitted-but-
+   mismatched mint is inert, never a wrong verdict. Everything OUTSIDE the sanctioned
+   vocabulary is refused: the sensitive reserved namespaces (arrays ext witness, datatype
+   testers, qvars, preprocessing witnesses — minted directly via [Env.declare_reserved] by
+   trusted code, no inertness guard) and any user name. DISCRIMINATING: against an
+   admit-all regression the ext-witness/user mints would SUCCEED; against a deny-all
+   regression the op mints would FAIL. *)
+let test_session_parse_minter () =
+  let s = Session.create () in
+  let m = Session.parse_minter s in
+  let r = Rank.create [ Sort.int ] Sort.int in
+  let refused name =
+    match Internal_minter.mint m name r with
+    | _ -> false
+    | exception (Invalid_argument _ | Env.Reserved_symbol _) -> true
+    | exception _ -> false
+  in
+  check
+    "parse_minter ADMITS the arrays op-symbol grammar (arrays migration)"
+    (not (refused ".oxsmt.arr.select|Int|Int"));
+  check
+    "parse_minter ADMITS the bit-vector marker grammar (bv migration)"
+    (not (refused ".oxsmt.bv|bvadd|1"));
+  (* Sensitive reserved namespaces: NEVER admitted through this front-end door — they are
+     minted directly via [Env.declare_reserved] by trusted code and have no inertness
+     guard. These must stay refused with BOTH theory grammars widened. *)
+  check
+    "parse_minter refuses the arrays ext-witness namespace (.oxsmt.arr.ext.N, no '|')"
+    (refused ".oxsmt.arr.ext.0");
+  check "parse_minter refuses the datatype tester namespace" (refused ".oxsmt.is-Cons");
+  check "parse_minter refuses the qvar namespace" (refused ".oxsmt.qvar.0.0");
+  check
+    "parse_minter refuses the preprocessing-witness namespace"
+    (refused ".oxsmt.ite.0");
+  check "parse_minter refuses a user-namespace name" (refused "user_fn")
+;;
+
+(* board #58 O-MINTER: the parser's [?internal_mint] threading is source-compatible with
+   the Session-driven drivers — a [parse_into ~internal_mint:(Session.parse_minter s)]
+   parses and solves a normal file identically. (No trunk parser command mints an internal
+   symbol yet, so the hook itself is exercised by the arrays/bv migrations; this pins the
+   wiring, and that [parse_minter] returns an [Internal_minter.t] the parser accepts.) *)
+let test_parser_internal_mint_threading () =
+  let s = Session.create () in
+  let parsed =
+    Parser.parse_into
+      ~internal_mint:(Session.parse_minter s)
+      (Session.env s)
+      (Session.context s)
+      "(declare-const p Bool)(assert p)(check-sat)"
+  in
+  List.iter (Session.assert_term s) parsed.Parser.assertions;
+  check_verdict
+    "parse_into with ~internal_mint threads and solves"
+    Session.Sat
+    (Session.check_sat s)
+;;
+
+(* board #58 (arrays migration): the array [select]/[store] op symbols now live in the
+   reserved namespace as [.oxsmt.arr.<op>|<sortkey>|<sortkey>], minted through the cap
+   door instead of [Env.declare_fun]. This pins the two soundness properties the migration
+   buys, against the canonical name the parser and theory actually build
+   ([Array_defs.op_symbol_name], not a hand-written literal that could drift):
+   - the real op name is doubly rejected at the PUBLIC doors — the [.oxsmt.] reserved
+     prefix AND the [|] sort-key-separator byte class — so no user declaration can alias
+     it;
+   - the cap door [Env.declare_reserved] MINTS it. Against the pre-migration [@arr.*] name
+     this call RAISED ("not a reserved (.oxsmt.*) name"), so this check is RED on the code
+     path before the rename. *)
+let test_arrays_op_symbol_reserved () =
+  let name =
+    Array_defs.op_symbol_name Array_defs.Select ~index:Sort.int ~element:Sort.int
+  in
+  check "array op name carries the reserved .oxsmt. prefix" (Env.is_reserved_name name);
+  check "array op name carries a '|' sort-key separator byte" (String.contains name '|');
+  let env, cap = Env.create_with_cap () in
+  let r =
+    Rank.create [ Sort.array_ ~index:Sort.int ~element:Sort.int; Sort.int ] Sort.int
+  in
+  check
+    "public Env.declare_fun rejects the real array op name (reserved prefix + '|' byte)"
+    (match Env.declare_fun env name r with
+     | exception Env.Reserved_symbol _ -> true
+     | _ -> false
+     | exception _ -> false);
+  check
+    "cap door mints the real array op name (RED against the pre-migration @arr. name)"
+    (match Env.declare_reserved cap env name r with
+     | _ -> true
+     | exception _ -> false)
+;;
+
+(* board #58 hardening (codex stack-review CRITICAL, arrays lane): the op-symbol registry
+   ({!Array_defs}) is caller-installable through the PUBLIC [Session.set_arrays] +
+   [Array_defs.add]. Nothing but the entries' own names constrains it, so a caller could
+   register an ARBITRARY symbol as a select/store; the arrays theory classifies an [App]
+   head by registry membership ([role_of_sym]) and would then apply read-over-write to a
+   symbol that is not an array operator -> a WRONG unsat on a formula that is sat under
+   the uninterpreted reading. Fix: [Array_defs.add] rejects any entry whose symbol NAME is
+   not the canonical [op_symbol_name] for its claimed (role, index, element), making the
+   registry self-certifying. *)
+let test_array_defs_add_rejects_noncanonical () =
+  let env = Env.create () in
+  let arr = Sort.array_ ~index:Sort.int ~element:Sort.int in
+  let sel_rank = Rank.create [ arr; Sort.int ] Sort.int in
+  let bogus = Env.declare_fun env "mysel" sel_rank in
+  check
+    "Array_defs.add rejects an arbitrary (non-canonical) symbol claimed as a select"
+    (match
+       Array_defs.add
+         Array_defs.empty
+         bogus
+         Array_defs.Select
+         ~index:Sort.int
+         ~element:Sort.int
+     with
+     | exception Invalid_argument _ -> true
+     | _ -> false);
+  (* the canonically-named op symbol (what the parser/theory actually mint) is accepted *)
+  let env2, cap = Env.create_with_cap () in
+  let canon_name =
+    Array_defs.op_symbol_name Array_defs.Select ~index:Sort.int ~element:Sort.int
+  in
+  let canon = Env.declare_reserved cap env2 canon_name sel_rank in
+  check
+    "Array_defs.add accepts the canonically-named op symbol"
+    (match
+       Array_defs.add
+         Array_defs.empty
+         canon
+         Array_defs.Select
+         ~index:Sort.int
+         ~element:Sort.int
+     with
+     | _ -> true
+     | exception _ -> false)
+;;
+
+(* End-to-end form of the same CRITICAL: build a poisoned registry mapping two arbitrary
+   uninterpreted functions to select/store and drive a solve. Pre-fix the theory trusts
+   it, applies ROW1, and returns a wrong unsat; post-fix [Array_defs.add] refuses the
+   poisoned entries so the registry cannot be built (the door is closed). RED against the
+   pre-fix tip. *)
+let test_registry_poison_no_wrong_unsat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let arr = Sort.array_ ~index:Sort.int ~element:Sort.int in
+  let a = Context.const ctx (Session.declare_const s "a" arr) in
+  let i = Context.const ctx (Session.declare_const s "i" Sort.int) in
+  let v = Context.const ctx (Session.declare_const s "v" Sort.int) in
+  let sel_sym = Session.declare_fun s "mysel" (Rank.create [ arr; Sort.int ] Sort.int) in
+  let st_sym =
+    Session.declare_fun s "mysto" (Rank.create [ arr; Sort.int; Sort.int ] arr)
+  in
+  match
+    try
+      Some
+        (Array_defs.add
+           (Array_defs.add
+              Array_defs.empty
+              sel_sym
+              Array_defs.Select
+              ~index:Sort.int
+              ~element:Sort.int)
+           st_sym
+           Array_defs.Store
+           ~index:Sort.int
+           ~element:Sort.int)
+    with
+    | Invalid_argument _ -> None
+  with
+  | None -> check "poisoned arrays registry rejected at Array_defs.add (hole closed)" true
+  | Some reg ->
+    Session.set_arrays s reg;
+    (* [mysel(mysto(a,i,v), i) <> v]: ROW1 would refute if these were REAL ops, but they
+       are ordinary uninterpreted functions, so the formula is SAT — a wrong unsat is the
+       bug. This is the fable leg's O-REGISTRY reproduction shape. *)
+    let store_app = Context.app ctx st_sym [ a; i; v ] in
+    let sel_app = Context.app ctx sel_sym [ store_app; i ] in
+    Session.assert_term s (Context.not_ ctx (Context.eq ctx sel_app v));
+    check
+      "no wrong unsat from a poisoned arrays registry"
+      (match Session.check_sat s with
+       | Session.Unsat -> false
+       | Session.Sat | Session.Unknown -> true)
+;;
+
+(* board #58 O-MINTER + arrays migration: the front-end minter [Session.parse_minter] is
+   an opaque {!Internal_minter.t} whose [admit] gate is NARROWED to exactly the arrays
+   op-symbol grammar ({!Array_defs.is_op_name}). This is what forecloses the
+   witness-capture half of the codex critical: a caller cannot pre-mint the extensionality
+   Skolem name [.oxsmt.arr.ext.N] (or a tester/qvar/preprocessing-witness name) through
+   the parse door and later collide with the theory's own witness — the gate refuses every
+   reserved name that is not an op symbol. DISCRIMINATING both ways: RED against a
+   deny-all admit (the op mint fails) AND against an admit-all minter (the witness/qvar
+   mints succeed). The theory-side freshness advance (Arr.witness_index) and the
+   assert-gate exemption ([is_op_sym]) are the deeper backstops for trusted in-process
+   code that mints via [Env.declare_reserved] directly. *)
+let test_parse_minter_admit_gate () =
+  let s = Session.create () in
+  let mint = Session.parse_minter s in
+  let arr = Sort.array_ ~index:Sort.int ~element:Sort.int in
+  let sel_name =
+    Array_defs.op_symbol_name Array_defs.Select ~index:Sort.int ~element:Sort.int
+  in
+  let admits name rank =
+    match Internal_minter.mint mint name rank with
+    | _ -> true
+    | exception _ -> false
+  in
+  check
+    "parse_minter admits an array op-symbol name"
+    (admits sel_name (Rank.create [ arr; Sort.int ] Sort.int));
+  check
+    "parse_minter REFUSES the extensionality-witness name (.oxsmt.arr.ext.N, no '|')"
+    (not (admits ".oxsmt.arr.ext.0" (Rank.create [] Sort.int)));
+  check
+    "parse_minter REFUSES a non-op reserved name (qvar/tester/witness namespace)"
+    (not (admits ".oxsmt.q.0" (Rank.create [] Sort.int)))
 ;;
 
 let test_parser_into_session () =
@@ -836,24 +1159,27 @@ let test_adr0010_use_history () =
     (Session.check_sat s)
 ;;
 
-(* Bool boundary (§3.6, C6 + H2 errata) at the SESSION level. IMPORTANT wiring-level
-   distinction from the ADR §6 combine-level fixtures: a bare Bool variable [b] is a
-   PROPOSITIONAL variable (a nullary Bool [App]), NOT a theory atom — so the seam
-   ({!Cdclt.on_assign}) never forwards its truth value to the combinator (only theory
-   atoms are forwarded). From the combinator's view every such [b] under [h(b)] is
-   therefore BURIED/UNBOUND — the ADR's "surfaced/bound leaf" precondition (b asserted as
-   an atom EUF sees) is not met through the wiring — so the leaf bridge cannot fire and
-   the combinator degrades via [Combine.Incomplete]. Consequently ALL
-   Bool-leaf/compound-under- UF shapes come out Unknown at the Session level (sound; the
-   ADR's UNSAT/SAT leaf verdicts are combine-test-level, where b is asserted directly to
-   the combinator). This is a documented wiring completeness gap
-   [[wiring-bool-leaf-forwarding]], never a wrong verdict, and it exercises the
-   [Incomplete] named-catch. *)
+(* Bool boundary (§3.6, C6 + H2 errata) at the SESSION level. A bare Bool variable [b] is
+   a PROPOSITIONAL variable (a nullary Bool [App]), NOT a theory atom — so the seam
+   ({!Cdclt.on_assign}) does not forward its truth value to the combinator merely by
+   virtue of being a propositional var. The Bool-cardinality completeness fix
+   ({!Session.register_bool_terms} + {!Cdclt.bind_bool_var_atom}) closes the old
+   wiring-bool-leaf-forwarding gap: a bare Bool variable used as a UF argument is now
+   bound to its propositional SAT var as an EUF [K_bool] atom, so the SAT core decides it,
+   EUF binds it to true/false, and the leaf shapes below resolve to their true verdicts
+   (formerly all degraded to a sound Unknown). Congruence + the [true <> false] axiom then
+   discharges the pigeonhole cases. A STRUCTURED Bool compound under a UF argument (e.g.
+   [h (b ∧ c)]) is a different, harder case ([Combine]'s "structured Bool compound"
+   [Incomplete], §3.6 case (ii)) and still degrades to a sound Unknown — the leaf bridge
+   names a nullary leaf, and this fix does not abstract compounds. The ADR §6
+   combine-level fixtures pin the same verdicts at the combinator unit level (where [b] is
+   asserted directly, without the session's atom binding). *)
 let test_adr0010_bool_boundary () =
   let hb s = Session.declare_fun s "h" (Rank.create [ Sort.bool ] Sort.bool) in
   let neq ctx a b = Context.not_ ctx (Context.eq ctx a b) in
-  (* leaf ¬b ∧ h(b)≠h(false): combine-level UNSAT, but at the wiring level b is a
-     propositional var not forwarded to the theory → buried → Incomplete → sound Unknown. *)
+  (* leaf ¬b ∧ h(b)≠h(false): b is bound false, so h(b)=h(false) by congruence contradicts
+     the disequality → UNSAT. Formerly a sound Unknown (b buried, not forwarded); the
+     Bool-cardinality fix now binds b and the wiring reaches the combine-level UNSAT. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let h = hb s in
@@ -862,10 +1188,11 @@ let test_adr0010_bool_boundary () =
   Session.assert_term s (Context.not_ ctx b);
   Session.assert_term s (neq ctx (Context.app ctx h [ b ]) hfalse);
   check_verdict
-    "bool leaf ¬b ∧ h(b)≠h(false) (buried at wiring → unknown)"
-    Session.Unknown
+    "bool leaf ¬b ∧ h(b)≠h(false) (b bound false → unsat)"
+    Session.Unsat
     (Session.check_sat s);
-  (* leaf b ∧ h(b)≠h(false): likewise b is not forwarded → Unknown (buried; never Sat). *)
+  (* leaf b ∧ h(b)≠h(false): b is bound true, so h(b) may differ from h(false) → SAT.
+     Formerly a sound Unknown; the fix binds b and the wiring reaches SAT. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let h = hb s in
@@ -874,10 +1201,12 @@ let test_adr0010_bool_boundary () =
   Session.assert_term s b;
   Session.assert_term s (neq ctx (Context.app ctx h [ b ]) hfalse);
   check_verdict
-    "bool leaf b ∧ h(b)≠h(false) (buried at wiring → unknown)"
-    Session.Unknown
+    "bool leaf b ∧ h(b)≠h(false) (b bound true → sat)"
+    Session.Sat
     (Session.check_sat s);
-  (* buried H2: h(b)≠h(true) ∧ h(b)≠h(false) → UNKNOWN (b never surfaces; Incomplete). *)
+  (* buried H2: h(b)≠h(true) ∧ h(b)≠h(false) → UNSAT (b is true or false, so h(b) collides
+     with one of h(true)/h(false) — a 3-into-2 pigeonhole). Formerly a sound Unknown (b
+     never surfaced); the fix decides b and congruence discharges the pigeonhole. *)
   let s = Session.create () in
   let ctx = Session.context s in
   let h = hb s in
@@ -895,8 +1224,8 @@ let test_adr0010_bool_boundary () =
        (Context.app ctx h [ b ])
        (Context.app ctx h [ Context.bool_const ctx false ]));
   check_verdict
-    "bool buried H2 h(b)≠h(true) ∧ h(b)≠h(false)"
-    Session.Unknown
+    "bool buried H2 h(b)≠h(true) ∧ h(b)≠h(false) (b decided → unsat)"
+    Session.Unsat
     (Session.check_sat s);
   (* structured compound under a UF arg: ¬b ∧ h(b∧c)≠h(false) → UNKNOWN (degrade at walk). *)
   let s = Session.create () in
@@ -1157,6 +1486,156 @@ let test_presolve_run_direct () =
   check "run: under-UF variable skipped" (r_uf.Oxsmt_interface.Presolve.defs = [])
 ;;
 
+(* Pass A entailed-equality extraction (task #7): the reviewer-pinned soundness contracts
+   as DISCRIMINATING mutation tests. The win direction is UNSAT (R1 does not run there),
+   so the grammar + independent-intersection contracts ARE the soundness margin — each
+   check below FAILS against the named mutant (verified by mutating the source).
+   Sort-agnostic: Int vars suffice (a Bool/iff equality is an Int-Eq whose result is
+   Bool-sorted). *)
+let test_presolve_pass_a () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let v name = Context.const ctx (Session.declare_const s name Sort.int) in
+  let a = v "a"
+  and b = v "b"
+  and c = v "c"
+  and d = v "d"
+  and u = v "u"
+  and w = v "w" in
+  let eq = Context.eq ctx in
+  let mem x y lst =
+    List.exists (fun e -> Term.equal e (eq x y) || Term.equal e (eq y x)) lst
+  in
+  let ee = Oxsmt_interface.Presolve.entailed_equalities ctx in
+  (* (1) positive diamond: both branches entail a=c (via b, via d) ⇒ a=c extracted; the
+         branch-local b,d are NOT entailed. *)
+  let diamond =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq b c ]; Context.and_ ctx [ eq a d; eq d c ] ]
+  in
+  let r1 = ee [ diamond ] in
+  check "pass_a: diamond entails a=c" (mem a c r1);
+  check "pass_a: diamond does NOT entail a=b" (not (mem a b r1));
+  check "pass_a: diamond does NOT entail a=d" (not (mem a d r1));
+  (* (2) GRAMMAR opacity (codex BLOCKER-1 / fable #5): the Bool/iff equality operand
+     [(= (= a b) (= c d))] must be OPAQUE — a=b is NOT entailed by branch 1. A mutant that
+     recurses into Eq-operands extracts a=b ⇒ wrong-Unsat. u=w IS entailed by both. *)
+  let bool_nest =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq (eq a b) (eq c d); eq u w ]
+      ; Context.and_ ctx [ eq a b; eq u w ]
+      ]
+  in
+  let r2 = ee [ bool_nest ] in
+  check "pass_a: grammar opaque at Bool-Eq operand (no a=b)" (not (mem a b r2));
+  check "pass_a: grammar still extracts entailed u=w" (mem u w r2);
+  (* (3) INDEPENDENT per-branch intersection (codex BLOCKER-2): (a=b,c=d) vs (a=c,b=d) —
+     correct intersection is EMPTY. A mutant unioning the branch union-finds merges all
+     four terms and extracts a=d ⇒ wrong-Unsat. *)
+  let cross =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq c d ]; Context.and_ ctx [ eq a c; eq b d ] ]
+  in
+  let r3 = ee [ cross ] in
+  check "pass_a: cross-branch intersection has no a=d" (not (mem a d r3));
+  check "pass_a: cross-branch intersection empty" (r3 = []);
+  (* (4) fire-condition: an equality-free disjunct ⇒ all-singleton closure ⇒ empty
+     intersection ⇒ neutral []. *)
+  let with_le =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq b c ]; Context.le ctx a (Context.int_const ctx 0) ]
+  in
+  check "pass_a: equality-free disjunct bails" (ee [ with_le ] = []);
+  (* (5) GRAMMAR OPACITY per named-opaque arm (fable rider #1): a disjunct that contains
+     [(= a b)] ONLY under an opaque node does NOT entail a=b; each arm-descending mutant
+     would extract a=b (a wrong-Unsat). Shape: branch1 = (= u w) ∧ TRAP[(= a b)], branch2
+     = (= u w) ∧ (= a b); correct extraction = [{u=w}], never a=b. Each check FAILS
+     against the mutant that recurses into that arm (mutation-verified). *)
+  let p = Context.const ctx (Session.declare_const s "pbool" Sort.bool) in
+  let qp = Session.declare_fun s "qp" (Rank.create [ Sort.bool ] Sort.bool) in
+  let trap_case name trap =
+    let f =
+      Context.or_
+        ctx
+        [ Context.and_ ctx [ eq u w; trap ]; Context.and_ ctx [ eq u w; eq a b ] ]
+    in
+    let r = ee [ f ] in
+    check ("pass_a: " ^ name ^ " opaque (no a=b)") (not (mem a b r));
+    check ("pass_a: " ^ name ^ " still extracts u=w") (mem u w r)
+  in
+  trap_case "Not" (Context.not_ ctx (eq a b));
+  trap_case "Ite" (Context.ite ctx p (eq a b) (eq c d));
+  trap_case "Or" (Context.or_ ctx [ eq a b; eq c d ]);
+  trap_case "App" (Context.app ctx qp [ eq a b ]);
+  (* (6) ABSENT-BRANCH SINGLETON (codex): a term present in only one branch must not be
+     spuriously equated. branch1=[{a,b,c}], branch2=[{a,d}]: only a is shared but its
+     class differs, b/c/d are branch-local ⇒ nothing entailed. *)
+  let absent =
+    Context.or_ ctx [ Context.and_ ctx [ eq a b; eq b c ]; Context.and_ ctx [ eq a d ] ]
+  in
+  check "pass_a: absent-branch singleton no spurious merge" (ee [ absent ] = []);
+  (* (7) FOREST CARDINALITY (codex): four terms equal in every branch ⇒ a spanning TREE of
+     3 edges, not the 6-edge full closure. A mutant emitting the closure gives 6. Branches
+     are DISTINCT (chain vs star over [{a,b,c,d}]) so [Context.or_] keeps both (identical
+     disjuncts would hash-cons-dedup to a non-[Or] and Pass A would not fire). *)
+  let all4 =
+    Context.or_
+      ctx
+      [ Context.and_ ctx [ eq a b; eq b c; eq c d ] (* chain *)
+      ; Context.and_ ctx [ eq a b; eq a c; eq a d ] (* star, same closure *)
+      ]
+  in
+  check "pass_a: spanning forest cardinality (3 not 6)" (List.length (ee [ all4 ]) = 3);
+  (* (8) CAP / NEUTRAL ABORT (codex): a universe over the per-Or cap emits NOTHING (never
+     a partial forest). 513 distinct terms (> pass_a_max_terms=512) must abort to [].
+     Chain vs star branches (both force all-equal) keep the two disjuncts distinct. *)
+  let big =
+    let xs =
+      List.init 513 (fun i ->
+        Context.const ctx (Session.declare_const s (Printf.sprintf "cx%d" i) Sort.int))
+    in
+    let x0 = List.hd xs in
+    let rec chain = function
+      | x :: (y :: _ as rest) -> eq x y :: chain rest
+      | _ -> []
+    in
+    let star = List.filter_map (fun x -> if x == x0 then None else Some (eq x0 x)) xs in
+    Context.or_ ctx [ Context.and_ ctx (chain xs); Context.and_ ctx star ]
+  in
+  check "pass_a: over-cap Or neutral-aborts to []" (ee [ big ] = []);
+  (* (9) determinism (I6): identical extraction run twice. *)
+  check "pass_a: deterministic" (ee [ diamond ] = ee [ diamond ])
+;;
+
+(* cert-trace set-once / pristine hardening (task #7 rider #3): [install_cert_trace] must
+   raise on a double-install and on a post-assert install, so the cert-OFF Pass-A gate
+   cannot be defeated by installing a trace after Pass A already fired. Discriminating:
+   the pre-rider [install_cert_trace] (a bare [Sat.set_trace]) does NOT raise here. *)
+let test_cert_trace_set_once () =
+  let noop : Oxsmt_solver.Sat.trace =
+    { on_input = (fun ~id:_ ~clause:_ ~origin:_ -> ())
+    ; on_unit = (fun ~id:_ ~lit:_ -> ())
+    ; on_learned = (fun ~id:_ ~clause:_ ~antecedents:_ ~btlevel:_ -> ())
+    ; on_theory_clause = (fun ~id:_ ~clause:_ ~role:_ -> ())
+    ; on_unsat = (fun _ -> ())
+    }
+  in
+  let s = Session.create () in
+  Session.install_cert_trace s (Some noop);
+  check_raises "cert set-once: double install raises" (fun () ->
+    Session.install_cert_trace s (Some noop));
+  let s2 = Session.create () in
+  let ctx = Session.context s2 in
+  let x = Context.const ctx (Session.declare_const s2 "x" Sort.bool) in
+  Session.assert_term s2 x;
+  check_raises "cert set-once: post-assert install raises" (fun () ->
+    Session.install_cert_trace s2 (Some noop))
+;;
+
 (* codex H1 == same-model F1 (both legs, independently). Substitution composes
    coefficients through the arithmetic smart constructors, so an alias inlined into a
    huge-coefficient term overflows int63. That MUST degrade to a clean [Unknown]
@@ -1183,9 +1662,13 @@ let test_presolve_overflow_coeff_degrades () =
    | () -> ()
    | exception e ->
      check ("coeff overflow raised " ^ Printexc.to_string e ^ " (want unknown)") false);
+  (* DESIGN A13: coefficient composition to 1e21 no longer overflows the model boundary
+     (Bigint terms + [Int of Bigint] model), so the query is decided on its merits: x=1e9
+     forces 1e21 = 3*w, and 10^21 mod 3 = 1, so there is no integer w — genuinely UNSAT.
+     (Pre-A13 this degraded to Unknown via the model-extraction int63 projection.) *)
   check_verdict
-    "overflow(coeff): degrades to unknown"
-    Session.Unknown
+    "overflow(coeff): decided UNSAT (A13 Bigint), no longer degraded"
+    Session.Unsat
     (Session.check_sat s)
 ;;
 
@@ -1378,7 +1861,585 @@ let test_dag_sharing_no_blowup () =
     (elapsed < 2.0)
 ;;
 
+(* --- Contextual simplification (task #13) --------------------------------------------
+   [Presolve.simplify_contextual], driven through [assert_presolved]. The win direction is
+   UNSAT (R1 does not run), so these fixtures ARE the soundness margin. THREE registry
+   mutants (module=presolve) are wrong-scoping bugs each caught by a SAT fixture that
+   flips to UNSAT (else-branch, condition, polarity — the last also caught end-to-end by
+   [n3] below); the FOURTH (shared-memo) is a SILENT NO-OP that preserves verdicts and is
+   caught by the structural effectiveness oracle [test_ctx_simp_fires], not a verdict
+   flip. A model-preserving rewrite: no variable is eliminated, so [eliminated_vars] stays
+   empty throughout. NOTE: the ship default is OFF (see [ctx_simp_flag]);
+   [make wiring-test] sets OXSMT_PRESOLVE_CTX=1 so these fixtures exercise the ON path. *)
+
+(* EFFECTIVENESS + equality substitution: the then-branch assumes [x = 5], so [(>= x 100)]
+   folds to false there; the else-branch is unconstrained on [x] except [x <> 5]. Sat with
+   a model, and nothing eliminated. *)
+let test_ctx_simp_eq_subst_sat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.ge ctx x (Context.int_const ctx 100))
+        (Context.ge ctx x (Context.int_const ctx 0))
+    ];
+  check "ctx eq-subst: nothing eliminated" (Session.eliminated_vars s = []);
+  match Session.check_sat s, Session.get_model s with
+  | Session.Sat, Some (_, m) ->
+    check "ctx eq-subst: model binds x" (find_int_in_model m "x" <> None)
+  | v, _ -> check ("ctx eq-subst: expected sat+model, got " ^ verdict_str v) false
+;;
+
+(* UNSAT direction (no wrong-Sat): [(ite (= x 5) (>= x 100) (= x 5))] is false in BOTH
+   branches (x=5 => x>=100 false; x<>5 => x=5 false), so with [x <= 4] the problem is
+   unsat. The contextual pass collapses the ite to false; the base solver would also
+   refute it — either way the verdict must be Unsat. *)
+let test_ctx_simp_unsat_direction () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.ge ctx x (Context.int_const ctx 100))
+        (Context.eq ctx x (Context.int_const ctx 5))
+    ; Context.le ctx x (Context.int_const ctx 4)
+    ];
+  check_verdict "ctx unsat-direction" Session.Unsat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 1 — substitute-in-the-else-branch. [(ite (= x 5) false (= x 7))] is Sat
+   (x = 7: condition false, else [(= 7 7)] true). If the then-branch assumption [x = 5]
+   leaks into the else-branch, [(= x 7)] becomes [(= 5 7)] = false, the ite collapses to
+   [(ite (= x 5) false false)] = false, and it flips to Unsat. *)
+let test_ctx_simp_else_branch_oracle () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.bool_const ctx false)
+        (Context.eq ctx x (Context.int_const ctx 7))
+    ];
+  check_verdict "ctx else-branch oracle: sat (x=7)" Session.Sat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 2 — assumption applied to the condition (above the branches).
+   [(ite (= x 5) false (>= x 7))] is Sat (x = 7). If the then-branch assumption is applied
+   back to the CONDITION, [(= x 5)] folds to true, the ite collapses to its then-branch
+   [false], and it flips to Unsat. *)
+let test_ctx_simp_condition_oracle () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.bool_const ctx false)
+        (Context.ge ctx x (Context.int_const ctx 7))
+    ];
+  check_verdict "ctx condition oracle: sat (x=7)" Session.Sat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 3 — equality substitution ignoring polarity (a disequality condition read
+   as an equality). [(ite (not (= x 5)) (>= x 100) false)] is Sat (x = 100: condition x<>5
+   true, then-branch x>=100 true). The then-branch establishes only [x <> 5] — NO
+   substitution. If the substitution [x -> 5] is added regardless of the true/false
+   polarity, [(>= x 100)] folds to [(>= 5 100)] = false and it flips to Unsat. *)
+let test_ctx_simp_polarity_oracle () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.not_ ctx (Context.eq ctx x (Context.int_const ctx 5)))
+        (Context.ge ctx x (Context.int_const ctx 100))
+        (Context.bool_const ctx false)
+    ];
+  check_verdict "ctx polarity oracle: sat (x=100)" Session.Sat (Session.check_sat s)
+;;
+
+(* SHARED-SUBTERM soundness: the subterm [(>= x 100)] appears in BOTH branches of
+   [(ite (= x 5) (and (<= x 3) (>= x 100)) (>= x 100))]. The then-branch folds it to false
+   under [x = 5]; the else-branch must keep it ([x <> 5]). Sat (x = 100 via the
+   else-branch). The verdict is preserved regardless of memo scoping (see
+   [test_ctx_simp_fires] for the effectiveness oracle — a shared memo bypasses the
+   substitution rather than corrupting it, so it stays Sat here). *)
+let test_ctx_simp_shared_subterm_sat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let ge100 = Context.ge ctx x (Context.int_const ctx 100) in
+  Session.assert_presolved
+    s
+    [ Context.ite
+        ctx
+        (Context.eq ctx x (Context.int_const ctx 5))
+        (Context.and_ ctx [ Context.le ctx x (Context.int_const ctx 3); ge100 ])
+        ge100
+    ];
+  check_verdict "ctx shared-subterm: sat (x=100)" Session.Sat (Session.check_sat s)
+;;
+
+(* MUTANT ORACLE 4 + EFFECTIVENESS — the substitution actually fires, and the per-branch
+   memo is scoped correctly. Called directly on [simplify_contextual]: for
+   [(ite (= x 5) (>= x 100) foo)] the then-branch MUST fold to false (x = 5 makes x >= 100
+   false), while [foo] survives in the else-branch. This is the oracle for the shared-memo
+   mutant: sharing ONE memo across branch scopes lets the condition's subterms (memoized
+   under the parent as themselves) shadow the branch's [x -> 5] substitution, so the
+   then-branch is NOT folded — a silent no-op that forfeits the whole win. Also the direct
+   guard that the pass is not accidentally disabled (e.g. an ITE-scan or has-ite
+   regression). *)
+let test_ctx_simp_fires () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let foo = Context.const ctx (Session.declare_const s "foo_b" Sort.bool) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 5))
+      (Context.ge ctx x (Context.int_const ctx 100))
+      foo
+  in
+  match Oxsmt_interface.Presolve.simplify_contextual ctx [ ite ] with
+  | [ r ] ->
+    (match r.node with
+     | Ite (_, a, _) ->
+       check
+         "ctx fires: then-branch folded to false"
+         (match a.node with
+          | Bool_const false -> true
+          | _ -> false)
+     | Bool_const _ -> check "ctx fires: fully collapsed (acceptable)" true
+     | _ -> check "ctx fires: unexpected result shape" false)
+  | _ -> check "ctx fires: expected a single simplified term" false
+;;
+
+(* MUTANT ORACLE 3 (end-to-end, stronger than the unit polarity check) — the reviewer's
+   n3: a negated condition with the variable in the THEN branch.
+   [(= r (ite (not (= v 7)) (+ v 1000) 500)) /\ (v=7 \/ v=3) /\ r=1003]. Correct: sat at
+   v=3 (then-branch v<>7 holds, v+1000=1003=r). Under the ctx-eq-subst-ignore-polarity
+   mutant, v->7 is wrongly substituted in the v<>7 branch, so the then-branch becomes
+   7+1000=1007 and r is forced to 1007 (v=3) or 500 (v=7), neither 1003 -> solved-UNSAT (a
+   wrong verdict). This drives the mis-scope through the full session (assert_presolved ->
+   check_sat), a strictly stronger discriminator than the unit-level
+   [test_ctx_simp_polarity_oracle]. *)
+let test_ctx_simp_n3_polarity_e2e () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let r = Context.const ctx (Session.declare_const s "r" Sort.int) in
+  let v = Context.const ctx (Session.declare_const s "v" Sort.int) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.not_ ctx (Context.eq ctx v (Context.int_const ctx 7)))
+      (Context.linear_combination ctx [ 1, v ] 1000)
+      (Context.int_const ctx 500)
+  in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx r ite
+    ; Context.or_
+        ctx
+        [ Context.eq ctx v (Context.int_const ctx 7)
+        ; Context.eq ctx v (Context.int_const ctx 3)
+        ]
+    ; Context.eq ctx r (Context.int_const ctx 1003)
+    ];
+  check_verdict
+    "ctx n3 polarity (e2e): sat (v=3, r=1003)"
+    Session.Sat
+    (Session.check_sat s)
+;;
+
+(* COMPLETENESS re-fold (presolve.ml:543 obligation): an OUTER [(= x 5)] rewrites the
+   inner atom [(<= y x)] to [(<= y 5)]; [assume] records the REWRITTEN atom, so an inner
+   reoccurrence of the ORIGINAL [(<= y x)] matches [env.atoms] only after its children are
+   substituted — the simp path must re-check the REBUILT term against the assumed atoms.
+   In [(ite (= x 5) (ite (<= y x) (<= y x) false) true)], with the re-fold the inner ite's
+   then-branch folds to [true]; without it, it stays the rebuilt [(<= y 5)] atom. This is
+   completeness only (equivalence holds either way) — checked structurally on the direct
+   [simplify_contextual] output. *)
+let test_ctx_simp_nested_refold () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  let inner =
+    Context.ite
+      ctx
+      (Context.le ctx y x)
+      (Context.le ctx y x)
+      (Context.bool_const ctx false)
+  in
+  let top =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 5))
+      inner
+      (Context.bool_const ctx true)
+  in
+  match Oxsmt_interface.Presolve.simplify_contextual ctx [ top ] with
+  | [ r ] ->
+    (match r.node with
+     | Ite (_, a, _) ->
+       (match a.node with
+        | Ite (_, at, _) ->
+          check
+            "ctx nested re-fold: inner reoccurrence folded to true"
+            (match at.node with
+             | Bool_const true -> true
+             | _ -> false)
+        | _ -> check "ctx nested re-fold: then-branch not the expected inner ite" false)
+     | _ -> check "ctx nested re-fold: unexpected result shape" false)
+  | _ -> check "ctx nested re-fold: expected a single simplified term" false
+;;
+
+(* NEUTRALITY: an ITE-free assertion set is passed through untouched (same verdict as any
+   other presolve path); nothing eliminated. *)
+let test_ctx_simp_no_ite_neutral () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ge ctx x (Context.int_const ctx 0)
+    ; Context.le ctx x (Context.int_const ctx 10)
+    ];
+  check "ctx no-ite: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "ctx no-ite: sat" Session.Sat (Session.check_sat s)
+;;
+
+(* --- Equality-over-ITE projection (task #34) -----------------------------------------
+   [Presolve.simplify_projection]. All three identities are EQUIVALENCES, so — like the
+   contextual pass — the win direction is UNSAT (R1 does not run) and these fixtures ARE
+   the soundness margin. Registry mutants (module=presolve): [proj-branch-swap] swaps the
+   two projected sub-equalities, [proj-boolite-true-false] mis-collapses
+   [(ite c true false)], [proj-selector-then-wrong] takes the wrong sub-branch in the
+   selector collapse. NOTE: the ship default is OFF (see [proj_flag]); [make wiring-test]
+   sets OXSMT_PRESOLVE_PROJ=1 so the end-to-end fixtures exercise the ON path. The
+   direct-call fixtures do not need it. *)
+
+let proj_simplify ctx t = Oxsmt_interface.Presolve.simplify_projection ctx [ t ]
+
+(* EFFECTIVENESS + branch ORDER (the [proj-branch-swap] oracle). [(= (ite c 923 926) 923)]
+   projects to [(ite c (= 923 923) (= 926 923))] = [(ite c true false)] = [c]. The pass
+   MUST collapse it to exactly [c] (the condition atom), not leave an equality-over-ITE
+   and not produce [(not c)] (which is what swapping the branches would give). *)
+let test_proj_eq_over_ite_fires () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let ite = Context.ite ctx c (Context.int_const ctx 923) (Context.int_const ctx 926) in
+  match proj_simplify ctx (Context.eq ctx ite (Context.int_const ctx 923)) with
+  | [ r ] -> check "proj fires: (= (ite c 923 926) 923) -> c" (r.tag = c.tag)
+  | _ -> check "proj fires: expected a single term" false
+;;
+
+(* The complementary branch arm: [(= (ite c 923 926) 926)] -> [(ite c false true)] ->
+   [(not c)]. Exercises the [(ite c false true) -> (not c)] collapse; the branch-swap
+   mutant yields [c] instead. *)
+let test_proj_eq_over_ite_neg () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let ite = Context.ite ctx c (Context.int_const ctx 923) (Context.int_const ctx 926) in
+  let notc = Context.not_ ctx c in
+  match proj_simplify ctx (Context.eq ctx ite (Context.int_const ctx 926)) with
+  | [ r ] -> check "proj fires: (= (ite c 923 926) 926) -> (not c)" (r.tag = notc.tag)
+  | _ -> check "proj neg: expected a single term" false
+;;
+
+(* NESTED chain: [(= (ite c1 927 (ite c0 923 926)) 927)] where c1, c0 are distinct atoms.
+   Correct projection collapses to [(or c1 (and (not c1) (not c0)))]-equivalent — the
+   point for the test is only that NO equality-over-ITE and NO opaque Bool-sorted [ite]
+   survives (every [(= const const)] leaf folded), i.e. the chain fully reduces to a
+   boolean over the original condition atoms. Guards the recursion + the Bool-ITE
+   collapse. *)
+let has_eq_over_ite_or_bool_ite (t : Term.t) =
+  let rec go (t : Term.t) =
+    match t.node with
+    | Eq (a, b) ->
+      (match a.node, b.node with
+       | Ite _, _ | _, Ite _ -> true
+       | _ -> go a || go b)
+    | Ite (c, a, b) -> Sort.equal t.sort Sort.bool || go c || go a || go b
+    | Not a | Le a -> go a
+    | And xs | Or xs -> Iarr.exists go xs
+    | App (_, args) -> Iarr.exists go args
+    | Arith lin -> Iarr.exists (fun (tm, _c) -> go tm) lin.coeffs
+    | Bool_const _ | Int_const _ -> false
+  in
+  go t
+;;
+
+let test_proj_nested_chain_collapses () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let y = Context.const ctx (Session.declare_const s "y" Sort.int) in
+  let c0 = Context.eq ctx x (Context.int_const ctx 0) in
+  let c1 = Context.eq ctx y (Context.int_const ctx 0) in
+  let inner =
+    Context.ite ctx c0 (Context.int_const ctx 923) (Context.int_const ctx 926)
+  in
+  let outer = Context.ite ctx c1 (Context.int_const ctx 927) inner in
+  match proj_simplify ctx (Context.eq ctx outer (Context.int_const ctx 927)) with
+  | [ r ] ->
+    check
+      "proj nested: no equality-over-ITE / opaque Bool-ITE survives"
+      (not (has_eq_over_ite_or_bool_ite r))
+  | _ -> check "proj nested: expected a single term" false
+;;
+
+(* SELECTOR COLLAPSE (same condition), the [proj-selector-then-wrong] oracle. The Bool-ITE
+   [(ite c p (ite c q r))]: in the else-branch [c] is false, so the nested same-[c] [ite]
+   takes its ELSE [r]. Result: [(ite c p r)] — the else must be [r], not [q] and not the
+   surviving nested ite. *)
+let test_proj_selector_same_cond () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let p = Context.const ctx (Session.declare_const s "p" Sort.bool) in
+  let q = Context.const ctx (Session.declare_const s "q" Sort.bool) in
+  let r_ = Context.const ctx (Session.declare_const s "r" Sort.bool) in
+  let inner = Context.ite ctx c q r_ in
+  match proj_simplify ctx (Context.ite ctx c p inner) with
+  | [ res ] ->
+    (match res.node with
+     | Ite (c', a', b') ->
+       check "proj selector: same cond kept" (c'.tag = c.tag);
+       check "proj selector: then = p" (a'.tag = p.tag);
+       check
+         "proj selector: else collapses to r (not the nested ite, not q)"
+         (b'.tag = r_.tag)
+     | _ -> check "proj selector: expected an ite" false)
+  | _ -> check "proj selector: expected a single term" false
+;;
+
+(* SELECTOR COLLAPSE (complement condition): [(ite c p (ite (not c) q r))]: in the
+   else-branch [c] is false so [(not c)] is true, and the nested [ite] takes its THEN [q].
+   Result: [(ite c p q)]. *)
+let test_proj_selector_complement () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let c = Context.eq ctx x (Context.int_const ctx 0) in
+  let p = Context.const ctx (Session.declare_const s "p" Sort.bool) in
+  let q = Context.const ctx (Session.declare_const s "q" Sort.bool) in
+  let r_ = Context.const ctx (Session.declare_const s "r" Sort.bool) in
+  let inner = Context.ite ctx (Context.not_ ctx c) q r_ in
+  match proj_simplify ctx (Context.ite ctx c p inner) with
+  | [ res ] ->
+    (match res.node with
+     | Ite (c', a', b') ->
+       check "proj selector-compl: same cond kept" (c'.tag = c.tag);
+       check "proj selector-compl: then = p" (a'.tag = p.tag);
+       check "proj selector-compl: else collapses to q" (b'.tag = q.tag)
+     | _ -> check "proj selector-compl: expected an ite" false)
+  | _ -> check "proj selector-compl: expected a single term" false
+;;
+
+(* END-TO-END wrong-UNSAT guard (the scary direction). [(= (ite (= x 0) 10 20) 20)] means
+   the ITE value is 20, i.e. the else-branch, i.e. [x <> 0]. With [(not (= x 0))] asserted
+   this is consistent -> SAT (x = 5). A branch-swap projection reads the condition as
+   [x = 0] which, with [x <> 0], is UNSAT — a wrong-Unsat. The projection ON, the verdict
+   MUST be Sat. *)
+let test_proj_e2e_no_wrong_unsat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 0))
+      (Context.int_const ctx 10)
+      (Context.int_const ctx 20)
+  in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx ite (Context.int_const ctx 20)
+    ; Context.not_ ctx (Context.eq ctx x (Context.int_const ctx 0))
+    ];
+  check "proj e2e: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "proj e2e no-wrong-unsat: sat (x<>0)" Session.Sat (Session.check_sat s)
+;;
+
+(* END-TO-END wrong-SAT guard. Same ITE-equality with [(= x 0)] asserted: the ITE value 20
+   needs [x <> 0], contradicting [x = 0] -> UNSAT. A branch-swap reads [x = 0], consistent
+   with [x = 0] -> a wrong-Sat. Verdict MUST be Unsat. *)
+let test_proj_e2e_no_wrong_sat () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  let ite =
+    Context.ite
+      ctx
+      (Context.eq ctx x (Context.int_const ctx 0))
+      (Context.int_const ctx 10)
+      (Context.int_const ctx 20)
+  in
+  Session.assert_presolved
+    s
+    [ Context.eq ctx ite (Context.int_const ctx 20)
+    ; Context.eq ctx x (Context.int_const ctx 0)
+    ];
+  check_verdict
+    "proj e2e no-wrong-sat: unsat (x=0 forces ite=10<>20)"
+    Session.Unsat
+    (Session.check_sat s)
+;;
+
+(* NEUTRALITY: an ITE-free assertion set is passed through untouched. *)
+let test_proj_no_ite_neutral () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "x" Sort.int) in
+  Session.assert_presolved
+    s
+    [ Context.ge ctx x (Context.int_const ctx 0)
+    ; Context.le ctx x (Context.int_const ctx 10)
+    ];
+  check "proj no-ite: nothing eliminated" (Session.eliminated_vars s = []);
+  check_verdict "proj no-ite: sat" Session.Sat (Session.check_sat s)
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Dynamic relevancy (task #24): the branch filter must suppress decisions on a satisfied
+   disjunction's free siblings, and it must NEVER change a verdict (soundness is
+   backstopped by the fail-closed Model_check on every reported Sat). *)
+
+let decisions_of s = (Session.stats s).Oxsmt_solver.Sat.Stats.decisions
+
+(* [(or p0 … p19)] with [p0] separately asserted true: with relevancy ON the Or is
+   satisfied by [p0], so [p1..p19] are irrelevant and never decided; OFF, VSIDS branches
+   on every free sibling. *)
+let relevancy_probe ~enable_relevancy =
+  let s = Session.create ~enable_relevancy () in
+  let ctx = Session.context s in
+  let ps =
+    List.init 20 (fun i ->
+      Context.const ctx (Session.declare_const s (Printf.sprintf "p%d" i) Sort.bool))
+  in
+  Session.assert_term s (Context.or_ ctx ps);
+  Session.assert_term s (List.hd ps);
+  let v = Session.check_sat s in
+  v, decisions_of s
+;;
+
+let test_relevancy_firing () =
+  let voff, doff = relevancy_probe ~enable_relevancy:false in
+  let von, don = relevancy_probe ~enable_relevancy:true in
+  check_verdict "relevancy firing: OFF sat" Session.Sat voff;
+  check_verdict "relevancy firing: ON sat" Session.Sat von;
+  (* RED against a stubbed filter (should_branch always true): then [don = doff] and this
+     fails. The free siblings are branched OFF but pruned ON. *)
+  check
+    (Printf.sprintf "relevancy firing: ON decisions (%d) < OFF decisions (%d)" don doff)
+    (don < doff)
+;;
+
+(* Relevancy is a decision-ordering side channel: it must never flip a verdict. Cover both
+   directions (sat and unsat) over Boolean and EUF-equality skeletons. *)
+let test_relevancy_verdict_parity () =
+  let run ~enable_relevancy build =
+    let s = Session.create ~enable_relevancy () in
+    let ctx = Session.context s in
+    build s ctx;
+    Session.check_sat s
+  in
+  let bool_const s ctx name =
+    Context.const ctx (Session.declare_const s name Sort.bool)
+  in
+  let cases =
+    [ ( "or-sat"
+      , fun s ctx ->
+          Session.assert_term
+            s
+            (Context.or_ ctx [ bool_const s ctx "a"; bool_const s ctx "b" ]) )
+    ; ( "and-not-unsat"
+      , fun s ctx ->
+          let p = bool_const s ctx "p" in
+          Session.assert_term s (Context.and_ ctx [ p; Context.not_ ctx p ]) )
+    ; ( "euf-eq-unsat"
+      , fun s ctx ->
+          let ss = Sort.uninterpreted (Session.declare_sort s "S") in
+          let a = Context.const ctx (Session.declare_const s "a" ss) in
+          let b = Context.const ctx (Session.declare_const s "b" ss) in
+          let e = Context.eq ctx a b in
+          Session.assert_term s (Context.and_ ctx [ e; Context.not_ ctx e ]) )
+    ; ( "euf-or-sat"
+      , fun s ctx ->
+          let ss = Sort.uninterpreted (Session.declare_sort s "S") in
+          let p = Session.declare_fun s "p" (Rank.create [ ss ] Sort.bool) in
+          let x = Context.const ctx (Session.declare_const s "x" ss) in
+          let y = Context.const ctx (Session.declare_const s "y" ss) in
+          Session.assert_term
+            s
+            (Context.or_ ctx [ Context.app ctx p [ x ]; Context.app ctx p [ y ] ]) )
+    ]
+  in
+  List.iter
+    (fun (name, build) ->
+       let off = run ~enable_relevancy:false build in
+       let on = run ~enable_relevancy:true build in
+       check_verdict (name ^ ": ON verdict matches OFF") off on)
+    cases
+;;
+
+(* Env write-once (task #63): [declare_fun]'s unconditional last-wins let a caller
+   redeclare a datatype constructor (registered by a validated [set_datatypes] at
+   [() -> datatype]) as an uninterpreted constant at a different rank — the DT theory
+   keeps classifying it as a constructor by registry membership while its rank now says
+   another sort, a wrong verdict. A rank-CHANGING redeclaration is now rejected; an
+   idempotent same-rank one still works. *)
+let test_declare_fun_write_once () =
+  let module Defs = Oxsmt_core.Datatype_defs in
+  let s = Session.create () in
+  let d_sym = Session.declare_sort s "D" in
+  let d_sort = Sort.datatype_ d_sym in
+  let c = Session.declare_fun s "C" (Rank.create [] d_sort) in
+  let tester = Session.declare_fun s "is-C" (Rank.create [ d_sort ] Sort.bool) in
+  Session.set_datatypes
+    s
+    (Defs.add
+       Defs.empty
+       { Defs.sort_sym = d_sym
+       ; constructors = [ { Defs.sym = c; selectors = []; tester } ]
+       });
+  let u_sort = Sort.uninterpreted (Session.declare_sort s "U") in
+  check_raises
+    "redeclaring a registered constructor at a different rank is rejected"
+    (fun () -> Session.declare_fun s "C" (Rank.create [] u_sort));
+  (* idempotent same-rank redeclaration is still allowed (guards over-rejection) *)
+  check
+    "idempotent same-rank redeclaration is allowed"
+    (match Session.declare_fun s "C" (Rank.create [] d_sort) with
+     | _ -> true
+     | exception _ -> false)
+;;
+
 let () =
+  test_declare_fun_write_once ();
+  test_relevancy_firing ();
+  test_relevancy_verdict_parity ();
   test_push_pop ();
   test_assert_after_check ();
   test_euf_unsat ();
@@ -1402,6 +2463,14 @@ let () =
   test_effort_budget_exhaustion ();
   test_effort_determinism ();
   test_namespace_guard ();
+  test_internal_marker_byte_class ();
+  test_cap_door_mints_internal ();
+  test_session_parse_minter ();
+  test_parser_internal_mint_threading ();
+  test_arrays_op_symbol_reserved ();
+  test_array_defs_add_rejects_noncanonical ();
+  test_registry_poison_no_wrong_unsat ();
+  test_parse_minter_admit_gate ();
   test_parser_into_session ();
   test_determinism ();
   test_cli_refused_symbol_degrades ();
@@ -1417,6 +2486,8 @@ let () =
   test_presolve_neutral ();
   test_presolve_determinism ();
   test_presolve_run_direct ();
+  test_presolve_pass_a ();
+  test_cert_trace_set_once ();
   test_presolve_overflow_coeff_degrades ();
   test_presolve_bignum_const_solves ();
   test_presolve_eq_uf_side_sound ();
@@ -1425,6 +2496,24 @@ let () =
   test_f1_qvar_shadow_head ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
+  test_ctx_simp_eq_subst_sat ();
+  test_ctx_simp_unsat_direction ();
+  test_ctx_simp_else_branch_oracle ();
+  test_ctx_simp_condition_oracle ();
+  test_ctx_simp_polarity_oracle ();
+  test_ctx_simp_n3_polarity_e2e ();
+  test_ctx_simp_shared_subterm_sat ();
+  test_ctx_simp_fires ();
+  test_ctx_simp_nested_refold ();
+  test_ctx_simp_no_ite_neutral ();
+  test_proj_eq_over_ite_fires ();
+  test_proj_eq_over_ite_neg ();
+  test_proj_nested_chain_collapses ();
+  test_proj_selector_same_cond ();
+  test_proj_selector_complement ();
+  test_proj_e2e_no_wrong_unsat ();
+  test_proj_e2e_no_wrong_sat ();
+  test_proj_no_ite_neutral ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

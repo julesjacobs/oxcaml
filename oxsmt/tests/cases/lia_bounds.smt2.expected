@@ -1,3 +1,3 @@
 (goal 1
   (verdict unsat)
-  (counters (conflicts <10) (decisions <10) (propagations <100)))
+  (counters (conflicts <10) (decisions <10) (propagations <10)))

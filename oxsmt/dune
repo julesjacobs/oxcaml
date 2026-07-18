@@ -9,4 +9,20 @@
 (env
  (release
   (flags
-   (:standard -noassert))))
+   (:standard -noassert)))
+ ; o3 (board: OxCaml -O3 measurement toolchain). Same source, same -noassert as
+ ; `release`, but built with OxCaml's flambda2 ocamlopt at -O3. This profile is
+ ; ONLY meaningful when the OxCaml toolchain is first on PATH (its ocamlopt.opt
+ ; understands -O3); the default/release profiles on the standard opam toolchain
+ ; are byte-unchanged. Two link flags accommodate the nix-built OxCaml runtime on
+ ; this el8 box: -ldl (el8 glibc 2.28 keeps dlopen/dlsym in a separate libdl that
+ ; the runtime's link line omits) and a small C shim object supplying the C23
+ ; __isoc23_strtol family that libasmrun.a references but el8 glibc predates. The
+ ; shim path comes from $OXSMT_O3_SHIM so the branch carries no machine path.
+ (o3
+  (flags
+   (:standard -noassert))
+  (ocamlopt_flags
+   (:standard -O3))
+  (link_flags
+   (:standard -cclib -ldl -cclib %{env:OXSMT_O3_SHIM=isoc23_shim.o}))))

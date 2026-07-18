@@ -135,8 +135,23 @@ type model = sort_card list * model_binding list
     [lemma_gen_budget] caps the number of ground lemma instances generated per [check_sat]
     (ADR-0012 §1.4); on exhaustion the instantiation loop degrades to [Unknown] rather
     than hanging (a matching-loop lemma such as associativity never runs away). Absent =
-    the manager's generous deterministic default. *)
-val create : ?split_budget:int -> ?max_effort:int -> ?lemma_gen_budget:int -> unit -> t
+    the manager's generous deterministic default.
+
+    [enable_relevancy] installs the dynamic-relevancy branch filter (task #24, QF_UF): the
+    decision heuristic only branches on atoms relevant to satisfying the formula under the
+    current partial assignment. Absent, it defaults to the [OXSMT_RELEVANCY] environment
+    gate (OFF unless that names an on value), so the shipped / [make test] path is
+    byte-identical to a build without it. Soundness is backstopped by the fail-closed
+    [Model_check] on every reported [Sat], so a wrong relevancy marking can only cost a
+    solve to [unknown], never a wrong verdict; verified for the pure QF_UF path (see
+    logs/quf-propagation-log.md). Tests pass it explicitly to exercise both settings. *)
+val create
+  :  ?split_budget:int
+  -> ?max_effort:int
+  -> ?lemma_gen_budget:int
+  -> ?enable_relevancy:bool
+  -> unit
+  -> t
 
 (** The session's {!Oxsmt_core.Env.t}. Exposed so a front end (e.g. the test-only SMT-LIB
     parser) can declare symbols and build assertion terms in the {e same} context the
@@ -145,6 +160,39 @@ val env : t -> Oxsmt_core.Env.t
 
 (** The session's {!Oxsmt_core.Context.t} (same rationale as {!env}). *)
 val context : t -> Oxsmt_core.Context.t
+
+(** [parse_minter t] is the cap-backed minter for theory-internal reserved symbols
+    ([".oxsmt.<theory>.*"], board #58 O-MINTER), for a front end that must mint one
+    mid-parse — the SMT-LIB parser's [?internal_mint] hook, because arrays op symbols are
+    per-sort instantiations discovered only at first [select]/[store] use and so cannot be
+    pre-minted at a declaration site. It returns an OPAQUE
+    {!Oxsmt_core.Internal_minter.t}, NOT a bare [string -> Rank.t -> Symbol.t] closure:
+    the holder can mint only the marker names the session sanctions (via the minter's
+    [admit] gate) and never obtains the {!Oxsmt_core.Env.reserved_cap} or a re-delegatable
+    general closure — so a caller holding only a [t] cannot forge an arbitrary reserved
+    name (the O-MINTER narrowing; ADR-0012: [Session] stays the sole cap holder). The
+    sensitive reserved namespaces (arrays ext witness, datatype testers, qvars,
+    preprocessing witnesses) are minted directly through [Env.declare_reserved] by trusted
+    code and are NEVER admitted through this door. The sanctioned set is the parse-time
+    theory vocabulary: it admits the bit-vector markers ([Oxsmt_core.Bv.is_bv_name],
+    [.oxsmt.bv|...]); a further theory (arrays) widens it with its own grammar.
+
+    A holder can still mint any ADMITTED shape, so admitting a grammar is PAIRED with that
+    theory's consuming-side check (bit-vectors: [Oxsmt_core.Bv.view] verifies
+    operand/result sorts and arity), which keeps a name/rank-mismatched mint inert. *)
+val parse_minter : t -> Oxsmt_core.Internal_minter.t
+
+(** [set_arrays t defs] installs the array [select]/[store] symbol registry the front end
+    parsed ({!Oxsmt_core.Array_defs}), routing the session onto the standalone arrays
+    theory (QF_AX: read-over-write + extensionality). Must precede {!assert_term}. A
+    non-empty registry also degrades any [Final]->[Sat] on the problem to [Unknown] in v1
+    (sat models on arrays are not yet self-checked); UNSAT is unaffected. A no-op with an
+    empty registry.
+
+    RESET-PER-QUERY (task #54, contract-A): see {!set_datatypes} — replacing the array
+    registry after a prior query instantiated a theory invalidates it (fresh rebuild at
+    the next intern), and raises [Invalid_argument] if attempted with live assertions. *)
+val set_arrays : t -> Oxsmt_core.Array_defs.t -> unit
 
 (** [declare_sort]/[declare_fun]/[declare_const] declare into {!env}. They reject the
     reserved fresh-symbol namespace ([".oxsmt.*"], board #48) with [Invalid_argument] so a
@@ -159,8 +207,40 @@ val declare_const : t -> string -> Oxsmt_core.Sort.t -> Oxsmt_core.Symbol.t
     testers must already be declared as ordinary symbols (via {!declare_sort}/
     {!declare_fun}); this records their datatype structure. A non-empty [defs] installs
     the DT theory (an e-graph client: EUF congruence + the datatype axioms) for this
-    session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}. *)
+    session in place of the EUF+LIA stack, so it must precede {!assert_term}/{!check_sat}.
+
+    RESET-PER-QUERY (task #54, contract-A ruling). Each query's sort/datatype declarations
+    are self-contained and PRECEDE its assertions. Calling this (or {!declare_datatype} /
+    {!set_arrays}) to mutate the datatype/array registry AFTER a prior query has already
+    instantiated a theory INVALIDATES that cached theory: it is dropped along with the
+    SAT-var<->atom bijection, and the next {!check_sat} rebuilds the theory fresh against
+    the new registry (so a re-used term re-classifies correctly — the none->DT,
+    DT->arrays, and loader-overwrite patterns all return correct verdicts rather than the
+    #51 interim [unknown]). This is sound only BETWEEN queries: mutating the registry with
+    live state bound to the dropped bijection — live ground assertions (no {!pop} since
+    the last {!check_sat}) OR a live quantified lemma ({!assert_lemma}; user input,
+    outside the assertion set, and a base-frame lemma survives {!pop}) — raises
+    [Invalid_argument] rather than resetting under it. Declarations (and lemmas) must
+    precede assertions within a query. The common single-query path (all declarations
+    before the first {!check_sat}, no cross-query lemma) never triggers a reset and is
+    byte-identical to before. *)
 val set_datatypes : t -> Oxsmt_core.Datatype_defs.t -> unit
+
+(** [true] iff a datatype has been declared for this session ([set_datatypes] /
+    [declare_datatype] with a non-empty registry) — i.e. the standalone DT theory is
+    installed. A [Sat] from a DT session is self-checked by the in-process DT constructor-
+    tree checker, but its tree model is not yet carried by the scalar [model] type, so
+    {!get_model} is [None]; a front end uses this to report [sat] on the verdict alone
+    (matching the headline classifier) rather than treating a modelless [Sat] as a
+    non-self-checkable UF sat. *)
+val uses_datatypes : t -> bool
+
+(** [true] iff an array select/store registry has been installed ([set_arrays] with a
+    non-empty registry) — i.e. the standalone arrays theory is installed. Like a datatype
+    [Sat], an array [Sat] is self-checked in process (by the array model checker) but its
+    map model is not carried by the scalar [model] type, so {!get_model} is [None]; a
+    front end uses this to report [sat] on the verdict alone. *)
+val uses_arrays : t -> bool
 
 (** One constructor for {!declare_datatype}: its name and each field's (selector name,
     sort). A nullary constructor (an enum case) has [fields = []]. *)
@@ -178,7 +258,9 @@ type ctor_decl =
     {!Oxsmt_core.Sort.datatype_} so a recursive field can reference it). Returns the built
     {!Oxsmt_core.Datatype_defs.datatype} (all minted symbols, for building terms) and adds
     it to the session registry, installing the DT theory. Must precede
-    {!assert_term}/{!check_sat}. *)
+    {!assert_term}/{!check_sat}. Adding a datatype AFTER a prior query instantiated a
+    theory invalidates the cached theory (reset-per-query, task #54 — see
+    {!set_datatypes}); doing so with live assertions raises [Invalid_argument]. *)
 val declare_datatype
   :  t
   -> Oxsmt_core.Sort.t
@@ -307,8 +389,14 @@ val cert_assumptions : t -> Oxsmt_solver.Sat.lit list
 
 (** The failed-assumption (selector) core of the most recent {!check_sat} that returned
     [Unsat] under a nonempty assumption set; empty otherwise. Passthrough of
-    {!Oxsmt_solver.Sat.failed_assumptions}. *)
+    {!Oxsmt_solver.Sat.failed_assumptions}, with the internal symmetry-breaking activation
+    selector (task #25) filtered out — a private aux var must never surface in a core. *)
 val failed_assumptions : t -> Oxsmt_solver.Sat.lit list
+
+(** Test-only (task #25): whether a symmetry-breaking emission is currently active (its
+    activation selector is still assumed). Used by [symbreak_test] to check the R2
+    emission restriction (no emission under a pushed frame or with lemmas registered). *)
+val symbreak_active_for_test : t -> bool
 
 (** The SAT core's counter trio, monotonic across the session (DESIGN.md §8). *)
 val stats : t -> Oxsmt_solver.Sat.Stats.t
@@ -363,4 +451,32 @@ module For_test : sig
       it fails closed on a datatype sort — a datatype has no scalar default, so it must
       raise rather than fabricate [VUninterp 0] (the silent wrong-value class, codex). *)
   val default_value : Oxsmt_core.Sort.t -> model_value
+
+  (** Substitute (or, with [None], restore) the DT model self-checker that {!check_sat}'s
+      commit consults for a datatype [Sat] (GOALS Datatypes). Exposed ONLY to pin the
+      commit -> checker WIRING: a fault-injection test installs a reject-all stub and
+      asserts the session then reports [Unknown] on a genuinely-sat query — a regression
+      that bypassed the checker would ignore the stub and wrongly report [Sat]. [None]
+      (the default, and the only production state) uses the real {!Dt_model_check}; NOT
+      for solver code. *)
+  val set_dt_checker
+    :  (Oxsmt_core.Datatype_defs.t
+        -> (Oxsmt_core.Term.t * Oxsmt_dt.Dt.ctor_tree) list
+        -> Oxsmt_core.Term.t list
+        -> bool)
+         option
+    -> unit
+
+  (** Substitute (or, with [None], restore) the arrays model self-checker that
+      {!check_sat}'s commit consults for an array [Sat]. Exposed ONLY to pin the commit ->
+      checker WIRING (a fault-injection test installs a reject-all stub and asserts the
+      session then reports [Unknown] on a genuinely-sat array query). [None] (the default,
+      and the only production state) uses the real {!Array_model_check}. *)
+  val set_array_checker
+    :  (Oxsmt_core.Array_defs.t
+        -> (Oxsmt_core.Term.t * Oxsmt_arr.Arr.value) list
+        -> Oxsmt_core.Term.t list
+        -> bool)
+         option
+    -> unit
 end

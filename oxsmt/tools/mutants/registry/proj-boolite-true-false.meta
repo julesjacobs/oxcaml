@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=The Bool-ITE collapse mis-folds the constant-branch form: (ite c true false) is collapsed to (not c) instead of c. A projected equality-over-ITE whose branches fold to (true, false) is the boolean [c] itself; folding it to (not c) inverts the condition — a wrong verdict. On (= (ite (= x 0) 923 926) 923) the correct projection folds to (ite (= x 0) true false) = (= x 0); the mutant yields (not (= x 0)). Killed by test_proj_eq_over_ite_fires.
+review=task #34 equality-over-ITE projection; logs/ite-projection-log.md (Bool-ITE collapse)
+expected=KILLED-TEST

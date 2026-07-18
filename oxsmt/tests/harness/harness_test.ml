@@ -274,6 +274,64 @@ let () =
           ~evals:[ Eval_unusable "malformed" ]
           [ sat_goal ])
          .outcome);
+  (* --- Model-optional goldens (b'): a golden that OMITS the (model ...) line pins
+     verdict + counters + eval-validity but NOT the model text (a sat instance may have
+     many equivalent models; base-l0 et al. reshuffle which one search lands on). --- *)
+  let sat_g_model_less = produced_text ~include_model:false [ sat_goal ] in
+  check
+    "model-optional golden carries no (model ...) line"
+    (not (contains sat_g_model_less "(model"));
+  let sat_goal_altmodel = { sat_goal with model = Some (Flat [ "x", "5"; "y", "9" ]) } in
+  (* A DIFFERENT valid model (same verdict/counters) still matches a model-less golden. *)
+  check
+    "model-less golden + different valid model -> Pass (model text not pinned)"
+    (is_pass
+       (eval
+          ~expected:[ Some Sat ]
+          ~golden:sat_g_model_less
+          ~evals:[ Eval_satisfies ]
+          [ sat_goal_altmodel ])
+         .outcome);
+  (* DISCRIMINATION (the (b') obligation): relaxing the golden must NOT let an unsound
+     model through — the layer-1 eval self-check still dominates. This RED-fails if the
+     model-less branch ever short-circuits to Pass ahead of the soundness check. *)
+  check
+    "model-less golden + MODEL-FAILS -> Fail_model_unsound (soundness still dominates)"
+    (is_unsound
+       (eval
+          ~expected:[ Some Sat ]
+          ~golden:sat_g_model_less
+          ~evals:[ Eval_fails "trace" ]
+          [ sat_goal ])
+         .outcome);
+  (* Backward-compat: a model-BEARING golden still pins the model text. *)
+  check
+    "model-bearing golden + different model -> Fail_golden_mismatch (still pinned)"
+    (is_mismatch
+       (eval
+          ~expected:[ Some Sat ]
+          ~golden:sat_g
+          ~evals:[ Eval_satisfies ]
+          [ sat_goal_altmodel ])
+         .outcome);
+  (* PROMOTE-PRESERVATION: a FAILING model-less golden must yield a model-less [produced]
+     — the runner writes [fe.produced] verbatim on --promote, so if [produced] carried a
+     model line a promote would silently RE-PIN the model and revert the golden to
+     fragile. Here the golden is model-less and the counters mismatch (promotable);
+     [produced] must have no (model ...) line. *)
+  let model_less_mismatch =
+    eval
+      ~expected:[ Some Sat ]
+      ~golden:sat_g_model_less
+      ~evals:[ Eval_satisfies ]
+      [ { sat_goal with counters = { conflicts = 1; decisions = 1; propagations = 1 } } ]
+  in
+  check
+    "model-less golden with mismatching counters -> Fail_golden_mismatch"
+    (is_mismatch model_less_mismatch.outcome);
+  check
+    "model-less golden's promote text stays model-less (no silent re-pin)"
+    (not (contains model_less_mismatch.produced "(model"));
   (* Neither soundness failure nor an unreadable model is promotable. *)
   check "model-unsound not promotable" (not (promotable (Fail_model_unsound "x")));
   check "eval-unusable not promotable" (not (promotable (Fail_eval_unusable "x")));

@@ -19,6 +19,15 @@
 
 open Oxsmt_core
 
+(* GCD / Diophantine integer-feasibility test before b&b branching. Default ON; set
+   OXSMT_NO_DIOPHANTINE to disable (A/B). Read once (module scope is fine — no term/id
+   currency, just a boolean policy). *)
+let diophantine_on =
+  match Sys.getenv_opt "OXSMT_NO_DIOPHANTINE" with
+  | None | Some ("0" | "false" | "no" | "") -> true
+  | Some _ -> false
+;;
+
 type t =
   { lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
@@ -88,10 +97,12 @@ let assert_lit t lit =
    like an ordinary [assert_lit]. The combinator does the fallible work — building the
    [eq] term and recording the edge Γ — BEFORE calling this, and this op is pure mutation
    (a pair of bounds on LIA's trail), so a skipped notification leaves zero partial state
-   (H5). *)
+   (H5). Uses {!Lia.notify_equality}, which no-ops a [0 = 0] TAUTOLOGY re-notification
+   (congruence can re-surface an equality LIA already relates — turning that into a
+   query-wide [unknown] was a latent Stage-2 gap) but keeps raising on an unsatisfiable
+   [0 = k] equality, so a genuine constant contradiction is never silently dropped. *)
 let notify_eq t ~edge_id eq =
-  guard t (fun () ->
-    Lia.assert_atom t.lia eq ~polarity:true ~premise:(Fabric.Fabric edge_id))
+  guard t (fun () -> Lia.notify_equality t.lia eq ~premise:(Fabric.Fabric edge_id))
 ;;
 
 (* LIA parity with {!Euf_adapter}'s codex AP4 tripwire: an EMPTY premise set is an
@@ -202,6 +213,17 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
             not the discarded [Eq v ¬Eq] tautology). *)
          (match Lia.suggest_branch t.lia with
           | None -> Fabric.Sat
+          | Some (le_atom, ge_atom) when diophantine_on ->
+            (* Integer-feasibility (GCD) test before branching: a ℚ-feasible but
+               ℤ-infeasible equality row (e.g. [4s+4x=6]) is refuted here immediately
+               rather than left to b&b, which would otherwise wander. Sound conflict
+               (premises are ℤ-unsatisfiable); on [None] proceed exactly as before. *)
+            (match Lia.diophantine_conflict t.lia with
+             | Some c -> Fabric.Conflict (fabric_conflict_explanation c)
+             | None ->
+               (match Lia.cube_model t.lia with
+                | Some _ -> Fabric.Sat
+                | None -> Fabric.Split [ le_atom; ge_atom ]))
           | Some (le_atom, ge_atom) ->
             (* Before branching, try the Bromberger-Fleury unit cube test: a fat feasible
                region yields an integer model in one shrink+re-solve, skipping b&b (which
@@ -270,7 +292,9 @@ let fabric_verify t term value lo hi =
 let model t =
   (* Valid only after [check Final] returned [Sat] (all problem vars integral);
      [Lia.model] raises otherwise. LIA emits only [Int] values. *)
-  Lia.model t.lia |> List.map (fun (term, v) -> term, Model.Int v) |> Model.of_alist
+  Lia.model_bigint t.lia
+  |> List.map (fun (term, v) -> term, Model.Int v)
+  |> Model.of_alist
 ;;
 
 let push t =

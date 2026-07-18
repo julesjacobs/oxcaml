@@ -473,6 +473,26 @@ let exploit_empty_lemma_failed_assumption : Checker.events =
   }
 ;;
 
+(* Base #53 RED: a level-0 THEORY conflict now routes to an EMPTY-CORE E3
+   [Failed_assumption { antecedents = [] }] (sat.ml [conclude_unsat], [~theory:true]).
+   That route is NOT a free pass to "unsat" — it is gated by the checker's [refutes_under]
+   over the whole clause DB. Here the theory conflict is BOGUS: the emitted theory leaf
+   [b] does NOT contradict the SAT input [a], so the DB [{a}, {b}] is satisfiable and BCP
+   over it derives NO ⊥. The empty-core E3 must therefore be REJECTED — proving a
+   mis-emitted (or fabricated) level-0 theory conflict cannot launder a SAT query to
+   unsat. Contrast the e3_failed_assumption_theory_prop positive, where the DB genuinely
+   refutes. *)
+let bogus_theory_conflict_empty_core_e3 : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30; clause = [| b_ |]; role = Sat.Conflict } : Recorder.theory_event) ]
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
 (* the E1 opposite the origin-keyed guard must NOT break: a raw-empty QUERY input asserts
    the empty clause = false, which is legitimately unsat. Stays VALID pre- and post-fix. *)
 let empty_query_input_ok : Checker.events =
@@ -597,6 +617,12 @@ let () =
     (handbuilt ~learned_ants:[ 10; 11; 12; 999 ] ());
   (* C2 (codex, CRITICAL): empty theory Reason clause admitted as ⊥ -> a SAT query VALID. *)
   expect "corrupt: empty theory Reason clause -> INVALID" `Invalid exploit_empty_reason;
+  (* base #53: a bogus level-0 theory conflict routed to empty-core E3 must still fail
+     [refutes_under] — the route is not a free pass to unsat. *)
+  expect
+    "corrupt: bogus theory conflict empty-core E3 (non-refuting DB) -> INVALID"
+    `Invalid
+    bogus_theory_conflict_empty_core_e3;
   (* CRITICAL (codex, this round): a raw-empty Theory_lemma INPUT fabricates ⊥ and
      certifies the SAT query [{a}] unsat through all THREE terminals. Each must go
      INVALID; the empty QUERY input opposite must stay VALID (the origin-keyed guard, not
