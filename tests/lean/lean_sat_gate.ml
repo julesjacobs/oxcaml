@@ -38,9 +38,18 @@ let lean_bin () =
     Filename.concat home ".dispatch/bin/lean"
 ;;
 
+(* Outcome of a [lean] invocation (rider R1): a SEMANTIC rejection (kernel/elaboration
+   error) is distinguished from an OPERATIONAL failure (timeout / signal death), so a
+   negative-control or wrong-model run that times out is never miscounted as the kernel
+   having rejected it. *)
+type lean_run =
+  | Accepted of string (* WEXITED 0 *)
+  | Rejected of string (* WEXITED n≠0 with diagnostic output: a real kernel rejection *)
+  | Operational of string (* timeout, signal death, or a nonzero exit with no output *)
+
 (* Spawn lean on [src], capture combined output, enforce [timeout] seconds in-process (no
-   dependency on the deny-ruled /usr/bin/timeout). Returns (exit_ok, output). *)
-let run_lean ~timeout ~src ~tag ~logdir : bool * string =
+   dependency on the deny-ruled /usr/bin/timeout). *)
+let run_lean ~timeout ~src ~tag ~logdir : lean_run =
   let lean = lean_bin () in
   let base = Filename.concat logdir tag in
   let src_file = base ^ ".lean" in
@@ -64,32 +73,43 @@ let run_lean ~timeout ~src ~tag ~logdir : bool * string =
          | _ -> ());
         (try ignore (Unix.waitpid [] pid) with
          | _ -> ());
-        false, "TIMEOUT")
+        Operational "TIMEOUT")
       else (
         Unix.sleepf 0.02;
         wait ())
     else (
-      let ok =
-        match status with
-        | Unix.WEXITED 0 -> true
-        | _ -> false
+      let out =
+        try read_file out_file with
+        | _ -> ""
       in
-      ( ok
-      , try read_file out_file with
-        | _ -> "" ))
+      match status with
+      | Unix.WEXITED 0 -> Accepted out
+      | Unix.WEXITED _ when String.trim out <> "" -> Rejected out
+      | Unix.WEXITED n -> Operational (Printf.sprintf "exit %d, no diagnostic output" n)
+      | Unix.WSIGNALED n -> Operational (Printf.sprintf "killed by signal %d" n)
+      | Unix.WSTOPPED n -> Operational (Printf.sprintf "stopped by signal %d" n))
   in
   wait ()
 ;;
 
 type outcome =
-  | Verified (* positive accepted AND refutation control rejected *)
+  | Verified (* positive accepted AND refutation control semantically rejected *)
   | Broken of string (* positive rejected, or refutation control accepted: soundness *)
   | Unsupported of string (* model construct not yet translatable: loud gap *)
   | Not_sat of string (* Unsat / Unknown / no self-checkable model *)
+  | Errored of
+      string (* a pipeline phase raised (rider R2: loud, counted, fails the run) *)
 
-let solve_and_model path : (Session.model * Oxsmt_core.Term.t list) option * string =
+(* rider R2: a raised pipeline phase is reported as [`Errored] (loud + fails the run),
+   kept distinct from a legitimate non-sat verdict ([`Nonsat]). *)
+let solve_and_model path
+  : [ `Solved of Session.model * Oxsmt_core.Term.t list
+    | `Nonsat of string
+    | `Errored of string
+    ]
+  =
   match read_file path with
-  | exception e -> None, "read: " ^ Printexc.to_string e
+  | exception e -> `Errored ("read: " ^ Printexc.to_string e)
   | src ->
     let s = Session.create ~max_effort:200_000 () in
     (match
@@ -99,21 +119,21 @@ let solve_and_model path : (Session.model * Oxsmt_core.Term.t list) option * str
          (Session.context s)
          src
      with
-     | exception ex -> None, "parse: " ^ Printexc.to_string ex
+     | exception ex -> `Errored ("parse: " ^ Printexc.to_string ex)
      | parsed ->
        Session.set_datatypes s parsed.Parser.datatypes;
        Session.set_arrays s parsed.Parser.arrays;
        (match Session.assert_presolved s parsed.Parser.assertions with
-        | exception ex -> None, "assert: " ^ Printexc.to_string ex
+        | exception ex -> `Errored ("assert: " ^ Printexc.to_string ex)
         | () ->
           (match Session.check_sat s with
            | Session.Sat ->
              (match Session.get_model s with
-              | Some model -> Some (model, parsed.Parser.assertions), "sat+model"
-              | None -> None, "sat-no-self-checkable-model")
-           | Session.Unsat -> None, "unsat"
-           | Session.Unknown -> None, "unknown"
-           | exception ex -> None, "solve: " ^ Printexc.to_string ex)))
+              | Some model -> `Solved (model, parsed.Parser.assertions)
+              | None -> `Nonsat "sat-no-self-checkable-model")
+           | Session.Unsat -> `Nonsat "unsat"
+           | Session.Unknown -> `Nonsat "unknown"
+           | exception ex -> `Errored ("solve: " ^ Printexc.to_string ex))))
 ;;
 
 (* Corrupt a model by tweaking the FIRST constant binding by one minimal step (flip a
@@ -149,38 +169,52 @@ let corrupt_total = ref 0
 
 let run_file ~timeout ~logdir path : outcome =
   match solve_and_model path with
-  | None, why -> Not_sat why
-  | Some (model, assertions), _ ->
+  | `Errored why -> Errored why
+  | `Nonsat why -> Not_sat why
+  | `Solved (model, assertions) ->
     (match Lean_export.emit_sat ~model ~assertions with
      | exception Lean_export.Gap g -> Unsupported g
      | { positive; refutation_control } ->
        let base = Filename.basename path in
-       let pos_ok, pos_out =
-         run_lean ~timeout ~src:positive ~tag:(base ^ ".pos") ~logdir
-       in
-       let neg_ok, _ =
-         run_lean ~timeout ~src:refutation_control ~tag:(base ^ ".neg") ~logdir
-       in
-       if not pos_ok
-       then Broken (Printf.sprintf "positive rejected: %s" (String.trim pos_out))
-       else if neg_ok
-       then Broken "refutation control ACCEPTED (kernel proved a false model true)"
-       else (
-         match Lean_export.check_axioms pos_out with
-         | Error m -> Broken ("axiom-whitelist violation: " ^ m)
-         | Ok () ->
-           (* wrong-model discrimination: tweak one value; the corrupted positive should
-              be REJECTED. A tweak that still satisfies (another valid model) is not a
-              soundness break, so this is a REPORTED metric (caught/total), not a hard
-              gate; the guaranteed per-file discrimination is the refutation control
-              above. *)
-           (match Lean_export.emit_sat ~model:(corrupt_model model) ~assertions with
-            | exception Lean_export.Gap _ -> ()
-            | { positive = cpos; _ } ->
-              incr corrupt_total;
-              let cok, _ = run_lean ~timeout ~src:cpos ~tag:(base ^ ".corrupt") ~logdir in
-              if not cok then incr corrupt_caught);
-           Verified))
+       let pos = run_lean ~timeout ~src:positive ~tag:(base ^ ".pos") ~logdir in
+       let neg = run_lean ~timeout ~src:refutation_control ~tag:(base ^ ".neg") ~logdir in
+       (match pos with
+        | Rejected out ->
+          Broken (Printf.sprintf "positive rejected: %s" (String.trim out))
+        | Operational why -> Broken (Printf.sprintf "positive did not check (%s)" why)
+        | Accepted pos_out ->
+          (* rider R1: the refutation control must be rejected SEMANTICALLY. An accept is
+             a soundness break; an operational failure (timeout/crash) is not valid
+             evidence the control was rejected, so we fail closed rather than credit it. *)
+          (match neg with
+           | Accepted _ ->
+             Broken "refutation control ACCEPTED (kernel proved a false model true)"
+           | Operational why ->
+             Broken
+               (Printf.sprintf
+                  "refutation control did not semantically reject (%s); no \
+                   discrimination evidence"
+                  why)
+           | Rejected _ ->
+             (match Lean_export.check_axioms ~theorem_name:"oxsmt_sat" pos_out with
+              | Error m -> Broken ("axiom-whitelist violation: " ^ m)
+              | Ok () ->
+                (* wrong-model discrimination: tweak one value; the corrupted positive
+                   should be SEMANTICALLY rejected. A tweak that still satisfies (another
+                   valid model) is not a soundness break, so this is a REPORTED metric
+                   (caught/total), not a hard gate; the guaranteed per-file discrimination
+                   is the refutation control above. An operational failure is not counted
+                   as caught. *)
+                (match Lean_export.emit_sat ~model:(corrupt_model model) ~assertions with
+                 | exception Lean_export.Gap _ -> ()
+                 | { positive = cpos; _ } ->
+                   incr corrupt_total;
+                   (match
+                      run_lean ~timeout ~src:cpos ~tag:(base ^ ".corrupt") ~logdir
+                    with
+                    | Rejected _ -> incr corrupt_caught
+                    | Accepted _ | Operational _ -> ()));
+                Verified))))
 ;;
 
 let expand_arg arg =
@@ -200,12 +234,27 @@ let expand_arg arg =
   else [ arg ]
 ;;
 
+(* rider R2: floor on VERIFIED so an all-skip / all-error / no-args run keyed on exit code
+   cannot pass green. [--min-verified N] or [OXSMT_LEAN_MIN_VERIFIED]; default 1. *)
+let min_verified_default () =
+  match Sys.getenv_opt "OXSMT_LEAN_MIN_VERIFIED" with
+  | Some s ->
+    (try int_of_string (String.trim s) with
+     | _ -> 1)
+  | None -> 1
+;;
+
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
   let timeout, args =
     match args with
     | "--timeout" :: t :: rest -> float_of_string t, rest
     | _ -> 30.0, args
+  in
+  let min_verified, args =
+    match args with
+    | "--min-verified" :: n :: rest -> int_of_string n, rest
+    | _ -> min_verified_default (), args
   in
   let logdir =
     match Sys.getenv_opt "OXSMT_LEAN_LOGDIR" with
@@ -214,12 +263,17 @@ let () =
   in
   (try Unix.mkdir logdir 0o755 with
    | _ -> ());
+  if args = []
+  then (
+    Printf.printf "lean_sat_gate: no input files/dirs given (nothing to verify)\n%!";
+    exit 1);
   let files = List.concat_map expand_arg args in
   let n_sat = ref 0
   and n_verified = ref 0
   and n_broken = ref 0
   and n_unsupported = ref 0
-  and n_notsat = ref 0 in
+  and n_notsat = ref 0
+  and n_error = ref 0 in
   List.iter
     (fun path ->
       let base = Filename.basename path in
@@ -238,12 +292,15 @@ let () =
         Printf.printf "UNSUPPORTED    %s :: %s\n%!" base g
       | Not_sat why ->
         incr n_notsat;
-        Printf.printf "skip(%s) %s\n%!" why base)
+        Printf.printf "skip(%s) %s\n%!" why base
+      | Errored why ->
+        incr n_error;
+        Printf.printf "ERROR          %s :: %s\n%!" base why)
     files;
   Printf.printf
     "\n\
      lean_sat_gate: %d files | sat-solves=%d (VERIFIED=%d BROKEN=%d UNSUPPORTED=%d) \
-     non-sat=%d | wrong-model-rejected=%d/%d\n\
+     non-sat=%d ERROR=%d | wrong-model-rejected=%d/%d\n\
      %!"
     (List.length files)
     !n_sat
@@ -251,7 +308,19 @@ let () =
     !n_broken
     !n_unsupported
     !n_notsat
+    !n_error
     !corrupt_caught
     !corrupt_total;
+  if !n_error > 0
+  then (
+    Printf.printf "lean_sat_gate: FAILED (%d pipeline error(s))\n%!" !n_error;
+    exit 1);
+  if !n_verified < min_verified
+  then (
+    Printf.printf
+      "lean_sat_gate: FAILED (VERIFIED=%d < required minimum %d)\n%!"
+      !n_verified
+      min_verified;
+    exit 1);
   if !n_broken > 0 then exit 1
 ;;

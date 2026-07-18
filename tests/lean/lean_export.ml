@@ -331,44 +331,58 @@ let emit_fun_def (fi : fun_info) : string =
    Lean.ofReduceBool / ofReduceNat (or any other axiom) is a HARD FAIL — this is what
    keeps a `sorry`, a native-`decide` oracle, or a smuggled classical axiom out of the
    proofs. Returns [Ok ()] if the axioms are within the whitelist (including "does not
-   depend on any axioms"), else [Error msg]. *)
+   depend on any axioms"), else [Error msg].
+
+   Hardening (rider R5, defends codex finding F6): (1) reject output that carries MORE
+   than one axioms line — a smuggled clean [#print axioms] prepended before the real
+   theorem can no longer whitewash the verdict; the emitters each produce EXACTLY one. (2)
+   When [?theorem_name] is given, the sole axioms line must name that theorem ([Lean]
+   prints ['<name>' depends on axioms: …] / ['<name>' does not depend on any axioms]) — so
+   the gate reads the axioms OF THE THEOREM IT CHECKED, not of some other declaration. *)
 let allowed_axioms = [ "propext"; "Quot.sound" ]
 
-let check_axioms (lean_output : string) : (unit, string) result =
+let is_sub hay needle =
+  let nl = String.length needle
+  and hl = String.length hay in
+  let rec loop i =
+    if i + nl > hl
+    then false
+    else if String.sub hay i nl = needle
+    then true
+    else loop (i + 1)
+  in
+  nl = 0 || loop 0
+;;
+
+let check_axioms ?theorem_name (lean_output : string) : (unit, string) result =
   let lines = String.split_on_char '\n' lean_output in
-  match
-    List.find_opt
-      (fun l ->
-        let sub needle =
-          let nl = String.length needle
-          and hl = String.length l in
-          let rec loop i =
-            if i + nl > hl
-            then false
-            else if String.sub l i nl = needle
-            then true
-            else loop (i + 1)
-          in
-          nl = 0 || loop 0
-        in
-        sub "does not depend on any axioms" || sub "depends on axioms")
+  let axiom_lines =
+    List.filter
+      (fun l -> is_sub l "does not depend on any axioms" || is_sub l "depends on axioms")
       lines
-  with
-  | None -> Error "no `#print axioms` line found (proof may not have elaborated)"
-  | Some line ->
-    let is_sub hay needle =
-      let nl = String.length needle
-      and hl = String.length hay in
-      let rec loop i =
-        if i + nl > hl
-        then false
-        else if String.sub hay i nl = needle
-        then true
-        else loop (i + 1)
-      in
-      nl = 0 || loop 0
+  in
+  match axiom_lines with
+  | [] -> Error "no `#print axioms` line found (proof may not have elaborated)"
+  | _ :: _ :: _ ->
+    Error
+      (Printf.sprintf
+         "expected exactly one `#print axioms` line, found %d (possible prepended-axioms \
+          bypass)"
+         (List.length axiom_lines))
+  | [ line ] ->
+    let name_ok =
+      match theorem_name with
+      | None -> true
+      | Some n -> is_sub line ("'" ^ n ^ "'")
     in
-    if is_sub line "does not depend on any axioms"
+    if not name_ok
+    then
+      Error
+        (Printf.sprintf
+           "axioms line does not name the checked theorem %s: %s"
+           (Option.value ~default:"?" theorem_name)
+           line)
+    else if is_sub line "does not depend on any axioms"
     then Ok ()
     else (
       (* extract the [...] list *)

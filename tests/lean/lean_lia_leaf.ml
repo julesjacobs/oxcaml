@@ -1,5 +1,14 @@
 (* LIA Farkas theory-leaf -> Lean (lean-proofs lane, rung 2).
 
+   SUPERSEDED (rider R4): this standalone emitter proves the recorded Farkas WITNESS is
+   internally infeasible but does NOT bind that proof to the recorded leaf CLAUSE (see the
+   [ignore event] in [entries_of_witness] — the event, which carries the clause, is
+   unused). So a proof it produces attests "these multipliers refute their own premise
+   rows", not "this leaf clause is a valid theory lemma". The leaf<->clause binding that
+   turns a leaf into a proved [have satClause … = true] lives in
+   [Lean_res.emit_refutation] (via [OxsmtBridge.leaf_sat]), which the resolution gate
+   uses; prefer it. This module is kept as a focused Farkas-arithmetic self-test.
+
    Consumes a recorded [Recorder.theory_event] carrying a [lia_conflict_witness] (the
    Farkas multipliers) plus the certificate's atom table (SAT var -> core Term), and emits
    an explicit core-Lean-4 proof, over the reflective {!Farkas_prelude}, that the leaf's

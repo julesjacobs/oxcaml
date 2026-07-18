@@ -4,7 +4,13 @@
    substrate; per team-lead's 2026-07-17 ruling `omega` is permitted HERE — cert-independent
    closed lemmas, kernel still checks the term, axioms stay ⊆ {propext, Quot.sound} — but
    NEVER in an emitted per-certificate file, which the gate enforces mechanically). Emitted
-   per-file proofs only APPLY these lemmas as terms + ground `by decide`. -/
+   per-file proofs only APPLY these lemmas as terms + ground `by decide`.
+
+   omega SURFACE (rider R6): `omega` is used in FIVE once-proved lemmas of this prelude —
+   `eval_negbump`, `eval_subL`, `strengthen_neg`, `prem_neg`, and `prem_eq` (not only
+   `strengthen_neg`). All five are fixed, cert-independent closed lemmas over
+   universally-quantified integers; none can depend on or mask a certificate's content.
+   `res_prelude` and `farkas_prelude` use NO omega. -/
 namespace OxsmtBridge
 
 open OxsmtRes

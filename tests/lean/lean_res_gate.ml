@@ -59,8 +59,18 @@ let prelude_text () =
     ]
 ;;
 
-(* Spawn lean with an in-process wall-clock cap. Returns (exit_ok, output). *)
-let run_lean ~timeout ~src ~file : bool * string =
+(* Outcome of a [lean] invocation (rider R1). A SEMANTIC rejection (kernel/elaboration
+   error, [WEXITED n≠0] with diagnostic output) is distinguished from an OPERATIONAL
+   failure (timeout or signal death), because only the former is valid evidence that a
+   tampered/negative proof was actually REJECTED by the kernel — a timeout/crash on an
+   expected-reject run must not be mistaken for successful discrimination. *)
+type lean_run =
+  | Accepted of string (* WEXITED 0 *)
+  | Rejected of string (* WEXITED n≠0 with diagnostic output: a real kernel rejection *)
+  | Operational of string (* timeout, signal death, or a nonzero exit with no output *)
+
+(* Spawn lean with an in-process wall-clock cap. *)
+let run_lean ~timeout ~src ~file : lean_run =
   let lean = lean_bin () in
   let out_file = file ^ ".out" in
   write_file file src;
@@ -82,19 +92,21 @@ let run_lean ~timeout ~src ~file : bool * string =
          | _ -> ());
         (try ignore (Unix.waitpid [] pid) with
          | _ -> ());
-        false, "TIMEOUT")
+        Operational "TIMEOUT")
       else (
         Unix.sleepf 0.02;
         wait ())
     else (
-      let ok =
-        match status with
-        | Unix.WEXITED 0 -> true
-        | _ -> false
+      let out =
+        try read_file out_file with
+        | _ -> ""
       in
-      ( ok
-      , try read_file out_file with
-        | _ -> "" ))
+      match status with
+      | Unix.WEXITED 0 -> Accepted out
+      | Unix.WEXITED _ when String.trim out <> "" -> Rejected out
+      | Unix.WEXITED n -> Operational (Printf.sprintf "exit %d, no diagnostic output" n)
+      | Unix.WSIGNALED n -> Operational (Printf.sprintf "killed by signal %d" n)
+      | Unix.WSTOPPED n -> Operational (Printf.sprintf "stopped by signal %d" n))
   in
   wait ()
 ;;
@@ -232,16 +244,50 @@ let tamper_euf (src : string) : string option =
        else Some (String.sub src 0 j ^ "rfl" ^ String.sub src !k (hl - !k)))
 ;;
 
-(* MECHANICAL NO-AUTOMATION GUARD (team-lead ruling 2026-07-17): the EMITTED
-   per-certificate body must never contain a proof-search / decision-procedure tactic —
-   omega, simp, grind, native_decide, linarith, etc. (omega is permitted ONLY in the
-   once-proved prelude substrate, never per-cert). The emitter only ever produces `by
-   decide`, `rfl`, and term-mode applications; this scan turns that invariant into
-   enforced evidence. Returns [Some tok] if a banned token appears in [body]. *)
+(* Is [c] an identifier char (Lean idents also allow ?, ! and '; we treat those as part of
+   a token so `exact?`/`decide!`/`simp_all` are matched whole and never split). *)
+let ident_char c =
+  (c >= 'a' && c <= 'z')
+  || (c >= 'A' && c <= 'Z')
+  || (c >= '0' && c <= '9')
+  || c = '_'
+  || c = '\''
+  || c = '?'
+  || c = '!'
+;;
+
+(* Read the token starting at [i] (a maximal run of ident chars). *)
+let token_at (s : string) (i : int) : string =
+  let hl = String.length s in
+  let j = ref i in
+  while !j < hl && ident_char s.[!j] do
+    incr j
+  done;
+  String.sub s i (!j - i)
+;;
+
+(* MECHANICAL NO-AUTOMATION GUARD (team-lead ruling 2026-07-17), reworked per rider R3.
+   The EMITTED per-certificate body must never contain a proof-search / decision-procedure
+   tactic; the emitter only ever produces the top-level structural `by` block (have /
+   exact / let, no automation) and nested ground `by decide` checks, `rfl`, and term-mode
+   applications. Two complementary checks, both word-boundary aware so a constructor name
+   containing a banned substring (e.g. `fn_simple` ⊃ `simp`) no longer false-positives and
+   a distinct tactic (e.g. `exact?`, `trivial`) is no longer missed:
+
+   1. ALLOWLIST on nested `by` blocks. Every `by` token whose block is written inline as
+      `by <tactic>` (a space, not the top-level `:= by\n<newline>` opener) may only invoke
+      `decide`. This closes any tactic — automation or otherwise — sneaking into a nested
+      block, without the false-positive of a raw substring scan.
+   2. Word-boundary BLOCKLIST (defense in depth) for automation tactics appearing as whole
+      tokens ANYWHERE in the body, covering both the classic decision procedures and the
+      false-negatives the old substring scan missed (`exact?`, `apply?`, `trivial`, …).
+
+   Returns [Some reason] on the first violation. *)
 let banned_automation_token (body : string) : string option =
-  let banned =
+  let blocked =
     [ "omega"
     ; "simp"
+    ; "simp_all"
     ; "grind"
     ; "native_decide"
     ; "linarith"
@@ -252,15 +298,67 @@ let banned_automation_token (body : string) : string option =
     ; "tauto"
     ; "decide!"
     ; "bv_decide"
+    ; "exact?"
+    ; "apply?"
+    ; "rfl?"
+    ; "trivial"
+    ; "hint"
+    ; "omega?"
+    ; "decide?"
     ]
   in
-  List.find_opt (fun tok -> find_sub body tok <> None) banned
+  let hl = String.length body in
+  (* check 1: nested `by <tactic>` allowlist (only `by decide` permitted inline). *)
+  let rec scan_by i =
+    if i >= hl
+    then None
+    else if token_at body i = "by"
+            && (i = 0 || not (ident_char body.[i - 1]))
+            && i + 2 < hl
+            && body.[i + 2] = ' ' (* an inline `by <tactic>`; the opener is `by\n` *)
+    then (
+      let k = ref (i + 3) in
+      while !k < hl && body.[!k] = ' ' do
+        incr k
+      done;
+      let tac = token_at body !k in
+      if tac = "decide"
+      then scan_by (i + 2)
+      else Some (Printf.sprintf "nested `by %s` (only `by decide` is allowed)" tac))
+    else scan_by (i + 1)
+  in
+  match scan_by 0 with
+  | Some _ as r -> r
+  | None ->
+    (* check 2: word-boundary blocklist. *)
+    let rec scan_block i =
+      if i >= hl
+      then None
+      else if i = 0 || not (ident_char body.[i - 1])
+      then (
+        let tok = token_at body i in
+        if tok <> "" && List.mem tok blocked
+        then Some (Printf.sprintf "automation tactic token `%s`" tok)
+        else scan_block (i + max 1 (String.length tok)))
+      else scan_block (i + 1)
+    in
+    scan_block 0
 ;;
 
 let cnt = ref 0
 let cnt_verified = ref 0
 let cnt_broken = ref 0
 let cnt_unsupported = ref 0
+let cnt_error = ref 0
+
+(* Status of one tamper (discrimination) arm (rider R1). *)
+type arm =
+  | Absent (* the tamper produced nothing to corrupt on this proof *)
+  | Sem_rejected
+    (* the corrupted proof was REJECTED by the kernel: valid discrimination *)
+  | Op_failed of
+      string (* the corrupted run timed out / crashed: NOT valid discrimination *)
+  | Accepted_bad (* the corrupted proof was ACCEPTED: a soundness break *)
 
 let install_traces s rec_ =
   Session.install_cert_trace s (Some (Recorder.trace rec_));
@@ -279,10 +377,17 @@ let install_traces s rec_ =
        })
 ;;
 
+(* Loud, counted skip for a phase that raised (rider R2: the pipeline exceptions used to
+   be silently swallowed as [-> ()]; now every one is reported and makes the run fail). *)
+let phase_error base phase msg =
+  incr cnt_error;
+  Printf.printf "ERROR        %s :: %s: %s\n%!" base phase msg
+;;
+
 let process_file ~prelude ~timeout ~logdir path : unit =
   let base = Filename.basename path in
   match read_file path with
-  | exception _ -> ()
+  | exception e -> phase_error base "read" (Printexc.to_string e)
   | src ->
     let s = Session.create ~max_effort:200_000 () in
     let rec_ = Recorder.create () in
@@ -294,15 +399,15 @@ let process_file ~prelude ~timeout ~logdir path : unit =
          (Session.context s)
          src
      with
-     | exception _ -> ()
+     | exception e -> phase_error base "parse" (Printexc.to_string e)
      | parsed ->
        Session.set_datatypes s parsed.Parser.datatypes;
        Session.set_arrays s parsed.Parser.arrays;
        (match Session.assert_presolved s parsed.Parser.assertions with
-        | exception _ -> ()
+        | exception e -> phase_error base "assert" (Printexc.to_string e)
         | () ->
           (match Session.check_sat s with
-           | exception _ -> ()
+           | exception e -> phase_error base "check_sat" (Printexc.to_string e)
            | Session.Sat | Session.Unknown -> ()
            | Session.Unsat ->
              incr cnt;
@@ -332,52 +437,115 @@ let process_file ~prelude ~timeout ~logdir path : unit =
               | body ->
                 let full = prelude ^ "\n" ^ body in
                 let f = Filename.concat logdir (name ^ ".lean") in
-                let ok, out = run_lean ~timeout ~src:full ~file:f in
-                let tamper_accepts label f_tamper =
+                let pos = run_lean ~timeout ~src:full ~file:f in
+                (* classify each discrimination arm as absent / semantic-reject /
+                   operational failure / accepted (rider R1). *)
+                let classify label f_tamper : arm =
                   match f_tamper body with
-                  | None -> false (* nothing to tamper => treat as rejected (safe) *)
+                  | None -> Absent
                   | Some tbody ->
                     let tf = Filename.concat logdir (name ^ "." ^ label ^ ".lean") in
-                    fst (run_lean ~timeout ~src:(prelude ^ "\n" ^ tbody) ~file:tf)
+                    (match run_lean ~timeout ~src:(prelude ^ "\n" ^ tbody) ~file:tf with
+                     | Accepted _ -> Accepted_bad
+                     | Rejected _ -> Sem_rejected
+                     | Operational why -> Op_failed why)
                 in
-                let pivot_ok = tamper_accepts "pivot" tamper_pivot in
-                let drop_ok = tamper_accepts "drop" drop_premise in
-                let euf_ok = tamper_accepts "euf" tamper_euf in
-                let tampered_ok = pivot_ok || drop_ok || euf_ok in
-                if not ok
-                then (
-                  incr cnt_broken;
-                  Printf.printf
-                    "BROKEN       %s :: valid refutation REJECTED: %s\n%!"
-                    base
-                    (match
-                       String.split_on_char '\n' out
-                       |> List.find_opt (fun l -> String.length l > 0)
-                     with
-                     | Some l -> l
-                     | None -> "?"))
-                else if tampered_ok
-                then (
-                  incr cnt_broken;
-                  Printf.printf
-                    "BROKEN       %s :: TAMPERED refutation ACCEPTED (%s)\n%!"
-                    base
-                    (if pivot_ok
-                     then "swapped-pivot"
-                     else if drop_ok
-                     then "dropped-premise"
-                     else "broken-euf-chain"))
-                else (
-                  match Oxsmt_lean_export.Lean_export.check_axioms out with
-                  | Error m ->
-                    incr cnt_broken;
-                    Printf.printf
-                      "BROKEN       %s :: axiom-whitelist violation: %s\n%!"
-                      base
-                      m
-                  | Ok () ->
-                    incr cnt_verified;
-                    Printf.printf "VERIFIED     %s\n%!" base)))))
+                let pivot = classify "pivot" tamper_pivot in
+                let drop = classify "drop" drop_premise in
+                let euf = classify "euf" tamper_euf in
+                let arm_str = function
+                  | Absent -> "absent"
+                  | Sem_rejected -> "semantic-reject"
+                  | Op_failed why -> "OPERATIONAL(" ^ why ^ ")"
+                  | Accepted_bad -> "ACCEPTED"
+                in
+                (* HARD discrimination arms: every resolution proof (all of them) carries
+                   a swapped-pivot and a dropped-premise arm, and each MUST produce a
+                   semantic rejection — an absent arm (regex miss) or an operational
+                   failure is not evidence of discrimination (rider R1). The EUF/DT [euf]
+                   arm is a bonus arm whose tamper is not always constructible (e.g. an
+                   [rfl] congruence closing has no [he_] to break), so it is checked for
+                   soundness (accept => break) and otherwise only reported, never
+                   hard-required. *)
+                let has_resolve = find_sub body "resolve " <> None in
+                let hard_arms =
+                  [ "swapped-pivot", pivot; "dropped-premise", drop ]
+                  |> List.filter (fun _ -> has_resolve)
+                in
+                let all_arms =
+                  [ "swapped-pivot", pivot
+                  ; "dropped-premise", drop
+                  ; "broken-euf-chain", euf
+                  ]
+                in
+                (match List.find_opt (fun (_, a) -> a = Accepted_bad) all_arms with
+                 | Some (label, _) ->
+                   incr cnt_broken;
+                   Printf.printf
+                     "BROKEN       %s :: TAMPERED refutation ACCEPTED (%s)\n%!"
+                     base
+                     label
+                 | None ->
+                   (match pos with
+                    | Rejected out ->
+                      incr cnt_broken;
+                      Printf.printf
+                        "BROKEN       %s :: valid refutation REJECTED: %s\n%!"
+                        base
+                        (match
+                           String.split_on_char '\n' out
+                           |> List.find_opt (fun l -> String.length l > 0)
+                         with
+                         | Some l -> l
+                         | None -> "?")
+                    | Operational why ->
+                      incr cnt_broken;
+                      Printf.printf
+                        "BROKEN       %s :: valid refutation did not check (%s)\n%!"
+                        base
+                        why
+                    | Accepted out ->
+                      (match
+                         List.find_opt (fun (_, a) -> a <> Sem_rejected) hard_arms
+                       with
+                       | Some (label, a) ->
+                         incr cnt_broken;
+                         Printf.printf
+                           "BROKEN       %s :: discrimination arm %s not a semantic \
+                            rejection: %s\n\
+                            %!"
+                           base
+                           label
+                           (arm_str a)
+                       | None ->
+                         (match
+                            Oxsmt_lean_export.Lean_export.check_axioms
+                              ~theorem_name:"refute"
+                              out
+                          with
+                          | Error m ->
+                            incr cnt_broken;
+                            Printf.printf
+                              "BROKEN       %s :: axiom-whitelist violation: %s\n%!"
+                              base
+                              m
+                          | Ok () ->
+                            incr cnt_verified;
+                            (* surface a bonus euf arm that could not demonstrate a
+                               semantic rejection (non-fatal, loud). *)
+                            let euf_note =
+                              match euf with
+                              | Sem_rejected | Absent -> ""
+                              | Op_failed why -> " [euf arm OPERATIONAL: " ^ why ^ "]"
+                              | Accepted_bad -> ""
+                            in
+                            if hard_arms = []
+                            then
+                              Printf.printf
+                                "VERIFIED     %s (trivial: no resolution arm)%s\n%!"
+                                base
+                                euf_note
+                            else Printf.printf "VERIFIED     %s%s\n%!" base euf_note))))))))
 ;;
 
 let expand_arg arg =
@@ -391,12 +559,28 @@ let expand_arg arg =
   else [ arg ]
 ;;
 
+(* rider R2: a floor on VERIFIED so an all-skip / all-error / no-args run keyed on exit
+   code cannot pass green. Set on the command line ([--min-verified N]) or via
+   [OXSMT_LEAN_MIN_VERIFIED]; defaults to 1 (at least one proof must actually verify). *)
+let min_verified_default () =
+  match Sys.getenv_opt "OXSMT_LEAN_MIN_VERIFIED" with
+  | Some s ->
+    (try int_of_string (String.trim s) with
+     | _ -> 1)
+  | None -> 1
+;;
+
 let () =
   let args = List.tl (Array.to_list Sys.argv) in
   let timeout, args =
     match args with
     | "--timeout" :: t :: rest -> float_of_string t, rest
     | _ -> 60.0, args
+  in
+  let min_verified, args =
+    match args with
+    | "--min-verified" :: n :: rest -> int_of_string n, rest
+    | _ -> min_verified_default (), args
   in
   let logdir =
     match Sys.getenv_opt "OXSMT_LEAN_LOGDIR" with
@@ -405,14 +589,30 @@ let () =
   in
   (try Unix.mkdir logdir 0o755 with
    | _ -> ());
+  if args = []
+  then (
+    Printf.printf "lean_res_gate: no input files/dirs given (nothing to verify)\n%!";
+    exit 1);
   let prelude = prelude_text () in
   let files = List.concat_map expand_arg args in
   List.iter (fun p -> process_file ~prelude ~timeout ~logdir p) files;
   Printf.printf
-    "\nlean_res_gate: unsat-solves=%d | VERIFIED=%d BROKEN=%d UNSUPPORTED=%d\n%!"
+    "\nlean_res_gate: unsat-solves=%d | VERIFIED=%d BROKEN=%d UNSUPPORTED=%d ERROR=%d\n%!"
     !cnt
     !cnt_verified
     !cnt_broken
-    !cnt_unsupported;
+    !cnt_unsupported
+    !cnt_error;
+  if !cnt_error > 0
+  then (
+    Printf.printf "lean_res_gate: FAILED (%d pipeline error(s))\n%!" !cnt_error;
+    exit 1);
+  if !cnt_verified < min_verified
+  then (
+    Printf.printf
+      "lean_res_gate: FAILED (VERIFIED=%d < required minimum %d)\n%!"
+      !cnt_verified
+      min_verified;
+    exit 1);
   if !cnt_broken > 0 then exit 1
 ;;
