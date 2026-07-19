@@ -16,6 +16,15 @@ type t =
     goal : Types.refinement_expression;
   }
 
+(* Cross-phase provenance for recursive bindings.  The defeq expander runs
+   before typecore computes the structural-termination verdict.  Physical
+   location identity connects those phases without a user-spellable
+   attribute. *)
+module Recursive_binding : sig
+  val request_defeq : Location.t -> unit
+  val defeq_requested : Location.t -> bool
+end
+
 val create :
   loc:Location.t ->
   facts:fact list ->

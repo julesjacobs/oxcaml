@@ -5,7 +5,8 @@
 
    - the original binding for [f], forced [@ total] (so a body using a partial
      operation -- integer [/] or [mod], [raise], [List.hd], array indexing --
-     or recursion is rejected at the totality mode, and hence unreflectable);
+     is rejected at the totality mode; recursion is admitted only when
+     typecore's structural-termination analysis proves the recursive group);
 
    - a companion binding
        [let f_def p1 ... pn = (() : unit{ f p1 ... pn = rhs })]
@@ -116,14 +117,19 @@ let make_lemma_binding ~loc ~function_name ~parameters ~parameter_names ~body =
      user-writable attribute. *)
   let lemma_loc = { loc with Location.loc_ghost = true } in
   generated_lemma_locations := lemma_loc :: !generated_lemma_locations;
-  Ast_helper.Vb.mk ~loc:lemma_loc
-    (Ast_helper.Pat.var ~loc { txt = function_name ^ "_def"; loc })
-    lemma_function
+  let binding =
+    Ast_helper.Vb.mk ~loc:lemma_loc
+      (Ast_helper.Pat.var ~loc { txt = function_name ^ "_def"; loc })
+      lemma_function
+  in
+  { binding with
+    pvb_modes = [Location.mkloc (Mode "total") lemma_loc];
+  }
 
 (* Expand a single [let[@vox.def] ...] binding into the [f] item (forced
    [@ total]) and the companion [f_def] item.  Raises on anything the first cut
    does not support. *)
-let expand_binding ~item_loc binding =
+let expand_binding ~item_loc ~rec_flag binding =
   let loc = binding.pvb_loc in
   let function_name =
     match binding.pvb_pat.ppat_desc with
@@ -167,7 +173,9 @@ let expand_binding ~item_loc binding =
   let lemma_binding =
     make_lemma_binding ~loc ~function_name ~parameters ~parameter_names ~body
   in
-  [ { pstr_desc = Pstr_value (Nonrecursive, [function_binding]);
+  if rec_flag = Asttypes.Recursive then
+    Vox_vc.Recursive_binding.request_defeq binding.pvb_loc;
+  [ { pstr_desc = Pstr_value (rec_flag, [function_binding]);
       pstr_loc = item_loc;
     };
     { pstr_desc = Pstr_value (Nonrecursive, [lemma_binding]);
@@ -179,14 +187,14 @@ let expand_item (item : structure_item) =
   | Pstr_value (rec_flag, bindings)
     when List.exists binding_has_def_attribute bindings ->
     (match rec_flag, bindings with
-     | Nonrecursive, [binding] -> expand_binding ~item_loc:item.pstr_loc binding
-     | Recursive, _ ->
-       error ~loc:item.pstr_loc
-         "[@vox.def] cannot be used on a recursive binding (recursion is not \
-          total, so it cannot be reflected)"
+     | (Nonrecursive | Recursive), [binding] ->
+       expand_binding ~item_loc:item.pstr_loc ~rec_flag binding
      | Nonrecursive, _ ->
        error ~loc:item.pstr_loc
-         "[@vox.def] must be the sole binding of its [let]")
+         "[@vox.def] must be the sole binding of its [let]"
+     | Recursive, _ ->
+       error ~loc:item.pstr_loc
+         "[@vox.def] must be the sole binding of its recursive [let]")
   | _ -> [item]
 
 let expand_structure structure = List.concat_map expand_item structure

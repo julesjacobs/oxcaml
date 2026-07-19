@@ -12067,6 +12067,14 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       let structurally_terminating =
         is_recursive && structurally_terminating_group spat_sexp_list
       in
+      if is_recursive && not structurally_terminating then
+        List.iter
+          (fun binding ->
+            if Vox_vc.Recursive_binding.defeq_requested binding.pvb_loc then
+              Location.raise_errorf ~loc:binding.pvb_loc
+                "vox: [@vox.def] cannot be used on this recursive binding: \
+                 its recursive group is not structurally total")
+          spat_sexp_list;
       let rhs_pvs =
         if is_recursive && not structurally_terminating
         then
@@ -14363,9 +14371,33 @@ let unsupported_refinement_expression expression construct =
          Refinement_expression_not_supported construct ))
 
 let lower_refinement_expression ~view expression =
+  (* Refinements are propositions about program values, not distinct logical
+     sorts.  In particular, a function mentioned in a predicate may have a
+     refined domain or result in the program type, while applications in the
+     predicate IR operate on their carrier types.  Preserve the arrow shape
+     but erase refinements along it before validating the lowered term. *)
+  let rec logical_type type_ =
+    match get_desc type_ with
+    | Trefine { ref_skeleton; _ } -> logical_type ref_skeleton
+    | Tarrow (label, argument, result, commu) ->
+      Btype.newgenty
+        (Tarrow
+           ( label,
+             logical_type argument,
+             logical_type result,
+             commu ))
+    | Tpoly (body, variables) ->
+      Btype.newgenty (Tpoly (logical_type body, variables))
+    | _ -> type_
+  in
   let variable_binder pattern =
     match pattern.pat_desc with
-    | Tpat_var { id; _ } -> { rb_id = id; rb_type = pattern.pat_type }
+    | Tpat_var { id; _ } ->
+      { rb_id = id; rb_type = logical_type pattern.pat_type }
+    | Tpat_any ->
+      { rb_id = Ident.create_local "*ignored-refinement-let*";
+        rb_type = logical_type pattern.pat_type;
+      }
     | _ ->
       unsupported_refinement_expression expression
         "Non-variable binding patterns"
@@ -14374,7 +14406,8 @@ let lower_refinement_expression ~view expression =
     let lower_value = lower ~function_head:false bound in
     let create rexp_desc =
       Refinement.create
-        ~loc:expression.exp_loc ~type_:expression.exp_type rexp_desc
+        ~loc:expression.exp_loc ~type_:(logical_type expression.exp_type)
+        rexp_desc
     in
     match expression.exp_desc with
     | Texp_ident { path = Pident id; _ } when Ident.Set.mem id bound ->
@@ -14462,8 +14495,56 @@ let lower_refinement_expression ~view expression =
            ( lower_value condition,
              lower_value ifso,
              Option.map lower_value ifnot ))
+    | Texp_match (scrutinee, _, cases, [], Total) ->
+      let lower_argument pattern =
+        match pattern.pat_desc with
+        | Tpat_any -> None
+        | Tpat_var { id; _ } ->
+          Some { rb_id = id; rb_type = logical_type pattern.pat_type }
+        | _ ->
+          unsupported_refinement_expression expression
+            "Nested or aliased match patterns"
+      in
+      let lower_case case =
+        if Option.is_some case.c_guard then
+          unsupported_refinement_expression expression "Guarded match cases";
+        let pattern =
+          match case.c_lhs.pat_desc with
+          | Tpat_value pattern -> (pattern :> value general_pattern)
+          | _ ->
+            unsupported_refinement_expression expression
+              "Exception match cases"
+        in
+        match pattern.pat_desc with
+        | Tpat_construct (_, constructor, _, arguments, _) ->
+          let arguments =
+            List.map (fun (_, pattern) -> lower_argument pattern) arguments
+          in
+          let body_bound =
+            List.fold_left
+              (fun bound -> function
+                | None -> bound
+                | Some binder -> Ident.Set.add binder.rb_id bound)
+              bound arguments
+          in
+          { rcase_constructor =
+              { rconstr_type_path = cstr_res_type_path constructor;
+                rconstr_name = constructor.cstr_name;
+              };
+            rcase_arguments = arguments;
+            rcase_body =
+              lower ~function_head:false body_bound case.c_rhs;
+          }
+        | _ ->
+          unsupported_refinement_expression expression
+            "Match cases other than constructor patterns"
+      in
+      create
+        (Rexp_match
+           (lower_value scrutinee, List.map lower_case cases))
     | Texp_match _ ->
-      unsupported_refinement_expression expression "A match expression"
+      unsupported_refinement_expression expression
+        "A partial, effectful, or guarded match expression"
     | _ ->
       unsupported_refinement_expression expression "This expression form"
   in

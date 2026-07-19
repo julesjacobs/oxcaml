@@ -83,7 +83,7 @@ type unsupported = int{ match _ with 0 -> true | _ -> false }
 Line 1, characters 24-59:
 1 | type unsupported = int{ match _ with 0 -> true | _ -> false }
                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: A match expression is not yet supported in refinements.
+Error: Match cases other than constructor patterns is not yet supported in refinements.
 |}]
 
 type restored_after_lowering_error = int{ ((_ : int) = _) }
