@@ -36,6 +36,7 @@ type result =
   { verdict : verdict;
     location : Location.t;
     detail : string option;
+    unused_facts : int list;
   }
 
 let string_of_verdict = function
@@ -1221,12 +1222,21 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
   let goal_term, goal_sort = emit_expression context variables goal in
   expect_bool goal.rexp_loc goal_sort;
   let buffer = Buffer.create 1024 in
+  begin
+    match query with
+    | Prove ->
+      Buffer.add_string buffer
+        "(set-option :produce-unsat-cores true)\n"
+    | Disprove -> ()
+  end;
   emit_datatypes context vc.location buffer;
   emit_references context vc.location buffer;
   emit_variables context vc.location buffer variables;
-  List.iter
-    (fun fact ->
-      Buffer.add_string buffer ("(assert (= " ^ fact ^ " true))\n"))
+  List.iteri
+    (fun index fact ->
+      Buffer.add_string buffer
+        ("(assert (! (= " ^ fact ^ " true) :named h_"
+         ^ string_of_int index ^ "))\n"))
     fact_terms;
   let query_term =
     match query with
@@ -1235,6 +1245,11 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
   in
   Buffer.add_string buffer ("(assert " ^ query_term ^ ")\n");
   Buffer.add_string buffer "(check-sat)\n";
+  begin
+    match query with
+    | Prove -> Buffer.add_string buffer "(get-unsat-core)\n"
+    | Disprove -> ()
+  end;
   Buffer.contents buffer
 
 let emit ~query ~env (vc : Vox_vc.t) =
@@ -1304,48 +1319,160 @@ let line_starts_with prefix line =
   String.length line >= prefix_length
   && String.equal (String.sub line 0 prefix_length) prefix
 
-let output_has_error output =
+let contains_substring text substring =
+  let text_length = String.length text in
+  let substring_length = String.length substring in
+  let rec loop index =
+    if index + substring_length > text_length then false
+    else if String.sub text index substring_length = substring then true
+    else loop (index + 1)
+  in
+  substring_length = 0 || loop 0
+
+let is_error_line line =
+  line_starts_with "(error" line || line_starts_with "error" line
+
+let is_unavailable_core_error ~query ~status line =
+  is_error_line line
+  &&
+  match query, status with
+  | Prove, (Sat | Unknown) ->
+    contains_substring line "unsat core is not available"
+  | (Prove, Unsat) | Disprove, _ -> false
+
+let output_has_unavailable_core_error ~query ~status output =
+  String.split_on_char '\n' output
+  |> List.exists (fun line ->
+       is_unavailable_core_error ~query ~status (String.trim line))
+
+let output_has_error ~query ~status output =
   String.split_on_char '\n' output
   |> List.exists (fun line ->
        let line = String.trim line in
-       line_starts_with "(error" line || line_starts_with "error" line)
+       is_error_line line
+       && not (is_unavailable_core_error ~query ~status line))
 
 let detail_or fallback output =
   if String.equal (String.trim output) "" then fallback else output
 
-let solver_result ~backend ~query process =
+let fact_id name =
+  let prefix = "h_" in
+  let prefix_length = String.length prefix in
+  let length = String.length name in
+  if length <= prefix_length || not (line_starts_with prefix name) then None
+  else
+    let rec all_digits index =
+      if index = length then true
+      else
+        match name.[index] with
+        | '0' .. '9' -> all_digits (index + 1)
+        | _ -> false
+    in
+    if all_digits prefix_length then
+      int_of_string_opt
+        (String.sub name prefix_length (length - prefix_length))
+    else None
+
+let parse_unsat_core ~fact_count output =
+  let payload =
+    String.split_on_char '\n' output
+    |> List.filter_map (fun line ->
+         let line = String.trim line in
+         match line with
+         | "" | "sat" | "unsat" | "unknown" -> None
+         | _ -> Some line)
+    |> String.concat " "
+    |> String.trim
+  in
+  let length = String.length payload in
+  if length < 2 || payload.[0] <> '(' || payload.[length - 1] <> ')'
+  then None
+  else
+    let contents = String.sub payload 1 (length - 2) in
+    if String.contains contents '(' || String.contains contents ')' then None
+    else
+      let names =
+        String.map
+          (function
+            | '\t' | '\r' -> ' '
+            | character -> character)
+          contents
+        |> String.split_on_char ' '
+        |> List.filter (fun name -> not (String.equal name ""))
+      in
+      let ids = List.map fact_id names in
+      if
+        List.exists Option.is_none ids
+        || List.exists
+             (function
+               | Some id -> id < 0 || id >= fact_count
+               | None -> false)
+             ids
+      then None
+      else
+        let used = List.filter_map (fun id -> id) ids in
+        Some
+          (List.init fact_count Fun.id
+           |> List.filter (fun id -> not (List.mem id used)))
+
+let solver_result ~backend ~query ~fact_count process =
   if process.status = 127 then
     `Final
       ( Unavailable,
-        Some (detail_or "solver command unavailable (exit 127)" process.output)
+        Some (detail_or "solver command unavailable (exit 127)" process.output),
+        []
       )
   else if process.status = 124 || process.status = 137 then
     `Final
       ( Solver_error,
-        Some (detail_or "solver timed out" process.output) )
+        Some (detail_or "solver timed out" process.output),
+        [] )
   else if
     backend = `Oxsmt && process.status = oxsmt_unsupported_input_exit_code
   then `Open "unknown"
-  else if process.status <> 0 then
-    `Final
-      ( Solver_error,
-        Some
-          (detail_or
-             ("solver exited " ^ string_of_int process.status)
-             process.output) )
-  else if output_has_error process.output then
-    `Final (Solver_error, Some process.output)
   else
-    match parse_status process.output with
-    | None -> `Final (Solver_error, Some process.output)
-    | Some Unsat ->
-      begin
-        match query with
-        | Prove -> `Final (Proved, None)
-        | Disprove -> `Final (Disproved, None)
-      end
-    | Some Sat -> `Open "sat"
-    | Some Unknown -> `Open "unknown"
+    let status = parse_status process.output in
+    let expected_unavailable_core_exit =
+      match status with
+      | Some status ->
+        process.status = 1
+        && output_has_unavailable_core_error ~query ~status process.output
+        && not (output_has_error ~query ~status process.output)
+      | None -> false
+    in
+    if process.status <> 0 && not expected_unavailable_core_exit then
+      `Final
+        ( Solver_error,
+          Some
+            (detail_or
+               ("solver exited " ^ string_of_int process.status)
+               process.output),
+          [] )
+    else
+      match status with
+      | None -> `Final (Solver_error, Some process.output, [])
+      | Some status when output_has_error ~query ~status process.output ->
+        `Final (Solver_error, Some process.output, [])
+      | Some Unsat ->
+        begin
+          match query with
+          | Prove ->
+            begin
+              match parse_unsat_core ~fact_count process.output with
+              | Some unused_facts ->
+                `Final (Proved, None, unused_facts)
+              | None ->
+                `Final
+                  ( Solver_error,
+                    Some
+                      ("solver returned unsat without a valid unsat core:\n"
+                       ^ process.output),
+                    [] )
+            end
+          | Disprove -> `Final (Disproved, None, [])
+        end
+      | Some Sat -> `Open "sat"
+      | Some Unknown -> `Open "unknown"
 
 let backend_name = function
   | `Z3 -> "z3"
@@ -1356,8 +1483,8 @@ let default_input_mode = function
 
 let discharge ~backend ~command ?input_mode ?(timeout_seconds = 30) ~env
     (vc : Vox_vc.t) =
-  let result verdict ?detail () =
-    { verdict; location = vc.location; detail }
+  let result verdict ?detail ?(unused_facts = []) () =
+    { verdict; location = vc.location; detail; unused_facts }
   in
   if timeout_seconds <= 0 then
     result Solver_error ~detail:"timeout must be positive" ()
@@ -1382,16 +1509,19 @@ let discharge ~backend ~command ?input_mode ?(timeout_seconds = 30) ~env
           let process =
             run_solver ~command ~input_mode ~timeout_seconds contents
           in
-          solver_result ~backend ~query process
+          solver_result ~backend ~query ~fact_count:(List.length vc.facts)
+            process
       in
       begin
         try
           match run Prove with
-          | `Final (verdict, detail) -> result verdict ?detail ()
+          | `Final (verdict, detail, unused_facts) ->
+            result verdict ?detail ~unused_facts ()
           | `Open positive_status ->
             begin
               match run Disprove with
-              | `Final (verdict, detail) -> result verdict ?detail ()
+              | `Final (verdict, detail, unused_facts) ->
+                result verdict ?detail ~unused_facts ()
               | `Open negative_status ->
                 result Not_proved
                   ~detail:
@@ -1404,6 +1534,7 @@ let discharge ~backend ~command ?input_mode ?(timeout_seconds = 30) ~env
         { verdict = Solver_error;
           location = emission_error.location;
           detail = Some emission_error.message;
+          unused_facts = [];
         }
       | exception_ ->
         result Solver_error ~detail:(Printexc.to_string exception_) ()

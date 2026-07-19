@@ -87,8 +87,7 @@ let selection_of_string = function
     Result.map (fun backend -> Single backend) (backend_of_string backend)
 
 let capabilities = function
-  | Lean -> { fact_usage = Fact_usage }
-  | Z3 | Oxsmt -> { fact_usage = No_fact_usage }
+  | Lean | Z3 | Oxsmt -> { fact_usage = Fact_usage }
 
 let resolve_command ~explicit ~environment ~fallback =
   match explicit with
@@ -167,7 +166,7 @@ module Z3_backend = struct
       verdict = verdict_of_smt smt.verdict;
       location = smt.location;
       detail = smt.detail;
-      unused_facts = None;
+      unused_facts = Some smt.unused_facts;
     }
 end
 
@@ -185,7 +184,7 @@ module Oxsmt_backend = struct
       verdict = verdict_of_smt smt.verdict;
       location = smt.location;
       detail = smt.detail;
-      unused_facts = None;
+      unused_facts = Some smt.unused_facts;
     }
 end
 

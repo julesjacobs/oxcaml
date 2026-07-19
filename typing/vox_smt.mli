@@ -32,6 +32,9 @@ type result =
   { verdict : verdict;
     location : Location.t;
     detail : string option;
+    (** Empty unless [verdict = Proved].  SMT backends derive this
+        conservatively from the proof query's unsat core. *)
+    unused_facts : int list;
   }
 
 val string_of_verdict : verdict -> string

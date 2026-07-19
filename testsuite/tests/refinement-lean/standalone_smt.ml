@@ -117,6 +117,19 @@ let arithmetic_and_booleans =
   in
   vc ~facts:[fact x_value] (conjunction arithmetic booleans)
 
+let unused_fact_usage =
+  let x_value = equal int_type (bound x) (int 4) in
+  vc ~facts:[fact x_value; fact (bool true)]
+    (greater (bound x) (int 0))
+
+let used_everywhere =
+  let lower = less_equal (int 0) (bound x) in
+  let upper = less_equal (bound x) (int 0) in
+  vc ~facts:[fact lower; fact upper]
+    (equal int_type (bound x) (int 0))
+
+let open_goal = vc (free bool_type "open_predicate")
+
 let ground_defeq_shape =
   let function_type = arrow int_type int_type in
   let function_ = free function_type "successor_def" in
@@ -293,6 +306,9 @@ let shell_command script = "/bin/sh -c " ^ Filename.quote script
 let fixed_status status =
   shell_command ("printf '" ^ status ^ "\\n'")
 
+let fixed_unsat_core names =
+  fixed_status ("unsat\\n(" ^ String.concat " " names ^ ")")
+
 let discharge ?(backend = `Z3) command condition =
   Vox_smt.discharge ~backend ~command:(Some command) ~env condition
 
@@ -303,11 +319,15 @@ let () =
   assert (missing.verdict = Vox_smt.Unavailable);
   let unknown = discharge (fixed_status "unknown") arithmetic_and_booleans in
   assert (unknown.verdict = Vox_smt.Not_proved);
+  assert (unknown.unused_facts = []);
   assert
     (unknown.detail
      = Some "prove query: unknown; disprove query: unknown");
-  let proved = discharge (fixed_status "unsat") arithmetic_and_booleans in
+  let proved =
+    discharge (fixed_unsat_core ["h_0"]) arithmetic_and_booleans
+  in
   assert (proved.verdict = Vox_smt.Proved);
+  assert (proved.unused_facts = []);
   let open_ = discharge (fixed_status "sat") arithmetic_and_booleans in
   assert (open_.verdict = Vox_smt.Not_proved);
   let discriminate =
@@ -329,6 +349,24 @@ let () =
       arithmetic_and_booleans
   in
   assert (false_status.verdict = Vox_smt.Solver_error);
+  let unused =
+    discharge (fixed_unsat_core []) arithmetic_and_booleans
+  in
+  assert (unused.verdict = Vox_smt.Proved);
+  assert (unused.unused_facts = [0]);
+  let malformed_core =
+    discharge (fixed_status "unsat\\n(not_a_fact)")
+      arithmetic_and_booleans
+  in
+  assert (malformed_core.verdict = Vox_smt.Solver_error);
+  let unavailable_core_exit =
+    shell_command
+      "if grep -Fq '(get-unsat-core)'; then \
+       printf 'sat\\n(error \"line 1: unsat core is not available\")\\n'; \
+       exit 1; else printf 'sat\\n'; fi"
+  in
+  let not_proved = discharge unavailable_core_exit open_goal in
+  assert (not_proved.verdict = Vox_smt.Not_proved);
   print_endline
     "verdicts: proved/disproved/unknown/error/unavailable distinguished";
   let unsupported =
@@ -364,16 +402,16 @@ let () =
      = Vox_backend.Fact_usage);
   assert
     ((Vox_backend.capabilities Vox_backend.Z3).fact_usage
-     = Vox_backend.No_fact_usage);
+     = Vox_backend.Fact_usage);
   assert
     ((Vox_backend.capabilities Vox_backend.Oxsmt).fact_usage
-     = Vox_backend.No_fact_usage);
+     = Vox_backend.Fact_usage);
   print_endline "backend selection and usage capabilities checked";
   if Vox_lean.lean_available () then begin
     let cross =
       Vox_backend.discharge ~selection:Vox_backend.Cross
         ~smt_solver:(Some (fixed_status "unknown"))
-        ~oxsmt_solver:(Some (fixed_status "unsat")) ~env
+        ~oxsmt_solver:(Some (fixed_unsat_core [])) ~env
         arithmetic_and_booleans
     in
     assert (cross.verdict = Vox_backend.Solver_error);
@@ -392,13 +430,13 @@ let () =
         assert (z3.unused_facts = None);
         assert (oxsmt.backend = Vox_backend.Oxsmt);
         assert (oxsmt.verdict = Vox_backend.Proved);
-        assert (oxsmt.unused_facts = None)
+        assert (oxsmt.unused_facts = Some [0])
       | _ -> failwith "cross backend result order changed"
     end;
     let all_proved =
       Vox_backend.discharge ~selection:Vox_backend.Cross
-        ~smt_solver:(Some (fixed_status "unsat"))
-        ~oxsmt_solver:(Some (fixed_status "unsat")) ~env
+        ~smt_solver:(Some (fixed_unsat_core ["h_0"]))
+        ~oxsmt_solver:(Some (fixed_unsat_core ["h_0"])) ~env
         arithmetic_and_booleans
     in
     assert (all_proved.verdict = Vox_backend.Proved);
@@ -412,11 +450,35 @@ let () =
   | Some command ->
     let result =
       Vox_smt.discharge ~backend:`Z3 ~command:(Some command)
-        ~env arithmetic_and_booleans
+        ~env unused_fact_usage
     in
     begin
       match result.verdict with
       | Vox_smt.Unavailable ->
         failwith "VOX_SMT_TEST_SOLVER was configured but is unavailable"
-      | _ -> print_endline "z3 subprocess: completed"
-    end
+      | Vox_smt.Proved -> assert (result.unused_facts = [1])
+      | _ -> failwith "z3 did not prove the unused-fact test"
+    end;
+    let all_used =
+      Vox_smt.discharge ~backend:`Z3 ~command:(Some command)
+        ~env used_everywhere
+    in
+    begin
+      match all_used.verdict with
+      | Vox_smt.Proved -> assert (all_used.unused_facts = [])
+      | _ -> failwith "z3 did not prove the all-facts-used test"
+    end;
+    print_endline "z3 subprocess: usage cores checked"
+
+let () =
+  let binary = "/j/office/app/z3/prod/4.8.5/install/bin/z3" in
+  if Sys.file_exists binary then begin
+    let command = binary ^ " -in" in
+    let discharge condition =
+      Vox_smt.discharge ~backend:`Z3 ~command:(Some command) ~env condition
+    in
+    let disproved = discharge (vc (bool false)) in
+    assert (disproved.verdict = Vox_smt.Disproved);
+    let not_proved = discharge open_goal in
+    assert (not_proved.verdict = Vox_smt.Not_proved)
+  end

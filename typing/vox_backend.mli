@@ -15,6 +15,10 @@ type verdict =
   | Solver_error
   | Unavailable
 
+(** Fact usage is conservative.  An SMT unsat core need not be minimal, so a
+    core may keep an unnecessary fact visible.  Only facts outside the
+    solver-returned core are unused: a fade may be missed, but never
+    invented. *)
 type fact_usage_capability =
   | Fact_usage
   | No_fact_usage
