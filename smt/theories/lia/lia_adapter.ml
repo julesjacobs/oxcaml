@@ -257,6 +257,12 @@ let notify_eq t ~edge_id eq =
   guard t (fun () -> Lia.notify_equality t.lia eq ~premise:(Fabric.Fabric edge_id))
 ;;
 
+(* rung 2 (OXSMT_LIA_MODELFIND): receive the combinator's pinned Int-disequality snapshot
+   and forward it to the engine as a dive HINT (see {!Lia.set_pin_hint}). Read-only w.r.t.
+   the combinator; no trail/premise effect. The combinator only calls this on the
+   modelfind ON path, so the OFF path never installs a hint (byte-identical). *)
+let note_disequalities t pairs = guard t (fun () -> Lia.set_pin_hint t.lia pairs)
+
 (* LIA parity with {!Euf_adapter}'s codex AP4 tripwire: an EMPTY premise set is an
    unconditional entailment (for a propagation) or an unconditional [false] (for a
    conflict) — a soundness bug either way. UNCONDITIONAL guard, not [assert]: like AP4 it

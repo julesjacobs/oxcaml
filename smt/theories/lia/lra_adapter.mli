@@ -17,6 +17,10 @@ val fabric_verify
 
 val notify_eq : t -> edge_id:Fabric.edge_id -> Term.t -> unit
 
+(** No-op: OXSMT_LIA_MODELFIND is Int-only; LRA does not model-find. Present only to
+    satisfy the shared [FABRIC_CHILD] surface. *)
+val note_disequalities : t -> (Term.t * Term.t) list -> unit
+
 type checkpoint
 
 val checkpoint : t -> checkpoint

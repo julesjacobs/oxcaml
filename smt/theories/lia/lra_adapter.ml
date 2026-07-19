@@ -28,8 +28,7 @@ type t =
   ; disequalities : disequality Dynarray.t
   ; reasons : Lit.t Dynarray.t
   ; mutable frames : (int * int) list
-  ; mutable last_conflict :
-      (Rational.t list * Fabric.justification list) option
+  ; mutable last_conflict : (Rational.t list * Fabric.justification list) option
   }
 
 let create ctx _env =
@@ -126,27 +125,17 @@ let register_atom t atom term =
 ;;
 
 let constraint_of_linear linear comparison =
-  { Lra.coeffs = linear.coeffs
-  ; comparison
-  ; rhs = Rational.neg linear.constant
-  }
+  { Lra.coeffs = linear.coeffs; comparison; rhs = Rational.neg linear.constant }
 ;;
 
 let assert_convex t linear comparison premise =
-  match
-    Lra.assert_constraint t.lra (constraint_of_linear linear comparison) ~premise
-  with
+  match Lra.assert_constraint t.lra (constraint_of_linear linear comparison) ~premise with
   | Lra.Asserted | Lra.Immediate_conflict _ -> ()
   | Lra.Split _ -> failwith "Lra_adapter: convex constraint unexpectedly requested split"
 ;;
 
 let record_disequality t ~eq ~lhs ~rhs linear premise =
-  match
-    Lra.assert_constraint
-      t.lra
-      (constraint_of_linear linear Lra.Ne)
-      ~premise
-  with
+  match Lra.assert_constraint t.lra (constraint_of_linear linear Lra.Ne) ~premise with
   | Lra.Split (lt, gt) -> Dynarray.add_last t.disequalities { eq; lhs; rhs; lt; gt }
   | Lra.Asserted | Lra.Immediate_conflict _ ->
     failwith "Lra_adapter: disequality was silently made convex"
@@ -171,8 +160,7 @@ let assert_lit t lit =
 ;;
 
 let checked_premises premises =
-  if premises = []
-  then failwith "Lra_adapter: empty conflict premise set (unsound)";
+  if premises = [] then failwith "Lra_adapter: empty conflict premise set (unsound)";
   premises
 ;;
 
@@ -279,19 +267,12 @@ let fabric_verify t term value lower upper =
     (try
        let value = Rational.of_string value in
        match
-         ( Lra.oriented_bound
-             t.lra
-             ~coeffs:linear.coeffs
-             ~constant:linear.constant
-             `Lower
-         , Lra.oriented_bound
-             t.lra
-             ~coeffs:linear.coeffs
-             ~constant:linear.constant
-             `Upper )
+         ( Lra.oriented_bound t.lra ~coeffs:linear.coeffs ~constant:linear.constant `Lower
+         , Lra.oriented_bound t.lra ~coeffs:linear.coeffs ~constant:linear.constant `Upper
+         )
        with
-       | Some (Fabric.Real actual_lower, lower_value),
-         Some (Fabric.Real actual_upper, upper_value) ->
+       | ( Some (Fabric.Real actual_lower, lower_value)
+         , Some (Fabric.Real actual_upper, upper_value) ) ->
          Lit.equal actual_lower lower_lit
          && Lit.equal actual_upper upper_lit
          && Rational.equal lower_value value
@@ -315,6 +296,10 @@ let notify_eq t ~edge_id eq =
     else assert_convex t linear Lra.Eq (Fabric.Fabric edge_id)
   | _ -> failwith "Lra_adapter.notify_eq: expected a Real equality"
 ;;
+
+(* rung 2 (OXSMT_LIA_MODELFIND): the disequality-aware dive is Int-only; LRA does not
+   model-find. No-op on the shared [FABRIC_CHILD] surface. *)
+let note_disequalities _t _ = ()
 
 let model t =
   Lra.model t.lra
@@ -340,10 +325,10 @@ let pop t n =
   let rec unwind k frames disequalities reasons =
     if k = 0
     then disequalities, reasons, frames
-    else
+    else (
       match frames with
       | [] -> invalid_arg "Lra_adapter.pop: too many frames"
-      | (d, r) :: rest -> unwind (k - 1) rest d r
+      | (d, r) :: rest -> unwind (k - 1) rest d r)
   in
   let d, r, frames =
     unwind n t.frames (Dynarray.length t.disequalities) (Dynarray.length t.reasons)
@@ -360,8 +345,7 @@ type checkpoint =
   }
 
 let checkpoint t =
-  if t.frames <> []
-  then failwith "Lra_adapter.checkpoint: expected a single base frame";
+  if t.frames <> [] then failwith "Lra_adapter.checkpoint: expected a single base frame";
   { engine = Lra.checkpoint t.lra
   ; disequalities = Dynarray.length t.disequalities
   ; reasons = Dynarray.length t.reasons

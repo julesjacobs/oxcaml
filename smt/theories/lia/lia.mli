@@ -215,6 +215,13 @@ val cube_model : 'tok t -> (Term.t * int) list option
     does not converge — a disequality-AWARE dive is the follow-up. *)
 val model_find : ?node_budget:int -> 'tok t -> bool
 
+(** [set_pin_hint t pairs] installs a READ-ONLY snapshot of the combinator's pinned Int
+    disequality pairs [(px, py)] (meaning [px <> py]) for the next {!model_find} dive to
+    steer branching away from equating them. A hint only — soundness is unchanged (the
+    combinator's [find_disagreement] and the session R1 check validate every model); pairs
+    whose terms are not problem variables are ignored by the dive. Empty by default. *)
+val set_pin_hint : 'tok t -> (Term.t * Term.t) list -> unit
+
 (** [model t] is the integer assignment of the problem variables; valid only after
     {!solve_integer} returned [Int_sat] or {!cube_model} returned [Some] (raises
     {!Failure} if a value is non-integral and no cube model is stashed). *)

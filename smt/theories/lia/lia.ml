@@ -152,6 +152,12 @@ type 'tok t =
          reads it immediately after the Final->Sat). Bigint-valued (convert-class models
          carry >int63 bit-field values). Cleared at the start of every [check], exactly
          like [last_cube_model], so a stale dive point can never satisfy a later Sat. *)
+  ; mutable pin_hint : (Term.t * Term.t) list
+      (* rung 2 (OXSMT_LIA_MODELFIND): a READ-ONLY snapshot of the combinator's pinned Int
+         disequality pairs, set by {!set_pin_hint} before a Final dive. {!model_find} uses
+         it to steer branching so the returned model separates px ≠ py — a HINT ONLY (the
+         combinator's find_disagreement + the session R1 check still validate every
+         model). Empty on the OFF path (never set), so OFF is byte-identical. *)
   ; mutable eq_frames : (Term.t * Term.t * 'tok) list list
       (* push/pop stack (head = current frame) of asserted positive Int equalities as
          [(lhs, rhs, premise)], mirroring [report_frames]' framing so a [pop] drops
@@ -242,6 +248,7 @@ let create ctx =
   ; overflows = 0
   ; last_cube_model = None
   ; last_modelfind_model = None
+  ; pin_hint = []
   ; eq_frames = [ [] ]
   ; false_frames = [ [] ]
   ; cube_tried = false
@@ -1864,6 +1871,55 @@ let one_half =
   Rational.of_big_frac ~num:Oxsmt_core.Bigint.one ~den:(Oxsmt_core.Bigint.of_int 2)
 ;;
 
+(* rung 2: install the combinator's pinned-disequality snapshot for the next {!model_find}
+   dive. Pure setter; empty (never called) on the OFF path. *)
+let set_pin_hint t pairs = t.pin_hint <- pairs
+
+(* rung 2: the first pinned pair [(px, py)] the CURRENT integral simplex assignment
+   equates (both are problem vars with the same integer value), as [(id_of_px, value)] for
+   the separating branch. [None] when every pin is separated (or its terms are not problem
+   vars — those are left to the combinator). Only meaningful at an integral vertex. *)
+let first_violated_pin t =
+  let pv term = Term.Table.find_opt t.var_of_term term in
+  let const (term : Term.t) =
+    match term.Term.node with
+    | Term.Int_const k -> Some k
+    | _ -> None
+  in
+  let value_big id = Rational.floor_bigint (Delta.c_part (Simplex.value t.simplex id)) in
+  let rec go = function
+    | [] -> None
+    | (a, b) :: rest ->
+      let cand =
+        match pv a, pv b with
+        | Some ida, Some idb when ida <> idb ->
+          (* var <> var: separate the first var from their shared value. *)
+          if Rational.compare
+               (Delta.c_part (Simplex.value t.simplex ida))
+               (Delta.c_part (Simplex.value t.simplex idb))
+             = 0
+          then Some (ida, value_big ida)
+          else None
+        | Some ida, _ ->
+          (* var <> const (the convert bit-field shape): separate the var from the const. *)
+          (match const b with
+           | Some k ->
+             if Oxsmt_core.Bigint.equal (value_big ida) k then Some (ida, k) else None
+           | None -> None)
+        | _, Some idb ->
+          (match const a with
+           | Some k ->
+             if Oxsmt_core.Bigint.equal (value_big idb) k then Some (idb, k) else None
+           | None -> None)
+        | None, None -> None
+      in
+      (match cand with
+       | Some _ -> cand
+       | None -> go rest)
+  in
+  go t.pin_hint
+;;
+
 (* Cut-free, arbitrary-precision, round-to-nearest DIVING branch-and-bound model finder
    (the engine behind [Lia_adapter]'s OXSMT_LIA_MODELFIND mode; the env gate lives in the
    adapter, this function is env-independent public API — same scope discipline as
@@ -1906,15 +1962,53 @@ let model_find ?(node_budget = 200_000) t =
      rather than trust the feasibility gate (mirrors {!solve_integer}). *)
   t.check_dirty <- true;
   let nodes = ref 0 in
-  let rec dfs () =
+  (* GREEDY descent (linear, not backtracking DFS — the convert class's ~381 interacting
+     disequalities make a full backtracking search explode). Each step COMMITS one bound
+     (pushed, popped only at the very end): an integer-branch bound for a fractional var,
+     or — once the vertex is integral — a SEPARATING bound for the first pinned
+     [px <> const] the model equates. A commit has only LOCAL 2-way retry (preferred side;
+     the other side on infeasibility); if BOTH sides are infeasible the whole dive fails
+     (no cross-commit backtracking) and the caller falls back — sound, since a failed dive
+     returns [false]. The integral, all-pins-separated leaf is where the model is captured
+     (bounds still in effect). *)
+  let committed = ref 0 in
+  (* Commit ONE bound with a leaf-local 2-way retry: run [try1] (a single [assert_upper] /
+     [assert_lower]); if the simplex is then infeasible, undo and run [try2]; if BOTH are
+     infeasible return [`Dead] (the caller fails the whole dive — no cross-commit undo). A
+     surviving commit stays pushed until the end. *)
+  let commit ~try1 ~try2 =
+    Simplex.push t.simplex;
+    incr committed;
+    try1 ();
     match Simplex.check t.simplex with
-    | Some _ -> `Unsat
+    | None -> `Ok
+    | Some _ ->
+      Simplex.pop t.simplex 1;
+      decr committed;
+      Simplex.push t.simplex;
+      incr committed;
+      try2 ();
+      (match Simplex.check t.simplex with
+       | None -> `Ok
+       | Some _ ->
+         Simplex.pop t.simplex 1;
+         decr committed;
+         `Dead)
+  in
+  (* Phase 1: BACKTRACKING arithmetic solve (round-to-nearest). Arithmetic needs 2-way
+     backtracking (greedy rounding dead-ends); on success it LEAVES the winning path's
+     bounds pushed, so the integral vertex — and the model / pin values read from it —
+     survive into phase 2. [`Ok] = integral vertex reached (winning bounds left in
+     [committed]); [`Fail] = infeasible or budget, this call's own bounds popped. *)
+  let rec arith_solve () =
+    match Simplex.check t.simplex with
+    | Some _ -> `Fail
     | None ->
       (match first_non_integer t with
-       | None -> `Sat (extract_model_bigint t)
+       | None -> `Ok
        | Some (_term, id, d) ->
          if !nodes >= node_budget
-         then `Unknown
+         then `Fail
          else (
            incr nodes;
            let cpart = Delta.c_part d in
@@ -1922,54 +2016,73 @@ let model_find ?(node_budget = 200_000) t =
            let fp1 = Oxsmt_core.Bigint.add f Oxsmt_core.Bigint.one in
            let lo = Delta.of_rat (Rational.of_bigint f) in
            let hi = Delta.of_rat (Rational.of_bigint fp1) in
-           (* frac = cpart - floor(cpart) ∈ [0,1); nearest integer is f+1 iff frac > 1/2,
-                so try that half FIRST — the dive follows the LP relaxation. *)
            let frac = Rational.sub cpart (Rational.of_bigint f) in
            let ceil_first = Rational.compare frac one_half > 0 in
-           let try_upper () =
-             (* x <= f *)
+           let up () = ignore (Simplex.assert_lower t.simplex id hi (Branch id)) in
+           let dn () = ignore (Simplex.assert_upper t.simplex id lo (Branch id)) in
+           let try_side assert_fn =
              Simplex.push t.simplex;
-             let _ = Simplex.assert_upper t.simplex id lo (Branch id) in
-             let r = dfs () in
-             Simplex.pop t.simplex 1;
-             r
+             incr committed;
+             assert_fn ();
+             match arith_solve () with
+             | `Ok -> `Ok (* leave the winning bound pushed *)
+             | `Fail ->
+               Simplex.pop t.simplex 1;
+               decr committed;
+               `Fail
            in
-           let try_lower () =
-             (* x >= f+1 *)
-             Simplex.push t.simplex;
-             let _ = Simplex.assert_lower t.simplex id hi (Branch id) in
-             let r = dfs () in
-             Simplex.pop t.simplex 1;
-             r
-           in
-           let first, second =
-             if ceil_first then try_lower, try_upper else try_upper, try_lower
-           in
-           match first () with
-           | (`Sat _ | `Unknown) as r -> r
-           | `Unsat -> second ()))
+           let first, second = if ceil_first then up, dn else dn, up in
+           match try_side first with
+           | `Ok -> `Ok
+           | `Fail -> try_side second))
   in
-  match dfs () with
-  | r ->
-    (match Sys.getenv_opt "OXSMT_LIA_MODELFIND_DEBUG" with
-     | Some _ ->
-       Printf.eprintf
-         "modelfind: nodes=%d outcome=%s\n%!"
-         !nodes
-         (match r with
-          | `Sat _ -> "sat"
-          | `Unknown -> "unknown(budget)"
-          | `Unsat -> "unsat")
-     | None -> ());
-    (match r with
-     | `Sat m ->
-       t.last_modelfind_model <- Some m;
-       true
-     | `Unknown | `Unsat -> false)
-  | exception Rational.Overflow ->
-    Simplex.poison t.simplex;
-    t.overflows <- t.overflows + 1;
-    false
+  (* Phase 2: GREEDY pin repair. From an integral vertex, separate the first pinned
+     [x <> k] the model equates (convert's var-vs-const shape) by COMMITTING one bound (no
+     cross-pin backtracking — that explodes on ~381 pins), then re-run phase 1. When no
+     pin is violated the vertex is a genuine ℤ model of the asserted set AND the
+     disequalities. A [`Dead] commit (var forced onto [k]) fails the dive; the combinator
+     re-derives. *)
+  let rec repair () =
+    match arith_solve () with
+    | `Fail -> `Fail
+    | `Ok ->
+      (match first_violated_pin t with
+       | None -> `Sat (extract_model_bigint t)
+       | Some (id, k) ->
+         if !nodes >= node_budget
+         then `Fail
+         else (
+           incr nodes;
+           let vlo =
+             Delta.of_rat
+               (Rational.of_bigint (Oxsmt_core.Bigint.sub k Oxsmt_core.Bigint.one))
+           in
+           let vhi =
+             Delta.of_rat
+               (Rational.of_bigint (Oxsmt_core.Bigint.add k Oxsmt_core.Bigint.one))
+           in
+           let up () = ignore (Simplex.assert_lower t.simplex id vhi (Branch id)) in
+           let dn () = ignore (Simplex.assert_upper t.simplex id vlo (Branch id)) in
+           match commit ~try1:up ~try2:dn with
+           | `Ok -> repair ()
+           | `Dead -> `Fail))
+  in
+  let result =
+    match repair () with
+    | v -> v
+    | exception Rational.Overflow ->
+      Simplex.poison t.simplex;
+      t.overflows <- t.overflows + 1;
+      `Fail
+  in
+  (* Restore the simplex: pop every surviving committed bound (the model, if any, was
+     already captured into [last_modelfind_model] at the leaf). *)
+  if !committed > 0 then Simplex.pop t.simplex !committed;
+  match result with
+  | `Sat m ->
+    t.last_modelfind_model <- Some m;
+    true
+  | `Fail -> false
 ;;
 
 let solve_integer ?(budget = default_budget) t =

@@ -204,6 +204,7 @@ struct
   (* ADR-0014 Stage 2/3: a mock records no merges, carries no per-class data, reacts to no
      notification. *)
   let notify_eq () ~edge_id:_ _ = ()
+  let note_disequalities () _ = ()
 
   (* ADR-0014 Stage 4.2: the mock carries no backtrackable state, so checkpoint/rewind are
      no-ops (never exercised by these tests). *)
@@ -1293,6 +1294,7 @@ module Toy_lia = struct
 
   (* ADR-0014 Stage 2: the toy arithmetic child ignores hub notifications. *)
   let notify_eq _t ~edge_id:_ _ = ()
+  let note_disequalities _t _ = ()
 
   (* ADR-0014 Stage 4.2: no-op checkpoint/rewind (not exercised by these tests). *)
   type checkpoint = unit
@@ -1481,6 +1483,7 @@ module Toy_euf = struct
      the combinator's Stage-2 drain is a no-op here (the real EUF→LIA notification is
      driven in the real-adapter Stage-2 test). *)
   let notify_eq _t ~edge_id:_ _ = ()
+  let note_disequalities _t _ = ()
 
   (* ADR-0014 Stage 4.2: no-op checkpoint/rewind (not exercised by these tests). *)
   type checkpoint = unit

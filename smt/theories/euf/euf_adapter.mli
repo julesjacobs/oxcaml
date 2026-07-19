@@ -87,6 +87,10 @@ val class_tag : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t option
     the shared [FABRIC_CHILD] surface. *)
 val notify_eq : t -> edge_id:Oxsmt_core.Fabric.edge_id -> Oxsmt_core.Term.t -> unit
 
+(** No-op: the congruence child does not model-find (OXSMT_LIA_MODELFIND is
+    arithmetic-only). Present only to satisfy the shared [FABRIC_CHILD] surface. *)
+val note_disequalities : t -> (Oxsmt_core.Term.t * Oxsmt_core.Term.t) list -> unit
+
 (** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
     undo): delegate the engine state to {!Euf.checkpoint}/{!Euf.rewind_to_checkpoint} and
     invalidate the explain-cache entries snapshotted since the checkpoint. *)

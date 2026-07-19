@@ -238,6 +238,13 @@ module type FABRIC_CHILD = sig
       theory's own trail (F3 co-location). *)
   val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
 
+  (** rung 2 (OXSMT_LIA_MODELFIND): receive a READ-ONLY snapshot of the combinator's
+      pinned Int disequality pairs [(px, py)] ([px <> py]) so a model-finding child can
+      produce a candidate that already separates them. A HINT ONLY — soundness is
+      unchanged (the combinator's [find_disagreement] + the session R1 check validate
+      every model); a child that does not model-find ignores it. No premise/trail effect. *)
+  val note_disequalities : t -> (Term.t * Term.t) list -> unit
+
   (** ADR-0014 Stage 4.2: sub-frame checkpoint/rewind for chrono earliest-removed
       incremental undo (a watermark on the child's own undo trail; [rewind_to_checkpoint]
       drains it back without touching the frame stack). *)

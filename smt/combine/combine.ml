@@ -55,6 +55,14 @@ module type FABRIC_CHILD = sig
      theory's own trail (F3 co-location). *)
   val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
 
+  (* rung 2 (OXSMT_LIA_MODELFIND): receive a READ-ONLY snapshot of the currently pinned
+     Int DISEQUALITY pairs [(px, py)] (px ≠ py) held by the combinator, so a model-finding
+     child can produce a candidate that already separates them. A HINT ONLY — it must not
+     change the child's soundness (any model is still validated by the combinator's
+     [find_disagreement] + the session R1 check); a child that does not model-find
+     (EUF/LRA) ignores it. No premise/trail effect. *)
+  val note_disequalities : t -> (Term.t * Term.t) list -> unit
+
   (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind for the chrono earliest-removed
      incremental undo (a child's own trail watermark; restore drains it without touching
      the frame stack). *)
@@ -128,6 +136,21 @@ let model_repair_on =
   match Sys.getenv_opt "OXSMT_LIA_MODEL_REPAIR" with
   | Some ("0" | "false" | "no") -> false
   | Some _ | None -> true
+;;
+
+(* Disequality-aware LIA model-finder (OXSMT_LIA_MODELFIND; rung 2, charter
+   logs/convert-impl-report.md). Default OFF — byte-identical to trunk BY CONSTRUCTION:
+   when off, no pins are ever fed to the arithmetic child, so [B.note_disequalities] is
+   never called and the Final path is the exact trunk logic. When ON, before each Final
+   dive the combinator hands the arithmetic child the CURRENT pinned Int-disequality pairs
+   (READ-ONLY snapshot of [t.pins]) so its cut-free dive can produce a model that already
+   separates them, instead of the combinator resolving one pin per Final round-trip (which
+   does not converge on the convert class's ~381 pins). Read-once, same vocabulary as
+   {!fabric_off}. *)
+let modelfind_on =
+  match Sys.getenv_opt "OXSMT_LIA_MODELFIND" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
 ;;
 
 module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig
@@ -1400,6 +1423,16 @@ end = struct
        | Theory.Lemma l -> Theory.Lemma l
        | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
        | (Theory.Sat | Theory.Propagations []) as ra ->
+         (* rung 2 (OXSMT_LIA_MODELFIND): hand the arithmetic child a READ-ONLY snapshot
+            of the pinned Int-disequality pairs so its dive can separate them in one
+            solve. OFF path never runs this — byte-identical to trunk. *)
+         if modelfind_on
+         then
+           B.note_disequalities
+             t.b
+             (List.filter_map
+                (fun (p : pin) -> if p.psign then None else Some (p.px, p.py))
+                (all_pins t));
          (match realize t R.B (B.check_fabric t.b Theory.Final) with
           | Theory.Conflict e -> Theory.Conflict e
           | Theory.Split terms -> Theory.Split terms
