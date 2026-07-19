@@ -1183,6 +1183,86 @@ let data_shape location data =
     shape_constructors;
   }
 
+let check_abstract_inhabitance (context : context) location =
+  let trusted_constant key =
+    List.exists
+      (fun reference ->
+        match reference.reference_head, reference.reference_sort with
+        | (Rglobal path | Rapp path), Sdata reference_key
+          when String.equal key reference_key ->
+          begin match
+            Subst.Lazy.force_value_description
+              (Env.find_value path context.env)
+          with
+          | { val_kind = Val_reg _; _ } -> true
+          | { val_kind = Val_prim _ | Val_mut _ | Val_ivar _ | Val_self _
+                           | Val_anc _; _ } -> false
+          | exception Not_found -> false
+          end
+        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ -> false)
+      context.references
+  in
+  List.iter
+    (fun data ->
+      match definition location data with
+      | Abstract when not (trusted_constant data.data_key) ->
+        error location
+          "abstract type %s is not known to be inhabited"
+          (Path.name data.data_path)
+      | Abstract | Variant _ | Record _ -> ())
+    context.data
+
+let check_concrete_inhabitance (context : context) location =
+  let rec sort_is_inhabited inhabited = function
+    | Sint | Sbool -> true
+    | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
+    | Sdata key -> List.mem key inhabited
+    | Sarrow _ -> false
+  in
+  let inhabited =
+    ref
+      (List.filter_map
+         (fun data ->
+           match definition location data with
+           | Abstract -> Some data.data_key
+           | Variant _ | Record _ -> None)
+         context.data)
+  in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    let add key condition =
+      if condition && not (List.mem key !inhabited) then begin
+        inhabited := key :: !inhabited;
+        changed := true
+      end
+    in
+    List.iter
+      (fun data ->
+        let definition_is_inhabited =
+          match definition location data with
+          | Abstract -> true
+          | Variant constructors ->
+            List.exists
+              (fun constructor ->
+                List.for_all (sort_is_inhabited !inhabited)
+                  constructor.constructor_fields)
+              constructors
+          | Record fields ->
+            List.for_all
+              (fun (_, sort) -> sort_is_inhabited !inhabited sort)
+              fields
+        in
+        add data.data_key definition_is_inhabited)
+      context.data
+  done;
+  List.iter
+    (fun data ->
+      if not (List.mem data.data_key !inhabited) then
+        error location "datatype %s is not well-founded"
+          (Path.name data.data_path))
+    context.data
+
 type oxsmt_environment =
   { terms : Oxsmt_context.t;
     datatypes : (string * Oxsmt_datatype_defs.datatype) list;
@@ -1192,7 +1272,12 @@ type oxsmt_environment =
 
 let oxsmt_shapes context location =
   List.map tuple_shape context.tuples
-  @ List.map (data_shape location) context.data
+  @ List.filter_map
+      (fun data ->
+        match definition location data with
+        | Abstract -> None
+        | Variant _ | Record _ -> Some (data_shape location data))
+      context.data
   |> List.sort (fun left right ->
        String.compare left.shape_key right.shape_key)
 
@@ -1219,14 +1304,32 @@ let oxsmt_sort context sorts location = function
 
 let oxsmt_declare_datatypes session context location =
   let shapes = oxsmt_shapes context location in
-  let sorts =
+  let sort_declarations =
     List.map
       (fun shape ->
-        let symbol =
-          Oxsmt_session.declare_sort session shape.shape_name
-        in
-        shape.shape_key, Oxsmt_sort.datatype_ symbol)
+        ( shape.shape_key,
+          shape.shape_name,
+          fun symbol -> Oxsmt_sort.datatype_ symbol ))
       shapes
+    @ List.filter_map
+        (fun data ->
+          match definition location data with
+          | Abstract ->
+            Some
+              ( data.data_key,
+                data.data_name,
+                fun symbol -> Oxsmt_sort.uninterpreted symbol )
+          | Variant _ | Record _ -> None)
+        context.data
+    |> List.sort (fun (left, _, _) (right, _, _) ->
+         String.compare left right)
+  in
+  let sorts =
+    List.map
+      (fun (key, name, sort_of_symbol) ->
+        let symbol = Oxsmt_session.declare_sort session name in
+        key, sort_of_symbol symbol)
+      sort_declarations
   in
   let datatypes =
     List.map
@@ -1747,7 +1850,7 @@ let oxsmt_expression context environment expression =
               match definition expression.rexp_loc data with
               | Variant constructors ->
                 List.init (List.length constructors) Fun.id
-              | Record _ ->
+              | Abstract | Record _ ->
                 error expression.rexp_loc "match scrutinee is not a variant"
             in
             if actual_indices <> expected_indices then
@@ -1969,6 +2072,8 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   let expressions = facts @ [goal] in
   let context = { env; data = []; tuples = []; references = [] } in
   let variables = collect context expressions in
+  check_abstract_inhabitance context vc.location;
+  check_concrete_inhabitance context vc.location;
   let session = Oxsmt_session.create () in
   let terms = Oxsmt_session.context session in
   let sorts, datatypes =
@@ -2116,86 +2221,6 @@ let emit_datatypes context location buffer =
     Buffer.add_string buffer
       ("(declare-datatypes (" ^ sort_declarations ^ ") ("
        ^ constructor_lists ^ "))\n")
-
-let check_abstract_inhabitance context location =
-  let trusted_constant key =
-    List.exists
-      (fun reference ->
-        match reference.reference_head, reference.reference_sort with
-        | (Rglobal path | Rapp path), Sdata reference_key
-          when String.equal key reference_key ->
-          begin match
-            Subst.Lazy.force_value_description
-              (Env.find_value path context.env)
-          with
-          | { val_kind = Val_reg _; _ } -> true
-          | { val_kind = Val_prim _ | Val_mut _ | Val_ivar _ | Val_self _
-                           | Val_anc _; _ } -> false
-          | exception Not_found -> false
-          end
-        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ -> false)
-      context.references
-  in
-  List.iter
-    (fun data ->
-      match definition location data with
-      | Abstract when not (trusted_constant data.data_key) ->
-        error location
-          "abstract type %s is not known to be inhabited"
-          (Path.name data.data_path)
-      | Abstract | Variant _ | Record _ -> ())
-    context.data
-
-let check_concrete_inhabitance context location =
-  let rec sort_is_inhabited inhabited = function
-    | Sint | Sbool -> true
-    | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
-    | Sdata key -> List.mem key inhabited
-    | Sarrow _ -> false
-  in
-  let inhabited =
-    ref
-      (List.filter_map
-         (fun data ->
-           match definition location data with
-           | Abstract -> Some data.data_key
-           | Variant _ | Record _ -> None)
-         context.data)
-  in
-  let changed = ref true in
-  while !changed do
-    changed := false;
-    let add key condition =
-      if condition && not (List.mem key !inhabited) then begin
-        inhabited := key :: !inhabited;
-        changed := true
-      end
-    in
-    List.iter
-      (fun data ->
-        let definition_is_inhabited =
-          match definition location data with
-          | Abstract -> true
-          | Variant constructors ->
-            List.exists
-              (fun constructor ->
-                List.for_all (sort_is_inhabited !inhabited)
-                  constructor.constructor_fields)
-              constructors
-          | Record fields ->
-            List.for_all
-              (fun (_, sort) -> sort_is_inhabited !inhabited sort)
-              fields
-        in
-        add data.data_key definition_is_inhabited)
-      context.data
-  done;
-  List.iter
-    (fun data ->
-      if not (List.mem data.data_key !inhabited) then
-        error location "datatype %s is not well-founded"
-          (Path.name data.data_path))
-    context.data
 
 let emit_references (context : context) location buffer =
   List.sort
