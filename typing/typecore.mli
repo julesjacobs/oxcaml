@@ -18,6 +18,17 @@
 open Asttypes
 open Types
 
+type refinement_imposition_judgment =
+  { location : Location.t;
+    annotation_location : Location.t;
+    env : Env.t;
+    checked_type : type_expr option;
+    imposed_type : type_expr;
+  }
+
+val take_refinement_imposition_judgments :
+  unit -> refinement_imposition_judgment list
+
 (* This variant is used for printing which type of comprehension something is
    found in; it's used by [type_forcing_context], which see. *)
 type comprehension_type =

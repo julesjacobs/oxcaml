@@ -64,6 +64,16 @@ val supports_equality : env:Env.t -> Types.type_expr -> bool
    prefix application, never the raw [Types.Refinement.print] AST syntax. *)
 val render_predicate : env:Env.t -> Types.refinement_expression -> string
 
+type witness_variable =
+  { source_name : string;
+    model_name : string;
+  }
+
+val witness_variables :
+  env:Env.t ->
+  Vox_vc.t ->
+  (witness_variable list, emission_error) Stdlib.result
+
 val emit :
   env:Env.t -> Vox_vc.t -> (string, emission_error) Stdlib.result
 

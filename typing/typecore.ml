@@ -28,6 +28,21 @@ open Btype
 open Ctype
 open Mode
 
+type refinement_imposition_judgment =
+  { location : Location.t;
+    annotation_location : Location.t;
+    env : Env.t;
+    checked_type : type_expr option;
+    imposed_type : type_expr;
+  }
+
+let refinement_imposition_judgments = ref []
+
+let take_refinement_imposition_judgments () =
+  let judgments = List.rev !refinement_imposition_judgments in
+  refinement_imposition_judgments := [];
+  judgments
+
 type comprehension_type =
   | List_comprehension
   | Array_comprehension of mutability
@@ -4112,6 +4127,19 @@ and type_pat_aux
         let p =
           type_pat ~alloc_mode tps category sp_constrained expected_ty' sort
         in
+        begin match get_desc ty with
+        | Trefine refinement
+          when Option.is_some !Clflags.vox_dump_vc_json ->
+          refinement_imposition_judgments :=
+            { location = p.pat_loc;
+              annotation_location = refinement.ref_pred.rexp_loc;
+              env = !!penv;
+              checked_type = None;
+              imposed_type = ty;
+            }
+            :: !refinement_imposition_judgments
+        | _ -> ()
+        end;
         let extra =
           Tpat_constraint (cty, type_modes),
           loc,
@@ -7123,7 +7151,18 @@ and type_refinement_annotation
   let with_explanation = with_explanation explanation in
   let refined_type = instance refined_type in
   let skeleton = instance refinement.ref_skeleton in
-  let mark arg = { arg with exp_type = refined_type }, true in
+  let mark arg =
+    if Option.is_some !Clflags.vox_dump_vc_json then
+      refinement_imposition_judgments :=
+        { location = arg.exp_loc;
+          annotation_location = refinement.ref_pred.rexp_loc;
+          env;
+          checked_type = Some skeleton;
+          imposed_type = refined_type;
+        }
+        :: !refinement_imposition_judgments;
+    { arg with exp_type = refined_type }, true
+  in
   if not (is_refinement_inferred_head sarg)
   then
     let arg = type_expect env expected_mode sarg (mk_expected skeleton) in

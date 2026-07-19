@@ -89,7 +89,8 @@ let test_origin =
   Vox_vc.{ kind = "binder"; name = Some "x"; span = Some loc }
 
 let fact expression =
-  Vox_vc.{ expression; location = Some loc; origin = test_origin }
+  Vox_vc.
+    { expression; location = Some loc; scope = None; origin = test_origin }
 
 let vc ?(facts = []) goal = Vox_vc.create ~loc ~facts ~goal
 
