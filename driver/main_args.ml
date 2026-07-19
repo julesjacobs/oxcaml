@@ -954,7 +954,7 @@ let mk_vox_smt_solver f =
 let mk_vox_oxsmt_solver f =
   ( "-vox-oxsmt-solver",
     Arg.String f,
-    "<command>  External stdin runner command for the oxsmt backend" )
+    "<command>  Ignored by in-process oxsmt; legacy benchmark command" )
 
 let mk_dtlambda f =
   "-dtlambda", Arg.Unit f, " (undocumented)"

@@ -1,0 +1,23 @@
+; In-tree unit + integration tests for smt/combine. Stays within the smt/ tree, so it
+; honors the dependency firewall (I3 — nothing above the OCaml stdlib). Run via
+; `make combine-test`; also built by `make build`.
+;
+; The toy EUF (a naive congruence closure) and toy LIA (a brute-force bounded-integer
+; decision procedure) here are deliberately test-only, written from the theory specs alone
+; (DESIGN §10): they share no code with the real engines, and — like the naive oracles in
+; euf/lia — give an independent cross-check of the combinator's end-to-end N-O behavior.
+; The mini DPLL(T) driver stands in for the CDCL(T) seam so the split lifecycle is
+; exercised. Now that the sibling adapters are merged, the SAME functorized driver ALSO
+; binds the real Euf_adapter + Lia_adapter (Part 3 — the empirical W1 gate), so this exe
+; additionally links oxsmt_euf + oxsmt_lia. The library oxsmt_combine itself stays
+; core-only (engine-independent); only this test reaches for the concrete adapters.
+
+(executable
+ (name combine_test)
+ (modules combine_test)
+ (libraries oxsmt_core oxsmt_combine oxsmt_euf oxsmt_lia))
+
+(executable
+ (name lia_eq_prop_combine_test)
+ (modules lia_eq_prop_combine_test)
+ (libraries oxsmt_core oxsmt_combine oxsmt_euf oxsmt_lia))

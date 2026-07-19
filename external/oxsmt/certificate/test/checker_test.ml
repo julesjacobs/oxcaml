@@ -1,0 +1,1980 @@
+(* Cert step-2 REPLAY CHECKER self-test (ADR-0013 step 2). Two halves:
+
+   (1) POSITIVE — the same E1-E4 / theory-reason / ordered-RUP / crit / high4 solves the
+       step-1 [cert_emit_test] drives, run through {!Oxsmt_certificate.Checker.check}:
+       every honest recorded stream must be VALID. This is the "search -> check" gate on
+       real solves.
+
+   (2) DISCRIMINATION — one corruption per class (dropped hint, permuted hints where order
+       matters, wrong antecedent set, forged citation KIND, ambiguous id, truncated
+       stream), each verified to FLIP a VALID stream to INVALID (or UNSUPPORTED). A
+       checker that passed the positives but rubber-stamped a corruption would be
+       worthless; each negative is proven to reject the exact defect it targets.
+
+   Plus board #153b: exact-antecedent-SET assertions (not length-only) on a real chain.
+
+   Stdlib-only; deterministic; nonzero exit on any failed check. The scripted mock theory
+   is the trimmed copy [cert_emit_test]/[seam_test] use. *)
+
+module Sat = Oxsmt_solver.Sat
+module Recorder = Oxsmt_certificate.Recorder
+module Checker = Oxsmt_certificate.Checker
+module Cdclt = Oxsmt_interface.Cdclt
+module Session = Oxsmt_interface.Session
+module Context = Oxsmt_core.Context
+module Env = Oxsmt_core.Env
+module Rank = Oxsmt_core.Rank
+module Sort = Oxsmt_core.Sort
+module Term = Oxsmt_core.Term
+module Defs = Oxsmt_core.Datatype_defs
+module Rational = Oxsmt_lia.Rational
+module Cnf = Oxsmt_preprocess.Cnf
+
+let checks = ref 0
+let failures = ref 0
+
+let fail name msg =
+  incr failures;
+  Printf.printf "  FAIL %s: %s\n" name msg
+;;
+
+let check name cond =
+  incr checks;
+  if not cond then fail name "condition false"
+;;
+
+let dimacs_of_lit l =
+  let v = Sat.var_of_lit l + 1 in
+  if Sat.sign_of_lit l then v else -v
+;;
+
+let clause_set (c : Sat.lit array) =
+  List.sort compare (List.map dimacs_of_lit (Array.to_list c))
+;;
+
+let show_ints xs = "[" ^ String.concat ";" (List.map string_of_int xs) ^ "]"
+let show_sets sets = "[" ^ String.concat "; " (List.map show_ints sets) ^ "]"
+
+(* Assert a verdict shape (Valid / Invalid / Unsupported), printing the actual verdict on
+   a mismatch so a regression is legible. *)
+let expect name kind ev =
+  incr checks;
+  let v = Checker.check ev in
+  let ok =
+    match kind, v with
+    | `Valid, (Checker.Valid_modulo_unchecked_steps | Checker.Valid) -> true
+    | `Fully_valid, Checker.Valid -> true
+    | `Modulo, Checker.Valid_modulo_unchecked_steps -> true
+    | `Invalid, Checker.Invalid _ -> true
+    | `Unsupported, Checker.Unsupported _ -> true
+    | _ -> false
+  in
+  if not ok
+  then (
+    incr failures;
+    Printf.printf "  FAIL %s: got %s\n" name (Checker.string_of_verdict v))
+;;
+
+let expect_assertions name kind ~original ev =
+  incr checks;
+  let verdict = Checker.check_assertions ~original ev in
+  let ok =
+    match kind, verdict with
+    | `Fully_valid, Checker.Valid -> true
+    | `Modulo, Checker.Valid_modulo_unchecked_steps -> true
+    | `Invalid, Checker.Invalid _ -> true
+    | _ -> false
+  in
+  if not ok
+  then (
+    incr failures;
+    Printf.printf "  FAIL %s: got %s\n" name (Checker.string_of_verdict verdict))
+;;
+
+(* Assert VALID *and* that the learned-clause full-closure RUP fallback (task #56)
+   actually FIRED — so these are positive tests of the fallback PATH, not vacuously-valid
+   streams that might pass via the hinted chain. Resets the cumulative counter per case. *)
+let expect_via_fallback name ev =
+  incr checks;
+  Checker.reset_fallback_firings ();
+  let v = Checker.check ev in
+  let fired = Checker.fallback_firing_count () in
+  match v with
+  | (Checker.Valid_modulo_unchecked_steps | Checker.Valid) when fired > 0 -> ()
+  | _ ->
+    incr failures;
+    Printf.printf
+      "  FAIL %s: got %s (fallback fired=%d, expected VALID with fired>0)\n"
+      name
+      (Checker.string_of_verdict v)
+      fired
+;;
+
+let install_presolve_trace session recorder =
+  Session.install_presolve_certificate_trace
+    session
+    (Some
+       { Session.on_equality_elimination =
+           (fun ~context ~original ~reduced ~definitions ->
+             Recorder.record_equality_elimination
+               recorder
+               ~context
+               ~original
+               ~reduced
+               ~definitions:
+                 (List.map
+                    (fun (definition : Session.certificate_presolve_definition) ->
+                       { Recorder.name = definition.name
+                       ; sort = definition.sort
+                       ; value = definition.value
+                       })
+                    definitions))
+       ; on_clausify_begin =
+           (fun ~rewrite_id ~source ~preprocessed ->
+             Recorder.begin_clausify
+               recorder
+               ~statement_id:rewrite_id
+               ~source
+               ~preprocessed)
+       ; on_clausify_bindings =
+           (fun ~selector ~bindings ->
+             Recorder.record_clausify_bindings recorder ~selector ~bindings)
+       ; on_clausify_end = (fun () -> Recorder.end_clausify recorder)
+       })
+;;
+
+let install_leaf_trace session recorder =
+  Session.install_leaf_certificate_trace
+    session
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom recorder ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf recorder ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness recorder ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict recorder ~premise_lits ~multipliers)
+       })
+;;
+
+(* ------------------------------------------------------------------ *)
+(* The scripted mock theory (trimmed copy of cert_emit_test's). *)
+
+type mock_config =
+  { conflicts : Sat.lit list list
+  ; implications : (Sat.lit list * Sat.lit) list
+  ; final_splits : Sat.lit list list
+  }
+
+let empty_config = { conflicts = []; implications = []; final_splits = [] }
+
+let make_mock _st config =
+  let trail = ref [] in
+  let is_true l = List.exists (fun (x, _) -> x = l) !trail in
+  let on_assign l ~level = trail := (l, level) :: !trail in
+  let on_backtrack ~level = trail := List.filter (fun (_, lv) -> lv <= level) !trail in
+  let all_true ls = List.for_all is_true ls in
+  let pending_splits = ref config.final_splits in
+  let check ~final =
+    match List.find_opt all_true config.conflicts with
+    | Some premises -> Sat.T_conflict premises
+    | None ->
+      let props =
+        List.filter_map
+          (fun (ants, cons) ->
+            if all_true ants && not (is_true cons) then Some cons else None)
+          config.implications
+      in
+      let props = List.sort_uniq compare props in
+      if props <> []
+      then Sat.T_consistent props
+      else if final
+      then (
+        match !pending_splits with
+        | s :: rest ->
+          pending_splits := rest;
+          Sat.T_lemma [ s ]
+        | [] -> Sat.T_consistent [])
+      else Sat.T_consistent []
+  in
+  let explain l =
+    match List.find_opt (fun (_, cons) -> cons = l) config.implications with
+    | Some (ants, _) -> ants
+    | None -> []
+  in
+  { Sat.on_assign; on_backtrack; check; explain; on_chrono_rewind = None }
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Positive scenarios: drive a real solve and snapshot its stream as [Checker.events]. *)
+
+let e1_root_empty () =
+  let s = Sat.create () in
+  let a = Sat.new_var s in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.pos a ];
+  Sat.add_clause s [ Sat.neg a ];
+  let r = Sat.solve s in
+  check "e1: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[]
+;;
+
+let e2_level0_conflict () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  Sat.add_clause s [ Sat.neg a ];
+  Sat.add_clause s [ Sat.neg b ];
+  let r = Sat.solve s in
+  check "e2: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[]
+;;
+
+let e3_failed_assumption_theory_prop () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b
+  and lc = Sat.pos c in
+  ignore lc;
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg c; Sat.neg b ];
+  let r = Sat.solve ~assumptions:[ la; lb ] s in
+  check "e3: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[ la; lb ]
+;;
+
+let e4_theory_lemma_empty () =
+  let s = Sat.create () in
+  let p = Sat.new_var s
+  and q = Sat.new_var s in
+  let lp = Sat.pos p
+  and lq = Sat.pos q in
+  let mock = make_mock s { empty_config with final_splits = [ [ lp; lq ] ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg p ];
+  Sat.add_clause s [ Sat.neg q ];
+  let r = Sat.solve s in
+  check "e4: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[]
+;;
+
+let theory_conflict () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let la = Sat.pos a
+  and lb = Sat.pos b in
+  let mock = make_mock s { empty_config with conflicts = [ [ la; lb ] ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  let r = Sat.solve ~assumptions:[ la; lb ] s in
+  check "theory-confl: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[ la; lb ]
+;;
+
+let analyze_theory_reason () =
+  let s = Sat.create () in
+  let p = Sat.new_var s
+  and a = Sat.new_var s
+  and c = Sat.new_var s
+  and d = Sat.new_var s in
+  let lp = Sat.pos p
+  and la = Sat.pos a
+  and lc = Sat.pos c
+  and ld = Sat.pos d in
+  let mock =
+    make_mock s { empty_config with implications = [ [ lp; la ], lc; [ lp; la ], ld ] }
+  in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg c; Sat.neg d ];
+  let r = Sat.solve ~assumptions:[ lp; la ] s in
+  check "analyze-reason: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[ lp; la ]
+;;
+
+(* the antecedent-order scenario: a pure-Boolean 1UIP with a real resolution chain.
+   Returns both the events and the single learned event (for the exact-set assertion). *)
+let antecedent_order () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s in
+  ignore (b, c);
+  let la = Sat.pos a in
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg a; Sat.pos b ];
+  Sat.add_clause s [ Sat.neg b; Sat.pos c ];
+  Sat.add_clause s [ Sat.neg b; Sat.neg c ];
+  let r = Sat.solve ~assumptions:[ la ] s in
+  check "order: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[ la ]
+;;
+
+let crit1_unminimized () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s
+  and c = Sat.new_var s
+  and d = Sat.new_var s in
+  ignore (b, d);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ Sat.neg a; Sat.pos b ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg a; Sat.pos d ];
+  Sat.add_clause s [ Sat.neg c; Sat.neg b; Sat.neg d ];
+  let r = Sat.solve ~assumptions:[ Sat.pos a; Sat.pos c ] s in
+  check "crit1: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[ Sat.pos a; Sat.pos c ]
+;;
+
+let crit2_level0_theory_reason () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and c = Sat.new_var s
+  and x = Sat.new_var s
+  and y = Sat.new_var s in
+  let la = Sat.pos a
+  and lc = Sat.pos c
+  and lx = Sat.pos x
+  and ly = Sat.pos y in
+  let mock = make_mock s { empty_config with implications = [ [ la ], lc ] } in
+  Sat.set_theory s (Some mock);
+  let rec_ = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec_));
+  Sat.add_clause s [ la ];
+  Sat.add_clause s [ Sat.neg c; lx ];
+  Sat.add_clause s [ Sat.neg c; ly ];
+  Sat.add_clause s [ Sat.neg x; Sat.neg y ];
+  let r = Sat.solve s in
+  check "crit2: unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[]
+;;
+
+(* repeated solve on an already-unsat core re-emits its conclusion; both must check VALID. *)
+let crit3_repeated_solve () =
+  let s = Sat.create () in
+  let a = Sat.new_var s
+  and b = Sat.new_var s in
+  let rec1 = Recorder.create () in
+  Sat.set_trace s (Some (Recorder.trace rec1));
+  Sat.add_clause s [ Sat.pos a; Sat.pos b ];
+  Sat.add_clause s [ Sat.neg a ];
+  Sat.add_clause s [ Sat.neg b ];
+  let r1 = Sat.solve s in
+  check "crit3: first unsat" (r1 = Sat.Unsat);
+  let ev1 = Checker.of_recorder rec1 ~assumptions:[] in
+  (* second solve on the same (now permanently-unsat) core re-emits the terminal into a
+     fresh recorder; but the id-resolving content events were surfaced on the FIRST solve,
+     so re-checking the second stream in isolation would dangle. The realistic re-emit
+     check is that the SAME recorder, kept installed across both solves, still checks
+     VALID. *)
+  let r2 = Sat.solve s in
+  check "crit3: second unsat" (r2 = Sat.Unsat);
+  let ev2 = Checker.of_recorder rec1 ~assumptions:[] in
+  ev1, ev2
+;;
+
+(* the HIGH-4 cross-solver ambiguity: one recorder over two solvers whose ids both restart
+   from 0 -> a content id is emitted twice -> the cited id is ambiguous -> INVALID. *)
+let high4_ambiguous () =
+  let rec_ = Recorder.create () in
+  let s1 = Sat.create () in
+  let a = Sat.new_var s1 in
+  Sat.set_trace s1 (Some (Recorder.trace rec_));
+  Sat.add_clause s1 [ Sat.pos a ];
+  ignore (Sat.solve s1 : Sat.result);
+  let s2 = Sat.create () in
+  let b = Sat.new_var s2
+  and c = Sat.new_var s2 in
+  Sat.set_trace s2 (Some (Recorder.trace rec_));
+  Sat.add_clause s2 [ Sat.pos b; Sat.pos c ];
+  Sat.add_clause s2 [ Sat.neg b ];
+  Sat.add_clause s2 [ Sat.neg c ];
+  let r = Sat.solve s2 in
+  check "high4: solver-2 unsat" (r = Sat.Unsat);
+  Checker.of_recorder rec_ ~assumptions:[]
+;;
+
+(* End-to-end W1b replay. The first equality defines [x]; the second becomes [false]
+   after substitution, so the SAT proof is propositional and every independent obligation
+   can reach fully VALID. The recorder keeps original/reduced statement data separate
+   from the definition witness and groups the emitted Query inputs under the reduced
+   term. *)
+let equality_elimination_replay () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_presolve_x" Sort.int)
+  in
+  let one = Context.int_const context 1
+  and two = Context.int_const context 2 in
+  let assertions = [ Context.eq context x one; Context.eq context x two ] in
+  Session.assert_presolved session assertions;
+  check "presolve-replay: solve unsat" (Session.check_sat session = Session.Unsat);
+  ( Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session)
+  , assertions
+  , two )
+;;
+
+let replace_equality_definition_value (events : Checker.events) value =
+  { events with
+    equality_witnesses =
+      List.map
+        (fun (witness : Recorder.equality_elimination_witness) ->
+           { witness with
+             Recorder.definitions =
+               List.map
+                 (fun (definition : Recorder.equality_definition) ->
+                    { definition with Recorder.value })
+                 witness.Recorder.definitions
+           })
+        events.equality_witnesses
+  }
+;;
+
+let replace_reduced_statement (events : Checker.events) replacement =
+  { events with
+    rewrite_statements =
+      List.map
+        (fun (statement : Recorder.rewrite_statement) ->
+           { statement with Recorder.reduced = [ replacement ] })
+        events.rewrite_statements
+  ; clausify_groups =
+      List.map
+        (fun (group : Recorder.clausify_group) ->
+           { group with Recorder.source = replacement })
+        events.clausify_groups
+  }
+;;
+
+let drop_grouped_input (events : Checker.events) =
+  { events with
+    clausify_groups =
+      List.mapi
+        (fun index (group : Recorder.clausify_group) ->
+           if index = 0
+           then
+             { group with
+               Recorder.input_ids =
+                 (match group.Recorder.input_ids with
+                  | _ :: rest -> rest
+                  | [] -> [])
+             }
+           else group)
+        events.clausify_groups
+  }
+;;
+
+let erase_presolve_channel (events : Checker.events) =
+  { events with
+    inputs =
+      List.map
+        (fun (input : Recorder.input_event) ->
+           { input with Recorder.clausify_group = None })
+        events.inputs
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  }
+;;
+
+let foreign_definition_value (events : Checker.events) =
+  let original =
+    List.find_map
+      (fun (witness : Recorder.equality_elimination_witness) ->
+         match witness.Recorder.definitions with
+         | definition :: _ -> Some definition.Recorder.value
+         | [] -> None)
+      events.equality_witnesses
+    |> Option.get
+  in
+  let environment = Env.create () in
+  let context = Context.create environment in
+  let rec make index =
+    let candidate = Context.int_const context (1000 + index) in
+    if candidate.Term.tag = original.Term.tag
+    then candidate
+    else if candidate.Term.tag > original.Term.tag + 8
+    then failwith "presolve mixed-Context discriminator could not align tags"
+    else make (index + 1)
+  in
+  let foreign = make 0 in
+  replace_equality_definition_value events foreign, foreign.Term.tag = original.Term.tag
+;;
+
+let alias_cnf_binding_to_selector (events : Checker.events) =
+  let group = List.hd events.clausify_groups in
+  let selector = Option.get group.Recorder.selector in
+  let bindings =
+    Option.get group.Recorder.bindings |> List.map (fun (term, _) -> term, selector)
+  in
+  let cnf = Cnf.clausify group.Recorder.preprocessed in
+  let binding_array = Array.of_list bindings in
+  let map_literal literal =
+    let _, variable = binding_array.(Cnf.Lit.var literal - 1) in
+    if Cnf.Lit.is_positive literal then Sat.pos variable else Sat.neg variable
+  in
+  let clauses_rev = ref [] in
+  Cnf.iter_clauses
+    (fun clause ->
+       clauses_rev
+       := Array.of_list (Sat.neg selector :: List.map map_literal clause) :: !clauses_rev)
+    cnf;
+  let clauses = List.rev !clauses_rev in
+  let clause_by_id = List.combine group.Recorder.input_ids clauses in
+  { events with
+    inputs =
+      List.map
+        (fun (input : Recorder.input_event) ->
+           match List.assoc_opt input.Recorder.id clause_by_id with
+           | None -> input
+           | Some clause -> { input with Recorder.clause })
+        events.inputs
+  ; clausify_groups = [ { group with Recorder.bindings = Some bindings } ]
+  }
+;;
+
+let presolve_trace_lifecycle () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_presolve_trace session recorder;
+  let second_install_rejected =
+    match install_presolve_trace session recorder with
+    | () -> false
+    | exception Invalid_argument _ -> true
+  in
+  check "presolve trace: second companion install rejected" second_install_rejected;
+  Session.install_cert_trace session None;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_trace_off_x" Sort.int)
+  in
+  Session.assert_presolved session [ Context.eq context x (Context.int_const context 1) ];
+  check
+    "presolve trace: uninstalling parent clears companion callbacks"
+    (Recorder.rewrite_statements recorder = [])
+;;
+
+let satisfiable_equality_elimination_artifact () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_presolve_sat_x" Sort.int)
+  in
+  let one = Context.int_const context 1 in
+  let assertions = [ Context.eq context x one; Context.le context x one ] in
+  Session.assert_presolved session assertions;
+  check
+    "presolve anchored-negative: baseline is sat"
+    (Session.check_sat session = Session.Sat);
+  Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session), assertions
+;;
+
+let add_ungrouped_empty_input (events : Checker.events) =
+  let id =
+    1
+    + List.fold_left
+        (fun maximum (input : Recorder.input_event) -> max maximum input.Recorder.id)
+        0
+        events.inputs
+  in
+  let input : Recorder.input_event =
+    { id; clause = [||]; origin = Sat.Query; clausify_group = None }
+  in
+  { events with
+    inputs = events.inputs @ [ input ]
+  ; conclusion = Some (Sat.Root_empty { input_id = id })
+  }
+;;
+
+let add_negative_selector_assumption (events : Checker.events) =
+  let selector =
+    List.hd events.clausify_groups |> fun group -> Option.get group.Recorder.selector
+  in
+  { events with
+    conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = [ Sat.neg selector ]
+  }
+;;
+
+let presolved_lia_farkas_conflict () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_leaf_trace session recorder;
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let x =
+    Context.const context (Session.declare_const session "cert_bound_lia_x" Sort.int)
+  in
+  let zero = Context.int_const context 0
+  and one = Context.int_const context 1
+  and two = Context.int_const context 2 in
+  let assertions = [ Context.le context x zero; Context.le context one x ] in
+  Session.assert_presolved session assertions;
+  check "presolve binding/atom: solve unsat" (Session.check_sat session = Session.Unsat);
+  ( Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session)
+  , assertions
+  , Context.le context two x )
+;;
+
+let replace_first_atom_statement (events : Checker.events) replacement =
+  { events with
+    atoms =
+      List.mapi
+        (fun index (event : Recorder.atom_event) ->
+           if index = 0 then { event with Recorder.atom = replacement } else event)
+        events.atoms
+  }
+;;
+
+let lower_preprocess_unchecked () =
+  let session = Session.create () in
+  let recorder = Recorder.create () in
+  Session.install_cert_trace session (Some (Recorder.trace recorder));
+  install_leaf_trace session recorder;
+  install_presolve_trace session recorder;
+  let context = Session.context session in
+  let zero = Context.int_const context 0
+  and two = Context.int_const context 2 in
+  let quotient = Context.div context zero two in
+  let assertions = [ Context.not_ context (Context.eq context quotient zero) ] in
+  Session.assert_presolved session assertions;
+  check
+    "lower preprocess conditional: solve unsat"
+    (Session.check_sat session = Session.Unsat);
+  Checker.of_recorder recorder ~assumptions:(Session.cert_assumptions session), assertions
+;;
+
+(* End-to-end LIA leaf witness: [x <= 0] and [x >= 1] produce one Farkas-backed theory
+   Conflict. Cdclt records the SAT-var->atom statement separately from the multiplier
+   witness, Recorder binds the latter to the next frozen-seam Conflict id, and Checker
+   independently recomputes the contradiction. *)
+let lia_farkas_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "cert_x" Sort.int) in
+  Session.assert_term s (Context.le ctx x (Context.int_const ctx 0));
+  Session.assert_term s (Context.le ctx (Context.int_const ctx 1) x);
+  check "lia-farkas: solve unsat" (Session.check_sat s = Session.Unsat);
+  Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+(* Post-LAND-29b equality-premise Farkas conflict: [2x = 4] forces [x = 2], contradicting
+   [x <> 2]. The eq-aware emitter records the [2x = 4] EQUALITY as a Farkas premise with a
+   signed / fractional multiplier ([-1/2] here), which the checker must accept (equalities
+   admit any-sign multipliers) while still independently re-deriving the [0 < c]
+   contradiction. This is exactly the shape the fork-base review never saw. *)
+let lia_farkas_equality_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let x = Context.const ctx (Session.declare_const s "cert_eqx" Sort.int) in
+  Session.assert_term
+    s
+    (Context.eq ctx (Context.mul_const ctx 2 x) (Context.int_const ctx 4));
+  Session.assert_term s (Context.distinct ctx [ x; Context.int_const ctx 2 ]);
+  check "lia-farkas-eq: solve unsat" (Session.check_sat s = Session.Unsat);
+  Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+let strip_lia_witnesses (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (e : Recorder.theory_event) -> { e with Recorder.lia_witness = None })
+        ev.theory
+  }
+;;
+
+let zero_lia_multipliers (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (e : Recorder.theory_event) ->
+          match e.Recorder.lia_witness with
+          | None -> e
+          | Some witness ->
+            let premises =
+              List.map
+                (fun (p : Recorder.lia_premise) ->
+                  { p with Recorder.multiplier = Rational.zero })
+                witness.Recorder.premises
+            in
+            { e with Recorder.lia_witness = Some { Recorder.premises } })
+        ev.theory
+  }
+;;
+
+(* End-to-end EUF leaf witness. The contradiction needs both transitivity and congruence:
+   a=b, b=c, but f(a)<>f(c). Cdclt preserves the pure-EUF rule before the frozen seam
+   drops it; Checker then rebuilds closure without calling the EUF engine. *)
+let euf_congruence_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let u = Sort.uninterpreted (Session.declare_sort s "cert_euf_u") in
+  let const name = Context.const ctx (Session.declare_const s name u) in
+  let a = const "cert_euf_a"
+  and b = const "cert_euf_b"
+  and c = const "cert_euf_c"
+  and d = const "cert_euf_d"
+  and e = const "cert_euf_e" in
+  let f = Session.declare_fun s "cert_euf_f" (Rank.create [ u ] u) in
+  let ab = Context.eq ctx a b in
+  let bc = Context.eq ctx b c in
+  let fac = Context.eq ctx (Context.app ctx f [ a ]) (Context.app ctx f [ c ]) in
+  Session.assert_term s ab;
+  Session.assert_term s bc;
+  Session.assert_term s (Context.not_ ctx fac);
+  check "euf-leaf: solve unsat" (Session.check_sat s = Session.Unsat);
+  ( Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+  , bc
+  , Context.eq ctx d e )
+;;
+
+(* The separate lazy-reason path: a=b lets EUF propagate f(a)=f(b); the two Boolean
+   clauses then conflict only after consuming that propagated equality, so 1UIP must
+   materialize its [Reason] leaf through [Cdclt.explain]. *)
+let euf_congruence_reason () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let u = Sort.uninterpreted (Session.declare_sort s "cert_euf_reason_u") in
+  let const name = Context.const ctx (Session.declare_const s name u) in
+  let a = const "cert_euf_reason_a"
+  and b = const "cert_euf_reason_b" in
+  let f = Session.declare_fun s "cert_euf_reason_f" (Rank.create [ u ] u) in
+  let p = Context.const ctx (Session.declare_const s "cert_euf_reason_p" Sort.bool) in
+  let ab = Context.eq ctx a b in
+  let fab = Context.eq ctx (Context.app ctx f [ a ]) (Context.app ctx f [ b ]) in
+  Session.assert_term s ab;
+  Session.assert_term s (Context.or_ ctx [ Context.not_ ctx fab; p ]);
+  Session.assert_term s (Context.or_ ctx [ Context.not_ ctx fab; Context.not_ ctx p ]);
+  check "euf-reason: solve unsat" (Session.check_sat s = Session.Unsat);
+  Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+;;
+
+(* End-to-end datatype constructor-distinctness leaf. The asserted equality [red=green] is
+   a genuine DT Conflict, not an EUF conflict: Cdclt conservatively records the two
+   constructor terms, while Checker independently rebuilds equality/congruence from the
+   atom statement and reads distinctness from the separately recorded DT declaration. *)
+let dt_distinctness_conflict () =
+  let s = Session.create () in
+  let rec_ = Recorder.create () in
+  Session.install_cert_trace s (Some (Recorder.trace rec_));
+  Session.install_leaf_certificate_trace
+    s
+    (Some
+       { Cdclt.on_theory_atom =
+           (fun ~var ~atom -> Recorder.record_theory_atom rec_ ~var ~atom)
+       ; on_euf_leaf = (fun ~clause -> Recorder.record_euf_leaf rec_ ~clause)
+       ; on_dt_distinctness =
+           (fun ~registry ~clause ~left ~right ->
+             Recorder.record_dt_distinctness rec_ ~registry ~clause ~left ~right)
+       ; on_lia_conflict =
+           (fun ~premise_lits ~multipliers ->
+             Recorder.record_lia_conflict rec_ ~premise_lits ~multipliers)
+       });
+  let ctx = Session.context s in
+  let color = Sort.datatype_ (Session.declare_sort s "cert_dt_color") in
+  let datatype =
+    Session.declare_datatype
+      s
+      color
+      [ { Session.ctor_name = "cert_dt_red"; fields = [] }
+      ; { Session.ctor_name = "cert_dt_green"; fields = [] }
+      ]
+  in
+  let constructor index =
+    let descriptor = List.nth datatype.Defs.constructors index in
+    Context.const ctx descriptor.Defs.sym
+  in
+  let red = constructor 0
+  and green = constructor 1 in
+  let equality = Context.eq ctx red green in
+  Session.assert_term s equality;
+  check "dt-distinctness: solve unsat" (Session.check_sat s = Session.Unsat);
+  ( Checker.of_recorder rec_ ~assumptions:(Session.cert_assumptions s)
+  , equality
+  , Context.eq ctx red red )
+;;
+
+let strip_dt_witnesses (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) -> { event with Recorder.dt_witness = None })
+        ev.theory
+  }
+;;
+
+let collapse_dt_witness_pair (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+          match event.Recorder.dt_witness with
+          | None -> event
+          | Some witness ->
+            { event with
+              Recorder.dt_witness =
+                Some { witness with Recorder.right = witness.Recorder.left }
+            })
+        ev.theory
+  }
+;;
+
+let replace_dt_equality_statement (ev : Checker.events) ~from ~to_ =
+  { ev with
+    atoms =
+      List.map
+        (fun (event : Recorder.atom_event) ->
+          if Term.equal event.Recorder.atom from
+          then { event with Recorder.atom = to_ }
+          else event)
+        ev.atoms
+  }
+;;
+
+let erase_dt_constructor_declaration (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+          match event.Recorder.dt_witness with
+          | None -> event
+          | Some _ -> { event with Recorder.dt_registry = Some Defs.empty })
+        ev.theory
+  }
+;;
+
+(* Cross-Context tag-alias discriminator. Both Contexts allocate their first two
+   constructor constants at the same numeric tags, but the nodes and declarations are
+   unrelated. A checker that admits only atom statements into its tag-collision preflight
+   lets these foreign witness endpoints alias the genuine statement terms in Term.Table
+   and incorrectly inherit their equality class. *)
+let foreign_dt_witness_context (ev : Checker.events) =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let color = Sort.datatype_ (Session.declare_sort s "cert_dt_foreign_color") in
+  let datatype =
+    Session.declare_datatype
+      s
+      color
+      [ { Session.ctor_name = "cert_dt_foreign_red"; fields = [] }
+      ; { Session.ctor_name = "cert_dt_foreign_green"; fields = [] }
+      ]
+  in
+  let constructor index =
+    let descriptor = List.nth datatype.Defs.constructors index in
+    Context.const ctx descriptor.Defs.sym
+  in
+  let foreign_first = constructor 0
+  and foreign_second = constructor 1 in
+  let registry = Defs.add Defs.empty datatype in
+  let original =
+    List.find_map
+      (fun (event : Recorder.theory_event) -> event.Recorder.dt_witness)
+      ev.theory
+    |> Option.get
+  in
+  let foreign_at_tag tag =
+    if foreign_first.Term.tag = tag
+    then foreign_first
+    else if foreign_second.Term.tag = tag
+    then foreign_second
+    else foreign_first
+  in
+  let foreign_left = foreign_at_tag original.Recorder.left.Term.tag
+  and foreign_right = foreign_at_tag original.Recorder.right.Term.tag in
+  let tags_collide =
+    original.Recorder.left.Term.tag = foreign_left.Term.tag
+    && original.Recorder.right.Term.tag = foreign_right.Term.tag
+    && original.Recorder.left != foreign_left
+    && original.Recorder.right != foreign_right
+  in
+  let corrupted =
+    { ev with
+      theory =
+        List.map
+          (fun (event : Recorder.theory_event) ->
+            match event.Recorder.dt_witness with
+            | None -> event
+            | Some witness ->
+              { event with
+                Recorder.dt_registry = Some registry
+              ; dt_witness =
+                  Some
+                    { witness with Recorder.left = foreign_left; right = foreign_right }
+              })
+          ev.theory
+    }
+  in
+  corrupted, tags_collide
+;;
+
+let strip_euf_witnesses (ev : Checker.events) =
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+          { event with Recorder.euf_witness = None })
+        ev.theory
+  }
+;;
+
+let drop_euf_equality (ev : Checker.events) equality =
+  let var =
+    match
+      List.find_opt
+        (fun (event : Recorder.atom_event) -> Term.equal event.Recorder.atom equality)
+        ev.atoms
+    with
+    | Some event -> event.Recorder.var
+    | None -> failwith "EUF discrimination: equality has no atom declaration"
+  in
+  { ev with
+    theory =
+      List.map
+        (fun (event : Recorder.theory_event) ->
+          match event.Recorder.euf_witness with
+          | None -> event
+          | Some witness ->
+            let clause =
+              List.filter (fun lit -> Sat.var_of_lit lit <> var) witness.Recorder.clause
+            in
+            { event with
+              Recorder.clause = Array.of_list clause
+            ; euf_witness = Some { Recorder.clause }
+            })
+        ev.theory
+  }
+;;
+
+let replace_euf_equality_statement (ev : Checker.events) ~from ~to_ =
+  { ev with
+    atoms =
+      List.map
+        (fun (event : Recorder.atom_event) ->
+          if Term.equal event.Recorder.atom from
+          then { event with Recorder.atom = to_ }
+          else event)
+        ev.atoms
+  }
+;;
+
+(* ------------------------------------------------------------------ *)
+(* A HAND-BUILT, order-sensitive learned-clause chain (full control for the ordered-RUP
+   discrimination). Inputs (all Query): id10 [a∨b], id11 [¬a∨c], id12 [¬a∨¬c] entail b;
+   the learned clause id20 [b] replays by ordered RUP [10;11;12] (b:=false; 10 forces a;
+   11 forces c; 12 conflicts) — a chain where a permutation strands a non-unit hint. The
+   refutation is closed as a Failed_assumption under [¬b] (b forced true by the learned
+   clause contradicts the assumption). *)
+let a_ = Sat.pos 0
+and na_ = Sat.neg 0
+and b_ = Sat.pos 1
+and nb_ = Sat.neg 1
+and c_ = Sat.pos 2
+and nc_ = Sat.neg 2
+
+let mk_input id clause : Recorder.input_event =
+  { id; clause; origin = Sat.Query; clausify_group = None }
+;;
+
+let mk_learned id clause antecedents : Recorder.learned_event =
+  { id; clause; antecedents; btlevel = 0 }
+;;
+
+(* A malformed in-memory artifact can combine terms from two Contexts, whose tag streams
+   both start at zero. Without the checker's physical-node collision preflight, its
+   tag-keyed Term.Table aliases the unrelated equality endpoints and accepts this invalid
+   EUF leaf. Real recorder streams are single-Context; the negative pins fail-closed input
+   handling at the public [Checker.events] boundary. *)
+let mixed_context_euf_leaf () : Checker.events =
+  let make_equality () =
+    let env = Env.create () in
+    let ctx = Context.create env in
+    let u = Sort.uninterpreted (Env.declare_sort env "cert_cross_context_u") in
+    let const name = Context.const ctx (Env.declare_fun env name (Rank.create [] u)) in
+    Context.eq ctx (const "cert_cross_context_a") (const "cert_cross_context_b")
+  in
+  let first = make_equality () in
+  let second = make_equality () in
+  let clause = [ Sat.neg_lit a_; b_ ] in
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| nb_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms =
+      [ ({ var = Sat.var_of_lit a_; atom = first } : Recorder.atom_event)
+      ; ({ var = Sat.var_of_lit b_; atom = second } : Recorder.atom_event)
+      ]
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30
+         ; clause = Array.of_list clause
+         ; role = Sat.Conflict
+         ; lia_witness = None
+         ; euf_witness = Some { Recorder.clause }
+         ; dt_registry = None
+         ; dt_witness = None
+         }
+         : Recorder.theory_event)
+      ]
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+(* Tags can be disjoint yet global Symbol ids can be redeclared at incompatible Env-local
+   ranks. Congruence must compare the observed result/argument sorts as well as symbol and
+   arity, or the U- and V-sorted constants below collapse across contexts. *)
+let mixed_context_rank_euf_leaf () : Checker.events =
+  let make_equality ~sort_name ~pad =
+    let env = Env.create () in
+    let ctx = Context.create env in
+    for i = 0 to pad - 1 do
+      ignore (Context.int_const ctx i : Term.t)
+    done;
+    let sort = Sort.uninterpreted (Env.declare_sort env sort_name) in
+    let const name = Context.const ctx (Env.declare_fun env name (Rank.create [] sort)) in
+    Context.eq ctx (const "cert_cross_rank_f") (const "cert_cross_rank_g")
+  in
+  let first = make_equality ~sort_name:"cert_cross_rank_u" ~pad:0 in
+  let second = make_equality ~sort_name:"cert_cross_rank_v" ~pad:3 in
+  let clause = [ Sat.neg_lit a_; b_ ] in
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| nb_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms =
+      [ ({ var = Sat.var_of_lit a_; atom = first } : Recorder.atom_event)
+      ; ({ var = Sat.var_of_lit b_; atom = second } : Recorder.atom_event)
+      ]
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30
+         ; clause = Array.of_list clause
+         ; role = Sat.Conflict
+         ; lia_witness = None
+         ; euf_witness = Some { Recorder.clause }
+         ; dt_registry = None
+         ; dt_witness = None
+         }
+         : Recorder.theory_event)
+      ]
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+let handbuilt ?(learned_ants = [ 10; 11; 12 ]) ?conclusion () : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] learned_ants ]
+  ; theory = []
+  ; conclusion =
+      (match conclusion with
+       | Some c -> Some c
+       | None -> Some (Sat.Failed_assumption { antecedents = [ 20 ] }))
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #56 rider 2: same inputs as [handbuilt], but the learned clause is [c], which
+   those inputs do NOT entail (model a=false,b=true,c=false satisfies all three). So
+   corrupting the cited chain fails ordered RUP AND the full-closure fallback finds no ⊥ →
+   INVALID — the accept-invalid direction stays rejected under every hint-corruption
+   shape. *)
+let handbuilt_unentailed ?(learned_ants = [ 10; 11; 12 ]) () : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; nc_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| c_ |] learned_ants ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nc_ ]
+  }
+;;
+
+(* CRIT-1 (reviewer, logs/cert-step2-review.md): a learned-clause hint must resolve only
+   to an ALREADY-VERIFIED learned clause, never itself or a later one. These two streams
+   certify a trivially-SAT / SAT query as unsat pre-fix (accept-invalid, the north star);
+   the growing verified-id set makes each INVALID. *)
+
+(* exploit A: two SELF-citing learned clauses on an empty (trivially SAT) query. Each
+   learned clause cites its own id as its sole hint, so negating the clause falsifies the
+   cited (== same) clause and "verifies" it out of nothing. *)
+let exploit_self_cite : Checker.events =
+  let x = Sat.pos 3
+  and nx = Sat.neg 3 in
+  { Checker.inputs = []
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| x |] [ 20 ]; mk_learned 21 [| nx |] [ 21 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 21 })
+  ; assumptions = []
+  }
+;;
+
+(* exploit B: MUTUALLY-referential learned clauses certify a SATISFIABLE query ([a] alone
+   is sat, a=true) as unsat. id20 cites id21 and id21 cites id20; pre-fix both "verify". *)
+let exploit_mutual : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| na_ |] [ 21 ]; mk_learned 21 [| na_ |] [ 20 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 20 })
+  ; assumptions = []
+  }
+;;
+
+(* C2 (codex, CRITICAL): an EMPTY theory Reason clause is admitted into the axiom DB as ⊥
+   (guard_theory_leaf guarded only the empty-Conflict role), so BCP finds an immediate
+   conflict and a SAT query is certified unsat. A Reason must carry its implied literal at
+   slot 0 — an empty Reason is malformed → INVALID. Query [{a}] is SAT. *)
+let exploit_empty_reason : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30
+         ; clause = [||]
+         ; role = Sat.Reason
+         ; lia_witness = None
+         ; euf_witness = None
+         ; dt_registry = None
+         ; dt_witness = None
+         }
+         : Recorder.theory_event)
+      ]
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* H4 (codex, HIGH→CRITICAL): a spurious clause sharing an id with a real one is admitted
+   to the axiom DB even though the ambiguity is NEVER cited, poisoning BCP. Here id 10
+   carries both [a] (the real, SAT query [{a}]) and a spurious [¬a]; the E3 terminal cites
+   nothing, so the ambiguity slips past citation-time resolution and BCP refutes a SAT
+   query. Ambiguous content ids must be rejected at STREAM ADMISSION. Triggers ONLY on
+   ambiguity (M6: a clean discriminator of the #153a admission guard). *)
+let exploit_ambiguous_admission : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 10 [| na_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* M5 (codex): duplicate raw literals defeat unit detection, OVER-rejecting a valid cert.
+   Input id10 [a;a] is really the unit [a]; without dedup it is seen as 2-free and never
+   propagated, so [¬a] (id11) is not falsified and Root_empty spuriously fails. Post-fix
+   (dedup at ingest) this is VALID. *)
+let overreject_dup_lit : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_; a_ |]; mk_input 11 [| na_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Root_empty { input_id = 11 })
+  ; assumptions = []
+  }
+;;
+
+(* CRITICAL (codex, this round): a RAW-EMPTY Theory_lemma INPUT clause fabricates ⊥.
+   Theory lemmas arrive as input_events with origin=Theory_lemma; a raw-empty one has no
+   Valid_lemma witness in any theory (ADR-0013 §4.0 E4 admits only a NONEMPTY lemma that
+   FILTERS to [] under the level-0 closure). Pre-fix it is admitted to the axiom DB as a
+   trusted [] that certifies the SAT query [{a}] unsat through ALL THREE terminals:
+   Root_empty citing it, Level0_conflict citing it, and Failed_assumption (empty
+   antecedents — never cites it, yet BCP over the poisoned DB refutes anything). Post-fix
+   the admission guard keys on origin and rejects the empty lemma before it enters the DB,
+   so all three go INVALID. Contrast [empty_query_input_ok]: an empty QUERY input is the
+   legitimate E1 opposite and stays VALID. *)
+let mk_lemma_input id clause : Recorder.input_event =
+  { id; clause; origin = Sat.Theory_lemma; clausify_group = None }
+;;
+
+let exploit_empty_lemma_root_empty : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Root_empty { input_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+let exploit_empty_lemma_level0 : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+  ; assumptions = []
+  }
+;;
+
+let exploit_empty_lemma_failed_assumption : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |]; mk_lemma_input 30 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* Base #53 RED: a level-0 THEORY conflict now routes to an EMPTY-CORE E3
+   [Failed_assumption { antecedents = [] }] (sat.ml [conclude_unsat], [~theory:true]).
+   That route is NOT a free pass to "unsat" — it is gated by the checker's [refutes_under]
+   over the whole clause DB. Here the theory conflict is BOGUS: the emitted theory leaf
+   [b] does NOT contradict the SAT input [a], so the DB [{a}, {b}] is satisfiable and BCP
+   over it derives NO ⊥. The empty-core E3 must therefore be REJECTED — proving a
+   mis-emitted (or fabricated) level-0 theory conflict cannot launder a SAT query to
+   unsat. Contrast the e3_failed_assumption_theory_prop positive, where the DB genuinely
+   refutes. *)
+let bogus_theory_conflict_empty_core_e3 : Checker.events =
+  { Checker.inputs = [ mk_input 1 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory =
+      [ ({ id = 30
+         ; clause = [| b_ |]
+         ; role = Sat.Conflict
+         ; lia_witness = None
+         ; euf_witness = None
+         ; dt_registry = None
+         ; dt_witness = None
+         }
+         : Recorder.theory_event)
+      ]
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [] })
+  ; assumptions = []
+  }
+;;
+
+(* the E1 opposite the origin-keyed guard must NOT break: a raw-empty QUERY input asserts
+   the empty clause = false, which is legitimately unsat. Stays VALID pre- and post-fix. *)
+let empty_query_input_ok : Checker.events =
+  { Checker.inputs = [ mk_input 1 [||] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Root_empty { input_id = 1 })
+  ; assumptions = []
+  }
+;;
+
+(* task #42 SATISFIED-HINT SKIP — the rings id-162 pattern reproduced by hand: a redundant
+   antecedent whose satisfying literal an EARLIER antecedent already forced sits
+   MID-chain. Negate learned [b] → b:=false; 10=[a∨b] forces a; 11=[¬a∨c] forces c;
+   12=[¬a∨c] is now SATISFIED (c true) → SKIP; 13=[¬a∨¬c] is falsified → conflict. Pre-fix
+   the checker ERRORED on the satisfied hint 12 (INVALID); post-fix it skips it and the
+   chain still closes on 13. VALID — the exact positive the fix unblocks. *)
+let id162_satisfied_skip : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]
+      ; mk_input 11 [| na_; c_ |]
+      ; mk_input 12 [| na_; c_ |]
+      ; mk_input 13 [| na_; nc_ |]
+      ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12; 13 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #42 negative (i): a mid-chain hint that is NEITHER unit NOR satisfied (2 free
+   literals) still ERRORS — the skip is narrow and the "refuses to search" contract stands
+   for the non-satisfied cases. Negate [b] → b:=false; 10 forces a; 11=[c∨d] then has BOTH
+   literals free → reject, never search. *)
+let neither_unit_nor_satisfied : Checker.events =
+  let d_ = Sat.pos 3 in
+  { Checker.inputs = [ mk_input 10 [| a_; b_ |]; mk_input 11 [| c_; d_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10; 11 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #42 negative (ii): remove the load-bearing final hint (13) from the id-162 chain —
+   the remaining hints derive NO conflict. Skipping the satisfied 12 must NOT launder an
+   incomplete chain to valid: the chain is consumed without a conflict → ERROR. Proves the
+   conflict-derivation requirement survives the skip. *)
+let satisfied_but_no_conflict : Checker.events =
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]; mk_input 11 [| na_; c_ |]; mk_input 12 [| na_; c_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10; 11; 12 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #47 E1/E2 CITED-CLAUSE FALLBACK. A Level0_conflict whose cited clause is NOT
+   falsified by the closure, but the closure IS globally inconsistent → VALID via the
+   [refutes_under []] fallback. Inputs [a] and [¬a] are UP-inconsistent; the terminal
+   cites id10=[a], which the closure (a:=true) SATISFIES, not falsifies — mirroring the
+   rings id-7866 shape where the emitter's cited witness is satisfied under the checker's
+   batch closure yet the closure still derives ⊥. Pre-fix (no fallback) this is INVALID;
+   the fix accepts it. *)
+let e2_fallback_closure_inconsistent : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |]; mk_input 11 [| na_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 10 })
+  ; assumptions = []
+  }
+;;
+
+(* task #47 negative: cited clause NOT falsified AND the closure CONSISTENT → INVALID. The
+   fallback is gated on GENUINE inconsistency, not a blanket pass. Query [a] alone is SAT;
+   a Level0_conflict citing the satisfied [a] must be rejected — the accept-invalid north
+   star. (Rejects pre- and post-fix; the point is that the fallback did NOT open a hole.) *)
+let e2_cited_not_falsified_closure_consistent : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = []
+  ; theory = []
+  ; conclusion = Some (Sat.Level0_conflict { conflict_id = 10 })
+  ; assumptions = []
+  }
+;;
+
+(* task #56 LEARNED-CLAUSE FULL-CLOSURE RUP FALLBACK. Mirrors the rings id-6571/6572
+   shape: a learned clause whose CITED antecedent is SATISFIED under the level-0 closure
+   (so the hinted ordered chain is consumed without a conflict), yet the clause is
+   ENTAILED by the verified closure. Inputs 10=[a∨b],11=[¬a∨c],12=[¬a∨¬c] entail b; 13=[d]
+   forces d; 14=[d∨b] is satisfied by d. Learned 20=[b] cites ONLY the satisfied 14 →
+   ordered RUP consumes the chain (14 skipped) → fails; the fallback seeds ¬b and BCP over
+   the closure derives ⊥ (b:=false ⇒ 10 forces a ⇒ 11 forces c ⇒ 12 conflicts) → VALID.
+   Failed_assumption under [¬b] closes it. Pre-fix (no fallback) → INVALID. *)
+let learned_fallback_entailed : Checker.events =
+  let d_ = Sat.pos 3 in
+  { Checker.inputs =
+      [ mk_input 10 [| a_; b_ |]
+      ; mk_input 11 [| na_; c_ |]
+      ; mk_input 12 [| na_; nc_ |]
+      ; mk_input 13 [| d_ |]
+      ; mk_input 14 [| d_; b_ |]
+      ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 14 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* task #56 negative: an UNENTAILED learned clause must still be REJECTED — the fallback
+   is gated on genuine entailment, not a blanket pass (no accept-invalid). Query is a=true
+   (SAT); learned 20 = the unit [b] (b unconstrained) cites the satisfied 10 = [a] →
+   ordered RUP consumed → the fallback seeds b false and BCP over the single input derives
+   NO conflict → INVALID. *)
+let learned_unentailed : Checker.events =
+  { Checker.inputs = [ mk_input 10 [| a_ |] ]
+  ; rewrite_statements = []
+  ; equality_witnesses = []
+  ; clausify_groups = []
+  ; atoms = []
+  ; units = []
+  ; learned = [ mk_learned 20 [| b_ |] [ 10 ] ]
+  ; theory = []
+  ; conclusion = Some (Sat.Failed_assumption { antecedents = [ 20 ] })
+  ; assumptions = [ nb_ ]
+  }
+;;
+
+(* ------------------------------------------------------------------ *)
+
+let () =
+  (* (1) POSITIVE — every honest stream is VALID. *)
+  presolve_trace_lifecycle ();
+  expect "positive: E1 Root_empty (query filter-to-[])" `Valid (e1_root_empty ());
+  expect "positive: E2 Level0_conflict" `Valid (e2_level0_conflict ());
+  expect
+    "positive: E3 Failed_assumption + Theory_prop (H1)"
+    `Valid
+    (e3_failed_assumption_theory_prop ());
+  expect
+    "positive: E4 Root_empty (theory-lemma filter-to-[])"
+    `Valid
+    (e4_theory_lemma_empty ());
+  expect "positive: theory conflict leaf" `Valid (theory_conflict ());
+  expect "positive: 1UIP theory-reason materialization" `Valid (analyze_theory_reason ());
+  expect "positive: ordered-RUP antecedent chain" `Valid (antecedent_order ());
+  expect "positive: CRIT-1 unminimized learned clause" `Valid (crit1_unminimized ());
+  expect "positive: CRIT-2 level-0 theory reason" `Valid (crit2_level0_theory_reason ());
+  let ev1, ev2 = crit3_repeated_solve () in
+  expect "positive: CRIT-3 first solve" `Valid ev1;
+  expect "positive: CRIT-3 repeated-solve re-emit" `Valid ev2;
+  expect "positive: hand-built order-sensitive chain" `Valid (handbuilt ());
+  let presolve_events, presolve_original, presolve_two = equality_elimination_replay () in
+  check
+    "positive: W1b statement has one separate equality-elimination witness"
+    (List.length presolve_events.Checker.rewrite_statements = 1
+     && List.length presolve_events.Checker.equality_witnesses = 1
+     && List.length presolve_events.Checker.clausify_groups = 1);
+  expect_assertions
+    "positive: independently replayed W1b equality elimination -> fully VALID"
+    `Fully_valid
+    ~original:presolve_original
+    presolve_events;
+  expect_assertions
+    "coverage: stripping W1b witness stays conditional"
+    `Modulo
+    ~original:presolve_original
+    { presolve_events with equality_witnesses = [] };
+  expect_assertions
+    "corrupt: wrong W1b definition value -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (replace_equality_definition_value presolve_events presolve_two);
+  expect_assertions
+    "corrupt: wrong W1b reduced term -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (replace_reduced_statement
+       presolve_events
+       (Context.bool_const
+          (List.hd presolve_events.rewrite_statements).Recorder.context
+          true));
+  expect_assertions
+    "corrupt: dropped W1b Query-input group member -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (drop_grouped_input presolve_events);
+  expect_assertions
+    "corrupt: W1b CNF variable aliases its activation selector -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (alias_cnf_binding_to_selector presolve_events);
+  expect_assertions
+    "corrupt: erased W1b statement/witness/input channel -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    (erase_presolve_channel presolve_events);
+  let foreign_presolve_events, foreign_presolve_tags_collide =
+    foreign_definition_value presolve_events
+  in
+  check
+    "mixed-context W1b discriminator has colliding tags on distinct physical terms"
+    foreign_presolve_tags_collide;
+  expect_assertions
+    "corrupt: mixed-Context W1b witness value -> INVALID"
+    `Invalid
+    ~original:presolve_original
+    foreign_presolve_events;
+  let satisfiable_presolve_events, satisfiable_presolve_original =
+    satisfiable_equality_elimination_artifact ()
+  in
+  expect_assertions
+    "corrupt: extra ungrouped Query contradiction on satisfiable original -> INVALID"
+    `Invalid
+    ~original:satisfiable_presolve_original
+    (add_ungrouped_empty_input satisfiable_presolve_events);
+  expect_assertions
+    "corrupt: negative activation-selector assumption on satisfiable original -> INVALID"
+    `Invalid
+    ~original:satisfiable_presolve_original
+    (add_negative_selector_assumption satisfiable_presolve_events);
+  let bound_lia_events, bound_lia_original, bound_lia_replacement =
+    presolved_lia_farkas_conflict ()
+  in
+  expect_assertions
+    "positive: W1b/CNF binding agrees with theory atom map -> fully VALID"
+    `Fully_valid
+    ~original:bound_lia_original
+    bound_lia_events;
+  expect_assertions
+    "corrupt: theory atom statement disagrees with W1b CNF binding -> INVALID"
+    `Invalid
+    ~original:bound_lia_original
+    (replace_first_atom_statement bound_lia_events bound_lia_replacement);
+  let lower_preprocess_events, lower_preprocess_original =
+    lower_preprocess_unchecked ()
+  in
+  check
+    "coverage: lower Preprocess.run changed at least one W1b output term"
+    (List.exists
+       (fun (group : Recorder.clausify_group) ->
+          group.Recorder.source != group.Recorder.preprocessed)
+       lower_preprocess_events.clausify_groups);
+  expect_assertions
+    "coverage: unreplayed lower Preprocess.run rewrite stays conditional"
+    `Modulo
+    ~original:lower_preprocess_original
+    lower_preprocess_events;
+  let lia_ev = lia_farkas_conflict () in
+  check
+    "positive: LIA stream carries a Farkas-witnessed Conflict leaf"
+    (List.exists
+       (fun (e : Recorder.theory_event) -> Option.is_some e.Recorder.lia_witness)
+       lia_ev.Checker.theory);
+  expect "positive: all theory leaves witnessed -> fully VALID" `Fully_valid lia_ev;
+  expect
+    "coverage: stripping a valid LIA witness stays conditional"
+    `Modulo
+    (strip_lia_witnesses lia_ev);
+  expect
+    "corrupt: zeroed Farkas multipliers -> INVALID"
+    `Invalid
+    (zero_lia_multipliers lia_ev);
+  let lia_eq_ev = lia_farkas_equality_conflict () in
+  (* [`Valid] accepts VALID or VALID-modulo: the point is the equality-premise Farkas leaf
+     is ACCEPTED (pre-fix it was INVALID — negative/fractional multiplier on the [2x = 4]
+     equality). The cert stays modulo here because the disequality split leaves a separate
+     unwitnessed leaf, which is fine. *)
+  expect
+    "positive: equality-premise (signed-multiplier) Farkas conflict accepted"
+    `Valid
+    lia_eq_ev;
+  expect
+    "corrupt: zeroed multipliers on an equality-premise witness -> INVALID"
+    `Invalid
+    (zero_lia_multipliers lia_eq_ev);
+  let euf_ev, chain_equality, replacement_equality = euf_congruence_conflict () in
+  check
+    "positive: EUF stream carries a congruence witness"
+    (List.exists
+       (fun (event : Recorder.theory_event) -> Option.is_some event.Recorder.euf_witness)
+       euf_ev.Checker.theory);
+  expect "positive: every EUF theory leaf witnessed -> fully VALID" `Fully_valid euf_ev;
+  expect
+    "coverage: stripping valid EUF witnesses stays conditional"
+    `Modulo
+    (strip_euf_witnesses euf_ev);
+  expect
+    "corrupt: dropped equality from EUF witness -> INVALID"
+    `Invalid
+    (drop_euf_equality euf_ev chain_equality);
+  expect
+    "corrupt: replaced equality statement breaks EUF chain -> INVALID"
+    `Invalid
+    (replace_euf_equality_statement euf_ev ~from:chain_equality ~to_:replacement_equality);
+  expect
+    "corrupt: mixed-Context term-tag alias in EUF statement -> INVALID"
+    `Invalid
+    (mixed_context_euf_leaf ());
+  expect
+    "corrupt: mixed-Context symbol rank mismatch in EUF statement -> INVALID"
+    `Invalid
+    (mixed_context_rank_euf_leaf ());
+  let euf_reason_ev = euf_congruence_reason () in
+  check
+    "positive: propagated EUF equality carries a witnessed Reason leaf"
+    (List.exists
+       (fun (event : Recorder.theory_event) ->
+         event.Recorder.role = Sat.Reason && Option.is_some event.Recorder.euf_witness)
+       euf_reason_ev.Checker.theory);
+  expect "positive: EUF Reason leaf replay -> fully VALID" `Fully_valid euf_reason_ev;
+  let dt_ev, dt_equality, dt_reflexive = dt_distinctness_conflict () in
+  check
+    "positive: DT stream carries a distinct-constructor witness"
+    (List.exists
+       (fun (event : Recorder.theory_event) ->
+         Option.is_some event.Recorder.dt_registry
+         && Option.is_some event.Recorder.dt_witness)
+       dt_ev.Checker.theory);
+  expect "positive: DT constructor-distinctness leaf -> fully VALID" `Fully_valid dt_ev;
+  expect
+    "coverage: stripping valid DT witness stays conditional"
+    `Modulo
+    (strip_dt_witnesses dt_ev);
+  expect
+    "corrupt: same constructor on both DT witness sides -> INVALID"
+    `Invalid
+    (collapse_dt_witness_pair dt_ev);
+  expect
+    "corrupt: DT atom statement no longer equates constructors -> INVALID"
+    `Invalid
+    (replace_dt_equality_statement dt_ev ~from:dt_equality ~to_:dt_reflexive);
+  expect
+    "corrupt: DT declaration no longer names witness constructors -> INVALID"
+    `Invalid
+    (erase_dt_constructor_declaration dt_ev);
+  let foreign_dt_ev, foreign_tags_collide = foreign_dt_witness_context dt_ev in
+  check
+    "mixed-context DT discriminator has colliding tags on distinct physical terms"
+    foreign_tags_collide;
+  expect "corrupt: mixed-Context DT witness endpoints -> INVALID" `Invalid foreign_dt_ev;
+  (* board #153b — EXACT antecedent-SET (and order) on a real chain, not length-only. The
+     order scenario learns [¬b] from [¬b∨c] then the conflict [¬b∨¬c]; the frozen contract
+     order [rₙ..r₁; conflict] is exactly [ {¬b,c}; {¬b,¬c} ] = [ [-2;3]; [-3;-2] ]. *)
+  let () =
+    let ev = antecedent_order () in
+    let input_clause_of id =
+      List.find_map
+        (fun (i : Recorder.input_event) ->
+          if i.Recorder.id = id then Some (clause_set i.Recorder.clause) else None)
+        ev.Checker.inputs
+    in
+    match ev.Checker.learned with
+    | [ le ] ->
+      let ant_sets =
+        List.map
+          (fun id -> Option.value ~default:[ 0 ] (input_clause_of id))
+          le.Recorder.antecedents
+      in
+      let expected = [ [ -2; 3 ]; [ -3; -2 ] ] in
+      check
+        (Printf.sprintf
+           "exact-set: antecedent clause-sets = %s (got %s)"
+           (show_sets expected)
+           (show_sets ant_sets))
+        (ant_sets = expected)
+    | ls ->
+      fail
+        "exact-set"
+        (Printf.sprintf "expected 1 learned clause, got %d" (List.length ls))
+  in
+  (* (2) DISCRIMINATION — each corruption FLIPS a VALID stream to INVALID/UNSUPPORTED.
+     Every negative is paired with its honest VALID baseline above so the flip is proven. *)
+  (* task #56 REFRAME (was three "corrupt hint chain -> INVALID" negatives): with the
+     full-closure RUP fallback, a well-formed but incomplete/mis-ordered/duplicated hint
+     chain on an ENTAILED learned clause is now VALID *via the fallback* — the cited chain
+     is advisory, the ground truth is closure-entailment. handbuilt's inputs entail [b],
+     so these three (dropped / permuted / wrong-set of well-formed cited ids) are now
+     positive tests of the FALLBACK PATH; each asserts the fallback actually FIRED. The
+     lost "corruption -> reject" discrimination is REPLACED below by the same shapes on an
+     UNENTAILED clause (the only soundness-relevant direction). *)
+  expect_via_fallback
+    "fallback: dropped hint on entailed clause -> VALID (fallback fired)"
+    (handbuilt ~learned_ants:[ 10; 11 ] ());
+  expect_via_fallback
+    "fallback: permuted hints on entailed clause -> VALID (fallback fired)"
+    (handbuilt ~learned_ants:[ 11; 10; 12 ] ());
+  expect_via_fallback
+    "fallback: wrong antecedent set on entailed clause -> VALID (fallback fired)"
+    (handbuilt ~learned_ants:[ 10; 11; 11 ] ());
+  (* task #56 rider 2 — the REPLACEMENT discrimination: the SAME hint-corruption shapes on
+     an UNENTAILED clause still REJECT. [handbuilt_unentailed] learns [c], which
+     handbuilt's inputs do NOT entail (a=false,b=true,c=false is a model), so ordered RUP
+     fails AND the fallback finds no ⊥ → INVALID. Proves corruption + non-entailment (the
+     accept-invalid direction — the only soundness direction) stays fully rejected. *)
+  expect
+    "corrupt: dropped hint on UNENTAILED clause -> INVALID"
+    `Invalid
+    (handbuilt_unentailed ~learned_ants:[ 10; 11 ] ());
+  expect
+    "corrupt: permuted hints on UNENTAILED clause -> INVALID"
+    `Invalid
+    (handbuilt_unentailed ~learned_ants:[ 11; 10; 12 ] ());
+  expect
+    "corrupt: wrong antecedent set on UNENTAILED clause -> INVALID"
+    `Invalid
+    (handbuilt_unentailed ~learned_ants:[ 10; 11; 11 ] ());
+  (* forged citation KIND (board #153a): a Root_empty whose input_id is actually a LEARNED
+     event's id. The recorder's occurrence-count resolver false-cleans this; the
+     kind-keyed checker rejects it. *)
+  expect
+    "corrupt: forged citation kind (Root_empty -> learned id) -> INVALID"
+    `Invalid
+    (handbuilt ~conclusion:(Sat.Root_empty { input_id = 20 }) ());
+  (* ambiguous id (HIGH-4): one id, two content clauses (cross-solver reuse). *)
+  expect "corrupt: ambiguous cross-solver id -> INVALID" `Invalid (high4_ambiguous ());
+  (* truncated stream: the terminal conclusion is missing. *)
+  expect
+    "corrupt: truncated stream (no conclusion) -> INVALID"
+    `Invalid
+    { (handbuilt ()) with conclusion = None };
+  (* dangling citation: an antecedent id that resolves to nothing. *)
+  expect
+    "corrupt: dangling antecedent id -> INVALID"
+    `Invalid
+    (handbuilt ~learned_ants:[ 10; 11; 999 ] ());
+  (* CRIT-1 (reviewer accept-invalid north star): a learned-clause hint that cites an
+     unverified learned id — itself, or a later/mutually-referential one. Both certify a
+     (trivially-)SAT query as unsat pre-fix; the verified-id gate makes them INVALID. *)
+  expect
+    "corrupt: self-citing learned clauses (empty query) -> INVALID"
+    `Invalid
+    exploit_self_cite;
+  expect
+    "corrupt: mutually-referential learned clauses (sat query) -> INVALID"
+    `Invalid
+    exploit_mutual;
+  (* H3 (codex): ordered_rup must validate the FULL antecedent list even after an early
+     falsification — a forged/dangling id in the TAIL (here 999 after the 12 that already
+     conflicts) must not slip through. *)
+  expect
+    "corrupt: dangling antecedent AFTER early conflict -> INVALID"
+    `Invalid
+    (handbuilt ~learned_ants:[ 10; 11; 12; 999 ] ());
+  (* C2 (codex, CRITICAL): empty theory Reason clause admitted as ⊥ -> a SAT query VALID. *)
+  expect "corrupt: empty theory Reason clause -> INVALID" `Invalid exploit_empty_reason;
+  (* base #53: a bogus level-0 theory conflict routed to empty-core E3 must still fail
+     [refutes_under] — the route is not a free pass to unsat. *)
+  expect
+    "corrupt: bogus theory conflict empty-core E3 (non-refuting DB) -> INVALID"
+    `Invalid
+    bogus_theory_conflict_empty_core_e3;
+  (* CRITICAL (codex, this round): a raw-empty Theory_lemma INPUT fabricates ⊥ and
+     certifies the SAT query [{a}] unsat through all THREE terminals. Each must go
+     INVALID; the empty QUERY input opposite must stay VALID (the origin-keyed guard, not
+     a blanket empty ban). *)
+  expect
+    "corrupt: empty Theory_lemma input (Root_empty) -> INVALID"
+    `Invalid
+    exploit_empty_lemma_root_empty;
+  expect
+    "corrupt: empty Theory_lemma input (Level0_conflict) -> INVALID"
+    `Invalid
+    exploit_empty_lemma_level0;
+  expect
+    "corrupt: empty Theory_lemma input (Failed_assumption, uncited) -> INVALID"
+    `Invalid
+    exploit_empty_lemma_failed_assumption;
+  expect
+    "positive: empty QUERY input stays legitimately unsat (E1) -> VALID"
+    `Valid
+    empty_query_input_ok;
+  (* task #42 satisfied-hint SKIP: the rings id-162 pattern (redundant satisfied hint
+     mid-chain) now REPLAYS, and the two narrow-guard negatives (a hint neither unit nor
+     satisfied still errors; skipping a satisfied hint does not launder a chain that
+     derives no conflict). *)
+  expect
+    "positive: id-162 satisfied hint mid-chain skipped -> VALID"
+    `Valid
+    id162_satisfied_skip;
+  expect
+    "corrupt: hint neither unit nor satisfied (2 free) -> INVALID"
+    `Invalid
+    neither_unit_nor_satisfied;
+  expect
+    "corrupt: satisfied hint but chain derives no conflict -> INVALID"
+    `Invalid
+    satisfied_but_no_conflict;
+  (* task #47 E1/E2 cited-clause fallback: cited clause not falsified but closure globally
+     inconsistent -> VALID; and the gate — cited not falsified AND closure consistent (a
+     SAT query) -> INVALID (fallback fires only on genuine inconsistency). *)
+  expect
+    "positive: E2 cited clause satisfied but closure inconsistent -> VALID"
+    `Valid
+    e2_fallback_closure_inconsistent;
+  expect
+    "corrupt: E2 cited not falsified AND closure consistent (sat query) -> INVALID"
+    `Invalid
+    e2_cited_not_falsified_closure_consistent;
+  (* task #56 learned-clause full-closure RUP fallback: a learned clause whose cited
+     antecedent is satisfied (hinted chain consumed) but which the verified closure
+     entails -> VALID; and the gate — an unentailed learned clause -> INVALID (fallback
+     gated on genuine entailment, no accept-invalid). *)
+  expect
+    "positive: learned clause cited-antecedent satisfied but closure-entailed -> VALID"
+    `Valid
+    learned_fallback_entailed;
+  expect
+    "corrupt: unentailed learned clause (fallback finds no ⊥) -> INVALID"
+    `Invalid
+    learned_unentailed;
+  (* H4 (codex, HIGH->CRITICAL): ambiguous content id admitted to the DB (never cited) ->
+     a SAT query VALID. Must be rejected at stream admission. Also the M6 clean
+     discriminator of the #153a ambiguity guard (only ambiguity triggers). *)
+  expect
+    "corrupt: ambiguous content id at admission -> INVALID"
+    `Invalid
+    exploit_ambiguous_admission;
+  (* M5 (codex): duplicate raw literals must NOT over-reject a valid cert (dedup at
+     ingest). *)
+  expect "positive: duplicate raw literals do not over-reject" `Valid overreject_dup_lit;
+  (* UNSUPPORTED extension point: an empty theory Conflict leaf (unconditional T_conflict
+     [], ADR-0013 Rev 6) has no v1 leaf witness for ⊥-from-∅ — the checker fails closed to
+     UNSUPPORTED, never VALID. Hand-built: the terminal cites the empty theory conflict. *)
+  let unsupported_empty_conflict : Checker.events =
+    { Checker.inputs = [ mk_input 10 [| a_ |] ]
+    ; rewrite_statements = []
+    ; equality_witnesses = []
+    ; clausify_groups = []
+    ; atoms = []
+    ; units = []
+    ; learned = []
+    ; theory =
+        [ ({ id = 30
+           ; clause = [||]
+           ; role = Sat.Conflict
+           ; lia_witness = None
+           ; euf_witness = None
+           ; dt_registry = None
+           ; dt_witness = None
+           }
+           : Recorder.theory_event)
+        ]
+    ; conclusion = Some (Sat.Level0_conflict { conflict_id = 30 })
+    ; assumptions = []
+    }
+  in
+  expect
+    "ext-point: empty theory Conflict -> UNSUPPORTED"
+    `Unsupported
+    unsupported_empty_conflict;
+  Printf.printf "checker_test: %d checks, %d failures\n" !checks !failures;
+  if !failures > 0 then exit 1
+;;

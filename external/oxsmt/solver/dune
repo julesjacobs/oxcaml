@@ -1,0 +1,4 @@
+; stdlib-only — no libraries field, ever (AGENTS.md dependency firewall).
+
+(library
+ (name oxsmt_solver))

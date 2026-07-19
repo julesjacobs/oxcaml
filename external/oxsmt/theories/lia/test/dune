@@ -1,0 +1,76 @@
+; In-tree unit + property tests for smt/theories/lia. Depends only on oxsmt_core and
+; oxsmt_lia, so it honors the dependency firewall (I3) even though it lives under smt/.
+; Run via `make lia-test`; also built by `make build`.
+;
+; The independent Farkas verifier and the brute-force enumerator here are deliberately
+; test-only and written from the certificate/semantics definitions (DESIGN §10), not from
+; the solver internals.
+
+(executable
+ (name lia_test)
+ (modules lia_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; Direct linear-real-arithmetic engine self-test.  It uses an independent exact
+; Fourier--Motzkin oracle and a public-output Farkas verifier; no frozen Real-sort term
+; support is needed for this additive engine-level suite.
+
+(executable
+ (name lra_test)
+ (modules lra_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; The THEORY-adapter test (ADR-0005 M4). Same firewall: oxsmt_core + oxsmt_lia only. Its
+; independent Farkas verifier reconstructs half-planes from the adapter's PUBLIC premise
+; literals (no engine internals), per DESIGN §10.
+
+(executable
+ (name lia_adapter_test)
+ (modules lia_adapter_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; Dark-gated equality propagation: run twice from Makefile, once OFF to pin the inert
+; path and once ON to exercise positive/negative sparse reasons plus push/pop re-derivation.
+
+(executable
+ (name lia_eq_prop_test)
+ (modules lia_eq_prop_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; Bigint self-test (core-bignum W2): hand vectors + pure-OCaml property vectors + an
+; INDEPENDENT Python differential oracle (R4). The oracle shells out via stdlib
+; [Sys.command]; no library dep is added, so the I3 firewall holds. python3-absent → skip.
+
+(executable
+ (name bigint_test)
+ (modules bigint_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; One-word (Zarith-style) Rational representation self-test: rep-boundary vectors +
+; INDEPENDENT Python fractions.Fraction differential oracle crossing the immediate/block
+; boundary both ways. Simplex-free (so it always terminates) — the mutation-testing suite
+; for the rational-word mutants. Same I3 firewall; python3-absent → skip.
+
+(executable
+ (name rational_word_test)
+ (modules rational_word_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; Standalone HNF kernel self-test (Stage B lattice kernel): hand matrices, a random
+; property sweep (self-check + an independent unimodularity witness), the lattice-
+; determinant invariant, and a modular/ring-lattice gcd example. oxsmt_core + oxsmt_lia
+; only (I3 firewall).
+
+(executable
+ (name hnf_test)
+ (modules hnf_test)
+ (libraries oxsmt_core oxsmt_lia))
+
+; Adapter-level per-query CG-cut budget + reset test (task #53 H3). Run via
+; `make cut-budget-test` with OXSMT_CG_CUTS=1 set (the cut site's flag is fixed at module
+; load); skips cleanly if the flag is off. Same I3 firewall (oxsmt_core + oxsmt_lia only).
+
+(executable
+ (name cut_budget_test)
+ (modules cut_budget_test)
+ (libraries oxsmt_core oxsmt_lia))

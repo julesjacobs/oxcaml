@@ -47,6 +47,9 @@ val emit :
   Vox_vc.t ->
   (string, emission_error) Stdlib.result
 
+val discharge_oxsmt :
+  ?timeout_seconds:int -> env:Env.t -> Vox_vc.t -> result
+
 val discharge :
   backend:backend ->
   command:string option ->

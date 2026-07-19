@@ -1,4 +1,5 @@
 (* TEST
+ include unix;
  include ocamlcommon;
 *)
 
@@ -214,6 +215,49 @@ let cases =
     "datatype", datatype;
     "let-ite-lambda-beta", reduction;
   ]
+
+let () =
+  List.iter
+    (fun (_, condition) ->
+      let result = Vox_smt.discharge_oxsmt ~env condition in
+      assert (result.verdict = Vox_smt.Proved))
+    cases;
+  let disproved = Vox_smt.discharge_oxsmt ~env (vc (bool false)) in
+  assert (disproved.verdict = Vox_smt.Disproved);
+  let nonlinear =
+    let square = multiply (bound x) (bound x) in
+    vc (equal int_type square square)
+  in
+  let unknown = Vox_smt.discharge_oxsmt ~env nonlinear in
+  assert (unknown.verdict = Vox_smt.Not_proved);
+  let original_mask =
+    Unix.sigprocmask Unix.SIG_BLOCK [Sys.sigalrm]
+  in
+  Unix.putenv "VOX_OXSMT_TEST_SPIN" "1";
+  let started = Unix.gettimeofday () in
+  let blocked_timeout, remained_blocked =
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.putenv "VOX_OXSMT_TEST_SPIN" "0";
+        ignore (Unix.sigprocmask Unix.SIG_SETMASK original_mask))
+      (fun () ->
+        let result =
+          Vox_smt.discharge_oxsmt ~timeout_seconds:1 ~env
+            arithmetic_and_booleans
+        in
+        let current_mask =
+          Unix.sigprocmask Unix.SIG_BLOCK []
+        in
+        result, List.mem Sys.sigalrm current_mask)
+  in
+  let elapsed = Unix.gettimeofday () -. started in
+  assert (blocked_timeout.verdict = Vox_smt.Solver_error);
+  assert remained_blocked;
+  assert (elapsed >= 0.75 && elapsed <= 2.5);
+  let bad_timeout =
+    Vox_smt.discharge_oxsmt ~timeout_seconds:0 ~env arithmetic_and_booleans
+  in
+  assert (bad_timeout.verdict = Vox_smt.Solver_error)
 
 let () =
   List.iter
