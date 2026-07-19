@@ -31,6 +31,12 @@
 (assert (not (= (= (VoxData_9e95b208c17b28cd510d1b4a094ad589_c_1_Some 7) (VoxData_9e95b208c17b28cd510d1b4a094ad589_c_1_Some 7)) true)))
 (check-sat)
 (get-unsat-core)
+=== recursive-datatype ===
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e 0)) (((VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_c_0___) (VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_c_1___ (VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_s_1_0 Int) (VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_s_1_1 VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e)))))
+(assert (not (= (= (VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_c_1___ 7 VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_c_0___) (VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_c_1___ 7 VoxData_05cdd02e1e76c0cf1d9d14358dd21a4e_c_0___)) true)))
+(check-sat)
+(get-unsat-core)
 === let-ite-lambda-beta ===
 (set-option :produce-unsat-cores true)
 (assert (not (= (and (ite true (let ((l_0 3)) (= l_0 3)) false) (= 4 4)) true)))

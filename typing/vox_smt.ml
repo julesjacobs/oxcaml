@@ -104,6 +104,7 @@ type data_instance =
   { data_key : string;
     data_name : string;
     data_path : Path.t;
+    data_type_arguments : type_expr list;
     mutable data_definition : data_definition option;
   }
 
@@ -191,16 +192,18 @@ let instantiate context location declaration arguments type_ =
   | Ctype.Cannot_apply ->
     error location "cannot instantiate datatype field type"
 
-let ensure_no_nested_data location owner sort =
+let same_type_arguments left right =
+  List.length left = List.length right
+  && List.for_all2
+       (fun left right -> get_id left = get_id right)
+       left right
+
+let ensure_no_function_field location sort =
   let rec loop = function
-    | Sint | Sbool -> ()
+    | Sint | Sbool | Sdata _ -> ()
     | Stuple sorts -> List.iter loop sorts
     | Sarrow _ ->
       error location "function-valued datatype fields are not supported"
-    | Sdata nested ->
-      error location
-        "recursive or mutually nested datatype %s in %s is not supported"
-        nested owner
   in
   loop sort
 
@@ -269,12 +272,27 @@ and register_abstract context location path arguments declaration =
       { data_key = key;
         data_name = "VoxData_" ^ digest key;
         data_path = path;
+        data_type_arguments = arguments;
         data_definition = Some Abstract;
       }
       :: context.data;
     Sdata key
 
 and register_data context location path arguments declaration =
+  begin match
+    List.find_opt
+      (fun data ->
+        Path.same data.data_path path
+        && Option.is_none data.data_definition)
+      context.data
+  with
+  | Some data
+    when not (same_type_arguments data.data_type_arguments arguments) ->
+    error location
+      "non-regular recursive datatype %s is not supported"
+      (Path.name path)
+  | Some _ | None -> ()
+  end;
   let argument_sorts =
     List.map (sort_of_type context location) arguments
   in
@@ -293,6 +311,7 @@ and register_data context location path arguments declaration =
       { data_key = key;
         data_name = "VoxData_" ^ digest key;
         data_path = path;
+        data_type_arguments = arguments;
         data_definition = None;
       }
     in
@@ -302,7 +321,7 @@ and register_data context location path arguments declaration =
         instantiate context location declaration arguments type_
       in
       let sort = sort_of_type context location type_ in
-      ensure_no_nested_data location key sort;
+      ensure_no_function_field location sort;
       sort
     in
     let definition =
@@ -2127,6 +2146,57 @@ let check_abstract_inhabitance context location =
       | Abstract | Variant _ | Record _ -> ())
     context.data
 
+let check_concrete_inhabitance context location =
+  let rec sort_is_inhabited inhabited = function
+    | Sint | Sbool -> true
+    | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
+    | Sdata key -> List.mem key inhabited
+    | Sarrow _ -> false
+  in
+  let inhabited =
+    ref
+      (List.filter_map
+         (fun data ->
+           match definition location data with
+           | Abstract -> Some data.data_key
+           | Variant _ | Record _ -> None)
+         context.data)
+  in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    let add key condition =
+      if condition && not (List.mem key !inhabited) then begin
+        inhabited := key :: !inhabited;
+        changed := true
+      end
+    in
+    List.iter
+      (fun data ->
+        let definition_is_inhabited =
+          match definition location data with
+          | Abstract -> true
+          | Variant constructors ->
+            List.exists
+              (fun constructor ->
+                List.for_all (sort_is_inhabited !inhabited)
+                  constructor.constructor_fields)
+              constructors
+          | Record fields ->
+            List.for_all
+              (fun (_, sort) -> sort_is_inhabited !inhabited sort)
+              fields
+        in
+        add data.data_key definition_is_inhabited)
+      context.data
+  done;
+  List.iter
+    (fun data ->
+      if not (List.mem data.data_key !inhabited) then
+        error location "datatype %s is not well-founded"
+          (Path.name data.data_path))
+    context.data
+
 let emit_references (context : context) location buffer =
   List.sort
     (fun (left : reference) (right : reference) ->
@@ -2180,6 +2250,7 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
   let context = { env; data = []; tuples = []; references = [] } in
   let variables = collect context expressions in
   check_abstract_inhabitance context vc.location;
+  check_concrete_inhabitance context vc.location;
   let fact_terms =
     List.map
       (fun fact ->

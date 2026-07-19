@@ -34,6 +34,7 @@ let tuple_type fields =
 let int_type = Predef.type_int
 let bool_type = Predef.type_bool
 let option_type = Predef.type_option int_type
+let list_type = Predef.type_list int_type
 let pair_type = tuple_type [None, int_type; None, bool_type]
 let loc = Location.in_file "standalone_smt.ml"
 
@@ -61,6 +62,17 @@ let some value =
            rconstr_name = "Some";
          },
          [value] ))
+
+let nil =
+  node list_type
+    (Rexp_construct
+       ({ rconstr_type_path = Predef.path_list; rconstr_name = "[]" }, []))
+
+let cons head tail =
+  node list_type
+    (Rexp_construct
+       ( { rconstr_type_path = Predef.path_list; rconstr_name = "::" },
+         [head; tail] ))
 
 let primitive type_ name =
   let stdlib = Path.Pident (Ident.create_persistent "Stdlib") in
@@ -157,6 +169,10 @@ let datatype =
   let value = some (int 7) in
   vc (equal option_type value value)
 
+let recursive_datatype =
+  let value = cons (int 7) nil in
+  vc (equal list_type value value)
+
 let reduction =
   let local =
     { rb_id = Ident.create_scoped ~scope:2 "local";
@@ -213,6 +229,7 @@ let cases =
     "bound-function-symbol", bound_function_symbol;
     "tuple", tuple;
     "datatype", datatype;
+    "recursive-datatype", recursive_datatype;
     "let-ite-lambda-beta", reduction;
   ]
 
