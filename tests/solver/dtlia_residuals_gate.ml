@@ -115,6 +115,54 @@ let () =
      (assert (> k 5))\n\
      (check-sat)\n"
     Session.Unsat;
+  Printf.printf "\ndtlia residuals gate (applied uninterpreted predicates, QF_UFDT):\n%!";
+  (* P recovery: applied predicate over a selector output. RED with PRED off. *)
+  expect
+    "P p(key t), t=Node(_,3,_) -> sat"
+    "(declare-datatypes ((Tree 0)) (((Node (left Tree) (key Int) (right Tree)) (Empty))))\n\
+     (declare-fun p (Int) Bool)\n\
+     (declare-const t Tree)\n\
+     (assert (= t (Node Empty 3 Empty)))\n\
+     (assert (p (key t)))\n\
+     (check-sat)\n"
+    Session.Sat;
+  (* P2 recovery: applied predicate over a plain Int, datatype present. *)
+  expect
+    "P2 p(x), enum present -> sat"
+    "(declare-datatypes ((Color 0)) (((Red) (Green) (Blue))))\n\
+     (declare-fun p (Int) Bool)\n\
+     (declare-const c Color)\n\
+     (declare-const x Int)\n\
+     (assert (= c Red))\n\
+     (assert (p x))\n\
+     (check-sat)\n"
+    Session.Sat;
+  (* P3 mixed polarity, distinct selector values -> sat (p(key t1)=T, p(key t2)=F, keys
+     DIFFER so no functionality conflict). *)
+  expect
+    "P3 p(key t1) /\\ ~p(key t2), keys 1 vs 2 -> sat"
+    "(declare-datatypes ((Tree 0)) (((Node (left Tree) (key Int) (right Tree)) (Empty))))\n\
+     (declare-fun p (Int) Bool)\n\
+     (declare-const t1 Tree)\n\
+     (declare-const t2 Tree)\n\
+     (assert (= t1 (Node Empty 1 Empty)))\n\
+     (assert (= t2 (Node Empty 2 Empty)))\n\
+     (assert (p (key t1)))\n\
+     (assert (not (p (key t2))))\n\
+     (check-sat)\n"
+    Session.Sat;
+  (* PCONG soundness: congruence violation p(key t1) /\ ~p(key t2) /\ key t1 = key t2 ->
+     UNSAT (solver refutes via p-congruence; must never become sat). *)
+  expect_not_sat
+    "PCONG p(key t1) /\\ ~p(key t2) /\\ key t1=key t2 (never sat)"
+    "(declare-datatypes ((Tree 0)) (((Node (left Tree) (key Int) (right Tree)) (Empty))))\n\
+     (declare-fun p (Int) Bool)\n\
+     (declare-const t1 Tree)\n\
+     (declare-const t2 Tree)\n\
+     (assert (= (key t1) (key t2)))\n\
+     (assert (p (key t1)))\n\
+     (assert (not (p (key t2))))\n\
+     (check-sat)\n";
   if !failures > 0
   then (
     Printf.printf "dtlia-residuals gate: %d failure(s)\n%!" !failures;

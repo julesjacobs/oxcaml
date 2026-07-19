@@ -389,6 +389,75 @@ let run_combination_split () =
       splits
 ;;
 
+(* Applied-predicate functionality (congruence) guard (dtlia-residuals lane). QF_UFDT: an
+   uninterpreted predicate [p(args)] over selector outputs is checked through an
+   INDEPENDENT functionality table {!Dt_model_check} builds from the applied-atom truths
+   in the model — grouping by the ARGUMENT VALUES, so congruence is re-derived, never
+   trusted from the solver. This is the direct proof the guard is load-bearing: a model
+   that assigns [p(key t1)] and [p(key t2)] DIFFERENT truths while both keys evaluate to
+   the SAME value (the N-O disagreement a per-atom read would rubber-stamp) MUST be
+   rejected; the consistent companion is accepted. *)
+let run_predicate_functionality () =
+  let s = Session.create () in
+  let tree = Sort.datatype_ (Session.declare_sort s "TreeF") in
+  let dt =
+    Session.declare_datatype
+      s
+      tree
+      [ { Session.ctor_name = "NodeF"
+        ; fields = [ "leftF", tree; "keyF", Sort.int; "rightF", tree ]
+        }
+      ; { Session.ctor_name = "EmptyF"; fields = [] }
+      ]
+  in
+  let reg = Defs.add Defs.empty dt in
+  let ctx = Session.context s in
+  let key = (List.nth (List.nth dt.Defs.constructors 0).Defs.selectors 1).Defs.sym in
+  let p =
+    Session.declare_fun
+      s
+      "pF"
+      { Oxsmt_core.Rank.domain = Iarr.of_list [ Sort.int ]; codomain = Sort.bool }
+  in
+  let t1 = Context.const ctx (Session.declare_const s "t1F" tree) in
+  let t2 = Context.const ctx (Session.declare_const s "t2F" tree) in
+  let key_t1 = Context.app ctx key [ t1 ] in
+  let key_t2 = Context.app ctx key [ t2 ] in
+  let p_kt1 = Context.app ctx p [ key_t1 ] in
+  let p_kt2 = Context.app ctx p [ key_t2 ] in
+  (* both trees carry key 5 in the model, so [key t1] and [key t2] evaluate equal *)
+  let tree5 =
+    Dt.Ctor
+      ( "NodeF"
+      , [ Dt.Ctor ("EmptyF", [])
+        ; Dt.Leaf (Model.Int (Bigint.of_int 5))
+        ; Dt.Ctor ("EmptyF", [])
+        ] )
+  in
+  let violating : (Term.t * Dt.ctor_tree) list =
+    [ t1, tree5
+    ; t2, tree5
+    ; p_kt1, Dt.Leaf (Model.Bool true)
+    ; p_kt2, Dt.Leaf (Model.Bool false)
+    ]
+  in
+  expect_bool
+    "predicate functionality: congruence-violating model rejected"
+    (Dt_model_check.check reg violating [ p_kt1; Context.not_ ctx p_kt2 ])
+    false;
+  let consistent : (Term.t * Dt.ctor_tree) list =
+    [ t1, tree5
+    ; t2, tree5
+    ; p_kt1, Dt.Leaf (Model.Bool true)
+    ; p_kt2, Dt.Leaf (Model.Bool true)
+    ]
+  in
+  expect_bool
+    "predicate functionality: consistent model accepted"
+    (Dt_model_check.check reg consistent [ p_kt1; p_kt2 ])
+    true
+;;
+
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/dt-goldens-sat" in
   run_goldens dir;
@@ -396,6 +465,7 @@ let () =
   run_discrimination ();
   run_bool_inhabitance ();
   run_dag_blowup ();
+  run_predicate_functionality ();
   run_fault_injection (read_file (Filename.concat dir "dt_recursive_diseq_sat.smt2"));
   Printf.printf "Dt sat-gate: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1

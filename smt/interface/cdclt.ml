@@ -1661,6 +1661,30 @@ let model t =
    commit branch and validated by [Dt_model_check] before any [sat] is reported. *)
 let dt_model t = t.last_dt_model
 
+(* Applied Bool theory atoms — uninterpreted predicate applications [p(args)] with
+   [args >= 1], interned in the theory-atom table [t2v] — paired with their truth in the
+   accepting SAT assignment. Read at commit time (AFTER [Sat.solve] returned [Sat], so
+   [saved_model] is the accepting one). Feeds {!Session}'s DT commit branch, where
+   {!Dt_model_check} builds an INDEPENDENT functionality (congruence) table over these
+   atoms so a QF_UFDT predicate over datatype/selector arguments can be checked rather
+   than fail-closed. Non-registering; a nullary Bool const lives in the propositional
+   skeleton (Session's [prop_to_var]), not here, so this returns only genuine
+   applications. A datatype TESTER [(_ is C) x] is also a Bool application but is
+   evaluated structurally by {!Dt_model_check} from the constructor tree, so it is
+   excluded here (only an uninterpreted predicate needs the functionality table). *)
+let applied_bool_atom_values t =
+  let reg = !(t.registry) in
+  Term.Table.fold
+    (fun (term : Term.t) v acc ->
+      match term.Term.node, term.Term.sort with
+      | Term.App (sym, args), Sort.Bool
+        when Iarr.length args >= 1 && Option.is_none (Datatype_defs.tester_of_sym reg sym)
+        -> (term, Sat.value t.sat v) :: acc
+      | _ -> acc)
+    t.t2v
+    []
+;;
+
 (* The arrays checker model snapshotted at the accepting Final->Sat, or [None] when the
    last check-sat was not an arrays-theory [Sat]. Read by {!Session}'s arrays commit
    branch and validated by [Array_model_check] before any [sat] is reported. *)

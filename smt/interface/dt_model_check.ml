@@ -166,11 +166,33 @@ let as_bool = function
   | _ -> raise Bad
 ;;
 
+(* Total structural equality on model values (no [Bad]); used to group applied-predicate
+   argument tuples for the independent functionality (congruence) check below. A kind
+   mismatch is simply "not equal" (never raises), unlike {!model_value_eq}/{!v_eq} which
+   fault on a well-sorted [Eq]. *)
+let rec v_equal (a : v) (b : v) : bool =
+  match a, b with
+  | Leaf (Model.Int x), Leaf (Model.Int y) -> Bigint.equal x y
+  | Leaf (Model.Bool x), Leaf (Model.Bool y) -> Bool.equal x y
+  | Leaf (Model.Uninterp x), Leaf (Model.Uninterp y) -> Int.equal x y
+  | Leaf (Model.Real x), Leaf (Model.Real y) ->
+    Bigint.equal x.Term.num y.Term.num && Bigint.equal x.Term.den y.Term.den
+  | Ctor (n1, k1), Ctor (n2, k2) ->
+    String.equal n1 n2 && List.length k1 = List.length k2 && List.for_all2 v_equal k1 k2
+  | _ -> false
+;;
+
+let vlist_equal a b = List.length a = List.length b && List.for_all2 v_equal a b
+
 (* Evaluate [term] under the model table [env] (leaf variables + underspecified selector
    terms) and the datatype shape [reg]; raises {!Bad} on any fault. Compound terms are
    computed structurally — only leaves and genuinely-underspecified selector applications
    are read from [env]. *)
-let ev_with (reg : Defs.t) (env : v Term.Table.t) =
+let ev_with
+  (reg : Defs.t)
+  (env : v Term.Table.t)
+  (funs : (string, (v list * bool) list) Hashtbl.t)
+  =
   (* Structural value equality, DAG-aware (see the physical-identity note above).
      Well-sorted [Eq] never mixes a tree with a leaf (nor two leaves of different kinds);
      a mismatch is a fault => fail closed. Memoized on the physical pair so equating two
@@ -278,13 +300,27 @@ let ev_with (reg : Defs.t) (env : v Term.Table.t) =
              | Some _ -> raise Bad
              | None ->
                (* not a constructor/selector/tester. A leaf (nullary) variable/constant is
-                  read from the model; an applied uninterpreted function (only in QF_UFDT,
-                  out of the v1 fragment) has no value => fail closed. *)
+                  read from the model. An applied uninterpreted PREDICATE [p(args)] (Bool,
+                  QF_UFDT) is evaluated through the independent functionality table
+                  [funs]: its arguments are evaluated here and looked up by VALUE, so
+                  congruence is re-derived from the argument values (never trusting the
+                  solver's class structure — [check] rejects a functionality violation
+                  before this runs). An applied uninterpreted FUNCTION with a non-Bool
+                  result has no table entry and stays out of the fragment => fail closed. *)
                if Array.length args = 0
                then (
                  match Term.Table.find_opt env t with
                  | Some v -> v
                  | None -> raise Bad)
+               else if Sort.equal t.Term.sort Sort.bool
+               then (
+                 match Hashtbl.find_opt funs (Symbol.name sym) with
+                 | None -> raise Bad
+                 | Some rows ->
+                   let argvals = Array.to_list (Array.map ev args) in
+                   (match List.find_opt (fun (a, _) -> vlist_equal a argvals) rows with
+                    | Some (_, b) -> Leaf (Model.Bool b)
+                    | None -> raise Bad))
                else raise Bad)))
   in
   ev
@@ -307,7 +343,42 @@ let check reg model assertions =
   then false
   else (
     let env = build_env model in
-    let ev = ev_with reg env in
-    try List.for_all (fun a -> as_bool (ev a)) assertions with
-    | Bad -> false)
+    (* Independent functionality table for applied Bool predicates [p(args)] (QF_UFDT).
+       Each applied-predicate atom arrives in [model] as [(p(args), Leaf (Bool b))] (its
+       truth from the accepting assignment); evaluate its arguments under the model and
+       group the truth by (symbol, argument VALUES). A conflicting truth for value-equal
+       arguments is a functionality (congruence) violation ⇒ reject — this re-derives
+       congruence from the argument values, exactly as {!Model_check}'s function tables
+       do, so it never trusts the solver's class structure. Arguments are evaluated with
+       an empty table (predicate arguments are datatype/arithmetic terms, not other
+       predicates); an atom whose arguments do not resolve is skipped (fail-closed for
+       that atom, never a wrong pass). *)
+    let empty : (string, (v list * bool) list) Hashtbl.t = Hashtbl.create 1 in
+    let arg_ev = ev_with reg env empty in
+    let funs : (string, (v list * bool) list) Hashtbl.t = Hashtbl.create 16 in
+    let functional = ref true in
+    List.iter
+      (fun (t, tree) ->
+        match t.Term.node, tree with
+        | Term.App (sym, args), Leaf (Model.Bool b) when Iarr.length args >= 1 ->
+          (match
+             try Some (List.map arg_ev (Iarr.to_list args)) with
+             | Bad -> None
+           with
+           | None -> ()
+           | Some argvals ->
+             let name = Symbol.name sym in
+             let rows = Option.value ~default:[] (Hashtbl.find_opt funs name) in
+             if List.exists (fun (a, b') -> vlist_equal a argvals && b' <> b) rows
+             then functional := false
+             else if not (List.exists (fun (a, _) -> vlist_equal a argvals) rows)
+             then Hashtbl.replace funs name ((argvals, b) :: rows))
+        | _ -> ())
+      model;
+    if not !functional
+    then false
+    else (
+      let ev = ev_with reg env funs in
+      try List.for_all (fun a -> as_bool (ev a)) assertions with
+      | Bad -> false))
 ;;

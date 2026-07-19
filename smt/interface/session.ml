@@ -2108,6 +2108,44 @@ let complete_dt_elim_scalars t model =
     model @ additions)
 ;;
 
+(* DT applied-predicate model completion (default ON;
+   [OXSMT_DTLIA_PRED_COMPLETE]=0/false/no opts out). An uninterpreted PREDICATE
+   application [p(args)] (Bool, [args >= 1]) over datatype/selector arguments is a QF_UFDT
+   atom: {!Dt_model_check} could not evaluate it (an applied
+   non-constructor/selector/tester term) and failed closed — the applied- predicate
+   residual stamped out-of-fragment in the LAND 71 bugreport-03 update. Add each such
+   atom's truth (from the accepting SAT assignment, via [Cdclt.applied_bool_atom_values])
+   to the DT checker model; [Dt_model_check] then builds an INDEPENDENT functionality
+   (congruence) table over these atoms — re-deriving congruence from the argument values —
+   so it certifies the predicate rather than fail-closing. Gains-only and fail-closed: the
+   checker still re-evaluates every assertion and rejects any functionality violation, so
+   a completed value can only turn a model-check [unknown] into a checked [Sat], never a
+   wrong [Sat]. UNSAT never reaches here (the solver enforces p-congruence and refutes a
+   violation before commit). *)
+let dtlia_pred_complete =
+  lazy
+    (match Sys.getenv_opt "OXSMT_DTLIA_PRED_COMPLETE" with
+     | Some ("0" | "false" | "no" | "off") -> false
+     | Some _ | None -> true)
+;;
+
+let complete_dt_applied_preds t model =
+  if not (Lazy.force dtlia_pred_complete)
+  then model
+  else (
+    let seen = Term.Table.create 128 in
+    List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
+    let additions =
+      List.filter_map
+        (fun (term, b) ->
+          if Term.Table.mem seen term
+          then None
+          else Some (term, Oxsmt_dt.Dt.Leaf (Model.Bool b)))
+        (Cdclt.applied_bool_atom_values t.cdclt)
+    in
+    model @ additions)
+;;
+
 let commit_sat t =
   (* ARRAYS (QF_AX model construction, task #14): the standalone arrays theory is
      installed, so soundness rests on the array self-check, not the UF [Model_check]
@@ -2152,6 +2190,7 @@ let commit_sat t =
     | Some model ->
       let model = complete_dt_bool_atoms t model in
       let model = complete_dt_elim_scalars t model in
+      let model = complete_dt_applied_preds t model in
       let check =
         match !dt_checker_override with
         | Some f -> f

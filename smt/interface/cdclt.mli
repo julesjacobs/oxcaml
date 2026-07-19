@@ -222,6 +222,14 @@ val model : t -> (sort_card list * binding list) option
     is reported. Deterministic. *)
 val dt_model : t -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list option
 
+(** [applied_bool_atom_values t] is every interned applied Bool theory atom (an
+    uninterpreted predicate application [p(args)], [args >= 1]) paired with its truth in
+    the accepting SAT assignment. Read at commit time (saved model = the accepting one).
+    Feeds {!Session}'s DT commit branch so {!Dt_model_check} can build an independent
+    functionality table for QF_UFDT predicates over datatype/selector arguments.
+    Deterministic. *)
+val applied_bool_atom_values : t -> (Term.t * bool) list
+
 (** [array_model t] is the arrays theory's checker model, snapshotted at the accepting
     Final->Sat when the installed theory is the standalone arrays theory (QF_AX model
     construction); [None] otherwise. Read by {!Session}'s arrays commit branch and
