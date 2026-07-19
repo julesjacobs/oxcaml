@@ -43,9 +43,9 @@ open Oxsmt_core
 
 type 'tok t
 
-(** A Farkas-certified infeasible core. For an inequality premise, [farkasᵢ >= 0] is
-    its asserted half-plane multiplier. For a positive Int equality [a = b], [farkasᵢ]
-    is an unrestricted signed multiplier on the equation [a - b = 0]. Their sum is a
+(** A Farkas-certified infeasible core. For an inequality premise, [farkasᵢ >= 0] is its
+    asserted half-plane multiplier. For a positive Int equality [a = b], [farkasᵢ] is an
+    unrestricted signed multiplier on the equation [a - b = 0]. Their sum is a
     variable-free positive constant. *)
 type 'tok conflict =
   { premises : 'tok list
@@ -86,8 +86,8 @@ val create : Context.t -> 'tok t
 val assert_atom : 'tok t -> Term.t -> polarity:bool -> premise:'tok -> unit
 
 (** [register_atom t atom] pre-declares [atom]'s variable/bound structure without
-    asserting it, so {!propagate} can later report it as theory-implied. This covers
-    [Le] atoms, and under [OXSMT_LIA_EQ_PROP=1] also Int equalities. Idempotent. *)
+    asserting it, so {!propagate} can later report it as theory-implied. This covers [Le]
+    atoms, and under [OXSMT_LIA_EQ_PROP=1] also Int equalities. Idempotent. *)
 val register_atom : 'tok t -> Term.t -> unit
 
 (** [check t] tests rational (δ) feasibility of the asserted atoms. *)
@@ -188,6 +188,33 @@ val propagate : 'tok t -> (Term.t * bool * 'tok list) list
     push/pops simplex bounds). *)
 val cube_model : 'tok t -> (Term.t * int) list option
 
+(** [model_find ?node_budget t] — after a {!Sat_candidate} whose ℚ-model is not integral —
+    runs a cut-free, arbitrary-precision, round-to-nearest DIVING branch-and-bound
+    entirely inside the theory (no CDCL(T) round-trip, no cut generation), bounded by
+    [node_budget] B&B nodes. Returns [true] iff it found an integer model of the currently
+    asserted atom set — stashed for a subsequent {!model_bigint} until the next {!check};
+    [false] means "no model within budget" and the caller MUST fall back to
+    {!suggest_branch} (never treat [false] as unsat). Re-runnable at every [Final] (unlike
+    {!cube_model}'s once-guard): each call re-solves from the CURRENT simplex bounds, so
+    it composes with the combiner's disequality-resolution splits between Finals. Intended
+    for the convert class (bounded ℤ-feasible conjunctions with 2^32/2^64-scale
+    coefficients, where the CDCL(T)-delegated B&B wanders); the engine behind
+    [Lia_adapter]'s OXSMT_LIA_MODELFIND mode. Sound: the leaf assignment is
+    simplex-feasible and integral, and every branch bound only restricts, so it is a
+    genuine ℤ model of the SIMPLEX constraints; the session's independent R1 check
+    re-validates, so a bug degrades to [unknown], never a wrong [sat]. Overflow-safe by
+    construction (all branch points/values go through the [Bigint] projections), so unlike
+    {!solve_integer} it does not degrade on the 2^64-coefficient inputs. Sets the
+    {!solve_integer}-style dirty flag.
+
+    {b Known limitation (logs/convert-impl-report.md).} The dive sees only the simplex
+    (=/≤/≥) constraints. Int DISEQUALITIES are routed to the EUF congruence child + the
+    combiner's pins ({!Combine}), NOT to LIA, so a returned model can violate an asserted
+    [px <> py]; the combiner's [find_disagreement] then rejects it and splits. On a
+    formula with hundreds of pinned disequalities (convert), the dive/split interleaving
+    does not converge — a disequality-AWARE dive is the follow-up. *)
+val model_find : ?node_budget:int -> 'tok t -> bool
+
 (** [model t] is the integer assignment of the problem variables; valid only after
     {!solve_integer} returned [Int_sat] or {!cube_model} returned [Some] (raises
     {!Failure} if a value is non-integral and no cube model is stashed). *)
@@ -269,10 +296,7 @@ val is_poisoned : 'tok t -> bool
 module For_testing : sig
   (** The equality and hash used by the slack-dedup table, including canonical ordering.
       Exposed only for the soundness-critical key discrimination test. *)
-  val slack_key_equal
-    :  (int * Rational.t) list
-    -> (int * Rational.t) list
-    -> bool
+  val slack_key_equal : (int * Rational.t) list -> (int * Rational.t) list -> bool
 
   val slack_key_hash : (int * Rational.t) list -> int
 end

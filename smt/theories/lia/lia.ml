@@ -146,6 +146,12 @@ type 'tok t =
          at the current Final; read once by [model] (the adapter reads it immediately
          after the Final->Sat). Cleared at the start of every [check] so it can never
          satisfy a later, non-cube Sat with a stale point. *)
+  ; mutable last_modelfind_model : (Term.t * Oxsmt_core.Bigint.t) list option
+      (* set by [model_find] (OXSMT_LIA_MODELFIND) when the cut-free diving B&B found an
+         integer model at the current Final; read once by [model_bigint] (the adapter
+         reads it immediately after the Final->Sat). Bigint-valued (convert-class models
+         carry >int63 bit-field values). Cleared at the start of every [check], exactly
+         like [last_cube_model], so a stale dive point can never satisfy a later Sat. *)
   ; mutable eq_frames : (Term.t * Term.t * 'tok) list list
       (* push/pop stack (head = current frame) of asserted positive Int equalities as
          [(lhs, rhs, premise)], mirroring [report_frames]' framing so a [pop] drops
@@ -235,6 +241,7 @@ let create ctx =
   ; check_dirty = true
   ; overflows = 0
   ; last_cube_model = None
+  ; last_modelfind_model = None
   ; eq_frames = [ [] ]
   ; false_frames = [ [] ]
   ; cube_tried = false
@@ -745,6 +752,7 @@ let check t =
   (* A cube model is valid only within the single Final->model window that produced it;
      clear it here so a later (non-cube) Sat can never read a stale point. *)
   t.last_cube_model <- None;
+  t.last_modelfind_model <- None;
   (* task #78 follow-up: a positive [Trivially_false] equality asserted in a still-live
      frame is a standalone UNSAT relation independent of the simplex. Report it as a
      [Conflict] before (and regardless of) the simplex scan; it persists until the frame
@@ -1803,11 +1811,17 @@ let extract_model_bigint t =
 
 let model_bigint t =
   ensure_live t;
-  match t.last_cube_model with
-  (* A cube model's values are the Bromberger–Fleury rounded integers, already native and
-     small; widen them exactly. *)
-  | Some m -> List.map (fun (term, v) -> term, Oxsmt_core.Bigint.of_int v) m
-  | None -> extract_model_bigint t
+  match t.last_modelfind_model with
+  (* A [model_find] dive point is already Bigint-valued (it may assign a variable a >int63
+     value); return it verbatim. Checked before [last_cube_model]/the live scan for the
+     same reason cube's stash is: it is the integer point that made THIS Final [Sat]. *)
+  | Some m -> m
+  | None ->
+    (match t.last_cube_model with
+     (* A cube model's values are the Bromberger–Fleury rounded integers, already native
+        and small; widen them exactly. *)
+     | Some m -> List.map (fun (term, v) -> term, Oxsmt_core.Bigint.of_int v) m
+     | None -> extract_model_bigint t)
 ;;
 
 (* Bromberger-Fleury unit cube test (see {!Simplex.cube_test}): after a {!Sat_candidate}
@@ -1843,6 +1857,119 @@ let cube_model t =
          Some m
        with
        | Rational.Overflow -> None))
+;;
+
+(* [1/2] as a canonical rational, for the round-to-nearest branch-direction test. *)
+let one_half =
+  Rational.of_big_frac ~num:Oxsmt_core.Bigint.one ~den:(Oxsmt_core.Bigint.of_int 2)
+;;
+
+(* Cut-free, arbitrary-precision, round-to-nearest DIVING branch-and-bound model finder
+   (the engine behind [Lia_adapter]'s OXSMT_LIA_MODELFIND mode; the env gate lives in the
+   adapter, this function is env-independent public API — same scope discipline as
+   {!cg_cut}).
+
+   Motivation (logs/z3diag-dartconv-report.md, convert class): these
+   bit-vector-arithmetic- as-Int problems are ℤ-feasible bounded conjunctions with
+   2^32/2^64-scale coefficients. z3 solves them by a lean cut-free simplex +
+   branch-and-bound that walks to a model; with cuts on it drowns. oxsmt's live path
+   delegates each B&B split back to CDCL(T) as a {!suggest_branch} [Split], and the SAT
+   layer wanders a huge tree (measured ~99k decisions / ~581 conflicts on convert-1470 and
+   never converges). This driver keeps the B&B TIGHT inside the theory — a depth-first
+   dive over the simplex, no CDCL(T) round-trip, no cut generation — and branches toward
+   the LP value (round-to-nearest) so it descends straight to an integer point when one
+   exists.
+
+   Contract. Returns [true] iff it found an integer model of the CURRENTLY ASSERTED atom
+   set (stashed in [last_modelfind_model], read once by {!model_bigint}); [false] means
+   "no model within [node_budget]" — the caller must fall back to the ordinary branch/cut
+   path, NEVER treat [false] as unsat. A root ℚ-infeasibility or a genuine
+   integer-infeasibility also returns [false] (the fallback re-derives the sound
+   conflict); this driver is a pure accelerator that can only turn a would-be
+   [unknown]/long-search into a [Sat].
+
+   Soundness. A returned model is the simplex's own assignment at a leaf where
+   {!Simplex.check} is feasible AND every problem var is integral. Branch bounds only
+   RESTRICT the feasible region (they are [<= f] / [>= f+1] over ℤ), so any point
+   satisfying them satisfies the original atoms; the point is thus a genuine ℤ model of
+   the asserted set, and {!Session}'s independent R1 model check re-validates it — a bug
+   degrades to [unknown], never a wrong [sat]. Overflow-safe BY CONSTRUCTION: every branch
+   point and model value is taken through the [Bigint] projections
+   ([floor_bigint]/[of_bigint]/ [num_bigint]) and the internal (never-raising) rational
+   arithmetic, so the 2^64-coeff inputs never trip the native-int I8 ceiling that
+   {!solve_integer} hits at its [Rational.floor] branch point. The defensive [Overflow]
+   arm below is therefore unreached on the intended inputs but kept to mirror
+   {!solve_integer}'s fail-closed poison. *)
+let model_find ?(node_budget = 200_000) t =
+  ensure_live t;
+  (* B&B pushes/asserts/pops simplex bounds directly; force any later [check] to re-run
+     rather than trust the feasibility gate (mirrors {!solve_integer}). *)
+  t.check_dirty <- true;
+  let nodes = ref 0 in
+  let rec dfs () =
+    match Simplex.check t.simplex with
+    | Some _ -> `Unsat
+    | None ->
+      (match first_non_integer t with
+       | None -> `Sat (extract_model_bigint t)
+       | Some (_term, id, d) ->
+         if !nodes >= node_budget
+         then `Unknown
+         else (
+           incr nodes;
+           let cpart = Delta.c_part d in
+           let f = Rational.floor_bigint cpart in
+           let fp1 = Oxsmt_core.Bigint.add f Oxsmt_core.Bigint.one in
+           let lo = Delta.of_rat (Rational.of_bigint f) in
+           let hi = Delta.of_rat (Rational.of_bigint fp1) in
+           (* frac = cpart - floor(cpart) ∈ [0,1); nearest integer is f+1 iff frac > 1/2,
+                so try that half FIRST — the dive follows the LP relaxation. *)
+           let frac = Rational.sub cpart (Rational.of_bigint f) in
+           let ceil_first = Rational.compare frac one_half > 0 in
+           let try_upper () =
+             (* x <= f *)
+             Simplex.push t.simplex;
+             let _ = Simplex.assert_upper t.simplex id lo (Branch id) in
+             let r = dfs () in
+             Simplex.pop t.simplex 1;
+             r
+           in
+           let try_lower () =
+             (* x >= f+1 *)
+             Simplex.push t.simplex;
+             let _ = Simplex.assert_lower t.simplex id hi (Branch id) in
+             let r = dfs () in
+             Simplex.pop t.simplex 1;
+             r
+           in
+           let first, second =
+             if ceil_first then try_lower, try_upper else try_upper, try_lower
+           in
+           match first () with
+           | (`Sat _ | `Unknown) as r -> r
+           | `Unsat -> second ()))
+  in
+  match dfs () with
+  | r ->
+    (match Sys.getenv_opt "OXSMT_LIA_MODELFIND_DEBUG" with
+     | Some _ ->
+       Printf.eprintf
+         "modelfind: nodes=%d outcome=%s\n%!"
+         !nodes
+         (match r with
+          | `Sat _ -> "sat"
+          | `Unknown -> "unknown(budget)"
+          | `Unsat -> "unsat")
+     | None -> ());
+    (match r with
+     | `Sat m ->
+       t.last_modelfind_model <- Some m;
+       true
+     | `Unknown | `Unsat -> false)
+  | exception Rational.Overflow ->
+    Simplex.poison t.simplex;
+    t.overflows <- t.overflows + 1;
+    false
 ;;
 
 let solve_integer ?(budget = default_budget) t =
