@@ -56,13 +56,13 @@ module Arr = Oxsmt_arr.Arr
    occurs/acyclicity) is exactly what certifies a combined Sat, since [Combine] emits Sat
    only after BOTH children certify Final.
 
-   The FABRIC-LIVE methods are UNREACHABLE: [Dtlia_router.fabric_disabled] forces
-   [Combine] onto the classic no-fabric path ([check_off]/[explain_off], and no
-   create-time merge-consumer setup), so the fabric seam is never driven for this
-   instantiation. They are loud fail-closed stubs (raise
-   [Combine.Incomplete "dtlia-fabric-unsupported"] -> verdict [unknown]) as defence in
-   depth — never a quiet wrong answer or a crash if a future change ever wired the fabric
-   here.
+   The FABRIC-LIVE methods (ADR-0014 Stage B) are REAL forwards to the standalone DT
+   fabric seam ([Dt.check_fabric]/[assert_fabric_eq]/[fabric_explain_eq]/merge-log +
+   class-tag forwards/[checkpoint]), currency-correct and trail-correct. They are
+   currently UNDRIVEN because [Dtlia_router.fabric_disabled] forces [Combine] onto the
+   classic no-fabric path ([check_off]/[explain_off], no create-time merge-consumer
+   setup), so the fabric seam exists but is dark for this instantiation until Stage C
+   flips the lever.
 
    The datatype registry (which [Dt.create] needs but the frozen [Theory.THEORY]
    [create : ctx -> env] cannot carry) is threaded via [set_registry], called by
@@ -149,6 +149,14 @@ end
 module CombinedDt =
   Oxsmt_combine.Combine.Combine (Oxsmt_combine.Dtlia_router) (Dt_congruence)
     (Oxsmt_lia.Lia_adapter)
+
+(* Re-export of the LAND-67 backstop hit counter ([find_congruence_split] fires) for the
+   DT+LIA instantiation, so an out-of-band data-gathering probe (Stage C mechanism-I
+   measurement) can read whether the in-search congruence propagation
+   ([OXSMT_COMBINE_INSEARCH]) drives the classic-path backstop toward 0.
+   Byte-id-invisible: a monotone process-global read, changes no
+   verdict/split/explanation. *)
+let combine_congruence_split_hit_count = CombinedDt.congruence_split_hit_count
 
 (* The theory the seam drives. A problem that declares an algebraic datatype installs the
    standalone DT theory, one that uses arrays the standalone arrays theory (both e-graph

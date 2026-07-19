@@ -255,6 +255,12 @@ val ckpt_log_length_for_test : t -> int
     backstop still fires on the fabric path. Process-global, monotone. *)
 val dt_scalar_completion_hit_count : unit -> int
 
+(** LAND-67 backstop hit counter for the DT+LIA combination
+    ([Combine.find_congruence_split] fires): a data-gathering probe for Stage C mechanism
+    I ([OXSMT_COMBINE_INSEARCH]), which should drive it toward 0 by propagating the
+    DT-known Int equality in-search. Byte-id invisible; process-global, monotone. *)
+val combine_congruence_split_hit_count : unit -> int
+
 (** [egraph_view t] is the immutable congruence snapshot captured at the most recent
     accepting theory [Final], for the lemma tier's E-matcher. Capturing before [Sat.solve]
     backtracks preserves the candidate assignment's equalities for congruence-dependent

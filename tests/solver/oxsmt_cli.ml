@@ -80,7 +80,17 @@ let print_block b =
     b.decisions
     b.propagations;
   print_string (Buffer.contents buf);
-  print_newline ()
+  print_newline ();
+  (* Data-gathering probe (Stage C mechanism-I measurement): when
+     OXSMT_PRINT_COMBINE_STATS is set, emit the LAND-67 backstop hit count to STDERR so it
+     never perturbs the stdout result line the gates match on. Unset => no read, no output
+     => byte-identical. *)
+  match Sys.getenv_opt "OXSMT_PRINT_COMBINE_STATS" with
+  | Some ("1" | "true" | "yes") ->
+    Printf.eprintf
+      "(combine_stats (congruence_split_hits %d))\n"
+      (Oxsmt_interface.Cdclt.combine_congruence_split_hit_count ())
+  | _ -> ()
 ;;
 
 (* Count top-level check-sats and detect incremental commands, exactly as the harness

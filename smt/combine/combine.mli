@@ -310,7 +310,7 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
 
-  (** Backstop hit counter (LAND 71, task #31): the number of times
+  (** Backstop hit counter (LAND 67, task #31): the number of times
       {!find_congruence_split} (the DT-known-but-LIA-unreflected Int-equality backstop)
       has actually returned a split. Byte-id invisible; a whitebox probe so a later stage
       can assert the backstop still fires on the fabric path. Per-instantiation, monotone. *)
