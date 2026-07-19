@@ -1188,6 +1188,102 @@ let prove_refinement state ~env ~loc ~kind ~program_point ?result_span
   let goal = bind_scope_references (Facts.scope state.facts) goal in
   prove state ~env ~loc ~kind ~program_point ?result_span ~provenance goal
 
+let align_seal_sibling_references ~env interface_predicate
+    implementation_predicate =
+  let names = ref [] in
+  let rec collect expression =
+    begin match expression.rexp_desc with
+    | Rexp_ident (Rfree (Rsibling name | Rfun name)) ->
+      if not (List.mem name !names) then names := name :: !names
+    | Rexp_ident (Rfree (Rglobal _ | Rapp _)) -> ()
+    | Rexp_ident _ | Rexp_constant _ -> ()
+    | Rexp_let (bindings, body) ->
+      List.iter (fun binding -> collect binding.rbind_expr) bindings;
+      collect body
+    | Rexp_function { body; _ } -> collect body
+    | Rexp_apply (function_, arguments) ->
+      collect function_;
+      List.iter (fun (_, argument) -> collect argument) arguments
+    | Rexp_tuple fields -> List.iter (fun (_, field) -> collect field) fields
+    | Rexp_construct (_, arguments) -> List.iter collect arguments
+    | Rexp_field (record, _) -> collect record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      collect condition;
+      collect ifso;
+      Option.iter collect ifnot
+    | Rexp_match (scrutinee, cases) ->
+      collect scrutinee;
+      List.iter (fun case -> collect case.rcase_body) cases
+    end
+  in
+  collect interface_predicate;
+  let paths =
+    List.filter_map
+      (fun name ->
+        match
+          Env.lookup_value ~use:false ~loc:Location.none
+            (Longident.Lident name) env
+        with
+        | path, description, _ -> Some (name, path, description.val_uid)
+        | exception Env.Error _ -> None)
+      !names
+  in
+  let rec rewrite expression =
+    let rexp_desc =
+      match expression.rexp_desc with
+      | Rexp_ident (Rfree (Rglobal path | Rapp path)) ->
+        begin match
+          List.find_opt
+            (fun (_, sibling_path, sibling_uid) ->
+              Path.same path sibling_path
+              ||
+              match
+                Subst.Lazy.force_value_description (Env.find_value path env)
+              with
+              | description -> Uid.equal description.val_uid sibling_uid
+              | exception Not_found -> false)
+            paths
+        with
+        | Some (name, _, _) -> Rexp_ident (Rfree (Rsibling name))
+        | None -> expression.rexp_desc
+        end
+      | Rexp_ident _ | Rexp_constant _ -> expression.rexp_desc
+      | Rexp_let (bindings, body) ->
+        Rexp_let
+          ( List.map
+              (fun binding ->
+                { binding with rbind_expr = rewrite binding.rbind_expr })
+              bindings,
+            rewrite body )
+      | Rexp_function function_ ->
+        Rexp_function { function_ with body = rewrite function_.body }
+      | Rexp_apply (function_, arguments) ->
+        Rexp_apply
+          ( rewrite function_,
+            List.map
+              (fun (label, argument) -> label, rewrite argument)
+              arguments )
+      | Rexp_tuple fields ->
+        Rexp_tuple
+          (List.map (fun (label, field) -> label, rewrite field) fields)
+      | Rexp_construct (constructor, arguments) ->
+        Rexp_construct (constructor, List.map rewrite arguments)
+      | Rexp_field (record, field) -> Rexp_field (rewrite record, field)
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        Rexp_ifthenelse
+          (rewrite condition, rewrite ifso, Option.map rewrite ifnot)
+      | Rexp_match (scrutinee, cases) ->
+        Rexp_match
+          ( rewrite scrutinee,
+            List.map
+              (fun case ->
+                { case with rcase_body = rewrite case.rcase_body })
+              cases )
+    in
+    { expression with rexp_desc }
+  in
+  rewrite implementation_predicate
+
 let verify_seal_obligation ~env ~seal_location
     (obligation : Ctype.refinement_seal_obligation) =
   (* Surface the seal obligation on the implementation's refined-type
@@ -1213,6 +1309,14 @@ let verify_seal_obligation ~env ~seal_location
   in
   let goal =
     Vox_vc.instantiate ~refinement:obligation.rso_conclusion ~with_:subject
+  in
+  (* Signature-relative references deliberately survive .cmi persistence by
+     name.  At an implementation seal, reconcile them only with the exact
+     exported paths found in the inclusion environment.  Looking the path up
+     (rather than equating bare names) keeps shadowed locals and unrelated
+     qualified values distinct. *)
+  let hypothesis =
+    align_seal_sibling_references ~env goal hypothesis
   in
   (* Anchor the goal's own span to the implementation annotation so a click on
      the obligation jumps into the [.ml].  This is display-only: the emitted

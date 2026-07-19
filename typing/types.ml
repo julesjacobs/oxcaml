@@ -2115,7 +2115,7 @@ module Refinement = struct
       match left, right with
       | Rfun left, Rfun right | Rsibling left, Rsibling right ->
         String.equal left right
-      | Rapp left, Rapp right | Rglobal left, Rglobal right ->
+      | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
         Path.same left right
       | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
     in

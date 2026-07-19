@@ -1,0 +1,8 @@
+File "bst.ml", line 1:
+Error: Refinement verification failed at module seal for value "empty_has_no_zero" (disproved)
+File "bst.mli", lines 10-11, characters 0-59:
+  Interface declaration for value empty_has_no_zero
+File "bst.ml", line 12, characters 4-21:
+12 | let empty_has_no_zero (_ : unit @ logical)
+         ^^^^^^^^^^^^^^^^^
+  Implementation declaration for value empty_has_no_zero

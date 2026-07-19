@@ -96,6 +96,7 @@ type constructor =
   }
 
 type data_definition =
+  | Abstract
   | Variant of constructor list
   | Record of (string * sort) list
 
@@ -243,11 +244,35 @@ let rec sort_of_type context location type_ =
           instantiate context location declaration arguments manifest
         in
         sort_of_type context location expanded
+      | Type_abstract _, None ->
+        register_abstract context location path arguments declaration
       | _ ->
         error location "type %s is not a supported SMT datatype"
           (Path.name path)
     end
   | _ -> error location "unsupported refinement-expression type"
+
+and register_abstract context location path arguments declaration =
+  let argument_sorts = List.map (sort_of_type context location) arguments in
+  let key =
+    "abstract:" ^ Path.name path ^ "<"
+    ^ String.concat "," (List.map sort_key argument_sorts)
+    ^ ">"
+  in
+  match find_data context key with
+  | Some _ -> Sdata key
+  | None ->
+    if List.length arguments <> declaration.type_arity then
+      error location "abstract datatype %s has the wrong number of arguments"
+        (Path.name path);
+    context.data <-
+      { data_key = key;
+        data_name = "VoxData_" ^ digest key;
+        data_path = path;
+        data_definition = Some Abstract;
+      }
+      :: context.data;
+    Sdata key
 
 and register_data context location path arguments declaration =
   let argument_sorts =
@@ -427,7 +452,7 @@ let same_reference left right =
   match left, right with
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
-  | Rapp left, Rapp right | Rglobal left, Rglobal right ->
+  | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
     Path.same left right
   | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
 
@@ -649,6 +674,8 @@ let definition location data =
 
 let constructor location data name =
   match definition location data with
+  | Abstract ->
+    error location "%s is an abstract type" (Path.name data.data_path)
   | Record _ -> error location "%s is a record type" (Path.name data.data_path)
   | Variant constructors ->
     let rec loop index = function
@@ -664,6 +691,8 @@ let constructor location data name =
 
 let record_field location data name =
   match definition location data with
+  | Abstract ->
+    error location "%s is an abstract type" (Path.name data.data_path)
   | Variant _ ->
     error location "%s is a variant type" (Path.name data.data_path)
   | Record fields ->
@@ -1109,6 +1138,8 @@ let tuple_shape tuple =
 let data_shape location data =
   let shape_constructors =
     match definition location data with
+    | Abstract ->
+      error location "internal error: abstract datatype has a concrete shape"
     | Variant [] ->
       error location "empty variant datatypes are not supported"
     | Variant constructors ->
@@ -2014,9 +2045,23 @@ let oxsmt_query_result ~query ~timeout_seconds ~env vc =
   | Oxsmt_term.Unsupported _ -> `Open "unknown"
 
 let emit_datatypes context location buffer =
+  let abstract_data, concrete_data =
+    List.partition
+      (fun data ->
+        match definition location data with
+        | Abstract -> true
+        | Variant _ | Record _ -> false)
+      context.data
+  in
+  List.sort
+    (fun left right -> String.compare left.data_key right.data_key)
+    abstract_data
+  |> List.iter (fun data ->
+       Buffer.add_string buffer
+         ("(declare-sort " ^ data.data_name ^ " 0)\n"));
   let shapes =
     List.map tuple_shape context.tuples
-    @ List.map (data_shape location) context.data
+    @ List.map (data_shape location) concrete_data
     |> List.sort (fun left right ->
          String.compare left.shape_key right.shape_key)
   in
@@ -2052,6 +2097,35 @@ let emit_datatypes context location buffer =
     Buffer.add_string buffer
       ("(declare-datatypes (" ^ sort_declarations ^ ") ("
        ^ constructor_lists ^ "))\n")
+
+let check_abstract_inhabitance context location =
+  let trusted_constant key =
+    List.exists
+      (fun reference ->
+        match reference.reference_head, reference.reference_sort with
+        | (Rglobal path | Rapp path), Sdata reference_key
+          when String.equal key reference_key ->
+          begin match
+            Subst.Lazy.force_value_description
+              (Env.find_value path context.env)
+          with
+          | { val_kind = Val_reg _; _ } -> true
+          | { val_kind = Val_prim _ | Val_mut _ | Val_ivar _ | Val_self _
+                           | Val_anc _; _ } -> false
+          | exception Not_found -> false
+          end
+        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ -> false)
+      context.references
+  in
+  List.iter
+    (fun data ->
+      match definition location data with
+      | Abstract when not (trusted_constant data.data_key) ->
+        error location
+          "abstract type %s is not known to be inhabited"
+          (Path.name data.data_path)
+      | Abstract | Variant _ | Record _ -> ())
+    context.data
 
 let emit_references (context : context) location buffer =
   List.sort
@@ -2105,6 +2179,7 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
   let expressions = facts @ [goal] in
   let context = { env; data = []; tuples = []; references = [] } in
   let variables = collect context expressions in
+  check_abstract_inhabitance context vc.location;
   let fact_terms =
     List.map
       (fun fact ->
