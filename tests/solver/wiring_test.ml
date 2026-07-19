@@ -2163,6 +2163,64 @@ let test_dag_sharing_no_blowup () =
     (elapsed < 2.0)
 ;;
 
+(* Growth guard (task #28, DARK): OFF unless [OXSMT_PRESOLVE_ELIM_GROWTH] gives a positive
+   integer factor. OFF => the eq-elimination runs to completion (byte-for-byte trunk); ON =>
+   a chained-widening blowup trips the proportional budget and the WHOLE elimination is
+   abandoned (defs=[], original assertions returned). The env is read per call, so one
+   process exercises both states; toggling OFF->ON FLIPS the abort, so the guard (not a
+   tautology) causes it. *)
+let test_presolve_growth_guard () =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let names r =
+    List.map (fun (d : Oxsmt_interface.Presolve.def) -> d.Oxsmt_interface.Presolve.name) r
+  in
+  let v name = Context.const ctx (Session.declare_const s name Sort.int) in
+  (* Chained-widening blowup: z0 = c0; zk = z(k-1) + ck (all vars distinct). Substituting to
+     a fixpoint makes [subst zk] the width-(k+1) sum c0+..+ck, so computing every def costs
+     O(n^2) reconstruction weight -- far past a factor-16 proportional budget. *)
+  let n = 3000 in
+  let c i = v (Printf.sprintf "gc%d" i) in
+  let z = Array.init (n + 1) (fun i -> v (Printf.sprintf "gz%d" i)) in
+  let conj = ref [ Context.eq ctx z.(0) (c 0) ] in
+  for k = 1 to n do
+    let rhs =
+      Context.linear_combination_big
+        ctx
+        [ Oxsmt_core.Bigint.one, z.(k - 1); Oxsmt_core.Bigint.one, c k ]
+        Oxsmt_core.Bigint.zero
+    in
+    conj := Context.eq ctx z.(k) rhs :: !conj
+  done;
+  let blowup = List.rev !conj in
+  (* DARK DEFAULT (guard off; a non-integer value reads as disabled): the blowup elimination
+     COMPLETES. This is the RED discriminator -- it FLIPS to aborted once the guard is on. *)
+  Unix.putenv "OXSMT_PRESOLVE_ELIM_GROWTH" "";
+  let r_off = Oxsmt_interface.Presolve.run ctx blowup in
+  check
+    "growth(off): dark default eliminates the chained-widening (full elim)"
+    (r_off.Oxsmt_interface.Presolve.defs <> []);
+  (* GUARD ON (factor 16). *)
+  Unix.putenv "OXSMT_PRESOLVE_ELIM_GROWTH" "16";
+  (* An ordinary single alias is well under any proportional budget: guard does not fire. *)
+  let x = v "x" in
+  let r_norm =
+    Oxsmt_interface.Presolve.run ctx [ Context.eq ctx x (Context.int_const ctx 5) ]
+  in
+  check
+    "growth(on): ordinary alias still eliminated"
+    (names r_norm.Oxsmt_interface.Presolve.defs = [ "x" ]);
+  let r_blow = Oxsmt_interface.Presolve.run ctx blowup in
+  check
+    "growth(on): chained-widening elimination aborted (defs=[])"
+    (r_blow.Oxsmt_interface.Presolve.defs = []);
+  check
+    "growth(on): aborted run returns original assertions unchanged"
+    (List.length r_blow.Oxsmt_interface.Presolve.reduced = List.length blowup);
+  (* Restore the dark default so later tests observe trunk behaviour. *)
+  Unix.putenv "OXSMT_PRESOLVE_ELIM_GROWTH" ""
+;;
+
 (* --- Contextual simplification (task #13) --------------------------------------------
    [Presolve.simplify_contextual], driven through [assert_presolved]. The win direction is
    UNSAT (R1 does not run), so these fixtures ARE the soundness margin. THREE registry
@@ -2809,6 +2867,7 @@ let () =
   test_loader_presolve_quantifier_boundary ();
   test_presolve_negated_eq_not_eliminated ();
   test_dag_sharing_no_blowup ();
+  test_presolve_growth_guard ();
   test_ctx_simp_eq_subst_sat ();
   test_ctx_simp_unsat_direction ();
   test_ctx_simp_else_branch_oracle ();

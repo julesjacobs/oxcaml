@@ -368,6 +368,79 @@ let entailed_equalities ctx assertions =
     conjuncts
 ;;
 
+(* Growth guard (task #28, DARK / opt-in) on the W1b eq-elimination. The elimination
+   substitutes each aliased variable by its definition through the smart constructors;
+   [subst] is memoized per input node, so the NUMBER of reconstructions is bounded by the
+   input DAG, but each reconstruction's WIDTH (an [Arith] linear form's term count, an
+   [And]/[Or]/[App] arity) grows as a widening alias chain is merged in, so the total
+   constructed representation -- and the memory it allocates -- is the SUM of those widths
+   and can blow up (a giant SMPT exemplar measured 1.41 GB / 8.19 s WITH elimination vs
+   79 MB / 1.06 s without, same UNSAT).
+
+   [OXSMT_PRESOLVE_ELIM_GROWTH] = a positive integer growth factor turns the guard ON;
+   the budget is that factor times the input conjuncts' DAG weight plus [elim_base_budget].
+   Unset (or a non-positive / non-integer value) => guard OFF: the elimination runs to
+   completion exactly as trunk. The guard is DARK because eliminating is not always an
+   optimization -- on some giant files the eliminated form is load-bearing for search (a
+   guard-OFF run solves at a higher budget where the guard-ON run times out), so the flip is
+   gated on a multi-budget quiet A/B. Mirrors [OXSMT_NEC_PROPFOLD] / [OXSMT_SYMBREAK_UFTAIL]. *)
+let elim_growth () =
+  match Sys.getenv_opt "OXSMT_PRESOLVE_ELIM_GROWTH" with
+  | Some s ->
+    (match int_of_string_opt (String.trim s) with
+     | Some n when n > 0 -> Some n
+     | Some _ | None -> None)
+  | None -> None
+;;
+
+(* A small floor so a modest input whose elimination genuinely rewrites most nodes (work ~ a
+   few x its own small weight) never trips; the proportional term dominates at scale. *)
+let elim_base_budget = 65536
+
+exception Elim_budget
+
+(* Immediate-child weight of a node = 1 + arity: the allocation cost of (re)building it. *)
+let node_weight (t : Term.t) =
+  match t.node with
+  | Bool_const _ | Int_const _ | Real_const _ | Real_arith _ -> 1
+  | App (_, args) -> 1 + Iarr.length args
+  | Arith lin -> 1 + Iarr.length lin.coeffs
+  | Le _ -> 2
+  | Eq _ -> 3
+  | Not _ -> 2
+  | And xs | Or xs -> 1 + Iarr.length xs
+  | Ite _ -> 4
+;;
+
+(* Total DAG weight of [roots]: each distinct hash-consed node counted once (shared subterms
+   once). O(input DAG); computed only when the guard is enabled AND an alias will be
+   eliminated. *)
+let dag_weight (roots : Term.t list) =
+  let seen = Term.Table.create 256 in
+  let total = ref 0 in
+  let rec go (t : Term.t) =
+    if not (Term.Table.mem seen t)
+    then (
+      Term.Table.add seen t ();
+      total := !total + node_weight t;
+      match t.node with
+      | Bool_const _ | Int_const _ | Real_const _ | Real_arith _ -> ()
+      | App (_, args) -> Iarr.iter go args
+      | Arith lin -> Iarr.iter (fun (tm, _co) -> go tm) lin.coeffs
+      | Le a | Not a -> go a
+      | Eq (a, b) ->
+        go a;
+        go b
+      | And xs | Or xs -> Iarr.iter go xs
+      | Ite (c, a, b) ->
+        go c;
+        go a;
+        go b)
+  in
+  List.iter go roots;
+  !total
+;;
+
 let run ctx assertions =
   let conjuncts = List.concat_map flatten assertions in
   (* Interface variables to skip (constraint 3, defense-in-depth): vars occurring under a
@@ -407,6 +480,31 @@ let run ctx assertions =
     { reduced = assertions; defs = [] }
   else (
     let sigma = !sigma in
+    (* Growth guard (task #28, DARK): enabled only when [OXSMT_PRESOLVE_ELIM_GROWTH] gives a
+       positive integer factor. When [None] the guard is inert -- [charged] is the identity, no
+       budget is computed, no [Elim_budget] is raised -- so [run] is byte-for-byte trunk. When
+       [Some factor] the budget is PROPORTIONAL to the input's own DAG weight and [charge] is
+       called once per reconstructed node with the node's width; on exhaustion the WHOLE
+       elimination is abandoned (equisatisfiable neutral, the un-eliminated set is solved
+       directly). Dark because eliminating is NOT always an optimization: on some giant files
+       the eliminated form is load-bearing for search (guard-OFF solves at a higher budget
+       where guard-ON times out), so the flip is gated on a multi-budget quiet A/B. *)
+    let guard = elim_growth () in
+    let input_weight =
+      match guard with
+      | Some _ -> dag_weight conjuncts
+      | None -> 0
+    in
+    let budget =
+      match guard with
+      | Some factor -> (factor * input_weight) + elim_base_budget
+      | None -> 0
+    in
+    let work = ref 0 in
+    let charge w =
+      work := !work + w;
+      if !work > budget then raise Elim_budget
+    in
     (* Substitute to a fixpoint through the smart constructors: replace each defined
        variable by its (recursively resolved) definition. [sigma] is acyclic, so this
        terminates; memoized on the hash-cons tag so each distinct subterm is rebuilt once.
@@ -429,6 +527,16 @@ let run ctx assertions =
          directly is byte-identical and skips a reconstruction (list/array alloc +
          hash-cons lookup). Prunes the rebuild to only the paths that actually mention an
          alias. *)
+      (* Each constructing arm charges the CONSTRUCTED node's own weight (1 + its arity), not
+         the input arity: an [Arith]'s [linear_combination_big] FOLDS a substituted wide
+         sub-form into itself, so the alloc -- and the blowup -- lives in the result's width,
+         which only [node_weight r] sees. [charged] is the identity when the guard is off. *)
+      let charged r =
+        (match guard with
+         | None -> ()
+         | Some _ -> charge (node_weight r));
+        r
+      in
       match t.node with
       | Bool_const _ | Int_const _ | Real_const _ -> t
       | App (sym, args) ->
@@ -437,7 +545,7 @@ let run ctx assertions =
         else (
           match map_changed subst (Iarr.to_list args) with
           | None -> t
-          | Some args' -> Context.app ctx sym args')
+          | Some args' -> charged (Context.app ctx sym args'))
       | Arith lin ->
         let changed = ref false in
         let coeffs' =
@@ -448,7 +556,9 @@ let run ctx assertions =
                co, tm')
             (Iarr.to_list lin.coeffs)
         in
-        if !changed then Context.linear_combination_big ctx coeffs' lin.const else t
+        if !changed
+        then charged (Context.linear_combination_big ctx coeffs' lin.const)
+        else t
       | Real_arith _ -> t
       | Le a ->
         (* Preserve the OLD rebuild's [Int_const 0] interning at the same point (right-to-
@@ -456,46 +566,71 @@ let run ctx assertions =
            may reuse it and its tag must match trunk on a formula with no explicit [0]. *)
         let zero = Context.int_const ctx 0 in
         let a' = subst a in
-        if same_tag a a' then t else Context.le ctx a' zero
+        if same_tag a a' then t else charged (Context.le ctx a' zero)
       | Eq (a, b) ->
         let a' = subst a in
         let b' = subst b in
-        if same_tag a a' && same_tag b b' then t else Context.eq ctx a' b'
+        if same_tag a a' && same_tag b b' then t else charged (Context.eq ctx a' b')
       | Not a ->
         let a' = subst a in
-        if same_tag a a' then t else Context.not_ ctx a'
+        if same_tag a a' then t else charged (Context.not_ ctx a')
       | And xs ->
         (match map_changed subst (Iarr.to_list xs) with
          | None -> t
-         | Some xs' -> Context.and_ ctx xs')
+         | Some xs' -> charged (Context.and_ ctx xs'))
       | Or xs ->
         (match map_changed subst (Iarr.to_list xs) with
          | None -> t
-         | Some xs' -> Context.or_ ctx xs')
+         | Some xs' -> charged (Context.or_ ctx xs'))
       | Ite (c, a, b) ->
         let c' = subst c in
         let a' = subst a in
         let b' = subst b in
         if same_tag c c' && same_tag a a' && same_tag b b'
         then t
-        else Context.ite ctx c' a' b'
+        else charged (Context.ite ctx c' a' b')
     in
-    let reduced =
-      List.filter_map
-        (function
-          | `Def -> None
-          | `Keep c -> Some (subst c))
-        tagged
+    (* Observability (OXSMT_PRESOLVE_ELIM_STATS): input weight, budget, work spent, whether
+       the guard aborted, and the eliminated-def count -- enough to calibrate the factor. *)
+    let emit ~aborted ~ndefs =
+      match Sys.getenv_opt "OXSMT_PRESOLVE_ELIM_STATS" with
+      | None -> ()
+      | Some _ ->
+        Printf.eprintf
+          "elim: input_weight=%d budget=%d work=%d defs=%d aborted=%d\n%!"
+          input_weight
+          budget
+          !work
+          ndefs
+          (if aborted then 1 else 0)
     in
-    (* Defs in ELIMINATION order (order is newest-first; [rev_map] restores oldest-first).
-       Each value is [subst x] = the definition resolved over surviving variables only, so
-       model re-derivation needs no ordering between defs. *)
-    let defs =
-      List.rev_map
-        (fun x -> { name = name_of x; sort = x.Term.sort; value = subst x })
-        !order
-    in
-    { reduced; defs })
+    match
+      let reduced =
+        List.filter_map
+          (function
+            | `Def -> None
+            | `Keep c -> Some (subst c))
+          tagged
+      in
+      (* Defs in ELIMINATION order (order is newest-first; [rev_map] restores oldest-first).
+         Each value is [subst x] = the definition resolved over surviving variables only, so
+         model re-derivation needs no ordering between defs. *)
+      let defs =
+        List.rev_map
+          (fun x -> { name = name_of x; sort = x.Term.sort; value = subst x })
+          !order
+      in
+      reduced, defs
+    with
+    | reduced, defs ->
+      emit ~aborted:false ~ndefs:(List.length defs);
+      { reduced; defs }
+    | exception Elim_budget ->
+      (* Growth blew past the proportional budget: abandon the WHOLE elimination and return
+         the ORIGINAL assertions unchanged -- the identical neutral result a zero-alias file
+         returns, equisatisfiable (the un-eliminated set is solved directly). *)
+      emit ~aborted:true ~ndefs:0;
+      { reduced = assertions; defs = [] })
 ;;
 
 (* --- Contextual simplification (task #13) ---------------------------------------------

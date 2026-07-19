@@ -78,7 +78,16 @@ val entailed_equalities : Context.t -> Term.t list -> Term.t list
 (** [run ctx assertions] presolves [assertions] (raw asserted terms, built through [ctx]).
     Total and deterministic: on a zero-alias input it returns
     [{ reduced = assertions; defs = [] }] (exact neutrality). All produced terms are built
-    through [ctx]'s smart constructors. *)
+    through [ctx]'s smart constructors.
+
+    A DARK growth guard ([OXSMT_PRESOLVE_ELIM_GROWTH] = a positive integer factor) budgets
+    the elimination's reconstructed weight proportionally to the input DAG weight; on
+    exhaustion it abandons the whole elimination and returns the ORIGINAL assertions (the same
+    equisatisfiable neutral result a zero-alias input yields). DEFAULT OFF: unset -- or a
+    non-positive / non-integer value -- leaves the elimination byte-for-byte as trunk. Off by
+    default because eliminating is not always an optimization: on some giant inputs the
+    eliminated form is load-bearing for search, so a lower budget solves without it and times
+    out with it. *)
 val run : Context.t -> Term.t list -> result
 
 (** [simplify_contextual ctx assertions] contextually simplifies each assertion (task

@@ -39,7 +39,8 @@
   oxsmt_core
   oxsmt_interface
   oxsmt_smtlib_parser
-  oxsmt_query_loader))
+  oxsmt_query_loader
+  unix))
 
 ; Exact QF_LRA/QF_UFLRA Session wiring and model-check discrimination tests
 ; (make lra-wiring-test).
