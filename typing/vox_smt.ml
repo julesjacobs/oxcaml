@@ -53,6 +53,17 @@ type result =
     unused_facts : int list;
   }
 
+type emitted_fact =
+  { selector : string;
+    term : string;
+  }
+
+type emitted_query =
+  { contents : string;
+    facts : emitted_fact list;
+    goal : string;
+  }
+
 let string_of_verdict = function
   | Proved -> "proved"
   | Not_proved -> "not-proved"
@@ -2294,12 +2305,19 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
   emit_datatypes context vc.location buffer;
   emit_references context vc.location buffer;
   emit_variables context vc.location buffer variables;
-  List.iteri
-    (fun index fact ->
+  let emitted_facts =
+    List.mapi
+      (fun index fact ->
+        { selector = "h_" ^ string_of_int index;
+          term = "(= " ^ fact ^ " true)";
+        })
+      fact_terms
+  in
+  List.iter
+    (fun fact ->
       Buffer.add_string buffer
-        ("(assert (! (= " ^ fact ^ " true) :named h_"
-         ^ string_of_int index ^ "))\n"))
-    fact_terms;
+        ("(assert (! " ^ fact.term ^ " :named " ^ fact.selector ^ "))\n"))
+    emitted_facts;
   let query_term =
     match query with
     | Prove -> "(not (= " ^ goal_term ^ " true))"
@@ -2312,9 +2330,12 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
     | Prove -> Buffer.add_string buffer "(get-unsat-core)\n"
     | Disprove -> ()
   end;
-  Buffer.contents buffer
+  { contents = Buffer.contents buffer;
+    facts = emitted_facts;
+    goal = query_term;
+  }
 
-let emit ~query ~env (vc : Vox_vc.t) =
+let emit_query ~query ~env (vc : Vox_vc.t) =
   try Ok (emit_internal ~query ~env vc) with
   | Emission_error error -> Error error
   | exception_ ->
@@ -2322,6 +2343,9 @@ let emit ~query ~env (vc : Vox_vc.t) =
       { location = vc.location;
         message = Printexc.to_string exception_;
       }
+
+let emit ~query ~env vc =
+  Result.map (fun query -> query.contents) (emit_query ~query ~env vc)
 
 let parse_status output =
   let statuses =
@@ -2579,8 +2603,8 @@ let discharge_oxsmt ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
     | exception_ ->
       result Solver_error ~detail:(Printexc.to_string exception_) ()
 
-let discharge ~backend ~command ?input_mode ?(timeout_seconds = 30) ~env
-    (vc : Vox_vc.t) =
+let discharge ~backend ~command ?prove_contents ?input_mode
+    ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
   let result verdict ?detail ?(unused_facts = []) () =
     { verdict; location = vc.location; detail; unused_facts }
   in
@@ -2601,7 +2625,12 @@ let discharge ~backend ~command ?input_mode ?(timeout_seconds = 30) ~env
         Option.value input_mode ~default:(default_input_mode backend)
       in
       let run query =
-        match emit ~query ~env vc with
+        let emitted =
+          match query, prove_contents with
+          | Prove, Some contents -> Ok contents
+          | (Prove | Disprove), _ -> emit ~query ~env vc
+        in
+        match emitted with
         | Error emission_error -> raise (Emission_error emission_error)
         | Ok contents ->
           let process =

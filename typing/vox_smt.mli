@@ -37,6 +37,17 @@ type result =
     unused_facts : int list;
   }
 
+type emitted_fact =
+  { selector : string;
+    term : string;
+  }
+
+type emitted_query =
+  { contents : string;
+    facts : emitted_fact list;
+    goal : string;
+  }
+
 val string_of_verdict : verdict -> string
 
 val parse_status : string -> solver_status option
@@ -47,12 +58,19 @@ val emit :
   Vox_vc.t ->
   (string, emission_error) Stdlib.result
 
+val emit_query :
+  query:query ->
+  env:Env.t ->
+  Vox_vc.t ->
+  (emitted_query, emission_error) Stdlib.result
+
 val discharge_oxsmt :
   ?timeout_seconds:int -> env:Env.t -> Vox_vc.t -> result
 
 val discharge :
   backend:backend ->
   command:string option ->
+  ?prove_contents:string ->
   ?input_mode:input_mode ->
   ?timeout_seconds:int ->
   env:Env.t ->

@@ -292,6 +292,55 @@ let json_emission_error (error : Vox_lean.emission_error) =
       Json.field "location" (json_span error.location);
     ]
 
+let json_smt_emission_error (error : Vox_smt.emission_error) =
+  Json.object_
+    [ Json.field "message" (json_string error.message);
+      Json.field "location" (json_span error.location);
+    ]
+
+let emit_generated_smt ~env condition =
+  if !Clflags.vox_dump_vc_json_smt then
+    Some (Vox_smt.emit_query ~query:Vox_smt.Prove ~env condition)
+  else None
+
+let generated_smt_prove_contents ~env condition = function
+  | Some (Ok (query : Vox_smt.emitted_query)) ->
+    (* Keep solver eligibility behind a separate ordinary emission.  On R5
+       the dump and ordinary paths deliberately use the same bounded emitter. *)
+    begin
+      match Vox_smt.emit ~query:Vox_smt.Prove ~env condition with
+      | Ok _ -> Some query.contents
+      | Error _ -> None
+    end
+  | None | Some (Error _) -> None
+
+let json_generated_smt = function
+  | Ok (query : Vox_smt.emitted_query) ->
+    let facts =
+      List.mapi
+        (fun fact_index (fact : Vox_smt.emitted_fact) ->
+          Json.object_
+            [ Json.field "fact_index" (Json.int fact_index);
+              Json.field "selector" (json_string fact.selector);
+              Json.field "term" (json_string fact.term);
+            ])
+        query.facts
+    in
+    Json.object_
+      [ Json.field "prove" (json_string query.contents);
+        Json.field "facts" (Json.array facts);
+        Json.field "goal" (json_string query.goal);
+        Json.field "emission_error" (Json.option json_smt_emission_error None);
+      ]
+  | Error error ->
+    Json.object_
+      [ Json.field "prove" (Json.option json_string None);
+        Json.field "facts" (Json.array []);
+        Json.field "goal" (Json.option json_string None);
+        Json.field "emission_error"
+          (Json.option json_smt_emission_error (Some error));
+      ]
+
 let json_backend_result (result : Vox_backend.backend_result) =
   let fact_usage =
     match result.capabilities.fact_usage with
@@ -326,7 +375,7 @@ let witness_relevance_fields ~env condition =
     ]
 
 let record_vc ~kind ~program_point ?result_span ~provenance ~env
-    (condition : Vox_vc.t) (result : Vox_backend.result) =
+    ~generated_smt (condition : Vox_vc.t) (result : Vox_backend.result) =
   let generated_lean, emission_error =
     match Vox_lean.emit ~env condition with
     | Ok source -> Some source, None
@@ -367,6 +416,12 @@ let record_vc ~kind ~program_point ?result_span ~provenance ~env
     | None | Some _ -> []
   in
   let witness_relevance_fields = witness_relevance_fields ~env condition in
+  let generated_smt_field =
+    match generated_smt with
+    | None -> []
+    | Some generated_smt ->
+      [Json.field "generated_smt" (json_generated_smt generated_smt)]
+  in
   let json =
     Json.object_
       ([ Json.field "location" (json_span condition.Vox_vc.location);
@@ -386,7 +441,8 @@ let record_vc ~kind ~program_point ?result_span ~provenance ~env
         Json.field "provenance" (json_provenance provenance);
       ]
       @ result_span_field
-      @ witness_relevance_fields)
+      @ witness_relevance_fields
+      @ generated_smt_field)
   in
   dumped_vcs := json :: !dumped_vcs
 
@@ -1121,10 +1177,13 @@ let rec bind_scope_references scope expression =
 let is_def_axiom_binding binding =
   Vox_defeq.is_generated_lemma_loc binding.vb_loc
 
-let discharge ~env condition =
+let discharge ~generated_smt ~env condition =
+  let prove_contents =
+    generated_smt_prove_contents ~env condition generated_smt
+  in
   Vox_backend.discharge ~selection:(backend_selection ())
     ~smt_solver:!Clflags.vox_smt_solver
-    ~oxsmt_solver:!Clflags.vox_oxsmt_solver ~env condition
+    ~oxsmt_solver:!Clflags.vox_oxsmt_solver ?prove_contents ~env condition
 
 let failure_text (result : Vox_backend.result) =
   match backend_selection (), result.detail with
@@ -1155,6 +1214,7 @@ let prove state ~env ~loc ~kind ~program_point ?result_span ~provenance goal =
       (String.concat ", " (List.map Ident.name escaped))
   | Ok condition ->
     let provenance = lazy (provenance ()) in
+    let generated_smt = emit_generated_smt ~env condition in
     if !Clflags.vox_dump_vc then begin
       dump_vc ~kind ~env condition;
       let origin =
@@ -1162,14 +1222,15 @@ let prove state ~env ~loc ~kind ~program_point ?result_span ~provenance goal =
       in
       if Option.is_some !Clflags.vox_dump_vc_json then
         record_vc ~kind ~program_point ?result_span
-          ~provenance:(Lazy.force provenance) ~env condition
+          ~provenance:(Lazy.force provenance) ~env ~generated_smt condition
           (not_discharged_result condition);
       state.facts <- Facts.add ~origin ~loc goal state.facts
     end else begin
-      let result = discharge ~env condition in
+      let result = discharge ~generated_smt ~env condition in
       if Option.is_some !Clflags.vox_dump_vc_json then
         record_vc ~kind ~program_point ?result_span
-          ~provenance:(Lazy.force provenance) ~env condition result;
+          ~provenance:(Lazy.force provenance) ~env ~generated_smt condition
+          result;
       match result.verdict with
       | Vox_backend.Proved ->
         let origin =
@@ -1346,16 +1407,18 @@ let verify_seal_obligation ~env ~seal_location
         ];
     }
   in
+  let generated_smt = emit_generated_smt ~env condition in
   if !Clflags.vox_dump_vc then begin
     dump_vc ~kind:"seal-implication" ~env condition;
     if Option.is_some !Clflags.vox_dump_vc_json then
       record_vc ~kind:"seal-implication" ~program_point:anchor
-        ~provenance ~env condition (not_discharged_result condition)
+        ~provenance ~env ~generated_smt condition
+        (not_discharged_result condition)
   end else begin
-    let result = discharge ~env condition in
+    let result = discharge ~generated_smt ~env condition in
     if Option.is_some !Clflags.vox_dump_vc_json then
       record_vc ~kind:"seal-implication" ~program_point:anchor
-        ~provenance ~env condition result;
+        ~provenance ~env ~generated_smt condition result;
     match result.verdict with
     | Vox_backend.Proved -> ()
     | (Vox_backend.Not_proved | Disproved | Unknown | Solver_error

@@ -26,6 +26,7 @@ type capabilities =
 type obligation =
   { env : Env.t;
     condition : Vox_vc.t;
+    prove_contents : string option;
   }
 
 type backend_result =
@@ -137,7 +138,7 @@ module Lean_backend = struct
   let backend = Lean
   let capabilities = capabilities backend
 
-  let discharge ~command:_ { env; condition } =
+  let discharge ~command:_ { env; condition; prove_contents = _ } =
     let lean = Vox_lean.discharge ~env condition in
     let verdict =
       match lean.verdict with
@@ -169,10 +170,10 @@ module Z3_backend = struct
   let backend = Z3
   let capabilities = capabilities backend
 
-  let discharge ~command { env; condition } =
+  let discharge ~command { env; condition; prove_contents } =
     let smt =
       Vox_smt.discharge ~backend:`Z3 ~command:(z3_command command)
-        ~input_mode:Vox_smt.Stdin ~env condition
+        ?prove_contents ~input_mode:Vox_smt.Stdin ~env condition
     in
     { backend;
       capabilities;
@@ -187,12 +188,12 @@ module Oxsmt_backend = struct
   let backend = Oxsmt
   let capabilities = capabilities backend
 
-  let discharge ~command { env; condition } =
+  let discharge ~command { env; condition; prove_contents } =
     let smt =
       if legacy_oxsmt_external () then
         Vox_smt.discharge ~backend:`Oxsmt
-          ~command:(oxsmt_command command) ~input_mode:Vox_smt.Stdin ~env
-          condition
+          ~command:(oxsmt_command command) ?prove_contents
+          ~input_mode:Vox_smt.Stdin ~env condition
       else
         Vox_smt.discharge_oxsmt
           ~timeout_seconds:(oxsmt_timeout_seconds ()) ~env condition
@@ -278,8 +279,9 @@ let cross_result (condition : Vox_vc.t) (results : backend_result list) =
       backend_results = results;
     }
 
-let discharge ~selection ~smt_solver ~oxsmt_solver ~env condition =
-  let obligation = { env; condition } in
+let discharge ~selection ~smt_solver ~oxsmt_solver ?prove_contents ~env
+    condition =
+  let obligation = { env; condition; prove_contents } in
   match selection with
   | Single backend ->
     discharge_backend ~smt_solver ~oxsmt_solver backend obligation

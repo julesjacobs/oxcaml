@@ -935,6 +935,11 @@ let mk_vox_dump_vc_json f =
     Arg.String f,
     "<file>  Write processed refinement verification conditions as JSON" )
 
+let mk_vox_dump_vc_json_smt f =
+  ( "-vox-dump-vc-json-smt",
+    Arg.Unit f,
+    " Include generated SMT prove queries in VC JSON dumps" )
+
 let mk_vox_type_only f =
   ( "-vox-type-only",
     Arg.Unit f,
@@ -1242,6 +1247,7 @@ module type Core_options = sig
   val _dsource : unit -> unit
   val _vox_dump_vc : unit -> unit
   val _vox_dump_vc_json : string -> unit
+  val _vox_dump_vc_json_smt : unit -> unit
   val _vox_type_only : unit -> unit
   val _vox_backend : string -> unit
   val _vox_smt_solver : string -> unit
@@ -1647,6 +1653,7 @@ struct
     mk_dsource F._dsource;
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
@@ -1762,6 +1769,7 @@ struct
     mk_dsource F._dsource;
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
@@ -1952,6 +1960,7 @@ struct
     mk_dsource F._dsource;
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
@@ -2123,6 +2132,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dsource F._dsource;
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
@@ -2276,6 +2286,7 @@ struct
     mk_dsource F._dsource;
     mk_vox_dump_vc F._vox_dump_vc;
     mk_vox_dump_vc_json F._vox_dump_vc_json;
+    mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
@@ -2531,6 +2542,8 @@ module Default = struct
       vox_dump_vc := true;
       unique_ids := false
     let _vox_dump_vc_json file = vox_dump_vc_json := Some file
+
+    let _vox_dump_vc_json_smt () = vox_dump_vc_json_smt := true
     let _vox_backend backend = vox_backend := backend
     let _vox_smt_solver command = vox_smt_solver := Some command
     let _vox_oxsmt_solver command = vox_oxsmt_solver := Some command

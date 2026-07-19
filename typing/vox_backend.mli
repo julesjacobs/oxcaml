@@ -30,6 +30,7 @@ type capabilities =
 type obligation =
   { env : Env.t;
     condition : Vox_vc.t;
+    prove_contents : string option;
   }
 
 type backend_result =
@@ -72,6 +73,7 @@ val discharge :
   selection:selection ->
   smt_solver:string option ->
   oxsmt_solver:string option ->
+  ?prove_contents:string ->
   env:Env.t ->
   Vox_vc.t ->
   result
