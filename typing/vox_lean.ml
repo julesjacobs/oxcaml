@@ -862,7 +862,7 @@ let witness_variables ~env (vc : Vox_vc.t) =
           end
         | Rexp_ident (Rbound _) | Rexp_constant _ | Rexp_let _
         | Rexp_function _ | Rexp_apply _ | Rexp_tuple _ | Rexp_construct _
-        | Rexp_field _ | Rexp_ifthenelse _ -> ())
+        | Rexp_field _ | Rexp_ifthenelse _ | Rexp_match _ -> ())
       vc.goal;
     Ok !result
   with

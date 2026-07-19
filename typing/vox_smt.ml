@@ -1629,6 +1629,91 @@ let oxsmt_expression context environment expression =
             error expression.rexp_loc
               "field applied to a non-record type"
         end
+      | Rexp_match (scrutinee, cases) ->
+        let scrutinee, scrutinee_sort = build locals scrutinee in
+        begin
+          match scrutinee_sort with
+          | Sdata key ->
+            let data = data_for_key context expression.rexp_loc key in
+            let build_case case =
+              if
+                not
+                  (Path.same data.data_path
+                     case.rcase_constructor.rconstr_type_path)
+              then
+                error expression.rexp_loc
+                  "match constructor path does not match its scrutinee type";
+              let constructor_index, constructor =
+                constructor expression.rexp_loc data
+                  case.rcase_constructor.rconstr_name
+              in
+              if
+                List.length constructor.constructor_fields
+                <> List.length case.rcase_arguments
+              then error expression.rexp_loc "match constructor arity mismatch";
+              let _, case_locals =
+                List.fold_left2
+                  (fun (field_index, locals) field argument ->
+                    let selected =
+                      let selector =
+                        oxsmt_selector environment expression.rexp_loc key
+                          constructor_index field_index
+                      in
+                      Oxsmt_context.app environment.terms selector
+                        [scrutinee]
+                    in
+                    let locals =
+                      match argument with
+                      | None -> locals
+                      | Some binder ->
+                        let binder_sort =
+                          sort_of_type context expression.rexp_loc
+                            binder.rb_type
+                        in
+                        expect_sort expression.rexp_loc field binder_sort;
+                        (binder.rb_id, (selected, field)) :: locals
+                    in
+                    field_index + 1, locals)
+                  (0, locals) constructor.constructor_fields
+                  case.rcase_arguments
+              in
+              let body, body_sort = build case_locals case.rcase_body in
+              expect_sort expression.rexp_loc result_sort body_sort;
+              let tester =
+                (oxsmt_constructor environment expression.rexp_loc key
+                   constructor_index)
+                  .Oxsmt_datatype_defs.tester
+              in
+              ( constructor_index,
+                Oxsmt_context.app environment.terms tester [scrutinee],
+                body )
+            in
+            let cases = List.map build_case cases in
+            let actual_indices =
+              List.map (fun (index, _, _) -> index) cases
+              |> List.sort_uniq Int.compare
+            in
+            let expected_indices =
+              match definition expression.rexp_loc data with
+              | Variant constructors ->
+                List.init (List.length constructors) Fun.id
+              | Record _ ->
+                error expression.rexp_loc "match scrutinee is not a variant"
+            in
+            if actual_indices <> expected_indices then
+              error expression.rexp_loc
+                "match cases do not cover each constructor exactly once";
+            let rec build_match = function
+              | [] -> error expression.rexp_loc "empty match"
+              | [(_, _, body)] -> body
+              | (_, tester, body) :: rest ->
+                Oxsmt_context.ite environment.terms tester body
+                  (build_match rest)
+            in
+            build_match cases
+          | _ ->
+            error expression.rexp_loc "match scrutinee is not a datatype"
+        end
       | Rexp_ifthenelse (condition, ifso, Some ifnot) ->
         let condition, condition_sort = build locals condition in
         expect_bool expression.rexp_loc condition_sort;
@@ -1657,8 +1742,7 @@ let contains_substring string substring =
   in
   substring_length = 0 || loop 0
 
-let check_oxsmt_session session =
-  let verdict = Oxsmt_session.check_sat session in
+let validate_oxsmt_verdict session verdict =
   let reason = Oxsmt_session.last_unknown_reason session in
   match verdict with
   | Oxsmt_session.Unknown
@@ -1674,6 +1758,60 @@ let check_oxsmt_session session =
   | Oxsmt_session.Sat
   | Oxsmt_session.Unsat
   | Oxsmt_session.Unknown -> verdict
+
+let check_oxsmt_session session =
+  let verdict = Oxsmt_session.check_sat session in
+  validate_oxsmt_verdict session verdict
+
+let check_oxsmt_session_assuming session assumptions =
+  let result = Oxsmt_session.check_sat_assuming session assumptions in
+  ignore (validate_oxsmt_verdict session result.verdict);
+  match result.verdict, result.unsat_core with
+  | Oxsmt_session.Unsat, Some _
+  | (Oxsmt_session.Sat | Oxsmt_session.Unknown), None -> result
+  | Oxsmt_session.Unsat, None ->
+    failwith "oxsmt returned unsat without an assumption core"
+  | (Oxsmt_session.Sat | Oxsmt_session.Unknown), Some _ ->
+    failwith "oxsmt returned an assumption core for a non-unsat result"
+
+let inject_oxsmt_core_for_testing fact_assumptions
+    (result : Oxsmt_session.assumption_check) =
+  match Sys.getenv_opt "VOX_OXSMT_TEST_UNSAT_CORE" with
+  | Some "empty" when result.Oxsmt_session.verdict = Oxsmt_session.Unsat ->
+    { result with unsat_core = Some [] }
+  | Some "non-covering"
+    when result.Oxsmt_session.verdict = Oxsmt_session.Unsat ->
+    let assumption = snd (List.hd (List.rev fact_assumptions)) in
+    { result with unsat_core = Some [assumption] }
+  | Some _ | None -> result
+
+let unused_oxsmt_facts session fact_assumptions core =
+  let used_facts =
+    List.map
+      (fun (core_term, core_polarity) ->
+        match
+          List.find_opt
+            (fun (_, (fact_term, fact_polarity)) ->
+              Bool.equal core_polarity fact_polarity
+              && Oxsmt_term.equal core_term fact_term)
+            fact_assumptions
+        with
+        | Some (index, _) -> index
+        | None -> failwith "oxsmt returned an invalid assumption core")
+      core
+  in
+  let unique_used_facts = List.sort_uniq Int.compare used_facts in
+  if List.length unique_used_facts <> List.length used_facts then
+    failwith "oxsmt returned a duplicate in its assumption core";
+  let replay = check_oxsmt_session_assuming session core in
+  match replay.verdict with
+  | Oxsmt_session.Unsat ->
+    List.filter_map
+      (fun (index, _) ->
+        if List.mem index unique_used_facts then None else Some index)
+      fact_assumptions
+  | Oxsmt_session.Sat | Oxsmt_session.Unknown ->
+    failwith "oxsmt returned an assumption core that does not prove the query"
 
 let oxsmt_timeout_active = Atomic.make false
 
@@ -1812,17 +1950,50 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   let goal, goal_sort = oxsmt_expression context environment goal in
   expect_bool vc.goal.rexp_loc goal_sort;
   let goal = Oxsmt_context.eq terms goal true_term in
-  let query =
-    match query with
-    | Prove -> Oxsmt_context.not_ terms goal
-    | Disprove -> goal
-  in
-  Oxsmt_session.assert_presolved session (facts @ [query]);
-  check_oxsmt_session session
+  match query with
+  | Prove ->
+    let fact_assumptions =
+      List.mapi
+        (fun index _ ->
+          let symbol =
+            Oxsmt_session.declare_const session
+              ("VoxFact_" ^ string_of_int index)
+              Oxsmt_sort.bool
+          in
+          index, (Oxsmt_context.const terms symbol, true))
+        facts
+    in
+    let guarded_facts =
+      List.map2
+        (fun fact (_, (selector, _)) ->
+          Oxsmt_context.implies terms selector fact)
+        facts fact_assumptions
+    in
+    Oxsmt_session.assert_presolved session
+      (guarded_facts @ [Oxsmt_context.not_ terms goal]);
+    let result =
+      check_oxsmt_session_assuming session
+        (List.map snd fact_assumptions)
+      |> inject_oxsmt_core_for_testing fact_assumptions
+    in
+    begin
+      match result.verdict, result.unsat_core with
+      | Oxsmt_session.Unsat, Some core ->
+        result.verdict, unused_oxsmt_facts session fact_assumptions core
+      | (Oxsmt_session.Sat | Oxsmt_session.Unknown), None ->
+        result.verdict, []
+      | Oxsmt_session.Unsat, None ->
+        failwith "oxsmt returned unsat without an assumption core"
+      | (Oxsmt_session.Sat | Oxsmt_session.Unknown), Some _ ->
+        failwith "oxsmt returned an assumption core for a non-unsat result"
+    end
+  | Disprove ->
+    Oxsmt_session.assert_presolved session (facts @ [goal]);
+    check_oxsmt_session session, []
 
 let oxsmt_query_result ~query ~timeout_seconds ~env vc =
   try
-    let verdict =
+    let verdict, unused_facts =
       with_oxsmt_timeout ~timeout_seconds (fun () ->
         solve_oxsmt_query ~query ~env vc)
     in
@@ -1830,14 +2001,14 @@ let oxsmt_query_result ~query ~timeout_seconds ~env vc =
     | Oxsmt_session.Unsat ->
       begin
         match query with
-        | Prove -> `Final (Proved, None)
-        | Disprove -> `Final (Disproved, None)
+        | Prove -> `Final (Proved, None, unused_facts)
+        | Disprove -> `Final (Disproved, None, [])
       end
     | Oxsmt_session.Sat -> `Open "sat"
     | Oxsmt_session.Unknown -> `Open "unknown"
   with
   | Oxsmt_timeout ->
-    `Final (Solver_error, Some "oxsmt solver timed out")
+    `Final (Solver_error, Some "oxsmt solver timed out", [])
   | Oxsmt_unsupported _
   | Oxsmt_term.Overflow
   | Oxsmt_term.Unsupported _ -> `Open "unknown"
@@ -2205,22 +2376,24 @@ let default_input_mode = function
   | `Z3 | `Oxsmt -> Stdin
 
 let discharge_oxsmt ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
-  let result verdict ?detail () =
-    { verdict; location = vc.location; detail }
+  let result verdict ?detail ?(unused_facts = []) () =
+    { verdict; location = vc.location; detail; unused_facts }
   in
   if timeout_seconds <= 0 then
     result Solver_error ~detail:"timeout must be positive" ()
   else
     try
       match oxsmt_query_result ~query:Prove ~timeout_seconds ~env vc with
-      | `Final (verdict, detail) -> result verdict ?detail ()
+      | `Final (verdict, detail, unused_facts) ->
+        result verdict ?detail ~unused_facts ()
       | `Open positive_status ->
         begin
           match
             oxsmt_query_result
               ~query:Disprove ~timeout_seconds ~env vc
           with
-          | `Final (verdict, detail) -> result verdict ?detail ()
+          | `Final (verdict, detail, unused_facts) ->
+            result verdict ?detail ~unused_facts ()
           | `Open negative_status ->
             result Not_proved
               ~detail:
@@ -2233,6 +2406,7 @@ let discharge_oxsmt ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
       { verdict = Solver_error;
         location = emission_error.location;
         detail = Some emission_error.message;
+        unused_facts = [];
       }
     | exception_ ->
       result Solver_error ~detail:(Printexc.to_string exception_) ()

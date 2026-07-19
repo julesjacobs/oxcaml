@@ -224,6 +224,25 @@ let () =
     cases;
   let disproved = Vox_smt.discharge_oxsmt ~env (vc (bool false)) in
   assert (disproved.verdict = Vox_smt.Disproved);
+  let unused = Vox_smt.discharge_oxsmt ~env unused_fact_usage in
+  assert (unused.verdict = Vox_smt.Proved);
+  assert (unused.unused_facts = [1]);
+  let all_used = Vox_smt.discharge_oxsmt ~env used_everywhere in
+  assert (all_used.verdict = Vox_smt.Proved);
+  assert (all_used.unused_facts = []);
+  let through_backend condition =
+    Vox_backend.discharge
+      ~selection:(Vox_backend.Single Vox_backend.Oxsmt)
+      ~smt_solver:None
+      ~oxsmt_solver:(Some "/definitely/missing/oxsmt-command")
+      ~env condition
+  in
+  let unused = through_backend unused_fact_usage in
+  assert (unused.verdict = Vox_backend.Proved);
+  assert (unused.unused_facts = Some [1]);
+  let all_used = through_backend used_everywhere in
+  assert (all_used.verdict = Vox_backend.Proved);
+  assert (all_used.unused_facts = Some []);
   let nonlinear =
     let square = multiply (bound x) (bound x) in
     vc (equal int_type square square)
@@ -257,7 +276,30 @@ let () =
   let bad_timeout =
     Vox_smt.discharge_oxsmt ~timeout_seconds:0 ~env arithmetic_and_booleans
   in
-  assert (bad_timeout.verdict = Vox_smt.Solver_error)
+  assert (bad_timeout.verdict = Vox_smt.Solver_error);
+  Unix.putenv "VOX_OXSMT_TEST_RAISE" "1";
+  let internal_failure =
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "VOX_OXSMT_TEST_RAISE" "0")
+      (fun () -> Vox_smt.discharge_oxsmt ~env arithmetic_and_booleans)
+  in
+  assert (internal_failure.verdict = Vox_smt.Solver_error);
+  let with_injected_core core function_ =
+    Unix.putenv "VOX_OXSMT_TEST_UNSAT_CORE" core;
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "VOX_OXSMT_TEST_UNSAT_CORE" "none")
+      function_
+  in
+  let empty_core =
+    with_injected_core "empty" (fun () ->
+      Vox_smt.discharge_oxsmt ~env unused_fact_usage)
+  in
+  assert (empty_core.verdict = Vox_smt.Solver_error);
+  let non_covering_core =
+    with_injected_core "non-covering" (fun () ->
+      Vox_smt.discharge_oxsmt ~env unused_fact_usage)
+  in
+  assert (non_covering_core.verdict = Vox_smt.Solver_error)
 
 let () =
   List.iter
@@ -475,7 +517,7 @@ let () =
         assert (z3.unused_facts = None);
         assert (oxsmt.backend = Vox_backend.Oxsmt);
         assert (oxsmt.verdict = Vox_backend.Proved);
-        assert (oxsmt.unused_facts = Some [0])
+        assert (oxsmt.unused_facts = Some [])
       | _ -> failwith "cross backend result order changed"
     end;
     let all_proved =
