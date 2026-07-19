@@ -45,6 +45,38 @@ let is_declared env name =
    that IS asserted makes [Session.has_live_lemma] true, so THE SOUNDNESS RULE degrades
    any ground [Sat] to [Unknown] automatically (§2). Returns [true] iff every lemma
    loaded. *)
+(* dark OXSMT_NIA incremental-linearization loop: [check_sat] followed by a BOUNDED CEGAR
+   refinement. When the R1 model self-check rejects a candidate because a nonlinear
+   product was inconsistent under real multiplication, {!Session.nia_refine} pins the
+   products at that model's values and we re-solve, up to [max_nia_refine] rounds. Shared
+   by both drivers (oxsmt_cli / corpus_classify) so they cannot diverge. A no-op on any
+   query with the lever off or no nonlinear products: [nia_refine] returns [false]
+   immediately, so the loop runs [check_sat] exactly once — byte-identical to a bare
+   [Session.check_sat]. *)
+let max_nia_refine =
+  match Sys.getenv_opt "OXSMT_NIA_REFINE" with
+  | Some v ->
+    (match int_of_string_opt (String.trim v) with
+     | Some n when n >= 0 -> n
+     | _ -> 40)
+  | None -> 40
+;;
+
+let check_sat_refined s =
+  let v = ref (Session.check_sat s) in
+  let budget = ref max_nia_refine in
+  while
+    !v = Session.Unknown
+    && String.equal (Session.last_unknown_reason s) "r1-model-check-failed"
+    && !budget > 0
+    && Session.nia_refine s
+  do
+    decr budget;
+    v := Session.check_sat s
+  done;
+  !v
+;;
+
 let assert_all ?(presolve = true) s (parsed : Parser.t) =
   (* Total dropped assertion content: what partial assertion dropped at PARSE
      ([parsed.dropped]) plus any lemma dropped HERE because its body/trigger is outside

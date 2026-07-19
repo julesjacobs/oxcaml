@@ -247,7 +247,7 @@ let () =
                (visible-failure-modes directive): a one-line stderr marker names the file
                and exception, so a silent completeness loss is never invisible. *)
             let v =
-              try Session.check_sat s with
+              try Oxsmt_query_loader.check_sat_refined s with
               | e ->
                 Printf.eprintf
                   "corpus_classify: check_sat degraded to unknown on %s: %s\n"

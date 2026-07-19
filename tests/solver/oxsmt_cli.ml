@@ -274,12 +274,12 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
        invisible. *)
     (* [(check-sat-assuming (lit ...))] drives the in-process assumption API and, on
        [Unsat], carries the returned core out for [(get-unsat-core)] printing; a plain
-       [check-sat] takes the existing path with no core. Both degrade a raised exception to
-       a sound [unknown] (LOUD stderr marker). *)
+       [check-sat] takes the existing path with no core. Both degrade a raised exception
+       to a sound [unknown] (LOUD stderr marker). *)
     let v, core_render =
       match parsed.Parser.assumptions with
       | None ->
-        ( (try Session.check_sat s with
+        ( (try Oxsmt_query_loader.check_sat_refined s with
            | e ->
              Printf.eprintf
                "oxsmt_cli: check_sat degraded to unknown: %s\n"
@@ -313,36 +313,36 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
     let result_block =
       match v with
       | Session.Sat ->
-       (match Session.get_model s with
-        (* A [Sat] whose model was reconstructed and self-checked at the session level is
-           rendered and emitted here. A table-free (const/Bool/LIA) model uses the LEGACY
-           flat body; a FUNCTION-TABLE / sorted model uses the §8 sidecar grammar — the
-           harness model-transport now carries both (ADR-UF-models R9), and the R1
-           in-process checker has already gated any table model's [sat] (THE SOUNDNESS
-           RULE), so the table flip reaches the corpus. [render_model] decides which body
-           to emit. *)
-        | Some m ->
-          (match render_model m with
-           | body -> block "sat" (Some body)
-           | exception Oxsmt_smtlib.Printer.Unsupported _ ->
-             (* A model names a symbol the SMT-LIB printer cannot faithfully render: the
-                empty symbol [||], or a predefined-operator collision like [|+|]. Quoting
-                is purely lexical and cannot disambiguate these, so the printer's refusal
-                is CORRECT (not something to make total). Emitting the name anyway would
-                be malformed solver output; degrade this goal to a sound [unknown] with no
-                model rather than crash the CLI. *)
-             block ~reason:"cli-printer-unsupported" "unknown" None)
-        | None ->
-          (* A DATATYPES or ARRAYS session self-checks its [Sat] with the in-process
-             constructor-tree / array-map checker (Session.commit_sat), but the scalar
-             [model] type cannot carry a tree or an array map, so [get_model] is [None]
-             here (model transport to the external eval is a follow-up). Report [sat] on
-             the verdict — matching the headline classifier, which decides on the verdict
-             alone — rather than downgrading to [unknown]. A modelless [Sat] from neither
-             theory (a UF table we could not render) stays the sound [unknown]. *)
-          if Session.uses_datatypes s || Session.uses_arrays s
-          then block "sat" None
-          else block ~reason:"cli-unrenderable-model" "unknown" None)
+        (match Session.get_model s with
+         (* A [Sat] whose model was reconstructed and self-checked at the session level is
+            rendered and emitted here. A table-free (const/Bool/LIA) model uses the LEGACY
+            flat body; a FUNCTION-TABLE / sorted model uses the §8 sidecar grammar — the
+            harness model-transport now carries both (ADR-UF-models R9), and the R1
+            in-process checker has already gated any table model's [sat] (THE SOUNDNESS
+            RULE), so the table flip reaches the corpus. [render_model] decides which body
+            to emit. *)
+         | Some m ->
+           (match render_model m with
+            | body -> block "sat" (Some body)
+            | exception Oxsmt_smtlib.Printer.Unsupported _ ->
+              (* A model names a symbol the SMT-LIB printer cannot faithfully render: the
+                 empty symbol [||], or a predefined-operator collision like [|+|]. Quoting
+                 is purely lexical and cannot disambiguate these, so the printer's refusal
+                 is CORRECT (not something to make total). Emitting the name anyway would
+                 be malformed solver output; degrade this goal to a sound [unknown] with
+                 no model rather than crash the CLI. *)
+              block ~reason:"cli-printer-unsupported" "unknown" None)
+         | None ->
+           (* A DATATYPES or ARRAYS session self-checks its [Sat] with the in-process
+              constructor-tree / array-map checker (Session.commit_sat), but the scalar
+              [model] type cannot carry a tree or an array map, so [get_model] is [None]
+              here (model transport to the external eval is a follow-up). Report [sat] on
+              the verdict — matching the headline classifier, which decides on the verdict
+              alone — rather than downgrading to [unknown]. A modelless [Sat] from neither
+              theory (a UF table we could not render) stays the sound [unknown]. *)
+           if Session.uses_datatypes s || Session.uses_arrays s
+           then block "sat" None
+           else block ~reason:"cli-unrenderable-model" "unknown" None)
       | Session.Unsat -> block "unsat" None
       | Session.Unknown -> block ~reason:(Session.last_unknown_reason s) "unknown" None
     in
@@ -403,13 +403,13 @@ let () =
       [ b ], core)
   in
   List.iter print_block blocks;
-  (* [(get-unsat-core)] output: the SMT-LIB paren list of the core's assumption literals, on
-     its own stdout line AFTER the result block (matching an SMT-LIB solver's command order).
-     Emitted only when the document asked for it AND the check was [Unsat] with a core (a
-     [check-sat-assuming] that refuted); a core query on a non-[unsat] result is not
-     well-formed SMT-LIB, so nothing goes to stdout (a stderr note keeps it visible without
-     polluting the verdict channel). Ordinary [check-sat] documents carry no core, so this is
-     a no-op there — stdout stays byte-identical on every non-assuming path. *)
+  (* [(get-unsat-core)] output: the SMT-LIB paren list of the core's assumption literals,
+     on its own stdout line AFTER the result block (matching an SMT-LIB solver's command
+     order). Emitted only when the document asked for it AND the check was [Unsat] with a
+     core (a [check-sat-assuming] that refuted); a core query on a non-[unsat] result is
+     not well-formed SMT-LIB, so nothing goes to stdout (a stderr note keeps it visible
+     without polluting the verdict channel). Ordinary [check-sat] documents carry no core,
+     so this is a no-op there — stdout stays byte-identical on every non-assuming path. *)
   (match core_render with
    | Some core when wants_core -> print_endline core
    | _ ->

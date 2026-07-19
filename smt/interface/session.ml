@@ -153,6 +153,16 @@ type t =
       (* verdict of the most recent check_sat, for get_model *)
   ; mutable last_model : model option
       (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+  ; mutable nia_rejected_model : model option
+      (* dark OXSMT_NIA incremental linearization: the candidate model most recently
+         REJECTED by the R1 [Model_check] because a nonlinear product was inconsistent
+         under real multiplication. Retained so {!nia_refine} can pin those products at
+         their current values and re-solve (CEGAR). [None] except right after such a
+         rejection. *)
+  ; nia_refine_seen : (int, unit) Hashtbl.t
+      (* term tags of point-refinement lemmas already asserted this session, so
+         {!nia_refine} never re-asserts an identical lemma (which would loop without
+         progress). *)
   ; mutable asserted : Term.t list
       (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
          model self-check. Frame-scoped in lockstep with [frames] (F3): a [push] snapshots
@@ -384,6 +394,8 @@ let create
   ; unknown_reason = ""
   ; last_verdict = Unknown
   ; last_model = None
+  ; nia_rejected_model = None
+  ; nia_refine_seen = Hashtbl.create 16
   ; asserted = []
   ; asserted_saved = []
   ; last_splits = 0
@@ -2065,11 +2077,96 @@ let commit_sat t =
         t.last_model <- Some m;
         Sat)
       else (
+        (* Retain the rejected candidate for OXSMT_NIA point refinement ({!nia_refine});
+           inert unless nonlinear products are present and the caller drives a refinement
+           loop, so this does not change any verdict on its own. *)
+        t.nia_rejected_model <- Some m;
         t.unknown_reason <- "r1-model-check-failed";
         Unknown)
     | None ->
       t.unknown_reason <- "no-model";
       Unknown)
+;;
+
+(* dark OXSMT_NIA incremental linearization (CEGAR refinement). After a [check_sat] that
+   returned [Unknown] because the R1 model check rejected a candidate whose nonlinear
+   product was inconsistent under real multiplication, PIN each abstracted product at its
+   value in that rejected model — assert the conditional point lemma
+   [(a = va) /\ (b = vb) -> mul(a,b) = va*vb] — so the NEXT [check_sat] cannot reuse the
+   same inconsistent model. Returns [true] iff at least one NEW lemma was asserted, i.e.
+   there is progress to re-solve on; [false] (lever off / no rejected model / no products
+   / every current point already pinned) tells the caller's bounded loop to stop.
+
+   SOUND: every lemma is a valid consequence of integer multiplication (when the factors
+   take those values, the product is fixed), so it only EXCLUDES models and never removes
+   a real solution — [unsat] stays sound and any [sat] the loop reaches is still R1
+   model-checked before it is reported. Purely additive: the lemmas are ordinary ground
+   assertions internalized at level 0 between checks, exactly like quantifier instances. *)
+let nia_refine t =
+  match if Nia_config.enabled () then t.nia_rejected_model else None with
+  | None -> false
+  | Some (_sorts, bindings) ->
+    t.nia_rejected_model <- None;
+    let tbls = Model_check.tables_of_bindings bindings in
+    let visited : (int, unit) Hashtbl.t = Hashtbl.create 256 in
+    let products : (int, Term.t * Term.t * Term.t) Hashtbl.t = Hashtbl.create 16 in
+    let rec walk (u : Term.t) =
+      if not (Hashtbl.mem visited u.Term.tag)
+      then (
+        Hashtbl.replace visited u.Term.tag ();
+        match u.Term.node with
+        | Term.App (sym, args) ->
+          (match Iarr.to_list args with
+           | [ a; b ] when Nia_config.is_mul_name (Symbol.name sym) ->
+             Hashtbl.replace products u.Term.tag (u, a, b)
+           | _ -> ());
+          List.iter walk (Iarr.to_list args)
+        | Term.Le a -> walk a
+        | Term.Eq (a, b) ->
+          walk a;
+          walk b
+        | Term.Not a -> walk a
+        | Term.And xs | Term.Or xs -> List.iter walk (Iarr.to_list xs)
+        | Term.Ite (c, a, b) ->
+          walk c;
+          walk a;
+          walk b
+        | Term.Arith lin -> Iarr.iter (fun (c, _coeff) -> walk c) lin.Term.coeffs
+        | Term.Real_arith lin -> Iarr.iter (fun (c, _coeff) -> walk c) lin.Term.coeffs
+        | Term.Int_const _ | Term.Real_const _ | Term.Bool_const _ -> ())
+    in
+    List.iter walk t.asserted;
+    let added = ref 0 in
+    Hashtbl.iter
+      (fun _tag (p, a, b) ->
+        match Model_check.eval_in tbls a, Model_check.eval_in tbls b with
+        | Some (Cdclt.VInt va), Some (Cdclt.VInt vb) ->
+          let ctx = t.ctx in
+          let prod = Bigint.mul va vb in
+          let lemma =
+            Context.implies
+              ctx
+              (Context.and_
+                 ctx
+                 [ Context.eq ctx a (Context.int_const_big ctx va)
+                 ; Context.eq ctx b (Context.int_const_big ctx vb)
+                 ])
+              (Context.eq ctx p (Context.int_const_big ctx prod))
+          in
+          if not (Hashtbl.mem t.nia_refine_seen lemma.Term.tag)
+          then (
+            Hashtbl.replace t.nia_refine_seen lemma.Term.tag ();
+            (* A refinement lemma must never brick the session: guard the internalize so
+               an (essentially impossible, pure-equality) overflow degrades to "no
+               progress" rather than a degraded session. *)
+            try
+              assert_term t lemma;
+              incr added
+            with
+            | _ -> ())
+        | _ -> ())
+      products;
+    !added > 0
 ;;
 
 let check_sat t =

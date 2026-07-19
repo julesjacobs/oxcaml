@@ -31,7 +31,9 @@ let solve src =
     if not (Oxsmt_query_loader.assert_all ~presolve:true s parsed)
     then "unknown"
     else (
-      match Session.check_sat s with
+      (* drive the full refined path (Stage 2 CEGAR loop) exactly as the CLI / classifier
+         do *)
+      match Oxsmt_query_loader.check_sat_refined s with
       | Session.Sat -> "sat"
       | Session.Unsat -> "unsat"
       | Session.Unknown -> "unknown")
@@ -91,7 +93,11 @@ let abstraction_suite () =
     "cube-neg"
     "unsat"
     "(set-logic QF_NIA)(declare-fun x () Int)(assert (>= x 0))(assert (= (* x x x) (- \
-     8)))(check-sat)"
+     8)))(check-sat)";
+  (* Stage 2 CEGAR refinement (OXSMT_NIA_REFINE, default on): the sign/zero/unit lemmas do
+     not settle this, but pinning the product at the rejected model's value does. x=2
+     forces y=3, a definite SAT re-checked under real multiplication. *)
+  expect "refine-sat" "sat" (nia_hdr ^ "(assert (= (* x y) 6))(assert (= x 2))(check-sat)")
 ;;
 
 let dark_suite () =
