@@ -1,0 +1,216 @@
+(* Core-minimization property test + benchmark (task #36).
+
+   [Session.check_sat_assuming]'s documented guarantee is that [unsat_core] is a
+   subset-minimal, duplicate-free subset of the assumptions in input order. This upgrade
+   replaces the linear one-probe-per-member deletion loop with z3-style CLAUSE-SET
+   REFINEMENT (mus.cpp:80 [get_mus1]): an Unsat deletion probe's own failed-assumption
+   core becomes the new working set, dropping many redundant members per probe. This file
+   proves the upgrade is a COST change, not a semantics change, and measures the win.
+
+   Gadget (the [assuming-bool-min] session-cores test generalized from one decoy to [r]):
+   one wide clause [c_1; ...; c_r; a; b] plus the four x/y clauses that already make
+   [{~a, ~b}] unsatisfiable. Assuming every [~c_i], [~a], [~b], the wide clause is
+   falsified immediately (all literals false), so the SAT core's first conflict names ALL
+   of [{~c_1..~c_r, ~a, ~b}] — a loose over-approximation, because [{~a, ~b}] alone is
+   unsat via the x/y clauses. The unique minimal core is therefore [{~a, ~b}]: every
+   [~c_i] is redundant. Linear deletion pays one re-solve per decoy; refinement drops the
+   whole decoy block in the single probe that first removes one, then confirms [~a]/[~b].
+
+   Checks:
+   1. SUBSET-MINIMALITY (randomized): over shuffled assumption orders and several decoy
+      counts, the returned core re-solves Unsat and every one-literal deletion is Sat, and
+      it is exactly [{~a, ~b}]. This is the documented guarantee, verified independently.
+   2. EQUIVALENCE: the linear baseline ([OXSMT_CORE_MIN_LINEAR=1]) and refinement return
+      the SAME minimal class (both pass check 1); refinement never spends MORE probes and,
+      once there are >= 2 decoys, spends strictly FEWER.
+   3. DISCRIMINATION: the minimality checker REJECTS a deliberately non-minimal core (the
+      full assumption set) — deleting a decoy leaves it Unsat — so a broken minimizer that
+      left decoys in (or dropped an essential) would fail check 1. *)
+
+open Oxsmt_core
+module Session = Oxsmt_interface.Session
+
+let checks = ref 0
+let failures = ref 0
+
+let fail name msg =
+  incr failures;
+  Printf.printf "  FAIL %s: %s\n" name msg
+;;
+
+let ok _name = incr checks
+let check_true name b = if b then ok name else fail name "expected true"
+let assumption_equal (a, ap) (b, bp) = ap = bp && Term.equal a b
+let assumption_mem x xs = List.exists (assumption_equal x) xs
+let remove_assumption x xs = List.filter (fun y -> not (assumption_equal x y)) xs
+
+(* Deterministic Fisher-Yates so a failure reproduces from its seed. *)
+let shuffle seed xs =
+  let a = Array.of_list xs in
+  let st = Random.State.make [| seed |] in
+  for i = Array.length a - 1 downto 1 do
+    let j = Random.State.int st (i + 1) in
+    let t = a.(i) in
+    a.(i) <- a.(j);
+    a.(j) <- t
+  done;
+  Array.to_list a
+;;
+
+(* Build the r-decoy gadget on a fresh session; return (essential MUS, redundant decoys). *)
+let build_gadget s ~r ~tag =
+  let ctx = Session.context s in
+  let bv name = Context.const ctx (Session.declare_const s name Sort.bool) in
+  let neg t = Context.not_ ctx t in
+  let clause ts = Session.assert_term s (Context.or_ ctx ts) in
+  let a = bv (tag ^ "_a") in
+  let b = bv (tag ^ "_b") in
+  let x = bv (tag ^ "_x") in
+  let y = bv (tag ^ "_y") in
+  let decoys = List.init r (fun i -> bv (Printf.sprintf "%s_c%d" tag i)) in
+  clause (decoys @ [ a; b ]);
+  clause [ a; b; x; y ];
+  clause [ a; b; x; neg y ];
+  clause [ a; b; neg x; y ];
+  clause [ a; b; neg x; neg y ];
+  let mus = [ a, false; b, false ] in
+  let noise = List.map (fun c -> c, false) decoys in
+  mus, noise
+;;
+
+(* [is_minimal_core session core] is the documented guarantee, checked independently: the
+   core re-solves Unsat and every one-literal deletion re-solves Sat. Returns [false] (not
+   an exception) on a violation so it can double as the discrimination oracle. *)
+let is_minimal_core session core =
+  let replay = Session.check_sat_assuming session core in
+  replay.Session.verdict = Session.Unsat
+  && List.for_all
+       (fun lit ->
+         let probe = Session.check_sat_assuming session (remove_assumption lit core) in
+         probe.Session.verdict = Session.Sat)
+       core
+;;
+
+let set_linear on = Unix.putenv "OXSMT_CORE_MIN_LINEAR" (if on then "1" else "0")
+
+(* ------------------------------------------------------------------ 1 + 2 + 3 --------- *)
+
+let property_case ~r ~seed =
+  let name = Printf.sprintf "r=%d/seed=%d" r seed in
+  let tag = Printf.sprintf "g_%d_%d" r seed in
+  let cores =
+    List.map
+      (fun linear ->
+        set_linear linear;
+        let s = Session.create () in
+        let mus, noise = build_gadget s ~r ~tag:(tag ^ if linear then "L" else "R") in
+        let assumptions = shuffle seed (mus @ noise) in
+        let result = Session.check_sat_assuming s assumptions in
+        (* Capture the probe count BEFORE the minimality replays below, which re-enter
+           [check_sat_assuming] on [s] and reset its counter. *)
+        let probes = Session.minimize_probes s in
+        (match result.Session.verdict with
+         | Session.Unsat -> ok (name ^ ": unsat")
+         | _ -> fail name "check_sat_assuming did not return Unsat");
+        (match result.Session.unsat_core with
+         | None -> fail name "unsat_core = None"
+         | Some core ->
+           (* the returned core is exactly the planted MUS {~a,~b} ... *)
+           check_true
+             (name ^ ": core = MUS")
+             (List.length core = List.length mus
+              && List.for_all (fun m -> assumption_mem m core) mus);
+           (* ... and independently subset-minimal. Verify on the SAME session [s]: the
+              core's atoms live in [s]'s context, so re-solving them elsewhere is invalid.
+              Assumptions never persist, so these replays do not corrupt later checks. *)
+           check_true (name ^ ": subset-minimal") (is_minimal_core s core));
+        result.Session.unsat_core, probes, mus, noise)
+      [ false (* refinement *); true (* linear *) ]
+  in
+  match cores with
+  | [ (Some refine_core, refine_probes, mus, noise)
+    ; (Some linear_core, linear_probes, _, _)
+    ] ->
+    (* EQUIVALENCE: both strategies land on the same minimal class. *)
+    check_true
+      (name ^ ": strategies agree")
+      (List.length refine_core = List.length linear_core
+       && List.for_all (fun m -> assumption_mem m refine_core) mus
+       && List.for_all (fun m -> assumption_mem m linear_core) mus);
+    (* COST: refinement never spends more; with >= 2 decoys it spends strictly fewer. *)
+    check_true
+      (Printf.sprintf
+         "%s: refine probes (%d) <= linear (%d)"
+         name
+         refine_probes
+         linear_probes)
+      (refine_probes <= linear_probes);
+    if List.length noise >= 2
+    then
+      check_true
+        (Printf.sprintf
+           "%s: refine probes (%d) < linear (%d)"
+           name
+           refine_probes
+           linear_probes)
+        (refine_probes < linear_probes);
+    (* DISCRIMINATION: the checker must REJECT the non-minimal full set (deleting a decoy
+       stays Unsat), so a minimizer that left decoys in would fail the minimality check. *)
+    if List.length noise >= 1
+    then (
+      let disc = Session.create () in
+      let dmus, dnoise = build_gadget disc ~r ~tag:(tag ^ "D") in
+      check_true
+        (name ^ ": checker rejects non-minimal full set")
+        (not (is_minimal_core disc (dmus @ dnoise))))
+  | _ -> fail name "a strategy returned None"
+;;
+
+let () =
+  List.iter
+    (fun r -> List.iter (fun seed -> property_case ~r ~seed) [ 1; 2; 3; 7; 42 ])
+    [ 0; 1; 2; 5; 12 ]
+;;
+
+(* ------------------------------------------------------------------ benchmark --------- *)
+
+(* Report old (linear) vs new (refinement) probe counts and wall time on assumption-heavy
+   inputs: N total assumptions, a planted 2-literal MUS, N-2 redundant decoys. *)
+let benchmark () =
+  Printf.printf "\ncore-min benchmark (N assumptions, planted 2-literal MUS):\n";
+  Printf.printf
+    "%6s | %-11s | %-11s | %-9s | %-9s\n"
+    "N"
+    "probes(lin)"
+    "probes(ref)"
+    "ms(lin)"
+    "ms(ref)";
+  Printf.printf "%s\n" (String.make 60 '-');
+  List.iter
+    (fun n ->
+      let r = n - 2 in
+      let measure linear =
+        set_linear linear;
+        let s = Session.create () in
+        let mus, noise = build_gadget s ~r ~tag:(Printf.sprintf "b%d%b" n linear) in
+        let assumptions = shuffle 1 (mus @ noise) in
+        let t0 = Unix.gettimeofday () in
+        let result = Session.check_sat_assuming s assumptions in
+        let ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
+        assert (result.Session.verdict = Session.Unsat);
+        Session.minimize_probes s, ms
+      in
+      let lp, lms = measure true in
+      let rp, rms = measure false in
+      Printf.printf "%6d | %-11d | %-11d | %-9.2f | %-9.2f\n" n lp rp lms rms)
+    [ 20; 100; 500 ]
+;;
+
+let () =
+  benchmark ();
+  if !failures > 0
+  then (
+    Printf.printf "\ncore_min_test: %d FAILURES / %d checks\n" !failures !checks;
+    exit 1)
+  else Printf.printf "\ncore_min_test: all %d checks passed\n" !checks
+;;

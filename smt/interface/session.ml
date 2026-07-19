@@ -193,6 +193,13 @@ type t =
          tracing may not be installed afterwards: its recorder must observe the clause
          database from the pristine start, including units and learned clauses produced by
          an assumption query. *)
+  ; mutable minimize_probes : int
+      (* Diagnostic (never consulted by the solver): the number of incremental re-solves
+         [check_sat_assuming]'s core minimizer spent since the last
+         [reset_assumption_check] — the initial assumption solve plus every
+         deletion/refinement probe plus the final replay. Surfaced test-only via
+         {!minimize_probes} so the property test and benchmark can compare the linear and
+         clause-set-refinement strategies honestly. *)
   ; mutable presolve_certificate_trace : presolve_certificate_trace option
       (* Off-seam statement/witness channel for W1b equality elimination. [None] in every
          ordinary solve. Callback results are recorder ids and never feed search. *)
@@ -286,9 +293,9 @@ let create
      unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
      counter effect. The opt-out (not base-l0) keeps every declaration => byte-identical
      to the pre-flip trunk. *)
-  (* OXSMT_EMATCH_MGI (DEFAULT-OFF, dark, quant-mgi): model-guided instantiation. When
-     on, {!Manager.round} drops matcher instances already satisfied by the current model
-     once a [check_sat] is flooding toward the [lemma-gen-budget] Unknown, spending the
+  (* OXSMT_EMATCH_MGI (DEFAULT-OFF, dark, quant-mgi): model-guided instantiation. When on,
+     {!Manager.round} drops matcher instances already satisfied by the current model once
+     a [check_sat] is flooding toward the [lemma-gen-budget] Unknown, spending the
      budget/wall on the model-relevant (conflict / novel) instances instead. OFF is
      byte-identical (the filter never engages). Opt-in token set (only [=1]/[=true]/
      [=yes]); selection-only, never changes a verdict unsoundly. *)
@@ -387,6 +394,7 @@ let create
   ; relevancy
   ; cert_active = false
   ; assumption_query_started = false
+  ; minimize_probes = 0
   ; presolve_certificate_trace = None
   ; sym_counter = ref 0
   ; sym_sel = None
@@ -2216,6 +2224,7 @@ let dedup_assumptions assumptions =
 ;;
 
 let reset_assumption_check t =
+  t.minimize_probes <- 0;
   t.last_verdict <- Unknown;
   t.last_failed_frame_assumptions <- None;
   Cdclt.clear_last_conflict t.cdclt;
@@ -2247,6 +2256,7 @@ let commit_sat_assuming t assumptions =
    Per-probe [begin_check] gives each semantic deletion check its configured effort
    budget; learned clauses remain shared in the incremental SAT core. *)
 let solve_prepared_assumptions t ~fixed assumptions =
+  t.minimize_probes <- t.minimize_probes + 1;
   Cdclt.clear_last_conflict t.cdclt;
   t.last_model <- None;
   t.budget_exhausted <- false;
@@ -2335,26 +2345,74 @@ let check_sat_assuming t assumptions =
          | Unsat ->
            (* The frozen SAT core provides a cheap proof-dependent over-approximation.
               Restore every fixed selector, then minimize only the user literals. *)
-           let failed = Hashtbl.create ((2 * List.length prepared) + 1) in
-           List.iter
-             (fun lit -> Hashtbl.replace failed (sat_lit_key lit) ())
-             (Sat.failed_assumptions t.sat);
+           let failed_keys () =
+             let tbl = Hashtbl.create ((2 * List.length prepared) + 1) in
+             List.iter
+               (fun lit -> Hashtbl.replace tbl (sat_lit_key lit) ())
+               (Sat.failed_assumptions t.sat);
+             tbl
+           in
            let initial_core =
+             let failed = failed_keys () in
              List.filter (fun a -> Hashtbl.mem failed (sat_lit_key a.lit)) prepared
            in
-           let without target xs = List.filter (fun a -> a != target) xs in
-           let rec minimize core = function
-             | [] -> Some core
-             | assumption :: rest ->
-               let candidate = without assumption core in
-               (match solve_prepared_assumptions t ~fixed candidate with
-                | Unsat -> minimize candidate rest
-                | Sat -> minimize core rest
-                | Unknown -> None)
+           (* Deletion-based minimization (destructive MUS). [necessary] accumulates the
+              transition literals already witnessed necessary (removing one turns the
+              query Sat); the working tail holds the yet-untested candidates. The
+              invariant "[necessary] plus the tail is Unsat" holds every iteration, so at
+              the end [necessary] is itself a subset-minimal core. Each probe re-solves
+              the whole current working set minus one literal, warm in the shared
+              incremental core.
+
+              CLAUSE-SET REFINEMENT (default; z3 mus.cpp:80 [mus::imp::get_mus1]): when a
+              deletion probe returns Unsat, the SAT core's OWN failed-assumption set is an
+              unsat sub-core of the probed candidate, so every tail literal ABSENT from it
+              is redundant and drops in that single probe — not one re-solve per member
+              (mus.cpp:106, "unknown := core \\ mus"). Each [necessary] literal is
+              guaranteed to reappear in that failed set: its own removal was already
+              witnessed Sat, so it lies in every unsat core of any subset of the working
+              set — hence refinement can never discard a confirmed member, and [necessary]
+              need not be re-tested. Both strategies leave [necessary] subset-minimal;
+              only the probe count differs. [OXSMT_CORE_MIN_LINEAR] set to 1/true/yes
+              selects the pre-refinement linear walk (one probe per initial-core member) —
+              the A/B baseline and a fallback; read here rather than at [create] because
+              it steers only this assumption-query path. *)
+           let refine =
+             match Sys.getenv_opt "OXSMT_CORE_MIN_LINEAR" with
+             | Some ("1" | "true" | "yes") -> false
+             | Some _ | None -> true
            in
-           (match minimize initial_core initial_core with
+           let rec minimize necessary = function
+             | [] -> Some (List.rev necessary)
+             | assumption :: rest ->
+               (* Probe the entire current working set minus [assumption]. *)
+               let candidate = List.rev_append necessary rest in
+               (match solve_prepared_assumptions t ~fixed candidate with
+                | Unknown -> None
+                | Sat -> minimize (assumption :: necessary) rest
+                | Unsat when not refine -> minimize necessary rest
+                | Unsat ->
+                  let failed = failed_keys () in
+                  let rest =
+                    List.filter (fun a -> Hashtbl.mem failed (sat_lit_key a.lit)) rest
+                  in
+                  minimize necessary rest)
+           in
+           (match minimize [] initial_core with
             | None -> { verdict = Unknown; unsat_core = None }
-            | Some core ->
+            | Some minimal ->
+              (* Restore input order: the minimal core is [minimal] read as a set, so
+                 filtering [initial_core] (already in input order) recovers the order the
+                 documented guarantee promises. *)
+              let core =
+                let in_core = Hashtbl.create ((2 * List.length minimal) + 1) in
+                List.iter
+                  (fun a -> Hashtbl.replace in_core (sat_lit_key a.lit) ())
+                  minimal;
+                List.filter
+                  (fun a -> Hashtbl.mem in_core (sat_lit_key a.lit))
+                  initial_core
+              in
               (* Replay the final core even when the last deletion happened to be an Unsat
                  probe. This makes evidence, failed assumptions, stats, and model state
                  describe exactly the public result. *)
@@ -2555,6 +2613,7 @@ let last_farkas t =
 let symbreak_active_for_test t = Option.is_some t.sym_sel
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
+let minimize_probes t = t.minimize_probes
 let budget_exhausted t = t.budget_exhausted
 let effort t = t.last_effort
 let effort_exhausted t = t.effort_exhausted

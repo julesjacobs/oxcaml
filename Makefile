@@ -92,7 +92,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -673,6 +673,14 @@ cdclt-lemma-test:
 session-cores-test:
 	$(DUNE) exec smt/interface/test/session_cores_test.exe
 
+## core-min-test — task #36 unsat-core minimization upgrade (clause-set refinement,
+##   z3 mus.cpp:get_mus1). Proves the refinement keeps the documented subset-minimal core
+##   guarantee (randomized planted MUS), that linear and refinement agree while refinement
+##   spends fewer probes, and that the minimality checker discriminates a non-minimal core.
+##   Emits the old-vs-new probe/latency benchmark. Included in `make test`.
+core-min-test:
+	$(DUNE) exec smt/interface/test/core_min_test.exe
+
 ## interpolation-test — public equality-aware interpolation consumer. Requires a signed
 ## equality certificate, fresh-session checks of A=>I and I&B unsat, shared vocabulary,
 ## and rejection of independent weaken/strengthen corruptions.
@@ -946,6 +954,7 @@ test: check-frozen
 	$(MAKE) cut-budget-test
 	$(MAKE) cdclt-lemma-test
 	$(MAKE) session-cores-test
+	$(MAKE) core-min-test
 	$(MAKE) interpolation-test
 	$(MAKE) optimize-test
 	$(MAKE) omt-test

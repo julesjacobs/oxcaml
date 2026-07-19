@@ -293,8 +293,8 @@ val declare_datatype
 val assert_term : t -> Oxsmt_core.Term.t -> unit
 
 (** Scan a complete assertion batch before preprocessing and select its actual arithmetic
-    family. Mixed Int/Real content, Real with arrays/datatypes, a live-theory swap, or Real
-    while [OXSMT_LRA] is disabled degrades the session to [unknown]. Idempotent. *)
+    family. Mixed Int/Real content, Real with arrays/datatypes, a live-theory swap, or
+    Real while [OXSMT_LRA] is disabled degrades the session to [unknown]. Idempotent. *)
 val preselect_arithmetic : t -> Oxsmt_core.Term.t list -> unit
 
 (** [assert_presolved t terms] asserts a WHOLE batch of terms through the W1b
@@ -381,16 +381,16 @@ val pop : t -> unit
 val check_sat : t -> verdict
 
 (** [check_sat_assuming t assumptions] decides the active assertions conjoined with the
-    supplied Boolean literals. Each term must be a Bool-sorted atom built in
-    [context t]; Boolean connectives are rejected with [Invalid_argument]. Exact
-    duplicate literals are ignored, while opposite polarities remain distinct.
+    supplied Boolean literals. Each term must be a Bool-sorted atom built in [context t];
+    Boolean connectives are rejected with [Invalid_argument]. Exact duplicate literals are
+    ignored, while opposite polarities remain distinct.
 
     On [Unsat], [unsat_core] is a subset-minimal, duplicate-free subset of [assumptions],
     in input order: the active assertions conjoined with the core are unsatisfiable, and
     deleting any one core literal makes the remainder [Sat]. The empty core therefore
     means the active assertions are already unsatisfiable. The initial candidate comes
-    from the SAT core's failed assumptions and is then deletion-minimized. If any
-    deletion cannot be certified [Sat] or [Unsat], the whole call fails closed to
+    from the SAT core's failed assumptions and is then deletion-minimized. If any deletion
+    cannot be certified [Sat] or [Unsat], the whole call fails closed to
     [{ verdict = Unknown; unsat_core = None }].
 
     This entry point is additive: ordinary {!check_sat} does not consult assumption state
@@ -402,25 +402,23 @@ val check_sat : t -> verdict
 val check_sat_assuming : t -> assumption list -> assumption_check
 
 (** The model of the most recent {!check_sat} or {!check_sat_assuming}, iff that call
-    returned [Sat] {e and} a
-    checkable model is reconstructable. Bindings are one [Const (symbol-name, value)] per
-    constrained nullary symbol, sorted by name: the theory's Int / uninterpreted-sort
-    constants {e unioned with} a [Bool] per declared propositional variable (a mixed
-    Boolean/theory [Sat] covers both, so the §8 evaluator sees every declared symbol).
-    Reserved internal witnesses ([".oxsmt.*"], e.g. an ITE lift) are excluded — the model
-    names only user-declared symbols. [None] after [Unsat]/[Unknown], before any
-    [check_sat], or when the [Sat]'s model would require a function table (any applied
-    uninterpreted symbol is constrained) — a v1 completeness limit of the model
-    reconstruction, not of the verdict. *)
+    returned [Sat] {e and} a checkable model is reconstructable. Bindings are one
+    [Const (symbol-name, value)] per constrained nullary symbol, sorted by name: the
+    theory's Int / uninterpreted-sort constants {e unioned with} a [Bool] per declared
+    propositional variable (a mixed Boolean/theory [Sat] covers both, so the §8 evaluator
+    sees every declared symbol). Reserved internal witnesses ([".oxsmt.*"], e.g. an ITE
+    lift) are excluded — the model names only user-declared symbols. [None] after
+    [Unsat]/[Unknown], before any [check_sat], or when the [Sat]'s model would require a
+    function table (any applied uninterpreted symbol is constrained) — a v1 completeness
+    limit of the model reconstruction, not of the verdict. *)
 val get_model : t -> model option
 
 (** census (task #78): a short tag naming WHY the most recent {!check_sat} or
-    {!check_sat_assuming} returned
-    [Unknown] (e.g. ["r1-model-check-failed"], ["effort-budget"], ["lemma-saturated"],
-    ["combine-incomplete-solve"]). Empty string when the last verdict was not [Unknown].
-    Diagnostic introspection only — the solver never reads it, so it cannot influence a
-    verdict; the dev CLI surfaces it unconditionally on stderr to bucket structural
-    unknowns by cause. *)
+    {!check_sat_assuming} returned [Unknown] (e.g. ["r1-model-check-failed"],
+    ["effort-budget"], ["lemma-saturated"], ["combine-incomplete-solve"]). Empty string
+    when the last verdict was not [Unknown]. Diagnostic introspection only — the solver
+    never reads it, so it cannot influence a verdict; the dev CLI surfaces it
+    unconditionally on stderr to bucket structural unknowns by cause. *)
 val last_unknown_reason : t -> string
 
 (** {2 Certificate emission (ADR-0013)}
@@ -450,12 +448,11 @@ type presolve_certificate_trace =
 
 (** Install (or, with [None], remove) a certificate-emission trace on the inner SAT core.
     {b Must be called on a PRISTINE session} — before the first {!assert_term}/{!push} or
-    nonempty {!check_sat_assuming} —
-    per the {!Oxsmt_solver.Sat.set_trace} lifecycle contract (the recorder must observe
-    every input from the start, or a conclusion could cite an untraced clause's id). A
-    [None] default means byte-identical solving; a set trace bypasses learned-clause
-    minimization (ADR-0013 §1.4(b), a weaker-but-sound solver), so verdicts are preserved
-    but counters may differ from an untraced run. *)
+    nonempty {!check_sat_assuming} — per the {!Oxsmt_solver.Sat.set_trace} lifecycle
+    contract (the recorder must observe every input from the start, or a conclusion could
+    cite an untraced clause's id). A [None] default means byte-identical solving; a set
+    trace bypasses learned-clause minimization (ADR-0013 §1.4(b), a weaker-but-sound
+    solver), so verdicts are preserved but counters may differ from an untraced run. *)
 val install_cert_trace : t -> Oxsmt_solver.Sat.trace option -> unit
 
 (** The off-frozen-seam companion to {!install_cert_trace}: carries theory-atom meanings,
@@ -481,20 +478,20 @@ val install_lia_certificate_trace : t -> Cdclt.lia_certificate_trace option -> u
 val cert_assumptions : t -> Oxsmt_solver.Sat.lit list
 
 (** The failed-assumption (selector) core of the most recent ordinary {!check_sat} that
-    returned [Unsat] under a nonempty frame-assumption set; empty otherwise. User
-    literals from {!check_sat_assuming} and the internal symmetry-breaking activation
-    selector are filtered out. *)
+    returned [Unsat] under a nonempty frame-assumption set; empty otherwise. User literals
+    from {!check_sat_assuming} and the internal symmetry-breaking activation selector are
+    filtered out. *)
 val failed_assumptions : t -> Oxsmt_solver.Sat.lit list
 
 (** {2 Theory infeasibility evidence (task #106)}
     — additive, observational; reading it never perturbs solving.
 
-    After a {!check_sat} or {!check_sat_assuming} that returned [Unsat] {e via a LIA
-    theory conflict}, these
-    surface the refuting conflict's evidence for a downstream consumer (e.g. a CHC/Horn
-    solver building Farkas interpolants). The evidence is recorded off the frozen,
-    payload-free {!Explanation} (ADR-0006) by the LIA adapter at conflict-production time
-    and read back here; a [None]-by-default channel that a caller may ignore entirely.
+    After a {!check_sat} or {!check_sat_assuming} that returned [Unsat]
+    {e via a LIA theory conflict}, these surface the refuting conflict's evidence for a
+    downstream consumer (e.g. a CHC/Horn solver building Farkas interpolants). The
+    evidence is recorded off the frozen, payload-free {!Explanation} (ADR-0006) by the LIA
+    adapter at conflict-production time and read back here; a [None]-by-default channel
+    that a caller may ignore entirely.
 
     {b Premise rendering.} Each premise is a [(atom, polarity)] pair: [polarity = true]
     means the atom was asserted true, [false] means asserted false (an [Le] atom's ℤ-
@@ -515,14 +512,14 @@ val failed_assumptions : t -> Oxsmt_solver.Sat.lit list
     (an EUF-congruence fabric-edge handle). *)
 
 (** [last_unsat_core t] is the theory-unsat core of the most recent {!check_sat} or
-    {!check_sat_assuming}: the
-    [(atom, polarity)] premises of its refuting LIA conflict. The conjunction of the atoms
-    at their polarities is T-unsatisfiable. [None] per the rules above. *)
+    {!check_sat_assuming}: the [(atom, polarity)] premises of its refuting LIA conflict.
+    The conjunction of the atoms at their polarities is T-unsatisfiable. [None] per the
+    rules above. *)
 val last_unsat_core : t -> (Oxsmt_core.Term.t * bool) list option
 
 (** [last_farkas t] is the Farkas certificate of the most recent {!check_sat} or
-    {!check_sat_assuming} refutation: [(coeffᵢ, (atomᵢ, polarityᵢ))] pairs where
-    an inequality's [coeffᵢ >= 0] multiplies its asserted half-plane, while a positive Int
+    {!check_sat_assuming} refutation: [(coeffᵢ, (atomᵢ, polarityᵢ))] pairs where an
+    inequality's [coeffᵢ >= 0] multiplies its asserted half-plane, while a positive Int
     equality's unrestricted signed [coeffᵢ] multiplies the equation [a - b = 0]. The
     resulting sum is a variable-free false constant — the rational-infeasibility proof.
     Premises use the same rendering as {!last_unsat_core} and are index-aligned. [None]
@@ -543,16 +540,25 @@ val stats : t -> Oxsmt_solver.Sat.Stats.t
     (determinism/perf stat). *)
 val splits : t -> int
 
+(** Incremental re-solves the most recent {!check_sat_assuming} spent minimizing its
+    assumption core: the initial assumption solve, every deletion/refinement probe, and
+    the final core replay. [0] after a call that never reached minimization (empty
+    assumptions, an early [Unknown] decline, or a [Sat] verdict). Diagnostic/perf
+    introspection only — never consulted by the solver, so it cannot affect a verdict;
+    exposed so the core-min property test and benchmark can compare the linear and
+    clause-set-refinement strategies (see [OXSMT_CORE_MIN_LINEAR]). *)
+val minimize_probes : t -> int
+
 (** [true] iff the most recent {!check_sat} or {!check_sat_assuming} degraded to [Unknown]
     by exhausting the split budget (the distinct split-budget stat; the query is otherwise
     unresolved). *)
 val budget_exhausted : t -> bool
 
 (** Effort consumed by the most recent {!check_sat} or {!check_sat_assuming}: SAT
-    conflicts + decisions + seam
-    [Final]-rounds (board #60). A deterministic function of the input (I6) — this is the
-    per-file value the calibration run records to pick the cutoff, and the determinism
-    check is that two runs report the same number. 0 before any {!check_sat}. *)
+    conflicts + decisions + seam [Final]-rounds (board #60). A deterministic function of
+    the input (I6) — this is the per-file value the calibration run records to pick the
+    cutoff, and the determinism check is that two runs report the same number. 0 before
+    any {!check_sat}. *)
 val effort : t -> int
 
 (** [true] iff the most recent {!check_sat} or {!check_sat_assuming} returned [Unknown]
