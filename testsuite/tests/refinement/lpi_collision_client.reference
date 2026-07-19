@@ -1,0 +1,4 @@
+File "lpi_collision_client.ml", line 3, characters 2-20:
+3 |   (1 : int{ _ = 0 })
+      ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

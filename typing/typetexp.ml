@@ -1050,9 +1050,27 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       ctyp desc typ
   | Ptyp_arrow _ ->
       let args, ret, ret_mode = extract_params styp in
-      let add_dependent_parameter env label type_ loc =
-        match label with
-        | Types.Labelled name ->
+      let contains_refinement core_type =
+        let found = ref false in
+        let iterator =
+          { Ast_iterator.default_iterator with
+            typ =
+              (fun iterator core_type ->
+                match core_type.ptyp_desc with
+                | Ptyp_extension
+                    ({ txt = "vox2.refinement.type"; _ }, _) ->
+                  found := true
+                | _ ->
+                  Ast_iterator.default_iterator.typ iterator core_type);
+          }
+        in
+        iterator.typ iterator core_type;
+        !found
+      in
+      let add_dependent_parameter env label type_ loc ~in_refinement =
+        match label, in_refinement with
+        | _, false -> env
+        | Types.Labelled name, true ->
           let id = Ident.create_local name in
           let sort =
             match
@@ -1084,7 +1102,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           in
           Env.add_value ~mode id description env
           |> Env.add_dependent_parameter ~label:name id
-        | Types.Nolabel | Types.Optional _ | Types.Position _ -> env
+        | (Types.Nolabel | Types.Optional _ | Types.Position _), true -> env
       in
       let rec loop env acc_mode args =
         match args with
@@ -1103,8 +1121,15 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             | _ :: _ ->
               { mode_modes = acc_mode; mode_desc = [] }
           in
+          let in_refinement =
+            contains_refinement ret
+            || List.exists
+                 (fun (_, _, argument) -> contains_refinement argument)
+                 rest
+          in
           let result_env =
             add_dependent_parameter env l arg_cty.ctyp_type arg.ptyp_loc
+              ~in_refinement
           in
           let ret_cty = loop result_env acc_mode rest in
           let arg_ty = arg_cty.ctyp_type in
