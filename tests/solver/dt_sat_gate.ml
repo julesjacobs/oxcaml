@@ -29,8 +29,8 @@ let failures = ref 0
 let fail fmt =
   Printf.ksprintf
     (fun s ->
-       incr failures;
-       print_string ("  FAIL " ^ s ^ "\n"))
+      incr failures;
+      print_string ("  FAIL " ^ s ^ "\n"))
     fmt
 ;;
 
@@ -325,9 +325,48 @@ let run_dag_blowup () =
   then fail "dag-blowup: an ill-arity shared bottom must be rejected"
 ;;
 
+(* task #47: DIRECT coverage that the model-based interface split does REAL work on the
+   DT+LIA combined stack (now THE load-bearing combination mechanism, since CombinedDt
+   takes the classic no-fabric path). [dtlia_order_unsat] is the shape where DT entails
+   [key t = k] (selector eval) while LIA's initial candidate model disagrees ([k>0],
+   [key t<=0]); the combinator's [find_disagreement] must return that shared Int pair and
+   emit the ℤ-trichotomy split. Assert BOTH the verdict AND [Session.splits > 0] —
+   end-verdict alone would pass even if a future change resolved it by some other path, so
+   the split count is the direct probe. *)
+let solve_with_splits src =
+  let s = Session.create () in
+  match Parser.parse_into (Session.env s) (Session.context s) src with
+  | exception (Parser.Malformed _ | Parser.Unsupported _) -> Session.Unknown, 0
+  | parsed ->
+    if Oxsmt_query_loader.assert_all s parsed
+    then (
+      let v = Session.check_sat s in
+      v, Session.splits s)
+    else Session.Unknown, 0
+;;
+
+let run_combination_split () =
+  let verdict, splits =
+    solve_with_splits (read_file "tests/cases/dtlia_order_unsat.smt2")
+  in
+  incr checks;
+  (match verdict with
+   | Session.Unsat -> ()
+   | Session.Sat | Session.Unknown ->
+     fail "combination split: dtlia_order_unsat got non-unsat");
+  incr checks;
+  if splits <= 0
+  then
+    fail
+      "combination split: dtlia_order_unsat closed with %d splits — the model-based \
+       interface trichotomy split must fire (it is the load-bearing DT+LIA mechanism)"
+      splits
+;;
+
 let () =
   let dir = if Array.length Sys.argv > 1 then Sys.argv.(1) else "tests/dt-goldens-sat" in
   run_goldens dir;
+  run_combination_split ();
   run_discrimination ();
   run_bool_inhabitance ();
   run_dag_blowup ();

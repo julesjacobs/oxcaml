@@ -67,7 +67,20 @@ module Arr = Oxsmt_arr.Arr
    The datatype registry (which [Dt.create] needs but the frozen [Theory.THEORY]
    [create : ctx -> env] cannot carry) is threaded via [set_registry], called by
    {!ensure_theory} immediately before [CombinedDt.create]: single-threaded, read
-   synchronously into the [Dt.t] instance, so no cross-session hazard. *)
+   synchronously into the [Dt.t] instance.
+
+   REGISTRY SIDE CHANNEL (review point). [Combine.create] is fixed to the frozen
+   [Theory.THEORY] shape [ctx -> env], so the [Datatype_defs.t ref] cannot be threaded as
+   a [create] argument without breaking the frozen signature the functor result includes —
+   the side channel is forced, not a convenience. It is HARDENED to a
+   consumed-exactly-once slot rather than a bare mutable ref: [set_registry] fills it,
+   [create] reads AND CLEARS it, and [create] with an EMPTY slot is a HARD ERROR (never a
+   silent empty-registry DT theory). So a [create] not immediately preceded by its own
+   [set_registry] fails loud — a future interleaved / parallel construction (the consumer
+   builds a Session per query) cannot cross two registries silently; the worst case is a
+   loud failure at construction, never a wrong verdict. Under today's single-threaded
+   {!ensure_theory} (set immediately before create) the slot is filled-then-drained with
+   no interleaving. *)
 module Dt_congruence = struct
   type t = Dt.t
 
@@ -76,11 +89,16 @@ module Dt_congruence = struct
 
   let create ctx env =
     match !pending_registry with
-    | Some reg -> Dt.create ctx env reg
+    | Some reg ->
+      (* consume-exactly-once: clear the slot so a second [create] without a fresh
+         [set_registry] hard-errors below rather than silently reusing a stale registry. *)
+      pending_registry := None;
+      Dt.create ctx env reg
     | None ->
       failwith
-        "Dt_congruence.create: datatype registry not set (Cdclt.ensure_theory must call \
-         set_registry before CombinedDt.create)"
+        "Dt_congruence.create: datatype registry slot empty (Cdclt.ensure_theory must \
+         call set_registry immediately before each CombinedDt.create; consumed-once side \
+         channel)"
   ;;
 
   let register_atom = Dt.register_atom

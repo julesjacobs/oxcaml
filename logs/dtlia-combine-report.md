@@ -22,10 +22,21 @@ path — the same mechanism QF_UFLIA uses for `f x = x + y`, no fabric, no no-op
 
 `dtlia_order_unsat`: DT derives `key(t) = k` in its congruence (both are Int interface
 members). At Final, `find_disagreement` sees DT-equal / LIA-unequal on `(key(t), k)` →
-ℤ-trichotomy split. All three branches close: `key(t)=k` → LIA conflict (`k>0 ∧ key(t)≤0`);
-`key(t)<k` / `key(t)>k` → the negative Int equality routes to DT only, contradicting DT's
-entailed `key(t)=k` → DT conflict. So the DT-derived Int equality reaches LIA WITHOUT a
-propagation Lit.
+ℤ-trichotomy split. So the DT-derived Int equality reaches LIA through the model-based
+interface split, WITHOUT a propagation Lit — this is now THE load-bearing combination
+mechanism for the consumer (the classic path is forced), so it has DIRECT coverage, not just
+end-verdict coverage:
+- Confirmed the split fires on `dtlia_order_unsat` by instrumenting `combine_models` (the
+  `find_disagreement` trichotomy arm prints under a debug env; reverted after confirming).
+- `dt-sat-gate` `run_combination_split` asserts `dtlia_order_unsat` → unsat AND
+  `Session.splits > 0` (a future change that resolved it by another path would fail this).
+- The split logic itself (`find_disagreement` / `equality_split` / the ℤ-trichotomy) is the
+  same theory-agnostic combinator code `combine-test` unit-covers with hand-rolled EUF+LIA
+  children — the DT+LIA path reuses it unchanged.
+
+The split closes at decision level 0 (LIA theory-propagates the trichotomy disjuncts against
+`k>0 ∧ key(t)≤0`, so no SAT branch is needed) — hence `decisions=0` in the counters despite
+the split firing.
 
 ### Build requirement (lead's #1 review check) — satisfied by construction
 
@@ -94,11 +105,26 @@ matching is identical to the standalone-DT path.
 check-frozen unaffected: `combine.mli`/`cdclt.ml`/`dt.mli`/`dt_model_check.ml` are not among
 the 14 frozen interfaces; `Theory.THEORY` (frozen) is untouched.
 
+### Registry side channel (review point)
+
+`Dt.create` needs the `Datatype_defs.t ref`, but `Combine.create` is fixed to the frozen
+`Theory.THEORY` shape `ctx -> env` (the functor result *includes* `Theory.THEORY`), so the
+registry CANNOT be threaded as a `create` argument without breaking the frozen signature —
+widening `create` is not an option, the side channel is forced. It is hardened to a
+consumed-exactly-once slot, not a bare mutable ref: `set_registry` fills it, `create` reads
+AND clears it, and `create` on an EMPTY slot is a HARD ERROR (never a silent empty-registry DT
+theory). So a `create` not immediately preceded by its own `set_registry` fails loud — a
+future interleaved / parallel Session construction cannot silently cross two registries; worst
+case is a loud construction-time failure, never a wrong verdict. Under today's single-threaded
+`ensure_theory` (set immediately before create) the slot is filled-then-drained with no
+interleaving.
+
 ## Gates
 
 - REDs green (new binary): order_unsat/dt_only/int_only/acyclic → unsat; order_sat → checked sat.
-- `make` harness 90/90 (0 fail); check-frozen 14/14; dt-sat-gate 29/0; combine-test 131/0;
-  dt-multi-query-gate ok; euf-adapter 0-fail; dt-combine-fabric-gate ok.
+- `make` harness 90/90 (0 fail); check-frozen 14/14; dt-sat-gate 31/0 (incl. the direct
+  interface-split coverage); combine-test 131/0; dt-multi-query-gate ok; euf-adapter 0-fail;
+  dt-combine-fabric-gate ok.
 - Five-logic byte-id + UFDT/QF_UFDT/QF_DT 40-file verdict-identity vs trunk `40e8d7392f`:
   ALL 0-diff (table below).
 
