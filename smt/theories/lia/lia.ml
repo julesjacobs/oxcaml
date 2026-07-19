@@ -141,6 +141,14 @@ type 'tok t =
          skip the simplex feasibility scan and return [Sat_candidate] without re-pivoting
          (FIX #3a). A [Conflict] leaves it set, so the next [check] re-runs. *)
   ; mutable overflows : int (* number of overflow-degradations to unknown *)
+  ; mutable bound_gen : int
+      (* monotone counter of ASSERTION-SET mutations: bumped by [assert_atom] and [pop]
+         (the ops that add/remove a simplex bound the model must satisfy), NOT by [check]
+         (a read-only re-certification). Keys {!last_modelfind_model}'s durability across
+         the combinator's multi-call Nelson-Oppen model assembly. [model_find]'s own
+         internal push/assert/pop go through the RAW {!Simplex} ops (not the [Lia]-level
+         wrappers), so a dive never bumps this — the snapshot recorded at capture equals
+         the live external generation, and stays equal until a real [assert_atom]/[pop]. *)
   ; mutable last_cube_model : (Term.t * int) list option
       (* set by [cube_model] when the Bromberger-Fleury cube test found an integer model
          at the current Final; read once by [model] (the adapter reads it immediately
@@ -148,10 +156,22 @@ type 'tok t =
          satisfy a later, non-cube Sat with a stale point. *)
   ; mutable last_modelfind_model : (Term.t * Oxsmt_core.Bigint.t) list option
       (* set by [model_find] (OXSMT_LIA_MODELFIND) when the cut-free diving B&B found an
-         integer model at the current Final; read once by [model_bigint] (the adapter
-         reads it immediately after the Final->Sat). Bigint-valued (convert-class models
-         carry >int63 bit-field values). Cleared at the start of every [check], exactly
-         like [last_cube_model], so a stale dive point can never satisfy a later Sat. *)
+         integer model at the current Final. Bigint-valued (convert-class models carry
+         >int63 bit-field values). DURABILITY CONTRACT: this is a genuine ℤ-model of the
+         asserted atom set captured at the dive leaf (bounds still in effect) — it stays
+         valid for as long as that atom set is unchanged. The combinator's Nelson-Oppen
+         model assembly reads it MULTIPLE times per Final ([model_bigint] at combine.ml
+         combine_models / combine_models_fabric / model), interleaved with re-certifying
+         [check]s. A [check] does NOT change the atom set, so it must NOT invalidate this
+         model (the earlier one-window clear-in-[check] was the contract bug: a
+         stash-cleared [model_bigint] then read the popped, non-integral live LP vertex
+         and fail-closed to [unknown]). Validity is instead keyed to [bound_gen]: served
+         by [model_bigint] only when [last_modelfind_gen = bound_gen], so a genuine
+         [assert_atom]/[pop] (which bumps [bound_gen]) drops it, but a bare [check] keeps
+         it. A served model is still R1-re-checked by {!Session}, so a stale serve can
+         only degrade to [unknown], never a wrong [sat]. *)
+  ; mutable last_modelfind_gen : int
+      (* the [bound_gen] snapshot at which [last_modelfind_model] was captured; see there. *)
   ; mutable pin_hint : (Term.t * Term.t) list
       (* rung 2 (OXSMT_LIA_MODELFIND): a READ-ONLY snapshot of the combinator's pinned Int
          disequality pairs, set by {!set_pin_hint} before a Final dive. {!model_find} uses
@@ -246,8 +266,10 @@ let create ctx =
   ; report_frames = [ [] ]
   ; check_dirty = true
   ; overflows = 0
+  ; bound_gen = 0
   ; last_cube_model = None
   ; last_modelfind_model = None
+  ; last_modelfind_gen = -1
   ; pin_hint = []
   ; eq_frames = [ [] ]
   ; false_frames = [ [] ]
@@ -464,6 +486,9 @@ let assert_atom t atom ~polarity ~premise =
   ensure_live t;
   (* A new/tightened bound can make the tableau infeasible -> the next [check] must run. *)
   t.check_dirty <- true;
+  (* The asserted atom set changed: any captured [model_find] model may no longer be a
+     model of it. Advance the generation so [model_bigint] stops serving the stash. *)
+  t.bound_gen <- t.bound_gen + 1;
   (* Record a positive Int equality for the integer-feasibility (gcd) test. Only the
      positive polarity is a genuine equation [a = b]; a negated equality raises
      [Unsupported] below (it is resolved by a trichotomy split, never asserted here). The
@@ -757,9 +782,14 @@ let rec first_false_frame = function
 let check t =
   ensure_live t;
   (* A cube model is valid only within the single Final->model window that produced it;
-     clear it here so a later (non-cube) Sat can never read a stale point. *)
+     clear it here so a later (non-cube) Sat can never read a stale point. The
+     [model_find] stash is deliberately NOT cleared here: [check] does not change the
+     asserted atom set, so a captured integral model stays valid across a re-certifying
+     [check]. Its durability is instead keyed to [bound_gen] (bumped only by
+     [assert_atom]/[pop]); clearing it here was the one-window contract bug that
+     fail-closed the combinator's later [model_bigint] to [unknown]. See
+     [last_modelfind_model]. *)
   t.last_cube_model <- None;
-  t.last_modelfind_model <- None;
   (* task #78 follow-up: a positive [Trivially_false] equality asserted in a still-live
      frame is a standalone UNSAT relation independent of the simplex. Report it as a
      [Conflict] before (and regardless of) the simplex scan; it persists until the frame
@@ -1816,21 +1846,6 @@ let extract_model_bigint t =
   |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag)
 ;;
 
-let model_bigint t =
-  ensure_live t;
-  match t.last_modelfind_model with
-  (* A [model_find] dive point is already Bigint-valued (it may assign a variable a >int63
-     value); return it verbatim. Checked before [last_cube_model]/the live scan for the
-     same reason cube's stash is: it is the integer point that made THIS Final [Sat]. *)
-  | Some m -> m
-  | None ->
-    (match t.last_cube_model with
-     (* A cube model's values are the Bromberger–Fleury rounded integers, already native
-        and small; widen them exactly. *)
-     | Some m -> List.map (fun (term, v) -> term, Oxsmt_core.Bigint.of_int v) m
-     | None -> extract_model_bigint t)
-;;
-
 (* Bromberger-Fleury unit cube test (see {!Simplex.cube_test}): after a {!Sat_candidate}
    whose ℚ-model is not integral, try to satisfy the asserted atoms with an integer model
    directly, before branch-and-bound. On success the model is stashed in [last_cube_model]
@@ -2067,7 +2082,18 @@ let model_find ?(node_budget = 200_000) t =
     | `Ok -> resolve_pins ()
   and resolve_pins () =
     match first_violated_pin t ~skip with
-    | None -> `Sat (extract_model_bigint t)
+    | None ->
+      (* Defensive: only capture at a genuinely integral vertex. [commit]'s trial
+         [Simplex.check]s can leave the value array at a fractional point ([Simplex.pop]
+         restores bounds but NOT values — simplex.ml), so a stale vertex must be re-solved
+         before extraction rather than [failwith]-ing (which would poison the whole solve
+         to [unknown]). With the [`Dead] re-solve below this is normally already integral. *)
+      (match first_non_integer t with
+       | None -> `Sat (extract_model_bigint t)
+       | Some _ ->
+         (match arith_solve () with
+          | `Ok -> resolve_pins ()
+          | `Fail -> `Fail))
     | Some (id, k) ->
       if !nodes >= node_budget
       then `Fail
@@ -2087,10 +2113,16 @@ let model_find ?(node_budget = 200_000) t =
         | `Ok ->
           repair () (* vertex changed by the separating bound: re-solve arithmetic *)
         | `Dead ->
-          (* cannot separate this pin here; skip it (leave to the combinator) and continue
-             at the SAME vertex (no re-solve — nothing changed). *)
+          (* Cannot separate this pin here; skip it (leave to the combinator). The bounds
+             are unchanged, but [commit]'s failed trials pivoted the tableau and
+             [Simplex.pop] does NOT restore the value array (simplex.ml) — so the integral
+             vertex arith_solve had reached is gone from the assignment. Re-solve to an
+             integral vertex (the skipped pin is now ignored by [first_violated_pin])
+             before continuing, so the eventual extraction never sees a fractional point. *)
           Hashtbl.replace skip id ();
-          resolve_pins ())
+          (match arith_solve () with
+           | `Ok -> resolve_pins ()
+           | `Fail -> `Fail))
   in
   let result =
     match repair () with
@@ -2106,8 +2138,67 @@ let model_find ?(node_budget = 200_000) t =
   match result with
   | `Sat m ->
     t.last_modelfind_model <- Some m;
+    (* Stamp the stash with the CURRENT generation. The dive's own bounds were
+       pushed/popped through the raw {!Simplex} ops (never [assert_atom]/[pop]), so
+       [bound_gen] is exactly the external assertion generation this model satisfies;
+       [model_bigint] serves it until a real [assert_atom]/[pop] bumps past it. *)
+    t.last_modelfind_gen <- t.bound_gen;
     true
   | `Fail -> false
+;;
+
+(* Arbitrary-precision model extraction (ADR-0018). Three tiers, in order:
+
+   1. A [model_find] stash captured at the CURRENT generation
+      ([last_modelfind_gen = bound_gen]) — the durable integral dive point, served
+      verbatim (it may assign a variable a >int63 value). It stays current across
+      re-certifying [check]s and is dropped only by a real [assert_atom]/[pop].
+
+   2. RE-DERIVE ON DEMAND (the durability contract's second half). The combinator's
+      Nelson-Oppen model assembly reads {!model_bigint} once per Final round, but each
+      round it has ASSERTED/POPPED bounds (injected pin-equalities, decision splits) since
+      the last dive — so a stash from an earlier generation is a genuine model of
+      DIFFERENT constraints and must not be served. When [model_find] has been active this
+      session ([last_modelfind_gen >= 0]) and the live tableau is NOT at an integer point,
+      re-run the dive for the CURRENT constraints and serve the fresh integral model. This
+      is what makes the dive survive the combinator's multi-round assembly: without it, a
+      later read hits tier 3 on the popped, non-integral LP vertex and fail-closes the
+      whole solve to [unknown]. Sound: the re-derived point is a genuine ℤ-model of the
+      current asserted set (the dive only RESTRICTS the feasible region) and {!Session}'s
+      R1 check re-validates it independently — a miss just falls through to tier 3.
+
+   3. The live simplex vertex ({!extract_model_bigint}). Correct when the tableau is
+      already integral (the trunk/non-dive path always is here); if it is non-integral and
+      tiers 1-2 did not produce a model, it [failwith]s and the session degrades to
+      [unknown] (never a wrong [sat]).
+
+   OFF byte-identity: on the OFF path [model_find] is never called, so
+   [last_modelfind_model] stays [None] and [last_modelfind_gen] stays [-1] — tier 1's
+   guard and tier 2's [>= 0] guard are both false, and this reduces to the exact trunk
+   [last_cube_model]/live scan. *)
+let model_bigint t =
+  ensure_live t;
+  match t.last_modelfind_model with
+  | Some m when t.last_modelfind_gen = t.bound_gen -> m
+  | _ ->
+    (match t.last_cube_model with
+     (* A cube model's values are the Bromberger–Fleury rounded integers, already native
+        and small; widen them exactly. *)
+     | Some m -> List.map (fun (term, v) -> term, Oxsmt_core.Bigint.of_int v) m
+     | None ->
+       (* Tier 2: re-derive for the current constraints when the live tableau is
+          fractional and the dive is active. [first_non_integer] is lookup-only (no
+          tableau mutation); [model_find] restores the tableau (pops its own bounds)
+          before returning, so this is net-neutral on simplex state. *)
+       if t.last_modelfind_gen >= 0 && Option.is_some (first_non_integer t)
+       then
+         if model_find t
+         then (
+           match t.last_modelfind_model with
+           | Some m when t.last_modelfind_gen = t.bound_gen -> m
+           | _ -> extract_model_bigint t)
+         else extract_model_bigint t
+       else extract_model_bigint t)
 ;;
 
 let solve_integer ?(budget = default_budget) t =
@@ -2307,6 +2398,9 @@ let pop t n =
   (* Restoring (loosening) bounds can leave the assignment infeasible for the restored
      frame; the next [check] must re-run rather than trust the gate. *)
   t.check_dirty <- true;
+  (* The asserted atom set changed (bounds removed): drop any captured [model_find] model
+     by advancing the generation. See [assert_atom]/[bound_gen]. *)
+  t.bound_gen <- t.bound_gen + 1;
   (* Un-report every atom first reported in a popped frame: its entailing bound is being
      unwound. Re-dirty its var so the next [propagate] re-checks it and re-emits if a
      surviving (shallower) bound still entails it — this is what lets an atom entailed at
