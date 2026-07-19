@@ -162,3 +162,14 @@
  (name dtlia_bst_gate)
  (modules dtlia_bst_gate)
  (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))
+
+; dtlia-residuals gate (make dtlia-residuals-gate): the bugreport-03 fail-closed residuals.
+; Residual 1 (F2/G2): scalars fixed only by an equality are presolve-eliminated and the DT
+; checker failed closed re-evaluating the original assertion; RED before
+; Session.complete_dt_elim_scalars reconstructed them, GREEN after. Drives .smt2 through the
+; shared loader with presolve.
+
+(executable
+ (name dtlia_residuals_gate)
+ (modules dtlia_residuals_gate)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))

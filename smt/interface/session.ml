@@ -2011,6 +2011,103 @@ let complete_dt_bool_atoms t model =
     model @ List.sort (fun (a, _) (b, _) -> Term.compare a b) additions)
 ;;
 
+(* DT eliminated-scalar model completion (default ON;
+   [OXSMT_DTLIA_ELIM_COMPLETE]=0/false/no opts out). Presolve equality-elimination
+   substitutes a scalar fixed only by an equality (e.g. [k = 2]) out of the reduced
+   formula, so it reaches neither the theory model nor the SAT skeleton; yet the DT
+   checker re-evaluates the ORIGINAL assertions ([t.asserted], still mentioning [k]) and
+   fails closed on it — the F2/G2 residual stamped in the scalar-rider review. The R1 path
+   already reconstructs these via {!splice_elim_defs}; the DT checker model did not. This
+   is the DT analogue: reconstruct each eliminated def's value (over the surviving
+   scalars, in elimination order — same evaluator/order as {!splice_elim_defs}) and add it
+   as a leaf keyed by the eliminated const's term as it appears in the assertions.
+   Fail-closed and gains-only: values are the presolve witnesses resolved over the
+   accepting model, {!Dt_model_check} still re-checks every assertion, and any def we
+   cannot resolve (references an unvalued survivor, a Real value, or a name that never
+   appears in the assertions) is skipped — the checker then fails closed, never a wrong
+   [Sat]. UNSAT never reaches here. *)
+let dtlia_elim_complete =
+  lazy
+    (match Sys.getenv_opt "OXSMT_DTLIA_ELIM_COMPLETE" with
+     | Some ("0" | "false" | "no" | "off") -> false
+     | Some _ | None -> true)
+;;
+
+let cdclt_of_model_value : Model.value -> model_value option = function
+  | Model.Bool b -> Some (VBool b)
+  | Model.Int n -> Some (VInt n)
+  | Model.Uninterp i -> Some (VUninterp i)
+  | Model.Real _ -> None
+;;
+
+let model_value_of_cdclt : model_value -> Model.value option = function
+  | VBool b -> Some (Model.Bool b)
+  | VInt n -> Some (Model.Int n)
+  | VUninterp i -> Some (Model.Uninterp i)
+  | VReal _ -> None
+;;
+
+let complete_dt_elim_scalars t model =
+  if (not (Lazy.force dtlia_elim_complete)) || t.elim_defs = []
+  then model
+  else (
+    (* name -> the eliminated const's hash-consed Term.t, from the original assertions. *)
+    let name_to_term : (string, Term.t) Hashtbl.t = Hashtbl.create 64 in
+    let rec collect (u : Term.t) =
+      match u.Term.node with
+      | App (sym, args) when Iarr.length args = 0 ->
+        let n = Symbol.name sym in
+        if not (Hashtbl.mem name_to_term n) then Hashtbl.replace name_to_term n u
+      | App (_, args) -> Iarr.iter collect args
+      | Arith lin -> Iarr.iter (fun (tm, _c) -> collect tm) lin.Term.coeffs
+      | Real_arith lin -> Iarr.iter (fun (tm, _c) -> collect tm) lin.Term.coeffs
+      | Le a | Not a -> collect a
+      | Eq (a, b) ->
+        collect a;
+        collect b
+      | And xs | Or xs -> Iarr.iter collect xs
+      | Ite (c, a, b) ->
+        collect c;
+        collect a;
+        collect b
+      | Bool_const _ | Int_const _ | Real_const _ -> ()
+    in
+    List.iter collect t.asserted;
+    let seen = Term.Table.create 128 in
+    List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
+    (* base scalar model = the DT model's existing nullary scalar leaves, as R1 bindings. *)
+    let bindings =
+      List.filter_map
+        (fun (term, (tree : Oxsmt_dt.Dt.ctor_tree)) ->
+          match tree, term.Term.node with
+          | Oxsmt_dt.Dt.Leaf v, App (sym, args) when Iarr.length args = 0 ->
+            Option.map (fun cv -> Const (Symbol.name sym, cv)) (cdclt_of_model_value v)
+          | _ -> None)
+        model
+    in
+    let tbls = Model_check.tables_of_bindings bindings in
+    (* reverse elimination order, chaining each resolved value into [tbls] so a later def
+       may reference an earlier-reconstructed one (as {!splice_elim_defs} does). *)
+    let additions =
+      List.filter_map
+        (fun (d : Presolve.def) ->
+          match Hashtbl.find_opt name_to_term d.Presolve.name with
+          | Some term when not (Term.Table.mem seen term) ->
+            (match Model_check.eval_in tbls d.Presolve.value with
+             | Some cv ->
+               (match model_value_of_cdclt cv with
+                | Some v ->
+                  Model_check.add_const tbls d.Presolve.name cv;
+                  Term.Table.replace seen term ();
+                  Some (term, Oxsmt_dt.Dt.Leaf v)
+                | None -> None)
+             | None -> None)
+          | _ -> None)
+        (List.rev t.elim_defs)
+    in
+    model @ additions)
+;;
+
 let commit_sat t =
   (* ARRAYS (QF_AX model construction, task #14): the standalone arrays theory is
      installed, so soundness rests on the array self-check, not the UF [Model_check]
@@ -2054,6 +2151,7 @@ let commit_sat t =
     match Cdclt.dt_model t.cdclt with
     | Some model ->
       let model = complete_dt_bool_atoms t model in
+      let model = complete_dt_elim_scalars t model in
       let check =
         match !dt_checker_override with
         | Some f -> f
