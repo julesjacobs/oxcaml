@@ -190,6 +190,37 @@ let budget_mixed =
 |}
 ;;
 
+(* Reviewer's LINKED two-class witness (task #39, one-class clamp). Two genuine automorphism
+   classes C={c0,c1} and D={d0,d1}, bijectively linked via h:D->C and q:C->D. Each class is
+   a true whole-formula automorphism, so an independent class-local lex-leader is emitted for
+   each; CONJOINED, the two separate orderings eliminate every common orbit representative ->
+   wrong-UNSAT on a z3-SAT instance (classic simultaneous symmetry breaking). The one-class
+   clamp emits at most ONE class per formula, so it stays SAT. *)
+let linked_two_classes =
+  {|
+(set-logic QF_UF)
+(declare-sort C 0)
+(declare-sort D 0)
+(declare-fun c0 () C)
+(declare-fun c1 () C)
+(declare-fun d0 () D)
+(declare-fun d1 () D)
+(declare-fun h (D) C)
+(declare-fun q (C) D)
+(assert (distinct c0 c1))
+(assert (distinct d0 d1))
+(assert (or (= (h d0) c0) (= (h d0) c1)))
+(assert (or (= (h d1) c0) (= (h d1) c1)))
+(assert (distinct (h d0) (h d1)))
+(assert (or (= (q c0) d0) (= (q c0) d1)))
+(assert (or (= (q c1) d0) (= (q c1) d1)))
+(assert (distinct (q c0) (q c1)))
+(assert (= (q (h d0)) d1))
+(assert (= (q (h d1)) d0))
+(check-sat)
+|}
+;;
+
 (* --- helpers -------------------------------------------------------------------------- *)
 
 (* Parse into a fresh cap-bearing env/ctx (NOT a session) so we can call [symmetry_break]
@@ -382,6 +413,22 @@ let sym_aux_names terms =
    (SAT->UNSAT). The fix retracts the lex clauses on any post-emission assertion. This
    exact sequence is RED (SAT->UNSAT) with the retraction disabled; [(= (op e0 e1) e0)] is
    genuinely SAT with the base problem (z3-confirmed) yet the stale lex clauses refute it. *)
+(* One-class clamp RED (task #39): the linked two-class instance is z3-SAT, but WITHOUT the
+   clamp two independent class-local lex-leaders conjoin to a wrong-UNSAT. Run with the budget
+   merit-gate OFF so BOTH classes are eligible (the condition that exposes the latent hole;
+   with the gate ON only one class passes on this instance). RED = SAT->UNSAT if the clamp is
+   reverted. *)
+let test_multiclass_clamp () =
+  Unix.putenv "OXSMT_SYMBREAK_BUDGET" "0";
+  let r = fst (solve ~presolve:true linked_two_classes) in
+  Unix.putenv "OXSMT_SYMBREAK_BUDGET" "1";
+  match r with
+  | Session.Sat -> ok "one-class clamp keeps linked two-class instance SAT (RED without clamp)"
+  | Session.Unsat ->
+    fail "one-class clamp MISSING: linked two-class instance wrong-UNSAT (simultaneous break)"
+  | Session.Unknown -> fail "one-class clamp: unknown on a small SAT instance"
+;;
+
 let test_f1_incremental () =
   let s = Session.create () in
   let env = Session.env s
@@ -662,14 +709,18 @@ let test_budget_gate () =
   if List.length on_pervasive > 0
   then ok "budget: keeps a pervasive class (n_cells >= k*k) — QG win protected"
   else fail "budget: dropped a pervasive class (n_cells >= k*k) — over-aggressive gate";
-  (* MIXED-family: within one file the budget must KEEP the pervasive class and DROP the
-     incidental one — so [0 < on_mixed < off_mixed] (some breaking survives, strictly less
-     than with both classes). RED if the gate decides the whole file on one side. *)
-  if List.length on_mixed > 0 && List.length on_mixed < List.length off_mixed
-  then ok "budget: mixed file keeps pervasive + drops incidental (per-class allocation)"
+  (* MIXED-family under the ONE-CLASS CLAMP (task #39): the clamp caps emission at a single
+     class per formula, so the old "budget-OFF emits BOTH classes, budget-ON emits only the
+     pervasive" comparison no longer holds — at most one class emits either way. What the
+     merit gate must still do in a mixed file is PREFER a pervasive class so the file is not
+     blanked: budget_mixed must emit a non-empty break in both states (the pervasive I-class,
+     which is first in tag order). The incidental-drop discrimination remains covered by the
+     single-class [budget_incidental] test above. *)
+  if List.length on_mixed > 0 && List.length off_mixed > 0
+  then ok "budget+clamp: mixed file still emits the pervasive class (one-class clamp)"
   else
     fail
-      "budget: mixed-file allocation wrong (off=%d on=%d) — not per-class"
+      "budget+clamp: mixed file blanked (off=%d on=%d) — pervasive class not emitted"
       (List.length off_mixed)
       (List.length on_mixed)
 ;;
@@ -681,6 +732,7 @@ let () =
   test_sat_preserved ();
   test_vp_mutant_flips ();
   test_unsat_preserved ();
+  test_multiclass_clamp ();
   test_f1_incremental ();
   test_f2_counter ();
   test_f3_multisort ();
