@@ -2569,6 +2569,86 @@ let test_proj_nested_chain_collapses () =
   | _ -> check "proj nested: expected a single term" false
 ;;
 
+(* OXSMT_NEC_PROPFOLD rebuilds a projected [and]/[or] incrementally.  Once projection
+   exposes [p] and [not p], the result is fixed and the remaining operands must not be
+   projected.  Pin that ordering with a budget: the initial [has_ite] DAG scan fits, as do
+   the first contradictory operands, but eagerly rebuilding all the trailing equalities
+   exhausts the budget and neutral-aborts to the original non-constant term. *)
+let test_proj_propfold_short_circuit () =
+  let old_propfold = Sys.getenv_opt "OXSMT_NEC_PROPFOLD" in
+  let old_budget = Sys.getenv_opt "OXSMT_PRESOLVE_PROJ_MAX_STEPS" in
+  let restore name = function
+    | Some value -> Unix.putenv name value
+    | None -> Unix.putenv name ""
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      restore "OXSMT_NEC_PROPFOLD" old_propfold;
+      restore "OXSMT_PRESOLVE_PROJ_MAX_STEPS" old_budget)
+    (fun () ->
+       Unix.putenv "OXSMT_NEC_PROPFOLD" "1";
+       Unix.putenv "OXSMT_PRESOLVE_PROJ_MAX_STEPS" "1500";
+       let s = Session.create () in
+       let ctx = Session.context s in
+       let p = Context.const ctx (Session.declare_const s "propfold-p" Sort.bool) in
+       let value =
+         Context.ite ctx p (Context.int_const ctx 0) (Context.int_const ctx 1)
+       in
+       (* Create the contradictory pair first, so hash-cons tag order visits it before
+          the deliberately expensive tail. *)
+       let is_zero = Context.eq ctx value (Context.int_const ctx 0) in
+       let is_one = Context.eq ctx value (Context.int_const ctx 1) in
+       let tail =
+         List.init 1000 (fun i -> Context.eq ctx value (Context.int_const ctx (i + 2)))
+       in
+       let input = Context.and_ ctx (is_zero :: is_one :: tail) in
+       (match Oxsmt_interface.Presolve.simplify_projection ctx [ input ] with
+        | [ { node = Bool_const false; _ } ] ->
+          check "proj propfold: complementary pair short-circuits before budget" true
+        | _ ->
+          check "proj propfold: complementary pair short-circuits before budget" false);
+       Unix.putenv "OXSMT_NEC_PROPFOLD" "";
+       (match Oxsmt_interface.Presolve.simplify_projection ctx [ input ] with
+        | [ output ] when output.tag = input.tag ->
+          check "proj propfold: default-off path neutral-aborts unchanged" true
+        | _ -> check "proj propfold: default-off path neutral-aborts unchanged" false);
+       Unix.putenv "OXSMT_NEC_PROPFOLD" "1";
+       (match
+          Oxsmt_interface.Presolve.simplify_projection
+            ctx
+            [ Context.or_ ctx [ is_zero; is_one ] ]
+        with
+        | [ { node = Bool_const true; _ } ] ->
+          check "proj propfold: complementary disjunction becomes true" true
+        | _ -> check "proj propfold: complementary disjunction becomes true" false);
+       (match
+          Oxsmt_interface.Presolve.simplify_projection
+            ctx
+            [ Context.eq ctx value (Context.int_const ctx 2) ]
+        with
+        | [ { node = Bool_const false; _ } ] ->
+          check "proj propfold: unreachable fixed literal becomes false" true
+        | _ -> check "proj propfold: unreachable fixed literal becomes false" false);
+       (* A bare variable is an admissible projection leaf, but not a fixed literal.
+          [(ite p 0 1) = x] is satisfiable by [p=true, x=0]; the reachable-literal prune
+          must not reject it merely because [x] is not syntactically one of {0,1}. *)
+       let x = Context.const ctx (Session.declare_const s "propfold-x" Sort.int) in
+       let projected =
+         Oxsmt_interface.Presolve.simplify_projection ctx [ Context.eq ctx value x ]
+       in
+       let projected_symmetric =
+         Oxsmt_interface.Presolve.simplify_projection ctx [ Context.eq ctx x value ]
+       in
+       Session.assert_term s p;
+       Session.assert_term s (Context.eq ctx x (Context.int_const ctx 0));
+       List.iter (Session.assert_term s) projected;
+       List.iter (Session.assert_term s) projected_symmetric;
+       check_verdict
+         "proj propfold: variable leaf remains satisfiable in both orientations"
+         Session.Sat
+         (Session.check_sat s))
+;;
+
 (* SELECTOR COLLAPSE (same condition), the [proj-selector-then-wrong] oracle. The Bool-ITE
    [(ite c p (ite c q r))]: in the else-branch [c] is false, so the nested same-[c] [ite]
    takes its ELSE [r]. Result: [(ite c p r)] — the else must be [r], not [q] and not the
@@ -2881,6 +2961,7 @@ let () =
   test_proj_eq_over_ite_fires ();
   test_proj_eq_over_ite_neg ();
   test_proj_nested_chain_collapses ();
+  test_proj_propfold_short_circuit ();
   test_proj_selector_same_cond ();
   test_proj_selector_complement ();
   test_proj_e2e_no_wrong_unsat ();

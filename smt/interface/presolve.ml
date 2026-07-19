@@ -1012,10 +1012,46 @@ let proj_is_leaf (t : Term.t) =
   | Arith _ | Real_arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> false
 ;;
 
+(* Build an [and]/[or] from already-simplified operands, also detecting a complementary
+   pair.  Used only by the dark propfold path: the ordinary projection path keeps using
+   the existing [Context] constructors exactly. *)
+let bool_ac_with_complements ctx ~is_and terms =
+  let stop_value = not is_and in
+  let neutral_value = is_and in
+  let stopped = ref false in
+  let seen = Hashtbl.create (List.length terms) in
+  let rev_operands = ref [] in
+  let rec add (x : Term.t) =
+    if not !stopped
+    then (
+      match x.node with
+      | Bool_const b -> if Bool.equal b stop_value then stopped := true
+      | And xs when is_and -> Iarr.iter add xs
+      | Or xs when not is_and -> Iarr.iter add xs
+      | _ ->
+        let neg_tag = (Context.not_ ctx x).tag in
+        if Hashtbl.mem seen neg_tag
+        then stopped := true
+        else if not (Hashtbl.mem seen x.tag)
+        then (
+          Hashtbl.add seen x.tag ();
+          rev_operands := x :: !rev_operands))
+  in
+  List.iter add terms;
+  if !stopped
+  then Context.bool_const ctx stop_value
+  else (
+    match !rev_operands with
+    | [] -> Context.bool_const ctx neutral_value
+    | operands ->
+      let operands = List.rev operands in
+      if is_and then Context.and_ ctx operands else Context.or_ ctx operands)
+;;
+
 (* Build a Bool-sorted [(ite c x y)] collapsing the forms the {!Node} constructor leaves
    alone: constant condition, constant branches ([(ite c true false) -> c] etc.), and a
    single-constant branch (to [or]/[and]). [c], [x], [y] are already simplified. *)
-let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
+let bool_ite ?(detect_complements = false) ctx (c : Term.t) (x : Term.t) (y : Term.t) =
   match c.node with
   | Bool_const true -> x
   | Bool_const false -> y
@@ -1023,10 +1059,24 @@ let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
     (match x.node, y.node with
      | Bool_const true, Bool_const false -> c
      | Bool_const false, Bool_const true -> Context.not_ ctx c
-     | Bool_const true, _ -> Context.or_ ctx [ c; y ]
-     | Bool_const false, _ -> Context.and_ ctx [ Context.not_ ctx c; y ]
-     | _, Bool_const true -> Context.or_ ctx [ Context.not_ ctx c; x ]
-     | _, Bool_const false -> Context.and_ ctx [ c; x ]
+     | Bool_const true, _ ->
+       if detect_complements
+       then bool_ac_with_complements ctx ~is_and:false [ c; y ]
+       else Context.or_ ctx [ c; y ]
+     | Bool_const false, _ ->
+       let operands = [ Context.not_ ctx c; y ] in
+       if detect_complements
+       then bool_ac_with_complements ctx ~is_and:true operands
+       else Context.and_ ctx operands
+     | _, Bool_const true ->
+       let operands = [ Context.not_ ctx c; x ] in
+       if detect_complements
+       then bool_ac_with_complements ctx ~is_and:false operands
+       else Context.or_ ctx operands
+     | _, Bool_const false ->
+       if detect_complements
+       then bool_ac_with_complements ctx ~is_and:true [ c; x ]
+       else Context.and_ ctx [ c; x ]
      | _ -> Context.ite ctx c x y)
 ;;
 
@@ -1071,7 +1121,7 @@ let collapse_contradictions ctx ~max_passes terms =
       | Le a -> Context.le ctx (go a) (zero_for_numeric_sort ctx a.sort)
       | Not a -> Context.not_ ctx (go a)
       | Eq (a, b) -> Context.eq ctx (go a) (go b)
-      | Ite (c, a, b) -> bool_ite ctx (go c) (go a) (go b)
+      | Ite (c, a, b) -> bool_ite ~detect_complements:true ctx (go c) (go a) (go b)
       | And xs -> cc ~is_and:true (List.map go (Iarr.to_list xs))
       | Or xs -> cc ~is_and:false (List.map go (Iarr.to_list xs))
     and cc ~is_and ys =
@@ -1163,15 +1213,15 @@ let simplify_projection ctx assertions =
   let false_ = Context.bool_const ctx false in
   (* Demand-driven short-circuit (nec-propfold): a value-ITE branch that provably cannot
      equal the comparison constant is folded to [false] with NO descent — never building
-     the dead sub-cross-product. [reach t] = [Some set] of reachable constant-leaf tags
+     the dead sub-cross-product. [reach t] = [Some set] of reachable constant leaves
      when [t] is a CLOSED value-ITE (all leaves constant), [None] when OPEN (a
      non-constant leaf reachable, so [(= t d)] cannot be pruned). Bottom-up, memoized per
      Context tag; a pure structural property (NO assumption context).
      [reach_steps]/[pruned] are stats. *)
-  let reach_memo : (int, (int, unit) Hashtbl.t option) Hashtbl.t = Hashtbl.create 4096 in
+  let reach_memo : (int, Term.Set.t option) Hashtbl.t = Hashtbl.create 4096 in
   let reach_steps = ref 0 in
   let pruned = ref 0 in
-  let rec reach (t : Term.t) : (int, unit) Hashtbl.t option =
+  let rec reach (t : Term.t) : Term.Set.t option =
     match Hashtbl.find_opt reach_memo t.tag with
     | Some r -> r
     | None ->
@@ -1179,27 +1229,27 @@ let simplify_projection ctx assertions =
       if !reach_steps + !steps > max_steps then raise Proj_budget;
       let r =
         match t.node with
-        | Int_const _ | Bool_const _ | Real_const _ ->
-          let s = Hashtbl.create 1 in
-          Hashtbl.replace s t.tag ();
-          Some s
+        | Int_const _ | Bool_const _ | Real_const _ -> Some (Term.Set.singleton t)
         | Ite (_c, x, y) ->
           (match reach x, reach y with
            | None, _ | _, None -> None
-           | Some sx, Some sy ->
-             let s = Hashtbl.create (Hashtbl.length sx + Hashtbl.length sy) in
-             Hashtbl.iter (fun k () -> Hashtbl.replace s k ()) sx;
-             Hashtbl.iter (fun k () -> Hashtbl.replace s k ()) sy;
-             Some s)
+           | Some sx, Some sy -> Some (Term.Set.union sx sy))
         | _ -> None
       in
       Hashtbl.add reach_memo t.tag r;
       r
   in
   let may_equal (n : Term.t) (d : Term.t) : bool =
-    match reach n with
-    | None -> true
-    | Some s -> Hashtbl.mem s d.tag
+    (* Reachability can disprove equality only against a fixed literal.  [proj_is_leaf]
+       also admits a bare variable so ordinary equality-over-ITE projection can handle
+       it, but a variable is not one of the value-ITE's syntactic leaves: it can be
+       assigned any reachable value. *)
+    match d.node with
+    | Int_const _ | Bool_const _ | Real_const _ ->
+      (match reach n with
+       | None -> true
+       | Some s -> Term.Set.mem d s)
+    | App _ | Arith _ | Real_arith _ | Le _ | Eq _ | Not _ | And _ | Or _ | Ite _ -> true
   in
   let rec go (t : Term.t) : Term.t =
     match Term.Table.find_opt memo t with
@@ -1228,8 +1278,14 @@ let simplify_projection ctx assertions =
         lin.const
     | Le a -> Context.le ctx (go a) (zero_for_numeric_sort ctx a.sort)
     | Not a -> Context.not_ ctx (go a)
-    | And xs -> Context.and_ ctx (List.map go (Iarr.to_list xs))
-    | Or xs -> Context.or_ ctx (List.map go (Iarr.to_list xs))
+    | And xs ->
+      if propfold
+      then rewrite_bool_ac ~is_and:true xs
+      else Context.and_ ctx (List.map go (Iarr.to_list xs))
+    | Or xs ->
+      if propfold
+      then rewrite_bool_ac ~is_and:false xs
+      else Context.or_ ctx (List.map go (Iarr.to_list xs))
     | Eq (a, b) -> rewrite_eq (go a) (go b)
     | Ite (c, a, b) -> rewrite_ite (go c) (go a) (go b)
   and rewrite_eq (a : Term.t) (b : Term.t) : Term.t =
@@ -1260,7 +1316,8 @@ let simplify_projection ctx assertions =
       incr projections;
       let r =
         match ite_t.node with
-        | Ite (c, x, y) -> bool_ite ctx c (rewrite_eq x d) (rewrite_eq y d)
+        | Ite (c, x, y) ->
+          bool_ite ~detect_complements:propfold ctx c (rewrite_eq x d) (rewrite_eq y d)
         | _ -> Context.eq ctx ite_t d (* unreachable: caller guarantees an Ite *)
       in
       Tag_pair_table.add proj_memo key r;
@@ -1295,6 +1352,46 @@ let simplify_projection ctx assertions =
         | _ -> b
       in
       Context.ite ctx c a' b'
+  and rewrite_bool_ac ~is_and xs =
+    (* [Context.and_]/[or_] detect constants and duplicate operands, but their list
+       interface requires every operand to be rebuilt first.  Under [propfold] that is
+       exactly the expensive order to use: projection often exposes [x] and [not x]
+       near the front of a very large conjunction, after which rebuilding the rest of
+       the conjunction is dead work.  Rebuild and flatten operands incrementally,
+       applying the same AC identities plus the complementary-literal identity.  Stop
+       as soon as the result is fixed.  This is a local logical equivalence; the later
+       whole-DAG pass remains as a fallback for complements exposed across rebuild
+       boundaries. *)
+    let stop_value = not is_and in
+    let neutral_value = is_and in
+    let stopped = ref false in
+    let seen = Hashtbl.create (Iarr.length xs) in
+    let rev_operands = ref [] in
+    let rec add (x : Term.t) =
+      if not !stopped
+      then (
+        match x.node with
+        | Bool_const b -> if Bool.equal b stop_value then stopped := true
+        | And ys when is_and -> Iarr.iter add ys
+        | Or ys when not is_and -> Iarr.iter add ys
+        | _ ->
+          let neg_tag = (Context.not_ ctx x).tag in
+          if Hashtbl.mem seen neg_tag
+          then stopped := true
+          else if not (Hashtbl.mem seen x.tag)
+          then (
+            Hashtbl.add seen x.tag ();
+            rev_operands := x :: !rev_operands))
+    in
+    Iarr.iter (fun x -> if not !stopped then add (go x)) xs;
+    if !stopped
+    then Context.bool_const ctx stop_value
+    else (
+      match !rev_operands with
+      | [] -> Context.bool_const ctx neutral_value
+      | operands ->
+        let operands = List.rev operands in
+        if is_and then Context.and_ ctx operands else Context.or_ ctx operands)
   in
   let emit ~aborted =
     match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ_STATS" with
@@ -1336,19 +1433,14 @@ let simplify_projection ctx assertions =
   in
   if nec_propfold ()
   then (
-    (* PROVEN propfold-via-Context (banked substrate, dark). Distribute equality-over-ITE
-       via [go] — under [propfold] this also runs the [may_equal]/[reach] prune that folds
-       a dead value-ITE branch to [false] DURING distribution (load-bearing: it is what
-       forms the complementary sibling pair) — then run the complementary-literal
-       [collapse_contradictions] over the conjoined result. On the nec bftpd/checkpass
-       class this reproduces z3's preprocessing collapse to literal [false] (measured
-       passes=2, ~27.8s total), removing the ~35s clausify+search of the undistributed
-       skeleton that times the class out. NOT a 2s win: the ~3.68M-op distribution is
-       term-layer-throughput bound, not representation bound — see
-       logs/nec-repr-report.md. Banks the class for higher-budget consumers. The cheap-IR
-       per-op engine was abandoned (both slower than [go] and not collapse-equivalent to
-       it; report RUNG 3). Neutral-abort to the input on the step budget (sound: the
-       assertions are returned unchanged). *)
+    (* Propfold-via-Context (dark). Distribute equality-over-ITE via [go]. Under
+       [propfold], [may_equal]/[reach] prunes a closed value-ITE that cannot equal a fixed
+       literal, and the incremental [and]/[or] rebuild stops as soon as that exposes a
+       complementary pair. The final [collapse_contradictions] pass remains as a fallback
+       for complements that cross a rebuild boundary. This reproduces z3's preprocessing
+       collapse to literal [false] on the nec bftpd/checkpass class without constructing
+       the dead remainder of the projected DAG. Neutral-abort to the input on the step
+       budget (sound: the assertions are returned unchanged). *)
     match
       List.map
         (fun a ->
