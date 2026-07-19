@@ -496,7 +496,8 @@ DT_COMBINE_FABRIC_CASES ?= \
   tests/cases/dtlia_order_unsat.smt2:unsat \
   tests/dt-goldens-sat/dtlia_order_sat.smt2:sat \
   tests/cases/dtlia_acyclic_unsat.smt2:unsat \
-  tests/cases/dtlia_dt_only_unsat.smt2:unsat
+  tests/cases/dtlia_dt_only_unsat.smt2:unsat \
+  tests/cases/dtlia_selector_under_arith_unsat.smt2:unsat
 dt-combine-fabric-gate:
 	$(DUNE) build tests/solver/oxsmt_cli.exe
 	@fail=0; for env in "" "OXSMT_NO_FABRIC=1"; do \
