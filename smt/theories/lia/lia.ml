@@ -1879,7 +1879,12 @@ let set_pin_hint t pairs = t.pin_hint <- pairs
    equates (both are problem vars with the same integer value), as [(id_of_px, value)] for
    the separating branch. [None] when every pin is separated (or its terms are not problem
    vars — those are left to the combinator). Only meaningful at an integral vertex. *)
-let first_violated_pin t =
+(* First pinned pair the current INTEGRAL vertex equates, as
+   [(id_to_branch, forbidden value)], skipping any [id] in [skip] (a pin the dive already
+   tried and could not separate without dead-ending — left to the combinator). Handles the
+   convert var-vs-const shape and var-vs-var; a pin whose terms are not problem vars is
+   ignored (combinator handles). *)
+let first_violated_pin t ~skip =
   let pv term = Term.Table.find_opt t.var_of_term term in
   let const (term : Term.t) =
     match term.Term.node with
@@ -1887,6 +1892,7 @@ let first_violated_pin t =
     | _ -> None
   in
   let value_big id = Rational.floor_bigint (Delta.c_part (Simplex.value t.simplex id)) in
+  let skipped id = Hashtbl.mem skip id in
   let rec go = function
     | [] -> None
     | (a, b) :: rest ->
@@ -1894,22 +1900,27 @@ let first_violated_pin t =
         match pv a, pv b with
         | Some ida, Some idb when ida <> idb ->
           (* var <> var: separate the first var from their shared value. *)
-          if Rational.compare
-               (Delta.c_part (Simplex.value t.simplex ida))
-               (Delta.c_part (Simplex.value t.simplex idb))
-             = 0
+          if (not (skipped ida))
+             && Rational.compare
+                  (Delta.c_part (Simplex.value t.simplex ida))
+                  (Delta.c_part (Simplex.value t.simplex idb))
+                = 0
           then Some (ida, value_big ida)
           else None
         | Some ida, _ ->
           (* var <> const (the convert bit-field shape): separate the var from the const. *)
           (match const b with
            | Some k ->
-             if Oxsmt_core.Bigint.equal (value_big ida) k then Some (ida, k) else None
+             if (not (skipped ida)) && Oxsmt_core.Bigint.equal (value_big ida) k
+             then Some (ida, k)
+             else None
            | None -> None)
         | _, Some idb ->
           (match const a with
            | Some k ->
-             if Oxsmt_core.Bigint.equal (value_big idb) k then Some (idb, k) else None
+             if (not (skipped idb)) && Oxsmt_core.Bigint.equal (value_big idb) k
+             then Some (idb, k)
+             else None
            | None -> None)
         | None, None -> None
       in
@@ -2042,30 +2053,44 @@ let model_find ?(node_budget = 200_000) t =
      pin is violated the vertex is a genuine ℤ model of the asserted set AND the
      disequalities. A [`Dead] commit (var forced onto [k]) fails the dive; the combinator
      re-derives. *)
+  (* Pins the dive tried to separate but could not without dead-ending: SKIPPED and left
+     to the combinator (rung 3a). Skipping (rather than failing the whole dive) turns a
+     single hard pin from "abandon to the wandering arithmetic search" into "separate the
+     other ~N pins, hand the combinator the few residuals" — a handful of Final
+     round-trips instead of non-convergence. Sound: the returned model violates the
+     skipped pins, and the combinator's find_disagreement/repair_split catch exactly those
+     (rail 1). *)
+  let skip = Hashtbl.create 64 in
   let rec repair () =
     match arith_solve () with
     | `Fail -> `Fail
-    | `Ok ->
-      (match first_violated_pin t with
-       | None -> `Sat (extract_model_bigint t)
-       | Some (id, k) ->
-         if !nodes >= node_budget
-         then `Fail
-         else (
-           incr nodes;
-           let vlo =
-             Delta.of_rat
-               (Rational.of_bigint (Oxsmt_core.Bigint.sub k Oxsmt_core.Bigint.one))
-           in
-           let vhi =
-             Delta.of_rat
-               (Rational.of_bigint (Oxsmt_core.Bigint.add k Oxsmt_core.Bigint.one))
-           in
-           let up () = ignore (Simplex.assert_lower t.simplex id vhi (Branch id)) in
-           let dn () = ignore (Simplex.assert_upper t.simplex id vlo (Branch id)) in
-           match commit ~try1:up ~try2:dn with
-           | `Ok -> repair ()
-           | `Dead -> `Fail))
+    | `Ok -> resolve_pins ()
+  and resolve_pins () =
+    match first_violated_pin t ~skip with
+    | None -> `Sat (extract_model_bigint t)
+    | Some (id, k) ->
+      if !nodes >= node_budget
+      then `Fail
+      else (
+        incr nodes;
+        let vlo =
+          Delta.of_rat
+            (Rational.of_bigint (Oxsmt_core.Bigint.sub k Oxsmt_core.Bigint.one))
+        in
+        let vhi =
+          Delta.of_rat
+            (Rational.of_bigint (Oxsmt_core.Bigint.add k Oxsmt_core.Bigint.one))
+        in
+        let up () = ignore (Simplex.assert_lower t.simplex id vhi (Branch id)) in
+        let dn () = ignore (Simplex.assert_upper t.simplex id vlo (Branch id)) in
+        match commit ~try1:up ~try2:dn with
+        | `Ok ->
+          repair () (* vertex changed by the separating bound: re-solve arithmetic *)
+        | `Dead ->
+          (* cannot separate this pin here; skip it (leave to the combinator) and continue
+             at the SAME vertex (no re-solve — nothing changed). *)
+          Hashtbl.replace skip id ();
+          resolve_pins ())
   in
   let result =
     match repair () with
