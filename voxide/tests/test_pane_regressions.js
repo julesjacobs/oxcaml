@@ -87,7 +87,7 @@ section("Backend selector placement");
     "header order pins the backend selector before status"
   );
   ok(
-    /\.backend-control\s*\{[^}]*flex:\s*0 0 108px;/s.test(css),
+    /\.backend-control\s*\{[^}]*flex:\s*0 0 168px;/s.test(css),
     "the leftmost backend dropdown owns a fixed track across status text states"
   );
   ok(

@@ -1063,6 +1063,8 @@ function proofPaneModel(vcs, cursor, opts) {
         "type-error": "Obligation data unavailable: fix the source error.",
         "compiler-lacks-vc-data":
           "Obligation data unavailable: this compiler does not provide VC data.",
+        "verification-not-run":
+          "Verification was not run (typecheck only).",
         "backend-unavailable":
           "Obligation data unavailable: the selected backend could not run.",
         "compiler-unavailable":

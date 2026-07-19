@@ -42,7 +42,9 @@ _VERIFY_PREFIX = "Refinement verification failed"
 # vs "no refinements to verify") -- it never gates whether verification runs.
 _REFINEMENT_IN_TYPE = re.compile(r"\{[^{}]*(?<![A-Za-z0-9_])_(?![A-Za-z0-9_])[^{}]*\}")
 
-BACKENDS = ("lean", "z3", "oxsmt", "cross")
+VERIFICATION_BACKENDS = ("lean", "z3", "oxsmt", "cross")
+NO_VERIFICATION_BACKEND = "none"
+BACKENDS = (*VERIFICATION_BACKENDS, NO_VERIFICATION_BACKEND)
 SOLVER_ENVIRONMENT = {
     "z3": "VOXIDE_SMT_SOLVER",
     "oxsmt": "VOXIDE_OXSMT_SOLVER",
@@ -70,7 +72,14 @@ def backend_options(ocamlc: str) -> Tuple[str, ...]:
     except (OSError, subprocess.TimeoutExpired):
         return ("lean",)
     help_text = completed.stdout + completed.stderr
-    return BACKENDS if "-vox-backend" in help_text else ("lean",)
+    options = (
+        list(VERIFICATION_BACKENDS)
+        if "-vox-backend" in help_text
+        else ["lean"]
+    )
+    if "-vox-type-only" in help_text:
+        options.append(NO_VERIFICATION_BACKEND)
+    return tuple(options)
 
 
 @lru_cache(maxsize=None)
@@ -144,7 +153,11 @@ def _backend_arguments(ocamlc: str, backend: str) -> List[str]:
     options = backend_options(ocamlc)
     if backend not in options:
         raise ValueError(f"compiler does not support verification backend: {backend}")
-    if len(options) == 1:
+    if backend == NO_VERIFICATION_BACKEND:
+        return ["-vox-type-only"]
+    if backend == "lean" and not any(
+        option in options for option in ("z3", "oxsmt", "cross")
+    ):
         return []
     arguments = ["-vox-backend", backend]
     commands = solver_commands()
@@ -294,6 +307,15 @@ def _verification_status(
         "message": "No refinements to verify.",
         "obligations": False,
     }
+
+
+def _type_only_verification(errors: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Honest verification channel for a ``-vox-type-only`` check."""
+    if errors:
+        message = "Verification was not run; fix the type errors to finish checking."
+    else:
+        message = "Typecheck completed; verification was not run."
+    return {"status": "not-run", "message": message, "obligations": False}
 
 
 def find_ocamlc(override: Optional[str] = None) -> Optional[str]:
@@ -517,7 +539,7 @@ def check_source(
             backend_args = _backend_arguments(ocamlc, backend)
             dump_args = (
                 ["-vox-dump-vc-json", "vcs.json"]
-                if supports_vc_dump(ocamlc)
+                if backend != NO_VERIFICATION_BACKEND and supports_vc_dump(ocamlc)
                 else []
             )
             checked = _run(
@@ -592,31 +614,50 @@ def check_source(
         for error in errors:
             error.setdefault("kind", _error_kind(error["message"]))
 
-        vc_payload = _vcs_from_dump_path(
-            dump_path,
-            source_lines,
-            checked.returncode,
-            revision,
-            backend,
-            backend_options(ocamlc),
-            types,
-            ocamlc=ocamlc,
-        )
+        if backend == NO_VERIFICATION_BACKEND:
+            vc_payload = _vcs_unavailable(
+                revision,
+                backend,
+                backend_options(ocamlc),
+                reason="verification-not-run",
+                ocamlc=ocamlc,
+            )
+        else:
+            vc_payload = _vcs_from_dump_path(
+                dump_path,
+                source_lines,
+                checked.returncode,
+                revision,
+                backend,
+                backend_options(ocamlc),
+                types,
+                ocamlc=ocamlc,
+            )
         outcome = _primary_outcome(checked, errors, vc_payload)
+        if backend == NO_VERIFICATION_BACKEND and outcome["kind"] == "ok":
+            outcome = _outcome("checked-no-verification")
         reason_for_outcome = _unavailable_reason_for_outcome(outcome["kind"])
-        if reason_for_outcome is not None and vc_payload.get("unavailable"):
+        if (
+            backend != NO_VERIFICATION_BACKEND
+            and reason_for_outcome is not None
+            and vc_payload.get("unavailable")
+        ):
             vc_payload["unavailable_reason"] = reason_for_outcome
         summary = _as_dict(vc_payload.get("obligation_summary"))
         return {
             "revision": revision,
             "backend": backend,
             "backend_options": list(backend_options(ocamlc)),
-            "ok": outcome["kind"] == "ok",
+            "ok": outcome["kind"] in ("ok", "checked-no-verification"),
             "outcome": outcome,
             "errors": errors,
             "types": types,
             "signature": {"status": "not-requested", "text": "", "error": ""},
-            "verification": _verification_status(errors, types, summary),
+            "verification": (
+                _type_only_verification(errors)
+                if backend == NO_VERIFICATION_BACKEND
+                else _verification_status(errors, types, summary)
+            ),
             **vc_payload,
             "backend_solver_configuration": backend_solver_configuration(ocamlc),
         }
@@ -1437,6 +1478,14 @@ def vcs_for_source(
     pane never mistakes a crashed dump for a program with no obligations.
     """
     options = backend_options(ocamlc)
+    if backend == NO_VERIFICATION_BACKEND:
+        return _vcs_unavailable(
+            revision,
+            backend,
+            options,
+            reason="verification-not-run",
+            ocamlc=ocamlc,
+        )
     if not source.strip():
         return _vcs_available(
             revision,
@@ -1782,6 +1831,12 @@ def _file_verification(
 def _workspace_verification(per_file: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Fold the per-unit outcomes into one workspace-wide verdict."""
     statuses = [entry["verification"]["status"] for entry in per_file.values()]
+    if "not-run" in statuses:
+        return {
+            "status": "not-run",
+            "message": "Workspace typecheck completed; verification was not run.",
+            "obligations": False,
+        }
     if "unavailable" in statuses:
         return {
             "status": "unavailable",
@@ -1968,6 +2023,7 @@ def check_workspace(
         for name in names:
             (Path(scratch) / name).write_text(sources[name], encoding="utf-8")
         dump_path = Path(scratch) / "vcs.json"
+        type_only = backend == NO_VERIFICATION_BACKEND
         try:
             checked = _run(
                 ocamlc,
@@ -1975,8 +2031,11 @@ def check_workspace(
                     *_backend_arguments(ocamlc, backend),
                     "-c",
                     "-annot",
-                    "-vox-dump-vc-json",
-                    "vcs.json",
+                    *(
+                        []
+                        if type_only
+                        else ["-vox-dump-vc-json", "vcs.json"]
+                    ),
                     *order,
                 ],
                 scratch,
@@ -2044,7 +2103,10 @@ def check_workspace(
         active_imposed_types: List[Dict[str, Any]] = []
         conditions: List[object] = []
         placeable: List[bool] = []
-        if dump_path.is_file():
+        if type_only:
+            unavailable = True
+            unavailable_reason = "verification-not-run"
+        elif dump_path.is_file():
             try:
                 document = json.loads(dump_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -2104,14 +2166,18 @@ def check_workspace(
         file_summary = _summary_for_file(conditions, placeable, name)
         file_unavailable = unavailable or unattributed_hidden
         file_outcome = _outcome_for_unit(
-            file_errors, file_summary, file_unavailable
+            file_errors, file_summary, file_unavailable and not type_only
         )
+        if type_only and file_outcome["kind"] == "ok":
+            file_outcome = _outcome("checked-no-verification")
         entry: Dict[str, Any] = {
             "errors": file_errors,
             "outcome": file_outcome,
             "obligation_summary": file_summary,
-            "verification": _file_verification(
-                file_errors, file_summary, file_unavailable
+            "verification": (
+                _type_only_verification(file_errors)
+                if type_only
+                else _file_verification(file_errors, file_summary, file_unavailable)
             ),
         }
         if name == active:
@@ -2129,10 +2195,12 @@ def check_workspace(
         errors,
         {"obligation_summary": obligation_summary},
     )
-    if unavailable and outcome["kind"] == "ok":
+    if type_only and outcome["kind"] == "ok":
+        outcome = _outcome("checked-no-verification")
+    elif unavailable and outcome["kind"] == "ok":
         outcome = _outcome("compiler-crashed", "Obligation data unavailable.")
     reason_for_outcome = _unavailable_reason_for_outcome(outcome["kind"])
-    if unavailable and reason_for_outcome is not None:
+    if unavailable and not type_only and reason_for_outcome is not None:
         unavailable_reason = reason_for_outcome
 
     return {
@@ -2141,7 +2209,7 @@ def check_workspace(
         "backend_options": list(backend_options(ocamlc)),
         "backend_solver_configuration": backend_solver_configuration(ocamlc),
         "active": active,
-        "ok": outcome["kind"] == "ok",
+        "ok": outcome["kind"] in ("ok", "checked-no-verification"),
         "outcome": outcome,
         "files": per_file,
         "vcs": vcs,

@@ -78,6 +78,17 @@ class BackendConfigurationTests(unittest.TestCase):
                 compiler_adapter._backend_arguments("/legacy/ocamlc.opt", "lean"),
                 [],
             )
+        with mock.patch.object(
+            compiler_adapter,
+            "backend_options",
+            return_value=("lean", "none"),
+        ):
+            self.assertEqual(
+                compiler_adapter._backend_arguments(
+                    "/type-only-legacy/ocamlc.opt", "lean"
+                ),
+                [],
+            )
 
     def test_solver_configuration_metadata_is_boolean_only(self):
         with mock.patch.dict(
@@ -152,6 +163,53 @@ class BackendConfigurationTests(unittest.TestCase):
             self.assertFalse(compiler_adapter.supports_vc_dump("/legacy/ocamlc"))
             self.assertTrue(compiler_adapter.supports_vc_dump("/current/ocamlc"))
         compiler_adapter.supports_vc_dump.cache_clear()
+
+    def test_type_only_is_advertised_only_when_compiler_help_supports_it(self):
+        compiler_adapter.backend_options.cache_clear()
+        current_help = mock.Mock(
+            stdout="-vox-backend {lean|z3|oxsmt|cross}\n-vox-type-only",
+            stderr="",
+        )
+        legacy_help = mock.Mock(stdout="usage: ocamlc", stderr="")
+        with mock.patch.object(
+            compiler_adapter.subprocess,
+            "run",
+            side_effect=[current_help, legacy_help],
+        ):
+            self.assertEqual(
+                compiler_adapter.backend_options("/current/ocamlc"),
+                ("lean", "z3", "oxsmt", "cross", "none"),
+            )
+            self.assertEqual(
+                compiler_adapter.backend_options("/legacy/ocamlc"),
+                ("lean",),
+            )
+        compiler_adapter.backend_options.cache_clear()
+
+    def test_type_only_check_uses_flag_and_never_requests_vc_dump(self):
+        calls = []
+
+        def completed(ocamlc, arguments, scratch, **kwargs):
+            calls.append(arguments)
+            return compiler_adapter.subprocess.CompletedProcess(
+                [ocamlc, *arguments], 0, "", ""
+            )
+
+        with mock.patch.object(
+            compiler_adapter,
+            "backend_options",
+            return_value=("lean", "none"),
+        ), mock.patch.object(compiler_adapter, "_run", side_effect=completed):
+            payload = compiler_adapter.check_source(
+                "let x = 1", 9, "/current/ocamlc", "none"
+            )
+        self.assertEqual(calls, [["-vox-type-only", "-c", "-annot", "input.ml"]])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["outcome"]["kind"], "checked-no-verification")
+        self.assertEqual(payload["verification"]["status"], "not-run")
+        self.assertTrue(payload["unavailable"])
+        self.assertEqual(payload["unavailable_reason"], "verification-not-run")
+        self.assertEqual(payload["vcs"], [])
 
 
 class ParserTests(unittest.TestCase):

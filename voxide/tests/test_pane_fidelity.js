@@ -226,6 +226,8 @@ const PANE_IDS = [
   // working-tree HTML/app no longer exposes a fade control.
   "fade-box", "fade-label", "tree", "sidebar-button",
   "backend-control", "backend-select", "backend-results",
+  "share-button", "session-notice", "obligations-details", "obligations-summary",
+  "obligations-list", "regression-banner", "regression-details", "regression-report",
 ];
 
 function makeCm() {

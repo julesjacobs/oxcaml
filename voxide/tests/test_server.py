@@ -352,6 +352,19 @@ class RequestLogicTests(unittest.TestCase):
             config["backend_options"], ["lean", "z3", "oxsmt", "cross"]
         )
 
+    def test_type_only_backend_is_validated_and_relayed(self):
+        status, payload = server.process_post(
+            "/check",
+            b'{"source":"let x = 1","revision":2,"backend":"none"}',
+            fake_check,
+            "/fake/ocamlc.opt",
+            fake_vcs,
+            available_backends=("lean", "none"),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["backend"], "none")
+        self.assertEqual(payload["test_backend"], "none")
+
     def test_solver_configuration_is_consistent_across_payloads(self):
         configuration = {"z3": True, "oxsmt": True}
         contradictory = lambda *args, **kwargs: {

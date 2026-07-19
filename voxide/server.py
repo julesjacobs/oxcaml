@@ -194,7 +194,9 @@ def process_post(
     solver_configuration = compiler_adapter.backend_solver_configuration(ocamlc)
     backend = body.get("backend", "lean")
     if not isinstance(backend, str) or backend not in compiler_adapter.BACKENDS:
-        return 400, {"error": "backend must be lean, z3, oxsmt, or cross"}
+        return 400, {
+            "error": "backend must be lean, z3, oxsmt, cross, or none"
+        }
     if backend not in options:
         return 400, {"error": f"compiler does not support backend {backend}"}
     # /workspace-check compiles a set of buffers together (multi-file /

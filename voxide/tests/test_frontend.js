@@ -187,6 +187,8 @@ function register(id) {
   "verify-output", "verification-details", "pane-mode", "pane-body", "proof-details", "legend", "editor-pane",
   "doc-view", "theme-button", "compact-box", "tree", "sidebar-button", "tabs", "cross-unit",
   "backend-control", "backend-select", "backend-results",
+  "share-button", "session-notice", "obligations-details", "obligations-summary",
+  "obligations-list", "regression-banner", "regression-details", "regression-report",
 ].forEach(register);
 
 const documentElement = new El("html");
@@ -225,7 +227,7 @@ function makeCm() {
     getLine: (n) => value.split("\n")[n] || "",
     lineCount: () => value.split("\n").length,
     on: (type, fn) => (listeners[type] = listeners[type] || []).push(fn),
-    addKeyMap: () => {},
+    addKeyMap: (map) => { cm._keymap = map; },
     setOption: (k, v) => (options[k] = v),
     getOption: (k) => options[k],
     // Records marks so a test can inspect what app.js painted (the provenance
@@ -251,6 +253,7 @@ function makeCm() {
     },
     focus: () => {},
     refresh: () => {},
+    scrollIntoView: () => {},
   };
   return cm;
 }
@@ -263,6 +266,20 @@ const localStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),
   setItem: (k, v) => store.set(k, String(v)),
   removeItem: (k) => store.delete(k),
+};
+let copiedShareLink = "";
+const locationShim = {
+  _hash: "",
+  get hash() { return this._hash; },
+  set hash(value) {
+    this._hash = String(value).startsWith("#") ? String(value) : "#" + value;
+  },
+  get href() { return "http://127.0.0.1/" + this._hash; },
+};
+const historyShim = {
+  replaceState: (_state, _title, url) => {
+    if (!String(url).includes("#")) locationShim._hash = "";
+  },
 };
 
 const TREE = {
@@ -509,7 +526,7 @@ function bstWorkspacePayload(revision, active, backend) {
     revision,
     active: active || "client_positive.ml",
     backend: selected,
-    backend_options: ["lean", "z3", "oxsmt", "cross"],
+    backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
     backend_solver_configuration: { z3: true, oxsmt: true },
     ok: !gap,
     outcome: gap ? gapOutcome : okOutcome,
@@ -580,6 +597,7 @@ let heldCheckResolvers = [];
 let holdChecksMatching = null;
 let transportFailuresRemaining = 0;
 let httpFailure = null;
+let backendConfigurationOverride = null;
 function jsonResponse(obj) {
   return Promise.resolve({
     ok: true,
@@ -611,8 +629,8 @@ function fetchShim(url, opts) {
   if (u === "/ls") return jsonResponse(TREE);
   if (u === "/examples") return jsonResponse(EXAMPLES);
   if (u === "/config")
-    return jsonResponse({
-      backend_options: ["lean", "z3", "oxsmt", "cross"],
+    return jsonResponse(backendConfigurationOverride || {
+      backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
       backend_solver_configuration: { z3: true, oxsmt: true },
       default_backend: "oxsmt",
     });
@@ -648,6 +666,133 @@ function fetchShim(url, opts) {
     if (src.indexOf("SLOWROUND") !== -1) {
       return new Promise((resolve) => slowCheckResolvers.push({ resolve, revision }));
     }
+    if (body.backend === "none") {
+      const typeError = src.indexOf("NONE_TYPE_ERROR") !== -1;
+      return jsonResponse({
+        revision,
+        backend: "none",
+        backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
+        backend_solver_configuration: { z3: true, oxsmt: true },
+        ok: !typeError,
+        outcome: {
+          kind: typeError ? "type-mode" : "checked-no-verification",
+          message: typeError ? "type mismatch" : "",
+          source_located: typeError,
+        },
+        errors: typeError
+          ? [{
+              kind: "type-mode",
+              message: "type mismatch",
+              start: { line: 0, col: 0 },
+              end: { line: 0, col: 3 },
+            }]
+          : [],
+        types: [
+          { start: { line: 0, col: 0 }, end: { line: 0, col: 3 }, type: "int" },
+        ],
+        signature: { status: "not-requested", text: "", error: "" },
+        verification: {
+          status: "not-run",
+          message: "Typecheck completed; verification was not run.",
+          obligations: false,
+        },
+        vcs: [],
+        unavailable: true,
+        unavailable_reason: "verification-not-run",
+        hidden: 0,
+        obligation_summary: {
+          total: 0,
+          statuses: {
+            proved: 0,
+            disproved: 0,
+            unproved: 0,
+            "solver-error": 0,
+            unavailable: 0,
+            unknown: 0,
+          },
+          hidden: 0,
+          hidden_statuses: {
+            proved: 0,
+            disproved: 0,
+            unproved: 0,
+            "solver-error": 0,
+            unavailable: 0,
+            unknown: 0,
+          },
+        },
+        refinement_types: [],
+        identifier_modes: [],
+        imposed_types: [],
+      });
+    }
+    if (src.indexOf("REGRESSION_") !== -1) {
+      const relocated = src.indexOf("REGRESSION_RELOCATE_") !== -1;
+      const broken =
+        src.indexOf("REGRESSION_BROKEN") !== -1 ||
+        src.indexOf("REGRESSION_RELOCATE_BROKEN") !== -1;
+      const status = broken ? "disproved" : "proved";
+      const spanLine = relocated ? src.split("\n").length - 2 : 0;
+      return jsonResponse({
+        revision,
+        backend: body.backend || "oxsmt",
+        backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
+        backend_solver_configuration: { z3: true, oxsmt: true },
+        ok: !broken,
+        outcome: {
+          kind: broken ? "verification" : "ok",
+          message: "",
+          source_located: false,
+        },
+        errors: [],
+        types: [],
+        signature: { status: "not-requested", text: "", error: "" },
+        verification: {
+          status: broken ? "failed" : "verified",
+          message: broken ? "not discharged" : "discharged",
+          obligations: true,
+        },
+        vcs: [{
+          id: relocated && broken ? 99 : 0,
+          status,
+          kind: "annotation",
+          span: {
+            start: { line: spanLine, col: 4 },
+            end: { line: spanLine, col: 5 },
+          },
+          goal: { display: "x > 0", raw: "x > 0" },
+          hypotheses: [],
+          counterexample: null,
+          detail: broken ? "refuted" : null,
+          generated_lean: null,
+        }],
+        unavailable: false,
+        unavailable_reason: null,
+        hidden: 0,
+        obligation_summary: {
+          total: 1,
+          statuses: {
+            proved: broken ? 0 : 1,
+            disproved: broken ? 1 : 0,
+            unproved: 0,
+            "solver-error": 0,
+            unavailable: 0,
+            unknown: 0,
+          },
+          hidden: 0,
+          hidden_statuses: {
+            proved: 0,
+            disproved: 0,
+            unproved: 0,
+            "solver-error": 0,
+            unavailable: 0,
+            unknown: 0,
+          },
+        },
+        refinement_types: [],
+        identifier_modes: [],
+        imposed_types: [],
+      });
+    }
     if (src.indexOf("UNIFIEDROUND") !== -1) {
       return jsonResponse({
         revision,
@@ -660,7 +805,7 @@ function fetchShim(url, opts) {
         signature: { status: "not-requested", text: "", error: "" },
         verification: { status: "verified", message: "ok", obligations: true },
         backend: body.backend || "lean",
-        backend_options: ["lean", "z3", "oxsmt", "cross"],
+        backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
         backend_solver_configuration: { z3: true, oxsmt: true },
         unavailable: false,
         hidden: 0,
@@ -752,7 +897,7 @@ function fetchShim(url, opts) {
         signature: "val positive : int{ _ > 0 } -> int\nval seven : int",
         verification: { status: "verified", message: "ok", obligations: true },
         backend: body.backend || "oxsmt",
-        backend_options: ["lean", "z3", "oxsmt", "cross"],
+        backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
         backend_solver_configuration: { z3: true, oxsmt: true },
         unavailable: false,
         hidden: 0,
@@ -1032,7 +1177,7 @@ function fetchShim(url, opts) {
       return jsonResponse({
         revision,
         backend,
-        backend_options: ["lean", "z3", "oxsmt", "cross"],
+        backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
         backend_solver_configuration: { z3: true, oxsmt: false },
         unavailable: false,
         hidden: 0,
@@ -1280,6 +1425,16 @@ function loadApp() {
     Math,
     encodeURIComponent,
     decodeURIComponent,
+    location: locationShim,
+    history: historyShim,
+    navigator: {
+      clipboard: {
+        writeText: (value) => {
+          copiedShareLink = String(value);
+          return Promise.resolve();
+        },
+      },
+    },
   };
   sandbox.window = sandbox;
   sandbox.window.confirm = () => confirmResult;
@@ -1654,7 +1809,7 @@ async function main() {
       signature: "val positive : int{ _ > 0 } -> int\nval seven : int",
       verification: { status: "verified", message: "ok", obligations: true },
       backend: "oxsmt",
-      backend_options: ["lean", "z3", "oxsmt", "cross"],
+      backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
       backend_solver_configuration: { z3: true, oxsmt: true },
       unavailable: false,
       hidden: 0,
@@ -2266,8 +2421,8 @@ async function main() {
     await backends.refreshVcs();
     ok(
       registry["backend-control"].hidden === false &&
-        registry["backend-select"].children.length === 4,
-      "new compiler metadata shows all four choices in the header"
+        registry["backend-select"].children.length === 5,
+      "new compiler metadata shows all verification choices plus typecheck-only"
     );
     const backendChoices = registry["backend-select"].children;
     ok(
@@ -2346,6 +2501,231 @@ async function main() {
         legacy.getBackendOptions().includes("oxsmt"),
       "missing round metadata preserves the backend established by /config"
     );
+  }
+
+  console.log("Typecheck-only honesty, obligation navigation, and edit diff:");
+  {
+    store.clear();
+    locationShim._hash = "";
+    const wave = loadApp();
+    await tick();
+    await tick();
+    wave.cm.setValue("let type_only_demo = 1");
+    registry["backend-select"].value = "none";
+    registry["backend-select"]._fire("change", {});
+    await wave.runCheck();
+    ok(
+      /^✓ checked \(no verification\) \(\d+ ms\)$/.test(
+        registry["status"].textContent
+      ),
+      "typecheck-only has a distinct honest status with inline latency"
+    );
+    ok(
+      (registry["pane-body"]._html || "").includes(
+        "Verification was not run (typecheck only)."
+      ) &&
+        registry["obligations-summary"].textContent === "Verification not run" &&
+        localStorage.getItem("voxide-backend") === "none",
+      "PROOF/list say verification was not run and the selection persists"
+    );
+    wave.cm.setValue("NONE_TYPE_ERROR");
+    await wave.runCheck();
+    ok(
+      registry["status"].textContent.includes("type/mode error") &&
+        !registry["status"].textContent.includes("checked (no verification)"),
+      "type errors still dominate a typecheck-only round"
+    );
+
+    registry["backend-select"].value = "oxsmt";
+    registry["backend-select"]._fire("change", {});
+    wave.cm.setValue("let x = 1 (* REGRESSION_GREEN *)");
+    await wave.runCheck();
+    ok(
+      registry["obligations-list"].children.length === 1 &&
+        registry["obligations-list"].textContent.includes("x > 0") &&
+        registry["obligations-list"].textContent.includes("L1"),
+      "all-obligations list shows glyph metadata, source-like goal, and line"
+    );
+    wave.cm.setValue("let x = 1 (* REGRESSION_BROKEN *)");
+    await wave.runCheck();
+    ok(
+      registry["regression-banner"].textContent === "1 obligation regressed" &&
+        registry["regression-details"].hidden === false &&
+        registry["regression-report"].textContent.includes("broken: x > 0"),
+      "proved-to-disproved transition is called out and listed"
+    );
+    ok(
+      wave.cm._marks.some(
+        (mark) =>
+          !mark.cleared &&
+          String(mark.opts.className || "").includes("vc-regressed")
+      ),
+      "newly broken obligation gets a distinguishable editor marker"
+    );
+    registry["obligations-list"].children[0]._fire("click", {});
+    ok(
+      wave.cm.getCursor().line === 0 && wave.cm.getCursor().ch === 4,
+      "clicking an obligation jumps to and pins its source span"
+    );
+    wave.cm.setCursor({ line: 0, ch: 0 });
+    wave.cm._keymap.F8();
+    ok(
+      wave.cm.getCursor().ch === 4,
+      "F8 navigates to the next failing obligation"
+    );
+    wave.cm.setValue("let y = 1 (* REGRESSION_BROKEN *)");
+    await wave.runCheck();
+    ok(
+      registry["regression-banner"].hidden === true &&
+        registry["regression-report"].textContent.includes(
+          "not be matched confidently; no regression was claimed"
+        ),
+      "uncertain span/identity drift is reported without a false regression"
+    );
+  }
+  {
+    store.clear();
+    locationShim._hash = "";
+    const relocated = loadApp();
+    await tick();
+    await tick();
+    relocated.cm.setValue(
+      "let old_context = 0\n" +
+      "let x = 1 (* REGRESSION_RELOCATE_GREEN *)\n" +
+      "let retained_tail = 0"
+    );
+    await relocated.runCheck();
+    const padding = Array.from(
+      { length: 199 },
+      (_value, index) => "let padding_" + index + " = 0"
+    ).join("\n");
+    relocated.cm.setValue(
+      "let replacement_context = 0\n" +
+      padding +
+      "\nlet x = 1 (* REGRESSION_RELOCATE_BROKEN *)\n" +
+      "let retained_tail = 0"
+    );
+    await relocated.runCheck();
+    ok(
+      registry["regression-banner"].hidden === true &&
+        registry["regression-report"].textContent.includes(
+          "not be matched confidently; no regression was claimed"
+        ) &&
+        !relocated.cm._marks.some(
+          (mark) =>
+            !mark.cleared &&
+            String(mark.opts.className || "").includes("vc-regressed")
+        ),
+      "deleting and recreating an identical-looking VC at line 201 is uncertain, never regressed"
+    );
+  }
+
+  console.log("Scratch persistence and fragment sharing:");
+  {
+    store.clear();
+    locationShim._hash = "";
+    copiedShareLink = "";
+    const scratch = loadApp();
+    await tick();
+    await tick();
+    scratch.cm.setValue("let hand_edited_scratch = 42");
+    registry["backend-select"].value = "none";
+    registry["backend-select"]._fire("change", {});
+    const saved = JSON.parse(localStorage.getItem("voxide-session-v1"));
+    ok(
+      saved.source === "let hand_edited_scratch = 42" && saved.backend === "none",
+      "hand edits and backend are persisted locally"
+    );
+    const restored = loadApp();
+    await tick();
+    await tick();
+    ok(
+      restored.cm.getValue() === "let hand_edited_scratch = 42" &&
+        restored.getBackend() === "none",
+      "a reload restores the exact scratch buffer and backend"
+    );
+    await restored.shareCurrentSession();
+    ok(
+      locationShim.hash.startsWith("#voxide=") &&
+        copiedShareLink.includes("#voxide=") &&
+        registry["session-notice"].textContent.includes("contains this buffer set"),
+      "share action emits and copies a self-contained fragment URL"
+    );
+    localStorage.removeItem("voxide-session-v1");
+    const shared = loadApp();
+    await tick();
+    await tick();
+    ok(
+      shared.cm.getValue() === "let hand_edited_scratch = 42" &&
+        shared.getBackend() === "none" &&
+        locationShim.hash === "",
+      "fragment reopen restores exact content and consumes the one-time fragment"
+    );
+    shared.cm.setValue("let hand_edited_scratch = 43");
+    const editedReload = loadApp();
+    await tick();
+    await tick();
+    ok(
+      editedReload.cm.getValue() === "let hand_edited_scratch = 43",
+      "an edit after share restore survives reload instead of being overwritten"
+    );
+    const workspaceState = {
+      version: 1,
+      backend: "lean",
+      mode: "workspace",
+      order: ["A.ml", "B.ml"],
+      active: "B.ml",
+      buffers: { "A.ml": "let a = 1", "B.ml": "let b = A.a" },
+    };
+    ok(
+      shared.restoreSessionState(workspaceState) &&
+        JSON.stringify(shared.captureSessionState()) ===
+          JSON.stringify(workspaceState),
+      "session state preserves an exact multi-buffer set and active unit"
+    );
+    editedReload.cm.setValue("x".repeat(1000001));
+    const hashBeforeOversize = locationShim.hash;
+    const copiedBeforeOversize = copiedShareLink;
+    const oversizedShared = await editedReload.shareCurrentSession();
+    ok(
+      oversizedShared === false &&
+        locationShim.hash === hashBeforeOversize &&
+        copiedShareLink === copiedBeforeOversize &&
+        registry["session-notice"].textContent.includes("too large to share") &&
+        !registry["session-notice"].textContent.includes("copied"),
+      "an oversized session fails honestly before changing or copying a share link"
+    );
+    locationShim._hash = "";
+  }
+  {
+    store.clear();
+    backendConfigurationOverride = {
+      backend_options: ["lean", "z3", "none"],
+      backend_solver_configuration: { z3: false, oxsmt: false },
+      default_backend: "lean",
+    };
+    const unavailableBackendState = {
+      version: 1,
+      backend: "z3",
+      mode: "single",
+      source: "let shared_z3 = 1",
+    };
+    locationShim.hash =
+      "voxide=" + encodeURIComponent(JSON.stringify(unavailableBackendState));
+    const fallback = loadApp();
+    await tick();
+    await tick();
+    ok(
+      fallback.getBackend() === "lean" &&
+        registry["session-notice"].textContent.includes(
+          "requested backend z3"
+        ) &&
+        registry["session-notice"].textContent.includes("using lean") &&
+        registry["session-notice"].textContent.includes("not configured"),
+      "share restore discloses requested backend, active fallback, and configuration reason"
+    );
+    backendConfigurationOverride = null;
+    locationShim._hash = "";
   }
 
   // --- STATUS zone fail-closed honesty ---
@@ -2816,6 +3196,76 @@ async function main() {
     rowFiles.length === 2 && rowFiles[0] === "Client.ml" && rowFiles[1] === "Demo.mli",
     "cross-unit rows name the other units"
   );
+  const obligationRows = registry["obligations-list"].children;
+  ok(
+    obligationRows.length === 3 &&
+      registry["obligations-summary"].textContent === "All obligations (3)" &&
+      registry["obligations-list"].textContent.includes("Demo.ml:L1") &&
+      registry["obligations-list"].textContent.includes("Demo.mli:L2") &&
+      registry["obligations-list"].textContent.includes("Client.ml:L1"),
+    "workspace all-obligations lists every unit with status, kind, goal, and file line"
+  );
+  const clientObligation = obligationRows.find((row) =>
+    row.textContent.includes("Client.ml:L1")
+  );
+  clientObligation._fire("click", {});
+  ok(
+    w.getActiveFile() === "Client.ml" &&
+      w.cm.getCursor().ch === 20 &&
+      (registry["pane-body"]._html || "").includes("nonneg 5"),
+    "a cross-unit obligation row switches units, jumps, and pins its proof"
+  );
+
+  const rewriteSummary = (summary, fileVcs) => {
+    const statuses = {
+      proved: 0,
+      disproved: 0,
+      unproved: 0,
+      "solver-error": 0,
+      unavailable: 0,
+      unknown: 0,
+    };
+    fileVcs.forEach((vc) => { statuses[vc.status] += 1; });
+    return { ...summary, total: fileVcs.length, statuses };
+  };
+  workspacePayloadTransform = (payload) => {
+    const failingVcs = payload.vcs.map((vc) => ({
+      ...vc,
+      status: vc.id === 0 || vc.id === 2 ? "disproved" : vc.status,
+    }));
+    const files = {};
+    Object.keys(payload.files).forEach((file) => {
+      files[file] = {
+        ...payload.files[file],
+        obligation_summary: rewriteSummary(
+          payload.files[file].obligation_summary,
+          failingVcs.filter((vc) => vc.file === file)
+        ),
+      };
+    });
+    return {
+      ...payload,
+      files,
+      vcs: failingVcs,
+      obligation_summary: rewriteSummary(
+        payload.obligation_summary,
+        failingVcs
+      ),
+    };
+  };
+  await w.runWorkspaceCheck();
+  w.cm._keymap.F8();
+  ok(
+    w.getActiveFile() === "Demo.ml" && w.cm.getCursor().ch === 16,
+    "F8 traverses from a failing Client.ml obligation into Demo.ml"
+  );
+  w.cm._keymap["Shift-F8"]();
+  ok(
+    w.getActiveFile() === "Client.ml" && w.cm.getCursor().ch === 20,
+    "Shift-F8 traverses backward across workspace units"
+  );
+  workspacePayloadTransform = null;
+  await w.runWorkspaceCheck();
 
   // Tab switch re-partitions: the seal (anchored in Demo.mli) becomes the
   // active-file VC.

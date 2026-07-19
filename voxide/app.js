@@ -35,6 +35,14 @@ const crossUnitElement = document.getElementById("cross-unit");
 const backendControlElement = document.getElementById("backend-control");
 const backendSelectElement = document.getElementById("backend-select");
 const backendResultsElement = document.getElementById("backend-results");
+const shareButtonElement = document.getElementById("share-button");
+const sessionNoticeElement = document.getElementById("session-notice");
+const obligationsDetailsElement = document.getElementById("obligations-details");
+const obligationsSummaryElement = document.getElementById("obligations-summary");
+const obligationsListElement = document.getElementById("obligations-list");
+const regressionBannerElement = document.getElementById("regression-banner");
+const regressionDetailsElement = document.getElementById("regression-details");
+const regressionReportElement = document.getElementById("regression-report");
 
 let documentRevision = 0;
 let appliedRevision = -1;
@@ -165,6 +173,15 @@ let configuredDefaultBackend = null;
 let paneSelectedVcId = null;
 let paneOverlappingVcs = [];
 
+// Client-only edit history. Snapshots are accepted only from a current unified
+// result and matched conservatively (unique kind + goal + source slice plus an
+// edit-derived span correspondence), so a moved, recreated, or duplicated
+// anchor is reported as uncertain rather than blamed.
+let lastAcceptedSnapshot = null;
+let lastGreenSnapshot = null;
+let regressedVcIds = new Set();
+let regressionTimer = null;
+
 // The status taxonomy (VC_STATUSES / normalizeStatus / FAILED_STATUSES /
 // BADGE_HINT) now lives in pane_model.js, the shared pure model this file and
 // the terminal tool both render from; they are globals from that script.
@@ -183,7 +200,7 @@ function completedLatencyText() {
 function applyBackendMetadata(payload, preferredBackend) {
   const advertised = payload && Array.isArray(payload.backend_options)
     ? payload.backend_options.filter((name) =>
-        ["lean", "z3", "oxsmt", "cross"].includes(name)
+        ["lean", "z3", "oxsmt", "cross", "none"].includes(name)
       )
     : [];
   if (!advertised.length) return false;
@@ -197,6 +214,7 @@ function applyBackendMetadata(payload, preferredBackend) {
   }
   const preferredIsUsable =
     preferredBackend === "lean" ||
+    preferredBackend === "none" ||
     (preferredBackend === "z3" && backendSolverConfiguration.z3) ||
     (preferredBackend === "oxsmt" && backendSolverConfiguration.oxsmt) ||
     (preferredBackend === "cross" &&
@@ -218,8 +236,11 @@ function applyBackendMetadata(payload, preferredBackend) {
   backendOptions.forEach((name) => {
     const option = document.createElement("option");
     option.value = name;
-    const label =
-      name === "oxsmt" ? "oxsmt" : name[0].toUpperCase() + name.slice(1);
+    const label = name === "none"
+      ? "none (typecheck only)"
+      : name === "oxsmt"
+        ? "oxsmt"
+        : name[0].toUpperCase() + name.slice(1);
     const required = name === "cross" ? ["z3", "oxsmt"] : [name];
     const missing = required.filter(
       (solver) =>
@@ -247,7 +268,10 @@ async function loadBackendConfiguration() {
     if (!response.ok) throw new Error(response.statusText);
     const payload = await response.json();
     configuredDefaultBackend = payload.default_backend;
-    applyBackendMetadata(payload, payload.default_backend);
+    applyBackendMetadata(
+      payload,
+      savedBackendPreference() || payload.default_backend
+    );
   } catch (error) {
     // No configuration means no established backend fact. Keep the fixed-width
     // selector blank/disabled; a later server response may still establish it.
@@ -698,11 +722,316 @@ function markVcs() {
     const depthClass = "vc-goal-d" + Math.min(containers.size, 3);
     vcMarks.push(
       cm.markText(from, to, {
-        className: "vc-" + vc.status + " " + depthClass,
+        className:
+          "vc-" + vc.status + " " + depthClass +
+          (regressedVcIds.has(vcKey(vc)) ? " vc-regressed" : ""),
         title: BADGE_HINT[vc.status] || vc.status,
       })
     );
   });
+}
+
+function vcKey(vc) {
+  return (vc.file || "") + ":" + String(vc.id);
+}
+
+function allObligations() {
+  return workspaceMode ? [...vcs, ...crossUnitVcs] : vcs;
+}
+
+function obligationGlyph(status) {
+  if (status === "proved") return "✓";
+  if (status === "disproved" || status === "failed") return "✗";
+  return "⚠";
+}
+
+function jumpToObligation(vc) {
+  if (workspaceMode && vc.file && vc.file !== activeFile) switchTab(vc.file);
+  const from = cmPosition(vc.start);
+  const to = cmPosition(vc.end);
+  setCursorProgrammatically(from);
+  paneSelectedVcId = vc.id;
+  cm.scrollIntoView({ from, to }, 60);
+  cm.focus();
+  const flash = cm.markText(from, to, { className: "hyp-flash" });
+  window.setTimeout(() => flash.clear(), 1200);
+  renderProofPane();
+  renderAllObligations();
+}
+
+function renderAllObligations() {
+  obligationsListElement.replaceChildren();
+  if (vcsUnavailableReason === "verification-not-run") {
+    obligationsSummaryElement.textContent = "Verification not run";
+    obligationsDetailsElement.open = false;
+    return;
+  }
+  const listed = allObligations();
+  obligationsSummaryElement.textContent =
+    "All obligations (" +
+    (workspaceMode ? listed.length : obligationSummary.total) +
+    ")";
+  listed.forEach((vc) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className =
+      "obligation-row obligation-row-status-" + vc.status +
+      (paneVc && paneVc.id === vc.id && paneVc.file === vc.file
+        ? " obligation-active"
+        : "");
+    row.title = "Jump to " + anchorText(vc) + " and pin this proof";
+    const glyph = document.createElement("span");
+    glyph.className = "obligation-glyph";
+    glyph.textContent = obligationGlyph(vc.status);
+    const kind = document.createElement("span");
+    kind.className = "obligation-kind";
+    kind.textContent = vc.kind || "obligation";
+    const goal = document.createElement("span");
+    goal.className = "obligation-goal";
+    goal.textContent = vc.goal.display || vc.goal.raw || "(goal unavailable)";
+    const line = document.createElement("span");
+    line.className = "obligation-line";
+    line.textContent =
+      (workspaceMode && vc.file ? vc.file + ":" : "") +
+      "L" +
+      (vc.start.line + 1);
+    row.appendChild(glyph);
+    row.appendChild(kind);
+    row.appendChild(goal);
+    row.appendChild(line);
+    row.addEventListener("click", () => jumpToObligation(vc));
+    obligationsListElement.appendChild(row);
+  });
+}
+
+function failingObligations() {
+  return allObligations().filter((vc) => FAILED_STATUSES.includes(vc.status));
+}
+
+function stepFailingObligation(delta) {
+  const failing = failingObligations();
+  if (!failing.length) return;
+  let index = paneVc
+    ? failing.findIndex((vc) => vc.id === paneVc.id && vc.file === paneVc.file)
+    : -1;
+  index = (index + delta + failing.length) % failing.length;
+  jumpToObligation(failing[index]);
+}
+
+cm.addKeyMap({
+  F8: () => stepFailingObligation(1),
+  "Shift-F8": () => stepFailingObligation(-1),
+});
+
+function sourceSlice(source, vc) {
+  const lines = String(source).split("\n");
+  if (vc.start.line === vc.end.line) {
+    return (lines[vc.start.line] || "").slice(vc.start.col, vc.end.col);
+  }
+  const pieces = [(lines[vc.start.line] || "").slice(vc.start.col)];
+  for (let line = vc.start.line + 1; line < vc.end.line; line += 1) {
+    pieces.push(lines[line] || "");
+  }
+  pieces.push((lines[vc.end.line] || "").slice(0, vc.end.col));
+  return pieces.join("\n");
+}
+
+function snapshotKey() {
+  const scope = workspaceMode
+    ? "workspace:" + activeWorkspaceId + ":" + activeFile
+    : "buffer:" + (currentPath || "scratch");
+  return scope + ":" + backendSelection;
+}
+
+function verificationSnapshot() {
+  const source = cm.getValue();
+  return {
+    key: snapshotKey(),
+    revision: documentRevision,
+    source,
+    vcs: vcs.map((vc) => ({
+      id: vc.id,
+      file: vc.file,
+      status: vc.status,
+      kind: vc.kind,
+      goal: vc.goal.raw || vc.goal.display,
+      display: vc.goal.display,
+      start: { ...vc.start },
+      end: { ...vc.end },
+      source: sourceSlice(source, vc),
+    })),
+  };
+}
+
+function matchObligations(before, after) {
+  const identity = (vc) => vc.kind + "\u001f" + vc.goal + "\u001f" + vc.source;
+  const groups = (snapshot) => {
+    const result = new Map();
+    snapshot.vcs.forEach((vc) => {
+      const key = identity(vc);
+      if (!result.has(key)) result.set(key, []);
+      result.get(key).push(vc);
+    });
+    return result;
+  };
+  const oldGroups = groups(before);
+  const newGroups = groups(after);
+  const offsetAt = (source, position) => {
+    const lines = String(source).split("\n");
+    let offset = 0;
+    for (let line = 0; line < position.line; line += 1) {
+      offset += lines[line].length + 1;
+    }
+    return offset + position.col;
+  };
+  const mappedSpan = (vc) => {
+    const oldSource = String(before.source);
+    const newSource = String(after.source);
+    const oldStart = offsetAt(oldSource, vc.start);
+    const oldEnd = offsetAt(oldSource, vc.end);
+    if (oldSource === newSource) return { start: oldStart, end: oldEnd };
+    if (after.revision <= before.revision) return null;
+    let prefix = 0;
+    const prefixLimit = Math.min(oldSource.length, newSource.length);
+    while (
+      prefix < prefixLimit &&
+      oldSource[prefix] === newSource[prefix]
+    ) {
+      prefix += 1;
+    }
+    let suffix = 0;
+    while (
+      oldSource.length - suffix > prefix &&
+      newSource.length - suffix > prefix &&
+      oldSource[oldSource.length - suffix - 1] ===
+        newSource[newSource.length - suffix - 1]
+    ) {
+      suffix += 1;
+    }
+    if (oldEnd <= prefix) return { start: oldStart, end: oldEnd };
+    const oldSuffixStart = oldSource.length - suffix;
+    if (oldStart < oldSuffixStart) return null;
+    const shift = newSource.length - oldSource.length;
+    return { start: oldStart + shift, end: oldEnd + shift };
+  };
+  const spansCorrespond = (oldVc, newVc) => {
+    const mapped = mappedSpan(oldVc);
+    return (
+      mapped !== null &&
+      mapped.start === offsetAt(after.source, newVc.start) &&
+      mapped.end === offsetAt(after.source, newVc.end)
+    );
+  };
+  const matches = [];
+  let uncertain = 0;
+  oldGroups.forEach((oldVcs, key) => {
+    const newVcs = newGroups.get(key) || [];
+    if (
+      oldVcs.length === 1 &&
+      newVcs.length === 1 &&
+      spansCorrespond(oldVcs[0], newVcs[0])
+    ) {
+      matches.push({ before: oldVcs[0], after: newVcs[0] });
+    } else {
+      uncertain += Math.max(oldVcs.length, newVcs.length);
+    }
+  });
+  newGroups.forEach((newVcs, key) => {
+    if (!oldGroups.has(key)) uncertain += newVcs.length;
+  });
+  return { matches, uncertain };
+}
+
+function clearRegressionPresentation() {
+  regressedVcIds = new Set();
+  regressionBannerElement.hidden = true;
+  regressionDetailsElement.hidden = true;
+  regressionReportElement.replaceChildren();
+  if (regressionTimer !== null) {
+    window.clearTimeout(regressionTimer);
+    regressionTimer = null;
+  }
+}
+
+function resetRegressionHistory() {
+  lastAcceptedSnapshot = null;
+  lastGreenSnapshot = null;
+  clearRegressionPresentation();
+}
+
+function renderRegressionReport(diff, sinceGreen) {
+  regressedVcIds = new Set(diff.regressed.map((vc) => vcKey(vc)));
+  if (diff.regressed.length) {
+    regressionBannerElement.textContent =
+      diff.regressed.length +
+      " obligation" +
+      (diff.regressed.length === 1 ? "" : "s") +
+      " regressed";
+    regressionBannerElement.hidden = false;
+    regressionTimer = window.setTimeout(() => {
+      regressionBannerElement.hidden = true;
+      regressionTimer = null;
+    }, 6000);
+  }
+  const changed = sinceGreen || diff;
+  const rows = [...changed.regressed, ...diff.fixed];
+  rows.forEach((vc) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "regression-row";
+    row.textContent =
+      (diff.fixed.includes(vc) ? "fixed: " : "broken: ") +
+      vc.display + " (line " + (vc.start.line + 1) + ")";
+    row.addEventListener("click", () => jumpToObligation(vc));
+    regressionReportElement.appendChild(row);
+  });
+  if (changed.uncertain) {
+    const note = document.createElement("div");
+    note.className = "regression-uncertain";
+    note.textContent =
+      changed.uncertain +
+      " obligation" +
+      (changed.uncertain === 1 ? " could" : "s could") +
+      " not be matched confidently; no regression was claimed.";
+    regressionReportElement.appendChild(note);
+  }
+  regressionDetailsElement.hidden = rows.length === 0 && !changed.uncertain;
+}
+
+function obligationDiff(before, after) {
+  if (!before || before.key !== after.key) {
+    return { regressed: [], fixed: [], uncertain: 0 };
+  }
+  const compared = matchObligations(before, after);
+  const regressed = [];
+  const fixed = [];
+  compared.matches.forEach((pair) => {
+    const wasFailed = FAILED_STATUSES.includes(pair.before.status);
+    const isFailed = FAILED_STATUSES.includes(pair.after.status);
+    if (pair.before.status === "proved" && isFailed) regressed.push(pair.after);
+    if (wasFailed && pair.after.status === "proved") fixed.push(pair.after);
+  });
+  return { regressed, fixed, uncertain: compared.uncertain };
+}
+
+function updateRegressionTracking() {
+  clearRegressionPresentation();
+  if (backendSelection === "none" || vcsUnavailable || !lastCompiles) return;
+  const snapshot = verificationSnapshot();
+  const previous = lastAcceptedSnapshot && lastAcceptedSnapshot.key === snapshot.key
+    ? lastAcceptedSnapshot
+    : null;
+  const diff = obligationDiff(previous, snapshot);
+  const green =
+    obligationSummary.total > 0 &&
+    Number(obligationSummary.statuses.proved) === obligationSummary.total;
+  const greenBase = lastGreenSnapshot && lastGreenSnapshot.key === snapshot.key
+    ? lastGreenSnapshot
+    : null;
+  const sinceGreen = greenBase ? obligationDiff(greenBase, snapshot) : null;
+  renderRegressionReport(diff, sinceGreen);
+  lastAcceptedSnapshot = snapshot;
+  if (green) lastGreenSnapshot = snapshot;
 }
 
 // Move the caret to a hypothesis's source span and briefly highlight it, so
@@ -1158,9 +1487,13 @@ function renderVerification(verification, errors) {
   const hasVerificationDiagnostic = (errors || []).some(
     (error) => error.kind === "verification"
   );
-  if (status === "failed" && message && !hasVerificationDiagnostic) {
+  if (
+    (status === "not-run" ||
+      (status === "failed" && !hasVerificationDiagnostic)) &&
+    message
+  ) {
     verificationDetailsElement.hidden = false;
-    verifyElement.className = "verify-fail";
+    verifyElement.className = status === "not-run" ? "muted" : "verify-fail";
     verifyElement.textContent = message;
   } else {
     verificationDetailsElement.hidden = true;
@@ -1182,6 +1515,18 @@ function renderStatusVerdict() {
   // check.  Until then the header keeps its pending "checking…" state (set by
   // clearResults); no partial result is allowed to replace it.
   if (!firstCheckDone) return;
+  if (
+    backendSelection === "none" &&
+    lastCompiles &&
+    lastOutcome &&
+    lastOutcome.kind === "checked-no-verification"
+  ) {
+    setStatus(
+      "ok",
+      "✓ checked (no verification)" + completedLatencyText()
+    );
+    return;
+  }
   const rollup = statusRollup(vcs, {
     compiles: lastCompiles,
     errorCount: lastErrorCount,
@@ -1212,7 +1557,12 @@ function applyCheck(response) {
   ).length;
   lastCompiles =
     lastErrorCount === 0 &&
-    (!lastOutcome || ["ok", "verification", "backend-unavailable"].includes(lastOutcome.kind));
+    (!lastOutcome || [
+      "ok",
+      "verification",
+      "backend-unavailable",
+      "checked-no-verification",
+    ].includes(lastOutcome.kind));
   renderDiagnostics(response.errors || []);
   renderSignatureState(response.signature, response.outcome);
   renderVerification(response.verification, response.errors || []);
@@ -1245,11 +1595,13 @@ function applyUnifiedCheck(response, elapsed) {
     imposedTypes = validatedRanges(response.imposed_types, spanContext);
   }
   applyCheck(response);
+  updateRegressionTracking();
   markVcs();
   renderLegend();
   renderBackendResults();
   applyPendingCursor();
   renderProofPane();
+  renderAllObligations();
   renderCursorType();
   lastLatencyMs = elapsed;
   renderStatusVerdict();
@@ -1276,7 +1628,11 @@ function renderSignatureState(signature, outcome) {
       signatureElement,
       "Unavailable: " + (channel.error || "signature inference failed")
     );
-  } else if (!outcome || outcome.kind === "ok") {
+  } else if (
+    !outcome ||
+    outcome.kind === "ok" ||
+    outcome.kind === "checked-no-verification"
+  ) {
     renderHighlightedText(signatureElement, "loading…");
   } else {
     renderHighlightedText(signatureElement, "Unavailable for this check.");
@@ -1356,6 +1712,7 @@ async function refreshVcs() {
     renderBackendResults();
     applyPendingCursor();
     renderProofPane();
+    renderAllObligations();
     // The refinement subterm types just changed; refresh the CURSOR readout so
     // a caret already inside a predicate picks them up without a further move.
     renderCursorType();
@@ -1490,7 +1847,7 @@ function finishAuthoritativeRequest(controller) {
 }
 
 async function refreshSignature(snapshot) {
-  if (snapshot.outcome !== "ok") return;
+  if (!["ok", "checked-no-verification"].includes(snapshot.outcome)) return;
   if (signatureController) signatureController.abort();
   const controller = newRequestController();
   signatureController = controller;
@@ -1655,6 +2012,7 @@ cm.on("change", () => {
   if (workspaceMode && activeFile) {
     workspaceBuffers[activeFile] = cm.getValue();
   }
+  persistSessionState();
   // A changed buffer invalidates every visible result immediately.  Keeping
   // old squiggles/VCs while merely changing the header would let stale proof
   // state masquerade as current during a multi-second solver run.
@@ -1676,6 +2034,7 @@ cm.on("cursorActivity", () => {
   paneSelectedVcId = null;
   renderCursorType();
   renderProofPane();
+  renderAllObligations();
   renderInlineDiagnostic();
 });
 // One delegated handler for the pane: a clicked hypothesis row (rendered with
@@ -1882,10 +2241,265 @@ compactBox.addEventListener("change", () => {
   renderProofPane();
 });
 
+const SESSION_KEY = "voxide-session-v1";
+const BACKEND_KEY = "voxide-backend";
+const SHARE_PREFIX = "#voxide=";
+
+function showSessionNotice(message) {
+  sessionNoticeElement.textContent = message || "";
+  sessionNoticeElement.hidden = !message;
+}
+
+function savedBackendPreference() {
+  try {
+    return localStorage.getItem(BACKEND_KEY);
+  } catch (error) {
+    return null;
+  }
+}
+
+function rememberBackendPreference(backend) {
+  try {
+    localStorage.setItem(BACKEND_KEY, backend);
+  } catch (error) {}
+}
+
+function captureSessionState() {
+  if (workspaceMode) {
+    const buffers = { ...workspaceBuffers };
+    if (activeFile) buffers[activeFile] = cm.getValue();
+    return {
+      version: 1,
+      backend: backendSelection,
+      mode: "workspace",
+      order: WORKSPACE_ORDER.slice(),
+      active: activeFile,
+      buffers,
+      ...(activeWorkspaceId !== "scratch"
+        ? { workspaceId: activeWorkspaceId }
+        : {}),
+    };
+  }
+  return {
+    version: 1,
+    backend: backendSelection,
+    mode: "single",
+    source: cm.getValue(),
+    ...(currentPath ? { path: currentPath } : {}),
+  };
+}
+
+function persistSessionState() {
+  if (docOpen || !backendSelection) return;
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(captureSessionState()));
+  } catch (error) {
+    showSessionNotice("This edit could not be saved locally.");
+  }
+}
+
+function validSessionState(value) {
+  if (
+    !value ||
+    value.version !== 1 ||
+    !["lean", "z3", "oxsmt", "cross", "none"].includes(value.backend)
+  ) {
+    return false;
+  }
+  if (value.mode === "single") {
+    return (
+      typeof value.source === "string" &&
+      value.source.length <= 1000000 &&
+      (value.path === undefined ||
+        (/^(docs|examples)\/[A-Za-z0-9_.\/-]+$/.test(value.path) &&
+          !value.path.includes("..")))
+    );
+  }
+  if (
+    value.mode !== "workspace" ||
+    !Array.isArray(value.order) ||
+    value.order.length === 0 ||
+    value.order.length > 32 ||
+    typeof value.active !== "string" ||
+    !value.buffers ||
+    typeof value.buffers !== "object"
+  ) {
+    return false;
+  }
+  const unique = new Set(value.order);
+  return (
+    unique.size === value.order.length &&
+    unique.has(value.active) &&
+    value.order.every(
+      (name) =>
+        /^[A-Za-z][A-Za-z0-9_']*\.mli?$/.test(name) &&
+        typeof value.buffers[name] === "string"
+    ) &&
+    value.order.reduce((total, name) => total + value.buffers[name].length, 0) <=
+      1000000
+  );
+}
+
+function savedSessionState() {
+  try {
+    const value = JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+    return validSessionState(value) ? value : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function fragmentSessionState() {
+  if (typeof location === "undefined" || !location.hash) {
+    return { present: false, state: null };
+  }
+  if (!location.hash.startsWith(SHARE_PREFIX)) {
+    return { present: false, state: null };
+  }
+  try {
+    const value = JSON.parse(
+      decodeURIComponent(location.hash.slice(SHARE_PREFIX.length))
+    );
+    return validSessionState(value)
+      ? { present: true, state: value }
+      : { present: true, state: null };
+  } catch (error) {
+    return { present: true, state: null };
+  }
+}
+
+function consumeShareFragment() {
+  if (typeof location === "undefined") return;
+  if (typeof history !== "undefined" && history.replaceState) {
+    history.replaceState(null, "", location.href.split("#")[0]);
+  } else {
+    location.hash = "";
+  }
+}
+
+function backendUnavailableReason(backend) {
+  if (!backendOptions.includes(backend)) {
+    return "this compiler does not provide it";
+  }
+  const required = backend === "cross" ? ["z3", "oxsmt"] : [backend];
+  const missing = required.filter(
+    (solver) =>
+      solver in backendSolverConfiguration &&
+      !backendSolverConfiguration[solver]
+  );
+  return missing.length
+    ? "the " + missing.join(" and ") + " solver command is not configured"
+    : null;
+}
+
+function selectRestoredBackend(requested, label) {
+  const unavailableReason = backendUnavailableReason(requested);
+  if (unavailableReason === null) {
+    applyBackendMetadata(
+      {
+        backend_options: backendOptions,
+        backend_solver_configuration: backendSolverConfiguration,
+      },
+      requested
+    );
+    if (backendSelection === requested) {
+      rememberBackendPreference(backendSelection);
+      return;
+    }
+  }
+  showSessionNotice(
+    label + " requested backend " + requested +
+      ", but " +
+      (unavailableReason || "it could not be selected") +
+      "; using " +
+      backendSelection +
+      "."
+  );
+}
+
+function restoreSessionState(state, label) {
+  if (!validSessionState(state)) return false;
+  cancelTransportRetries();
+  cancelActiveRequests();
+  cancelPendingCursor();
+  resetRegressionHistory();
+  exitDocMode();
+  exitWorkspace();
+  selectRestoredBackend(state.backend, label);
+  if (state.mode === "workspace") {
+    WORKSPACE_ORDER = state.order.slice();
+    workspaceBuffers = { ...state.buffers };
+    const curated = examplesList.find(
+      (example) =>
+        example.name === state.workspaceId &&
+        validCuratedWorkspace(example) &&
+        curatedWorkspaceOrder(example.workspace).join("\u001f") ===
+          state.order.join("\u001f")
+    );
+    activeWorkspaceId = curated ? curated.name : "scratch";
+    activeWorkspaceMeta = curated || null;
+    activateWorkspace(state.active);
+  } else {
+    currentPath = state.path || null;
+    highlightActive(currentPath);
+    clearResults();
+    cm.setOption("readOnly", false);
+    suppressChange = true;
+    cm.setValue(state.source);
+    suppressChange = false;
+    lastLoaded = state.source;
+    setCursorProgrammatically({ line: 0, ch: 0 });
+    documentRevision += 1;
+    scheduleCheck(0);
+  }
+  persistSessionState();
+  return true;
+}
+
+async function shareCurrentSession() {
+  const state = captureSessionState();
+  if (!validSessionState(state)) {
+    showSessionNotice(
+      "This session is too large to share; no share link was created."
+    );
+    return false;
+  }
+  persistSessionState();
+  const fragment = "voxide=" + encodeURIComponent(JSON.stringify(state));
+  let url = fragment;
+  if (typeof location !== "undefined") {
+    location.hash = fragment;
+    url = location.href;
+  }
+  let copied = false;
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === "function"
+  ) {
+    try {
+      await navigator.clipboard.writeText(url);
+      copied = true;
+    } catch (error) {}
+  }
+  showSessionNotice(
+    copied
+      ? "Share link copied. It contains this buffer set and backend."
+      : "Share link ready in the address bar. It contains this buffer set and backend."
+  );
+  return true;
+}
+
+shareButtonElement.addEventListener("click", () => {
+  void shareCurrentSession();
+});
+
 backendSelectElement.addEventListener("change", () => {
   const selected = backendSelectElement.value;
   if (!backendOptions.includes(selected) || selected === backendSelection) return;
   backendSelection = selected;
+  rememberBackendPreference(selected);
+  persistSessionState();
   cancelTransportRetries();
   cancelActiveRequests();
   cancelPendingCursor();
@@ -1939,10 +2553,14 @@ function clearResults() {
   lastWorkspaceLayer = null;
   paneSelectedVcId = null;
   paneOverlappingVcs = [];
+  clearRegressionPresentation();
   legendElement.hidden = true;
   legendElement.replaceChildren();
   backendResultsElement.hidden = true;
   backendResultsElement.replaceChildren();
+  obligationsDetailsElement.open = false;
+  obligationsSummaryElement.textContent = "All obligations";
+  obligationsListElement.replaceChildren();
   diagnosticsElement.replaceChildren();
   setStatus("checking", "checking…");
   signatureElement.replaceChildren();
@@ -2453,6 +3071,13 @@ function workspaceFileRollup(payload, name, expectedOrder) {
   const verificationStatus = entry && entry.verification
     ? entry.verification.status
     : null;
+  if (
+    payload.backend === "none" &&
+    entry.outcome.kind === "checked-no-verification" &&
+    typeErrors.length === 0
+  ) {
+    return { status: "ok", glyph: "✓", label: "checked" };
+  }
   // Reachability comes only from the observed compile order and outcomes.
   // Curated expectations never participate in a live tab verdict.
   if (workspaceUnitNotReached(payload, name, order, fileVcs)) {
@@ -2491,6 +3116,13 @@ function wholeWorkspaceRollup(payload, expectedOrder) {
   const entries = order.map((name) => payload.files[name]);
   const errors = entries.flatMap((entry) => entry.errors || []);
   const typeErrors = errors.filter((error) => error.kind !== "verification");
+  if (
+    payload.backend === "none" &&
+    payload.outcome.kind === "checked-no-verification" &&
+    typeErrors.length === 0
+  ) {
+    return { status: "ok", glyph: "✓", label: "checked (no verification)" };
+  }
   const hasFailedEntry = entries.some(
     (entry) =>
       entry.verification && ["failed", "blocked"].includes(entry.verification.status)
@@ -2746,7 +3378,12 @@ function applyWorkspaceView(payload, elapsed) {
   lastCompiles =
     activeValid &&
     lastErrorCount === 0 &&
-    (!lastOutcome || ["ok", "verification", "backend-unavailable"].includes(lastOutcome.kind));
+    (!lastOutcome || [
+      "ok",
+      "verification",
+      "backend-unavailable",
+      "checked-no-verification",
+    ].includes(lastOutcome.kind));
   // A completed workspace check has landed for the active unit.
   firstCheckDone = true;
   renderVerification(
@@ -2756,6 +3393,7 @@ function applyWorkspaceView(payload, elapsed) {
   if (activeValid) renderStatusVerdict();
   if (elapsed !== undefined) lastLatencyMs = elapsed;
   setWorkspaceStatus(payload);
+  updateRegressionTracking();
   markVcs();
   renderLegend();
   renderBackendResults();
@@ -2763,6 +3401,7 @@ function applyWorkspaceView(payload, elapsed) {
   renderTabs();
   renderCursorType();
   renderProofPane();
+  renderAllObligations();
 }
 
 function knownGapLayerConfig(backend) {
@@ -2929,6 +3568,7 @@ function switchTab(name) {
   else renderTabs();
   cm.setCursor({ line: 0, ch: 0 });
   cm.focus();
+  persistSessionState();
   scheduleCheck(0);
 }
 
@@ -2938,6 +3578,7 @@ function activateWorkspace(name) {
   cancelTransportRetries();
   cancelActiveRequests();
   cancelPendingCursor();
+  resetRegressionHistory();
   exitDocMode();
   workspaceMode = true;
   activeFile = name in workspaceBuffers ? name : WORKSPACE_ORDER[0];
@@ -2952,6 +3593,7 @@ function activateWorkspace(name) {
   pendingCursor = null;
   renderTabs();
   documentRevision += 1;
+  persistSessionState();
   scheduleCheck(0);
 }
 
@@ -3176,6 +3818,7 @@ async function openFile(node, force) {
     const response = await fetch("/file?path=" + encodeURIComponent(node.path));
     if (!response.ok) return false;
     const source = await response.text();
+    resetRegressionHistory();
     currentPath = node.path;
     highlightActive(node.path);
     rememberFile(node.path);
@@ -3575,6 +4218,19 @@ function findFileNode(path) {
 async function init() {
   await loadBackendConfiguration();
   await loadTree();
+  const shared = fragmentSessionState();
+  if (shared.present) {
+    if (shared.state && restoreSessionState(shared.state, "This share link")) {
+      consumeShareFragment();
+      return;
+    }
+    showSessionNotice(
+      "This share link is invalid or incomplete; no shared buffers were opened."
+    );
+  } else {
+    const saved = savedSessionState();
+    if (saved && restoreSessionState(saved, "The saved session")) return;
+  }
   const remembered = savedFile();
   if (remembered) {
     const node = findFileNode(remembered);
@@ -3620,6 +4276,11 @@ window.__voxide = {
   getBackend: () => backendSelection,
   getBackendOptions: () => backendOptions.slice(),
   getBackendSolverConfiguration: () => ({ ...backendSolverConfiguration }),
+  captureSessionState,
+  restoreSessionState: (state) => restoreSessionState(state, "The test session"),
+  shareCurrentSession,
+  renderAllObligations,
+  stepFailingObligation,
   getCompact: () => compact,
   setCompact,
   getRetryState: () => ({ attempt: retryAttempt, scheduled: retryTimer !== null }),
