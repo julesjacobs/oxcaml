@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "compiler": {
+    "revision": "845c60e68eef31445ca85bc8da931ab9606095d5",
+    "version": "5.4.0+ox",
+    "binary": "/usr/local/home/jujacobs/oxcamls/vox2/worktrees/bst-verified/_install/bin/ocamlc",
+    "binary_sha256": "ae018f6f81a021a76bc7a6a80c3c454b4cab7634cc8d6447166d3fb8bfa98f85"
+  },
+  "corpus_revision": "845c60e68eef31445ca85bc8da931ab9606095d5",
+  "source_bundle_sha256": "9fa00a4c91b01169c055d69dda421c06c1afb2e64b0f4211a672e1e9707fef11",
+  "reference_solver": {
+    "name": "Z3",
+    "version": "4.8.5",
+    "binary": "/j/office/app/z3/prod/4.8.5/install/bin/z3"
+  },
+  "reference_core_search_bound": {
+    "max_facts_for_exhaustive_search": 12,
+    "max_solver_checks": 4096
+  },
+  "index": [
+    {
+      "id": "ref-vc-dump-001",
+      "smt2": "ref-vc-dump-001.smt2",
+      "metadata": "ref-vc-dump-001.json",
+      "source": "testsuite/tests/refinement/vc_dump.ml:12",
+      "kind": "annotation",
+      "fact_count": 0,
+      "reference_core_size": 0
+    },
+    {
+      "id": "ref-vc-dump-002",
+      "smt2": "ref-vc-dump-002.smt2",
+      "metadata": "ref-vc-dump-002.json",
+      "source": "testsuite/tests/refinement/vc_dump.ml:13",
+      "kind": "contract-argument",
+      "fact_count": 3,
+      "reference_core_size": 0
+    },
+    {
+      "id": "ref-vc-dump-003",
+      "smt2": "ref-vc-dump-003.smt2",
+      "metadata": "ref-vc-dump-003.json",
+      "source": "testsuite/tests/refinement/vc_dump.ml:14",
+      "kind": "contract-argument",
+      "fact_count": 5,
+      "reference_core_size": 1
+    },
+    {
+      "id": "ref-vc-seal-001",
+      "smt2": "ref-vc-seal-001.smt2",
+      "metadata": "ref-vc-seal-001.json",
+      "source": "testsuite/tests/refinement/vc_dump_file_seal.ml:18",
+      "kind": "annotation",
+      "fact_count": 0,
+      "reference_core_size": 0
+    },
+    {
+      "id": "ref-vc-seal-002",
+      "smt2": "ref-vc-seal-002.smt2",
+      "metadata": "ref-vc-seal-002.json",
+      "source": "testsuite/tests/refinement/vc_dump_file_seal.ml:18",
+      "kind": "seal-implication",
+      "fact_count": 1,
+      "reference_core_size": 1
+    }
+  ],
+  "counts": {
+    "exported_vcs": 5,
+    "standalone_unsat": 5,
+    "source_groups": {
+      "refinement_regression": 5,
+      "bst_behind_mli": 0
+    },
+    "blocked_after_introspection": {
+      "bst_behind_mli": 49
+    }
+  },
+  "counts_by_shape": {
+    "source_construct": {
+      "annotation": 2,
+      "contract-argument": 2,
+      "seal-implication": 1
+    },
+    "fact_count": { "0": 2, "1": 1, "3": 1, "5": 1 },
+    "reference_core_size": { "0": 3, "1": 2 },
+    "unused_fact_count": { "0": 3, "3": 1, "4": 1 },
+    "datatype_declarations": { "none": 5, "recursive": 0 }
+  },
+  "gaps": [
+    "The schema-v2 dump has no generated_smt.prove field (nor aligned SMT declarations/fact terms/goal term), so it cannot by itself reproduce the SMT query.",
+    "The oxsmt backend advertises No_fact_usage, so its JSON has neither fact used flags nor selector/core ids.",
+    "The BST's first VC is rejected by the current SMT emitter before solver invocation because recursive or mutually nested datatype data:t<> in data:t<> is not supported; all 49 BST VCs were introspected but no faithful standalone BST SMT query was available."
+  ]
+}

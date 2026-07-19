@@ -15,6 +15,21 @@
   oxsmt_smtlib
   oxsmt_query_loader))
 
+; Live-consumer VC-corpus regression suite (make vc-corpus-test, bugreport 05): drives
+; every corpus .smt2 (check-sat-assuming + get-unsat-core form) through the in-process
+; Session.check_sat_assuming API via the SHARED loader, fails loudly on any verdict flip
+; from the sidecar's expected verdict, and emits a core-vs-reference_core delta table.
+; Reads its own minimal JSON sidecars (stdlib-only, I3). Included in `make test`.
+
+(executable
+ (name vc_corpus_test)
+ (modules vc_corpus_test)
+ (libraries
+  oxsmt_core
+  oxsmt_interface
+  oxsmt_smtlib_parser
+  oxsmt_query_loader))
+
 ; Session semantics + namespace-guard unit tests (make wiring-test).
 
 (executable

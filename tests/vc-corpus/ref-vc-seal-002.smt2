@@ -1,0 +1,7 @@
+(set-option :produce-unsat-cores true)
+(declare-const v_0 Int)
+(declare-const sel_1 Bool)
+(assert (=> sel_1 (= (= v_0 1) true)))
+(assert (not (= (> v_0 0) true)))
+(check-sat-assuming (sel_1))
+(get-unsat-core)

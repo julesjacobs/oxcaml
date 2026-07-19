@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "ref-vc-seal-002",
+  "origin": {
+    "source_construct": "seal-implication",
+    "source_name": "positive",
+    "source_file": "testsuite/tests/refinement/vc_dump_file_seal.ml",
+    "interface_file": "testsuite/tests/refinement/vc_dump_file_seal.mli:1",
+    "line": 18,
+    "location": "vc_dump_file_seal.ml:18:25-30",
+    "program_point": "vc_dump_file_seal.ml:18:25-30"
+  },
+  "goal": { "source_text": "value > 0", "smt": "(> v_0 0)" },
+  "expected_verdict": "unsat",
+  "selector_to_fact": {
+    "sel_1": "value = 1"
+  },
+  "vox2_computed_core": {
+    "selectors": ["sel_1"],
+    "source": "Lean fact-usage result in schema-v2 dump"
+  },
+  "reference_core": {
+    "selectors": ["sel_1"],
+    "classification": "minimum_cardinality",
+    "method": "increasing-cardinality subset search with every candidate re-run under Z3",
+    "bound": { "max_facts_for_exhaustive_search": 12, "max_solver_checks": 4096 },
+    "solver_checks": 2
+  }
+}

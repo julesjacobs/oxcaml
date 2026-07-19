@@ -82,6 +82,14 @@ CORPUS_RELEASE_TIMEOUT ?= 120
 # Default = the committed regression cases; override with a corpus subset for a wider sweep.
 DEV_RELEASE_DIRS ?= tests/cases
 
+# vc-corpus-test knob (bugreport 05): the live-consumer (vox2) VC corpus. Default is the
+# tracked fixture copy under tests/vc-corpus (so `make test` gates in a fresh checkout —
+# the consumer's bugreports/ tree is UNTRACKED and absent from a clone). Point at the live
+# drop dir with `make vc-corpus-test VC_CORPUS=bugreports/corpus`. The target GLOBs the dir
+# (never a hardcoded file list) so append-mostly future drops are picked up with no change,
+# and tolerates an absent dir (clean skip).
+VC_CORPUS ?= tests/vc-corpus
+
 # regress-test knobs (board #162). The cvc5 + z3 SOLVER-regression suites, used as an
 # edge-case SOUNDNESS oracle — deliberately SEPARATE from the headline corpus sweep (these
 # dirs are NOT in CORPUS_DIRS and never enter the denominator). REGRESS_DIRS is soft: a
@@ -92,7 +100,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -681,6 +689,18 @@ session-cores-test:
 core-min-test:
 	$(DUNE) exec smt/interface/test/core_min_test.exe
 
+## vc-corpus-test — live-consumer (vox2) VC-corpus regression (bugreport 05). Drives every
+##   $(VC_CORPUS)/*.smt2 (the check-sat-assuming + get-unsat-core VC form) through the
+##   in-process Session.check_sat_assuming API via the SHARED loader (same assertion path as
+##   oxsmt_cli), and FAILS LOUDLY (nonzero exit) on any verdict flip from the sidecar's
+##   expected_verdict. Also emits a per-VC core-vs-reference_core delta table (subset-
+##   minimality defect / cardinality gap / parse-declare failure) and records the manifest's
+##   compiler/corpus revisions for attribution. GLOBs the dir (no hardcoded file list) so
+##   future drops are picked up; an absent dir is a clean skip. Included in `make test`.
+vc-corpus-test:
+	$(DUNE) build tests/solver/vc_corpus_test.exe
+	$(DUNE) exec tests/solver/vc_corpus_test.exe -- $(VC_CORPUS)
+
 ## interpolation-test — public equality-aware interpolation consumer. Requires a signed
 ## equality certificate, fresh-session checks of A=>I and I&B unsat, shared vocabulary,
 ## and rejection of independent weaken/strengthen corruptions.
@@ -955,6 +975,7 @@ test: check-frozen
 	$(MAKE) cdclt-lemma-test
 	$(MAKE) session-cores-test
 	$(MAKE) core-min-test
+	$(MAKE) vc-corpus-test
 	$(MAKE) interpolation-test
 	$(MAKE) optimize-test
 	$(MAKE) omt-test

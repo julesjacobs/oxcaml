@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "id": "ref-vc-dump-003",
+  "origin": {
+    "source_construct": "contract-argument",
+    "source_name": "x",
+    "source_file": "testsuite/tests/refinement/vc_dump.ml",
+    "line": 14,
+    "location": "vc_dump.ml:14:38-39",
+    "program_point": "vc_dump.ml:14:29-39"
+  },
+  "goal": { "source_text": "y > 0", "smt": "(> v_1 0)" },
+  "expected_verdict": "unsat",
+  "selector_to_fact": {
+    "sel_1": "3 >= 3",
+    "sel_2": "annotation >= 3",
+    "sel_3": "annotation = 3",
+    "sel_4": "1 > 0",
+    "sel_5": "y > 0"
+  },
+  "vox2_computed_core": {
+    "selectors": ["sel_5"],
+    "source": "Lean fact-usage result in schema-v2 dump"
+  },
+  "reference_core": {
+    "selectors": ["sel_5"],
+    "classification": "minimum_cardinality",
+    "method": "increasing-cardinality subset search with every candidate re-run under Z3",
+    "bound": { "max_facts_for_exhaustive_search": 12, "max_solver_checks": 4096 },
+    "solver_checks": 6
+  }
+}

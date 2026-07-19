@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "id": "ref-vc-seal-001",
+  "origin": {
+    "source_construct": "annotation",
+    "source_file": "testsuite/tests/refinement/vc_dump_file_seal.ml",
+    "line": 18,
+    "location": "vc_dump_file_seal.ml:18:15-33",
+    "program_point": "vc_dump_file_seal.ml:18:16-17"
+  },
+  "goal": { "source_text": "1 = 1", "smt": "(= 1 1)" },
+  "expected_verdict": "unsat",
+  "selector_to_fact": {},
+  "vox2_computed_core": {
+    "selectors": [],
+    "source": "Lean fact-usage result in schema-v2 dump"
+  },
+  "reference_core": {
+    "selectors": [],
+    "classification": "minimum_cardinality",
+    "method": "increasing-cardinality subset search with every candidate re-run under Z3",
+    "bound": { "max_facts_for_exhaustive_search": 12, "max_solver_checks": 4096 },
+    "solver_checks": 1
+  }
+}
