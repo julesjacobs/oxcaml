@@ -172,6 +172,142 @@ let () =
     [ 0; 1; 2; 5; 12 ]
 ;;
 
+(* ------------------------------------------ verdict-first degradation (bugreport 02)
+   ---- *)
+
+(* The three degradation arms are unreachable naturally — the replay re-certifies a core
+   the minimizer just derived — so drive them with the test-only fault-injection hooks.
+   Each asserts the FLIPPED contract: the verdict stays [Unsat] (old code returned
+   [Unknown] here), [unsat_core] drops to [None], and [last_unknown_reason] carries the
+   diagnostic tag. The control below shows the same query returns a verified core with no
+   injection, so the injection is exactly what exercises the arm. *)
+let degradation_case ~name ~arm ~expected_reason =
+  set_linear false;
+  let s = Session.create () in
+  let mus, noise = build_gadget s ~r:1 ~tag:name in
+  (match arm with
+   | `Deletion v -> Session.inject_deletion_verdict_for_test (Some v)
+   | `Replay v -> Session.inject_replay_verdict_for_test (Some v));
+  let result = Session.check_sat_assuming s (mus @ noise) in
+  (match result.Session.verdict with
+   | Session.Unsat -> ok (name ^ ": verdict stays Unsat (old: Unknown)")
+   | _ -> fail name "verdict downgraded — verdict-first requires Unsat");
+  check_true (name ^ ": unsat_core = None") (result.Session.unsat_core = None);
+  check_true
+    (name ^ ": diagnostic reason")
+    (String.equal (Session.last_unknown_reason s) expected_reason);
+  (* defensive disarm so a not-fired injection cannot leak into a later query *)
+  Session.inject_deletion_verdict_for_test None;
+  Session.inject_replay_verdict_for_test None
+;;
+
+let () =
+  set_linear false;
+  (* control: no injection ⇒ Unsat WITH a verified 2-literal core and no degradation tag. *)
+  let s = Session.create () in
+  let mus, noise = build_gadget s ~r:1 ~tag:"ctrl" in
+  let result = Session.check_sat_assuming s (mus @ noise) in
+  check_true "control: verdict Unsat" (result.Session.verdict = Session.Unsat);
+  check_true
+    "control: core = Some MUS"
+    (match result.Session.unsat_core with
+     | Some core -> List.length core = List.length mus
+     | None -> false);
+  check_true
+    "control: no degradation reason"
+    (String.equal (Session.last_unknown_reason s) "");
+  degradation_case
+    ~name:"replay-sat"
+    ~arm:(`Replay Session.Sat)
+    ~expected_reason:"assumption-core-recheck-sat";
+  degradation_case
+    ~name:"replay-unknown"
+    ~arm:(`Replay Session.Unknown)
+    ~expected_reason:"assumption-core-recheck-unknown";
+  degradation_case
+    ~name:"deletion-unknown"
+    ~arm:(`Deletion Session.Unknown)
+    ~expected_reason:"assumption-core-minimize-unknown"
+;;
+
+(* ------------------------------------------ sufficiency + empty-core semantics (bug 01)
+   -- *)
+
+let bool_atom s name =
+  Context.const (Session.context s) (Session.declare_const s name Sort.bool)
+;;
+
+let () =
+  (* Unsat with an empty core occurs ONLY when the active assertions alone are unsat:
+     assert a base contradiction, query under an unrelated assumption, and confirm the
+     empty core is itself sufficient (actives alone re-solve Unsat). *)
+  let name = "empty-core-actives-unsat" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let p = bool_atom s "ec_p" in
+  Session.assert_term s p;
+  Session.assert_term s (Context.not_ ctx p);
+  let q = bool_atom s "ec_q" in
+  let result = Session.check_sat_assuming s [ q, true ] in
+  check_true (name ^ ": verdict Unsat") (result.Session.verdict = Session.Unsat);
+  check_true (name ^ ": empty core") (result.Session.unsat_core = Some []);
+  check_true
+    (name ^ ": empty core is sufficient (actives alone unsat)")
+    ((Session.check_sat_assuming s []).Session.verdict = Session.Unsat)
+;;
+
+let () =
+  (* Sufficiency on a nonempty core: (actives ∧ returned core) re-solves Unsat and every
+     one-literal deletion is Sat — the replay-verified guarantee, checked on the producing
+     session. *)
+  let name = "sufficiency-nonempty" in
+  set_linear false;
+  let s = Session.create () in
+  let mus, noise = build_gadget s ~r:3 ~tag:"suff" in
+  let result = Session.check_sat_assuming s (mus @ noise) in
+  match result.Session.unsat_core with
+  | None -> fail name "expected Some core"
+  | Some core ->
+    check_true (name ^ ": nonempty") (core <> []);
+    check_true (name ^ ": sufficient + subset-minimal") (is_minimal_core s core)
+;;
+
+(* ------------------------------------------ multi-MUS (review rider 1)
+   ------------------- *)
+
+(* Overlapping MUSes: assume a, b, c all true with hard (~a | ~b) and (~a | ~c). Both
+   [{a,b}] and [{a,c}] are minimal cores (a is necessary to both; [{b,c}] is Sat). The
+   minimizer must return ONE genuine MUS — subset-minimal, holding the shared essential a
+   and exactly one of b/c — never the non-minimal [{a,b,c}]. Both strategies must return a
+   valid MUS (they may pick different ones). *)
+let () =
+  let run linear =
+    set_linear linear;
+    let tag = if linear then "mmusL" else "mmusR" in
+    let name = "multi-mus/" ^ if linear then "linear" else "refine" in
+    let s = Session.create () in
+    let ctx = Session.context s in
+    let a = bool_atom s (tag ^ "_a") in
+    let b = bool_atom s (tag ^ "_b") in
+    let c = bool_atom s (tag ^ "_c") in
+    let neg t = Context.not_ ctx t in
+    Session.assert_term s (Context.or_ ctx [ neg a; neg b ]);
+    Session.assert_term s (Context.or_ ctx [ neg a; neg c ]);
+    let result = Session.check_sat_assuming s [ a, true; b, true; c, true ] in
+    match result.Session.unsat_core with
+    | None -> fail name "expected Some core"
+    | Some core ->
+      check_true (name ^ ": size 2") (List.length core = 2);
+      check_true (name ^ ": subset-minimal MUS") (is_minimal_core s core);
+      check_true (name ^ ": holds shared essential a") (assumption_mem (a, true) core);
+      check_true
+        (name ^ ": exactly one of b/c")
+        (assumption_mem (b, true) core <> assumption_mem (c, true) core)
+  in
+  run false;
+  run true
+;;
+
 (* ------------------------------------------------------------------ benchmark --------- *)
 
 (* Report old (linear) vs new (refinement) probe counts and wall time on assumption-heavy

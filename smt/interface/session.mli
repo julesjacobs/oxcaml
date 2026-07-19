@@ -94,8 +94,9 @@ type verdict =
     without interning a [Not] term. *)
 type assumption = Oxsmt_core.Term.t * bool
 
-(** The result of {!check_sat_assuming}. [unsat_core] is [Some core] exactly when
-    [verdict = Unsat]. *)
+(** The result of {!check_sat_assuming}. [unsat_core] is [Some core] on [verdict = Unsat]
+    UNLESS core extraction degraded, in which case it is [None] (see {!check_sat_assuming}
+    for the verdict-first degradation contract); it is [None] on [Sat] and [Unknown]. *)
 type assumption_check =
   { verdict : verdict
   ; unsat_core : assumption list option
@@ -385,13 +386,27 @@ val check_sat : t -> verdict
     Boolean connectives are rejected with [Invalid_argument]. Exact duplicate literals are
     ignored, while opposite polarities remain distinct.
 
-    On [Unsat], [unsat_core] is a subset-minimal, duplicate-free subset of [assumptions],
-    in input order: the active assertions conjoined with the core are unsatisfiable, and
-    deleting any one core literal makes the remainder [Sat]. The empty core therefore
-    means the active assertions are already unsatisfiable. The initial candidate comes
-    from the SAT core's failed assumptions and is then deletion-minimized. If any deletion
-    cannot be certified [Sat] or [Unsat], the whole call fails closed to
-    [{ verdict = Unknown; unsat_core = None }].
+    On [Unsat] with [unsat_core = Some core], the core is both {e sufficient} and
+    {e subset-minimal}, duplicate-free, and in input order. Sufficiency is
+    replay-verified: the implementation re-solves (active assertions) ∧ (exactly the
+    returned core) and only publishes the core if that replay is [Unsat] — so (active
+    assertions) ∧ (core) is guaranteed unsatisfiable, never a non-covering subset.
+    Subset-minimality means deleting any one core literal makes the remainder [Sat], hence
+    every member is necessary. Consequently [unsat_core = Some []] on [Unsat] occurs ONLY
+    when the active assertions alone are unsatisfiable (the empty-core replay ran with
+    zero assumptions and returned [Unsat]); an empty core can never hide a necessary
+    assumption. The initial candidate comes from the SAT core's failed assumptions and is
+    then deletion-minimized.
+
+    {b Verdict-first degradation.} The initial solve establishes the [Unsat] verdict
+    through a completed solve; the verdict is therefore never downgraded below what
+    {!check_sat} would report. If core extraction degrades — a deletion probe or the final
+    replay cannot be certified [Sat]/[Unsat], or the replay unexpectedly returns [Sat] (an
+    inconsistent core the implementation refuses to publish) — the call returns
+    [verdict = Unsat] with [unsat_core = None] and sets {!last_unknown_reason} to a
+    diagnostic tag (["assumption-core-recheck-sat"], ["assumption-core-recheck-unknown"],
+    or ["assumption-core-minimize-unknown"]). [unsat_core = None] on [Unsat] thus means
+    "no verified core available", not "no core".
 
     This entry point is additive: ordinary {!check_sat} does not consult assumption state
     and retains its existing search path. Nonempty assumption queries currently decline
@@ -415,10 +430,14 @@ val get_model : t -> model option
 
 (** census (task #78): a short tag naming WHY the most recent {!check_sat} or
     {!check_sat_assuming} returned [Unknown] (e.g. ["r1-model-check-failed"],
-    ["effort-budget"], ["lemma-saturated"], ["combine-incomplete-solve"]). Empty string
-    when the last verdict was not [Unknown]. Diagnostic introspection only — the solver
-    never reads it, so it cannot influence a verdict; the dev CLI surfaces it
-    unconditionally on stderr to bucket structural unknowns by cause. *)
+    ["effort-budget"], ["lemma-saturated"], ["combine-incomplete-solve"]). Also set, with
+    the last verdict [Unsat], when {!check_sat_assuming} certified unsatisfiability but
+    could not publish a verified core (the verdict-first degradation tags
+    ["assumption-core-recheck-sat"] / ["assumption-core-recheck-unknown"] /
+    ["assumption-core-minimize-unknown"]) — the channel a consumer reads to learn why
+    [unsat_core] is [None] under an [Unsat] verdict. Empty string otherwise. Diagnostic
+    introspection only — the solver never reads it, so it cannot influence a verdict; the
+    dev CLI surfaces it unconditionally on stderr to bucket structural unknowns by cause. *)
 val last_unknown_reason : t -> string
 
 (** {2 Certificate emission (ADR-0013)}
@@ -532,6 +551,16 @@ val last_farkas : t -> (Oxsmt_lia.Rational.t * (Oxsmt_core.Term.t * bool)) list 
     activation selector is still assumed). Used by [symbreak_test] to check the R2
     emission restriction (no emission under a pushed frame or with lemmas registered). *)
 val symbreak_active_for_test : t -> bool
+
+(** Test-only fault injection for {!check_sat_assuming}'s verdict-first degradation arms
+    (bugreport 02). Arm ([Some v]) the NEXT minimization deletion probe / final core
+    replay to return verdict [v] instead of solving, so the arms — unreachable naturally
+    because the replay re-certifies a core the minimizer just derived — can be exercised;
+    the arm fires once, then disarms. [None] disarms immediately. NEVER call outside
+    tests. *)
+val inject_deletion_verdict_for_test : verdict option -> unit
+
+val inject_replay_verdict_for_test : verdict option -> unit
 
 (** The SAT core's counter trio, monotonic across the session (DESIGN.md §8). *)
 val stats : t -> Oxsmt_solver.Sat.Stats.t

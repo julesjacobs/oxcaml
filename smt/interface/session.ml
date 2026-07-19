@@ -2277,6 +2277,18 @@ let solve_prepared_assumptions t ~fixed assumptions =
   verdict
 ;;
 
+(* Test-only fault injection for the verdict-first degradation arms (bugreport 02). Both
+   default [None], are NEVER armed in production, and are consumed once (armed → fires on
+   the next matching probe → resets to [None]). They exist because the degradation arms
+   are essentially unreachable naturally (the replay gate re-certifies a core we just
+   derived), yet the flipped contract — verdict stays [Unsat], only the core drops to
+   [None] — must be test-covered. [inject_deletion_verdict] overrides the next
+   minimization deletion probe's result; [inject_replay_verdict] overrides the final core
+   replay's result. Read only inside {!check_sat_assuming}'s Unsat arm, so no
+   non-assumption path observes them. *)
+let inject_deletion_verdict : verdict option ref = ref None
+let inject_replay_verdict : verdict option ref = ref None
+
 let check_sat_assuming t assumptions =
   match assumptions with
   | [] ->
@@ -2382,12 +2394,35 @@ let check_sat_assuming t assumptions =
              | Some ("1" | "true" | "yes") -> false
              | Some _ | None -> true
            in
+           (* Verdict-first degradation (bugreports 01/02): the initial solve above
+              already certified (active assertions ∧ assumptions) [Unsat] through a
+              completed solve. Any downstream failure to hand back a VERIFIED core — a
+              deletion probe or the final replay degrading to [Unknown], or the replay
+              unexpectedly returning [Sat] (an inconsistent core we refuse to publish) —
+              therefore leaves the verdict at [Unsat] and drops only [unsat_core] to
+              [None], recording a diagnostic tag in [unknown_reason]. The verdict field is
+              never downgraded below what {!check_sat} would report; a consumer keys blame
+              off [Unsat] and reads [unsat_core = None] as "no verified core available". *)
+           let degrade_core reason =
+             t.last_verdict <- Unsat;
+             t.last_model <- None;
+             t.unknown_reason <- reason;
+             { verdict = Unsat; unsat_core = None }
+           in
+           let probe candidate =
+             let verdict = solve_prepared_assumptions t ~fixed candidate in
+             match !inject_deletion_verdict with
+             | Some forced ->
+               inject_deletion_verdict := None;
+               forced
+             | None -> verdict
+           in
            let rec minimize necessary = function
              | [] -> Some (List.rev necessary)
              | assumption :: rest ->
                (* Probe the entire current working set minus [assumption]. *)
                let candidate = List.rev_append necessary rest in
-               (match solve_prepared_assumptions t ~fixed candidate with
+               (match probe candidate with
                 | Unknown -> None
                 | Sat -> minimize (assumption :: necessary) rest
                 | Unsat when not refine -> minimize necessary rest
@@ -2399,7 +2434,7 @@ let check_sat_assuming t assumptions =
                   minimize necessary rest)
            in
            (match minimize [] initial_core with
-            | None -> { verdict = Unknown; unsat_core = None }
+            | None -> degrade_core "assumption-core-minimize-unknown"
             | Some minimal ->
               (* Restore input order: the minimal core is [minimal] read as a set, so
                  filtering [initial_core] (already in input order) recovers the order the
@@ -2416,17 +2451,21 @@ let check_sat_assuming t assumptions =
               (* Replay the final core even when the last deletion happened to be an Unsat
                  probe. This makes evidence, failed assumptions, stats, and model state
                  describe exactly the public result. *)
-              (match solve_prepared_assumptions t ~fixed core with
+              let replay =
+                let verdict = solve_prepared_assumptions t ~fixed core in
+                match !inject_replay_verdict with
+                | Some forced ->
+                  inject_replay_verdict := None;
+                  forced
+                | None -> verdict
+              in
+              (match replay with
                | Unsat ->
                  { verdict = Unsat
                  ; unsat_core = Some (List.map (fun a -> a.source) core)
                  }
-               | Unknown -> { verdict = Unknown; unsat_core = None }
-               | Sat ->
-                 t.last_verdict <- Unknown;
-                 t.last_model <- None;
-                 t.unknown_reason <- "assumption-core-recheck-sat";
-                 { verdict = Unknown; unsat_core = None }))))
+               | Unknown -> degrade_core "assumption-core-recheck-unknown"
+               | Sat -> degrade_core "assumption-core-recheck-sat"))))
 ;;
 
 let get_model t =
@@ -2611,6 +2650,12 @@ let last_farkas t =
    (its activation selector still assumed)? Lets [symbreak_test] assert the R2 emission
    restriction directly (no emission under a frame / with lemmas registered). *)
 let symbreak_active_for_test t = Option.is_some t.sym_sel
+
+(* Test-only fault injection (bugreport 02 verdict-first arms): arm the next minimization
+   deletion probe / final core replay to return a chosen verdict, so the degradation arms
+   — unreachable naturally — can be driven. [None] disarms. See [inject_*_verdict] refs. *)
+let inject_deletion_verdict_for_test v = inject_deletion_verdict := v
+let inject_replay_verdict_for_test v = inject_replay_verdict := v
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let minimize_probes t = t.minimize_probes
