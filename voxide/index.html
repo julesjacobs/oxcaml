@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>vox2 IDE</title>
+    <!-- Apply the saved theme before first paint (no flash). Dark is the
+         default; no OS sniffing. -->
+    <script>
+      try {
+        if (localStorage.getItem("voxide-theme") === "light")
+          document.documentElement.dataset.theme = "light";
+      } catch (e) {}
+    </script>
+    <link rel="stylesheet" href="vendor/codemirror/codemirror.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <button id="sidebar-button" type="button" title="Show / hide the file explorer" aria-label="Toggle file explorer">☰</button>
+      <span class="brand">vox2 IDE</span>
+      <div id="backend-control" class="backend-control">
+        <select id="backend-select" aria-label="Verification backend" title="Verification backend" disabled>
+          <option value=""></option>
+        </select>
+      </div>
+      <div class="round-summary" aria-label="Latest automatic check">
+        <span id="status" class="status-checking" role="status">checking…</span>
+      </div>
+      <span id="spacer"></span>
+      <label id="compact-label" title="Compact: goal and hypotheses only. Uncheck for the full proof state."><input type="checkbox" id="compact-box" checked /> compact</label>
+      <button id="theme-button" type="button" title="Toggle light / dark theme">☀ Light</button>
+    </header>
+    <main>
+      <aside id="sidebar" aria-label="File explorer">
+        <div id="tree" role="tree"></div>
+      </aside>
+      <section id="editor-pane" aria-label="vox2 OCaml editor">
+        <div id="tabs" class="tabs" role="tablist" aria-label="Open units" hidden></div>
+        <textarea id="code"></textarea>
+        <article id="doc-view" class="doc-view" aria-label="Documentation" hidden></article>
+      </section>
+      <aside id="output-pane">
+        <!-- Three status-bearing zones, no headings: the token/summary lines
+             carry the structure.  STATUS = buffer roll-up (diagnostics +
+             verdict), PROOF = the cursor-driven proof pane (the star), CURSOR =
+             type + signature. Compact is the default and shows only goal,
+             hypotheses, and type; the header control reveals the complete
+             status/proof/cursor detail surface. -->
+        <section id="status-zone" aria-label="Buffer status">
+          <!-- The fail-closed buffer verdict + count lives in the top header
+               (#status); compile/type diagnostics are status-level and always
+               visible, while the rare unlocated fallback is locally disclosed. -->
+          <div id="backend-results" class="backend-results" hidden></div>
+          <div id="diagnostics" aria-live="polite"></div>
+          <details id="verification-details" class="verification-details" hidden>
+            <summary>details</summary>
+            <div id="verify-output" class="muted"></div>
+          </details>
+          <div id="legend" class="legend" hidden></div>
+        </section>
+        <section id="proof-section" aria-label="Proof at cursor">
+          <div id="pane-mode" class="pane-mode"></div>
+          <div id="pane-body"></div>
+          <div id="proof-details" class="proof-details"></div>
+          <div id="cross-unit" class="cross-unit" hidden></div>
+        </section>
+        <section id="cursor-zone" aria-label="Type and mode at cursor">
+          <pre id="cursor-type" class="cursor-type"></pre>
+          <details id="signature-box" class="signature-box">
+            <summary>signature</summary>
+            <pre id="signature"></pre>
+          </details>
+        </section>
+      </aside>
+    </main>
+    <script src="vendor/codemirror/codemirror.js"></script>
+    <script src="vendor/codemirror/mode/mllike/mllike.js"></script>
+    <script src="vox-mode.js"></script>
+    <script src="pane_model.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

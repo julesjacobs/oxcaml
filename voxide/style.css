@@ -1,0 +1,979 @@
+/* Dense dev-tool aesthetic, dark by DEFAULT (no OS sniffing).  The toolbar
+   toggle flips html[data-theme="light"], persisted in localStorage; every
+   colour is a variable so the light block below swaps the whole palette. */
+:root {
+  color-scheme: dark;
+  --background: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --foreground: #d6dbe2;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --ok: #3fb950;
+  --error: #ff5f56;
+  --warning: #d29922;
+  --verify: #e3b341;
+  --vc-ok-line: #3fb950;
+  /* vox1-matched dark fail underline (was #ff5f56). */
+  --vc-fail-line: #f0533f;
+  --btn-bg: #21262d;
+  --goal-bg: #16202b;
+  --hyp-bg: #131a22;
+  --cex-bg: #2a1614;
+  --sel-bg: #253650;
+  --badge-ok-bg: rgba(63, 185, 80, 0.2);
+  --badge-fail-bg: rgba(255, 95, 86, 0.2);
+  --badge-unknown-bg: #21262d;
+  --amber-bg: rgba(227, 179, 65, 0.18);
+  /* Per-obligation editor wash, opacity deepening by nesting depth d0..d3
+     (see markVcs + .vc-goal-d* ). d0 is the clearly-visible base for a single
+     goal; each deeper level is distinctly more opaque. */
+  --vc-goal-d0: rgba(88, 166, 255, 0.11);
+  --vc-goal-d1: rgba(88, 166, 255, 0.20);
+  --vc-goal-d2: rgba(88, 166, 255, 0.30);
+  --vc-goal-d3: rgba(88, 166, 255, 0.42);
+  /* Provenance hover correlation (pane row <-> editor source span). */
+  --prov-hl: rgba(88, 166, 255, 0.28);
+  --prov-hl-edge: rgba(88, 166, 255, 0.85);
+  --mono: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+  --background: #ffffff;
+  --panel: #f6f7f9;
+  --border: #d9dde4;
+  --foreground: #24292f;
+  --muted: #57606a;
+  --accent: #0b5fbf;
+  --ok: #1a7f37;
+  --error: #c0334d;
+  --warning: #7d4e00;
+  --verify: #9a6700;
+  --vc-ok-line: #2da44e;
+  --vc-fail-line: #e5484d;
+  --btn-bg: #eceef2;
+  --goal-bg: #eef4fb;
+  --hyp-bg: #f0f2f5;
+  --cex-bg: #fbecee;
+  --sel-bg: #cfe0f7;
+  --badge-ok-bg: rgba(26, 127, 55, 0.15);
+  --badge-fail-bg: rgba(192, 51, 77, 0.15);
+  --badge-unknown-bg: #e7e9ee;
+  --amber-bg: rgba(125, 78, 0, 0.14);
+  --vc-goal-d0: rgba(11, 95, 191, 0.12);
+  --vc-goal-d1: rgba(11, 95, 191, 0.22);
+  --vc-goal-d2: rgba(11, 95, 191, 0.34);
+  --vc-goal-d3: rgba(11, 95, 191, 0.46);
+  --prov-hl: rgba(11, 95, 191, 0.22);
+  --prov-hl-edge: rgba(11, 95, 191, 0.8);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--foreground);
+  font: 13px/1.5 var(--mono);
+}
+header {
+  min-height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.brand { color: var(--accent); font-weight: 700; letter-spacing: .04em; }
+#spacer { flex: 1; }
+button {
+  color: var(--foreground);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+#sidebar-button { padding: 4px 8px; line-height: 1; }
+kbd { color: var(--muted); font: inherit; }
+/* The selector is the leftmost round control and owns a fixed width. Status
+   text grows only to its right, so changing verdict/latency cannot move it. */
+.round-summary {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+/* The header pill is the fail-closed buffer verdict (glyph + count): green
+   ONLY when it compiles AND every obligation proved; red / amber otherwise. */
+#status {
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-checking { color: var(--warning); }
+.status-ok { color: var(--ok); }
+.status-verified { color: var(--ok); font-weight: 700; }
+.status-disproved, .status-error { color: var(--error); font-weight: 700; }
+.status-unproved, .status-solver-error, .status-unavailable {
+  color: var(--warning);
+  font-weight: 700;
+}
+#compact-label {
+  flex: 0 0 88px;
+  color: var(--muted);
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  cursor: pointer;
+  user-select: none;
+}
+#compact-label:hover { color: var(--foreground); }
+#theme-button {
+  flex: 0 0 88px;
+  white-space: nowrap;
+}
+main { flex: 1; display: flex; min-height: 0; }
+
+/* File explorer sidebar. */
+#sidebar {
+  width: 232px;
+  flex: 0 0 232px;
+  min-width: 0;
+  overflow: auto;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  font-size: 12.5px;
+  padding: 6px 0;
+}
+body.sidebar-hidden #sidebar { display: none; }
+#tree { user-select: none; }
+.tree-children { display: block; padding-left: 12px; }
+.tree-dir.collapsed > .tree-children { display: none; }
+.tree-root > .tree-dir-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: 11px;
+}
+.tree-dir-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+  color: var(--foreground);
+}
+.tree-dir-label:hover { background: var(--hyp-bg); }
+.tree-chevron { width: 10px; color: var(--muted); font-size: 10px; }
+.tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.workspace-example > .tree-dir-label {
+  align-items: flex-start;
+  color: var(--foreground);
+  font-size: 12.5px;
+  letter-spacing: normal;
+  text-transform: none;
+}
+.workspace-identity { min-width: 0; overflow: hidden; }
+.tree-file {
+  padding: 4px 8px 4px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+  border-left: 2px solid transparent;
+}
+.tree-file-title, .tree-file-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tree-file-name { color: var(--muted); font-size: 10.5px; margin-top: 1px; }
+.tree-file:hover { background: var(--hyp-bg); }
+.tree-file:focus-visible, .tree-dir-label:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.tree-file.active {
+  background: var(--goal-bg);
+  border-left-color: var(--accent);
+}
+.tree-file.kind-mli { color: var(--accent); }
+.tree-file.kind-doc { color: var(--muted); font-style: italic; }
+
+#editor-pane {
+  flex: 1.45;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+/* Read-only rendered-doc viewer: shown in place of the editor while a .md
+   doc is open (editor-pane gets .doc-mode).  Prose in a system font, code
+   in the editor's mono; the whole palette rides the theme variables. */
+.doc-view { display: none; }
+#editor-pane.doc-mode .CodeMirror { display: none; }
+#editor-pane.doc-mode .doc-view { display: block; }
+body.doc-mode #backend-control,
+body.doc-mode .round-summary,
+body.doc-mode #output-pane { display: none; }
+body.doc-mode #editor-pane { flex: 1; border-right: 0; }
+.doc-view {
+  height: 100%;
+  overflow: auto;
+  padding: 20px 26px 40px;
+  background: var(--background);
+  color: var(--foreground);
+  font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+}
+.doc-view .md { max-width: 760px; }
+.doc-view h1, .doc-view h2, .doc-view h3 {
+  color: var(--foreground);
+  line-height: 1.3;
+  margin: 1.4em 0 .5em;
+}
+.doc-view h1 {
+  font-size: 1.7em;
+  margin-top: 0;
+  padding-bottom: .3em;
+  border-bottom: 1px solid var(--border);
+}
+.doc-view h2 {
+  font-size: 1.3em;
+  padding-bottom: .2em;
+  border-bottom: 1px solid var(--border);
+}
+.doc-view h3 { font-size: 1.1em; }
+.doc-view p, .doc-view li { color: var(--foreground); }
+.doc-view ul, .doc-view ol { padding-left: 1.6em; }
+.doc-view li { margin: .25em 0; }
+.doc-view blockquote {
+  margin: 1em 0;
+  padding: .3em 1em;
+  color: var(--muted);
+  border-left: 3px solid var(--border);
+}
+.doc-view hr { border: 0; border-top: 1px solid var(--border); margin: 1.6em 0; }
+.doc-view a.md-link { color: var(--accent); text-decoration: none; }
+.doc-view a.md-link:hover { text-decoration: underline; }
+.doc-view code.md-inline-code {
+  font-family: var(--mono);
+  font-size: .9em;
+  background: var(--hyp-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: .05em .35em;
+}
+.doc-view pre.md-code {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 12px 14px;
+  overflow: auto;
+  margin: 1em 0;
+}
+.doc-view pre.md-code code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--foreground);
+  white-space: pre;
+}
+#output-pane {
+  flex: 1;
+  min-width: 320px;
+  overflow: auto;
+  background: var(--background);
+  padding: 8px 14px 20px;
+}
+#output-pane section {
+  border-bottom: 1px solid var(--border);
+  padding: 3px 0 12px;
+}
+#status-zone { min-height: 34px; }
+#proof-section { min-height: 108px; }
+#cursor-zone { min-height: 76px; }
+#output-pane section:last-child { border-bottom: 0; }
+/* Compact is the minimal proof surface: goal, hypotheses, and cursor type.
+   The header still carries the buffer verdict; all pane-local status/detail
+   chrome returns when the user switches to full view. */
+body.compact-view #status-zone,
+body.compact-view #proof-details,
+body.compact-view #cross-unit,
+body.compact-view #signature-box { display: none; }
+#output-pane h2 {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  margin: 10px 0 5px;
+}
+pre { margin: 0; white-space: pre-wrap; font: inherit; }
+.muted { color: var(--muted); }
+
+/* ---------------------------------------------------------------------------
+   Redesign: 3 status-bearing zones (STATUS / PROOF / CURSOR), the depth model,
+   the loud verdict token, and its underline swatch.
+   --------------------------------------------------------------------------- */
+
+/* The compact backend selector lives with the verification controls in the
+   header.  Cross-backend comparison remains in STATUS, outside the
+   fidelity-locked #proof-section. */
+.backend-control {
+  display: inline-flex;
+  flex: 0 0 108px;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  white-space: nowrap;
+}
+.backend-control[hidden] { display: none; }
+.backend-control select {
+  width: 108px;
+  color: var(--foreground);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font: 11px var(--mono);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.backend-control select:disabled { color: transparent; cursor: wait; }
+.backend-results { margin: 0 0 8px; }
+.backend-result {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin: 3px 0;
+}
+.backend-vc-anchor { color: var(--muted); font-size: 11px; }
+.backend-badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.backend-proved { color: var(--ok); background: var(--badge-ok-bg); }
+.backend-disproved, .backend-failed {
+  color: var(--error);
+  background: var(--badge-fail-bg);
+}
+.backend-unknown, .backend-unproved {
+  color: var(--muted);
+  background: var(--badge-unknown-bg);
+}
+.backend-solver-error { color: var(--warning); background: var(--amber-bg); }
+.backend-unavailable {
+  color: var(--warning);
+  border-style: dashed;
+  background: transparent;
+}
+.backend-divergence {
+  border: 2px solid var(--error);
+  border-radius: 4px;
+  padding: 5px;
+  background: var(--badge-fail-bg);
+}
+.backend-divergence-label {
+  flex-basis: 100%;
+  color: var(--error);
+  letter-spacing: .04em;
+}
+
+/* PROOF zone off-obligation: the grey CONTEXT token (full view only) -- NOT a
+   verdict.  (The obligation verdict is no longer a separate token; it rides the
+   goal line's colour.  tok-<status> also colours the goal's glyph/qualifier.) */
+.verdict-token {
+  margin: 2px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+.tok-proved { color: var(--ok); }
+.tok-disproved, .tok-failed, .tok-unknown { color: var(--error); }
+.tok-unproved, .tok-solver-error, .tok-unavailable { color: var(--warning); }
+.tok-context { color: var(--muted); }
+
+/* The code anchor under the headline: [file:]line:col, secondary/dim. */
+.pane-anchor {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 6px;
+}
+
+/* CURSOR zone: type/mode at cursor (depth 0) + signature (one click). */
+#cursor-zone { padding-top: 9px; }
+.cursor-type { color: var(--foreground); }
+.cursor-line { line-height: 1.45; }
+.cursor-label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.cursor-checked { border-left: 2px solid var(--muted); padding-left: 5px; }
+.cursor-imposed { border-left: 2px solid var(--accent); padding-left: 5px; }
+.cursor-mode { color: var(--muted); }
+.signature-box { margin-top: 8px; }
+.signature-box > summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.signature-box > pre { margin-top: 6px; }
+
+/* Proof pane. */
+#proof-section { position: relative; }
+#proof-section .placeholder { color: var(--muted); }
+.pane-mode {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: .06em;
+  margin-bottom: 6px;
+}
+/* The mode line is empty now (the verdict token carries the mode) -- collapse
+   it so it leaves no stray gap. */
+.pane-mode:empty { display: none; }
+#pane-body h3 {
+  margin: 12px 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.vc-kind {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  margin-bottom: 4px;
+}
+.goal, .hyp, .cex {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  padding: 3px 6px;
+  border-radius: 3px;
+  margin: 2px 0;
+}
+.goal { background: var(--goal-bg); border-left: 3px solid var(--muted); }
+.hyp { background: var(--hyp-bg); border-left: 3px solid var(--border); }
+.cex { background: var(--cex-bg); border-left: 3px solid var(--error); }
+/* The goal line CARRIES the verdict: the left rule takes the verdict colour
+   (green proved / red disproved / amber unproved|solver-error), and the leading
+   glyph + `⊢` + any welded `· no witness` qualifier (.goal-mark / .goal-qual)
+   take the same colour via their tok-<status> class.  The goal predicate keeps
+   its own syntax highlighting.  proved is GREEN (was the blue accent). */
+.goal-proved { border-left-color: var(--ok); }
+.goal-disproved, .goal-failed, .goal-unknown { border-left-color: var(--error); }
+.goal-unproved, .goal-solver-error { border-left-color: var(--warning); }
+.goal-turn, .goal-mark, .goal-qual { font-weight: 700; }
+/* The verdict glyph sits at the right end of the goal line. */
+.goal-mark { float: right; }
+.hyp-unused { opacity: .4; transition: opacity .12s ease; }
+.hyp-unused:hover { opacity: 1; }
+
+/* Prover-style proof state: named hypotheses, one per line, above a dividing
+   rule and the turnstile goal. */
+.context { margin: 2px 0; }
+.hyprow {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+}
+.hyp-name { color: var(--accent); }
+.hyp-sep { color: var(--muted); }
+.hyp-link { cursor: pointer; }
+/* Provenance hover affordance (vox1-style): a linked hypothesis or the goal
+   highlights on hover, and lights up in reverse (.prov-active) when the editor
+   pointer is over its source span.  Browser-only interactive chrome. */
+.hyp-link:hover, .hyp-link.prov-active, .hyprow.prov-active {
+  background: var(--hyp-bg);
+}
+.goal { cursor: default; }
+.goal:hover, .goal.prov-active { filter: brightness(1.12); }
+.overlap-control {
+  position: absolute;
+  top: 3px;
+  right: 6px;
+  padding: 0 4px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font: 10px/1.5 var(--mono);
+  cursor: pointer;
+}
+.overlap-control::after { content: attr(data-overlap-label); }
+.overlap-control:hover, .overlap-control:focus-visible {
+  color: var(--foreground);
+  border-color: var(--accent);
+}
+/* The transient editor mark painted while a pane row is hovered. */
+.prov-hl {
+  background: var(--prov-hl);
+  border-radius: 2px;
+  outline: 1px solid var(--prov-hl-edge);
+}
+.turn-rule {
+  border-top: 1px solid var(--border);
+  margin: 6px 0;
+}
+/* Transient highlight when a hypothesis click jumps to its source. */
+.hyp-flash {
+  background: var(--amber-bg);
+  border-radius: 2px;
+}
+
+/* The raw app-syntax predicate, tucked behind a disclosure under the goal. */
+.raw { margin-top: 8px; }
+.raw summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.raw pre {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--hyp-bg);
+  border-left: 3px solid var(--border);
+  border-radius: 3px;
+  padding: 6px;
+  margin: 6px 0 0;
+  overflow: auto;
+}
+.also-here {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+
+/* Verdict legend: shown only while some obligation failed, and collapsed into
+   a disclosure by default so it does not dump the whole key above every pane.
+   Each swatch wears the matching vc-* marker class, so it cannot drift from the
+   source underlines. */
+.legend {
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.legend-summary {
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.legend-details .leg {
+  display: inline-block;
+  margin: 4px 14px 0 0;
+  white-space: nowrap;
+}
+
+/* Per-VC underline, one style per status.  ONE set of declarations drives BOTH
+   the legend swatch (.leg.vc-*) and the in-editor CodeMirror mark (.vc-*), so
+   the two are visually identical.  text-decoration (not border-bottom) is used
+   because it renders the same inside a CodeMirror line as in normal flow -- a
+   border-bottom sits at the tall line box's edge and looks detached. */
+.vc-proved, .vc-disproved, .vc-unproved, .vc-failed, .vc-unknown,
+.vc-solver-error, .vc-unavailable {
+  text-decoration-line: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+}
+/* The per-obligation translucent wash, with opacity that DEEPENS BY NESTING
+   DEPTH.  markVcs computes each obligation's containment depth (how many other
+   obligation spans strictly contain it) and tags the mark vc-goal-d0..d3 (d3 =
+   clamp), so a nested goal reads as visibly more opaque than its encloser -- the
+   depth is explicit, not relying on CodeMirror to composite overlapping
+   translucent marks (it does not: it flattens overlapping marks onto one span,
+   so same-alpha washes would not stack).  Where CM DOES put several depth
+   classes on one nested segment, the deepest wins (declared last).  The base
+   (d0) alpha is high enough that a single goal's wash is clearly visible without
+   fighting the underline or code legibility. */
+.vc-goal-d0 { background-color: var(--vc-goal-d0); }
+.vc-goal-d1 { background-color: var(--vc-goal-d1); }
+.vc-goal-d2 { background-color: var(--vc-goal-d2); }
+.vc-goal-d3 { background-color: var(--vc-goal-d3); }
+.vc-proved {
+  text-decoration-style: solid;
+  text-decoration-color: var(--vc-ok-line);
+}
+.vc-disproved {
+  text-decoration-style: solid;
+  text-decoration-color: var(--vc-fail-line);
+}
+.vc-unproved, .vc-failed {
+  text-decoration-style: dashed;
+  text-decoration-color: var(--vc-fail-line);
+}
+/* Unknown: a GREY dotted line (vox1 reserves dotted-grey for a genuinely
+   unknown VC, distinct from the red of a failure). */
+.vc-unknown {
+  text-decoration-style: dotted;
+  text-decoration-color: var(--muted);
+}
+/* Solver error: a DASHED amber line (vox1 reserves dashed for amber/trusted;
+   there is no dotted-amber). */
+.vc-solver-error {
+  text-decoration-style: dashed;
+  text-decoration-color: var(--warning);
+}
+.vc-unavailable {
+  text-decoration-style: wavy;
+  text-decoration-color: var(--warning);
+}
+
+/* The raw solver diagnostic, collapsed into a disclosure by default (the
+   verbose grind output is available on demand, not dumped inline). */
+.solver-detail { margin-top: 8px; }
+.solver-detail summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.solver-detail .detail { margin-top: 6px; }
+
+/* The raw solver diagnostic surfaced for a failing obligation. */
+.detail {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--cex-bg);
+  border-left: 3px solid var(--warning);
+  border-radius: 3px;
+  padding: 3px 6px;
+  margin: 2px 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
+/* The generated Lean theorem, tucked behind a disclosure. */
+.lean { margin-top: 10px; }
+.lean summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+}
+.lean pre {
+  white-space: pre-wrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--hyp-bg);
+  border-left: 3px solid var(--border);
+  border-radius: 3px;
+  padding: 6px;
+  margin: 6px 0 0;
+  overflow: auto;
+}
+/* Generated-Lean escape hatch: copy / download / open the self-contained file. */
+.lean-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
+.lean-btn { font-size: 11px; padding: 2px 8px; }
+.lean-hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.4;
+}
+.proof-details { margin-top: 7px; }
+.proof-details > details { margin-top: 5px; }
+.proof-details summary,
+.verification-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.proof-owned-detail { margin-top: 6px; }
+
+/* Approximate off-obligation "known here" view: the honesty caveat under the
+   named rows (facts introduced above the caret; branch facts deliberately
+   omitted). */
+.context-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+/* The verdict spelled out prominently: keeps "unproved" (may still hold) from
+   being skimmed as "disproved" (genuinely false). */
+.status-note {
+  margin: 6px 0;
+  padding: 3px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.status-note-unproved,
+.status-note-failed,
+.status-note-unknown {
+  background: transparent;
+  border-left: 3px solid var(--vc-fail-line);
+}
+.status-note-solver-error, .status-note-unavailable {
+  background: var(--amber-bg);
+  border-left: 3px solid var(--warning);
+}
+
+/* A disproved obligation with no concrete witness (grind refuted the goal but
+   produced no model): honest "refuted, no witness" note in place of a table. */
+.cex-none {
+  background: var(--cex-bg);
+  border-left: 3px solid var(--error);
+  border-radius: 3px;
+  padding: 3px 6px;
+  margin: 2px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.diagnostic-ok { color: var(--ok); padding: 5px 7px; }
+.diagnostic-error {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: var(--foreground);
+  background: rgba(255, 95, 86, .1);
+  border: 0;
+  border-left: 3px solid var(--error);
+  border-radius: 2px;
+  margin: 4px 0;
+  padding: 5px 8px;
+  white-space: normal;
+  cursor: pointer;
+}
+.diagnostic-static { cursor: default; }
+.diagnostic-squiggle {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: var(--error);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+.diagnostic-point {
+  color: var(--error);
+  font-weight: 700;
+  pointer-events: none;
+}
+/* A verification failure gets NO editor squiggle: its underline is the
+   status-aware vox1 vc-<status> mark (solid disproved / dashed unproved) drawn
+   by markVcs, not a wavy line (see renderDiagnostics).  The point widget for a
+   span-less verification error stays amber. */
+.diagnostic-point-verify { color: var(--verify); }
+.diagnostic-point-verify-fallback { color: var(--warning); }
+.diagnostic-verify-fallback {
+  text-decoration: underline wavy var(--warning);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.caret-inline-diagnostic {
+  color: var(--muted);
+  font: 11px/1.25 var(--mono);
+  margin-left: 14px;
+  opacity: 0.9;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.diagnostic-verify {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: var(--foreground);
+  background: rgba(227, 179, 65, .1);
+  border: 0;
+  border-left: 3px solid var(--verify);
+  border-radius: 2px;
+  margin: 4px 0;
+  padding: 5px 8px;
+  white-space: normal;
+  cursor: pointer;
+}
+.diagnostic-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  vertical-align: baseline;
+  background: rgba(255, 95, 86, .18);
+  color: var(--error);
+}
+.diagnostic-verify .diagnostic-badge {
+  background: rgba(227, 179, 65, .18);
+  color: var(--verify);
+}
+.verify-ok { color: var(--ok); padding: 2px 0; }
+.verify-fail {
+  color: var(--foreground);
+  background: rgba(227, 179, 65, .1);
+  border-left: 3px solid var(--verify);
+  border-radius: 2px;
+  padding: 5px 8px;
+  white-space: normal;
+}
+.verify-pending { color: var(--warning); }
+
+.CodeMirror { height: 100%; font: 13px/1.55 var(--mono); }
+.cm-s-default.CodeMirror {
+  color: var(--foreground);
+  background: var(--background);
+}
+.CodeMirror-gutters {
+  background: var(--background);
+  border-right-color: var(--border);
+}
+.CodeMirror-linenumber { color: var(--muted); }
+.CodeMirror-cursor { border-left: 2px solid var(--foreground); }
+.CodeMirror-selected { background: var(--sel-bg); }
+
+/* CodeMirror token colours for the dark theme (CM5 defaults are tuned for
+   white backgrounds).  Light mode keeps the CM defaults, which suit white. */
+html:not([data-theme="light"]) .cm-keyword { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-comment { color: #67717d; }
+html:not([data-theme="light"]) .cm-number,
+html:not([data-theme="light"]) .cm-atom,
+html:not([data-theme="light"]) .cm-builtin { color: #ff9e64; }
+html:not([data-theme="light"]) .cm-string,
+html:not([data-theme="light"]) .cm-quote { color: #9ece6a; }
+html:not([data-theme="light"]) .cm-def { color: #7aa2f7; }
+html:not([data-theme="light"]) .cm-variable-2 { color: #7dcfff; }
+html:not([data-theme="light"]) .cm-variable-3,
+html:not([data-theme="light"]) .cm-type { color: #2ac3de; }
+
+/* vox-specific token classes (see vox-mode.js): no CM default, so both
+   themes need explicit colours.  Weight/style set once; hue per theme. */
+.cm-vox-refine-delim, .cm-vox-hole { font-weight: 700; }
+.cm-vox-refine-body { font-style: italic; }
+.cm-vox-quant { font-weight: 600; font-style: italic; }
+.cm-vox-marker, .cm-vox-attr-name { font-weight: 600; }
+.cm-vox-assign { font-weight: 700; }
+html:not([data-theme="light"]) .cm-vox-refine-delim,
+html:not([data-theme="light"]) .cm-vox-hole { color: #58a6ff; }
+html:not([data-theme="light"]) .cm-vox-quant { color: #bb9af7; }
+html:not([data-theme="light"]) .cm-vox-marker,
+html:not([data-theme="light"]) .cm-vox-attr-name { color: #e0af68; }
+html:not([data-theme="light"]) .cm-vox-assign { color: #ff9e64; }
+html[data-theme="light"] .cm-vox-refine-delim,
+html[data-theme="light"] .cm-vox-hole { color: #0b5fbf; }
+html[data-theme="light"] .cm-vox-quant { color: #8250df; }
+html[data-theme="light"] .cm-vox-marker,
+html[data-theme="light"] .cm-vox-attr-name { color: #9a6700; }
+html[data-theme="light"] .cm-vox-assign { color: #bc4c00; }
+
+@media (max-width: 760px) {
+  .backend-control label { display: none; }
+  .backend-control select { width: 88px; }
+  #sidebar { flex-basis: 160px; width: 160px; }
+  main { flex-direction: column; }
+  #editor-pane {
+    flex: 1;
+    min-height: 50%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  #output-pane { flex: 1; min-width: 0; }
+}
+
+/* ---------------------------------------------------------------------------
+   Multi-file workspace (slice 6): tab strip + cross-unit obligations list.
+   --------------------------------------------------------------------------- */
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px 0 6px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--foreground); }
+.tab-active {
+  color: var(--foreground);
+  background: var(--background);
+  border-color: var(--border);
+}
+.tab-status {
+  min-width: 1em;
+  color: var(--muted);
+  font-weight: 700;
+  text-align: center;
+  flex: 0 0 auto;
+}
+.tab-status-verified, .tab-status-ok { color: var(--ok); }
+.tab-status-disproved, .tab-status-error { color: var(--error); }
+.tab-status-unproved, .tab-status-solver-error,
+.tab-status-unavailable { color: var(--warning); }
+.tab-status-pending { color: var(--muted); }
+
+.cross-unit {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.cross-unit-title {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.cross-unit-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  color: var(--accent);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+.cross-unit-row:hover { border-color: var(--accent); }
+.workspace-file.active { color: var(--accent); font-weight: 600; }

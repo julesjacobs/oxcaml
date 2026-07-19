@@ -1,0 +1,132 @@
+================= VOXIDE VIEW =================
+server: <server>    frontend: <frontend>
+toggles: theme=dark  compact=on  sidebar=shown  tokenizer=real
+controls: backend=oxsmt  |  read-only doc  |  (—)
+backend options: available: lean, z3, oxsmt, cross; selector: shown
+actions: automatic (no Check or Verify buttons)
+status class: status-checking
+
+--- File explorer (active: docs/welcome.md) ---
+▾ Examples
+  overview.ml   -- Sixty seconds
+  abs.ml   -- Branches become facts
+  guard.ml   -- Guarding a refined call
+  binder.ml   -- Let-binder facts
+  recursion.ml   -- Recursion by induction
+  dependent.ml   -- Dependent contracts
+  ✗ counterexample.ml   -- When you're wrong — expected outcome: does not verify (curated example)
+  ✗ proof_tour.ml   -- Proof-pane tour — expected outcome: does not verify (curated example)
+▾ Docs
+  refinements.md   -- refinements.md
+  welcome.md   (active)   -- welcome.md
+▾ Workspace (multi-file)
+  Demo.mli   -- Demo.mli — multi-file demo unit
+  Demo.ml   -- Demo.ml — multi-file demo unit
+  Client.ml   -- Client.ml — multi-file demo unit
+
+--- Document (docs/welcome.md, read-only) ---
+Welcome to the vox2 IDE
+
+This is a small, local, single-user editor for vox2 — OCaml extended with refinement types whose proof obligations are discharged by the compiler as you type. Checks run on your own machine; nothing leaves the box.
+
+The three panes
+
+- Explorer (left): the curated  and these read-only . Use
+
+  the  button in the header to hide or show it. Files are colour-coded by   kind, and an example that is expected not to verify is prefixed with .
+
+- Editor (middle): a refinement-aware OCaml buffer. Type errors get red
+
+  squiggles; verification failures get amber ones. Zero-width diagnostics show   a  (type) or  (verify) marker.
+
+- Output (right): the buffer-wide STATUS zone, the cursor-following PROOF
+
+  zone, and the CURSOR zone with the type and inferred module signature.
+
+Working in a buffer
+
+- Editing automatically typechecks and verifies after a short pause. From
+
+  left to right, the header shows the backend dropdown, the current status,   then the latest completed round as . While a newer round is pending,   it explicitly shows  and  instead of stale results.
+
+- Move the cursor onto a marked obligation to read its goal and hypotheses in
+
+  the Proof pane.
+
+Header controls
+
+- compact — show only the goal and hypotheses; uncheck for the full proof
+
+  state.
+
+- Hypotheses the proof did not rely on are always dimmed.
+- light / dark — flip the palette; the choice is applied before first paint,
+
+  so there is no flash on reload.
+
+Reading the docs
+
+These  docs open read-only and are never compiled — switching to a doc clears the diagnostics and proof state from whatever file you were editing, and switching back to an example restores the editor.
+
+To start writing, open Sixty seconds under , or read the refinement guide.
+
+--- Status (roll-up) ---
+
+
+--- Verification backend ---
+selected: oxsmt
+available: lean, z3, oxsmt, cross
+selector: shown
+
+--- Proof pane ---
+Proof pane
+Documentation (read-only).
+
+--- Verdict legend ---
+(hidden -- shown only when an obligation fails)
+
+--- Diagnostics ---
+(none)
+
+--- Type at cursor ---
+Move the cursor over an expression.
+
+--- Inferred signature ---
+Waiting for compiler…
+
+--- Verification ---
+[depth-1 muted]
+
+--- Dialogs / guards ---
+(none)
+===============================================
+================= VOXIDE VIEW =================
+
+--- Proof pane ---
+Proof pane
+Documentation (read-only).
+===============================================
+================= VOXIDE VIEW =================
+
+--- Editor (examples/overview.ml, cursor 11:22) ---
+   1 | (* Sixty seconds with refinement types.
+   2 | 
+   3 |    A refinement type like [int{ _ > 0 }] is an ordinary int carrying a
+   4 |    proof obligation: every value that flows into it must satisfy the
+   5 |    predicate, and the verifier discharges that obligation for you.  The
+   6 |    [_] stands for the value being constrained. *)
+   7 | 
+   8 | let positive (x : int{ _ > 0 }) = x
+   9 | 
+  10 | (* The call site carries the obligation [7 > 0], discharged here. *)
+* 11 | let seven = positive 7
+                            ~  [vc:proved] the verifier discharged this obligation
+                            ^ (cursor)
+  12 | 
+===============================================
+================= VOXIDE VIEW =================
+
+--- Proof pane ---
+Proof pane
+⊢ 7 > 0  ✓
+===============================================

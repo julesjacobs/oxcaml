@@ -1,0 +1,71 @@
+================= VOXIDE VIEW =================
+server: <server>    frontend: <frontend>
+toggles: theme=dark  compact=on  sidebar=shown  tokenizer=real
+controls: backend=oxsmt  |  ✗ 1 disproved  |  (49 ms)
+backend options: available: lean, z3, oxsmt, cross; selector: shown
+actions: automatic (no Check or Verify buttons)
+status class: status-disproved
+
+--- File explorer (active: examples/counterexample.ml) ---
+▾ Examples
+  overview.ml   -- Sixty seconds
+  abs.ml   -- Branches become facts
+  guard.ml   -- Guarding a refined call
+  binder.ml   -- Let-binder facts
+  recursion.ml   -- Recursion by induction
+  dependent.ml   -- Dependent contracts
+  ✗ counterexample.ml   (active)   -- When you're wrong — expected outcome: does not verify (curated example)
+  ✗ proof_tour.ml   -- Proof-pane tour — expected outcome: does not verify (curated example)
+▾ Docs
+  refinements.md   -- refinements.md
+  welcome.md   -- welcome.md
+▾ Workspace (multi-file)
+  Demo.mli   -- Demo.mli — multi-file demo unit
+  Demo.ml   -- Demo.ml — multi-file demo unit
+  Client.ml   -- Client.ml — multi-file demo unit
+
+--- Editor (examples/counterexample.ml, cursor 10:22) ---
+   1 | (* When the specification is wrong.
+   2 | 
+   3 |    [need_one] demands its argument equal 1.  The call [need_one 2] asks
+   4 |    the verifier to prove [2 = 1]; it cannot, and reports the obligation
+   5 |    as disproved.  This is the one example here that does NOT verify --
+   6 |    by design. *)
+   7 | 
+   8 | let need_one (x : int{ _ = 1 }) = x
+   9 | 
+* 10 | let wrong = need_one 2
+                            ~  [vc:disproved] the verifier refuted this obligation (its negation was proved; a concrete witness may not be available)
+                            ^ (cursor)
+  11 | 
+
+--- Status (roll-up) ---
+
+
+--- Verification backend ---
+selected: oxsmt
+available: lean, z3, oxsmt, cross
+selector: shown
+
+--- Proof pane ---
+Proof pane
+⊢ 2 = 1  ✗
+
+--- Verdict legend ---
+proved   disproved (refuted)   unproved (no witness)   solver error (no verdict)
+
+--- Diagnostics ---
+[verify] Line 10, column 22: Refinement verification failed (disproved)
+
+--- Type at cursor ---
+int
+
+--- Inferred signature ---
+Unavailable until the errors are fixed.
+
+--- Verification ---
+[depth-1 verify-fail] Refinement verification failed (disproved)
+
+--- Dialogs / guards ---
+(none)
+===============================================
