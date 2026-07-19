@@ -35,6 +35,14 @@ type t =
   (** Registered ground terms of a given sort, in registration order — the seed pool the
       matcher's seeding producer (ADR-0012 tranche 3, chunk 3) draws from to instantiate a
       trigger-inert universal. Like [app_terms_by_symbol], non-registering. *)
+  ; atom_value : Term.t -> bool option
+  (** The Boolean value of a ground atom in the {e current model} — the satisfying
+      assignment of the theory [Sat] the instantiation loop is refining ([Some true]/
+      [Some false]), or [None] if the term is not a registered atom (never interned as a
+      SAT variable). Reads the SAT solver's saved model, NOT the level-0 congruence
+      closure. The model-guided instantiation selector ({!Manager}) tests a candidate
+      instance body against it. A wrong value can at worst pick a non-conflicting but
+      still universally-valid instance, never an unsound one. Non-registering. *)
   }
 
 (** An empty view (no registered term): [app_terms_by_symbol]/[class_members] behave as if

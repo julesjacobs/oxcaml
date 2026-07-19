@@ -53,6 +53,20 @@ type 'p enode =
   ; mutable size : int (* class size; valid at a root *)
   ; mutable uses :
       int list (* App e-nodes with this root as a direct arg; valid at a root *)
+  ; mutable wl : int list
+      (* Incremental {!propagate} reverse index (C1-incr, [t.incr] only): indices into
+         [t.watched] of watched atoms with an endpoint whose current root is this node.
+         Valid at a ROOT; trailed; spliced child→root on [merge] exactly like [uses], so a
+         dirty root's [wl] enumerates the watched atoms whose status could have flipped
+         without scanning all of [t.watched]. Left [[]] (never mutated) when [t.incr] is
+         off, so the flag-off engine is byte-identical to trunk. *)
+  ; mutable dl : int list
+      (* Incremental disequality reverse index (C1-incr, [t.incr] only): indices into
+         [t.diseqs] of asserted disequalities with an endpoint whose current root is this
+         node. Valid at a ROOT; trailed; spliced child→root on [merge] like [uses]. Lets
+         the separation test ([separated_incr]/[distinct_witness]) scan only the diseqs
+         incident to a queried class instead of all of [t.diseqs]. Left [[]] when [t.incr]
+         is off. *)
   ; mutable fparent : int (* explanation-forest parent; = self at a tree root *)
   ; mutable freason : 'p reason (* reason for the edge to [fparent] *)
   ; mutable stamp : int (* scratch marker for NCA; not trailed *)
@@ -113,6 +127,12 @@ type 'p undo =
   | U_parent of int * int
   | U_size of int * int
   | U_uses of int * int list
+  | U_wl of int * int list (* C1-incr: restore a root's watched-atom reverse index *)
+  | U_dl of int * int list (* C1-incr: restore a root's disequality reverse index *)
+  | U_sep of int * int
+  (* C1-incr: restore a separated-root-pair key's prior separating-diseq count (0 =
+     absent). Reverses both an increment (new diseq / re-key in) and a decrement (re-key
+     out / merged-away). *)
   | U_fedge of int * int * 'p reason
   | U_sig_add of (int * int array)
   | U_sig_del of (int * int array) * int
@@ -134,6 +154,7 @@ type level =
   ; l_diseqs : int
   ; l_touched : int (* {!t.touched} length at push (restored on pop) *)
   ; l_prop_mark : int (* {!t.prop_mark} at push (restored on pop) *)
+  ; l_check_mark : int (* {!t.check_mark} at push (restored on pop); C1-incr [check] *)
   }
 
 type 'p t =
@@ -189,6 +210,13 @@ type 'p t =
        it matches no watched endpoint. *)
     touched : int Dynarray.t
   ; mutable prop_mark : int
+  ; (* C1-incr ([t.incr] only) [check] cursor into [touched], the analogue of [prop_mark]
+       for {!check}: [check] scans only the diseqs incident to a class root touched since
+       [check_mark] (a diseq can newly violate only when its endpoints merge, marking the
+       surviving root touched), then advances [check_mark]. Restored on [pop] like
+       [prop_mark], so a violation retracted by a pop is re-detected at the shallower
+       level. Unused when [t.incr] is off. *)
+    mutable check_mark : int
   ; mutable stamp : int
   ; (* ADR-0014 Stage 2 merge-notification log. When [record_merges] is set (by the
        combinator when fabric callbacks are live), every actual class union appends its
@@ -261,10 +289,42 @@ type 'p t =
        per-call scratch. *)
     merge_q : (int * int * 'p reason) Queue.t
   ; dedup_seen : unit Int_set.t
+  ; (* C1-incr (OXSMT_EUF_INCR): when set, [merge]/[register]/[assert_neq] maintain the
+       per-root [wl]/[dl] reverse indices and {!propagate}/{!distinct_witness} consume the
+       delta (dirty roots' [wl], a queried class's [dl]) instead of rescanning all of
+       [t.watched]/[t.diseqs] each call. Read once at [create]; default OFF ⇒ the reverse
+       indices are never touched and the flag-off engine is byte-identical to trunk. The
+       incremental path is verdict-identical BY CONSTRUCTION (it re-evaluates a superset
+       of the atoms the full scan would, and the extra atoms provably re-report nothing —
+       see {!propagate}); the flag exists so the A/B can prove that, not because the two
+       paths can disagree. *)
+    incr : bool
+  ; (* C1-incr scratch: dedup + collect candidate watched indices from the dirty roots'
+       [wl] lists before sorting into registration order. Reused (cleared, not
+       reallocated) like {!dirty}. Not trailed. *)
+    cand_seen : unit Int_set.t
+  ; cand : int Dynarray.t
+  ; (* C1-incr separated-pair index ([t.incr] only): maps a packed unordered root-pair key
+       ([sep_key], base [2^31], independent of the e-node count so it survives across
+       calls) to the NUMBER of asserted disequalities currently separating that pair.
+       Maintained incrementally — [assert_neq] increments a new diseq's pair; [merge]
+       re-keys every diseq incident to the smaller (child) class from [{child, o}] to
+       [{root, o}] (decrement + increment), or drops it when the merge makes it internal
+       ([o = root]). Trailed, so [pop] restores it. {!propagate}'s separation test is then
+       an O(1) count lookup ([> 0]) instead of an O(#incident-diseqs) list scan. Total
+       re-keying work over a solve is O(#diseqs · log n) (union-by-size: each diseq
+       re-keys O(log n) times) — the same budget as the [uses] splice. *)
+    sep_count : int Int_set.t
   }
 
 (* Note a class root as dirty for the next {!propagate} (see [touched]). *)
 let mark_touched t root = Dynarray.add_last t.touched root
+
+let incr_default =
+  match Sys.getenv_opt "OXSMT_EUF_INCR" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
 
 let create ctx =
   { ctx
@@ -280,6 +340,7 @@ let create ctx =
   ; trail = Trail.create ()
   ; touched = Dynarray.create ()
   ; prop_mark = 0
+  ; check_mark = 0
   ; stamp = 0
   ; record_merges = false
   ; merges = Dynarray.create ()
@@ -292,6 +353,10 @@ let create ctx =
   ; ex_pending = Queue.create ()
   ; merge_q = Queue.create ()
   ; dedup_seen = Int_set.create 16
+  ; incr = incr_default
+  ; cand_seen = Int_set.create 64
+  ; cand = Dynarray.create ()
+  ; sep_count = Int_set.create 64
   }
 ;;
 
@@ -374,6 +439,51 @@ let set_uses t i v =
   n.uses <- v
 ;;
 
+let set_wl t i v =
+  let n = get t i in
+  push_undo t (U_wl (i, n.wl));
+  n.wl <- v
+;;
+
+let set_dl t i v =
+  let n = get t i in
+  push_undo t (U_dl (i, n.dl));
+  n.dl <- v
+;;
+
+(* C1-incr separated-pair count map ([t.sep_count]). Keys pack an unordered root pair with
+   a FIXED base [2^31] (not the current e-node count, so a key stays valid across calls as
+   [enodes] grows): every e-node id is [< 2^31] (physically — [2^31] e-nodes is ~155 GB —
+   and enforced by the guard at the [propagate]/[assert_neq] entry), so [lo*2^31 + hi]
+   with [lo <= hi < 2^31] is injective and [< 2^62]. *)
+let sep_base = 1 lsl 31
+let sep_key lo hi = if lo <= hi then (lo * sep_base) + hi else (hi * sep_base) + lo
+
+let sep_get t key =
+  match Int_set.find_opt t.sep_count key with
+  | Some c -> c
+  | None -> 0
+;;
+
+(* [+1] the count of diseqs separating [{ra, rb}] (trailed). *)
+let sep_incr t ra rb =
+  let key = sep_key ra rb in
+  let old = sep_get t key in
+  push_undo t (U_sep (key, old));
+  Int_set.replace t.sep_count key (old + 1)
+;;
+
+(* [-1] the count of diseqs separating [{ra, rb}] (trailed); a count reaching 0 is removed
+   so [sep_get] reads absent-as-0. *)
+let sep_decr t ra rb =
+  let key = sep_key ra rb in
+  let old = sep_get t key in
+  push_undo t (U_sep (key, old));
+  if old <= 1
+  then Int_set.remove t.sep_count key
+  else Int_set.replace t.sep_count key (old - 1)
+;;
+
 let set_fedge t i p r =
   let n = get t i in
   push_undo t (U_fedge (i, n.fparent, n.freason));
@@ -391,6 +501,12 @@ let apply_undo t = function
   | U_parent (i, old) -> Array.unsafe_set t.parents i old
   | U_size (i, old) -> (get t i).size <- old
   | U_uses (i, old) -> (get t i).uses <- old
+  | U_wl (i, old) -> (get t i).wl <- old
+  | U_dl (i, old) -> (get t i).dl <- old
+  | U_sep (key, old) ->
+    if old = 0
+    then Int_set.remove t.sep_count key
+    else Int_set.replace t.sep_count key old
   | U_fedge (i, op, orr) ->
     let n = get t i in
     n.fparent <- op;
@@ -613,6 +729,37 @@ let merge t a0 b0 reason0 =
       (* union child under root *)
       set_size t root ((get t root).size + (get t child).size);
       set_uses t root ((get t child).uses @ (get t root).uses);
+      (* C1-incr: carry the child's watched/disequality reverse indices onto the surviving
+         root, exactly like [uses]. A watched atom or diseq whose endpoint was rooted at
+         [child] now roots at [root], so its index must live in [root]'s lists for the
+         next {!propagate}/{!distinct_witness} to find it. Trailed, so [pop] restores
+         both. Off ⇒ skipped (zero hot-path cost, byte-identical to trunk). *)
+      if t.incr
+      then (
+        (* Re-key the separated-pair counts for every diseq incident to the CHILD class
+           (still a root here — done before [set_parent]). Its endpoint at [child] moves
+           to [root], so the separated pair [{child, o}] becomes [{root, o}]. If
+           [o = root] the merge makes the diseq internal (its two endpoints now share
+           [root]) — a violation {!check} reports, and no longer a separation, so we only
+           decrement. [o = child] is the already-internal/degenerate case (skip). Each
+           diseq re-keys O(log n) times over a solve (union-by-size), matching the [uses]
+           splice budget. *)
+        List.iter
+          (fun didx ->
+            let d = Dynarray.get t.diseqs didx in
+            let du = find t d.d_a
+            and dv = find t d.d_b in
+            let o = if du = child then dv else du in
+            if o = child
+            then ()
+            else if o = root
+            then sep_decr t child o
+            else (
+              sep_decr t child o;
+              sep_incr t root o))
+          (get t child).dl;
+        set_wl t root ((get t child).wl @ (get t root).wl);
+        set_dl t root ((get t child).dl @ (get t root).dl));
       set_parent t child root;
       (* ADR-0014 Stage 3: the surviving root inherits the child's per-class tag if it had
          none (trailed). If BOTH carried a tag the collision is surfaced via the merge log
@@ -678,6 +825,8 @@ let rec register t (term : Term.t) : int =
       ; kind
       ; size = 1
       ; uses = []
+      ; wl = []
+      ; dl = []
       ; fparent = id
       ; freason = R_none
       ; stamp = 0
@@ -718,12 +867,22 @@ let rec register t (term : Term.t) : int =
       let ia = register t sa
       and ib = register t sb in
       Dynarray.add_last t.watched { w_atom = term; w_a = ia; w_b = ib; w_reported = -1 };
-      Term.Table.replace t.watch_index term (Dynarray.length t.watched - 1);
+      let widx = Dynarray.length t.watched - 1 in
+      Term.Table.replace t.watch_index term widx;
       Term.Table.replace t.watch_sides term (sa, sb);
       (* a freshly-watched atom must be evaluated by the next {!propagate} even if no
          merge follows (its sides may already be (dis)equal) — dirty its endpoints. *)
-      mark_touched t (find t ia);
-      mark_touched t (find t ib)
+      let ra = find t ia
+      and rb = find t ib in
+      mark_touched t ra;
+      mark_touched t rb;
+      (* C1-incr: index this watch under both endpoint roots so a later dirtying of either
+         class enumerates it without scanning all of [t.watched]. Trailed. (If both roots
+         coincide the index appears twice — harmless: {!propagate} dedups by index.) *)
+      if t.incr
+      then (
+        set_wl t ra (widx :: (get t ra).wl);
+        set_wl t rb (widx :: (get t rb).wl))
     in
     (match term.node with
      | Eq (a, b) when not (Sort.equal a.sort Sort.bool) -> add_watch a b
@@ -792,10 +951,25 @@ let assert_neq t ~premise a b =
   let ia = register t a
   and ib = register t b in
   Dynarray.add_last t.diseqs { d_a = ia; d_b = ib; d_prem = premise };
+  let didx = Dynarray.length t.diseqs - 1 in
   (* a new disequality can newly-separate a watched pair whose classes match its
      endpoints' — dirty both endpoint classes so {!propagate} re-checks them. *)
-  mark_touched t (find t ia);
-  mark_touched t (find t ib)
+  let ra = find t ia
+  and rb = find t ib in
+  mark_touched t ra;
+  mark_touched t rb;
+  (* C1-incr: index this diseq under both endpoint roots so the separation test scans only
+     the diseqs incident to a queried class, and register the separated pair in the O(1)
+     count map. Trailed. A diseq on an already-equal pair ([ra = rb]) is an immediate
+     violation {!check} reports — it still joins [dl] (so [check] cites it) but adds no
+     separated pair. *)
+  if t.incr
+  then (
+    if Dynarray.length t.enodes > sep_base
+    then invalid_arg "Euf.assert_neq: e-node count exceeds packing bound";
+    set_dl t ra (didx :: (get t ra).dl);
+    set_dl t rb (didx :: (get t rb).dl);
+    if ra <> rb then sep_incr t ra rb)
 ;;
 
 (* --- explanation --------------------------------------------------------- *)
@@ -950,23 +1124,64 @@ type 'p check_result =
 
 (* Scan disequalities in assertion order; return the first violated one (C3). *)
 let check t =
-  let result = ref Consistent in
-  (try
-     Dynarray.iteri
-       (fun _ d ->
-         if find t d.d_a = find t d.d_b
-         then (
-           let edges = explain_core t d.d_a d.d_b in
-           if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
-           then
-             failwith
-               "Euf self-check: conflict explanation does not connect the disequal terms";
-           result := Conflict (premises edges @ [ d.d_prem ]);
-           raise Exit))
-       t.diseqs
-   with
-   | Exit -> ());
-  !result
+  let conflict_of d =
+    let edges = explain_core t d.d_a d.d_b in
+    if !self_check && not (Naive.equal (naive_closure t edges) d.d_a d.d_b)
+    then
+      failwith "Euf self-check: conflict explanation does not connect the disequal terms";
+    Conflict (premises edges @ [ d.d_prem ])
+  in
+  if t.incr
+  then (
+    (* Incremental (OXSMT_EUF_INCR): a diseq becomes violated ([find d_a = find d_b]) only
+       when its two endpoints merge, which marks the surviving root touched. As of
+       [check_mark] no diseq is violated (invariant below), so every currently-violated
+       diseq became so at a merge whose surviving root sits in [touched.(check_mark ..)]
+       and lives in that root's [dl]. Scan only those roots' incident diseqs and return
+       the MINIMUM-assertion-index violated one — byte-identical to the full
+       assertion-order scan's first hit, since [dl] holds every violated diseq's index.
+
+       [check_mark] advances to the touched-log end ONLY on a Consistent result — that is
+       what re-establishes the "clean up to [check_mark]" invariant. On a Conflict we
+       leave [check_mark] put: the violation is unresolved (the caller may pop — which
+       restores [check_mark] via the trail — or, as the CB checkpoint path and the obs-eq
+       oracle do, keep asserting without a pop), so the next [check] must re-scan the same
+       range and re-find it rather than skip past the still-violated root. *)
+    let dirty = t.dirty in
+    Int_set.clear dirty;
+    let newmark = Dynarray.length t.touched in
+    for i = t.check_mark to newmark - 1 do
+      Int_set.replace dirty (Dynarray.get t.touched i) ()
+    done;
+    let best = ref (-1) in
+    Int_set.iter
+      (fun r () ->
+        List.iter
+          (fun didx ->
+            if !best < 0 || didx < !best
+            then (
+              let d = Dynarray.get t.diseqs didx in
+              if find t d.d_a = find t d.d_b then best := didx))
+          (get t r).dl)
+      dirty;
+    if !best < 0
+    then (
+      t.check_mark <- newmark;
+      Consistent)
+    else conflict_of (Dynarray.get t.diseqs !best))
+  else (
+    let result = ref Consistent in
+    (try
+       Dynarray.iteri
+         (fun _ d ->
+           if find t d.d_a = find t d.d_b
+           then (
+             result := conflict_of d;
+             raise Exit))
+         t.diseqs
+     with
+     | Exit -> ());
+    !result)
 ;;
 
 (* --- disequality propagation + Nelson-Oppen sharing ---------------------- *)
@@ -987,36 +1202,64 @@ let check t =
    gate-fail falls back to the authoritative full scan (which also covers a diseq asserted
    since the build, which the index would lack). Same result as the scan in every case (a
    fast path over a sound fallback), so output is unchanged. *)
+(* C1-incr witness: the earliest-asserted (minimum diseq-index) diseq separating the
+   distinct CURRENT roots [{ra, rb}], or [None]. A separating diseq has one endpoint
+   rooted at [ra] and one at [rb], so it lives in BOTH incident lists; we scan the shorter
+   [dl] and take the minimum index. Byte-identical to the full assertion-order scan's
+   FIRST hit ([dl] holds every separating diseq's index, so the incident-list minimum IS
+   that first one) ⇒ same witness object ⇒ same [d_prem] ⇒ identical learned clauses. Only
+   called on the [sep_count]-guarded path (a witness is known to exist), so the scan is
+   never wasted on a non-separated pair. *)
+let dl_witness t ra rb =
+  let la = (get t ra).dl
+  and lb = (get t rb).dl in
+  let lst = if List.compare_lengths la lb <= 0 then la else lb in
+  let best = ref (-1) in
+  List.iter
+    (fun didx ->
+      if !best < 0 || didx < !best
+      then (
+        let d = Dynarray.get t.diseqs didx in
+        let du = find t d.d_a
+        and dv = find t d.d_b in
+        if (du = ra && dv = rb) || (du = rb && dv = ra) then best := didx))
+    lst;
+  if !best < 0 then None else Some (Dynarray.get t.diseqs !best)
+;;
+
 let distinct_witness t a b =
   let ra = find t a
   and rb = find t b in
-  let full_scan () =
-    let w = ref None in
-    (try
-       Dynarray.iter
-         (fun d ->
-           let du = find t d.d_a
-           and dv = find t d.d_b in
-           if (du = ra && dv = rb) || (du = rb && dv = ra)
-           then (
-             w := Some d;
-             raise Exit))
-         t.diseqs
-     with
-     | Exit -> ());
-    !w
-  in
-  let m = t.sep_wit_m in
-  if m > 0 && Dynarray.length t.enodes = m && ra < m && rb < m
-  then (
-    let key = if ra <= rb then (ra * m) + rb else (rb * m) + ra in
-    match Int_set.find_opt t.sep_wit key with
-    | Some d ->
-      let du = find t d.d_a
-      and dv = find t d.d_b in
-      if (du = ra && dv = rb) || (du = rb && dv = ra) then Some d else full_scan ()
-    | None -> full_scan ())
-  else full_scan ()
+  if t.incr
+  then if ra = rb || sep_get t (sep_key ra rb) = 0 then None else dl_witness t ra rb
+  else (
+    let full_scan () =
+      let w = ref None in
+      (try
+         Dynarray.iter
+           (fun d ->
+             let du = find t d.d_a
+             and dv = find t d.d_b in
+             if (du = ra && dv = rb) || (du = rb && dv = ra)
+             then (
+               w := Some d;
+               raise Exit))
+           t.diseqs
+       with
+       | Exit -> ());
+      !w
+    in
+    let m = t.sep_wit_m in
+    if m > 0 && Dynarray.length t.enodes = m && ra < m && rb < m
+    then (
+      let key = if ra <= rb then (ra * m) + rb else (rb * m) + ra in
+      match Int_set.find_opt t.sep_wit key with
+      | Some d ->
+        let du = find t d.d_a
+        and dv = find t d.d_b in
+        if (du = ra && dv = rb) || (du = rb && dv = ra) then Some d else full_scan ()
+      | None -> full_scan ())
+    else full_scan ())
 ;;
 
 type implied =
@@ -1048,40 +1291,95 @@ let propagate t =
   t.prop_mark <- Dynarray.length t.touched;
   let acc = ref [] in
   if Int_set.length dirty > 0
-  then (
-    (* Separated-class index, built ONCE per [propagate] call. No merge happens inside a
-       [propagate], so every representative is stable here: the unordered root-pair
-       [{find d_a, find d_b}] of each asserted disequality is fixed for the whole call. So
-       instead of re-running the O(#diseqs) [distinct_witness] scan for every dirty
-       watched atom (the quadratic that dominated QG: ~252 dirty atoms × up to ~600 diseqs
-       × 2 finds each, per call), we scan the diseqs once into a hash set of normalized
-       (lo,hi) root pairs and test membership in O(1) per watched atom. Equivalent
-       predicate: [distinct_witness a b <> None] iff the unordered pair [{find a, find b}]
-       equals some diseq's separated pair — exactly membership of its normalized key.
-       [propagate] only needs this boolean; the citable witness is still produced by
-       [distinct_witness] via [explain_implied], which the adapter calls at propagation
-       time to snapshot each propagation's reason (#102 CONTRACT-EX), so the witness path
-       is unchanged. The set is membership-tested only (never iterated), so it introduces
-       no Hashtbl-order into any observable path (C8); watched iteration stays in
-       registration/index order, so the reported list is byte-identical to the old
-       full-scan output.
+  then
+    if t.incr
+    then (
+      (* Incremental path (OXSMT_EUF_INCR): [dirty] holds the roots touched since the last
+         call. A watched atom's entailed truth can flip only if an endpoint now roots at a
+         dirty class, so the candidates are exactly the atoms indexed under a dirty root's
+         [wl] — no scan of all of [t.watched]/[t.diseqs]. We collect them, dedup, and
+         process in ascending watched index (= registration order = the full scan's
+         [Dynarray.iteri] order), so the reported list is byte-identical regardless of
+         [wl]/[dirty] hash order (C8).
 
-       Error asymmetry (soundness): a FALSE POSITIVE in this set (a spurious separated
-       pair, or a stale/pre-merge rep that coincides with a watched pair's roots) makes
-       [propagate] report a watched Eq FALSE that is not actually entailed distinct — a
-       wrong theory propagation, the wrong-verdict direction. A FALSE NEGATIVE (a real
-       separated pair missing) only drops a distinct-propagation — a completeness loss,
-       not a soundness one. We do not lean on the downstream lazy [explain_implied] guard
-       to catch a spurious propagation; the [test_propagate_pushpop_vs_full] oracle checks
-       byte-identical output against an independent full scan, forbidding BOTH directions
-       (mutants [euf_propagate_sep_stale_reps] / [euf_propagate_sep_skip_rebuild]). *)
-    (* Reuse the engine-owned witness index (cleared, not reallocated). It maps each
-       separated root pair to a WITNESS diseq (not just [()]); {!propagate} needs only the
-       membership test, but recording the witness is free here (we already scan every
-       diseq) and lets {!distinct_witness} skip its own O(#diseqs) rescan. *)
-    let sep = t.sep_wit in
-    Int_set.clear sep;
-    (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
+         Verdict identity: this candidate set is a SUPERSET of the full scan's "dirty
+         endpoint" set — a [wl] entry survives on its root even after that root later
+         merges into another (spliced, not cleared, like [uses]), so a candidate's current
+         roots may not both be dirty. But every EXTRA atom re-reports NOTHING: if neither
+         current root is dirty its status is unchanged since it was last evaluated, so
+         [cur] equals the last reported value (or is still [-1] unknown) and the
+         [cur <> w_reported] guard drops it — exactly what the full scan does for it. So
+         the emitted list is identical, at cost proportional to the delta rather than to
+         [#watched] + [#diseqs]. Separation is decided by an O(1) lookup in the
+         incrementally-maintained [sep_count] map, and the citable witness is still
+         {!distinct_witness} (incr: [sep_count]-guarded {!dl_witness}, the same
+         earliest-asserted diseq the full scan cites). *)
+      if Dynarray.length t.enodes > sep_base
+      then invalid_arg "Euf.propagate: e-node count exceeds packing bound";
+      let cand = t.cand
+      and seen = t.cand_seen in
+      Dynarray.clear cand;
+      Int_set.clear seen;
+      Int_set.iter
+        (fun r () ->
+          List.iter
+            (fun idx ->
+              if not (Int_set.mem seen idx)
+              then (
+                Int_set.replace seen idx ();
+                Dynarray.add_last cand idx))
+            (get t r).wl)
+        dirty;
+      let ord = Dynarray.to_array cand in
+      Array.sort (compare : int -> int -> int) ord;
+      Array.iter
+        (fun idx ->
+          let w = Dynarray.get t.watched idx in
+          let ra = find t w.w_a
+          and rb = find t w.w_b in
+          let cur =
+            if ra = rb then 1 else if sep_get t (sep_key ra rb) > 0 then 0 else -1
+          in
+          if cur <> -1 && cur <> w.w_reported
+          then (
+            set_reported t idx cur;
+            acc := { atom = w.w_atom; value = cur = 1 } :: !acc))
+        ord)
+    else (
+      (* Separated-class index, built ONCE per [propagate] call. No merge happens inside a
+         [propagate], so every representative is stable here: the unordered root-pair
+         [{find d_a, find d_b}] of each asserted disequality is fixed for the whole call.
+         So instead of re-running the O(#diseqs) [distinct_witness] scan for every dirty
+         watched atom (the quadratic that dominated QG: ~252 dirty atoms × up to ~600
+         diseqs × 2 finds each, per call), we scan the diseqs once into a hash set of
+         normalized (lo,hi) root pairs and test membership in O(1) per watched atom.
+         Equivalent predicate: [distinct_witness a b <> None] iff the unordered pair
+         [{find a, find b}] equals some diseq's separated pair — exactly membership of its
+         normalized key. [propagate] only needs this boolean; the citable witness is still
+         produced by [distinct_witness] via [explain_implied], which the adapter calls at
+         propagation time to snapshot each propagation's reason (#102 CONTRACT-EX), so the
+         witness path is unchanged. The set is membership-tested only (never iterated), so
+         it introduces no Hashtbl-order into any observable path (C8); watched iteration
+         stays in registration/index order, so the reported list is byte-identical to the
+         old full-scan output.
+
+         Error asymmetry (soundness): a FALSE POSITIVE in this set (a spurious separated
+         pair, or a stale/pre-merge rep that coincides with a watched pair's roots) makes
+         [propagate] report a watched Eq FALSE that is not actually entailed distinct — a
+         wrong theory propagation, the wrong-verdict direction. A FALSE NEGATIVE (a real
+         separated pair missing) only drops a distinct-propagation — a completeness loss,
+         not a soundness one. We do not lean on the downstream lazy [explain_implied]
+         guard to catch a spurious propagation; the [test_propagate_pushpop_vs_full]
+         oracle checks byte-identical output against an independent full scan, forbidding
+         BOTH directions (mutants [euf_propagate_sep_stale_reps] /
+         [euf_propagate_sep_skip_rebuild]). *)
+      (* Reuse the engine-owned witness index (cleared, not reallocated). It maps each
+         separated root pair to a WITNESS diseq (not just [()]); {!propagate} needs only
+         the membership test, but recording the witness is free here (we already scan
+         every diseq) and lets {!distinct_witness} skip its own O(#diseqs) rescan. *)
+      let sep = t.sep_wit in
+      Int_set.clear sep;
+      (* Pack an unordered rep pair [(lo, hi)] into one [int] key: [lo * m + hi] with
        [m = #e-nodes]. Every rep is an e-node id in [0, m), so distinct pairs give distinct
        keys UNLESS the packing wraps: OCaml [int] arithmetic is mod 2^63, so injectivity
        holds only for [m < floor (sqrt (2^63)) ~ 3.037e9]; the fail-closed check below
@@ -1089,49 +1387,50 @@ let propagate t =
        two pairs. No merge happens inside [propagate], so [m] and
        every [find] are stable for the whole call; the build and lookup loops therefore use
        the same [m]. *)
-    let m = Dynarray.length t.enodes in
-    (* [m] is fixed for the whole call (no merge inside [propagate]). Guard the packing's
-       injectivity precondition once here: keys alias only once [lo*m+hi] wraps mod 2^63,
-       i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We enforce the STRICTER [m <= 2^31]
-       with an EXPLICIT fail-closed raise (NOT [assert], which [main/dune]'s release
-       [-noassert] would compile out of the promotable binary): an overflowed key could
-       alias two pairs and yield a wrong distinct-propagation (the wrong-verdict
-       direction), so we raise instead — degrading to a sound [Unknown] via the solve
-       firewall's catch-all ({!Session.raw_solve}) — rather than relying on the assert
-       firing. The bound is also physically unreachable ([m > 2^31] e-nodes ~ 155 GB). *)
-    if m > 1 lsl 31 then invalid_arg "Euf.propagate: e-node count exceeds packing bound";
-    t.sep_wit_m <- m;
-    let pack lo hi = (lo * m) + hi in
-    Dynarray.iter
-      (fun d ->
-        let du = find t d.d_a
-        and dv = find t d.d_b in
-        let key = if du <= dv then pack du dv else pack dv du in
-        (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
-           so the witness {!distinct_witness} serves is byte-identical to what its full
-           assertion-order scan would return (same premise token ⇒ identical learned
-           clauses ⇒ counted-metric identity). [Dynarray.iter] visits diseqs in assertion
-           order. *)
-        if not (Int_set.mem sep key) then Int_set.replace sep key d)
-      t.diseqs;
-    Dynarray.iteri
-      (fun idx w ->
-        let ra = find t w.w_a
-        and rb = find t w.w_b in
-        if Int_set.mem dirty ra || Int_set.mem dirty rb
-        then (
-          let cur =
-            if ra = rb
-            then 1
-            else (
-              let key = if ra <= rb then pack ra rb else pack rb ra in
-              if Int_set.mem sep key then 0 else -1)
-          in
-          if cur <> -1 && cur <> w.w_reported
+      let m = Dynarray.length t.enodes in
+      (* [m] is fixed for the whole call (no merge inside [propagate]). Guard the
+         packing's injectivity precondition once here: keys alias only once [lo*m+hi]
+         wraps mod 2^63, i.e. at [m >= floor (sqrt (2^63)) ~ 3.037e9]. We enforce the
+         STRICTER [m <= 2^31] with an EXPLICIT fail-closed raise (NOT [assert], which
+         [main/dune]'s release [-noassert] would compile out of the promotable binary): an
+         overflowed key could alias two pairs and yield a wrong distinct-propagation (the
+         wrong-verdict direction), so we raise instead — degrading to a sound [Unknown]
+         via the solve firewall's catch-all ({!Session.raw_solve}) — rather than relying
+         on the assert firing. The bound is also physically unreachable ([m > 2^31]
+         e-nodes ~ 155 GB). *)
+      if m > 1 lsl 31 then invalid_arg "Euf.propagate: e-node count exceeds packing bound";
+      t.sep_wit_m <- m;
+      let pack lo hi = (lo * m) + hi in
+      Dynarray.iter
+        (fun d ->
+          let du = find t d.d_a
+          and dv = find t d.d_b in
+          let key = if du <= dv then pack du dv else pack dv du in
+          (* FIRST-writer-wins: keep the earliest-asserted separating diseq for each pair,
+             so the witness {!distinct_witness} serves is byte-identical to what its full
+             assertion-order scan would return (same premise token ⇒ identical learned
+             clauses ⇒ counted-metric identity). [Dynarray.iter] visits diseqs in
+             assertion order. *)
+          if not (Int_set.mem sep key) then Int_set.replace sep key d)
+        t.diseqs;
+      Dynarray.iteri
+        (fun idx w ->
+          let ra = find t w.w_a
+          and rb = find t w.w_b in
+          if Int_set.mem dirty ra || Int_set.mem dirty rb
           then (
-            set_reported t idx cur;
-            acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
-      t.watched);
+            let cur =
+              if ra = rb
+              then 1
+              else (
+                let key = if ra <= rb then pack ra rb else pack rb ra in
+                if Int_set.mem sep key then 0 else -1)
+            in
+            if cur <> -1 && cur <> w.w_reported
+            then (
+              set_reported t idx cur;
+              acc := { atom = w.w_atom; value = cur = 1 } :: !acc)))
+        t.watched);
   List.rev !acc
 ;;
 
@@ -1276,9 +1575,7 @@ let class_members t term =
 
 (* Every registered term in registration (e-node id) order. This is the exact finite
    universe used to build an immutable accepting-Final snapshot for E-matching. *)
-let registered_terms t =
-  List.init (Dynarray.length t.enodes) (fun id -> (get t id).term)
-;;
+let registered_terms t = List.init (Dynarray.length t.enodes) (fun id -> (get t id).term)
 
 (* Registered terms whose sort is [sort], in registration (id) order. Non-registering: it
    only reads the [enodes] Dynarray (never [register]), like the other four query
@@ -1305,6 +1602,7 @@ let push t =
     ; l_diseqs = Dynarray.length t.diseqs
     ; l_touched = Dynarray.length t.touched
     ; l_prop_mark = t.prop_mark
+    ; l_check_mark = t.check_mark
     }
 ;;
 
@@ -1320,6 +1618,7 @@ let restore_aux t lv =
      deeper level (its [set_reported] now undone by the trail) is re-evaluated here. *)
   Dynarray.truncate t.touched lv.l_touched;
   t.prop_mark <- lv.l_prop_mark;
+  t.check_mark <- lv.l_check_mark;
   for i = Dynarray.length t.enodes - 1 downto lv.l_enodes do
     Term.Table.remove t.index (get t i).term
   done;
@@ -1368,6 +1667,7 @@ let checkpoint t =
       ; l_diseqs = Dynarray.length t.diseqs
       ; l_touched = Dynarray.length t.touched
       ; l_prop_mark = t.prop_mark
+      ; l_check_mark = t.check_mark
       }
   }
 ;;

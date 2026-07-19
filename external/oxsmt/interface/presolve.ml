@@ -1097,6 +1097,17 @@ let symbreak_consider_max = 8
 (* Size cap (sat-safe): emit lex-leader only for classes of size in [2, symbreak_emit_max). *)
 let symbreak_emit_max = 6
 
+(* Route A (OXSMT_SYMBREAK_UFTAIL) — the QF_UF algorithm-bound tail (QG-classification / NEQ
+   / PEQ; z3 diagnosis logs/z3diag-uftail-report.md). The size cap and the bucket cap blank
+   every interchangeable class of size >= 6, but every class in that tail is size 6..14. With
+   the lever ON we lift both caps ONLY for a class whose constants are (a subset of) the
+   value-set of some totality clause [(or (= cell c0) ... (= cell ck))] — z3's
+   [is_range_restriction] shape, ported as a GUARD. Ordinary SAT instances (no such clause)
+   are untouched. This only makes such a class an ELIGIBLE CANDIDATE; the one-class clamp
+   still emits a single class, so the multi-class simultaneous-breaking unsoundness is
+   structurally impossible. Dark: default OFF => byte-identical to trunk. *)
+let symbreak_uftail_consider_max = 32
+
 (* Cap the lex atom sequence per class (a longer sequence only strengthens the break; we
    truncate deterministically in tag order — still sound). *)
 let symbreak_atoms_max = 512
@@ -1197,8 +1208,10 @@ let symbreak_stats_on =
    DEFAULT-ON (quiesced A/B on the frozen pre-land sha, QF_UF Goel+QG: OFF 6958 -> ON 6964
    = +6, gain-only, 0 flips -- logs/symbreak-budget-quiesced-ab.md; dual-review APPROVE
    logs/symbreak-budget-review-fable.md). [OXSMT_SYMBREAK_BUDGET] set to 0/false/no opts
-   out (byte-identical to the pre-flip default: every class with
-   [2 <= k < symbreak_emit_max] emits, uncapped detection); unset / any other value => ON.
+   out of the merit gate (uncapped detection; every class with [2 <= k < symbreak_emit_max]
+   is ELIGIBLE). NOTE the one-class clamp still applies with the budget off: at most the
+   single highest-merit eligible class emits per formula regardless of this flag. Unset / any
+   other value => ON.
    The opt-out token set is the SAME as [OXSMT_SYMBREAK] / [OXSMT_BASE_L0] /
    [OXSMT_ARR_ROW2]. Read once per [symmetry_break] call (a single [getenv], negligible
    against the pass); NOT cached, so a test can exercise both states in one process. *)
@@ -1206,6 +1219,87 @@ let symbreak_budget_enabled () =
   match Sys.getenv_opt "OXSMT_SYMBREAK_BUDGET" with
   | Some ("0" | "false" | "no") -> false
   | Some _ | None -> true
+;;
+
+(* Route A dark lever (default OFF => byte-identical to trunk). When ON, the size and bucket
+   caps are lifted for RANGE-RESTRICTED classes only (below). Read once per call. *)
+let symbreak_uftail_enabled () =
+  match Sys.getenv_opt "OXSMT_SYMBREAK_UFTAIL" with
+  | Some ("1" | "true" | "yes") -> true
+  | Some _ | None -> false
+;;
+
+(* Value-sets of totality clauses [(or (= cell c0) ... (= cell ck))] in [conjuncts]: each
+   such [Or] pins one term [cell] (a non-free-const application) to the free constants
+   [{c0..ck}]. A class is RANGE-RESTRICTED (Route A guard) iff its constant set is a subset of
+   one of these value-sets. z3's [is_range_restriction] shape. Pure / deterministic; a single
+   memoized DAG walk. *)
+let symbreak_totality_valuesets conjuncts =
+  let seen = Term.Table.create 512 in
+  let sets = ref [] in
+  let classify (disjuncts : Term.t list) =
+    match disjuncts with
+    | [] | [ _ ] -> None
+    | _ ->
+      let cell = ref None in
+      let consts = ref Term.Set.empty in
+      let ok = ref true in
+      List.iter
+        (fun (d : Term.t) ->
+           if !ok
+           then (
+             match d.Term.node with
+             | Eq (a, b) ->
+               let a_free = is_free_const a in
+               let b_free = is_free_const b in
+               let picked =
+                 if a_free && not b_free
+                 then Some (b, a)
+                 else if b_free && not a_free
+                 then Some (a, b)
+                 else None
+               in
+               (match picked with
+                | None -> ok := false
+                | Some (this_cell, this_const) ->
+                  (match !cell with
+                   | None -> cell := Some this_cell
+                   | Some c -> if not (Term.equal c this_cell) then ok := false);
+                  consts := Term.Set.add this_const !consts)
+             | _ -> ok := false))
+        disjuncts;
+      if !ok && Term.Set.cardinal !consts >= 2 then Some !consts else None
+  in
+  let rec go (t : Term.t) =
+    if not (Term.Table.mem seen t)
+    then (
+      Term.Table.add seen t ();
+      match t.Term.node with
+      | Or xs ->
+        (match classify (Iarr.to_list xs) with
+         | Some cset -> sets := cset :: !sets
+         | None -> ());
+        Iarr.iter go xs
+      | And xs -> Iarr.iter go xs
+      | Not a | Le a -> go a
+      | Eq (a, b) ->
+        go a;
+        go b
+      | Ite (c, a, b) ->
+        go c;
+        go a;
+        go b
+      | App (_, args) -> Iarr.iter go args
+      | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+      | Real_arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
+  in
+  List.iter go conjuncts;
+  !sets
+;;
+
+let class_is_range_restricted valuesets class_set =
+  List.exists (fun v -> Term.Set.subset class_set v) valuesets
 ;;
 
 (* Per-class local structural merit (zero tuned constant, family-blind). Breaking a class
@@ -1230,6 +1324,16 @@ let symmetry_break ~counter cap env ctx assertions =
   let base_key = symbreak_tag_multiset conjuncts in
   let stats_on = Lazy.force symbreak_stats_on in
   let budget_on = symbreak_budget_enabled () in
+  let uftail_on = symbreak_uftail_enabled () in
+  (* Route A: totality-clause value-sets (empty unless the lever is ON). Their PRESENCE marks
+     a formula as a member of the target tail; the wider bucket scan is gated on it so uftail
+     is a strict NO-OP on formulas lacking the range-restriction shape. *)
+  let valuesets = if uftail_on then symbreak_totality_valuesets conjuncts else [] in
+  let consider_max =
+    if uftail_on && valuesets <> []
+    then symbreak_uftail_consider_max
+    else symbreak_consider_max
+  in
   let n_conjuncts = List.length conjuncts in
   let class_log = ref [] in
   let dag_nodes = ref 0 in
@@ -1372,6 +1476,21 @@ let symmetry_break ~counter cap env ctx assertions =
     let cell_list = Term.Set.elements !cells in
     let out = ref [] in
     let n_constraints = ref 0 in
+    (* One-class clamp (SOUNDNESS, all paths). Breaking a SINGLE confirmed-automorphism
+       class with a lex-leader is sound (it keeps >=1 representative per orbit of that
+       class's symmetry group; other symmetries are simply left unbroken). But emitting an
+       INDEPENDENT class-local lex-leader for two or more classes that are LINKED through
+       shared function symbols is UNSOUND: their separate orderings can jointly eliminate
+       every common orbit representative -> wrong-UNSAT (classic simultaneous symmetry
+       breaking; repro tests/solver/data qa_two_classes_opposite_parity). The budget
+       merit-gate happened to mask this on trunk by usually leaving one class, but the hole
+       is latent. So we emit for AT MOST ONE class per formula. Detection collects every
+       eligible class (passes size cap + merit) as a candidate; after detection we emit the
+       single HIGHEST-MERIT class (most application cells of the class sort), ties broken by
+       the smallest class-constant tag (i.e. the first in the existing deterministic order).
+       Emitting the most-used class preserves the most pruning on the pervasive-domain files
+       (QG-classification) at no soundness cost. Deterministic (I6). *)
+    let candidates = ref [] in
     (* one group per distinct sort (tag order preserved by [filter]); deterministic
        sort-group order by the min constant tag in the group. *)
     let sort_groups =
@@ -1404,7 +1523,7 @@ let symmetry_break ~counter cap env ctx assertions =
          List.iter
            (fun bucket ->
               let n = List.length bucket in
-              if n >= 2 && n <= symbreak_consider_max
+              if n >= 2 && n <= consider_max
               then (
                 let arr = Array.of_list bucket in
                 (* arr is in tag order (bucket built from tag-ordered group, rev preserves) *)
@@ -1443,106 +1562,117 @@ let symmetry_break ~counter cap env ctx assertions =
                 List.iter
                   (fun consts_in_class ->
                      let k = List.length consts_in_class in
-                     (* SIZE CAP (sat-safe): emit only for 2 <= k < symbreak_emit_max. *)
-                     if k >= 2 && k < symbreak_emit_max
+                     (* Route A (uftail): a class whose constants are the value-domain of a
+                        totality clause is RANGE-RESTRICTED — z3 breaks exactly these. Lift the
+                        size cap and merit gate for it. Still sound: the one-class clamp emits
+                        a single class, so multi-class simultaneous breaking cannot occur. *)
+                     let uftail_class =
+                       uftail_on
+                       && class_is_range_restricted
+                            valuesets
+                            (Term.Set.of_list consts_in_class)
+                     in
+                     (* SIZE CAP (sat-safe): consider 2 <= k < symbreak_emit_max, OR any size
+                        when [uftail_class] lifts the cap (Route A). *)
+                     if k >= 2 && (k < symbreak_emit_max || uftail_class)
                      then (
-                       let c0 = !n_constraints in
-                       let cs = Array.of_list consts_in_class in
-                       (* class sort *)
-                       let csort = cs.(0).Term.sort in
-                       (* atoms = (= cell c_v) for cells of the class sort, values in class;
-                       fixed order: (cell tag, value tag), truncated to the atom cap. *)
+                       let csort = (List.hd consts_in_class).Term.sort in
                        let class_cells =
                          List.filter (fun c -> Sort.equal c.Term.sort csort) cell_list
                        in
-                       (* Size-relative budget (OXSMT_SYMBREAK_BUDGET, DEFAULT-ON). When
-                       ON (the default), drop a class whose domain is not used
-                       combinatorially enough to be worth the lex-leader cost (board #64).
-                       Set to 0/false/no to opt out: every class is kept, so the whole [if]
-                       guard collapses to [true] and emission is byte-identical to the
-                       pre-flip default. Only ever SKIPS emission — sound (see
-                       [class_merits_break]). *)
+                       (* Size-relative budget (OXSMT_SYMBREAK_BUDGET, DEFAULT-ON): a class
+                          whose domain is not used combinatorially enough is not worth the
+                          lex-leader cost (board #64). Eligibility only — the clamp emits at
+                          most one of the eligible classes. Bypassed for a range-restricted
+                          uftail class (its combinatorial use is the totality structure). *)
                        if
                          (not budget_on)
+                         || uftail_class
                          || class_merits_break ~k ~n_cells:(List.length class_cells)
                        then (
-                         let atoms = ref [] in
-                         let natoms = ref 0 in
-                         (try
-                            List.iter
-                              (fun cell ->
-                                 Array.iter
-                                   (fun v ->
-                                      if !natoms >= symbreak_atoms_max then raise Exit;
-                                      atoms := Context.eq ctx cell v :: !atoms;
-                                      incr natoms)
-                                   cs)
-                              class_cells
-                          with
-                          | Exit -> ());
-                         let atoms = List.rev !atoms in
-                         (* full-action lex-leader for each adjacent generator (c_i
-                         c_[{i+1}]). The lex constraint A <= g(A) over the atom sequence,
-                         false<true, encoded with an O(n) prefix-equal chain of fresh aux
-                         vars: p_0 = true; for each moved atom a_j (image b_j): (p_j /\
-                         a_j) -> b_j [lex step] p_[{j+1}] <-> (p_j /\ (a_j = b_j))
-                         [prefix advance] *)
-                         for i = 0 to k - 2 do
-                           let a = cs.(i)
-                           and b = cs.(i + 1) in
-                           let sigma = Term.Map.add a b (Term.Map.singleton b a) in
-                           let images = symbreak_rebuild ctx sigma bump atoms in
-                           (* the atoms actually MOVED by g (a_j <> b_j); fixed atoms
-                           contribute a vacuous step and no prefix change, so they are
-                           dropped soundly. *)
-                           let seq =
-                             List.rev
-                               (List.fold_left2
-                                  (fun acc atom image ->
-                                     if Term.equal atom image
-                                     then acc
-                                     else (atom, image) :: acc)
-                                  []
-                                  atoms
-                                  images)
-                           in
-                           let m = List.length seq in
-                           let prefix = ref (Context.bool_const ctx true) in
-                           List.iteri
-                             (fun j (atom, image) ->
-                                (* (prefix /\ atom) -> image *)
-                                let lhs = Context.and_ ctx [ !prefix; atom ] in
-                                out
-                                := Context.or_ ctx [ Context.not_ ctx lhs; image ] :: !out;
-                                incr n_constraints;
-                                if !n_constraints > symbreak_constraints_max
-                                then raise Symbreak_budget;
-                                (* advance the prefix through a fresh aux var, except after
-                               the last step (its value is never read). *)
-                                if j < m - 1
-                                then (
-                                  let p = fresh_bool () in
-                                  let def =
-                                    Context.and_
-                                      ctx
-                                      [ !prefix; Context.eq ctx atom image ]
-                                  in
-                                  out := Context.eq ctx p def :: !out;
-                                  incr n_constraints;
-                                  prefix := p))
-                             seq
-                         done;
-                         if stats_on
-                         then
-                           class_log
-                           := ( k
-                              , List.length class_cells
-                              , List.length atoms
-                              , !n_constraints - c0 )
-                              :: !class_log)))
+                         let tag_key =
+                           List.fold_left
+                             (fun m (c : Term.t) -> Int.min m c.Term.tag)
+                             max_int
+                             consts_in_class
+                         in
+                         candidates
+                         := (List.length class_cells, tag_key, consts_in_class, class_cells)
+                            :: !candidates)))
                   classes))
            bucket_list)
       sort_groups;
+    (* One-class clamp: emit the single HIGHEST-MERIT eligible class (most cells), ties ->
+       smallest class-constant tag (first in the existing deterministic order). *)
+    (match
+       List.fold_left
+         (fun best cand ->
+            match best with
+            | None -> Some cand
+            | Some (bn, btag, _, _) ->
+              let n, tag, _, _ = cand in
+              if n > bn || (n = bn && tag < btag) then Some cand else best)
+         None
+         !candidates
+     with
+     | None -> ()
+     | Some (_, _, consts_in_class, class_cells) ->
+       let c0 = !n_constraints in
+       let cs = Array.of_list consts_in_class in
+       let k = Array.length cs in
+       let atoms = ref [] in
+       let natoms = ref 0 in
+       (try
+          List.iter
+            (fun cell ->
+               Array.iter
+                 (fun v ->
+                    if !natoms >= symbreak_atoms_max then raise Exit;
+                    atoms := Context.eq ctx cell v :: !atoms;
+                    incr natoms)
+                 cs)
+            class_cells
+        with
+        | Exit -> ());
+       let atoms = List.rev !atoms in
+       (* full-action lex-leader for each adjacent generator (c_i c_[{i+1}]); A <= g(A) over
+          the atom sequence, false<true, via an O(n) prefix-equal chain of fresh aux vars. *)
+       for i = 0 to k - 2 do
+         let a = cs.(i)
+         and b = cs.(i + 1) in
+         let sigma = Term.Map.add a b (Term.Map.singleton b a) in
+         let images = symbreak_rebuild ctx sigma bump atoms in
+         let seq =
+           List.rev
+             (List.fold_left2
+                (fun acc atom image ->
+                   if Term.equal atom image then acc else (atom, image) :: acc)
+                []
+                atoms
+                images)
+         in
+         let m = List.length seq in
+         let prefix = ref (Context.bool_const ctx true) in
+         List.iteri
+           (fun j (atom, image) ->
+              let lhs = Context.and_ ctx [ !prefix; atom ] in
+              out := Context.or_ ctx [ Context.not_ ctx lhs; image ] :: !out;
+              incr n_constraints;
+              if !n_constraints > symbreak_constraints_max then raise Symbreak_budget;
+              if j < m - 1
+              then (
+                let p = fresh_bool () in
+                let def = Context.and_ ctx [ !prefix; Context.eq ctx atom image ] in
+                out := Context.eq ctx p def :: !out;
+                incr n_constraints;
+                prefix := p))
+           seq
+       done;
+       if stats_on
+       then
+         class_log
+         := (k, List.length class_cells, List.length atoms, !n_constraints - c0)
+            :: !class_log);
     emit_stats ~aborted:false;
     List.rev !out
   with

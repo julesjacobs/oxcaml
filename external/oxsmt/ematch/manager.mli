@@ -51,6 +51,8 @@ type instantiation =
 val create
   :  ?gen_budget:int
   -> ?seed:bool
+  -> ?model_guided:bool (* quant-mgi: flood-gated model-guided filter, default false *)
+  -> ?mgi_threshold:int
   -> ?seed_cap:int
   -> ?pool_cap:int
   -> ?streaming_partial:bool

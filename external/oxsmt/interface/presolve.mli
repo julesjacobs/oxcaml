@@ -141,14 +141,23 @@ val simplify_projection : Context.t -> Term.t list -> Term.t list
 
     {b Emission is a SOUND lex-leader, never value precedence.} Value precedence is proven
     UNSOUND for this index+value symmetry (constants appear as both function arguments and
-    values → real SAT→UNSAT flips). For each class and each adjacent generator [g] the
-    pass requires the assignment [A] to be lexicographically <= [g(A)] over a fixed atom
-    sequence, encoded with an O(n) prefix-equal chain carried by fresh reserved
-    [".oxsmt.sym.*"] nullary Bool aux vars (see the last paragraph). [A ⪯ g(A)] keeps >=1
-    representative per orbit ⇒ SAT-preserving; adding constraints ⇒ UNSAT-preserving.
+    values → real SAT→UNSAT flips). The pass emits for AT MOST ONE class per formula —
+    the single highest-merit eligible class (the one-class clamp): conjoining independent
+    class-local lex-leaders for two or more LINKED classes can jointly delete every common
+    orbit representative (wrong-UNSAT), so only one class is broken. For that class and each
+    adjacent generator [g] the pass requires the assignment [A] to be lexicographically
+    <= [g(A)] over a fixed atom sequence, encoded with an O(n) prefix-equal chain carried
+    by fresh reserved [".oxsmt.sym.*"] nullary Bool aux vars (see the last paragraph).
+    [A ⪯ g(A)] keeps >=1 representative per orbit ⇒ SAT-preserving; adding constraints ⇒
+    UNSAT-preserving.
 
-    {b Size cap (sat-safe).} Emission is skipped for classes of size >= 6 (offline A/B:
-    the size-6/7 classes regress the satisfiable instances they touch for ~0 conversion).
+    {b Size cap (sat-safe), with a range-restriction override.} By default emission is
+    skipped for classes of size >= 6 (offline A/B: the size-6/7 classes regress the
+    satisfiable instances they touch for ~0 conversion). The [OXSMT_SYMBREAK_UFTAIL] lever
+    (default OFF, byte-identical to trunk when off) lifts the size and bucket caps for
+    RANGE-RESTRICTED classes only — those whose constant set is a subset of some totality
+    clause's value-set [(or (= cell c0) ... (= cell ck))] (z3's [is_range_restriction]
+    shape, ported as a guard) — capturing the QF_UF QG/NEQ/PEQ algorithm-bound tail.
 
     {b Equisatisfiable, not equivalent.} The returned constraints REMOVE symmetric models,
     so the caller must NOT record them in the R1 self-check set (a found model still

@@ -193,6 +193,13 @@ type t =
          tracing may not be installed afterwards: its recorder must observe the clause
          database from the pristine start, including units and learned clauses produced by
          an assumption query. *)
+  ; mutable minimize_probes : int
+      (* Diagnostic (never consulted by the solver): the number of incremental re-solves
+         [check_sat_assuming]'s core minimizer spent since the last
+         [reset_assumption_check] — the initial assumption solve plus every
+         deletion/refinement probe plus the final replay. Surfaced test-only via
+         {!minimize_probes} so the property test and benchmark can compare the linear and
+         clause-set-refinement strategies honestly. *)
   ; mutable presolve_certificate_trace : presolve_certificate_trace option
       (* Off-seam statement/witness channel for W1b equality elimination. [None] in every
          ordinary solve. Callback results are recorder ids and never feed search. *)
@@ -267,12 +274,43 @@ let create
        | Some ("0" | "false" | "no") -> false
        | Some _ | None -> true)
   in
+  (* Lemma generation budget per [check_sat]: [OXSMT_LEMMA_GEN_BUDGET] env override
+     (quant-mgi tuning knob). The explicit [lemma_gen_budget] param wins; else the env
+     override; else [None] => the manager's default (100k). Byte-identical to trunk when
+     unset. FAIR (the landed streaming/fair instantiation, LAND 45) supersedes a raised
+     DEFAULT for the quantified board, so this ships only the knob, not a default change. *)
+  let lemma_gen_budget =
+    match lemma_gen_budget with
+    | Some _ as b -> b
+    | None ->
+      (match Sys.getenv_opt "OXSMT_LEMMA_GEN_BUDGET" with
+       | Some s -> int_of_string_opt s
+       | None -> None)
+  in
   (* Under base-l0 the redundant level-0-unit cert DECLARATIONS ([on_unit]) are suppressed
      (base #53): a base-frame input unit that a level-0 theory conflict retracts in the
      checker's contradictory closure would otherwise spuriously fail the "declared level-0
      unit entailed" check, though the E3 refutation is valid. Emitter-only; no verdict/
      counter effect. The opt-out (not base-l0) keeps every declaration => byte-identical
      to the pre-flip trunk. *)
+  (* OXSMT_EMATCH_MGI (DEFAULT-OFF, dark, quant-mgi): model-guided instantiation. When on,
+     {!Manager.round} drops matcher instances already satisfied by the current model once
+     a [check_sat] is flooding toward the [lemma-gen-budget] Unknown, spending the
+     budget/wall on the model-relevant (conflict / novel) instances instead. OFF is
+     byte-identical (the filter never engages). Opt-in token set (only [=1]/[=true]/
+     [=yes]); selection-only, never changes a verdict unsoundly. *)
+  let model_guided_lemmas =
+    match Sys.getenv_opt "OXSMT_EMATCH_MGI" with
+    | Some ("1" | "true" | "yes") -> true
+    | Some _ | None -> false
+  in
+  (* quant-mgi threshold sweep knob: gen-steps this check before the MGI filter engages.
+     Unset => Manager's default. *)
+  let mgi_threshold_override =
+    match Sys.getenv_opt "OXSMT_EMATCH_MGI_THRESHOLD" with
+    | Some s -> int_of_string_opt s
+    | None -> None
+  in
   let sat = Sat.create ~base_l0_cert_mode:base_at_level0 () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
      unbounded — it still COUNTS (for instrumentation) but never cuts off, so the default
@@ -326,7 +364,14 @@ let create
   ; pp = Preprocess.create cap env ctx
   ; sat
   ; cdclt
-  ; mgr = Manager.create ?gen_budget:lemma_gen_budget ~seed:seed_lemmas ctx env
+  ; mgr =
+      Manager.create
+        ?gen_budget:lemma_gen_budget
+        ~seed:seed_lemmas
+        ~model_guided:model_guided_lemmas
+        ?mgi_threshold:mgi_threshold_override
+        ctx
+        env
   ; prop_to_var = Term.Table.create 256
   ; bool_consts = []
   ; frames = [ base ]
@@ -349,6 +394,7 @@ let create
   ; relevancy
   ; cert_active = false
   ; assumption_query_started = false
+  ; minimize_probes = 0
   ; presolve_certificate_trace = None
   ; sym_counter = ref 0
   ; sym_sel = None
@@ -2178,6 +2224,7 @@ let dedup_assumptions assumptions =
 ;;
 
 let reset_assumption_check t =
+  t.minimize_probes <- 0;
   t.last_verdict <- Unknown;
   t.last_failed_frame_assumptions <- None;
   Cdclt.clear_last_conflict t.cdclt;
@@ -2209,6 +2256,7 @@ let commit_sat_assuming t assumptions =
    Per-probe [begin_check] gives each semantic deletion check its configured effort
    budget; learned clauses remain shared in the incremental SAT core. *)
 let solve_prepared_assumptions t ~fixed assumptions =
+  t.minimize_probes <- t.minimize_probes + 1;
   Cdclt.clear_last_conflict t.cdclt;
   t.last_model <- None;
   t.budget_exhausted <- false;
@@ -2228,6 +2276,18 @@ let solve_prepared_assumptions t ~fixed assumptions =
   t.last_verdict <- verdict;
   verdict
 ;;
+
+(* Test-only fault injection for the verdict-first degradation arms (bugreport 02). Both
+   default [None], are NEVER armed in production, and are consumed once (armed → fires on
+   the next matching probe → resets to [None]). They exist because the degradation arms
+   are essentially unreachable naturally (the replay gate re-certifies a core we just
+   derived), yet the flipped contract — verdict stays [Unsat], only the core drops to
+   [None] — must be test-covered. [inject_deletion_verdict] overrides the next
+   minimization deletion probe's result; [inject_replay_verdict] overrides the final core
+   replay's result. Read only inside {!check_sat_assuming}'s Unsat arm, so no
+   non-assumption path observes them. *)
+let inject_deletion_verdict : verdict option ref = ref None
+let inject_replay_verdict : verdict option ref = ref None
 
 let check_sat_assuming t assumptions =
   match assumptions with
@@ -2297,40 +2357,115 @@ let check_sat_assuming t assumptions =
          | Unsat ->
            (* The frozen SAT core provides a cheap proof-dependent over-approximation.
               Restore every fixed selector, then minimize only the user literals. *)
-           let failed = Hashtbl.create ((2 * List.length prepared) + 1) in
-           List.iter
-             (fun lit -> Hashtbl.replace failed (sat_lit_key lit) ())
-             (Sat.failed_assumptions t.sat);
+           let failed_keys () =
+             let tbl = Hashtbl.create ((2 * List.length prepared) + 1) in
+             List.iter
+               (fun lit -> Hashtbl.replace tbl (sat_lit_key lit) ())
+               (Sat.failed_assumptions t.sat);
+             tbl
+           in
            let initial_core =
+             let failed = failed_keys () in
              List.filter (fun a -> Hashtbl.mem failed (sat_lit_key a.lit)) prepared
            in
-           let without target xs = List.filter (fun a -> a != target) xs in
-           let rec minimize core = function
-             | [] -> Some core
-             | assumption :: rest ->
-               let candidate = without assumption core in
-               (match solve_prepared_assumptions t ~fixed candidate with
-                | Unsat -> minimize candidate rest
-                | Sat -> minimize core rest
-                | Unknown -> None)
+           (* Deletion-based minimization (destructive MUS). [necessary] accumulates the
+              transition literals already witnessed necessary (removing one turns the
+              query Sat); the working tail holds the yet-untested candidates. The
+              invariant "[necessary] plus the tail is Unsat" holds every iteration, so at
+              the end [necessary] is itself a subset-minimal core. Each probe re-solves
+              the whole current working set minus one literal, warm in the shared
+              incremental core.
+
+              CLAUSE-SET REFINEMENT (default; z3 mus.cpp:80 [mus::imp::get_mus1]): when a
+              deletion probe returns Unsat, the SAT core's OWN failed-assumption set is an
+              unsat sub-core of the probed candidate, so every tail literal ABSENT from it
+              is redundant and drops in that single probe — not one re-solve per member
+              (mus.cpp:106, "unknown := core \\ mus"). Each [necessary] literal is
+              guaranteed to reappear in that failed set: its own removal was already
+              witnessed Sat, so it lies in every unsat core of any subset of the working
+              set — hence refinement can never discard a confirmed member, and [necessary]
+              need not be re-tested. Both strategies leave [necessary] subset-minimal;
+              only the probe count differs. [OXSMT_CORE_MIN_LINEAR] set to 1/true/yes
+              selects the pre-refinement linear walk (one probe per initial-core member) —
+              the A/B baseline and a fallback; read here rather than at [create] because
+              it steers only this assumption-query path. *)
+           let refine =
+             match Sys.getenv_opt "OXSMT_CORE_MIN_LINEAR" with
+             | Some ("1" | "true" | "yes") -> false
+             | Some _ | None -> true
            in
-           (match minimize initial_core initial_core with
-            | None -> { verdict = Unknown; unsat_core = None }
-            | Some core ->
+           (* Verdict-first degradation (bugreports 01/02): the initial solve above
+              already certified (active assertions ∧ assumptions) [Unsat] through a
+              completed solve. Any downstream failure to hand back a VERIFIED core — a
+              deletion probe or the final replay degrading to [Unknown], or the replay
+              unexpectedly returning [Sat] (an inconsistent core we refuse to publish) —
+              therefore leaves the verdict at [Unsat] and drops only [unsat_core] to
+              [None], recording a diagnostic tag in [unknown_reason]. The verdict field is
+              never downgraded below what {!check_sat} would report; a consumer keys blame
+              off [Unsat] and reads [unsat_core = None] as "no verified core available". *)
+           let degrade_core reason =
+             t.last_verdict <- Unsat;
+             t.last_model <- None;
+             t.unknown_reason <- reason;
+             { verdict = Unsat; unsat_core = None }
+           in
+           let probe candidate =
+             let verdict = solve_prepared_assumptions t ~fixed candidate in
+             match !inject_deletion_verdict with
+             | Some forced ->
+               inject_deletion_verdict := None;
+               forced
+             | None -> verdict
+           in
+           let rec minimize necessary = function
+             | [] -> Some (List.rev necessary)
+             | assumption :: rest ->
+               (* Probe the entire current working set minus [assumption]. *)
+               let candidate = List.rev_append necessary rest in
+               (match probe candidate with
+                | Unknown -> None
+                | Sat -> minimize (assumption :: necessary) rest
+                | Unsat when not refine -> minimize necessary rest
+                | Unsat ->
+                  let failed = failed_keys () in
+                  let rest =
+                    List.filter (fun a -> Hashtbl.mem failed (sat_lit_key a.lit)) rest
+                  in
+                  minimize necessary rest)
+           in
+           (match minimize [] initial_core with
+            | None -> degrade_core "assumption-core-minimize-unknown"
+            | Some minimal ->
+              (* Restore input order: the minimal core is [minimal] read as a set, so
+                 filtering [initial_core] (already in input order) recovers the order the
+                 documented guarantee promises. *)
+              let core =
+                let in_core = Hashtbl.create ((2 * List.length minimal) + 1) in
+                List.iter
+                  (fun a -> Hashtbl.replace in_core (sat_lit_key a.lit) ())
+                  minimal;
+                List.filter
+                  (fun a -> Hashtbl.mem in_core (sat_lit_key a.lit))
+                  initial_core
+              in
               (* Replay the final core even when the last deletion happened to be an Unsat
                  probe. This makes evidence, failed assumptions, stats, and model state
                  describe exactly the public result. *)
-              (match solve_prepared_assumptions t ~fixed core with
+              let replay =
+                let verdict = solve_prepared_assumptions t ~fixed core in
+                match !inject_replay_verdict with
+                | Some forced ->
+                  inject_replay_verdict := None;
+                  forced
+                | None -> verdict
+              in
+              (match replay with
                | Unsat ->
                  { verdict = Unsat
                  ; unsat_core = Some (List.map (fun a -> a.source) core)
                  }
-               | Unknown -> { verdict = Unknown; unsat_core = None }
-               | Sat ->
-                 t.last_verdict <- Unknown;
-                 t.last_model <- None;
-                 t.unknown_reason <- "assumption-core-recheck-sat";
-                 { verdict = Unknown; unsat_core = None }))))
+               | Unknown -> degrade_core "assumption-core-recheck-unknown"
+               | Sat -> degrade_core "assumption-core-recheck-sat"))))
 ;;
 
 let get_model t =
@@ -2515,8 +2650,15 @@ let last_farkas t =
    (its activation selector still assumed)? Lets [symbreak_test] assert the R2 emission
    restriction directly (no emission under a frame / with lemmas registered). *)
 let symbreak_active_for_test t = Option.is_some t.sym_sel
+
+(* Test-only fault injection (bugreport 02 verdict-first arms): arm the next minimization
+   deletion probe / final core replay to return a chosen verdict, so the degradation arms
+   — unreachable naturally — can be driven. [None] disarms. See [inject_*_verdict] refs. *)
+let inject_deletion_verdict_for_test v = inject_deletion_verdict := v
+let inject_replay_verdict_for_test v = inject_replay_verdict := v
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
+let minimize_probes t = t.minimize_probes
 let budget_exhausted t = t.budget_exhausted
 let effort t = t.last_effort
 let effort_exhausted t = t.effort_exhausted

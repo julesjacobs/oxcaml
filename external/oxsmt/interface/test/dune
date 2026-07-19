@@ -58,3 +58,16 @@
  (name chrono_incr_undo_test)
  (modules chrono_incr_undo_test)
  (libraries oxsmt_core oxsmt_solver oxsmt_interface unix))
+
+; task #36 core-minimization upgrade (clause-set refinement, z3 mus.cpp:get_mus1): proves
+; the refinement preserves the documented subset-minimality guarantee (randomized planted
+; MUS), that linear and refinement agree while refinement spends <= (and, with >= 2 decoys,
+; <) probes, and that the minimality checker discriminates a non-minimal core. Also emits
+; the old-vs-new probe/latency benchmark (N=20/100/500). Arms OXSMT_CORE_MIN_LINEAR
+; in-process (Unix.putenv), so it needs [unix]. Run via `make core-min-test`; also built by
+; `make build`.
+
+(executable
+ (name core_min_test)
+ (modules core_min_test)
+ (libraries oxsmt_core oxsmt_interface unix))

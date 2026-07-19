@@ -1920,10 +1920,8 @@ let check_oxsmt_session_assuming session assumptions =
   let result = Oxsmt_session.check_sat_assuming session assumptions in
   ignore (validate_oxsmt_verdict session result.verdict);
   match result.verdict, result.unsat_core with
-  | Oxsmt_session.Unsat, Some _
+  | Oxsmt_session.Unsat, _
   | (Oxsmt_session.Sat | Oxsmt_session.Unknown), None -> result
-  | Oxsmt_session.Unsat, None ->
-    failwith "oxsmt returned unsat without an assumption core"
   | (Oxsmt_session.Sat | Oxsmt_session.Unknown), Some _ ->
     failwith "oxsmt returned an assumption core for a non-unsat result"
 
@@ -2135,10 +2133,9 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
       match result.verdict, result.unsat_core with
       | Oxsmt_session.Unsat, Some core ->
         result.verdict, unused_oxsmt_facts session fact_assumptions core
+      | Oxsmt_session.Unsat, None -> result.verdict, []
       | (Oxsmt_session.Sat | Oxsmt_session.Unknown), None ->
         result.verdict, []
-      | Oxsmt_session.Unsat, None ->
-        failwith "oxsmt returned unsat without an assumption core"
       | (Oxsmt_session.Sat | Oxsmt_session.Unknown), Some _ ->
         failwith "oxsmt returned an assumption core for a non-unsat result"
     end

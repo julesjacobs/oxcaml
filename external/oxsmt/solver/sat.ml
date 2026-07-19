@@ -19,6 +19,23 @@ let neg_lit l = l lxor 1
 let var_of_lit l = l lsr 1
 let sign_of_lit l = l land 1 = 0
 
+(* QF_LIA round-3 clause-ingest experiment.  [add_clause] sorts and deduplicates every
+   input clause before testing whether it contains both polarities of a variable.  The
+   old test performs a linear [List.mem] for every literal, making a wide clause
+   quadratic.  Literal encoding makes the two polarities [2*v] and [2*v+1], so after the
+   integer sort they are adjacent; one linear pass is exactly equivalent.  Default OFF
+   selects the existing quadratic expression for the corpus A/B. *)
+let linear_tautology_on =
+  match Sys.getenv_opt "OXSMT_SAT_LINEAR_TAUTOLOGY" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+let rec sorted_clause_is_tautology = function
+  | a :: ((b :: _) as rest) -> b = neg_lit a || sorted_clause_is_tautology rest
+  | [] | [ _ ] -> false
+;;
+
 type result =
   | Sat
   | Unsat
@@ -2206,7 +2223,11 @@ let add_clause ?(origin = Query) t lits =
         id
     in
     let ls = List.sort_uniq compare lits in
-    let tautology = List.exists (fun l -> List.mem (neg_lit l) ls) ls in
+    let tautology =
+      if linear_tautology_on
+      then sorted_clause_is_tautology ls
+      else List.exists (fun l -> List.mem (neg_lit l) ls) ls
+    in
     if not tautology
     then (
       let already_true = List.exists (fun l -> lit_val t l = 1) ls in
@@ -2497,7 +2518,11 @@ let enqueue_theory_lits t lits =
    also free of any lost benefit. *)
 let try_lemma_backjump t ls =
   let ded = List.sort_uniq compare ls in
-  let tautology = List.exists (fun l -> List.mem (neg_lit l) ded) ded in
+  let tautology =
+    if linear_tautology_on
+    then sorted_clause_is_tautology ded
+    else List.exists (fun l -> List.mem (neg_lit l) ded) ded
+  in
   if tautology
   then false
   else (

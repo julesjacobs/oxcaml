@@ -316,7 +316,12 @@ let () =
     with_injected_core "non-covering" (fun () ->
       Vox_smt.discharge_oxsmt ~env unused_fact_usage)
   in
-  assert (non_covering_core.verdict = Vox_smt.Solver_error)
+  assert (non_covering_core.verdict = Vox_smt.Solver_error);
+  Oxsmt_interface.Session.inject_replay_verdict_for_test
+    (Some Oxsmt_interface.Session.Unknown);
+  let missing_core = Vox_smt.discharge_oxsmt ~env unused_fact_usage in
+  assert (missing_core.verdict = Vox_smt.Proved);
+  assert (missing_core.unused_facts = [])
 
 let () =
   List.iter

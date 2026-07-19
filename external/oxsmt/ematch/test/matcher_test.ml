@@ -108,6 +108,7 @@ let view_of ~apps ~classes : Egraph_view.t =
            simple filtered union suffices. *)
         let all = List.concat_map (fun (_, terms) -> terms) apps @ List.concat classes in
         List.filter (fun (t : Term.t) -> Sort.equal t.Term.sort sort) all)
+  ; atom_value = (fun _ -> None)
   }
 ;;
 
@@ -203,6 +204,7 @@ let u_snapshot_immutable () =
            else [ term ])
     ; ground_terms_by_sort =
         (fun sort -> if Sort.equal sort Sort.int then [ a; b ] else [])
+    ; atom_value = (fun _ -> None)
     }
   in
   let snapshot = Egraph_view.snapshot live ~ground_terms:[ a; b ] in
@@ -888,6 +890,50 @@ let u_seed_rollback () =
     (Manager.budget_exhausted mgr)
 ;;
 
+(* U-MGI (quant-mgi): the model-guided flood filter drops matcher instances the current
+   model ALREADY SATISFIES, while keeping model-falsified (conflict) and model-
+   undetermined (novel) ones. Lemma [forall x. p(x)] with trigger [p(x)]; a ground
+   [p(a)] registered, so the matcher yields sigma=[a] and instance body [p(a)].
+   [mgi_threshold=0] engages the filter from round 1. FOUR arms (RED both directions):
+   filter ON + p(a)=true => DROPPED; filter OFF => EMITTED; filter ON + p(a)=false =>
+   KEPT (conflict never suppressed); filter ON + p(a)=None => KEPT (reachability). *)
+let u_mgi_filter () =
+  let run ~model_guided atomval =
+    let sc = scaffold () in
+    let p = Env.declare_fun sc.env "p" int_to_bool in
+    let a = Context.const sc.ctx (Env.declare_fun sc.env "a" (Rank.create [] Sort.int)) in
+    let pa = Context.app sc.ctx p [ a ] in
+    let lemma =
+      make_lemma sc ~id:0 ~arity:1 (fun q ->
+        let body = Context.app sc.ctx p [ q.(0) ] in
+        body, [ [ body ] ])
+    in
+    let view =
+      { (view_of ~apps:[ p, [ pa ] ] ~classes:[]) with
+        Egraph_view.atom_value = atomval pa
+      }
+    in
+    let mgr = Manager.create ~model_guided ~mgi_threshold:0 sc.ctx sc.env in
+    Manager.add_lemma mgr lemma;
+    Manager.begin_check mgr;
+    Manager.round mgr view
+  in
+  let some v pa t = if Term.equal t pa then Some v else None in
+  let none _pa _t = None in
+  check
+    "U-MGI: model-satisfied instance dropped when filter on"
+    (run ~model_guided:true (some true) = []);
+  check
+    "U-MGI: legacy emits the same instance (filter off)"
+    (List.length (run ~model_guided:false (some true)) = 1);
+  check
+    "U-MGI: model-falsified (conflict) instance kept when filter on"
+    (List.length (run ~model_guided:true (some false)) = 1);
+  check
+    "U-MGI: model-undetermined instance kept when filter on"
+    (List.length (run ~model_guided:true none) = 1)
+;;
+
 (* E-ZERO-QVAR (codex MED, matcher.ml zero-qvar contract): a [forall (). body] lemma is a
    ground fact and must instantiate ONCE. Body p(a) contradicts the ground ¬p(a): the
    empty substitution must be emitted → p(a) asserted → unsat. Discrimination: the pre-fix
@@ -1278,6 +1324,7 @@ let () =
   u_fair_slices ();
   u_dedup_rollback ();
   u_seed_rollback ();
+  u_mgi_filter ();
   e_find ();
   e_congruence_snapshot ();
   e_nested ();

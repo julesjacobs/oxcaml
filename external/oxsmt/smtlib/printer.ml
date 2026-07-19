@@ -518,14 +518,17 @@ let collect_decls dts arrs env assertions =
         then funs := sym :: !funs)
   in
   let rec visit (t : Term.t) =
-    (* F3 (LRA review bounce): flag-OFF byte-identity. Trunk's [visit] collected sorts
-       only via [register_fun] (domain then codomain), giving domain-before-codomain
-       declare-sort order. An unconditional [visit_sort t.sort] here collects an
-       application's RESULT sort first, reversing that order (A,B -> B,A) for existing
-       multi-sort UF. Gate it on the flag: flag-OFF reverts to trunk exactly; flag-ON
-       keeps it so a Real term's sort (e.g. a [Real_const] leaf) is still
-       marked/collected. *)
-    if Lra_config.enabled () then visit_sort t.sort;
+    (* Trunk's [visit] collected sorts only via [register_fun] (domain then codomain),
+       giving domain-before-codomain declare-sort order. An unconditional
+       [visit_sort t.sort] here collects an application's RESULT sort first, reversing
+       that order (A,B -> B,A) for existing multi-sort UF (F3).
+       Uninterpreted/array/datatype result sorts are ALREADY collected in the right order
+       via [register_fun], so the only thing [visit_sort t.sort] must still do is mark a
+       [Real] result sort (a constant-only Real term has no Real-sorted function to
+       collect it) for the QF_?LRA logic label. Restrict to the Real case: non-Real is a
+       no-op (byte-identical to trunk, so the flip does not reorder any existing UF's
+       declare-sorts), and [Real] never appears with the flag off. *)
+    if Sort.equal t.sort Sort.real then visit_sort t.sort;
     match t.node with
     | Bool_const _ | Int_const _ | Real_const _ -> ()
     | App (sym, args) ->

@@ -1071,35 +1071,33 @@ and read_op ?expected st scope op args orig =
     else Context.linear_combination st.ctx (List.map (fun term -> 1, term) terms) 0
   | "+", [] -> malformedf "+ expects >= 1 argument"
   | "-", [ a ] -> Context.neg st.ctx (rd a)
-  | "-", _ :: _ when not (Lra_config.enabled ()) ->
-    (* F2 (LRA review bounce): flag-OFF byte-identity. Trunk's [-] arm was
-       [(1, rd x) :: List.map (fun a -> -1, rd a) rest], and OCaml evaluates [::]
-       right-to-left, so trunk interned the subtrahends [rest] BEFORE the head [x]. The
-       shared [numeric_terms] reads left-to-right ([List.map rd args]), which flips the
-       head's term tag and perturbs the (still valid) printed model. Reproduce trunk's
-       exact expression and read order here for the flag-OFF integer path. *)
-    (match args with
-     | first_arg :: rest_args ->
-       Context.linear_combination
-         st.ctx
-         ((1, rd first_arg) :: List.map (fun a -> -1, rd a) rest_args)
-         0
-     | [] -> assert false)
-  | "-", _ :: _ ->
-    (* a - b - c ... = 1*a + (-1)*b + (-1)*c ... (flag ON: Real or Int) *)
-    let terms = numeric_terms () in
-    (match terms with
-     | first :: rest when Sort.equal first.sort Sort.real ->
-       Context.real_linear_combination_big
-         st.ctx
-         ((rational_one, first) :: List.map (fun term -> rational_minus_one, term) rest)
-         rational_zero
-     | first :: rest ->
-       Context.linear_combination
-         st.ctx
-         ((1, first) :: List.map (fun term -> -1, term) rest)
-         0
-     | [] -> assert false)
+  | "-", first_arg :: rest_args ->
+    (* Read in trunk's order — the subtrahends [rest] (via [List.map]) BEFORE the head, so
+       an all-Int subtraction is byte-identical to trunk with the flag ON as well as off.
+       Trunk's arm was [(1, rd x) :: List.map (fun a -> -1, rd a) rest], and OCaml
+       evaluates [::] right-to-left, interning [rest] before [x]; reading the subtrahends
+       via [List.map] then the head reproduces that exact intern order (the shared
+       [numeric_terms] reads head-first and perturbs the still-valid printed model). A
+       Real operand promotes the whole sum: each Int operand is coerced ([Int_const] ->
+       Real; a non-constant Int beside a Real stays Int and the session degrades as
+       mixed-Int/Real), so the flag-ON Real path is unchanged in result. *)
+    let neg_terms = List.map (fun a -> rd a) rest_args in
+    let head = rd first_arg in
+    if Sort.equal head.Term.sort Sort.real
+       || List.exists (fun (t : Term.t) -> Sort.equal t.sort Sort.real) neg_terms
+    then
+      Context.real_linear_combination_big
+        st.ctx
+        ((rational_one, coerce_to_sort st Sort.real head)
+         :: List.map
+              (fun t -> rational_minus_one, coerce_to_sort st Sort.real t)
+              neg_terms)
+        rational_zero
+    else
+      Context.linear_combination
+        st.ctx
+        ((1, head) :: List.map (fun t -> -1, t) neg_terms)
+        0
   | "-", [] -> malformedf "- expects >= 1 argument"
   | "*", _ :: _ -> read_mul ?expected st scope args
   | "*", [] -> malformedf "* expects >= 1 argument"
