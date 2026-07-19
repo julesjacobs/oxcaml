@@ -583,49 +583,143 @@ let lt st a b =
 let ge st a b = le st b a
 let gt st a b = lt st b a
 
+(* Merge two tag-sorted, DISTINCT sequences of Bool children into one canonical And/Or,
+   dropping the equal-tag duplicate. Each input is already canonical — the children array
+   of a same-kind hash-consed node (sorted, distinct, no nested same-kind), or a single
+   non-same-kind term as a length-1 sequence — so this O(W) merge produces exactly the
+   [sort_uniq]-by-tag child array the general [nary] path would, but without re-flattening
+   or the O(W log W) [List.sort_uniq] merge churn. Used by {!nary2}. *)
+let merge_sorted st ~is_and la ga lb gb =
+  if la + lb = 0
+  then bool_const st is_and (* identity: And drops to true, Or to false *)
+  else (
+    let dummy = if la > 0 then ga 0 else gb 0 in
+    let out = Array.make (la + lb) dummy in
+    let i = ref 0
+    and j = ref 0
+    and w = ref 0 in
+    let emit x =
+      out.(!w) <- x;
+      incr w
+    in
+    while !i < la && !j < lb do
+      let x = ga !i
+      and y = gb !j in
+      if x.tag = y.tag
+      then (
+        emit x;
+        incr i;
+        incr j)
+      else if x.tag < y.tag
+      then (
+        emit x;
+        incr i)
+      else (
+        emit y;
+        incr j)
+    done;
+    while !i < la do
+      emit (ga !i);
+      incr i
+    done;
+    while !j < lb do
+      emit (gb !j);
+      incr j
+    done;
+    if !w = 1
+    then out.(0)
+    else (
+      let children = if !w = la + lb then out else Array.sub out 0 !w in
+      let node =
+        if is_and then And (Iarr.of_array children) else Or (Iarr.of_array children)
+      in
+      hashcons st node Sort.bool))
+;;
+
+(* Binary [and_]/[or_] fast path (the dominant projection/VC shape: [bool_ite] composes an
+   ITE spine with [or_ [c; prev_or]] / [and_ [nc; prev_and]], and deeply nested binary
+   [(and (and ... ) x)] in a formula builds [and_ [wide_and; x]] at each level, where [prev]
+   is an already-canonical wide same-kind node). The general [nary] path flattens [prev]'s W
+   children and re-sorts from scratch every level (O(W log W) with list churn, O(D^2) over a
+   depth-D spine); merge the two operands' canonical child sequences in O(W) instead.
+   Byte-identical to {!nary}: same short-circuit/identity folding and same
+   sorted-unique-by-tag result. *)
+(* [t] is an already-canonical wide operand for this connective — an [And] under [and_] or
+   an [Or] under [or_] — whose sorted child array {!nary2} can merge directly. Any other
+   2-input shape (two leaves, or a constant) is handled optimally by the general path's own
+   2-element fast path, so it is not worth routing through [nary2]. *)
+let same_kind ~is_and t =
+  match t.node with
+  | And _ -> is_and
+  | Or _ -> not is_and
+  | _ -> false
+;;
+
+let nary2 st ~is_and a b =
+  let name = if is_and then "and" else "or" in
+  require_bool name a;
+  require_bool name b;
+  let absorbing = not is_and in
+  (* A same-kind node contributes its sorted child array; a Bool_const is the short-circuit
+     ([absorbing]) or drops to the empty sequence ([identity]); anything else is itself. *)
+  let side t =
+    match t.node with
+    | Bool_const v -> if Bool.equal v absorbing then `Absorb else `Sq (0, fun _ -> t)
+    | And xs when is_and -> `Sq (Iarr.length xs, fun i -> Iarr.get xs i)
+    | Or xs when not is_and -> `Sq (Iarr.length xs, fun i -> Iarr.get xs i)
+    | _ -> `Sq (1, fun _ -> t)
+  in
+  match side a, side b with
+  | `Absorb, _ | _, `Absorb -> bool_const st absorbing
+  | `Sq (la, ga), `Sq (lb, gb) -> merge_sorted st ~is_and la ga lb gb
+;;
+
 (* n-ary And/Or: flatten same connective, constant-fold, dedup + tag-sort.
    [absorbing]/[identity] are the short-circuit and drop values. *)
 let nary st ~is_and children =
-  let identity = is_and (* And drops true, Or drops false *)
-  and absorbing = not is_and in
-  List.iter (require_bool (if is_and then "and" else "or")) children;
-  let exception Short in
-  let flat = ref [] in
-  let rec push t =
-    match t.node with
-    | And xs when is_and -> Iarr.iter push xs
-    | Or xs when not is_and -> Iarr.iter push xs
-    | Bool_const v ->
-      if Bool.equal v absorbing then raise Short else () (* drop identity *)
-    | _ -> flat := t :: !flat
-  in
-  let build sorted =
-    if is_and then And (Iarr.of_list sorted) else Or (Iarr.of_list sorted)
-  in
-  match List.iter push children with
-  | exception Short -> bool_const st absorbing
-  | () ->
-    (* Fast paths for the dominant flattened arities: [bool_ite]'s connective folds and
-       most VC conjunctions produce one- or two-child nary nodes, and going straight to the
-       ordered/deduped result skips [List.sort_uniq]'s merge machinery (the [rev_merge]
-       chain shows up in the nec projection profile), which only earns its keep from arity 3
-       up. The [List.rev] the general path applied before [sort_uniq] was dead: [sort_uniq]'s
-       output is a pure function of the tag order, independent of input permutation, and any
-       equal-tag children are the identical hash-consed term. *)
-    (match !flat with
-     | [] -> bool_const st identity
-     | [ x ] -> x
-     | [ a; b ] ->
-       if a.tag = b.tag
-       then a
-       else (
-         let lo, hi = if a.tag < b.tag then a, b else b, a in
-         hashcons st (build [ lo; hi ]) Sort.bool)
-     | flat ->
-       (match List.sort_uniq (fun a b -> Int.compare a.tag b.tag) flat with
-        | [] -> bool_const st identity
-        | [ x ] -> x
-        | sorted -> hashcons st (build sorted) Sort.bool))
+  match children with
+  | [ a; b ] when same_kind ~is_and a || same_kind ~is_and b -> nary2 st ~is_and a b
+  | _ ->
+    let identity = is_and (* And drops true, Or drops false *)
+    and absorbing = not is_and in
+    List.iter (require_bool (if is_and then "and" else "or")) children;
+    let exception Short in
+    let flat = ref [] in
+    let rec push t =
+      match t.node with
+      | And xs when is_and -> Iarr.iter push xs
+      | Or xs when not is_and -> Iarr.iter push xs
+      | Bool_const v ->
+        if Bool.equal v absorbing then raise Short else () (* drop identity *)
+      | _ -> flat := t :: !flat
+    in
+    let build sorted =
+      if is_and then And (Iarr.of_list sorted) else Or (Iarr.of_list sorted)
+    in
+    match List.iter push children with
+    | exception Short -> bool_const st absorbing
+    | () ->
+      (* Fast paths for the dominant flattened arities: [bool_ite]'s connective folds and
+         most VC conjunctions produce one- or two-child nary nodes, and going straight to the
+         ordered/deduped result skips [List.sort_uniq]'s merge machinery (the [rev_merge]
+         chain shows up in the nec projection profile), which only earns its keep from arity 3
+         up. The [List.rev] the general path applied before [sort_uniq] was dead: [sort_uniq]'s
+         output is a pure function of the tag order, independent of input permutation, and any
+         equal-tag children are the identical hash-consed term. *)
+      (match !flat with
+       | [] -> bool_const st identity
+       | [ x ] -> x
+       | [ a; b ] ->
+         if a.tag = b.tag
+         then a
+         else (
+           let lo, hi = if a.tag < b.tag then a, b else b, a in
+           hashcons st (build [ lo; hi ]) Sort.bool)
+       | flat ->
+         (match List.sort_uniq (fun a b -> Int.compare a.tag b.tag) flat with
+          | [] -> bool_const st identity
+          | [ x ] -> x
+          | sorted -> hashcons st (build sorted) Sort.bool))
 ;;
 
 let and_ st children = nary st ~is_and:true children
