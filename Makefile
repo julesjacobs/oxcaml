@@ -100,7 +100,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate dtlia-incremental-gate dt-combine-fabric-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test dt-fabric-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate dtlia-incremental-gate dt-combine-fabric-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -654,6 +654,16 @@ euf-test:
 euf-adapter-test:
 	OXSMT_EUF_SELF_CHECK=1 $(DUNE) exec smt/theories/euf/test/euf_adapter_test.exe
 
+## dt-fabric-test — Stage B DT-on-fabric soundness REDs (ADR-0014, task/combine-fabric):
+##   drives the DARK fabric seam directly and asserts (a) a hub-injected [assert_fabric_eq]
+##   edge is PRESERVED in the conflict Γ [check_fabric] returns — both as a direct
+##   constructor-distinctness premise and BURIED inside a [P_derived] injectivity premise
+##   (the wrong-UNSAT hazard a flattening regression would reintroduce) — and (b) push /
+##   assert_fabric_eq+derive / pop restores [fabric_are_equal] to false and drops the cached
+##   propagation reason (no popped-frame leak). Nonzero exit on any failed check.
+dt-fabric-test:
+	$(DUNE) exec smt/theories/dt/test/dt_fabric_test.exe
+
 ## bigint-test — smt/theories/lia Bigint self-test (core-bignum W2, stdlib-only): limb-
 ##   boundary hand vectors, pure-OCaml property vectors, a Knuth add-back regression vector,
 ##   a deep-growth tripwire (hundreds of limbs), and an INDEPENDENT Python differential
@@ -1075,6 +1085,7 @@ test: check-frozen
 	$(MAKE) bv-goldens-test
 	$(MAKE) bv-op-coverage-test
 	$(MAKE) loud-unknown-test
+	$(MAKE) dt-fabric-test
 	$(MAKE) dt-sat-gate
 	$(MAKE) dt-multi-query-gate
 	$(MAKE) dtlia-incremental-gate
