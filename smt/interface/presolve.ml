@@ -1097,6 +1097,17 @@ let symbreak_consider_max = 8
 (* Size cap (sat-safe): emit lex-leader only for classes of size in [2, symbreak_emit_max). *)
 let symbreak_emit_max = 6
 
+(* Route A (OXSMT_SYMBREAK_UFTAIL) — the QF_UF algorithm-bound tail (QG-classification / NEQ
+   / PEQ; z3 diagnosis logs/z3diag-uftail-report.md). The size cap and the bucket cap blank
+   every interchangeable class of size >= 6, but every class in that tail is size 6..14. With
+   the lever ON we lift both caps ONLY for a class whose constants are (a subset of) the
+   value-set of some totality clause [(or (= cell c0) ... (= cell ck))] — z3's
+   [is_range_restriction] shape, ported as a GUARD. Ordinary SAT instances (no such clause)
+   are untouched. This only makes such a class an ELIGIBLE CANDIDATE; the one-class clamp
+   still emits a single class, so the multi-class simultaneous-breaking unsoundness is
+   structurally impossible. Dark: default OFF => byte-identical to trunk. *)
+let symbreak_uftail_consider_max = 32
+
 (* Cap the lex atom sequence per class (a longer sequence only strengthens the break; we
    truncate deterministically in tag order — still sound). *)
 let symbreak_atoms_max = 512
@@ -1197,8 +1208,10 @@ let symbreak_stats_on =
    DEFAULT-ON (quiesced A/B on the frozen pre-land sha, QF_UF Goel+QG: OFF 6958 -> ON 6964
    = +6, gain-only, 0 flips -- logs/symbreak-budget-quiesced-ab.md; dual-review APPROVE
    logs/symbreak-budget-review-fable.md). [OXSMT_SYMBREAK_BUDGET] set to 0/false/no opts
-   out (byte-identical to the pre-flip default: every class with
-   [2 <= k < symbreak_emit_max] emits, uncapped detection); unset / any other value => ON.
+   out of the merit gate (uncapped detection; every class with [2 <= k < symbreak_emit_max]
+   is ELIGIBLE). NOTE the one-class clamp still applies with the budget off: at most the
+   single highest-merit eligible class emits per formula regardless of this flag. Unset / any
+   other value => ON.
    The opt-out token set is the SAME as [OXSMT_SYMBREAK] / [OXSMT_BASE_L0] /
    [OXSMT_ARR_ROW2]. Read once per [symmetry_break] call (a single [getenv], negligible
    against the pass); NOT cached, so a test can exercise both states in one process. *)
@@ -1206,6 +1219,87 @@ let symbreak_budget_enabled () =
   match Sys.getenv_opt "OXSMT_SYMBREAK_BUDGET" with
   | Some ("0" | "false" | "no") -> false
   | Some _ | None -> true
+;;
+
+(* Route A dark lever (default OFF => byte-identical to trunk). When ON, the size and bucket
+   caps are lifted for RANGE-RESTRICTED classes only (below). Read once per call. *)
+let symbreak_uftail_enabled () =
+  match Sys.getenv_opt "OXSMT_SYMBREAK_UFTAIL" with
+  | Some ("1" | "true" | "yes") -> true
+  | Some _ | None -> false
+;;
+
+(* Value-sets of totality clauses [(or (= cell c0) ... (= cell ck))] in [conjuncts]: each
+   such [Or] pins one term [cell] (a non-free-const application) to the free constants
+   [{c0..ck}]. A class is RANGE-RESTRICTED (Route A guard) iff its constant set is a subset of
+   one of these value-sets. z3's [is_range_restriction] shape. Pure / deterministic; a single
+   memoized DAG walk. *)
+let symbreak_totality_valuesets conjuncts =
+  let seen = Term.Table.create 512 in
+  let sets = ref [] in
+  let classify (disjuncts : Term.t list) =
+    match disjuncts with
+    | [] | [ _ ] -> None
+    | _ ->
+      let cell = ref None in
+      let consts = ref Term.Set.empty in
+      let ok = ref true in
+      List.iter
+        (fun (d : Term.t) ->
+           if !ok
+           then (
+             match d.Term.node with
+             | Eq (a, b) ->
+               let a_free = is_free_const a in
+               let b_free = is_free_const b in
+               let picked =
+                 if a_free && not b_free
+                 then Some (b, a)
+                 else if b_free && not a_free
+                 then Some (a, b)
+                 else None
+               in
+               (match picked with
+                | None -> ok := false
+                | Some (this_cell, this_const) ->
+                  (match !cell with
+                   | None -> cell := Some this_cell
+                   | Some c -> if not (Term.equal c this_cell) then ok := false);
+                  consts := Term.Set.add this_const !consts)
+             | _ -> ok := false))
+        disjuncts;
+      if !ok && Term.Set.cardinal !consts >= 2 then Some !consts else None
+  in
+  let rec go (t : Term.t) =
+    if not (Term.Table.mem seen t)
+    then (
+      Term.Table.add seen t ();
+      match t.Term.node with
+      | Or xs ->
+        (match classify (Iarr.to_list xs) with
+         | Some cset -> sets := cset :: !sets
+         | None -> ());
+        Iarr.iter go xs
+      | And xs -> Iarr.iter go xs
+      | Not a | Le a -> go a
+      | Eq (a, b) ->
+        go a;
+        go b
+      | Ite (c, a, b) ->
+        go c;
+        go a;
+        go b
+      | App (_, args) -> Iarr.iter go args
+      | Arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+      | Real_arith lin -> Iarr.iter (fun (tm, _c) -> go tm) lin.coeffs
+      | Bool_const _ | Int_const _ | Real_const _ -> ())
+  in
+  List.iter go conjuncts;
+  !sets
+;;
+
+let class_is_range_restricted valuesets class_set =
+  List.exists (fun v -> Term.Set.subset class_set v) valuesets
 ;;
 
 (* Per-class local structural merit (zero tuned constant, family-blind). Breaking a class
@@ -1230,6 +1324,16 @@ let symmetry_break ~counter cap env ctx assertions =
   let base_key = symbreak_tag_multiset conjuncts in
   let stats_on = Lazy.force symbreak_stats_on in
   let budget_on = symbreak_budget_enabled () in
+  let uftail_on = symbreak_uftail_enabled () in
+  (* Route A: totality-clause value-sets (empty unless the lever is ON). Their PRESENCE marks
+     a formula as a member of the target tail; the wider bucket scan is gated on it so uftail
+     is a strict NO-OP on formulas lacking the range-restriction shape. *)
+  let valuesets = if uftail_on then symbreak_totality_valuesets conjuncts else [] in
+  let consider_max =
+    if uftail_on && valuesets <> []
+    then symbreak_uftail_consider_max
+    else symbreak_consider_max
+  in
   let n_conjuncts = List.length conjuncts in
   let class_log = ref [] in
   let dag_nodes = ref 0 in
@@ -1419,7 +1523,7 @@ let symmetry_break ~counter cap env ctx assertions =
          List.iter
            (fun bucket ->
               let n = List.length bucket in
-              if n >= 2 && n <= symbreak_consider_max
+              if n >= 2 && n <= consider_max
               then (
                 let arr = Array.of_list bucket in
                 (* arr is in tag order (bucket built from tag-ordered group, rev preserves) *)
@@ -1458,8 +1562,19 @@ let symmetry_break ~counter cap env ctx assertions =
                 List.iter
                   (fun consts_in_class ->
                      let k = List.length consts_in_class in
-                     (* SIZE CAP (sat-safe): consider only 2 <= k < symbreak_emit_max. *)
-                     if k >= 2 && k < symbreak_emit_max
+                     (* Route A (uftail): a class whose constants are the value-domain of a
+                        totality clause is RANGE-RESTRICTED — z3 breaks exactly these. Lift the
+                        size cap and merit gate for it. Still sound: the one-class clamp emits
+                        a single class, so multi-class simultaneous breaking cannot occur. *)
+                     let uftail_class =
+                       uftail_on
+                       && class_is_range_restricted
+                            valuesets
+                            (Term.Set.of_list consts_in_class)
+                     in
+                     (* SIZE CAP (sat-safe): consider 2 <= k < symbreak_emit_max, OR any size
+                        when [uftail_class] lifts the cap (Route A). *)
+                     if k >= 2 && (k < symbreak_emit_max || uftail_class)
                      then (
                        let csort = (List.hd consts_in_class).Term.sort in
                        let class_cells =
@@ -1468,9 +1583,11 @@ let symmetry_break ~counter cap env ctx assertions =
                        (* Size-relative budget (OXSMT_SYMBREAK_BUDGET, DEFAULT-ON): a class
                           whose domain is not used combinatorially enough is not worth the
                           lex-leader cost (board #64). Eligibility only — the clamp emits at
-                          most one of the eligible classes. *)
+                          most one of the eligible classes. Bypassed for a range-restricted
+                          uftail class (its combinatorial use is the totality structure). *)
                        if
                          (not budget_on)
+                         || uftail_class
                          || class_merits_break ~k ~n_cells:(List.length class_cells)
                        then (
                          let tag_key =
