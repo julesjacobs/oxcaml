@@ -599,18 +599,33 @@ let nary st ~is_and children =
       if Bool.equal v absorbing then raise Short else () (* drop identity *)
     | _ -> flat := t :: !flat
   in
+  let build sorted =
+    if is_and then And (Iarr.of_list sorted) else Or (Iarr.of_list sorted)
+  in
   match List.iter push children with
   | exception Short -> bool_const st absorbing
   | () ->
-    let sorted = List.sort_uniq (fun a b -> Int.compare a.tag b.tag) (List.rev !flat) in
-    (match sorted with
+    (* Fast paths for the dominant flattened arities: [bool_ite]'s connective folds and
+       most VC conjunctions produce one- or two-child nary nodes, and going straight to the
+       ordered/deduped result skips [List.sort_uniq]'s merge machinery (the [rev_merge]
+       chain shows up in the nec projection profile), which only earns its keep from arity 3
+       up. The [List.rev] the general path applied before [sort_uniq] was dead: [sort_uniq]'s
+       output is a pure function of the tag order, independent of input permutation, and any
+       equal-tag children are the identical hash-consed term. *)
+    (match !flat with
      | [] -> bool_const st identity
      | [ x ] -> x
-     | _ ->
-       let node =
-         if is_and then And (Iarr.of_list sorted) else Or (Iarr.of_list sorted)
-       in
-       hashcons st node Sort.bool)
+     | [ a; b ] ->
+       if a.tag = b.tag
+       then a
+       else (
+         let lo, hi = if a.tag < b.tag then a, b else b, a in
+         hashcons st (build [ lo; hi ]) Sort.bool)
+     | flat ->
+       (match List.sort_uniq (fun a b -> Int.compare a.tag b.tag) flat with
+        | [] -> bool_const st identity
+        | [ x ] -> x
+        | sorted -> hashcons st (build sorted) Sort.bool))
 ;;
 
 let and_ st children = nary st ~is_and:true children

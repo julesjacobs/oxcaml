@@ -16,6 +16,19 @@ type result =
   ; defs : def list
   }
 
+(* Monomorphic (tag, tag) keyed table for the projection memo. The generic [Hashtbl] on
+   a boxed [(int * int)] key routes every probe through [caml_hash] + [compare_val]
+   (polymorphic structural hash/compare). Destructuring the pair here compiles [equal] to
+   two native int compares and [hash] to plain arithmetic, with no [caml_hash]/[compare_val].
+   The memo is a pure per-call function cache whose bucket layout is never observed, so which
+   term a key maps to is unchanged: a throughput-only substitution. *)
+module Tag_pair_table = Hashtbl.Make (struct
+    type t = int * int
+
+    let equal (a, b) (c, d) = Int.equal a c && Int.equal b d
+    let hash (a, b) = (a * 31) + b
+  end)
+
 (* Hash-consing makes tag equality physical identity, so a rewrite that returns children
    unchanged returns the identical node. *)
 let same_tag (a : Term.t) (b : Term.t) = a.Term.tag = b.Term.tag
@@ -1010,7 +1023,7 @@ let simplify_projection ctx assertions =
      collide tags and return stale answers (a module-global table silently corrupts the
      pass — the same footgun the contextual pass documents). *)
   let memo : Term.t Term.Table.t = Term.Table.create 4096 in
-  let proj_memo : (int * int, Term.t) Hashtbl.t = Hashtbl.create 4096 in
+  let proj_memo : Term.t Tag_pair_table.t = Tag_pair_table.create 4096 in
   let propfold = nec_propfold () in
   let false_ = Context.bool_const ctx false in
   (* Demand-driven short-circuit (nec-propfold): a value-ITE branch that provably cannot
@@ -1105,7 +1118,7 @@ let simplify_projection ctx assertions =
     | _ -> Context.eq ctx a b
   and project (ite_t : Term.t) (d : Term.t) : Term.t =
     let key = ite_t.tag, d.tag in
-    match Hashtbl.find_opt proj_memo key with
+    match Tag_pair_table.find_opt proj_memo key with
     | Some r -> r
     | None ->
       tick ();
@@ -1115,7 +1128,7 @@ let simplify_projection ctx assertions =
         | Ite (c, x, y) -> bool_ite ctx c (rewrite_eq x d) (rewrite_eq y d)
         | _ -> Context.eq ctx ite_t d (* unreachable: caller guarantees an Ite *)
       in
-      Hashtbl.add proj_memo key r;
+      Tag_pair_table.add proj_memo key r;
       r
   and rewrite_ite (c : Term.t) (a : Term.t) (b : Term.t) : Term.t =
     match c.node with
