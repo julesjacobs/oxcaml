@@ -22,11 +22,14 @@ used below are `Bigint.t`, canonical core rational records, and
 
 ## 2. Rollout gate and theory selection
 
-Use one read-once dark flag, `OXSMT_LRA`.  It is off unless its value is one of `1`,
-`true`, `yes`, or `on`.  Add a non-frozen `Oxsmt_core.Lra_config` module and expose
-`val enabled : unit -> bool`; its implementation owns the sole lazy environment read.
-Parser, printer, loader, `Session`, and `Cdclt` must call that accessor rather than each
-capturing the environment independently.
+Use one read-once flag, `OXSMT_LRA`, owned by the non-frozen `Oxsmt_core.Lra_config`
+module, which exposes `val enabled : unit -> bool` and owns the sole lazy environment
+read.  Parser, printer, loader, `Session`, and `Cdclt` must call that accessor rather
+than each capturing the environment independently.
+
+Real arithmetic shipped **on by default** with the rollout flip (LAND 48); the flag is
+now a tri-state reversibility switch rather than the original positive opt-in allowlist.
+Its value convention is section 2.1.
 
 When the flag is off:
 
@@ -41,6 +44,34 @@ When the flag is off:
   declare those names print exactly as before.  Under the flag, add `/` to
   `predefined_funs` and `Real` to `predefined_sorts`; the parser applies the same
   conditional reservation.
+
+### 2.1 Environment value convention (fleet-wide)
+
+`OXSMT_LRA` is tri-state, and follows the convention shared by every `OXSMT_*` default-on
+lever (e.g. `OXSMT_LEMMA_FAIR`):
+
+- **unset** -> the default direction (here **ON**);
+- a **recognized opt-out** token -- `0`, `false`, `no`, or `off`, case-insensitive and
+  with surrounding whitespace trimmed -> **OFF**.  This force-OFF byte-recovers the
+  pre-flip trunk exactly and is the reversibility switch for A/B and byte-recovery;
+- **any other value** (an unrecognized token / a genuine typo) -> the default direction
+  (**ON**).
+
+The load-bearing rule is *unrecognized == unset*: a value the reader cannot parse resolves
+to the lever's default, never to the opposite side.  For a default-on lever this means
+garbage -> ON; for a dark (default-off) lever the same rule reads as garbage -> OFF.  The
+two therefore look opposite in code but express one convention -- "garbage takes the
+default" -- which is the least-surprising behaviour (a typo cannot silently flip a
+reviewed, verified default) and keeps every lever's force-token the *only* way to reach the
+non-default side.  Whitespace is not "garbage": recognized tokens are matched after
+`String.trim`, so `OXSMT_LRA="off\n"` from a shell still opts out.
+
+Consistency note (2026-07-19): `OXSMT_LEMMA_FAIR` (also default-on) currently resolves an
+unrecognized value to **OFF** (`manager.ml`, `Some _ -> false`), i.e. the opposite side
+from its own default, and its comment mis-states that this "matches the `OXSMT_LRA` flip
+lever" (LRA takes garbage -> ON).  Aligning FAIR to this convention is a one-line change in
+its own lane (treat only the recognized opt-out tokens as OFF); tracked as a cross-lane
+reconcile item, not made here.
 
 In particular, do not select a theory from the `set-logic` string.  Selection is
 content-driven today and must remain so.  Add the non-frozen type

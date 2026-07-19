@@ -1089,7 +1089,19 @@ and read_op ?expected st scope op args orig =
        mixed-Int/Real), so the flag-ON Real path is unchanged in result. *)
     let neg_terms = List.map (fun a -> rd a) rest_args in
     let head = rd first_arg in
-    if Sort.equal head.Term.sort Sort.real
+    (* R1: honor an enclosing Real [expected] (e.g. this subtraction used as an operand of a
+       Real [=]/comparison, which [same_sort_terms] re-reads with [expected = Real]). Without
+       it, an all-Int subtraction whose operands widen to Real (an Int [ite]/const) stays Int
+       and then mixes with the Real context, degrading to unknown; the [coerce_to_sort] calls
+       below widen each operand ([(= (- (ite p 1 2) 3) 0.0)] -> unsat). Only fires under
+       [expected = Real], so the all-Int (non-Real) path and its byte-identity are untouched. *)
+    let expected_real =
+      match expected with
+      | Some sort -> Lra_config.enabled () && Sort.equal sort Sort.real
+      | None -> false
+    in
+    if expected_real
+       || Sort.equal head.Term.sort Sort.real
        || List.exists (fun (t : Term.t) -> Sort.equal t.sort Sort.real) neg_terms
     then
       Context.real_linear_combination_big
