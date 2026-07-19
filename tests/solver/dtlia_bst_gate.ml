@@ -176,7 +176,18 @@ let run_match_discrimination () =
      a wrong verdict from silently using the last arm for the uncovered constructor. *)
   expect_no_wrong_unsat
     "non-exhaustive match fail-closed"
-    (tree ^ "(declare-const t Tree)\n(assert (= (match t ((Empty 0))) 0))\n(check-sat)\n")
+    (tree ^ "(declare-const t Tree)\n(assert (= (match t ((Empty 0))) 0))\n(check-sat)\n");
+  (* Duplicate-constructor non-exhaustive match: two Node cases inflate the raw case count
+     to num_constructors while Empty is uncovered. Without the distinct-constructor guard
+     this passes exhaustiveness and desugars to [ite (is-Node t) k 5]; for a concrete
+     Empty scrutinee it returns the last (dead) Node arm body 5, making [(not (= .. 5))] a
+     DEFINITE WRONG unsat (z3 rejects the same input: "a constructor is missing"). The
+     distinct-constructor guard must reject it fail-closed. *)
+  expect_no_wrong_unsat
+    "duplicate-constructor non-exhaustive fail-closed"
+    (tree
+     ^ "(assert (not (= (match Empty (((Node l k r) k) ((Node l2 k2 r2) 5))) 5)))\n\
+        (check-sat)\n")
 ;;
 
 let () =

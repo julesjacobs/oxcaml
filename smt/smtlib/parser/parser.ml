@@ -687,8 +687,9 @@ and read_match ?expected st scope args orig =
           String.equal (Symbol.name c.Datatype_defs.sym) cname)
         dt.Datatype_defs.constructors
     in
-    (* Build one case: [Some tester, body] for a constructor pattern, [None, body] for a
-       default (variable / wildcard). *)
+    (* Build one case: [Some ctor_name, Some tester, body] for a constructor pattern,
+       [None, None, body] for a default (variable / wildcard). The [ctor_name] lets the
+       exhaustiveness check count DISTINCT constructors and reject a duplicate pattern. *)
     let build_case (c : Sexp.t) =
       let pat, body_s =
         match c with
@@ -701,7 +702,7 @@ and read_match ?expected st scope args orig =
       match pat with
       (* wildcard [_] is a catch-all default binding nothing (it is a reserved token, so
          [Sexp.symbol_name] does not see it). *)
-      | Sexp.Atom (Tok.Reserved "_") -> None, read_term ?expected st scope body_s
+      | Sexp.Atom (Tok.Reserved "_") -> None, None, read_term ?expected st scope body_s
       | Sexp.Atom _ ->
         (match Sexp.symbol_name pat with
          | None -> malformedf "malformed match pattern: %s" (Sexp.to_string pat)
@@ -710,7 +711,8 @@ and read_match ?expected st scope args orig =
             | Some c ->
               if c.Datatype_defs.selectors <> []
               then malformedf "match: constructor %s needs arguments" pname;
-              ( Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
+              ( Some pname
+              , Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
               , read_term ?expected st scope body_s )
             | None ->
               (* a variable (or [_]) pattern: default case; a named variable binds the
@@ -718,7 +720,7 @@ and read_match ?expected st scope args orig =
               let scope' =
                 if String.equal pname "_" then scope else Scope.add pname scrut scope
               in
-              None, read_term ?expected st scope' body_s))
+              None, None, read_term ?expected st scope' body_s))
       | Sexp.List (chead :: var_atoms) ->
         (match Sexp.symbol_name chead with
          | None ->
@@ -744,7 +746,8 @@ and read_match ?expected st scope args orig =
                   var_atoms
                   c.Datatype_defs.selectors
               in
-              ( Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
+              ( Some cname
+              , Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
               , read_term ?expected st scope' body_s )))
       | _ -> malformedf "malformed match pattern: %s" (Sexp.to_string pat)
     in
@@ -752,20 +755,29 @@ and read_match ?expected st scope args orig =
     (* Exhaustiveness: the last case becomes the [ite] chain's else (no tester), so a
        match that is NOT exhaustive (fewer distinct constructor cases than the datatype
        has, and no variable/wildcard default) would silently give the last case's body for
-       an uncovered constructor — a wrong value. SMT-LIB requires exhaustiveness; reject a
+       an uncovered constructor — a wrong value. Count DISTINCT constructors covered (and
+       reject a duplicate constructor pattern), so a duplicate cannot inflate the count
+       and mask an uncovered constructor. SMT-LIB requires exhaustiveness; reject a
        non-exhaustive match as malformed (fail-closed to unknown) rather than risk a wrong
        verdict. *)
-    let has_default = List.exists (fun (tester_opt, _) -> tester_opt = None) built in
-    let n_ctor_cases = List.length (List.filter (fun (t, _) -> t <> None) built) in
-    if (not has_default) && n_ctor_cases < List.length dt.Datatype_defs.constructors
+    let has_default = List.exists (fun (_, tester_opt, _) -> tester_opt = None) built in
+    let covered =
+      List.filter_map (fun (name_opt, _, _) -> name_opt) built
+      |> List.sort_uniq String.compare
+    in
+    let n_ctor_cases = List.length (List.filter (fun (_, t, _) -> t <> None) built) in
+    if List.length covered < n_ctor_cases
+    then malformedf "match: duplicate constructor pattern";
+    if (not has_default)
+       && List.length covered < List.length dt.Datatype_defs.constructors
     then malformedf "non-exhaustive match (no default and not all constructors covered)";
     (match List.rev built with
      | [] -> malformedf "match with no cases: %s" (Sexp.to_string orig)
-     | (_, last_body) :: rest_rev ->
+     | (_, _, last_body) :: rest_rev ->
        (* rest_rev is later-to-earlier; fold builds ite tester0 body0 (... last_body). A
           non-last default case discards the (dead) accumulated later cases. *)
        List.fold_left
-         (fun else_acc (tester_opt, body) ->
+         (fun else_acc (_, tester_opt, body) ->
            match tester_opt with
            | Some tester -> Context.ite st.ctx tester body else_acc
            | None -> body)
