@@ -669,8 +669,13 @@ let solve
   P.query_count := 0;
   P.budget_ref := budget;
   P.effort_cap := max_effort;
-  (* the disjunctive-DNF fallback defaults ON; the affine-equality mining defaults OFF *)
-  let disj_on = flag_of disj "OXSMT_CHC_CEGIS_DISJ" ~default:true in
+  (* Reviewed defaults (task #15): the disjunctive-DNF fallback defaults OFF (measured
+     sound-but-FLAT: 0 corpus gains, only a wall tax; kept as an opt-in lever). The
+     affine-equality mining stays default OFF here (dark): the ON flip is reviewer-approved
+     (+1 [chc-LIA-Lin_021], 0 disagreements on CHC-COMP LIA-lin) but the fresh full-board
+     A/B is deferred to a quiet box, so per the flip bar it is dark-with-flip-gated for now;
+     flipping this to [~default:true] is the one-line flip once the quiet A/B confirms. *)
+  let disj_on = flag_of disj "OXSMT_CHC_CEGIS_DISJ" ~default:false in
   let affine_on = flag_of affine "OXSMT_CHC_CEGIS_AFFINE" ~default:false in
   match P.build_sys s with
   | exception P.Not_linear r -> { verdict = Unknown ("not linear: " ^ r); detail = r }
@@ -699,12 +704,16 @@ let solve
             whose reachable set is non-convex (hull admits a bad state, the union does
             not). Purely additive — reached only when the conjunction already failed — and
             gated by the same [P.verify] firewall, so it can only ever add Safe verdicts,
-            never a wrong one. Env-gated ([OXSMT_CHC_CEGIS_DISJ], default on; [_DISJ_K]
-            max disjuncts). *)
+            never a wrong one. Env-gated ([OXSMT_CHC_CEGIS_DISJ], default OFF; [_DISJ_K]
+            max disjuncts, hard-clamped to 32). *)
          let max_k =
+           (* Hard clamp (disj-query-cap law): [try_k] recurses k = 2 .. max_k, each step a
+              full [disj_solve]; an unbounded env value loops far past any useful box count
+              (and [k + 1] could overflow int) -- a hang, not a wrong verdict, but still
+              unacceptable. Cap at 32 (no real disjunctive invariant needs more boxes). *)
            match Sys.getenv_opt "OXSMT_CHC_CEGIS_DISJ_K" with
            | Some s ->
-             (try max 2 (int_of_string s) with
+             (try min 32 (max 2 (int_of_string s)) with
               | _ -> 3)
            | None -> 3
          in
