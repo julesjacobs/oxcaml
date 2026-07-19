@@ -1,8 +1,8 @@
 File "bst.ml", line 1:
 Error: Refinement verification failed at module seal for value "insert_law" (not-proved)
-File "bst.mli", lines 11-14, characters 0-54:
+File "bst.mli", lines 12-19, characters 0-12:
   Interface declaration for value insert_law
-File "bst.ml", line 17, characters 4-14:
-17 | let insert_law ~(key : int @ logical) ~(tree : t @ logical)
+File "bst.ml", line 18, characters 4-14:
+18 | let insert_law ~(inserted : int)
          ^^^^^^^^^^
   Implementation declaration for value insert_law
