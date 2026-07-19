@@ -176,6 +176,13 @@ val clear_last_conflict : t -> unit
 (** Splits emitted during the last check-sat (stat / determinism witness). *)
 val splits_used : t -> int
 
+(** Fabric edges the DT+LIA combinator injected/notified this session
+    ([Combine.fabric_stats.edges_injected], monotone per-instance): >0 exactly when
+    in-search congruence propagation across the DT/LIA seam fired
+    ([OXSMT_COMBINE_INSEARCH] ON). The positive mechanism-I discriminator the dt-sat-gate
+    uses; 0 on the classic path / non-DT+LIA stacks. *)
+val combine_fabric_edges_injected : t -> int
+
 (** Effort consumed on the shared budget so far in the current/most-recent check-sat
     ([Budget.used]); the instrumentation read behind {!Session.effort}. *)
 val effort_used : t -> int

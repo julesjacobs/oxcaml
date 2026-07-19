@@ -1251,6 +1251,18 @@ let clear_last_conflict t =
 let splits_used t = t.splits
 let effort_used t = Budget.used t.budget
 
+(* Stage C mechanism-I engagement probe: the number of fabric edges the DT+LIA combinator
+   INJECTED or NOTIFIED during the session ([Combine.fabric_stats.edges_injected],
+   monotone per-instance). >0 exactly when in-search congruence propagation across the
+   DT/LIA seam actually fired ([OXSMT_COMBINE_INSEARCH] ON) — the positive discriminator
+   the dt-sat-gate uses so a broken lever (0 edges) cannot pass. 0 for non-DT+LIA stacks /
+   classic path. *)
+let combine_fabric_edges_injected t =
+  match t.theory with
+  | Some (TCombinedDt th) -> (CombinedDt.fabric_stats th).CombinedDt.edges_injected
+  | Some (TCombined _ | TCombinedReal _ | TArr _) | None -> 0
+;;
+
 (* task #106: passthrough of the LIA adapter's observational conflict evidence.
    Re-exported record so {!Session} can read the fields. Only the EUF+LIA stack carries
    it. *)

@@ -336,17 +336,32 @@ let run_dag_blowup () =
 let solve_with_splits src =
   let s = Session.create () in
   match Parser.parse_into (Session.env s) (Session.context s) src with
-  | exception (Parser.Malformed _ | Parser.Unsupported _) -> Session.Unknown, 0
+  | exception (Parser.Malformed _ | Parser.Unsupported _) -> Session.Unknown, 0, 0
   | parsed ->
     if Oxsmt_query_loader.assert_all s parsed
     then (
       let v = Session.check_sat s in
-      v, Session.splits s)
-    else Session.Unknown, 0
+      v, Session.splits s, Session.fabric_edges_injected s)
+    else Session.Unknown, 0, 0
 ;;
 
+(* Lever-aware (Stage C): [dtlia_order_unsat] is the shape where DT entails [key t = k]
+   (selector eval) while LIA's initial candidate model disagrees. On the CLASSIC path
+   ([OXSMT_COMBINE_INSEARCH] unset) the combinator resolves it with the ℤ-trichotomy
+   [Split] — assert [splits > 0], the load-bearing classic mechanism (the OFF regression
+   asset, unchanged). With the lever ON, mechanism I resolves the SAME disagreement by
+   IN-SEARCH fabric propagation (the DT congruence merge is notified to LIA), so no split
+   fires. Do NOT merely tolerate 0 splits — that would pass a broken lever that silently
+   fell back to no-op; instead DISCRIMINATE by requiring a POSITIVE engagement signal:
+   [fabric_edges_injected > 0], i.e. the fabric actually propagated an edge. Both modes
+   also assert the verdict. *)
 let run_combination_split () =
-  let verdict, splits =
+  let lever_on =
+    match Sys.getenv_opt "OXSMT_COMBINE_INSEARCH" with
+    | Some ("1" | "true" | "yes") -> true
+    | _ -> false
+  in
+  let verdict, splits, edges =
     solve_with_splits (read_file "tests/cases/dtlia_order_unsat.smt2")
   in
   incr checks;
@@ -355,11 +370,22 @@ let run_combination_split () =
    | Session.Sat | Session.Unknown ->
      fail "combination split: dtlia_order_unsat got non-unsat");
   incr checks;
-  if splits <= 0
+  if lever_on
+  then (
+    if edges <= 0
+    then
+      fail
+        "combination split (OXSMT_COMBINE_INSEARCH ON): dtlia_order_unsat closed with %d \
+         fabric edges and %d splits — mechanism I in-search propagation must ENGAGE \
+         (edges_injected > 0); 0 edges means the lever fell back to no-op"
+        edges
+        splits)
+  else if splits <= 0
   then
     fail
       "combination split: dtlia_order_unsat closed with %d splits — the model-based \
-       interface trichotomy split must fire (it is the load-bearing DT+LIA mechanism)"
+       interface trichotomy split must fire (it is the load-bearing DT+LIA classic \
+       mechanism)"
       splits
 ;;
 

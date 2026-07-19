@@ -2832,6 +2832,7 @@ let inject_deletion_verdict_for_test v = inject_deletion_verdict := v
 let inject_replay_verdict_for_test v = inject_replay_verdict := v
 let stats t = Sat.stats t.sat
 let splits t = t.last_splits
+let fabric_edges_injected t = Cdclt.combine_fabric_edges_injected t.cdclt
 let minimize_probes t = t.minimize_probes
 let budget_exhausted t = t.budget_exhausted
 let effort t = t.last_effort

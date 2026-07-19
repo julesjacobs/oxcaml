@@ -579,6 +579,11 @@ val stats : t -> Oxsmt_solver.Sat.Stats.t
     (determinism/perf stat). *)
 val splits : t -> int
 
+(** Fabric edges the DT+LIA combinator injected/notified this session (Stage C mechanism-I
+    engagement probe; >0 iff in-search DT/LIA congruence propagation fired under
+    [OXSMT_COMBINE_INSEARCH]). 0 on the classic path / non-DT+LIA stacks. *)
+val fabric_edges_injected : t -> int
+
 (** Incremental re-solves the most recent {!check_sat_assuming} spent minimizing its
     assumption core: the initial assumption solve, every deletion/refinement probe, and
     the final core replay. [0] after a call that never reached minimization (empty
