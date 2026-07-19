@@ -119,6 +119,18 @@ let modelfind_on =
   | Some _ | None -> false
 ;;
 
+(* Rung 3b (OXSMT_LIA_DISEQ_CDCL): make the {!Lia.model_find} dive use bounded-backtracking
+   DPLL over the pin-separation decisions instead of the greedy skip, so it converges to a
+   FULLY-separated integral model on the disequality-dense convert class rather than handing
+   residual pins back to the combinator and wandering. Only meaningful together with
+   [modelfind_on] (the dive activates and receives pins under [OXSMT_LIA_MODELFIND]); on its
+   own it is inert. Default OFF -> byte-identical to trunk (dive never called). *)
+let diseq_cdcl_on =
+  match Sys.getenv_opt "OXSMT_LIA_DISEQ_CDCL" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* B&B node budget for the dive (PORTFOLIO TIME-BOX LAW: an auxiliary strategy must be
    bounded well below the wall). Overridable ([OXSMT_LIA_MODELFIND_BUDGET]) for A/B and
    tuning; the default is the {!Lia.model_find} default. Only consulted when
@@ -469,7 +481,7 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
    miss (no model in budget, or the once-per-instance guard already fired) falls through
    to the split/cut. *)
 let dive_or_branch t le_atom ge_atom : Fabric.check_result =
-  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget t.lia
+  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget ~backtrack:diseq_cdcl_on t.lia
   then Fabric.Sat
   else branch_or_hnf_cut t le_atom ge_atom
 ;;

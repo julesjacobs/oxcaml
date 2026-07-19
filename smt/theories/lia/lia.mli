@@ -213,7 +213,7 @@ val cube_model : 'tok t -> (Term.t * int) list option
     [px <> py]; the combiner's [find_disagreement] then rejects it and splits. On a
     formula with hundreds of pinned disequalities (convert), the dive/split interleaving
     does not converge — a disequality-AWARE dive is the follow-up. *)
-val model_find : ?node_budget:int -> 'tok t -> bool
+val model_find : ?node_budget:int -> ?backtrack:bool -> 'tok t -> bool
 
 (** [set_pin_hint t pairs] installs a READ-ONLY snapshot of the combinator's pinned Int
     disequality pairs [(px, py)] (meaning [px <> py]) for the next {!model_find} dive to

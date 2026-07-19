@@ -2138,7 +2138,7 @@ let first_violated_pin t ~skip =
    {!solve_integer} hits at its [Rational.floor] branch point. The defensive [Overflow]
    arm below is therefore unreached on the intended inputs but kept to mirror
    {!solve_integer}'s fail-closed poison. *)
-let model_find ?(node_budget = 200_000) t =
+let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
   ensure_live t;
   (* B&B pushes/asserts/pops simplex bounds directly; force any later [check] to re-run
      rather than trust the feasibility gate (mirrors {!solve_integer}). *)
@@ -2280,8 +2280,67 @@ let model_find ?(node_budget = 200_000) t =
            | `Ok -> resolve_pins ()
            | `Fail -> `Fail))
   in
+  (* Rung 3b (OXSMT_LIA_DISEQ_CDCL): bounded-backtracking DPLL over the pin-separation
+     decisions, replacing the greedy skip. Each decision COMMITS one separating bound
+     ([x <= k-1] or [x >= k+1]) for a pin the integral vertex equates; if the resulting
+     arithmetic is infeasible ([arith_solve `Fail]) we backtrack to the decision level and
+     try the other side, then (both sides dead) unwind further. This finds a FULLY-separated
+     integral model (no residual pins handed back to the combinator), which is what
+     converges the convert class instead of wandering. [node_budget] bounds the total
+     decisions/flips (every [incr nodes]) so exhaustion returns [`Fail] — a sound fallback
+     to the ordinary branch, never a wrong verdict. Chronological (no clause learning yet).
+     Sound identically to the greedy path: the captured model is at an integral feasible
+     vertex with EVERY pin separated ([first_violated_pin] = [None]) and is R1-re-checked. *)
+  let no_skip = Hashtbl.create 1 in
+  let trail_bt = ref [] in
+  let rec descend_bt () =
+    match first_violated_pin t ~skip:no_skip with
+    | None -> `Sat (extract_model_bigint t)
+    | Some (id, k) ->
+      if !nodes >= node_budget
+      then `Fail
+      else (
+        incr nodes;
+        try_side_bt id k `Up ~pending:`Dn)
+  and try_side_bt id k side ~pending =
+    let cb = !committed in
+    Simplex.push t.simplex;
+    incr committed;
+    (let vlo =
+       Delta.of_rat (Rational.of_bigint (Oxsmt_core.Bigint.sub k Oxsmt_core.Bigint.one))
+     and vhi =
+       Delta.of_rat (Rational.of_bigint (Oxsmt_core.Bigint.add k Oxsmt_core.Bigint.one))
+     in
+     match side with
+     | `Up -> ignore (Simplex.assert_lower t.simplex id vhi (Branch id))
+     | `Dn -> ignore (Simplex.assert_upper t.simplex id vlo (Branch id)));
+    trail_bt := (id, k, cb, pending) :: !trail_bt;
+    (match arith_solve () with
+     | `Ok -> descend_bt ()
+     | `Fail -> backtrack_bt ())
+  and backtrack_bt () =
+    match !trail_bt with
+    | [] -> `Fail
+    | (id, k, cb, pending) :: rest ->
+      if !committed > cb then Simplex.pop t.simplex (!committed - cb);
+      committed := cb;
+      trail_bt := rest;
+      (match pending with
+       | `None -> backtrack_bt ()
+       | (`Up | `Dn) as s ->
+         if !nodes >= node_budget
+         then `Fail
+         else (
+           incr nodes;
+           try_side_bt id k s ~pending:`None))
+  in
+  let repair_bt () =
+    match arith_solve () with
+    | `Fail -> `Fail
+    | `Ok -> descend_bt ()
+  in
   let result =
-    match repair () with
+    match if backtrack then repair_bt () else repair () with
     | v -> v
     | exception Rational.Overflow ->
       Simplex.poison t.simplex;
