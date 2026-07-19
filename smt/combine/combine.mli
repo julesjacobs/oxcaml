@@ -137,6 +137,27 @@ module type ROUTER = sig
       finding B1), leaving the split with no constraining power. Terms are built through
       [ctx] so they share the session tag stream / hash-consing (D6). *)
   val equality_split : Context.t -> Term.t -> Term.t -> Term.t list
+
+  (** ADR-0014 fabric per-instantiation disable (task #47). When [true], [Combine] takes
+      the classic no-fabric path (byte-for-byte trunk [check_off]/[explain_off])
+      REGARDLESS of the global [OXSMT_NO_FABRIC] setting, and skips the create-time
+      merge-consumer setup. Set by a router whose congruence child does NOT implement the
+      fabric-live seam (the DT+LIA combination): its selector-derived Int equalities reach
+      the arithmetic child through the classic ℤ-trichotomy-split path, never the fabric
+      hub, so the fabric-live congruence-child methods stay unreachable (loud fail-closed
+      stubs, defence in depth). [false] for QF_UFLIA / QF_UFLRA (fabric governed by
+      [OXSMT_NO_FABRIC] as before). *)
+  val fabric_disabled : bool
+
+  (** Task #47: when [true], the congruence child MODELS datatype-sorted terms (it IS the
+      datatype theory), so [Combine] does not degrade a datatype-sorted term to [unknown]
+      at Sat certification — the child's genuine axiom-validating Final (constructor
+      distinctness, injectivity, selector evaluation, occurs/acyclicity) has already
+      certified those terms, and the merged model OMITS them (their constructor-tree
+      values are extracted from the child separately by {!Oxsmt_interface.Cdclt}). [false]
+      for the EUF congruence child, which has no datatype model — a datatype-sorted term
+      there is a dispatch leak and must stay the wrong-Sat-blocking [Incomplete] degrade. *)
+  val congruence_models_datatypes : bool
 end
 
 (** Raised (→ engine CONTRACT-POISON → verdict [unknown], soundness bias I8) whenever the
@@ -282,9 +303,9 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
 
-  (** Whether a cross-theory justification edge is currently live. An EUF certificate
-      leaf may be claimed as pure congruence only while this is false; once an edge is
-      live, an [Euf_congruence] explanation can contain expanded arithmetic evidence. *)
+  (** Whether a cross-theory justification edge is currently live. An EUF certificate leaf
+      may be claimed as pure congruence only while this is false; once an edge is live, an
+      [Euf_congruence] explanation can contain expanded arithmetic evidence. *)
   val has_live_fabric_edges : t -> bool
 
   (** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental

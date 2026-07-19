@@ -46,6 +46,91 @@ module Combined_real =
 module Dt = Oxsmt_dt.Dt
 module Arr = Oxsmt_arr.Arr
 
+(* task #47 (bugreport 03): the DT theory presented as the CONGRUENCE CHILD of the
+   Nelson-Oppen combinator, so a mixed datatype/arithmetic query DECIDES its ordering
+   obligations (LIA) AND its structure (DT) instead of poisoning on the foreign order atom
+   (the standalone [Dt] rejects a [(> k 0)] as [K_foreign]). [t = Dt.t]: the frozen THEORY
+   seam plus [internalize_term] (so selector-evaluation fires on a [key t] surfacing only
+   inside a LIA atom) and [fabric_are_equal] are REAL forwards to the standalone DT theory
+   — its genuine axiom-validating Final (distinctness, injectivity, selector evaluation,
+   occurs/acyclicity) is exactly what certifies a combined Sat, since [Combine] emits Sat
+   only after BOTH children certify Final.
+
+   The FABRIC-LIVE methods are UNREACHABLE: [Dtlia_router.fabric_disabled] forces
+   [Combine] onto the classic no-fabric path ([check_off]/[explain_off], and no
+   create-time merge-consumer setup), so the fabric seam is never driven for this
+   instantiation. They are loud fail-closed stubs (raise
+   [Combine.Incomplete "dtlia-fabric-unsupported"] -> verdict [unknown]) as defence in
+   depth — never a quiet wrong answer or a crash if a future change ever wired the fabric
+   here.
+
+   The datatype registry (which [Dt.create] needs but the frozen [Theory.THEORY]
+   [create : ctx -> env] cannot carry) is threaded via [set_registry], called by
+   {!ensure_theory} immediately before [CombinedDt.create]: single-threaded, read
+   synchronously into the [Dt.t] instance, so no cross-session hazard. *)
+module Dt_congruence = struct
+  type t = Dt.t
+
+  let pending_registry : Oxsmt_core.Datatype_defs.t ref option ref = ref None
+  let set_registry r = pending_registry := Some r
+
+  let create ctx env =
+    match !pending_registry with
+    | Some reg -> Dt.create ctx env reg
+    | None ->
+      failwith
+        "Dt_congruence.create: datatype registry not set (Cdclt.ensure_theory must call \
+         set_registry before CombinedDt.create)"
+  ;;
+
+  let register_atom = Dt.register_atom
+  let assert_lit = Dt.assert_lit
+  let check = Dt.check
+  let explain = Dt.explain
+  let push = Dt.push
+  let pop = Dt.pop
+  let model = Dt.model
+  let internalize_term = Dt.internalize_term
+  let fabric_are_equal = Dt.equal_if_registered
+
+  (* The congruence child fixes no arithmetic value and is never the fabric's fixed-value
+     witness (mirrors {!Euf_adapter}); [notify_eq] is a no-op (a congruence hub reacts to
+     no notifications). All three are on the classic path's dormant side — inert, not
+     stubs. *)
+  let fixed_bounds _ _ = None
+  let fabric_verify _ _ _ _ _ = false
+  let notify_eq _ ~edge_id:_ _ = ()
+
+  let unsupported what =
+    raise
+      (Oxsmt_combine.Combine.Incomplete
+         ("dtlia-fabric-unsupported: "
+          ^ what
+          ^ " — the DT+LIA combination forces the classic no-fabric path (Dtlia_router); \
+             this method must be unreachable"))
+  ;;
+
+  let check_fabric _ _ = unsupported "check_fabric"
+  let explain_fabric _ _ = unsupported "explain_fabric"
+  let assert_fabric_eq _ ~edge_id:_ _ _ = unsupported "assert_fabric_eq"
+  let fabric_explain_eq _ _ _ = unsupported "fabric_explain_eq"
+  let set_record_merges _ _ = unsupported "set_record_merges"
+  let add_merge_consumer _ = unsupported "add_merge_consumer"
+  let drain_merges _ _ = unsupported "drain_merges"
+  let set_class_tag _ _ _ = unsupported "set_class_tag"
+  let class_tag _ _ = unsupported "class_tag"
+
+  type merge_cursor = unit
+  type checkpoint = unit
+
+  let checkpoint _ = unsupported "checkpoint"
+  let rewind_to_checkpoint _ _ = unsupported "rewind_to_checkpoint"
+end
+
+module CombinedDt =
+  Oxsmt_combine.Combine.Combine (Oxsmt_combine.Dtlia_router) (Dt_congruence)
+    (Oxsmt_lia.Lia_adapter)
+
 (* The theory the seam drives. A problem that declares an algebraic datatype installs the
    standalone DT theory, one that uses arrays the standalone arrays theory (both e-graph
    clients — EUF congruence plus their own axioms); every other problem keeps the
@@ -56,7 +141,13 @@ module Arr = Oxsmt_arr.Arr
 type theory_impl =
   | TCombined of Combined.t
   | TCombinedReal of Combined_real.t
-  | TDt of Dt.t
+  | TCombinedDt of CombinedDt.t
+    (* task #47: the DT+LIA Nelson-Oppen stack, installed for ANY datatype-declaring
+       problem (replaces the standalone [TDt], so a mixed datatype/arithmetic query is
+       decided rather than poisoned). A datatype-only query is the arith-free special
+       case: LIA sees no atom, so the combinator is byte-equivalent to standalone DT on
+       it. The quantified matcher reads that inner DT congruence child (see
+       {!live_egraph_view}), so UFDT stays verdict-identical. *)
   | TArr of Arr.t
 
 type arithmetic_family =
@@ -69,7 +160,7 @@ let th_register impl a term =
   match impl with
   | TCombined th -> Combined.register_atom th a term
   | TCombinedReal th -> Combined_real.register_atom th a term
-  | TDt th -> Dt.register_atom th a term
+  | TCombinedDt th -> CombinedDt.register_atom th a term
   | TArr th -> Arr.register_atom th a term
 ;;
 
@@ -77,7 +168,7 @@ let th_assert impl lit =
   match impl with
   | TCombined th -> Combined.assert_lit th lit
   | TCombinedReal th -> Combined_real.assert_lit th lit
-  | TDt th -> Dt.assert_lit th lit
+  | TCombinedDt th -> CombinedDt.assert_lit th lit
   | TArr th -> Arr.assert_lit th lit
 ;;
 
@@ -85,7 +176,7 @@ let th_check impl effort =
   match impl with
   | TCombined th -> Combined.check th effort
   | TCombinedReal th -> Combined_real.check th effort
-  | TDt th -> Dt.check th effort
+  | TCombinedDt th -> CombinedDt.check th effort
   | TArr th -> Arr.check th effort
 ;;
 
@@ -93,7 +184,7 @@ let th_explain impl lit =
   match impl with
   | TCombined th -> Combined.explain th lit
   | TCombinedReal th -> Combined_real.explain th lit
-  | TDt th -> Dt.explain th lit
+  | TCombinedDt th -> CombinedDt.explain th lit
   | TArr th -> Arr.explain th lit
 ;;
 
@@ -101,7 +192,7 @@ let th_push impl =
   match impl with
   | TCombined th -> Combined.push th
   | TCombinedReal th -> Combined_real.push th
-  | TDt th -> Dt.push th
+  | TCombinedDt th -> CombinedDt.push th
   | TArr th -> Arr.push th
 ;;
 
@@ -109,7 +200,7 @@ let th_pop impl n =
   match impl with
   | TCombined th -> Combined.pop th n
   | TCombinedReal th -> Combined_real.pop th n
-  | TDt th -> Dt.pop th n
+  | TCombinedDt th -> CombinedDt.pop th n
   | TArr th -> Arr.pop th n
 ;;
 
@@ -117,7 +208,7 @@ let th_model impl =
   match impl with
   | TCombined th -> Combined.model th
   | TCombinedReal th -> Combined_real.model th
-  | TDt th -> Dt.model th
+  | TCombinedDt th -> CombinedDt.model th
   | TArr th -> Arr.model th
 ;;
 
@@ -359,8 +450,15 @@ let record_euf_leaf t ~rule ~clause =
    structural closure of those exact equality atoms. A negative premise, foreign atom,
    missing SAT-var binding, or unrelated term leaves the leaf conditional. *)
 let record_dt_distinctness t ~premises ~premise_lits ~clause =
-  match t.leaf_certificate_trace, t.theory with
-  | Some trace, Some (TDt dt) ->
+  (* task #47: the DT constructor-distinctness certificate applies on BOTH the standalone
+     DT stack and the DT+LIA combined stack (the DT congruence child is the real [Dt.t]). *)
+  let dt_of =
+    match t.theory with
+    | Some (TCombinedDt th) -> Some (CombinedDt.congruence_state th)
+    | Some (TCombined _ | TCombinedReal _ | TArr _) | None -> None
+  in
+  match t.leaf_certificate_trace, dt_of with
+  | Some trace, Some dt ->
     let rec equality_atoms acc = function
       | [] -> Some (List.rev acc)
       | lit :: rest ->
@@ -384,7 +482,7 @@ let record_dt_distinctness t ~premises ~premise_lits ~clause =
           let closure = statement_subterms atoms in
           if Term.Table.mem closure left && Term.Table.mem closure right
           then trace.on_dt_distinctness ~registry:!(t.registry) ~clause ~left ~right))
-  | Some _, Some (TCombined _ | TCombinedReal _ | TArr _) | Some _, None | None, _ -> ()
+  | Some _, None | None, _ -> ()
 ;;
 
 let set_leaf_certificate_trace t tr =
@@ -518,7 +616,16 @@ let ensure_theory t =
         if not (Oxsmt_core.Array_defs.is_empty !(t.array_registry))
         then TArr (Arr.create t.ctx t.env t.cap !(t.array_registry))
         else if not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
-        then TDt (Dt.create t.ctx t.env t.registry)
+        then (
+          (* task #47: install the DT+LIA Nelson-Oppen stack UNCONDITIONALLY for any
+             datatype-declaring problem — NOT only when arithmetic is also present. A
+             conditional arm would re-create the poison for arithmetic that arrives AFTER
+             the theory is first instantiated (batched queries in one session); the
+             combinator is byte-equivalent to standalone DT on an arith-free query (LIA
+             sees no atom). The registry is threaded via the side channel because
+             [Combine.create] is the frozen [ctx -> env] shape. *)
+          Dt_congruence.set_registry t.registry;
+          TCombinedDt (CombinedDt.create t.ctx t.env))
         else TCombined (Combined.create t.ctx t.env)
     in
     t.theory <- Some impl;
@@ -629,7 +736,10 @@ let on_assign t l ~level =
       (match t.theory with
        | Some (TCombined th) -> Some (CInt (Combined.checkpoint th))
        | Some (TCombinedReal th) -> Some (CReal (Combined_real.checkpoint th))
-       | Some (TDt _ | TArr _) | None -> None)
+       (* S4.2 incremental undo (dark, chrono-only) is not wired for the DT stacks — the
+          combinator's [checkpoint] would drive [Dt_congruence.checkpoint] (a fabric-live
+          stub); leave it a full-rebuild [None] like the arrays theory. *)
+       | Some (TCombinedDt _ | TArr _) | None -> None)
   else sync_level t;
   let v = Sat.var_of_lit l in
   match Vartbl.find_opt t.v2a v with
@@ -683,9 +793,10 @@ let on_backtrack t ~level =
 let on_chrono_rewind t w =
   (match t.theory with
    | None -> () (* pure-Boolean: no theory to rewind (the log is still truncated below) *)
-   | Some (TDt _ | TArr _) ->
+   | Some (TCombinedDt _ | TArr _) ->
      failwith
-       "cdclt.on_chrono_rewind: OXSMT_CHRONO_INCR_UNDO requires the Combined theory"
+       "cdclt.on_chrono_rewind: OXSMT_CHRONO_INCR_UNDO requires the EUF+LIA Combined \
+        theory"
    | Some (TCombined th) ->
      if w < Dynarray.length t.ckpt_log
      then (
@@ -801,10 +912,10 @@ let desugar_result t ~final (r : Theory.check_result) : Sat.theory_result =
 let desugar_result_for_test = desugar_result
 
 let live_egraph_view t : Egraph_view.t =
-  (* Boolean value of a ground atom in the CURRENT MODEL (the satisfying assignment of
-     the theory [Sat] the instantiation loop is refining), for the model-guided
-     instantiation selector. Reads the SAT solver's saved model via the theory-atom <->
-     SAT-var bijection [t2v]; an atom never interned ([None]). Non-registering. *)
+  (* Boolean value of a ground atom in the CURRENT MODEL (the satisfying assignment of the
+     theory [Sat] the instantiation loop is refining), for the model-guided instantiation
+     selector. Reads the SAT solver's saved model via the theory-atom <-> SAT-var
+     bijection [t2v]; an atom never interned ([None]). Non-registering. *)
   let atom_value term =
     Option.map (fun v -> Sat.value t.sat v) (Term.Table.find_opt t.t2v term)
   in
@@ -829,12 +940,19 @@ let live_egraph_view t : Egraph_view.t =
         (fun sort -> Oxsmt_euf.Euf_adapter.registered_terms_by_sort cs sort)
     ; atom_value
     }
-  | Some (TDt th) ->
-    { app_terms_by_symbol = Dt.app_terms_by_symbol th
-    ; find_class_opt = Dt.find_class_opt th
-    ; equal_if_registered = Dt.equal_if_registered th
-    ; class_members = Dt.class_members th
-    ; ground_terms_by_sort = Dt.registered_terms_by_sort th
+  | Some (TCombinedDt th) ->
+    (* task #47 (lead steer #2, MANDATORY): the quantified matcher's DT view under the
+       combined stack MUST read the INNER DT congruence child (the real [Dt.t]), so a UFDT
+       query is verdict-identical to the standalone-DT path — the combinator's own
+       EUF-shaped [congruence_state] would expose LIA-shared classes and regress the
+       ~1,500-solved UFDT corpus. [CombinedDt.congruence_state] is exactly that inner
+       [Dt.t]. *)
+    let cs = CombinedDt.congruence_state th in
+    { app_terms_by_symbol = Dt.app_terms_by_symbol cs
+    ; find_class_opt = Dt.find_class_opt cs
+    ; equal_if_registered = Dt.equal_if_registered cs
+    ; class_members = Dt.class_members cs
+    ; ground_terms_by_sort = Dt.registered_terms_by_sort cs
     ; atom_value
     }
   | Some (TArr th) ->
@@ -854,7 +972,7 @@ let live_registered_terms t =
     Oxsmt_euf.Euf_adapter.registered_terms (Combined.congruence_state th)
   | Some (TCombinedReal th) ->
     Oxsmt_euf.Euf_adapter.registered_terms (Combined_real.congruence_state th)
-  | Some (TDt th) -> Dt.registered_terms th
+  | Some (TCombinedDt th) -> Dt.registered_terms (CombinedDt.congruence_state th)
   | Some (TArr th) -> Arr.registered_terms th
   | None -> []
 ;;
@@ -893,12 +1011,37 @@ let check t ~final =
            theories have no tree model. *)
         t.last_dt_model
         <- (match impl with
-            | TDt th -> Dt.check_model th
+            | TCombinedDt th ->
+              (* task #47 mixed-sat model reconciliation: the DT constructor tree's Int
+                 leaves (and Int scalar leaves) take the ARITHMETIC child's values from
+                 the merged model, not the pure-DT per-class default (which has no
+                 arithmetic and would give [0] for a LIA-constrained variable). Only a
+                 genuine [Model.Int] overrides — a pure-DT Int class (no LIA atom,
+                 surfaced as the merged model's realize-me [Uninterp] signal) falls back
+                 to DT's own [leaf_value]. This is the reconciliation {!Dt_model_check}
+                 needs so a mixed sat's arithmetic assertions ([(> k 0)] etc.) evaluate to
+                 true; the DT axioms (distinctness / injectivity / occurs) are already
+                 certified by the congruence child's Final. *)
+              let merged = CombinedDt.model th in
+              let arith_leaf (term : Term.t) =
+                match term.Term.sort with
+                | Sort.Int _ ->
+                  (match Model.value merged term with
+                   | Some (Model.Int _ as v) -> Some v
+                   | _ -> None)
+                | Sort.Bool
+                | Sort.Real
+                | Sort.Uninterpreted _
+                | Sort.Datatype _
+                | Sort.Array _
+                | Sort.BitVec _ -> None
+              in
+              Dt.check_model_with_leaf (CombinedDt.congruence_state th) arith_leaf
             | TCombined _ | TCombinedReal _ | TArr _ -> None);
         t.last_array_model
         <- (match impl with
             | TArr th -> Arr.array_model th
-            | TCombined _ | TCombinedReal _ | TDt _ -> None);
+            | TCombined _ | TCombinedReal _ | TCombinedDt _ -> None);
         t.last_egraph_view
         <- (if t.capture_egraph then Some (snapshot_egraph_view t) else None);
         desugar_result t ~final:true r
@@ -1016,7 +1159,11 @@ let clear_last_conflict t =
     Oxsmt_lia.Lia_adapter.clear_last_conflict (Combined.arith_state th)
   | Some (TCombinedReal th) ->
     Oxsmt_lia.Lra_adapter.clear_last_conflict (Combined_real.arith_state th)
-  | Some (TDt _) | Some (TArr _) | None -> ()
+  | Some (TCombinedDt th) ->
+    (* task #47: the DT+LIA stack has a LIA arithmetic child that carries the same
+       observational conflict evidence — clear it like the QF_UFLIA stack. *)
+    Oxsmt_lia.Lia_adapter.clear_last_conflict (CombinedDt.arith_state th)
+  | Some (TArr _) | None -> ()
 ;;
 
 let splits_used t = t.splits
@@ -1042,7 +1189,12 @@ let last_conflict_core t : conflict_core option =
       (fun (core : Oxsmt_lia.Lra_adapter.conflict_core) ->
         { farkas = core.farkas; atoms = core.atoms })
       (Oxsmt_lia.Lra_adapter.last_conflict_core (Combined_real.arith_state th))
-  | Some (TDt _) | Some (TArr _) | None -> None
+  | Some (TCombinedDt th) ->
+    Option.map
+      (fun (core : Oxsmt_lia.Lia_adapter.conflict_core) ->
+        { farkas = core.farkas; atoms = core.atoms })
+      (Oxsmt_lia.Lia_adapter.last_conflict_core (CombinedDt.arith_state th))
+  | Some (TArr _) | None -> None
 ;;
 
 (* Convert a snapshot [Model.value] to the sidecar vocabulary. *)

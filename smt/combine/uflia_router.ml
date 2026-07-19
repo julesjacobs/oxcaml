@@ -44,15 +44,14 @@ let owner term =
      | Sort.Int _ -> Both
      (* A datatype, array, or bitvector equality/disequality is decided by congruence (all
         are e-graph clients alongside EUF), so it routes to EUF like an uninterpreted-sort
-        equality — no arithmetic arrangement. The bit-blasting engine supplies the bit-level
-        semantics separately at the propositional layer. *)
+        equality — no arithmetic arrangement. The bit-blasting engine supplies the
+        bit-level semantics separately at the propositional layer. *)
      | Sort.Bool
      | Sort.Real
      | Sort.Uninterpreted _
      | Sort.Datatype _
      | Sort.Array _
-     | Sort.BitVec _
-       -> A)
+     | Sort.BitVec _ -> A)
 ;;
 
 (* The ASSERT fan-out — a subset of [owner] (combine.mli). Two narrowings:
@@ -62,18 +61,19 @@ let owner term =
      there.
    - A NEGATIVE shared (Int) equality routes to EUF only (codex S1): LIA raises
      [Unsupported] on a disequality (lia.mli). Sound (EUF handles diseq natively). The
-     intended completeness net is that if LIA's candidate model later equates the pair, the
-     shared-pair disagreement splits into the ℤ-trichotomy, whose [<]/[>] branches carry the
-     ordering to LIA. That net is INCOMPLETE for a variable-vs-CONSTANT disequality
-     ([x <> c], the nec-smt ITE-condition shape): [Combine.find_disagreement] ranges over the
-     Int-sorted, both-valued INTERFACE members and misses [x <> c] because the variable is
-     EUF-only-used (not a both-used interface member) and the constant is not an interface
-     node, so LIA never hears such a disequality and its model may set [x = c] — a spurious candidate R1
-     then rejects (→ unknown; task #30, logs/nec-probe-report.md). The flag
-     [OXSMT_LIA_MODEL_REPAIR] (combine.ml [repair_split]) closes the gap by scanning the
-     negatively-pinned pairs LIA's model equates at Final and emitting the same ℤ-trichotomy;
-     default-ON since task #59, forced OFF by [OXSMT_LIA_MODEL_REPAIR=0] (this narrowing
-     stays incomplete-but-sound as before). Every other atom/polarity asserts as [owner]. *)
+     intended completeness net is that if LIA's candidate model later equates the pair,
+     the shared-pair disagreement splits into the ℤ-trichotomy, whose [<]/[>] branches
+     carry the ordering to LIA. That net is INCOMPLETE for a variable-vs-CONSTANT
+     disequality ([x <> c], the nec-smt ITE-condition shape): [Combine.find_disagreement]
+     ranges over the Int-sorted, both-valued INTERFACE members and misses [x <> c] because
+     the variable is EUF-only-used (not a both-used interface member) and the constant is
+     not an interface node, so LIA never hears such a disequality and its model may set
+     [x = c] — a spurious candidate R1 then rejects (→ unknown; task #30,
+     logs/nec-probe-report.md). The flag [OXSMT_LIA_MODEL_REPAIR] (combine.ml
+     [repair_split]) closes the gap by scanning the negatively-pinned pairs LIA's model
+     equates at Final and emitting the same ℤ-trichotomy; default-ON since task #59,
+     forced OFF by [OXSMT_LIA_MODEL_REPAIR=0] (this narrowing stays incomplete-but-sound
+     as before). Every other atom/polarity asserts as [owner]. *)
 let assert_to term ~positive =
   match Theory_view.atom term with
   | Theory_view.Le_zero arg ->
@@ -111,3 +111,9 @@ let equality_split ctx x y =
            LIA is Int-only, so every shared term is Int-sorted)"));
   [ Context.eq ctx x y; Context.lt ctx x y; Context.gt ctx x y ]
 ;;
+
+(* QF_UFLIA uses the EUF congruence child (no datatype model) and the theory fabric under
+   the global [OXSMT_NO_FABRIC] toggle — both flags off keep this instantiation
+   byte-identical to before task #47. *)
+let fabric_disabled = false
+let congruence_models_datatypes = false

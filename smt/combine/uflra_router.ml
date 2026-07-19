@@ -21,8 +21,7 @@ let owner term =
     require_real "Uflra_router.owner" arg;
     B
   | Theory_view.Predicate _ | Theory_view.Bool_lit _ -> A
-  | Theory_view.Equality (x, _) ->
-    if arithmetic_sort x.sort then Both else A
+  | Theory_view.Equality (x, _) -> if arithmetic_sort x.sort then Both else A
 ;;
 
 let assert_to term ~positive:_ =
@@ -31,15 +30,19 @@ let assert_to term ~positive:_ =
     require_real "Uflra_router.assert_to" arg;
     B
   | Theory_view.Predicate _ | Theory_view.Bool_lit _ -> A
-  | Theory_view.Equality (x, _) ->
-    if arithmetic_sort x.sort then Both else A
+  | Theory_view.Equality (x, _) -> if arithmetic_sort x.sort then Both else A
 ;;
 
 let equality_split ctx x y =
   if not (arithmetic_sort x.Term.sort && arithmetic_sort y.Term.sort)
   then
     raise
-      (Combine.Combination_unsound
-         "Uflra_router.equality_split: non-Real shared term");
+      (Combine.Combination_unsound "Uflra_router.equality_split: non-Real shared term");
   [ Context.eq ctx x y; Context.lt ctx x y; Context.gt ctx x y ]
 ;;
+
+(* QF_UFLRA uses the EUF congruence child (no datatype model) and the theory fabric under
+   the global [OXSMT_NO_FABRIC] toggle — both flags off, byte-identical to before task
+   #47. *)
+let fabric_disabled = false
+let congruence_models_datatypes = false
