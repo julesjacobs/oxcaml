@@ -119,6 +119,10 @@ module Dt_congruence = struct
   let fabric_verify _ _ _ _ _ = false
   let notify_eq _ ~edge_id:_ _ = ()
 
+  (* OXSMT_LIA_MODELFIND disequality hint: the DT congruence child does not model-find, so
+     it ignores the pinned pairs (mirrors {!Euf_adapter}/{!Lra_adapter}). No-op, no state. *)
+  let note_disequalities _ _ = ()
+
   let unsupported what =
     raise
       (Oxsmt_combine.Combine.Incomplete
