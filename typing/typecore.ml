@@ -10084,6 +10084,14 @@ and type_function
           ~type_body:begin
             fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
               ~contains_gadt:param_contains_gadt ->
+              let ext_env =
+                match typed_arg_label, pat.pat_desc with
+                | Labelled label, Tpat_var { id; _ }
+                | Labelled label, Tpat_alias { id; _ } ->
+                  Env.add_dependent_parameter ~label id ext_env
+                | (Nolabel | Optional _ | Position _ | Labelled _), _ ->
+                  ext_env
+              in
               let { function_ = suffix_type, params_suffix, body;
                     newtypes; params_contain_gadt = suffix_contains_gadt;
                     fun_alloc_mode; ret_info;
@@ -14451,12 +14459,18 @@ let lower_refinement_expression ~view expression =
     match expression.exp_desc with
     | Texp_ident { path = Pident id; _ } when Ident.Set.mem id bound ->
       create (Rexp_ident (Rbound id))
-    | Texp_ident { path = Pident id; _ }
-      when Env.is_in_signature expression.exp_env ->
-      (* A value mentioned by another declaration in the same signature is
-         signature-relative.  Its source name, unlike its transient stamp,
-         survives signature copying, sealing, and functor instantiation. *)
-      create (Rexp_ident (Rfree (Rsibling (Ident.name id))))
+    | Texp_ident { path = Pident id; _ } ->
+      begin match Env.dependent_parameter_label id expression.exp_env with
+      | Some label ->
+        create (Rexp_ident (Rfree (Rparameter (label, id))))
+      | None when Env.is_in_signature expression.exp_env ->
+        (* A value mentioned by another declaration in the same signature is
+           signature-relative.  Its source name, unlike its transient stamp,
+           survives signature copying, sealing, and functor instantiation. *)
+        create (Rexp_ident (Rfree (Rsibling (Ident.name id))))
+      | None ->
+        create (Rexp_ident (Rfree (Rglobal (Pident id))))
+      end
     | Texp_ident { path; _ } ->
       let reference = if function_head then Rapp path else Rglobal path in
       create (Rexp_ident (Rfree reference))

@@ -91,7 +91,7 @@ module Fact_env = struct
          internal type nodes.  Facts are boolean predicates with resolved
          value paths, so their typed expression structure is the stable key
          at a control-flow join. *)
-      Types.Refinement.alpha_equal ~equal_type:(fun _ _ -> true) left right
+      Types.Refinement.strict_equal ~equal_type:(fun _ _ -> true) left right
     in
     { facts_rev =
         List.filter

@@ -208,7 +208,8 @@ let inhabited_data_keys context =
                            | Val_anc _; _ } -> None
           | exception Not_found -> None
           end
-        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ -> None)
+        | (Rfun _ | Rsibling _ | Rparameter _ | Rglobal _ | Rapp _), _ ->
+          None)
       context.references
   in
   close trusted_abstract_constants
@@ -442,6 +443,7 @@ let supports_equality ~env type_ =
 
 let reference_basename = function
   | Rfun name | Rsibling name -> name
+  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> Path.last path
 
 let primitive_builtin = function
@@ -526,6 +528,7 @@ let display_path path =
 
 let display_reference_name = function
   | Rfun name | Rsibling name -> name
+  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> display_path path
 
 (* Infix operators recognized for display by source name.  These are absent
@@ -545,7 +548,7 @@ let display_infix_operator name =
   | None -> None
 
 let display_builtin ~env = function
-  | Rfun _ | Rsibling _ -> None
+  | Rfun _ | Rsibling _ | Rparameter _ -> None
   | Rapp path | Rglobal path ->
     begin
       match Subst.Lazy.force_value_description (Env.find_value path env) with
@@ -567,7 +570,7 @@ let binary_operator ~env reference =
     Some (display_operator builtin)
   | Some `Not | None ->
     (match reference with
-     | Rfun _ | Rsibling _ -> None
+     | Rfun _ | Rsibling _ | Rparameter _ -> None
      | Rapp path | Rglobal path -> display_infix_operator (Path.last path))
 
 let display_constant constant =
@@ -761,7 +764,7 @@ let render_predicate ~env expression =
 let builtin_name context = function
   | Rfun name -> Option.map (fun name -> `Constructor_mismatch name)
       (constructor_mismatch name)
-  | Rsibling _ -> None
+  | Rsibling _ | Rparameter _ -> None
   | (Rapp path | Rglobal path) ->
     begin
       match
@@ -781,13 +784,16 @@ let same_reference left right =
      lower to [Rsibling "base"] and be conflated if a VC ever spanned both. *)
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
+  | Rparameter (left_label, left), Rparameter (right_label, right) ->
+    String.equal left_label right_label && Ident.same left right
   | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
     Path.same left right
-  | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
+  | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ -> false
 
 let quantifier_name = function
   | Rfun name | Rsibling name ->
     String.equal name "forall_" || String.equal name "exists_"
+  | Rparameter _ -> false
   | Rapp path | Rglobal path ->
     let name = Path.last path in
     String.equal name "forall_" || String.equal name "exists_"
@@ -795,6 +801,7 @@ let quantifier_name = function
 let reference_description = function
   | Rfun name -> "function " ^ name
   | Rsibling name -> "sibling " ^ name
+  | Rparameter (label, _) -> "parameter " ^ label
   | Rapp path -> "application " ^ Path.name path
   | Rglobal path -> "value " ^ Path.name path
 

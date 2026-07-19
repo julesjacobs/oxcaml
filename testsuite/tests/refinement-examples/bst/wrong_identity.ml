@@ -9,26 +9,22 @@ let[@vox.def] member (_query : int @ logical) (tree : t @ logical) =
 
 let[@vox.def] insert (_key : int @ logical) (tree : t @ logical) = tree
 
-let empty_has_no_zero (_ : unit @ logical)
-    : unit{ member 0 empty = false } =
-  let _ = member_def 0 empty in ()
+let empty_law ~(key : int @ logical)
+    : unit{ member key empty = false } =
+  let _ = member_def key empty in
+  ()
 
-let empty_has_no_one (_ : unit @ logical)
-    : unit{ member 1 empty = false } =
-  let _ = member_def 1 empty in ()
+let insert_law ~(key : int @ logical) ~(tree : t @ logical)
+    : unit{
+      member key (insert key tree) = member key tree
+    } =
+  let _ = insert_def key tree in
+  ()
 
-let insert_zero_has_zero (_ : unit @ logical)
-    : unit{ member 0 (insert 0 empty) = false } =
-  let _ = insert_def 0 empty in
-  let _ = member_def 0 empty in ()
-
-let insert_zero_has_no_one (_ : unit @ logical)
-    : unit{ member 1 (insert 0 empty) = false } =
-  let _ = insert_def 0 empty in
-  let _ = member_def 1 empty in ()
-
-let insert_one_preserves_zero (_ : unit @ logical)
-    : unit{ member 0 (insert 1 (insert 0 empty)) = false } =
-  let _ = insert_def 0 empty in
-  let _ = insert_def 1 empty in
-  let _ = member_def 0 empty in ()
+let member_insert_law ~(inserted : int @ logical)
+    ~(tree : t @ logical) ~(query : int @ logical)
+    : unit{
+      member query (insert inserted tree) = member query tree
+    } =
+  let _ = insert_def inserted tree in
+  ()

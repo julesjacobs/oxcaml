@@ -1,8 +1,8 @@
 File "bst.ml", line 1:
-Error: Refinement verification failed at module seal for value "insert_one_preserves_zero" (disproved)
-File "bst.mli", lines 18-20, characters 0-62:
-  Interface declaration for value insert_one_preserves_zero
-File "bst.ml", line 37, characters 4-29:
-37 | let insert_one_preserves_zero (_ : unit @ logical)
-         ^^^^^^^^^^^^^^^^^^^^^^^^^
-  Implementation declaration for value insert_one_preserves_zero
+Error: Refinement verification failed at module seal for value "member_insert_law" (not-proved)
+File "bst.mli", lines 16-23, characters 0-12:
+  Interface declaration for value member_insert_law
+File "bst.ml", line 28, characters 4-21:
+28 | let member_insert_law ~(inserted : int @ logical)
+         ^^^^^^^^^^^^^^^^^
+  Implementation declaration for value member_insert_law

@@ -518,8 +518,15 @@ let () =
 
 type definition =
   { id : Ident.t;
-    parameters : Ident.t list;
+    parameters : Ident.t option list;
     type_ : type_expr;
+    replacements : (Ident.t * refinement_expression) list;
+  }
+
+type partial_application =
+  { parameters : Ident.t option list;
+    type_ : type_expr;
+    replacements : (Ident.t * refinement_expression) list;
   }
 
 type state =
@@ -528,6 +535,7 @@ type state =
     mutable resume_facts : (Ident.t * Facts.t) list;
     total_functions : unit Types.Uid.Tbl.t;
     call_subjects : (Location.t, Ident.t) Hashtbl.t;
+    partial_applications : (Location.t, partial_application) Hashtbl.t;
   }
 
 exception Unsupported_subject of Location.t * string
@@ -821,6 +829,84 @@ let expression_contains_refinement expression =
   iterator.expr iterator expression;
   !found
 
+let dependent_parameter_ids type_ =
+  let parameters = ref [] in
+  let add label id =
+    match List.assoc_opt label !parameters with
+    | None -> parameters := (label, Some id) :: !parameters
+    | Some (Some other) when Ident.same id other -> ()
+    | Some None -> ()
+    | Some (Some _) ->
+      parameters :=
+        List.map
+          (fun (other_label, parameter) ->
+            if String.equal label other_label
+            then other_label, None
+            else other_label, parameter)
+          !parameters
+  in
+  let rec visit_expression expression =
+    begin match expression.rexp_desc with
+    | Rexp_ident (Rfree (Rparameter (label, id))) -> add label id
+    | Rexp_ident _ | Rexp_constant _ -> ()
+    | Rexp_let (bindings, body) ->
+      List.iter
+        (fun binding -> visit_expression binding.rbind_expr)
+        bindings;
+      visit_expression body
+    | Rexp_function function_ -> visit_expression function_.body
+    | Rexp_apply (function_, arguments) ->
+      visit_expression function_;
+      List.iter
+        (fun (_, argument) -> visit_expression argument)
+        arguments
+    | Rexp_tuple fields ->
+      List.iter (fun (_, field) -> visit_expression field) fields
+    | Rexp_construct (_, arguments) ->
+      List.iter visit_expression arguments
+    | Rexp_field (record, _) -> visit_expression record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      visit_expression condition;
+      visit_expression ifso;
+      Option.iter visit_expression ifnot
+    | Rexp_match (scrutinee, cases) ->
+      visit_expression scrutinee;
+      List.iter (fun case -> visit_expression case.rcase_body) cases
+    end
+  in
+  with_type_mark (fun mark ->
+    let rec visit type_ =
+      if try_mark_node mark type_ then
+        match get_desc type_ with
+        | Trefine refinement ->
+          visit_expression refinement.ref_pred;
+          visit refinement.ref_skeleton
+        | _ -> Btype.iter_type_expr visit type_
+    in
+    visit type_);
+  !parameters
+
+let align_partial_application partial type_ =
+  let source_parameters = dependent_parameter_ids partial.type_ in
+  let target_parameters = dependent_parameter_ids type_ in
+  let align id =
+    List.find_map
+      (fun (label, source) ->
+        match source with
+        | Some source when Ident.same source id ->
+          List.assoc_opt label target_parameters |> Option.join
+        | None | Some _ -> None)
+      source_parameters
+    |> Option.value ~default:id
+  in
+  { parameters = List.map (Option.map align) partial.parameters;
+    type_;
+    replacements =
+      List.map
+        (fun (parameter, replacement) -> align parameter, replacement)
+        partial.replacements;
+  }
+
 let register_definition state binding =
   match pattern_variable binding.vb_pat with
   | None -> ()
@@ -831,11 +917,33 @@ let register_definition state binding =
         Types.Uid.Tbl.replace state.total_functions uid ()
       | _ -> ()
     end;
-    let parameters = definition_parameters binding.vb_expr in
-    if parameters <> [] && contains_refinement binding.vb_pat.pat_type then
+    begin match
+      Hashtbl.find_opt state.partial_applications binding.vb_expr.exp_loc
+    with
+    | Some partial ->
+      let partial =
+        align_partial_application partial binding.vb_pat.pat_type
+      in
       state.definitions <-
-        { id; parameters; type_ = binding.vb_pat.pat_type }
+        { id;
+          parameters = partial.parameters;
+          type_ = partial.type_;
+          replacements = partial.replacements;
+        }
         :: state.definitions
+    | None ->
+      let parameters =
+        definition_parameters binding.vb_expr |> List.map Option.some
+      in
+      if parameters <> [] && contains_refinement binding.vb_pat.pat_type then
+        state.definitions <-
+          { id;
+            parameters;
+            type_ = binding.vb_pat.pat_type;
+            replacements = [];
+          }
+          :: state.definitions
+    end
 
 let find_definition state = function
   | Path.Pident id ->
@@ -1023,9 +1131,6 @@ let rec subject state ?(function_head = false) expression =
   | Texp_mutvar _ -> unsupported expression "a mutable variable"
   | _ -> unsupported expression "this expression form"
 
-let same_parameter_reference id name =
-  String.equal (Ident.name id) name
-
 let rec replace_parameters replacements expression =
   let replace = replace_parameters replacements in
   let replace_reference reference =
@@ -1034,9 +1139,9 @@ let rec replace_parameters replacements expression =
         match reference with
         | Rglobal (Pident other) | Rapp (Pident other)
           when Ident.same id other -> Some replacement
-        | Rsibling name when same_parameter_reference id name ->
+        | Rparameter (_, other) when Ident.same id other ->
           Some replacement
-        | Rfun _ | Rsibling _ | Rglobal _ | Rapp _ -> None)
+        | Rfun _ | Rsibling _ | Rparameter _ | Rglobal _ | Rapp _ -> None)
       replacements
   in
   match expression.rexp_desc with
@@ -1111,6 +1216,9 @@ let rec bind_scope_references scope expression =
   let recur = bind_scope_references scope in
   match expression.rexp_desc with
   | Rexp_ident (Rfree (Rglobal (Pident id) | Rapp (Pident id)))
+    when Ident.Set.mem id scope ->
+    { expression with rexp_desc = Rexp_ident (Rbound id) }
+  | Rexp_ident (Rfree (Rparameter (_, id)))
     when Ident.Set.mem id scope ->
     { expression with rexp_desc = Rexp_ident (Rbound id) }
   | Rexp_ident _ | Rexp_constant _ -> expression
@@ -1251,11 +1359,62 @@ let prove_refinement state ~env ~loc ~kind ~program_point ?result_span
 
 let align_seal_sibling_references ~env interface_predicate
     implementation_predicate =
+  let rec normalize_interface expression =
+    let normalize = normalize_interface in
+    let rexp_desc =
+      match expression.rexp_desc with
+      | Rexp_ident (Rfree (Rglobal path | Rapp path)) ->
+        begin match Env.find_value path env with
+        | _ -> expression.rexp_desc
+        | exception Not_found ->
+          Rexp_ident (Rfree (Rsibling (Path.last path)))
+        end
+      | Rexp_ident _ | Rexp_constant _ -> expression.rexp_desc
+      | Rexp_let (bindings, body) ->
+        Rexp_let
+          ( List.map
+              (fun binding ->
+                { binding with rbind_expr = normalize binding.rbind_expr })
+              bindings,
+            normalize body )
+      | Rexp_function function_ ->
+        Rexp_function { function_ with body = normalize function_.body }
+      | Rexp_apply (function_, arguments) ->
+        Rexp_apply
+          ( normalize function_,
+            List.map
+              (fun (label, argument) -> label, normalize argument)
+              arguments )
+      | Rexp_tuple fields ->
+        Rexp_tuple
+          (List.map (fun (label, field) -> label, normalize field) fields)
+      | Rexp_construct (constructor, arguments) ->
+        Rexp_construct (constructor, List.map normalize arguments)
+      | Rexp_field (record, field) -> Rexp_field (normalize record, field)
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        Rexp_ifthenelse
+          (normalize condition, normalize ifso, Option.map normalize ifnot)
+      | Rexp_match (scrutinee, cases) ->
+        Rexp_match
+          ( normalize scrutinee,
+            List.map
+              (fun case ->
+                { case with rcase_body = normalize case.rcase_body })
+              cases )
+    in
+    { expression with rexp_desc }
+  in
+  let interface_predicate = normalize_interface interface_predicate in
   let names = ref [] in
+  let parameters = ref [] in
   let rec collect expression =
     begin match expression.rexp_desc with
     | Rexp_ident (Rfree (Rsibling name | Rfun name)) ->
       if not (List.mem name !names) then names := name :: !names
+    | Rexp_ident (Rfree (Rparameter (label, id))) ->
+      if not (List.exists (fun (other, _) -> String.equal label other)
+                !parameters)
+      then parameters := (label, id) :: !parameters
     | Rexp_ident (Rfree (Rglobal _ | Rapp _)) -> ()
     | Rexp_ident _ | Rexp_constant _ -> ()
     | Rexp_let (bindings, body) ->
@@ -1292,6 +1451,17 @@ let align_seal_sibling_references ~env interface_predicate
   let rec rewrite expression =
     let rexp_desc =
       match expression.rexp_desc with
+      | Rexp_ident (Rfree (Rparameter (label, _))) ->
+        begin match
+          List.find_opt
+            (fun (interface_label, _) ->
+              String.equal label interface_label)
+            !parameters
+        with
+        | Some (_, interface_id) ->
+          Rexp_ident (Rfree (Rparameter (label, interface_id)))
+        | None -> expression.rexp_desc
+        end
       | Rexp_ident (Rfree (Rglobal path | Rapp path)) ->
         begin match
           List.find_opt
@@ -1306,7 +1476,16 @@ let align_seal_sibling_references ~env interface_predicate
             paths
         with
         | Some (name, _, _) -> Rexp_ident (Rfree (Rsibling name))
-        | None -> expression.rexp_desc
+        | None ->
+          begin match path with
+          | Pident id
+            when List.mem (Ident.name id) !names
+                 && (match Env.find_value path env with
+                     | _ -> false
+                     | exception Not_found -> true) ->
+            Rexp_ident (Rfree (Rsibling (Ident.name id)))
+          | Pdot _ | Papply _ | Pextra_ty _ | Pident _ -> expression.rexp_desc
+          end
         end
       | Rexp_ident _ | Rexp_constant _ -> expression.rexp_desc
       | Rexp_let (bindings, body) ->
@@ -1343,7 +1522,7 @@ let align_seal_sibling_references ~env interface_predicate
     in
     { expression with rexp_desc }
   in
-  rewrite implementation_predicate
+  interface_predicate, rewrite implementation_predicate
 
 let verify_seal_obligation ~env ~seal_location
     (obligation : Ctype.refinement_seal_obligation) =
@@ -1376,7 +1555,7 @@ let verify_seal_obligation ~env ~seal_location
      exported paths found in the inclusion environment.  Looking the path up
      (rather than equating bare names) keeps shadowed locals and unrelated
      qualified values distinct. *)
-  let hypothesis =
+  let goal, hypothesis =
     align_seal_sibling_references ~env goal hypothesis
   in
   (* Anchor the goal's own span to the implementation annotation so a click on
@@ -2199,6 +2378,64 @@ and add_resumed_facts state function_ arguments =
            state.resume_facts))
     (continued_continuation function_ arguments)
 
+and dependent_parameter_identity ~label type_ =
+  let identity = ref None in
+  let ambiguous = ref false in
+  let add id =
+    match !identity with
+    | None -> identity := Some id
+    | Some other when Ident.same id other -> ()
+    | Some _ -> ambiguous := true
+  in
+  let rec visit_expression expression =
+    begin match expression.rexp_desc with
+    | Rexp_ident (Rfree (Rparameter (parameter_label, id))) ->
+      if String.equal parameter_label label then add id
+    | Rexp_ident _ | Rexp_constant _ -> ()
+    | Rexp_let (bindings, body) ->
+      List.iter
+        (fun binding -> visit_expression binding.rbind_expr)
+        bindings;
+      visit_expression body
+    | Rexp_function function_ -> visit_expression function_.body
+    | Rexp_apply (function_, arguments) ->
+      visit_expression function_;
+      List.iter
+        (fun (_, argument) -> visit_expression argument)
+        arguments
+    | Rexp_tuple fields ->
+      List.iter (fun (_, field) -> visit_expression field) fields
+    | Rexp_construct (_, arguments) ->
+      List.iter visit_expression arguments
+    | Rexp_field (record, _) -> visit_expression record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      visit_expression condition;
+      visit_expression ifso;
+      Option.iter visit_expression ifnot
+    | Rexp_match (scrutinee, cases) ->
+      visit_expression scrutinee;
+      List.iter (fun case -> visit_expression case.rcase_body) cases
+    end
+  in
+  with_type_mark (fun mark ->
+    let rec visit type_ =
+      if try_mark_node mark type_ then
+        match get_desc type_ with
+        | Trefine refinement ->
+          visit_expression refinement.ref_pred;
+          visit refinement.ref_skeleton
+        | Tarrow ((nested_label, _, _), domain, result, _) ->
+          visit domain;
+          begin match nested_label with
+          | Types.Labelled nested when String.equal nested label -> ()
+          | Types.Nolabel | Types.Optional _ | Types.Position _
+          | Types.Labelled _ -> visit result
+          end
+        | _ -> Btype.iter_type_expr visit type_
+    in
+    visit type_);
+  if !ambiguous then None else !identity
+
 and walk_match state scrutinee cases effect_cases marks =
   let pre_scrutinee_facts = state.facts in
   walk_expression state scrutinee;
@@ -2281,18 +2518,27 @@ and walk_match state scrutinee cases effect_cases marks =
     else normal_scrutinee_facts
 
 and check_application state application function_ arguments =
-  let definition =
+  let contract =
     match function_.exp_desc with
-    | Texp_ident { path; _ } -> find_definition state path
+    | Texp_ident { path; _ } ->
+      Option.map
+        (fun (definition : definition) ->
+          definition.parameters, definition.type_, definition.replacements)
+        (find_definition state path)
+    | Texp_apply _ ->
+      Option.map
+        (fun (partial : partial_application) ->
+          partial.parameters, partial.type_, partial.replacements)
+        (Hashtbl.find_opt state.partial_applications function_.exp_loc)
     | _ -> None
   in
-  let parameters, function_type =
-    match definition with
-    | None -> [], function_.exp_type
-    | Some definition -> definition.parameters, definition.type_
+  let parameters, function_type, initial_replacements =
+    match contract with
+    | None -> [], function_.exp_type, []
+    | Some contract -> contract
   in
-  let rec loop type_ parameters replacements = function
-    | [] -> type_, replacements
+  let rec loop type_ parameters replacements omitted = function
+    | [] -> type_, replacements, List.rev omitted, parameters
     | (_, argument) :: arguments ->
       let type_ =
         match get_desc type_ with
@@ -2300,18 +2546,26 @@ and check_application state application function_ arguments =
         | _ -> type_
       in
       begin match get_desc type_ with
-      | Tarrow (_, domain, result, _) ->
+      | Tarrow (((label, _, _) as arrow), domain, result, commutable) ->
         let parameter, parameters =
           match parameters with
-          | [] -> None, []
-          | parameter :: parameters -> Some parameter, parameters
+          | parameter :: parameters -> parameter, parameters
+          | [] ->
+            begin match label with
+            | Types.Labelled name ->
+              dependent_parameter_identity ~label:name result, []
+            | Types.Nolabel | Types.Optional _ | Types.Position _ ->
+              None, []
+            end
         in
-        let replacements =
+        let replacements, omitted =
           match argument with
-          | Omitted _ -> replacements
+          | Omitted _ ->
+            replacements,
+            (parameter, arrow, domain, commutable) :: omitted
           | Arg (argument, _) ->
             begin match refinement domain, parameter with
-            | None, None -> replacements
+            | None, None -> replacements, omitted
             | domain_refinement, parameter ->
               let argument_subject = subject state argument in
               Option.iter
@@ -2319,7 +2573,8 @@ and check_application state application function_ arguments =
                   let provenance () =
                     contract_argument_provenance
                       ~application_location:application.exp_loc
-                      ~argument_location:argument.exp_loc ~parameter refinement
+                      ~argument_location:argument.exp_loc
+                      ~parameter refinement
                   in
                   prove_refinement state ~env:application.exp_env
                     ~loc:argument.exp_loc ~kind:"contract-argument"
@@ -2328,34 +2583,75 @@ and check_application state application function_ arguments =
                     ~subject:argument_subject refinement replacements)
                 domain_refinement;
               begin match parameter with
-              | None -> replacements
+              | None -> replacements, omitted
               | Some parameter ->
-                (parameter, argument_subject) :: replacements
+                (parameter, argument_subject) :: replacements, omitted
               end
             end
         in
-        loop result parameters replacements arguments
-      | _ -> type_, replacements
+        loop result parameters replacements omitted arguments
+      | _ -> type_, replacements, List.rev omitted, []
       end
   in
-  let result_type, replacements =
-    loop function_type parameters [] arguments
+  let result_type, replacements, omitted, remaining_parameters =
+    loop function_type parameters initial_replacements [] arguments
   in
-  Option.iter
-    (fun refinement ->
-      let result_subject = subject state application in
-      let fact = Vox_vc.instantiate ~refinement ~with_:result_subject in
-      let fact = replace_parameters replacements fact in
-      let fact = bind_scope_references (Facts.scope state.facts) fact in
-      let name =
-        match function_.exp_desc with
-        | Texp_ident { path; _ } -> Some (Path.last path)
-        | _ -> None
+  let rec infer_remaining_parameters type_ =
+    match get_desc type_ with
+    | Tpoly (type_, _) -> infer_remaining_parameters type_
+    | Tarrow ((label, _, _), _, result, _) ->
+      let parameter =
+        match label with
+        | Types.Labelled name ->
+          dependent_parameter_identity ~label:name result
+        | Types.Nolabel | Types.Optional _ | Types.Position _ -> None
       in
-      let origin = fact_origin ?name ~kind:"application" application.exp_loc in
-      state.facts <-
-        Facts.add ~origin ~loc:application.exp_loc fact state.facts)
-    (refinement result_type)
+      parameter :: infer_remaining_parameters result
+    | _ -> []
+  in
+  let remaining_parameters =
+    match remaining_parameters with
+    | _ :: _ -> remaining_parameters
+    | [] -> infer_remaining_parameters result_type
+  in
+  let parameters =
+      List.map
+        (fun (parameter, _, _, _) -> parameter)
+        omitted
+      @ remaining_parameters
+  in
+  match parameters with
+  | _ :: _ ->
+    let type_ =
+      List.fold_right
+        (fun (_, arrow, domain, commutable) result ->
+          Btype.newgenty
+            (Tarrow (arrow, domain, result, Btype.copy_commu commutable)))
+        omitted result_type
+    in
+    Hashtbl.replace state.partial_applications application.exp_loc
+      { parameters;
+        type_;
+        replacements;
+      }
+  | [] ->
+    Option.iter
+      (fun refinement ->
+        let result_subject = subject state application in
+        let fact = Vox_vc.instantiate ~refinement ~with_:result_subject in
+        let fact = replace_parameters replacements fact in
+        let fact = bind_scope_references (Facts.scope state.facts) fact in
+        let name =
+          match function_.exp_desc with
+          | Texp_ident { path; _ } -> Some (Path.last path)
+          | _ -> None
+        in
+        let origin =
+          fact_origin ?name ~kind:"application" application.exp_loc
+        in
+        state.facts <-
+          Facts.add ~origin ~loc:application.exp_loc fact state.facts)
+      (refinement result_type)
 
 and walk_default_expression state expression =
   let super = Tast_iterator.default_iterator in
@@ -2550,6 +2846,7 @@ let verify_structure ?(toplevel = false) structure =
         resume_facts = [];
         total_functions = toplevel_total_functions;
         call_subjects = Hashtbl.create 16;
+        partial_applications = Hashtbl.create 16;
       }
     else
       { facts = Facts.empty;
@@ -2557,6 +2854,7 @@ let verify_structure ?(toplevel = false) structure =
         resume_facts = [];
         total_functions = Types.Uid.Tbl.create 16;
         call_subjects = Hashtbl.create 16;
+        partial_applications = Hashtbl.create 16;
       }
   in
   let walk_root () =

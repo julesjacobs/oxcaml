@@ -227,6 +227,7 @@ and refinement_identifier =
 and refinement_reference =
   | Rfun of string
   | Rsibling of string
+  | Rparameter of string * Ident.t
   | Rapp of Path.t
   | Rglobal of Path.t
 
@@ -1577,6 +1578,7 @@ module Refinement = struct
     let map_reference = function
       | Rapp path -> Rapp (value_path path)
       | Rglobal path -> Rglobal (value_path path)
+      | Rparameter (label, id) -> Rparameter (label, id)
       | Rsibling name ->
         (match sibling_prefix with
          | Some root -> Rglobal (Path.Pdot (root, name))
@@ -2010,24 +2012,14 @@ module Refinement = struct
           refinement.ref_pred;
     }
 
-  (* Freshen the free references to bare local [Pident]s in a predicate.  Such a
-     reference is a function parameter (or other unit-local value) that a
-     structure-level predicate mentions; it is lowered as [Rfree (Rglobal/Rapp
-     (Pident id))] carrying that unit's local stamp.  Local stamps are only
-     unique within a compilation unit, so when a refinement is imported from
-     another unit its foreign parameter stamp can coincide with a caller-local
-     binder stamp -- and because [Ident.same] compares locals by stamp, the two
-     distinct values would be conflated (a cross-unit soundness hole).  Renaming
-     each such reference to a globally fresh [Scoped] ident on import makes the
-     foreign parameter a unique opaque symbol that cannot be [Ident.same] to any
-     current-unit binder (a [Scoped] ident is never [same] as a [Local] one, and
-     its stamp is fresh regardless), so it can neither be rewritten to a caller
-     binder nor conflated by [Path.same].  [Rsibling]/[Rfun] (name-keyed) and
+  (* Freshen free references carrying unit-local identifiers.  These are bare
+     local [Pident]s and the identities in [Rparameter].  Local stamps are only
+     unique within a compilation unit, so an imported stamp can coincide with a
+     caller-local binder stamp.  Renaming to a globally fresh [Scoped] ident on
+     import prevents that conflation.  [Rsibling]/[Rfun] (name-keyed) and
      module-qualified [Pdot] references are left untouched.  Renaming is
-     consistent within the predicate (every mention of one foreign parameter
-     maps to the same fresh ident), and it is applied once at import, where the
-     loaded signature is cached, so a unit's parameter reference is stable across
-     all uses in the importing compilation. *)
+     consistent within the predicate and is applied once when the cached
+     signature is imported. *)
   let freshen_free_local_refs refinement =
     let renaming = ref [] in
     let fresh_for id =
@@ -2041,6 +2033,7 @@ module Refinement = struct
     let rename_reference = function
       | Rglobal (Path.Pident id) -> Rglobal (Path.Pident (fresh_for id))
       | Rapp (Path.Pident id) -> Rapp (Path.Pident (fresh_for id))
+      | Rparameter (label, id) -> Rparameter (label, fresh_for id)
       | (Rglobal _ | Rapp _ | Rfun _ | Rsibling _) as reference -> reference
     in
     let rec walk expression =
@@ -2088,7 +2081,7 @@ module Refinement = struct
       String.equal left right && left_delimiter = right_delimiter
     | _ -> left = right
 
-  let alpha_equal ~equal_type ?(binders = []) left right =
+  let alpha_equal ~equal_type ?(binders = []) ?(parameters = []) left right =
     let add_pair pairs left right =
       match
         List.find_opt (fun (id, _) -> Ident.same id left) pairs,
@@ -2115,9 +2108,12 @@ module Refinement = struct
       match left, right with
       | Rfun left, Rfun right | Rsibling left, Rsibling right ->
         String.equal left right
+      | Rparameter (left_label, left), Rparameter (right_label, right) ->
+        String.equal left_label right_label && paired parameters left right
       | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
         Path.same left right
-      | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
+      | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ ->
+        false
     in
     let rec equal pairs left right =
       equal_type left.rexp_type right.rexp_type
@@ -2242,16 +2238,28 @@ module Refinement = struct
             (fun pairs -> add_binders pairs rest)
         else None
     in
-    Option.fold
-      ~none:false
-      ~some:(fun pairs -> equal pairs left right)
-      (add_binders [] binders)
+    let rec add_parameters pairs = function
+      | [] -> Some pairs
+      | (left, right) :: rest ->
+        Option.bind (add_pair pairs left right) (fun pairs ->
+          add_parameters pairs rest)
+    in
+    Option.fold ~none:false
+      ~some:(fun _ ->
+        Option.fold
+          ~none:false
+          ~some:(fun pairs -> equal pairs left right)
+          (add_binders [] binders))
+      (add_parameters [] parameters)
 
-  let equal_desc ~equal_type left right =
+  let strict_equal ~equal_type left right = alpha_equal ~equal_type left right
+
+  let equal_desc ~equal_type ?(parameters = []) left right =
     equal_type left.ref_skeleton right.ref_skeleton
     && alpha_equal
          ~equal_type
          ~binders:[left.ref_view, right.ref_view]
+         ~parameters
          left.ref_pred right.ref_pred
 
   let print_constant ppf = function
@@ -2285,6 +2293,7 @@ module Refinement = struct
   let print_reference ppf = function
     | Rfun name -> Format.fprintf ppf "fun[%s]" name
     | Rsibling name -> Format.fprintf ppf "sibling[%s]" name
+    | Rparameter (label, _) -> Format.fprintf ppf "parameter[%s]" label
     | Rapp path -> Format.fprintf ppf "app[%a]" print_path path
     | Rglobal path -> Format.fprintf ppf "global[%a]" print_path path
 
@@ -2394,6 +2403,7 @@ module Refinement = struct
     let validate_reference = function
       | Rfun name -> require_name "function" name
       | Rsibling name -> require_name "sibling" name
+      | Rparameter (label, _) -> require_name "parameter" label
       | Rapp _ | Rglobal _ -> ()
     in
     let rec loop bound seen expression =

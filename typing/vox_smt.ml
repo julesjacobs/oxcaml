@@ -463,10 +463,11 @@ and reduce_application outer function_ arguments =
 
 let reference_basename = function
   | Rfun name | Rsibling name -> name
+  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> Path.last path
 
 let builtin_name context = function
-  | Rfun _ | Rsibling _ -> None
+  | Rfun _ | Rsibling _ | Rparameter _ -> None
   | Rapp path | Rglobal path ->
     begin
       match
@@ -482,13 +483,16 @@ let same_reference left right =
   match left, right with
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
+  | Rparameter (left_label, left), Rparameter (right_label, right) ->
+    String.equal left_label right_label && Ident.same left right
   | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
     Path.same left right
-  | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
+  | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ -> false
 
 let quantifier_name = function
   | Rfun name | Rsibling name ->
     String.equal name "forall_" || String.equal name "exists_"
+  | Rparameter _ -> false
   | Rapp path | Rglobal path ->
     let name = Path.last path in
     String.equal name "forall_" || String.equal name "exists_"
@@ -496,6 +500,7 @@ let quantifier_name = function
 let reference_description = function
   | Rfun name -> "function " ^ name
   | Rsibling name -> "sibling " ^ name
+  | Rparameter (label, _) -> "parameter " ^ label
   | Rapp path -> "application " ^ Path.name path
   | Rglobal path -> "value " ^ Path.name path
 
@@ -1210,7 +1215,8 @@ let check_abstract_inhabitance (context : context) location =
                            | Val_anc _; _ } -> false
           | exception Not_found -> false
           end
-        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ -> false)
+        | (Rfun _ | Rsibling _ | Rparameter _ | Rglobal _ | Rapp _), _ ->
+          false)
       context.references
   in
   List.iter

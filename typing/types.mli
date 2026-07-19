@@ -341,6 +341,7 @@ and refinement_identifier =
 and refinement_reference =
   | Rfun of string
   | Rsibling of string
+  | Rparameter of string * Ident.t
   | Rapp of Path.t
   | Rglobal of Path.t
 
@@ -655,7 +656,8 @@ module Refinement : sig
       [sibling_prefix], when given, requalifies signature-relative sibling
       references ([Rsibling]/[Rfun]) to that module path -- used when a
       signature is projected under a module prefix.  Omitted for in-instance
-      substitutions, where siblings stay bare (name-keyed). *)
+      substitutions, where siblings stay bare (name-keyed).  Parameter
+      identities are not paths and are preserved. *)
 
   val subst : id:Ident.t -> by:t -> t -> t
   (** Capture-avoiding substitution of a bound value identifier. *)
@@ -667,28 +669,39 @@ module Refinement : sig
   (** Unconditionally freshen the view binder and every predicate binder. *)
 
   val freshen_free_local_refs : refinement_desc -> refinement_desc
-  (** Freshen every free reference to a bare local [Pident] (a function
-      parameter or unit-local value a predicate mentions) to a globally fresh
-      [Scoped] ident, consistently within the predicate.  Applied on import from
-      a .cmi so a foreign parameter's local stamp cannot collide with a
-      caller-local binder.  [Rsibling]/[Rfun] and module-qualified [Pdot]
-      references are left unchanged. *)
+  (** Freshen every free bare local [Pident] and [Rparameter] identity to a
+      globally fresh [Scoped] ident, consistently within the predicate.
+      Applied on import from a .cmi so a foreign local stamp cannot collide
+      with a caller-local binder.  [Rsibling]/[Rfun] and module-qualified
+      [Pdot] references are left unchanged. *)
 
   val alpha_equal :
     equal_type:(type_expr -> type_expr -> bool) ->
     ?binders:(refinement_binder * refinement_binder) list ->
+    ?parameters:(Ident.t * Ident.t) list ->
     t ->
     t ->
     bool
-  (** Structural equality modulo a threaded bijection between binders. *)
+  (** Structural equality modulo threaded bijections between binders and
+      explicitly position-paired parameter identities.  Unpaired free
+      parameter identities are compared strictly. *)
+
+  val strict_equal :
+    equal_type:(type_expr -> type_expr -> bool) ->
+    t ->
+    t ->
+    bool
+  (** Structural equality with strict free-reference identity. *)
 
   val equal_desc :
     equal_type:(type_expr -> type_expr -> bool) ->
+    ?parameters:(Ident.t * Ident.t) list ->
     refinement_desc ->
     refinement_desc ->
     bool
-  (** Rigid descriptor equality, including skeleton, view binder, and
-      alpha-equivalent predicate. *)
+  (** Rigid descriptor equality, including skeleton, view binder, and the
+      predicate.  Parameter identities are strict unless the structural type
+      comparison supplies explicit position pairs. *)
 
   val print : Format.formatter -> t -> unit
 

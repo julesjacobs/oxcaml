@@ -4289,6 +4289,95 @@ let rec expands_to_datatype env ty =
 let may_have_jkind_intersection_tk env ty jkind =
   Jkind.may_have_intersection env (type_jkind env ty) jkind
 
+(* A dependent parameter is bound by its arrow position, not by its printed
+   label.  Structural type relations install the correspondence while
+   descending through matching labeled arrows; predicate equality may only
+   consume pairs established here. *)
+let refinement_parameter_pairs = ref []
+
+let dependent_parameter_identity ~label type_ =
+  let identities = ref [] in
+  let add id =
+    if not (List.exists (Ident.same id) !identities)
+    then identities := id :: !identities
+  in
+  let rec visit_expression expression =
+    begin match expression.rexp_desc with
+    | Rexp_ident (Rfree (Rparameter (parameter_label, id))) ->
+      if String.equal parameter_label label then add id
+    | Rexp_ident _ | Rexp_constant _ -> ()
+    | Rexp_let (bindings, body) ->
+      List.iter
+        (fun binding -> visit_expression binding.rbind_expr)
+        bindings;
+      visit_expression body
+    | Rexp_function function_ -> visit_expression function_.body
+    | Rexp_apply (function_, arguments) ->
+      visit_expression function_;
+      List.iter (fun (_, argument) -> visit_expression argument) arguments
+    | Rexp_tuple fields ->
+      List.iter (fun (_, field) -> visit_expression field) fields
+    | Rexp_construct (_, arguments) ->
+      List.iter visit_expression arguments
+    | Rexp_field (record, _) -> visit_expression record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      visit_expression condition;
+      visit_expression ifso;
+      Option.iter visit_expression ifnot
+    | Rexp_match (scrutinee, cases) ->
+      visit_expression scrutinee;
+      List.iter (fun case -> visit_expression case.rcase_body) cases
+    end
+  in
+  with_type_mark (fun mark ->
+    let rec visit type_ =
+      if try_mark_node mark type_ then
+        match get_desc type_ with
+        | Trefine refinement ->
+          visit_expression refinement.ref_pred;
+          visit refinement.ref_skeleton
+        | Tarrow ((nested_label, _, _), domain, result, _) ->
+          visit domain;
+          begin match nested_label with
+          | Labelled nested when String.equal nested label -> ()
+          | Nolabel | Optional _ | Position _ | Labelled _ -> visit result
+          end
+        | _ -> Btype.iter_type_expr visit type_
+    in
+    visit type_);
+  match !identities with
+  | [id] -> Some id
+  | [] | _ :: _ :: _ -> None
+
+let with_refinement_parameter_pair label left_result right_result f =
+  match
+    dependent_parameter_identity ~label left_result,
+    dependent_parameter_identity ~label right_result
+  with
+  | Some left, Some right ->
+    Misc.protect_refs
+      [Misc.R
+         (refinement_parameter_pairs,
+          (left, right) :: !refinement_parameter_pairs)]
+      f
+  | (None | Some _), (None | Some _) -> f ()
+
+let with_arrow_refinement_parameter_pair left_label right_label
+    left_result right_result f =
+  match left_label, right_label with
+  | Labelled left, Labelled right when String.equal left right ->
+    with_refinement_parameter_pair left left_result right_result f
+  | (Nolabel | Optional _ | Position _ | Labelled _), _ -> f ()
+
+let with_reversed_refinement_parameter_pairs f =
+  Misc.protect_refs
+    [Misc.R
+       (refinement_parameter_pairs,
+        List.map
+          (fun (left, right) -> right, left)
+          !refinement_parameter_pairs)]
+    f
+
 (* [mcomp] tests if two types are "compatible" -- i.e., if there could
    exist a witness of their equality. This is distinct from [eqtype],
    which checks if two types *are*  exactly the same.
@@ -4379,8 +4468,9 @@ let rec mcomp type_pairs env t1 t2 =
         (* Rigid cases -- neither side is flexible nor aliasable *)
         | (Tarrow ((l1,_,_), t1, u1, _), Tarrow ((l2,_,_), t2, u2, _), _, _)
           when compatible_labels ~in_pattern_mode:true l1 l2 ->
-            mcomp type_pairs env t1 t2;
-            mcomp type_pairs env u1 u2;
+            with_arrow_refinement_parameter_pair l1 l2 u1 u2 (fun () ->
+              mcomp type_pairs env t1 t2;
+              mcomp type_pairs env u1 u2);
         | (Ttuple tl1, Ttuple tl2, _, _) ->
             mcomp_labeled_list type_pairs env tl1 tl2
         (*
@@ -4412,6 +4502,7 @@ let rec mcomp type_pairs env t1 t2 =
                         mcomp type_pairs env type1 type2;
                         true
                       with Incompatible -> false)
+                    ~parameters:!refinement_parameter_pairs
                     refinement1 refinement2)
             then raise Incompatible
         | (Trefine _, _, _, _) | (_, Trefine _, _, _) ->
@@ -5091,6 +5182,7 @@ and unify3 uenv t1 t1' t2 t2' =
                 ~equal_type:(fun type1 type2 ->
                   unify uenv type1 type2;
                   true)
+                ~parameters:!refinement_parameter_pairs
                 refinement1 refinement2)
         then raise_unexplained_for Unify
       with Unify_trace trace ->
@@ -5120,15 +5212,17 @@ and unify3 uenv t1 t1' t2 t2' =
       begin match (d1, d2) with
         (Tarrow ((l1,a1,r1), t1, u1, c1), Tarrow ((l2,a2,r2), t2, u2, c2)) ->
           eq_labels Unify ~in_pattern_mode:(in_pattern_mode uenv) l1 l2;
-          unify_alloc_mode_for Unify a1 a2;
-          unify_alloc_mode_for Unify r1 r2;
-          unify uenv t1 t2; unify uenv u1 u2;
-          begin match is_commu_ok c1, is_commu_ok c2 with
-          | false, true -> set_commu_ok c1
-          | true, false -> set_commu_ok c2
-          | false, false -> link_commu ~inside:c1 c2
-          | true, true -> ()
-          end
+          with_arrow_refinement_parameter_pair l1 l2 u1 u2 (fun () ->
+            unify_alloc_mode_for Unify a1 a2;
+            unify_alloc_mode_for Unify r1 r2;
+            unify uenv t1 t2;
+            unify uenv u1 u2;
+            begin match is_commu_ok c1, is_commu_ok c2 with
+            | false, true -> set_commu_ok c1
+            | true, false -> set_commu_ok c2
+            | false, false -> link_commu ~inside:c1 c2
+            | true, true -> ()
+            end)
       | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
           unify_labeled_list uenv labeled_tl1 labeled_tl2
       | (Tunboxed_tuple labeled_tl1, Tunboxed_tuple labeled_tl2) ->
@@ -6500,15 +6594,20 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
           | (Tarrow ((l1,a1,r1), t1, u1, _),
              Tarrow ((l2,a2,r2), t2, u2, _)) ->
               eq_labels Moregen ~in_pattern_mode:false l1 l2;
-              moregen inst_nongen (neg_variance variance) type_pairs env t1 t2;
-              moregen inst_nongen variance type_pairs env u1 u2;
-              (* [t2] and [u2] is the user-written interface, which we deem as
-                 more "principal" and used for mode crossing. See
-                 [typing-modes/crossing.ml]. *)
-              (* CR zqian: should use the meet of [t1] and [t2] for mode
-              crossing. Similar for [u1] and [u2]. *)
-              moregen_alloc_mode env t2 ~is_ret:false (neg_variance variance) a1 a2;
-              moregen_alloc_mode env u2 ~is_ret:true variance r1 r2
+              let compare_arrow () =
+                moregen inst_nongen (neg_variance variance) type_pairs env
+                  t1 t2;
+                moregen inst_nongen variance type_pairs env u1 u2;
+                (* [t2] and [u2] is the user-written interface, which we deem
+                   as more "principal" and used for mode crossing. See
+                   [typing-modes/crossing.ml]. *)
+                (* CR zqian: should use the meet of [t1] and [t2] for mode
+                crossing. Similar for [u1] and [u2]. *)
+                moregen_alloc_mode env t2 ~is_ret:false
+                  (neg_variance variance) a1 a2;
+                moregen_alloc_mode env u2 ~is_ret:true variance r1 r2
+              in
+              with_arrow_refinement_parameter_pair l1 l2 u1 u2 compare_arrow
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               moregen_labeled_list inst_nongen variance type_pairs env
                 labeled_tl1 labeled_tl2
@@ -6579,6 +6678,7 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                         type1 type2;
                       true)
                     ~binders:[refinement1.ref_view, refinement2.ref_view]
+                    ~parameters:!refinement_parameter_pairs
                     refinement1.ref_pred refinement2.ref_pred
                 in
                 if not predicates_equal then begin
@@ -6604,6 +6704,7 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                           moregen inst_nongen Invariant type_pairs env
                             type1 type2;
                           true)
+                        ~parameters:!refinement_parameter_pairs
                         refinement1 refinement2)
                 then raise_unexplained_for Moregen
               end
@@ -7081,10 +7182,13 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
           | (Tarrow ((l1,a1,r1), t1, u1, _),
              Tarrow ((l2,a2,r2), t2, u2, _)) ->
               eq_labels Equality ~in_pattern_mode:false l1 l2;
-              eqtype rename type_pairs subst env t1 t2 ~do_jkind_check:true;
-              eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true;
-              eqtype_alloc_mode a1 a2;
-              eqtype_alloc_mode r1 r2
+              with_arrow_refinement_parameter_pair l1 l2 u1 u2 (fun () ->
+                eqtype rename type_pairs subst env t1 t2
+                  ~do_jkind_check:true;
+                eqtype rename type_pairs subst env u1 u2
+                  ~do_jkind_check:true;
+                eqtype_alloc_mode a1 a2;
+                eqtype_alloc_mode r1 r2)
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               eqtype_labeled_list rename type_pairs subst env labeled_tl1
                 labeled_tl2
@@ -7145,6 +7249,7 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
                         eqtype rename type_pairs subst env
                           ~do_jkind_check type1 type2;
                         true)
+                      ~parameters:!refinement_parameter_pairs
                       refinement1 refinement2)
               then raise_unexplained_for Equality
           | (Trefine _, _) | (_, Trefine _) ->
@@ -7977,22 +8082,24 @@ let rec subtype_rec env trace t1 t2 cstrs =
     | (Tarrow((l1,a1,r1), t1, u1, _),
        Tarrow((l2,a2,r2), t2, u2, _))
       when compatible_labels ~in_pattern_mode:false l1 l2 ->
-        let cstrs =
+        with_arrow_refinement_parameter_pair l1 l2 u1 u2 (fun () ->
+          let cstrs =
+            with_reversed_refinement_parameter_pairs (fun () ->
+              subtype_rec
+                env
+                (Subtype.Diff {got = t2; expected = t1} :: trace)
+                t2 t1
+                cstrs)
+          in
+          let a2 = cross_left_alloc env t2 a2 in
+          subtype_alloc_mode env trace a2 a1;
+          let r2 = cross_right_alloc_ret env u2 r2 in
+          subtype_alloc_mode env trace r1 r2;
           subtype_rec
             env
-            (Subtype.Diff {got = t2; expected = t1} :: trace)
-            t2 t1
-            cstrs
-        in
-        let a2 = cross_left_alloc env t2 a2 in
-        subtype_alloc_mode env trace a2 a1;
-        let r2 = cross_right_alloc_ret env u2 r2 in
-        subtype_alloc_mode env trace r1 r2;
-        subtype_rec
-          env
-          (Subtype.Diff {got = u1; expected = u2} :: trace)
-          u1 u2
-          cstrs
+            (Subtype.Diff {got = u1; expected = u2} :: trace)
+            u1 u2
+            cstrs)
     | (Ttuple tl1, Ttuple tl2) ->
         subtype_labeled_list env trace tl1 tl2 cstrs
     | (Tunboxed_tuple tl1, Tunboxed_tuple tl2) ->
@@ -8026,11 +8133,12 @@ let rec subtype_rec env trace t1 t2 cstrs =
               else
                 if cn
                 then
-                  subtype_rec
-                    env
-                    (Subtype.Diff {got = t2; expected = t1} :: trace)
-                    t2 t1
-                    cstrs
+                  with_reversed_refinement_parameter_pairs (fun () ->
+                    subtype_rec
+                      env
+                      (Subtype.Diff {got = t2; expected = t1} :: trace)
+                      t2 t1
+                      cstrs)
                 else cstrs)
             cstrs decl.type_variance (List.combine tl1 tl2)
         with Not_found ->
@@ -8092,6 +8200,7 @@ let rec subtype_rec env trace t1 t2 cstrs =
       when Refinement.equal_desc
              ~equal_type:(fun type1 type2 ->
                is_equal env false [type1] [type2])
+             ~parameters:!refinement_parameter_pairs
              refinement1 refinement2 ->
         cstrs
     | (Trefine _, _) | (_, Trefine _) ->

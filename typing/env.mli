@@ -715,6 +715,8 @@ exception Error of error
 val in_signature: bool -> t -> t
 
 val is_in_signature: t -> bool
+val add_dependent_parameter : label:string -> Ident.t -> t -> t
+val dependent_parameter_label : Ident.t -> t -> string option
 
 val set_value_used_callback:
     Subst.Lazy.value_description -> (unit -> unit) -> unit
