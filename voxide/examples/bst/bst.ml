@@ -209,27 +209,20 @@ let rec member_insert new_key tree query
       finish_member_insert new_key tree query
         (member_insert_right key new_key left right query induction)
 
-let empty_has_no_zero (_ : unit @ logical)
-    : unit{ member 0 empty = false } =
-  prove_member_empty 0
+let empty_law ~(key : int @ logical)
+    : unit{ member key empty = false } =
+  prove_member_empty key
 
-let empty_has_no_one (_ : unit @ logical)
-    : unit{ member 1 empty = false } =
-  prove_member_empty 1
+let insert_law ~(key : int @ logical) ~(tree : t @ logical)
+    : unit{ member key (insert key tree) = true } =
+  member_insert key tree key
 
-let insert_zero_has_zero (_ : unit @ logical)
-    : unit{ member 0 (insert 0 empty) = true } =
-  member_insert 0 empty 0
-
-let insert_zero_has_no_one (_ : unit @ logical)
-    : unit{ member 1 (insert 0 empty) = false } =
-  let _insert = member_insert 0 empty 1 in
-  let _empty = prove_member_empty 1 in
-  ()
-
-let insert_one_preserves_zero (_ : unit @ logical)
-    : unit{ member 0 (insert 1 (insert 0 empty)) = true }
+let member_insert_law ~(inserted : int @ logical)
+    ~(tree : t @ logical) ~(query : int @ logical)
+    : unit{
+      member query (insert inserted tree)
+      = ((inserted = query) || member query tree)
+    }
   =
-  let _second_insert = member_insert 1 (insert 0 empty) 0 in
-  let _first_insert = member_insert 0 empty 0 in
-  ()
+  let _membership = member_insert inserted tree query in
+  if int_equal query inserted then () else ()

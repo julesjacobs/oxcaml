@@ -40,7 +40,7 @@
       "name": "bst",
       "title": "Binary search tree (verified behind an interface)",
       "filename": "bst/",
-      "description": "A genuine recursive BST, an abstract interface with membership-algebra proof tokens, and a positive client that proves four facts from the interface alone. Opens on Lean; z3 and oxsmt verify the interface/client layer but currently report a known recursive-datatype solver gap in bst.ml.",
+      "description": "A genuine recursive BST whose abstract interface exports three parametric functional-correctness laws: empty membership, inserted-key membership, and the full member-after-insert characterization. The positive client instantiates them at fresh keys and tree shapes. On R6, Lean and z3 verify the complete workspace; in-process oxsmt is honest-partial and reports unproved when it cannot discharge the recursive proof.",
       "expected_state": "verified",
       "workspace": {
         "active": "client_positive.ml",
@@ -67,23 +67,14 @@
           },
           "z3": {
             "bst.mli": "interface",
-            "bst.ml": "solver-error",
+            "bst.ml": "verified",
             "client_positive.ml": "verified"
           },
           "oxsmt": {
             "bst.mli": "interface",
-            "bst.ml": "solver-error",
-            "client_positive.ml": "verified"
+            "bst.ml": "unproved",
+            "client_positive.ml": "unavailable"
           }
-        },
-        "known_gap": "Recursive-datatype implementation VCs are Lean-only today; z3/oxsmt solver-error is a backend capability gap, not a source failure.",
-        "known_gap_check": {
-          "label": "interface + client",
-          "active": "client_positive.ml",
-          "files": [
-            "bst.mli",
-            "client_positive.ml"
-          ]
         }
       }
     },

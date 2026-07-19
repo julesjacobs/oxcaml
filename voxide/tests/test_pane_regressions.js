@@ -160,13 +160,13 @@ section("Curated teaching metadata stays separate and compiler-backed");
       bst.expected_state === "verified" &&
       bst.workspace.default_backend === "lean" &&
       bst.workspace.expected_by_backend.lean["bst.ml"] === "verified" &&
-      bst.workspace.expected_by_backend.oxsmt["bst.ml"] === "solver-error" &&
+      bst.workspace.expected_by_backend.z3["bst.ml"] === "verified" &&
+      bst.workspace.expected_by_backend.oxsmt["bst.ml"] === "unproved" &&
       bst.workspace.expected_by_backend.oxsmt["client_positive.ml"] ===
-        "verified" &&
-      bst.workspace.known_gap_check.files.join(",") ===
-        "bst.mli,client_positive.ml" &&
-      bst.workspace.known_gap_check.active === "client_positive.ml",
-    "BST metadata separates the full workspace from its live client-layer check"
+        "unavailable" &&
+      !Object.prototype.hasOwnProperty.call(bst.workspace, "known_gap") &&
+      !Object.prototype.hasOwnProperty.call(bst.workspace, "known_gap_check"),
+    "BST metadata records z3 completeness and honest-partial oxsmt"
   );
   const observed = (entry) => {
     const fixture = JSON.parse(

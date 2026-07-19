@@ -314,7 +314,7 @@ const EXAMPLES = {
       name: "bst",
       title: "Binary search tree (verified behind an interface)",
       filename: "bst/",
-      description: "A genuine recursive BST behind an abstract interface.",
+      description: "A recursive BST with three parametric laws.",
       expected_state: "verified",
       workspace: {
         active: "client_positive.ml",
@@ -326,14 +326,8 @@ const EXAMPLES = {
         ],
         expected_by_backend: {
           lean: { "bst.mli": "interface", "bst.ml": "verified", "client_positive.ml": "verified" },
-          z3: { "bst.mli": "interface", "bst.ml": "solver-error", "client_positive.ml": "verified" },
-          oxsmt: { "bst.mli": "interface", "bst.ml": "solver-error", "client_positive.ml": "verified" },
-        },
-        known_gap: "recursive-datatype implementation VCs are Lean-only",
-        known_gap_check: {
-          label: "interface + client",
-          active: "client_positive.ml",
-          files: ["bst.mli", "client_positive.ml"],
+          z3: { "bst.mli": "interface", "bst.ml": "verified", "client_positive.ml": "verified" },
+          oxsmt: { "bst.mli": "interface", "bst.ml": "unproved", "client_positive.ml": "unavailable" },
         },
       },
     },
@@ -461,20 +455,20 @@ function workspacePayload(revision, active, backend) {
 
 function bstWorkspacePayload(revision, active, backend) {
   const selected = backend || "lean";
-  const gap = selected === "z3" || selected === "oxsmt";
+  const partial = selected === "oxsmt";
   const okOutcome = { kind: "ok", message: "", source_located: false };
-  const gapOutcome = {
+  const partialOutcome = {
     kind: "verification",
-    message: "Refinement verification failed (solver-error)",
+    message: "Refinement verification failed (not-proved)",
     source_located: true,
   };
-  const summary = (proved, solverError) => ({
-    total: proved + solverError,
+  const summary = (proved, unproved) => ({
+    total: proved + unproved,
     statuses: {
       proved,
       disproved: 0,
-      unproved: 0,
-      "solver-error": solverError,
+      unproved,
+      "solver-error": 0,
       unavailable: 0,
       unknown: 0,
     },
@@ -497,25 +491,24 @@ function bstWorkspacePayload(revision, active, backend) {
     goal: { display: "interface fact holds", raw: "" },
     hypotheses: [],
   });
-  const vcs = gap
+  const vcs = partial
     ? [
         {
           id: 0,
           file: "bst.ml",
           kind: "annotation",
-          status: "solver-error",
+          status: "unproved",
           span: { start: { line: 21, col: 0 }, end: { line: 21, col: 8 } },
           goal: { display: "recursive tree equation", raw: "" },
           hypotheses: [],
-          detail: "recursive datatype is not supported by this SMT backend",
+          detail: "prove query: sat; disprove query: sat",
         },
       ]
     : [
         provedVc(0, "bst.ml", 21),
         provedVc(1, "client_positive.ml", 2),
         provedVc(2, "client_positive.ml", 6),
-        provedVc(3, "client_positive.ml", 10),
-        provedVc(4, "client_positive.ml", 14),
+        provedVc(3, "client_positive.ml", 14),
       ];
   const presentation = {
     types: [],
@@ -528,8 +521,8 @@ function bstWorkspacePayload(revision, active, backend) {
     backend: selected,
     backend_options: ["lean", "z3", "oxsmt", "cross", "none"],
     backend_solver_configuration: { z3: true, oxsmt: true },
-    ok: !gap,
-    outcome: gap ? gapOutcome : okOutcome,
+    ok: !partial,
+    outcome: partial ? partialOutcome : okOutcome,
     files: {
       "bst.mli": {
         errors: [],
@@ -539,23 +532,23 @@ function bstWorkspacePayload(revision, active, backend) {
         ...presentation,
       },
       "bst.ml": {
-        errors: gap
-          ? [{ message: gapOutcome.message, kind: "verification" }]
+        errors: partial
+          ? [{ message: partialOutcome.message, kind: "verification" }]
           : [],
-        outcome: gap ? gapOutcome : okOutcome,
-        verification: gap
-          ? { status: "failed", message: gapOutcome.message, obligations: true }
+        outcome: partial ? partialOutcome : okOutcome,
+        verification: partial
+          ? { status: "failed", message: partialOutcome.message, obligations: true }
           : { status: "verified", message: "ok", obligations: true },
-        obligation_summary: gap ? summary(0, 1) : summary(1, 0),
+        obligation_summary: partial ? summary(0, 1) : summary(1, 0),
         ...presentation,
       },
       "client_positive.ml": {
         errors: [],
         outcome: okOutcome,
-        verification: gap
+        verification: partial
           ? { status: "none", message: "Not reached.", obligations: false }
           : { status: "verified", message: "ok", obligations: true },
-        obligation_summary: gap ? summary(0, 0) : summary(4, 0),
+        obligation_summary: partial ? summary(0, 0) : summary(3, 0),
         ...presentation,
       },
     },
@@ -564,8 +557,8 @@ function bstWorkspacePayload(revision, active, backend) {
     identifier_modes: [],
     unavailable: false,
     hidden: 0,
-    obligation_summary: gap ? summary(0, 1) : summary(5, 0),
-    workspace_verification: gap
+    obligation_summary: partial ? summary(0, 1) : summary(4, 0),
+    workspace_verification: partial
       ? { status: "failed", message: "A unit did not verify.", obligations: true }
       : { status: "verified", message: "All units verified.", obligations: true },
   };
@@ -585,8 +578,8 @@ function bstClientLayerPayload(revision, backend) {
   payload.vcs = payload.vcs.filter(
     (vc) => vc.file === "client_positive.ml"
   );
-  payload.obligation_summary.total = 4;
-  payload.obligation_summary.statuses.proved = 4;
+  payload.obligation_summary.total = 3;
+  payload.obligation_summary.statuses.proved = 3;
   return payload;
 }
 let workspacePayloadTransform = null;
@@ -1915,8 +1908,10 @@ async function main() {
     .querySelectorAll(".workspace-file")
     .find((entry) => entry.dataset.file === "bst.ml");
   ok(
-    bstImplNode && bstImplNode.title.indexOf("known backend gap") !== -1,
-    "BST implementation explorer metadata names the recursive-datatype backend gap"
+    bstImplNode &&
+      bstImplNode.title.indexOf("expected on lean: verified") !== -1 &&
+      bstImplNode.title.indexOf("known backend gap") === -1,
+    "BST implementation explorer metadata no longer advertises the retired backend error"
   );
   const absentOrderWorkspace = JSON.parse(JSON.stringify(bstMeta));
   absentOrderWorkspace.workspace.order = ["bst.mli", "absent.ml"];
@@ -1960,8 +1955,8 @@ async function main() {
   );
   ok(
     bst.getActiveFile() === "client_positive.ml" &&
-      bst.cm.getValue().indexOf("Bst.insert_one_preserves_zero") !== -1,
-    "the positive client opens active with its interface-only proof source"
+      bst.cm.getValue().indexOf("Bst.member_insert_law") !== -1,
+    "the positive client opens active with its parametric interface-law source"
   );
   ok(
     bst.getBackend() === "lean" &&
@@ -1995,40 +1990,33 @@ async function main() {
     (tab) => tab.dataset.file === "client_positive.ml"
   );
   ok(
-    registry["status"].textContent.indexOf("solver error") !== -1 &&
-      registry["status"].textContent.indexOf("known backend gap") !== -1 &&
-      registry["status"].textContent.indexOf(
-        "interface + client verified · 4/4"
-      ) !== -1 &&
-      registry["status"]._classes.has("status-solver-error"),
-    "oxsmt shows the implementation gap and the separate verified client layer"
+    registry["status"].textContent.indexOf("1 unproved") !== -1 &&
+      registry["status"].textContent.indexOf("known backend gap") === -1 &&
+      registry["status"]._classes.has("status-unproved"),
+    "oxsmt reports its honest-partial implementation result as unproved"
   );
   ok(
-    implTab.querySelectorAll(".tab-status-solver-error").length === 1 &&
+    implTab.querySelectorAll(".tab-status-unproved").length === 1 &&
       implTab.querySelectorAll(".tab-status-error").length === 0 &&
-      implTab.querySelector(".tab-status").title.indexOf("known backend gap") !== -1,
-    "the implementation tab keeps solver-error distinct from a source error or fabricated green"
+      implTab.querySelector(".tab-status").title.indexOf("known backend gap") === -1,
+    "the implementation tab keeps unproved distinct from a source error or fabricated green"
   );
   ok(
-    clientTab.querySelectorAll(".tab-status-verified").length === 1 &&
+    clientTab.querySelectorAll(".tab-status-unavailable").length === 1 &&
       clientTab.querySelector(".tab-status").title.indexOf(
-        "live interface + client check"
-      ) !== -1 &&
-      bst.getVcs().length === 4 &&
-      bst.getVcs().every((vc) => vc.status === "proved"),
-    "the client tab and proof pane render the live oxsmt interface-plus-client result"
+        "not reached"
+      ) !== -1 && bst.getVcs().length === 0,
+    "the later client stays honestly not reached after oxsmt's unproved implementation VC"
   );
   const oxsmtChecks = fetchLog.filter(
     (entry) => entry.url === "/workspace-check"
   );
   ok(
-    oxsmtChecks.length === 2 &&
+    oxsmtChecks.length === 1 &&
       oxsmtChecks[0].body.files.map((file) => file.name).join(",") ===
         "bst.mli,bst.ml,client_positive.ml" &&
-      oxsmtChecks[1].body.files.map((file) => file.name).join(",") ===
-        "bst.mli,client_positive.ml" &&
-      oxsmtChecks[1].body.backend === "oxsmt",
-    "the green client verdict comes from a second live oxsmt compiler request"
+      oxsmtChecks[0].body.backend === "oxsmt",
+    "oxsmt's honest-partial verdict comes from the full live workspace request"
   );
   delete bstMeta.workspace.expected_by_backend.oxsmt["client_positive.ml"];
   await bst.runWorkspaceCheck();
@@ -2036,12 +2024,12 @@ async function main() {
     .querySelectorAll(".tab")
     .find((tab) => tab.dataset.file === "client_positive.ml");
   ok(
-    expectationFreeClientTab.querySelectorAll(".tab-status-verified").length ===
-      1 && bst.getVcs().length === 4,
+    expectationFreeClientTab.querySelectorAll(".tab-status-unavailable").length ===
+      1 && bst.getVcs().length === 0,
     "removing client expectations does not change its live compiler verdict"
   );
   bstMeta.workspace.expected_by_backend.oxsmt["client_positive.ml"] =
-    "verified";
+    "unavailable";
   await bst.openCuratedWorkspace("bst", "bst.ml");
   await tick();
   await tick();
