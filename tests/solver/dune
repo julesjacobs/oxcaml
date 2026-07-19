@@ -130,3 +130,13 @@
  (name weq_graph_test)
  (modules weq_graph_test)
  (libraries oxsmt_core oxsmt_interface oxsmt_arr))
+
+; dtlia-incremental gate (make dtlia-incremental-gate): the incremental / free-Boolean
+; DT+LIA regression. Drives mixed datatype+integer SAT/UNSAT through check_sat_assuming and
+; batch with pure-Boolean atoms; RED before the DT checker model was completed with the
+; Boolean atoms' accepting-assignment values, GREEN after.
+
+(executable
+ (name dtlia_incremental_gate)
+ (modules dtlia_incremental_gate)
+ (libraries oxsmt_core oxsmt_interface))

@@ -1923,6 +1923,55 @@ let array_checker_override
   ref None
 ;;
 
+(* DT Boolean-atom model completion (default ON; [OXSMT_DTLIA_BOOL_COMPLETE]=0/false/no
+   opts out). At an accepting DT (or DT+LIA) [Sat], [Cdclt.dt_model] carries datatype
+   trees plus Int/scalar leaves, but NOT the truth value of a PURE-Boolean atom whose
+   value lives only in the propositional skeleton: a free Bool constant that is ASSERTED,
+   ASSUMED (every non-empty {!check_sat_assuming} splices its assumption atoms into
+   [asserted]), or an uninterpreted nullary predicate. The independent {!Dt_model_check}
+   reads such a nullary atom from the model env and fails closed when it is absent
+   (dt_model_check.ml, the "leaf (nullary) variable" arm), so those otherwise-SAT problems
+   degraded to a sound [unknown] — this is the incremental DT+LIA scope limit (bugreport
+   03) and, more generally, DT with any free Boolean structure. *)
+let dtlia_bool_complete =
+  lazy
+    (match Sys.getenv_opt "OXSMT_DTLIA_BOOL_COMPLETE" with
+     | Some ("0" | "false" | "no" | "off") -> false
+     | Some _ | None -> true)
+;;
+
+(* Complete the DT checker model with a Bool leaf for every nullary Bool atom surfaced in
+   the propositional skeleton ([prop_to_var], keyed by the same hash-consed {!Term.t} the
+   checker looks up), valued from the accepting SAT assignment ([Sat.value t.sat]; fresh
+   here because [commit_sat] runs AFTER [Sat.solve] returned [Sat] and saved its model).
+
+   Gains-only and fail-closed, exactly like [Cdclt.complete_dt_model_with_scalars]: it
+   only ADDS leaves valued from the solver's OWN satisfying assignment (never invents
+   one), builds a fresh list (no session mutation), skips any term already in the model
+   ([seen]), and {!Dt_model_check} still re-evaluates every assertion independently — so
+   it can only turn a model-check [unknown] into a checked [Sat], never manufacture a
+   wrong [Sat]. A theory/compound atom (Eq/Le/And/…) is not a nullary [App], so it is
+   excluded and stays computed structurally by the checker. *)
+let complete_dt_bool_atoms t model =
+  if not (Lazy.force dtlia_bool_complete)
+  then model
+  else (
+    let seen = Term.Table.create 128 in
+    List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
+    let additions =
+      Term.Table.fold
+        (fun (term : Term.t) sv acc ->
+          match term.Term.node, term.Term.sort with
+          | Term.App (_, args), Sort.Bool
+            when Iarr.length args = 0 && not (Term.Table.mem seen term) ->
+            (term, Oxsmt_dt.Dt.Leaf (Model.Bool (Sat.value t.sat sv))) :: acc
+          | _ -> acc)
+        t.prop_to_var
+        []
+    in
+    model @ List.sort (fun (a, _) (b, _) -> Term.compare a b) additions)
+;;
+
 let commit_sat t =
   (* ARRAYS (QF_AX model construction, task #14): the standalone arrays theory is
      installed, so soundness rests on the array self-check, not the UF [Model_check]
@@ -1965,6 +2014,7 @@ let commit_sat t =
        checked-[Sat]. *)
     match Cdclt.dt_model t.cdclt with
     | Some model ->
+      let model = complete_dt_bool_atoms t model in
       let check =
         match !dt_checker_override with
         | Some f -> f
