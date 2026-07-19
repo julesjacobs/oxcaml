@@ -302,12 +302,20 @@ let implied t ~tl ~hd ~weight =
     pr.(tl) <- -1;
     heap_push t.heap 0 tl;
     let result = ref None in
+    (* real dist tl⇝hd = reduced_dist − pi(tl) + pi(hd); entailed iff real <= weight, i.e.
+       reduced_dist <= [thresh]. Dijkstra pops in increasing reduced_dist, so once the
+       minimum exceeds [thresh] no reachable hd can satisfy the atom — stop and answer
+       None. This makes the common not-entailed query cheap (bounded exploration) instead
+       of walking the whole reachable component. *)
+    let thresh = weight + pi.(tl) - pi.(hd) in
     let continue = ref true in
     while !continue do
       match heap_pop_min t.heap with
       | None -> continue := false
       | Some (rd, u) ->
-        if seen.(u) = ep && rd = d.(u)
+        if rd > thresh
+        then continue := false (* no hd within the weight bound remains *)
+        else if seen.(u) = ep && rd = d.(u)
         then
           if u = hd
           then (

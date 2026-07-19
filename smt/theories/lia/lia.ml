@@ -193,6 +193,27 @@ type 'tok t =
          whole query to [unknown]. Mirrors [eq_frames]' framing (plain frame-drop on
          [pop]; carries no simplex state). Only ever populated when {!trivial_eq_fix_on};
          stays empty otherwise, so the OFF path is byte-for-byte trunk. *)
+  ; dl : 'tok Dl.t option
+      (* DARK (#51): difference-logic side propagator, [Some] iff [dl_prop_on]. [None] =>
+         byte-for-byte trunk. Edges assert alongside simplex bounds and retract with the
+         same push/pop/checkpoint frames. *)
+  ; mutable dl_conflict : 'tok list option
+      (* a negative-cycle conflict detected at DL edge-assert time, its cycle premises
+         held for the next [check] to report; cleared on [pop]/[rewind] (the asserting
+         frame is unwound). *)
+  ; dl_reg_by_node : (int, (int * int * int * int) list) Hashtbl.t
+      (* DARK (#51): difference-shaped registered [Le] atoms as [(reg_index, tl, hd, w)]
+         (DL-node edge of the positive atom), indexed under BOTH endpoint nodes — the
+         transitive-entailment propagation targets. Append-only per registration; a
+         within-frame registration popped away is handled by the [reported] guard, exactly
+         as [registered] itself is never shrunk. *)
+  ; dl_dirty : (int, unit) Hashtbl.t
+      (* DARK (#51): DL nodes whose incident shortest paths MAY have changed since the
+         last [propagate] (endpoints of edges asserted since then, plus freshly-registered
+         atoms' endpoints). [propagate] queries only atoms incident to a dirty node — the
+         DL analogue of {!dirty}. Cleared each [propagate]. Incomplete for a
+         purely-transitive entailment whose atom endpoints are both untouched
+         (completeness-only: a missed force = more decisions, never a wrong verdict). *)
   ; mutable cube_tried : bool
   ; mutable gcd_cut_tried : bool
   (* task #128: the multi-row gcd cut runs at most ONCE per instance. The lattice
@@ -240,6 +261,22 @@ let gcd_cut_on =
   | _ -> false
 ;;
 
+(* DARK (Dartagnan charter #51): a difference-logic side propagator ({!Dl}). When ON,
+   every asserted difference ([x - y <= c]) or var-const ([x <= c]) atom ALSO becomes an
+   edge in an incremental Cotton-Maler difference graph, which detects negative-cycle
+   conflicts and entails registered difference atoms transitively — the census-matched
+   accelerator for this class (82% difference/var-const atoms). It is a SUBSET reasoner
+   layered over the simplex: every DL conflict/propagation is over a subset of the
+   asserted constraints, so both are sound; the simplex remains the completeness backstop
+   at [Final] (sum/3+-var/ non-integer atoms are never ingested and reach only the
+   simplex). OFF: [t.dl = None] and no field is touched, so the path is byte-for-byte
+   trunk. Read once. *)
+let dl_prop_on =
+  match Sys.getenv_opt "OXSMT_LIA_DL_PROP" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* A residual equality row over the still-free integer variables, used by the multi-row
    gcd cut: [gc] is the (var-id, integer-valued coefficient) list, [gr] the residual, [gp]
    the accumulated trail-literal premises of every asserted equality combined into it. *)
@@ -273,6 +310,10 @@ let create ctx =
   ; pin_hint = []
   ; eq_frames = [ [] ]
   ; false_frames = [ [] ]
+  ; dl = (if dl_prop_on then Some (Dl.create ()) else None)
+  ; dl_conflict = None
+  ; dl_reg_by_node = Hashtbl.create (if dl_prop_on then 256 else 1)
+  ; dl_dirty = Hashtbl.create (if dl_prop_on then 64 else 1)
   ; cube_tried = false
   ; gcd_cut_tried = false
   }
@@ -482,6 +523,84 @@ let apply_bounds t cs ~premise ~equality =
     cs
 ;;
 
+(* ---- DARK (#51): difference-logic ingest ----
+
+   DL node ids: problem-var [v] maps to [v + 1]; node 0 is the shared zero node (var-const
+   bound [x <= c] is [x - zero <= c]). *)
+let dl_zero = 0
+let dl_node v = v + 1
+
+let dl_int_of_rat r =
+  if Rational.is_int r then Bigint.to_int_opt (Rational.num_bigint r) else None
+;;
+
+(* From a normalized "Σ pairs + k <= 0" form (problem-var ids, exact coeffs), the DL edge
+   [hd - tl <= w] in DL-node space, or [None] if the form is not difference/var-const
+   shaped (coeffs must be exactly +/-1, <= 2 variables) or [k] does not fit an int. *)
+let dl_edge_of_form pairs k =
+  match dl_int_of_rat k with
+  | None -> None
+  | Some ki ->
+    let is1 c = Rational.equal c Rational.one in
+    let ism1 c = Rational.equal c (Rational.neg Rational.one) in
+    (match pairs with
+     | [ (a, ca); (b, cb) ] when is1 ca && ism1 cb ->
+       (* a - b + k <= 0 => a - b <= -k *)
+       Some (dl_node b, dl_node a, -ki)
+     | [ (a, ca); (b, cb) ] when ism1 ca && is1 cb -> Some (dl_node a, dl_node b, -ki)
+     | [ (a, ca) ] when is1 ca -> Some (dl_zero, dl_node a, -ki) (* a <= -k *)
+     | [ (a, ca) ] when ism1 ca ->
+       Some (dl_node a, dl_zero, -ki) (* -a + k <= 0 => zero - a <= -k *)
+     | _ -> None)
+;;
+
+(* The DL edges [(tl, hd, weight)] an atom contributes at [polarity]. A [Le] gives one; a
+   positive Int equality gives two (both orientations). Non-difference forms drop out
+   (simplex-only). Never allocates a NEW problem var beyond what the simplex assert of the
+   same atom already does (same {!combo_of_term}/{!equality_merged}). *)
+let dl_edges_of_atom t (atom : Term.t) ~polarity : (int * int * int) list =
+  match atom.node with
+  | Le inner ->
+    let pairs, const = combo_of_term t inner in
+    let pairs, k =
+      if polarity
+      then pairs, const
+      else
+        ( (* ¬(inner <= 0) ≡ inner >= 1 ≡ -inner + 1 <= 0 *)
+          List.map (fun (v, c) -> v, Rational.neg c) pairs
+        , Rational.sub Rational.one const )
+    in
+    (match dl_edge_of_form pairs k with
+     | Some e -> [ e ]
+     | None -> [])
+  | Eq (a, b) when polarity && not (Sort.equal a.sort Sort.bool) ->
+    let merged, rhs = equality_merged t a b in
+    (* Σmerged = rhs => Σmerged - rhs <= 0 AND -(Σmerged) + rhs <= 0 *)
+    let up = dl_edge_of_form merged (Rational.neg rhs) in
+    let lo = dl_edge_of_form (List.map (fun (v, c) -> v, Rational.neg c) merged) rhs in
+    List.filter_map Fun.id [ up; lo ]
+  | _ -> []
+;;
+
+(* Assert [atom]'s DL edges (guarded by [t.dl] = [dl_prop_on]); record the first
+   negative-cycle conflict for the next [check]. Sound: a DL cycle is over a subset of the
+   asserted constraints. *)
+let dl_assert_atom t atom ~polarity ~premise =
+  match t.dl with
+  | None -> ()
+  | Some g ->
+    List.iter
+      (fun (tl, hd, weight) ->
+        (* Endpoints' incident shortest paths may change -> dirty them for the next
+           [propagate] delta. *)
+        Hashtbl.replace t.dl_dirty tl ();
+        Hashtbl.replace t.dl_dirty hd ();
+        match Dl.assert_edge g ~tl ~hd ~weight premise with
+        | None -> ()
+        | Some { premises } -> if t.dl_conflict = None then t.dl_conflict <- Some premises)
+      (dl_edges_of_atom t atom ~polarity)
+;;
+
 let assert_atom t atom ~polarity ~premise =
   ensure_live t;
   (* A new/tightened bound can make the tableau infeasible -> the next [check] must run. *)
@@ -517,7 +636,11 @@ let assert_atom t atom ~polarity ~premise =
        | Bounds cs -> apply_bounds t cs ~premise ~equality:true)
     | Eq (a, _) when polarity && not (Sort.equal a.sort Sort.bool) ->
       apply_bounds t (constraints_of_atom t atom ~polarity) ~premise ~equality:true
-    | _ -> apply_bounds t (constraints_of_atom t atom ~polarity) ~premise ~equality:false)
+    | _ -> apply_bounds t (constraints_of_atom t atom ~polarity) ~premise ~equality:false);
+  (* DARK (#51): mirror the asserted atom into the difference-logic graph. Same guard so a
+     coefficient overflow bricks cleanly; a no-op when [t.dl = None]. *)
+  if t.dl <> None
+  then guard_overflow t (fun () -> dl_assert_atom t atom ~polarity ~premise)
 ;;
 
 (* ADR-0014 Stage 2 fabric [new_eq] entry: assert an EUF-entailed positive Int equality
@@ -617,9 +740,33 @@ let register_atom t (atom : Term.t) =
              re-evaluated every registered atom on every call. *)
           Hashtbl.replace t.dirty var ()
         in
-        match constraints_of_atom t atom ~polarity:true with
-        | [ (var, `Upper, rhs) ] -> add var (Reg_upper rhs)
-        | [ (var, `Lower, rhs) ] -> add var (Reg_lower rhs)
+        (match constraints_of_atom t atom ~polarity:true with
+         | [ (var, `Upper, rhs) ] -> add var (Reg_upper rhs)
+         | [ (var, `Lower, rhs) ] -> add var (Reg_lower rhs)
+         | _ -> ());
+        (* DARK (#51): record the difference-shaped positive edge as a DL propagation
+           target, keyed by the reg index just assigned. *)
+        match t.dl, Term.Table.find_opt t.reg_index atom with
+        | Some _, Some i ->
+          (match dl_edges_of_atom t atom ~polarity:true with
+           | [ (tl, hd, w) ] ->
+             let add node =
+               Hashtbl.replace
+                 t.dl_reg_by_node
+                 node
+                 ((i, tl, hd, w)
+                  ::
+                  (match Hashtbl.find_opt t.dl_reg_by_node node with
+                   | Some l -> l
+                   | None -> []))
+             in
+             add tl;
+             if hd <> tl then add hd;
+             (* A freshly-registered atom may already be entailed by existing edges; dirty
+                its endpoints so the next [propagate] checks it. *)
+             Hashtbl.replace t.dl_dirty tl ();
+             Hashtbl.replace t.dl_dirty hd ()
+           | _ -> ())
         | _ -> ())
     | Eq (a, _) when equality_propagation_on && not (Sort.equal a.sort Sort.bool) ->
       if not (Term.Table.mem t.pending_equality_set atom)
@@ -790,28 +937,37 @@ let check t =
      fail-closed the combinator's later [model_bigint] to [unknown]. See
      [last_modelfind_model]. *)
   t.last_cube_model <- None;
-  (* task #78 follow-up: a positive [Trivially_false] equality asserted in a still-live
-     frame is a standalone UNSAT relation independent of the simplex. Report it as a
-     [Conflict] before (and regardless of) the simplex scan; it persists until the frame
-     is popped, exactly like a simplex infeasibility. Empty when {!trivial_eq_fix_on} is
-     off, so this branch is inert on the OFF path (trunk). *)
-  match first_false_frame t.false_frames with
-  | Some premise -> Conflict { premises = [ premise ]; farkas = [] }
+  (* DARK (#51): a difference-logic negative cycle detected at assert time is a standalone
+     UNSAT over a subset of the asserted constraints — report it before the simplex scan.
+     Its premises are the cycle's asserted-atom trail literals (empty [farkas]: a
+     difference-cycle conflict, same non-Farkas shape as a Diophantine conflict). Inert
+     ([dl_conflict = None]) on the OFF path (trunk). *)
+  match t.dl_conflict with
+  | Some premises -> Conflict { premises; farkas = [] }
   | None ->
-    (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
-       feasible check. The tableau/assignment the previous [check] certified feasible is
-       still current (no assert/pop happened), so returning [Sat_candidate] re-certifies
-       the SAME feasible state — never an unrepaired one (the DdM invariants held then and
-       nothing has touched them since). A [Conflict] leaves [check_dirty] set so the
-       engine's backtrack (which [pop]s -> re-dirties) forces a real re-check. *)
-    if not t.check_dirty
-    then Sat_candidate
-    else (
-      match Simplex.check t.simplex with
-      | None ->
-        t.check_dirty <- false;
-        Sat_candidate
-      | Some c -> Conflict (externalize c))
+    (* task #78 follow-up: a positive [Trivially_false] equality asserted in a still-live
+       frame is a standalone UNSAT relation independent of the simplex. Report it as a
+       [Conflict] before (and regardless of) the simplex scan; it persists until the frame
+       is popped, exactly like a simplex infeasibility. Empty when {!trivial_eq_fix_on} is
+       off, so this branch is inert on the OFF path (trunk). *)
+    (match first_false_frame t.false_frames with
+     | Some premise -> Conflict { premises = [ premise ]; farkas = [] }
+     | None ->
+       (* FIX #3a: skip the simplex feasibility scan when no bound changed since the last
+          feasible check. The tableau/assignment the previous [check] certified feasible
+          is still current (no assert/pop happened), so returning [Sat_candidate]
+          re-certifies the SAME feasible state — never an unrepaired one (the DdM
+          invariants held then and nothing has touched them since). A [Conflict] leaves
+          [check_dirty] set so the engine's backtrack (which [pop]s -> re-dirties) forces
+          a real re-check. *)
+       if not t.check_dirty
+       then Sat_candidate
+       else (
+         match Simplex.check t.simplex with
+         | None ->
+           t.check_dirty <- false;
+           Sat_candidate
+         | Some c -> Conflict (externalize c)))
 ;;
 
 let rational_value t (term : Term.t) =
@@ -2381,12 +2537,51 @@ let propagate t =
                  | Some (tok, l) when Delta.lt rhs l -> emit false [ tok ]
                  | _ -> ())))))
     cands;
+  (* DARK (#51): difference-logic transitive propagation. The simplex delta above only
+     re-checks atoms whose OWN slack bound changed; a transitively-entailed difference
+     atom (the z3-vs-oxsmt gap) is invisible to it. Scan the difference-shaped registered
+     atoms and emit any the graph now entails (shortest path <= rhs) or refutes (its
+     integer negation entailed). Premises are the entailing path's asserted-atom literals
+     — valid trail antecedents, and a subset of the asserted constraints, hence sound.
+     Additive: the [reported] guard skips atoms the simplex pass already emitted; inert
+     when [dl = None] (OFF is byte-for-byte trunk). *)
+  (match t.dl with
+   | None -> ()
+   | Some g ->
+     let seen = Hashtbl.create 64 in
+     let visit (i, tl, hd, w) =
+       if (not (Dynarray.get t.reported i)) && not (Hashtbl.mem seen i)
+       then (
+         Hashtbl.replace seen i ();
+         let emit polarity premises =
+           out := ((Dynarray.get t.registered i).atom, polarity, premises) :: !out;
+           Dynarray.set t.reported i true;
+           match t.report_frames with
+           | fr :: rest -> t.report_frames <- (i :: fr) :: rest
+           | [] -> t.report_frames <- [ [ i ] ]
+         in
+         match Dl.implied g ~tl ~hd ~weight:w with
+         | Some premises -> emit true premises
+         | None ->
+           (* integer negation of [hd - tl <= w] is [tl - hd <= -(w+1)] *)
+           (match Dl.implied g ~tl:hd ~hd:tl ~weight:(-(w + 1)) with
+            | Some premises -> emit false premises
+            | None -> ()))
+     in
+     Hashtbl.iter
+       (fun node () ->
+         match Hashtbl.find_opt t.dl_reg_by_node node with
+         | Some atoms -> List.iter visit atoms
+         | None -> ())
+       t.dl_dirty;
+     Hashtbl.clear t.dl_dirty);
   List.rev !out
 ;;
 
 let push t =
   ensure_live t;
   Simplex.push t.simplex;
+  Option.iter Dl.push t.dl;
   t.report_frames <- [] :: t.report_frames;
   t.eq_frames <- [] :: t.eq_frames;
   t.false_frames <- [] :: t.false_frames
@@ -2395,6 +2590,12 @@ let push t =
 let pop t n =
   ensure_live t;
   Simplex.pop t.simplex n;
+  (* DARK (#51): drop the DL edges asserted in the popped frames, and clear any DL
+     conflict (the frame that asserted the conflicting edge is being unwound). Potentials
+     stay valid under edge removal (removing constraints only relaxes), so no restore is
+     needed. *)
+  Option.iter (fun g -> Dl.pop g n) t.dl;
+  t.dl_conflict <- None;
   (* Restoring (loosening) bounds can leave the assignment infeasible for the restored
      frame; the next [check] must re-run rather than trust the gate. *)
   t.check_dirty <- true;
@@ -2469,6 +2670,8 @@ type checkpoint =
   ; c_reported : int
   ; c_eq : int
   ; c_false : int
+  ; c_dl :
+      Dl.checkpoint option (* DARK (#51): DL edge watermark; [None] when [dl = None] *)
   }
 
 let single_base_frame = function
@@ -2484,12 +2687,19 @@ let checkpoint t =
   ; c_reported = List.length (single_base_frame t.report_frames)
   ; c_eq = List.length (single_base_frame t.eq_frames)
   ; c_false = List.length (single_base_frame t.false_frames)
+  ; c_dl = Option.map Dl.checkpoint t.dl
   }
 ;;
 
 let rewind_to_checkpoint t c =
   ensure_live t;
   Simplex.rewind_to_checkpoint t.simplex c.c_simplex;
+  (* DARK (#51): rewind the DL graph to its checkpoint watermark and clear any DL conflict
+     (its asserting edge is unwound). Potentials stay valid under edge removal. *)
+  (match t.dl, c.c_dl with
+   | Some g, Some cp -> Dl.rewind_to_checkpoint g cp
+   | _ -> ());
+  t.dl_conflict <- None;
   t.check_dirty <- true;
   let fr = single_base_frame t.report_frames in
   let rec drop_reported k fr =
