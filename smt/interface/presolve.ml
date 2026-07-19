@@ -838,6 +838,22 @@ let proj_max_steps () =
 
 exception Proj_budget
 
+(* nec-propfold (rung 3): z3 reaches literal [false] on bftpd via `simplify
+   :pull_cheap_ite` alone (depth 1, `:local_ctx false` — NON-contextual) — the eq-over-ITE
+   distribution the projection already does, followed by a bool rewriter that collapses
+   PROPOSITIONAL CONTRADICTIONS the distributed form exposes. oxsmt's n-ary [and]/[or]
+   smart constructor flattens + constant-folds + dedups by tag but does NOT detect
+   complementary literals ([(and X (not X))] -> false, [(or X (not X))] -> true), so the
+   distributed skeleton never collapses and ships to SAT (1936 decisions on a 6 GB
+   skeleton). This pass adds exactly that detection — a GLOBAL, non-contextual,
+   equivalence-preserving structural rule (no per-branch assumption context) — bottom-up
+   over the projected DAG to a fixpoint. Default OFF. *)
+let nec_propfold () =
+  match Sys.getenv_opt "OXSMT_NEC_PROPFOLD" with
+  | Some ("1" | "true" | "yes") -> true
+  | Some _ | None -> false
+;;
+
 (* A leaf admissible as the non-ITE side of a projected equality: a constant, or a bare
    nullary variable. Restricting the distributed side to a leaf keeps [(= x d)]/[(= y d)]
    size-1-bounded so the projection cannot blow up term size. *)
@@ -866,6 +882,114 @@ let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
      | _ -> Context.ite ctx c x y)
 ;;
 
+(* nec-propfold: bottom-up rebuild of the projected DAG adding COMPLEMENTARY-LITERAL
+   detection to n-ary [and]/[or] — the one bool-rewriter rule oxsmt's smart constructor
+   lacks and z3's has. [(and .. X .. (not X) ..)] -> false, [(or ..)] -> true. Rebuilds
+   every conjunct/disjunct through [ctx]'s constructors (flatten + dedup already there),
+   then checks the flattened operand set for a member whose negation is also present (via
+   the hash-consed [not_] tag). Run to a fixpoint (a collapse can expose another): each
+   pass only shrinks, so it terminates; [max_passes] caps the pathological case. Pure
+   logical equivalence, eliminates no variable, NO assumption context. [changed]/[passes]
+   are returned for stats. *)
+let collapse_contradictions ctx ~max_passes terms =
+  let passes = ref 0 in
+  let one_pass ts =
+    let memo : Term.t Term.Table.t = Term.Table.create 4096 in
+    let changed = ref false in
+    let rec go (t : Term.t) : Term.t =
+      match Term.Table.find_opt memo t with
+      | Some r -> r
+      | None ->
+        let r = rebuild t in
+        Term.Table.add memo t r;
+        r
+    and rebuild (t : Term.t) : Term.t =
+      match t.node with
+      | Bool_const _ | Int_const _ | Real_const _ -> t
+      | App (sym, args) ->
+        if Iarr.length args = 0
+        then t
+        else Context.app ctx sym (List.map go (Iarr.to_list args))
+      | Arith lin ->
+        Context.linear_combination_big
+          ctx
+          (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+          lin.const
+      | Real_arith lin ->
+        Context.real_linear_combination_big
+          ctx
+          (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+          lin.const
+      | Le a -> Context.le ctx (go a) (zero_for_numeric_sort ctx a.sort)
+      | Not a -> Context.not_ ctx (go a)
+      | Eq (a, b) -> Context.eq ctx (go a) (go b)
+      | Ite (c, a, b) -> bool_ite ctx (go c) (go a) (go b)
+      | And xs -> cc ~is_and:true (List.map go (Iarr.to_list xs))
+      | Or xs -> cc ~is_and:false (List.map go (Iarr.to_list xs))
+    and cc ~is_and ys =
+      let node = if is_and then Context.and_ ctx ys else Context.or_ ctx ys in
+      match node.node with
+      | And xs | Or xs ->
+        (* DIAG (OXSMT_PROPFOLD_LITONLY): restrict the complement check to ATOMIC children
+           to isolate whether the bftpd collapse needs COMPOUND-subformula complements
+           (the cheap IR only does atomic) or just the fixpoint. *)
+        let litonly =
+          match Sys.getenv_opt "OXSMT_PROPFOLD_LITONLY" with
+          | Some ("1" | "true" | "yes") -> true
+          | Some _ | None -> false
+        in
+        let atomic (x : Term.t) =
+          match x.node with
+          | And _ | Or _ | Ite _ -> false
+          | _ -> true
+        in
+        let tags = Hashtbl.create (Iarr.length xs) in
+        Iarr.iter
+          (fun (x : Term.t) ->
+             if (not litonly) || atomic x then Hashtbl.replace tags x.tag ())
+          xs;
+        let contradiction =
+          Iarr.exists
+            (fun (x : Term.t) ->
+               ((not litonly) || atomic x) && Hashtbl.mem tags (Context.not_ ctx x).tag)
+            xs
+        in
+        if contradiction
+        then (
+          changed := true;
+          Context.bool_const ctx (not is_and))
+        else node
+      | _ -> node
+    in
+    let ts' = List.map go ts in
+    !changed, ts'
+  in
+  let rec loop ts =
+    if !passes >= max_passes
+    then ts
+    else (
+      incr passes;
+      let changed, ts' = one_pass ts in
+      if changed then loop ts' else ts')
+  in
+  (* Conjoin the assertion list into ONE flattened conjunction so a contradiction BETWEEN
+     two separate top-level assertions (X asserted here, (not X) asserted there) becomes a
+     sibling pair the complementary check can see — z3 refutes the whole goal, not
+     conjuncts in isolation. [Context.and_] flattens + dedups; a [false] result
+     short-circuits. *)
+  let result = loop [ Context.and_ ctx terms ] in
+  (match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ_STATS" with
+   | Some ("1" | "true" | "yes") ->
+     let collapsed_false =
+       match result with
+       | [ { node = Bool_const false; _ } ] -> 1
+       | _ -> 0
+     in
+     Printf.eprintf "propfold: passes=%d collapsed_false=%d\n%!" !passes collapsed_false
+   | Some _ | None -> ());
+  result
+;;
+
 let simplify_projection ctx assertions =
   let steps = ref 0 in
   let max_steps = proj_max_steps () in
@@ -887,6 +1011,48 @@ let simplify_projection ctx assertions =
      pass — the same footgun the contextual pass documents). *)
   let memo : Term.t Term.Table.t = Term.Table.create 4096 in
   let proj_memo : (int * int, Term.t) Hashtbl.t = Hashtbl.create 4096 in
+  let propfold = nec_propfold () in
+  let false_ = Context.bool_const ctx false in
+  (* Demand-driven short-circuit (nec-propfold): a value-ITE branch that provably cannot
+     equal the comparison constant is folded to [false] with NO descent — never building
+     the dead sub-cross-product. [reach t] = [Some set] of reachable constant-leaf tags
+     when [t] is a CLOSED value-ITE (all leaves constant), [None] when OPEN (a
+     non-constant leaf reachable, so [(= t d)] cannot be pruned). Bottom-up, memoized per
+     Context tag; a pure structural property (NO assumption context).
+     [reach_steps]/[pruned] are stats. *)
+  let reach_memo : (int, (int, unit) Hashtbl.t option) Hashtbl.t = Hashtbl.create 4096 in
+  let reach_steps = ref 0 in
+  let pruned = ref 0 in
+  let rec reach (t : Term.t) : (int, unit) Hashtbl.t option =
+    match Hashtbl.find_opt reach_memo t.tag with
+    | Some r -> r
+    | None ->
+      incr reach_steps;
+      if !reach_steps + !steps > max_steps then raise Proj_budget;
+      let r =
+        match t.node with
+        | Int_const _ | Bool_const _ | Real_const _ ->
+          let s = Hashtbl.create 1 in
+          Hashtbl.replace s t.tag ();
+          Some s
+        | Ite (_c, x, y) ->
+          (match reach x, reach y with
+           | None, _ | _, None -> None
+           | Some sx, Some sy ->
+             let s = Hashtbl.create (Hashtbl.length sx + Hashtbl.length sy) in
+             Hashtbl.iter (fun k () -> Hashtbl.replace s k ()) sx;
+             Hashtbl.iter (fun k () -> Hashtbl.replace s k ()) sy;
+             Some s)
+        | _ -> None
+      in
+      Hashtbl.add reach_memo t.tag r;
+      r
+  in
+  let may_equal (n : Term.t) (d : Term.t) : bool =
+    match reach n with
+    | None -> true
+    | Some s -> Hashtbl.mem s d.tag
+  in
   let rec go (t : Term.t) : Term.t =
     match Term.Table.find_opt memo t with
     | Some r -> r
@@ -919,10 +1085,23 @@ let simplify_projection ctx assertions =
     | Eq (a, b) -> rewrite_eq (go a) (go b)
     | Ite (c, a, b) -> rewrite_ite (go c) (go a) (go b)
   and rewrite_eq (a : Term.t) (b : Term.t) : Term.t =
-    (* Project when one side is an [Ite] and the other a leaf; else the plain equality. *)
+    (* Project when one side is an [Ite] and the other a leaf; else the plain equality.
+       Under [propfold], short-circuit a closed value-ITE that cannot reach the constant
+       to [false] with no descent (demand-driven — never builds the dead
+       sub-cross-product). *)
     match a.node, b.node with
-    | Ite _, _ when proj_is_leaf b -> project a b
-    | _, Ite _ when proj_is_leaf a -> project b a
+    | Ite _, _ when proj_is_leaf b ->
+      if propfold && not (may_equal a b)
+      then (
+        incr pruned;
+        false_)
+      else project a b
+    | _, Ite _ when proj_is_leaf a ->
+      if propfold && not (may_equal b a)
+      then (
+        incr pruned;
+        false_)
+      else project b a
     | _ -> Context.eq ctx a b
   and project (ite_t : Term.t) (d : Term.t) : Term.t =
     let key = ite_t.tag, d.tag in
@@ -1007,22 +1186,54 @@ let simplify_projection ctx assertions =
       Term.Table.add has_ite_table t b;
       b
   in
-  match
-    List.map
-      (fun a ->
-         if has_ite a
-         then (
-           engaged := true;
-           go a)
-         else a)
+  if nec_propfold ()
+  then (
+    (* PROVEN propfold-via-Context (banked substrate, dark). Distribute equality-over-ITE
+       via [go] — under [propfold] this also runs the [may_equal]/[reach] prune that folds
+       a dead value-ITE branch to [false] DURING distribution (load-bearing: it is what
+       forms the complementary sibling pair) — then run the complementary-literal
+       [collapse_contradictions] over the conjoined result. On the nec bftpd/checkpass
+       class this reproduces z3's preprocessing collapse to literal [false] (measured
+       passes=2, ~27.8s total), removing the ~35s clausify+search of the undistributed
+       skeleton that times the class out. NOT a 2s win: the ~3.68M-op distribution is
+       term-layer-throughput bound, not representation bound — see
+       logs/nec-repr-report.md. Banks the class for higher-budget consumers. The cheap-IR
+       per-op engine was abandoned (both slower than [go] and not collapse-equivalent to
+       it; report RUNG 3). Neutral-abort to the input on the step budget (sound: the
+       assertions are returned unchanged). *)
+    match
+      List.map
+        (fun a ->
+           if has_ite a
+           then (
+             engaged := true;
+             go a)
+           else a)
+        assertions
+    with
+    | exception Proj_budget ->
+      emit ~aborted:true;
       assertions
-  with
-  | exception Proj_budget ->
-    emit ~aborted:true;
-    assertions
-  | simplified ->
-    emit ~aborted:false;
-    simplified
+    | distributed ->
+      emit ~aborted:false;
+      collapse_contradictions ctx ~max_passes:64 distributed)
+  else (
+    match
+      List.map
+        (fun a ->
+           if has_ite a
+           then (
+             engaged := true;
+             go a)
+           else a)
+        assertions
+    with
+    | exception Proj_budget ->
+      emit ~aborted:true;
+      assertions
+    | simplified ->
+      emit ~aborted:false;
+      simplified)
 ;;
 
 (* --- Symmetry breaking (task #25, quf-symmetry-experiment.md §6) ----------------------
