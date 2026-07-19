@@ -2138,12 +2138,30 @@ let first_violated_pin t ~skip =
    {!solve_integer} hits at its [Rational.floor] branch point. The defensive [Overflow]
    arm below is therefore unreached on the intended inputs but kept to mirror
    {!solve_integer}'s fail-closed poison. *)
-let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
+let model_find ?(node_budget = 200_000) ?(backtrack = false) ?stall t =
   ensure_live t;
   (* B&B pushes/asserts/pops simplex bounds directly; force any later [check] to re-run
      rather than trust the feasibility gate (mirrors {!solve_integer}). *)
   t.check_dirty <- true;
   let nodes = ref 0 in
+  (* STALL DETECTOR (large-coefficient mode-2 wall, logs/large-coeff-arith-report.md).
+     [stall = Some (min_nodes, ratio)] aborts a dive that re-branches a small variable set
+     without progress — the cut-free B&B unit-step walk on 2^32/2^64-coefficient
+     constraints, where the same handful of variables are branched thousands of times
+     (depth >> distinct branched vars) while a converging dive keeps depth ~= distinct
+     (each level fixes a fresh var). Aborting is exactly the [node_budget] cutoff's
+     contract (return [`Fail] => [model_find] false => the caller falls back to the
+     ordinary branch/cut path), so it is sound: it can only turn a long stuck dive into a
+     fast fallback, never a wrong verdict. Orthogonal to the [backtrack] (diseq-CDCL) pin
+     machinery — this fires only in phase-1 [arith_solve] integralization, before pin
+     separation. [None] (the default, and every OFF path) is byte-identical to trunk. *)
+  let branch_ids = Hashtbl.create 256 in
+  let stall_tripped () =
+    match stall with
+    | None -> false
+    | Some (min_nodes, ratio) ->
+      !nodes >= min_nodes && !nodes >= ratio * Hashtbl.length branch_ids
+  in
   (* GREEDY descent (linear, not backtracking DFS — the convert class's ~381 interacting
      disequalities make a full backtracking search explode). Each step COMMITS one bound
      (pushed, popped only at the very end): an integer-branch bound for a fractional var,
@@ -2200,10 +2218,11 @@ let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
       (match first_non_integer t with
        | None -> `Ok
        | Some (_term, id, d) ->
-         if !nodes >= node_budget
+         if !nodes >= node_budget || stall_tripped ()
          then `Fail
          else (
            incr nodes;
+           (match stall with Some _ -> Hashtbl.replace branch_ids id () | None -> ());
            let cpart = Delta.c_part d in
            let f = Rational.floor_bigint cpart in
            let fp1 = Oxsmt_core.Bigint.add f Oxsmt_core.Bigint.one in

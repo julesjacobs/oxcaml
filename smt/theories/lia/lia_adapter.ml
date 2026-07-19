@@ -139,6 +139,31 @@ let modelfind_budget =
   Option.bind (Sys.getenv_opt "OXSMT_LIA_MODELFIND_BUDGET") int_of_string_opt
 ;;
 
+(* STALL DETECTOR for the dive (large-coefficient mode-2 wall, logs/large-coeff-arith-report.md).
+   [OXSMT_LIA_MODELFIND_STALL=1] aborts a dive that re-branches a small variable set without
+   progress — the cut-free B&B unit-step walk on 2^32/2^64-coefficient constraints, where the
+   dive burns its whole node budget re-branching ~12-32 variables (depth >> distinct vars)
+   while a converging dive keeps depth ~= distinct. Aborting = the [node_budget] cutoff's
+   contract (fall back to the ordinary path, which SOLVES these files), so it is sound;
+   orthogonal to [diseq_cdcl_on] (it fires in phase-1 integralization, before pin separation).
+   Only consulted when [modelfind_on]; OFF ([None]) is byte-identical to trunk. Tunables:
+   [OXSMT_LIA_MODELFIND_STALL_MIN] (min nodes before it can fire, default 1000) and
+   [OXSMT_LIA_MODELFIND_STALL_RATIO] (nodes / distinct-vars ratio, default 16 — far above a
+   converging dive's ~1.3, far below a stuck dive's 60+). *)
+let modelfind_stall =
+  match Sys.getenv_opt "OXSMT_LIA_MODELFIND_STALL" with
+  | Some ("1" | "true" | "yes" | "on") ->
+    let env_int name default =
+      match Option.bind (Sys.getenv_opt name) int_of_string_opt with
+      | Some n when n > 0 -> n
+      | Some _ | None -> default
+    in
+    Some
+      ( env_int "OXSMT_LIA_MODELFIND_STALL_MIN" 1000
+      , env_int "OXSMT_LIA_MODELFIND_STALL_RATIO" 16 )
+  | Some _ | None -> None
+;;
+
 let cut_gate_ants_pct =
   match Option.bind (Sys.getenv_opt "OXSMT_CG_ANTS_PCT") int_of_string_opt with
   | Some n when n >= 0 -> n
@@ -481,7 +506,7 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
    miss (no model in budget, or the once-per-instance guard already fired) falls through
    to the split/cut. *)
 let dive_or_branch t le_atom ge_atom : Fabric.check_result =
-  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget ~backtrack:diseq_cdcl_on t.lia
+  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget ~backtrack:diseq_cdcl_on ?stall:modelfind_stall t.lia
   then Fabric.Sat
   else branch_or_hnf_cut t le_atom ge_atom
 ;;
