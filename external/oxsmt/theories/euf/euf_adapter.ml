@@ -150,6 +150,10 @@ let class_tag t term = Euf.class_tag t.engine term
    reflected in the congruence closure; there is nothing to re-assert. *)
 let notify_eq _t ~edge_id:_ _ = ()
 
+(* rung 2 (OXSMT_LIA_MODELFIND): only the arithmetic child model-finds; the congruence
+   child has no use for the disequality hint. No-op on the shared [FABRIC_CHILD] surface. *)
+let note_disequalities _t _ = ()
+
 (* The congruence child fixes no arithmetic value; the fix-trigger queries only LIA. *)
 let fixed_bounds _t _term = None
 

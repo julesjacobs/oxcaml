@@ -204,6 +204,7 @@ struct
   (* ADR-0014 Stage 2/3: a mock records no merges, carries no per-class data, reacts to no
      notification. *)
   let notify_eq () ~edge_id:_ _ = ()
+  let note_disequalities () _ = ()
 
   (* ADR-0014 Stage 4.2: the mock carries no backtrackable state, so checkpoint/rewind are
      no-ops (never exercised by these tests). *)
@@ -263,6 +264,11 @@ module Ctrl_router = struct
   let equality_split ctx x y =
     [ Context.eq ctx x y; Context.lt ctx x y; Context.gt ctx x y ]
   ;;
+
+  (* task #47: the control router exercises the fabric path like QF_UFLIA — both flags
+     off. *)
+  let fabric_disabled = false
+  let congruence_models_datatypes = false
 end
 
 module Cmock = Cmb.Combine (Ctrl_router) (MockA) (MockB)
@@ -1079,7 +1085,7 @@ let test_real_router_and_model () =
     "real router: negative Real equality reaches both children"
     (R.assert_to eq ~positive:false = R.Both);
   (match R.equality_split f.ctx x y with
-   | head :: _ :: _ :: [] ->
+   | [ head; _; _ ] ->
      check "real router: trichotomy retains equality guard" (Term.equal head eq)
    | _ -> check "real router: trichotomy retains equality guard" false);
   let ix = const f "real-router-int-x" in
@@ -1102,8 +1108,7 @@ let test_real_router_and_model () =
   let model = Cmock_real.model combined in
   let inherited term =
     match Model.value model term with
-    | Some (Model.Real q) ->
-      Bigint.equal q.num value.num && Bigint.equal q.den value.den
+    | Some (Model.Real q) -> Bigint.equal q.num value.num && Bigint.equal q.den value.den
     | _ -> false
   in
   check "real model merge: LRA value reaches source class member" (inherited x);
@@ -1289,6 +1294,7 @@ module Toy_lia = struct
 
   (* ADR-0014 Stage 2: the toy arithmetic child ignores hub notifications. *)
   let notify_eq _t ~edge_id:_ _ = ()
+  let note_disequalities _t _ = ()
 
   (* ADR-0014 Stage 4.2: no-op checkpoint/rewind (not exercised by these tests). *)
   type checkpoint = unit
@@ -1477,6 +1483,7 @@ module Toy_euf = struct
      the combinator's Stage-2 drain is a no-op here (the real EUF→LIA notification is
      driven in the real-adapter Stage-2 test). *)
   let notify_eq _t ~edge_id:_ _ = ()
+  let note_disequalities _t _ = ()
 
   (* ADR-0014 Stage 4.2: no-op checkpoint/rewind (not exercised by these tests). *)
   type checkpoint = unit

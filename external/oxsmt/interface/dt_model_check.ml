@@ -119,7 +119,7 @@ let make_inhabits reg : Sort.t -> v -> bool =
              (match
                 List.find_opt
                   (fun (c : Defs.constructor) ->
-                     String.equal (Symbol.name c.Defs.sym) name)
+                    String.equal (Symbol.name c.Defs.sym) name)
                   dt.Defs.constructors
               with
               | None -> false (* not a legal constructor of this datatype *)
@@ -216,9 +216,34 @@ let ev_with (reg : Defs.t) (env : v Term.Table.t) =
     | Term.Or xs ->
       Leaf (Model.Bool (Iarr.fold (fun acc x -> acc || as_bool (ev x)) false xs))
     | Term.Ite (c, a, b) -> if as_bool (ev c) then ev a else ev b
-    | Term.Le _ | Term.Arith _ | Term.Real_const _ | Term.Real_arith _ ->
-      (* arithmetic is not in the pure-DT fragment (a datatype+LIA problem degrades to
-         [unknown] at solve time before this runs); no faithful value here => fail closed. *)
+    | Term.Arith lin ->
+      (* Combined DT+LIA (task #47): an Int-linear term is folded over its operands' Int
+         values (arbitrary-precision {!Bigint}, matching {!Model_check}), so a mixed
+         datatype/arithmetic sat model — whose Int leaves carry the LIA child's values
+         (spliced in by {!Oxsmt_dt.Dt.check_model_with_leaf}) — is faithfully evaluated
+         here. A non-Int operand (ill-typed model) fails closed. *)
+      let as_int (v : v) =
+        match v with
+        | Leaf (Model.Int n) -> n
+        | _ -> raise Bad
+      in
+      let sum =
+        Iarr.fold
+          (fun acc (child, coeff) ->
+            Bigint.add acc (Bigint.mul coeff (as_int (ev child))))
+          lin.Term.const
+          lin.Term.coeffs
+      in
+      Leaf (Model.Int sum)
+    | Term.Le a ->
+      (* [Le a] is [a <= 0] over the integers. *)
+      (match ev a with
+       | Leaf (Model.Int n) -> Leaf (Model.Bool (Bigint.compare n Bigint.zero <= 0))
+       | _ -> raise Bad)
+    | Term.Real_const _ | Term.Real_arith _ ->
+      (* Real arithmetic mixed with datatypes is out of the supported fragment (it
+         degrades to [unknown] at solve time before this runs); no faithful value here =>
+         fail closed. *)
       raise Bad
     | Term.App (sym, args) ->
       let args = Array.of_list (Iarr.to_list args) in

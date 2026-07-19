@@ -103,6 +103,30 @@ let cut_gate_on =
   | _ -> true
 ;;
 
+(* Cut-free diving model-finder mode (charter: logs/convert-impl-report.md; diagnosis
+   logs/z3diag-dartconv-report.md, convert class). Default OFF — byte-identical to trunk
+   BY CONSTRUCTION: when off, {!Lia.model_find} is never called and no state is touched,
+   so the Final path is the exact trunk branch/cut logic. When ON, at the FIRST
+   integer-infeasible [Final] (after the cube test misses) the adapter runs
+   {!Lia.model_find} — a cut-free, round-to-nearest branch-and-bound dive inside the
+   theory — before falling back to the CDCL(T)-delegated {!Lia.suggest_branch} [Split]. A
+   found model is a genuine ℤ model (re-checked by the session R1 gate), so this can only
+   turn a would-be [unknown]/long search into [Sat], never a wrong verdict. Read once
+   (module scope; no term/id state). *)
+let modelfind_on =
+  match Sys.getenv_opt "OXSMT_LIA_MODELFIND" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+(* B&B node budget for the dive (PORTFOLIO TIME-BOX LAW: an auxiliary strategy must be
+   bounded well below the wall). Overridable ([OXSMT_LIA_MODELFIND_BUDGET]) for A/B and
+   tuning; the default is the {!Lia.model_find} default. Only consulted when
+   [modelfind_on]. *)
+let modelfind_budget =
+  Option.bind (Sys.getenv_opt "OXSMT_LIA_MODELFIND_BUDGET") int_of_string_opt
+;;
+
 let cut_gate_ants_pct =
   match Option.bind (Sys.getenv_opt "OXSMT_CG_ANTS_PCT") int_of_string_opt with
   | Some n when n >= 0 -> n
@@ -134,9 +158,9 @@ type conflict_core =
       (* [Some coeffs] for a Farkas-certified rational-infeasibility conflict, index-
          aligned with [atoms]. Inequality coefficients are nonnegative half-plane
          multipliers; a positive Int equality's coefficient is signed and multiplies its
-         equation. [None] for a Diophantine / divisibility conflict, whose engine
-         [farkas] vector is empty (the cert is the GCD argument, not a rational
-         multiplier — see {!Lia.diophantine_conflict}). *)
+         equation. [None] for a Diophantine / divisibility conflict, whose engine [farkas]
+         vector is empty (the cert is the GCD argument, not a rational multiplier — see
+         {!Lia.diophantine_conflict}). *)
   ; atoms :
       (Term.t * bool) list (* each premise atom's [Term.t] + its asserted polarity *)
   }
@@ -233,6 +257,12 @@ let notify_eq t ~edge_id eq =
   guard t (fun () -> Lia.notify_equality t.lia eq ~premise:(Fabric.Fabric edge_id))
 ;;
 
+(* rung 2 (OXSMT_LIA_MODELFIND): receive the combinator's pinned Int-disequality snapshot
+   and forward it to the engine as a dive HINT (see {!Lia.set_pin_hint}). Read-only w.r.t.
+   the combinator; no trail/premise effect. The combinator only calls this on the
+   modelfind ON path, so the OFF path never installs a hint (byte-identical). *)
+let note_disequalities t pairs = guard t (fun () -> Lia.set_pin_hint t.lia pairs)
+
 (* LIA parity with {!Euf_adapter}'s codex AP4 tripwire: an EMPTY premise set is an
    unconditional entailment (for a propagation) or an unconditional [false] (for a
    conflict) — a soundness bug either way. UNCONDITIONAL guard, not [assert]: like AP4 it
@@ -290,8 +320,7 @@ let same_justification a b =
    path is reached only for equality propagation, which is dark by default. *)
 let dedup_justifications premises =
   List.fold_left
-    (fun out p ->
-       if List.exists (same_justification p) out then out else out @ [ p ])
+    (fun out p -> if List.exists (same_justification p) out then out else out @ [ p ])
     []
     premises
 ;;
@@ -433,6 +462,18 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
       | None -> branch ()))
 ;;
 
+(* OXSMT_LIA_MODELFIND: try the cut-free diving B&B before the ordinary branch/cut
+   fallback. [modelfind_on] is checked FIRST with [&&] short-circuit, so the OFF path
+   never calls {!Lia.model_find} and is byte-identical to trunk ([branch_or_hnf_cut]
+   verbatim). A dive hit is a genuine ℤ model (session R1 re-checks) → [Fabric.Sat]; a
+   miss (no model in budget, or the once-per-instance guard already fired) falls through
+   to the split/cut. *)
+let dive_or_branch t le_atom ge_atom : Fabric.check_result =
+  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget t.lia
+  then Fabric.Sat
+  else branch_or_hnf_cut t le_atom ge_atom
+;;
+
 let check_fabric t (effort : Theory.effort) : Fabric.check_result =
   guard t (fun () ->
     match Lia.check t.lia with
@@ -457,7 +498,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
              | None ->
                (match Lia.cube_model t.lia with
                 | Some _ -> Fabric.Sat
-                | None -> branch_or_hnf_cut t le_atom ge_atom))
+                | None -> dive_or_branch t le_atom ge_atom))
           | Some (le_atom, ge_atom) ->
             (* Before branching, try the Bromberger-Fleury unit cube test: a fat feasible
                region yields an integer model in one shrink+re-solve, skipping b&b (which
@@ -466,7 +507,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
                session R1 check; a miss falls back to the split. *)
             (match Lia.cube_model t.lia with
              | Some _ -> Fabric.Sat
-             | None -> branch_or_hnf_cut t le_atom ge_atom))))
+             | None -> dive_or_branch t le_atom ge_atom))))
 ;;
 
 let check t effort =
@@ -603,8 +644,8 @@ let hnf_cuts_emitted t = t.hnf_cuts_emitted
 
 (* task #106 observational core. Reset the stash at the start of each check-sat (so a
    stale conflict from a prior check cannot masquerade as this one's core) and read it
-   back, mapped from the engine premise tokens to [Term.t]s. [clear_last_conflict]
-   mutates only the observational [last_conflict] stash; neither touches the solver's
+   back, mapped from the engine premise tokens to [Term.t]s. [clear_last_conflict] mutates
+   only the observational [last_conflict] stash; neither touches the solver's
    verdict/search state. *)
 let clear_last_conflict t = t.last_conflict <- None
 
@@ -628,8 +669,8 @@ let last_conflict_core t : conflict_core option =
      | None -> None
      | Some atoms ->
        (* [farkas] is either empty (a Diophantine/divisibility conflict → no rational
-          multiplier vector) or index-aligned and equal in length to the premises. The
-          LIA boundary preserves which bound of an equality contributed: its upper bound
+          multiplier vector) or index-aligned and equal in length to the premises. The LIA
+          boundary preserves which bound of an equality contributed: its upper bound
           becomes a positive equation coefficient and its lower bound a negative one.
           Reject every malformed sign/atom combination here rather than exposing an
           ambiguous certificate. *)

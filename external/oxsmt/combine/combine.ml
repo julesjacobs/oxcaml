@@ -10,6 +10,12 @@ module type ROUTER = sig
   val assert_to : Term.t -> positive:bool -> owner
   val arithmetic_sort : Sort.t -> bool
   val equality_split : Context.t -> Term.t -> Term.t -> Term.t list
+
+  (* task #47: force the classic no-fabric path (regardless of OXSMT_NO_FABRIC) for a
+     congruence child without the fabric-live seam; and let the congruence child own the
+     datatype-sorted terms at Sat certification. See combine.mli. *)
+  val fabric_disabled : bool
+  val congruence_models_datatypes : bool
 end
 
 exception Combination_unsound of string
@@ -48,6 +54,14 @@ module type FABRIC_CHILD = sig
      equality atom into this theory, attributed to the fabric edge. Pure mutation on the
      theory's own trail (F3 co-location). *)
   val notify_eq : t -> edge_id:edge_id -> Term.t -> unit
+
+  (* rung 2 (OXSMT_LIA_MODELFIND): receive a READ-ONLY snapshot of the currently pinned
+     Int DISEQUALITY pairs [(px, py)] (px ≠ py) held by the combinator, so a model-finding
+     child can produce a candidate that already separates them. A HINT ONLY — it must not
+     change the child's soundness (any model is still validated by the combinator's
+     [find_disagreement] + the session R1 check); a child that does not model-find
+     (EUF/LRA) ignores it. No premise/trail effect. *)
+  val note_disequalities : t -> (Term.t * Term.t) list -> unit
 
   (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind for the chrono earliest-removed
      incremental undo (a child's own trail watermark; restore drains it without touching
@@ -124,6 +138,21 @@ let model_repair_on =
   | Some _ | None -> true
 ;;
 
+(* Disequality-aware LIA model-finder (OXSMT_LIA_MODELFIND; rung 2, charter
+   logs/convert-impl-report.md). Default OFF — byte-identical to trunk BY CONSTRUCTION:
+   when off, no pins are ever fed to the arithmetic child, so [B.note_disequalities] is
+   never called and the Final path is the exact trunk logic. When ON, before each Final
+   dive the combinator hands the arithmetic child the CURRENT pinned Int-disequality pairs
+   (READ-ONLY snapshot of [t.pins]) so its cut-free dive can produce a model that already
+   separates them, instead of the combinator resolving one pin per Final round-trip (which
+   does not converge on the convert class's ~381 pins). Read-once, same vocabulary as
+   {!fabric_off}. *)
+let modelfind_on =
+  match Sys.getenv_opt "OXSMT_LIA_MODELFIND" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig
   include Theory.THEORY
 
@@ -170,6 +199,16 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
     val expand : t -> justification list -> Lit.t list
   end
 end = struct
+  (* task #47: a router may force this instantiation onto the classic no-fabric path
+     regardless of the global [OXSMT_NO_FABRIC] (the DT+LIA combination, whose congruence
+     child has no fabric-live seam). Shadow the module-level toggles with the per-router
+     OR so EVERY downstream use ([create]'s merge-consumer setup, [assert_lit]'s order
+     ledger, [record_props], [check]'s and [explain]'s dispatch) takes the byte-for-byte
+     trunk-OFF path for such a router. For QF_UFLIA/QF_UFLRA ([R.fabric_disabled = false])
+     the value is unchanged, so those instantiations are bit-identical to before. *)
+  let fabric_off = fabric_off || R.fabric_disabled
+  let fabric_callbacks_off = fabric_callbacks_off || R.fabric_disabled
+
   (* A pinned shared-equality literal: the pair it relates, its asserted polarity, and
      which children it was actually asserted to (a negative equality may reach only the
      congruence child — CONTRACT S1). At Final every routed child's model must satisfy it. *)
@@ -373,8 +412,8 @@ end = struct
   let node_owner (term : Term.t) =
     match term.Term.node with
     | Term.App (_, args) -> if Iarr.length args > 0 then O_euf else O_neutral
-    | Term.Arith _ | Term.Real_arith _ | Term.Le _ | Term.Int_const _
-    | Term.Real_const _ -> O_lia
+    | Term.Arith _ | Term.Real_arith _ | Term.Le _ | Term.Int_const _ | Term.Real_const _
+      -> O_lia
     | Term.Bool_const _ -> O_euf
     | Term.Eq _ | Term.Not _ | Term.And _ | Term.Or _ | Term.Ite _ -> O_neutral
   ;;
@@ -474,9 +513,8 @@ end = struct
            List.iter
              (fun (side : Term.t) ->
                match side.Term.node, side.Term.sort with
-               | Term.App (_, sa), sort
-                 when Iarr.length sa = 0 && R.arithmetic_sort sort ->
-                 mark_use side O_euf
+               | Term.App (_, sa), sort when Iarr.length sa = 0 && R.arithmetic_sort sort
+                 -> mark_use side O_euf
                | _ -> ())
              [ a; b ]
          | _ -> ());
@@ -683,15 +721,12 @@ end = struct
 
   let rational_add (a : Term.rational) (b : Term.rational) =
     Term.rational_of_frac_big
-      ~num:
-        (Bigint.add (Bigint.mul a.num b.den) (Bigint.mul b.num a.den))
+      ~num:(Bigint.add (Bigint.mul a.num b.den) (Bigint.mul b.num a.den))
       ~den:(Bigint.mul a.den b.den)
   ;;
 
   let rational_mul (a : Term.rational) (b : Term.rational) =
-    Term.rational_of_frac_big
-      ~num:(Bigint.mul a.num b.num)
-      ~den:(Bigint.mul a.den b.den)
+    Term.rational_of_frac_big ~num:(Bigint.mul a.num b.num) ~den:(Bigint.mul a.den b.den)
   ;;
 
   (* EVALUATE a term through a child's model. A child (esp. the arithmetic one) keys only
@@ -776,11 +811,8 @@ end = struct
   let find_disagreement t ma mb =
     let candidate (term : Term.t) =
       match term.Term.sort with
-      | Sort.Bool
-      | Sort.Uninterpreted _
-      | Sort.Datatype _
-      | Sort.Array _
-      | Sort.BitVec _ -> false
+      | Sort.Bool | Sort.Uninterpreted _ | Sort.Datatype _ | Sort.Array _ | Sort.BitVec _
+        -> false
       | (Sort.Int _ | Sort.Real) as sort -> R.arithmetic_sort sort
     in
     let valued =
@@ -843,7 +875,12 @@ end = struct
     Term.Set.iter
       (fun (term : Term.t) ->
         match term.Term.sort with
-        | Sort.Datatype _ ->
+        | Sort.Datatype _ when not R.congruence_models_datatypes ->
+          (* No datatype theory in this combination (the EUF congruence child) — refuse to
+             certify a Sat with unchecked datatype axioms. task #47: when the congruence
+             child IS the datatype theory ([R.congruence_models_datatypes]), it has
+             already certified these terms at its own axiom-validating Final, so this
+             guard is skipped (the arm below). *)
           raise
             (Incomplete
                "datatype-sorted term live at Sat certification: no datatype theory yet")
@@ -856,7 +893,12 @@ end = struct
             (Incomplete
                "array-sorted term live at Sat certification: handled by the standalone \
                 arrays theory, not this combinator")
-        | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Uninterpreted _ | Sort.BitVec _ -> ())
+        | Sort.Bool
+        | Sort.Int _
+        | Sort.Real
+        | Sort.Uninterpreted _
+        | Sort.BitVec _
+        | Sort.Datatype _ -> ())
       t.all_terms
   ;;
 
@@ -881,8 +923,7 @@ end = struct
         | Sort.Real
         | Sort.Uninterpreted _
         | Sort.Datatype _
-        | Sort.Array _
-          -> ())
+        | Sort.Array _ -> ())
       t.all_terms
   ;;
 
@@ -1382,6 +1423,16 @@ end = struct
        | Theory.Lemma l -> Theory.Lemma l
        | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
        | (Theory.Sat | Theory.Propagations []) as ra ->
+         (* rung 2 (OXSMT_LIA_MODELFIND): hand the arithmetic child a READ-ONLY snapshot
+            of the pinned Int-disequality pairs so its dive can separate them in one
+            solve. OFF path never runs this — byte-identical to trunk. *)
+         if modelfind_on
+         then
+           B.note_disequalities
+             t.b
+             (List.filter_map
+                (fun (p : pin) -> if p.psign then None else Some (p.px, p.py))
+                (all_pins t));
          (match realize t R.B (B.check_fabric t.b Theory.Final) with
           | Theory.Conflict e -> Theory.Conflict e
           | Theory.Split terms -> Theory.Split terms
@@ -1576,8 +1627,7 @@ end = struct
       Term.Set.iter
         (fun (term : Term.t) ->
           match term.sort, model_eval ma term with
-          | Sort.Real, Some (Model.Uninterp cid)
-            when not (Hashtbl.mem class_real cid) ->
+          | Sort.Real, Some (Model.Uninterp cid) when not (Hashtbl.mem class_real cid) ->
             let q = fresh () in
             Hashtbl.add class_real cid q;
             Hashtbl.replace used_real (rational_key q) ()
@@ -1647,11 +1697,20 @@ end = struct
              turns into [unknown] (a completeness degrade, not a soundness poison). This
              is the plumbing-lane backstop; the datatype-theory lane replaces it with real
              model extraction. *)
-          | Sort.Datatype _ ->
+          | Sort.Datatype _ when not R.congruence_models_datatypes ->
             raise
               (Incomplete
                  "datatype-sorted term in candidate model: no datatype-theory model \
                   support yet (plumbing backstop -> unknown)")
+          | Sort.Datatype _ ->
+            (* task #47: the congruence child IS the datatype theory. Its constructor-tree
+               values are extracted separately (by {!Oxsmt_interface.Cdclt} via the
+               child's own [check_model]); the merged model here OMITS datatype-sorted
+               terms ([Model.value] has no constructor-tree variant), which is sound
+               because the child's axiom-validating Final already certified them and the
+               DT self-check ({!Oxsmt_interface.Dt_model_check}) — not this merged model —
+               gates the Sat. *)
+            None
           | Sort.Array _ ->
             (* Same backstop as the datatype arm: an array-sorted term in this
                combinator's candidate model means arrays leaked past the standalone

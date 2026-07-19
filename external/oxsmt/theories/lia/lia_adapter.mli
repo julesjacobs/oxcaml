@@ -52,6 +52,13 @@ val fabric_verify
     before calling, so a skip leaves no partial state (H5). *)
 val notify_eq : t -> edge_id:Fabric.edge_id -> Term.t -> unit
 
+(** [note_disequalities t pairs] receives the combinator's pinned Int-disequality snapshot
+    [(px, py)] (px <> py) and forwards it to the engine as a HINT for the next
+    OXSMT_LIA_MODELFIND dive (see {!Lia.set_pin_hint}). Read-only w.r.t. the combinator;
+    no trail/premise effect; soundness unchanged (models are still combinator- and
+    R1-validated). *)
+val note_disequalities : t -> (Term.t * Term.t) list -> unit
+
 (** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
     undo): delegate to {!Lia.checkpoint}/{!Lia.rewind_to_checkpoint} and invalidate the
     explain-cache entries snapshotted since the checkpoint. *)
@@ -85,14 +92,14 @@ val propagation_reason : Lit.t list -> Explanation.t
 (** The Farkas / premise evidence of one theory conflict, mapped to terms. *)
 type conflict_core =
   { farkas : Rational.t list option
-    (** [Some coeffs] for a Farkas-certified rational-infeasibility conflict, index-aligned
+  (** [Some coeffs] for a Farkas-certified rational-infeasibility conflict, index-aligned
       with [atoms]. An inequality coefficient is nonnegative and multiplies its asserted
-      half-plane. A positive Int equality coefficient is signed and multiplies [a - b =
-      0]. Their sum is a variable-free false constant. [None] for a Diophantine /
+      half-plane. A positive Int equality coefficient is signed and multiplies
+      [a - b = 0]. Their sum is a variable-free false constant. [None] for a Diophantine /
       divisibility conflict (empty engine vector), a shape/sign mismatch, or unsupported
       premises. *)
   ; atoms : (Term.t * bool) list
-    (** each premise atom's [Term.t] and its asserted polarity, in premise order. *)
+  (** each premise atom's [Term.t] and its asserted polarity, in premise order. *)
   }
 
 (** [last_conflict_core t] is the {!conflict_core} of the MOST RECENT conflict this

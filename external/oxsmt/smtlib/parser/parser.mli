@@ -145,6 +145,12 @@ type t =
      DROPPED rather than failing the whole file (lemmas-climb). [> 0] obliges the loader
      to arm a sat-degrade sentinel: dropping only weakens the set (sound for [unsat]), and
      the sentinel's live lemma degrades any [Sat] to [Unknown]. *)
+  ; assumptions : (Oxsmt_core.Term.t * bool) list option
+  (* the [(check-sat-assuming (lit ...))] assumption literals as (atom, polarity) pairs
+     ([true] = the atom, [false] = its [(not atom)] negation), in file order. [None] when
+     the document has no [check-sat-assuming]; [Some []] is a [check-sat-assuming ()]. A
+     driver feeds these to [Oxsmt_interface.Session.check_sat_assuming]; the reader does
+     not solve. A non-Bool / undeclared literal is a [Malformed], as an ill-sorted assert. *)
   }
 
 (** [parse src] parses a whole SMT-LIB2 document, creating a fresh {!Oxsmt_core.Env.t} and

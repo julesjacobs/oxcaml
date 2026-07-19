@@ -16,6 +16,19 @@ type result =
   ; defs : def list
   }
 
+(* Monomorphic (tag, tag) keyed table for the projection memo. The generic [Hashtbl] on
+   a boxed [(int * int)] key routes every probe through [caml_hash] + [compare_val]
+   (polymorphic structural hash/compare). Destructuring the pair here compiles [equal] to
+   two native int compares and [hash] to plain arithmetic, with no [caml_hash]/[compare_val].
+   The memo is a pure per-call function cache whose bucket layout is never observed, so which
+   term a key maps to is unchanged: a throughput-only substitution. *)
+module Tag_pair_table = Hashtbl.Make (struct
+    type t = int * int
+
+    let equal (a, b) (c, d) = Int.equal a c && Int.equal b d
+    let hash (a, b) = (a * 31) + b
+  end)
+
 (* Hash-consing makes tag equality physical identity, so a rewrite that returns children
    unchanged returns the identical node. *)
 let same_tag (a : Term.t) (b : Term.t) = a.Term.tag = b.Term.tag
@@ -355,6 +368,79 @@ let entailed_equalities ctx assertions =
     conjuncts
 ;;
 
+(* Growth guard (task #28, DARK / opt-in) on the W1b eq-elimination. The elimination
+   substitutes each aliased variable by its definition through the smart constructors;
+   [subst] is memoized per input node, so the NUMBER of reconstructions is bounded by the
+   input DAG, but each reconstruction's WIDTH (an [Arith] linear form's term count, an
+   [And]/[Or]/[App] arity) grows as a widening alias chain is merged in, so the total
+   constructed representation -- and the memory it allocates -- is the SUM of those widths
+   and can blow up (a giant SMPT exemplar measured 1.41 GB / 8.19 s WITH elimination vs
+   79 MB / 1.06 s without, same UNSAT).
+
+   [OXSMT_PRESOLVE_ELIM_GROWTH] = a positive integer growth factor turns the guard ON;
+   the budget is that factor times the input conjuncts' DAG weight plus [elim_base_budget].
+   Unset (or a non-positive / non-integer value) => guard OFF: the elimination runs to
+   completion exactly as trunk. The guard is DARK because eliminating is not always an
+   optimization -- on some giant files the eliminated form is load-bearing for search (a
+   guard-OFF run solves at a higher budget where the guard-ON run times out), so the flip is
+   gated on a multi-budget quiet A/B. Mirrors [OXSMT_NEC_PROPFOLD] / [OXSMT_SYMBREAK_UFTAIL]. *)
+let elim_growth () =
+  match Sys.getenv_opt "OXSMT_PRESOLVE_ELIM_GROWTH" with
+  | Some s ->
+    (match int_of_string_opt (String.trim s) with
+     | Some n when n > 0 -> Some n
+     | Some _ | None -> None)
+  | None -> None
+;;
+
+(* A small floor so a modest input whose elimination genuinely rewrites most nodes (work ~ a
+   few x its own small weight) never trips; the proportional term dominates at scale. *)
+let elim_base_budget = 65536
+
+exception Elim_budget
+
+(* Immediate-child weight of a node = 1 + arity: the allocation cost of (re)building it. *)
+let node_weight (t : Term.t) =
+  match t.node with
+  | Bool_const _ | Int_const _ | Real_const _ | Real_arith _ -> 1
+  | App (_, args) -> 1 + Iarr.length args
+  | Arith lin -> 1 + Iarr.length lin.coeffs
+  | Le _ -> 2
+  | Eq _ -> 3
+  | Not _ -> 2
+  | And xs | Or xs -> 1 + Iarr.length xs
+  | Ite _ -> 4
+;;
+
+(* Total DAG weight of [roots]: each distinct hash-consed node counted once (shared subterms
+   once). O(input DAG); computed only when the guard is enabled AND an alias will be
+   eliminated. *)
+let dag_weight (roots : Term.t list) =
+  let seen = Term.Table.create 256 in
+  let total = ref 0 in
+  let rec go (t : Term.t) =
+    if not (Term.Table.mem seen t)
+    then (
+      Term.Table.add seen t ();
+      total := !total + node_weight t;
+      match t.node with
+      | Bool_const _ | Int_const _ | Real_const _ | Real_arith _ -> ()
+      | App (_, args) -> Iarr.iter go args
+      | Arith lin -> Iarr.iter (fun (tm, _co) -> go tm) lin.coeffs
+      | Le a | Not a -> go a
+      | Eq (a, b) ->
+        go a;
+        go b
+      | And xs | Or xs -> Iarr.iter go xs
+      | Ite (c, a, b) ->
+        go c;
+        go a;
+        go b)
+  in
+  List.iter go roots;
+  !total
+;;
+
 let run ctx assertions =
   let conjuncts = List.concat_map flatten assertions in
   (* Interface variables to skip (constraint 3, defense-in-depth): vars occurring under a
@@ -394,6 +480,31 @@ let run ctx assertions =
     { reduced = assertions; defs = [] }
   else (
     let sigma = !sigma in
+    (* Growth guard (task #28, DARK): enabled only when [OXSMT_PRESOLVE_ELIM_GROWTH] gives a
+       positive integer factor. When [None] the guard is inert -- [charged] is the identity, no
+       budget is computed, no [Elim_budget] is raised -- so [run] is byte-for-byte trunk. When
+       [Some factor] the budget is PROPORTIONAL to the input's own DAG weight and [charge] is
+       called once per reconstructed node with the node's width; on exhaustion the WHOLE
+       elimination is abandoned (equisatisfiable neutral, the un-eliminated set is solved
+       directly). Dark because eliminating is NOT always an optimization: on some giant files
+       the eliminated form is load-bearing for search (guard-OFF solves at a higher budget
+       where guard-ON times out), so the flip is gated on a multi-budget quiet A/B. *)
+    let guard = elim_growth () in
+    let input_weight =
+      match guard with
+      | Some _ -> dag_weight conjuncts
+      | None -> 0
+    in
+    let budget =
+      match guard with
+      | Some factor -> (factor * input_weight) + elim_base_budget
+      | None -> 0
+    in
+    let work = ref 0 in
+    let charge w =
+      work := !work + w;
+      if !work > budget then raise Elim_budget
+    in
     (* Substitute to a fixpoint through the smart constructors: replace each defined
        variable by its (recursively resolved) definition. [sigma] is acyclic, so this
        terminates; memoized on the hash-cons tag so each distinct subterm is rebuilt once.
@@ -416,6 +527,16 @@ let run ctx assertions =
          directly is byte-identical and skips a reconstruction (list/array alloc +
          hash-cons lookup). Prunes the rebuild to only the paths that actually mention an
          alias. *)
+      (* Each constructing arm charges the CONSTRUCTED node's own weight (1 + its arity), not
+         the input arity: an [Arith]'s [linear_combination_big] FOLDS a substituted wide
+         sub-form into itself, so the alloc -- and the blowup -- lives in the result's width,
+         which only [node_weight r] sees. [charged] is the identity when the guard is off. *)
+      let charged r =
+        (match guard with
+         | None -> ()
+         | Some _ -> charge (node_weight r));
+        r
+      in
       match t.node with
       | Bool_const _ | Int_const _ | Real_const _ -> t
       | App (sym, args) ->
@@ -424,7 +545,7 @@ let run ctx assertions =
         else (
           match map_changed subst (Iarr.to_list args) with
           | None -> t
-          | Some args' -> Context.app ctx sym args')
+          | Some args' -> charged (Context.app ctx sym args'))
       | Arith lin ->
         let changed = ref false in
         let coeffs' =
@@ -435,7 +556,9 @@ let run ctx assertions =
                co, tm')
             (Iarr.to_list lin.coeffs)
         in
-        if !changed then Context.linear_combination_big ctx coeffs' lin.const else t
+        if !changed
+        then charged (Context.linear_combination_big ctx coeffs' lin.const)
+        else t
       | Real_arith _ -> t
       | Le a ->
         (* Preserve the OLD rebuild's [Int_const 0] interning at the same point (right-to-
@@ -443,46 +566,71 @@ let run ctx assertions =
            may reuse it and its tag must match trunk on a formula with no explicit [0]. *)
         let zero = Context.int_const ctx 0 in
         let a' = subst a in
-        if same_tag a a' then t else Context.le ctx a' zero
+        if same_tag a a' then t else charged (Context.le ctx a' zero)
       | Eq (a, b) ->
         let a' = subst a in
         let b' = subst b in
-        if same_tag a a' && same_tag b b' then t else Context.eq ctx a' b'
+        if same_tag a a' && same_tag b b' then t else charged (Context.eq ctx a' b')
       | Not a ->
         let a' = subst a in
-        if same_tag a a' then t else Context.not_ ctx a'
+        if same_tag a a' then t else charged (Context.not_ ctx a')
       | And xs ->
         (match map_changed subst (Iarr.to_list xs) with
          | None -> t
-         | Some xs' -> Context.and_ ctx xs')
+         | Some xs' -> charged (Context.and_ ctx xs'))
       | Or xs ->
         (match map_changed subst (Iarr.to_list xs) with
          | None -> t
-         | Some xs' -> Context.or_ ctx xs')
+         | Some xs' -> charged (Context.or_ ctx xs'))
       | Ite (c, a, b) ->
         let c' = subst c in
         let a' = subst a in
         let b' = subst b in
         if same_tag c c' && same_tag a a' && same_tag b b'
         then t
-        else Context.ite ctx c' a' b'
+        else charged (Context.ite ctx c' a' b')
     in
-    let reduced =
-      List.filter_map
-        (function
-          | `Def -> None
-          | `Keep c -> Some (subst c))
-        tagged
+    (* Observability (OXSMT_PRESOLVE_ELIM_STATS): input weight, budget, work spent, whether
+       the guard aborted, and the eliminated-def count -- enough to calibrate the factor. *)
+    let emit ~aborted ~ndefs =
+      match Sys.getenv_opt "OXSMT_PRESOLVE_ELIM_STATS" with
+      | None -> ()
+      | Some _ ->
+        Printf.eprintf
+          "elim: input_weight=%d budget=%d work=%d defs=%d aborted=%d\n%!"
+          input_weight
+          budget
+          !work
+          ndefs
+          (if aborted then 1 else 0)
     in
-    (* Defs in ELIMINATION order (order is newest-first; [rev_map] restores oldest-first).
-       Each value is [subst x] = the definition resolved over surviving variables only, so
-       model re-derivation needs no ordering between defs. *)
-    let defs =
-      List.rev_map
-        (fun x -> { name = name_of x; sort = x.Term.sort; value = subst x })
-        !order
-    in
-    { reduced; defs })
+    match
+      let reduced =
+        List.filter_map
+          (function
+            | `Def -> None
+            | `Keep c -> Some (subst c))
+          tagged
+      in
+      (* Defs in ELIMINATION order (order is newest-first; [rev_map] restores oldest-first).
+         Each value is [subst x] = the definition resolved over surviving variables only, so
+         model re-derivation needs no ordering between defs. *)
+      let defs =
+        List.rev_map
+          (fun x -> { name = name_of x; sort = x.Term.sort; value = subst x })
+          !order
+      in
+      reduced, defs
+    with
+    | reduced, defs ->
+      emit ~aborted:false ~ndefs:(List.length defs);
+      { reduced; defs }
+    | exception Elim_budget ->
+      (* Growth blew past the proportional budget: abandon the WHOLE elimination and return
+         the ORIGINAL assertions unchanged -- the identical neutral result a zero-alias file
+         returns, equisatisfiable (the un-eliminated set is solved directly). *)
+      emit ~aborted:true ~ndefs:0;
+      { reduced = assertions; defs = [] })
 ;;
 
 (* --- Contextual simplification (task #13) ---------------------------------------------
@@ -838,6 +986,22 @@ let proj_max_steps () =
 
 exception Proj_budget
 
+(* nec-propfold (rung 3): z3 reaches literal [false] on bftpd via `simplify
+   :pull_cheap_ite` alone (depth 1, `:local_ctx false` — NON-contextual) — the eq-over-ITE
+   distribution the projection already does, followed by a bool rewriter that collapses
+   PROPOSITIONAL CONTRADICTIONS the distributed form exposes. oxsmt's n-ary [and]/[or]
+   smart constructor flattens + constant-folds + dedups by tag but does NOT detect
+   complementary literals ([(and X (not X))] -> false, [(or X (not X))] -> true), so the
+   distributed skeleton never collapses and ships to SAT (1936 decisions on a 6 GB
+   skeleton). This pass adds exactly that detection — a GLOBAL, non-contextual,
+   equivalence-preserving structural rule (no per-branch assumption context) — bottom-up
+   over the projected DAG to a fixpoint. Default OFF. *)
+let nec_propfold () =
+  match Sys.getenv_opt "OXSMT_NEC_PROPFOLD" with
+  | Some ("1" | "true" | "yes") -> true
+  | Some _ | None -> false
+;;
+
 (* A leaf admissible as the non-ITE side of a projected equality: a constant, or a bare
    nullary variable. Restricting the distributed side to a leaf keeps [(= x d)]/[(= y d)]
    size-1-bounded so the projection cannot blow up term size. *)
@@ -866,6 +1030,114 @@ let bool_ite ctx (c : Term.t) (x : Term.t) (y : Term.t) =
      | _ -> Context.ite ctx c x y)
 ;;
 
+(* nec-propfold: bottom-up rebuild of the projected DAG adding COMPLEMENTARY-LITERAL
+   detection to n-ary [and]/[or] — the one bool-rewriter rule oxsmt's smart constructor
+   lacks and z3's has. [(and .. X .. (not X) ..)] -> false, [(or ..)] -> true. Rebuilds
+   every conjunct/disjunct through [ctx]'s constructors (flatten + dedup already there),
+   then checks the flattened operand set for a member whose negation is also present (via
+   the hash-consed [not_] tag). Run to a fixpoint (a collapse can expose another): each
+   pass only shrinks, so it terminates; [max_passes] caps the pathological case. Pure
+   logical equivalence, eliminates no variable, NO assumption context. [changed]/[passes]
+   are returned for stats. *)
+let collapse_contradictions ctx ~max_passes terms =
+  let passes = ref 0 in
+  let one_pass ts =
+    let memo : Term.t Term.Table.t = Term.Table.create 4096 in
+    let changed = ref false in
+    let rec go (t : Term.t) : Term.t =
+      match Term.Table.find_opt memo t with
+      | Some r -> r
+      | None ->
+        let r = rebuild t in
+        Term.Table.add memo t r;
+        r
+    and rebuild (t : Term.t) : Term.t =
+      match t.node with
+      | Bool_const _ | Int_const _ | Real_const _ -> t
+      | App (sym, args) ->
+        if Iarr.length args = 0
+        then t
+        else Context.app ctx sym (List.map go (Iarr.to_list args))
+      | Arith lin ->
+        Context.linear_combination_big
+          ctx
+          (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+          lin.const
+      | Real_arith lin ->
+        Context.real_linear_combination_big
+          ctx
+          (List.map (fun (tm, co) -> co, go tm) (Iarr.to_list lin.coeffs))
+          lin.const
+      | Le a -> Context.le ctx (go a) (zero_for_numeric_sort ctx a.sort)
+      | Not a -> Context.not_ ctx (go a)
+      | Eq (a, b) -> Context.eq ctx (go a) (go b)
+      | Ite (c, a, b) -> bool_ite ctx (go c) (go a) (go b)
+      | And xs -> cc ~is_and:true (List.map go (Iarr.to_list xs))
+      | Or xs -> cc ~is_and:false (List.map go (Iarr.to_list xs))
+    and cc ~is_and ys =
+      let node = if is_and then Context.and_ ctx ys else Context.or_ ctx ys in
+      match node.node with
+      | And xs | Or xs ->
+        (* DIAG (OXSMT_PROPFOLD_LITONLY): restrict the complement check to ATOMIC children
+           to isolate whether the bftpd collapse needs COMPOUND-subformula complements
+           (the cheap IR only does atomic) or just the fixpoint. *)
+        let litonly =
+          match Sys.getenv_opt "OXSMT_PROPFOLD_LITONLY" with
+          | Some ("1" | "true" | "yes") -> true
+          | Some _ | None -> false
+        in
+        let atomic (x : Term.t) =
+          match x.node with
+          | And _ | Or _ | Ite _ -> false
+          | _ -> true
+        in
+        let tags = Hashtbl.create (Iarr.length xs) in
+        Iarr.iter
+          (fun (x : Term.t) ->
+             if (not litonly) || atomic x then Hashtbl.replace tags x.tag ())
+          xs;
+        let contradiction =
+          Iarr.exists
+            (fun (x : Term.t) ->
+               ((not litonly) || atomic x) && Hashtbl.mem tags (Context.not_ ctx x).tag)
+            xs
+        in
+        if contradiction
+        then (
+          changed := true;
+          Context.bool_const ctx (not is_and))
+        else node
+      | _ -> node
+    in
+    let ts' = List.map go ts in
+    !changed, ts'
+  in
+  let rec loop ts =
+    if !passes >= max_passes
+    then ts
+    else (
+      incr passes;
+      let changed, ts' = one_pass ts in
+      if changed then loop ts' else ts')
+  in
+  (* Conjoin the assertion list into ONE flattened conjunction so a contradiction BETWEEN
+     two separate top-level assertions (X asserted here, (not X) asserted there) becomes a
+     sibling pair the complementary check can see — z3 refutes the whole goal, not
+     conjuncts in isolation. [Context.and_] flattens + dedups; a [false] result
+     short-circuits. *)
+  let result = loop [ Context.and_ ctx terms ] in
+  (match Sys.getenv_opt "OXSMT_PRESOLVE_PROJ_STATS" with
+   | Some ("1" | "true" | "yes") ->
+     let collapsed_false =
+       match result with
+       | [ { node = Bool_const false; _ } ] -> 1
+       | _ -> 0
+     in
+     Printf.eprintf "propfold: passes=%d collapsed_false=%d\n%!" !passes collapsed_false
+   | Some _ | None -> ());
+  result
+;;
+
 let simplify_projection ctx assertions =
   let steps = ref 0 in
   let max_steps = proj_max_steps () in
@@ -886,7 +1158,49 @@ let simplify_projection ctx assertions =
      collide tags and return stale answers (a module-global table silently corrupts the
      pass — the same footgun the contextual pass documents). *)
   let memo : Term.t Term.Table.t = Term.Table.create 4096 in
-  let proj_memo : (int * int, Term.t) Hashtbl.t = Hashtbl.create 4096 in
+  let proj_memo : Term.t Tag_pair_table.t = Tag_pair_table.create 4096 in
+  let propfold = nec_propfold () in
+  let false_ = Context.bool_const ctx false in
+  (* Demand-driven short-circuit (nec-propfold): a value-ITE branch that provably cannot
+     equal the comparison constant is folded to [false] with NO descent — never building
+     the dead sub-cross-product. [reach t] = [Some set] of reachable constant-leaf tags
+     when [t] is a CLOSED value-ITE (all leaves constant), [None] when OPEN (a
+     non-constant leaf reachable, so [(= t d)] cannot be pruned). Bottom-up, memoized per
+     Context tag; a pure structural property (NO assumption context).
+     [reach_steps]/[pruned] are stats. *)
+  let reach_memo : (int, (int, unit) Hashtbl.t option) Hashtbl.t = Hashtbl.create 4096 in
+  let reach_steps = ref 0 in
+  let pruned = ref 0 in
+  let rec reach (t : Term.t) : (int, unit) Hashtbl.t option =
+    match Hashtbl.find_opt reach_memo t.tag with
+    | Some r -> r
+    | None ->
+      incr reach_steps;
+      if !reach_steps + !steps > max_steps then raise Proj_budget;
+      let r =
+        match t.node with
+        | Int_const _ | Bool_const _ | Real_const _ ->
+          let s = Hashtbl.create 1 in
+          Hashtbl.replace s t.tag ();
+          Some s
+        | Ite (_c, x, y) ->
+          (match reach x, reach y with
+           | None, _ | _, None -> None
+           | Some sx, Some sy ->
+             let s = Hashtbl.create (Hashtbl.length sx + Hashtbl.length sy) in
+             Hashtbl.iter (fun k () -> Hashtbl.replace s k ()) sx;
+             Hashtbl.iter (fun k () -> Hashtbl.replace s k ()) sy;
+             Some s)
+        | _ -> None
+      in
+      Hashtbl.add reach_memo t.tag r;
+      r
+  in
+  let may_equal (n : Term.t) (d : Term.t) : bool =
+    match reach n with
+    | None -> true
+    | Some s -> Hashtbl.mem s d.tag
+  in
   let rec go (t : Term.t) : Term.t =
     match Term.Table.find_opt memo t with
     | Some r -> r
@@ -919,14 +1233,27 @@ let simplify_projection ctx assertions =
     | Eq (a, b) -> rewrite_eq (go a) (go b)
     | Ite (c, a, b) -> rewrite_ite (go c) (go a) (go b)
   and rewrite_eq (a : Term.t) (b : Term.t) : Term.t =
-    (* Project when one side is an [Ite] and the other a leaf; else the plain equality. *)
+    (* Project when one side is an [Ite] and the other a leaf; else the plain equality.
+       Under [propfold], short-circuit a closed value-ITE that cannot reach the constant
+       to [false] with no descent (demand-driven — never builds the dead
+       sub-cross-product). *)
     match a.node, b.node with
-    | Ite _, _ when proj_is_leaf b -> project a b
-    | _, Ite _ when proj_is_leaf a -> project b a
+    | Ite _, _ when proj_is_leaf b ->
+      if propfold && not (may_equal a b)
+      then (
+        incr pruned;
+        false_)
+      else project a b
+    | _, Ite _ when proj_is_leaf a ->
+      if propfold && not (may_equal b a)
+      then (
+        incr pruned;
+        false_)
+      else project b a
     | _ -> Context.eq ctx a b
   and project (ite_t : Term.t) (d : Term.t) : Term.t =
     let key = ite_t.tag, d.tag in
-    match Hashtbl.find_opt proj_memo key with
+    match Tag_pair_table.find_opt proj_memo key with
     | Some r -> r
     | None ->
       tick ();
@@ -936,7 +1263,7 @@ let simplify_projection ctx assertions =
         | Ite (c, x, y) -> bool_ite ctx c (rewrite_eq x d) (rewrite_eq y d)
         | _ -> Context.eq ctx ite_t d (* unreachable: caller guarantees an Ite *)
       in
-      Hashtbl.add proj_memo key r;
+      Tag_pair_table.add proj_memo key r;
       r
   and rewrite_ite (c : Term.t) (a : Term.t) (b : Term.t) : Term.t =
     match c.node with
@@ -1007,22 +1334,54 @@ let simplify_projection ctx assertions =
       Term.Table.add has_ite_table t b;
       b
   in
-  match
-    List.map
-      (fun a ->
-         if has_ite a
-         then (
-           engaged := true;
-           go a)
-         else a)
+  if nec_propfold ()
+  then (
+    (* PROVEN propfold-via-Context (banked substrate, dark). Distribute equality-over-ITE
+       via [go] — under [propfold] this also runs the [may_equal]/[reach] prune that folds
+       a dead value-ITE branch to [false] DURING distribution (load-bearing: it is what
+       forms the complementary sibling pair) — then run the complementary-literal
+       [collapse_contradictions] over the conjoined result. On the nec bftpd/checkpass
+       class this reproduces z3's preprocessing collapse to literal [false] (measured
+       passes=2, ~27.8s total), removing the ~35s clausify+search of the undistributed
+       skeleton that times the class out. NOT a 2s win: the ~3.68M-op distribution is
+       term-layer-throughput bound, not representation bound — see
+       logs/nec-repr-report.md. Banks the class for higher-budget consumers. The cheap-IR
+       per-op engine was abandoned (both slower than [go] and not collapse-equivalent to
+       it; report RUNG 3). Neutral-abort to the input on the step budget (sound: the
+       assertions are returned unchanged). *)
+    match
+      List.map
+        (fun a ->
+           if has_ite a
+           then (
+             engaged := true;
+             go a)
+           else a)
+        assertions
+    with
+    | exception Proj_budget ->
+      emit ~aborted:true;
       assertions
-  with
-  | exception Proj_budget ->
-    emit ~aborted:true;
-    assertions
-  | simplified ->
-    emit ~aborted:false;
-    simplified
+    | distributed ->
+      emit ~aborted:false;
+      collapse_contradictions ctx ~max_passes:64 distributed)
+  else (
+    match
+      List.map
+        (fun a ->
+           if has_ite a
+           then (
+             engaged := true;
+             go a)
+           else a)
+        assertions
+    with
+    | exception Proj_budget ->
+      emit ~aborted:true;
+      assertions
+    | simplified ->
+      emit ~aborted:false;
+      simplified)
 ;;
 
 (* --- Symmetry breaking (task #25, quf-symmetry-experiment.md §6) ----------------------

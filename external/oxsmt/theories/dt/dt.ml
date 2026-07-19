@@ -60,7 +60,7 @@ type info =
 type t =
   { ctx : Context.t
   ; reg : Defs.t ref
-    (* LIVE registry ref shared with the session/cdclt (NOT a snapshot): datatypes
+      (* LIVE registry ref shared with the session/cdclt (NOT a snapshot): datatypes
          declared AFTER this theory is instantiated (batched VC queries in one Session)
          must be visible, or their terms fail classification -> unknown. The registry only
          grows (monotonic [Datatype_defs.add]), so a live read never re-classifies an
@@ -78,16 +78,16 @@ type t =
   ; mutable dt_terms : Term.t list (* every registered datatype-sorted term, rev order *)
   ; split_relevant : unit Term.Table.t (* DT terms in a diseq / under a selector-tester *)
   ; diseq_relevant : unit Term.Table.t
-    (* DT terms that are an operand of a disequality (or a field of one, transitively) —
+      (* DT terms that are an operand of a disequality (or a field of one, transitively) —
          the seed set for field-relevance propagation; distinctness, not equality, is what
          forces a field to be case-split. *)
   ; input_dt : unit Term.Table.t
-    (* datatype terms from the ORIGINAL problem (not theory-introduced constructor
+      (* datatype terms from the ORIGINAL problem (not theory-introduced constructor
          instantiations) — the field-relevance cascade only crosses these, bounding it to
          the finite input structure (no runaway down a recursive spine of split-born
          selector terms). *)
   ; mutable diseq_frames : (Term.t * Term.t) list list
-    (* datatype-sorted disequality operand pairs, a per-frame stack in lockstep with
+      (* datatype-sorted disequality operand pairs, a per-frame stack in lockstep with
          [frames] (one list per push; [pop n] drops the popped frames' pairs). The guide
          for disequality-aware model completion (a free field must not be filled with a
          value that reproduces a forbidden term). Frame-scoped so it does not accumulate
@@ -98,15 +98,15 @@ type t =
   ; mutable explain_cache : Explanation.t Lit.Map.t
   ; mutable frames : Lit.t list list
   ; merge_cursor : Euf.merge_cursor option
-    (* W5 Lever B (OXSMT_DT_INCR): a private cursor into the engine's merge-notification
+      (* W5 Lever B (OXSMT_DT_INCR): a private cursor into the engine's merge-notification
          log, allocated (and recording enabled) only when [incr_on]. A non-empty drain
          means an Euf union changed some class since the last build, so [witness_cache] /
          [occurs_cache] are invalidated. [None] when the flag is off (no cursor, no cost). *)
   ; mutable witness_cache : ((int, Term.t) Hashtbl.t * prem list option) option
-    (* Cached {!build_witnesses} result, or [None] when invalidated. Always [None] when
+      (* Cached {!build_witnesses} result, or [None] when invalidated. Always [None] when
          [incr_on] is false. *)
   ; mutable occurs_cache : prem list option option
-    (* Cached {!occurs_check} result (outer option = cache validity, inner = the
+  (* Cached {!occurs_check} result (outer option = cache validity, inner = the
      conflict-or-none the check returns), invalidated in lockstep with [witness_cache]. *)
   }
 
@@ -185,7 +185,12 @@ let head_args (term : Term.t) : (Symbol.t * Term.t array) option =
 let dt_sort_sym (sort : Sort.t) : Symbol.t option =
   match sort with
   | Sort.Datatype s -> Some s
-  | Sort.Bool | Sort.Int _ | Sort.Real | Sort.Uninterpreted _ | Sort.Array _ | Sort.BitVec _ -> None
+  | Sort.Bool
+  | Sort.Int _
+  | Sort.Real
+  | Sort.Uninterpreted _
+  | Sort.Array _
+  | Sort.BitVec _ -> None
 ;;
 
 let is_dt_sort t (sort : Sort.t) =
@@ -211,11 +216,11 @@ let dedup_lits (ls : Lit.t list) : Lit.t list =
   let seen = ref Lit.Map.empty in
   List.filter
     (fun l ->
-       if Lit.Map.mem l !seen
-       then false
-       else (
-         seen := Lit.Map.add l () !seen;
-         true))
+      if Lit.Map.mem l !seen
+      then false
+      else (
+        seen := Lit.Map.add l () !seen;
+        true))
     ls
 ;;
 
@@ -339,6 +344,21 @@ let assert_lit t lit =
     invalid_arg "Dt.assert_lit: a foreign (non-DT) atom must not be asserted"
 ;;
 
+(* Internalise [term] (+ closure) into the e-graph with no atom binding — the combinator's
+   boundary-term visibility hook (internalization ADR §3; mirrors {!Euf_adapter}). Same
+   engine + cataloguer calls as [register_atom]'s registration step (so idempotent /
+   undone-by-pop identically), MINUS the atom<->term binding: [term] is never watched,
+   asserted, propagated, or explained. Cataloguing is what makes selector-evaluation fire
+   on a selector application (e.g. [key t]) that surfaces only inside the arithmetic
+   child's order atom — without it [key t] would not be in [selector_terms] and DT would
+   never derive [key t = k]. Recorded in [atom_terms] so [model] values it (an Int class
+   id the combinator's disagreement search reads). *)
+let internalize_term t term =
+  Euf.register_term t.engine term;
+  catalog t ~input:true term;
+  if not (List.memq term t.atom_terms) then t.atom_terms <- term :: t.atom_terms
+;;
+
 (* --- the DT saturation fixpoint --- *)
 
 (* [x = C (sel_1 x, .., sel_n x)] (nullary C: the constant), the constructor a true tester
@@ -361,18 +381,18 @@ let build_witnesses_raw t : (int, Term.t) Hashtbl.t * prem list option =
   let conflict = ref None in
   List.iter
     (fun cterm ->
-       if !conflict = None
-       then (
-         let k = Euf.class_of t.engine cterm in
-         match Hashtbl.find_opt witnesses k with
-         | None -> Hashtbl.replace witnesses k cterm
-         | Some wterm ->
-           let cs = fst (Option.get (head_args cterm)) in
-           let ws = fst (Option.get (head_args wterm)) in
-           if not (Symbol.equal cs ws)
-           then conflict := Some (Euf.explain t.engine cterm wterm)
-           else if cterm.Term.tag < wterm.Term.tag
-           then Hashtbl.replace witnesses k cterm))
+      if !conflict = None
+      then (
+        let k = Euf.class_of t.engine cterm in
+        match Hashtbl.find_opt witnesses k with
+        | None -> Hashtbl.replace witnesses k cterm
+        | Some wterm ->
+          let cs = fst (Option.get (head_args cterm)) in
+          let ws = fst (Option.get (head_args wterm)) in
+          if not (Symbol.equal cs ws)
+          then conflict := Some (Euf.explain t.engine cterm wterm)
+          else if cterm.Term.tag < wterm.Term.tag
+          then Hashtbl.replace witnesses k cterm))
     (List.rev t.ctor_terms);
   witnesses, !conflict
 ;;
@@ -398,44 +418,41 @@ let build_witnesses t : (int, Term.t) Hashtbl.t * prem list option =
 ;;
 
 (* Recover only the constructor-distinctness conflict that {!build_witnesses_raw} would
-   choose in the current class structure. The scan deliberately uses the same
-   registration order, canonical witness choice, and first-clash stop as the production
-   check. Even then it makes no claim unless the e-graph explanation, flattened and
-   deduplicated exactly as {!conflict_of} does, is byte-for-byte the caller's emitted
-   premise list. Thus an injectivity, tester, selector, occurs-check, or unrelated EUF
-   conflict remains unwitnessed rather than being mislabeled as constructor
-   distinctness. *)
+   choose in the current class structure. The scan deliberately uses the same registration
+   order, canonical witness choice, and first-clash stop as the production check. Even
+   then it makes no claim unless the e-graph explanation, flattened and deduplicated
+   exactly as {!conflict_of} does, is byte-for-byte the caller's emitted premise list.
+   Thus an injectivity, tester, selector, occurs-check, or unrelated EUF conflict remains
+   unwitnessed rather than being mislabeled as constructor distinctness. *)
 let constructor_clash_for_premises t premises =
   let witnesses = Hashtbl.create 64 in
   let stopped = ref false in
   let result = ref None in
   List.iter
     (fun cterm ->
-       if not !stopped
-       then (
-         let k = Euf.class_of t.engine cterm in
-         match Hashtbl.find_opt witnesses k with
-         | None -> Hashtbl.replace witnesses k cterm
-         | Some wterm ->
-           let cs = fst (Option.get (head_args cterm)) in
-           let ws = fst (Option.get (head_args wterm)) in
-           if not (Symbol.equal cs ws)
-           then (
-             stopped := true;
-             match
-               Defs.constructor_of_sym !(t.reg) cs,
-               Defs.constructor_of_sym !(t.reg) ws
-             with
-             | Some (cdt, _), Some (wdt, _)
-               when Symbol.equal cdt.Defs.sort_sym wdt.Defs.sort_sym ->
-               let explained =
-                 dedup_lits (lits_of_prems (Euf.explain t.engine cterm wterm))
-               in
-               if List.equal Lit.equal explained premises
-               then result := Some (cterm, wterm)
-             | Some _, Some _ | None, _ | _, None -> ())
-           else if cterm.Term.tag < wterm.Term.tag
-           then Hashtbl.replace witnesses k cterm))
+      if not !stopped
+      then (
+        let k = Euf.class_of t.engine cterm in
+        match Hashtbl.find_opt witnesses k with
+        | None -> Hashtbl.replace witnesses k cterm
+        | Some wterm ->
+          let cs = fst (Option.get (head_args cterm)) in
+          let ws = fst (Option.get (head_args wterm)) in
+          if not (Symbol.equal cs ws)
+          then (
+            stopped := true;
+            match
+              Defs.constructor_of_sym !(t.reg) cs, Defs.constructor_of_sym !(t.reg) ws
+            with
+            | Some (cdt, _), Some (wdt, _)
+              when Symbol.equal cdt.Defs.sort_sym wdt.Defs.sort_sym ->
+              let explained =
+                dedup_lits (lits_of_prems (Euf.explain t.engine cterm wterm))
+              in
+              if List.equal Lit.equal explained premises then result := Some (cterm, wterm)
+            | Some _, Some _ | None, _ | _, None -> ())
+          else if cterm.Term.tag < wterm.Term.tag
+          then Hashtbl.replace witnesses k cterm))
     (List.rev t.ctor_terms);
   !result
 ;;
@@ -454,100 +471,100 @@ let saturate_round t ~changed : prem list option =
     (* injectivity: same constructor in one class => field equalities *)
     List.iter
       (fun cterm ->
-         if !conflict = None
-         then (
-           let k = Euf.class_of t.engine cterm in
-           match Hashtbl.find_opt witnesses k with
-           | Some wterm when not (Term.equal wterm cterm) ->
-             let cs, ca = Option.get (head_args cterm) in
-             let ws, wa = Option.get (head_args wterm) in
-             if Symbol.equal cs ws
-             then
-               Array.iteri
-                 (fun i cai ->
-                    let wai = wa.(i) in
-                    if not (Euf.are_equal t.engine cai wai)
-                    then (
-                      Euf.assert_eq
-                        t.engine
-                        ~premise:(derived_premise t cterm wterm)
-                        cai
-                        wai;
-                      changed := true))
-                 ca
-           | _ -> ()))
+        if !conflict = None
+        then (
+          let k = Euf.class_of t.engine cterm in
+          match Hashtbl.find_opt witnesses k with
+          | Some wterm when not (Term.equal wterm cterm) ->
+            let cs, ca = Option.get (head_args cterm) in
+            let ws, wa = Option.get (head_args wterm) in
+            if Symbol.equal cs ws
+            then
+              Array.iteri
+                (fun i cai ->
+                  let wai = wa.(i) in
+                  if not (Euf.are_equal t.engine cai wai)
+                  then (
+                    Euf.assert_eq
+                      t.engine
+                      ~premise:(derived_premise t cterm wterm)
+                      cai
+                      wai;
+                    changed := true))
+                ca
+          | _ -> ()))
       (List.rev t.ctor_terms);
     (* selector evaluation: sel_i (C a..) = a_i once the argument's class is a C *)
     List.iter
       (fun st ->
-         if !conflict = None
-         then (
-           match head_args st with
-           | Some (sym, sargs) when Array.length sargs = 1 ->
-             (match Defs.selector_of_sym !(t.reg) sym with
-              | Some (_dt, c, sel) ->
-                let x = sargs.(0) in
-                (match witness_of t witnesses x with
-                 | Some wterm ->
-                   let ws, wa = Option.get (head_args wterm) in
-                   if Symbol.equal ws c.Defs.sym
-                   then (
-                     let target = wa.(sel.Defs.index) in
-                     if not (Euf.are_equal t.engine st target)
-                     then (
-                       Euf.assert_eq
-                         t.engine
-                         ~premise:(derived_premise t x wterm)
-                         st
-                         target;
-                       changed := true))
-                 | None -> ())
-              | None -> ())
-           | _ -> ()))
+        if !conflict = None
+        then (
+          match head_args st with
+          | Some (sym, sargs) when Array.length sargs = 1 ->
+            (match Defs.selector_of_sym !(t.reg) sym with
+             | Some (_dt, c, sel) ->
+               let x = sargs.(0) in
+               (match witness_of t witnesses x with
+                | Some wterm ->
+                  let ws, wa = Option.get (head_args wterm) in
+                  if Symbol.equal ws c.Defs.sym
+                  then (
+                    let target = wa.(sel.Defs.index) in
+                    if not (Euf.are_equal t.engine st target)
+                    then (
+                      Euf.assert_eq
+                        t.engine
+                        ~premise:(derived_premise t x wterm)
+                        st
+                        target;
+                      changed := true))
+                | None -> ())
+             | None -> ())
+          | _ -> ()))
       (List.rev t.selector_terms);
     (* testers: is-C x asserted true/false vs the class's witness *)
     List.iter
       (fun tt ->
-         if !conflict = None
-         then (
-           match head_args tt with
-           | Some (sym, targs) when Array.length targs = 1 ->
-             (match Defs.tester_of_sym !(t.reg) sym with
-              | Some (_dt, c) ->
-                let x = targs.(0) in
-                let is_true = Euf.are_equal t.engine tt t.true_const in
-                let is_false = Euf.are_equal t.engine tt t.false_const in
-                (match witness_of t witnesses x with
-                 | Some wterm ->
-                   let ws, _ = Option.get (head_args wterm) in
-                   let same = Symbol.equal ws c.Defs.sym in
-                   if is_true && not same
-                   then
-                     conflict
-                     := Some
-                          (Euf.explain t.engine tt t.true_const
-                           @ Euf.explain t.engine x wterm)
-                   else if is_false && same
-                   then
-                     conflict
-                     := Some
-                          (Euf.explain t.engine tt t.false_const
-                           @ Euf.explain t.engine x wterm)
-                 | None ->
-                   if is_true
-                   then (
-                     let cterm = instantiate_ctor t c x in
-                     if not (Euf.are_equal t.engine x cterm)
-                     then (
-                       Euf.assert_eq
-                         t.engine
-                         ~premise:(derived_premise t tt t.true_const)
-                         x
-                         cterm;
-                       catalog t ~input:false cterm;
-                       changed := true)))
-              | None -> ())
-           | _ -> ()))
+        if !conflict = None
+        then (
+          match head_args tt with
+          | Some (sym, targs) when Array.length targs = 1 ->
+            (match Defs.tester_of_sym !(t.reg) sym with
+             | Some (_dt, c) ->
+               let x = targs.(0) in
+               let is_true = Euf.are_equal t.engine tt t.true_const in
+               let is_false = Euf.are_equal t.engine tt t.false_const in
+               (match witness_of t witnesses x with
+                | Some wterm ->
+                  let ws, _ = Option.get (head_args wterm) in
+                  let same = Symbol.equal ws c.Defs.sym in
+                  if is_true && not same
+                  then
+                    conflict
+                    := Some
+                         (Euf.explain t.engine tt t.true_const
+                          @ Euf.explain t.engine x wterm)
+                  else if is_false && same
+                  then
+                    conflict
+                    := Some
+                         (Euf.explain t.engine tt t.false_const
+                          @ Euf.explain t.engine x wterm)
+                | None ->
+                  if is_true
+                  then (
+                    let cterm = instantiate_ctor t c x in
+                    if not (Euf.are_equal t.engine x cterm)
+                    then (
+                      Euf.assert_eq
+                        t.engine
+                        ~premise:(derived_premise t tt t.true_const)
+                        x
+                        cterm;
+                      catalog t ~input:false cterm;
+                      changed := true)))
+             | None -> ())
+          | _ -> ()))
       (List.rev t.tester_terms);
     (* single-constructor forcing: a value of a 1-constructor datatype IS that constructor
        (a type tautology, hence an empty premise), so force [x = C (sel_1 x, ..)] for a
@@ -558,19 +575,19 @@ let saturate_round t ~changed : prem list option =
        field is forced only if it is itself split-relevant. *)
     List.iter
       (fun x ->
-         if !conflict = None && Term.Table.mem t.split_relevant x
-         then (
-           match datatype_of_sort t x.Term.sort with
-           | Some { Defs.constructors = [ c ]; _ } ->
-             if witness_of t witnesses x = None
-             then (
-               let cterm = instantiate_ctor t c x in
-               if not (Euf.are_equal t.engine x cterm)
-               then (
-                 Euf.assert_eq t.engine ~premise:(P_derived []) x cterm;
-                 catalog t ~input:false cterm;
-                 changed := true))
-           | Some _ | None -> ()))
+        if !conflict = None && Term.Table.mem t.split_relevant x
+        then (
+          match datatype_of_sort t x.Term.sort with
+          | Some { Defs.constructors = [ c ]; _ } ->
+            if witness_of t witnesses x = None
+            then (
+              let cterm = instantiate_ctor t c x in
+              if not (Euf.are_equal t.engine x cterm)
+              then (
+                Euf.assert_eq t.engine ~premise:(P_derived []) x cterm;
+                catalog t ~input:false cterm;
+                changed := true))
+          | Some _ | None -> ()))
       (List.rev t.dt_terms);
     !conflict
 ;;
@@ -607,7 +624,7 @@ let occurs_check_raw t witnesses : prem list option =
       let _, wargs = Option.get (head_args wterm) in
       List.filter_map
         (fun a ->
-           if is_dt_sort t a.Term.sort then Some (Euf.class_of t.engine a, a) else None)
+          if is_dt_sort t a.Term.sort then Some (Euf.class_of t.engine a, a) else None)
         (Array.to_list wargs)
   in
   let edge_prems arg =
@@ -621,24 +638,24 @@ let occurs_check_raw t witnesses : prem list option =
       Hashtbl.replace color k `Gray;
       List.iter
         (fun (k', arg) ->
-           if !result = None
-           then (
-             match Hashtbl.find_opt color k' with
-             | Some `Gray ->
-               let prems = ref (edge_prems arg) in
-               let cur = ref k in
-               while !cur <> k' do
-                 match Hashtbl.find_opt parent !cur with
-                 | Some (pc, parg) ->
-                   prems := edge_prems parg @ !prems;
-                   cur := pc
-                 | None -> cur := k' (* safety: broken chain, stop *)
-               done;
-               result := Some !prems
-             | Some `Black -> ()
-             | None ->
-               Hashtbl.replace parent k' (k, arg);
-               dfs k'))
+          if !result = None
+          then (
+            match Hashtbl.find_opt color k' with
+            | Some `Gray ->
+              let prems = ref (edge_prems arg) in
+              let cur = ref k in
+              while !cur <> k' do
+                match Hashtbl.find_opt parent !cur with
+                | Some (pc, parg) ->
+                  prems := edge_prems parg @ !prems;
+                  cur := pc
+                | None -> cur := k' (* safety: broken chain, stop *)
+              done;
+              result := Some !prems
+            | Some `Black -> ()
+            | None ->
+              Hashtbl.replace parent k' (k, arg);
+              dfs k'))
         (succs k);
       Hashtbl.replace color k `Black)
   in
@@ -649,8 +666,8 @@ let occurs_check_raw t witnesses : prem list option =
      verdict is stable. *)
   List.iter
     (fun cterm ->
-       let k = Euf.class_of t.engine cterm in
-       if Hashtbl.mem witnesses k && not (Hashtbl.mem color k) then dfs k)
+      let k = Euf.class_of t.engine cterm in
+      if Hashtbl.mem witnesses k && not (Hashtbl.mem color k) then dfs k)
     (List.rev t.ctor_terms);
   !result
 ;;
@@ -701,12 +718,12 @@ let cache_reason t lit expl =
 let collect_propagations t : Lit.t list =
   List.filter_map
     (fun (imp : Euf.implied) ->
-       match Term.Table.find_opt t.watched imp.Euf.atom with
-       | None -> None
-       | Some atom ->
-         let lit = Lit.make atom imp.Euf.value in
-         cache_reason t lit (reason_of_implied t imp);
-         Some lit)
+      match Term.Table.find_opt t.watched imp.Euf.atom with
+      | None -> None
+      | Some atom ->
+        let lit = Lit.make atom imp.Euf.value in
+        cache_reason t lit (reason_of_implied t imp);
+        Some lit)
     (Euf.propagate t.engine)
 ;;
 
@@ -723,30 +740,29 @@ let mark_field_relevance t witnesses =
     changed := false;
     List.iter
       (fun x ->
-         if Term.Table.mem t.diseq_relevant x
-         then (
-           match witness_of t witnesses x with
-           | Some wterm ->
-             let _, wargs = Option.get (head_args wterm) in
-             Array.iter
-               (fun a ->
-                  (* [input_dt] guard BOUNDS the cascade: cross only fields that are terms
+        if Term.Table.mem t.diseq_relevant x
+        then (
+          match witness_of t witnesses x with
+          | Some wterm ->
+            let _, wargs = Option.get (head_args wterm) in
+            Array.iter
+              (fun a ->
+                (* [input_dt] guard BOUNDS the cascade: cross only fields that are terms
                    of the original problem, never a split-born selector term — else a
                    recursive disequality ([x <> y] over a recursive datatype) would march
                    down the spine (tail, tail-of-tail, ..) forever and spuriously exhaust
                    the split budget on a trivially-sat query. Input structure is finite. *)
-                  if
-                    is_dt_sort t a.Term.sort
-                    && Term.Table.mem t.input_dt a
-                    && not (Term.Table.mem t.diseq_relevant a)
-                  then (
-                    (* into [split_relevant] so the field is case-split, and
+                if is_dt_sort t a.Term.sort
+                   && Term.Table.mem t.input_dt a
+                   && not (Term.Table.mem t.diseq_relevant a)
+                then (
+                  (* into [split_relevant] so the field is case-split, and
                      [diseq_relevant] so a nested field cascades further *)
-                    Term.Table.replace t.split_relevant a ();
-                    Term.Table.replace t.diseq_relevant a ();
-                    changed := true))
-               wargs
-           | None -> ()))
+                  Term.Table.replace t.split_relevant a ();
+                  Term.Table.replace t.diseq_relevant a ();
+                  changed := true))
+              wargs
+          | None -> ()))
       t.dt_terms
   done
 ;;
@@ -761,12 +777,12 @@ let exhaustiveness_split t witnesses : Term.t list option =
   let cand = ref None in
   List.iter
     (fun x ->
-       if !cand = None && Term.Table.mem t.split_relevant x
-       then (
-         match datatype_of_sort t x.Term.sort with
-         | Some dt when List.length dt.Defs.constructors >= 2 ->
-           if witness_of t witnesses x = None then cand := Some (x, dt)
-         | _ -> ()))
+      if !cand = None && Term.Table.mem t.split_relevant x
+      then (
+        match datatype_of_sort t x.Term.sort with
+        | Some dt when List.length dt.Defs.constructors >= 2 ->
+          if witness_of t witnesses x = None then cand := Some (x, dt)
+        | _ -> ()))
     (List.sort (fun a b -> compare a.Term.tag b.Term.tag) t.dt_terms);
   match !cand with
   | None -> None
@@ -928,9 +944,9 @@ let leaf_value t (x : Term.t) : Model.value =
       let int_const =
         List.find_map
           (fun (m : Term.t) ->
-             match m.Term.node with
-             | Term.Int_const n -> Some n
-             | _ -> None)
+            match m.Term.node with
+            | Term.Int_const n -> Some n
+            | _ -> None)
           members
       in
       (* An Int-sorted class value is the class's [Int_const] literal —
@@ -1094,11 +1110,11 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
     in
     List.iter
       (fun (a, b) ->
-         if not (Euf.are_equal t.engine a b)
-         then (
-           reg_rep a;
-           reg_rep b;
-           ignore (add_dis (Euf.class_of t.engine a) (Euf.class_of t.engine b) : bool)))
+        if not (Euf.are_equal t.engine a b)
+        then (
+          reg_rep a;
+          reg_rep b;
+          ignore (add_dis (Euf.class_of t.engine a) (Euf.class_of t.engine b) : bool)))
       (List.concat t.diseq_frames);
     let changed = ref true in
     let rounds = ref 0 in
@@ -1108,44 +1124,44 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
       let pairs =
         Hashtbl.fold
           (fun k s acc ->
-             Hashtbl.fold (fun k2 () acc -> if k < k2 then (k, k2) :: acc else acc) s acc)
+            Hashtbl.fold (fun k2 () acc -> if k < k2 then (k, k2) :: acc else acc) s acc)
           dis
           []
       in
       List.iter
         (fun (kx, ky) ->
-           match witness_ca kx, witness_ca ky with
-           | Some (cx, fx), Some (cy, fy) when Symbol.equal cx.Defs.sym cy.Defs.sym ->
-             let n = Array.length fx in
-             let guaranteed i =
-               let kxi, _ = fx.(i)
-               and kyi, _ = fy.(i) in
-               kxi <> kyi
-               && (mem_dis kxi kyi
-                   ||
-                   match witness_ca kxi, witness_ca kyi with
-                   | Some (ci, _), Some (cj, _) ->
-                     not (Symbol.equal ci.Defs.sym cj.Defs.sym)
-                   | _ -> false)
-             in
-             let already = ref false in
-             for i = 0 to n - 1 do
-               if guaranteed i then already := true
-             done;
-             if not !already
-             then (
-               let picked = ref false in
-               for i = 0 to n - 1 do
-                 if not !picked
-                 then (
-                   let kxi, _ = fx.(i)
-                   and kyi, _ = fy.(i) in
-                   if kxi <> kyi
-                   then (
-                     picked := true;
-                     if add_dis kxi kyi then changed := true))
-               done)
-           | _ -> ())
+          match witness_ca kx, witness_ca ky with
+          | Some (cx, fx), Some (cy, fy) when Symbol.equal cx.Defs.sym cy.Defs.sym ->
+            let n = Array.length fx in
+            let guaranteed i =
+              let kxi, _ = fx.(i)
+              and kyi, _ = fy.(i) in
+              kxi <> kyi
+              && (mem_dis kxi kyi
+                  ||
+                  match witness_ca kxi, witness_ca kyi with
+                  | Some (ci, _), Some (cj, _) ->
+                    not (Symbol.equal ci.Defs.sym cj.Defs.sym)
+                  | _ -> false)
+            in
+            let already = ref false in
+            for i = 0 to n - 1 do
+              if guaranteed i then already := true
+            done;
+            if not !already
+            then (
+              let picked = ref false in
+              for i = 0 to n - 1 do
+                if not !picked
+                then (
+                  let kxi, _ = fx.(i)
+                  and kyi, _ = fy.(i) in
+                  if kxi <> kyi
+                  then (
+                    picked := true;
+                    if add_dis kxi kyi then changed := true))
+              done)
+          | _ -> ())
         (List.sort compare pairs)
     done;
     (* Model COMPLETION for an unconstrained class. Distinct e-classes are never
@@ -1223,9 +1239,9 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
                    let peers = Hashtbl.fold (fun k' () acc -> k' :: acc) s [] in
                    List.filter_map
                      (fun k' ->
-                        match Hashtbl.find_opt rep k' with
-                        | Some xr -> Some (fbd_tree xr depth)
-                        | None -> None)
+                       match Hashtbl.find_opt rep k' with
+                       | Some xr -> Some (fbd_tree xr depth)
+                       | None -> None)
                      (List.sort compare peers)
                in
                let rec pick idx tries =
@@ -1277,9 +1293,9 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
                 , Array.to_list
                     (Array.map
                        (fun a ->
-                          if is_dt_sort t a.Term.sort
-                          then fbd_tree a (depth + 1)
-                          else Leaf (leaf a))
+                         if is_dt_sort t a.Term.sort
+                         then fbd_tree a (depth + 1)
+                         else Leaf (leaf a))
                        wargs) )
             | None ->
               (match datatype_of_sort t x.Term.sort with
@@ -1312,12 +1328,12 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
               let fields =
                 List.map
                   (fun (s : Defs.selector) ->
-                     if is_dt_sort t s.Defs.field_sort
-                     then (
-                       match datatype_of_sort t s.Defs.field_sort with
-                       | Some d -> base_tree d (depth + 1)
-                       | None -> Leaf (Model.Uninterp 0))
-                     else Leaf (base_leaf s.Defs.field_sort))
+                    if is_dt_sort t s.Defs.field_sort
+                    then (
+                      match datatype_of_sort t s.Defs.field_sort with
+                      | Some d -> base_tree d (depth + 1)
+                      | None -> Leaf (Model.Uninterp 0))
+                    else Leaf (base_leaf s.Defs.field_sort))
                   c.Defs.selectors
               in
               tick ();
@@ -1348,12 +1364,12 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
           let self_rec =
             List.find_opt
               (fun (c : Defs.constructor) ->
-                 List.exists
-                   (fun (s : Defs.selector) ->
-                      match dt_sort_sym s.Defs.field_sort with
-                      | Some a -> Symbol.equal a dt.Defs.sort_sym
-                      | None -> false)
-                   c.Defs.selectors)
+                List.exists
+                  (fun (s : Defs.selector) ->
+                    match dt_sort_sym s.Defs.field_sort with
+                    | Some a -> Symbol.equal a dt.Defs.sort_sym
+                    | None -> false)
+                  c.Defs.selectors)
               ctors
           in
           match self_rec with
@@ -1366,17 +1382,17 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
             let fields =
               List.map
                 (fun (s : Defs.selector) ->
-                   match dt_sort_sym s.Defs.field_sort with
-                   | Some a when Symbol.equal a dt.Defs.sort_sym && not !recursed ->
-                     recursed := true;
-                     distinct_base dt (idx - 1) (depth + 1)
-                   | _ ->
-                     if is_dt_sort t s.Defs.field_sort
-                     then (
-                       match datatype_of_sort t s.Defs.field_sort with
-                       | Some d -> base_tree d (depth + 1)
-                       | None -> Leaf (Model.Uninterp 0))
-                     else Leaf (base_leaf s.Defs.field_sort))
+                  match dt_sort_sym s.Defs.field_sort with
+                  | Some a when Symbol.equal a dt.Defs.sort_sym && not !recursed ->
+                    recursed := true;
+                    distinct_base dt (idx - 1) (depth + 1)
+                  | _ ->
+                    if is_dt_sort t s.Defs.field_sort
+                    then (
+                      match datatype_of_sort t s.Defs.field_sort with
+                      | Some d -> base_tree d (depth + 1)
+                      | None -> Leaf (Model.Uninterp 0))
+                    else Leaf (base_leaf s.Defs.field_sort))
                 c.Defs.selectors
             in
             tick ();
@@ -1397,13 +1413,13 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
             let cross =
               List.find_map
                 (fun (c : Defs.constructor) ->
-                   match
-                     List.find_opt
-                       (fun (s : Defs.selector) -> is_dt_sort t s.Defs.field_sort)
-                       c.Defs.selectors
-                   with
-                   | Some s -> Some (c, s)
-                   | None -> None)
+                  match
+                    List.find_opt
+                      (fun (s : Defs.selector) -> is_dt_sort t s.Defs.field_sort)
+                      c.Defs.selectors
+                  with
+                  | Some s -> Some (c, s)
+                  | None -> None)
                 ctors
             in
             (match cross with
@@ -1412,17 +1428,17 @@ let constructor_model_gen t ~(leaf : Term.t -> Model.value)
                let fields =
                  List.map
                    (fun (s : Defs.selector) ->
-                      if s.Defs.index = target.Defs.index
-                      then (
-                        match datatype_of_sort t s.Defs.field_sort with
-                        | Some d -> distinct_base d idx (depth + 1)
-                        | None -> Leaf (base_leaf s.Defs.field_sort))
-                      else if is_dt_sort t s.Defs.field_sort
-                      then (
-                        match datatype_of_sort t s.Defs.field_sort with
-                        | Some d -> base_tree d (depth + 1)
-                        | None -> Leaf (Model.Uninterp 0))
-                      else Leaf (base_leaf s.Defs.field_sort))
+                     if s.Defs.index = target.Defs.index
+                     then (
+                       match datatype_of_sort t s.Defs.field_sort with
+                       | Some d -> distinct_base d idx (depth + 1)
+                       | None -> Leaf (base_leaf s.Defs.field_sort))
+                     else if is_dt_sort t s.Defs.field_sort
+                     then (
+                       match datatype_of_sort t s.Defs.field_sort with
+                       | Some d -> base_tree d (depth + 1)
+                       | None -> Leaf (Model.Uninterp 0))
+                     else Leaf (base_leaf s.Defs.field_sort))
                    c.Defs.selectors
                in
                tick ();
@@ -1489,10 +1505,17 @@ let bool_completion t : Term.t -> Model.value =
    the model trees are finite ([base_tree]/[distinct_base] carry [depth > 10_000] caps,
    and the occurs check refutes a cyclic assignment as UNSAT before any sat model is
    built), so it always terminates. *)
-let check_model t : (Term.t * ctor_tree) list option =
+let check_model_with_leaf t (override : Term.t -> Model.value option)
+  : (Term.t * ctor_tree) list option
+  =
   let bool_of = bool_completion t in
   let leaf (x : Term.t) : Model.value =
-    if Sort.equal x.Term.sort Sort.bool then bool_of x else leaf_value t x
+    (* The combined DT+LIA path supplies the arithmetic child's Int values via [override];
+       an unoverridden leaf falls back to the pure-DT per-class default (Bool via the
+       diseq-respecting completion, everything else via [leaf_value]). *)
+    match override x with
+    | Some v -> v
+    | None -> if Sort.equal x.Term.sort Sort.bool then bool_of x else leaf_value t x
   in
   match constructor_model_gen t ~leaf with
   | None -> None
@@ -1516,6 +1539,10 @@ let check_model t : (Term.t * ctor_tree) list option =
     Some (trees @ !scalars)
 ;;
 
+let check_model t : (Term.t * ctor_tree) list option =
+  check_model_with_leaf t (fun _ -> None)
+;;
+
 (* Read-only e-graph queries for quantified-lemma matching. These forwards inherit the
    engine accessors' non-registering behavior, so matching cannot perturb DT state. *)
 let app_terms_by_symbol t sym = Euf.app_terms_by_symbol t.engine sym
@@ -1523,6 +1550,4 @@ let find_class_opt t term = Euf.find_class_opt t.engine term
 let equal_if_registered t a b = Euf.equal_if_registered t.engine a b
 let class_members t term = Euf.class_members t.engine term
 let registered_terms t = Euf.registered_terms t.engine
-
-let registered_terms_by_sort t sort =
-  Euf.registered_terms_by_sort t.engine sort
+let registered_terms_by_sort t sort = Euf.registered_terms_by_sort t.engine sort

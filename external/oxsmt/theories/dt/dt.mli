@@ -46,16 +46,24 @@ val push : t -> unit
 val pop : t -> int -> unit
 val model : t -> Model.t
 
+(** [internalize_term t term] internalises [term] and its subterm closure into the DT
+    theory's e-graph WITHOUT binding it to an atom — never asserted, watched, propagated,
+    or explained; only made visible to congruence + the DT saturation cataloguer (so
+    selector-evaluation fires on a selector application, e.g. [key t], that surfaces only
+    inside the arithmetic child's atom [(> (key t) 0)]) and to the model enumeration. The
+    Nelson–Oppen combinator ({!Oxsmt_combine.Combine.CONGRUENCE_CHILD}) uses this to make
+    the DT congruence child see a boundary term of the OTHER (arithmetic) child.
+    Idempotent; undone by [pop] of the introducing frame (the engine's internalisation is
+    trailed). *)
+val internalize_term : t -> Term.t -> unit
+
 (** [constructor_clash_for_premises t premises] returns two applications of distinct
     constructors of the same datatype when they are equal in [t]'s current congruence
-    closure and the engine's explanation for that equality is exactly [premises] after
-    the same deduplication used by {!check}. This is a conservative certificate query:
-    it returns [None] for every other datatype conflict, including injectivity and
+    closure and the engine's explanation for that equality is exactly [premises] after the
+    same deduplication used by {!check}. This is a conservative certificate query: it
+    returns [None] for every other datatype conflict, including injectivity and
     acyclicity. It does not mutate the theory. *)
-val constructor_clash_for_premises
-  :  t
-  -> Lit.t list
-  -> (Term.t * Term.t) option
+val constructor_clash_for_premises : t -> Lit.t list -> (Term.t * Term.t) option
 
 (** A model value for a datatype term, as a constructor tree the §8 self-check evaluator
     checks against the formula (GOALS: "a model with actual constructor trees"). A leaf is
@@ -81,9 +89,24 @@ val constructor_model : t -> (Term.t * ctor_tree) list option
     [Sat]. *)
 val check_model : t -> (Term.t * ctor_tree) list option
 
+(** [check_model_with_leaf t override] is {!check_model} with an external scalar-leaf
+    override: for a non-datatype leaf term [x], the model value is [override x] when it
+    returns [Some], else the theory's own per-class default. The Nelson–Oppen combined
+    DT+LIA path ({!Oxsmt_interface.Cdclt}) passes the merged model's Int values as the
+    override, so the constructor tree's Int fields (and Int scalar leaves) carry the
+    ARITHMETIC child's values rather than the pure-DT default (which has no arithmetic and
+    would give [0]) — the reconciliation the mixed-sat self-check
+    ({!Oxsmt_interface.Dt_model_check}) needs. {!check_model} is exactly this with a
+    constant-[None] override. *)
+val check_model_with_leaf
+  :  t
+  -> (Term.t -> Model.value option)
+  -> (Term.t * ctor_tree) list option
+
 (** Non-registering queries over the DT theory's congruence closure, used by quantified
     lemma matching. See the corresponding accessors in {!Oxsmt_euf.Euf}. *)
 val app_terms_by_symbol : t -> Symbol.t -> Term.t list
+
 val find_class_opt : t -> Term.t -> int option
 val equal_if_registered : t -> Term.t -> Term.t -> bool
 val class_members : t -> Term.t -> Term.t list
