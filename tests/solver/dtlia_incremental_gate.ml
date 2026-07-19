@@ -175,6 +175,40 @@ let s1_unsat_with_bool () =
     Session.Unsat
 ;;
 
+(* M1 (multi-query no-staleness): TWO successive check_sat_assuming calls in ONE session
+   on a SHARED Bool atom [g] with OPPOSITE polarity, each SAT but forcing a DIFFERENT key
+   value ([g -> key t = 5], [not g -> key t = 7]). Call 1 commits a model with g=true;
+   call 2 assumes g=false. The completion reads [g]'s value from [Sat.value], which each
+   solve rebuilds from scratch ([save_model] clears + refills [saved_model] for every
+   var), so call 2 must see g=FALSE — if it read call 1's stale g=true, [Dt_model_check]
+   would evaluate call 2's spliced [not g] assumption to false and degrade to unknown.
+   Both calls returning SAT (with the right key each time) pins that the injected value is
+   never stale from a previous check_sat. The soundness-adjacent case the lead asked to
+   hunt hardest. *)
+let m1_multi_query_no_staleness () =
+  let s = Session.create () in
+  let a = make_tree s in
+  let ic n = Context.int_const a.ctx n in
+  let mk_empty = Context.app a.ctx a.empty [] in
+  let t = Context.const a.ctx (Session.declare_const s "t" a.tree) in
+  let k = Context.const a.ctx (Session.declare_const s "k" Sort.int) in
+  let key_t = Context.app a.ctx a.key [ t ] in
+  let g = Context.const a.ctx (Session.declare_const s "g" Sort.bool) in
+  Session.assert_term
+    s
+    (Context.eq a.ctx t (Context.app a.ctx a.node [ mk_empty; k; mk_empty ]));
+  Session.assert_term s (Context.implies a.ctx g (Context.eq a.ctx key_t (ic 5)));
+  Session.assert_term
+    s
+    (Context.implies a.ctx (Context.not_ a.ctx g) (Context.eq a.ctx key_t (ic 7)));
+  expect "M1a check_sat_assuming(g=true) -> key t=5" (csa1 s g true) Session.Sat;
+  expect
+    "M1b check_sat_assuming(g=false) -> key t=7 (no stale g)"
+    (csa1 s g false)
+    Session.Sat;
+  expect "M1c check_sat_assuming(g=true) again (no stale sat)" (csa1 s g true) Session.Sat
+;;
+
 let () =
   Printf.printf "dtlia incremental / free-Boolean gate:\n%!";
   r1_csa_trivial_assumption ();
@@ -182,6 +216,7 @@ let () =
   v1_asserted_gate_true ();
   v2_assumption_polarity ();
   s1_unsat_with_bool ();
+  m1_multi_query_no_staleness ();
   if !failures > 0
   then (
     Printf.printf "dtlia-incremental gate: %d failure(s)\n%!" !failures;
