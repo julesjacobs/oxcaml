@@ -1,0 +1,10 @@
+{
+ "id": "bst-r7-045",
+ "unit": "bst",
+ "vc_index_in_unit": 44,
+ "kind": "seal-implication",
+ "expected": "unsat",
+ "expected_source": "z3 4.8.5 replay of the prove query",
+ "sha256": "9b2ba2b32192c44666b9fc853518323517df952fc6b7d1d0e46ba7aa58a0cd0a",
+ "z3_unsat_core": "(h_0)"
+}

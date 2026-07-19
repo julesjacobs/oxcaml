@@ -100,7 +100,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test nia-test loud-unknown-test euf-test euf-adapter-test dt-fabric-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate dtlia-incremental-gate dt-combine-fabric-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test nia-test loud-unknown-test euf-test euf-adapter-test dt-fabric-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate dtlia-incremental-gate dtlia-bst-gate dt-combine-fabric-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -492,6 +492,16 @@ dt-multi-query-gate:
 dtlia-incremental-gate:
 	$(DUNE) build tests/solver/dtlia_incremental_gate.exe
 	$(DUNE) exec tests/solver/dtlia_incremental_gate.exe
+
+## dtlia-bst-gate — consumer BST acceptance corpus (bugreport 03 followup 3). 49
+##   functional-correctness VCs whose defining equations use SMT-LIB [match]; all expected
+##   unsat. RED = bst-r7-008 (frontier, blocked by the parser rejecting [match]); fixed by
+##   desugaring match to testers+selectors+ite. Plus inline match-desugaring discrimination
+##   (branch selection + SAT direction). Drives the tracked fixture; absent dir = clean skip.
+DTLIA_BST_CORPUS ?= tests/dtlia-bst-corpus
+dtlia-bst-gate:
+	$(DUNE) build tests/solver/dtlia_bst_gate.exe
+	$(DUNE) exec tests/solver/dtlia_bst_gate.exe -- $(DTLIA_BST_CORPUS)
 
 ## dt-combine-fabric-gate — DT+LIA combination fabric-invariance gate (task #47, bugreport
 ##   03). The DT congruence child ([Dt_congruence]) has no fabric-live seam, so
@@ -1098,6 +1108,7 @@ test: check-frozen
 	$(MAKE) dt-sat-gate
 	$(MAKE) dt-multi-query-gate
 	$(MAKE) dtlia-incremental-gate
+	$(MAKE) dtlia-bst-gate
 	$(MAKE) dt-combine-fabric-gate
 	$(MAKE) array-sat-gate
 	$(MAKE) row2-red-gate

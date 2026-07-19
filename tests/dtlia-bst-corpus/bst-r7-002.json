@@ -1,0 +1,10 @@
+{
+ "id": "bst-r7-002",
+ "unit": "bst",
+ "vc_index_in_unit": 1,
+ "kind": "annotation",
+ "expected": "unsat",
+ "expected_source": "z3 4.8.5 replay of the prove query",
+ "sha256": "6bb6ffbcc2a81042e144e1a5b35cda03fb795efdbcd43148503a19f3546d4c93",
+ "z3_unsat_core": "()"
+}

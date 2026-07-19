@@ -1,0 +1,10 @@
+{
+ "id": "bst-r7-036",
+ "unit": "bst",
+ "vc_index_in_unit": 35,
+ "kind": "contract-argument",
+ "expected": "unsat",
+ "expected_source": "z3 4.8.5 replay of the prove query",
+ "sha256": "4d390ea5d9936cfb3f87367d3b1e03b850d81d82bf494f7d6c2a99653003e24b",
+ "z3_unsat_core": "(h_8 h_9 h_12 h_14)"
+}

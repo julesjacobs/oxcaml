@@ -1,0 +1,5 @@
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((VoxData_73f9715dbf4e4e799112341b80b2775d 0)) (((VoxData_73f9715dbf4e4e799112341b80b2775d_c_0_Empty) (VoxData_73f9715dbf4e4e799112341b80b2775d_c_1_Node (VoxData_73f9715dbf4e4e799112341b80b2775d_s_1_0 VoxData_73f9715dbf4e4e799112341b80b2775d) (VoxData_73f9715dbf4e4e799112341b80b2775d_s_1_1 Int) (VoxData_73f9715dbf4e4e799112341b80b2775d_s_1_2 VoxData_73f9715dbf4e4e799112341b80b2775d)))))
+(assert (not (= (= VoxData_73f9715dbf4e4e799112341b80b2775d_c_0_Empty VoxData_73f9715dbf4e4e799112341b80b2775d_c_0_Empty) true)))
+(check-sat)
+(get-unsat-core)

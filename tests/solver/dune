@@ -153,3 +153,12 @@
  (name dtlia_incremental_gate)
  (modules dtlia_incremental_gate)
  (libraries oxsmt_core oxsmt_interface))
+
+; dtlia-bst gate (make dtlia-bst-gate): the consumer BST acceptance corpus (bugreport 03
+; followup 3) — 49 functional-correctness VCs whose defining equations use SMT-LIB match.
+; RED = bst-r7-008 (frontier, match desugaring); all 49 expected unsat.
+
+(executable
+ (name dtlia_bst_gate)
+ (modules dtlia_bst_gate)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader))

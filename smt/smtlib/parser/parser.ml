@@ -658,6 +658,122 @@ and read_let ?expected st scope rest =
     read_term ?expected st scope body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
+(* Datatype [(match t ((pat body) ...))]: desugar to nested testers + selectors + [ite],
+   exactly as z3 lowers a datatype match. A constructor pattern [C] (nullary) or
+   [(C x1..xn)] contributes [ite ((_ is C) t) body ...], with each [xi] bound in [body]'s
+   scope to the selector application [(sel_i t)] (so the body reads the field by the
+   pattern variable's name). A variable / wildcard [_] pattern is the catch-all default
+   (binds the whole scrutinee unless [_]). The LAST case is the [ite] chain's else branch:
+   the datatype is exhaustive (SMT-LIB requires a match to cover every constructor, or
+   carry a wildcard), so if a value is none of the earlier-tested constructors it must be
+   the last case's — this is exact, not an approximation. The scrutinee term is read ONCE
+   and shared across every tester/selector (hash-consed). Raises {!Malformed} on a
+   non-datatype scrutinee, an unknown constructor, or a pattern-arity mismatch. *)
+and read_match ?expected st scope args orig =
+  match args with
+  | [ scrut_s; Sexp.List cases ] ->
+    let scrut = read_term st scope scrut_s in
+    let dt =
+      match scrut.Term.sort with
+      | Sort.Datatype sym ->
+        (match Datatype_defs.datatype_of_sort st.datatypes sym with
+         | Some dt -> dt
+         | None -> malformedf "match scrutinee sort is not a declared datatype")
+      | _ -> malformedf "match scrutinee is not a datatype: %s" (Sexp.to_string scrut_s)
+    in
+    let find_ctor cname =
+      List.find_opt
+        (fun (c : Datatype_defs.constructor) ->
+          String.equal (Symbol.name c.Datatype_defs.sym) cname)
+        dt.Datatype_defs.constructors
+    in
+    (* Build one case: [Some tester, body] for a constructor pattern, [None, body] for a
+       default (variable / wildcard). *)
+    let build_case (c : Sexp.t) =
+      let pat, body_s =
+        match c with
+        | Sexp.List [ pat; body ] -> pat, body
+        | _ ->
+          malformedf
+            "malformed match case (expected (pattern body)): %s"
+            (Sexp.to_string c)
+      in
+      match pat with
+      (* wildcard [_] is a catch-all default binding nothing (it is a reserved token, so
+         [Sexp.symbol_name] does not see it). *)
+      | Sexp.Atom (Tok.Reserved "_") -> None, read_term ?expected st scope body_s
+      | Sexp.Atom _ ->
+        (match Sexp.symbol_name pat with
+         | None -> malformedf "malformed match pattern: %s" (Sexp.to_string pat)
+         | Some pname ->
+           (match find_ctor pname with
+            | Some c ->
+              if c.Datatype_defs.selectors <> []
+              then malformedf "match: constructor %s needs arguments" pname;
+              ( Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
+              , read_term ?expected st scope body_s )
+            | None ->
+              (* a variable (or [_]) pattern: default case; a named variable binds the
+                 whole scrutinee. *)
+              let scope' =
+                if String.equal pname "_" then scope else Scope.add pname scrut scope
+              in
+              None, read_term ?expected st scope' body_s))
+      | Sexp.List (chead :: var_atoms) ->
+        (match Sexp.symbol_name chead with
+         | None ->
+           malformedf "malformed match constructor pattern: %s" (Sexp.to_string pat)
+         | Some cname ->
+           (match find_ctor cname with
+            | None -> malformedf "match: unknown constructor %s in pattern" cname
+            | Some c ->
+              if List.length var_atoms <> List.length c.Datatype_defs.selectors
+              then malformedf "match: constructor %s pattern arity mismatch" cname;
+              let scope' =
+                List.fold_left2
+                  (fun acc var_s (sel : Datatype_defs.selector) ->
+                    match Sexp.symbol_name var_s with
+                    | Some "_" -> acc
+                    | Some v ->
+                      Scope.add v (Context.app st.ctx sel.Datatype_defs.sym [ scrut ]) acc
+                    | None ->
+                      malformedf
+                        "malformed match pattern variable: %s"
+                        (Sexp.to_string var_s))
+                  scope
+                  var_atoms
+                  c.Datatype_defs.selectors
+              in
+              ( Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
+              , read_term ?expected st scope' body_s )))
+      | _ -> malformedf "malformed match pattern: %s" (Sexp.to_string pat)
+    in
+    let built = List.map build_case cases in
+    (* Exhaustiveness: the last case becomes the [ite] chain's else (no tester), so a
+       match that is NOT exhaustive (fewer distinct constructor cases than the datatype
+       has, and no variable/wildcard default) would silently give the last case's body for
+       an uncovered constructor — a wrong value. SMT-LIB requires exhaustiveness; reject a
+       non-exhaustive match as malformed (fail-closed to unknown) rather than risk a wrong
+       verdict. *)
+    let has_default = List.exists (fun (tester_opt, _) -> tester_opt = None) built in
+    let n_ctor_cases = List.length (List.filter (fun (t, _) -> t <> None) built) in
+    if (not has_default) && n_ctor_cases < List.length dt.Datatype_defs.constructors
+    then malformedf "non-exhaustive match (no default and not all constructors covered)";
+    (match List.rev built with
+     | [] -> malformedf "match with no cases: %s" (Sexp.to_string orig)
+     | (_, last_body) :: rest_rev ->
+       (* rest_rev is later-to-earlier; fold builds ite tester0 body0 (... last_body). A
+          non-last default case discards the (dead) accumulated later cases. *)
+       List.fold_left
+         (fun else_acc (tester_opt, body) ->
+           match tester_opt with
+           | Some tester -> Context.ite st.ctx tester body else_acc
+           | None -> body)
+         last_body
+         rest_rev)
+  | _ ->
+    malformedf "malformed match (expected (match t (cases))): %s" (Sexp.to_string orig)
+
 (* The application head selects interpretation. Only an UNQUOTED symbol can be a builtin
    operator; a quoted [|+|] head (or a reserved word) is never an operator. *)
 and read_app ?expected st scope head args orig =
@@ -715,7 +831,7 @@ and read_app ?expected st scope head args orig =
                 | _ -> false)
               binders -> unsupportedf "quantifiers are not supported (QF only)"
      | _ -> malformedf "malformed quantifier (expected (forall|exists (binders) body))")
-  | Sexp.Atom (Tok.Reserved "match") -> unsupportedf "datatype match is not supported yet"
+  | Sexp.Atom (Tok.Reserved "match") -> read_match ?expected st scope args orig
   | Sexp.Atom (Tok.Reserved r) ->
     malformedf "reserved word %s cannot head an application" r
   (* Tester [((_ is C) t)]: an indexed identifier heads the application. Resolve to the
