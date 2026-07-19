@@ -147,6 +147,12 @@ type t =
   ; dropped : int
   (* count of assertion content the reader could not represent and dropped via partial
      assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade sentinel *)
+  ; assumptions : (Term.t * bool) list option
+  (* the [(check-sat-assuming (lit ...))] assumption literals as (atom, polarity) pairs
+     ([true] = the atom, [false] = its negation), in file order; [None] when there is no
+     [check-sat-assuming] (an ordinary [check-sat] or a declaration-only fragment).
+     [Some []] is a [check-sat-assuming ()] with no assumptions. The driver feeds these to
+     {!Oxsmt_interface.Session.check_sat_assuming}. *)
   }
 
 type fundecl =
@@ -2167,6 +2173,23 @@ let run st sexps =
      remain supported for programmatic parser clients. *)
   let checked = ref false in
   let exited = ref false in
+  (* The [(check-sat-assuming (lit ...))] assumption literals, if any. [None] until a
+     check-sat-assuming is seen; [Some pairs] after (possibly empty). Each literal is a
+     Boolean atom (polarity [true]) or its single [(not atom)] negation (polarity [false]),
+     read through the ordinary term reader at top-level scope so a non-Bool or undeclared
+     literal is a [Malformed] exactly as an ill-sorted assert would be. *)
+  let assumptions = ref None in
+  let read_assumption (lit : Sexp.t) =
+    let atom, polarity =
+      match lit with
+      | Sexp.List [ head; a ] when Sexp.simple head = Some "not" -> a, false
+      | _ -> lit, true
+    in
+    let t = read_term st Scope.empty atom in
+    if not (Sort.equal t.Term.sort Sort.bool)
+    then malformedf "check-sat-assuming literal is not Bool: %s" (Sexp.to_string lit);
+    t, polarity
+  in
   (* Count of assertion content the reader could not represent and DROPPED (partial
      assertion, below). Surfaced on {!t} so the shared loader arms a sentinel lemma when
      [dropped > 0] — the live-lemma soundness rule then degrades any [Sat] to [Unknown],
@@ -2371,6 +2394,15 @@ let run st sexps =
                "multiple check-sat commands are not supported by the batch reader";
            checked := true
          | Some "check-sat", _ -> malformedf "check-sat expects no arguments"
+         | Some "check-sat-assuming", [ Sexp.List lits ] ->
+           if !checked
+           then
+             unsupportedf
+               "multiple check-sat commands are not supported by the batch reader";
+           checked := true;
+           assumptions := Some (List.map read_assumption lits)
+         | Some "check-sat-assuming", _ ->
+           malformedf "check-sat-assuming expects a single (lit ...) list"
          | Some "exit", [] -> exited := true
          | Some "exit", _ -> malformedf "exit expects no arguments"
          | Some ("push" | "pop"), _ ->
@@ -2398,7 +2430,8 @@ let run st sexps =
   , List.rev !lemmas
   , List.rev !existentials
   , List.rev !clauses
-  , !dropped )
+  , !dropped
+  , !assumptions )
 ;;
 
 let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
@@ -2417,7 +2450,7 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
     ; arrays = Array_defs.empty
     }
   in
-  let logic, status, assertions, lemmas, existentials, clauses, dropped =
+  let logic, status, assertions, lemmas, existentials, clauses, dropped, assumptions =
     try run st sexps with
     | Term.Sort_error m -> raise (Malformed ("sort error: " ^ m))
     | Term.Unsupported m -> raise (Unsupported m)
@@ -2434,6 +2467,7 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
   ; existentials
   ; clauses
   ; dropped
+  ; assumptions
   }
 ;;
 

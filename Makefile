@@ -100,7 +100,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -701,6 +701,43 @@ vc-corpus-test:
 	$(DUNE) build tests/solver/vc_corpus_test.exe
 	$(DUNE) exec tests/solver/vc_corpus_test.exe -- $(VC_CORPUS)
 
+## csa-test (task #52) — end-to-end CLI support for [(check-sat-assuming (lit ...))] +
+##   [(get-unsat-core)]. Drives the real oxsmt_cli on every $(VC_CORPUS)/*.smt2 (the
+##   consumer's portable VC form) and requires each to print [verdict unsat] AND a
+##   get-unsat-core paren list — RED against trunk, where the parser had no
+##   check-sat-assuming arm and every VC degraded to [unknown] with no core. Plus two
+##   inline discriminators: a NEGATIVE assumption literal [(not p)] must appear verbatim in
+##   the core, and [(get-unsat-core)] on a [sat] result must emit NO stdout core line
+##   (SMT-LIB: a core is only defined after unsat). Clean-skips an absent corpus dir.
+csa-test:
+	$(DUNE) build tests/solver/oxsmt_cli.exe
+	@cli=_build/default/tests/solver/oxsmt_cli.exe; fail=0; \
+	  if [ ! -d "$(VC_CORPUS)" ]; then echo "csa-test: SKIP (corpus dir $(VC_CORPUS) absent)"; exit 0; fi; \
+	  for f in $(VC_CORPUS)/*.smt2; do \
+	    [ -e "$$f" ] || { echo "csa-test: SKIP (no .smt2 in $(VC_CORPUS))"; exit 0; }; \
+	    out=$$($$cli "$$f" 2>/dev/null); \
+	    v=$$(printf '%s\n' "$$out" | grep -o 'verdict [a-z]*' | head -1 | awk '{print $$2}'); \
+	    core=$$(printf '%s\n' "$$out" | sed -n '2p'); \
+	    if [ "$$v" != "unsat" ]; then echo "csa-test: FAIL $$(basename $$f): want unsat, got $${v:-<none>}"; fail=1; \
+	    elif [ -z "$$core" ] || [ "$${core#(}" = "$$core" ]; then echo "csa-test: FAIL $$(basename $$f): no get-unsat-core line printed"; fail=1; \
+	    else echo "csa-test: OK $$(basename $$f) -> unsat core=$$core"; fi; \
+	  done; \
+	  d=$$(mktemp -d); \
+	  printf '(declare-const p Bool)\n(assert p)\n(check-sat-assuming ((not p)))\n(get-unsat-core)\n' > $$d/neg.smt2; \
+	  nout=$$($$cli $$d/neg.smt2 2>/dev/null); \
+	  nv=$$(printf '%s\n' "$$nout" | grep -o 'verdict [a-z]*' | head -1 | awk '{print $$2}'); \
+	  ncore=$$(printf '%s\n' "$$nout" | sed -n '2p'); \
+	  if [ "$$nv" = "unsat" ] && [ "$$ncore" = "((not p))" ]; then echo "csa-test: OK negative-literal core -> $$ncore"; \
+	  else echo "csa-test: FAIL negative-literal: verdict=$$nv core=$$ncore (want unsat ((not p)))"; fail=1; fi; \
+	  printf '(declare-const sel Bool)\n(declare-const x Int)\n(assert (=> sel (> x 0)))\n(check-sat-assuming (sel))\n(get-unsat-core)\n' > $$d/sat.smt2; \
+	  sout=$$($$cli $$d/sat.smt2 2>/dev/null); \
+	  sv=$$(printf '%s\n' "$$sout" | grep -o 'verdict [a-z]*' | head -1 | awk '{print $$2}'); \
+	  score=$$(printf '%s\n' "$$sout" | sed -n '2p'); \
+	  if [ "$$sv" = "sat" ] && [ -z "$$score" ]; then echo "csa-test: OK sat+get-unsat-core -> no stdout core line"; \
+	  else echo "csa-test: FAIL sat+get-unsat-core: verdict=$$sv extra-line=[$$score] (want sat, no core line)"; fail=1; fi; \
+	  rm -rf $$d; \
+	  test $$fail -eq 0
+
 ## interpolation-test — public equality-aware interpolation consumer. Requires a signed
 ## equality certificate, fresh-session checks of A=>I and I&B unsat, shared vocabulary,
 ## and rejection of independent weaken/strengthen corruptions.
@@ -976,6 +1013,7 @@ test: check-frozen
 	$(MAKE) session-cores-test
 	$(MAKE) core-min-test
 	$(MAKE) vc-corpus-test
+	$(MAKE) csa-test
 	$(MAKE) interpolation-test
 	$(MAKE) optimize-test
 	$(MAKE) omt-test

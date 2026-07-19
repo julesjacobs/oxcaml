@@ -142,6 +142,28 @@ let token_of_value = function
    reads it back through the same lexer, so quoting cannot desync on a token boundary. *)
 let q = Oxsmt_smtlib.Printer.quote_symbol
 
+(* Render one unsat-core assumption literal back to SMT-LIB source: a Bool constant prints
+   as its (lexically quoted) name, its negation as [(not name)]. Assumption literals are
+   Boolean constants per SMT-LIB (a declared 0-ary Bool symbol, or [true]/[false]), so a
+   non-constant atom is not a well-formed literal and renders as a placeholder rather than
+   crashing. *)
+let render_core_lit ((atom, polarity) : Session.assumption) =
+  let name =
+    match atom.Oxsmt_core.Term.node with
+    | Oxsmt_core.Term.App (sym, args) when Oxsmt_core.Iarr.length args = 0 ->
+      q (Oxsmt_core.Symbol.name sym)
+    | Oxsmt_core.Term.Bool_const b -> if b then "true" else "false"
+    | _ -> "?"
+  in
+  if polarity then name else "(not " ^ name ^ ")"
+;;
+
+(* SMT-LIB [(get-unsat-core)] output: the parenthesized list of the core literals, in the
+   input assumption order [check_sat_assuming] preserves. *)
+let render_core (core : Session.assumption list) =
+  "(" ^ String.concat " " (List.map render_core_lit core) ^ ")"
+;;
+
 (* Render the model BODY sexp. A table-free (const/Bool/LIA) model uses the LEGACY flat
    [((name token) ...)] body — byte-identical to the pre-UF output, so the harness's
    existing const transport is unchanged (no regression). A model with sorts/tables uses
@@ -220,17 +242,17 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
   with
   | exception Parser.Unsupported msg ->
     (* out-of-subset construct -> sound unknown (I8); tag the construct for the census. *)
-    unknown_block_with ("cli-parse-unsupported:" ^ san_token msg)
+    unknown_block_with ("cli-parse-unsupported:" ^ san_token msg), None
   | exception Parser.Malformed msg ->
     (* unparseable as a query -> sound unknown (I8). *)
-    unknown_block_with ("cli-parse-malformed:" ^ san_token msg)
+    unknown_block_with ("cli-parse-malformed:" ^ san_token msg), None
   | exception _ ->
     (* ROBUSTNESS / fail-closed (I8): the reader maps its expected rejections to
        [Malformed]/[Unsupported], but an unmapped exception on untrusted corpus input
        ([Failure]/[Invalid_argument]/[Stack_overflow]/...) must still degrade to a sound
        [unknown] rather than crash the driver (the "error instead of degrade" robustness
        item). [unknown] is always sound; a crash is never acceptable. *)
-    unknown_block_with "cli-parse-crash"
+    unknown_block_with "cli-parse-crash", None
   | parsed when not (Oxsmt_query_loader.assert_all ~presolve s parsed) ->
     (* W1b: the shared loader submits the ground batch through the equality-elimination
        presolve (a no-op on zero-alias files) plus each [forall] lemma through the cap-
@@ -239,8 +261,8 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
        outside the reader's subset degrades here to a sound [unknown] — never a dropped
        quantifier (sound for the [sat] direction). [--no-presolve] restores the per-term
        [assert_term] path for A/B measurement; both are sound. *)
-    unknown_block_with "cli-loader-reject"
-  | _loaded ->
+    unknown_block_with "cli-loader-reject", None
+  | parsed ->
     (* Assertions (ground batch + [forall] lemmas) were loaded into [s] by the guard
        above; solve the ground core once. THE SOUNDNESS RULE (a live lemma degrades [Sat]
        to [Unknown]) is enforced inside {!Session.check_sat}. I8 fail-closed: a live lemma
@@ -250,13 +272,33 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
        drivers equivalent). The degrade is LOUD (visible-failure-modes directive): a
        one-line stderr marker names the exception, so a silent completeness loss is never
        invisible. *)
-    let v =
-      try Session.check_sat s with
-      | e ->
-        Printf.eprintf
-          "oxsmt_cli: check_sat degraded to unknown: %s\n"
-          (Printexc.to_string e);
-        Session.Unknown
+    (* [(check-sat-assuming (lit ...))] drives the in-process assumption API and, on
+       [Unsat], carries the returned core out for [(get-unsat-core)] printing; a plain
+       [check-sat] takes the existing path with no core. Both degrade a raised exception to
+       a sound [unknown] (LOUD stderr marker). *)
+    let v, core_render =
+      match parsed.Parser.assumptions with
+      | None ->
+        ( (try Session.check_sat s with
+           | e ->
+             Printf.eprintf
+               "oxsmt_cli: check_sat degraded to unknown: %s\n"
+               (Printexc.to_string e);
+             Session.Unknown)
+        , None )
+      | Some assums ->
+        (try
+           let { Session.verdict; unsat_core } = Session.check_sat_assuming s assums in
+           ( verdict
+           , match verdict, unsat_core with
+             | Session.Unsat, Some core -> Some (render_core core)
+             | _ -> None )
+         with
+         | e ->
+           Printf.eprintf
+             "oxsmt_cli: check_sat_assuming degraded to unknown: %s\n"
+             (Printexc.to_string e);
+           Session.Unknown, None)
     in
     let st = Session.stats s in
     let block ?(reason = "") verdict model =
@@ -268,8 +310,9 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
       ; reason
       }
     in
-    (match v with
-     | Session.Sat ->
+    let result_block =
+      match v with
+      | Session.Sat ->
        (match Session.get_model s with
         (* A [Sat] whose model was reconstructed and self-checked at the session level is
            rendered and emitted here. A table-free (const/Bool/LIA) model uses the LEGACY
@@ -300,8 +343,10 @@ let solve_batch ?max_effort ?(presolve = true) sexps =
           if Session.uses_datatypes s || Session.uses_arrays s
           then block "sat" None
           else block ~reason:"cli-unrenderable-model" "unknown" None)
-     | Session.Unsat -> block "unsat" None
-     | Session.Unknown -> block ~reason:(Session.last_unknown_reason s) "unknown" None)
+      | Session.Unsat -> block "unsat" None
+      | Session.Unknown -> block ~reason:(Session.last_unknown_reason s) "unknown" None
+    in
+    result_block, core_render
 ;;
 
 let () =
@@ -340,12 +385,36 @@ let () =
     | exception Sexp.Malformed _ -> []
   in
   let n_checks, incremental = scan_commands sexps in
-  let blocks =
+  (* Whether the document requested [(get-unsat-core)]; drives printing the core after the
+     result block. A command keyword is an UNQUOTED symbol head (matches [scan_commands]). *)
+  let wants_core =
+    List.exists
+      (fun sx ->
+        match sx with
+        | Sexp.List (head :: _) -> Sexp.simple head = Some "get-unsat-core"
+        | _ -> false)
+      sexps
+  in
+  let blocks, core_render =
     if incremental || n_checks <> 1
-    then List.init n_checks (fun _ -> unknown_block_with "cli-incremental")
-    else [ solve_batch ?max_effort:!max_effort ~presolve:!presolve sexps ]
+    then List.init n_checks (fun _ -> unknown_block_with "cli-incremental"), None
+    else (
+      let b, core = solve_batch ?max_effort:!max_effort ~presolve:!presolve sexps in
+      [ b ], core)
   in
   List.iter print_block blocks;
+  (* [(get-unsat-core)] output: the SMT-LIB paren list of the core's assumption literals, on
+     its own stdout line AFTER the result block (matching an SMT-LIB solver's command order).
+     Emitted only when the document asked for it AND the check was [Unsat] with a core (a
+     [check-sat-assuming] that refuted); a core query on a non-[unsat] result is not
+     well-formed SMT-LIB, so nothing goes to stdout (a stderr note keeps it visible without
+     polluting the verdict channel). Ordinary [check-sat] documents carry no core, so this is
+     a no-op there — stdout stays byte-identical on every non-assuming path. *)
+  (match core_render with
+   | Some core when wants_core -> print_endline core
+   | _ ->
+     if wants_core && Option.is_none core_render
+     then Printf.eprintf "oxsmt_cli: (get-unsat-core) with no core (not unsat-assuming)\n");
   (* census (task #78, USER directive): the unknown-reason is LOUD and UNCONDITIONAL — no
      env gate. STDOUT stays SMT-LIB-clean (bare [(result (verdict unknown) ...)] via
      [print_block] above), and every self-returned [unknown] ALWAYS emits one stable
