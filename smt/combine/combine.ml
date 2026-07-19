@@ -881,7 +881,7 @@ end = struct
      reflect the equality, so once [a = b] is asserted and absorbed the pair is skipped —
      terminating (interface², per invariant (iii), same per-ground-check scope as
      {!find_disagreement}). *)
-  (* Backstop hit counter (LAND 71, task #31): incremented once per fire when
+  (* Backstop hit counter (LAND 67, task #31): incremented once per fire when
      [find_congruence_split] actually returns a split. Byte-id-invisible — the increment
      changes no verdict, split count, or explanation; a whitebox probe read only by tests
      so a later stage can assert the backstop still fires on the fabric path. *)
