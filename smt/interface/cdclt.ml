@@ -565,6 +565,46 @@ let subterms_sorted t =
   List.sort Term.compare (Term.Table.fold (fun k () acc -> k :: acc) t.subterms [])
 ;;
 
+(* Complete the DT checker model with scalar leaves that occur only in LIA-owned atoms
+   (task #62, bugreport-03 rider #1). [check_model_with_leaf] enumerates scalars by
+   walking the DT congruence child's atom terms; a scalar that appears solely inside an
+   integer atom (e.g. [k] in [(> k 0)]) is never interned by that child, so the
+   independent checker cannot evaluate the ORIGINAL arithmetic assertion over it and fails
+   closed to [unknown] on an otherwise-SAT mixed problem. Fill each missing nullary
+   Int/Bool/Uninterp subterm from Cdclt's whole registered-subterm closure, taking its
+   value from the accepting combined scalar model. Exact sort/variant matching keeps this
+   fail-closed: a scalar we cannot resolve stays absent, so the checker still rejects (=>
+   [unknown], never wrong-SAT). Values are only ever read from the accepting model, never
+   invented, so a completed value is always consistent with the solver's own satisfying
+   assignment. Selector applications ([Iarr.length args > 0]) are DT-owned, already
+   covered by the tree, and never touched here. (Scalars whose value is fixed only by an
+   equality [k = 2] are removed by presolve equality-elimination and never reach this
+   path; reconstructing those into the DT checker model is tracked separately as task
+   #64.) *)
+let complete_dt_model_with_scalars t scalar_model model =
+  let seen = Term.Table.create 128 in
+  List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
+  let resolve (term : Term.t) : Model.value option =
+    match term.Term.node, term.Term.sort, Model.value scalar_model term with
+    | Term.App (_, args), Sort.Int _, Some (Model.Int _ as v) when Iarr.length args = 0 ->
+      Some v
+    | Term.App (_, args), Sort.Bool, Some (Model.Bool _ as v) when Iarr.length args = 0 ->
+      Some v
+    | Term.App (_, args), Sort.Uninterpreted _, Some (Model.Uninterp _ as v)
+      when Iarr.length args = 0 -> Some v
+    | _ -> None
+  in
+  let additions =
+    List.filter_map
+      (fun (term : Term.t) ->
+        if Term.Table.mem seen term
+        then None
+        else Option.map (fun v -> term, Dt.Leaf v) (resolve term))
+      (subterms_sorted t)
+  in
+  model @ additions
+;;
+
 (* Get-or-create the SAT var for a theory-atom [term], registering it with the combined
    theory on first sight (CONTRACT-REG). [split] flags an atom minted mid-solve from a
    [Split], whose e-node registration may later be truncated by a backjump. *)
@@ -1058,7 +1098,12 @@ let check t ~final =
                 | Sort.Array _
                 | Sort.BitVec _ -> None
               in
-              Dt.check_model_with_leaf (CombinedDt.congruence_state th) arith_leaf
+              (* Rider #1 (task #62): also bind scalars that occur only in LIA-owned atoms
+                 so [Dt_model_check] can evaluate the original arithmetic assertion over
+                 them (enum + unrelated Int on a mixed SAT). Fail-closed by construction. *)
+              Option.map
+                (complete_dt_model_with_scalars t merged)
+                (Dt.check_model_with_leaf (CombinedDt.congruence_state th) arith_leaf)
             | TCombined _ | TCombinedReal _ | TArr _ -> None);
         t.last_array_model
         <- (match impl with
