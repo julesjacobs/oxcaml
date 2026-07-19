@@ -194,6 +194,7 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+  val congruence_split_hit_count : unit -> int
   val has_live_fabric_edges : t -> bool
 
   (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind (chrono earliest-removed incremental
@@ -880,6 +881,13 @@ end = struct
      reflect the equality, so once [a = b] is asserted and absorbed the pair is skipped —
      terminating (interface², per invariant (iii), same per-ground-check scope as
      {!find_disagreement}). *)
+  (* Backstop hit counter (LAND 71, task #31): incremented once per fire when
+     [find_congruence_split] actually returns a split. Byte-id-invisible — the increment
+     changes no verdict, split count, or explanation; a whitebox probe read only by tests
+     so a later stage can assert the backstop still fires on the fabric path. *)
+  let congruence_split_hits = ref 0
+  let congruence_split_hit_count () = !congruence_split_hits
+
   let find_congruence_split t mb =
     if (not dtlia_purify_on) || not R.congruence_models_datatypes
     then None
@@ -914,7 +922,9 @@ end = struct
           else inner a rest
       in
       match outer members with
-      | Some (a, b) -> Some (R.equality_split t.ctx a b)
+      | Some (a, b) ->
+        incr congruence_split_hits;
+        Some (R.equality_split t.ctx a b)
       | None -> None)
   ;;
 
@@ -1468,11 +1478,18 @@ end = struct
       (match repair_split t mb with
        | Some split -> Theory.Split split
        | None ->
-         require_bool_args_bound t ma;
-         require_no_foreign_arithmetic t;
-         require_no_datatype_terms t;
-         require_no_bitvec_terms t;
-         Theory.Sat)
+         (* M3 backstop (LAND 67): retain the congruence-split backstop on the fabric
+            path, exactly as {!combine_models} does — a DT-known Int equality LIA has not
+            reflected is routed as a case split rather than laundered into Sat. DARK in
+            Stage B ([fabric_disabled] ⇒ this drive is unreached ⇒ byte-identical OFF). *)
+         (match find_congruence_split t mb with
+          | Some split -> Theory.Split split
+          | None ->
+            require_bool_args_bound t ma;
+            require_no_foreign_arithmetic t;
+            require_no_datatype_terms t;
+            require_no_bitvec_terms t;
+            Theory.Sat))
     | Some (x, y) ->
       if try_inject_pair t x y
       then (

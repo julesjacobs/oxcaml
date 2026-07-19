@@ -39,13 +39,21 @@ let incr_on = env_flag "OXSMT_DT_INCR"
 
 (* The engine's ['p]. A real assertion carries [P_lit]; the standing [true <> false]
    disequality carries [P_axiom]; a DT-derived equality (field equality, selector
-   evaluation, constructor instantiation) carries [P_derived reasons] — the trail literals
-   whose conjunction entails the trigger. [P_axiom] rides along and is dropped when we
-   build an Explanation, so a returned premise set holds only asserted literals. *)
+   evaluation, constructor instantiation) carries [P_derived reasons] — the
+   {!Fabric.justification}s whose conjunction entails the trigger; a fabric-injected
+   equality (ADR-0014, the combinator's [assert_fabric_eq]) carries [P_fabric edge_id].
+   [P_axiom] rides along and is dropped when we build an Explanation. The premise currency
+   is {!Fabric.justification} (not bare [Lit.t]): a DT-derived equality whose chain buries
+   an injected fabric edge must PRESERVE that edge handle, or the returned Γ would be
+   incomplete and the combinator would wrong-UNSAT. On the classic (fabric-disabled) path
+   every justification is a [Real l], so it strips back to a bare literal list — the
+   frozen {!check}/{!explain}/{!conflict_of} outputs are byte-identical to before this
+   surgery. *)
 type prem =
   | P_lit of Lit.t
   | P_axiom
-  | P_derived of Lit.t list
+  | P_derived of Fabric.justification list
+  | P_fabric of Fabric.edge_id
 
 type kind =
   | K_eq of Term.t * Term.t
@@ -95,7 +103,10 @@ type t =
          (flattened) at model build, additionally guarded by [not (are_equal a b)]; the §8
          checker remains the authority, so this is completeness-steering only, never a
          verdict. *)
-  ; mutable explain_cache : Explanation.t Lit.Map.t
+  ; mutable explain_cache : Fabric.Explanation.t Lit.Map.t
+      (* propagated lit -> its reason, SNAPSHOTTED at propagation time, in FABRIC currency
+         so a fabric-injected premise survives; {!explain} strips it back to the frozen
+         {!Explanation.t} for the classic seam. *)
   ; mutable frames : Lit.t list list
   ; merge_cursor : Euf.merge_cursor option
       (* W5 Lever B (OXSMT_DT_INCR): a private cursor into the engine's merge-notification
@@ -205,12 +216,44 @@ let datatype_of_sort t (sort : Sort.t) : Defs.datatype option =
   | None -> None
 ;;
 
+(* Flatten a premise to bare literals — the FROZEN currency of {!conflict_of}/{!explain}.
+   A [P_fabric] handle (or a fabric edge buried in a [P_derived] chain) is UNREACHABLE on
+   the classic path (the combinator never calls [assert_fabric_eq] while
+   [Dtlia_router.fabric_disabled]); it fails loud here rather than silently dropping a
+   soundness-relevant premise (which would let a wrong UNSAT escape). *)
 let rec lits_of_prem = function
   | P_lit l -> [ l ]
   | P_axiom -> []
-  | P_derived ls -> ls
+  | P_derived js ->
+    List.map
+      (function
+        | Fabric.Real l -> l
+        | Fabric.Fabric _ ->
+          failwith "Dt: fabric handle in frozen explanation path (unsound)")
+      js
+  | P_fabric _ -> failwith "Dt: fabric handle in frozen explanation path (unsound)"
 
 and lits_of_prems ps = List.concat_map lits_of_prem ps
+
+(* Flatten a premise to fabric currency — the SEAM currency of {!check_fabric} /
+   {!fabric_conflict_of} / {!reason_of_implied} / {!fabric_explain_eq}. A [P_fabric] edge
+   becomes a [Fabric] handle the combinator expands; a [P_derived] chain forwards its
+   already-fabric justifications verbatim (so a buried edge survives). *)
+let justs_of_prem = function
+  | P_lit l -> [ Fabric.Real l ]
+  | P_axiom -> []
+  | P_derived js -> js
+  | P_fabric e -> [ Fabric.Fabric e ]
+;;
+
+let justs_of_prems ps = List.concat_map justs_of_prem ps
+
+let just_equal (a : Fabric.justification) (b : Fabric.justification) =
+  match a, b with
+  | Fabric.Real l1, Fabric.Real l2 -> Lit.equal l1 l2
+  | Fabric.Fabric e1, Fabric.Fabric e2 -> Int.equal e1 e2
+  | (Fabric.Real _ | Fabric.Fabric _), _ -> false
+;;
 
 let dedup_lits (ls : Lit.t list) : Lit.t list =
   let seen = ref Lit.Map.empty in
@@ -224,8 +267,24 @@ let dedup_lits (ls : Lit.t list) : Lit.t list =
     ls
 ;;
 
+(* First-occurrence dedup over fabric currency (mirrors {!dedup_lits}). On the classic
+   all-[Real] path this deduplicates by [Lit.equal] in first-occurrence order, so mapping
+   the result back to literals is IDENTICAL to [dedup_lits] on the same list — the
+   byte-identity of the frozen OFF path rests on this. *)
+let dedup_justs (js : Fabric.justification list) : Fabric.justification list =
+  let seen = ref [] in
+  List.filter
+    (fun j ->
+      if List.exists (just_equal j) !seen
+      then false
+      else (
+        seen := j :: !seen;
+        true))
+    js
+;;
+
 let derived_premise t a b =
-  P_derived (dedup_lits (lits_of_prems (Euf.explain t.engine a b)))
+  P_derived (dedup_justs (justs_of_prems (Euf.explain t.engine a b)))
 ;;
 
 (* --- registration: catalog DT structure while registering into the e-graph --- *)
@@ -691,8 +750,8 @@ let occurs_check t witnesses : prem list option =
 
 (* --- propagation reason caching (mirrors Euf_adapter) --- *)
 
-let reason_of_implied t (imp : Euf.implied) : Explanation.t =
-  let premises = dedup_lits (lits_of_prems (Euf.explain_implied t.engine imp)) in
+let reason_of_implied t (imp : Euf.implied) : Fabric.Explanation.t =
+  let premises = dedup_justs (justs_of_prems (Euf.explain_implied t.engine imp)) in
   (* Unlike EUF, DT propagates {b tautologies}: [sel_i (C a…) = a_i] holds with no
      hypothesis, so when the watched atom's constructor argument is a literal term the
      reason is legitimately empty. Tag it [Trivial] (an unconditional theory-valid unit)
@@ -703,7 +762,7 @@ let reason_of_implied t (imp : Euf.implied) : Explanation.t =
     then Explanation.Rule_tag.Trivial
     else Explanation.Rule_tag.Euf_congruence
   in
-  { Explanation.premises; rule }
+  { Fabric.Explanation.premises; rule }
 ;;
 
 let cache_reason t lit expl =
@@ -793,12 +852,27 @@ let exhaustiveness_split t witnesses : Term.t list option =
          dt.Defs.constructors)
 ;;
 
+(* FROZEN classic-path conflict builder. Byte-identical to before the currency surgery:
+   [lits_of_prems] strips every (all-[Real], on this path) justification to a bare literal
+   and [dedup_lits] deduplicates exactly as it always did. *)
 let conflict_of prems =
   let premises = dedup_lits (lits_of_prems prems) in
   if premises = [] then failwith "Dt: empty conflict premise set (unsound) [tripwire]";
   Theory.Conflict { Explanation.premises; rule = Explanation.Rule_tag.Euf_congruence }
 ;;
 
+(* Fabric-currency conflict builder — the seam analogue of {!conflict_of}. Keeps a
+   [P_fabric] / buried-edge premise as a [Fabric] handle for the combinator to expand.
+   Same empty-set tripwire (an unconditional [false] is a soundness bug). *)
+let fabric_conflict_of prems : Fabric.check_result =
+  let premises = dedup_justs (justs_of_prems prems) in
+  if premises = [] then failwith "Dt: empty conflict premise set (unsound) [tripwire]";
+  Fabric.Conflict
+    { Fabric.Explanation.premises; rule = Explanation.Rule_tag.Euf_congruence }
+;;
+
+(* FROZEN classic-path [check]. Kept EXACTLY as before the surgery (the OFF path the
+   CDCL(T) seam drives): standalone Theory currency, [conflict_of], Theory results. *)
 let check t effort =
   match saturate t with
   | Some prems -> conflict_of prems
@@ -821,7 +895,51 @@ let check t effort =
               | None -> Theory.Sat))))
 ;;
 
-let explain t lit =
+(* ADR-0014 fabric-currency [check]: structurally parallel to {!check}, differing only in
+   currency — conflicts via {!fabric_conflict_of}, results in {!Fabric.check_result}. DARK
+   in Stage B ([Dtlia_router.fabric_disabled]); {!collect_propagations} returns the same
+   literals (its cache is now fabric currency). *)
+let check_fabric t effort : Fabric.check_result =
+  match saturate t with
+  | Some prems -> fabric_conflict_of prems
+  | None ->
+    let witnesses, clash = build_witnesses t in
+    (match clash with
+     | Some prems -> fabric_conflict_of prems
+     | None ->
+       (match occurs_check t witnesses with
+        | Some prems -> fabric_conflict_of prems
+        | None ->
+          let lits = collect_propagations t in
+          (match lits, effort with
+           | _ :: _, _ -> Fabric.Propagations lits
+           | [], Theory.Propagate -> Fabric.Propagations []
+           | [], Theory.Final ->
+             mark_field_relevance t witnesses;
+             (match exhaustiveness_split t witnesses with
+              | Some terms -> Fabric.Split terms
+              | None -> Fabric.Sat))))
+;;
+
+(* Strip a fabric-currency explanation to the frozen {!Explanation.t} for the classic
+   seam. A [Fabric] handle crossing this frozen boundary is unsound (the combinator must
+   have expanded it first); fail loud. Unreachable on the OFF path (all-[Real]). *)
+let ordinary_explanation (e : Fabric.Explanation.t) : Explanation.t =
+  let premises =
+    List.map
+      (function
+        | Fabric.Real lit -> lit
+        | Fabric.Fabric _ ->
+          failwith "Dt: fabric handle crossed the frozen THEORY seam (unsound)")
+      e.premises
+  in
+  { Explanation.premises; rule = e.rule }
+;;
+
+(* Serve the fabric-currency reason SNAPSHOTTED at propagation time (see
+   {!reason_of_implied}). A miss is a driver/contract violation — fail loud so it degrades
+   to [unknown] via CONTRACT-POISON rather than fabricating a premise set. *)
+let explain_fabric t lit =
   match Lit.Map.find_opt lit t.explain_cache with
   | Some expl -> expl
   | None ->
@@ -829,6 +947,8 @@ let explain t lit =
       "Dt.explain: no cached reason for literal (not theory-propagated, or its frame was \
        popped)"
 ;;
+
+let explain t lit = ordinary_explanation (explain_fabric t lit)
 
 let push t =
   Euf.push t.engine;
@@ -872,6 +992,105 @@ let pop t n =
   <- (match drop_diseq n t.diseq_frames with
       | [] -> [ [] ]
       | fs -> fs)
+;;
+
+(* --- ADR-0014 fabric seam (DARK in Stage B; unreachable while [fabric_disabled]) --- *)
+
+(* Read-only congruence query — the combinator asks before {!assert_fabric_eq} /
+   {!fabric_explain_eq}. Same accessor as the lemma-tier query API. *)
+let fabric_are_equal t a b = Euf.equal_if_registered t.engine a b
+
+(* Assert a hub-injected equality attributed to fabric [edge_id]. The premise is a
+   [P_fabric] handle so the edge survives into every downstream explanation Γ (the exact
+   soundness hazard: a flattening to bare literals would drop it). Under [incr_on] a merge
+   changes some class, so drop the Lever-B caches (mirrors {!assert_lit}'s path via the
+   engine merge — here explicit, since we bypass the check-time [sync_merges] path). *)
+let assert_fabric_eq t ~edge_id a b =
+  Euf.assert_eq t.engine ~premise:(P_fabric edge_id) a b;
+  if incr_on then invalidate_incr t
+;;
+
+(* The fabric-currency justification set entailing [a = b] in the current closure (the
+   [new_eq] justification the combinator expands). Precedence-valid (CONTRACT-EX); the
+   combinator only calls it after {!fabric_are_equal}. *)
+let fabric_explain_eq t a b = dedup_justs (justs_of_prems (Euf.explain t.engine a b))
+
+(* ADR-0014 Stage 2/3 merge-notification log + per-class tag slot: thin forwards to the
+   engine. Enabling recording is harmless for DT's own private incr cursor — the log is
+   multi-consumer (euf.mli), so a fabric consumer's cursor is independent of the
+   [OXSMT_DT_INCR] cursor. *)
+type merge_cursor = Euf.merge_cursor
+
+let set_record_merges t on = Euf.set_record_merges t.engine on
+let add_merge_consumer t = Euf.add_merge_consumer t.engine
+let drain_merges t c = Euf.drain_merges t.engine c
+let set_class_tag t term tag = Euf.set_class_tag t.engine term tag
+let class_tag t term = Euf.class_tag t.engine term
+
+(* The congruence child is the hub itself, not a reactor: a hub merge is already in the
+   closure, so [notify_eq] is a no-op (mirrors {!Euf_adapter}). *)
+let notify_eq _t ~edge_id:_ _ = ()
+
+(* The congruence child model-finds nothing and is never the fixed-value witness. *)
+let fixed_bounds _t _term = None
+let fabric_verify _t _term _value _lo _hi = false
+let note_disequalities _t _ = ()
+
+(* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind. Delegates the engine state to
+   {!Euf.checkpoint}/{!Euf.rewind_to_checkpoint} and mirrors {!pop}'s explain-cache and
+   diseq-frame invalidation at sub-frame granularity (both stacks held at a SINGLE base
+   frame by the CB driver; fail loud otherwise). Under [incr_on] a rewind retracts merges,
+   so drop the Lever-B caches (mirrors {!pop}). *)
+type checkpoint =
+  { a_engine : Euf.checkpoint
+  ; a_frames : int
+  ; a_diseq_frames : int
+  }
+
+let checkpoint t =
+  match t.frames, t.diseq_frames with
+  | [ fr ], [ dfr ] ->
+    { a_engine = Euf.checkpoint t.engine
+    ; a_frames = List.length fr
+    ; a_diseq_frames = List.length dfr
+    }
+  | _ -> failwith "Dt.checkpoint: expected a single base frame (S4.2 CB driver invariant)"
+;;
+
+let rewind_to_checkpoint t c =
+  Euf.rewind_to_checkpoint t.engine c.a_engine;
+  if incr_on then invalidate_incr t;
+  (match t.frames with
+   | [ fr ] ->
+     let rec drop k fr =
+       if k <= 0
+       then fr
+       else (
+         match fr with
+         | [] -> []
+         | l :: tl ->
+           t.explain_cache <- Lit.Map.remove l t.explain_cache;
+           drop (k - 1) tl)
+     in
+     t.frames <- [ drop (List.length fr - c.a_frames) fr ]
+   | _ ->
+     failwith
+       "Dt.rewind_to_checkpoint: expected a single base frame (S4.2 CB driver invariant)");
+  match t.diseq_frames with
+  | [ dfr ] ->
+    let rec drop k l =
+      if k <= 0
+      then l
+      else (
+        match l with
+        | [] -> []
+        | _ :: tl -> drop (k - 1) tl)
+    in
+    t.diseq_frames <- [ drop (List.length dfr - c.a_diseq_frames) dfr ]
+  | _ ->
+    failwith
+      "Dt.rewind_to_checkpoint: expected a single base diseq frame (S4.2 CB driver \
+       invariant)"
 ;;
 
 (* --- models --- *)

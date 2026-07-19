@@ -623,6 +623,12 @@ type instantiation =
     produced it (a budget-aborted round's instances are absent). *)
 val lemma_instantiations : t -> instantiation list
 
+(** Backstop hit counter (LAND 67, task #31): the number of times [complete_dt_bool_atoms]
+    has actually bound >= 1 missing Bool atom. Byte-id invisible; a whitebox probe so a
+    later stage can assert the DT Bool-completion backstop still fires on the fabric path.
+    Process-global, monotone. *)
+val dt_bool_completion_hit_count : unit -> int
+
 (** Test-only whitebox hook. NOT for solver code. *)
 module For_test : sig
   (** The canonical model-reconstruction default for an unconstrained variable of a given

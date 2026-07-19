@@ -1952,6 +1952,13 @@ let dtlia_bool_complete =
    it can only turn a model-check [unknown] into a checked [Sat], never manufacture a
    wrong [Sat]. A theory/compound atom (Eq/Le/And/…) is not a nullary [App], so it is
    excluded and stays computed structurally by the checker. *)
+(* Backstop hit counter (LAND 67, task #31): incremented once per fire when this Bool-atom
+   completion actually binds >= 1 missing bool. Byte-id-invisible — the increment changes
+   no verdict, split count, or explanation; a whitebox probe read only by tests so a later
+   stage can assert the backstop still fires on the fabric path. *)
+let dt_bool_completion_hits = ref 0
+let dt_bool_completion_hit_count () = !dt_bool_completion_hits
+
 let complete_dt_bool_atoms t model =
   if not (Lazy.force dtlia_bool_complete)
   then model
@@ -1969,6 +1976,9 @@ let complete_dt_bool_atoms t model =
         t.prop_to_var
         []
     in
+    (match additions with
+     | _ :: _ -> incr dt_bool_completion_hits
+     | [] -> ());
     model @ List.sort (fun (a, _) (b, _) -> Term.compare a b) additions)
 ;;
 

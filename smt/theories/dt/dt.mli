@@ -112,3 +112,64 @@ val equal_if_registered : t -> Term.t -> Term.t -> bool
 val class_members : t -> Term.t -> Term.t list
 val registered_terms : t -> Term.t list
 val registered_terms_by_sort : t -> Sort.t -> Term.t list
+
+(** {2 ADR-0014 fabric seam (DARK).}
+
+    The rich, non-frozen child surface the Nelson–Oppen combinator drives when the DT
+    theory is on the e-graph fabric — the concrete counterpart of
+    {!Oxsmt_combine.Combine.FABRIC_CONGRUENCE_CHILD}. In Stage B this machinery EXISTS and
+    is trail-correct but is never driven by the default solver path
+    ([Oxsmt_combine.Dtlia_router.fabric_disabled] is compile-time [true]): the classic
+    {!check}/{!explain} path above is byte-identical to before. All results are in the
+    {!Oxsmt_core.Fabric} currency so a hub-injected equality's edge handle is preserved. *)
+
+(** {!check} in fabric currency: same reasoning, conflicts carry {!Fabric.justification}s. *)
+val check_fabric : t -> Theory.effort -> Fabric.check_result
+
+(** {!explain} in fabric currency (served from the snapshotted propagation cache). *)
+val explain_fabric : t -> Lit.t -> Fabric.Explanation.t
+
+(** The congruence child fixes no arithmetic value: always [None]. *)
+val fixed_bounds : t -> Term.t -> Fabric.fixed_bounds option
+
+(** The congruence child is never the fixed-value witness: always [false]. *)
+val fabric_verify
+  :  t
+  -> Term.t
+  -> string
+  -> Fabric.justification
+  -> Fabric.justification
+  -> bool
+
+(** A hub [new_eq] reaction: no-op (the congruence hub reacts to no notifications). *)
+val notify_eq : t -> edge_id:Fabric.edge_id -> Term.t -> unit
+
+(** OXSMT_LIA_MODELFIND disequality hint: ignored (the DT child does not model-find). *)
+val note_disequalities : t -> (Term.t * Term.t) list -> unit
+
+(** ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
+    undo). Captures the engine checkpoint plus the frame/diseq-frame lengths; the rewind
+    restores the engine and drops the reasons/diseq-pairs added since. *)
+type checkpoint
+
+val checkpoint : t -> checkpoint
+val rewind_to_checkpoint : t -> checkpoint -> unit
+
+(** Read-only congruence-equality query (the combinator asks before injecting/explaining a
+    fabric equality). *)
+val fabric_are_equal : t -> Term.t -> Term.t -> bool
+
+(** Assert a hub-injected equality attributed to fabric [edge_id]; the edge is preserved
+    as a {!Fabric.justification} through every downstream explanation. *)
+val assert_fabric_eq : t -> edge_id:Fabric.edge_id -> Term.t -> Term.t -> unit
+
+(** ADR-0014 Stage 2/3 multi-consumer merge log, per-class tag slot, and the
+    congruence-explanation accessor for the [new_eq] justification. *)
+type merge_cursor
+
+val set_record_merges : t -> bool -> unit
+val add_merge_consumer : t -> merge_cursor
+val drain_merges : t -> merge_cursor -> Fabric.merge_event list
+val set_class_tag : t -> Term.t -> Term.t -> unit
+val class_tag : t -> Term.t -> Term.t option
+val fabric_explain_eq : t -> Term.t -> Term.t -> Fabric.justification list

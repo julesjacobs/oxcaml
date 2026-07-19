@@ -123,30 +123,27 @@ module Dt_congruence = struct
      it ignores the pinned pairs (mirrors {!Euf_adapter}/{!Lra_adapter}). No-op, no state. *)
   let note_disequalities _ _ = ()
 
-  let unsupported what =
-    raise
-      (Oxsmt_combine.Combine.Incomplete
-         ("dtlia-fabric-unsupported: "
-          ^ what
-          ^ " — the DT+LIA combination forces the classic no-fabric path (Dtlia_router); \
-             this method must be unreachable"))
-  ;;
+  (* ADR-0014 Stage B: the DT fabric seam now EXISTS as real forwards to the standalone
+     {!Dt} machinery (currency-correct, trail-correct, unit-tested). It stays DARK:
+     [Dtlia_router.fabric_disabled] is compile-time [true], so [Combine] never drives
+     these for this instantiation and the default path is byte-identical to baseline. The
+     loud [Incomplete] stubs they replaced are no longer needed — the methods are correct,
+     not merely defended. *)
+  let check_fabric = Dt.check_fabric
+  let explain_fabric = Dt.explain_fabric
+  let assert_fabric_eq = Dt.assert_fabric_eq
+  let fabric_explain_eq = Dt.fabric_explain_eq
+  let set_record_merges = Dt.set_record_merges
+  let add_merge_consumer = Dt.add_merge_consumer
+  let drain_merges = Dt.drain_merges
+  let set_class_tag = Dt.set_class_tag
+  let class_tag = Dt.class_tag
 
-  let check_fabric _ _ = unsupported "check_fabric"
-  let explain_fabric _ _ = unsupported "explain_fabric"
-  let assert_fabric_eq _ ~edge_id:_ _ _ = unsupported "assert_fabric_eq"
-  let fabric_explain_eq _ _ _ = unsupported "fabric_explain_eq"
-  let set_record_merges _ _ = unsupported "set_record_merges"
-  let add_merge_consumer _ = unsupported "add_merge_consumer"
-  let drain_merges _ _ = unsupported "drain_merges"
-  let set_class_tag _ _ _ = unsupported "set_class_tag"
-  let class_tag _ _ = unsupported "class_tag"
+  type merge_cursor = Dt.merge_cursor
+  type checkpoint = Dt.checkpoint
 
-  type merge_cursor = unit
-  type checkpoint = unit
-
-  let checkpoint _ = unsupported "checkpoint"
-  let rewind_to_checkpoint _ _ = unsupported "rewind_to_checkpoint"
+  let checkpoint = Dt.checkpoint
+  let rewind_to_checkpoint = Dt.rewind_to_checkpoint
 end
 
 module CombinedDt =
@@ -581,6 +578,13 @@ let subterms_sorted t =
    equality [k = 2] are removed by presolve equality-elimination and never reach this
    path; reconstructing those into the DT checker model is tracked separately as task
    #64.) *)
+(* Backstop hit counter (LAND 65, task #31): incremented once per fire when this scalar
+   completion actually binds >= 1 missing scalar. Byte-id-invisible — the increment
+   changes no verdict, split count, or explanation; it is a whitebox probe read only by
+   tests so a later stage can assert the backstop still fires on the fabric path. *)
+let dt_scalar_completion_hits = ref 0
+let dt_scalar_completion_hit_count () = !dt_scalar_completion_hits
+
 let complete_dt_model_with_scalars t scalar_model model =
   let seen = Term.Table.create 128 in
   List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
@@ -602,6 +606,9 @@ let complete_dt_model_with_scalars t scalar_model model =
         else Option.map (fun v -> term, Dt.Leaf v) (resolve term))
       (subterms_sorted t)
   in
+  (match additions with
+   | _ :: _ -> incr dt_scalar_completion_hits
+   | [] -> ());
   model @ additions
 ;;
 
