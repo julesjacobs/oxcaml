@@ -2154,6 +2154,15 @@ let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
      returns [false]. The integral, all-pins-separated leaf is where the model is captured
      (bounds still in effect). *)
   let committed = ref 0 in
+  (* Rung 3b (OXSMT_LIA_DISEQ_CDCL) conflict capture: the [Branch] var-ids in the most
+     recent simplex Farkas conflict, used by the backtracking pin-repair to jump directly to
+     a decision implicated in the infeasibility (conflict-directed backjumping) instead of
+     chronologically flipping irrelevant decisions. Written by [arith_solve] on every
+     infeasible [check]; read only by [resolve_pins_bt]; the greedy path ignores it. *)
+  let confl_vars = ref [] in
+  let branch_vars_of (c : _ Simplex.conflict) =
+    List.filter_map (function Branch id -> Some id | _ -> None) c.Simplex.premises
+  in
   (* Commit ONE bound with a leaf-local 2-way retry: run [try1] (a single [assert_upper] /
      [assert_lower]); if the simplex is then infeasible, undo and run [try2]; if BOTH are
      infeasible return [`Dead] (the caller fails the whole dive — no cross-commit undo). A
@@ -2184,7 +2193,9 @@ let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
      [committed]); [`Fail] = infeasible or budget, this call's own bounds popped. *)
   let rec arith_solve () =
     match Simplex.check t.simplex with
-    | Some _ -> `Fail
+    | Some c ->
+      confl_vars := branch_vars_of c;
+      `Fail
     | None ->
       (match first_non_integer t with
        | None -> `Ok
@@ -2292,7 +2303,51 @@ let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
      Sound identically to the greedy path: the captured model is at an integral feasible
      vertex with EVERY pin separated ([first_violated_pin] = [None]) and is R1-re-checked. *)
   let no_skip = Hashtbl.create 1 in
+  (* Trail of pin-separation decisions, most recent first: [(id, k, side, cb, pending)] where
+     [side] is the separation direction taken ([`Up] = x>=k+1, [`Dn] = x<=k-1), [cb] the
+     [committed] count before this decision's bound (backjump target), [pending] the untried
+     side (or [`None]). The trail is the single source of truth for which separations are
+     currently active. *)
   let trail_bt = ref [] in
+  (* Learned no-goods (clause learning, the charter's avoid-set): each is a sorted set of
+     separation LITERALS ([lit] codes) that were jointly infeasible. Stable across the whole
+     dive (unlike the transient trail), so a bad combination is never re-committed — this is
+     what stops the re-exploration that made plain DPLL / no-store CBJ explode. Pure pruning:
+     a spurious no-good can only make the dive [`Fail] (sound fallback), never a wrong model. *)
+  let nogoods = ref [] in
+  let lit id side = (id lsl 1) lor (match side with `Up -> 0 | `Dn -> 1) in
+  let active_side id =
+    List.find_map (fun (i, _, s, _, _) -> if i = id then Some s else None) !trail_bt
+  in
+  let lit_active l =
+    let id = l lsr 1
+    and s = if l land 1 = 0 then `Up else `Dn in
+    match active_side id with
+    | Some `Up -> (match s with `Up -> true | `Dn -> false)
+    | Some `Dn -> (match s with `Dn -> true | `Up -> false)
+    | None -> false
+  in
+  (* [side] at [id] is forbidden if committing it would complete some learned no-good (all its
+     other literals are already active). *)
+  let forbidden id side =
+    let l = lit id side in
+    List.exists
+      (fun ng -> List.mem l ng && List.for_all (fun l' -> l' = l || lit_active l') ng)
+      !nogoods
+  in
+  (* Learn: the just-tried [(this_id, this_side)] together with the currently-active
+     separations on the conflict's variables were jointly infeasible. *)
+  let learn this_id this_side =
+    let ls = ref [ lit this_id this_side ] in
+    List.iter
+      (fun v ->
+        match active_side v with
+        | Some s -> ls := lit v s :: !ls
+        | None -> ())
+      !confl_vars;
+    let ng = List.sort_uniq Int.compare !ls in
+    nogoods := ng :: !nogoods
+  in
   let rec descend_bt () =
     match first_violated_pin t ~skip:no_skip with
     | None -> `Sat (extract_model_bigint t)
@@ -2301,38 +2356,69 @@ let model_find ?(node_budget = 200_000) ?(backtrack = false) t =
       then `Fail
       else (
         incr nodes;
-        try_side_bt id k `Up ~pending:`Dn)
+        let up_bad = forbidden id `Up
+        and dn_bad = forbidden id `Dn in
+        if up_bad && dn_bad
+        then (
+          (* both separations ruled out by learned no-goods: a conflict at this pin with no
+             new bound. The reason is the active separations that completed the no-goods;
+             use them to backjump. *)
+          confl_vars := List.filter_map (fun (i, _, _, _, _) -> Some i) !trail_bt;
+          backtrack_bt ())
+        else if up_bad
+        then try_side_bt id k `Dn ~pending:`None
+        else if dn_bad
+        then try_side_bt id k `Up ~pending:`None
+        else try_side_bt id k `Up ~pending:`Dn)
   and try_side_bt id k side ~pending =
     let cb = !committed in
     Simplex.push t.simplex;
     incr committed;
-    (let vlo =
-       Delta.of_rat (Rational.of_bigint (Oxsmt_core.Bigint.sub k Oxsmt_core.Bigint.one))
-     and vhi =
-       Delta.of_rat (Rational.of_bigint (Oxsmt_core.Bigint.add k Oxsmt_core.Bigint.one))
-     in
-     match side with
-     | `Up -> ignore (Simplex.assert_lower t.simplex id vhi (Branch id))
-     | `Dn -> ignore (Simplex.assert_upper t.simplex id vlo (Branch id)));
-    trail_bt := (id, k, cb, pending) :: !trail_bt;
-    (match arith_solve () with
-     | `Ok -> descend_bt ()
-     | `Fail -> backtrack_bt ())
+    let vlo =
+      Delta.of_rat (Rational.of_bigint (Oxsmt_core.Bigint.sub k Oxsmt_core.Bigint.one))
+    and vhi =
+      Delta.of_rat (Rational.of_bigint (Oxsmt_core.Bigint.add k Oxsmt_core.Bigint.one))
+    in
+    let immediate =
+      match side with
+      | `Up -> Simplex.assert_lower t.simplex id vhi (Branch id)
+      | `Dn -> Simplex.assert_upper t.simplex id vlo (Branch id)
+    in
+    trail_bt := (id, k, side, cb, pending) :: !trail_bt;
+    (match immediate with
+     | Some c ->
+       confl_vars := branch_vars_of c;
+       learn id side;
+       backtrack_bt ()
+     | None ->
+       (match arith_solve () with
+        | `Ok -> descend_bt ()
+        | `Fail ->
+          learn id side;
+          backtrack_bt ()))
+  (* Conflict-directed backjumping over the trail: pop decisions until one whose variable is
+     implicated in the current conflict ([confl_vars]) with an untried side, then flip it.
+     Decisions not in the conflict are popped without flipping (their pins reappear and are
+     re-decided, now pruned by the learned no-goods). [node_budget] bounds total work so a
+     non-converging instance returns [`Fail] (sound fallback), never a wrong verdict. *)
   and backtrack_bt () =
     match !trail_bt with
     | [] -> `Fail
-    | (id, k, cb, pending) :: rest ->
+    | (id, _k, _side, cb, pending) :: rest ->
       if !committed > cb then Simplex.pop t.simplex (!committed - cb);
       committed := cb;
       trail_bt := rest;
-      (match pending with
-       | `None -> backtrack_bt ()
-       | (`Up | `Dn) as s ->
-         if !nodes >= node_budget
-         then `Fail
-         else (
-           incr nodes;
-           try_side_bt id k s ~pending:`None))
+      if List.mem id !confl_vars
+      then (
+        match pending with
+        | `None -> backtrack_bt ()
+        | (`Up | `Dn) as s ->
+          if !nodes >= node_budget
+          then `Fail
+          else (
+            incr nodes;
+            try_side_bt id _k s ~pending:`None))
+      else backtrack_bt ()
   in
   let repair_bt () =
     match arith_solve () with
