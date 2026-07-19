@@ -634,7 +634,18 @@ let context t = t.ctx
      operand/result sorts and arity against the term's actual sorts, so a mis-ranked
      admitted marker decodes to [None] (ordinary uninterpreted, at worst [unknown]), never
      reinterpreted. *)
-let parse_sanctioned_marker name = Array_defs.is_op_name name || Bv.is_bv_name name
+(* - nonlinear-integer multiplication marker ({!Oxsmt_core.Nia_config.is_mul_name}: the
+     single [.oxsmt.nia.mul] name, dark OXSMT_NIA). PAIRED check = RANK AGREEMENT +
+     REAL-MULTIPLICATION re-evaluation: {!Model_check} evaluates a 2-argument
+     [.oxsmt.nia.mul] application as actual integer multiplication of its argument values
+     and fails closed on any other shape, so a forged/mis-ranked marker cannot be
+     reinterpreted into a wrong [sat]; and to the EUF+LIA core it is an ORDINARY
+     uninterpreted function, so any [unsat] already holds for real multiplication (the
+     lemmas only add sound unsats). *)
+let parse_sanctioned_marker name =
+  Array_defs.is_op_name name || Bv.is_bv_name name || Nia_config.is_mul_name name
+;;
+
 let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
 (* Declarations reject the reserved fresh-symbol namespace (board #48 / #58): every
@@ -1188,6 +1199,12 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
     Env.is_reserved_name (Symbol.name s)
     && (not (Bv.is_bv_sym s))
     && (not (Array_defs.is_op_sym s))
+    (* the nonlinear-integer product marker (dark OXSMT_NIA) is theory VOCABULARY that
+       legitimately appears in a user assertion after abstraction, exactly like the
+       bit-vector markers above; it cannot be user-forged (declaration doors reject
+       [.oxsmt.*], and [Context.app] refuses a symbol with no cap-granted rank), and its
+       consuming side ({!Model_check} real-multiplication re-eval) fails closed. *)
+    && (not (Nia_config.is_mul_name (Symbol.name s)))
     && not (List.exists (Symbol.equal s) allowed)
   in
   (* A SORT carries a symbol too: an [Uninterpreted] sort over a reserved [.oxsmt.*] name,

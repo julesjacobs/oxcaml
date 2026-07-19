@@ -100,7 +100,7 @@ REGRESS_DIRS ?= ../corpora/regress/cvc5 ../corpora/regress/z3
 REGRESS_TIMEOUT ?= 1
 REGRESS_JOBS ?= 48
 
-.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test loud-unknown-test euf-test euf-adapter-test dt-fabric-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate dtlia-incremental-gate dt-combine-fabric-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
+.PHONY: build build-oxcaml fmt test core-test core-prelude-test sat-test satpre-test satcore-test lemma-backjump-test seam-test chrono-test chrono-session-test lia-trivial-eq-test lia-gcd-cut-test lia-eq-prop-test lgc-test sat-bench corpus-run corpus-run-release regress-test promote-baseline dev-release-check driver-equiv-test perf-gen perf-bench preprocess-test bigint-test lia-test lra-test lra-wiring-test lia-adapter-test hnf-test cut-budget-test cdclt-lemma-test chrono-incr-undo-test session-cores-test core-min-test vc-corpus-test csa-test interpolation-test lra-cert-test optimize-test omt-test bv-blast-test bv-goldens-test bv-op-coverage-test nia-test loud-unknown-test euf-test euf-adapter-test dt-fabric-test combine-test stage0-test wiring-test symbreak-test dt-sat-gate dt-multi-query-gate dtlia-incremental-gate dt-combine-fabric-gate array-sat-gate row2-red-gate arr-store-idx-test arr-foreign-atom-test smtlib-test smtlib-corpus fuzz-lex fol-test quant-pipeline-test eval-test bench gate promote check-frozen spine status status-fresh status-test mutants chc-test chc-interp-test
 
 ## build — compile everything under smt/ (stdlib-only). Fast dev loop.
 build:
@@ -857,6 +857,14 @@ bv-goldens-test:
 bv-op-coverage-test:
 	$(DUNE) exec tests/solver/bv_op_coverage_test.exe
 
+## nia-test — nonlinear-integer (QF_NIA) abstraction self-test (dark OXSMT_NIA). ON run
+##   gates the sign/zero/unit refutations, a model-checked sat, and the fail-closed
+##   SAT-soundness gate; OFF run gates the dark rejection (byte-identical to trunk) and that
+##   plain QF_LIA is unaffected. Self-contained (no z3).
+nia-test:
+	OXSMT_NIA=1 $(DUNE) exec tests/solver/nia_test.exe
+	$(DUNE) exec tests/solver/nia_test.exe
+
 ## lia-adapter-test — smt/theories/lia THEORY-adapter (ADR-0005 M4) unit + property
 ##   self-test (stdlib-only, deterministic). Currency round-trip (Atom/Lit <-> Term),
 ##   conflict rule tags with a PUBLIC-OUTPUT Farkas verifier, bound propagation + lazy
@@ -1084,6 +1092,7 @@ test: check-frozen
 	$(MAKE) bv-blast-test
 	$(MAKE) bv-goldens-test
 	$(MAKE) bv-op-coverage-test
+	$(MAKE) nia-test
 	$(MAKE) loud-unknown-test
 	$(MAKE) dt-fabric-test
 	$(MAKE) dt-sat-gate

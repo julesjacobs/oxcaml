@@ -145,8 +145,9 @@ type t =
          Empty when the flag is OFF (byte-identical) — quantifiers then take {!lemmas}/
          {!existentials}. Ground (non-quantifier) assertions always take {!assertions}. *)
   ; dropped : int
-  (* count of assertion content the reader could not represent and dropped via partial
-     assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade sentinel *)
+      (* count of assertion content the reader could not represent and dropped via partial
+         assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade
+         sentinel *)
   ; assumptions : (Term.t * bool) list option
   (* the [(check-sat-assuming (lit ...))] assumption literals as (atom, polarity) pairs
      ([true] = the atom, [false] = its negation), in file order; [None] when there is no
@@ -206,6 +207,13 @@ type pstate =
          instantiation, keyed by a deterministic string; arrays are polymorphic so each
          instantiation gets its own symbol with a concrete rank *)
   ; mutable arrays : Array_defs.t (* the accumulated array select/store symbol registry *)
+  ; mutable nia_mul_sym : Symbol.t option
+      (* the single [.oxsmt.nia.mul : (Int Int) Int] symbol abstracting nonlinear integer
+         products (dark OXSMT_NIA), minted on first use and reused so hash-consing gives
+         congruence for free. [None] until the first nonlinear product is read. *)
+  ; mutable nia_products : Nia_lin.product list
+  (* every distinct abstracted product [p = a*b] discovered while reading terms; drained
+     at end of {!run} to emit {!Nia_lin.lemmas} as extra top-level assertions. *)
   }
 
 module Tok = Oxsmt_lexical.Lexer
@@ -1089,12 +1097,13 @@ and read_op ?expected st scope op args orig =
        mixed-Int/Real), so the flag-ON Real path is unchanged in result. *)
     let neg_terms = List.map (fun a -> rd a) rest_args in
     let head = rd first_arg in
-    (* R1: honor an enclosing Real [expected] (e.g. this subtraction used as an operand of a
-       Real [=]/comparison, which [same_sort_terms] re-reads with [expected = Real]). Without
-       it, an all-Int subtraction whose operands widen to Real (an Int [ite]/const) stays Int
-       and then mixes with the Real context, degrading to unknown; the [coerce_to_sort] calls
-       below widen each operand ([(= (- (ite p 1 2) 3) 0.0)] -> unsat). Only fires under
-       [expected = Real], so the all-Int (non-Real) path and its byte-identity are untouched. *)
+    (* R1: honor an enclosing Real [expected] (e.g. this subtraction used as an operand of
+       a Real [=]/comparison, which [same_sort_terms] re-reads with [expected = Real]).
+       Without it, an all-Int subtraction whose operands widen to Real (an Int
+       [ite]/const) stays Int and then mixes with the Real context, degrading to unknown;
+       the [coerce_to_sort] calls below widen each operand ([(= (- (ite p 1 2) 3) 0.0)] ->
+       unsat). Only fires under [expected = Real], so the all-Int (non-Real) path and its
+       byte-identity are untouched. *)
     let expected_real =
       match expected with
       | Some sort -> Lra_config.enabled () && Sort.equal sort Sort.real
@@ -1247,9 +1256,28 @@ and read_xor st scope args =
     List.fold_left (fun acc a -> Context.not_ st.ctx (Context.eq st.ctx acc a)) first rest
   | _ -> malformedf "xor expects >= 2 arguments"
 
+(* Abstract one binary integer product [a*b] as [(.oxsmt.nia.mul a b)] (dark OXSMT_NIA):
+   mint-or-reuse the single shared symbol so hash-consing gives congruence for free, and
+   register the product for end-of-parse lemma emission ({!Nia_lin}). *)
+and nia_mul_term st a b =
+  let sym =
+    match st.nia_mul_sym with
+    | Some s -> s
+    | None ->
+      let s =
+        internal_mint st Nia_config.mul_name (Rank.create [ Sort.int; Sort.int ] Sort.int)
+      in
+      st.nia_mul_sym <- Some s;
+      s
+  in
+  let p = Context.app st.ctx sym [ a; b ] in
+  st.nia_products <- { Nia_lin.p; a; b } :: st.nia_products;
+  p
+
 (* Linear multiplication only: at most one non-constant factor (DESIGN §1). Constant
    factors fold into a coefficient via [mul_const]; two or more non-constants is nonlinear
-   and unsupported. *)
+   and unsupported — unless the nonlinear-integer lever is on, when a >= 2-nonconstant
+   integer product is abstracted via {!nia_mul_term}. *)
 and read_mul ?expected st scope args =
   let parsed =
     match expected with
@@ -1304,6 +1332,15 @@ and read_mul ?expected st scope args =
         ts
     in
     match nonconsts with
+    | first :: (_ :: _ as rest) when Nia_config.enabled () ->
+      (* Nonlinear integer product (dark OXSMT_NIA). Abstract the >= 2 non-constant
+         factors into a left-associated chain of uninterpreted [.oxsmt.nia.mul]
+         applications ([x*y*z] -> [mul(mul(x,y),z)]), then fold any constant factors as a
+         coefficient. Sound: the abstraction is an ordinary uninterpreted function (unsat
+         holds for real multiplication too), constrained by {!Nia_lin.lemmas} and
+         re-checked by {!Model_check} under real multiplication. *)
+      let product = List.fold_left (fun acc t -> nia_mul_term st acc t) first rest in
+      List.fold_left (fun acc k -> Context.mul_const_big st.ctx k acc) product consts
     | _ :: _ :: _ -> unsupportedf "nonlinear multiplication (>= 2 non-constant factors)"
     | _ ->
       let base =
@@ -2150,6 +2187,13 @@ let known_logic = function
   | "QF_UFBV"
   | "QF_BVLIA"
   | "QF_UFBVLIA" -> true
+  (* Nonlinear integer arithmetic (dark OXSMT_NIA). Accepted at the NAME level only when
+     the lever is on: a nonlinear product is abstracted to an uninterpreted
+     [.oxsmt.nia.mul] application ({!read_mul}) reduced to QF_UFLIA + sound multiplication
+     lemmas, and every [sat] is re-checked under REAL multiplication ({!Model_check}). Any
+     construct still outside that subset (a real product, an unbounded pathological term)
+     degrades per the fail-closed CONSTRUCT discipline. *)
+  | "QF_NIA" | "NIA" -> Nia_config.enabled ()
   (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
   | "UF"
   | "UFLIA"
@@ -2187,9 +2231,9 @@ let run st sexps =
   let exited = ref false in
   (* The [(check-sat-assuming (lit ...))] assumption literals, if any. [None] until a
      check-sat-assuming is seen; [Some pairs] after (possibly empty). Each literal is a
-     Boolean atom (polarity [true]) or its single [(not atom)] negation (polarity [false]),
-     read through the ordinary term reader at top-level scope so a non-Bool or undeclared
-     literal is a [Malformed] exactly as an ill-sorted assert would be. *)
+     Boolean atom (polarity [true]) or its single [(not atom)] negation (polarity
+     [false]), read through the ordinary term reader at top-level scope so a non-Bool or
+     undeclared literal is a [Malformed] exactly as an ill-sorted assert would be. *)
   let assumptions = ref None in
   let read_assumption (lit : Sexp.t) =
     let atom, polarity =
@@ -2436,9 +2480,31 @@ let run st sexps =
          | Some other, _ -> unsupportedf "unsupported command: %s" other
          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
+  (* Emit the nonlinear-multiplication lemmas (dark OXSMT_NIA) as extra top-level
+     assertions, one set per DISTINCT abstracted product. Each is a valid integer
+     consequence of [p = a*b] ({!Nia_lin}), so they are equisatisfiable with the original
+     nonlinear formula and safe to add to the asserted set (they also hold under
+     {!Model_check}'s real-multiplication re-evaluation). *)
+  let nia_lemmas =
+    match st.nia_products with
+    | [] -> []
+    | products ->
+      let seen = Term.Table.create 64 in
+      let distinct =
+        List.filter
+          (fun { Nia_lin.p; _ } ->
+            match Term.Table.find_opt seen p with
+            | Some () -> false
+            | None ->
+              Term.Table.replace seen p ();
+              true)
+          products
+      in
+      Nia_lin.lemmas st.ctx distinct
+  in
   ( !logic
   , !status
-  , List.rev !asserts
+  , List.rev !asserts @ nia_lemmas
   , List.rev !lemmas
   , List.rev !existentials
   , List.rev !clauses
@@ -2460,6 +2526,8 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
     ; internal_mint
     ; array_ops = Hashtbl.create 8
     ; arrays = Array_defs.empty
+    ; nia_mul_sym = None
+    ; nia_products = []
     }
   in
   let logic, status, assertions, lemmas, existentials, clauses, dropped, assumptions =

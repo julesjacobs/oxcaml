@@ -12,6 +12,8 @@
 
 module Bigint = Bigint
 module Lra_config = Lra_config
+module Nia_config = Nia_config
+module Nia_lin = Nia_lin
 module Rational_syntax = Rational_syntax
 module Iarr = Iarr
 module Symbol = Symbol
