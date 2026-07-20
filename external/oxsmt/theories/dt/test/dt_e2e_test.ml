@@ -74,6 +74,55 @@ let () =
    then (
      incr failures;
      Printf.printf "  FAIL tester %s is not reserved-namespaced\n" (Symbol.name tester)));
+  (* A tester returned by the programmatic declaration door is reserved but is
+     also validated datatype vocabulary. It must pass the assertion and
+     assumption capture gates; otherwise direct Session clients cannot express
+     datatype matches/testers. *)
+  (let s = Session.create () in
+   let color = Sort.datatype_ (Session.declare_sort s "GateColor") in
+   let dt =
+     Session.declare_datatype
+       s
+       color
+       [ { Session.ctor_name = "gate_red"; fields = [] }
+       ; { Session.ctor_name = "gate_green"; fields = [] }
+       ]
+   in
+   let red = ctor dt 0 in
+   let green_tester = (List.nth dt.Defs.constructors 1).Defs.tester in
+   let ctx = Session.context s in
+   let x = k s "gate_x" color in
+   Session.assert_presolved
+     s
+     [ Context.eq ctx x (Context.const ctx red)
+     ; Context.app ctx green_tester [ x ]
+     ];
+   expect
+     "programmatic tester passes assertion gate"
+     (Session.check_sat s)
+     Session.Unsat);
+  (let s = Session.create () in
+   let color = Sort.datatype_ (Session.declare_sort s "AssumeColor") in
+   let dt =
+     Session.declare_datatype
+       s
+       color
+       [ { Session.ctor_name = "assume_red"; fields = [] }
+       ; { Session.ctor_name = "assume_green"; fields = [] }
+       ]
+   in
+   let red = ctor dt 0 in
+   let green_tester = (List.nth dt.Defs.constructors 1).Defs.tester in
+   let ctx = Session.context s in
+   let x = k s "assume_x" color in
+   Session.assert_term s (Context.eq ctx x (Context.const ctx red));
+   let result =
+     Session.check_sat_assuming s [ Context.app ctx green_tester [ x ], true ]
+   in
+   expect
+     "programmatic tester passes assumption gate"
+     result.Session.verdict
+     Session.Unsat);
   (* Rule 1: constructor clash *)
   (let s, ls, _cs, nil, cons, _head = setup () in
    let ctx = Session.context s in

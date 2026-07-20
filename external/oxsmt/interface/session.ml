@@ -1174,8 +1174,9 @@ let assert_bool_at ?sel ?(record_presolve = false) t pterm =
    so a client could intern one and build a term that CAPTURES an internal witness ->
    wrong verdict (codex's ite-capture trigger). The single source of truth for the
    reservation is [Env.is_reserved_name]. [allowed] whitelists a specific lemma's own qvar
-   symbols — the ONLY reserved symbols legitimately present in a lemma body/trigger (a
-   ground user assertion whitelists nothing).
+   symbols. [datatypes] whitelists the capability-minted tester symbols returned by
+   [declare_datatype]: like the reserved array/bitvector operators below, they are theory
+   vocabulary that legitimately occurs in assertions built through the Session API.
 
    board #58: array [select]/[store] op symbols also live in the reserved namespace
    ([.oxsmt.arr.<op>|<sortkey>|<sortkey>]) and DO appear as App heads in ordinary parsed
@@ -1185,7 +1186,7 @@ let assert_bool_at ?sel ?(record_presolve = false) t pterm =
    so an op-named symbol that reaches a built term is one the parser/theory minted, never
    a user alias (see [Array_defs.is_op_sym]). It does not touch the qvar/witness
    namespaces. *)
-let term_has_reserved ?(allowed = []) (t0 : Term.t) =
+let term_has_reserved ?(allowed = []) datatypes (t0 : Term.t) =
   (* MEMOIZED over the hash-cons DAG. A user term is a maximally-shared DAG (the SMT-LIB
      [let] reader binds each value to one hash-consed node and reuses it by reference), so
      the naive per-path recursion re-walks a shared subterm once per path to it —
@@ -1211,6 +1212,10 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
     Env.is_reserved_name (Symbol.name s)
     && (not (Bv.is_bv_sym s))
     && (not (Array_defs.is_op_sym s))
+    (* [declare_datatype] deliberately mints unforgeable reserved testers, then records
+       their exact symbols in the validated registry. Exempt only those registered
+       symbols; an arbitrary [.oxsmt.*] symbol remains rejected. *)
+    && Datatype_defs.tester_of_sym datatypes s = None
     (* the nonlinear-integer product marker (dark OXSMT_NIA) is theory VOCABULARY that
        legitimately appears in a user assertion after abstraction, exactly like the
        bit-vector markers above; it cannot be user-forged (declaration doors reject
@@ -1278,7 +1283,7 @@ let assert_term_selected t term =
      reserved [.oxsmt.*] symbol (a coerced/interned qvar OR a captured preprocessing
      witness) degrades to a clean [Unknown] via the I8 Unsupported discipline (NOT a raw
      [Failure]) — never registered, never in a model, never capturing an internal aux. *)
-  if term_has_reserved term
+  if term_has_reserved !(t.registry) term
   then degrade t "reserved-symbol"
   else (
     t.asserted <- term :: t.asserted;
@@ -1348,7 +1353,7 @@ let assert_presolved_selected t terms =
     | [] -> true
     | _ -> false
   in
-  if List.exists term_has_reserved terms
+  if List.exists (term_has_reserved !(t.registry)) terms
   then degrade t "reserved-symbol"
   else (
     (* Record the ORIGINALS for R1 (order-insensitive; [Model_check.check] folds over
@@ -1593,7 +1598,7 @@ let assert_lemma t ~qvars ~build =
            | _ -> assert false (* a qvar is a nullary App by construction *))
          qv)
   in
-  let foreign tm = term_has_reserved ~allowed:qvar_syms tm in
+  let foreign tm = term_has_reserved ~allowed:qvar_syms !(t.registry) tm in
   if foreign body || List.exists (List.exists foreign) triggers
   then
     invalid_arg
@@ -2483,7 +2488,10 @@ let check_sat_assuming t assumptions =
       t.unknown_reason
       <- (if String.length t.degraded_reason = 0 then "degraded" else t.degraded_reason);
       { verdict = Unknown; unsat_core = None })
-    else if List.exists (fun (atom, _) -> term_has_reserved atom) assumptions
+    else if
+      List.exists
+        (fun (atom, _) -> term_has_reserved !(t.registry) atom)
+        assumptions
     then (
       degrade t "reserved-symbol";
       t.unknown_reason <- t.degraded_reason;
