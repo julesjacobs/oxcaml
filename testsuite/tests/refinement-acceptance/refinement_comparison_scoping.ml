@@ -24,3 +24,22 @@ Error: This value is "partial"
          which is "partial".
        However, the highlighted expression is expected to be "total".
 |}]
+
+(* A structurally recursive function is total and can therefore occur in a
+   refinement predicate.  The reflexive predicate keeps this test focused on
+   predicate totality rather than recursive equation emission. *)
+let rec structural_length @ total = function
+  | [] -> 0
+  | _ :: tail -> 1 + structural_length tail
+
+type structural_predicate =
+  int{
+    structural_length ([] : int list)
+    = structural_length ([] : int list)
+  }
+
+[%%expect {|
+val structural_length : 'a list -> int = <fun>
+type structural_predicate =
+    int{ structural_length [] = structural_length [] }
+|}]

@@ -1,0 +1,9 @@
+; Adversarial self-test for the QF_BV bit-blaster. Depends only on oxsmt_core,
+; oxsmt_solver, and oxsmt_bitblast (dependency firewall, I3). Run via `make bv-blast-test`;
+; also built by `make build`. The independent value-semantics oracle (Bv_eval) is compared
+; against the Tseitin circuits over full small-width enumeration; nonzero exit on failure.
+
+(executable
+ (name bv_blast_test)
+ (modules bv_blast_test)
+ (libraries oxsmt_core oxsmt_solver oxsmt_bitblast))

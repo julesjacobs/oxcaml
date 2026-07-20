@@ -1050,7 +1050,61 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       ctyp desc typ
   | Ptyp_arrow _ ->
       let args, ret, ret_mode = extract_params styp in
-      let rec loop acc_mode args =
+      let contains_refinement core_type =
+        let found = ref false in
+        let iterator =
+          { Ast_iterator.default_iterator with
+            typ =
+              (fun iterator core_type ->
+                match core_type.ptyp_desc with
+                | Ptyp_extension
+                    ({ txt = "vox2.refinement.type"; _ }, _) ->
+                  found := true
+                | _ ->
+                  Ast_iterator.default_iterator.typ iterator core_type);
+          }
+        in
+        iterator.typ iterator core_type;
+        !found
+      in
+      let add_dependent_parameter env label type_ loc ~in_refinement =
+        match label, in_refinement with
+        | _, false -> env
+        | Types.Labelled name, true ->
+          let id = Ident.create_local name in
+          let sort =
+            match
+              Ctype.type_sort
+                ~why:Jkind.History.Structure_item
+                ~fixed:false env type_
+            with
+            | Ok sort -> sort
+            | Error violation ->
+              raise (Error (loc, env, Bad_jkind_annot (type_, violation)))
+          in
+          let description =
+            { val_type = type_;
+              val_kind = Val_reg sort;
+              val_lpoly = Lpoly.determined [];
+              val_attributes = [];
+              val_zero_alloc = Zero_alloc.default;
+              val_modalities = Modality.undefined;
+              val_loc = loc;
+              val_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
+            }
+          in
+          let mode =
+            Mode.Value.of_const
+              { Mode.Value.Const.legacy with
+                totality = Mode.Totality.Const.Total;
+                logicality = Mode.Logicality.Const.Logical;
+              }
+          in
+          Env.add_value ~mode id description env
+          |> Env.add_dependent_parameter ~label:name id
+        | (Types.Nolabel | Types.Optional _ | Types.Position _), true -> env
+      in
+      let rec loop env acc_mode args =
         match args with
         | (l, arg_mode, arg) :: rest ->
           check_arg_type arg;
@@ -1067,7 +1121,17 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             | _ :: _ ->
               { mode_modes = acc_mode; mode_desc = [] }
           in
-          let ret_cty = loop acc_mode rest in
+          let in_refinement =
+            contains_refinement ret
+            || List.exists
+                 (fun (_, _, argument) -> contains_refinement argument)
+                 rest
+          in
+          let result_env =
+            add_dependent_parameter env l arg_cty.ctyp_type arg.ptyp_loc
+              ~in_refinement
+          in
+          let ret_cty = loop result_env acc_mode rest in
           let arg_ty = arg_cty.ctyp_type in
           let arg_ty =
             if Btype.is_Tpoly arg_ty then arg_ty else newmono arg_ty
@@ -1092,7 +1156,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             ty
         | [] -> transl_type env ~policy ~row_context ret_mode.mode_modes ret
       in
-      loop mode args
+      loop env mode args
   | Ptyp_tuple stl ->
     let desc, typ =
       transl_type_aux_tuple env ~loc ~policy ~row_context stl

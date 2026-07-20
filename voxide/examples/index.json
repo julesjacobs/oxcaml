@@ -40,7 +40,7 @@
       "name": "bst",
       "title": "Binary search tree (verified behind an interface)",
       "filename": "bst/",
-      "description": "A genuine recursive BST whose abstract interface exports three parametric functional-correctness laws: empty membership, inserted-key membership, and the full member-after-insert characterization. The positive client instantiates them at fresh keys and tree shapes. On R6, Lean and z3 verify the complete workspace; in-process oxsmt is honest-partial and reports unproved when it cannot discharge the recursive proof.",
+      "description": "A genuine recursive BST whose abstract interface exports an extensional equality and three parametric functional-correctness laws: empty membership, the full member-after-insert characterization, and equal_implies_member — if equal returns true, the two trees agree on membership at every query. The positive client instantiates the laws at fresh keys and tree shapes, including an extensionality demonstration on trees built in different insertion orders. On R6, Lean and z3 verify the complete workspace; in-process oxsmt is honest-partial and reports unproved when it cannot discharge the recursive proof.",
       "expected_state": "verified",
       "workspace": {
         "active": "client_positive.ml",

@@ -50,6 +50,11 @@ let sanitize text =
     | '0' .. '9' -> "n_" ^ result
     | _ -> result
 
+let lean_constructor_name = function
+  | "[]" -> "nil"
+  | "::" -> "cons"
+  | name -> sanitize name
+
 let digest text = Digest.to_hex (Digest.string text)
 
 type sort =
@@ -65,6 +70,7 @@ type constructor =
   }
 
 type data_definition =
+  | Abstract
   | Variant of constructor list
   | Record of (string * sort) list
 
@@ -72,6 +78,8 @@ type data_instance =
   { data_key : string;
     data_name : string;
     data_path : Path.t;
+    data_type_arguments : type_expr list;
+    data_arguments : sort list;
     mutable data_definition : data_definition option;
   }
 
@@ -106,6 +114,37 @@ let data_for_key context location key =
   | Some data -> data
   | None -> error location "internal error: missing Lean datatype %s" key
 
+let sort_contains context ~needle sort =
+  let rec loop seen sort =
+    if String.equal (sort_key needle) (sort_key sort)
+    then true
+    else
+      match sort with
+      | Sint | Sbool -> false
+      | Stuple sorts -> List.exists (loop seen) sorts
+      | Sarrow (argument, result) -> loop seen argument || loop seen result
+      | Sdata key ->
+        if List.mem key seen
+        then false
+        else
+          let data = data_for_key context Location.none key in
+          List.exists (loop (key :: seen)) data.data_arguments
+  in
+  loop [] sort
+
+let growing_instantiation context previous current =
+  let contains previous =
+    List.exists (sort_contains context ~needle:previous) current
+  in
+  let strictly_contains previous current =
+    not (String.equal (sort_key previous) (sort_key current))
+    && sort_contains context ~needle:previous current
+  in
+  List.for_all contains previous
+  && List.exists
+       (fun previous -> List.exists (strictly_contains previous) current)
+       previous
+
 let rec lean_sort context location = function
   | Sint -> "Int"
   | Sbool -> "Bool"
@@ -119,21 +158,90 @@ let rec lean_sort context location = function
     ^ lean_sort context location result ^ ")"
   | Sdata key -> (data_for_key context location key).data_name
 
+let inhabited_data_keys context =
+  let rec sort_is_inhabited inhabited = function
+    | Sint | Sbool -> true
+    | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
+    | Sarrow (_, result) -> sort_is_inhabited inhabited result
+    | Sdata key -> List.mem key inhabited
+  in
+  let data_is_inhabited inhabited data =
+    match data.data_definition with
+    | Some Abstract -> false
+    | Some (Variant constructors) ->
+      List.exists
+        (fun constructor ->
+          List.for_all
+            (sort_is_inhabited inhabited)
+            constructor.constructor_fields)
+        constructors
+    | Some (Record fields) ->
+      List.for_all
+        (fun (_, sort) -> sort_is_inhabited inhabited sort)
+        fields
+    | None -> false
+  in
+  let rec close inhabited =
+    let next =
+      List.fold_left
+        (fun inhabited data ->
+          if
+            List.mem data.data_key inhabited
+            || not (data_is_inhabited inhabited data)
+          then inhabited
+          else data.data_key :: inhabited)
+        inhabited context.data
+    in
+    if List.length next = List.length inhabited then inhabited else close next
+  in
+  let trusted_abstract_constants =
+    List.filter_map
+      (fun reference ->
+        match reference.reference_head, reference.reference_sort with
+        | (Rglobal path | Rapp path), Sdata key ->
+          begin match
+            Subst.Lazy.force_value_description
+              (Env.find_value path context.env)
+          with
+          | { val_kind = Val_reg _; _ } -> Some key
+          | { val_kind = Val_prim _ | Val_mut _ | Val_ivar _ | Val_self _
+                           | Val_anc _; _ } -> None
+          | exception Not_found -> None
+          end
+        | (Rfun _ | Rsibling _ | Rparameter _ | Rglobal _ | Rapp _), _ ->
+          None)
+      context.references
+  in
+  close trusted_abstract_constants
+
+let sort_is_inhabited inhabited_data =
+  let rec loop = function
+    | Sint | Sbool -> true
+    | Stuple sorts -> List.for_all loop sorts
+    (* A constant function inhabits an arrow whenever its result is inhabited.
+       We intentionally do not assume classical choice for an empty result. *)
+    | Sarrow (_, result) -> loop result
+    | Sdata key -> List.mem key inhabited_data
+  in
+  loop
+
 let instantiate context location declaration arguments type_ =
   try Ctype.apply context.env declaration.type_params type_ arguments with
   | Ctype.Cannot_apply ->
     error location "cannot instantiate datatype field type"
 
-let ensure_no_nested_data location owner sort =
+let same_type_arguments left right =
+  List.length left = List.length right
+  && List.for_all2
+       (fun left right -> get_id left = get_id right)
+       left right
+
+let ensure_no_function_field location sort =
   let rec loop = function
-    | Sint | Sbool -> ()
+    | Sint | Sbool | Sdata _ -> ()
     | Stuple sorts -> List.iter loop sorts
     | Sarrow _ ->
       error location "function-valued datatype fields are not supported"
-    | Sdata nested ->
-      error location
-        "recursive or mutually nested datatype %s in %s is not supported"
-        nested owner
   in
   loop sort
 
@@ -174,6 +282,8 @@ let rec sort_of_type context location type_ =
           instantiate context location declaration arguments manifest
         in
         sort_of_type context location expanded
+      | Type_abstract _, None ->
+        register_abstract context location path arguments declaration
       | _ ->
         error location "type %s is not a supported Lean datatype"
           (Path.name path)
@@ -181,7 +291,45 @@ let rec sort_of_type context location type_ =
   | _ ->
     error location "unsupported refinement-expression type"
 
+and register_abstract context location path arguments declaration =
+  let argument_sorts = List.map (sort_of_type context location) arguments in
+  let key =
+    "abstract:" ^ Path.name path ^ "<"
+    ^ String.concat "," (List.map sort_key argument_sorts)
+    ^ ">"
+  in
+  match find_data context key with
+  | Some _ -> Sdata key
+  | None ->
+    if List.length arguments <> declaration.type_arity then
+      error location "abstract datatype %s has the wrong number of arguments"
+        (Path.name path);
+    context.data <-
+      { data_key = key;
+        data_name = "VoxData_" ^ digest key;
+        data_path = path;
+        data_type_arguments = arguments;
+        data_arguments = argument_sorts;
+        data_definition = Some Abstract;
+      }
+      :: context.data;
+    Sdata key
+
 and register_data context location path arguments declaration =
+  begin match
+    List.find_opt
+      (fun data ->
+        Path.same data.data_path path
+        && Option.is_none data.data_definition)
+      context.data
+  with
+  | Some data
+    when not (same_type_arguments data.data_type_arguments arguments) ->
+    error location
+      "non-regular recursive datatype %s is not supported"
+      (Path.name path)
+  | Some _ | None -> ()
+  end;
   let argument_sorts =
     List.map (sort_of_type context location) arguments
   in
@@ -193,6 +341,17 @@ and register_data context location path arguments declaration =
   match find_data context key with
   | Some _ -> Sdata key
   | None ->
+    if
+      List.exists
+        (fun data ->
+          Path.same data.data_path path
+          && Option.is_none data.data_definition
+          && growing_instantiation context data.data_arguments argument_sorts)
+        context.data
+    then
+      error location
+        "non-regular recursive datatype %s is not supported"
+        (Path.name path);
     if List.length arguments <> declaration.type_arity then
       error location "datatype %s has the wrong number of arguments"
         (Path.name path);
@@ -200,6 +359,8 @@ and register_data context location path arguments declaration =
       { data_key = key;
         data_name = "VoxData_" ^ digest key;
         data_path = path;
+        data_type_arguments = arguments;
+        data_arguments = argument_sorts;
         data_definition = None;
       }
     in
@@ -209,7 +370,7 @@ and register_data context location path arguments declaration =
         instantiate context location declaration arguments type_
       in
       let sort = sort_of_type context location type_ in
-      ensure_no_nested_data location key sort;
+      ensure_no_function_field location sort;
       sort
     in
     let definition =
@@ -257,8 +418,32 @@ and register_data context location path arguments declaration =
     data.data_definition <- Some definition;
     Sdata key
 
+let supports_match_facts ~env type_ =
+  let context = { env; data = []; references = [] } in
+  match sort_of_type context Location.none type_ with
+  | Sint | Sbool | Stuple _ -> true
+  | Sdata key ->
+    begin match (data_for_key context Location.none key).data_definition with
+    | Some (Variant _ | Record _) -> true
+    | Some Abstract | None -> false
+    end
+  | Sarrow _ -> false
+  | exception Emission_error _ -> false
+
+let supports_equality ~env type_ =
+  let context = { env; data = []; references = [] } in
+  let rec supported = function
+    | Sint | Sbool | Sdata _ -> true
+    | Stuple fields -> List.for_all supported fields
+    | Sarrow _ -> false
+  in
+  match supported (sort_of_type context Location.none type_) with
+  | supported -> supported
+  | exception Emission_error _ -> false
+
 let reference_basename = function
   | Rfun name | Rsibling name -> name
+  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> Path.last path
 
 let primitive_builtin = function
@@ -275,6 +460,20 @@ let primitive_builtin = function
   | "%sequor" -> Some `Or
   | "%boolnot" -> Some `Not
   | _ -> None
+
+let constructor_mismatch_prefix = "*vox-match-constructor-mismatch*:"
+
+let constructor_mismatch_name constructor =
+  constructor_mismatch_prefix ^ constructor
+
+let constructor_mismatch name =
+  let prefix_length = String.length constructor_mismatch_prefix in
+  if String.length name >= prefix_length
+     && String.sub name 0 prefix_length = constructor_mismatch_prefix
+  then
+    Some
+      (String.sub name prefix_length (String.length name - prefix_length))
+  else None
 
 (* Source-like rendering of a refinement predicate, for user-facing display:
    the [int{ ... }] predicate shown in signatures ([-i]), type-at-cursor and
@@ -329,6 +528,7 @@ let display_path path =
 
 let display_reference_name = function
   | Rfun name | Rsibling name -> name
+  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> display_path path
 
 (* Infix operators recognized for display by source name.  These are absent
@@ -348,7 +548,7 @@ let display_infix_operator name =
   | None -> None
 
 let display_builtin ~env = function
-  | Rfun _ | Rsibling _ -> None
+  | Rfun _ | Rsibling _ | Rparameter _ -> None
   | Rapp path | Rglobal path ->
     begin
       match Subst.Lazy.force_value_description (Env.find_value path env) with
@@ -370,7 +570,7 @@ let binary_operator ~env reference =
     Some (display_operator builtin)
   | Some `Not | None ->
     (match reference with
-     | Rfun _ | Rsibling _ -> None
+     | Rfun _ | Rsibling _ | Rparameter _ -> None
      | Rapp path | Rglobal path -> display_infix_operator (Path.last path))
 
 let display_constant constant =
@@ -434,6 +634,25 @@ let render_predicate ~env expression =
             (paren_if (render ifnot) 6)
       in
       { text; precedence = 5 }
+    | Rexp_match (scrutinee, cases) ->
+      let case case =
+        let arguments =
+          List.map
+            (Option.fold ~none:"_"
+               ~some:(fun binder -> Ident.name binder.rb_id))
+            case.rcase_arguments
+        in
+        Printf.sprintf "| %s%s -> %s"
+          case.rcase_constructor.rconstr_name
+          (if arguments = [] then "" else " " ^ String.concat " " arguments)
+          (render case.rcase_body).text
+      in
+      { text =
+          Printf.sprintf "match %s with %s"
+            (render scrutinee).text
+            (String.concat " " (List.map case cases));
+        precedence = 5;
+      }
     | Rexp_let (bindings, body) ->
       let binding binding =
         Printf.sprintf "%s = %s"
@@ -455,6 +674,13 @@ let render_predicate ~env expression =
     | Rexp_apply (function_, arguments) -> render_apply function_ arguments
   and render_apply function_ arguments =
     match function_.rexp_desc, arguments with
+    | Rexp_ident (Rfree (Rfun name)), [Nolabel, argument]
+      when Option.is_some (constructor_mismatch name) ->
+      { text =
+          "is not " ^ Option.get (constructor_mismatch name) ^ " "
+          ^ paren_if (render argument) 71;
+        precedence = 70;
+      }
     | Rexp_ident (Rfree reference), [Nolabel, argument] ->
       begin
         match display_builtin ~env reference with
@@ -536,7 +762,9 @@ let render_predicate ~env expression =
 
 
 let builtin_name context = function
-  | (Rfun _ | Rsibling _) -> None
+  | Rfun name -> Option.map (fun name -> `Constructor_mismatch name)
+      (constructor_mismatch name)
+  | Rsibling _ | Rparameter _ -> None
   | (Rapp path | Rglobal path) ->
     begin
       match
@@ -556,13 +784,16 @@ let same_reference left right =
      lower to [Rsibling "base"] and be conflated if a VC ever spanned both. *)
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
-  | Rapp left, Rapp right | Rglobal left, Rglobal right ->
+  | Rparameter (left_label, left), Rparameter (right_label, right) ->
+    String.equal left_label right_label && Ident.same left right
+  | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
     Path.same left right
-  | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
+  | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ -> false
 
 let quantifier_name = function
   | Rfun name | Rsibling name ->
     String.equal name "forall_" || String.equal name "exists_"
+  | Rparameter _ -> false
   | Rapp path | Rglobal path ->
     let name = Path.last path in
     String.equal name "forall_" || String.equal name "exists_"
@@ -570,6 +801,7 @@ let quantifier_name = function
 let reference_description = function
   | Rfun name -> "function " ^ name
   | Rsibling name -> "sibling " ^ name
+  | Rparameter (label, _) -> "parameter " ^ label
   | Rapp path -> "application " ^ Path.name path
   | Rglobal path -> "value " ^ Path.name path
 
@@ -628,6 +860,11 @@ let rec iter_expression function_ expression =
     iter_expression function_ condition;
     iter_expression function_ ifso;
     Option.iter (iter_expression function_) ifnot
+  | Rexp_match (scrutinee, cases) ->
+    iter_expression function_ scrutinee;
+    List.iter
+      (fun case -> iter_expression function_ case.rcase_body)
+      cases
 
 type variable =
   { variable_id : Ident.t;
@@ -694,6 +931,70 @@ let collect context vc =
     expressions;
   !variables
 
+type witness_variable =
+  { source_name : string;
+    model_name : string;
+  }
+
+let witness_variables ~env (vc : Vox_vc.t) =
+  try
+    let context = { env; data = []; references = [] } in
+    let variables = collect context vc in
+    let free = Types.Refinement.free_bound_identifiers vc.goal in
+    let result = ref [] in
+    let add source_name model_name =
+      if
+        not
+          (List.exists
+             (fun variable -> String.equal variable.model_name model_name)
+             !result)
+      then result := !result @ [{ source_name; model_name }]
+    in
+    iter_expression
+      (fun node ->
+        match node.rexp_desc with
+        | Rexp_ident (Rbound id) when Ident.Set.mem id free ->
+          begin match find_variable id variables with
+          | Some variable -> add (Ident.name id) variable.variable_name
+          | None ->
+            error node.rexp_loc
+              "identifier %s is neither locally bound nor in VC scope"
+              (Ident.name id)
+          end
+        | Rexp_ident (Rfree reference_identifier) ->
+          begin match builtin_name context reference_identifier with
+          | Some _ -> ()
+          | None ->
+            let reference =
+              match
+                List.find_opt
+                  (fun existing ->
+                    same_reference existing.reference_head
+                      reference_identifier)
+                  context.references
+              with
+              | Some reference -> reference
+              | None ->
+                error node.rexp_loc
+                  "internal error: missing Lean reference %s"
+                  (reference_description reference_identifier)
+            in
+            add (reference_basename reference_identifier)
+              reference.reference_name
+          end
+        | Rexp_ident (Rbound _) | Rexp_constant _ | Rexp_let _
+        | Rexp_function _ | Rexp_apply _ | Rexp_tuple _ | Rexp_construct _
+        | Rexp_field _ | Rexp_ifthenelse _ | Rexp_match _ -> ())
+      vc.goal;
+    Ok !result
+  with
+  | Emission_error error -> Error error
+  | exception_ ->
+    Error
+      { location = vc.Vox_vc.location;
+        message = Printexc.to_string exception_;
+      }
+
 let expect_sort location expected actual =
   if not (String.equal (sort_key expected) (sort_key actual)) then
     error location "refinement expression has an inconsistent type"
@@ -706,7 +1007,7 @@ let expect_bool location = function
   | Sbool -> ()
   | _ -> error location "boolean operation used at a non-bool type"
 
-let emit_builtin location builtin arguments =
+let emit_builtin context location builtin arguments =
   let terms = List.map fst arguments in
   let sorts = List.map snd arguments in
   let binary operation check =
@@ -718,6 +1019,46 @@ let emit_builtin location builtin arguments =
     | _ -> error location "binary builtin used with the wrong arity"
   in
   match builtin with
+  | `Constructor_mismatch constructor_name ->
+    begin
+      match terms, sorts with
+      | [subject], [Sdata key] ->
+        let data = data_for_key context location key in
+        let constructor =
+          match data.data_definition with
+          | Some (Variant constructors) ->
+            begin match
+              List.find_opt
+                (fun constructor ->
+                  String.equal constructor.constructor_name constructor_name)
+                constructors
+            with
+            | Some constructor -> constructor
+            | None ->
+              error location "constructor %s does not belong to type %s"
+                constructor_name (Path.name data.data_path)
+            end
+          | Some (Record _) ->
+            error location "%s is a record type" (Path.name data.data_path)
+          | Some Abstract ->
+            error location "%s is an abstract type" (Path.name data.data_path)
+          | None ->
+            error location "recursive datatype registration did not finish"
+        in
+        let fields =
+          List.map (fun _ -> "_") constructor.constructor_fields
+        in
+        let pattern =
+          String.concat " "
+            ((data.data_name ^ "." ^ sanitize constructor_name) :: fields)
+        in
+        "(match " ^ subject ^ " with | " ^ pattern
+        ^ " => false | _ => true)"
+      | [_], [_] ->
+        error location "constructor test used at a non-datatype type"
+      | _ ->
+        error location "constructor test used with the wrong arity"
+    end
   | `Equal | `Not_equal ->
     begin
       match terms, sorts with
@@ -771,6 +1112,8 @@ let definition location data =
 
 let constructor location data name =
   match definition location data with
+  | Abstract ->
+    error location "%s is an abstract type" (Path.name data.data_path)
   | Record _ -> error location "%s is a record type" (Path.name data.data_path)
   | Variant constructors ->
     begin
@@ -787,6 +1130,8 @@ let constructor location data name =
 
 let record_field location data name =
   match definition location data with
+  | Abstract ->
+    error location "%s is an abstract type" (Path.name data.data_path)
   | Variant _ ->
     error location "%s is a variant type" (Path.name data.data_path)
   | Record fields ->
@@ -911,7 +1256,7 @@ let emit_expression context variables expression =
         let arguments =
           List.map (fun (_, argument) -> emit locals argument) arguments
         in
-        emit_builtin expression.rexp_loc
+        emit_builtin context expression.rexp_loc
           (Option.get (builtin_name context reference_identifier)) arguments
       | Rexp_apply (function_expression, arguments) ->
         let function_term, function_sort = emit locals function_expression in
@@ -967,24 +1312,35 @@ let emit_expression context variables expression =
             then
               error expression.rexp_loc
                 "constructor path does not match its result type";
-            let constructor =
-              constructor expression.rexp_loc data
-                constructor_description.rconstr_name
-            in
             let arguments = List.map (emit locals) arguments in
-            if
-              List.length constructor.constructor_fields
-              <> List.length arguments
-            then
+            let name, fields =
+              match definition expression.rexp_loc data with
+              | Abstract ->
+                error expression.rexp_loc
+                  "constructor used at an abstract datatype"
+              | Variant _ ->
+                let constructor =
+                  constructor expression.rexp_loc data
+                    constructor_description.rconstr_name
+                in
+                constructor.constructor_name,
+                constructor.constructor_fields
+              | Record fields ->
+                if
+                  not
+                    (String.equal constructor_description.rconstr_name "mk")
+                then
+                  error expression.rexp_loc
+                    "record construction must use the structure constructor";
+                "mk", List.map snd fields
+            in
+            if List.length fields <> List.length arguments then
               error expression.rexp_loc "constructor arity mismatch";
             List.iter2
               (fun expected (_, actual) ->
                 expect_sort expression.rexp_loc expected actual)
-              constructor.constructor_fields arguments;
-            let head =
-              data.data_name ^ "."
-              ^ sanitize constructor.constructor_name
-            in
+              fields arguments;
+            let head = data.data_name ^ "." ^ lean_constructor_name name in
             "(" ^ String.concat " " (head :: List.map fst arguments) ^ ")"
           | _ ->
             error expression.rexp_loc
@@ -1007,6 +1363,57 @@ let emit_expression context variables expression =
             ^ record_term ^ ")"
           | _ -> error expression.rexp_loc "field applied to a non-record type"
         end
+      | Rexp_match (scrutinee, cases) ->
+        let scrutinee, scrutinee_sort = emit locals scrutinee in
+        begin match scrutinee_sort with
+        | Sdata key ->
+          let data = data_for_key context expression.rexp_loc key in
+          let render_case case =
+            if
+              not
+                (Path.same data.data_path
+                   case.rcase_constructor.rconstr_type_path)
+            then
+              error expression.rexp_loc
+                "match constructor path does not match its scrutinee type";
+            let constructor =
+              constructor expression.rexp_loc data
+                case.rcase_constructor.rconstr_name
+            in
+            if
+              List.length constructor.constructor_fields
+              <> List.length case.rcase_arguments
+            then error expression.rexp_loc "match constructor arity mismatch";
+            let arguments, case_locals =
+              List.fold_left2
+                (fun (arguments, locals) field -> function
+                  | None -> "_" :: arguments, locals
+                  | Some binder ->
+                    let name = fresh_local () in
+                    let binder_sort =
+                      sort_of_type context expression.rexp_loc binder.rb_type
+                    in
+                    expect_sort expression.rexp_loc field binder_sort;
+                    name :: arguments, (binder.rb_id, name) :: locals)
+                ([], locals) constructor.constructor_fields
+                case.rcase_arguments
+            in
+            let body, body_sort = emit case_locals case.rcase_body in
+            expect_sort expression.rexp_loc result_sort body_sort;
+            let head =
+              data.data_name ^ "."
+              ^ lean_constructor_name constructor.constructor_name
+            in
+            "| "
+            ^ String.concat " " (head :: List.rev arguments)
+            ^ " => " ^ body
+          in
+          if cases = [] then error expression.rexp_loc "empty match";
+          "(match " ^ scrutinee ^ " with "
+          ^ String.concat " " (List.map render_case cases)
+          ^ ")"
+        | _ -> error expression.rexp_loc "match scrutinee is not a datatype"
+        end
       | Rexp_ifthenelse (condition, ifso, Some ifnot) ->
         let condition, condition_sort = emit locals condition in
         expect_bool expression.rexp_loc condition_sort;
@@ -1022,14 +1429,186 @@ let emit_expression context variables expression =
   in
   emit [] expression
 
+let equality_function_name data = "vox_decEq_" ^ data.data_name
+
+(* Lean's stock mutual [DecidableEq] derivation cannot follow a recursive
+   occurrence through a product.  Compare tuple leaves directly and make the
+   datatype comparisons mutually recursive instead; [simp_all] only proves
+   that these executable comparisons agree with constructor equality. *)
+let equality_decision context location sort left right =
+  match sort with
+  | Sint | Sbool -> "decEq " ^ left ^ " " ^ right
+  | Sdata key ->
+    let data = data_for_key context location key in
+    begin match definition location data with
+    | Abstract -> "decEq " ^ left ^ " " ^ right
+    | Variant _ | Record _ ->
+      equality_function_name data ^ " " ^ left ^ " " ^ right
+    end
+  | Stuple _ -> error location "internal error: unexpanded equality tuple"
+  | Sarrow _ -> error location "internal error: equality on function field"
+
+let equality_patterns context location next sort =
+  let rec loop sort =
+    match sort with
+    | Stuple sorts ->
+      let fields = List.map loop sorts in
+      ( "(" ^ String.concat ", " (List.map (fun (left, _, _) -> left) fields)
+        ^ ")",
+        "("
+        ^ String.concat ", " (List.map (fun (_, right, _) -> right) fields)
+        ^ ")",
+        List.concat_map (fun (_, _, comparisons) -> comparisons) fields )
+    | sort ->
+      let index = next () in
+      let left = "left_" ^ string_of_int index in
+      let right = "right_" ^ string_of_int index in
+      left, right, [equality_decision context location sort left right]
+  in
+  loop sort
+
+let emit_equality_result buffer comparisons =
+  match comparisons with
+  | [] -> Buffer.add_string buffer "    isTrue rfl\n"
+  | _ ->
+    Buffer.add_string buffer
+      ("    match " ^ String.concat ", " comparisons ^ " with\n");
+    Buffer.add_string buffer
+      ("    | "
+      ^ String.concat ", "
+          (List.mapi
+             (fun index _ -> "isTrue equal_" ^ string_of_int index)
+             comparisons)
+      ^ " => isTrue (by simp_all)\n");
+    List.iteri
+      (fun false_index _ ->
+        Buffer.add_string buffer "    | ";
+        List.iteri
+          (fun index _ ->
+            if index > 0 then Buffer.add_string buffer ", ";
+            if index = false_index then
+              Buffer.add_string buffer
+                ("isFalse not_equal_" ^ string_of_int index)
+            else Buffer.add_char buffer '_')
+          comparisons;
+        Buffer.add_string buffer " => isFalse (by simp_all)\n")
+      comparisons
+
+let constructor_pattern name fields =
+  "." ^ lean_constructor_name name
+  ^
+  (match fields with
+  | [] -> ""
+  | _ -> " " ^ String.concat " " fields)
+
+let emit_variant_equality context buffer constructors =
+  match constructors with
+  | [] -> Buffer.add_string buffer "  | left, _ => nomatch left\n"
+  | constructors ->
+    List.iter
+      (fun left_constructor ->
+        List.iter
+          (fun right_constructor ->
+            let next =
+              let index = ref 0 in
+              fun () ->
+                let result = !index in
+                incr index;
+                result
+            in
+            let same_constructor =
+              String.equal left_constructor.constructor_name
+                right_constructor.constructor_name
+            in
+            let patterns =
+              if same_constructor
+              then
+                List.map
+                  (equality_patterns context Location.none next)
+                  left_constructor.constructor_fields
+              else []
+            in
+            let left_fields, right_fields, comparisons =
+              if not same_constructor then
+                ( List.map (fun _ -> "_") left_constructor.constructor_fields,
+                  List.map (fun _ -> "_")
+                    right_constructor.constructor_fields,
+                  [] )
+              else
+                ( List.map (fun (left, _, _) -> left) patterns,
+                  List.map (fun (_, right, _) -> right) patterns,
+                  List.concat_map
+                    (fun (_, _, comparisons) -> comparisons)
+                    patterns )
+            in
+            Buffer.add_string buffer
+              ("  | "
+              ^ constructor_pattern left_constructor.constructor_name
+                  left_fields
+              ^ ", "
+              ^ constructor_pattern right_constructor.constructor_name
+                  right_fields
+              ^ " =>\n");
+            if same_constructor then emit_equality_result buffer comparisons
+            else Buffer.add_string buffer "    isFalse (by simp)\n")
+          constructors)
+      constructors
+
+let emit_record_equality context buffer fields =
+  let next =
+    let index = ref 0 in
+    fun () ->
+      let result = !index in
+      incr index;
+      result
+  in
+  let patterns =
+    List.map
+      (fun (_, sort) -> equality_patterns context Location.none next sort)
+      fields
+  in
+  Buffer.add_string buffer
+    ("  | .mk "
+    ^ String.concat " " (List.map (fun (left, _, _) -> left) patterns)
+    ^ ", .mk "
+    ^ String.concat " " (List.map (fun (_, right, _) -> right) patterns)
+    ^ " =>\n");
+  emit_equality_result buffer
+    (List.concat_map (fun (_, _, comparisons) -> comparisons) patterns)
+
+let emit_decidable_equality context buffer data =
+  match definition Location.none data with
+  | Abstract -> ()
+  | (Variant _ | Record _) as definition ->
+    Buffer.add_string buffer
+      ("def " ^ equality_function_name data ^ " : (left right : "
+      ^ data.data_name ^ ") -> Decidable (left = right)\n");
+    begin match definition with
+    | Variant constructors ->
+      emit_variant_equality context buffer constructors
+    | Record fields -> emit_record_equality context buffer fields
+    | Abstract -> assert false
+    end;
+    Buffer.add_char buffer '\n'
+
+let emit_equality_instance buffer data =
+  match definition Location.none data with
+  | Abstract -> ()
+  | Variant _ | Record _ ->
+    Buffer.add_string buffer
+      ("instance : DecidableEq " ^ data.data_name ^ " := "
+      ^ equality_function_name data ^ "\n")
+
 let emit_data context buffer data =
   match definition Location.none data with
+  | Abstract ->
+    Buffer.add_string buffer ("axiom " ^ data.data_name ^ " : Type\n\n")
   | Variant constructors ->
     Buffer.add_string buffer ("inductive " ^ data.data_name ^ " where\n");
     List.iter
       (fun constructor ->
         Buffer.add_string buffer
-          ("  | " ^ sanitize constructor.constructor_name);
+          ("  | " ^ lean_constructor_name constructor.constructor_name);
         List.iteri
           (fun index sort ->
             Buffer.add_string buffer
@@ -1038,7 +1617,7 @@ let emit_data context buffer data =
           constructor.constructor_fields;
         Buffer.add_char buffer '\n')
       constructors;
-    Buffer.add_string buffer "deriving DecidableEq\n\n"
+    Buffer.add_char buffer '\n'
   | Record fields ->
     Buffer.add_string buffer ("structure " ^ data.data_name ^ " where\n");
     List.iter
@@ -1047,7 +1626,15 @@ let emit_data context buffer data =
           ("  " ^ sanitize name ^ " : "
           ^ lean_sort context Location.none sort ^ "\n"))
       fields;
-    Buffer.add_string buffer "deriving DecidableEq\n\n"
+    Buffer.add_char buffer '\n'
+
+let constructor_mismatch_subject expression =
+  match expression.rexp_desc with
+  | Rexp_apply
+      ( { rexp_desc = Rexp_ident (Rfree (Rfun name)); _ },
+        [Nolabel, subject] )
+    when Option.is_some (constructor_mismatch name) -> Some subject
+  | _ -> None
 
 let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   let context = { env; data = []; references = [] } in
@@ -1063,16 +1650,43 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   if linter then
     Buffer.add_string buffer "set_option linter.unusedVariables true\n"
   else Buffer.add_char buffer '\n';
-  List.sort
-    (fun left right -> String.compare left.data_key right.data_key)
-    context.data
-  |> List.iter (emit_data context buffer);
+  let data =
+    List.sort
+      (fun left right -> String.compare left.data_key right.data_key)
+      context.data
+  in
+  let abstract_data, concrete_data =
+    List.partition
+      (fun data ->
+        match definition Location.none data with
+        | Abstract -> true
+        | Variant _ | Record _ -> false)
+      data
+  in
+  (* Monomorphizing a nested recursive field can turn it into mutual
+     recursion between the owner and the instantiated field datatype. *)
+  List.iter (emit_data context buffer) abstract_data;
+  if List.length concrete_data > 1 then Buffer.add_string buffer "mutual\n";
+  List.iter (emit_data context buffer) concrete_data;
+  if List.length concrete_data > 1 then Buffer.add_string buffer "end\n\n";
+  List.iter (emit_decidable_equality context buffer) abstract_data;
+  if List.length concrete_data > 1 then Buffer.add_string buffer "mutual\n";
+  List.iter (emit_decidable_equality context buffer) concrete_data;
+  if List.length concrete_data > 1 then Buffer.add_string buffer "end\n\n";
+  List.iter (emit_equality_instance buffer) concrete_data;
+  if data <> [] then Buffer.add_char buffer '\n';
+  let inhabited_data = inhabited_data_keys context in
   List.sort
     (fun left right -> String.compare left.reference_name right.reference_name)
     context.references
   |> List.iter (fun reference ->
+    if not (sort_is_inhabited inhabited_data reference.reference_sort)
+    then
+      error vc.location
+        "free reference %s has a sort that is not known to be inhabited"
+        (reference_description reference.reference_head);
     Buffer.add_string buffer
-      ("opaque " ^ reference.reference_name ^ " : "
+      ("axiom " ^ reference.reference_name ^ " : "
       ^ lean_sort context vc.location reference.reference_sort ^ "\n"));
   if context.references <> [] then Buffer.add_char buffer '\n';
   Buffer.add_string buffer
@@ -1096,7 +1710,25 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   expect_bool vc.goal.rexp_loc goal_sort;
   Buffer.add_string buffer ": ";
   if negated then Buffer.add_string buffer "¬ ";
-  Buffer.add_string buffer ("(" ^ goal ^ " = true) := by\n  grind\n");
+  Buffer.add_string buffer ("(" ^ goal ^ " = true) := by\n");
+  let mismatch_subjects =
+    List.filter_map
+      (fun (fact : Vox_vc.fact) ->
+        Option.map
+          (fun subject -> fst (emit_expression context variables subject))
+          (constructor_mismatch_subject fact.expression))
+      vc.facts
+    |> List.sort_uniq String.compare
+  in
+  begin match mismatch_subjects with
+  | [] -> Buffer.add_string buffer "  grind\n"
+  | subjects ->
+    Buffer.add_string buffer "  first | grind | (";
+    List.iter
+      (fun subject -> Buffer.add_string buffer ("cases " ^ subject ^ " <;> "))
+      subjects;
+    Buffer.add_string buffer "grind)\n"
+  end;
   Buffer.contents buffer
 
 let emit ~env (vc : Vox_vc.t) =

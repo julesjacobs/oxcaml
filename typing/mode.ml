@@ -7726,7 +7726,8 @@ module Modality = struct
         Value.Comonadic.Const.Per_axis.le ax a b
 
     let print (type a) (ax : a Axis.t) ppf (t : a) =
-      match ax, t with
+      match[@warning "-4"] ax, t with
+      | Monadic Logicality, Join_const Physical -> Fmt.fprintf ppf "nonlogical"
       | Comonadic ax, Meet_const t ->
         Value.Comonadic.Const.Per_axis.print ax ppf t
       | Monadic ax, Join_const t -> Value.Monadic.Const.Per_axis.print ax ppf t
@@ -7737,6 +7738,8 @@ module Modality = struct
   type equate_error = equate_step * error
 
   module Const = struct
+    module Monadic_atom = Monadic.Atom
+    module Comonadic_atom = Comonadic.Atom
     module Monadic = Monadic.Const
     module Comonadic = Comonadic.Const
 
@@ -7796,7 +7799,34 @@ module Modality = struct
         Value.Axis.all
 
     let print ppf { monadic; comonadic } =
-      Fmt.fprintf ppf "%a;%a" Monadic.print monadic Comonadic.print comonadic
+      let (Monadic.Join_const monadic) = monadic in
+      let (Comonadic.Meet_const comonadic) = comonadic in
+      Fmt.fprintf ppf
+        "join_const(%a,%a,%a,%a,%a);meet_const(%a,%a,%a,%a,%a,%a,%a)"
+        (Per_axis.print (Axis.Monadic Uniqueness))
+        (Monadic_atom.Join_const monadic.uniqueness)
+        (Per_axis.print (Axis.Monadic Contention))
+        (Monadic_atom.Join_const monadic.contention)
+        (Per_axis.print (Axis.Monadic Logicality))
+        (Monadic_atom.Join_const monadic.logicality)
+        (Per_axis.print (Axis.Monadic Visibility))
+        (Monadic_atom.Join_const monadic.visibility)
+        (Per_axis.print (Axis.Monadic Staticity))
+        (Monadic_atom.Join_const monadic.staticity)
+        (Per_axis.print (Axis.Comonadic Areality))
+        (Comonadic_atom.Meet_const comonadic.areality)
+        (Per_axis.print (Axis.Comonadic Linearity))
+        (Comonadic_atom.Meet_const comonadic.linearity)
+        (Per_axis.print (Axis.Comonadic Portability))
+        (Comonadic_atom.Meet_const comonadic.portability)
+        (Per_axis.print (Axis.Comonadic Totality))
+        (Comonadic_atom.Meet_const comonadic.totality)
+        (Per_axis.print (Axis.Comonadic Forkable))
+        (Comonadic_atom.Meet_const comonadic.forkable)
+        (Per_axis.print (Axis.Comonadic Yielding))
+        (Comonadic_atom.Meet_const comonadic.yielding)
+        (Per_axis.print (Axis.Comonadic Statefulness))
+        (Comonadic_atom.Meet_const comonadic.statefulness)
   end
 
   type t = (Monadic.t, Comonadic.t) monadic_comonadic

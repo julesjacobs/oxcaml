@@ -131,6 +131,8 @@ typing_SOURCES = \
   typing/ctype.mli typing/ctype.ml \
   typing/vox_vc.mli typing/vox_vc.ml \
   typing/vox_lean.mli typing/vox_lean.ml \
+  typing/vox_smt.mli typing/vox_smt.ml \
+  typing/vox_backend.mli typing/vox_backend.ml \
   typing/printtyp.mli typing/printtyp.ml \
   typing/includeclass.mli typing/includeclass.ml \
   typing/mtype.mli typing/mtype.ml \

@@ -1,0 +1,64 @@
+; Test-only. Depends only on oxsmt_solver (stdlib-only), so it honors the
+; dependency firewall (I3) even though it lives under smt/. The DIMACS parser
+; (oxsmt_dimacs) is a separate TEST-ONLY library — never linked into shipped
+; solver code, the same split discipline the SMT-LIB parser follows (DESIGN.md
+; §3). Run via `make sat-test` / `make sat-bench`.
+
+(library
+ (name oxsmt_dimacs)
+ (modules dimacs)
+ (libraries oxsmt_solver))
+
+; sat_test's shipped-SIZEREL reduceDB relocation leg (test_arena_reduce_db_sizerel)
+; overrides OXSMT_LGC_FIXED / OXSMT_LGC_SIZEREL / OXSMT_LGC_INITIAL in-process via
+; Unix.putenv (the Makefile pins OXSMT_LGC_FIXED=0 for the other reduceDB pins), so it needs
+; [unix]. Test-only, never linked into the shipped stdlib-only solver (I3 firewall), same as
+; lgc_test below.
+
+(executable
+ (name sat_test)
+ (modules sat_test dpll)
+ (libraries oxsmt_solver oxsmt_dimacs unix))
+
+(executable
+ (name seam_test)
+ (modules seam_test)
+ (libraries oxsmt_solver))
+
+(executable
+ (name satpre_test)
+ (modules satpre_test)
+ (libraries oxsmt_solver))
+
+(executable
+ (name chrono_test)
+ (modules chrono_test)
+ (libraries oxsmt_solver))
+
+; lgc_test toggles OXSMT_LGC_FIXED / OXSMT_LGC_INITIAL per solver via Unix.putenv, so it
+; compares the reduceDB schedules OFF vs ON in one process. [unix] is test-only (never
+; linked into the shipped solver, which stays stdlib-only per the I3 firewall).
+
+(executable
+ (name lgc_test)
+ (modules lgc_test)
+ (libraries oxsmt_solver unix))
+
+(executable
+ (name sat_bench)
+ (modules sat_bench)
+ (libraries oxsmt_solver oxsmt_dimacs))
+
+(executable
+ (name satcore_test)
+ (modules satcore_test)
+ (libraries oxsmt_solver unix))
+
+; lemma_backjump_test toggles OXSMT_LEMMA_BACKJUMP per solver via Unix.putenv to exercise
+; the dark asserting-lemma partial-backjump seam (real HNF cuts are non-asserting, so this
+; is the ON path's only permanent exerciser). [unix] is test-only (I3 firewall).
+
+(executable
+ (name lemma_backjump_test)
+ (modules lemma_backjump_test)
+ (libraries oxsmt_solver unix))

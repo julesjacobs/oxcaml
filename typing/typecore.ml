@@ -28,6 +28,21 @@ open Btype
 open Ctype
 open Mode
 
+type refinement_imposition_judgment =
+  { location : Location.t;
+    annotation_location : Location.t;
+    env : Env.t;
+    checked_type : type_expr option;
+    imposed_type : type_expr;
+  }
+
+let refinement_imposition_judgments = ref []
+
+let take_refinement_imposition_judgments () =
+  let judgments = List.rev !refinement_imposition_judgments in
+  refinement_imposition_judgments := [];
+  judgments
+
 type comprehension_type =
   | List_comprehension
   | Array_comprehension of mutability
@@ -3414,8 +3429,29 @@ let rec type_pat
       expected_ty sort ->
   Builtin_attributes.warning_scope sp.ppat_attributes
     (fun () ->
-       type_pat_aux tps category ~no_existentials
-         ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
+       (* A destructuring pattern may forget a refinement while taking the
+          value apart.  Keep the refinement on the typed pattern so that the
+          verification pass can still use it. *)
+       let refined =
+         match sp.ppat_desc with
+         | Ppat_constant _ | Ppat_construct _ | Ppat_tuple _ | Ppat_record _ ->
+           let expanded = expand_head !!penv (instance expected_ty) in
+           begin match get_desc expanded with
+           | Trefine refinement -> Some (expanded, refinement.ref_skeleton)
+           | _ -> None
+           end
+         | _ -> None
+       in
+       match refined with
+       | Some (refined, skeleton) ->
+         let pattern =
+           type_pat_aux tps category ~no_existentials ~alloc_mode
+             ~mutable_flag ~penv sp skeleton sort
+         in
+         { pattern with pat_type = refined }
+       | None ->
+         type_pat_aux tps category ~no_existentials
+           ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
     )
 
 and type_pat_aux
@@ -4091,6 +4127,19 @@ and type_pat_aux
         let p =
           type_pat ~alloc_mode tps category sp_constrained expected_ty' sort
         in
+        begin match get_desc ty with
+        | Trefine refinement
+          when Option.is_some !Clflags.vox_dump_vc_json ->
+          refinement_imposition_judgments :=
+            { location = p.pat_loc;
+              annotation_location = refinement.ref_pred.rexp_loc;
+              env = !!penv;
+              checked_type = None;
+              imposed_type = ty;
+            }
+            :: !refinement_imposition_judgments
+        | _ -> ()
+        end;
         let extra =
           Tpat_constraint (cty, type_modes),
           loc,
@@ -6728,6 +6777,345 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
+type structural_relation =
+  | Structural_root
+  | Structural_subterm
+
+module Structural_string = Misc.Stdlib.String
+
+type structural_env =
+  { bound : Structural_string.Set.t;
+    relations : structural_relation Structural_string.Map.t
+  }
+
+let structural_pattern_bound_names pat =
+  let names = ref Structural_string.Set.empty in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      pat =
+        (fun iterator pat ->
+          (match pat.ppat_desc with
+           | Ppat_var { txt = name; _ }
+           | Ppat_alias (_, { txt = name; _ }) ->
+             names := Structural_string.Set.add name !names
+           | _ -> ());
+          Ast_iterator.default_iterator.pat iterator pat)
+    }
+  in
+  iterator.pat iterator pat;
+  !names
+
+(* Return the variables whose values are the root represented by [pat], or
+   strict constructor sub-terms of it.  In particular, record and array
+   projections are deliberately absent: they may cross mutable indirections. *)
+let rec structural_pattern_relations relation pat =
+  let singleton name relation = Structural_string.Map.singleton name relation in
+  let union left right =
+    Structural_string.Map.union (fun _ left _ -> Some left) left right
+  in
+  let strict pat = structural_pattern_relations Structural_subterm pat in
+  match pat.ppat_desc with
+  | Ppat_var { txt = name; _ } -> singleton name relation
+  | Ppat_alias (pat, { txt = name; _ }) ->
+    union (singleton name relation) (structural_pattern_relations relation pat)
+  | Ppat_construct (_, Some (_, pat))
+  | Ppat_variant (_, Some pat) ->
+    strict pat
+  | Ppat_tuple (pats, _)
+  | Ppat_unboxed_tuple (pats, _) ->
+    List.fold_left
+      (fun relations (_, pat) -> union relations (strict pat))
+      Structural_string.Map.empty pats
+  | Ppat_or (left, right) ->
+    let left = structural_pattern_relations relation left in
+    let right = structural_pattern_relations relation right in
+    Structural_string.Map.merge
+      (fun _ left right ->
+        match left, right with
+        | Some left, Some right when left = right -> Some left
+        | _ -> None)
+      left right
+  | Ppat_constraint (pat, _, _)
+  | Ppat_open (_, pat) ->
+    structural_pattern_relations relation pat
+  | Ppat_any
+  | Ppat_constant _
+  | Ppat_interval _
+  | Ppat_unboxed_unit
+  | Ppat_unboxed_bool _
+  | Ppat_construct (_, None)
+  | Ppat_variant (_, None)
+  | Ppat_record _
+  | Ppat_record_unboxed_product _
+  | Ppat_array _
+  | Ppat_type _
+  | Ppat_lazy _
+  | Ppat_unpack _
+  | Ppat_exception _
+  | Ppat_effect _
+  | Ppat_extension _ ->
+    Structural_string.Map.empty
+
+let structural_bind_pattern env relation pat =
+  let names = structural_pattern_bound_names pat in
+  let relations =
+    Structural_string.Set.fold Structural_string.Map.remove names env.relations
+  in
+  let relations =
+    match relation with
+    | None -> relations
+    | Some relation ->
+      Structural_string.Map.union
+        (fun _ relation _ -> Some relation)
+        (structural_pattern_relations relation pat) relations
+  in
+  { bound = Structural_string.Set.union names env.bound; relations }
+
+let rec structural_function_labels exp =
+  match exp.pexp_desc with
+  | Pexp_constraint (exp, _, _)
+  | Pexp_coerce (exp, _, _)
+  | Pexp_newtype (_, _, exp) ->
+    structural_function_labels exp
+  | Pexp_function (params, _, body) ->
+    if List.exists
+         (fun { pparam_desc; _ } ->
+           match pparam_desc with
+           | Pparam_val (_, Some _, _) -> true
+           | Pparam_val (_, None, _)
+           | Pparam_newtype _ -> false)
+         params
+    then []
+    else
+      let labels =
+        List.filter_map
+          (fun { pparam_desc; _ } ->
+            match pparam_desc with
+            | Pparam_val (label, None, _) -> Some label
+            | Pparam_val (_, Some _, _)
+            | Pparam_newtype _ -> None)
+          params
+      in
+      let body_labels =
+        match body with
+        | Pfunction_body body -> structural_function_labels body
+        | Pfunction_cases _ -> [Asttypes.Nolabel]
+      in
+      labels @ body_labels
+  | _ -> []
+
+let structural_binding_name { pvb_pat; _ } =
+  match Structural_string.Set.elements
+          (structural_pattern_bound_names pvb_pat)
+  with
+  | [name] -> Some name
+  | _ -> None
+
+let structurally_terminating_group bindings =
+  let binding_info =
+    List.map
+      (fun binding ->
+        Option.map
+          (fun name -> name, structural_function_labels binding.pvb_expr)
+          (structural_binding_name binding))
+      bindings
+  in
+  if List.exists Option.is_none binding_info
+  then false
+  else
+    let binding_info = List.map Option.get binding_info in
+    let group_names =
+      List.fold_left
+        (fun names (name, _) -> Structural_string.Set.add name names)
+        Structural_string.Set.empty binding_info
+    in
+    let target_labels =
+      List.fold_left
+        (fun labels (name, function_labels) ->
+          Structural_string.Map.add name function_labels labels)
+        Structural_string.Map.empty binding_info
+    in
+    let max_common_position =
+      List.fold_left
+        (fun minimum (_, labels) -> min minimum (List.length labels))
+        max_int binding_info
+    in
+    let check_position position =
+      let valid = ref true in
+      let is_group_reference env lid =
+        match lid.txt with
+        | Longident.Lident name ->
+          Structural_string.Set.mem name group_names
+          && not (Structural_string.Set.mem name env.bound)
+        | Longident.Ldot _ | Longident.Lapply _ -> false
+      in
+      let relation_of_expression env exp =
+        let rec loop exp =
+          match exp.pexp_desc with
+          | Pexp_ident { txt = Longident.Lident name; _ } ->
+            Structural_string.Map.find_opt name env.relations
+          | Pexp_constraint (exp, _, _)
+          | Pexp_coerce (exp, _, _)
+          | Pexp_newtype (_, _, exp) -> loop exp
+          | _ -> None
+        in
+        loop exp
+      in
+      let call_argument name args =
+        match Structural_string.Map.find_opt name target_labels with
+        | None -> None
+        | Some labels ->
+          begin match List.nth_opt labels position with
+          | None -> None
+          | Some Asttypes.Nolabel ->
+            let nolabel_index =
+              List.fold_left
+                (fun index label ->
+                  if label = Asttypes.Nolabel then index + 1 else index)
+                0 (List.filteri (fun index _ -> index < position) labels)
+            in
+            List.filter_map
+              (fun (label, exp) ->
+                if label = Asttypes.Nolabel then Some exp else None)
+              args
+            |> Fun.flip List.nth_opt nolabel_index
+          | Some target_label ->
+            List.find_map
+              (fun (label, exp) ->
+                if label = target_label then Some exp else None)
+              args
+          end
+      in
+      let rec expression env exp =
+        let default () =
+          let iterator =
+            { Ast_iterator.default_iterator with
+              expr = (fun _ exp -> expression env exp)
+            }
+          in
+          Ast_iterator.default_iterator.expr iterator exp
+        in
+        match exp.pexp_desc with
+        | Pexp_ident lid ->
+          if is_group_reference env lid then valid := false
+        | Pexp_apply
+            ({ pexp_desc =
+                 Pexp_ident ({ txt = Longident.Lident name; _ } as lid);
+               _ },
+             args)
+          when is_group_reference env lid ->
+          (match call_argument name args with
+           | Some argument
+             when relation_of_expression env argument
+                  = Some Structural_subterm -> ()
+           | None | Some _ -> valid := false);
+          List.iter (fun (_, argument) -> expression env argument) args
+        | Pexp_function (params, _, body) ->
+          let env =
+            List.fold_left
+              (fun env { pparam_desc; _ } ->
+                match pparam_desc with
+                | Pparam_newtype _ -> env
+                | Pparam_val (_, default, pat) ->
+                  Option.iter (expression env) default;
+                  structural_bind_pattern env None pat)
+              env params
+          in
+          begin match body with
+          | Pfunction_body body -> expression env body
+          | Pfunction_cases (cases, _, _) -> cases_with_relation env None cases
+          end
+        | Pexp_match (scrutinee, cases) ->
+          expression env scrutinee;
+          cases_with_relation env (relation_of_expression env scrutinee) cases
+        | Pexp_try (body, cases) ->
+          expression env body;
+          cases_with_relation env None cases
+        | Pexp_let (_, recursive, bindings, body) ->
+          let body_env =
+            List.fold_left
+              (fun env { pvb_pat; _ } ->
+                structural_bind_pattern env None pvb_pat)
+              env bindings
+          in
+          let rhs_env = if recursive = Recursive then body_env else env in
+          List.iter
+            (fun { pvb_expr; _ } -> expression rhs_env pvb_expr)
+            bindings;
+          expression body_env body
+        | Pexp_for (pat, start, stop, _, body) ->
+          expression env start;
+          expression env stop;
+          expression (structural_bind_pattern env None pat) body
+        | Pexp_letmodule _
+        | Pexp_object _
+        | Pexp_pack _
+        | Pexp_letop _
+        | Pexp_comprehension _ ->
+          valid := false
+        | _ -> default ()
+      and cases_with_relation env relation cases =
+        List.iter
+          (fun { pc_lhs; pc_guard; pc_rhs } ->
+            let env = structural_bind_pattern env relation pc_lhs in
+            Option.iter (expression env) pc_guard;
+            expression env pc_rhs)
+          cases
+      and top_function env parameter_index exp =
+        match exp.pexp_desc with
+        | Pexp_constraint (exp, _, _)
+        | Pexp_coerce (exp, _, _)
+        | Pexp_newtype (_, _, exp) ->
+          top_function env parameter_index exp
+        | Pexp_function (params, _, body) ->
+          let env, parameter_index =
+            List.fold_left
+              (fun (env, parameter_index) { pparam_desc; _ } ->
+                match pparam_desc with
+                | Pparam_newtype _ -> env, parameter_index
+                | Pparam_val (_, default, pat) ->
+                  Option.iter (expression env) default;
+                  let relation =
+                    if parameter_index = position
+                    then Some Structural_root
+                    else None
+                  in
+                  structural_bind_pattern env relation pat,
+                  parameter_index + 1)
+              (env, parameter_index) params
+          in
+          begin match body with
+          | Pfunction_body body ->
+            begin match structural_function_labels body with
+            | [] -> expression env body
+            | _ :: _ -> top_function env parameter_index body
+            end
+          | Pfunction_cases (cases, _, _) ->
+            let relation =
+              if parameter_index = position
+              then Some Structural_root
+              else None
+            in
+            cases_with_relation env relation cases
+          end
+        | _ -> valid := false
+      in
+      List.iter
+        (fun { pvb_expr; _ } ->
+          top_function
+            { bound = Structural_string.Set.empty;
+              relations = Structural_string.Map.empty
+            }
+            0 pvb_expr)
+        bindings;
+      !valid
+    in
+    let rec try_position position =
+      position < max_common_position
+      && (check_position position || try_position (position + 1))
+    in
+    try_position 0
+
 let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
   (* We now delegate everything to type_expect *)
   type_expect ?recarg ~overwrite env expected_mode sexp
@@ -6763,7 +7151,18 @@ and type_refinement_annotation
   let with_explanation = with_explanation explanation in
   let refined_type = instance refined_type in
   let skeleton = instance refinement.ref_skeleton in
-  let mark arg = { arg with exp_type = refined_type }, true in
+  let mark arg =
+    if Option.is_some !Clflags.vox_dump_vc_json then
+      refinement_imposition_judgments :=
+        { location = arg.exp_loc;
+          annotation_location = refinement.ref_pred.rexp_loc;
+          env;
+          checked_type = Some skeleton;
+          imposed_type = refined_type;
+        }
+        :: !refinement_imposition_judgments;
+    { arg with exp_type = refined_type }, true
+  in
   if not (is_refinement_inferred_head sarg)
   then
     let arg = type_expect env expected_mode sarg (mk_expected skeleton) in
@@ -9685,6 +10084,14 @@ and type_function
           ~type_body:begin
             fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
               ~contains_gadt:param_contains_gadt ->
+              let ext_env =
+                match typed_arg_label, pat.pat_desc with
+                | Labelled label, Tpat_var { id; _ }
+                | Labelled label, Tpat_alias { id; _ } ->
+                  Env.add_dependent_parameter ~label id ext_env
+                | (Nolabel | Optional _ | Position _ | Labelled _), _ ->
+                  ext_env
+              in
               let { function_ = suffix_type, params_suffix, body;
                     newtypes; params_contain_gadt = suffix_contains_gadt;
                     fun_alloc_mode; ret_info;
@@ -11704,8 +12111,19 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
          we type-checked expressions before patterns, then we could call
          [add_module_variables] here.
       *)
+      let structurally_terminating =
+        is_recursive && structurally_terminating_group spat_sexp_list
+      in
+      if is_recursive && not structurally_terminating then
+        List.iter
+          (fun binding ->
+            if Vox_vc.Recursive_binding.defeq_requested binding.pvb_loc then
+              Location.raise_errorf ~loc:binding.pvb_loc
+                "vox: [@vox.def] cannot be used on this recursive binding: \
+                 its recursive group is not structurally total")
+          spat_sexp_list;
       let rhs_pvs =
-        if is_recursive
+        if is_recursive && not structurally_terminating
         then
           let partial =
             Value.of_const
@@ -14000,9 +14418,33 @@ let unsupported_refinement_expression expression construct =
          Refinement_expression_not_supported construct ))
 
 let lower_refinement_expression ~view expression =
+  (* Refinements are propositions about program values, not distinct logical
+     sorts.  In particular, a function mentioned in a predicate may have a
+     refined domain or result in the program type, while applications in the
+     predicate IR operate on their carrier types.  Preserve the arrow shape
+     but erase refinements along it before validating the lowered term. *)
+  let rec logical_type type_ =
+    match get_desc type_ with
+    | Trefine { ref_skeleton; _ } -> logical_type ref_skeleton
+    | Tarrow (label, argument, result, commu) ->
+      Btype.newgenty
+        (Tarrow
+           ( label,
+             logical_type argument,
+             logical_type result,
+             commu ))
+    | Tpoly (body, variables) ->
+      Btype.newgenty (Tpoly (logical_type body, variables))
+    | _ -> type_
+  in
   let variable_binder pattern =
     match pattern.pat_desc with
-    | Tpat_var { id; _ } -> { rb_id = id; rb_type = pattern.pat_type }
+    | Tpat_var { id; _ } ->
+      { rb_id = id; rb_type = logical_type pattern.pat_type }
+    | Tpat_any ->
+      { rb_id = Ident.create_local "*ignored-refinement-let*";
+        rb_type = logical_type pattern.pat_type;
+      }
     | _ ->
       unsupported_refinement_expression expression
         "Non-variable binding patterns"
@@ -14011,17 +14453,24 @@ let lower_refinement_expression ~view expression =
     let lower_value = lower ~function_head:false bound in
     let create rexp_desc =
       Refinement.create
-        ~loc:expression.exp_loc ~type_:expression.exp_type rexp_desc
+        ~loc:expression.exp_loc ~type_:(logical_type expression.exp_type)
+        rexp_desc
     in
     match expression.exp_desc with
     | Texp_ident { path = Pident id; _ } when Ident.Set.mem id bound ->
       create (Rexp_ident (Rbound id))
-    | Texp_ident { path = Pident id; _ }
-      when Env.is_in_signature expression.exp_env ->
-      (* A value mentioned by another declaration in the same signature is
-         signature-relative.  Its source name, unlike its transient stamp,
-         survives signature copying, sealing, and functor instantiation. *)
-      create (Rexp_ident (Rfree (Rsibling (Ident.name id))))
+    | Texp_ident { path = Pident id; _ } ->
+      begin match Env.dependent_parameter_label id expression.exp_env with
+      | Some label ->
+        create (Rexp_ident (Rfree (Rparameter (label, id))))
+      | None when Env.is_in_signature expression.exp_env ->
+        (* A value mentioned by another declaration in the same signature is
+           signature-relative.  Its source name, unlike its transient stamp,
+           survives signature copying, sealing, and functor instantiation. *)
+        create (Rexp_ident (Rfree (Rsibling (Ident.name id))))
+      | None ->
+        create (Rexp_ident (Rfree (Rglobal (Pident id))))
+      end
     | Texp_ident { path; _ } ->
       let reference = if function_head then Rapp path else Rglobal path in
       create (Rexp_ident (Rfree reference))
@@ -14099,8 +14548,56 @@ let lower_refinement_expression ~view expression =
            ( lower_value condition,
              lower_value ifso,
              Option.map lower_value ifnot ))
+    | Texp_match (scrutinee, _, cases, [], Total) ->
+      let lower_argument pattern =
+        match pattern.pat_desc with
+        | Tpat_any -> None
+        | Tpat_var { id; _ } ->
+          Some { rb_id = id; rb_type = logical_type pattern.pat_type }
+        | _ ->
+          unsupported_refinement_expression expression
+            "Nested or aliased match patterns"
+      in
+      let lower_case case =
+        if Option.is_some case.c_guard then
+          unsupported_refinement_expression expression "Guarded match cases";
+        let pattern =
+          match case.c_lhs.pat_desc with
+          | Tpat_value pattern -> (pattern :> value general_pattern)
+          | _ ->
+            unsupported_refinement_expression expression
+              "Exception match cases"
+        in
+        match pattern.pat_desc with
+        | Tpat_construct (_, constructor, _, arguments, _) ->
+          let arguments =
+            List.map (fun (_, pattern) -> lower_argument pattern) arguments
+          in
+          let body_bound =
+            List.fold_left
+              (fun bound -> function
+                | None -> bound
+                | Some binder -> Ident.Set.add binder.rb_id bound)
+              bound arguments
+          in
+          { rcase_constructor =
+              { rconstr_type_path = cstr_res_type_path constructor;
+                rconstr_name = constructor.cstr_name;
+              };
+            rcase_arguments = arguments;
+            rcase_body =
+              lower ~function_head:false body_bound case.c_rhs;
+          }
+        | _ ->
+          unsupported_refinement_expression expression
+            "Match cases other than constructor patterns"
+      in
+      create
+        (Rexp_match
+           (lower_value scrutinee, List.map lower_case cases))
     | Texp_match _ ->
-      unsupported_refinement_expression expression "A match expression"
+      unsupported_refinement_expression expression
+        "A partial, effectful, or guarded match expression"
     | _ ->
       unsupported_refinement_expression expression "This expression form"
   in

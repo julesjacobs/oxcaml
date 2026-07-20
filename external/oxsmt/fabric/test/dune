@@ -1,0 +1,9 @@
+; Stage-0 backtracking-substrate tests (ADR-0014 §C Stage 0). Within the smt/ tree, so it
+; honors the dependency firewall (I3 — nothing above the OCaml stdlib). It links the real
+; engines (oxsmt_euf + oxsmt_lia) so the disjointness oracle exercises actual EUF and
+; simplex trails, not stand-ins. Run via `make stage0-test`; also built by `make build`.
+
+(executable
+ (name stage0_trail_test)
+ (modules stage0_trail_test)
+ (libraries oxsmt_core oxsmt_euf oxsmt_lia))

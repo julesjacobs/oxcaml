@@ -7,6 +7,7 @@ type fact_origin =
 type fact =
   { expression : Types.refinement_expression;
     location : Location.t option;
+    scope : Location.t option;
     origin : fact_origin;
   }
 
@@ -15,6 +16,15 @@ type t =
     facts : fact list;
     goal : Types.refinement_expression;
   }
+
+(* Cross-phase provenance for recursive bindings.  The defeq expander runs
+   before typecore computes the structural-termination verdict.  Physical
+   location identity connects those phases without a user-spellable
+   attribute. *)
+module Recursive_binding : sig
+  val request_defeq : Location.t -> unit
+  val defeq_requested : Location.t -> bool
+end
 
 val create :
   loc:Location.t ->
@@ -47,12 +57,19 @@ module Fact_env : sig
   val add :
     origin:fact_origin ->
     ?loc:Location.t ->
+    ?scope:Location.t ->
     Types.refinement_expression ->
     t ->
     t
 
   val facts : t -> fact list
   val scope : t -> Ident.Set.t
+
+  val intersect : t -> t -> t
+  (** Keep the facts, and only the scope, shared by both environments. *)
+
+  val union : t -> t -> t
+  (** Combine facts and scope from two environments. *)
 
   val snapshot :
     loc:Location.t ->

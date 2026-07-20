@@ -134,7 +134,10 @@
       (run cat %{input-file})))
     parser)))
  (library_flags -linkall)
- (libraries flambda2_floats)
+ (foreign_stubs
+  (language c)
+  (names vox_timeout_stubs))
+ (libraries flambda2_floats oxsmt_interface)
  (modules_without_implementation
   annot
   value_rec_types
@@ -238,6 +241,8 @@
   ctype
   vox_vc
   vox_lean
+  vox_smt
+  vox_backend
   printtyp
   rawprinttyp
   gprinttyp
@@ -346,8 +351,69 @@
   parsetree
   debug_event
   ; See note below about camlinternalQuote
-  (:include
+   (:include
    %{project_root}/duneconf/camlinternalquote_if_missing_from_stdlib)))
+
+; Installed compiler-libs do not carry Dune dependency metadata.  Bundle the
+; parser-free oxsmt Session stack into ocamlcommon so clients that link
+; [ocamlcommon] keep working without extra flags.
+
+(rule
+ (targets ocamlcommon_with_oxsmt.a)
+ (action
+  (run
+   %{dep:tools/merge_dot_a_files.sh}
+   %{targets}
+   %{dep:external/oxsmt/core/oxsmt_core.a}
+   %{dep:external/oxsmt/solver/oxsmt_solver.a}
+   %{dep:external/oxsmt/preprocess/oxsmt_preprocess.a}
+   %{dep:external/oxsmt/theories/euf/oxsmt_euf.a}
+   %{dep:external/oxsmt/theories/lia/oxsmt_lia.a}
+   %{dep:external/oxsmt/theories/dt/oxsmt_dt.a}
+   %{dep:external/oxsmt/theories/arr/oxsmt_arr.a}
+   %{dep:external/oxsmt/combine/oxsmt_combine.a}
+   %{dep:external/oxsmt/ematch/oxsmt_ematch.a}
+   %{dep:external/oxsmt/bitblast/oxsmt_bitblast.a}
+   %{dep:external/oxsmt/interface/oxsmt_interface.a}
+   %{dep:ocamlcommon.a})))
+
+(rule
+ (targets ocamlcommon_with_oxsmt.cma)
+ (action
+  (run
+   %{dep:tools/merge_archives.exe}
+   %{targets}
+   %{dep:external/oxsmt/core/oxsmt_core.cma}
+   %{dep:external/oxsmt/solver/oxsmt_solver.cma}
+   %{dep:external/oxsmt/preprocess/oxsmt_preprocess.cma}
+   %{dep:external/oxsmt/theories/euf/oxsmt_euf.cma}
+   %{dep:external/oxsmt/theories/lia/oxsmt_lia.cma}
+   %{dep:external/oxsmt/theories/dt/oxsmt_dt.cma}
+   %{dep:external/oxsmt/theories/arr/oxsmt_arr.cma}
+   %{dep:external/oxsmt/combine/oxsmt_combine.cma}
+   %{dep:external/oxsmt/ematch/oxsmt_ematch.cma}
+   %{dep:external/oxsmt/bitblast/oxsmt_bitblast.cma}
+   %{dep:external/oxsmt/interface/oxsmt_interface.cma}
+   %{dep:ocamlcommon.cma})))
+
+(rule
+ (targets ocamlcommon_with_oxsmt.cmxa)
+ (action
+  (run
+   %{dep:tools/merge_archives.exe}
+   %{targets}
+   %{dep:external/oxsmt/core/oxsmt_core.cmxa}
+   %{dep:external/oxsmt/solver/oxsmt_solver.cmxa}
+   %{dep:external/oxsmt/preprocess/oxsmt_preprocess.cmxa}
+   %{dep:external/oxsmt/theories/euf/oxsmt_euf.cmxa}
+   %{dep:external/oxsmt/theories/lia/oxsmt_lia.cmxa}
+   %{dep:external/oxsmt/theories/dt/oxsmt_dt.cmxa}
+   %{dep:external/oxsmt/theories/arr/oxsmt_arr.cmxa}
+   %{dep:external/oxsmt/combine/oxsmt_combine.cmxa}
+   %{dep:external/oxsmt/ematch/oxsmt_ematch.cmxa}
+   %{dep:external/oxsmt/bitblast/oxsmt_bitblast.cmxa}
+   %{dep:external/oxsmt/interface/oxsmt_interface.cmxa}
+   %{dep:ocamlcommon.cmxa})))
 
 ; Our system compiler doesn't have CamlInternalQuote in its stdlib, so
 ; we need to compile it as an additional target, but only for the first
@@ -512,11 +578,13 @@
 (install
  (files
   (ocamlbytecomp.a as compiler-libs/ocamlbytecomp.a)
-  (ocamlcommon.a as compiler-libs/ocamlcommon.a)
+  (ocamlcommon_with_oxsmt.a as compiler-libs/ocamlcommon.a)
   (ocamlbytecomp.cmxa as compiler-libs/ocamlbytecomp.cmxa)
-  (ocamlcommon.cmxa as compiler-libs/ocamlcommon.cmxa)
+  (ocamlcommon_with_oxsmt.cmxa as compiler-libs/ocamlcommon.cmxa)
   (ocamlbytecomp.cma as compiler-libs/ocamlbytecomp.cma)
-  (ocamlcommon.cma as compiler-libs/ocamlcommon.cma))
+  (ocamlcommon_with_oxsmt.cma as compiler-libs/ocamlcommon.cma)
+  (libocamlcommon_stubs.a as compiler-libs/libocamlcommon_stubs.a)
+  (dllocamlcommon_stubs.so as stublibs/dllocamlcommon_stubs.so))
  (section lib)
  (package ocaml))
 
@@ -1020,6 +1088,28 @@
   (glob_files .ocamlbytecomp.objs/native/*.cmx)
   (glob_files .ocamlcommon.objs/byte/*.{cmi,cmo,cmt,cmti})
   (glob_files .ocamlcommon.objs/native/*.cmx)
+  (glob_files external/oxsmt/core/.oxsmt_core.objs/byte/*.cmi)
+  (glob_files external/oxsmt/core/.oxsmt_core.objs/native/*.cmx)
+  (glob_files external/oxsmt/solver/.oxsmt_solver.objs/byte/*.cmi)
+  (glob_files external/oxsmt/solver/.oxsmt_solver.objs/native/*.cmx)
+  (glob_files external/oxsmt/preprocess/.oxsmt_preprocess.objs/byte/*.cmi)
+  (glob_files external/oxsmt/preprocess/.oxsmt_preprocess.objs/native/*.cmx)
+  (glob_files external/oxsmt/theories/euf/.oxsmt_euf.objs/byte/*.cmi)
+  (glob_files external/oxsmt/theories/euf/.oxsmt_euf.objs/native/*.cmx)
+  (glob_files external/oxsmt/theories/lia/.oxsmt_lia.objs/byte/*.cmi)
+  (glob_files external/oxsmt/theories/lia/.oxsmt_lia.objs/native/*.cmx)
+  (glob_files external/oxsmt/theories/dt/.oxsmt_dt.objs/byte/*.cmi)
+  (glob_files external/oxsmt/theories/dt/.oxsmt_dt.objs/native/*.cmx)
+  (glob_files external/oxsmt/theories/arr/.oxsmt_arr.objs/byte/*.cmi)
+  (glob_files external/oxsmt/theories/arr/.oxsmt_arr.objs/native/*.cmx)
+  (glob_files external/oxsmt/combine/.oxsmt_combine.objs/byte/*.cmi)
+  (glob_files external/oxsmt/combine/.oxsmt_combine.objs/native/*.cmx)
+  (glob_files external/oxsmt/ematch/.oxsmt_ematch.objs/byte/*.cmi)
+  (glob_files external/oxsmt/ematch/.oxsmt_ematch.objs/native/*.cmx)
+  (glob_files external/oxsmt/bitblast/.oxsmt_bitblast.objs/byte/*.cmi)
+  (glob_files external/oxsmt/bitblast/.oxsmt_bitblast.objs/native/*.cmx)
+  (glob_files external/oxsmt/interface/.oxsmt_interface.objs/byte/*.cmi)
+  (glob_files external/oxsmt/interface/.oxsmt_interface.objs/native/*.cmx)
   (glob_files .ocamloptcomp.objs/byte/*.{cmi,cmo,cmt,cmti})
   (glob_files .ocamloptcomp.objs/native/*.cmx)
   (glob_files

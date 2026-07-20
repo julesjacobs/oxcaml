@@ -1,0 +1,197 @@
+(** SMT-LIB2 parser — TEST-ONLY. Reads the QF_UFLIA subset our printer emits (plus the
+    constructs the public corpora need) into frozen-API {!Oxsmt_core.Term.t}s through a
+    {!Oxsmt_core.Context.t}. It is the reverse of {!Oxsmt_smtlib.Printer} where the subset
+    overlaps.
+
+    {b This library is never linked into the shipped compiler} (DESIGN.md §3): only the
+    printer ships. It exists to ingest benchmarks and round-trip our own dumps.
+
+    [define-fun] macros are supported: parameters/result sort are read at definition time,
+    the body is expanded by capture-avoiding substitution at each use site (macros, not
+    recursive functions). Recursion — direct or mutual — and [define-fun-rec]/
+    [define-funs-rec] are rejected as {!Unsupported}. With [OXSMT_LRA] enabled, the
+    ground parser additionally accepts exact QF_LRA/QF_UFLRA terms; Real quantification
+    remains unsupported.
+
+    The returned assertion list is a single batch, not an execution trace. Documents may
+    omit [check-sat] when used as parser fragments, but after a [check-sat] only inert
+    output/metadata commands and [exit] are accepted; a second check or a state-changing
+    command is {!Unsupported}. [check-sat] and [exit] take no arguments, and no command may
+    follow [exit].
+
+    Two failure modes, deliberately distinct (mirroring the gate reader):
+    - {!Malformed}: input the reader cannot make sense of as a query — bad s-expr, unknown
+      command shape, ill-sorted term, undeclared symbol, wrong arity, a [define-fun]
+      application whose argument or body sort does not match its declaration.
+    - {!Unsupported}: well-formed but outside our subset — a logic we do not model, a
+      theory we do not implement, nonlinear multiplication, quantifiers, recursive
+      [define-fun], or arithmetic exceeding native [int] range (the v1 core limitation). *)
+
+exception Malformed of string
+exception Unsupported of string
+
+(** Whether the front-end quantified pipeline (typed formula IR -> NNF/polarity ->
+    Skolemization + definitional clausification -> lowering) is enabled, from the flag
+    [OXSMT_QUANT_PIPELINE] (read once). Default ON (stage 2) routes quantified assertions
+    through {!Fol}; [OXSMT_QUANT_PIPELINE=0]/false/no forces OFF = the current hand-coded
+    quantifier-shape classification, byte-identical to the pre-flip trunk. Exposed so a
+    driver can report the active mode; the routing itself is internal to the parser. *)
+val quant_pipeline_enabled : bool Lazy.t
+
+(** A universally-quantified assertion, either [(assert (forall (binders) body))] or the
+    equivalent [(assert (not (exists (binders) body)))], in the ADR-0012 lemma tier. The
+    parser cannot construct the lemma itself — the bound variables must be minted as
+    cap-gated placeholder qvars through {!Oxsmt_interface.Session} (mint-before- build,
+    §1.3), which lives in a library this test-only parser must not depend on. So it
+    records the binders and a deferred [build]: the driver mints one qvar per binder and
+    passes their {!Oxsmt_core.Term.t} images (in binder order) to [build], which reads the
+    body and any [:pattern] triggers with each binder bound to its qvar image. Nested
+    [forall]s are flattened into one binder list; a positive nested [exists] is Skolemized
+    to a fresh function of the binders (via [skolem]), a negative one is out of fragment. *)
+
+(** A driver-supplied Skolem-FUNCTION minter (lemmas-climb chunk 2b): [skolem ~cod ~args]
+    declares a FRESH uninterpreted function of rank [(sorts of args) -> cod] and returns
+    it applied to [args]. Used to Skolemize a positive [exists] nested in a [forall] body
+    — each binder becomes a fresh function of the enclosing universals ([args] = the qvar
+    images), keeping the lemma universal and equisatisfiable. The fresh, collision-proof
+    symbol comes from the driver's {!Oxsmt_interface.Session}, not the parser. *)
+type skolemizer =
+  cod:Oxsmt_core.Sort.t -> args:Oxsmt_core.Term.t list -> Oxsmt_core.Term.t
+
+type lemma_src =
+  { qvars : (string * Oxsmt_core.Sort.t) list (* forall binders, flattened, outer-first *)
+  ; build :
+      skolem:skolemizer
+      -> Oxsmt_core.Term.t array
+      -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
+  (** [build ~skolem qvar_images] is [(body, triggers)]; [qvar_images.(k)] substitutes for
+      the k-th binder and [skolem] mints a fresh function for a positive nested [exists]
+      (lemmas-climb chunk 2b). May raise {!Malformed}/{!Unsupported} when the body is
+      outside the subset — the driver maps that to a sound [unknown]. *)
+  }
+
+(** A top-level existential: either a positive [(assert (exists (binders) body))] or the
+    equivalent [(assert (not (forall (binders) body)))]. Skolemized by the driver: the
+    binders become fresh ground witnesses and [ex_build] reads the body over them,
+    asserted as a ground formula — equisatisfiable with the original (sound in both
+    directions). A negated existential is represented as a universal {!lemma_src}; it is
+    never Skolemized to a constant. *)
+type exists_src =
+  { ex_qvars :
+      (string * Oxsmt_core.Sort.t) list (* exists binders, flattened, outer-first *)
+  ; ex_build : Oxsmt_core.Term.t array -> Oxsmt_core.Term.t
+  (** [ex_build witnesses] is the Bool body with binder [k] -> [witnesses.(k)] (a fresh
+      ground constant). May raise {!Malformed}/{!Unsupported} when the body is outside the
+      subset (e.g. a nested [forall]); the driver drops it with the sat-degrade sentinel. *)
+  }
+
+(** A binder-keyed Skolem minter for the pipeline: [skolem ~key ~cod ~args] mints (or
+    REUSES, memoized by [~key] = the eliminated existential's binder id) a Skolem function
+    of the [args] sorts applied to [args] (0-ary => a witness constant). Keying by binder
+    id is load-bearing: one existential referenced by several clauses must share ONE
+    symbol — otherwise a split [exists x. (p x /\ q x)] gets two witnesses, weakening the
+    assertion (a wrong [sat]). Distinct from {!skolemizer} (the OFF seam, deliberately
+    fresh-per-call). *)
+type keyed_skolemizer =
+  key:int -> cod:Oxsmt_core.Sort.t -> args:Oxsmt_core.Term.t list -> Oxsmt_core.Term.t
+
+(** A lowered clause from the front-end quantified pipeline (dark:
+    [OXSMT_QUANT_PIPELINE]). [cl_qvars] are the universal binders ([] = a GROUND clause,
+    lowered via a plain assert, not a live lemma); [cl_build ~skolem qvar_images] is
+    [(body, triggers)] over the qvar images, minting Skolem symbols through the
+    {!keyed_skolemizer} seam. May raise {!Malformed}/{!Unsupported} (or the
+    {!Oxsmt_core.Term} equivalents) when a leaf is outside the fragment — the loader drops
+    that clause and arms the sat-degrade sentinel. *)
+type clause =
+  { cl_qvars : (string * Oxsmt_core.Sort.t) list
+  ; cl_build :
+      skolem:keyed_skolemizer
+      -> Oxsmt_core.Term.t array
+      -> Oxsmt_core.Term.t * Oxsmt_core.Term.t list list
+  ; cl_source : Sexp.t
+  (** the source assertion body this clause was clausified from — provenance root for an
+      audit dump / certificate replay (ADR-0013 seam). *)
+  ; cl_skolems : (string * int list) list
+  (** Skolem provenance: each eliminated existential's source binder name with its
+      dependency list (dominating universal binder ids). With [cl_qvars] and [cl_source]
+      this records the Skolemization witness — why the clause is equisatisfiable with the
+      source — for the cert-replay seam. *)
+  }
+
+type t =
+  { env : Oxsmt_core.Env.t
+  ; ctx : Oxsmt_core.Context.t
+  ; logic : string option
+  ; status : Oxsmt_smtlib.Status.t option
+  ; assertions : Oxsmt_core.Term.t list (* ground assertions, in file order *)
+  ; datatypes : Oxsmt_core.Datatype_defs.t
+      (* algebraic-datatype shapes from [declare-datatype(s)]: constructors, selectors,
+         and testers, keyed by symbol, for the datatype theory. [empty] when none
+         declared. *)
+  ; arrays : Oxsmt_core.Array_defs.t
+      (* the [select]/[store] operator symbols minted for the array instantiations the
+         query uses, keyed by symbol, for the arrays theory. [empty] when the query uses
+         no arrays. *)
+  ; lemmas : lemma_src list (* top-level universal assertions, in file order *)
+  ; existentials : exists_src list
+      (* top-level existential assertions the loader Skolemizes into fresh ground
+         witnesses, in file order *)
+  ; clauses : clause list
+      (* front-end quantified pipeline (dark: [OXSMT_QUANT_PIPELINE]) output: the clauses
+         a quantifier-bearing assertion was clausified into. Empty when the flag is OFF
+         (byte-identical) — quantifiers then take [lemmas]/[existentials]. *)
+  ; dropped : int
+  (* count of assertion content outside the reader's fragment that partial assertion
+     DROPPED rather than failing the whole file (lemmas-climb). [> 0] obliges the loader
+     to arm a sat-degrade sentinel: dropping only weakens the set (sound for [unsat]), and
+     the sentinel's live lemma degrades any [Sat] to [Unknown]. *)
+  ; assumptions : (Oxsmt_core.Term.t * bool) list option
+  (* the [(check-sat-assuming (lit ...))] assumption literals as (atom, polarity) pairs
+     ([true] = the atom, [false] = its [(not atom)] negation), in file order. [None] when
+     the document has no [check-sat-assuming]; [Some []] is a [check-sat-assuming ()]. A
+     driver feeds these to [Oxsmt_interface.Session.check_sat_assuming]; the reader does
+     not solve. A non-Bool / undeclared literal is a [Malformed], as an ill-sorted assert. *)
+  }
+
+(** [parse src] parses a whole SMT-LIB2 document, creating a fresh {!Oxsmt_core.Env.t} and
+    {!Oxsmt_core.Context.t}. It owns that env, so it holds the reserved-minting capability
+    itself (never exposed) and threads its own [internal_mint]: a theory that mints a
+    reserved symbol mid-parse (bit-vectors, arrays) resolves. Sound because the cap and
+    env are local to the parse and never leave it. *)
+val parse : string -> t
+
+(** [parse_into env ctx src] parses using a caller-supplied env and context, so the
+    resulting terms share the tag stream (hash-cons identity) with terms already built in
+    [ctx]. Used by the round-trip tests to compare via {!Oxsmt_core.Term.equal} within one
+    context (the single-Context contract, ADR-0003). Re-declaring an already-known symbol
+    is idempotent.
+
+    [?internal_mint] (board #58 O-MINTER) is the opaque cap-backed minter for
+    theory-internal reserved symbols ([.oxsmt.<theory>.*]) that must be minted mid-parse —
+    arrays op symbols are per-(index sort, element sort) instantiations discovered only at
+    the first [select]/[store] use, so they cannot be pre-minted at a declaration site. A
+    [Session]-driven parse threads {!Oxsmt_interface.Session.parse_minter}, an opaque
+    {!Oxsmt_core.Internal_minter.t} wrapping [Env.declare_reserved] over the session's
+    private cap behind an [admit] gate: the parser mints a collision-proof sanctioned
+    marker without ever holding the cap or a general closure (ADR-0012: only [Session]
+    holds it). Omitting it (a standalone {!parse}, or a driver with no theory that mints
+    at parse time) makes any mid-parse mint request raise {!Malformed} — never a silent
+    success. *)
+val parse_into
+  :  ?internal_mint:Oxsmt_core.Internal_minter.t
+  -> Oxsmt_core.Env.t
+  -> Oxsmt_core.Context.t
+  -> string
+  -> t
+
+(** [parse_into_sexps] is [parse_into] on an already-parsed s-expression forest, so a
+    driver that must inspect the top-level commands before solving (e.g. counting
+    [check-sat]s) parses the source ONCE and reuses the result, rather than building the
+    full {!Sexp.t} tree a second time. Identical to [parse_into] on [Sexp.parse_many src]
+    for any [src]; the only difference is who owns the (single) parse. *)
+val parse_into_sexps
+  :  ?internal_mint:Oxsmt_core.Internal_minter.t
+  -> Oxsmt_core.Env.t
+  -> Oxsmt_core.Context.t
+  -> Sexp.t list
+  -> t

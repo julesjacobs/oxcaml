@@ -175,7 +175,11 @@ val instantiate : bool ref
 val dump_source : bool ref
 val vox_dump_vc : bool ref
 val vox_dump_vc_json : string option ref
+val vox_dump_vc_json_smt : bool ref
 val vox_type_only : bool ref
+val vox_backend : string ref
+val vox_smt_solver : string option ref
+val vox_oxsmt_solver : string option ref
 val dump_parsetree : bool ref
 val dump_typedtree : bool ref
 val dump_shape : bool ref

@@ -15,13 +15,26 @@ let run s =
 val run : string -> unit = <fun>
 |}];;
 
-let run_structure s =
+let roundtrip_structure s =
+  Language_extension.enable Language_extension.Mode Language_extension.Alpha;
+  Language_extension.enable
+    Language_extension.Layouts Language_extension.Alpha;
   let structure = Parse.implementation (Lexing.from_string s) in
   let typed_structure, _, _, _, _, _ =
     Typemod.type_structure (Lazy.force Env.initial) structure
   in
   let structure = Untypeast.untype_structure typed_structure in
-  Format.printf "%a@." Pprintast.structure structure
+  let printed = Format.asprintf "%a" Pprintast.structure structure in
+  let reparsed = Parse.implementation (Lexing.from_string printed) in
+  ignore (Typemod.type_structure (Lazy.force Env.initial) reparsed);
+  printed
+;;
+
+[%%expect{|
+val roundtrip_structure : string -> string = <fun>
+|}];;
+
+let run_structure s = Format.printf "%s@." (roundtrip_structure s)
 ;;
 
 [%%expect{|
@@ -186,5 +199,142 @@ run_structure {|
 
 [%%expect{|
 module type S  = sig val x : int -> int @@ portable end
+- : unit = ()
+|}];;
+
+run_structure {|
+  [@@@warning "-220"]
+  module type S = sig
+    val total : int -> int @@ total
+    val partial : int -> int @@ partial
+    val logical : int -> int @@ logical
+    val nonlogical : int -> int @@ nonlogical
+  end |};;
+
+[%%expect{|
+[@@@warning "-220"]
+module type S  =
+  sig
+    val total : int -> int @@ total
+    val partial : int -> int @@ partial
+    val logical : int -> int @@ logical
+    val nonlogical : int -> int @@ nonlogical
+  end
+- : unit = ()
+|}];;
+
+let contains (string : string) (substring : string) =
+  let string_length = String.length string in
+  let substring_length = String.length substring in
+  let rec loop pos =
+    pos + substring_length <= string_length
+    &&
+    (String.sub string pos substring_length = substring
+     || loop (pos + 1))
+  in
+  substring_length = 0 || loop 0
+;;
+
+[%%expect{|
+val contains : string -> string -> bool = <fun>
+|}];;
+
+let module_declaration_source placement token =
+  let source =
+    match placement with
+    | "declaration-suffix" ->
+      Printf.sprintf
+        "module type S = sig module M : sig val x : int -> int end @@ %s end"
+        token
+    | "declaration-name" ->
+      Printf.sprintf
+        "module type S = sig module (M @@ %s) : sig val x : int -> int end end"
+        token
+    | "alias-suffix" ->
+      Printf.sprintf
+        "module type S = sig module A : sig end module M = A @@ %s end"
+        token
+    | "alias-name" ->
+      Printf.sprintf
+        "module type S = sig module A : sig end module (M @@ %s) = A end"
+        token
+    | "recursive-first" ->
+      Printf.sprintf
+        "module type S = sig module rec M : sig end @@ %s and N : sig end end"
+        token
+    | "recursive-and" ->
+      Printf.sprintf
+        "module type S = sig module rec M : sig end and N : sig end @@ %s end"
+        token
+    | _ -> assert false
+  in
+  "[@@@warning \"-220\"] " ^ source
+;;
+
+[%%expect{|
+val module_declaration_source : string -> string -> string = <fun>
+|}];;
+
+let check_module_declaration_roundtrip placement token =
+  let source = module_declaration_source placement token in
+  let printed = roundtrip_structure source in
+  if not (contains printed ("@@ " ^ token))
+  then failwith "module declaration modality was dropped";
+  Format.printf "Round-tripped %s with %s@." placement token
+;;
+
+[%%expect{|
+val check_module_declaration_roundtrip : string -> string -> unit = <fun>
+|}];;
+
+let placements =
+  [ "declaration-suffix";
+    "declaration-name";
+    "alias-suffix";
+    "alias-name";
+    "recursive-first";
+    "recursive-and" ]
+;;
+
+let modality_tokens = [ "total"; "partial"; "logical"; "nonlogical" ];;
+
+List.iter
+  (fun placement ->
+    List.iter
+      (check_module_declaration_roundtrip placement)
+      modality_tokens)
+  placements
+;;
+
+[%%expect{|
+val placements : string list =
+  ["declaration-suffix"; "declaration-name"; "alias-suffix"; "alias-name";
+   "recursive-first"; "recursive-and"]
+val modality_tokens : string list =
+  ["total"; "partial"; "logical"; "nonlogical"]
+Round-tripped declaration-suffix with total
+Round-tripped declaration-suffix with partial
+Round-tripped declaration-suffix with logical
+Round-tripped declaration-suffix with nonlogical
+Round-tripped declaration-name with total
+Round-tripped declaration-name with partial
+Round-tripped declaration-name with logical
+Round-tripped declaration-name with nonlogical
+Round-tripped alias-suffix with total
+Round-tripped alias-suffix with partial
+Round-tripped alias-suffix with logical
+Round-tripped alias-suffix with nonlogical
+Round-tripped alias-name with total
+Round-tripped alias-name with partial
+Round-tripped alias-name with logical
+Round-tripped alias-name with nonlogical
+Round-tripped recursive-first with total
+Round-tripped recursive-first with partial
+Round-tripped recursive-first with logical
+Round-tripped recursive-first with nonlogical
+Round-tripped recursive-and with total
+Round-tripped recursive-and with partial
+Round-tripped recursive-and with logical
+Round-tripped recursive-and with nonlogical
 - : unit = ()
 |}]

@@ -674,6 +674,7 @@ type t = {
   classes: (lock_or_stage, class_data, class_data) IdTbl.t;
   cltypes: (empty, cltype_data, cltype_data) IdTbl.t;
   functor_args: unit Ident.tbl;
+  dependent_parameters: string Ident.Map.t;
   jkinds : (empty, jkind_data, jkind_data) IdTbl.t;
   summary: summary;
   local_constraints: type_declaration StagedPath.Map.t;
@@ -983,6 +984,7 @@ let empty = {
   implicit_jkinds = String.Map.empty;
   flags = 0;
   functor_args = Ident.empty;
+  dependent_parameters = Ident.Map.empty;
   jkinds = IdTbl.empty;
   stage = 0;
   toplevel_scope = Ident.lowest_scope
@@ -998,6 +1000,14 @@ let in_signature b env =
   {env with flags}
 
 let is_in_signature env = env.flags land in_signature_flag <> 0
+
+let add_dependent_parameter ~label id env =
+  { env with
+    dependent_parameters = Ident.Map.add id label env.dependent_parameters;
+  }
+
+let dependent_parameter_label id env =
+  Ident.Map.find_opt id env.dependent_parameters
 
 let has_local_constraints env =
   not (StagedPath.Map.is_empty env.local_constraints)
@@ -4330,6 +4340,7 @@ let add_components slot root env0 comps (locks : locks) =
     classes;
     cltypes;
     functor_args = env0.functor_args;
+    dependent_parameters = env0.dependent_parameters;
     jkinds;
     summary = Env_open(env0.summary, root);
     local_constraints = env0.local_constraints;

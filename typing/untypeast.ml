@@ -914,7 +914,8 @@ let signature_item sub item =
 let module_declaration sub md =
   let loc = sub.location sub md.md_loc in
   let attrs = sub.attributes sub md.md_attributes in
-  Md.mk ~loc ~attrs
+  let modalities = Typemode.untransl_modalities md.md_modalities in
+  Md.mk ~loc ~attrs ~modalities
     (map_loc sub md.md_name)
     (sub.module_type sub md.md_type)
 

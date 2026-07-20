@@ -92,7 +92,11 @@ module type Core_options = sig
   val _dsource : unit -> unit
   val _vox_dump_vc : unit -> unit
   val _vox_dump_vc_json : string -> unit
+  val _vox_dump_vc_json_smt : unit -> unit
   val _vox_type_only : unit -> unit
+  val _vox_backend : string -> unit
+  val _vox_smt_solver : string -> unit
+  val _vox_oxsmt_solver : string -> unit
   val _dparsetree : unit -> unit
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit

@@ -1,0 +1,8 @@
+File "bst.ml", line 1:
+Error: Refinement verification failed at module seal for value "empty_law" (disproved)
+File "bst.mli", lines 8-10, characters 0-43:
+  Interface declaration for value empty_law
+File "bst.ml", line 13, characters 4-13:
+13 | let empty_law ~(key : int)
+         ^^^^^^^^^
+  Implementation declaration for value empty_law

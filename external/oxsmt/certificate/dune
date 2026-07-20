@@ -1,0 +1,8 @@
+; Shipped certificate library (ADR-0013), stdlib-only. The checker independently replays
+; W1b equality elimination; it uses the existing CNF encoder only to bind the recorded
+; post-Preprocess term to the raw Sat Query clauses. CNF and the lower Preprocess rewrite
+; remain explicit trusted boundaries for this tranche.
+
+(library
+ (name oxsmt_certificate)
+ (libraries oxsmt_core oxsmt_preprocess oxsmt_lia oxsmt_solver))

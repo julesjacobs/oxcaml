@@ -1,0 +1,4 @@
+File "uninhabited_reference_source.ml", lines 5-6, characters 2-3:
+5 | ..let _proof = sink_def x in
+6 |   x
+Error: Refinement verification failed (solver-error)

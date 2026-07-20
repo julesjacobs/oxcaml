@@ -1,0 +1,4 @@
+File "client_unentailed.ml", line 2, characters 2-60:
+2 |   (Bst.member 3 (Bst.insert 3 Bst.empty) : bool{ _ = true })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
