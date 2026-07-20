@@ -119,12 +119,49 @@ let modelfind_on =
   | Some _ | None -> false
 ;;
 
+(* Rung 3b (OXSMT_LIA_DISEQ_CDCL): make the {!Lia.model_find} dive use bounded-backtracking
+   DPLL over the pin-separation decisions instead of the greedy skip, so it converges to a
+   FULLY-separated integral model on the disequality-dense convert class rather than handing
+   residual pins back to the combinator and wandering. Only meaningful together with
+   [modelfind_on] (the dive activates and receives pins under [OXSMT_LIA_MODELFIND]); on its
+   own it is inert. Default OFF -> byte-identical to trunk (dive never called). *)
+let diseq_cdcl_on =
+  match Sys.getenv_opt "OXSMT_LIA_DISEQ_CDCL" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* B&B node budget for the dive (PORTFOLIO TIME-BOX LAW: an auxiliary strategy must be
    bounded well below the wall). Overridable ([OXSMT_LIA_MODELFIND_BUDGET]) for A/B and
    tuning; the default is the {!Lia.model_find} default. Only consulted when
    [modelfind_on]. *)
 let modelfind_budget =
   Option.bind (Sys.getenv_opt "OXSMT_LIA_MODELFIND_BUDGET") int_of_string_opt
+;;
+
+(* STALL DETECTOR for the dive (large-coefficient mode-2 wall, logs/large-coeff-arith-report.md).
+   [OXSMT_LIA_MODELFIND_STALL=1] aborts a dive that re-branches a small variable set without
+   progress — the cut-free B&B unit-step walk on 2^32/2^64-coefficient constraints, where the
+   dive burns its whole node budget re-branching ~12-32 variables (depth >> distinct vars)
+   while a converging dive keeps depth ~= distinct. Aborting = the [node_budget] cutoff's
+   contract (fall back to the ordinary path, which SOLVES these files), so it is sound;
+   orthogonal to [diseq_cdcl_on] (it fires in phase-1 integralization, before pin separation).
+   Only consulted when [modelfind_on]; OFF ([None]) is byte-identical to trunk. Tunables:
+   [OXSMT_LIA_MODELFIND_STALL_MIN] (min nodes before it can fire, default 1000) and
+   [OXSMT_LIA_MODELFIND_STALL_RATIO] (nodes / distinct-vars ratio, default 16 — far above a
+   converging dive's ~1.3, far below a stuck dive's 60+). *)
+let modelfind_stall =
+  match Sys.getenv_opt "OXSMT_LIA_MODELFIND_STALL" with
+  | Some ("1" | "true" | "yes" | "on") ->
+    let env_int name default =
+      match Option.bind (Sys.getenv_opt name) int_of_string_opt with
+      | Some n when n > 0 -> n
+      | Some _ | None -> default
+    in
+    Some
+      ( env_int "OXSMT_LIA_MODELFIND_STALL_MIN" 1000
+      , env_int "OXSMT_LIA_MODELFIND_STALL_RATIO" 16 )
+  | Some _ | None -> None
 ;;
 
 let cut_gate_ants_pct =
@@ -469,7 +506,7 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
    miss (no model in budget, or the once-per-instance guard already fired) falls through
    to the split/cut. *)
 let dive_or_branch t le_atom ge_atom : Fabric.check_result =
-  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget t.lia
+  if modelfind_on && Lia.model_find ?node_budget:modelfind_budget ~backtrack:diseq_cdcl_on ?stall:modelfind_stall t.lia
   then Fabric.Sat
   else branch_or_hnf_cut t le_atom ge_atom
 ;;

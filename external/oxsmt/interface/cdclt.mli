@@ -249,6 +249,12 @@ val on_chrono_rewind_for_test : t -> int -> unit
 val check_for_test : t -> final:bool -> Oxsmt_solver.Sat.theory_result
 val ckpt_log_length_for_test : t -> int
 
+(** Backstop hit counter (LAND 65, task #31): the number of times
+    [complete_dt_model_with_scalars] has actually bound >= 1 missing scalar. Byte-id
+    invisible; a whitebox probe so a later stage can assert the DT scalar-completion
+    backstop still fires on the fabric path. Process-global, monotone. *)
+val dt_scalar_completion_hit_count : unit -> int
+
 (** [egraph_view t] is the immutable congruence snapshot captured at the most recent
     accepting theory [Final], for the lemma tier's E-matcher. Capturing before [Sat.solve]
     backtracks preserves the candidate assignment's equalities for congruence-dependent

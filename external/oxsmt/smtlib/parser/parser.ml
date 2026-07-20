@@ -145,8 +145,9 @@ type t =
          Empty when the flag is OFF (byte-identical) — quantifiers then take {!lemmas}/
          {!existentials}. Ground (non-quantifier) assertions always take {!assertions}. *)
   ; dropped : int
-  (* count of assertion content the reader could not represent and dropped via partial
-     assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade sentinel *)
+      (* count of assertion content the reader could not represent and dropped via partial
+         assertion (lemmas-climb); [> 0] means the loader must arm the sat-degrade
+         sentinel *)
   ; assumptions : (Term.t * bool) list option
   (* the [(check-sat-assuming (lit ...))] assumption literals as (atom, polarity) pairs
      ([true] = the atom, [false] = its negation), in file order; [None] when there is no
@@ -206,6 +207,13 @@ type pstate =
          instantiation, keyed by a deterministic string; arrays are polymorphic so each
          instantiation gets its own symbol with a concrete rank *)
   ; mutable arrays : Array_defs.t (* the accumulated array select/store symbol registry *)
+  ; mutable nia_mul_sym : Symbol.t option
+      (* the single [.oxsmt.nia.mul : (Int Int) Int] symbol abstracting nonlinear integer
+         products (dark OXSMT_NIA), minted on first use and reused so hash-consing gives
+         congruence for free. [None] until the first nonlinear product is read. *)
+  ; mutable nia_products : Nia_lin.product list
+  (* every distinct abstracted product [p = a*b] discovered while reading terms; drained
+     at end of {!run} to emit {!Nia_lin.lemmas} as extra top-level assertions. *)
   }
 
 module Tok = Oxsmt_lexical.Lexer
@@ -650,6 +658,134 @@ and read_let ?expected st scope rest =
     read_term ?expected st scope body
   | _ -> malformedf "malformed let (expected (let (bindings) body))"
 
+(* Datatype [(match t ((pat body) ...))]: desugar to nested testers + selectors + [ite],
+   exactly as z3 lowers a datatype match. A constructor pattern [C] (nullary) or
+   [(C x1..xn)] contributes [ite ((_ is C) t) body ...], with each [xi] bound in [body]'s
+   scope to the selector application [(sel_i t)] (so the body reads the field by the
+   pattern variable's name). A variable / wildcard [_] pattern is the catch-all default
+   (binds the whole scrutinee unless [_]). The LAST case is the [ite] chain's else branch:
+   the datatype is exhaustive (SMT-LIB requires a match to cover every constructor, or
+   carry a wildcard), so if a value is none of the earlier-tested constructors it must be
+   the last case's — this is exact, not an approximation. The scrutinee term is read ONCE
+   and shared across every tester/selector (hash-consed). Raises {!Malformed} on a
+   non-datatype scrutinee, an unknown constructor, or a pattern-arity mismatch. *)
+and read_match ?expected st scope args orig =
+  match args with
+  | [ scrut_s; Sexp.List cases ] ->
+    let scrut = read_term st scope scrut_s in
+    let dt =
+      match scrut.Term.sort with
+      | Sort.Datatype sym ->
+        (match Datatype_defs.datatype_of_sort st.datatypes sym with
+         | Some dt -> dt
+         | None -> malformedf "match scrutinee sort is not a declared datatype")
+      | _ -> malformedf "match scrutinee is not a datatype: %s" (Sexp.to_string scrut_s)
+    in
+    let find_ctor cname =
+      List.find_opt
+        (fun (c : Datatype_defs.constructor) ->
+          String.equal (Symbol.name c.Datatype_defs.sym) cname)
+        dt.Datatype_defs.constructors
+    in
+    (* Build one case: [Some ctor_name, Some tester, body] for a constructor pattern,
+       [None, None, body] for a default (variable / wildcard). The [ctor_name] lets the
+       exhaustiveness check count DISTINCT constructors and reject a duplicate pattern. *)
+    let build_case (c : Sexp.t) =
+      let pat, body_s =
+        match c with
+        | Sexp.List [ pat; body ] -> pat, body
+        | _ ->
+          malformedf
+            "malformed match case (expected (pattern body)): %s"
+            (Sexp.to_string c)
+      in
+      match pat with
+      (* wildcard [_] is a catch-all default binding nothing (it is a reserved token, so
+         [Sexp.symbol_name] does not see it). *)
+      | Sexp.Atom (Tok.Reserved "_") -> None, None, read_term ?expected st scope body_s
+      | Sexp.Atom _ ->
+        (match Sexp.symbol_name pat with
+         | None -> malformedf "malformed match pattern: %s" (Sexp.to_string pat)
+         | Some pname ->
+           (match find_ctor pname with
+            | Some c ->
+              if c.Datatype_defs.selectors <> []
+              then malformedf "match: constructor %s needs arguments" pname;
+              ( Some pname
+              , Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
+              , read_term ?expected st scope body_s )
+            | None ->
+              (* a variable (or [_]) pattern: default case; a named variable binds the
+                 whole scrutinee. *)
+              let scope' =
+                if String.equal pname "_" then scope else Scope.add pname scrut scope
+              in
+              None, None, read_term ?expected st scope' body_s))
+      | Sexp.List (chead :: var_atoms) ->
+        (match Sexp.symbol_name chead with
+         | None ->
+           malformedf "malformed match constructor pattern: %s" (Sexp.to_string pat)
+         | Some cname ->
+           (match find_ctor cname with
+            | None -> malformedf "match: unknown constructor %s in pattern" cname
+            | Some c ->
+              if List.length var_atoms <> List.length c.Datatype_defs.selectors
+              then malformedf "match: constructor %s pattern arity mismatch" cname;
+              let scope' =
+                List.fold_left2
+                  (fun acc var_s (sel : Datatype_defs.selector) ->
+                    match Sexp.symbol_name var_s with
+                    | Some "_" -> acc
+                    | Some v ->
+                      Scope.add v (Context.app st.ctx sel.Datatype_defs.sym [ scrut ]) acc
+                    | None ->
+                      malformedf
+                        "malformed match pattern variable: %s"
+                        (Sexp.to_string var_s))
+                  scope
+                  var_atoms
+                  c.Datatype_defs.selectors
+              in
+              ( Some cname
+              , Some (Context.app st.ctx c.Datatype_defs.tester [ scrut ])
+              , read_term ?expected st scope' body_s )))
+      | _ -> malformedf "malformed match pattern: %s" (Sexp.to_string pat)
+    in
+    let built = List.map build_case cases in
+    (* Exhaustiveness: the last case becomes the [ite] chain's else (no tester), so a
+       match that is NOT exhaustive (fewer distinct constructor cases than the datatype
+       has, and no variable/wildcard default) would silently give the last case's body for
+       an uncovered constructor — a wrong value. Count DISTINCT constructors covered (and
+       reject a duplicate constructor pattern), so a duplicate cannot inflate the count
+       and mask an uncovered constructor. SMT-LIB requires exhaustiveness; reject a
+       non-exhaustive match as malformed (fail-closed to unknown) rather than risk a wrong
+       verdict. *)
+    let has_default = List.exists (fun (_, tester_opt, _) -> tester_opt = None) built in
+    let covered =
+      List.filter_map (fun (name_opt, _, _) -> name_opt) built
+      |> List.sort_uniq String.compare
+    in
+    let n_ctor_cases = List.length (List.filter (fun (_, t, _) -> t <> None) built) in
+    if List.length covered < n_ctor_cases
+    then malformedf "match: duplicate constructor pattern";
+    if (not has_default)
+       && List.length covered < List.length dt.Datatype_defs.constructors
+    then malformedf "non-exhaustive match (no default and not all constructors covered)";
+    (match List.rev built with
+     | [] -> malformedf "match with no cases: %s" (Sexp.to_string orig)
+     | (_, _, last_body) :: rest_rev ->
+       (* rest_rev is later-to-earlier; fold builds ite tester0 body0 (... last_body). A
+          non-last default case discards the (dead) accumulated later cases. *)
+       List.fold_left
+         (fun else_acc (_, tester_opt, body) ->
+           match tester_opt with
+           | Some tester -> Context.ite st.ctx tester body else_acc
+           | None -> body)
+         last_body
+         rest_rev)
+  | _ ->
+    malformedf "malformed match (expected (match t (cases))): %s" (Sexp.to_string orig)
+
 (* The application head selects interpretation. Only an UNQUOTED symbol can be a builtin
    operator; a quoted [|+|] head (or a reserved word) is never an operator. *)
 and read_app ?expected st scope head args orig =
@@ -707,7 +843,7 @@ and read_app ?expected st scope head args orig =
                 | _ -> false)
               binders -> unsupportedf "quantifiers are not supported (QF only)"
      | _ -> malformedf "malformed quantifier (expected (forall|exists (binders) body))")
-  | Sexp.Atom (Tok.Reserved "match") -> unsupportedf "datatype match is not supported yet"
+  | Sexp.Atom (Tok.Reserved "match") -> read_match ?expected st scope args orig
   | Sexp.Atom (Tok.Reserved r) ->
     malformedf "reserved word %s cannot head an application" r
   (* Tester [((_ is C) t)]: an indexed identifier heads the application. Resolve to the
@@ -1089,12 +1225,13 @@ and read_op ?expected st scope op args orig =
        mixed-Int/Real), so the flag-ON Real path is unchanged in result. *)
     let neg_terms = List.map (fun a -> rd a) rest_args in
     let head = rd first_arg in
-    (* R1: honor an enclosing Real [expected] (e.g. this subtraction used as an operand of a
-       Real [=]/comparison, which [same_sort_terms] re-reads with [expected = Real]). Without
-       it, an all-Int subtraction whose operands widen to Real (an Int [ite]/const) stays Int
-       and then mixes with the Real context, degrading to unknown; the [coerce_to_sort] calls
-       below widen each operand ([(= (- (ite p 1 2) 3) 0.0)] -> unsat). Only fires under
-       [expected = Real], so the all-Int (non-Real) path and its byte-identity are untouched. *)
+    (* R1: honor an enclosing Real [expected] (e.g. this subtraction used as an operand of
+       a Real [=]/comparison, which [same_sort_terms] re-reads with [expected = Real]).
+       Without it, an all-Int subtraction whose operands widen to Real (an Int
+       [ite]/const) stays Int and then mixes with the Real context, degrading to unknown;
+       the [coerce_to_sort] calls below widen each operand ([(= (- (ite p 1 2) 3) 0.0)] ->
+       unsat). Only fires under [expected = Real], so the all-Int (non-Real) path and its
+       byte-identity are untouched. *)
     let expected_real =
       match expected with
       | Some sort -> Lra_config.enabled () && Sort.equal sort Sort.real
@@ -1247,9 +1384,28 @@ and read_xor st scope args =
     List.fold_left (fun acc a -> Context.not_ st.ctx (Context.eq st.ctx acc a)) first rest
   | _ -> malformedf "xor expects >= 2 arguments"
 
+(* Abstract one binary integer product [a*b] as [(.oxsmt.nia.mul a b)] (dark OXSMT_NIA):
+   mint-or-reuse the single shared symbol so hash-consing gives congruence for free, and
+   register the product for end-of-parse lemma emission ({!Nia_lin}). *)
+and nia_mul_term st a b =
+  let sym =
+    match st.nia_mul_sym with
+    | Some s -> s
+    | None ->
+      let s =
+        internal_mint st Nia_config.mul_name (Rank.create [ Sort.int; Sort.int ] Sort.int)
+      in
+      st.nia_mul_sym <- Some s;
+      s
+  in
+  let p = Context.app st.ctx sym [ a; b ] in
+  st.nia_products <- { Nia_lin.p; a; b } :: st.nia_products;
+  p
+
 (* Linear multiplication only: at most one non-constant factor (DESIGN §1). Constant
    factors fold into a coefficient via [mul_const]; two or more non-constants is nonlinear
-   and unsupported. *)
+   and unsupported — unless the nonlinear-integer lever is on, when a >= 2-nonconstant
+   integer product is abstracted via {!nia_mul_term}. *)
 and read_mul ?expected st scope args =
   let parsed =
     match expected with
@@ -1304,6 +1460,15 @@ and read_mul ?expected st scope args =
         ts
     in
     match nonconsts with
+    | first :: (_ :: _ as rest) when Nia_config.enabled () ->
+      (* Nonlinear integer product (dark OXSMT_NIA). Abstract the >= 2 non-constant
+         factors into a left-associated chain of uninterpreted [.oxsmt.nia.mul]
+         applications ([x*y*z] -> [mul(mul(x,y),z)]), then fold any constant factors as a
+         coefficient. Sound: the abstraction is an ordinary uninterpreted function (unsat
+         holds for real multiplication too), constrained by {!Nia_lin.lemmas} and
+         re-checked by {!Model_check} under real multiplication. *)
+      let product = List.fold_left (fun acc t -> nia_mul_term st acc t) first rest in
+      List.fold_left (fun acc k -> Context.mul_const_big st.ctx k acc) product consts
     | _ :: _ :: _ -> unsupportedf "nonlinear multiplication (>= 2 non-constant factors)"
     | _ ->
       let base =
@@ -2150,6 +2315,13 @@ let known_logic = function
   | "QF_UFBV"
   | "QF_BVLIA"
   | "QF_UFBVLIA" -> true
+  (* Nonlinear integer arithmetic (dark OXSMT_NIA). Accepted at the NAME level only when
+     the lever is on: a nonlinear product is abstracted to an uninterpreted
+     [.oxsmt.nia.mul] application ({!read_mul}) reduced to QF_UFLIA + sound multiplication
+     lemmas, and every [sat] is re-checked under REAL multiplication ({!Model_check}). Any
+     construct still outside that subset (a real product, an unbounded pathological term)
+     degrades per the fail-closed CONSTRUCT discipline. *)
+  | "QF_NIA" | "NIA" -> Nia_config.enabled ()
   (* quantified UF/LIA family + array/real/datatype supersets seen in ../corpora *)
   | "UF"
   | "UFLIA"
@@ -2187,9 +2359,9 @@ let run st sexps =
   let exited = ref false in
   (* The [(check-sat-assuming (lit ...))] assumption literals, if any. [None] until a
      check-sat-assuming is seen; [Some pairs] after (possibly empty). Each literal is a
-     Boolean atom (polarity [true]) or its single [(not atom)] negation (polarity [false]),
-     read through the ordinary term reader at top-level scope so a non-Bool or undeclared
-     literal is a [Malformed] exactly as an ill-sorted assert would be. *)
+     Boolean atom (polarity [true]) or its single [(not atom)] negation (polarity
+     [false]), read through the ordinary term reader at top-level scope so a non-Bool or
+     undeclared literal is a [Malformed] exactly as an ill-sorted assert would be. *)
   let assumptions = ref None in
   let read_assumption (lit : Sexp.t) =
     let atom, polarity =
@@ -2436,9 +2608,31 @@ let run st sexps =
          | Some other, _ -> unsupportedf "unsupported command: %s" other
          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
+  (* Emit the nonlinear-multiplication lemmas (dark OXSMT_NIA) as extra top-level
+     assertions, one set per DISTINCT abstracted product. Each is a valid integer
+     consequence of [p = a*b] ({!Nia_lin}), so they are equisatisfiable with the original
+     nonlinear formula and safe to add to the asserted set (they also hold under
+     {!Model_check}'s real-multiplication re-evaluation). *)
+  let nia_lemmas =
+    match st.nia_products with
+    | [] -> []
+    | products ->
+      let seen = Term.Table.create 64 in
+      let distinct =
+        List.filter
+          (fun { Nia_lin.p; _ } ->
+            match Term.Table.find_opt seen p with
+            | Some () -> false
+            | None ->
+              Term.Table.replace seen p ();
+              true)
+          products
+      in
+      Nia_lin.lemmas st.ctx distinct
+  in
   ( !logic
   , !status
-  , List.rev !asserts
+  , List.rev !asserts @ nia_lemmas
   , List.rev !lemmas
   , List.rev !existentials
   , List.rev !clauses
@@ -2460,6 +2654,8 @@ let parse_into_sexps ?internal_mint env ctx (sexps : Sexp.t list) =
     ; internal_mint
     ; array_ops = Hashtbl.create 8
     ; arrays = Array_defs.empty
+    ; nia_mul_sym = None
+    ; nia_products = []
     }
   in
   let logic, status, assertions, lemmas, existentials, clauses, dropped, assumptions =

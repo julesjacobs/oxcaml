@@ -74,3 +74,13 @@
  (name cut_budget_test)
  (modules cut_budget_test)
  (libraries oxsmt_core oxsmt_lia))
+
+; Incremental difference-logic graph self-test (Cotton-Maler {!Dl}): directed cases +
+; 20k-step randomized differential fuzz against an INDEPENDENT Bellman-Ford oracle
+; (consistency verdict, conflict-premise negative-cycle check, and implied-entailment via
+; integer negation). Simplex-free, deterministic, stdlib-only (I3 firewall).
+
+(executable
+ (name dl_test)
+ (modules dl_test)
+ (libraries oxsmt_core oxsmt_lia))

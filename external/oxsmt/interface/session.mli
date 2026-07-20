@@ -381,6 +381,16 @@ val pop : t -> unit
     Repeatable; more assertions or push/pop may follow. *)
 val check_sat : t -> verdict
 
+(** [nia_refine t] is the dark OXSMT_NIA incremental-linearization refinement step. After
+    a [check_sat] that returned [Unknown] because the model self-check rejected a
+    candidate whose nonlinear product was inconsistent under real multiplication, it pins
+    each abstracted product at that model's values (a sound conditional point lemma) so
+    the next [check_sat] cannot reuse the inconsistent model. Returns [true] iff a new
+    lemma was asserted (progress to re-solve on); [false] (lever off, no rejected model,
+    or no new point) stops the caller's bounded loop. A no-op returning [false] unless the
+    lever is on and nonlinear products are present, so it never perturbs a non-NIA query. *)
+val nia_refine : t -> bool
+
 (** [check_sat_assuming t assumptions] decides the active assertions conjoined with the
     supplied Boolean literals. Each term must be a Bool-sorted atom built in [context t];
     Boolean connectives are rejected with [Invalid_argument]. Exact duplicate literals are
@@ -622,6 +632,12 @@ type instantiation =
     instance actually asserted this session, tagged with which lemma and substitution
     produced it (a budget-aborted round's instances are absent). *)
 val lemma_instantiations : t -> instantiation list
+
+(** Backstop hit counter (LAND 67, task #31): the number of times [complete_dt_bool_atoms]
+    has actually bound >= 1 missing Bool atom. Byte-id invisible; a whitebox probe so a
+    later stage can assert the DT Bool-completion backstop still fires on the fabric path.
+    Process-global, monotone. *)
+val dt_bool_completion_hit_count : unit -> int
 
 (** Test-only whitebox hook. NOT for solver code. *)
 module For_test : sig

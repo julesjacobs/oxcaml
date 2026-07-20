@@ -42,9 +42,7 @@ let as_real = function
   | _ -> raise Bad
 ;;
 
-let real_of_term_rational (q : Term.rational) =
-  Rational.of_big_frac ~num:q.num ~den:q.den
-;;
+let real_of_term_rational (q : Term.rational) = Rational.of_big_frac ~num:q.num ~den:q.den
 
 (* Evaluate [t] under the model tables ([consts]/[funs]); raises {!Bad} on any fault
    (missing binding, type error, arithmetic overflow). Shared by {!check} (over the
@@ -77,7 +75,17 @@ let ev_with
     | Term.Real_const q -> VReal (real_of_term_rational q)
     | Term.App (sym, args) ->
       let name = Symbol.name sym in
-      if Iarr.length args = 0
+      if Nia_config.is_mul_name name && Iarr.length args = 2
+      then (
+        (* Nonlinear-integer product marker (dark OXSMT_NIA): evaluate as ACTUAL integer
+           multiplication of the argument values, NOT via the reconstructed uninterpreted
+           table. This is the SAT-soundness gate — a candidate model in which the product
+           constraint is violated makes the enclosing assertion evaluate false and fails
+           closed to [unknown]. Fail-closed on any non-Int argument (rank disagreement). *)
+        match Iarr.to_list args with
+        | [ x; y ] -> VInt (Bigint.mul (as_int (ev x)) (as_int (ev y)))
+        | _ -> raise Bad)
+      else if Iarr.length args = 0
       then (
         match Hashtbl.find_opt consts name with
         | Some v -> v
@@ -108,7 +116,7 @@ let ev_with
       let s =
         Iarr.fold
           (fun acc (c, coeff) ->
-             Rational.add acc (Rational.mul (real_of_term_rational coeff) (as_real (ev c))))
+            Rational.add acc (Rational.mul (real_of_term_rational coeff) (as_real (ev c))))
           (real_of_term_rational lin.Term.const)
           lin.Term.coeffs
       in

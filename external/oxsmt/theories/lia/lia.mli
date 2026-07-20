@@ -213,7 +213,17 @@ val cube_model : 'tok t -> (Term.t * int) list option
     [px <> py]; the combiner's [find_disagreement] then rejects it and splits. On a
     formula with hundreds of pinned disequalities (convert), the dive/split interleaving
     does not converge — a disequality-AWARE dive is the follow-up. *)
-val model_find : ?node_budget:int -> 'tok t -> bool
+
+(** [?stall = Some (min_nodes, ratio)] aborts a dive that re-branches a small variable set
+    without progress — the cut-free B&B unit-step walk on 2^32/2^64-coefficient
+    constraints (the "mode-2" wall), where [depth >> distinct branched vars] while a
+    converging dive keeps [depth ~= distinct]. It fires only once [nodes >= min_nodes] and
+    [nodes >= ratio * distinct-branched-vars], and only in phase-1 integralization
+    (orthogonal to [backtrack]'s pin machinery). Aborting returns [false] exactly like the
+    [node_budget] cutoff, so it is sound (only turns a long stuck dive into a fast
+    fallback, never a wrong verdict) and [None] (the default) is byte-identical to trunk.
+    Wired to [OXSMT_LIA_MODELFIND_STALL{,_MIN,_RATIO}] in {!Lia_adapter}. *)
+val model_find : ?node_budget:int -> ?backtrack:bool -> ?stall:int * int -> 'tok t -> bool
 
 (** [set_pin_hint t pairs] installs a READ-ONLY snapshot of the combinator's pinned Int
     disequality pairs [(px, py)] (meaning [px <> py]) for the next {!model_find} dive to

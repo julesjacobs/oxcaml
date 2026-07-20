@@ -153,6 +153,24 @@ let modelfind_on =
   | Some _ | None -> false
 ;;
 
+(* DT+LIA Nelson-Oppen purification for selector-under-arith (task #63, bugreport 03
+   residual). The congruence child (DT) can derive an Int equality between two interface
+   members — selector evaluation [key (Node _ f _) = f] — whose defining field [f] is a
+   COMPOUND arith term (e.g. [x + 1]) with a leaf [x] that LIA never saw (it occurs only
+   inside the datatype constructor). LIA then cannot value the selector output, so the
+   value-based {!find_disagreement} skips the pair and the equality stays UNSHARED: a
+   genuinely-decidable goal degrades to a sound [unknown]. This pass surfaces the equality
+   directly (see {!find_congruence_split}). Read-once, same tri-state default-ON
+   vocabulary as {!model_repair_on}: unset / any non-off value -> ON; [=0/false/no] -> OFF
+   (the byte-for-byte pre-fix DT+LIA path — the RED repros return to [unknown]).
+   Non-datatype combinations ([R.congruence_models_datatypes] false) never run the pass
+   regardless of this flag, so QF_UFLIA/QF_UFLRA stay byte-identical by construction. *)
+let dtlia_purify_on =
+  match Sys.getenv_opt "OXSMT_DTLIA_PURIFY" with
+  | Some ("0" | "false" | "no") -> false
+  | Some _ | None -> true
+;;
+
 module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : sig
   include Theory.THEORY
 
@@ -176,6 +194,7 @@ module Combine (R : ROUTER) (A : FABRIC_CONGRUENCE_CHILD) (B : FABRIC_CHILD) : s
 
   val fabric_stats : t -> fabric_stats
   val set_fabric_trace : t -> Fabric.trace option -> unit
+  val congruence_split_hit_count : unit -> int
   val has_live_fabric_edges : t -> bool
 
   (* ADR-0014 Stage 4.2: sub-frame checkpoint/rewind (chrono earliest-removed incremental
@@ -841,6 +860,74 @@ end = struct
     outer valued
   ;;
 
+  (* task #63 (N-O purification / bugreport 03 residual): surface an Int equality the
+     congruence child (DT) KNOWS but LIA's model has not reflected. When the datatype
+     child selector-evaluates [key (Node _ f _) = f] and the field [f] is a COMPOUND arith
+     term ([x + 1]) whose leaf [x] LIA never saw (it occurs only inside the datatype
+     constructor), LIA cannot value the selector output, so the value-based
+     {!find_disagreement} skips the pair and the equality is never routed to LIA — a
+     decidable goal degrades to a sound [unknown]. Here, for each Int-sorted interface
+     pair the congruence child equates ([A.fabric_are_equal] — a pure e-graph query, no
+     fabric state, works on the classic path) but the arithmetic model does NOT reflect
+     (endpoints valued differently, or at least one unvalued), emit the trichotomy so the
+     SAT layer routes [a = b] into LIA (a positive Int equality is [Both]-owned, so LIA
+     absorbs it and the [x + 1] leaf becomes a LIA variable). Reached only when BOTH
+     children are Final-Sat, so the current arrangement is already DT-consistent; the
+     emitted split is a valid case-split — SOUND (it only adds constraints, never
+     fabricates a model; Sat is still certified only after the DT axiom Final + the
+     independent Dt_model_check). DT-scoped by [R.congruence_models_datatypes] (false ⇒
+     [None] ⇒ QF_UFLIA/QF_UFLRA byte-identical) and by {!dtlia_purify_on} ([=0] restores
+     the pre-fix DT+LIA path). Progress-guard: fires only where LIA does not already
+     reflect the equality, so once [a = b] is asserted and absorbed the pair is skipped —
+     terminating (interface², per invariant (iii), same per-ground-check scope as
+     {!find_disagreement}). *)
+  (* Backstop hit counter (LAND 67, task #31): incremented once per fire when
+     [find_congruence_split] actually returns a split. Byte-id-invisible — the increment
+     changes no verdict, split count, or explanation; a whitebox probe read only by tests
+     so a later stage can assert the backstop still fires on the fabric path. *)
+  let congruence_split_hits = ref 0
+  let congruence_split_hit_count () = !congruence_split_hits
+
+  let find_congruence_split t mb =
+    if (not dtlia_purify_on) || not R.congruence_models_datatypes
+    then None
+    else (
+      let candidate (term : Term.t) =
+        match term.Term.sort with
+        | Sort.Bool
+        | Sort.Uninterpreted _
+        | Sort.Datatype _
+        | Sort.Array _
+        | Sort.BitVec _ -> false
+        | (Sort.Int _ | Sort.Real) as sort -> R.arithmetic_sort sort
+      in
+      let members = List.filter candidate (Term.Set.elements t.interface) in
+      (* LIA already reflects [a = b] iff it values both endpoints to the same value. *)
+      let mb_reflects a b =
+        match model_eval mb a, model_eval mb b with
+        | Some va, Some vb -> value_equal va vb
+        | _ -> false
+      in
+      let rec outer = function
+        | [] -> None
+        | a :: rest ->
+          (match inner a rest with
+           | Some pair -> Some pair
+           | None -> outer rest)
+      and inner a = function
+        | [] -> None
+        | b :: rest ->
+          if A.fabric_are_equal t.a a b && not (mb_reflects a b)
+          then Some (a, b)
+          else inner a rest
+      in
+      match outer members with
+      | Some (a, b) ->
+        incr congruence_split_hits;
+        Some (R.equality_split t.ctx a b)
+      | None -> None)
+  ;;
+
   (* H2 (codex): a Bool leaf / Bool-returning UF used as an argument of an uninterpreted
      function is sound only if EUF has BOUND it to [true]/[false] — which happens exactly
      when it surfaced as a SAT atom (a top-level literal asserted via K_bool). A BURIED
@@ -994,13 +1081,16 @@ end = struct
       (match repair_split t mb with
        | Some split -> Theory.Split split
        | None ->
-         (* Int arrangement agrees; about to certify Sat — now require every buried Bool
-            UF argument to be bound (else a wrong-SAT would leak, codex H2). *)
-         require_bool_args_bound t ma;
-         require_no_foreign_arithmetic t;
-         require_no_datatype_terms t;
-         require_no_bitvec_terms t;
-         Theory.Sat)
+         (match find_congruence_split t mb with
+          | Some split -> Theory.Split split
+          | None ->
+            (* Int arrangement agrees; about to certify Sat — now require every buried
+               Bool UF argument to be bound (else a wrong-SAT would leak, codex H2). *)
+            require_bool_args_bound t ma;
+            require_no_foreign_arithmetic t;
+            require_no_datatype_terms t;
+            require_no_bitvec_terms t;
+            Theory.Sat))
   ;;
 
   let check_b_propagate t la : Theory.check_result =
@@ -1388,11 +1478,18 @@ end = struct
       (match repair_split t mb with
        | Some split -> Theory.Split split
        | None ->
-         require_bool_args_bound t ma;
-         require_no_foreign_arithmetic t;
-         require_no_datatype_terms t;
-         require_no_bitvec_terms t;
-         Theory.Sat)
+         (* M3 backstop (LAND 67): retain the congruence-split backstop on the fabric
+            path, exactly as {!combine_models} does — a DT-known Int equality LIA has not
+            reflected is routed as a case split rather than laundered into Sat. DARK in
+            Stage B ([fabric_disabled] ⇒ this drive is unreached ⇒ byte-identical OFF). *)
+         (match find_congruence_split t mb with
+          | Some split -> Theory.Split split
+          | None ->
+            require_bool_args_bound t ma;
+            require_no_foreign_arithmetic t;
+            require_no_datatype_terms t;
+            require_no_bitvec_terms t;
+            Theory.Sat))
     | Some (x, y) ->
       if try_inject_pair t x y
       then (

@@ -153,6 +153,16 @@ type t =
       (* verdict of the most recent check_sat, for get_model *)
   ; mutable last_model : model option
       (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
+  ; mutable nia_rejected_model : model option
+      (* dark OXSMT_NIA incremental linearization: the candidate model most recently
+         REJECTED by the R1 [Model_check] because a nonlinear product was inconsistent
+         under real multiplication. Retained so {!nia_refine} can pin those products at
+         their current values and re-solve (CEGAR). [None] except right after such a
+         rejection. *)
+  ; nia_refine_seen : (int, unit) Hashtbl.t
+      (* term tags of point-refinement lemmas already asserted this session, so
+         {!nia_refine} never re-asserts an identical lemma (which would loop without
+         progress). *)
   ; mutable asserted : Term.t list
       (* the ACTIVE ORIGINAL asserted terms (pre-preprocessing), for the R1 in-process
          model self-check. Frame-scoped in lockstep with [frames] (F3): a [push] snapshots
@@ -384,6 +394,8 @@ let create
   ; unknown_reason = ""
   ; last_verdict = Unknown
   ; last_model = None
+  ; nia_rejected_model = None
+  ; nia_refine_seen = Hashtbl.create 16
   ; asserted = []
   ; asserted_saved = []
   ; last_splits = 0
@@ -634,7 +646,18 @@ let context t = t.ctx
      operand/result sorts and arity against the term's actual sorts, so a mis-ranked
      admitted marker decodes to [None] (ordinary uninterpreted, at worst [unknown]), never
      reinterpreted. *)
-let parse_sanctioned_marker name = Array_defs.is_op_name name || Bv.is_bv_name name
+(* - nonlinear-integer multiplication marker ({!Oxsmt_core.Nia_config.is_mul_name}: the
+     single [.oxsmt.nia.mul] name, dark OXSMT_NIA). PAIRED check = RANK AGREEMENT +
+     REAL-MULTIPLICATION re-evaluation: {!Model_check} evaluates a 2-argument
+     [.oxsmt.nia.mul] application as actual integer multiplication of its argument values
+     and fails closed on any other shape, so a forged/mis-ranked marker cannot be
+     reinterpreted into a wrong [sat]; and to the EUF+LIA core it is an ORDINARY
+     uninterpreted function, so any [unsat] already holds for real multiplication (the
+     lemmas only add sound unsats). *)
+let parse_sanctioned_marker name =
+  Array_defs.is_op_name name || Bv.is_bv_name name || Nia_config.is_mul_name name
+;;
+
 let parse_minter t = Internal_minter.create ~admit:parse_sanctioned_marker t.cap t.env
 
 (* Declarations reject the reserved fresh-symbol namespace (board #48 / #58): every
@@ -1188,6 +1211,12 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
     Env.is_reserved_name (Symbol.name s)
     && (not (Bv.is_bv_sym s))
     && (not (Array_defs.is_op_sym s))
+    (* the nonlinear-integer product marker (dark OXSMT_NIA) is theory VOCABULARY that
+       legitimately appears in a user assertion after abstraction, exactly like the
+       bit-vector markers above; it cannot be user-forged (declaration doors reject
+       [.oxsmt.*], and [Context.app] refuses a symbol with no cap-granted rank), and its
+       consuming side ({!Model_check} real-multiplication re-eval) fails closed. *)
+    && (not (Nia_config.is_mul_name (Symbol.name s)))
     && not (List.exists (Symbol.equal s) allowed)
   in
   (* A SORT carries a symbol too: an [Uninterpreted] sort over a reserved [.oxsmt.*] name,
@@ -1923,6 +1952,65 @@ let array_checker_override
   ref None
 ;;
 
+(* DT Boolean-atom model completion (default ON; [OXSMT_DTLIA_BOOL_COMPLETE]=0/false/no
+   opts out). At an accepting DT (or DT+LIA) [Sat], [Cdclt.dt_model] carries datatype
+   trees plus Int/scalar leaves, but NOT the truth value of a PURE-Boolean atom whose
+   value lives only in the propositional skeleton: a free Bool constant that is ASSERTED,
+   ASSUMED (every non-empty {!check_sat_assuming} splices its assumption atoms into
+   [asserted]), or an uninterpreted nullary predicate. The independent {!Dt_model_check}
+   reads such a nullary atom from the model env and fails closed when it is absent
+   (dt_model_check.ml, the "leaf (nullary) variable" arm), so those otherwise-SAT problems
+   degraded to a sound [unknown] — this is the incremental DT+LIA scope limit (bugreport
+   03) and, more generally, DT with any free Boolean structure. *)
+let dtlia_bool_complete =
+  lazy
+    (match Sys.getenv_opt "OXSMT_DTLIA_BOOL_COMPLETE" with
+     | Some ("0" | "false" | "no" | "off") -> false
+     | Some _ | None -> true)
+;;
+
+(* Complete the DT checker model with a Bool leaf for every nullary Bool atom surfaced in
+   the propositional skeleton ([prop_to_var], keyed by the same hash-consed {!Term.t} the
+   checker looks up), valued from the accepting SAT assignment ([Sat.value t.sat]; fresh
+   here because [commit_sat] runs AFTER [Sat.solve] returned [Sat] and saved its model).
+
+   Gains-only and fail-closed, exactly like [Cdclt.complete_dt_model_with_scalars]: it
+   only ADDS leaves valued from the solver's OWN satisfying assignment (never invents
+   one), builds a fresh list (no session mutation), skips any term already in the model
+   ([seen]), and {!Dt_model_check} still re-evaluates every assertion independently — so
+   it can only turn a model-check [unknown] into a checked [Sat], never manufacture a
+   wrong [Sat]. A theory/compound atom (Eq/Le/And/…) is not a nullary [App], so it is
+   excluded and stays computed structurally by the checker. *)
+(* Backstop hit counter (LAND 71, task #31): incremented once per fire when this Bool-atom
+   completion actually binds >= 1 missing bool. Byte-id-invisible — the increment changes
+   no verdict, split count, or explanation; a whitebox probe read only by tests so a later
+   stage can assert the backstop still fires on the fabric path. *)
+let dt_bool_completion_hits = ref 0
+let dt_bool_completion_hit_count () = !dt_bool_completion_hits
+
+let complete_dt_bool_atoms t model =
+  if not (Lazy.force dtlia_bool_complete)
+  then model
+  else (
+    let seen = Term.Table.create 128 in
+    List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
+    let additions =
+      Term.Table.fold
+        (fun (term : Term.t) sv acc ->
+          match term.Term.node, term.Term.sort with
+          | Term.App (_, args), Sort.Bool
+            when Iarr.length args = 0 && not (Term.Table.mem seen term) ->
+            (term, Oxsmt_dt.Dt.Leaf (Model.Bool (Sat.value t.sat sv))) :: acc
+          | _ -> acc)
+        t.prop_to_var
+        []
+    in
+    (match additions with
+     | _ :: _ -> incr dt_bool_completion_hits
+     | [] -> ());
+    model @ List.sort (fun (a, _) (b, _) -> Term.compare a b) additions)
+;;
+
 let commit_sat t =
   (* ARRAYS (QF_AX model construction, task #14): the standalone arrays theory is
      installed, so soundness rests on the array self-check, not the UF [Model_check]
@@ -1965,6 +2053,7 @@ let commit_sat t =
        checked-[Sat]. *)
     match Cdclt.dt_model t.cdclt with
     | Some model ->
+      let model = complete_dt_bool_atoms t model in
       let check =
         match !dt_checker_override with
         | Some f -> f
@@ -1988,11 +2077,96 @@ let commit_sat t =
         t.last_model <- Some m;
         Sat)
       else (
+        (* Retain the rejected candidate for OXSMT_NIA point refinement ({!nia_refine});
+           inert unless nonlinear products are present and the caller drives a refinement
+           loop, so this does not change any verdict on its own. *)
+        t.nia_rejected_model <- Some m;
         t.unknown_reason <- "r1-model-check-failed";
         Unknown)
     | None ->
       t.unknown_reason <- "no-model";
       Unknown)
+;;
+
+(* dark OXSMT_NIA incremental linearization (CEGAR refinement). After a [check_sat] that
+   returned [Unknown] because the R1 model check rejected a candidate whose nonlinear
+   product was inconsistent under real multiplication, PIN each abstracted product at its
+   value in that rejected model — assert the conditional point lemma
+   [(a = va) /\ (b = vb) -> mul(a,b) = va*vb] — so the NEXT [check_sat] cannot reuse the
+   same inconsistent model. Returns [true] iff at least one NEW lemma was asserted, i.e.
+   there is progress to re-solve on; [false] (lever off / no rejected model / no products
+   / every current point already pinned) tells the caller's bounded loop to stop.
+
+   SOUND: every lemma is a valid consequence of integer multiplication (when the factors
+   take those values, the product is fixed), so it only EXCLUDES models and never removes
+   a real solution — [unsat] stays sound and any [sat] the loop reaches is still R1
+   model-checked before it is reported. Purely additive: the lemmas are ordinary ground
+   assertions internalized at level 0 between checks, exactly like quantifier instances. *)
+let nia_refine t =
+  match if Nia_config.enabled () then t.nia_rejected_model else None with
+  | None -> false
+  | Some (_sorts, bindings) ->
+    t.nia_rejected_model <- None;
+    let tbls = Model_check.tables_of_bindings bindings in
+    let visited : (int, unit) Hashtbl.t = Hashtbl.create 256 in
+    let products : (int, Term.t * Term.t * Term.t) Hashtbl.t = Hashtbl.create 16 in
+    let rec walk (u : Term.t) =
+      if not (Hashtbl.mem visited u.Term.tag)
+      then (
+        Hashtbl.replace visited u.Term.tag ();
+        match u.Term.node with
+        | Term.App (sym, args) ->
+          (match Iarr.to_list args with
+           | [ a; b ] when Nia_config.is_mul_name (Symbol.name sym) ->
+             Hashtbl.replace products u.Term.tag (u, a, b)
+           | _ -> ());
+          List.iter walk (Iarr.to_list args)
+        | Term.Le a -> walk a
+        | Term.Eq (a, b) ->
+          walk a;
+          walk b
+        | Term.Not a -> walk a
+        | Term.And xs | Term.Or xs -> List.iter walk (Iarr.to_list xs)
+        | Term.Ite (c, a, b) ->
+          walk c;
+          walk a;
+          walk b
+        | Term.Arith lin -> Iarr.iter (fun (c, _coeff) -> walk c) lin.Term.coeffs
+        | Term.Real_arith lin -> Iarr.iter (fun (c, _coeff) -> walk c) lin.Term.coeffs
+        | Term.Int_const _ | Term.Real_const _ | Term.Bool_const _ -> ())
+    in
+    List.iter walk t.asserted;
+    let added = ref 0 in
+    Hashtbl.iter
+      (fun _tag (p, a, b) ->
+        match Model_check.eval_in tbls a, Model_check.eval_in tbls b with
+        | Some (Cdclt.VInt va), Some (Cdclt.VInt vb) ->
+          let ctx = t.ctx in
+          let prod = Bigint.mul va vb in
+          let lemma =
+            Context.implies
+              ctx
+              (Context.and_
+                 ctx
+                 [ Context.eq ctx a (Context.int_const_big ctx va)
+                 ; Context.eq ctx b (Context.int_const_big ctx vb)
+                 ])
+              (Context.eq ctx p (Context.int_const_big ctx prod))
+          in
+          if not (Hashtbl.mem t.nia_refine_seen lemma.Term.tag)
+          then (
+            Hashtbl.replace t.nia_refine_seen lemma.Term.tag ();
+            (* A refinement lemma must never brick the session: guard the internalize so
+               an (essentially impossible, pure-equality) overflow degrades to "no
+               progress" rather than a degraded session. *)
+            try
+              assert_term t lemma;
+              incr added
+            with
+            | _ -> ())
+        | _ -> ())
+      products;
+    !added > 0
 ;;
 
 let check_sat t =

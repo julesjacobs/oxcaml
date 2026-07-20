@@ -123,30 +123,27 @@ module Dt_congruence = struct
      it ignores the pinned pairs (mirrors {!Euf_adapter}/{!Lra_adapter}). No-op, no state. *)
   let note_disequalities _ _ = ()
 
-  let unsupported what =
-    raise
-      (Oxsmt_combine.Combine.Incomplete
-         ("dtlia-fabric-unsupported: "
-          ^ what
-          ^ " — the DT+LIA combination forces the classic no-fabric path (Dtlia_router); \
-             this method must be unreachable"))
-  ;;
+  (* ADR-0014 Stage B: the DT fabric seam now EXISTS as real forwards to the standalone
+     {!Dt} machinery (currency-correct, trail-correct, unit-tested). It stays DARK:
+     [Dtlia_router.fabric_disabled] is compile-time [true], so [Combine] never drives
+     these for this instantiation and the default path is byte-identical to baseline. The
+     loud [Incomplete] stubs they replaced are no longer needed — the methods are correct,
+     not merely defended. *)
+  let check_fabric = Dt.check_fabric
+  let explain_fabric = Dt.explain_fabric
+  let assert_fabric_eq = Dt.assert_fabric_eq
+  let fabric_explain_eq = Dt.fabric_explain_eq
+  let set_record_merges = Dt.set_record_merges
+  let add_merge_consumer = Dt.add_merge_consumer
+  let drain_merges = Dt.drain_merges
+  let set_class_tag = Dt.set_class_tag
+  let class_tag = Dt.class_tag
 
-  let check_fabric _ _ = unsupported "check_fabric"
-  let explain_fabric _ _ = unsupported "explain_fabric"
-  let assert_fabric_eq _ ~edge_id:_ _ _ = unsupported "assert_fabric_eq"
-  let fabric_explain_eq _ _ _ = unsupported "fabric_explain_eq"
-  let set_record_merges _ _ = unsupported "set_record_merges"
-  let add_merge_consumer _ = unsupported "add_merge_consumer"
-  let drain_merges _ _ = unsupported "drain_merges"
-  let set_class_tag _ _ _ = unsupported "set_class_tag"
-  let class_tag _ _ = unsupported "class_tag"
+  type merge_cursor = Dt.merge_cursor
+  type checkpoint = Dt.checkpoint
 
-  type merge_cursor = unit
-  type checkpoint = unit
-
-  let checkpoint _ = unsupported "checkpoint"
-  let rewind_to_checkpoint _ _ = unsupported "rewind_to_checkpoint"
+  let checkpoint = Dt.checkpoint
+  let rewind_to_checkpoint = Dt.rewind_to_checkpoint
 end
 
 module CombinedDt =
@@ -563,6 +560,56 @@ let rec collect t (term : Term.t) =
    (I6). [Term.compare] is [Int.compare] on the tag. *)
 let subterms_sorted t =
   List.sort Term.compare (Term.Table.fold (fun k () acc -> k :: acc) t.subterms [])
+;;
+
+(* Complete the DT checker model with scalar leaves that occur only in LIA-owned atoms
+   (task #62, bugreport-03 rider #1). [check_model_with_leaf] enumerates scalars by
+   walking the DT congruence child's atom terms; a scalar that appears solely inside an
+   integer atom (e.g. [k] in [(> k 0)]) is never interned by that child, so the
+   independent checker cannot evaluate the ORIGINAL arithmetic assertion over it and fails
+   closed to [unknown] on an otherwise-SAT mixed problem. Fill each missing nullary
+   Int/Bool/Uninterp subterm from Cdclt's whole registered-subterm closure, taking its
+   value from the accepting combined scalar model. Exact sort/variant matching keeps this
+   fail-closed: a scalar we cannot resolve stays absent, so the checker still rejects (=>
+   [unknown], never wrong-SAT). Values are only ever read from the accepting model, never
+   invented, so a completed value is always consistent with the solver's own satisfying
+   assignment. Selector applications ([Iarr.length args > 0]) are DT-owned, already
+   covered by the tree, and never touched here. (Scalars whose value is fixed only by an
+   equality [k = 2] are removed by presolve equality-elimination and never reach this
+   path; reconstructing those into the DT checker model is tracked separately as task
+   #64.) *)
+(* Backstop hit counter (LAND 65, task #31): incremented once per fire when this scalar
+   completion actually binds >= 1 missing scalar. Byte-id-invisible — the increment
+   changes no verdict, split count, or explanation; it is a whitebox probe read only by
+   tests so a later stage can assert the backstop still fires on the fabric path. *)
+let dt_scalar_completion_hits = ref 0
+let dt_scalar_completion_hit_count () = !dt_scalar_completion_hits
+
+let complete_dt_model_with_scalars t scalar_model model =
+  let seen = Term.Table.create 128 in
+  List.iter (fun (term, _) -> Term.Table.replace seen term ()) model;
+  let resolve (term : Term.t) : Model.value option =
+    match term.Term.node, term.Term.sort, Model.value scalar_model term with
+    | Term.App (_, args), Sort.Int _, Some (Model.Int _ as v) when Iarr.length args = 0 ->
+      Some v
+    | Term.App (_, args), Sort.Bool, Some (Model.Bool _ as v) when Iarr.length args = 0 ->
+      Some v
+    | Term.App (_, args), Sort.Uninterpreted _, Some (Model.Uninterp _ as v)
+      when Iarr.length args = 0 -> Some v
+    | _ -> None
+  in
+  let additions =
+    List.filter_map
+      (fun (term : Term.t) ->
+        if Term.Table.mem seen term
+        then None
+        else Option.map (fun v -> term, Dt.Leaf v) (resolve term))
+      (subterms_sorted t)
+  in
+  (match additions with
+   | _ :: _ -> incr dt_scalar_completion_hits
+   | [] -> ());
+  model @ additions
 ;;
 
 (* Get-or-create the SAT var for a theory-atom [term], registering it with the combined
@@ -1058,7 +1105,12 @@ let check t ~final =
                 | Sort.Array _
                 | Sort.BitVec _ -> None
               in
-              Dt.check_model_with_leaf (CombinedDt.congruence_state th) arith_leaf
+              (* Rider #1 (task #62): also bind scalars that occur only in LIA-owned atoms
+                 so [Dt_model_check] can evaluate the original arithmetic assertion over
+                 them (enum + unrelated Int on a mixed SAT). Fail-closed by construction. *)
+              Option.map
+                (complete_dt_model_with_scalars t merged)
+                (Dt.check_model_with_leaf (CombinedDt.congruence_state th) arith_leaf)
             | TCombined _ | TCombinedReal _ | TArr _ -> None);
         t.last_array_model
         <- (match impl with

@@ -13,3 +13,11 @@
  (name dt_e2e_test)
  (modules dt_e2e_test)
  (libraries oxsmt_core oxsmt_dt oxsmt_interface))
+
+; Stage B soundness REDs for the DT fabric seam (edge-id preservation in the conflict Γ,
+; and push/assert_fabric_eq/pop restorability). Firewall: oxsmt_core + oxsmt_euf + oxsmt_dt.
+
+(executable
+ (name dt_fabric_test)
+ (modules dt_fabric_test)
+ (libraries oxsmt_core oxsmt_euf oxsmt_dt))
