@@ -445,6 +445,10 @@ let run_predicate_functionality () =
     "predicate functionality: congruence-violating model rejected"
     (Dt_model_check.check reg violating [ p_kt1; Context.not_ ctx p_kt2 ])
     false;
+  expect_bool
+    "predicate functionality: violating model + [p_kt1] only rejected"
+    (Dt_model_check.check reg violating [ p_kt1 ])
+    false;
   let consistent : (Term.t * Dt.ctor_tree) list =
     [ t1, tree5
     ; t2, tree5
