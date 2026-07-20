@@ -6313,6 +6313,7 @@ type refinement_seal_obligation =
   { rso_skeleton : type_expr;
     rso_hypothesis : refinement_desc;
     rso_conclusion : refinement_desc;
+    rso_is_contravariant : bool;
     rso_value_name : string;
     rso_implementation_location : Location.t;
     rso_implementation_predicate_location : Location.t;
@@ -6344,7 +6345,7 @@ let with_refinement_seal
       refinement_seal_obligations := old_obligations)
 
 let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion
-    ~implementation_predicate_location =
+    ~is_contravariant ~implementation_predicate_location =
   match !refinement_seal_context with
   | None -> ()
   | Some context ->
@@ -6352,6 +6353,7 @@ let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion
       { rso_skeleton = skeleton;
         rso_hypothesis = hypothesis;
         rso_conclusion = conclusion;
+        rso_is_contravariant = is_contravariant;
         rso_value_name = context.value_name;
         rso_implementation_location = context.implementation_location;
         rso_implementation_predicate_location =
@@ -6692,6 +6694,7 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                   record_refinement_seal_obligation
                     ~skeleton:refinement1.ref_skeleton
                     ~hypothesis ~conclusion
+                    ~is_contravariant:(variance = Contravariant)
                     ~implementation_predicate_location:
                       refinement1.ref_pred.rexp_loc
                 end;

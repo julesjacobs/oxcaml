@@ -1556,7 +1556,13 @@ let verify_seal_obligation ~env ~seal_location
      (rather than equating bare names) keeps shadowed locals and unrelated
      qualified values distinct. *)
   let goal, hypothesis =
-    align_seal_sibling_references ~env goal hypothesis
+    if obligation.rso_is_contravariant
+    then
+      let hypothesis, goal =
+        align_seal_sibling_references ~env hypothesis goal
+      in
+      goal, hypothesis
+    else align_seal_sibling_references ~env goal hypothesis
   in
   (* Anchor the goal's own span to the implementation annotation so a click on
      the obligation jumps into the [.ml].  This is display-only: the emitted

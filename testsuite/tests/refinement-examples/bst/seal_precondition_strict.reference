@@ -1,0 +1,8 @@
+File "seal_precondition_strict.ml", line 1:
+Error: Refinement verification failed at module seal for value "test" (not-proved)
+File "seal_precondition_strict.mli", lines 5-9, characters 0-24:
+  Interface declaration for value test
+File "seal_precondition_strict.ml", line 5, characters 4-8:
+5 | let test ~(q : int) ~(tree : t @ logical)
+        ^^^^
+  Implementation declaration for value test
