@@ -540,6 +540,87 @@ let check_cnf_converse label (phi : Term.t) (cnf : Cnf.t) =
     loop 1)
 ;;
 
+let check_cnf_canonical_equiv label (phi : Term.t) (cnf : Cnf.t) =
+  let atoms = Array.of_list (collect_atoms phi) in
+  let bits = Array.make (Array.length atoms) false in
+  let rec loop i =
+    if i = Array.length atoms
+    then (
+      let assign : bool Term.Table.t = Term.Table.create 32 in
+      Array.iteri (fun j atom -> Term.Table.replace assign atom bits.(j)) atoms;
+      let atomval atom = Term.Table.find assign atom in
+      let truth = eval_skeleton atomval phi in
+      let var_val v = eval_skeleton atomval (Cnf.subterm_of_var cnf v) in
+      let all_sat =
+        List.for_all (clause_sat var_val) (Cnf.clauses cnf)
+      in
+      check (label ^ " canonical extension") (Bool.equal truth all_sat))
+    else
+      List.iter
+        (fun bit ->
+           bits.(i) <- bit;
+           loop (i + 1))
+        [ false; true ]
+  in
+  loop 0
+;;
+
+let test_direct_term_ite_clauses () =
+  let s = make_session () in
+  let ctx = s.ctx in
+  let p0 = Context.const ctx s.p.(0) in
+  let p1 = Context.const ctx s.p.(1) in
+  let x0 = Context.const ctx s.x.(0) in
+  let x1 = Context.const ctx s.x.(1) in
+  let k n = Context.int_const ctx n in
+  let shared = Context.ite ctx p0 x0 x1 in
+  let cases =
+    [ "simple", Context.eq ctx shared (k 0), 1
+    ; ( "compound-negated-condition"
+      , Context.eq
+          ctx
+          (Context.ite ctx (Context.not_ ctx (Context.and_ ctx [ p0; p1 ])) x0 x1)
+          (k 1)
+      , 1 )
+    ; ( "nested"
+      , Context.eq ctx (Context.ite ctx p0 (Context.ite ctx p1 x0 x1) (k 2)) (k 3)
+      , 2 )
+    ; "shared", Context.eq ctx (Context.add ctx shared shared) (k 4), 1
+    ]
+  in
+  List.iter
+    (fun (label, original, expected_guards) ->
+       let legacy = Preprocess.run s.pp original in
+       let pterm, _definitions, guards = Preprocess.run_with_guarded_ites s.pp original in
+       check (label ^ " guarded-ite count") (List.length guards = expected_guards);
+       let direct_clauses, implications =
+         List.fold_right
+           (fun (guard : Preprocess.guarded_ite) (clauses, implications) ->
+              let then_eq = Context.eq ctx guard.result guard.then_branch in
+              let else_eq = Context.eq ctx guard.result guard.else_branch in
+              ( [ Context.not_ ctx guard.condition; then_eq ]
+                :: [ guard.condition; else_eq ]
+                :: clauses
+              , Context.implies ctx guard.condition then_eq
+                :: Context.implies ctx (Context.not_ ctx guard.condition) else_eq
+                :: implications ))
+           guards
+           ([], [])
+       in
+       let semantic = Context.and_ ctx (pterm :: implications) in
+       let direct = Cnf.clausify_clauses ([ pterm ] :: direct_clauses) in
+       let legacy_cnf = Cnf.clausify legacy in
+       check
+         (label ^ " direct has fewer variables")
+         (Cnf.num_vars direct < Cnf.num_vars legacy_cnf);
+       check
+         (label ^ " direct has fewer clauses")
+         (List.length (Cnf.clauses direct) < List.length (Cnf.clauses legacy_cnf));
+       check_cnf_canonical_equiv (label ^ " direct") semantic direct;
+       check_cnf_converse (label ^ " direct") semantic direct)
+    cases
+;;
+
 let n_clausify_formulas = 400
 let clausify_depth = 3
 let clauses_emitted = ref 0
@@ -712,6 +793,13 @@ let test_spot_checks () =
   check "lone atom: one var" (Cnf.num_vars cnf = 1);
   check "lone atom: one clause" (List.length (Cnf.clauses cnf) = 1);
   check "lone atom: atom mapped" (Cnf.atom_of_var cnf 1 = Some p0);
+  let clause_api = Cnf.clausify_clauses [ [ p0 ] ] in
+  check "clause API preserves ordinary clausify vars" (Cnf.num_vars clause_api = 1);
+  check "clause API preserves ordinary clausify bytes" (dimacs clause_api = dimacs cnf);
+  check_raises "clause API rejects no clauses" (fun () -> Cnf.clausify_clauses []);
+  check_raises "clause API rejects empty clause" (fun () -> Cnf.clausify_clauses [ [] ]);
+  check_raises "clause API rejects later empty clause" (fun () ->
+    Cnf.clausify_clauses [ [ p0 ]; [] ]);
   (* Bool constants clausify to a forcing unit + a root unit; true is sat, false unsat. *)
   let ctrue = Cnf.clausify (Context.bool_const ctx true) in
   let cfalse = Cnf.clausify (Context.bool_const ctx false) in
@@ -776,6 +864,7 @@ let () =
   test_adversarial_nests ();
   test_clausifier ();
   test_clausifier_negpol ();
+  test_direct_term_ite_clauses ();
   test_atom_map ();
   test_determinism ();
   test_unsupported ();

@@ -118,6 +118,165 @@ let run_discrimination () =
     false
 ;;
 
+(* The assertion reducer may erase a direct tester/selector application and therefore its
+   constructor fields from the solver model. The independent checker re-derives those two
+   SMT identities syntactically: testers inspect only the head and a matching selector
+   evaluates only its selected field. A wrong-constructor selector remains
+   underspecified and must still use an explicit model binding. *)
+let run_known_constructor_checker () =
+  let s = Session.create () in
+  let sort = Sort.datatype_ (Session.declare_sort s "Known_checker_D") in
+  let dt =
+    Session.declare_datatype
+      s
+      sort
+      [ { Session.ctor_name = "Known_checker_Leaf"; fields = [] }
+      ; { Session.ctor_name = "Known_checker_Node"
+        ; fields = [ "known_checker_value", Sort.int; "known_checker_dead", Sort.bool ]
+        }
+      ; { Session.ctor_name = "Known_checker_Wrap"
+        ; fields = [ "known_checker_inner", sort ]
+        }
+      ]
+  in
+  let reg = Defs.add Defs.empty dt in
+  let leaf, node, wrap =
+    match dt.Defs.constructors with
+    | [ leaf; node; wrap ] -> leaf, node, wrap
+    | _ -> assert false
+  in
+  let value =
+    match node.Defs.selectors with
+    | value :: _ -> value
+    | [] -> assert false
+  in
+  let inner =
+    match wrap.Defs.selectors with
+    | [ inner ] -> inner
+    | _ -> assert false
+  in
+  let ctx = Session.context s in
+  let missing_int =
+    Context.const ctx (Session.declare_const s "known_checker_missing_int" Sort.int)
+  in
+  let missing_bool =
+    Context.const ctx (Session.declare_const s "known_checker_missing_bool" Sort.bool)
+  in
+  let node_with_missing_fields =
+    Context.app ctx node.Defs.sym [ missing_int; missing_bool ]
+  in
+  let tester = Context.app ctx node.Defs.tester [ node_with_missing_fields ] in
+  expect_bool
+    "known constructor checker: tester ignores unmodelled fields"
+    (Dt_model_check.check reg [] [ tester ])
+    true;
+  let selected = Context.int_const ctx 42 in
+  let node_with_dead_sibling =
+    Context.app ctx node.Defs.sym [ selected; missing_bool ]
+  in
+  let selector = Context.app ctx value.Defs.sym [ node_with_dead_sibling ] in
+  expect_bool
+    "known constructor checker: matching selector ignores unmodelled sibling"
+    (Dt_model_check.check reg [] [ Context.eq ctx selector selected ])
+    true;
+  let nested_selector =
+    Context.app
+      ctx
+      value.Defs.sym
+      [ Context.app
+          ctx
+          inner.Defs.sym
+          [ Context.app
+              ctx
+              wrap.Defs.sym
+              [ Context.app ctx node.Defs.sym [ missing_int; missing_bool ] ]
+          ]
+      ]
+  in
+  expect_bool
+    "known constructor checker: nested matching selectors normalize to missing field"
+    (Dt_model_check.check reg [] [ Context.eq ctx nested_selector missing_int ])
+    true;
+  let known_tester = Context.app ctx node.Defs.tester [ node_with_missing_fields ] in
+  let selected_ite =
+    Context.ite ctx known_tester missing_int (Context.int_const ctx 0)
+  in
+  expect_bool
+    "known constructor checker: known tester collapses ITE before reflexivity"
+    (Dt_model_check.check reg [] [ Context.eq ctx selected_ite missing_int ])
+    true;
+  let projected_missing = Context.app ctx value.Defs.sym [ node_with_missing_fields ] in
+  let constructor_left =
+    Context.app ctx node.Defs.sym [ projected_missing; missing_bool ]
+  in
+  expect_bool
+    "known constructor checker: reflexivity normalizes inside constructor fields"
+    (Dt_model_check.check
+       reg
+       []
+       [ Context.eq ctx constructor_left node_with_missing_fields ])
+    true;
+  let plus_one term = Context.add ctx term (Context.int_const ctx 1) in
+  expect_bool
+    "known constructor checker: reflexivity normalizes inside integer linear terms"
+    (Dt_model_check.check
+       reg
+       []
+       [ Context.eq ctx (plus_one projected_missing) (plus_one missing_int) ])
+    true;
+  let wrong_selector =
+    Context.app ctx value.Defs.sym [ Context.app ctx leaf.Defs.sym [] ]
+  in
+  let expected = Context.int_const ctx 9 in
+  let wrong_assertion = Context.eq ctx wrong_selector expected in
+  expect_bool
+    "known constructor checker: wrong selector without model binding fails closed"
+    (Dt_model_check.check reg [] [ wrong_assertion ])
+    false;
+  expect_bool
+    "known constructor checker: wrong selector uses underspecified model binding"
+    (Dt_model_check.check
+       reg
+       [ wrong_selector, Dt.Leaf (Model.Int (Bigint.of_int 9)) ]
+       [ wrong_assertion ])
+    true;
+  let nested_wrong_argument =
+    Context.app
+      ctx
+      inner.Defs.sym
+      [ Context.app ctx wrap.Defs.sym [ Context.app ctx leaf.Defs.sym [] ] ]
+  in
+  let nested_wrong = Context.app ctx value.Defs.sym [ nested_wrong_argument ] in
+  let reduced_wrong = Context.app ctx value.Defs.sym [ Context.app ctx leaf.Defs.sym [] ] in
+  expect_bool
+    "known constructor checker: wrong selector finds reduced-argument model binding"
+    (Dt_model_check.check
+       reg
+       [ reduced_wrong, Dt.Leaf (Model.Int (Bigint.of_int 9)) ]
+       [ Context.eq ctx nested_wrong expected ])
+    true;
+  let x = Context.const ctx (Session.declare_const s "known_checker_x" sort) in
+  let y = Context.const ctx (Session.declare_const s "known_checker_y" sort) in
+  let sx = Context.app ctx value.Defs.sym [ x ] in
+  let sy = Context.app ctx value.Defs.sym [ y ] in
+  let leaf_tree = Dt.Ctor (Symbol.name leaf.Defs.sym, []) in
+  expect_bool
+    "known constructor checker: wrong selector is congruent on equal arguments"
+    (Dt_model_check.check
+       reg
+       [ x, leaf_tree
+       ; y, leaf_tree
+       ; sx, Dt.Leaf (Model.Int (Bigint.of_int 1))
+       ; sy, Dt.Leaf (Model.Int (Bigint.of_int 2))
+       ]
+       [ Context.eq ctx x (Context.app ctx leaf.Defs.sym [])
+       ; Context.eq ctx y (Context.app ctx leaf.Defs.sym [])
+       ; Context.eq ctx sx (Context.int_const ctx 1)
+       ; Context.eq ctx sy (Context.int_const ctx 2)
+       ])
+    false
+;;
+
 (* codex B1 discrimination: a value that does NOT inhabit its position's sort must be
    rejected by the checker's sort-inhabitance validation. This is the direct unit-level
    proof of the B1 fix: an [Uninterp] leaf in a BOOL datatype field is the exact
@@ -467,6 +626,7 @@ let () =
   run_goldens dir;
   run_combination_split ();
   run_discrimination ();
+  run_known_constructor_checker ();
   run_bool_inhabitance ();
   run_dag_blowup ();
   run_predicate_functionality ();

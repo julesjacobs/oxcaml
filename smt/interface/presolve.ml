@@ -1188,7 +1188,7 @@ let collapse_contradictions ctx ~max_passes terms =
   result
 ;;
 
-let simplify_projection ctx assertions =
+let simplify_projection ?propfold:propfold_override ctx assertions =
   let steps = ref 0 in
   let max_steps = proj_max_steps () in
   let tick () =
@@ -1209,7 +1209,7 @@ let simplify_projection ctx assertions =
      pass — the same footgun the contextual pass documents). *)
   let memo : Term.t Term.Table.t = Term.Table.create 4096 in
   let proj_memo : Term.t Tag_pair_table.t = Tag_pair_table.create 4096 in
-  let propfold = nec_propfold () in
+  let propfold = Option.value ~default:(nec_propfold ()) propfold_override in
   let false_ = Context.bool_const ctx false in
   (* Demand-driven short-circuit (nec-propfold): a value-ITE branch that provably cannot
      equal the comparison constant is folded to [false] with NO descent — never building
@@ -1431,7 +1431,7 @@ let simplify_projection ctx assertions =
       Term.Table.add has_ite_table t b;
       b
   in
-  if nec_propfold ()
+  if propfold
   then (
     (* Propfold-via-Context (dark). Distribute equality-over-ITE via [go]. Under
        [propfold], [may_equal]/[reach] prunes a closed value-ITE that cannot equal a fixed

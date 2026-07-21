@@ -616,6 +616,48 @@ let test_final_split_empty_unsat () =
   check "split-empty: push/pop invariant held" !(mock.invariant_ok)
 ;;
 
+(* An ordered complementary lemma over a variable created at Final is the dark binary
+   arrangement phase request. ON it is honored true-first without retaining the
+   tautology; OFF it follows the ordinary tautology path and the fresh variable keeps the
+   SAT core's default false phase. Run this test executable in both environments. *)
+let test_final_branch_true_first () =
+  let s = Sat.create () in
+  let p = ref None in
+  let emitted = ref false in
+  let check_theory ~final =
+    if final && not !emitted
+    then (
+      emitted := true;
+      let fresh = Sat.new_var s in
+      p := Some fresh;
+      Sat.T_lemma [ [ Sat.pos fresh; Sat.neg fresh ] ])
+    else Sat.T_consistent []
+  in
+  Sat.set_theory
+    s
+    (Some
+       { Sat.on_assign = (fun _ ~level:_ -> ())
+       ; on_backtrack = (fun ~level:_ -> ())
+       ; check = check_theory
+       ; explain = (fun _ -> [])
+       ; on_chrono_rewind = None
+       });
+  check "branch: sat" (Sat.solve s = Sat.Sat);
+  check "branch: request emitted" !emitted;
+  let binary_interface_eq_on =
+    match Sys.getenv_opt "OXSMT_BINARY_INTERFACE_EQ" with
+    | Some ("1" | "true" | "yes" | "on") -> true
+    | Some _ | None -> false
+  in
+  check
+    (if binary_interface_eq_on
+     then "branch: ON requests true polarity"
+     else "branch: OFF preserves ordinary false phase")
+    (match !p with
+     | Some p -> Bool.equal (Sat.value s p) binary_interface_eq_on
+     | None -> false)
+;;
+
 (* A Final-effort conflict rejects a full model. With unit (a) forcing a at level 0, the
    Final check refuses any model with a true, so the query is unsat. *)
 let test_final_conflict () =
@@ -846,6 +888,7 @@ let () =
   test_poisoned_not_pristine ();
   test_final_split ();
   test_final_split_empty_unsat ();
+  test_final_branch_true_first ();
   test_final_conflict ();
   test_valid_lemma_propagates ();
   test_lemma_coincident_atom_dropped ();

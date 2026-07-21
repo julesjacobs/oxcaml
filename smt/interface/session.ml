@@ -40,6 +40,81 @@ type assumption_check =
   ; unsat_core : assumption list option
   }
 
+type assumption_profile =
+  { prepare_cpu_s : float
+  ; initial_cpu_s : float
+  ; deletion_cpu_s : float
+  ; replay_cpu_s : float
+  ; initial_effort : int
+  ; deletion_effort : int
+  ; replay_effort : int
+  ; initial_decisions : int
+  ; deletion_decisions : int
+  ; replay_decisions : int
+  ; initial_conflicts : int
+  ; deletion_conflicts : int
+  ; replay_conflicts : int
+  ; deletion_probes : int
+  ; deletion_sat : int
+  ; deletion_unsat : int
+  ; deletion_unknown : int
+  ; initial_core_size : int
+  ; final_core_size : int
+  }
+
+let empty_assumption_profile =
+  { prepare_cpu_s = 0.
+  ; initial_cpu_s = 0.
+  ; deletion_cpu_s = 0.
+  ; replay_cpu_s = 0.
+  ; initial_effort = 0
+  ; deletion_effort = 0
+  ; replay_effort = 0
+  ; initial_decisions = 0
+  ; deletion_decisions = 0
+  ; replay_decisions = 0
+  ; initial_conflicts = 0
+  ; deletion_conflicts = 0
+  ; replay_conflicts = 0
+  ; deletion_probes = 0
+  ; deletion_sat = 0
+  ; deletion_unsat = 0
+  ; deletion_unknown = 0
+  ; initial_core_size = 0
+  ; final_core_size = 0
+  }
+;;
+
+type dt_ground_simplify_stats =
+  { tester_folds : int
+  ; selector_folds : int
+  }
+
+(* Whole assertion groups retained before preprocessing/CNF for the dark assumption-guided
+   path. [Buffered_direct] preserves the assertion's frame owner. [Buffered_presolved]
+   preserves the batch boundary because conservative fallback must run the exact original
+   batch presolve, not silently turn it into a stream of direct assertions. *)
+type buffered_assertion_group =
+  | Buffered_direct of
+      { term : Term.t
+      ; frame : Sat.var
+      }
+  | Buffered_presolved of
+      { terms : Term.t list
+      ; no_prior_assertions : bool
+      }
+
+type resolved_assumption_gate =
+  { gate : Term.t
+  ; body : Term.t
+  }
+
+type dt_specialization =
+  { selector : Sat.var
+  ; redundant_assumptions : unit Term.Table.t
+  ; scoped_relevancy : bool
+  }
+
 type model_value = Cdclt.value =
   | VBool of bool
   | VInt of Bigint.t
@@ -93,6 +168,13 @@ type t =
          A ref SHARED with [cdclt] (same ref), so a [set_datatypes] after [create] is
          visible when cdclt reads it lazily at the first theory-atom intern to pick the
          standalone DT theory over the EUF+LIA combined stack. *)
+  ; mutable dt_ground_tester_folds : int
+  ; mutable dt_ground_selector_folds : int
+  ; dt_ground_simplify : bool
+  ; assumption_preprocess : bool
+  ; mutable buffered_assertion_groups : buffered_assertion_group list
+  ; mutable assumption_preprocess_used : bool
+  ; mutable assumption_preprocess_allowed : bool
   ; array_registry : Oxsmt_core.Array_defs.t ref
       (* array select/store symbols (arrays lane); empty unless [set_arrays] was called. A
          ref SHARED with [cdclt] (same ref), read lazily at the first theory-atom intern
@@ -186,11 +268,15 @@ type t =
          definition and splices it into the model so the R1 checker (which evaluates the
          ORIGINAL assertions in [asserted]) and [get_model] both bind it. Empty unless the
          batch {!assert_presolved} path eliminated something. *)
-  ; relevancy : Relevancy.t option
+  ; mutable relevancy : Relevancy.t option
       (* dynamic relevancy driver (task #24, QF_UF), [None] unless the [OXSMT_RELEVANCY]
          gate is on (or {!create} is told to enable it). When [Some], {!assert_clausified}
          feeds it the boolean-skeleton graph and the SAT core's branch filter consults it;
          when [None] the whole feature is dark and byte-identical to trunk. *)
+  ; direct_term_ite : bool
+      (* Dark Z3-style non-Boolean ITE encoding. When enabled, preprocessing returns each
+         lifted ITE's guarded equalities separately for direct binary-clause emission.
+         Read once at session creation; certificate emission retains the legacy shape. *)
   ; mutable cert_active : bool
       (* set by {!install_cert_trace}: a certificate trace is installed. Pass A
          (entailed-equality extraction, task #7) is gated OFF while true — a derived unit
@@ -210,6 +296,10 @@ type t =
          deletion/refinement probe plus the final replay. Surfaced test-only via
          {!minimize_probes} so the property test and benchmark can compare the linear and
          clause-set-refinement strategies honestly. *)
+  ; mutable assumption_profile_on : bool
+      (* Test/diagnostic-only phase attribution for assumption queries. Enabled by
+         [OXSMT_ASSUMPTION_PROFILE]; never read by a solver decision. *)
+  ; mutable last_assumption_profile : assumption_profile
   ; mutable presolve_certificate_trace : presolve_certificate_trace option
       (* Off-seam statement/witness channel for W1b equality elimination. [None] in every
          ordinary solve. Callback results are recorder ids and never feed search. *)
@@ -239,6 +329,11 @@ type t =
      core with this snapshot, so user literals, stale cores after another dispatch, and
      the private symmetry selector never leak. *)
   }
+
+(* Installed after the buffering implementation is defined. Registry mutation lives
+   earlier in this module; the callback preserves eager-ingress lifecycle by materializing
+   pending originals before the existing registry/theory invalidation checks run. *)
+let materialize_before_registry_change : (t -> unit) ref = ref (fun _ -> ())
 
 let create
   ?(split_budget = default_split_budget)
@@ -284,6 +379,16 @@ let create
        | Some ("0" | "false" | "no") -> false
        | Some _ | None -> true)
   in
+  let dt_ground_simplify =
+    match Sys.getenv_opt "OXSMT_DT_GROUND_SIMPLIFY" with
+    | Some ("0" | "false" | "no" | "off") -> false
+    | Some _ | None -> true
+  in
+  let assumption_preprocess =
+    match Sys.getenv_opt "OXSMT_ASSUMPTION_PREPROCESS" with
+    | Some ("1" | "true" | "yes") -> true
+    | Some _ | None -> false
+  in
   (* Lemma generation budget per [check_sat]: [OXSMT_LEMMA_GEN_BUDGET] env override
      (quant-mgi tuning knob). The explicit [lemma_gen_budget] param wins; else the env
      override; else [None] => the manager's default (100k). Byte-identical to trunk when
@@ -320,6 +425,11 @@ let create
     match Sys.getenv_opt "OXSMT_EMATCH_MGI_THRESHOLD" with
     | Some s -> int_of_string_opt s
     | None -> None
+  in
+  let direct_term_ite =
+    match Sys.getenv_opt "OXSMT_DIRECT_TERM_ITE" with
+    | Some ("1" | "true" | "yes") -> true
+    | Some _ | None -> false
   in
   let sat = Sat.create ~base_l0_cert_mode:base_at_level0 () in
   (* One shared effort budget for the session (board #60). [max_effort = None] is
@@ -367,6 +477,13 @@ let create
   ; cap
   ; ctx
   ; registry
+  ; dt_ground_tester_folds = 0
+  ; dt_ground_selector_folds = 0
+  ; dt_ground_simplify
+  ; assumption_preprocess
+  ; buffered_assertion_groups = []
+  ; assumption_preprocess_used = false
+  ; assumption_preprocess_allowed = true
   ; array_registry
   ; arithmetic_family
   ; arithmetic_blocked = false
@@ -404,9 +521,12 @@ let create
   ; effort_exhausted = false
   ; elim_defs = []
   ; relevancy
+  ; direct_term_ite
   ; cert_active = false
   ; assumption_query_started = false
   ; minimize_probes = 0
+  ; assumption_profile_on = false
+  ; last_assumption_profile = empty_assumption_profile
   ; presolve_certificate_trace = None
   ; sym_counter = ref 0
   ; sym_sel = None
@@ -797,6 +917,7 @@ let set_datatypes t defs =
     match Oxsmt_core.Env.rank t.env sym with
     | r -> Some r
     | exception Not_found -> None);
+  if t.buffered_assertion_groups <> [] then !materialize_before_registry_change t;
   (* Task #54 reset-per-query. Invalidate the cached theory when this REPLACE actually
      involves datatypes (new or currently-installed) — never on a pure-logic no-op
      ([set_datatypes empty] on a session with no datatypes), which keeps the batched
@@ -827,6 +948,7 @@ let set_arrays t defs =
     match Oxsmt_core.Env.rank t.env sym with
     | r -> Some r
     | exception Not_found -> None);
+  if t.buffered_assertion_groups <> [] then !materialize_before_registry_change t;
   (* Task #54 reset-per-query (same as [set_datatypes]): invalidate the cached theory when
      this REPLACE actually involves arrays (new or currently-installed); a pure-logic
      no-op ([set_arrays empty] on a session with no arrays) resets nothing and stays
@@ -887,6 +1009,7 @@ let declare_datatype t sort constructors =
       constructors
   in
   let dt = { Oxsmt_core.Datatype_defs.sort_sym; constructors = ctors } in
+  if t.buffered_assertion_groups <> [] then !materialize_before_registry_change t;
   (* Task #54 reset-per-query. The additive door also invalidates a stale cached theory:
      adding the FIRST datatype after a pure-logic query instantiated the combined theory
      (none->DT), or a further datatype after the DT theory was cached (the #51 accumulate
@@ -951,7 +1074,14 @@ let prop_var_of t (atom : Term.t) =
    through {!Cdclt} (one SAT var 1:1 with a theory atom, registered with the combined
    theory); a propositional variable (nullary Bool [App]) shares one SAT var per distinct
    term; auxiliary Tseitin variables are fresh per formula (kept in [local]). *)
-let assert_clausified ?sel ?(record_presolve = false) ~root t cnf =
+let assert_clausified
+  ?sel
+  ?(record_presolve = false)
+  ?(relevancy_roots = [])
+  ~root
+  t
+  cnf
+  =
   let n = Cnf.num_vars cnf in
   let local = Array.make (n + 1) None in
   let sat_var v =
@@ -1059,10 +1189,13 @@ let assert_clausified ?sel ?(record_presolve = false) ~root t cnf =
             let children = List.map Option.get opt_children in
             Relevancy.register_node rel ~var:sv ~kind ~children))
     done;
-    (* Seed the top-level formula's root var relevant at level 0. *)
-    (match child_lit root true with
-     | Some (rv, _) -> Relevancy.seed_root rel rv
-     | None -> ())
+    (* Direct guarded-ITE literals are asserted roots just like the rewritten formula. *)
+    List.iter
+      (fun tm ->
+         match child_lit tm true with
+         | Some (rv, _) -> Relevancy.seed_root rel rv
+         | None -> ())
+      (root :: relevancy_roots)
 ;;
 
 (* Bool-cardinality rule (TODO Predicates §2; the one sanctioned finite sort). [Bool] has
@@ -1140,8 +1273,20 @@ let register_bool_terms t (pterm : Term.t) =
    (default: the current innermost frame). Shared by [assert_term] and
    [assert_instance_at_frame]; the exception handling is the I8/CONTRACT-POISON
    assert-time discipline. *)
-let assert_bool_at ?sel ?(record_presolve = false) t pterm =
-  match Cnf.clausify pterm with
+let assert_bool_at ?sel ?(record_presolve = false) ?(guarded_ites = []) t pterm =
+  let guarded_clauses, guarded_terms =
+    List.fold_right
+      (fun (guard : Preprocess.guarded_ite) (clauses, terms) ->
+         let then_eq = Context.eq t.ctx guard.result guard.then_branch in
+         let else_eq = Context.eq t.ctx guard.result guard.else_branch in
+         ( [ Context.not_ t.ctx guard.condition; then_eq ]
+           :: [ guard.condition; else_eq ]
+           :: clauses
+         , guard.condition :: then_eq :: else_eq :: terms ))
+      guarded_ites
+      ([], [])
+  in
+  match Cnf.clausify_clauses ([ pterm ] :: guarded_clauses) with
   | exception _ -> degrade t "clausify-fail"
   | cnf ->
     (* Atom registration walks the theory engines; a rejected / out-of-fragment atom or an
@@ -1152,12 +1297,19 @@ let assert_bool_at ?sel ?(record_presolve = false) t pterm =
        it surfaces HERE at assert-time registration, so it must be caught on this ingress
        path too. *)
     (try
-       assert_clausified ?sel ~record_presolve ~root:pterm t cnf;
+       assert_clausified
+         ?sel
+         ~record_presolve
+         ~relevancy_roots:guarded_terms
+         ~root:pterm
+         t
+         cnf;
        (* Bool-cardinality rule: surface every buried Bool-sorted predicate application as
           its own SAT atom so the finite Bool sort is decided, not left opaque (see
           {!register_bool_terms}). Same term, same try-block, so an out-of-fragment buried
           atom degrades identically to a clause-borne one. *)
-       register_bool_terms t pterm
+       register_bool_terms t pterm;
+       List.iter (register_bool_terms t) guarded_terms
      with
      | Combine.Incomplete msg -> degrade t ("combine-incomplete-register:" ^ san_token msg)
      | Term.Overflow
@@ -1270,6 +1422,625 @@ let term_has_reserved ?(allowed = []) (t0 : Term.t) =
    permanent clause DB. *)
 let deactivate_symbreak t = t.sym_sel <- None
 
+(* Dark, semantics-preserving datatype reduction for front ends that construct terms
+   directly (the Vox2 path does not use the test-only SMT-LIB parser). A tester applied
+   to a syntactic constructor is decided immediately; a selector applied to ITS OWN
+   constructor returns the corresponding field. A selector applied to a different
+   constructor is deliberately left alone: SMT-LIB gives that term an unspecified value.
+   Rebuilding through [Context] then collapses value ITEs whose tester became constant. *)
+let dt_ground_simplify_supported t =
+  t.dt_ground_simplify
+  && not (Oxsmt_core.Datatype_defs.is_empty !(t.registry))
+  && Oxsmt_core.Array_defs.is_empty !(t.array_registry)
+  &&
+  match !(t.arithmetic_family) with
+  | Cdclt.Real | Cdclt.Mixed -> false
+  | Cdclt.Integer | Cdclt.None_seen -> true
+;;
+
+let simplify_known_datatypes ?substitutions ?(fold_known_datatypes = true) t root =
+  let registry = !(t.registry) in
+  let memo : Term.t Term.Table.t = Term.Table.create 256 in
+  let expanding : unit Term.Table.t = Term.Table.create 16 in
+  let same_tag (a : Term.t) (b : Term.t) = a.tag = b.tag in
+  let rec go (term : Term.t) =
+    match Term.Table.find_opt memo term with
+    | Some result -> result
+    | None ->
+      let result =
+        match substitutions with
+        | Some table when not (Term.Table.mem expanding term) ->
+          (match Term.Table.find_opt table term with
+           | Some replacement ->
+             Term.Table.add expanding term ();
+             let result = go replacement in
+             Term.Table.remove expanding term;
+             result
+           | None -> rewrite term)
+        | None | Some _ -> rewrite term
+      in
+      Term.Table.add memo term result;
+      result
+  and rewrite (term : Term.t) =
+    match term.node with
+    | Bool_const _ | Int_const _ | Real_const _ -> term
+    | App (sym, args) ->
+      let args', args_changed =
+        let original = Iarr.to_list args in
+        let rewritten = List.map go original in
+        rewritten, List.exists2 (fun a b -> not (same_tag a b)) original rewritten
+      in
+      if not fold_known_datatypes
+      then if args_changed then Context.app t.ctx sym args' else term
+      else
+      (match Datatype_defs.tester_of_sym registry sym, args' with
+       | Some (_, expected_ctor), [ ({ node = App (ctor_sym, _); _ } : Term.t) ] ->
+         (match Datatype_defs.constructor_of_sym registry ctor_sym with
+          | Some (_, actual_ctor) ->
+            t.dt_ground_tester_folds <- t.dt_ground_tester_folds + 1;
+            Context.bool_const
+              t.ctx
+              (Symbol.equal expected_ctor.Datatype_defs.sym actual_ctor.sym)
+          | None -> if args_changed then Context.app t.ctx sym args' else term)
+       | _ ->
+         (match Datatype_defs.selector_of_sym registry sym, args' with
+          | ( Some (_, expected_ctor, selector)
+            , [ ({ node = App (ctor_sym, fields); _ } : Term.t) ] ) ->
+            (match Datatype_defs.constructor_of_sym registry ctor_sym with
+             | Some (_, actual_ctor)
+               when Symbol.equal expected_ctor.Datatype_defs.sym actual_ctor.sym ->
+               t.dt_ground_selector_folds <- t.dt_ground_selector_folds + 1;
+               Iarr.get fields selector.Datatype_defs.index
+             | Some _ | None -> if args_changed then Context.app t.ctx sym args' else term)
+          | _ -> if args_changed then Context.app t.ctx sym args' else term))
+    | Arith linear ->
+      let coeffs = Iarr.to_list linear.coeffs in
+      let coeffs' = List.map (fun (tm, coeff) -> go tm, coeff) coeffs in
+      if List.for_all2 (fun (a, _) (b, _) -> same_tag a b) coeffs coeffs'
+      then term
+      else
+        Context.linear_combination_big
+          t.ctx
+          (List.map (fun (tm, coeff) -> coeff, tm) coeffs')
+          linear.const
+    | Real_arith linear ->
+      let coeffs = Iarr.to_list linear.coeffs in
+      let coeffs' = List.map (fun (tm, coeff) -> go tm, coeff) coeffs in
+      if List.for_all2 (fun (a, _) (b, _) -> same_tag a b) coeffs coeffs'
+      then term
+      else
+        Context.real_linear_combination_big
+          t.ctx
+          (List.map (fun (tm, coeff) -> coeff, tm) coeffs')
+          linear.const
+    | Le a ->
+      let a' = go a in
+      let zero =
+        if Sort.equal a.sort Sort.real
+        then Context.real_const_big t.ctx ~num:Bigint.zero ~den:Bigint.one
+        else Context.int_const_big t.ctx Bigint.zero
+      in
+      if same_tag a a' then term else Context.le t.ctx a' zero
+    | Eq (a, b) ->
+      let a' = go a in
+      let b' = go b in
+      if same_tag a a' && same_tag b b' then term else Context.eq t.ctx a' b'
+    | Not a ->
+      let a' = go a in
+      if same_tag a a' then term else Context.not_ t.ctx a'
+    | And xs ->
+      let xs', changed =
+        let original = Iarr.to_list xs in
+        let rewritten = List.map go original in
+        rewritten, List.exists2 (fun a b -> not (same_tag a b)) original rewritten
+      in
+      if changed then Context.and_ t.ctx xs' else term
+    | Or xs ->
+      let xs', changed =
+        let original = Iarr.to_list xs in
+        let rewritten = List.map go original in
+        rewritten, List.exists2 (fun a b -> not (same_tag a b)) original rewritten
+      in
+      if changed then Context.or_ t.ctx xs' else term
+    | Ite (condition, then_, else_) ->
+      let condition' = go condition in
+      (match condition'.node with
+       | Bool_const true -> go then_
+       | Bool_const false -> go else_
+       | _ ->
+         let then' = go then_ in
+         let else' = go else_ in
+         if same_tag condition condition'
+            && same_tag then_ then'
+            && same_tag else_ else'
+         then term
+         else Context.ite t.ctx condition' then' else')
+  in
+  go root
+;;
+
+let preprocess_term t term =
+  let term =
+    if dt_ground_simplify_supported t && not t.cert_active
+    then simplify_known_datatypes t term
+    else term
+  in
+  Preprocess.run t.pp term
+;;
+
+let preprocess_assertion t term =
+  let term =
+    if dt_ground_simplify_supported t && not t.cert_active
+    then simplify_known_datatypes t term
+    else term
+  in
+  if t.direct_term_ite && not t.cert_active
+  then (
+    let pterm, _definitions, guarded_ites = Preprocess.run_with_guarded_ites t.pp term in
+    pterm, guarded_ites)
+  else Preprocess.run t.pp term, []
+;;
+
+(* Recognize possible canonical representations of [gate => body]. [Context.or_]
+   flattens a disjunctive body, so an implication whose body contains another negated Bool
+   atom is ambiguous at assertion time. Keep every possible [(gate, body)] split; the
+   solve-time audit accepts an entry only when exactly one candidate is both a positive
+   assumption and private over the complete active original set. Shape recognition here
+   is not by itself authority to omit CNF. *)
+let assumption_gate_candidates t term =
+  match term.Term.node with
+  | Or disjuncts ->
+    let negated_gates, _body_rev =
+      Iarr.fold
+        (fun (gates, body) disjunct ->
+          match disjunct.Term.node with
+          | Not ({ node = App (_, args); sort; _ } as gate)
+            when Iarr.length args = 0 && Sort.equal sort Sort.bool ->
+            gate :: gates, body
+          | _ -> gates, disjunct :: body)
+        ([], [])
+        disjuncts
+    in
+    (match negated_gates with
+     | [] -> None
+     | _ :: _ ->
+       let all = Iarr.to_list disjuncts in
+       let candidates =
+         List.filter_map
+           (fun gate ->
+             let rest =
+               List.filter
+                 (fun disjunct ->
+                   match disjunct.Term.node with
+                   | Not atom -> not (Term.equal atom gate)
+                   | _ -> true)
+                 all
+             in
+             match rest with
+             | [] -> None
+             | _ :: _ -> Some (gate, Context.or_ t.ctx rest))
+           negated_gates
+       in
+       (match candidates with
+        | [] -> None
+        | _ :: _ -> Some candidates))
+  | Bool_const _
+  | Int_const _
+  | Real_const _
+  | App _
+  | Arith _
+  | Real_arith _
+  | Le _
+  | Eq _
+  | Not _
+  | And _
+  | Ite _ -> None
+;;
+
+(* One pass over the hash-cons DAG computes syntax-position occurrence counts, capped at
+   two because privacy only distinguishes once from more-than-once. A node is propagated
+   to its children once for each of its first two incoming occurrences, so a shared child
+   reached from two parents counts twice without expanding an exponentially shared DAG.
+   Total work is at most twice the number of DAG edges. *)
+let occurrence_census roots =
+  let counts : int Term.Table.t = Term.Table.create 256 in
+  let queue = Queue.create () in
+  let add term =
+    let old = Option.value ~default:0 (Term.Table.find_opt counts term) in
+    if old < 2
+    then (
+      Term.Table.replace counts term (old + 1);
+      Queue.add term queue)
+  in
+  List.iter add roots;
+  let add_args args = Iarr.iter add args in
+  while not (Queue.is_empty queue) do
+    let term = Queue.take queue in
+    match term.Term.node with
+    | Bool_const _ | Int_const _ | Real_const _ -> ()
+    | App (_, args) | And args | Or args -> add_args args
+    | Arith linear -> Iarr.iter (fun (child, _) -> add child) linear.coeffs
+    | Real_arith linear -> Iarr.iter (fun (child, _) -> add child) linear.coeffs
+    | Le child | Not child -> add child
+    | Eq (a, b) ->
+      add a;
+      add b
+    | Ite (c, a, b) ->
+      add c;
+      add a;
+      add b
+  done;
+  fun term -> Option.value ~default:0 (Term.Table.find_opt counts term)
+;;
+
+(* Filled after [assert_presolved_selected] is defined. The indirection lets the earlier
+   [assert_term] entry point flush a buffered batch while keeping the substantial batch
+   presolve implementation in one place and preserving OCaml definition order. Module
+   initialization installs the callback before a Session can be created by a client. *)
+let materialize_presolved_group :
+  (t -> no_prior_assertions:bool -> Term.t list -> unit) ref
+  =
+  ref (fun _ ~no_prior_assertions:_ _ -> assert false)
+;;
+
+let materialize_buffered_assertions t =
+  let groups = List.rev t.buffered_assertion_groups in
+  t.buffered_assertion_groups <- [];
+  match groups with
+  | [] -> ()
+  | _ :: _ ->
+    (* Definitions produced by the inactive Q-guarded fast formula do not belong to the
+       original replay. A buffered presolved group below installs its own exact definitions;
+       a direct-only replay correctly leaves this empty. *)
+    t.elim_defs <- [];
+    List.iter
+      (function
+        | Buffered_direct { term; frame } ->
+          (* Preserve immediate-ingress ordering: a direct assertion following a batch
+             retracts any non-monotonic symmetry break that batch emitted. *)
+          deactivate_symbreak t;
+          (match preprocess_assertion t term with
+           | exception Term.Overflow -> degrade t "buffered-preprocess-overflow"
+           | exception Term.Unsupported _ -> degrade t "buffered-preprocess-unsupported"
+           | pterm, guarded_ites -> assert_bool_at ~sel:frame ~guarded_ites t pterm)
+        | Buffered_presolved { terms; no_prior_assertions } ->
+          !materialize_presolved_group t ~no_prior_assertions terms)
+      groups
+;;
+
+let disable_assumption_preprocess t =
+  materialize_buffered_assertions t;
+  t.assumption_preprocess_allowed <- false
+;;
+
+let () = materialize_before_registry_change := disable_assumption_preprocess
+
+let assumption_has_positive_gate assumptions gate =
+  List.exists (fun (atom, polarity) -> polarity && Term.equal atom gate) assumptions
+  && not
+       (List.exists
+          (fun (atom, polarity) -> (not polarity) && Term.equal atom gate)
+          assumptions)
+;;
+
+let resolve_assumption_gate ~occurrences assumptions candidates =
+  match
+    List.filter
+      (fun (gate, _body) ->
+        assumption_has_positive_gate assumptions gate && occurrences gate = 1)
+      candidates
+  with
+  | [ (gate, body) ] -> Some { gate; body }
+  | [] | _ :: _ :: _ -> None
+;;
+
+let peel_asserted_true term =
+  let rec peel term =
+    match term.Term.node with
+    | Eq (({ node = Bool_const true; _ } : Term.t), other)
+    | Eq (other, ({ node = Bool_const true; _ } : Term.t)) -> peel other
+    | _ -> term
+  in
+  peel term
+;;
+
+let constructor_binding t body =
+  let registry = !(t.registry) in
+  let body = peel_asserted_true body in
+  let is_user_constant term =
+    match term.Term.node with
+    | App (sym, args) ->
+      Iarr.length args = 0
+      && (match term.sort with
+          | Sort.Datatype _ -> true
+          | Sort.Bool | Sort.Int _ | Sort.Real | Sort.BitVec _ | Sort.Uninterpreted _
+          | Sort.Array _ -> false)
+      && Option.is_none (Datatype_defs.constructor_of_sym registry sym)
+    | _ -> false
+  in
+  let is_constructor term =
+    match term.Term.node with
+    | App (sym, _) -> Option.is_some (Datatype_defs.constructor_of_sym registry sym)
+    | _ -> false
+  in
+  match body.Term.node with
+  | Eq (a, b) when is_user_constant a && is_constructor b -> Some (a, b)
+  | Eq (a, b) when is_user_constant b && is_constructor a -> Some (b, a)
+  | _ -> None
+;;
+
+(* Reject cyclic constructor definitions before substitution. Replacing an existential
+   datatype constant by its asserted constructor value is equisatisfiable, but recursively
+   expanding a cycle such as [x = C(y), y = D(x)] and then dropping both defining
+   equalities is not a justified finite rewrite. A binding depending on any cycle is left
+   untouched; the ordinary datatype theory handles it. *)
+let acyclic_constructor_bindings t (deferred : resolved_assumption_gate list) =
+  let all : Term.t Term.Table.t = Term.Table.create 32 in
+  List.iter
+    (fun entry ->
+      match constructor_binding t entry.body with
+      | Some (constant, value) when not (Term.Table.mem all constant) ->
+        Term.Table.add all constant value
+      | Some _ | None -> ())
+    deferred;
+  let state : int Term.Table.t = Term.Table.create 32 in
+  let rec safe constant =
+    match Term.Table.find_opt state constant with
+    | Some 1 -> false
+    | Some 2 -> true
+    | Some 3 -> false
+    | Some _ -> assert false
+    | None ->
+      Term.Table.add state constant 1;
+      let value = Term.Table.find all constant in
+      let rec dependencies term =
+        if Term.Table.mem all term
+        then safe term
+        else
+          match term.Term.node with
+          | Bool_const _ | Int_const _ | Real_const _ -> true
+          | App (_, args) | And args | Or args -> Iarr.for_all dependencies args
+          | Arith linear -> Iarr.for_all (fun (child, _) -> dependencies child) linear.coeffs
+          | Real_arith linear ->
+            Iarr.for_all (fun (child, _) -> dependencies child) linear.coeffs
+          | Le child | Not child -> dependencies child
+          | Eq (a, b) -> dependencies a && dependencies b
+          | Ite (c, a, b) -> dependencies c && dependencies a && dependencies b
+      in
+      let result = dependencies value in
+      Term.Table.replace state constant (if result then 2 else 3);
+      result
+  in
+  let filtered = Term.Table.create (Term.Table.length all) in
+  Term.Table.iter
+    (fun constant value -> if safe constant then Term.Table.add filtered constant value)
+    all;
+  filtered
+;;
+
+let chrono_enabled_from_env () =
+  match Sys.getenv_opt "OXSMT_CHRONO" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+let assumption_preprocess_propfold_enabled () =
+  match Sys.getenv_opt "OXSMT_ASSUMPTION_PREPROCESS_PROPFOLD" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+let assumption_fast_complements_enabled () =
+  match Sys.getenv_opt "OXSMT_ASSUMPTION_FAST_COMPLEMENTS" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+(* A cheap specialization-only subset of Presolve's audited complementary-literal fold.
+   It inspects only atomic children of the flattened top-level conjunction. If it finds
+   [p] and [not p], replacing the whole root list by [false] is an equivalence. On a miss
+   it returns the original list byte-for-byte, preserving presolve order and identity. *)
+let collapse_atomic_complements t roots =
+  let literal term =
+    match term.Term.node with
+    | Not child ->
+      (match child.Term.node with
+       | And _ | Or _ | Ite _ -> None
+       | Bool_const _
+       | Int_const _
+       | Real_const _
+       | App _
+       | Arith _
+       | Real_arith _
+       | Le _
+       | Eq _
+       | Not _ -> Some (child.Term.tag, 2))
+    | And _ | Or _ | Ite _ -> None
+    | Bool_const _
+    | Int_const _
+    | Real_const _
+    | App _
+    | Arith _
+    | Real_arith _
+    | Le _
+    | Eq _ -> Some (term.Term.tag, 1)
+  in
+  let tags = Hashtbl.create (List.length roots) in
+  let contradiction = ref false in
+  let rec scan term =
+    match term.Term.node with
+    | Bool_const false -> contradiction := true
+    | Bool_const true -> ()
+    | And children -> Iarr.iter scan children
+    | App _ | Eq _ | Le _ | Not _ | Or _ | Ite _ ->
+      (match literal term with
+       | None -> ()
+       | Some (tag, polarity) ->
+         let seen = Option.value ~default:0 (Hashtbl.find_opt tags tag) lor polarity in
+         if seen = 3 then contradiction := true else Hashtbl.replace tags tag seen)
+    | Int_const _ | Real_const _ | Arith _ | Real_arith _ ->
+      invalid_arg "collapse_atomic_complements: non-Boolean conjunction root"
+  in
+  List.iter scan roots;
+  if !contradiction then [ Context.bool_const t.ctx false ] else roots
+;;
+
+let detach_scoped_relevancy t specialization =
+  if specialization.scoped_relevancy
+  then (
+    Sat.set_branch_filter t.sat None;
+    Cdclt.set_relevancy t.cdclt None;
+    t.relevancy <- None)
+;;
+
+(* If this returns a selector, the caller must assume it only for this solve. The emitted
+   clauses persist, but the fresh raw SAT selector occurs only negatively in them, so every
+   later fallback query can satisfy them by setting it false. *)
+let prepare_assumption_preprocess t assumptions =
+  if (not t.assumption_preprocess)
+     || not t.assumption_preprocess_allowed
+     || t.assumption_preprocess_used
+     || t.buffered_assertion_groups = []
+     || t.cert_active
+     || Option.is_some t.relevancy
+     || chrono_enabled_from_env ()
+     || not (dt_ground_simplify_supported t)
+  then None
+  else (
+    let originals = List.rev t.asserted in
+    let occurrences = occurrence_census originals in
+    let rec classify gated ordinary = function
+      | [] -> Some (List.rev gated, List.rev ordinary)
+      | original :: rest ->
+        (match assumption_gate_candidates t original with
+         | None -> classify gated (original :: ordinary) rest
+         | Some candidates ->
+           let private_candidates =
+             List.filter (fun (gate, _) -> occurrences gate = 1) candidates
+           in
+           (match private_candidates with
+            | [] -> classify gated (original :: ordinary) rest
+            | [ _ ] ->
+              (match
+                 resolve_assumption_gate
+                   ~occurrences
+                   assumptions
+                   private_candidates
+               with
+               | Some resolved -> classify (resolved :: gated) ordinary rest
+               | None -> None)
+            | _ :: _ :: _ -> None))
+    in
+    match classify [] [] originals with
+    | None | Some ([], _) -> None
+    | Some (deferred, ordinary) ->
+      let substitutions = acyclic_constructor_bindings t deferred in
+      let scoped_relevancy =
+        match t.relevancy with
+        | None when not (chrono_enabled_from_env ()) ->
+          let rel = Relevancy.create ~activity:(fun v -> Sat.var_activity t.sat v) () in
+          t.relevancy <- Some rel;
+          Cdclt.set_relevancy t.cdclt (Some rel);
+          Sat.set_branch_filter t.sat (Some (fun v -> Relevancy.should_branch rel v));
+          true
+        | None | Some _ -> false
+      in
+      let selector = Sat.new_var t.sat in
+      let specialized =
+        List.map
+          (simplify_known_datatypes
+             ~substitutions
+             ~fold_known_datatypes:false
+             t)
+          (List.map (fun entry -> entry.body) deferred @ ordinary)
+      in
+      let extra =
+        if pass_a_enabled t
+        then (
+          match Presolve.entailed_equalities t.ctx specialized with
+          | exception Term.Overflow -> []
+          | exception Term.Unsupported _ -> []
+          | eqs -> eqs)
+        else []
+      in
+      let internalize term =
+        match preprocess_assertion t term with
+        | exception Term.Overflow -> degrade t "deferred-gate-preprocess-overflow"
+        | exception Term.Unsupported _ -> degrade t "deferred-gate-preprocess-unsupported"
+        | pterm, guarded_ites -> assert_bool_at ~sel:selector ~guarded_ites t pterm
+      in
+      (match Presolve.run t.ctx specialized with
+       | exception Term.Overflow -> degrade t "deferred-gate-presolve-overflow"
+       | exception Term.Unsupported _ -> degrade t "deferred-gate-presolve-unsupported"
+       | { Presolve.reduced; defs } ->
+         t.elim_defs <- defs;
+         let reduced =
+           if assumption_fast_complements_enabled ()
+           then collapse_atomic_complements t reduced
+           else reduced
+         in
+         let reduced =
+           if proj_enabled t
+           then (
+             match
+               Presolve.simplify_projection
+                 ~propfold:(assumption_preprocess_propfold_enabled ())
+                 t.ctx
+                 reduced
+             with
+             | exception Term.Overflow ->
+               degrade t "deferred-gate-projection-overflow";
+               reduced
+             | exception Term.Unsupported _ ->
+               degrade t "deferred-gate-projection-unsupported";
+               reduced
+             | simplified -> simplified)
+           else reduced
+         in
+         let reduced =
+           if ctx_simp_enabled t
+           then (
+             match Presolve.simplify_contextual t.ctx reduced with
+             | exception Term.Overflow ->
+               degrade t "deferred-gate-context-overflow";
+               reduced
+             | exception Term.Unsupported _ ->
+               degrade t "deferred-gate-context-unsupported";
+               reduced
+             | simplified -> simplified)
+           else reduced
+         in
+         let roots = reduced @ extra in
+         (match roots with
+          | [] -> ()
+          | [ term ] -> internalize term
+          | terms ->
+            (match Context.and_ t.ctx terms with
+             | exception Term.Overflow -> degrade t "deferred-gate-conjoin-overflow"
+             | exception Term.Unsupported _ ->
+               degrade t "deferred-gate-conjoin-unsupported"
+             | conjunction -> internalize conjunction)));
+      if t.degraded
+      then (
+        if scoped_relevancy
+        then (
+          Sat.set_branch_filter t.sat None;
+          Cdclt.set_relevancy t.cdclt None;
+          t.relevancy <- None);
+        None)
+      else (
+        let redundant_assumptions = Term.Table.create (List.length deferred) in
+        List.iter
+          (fun entry -> Term.Table.replace redundant_assumptions entry.gate ())
+          deferred;
+        List.iter
+          (fun (atom, _) ->
+            if occurrences atom = 0 then Term.Table.replace redundant_assumptions atom ())
+          assumptions;
+        t.assumption_preprocess_used <- true;
+        Some { selector; redundant_assumptions; scoped_relevancy }))
+;;
+
 let assert_term_selected t term =
   (* F1: an assertion after a symmetry-breaking emission may break the detected symmetry;
      retract the (non-monotonic) lex clauses first. *)
@@ -1278,14 +2049,31 @@ let assert_term_selected t term =
      reserved [.oxsmt.*] symbol (a coerced/interned qvar OR a captured preprocessing
      witness) degrades to a clean [Unknown] via the I8 Unsupported discipline (NOT a raw
      [Failure]) — never registered, never in a model, never capturing an internal aux. *)
+  if t.assumption_preprocess_used then disable_assumption_preprocess t;
+  let buffer =
+    t.assumption_preprocess
+    && t.assumption_preprocess_allowed
+    && not t.cert_active
+    && (match t.frames with
+        | [ _ ] -> true
+        | _ -> false)
+  in
+  if (not buffer) && t.buffered_assertion_groups <> []
+  then disable_assumption_preprocess t;
   if term_has_reserved term
   then degrade t "reserved-symbol"
   else (
     t.asserted <- term :: t.asserted;
-    match Preprocess.run t.pp term with
-    | exception Term.Overflow -> degrade t "preprocess-overflow"
-    | exception Term.Unsupported _ -> degrade t "preprocess-unsupported"
-    | pterm -> assert_bool_at t pterm)
+    if buffer
+    then
+      t.buffered_assertion_groups
+      <- Buffered_direct { term; frame = current_selector t }
+         :: t.buffered_assertion_groups
+    else
+      (match preprocess_assertion t term with
+       | exception Term.Overflow -> degrade t "preprocess-overflow"
+       | exception Term.Unsupported _ -> degrade t "preprocess-unsupported"
+       | pterm, guarded_ites -> assert_bool_at ~guarded_ites t pterm))
 ;;
 
 let assert_term t term =
@@ -1304,25 +2092,25 @@ let assert_term t term =
    discipline as [assert_term]. Used by [assert_presolved] for the REDUCED conjuncts —
    [t.asserted] holds the ORIGINAL assertions (for R1), not the reduced ones. *)
 let internalize_reduced ?certificate_source t term =
-  match Preprocess.run t.pp term with
+  match preprocess_assertion t term with
   | exception Term.Overflow -> degrade t "overflow"
   | exception Term.Unsupported _ -> degrade t "unsupported"
-  | pterm ->
+  | pterm, guarded_ites ->
     (match t.presolve_certificate_trace, certificate_source with
      | Some trace, Some (rewrite_id, source) ->
        trace.on_clausify_begin ~rewrite_id ~source ~preprocessed:pterm;
        Fun.protect ~finally:trace.on_clausify_end (fun () ->
-         assert_bool_at ~record_presolve:true t pterm)
-     | (None | Some _), (None | Some _) -> assert_bool_at t pterm)
+         assert_bool_at ~record_presolve:true ~guarded_ites t pterm)
+     | (None | Some _), (None | Some _) -> assert_bool_at ~guarded_ites t pterm)
 ;;
 
 (* Like {!internalize_reduced} but guards every emitted clause with [sel] (task #25 F1:
    the symmetry-breaking activation selector). *)
 let internalize_reduced_at ~sel t term =
-  match Preprocess.run t.pp term with
+  match preprocess_assertion t term with
   | exception Term.Overflow -> degrade t "overflow"
   | exception Term.Unsupported _ -> degrade t "unsupported"
-  | pterm -> assert_bool_at ~sel t pterm
+  | pterm, guarded_ites -> assert_bool_at ~sel ~guarded_ites t pterm
 ;;
 
 (* W1b equality-elimination presolve (logs/w1b-design.md). The BATCH entry point: given
@@ -1336,24 +2124,17 @@ let internalize_reduced_at ~sel t term =
    reserved-symbol gate (R1 / codex C1) applies per term exactly as in {!assert_term}. On
    a zero-alias input the pass is a no-op ([reduced = originals], [defs = []]) and this is
    byte-identical to asserting each original with {!assert_term}. *)
-let assert_presolved_selected t terms =
+let materialize_presolved_selected t ~no_prior_assertions ~record_originals terms =
   (* F1: a further batch after a prior emission may break that symmetry; retract the prior
      lex clauses before this batch (possibly) emits its own. *)
   deactivate_symbreak t;
-  (* B4: capture whether the formula is EMPTY before this batch. Symmetry detection sees
-     only [terms]; if prior assertions exist, a symmetry of the batch need not be a
-     symmetry of [prior ∧ batch]. Captured before the originals below are recorded. *)
-  let no_prior_assertions =
-    match t.asserted with
-    | [] -> true
-    | _ -> false
-  in
   if List.exists term_has_reserved terms
   then degrade t "reserved-symbol"
   else (
     (* Record the ORIGINALS for R1 (order-insensitive; [Model_check.check] folds over
        all). The pre-preprocessing terms are exactly what the R1 checker must satisfy. *)
-    List.iter (fun term -> t.asserted <- term :: t.asserted) terms;
+    if record_originals
+    then List.iter (fun term -> t.asserted <- term :: t.asserted) terms;
     (* I8/CONTRACT-POISON (codex H1): the substitution builds terms through the arithmetic
        smart constructors, so composing coefficients can raise [Term.Overflow] (e.g.
        [x = 2y] substituted into [C·x = 0] with [2·C] out of int63) — or an [Unsupported]
@@ -1511,6 +2292,43 @@ let assert_presolved_selected t terms =
          List.iter (internalize_reduced_at ~sel t) sym_extra))
 ;;
 
+let () =
+  materialize_presolved_group
+  := (fun t ~no_prior_assertions terms ->
+       materialize_presolved_selected
+         t
+         ~no_prior_assertions
+         ~record_originals:false
+         terms)
+;;
+
+let assert_presolved_selected t terms =
+  if t.assumption_preprocess_used then disable_assumption_preprocess t;
+  let buffer =
+    t.assumption_preprocess
+    && t.assumption_preprocess_allowed
+    && not t.cert_active
+    && (match t.frames with
+        | [ _ ] -> true
+        | _ -> false)
+  in
+  if (not buffer) && t.buffered_assertion_groups <> []
+  then disable_assumption_preprocess t;
+  let no_prior_assertions = t.asserted = [] in
+  if buffer
+  then (
+    deactivate_symbreak t;
+    if List.exists term_has_reserved terms
+    then degrade t "reserved-symbol"
+    else (
+      List.iter (fun term -> t.asserted <- term :: t.asserted) terms;
+      t.buffered_assertion_groups
+      <- Buffered_presolved { terms; no_prior_assertions }
+         :: t.buffered_assertion_groups))
+  else
+    materialize_presolved_selected t ~no_prior_assertions ~record_originals:true terms
+;;
+
 let assert_presolved t terms =
   preselect_arithmetic t terms;
   (* F1: see [assert_term] — a dropped batch MUST degrade, never silently reduce the
@@ -1536,10 +2354,10 @@ let assert_instance_at_frame t ~frame (inst : Instance.t) =
      exists under a registered lemma), so [sym_sel] is always [None] here — but clearing
      it keeps the invariant local rather than relying on that reasoning. *)
   deactivate_symbreak t;
-  match Preprocess.run t.pp (Instance.to_term inst) with
+  match preprocess_assertion t (Instance.to_term inst) with
   | exception Term.Overflow -> degrade t "overflow"
   | exception Term.Unsupported _ -> degrade t "unsupported"
-  | pterm -> assert_bool_at ~sel:frame t pterm
+  | pterm, guarded_ites -> assert_bool_at ~sel:frame ~guarded_ites t pterm
 ;;
 
 type lemma = Lemma.t
@@ -1565,6 +2383,7 @@ type lemma_def =
    [unit] is widened additively so the tranche-1 manual path — {!instantiate} — can name
    the lemma; a caller may ignore it). *)
 let assert_lemma t ~qvars ~build =
+  disable_assumption_preprocess t;
   (* F1/R2: a lemma extends the formula (its instances assert during solve). Retract any
      active emission, and mark lemmas registered so a LATER [assert_presolved] refuses to
      emit (codex B2 — instances would break the symmetry mid-solve, un-retractably). *)
@@ -1638,6 +2457,7 @@ let assert_lemma t ~qvars ~build =
 let instantiate t lemma sigma = Manager.seed_instance t.mgr lemma sigma
 
 let push t =
+  disable_assumption_preprocess t;
   (* F1: a new frame's assertions may break a prior emission's symmetry; retract its lex
      clauses. (A later [pop] does not resurrect them — a re-emission would be needed,
      which the batch path does not do; sound, only forgoes the bonus.) *)
@@ -2186,26 +3006,26 @@ let commit_sat t =
        trees, so [get_model] stays [None] for a DT [Sat] in v1 (surfacing the tree model
        to the CLI / external eval is a follow-up); the verdict itself flips unknown ->
        checked-[Sat]. *)
-    match Cdclt.dt_model t.cdclt with
-    | Some model ->
-      let model = complete_dt_bool_atoms t model in
-      let model = complete_dt_elim_scalars t model in
-      let model = complete_dt_applied_preds t model in
-      let check =
-        match !dt_checker_override with
-        | Some f -> f
-        | None -> Dt_model_check.check
-      in
-      if check !(t.registry) model t.asserted
-      then (
-        t.last_model <- None;
-        Sat)
-      else (
-        t.unknown_reason <- "dt-model-check-failed";
-        Unknown)
-    | None ->
-      t.unknown_reason <- "dt-no-model";
-      Unknown)
+    (* A fully reduced ground query may leave the DT child with no model vocabulary at
+       all. Treat that as the empty candidate, not an automatic failure: the independent
+       checker can still certify constructor/tester/selector tautologies syntactically,
+       and fails closed if any original term genuinely needs a missing binding. *)
+    let model = Option.value ~default:[] (Cdclt.dt_model t.cdclt) in
+    let model = complete_dt_bool_atoms t model in
+    let model = complete_dt_elim_scalars t model in
+    let model = complete_dt_applied_preds t model in
+    let check =
+      match !dt_checker_override with
+      | Some f -> f
+      | None -> Dt_model_check.check
+    in
+    if check !(t.registry) model t.asserted
+    then (
+      t.last_model <- None;
+      Sat)
+    else (
+      t.unknown_reason <- "dt-model-check-failed";
+      Unknown))
   else (
     match build_model t with
     | Some m ->
@@ -2307,6 +3127,7 @@ let nia_refine t =
 ;;
 
 let check_sat t =
+  disable_assumption_preprocess t;
   t.last_verdict <- Unknown;
   t.last_failed_frame_assumptions <- None;
   (* task #106: clear the observational LIA conflict stash HERE, at the single mandatory
@@ -2464,7 +3285,7 @@ let prepare_assumption t ((source_atom, source_polarity) as source : assumption)
   let signed_term =
     if source_polarity then source_atom else Context.not_ t.ctx source_atom
   in
-  match Preprocess.run t.pp signed_term with
+  match preprocess_term t signed_term with
   | exception Term.Overflow ->
     degrade t "assumption-preprocess-overflow";
     None
@@ -2534,8 +3355,16 @@ let dedup_assumptions assumptions =
     assumptions
 ;;
 
+let assumption_profile_enabled () =
+  match Sys.getenv_opt "OXSMT_ASSUMPTION_PROFILE" with
+  | Some ("1" | "true" | "yes") -> true
+  | Some _ | None -> false
+;;
+
 let reset_assumption_check t =
   t.minimize_probes <- 0;
+  t.assumption_profile_on <- assumption_profile_enabled ();
+  t.last_assumption_profile <- empty_assumption_profile;
   t.last_verdict <- Unknown;
   t.last_failed_frame_assumptions <- None;
   Cdclt.clear_last_conflict t.cdclt;
@@ -2543,6 +3372,46 @@ let reset_assumption_check t =
   t.budget_exhausted <- false;
   t.effort_exhausted <- false;
   t.unknown_reason <- ""
+;;
+
+(* Cap for assumption-core deletion probes and final replay. The initial solve
+   remains governed only by the user's session budget and establishes the public verdict.
+   Once it proves Unsat, downstream core work gets a multiple of that solve's effort,
+   with a small floor for cheap cores. Expensive initial proofs skip optional minimization
+   altogether: on the Vox2 corpus such probes almost always exhausted their cap and
+   returned no core. [Cdclt.with_effort_cap] also takes the minimum with any
+   user-configured cap. The env knobs retain an opt-out/A-B path; malformed or negative
+   numeric values retain the defaults. *)
+let core_min_effort_cap_enabled () =
+  match Sys.getenv_opt "OXSMT_CORE_MIN_EFFORT_CAP" with
+  | Some ("0" | "false" | "no" | "off") -> false
+  | Some _ | None -> true
+;;
+
+let nonnegative_env_or name default =
+  match Sys.getenv_opt name with
+  | Some value ->
+    (match int_of_string_opt value with
+     | Some n when n >= 0 -> n
+     | Some _ | None -> default)
+  | None -> default
+;;
+
+let core_min_probe_effort_cap initial_effort =
+  let multiplier = nonnegative_env_or "OXSMT_CORE_MIN_EFFORT_MULTIPLIER" 1 in
+  let floor = nonnegative_env_or "OXSMT_CORE_MIN_EFFORT_FLOOR" 32 in
+  let scaled =
+    if multiplier = 0
+    then 0
+    else if initial_effort > max_int / multiplier
+    then max_int
+    else multiplier * initial_effort
+  in
+  max floor scaled
+;;
+
+let core_min_initial_effort_limit () =
+  nonnegative_env_or "OXSMT_CORE_MIN_INITIAL_EFFORT_LIMIT" 9
 ;;
 
 let emit_base_unit_if_needed t =
@@ -2562,11 +3431,51 @@ let commit_sat_assuming t assumptions =
   Fun.protect ~finally:(fun () -> t.asserted <- saved_asserted) (fun () -> commit_sat t)
 ;;
 
+type assumption_phase =
+  | Assumption_initial
+  | Assumption_deletion
+  | Assumption_replay
+
+let record_assumption_phase t phase ~cpu_s ~effort ~decisions ~conflicts ~verdict =
+  if t.assumption_profile_on
+  then (
+    let p = t.last_assumption_profile in
+    t.last_assumption_profile
+    <- (match phase with
+        | Assumption_initial ->
+          { p with
+            initial_cpu_s = p.initial_cpu_s +. cpu_s
+          ; initial_effort = p.initial_effort + effort
+          ; initial_decisions = p.initial_decisions + decisions
+          ; initial_conflicts = p.initial_conflicts + conflicts
+          }
+        | Assumption_deletion ->
+          { p with
+            deletion_cpu_s = p.deletion_cpu_s +. cpu_s
+          ; deletion_effort = p.deletion_effort + effort
+          ; deletion_decisions = p.deletion_decisions + decisions
+          ; deletion_conflicts = p.deletion_conflicts + conflicts
+          ; deletion_probes = p.deletion_probes + 1
+          ; deletion_sat = p.deletion_sat + (if verdict = Sat then 1 else 0)
+          ; deletion_unsat = p.deletion_unsat + (if verdict = Unsat then 1 else 0)
+          ; deletion_unknown = p.deletion_unknown + (if verdict = Unknown then 1 else 0)
+          }
+        | Assumption_replay ->
+          { p with
+            replay_cpu_s = p.replay_cpu_s +. cpu_s
+          ; replay_effort = p.replay_effort + effort
+          ; replay_decisions = p.replay_decisions + decisions
+          ; replay_conflicts = p.replay_conflicts + conflicts
+          }))
+;;
+
 (* One complete, client-grade ground query for a minimization probe. Unlike [raw_solve], a
    [Sat] result passes through model reconstruction and the independent model checker.
    Per-probe [begin_check] gives each semantic deletion check its configured effort
    budget; learned clauses remain shared in the incremental SAT core. *)
-let solve_prepared_assumptions t ~fixed assumptions =
+let solve_prepared_assumptions ?(verdict_only = false) t ~phase ~fixed assumptions =
+  let started = if t.assumption_profile_on then Sys.time () else 0. in
+  let stats_before = Sat.stats t.sat in
   t.minimize_probes <- t.minimize_probes + 1;
   Cdclt.clear_last_conflict t.cdclt;
   t.last_model <- None;
@@ -2578,6 +3487,9 @@ let solve_prepared_assumptions t ~fixed assumptions =
   let lits = List.map (fun a -> a.lit) assumptions in
   let verdict =
     match raw_solve t (fixed @ lits) with
+    | Sat when verdict_only ->
+      t.unknown_reason <- "assumption-preprocess-sat-unknown";
+      Unknown
     | Sat -> commit_sat_assuming t assumptions
     | Unsat -> Unsat
     | Unknown -> Unknown
@@ -2585,6 +3497,15 @@ let solve_prepared_assumptions t ~fixed assumptions =
   t.last_splits <- Cdclt.splits_used t.cdclt;
   t.last_effort <- Cdclt.effort_used t.cdclt;
   t.last_verdict <- verdict;
+  let stats_after = Sat.stats t.sat in
+  record_assumption_phase
+    t
+    phase
+    ~cpu_s:(if t.assumption_profile_on then Sys.time () -. started else 0.)
+    ~effort:t.last_effort
+    ~decisions:(stats_after.decisions - stats_before.decisions)
+    ~conflicts:(stats_after.conflicts - stats_before.conflicts)
+    ~verdict;
   verdict
 ;;
 
@@ -2609,12 +3530,17 @@ let check_sat_assuming t assumptions =
     (* Validate the entire public input before interning a negation or touching query
        evidence, so a malformed later element cannot leave a half-started check. *)
     List.iter validate_assumption assumptions;
-    reset_assumption_check t;
     let signed_terms =
       List.map
         (fun (atom, polarity) -> if polarity then atom else Context.not_ t.ctx atom)
         assumptions
     in
+    (* Match assertion ingress: choose or reject the arithmetic stack from the original
+       signed terms before preprocessing can erase a Real-valued subterm. In particular,
+       a known-constructor DT reduction must not let an unsupported Real+DT assumption
+       escape the foreign-theory gate. *)
+    preselect_arithmetic t signed_terms;
+    reset_assumption_check t;
     if t.degraded
     then (
       t.unknown_reason
@@ -2638,17 +3564,42 @@ let check_sat_assuming t assumptions =
       t.unknown_reason <- "assumptions-pure-bv-unsupported";
       { verdict = Unknown; unsat_core = None })
     else (
+      let assumption_preprocessing = prepare_assumption_preprocess t assumptions in
+      if Option.is_none assumption_preprocessing then disable_assumption_preprocess t;
+      if t.degraded
+      then (
+        t.unknown_reason
+        <- (if String.length t.degraded_reason = 0 then "degraded" else t.degraded_reason);
+        { verdict = Unknown; unsat_core = None })
+      else (
       t.assumption_query_started <- true;
       emit_base_unit_if_needed t;
+      let prepare_started = if t.assumption_profile_on then Sys.time () else 0. in
       let rec prepare acc = function
         | [] -> Some (dedup_assumptions (List.rev acc))
-        | assumption :: rest ->
-          (match prepare_assumption t assumption with
-           | None -> None
-           | Some prepared -> prepare (prepared :: acc) rest)
+        | ((atom, _) as assumption) :: rest ->
+          let redundant =
+            match assumption_preprocessing with
+            | Some specialization ->
+              Term.Table.mem specialization.redundant_assumptions atom
+            | None -> false
+          in
+          if redundant
+          then prepare acc rest
+          else (
+            match prepare_assumption t assumption with
+            | None -> None
+            | Some prepared -> prepare (prepared :: acc) rest)
       in
-      match prepare [] assumptions with
+      let prepared = prepare [] assumptions in
+      if t.assumption_profile_on
+      then (
+        let p = t.last_assumption_profile in
+        t.last_assumption_profile
+        <- { p with prepare_cpu_s = Sys.time () -. prepare_started });
+      match prepared with
       | None ->
+        Option.iter (detach_scoped_relevancy t) assumption_preprocessing;
         t.last_verdict <- Unknown;
         if String.length t.unknown_reason = 0
         then
@@ -2661,11 +3612,44 @@ let check_sat_assuming t assumptions =
         (* Frame selectors are fixed hard background. The symmetry selector is
            intentionally absent: arbitrary assumptions need not respect its chosen
            representative. *)
-        let fixed = List.map Sat.pos (assumed_frames t) in
-        (match solve_prepared_assumptions t ~fixed prepared with
+        let fixed =
+          List.map Sat.pos (assumed_frames t)
+          @ Option.to_list
+              (Option.map
+                 (fun specialization -> Sat.pos specialization.selector)
+                 assumption_preprocessing)
+        in
+        let initial_verdict =
+          let solve () =
+            solve_prepared_assumptions
+              ~verdict_only:(Option.is_some assumption_preprocessing)
+              t
+              ~phase:Assumption_initial
+              ~fixed
+              prepared
+          in
+          match assumption_preprocessing with
+          | Some specialization when specialization.scoped_relevancy ->
+            Fun.protect ~finally:(fun () -> detach_scoped_relevancy t specialization) solve
+          | None | Some _ -> solve ()
+        in
+        Option.iter (detach_scoped_relevancy t) assumption_preprocessing;
+        (match initial_verdict with
          | Sat -> { verdict = Sat; unsat_core = None }
          | Unknown -> { verdict = Unknown; unsat_core = None }
          | Unsat ->
+           if Option.is_some assumption_preprocessing
+           then (
+             t.last_verdict <- Unsat;
+             t.last_model <- None;
+             (* The proof may mention substituted atoms that are not public premises.
+                Verdict soundness follows from equivalence, but the ordinary theory-core
+                and Farkas evidence interfaces must not expose those internal atoms. *)
+             Cdclt.clear_last_conflict t.cdclt;
+             t.unknown_reason <- "assumption-preprocess-no-core";
+             { verdict = Unsat; unsat_core = None })
+           else (
+           let initial_effort = t.last_effort in
            (* The frozen SAT core provides a cheap proof-dependent over-approximation.
               Restore every fixed selector, then minimize only the user literals. *)
            let failed_keys () =
@@ -2679,6 +3663,11 @@ let check_sat_assuming t assumptions =
              let failed = failed_keys () in
              List.filter (fun a -> Hashtbl.mem failed (sat_lit_key a.lit)) prepared
            in
+           if t.assumption_profile_on
+           then (
+             let p = t.last_assumption_profile in
+             t.last_assumption_profile
+             <- { p with initial_core_size = List.length initial_core });
            (* Deletion-based minimization (destructive MUS). [necessary] accumulates the
               transition literals already witnessed necessary (removing one turns the
               query Sat); the working tail holds the yet-untested candidates. The
@@ -2720,8 +3709,25 @@ let check_sat_assuming t assumptions =
              t.unknown_reason <- reason;
              { verdict = Unsat; unsat_core = None }
            in
+           let core_effort_cap_enabled = core_min_effort_cap_enabled () in
+           let solve_with_core_effort_cap solve =
+             if core_effort_cap_enabled
+             then
+               Cdclt.with_effort_cap
+                 t.cdclt
+                 (core_min_probe_effort_cap initial_effort)
+                 solve
+             else solve ()
+           in
            let probe candidate =
-             let verdict = solve_prepared_assumptions t ~fixed candidate in
+             let verdict =
+               solve_with_core_effort_cap (fun () ->
+                 solve_prepared_assumptions
+                   t
+                   ~phase:Assumption_deletion
+                   ~fixed
+                   candidate)
+             in
              match !inject_deletion_verdict with
              | Some forced ->
                inject_deletion_verdict := None;
@@ -2744,9 +3750,13 @@ let check_sat_assuming t assumptions =
                   in
                   minimize necessary rest)
            in
-           (match minimize [] initial_core with
-            | None -> degrade_core "assumption-core-minimize-unknown"
-            | Some minimal ->
+           (if core_effort_cap_enabled
+               && initial_effort > core_min_initial_effort_limit ()
+            then degrade_core "assumption-core-initial-effort-skip"
+            else
+              match minimize [] initial_core with
+              | None -> degrade_core "assumption-core-minimize-unknown"
+              | Some minimal ->
               (* Restore input order: the minimal core is [minimal] read as a set, so
                  filtering [initial_core] (already in input order) recovers the order the
                  documented guarantee promises. *)
@@ -2759,11 +3769,23 @@ let check_sat_assuming t assumptions =
                   (fun a -> Hashtbl.mem in_core (sat_lit_key a.lit))
                   initial_core
               in
+              if t.assumption_profile_on
+              then (
+                let p = t.last_assumption_profile in
+                t.last_assumption_profile
+                <- { p with final_core_size = List.length core });
               (* Replay the final core even when the last deletion happened to be an Unsat
                  probe. This makes evidence, failed assumptions, stats, and model state
                  describe exactly the public result. *)
               let replay =
-                let verdict = solve_prepared_assumptions t ~fixed core in
+                let verdict =
+                  solve_with_core_effort_cap (fun () ->
+                    solve_prepared_assumptions
+                      t
+                      ~phase:Assumption_replay
+                      ~fixed
+                      core)
+                in
                 match !inject_replay_verdict with
                 | Some forced ->
                   inject_replay_verdict := None;
@@ -2776,7 +3798,7 @@ let check_sat_assuming t assumptions =
                  ; unsat_core = Some (List.map (fun a -> a.source) core)
                  }
                | Unknown -> degrade_core "assumption-core-recheck-unknown"
-               | Sat -> degrade_core "assumption-core-recheck-sat"))))
+               | Sat -> degrade_core "assumption-core-recheck-sat"))))))
 ;;
 
 let get_model t =
@@ -2971,6 +3993,13 @@ let stats t = Sat.stats t.sat
 let splits t = t.last_splits
 let fabric_edges_injected t = Cdclt.combine_fabric_edges_injected t.cdclt
 let minimize_probes t = t.minimize_probes
+let assumption_profile t = t.last_assumption_profile
+let dt_ground_simplify_stats t =
+  { tester_folds = t.dt_ground_tester_folds
+  ; selector_folds = t.dt_ground_selector_folds
+  }
+;;
+
 let budget_exhausted t = t.budget_exhausted
 let effort t = t.last_effort
 let effort_exhausted t = t.effort_exhausted
@@ -2995,6 +4024,7 @@ let lemma_instantiations t = Manager.instantiations t.mgr
 
 module For_test = struct
   let default_value = default_value
+  let simplify_known_datatypes t term = simplify_known_datatypes t term
   let set_dt_checker f = dt_checker_override := f
   let set_array_checker f = array_checker_override := f
 end

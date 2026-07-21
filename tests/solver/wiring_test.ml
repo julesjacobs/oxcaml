@@ -17,6 +17,12 @@ module Loader = Oxsmt_query_loader
 let checks = ref 0
 let failures = ref 0
 
+let env_enabled name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let check name cond =
   incr checks;
   if not cond
@@ -66,6 +72,64 @@ let test_push_pop () =
   Session.pop s;
   check_verdict "nested popped: sat" Session.Sat (Session.check_sat s);
   check_raises "pop with no matching push" (fun () -> Session.pop s)
+;;
+
+let with_direct_term_ite f =
+  let old = Sys.getenv_opt "OXSMT_DIRECT_TERM_ITE" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_DIRECT_TERM_ITE" (Option.value ~default:"" old))
+    (fun () ->
+       Unix.putenv "OXSMT_DIRECT_TERM_ITE" "1";
+       f ())
+;;
+
+let test_direct_term_ite_session () =
+  with_direct_term_ite (fun () ->
+    (* The selected branch is satisfiable and survives the original-formula model check. *)
+    let s = Session.create () in
+    let ctx = Session.context s in
+    let p = Context.const ctx (Session.declare_const s "direct-ite-p" Sort.bool) in
+    let zero = Context.int_const ctx 0 in
+    let one = Context.int_const ctx 1 in
+    Session.assert_term s p;
+    Session.assert_term s (Context.eq ctx (Context.ite ctx p zero one) zero);
+    check_verdict "direct term ITE: selected branch sat" Session.Sat (Session.check_sat s);
+    (* The two direct side clauses have the pushed assertion's selector. *)
+    let s = Session.create () in
+    let ctx = Session.context s in
+    let p = Context.const ctx (Session.declare_const s "direct-ite-pop-p" Sort.bool) in
+    let zero = Context.int_const ctx 0 in
+    let one = Context.int_const ctx 1 in
+    Session.assert_term s p;
+    Session.push s;
+    Session.assert_term s (Context.eq ctx (Context.ite ctx p zero one) one);
+    check_verdict "direct term ITE: pushed contradiction" Session.Unsat (Session.check_sat s);
+    Session.pop s;
+    check_verdict "direct term ITE: popped clauses retract" Session.Sat (Session.check_sat s);
+    (* Guard-only condition/equality atoms must be roots when dynamic relevancy is on. *)
+    let s = Session.create ~enable_relevancy:true () in
+    let ctx = Session.context s in
+    let p = Context.const ctx (Session.declare_const s "direct-ite-rel-p" Sort.bool) in
+    let zero = Context.int_const ctx 0 in
+    let one = Context.int_const ctx 1 in
+    Session.assert_term s p;
+    Session.assert_term s (Context.eq ctx (Context.ite ctx p zero one) one);
+    check_verdict
+      "direct term ITE: relevancy keeps guards live"
+      Session.Unsat
+      (Session.check_sat s);
+    (* Assumptions must retain legacy preprocessing: compacting this atom and dropping
+       its separate guards would turn an unsupported non-literal into an unsound literal. *)
+    let s = Session.create () in
+    let ctx = Session.context s in
+    let p = Context.const ctx (Session.declare_const s "direct-ite-asm-p" Sort.bool) in
+    let atom =
+      Context.eq ctx (Context.ite ctx p (Context.int_const ctx 0) (Context.int_const ctx 1))
+        (Context.int_const ctx 0)
+    in
+    let { Session.verdict; _ } = Session.check_sat_assuming s [ atom, true ] in
+    check_verdict "direct term ITE: assumptions stay legacy" Session.Unknown verdict)
 ;;
 
 let test_assert_after_check () =
@@ -166,6 +230,73 @@ let test_lia_branch_and_bound () =
     s
     (Context.eq ctx (Context.mul_const ctx 2 x) (Context.int_const ctx 1));
   check_verdict "LIA 2x=1 (no integer)" Session.Unsat (Session.check_sat s)
+;;
+
+(* End-to-end coverage for the dark Z3-style interface-equality path.  In particular,
+   rerunning the same pushed disequality after pop exercises the retained refinement
+   clause together with the adapter's framed pending constraint. *)
+let test_binary_interface_equality () =
+  let enabled name =
+    match Sys.getenv_opt name with
+    | Some ("1" | "true" | "yes" | "on") -> true
+    | Some _ | None -> false
+  in
+  if not (enabled "OXSMT_BINARY_INTERFACE_EQ" && enabled "OXSMT_LAZY_INTERFACE_DISEQ")
+  then ()
+  else
+    (let s = Session.create () in
+     let ctx = Session.context s in
+     let x = Context.const ctx (Session.declare_const s "binary_x" Sort.int) in
+     let y = Context.const ctx (Session.declare_const s "binary_y" Sort.int) in
+     Session.assert_term s (Context.not_ ctx (Context.eq ctx x y));
+     check_verdict
+       "binary interface equality: unconstrained disequality is sat"
+       Session.Sat
+       (Session.check_sat s));
+    (let s = Session.create () in
+     let ctx = Session.context s in
+     let x = Context.const ctx (Session.declare_const s "binary_px" Sort.int) in
+     let y = Context.const ctx (Session.declare_const s "binary_py" Sort.int) in
+     Session.assert_term s (Context.eq ctx x (Context.int_const ctx 0));
+     Session.assert_term s (Context.eq ctx y (Context.int_const ctx 0));
+     check_verdict
+       "binary interface equality: fixed equal base is sat"
+       Session.Sat
+       (Session.check_sat s);
+     let diseq = Context.not_ ctx (Context.eq ctx x y) in
+     Session.push s;
+     Session.assert_term s diseq;
+     check_verdict
+       "binary interface equality: pushed fixed disequality is unsat"
+       Session.Unsat
+       (Session.check_sat s);
+     Session.pop s;
+     check_verdict
+       "binary interface equality: pop retracts disequality"
+       Session.Sat
+       (Session.check_sat s);
+     Session.push s;
+     Session.assert_term s diseq;
+     check_verdict
+       "binary interface equality: refined disequality can be reintroduced"
+       Session.Unsat
+       (Session.check_sat s));
+    let s = Session.create () in
+    let ctx = Session.context s in
+    let x = Context.const ctx (Session.declare_const s "binary_big_x" Sort.int) in
+    let y = Context.const ctx (Session.declare_const s "binary_big_y" Sort.int) in
+    let huge =
+      Context.int_const_big
+        ctx
+        (Bigint.of_string "1234567890123456789012345678901234567890")
+    in
+    Session.assert_term s (Context.eq ctx x huge);
+    Session.assert_term s (Context.eq ctx y huge);
+    Session.assert_term s (Context.not_ ctx (Context.eq ctx x y));
+    check_verdict
+      "binary interface equality: huge fixed disequality is unsat"
+      Session.Unsat
+      (Session.check_sat s)
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -1745,6 +1876,11 @@ let test_presolve_bool_dep_default () =
         x
         (Context.ite ctx b (Context.int_const ctx 1) (Context.int_const ctx 2))
     ];
+  (* Assumption preprocessing intentionally buffers assertion batches until the first
+     ordinary solve. Preserve the default-off eager-elimination discriminator, while the
+     all-feature arm checks the same contract after forcing that documented fallback. *)
+  if env_enabled "OXSMT_ASSUMPTION_PREPROCESS"
+  then ignore (Session.check_sat s : Session.verdict);
   check "M1: x eliminated" (Session.eliminated_vars s = [ "x" ]);
   match Session.check_sat s, Session.get_model s with
   | Session.Sat, Some (_, m) ->
@@ -2106,6 +2242,10 @@ let test_loader_presolve_quantifier_boundary () =
   let s = Session.create () in
   let parsed = Parser.parse_into (Session.env s) (Session.context s) ground_only in
   ignore (Loader.assert_all s parsed : bool);
+  (* See [test_presolve_bool_dep_default]: buffering delays presolve state, but must not
+     change it once an ordinary query materializes the original assertion batch. *)
+  if env_enabled "OXSMT_ASSUMPTION_PREPROCESS"
+  then ignore (Session.check_sat s : Session.verdict);
   check
     "ground-only loader: presolve still eliminates aliases"
     (Session.eliminated_vars s = [ "x" ]);
@@ -2877,16 +3017,670 @@ let test_declare_fun_write_once () =
      | exception _ -> false)
 ;;
 
+(* Known-constructor DT reduction: selector evaluation is valid only for its owning
+   constructor, while testers decide both the same- and different-constructor cases. The
+   nested ITE pins the Vox2 shape: deciding the tester must discard the dead arm and
+   expose the constructor field. *)
+let test_dt_ground_simplify () =
+  let module Defs = Oxsmt_core.Datatype_defs in
+  let s = Session.create () in
+  let d_sort = Sort.datatype_ (Session.declare_sort s "Ground_simplify_D") in
+  let dt =
+    Session.declare_datatype
+      s
+      d_sort
+      [ { Session.ctor_name = "Ground_simplify_Leaf"; fields = [] }
+      ; { ctor_name = "Ground_simplify_Node"; fields = [ "ground_value", Sort.int ] }
+      ]
+  in
+  let leaf, node =
+    match dt.Defs.constructors with
+    | [ leaf; node ] -> leaf, node
+    | _ -> assert false
+  in
+  let selector =
+    match node.Defs.selectors with
+    | [ selector ] -> selector
+    | _ -> assert false
+  in
+  let ctx = Session.context s in
+  let leaf_term = Context.app ctx leaf.sym [] in
+  let field = Context.int_const ctx 17 in
+  let node_term = Context.app ctx node.sym [ field ] in
+  let simplify = Session.For_test.simplify_known_datatypes s in
+  check
+    "dt ground simplify: same-constructor selector returns field"
+    (Term.equal (simplify (Context.app ctx selector.sym [ node_term ])) field);
+  check
+    "dt ground simplify: same-constructor tester is true"
+    (match (simplify (Context.app ctx node.tester [ node_term ])).Term.node with
+     | Term.Bool_const true -> true
+     | _ -> false);
+  check
+    "dt ground simplify: different-constructor tester is false"
+    (match (simplify (Context.app ctx node.tester [ leaf_term ])).Term.node with
+     | Term.Bool_const false -> true
+     | _ -> false);
+  let wrong_selector = Context.app ctx selector.sym [ leaf_term ] in
+  check
+    "dt ground simplify: wrong-constructor selector stays unspecified"
+    (Term.equal (simplify wrong_selector) wrong_selector);
+  let nested =
+    Context.ite
+      ctx
+      (Context.app ctx node.tester [ node_term ])
+      (Context.app ctx selector.sym [ node_term ])
+      (Context.int_const ctx 99)
+  in
+  check
+    "dt ground simplify: known tester collapses nested ITE"
+    (Term.equal (simplify nested) field);
+  let stats = Session.dt_ground_simplify_stats s in
+  check
+    "dt ground simplify: ingress counters distinguish tester/selector folds"
+    (stats.tester_folds = 3 && stats.selector_folds = 2)
+;;
+
+(* The checker-side known-constructor identities retain no solver vocabulary. After a
+   pushed simplified query is popped, the next empty check must have the same DT split
+   relevance as flag-off; repeating the pushed query must remain checked-Sat in both
+   modes. Total SAT decisions can differ because flag-off retains the popped guarded atom
+   and flag-on folded it to a tautology before clausification. *)
+let test_dt_ground_simplify_lazy_push_pop () =
+  let saved = Sys.getenv_opt "OXSMT_DT_GROUND_SIMPLIFY" in
+  let run enabled =
+    Unix.putenv "OXSMT_DT_GROUND_SIMPLIFY" (if enabled then "1" else "0");
+    let s = Session.create () in
+    let d_sort = Sort.datatype_ (Session.declare_sort s "Lazy_push_pop_D") in
+    let dt =
+      Session.declare_datatype
+        s
+        d_sort
+        [ { Session.ctor_name = "Lazy_push_pop_Node"
+          ; fields = [ "lazy_push_pop_value", Sort.int ]
+          }
+        ]
+    in
+    let ctor, selector =
+      match dt.Datatype_defs.constructors with
+      | [ ctor ] ->
+        (match ctor.selectors with
+         | [ selector ] -> ctor, selector
+         | _ -> assert false)
+      | _ -> assert false
+    in
+    let ctx = Session.context s in
+    let field = Context.int_const ctx 17 in
+    let node = Context.app ctx ctor.sym [ field ] in
+    let assertion = Context.eq ctx (Context.app ctx selector.sym [ node ]) field in
+    let solve_in_frame () =
+      Session.push s;
+      Session.assert_term s assertion;
+      let verdict = Session.check_sat s in
+      Session.pop s;
+      verdict
+    in
+    let first = solve_in_frame () in
+    let stats_before_post_pop = Session.stats s in
+    let post_pop = Session.check_sat s in
+    let post_pop_splits = Session.splits s in
+    let stats_after_post_pop = Session.stats s in
+    let second = solve_in_frame () in
+    let repeated_ok = ref true in
+    if enabled
+    then
+      for _ = 1 to 64 do
+        if solve_in_frame () <> Session.Sat then repeated_ok := false
+      done;
+    let after_repeats = Session.check_sat s in
+    let after_repeats_splits = Session.splits s in
+    ( first
+    , post_pop
+    , second
+    , stats_after_post_pop.decisions - stats_before_post_pop.decisions
+    , post_pop_splits
+    , !repeated_ok
+    , after_repeats
+    , after_repeats_splits )
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_DT_GROUND_SIMPLIFY" (Option.value ~default:"" saved))
+    (fun () ->
+      let off = run false in
+      let on = run true in
+      let off_first, off_post, off_second, off_post_decisions, off_splits, _, _, _ = off in
+      let on_first, on_post, on_second, on_post_decisions, on_splits, repeated_ok, after_repeats, repeat_splits = on in
+      check
+        "dt known-constructor checker: flag-off and flag-on push/pop verdicts agree"
+        (off_first = Session.Sat
+         && off_post = Session.Sat
+         && off_second = Session.Sat
+         && on_first = off_first
+         && on_post = off_post
+         && on_second = off_second);
+      check
+        (Printf.sprintf
+           "dt known-constructor checker: post-pop DT relevance matches flag-off (splits on=%d \
+            off=%d; decisions on=%d off=%d)"
+           on_splits
+           off_splits
+           on_post_decisions
+           off_post_decisions)
+        (on_splits = off_splits);
+      check
+        "dt known-constructor checker: 64 push/pop repetitions retain no DT split state"
+        (repeated_ok && after_repeats = Session.Sat && repeat_splits = 0))
+;;
+
+(* Nonempty assumptions pass through a separate ingress path. Arithmetic-stack selection
+   must inspect the original signed atom before a known-constructor rewrite can erase its
+   Real field and turn an unsupported Real+DT query into an ordinary Boolean query. *)
+let test_dt_ground_simplify_real_assumption_no_escape () =
+  let saved = Sys.getenv_opt "OXSMT_DT_GROUND_SIMPLIFY" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_DT_GROUND_SIMPLIFY" (Option.value ~default:"" saved))
+    (fun () ->
+      Unix.putenv "OXSMT_DT_GROUND_SIMPLIFY" "1";
+      let s = Session.create () in
+      let d_sort = Sort.datatype_ (Session.declare_sort s "Real_assumption_D") in
+      let dt =
+        Session.declare_datatype
+          s
+          d_sort
+          [ { Session.ctor_name = "Real_assumption_Node"
+            ; fields = [ "real_assumption_value", Sort.real ]
+            }
+          ]
+      in
+      let ctor =
+        match dt.Datatype_defs.constructors with
+        | [ ctor ] -> ctor
+        | _ -> assert false
+      in
+      let ctx = Session.context s in
+      let value =
+        Context.real_const_big ctx ~num:Bigint.one ~den:(Bigint.of_int 2)
+      in
+      let node = Context.app ctx ctor.sym [ value ] in
+      let result = Session.check_sat_assuming s [ Context.app ctx ctor.tester [ node ], true ] in
+      check
+        "dt ground simplify: Real+DT assumption remains unsupported"
+        (result.verdict = Session.Unknown);
+      let stats = Session.dt_ground_simplify_stats s in
+      check
+        "dt ground simplify: Real+DT assumption keeps reducer dark"
+        (stats.tester_folds = 0 && stats.selector_folds = 0))
+;;
+
+(* A datatype registry can coexist with an array registry at the public loader boundary,
+   but that stack selects the arrays theory, not CombinedDt. The reducer must stay dark
+   there because the array model checker cannot validate datatype semantics. *)
+let test_dt_ground_simplify_mixed_stack_no_escape () =
+  let saved = Sys.getenv_opt "OXSMT_DT_GROUND_SIMPLIFY" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_DT_GROUND_SIMPLIFY" (Option.value ~default:"" saved))
+    (fun () ->
+      Unix.putenv "OXSMT_DT_GROUND_SIMPLIFY" "1";
+      let s = Session.create () in
+      let text =
+        "(declare-datatype Mixed_D ((Mixed_Node (mixed_value Int))))\n\
+         (declare-const mixed_a (Array Int Int))\n\
+         (assert (= (mixed_value (Mixed_Node 1)) 1))\n\
+         (assert (= (select mixed_a 0) 0))\n\
+         (check-sat)\n"
+      in
+      let parsed =
+        Parser.parse_into
+          ~internal_mint:(Session.parse_minter s)
+          (Session.env s)
+          (Session.context s)
+          text
+      in
+      let loaded = Loader.assert_all s parsed in
+      check "dt ground simplify: mixed arrays+DT query loads" loaded;
+      check
+        "dt ground simplify: mixed arrays+DT first Sat does not escape"
+        (match Session.check_sat s with
+         | Session.Sat | Session.Unknown -> true
+         | Session.Unsat -> false
+         | exception _ -> false);
+      let stats = Session.dt_ground_simplify_stats s in
+      check
+        "dt ground simplify: mixed arrays+DT keeps reducer dark"
+        (stats.tester_folds = 0 && stats.selector_folds = 0))
+;;
+
+(* Dark Vox2 path: defer only private [gate => body] assertions until the first exact
+   all-positive assumption query. The fast clauses are one-shot and selector-guarded;
+   every later/arbitrary query materializes the originals. *)
+let test_assumption_preprocess () =
+  let saved = Sys.getenv_opt "OXSMT_ASSUMPTION_PREPROCESS" in
+  let saved_fast_complements = Sys.getenv_opt "OXSMT_ASSUMPTION_FAST_COMPLEMENTS" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_ASSUMPTION_PREPROCESS" (Option.value ~default:"" saved);
+      Unix.putenv
+        "OXSMT_ASSUMPTION_FAST_COMPLEMENTS"
+        (Option.value ~default:"" saved_fast_complements))
+    (fun () ->
+      Unix.putenv "OXSMT_ASSUMPTION_PREPROCESS" "1";
+      Unix.putenv "OXSMT_ASSUMPTION_FAST_COMPLEMENTS" "1";
+      let make_session ?enable_relevancy prefix =
+        let s = Session.create ?enable_relevancy () in
+        let d_sort = Sort.datatype_ (Session.declare_sort s (prefix ^ "_D")) in
+        let dt =
+          Session.declare_datatype
+            s
+            d_sort
+            [ { Session.ctor_name = prefix ^ "_A"; fields = [] }
+            ; { Session.ctor_name = prefix ^ "_Node"
+              ; fields = [ prefix ^ "_value", Sort.int ]
+              }
+            ]
+        in
+        let a, node, selector =
+          match dt.Datatype_defs.constructors with
+          | [ a; node ] ->
+            (match node.selectors with
+             | [ selector ] -> a, node, selector
+             | _ -> assert false)
+          | _ -> assert false
+        in
+        s, Session.context s, d_sort, a, node, selector
+      in
+      let has_reserved_rank s name =
+        (* [Symbol.intern] only hash-conses the name and [Env.rank] only looks it up. *)
+        match Env.rank (Session.env s) (Symbol.intern name) with
+        | _ -> true
+        | exception Not_found -> false
+      in
+
+      (* Exact top-level [p] / [not p] collapses before preprocessing. The unrelated
+         value ITE is a discriminator: reverting only the complement scan creates its
+         reserved witness before reaching the same UNSAT verdict. A subset query must
+         still materialize the original assertions, after which push/pop uses the normal
+         encoding and the private fast selector remains inert. *)
+      let s, ctx, _, _, _, _ = make_session "defer_fast_complement" in
+      let p =
+        Context.const ctx (Session.declare_const s "defer_fast_complement_p" Sort.bool)
+      in
+      let q =
+        Context.const ctx (Session.declare_const s "defer_fast_complement_q" Sort.bool)
+      in
+      let gp =
+        Context.const ctx (Session.declare_const s "defer_fast_complement_gp" Sort.bool)
+      in
+      let gn =
+        Context.const ctx (Session.declare_const s "defer_fast_complement_gn" Sort.bool)
+      in
+      let f =
+        Session.declare_fun
+          s
+          "defer_fast_complement_f"
+          (Rank.create [ Sort.int ] Sort.int)
+      in
+      let value =
+        Context.ite ctx q (Context.int_const ctx 1) (Context.int_const ctx 2)
+      in
+      Session.assert_term s (Context.implies ctx gp p);
+      Session.assert_term s (Context.implies ctx gn (Context.not_ ctx p));
+      Session.assert_term
+        s
+        (Context.eq ctx (Context.app ctx f [ value ]) (Context.int_const ctx 0));
+      check
+        "dt deferred gates: atomic complements collapse before value-ITE preprocessing"
+        ((Session.check_sat_assuming s [ gp, true; gn, true ]).verdict = Session.Unsat
+         && not (has_reserved_rank s ".oxsmt.ite.0"));
+      check
+        "dt deferred gates: complement subset materializes originals without strengthening"
+        ((Session.check_sat_assuming s [ gp, true ]).verdict <> Session.Unsat
+         && has_reserved_rank s ".oxsmt.ite.0");
+      Session.push s;
+      Session.assert_term s (Context.not_ ctx p);
+      check
+        "dt deferred gates: complement fallback honors pushed contradiction"
+        ((Session.check_sat_assuming s [ gp, true ]).verdict = Session.Unsat);
+      Session.pop s;
+      check
+        "dt deferred gates: complement fallback retracts pushed contradiction"
+        ((Session.check_sat_assuming s [ gp, true ]).verdict <> Session.Unsat);
+      check
+        "dt deferred gates: complement fallback retains original full contradiction"
+        ((Session.check_sat_assuming s [ gp, true; gn, true ]).verdict = Session.Unsat);
+
+      (* Compound complements deliberately stay on the ordinary preprocessing path. This
+         bounds the optimization to exact atomic literals and avoids duplicating the
+         recursive propositional simplifier. *)
+      let s, ctx, _, _, _, _ = make_session "defer_fast_compound" in
+      let p =
+        Context.const ctx (Session.declare_const s "defer_fast_compound_p" Sort.bool)
+      in
+      let q =
+        Context.const ctx (Session.declare_const s "defer_fast_compound_q" Sort.bool)
+      in
+      let c =
+        Context.const ctx (Session.declare_const s "defer_fast_compound_c" Sort.bool)
+      in
+      let gp =
+        Context.const ctx (Session.declare_const s "defer_fast_compound_gp" Sort.bool)
+      in
+      let gn =
+        Context.const ctx (Session.declare_const s "defer_fast_compound_gn" Sort.bool)
+      in
+      let f =
+        Session.declare_fun
+          s
+          "defer_fast_compound_f"
+          (Rank.create [ Sort.int ] Sort.int)
+      in
+      let compound = Context.and_ ctx [ p; q ] in
+      let value =
+        Context.ite ctx c (Context.int_const ctx 11) (Context.int_const ctx 12)
+      in
+      Session.assert_term s (Context.implies ctx gp compound);
+      Session.assert_term s (Context.implies ctx gn (Context.not_ ctx compound));
+      Session.assert_term
+        s
+        (Context.eq ctx (Context.app ctx f [ value ]) (Context.int_const ctx 0));
+      check
+        "dt deferred gates: compound complements take ordinary preprocessing"
+        ((Session.check_sat_assuming s [ gp, true; gn, true ]).verdict = Session.Unsat
+         && has_reserved_rank s ".oxsmt.ite.0");
+
+      (* On a miss, the scan may look at tags but must not construct negations. Compare
+         the next fresh hash-cons tag with the flag disabled; both paths already construct
+         the same one-root conjunction later, so any extra term changes this tag. *)
+      let miss_result fast =
+        Unix.putenv "OXSMT_ASSUMPTION_FAST_COMPLEMENTS" (if fast then "1" else "0");
+        let s, ctx, _, _, _, _ = make_session "defer_fast_miss" in
+        let p =
+          Context.const ctx (Session.declare_const s "defer_fast_miss_p" Sort.bool)
+        in
+        let q =
+          Context.const ctx (Session.declare_const s "defer_fast_miss_q" Sort.bool)
+        in
+        let gp =
+          Context.const ctx (Session.declare_const s "defer_fast_miss_gp" Sort.bool)
+        in
+        let gq =
+          Context.const ctx (Session.declare_const s "defer_fast_miss_gq" Sort.bool)
+        in
+        Session.assert_term s (Context.implies ctx gp p);
+        Session.assert_term s (Context.implies ctx gq q);
+        let verdict = (Session.check_sat_assuming s [ gp, true; gq, true ]).verdict in
+        let fresh =
+          Context.eq ctx (Context.int_const ctx 101) (Context.int_const ctx 102)
+        in
+        verdict, fresh.tag
+      in
+      let miss_off = miss_result false in
+      let miss_on = miss_result true in
+      Unix.putenv "OXSMT_ASSUMPTION_FAST_COMPLEMENTS" "1";
+      check
+        "dt deferred gates: complement miss does not strengthen either query"
+        (fst miss_off <> Session.Unsat && fst miss_on <> Session.Unsat);
+      check
+        "dt deferred gates: complement miss preserves hash-cons allocation order"
+        (snd miss_on = snd miss_off);
+
+      let s, ctx, d_sort, a, _, _ = make_session "defer_basic" in
+      let x = Context.const ctx (Session.declare_const s "defer_basic_x" d_sort) in
+      let y = Context.const ctx (Session.declare_const s "defer_basic_y" Sort.int) in
+      let gate = Context.const ctx (Session.declare_const s "defer_basic_gate" Sort.bool) in
+      let a_value = Context.app ctx a.sym [] in
+      Session.assert_term s (Context.implies ctx gate (Context.eq ctx x a_value));
+      Session.assert_term s (Context.not_ ctx (Context.eq ctx x a_value));
+      Session.assert_term s (Context.eq ctx y (Context.int_const ctx 3));
+      let fast = Session.check_sat_assuming s [ gate, true ] in
+      check
+        "dt deferred gates: exact private positive query is verdict-only unsat"
+        (fast.verdict = Session.Unsat
+         && fast.unsat_core = None
+         && String.equal
+              (Session.last_unknown_reason s)
+              "assumption-preprocess-no-core"
+         && Session.last_unsat_core s = None
+         && Session.last_farkas s = None);
+      let negative = Session.check_sat_assuming s [ gate, false ] in
+      check
+        "dt deferred gates: negative follow-up materializes originals"
+        (negative.verdict = Session.Sat);
+      check
+        "dt deferred gates: direct fallback discards specialized definitions"
+        (Session.eliminated_vars s = []);
+      check
+        "dt deferred gates: datatype Sat remains modelless at the scalar API"
+        (Session.get_model s = None);
+      check_verdict
+        "dt deferred gates: ordinary follow-up leaves old fast selector inert"
+        Session.Sat
+        (Session.check_sat s);
+      let repeat_ok = ref true in
+      for _ = 1 to 1_000 do
+        let result = Session.check_sat_assuming s [ gate, true ] in
+        if result.verdict <> Session.Unsat then repeat_ok := false
+      done;
+      check
+        "dt deferred gates: 1000 repeats use the materialized encoding"
+        !repeat_ok;
+
+      let s, ctx, d_sort, a, _, _ = make_session "defer_push" in
+      let x = Context.const ctx (Session.declare_const s "defer_push_x" d_sort) in
+      let gate = Context.const ctx (Session.declare_const s "defer_push_gate" Sort.bool) in
+      let a_value = Context.app ctx a.sym [] in
+      Session.assert_term s (Context.implies ctx gate (Context.eq ctx x a_value));
+      Session.assert_term s (Context.not_ ctx (Context.eq ctx x a_value));
+      check
+        "dt deferred gates: fast query before push is unsat"
+        ((Session.check_sat_assuming s [ gate, true ]).verdict = Session.Unsat);
+      Session.push s;
+      Session.assert_term s gate;
+      check_verdict
+        "dt deferred gates: push materializes originals and keeps contradiction"
+        Session.Unsat
+        (Session.check_sat s);
+      Session.pop s;
+      check_verdict
+        "dt deferred gates: pop retracts pushed gate and old fast clauses stay inert"
+        Session.Sat
+        (Session.check_sat s);
+
+      let s, ctx, _, _, _, _ = make_session "defer_single" in
+      let gate = Context.const ctx (Session.declare_const s "defer_single_gate" Sort.bool) in
+      Session.assert_term s (Context.implies ctx gate (Context.bool_const ctx false));
+      check
+        "dt deferred gates: singleton specialized root is unsat"
+        ((Session.check_sat_assuming s [ gate, true ]).verdict = Session.Unsat);
+
+      let s, ctx, _, _, _, _ = make_session "defer_shared_ite" in
+      let p = Context.const ctx (Session.declare_const s "defer_shared_ite_p" Sort.bool) in
+      let f =
+        Session.declare_fun s "defer_shared_ite_f" (Rank.create [ Sort.int ] Sort.int)
+      in
+      let g1 = Context.const ctx (Session.declare_const s "defer_shared_ite_g1" Sort.bool) in
+      let g2 = Context.const ctx (Session.declare_const s "defer_shared_ite_g2" Sort.bool) in
+      let value =
+        Context.ite ctx p (Context.int_const ctx 1) (Context.int_const ctx 2)
+      in
+      let projected_value = Context.app ctx f [ value ] in
+      Session.assert_term
+        s
+        (Context.implies
+           ctx
+           g1
+           (Context.eq ctx projected_value (Context.int_const ctx 0)));
+      Session.assert_term
+        s
+        (Context.implies
+           ctx
+           g2
+           (Context.eq ctx projected_value (Context.int_const ctx 1)));
+      check
+        "dt deferred gates: multi-root shared value ITE below UF is unsat"
+        ((Session.check_sat_assuming s [ g1, true; g2, true ]).verdict = Session.Unsat);
+      check
+        "dt deferred gates: one-root preprocessing shares the value-ITE witness"
+        (has_reserved_rank s ".oxsmt.ite.0" && not (has_reserved_rank s ".oxsmt.ite.1"));
+      check
+        "dt deferred gates: shared-ITE subset falls back without strengthening"
+        ((Session.check_sat_assuming s [ g1, true ]).verdict <> Session.Unsat);
+
+      let s, ctx, d_sort, a, _, _ =
+        make_session ~enable_relevancy:true "defer_existing_relevancy"
+      in
+      let x =
+        Context.const
+          ctx
+          (Session.declare_const s "defer_existing_relevancy_x" d_sort)
+      in
+      let gate =
+        Context.const
+          ctx
+          (Session.declare_const s "defer_existing_relevancy_gate" Sort.bool)
+      in
+      let a_value = Context.app ctx a.sym [] in
+      Session.assert_term s (Context.implies ctx gate (Context.eq ctx x a_value));
+      Session.assert_term s (Context.not_ ctx (Context.eq ctx x a_value));
+      let result = Session.check_sat_assuming s [ gate, true ] in
+      check
+        "dt deferred gates: pre-existing relevancy uses the ordinary core path"
+        (result.verdict = Session.Unsat
+         && Option.is_some result.unsat_core
+         && not
+              (String.equal
+                 (Session.last_unknown_reason s)
+                 "assumption-preprocess-no-core"));
+
+      let s, ctx, d_sort, _, node, selector = make_session "defer_subset" in
+      let x = Context.const ctx (Session.declare_const s "defer_subset_x" d_sort) in
+      let geq = Context.const ctx (Session.declare_const s "defer_subset_geq" Sort.bool) in
+      let guse = Context.const ctx (Session.declare_const s "defer_subset_guse" Sort.bool) in
+      let seven = Context.int_const ctx 7 in
+      let node_value = Context.app ctx node.sym [ seven ] in
+      let selected = Context.app ctx selector.sym [ x ] in
+      Session.assert_term s (Context.implies ctx geq (Context.eq ctx x node_value));
+      Session.assert_term
+        s
+        (Context.implies ctx guse (Context.not_ ctx (Context.eq ctx selected seven)));
+      let both = Session.check_sat_assuming s [ geq, true; guse, true ] in
+      check
+        "dt deferred gates: constructor substitution closes all-positive conflict"
+        (both.verdict = Session.Unsat && both.unsat_core = None);
+      let only_eq = Session.check_sat_assuming s [ geq, true ] in
+      let only_use = Session.check_sat_assuming s [ guse, true ] in
+      check
+        "dt deferred gates: arbitrary assumption subsets fall back without strengthening"
+        (only_eq.verdict <> Session.Unsat && only_use.verdict <> Session.Unsat);
+
+      let s, ctx, d_sort, a, _, _ = make_session "defer_private" in
+      let x = Context.const ctx (Session.declare_const s "defer_private_x" d_sort) in
+      let gate = Context.const ctx (Session.declare_const s "defer_private_gate" Sort.bool) in
+      let a_value = Context.app ctx a.sym [] in
+      Session.assert_term s (Context.implies ctx gate (Context.eq ctx x a_value));
+      Session.assert_term s gate;
+      Session.assert_term s (Context.not_ ctx (Context.eq ctx x a_value));
+      let nonprivate = Session.check_sat_assuming s [ gate, true ] in
+      check
+        "dt deferred gates: a gate used outside its antecedent takes the original path"
+        (nonprivate.verdict = Session.Unsat
+         && nonprivate.unsat_core <> None
+         && not
+              (String.equal
+                 (Session.last_unknown_reason s)
+                 "assumption-preprocess-no-core"));
+
+      let s, ctx, d_sort, a, _, _ = make_session "defer_batch" in
+      let x = Context.const ctx (Session.declare_const s "defer_batch_x" d_sort) in
+      let gate = Context.const ctx (Session.declare_const s "defer_batch_gate" Sort.bool) in
+      let a_value = Context.app ctx a.sym [] in
+      Session.assert_presolved
+        s
+        [ Context.implies ctx gate (Context.eq ctx x a_value)
+        ; Context.not_ ctx (Context.eq ctx x a_value)
+        ];
+      let batch = Session.check_sat_assuming s [ gate, true ] in
+      check
+        "dt deferred gates: assert_presolved uses the exact whole-query fast path"
+        (batch.verdict = Session.Unsat
+         && batch.unsat_core = None
+         && String.equal
+              (Session.last_unknown_reason s)
+              "assumption-preprocess-no-core");
+
+      let registry_mutation_results enabled =
+        Unix.putenv "OXSMT_ASSUMPTION_PREPROCESS" (if enabled then "1" else "0");
+        let datatype_set () =
+          let s, ctx, d_sort, a, _, _ = make_session "defer_registry_set" in
+          let x = Context.const ctx (Session.declare_const s "defer_registry_set_x" d_sort) in
+          Session.assert_term s (Context.eq ctx x (Context.app ctx a.sym []));
+          let defs = Datatype_defs.add Datatype_defs.empty
+              { Datatype_defs.sort_sym =
+                  (match d_sort with Sort.Datatype sym -> sym | _ -> assert false)
+              ; constructors = [ a ]
+              }
+          in
+          match Session.set_datatypes s defs with
+          | exception Invalid_argument _ -> true
+          | () -> false
+        in
+        let datatype_add () =
+          let s, ctx, d_sort, a, _, _ = make_session "defer_registry_add" in
+          let x = Context.const ctx (Session.declare_const s "defer_registry_add_x" d_sort) in
+          Session.assert_term s (Context.eq ctx x (Context.app ctx a.sym []));
+          let d2 = Sort.datatype_ (Session.declare_sort s "defer_registry_add_D2") in
+          match
+            Session.declare_datatype
+              s
+              d2
+              [ { Session.ctor_name = "defer_registry_add_B"; fields = [] } ]
+          with
+          | exception Invalid_argument _ -> true
+          | _ -> false
+        in
+        let array_set () =
+          let s = Session.create () in
+          let parsed =
+            Parser.parse_into
+              ~internal_mint:(Session.parse_minter s)
+              (Session.env s)
+              (Session.context s)
+              "(declare-const defer_registry_array_a (Array Int Int))\n\
+               (assert (= (select defer_registry_array_a 0) 1))\n"
+          in
+          Session.set_arrays s parsed.Parser.arrays;
+          List.iter (Session.assert_term s) parsed.Parser.assertions;
+          match Session.set_arrays s parsed.Parser.arrays with
+          | exception Invalid_argument _ -> true
+          | () -> false
+        in
+        datatype_set (), datatype_add (), array_set ()
+      in
+      let registry_off = registry_mutation_results false in
+      let registry_on = registry_mutation_results true in
+      check
+        "assumption preprocessing: registry mutation lifecycle matches eager ingress"
+        (registry_on = registry_off && registry_on = (true, true, true)))
+;;
+
 let () =
+  test_dt_ground_simplify_mixed_stack_no_escape ();
+  test_dt_ground_simplify_real_assumption_no_escape ();
+  test_dt_ground_simplify_lazy_push_pop ();
+  test_dt_ground_simplify ();
   test_declare_fun_write_once ();
   test_relevancy_firing ();
   test_relevancy_verdict_parity ();
+  test_direct_term_ite_session ();
   test_push_pop ();
   test_assert_after_check ();
   test_euf_unsat ();
   test_lia_unsat ();
   test_lia_sat ();
   test_lia_branch_and_bound ();
+  test_binary_interface_equality ();
   test_mixed_split ();
   test_soundness_rule ();
   test_honeypot_flips ();
@@ -2967,6 +3761,7 @@ let () =
   test_proj_e2e_no_wrong_unsat ();
   test_proj_e2e_no_wrong_sat ();
   test_proj_no_ite_neutral ();
+  test_assumption_preprocess ();
   Printf.printf "wiring_test: %d checks, %d failures\n" !checks !failures;
   if !failures > 0 then exit 1
 ;;

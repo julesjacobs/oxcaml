@@ -145,6 +145,14 @@ let assert_eq fx a b =
   Lia_adapter.assert_lit fx.adapter (Lit.make atom true)
 ;;
 
+let assert_diseq fx a b =
+  let term = Context.eq fx.ctx a b in
+  let atom = Atom.fresh fx.alloc in
+  Lia_adapter.register_atom fx.adapter atom term;
+  Lia_adapter.assert_lit fx.adapter (Lit.make atom false);
+  term
+;;
+
 (* Register + assert a Le atom already built as a term (for split disjuncts). *)
 let assert_term_true fx term =
   let atom = Atom.fresh fx.alloc in
@@ -504,6 +512,117 @@ let test_push_pop () =
     (fun () -> Lia_adapter.explain fx.adapter lit_a_true)
 ;;
 
+(* The dark binary-interface path keeps a negative Int equality as a non-convex pending
+   constraint.  It accepts an unequal integer model directly; when the simplex model
+   equates the endpoints it emits the valid total-order refinement
+   [x=y \/ x<y \/ x>y]. *)
+let test_lazy_interface_disequality () =
+  match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+  | None | Some ("" | "0" | "false" | "no" | "off") ->
+    print_endline "binary interface disequality: skipped (dark flag off)"
+  | Some _ ->
+    print_endline "binary interface disequality:";
+    (* A lone disequality starts at the all-equal model and therefore asks SAT for the
+       guarded order refinement.  Driving either strict branch yields a valid model. *)
+    (let fx = make_fixture 2 in
+     let eq = assert_diseq fx fx.vars.(0) fx.vars.(1) in
+     let lt = Context.lt fx.ctx fx.vars.(0) fx.vars.(1) in
+     let gt = Context.gt fx.ctx fx.vars.(0) fx.vars.(1) in
+     (match Lia_adapter.check fx.adapter Theory.Final with
+      | Theory.Lemma [ (eq', true); (lt', true); (gt', true) ] ->
+        check "violated disequality emits equality-guarded trichotomy"
+          (Term.equal eq eq' && Term.equal lt lt' && Term.equal gt gt')
+      | _ -> check "violated disequality must emit one guarded trichotomy" false);
+     assert_term_true fx lt;
+     match Lia_adapter.check fx.adapter Theory.Final with
+     | Theory.Sat ->
+       let model = Lia_adapter.model fx.adapter in
+       check
+         "strict branch gives unequal integer values"
+         (match Model.value model fx.vars.(0), Model.value model fx.vars.(1) with
+          | Some (Model.Int x), Some (Model.Int y) -> not (Bigint.equal x y)
+          | _ -> false)
+     | _ -> check "strict branch of a lone disequality must be Sat" false);
+    (* If arithmetic independently forces x=y, both strict alternatives conflict. *)
+    (let fx = make_fixture 2 in
+     ignore (assert_diseq fx fx.vars.(0) fx.vars.(1));
+     assert_eq fx fx.vars.(0) fx.vars.(1);
+     (match Lia_adapter.check fx.adapter Theory.Final with
+      | Theory.Lemma _ -> check "forced-false disequality refines lazily" true
+      | _ -> check "forced-false disequality must refine before conflict" false);
+     List.iter
+       (fun strict ->
+          Lia_adapter.push fx.adapter;
+          assert_term_true fx strict;
+          (match Lia_adapter.check fx.adapter Theory.Final with
+           | Theory.Conflict _ -> check "each strict alternative conflicts with x=y" true
+           | _ -> check "strict alternative unexpectedly consistent with x=y" false);
+          Lia_adapter.pop fx.adapter 1)
+       [ Context.lt fx.ctx fx.vars.(0) fx.vars.(1)
+       ; Context.gt fx.ctx fx.vars.(0) fx.vars.(1)
+       ]);
+    (* Two pending disequalities are checked one at a time; resolving the first leaves
+       the second visible, and resolving both reaches Sat. *)
+    (let fx = make_fixture 4 in
+     let eq01 = assert_diseq fx fx.vars.(0) fx.vars.(1) in
+     let eq23 = assert_diseq fx fx.vars.(2) fx.vars.(3) in
+     let first =
+       match Lia_adapter.check fx.adapter Theory.Final with
+       | Theory.Lemma ((eq, true) :: _) -> Some eq
+       | _ -> None
+     in
+     check
+       "multiple disequalities: first refinement belongs to a pending equality"
+       (match first with
+        | Some eq -> Term.equal eq eq01 || Term.equal eq eq23
+        | None -> false);
+     assert_term_true fx (Context.lt fx.ctx fx.vars.(2) fx.vars.(3));
+     (match Lia_adapter.check fx.adapter Theory.Final with
+      | Theory.Lemma ((eq, true) :: _) ->
+        check "multiple disequalities: unresolved equality is refined next"
+          (Term.equal eq eq01)
+      | Theory.Sat ->
+        (* The simplex may also separate x0/x1 while satisfying x2<x3. *)
+        check "multiple disequalities: model separated both pairs" true
+      | _ -> check "multiple disequalities: unexpected final result" false));
+    (* A pending disequality follows the ordinary adapter frame and checkpoint lifetime. *)
+    (let fx = make_fixture 2 in
+     Lia_adapter.push fx.adapter;
+     ignore (assert_diseq fx fx.vars.(0) fx.vars.(1));
+     (match Lia_adapter.check fx.adapter Theory.Final with
+      | Theory.Lemma _ -> ()
+      | _ -> check "pushed disequality is active" false);
+     Lia_adapter.pop fx.adapter 1;
+     assert_eq fx fx.vars.(0) fx.vars.(1);
+     match Lia_adapter.check fx.adapter Theory.Final with
+     | Theory.Sat -> check "pop retracts pending disequality" true
+     | _ -> check "popped disequality remained active" false);
+    (let fx = make_fixture 2 in
+     let checkpoint = Lia_adapter.checkpoint fx.adapter in
+     ignore (assert_diseq fx fx.vars.(0) fx.vars.(1));
+     (match Lia_adapter.check fx.adapter Theory.Final with
+      | Theory.Lemma _ -> ()
+      | _ -> check "checkpoint-window disequality is active" false);
+     Lia_adapter.rewind_to_checkpoint fx.adapter checkpoint;
+     assert_eq fx fx.vars.(0) fx.vars.(1);
+     match Lia_adapter.check fx.adapter Theory.Final with
+     | Theory.Sat -> check "checkpoint rewind retracts pending disequality" true
+     | _ -> check "rewound disequality remained active" false);
+    (* Model evaluation and refinement retain arbitrary-precision integer endpoints. *)
+    let fx = make_fixture 2 in
+    let huge =
+      Context.int_const_big
+        fx.ctx
+        (Bigint.of_string "1234567890123456789012345678901234567890")
+    in
+    ignore (assert_diseq fx fx.vars.(0) fx.vars.(1));
+    assert_eq fx fx.vars.(0) huge;
+    assert_eq fx fx.vars.(1) huge;
+    match Lia_adapter.check fx.adapter Theory.Final with
+    | Theory.Lemma _ -> check "large equal endpoints refine without overflow" true
+    | _ -> check "large equal endpoints must refine" false
+;;
+
 (* ================================================================== *)
 (* 5. core-bignum W2 + ADR-0018 Bigint model boundary: the system that used to overflow
    int63 during check's pivot PROMOTES to Big and the ℚ-simplex completes. The ℤ model
@@ -687,6 +806,7 @@ let () =
   test_reentail_after_frame_pop ();
   test_final_split ();
   test_push_pop ();
+  test_lazy_interface_disequality ();
   test_poison ();
   test_idempotent_and_wide ();
   test_determinism ();

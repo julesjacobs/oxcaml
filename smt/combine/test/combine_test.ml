@@ -517,6 +517,28 @@ let test_final_agree_sat () =
   | _ -> check "final: agreeing arrangements (differing values) ⇒ Sat" false
 ;;
 
+let strict_env_on name =
+  match Sys.getenv_opt name with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
+let binary_arrangement_on =
+  strict_env_on "OXSMT_BINARY_INTERFACE_EQ"
+  && strict_env_on "OXSMT_LAZY_INTERFACE_DISEQ"
+;;
+
+let binary_arrangement_matches eq = function
+  | [ (a, true); (b, false) ] -> Term.equal a eq && Term.equal b eq
+  | _ -> false
+;;
+
+let arrangement_result_matches eq = function
+  | Th.Lemma signed -> binary_arrangement_on && binary_arrangement_matches eq signed
+  | Th.Split (head :: _) -> (not binary_arrangement_on) && Term.equal head eq
+  | Th.Split [] | Th.Sat | Th.Propagations _ | Th.Conflict _ -> false
+;;
+
 let test_final_disagree_split () =
   reset_mocks ();
   let f = fixture () in
@@ -528,7 +550,18 @@ let test_final_disagree_split () =
    := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 1) ]);
   (MockB.model_fn
    := fun () -> [ x, Model.Int (Bigint.of_int 1); y, Model.Int (Bigint.of_int 2) ]);
+  let eq = Context.eq f.ctx x y in
   match Cmock.check t Th.Final with
+  | Th.Lemma signed when binary_arrangement_on ->
+    check "final: disagreement ⇒ binary arrangement request" true;
+    check
+      "final: request is ordered equality/complement"
+      (binary_arrangement_matches eq signed);
+    check
+      "final: request's atom is the equality x=y"
+      (match signed with
+       | (a, _) :: _ -> Term.equal a eq
+       | [] -> false)
   | Th.Split terms ->
     let distinct =
       match terms with
@@ -536,17 +569,19 @@ let test_final_disagree_split () =
         (not (Term.equal a b)) && (not (Term.equal a c)) && not (Term.equal b c)
       | _ -> false
     in
-    check "final: disagreement ⇒ Split" true;
-    check "final: split is 3 DISTINCT atoms (ℤ-trichotomy, not A∨¬A)" distinct;
+    check "final: disagreement ⇒ trichotomy Split" (not binary_arrangement_on);
+    check
+      "final: split is 3 DISTINCT atoms (ℤ-trichotomy, not A∨¬A)"
+      ((not binary_arrangement_on) && distinct);
     check
       "final: split's first atom is the equality x=y"
       (match terms with
        | a :: _ -> Term.equal a (Context.eq f.ctx x y)
        | [] -> false)
   | _ ->
-    check "final: disagreement ⇒ Split" false;
-    check "final: split is 3 DISTINCT atoms (ℤ-trichotomy, not A∨¬A)" false;
-    check "final: split's first atom is the equality x=y" false
+    check "final: disagreement emits the configured arrangement" false;
+    check "final: arrangement shape is valid" false;
+    check "final: arrangement atom is the equality x=y" false
 ;;
 
 (* Truthiness of the repair flag, mirrored EXACTLY from combine.ml's read-once tri-state
@@ -585,6 +620,16 @@ let test_final_diseq_repair () =
   (MockA.model_fn := fun () -> [ x, Model.Int (Bigint.of_int 5) ]);
   (MockB.model_fn := fun () -> [ x, Model.Int (Bigint.of_int 0) ]);
   match Cmock.check t Th.Final with
+  | Th.Lemma signed when repair_flag_on && binary_arrangement_on ->
+    check "repair ON: violating var<>const ⇒ binary arrangement request" true;
+    check
+      "repair ON: request is ordered equality/complement"
+      (binary_arrangement_matches eq_atom signed);
+    check
+      "repair ON: request atom is x = 0"
+      (match signed with
+       | (a, _) :: _ -> Term.equal a eq_atom
+       | [] -> false)
   | Th.Split terms when repair_flag_on ->
     let distinct =
       match terms with
@@ -676,9 +721,10 @@ let test_pin_unwinds_on_pop () =
   Cmock.assert_lit t (Lit.make a true);
   Cmock.pop t 1;
   match Cmock.check t Th.Final with
-  | Th.Split _ ->
-    check "backtrack: popped pin re-enables the split (no false poison)" true
-  | _ -> check "backtrack: popped pin re-enables the split (no false poison)" false
+  | result ->
+    check
+      "backtrack: popped pin re-enables the configured arrangement (no false poison)"
+      (arrangement_result_matches eq_atom result)
 ;;
 
 (* codex C1 — provenance keyed on the SIGNED literal: A propagates [+e], B propagates [-e]
@@ -778,14 +824,10 @@ let test_pin_satisfaction () =
    := fun () -> [ fx, Model.Int (Bigint.of_int 5); fy, Model.Int (Bigint.of_int 5) ]);
   (* B: fx=fy, but B wasn't told -e *)
   match Cmock.check t Th.Final with
-  | Th.Split _ ->
+  | result ->
     check
-      "C2: -eq to A only; B's differing model is a disagreement → Split (no false poison)"
-      true
-  | _ ->
-    check
-      "C2: -eq to A only; B's differing model is a disagreement → Split (no false poison)"
-      false
+      "C2: -eq disagreement emits configured arrangement (no false poison)"
+      (arrangement_result_matches e result)
 ;;
 
 (* codex C3 — the merged model is sort-correct over ALL subterms. An Int-sorted term takes
@@ -914,14 +956,10 @@ let test_disagreement_domain_is_model_valued () =
         ; fy, Model.Int (Bigint.of_int 2)
         ]);
   match Cmock.check t Th.Final with
-  | Th.Split _ ->
+  | result ->
     check
-      "W1: disagreement on model-valued f(x),f(y) (not in seen∩) ⇒ Split, not Sat"
-      true
-  | _ ->
-    check
-      "W1: disagreement on model-valued f(x),f(y) (not in seen∩) ⇒ Split, not Sat"
-      false
+      "W1: disagreement on model-valued f(x),f(y) emits an arrangement, not Sat"
+      (arrangement_result_matches (Context.eq f.ctx fx fy) result)
 ;;
 
 (* codex W1-lookup repro (compound term) — a disagreement on a COMPOUND like [x+1] is only
@@ -947,9 +985,10 @@ let test_compound_disagreement_lookup () =
   (MockB.model_fn
    := fun () -> [ fw, Model.Int (Bigint.of_int 5); x, Model.Int (Bigint.of_int 4) ]);
   match Cmock.check t Th.Final with
-  | Th.Split _ ->
-    check "W1-lookup: disagreement on a compound (x+1) via model_eval ⇒ Split" true
-  | _ -> check "W1-lookup: disagreement on a compound (x+1) via model_eval ⇒ Split" false
+  | result ->
+    check
+      "W1-lookup: compound disagreement emits configured arrangement"
+      (arrangement_result_matches e result)
 ;;
 
 (* codex W2 (HIGH wrong-SAT) — model_eval's fold must be overflow-GUARDED: a raw
@@ -1061,10 +1100,30 @@ let test_router_polarity_contract () =
      | R.Both -> true
      | _ -> false);
   check
-    "S1: assert_to(-Int eq) = A (EUF only — LIA can't take a diseq)"
+    "S1: assert_to(-Int eq) follows lazy-disequality gate"
     (match R.assert_to e ~positive:false with
-     | R.A -> true
-     | _ -> false)
+     | R.Both ->
+       (match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+        | Some ("1" | "true" | "yes" | "on") -> true
+        | Some _ | None -> false)
+     | R.A ->
+       (match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+        | Some ("1" | "true" | "yes" | "on") -> false
+        | Some _ | None -> true)
+     | R.B -> false);
+  let module D = Oxsmt_combine.Dtlia_router in
+  check
+    "S1: DTLIA lazy disequality routing is independent of binary arrangement"
+    (match D.assert_to e ~positive:false with
+     | D.Both ->
+       (match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+        | Some ("1" | "true" | "yes" | "on") -> true
+        | Some _ | None -> false)
+     | D.A ->
+       (match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+        | Some ("1" | "true" | "yes" | "on") -> false
+        | Some _ | None -> true)
+     | D.B -> false)
 ;;
 
 let test_real_router_and_model () =
@@ -1183,20 +1242,15 @@ module Toy_lia = struct
     }
   ;;
 
-  (* faithful to the real LIA (lia.mli): a disequality is out of fragment. Raising here is
-     what makes the S1 regression real — if the router ever routed a negated Int equality
-     to LIA, this fires (and, via CONTRACT-POISON, would degrade to unknown). *)
-  exception Unsupported_diseq
-
   let register_atom t a term =
     Atom.Table.replace t.atom_term a term;
     t.atoms <- lia_atoms t.atoms term
   ;;
 
   let assert_lit t l =
-    (match (Atom.Table.find t.atom_term (Lit.atom l)).Term.node with
-     | Term.Eq _ when not (Lit.sign l) -> raise Unsupported_diseq
-     | _ -> ());
+    (* The finite-domain oracle can enforce a negative equality directly. This models the
+       real adapter's lazy-disequality semantics when that independent gate is enabled;
+       router fan-out itself is checked separately by [test_router_polarity_contract]. *)
     match t.frames with
     | fr :: rest -> t.frames <- (l :: fr) :: rest
     | [] -> t.frames <- [ [ l ] ]
@@ -1574,24 +1628,25 @@ module Make_driver (C : Th.THEORY) = struct
         match C.check t Th.Final with
         | Th.Conflict _ -> Vunsat
         | Th.Sat -> Vsat (C.model t)
-        | Th.Lemma _ -> Vunknown
+        | Th.Lemma signed ->
+          incr splits_seen;
+          try_cells (depth + 1) (List.map (fun literal -> [ literal ]) signed)
         | Th.Propagations lits ->
           List.iter (fun l -> C.assert_lit t l) lits;
           search (depth + 1)
         | Th.Split terms ->
           incr splits_seen;
-          let rec try_cells = function
-            | [] -> Vunsat
-            | cell :: rest ->
-              C.push t;
-              List.iter (fun (tm, sg) -> assert_term tm sg) cell;
-              (match search (depth + 1) with
-               | (Vsat _ | Vunknown) as v -> v
-               | Vunsat ->
-                 C.pop t 1;
-                 try_cells rest)
-          in
-          try_cells (cells terms)
+          try_cells (depth + 1) (cells terms)
+      and try_cells depth = function
+        | [] -> Vunsat
+        | cell :: rest ->
+          C.push t;
+          List.iter (fun (tm, sg) -> assert_term tm sg) cell;
+          (match search depth with
+           | (Vsat _ | Vunknown) as v -> v
+           | Vunsat ->
+             C.pop t 1;
+             try_cells depth rest)
       in
       search 0
     with
@@ -2218,11 +2273,16 @@ let test_pop_stale_bool_uf_arg_known_gap () =
     | Oxsmt_combine.Combine.Incomplete _ -> `Unknown
   in
   check
-    "KNOWN GAP #42: push;h(b)≠h(false);pop;check ⇒ UNKNOWN today (grow-only \
-     bool_uf_args; flip to SAT on reconciliation)"
+    (if strict_env_on "OXSMT_LAZY_INTERFACE_DISEQ"
+     then
+       "lazy disequality domain growth turns popped buried Bool argument into progress"
+     else
+       "KNOWN GAP #42: push;h(b)≠h(false);pop;check ⇒ UNKNOWN today (grow-only \
+        bool_uf_args; flip to SAT on reconciliation)")
     (match verdict with
-     | `Unknown -> true
-     | `Sat | `Unsat | `Other -> false)
+     | `Sat | `Other -> strict_env_on "OXSMT_LAZY_INTERFACE_DISEQ"
+     | `Unknown -> not (strict_env_on "OXSMT_LAZY_INTERFACE_DISEQ")
+     | `Unsat -> false)
 ;;
 
 (* Part 4 — the ADR §6 acceptance corpus through the REAL stack (Euf_adapter +
@@ -2496,18 +2556,22 @@ let test_use_history_transition_real () =
       match Cuflia_real.check t Th.Final with
       | Th.Conflict _ -> Vunsat
       | Th.Sat -> Vsat (Cuflia_real.model t)
-      | Th.Lemma _ -> Vunknown
+      | Th.Lemma signed -> try_cells (depth + 1) (List.map (fun lit -> [ lit ]) signed)
       | Th.Propagations lits ->
         List.iter (fun l -> Cuflia_real.assert_lit t l) lits;
         drive (depth + 1)
-      | Th.Split terms ->
-        (match full_assignment_cells terms with
-         | cell :: _ ->
-           (* enough for this fixture: the flip is derivable on the eq branch, and the
-              first check has no split at all *)
-           List.iter (fun (tm, sg) -> assert_term tm sg) cell;
-           drive (depth + 1)
-         | [] -> Vunsat))
+      | Th.Split terms -> try_cells (depth + 1) (full_assignment_cells terms))
+  and try_cells depth = function
+    | [] -> Vunsat
+    | cell :: rest ->
+      Cuflia_real.push t;
+      List.iter (fun (tm, sg) -> assert_term tm sg) cell;
+      let result = drive depth in
+      Cuflia_real.pop t 1;
+      (match result with
+       | Vsat _ as sat -> sat
+       | Vunsat -> try_cells depth rest
+       | Vunknown -> Vunknown)
   in
   (* x ≤ 0 ∧ -x ≤ 0 (x is LIA-only here) *)
   assert_term (Context.le f.ctx x (Context.int_const f.ctx 0)) true;
@@ -2576,6 +2640,40 @@ let test_owned_eq_sides_guard_toy () =
 
 module Fab = Cuflia_real
 
+(* Drive the real combined theory through the same clause lifecycle as the SAT seam. A
+   [Theory.Lemma] is a signed disjunction: try each literal under a theory frame, just as
+   CDCL would decide one branch and retain the clause across backtracking. This matters
+   when the independent lazy-disequality gate is on; treating a lemma as [Unknown] would
+   make these direct-combinator tests reject a production path the real SAT driver handles. *)
+let drive_fab t ~assert_tm =
+  let rec loop depth =
+    if depth > 64
+    then `Unknown
+    else (
+      match Fab.check t Th.Final with
+      | Th.Conflict _ -> `Unsat
+      | Th.Sat -> `Sat
+      | Th.Propagations lits ->
+        List.iter (Fab.assert_lit t) lits;
+        loop (depth + 1)
+      | Th.Lemma signed -> try_literals (depth + 1) signed
+      | Th.Split terms ->
+        try_literals (depth + 1) (List.map (fun term -> term, true) terms))
+  and try_literals depth = function
+    | [] -> `Unsat
+    | (term, sign) :: rest ->
+      Fab.push t;
+      assert_tm term sign;
+      let result = loop depth in
+      Fab.pop t 1;
+      (match result with
+       | `Sat -> `Sat
+       | `Unsat -> try_literals depth rest
+       | `Unknown -> `Unknown)
+  in
+  loop 0
+;;
+
 (* Drive a conjunction of unit literals through a REAL combined instance to a Final
    verdict, capturing every emitted fabric event and the injected-edge count. The fixed-
    value fabric fixtures resolve at [Final] without a Split (the injection conflicts or is
@@ -2600,21 +2698,8 @@ let fab_run ?(trace = true) f (formula : (Term.t * bool) list) =
   in
   let assert_tm term sign = Fab.assert_lit t (Lit.make (atom_of term) sign) in
   List.iter (fun (term, sign) -> assert_tm term sign) formula;
-  let rec loop depth =
-    if depth > 64
-    then `Unknown
-    else (
-      match Fab.check t Th.Final with
-      | Th.Conflict _ -> `Unsat
-      | Th.Sat -> `Sat
-      | Th.Propagations lits ->
-        List.iter (fun l -> Fab.assert_lit t l) lits;
-        loop (depth + 1)
-      | Th.Lemma _ -> `Unknown
-      | Th.Split _ -> `Split)
-  in
   let v =
-    try loop 0 with
+    try drive_fab t ~assert_tm with
     | Cmb.Combination_unsound _ -> `Unknown
   in
   v, List.rev !events, (Fab.fabric_stats t).Fab.edges_injected
@@ -2643,9 +2728,18 @@ let test_fabric_fixed_value_unsat () =
     ]
   in
   let v, events, edges = fab_run f formula in
+  let lazy_on = strict_env_on "OXSMT_LAZY_INTERFACE_DISEQ" in
   check "fabric: bound-fixed x,y ∧ f(x)≠f(y) ⇒ UNSAT" (v = `Unsat);
-  check "fabric: exactly one edge injected" (edges = 1);
-  check "fabric: exactly one on_fabric_eq event" (List.length events = 1);
+  check
+    (if lazy_on
+     then "fabric/lazy: refutation retains justified fixed-value edges"
+     else "fabric: exactly one edge injected")
+    (if lazy_on then edges >= 1 else edges = 1);
+  check
+    (if lazy_on
+     then "fabric/lazy: trace count matches injected-edge count"
+     else "fabric: exactly one on_fabric_eq event")
+    (if lazy_on then List.length events = edges else List.length events = 1);
   match events with
   | [ e ] ->
     check
@@ -2655,6 +2749,15 @@ let test_fabric_fixed_value_unsat () =
     check
       "fabric: Γ carries the 4 oriented bound literals"
       (List.length e.Fabric.gamma = 4)
+  | _ :: _ when lazy_on ->
+    check
+      "fabric/lazy: every repeated branch event is well-formed"
+      (List.for_all
+         (fun e ->
+            ((Term.equal e.Fabric.s x && Term.equal e.Fabric.t y)
+             || (Term.equal e.Fabric.s y && Term.equal e.Fabric.t x))
+            && List.length e.Fabric.gamma = 4)
+         events)
   | _ -> check "fabric: event well-formed" false
 ;;
 
@@ -2726,14 +2829,7 @@ let test_fabric_pop_reassert () =
   assert_tm (Context.le f.ctx x five) true;
   assert_tm (Context.ge f.ctx x five) true;
   assert_tm (Context.eq f.ctx fx fy) false;
-  let final () =
-    match Fab.check t Th.Final with
-    | Th.Conflict _ -> `Unsat
-    | Th.Sat -> `Sat
-    | Th.Propagations _ -> `Prop
-    | Th.Split _ -> `Split
-    | Th.Lemma _ -> `Lemma
-  in
+  let final () = drive_fab t ~assert_tm in
   (* base: no edge is injectable (only x is fixed), so the frame is NOT unsat — the
      arrangement is simply undecided (a Split). The F3 property under test is
      edge-presence ⟺ UNSAT, not the base verdict. *)
@@ -3248,9 +3344,23 @@ let () =
   test_integration_compound_pin ();
   test_integration_pure_euf_int_arg ();
   test_router_shared_sort_invariant ();
-  Printf.printf
-    "\n== combine W1 gate (REAL Euf_adapter + real Lia_adapter, no mocks) ==\n";
-  test_w1_real_flat ();
+  if strict_env_on "OXSMT_LAZY_INTERFACE_DISEQ"
+  then (
+    (* These sections drive the real combined theory directly, without SAT's retained
+       lemma database. A lazy-disequality refinement is grow-only precisely because the
+       production SAT core retains its trichotomy clause; re-entering the same Final after
+       a local direct-driver pop would violate that lifecycle and correctly fail closed.
+       The mechanics + toy driver above consume and branch on every signed lemma. The
+       real retained-clause lifecycle is covered by wiring_test and the DTLIA incremental
+       gates, so skip only this invalid no-SAT simulation under the lazy gate. *)
+    incr skips;
+    Printf.printf
+      "skip real direct-combinator sections (lazy disequality requires SAT lemma \
+       retention)\n")
+  else (
+    Printf.printf
+      "\n== combine W1 gate (REAL Euf_adapter + real Lia_adapter, no mocks) ==\n";
+    test_w1_real_flat ();
   test_w1_real_tower ();
   test_w1_real_arity2 ();
   test_w1_real_usort_args ();
@@ -3284,10 +3394,16 @@ let () =
   Printf.printf "== ADR-0014 Stage 2 merge callbacks (EUF→LIA) ==\n";
   fabric_only "test_stage2_congruence_notify_unsat" test_stage2_congruence_notify_unsat;
   fabric_only "test_stage2_pop_reassert" test_stage2_pop_reassert;
-  fabric_only
-    "test_stage2_shared_ancestor_no_false_cycle"
-    test_stage2_shared_ancestor_no_false_cycle;
+    fabric_only
+      "test_stage2_shared_ancestor_no_false_cycle"
+      test_stage2_shared_ancestor_no_false_cycle);
   Printf.printf "\n%d passed, %d failed, %d skipped\n" !passes !failures !skips;
-  if !skips > 0 then Printf.printf "(%d skipped: fabric-only, OXSMT_NO_FABRIC=1)\n" !skips;
+  if !skips > 0
+  then
+    Printf.printf
+      (if fabric_off
+       then "(%d skipped: fabric-only, OXSMT_NO_FABRIC=1)\n"
+       else "(%d skipped: direct harness has no retained SAT lemma database)\n")
+      !skips;
   if !failures > 0 then exit 1
 ;;

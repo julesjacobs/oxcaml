@@ -30,6 +30,14 @@
   oxsmt_smtlib_parser
   oxsmt_query_loader))
 
+; Exact-once Vox2 assumption-query performance runner. It deliberately omits the corpus
+; gate's fresh-session core-minimality reprobes and reports internal phase attribution.
+
+(executable
+ (name intset_perf_runner)
+ (modules intset_perf_runner)
+ (libraries oxsmt_core oxsmt_interface oxsmt_smtlib_parser oxsmt_query_loader unix))
+
 ; Session semantics + namespace-guard unit tests (make wiring-test).
 
 (executable

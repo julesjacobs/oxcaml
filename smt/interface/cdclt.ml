@@ -1250,6 +1250,7 @@ let clear_last_conflict t =
 
 let splits_used t = t.splits
 let effort_used t = Budget.used t.budget
+let with_effort_cap t cap f = Budget.with_cap t.budget cap f
 
 (* Stage C mechanism-I engagement probe: the number of fabric edges the DT+LIA combinator
    INJECTED or NOTIFIED during the session ([Combine.fabric_stats.edges_injected],

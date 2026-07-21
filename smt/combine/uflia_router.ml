@@ -1,5 +1,15 @@
 open Oxsmt_core
 
+(* This gate controls only routing a negative shared Int equality to LIA's lazy
+   disequality checker. It does not imply that [Combine] uses the binary arrangement
+   phase request: DTLIA can soundly use lazy disequalities on its classic no-fabric path
+   while retaining the ordinary trichotomy arrangement. *)
+let lazy_interface_disequality_on =
+  match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 type owner =
   | A
   | B
@@ -81,7 +91,7 @@ let assert_to term ~positive =
     B
   | Theory_view.Predicate _ | Theory_view.Bool_lit _ | Theory_view.Equality _ ->
     (match owner term with
-     | Both when not positive -> A
+     | Both when (not positive) && not lazy_interface_disequality_on -> A
      | o -> o)
 ;;
 

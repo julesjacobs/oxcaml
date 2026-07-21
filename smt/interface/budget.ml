@@ -6,7 +6,7 @@
 
 type t =
   { mutable used : int
-  ; max : int option
+  ; mutable max : int option
   }
 
 exception Exceeded
@@ -22,3 +22,14 @@ let tick t =
 
 let used t = t.used
 let reset t = t.used <- 0
+
+let with_cap t cap f =
+  let saved = t.max in
+  let effective =
+    match saved with
+    | None -> cap
+    | Some configured -> min configured cap
+  in
+  t.max <- Some effective;
+  Fun.protect ~finally:(fun () -> t.max <- saved) f
+;;

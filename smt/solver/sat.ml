@@ -31,6 +31,15 @@ let linear_tautology_on =
   | Some _ | None -> false
 ;;
 
+(* Private ordered-tautology phase request used only by the dark binary interface-
+   equality experiment. Keep the SAT seam's ordinary tautology behavior unchanged when
+   the experiment is off. *)
+let binary_interface_eq_on =
+  match Sys.getenv_opt "OXSMT_BINARY_INTERFACE_EQ" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 let rec sorted_clause_is_tautology = function
   | a :: ((b :: _) as rest) -> b = neg_lit a || sorted_clause_is_tautology rest
   | [] | [ _ ] -> false
@@ -2991,6 +3000,17 @@ let search t assumps conflict_limit =
                     handle_confl
                       ~theory:true
                       (H_transient (theory_conflict_clause t premises))
+                  | T_lemma [ [ l; nl ] ]
+                    when binary_interface_eq_on && nl = neg_lit l && lit_val t l = 0 ->
+                    (* A Final arrangement lemma [l ∨ ¬l] would ordinarily be dropped
+                       as a tautology. Its ordered form is a private phase request: [l]
+                       was internalized during this Final check, so decide it true first
+                       without retaining a useless clause. *)
+                    t.decisions <- t.decisions + 1;
+                    t.decisions_since_rephase <- t.decisions_since_rephase + 1;
+                    new_decision_level t;
+                    unchecked_enqueue t l r_decision;
+                    budget_tick t
                   | T_lemma clauses ->
                     add_theory_lemmas t clauses;
                     (* an empty-at-level-0 lemma makes the instance unsat (blocker: search

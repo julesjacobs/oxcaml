@@ -220,6 +220,122 @@ let ev_with
      are cached; a [Bad]-raising term is recomputed. Short-circuiting ([And]/[Or]/[Ite])
      is unaffected — a branch that was never evaluated is never cached. *)
   let ev_memo = Term.Table.create 256 in
+  let normalized_known = Term.Table.create 64 in
+  let equivalent_known_memo : ((int * int), bool) Hashtbl.t = Hashtbl.create 64 in
+  let wrong_selector_values : (Symbol.t * v * v) list ref = ref [] in
+  let rec normalize_known term =
+    match Term.Table.find_opt normalized_known term with
+    | Some normalized -> normalized
+    | None ->
+      let normalized =
+        match term.Term.node with
+        | Term.App (selector_sym, selector_args) when Iarr.length selector_args = 1 ->
+          (match Defs.selector_of_sym reg selector_sym with
+           | Some (_dt, expected_ctor, selector) ->
+             let argument = normalize_known (Iarr.get selector_args 0) in
+             (match argument.Term.node with
+              | Term.App (actual_sym, fields) ->
+                (match Defs.constructor_of_sym reg actual_sym with
+                 | Some (_actual_dt, actual)
+                   when Symbol.equal expected_ctor.Defs.sym actual.Defs.sym
+                        && selector.Defs.index < Iarr.length fields ->
+                   normalize_known (Iarr.get fields selector.Defs.index)
+                 | Some _ | None -> term)
+              | _ -> term)
+           | None -> term)
+        | Term.Ite (condition, then_, else_) ->
+          (match known_bool condition with
+           | Some true -> normalize_known then_
+           | Some false -> normalize_known else_
+           | None -> term)
+        | _ -> term
+      in
+      Term.Table.replace normalized_known term normalized;
+      normalized
+  and known_bool term =
+    let term = normalize_known term in
+    match term.Term.node with
+    | Term.Bool_const value -> Some value
+    | Term.Not child -> Option.map not (known_bool child)
+    | Term.And children ->
+      let values = List.map known_bool (Iarr.to_list children) in
+      if List.exists (Option.equal Bool.equal (Some false)) values
+      then Some false
+      else if List.for_all (Option.equal Bool.equal (Some true)) values
+      then Some true
+      else None
+    | Term.Or children ->
+      let values = List.map known_bool (Iarr.to_list children) in
+      if List.exists (Option.equal Bool.equal (Some true)) values
+      then Some true
+      else if List.for_all (Option.equal Bool.equal (Some false)) values
+      then Some false
+      else None
+    | Term.Eq (a, b) ->
+      if equivalent_known a b
+      then Some true
+      else (
+        match known_bool a, known_bool b with
+        | Some a, Some b -> Some (Bool.equal a b)
+        | (Some _ | None), (Some _ | None) -> None)
+    | Term.App (tester_sym, tester_args) when Iarr.length tester_args = 1 ->
+      (match Defs.tester_of_sym reg tester_sym with
+       | Some (_dt, expected_ctor) ->
+         let argument = normalize_known (Iarr.get tester_args 0) in
+         (match argument.Term.node with
+          | Term.App (actual_sym, _) ->
+            (match Defs.constructor_of_sym reg actual_sym with
+             | Some (_actual_dt, actual) ->
+               Some (Symbol.equal expected_ctor.Defs.sym actual.Defs.sym)
+             | None -> None)
+          | _ -> None)
+       | None -> None)
+    | Term.Int_const _
+    | Term.Real_const _
+    | Term.App _
+    | Term.Arith _
+    | Term.Real_arith _
+    | Term.Le _
+    | Term.Ite _ -> None
+  and equivalent_known a b =
+    let a = normalize_known a in
+    let b = normalize_known b in
+    if Term.equal a b
+    then true
+    else (
+      let key = a.Term.tag, b.Term.tag in
+      match Hashtbl.find_opt equivalent_known_memo key with
+      | Some result -> result
+      | None ->
+        let result =
+          match a.Term.node, b.Term.node with
+          | Term.App (sa, aa), Term.App (sb, ab) ->
+            Symbol.equal sa sb
+            && Iarr.length aa = Iarr.length ab
+            && List.for_all2 equivalent_known (Iarr.to_list aa) (Iarr.to_list ab)
+          | Term.Not a, Term.Not b | Term.Le a, Term.Le b -> equivalent_known a b
+          | Term.Eq (a1, a2), Term.Eq (b1, b2) ->
+            equivalent_known a1 b1 && equivalent_known a2 b2
+          | Term.And aa, Term.And ab | Term.Or aa, Term.Or ab ->
+            Iarr.length aa = Iarr.length ab
+            && List.for_all2 equivalent_known (Iarr.to_list aa) (Iarr.to_list ab)
+          | Term.Ite (ac, at, ae), Term.Ite (bc, bt, be) ->
+            equivalent_known ac bc
+            && equivalent_known at bt
+            && equivalent_known ae be
+          | Term.Arith la, Term.Arith lb ->
+            Bigint.equal la.Term.const lb.Term.const
+            && Iarr.length la.Term.coeffs = Iarr.length lb.Term.coeffs
+            && List.for_all2
+                 (fun (ta, ca) (tb, cb) ->
+                   Bigint.equal ca cb && equivalent_known ta tb)
+                 (Iarr.to_list la.Term.coeffs)
+                 (Iarr.to_list lb.Term.coeffs)
+          | _ -> false
+        in
+        Hashtbl.replace equivalent_known_memo key result;
+        result)
+  in
   let rec ev (t : Term.t) : v =
     match Term.Table.find_opt ev_memo t with
     | Some v -> v
@@ -231,7 +347,11 @@ let ev_with
     match t.Term.node with
     | Term.Bool_const b -> Leaf (Model.Bool b)
     | Term.Int_const n -> Leaf (Model.Int n)
-    | Term.Eq (a, b) -> Leaf (Model.Bool (v_eq (ev a) (ev b)))
+    | Term.Eq (a, b) ->
+      (* Reflexivity is independent of the value. First expose a direct matching-selector
+         field on either side, mirroring the reducer: [(= (sel (C ... x ...)) x)] is true
+         even when [x] disappeared from the reduced solver vocabulary. *)
+      Leaf (Model.Bool (equivalent_known a b || v_eq (ev a) (ev b)))
     | Term.Not a -> Leaf (Model.Bool (not (as_bool (ev a))))
     | Term.And xs ->
       Leaf (Model.Bool (Iarr.fold (fun acc x -> acc && as_bool (ev x)) true xs))
@@ -276,27 +396,104 @@ let ev_with
        | None ->
          (match Defs.tester_of_sym reg sym with
           | Some (_dt, c) when Array.length args = 1 ->
-            (match ev args.(0) with
-             | Ctor (name, _) ->
-               Leaf (Model.Bool (String.equal name (Symbol.name c.Defs.sym)))
-             | Leaf _ -> raise Bad)
+            (* Match the solver's known-constructor reduction independently. A tester's
+               value depends only on the constructor head, so fields in the syntactic
+               constructor are deliberately not evaluated: they may have disappeared
+               from the reduced solver vocabulary and therefore be absent from [env]. *)
+            let argument = normalize_known args.(0) in
+            (match argument.Term.node with
+             | Term.App (actual_sym, _) ->
+               (match Defs.constructor_of_sym reg actual_sym with
+                | Some (_actual_dt, actual) ->
+                  Leaf (Model.Bool (Symbol.equal c.Defs.sym actual.Defs.sym))
+                | None ->
+                  (match ev argument with
+                   | Ctor (name, _) ->
+                     Leaf (Model.Bool (String.equal name (Symbol.name c.Defs.sym)))
+                   | Leaf _ -> raise Bad))
+             | _ ->
+               (match ev argument with
+                | Ctor (name, _) ->
+                  Leaf (Model.Bool (String.equal name (Symbol.name c.Defs.sym)))
+                | Leaf _ -> raise Bad))
           | Some _ -> raise Bad
           | None ->
             (match Defs.selector_of_sym reg sym with
              | Some (_dt, c, sel) when Array.length args = 1 ->
-               (match ev args.(0) with
-                | Ctor (name, fields) when String.equal name (Symbol.name c.Defs.sym) ->
-                  (match List.nth_opt fields sel.Defs.index with
+               let argument = normalize_known args.(0) in
+               let underspecified () =
+                 (* Selector applied to a value of a DIFFERENT constructor: SMT-LIB
+                    leaves this underspecified. Use the model's own (consistent) value
+                    for this selector term, extracted at Final. The solver reducer may
+                    have normalized the selector argument before registering it, so fall
+                    back to a binding whose same selector is applied to an argument
+                    provably equal under the independent known-constructor identities. *)
+                 let value =
+                   match Term.Table.find_opt env t with
                    | Some v -> v
-                   | None -> raise Bad)
-                | Ctor _ ->
-                  (* selector applied to a value of a DIFFERENT constructor: SMT-LIB
-                     leaves this underspecified. Use the model's own (consistent) value
-                     for this selector term, extracted at Final; absent => fail closed. *)
-                  (match Term.Table.find_opt env t with
-                   | Some v -> v
-                   | None -> raise Bad)
-                | Leaf _ -> raise Bad)
+                   | None ->
+                     (match
+                        Term.Table.fold
+                          (fun candidate value found ->
+                            match found, candidate.Term.node with
+                            | Some _, _ -> found
+                            | None, Term.App (candidate_sym, candidate_args)
+                              when Symbol.equal sym candidate_sym
+                                   && Iarr.length candidate_args = 1
+                                   && equivalent_known
+                                        argument
+                                        (Iarr.get candidate_args 0) -> Some value
+                            | None, _ -> None)
+                          env
+                          None
+                      with
+                      | Some v -> v
+                      | None -> raise Bad)
+                 in
+                 (* A wrong-constructor selector is underspecified, but it is still ONE
+                    total function. Equal argument values must receive equal outputs;
+                    independent per-term env bindings are not allowed to disagree. *)
+                 let argument_value = ev argument in
+                 (match
+                    List.find_opt
+                      (fun (seen_sym, seen_argument, _seen_value) ->
+                        Symbol.equal sym seen_sym && v_eq argument_value seen_argument)
+                      !wrong_selector_values
+                  with
+                  | Some (_, _, seen_value) -> if not (v_eq value seen_value) then raise Bad
+                  | None ->
+                    wrong_selector_values
+                    := (sym, argument_value, value) :: !wrong_selector_values);
+                 value
+               in
+               (match argument.Term.node with
+                | Term.App (actual_sym, fields) ->
+                  (match Defs.constructor_of_sym reg actual_sym with
+                   | Some (_actual_dt, actual)
+                     when Symbol.equal c.Defs.sym actual.Defs.sym ->
+                     (* A matching selector depends only on its selected syntactic field.
+                        Do not evaluate dead siblings erased by the reducer. *)
+                     if sel.Defs.index < Iarr.length fields
+                     then ev (Iarr.get fields sel.Defs.index)
+                     else raise Bad
+                   | Some _ -> underspecified ()
+                   | None ->
+                     (match ev argument with
+                      | Ctor (name, values)
+                        when String.equal name (Symbol.name c.Defs.sym) ->
+                        (match List.nth_opt values sel.Defs.index with
+                         | Some v -> v
+                         | None -> raise Bad)
+                      | Ctor _ -> underspecified ()
+                      | Leaf _ -> raise Bad))
+                | _ ->
+                  (match ev argument with
+                   | Ctor (name, values) when String.equal name (Symbol.name c.Defs.sym) ->
+                     (match List.nth_opt values sel.Defs.index with
+                      | Some v -> v
+                      | None -> raise Bad)
+                   | Ctor _ -> underspecified ()
+                   | Leaf _ -> raise Bad))
              | Some _ -> raise Bad
              | None ->
                (* not a constructor/selector/tester. A leaf (nullary) variable/constant is

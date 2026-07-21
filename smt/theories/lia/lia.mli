@@ -248,6 +248,11 @@ val model_bigint : 'tok t -> (Term.t * Oxsmt_core.Bigint.t) list
     finite part), for inspection/tests; [Rational.zero] for an unseen term. *)
 val rational_value : 'tok t -> Term.t -> Rational.t
 
+(** [internalize_term t term] makes every arithmetic leaf of [term] part of the model
+    domain without asserting a bound. Used by the dark binary-interface-equality path so
+    a negative equality can be checked lazily against a total arithmetic model. *)
+val internalize_term : 'tok t -> Term.t -> unit
+
 (** [fixed_bounds t term] returns [(value, lower_reason, upper_reason)] exactly when
     [term]'s tightest ACTIVE ASSERTED (User) lower and upper bounds coincide on an
     integer. The reasons are oriented: [lower_reason] proves [term >= value] and

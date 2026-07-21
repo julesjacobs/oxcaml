@@ -187,6 +187,10 @@ val combine_fabric_edges_injected : t -> int
     ([Budget.used]); the instrumentation read behind {!Session.effort}. *)
 val effort_used : t -> int
 
+(** Run one operation with a temporary effort cap, bounded by the session's configured
+    cap when present. The prior cap is restored on normal and exceptional exits. *)
+val with_effort_cap : t -> int -> (unit -> 'a) -> 'a
+
 (** task #106: the LIA adapter's observational conflict evidence, re-exported so
     {!Session} can surface it. Only the EUF+LIA stack carries it (DT/arrays give [None]).
     See {!Oxsmt_lia.Lia_adapter.conflict_core}. *)

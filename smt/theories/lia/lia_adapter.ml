@@ -19,6 +19,15 @@
 
 open Oxsmt_core
 
+(* Independent of the combinator's binary arrangement policy: a negative Int equality
+   routed here is retained and checked lazily against every candidate arithmetic model.
+   This is also sound on DTLIA's classic no-fabric combination path. *)
+let lazy_interface_disequality_on =
+  match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+  | Some ("1" | "true" | "yes" | "on") -> true
+  | Some _ | None -> false
+;;
+
 (* GCD / Diophantine integer-feasibility test before b&b branching. Default ON; set
    OXSMT_NO_DIOPHANTINE to disable (A/B). Read once (module scope is fine — no term/id
    currency, just a boolean policy). *)
@@ -202,8 +211,15 @@ type conflict_core =
       (Term.t * bool) list (* each premise atom's [Term.t] + its asserted polarity *)
   }
 
+type lazy_disequality =
+  { eq : Term.t
+  ; lhs : Term.t
+  ; rhs : Term.t
+  }
+
 type t =
-  { lia : Fabric.justification Lia.t
+  { ctx : Context.t
+  ; lia : Fabric.justification Lia.t
   ; term_of_atom : Term.t Atom.Table.t (* engine atom id -> its registered [Term.t] *)
   ; atom_of_term : Atom.t Term.Table.t
       (* reverse map, for turning a propagated term back into its literal *)
@@ -224,10 +240,13 @@ type t =
      stashed verbatim from the engine [Lia.conflict] before it is projected to the
      payload- free [Explanation]. Reset per check-sat by {!clear_last_conflict}.
      Observational only. *)
+  ; mutable diseq_frames : lazy_disequality list list
+  ; refined_disequalities : unit Term.Table.t
   }
 
 let create ctx _env =
-  { lia = Lia.create ctx
+  { ctx
+  ; lia = Lia.create ctx
   ; term_of_atom = Atom.Table.create 64
   ; atom_of_term = Term.Table.create 64
   ; explain_cache = Lit.Map.empty
@@ -237,6 +256,8 @@ let create ctx _env =
   ; hnf_cuts_emitted = 0
   ; cg_attempts = 0
   ; last_conflict = None
+  ; diseq_frames = [ [] ]
+  ; refined_disequalities = Term.Table.create 32
   }
 ;;
 
@@ -269,7 +290,17 @@ let assert_lit t lit =
     let atom = Lit.atom lit in
     match Atom.Table.find_opt t.term_of_atom atom with
     | Some term ->
-      Lia.assert_atom t.lia term ~polarity:(Lit.sign lit) ~premise:(Fabric.Real lit)
+      (match term.Term.node, Lit.sign lit with
+       | Term.Eq (lhs, rhs), false
+         when lazy_interface_disequality_on && Sort.equal lhs.Term.sort Sort.int ->
+         Lia.internalize_term t.lia lhs;
+         Lia.internalize_term t.lia rhs;
+         let diseq = { eq = term; lhs; rhs } in
+         (match t.diseq_frames with
+          | frame :: rest -> t.diseq_frames <- (diseq :: frame) :: rest
+          | [] -> t.diseq_frames <- [ [ diseq ] ])
+       | _ ->
+         Lia.assert_atom t.lia term ~polarity:(Lit.sign lit) ~premise:(Fabric.Real lit))
     | None ->
       (* CONTRACT: [assert_lit]'s atom was registered first. A miss is a driver bug; fail
          loud -> engine degrades to unknown rather than reasoning on an unmapped atom. *)
@@ -499,6 +530,70 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
       | None -> branch ()))
 ;;
 
+let eval_int_model model term =
+  let values = Term.Table.create (List.length model) in
+  List.iter (fun (tm, value) -> Term.Table.replace values tm value) model;
+  let rec eval (tm : Term.t) =
+    match tm.Term.node with
+    | Term.Int_const value -> Some value
+    | Term.App _ -> Term.Table.find_opt values tm
+    | Term.Arith linear ->
+      Iarr.fold
+        (fun acc (leaf, coefficient) ->
+           match acc, eval leaf with
+           | Some sum, Some value ->
+             Some (Bigint.add sum (Bigint.mul coefficient value))
+           | None, _ | _, None -> None)
+        (Some linear.Term.const)
+        linear.Term.coeffs
+    | Term.Bool_const _
+    | Term.Real_const _
+    | Term.Real_arith _
+    | Term.Le _
+    | Term.Eq _
+    | Term.Not _
+    | Term.And _
+    | Term.Or _
+    | Term.Ite _ -> None
+  in
+  eval term
+;;
+
+let lazy_disequality_result t =
+  if not lazy_interface_disequality_on
+  then Fabric.Sat
+  else (
+    let model = Lia.model_bigint t.lia in
+    let disequalities = List.concat t.diseq_frames in
+    match
+      List.find_map
+        (fun diseq ->
+           match eval_int_model model diseq.lhs, eval_int_model model diseq.rhs with
+           | Some lhs, Some rhs when Bigint.equal lhs rhs -> Some diseq
+           | Some _, Some _ -> None
+           | None, _ | _, None ->
+             raise
+               (Lia.Unsupported
+                  "LIA: lazy interface disequality has no total arithmetic model value"))
+        disequalities
+    with
+    | None -> Fabric.Sat
+    | Some diseq ->
+      if Term.Table.mem t.refined_disequalities diseq.eq
+      then
+        raise
+          (Lia.Unsupported
+             "LIA: refined interface disequality still equated by the arithmetic model")
+      else (
+        Term.Table.replace t.refined_disequalities diseq.eq ();
+        Fabric.Lemma
+          [ diseq.eq, true
+          ; Context.lt t.ctx diseq.lhs diseq.rhs, true
+          ; Context.gt t.ctx diseq.lhs diseq.rhs, true
+          ])
+  )
+;;
+
 (* OXSMT_LIA_MODELFIND: try the cut-free diving B&B before the ordinary branch/cut
    fallback. [modelfind_on] is checked FIRST with [&&] short-circuit, so the OFF path
    never calls {!Lia.model_find} and is byte-identical to trunk ([branch_or_hnf_cut]
@@ -507,7 +602,7 @@ let branch_or_hnf_cut t le_atom ge_atom : Fabric.check_result =
    to the split/cut. *)
 let dive_or_branch t le_atom ge_atom : Fabric.check_result =
   if modelfind_on && Lia.model_find ?node_budget:modelfind_budget ~backtrack:diseq_cdcl_on ?stall:modelfind_stall t.lia
-  then Fabric.Sat
+  then lazy_disequality_result t
   else branch_or_hnf_cut t le_atom ge_atom
 ;;
 
@@ -524,7 +619,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
             [x>=floor v+1] (CONTRACT-SPLIT: >=2 distinct atoms, genuinely constraining —
             not the discarded [Eq v ¬Eq] tautology). *)
          (match Lia.suggest_branch t.lia with
-          | None -> Fabric.Sat
+          | None -> lazy_disequality_result t
           | Some (le_atom, ge_atom) when diophantine_on ->
             (* Integer-feasibility (GCD) test before branching: a ℚ-feasible but
                ℤ-infeasible equality row (e.g. [4s+4x=6]) is refuted here immediately
@@ -534,7 +629,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
              | Some c -> Fabric.Conflict (fabric_conflict_explanation t c)
              | None ->
                (match Lia.cube_model t.lia with
-                | Some _ -> Fabric.Sat
+               | Some _ -> lazy_disequality_result t
                 | None -> dive_or_branch t le_atom ge_atom))
           | Some (le_atom, ge_atom) ->
             (* Before branching, try the Bromberger-Fleury unit cube test: a fat feasible
@@ -543,7 +638,7 @@ let check_fabric t (effort : Theory.effort) : Fabric.check_result =
                design). Sound: the cube model is re-verified by the simplex and the
                session R1 check; a miss falls back to the split. *)
             (match Lia.cube_model t.lia with
-             | Some _ -> Fabric.Sat
+             | Some _ -> lazy_disequality_result t
              | None -> dive_or_branch t le_atom ge_atom))))
 ;;
 
@@ -612,7 +707,8 @@ let model t =
 
 let push t =
   Lia.push t.lia;
-  t.frames <- [] :: t.frames
+  t.frames <- [] :: t.frames;
+  t.diseq_frames <- [] :: t.diseq_frames
 ;;
 
 let pop t n =
@@ -633,6 +729,19 @@ let pop t n =
   <- (match drop n t.frames with
       | [] -> [ [] ]
       | fs -> fs)
+  ;
+  let rec drop_diseq k frames =
+    if k = 0
+    then frames
+    else (
+      match frames with
+      | _ :: rest -> drop_diseq (k - 1) rest
+      | [] -> [])
+  in
+  t.diseq_frames
+  <- (match drop_diseq n t.diseq_frames with
+      | [] -> [ [] ]
+      | frames -> frames)
 ;;
 
 (* ADR-0014 Stage 4.2 sub-frame checkpoint/rewind (chrono earliest-removed incremental
@@ -642,11 +751,16 @@ let pop t n =
 type checkpoint =
   { a_lia : Lia.checkpoint
   ; a_frames : int
+  ; a_diseqs : int
   }
 
 let checkpoint t =
-  match t.frames with
-  | [ fr ] -> { a_lia = Lia.checkpoint t.lia; a_frames = List.length fr }
+  match t.frames, t.diseq_frames with
+  | [ fr ], [ diseqs ] ->
+    { a_lia = Lia.checkpoint t.lia
+    ; a_frames = List.length fr
+    ; a_diseqs = List.length diseqs
+    }
   | _ ->
     failwith
       "Lia_adapter.checkpoint: expected a single base frame (S4.2 CB driver invariant)"
@@ -654,8 +768,8 @@ let checkpoint t =
 
 let rewind_to_checkpoint t c =
   Lia.rewind_to_checkpoint t.lia c.a_lia;
-  match t.frames with
-  | [ fr ] ->
+  match t.frames, t.diseq_frames with
+  | [ fr ], [ diseqs ] ->
     let rec drop k fr =
       if k <= 0
       then fr
@@ -666,7 +780,8 @@ let rewind_to_checkpoint t c =
           t.explain_cache <- Lit.Map.remove l t.explain_cache;
           drop (k - 1) tl)
     in
-    t.frames <- [ drop (List.length fr - c.a_frames) fr ]
+    t.frames <- [ drop (List.length fr - c.a_frames) fr ];
+    t.diseq_frames <- [ List.drop (List.length diseqs - c.a_diseqs) diseqs ]
   | _ ->
     failwith
       "Lia_adapter.rewind_to_checkpoint: expected a single base frame (S4.2 CB driver \
