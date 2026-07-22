@@ -1,0 +1,10 @@
+VC annotation at dependent_arrow_recursion_vc.ml:17:16-17
+  n = 0
+|- 0 = n
+
+VC annotation at dependent_arrow_recursion_vc.ml:17:23-39
+  not (n = 0)
+  call_result = n - 1
+|- call_result + 1 = n
+
+Error: VCs dumped, not discharged.

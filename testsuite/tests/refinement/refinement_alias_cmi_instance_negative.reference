@@ -1,0 +1,4 @@
+File "refinement_alias_cmi_instance_negative.ml", line 9, characters 2-4:
+9 |   ()
+      ^^
+Error: Refinement verification failed (not-proved)

@@ -1,0 +1,13 @@
+File "refinement_program_scope_seal_client.ml", lines 5-7, characters 6-3:
+5 | ......struct
+6 |   let field : int{ _ = Provider.B.field } = Provider.B.field
+7 | end
+Error: Refinement verification failed at module seal for value "field" (not-proved)
+File "refinement_program_scope_seal_client.ml", line 4, characters 2-41:
+4 |   val field : int{ _ = Provider.A.field }
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value field
+File "refinement_program_scope_seal_client.ml", line 6, characters 6-11:
+6 |   let field : int{ _ = Provider.B.field } = Provider.B.field
+          ^^^^^
+  Implementation declaration for value field

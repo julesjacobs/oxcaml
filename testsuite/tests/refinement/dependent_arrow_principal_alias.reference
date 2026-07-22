@@ -1,0 +1,4 @@
+File "dependent_arrow_principal_alias.ml", line 16, characters 37-42:
+16 | let rec step (n as whole) : int{ _ = whole } =
+                                          ^^^^^
+Error: This value is logical but is expected to be physical.

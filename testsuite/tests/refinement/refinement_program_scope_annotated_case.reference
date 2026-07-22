@@ -1,0 +1,4 @@
+File "refinement_program_scope_annotated_case.ml", line 2, characters 52-57:
+2 | let annotated = function (value : int) -> { field = value }
+                                                        ^^^^^
+Error: Refinement verification failed (not-proved)

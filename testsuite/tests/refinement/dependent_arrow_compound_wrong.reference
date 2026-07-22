@@ -1,0 +1,4 @@
+File "dependent_arrow_compound_wrong.ml", line 38, characters 2-56:
+38 |   (Api.relation (Api.plus_one 11) 22 : bool{ _ = true })
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

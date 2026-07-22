@@ -1,0 +1,4 @@
+File "quotation_staging_nested_inactive.ml", line 12, characters 9-58:
+12 |   ignore (() : unit{ Quotation_staging_vehicle.p = true })
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

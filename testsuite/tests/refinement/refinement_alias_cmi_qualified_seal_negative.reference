@@ -1,0 +1,15 @@
+File "refinement_alias_cmi_qualified_seal_negative.ml", lines 11-15, characters 6-3:
+11 | ......struct
+12 |   let p = Left.p
+13 |   module M = Right
+14 |   let law : unit{ p = true } = Left.proof
+15 | end
+Error: Refinement verification failed at module seal for value "law" (not-proved)
+File "refinement_alias_cmi_qualified_seal_negative.ml", line 10, characters 2-30:
+10 |   val law : unit{ M.p = true }
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value law
+File "refinement_alias_cmi_qualified_seal_negative.ml", line 14, characters 6-9:
+14 |   let law : unit{ p = true } = Left.proof
+           ^^^
+  Implementation declaration for value law

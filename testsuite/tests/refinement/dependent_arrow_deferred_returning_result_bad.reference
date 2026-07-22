@@ -1,0 +1,4 @@
+File "dependent_arrow_deferred_returning_result_bad.ml", lines 2-3, characters 2-19:
+2 | ..(Dependent_arrow_deferred_provider.returning_partial ~x:1
+3 |     : int{ _ = 2 })
+Error: Refinement verification failed (disproved)

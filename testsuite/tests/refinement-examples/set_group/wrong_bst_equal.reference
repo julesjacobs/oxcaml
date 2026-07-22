@@ -1,0 +1,18 @@
+File "bst.ml", lines 1-196, characters 26-3:
+  1 | ..........................struct
+  2 | type t =
+  3 |   | Nil
+  4 |   | Cons of int * t
+  5 | 
+...
+193 |   let _second = prove t2 in
+194 |   let _definition = equal_def t1 t2 in
+195 |   ()
+196 | end
+Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
+File "set_intf.ml", lines 13-15, characters 2-39:
+  Interface declaration for value equal_backward_law
+File "bst.ml", line 173, characters 4-22:
+173 | let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
+          ^^^^^^^^^^^^^^^^^^
+  Implementation declaration for value equal_backward_law

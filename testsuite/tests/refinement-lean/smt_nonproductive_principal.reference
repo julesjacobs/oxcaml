@@ -1,0 +1,4 @@
+File "smt_nonproductive_principal.ml", line 13, characters 50-52:
+13 | let reflexive (x : t @ logical) : unit{ x = x } = ()
+                                                       ^^
+Error: Refinement verification failed (solver-error)

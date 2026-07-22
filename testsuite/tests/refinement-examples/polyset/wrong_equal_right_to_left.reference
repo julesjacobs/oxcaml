@@ -1,0 +1,4 @@
+File "wrong_equal_right_to_left.ml", line 8, characters 2-46:
+8 |   (Int_set.member 67 left : bool{ _ = false })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

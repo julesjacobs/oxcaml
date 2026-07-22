@@ -1,0 +1,4 @@
+File "smt_nonregular_principal.ml", line 13, characters 62-64:
+13 | let reflexive (x : (int, bool) t @ logical) : unit{ x = x } = ()
+                                                                   ^^
+Error: Refinement verification failed (solver-error)

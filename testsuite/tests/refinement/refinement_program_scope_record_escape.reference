@@ -1,0 +1,5 @@
+File "refinement_program_scope_record_escape.ml", lines 3-5, characters 13-44:
+3 | .............() =
+4 |   let local = 1 in
+5 |   ({ field = local } : int{ _ = local } box)
+Error: The refinement type refers to value local outside its scope

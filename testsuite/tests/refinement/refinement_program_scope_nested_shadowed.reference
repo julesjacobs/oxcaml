@@ -1,0 +1,8 @@
+File "refinement_program_scope_nested_shadowed.ml", line 1:
+Error: Refinement verification failed at module seal for value "old" (not-proved)
+File "refinement_program_scope_nested_shadowed.mli", line 3, characters 2-29:
+  Interface declaration for value old
+File "refinement_program_scope_nested_shadowed.ml", line 3, characters 6-9:
+3 |   let old : int{ _ = anchor } = anchor
+          ^^^
+  Implementation declaration for value old

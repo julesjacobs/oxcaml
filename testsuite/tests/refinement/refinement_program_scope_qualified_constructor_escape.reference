@@ -1,0 +1,7 @@
+File "refinement_program_scope_qualified_constructor_escape.ml", lines 3-7, characters 13-32:
+3 | .............x =
+4 |   let module M : sig val x : int end = struct
+5 |     let x = x
+6 |   end in
+7 |   (Box M.x : int{ _ = M.x } box)
+Error: The refinement type refers to module M outside its scope

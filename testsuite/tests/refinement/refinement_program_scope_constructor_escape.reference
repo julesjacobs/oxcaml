@@ -1,0 +1,5 @@
+File "refinement_program_scope_constructor_escape.ml", lines 3-5, characters 13-36:
+3 | .............() =
+4 |   let local = 1 in
+5 |   (Box local : int{ _ = local } box)
+Error: The refinement type refers to value local outside its scope

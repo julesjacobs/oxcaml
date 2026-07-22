@@ -1,0 +1,4 @@
+File "quotation_staging_control.ml", line 4, characters 14-32:
+4 |   <[ $(ignore (0 : int{ false }); <[ 0 ]>) ]>
+                  ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

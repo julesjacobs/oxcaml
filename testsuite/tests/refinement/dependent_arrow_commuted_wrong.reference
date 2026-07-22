@@ -1,0 +1,4 @@
+File "dependent_arrow_commuted_wrong.ml", line 35, characters 2-41:
+35 |   (Api.relation 22 11 : bool{ _ = true })
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

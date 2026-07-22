@@ -1,0 +1,2 @@
+File "_none_", line 1:
+Error: The exported signature contains refinement identifier stable, which is not a visible exported value

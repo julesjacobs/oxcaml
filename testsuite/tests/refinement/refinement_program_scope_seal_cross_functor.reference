@@ -1,0 +1,13 @@
+File "refinement_program_scope_seal_cross_functor.ml", lines 20-22, characters 6-3:
+20 | ......struct
+21 |   let g : int{ _ = B.f } = B.f
+22 | end
+Error: Refinement verification failed at module seal for value "g" (not-proved)
+File "refinement_program_scope_seal_cross_functor.ml", line 19, characters 2-24:
+19 |   val g : int{ _ = A.f }
+       ^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value g
+File "refinement_program_scope_seal_cross_functor.ml", line 21, characters 6-7:
+21 |   let g : int{ _ = B.f } = B.f
+           ^
+  Implementation declaration for value g

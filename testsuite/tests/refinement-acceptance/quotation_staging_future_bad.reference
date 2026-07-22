@@ -1,0 +1,4 @@
+File "quotation_staging_future_bad.ml", line 5, characters 5-23:
+5 |   <[ (0 : int{ false }) ]>
+         ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

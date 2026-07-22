@@ -1,0 +1,25 @@
+File "negative_wrong_wrapper_seal.ml", lines 10-22, characters 39-3:
+10 | .......................................struct
+11 |   type t = int iarray
+12 | 
+13 |   external make_empty : unit -> t @@ total = "vox_sorted_iarray_empty"
+14 |   external view : t @ local logical -> int list @@ total
+...
+19 |   external view_law :
+20 |     seed:int -> unit{ view empty = [] } @@ total
+21 |     = "%ignore"
+22 | end
+Error: Signature mismatch:
+       ...
+       Values do not match:
+         external view_law : seed:int -> unit{ view empty = [] } = "%ignore"
+       is not included in
+         val view_law :
+           seed:(seed : int) -> unit{ view empty = [] && seed = 0 } @@ total
+       The type seed:int -> unit{ view empty = [] }
+       is not compatible with the type
+         seed:(seed : int) -> unit{ view empty = [] && seed = 0 }
+       File "negative_wrong_wrapper_seal.ml", lines 6-7, characters 2-62:
+         Expected declaration
+       File "negative_wrong_wrapper_seal.ml", lines 19-21, characters 2-15:
+         Actual declaration

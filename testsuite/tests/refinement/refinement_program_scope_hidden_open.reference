@@ -1,0 +1,4 @@
+File "refinement_program_scope_hidden_open.ml", line 5, characters 4-10:
+5 | let leaked : int{ _ = hidden } = hidden
+        ^^^^^^
+Error: The refinement type refers to value hidden outside its scope

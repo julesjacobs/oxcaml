@@ -1,0 +1,4 @@
+File "dependent_arrow_principal_wrong.ml", line 12, characters 52-54:
+12 |   let inner (value : int) : unit{ outer = value } = () in
+                                                         ^^
+Error: Refinement verification failed (not-proved)

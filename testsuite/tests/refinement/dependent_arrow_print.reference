@@ -1,0 +1,4 @@
+val identity : (x : int) -> int{ _ = x }
+val labeled_identity : value:(value : int) -> int{ _ = value }
+val nested_shadow : (x : int) -> (x__2 : int{ _ >= x }) -> int{ _ = x__2 }
+val unused_name : 'a -> 'a

@@ -1,0 +1,4 @@
+File "quotation_staging_future_to_splice.ml", line 8, characters 13-62:
+8 |     $(ignore (() : unit{ Quotation_staging_vehicle.p = true }); <[ 0 ]>)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

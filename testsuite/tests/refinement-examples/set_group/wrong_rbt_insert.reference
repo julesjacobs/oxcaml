@@ -1,0 +1,4 @@
+File "rbt.ml", line 81, characters 50-52:
+81 |     then finish_member_insert inserted tree query ()
+                                                       ^^
+Error: Refinement verification failed (not-proved)

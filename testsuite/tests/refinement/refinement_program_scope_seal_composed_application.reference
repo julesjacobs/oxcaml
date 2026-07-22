@@ -1,0 +1,12 @@
+File "refinement_program_scope_seal_composed_application.ml", line 20, characters 6-7:
+20 | end = C
+           ^
+Error: Refinement verification failed at module seal for value "out" (not-proved)
+File "refinement_program_scope_seal_composed_application.ml", line 19, characters 2-28:
+19 |   val out : int{ _ = C.out }
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value out
+File "refinement_program_scope_seal_composed_application.ml", line 10, characters 6-9:
+10 |   let out : int{ _ = M.value } = M.value
+           ^^^
+  Implementation declaration for value out

@@ -1,0 +1,4 @@
+File "quotation_staging_construction_to_future.ml", line 7, characters 12-61:
+7 |   <[ ignore (() : unit{ Quotation_staging_vehicle.p = true }) ]>
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

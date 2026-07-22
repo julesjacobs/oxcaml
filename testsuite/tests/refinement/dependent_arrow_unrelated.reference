@@ -1,0 +1,6 @@
+File "dependent_arrow_unrelated.ml", line 22, characters 14-21:
+22 |   consume ~x ~witness
+                   ^^^^^^^
+Error: The value witness has type q:(q : int) -> unit{ q = other }
+       but an expression was expected of type q:(q : int) -> unit{ q = x }
+       Type unit{ q = other } is not compatible with type unit{ q = x }

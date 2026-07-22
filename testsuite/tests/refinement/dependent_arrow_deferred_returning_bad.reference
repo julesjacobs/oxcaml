@@ -1,0 +1,4 @@
+File "dependent_arrow_deferred_returning_bad.ml", line 1, characters 67-68:
+1 | let value = Dependent_arrow_deferred_provider.returning_partial ~x:2
+                                                                       ^
+Error: Refinement verification failed (disproved)

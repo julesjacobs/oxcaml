@@ -1,0 +1,4 @@
+File "quotation_staging_nonreturn_right.ml", line 7, characters 16-34:
+7 |      ( $(ignore (0 : int{ false }); <[ () ]>),
+                    ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

@@ -1,0 +1,4 @@
+File "refinement_program_scope_client_collision.ml", line 4, characters 44-50:
+4 |   Refinement_program_scope_provider.consume stable
+                                                ^^^^^^
+Error: Refinement verification failed (not-proved)

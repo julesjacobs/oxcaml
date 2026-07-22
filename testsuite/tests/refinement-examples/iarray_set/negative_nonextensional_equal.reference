@@ -1,0 +1,4 @@
+File "negative_nonextensional_equal.ml", line 27, characters 2-4:
+27 |   ()
+       ^^
+Error: Refinement verification failed (disproved)

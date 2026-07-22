@@ -1,0 +1,7 @@
+File "refinement_program_scope_qualified_domain_escape.ml", lines 1-5, characters 13-26:
+1 | .............value x =
+2 |   let module M : sig val x : int end = struct
+3 |     let x = x
+4 |   end in
+5 |   (value : int{ _ = M.x })
+Error: The refinement type refers to module M outside its scope

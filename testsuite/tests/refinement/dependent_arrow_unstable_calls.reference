@@ -1,0 +1,4 @@
+File "dependent_arrow_unstable_calls_source.ml", line 3, characters 18-37:
+3 | let generated = [%same_location_calls]
+                      ^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

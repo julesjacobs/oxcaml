@@ -1,0 +1,4 @@
+File "quotation_staging_double_cancel_bad.ml", line 5, characters 19-37:
+5 |         $($(ignore (0 : int{ false }); <[ <[ 0 ]> ]>))
+                       ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

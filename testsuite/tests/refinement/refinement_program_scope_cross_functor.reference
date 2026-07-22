@@ -1,0 +1,4 @@
+File "refinement_program_scope_cross_functor.ml", line 5, characters 29-43:
+5 | let rejected = First.consume Second.witness
+                                 ^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

@@ -1,0 +1,4 @@
+File "quotation_staging_wrapper_bad.ml", line 7, characters 4-40:
+7 |     ($(Quote.Expr.int 0) : int{ false })
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)

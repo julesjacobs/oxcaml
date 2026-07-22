@@ -1,0 +1,4 @@
+File "refinement_program_scope_cross_module.ml", line 3, characters 37-59:
+3 | let rejected = Provider.Left.consume Provider.Right.witness
+                                         ^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
