@@ -74,6 +74,9 @@ type s =
   ; sort_var_mapping : sort_map
   ; freshen_refinement_binders : bool
   ; freshen_refinement_free_refs : bool
+  ; refinement_bound_replacements :
+      (Ident.t * refinement_expression) list
+  ; refinement_bound_renamings : (Ident.t * Ident.t) list
   ; sibling_prefix : Path.t option
   ; loc : Location.t option
   ; mutable last_compose : (s * s) option (* Memoized composition *)
@@ -118,6 +121,8 @@ let identity =
   ; sort_var_mapping = Nothing
   ; freshen_refinement_binders = false
   ; freshen_refinement_free_refs = false
+  ; refinement_bound_replacements = []
+  ; refinement_bound_renamings = []
   ; sibling_prefix = None
   ; loc = None
   ; last_compose = None
@@ -210,6 +215,20 @@ let add_jkind_path id p s =
 ;;
 
 let add_jkind id p s = add_jkind_path (Pident id) p s
+
+let add_refinement_bound id replacement s =
+  { s with
+    refinement_bound_replacements =
+      (id, replacement) :: s.refinement_bound_replacements;
+    last_compose = None;
+  }
+
+let add_refinement_bound_renaming source target s =
+  { s with
+    refinement_bound_renamings =
+      (source, target) :: s.refinement_bound_renamings;
+    last_compose = None;
+  }
 
 type additional_action_config =
   | Duplicate_variables
@@ -640,6 +659,23 @@ let jkind_const_desc s ({ with_bounds = No_with_bounds } as jkind : jkind_const_
   | Layout _ -> jkind
 ;;
 
+let reserve_refinement_identities copy_scope type_ =
+  with_type_mark (fun mark ->
+    let reserve = For_copy.reserve_ident copy_scope in
+    let rec visit type_ =
+      if try_mark_node mark type_ then begin
+        begin match get_desc type_ with
+        | Tarrow ((_, _, _, binder), _, _, _) -> Option.iter reserve binder
+        | Trefine refinement ->
+          reserve refinement.ref_view.rb_id;
+          Refinement.iter_bound_identifiers reserve refinement.ref_pred
+        | _ -> ()
+        end;
+        iter_type_expr visit type_
+      end
+    in
+    visit type_)
+
 (* Similar to [Ctype.nondep_type_rec]. *)
 let rec typexp copy_scope s ty =
   let should_duplicate_vars =
@@ -775,7 +811,7 @@ let rec typexp copy_scope s ty =
               | None -> Tvariant row))
         | Tfield (_label, kind, _t1, t2) when field_kind_repr kind = Fabsent ->
           Tlink (typexp copy_scope s t2)
-        | Tarrow ((label, marg, mret), arg, ret, comm) ->
+        | Tarrow ((label, marg, mret, binder), arg, ret, comm) ->
           let marg, mret =
             match s.additional_action with
             | Prepare_for_saving { prepare_mode; _ } ->
@@ -783,9 +819,20 @@ let rec typexp copy_scope s ty =
             | _ -> marg, mret
           in
           let arg = typexp copy_scope s arg in
-          let ret = typexp copy_scope s ret in
+          let binder, ret_substitution =
+            match binder with
+            | Some binder when s.freshen_refinement_binders ->
+              For_copy.reserve_ident copy_scope binder;
+              reserve_refinement_identities copy_scope arg;
+              reserve_refinement_identities copy_scope ret;
+              let fresh = For_copy.fresh_binder copy_scope binder in
+              ( Some fresh,
+                add_refinement_bound_renaming binder fresh s )
+            | Some _ | None -> binder, s
+          in
+          let ret = typexp copy_scope ret_substitution ret in
           let comm = copy_commu comm in
-          Tarrow ((label, marg, mret), arg, ret, comm)
+          Tarrow ((label, marg, mret, binder), arg, ret, comm)
         | Trefine refinement ->
           let map_type = typexp copy_scope s in
           let map_type_path path =
@@ -809,6 +856,13 @@ let rec typexp copy_scope s ty =
                      ?sibling_prefix:s.sibling_prefix
                      ~value_path:(value_path s)
                      ~type_path:map_type_path
+                |> Refinement.rename_free_many
+                     s.refinement_bound_renamings
+                |> fun predicate ->
+                List.fold_left
+                  (fun predicate (id, replacement) ->
+                    Refinement.subst ~id ~by:replacement predicate)
+                  predicate s.refinement_bound_replacements
             }
           in
           let refinement =
@@ -829,7 +883,10 @@ let rec typexp copy_scope s ty =
             | Duplicate_variables | No_action ->
               let refinement =
                 if s.freshen_refinement_binders
-                then Refinement.freshen_desc_binders refinement
+                then
+                  Refinement.freshen_desc_binders
+                    ~fresh_binder:(For_copy.fresh_binder copy_scope)
+                    refinement
                 else refinement
               in
               (* On import from another unit, freshen the predicate's free
@@ -839,7 +896,10 @@ let rec typexp copy_scope s ty =
                  the loaded signature is cached, so the fresh stamp is stable
                  across all uses in the importing compilation. *)
               if s.freshen_refinement_free_refs
-              then Refinement.freshen_free_local_refs refinement
+              then
+                Refinement.freshen_free_local_refs
+                  ~fresh_for:(For_copy.fresh_ident copy_scope)
+                  refinement
               else refinement
           in
           Trefine refinement
@@ -883,7 +943,10 @@ let jkind copy_scope s loc jk =
 *)
 let type_expr s ty =
   let loc = Option.value s.loc ~default:Location.none in
-  For_copy.with_scope (fun copy_scope -> typexp copy_scope s loc ty)
+  For_copy.with_scope (fun copy_scope ->
+    if s.freshen_refinement_binders
+    then reserve_refinement_identities copy_scope ty;
+    typexp copy_scope s loc ty)
 ;;
 
 let label_declaration copy_scope s l =
@@ -1276,7 +1339,10 @@ let force_type_expr ty =
   Wrap.force
     (fun _ s ty ->
       let loc = Option.value s.loc ~default:Location.none in
-      For_copy.with_scope (fun copy_scope -> typexp copy_scope s loc ty))
+      For_copy.with_scope (fun copy_scope ->
+        if s.freshen_refinement_binders
+        then reserve_refinement_identities copy_scope ty;
+        typexp copy_scope s loc ty))
     ty
 ;;
 
@@ -1371,6 +1437,11 @@ and force_signature_once' scoping s sg =
   (* Components of signature may be mutually recursive (e.g. type declarations or class
      and type declarations), so first build global renaming substitution... *)
   let sg', s' = rename_bound_idents scoping s sg in
+  (* A loaded signature has already been scope-validated, so every bare local
+     refinement reference names an exported value.  The signature-wide
+     substitution above maps those references coherently; freshening them again
+     while forcing individual descriptions would split that shared identity. *)
+  let s' = { s' with freshen_refinement_free_refs = false } in
   (* ... then apply it to each signature component in turn *)
   For_copy.with_scope (fun copy_scope ->
     List.rev_map (subst_lazy_signature_item' copy_scope scoping s') sg')
@@ -1436,6 +1507,20 @@ and compose s1 s2 =
             s1.freshen_refinement_binders || s2.freshen_refinement_binders
         ; freshen_refinement_free_refs =
             s1.freshen_refinement_free_refs || s2.freshen_refinement_free_refs
+        ; refinement_bound_replacements =
+            (match s1.refinement_bound_replacements,
+                   s2.refinement_bound_replacements with
+             | [], replacements | replacements, [] -> replacements
+             | _ :: _, _ :: _ ->
+               fatal_error
+                 "compose: dependent refinement substitutions cannot compose")
+        ; refinement_bound_renamings =
+            (match s1.refinement_bound_renamings,
+                   s2.refinement_bound_renamings with
+             | [], renamings | renamings, [] -> renamings
+             | _ :: _, _ :: _ ->
+               fatal_error
+                 "compose: dependent refinement renamings cannot compose")
         ; sibling_prefix =
             (match s2.sibling_prefix with
              | Some _ as p -> p

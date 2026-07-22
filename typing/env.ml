@@ -660,6 +660,14 @@ type type_descr_kind =
 
 type type_descriptions = type_descr_kind
 
+type dependent_parameter =
+  { type_ : type_expr }
+
+type dependent_value_origin =
+  { imposed_type : type_expr option ref;
+    allow_concrete_type : bool;
+  }
+
 let in_signature_flag = 0x01
 
 type t = {
@@ -674,7 +682,11 @@ type t = {
   classes: (lock_or_stage, class_data, class_data) IdTbl.t;
   cltypes: (empty, cltype_data, cltype_data) IdTbl.t;
   functor_args: unit Ident.tbl;
-  dependent_parameters: string Ident.Map.t;
+  dependent_parameters: dependent_parameter Ident.Map.t;
+  dependent_value_origins: dependent_value_origin Ident.Map.t;
+  refinement_program_values: Ident.Set.t;
+  refinement_stable_values: Ident.Set.t;
+  refinement_signature_values: Ident.Set.t;
   jkinds : (empty, jkind_data, jkind_data) IdTbl.t;
   summary: summary;
   local_constraints: type_declaration StagedPath.Map.t;
@@ -985,6 +997,10 @@ let empty = {
   flags = 0;
   functor_args = Ident.empty;
   dependent_parameters = Ident.Map.empty;
+  dependent_value_origins = Ident.Map.empty;
+  refinement_program_values = Ident.Set.empty;
+  refinement_stable_values = Ident.Set.empty;
+  refinement_signature_values = Ident.Set.empty;
   jkinds = IdTbl.empty;
   stage = 0;
   toplevel_scope = Ident.lowest_scope
@@ -1001,13 +1017,119 @@ let in_signature b env =
 
 let is_in_signature env = env.flags land in_signature_flag <> 0
 
-let add_dependent_parameter ~label id env =
-  { env with
-    dependent_parameters = Ident.Map.add id label env.dependent_parameters;
+let enter_refinement_signature env =
+  { (in_signature true env) with
+    refinement_signature_values = Ident.Set.empty;
   }
 
-let dependent_parameter_label id env =
-  Ident.Map.find_opt id env.dependent_parameters
+let add_dependent_parameters
+      ?value_origins ?(allow_concrete_origins = false) parameters env =
+  let dependent_parameters =
+    List.fold_left
+      (fun dependent_parameters (id, type_) ->
+        Ident.Map.add id { type_ } dependent_parameters)
+      env.dependent_parameters parameters
+  in
+  let value_origins = Option.value value_origins ~default:parameters in
+  let origin =
+    { imposed_type = ref None;
+      allow_concrete_type = allow_concrete_origins;
+    }
+  in
+  let dependent_value_origins =
+    List.fold_left
+      (fun dependent_value_origins (id, _) ->
+        Ident.Map.add id origin dependent_value_origins)
+      env.dependent_value_origins value_origins
+  in
+  { env with dependent_parameters; dependent_value_origins }
+
+let add_dependent_parameter ~type_ id env =
+  add_dependent_parameters [id, type_] env
+
+let enter_dependent_value_scope env =
+  { env with dependent_value_origins = Ident.Map.empty }
+
+let has_dependent_value_origin id env =
+  Ident.Map.mem id env.dependent_value_origins
+
+let dependent_value_origin_identifiers id env =
+  match Ident.Map.find_opt id env.dependent_value_origins with
+  | None -> []
+  | Some origin ->
+    Ident.Map.fold
+      (fun candidate candidate_origin identifiers ->
+        if candidate_origin == origin
+        then candidate :: identifiers
+        else identifiers)
+      env.dependent_value_origins []
+
+let dependent_value_origin_allows_concrete_type id env =
+  match Ident.Map.find_opt id env.dependent_value_origins with
+  | None -> false
+  | Some origin -> origin.allow_concrete_type
+
+let dependent_value_imposed_type id env =
+  Option.bind
+    (Ident.Map.find_opt id env.dependent_value_origins)
+    (fun origin -> !(origin.imposed_type))
+
+let set_dependent_value_imposed_type id type_ env =
+  match Ident.Map.find_opt id env.dependent_value_origins with
+  | None -> false
+  | Some origin ->
+    origin.imposed_type := Some type_;
+    true
+
+let copy_dependent_value_origin ~source_env ~source ~alias env =
+  match Ident.Map.find_opt source source_env.dependent_value_origins with
+  | None -> env
+  | Some origin ->
+    { env with
+      dependent_value_origins =
+        Ident.Map.add alias origin env.dependent_value_origins;
+    }
+
+let dependent_parameter_ids env =
+  Ident.Map.fold (fun id _ ids -> id :: ids) env.dependent_parameters []
+
+let dependent_parameter_bindings env =
+  Ident.Map.fold
+    (fun id parameter bindings -> (id, parameter.type_) :: bindings)
+    env.dependent_parameters []
+  |> List.rev
+
+let add_refinement_program_values ids env =
+  { env with
+    refinement_program_values =
+      List.fold_left
+        (fun values id -> Ident.Set.add id values)
+        env.refinement_program_values ids;
+  }
+
+let add_refinement_stable_values ids env =
+  { env with
+    refinement_stable_values =
+      List.fold_left
+        (fun values id -> Ident.Set.add id values)
+        env.refinement_stable_values ids;
+  }
+
+let add_refinement_signature_values ids env =
+  { env with
+    refinement_signature_values =
+      List.fold_left
+        (fun values id -> Ident.Set.add id values)
+        env.refinement_signature_values ids;
+  }
+
+let refinement_program_scope env = env.refinement_program_values
+
+let is_refinement_stable_value id env =
+  Ident.Set.mem id env.refinement_stable_values
+
+let is_refinement_signature_value id env =
+  Ident.Set.mem id env.refinement_signature_values
 
 let has_local_constraints env =
   not (StagedPath.Map.is_empty env.local_constraints)
@@ -1739,6 +1861,11 @@ let find_value_no_locks_exn id env =
   | Val_bound data, [] -> Normalize_mode.vda Normalize data
   | Val_unbound _, _ -> raise Not_found
 
+let find_value_definition_exn id env =
+  match IdTbl.find_same_without_locks id env.values with
+  | Val_bound data -> Normalize_mode.vda Normalize data
+  | Val_unbound _ -> raise Not_found
+
 let find_class path env =
   (find_class_full path env).clda_declaration
 
@@ -2288,6 +2415,15 @@ let find_shadowed_types path env =
 (* Given a signature and a root path, prefix all idents in the signature
    by the root path and build the corresponding substitution. *)
 
+let validate_refinement_signature signature =
+  match Vox_scope.validate_signature signature with
+  | Ok () -> ()
+  | Error identifier ->
+    Location.raise_errorf
+      "The exported signature contains refinement identifier %s, which is \
+       not a visible exported value"
+      (Ident.name identifier)
+
 let prefix_idents root prefixing_sub sg =
   let open Subst.Lazy in
   let rec prefix_idents root items_and_paths prefixing_sub =
@@ -2296,7 +2432,9 @@ let prefix_idents root prefixing_sub sg =
     | Sig_value(id, _, _) as item :: rem ->
       let p = Pdot(root, Ident.name id) in
       prefix_idents root
-        ((item, p) :: items_and_paths) prefixing_sub rem
+        ((item, p) :: items_and_paths)
+        (Subst.add_value id p prefixing_sub)
+        rem
     | Sig_type(id, td, rs, vis) :: rem ->
       let p = Pdot(root, Ident.name id) in
       prefix_idents root
@@ -2343,7 +2481,10 @@ let prefix_idents root prefixing_sub sg =
         rem
   in
   let sg = Subst.Lazy.force_signature_once sg in
-  prefix_idents root [] prefixing_sub sg
+  let items_and_paths, prefixing_sub =
+    prefix_idents root [] prefixing_sub sg
+  in
+  items_and_paths, prefixing_sub
 
 (* Compute structure descriptions *)
 
@@ -2440,7 +2581,15 @@ let rec components_of_module_maker
             in
             c.comp_values <- NameMap.add (Ident.name id) vda c.comp_values;
         | Sig_type(id, decl, _, _) ->
-            let final_decl = Subst.type_declaration sub decl in
+            (* A refinement can be hidden behind a type alias just as it can
+               appear directly in a value description.  Qualify sibling
+               references in the alias manifest when projecting the signature,
+               so expanding [M.law] later still refers to [M.p] rather than to
+               an unrelated bare [p]. *)
+            let final_decl =
+              Subst.type_declaration
+                (Subst.with_sibling_prefix cm_path sub) decl
+            in
             Btype.set_static_row_name final_decl
               (Subst.type_path sub (Path.Pident id));
             let store_decl path final_decl =
@@ -3350,6 +3499,7 @@ let persistent_structures_of_dir dir =
 (* Save a signature to a file *)
 let save_signature_with_transform cmi_transform ~alerts (sg, staticity) modname
       kind cmi_info =
+  validate_refinement_signature sg;
   Btype.cleanup_abbrev ();
   Subst.reset_additional_action_id ();
   let sg = Subst.Lazy.of_signature sg
@@ -4341,6 +4491,10 @@ let add_components slot root env0 comps (locks : locks) =
     cltypes;
     functor_args = env0.functor_args;
     dependent_parameters = env0.dependent_parameters;
+    dependent_value_origins = env0.dependent_value_origins;
+    refinement_program_values = env0.refinement_program_values;
+    refinement_stable_values = env0.refinement_stable_values;
+    refinement_signature_values = env0.refinement_signature_values;
     jkinds;
     summary = Env_open(env0.summary, root);
     local_constraints = env0.local_constraints;

@@ -43,31 +43,21 @@
  compiler_reference = "${test_source_directory}/cup_neg_captured.reference";
  check-ocamlc.byte-output;
 
- (* Accepted incompleteness: a TRUE cross-unit dependent claim is left opaque
-    (dependent results are not argument-substituted) and does not prove. *)
+ (* A true cross-unit dependent claim is instantiated at the supplied
+    argument. *)
  module = "cup_incomplete.ml";
- compiler_output = "cup_incomplete.output";
- ocamlc.byte;
- compiler_reference = "${test_source_directory}/cup_incomplete.reference";
- check-ocamlc.byte-output;
-
- (* Alias edge (known accepted limitation): the same dangling parameter freshened
-    via two import routes no longer unifies -- a fail-closed rigid clash.  Assert
-    by exit status only; the clash message embeds build-varying fresh stamps. *)
  ocamlc_byte_exit_status = "0";
+ ocamlc.byte;
+
+ (* Re-exporting the same binder through an alias preserves its identity. *)
  module = "cup_reexport.ml";
  ocamlc.byte;
 
  module = "cup_alias_clash.ml";
- ocamlc_byte_exit_status = "2";
  ocamlc.byte;
 *)
 
-(* Cross-unit dependent-result refinement regression.  A separately compiled
-   provider exports functions whose result refinement mentions a parameter, a
-   sibling, or a captured local -- all lowered as free local Pidents that could,
-   pre-fix, collide with a caller-local binder (a soundness hole) and that a
-   naive argument-substitution heuristic could not tell apart (a second hole).
-   Foreign parameter references are freshened to opaque symbols on import: false
-   claims are fail-closed rejected through every path, and dependent cross-unit
-   results are soundly opaque (accepted incompleteness). *)
+(* Cross-unit dependent-result regression.  Arrow-bound references are
+   freshened coherently on import and remain distinct from sibling and captured
+   references: false claims reject, while true dependent results instantiate at
+   applications. *)

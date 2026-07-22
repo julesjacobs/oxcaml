@@ -270,6 +270,17 @@ module Core_inclusion = struct
   let value_descriptions ~loc env ~direction subst id ~mmodes vd1 vd2 =
     if Directionality.mark_as_used direction then Env.mark_value_used vd1.val_uid;
     let vd2 = Subst.value_description subst vd2 in
+    let validate side value =
+      match Vox_dependent.validate_scopes value.val_type with
+      | Ok () -> ()
+      | Error binder ->
+        Location.raise_errorf ~loc:value.val_loc
+          "%s type for value %s has dependent refinement binder %s outside \
+           its unique scope"
+          side (Ident.name id) (Ident.unique_name binder)
+    in
+    validate "Implementation" vd1;
+    validate "Interface" vd2;
     let swapped = Directionality.is_negative direction in
     let implementation_location, interface_location =
       if swapped then vd2.val_loc, vd1.val_loc else vd1.val_loc, vd2.val_loc

@@ -943,6 +943,29 @@ let rec extract_params styp =
       (l, arg_mode, a) :: params, ret, ret_mode
   | _ -> assert false
 
+let refinement_alias_attribute = "vox2.refinement.alias"
+
+let refinement_named_type styp =
+  match styp.ptyp_desc with
+  | Ptyp_extension ({ txt; _ }, PTyp type_)
+    when String.starts_with ~prefix:"vox2.refinement.named." txt ->
+      let prefix_length = String.length "vox2.refinement.named." in
+      let aliases =
+        List.filter_map
+          (fun attribute ->
+            match attribute.attr_name.txt, attribute.attr_payload with
+            | name, PTyp { ptyp_desc = Ptyp_var (alias, None); _ }
+              when String.equal name refinement_alias_attribute ->
+              Some alias
+            | _ -> None)
+          styp.ptyp_attributes
+      in
+      Some
+        ( String.sub txt prefix_length (String.length txt - prefix_length),
+          aliases,
+          type_ )
+  | _ -> None
+
 let check_arg_type styp =
   if not (Language_extension.is_enabled Polymorphic_parameters) then begin
     match styp.ptyp_desc with
@@ -1067,10 +1090,10 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
         iterator.typ iterator core_type;
         !found
       in
-      let add_dependent_parameter env label type_ loc ~in_refinement =
-        match label, in_refinement with
-        | _, false -> env
-        | Types.Labelled name, true ->
+      let add_dependent_parameter env name type_ loc =
+        match name with
+        | None -> env, None
+        | Some name ->
           let id = Ident.create_local name in
           let sort =
             match
@@ -1100,15 +1123,49 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
                 logicality = Mode.Logicality.Const.Logical;
               }
           in
-          Env.add_value ~mode id description env
-          |> Env.add_dependent_parameter ~label:name id
-        | (Types.Nolabel | Types.Optional _ | Types.Position _), true -> env
+          let crossing =
+            Ctype.type_jkind_purely env type_
+            |> Ctype.crossing_of_jkind_principal env
+          in
+          let logicality =
+            Mode.Crossing.proj
+              (Mode.Crossing.Axis.Monadic Mode.Axis.Logicality)
+              crossing
+          in
+          let mode = Mode.Value.disallow_right mode in
+          let mode =
+            if
+              Mode.Crossing.Per_axis.equal
+                (Mode.Crossing.Axis.Monadic Mode.Axis.Logicality)
+                logicality
+                (Mode.Crossing.Per_axis.min
+                   (Mode.Crossing.Axis.Monadic Mode.Axis.Logicality))
+            then Mode.Crossing.apply_left crossing mode
+            else mode
+          in
+          ( Env.add_value ~mode id description env
+            |> Env.add_dependent_parameter ~type_ id,
+            Some id )
       in
       let rec loop env acc_mode args =
         match args with
         | (l, arg_mode, arg) :: rest ->
           check_arg_type arg;
+          let explicit_binder, binder_aliases, arg =
+            match refinement_named_type arg with
+            | Some (name, aliases, type_) -> Some name, aliases, type_
+            | None -> None, [], arg
+          in
           let l = transl_label l (Some arg) in
+          begin match explicit_binder, l with
+          | Some _, (Types.Optional _ | Types.Position _) ->
+            Location.raise_errorf ~loc:arg.ptyp_loc
+              "a dependent binder is not supported on an optional or \
+               position parameter"
+          | (None | Some _),
+            (Types.Nolabel | Types.Labelled _)
+          | None, (Types.Optional _ | Types.Position _) -> ()
+          end;
           let arg_cty =
             if Btype.is_position l then
               ctyp Ttyp_call_pos (newconstr Predef.path_lexing_position [])
@@ -1127,12 +1184,62 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
                  (fun (_, _, argument) -> contains_refinement argument)
                  rest
           in
-          let result_env =
-            add_dependent_parameter env l arg_cty.ctyp_type arg.ptyp_loc
-              ~in_refinement
+          let binder_name =
+            match explicit_binder, l, in_refinement with
+            | Some name, _, _ -> Some name
+            | None, Types.Labelled name, true -> Some name
+            | None,
+              (Types.Nolabel | Types.Labelled _ | Types.Optional _
+              | Types.Position _),
+              _ -> None
+          in
+          let result_env, arrow_binder =
+            add_dependent_parameter env binder_name arg_cty.ctyp_type
+              arg.ptyp_loc
+          in
+          let result_env, alias_binders =
+            List.fold_left
+              (fun (env, binders) alias ->
+                let env, binder =
+                  add_dependent_parameter env (Some alias) arg_cty.ctyp_type
+                    arg.ptyp_loc
+                in
+                match binder with
+                | Some binder -> env, binder :: binders
+                | None -> assert false)
+              (result_env, []) binder_aliases
           in
           let ret_cty = loop result_env acc_mode rest in
+          let ret_cty =
+            match arrow_binder, alias_binders with
+            | Some binder, _ :: _ ->
+              let ctyp_type =
+                List.fold_left
+                  (fun result alias ->
+                    Vox_dependent.rename
+                      ~binder:alias ~as_:binder result)
+                  ret_cty.ctyp_type alias_binders
+              in
+              { ret_cty with ctyp_type }
+            | (None | Some _), [] -> ret_cty
+            | None, _ :: _ -> assert false
+          in
+          let arrow_binder =
+            match arrow_binder with
+            | Some binder
+              when Vox_dependent.mentions binder ret_cty.ctyp_type ->
+              Some binder
+            | None | Some _ -> None
+          in
           let arg_ty = arg_cty.ctyp_type in
+          begin match arrow_binder with
+          | Some _
+            when Btype.is_Tpoly arg_ty && not (Btype.tpoly_is_mono arg_ty) ->
+            Location.raise_errorf ~loc:arg.ptyp_loc
+              "a dependent binder is not supported on a polymorphic \
+               parameter"
+          | None | Some _ -> ()
+          end;
           let arg_ty =
             if Btype.is_Tpoly arg_ty then arg_ty else newmono arg_ty
           in
@@ -1147,7 +1254,9 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           in
           let arg_mode_desc = Alloc.of_const arg_mode.mode_modes in
           let ret_mode_desc = Alloc.of_const ret_mode.mode_modes in
-          let arrow_desc = (l, arg_mode_desc, ret_mode_desc) in
+          let arrow_desc =
+            l, arg_mode_desc, ret_mode_desc, arrow_binder
+          in
           let ty =
             newty (Tarrow(arrow_desc, arg_ty, ret_cty.ctyp_type, commu_ok))
           in
@@ -1178,6 +1287,10 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
                (List.map (fun (label, ctyp) -> label, ctyp.ctyp_type) tl))
     in
     ctyp (Ttyp_unboxed_tuple tl) ctyp_type
+  | Ptyp_extension ({ txt; _ }, PTyp _)
+    when String.starts_with ~prefix:"vox2.refinement.named." txt ->
+      Location.raise_errorf ~loc
+        "a named type is only meaningful as a function parameter"
   | Ptyp_constr(lid, stl) ->
       let (path, decl) = Env.lookup_type ~loc:lid.loc lid.txt env in
       let stl =

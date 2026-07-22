@@ -266,9 +266,23 @@ and exp_extra =
                     Parsetree.jkind_annotation option * Uid.t
   | Texp_stack
   | Texp_mode of Mode.Alloc.Const.Option.t modes
+  | Texp_refinement_application of refinement_application
+  | Texp_refinement_constraint of type_expr
   | Texp_inspected_type of [ `exp ] type_inspection
   | Texp_borrowed
   | Texp_ghost_region
+
+and refinement_application_argument =
+  { rap_domain : type_expr;
+    rap_binder : Ident.t option;
+    rap_supplied : bool;
+    rap_subject : refinement_expression option;
+  }
+
+and refinement_application =
+  { rapp_arguments : refinement_application_argument list;
+    rapp_result : type_expr;
+  }
 
 and arg_label = Types.arg_label =
   | Nolabel

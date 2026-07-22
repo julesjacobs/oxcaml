@@ -28,12 +28,6 @@
  ocamlc.byte;
  compiler_reference = "${test_source_directory}/seal_precondition.reference";
  check-ocamlc.byte-output;
- flags = "-i -vox-backend z3 \
-          -vox-smt-solver \
-            '/j/office/app/z3/prod/4.8.5/install/bin/z3 -in'";
- compiler_output = "seal_precondition_z3.output";
- ocamlc.byte;
- check-ocamlc.byte-output;
  module = "seal_precondition_strict.mli";
  flags = "";
  compiler_output = "seal_precondition_strict_mli.output";

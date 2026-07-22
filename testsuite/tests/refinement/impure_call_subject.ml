@@ -14,7 +14,7 @@ let bad = equal_pair (next ()) (next ())
 [%%expect {|
 val counter : int ref = {contents = 0}
 val next : unit -> int = <fun>
-val equal_pair : int -> int{ _ = x } -> int * int = <fun>
+val equal_pair : (x : int) -> int{ _ = x } -> int * int = <fun>
 Line 9, characters 31-40:
 9 | let bad = equal_pair (next ()) (next ())
                                    ^^^^^^^^^
@@ -25,7 +25,7 @@ let[@vox.def] pure_succ x = x + 1
 let good = equal_pair (pure_succ 0) (pure_succ 0)
 [%%expect {|
 val pure_succ : int -> int = <fun>
-val pure_succ_def : int @ total -> unit{ pure_succ x = x + 1 } = <fun>
+val pure_succ_def : (x : int) -> unit{ pure_succ x = x + 1 } = <fun>
 val good : int * int = (1, 1)
 |}]
 

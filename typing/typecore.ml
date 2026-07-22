@@ -1501,10 +1501,7 @@ let proper_exp_loc exp =
   in
   aux exp.exp_extra
 
-(** [sexp] is used by error messages to report literals in their
-    original formatting *)
-let unify_exp ~sexp env exp expected_ty =
-  let loc = proper_exp_loc exp in
+let weaken_refinement_occurrence exp expected_ty =
   (* A refined value used where a bare (unrefined) type is expected may drop its
      refinement to the skeleton: the covariant use direction, where forgetting
      the predicate is sound.  This is the sanctioned expected-type weakening.
@@ -1523,6 +1520,13 @@ let unify_exp ~sexp env exp expected_ty =
       end
     | _ -> exp
   in
+  exp
+
+(** [sexp] is used by error messages to report literals in their
+    original formatting *)
+let unify_exp ~sexp env exp expected_ty =
+  let exp = weaken_refinement_occurrence exp expected_ty in
+  let loc = proper_exp_loc exp in
   try
     unify_exp_types loc env exp.exp_type expected_ty
   with Error(loc, env, Expr_type_clash(err, tfc, None)) ->
@@ -1756,45 +1760,92 @@ let iter_pattern_variables_type_mut ~f_immut ~f_mut pvs =
     | Val_mut _ -> f_mut pv_type
     | _ -> f_immut pv_lpoly pv_type) pvs
 
-let refinement_skeleton type_ =
+let expand_head_for_refinement env type_ =
+  let snapshot = Btype.snapshot () in
+  match Ctype.expand_head env type_ with
+  | expanded ->
+    let expanded = Ctype.duplicate_type expanded in
+    Btype.backtrack snapshot;
+    expanded
+  | exception exn ->
+    Btype.backtrack snapshot;
+    raise exn
+
+let refinement_alias_cache : bool Path.Tbl.t = Path.Tbl.create 31
+
+let type_may_reveal_refinement env type_ =
+  with_type_mark (fun mark ->
+    let seen_paths = ref Path.Set.empty in
+    let rec visit type_ =
+      if not (try_mark_node mark type_) then false
+      else
+        match get_desc type_ with
+        | Trefine _ -> true
+        | Tconstr (path, arguments, _) ->
+          List.exists visit arguments || visit_path path
+        | _ ->
+          let found = ref false in
+          iter_type_expr (fun child -> if visit child then found := true) type_;
+          !found
+    and visit_path path =
+      let compute () =
+        if Path.Set.mem path !seen_paths then false
+        else begin
+          seen_paths := Path.Set.add path !seen_paths;
+          match (Env.find_type path env).type_manifest with
+          | Some manifest -> visit manifest
+          | None -> false
+          | exception Not_found -> false
+        end
+      in
+      if Env.has_local_constraints env then compute ()
+      else
+        match Path.Tbl.find_opt refinement_alias_cache path with
+        | Some result -> result
+        | None ->
+          let result = compute () in
+          Path.Tbl.replace refinement_alias_cache path result;
+          result
+    in
+    visit type_)
+
+let refinement_skeleton env type_ =
   match get_desc type_ with
   | Trefine { ref_skeleton; _ } -> ref_skeleton
+  | Tconstr _ when type_may_reveal_refinement env type_ ->
+    begin match get_desc (expand_head_for_refinement env type_) with
+    | Trefine { ref_skeleton; _ } -> ref_skeleton
+    | _ -> type_
+    end
   | _ -> type_
 
-let type_contains_refinement type_ =
-  with_type_mark (fun mark ->
-    let found = ref false in
-    let rec visit type_ =
-      if not !found && try_mark_node mark type_ then
-        match get_desc type_ with
-        | Trefine _ -> found := true
-        | _ -> iter_type_expr visit type_
-    in
-    visit type_;
-    !found)
+let type_contains_refinement env type_ =
+  type_may_reveal_refinement env type_
 
 let add_pattern_variables ?check ?check_as ?(strip_refinement = false) env pv =
-  List.fold_right
-    (fun {pv_id; pv_mode; pv_value_kind; pv_type; pv_loc; pv_kind;
-          pv_attributes; pv_uid; pv_lpoly} env ->
-       let check = if pv_kind=As_var then check_as else check in
-       let pv_type =
-         if not strip_refinement
-         then pv_type
-         else
-           match pv_value_kind with
-           | Val_mut _ -> pv_type
-           | _ -> refinement_skeleton pv_type
-       in
-       Env.add_value ?check ~mode:pv_mode pv_id
-         {val_type = pv_type; val_kind = pv_value_kind; val_lpoly = pv_lpoly;
-          Types.val_loc = pv_loc;
-          val_attributes = pv_attributes; val_modalities = Modality.undefined;
-          val_zero_alloc = Zero_alloc.default;
-          val_uid = pv_uid
-         } env
-    )
-    pv env
+  let env =
+    List.fold_right
+      (fun {pv_id; pv_mode; pv_value_kind; pv_type; pv_loc; pv_kind;
+            pv_attributes; pv_uid; pv_lpoly} env ->
+         let check = if pv_kind=As_var then check_as else check in
+         let pv_type =
+           if not strip_refinement
+           then pv_type
+           else
+             match pv_value_kind with
+             | Val_mut _ -> pv_type
+             | _ -> refinement_skeleton env pv_type
+         in
+         Env.add_value ?check ~mode:pv_mode pv_id
+           {val_type = pv_type; val_kind = pv_value_kind; val_lpoly = pv_lpoly;
+            Types.val_loc = pv_loc;
+            val_attributes = pv_attributes; val_modalities = Modality.undefined;
+            val_zero_alloc = Zero_alloc.default;
+            val_uid = pv_uid
+           } env)
+      pv env
+  in
+  Env.add_refinement_program_values (List.map (fun pv -> pv.pv_id) pv) env
 
 let add_module_variables env module_variables =
   let module_variables_as_list =
@@ -4766,9 +4817,16 @@ let check_unused
     compilation unit or toplevel phrase *)
 let delayed_checks = ref []
 let refinement_predicate_context = ref false
+let refinement_imposition_inferred_head = ref None
 let reset_delayed_checks () = delayed_checks := []
 let add_delayed_check f =
   delayed_checks := (f, Warnings.backup ()) :: !delayed_checks
+
+let with_refinement_imposition_inferred_head expression f =
+  let previous = !refinement_imposition_inferred_head in
+  refinement_imposition_inferred_head := Some expression;
+  Fun.protect f ~finally:(fun () ->
+    refinement_imposition_inferred_head := previous)
 
 let force_delayed_checks () =
   (* checks may change type levels *)
@@ -4820,6 +4878,8 @@ let rec final_subexpression exp =
     -> final_subexpression e
   | _ -> exp
 
+let refinement_logical_type = Vox_dependent.logical_type
+
 let is_prim ~name funct =
   match funct.exp_desc with
   | Texp_ident { desc = {val_kind=Val_prim{Primitive.prim_name; _}};
@@ -4833,7 +4893,7 @@ let rec list_labels_aux env visited ls ty_fun =
   if TypeSet.mem ty visited then
     List.rev ls, false
   else match get_desc ty with
-    | Tarrow ((l,_,_), _, ty_res, _) ->
+    | Tarrow ((l,_,_,_), _, ty_res, _) ->
         list_labels_aux env (TypeSet.add ty visited) (l::ls) ty_res
     | _ ->
         List.rev ls, is_Tvar ty
@@ -4855,6 +4915,7 @@ type untyped_apply_arg =
       { sarg : Parsetree.expression;
         ty_arg : type_expr;
         ty_arg0 : type_expr;
+        binder : Ident.t option;
         sort_arg : Jkind.sort;
         commuted : bool;
         mode_fun : Alloc.lr;
@@ -4874,6 +4935,7 @@ type untyped_apply_arg =
   | Unknown_arg of
       { sarg : Parsetree.expression;
         ty_arg_mono : type_expr;
+        binder : Ident.t option;
         sort_arg : Jkind.sort;
         mode_fun : Alloc.lr;
         mode_arg : Alloc.lr}
@@ -4900,6 +4962,7 @@ type untyped_apply_arg =
 type untyped_omitted_param =
   { mode_fun: Alloc.lr;
     ty_arg : type_expr;
+    binder : Ident.t option;
     mode_arg : Alloc.lr;
     level: int;
     sort_arg : Jkind.sort }
@@ -5035,9 +5098,18 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
              let closed_args = mode_arg :: closed_args in
              (ty_ret, mode_ret, closed_args)
          | Arg (Eliminated_optional_arg
-                  { mode_fun; ty_arg; mode_arg; level; _ })
-         | Omitted { mode_fun; ty_arg; mode_arg; level } ->
-             let arrow_desc = lbl, mode_arg, mode_ret in
+                  { mode_fun; ty_arg; mode_arg; level; _ }) ->
+             let arrow_desc = lbl, mode_arg, mode_ret, None in
+             let ty_ret =
+               newty2 ~level
+                 (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
+             in
+             let mode_ret, _ =
+               Alloc.newvar_above (Alloc.join (mode_fun :: closed_args))
+             in
+             (ty_ret, mode_ret, closed_args)
+         | Omitted { mode_fun; ty_arg; binder; mode_arg; level } ->
+             let arrow_desc = lbl, mode_arg, mode_ret, binder in
              let ty_ret =
                newty2 ~level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
@@ -5081,7 +5153,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
     match sargs with
     | [] -> ty_fun, mode_fun, List.rev rev_args
     | (lbl, sarg) :: rest ->
-        let (sort_arg, mode_arg, ty_arg_mono, mode_ret, ty_res) =
+        let (sort_arg, mode_arg, ty_arg_mono, binder, mode_ret, ty_res) =
           let ty_fun = expand_head env ty_fun in
           match get_desc ty_fun with
           | Tvar { jkind; _ } ->
@@ -5099,7 +5171,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                   Warnings.Ignored_extra_argument;
               let mode_arg = Alloc.newvar () in
               let mode_ret = Alloc.newvar () in
-              let kind = (lbl, mode_arg, mode_ret) in
+              let kind = (lbl, mode_arg, mode_ret, None) in
               begin try
                 unify env ty_fun
                   (newty (Tarrow(kind,ty_arg,ty_res,commu_var ())));
@@ -5117,8 +5189,8 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                             Impossible_function_jkind
                               { some_args_ok; ty_fun; jkind }))
               end;
-              (sort_arg, mode_arg, ty_arg_mono, mode_ret, ty_res)
-        | Tarrow ((l, mode_arg, mode_ret), ty_arg, ty_res, _)
+              (sort_arg, mode_arg, ty_arg_mono, None, mode_ret, ty_res)
+        | Tarrow ((l, mode_arg, mode_ret, binder), ty_arg, ty_res, _)
           when labels_match ~param:l ~arg:lbl ->
             let sort_arg =
               match
@@ -5128,7 +5200,8 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
               | Error err -> raise(Error(funct.exp_loc, env,
                                          Function_type_not_rep (ty_arg,err)))
             in
-            (sort_arg, mode_arg, tpoly_get_mono ty_arg, mode_ret, ty_res)
+            ( sort_arg, mode_arg, tpoly_get_mono ty_arg, binder,
+              mode_ret, ty_res )
         | td ->
             let ty_fun = match td with Tarrow _ -> newty td | _ -> ty_fun in
             let ty_res =
@@ -5150,7 +5223,8 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                     extra_arg_loc = sarg.pexp_loc; }))
         in
         let arg =
-          Unknown_arg { sarg; ty_arg_mono; mode_fun; mode_arg; sort_arg }
+          Unknown_arg
+            { sarg; ty_arg_mono; binder; mode_fun; mode_arg; sort_arg }
         in
         loop ty_res mode_ret ((lbl, Arg arg) :: rev_args) rest
   in
@@ -5177,8 +5251,21 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
     let lopt =
       match get_desc ty_fun', get_desc (expand_head env ty_fun0) with
       | Tarrow (ad, ty_arg, ty_ret, com),
-        Tarrow (_, ty_arg0, ty_ret0, _)
+        Tarrow ((_, _, _, binder0), ty_arg0, ty_ret0, _)
         when is_commu_ok com ->
+          let binder =
+            let _, _, _, binder = ad in
+            binder
+          in
+          let ty_ret0 =
+            match binder, binder0 with
+            | Some binder, Some binder0 ->
+              Vox_dependent.rename ~binder:binder0 ~as_:binder ty_ret0
+            | None, None -> ty_ret0
+            | (None, Some _) | (Some _, None) ->
+              Location.raise_errorf ~loc:funct.exp_loc
+                "incompatible dependent arrow binders"
+          in
           Some (ad, `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0))
       | _ -> None
     in
@@ -5194,7 +5281,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
         ret_tvar
     | Some (ad, arrow_kind) ->
       begin
-        let (l, mode_arg, mode_ret) = ad in
+        let (l, mode_arg, mode_ret, binder) = ad in
         let name = label_name l
         and optional = is_optional l
         and omittable = is_omittable l in
@@ -5262,12 +5349,16 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                     may_warn sarg.pexp_loc
                       (not_principal "using an optional argument here");
                   Arg (Known_arg
-                    { sarg; ty_arg; ty_arg0; commuted; sort_arg;
+                    { sarg; ty_arg; ty_arg0; binder; commuted; sort_arg;
                       mode_fun; mode_arg; wrapped_in_some })
               | None ->
                 if omittable && List.mem_assoc Nolabel sargs then begin
                   may_warn funct.exp_loc (Warnings.Non_principal_labels
                                             "eliminated omittable argument");
+                  if Option.is_some binder then
+                    Location.raise_errorf ~loc:funct.exp_loc
+                      "a dependent optional or position parameter cannot be \
+                       eliminated";
                   Arg (Eliminated_optional_arg
                          { mode_fun; ty_arg; mode_arg
                          ; sort_arg; level = lv; expected_label = l})
@@ -5276,7 +5367,9 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                      over it. *)
                   may_warn funct.exp_loc
                     (Warnings.Non_principal_labels "commuted an argument");
-                  Omitted { mode_fun; ty_arg; mode_arg; level = lv; sort_arg }
+                  Omitted
+                    { mode_fun; ty_arg; binder; mode_arg; level = lv;
+                      sort_arg }
                 end
             in
             loop ty_ret ty_ret0 mode_ret ((l, arg) :: rev_args) remaining_sargs
@@ -5284,19 +5377,119 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
   in
   loop ty_fun ty_fun0 mode_fun [] sargs
 
+let application_domain_refinement type_ =
+  let rec loop type_ =
+    match get_desc type_ with
+    | Trefine refinement -> Some refinement
+    | Tpoly (type_, _) -> loop type_
+    | _ -> None
+  in
+  loop type_
+
+let refinement_false ~loc =
+  Refinement.create ~loc ~type_:Predef.type_bool
+    (Rexp_construct
+       ( { rconstr_type_path = Predef.path_bool;
+           rconstr_name = "false";
+         },
+         [] ))
+
+let conjoin_refinement_predicates env left right =
+  let loc = right.rexp_loc in
+  let fallback () =
+    Refinement.create ~loc ~type_:Predef.type_bool
+      (Rexp_ifthenelse (left, right, Some (refinement_false ~loc)))
+  in
+  match Env.find_value_by_name (Longident.Lident "&&") env with
+  | exception Not_found -> fallback ()
+  | path, description ->
+    begin match description.val_kind with
+    | Val_prim primitive when String.equal primitive.prim_name "%sequand" ->
+      let function_ =
+        Refinement.create ~loc ~type_:description.val_type
+          (Rexp_ident (Rfree (Rapp path)))
+      in
+      Refinement.create ~loc ~type_:Predef.type_bool
+        (Rexp_apply (function_, [Nolabel, left; Nolabel, right]))
+    | _ -> fallback ()
+    end
+
+let strengthen_omitted_domain env ~binder ~goal domain =
+  let rec strengthen domain =
+    let level = get_level domain in
+    match get_desc domain with
+    | Tpoly (body, variables) ->
+      newty2 ~level (Tpoly (strengthen body, variables))
+    | Trefine refinement ->
+      let view =
+        Refinement.create ~loc:goal.rexp_loc
+          ~type_:refinement.ref_view.rb_type
+          (Rexp_ident (Rbound refinement.ref_view.rb_id))
+      in
+      let goal = Refinement.subst ~id:binder ~by:view goal in
+      let ref_pred =
+        conjoin_refinement_predicates env refinement.ref_pred goal
+      in
+      newty2 ~level (Trefine { refinement with ref_pred })
+    | _ ->
+      let view_type = Vox_dependent.logical_type domain in
+      let view_id = Ident.create_local (Ident.name binder) in
+      let ref_view = { rb_id = view_id; rb_type = view_type } in
+      let view =
+        Refinement.create ~loc:goal.rexp_loc ~type_:view_type
+          (Rexp_ident (Rbound view_id))
+      in
+      let ref_pred = Refinement.subst ~id:binder ~by:view goal in
+      newty2 ~level
+        (Trefine { ref_skeleton = domain; ref_view; ref_pred })
+  in
+  strengthen domain
+
 (* See Note [Type-checking applications] for an overview *)
 let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
-      mode_ret args =
-  let ty_ret, mode_ret, _, _, args =
+      mode_ret args contracts deferred_goals =
+  let arguments_and_contracts = List.combine args contracts in
+  let ty_ret, mode_ret, _, _, pending, args, contracts =
     List.fold_left
-      (fun (ty_ret, mode_ret, open_args, closed_args, args) (lbl, arg, sch) ->
+      (fun (ty_ret, mode_ret, open_args, closed_args, pending, args, contracts)
+           ((lbl, arg, sch), contract) ->
          match arg with
          | Arg (exp, marg, sort) ->
              let open_args = (exp, marg) :: open_args in
              let args = (lbl, Arg (exp, sort), sch) :: args in
-             (ty_ret, mode_ret, open_args, closed_args, args)
-         | Omitted { mode_fun; ty_arg; mode_arg; level; sort_arg } ->
-             let arrow_desc = (lbl, mode_arg, mode_ret) in
+             ( ty_ret, mode_ret, open_args, closed_args, pending, args,
+               contract :: contracts )
+         | Omitted
+             { mode_fun; ty_arg; binder; mode_arg; level; sort_arg } ->
+             let selected, pending =
+               match binder with
+               | None -> [], pending
+               | Some binder ->
+                 List.partition
+                   (fun goal ->
+                     Ident.Set.mem binder
+                       (Refinement.free_bound_identifiers goal))
+                   pending
+             in
+             let ty_arg =
+               match binder with
+               | None -> ty_arg
+               | Some binder ->
+                 List.fold_left
+                   (fun domain goal ->
+                     strengthen_omitted_domain env ~binder ~goal domain)
+                   ty_arg selected
+             in
+             let binder =
+               match binder with
+               | Some binder when Vox_dependent.mentions binder ty_ret ->
+                 Some binder
+               | Some _ | None -> None
+             in
+             let contract =
+               { contract with rap_domain = ty_arg; rap_binder = binder }
+             in
+             let arrow_desc = (lbl, mode_arg, mode_ret, binder) in
              let sort_ret =
                match type_sort ~why:Function_result ~fixed:false env ty_ret with
                | Ok sort -> sort
@@ -5333,10 +5526,15 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
                 sort_ret }
              in
              let args = (lbl, arg, None) :: args in
-             (ty_ret, mode_closure, open_args, closed_args, args))
-      (ty_ret, mode_ret, [], [], []) (List.rev args)
+             ( ty_ret, mode_closure, open_args, closed_args, pending, args,
+               contract :: contracts ))
+      (ty_ret, mode_ret, [], [], deferred_goals, [], [])
+      (List.rev arguments_and_contracts)
   in
-  ty_ret, mode_ret, args
+  if pending <> [] then
+    Misc.fatal_error
+      "deferred refinement contract has no omitted dependent binder";
+  ty_ret, mode_ret, args, contracts
 
 (* Generalization criterion for expressions *)
 
@@ -5702,6 +5900,37 @@ let loc_rest_of_function
 
 (* Approximate the type of an expression, for better recursion *)
 
+let vox_core_type_has_vox sty =
+  let found = ref false in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      typ =
+        (fun self type_ ->
+          begin match type_.ptyp_desc with
+          | Ptyp_extension ({ txt; _ }, _)
+            when String.starts_with ~prefix:"vox2.refinement." txt ->
+            found := true
+          | _ -> ()
+          end;
+          Ast_iterator.default_iterator.typ self type_);
+    }
+  in
+  iterator.typ iterator sty;
+  !found
+
+let vox_expression_has_vox expression =
+  let found = ref false in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      typ =
+        (fun self type_ ->
+          if vox_core_type_has_vox type_ then found := true
+          else Ast_iterator.default_iterator.typ self type_);
+    }
+  in
+  iterator.expr iterator expression;
+  !found
+
 (* CR layouts v5: This any is fine because we don't allow you to make types
    that could be matched on and have anys in them.  But once we do, this
    should probably be sort variable.  See Test 22 in typing-layouts/basics.ml
@@ -5728,7 +5957,7 @@ let rec approx_type env sty =
         let ret = approx_type env sty in
         let marg = Alloc.of_const arg_mode.mode_modes in
         let mret = Alloc.newvar () in
-        newty (Tarrow ((p,marg,mret), arg_ty.ctyp_type, ret, commu_ok))
+        newty (Tarrow ((p,marg,mret,None), arg_ty.ctyp_type, ret, commu_ok))
       end
   | Ptyp_arrow (p, arg_sty, sty, arg_mode, _) ->
       let arg_mode = Typemode.transl_alloc_mode arg_mode in
@@ -5741,7 +5970,7 @@ let rec approx_type env sty =
       let ret = approx_type env sty in
       let marg = Alloc.of_const arg_mode.mode_modes in
       let mret = Alloc.newvar () in
-      newty (Tarrow ((p,marg,mret), newmono arg, ret, commu_ok))
+      newty (Tarrow ((p,marg,mret,None), newmono arg, ret, commu_ok))
   | Ptyp_tuple args ->
       newty (Ttuple (List.map (fun (l, t) -> l, approx_type env t) args))
   | Ptyp_constr (lid, ctl) ->
@@ -5776,11 +6005,15 @@ let type_pattern_approx env spat ty_expected =
 let type_approx_constraint ~loc env constraint_ ty_expected =
   match constraint_ with
   | Pconstraint sty ->
-      let ty_expected' = approx_type env sty in
-      begin try unify env ty_expected' ty_expected with Unify err ->
-        raise (Error (loc, env, Expr_type_clash (err, None, None)))
-      end;
-      ty_expected'
+      begin match sty.ptyp_desc with
+      | Ptyp_arrow _ when vox_core_type_has_vox sty -> ty_expected
+      | _ ->
+        let ty_expected' = approx_type env sty in
+        begin try unify env ty_expected' ty_expected with Unify err ->
+          raise (Error (loc, env, Expr_type_clash (err, None, None)))
+        end;
+        ty_expected'
+      end
   | Pcoerce (_sty1, sty2) ->
       let ty = approx_type env sty2 in
       begin try unify env ty ty_expected with Unify trace ->
@@ -5980,7 +6213,11 @@ let check_univars env kind exp ty_expected vars =
    [non-unit-statement] warning. *)
 
 let check_statement exp =
-  let ty = get_desc (expand_head exp.exp_env exp.exp_type) in
+  let ty =
+    get_desc
+      (expand_head exp.exp_env
+         (refinement_skeleton exp.exp_env exp.exp_type))
+  in
   match ty with
   | Tconstr (p, _, _) when Path.same p Predef.path_unit
                         || Path.same p Predef.path_unboxed_unit ->
@@ -6304,10 +6541,10 @@ type apply_prim =
   | Revapply
 let check_apply_prim_type prim typ =
   match get_desc typ with
-  | Tarrow ((Nolabel,_,_),a,b,_) when tpoly_is_mono a ->
+  | Tarrow ((Nolabel,_,_,_),a,b,_) when tpoly_is_mono a ->
       let a = tpoly_get_mono a in
       begin match get_desc b with
-      | Tarrow((Nolabel,_,_),c,d,_) when tpoly_is_mono c ->
+      | Tarrow((Nolabel,_,_,_),c,d,_) when tpoly_is_mono c ->
           let c = tpoly_get_mono c in
           let f, x, res =
             match prim with
@@ -6315,7 +6552,7 @@ let check_apply_prim_type prim typ =
             | Revapply -> c, a, d
           in
           begin match get_desc f with
-          | Tarrow((Nolabel,_,_),fl,fr,_) ->
+          | Tarrow((Nolabel,_,_,_),fl,fr,_) ->
               let fl = tpoly_get_mono fl in
               is_Tvar fl && is_Tvar fr && is_Tvar x && is_Tvar res
               && Types.eq_type fl x && Types.eq_type fr res
@@ -6612,6 +6849,267 @@ and type_function_ret_info =
   }
 
 (* value binding elaboration *)
+
+let rec vox_root_equivalent_parameters (pattern : Typedtree.pattern) =
+  match pattern.pat_desc with
+  | Tpat_var { id; _ } -> [id, pattern.pat_type]
+  | Tpat_alias { pattern = inner; id; _ } ->
+    let inner =
+      match inner.pat_desc with
+      | Tpat_var _ | Tpat_alias _ -> vox_root_equivalent_parameters inner
+      | _ -> []
+    in
+    (id, pattern.pat_type) :: inner
+  | _ -> []
+
+let rec vox_root_value_origins (pattern : Typedtree.pattern) =
+  if pattern.pat_extra <> []
+  then []
+  else match pattern.pat_desc with
+    | Tpat_var { id; _ } -> [id, pattern.pat_type]
+    | Tpat_alias { pattern = inner; id; _ } ->
+      let inner =
+        match inner.pat_desc with
+        | Tpat_var _ | Tpat_alias _ -> vox_root_value_origins inner
+        | _ -> []
+      in
+      (id, pattern.pat_type) :: inner
+    | _ -> []
+
+let vox_case_root_value_origins
+    : type k . k pattern_category -> k general_pattern ->
+        (Ident.t * type_expr) list
+  = fun category pattern ->
+    match category with
+    | Value -> vox_root_value_origins pattern
+    | Computation -> []
+
+let check_refinement_scope ~loc ~env ~program_scope type_ =
+  let module_in_scope id =
+    Ident.is_global_or_predef id
+    || Option.is_some (Env.find_module_index id env)
+  in
+  match
+    Vox_scope.validate_scopes_with_modules ~module_in_scope ~program_scope type_
+  with
+  | Ok () -> ()
+  | Error (Value id) ->
+    Location.raise_errorf ~loc
+      "The refinement type refers to value %s outside its scope"
+      (Ident.name id)
+  | Error (Module id) ->
+    Location.raise_errorf ~loc
+      "The refinement type refers to module %s outside its scope"
+      (Ident.name id)
+
+let rec vox_immutable_alias_binders (pattern : Typedtree.pattern) =
+  if pattern.pat_extra <> []
+  then []
+  else match pattern.pat_desc with
+    | Tpat_var { id; _ } -> [id]
+    | Tpat_alias { pattern = inner; id; _ } ->
+      begin match vox_immutable_alias_binders inner with
+      | [] -> []
+      | binders -> id :: binders
+      end
+    | _ -> []
+
+let vox_immutable_alias_source (expression : Typedtree.expression) =
+  match expression.exp_desc, expression.exp_extra with
+  | Texp_ident { path = Pident id; kind = Id_value; _ }, [] -> Some id
+  | _ -> None
+
+let vox_canonicalize_aliases parameter equivalents type_ =
+  List.fold_left
+    (fun type_ (equivalent, _) ->
+      if Ident.same equivalent parameter
+      then type_
+      else
+        Vox_dependent.rename ~binder:equivalent ~as_:parameter type_)
+    type_ equivalents
+
+let vox_parameter_domain ty_arg imposed_type =
+  match imposed_type with
+  | None -> ty_arg
+  | Some imposed_type ->
+    begin match get_desc ty_arg with
+    | Tpoly (_, variables) ->
+      newty2 ~level:(get_level ty_arg) (Tpoly (imposed_type, variables))
+    | _ ->
+      Misc.fatal_error "function parameter domain is not a polymorphic type"
+    end
+
+let rec vox_untyped_root_alias_names (pattern : Parsetree.pattern) =
+  match pattern.ppat_desc with
+  | Ppat_var name -> [name]
+  | Ppat_alias (inner, name) ->
+    begin match vox_untyped_root_alias_names inner with
+    | [] -> [name]
+    | inner_names -> name :: inner_names
+    end
+  | Ppat_constraint (inner, _, _) -> vox_untyped_root_alias_names inner
+  | _ -> []
+
+let vox_hoist_value_binding (binding : Parsetree.value_binding) =
+  match
+    binding.pvb_pat.ppat_desc,
+    binding.pvb_constraint,
+    binding.pvb_expr.pexp_desc
+  with
+  | ( Ppat_var _,
+      None,
+      Pexp_function
+        ( params,
+          { mode_annotations = [];
+            ret_mode_annotations = ret_modes;
+            ret_type_constraint = Some (Pconstraint result);
+          },
+          Pfunction_body body ) )
+    when not binding.pvb_is_poly
+         && binding.pvb_expr.pexp_attributes = [] ->
+    let rec root_parameter_name (pattern : Parsetree.pattern) =
+      match pattern.ppat_desc with
+      | Ppat_var name | Ppat_alias (_, name) -> Some name
+      | Ppat_constraint (pattern, _, _) -> root_parameter_name pattern
+      | _ -> None
+    in
+    let aliases pattern =
+      match vox_untyped_root_alias_names pattern with
+      | [] | [_] -> []
+      | _ :: aliases -> aliases
+    in
+    let rec extract_pattern (pattern : Parsetree.pattern) =
+      match pattern.ppat_desc with
+      | Ppat_constraint (inner, Some type_, parameter_modes) ->
+        Option.map
+          (fun name -> name, aliases inner, inner, type_, parameter_modes)
+          (root_parameter_name inner)
+      | Ppat_alias (inner, name) ->
+        begin match extract_pattern inner with
+        | Some (_, _, stripped_inner, type_, parameter_modes) ->
+          let inner =
+            { pattern with ppat_desc = Ppat_alias (stripped_inner, name) }
+          in
+          Some (name, aliases pattern, inner, type_, parameter_modes)
+        | None ->
+          let type_ = Ast_helper.Typ.any ~loc:pattern.ppat_loc None in
+          Some (name, aliases pattern, pattern, type_, [])
+        end
+      | Ppat_var name ->
+        let type_ = Ast_helper.Typ.any ~loc:pattern.ppat_loc None in
+        Some (name, [], pattern, type_, [])
+      | _ -> None
+    in
+    let pattern_has_vox (pattern : Parsetree.pattern) =
+      let found = ref false in
+      let super = Ast_iterator.default_iterator in
+      let iterator =
+        { super with
+          typ =
+            (fun iterator type_ ->
+              if vox_core_type_has_vox type_ then found := true
+              else super.typ iterator type_);
+        }
+      in
+      iterator.pat iterator pattern;
+      !found
+    in
+    let rec extract = function
+      | [] -> Some []
+      | (parameter : Parsetree.function_param) :: rest ->
+        begin match parameter.pparam_desc with
+        | Pparam_val
+            (((Nolabel | Labelled _) as label), None, pattern) ->
+          begin match extract_pattern pattern, extract rest with
+          | Some (name, aliases, inner, type_, parameter_modes), Some rest ->
+            Some
+              ((parameter, label, name, aliases, inner, type_, parameter_modes)
+               :: rest)
+          | None, _ | _, None -> None
+          end
+        | _ -> None
+        end
+    in
+    begin match extract params with
+    | Some (_ :: _ as parameters)
+      when List.exists vox_core_type_has_vox
+              (result
+              :: List.map
+                   (fun (_, _, _, _, _, type_, _) -> type_)
+                   parameters)
+           || List.exists
+                (fun (parameter, _, _, _, _, _, _) ->
+                  match parameter.pparam_desc with
+                  | Pparam_val (_, _, pattern) -> pattern_has_vox pattern
+                  | Pparam_newtype _ -> false)
+                parameters ->
+      let rec build = function
+        | [] -> assert false
+        | ((_, label, name, aliases, _, (type_ : Parsetree.core_type),
+            parameter_modes) : _) :: rest ->
+          let alias_attributes =
+            List.map
+              (fun alias ->
+                Ast_helper.Attr.mk
+                  ~loc:alias.loc
+                  { txt = "vox2.refinement.alias"; loc = alias.loc }
+                  (PTyp (Ast_helper.Typ.var ~loc:alias.loc alias.txt None)))
+              aliases
+          in
+          let domain =
+            { ptyp_desc =
+                Ptyp_extension
+                  ( { txt = "vox2.refinement.named." ^ name.txt;
+                      loc = type_.ptyp_loc;
+                    },
+                    PTyp type_ );
+              ptyp_loc = type_.ptyp_loc;
+              ptyp_loc_stack = [];
+              ptyp_attributes = alias_attributes;
+            }
+          in
+          let codomain, return_modes =
+            match rest with
+            | [] -> result, ret_modes
+            | _ :: _ -> build rest, []
+          in
+          { ptyp_desc =
+              Ptyp_arrow
+                (label, domain, codomain, parameter_modes, return_modes);
+            ptyp_loc = type_.ptyp_loc;
+            ptyp_loc_stack = [];
+            ptyp_attributes = [];
+          }
+      in
+      let arrow = build parameters in
+      let params =
+        List.map
+          (fun ((parameter : Parsetree.function_param), label, _, _, inner, _, _) ->
+            { parameter with
+              pparam_desc = Pparam_val (label, None, inner);
+            })
+          parameters
+      in
+      { binding with
+        pvb_constraint =
+          Some
+            (Pvc_constraint
+               { locally_abstract_univars = []; typ = arrow });
+        pvb_expr =
+          { binding.pvb_expr with
+            pexp_desc =
+              Pexp_function
+                ( params,
+                  { mode_annotations = [];
+                    ret_mode_annotations = [];
+                    ret_type_constraint = None;
+                  },
+                  Pfunction_body body );
+          };
+      }
+    | Some [] | None | Some (_ :: _) -> binding
+    end
+  | _ -> binding
 
 let vb_exp_constraint {pvb_expr=expr; pvb_pat=pat; pvb_constraint=ct; pvb_modes=modes; _ } =
   let open Ast_helper in
@@ -7116,6 +7614,104 @@ let structurally_terminating_group bindings =
     in
     try_position 0
 
+let totality_is_total totality =
+  match Mode.Totality.Guts.check_const_conservative totality with
+  | Some Mode.Totality.Const.Total -> true
+  | Some Mode.Totality.Const.Partial | None -> false
+
+let expression_has_total_mode expression =
+  List.exists
+    (fun (extra, _, _) ->
+      match extra with
+      | Texp_mode modes ->
+        begin match modes.mode_modes.totality with
+        | Some Mode.Totality.Const.Total -> true
+        | Some Mode.Totality.Const.Partial | None -> false
+        end
+      | _ -> false)
+    expression.exp_extra
+
+let dependent_argument_call_is_stable expression =
+  match expression.exp_desc with
+  | Texp_ident { mode; _ } ->
+    expression_has_total_mode expression
+    || totality_is_total
+         (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
+  | Texp_function { alloc_mode; _ } ->
+    expression_has_total_mode expression
+    || totality_is_total
+         (Mode.Alloc.proj_comonadic Mode.Axis.Totality alloc_mode)
+  | _ -> false
+
+let evaluated_argument_subject expression =
+  let dependent_ids = Env.dependent_parameter_ids expression.exp_env in
+  let exception Omitted_argument in
+  let opaque expression =
+    let id = Ident.create_local "argument_value" in
+    Refinement.create ~loc:expression.exp_loc
+      ~type_:(refinement_logical_type expression.exp_type)
+      (Rexp_ident (Rfree (Rglobal (Pident id))))
+  in
+  let rec lower ?(function_head = false) expression =
+    let create rexp_desc =
+      Refinement.create ~loc:expression.exp_loc
+        ~type_:(refinement_logical_type expression.exp_type) rexp_desc
+    in
+    match expression.exp_desc with
+    | Texp_ident { path = Pident id; _ }
+      when List.exists (Ident.same id) dependent_ids ->
+      create (Rexp_ident (Rbound id))
+    | Texp_ident { path; _ } ->
+      let reference = if function_head then Rapp path else Rglobal path in
+      create (Rexp_ident (Rfree reference))
+    | Texp_constant constant -> create (Rexp_constant constant)
+    | Texp_apply (function_, arguments, _, _, _)
+      when dependent_argument_call_is_stable function_ ->
+      let function_ = lower ~function_head:true function_ in
+      let arguments =
+        List.map
+          (function
+            | label, Arg (argument, _) -> label, lower argument
+            | _, Omitted _ -> raise Omitted_argument)
+          arguments
+      in
+      create (Rexp_apply (function_, arguments))
+    | Texp_tuple (fields, _) ->
+      create
+        (Rexp_tuple
+           (List.map (fun (label, field) -> label, lower field) fields))
+    | Texp_construct (_, constructor, _, arguments, _) ->
+      let constructor =
+        { rconstr_type_path = cstr_res_type_path constructor;
+          rconstr_name = constructor.cstr_name;
+        }
+      in
+      create
+        (Rexp_construct
+           (constructor, List.map (fun (_, argument) -> lower argument) arguments))
+    | Texp_field { record; label; _ } when label.lbl_mut = Immutable ->
+      let field =
+        { rfield_type_path = lbl_res_type_path label;
+          rfield_name = label.lbl_name;
+        }
+      in
+      create (Rexp_field (lower record, field))
+    | _ -> opaque expression
+  in
+  match lower expression with
+  | subject -> subject
+  | exception Omitted_argument -> opaque expression
+
+type dependent_case_parameter =
+  | Open_case_parameter of Ident.t * type_expr
+  | Infer_case_parameter of Ident.t * type_expr
+
+type case_parameter_origins =
+  { branch_impositions : (Location.t * type_expr option) list ref;
+    outer_env : Env.t;
+    outer_level : int;
+  }
+
 let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
   (* We now delegate everything to type_expect *)
   type_expect ?recarg ~overwrite env expected_mode sexp
@@ -7138,8 +7734,26 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
   let exp =
     Builtin_attributes.warning_scope sexp.pexp_attributes
       (fun () ->
-         type_expect_ ?recarg ~overwrite env expected_mode sexp
-           ty_expected_explained)
+         match get_desc ty_expected_explained.ty with
+         | Trefine refinement ->
+           let exp, retain_constraint =
+             type_refinement_annotation ~overwrite env expected_mode
+               ~loc:sexp.pexp_loc
+               ~explanation:ty_expected_explained.explanation sexp
+               ty_expected_explained.ty refinement
+           in
+           if not retain_constraint then exp
+           else
+             { exp with
+               exp_extra =
+                 ( Texp_refinement_constraint ty_expected_explained.ty,
+                   exp.exp_loc,
+                   [] )
+                 :: exp.exp_extra;
+             }
+         | _ ->
+           type_expect_ ?recarg ~overwrite env expected_mode sexp
+             ty_expected_explained)
   in
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);
@@ -7168,7 +7782,44 @@ and type_refinement_annotation
     let arg = type_expect env expected_mode sarg (mk_expected skeleton) in
     mark arg
   else
-    let arg = type_exp ~overwrite env expected_mode sarg in
+    let arg =
+      with_refinement_imposition_inferred_head sarg (fun () ->
+        type_exp ~overwrite env expected_mode sarg)
+    in
+    let direct_obj_magic =
+      match arg.exp_desc with
+      | Texp_apply (function_, _, _, _, _) ->
+        is_prim ~name:"%obj_magic" function_
+      | _ -> false
+    in
+    let parameter_value_origin =
+      match arg.exp_desc with
+      | Texp_ident { path = Pident id; kind = Id_value; _ }
+        when Env.has_dependent_value_origin id arg.exp_env ->
+        Some id
+      | _ -> None
+    in
+    let application_result =
+      match arg.exp_desc with
+      | Texp_apply _ -> true
+      | _ -> false
+    in
+    let parameter_value_origin_allowed =
+      match parameter_value_origin, get_desc arg.exp_type with
+      | Some _, (Tvar _ | Tunivar _) -> true
+      | Some origin, _ ->
+        Env.dependent_value_origin_allows_concrete_type origin arg.exp_env
+      | None, _ -> false
+    in
+    let mentions_parameter_value_origin =
+      match parameter_value_origin with
+      | None -> false
+      | Some origin ->
+        List.exists
+          (fun identifier ->
+            Vox_dependent.mentions_identifier identifier refined_type)
+          (Env.dependent_value_origin_identifiers origin arg.exp_env)
+    in
     match get_desc arg.exp_type with
     | Trefine actual ->
       let same =
@@ -7196,12 +7847,48 @@ and type_refinement_annotation
             actual.ref_skeleton (instance refinement.ref_skeleton));
         mark arg
       end
-    | Tvar _ | Tunivar _ ->
-      (* An unconstrained result (notably [Obj.magic]) must not acquire a
-         refinement without leaving an obligation mark. *)
+    | _ when direct_obj_magic ->
+      (* Exact primitive identity is retained in the typedtree, so direct
+         unsafe casts can leave an obligation without guessing from source
+         syntax.  Aliases remain covered by the historical [Tvar] ruling. *)
       with_explanation (fun () ->
         unify_exp_types loc env arg.exp_type skeleton);
       mark arg
+    | _ when parameter_value_origin_allowed
+             && not mentions_parameter_value_origin ->
+      let origin = Option.get parameter_value_origin in
+      (* Record the contextual refinement on the value-origin token rather
+         than on the mutable carrier-type representative.  Function-arrow
+         construction consumes this slot after the body has been typed. *)
+      with_explanation (fun () ->
+        unify_exp_types loc env arg.exp_type skeleton;
+        match Env.dependent_value_imposed_type origin arg.exp_env with
+        | None ->
+          if not
+               (Env.set_dependent_value_imposed_type
+                  origin refined_type arg.exp_env)
+          then Misc.fatal_error "missing dependent value origin"
+        | Some imposed_type ->
+          unify_exp_types loc env imposed_type refined_type);
+      { arg with exp_type = refined_type }, false
+    | Tvar _ | Tunivar _ ->
+      if application_result
+      then begin
+        (* Polymorphic application results include sound bottom values; their
+           unsafe-cast origins cannot in general be distinguished, so they
+           retain the historical [Obj.magic] ruling. *)
+        with_explanation (fun () ->
+          unify_exp_types loc env arg.exp_type refined_type);
+        { arg with exp_type = refined_type }, false
+      end
+      else begin
+        (* Other unconstrained inferred heads still leave an obligation; in
+           particular, an unrelated let-bound value must not be refined
+           merely because its current type is a variable. *)
+        with_explanation (fun () ->
+          unify_exp_types loc env arg.exp_type skeleton);
+        mark arg
+      end
     | _ ->
       with_explanation (fun () ->
         unify_exp_types loc env arg.exp_type skeleton);
@@ -7216,8 +7903,10 @@ and type_expect_
   let with_explanation = with_explanation explanation in
   (* Unify the result with [ty_expected], enforcing the current level *)
   let rue exp =
+    let expected_ty = instance ty_expected in
+    let exp = weaken_refinement_occurrence exp expected_ty in
     with_explanation (fun () ->
-      unify_exp ~sexp env (re exp) (instance ty_expected));
+      unify_exp ~sexp env (re exp) expected_ty);
     exp
   in
   let type_expect_record (type rep) ~overwrite (record_form : rep record_form)
@@ -7637,7 +8326,7 @@ and type_expect_
          deliberately exempt. *)
       let use_type =
         match desc.val_kind with
-        | Val_reg _ -> refinement_skeleton desc.val_type
+        | Val_reg _ -> refinement_skeleton env desc.val_type
         | _ -> desc.val_type
       in
       let exp = rue {
@@ -7971,7 +8660,7 @@ and type_expect_
         | _ ->
             (rt, funct), sargs
       in
-      let (args, ty_ret, mode_ret, pm) =
+      let (args, ty_ret, mode_ret, pm, refinement_application) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
       let mode_ret = Alloc.disallow_right mode_ret in
@@ -7993,6 +8682,24 @@ and type_expect_
         | false -> funct
       in
       let args = List.map (fun (lbl, arg, _) -> (lbl, arg)) args in
+      let refinement_aware =
+          type_contains_refinement env funct.exp_type
+          || type_contains_refinement env ty_ret
+          (* The outer refinement-imposition wrapper can contextually refine
+             this exact polymorphic-result application after it has been
+             built.  Other polymorphic results must retain ordinary layout
+             inference. *)
+          || (is_Tvar ty_ret
+              && match !refinement_imposition_inferred_head with
+                 | Some head -> head == sexp
+                 | None -> false)
+          || type_contains_refinement env ty_expected
+          || List.exists
+               (fun { rap_domain; rap_binder; _ } ->
+                 Option.is_some rap_binder
+                 || type_contains_refinement env rap_domain)
+               refinement_application
+      in
       let exp = rue {
         exp_desc = Texp_apply(funct, args, pm.apply_position, ap_mode,
                               zero_alloc);
@@ -8000,6 +8707,27 @@ and type_expect_
         exp_type = ty_ret;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
+      in
+      (* [rue] may refine the application type while reconciling it with an
+         enclosing constraint.  Decide whether metadata is needed only after
+         that reconciliation, otherwise an application checked against a
+         refinement skeleton reaches the verifier without its contracts. *)
+      let exp =
+        if not
+             (refinement_aware
+              || type_contains_refinement exp.exp_env exp.exp_type)
+        then exp
+        else
+          { exp with
+            exp_extra =
+              ( Texp_refinement_application
+                  { rapp_arguments = refinement_application;
+                    rapp_result = instance ty_ret;
+                  },
+                loc,
+                [] )
+              :: exp.exp_extra;
+          }
       in
       submode ~loc ~env ~reason:(Application ty_ret) mode_ret expected_mode;
       check_tail_call_local_returning loc env ap_mode pm;
@@ -8520,20 +9248,62 @@ and type_expect_
             exp_attributes = sexp.pexp_attributes;
             exp_env = env }
       | Some sifnot ->
-          let ifso =
-            type_expect env expected_mode sifso ty_expected_explained
-          in
-          let ifnot =
-            type_expect env expected_mode sifnot ty_expected_explained
-          in
-          (* Keep sharing *)
-          unify_exp ~sexp env ifnot ifso.exp_type;
-          re {
-            exp_desc = Texp_ifthenelse(cond, ifso, Some ifnot);
-            exp_loc = loc; exp_extra = [];
-            exp_type = ifso.exp_type;
-            exp_attributes = sexp.pexp_attributes;
-            exp_env = env }
+          begin match get_desc ty_expected with
+          | Tvar _ ->
+            let inferred =
+              mk_expected
+                (newvar (Jkind.Builtin.any ~why:Dummy_jkind))
+            in
+            let ifso = type_expect env expected_mode sifso inferred in
+            begin match get_desc ifso.exp_type with
+            | Trefine refinement ->
+              (* A neutral join does not make the first arm's predicate an
+                 expectation for the second arm.  Their common use type is the
+                 carrier; an outer refined expectation is handled before this
+                 point and therefore still distributes obligations. *)
+              let join_type = instance refinement.ref_skeleton in
+              let ifso = weaken_refinement_occurrence ifso join_type in
+              let ifnot =
+                type_expect env expected_mode sifnot (mk_expected join_type)
+              in
+              with_explanation (fun () ->
+                unify_exp_types loc env join_type (instance ty_expected));
+              re {
+                exp_desc = Texp_ifthenelse(cond, ifso, Some ifnot);
+                exp_loc = loc; exp_extra = [];
+                exp_type = join_type;
+                exp_attributes = sexp.pexp_attributes;
+                exp_env = env }
+            | _ ->
+              with_explanation (fun () ->
+                unify_exp ~sexp:sifso env ifso (instance ty_expected));
+              let ifnot =
+                type_expect env expected_mode sifnot ty_expected_explained
+              in
+              unify_exp ~sexp env ifnot ifso.exp_type;
+              re {
+                exp_desc = Texp_ifthenelse(cond, ifso, Some ifnot);
+                exp_loc = loc; exp_extra = [];
+                exp_type = ifso.exp_type;
+                exp_attributes = sexp.pexp_attributes;
+                exp_env = env }
+            end
+          | _ ->
+            let ifso =
+              type_expect env expected_mode sifso ty_expected_explained
+            in
+            let ifnot =
+              type_expect env expected_mode sifnot ty_expected_explained
+            in
+            (* Keep sharing *)
+            unify_exp ~sexp env ifnot ifso.exp_type;
+            re {
+              exp_desc = Texp_ifthenelse(cond, ifso, Some ifnot);
+              exp_loc = loc; exp_extra = [];
+              exp_type = ifso.exp_type;
+              exp_attributes = sexp.pexp_attributes;
+              exp_env = env }
+          end
       end
   | Pexp_sequence(sexp1, sexp2) ->
       let exp1, sort1 =
@@ -9128,7 +9898,7 @@ and type_expect_
             loop slet.pbop_pat (newvar initial_jkind) initial_sort sands
           in
           let ty_func_result, body_sort = new_rep_var ~why:Function_result () in
-          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy in
+          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy, None in
           let ty_func =
             newty (Tarrow(arrow_desc, newmono ty_params, ty_func_result,
                           commu_ok))
@@ -10020,7 +10790,8 @@ and type_function
           { mode_modes = Alloc.Const.Option.none; mode_desc = [] }
       in
       let env,
-          { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode };
+          { filtered_arrow =
+              { ty_arg; arg_mode; ty_ret; ret_mode; arrow_binder };
             arg_sort; ret_sort;
             ty_arg_mono; expected_pat_mode; expected_inner_mode;
             alloc_mode; really_poly
@@ -10074,7 +10845,7 @@ and type_function
               default_arg_sort
       in
       let (pat, suffix_type, params, body, ret_info, newtypes,
-           contains_gadt, curry), partial =
+           contains_gadt, curry, imposed_parameter_type), partial =
         (* Check everything else in the scope of the parameter. *)
         map_half_typed_cases Value env expected_pat_mode
           ty_arg_internal sort_arg_internal ty_ret pat.ppat_loc
@@ -10082,15 +10853,39 @@ and type_function
           (* We don't make use of [case_data] here so we pass unit. *)
           [ { pattern = pat; has_guard = false; needs_refute = false }, () ]
           ~type_body:begin
-            fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
-              ~contains_gadt:param_contains_gadt ->
+            fun () pat ~when_env:_ ~ext_env ~cont:_ ~pat_vars ~ty_expected
+              ~ty_infer:_ ~contains_gadt:param_contains_gadt ->
+              let parameter =
+                match vox_root_equivalent_parameters pat with
+                | [] -> None
+                | (root, _) :: _ as parameters -> Some (root, parameters)
+              in
+              let parameter_origins = vox_root_value_origins pat in
+              begin match arrow_binder, parameter with
+              | Some _, None ->
+                Location.raise_errorf ~loc:pat.pat_loc
+                  "a dependent function parameter requires a variable or \
+                   alias pattern"
+              | (None | Some _), (None | Some _) -> ()
+              end;
               let ext_env =
-                match typed_arg_label, pat.pat_desc with
-                | Labelled label, Tpat_var { id; _ }
-                | Labelled label, Tpat_alias { id; _ } ->
-                  Env.add_dependent_parameter ~label id ext_env
-                | (Nolabel | Optional _ | Position _ | Labelled _), _ ->
-                  ext_env
+                match typed_arg_label, parameter with
+                | (Nolabel | Labelled _), Some (_, parameters) ->
+                  Env.add_dependent_parameters
+                    ~value_origins:parameter_origins parameters ext_env
+                | (Optional _ | Position _), _
+                | (Nolabel | Labelled _), None -> ext_env
+              in
+              let ty_expected =
+                match arrow_binder, parameter with
+                | Some binder, Some (parameter, equivalents) ->
+                  let ty_expected =
+                    Vox_dependent.rename ~binder ~as_:parameter ty_expected
+                  in
+                  vox_canonicalize_aliases parameter equivalents ty_expected
+                | None, Some (parameter, equivalents) ->
+                  vox_canonicalize_aliases parameter equivalents ty_expected
+                | (None | Some _), None -> ty_expected
               in
               let { function_ = suffix_type, params_suffix, body;
                     newtypes; params_contain_gadt = suffix_contains_gadt;
@@ -10100,6 +10895,38 @@ and type_function
                 type_function ext_env expected_inner_mode ty_expected
                   rest body_constraint body ~in_function ~first:false
               in
+              let suffix_type =
+                match parameter with
+                | Some (parameter, equivalents) ->
+                  vox_canonicalize_aliases parameter equivalents suffix_type
+                | None -> suffix_type
+              in
+              let imposed_parameter_type =
+                List.find_map
+                  (fun (id, _) ->
+                    Env.dependent_value_imposed_type id ext_env)
+                  parameter_origins
+              in
+              let equivalent_ids =
+                match parameter with
+                | None -> Ident.Set.empty
+                | Some (_, equivalents) ->
+                  List.fold_left
+                    (fun ids (id, _) -> Ident.Set.add id ids)
+                    Ident.Set.empty equivalents
+              in
+              List.iter
+                (fun variable ->
+                  if variable.pv_kind <> Continuation_var
+                     && not (Ident.Set.mem variable.pv_id equivalent_ids)
+                     && Vox_dependent.mentions_identifier
+                          variable.pv_id suffix_type
+                  then
+                    Location.raise_errorf ~loc:pat.pat_loc
+                      "a dependent function result cannot refer to non-root \
+                       pattern variable %s"
+                      (Ident.name variable.pv_id))
+                pat_vars;
               let contains_gadt =
                 if param_contains_gadt then
                   Contains_gadt
@@ -10137,7 +10964,7 @@ and type_function
                   More_args {partial_mode = Alloc.disallow_right fun_alloc_mode}
               in
               pat, suffix_type, params_suffix, body, ret_info, newtypes,
-              contains_gadt, curry
+              contains_gadt, curry, imposed_parameter_type
           end
         |> function
           (* The result must be a singleton because we passed a singleton
@@ -10145,21 +10972,32 @@ and type_function
         | [ result ], partial -> result, partial
         | ([] | _ :: _ :: _), _ -> assert false
       in
+      let dependent_binder =
+        match typed_arg_label, pat.pat_desc with
+        | (Nolabel | Labelled _),
+          (Tpat_var { id; _ } | Tpat_alias { id; _ })
+          when Vox_dependent.mentions id suffix_type -> Some id
+        | (Nolabel | Labelled _ | Optional _ | Position _), _ -> None
+      in
       let exp_type_for_unification =
         instance
           (newgenty
              (Tarrow
-                ((typed_arg_label, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+                ( (typed_arg_label, arg_mode, ret_mode, arrow_binder),
+                  ty_arg,
+                  ty_ret,
+                  commu_ok )))
       in
       let exp_type =
-        if not (type_contains_refinement suffix_type)
+        if Option.is_none imposed_parameter_type
+           && not (type_contains_refinement env suffix_type)
         then exp_type_for_unification
         else
           instance
             (newgenty
                (Tarrow
-                  ( (typed_arg_label, arg_mode, ret_mode),
-                    ty_arg,
+                  ( (typed_arg_label, arg_mode, ret_mode, dependent_binder),
+                    vox_parameter_domain ty_arg imposed_parameter_type,
                     suffix_type,
                     commu_ok )))
       in
@@ -10261,7 +11099,26 @@ and type_function
       | Pfunction_body body ->
           let body =
             match ret_type_constraint with
-            | None -> type_expect env expected_mode body (mk_expected ty_expected)
+            | None ->
+              begin match get_desc ty_expected with
+              | Trefine refinement ->
+                let body, retain_constraint =
+                  type_refinement_annotation env expected_mode
+                    ~loc:body.pexp_loc ~explanation:None body ty_expected
+                    refinement
+                in
+                if not retain_constraint then body
+                else
+                  { body with
+                    exp_extra =
+                      ( Texp_refinement_constraint ty_expected,
+                        body.exp_loc,
+                        [] )
+                      :: body.exp_extra;
+                  }
+              | _ ->
+                type_expect env expected_mode body (mk_expected ty_expected)
+              end
             | Some constraint_ ->
             let body_loc = body.pexp_loc in
             let body, exp_type, exp_extra =
@@ -10280,17 +11137,28 @@ and type_function
                     type_refinement_annotation env expected_mode
                       ~loc:body_loc ~explanation:None body ty refinement
                   in
-                  unify_exp_types body_loc env
-                    refinement.ref_skeleton (instance ty_expected);
+                  let expected = instance ty_expected in
+                  begin match get_desc expected with
+                  | Trefine _ ->
+                    (* In a context that already requires a refinement (for
+                       example an inline higher-order witness), reconcile the
+                       two complete contracts.  Comparing only the explicit
+                       skeleton against the contextual refinement rejects
+                       alpha-equivalent annotations before verification. *)
+                    unify_exp_types body_loc env ty expected
+                  | _ ->
+                    unify_exp_types body_loc env
+                      refinement.ref_skeleton expected
+                  end;
                   body, ty,
                   (if retain_constraint then Some exp_extra else None)
                 | _ ->
-                  let body, exp_type, exp_extra =
-                    type_constraint_expect (expression_constraint body)
-                      env expected_mode body_loc ~loc_arg:body_loc
-                      type_mode.mode_modes constraint_ ty_expected
+                  let body =
+                    type_argument ~overwrite:No_overwrite env expected_mode
+                      body ty (instance ty)
                   in
-                  body, exp_type, Some exp_extra
+                  unify_exp_types body_loc env ty (instance ty_expected);
+                  body, ty, Some exp_extra
                 end
               | Pcoerce _ ->
                 let body, exp_type, exp_extra =
@@ -10794,15 +11662,17 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let lv = get_level expty in
     let lv' = get_level expty' in
     match get_desc expty', get_desc expty with
-    | Tarrow((l, marg, mret), ty_arg', ty_res', _),
-      Tarrow(_, ty_arg,  ty_res,  _)
+    | Tarrow((l, marg, mret, binder'), ty_arg', ty_res', _),
+      Tarrow((_, _, _, binder), ty_arg,  ty_res,  _)
       when lv' = generic_level || not !Clflags.principal ->
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
       let mret, changed' = Alloc.newvar_below mret in
       let marg, changed'' = Alloc.newvar_above marg in
       if changed || changed' || changed'' then
-        newty2 ~level:lv' (Tarrow((l, marg, mret), ty_arg', ty_res', commu_ok)),
-        newty2 ~level:lv  (Tarrow((l, marg, mret), ty_arg,  ty_res,  commu_ok)),
+        newty2 ~level:lv'
+          (Tarrow((l, marg, mret, binder'), ty_arg', ty_res', commu_ok)),
+        newty2 ~level:lv
+          (Tarrow((l, marg, mret, binder), ty_arg, ty_res, commu_ok)),
         true
       else
         ty', ty, false
@@ -10828,7 +11698,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let work () =
       let te = expand_head env ty_expected' in
       match get_desc te with
-        Tarrow((Nolabel,_,_),_,ty_res0,_) ->
+        Tarrow((Nolabel,_,_,_),_,ty_res0,_) ->
           Some (no_labels ty_res0, get_level te)
       | _ -> None
     in
@@ -10854,26 +11724,46 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
             let expected_mode = {expected_mode with position = RNontail} in
             type_exp ~overwrite env expected_mode sarg)
       in
-      let rec make_args args ty_fun =
+      let rec make_args args contracts ty_fun =
         match get_desc (expand_head env ty_fun) with
-        | Tarrow ((l,_marg,_mret),ty_arg,ty_fun,_) when is_optional l ->
+        | Tarrow ((l,_marg,_mret,binder),ty_arg,ty_fun,_)
+          when is_optional l ->
             let ty =
               type_option_none env (instance (tpoly_get_mono ty_arg))
                 sarg.pexp_loc
             in
+            let contract =
+              { rap_domain = ty_arg;
+                rap_binder = binder;
+                rap_supplied = true;
+                rap_subject = None;
+              }
+            in
             (* CR layouts v5: change value assumption below when we allow
                non-values in structures. *)
-            make_args ((l, Arg (ty, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_marg,_mret),_,ty_fun,_) when is_position l ->
+            make_args ((l, Arg (ty, Jkind.Sort.scannable)) :: args)
+              (contract :: contracts) ty_fun
+        | Tarrow ((l,_marg,_mret,binder),ty_arg,ty_fun,_)
+          when is_position l ->
             let arg = src_pos (Location.ghostify sarg.pexp_loc) [] env in
-            make_args ((l, Arg (arg, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
-            List.rev args, ty_fun, no_labels ty_res'
-        | Tvar _ ->  List.rev args, ty_fun, false
-        |  _ -> [], texp.exp_type, false
+            let contract =
+              { rap_domain = ty_arg;
+                rap_binder = binder;
+                rap_supplied = true;
+                rap_subject = None;
+              }
+            in
+            make_args ((l, Arg (arg, Jkind.Sort.scannable)) :: args)
+              (contract :: contracts) ty_fun
+        | Tarrow ((l,_,_,_),_,ty_res',_)
+          when l = Nolabel || !Clflags.classic ->
+            List.rev args, List.rev contracts, ty_fun, no_labels ty_res'
+        | Tvar _ ->  List.rev args, List.rev contracts, ty_fun, false
+        |  _ -> [], [], texp.exp_type, false
       in
       (* If make_args ends in Tvar, then simple_res is false, no_labels *)
-      let args, ty_fun', simple_res = make_args [] texp.exp_type
+      let args, prefix_contracts, ty_fun', simple_res =
+        make_args [] [] texp.exp_type
       and texp = {texp with exp_type = instance texp.exp_type} in
       if not (simple_res || safe_expect) then begin
         unify_exp ~sexp:sarg env texp ty_expected;
@@ -10882,10 +11772,10 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       let warn = !Clflags.principal &&
         (lv <> generic_level || get_level ty_fun' <> generic_level)
       and ty_fun = instance ty_fun' in
-      let marg, ty_arg, mret, ty_res =
+      let marg, ty_arg, mret, binder, ty_res =
         match get_desc (expand_head env ty_expected) with
-          Tarrow((Nolabel,marg,mret),ty_arg,ty_res,_) ->
-           marg, ty_arg, mret, ty_res
+          Tarrow((Nolabel,marg,mret,binder),ty_arg,ty_res,_) ->
+           marg, ty_arg, mret, binder, ty_res
         | _ -> assert false
       in
       unify_exp ~sexp:sarg env {texp with exp_type = ty_fun} ty_expected;
@@ -10943,8 +11833,41 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
          cases, look toward the end of
          typing-layouts-missing-cmi/function_arg.ml *)
       let func texp =
+        let subject = Option.map (fun _ -> evaluated_argument_subject eta_var)
+            binder
+        in
+        let application_result =
+          match binder, subject with
+          | Some binder, Some subject ->
+            Vox_dependent.instantiate ~binder ~with_:subject ty_res
+          | None, None -> ty_res
+          | (None, Some _) | (Some _, None) -> assert false
+        in
+        let eta_contract =
+          { rap_domain = ty_arg;
+            rap_binder = binder;
+            rap_supplied = true;
+            rap_subject = subject;
+          }
+        in
+        let contracts = prefix_contracts @ [eta_contract] in
+        let exp_extra =
+          if not
+               (type_contains_refinement env texp.exp_type
+                || type_contains_refinement env application_result
+                || Option.is_some binder)
+          then texp.exp_extra
+          else
+            ( Texp_refinement_application
+                { rapp_arguments = contracts;
+                  rapp_result = instance application_result;
+                },
+              texp.exp_loc,
+              [] )
+            :: texp.exp_extra
+        in
         let e =
-          {texp with exp_type = ty_res; exp_desc =
+          {texp with exp_type = application_result; exp_extra; exp_desc =
            Texp_apply
              (texp,
               args @ [Nolabel, Arg (eta_var, arg_sort)],
@@ -10952,7 +11875,9 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
               Alloc.proj_comonadic Areality (Alloc.disallow_right mret),
               None)}
         in
-        let e = {texp with exp_type = ty_res; exp_desc = Texp_exclave e} in
+        let e =
+          {texp with exp_type = application_result; exp_desc = Texp_exclave e}
+        in
         let cases = [ case eta_pat e ] in
         let cases_loc = { texp.exp_loc with loc_ghost = true } in
         let param, param_uid = name_cases "param" cases in
@@ -10963,7 +11888,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
                 Tfunction_cases
                   { fc_cases = cases; fc_partial = Total; fc_param = param;
                     fc_param_debug_uid = param_uid; fc_env = env;
-                    fc_ret_type = ty_res; fc_loc = cases_loc;
+                    fc_ret_type = application_result; fc_loc = cases_loc;
                     fc_exp_extra = []; fc_attributes = [];
                     fc_arg_mode = Alloc.disallow_right marg;
                     fc_arg_sort = arg_sort;
@@ -11012,7 +11937,10 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
 and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       ~enclosing_totality (lbl, arg) =
   match arg with
-  | Arg (Unknown_arg { sarg; ty_arg_mono; mode_arg; sort_arg }) ->
+  | Arg
+      (Unknown_arg
+        { sarg; ty_arg_mono; binder = _; mode_arg; sort_arg;
+          mode_fun = _ }) ->
       let expected_mode, mode_arg =
         mode_argument ~funct ~index ~position_and_mode ~partial_app
           ~enclosing_totality mode_arg in
@@ -11026,8 +11954,10 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
        | Position _ ->
            unify_exp ~sexp:sarg env arg (instance Predef.type_lexing_position));
       (lbl, Arg (arg, mode_arg, sort_arg), None)
-  | Arg (Known_arg { sarg; ty_arg; ty_arg0;
-                     mode_arg; wrapped_in_some; sort_arg }) ->
+  | Arg
+      (Known_arg
+        { sarg; ty_arg; ty_arg0; binder = _; mode_arg; wrapped_in_some;
+          sort_arg; commuted = _; mode_fun = _ }) ->
       let expected_mode, mode_arg =
         mode_argument ~funct ~index ~position_and_mode ~partial_app
           ~enclosing_totality mode_arg in
@@ -11037,8 +11967,8 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
           let ty_arg0' = tpoly_get_mono ty_arg0 in
           (* The arrow retains the refined domain as the durable contract
              record.  The supplied expression is checked at its carrier. *)
-          let ty_arg' = refinement_skeleton ty_arg' in
-          let ty_arg0' = refinement_skeleton ty_arg0' in
+          let ty_arg' = refinement_skeleton env ty_arg' in
+          let ty_arg0' = refinement_skeleton env ty_arg0' in
           if wrapped_in_some then begin
             type_option_some
               env expected_mode sarg ty_arg' ty_arg0', None
@@ -11109,7 +12039,7 @@ and type_application env app_loc expected_mode position_and_mode
   match sargs with
   | (* Special case for ignore: avoid discarding warning *)
     [Parsetree.Nolabel, sarg] when is_ignore funct ->
-      let {ty_arg; arg_mode; ty_ret; ret_mode} =
+      let {ty_arg; arg_mode; ty_ret; ret_mode; arrow_binder} =
         with_local_level_generalize_structure_if_principal (fun () ->
           filter_arrow_mono env (instance funct.exp_type) Nolabel)
       in
@@ -11128,7 +12058,12 @@ and type_application env app_loc expected_mode position_and_mode
       let exp = type_expect env arg_mode sarg (mk_expected ty_arg) in
       check_partial_application ~statement:false exp;
       ([Nolabel, Arg (exp, arg_sort), None],
-       ty_ret, ret_mode, position_and_mode)
+       ty_ret, ret_mode, position_and_mode,
+       [ { rap_domain = ty_arg;
+           rap_binder = arrow_binder;
+           rap_supplied = true;
+           rap_subject = None;
+         } ])
   | _ ->
     (* See Note [Type-checking applications] for an overview *)
       let ty = funct.exp_type in
@@ -11149,7 +12084,8 @@ and type_application env app_loc expected_mode position_and_mode
            true)
         end
       in
-      let ty_ret, mode_ret, args, position_and_mode =
+      let ty_ret, mode_ret, args, position_and_mode,
+          refinement_application =
         with_local_level_generalize_structure_if_principal begin fun () ->
           (* Consider for example the application
                [f n]
@@ -11171,20 +12107,140 @@ and type_application env app_loc expected_mode position_and_mode
           let position_and_mode =
             if partial_app then position_and_mode_default else position_and_mode
           in
-          let args =
-            List.mapi (fun index arg ->
+          let instantiate_type binder subject type_ =
+            Vox_dependent.instantiate ~binder ~with_:subject type_
+          in
+          let instantiate_untyped_arg binder subject (label, arg) =
+            let arg =
+              match arg with
+              | Arg (Known_arg known) ->
+                Arg
+                  (Known_arg
+                     { known with
+                       ty_arg =
+                         instantiate_type binder subject known.ty_arg;
+                       ty_arg0 =
+                         instantiate_type binder subject known.ty_arg0;
+                     })
+              | Arg (Unknown_arg unknown) ->
+                Arg
+                  (Unknown_arg
+                     { unknown with
+                       ty_arg_mono =
+                         instantiate_type binder subject
+                           unknown.ty_arg_mono;
+                     })
+              | Arg (Eliminated_optional_arg eliminated) ->
+                Arg
+                  (Eliminated_optional_arg
+                     { eliminated with
+                       ty_arg =
+                         instantiate_type binder subject eliminated.ty_arg;
+                     })
+              | Omitted omitted ->
+                Omitted
+                  { omitted with
+                    ty_arg =
+                      instantiate_type binder subject omitted.ty_arg;
+                  }
+            in
+            label, arg
+          in
+          let supplied_binder = function
+            | _, Arg (Known_arg { binder; _ })
+            | _, Arg (Unknown_arg { binder; _ }) -> binder
+            | _, Arg (Eliminated_optional_arg _)
+            | _, Omitted _ -> None
+          in
+          let refinement_application_argument ~subject = function
+            | _, Arg (Known_arg { ty_arg; binder; _ }) ->
+              { rap_domain = ty_arg; rap_binder = binder;
+                rap_supplied = true; rap_subject = subject }
+            | _, Arg (Unknown_arg { ty_arg_mono; binder; _ }) ->
+              { rap_domain = ty_arg_mono; rap_binder = binder;
+                rap_supplied = true; rap_subject = subject }
+            | _, Arg (Eliminated_optional_arg { ty_arg; _ }) ->
+              { rap_domain = ty_arg; rap_binder = None;
+                rap_supplied = true; rap_subject = None }
+            | _, Omitted { ty_arg; binder; _ } ->
+              { rap_domain = ty_arg; rap_binder = binder;
+                rap_supplied = false; rap_subject = None }
+          in
+          let rec type_args index ty_ret rev_args rev_contracts = function
+            | [] -> List.rev rev_args, ty_ret, List.rev rev_contracts
+            | untyped_arg :: remaining ->
+              let binder = supplied_binder untyped_arg in
+              let typed_arg =
                 type_apply_arg env ~app_loc ~funct ~index
                   ~position_and_mode ~partial_app
-                  ~enclosing_totality:expected_mode.enclosing_totality arg)
-              untyped_args
+                  ~enclosing_totality:expected_mode.enclosing_totality
+                  untyped_arg
+              in
+              let subject, remaining, ty_ret =
+                match binder, typed_arg with
+                | Some binder, (_, Arg (argument, _, _), _) ->
+                  let subject = evaluated_argument_subject argument in
+                  ( Some subject,
+                    List.map
+                      (instantiate_untyped_arg binder subject)
+                      remaining,
+                    instantiate_type binder subject ty_ret )
+                | None, _ -> None, remaining, ty_ret
+                | Some _, (_, Omitted _, _) -> assert false
+              in
+              let contract =
+                refinement_application_argument ~subject untyped_arg
+              in
+              type_args (index + 1) ty_ret (typed_arg :: rev_args)
+                (contract :: rev_contracts) remaining
+          in
+          let args, ty_ret, refinement_application =
+            type_args 0 ty_ret [] [] untyped_args
+          in
+          let omitted_binders =
+            List.fold_left
+              (fun binders (_, argument, _) ->
+                match argument with
+                | Omitted { binder = Some binder; _ } ->
+                  Ident.Set.add binder binders
+                | Omitted { binder = None; _ } | Arg _ -> binders)
+              Ident.Set.empty args
+          in
+          let refinement_application, deferred_goals =
+            List.fold_right2
+              (fun (_, argument, _) contract (contracts, goals) ->
+                match argument,
+                      application_domain_refinement contract.rap_domain
+                with
+                | Arg (argument, _, _), Some refinement
+                  when not
+                         (Ident.Set.disjoint omitted_binders
+                            (Refinement.free_bound_identifiers
+                               refinement.ref_pred)) ->
+                  let subject = evaluated_argument_subject argument in
+                  let goal =
+                    Refinement.subst ~id:refinement.ref_view.rb_id
+                      ~by:subject refinement.ref_pred
+                  in
+                  let contract =
+                    { contract with
+                      rap_domain =
+                        Vox_dependent.logical_type contract.rap_domain;
+                    }
+                  in
+                  contract :: contracts, goal :: goals
+                | (Arg _ | Omitted _), (Some _ | None) ->
+                  contract :: contracts, goals)
+              args refinement_application ([], [])
           in
           (* example: type-check [n] and generate [None] for [?opt].
              [args] becomes [(Label "a", Omitted bar);
                              (Optional "opt", Arg None);
                              (Nolabel, Arg n)] *)
-          let ty_ret, mode_ret, args =
+          let ty_ret, mode_ret, args, refinement_application =
             type_omitted_parameters_and_build_result_type expected_mode env
-              app_loc ty_ret mode_ret args
+              app_loc ty_ret mode_ret args refinement_application
+              deferred_goals
           in
           check_curried_application_complete ~env ~app_loc untyped_args;
           (* example:
@@ -11192,10 +12248,12 @@ and type_application env app_loc expected_mode position_and_mode
              [args] becomes [(Label "a", Omitted ());
                              (Optional "opt", Arg None);
                              (Nolabel, Arg n)] *)
-          ty_ret, mode_ret, args, position_and_mode
+          ty_ret, mode_ret, args, position_and_mode,
+          refinement_application
         end
       in
-      args, ty_ret, mode_ret, position_and_mode
+      args, ty_ret, mode_ret, position_and_mode,
+      refinement_application
 
 and type_tuple ~overwrite ~loc ~env ~(expected_mode : expected_mode) ~ty_expected
     ~explanation ~attributes sexpl =
@@ -11552,7 +12610,11 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
     (fun () -> type_exp env (mode_max_with_position position) sexp, sort)
   ~before_generalize: begin fun (exp, _sort) ->
     let subexp = final_subexpression exp in
-    let ty = expand_head env exp.exp_type in
+    (* A refined statement has the runtime type of its carrier.  In
+       particular [unit{p}] is a unit-valued statement, so it should neither
+       trigger Warning 10 nor be unified as an abstract non-unit value. *)
+    let carrier = refinement_skeleton env exp.exp_type in
+    let ty = expand_head env carrier in
     if is_Tvar ty
     && get_level ty > get_current_level ()
     && not (allow_polymorphic subexp) then
@@ -11561,6 +12623,10 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
         Warnings.Nonreturning_statement;
     if !Clflags.strict_sequence then
       with_explanation explanation (fun () ->
+        let exp =
+          if carrier == exp.exp_type then exp
+          else { exp with exp_type = ty }
+        in
         unify_exp ~sexp env exp expected_ty)
     else begin
       check_partial_application ~statement:true exp;
@@ -11595,6 +12661,7 @@ and map_half_typed_cases
         -> when_env:_ (* environment with module/pattern variables *)
         -> ext_env:_ (* when_env + continuation var*)
         -> cont:_
+        -> pat_vars:pattern_variable list
         -> ty_expected:_ (* type to check body in scope of *)
         -> ty_infer:_ (* type to infer for body *)
         -> contains_gadt:_ (* whether the pattern contains a GADT *)
@@ -11762,7 +12829,8 @@ and map_half_typed_cases
                 type information from preceding branches *)
             duplicate_type ty_res
           else ty_res in
-        type_body case_data pat ~when_env ~ext_env ~cont ~ty_expected
+        type_body case_data pat ~when_env ~ext_env ~cont ~pat_vars:pvs
+          ~ty_expected
           ~ty_infer:ty_res' ~contains_gadt)
     conts half_typed_cases
   end in
@@ -11844,10 +12912,15 @@ and map_half_typed_cases
 (* Typing of match cases *)
 and type_cases
     : type k . k pattern_category ->
-           _ -> _ -> _ -> _ -> _ -> _ -> ?conts:_ -> check_if_total:bool -> _ ->
+           _ -> _ -> _ -> _ -> _ -> _ -> ?conts:_ ->
+           ?dependent_parameter:dependent_case_parameter ->
+           ?case_parameter_origins:case_parameter_origins ->
+           check_if_total:bool -> _ ->
            Parsetree.case list -> k case list * partial
   = fun category env pat_mode expr_mode
-        ty_arg sort_arg ty_res_explained ?conts ~check_if_total loc caselist ->
+        ty_arg sort_arg ty_res_explained ?conts ?dependent_parameter
+        ?case_parameter_origins
+        ~check_if_total loc caselist ->
   let { ty = ty_res; explanation } = ty_res_explained in
   let caselist =
     List.map (fun case -> Parmatch.untyped_case case, case) caselist
@@ -11873,9 +12946,68 @@ and type_cases
   map_half_typed_cases ?conts category env pat_mode ty_arg sort_arg ty_res loc
     caselist ~check_if_total
     ~type_body:begin
-      fun { pc_guard; pc_rhs } pat ~when_env ~ext_env ~cont ~ty_expected
-        ~ty_infer ~contains_gadt:_ ->
+      fun { pc_lhs; pc_guard; pc_rhs } pat ~when_env ~ext_env ~cont ~pat_vars
+        ~ty_expected ~ty_infer ~contains_gadt:_ ->
         let cont = Option.map (fun (id,_) -> id) cont in
+        let parameters =
+          match dependent_parameter, case_parameter_origins with
+          | None, None -> []
+          | _ ->
+            List.filter_map
+              (fun name ->
+                List.find_map
+                  (fun variable ->
+                    if variable.pv_kind <> Continuation_var
+                       && String.equal
+                            (Ident.name variable.pv_id) name.txt
+                    then Some (variable.pv_id, variable.pv_type)
+                    else None)
+                  pat_vars)
+              (vox_untyped_root_alias_names pc_lhs)
+        in
+        let parameter =
+          match parameters with
+          | (parameter, _) :: _ -> Some parameter
+          | [] -> None
+        in
+        let ext_env =
+          match case_parameter_origins, parameter with
+          | Some _, Some _ ->
+            let value_origins = vox_case_root_value_origins category pat in
+            Env.add_dependent_parameters
+              ~value_origins ~allow_concrete_origins:true parameters ext_env
+          | _ -> ext_env
+        in
+        let ext_env, ty_expected =
+          match dependent_parameter, parameter with
+          | Some (Open_case_parameter (binder, _)), Some parameter ->
+            let ext_env =
+              match case_parameter_origins with
+              | Some _ -> ext_env
+              | None -> Env.add_dependent_parameters parameters ext_env
+            in
+            let ty_expected =
+              Vox_dependent.rename ~binder ~as_:parameter ty_expected
+              |> vox_canonicalize_aliases parameter parameters
+            in
+            ext_env, ty_expected
+          | Some (Infer_case_parameter (_, _)), Some parameter ->
+            let ext_env =
+              match case_parameter_origins with
+              | Some _ -> ext_env
+              | None -> Env.add_dependent_parameters parameters ext_env
+            in
+            let ty_expected =
+              vox_canonicalize_aliases parameter parameters ty_expected
+            in
+            ext_env, ty_expected
+          | Some (Open_case_parameter _), None ->
+            Location.raise_errorf ~loc:pat.pat_loc
+              "a dependent function case requires a root variable or alias \
+               pattern"
+          | Some (Infer_case_parameter _), None -> ext_env, ty_expected
+          | None, _ -> ext_env, ty_expected
+        in
         let guard =
           match pc_guard with
           | None -> None
@@ -11891,8 +13023,86 @@ and type_cases
                 (mk_expected ~explanation:When_guard Predef.type_bool))
         in
         let exp =
-          type_expect ext_env expr_mode pc_rhs (mk_expected ?explanation ty_expected)
+          match dependent_parameter with
+          | None ->
+            type_expect ext_env expr_mode pc_rhs
+              (mk_expected ?explanation ty_expected)
+          | Some (Open_case_parameter _) ->
+            begin match get_desc ty_expected with
+            | Trefine refinement ->
+              let exp, retain_constraint =
+                type_refinement_annotation ext_env expr_mode
+                  ~loc:pc_rhs.pexp_loc ~explanation pc_rhs ty_expected
+                  refinement
+              in
+              if not retain_constraint then exp
+              else
+                { exp with
+                  exp_extra =
+                    ( Texp_refinement_constraint ty_expected,
+                      exp.exp_loc,
+                      [] )
+                    :: exp.exp_extra;
+                }
+            | _ ->
+              type_expect ext_env expr_mode pc_rhs
+                (mk_expected ?explanation ty_expected)
+            end
+          | Some (Infer_case_parameter (common, _)) ->
+            begin match parameter with
+            | None ->
+              let exp = type_exp ext_env expr_mode pc_rhs in
+              let inferred_type = refinement_skeleton ext_env exp.exp_type in
+              with_explanation explanation (fun () ->
+                unify_exp_types pc_rhs.pexp_loc ext_env inferred_type
+                  (instance ty_expected));
+              exp
+            | Some parameter ->
+              let exp = type_exp ext_env expr_mode pc_rhs in
+              let inferred_type =
+                vox_canonicalize_aliases parameter parameters exp.exp_type
+                |> Vox_dependent.rename ~binder:parameter ~as_:common
+              in
+              with_explanation explanation (fun () ->
+                unify_exp_types pc_rhs.pexp_loc ext_env inferred_type
+                  (instance ty_expected));
+              exp
+            end
         in
+        begin match case_parameter_origins with
+        | None -> ()
+        | Some origins ->
+          let imposed_type =
+            List.find_map
+              (fun (id, _) ->
+                Env.dependent_value_imposed_type id ext_env)
+              parameters
+          in
+          Option.iter
+            (check_scope_escape pc_rhs.pexp_loc origins.outer_env
+               origins.outer_level)
+            imposed_type;
+          origins.branch_impositions :=
+            (pc_rhs.pexp_loc, imposed_type) :: !(origins.branch_impositions)
+        end;
+        let equivalent_ids =
+          List.fold_left
+            (fun ids (id, _) -> Ident.Set.add id ids)
+            Ident.Set.empty parameters
+        in
+        if Option.is_some dependent_parameter then
+          List.iter
+            (fun variable ->
+              if variable.pv_kind <> Continuation_var
+                 && not (Ident.Set.mem variable.pv_id equivalent_ids)
+                 && Vox_dependent.mentions_identifier
+                      variable.pv_id exp.exp_type
+              then
+                Location.raise_errorf ~loc:pat.pat_loc
+                  "a dependent function result cannot refer to non-root \
+                   pattern variable %s"
+                  (Ident.name variable.pv_id))
+            pat_vars;
         {
           c_lhs = pat;
           c_cont = cont;
@@ -11920,7 +13130,8 @@ and type_function_cases_expect
     env expected_mode ty_expected loc cases attrs ~first ~in_function =
   Builtin_attributes.warning_scope attrs begin fun () ->
     let env,
-        { filtered_arrow = { ty_arg; ty_ret; arg_mode; ret_mode };
+        { filtered_arrow =
+            { ty_arg; ty_ret; arg_mode; ret_mode; arrow_binder };
           arg_sort; ret_sort;
           ty_arg_mono; expected_pat_mode; expected_inner_mode; alloc_mode;
         } =
@@ -11929,17 +13140,88 @@ and type_function_cases_expect
         ~ret_mode_annots:Mode.Alloc.Const.Option.none
         ~is_first_val_param:first ~is_final_val_param:true
     in
+    let original_arrow_binder = arrow_binder in
+    let inferred_binder =
+      match arrow_binder with
+      | Some _ -> None
+      | None ->
+        if List.exists
+             (fun (case : Parsetree.case) ->
+               vox_expression_has_vox case.pc_rhs)
+             cases
+        then Some (Ident.create_local "argument")
+        else None
+    in
+    let dependent_parameter =
+      match arrow_binder, inferred_binder with
+      | Some binder, None ->
+        Some
+          (Open_case_parameter
+             (binder, refinement_logical_type ty_arg_mono))
+      | None, Some binder ->
+        Some
+          (Infer_case_parameter
+             (binder, refinement_logical_type ty_arg_mono))
+      | None, None -> None
+      | Some _, Some _ -> assert false
+    in
+    let case_parameter_origins =
+      { branch_impositions = ref [];
+        outer_env = env;
+        outer_level = get_current_level ();
+      }
+    in
     let cases, partial =
       type_cases Value env
         expected_pat_mode expected_inner_mode ty_arg_mono arg_sort
-        (mk_expected ty_ret) ~check_if_total:true loc cases
+        (mk_expected ty_ret) ?dependent_parameter ~case_parameter_origins
+        ~check_if_total:true loc cases
+    in
+    let imposed_parameter_type =
+      List.fold_left
+        (fun imposed (case_loc, case_imposed) ->
+          match imposed, case_imposed with
+          | imposed, None -> imposed
+          | None, Some case_imposed -> Some case_imposed
+          | Some imposed, Some case_imposed ->
+            if Ctype.is_equal env false [imposed] [case_imposed]
+            then Some imposed
+            else
+              Location.raise_errorf ~loc:case_loc
+                "function cases impose inconsistent parameter refinements")
+        None
+        (List.rev !(case_parameter_origins.branch_impositions))
+    in
+    let arrow_binder =
+      match arrow_binder, inferred_binder with
+      | Some binder, None -> Some binder
+      | None, Some binder when Vox_dependent.mentions binder ty_ret ->
+        Some binder
+      | None, (None | Some _) -> None
+      | Some _, Some _ -> assert false
     in
     let ty_fun =
       instance
         (newgenty
-           (Tarrow ((Nolabel, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+           (Tarrow
+              ((Nolabel, arg_mode, ret_mode, arrow_binder),
+               vox_parameter_domain ty_arg imposed_parameter_type,
+               ty_ret, commu_ok)))
     in
-    unify_exp_types loc env ty_fun (instance ty_expected);
+    check_refinement_scope ~loc ~env
+      ~program_scope:(Env.refinement_program_scope env) ty_fun;
+    let ty_fun_for_unification =
+      if Option.equal Ident.same original_arrow_binder arrow_binder
+         && Option.is_none imposed_parameter_type
+      then ty_fun
+      else
+        instance
+          (newgenty
+             (Tarrow
+                ((Nolabel, arg_mode, ret_mode, original_arrow_binder),
+                 ty_arg, ty_ret, commu_ok)))
+    in
+    unify_exp_types loc env ty_fun_for_unification (instance ty_expected);
     let param , param_uid = name_cases "param" cases in
     let cases =
       { fc_cases = cases;
@@ -11997,6 +13279,11 @@ and type_effect_cases
 and type_let ?check ?check_strict ?(force_toplevel = false)
     ?(strip_refinement = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
+  let spat_sexp_list =
+    match rec_flag with
+    | Recursive -> List.map vox_hoist_value_binding spat_sexp_list
+    | Nonrecursive -> spat_sexp_list
+  in
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
     match spat_sexp_list with
@@ -12138,6 +13425,13 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       let continuation_env =
         add_pattern_variables ~strip_refinement new_env pvs
       in
+      let continuation_env =
+        if existential_context = At_toplevel
+        then
+          Env.add_refinement_stable_values
+            (List.map (fun pv -> pv.pv_id) pvs) continuation_env
+        else continuation_env
+      in
       let mode_pat_typ_list =
         List.map
           (fun (m, pat) ->
@@ -12156,8 +13450,44 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         let exp_env =
           if is_recursive
           then
+            let recursive_rhs_pvs =
+              List.map2
+                (fun pv (_, pattern) ->
+                  let annotated_type =
+                    if type_contains_refinement pattern.pat_env pattern.pat_type
+                    then Some pattern.pat_type
+                    else
+                      List.find_map
+                        (function
+                          | ( Tpat_constraint (core_type, _),
+                              _,
+                              _ )
+                            when type_contains_refinement core_type.ctyp_env
+                                   core_type.ctyp_type ->
+                            Some core_type.ctyp_type
+                          | _ -> None)
+                        pattern.pat_extra
+                  in
+                  match annotated_type with
+                  | Some pv_type -> { pv with pv_type }
+                  | None -> pv)
+                rhs_pvs pat_list
+            in
             let rhs_env =
-              add_pattern_variables ~strip_refinement new_env rhs_pvs
+              (* Recursive calls must see the checked whole-function
+                 contract so their dependent conclusions are available to
+                 the body.  Stripping here reduces them to the carrier and
+                 irreversibly loses application metadata; continuation
+                 bindings remain governed by the caller's stripping policy. *)
+              add_pattern_variables ~strip_refinement:false new_env
+                recursive_rhs_pvs
+            in
+            let rhs_env =
+              if existential_context = At_toplevel
+              then
+                Env.add_refinement_stable_values
+                  (List.map (fun pv -> pv.pv_id) recursive_rhs_pvs) rhs_env
+              else rhs_env
             in
             add_module_variables rhs_env mvs
           else env
@@ -12275,7 +13605,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         let p =
           match p.pat_desc, e.exp_desc with
           | Tpat_var _, Texp_function _
-            when type_contains_refinement e.exp_type ->
+            when type_contains_refinement e.exp_env e.exp_type ->
             { p with pat_type = e.exp_type }
           | _ -> p
         in
@@ -12297,6 +13627,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ) l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
+  (* Unlike [pat_bound_idents_full], this typing-facing traversal preserves
+     unresolved sort variables instead of defaulting them for translation. *)
+  let bound_idents = Typedtree.let_bound_idents_full l in
   (* A local binder can acquire its refinement only while its RHS is typed.
      Re-enter it after generalization so the continuation sees the skeleton;
      the typed pattern remains the refinement record for verification. *)
@@ -12306,27 +13639,24 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           match pv.pv_value_kind with
           | Val_mut _ -> env
           | _ ->
-            begin match Env.find_value (Path.Pident pv.pv_id) env with
-            | lazy_description ->
-              let description =
-                Subst.Lazy.force_value_description lazy_description
-              in
-              let bound_type =
-                List.find_map
-                  (fun binding ->
-                    match binding.vb_pat.pat_desc with
-                    | Tpat_var { id; _ } when Ident.same id pv.pv_id ->
-                      Some binding.vb_pat.pat_type
-                    | _ -> None)
-                  l
-                |> Option.value ~default:description.val_type
-              in
-              if not (type_contains_refinement bound_type)
-              then env
-              else begin
+            let bound_type =
+              List.find_map
+                (fun (id, _, type_, _, _) ->
+                  if Ident.same id pv.pv_id then Some type_ else None)
+                bound_idents
+              |> Option.value ~default:pv.pv_type
+            in
+            if not (type_contains_refinement env bound_type)
+            then env
+            else begin
+              match Env.find_value (Path.Pident pv.pv_id) env with
+              | lazy_description ->
+                let description =
+                  Subst.Lazy.force_value_description lazy_description
+                in
                 let val_type =
                   if strip_refinement
-                  then refinement_skeleton bound_type
+                  then refinement_skeleton env bound_type
                   else bound_type
                 in
                 if eq_type val_type description.val_type
@@ -12334,11 +13664,35 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 else
                   Env.add_value ~mode:pv.pv_mode pv.pv_id
                     { description with val_type } env
-              end
-            | exception Not_found -> env
+              | exception Not_found -> env
             end)
         new_env pvs
   in
+  let new_env =
+    if is_recursive || mutable_flag = Asttypes.Mutable
+    then new_env
+    else
+      List.fold_left
+        (fun env binding ->
+          match vox_immutable_alias_source binding.vb_expr with
+          | None -> env
+          | Some source ->
+            List.fold_left
+              (fun env alias ->
+                Env.copy_dependent_value_origin
+                  ~source_env:binding.vb_expr.exp_env ~source ~alias env)
+              env (vox_immutable_alias_binders binding.vb_pat))
+        new_env l
+  in
+  let program_scope =
+    if existential_context = At_toplevel
+    then Ident.Set.empty
+    else Env.refinement_program_scope new_env
+  in
+  List.iter
+    (fun (_, name, type_, _, _) ->
+      check_refinement_scope ~loc:name.loc ~env:new_env ~program_scope type_)
+    bound_idents;
   (l, new_env)
 
 and type_let_def_wrap_warnings
@@ -12507,7 +13861,9 @@ and type_andops env sarg sands expected_sort expected_ty =
             let ty_result, op_result_sort =
               new_rep_var ~why:Function_result ()
             in
-            let arrow_desc = (Nolabel, Alloc.legacy, Alloc.legacy) in
+            let arrow_desc =
+              (Nolabel, Alloc.legacy, Alloc.legacy, None)
+            in
             let ty_rest_fun =
               newty (Tarrow(arrow_desc, newmono ty_arg, ty_result, commu_ok)) in
             let ty_op =
@@ -12564,6 +13920,7 @@ and type_n_ary_function
       ~explanation ~attributes
       (params, constraint_, body)
     =
+    let env = Env.enter_dependent_value_scope env in
     let in_function = mk_expected (instance ty_expected) ?explanation, loc in
     let { function_ = exp_type, result_params, body;
           newtypes; params_contain_gadt = contains_gadt;
@@ -12614,7 +13971,7 @@ and type_n_ary_function
                       let new_mode_var () = Mode.Alloc.newvar () in
                       (newty
                          (Tarrow
-                            ( (arg_label, new_mode_var (), new_mode_var ())
+                            ( (arg_label, new_mode_var (), new_mode_var (), None)
                             , new_ty_var Function_argument
                             , new_ty_var Function_result
                             , commu_ok )));
@@ -12670,6 +14027,8 @@ and type_n_ary_function
         Zero_alloc.create_const zero_alloc
     in
     let alloc_mode = Mode.Alloc.disallow_left fun_alloc_mode in
+    check_refinement_scope ~loc ~env
+      ~program_scope:(Env.refinement_program_scope env) exp_type;
     re
       { exp_desc =
           Texp_function
@@ -13307,7 +14666,7 @@ let escaping_submode_reason_hint =
     let get_non_local_arity ty =
       let rec loop sureness n ty =
         match get_desc ty with
-        | Tarrow ((_, _, res_mode), _, res_ty, _) ->
+        | Tarrow ((_, _, res_mode, _), _, res_ty, _) ->
           begin match
             Locality.Guts.check_const (Alloc.proj_comonadic Areality res_mode)
           with
@@ -14417,25 +15776,18 @@ let unsupported_refinement_expression expression construct =
          expression.exp_env,
          Refinement_expression_not_supported construct ))
 
-let lower_refinement_expression ~view expression =
+let lower_refinement_expression ?view expression =
   (* Refinements are propositions about program values, not distinct logical
      sorts.  In particular, a function mentioned in a predicate may have a
      refined domain or result in the program type, while applications in the
      predicate IR operate on their carrier types.  Preserve the arrow shape
      but erase refinements along it before validating the lowered term. *)
-  let rec logical_type type_ =
-    match get_desc type_ with
-    | Trefine { ref_skeleton; _ } -> logical_type ref_skeleton
-    | Tarrow (label, argument, result, commu) ->
-      Btype.newgenty
-        (Tarrow
-           ( label,
-             logical_type argument,
-             logical_type result,
-             commu ))
-    | Tpoly (body, variables) ->
-      Btype.newgenty (Tpoly (logical_type body, variables))
-    | _ -> type_
+  let logical_type = refinement_logical_type in
+  let local_binders = ref Ident.Map.empty in
+  let add_local_binder id type_ =
+    local_binders :=
+      Ident.Map.add id { rb_id = id; rb_type = logical_type type_ }
+        !local_binders
   in
   let variable_binder pattern =
     match pattern.pat_desc with
@@ -14460,16 +15812,28 @@ let lower_refinement_expression ~view expression =
     | Texp_ident { path = Pident id; _ } when Ident.Set.mem id bound ->
       create (Rexp_ident (Rbound id))
     | Texp_ident { path = Pident id; _ } ->
-      begin match Env.dependent_parameter_label id expression.exp_env with
-      | Some label ->
-        create (Rexp_ident (Rfree (Rparameter (label, id))))
-      | None when Env.is_in_signature expression.exp_env ->
+      begin
+        match
+          Env.is_in_signature expression.exp_env,
+          Env.is_refinement_signature_value id expression.exp_env
+        with
+      | true, true ->
         (* A value mentioned by another declaration in the same signature is
            signature-relative.  Its source name, unlike its transient stamp,
            survives signature copying, sealing, and functor instantiation. *)
         create (Rexp_ident (Rfree (Rsibling (Ident.name id))))
-      | None ->
+      | true, false ->
+        (* A value inherited from an enclosing signature or structure is not a
+           sibling of this signature.  Keep its resolved identity so the
+           enclosing signature's substitution projects it at the right level. *)
         create (Rexp_ident (Rfree (Rglobal (Pident id))))
+      | false, _
+        when Env.is_refinement_stable_value id expression.exp_env
+             || Ident.is_global_or_predef id ->
+        create (Rexp_ident (Rfree (Rglobal (Pident id))))
+      | false, _ ->
+        add_local_binder id expression.exp_type;
+        create (Rexp_ident (Rbound id))
       end
     | Texp_ident { path; _ } ->
       let reference = if function_head then Rapp path else Rglobal path in
@@ -14601,7 +15965,16 @@ let lower_refinement_expression ~view expression =
     | _ ->
       unsupported_refinement_expression expression "This expression form"
   in
-  lower ~function_head:false (Ident.Set.singleton view.rb_id) expression
+  let bound =
+    List.fold_left
+      (fun bound id -> Ident.Set.add id bound)
+      (Option.fold ~none:Ident.Set.empty
+         ~some:(fun view -> Ident.Set.singleton view.rb_id)
+         view)
+      (Env.dependent_parameter_ids expression.exp_env)
+  in
+  let expression = lower ~function_head:false bound expression in
+  expression, List.map snd (Ident.Map.bindings !local_binders)
 
 exception Unresolved_refinement_type of type_expr
 
@@ -14637,8 +16010,28 @@ let reject_unresolved_refinement_types skeleton predicate =
   Refinement.iter_types check_predicate_root predicate
 
 let type_refinement env loc skeleton predicate =
+  let dependent_bindings = Env.dependent_parameter_bindings env in
+  let dependent_values =
+    List.filter_map
+      (fun (id, type_) ->
+        match Env.find_value_definition_exn id env with
+        | description, mode ->
+          Some
+            ( id,
+              type_,
+              Subst.Lazy.force_value_description description,
+              mode )
+        | exception Not_found -> None)
+      dependent_bindings
+  in
   Typetexp.TyVarEnv.with_reentrant_scope (fun () ->
     with_refinement_typing_frame ~loc env (fun env ->
+      let dependent_binders =
+        List.map
+          (fun (id, type_) ->
+            { rb_id = id; rb_type = refinement_logical_type type_ })
+          dependent_bindings
+      in
       let sort =
         match
           Ctype.type_sort
@@ -14725,6 +16118,12 @@ let type_refinement env loc skeleton predicate =
       let env =
         Env.add_value ~mode:self_mode ref_view.rb_id description env
       in
+      let env =
+        List.fold_left
+          (fun env (id, type_, description, mode) ->
+            Env.add_value ~mode id { description with val_type = type_ } env)
+          env dependent_values
+      in
       let predicate = replace_refinement_holes predicate in
       let predicate_mode =
         Mode.Value.of_const
@@ -14736,7 +16135,7 @@ let type_refinement env loc skeleton predicate =
         type_expect env ~mode:predicate_mode predicate
           (mk_expected Predef.type_bool)
       in
-      let ref_pred =
+      let ref_pred, local_binders =
         lower_refinement_expression ~view:ref_view typed_predicate
       in
       (* Modelability: a predicate that actually reads a self whose type is not
@@ -14760,7 +16159,7 @@ let type_refinement env loc skeleton predicate =
       begin
         match
           Refinement.validate ~equal_type ~bool_type:Predef.type_bool
-            ~binders:[ref_view] ref_pred
+            ~binders:(ref_view :: dependent_binders @ local_binders) ref_pred
         with
         | Ok () -> ()
         | Error validation_error ->

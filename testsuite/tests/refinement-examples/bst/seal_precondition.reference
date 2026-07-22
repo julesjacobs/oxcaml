@@ -1,6 +1,9 @@
 type t = Empty
 val member : int -> t @ logical -> bool
-val member_def : int -> t @ logical -> unit{ member _query _tree = true }
+val member_def :
+  (_query : int) ->
+  (_tree : t) @ logical -> unit{ member _query _tree = true }
 val test :
-  q:int ->
-  tree:t @ logical -> pre:unit{ member q tree = true } -> unit{ q = q }
+  q:(q : int) ->
+  tree:(tree : t) @ logical ->
+  pre:unit{ member q tree = true } -> unit{ q = q }

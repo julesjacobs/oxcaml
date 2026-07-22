@@ -158,7 +158,7 @@ let rec lean_sort context location = function
     ^ lean_sort context location result ^ ")"
   | Sdata key -> (data_for_key context location key).data_name
 
-let inhabited_data_keys context =
+let inhabited_data_keys context fixed_abstract_variables =
   let rec sort_is_inhabited inhabited = function
     | Sint | Sbool -> true
     | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
@@ -208,11 +208,58 @@ let inhabited_data_keys context =
                            | Val_anc _; _ } -> None
           | exception Not_found -> None
           end
-        | (Rfun _ | Rsibling _ | Rparameter _ | Rglobal _ | Rapp _), _ ->
+        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ ->
           None)
       context.references
   in
-  close trusted_abstract_constants
+  let trusted_environment_constants =
+    Env.fold_values
+      (fun _name _path lazy_description _mode inhabited ->
+        match Subst.Lazy.force_value_description lazy_description with
+        | { val_kind = Val_reg _; val_type; _ } ->
+          let rec data_instance type_ =
+            let type_ = Ctype.expand_head_opt context.env type_ in
+            match get_desc type_ with
+            | Trefine refinement -> data_instance refinement.ref_skeleton
+            | Tpoly (body, []) -> data_instance body
+            | Tconstr (path, arguments, _) -> Some (path, arguments)
+            | _ -> None
+          in
+          begin match data_instance val_type with
+          | None -> inhabited
+          | Some (path, arguments) ->
+            List.fold_left
+              (fun inhabited data ->
+                if Path.same path data.data_path
+                   && Ctype.is_equal context.env false arguments
+                        data.data_type_arguments
+                   && not (List.mem data.data_key inhabited)
+                then data.data_key :: inhabited
+                else inhabited)
+              inhabited context.data
+          end
+        | { val_kind =
+              (Val_prim _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _);
+            _ } ->
+          inhabited)
+      None context.env []
+  in
+  (* Every iarray element type has the empty immutable array as an inhabitant.
+     This supplies only inhabitance; it does not expose constructors, indexing,
+     or equations for the abstract solver datatype. *)
+  let inhabited_builtins =
+    List.filter_map
+      (fun data ->
+        if Path.same data.data_path Predef.path_iarray
+        then Some data.data_key
+        else None)
+      context.data
+  in
+  close
+    (inhabited_builtins
+     @ fixed_abstract_variables
+     @ trusted_abstract_constants
+     @ trusted_environment_constants)
 
 let sort_is_inhabited inhabited_data =
   let rec loop = function
@@ -432,18 +479,27 @@ let supports_match_facts ~env type_ =
 
 let supports_equality ~env type_ =
   let context = { env; data = []; references = [] } in
+  let rec has_function_head type_ =
+    let type_ = Ctype.expand_head_opt env type_ in
+    match get_desc type_ with
+    | Trefine refinement -> has_function_head refinement.ref_skeleton
+    | Tpoly (type_, []) -> has_function_head type_
+    | Tarrow _ -> true
+    | _ -> false
+  in
   let rec supported = function
     | Sint | Sbool | Sdata _ -> true
     | Stuple fields -> List.for_all supported fields
     | Sarrow _ -> false
   in
-  match supported (sort_of_type context Location.none type_) with
-  | supported -> supported
-  | exception Emission_error _ -> false
+  if has_function_head type_ then false
+  else
+    match supported (sort_of_type context Location.none type_) with
+    | supported -> supported
+    | exception Emission_error _ -> false
 
 let reference_basename = function
   | Rfun name | Rsibling name -> name
-  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> Path.last path
 
 let primitive_builtin = function
@@ -528,7 +584,6 @@ let display_path path =
 
 let display_reference_name = function
   | Rfun name | Rsibling name -> name
-  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> display_path path
 
 (* Infix operators recognized for display by source name.  These are absent
@@ -548,7 +603,7 @@ let display_infix_operator name =
   | None -> None
 
 let display_builtin ~env = function
-  | Rfun _ | Rsibling _ | Rparameter _ -> None
+  | Rfun _ | Rsibling _ -> None
   | Rapp path | Rglobal path ->
     begin
       match Subst.Lazy.force_value_description (Env.find_value path env) with
@@ -570,7 +625,7 @@ let binary_operator ~env reference =
     Some (display_operator builtin)
   | Some `Not | None ->
     (match reference with
-     | Rfun _ | Rsibling _ | Rparameter _ -> None
+     | Rfun _ | Rsibling _ -> None
      | Rapp path | Rglobal path -> display_infix_operator (Path.last path))
 
 let display_constant constant =
@@ -592,16 +647,22 @@ let display_label = function
   | Optional label -> "?" ^ label ^ ":"
   | Position label -> "@" ^ label ^ ":"
 
-let render_predicate ~env expression =
+let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
+    expression =
   let parenthesize displayed = "(" ^ displayed.text ^ ")" in
   let paren_if displayed threshold =
     if displayed.precedence < threshold then parenthesize displayed
     else displayed.text
   in
-  let rec render expression =
+  let bound_name names id =
+    Option.value
+      (Out_type.Refinement_names.find_opt id names)
+      ~default:(Ident.name id)
+  in
+  let rec render names expression =
     match expression.rexp_desc with
     | Rexp_ident (Rbound id) ->
-      { text = display_function_name (Ident.name id); precedence = 100 }
+      { text = display_function_name (bound_name names id); precedence = 100 }
     | Rexp_ident (Rfree reference) ->
       { text = display_function_name (display_reference_name reference);
         precedence = 100;
@@ -609,102 +670,130 @@ let render_predicate ~env expression =
     | Rexp_constant constant ->
       { text = display_constant constant; precedence = 100 }
     | Rexp_construct (constructor, arguments) ->
-      render_construct constructor arguments
+      render_construct names constructor arguments
     | Rexp_field (record, field) ->
-      { text = paren_if (render record) 90 ^ "." ^ field.rfield_name;
+      { text = paren_if (render names record) 90 ^ "." ^ field.rfield_name;
         precedence = 90;
       }
     | Rexp_tuple fields ->
       let field (label, field) =
         match label with
-        | None -> (render field).text
-        | Some label -> "~" ^ label ^ ":" ^ (render field).text
+        | None -> (render names field).text
+        | Some label -> "~" ^ label ^ ":" ^ (render names field).text
       in
       { text = "(" ^ String.concat ", " (List.map field fields) ^ ")";
         precedence = 100;
       }
     | Rexp_ifthenelse (condition, ifso, ifnot) ->
-      let condition = (render condition).text in
-      let ifso = paren_if (render ifso) 6 in
+      let condition = (render names condition).text in
+      let ifso = paren_if (render names ifso) 6 in
       let text =
         match ifnot with
         | None -> Printf.sprintf "if %s then %s" condition ifso
         | Some ifnot ->
           Printf.sprintf "if %s then %s else %s" condition ifso
-            (paren_if (render ifnot) 6)
+            (paren_if (render names ifnot) 6)
       in
       { text; precedence = 5 }
     | Rexp_match (scrutinee, cases) ->
       let case case =
-        let arguments =
-          List.map
-            (Option.fold ~none:"_"
-               ~some:(fun binder -> Ident.name binder.rb_id))
-            case.rcase_arguments
+        let arguments, case_names =
+          List.fold_left
+            (fun (arguments, names) -> function
+              | None -> "_" :: arguments, names
+              | Some binder ->
+                let name, names =
+                  Out_type.Refinement_names.bind binder.rb_id names
+                in
+                name :: arguments, names)
+            ([], names) case.rcase_arguments
         in
+        let arguments = List.rev arguments in
         Printf.sprintf "| %s%s -> %s"
           case.rcase_constructor.rconstr_name
           (if arguments = [] then "" else " " ^ String.concat " " arguments)
-          (render case.rcase_body).text
+          (render case_names case.rcase_body).text
       in
       { text =
           Printf.sprintf "match %s with %s"
-            (render scrutinee).text
+            (render names scrutinee).text
             (String.concat " " (List.map case cases));
         precedence = 5;
       }
     | Rexp_let (bindings, body) ->
-      let binding binding =
-        Printf.sprintf "%s = %s"
-          (Ident.name binding.rbind_binder.rb_id)
-          (render binding.rbind_expr).text
+      let rendered_bindings =
+        List.map (fun binding -> render names binding.rbind_expr) bindings
+      in
+      let binding_names, body_names =
+        List.fold_left
+          (fun (binding_names, names) binding ->
+            let name, names =
+              Out_type.Refinement_names.bind
+                binding.rbind_binder.rb_id names
+            in
+            name :: binding_names, names)
+          ([], names) bindings
+      in
+      let binding_names = List.rev binding_names in
+      let rendered_bindings =
+        List.map2
+          (fun name expression -> Printf.sprintf "%s = %s" name expression.text)
+          binding_names rendered_bindings
       in
       { text =
           Printf.sprintf "let %s in %s"
-            (String.concat " and " (List.map binding bindings))
-            (render body).text;
+            (String.concat " and " rendered_bindings)
+            (render body_names body).text;
         precedence = 5;
       }
     | Rexp_function { arg_label; param; body } ->
+      let name, body_names =
+        Out_type.Refinement_names.bind param.rb_id names
+      in
       { text =
           Printf.sprintf "fun %s%s -> %s" (display_label arg_label)
-            (Ident.name param.rb_id) (render body).text;
+            name (render body_names body).text;
         precedence = 5;
       }
-    | Rexp_apply (function_, arguments) -> render_apply function_ arguments
-  and render_apply function_ arguments =
+    | Rexp_apply (function_, arguments) ->
+      render_apply names function_ arguments
+  and render_apply names function_ arguments =
     match function_.rexp_desc, arguments with
     | Rexp_ident (Rfree (Rfun name)), [Nolabel, argument]
       when Option.is_some (constructor_mismatch name) ->
       { text =
           "is not " ^ Option.get (constructor_mismatch name) ^ " "
-          ^ paren_if (render argument) 71;
+          ^ paren_if (render names argument) 71;
         precedence = 70;
       }
     | Rexp_ident (Rfree reference), [Nolabel, argument] ->
       begin
         match display_builtin ~env reference with
         | Some `Not ->
-          { text = "not " ^ paren_if (render argument) 71; precedence = 70 }
+          { text = "not " ^ paren_if (render names argument) 71;
+            precedence = 70 }
         | Some
             (`Add | `And | `Equal | `Greater | `Greater_equal | `Less
             | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
         | None ->
-          render_prefix (head_of_reference reference) [Nolabel, argument]
+          render_prefix names (head_of_reference reference)
+            [Nolabel, argument]
       end
     | Rexp_ident (Rfree reference), [Nolabel, left; Nolabel, right] ->
       begin
         match binary_operator ~env reference with
-        | Some operator -> render_binary operator left right
+        | Some operator -> render_binary names operator left right
         | None ->
-          render_prefix (head_of_reference reference)
+          render_prefix names (head_of_reference reference)
             [Nolabel, left; Nolabel, right]
       end
     | Rexp_ident (Rfree reference), arguments ->
-      render_prefix (head_of_reference reference) arguments
+      render_prefix names (head_of_reference reference) arguments
     | Rexp_ident (Rbound id), arguments ->
-      render_prefix (display_function_name (Ident.name id)) arguments
-    | _, arguments -> render_prefix (paren_if (render function_) 71) arguments
+      render_prefix names (display_function_name (bound_name names id))
+        arguments
+    | _, arguments ->
+      render_prefix names (paren_if (render names function_) 71) arguments
   and head_of_reference reference =
     match display_builtin ~env reference with
     | Some `Not -> "not"
@@ -714,9 +803,9 @@ let render_predicate ~env expression =
          as builtin) ->
       display_function_name (display_operator builtin).op_text
     | None -> display_function_name (display_reference_name reference)
-  and render_binary operator left right =
+  and render_binary names operator left right =
     let operand side expression =
-      let displayed = render expression in
+      let displayed = render names expression in
       let needs_parentheses =
         displayed.precedence < operator.op_precedence
         || (displayed.precedence = operator.op_precedence
@@ -731,40 +820,45 @@ let render_predicate ~env expression =
         ^ operand `Right right;
       precedence = operator.op_precedence;
     }
-  and render_prefix head arguments =
+  and render_prefix names head arguments =
     let argument (label, expression) =
-      display_label label ^ paren_if (render expression) 71
+      display_label label ^ paren_if (render names expression) 71
     in
     { text = String.concat " " (head :: List.map argument arguments);
       precedence = 70;
     }
-  and render_construct constructor arguments =
+  and render_construct names constructor arguments =
     let name = constructor.rconstr_name in
     match arguments with
     | [] -> { text = name; precedence = 100 }
     | [left; right] when String.equal name "::" ->
-      { text = paren_if (render left) 36 ^ " :: " ^ paren_if (render right) 35;
+      { text =
+          paren_if (render names left) 36 ^ " :: "
+          ^ paren_if (render names right) 35;
         precedence = 35;
       }
     | [argument] ->
-      { text = display_function_name name ^ " " ^ paren_if (render argument) 71;
+      { text =
+          display_function_name name ^ " "
+          ^ paren_if (render names argument) 71;
         precedence = 70;
       }
     | arguments ->
       let tuple =
         "("
-        ^ String.concat ", " (List.map (fun a -> (render a).text) arguments)
+        ^ String.concat ", "
+            (List.map (fun argument -> (render names argument).text) arguments)
         ^ ")"
       in
       { text = display_function_name name ^ " " ^ tuple; precedence = 70 }
   in
-  (render expression).text
+  (render names expression).text
 
 
 let builtin_name context = function
   | Rfun name -> Option.map (fun name -> `Constructor_mismatch name)
       (constructor_mismatch name)
-  | Rsibling _ | Rparameter _ -> None
+  | Rsibling _ -> None
   | (Rapp path | Rglobal path) ->
     begin
       match
@@ -784,16 +878,13 @@ let same_reference left right =
      lower to [Rsibling "base"] and be conflated if a VC ever spanned both. *)
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
-  | Rparameter (left_label, left), Rparameter (right_label, right) ->
-    String.equal left_label right_label && Ident.same left right
   | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
     Path.same left right
-  | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ -> false
+  | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
 
 let quantifier_name = function
   | Rfun name | Rsibling name ->
     String.equal name "forall_" || String.equal name "exists_"
-  | Rparameter _ -> false
   | Rapp path | Rglobal path ->
     let name = Path.last path in
     String.equal name "forall_" || String.equal name "exists_"
@@ -801,7 +892,6 @@ let quantifier_name = function
 let reference_description = function
   | Rfun name -> "function " ^ name
   | Rsibling name -> "sibling " ^ name
-  | Rparameter (label, _) -> "parameter " ^ label
   | Rapp path -> "application " ^ Path.name path
   | Rglobal path -> "value " ^ Path.name path
 
@@ -1581,7 +1671,8 @@ let emit_decidable_equality context buffer data =
   | Abstract -> ()
   | (Variant _ | Record _) as definition ->
     Buffer.add_string buffer
-      ("def " ^ equality_function_name data ^ " : (left right : "
+      ("noncomputable def " ^ equality_function_name data
+      ^ " : (left right : "
       ^ data.data_name ^ ") -> Decidable (left = right)\n");
     begin match definition with
     | Variant constructors ->
@@ -1593,10 +1684,14 @@ let emit_decidable_equality context buffer data =
 
 let emit_equality_instance buffer data =
   match definition Location.none data with
-  | Abstract -> ()
+  | Abstract ->
+    Buffer.add_string buffer
+      ("axiom " ^ equality_function_name data ^ " : DecidableEq "
+      ^ data.data_name ^ "\nattribute [instance] "
+      ^ equality_function_name data ^ "\n")
   | Variant _ | Record _ ->
     Buffer.add_string buffer
-      ("instance : DecidableEq " ^ data.data_name ^ " := "
+      ("noncomputable instance : DecidableEq " ^ data.data_name ^ " := "
       ^ equality_function_name data ^ "\n")
 
 let emit_data context buffer data =
@@ -1670,12 +1765,23 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   List.iter (emit_data context buffer) concrete_data;
   if List.length concrete_data > 1 then Buffer.add_string buffer "end\n\n";
   List.iter (emit_decidable_equality context buffer) abstract_data;
+  List.iter (emit_equality_instance buffer) abstract_data;
   if List.length concrete_data > 1 then Buffer.add_string buffer "mutual\n";
   List.iter (emit_decidable_equality context buffer) concrete_data;
   if List.length concrete_data > 1 then Buffer.add_string buffer "end\n\n";
   List.iter (emit_equality_instance buffer) concrete_data;
   if data <> [] then Buffer.add_char buffer '\n';
-  let inhabited_data = inhabited_data_keys context in
+  let fixed_abstract_variables =
+    List.filter_map
+      (fun variable ->
+        match variable.variable_sort with
+        | Sdata key -> Some key
+        | Sint | Sbool | Stuple _ | Sarrow _ -> None)
+      variables
+  in
+  let inhabited_data =
+    inhabited_data_keys context fixed_abstract_variables
+  in
   List.sort
     (fun left right -> String.compare left.reference_name right.reference_name)
     context.references
@@ -1908,4 +2014,6 @@ let discharge ?lean ?(timeout_seconds = 30) ~env (vc : Vox_vc.t) =
    [Out_type] is also linked into the [dynlink] library, which cannot depend on
    this module, so it defaults to the raw AST syntax and the full compiler
    overrides it here at startup. *)
-let () = Out_type.refinement_predicate_printer := render_predicate
+let () =
+  Out_type.refinement_predicate_printer :=
+    (fun ~env ~names expression -> render_predicate ~env ~names expression)

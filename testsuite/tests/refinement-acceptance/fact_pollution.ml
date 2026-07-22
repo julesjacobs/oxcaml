@@ -3,31 +3,24 @@
 *)
 
 (* ============================================================= *)
-(* ACCEPTANCE CORPUS: cross-occurrence fact identification        *)
+(* ACCEPTANCE CORPUS: opaque-call fact isolation                   *)
 (*                                                                *)
 (* The verification pass records a call's refined result as a fact *)
-(* keyed to the LOWERED call expression (vox_verify.ml, around the *)
-(* [result_subject] binding in [check_application]), and the Lean  *)
-(* backend gives structurally-equal opaque reference heads the     *)
-(* SAME name (vox_lean.ml, [note_reference]/[same_reference]).  So *)
-(* a fact about one occurrence of an opaque call [g ()] can be     *)
-(* used for another occurrence of [g ()].  Binder facts, by        *)
-(* contrast, are keyed to the binder's [Ident] ([Rbound]) and are  *)
-(* scoped, so they never cross occurrences.                        *)
+(* keyed to the LOWERED call expression (vox_verify.ml,            *)
+(* [opaque_call_subject]).  Re-visiting the same typed expression  *)
+(* reuses its subject, but physically distinct expressions retain  *)
+(* distinct subjects even when a PPX gives them the same location. *)
+(* [dependent_arrow_unstable_calls.ml] pins that distinction.      *)
 (*                                                                 *)
-(* Is cross-occurrence identification sound?  A fact derived from a *)
-(* refined RESULT is only recorded once the function's body has     *)
-(* PROVEN the result contract, which therefore holds for EVERY      *)
-(* evaluation.  So using such a fact at another occurrence is sound *)
-(* even for an impure function: both evaluations differ in value    *)
-(* but satisfy the same proven contract (fp_impure_definable /      *)
-(* fp_impure_xocc).  A FALSE or VALUE-VARYING exact contract cannot *)
-(* be held without an unsafe cast: a deterministic-constant body    *)
-(* proves an exact contract soundly even when it is impure          *)
-(* (fp_impure_const), whereas a value-varying body cannot           *)
-(* (fp_impure_no_false_contract).  So the only bogus fact about an  *)
-(* opaque occurrence comes from [Obj.magic] (fp_magic_combined),    *)
-(* i.e. the accepted hole.                                          *)
+(* A fact derived from a refined RESULT is recorded only after the  *)
+(* function's body has proved that result contract.  Each call can  *)
+(* therefore use its own result fact even for an impure function:   *)
+(* evaluations may differ in value while each satisfies the proved  *)
+(* contract (fp_impure_definable / fp_impure_xocc).  A false or     *)
+(* value-varying exact contract still requires an unsafe cast: a    *)
+(* deterministic-constant body proves an exact contract soundly     *)
+(* even when it is impure (fp_impure_const), whereas a varying body *)
+(* cannot (fp_impure_no_false_contract).                             *)
 (*                                                                 *)
 (* Impurity and representability are ORTHOGONAL: an impure function *)
 (* can have a proved refined result (above), while a function whose *)
@@ -74,10 +67,9 @@ val g_impure : unit -> int{ _ > 0 } = <fun>
 |}]
 
 (* @acc id=fp_impure_xocc final=ACCEPT today=ACCEPT stable=yes unlocks=verification
-   Two occurrences of the impure [g_impure ()]: the fact from one meets
-   the obligation about the other and discharges.  SOUND: the proven
-   contract [_ > 0] holds for every evaluation, so both occurrences
-   satisfy it even though they differ in value. *)
+   Two occurrences of the impure [g_impure ()] independently receive the
+   proved result contract [_ > 0], so both obligations discharge even when
+   the evaluations return different values. *)
 let fp_impure_xocc () =
   let _first = (g_impure () : int{ _ > 0 }) in
   (g_impure () : int{ _ > 0 })
@@ -124,15 +116,30 @@ Error: The value "read_int" is "partial"
          because it is used in an expression (at line 1, characters 47-69).
 |}]
 
-(* @acc id=fp_magic_combined final=ACCEPT today=ACCEPT stable=no unlocks=none
-   ACCEPTED [Obj.magic] hole: the laundered field binding plants the fact
-   [Obj.magic 0 > 0], which then discharges the later structurally-equal
-   annotation obligation. *)
 type r = { f : int{ _ > 0 } }
-let fp_launder = { f = Obj.magic 0 }
-let fp_magic_combined = (Obj.magic 0 : int{ _ > 0 })
 [%%expect {|
 type r = { f : int{ _ > 0 }; }
+|}]
+
+(* Exact direct [%obj_magic] identity is visible and now leaves an obligation;
+   this is the welcome tightening anticipated by imposition_channels.ml. *)
+let fp_direct_launder = { f = Obj.magic 0 }
+[%%expect {|
+Line 1, characters 30-41:
+1 | let fp_direct_launder = { f = Obj.magic 0 }
+                                  ^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* @acc id=fp_magic_combined final=ACCEPT today=ACCEPT stable=no unlocks=none
+   ACCEPTED indirect [Obj.magic] hole: after aliasing hides primitive identity,
+   the laundered field binding plants a structurally matching fact for the
+   later annotation obligation. *)
+let fp_hidden_magic = Obj.magic
+let fp_launder = { f = fp_hidden_magic 0 }
+let fp_magic_combined = (fp_hidden_magic 0 : int{ _ > 0 })
+[%%expect {|
+val fp_hidden_magic : 'a -> 'b = <fun>
 val fp_launder : r = {f = 0}
 val fp_magic_combined : int{ _ > 0 } = 0
 |}]

@@ -36,14 +36,14 @@
  module = "vc_dump_smt_regular.ml";
  flags = "-vox-backend z3 \
           -vox-smt-solver \
-            '/j/office/app/z3/prod/4.8.5/install/bin/z3 -in' \
+            'z3 -in' \
           -vox-dump-vc-json regular-z3-off.json -c";
  compiler_output = "regular-z3-off.output";
  ocamlc_byte_exit_status = "0";
  ocamlc.byte;
  flags = "-vox-backend z3 \
           -vox-smt-solver \
-            '/j/office/app/z3/prod/4.8.5/install/bin/z3 -in' \
+            'z3 -in' \
           -vox-dump-vc-json regular-z3-on.json \
           -vox-dump-vc-json-smt -c";
  compiler_output = "regular-z3-on.output";
@@ -52,14 +52,14 @@
  module = "vc_dump_smt_nonregular.ml";
  flags = "-vox-backend z3 \
           -vox-smt-solver \
-            '/j/office/app/z3/prod/4.8.5/install/bin/z3 -in' \
+            'z3 -in' \
           -vox-dump-vc-json nonregular-z3-off.json -c";
  compiler_output = "nonregular-z3-off.output";
  ocamlc_byte_exit_status = "2";
  ocamlc.byte;
  flags = "-vox-backend z3 \
           -vox-smt-solver \
-            '/j/office/app/z3/prod/4.8.5/install/bin/z3 -in' \
+            'z3 -in' \
           -vox-dump-vc-json nonregular-z3-on.json \
           -vox-dump-vc-json-smt -c";
  compiler_output = "nonregular-z3-on.output";
@@ -97,4 +97,3 @@ let positive (x : int{ _ > 0 }) = x
 let annotation = (3 : int{ _ >= 3 })
 let contract = positive 1
 let branch y = if y > 0 then positive y else 0
-

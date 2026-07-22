@@ -450,6 +450,8 @@ and print_simple_out_type ppf =
   | Otyp_refine (skeleton, predicate) ->
       fprintf ppf "@[<hov 1>%a{@ %s@ }@]"
         print_simple_out_type skeleton predicate
+  | Otyp_vox_named (name, type_) ->
+      fprintf ppf "@[<1>(%s :@ %a)@]" name print_simple_out_type type_
   | Otyp_stuff s -> pp_print_string ppf s
   | Otyp_var (non_gen, s) -> ty_var ~non_gen ppf s
   | Otyp_variant (row_fields, closed, tags) ->

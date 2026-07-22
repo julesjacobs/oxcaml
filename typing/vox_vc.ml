@@ -73,8 +73,19 @@ module Fact_env = struct
   let leave_many ids env =
     List.fold_left (fun env id -> leave id env) env ids
 
+  let same_expression left right =
+    (* Refinement copies may have distinct internal carrier nodes while
+       denoting the same resolved proposition. *)
+    Types.Refinement.strict_equal ~equal_type:(fun _ _ -> true) left right
+
   let add ~origin ?loc ?scope expression env =
-    if expression_in_scope env.scope expression then
+    if
+      expression_in_scope env.scope expression
+      && not
+           (List.exists
+              (fun fact -> same_expression expression fact.expression)
+              env.facts_rev)
+    then
       { env with
         facts_rev =
           { expression; location = loc; scope; origin } :: env.facts_rev;
@@ -86,13 +97,6 @@ module Fact_env = struct
 
   let intersect left right =
     let scope = Ident.Set.inter left.scope right.scope in
-    let same_expression left right =
-      (* Imported refinements are freshened at each use, including their
-         internal type nodes.  Facts are boolean predicates with resolved
-         value paths, so their typed expression structure is the stable key
-         at a control-flow join. *)
-      Types.Refinement.strict_equal ~equal_type:(fun _ _ -> true) left right
-    in
     { facts_rev =
         List.filter
           (fun fact ->

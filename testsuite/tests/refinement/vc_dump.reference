@@ -11,7 +11,6 @@ VC contract-argument at vc_dump.ml:14:38-39
   3 >= 3
   annotation >= 3
   annotation = 3
-  1 > 0
   y > 0
 |- y > 0
 

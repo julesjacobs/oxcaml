@@ -52,7 +52,7 @@ Error: Refinement verification failed (disproved)
    TODAY: accepts. *)
 let dep (n : int) (a : int{ _ = n }) = a
 [%%expect {|
-val dep : int -> int{ _ = n } -> int = <fun>
+val dep : (n : int) -> int{ _ = n } -> int = <fun>
 |}]
 
 let co_dependent = dep 3 3

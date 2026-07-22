@@ -628,6 +628,24 @@ and expression_extra i ppf (extra, loc, attrs) =
       attributes i ppf attrs;
       alloc_const_option_mode i ppf m.mode_modes;
       alloc_modes_opt i ppf m;
+  | Texp_refinement_application application ->
+      line i ppf "Texp_refinement_application %d result=%a\n"
+        (List.length application.rapp_arguments)
+        Rawprinttyp.type_expr application.rapp_result;
+      List.iter
+        (fun { rap_domain; rap_binder; rap_supplied; rap_subject } ->
+          line (i + 1) ppf "%s binder=%s subject=%s domain=%a\n"
+            (if rap_supplied then "supplied" else "omitted")
+            (Option.fold ~none:"none" ~some:Ident.unique_name rap_binder)
+            (Option.fold ~none:"none"
+               ~some:(fun subject ->
+                 Format.asprintf "%a" Types.Refinement.print subject)
+               rap_subject)
+            Rawprinttyp.type_expr rap_domain)
+        application.rapp_arguments
+  | Texp_refinement_constraint type_ ->
+      line i ppf "Texp_refinement_constraint %a\n"
+        Rawprinttyp.type_expr type_
   | Texp_inspected_type ti ->
       line i ppf "Texp_inspected_type\n";
       attributes i ppf attrs;

@@ -136,7 +136,7 @@
  (library_flags -linkall)
  (foreign_stubs
   (language c)
-  (names vox_timeout_stubs))
+  (names vox_timeout_stubs vox_z3_stubs))
  (libraries flambda2_floats oxsmt_interface)
  (modules_without_implementation
   annot
@@ -222,8 +222,10 @@
   zero_alloc
   types
   btype
+  vox_scope
   oprint
   subst
+  vox_dependent
   predef
   datarepr
   global_module

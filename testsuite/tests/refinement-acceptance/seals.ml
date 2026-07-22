@@ -155,6 +155,149 @@ Line 8, characters 2-26:
   Implementation declaration for value x
 |}]
 
+(* A declaration UID identifies the field declaration in the functor body,
+   not the runtime value produced by a particular application.  Seal
+   reconciliation must therefore retain the complete instance path. *)
+module Instance_functor (M : sig val value : int end) = struct
+  let field = M.value
+end
+
+module Instance_x = struct let value = 1 end
+module Instance_y = struct let value = 2 end
+module Instance_a = Instance_functor (Instance_x)
+module Instance_b = Instance_functor (Instance_y)
+module Instance_a_again = Instance_functor (Instance_x)
+module Instance_alias = Instance_a
+[%%expect {|
+module Instance_functor :
+  functor (M : sig val value : int end) -> sig val field : int end
+module Instance_x : sig val value : int end
+module Instance_y : sig val value : int end
+module Instance_a : sig val field : int end
+module Instance_b : sig val field : int end
+module Instance_a_again : sig val field : int end
+module Instance_alias = Instance_a
+|}]
+
+(* Exact paths and genuine aliases still reconcile. *)
+module Instance_same : sig
+  val field : int{ _ = Instance_a.field }
+end = struct
+  let field : int{ _ = Instance_a.field } = Instance_a.field
+end
+
+module Instance_alias_same : sig
+  val field : int{ _ = Instance_a.field }
+end = struct
+  let field : int{ _ = Instance_alias.field } = Instance_alias.field
+end
+[%%expect {|
+module Instance_same : sig val field : int{ _ = Instance_a.field } end
+module Instance_alias_same : sig val field : int{ _ = Instance_a.field } end
+|}]
+
+(* Different functor arguments must remain distinct at a covariant result
+   seal, even though both fields carry the UID of [Instance_functor.field]. *)
+module Instance_argument_rejected : sig
+  val field : int{ _ = Instance_a.field }
+end = struct
+  let field : int{ _ = Instance_b.field } = Instance_b.field
+end
+[%%expect {|
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   let field : int{ _ = Instance_b.field } = Instance_b.field
+5 | end
+Error: Refinement verification failed at module seal for value "field" (not-proved)
+Line 2, characters 2-41:
+2 |   val field : int{ _ = Instance_a.field }
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value field
+Line 4, characters 6-11:
+4 |   let field : int{ _ = Instance_b.field } = Instance_b.field
+          ^^^^^
+  Implementation declaration for value field
+|}]
+
+(* Re-evaluating an applicative functor at the same argument can still produce
+   a different term value; applicativity equates types, not values. *)
+module Instance_reapplication_rejected : sig
+  val field : int{ _ = Instance_a.field }
+end = struct
+  let field : int{ _ = Instance_a_again.field } = Instance_a_again.field
+end
+[%%expect {|
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   let field : int{ _ = Instance_a_again.field } = Instance_a_again.field
+5 | end
+Error: Refinement verification failed at module seal for value "field" (not-proved)
+Line 2, characters 2-41:
+2 |   val field : int{ _ = Instance_a.field }
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value field
+Line 4, characters 6-11:
+4 |   let field : int{ _ = Instance_a_again.field } = Instance_a_again.field
+          ^^^^^
+  Implementation declaration for value field
+|}]
+
+module Generative_functor () = struct
+  let field = 0
+end
+
+module Generative_a = Generative_functor ()
+module Generative_b = Generative_functor ()
+[%%expect {|
+module Generative_functor : functor () -> sig val field : int end
+module Generative_a : sig val field : int end
+module Generative_b : sig val field : int end
+|}]
+
+module Generative_rejected : sig
+  val field : int{ _ = Generative_a.field }
+end = struct
+  let field : int{ _ = Generative_b.field } = Generative_b.field
+end
+[%%expect {|
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   let field : int{ _ = Generative_b.field } = Generative_b.field
+5 | end
+Error: Refinement verification failed at module seal for value "field" (not-proved)
+Line 2, characters 2-43:
+2 |   val field : int{ _ = Generative_a.field }
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value field
+Line 4, characters 6-11:
+4 |   let field : int{ _ = Generative_b.field } = Generative_b.field
+          ^^^^^
+  Implementation declaration for value field
+|}]
+
+(* The same distinction is required when the seal implication reverses in a
+   function argument. *)
+module Instance_domain_rejected : sig
+  val consume : int{ _ = Instance_a.field } -> unit
+end = struct
+  let consume (_ : int{ _ = Instance_b.field }) = ()
+end
+[%%expect {|
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   let consume (_ : int{ _ = Instance_b.field }) = ()
+5 | end
+Error: Refinement verification failed at module seal for value "consume" (not-proved)
+Line 2, characters 2-51:
+2 |   val consume : int{ _ = Instance_a.field } -> unit
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  Interface declaration for value consume
+Line 4, characters 6-13:
+4 |   let consume (_ : int{ _ = Instance_b.field }) = ()
+          ^^^^^^^
+  Implementation declaration for value consume
+|}]
+
 (* Module type declarations are compared by rigid equality, even when the
    containing modules meet at a seal. *)
 module Module_type_equality : sig

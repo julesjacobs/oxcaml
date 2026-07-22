@@ -341,7 +341,6 @@ and refinement_identifier =
 and refinement_reference =
   | Rfun of string
   | Rsibling of string
-  | Rparameter of string * Ident.t
   | Rapp of Path.t
   | Rglobal of Path.t
 
@@ -387,7 +386,9 @@ and arg_label =
   | Position of string (** [label:[%call_pos] -> ...] *)
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
+(** The final component binds a dependent value identity in the arrow's
+    codomain.  It is scoped and alpha-renamed like the variables of [Tpoly]. *)
 
 (** [package] corresponds to the type of a first-class module *)
 and package =
@@ -635,6 +636,13 @@ module Refinement : sig
 
   val free_bound_identifiers : t -> Ident.Set.t
 
+  val iter_bound_identifiers : (Ident.t -> unit) -> t -> unit
+  (** Visit bound-identifier occurrences and expression-local binders. *)
+
+  val rename_free_many : (Ident.t * Ident.t) list -> t -> t
+  (** Simultaneously rename free bound-identifier occurrences.  Expression-
+      local binders shadow mappings with the same source identity. *)
+
   val fold_types : ('a -> type_expr -> 'a) -> 'a -> t -> 'a
   val iter_types : (type_expr -> unit) -> t -> unit
   val map_types : (type_expr -> type_expr) -> t -> t
@@ -665,26 +673,30 @@ module Refinement : sig
   val freshen_binders : t -> t
   (** Unconditionally freshen every binder and its bound occurrences. *)
 
-  val freshen_desc_binders : refinement_desc -> refinement_desc
+  val freshen_desc_binders :
+    fresh_binder:(Ident.t -> Ident.t) ->
+    refinement_desc ->
+    refinement_desc
   (** Unconditionally freshen the view binder and every predicate binder. *)
 
-  val freshen_free_local_refs : refinement_desc -> refinement_desc
-  (** Freshen every free bare local [Pident] and [Rparameter] identity to a
-      globally fresh [Scoped] ident, consistently within the predicate.
-      Applied on import from a .cmi so a foreign local stamp cannot collide
-      with a caller-local binder.  [Rsibling]/[Rfun] and module-qualified
-      [Pdot] references are left unchanged. *)
+  val freshen_free_local_refs :
+    fresh_for:(Ident.t -> Ident.t) ->
+    refinement_desc ->
+    refinement_desc
+  (** Freshen every free bare local [Pident] identity to a
+      globally fresh [Scoped] ident.  [fresh_for] supplies one coherent mapping
+      for the complete copied type, including all of its refinement
+      descriptors.  Applied on import from a .cmi so a foreign local stamp
+      cannot collide with a caller-local binder.  [Rsibling]/[Rfun] and
+      module-qualified [Pdot] references are left unchanged. *)
 
   val alpha_equal :
     equal_type:(type_expr -> type_expr -> bool) ->
     ?binders:(refinement_binder * refinement_binder) list ->
-    ?parameters:(Ident.t * Ident.t) list ->
     t ->
     t ->
     bool
-  (** Structural equality modulo threaded bijections between binders and
-      explicitly position-paired parameter identities.  Unpaired free
-      parameter identities are compared strictly. *)
+  (** Structural equality modulo threaded bijections between binders. *)
 
   val strict_equal :
     equal_type:(type_expr -> type_expr -> bool) ->
@@ -695,13 +707,11 @@ module Refinement : sig
 
   val equal_desc :
     equal_type:(type_expr -> type_expr -> bool) ->
-    ?parameters:(Ident.t * Ident.t) list ->
     refinement_desc ->
     refinement_desc ->
     bool
   (** Rigid descriptor equality, including skeleton, view binder, and the
-      predicate.  Parameter identities are strict unless the structural type
-      comparison supplies explicit position pairs. *)
+      predicate. *)
 
   val print : Format.formatter -> t -> unit
 

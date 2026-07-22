@@ -645,11 +645,19 @@ module For_copy : sig
 
   val redirect_desc: copy_scope -> type_expr -> type_desc -> unit
 
+  val fresh_ident: copy_scope -> Ident.t -> Ident.t
+
+  val fresh_binder: copy_scope -> Ident.t -> Ident.t
+
+  val reserve_ident: copy_scope -> Ident.t -> unit
+
   val with_scope: (copy_scope -> 'a) -> 'a
 end = struct
   type copy_scope = {
     mutable saved_desc : (transient_expr * type_desc) list;
     (* Save association of generic nodes with their description. *)
+    mutable fresh_idents : (Ident.t * Ident.t) list;
+    reserved_ident_stamps : (int, unit) Hashtbl.t;
   }
 
   let redirect_desc copy_scope ty desc =
@@ -657,12 +665,54 @@ end = struct
     copy_scope.saved_desc <- (ty, ty.desc) :: copy_scope.saved_desc;
     Transient_expr.set_desc ty desc
 
+  let fresh_ident copy_scope id =
+    match
+      List.find_opt
+        (fun (original, _) -> Ident.same original id)
+        copy_scope.fresh_idents
+    with
+    | Some (_, fresh) -> fresh
+    | None ->
+      let rec create () =
+        let fresh =
+          Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+        in
+        if Hashtbl.mem copy_scope.reserved_ident_stamps (Ident.stamp fresh)
+        then create ()
+        else fresh
+      in
+      let fresh = create () in
+      Hashtbl.replace copy_scope.reserved_ident_stamps (Ident.stamp fresh) ();
+      copy_scope.fresh_idents <- (id, fresh) :: copy_scope.fresh_idents;
+      fresh
+
+  let fresh_binder copy_scope id =
+    let rec create () =
+      let fresh =
+        Ident.create_scoped ~scope:(Ident.scope id) (Ident.name id)
+      in
+      if Hashtbl.mem copy_scope.reserved_ident_stamps (Ident.stamp fresh)
+      then create ()
+      else fresh
+    in
+    let fresh = create () in
+    Hashtbl.replace copy_scope.reserved_ident_stamps (Ident.stamp fresh) ();
+    fresh
+
+  let reserve_ident copy_scope id =
+    Hashtbl.replace copy_scope.reserved_ident_stamps (Ident.stamp id) ()
+
   (* Restore type descriptions. *)
   let cleanup { saved_desc; _ } =
     List.iter (fun (ty, desc) -> Transient_expr.set_desc ty desc) saved_desc
 
   let with_scope f =
-    let scope = { saved_desc = [] } in
+    let scope =
+      { saved_desc = [];
+        fresh_idents = [];
+        reserved_ident_stamps = Hashtbl.create 17;
+      }
+    in
     Fun.protect ~finally:(fun () -> cleanup scope) (fun () -> f scope)
 
 end

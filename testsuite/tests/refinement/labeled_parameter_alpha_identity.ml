@@ -9,12 +9,14 @@ module Facts = Vox_vc.Fact_env
 
 let node type_ rexp_desc = R.create ~loc:Location.none ~type_ rexp_desc
 
-let parameter label id =
-  node Predef.type_int (Rexp_ident (Rfree (Rparameter (label, id))))
+let bound id =
+  node Predef.type_int (Rexp_ident (Rbound id))
 
 let pair first second =
   node Predef.type_int
-    (Rexp_tuple [None, parameter "x" first; None, parameter "x" second])
+    (Rexp_tuple [None, bound first; None, bound second])
+
+let binder id = { rb_id = id; rb_type = Predef.type_int }
 
 let () =
   let left_outer = Ident.create_local "left_outer" in
@@ -27,12 +29,18 @@ let () =
   let equal_type _ _ = true in
   assert
     (R.alpha_equal ~equal_type
-       ~parameters:[left_outer, right_outer; left_inner, right_inner]
+       ~binders:
+         [ binder left_outer, binder right_outer;
+           binder left_inner, binder right_inner;
+         ]
        left right);
   assert
     (not
        (R.alpha_equal ~equal_type
-          ~parameters:[left_outer, right_outer; left_inner, right_inner]
+          ~binders:
+            [ binder left_outer, binder right_outer;
+              binder left_inner, binder right_inner;
+            ]
           left swapped));
   assert (not (R.alpha_equal ~equal_type left swapped))
 
@@ -40,7 +48,7 @@ let equal_to_zero id =
   node Predef.type_bool
     (Rexp_apply
        ( node Predef.type_int (Rexp_ident (Rfree (Rfun "="))),
-         [ Nolabel, parameter "key" id;
+         [ Nolabel, bound id;
            Nolabel, node Predef.type_int (Rexp_constant (Const_int 0));
          ] ))
 

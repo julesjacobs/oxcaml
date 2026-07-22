@@ -62,7 +62,11 @@ val supports_equality : env:Env.t -> Types.type_expr -> bool
    error messages, and the [display] field of the VC dump.  [env] resolves
    which primitive a reference denotes; unresolved references degrade to
    prefix application, never the raw [Types.Refinement.print] AST syntax. *)
-val render_predicate : env:Env.t -> Types.refinement_expression -> string
+val render_predicate :
+  ?names:Out_type.Refinement_names.t ->
+  env:Env.t ->
+  Types.refinement_expression ->
+  string
 
 type witness_variable =
   { source_name : string;

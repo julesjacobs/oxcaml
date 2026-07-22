@@ -65,6 +65,10 @@ module Fact_env : sig
   val facts : t -> fact list
   val scope : t -> Ident.Set.t
 
+  (** Keep only facts whose bound identifiers are contained in [scope], and
+      make [scope] the resulting lexical scope. *)
+  val restrict : Ident.Set.t -> t -> t
+
   val intersect : t -> t -> t
   (** Keep the facts, and only the scope, shared by both environments. *)
 

@@ -109,6 +109,11 @@ val find_value_no_locks_exn: Ident.t -> t ->
   Subst.Lazy.value_description * Mode.Value.l
 (** Find a value by an [Ident.t]. Raises if encounters any locks. *)
 
+val find_value_definition_exn: Ident.t -> t ->
+  Subst.Lazy.value_description * Mode.Value.l
+(** Find a value and its definition-site mode by exact [Ident.t], without
+    applying intervening locks. *)
+
 val find_value: Path.t -> t -> Subst.Lazy.value_description
 val find_type: Path.t -> t -> type_declaration
 val find_type_descrs: Path.t -> t -> type_descriptions
@@ -715,8 +720,31 @@ exception Error of error
 val in_signature: bool -> t -> t
 
 val is_in_signature: t -> bool
-val add_dependent_parameter : label:string -> Ident.t -> t -> t
-val dependent_parameter_label : Ident.t -> t -> string option
+val enter_refinement_signature : t -> t
+val add_dependent_parameter :
+  type_:type_expr -> Ident.t -> t -> t
+val add_dependent_parameters :
+  ?value_origins:(Ident.t * type_expr) list ->
+  ?allow_concrete_origins:bool ->
+  (Ident.t * type_expr) list ->
+  t ->
+  t
+val dependent_parameter_ids : t -> Ident.t list
+val dependent_parameter_bindings : t -> (Ident.t * type_expr) list
+val add_refinement_program_values : Ident.t list -> t -> t
+val add_refinement_stable_values : Ident.t list -> t -> t
+val add_refinement_signature_values : Ident.t list -> t -> t
+val refinement_program_scope : t -> Ident.Set.t
+val is_refinement_stable_value : Ident.t -> t -> bool
+val is_refinement_signature_value : Ident.t -> t -> bool
+val enter_dependent_value_scope : t -> t
+val has_dependent_value_origin : Ident.t -> t -> bool
+val dependent_value_origin_identifiers : Ident.t -> t -> Ident.t list
+val dependent_value_origin_allows_concrete_type : Ident.t -> t -> bool
+val dependent_value_imposed_type : Ident.t -> t -> type_expr option
+val set_dependent_value_imposed_type : Ident.t -> type_expr -> t -> bool
+val copy_dependent_value_origin :
+  source_env:t -> source:Ident.t -> alias:Ident.t -> t -> t
 
 val set_value_used_callback:
     Subst.Lazy.value_description -> (unit -> unit) -> unit

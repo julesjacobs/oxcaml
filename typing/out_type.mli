@@ -37,6 +37,15 @@ open Format_doc
 open Types
 open Outcometree
 
+module Refinement_names : sig
+  type t
+
+  val empty : t
+  val find_opt : Ident.t -> t -> string option
+  val bind : Ident.t -> t -> string * t
+  val bind_as : Ident.t -> string -> t -> t
+end
+
 (** {1 Wrapping functions}*)
 
 (** Renders a refinement predicate to a string for the [int{ ... }] shown in
@@ -44,7 +53,10 @@ open Outcometree
     a source-like, [env]-aware renderer at startup (the [dynlink] library keeps
     the default because it cannot depend on the verification modules). *)
 val refinement_predicate_printer :
-  (env:Env.t -> Types.refinement_expression -> string) ref
+  (env:Env.t ->
+   names:Refinement_names.t ->
+   Types.refinement_expression ->
+   string) ref
 
 val wrap_printing_env: error:bool -> Env.t -> (unit -> 'a) -> 'a
 (** Call the function using the environment for type path shortening

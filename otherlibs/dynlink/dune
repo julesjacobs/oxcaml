@@ -136,6 +136,7 @@
   axis_lattice
   value_rec_types
   btype
+  vox_scope
   lazy_backtrack
   type_shape
   zero_alloc_utils
@@ -150,6 +151,7 @@
   persistent_env
   env
   jkind
+  vox_dependent
   ikind
   errortrace
   ctype
@@ -373,6 +375,10 @@
 (copy_files ../../typing/predef.ml)
 
 (copy_files ../../typing/subst.ml)
+
+(copy_files ../../typing/vox_scope.ml)
+
+(copy_files ../../typing/vox_dependent.ml)
 (copy_files ../../typing/axis_lattice*.ml{,i})
 (copy_files ../../typing/ldd*.ml{,i})
 (copy_files ../../typing/ikind.ml{,i})
@@ -573,6 +579,10 @@
 
 (copy_files ../../typing/subst.mli)
 
+(copy_files ../../typing/vox_scope.mli)
+
+(copy_files ../../typing/vox_dependent.mli)
+
 (copy_files ../../typing/signature_with_global_bindings.mli)
 
 (copy_files ../../typing/data_types.mli)
@@ -747,6 +757,7 @@
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Primitive.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Oprint.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Btype.cmo
+  .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Vox_scope.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Typemode.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Predef.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Subst.cmo
@@ -764,6 +775,7 @@
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Type_shape.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Env.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Jkind.cmo
+  .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Vox_dependent.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Ikind.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Errortrace.cmo
   .dynlink_compilerlibs.objs/byte/dynlink_compilerlibs__Ctype.cmo
@@ -880,6 +892,7 @@
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Primitive.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Oprint.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Btype.cmx
+  .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Vox_scope.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Typemode.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Predef.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Subst.cmx
@@ -897,6 +910,7 @@
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Type_shape.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Env.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Jkind.cmx
+  .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Vox_dependent.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Ikind.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Errortrace.cmx
   .dynlink_compilerlibs.objs/native/dynlink_compilerlibs__Ctype.cmx

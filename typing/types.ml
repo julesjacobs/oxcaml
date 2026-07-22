@@ -227,7 +227,6 @@ and refinement_identifier =
 and refinement_reference =
   | Rfun of string
   | Rsibling of string
-  | Rparameter of string * Ident.t
   | Rapp of Path.t
   | Rglobal of Path.t
 
@@ -270,7 +269,7 @@ and arg_label =
   | Position of string
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
 
 and package =
     { pack_path : Path.t;
@@ -1578,7 +1577,6 @@ module Refinement = struct
     let map_reference = function
       | Rapp path -> Rapp (value_path path)
       | Rglobal path -> Rglobal (value_path path)
-      | Rparameter (label, id) -> Rparameter (label, id)
       | Rsibling name ->
         (match sibling_prefix with
          | Some root -> Rglobal (Path.Pdot (root, name))
@@ -1698,7 +1696,117 @@ module Refinement = struct
     in
     loop Ident.Set.empty Ident.Set.empty expression
 
+  let iter_bound_identifiers f expression =
+    let rec iter expression =
+      match expression.rexp_desc with
+      | Rexp_ident (Rbound id) -> f id
+      | Rexp_ident (Rfree _) | Rexp_constant _ -> ()
+      | Rexp_let (bindings, body) ->
+        List.iter
+          (fun binding ->
+            f binding.rbind_binder.rb_id;
+            iter binding.rbind_expr)
+          bindings;
+        iter body
+      | Rexp_function { param; body; _ } ->
+        f param.rb_id;
+        iter body
+      | Rexp_apply (function_, arguments) ->
+        iter function_;
+        List.iter (fun (_, argument) -> iter argument) arguments
+      | Rexp_tuple fields -> List.iter (fun (_, field) -> iter field) fields
+      | Rexp_construct (_, arguments) -> List.iter iter arguments
+      | Rexp_field (record, _) -> iter record
+      | Rexp_ifthenelse (condition, ifso, ifnot) ->
+        iter condition;
+        iter ifso;
+        Option.iter iter ifnot
+      | Rexp_match (scrutinee, cases) ->
+        iter scrutinee;
+        List.iter
+          (fun case ->
+            List.iter
+              (Option.iter (fun binder -> f binder.rb_id))
+              case.rcase_arguments;
+            iter case.rcase_body)
+          cases
+    in
+    iter expression
+
   let with_desc expression rexp_desc = { expression with rexp_desc }
+
+  let rename_free_many renamings expression =
+    let rec remove id = function
+      | [] -> []
+      | (source, _) :: rest when Ident.same source id -> remove id rest
+      | mapping :: rest -> mapping :: remove id rest
+    in
+    let lookup id renamings =
+      match
+        List.find_opt
+          (fun (source, _) -> Ident.same source id)
+          renamings
+      with
+      | Some (_, target) -> target
+      | None -> id
+    in
+    let rec rename renamings expression =
+      let recurse = rename renamings in
+      let rexp_desc =
+        match expression.rexp_desc with
+        | Rexp_ident (Rbound id) ->
+          Rexp_ident (Rbound (lookup id renamings))
+        | (Rexp_ident (Rfree _) | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          let bindings =
+            List.map
+              (fun binding ->
+                { binding with rbind_expr = recurse binding.rbind_expr })
+              bindings
+          in
+          let body_renamings =
+            List.fold_left
+              (fun renamings binding ->
+                remove binding.rbind_binder.rb_id renamings)
+              renamings bindings
+          in
+          Rexp_let (bindings, rename body_renamings body)
+        | Rexp_function ({ param; body; _ } as function_) ->
+          let body = rename (remove param.rb_id renamings) body in
+          Rexp_function { function_ with body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            ( recurse function_,
+              List.map
+                (fun (label, argument) -> label, recurse argument)
+                arguments )
+        | Rexp_tuple fields ->
+          Rexp_tuple
+            (List.map (fun (label, field) -> label, recurse field) fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct (constructor, List.map recurse arguments)
+        | Rexp_field (record, field) -> Rexp_field (recurse record, field)
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse
+            (recurse condition, recurse ifso, Option.map recurse ifnot)
+        | Rexp_match (scrutinee, cases) ->
+          let rename_case case =
+            let case_renamings =
+              List.fold_left
+                (fun renamings -> function
+                  | None -> renamings
+                  | Some binder -> remove binder.rb_id renamings)
+                renamings case.rcase_arguments
+            in
+            { case with
+              rcase_body = rename case_renamings case.rcase_body;
+            }
+          in
+          Rexp_match (recurse scrutinee, List.map rename_case cases)
+      in
+      with_desc expression rexp_desc
+    in
+    rename renamings expression
 
   let rec rename_free ~from ~to_ expression =
     let rename expression = rename_free ~from ~to_ expression in
@@ -1911,7 +2019,7 @@ module Refinement = struct
     Hashtbl.add avoid (Ident.stamp fresh) ();
     fresh
 
-  let freshen_binders_with avoid initial_env expression =
+  let freshen_binders_with fresh_binder initial_env expression =
     let rec lookup id = function
       | [] -> id
       | (old_id, fresh_id) :: rest ->
@@ -1933,7 +2041,7 @@ module Refinement = struct
             List.fold_left
               (fun (bindings, env) binding ->
                 let binder = binding.rbind_binder in
-                let fresh = fresh_id_avoiding avoid binder.rb_id in
+                let fresh = fresh_binder binder.rb_id in
                 let binding =
                   { binding with
                     rbind_binder = { binder with rb_id = fresh }
@@ -1944,7 +2052,7 @@ module Refinement = struct
           in
           Rexp_let (List.rev bindings, freshen env body)
         | Rexp_function ({ param; body; _ } as function_) ->
-          let fresh = fresh_id_avoiding avoid param.rb_id in
+          let fresh = fresh_binder param.rb_id in
           let body = freshen ((param.rb_id, fresh) :: env) body in
           Rexp_function
             { function_ with param = { param with rb_id = fresh }; body }
@@ -1975,7 +2083,7 @@ module Refinement = struct
                 (fun (arguments, env) -> function
                   | None -> None :: arguments, env
                   | Some binder ->
-                    let fresh = fresh_id_avoiding avoid binder.rb_id in
+                    let fresh = fresh_binder binder.rb_id in
                     ( Some { binder with rb_id = fresh } :: arguments,
                       (binder.rb_id, fresh) :: env ))
                 ([], env) case.rcase_arguments
@@ -1995,45 +2103,30 @@ module Refinement = struct
   let freshen_binders expression =
     let avoid = Hashtbl.create 17 in
     collect_binder_stamps avoid expression;
-    freshen_binders_with avoid [] expression
+    freshen_binders_with (fresh_id_avoiding avoid) [] expression
 
-  let freshen_desc_binders refinement =
-    let avoid = Hashtbl.create 17 in
-    Hashtbl.add avoid (Ident.stamp refinement.ref_view.rb_id) ();
-    collect_binder_stamps avoid refinement.ref_pred;
-    let fresh_view =
-      fresh_id_avoiding avoid refinement.ref_view.rb_id
-    in
+  let freshen_desc_binders ~fresh_binder refinement =
+    let fresh_view = fresh_binder refinement.ref_view.rb_id in
     { refinement with
       ref_view = { refinement.ref_view with rb_id = fresh_view };
       ref_pred =
-        freshen_binders_with avoid
+        freshen_binders_with fresh_binder
           [refinement.ref_view.rb_id, fresh_view]
           refinement.ref_pred;
     }
 
   (* Freshen free references carrying unit-local identifiers.  These are bare
-     local [Pident]s and the identities in [Rparameter].  Local stamps are only
+     local [Pident]s.  Local stamps are only
      unique within a compilation unit, so an imported stamp can coincide with a
      caller-local binder stamp.  Renaming to a globally fresh [Scoped] ident on
      import prevents that conflation.  [Rsibling]/[Rfun] (name-keyed) and
      module-qualified [Pdot] references are left untouched.  Renaming is
-     consistent within the predicate and is applied once when the cached
-     signature is imported. *)
-  let freshen_free_local_refs refinement =
-    let renaming = ref [] in
-    let fresh_for id =
-      match List.find_opt (fun (old, _) -> Ident.same old id) !renaming with
-      | Some (_, fresh) -> fresh
-      | None ->
-        let fresh = fresh_id id in
-        renaming := (id, fresh) :: !renaming;
-        fresh
-    in
+     provided by the caller so it can remain consistent across every
+     refinement descriptor in the complete copied type. *)
+  let freshen_free_local_refs ~fresh_for refinement =
     let rename_reference = function
       | Rglobal (Path.Pident id) -> Rglobal (Path.Pident (fresh_for id))
       | Rapp (Path.Pident id) -> Rapp (Path.Pident (fresh_for id))
-      | Rparameter (label, id) -> Rparameter (label, fresh_for id)
       | (Rglobal _ | Rapp _ | Rfun _ | Rsibling _) as reference -> reference
     in
     let rec walk expression =
@@ -2081,7 +2174,7 @@ module Refinement = struct
       String.equal left right && left_delimiter = right_delimiter
     | _ -> left = right
 
-  let alpha_equal ~equal_type ?(binders = []) ?(parameters = []) left right =
+  let alpha_equal ~equal_type ?(binders = []) left right =
     let add_pair pairs left right =
       match
         List.find_opt (fun (id, _) -> Ident.same id left) pairs,
@@ -2108,11 +2201,9 @@ module Refinement = struct
       match left, right with
       | Rfun left, Rfun right | Rsibling left, Rsibling right ->
         String.equal left right
-      | Rparameter (left_label, left), Rparameter (right_label, right) ->
-        String.equal left_label right_label && paired parameters left right
       | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
         Path.same left right
-      | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ ->
+      | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ ->
         false
     in
     let rec equal pairs left right =
@@ -2238,28 +2329,17 @@ module Refinement = struct
             (fun pairs -> add_binders pairs rest)
         else None
     in
-    let rec add_parameters pairs = function
-      | [] -> Some pairs
-      | (left, right) :: rest ->
-        Option.bind (add_pair pairs left right) (fun pairs ->
-          add_parameters pairs rest)
-    in
     Option.fold ~none:false
-      ~some:(fun _ ->
-        Option.fold
-          ~none:false
-          ~some:(fun pairs -> equal pairs left right)
-          (add_binders [] binders))
-      (add_parameters [] parameters)
+      ~some:(fun pairs -> equal pairs left right)
+      (add_binders [] binders)
 
   let strict_equal ~equal_type left right = alpha_equal ~equal_type left right
 
-  let equal_desc ~equal_type ?(parameters = []) left right =
+  let equal_desc ~equal_type left right =
     equal_type left.ref_skeleton right.ref_skeleton
     && alpha_equal
          ~equal_type
          ~binders:[left.ref_view, right.ref_view]
-         ~parameters
          left.ref_pred right.ref_pred
 
   let print_constant ppf = function
@@ -2293,7 +2373,6 @@ module Refinement = struct
   let print_reference ppf = function
     | Rfun name -> Format.fprintf ppf "fun[%s]" name
     | Rsibling name -> Format.fprintf ppf "sibling[%s]" name
-    | Rparameter (label, _) -> Format.fprintf ppf "parameter[%s]" label
     | Rapp path -> Format.fprintf ppf "app[%a]" print_path path
     | Rglobal path -> Format.fprintf ppf "global[%a]" print_path path
 
@@ -2403,7 +2482,6 @@ module Refinement = struct
     let validate_reference = function
       | Rfun name -> require_name "function" name
       | Rsibling name -> require_name "sibling" name
-      | Rparameter (label, _) -> require_name "parameter" label
       | Rapp _ | Rglobal _ -> ()
     in
     let rec loop bound seen expression =
@@ -2448,7 +2526,7 @@ module Refinement = struct
         let bound, seen = add_binder bound seen param in
         let seen = loop bound seen body in
         begin match get_desc expression.rexp_type with
-        | Tarrow ((type_label, _, _), argument_type, result_type, _)
+        | Tarrow ((type_label, _, _, _), argument_type, result_type, _)
           when type_label = arg_label
                && same_type (strip_mono argument_type) param.rb_type
                && same_type result_type body.rexp_type ->
@@ -2464,7 +2542,7 @@ module Refinement = struct
             (fun (function_type, seen) (label, argument) ->
               let seen = loop bound seen argument in
               match get_desc function_type with
-              | Tarrow ((type_label, _, _), argument_type, result_type, _)
+              | Tarrow ((type_label, _, _, _), argument_type, result_type, _)
                 when type_label = label
                      && same_type
                           (strip_mono argument_type) argument.rexp_type ->

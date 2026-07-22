@@ -236,6 +236,18 @@ module For_copy : sig
   val redirect_desc: copy_scope -> type_expr -> type_desc -> unit
         (* Temporarily change a type description *)
 
+  val fresh_ident: copy_scope -> Ident.t -> Ident.t
+        (* Return one fresh identity for each distinct source identity within
+           this copy scope. *)
+
+  val fresh_binder: copy_scope -> Ident.t -> Ident.t
+        (* Return a distinct fresh identity for one lexical binder occurrence,
+           avoiding every source and output stamp reserved in this scope. *)
+
+  val reserve_ident: copy_scope -> Ident.t -> unit
+        (* Prevent a newly allocated identity in this scope from reusing the
+           stamp of a serialized source identity. *)
+
   val with_scope: (copy_scope -> 'a) -> 'a
         (* [with_scope f] calls [f] and restores saved type descriptions
            before returning its result. *)

@@ -4912,6 +4912,8 @@ tuple_type:
 delimited_type_supporting_local_open:
   | LPAREN type_ = core_type RPAREN
       { type_ }
+  | LPAREN type_ = vox_refinement_named_type RPAREN
+      { type_ }
   | LPAREN MODULE ext_attrs = ext_attributes package_type = package_type_ RPAREN
       { mktyp_attrs ~loc:$sloc (Ptyp_package package_type) ext_attrs }
   | mktyp(
@@ -5024,6 +5026,17 @@ atomic_type:
       { expecting $loc($3) "a refinement predicate expression" }
   | atomic_type LBRACE seq_expr error
       { unclosed "{" $loc($2) "}" $loc($4) }
+
+vox_refinement_named_type:
+  | mktyp(
+      name = LIDENT COLON ty = atomic_type
+        { Ptyp_extension
+            ( { txt = "vox2.refinement.named." ^ name;
+                loc = make_loc $sloc },
+              PTyp ty ) }
+    )
+    { $1 }
+;
 
 
 (* This is the syntax of the actual type parameters in an application of

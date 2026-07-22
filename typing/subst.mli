@@ -57,6 +57,15 @@ val with_sibling_prefix : Path.t -> 'k subst -> 'k subst
 val add_modtype : Ident.t -> Path.t -> 'k subst -> 'k subst
 val add_jkind : Ident.t -> Path.t -> t -> t
 
+val add_refinement_bound :
+  Ident.t -> Types.Refinement.t -> 'k subst -> 'k subst
+(** Add capture-avoiding substitution for an arrow-bound refinement value. *)
+
+val add_refinement_bound_renaming :
+  Ident.t -> Ident.t -> 'k subst -> 'k subst
+(** Rename an arrow-bound refinement value without replacing the type metadata
+    carried by its occurrences. *)
+
 type additional_action_config =
   | Duplicate_variables
   (* [Duplicate_variables] makes it so that any substitution will duplicate variable

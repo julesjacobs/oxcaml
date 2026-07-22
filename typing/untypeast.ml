@@ -458,6 +458,8 @@ let exp_extra sub (extra, loc, attrs) sexp =
     | Texp_stack -> Pexp_stack sexp
     | Texp_mode modes ->
         Pexp_constraint (sexp, None, Typemode.untransl_mode modes)
+    | Texp_refinement_application _ -> sexp.pexp_desc
+    | Texp_refinement_constraint _ -> sexp.pexp_desc
     | Texp_inspected_type _ ->
         (* Type inspections are unnecessary in a Parsetree,
            as type inference reproduces them *)
@@ -583,6 +585,8 @@ let expression sub exp =
                         let modes = Typemode.untransl_mode modes in
                         [], modes
                       | Texp_poly _ | Texp_newtype _ | Texp_stack
+                      | Texp_refinement_application _
+                      | Texp_refinement_constraint _
                       | Texp_inspected_type _ -> [], []
                       | Texp_ghost_region | Texp_borrowed -> [], []
                     in

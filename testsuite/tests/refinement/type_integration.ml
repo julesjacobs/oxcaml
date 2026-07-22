@@ -12,7 +12,7 @@ let node type_ rexp_desc =
 let arrow argument result =
   Btype.newgenty
     (Tarrow
-       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
          argument,
          result,
          commu_ok ))

@@ -58,6 +58,10 @@ let string_of_label : Types.arg_label -> string = function
   | Labelled s | Position s -> s
   | Optional s -> "?"^s
 
+let raw_binder ppf = function
+  | None -> fprintf ppf "None"
+  | Some id -> fprintf ppf "Some(%s)" (Ident.unique_name id)
+
 let visited = ref []
 let rec raw_type ppf ty =
   let ty = safe_repr [] ty in
@@ -103,11 +107,12 @@ and raw_type_desc ppf ty =
     Tvar { name; jkind } ->
       fprintf ppf "Tvar (@,%a,@,%a)"
         print_name name (Format_doc.compat (Jkind.format env)) jkind
-  | Tarrow((l,arg,ret),t1,t2,c) ->
-      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a),@,%a,@,%a,@,%s)@]"
+  | Tarrow((l,arg,ret,binder),t1,t2,c) ->
+      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a,%a),@,%a,@,%a,@,%s)@]"
         (string_of_label l)
         (Format_doc.compat (Alloc.print ~verbose:true ())) arg
         (Format_doc.compat (Alloc.print ~verbose:true ())) ret
+        raw_binder binder
         raw_type t1 raw_type t2
         (if is_commu_ok c then "Cok" else "Cunknown")
   | Ttuple tl ->

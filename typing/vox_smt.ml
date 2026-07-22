@@ -20,6 +20,9 @@ external set_alarm : int -> int = "caml_vox_set_alarm"
 external with_async_exns : (unit -> 'a) -> 'a = "caml_vox_with_async_exns"
 external sigalrm_is_blocked : unit -> int = "caml_vox_sigalrm_is_blocked"
 external restore_sigalrm : bool -> bool = "caml_vox_restore_sigalrm"
+(* The persistent runner is restricted to compiler-emitted stdin queries. *)
+external run_persistent_z3 : string -> int -> string -> int * string
+  = "caml_vox_z3_run_persistent"
 
 type backend =
   [ `Z3
@@ -133,10 +136,15 @@ type reference =
 
 type context =
   { env : Env.t;
+    symbol_namespace : string;
     mutable data : data_instance list;
     mutable tuples : tuple_instance list;
     mutable references : reference list;
   }
+
+let solver_symbol context basename =
+  if String.equal context.symbol_namespace "" then basename
+  else basename ^ "_" ^ context.symbol_namespace
 
 let rec sort_key = function
   | Sint -> "int"
@@ -192,7 +200,7 @@ let register_tuple context location sorts =
   if Option.is_none (find_tuple context key) then
     context.tuples <-
       { tuple_key = key;
-        tuple_name = "VoxTuple_" ^ digest key;
+        tuple_name = solver_symbol context ("VoxTuple_" ^ digest key);
         tuple_fields = sorts;
       }
       :: context.tuples;
@@ -281,7 +289,7 @@ and register_abstract context location path arguments declaration =
         (Path.name path);
     context.data <-
       { data_key = key;
-        data_name = "VoxData_" ^ digest key;
+        data_name = solver_symbol context ("VoxData_" ^ digest key);
         data_path = path;
         data_type_arguments = arguments;
         data_definition = Some Abstract;
@@ -320,7 +328,7 @@ and register_data context location path arguments declaration =
         (Path.name path);
     let data =
       { data_key = key;
-        data_name = "VoxData_" ^ digest key;
+        data_name = solver_symbol context ("VoxData_" ^ digest key);
         data_path = path;
         data_type_arguments = arguments;
         data_definition = None;
@@ -463,11 +471,10 @@ and reduce_application outer function_ arguments =
 
 let reference_basename = function
   | Rfun name | Rsibling name -> name
-  | Rparameter (label, _) -> label
   | Rapp path | Rglobal path -> Path.last path
 
 let builtin_name context = function
-  | Rfun _ | Rsibling _ | Rparameter _ -> None
+  | Rfun _ | Rsibling _ -> None
   | Rapp path | Rglobal path ->
     begin
       match
@@ -483,16 +490,13 @@ let same_reference left right =
   match left, right with
   | Rfun left, Rfun right | Rsibling left, Rsibling right ->
     String.equal left right
-  | Rparameter (left_label, left), Rparameter (right_label, right) ->
-    String.equal left_label right_label && Ident.same left right
   | (Rapp left | Rglobal left), (Rapp right | Rglobal right) ->
     Path.same left right
-  | (Rfun _ | Rsibling _ | Rparameter _ | Rapp _ | Rglobal _), _ -> false
+  | (Rfun _ | Rsibling _ | Rapp _ | Rglobal _), _ -> false
 
 let quantifier_name = function
   | Rfun name | Rsibling name ->
     String.equal name "forall_" || String.equal name "exists_"
-  | Rparameter _ -> false
   | Rapp path | Rglobal path ->
     let name = Path.last path in
     String.equal name "forall_" || String.equal name "exists_"
@@ -500,7 +504,6 @@ let quantifier_name = function
 let reference_description = function
   | Rfun name -> "function " ^ name
   | Rsibling name -> "sibling " ^ name
-  | Rparameter (label, _) -> "parameter " ^ label
   | Rapp path -> "application " ^ Path.name path
   | Rglobal path -> "value " ^ Path.name path
 
@@ -524,7 +527,8 @@ let note_reference context expression reference =
         let index = List.length context.references in
         context.references <-
           { reference_head = reference;
-            reference_name = "VoxRef_" ^ string_of_int index;
+            reference_name =
+              solver_symbol context ("VoxRef_" ^ string_of_int index);
             reference_sort = sort;
           }
           :: context.references
@@ -1199,7 +1203,15 @@ let data_shape location data =
     shape_constructors;
   }
 
-let check_abstract_inhabitance (context : context) location =
+let check_abstract_inhabitance (context : context) variables location =
+  let fixed_variable key =
+    List.exists
+      (fun variable ->
+        match variable.variable_sort with
+        | Sdata variable_key -> String.equal key variable_key
+        | Sint | Sbool | Stuple _ | Sarrow _ -> false)
+      variables
+  in
   let trusted_constant key =
     List.exists
       (fun reference ->
@@ -1215,14 +1227,49 @@ let check_abstract_inhabitance (context : context) location =
                            | Val_anc _; _ } -> false
           | exception Not_found -> false
           end
-        | (Rfun _ | Rsibling _ | Rparameter _ | Rglobal _ | Rapp _), _ ->
+        | (Rfun _ | Rsibling _ | Rglobal _ | Rapp _), _ ->
           false)
       context.references
+  in
+  let trusted_environment_constant data =
+    Env.fold_values
+      (fun _name _path lazy_description _mode inhabited ->
+        inhabited
+        ||
+        match Subst.Lazy.force_value_description lazy_description with
+        | { val_kind = Val_reg _; val_type; _ } ->
+          let rec data_instance type_ =
+            let type_ = Ctype.expand_head_opt context.env type_ in
+            match get_desc type_ with
+            | Trefine refinement -> data_instance refinement.ref_skeleton
+            | Tpoly (body, []) -> data_instance body
+            | Tconstr (path, arguments, _) -> Some (path, arguments)
+            | _ -> None
+          in
+          Option.fold ~none:false
+            ~some:(fun (path, arguments) ->
+              Path.same path data.data_path
+              && Ctype.is_equal context.env false arguments
+                   data.data_type_arguments)
+            (data_instance val_type)
+        | { val_kind =
+              (Val_prim _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _);
+            _ } ->
+          false)
+      None context.env false
+  in
+  let inhabited_builtin data =
+    Path.same data.data_path Predef.path_iarray
   in
   List.iter
     (fun data ->
       match definition location data with
-      | Abstract when not (trusted_constant data.data_key) ->
+      | Abstract
+        when not
+               (inhabited_builtin data
+                || fixed_variable data.data_key
+                || trusted_constant data.data_key
+                || trusted_environment_constant data) ->
         error location
           "abstract type %s is not known to be inhabited"
           (Path.name data.data_path)
@@ -2085,9 +2132,11 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   in
   let goal = normalize vc.goal in
   let expressions = facts @ [goal] in
-  let context = { env; data = []; tuples = []; references = [] } in
+  let context =
+    { env; symbol_namespace = ""; data = []; tuples = []; references = [] }
+  in
   let variables = collect context expressions in
-  check_abstract_inhabitance context vc.location;
+  check_abstract_inhabitance context variables vc.location;
   check_concrete_inhabitance context vc.location;
   let session = Oxsmt_session.create () in
   let terms = Oxsmt_session.context session in
@@ -2273,7 +2322,7 @@ let emit_variables context location buffer variables =
            ^ ") " ^ smt_sort context location result ^ ")\n"))
     variables
 
-let emit_internal ~query ~env (vc : Vox_vc.t) =
+let emit_internal ?(symbol_namespace = "") ~query ~env (vc : Vox_vc.t) =
   let original_expressions =
     List.map (fun (fact : Vox_vc.fact) -> fact.expression) vc.facts
     @ [vc.goal]
@@ -2286,9 +2335,11 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
   in
   let goal = normalize vc.goal in
   let expressions = facts @ [goal] in
-  let context = { env; data = []; tuples = []; references = [] } in
+  let context =
+    { env; symbol_namespace; data = []; tuples = []; references = [] }
+  in
   let variables = collect context expressions in
-  check_abstract_inhabitance context vc.location;
+  check_abstract_inhabitance context variables vc.location;
   check_concrete_inhabitance context vc.location;
   let fact_terms =
     List.map
@@ -2341,8 +2392,8 @@ let emit_internal ~query ~env (vc : Vox_vc.t) =
     goal = query_term;
   }
 
-let emit_query ~query ~env (vc : Vox_vc.t) =
-  try Ok (emit_internal ~query ~env vc) with
+let emit_query_with_namespace ?symbol_namespace ~query ~env (vc : Vox_vc.t) =
+  try Ok (emit_internal ?symbol_namespace ~query ~env vc) with
   | Emission_error error -> Error error
   | exception_ ->
     Error
@@ -2350,8 +2401,16 @@ let emit_query ~query ~env (vc : Vox_vc.t) =
         message = Printexc.to_string exception_;
       }
 
+let emit_with_namespace ?symbol_namespace ~query ~env vc =
+  Result.map
+    (fun query -> query.contents)
+    (emit_query_with_namespace ?symbol_namespace ~query ~env vc)
+
+let emit_query ~query ~env vc =
+  emit_query_with_namespace ~query ~env vc
+
 let emit ~query ~env vc =
-  Result.map (fun query -> query.contents) (emit_query ~query ~env vc)
+  emit_with_namespace ~query ~env vc
 
 let parse_status output =
   let statuses =
@@ -2405,6 +2464,55 @@ let run_solver ~command ~input_mode ~timeout_seconds contents =
       in
       let status = Sys.command shell_command in
       { status; output = read_output output })
+
+let noninteractive_commands = Hashtbl.create 7
+
+let command_uses_shell_helper command =
+  let command = String.trim command in
+  let starts_with prefix =
+    let length = String.length prefix in
+    String.length command >= length
+    && String.equal (String.sub command 0 length) prefix
+  in
+  starts_with "/bin/sh " || starts_with "sh -c "
+
+let persistent_unsat_core_option =
+  "(set-option :produce-unsat-cores true)\n"
+
+let persistent_query_counter = Atomic.make 0
+
+let fresh_persistent_symbol_namespace () =
+  "q" ^ string_of_int (Atomic.fetch_and_add persistent_query_counter 1)
+
+let persistent_z3_contents contents =
+  let prefix_length = String.length persistent_unsat_core_option in
+  if
+    String.length contents >= prefix_length
+    && String.equal
+         (String.sub contents 0 prefix_length)
+         persistent_unsat_core_option
+  then
+    String.sub contents prefix_length (String.length contents - prefix_length)
+  else
+    contents
+
+let run_z3_solver ~command ~input_mode ~timeout_seconds contents =
+  match input_mode with
+  | File_argument ->
+    run_solver ~command ~input_mode ~timeout_seconds contents
+  | Stdin
+    when command_uses_shell_helper command
+         || Hashtbl.mem noninteractive_commands command ->
+    run_solver ~command ~input_mode ~timeout_seconds contents
+  | Stdin ->
+    let status, output =
+      run_persistent_z3 command timeout_seconds (persistent_z3_contents contents)
+    in
+    if status = -1 then begin
+      Hashtbl.replace noninteractive_commands command ();
+      run_solver ~command ~input_mode ~timeout_seconds contents
+    end else
+      { status; output }
 
 let line_starts_with prefix line =
   let prefix_length = String.length prefix in
@@ -2634,13 +2742,23 @@ let discharge ~backend ~command ?prove_contents ?input_mode
         let emitted =
           match query, prove_contents with
           | Prove, Some contents -> Ok contents
-          | (Prove | Disprove), _ -> emit ~query ~env vc
+          | (Prove | Disprove), _ ->
+            let symbol_namespace =
+              match backend with
+              | `Z3 -> Some (fresh_persistent_symbol_namespace ())
+              | `Oxsmt -> None
+            in
+            emit_with_namespace ?symbol_namespace ~query ~env vc
         in
         match emitted with
         | Error emission_error -> raise (Emission_error emission_error)
         | Ok contents ->
           let process =
-            run_solver ~command ~input_mode ~timeout_seconds contents
+            match backend, prove_contents with
+            | `Z3, None ->
+              run_z3_solver ~command ~input_mode ~timeout_seconds contents
+            | (`Z3, Some _) | (`Oxsmt, _) ->
+              run_solver ~command ~input_mode ~timeout_seconds contents
           in
           solver_result ~backend ~query ~fact_count:(List.length vc.facts)
             process

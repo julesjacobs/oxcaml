@@ -117,8 +117,10 @@ typing_SOURCES = \
   typing/shape.mli typing/shape.ml \
   typing/types.mli typing/types.ml \
   typing/btype.mli typing/btype.ml \
+  typing/vox_scope.mli typing/vox_scope.ml \
   typing/oprint.mli typing/oprint.ml \
   typing/subst.mli typing/subst.ml \
+  typing/vox_dependent.mli typing/vox_dependent.ml \
   typing/predef.mli typing/predef.ml \
   typing/datarepr.mli typing/datarepr.ml \
   file_formats/cmi_format.mli file_formats/cmi_format.ml \

@@ -72,6 +72,32 @@ let mk () : int{ _ = 3 } = 3
 val mk : unit -> int{ _ = 3 } = <fun>
 |}]
 
+(* An unannotated [if] joins a refined result and a bare result at their
+   carrier in either source order.  The first arm's predicate is not an
+   expectation imposed on the second arm. *)
+let sw_if_refined_first b = if b then mk () else 0
+[%%expect {|
+val sw_if_refined_first : bool -> int = <fun>
+|}]
+
+let sw_if_bare_first b = if b then 0 else mk ()
+[%%expect {|
+val sw_if_bare_first : bool -> int = <fun>
+|}]
+
+(* A standalone explicit refinement still infers its refined type. *)
+let sw_standalone_refinement = (3 : int{ _ = 3 })
+[%%expect {|
+val sw_standalone_refinement : int{ _ = 3 } = 3
+|}]
+
+(* An outer refined expectation is checked at each returning arm. *)
+let sw_if_outer_refinement b : int{ _ >= 0 } =
+  if b then mk () else 0
+[%%expect {|
+val sw_if_outer_refinement : bool -> int{ _ >= 0 } = <fun>
+|}]
+
 (* @acc id=sw_result_in_arith final=ACCEPT today=ACCEPT stable=yes unlocks=integration
    A refined call result in bare arithmetic. *)
 let sw_result_in_arith = mk () + 1

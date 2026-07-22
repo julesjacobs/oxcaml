@@ -43,6 +43,15 @@ let refinement_type_payload = function
       Some (skeleton, predicate)
   | _ -> None
 
+let refinement_named_type_payload = function
+  | ({ txt; _ }, PTyp type_)
+    when String.starts_with ~prefix:"vox2.refinement.named." txt ->
+      let prefix_length = String.length "vox2.refinement.named." in
+      Some
+        ( String.sub txt prefix_length (String.length txt - prefix_length),
+          type_ )
+  | _ -> None
+
 let prefix_symbols  = [ '!'; '?'; '~' ]
 let infix_symbols = [ '='; '<'; '>'; '@'; '^'; '|'; '&'; '+'; '-'; '*'; '/';
                       '$'; '%'; '#' ]
@@ -702,12 +711,17 @@ and core_type1 ctxt f x =
     | Ptyp_splice t ->
         pp f "@[<hov2>$(%a)@]" (core_type ctxt) t
     | Ptyp_extension e ->
-        begin match refinement_type_payload e with
-        | Some (skeleton, predicate) ->
-          pp f "@[<2>%a{@;%a@;}@]"
-            (core_type1 ctxt) skeleton
-            (expression reset_ctxt) predicate
-        | None -> extension ctxt f e
+        begin match refinement_named_type_payload e with
+        | Some (name, type_) ->
+          pp f "@[<2>(%s :@ %a)@]" name (core_type ctxt) type_
+        | None ->
+          begin match refinement_type_payload e with
+          | Some (skeleton, predicate) ->
+            pp f "@[<2>%a{@;%a@;}@]"
+              (core_type1 ctxt) skeleton
+              (expression reset_ctxt) predicate
+          | None -> extension ctxt f e
+          end
         end
     | (Ptyp_arrow _ | Ptyp_alias _ | Ptyp_poly _ | Ptyp_repr _
       | Ptyp_newlayout _ | Ptyp_of_kind _) ->

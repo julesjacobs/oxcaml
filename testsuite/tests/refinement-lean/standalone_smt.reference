@@ -51,3 +51,10 @@ oxsmt exits: unsupported is unknown; malformed is solver-error
 backend selection and usage capabilities checked
 cross aggregation: ordered divergence and unanimity checked
 z3 subprocess: SKIPPED (VOX_SMT_TEST_SOLVER is not provisioned)
+z3 persistent session: one start and scoped isolation checked
+z3 persistent session: global datatype names isolated
+z3 persistent session: option baseline checked
+z3 persistent session: early exit restart checked
+z3 persistent session: timeout restart checked
+z3 custom contents: one-shot fallback checked
+z3 startup output: one-shot fallback checked

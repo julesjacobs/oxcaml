@@ -453,6 +453,8 @@ let extra sub = function
   | Texp_ghost_region as d -> d
   | Texp_stack as d -> d
   | Texp_mode modes -> Texp_mode (sub.modes sub modes)
+  | Texp_refinement_application _ as d -> d
+  | Texp_refinement_constraint _ as d -> d
   | Texp_inspected_type (Label_disambiguation _) as d -> d
   | Texp_inspected_type (Polymorphic_parameter (Method _)) as d -> d
   | Texp_inspected_type (Polymorphic_parameter (Arrow _)) as d -> d

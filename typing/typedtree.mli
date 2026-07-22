@@ -416,6 +416,14 @@ and exp_extra =
         (** stack_ E *)
   | Texp_mode of Mode.Alloc.Const.Option.t modes
         (** E : _ @@ M  *)
+  | Texp_refinement_application of refinement_application
+        (** Instantiated formal domains, in formal parameter order, for a
+            refinement-aware application.  This metadata is internal and is
+            omitted when converting back to a parsetree. *)
+  | Texp_refinement_constraint of Types.type_expr
+        (** A refined expected type inherited from an enclosing dependent
+            function annotation.  This records the result obligation when no
+            result constraint remains in the parsetree after elaboration. *)
   | Texp_inspected_type of [ `exp ] type_inspection
         (** Inserted when type inspection was necessary to resolve types
             during inference. Generally, elaborated to a type constraint.
@@ -436,6 +444,18 @@ and exp_extra =
         (* NB. If an expression has both [Texp_borrowed] and
         [Texp_ghost_region], we assume the [Texp_borrowed] is inner than
         [Texp_ghost_region]. Currently it's impossible. *)
+
+and refinement_application_argument =
+  { rap_domain : Types.type_expr;
+    rap_binder : Ident.t option;
+    rap_supplied : bool;
+    rap_subject : Types.refinement_expression option;
+  }
+
+and refinement_application =
+  { rapp_arguments : refinement_application_argument list;
+    rapp_result : Types.type_expr;
+  }
 
 and arg_label = Types.arg_label =
   | Nolabel

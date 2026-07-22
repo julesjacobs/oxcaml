@@ -1,7 +1,5 @@
-(* Provider compiled as a SEPARATE unit.  Its parameters, siblings, and captured
-   locals mentioned in result refinements are all lowered as free local Pidents
-   carrying this unit's stamps; on import they must not be conflated with the
-   caller's binders. *)
+(* Provider compiled as a separate unit.  Arrow-bound parameters, sibling
+   values, and captured locals remain distinct through CMI import. *)
 let identity (x : int) : int{ _ = x } = x          (* result mentions the PARAMETER *)
 let k = 5
 let fk (x : int) : int{ _ = k } = k                (* result mentions a SIBLING *)

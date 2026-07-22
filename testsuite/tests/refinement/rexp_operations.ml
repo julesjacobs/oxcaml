@@ -23,7 +23,7 @@ let named_type name =
 let arrow argument result =
   create_expr
     (Tarrow
-       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
          argument,
          result,
          commu_ok ))

@@ -13,7 +13,11 @@ let node type_ rexp_desc = R.create ~loc:Location.none ~type_ rexp_desc
 
 let arrow argument result =
   Btype.newgenty
-    (Tarrow ((Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy), argument, result, commu_ok))
+    (Tarrow
+       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
+         argument,
+         result,
+         commu_ok ))
 ;;
 
 let bound binder = node binder.rb_type (Rexp_ident (Rbound binder.rb_id))

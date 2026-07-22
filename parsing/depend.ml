@@ -128,6 +128,20 @@ let rec add_type bv ty =
   | Ptyp_of_kind jkind -> add_jkind bv jkind
   | Ptyp_repr(_, t) -> add_type bv t
   | Ptyp_newlayout(_, t) -> add_type bv t
+  | Ptyp_extension ({ txt; _ }, PTyp type_)
+    when String.starts_with ~prefix:"vox2.refinement.named." txt ->
+      add_type bv type_
+  | Ptyp_extension
+      ( { txt = "vox2.refinement.type"; _ },
+        PStr
+          [ { pstr_desc =
+                Pstr_eval
+                  ( { pexp_desc =
+                        Pexp_constraint (_, Some type_, _);
+                      _ },
+                    _ );
+              _ } ] ) ->
+      add_type bv type_
   | Ptyp_extension e -> handle_extension e
 
 and add_package_type bv ptyp =

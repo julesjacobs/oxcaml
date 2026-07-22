@@ -96,15 +96,49 @@ val bf_module_alias : int = 9
 val bf_module_alias_proof : int{ _ = 9 } = 9
 |}]
 
-(* The value returned by this sequence happens to be [1], but the RHS is
-   impure and therefore contributes no selfification equation. *)
-let bf_no_impure_selfification () =
+(* Effects before a stable final expression do not obscure the value returned
+   on normal exit.  If the prefix raises or diverges, the binder is not
+   reached; otherwise this sequence returns [1], so [x = 1] is available. *)
+let bf_impure_prefix_literal_selfification () =
   let x = (ignore (read_int ()); 1) in
+  (x : int{ _ = 1 })
+[%%expect {|
+val bf_impure_prefix_literal_selfification : unit -> int{ _ = 1 } = <fun>
+|}]
+
+(* A mutable read is not a stable final expression: a later read need not
+   denote the value captured in [x], so no selfification fact is recorded. *)
+let bf_no_mutable_final_selfification cell =
+  let x = (ignore (read_int ()); !cell) in
   (x : int{ _ = 1 })
 [%%expect {|
 Line 3, characters 2-20:
 3 |   (x : int{ _ = 1 })
       ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* A handler with a different result prevents the try expression from being
+   selfified as either normal-path result. *)
+let bf_no_alternate_exception_selfification () =
+  let x = (try (ignore (read_int ()); 1) with Exit -> 2) in
+  (x : int{ _ = 1 })
+[%%expect {|
+Line 3, characters 2-20:
+3 |   (x : int{ _ = 1 })
+      ^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Aggregate children start from the same fact environment.  The first
+   child's local selfification cannot discharge the second child's goal. *)
+let bf_no_unordered_sibling_selfification_leak (value : int) =
+  ( (let x = (ignore (read_int ()); 1) in (x : int{ _ = 1 })),
+    (value : int{ _ = 1 }) )
+[%%expect {|
+Line 3, characters 4-26:
+3 |     (value : int{ _ = 1 }) )
+        ^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (not-proved)
 |}]
 

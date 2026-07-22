@@ -126,6 +126,128 @@ type bound_ident = { hide:bool; ident:Ident.t }
 (* printing environment for path shortening and naming *)
 let printing_env = ref Env.empty
 
+module Refinement_names = struct
+  type t =
+    { by_id : string Ident.Map.t;
+      used : String.Set.t;
+    }
+
+  let empty = { by_id = Ident.Map.empty; used = String.Set.empty }
+  let find_opt id names = Ident.Map.find_opt id names.by_id
+
+  let valid_name name =
+    let valid_first = function
+      | 'a' .. 'z' | '_' -> true
+      | _ -> false
+    in
+    let valid_rest = function
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
+      | _ -> false
+    in
+    String.length name > 0
+    && valid_first name.[0]
+    && String.for_all valid_rest name
+    && not (String.equal name "_")
+    && not (Lexer.is_keyword name)
+
+  let bind id names =
+    match find_opt id names with
+    | Some name -> name, names
+    | None ->
+      let base = Ident.name id in
+      let base = if valid_name base then base else "value" in
+      let rec choose index =
+        let candidate =
+          if index = 1 then base else Printf.sprintf "%s__%d" base index
+        in
+        if String.Set.mem candidate names.used
+        then choose (index + 1)
+        else candidate
+      in
+      let name = choose 1 in
+      ( name,
+        { by_id = Ident.Map.add id name names.by_id;
+          used = String.Set.add name names.used;
+        } )
+
+  let bind_as id name names =
+    { by_id = Ident.Map.add id name names.by_id;
+      used = String.Set.add name names.used;
+    }
+
+  let reserve name names =
+    { names with used = String.Set.add name names.used }
+end
+
+let current_refinement_names = ref Refinement_names.empty
+
+let with_refinement_names names f =
+  let previous = !current_refinement_names in
+  current_refinement_names := names;
+  try_finally f ~always:(fun () -> current_refinement_names := previous)
+
+let reserve_free_refinement_names type_ names =
+  let reserve_reference names = function
+    | Rfun name | Rsibling name -> Refinement_names.reserve name names
+    | Rapp path | Rglobal path ->
+      let displayed = Path.name path in
+      let displayed =
+        match String.index_opt displayed '.' with
+        | Some dot
+          when String.equal (String.sub displayed 0 dot) "Stdlib" ->
+          String.sub displayed (dot + 1)
+            (String.length displayed - dot - 1)
+        | None | Some _ -> displayed
+      in
+      if String.contains displayed '.' then names
+      else Refinement_names.reserve displayed names
+  in
+  let rec reserve_expression names expression =
+    match expression.rexp_desc with
+    | Rexp_ident (Rfree reference) -> reserve_reference names reference
+    | Rexp_ident (Rbound _) | Rexp_constant _ -> names
+    | Rexp_let (bindings, body) ->
+      List.fold_left
+        (fun names binding ->
+          reserve_expression names binding.rbind_expr)
+        names bindings
+      |> fun names -> reserve_expression names body
+    | Rexp_function { body; _ } -> reserve_expression names body
+    | Rexp_apply (function_, arguments) ->
+      List.fold_left
+        (fun names (_, argument) -> reserve_expression names argument)
+        (reserve_expression names function_) arguments
+    | Rexp_tuple fields ->
+      List.fold_left
+        (fun names (_, field) -> reserve_expression names field)
+        names fields
+    | Rexp_construct (_, arguments) ->
+      List.fold_left reserve_expression names arguments
+    | Rexp_field (record, _) -> reserve_expression names record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      let names = reserve_expression names condition in
+      let names = reserve_expression names ifso in
+      Option.fold ~none:names ~some:(reserve_expression names) ifnot
+    | Rexp_match (scrutinee, cases) ->
+      List.fold_left
+        (fun names case -> reserve_expression names case.rcase_body)
+        (reserve_expression names scrutinee) cases
+  in
+  let names = ref names in
+  with_type_mark (fun mark ->
+    let rec visit type_ =
+      if try_mark_node mark type_ then begin
+        begin match get_desc type_ with
+        | Trefine refinement ->
+          names := reserve_expression !names refinement.ref_pred
+        | _ -> ()
+        end;
+        iter_type_expr visit type_
+      end
+    in
+    visit type_);
+  !names
+
 (* Source-like rendering of a refinement predicate.  The default reproduces
    the raw [Types.Refinement.print] AST syntax; the full type-checker installs
    an [env]-aware, source-like renderer (see [Vox_lean.render_predicate]) at
@@ -133,8 +255,11 @@ let printing_env = ref Env.empty
    [dynlink] library, which does not include the refinement/verification
    modules. *)
 let refinement_predicate_printer :
-    (env:Env.t -> Types.refinement_expression -> string) ref =
-  ref (fun ~env:_ predicate ->
+    (env:Env.t ->
+     names:Refinement_names.t ->
+     Types.refinement_expression ->
+     string) ref =
+  ref (fun ~env:_ ~names:_ predicate ->
     Format.asprintf "%a" Types.Refinement.print predicate)
 
 (* When printing, it is important to only observe the
@@ -757,9 +882,15 @@ let wrap_mutation f =
 
 let wrap_printing_env ~reset_names env f =
   let old_env = !printing_env in
+  let old_refinement_names = !current_refinement_names in
   set_printing_env env;
-  if reset_names then reset_naming_context ();
-  try_finally f ~always:(fun () -> set_printing_env old_env)
+  if reset_names then begin
+    reset_naming_context ();
+    current_refinement_names := Refinement_names.empty
+  end;
+  try_finally f ~always:(fun () ->
+    current_refinement_names := old_refinement_names;
+    set_printing_env old_env)
 
 let wrap_printing_env ~error env f =
   if error then Env.without_cmis (wrap_printing_env ~reset_names:true env) f
@@ -1442,9 +1573,10 @@ let rec tree_of_modal_typexp mode modal ty =
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
         Otyp_var (non_gen, Variable_names.name_of_type name_gen tty)
-    | Tarrow ((l, marg, mret), ty1, ty2, _) ->
+    | Tarrow ((l, marg, mret, binder), ty1, ty2, _) ->
         let lab =
-          if !print_labels || is_omittable l then outcome_label l
+          if !print_labels || is_omittable l || Option.is_some binder
+          then outcome_label l
           else Nolabel
         in
         (* [marg] will contain undetermined axes. It would be imprecise if we
@@ -1466,7 +1598,25 @@ let rec tree_of_modal_typexp mode modal ty =
         in
         let acc_mode = curry_mode alloc_mode arg_mode in
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
-        let t2 = tree_of_modal_typexp mode modal ty2 in
+        let binder_name, t2 =
+          match binder with
+          | None -> None, tree_of_modal_typexp mode modal ty2
+          | Some binder ->
+            let names =
+              reserve_free_refinement_names ty2 !current_refinement_names
+            in
+            let name, names =
+              Refinement_names.bind binder names
+            in
+            ( Some name,
+              with_refinement_names names (fun () ->
+                tree_of_modal_typexp mode modal ty2) )
+        in
+        let t1 =
+          match binder_name with
+          | Some name -> Otyp_vox_named (name, t1)
+          | None -> t1
+        in
         Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
@@ -1607,9 +1757,13 @@ let rec tree_of_modal_typexp mode modal ty =
       Internal_names.add p';
       Otyp_constr (tree_of_path (Some Type) p', tree_of_typlist mode tyl')
     | Trefine refinement ->
+      let names =
+        Refinement_names.bind_as refinement.ref_view.rb_id "_"
+          !current_refinement_names
+      in
       Otyp_refine
         ( tree_of_typexp mode alloc_mode refinement.ref_skeleton,
-          !refinement_predicate_printer ~env:!printing_env
+          !refinement_predicate_printer ~env:!printing_env ~names
             refinement.ref_pred )
   in
   Aliases.remove_delay px;

@@ -2796,7 +2796,7 @@ let type_for_annotation ~env ~loc typ =
         | Tunivar _ ->
           let name, jkind_annotation = unwrap_univar ty |> Option.get in
           Ttyp_var (Some name, jkind_annotation)
-        | Tarrow ((arg_label, _, _), ty, ty', _) ->
+        | Tarrow ((arg_label, _, _, _), ty, ty', _) ->
           Ttyp_arrow
             ( arg_label,
               go ty,
@@ -3645,6 +3645,8 @@ and quote_expression_extra ~env ~scopes _stage extra lambda =
       |> Type_constraint.wrap)
     |> Exp_desc.wrap
   | Texp_ghost_region -> lambda
+  | Texp_refinement_application _
+  | Texp_refinement_constraint _ -> lambda
   | Texp_borrowed ->
     Exp_desc.borrow loc (mk_exp_noattr loc lambda) |> Exp_desc.wrap
 
@@ -3658,6 +3660,8 @@ and update_env_with_extra ~loc extra =
       Location.print_loc (to_location loc)
   | Texp_mode _ -> ()
   | Texp_inspected_type _ -> ()
+  | Texp_refinement_application _
+  | Texp_refinement_constraint _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
 
@@ -3671,6 +3675,8 @@ and update_env_without_extra ~loc extra =
       Location.print_loc (to_location loc)
   | Texp_mode _ -> ()
   | Texp_inspected_type _ -> ()
+  | Texp_refinement_application _
+  | Texp_refinement_constraint _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
 

@@ -12,7 +12,7 @@ let node type_ rexp_desc =
 let arrow argument result =
   Btype.newgenty
     (Tarrow
-       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
          argument,
          result,
          commu_ok ))
@@ -189,3 +189,120 @@ let () =
   let imported = Subst.type_expr (Subst.for_loading_cmi ()) original in
   check_freshened ~original imported;
   print_endline "cmi loading: all predicate binders freshened"
+
+let () =
+  let anchor = Ident.create_scoped ~scope:1 "anchor" in
+  let root = Ident.create_scoped ~scope:1 "Provider" in
+  let projected_anchor = Path.Pdot (Path.Pident root, "anchor") in
+  let refined =
+    let original = refinement (make_refined anchor) in
+    let ref_pred = free (Rglobal (Path.Pident anchor)) in
+    Btype.newgenty (Trefine { original with ref_pred })
+  in
+  let first = Ident.create_scoped ~scope:1 "first" in
+  let second = Ident.create_scoped ~scope:1 "second" in
+  let signature =
+    [ Sig_value (first, value_description refined, Exported);
+      Sig_value (second, value_description refined, Exported);
+    ]
+  in
+  let substitution = Subst.add_value anchor projected_anchor Subst.identity in
+  let projected = Subst.signature Keep substitution signature in
+  List.iter
+    (function
+      | Sig_value (_, description, Exported) ->
+        begin match (refinement description.val_type).ref_pred.rexp_desc with
+        | Rexp_ident (Rfree (Rglobal reference)) ->
+          assert (Path.same reference projected_anchor)
+        | _ -> failwith "value path was not projected"
+        end
+      | _ -> failwith "unexpected projected signature")
+    projected;
+  print_endline "signature projection: shared value path remains coherent"
+
+let module_description signature =
+  { md_type = Mty_signature signature;
+    md_modalities = Mode.Modality.(Const.id |> of_const);
+    md_attributes = [];
+    md_loc = Location.none;
+    md_uid = Uid.internal_not_actually_unique;
+  }
+
+let refined_reference id =
+  let original = refinement (make_refined id) in
+  let ref_pred = free (Rglobal (Path.Pident id)) in
+  Btype.newgenty (Trefine { original with ref_pred })
+
+let refined_qualified_reference module_id =
+  let original = refinement (make_refined module_id) in
+  let ref_pred = free (Rglobal (path module_id "x")) in
+  Btype.newgenty (Trefine { original with ref_pred })
+
+let () =
+  let outer_anchor = Ident.create_scoped ~scope:1 "outer_anchor" in
+  let nested_value = Ident.create_scoped ~scope:1 "nested_value" in
+  let nested_module = Ident.create_scoped ~scope:1 "Nested" in
+  let nested_signature =
+    [ Sig_value
+        ( nested_value,
+          value_description (refined_reference outer_anchor),
+          Exported ) ]
+  in
+  let valid =
+    [ Sig_value
+        (outer_anchor, value_description Predef.type_int, Exported);
+      Sig_module
+        ( nested_module,
+          Mp_present,
+          module_description nested_signature,
+          Trec_not,
+          Exported );
+    ]
+  in
+  assert (Result.is_ok (Vox_scope.validate_signature valid));
+  let qualified_module = Ident.create_scoped ~scope:1 "Qualified" in
+  let qualified_value = Ident.create_scoped ~scope:1 "qualified_value" in
+  let qualified_signature visibility =
+    [ Sig_module
+        ( qualified_module,
+          Mp_present,
+          module_description [],
+          Trec_not,
+          visibility );
+      Sig_value
+        ( qualified_value,
+          value_description (refined_qualified_reference qualified_module),
+          Exported );
+    ]
+  in
+  assert
+    (Result.is_ok
+       (Vox_scope.validate_signature (qualified_signature Exported)));
+  begin match Vox_scope.validate_signature (qualified_signature Hidden) with
+  | Error escaped -> assert (Ident.same escaped qualified_module)
+  | Ok () -> failwith "hidden module escaped into a qualified value path"
+  end;
+  let inner_anchor = Ident.create_scoped ~scope:1 "inner_anchor" in
+  let outer_value = Ident.create_scoped ~scope:1 "outer_value" in
+  let invalid_nested_signature =
+    [ Sig_value
+        (inner_anchor, value_description Predef.type_int, Exported) ]
+  in
+  let invalid =
+    [ Sig_value
+        ( outer_value,
+          value_description (refined_reference inner_anchor),
+          Exported );
+      Sig_module
+        ( nested_module,
+          Mp_present,
+          module_description invalid_nested_signature,
+          Trec_not,
+          Exported );
+    ]
+  in
+  begin match Vox_scope.validate_signature invalid with
+  | Error escaped -> assert (Ident.same escaped inner_anchor)
+  | Ok () -> failwith "nested value escaped into its enclosing signature"
+  end;
+  print_endline "signature validation: nested scopes are hierarchical"

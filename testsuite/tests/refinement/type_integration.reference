@@ -8,4 +8,4 @@ instance: types copied consistently; binder stamp preserved
 graph traversal: skeleton, view, and predicate annotations
 occurs check: predicate annotation participates
 rectypes: traversal and instance are cycle-safe
-printer: int{ positive value }
+printer: int{ positive _ }

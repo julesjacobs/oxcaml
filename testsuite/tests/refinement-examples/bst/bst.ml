@@ -29,9 +29,7 @@ let[@vox.def] membership_side first_member second_member =
 
 let empty = (Empty : t{ _ = Empty })
 
-let[@vox.def] rec member (query : int) (tree : t @ logical)
-    : bool{ _ = true || _ = false }
-  =
+let[@vox.def] rec member (query : int) (tree : t @ logical) =
   match tree with
   | Empty -> false
   | Node (left, key, right) ->

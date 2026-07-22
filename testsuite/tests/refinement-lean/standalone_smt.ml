@@ -5,6 +5,120 @@
 
 open Types
 
+let helper_starts_with prefix text =
+  let length = String.length prefix in
+  String.length text >= length
+  && String.equal (String.sub text 0 length) prefix
+
+let helper_touch filename =
+  let channel = open_out filename in
+  close_out channel
+
+let run_persistent_helper mode counter state =
+  let counter_channel =
+    open_out_gen [Open_wronly; Open_creat; Open_append; Open_text] 0o600
+      counter
+  in
+  output_string counter_channel "start\n";
+  close_out counter_channel;
+  if String.equal mode "startup_error" then begin
+    print_endline "(error \"startup diagnostic\")";
+    flush stdout
+  end;
+  let declarations = ref [] in
+  let global_datatypes = ref [] in
+  let core_enabled = ref false in
+  let declaration_frames = ref [] in
+  let checks = ref 0 in
+  let echo_prefix = "(echo \"" in
+  let rec loop () =
+    match input_line stdin with
+    | line when String.equal (String.trim line) "(push 1)" ->
+      declaration_frames := !declarations :: !declaration_frames;
+      loop ()
+    | line when String.equal (String.trim line) "(pop 1)" ->
+      begin
+        match !declaration_frames with
+        | saved :: rest ->
+          declarations := saved;
+          declaration_frames := rest
+        | [] -> print_endline "(error \"unbalanced pop\")"
+      end;
+      loop ()
+    | line
+      when String.equal (String.trim line)
+             "(set-option :produce-unsat-cores true)" ->
+      core_enabled := true;
+      loop ()
+    | line
+      when String.equal (String.trim line)
+             "(set-option :produce-unsat-cores false)" ->
+      core_enabled := false;
+      loop ()
+    | line when helper_starts_with echo_prefix (String.trim line) ->
+      let line = String.trim line in
+      let marker =
+        String.sub line (String.length echo_prefix)
+          (String.length line - String.length echo_prefix - 2)
+      in
+      print_endline marker;
+      flush stdout;
+      if
+        String.equal mode "early_exit_once"
+        && String.equal marker "__vox2_z3_ready__"
+        && not (Sys.file_exists state)
+      then begin
+        helper_touch state;
+        exit 9
+      end;
+      loop ()
+    | line when helper_starts_with "(declare-datatypes" line ->
+      if List.mem line !global_datatypes
+      then print_endline "(error \"duplicate global datatype\")"
+      else global_datatypes := line :: !global_datatypes;
+      flush stdout;
+      loop ()
+    | line when helper_starts_with "(declare-" line ->
+      if List.mem line !declarations
+      then print_endline "(error \"duplicate declaration\")"
+      else declarations := line :: !declarations;
+      flush stdout;
+      loop ()
+    | line when String.equal (String.trim line) "(check-sat)" ->
+      if String.equal mode "delay_once" && not (Sys.file_exists state)
+      then begin
+        helper_touch state;
+        Unix.sleep 5
+      end;
+      if String.equal mode "option_check" && !checks = 0
+      then print_endline "sat"
+      else if String.equal mode "option_check" && not !core_enabled
+      then print_endline "(error \"unsat cores unavailable\")"
+      else print_endline "unsat";
+      incr checks;
+      flush stdout;
+      loop ()
+    | line when String.equal (String.trim line) "(get-unsat-core)" ->
+      if !core_enabled then print_endline "()"
+      else print_endline "(error \"unsat core is not available\")";
+      flush stdout;
+      loop ()
+    | _ -> loop ()
+    | exception End_of_file -> ()
+  in
+  loop ()
+
+let () =
+  match
+    Sys.getenv_opt "VOX_Z3_HELPER_MODE",
+    Sys.getenv_opt "VOX_Z3_HELPER_COUNT",
+    Sys.getenv_opt "VOX_Z3_HELPER_STATE"
+  with
+  | Some mode, Some counter, Some state ->
+    run_persistent_helper mode counter state;
+    exit 0
+  | (Some _ | None), (Some _ | None), (Some _ | None) -> ()
+
 module R = Types.Refinement
 
 let next_type_id = ref 30_000
@@ -16,7 +130,7 @@ let fresh_type_id () =
 let arrow argument result =
   create_expr
     (Tarrow
-       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy),
+       ( (Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None),
          argument,
          result,
          commu_ok ))
@@ -421,6 +535,52 @@ let fixed_unsat_core names =
 let discharge ?(backend = `Z3) command condition =
   Vox_smt.discharge ~backend ~command:(Some command) ~env condition
 
+let helper_line_count filename =
+  let channel = open_in filename in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () ->
+      let rec loop count =
+        match input_line channel with
+        | _ -> loop (count + 1)
+        | exception End_of_file -> count
+      in
+      loop 0)
+
+let helper_command mode counter state =
+  String.concat " "
+    [ "env";
+      "VOX_Z3_HELPER_MODE=" ^ Filename.quote mode;
+      "VOX_Z3_HELPER_COUNT=" ^ Filename.quote counter;
+      "VOX_Z3_HELPER_STATE=" ^ Filename.quote state;
+      Filename.quote Sys.executable_name;
+    ]
+
+let with_helper_files function_ =
+  let counter = Filename.temp_file "vox-z3-starts" ".txt" in
+  let state = Filename.temp_file "vox-z3-state" ".txt" in
+  Sys.remove state;
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists counter then Sys.remove counter;
+      if Sys.file_exists state then Sys.remove state)
+    (fun () -> function_ counter state)
+
+let persistent_contents =
+  "(set-option :produce-unsat-cores true)\n\
+   (declare-const shared Int)\n\
+   (assert (= shared 0))\n\
+   (check-sat)\n\
+   (get-unsat-core)\n"
+
+let persistent_discharge ?(timeout_seconds = 30) command =
+  Vox_smt.discharge ~backend:`Z3 ~command:(Some command)
+    ~timeout_seconds ~env unused_fact_usage
+
+let custom_discharge command =
+  Vox_smt.discharge ~backend:`Z3 ~command:(Some command)
+    ~prove_contents:persistent_contents ~env (vc (bool true))
+
 let () =
   let missing =
     discharge "/definitely/missing/vox-z3" arithmetic_and_booleans
@@ -451,6 +611,8 @@ let () =
       arithmetic_and_booleans
   in
   assert (solver_error.verdict = Vox_smt.Solver_error);
+  let markerless = discharge "true" arithmetic_and_booleans in
+  assert (markerless.verdict = Vox_smt.Solver_error);
   let false_status =
     discharge
       (shell_command
@@ -580,14 +742,79 @@ let () =
     print_endline "z3 subprocess: usage cores checked"
 
 let () =
-  let binary = "/j/office/app/z3/prod/4.8.5/install/bin/z3" in
-  if Sys.file_exists binary then begin
-    let command = binary ^ " -in" in
+  with_helper_files (fun counter state ->
+    let command = helper_command "normal" counter state in
+    let first = persistent_discharge command in
+    let second = persistent_discharge command in
+    assert (first.verdict = Vox_smt.Proved);
+    if second.verdict <> Vox_smt.Proved then
+      failwith
+        (Option.value second.detail
+           ~default:"second persistent discharge did not prove");
+    assert (helper_line_count counter = 1));
+  print_endline "z3 persistent session: one start and scoped isolation checked";
+  with_helper_files (fun counter state ->
+    let command = helper_command "normal" counter state in
+    let discharge condition =
+      Vox_smt.discharge ~backend:`Z3 ~command:(Some command) ~env condition
+    in
+    let first = discharge datatype in
+    let second = discharge datatype in
+    assert (first.verdict = Vox_smt.Proved);
+    assert (second.verdict = Vox_smt.Proved);
+    assert (helper_line_count counter = 1));
+  print_endline "z3 persistent session: global datatype names isolated";
+  with_helper_files (fun counter state ->
+    let command = helper_command "option_check" counter state in
+    let result =
+      Vox_smt.discharge ~backend:`Z3 ~command:(Some command)
+        ~env open_goal
+    in
+    assert (result.verdict = Vox_smt.Disproved);
+    assert (helper_line_count counter = 1));
+  print_endline "z3 persistent session: option baseline checked";
+  with_helper_files (fun counter state ->
+    let command = helper_command "early_exit_once" counter state in
+    let recovered = persistent_discharge command in
+    assert (recovered.verdict = Vox_smt.Proved);
+    assert (helper_line_count counter = 2));
+  print_endline "z3 persistent session: early exit restart checked";
+  with_helper_files (fun counter state ->
+    let command = helper_command "delay_once" counter state in
+    let delayed = persistent_discharge ~timeout_seconds:1 command in
+    assert (delayed.verdict = Vox_smt.Solver_error);
+    let recovered = persistent_discharge command in
+    assert (recovered.verdict = Vox_smt.Proved);
+    assert (helper_line_count counter = 2));
+  print_endline "z3 persistent session: timeout restart checked";
+  with_helper_files (fun counter state ->
+    let command = helper_command "normal" counter state in
+    let first = custom_discharge command in
+    let second = custom_discharge command in
+    assert (first.verdict = Vox_smt.Proved);
+    assert (second.verdict = Vox_smt.Proved);
+    assert (helper_line_count counter = 2));
+  print_endline "z3 custom contents: one-shot fallback checked";
+  with_helper_files (fun counter state ->
+    let command = helper_command "startup_error" counter state in
+    let result = persistent_discharge command in
+    assert (result.verdict = Vox_smt.Solver_error);
+    assert (helper_line_count counter = 2));
+  print_endline "z3 startup output: one-shot fallback checked"
+
+let () =
+  match Sys.getenv_opt "VOX_SMT_TEST_SOLVER" with
+  | Some command ->
     let discharge condition =
       Vox_smt.discharge ~backend:`Z3 ~command:(Some command) ~env condition
     in
     let disproved = discharge (vc (bool false)) in
     assert (disproved.verdict = Vox_smt.Disproved);
     let not_proved = discharge open_goal in
-    assert (not_proved.verdict = Vox_smt.Not_proved)
-  end
+    assert (not_proved.verdict = Vox_smt.Not_proved);
+    List.iter
+      (fun condition ->
+        let result = discharge condition in
+        assert (result.verdict = Vox_smt.Proved))
+      [datatype; recursive_datatype; datatype; recursive_datatype]
+  | None -> ()

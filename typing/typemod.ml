@@ -2566,6 +2566,16 @@ and transl_signature ?(interface_toplevel = false) env
     | [] -> List.rev sig_items, List.rev sig_type, env
     | item :: srem ->
       let new_item , new_types , env = transl_sig_item env sig_type item in
+      let signature_values =
+        List.filter_map
+          (function
+            | Sig_value (id, _, Exported) -> Some id
+            | Sig_value (_, _, Hidden)
+            | Sig_type _ | Sig_typext _ | Sig_module _ | Sig_modtype _
+            | Sig_class _ | Sig_class_type _ | Sig_jkind _ -> None)
+          new_types
+      in
+      let env = Env.add_refinement_signature_values signature_values env in
       transl_sig env
         (new_item :: sig_items)
         (List.rev_append new_types sig_type)
@@ -2575,7 +2585,7 @@ and transl_signature ?(interface_toplevel = false) env
   Builtin_attributes.warning_scope []
     (fun () ->
        let (trem, rem, final_env) =
-         transl_sig (Env.in_signature true env) [] [] psg_items
+         transl_sig (Env.enter_refinement_signature env) [] [] psg_items
        in
        let rem = Signature_names.simplify final_env names rem in
        let sg =
@@ -4108,6 +4118,18 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
         let previous_saved_types = Cmt_format.get_saved_types () in
         let desc, sg, shape_map, new_env =
           type_str_item env shape_map pstr sig_acc_include_functor
+        in
+        let stable_values =
+          List.filter_map
+            (function
+              | Sig_value (id, _, Exported) -> Some id
+              | Sig_value (_, _, Hidden)
+              | Sig_type _ | Sig_typext _ | Sig_module _ | Sig_modtype _
+              | Sig_class _ | Sig_class_type _ | Sig_jkind _ -> None)
+            sg
+        in
+        let new_env =
+          Env.add_refinement_stable_values stable_values new_env
         in
         let str = { str_desc = desc; str_loc = pstr.pstr_loc; str_env = env } in
         Cmt_format.set_saved_types (Cmt_format.Partial_structure_item str
