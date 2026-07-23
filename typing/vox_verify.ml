@@ -106,6 +106,15 @@ type lexical_binding =
 
 let lexical_bindings = ref []
 
+(* Per-identifier-occurrence typed classification for the IDE's semantic
+   coloring (see [collect_semantic_tokens]).  Populated and emitted only when
+   [-vox-dump-vc-json] is set. *)
+let semantic_identifier_tokens = ref []
+
+(* Companion [{location, mode}] entries, one per non-ordinary semantic token,
+   in the editor's established identifier-mode readout shape. *)
+let dumped_identifier_modes = ref []
+
 let valid_local_span (location : Location.t) =
   let start = location.loc_start in
   let end_ = location.loc_end in
@@ -509,6 +518,16 @@ let () =
             | entries ->
               [Json.field "lexical_bindings" (Json.array entries)]
           in
+          let semantic_tokens_field =
+            match List.rev !semantic_identifier_tokens with
+            | [] -> []
+            | entries -> [Json.field "semantic_tokens" (Json.array entries)]
+          in
+          let identifier_modes_field =
+            match List.rev !dumped_identifier_modes with
+            | [] -> []
+            | entries -> [Json.field "identifier_modes" (Json.array entries)]
+          in
           let document =
             Json.object_
               ([ Json.field "schema_version" (Json.int 2);
@@ -517,7 +536,9 @@ let () =
                ]
                @ refinement_expression_types_field
                @ expression_type_judgments_field
-               @ lexical_bindings_field)
+               @ lexical_bindings_field
+               @ semantic_tokens_field
+               @ identifier_modes_field)
           in
           let channel = open_out file in
           Misc.try_finally
@@ -3536,6 +3557,161 @@ let collect_checked_expression_types ~imposition_locations structure =
   in
   List.iter (iterator.structure_item iterator) structure.str_items
 
+(* Per-identifier-occurrence semantic classification for editor coloring.
+   Every [Texp_ident] occurrence with a real source span yields one token
+   recording the occurrence's totality and logicality axes as read off the
+   typed occurrence, its syntactic role (application head, statement-position
+   mention, or ordinary use), and the derived classification.  The
+   classification deliberately reuses the same ingredients as
+   [call_head_is_stable] -- the [total_functions] registry, an explicit
+   [Texp_mode] totality, and the conservative totality projection -- so the
+   editor's notion of a proof/lemma call cannot drift from the verifier's
+   notion of an admissible call.  Unlike [call_head_is_stable] there is no
+   unconditional primitive escape: arithmetic on ints is stable for fact
+   admission, but [1 + 2] is not a lemma call, so primitives classify by
+   their modes alone.  Mode-crossing makes the bare totality axis [Total]
+   for many ordinary data values, so the modal route counts only for
+   function-typed or refinement-carrying occurrences; a registered total
+   definition counts for any type. *)
+
+type semantic_role =
+  | Semantic_head
+  | Semantic_statement
+  | Semantic_use
+
+let semantic_role_string = function
+  | Semantic_head -> "call-head"
+  | Semantic_statement -> "statement"
+  | Semantic_use -> "use"
+
+let semantic_totality_string expression mode =
+  if expression_has_total_mode expression then "total"
+  else
+    match
+      Mode.Totality.Guts.check_const_conservative
+        (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
+    with
+    | Some Mode.Totality.Const.Total -> "total"
+    | Some Mode.Totality.Const.Partial -> "partial"
+    | None -> "unknown"
+
+let semantic_logicality_string mode =
+  match
+    Mode.Logicality.Guts.check_const_conservative
+      (Mode.Value.proj_monadic Mode.Axis.Logicality mode)
+  with
+  | Some Mode.Logicality.Const.Logical -> "logical"
+  | Some Mode.Logicality.Const.Physical -> "physical"
+  | None -> "unknown"
+
+let semantic_arrow_type ~env type_ =
+  match get_desc (Ctype.expand_head env type_) with
+  | Tarrow _ -> true
+  | _ -> false
+  | exception _ -> false
+
+let collect_semantic_token state ~role expression =
+  match expression.exp_desc with
+  | Texp_ident { path; desc; mode; _ }
+    when valid_local_span expression.exp_loc ->
+    let env = expression.exp_env in
+    let totality = semantic_totality_string expression mode in
+    let logicality = semantic_logicality_string mode in
+    let total_definition =
+      Types.Uid.Tbl.mem state.total_functions desc.val_uid
+    in
+    let arrow = semantic_arrow_type ~env expression.exp_type in
+    (* The occurrence's [exp_type] can be an unrefined instance (a refined
+       let-binder's uses read back as the bare type), so consult the resolved
+       value's declared type as well. *)
+    let refined =
+      contains_refinement ~env expression.exp_type
+      || contains_refinement ~env desc.val_type
+    in
+    let known_total =
+      total_definition
+      || expression_has_total_mode expression
+      || String.equal totality "total"
+    in
+    let logical = String.equal logicality "logical" in
+    (* Total alone is not proof-relevant: arithmetic primitives and
+       mode-crossing data values are modally total.  A proof/lemma call or
+       proof-value use must also carry a refinement in its type (a
+       fact-producing contract), or be at logical mode outright.  Plain
+       refined data values (a run-time [int{ _ >= 0 }]) stay ordinary at
+       use sites; only function-typed mentions and logical values read as
+       proof artifacts there. *)
+    let classification =
+      match role with
+      | Semantic_head | Semantic_statement ->
+        if (known_total && refined) || logical then "proof-call"
+        else "ordinary"
+      | Semantic_use ->
+        if (known_total && refined && arrow) || logical then "proof-use"
+        else "ordinary"
+    in
+    let token =
+      Json.object_
+        [ Json.field "location" (json_span expression.exp_loc);
+          Json.field "name" (json_string (Path.name path));
+          Json.field "role" (json_string (semantic_role_string role));
+          Json.field "totality" (json_string totality);
+          Json.field "logicality" (json_string logicality);
+          Json.field "total_definition" (string_of_bool total_definition);
+          Json.field "classification" (json_string classification);
+        ]
+    in
+    semantic_identifier_tokens := token :: !semantic_identifier_tokens;
+    if not (String.equal classification "ordinary") then begin
+      let mode_text =
+        "@"
+        ^ (if known_total then " total" else "")
+        ^ (if logical then " logical" else "")
+      in
+      dumped_identifier_modes :=
+        Json.object_
+          [ Json.field "location" (json_span expression.exp_loc);
+            Json.field "mode" (json_string mode_text);
+          ]
+        :: !dumped_identifier_modes
+    end
+  | _ -> ()
+
+(* Runs before the fact walk so tokens survive a verification abort; total
+   definitions are pre-registered here through the same [register_definition]
+   the fact walk uses (re-registration there is idempotent). *)
+let collect_semantic_tokens state structure =
+  let consumed = ref [] in
+  let consume expression =
+    match expression.exp_desc with
+    | Texp_ident _ -> consumed := expression.exp_loc :: !consumed
+    | _ -> ()
+  in
+  let super = Tast_iterator.default_iterator in
+  let iterator =
+    { super with
+      value_binding =
+        (fun sub binding ->
+          register_definition state binding;
+          super.value_binding sub binding);
+      expr =
+        (fun sub expression ->
+          (match expression.exp_desc with
+           | Texp_apply (function_, _, _, _, _) ->
+             consume function_;
+             collect_semantic_token state ~role:Semantic_head function_
+           | Texp_sequence (first, _, _) ->
+             consume first;
+             collect_semantic_token state ~role:Semantic_statement first
+           | Texp_ident _ ->
+             if not (List.exists (same_span expression.exp_loc) !consumed)
+             then collect_semantic_token state ~role:Semantic_use expression
+           | _ -> ());
+          super.expr sub expression);
+    }
+  in
+  List.iter (iterator.structure_item iterator) structure.str_items
+
 let finish_dump () =
   if !Clflags.vox_dump_vc then begin
     Format.eprintf "Error: VCs dumped, not discharged.@.";
@@ -3564,6 +3740,7 @@ let verify_structure ?(toplevel = false) structure =
       let imposition_locations = collect_imposition_type_judgments () in
       collect_checked_expression_types ~imposition_locations structure;
       collect_refinement_types structure;
+      collect_semantic_tokens state structure;
     end else
       ignore (Typecore.take_refinement_imposition_judgments ());
     let iterator = iterator state in
