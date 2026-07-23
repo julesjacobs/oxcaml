@@ -1101,6 +1101,21 @@ let rec subject state ?(function_head = false) expression =
     node expression
       (Rexp_ifthenelse
          (lower condition, lower ifso, Option.map lower ifnot))
+  | Texp_sequence (_, _, result) ->
+    (* A normally completing sequence returns exactly its right operand.
+       Evaluation and fact flow are handled by [walk_expression]; lowering
+       only identifies the value produced on that normal-return path. *)
+    lower result
+  | Texp_letmutable (_, result)
+  | Texp_open (_, result)
+  | Texp_exclave result
+  | Texp_letexception (_, result)
+  | Texp_letmodule (_, _, _, _, result) ->
+    (* These wrappers likewise return their body on their single normal path.
+       Their setup is walked separately.  If the body itself depends on an
+       unsupported local entity (for example a mutable read), lowering that
+       body still fails closed at the existing case. *)
+    lower result
   | Texp_antiquotation _ ->
     (* The future value produced by dynamically supplied code is not
        structurally available while checking the generator.  A fresh opaque
@@ -1108,7 +1123,6 @@ let rec subject state ?(function_head = false) expression =
        do not constrain that value, while value-dependent claims remain
        fail-closed. *)
     opaque_call_subject state expression
-  | Texp_sequence _ -> unsupported expression "a sequence"
   | Texp_mutvar _ -> unsupported expression "a mutable variable"
   | _ -> unsupported expression "this expression form"
 
@@ -1923,6 +1937,22 @@ let computation_value_pattern pattern =
 let rec final_sequence_result expression =
   match expression.exp_desc with
   | Texp_sequence (_, _, result) -> final_sequence_result result
+  | _ -> expression
+
+(* The source site of a single-result expression is narrower than the value
+   used by selfification above.  These wrappers each have exactly one normal
+   result path; their setup may fail to return, but when it does return the
+   wrapper's value is its body.  Branching forms deliberately remain whole. *)
+let rec final_result_site expression =
+  match expression.exp_desc with
+  | Texp_sequence (_, _, result)
+  | Texp_let (_, _, result)
+  | Texp_letmutable (_, result)
+  | Texp_open (_, result)
+  | Texp_exclave result
+  | Texp_letexception (_, result)
+  | Texp_letmodule (_, _, _, _, result) ->
+    final_result_site result
   | _ -> expression
 
 let selfification_fact state ?scope binding =
@@ -3288,6 +3318,7 @@ and check_application state application function_ arguments
       contract :: metadata ->
       begin match argument, contract.rap_supplied with
       | Arg (argument, _), true ->
+        let result = final_result_site argument in
         let argument_facts = Option.get argument_facts in
         state.facts <- merge_facts argument_facts !relation_facts;
         Option.iter
@@ -3324,9 +3355,9 @@ and check_application state application function_ arguments
                 ~parameter:contract.rap_binder refinement
             in
             prove_refinement state ~env:application.exp_env
-              ~loc:argument.exp_loc ~kind:"contract-argument"
+              ~loc:result.exp_loc ~kind:"contract-argument"
               ~program_point:application.exp_loc
-              ~result_span:argument.exp_loc ~provenance
+              ~result_span:result.exp_loc ~provenance
               ~subject:(subject state argument) refinement)
           (refinement ~env:application.exp_env contract.rap_domain)
       | Omitted _, false -> ()

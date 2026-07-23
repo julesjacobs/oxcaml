@@ -55,6 +55,116 @@ val sequence_nested_result :
   unit -> unit{ Sequence_fact.p = true && Sequence_other.p = true } = <fun>
 |}]
 
+external called_sequence_law : unit -> unit{ Sequence_fact.p = true }
+  @@ total = "%identity"
+
+let sequence_called_proof_result_uses_right ()
+    : unit{ Sequence_fact.p = true } =
+  called_sequence_law ();
+  ()
+[%%expect {|
+external called_sequence_law : unit -> unit{ Sequence_fact.p = true }
+  = "%identity"
+val sequence_called_proof_result_uses_right :
+  unit -> unit{ Sequence_fact.p = true } = <fun>
+|}]
+
+let sequence_imperative_call_keeps_prior_fact ()
+    : unit{ Sequence_fact.p = true } =
+  called_sequence_law ();
+  print_int 0;
+  ()
+[%%expect {|
+val sequence_imperative_call_keeps_prior_fact :
+  unit -> unit{ Sequence_fact.p = true } = <fun>
+|}]
+
+external partial_sequence_law : unit -> unit{ Sequence_fact.p = true }
+  = "%identity"
+
+let sequence_partial_call_establishes_fact_on_return ()
+    : unit{ Sequence_fact.p = true } =
+  partial_sequence_law ();
+  ()
+[%%expect {|
+external partial_sequence_law : unit -> unit{ Sequence_fact.p = true }
+  = "%identity"
+val sequence_partial_call_establishes_fact_on_return :
+  unit -> unit{ Sequence_fact.p = true } = <fun>
+|}]
+
+let requires_sequence_fact (_ : unit{ Sequence_fact.p = true }) = ()
+
+let sequence_nested_in_refined_argument () =
+  requires_sequence_fact
+    (called_sequence_law ();
+     print_int 0;
+     ())
+[%%expect {|
+val requires_sequence_fact : unit{ Sequence_fact.p = true } -> unit = <fun>
+val sequence_nested_in_refined_argument : unit -> unit = <fun>
+|}]
+
+let sequence_partial_call_in_refined_argument () =
+  requires_sequence_fact
+    (partial_sequence_law ();
+     ())
+[%%expect {|
+val sequence_partial_call_in_refined_argument : unit -> unit = <fun>
+|}]
+
+let sequence_nested_let_argument () =
+  requires_sequence_fact
+    (let value = 0 in
+     called_sequence_law ();
+     print_int value;
+     ())
+
+let sequence_nested_open_argument () =
+  requires_sequence_fact
+    (let open Stdlib in
+     called_sequence_law ();
+     ())
+[%%expect {|
+val sequence_nested_let_argument : unit -> unit = <fun>
+val sequence_nested_open_argument : unit -> unit = <fun>
+|}]
+
+let requires_false_sequence (_ : unit{ false }) = ()
+
+let sequence_false_refined_argument_rejected () =
+  requires_false_sequence
+    (called_sequence_law ();
+     ())
+[%%expect {|
+val requires_false_sequence : unit{ false } -> unit = <fun>
+Line 6, characters 5-7:
+6 |      ())
+         ^^
+Error: Refinement verification failed (disproved)
+|}]
+
+let sequence_false_nested_let_argument_rejected () =
+  requires_false_sequence
+    (let value = 0 in
+     called_sequence_law ();
+     print_int value;
+     ())
+[%%expect {|
+Line 6, characters 5-7:
+6 |      ())
+         ^^
+Error: Refinement verification failed (disproved)
+|}]
+
+let[@warning "-21"] sequence_nonreturning_refined_argument () =
+  requires_false_sequence
+    (raise Exit;
+     ())
+[%%expect {|
+val sequence_nonreturning_refined_argument : unit -> unit = <fun>
+|}]
+
 let sequence_checks_left_local_obligation () : unit{ true } =
   (() : unit{ false });
   ()
@@ -84,6 +194,16 @@ let sequence_checks_right_as_result () : int{ _ = 7 } =
 Line 3, characters 2-3:
 3 |   8
       ^
+Error: Refinement verification failed (disproved)
+|}]
+
+let sequence_false_result_rejected () : unit{ false } =
+  called_sequence_law ();
+  ()
+[%%expect {|
+Line 3, characters 2-4:
+3 |   ()
+      ^^
 Error: Refinement verification failed (disproved)
 |}]
 
