@@ -80,7 +80,7 @@ let member_node query left key right
         else member query right
     }
   =
-  let _proof = member_def query (Node (left, key, right)) in
+  member_def query (Node (left, key, right));
   ()
 
 let member_insert_empty new_key query
@@ -89,9 +89,9 @@ let member_insert_empty new_key query
       = if query = new_key then true else member query Empty
   }
   =
-  let _insert = insert_def new_key Empty in
-  let _old_member = member_def query Empty in
-  let _new_member = member_node query Empty new_key Empty in
+  insert_def new_key Empty;
+  member_def query Empty;
+  member_node query Empty new_key Empty;
   ()
 
 let member_insert_same key (new_key : int{ _ = key }) left right query
@@ -102,8 +102,8 @@ let member_insert_same key (new_key : int{ _ = key }) left right query
         else member query (Node (left, key, right))
   }
   =
-  let _insert = insert_def new_key (Node (left, key, right)) in
-  let _member = member_node query left key right in
+  insert_def new_key (Node (left, key, right));
+  member_node query left key right;
   ()
 
 let member_insert_left key (new_key : int{ _ < key }) left right query
@@ -118,9 +118,9 @@ let member_insert_left key (new_key : int{ _ < key }) left right query
         else member query (Node (left, key, right))
   }
   =
-  let _insert = insert_def new_key (Node (left, key, right)) in
-  let _old_member = member_node query left key right in
-  let _new_member = member_node query (insert new_key left) key right in
+  insert_def new_key (Node (left, key, right));
+  member_node query left key right;
+  member_node query (insert new_key left) key right;
   ()
 
 let member_insert_right key
@@ -136,9 +136,9 @@ let member_insert_right key
         else member query (Node (left, key, right))
   }
   =
-  let _insert = insert_def new_key (Node (left, key, right)) in
-  let _old_member = member_node query left key right in
-  let _new_member = member_node query left key (insert new_key right) in
+  insert_def new_key (Node (left, key, right));
+  member_node query left key right;
+  member_node query left key (insert new_key right);
   ()
 
 let rec member_insert new_key tree query
@@ -151,7 +151,7 @@ let rec member_insert new_key tree query
   | Empty -> member_insert_empty new_key query
   | Node (left, key, right) ->
     let choice = direction new_key key in
-    let _choice = direction_def new_key key in
+    direction_def new_key key;
     match choice with
     | Same -> member_insert_same key new_key left right query
     | Left ->
@@ -163,7 +163,7 @@ let rec member_insert new_key tree query
 
 let empty_law ~(query : int)
     : unit{ member query empty = false } =
-  let _proof = member_def query empty in
+  member_def query empty;
   ()
 
 let insert_law ~(inserted : int)
@@ -173,7 +173,7 @@ let insert_law ~(inserted : int)
       = ((query = inserted) || member query tree)
     }
   =
-  let _membership = member_insert inserted tree query in
+  member_insert inserted tree query;
   ()
 
 let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
@@ -186,7 +186,7 @@ let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
       && agrees t1 t2 left = true
       && agrees t1 t2 right = true
     } =
-  let _definition = agrees_def t1 t2 (Node (left, key, right)) in
+  agrees_def t1 t2 (Node (left, key, right));
   ()
 
 let rec agrees_member ~(t1 : t @ logical) ~(t2 : t @ logical)
@@ -196,15 +196,15 @@ let rec agrees_member ~(t1 : t @ logical) ~(t2 : t @ logical)
     : unit{ member query t1 = member query t2 } =
   match nodes with
   | Empty ->
-    let _member = member_def query Empty in
+    member_def query Empty;
     ()
   | Node (left, key, right) ->
     let facts =
       agrees_node ~t1 ~t2 ~left ~key ~right ~proof:agreement
     in
-    let _member = member_def query (Node (left, key, right)) in
+    member_def query (Node (left, key, right));
     let choice = direction query key in
-    let _choice = direction_def query key in
+    direction_def query key;
     match choice with
     | Same -> facts
     | Left ->
@@ -218,11 +218,11 @@ let prove_equal_member ~(t1 : t @ logical)
     ~(t2 : t{ equal t1 _ = true } @ logical)
     ~(query : int)
     : unit{ member query t1 = member query t2 } =
-  let _definition = equal_def t1 t2 in
+  equal_def t1 t2;
   let first_member = member query t1 in
   let second_member = member query t2 in
   let side = membership_side first_member second_member in
-  let _side = membership_side_def first_member second_member in
+  membership_side_def first_member second_member;
   match side with
   | First ->
     agrees_member ~t1 ~t2 ~nodes:t1 ~query
@@ -244,18 +244,16 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
   let rec prove nodes : unit{ agrees t1 t2 nodes = true } =
     match nodes with
     | Empty ->
-      let _definition = agrees_def t1 t2 Empty in
+      agrees_def t1 t2 Empty;
       ()
     | Node (left, key, right) ->
-      let _same_membership = pointwise ~query:key in
-      let _left = prove left in
-      let _right = prove right in
-      let _definition =
-        agrees_def t1 t2 (Node (left, key, right))
-      in
+      pointwise ~query:key;
+      prove left;
+      prove right;
+      agrees_def t1 t2 (Node (left, key, right));
       ()
   in
-  let _first = prove t1 in
-  let _second = prove t2 in
-  let _definition = equal_def t1 t2 in
+  prove t1;
+  prove t2;
+  equal_def t1 t2;
   ()
