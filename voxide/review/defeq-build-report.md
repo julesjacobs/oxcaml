@@ -2,10 +2,10 @@
 
 First cut of `let[@vox.def]`, per `design/definitional-equations-synthesis.md`.
 
-- Worktree: `/usr/local/home/jujacobs/oxcamls/vox2/worktrees/defeq-build`
+- Build checkout: dedicated checkout for branch `defeq-build`
 - Branch: `defeq-build`, base `ebedc4dec1` (branch `refine-types-emit`, the live compiler)
 - Commit: `4453b5bc0795dc17ec118cd8d7026ed7caefaff8`
-- Built binary: `/usr/local/home/jujacobs/oxcamls/vox2/worktrees/defeq-build/_install/bin/ocamlc.opt`
+- Built binary: `_install/bin/ocamlc.opt` in that checkout
 
 ## What changed (5 files)
 
