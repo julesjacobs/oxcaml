@@ -36,15 +36,34 @@ def main():
     # partial-application binding; the argument-position imperative call
     # stays ordinary.
     expect(occurrences("Facts.lemma", "call-head"), ["proof-call"])
+    expect(occurrences("aliased_law", "call-head"), ["proof-call"])
     expect(occurrences("local_lemma", "call-head"), ["proof-call"])
     expect(occurrences("alias", "call-head"), ["proof-call"])
+    expect(occurrences("flat_alias", "call-head"), ["proof-call"])
+    expect(occurrences("nested_alias", "call-head"), ["proof-call"])
     expect(occurrences("partial", "call-head"), ["proof-call"])
     expect(occurrences("imperative_fn", "call-head"), ["ordinary"])
 
+    # Totality plus an arbitrary refinement is not a lemma classification.
+    # Computational int/bool results, a refinement confined to an argument,
+    # a plain total predicate, an ordinary function value, and an ordinary
+    # partial application all remain ordinary.
+    expect(occurrences("total_zero", "call-head"), ["ordinary"])
+    expect(occurrences("total_truth", "call-head"), ["ordinary"])
+    expect(occurrences("consume_nonnegative", "call-head"), ["ordinary"])
+    expect(occurrences("plain_predicate", "call-head"), ["ordinary"])
+    expect(occurrences("total_zero", "use"), ["ordinary"])
+    expect(occurrences("total_zero_two", "call-head"), ["ordinary"])
+    expect(occurrences("ordinary_partial", "call-head"), ["ordinary"])
+    expect(occurrences("aliased_total", "call-head"), ["ordinary"])
+
     # A statement-position mention of an exported refined value is a proof
-    # call; the alias-creating mention of the lemma is a proof use.
+    # call.  Each non-call mention whose resolved contract eventually returns
+    # refined unit is a proof use: the two top-level alias RHSs, the local alias
+    # RHS, and the intermediate value returned by the nested alias expression.
     expect(occurrences("Facts.evidence", "statement"), ["proof-call"])
-    expect(occurrences("Facts.lemma", "use"), ["proof-use"])
+    expect(occurrences("Facts.lemma", "use"), ["proof-use"] * 3)
+    expect(occurrences("inner_alias", "use"), ["proof-use"])
 
     # Ordinary imperative and arithmetic heads stay ordinary, including the
     # same-spelling imperative shadow of the lemma.

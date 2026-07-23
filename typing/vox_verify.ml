@@ -3562,17 +3562,16 @@ let collect_checked_expression_types ~imposition_locations structure =
    recording the occurrence's totality and logicality axes as read off the
    typed occurrence, its syntactic role (application head, statement-position
    mention, or ordinary use), and the derived classification.  The
-   classification deliberately reuses the same ingredients as
-   [call_head_is_stable] -- the [total_functions] registry, an explicit
-   [Texp_mode] totality, and the conservative totality projection -- so the
-   editor's notion of a proof/lemma call cannot drift from the verifier's
-   notion of an admissible call.  Unlike [call_head_is_stable] there is no
-   unconditional primitive escape: arithmetic on ints is stable for fact
-   admission, but [1 + 2] is not a lemma call, so primitives classify by
-   their modes alone.  Mode-crossing makes the bare totality axis [Total]
-   for many ordinary data values, so the modal route counts only for
-   function-typed or refinement-carrying occurrences; a registered total
-   definition counts for any type. *)
+   classification reuses the totality evidence from [call_head_is_stable] --
+   the [total_functions] registry, an explicit [Texp_mode] totality, and the
+   conservative totality projection.  Its presentation policy is deliberately
+   narrower than general fact admission: only an eventual refined-unit law
+   result is a proof artifact.  Partial/effectful calls therefore remain
+   ordinary even when their established result contract can contribute a fact.
+   Unlike [call_head_is_stable] there is no unconditional primitive escape:
+   arithmetic on ints is not a lemma call.  A registered total definition
+   supplies totality but does not by itself make a computation a proof
+   artifact. *)
 
 type semantic_role =
   | Semantic_head
@@ -3610,6 +3609,30 @@ let semantic_arrow_type ~env type_ =
   | _ -> false
   | exception _ -> false
 
+let semantic_proof_contract ~env type_ =
+  let seen_paths = ref Path.Set.empty in
+  let rec result type_ =
+    match get_desc type_ with
+    | Tpoly (type_, _) -> result type_
+    | Tarrow (_, _, type_, _) -> result type_
+    | Trefine refinement -> unit_carrier refinement.ref_skeleton
+    | Tconstr (path, _, _) ->
+      if Path.Set.mem path !seen_paths then false
+      else begin
+        seen_paths := Path.Set.add path !seen_paths;
+        match expand_head_for_refinement ~env type_ with
+        | expanded -> result expanded
+        | exception _ -> false
+      end
+    | _ -> false
+  and unit_carrier type_ =
+    match get_desc (expand_head_for_refinement ~env type_) with
+    | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+    | _ -> false
+    | exception _ -> false
+  in
+  result type_
+
 let collect_semantic_token state ~role expression =
   match expression.exp_desc with
   | Texp_ident { path; desc; mode; _ }
@@ -3621,12 +3644,14 @@ let collect_semantic_token state ~role expression =
       Types.Uid.Tbl.mem state.total_functions desc.val_uid
     in
     let arrow = semantic_arrow_type ~env expression.exp_type in
-    (* The occurrence's [exp_type] can be an unrefined instance (a refined
-       let-binder's uses read back as the bare type), so consult the resolved
-       value's declared type as well. *)
-    let refined =
-      contains_refinement ~env expression.exp_type
-      || contains_refinement ~env desc.val_type
+    (* The occurrence's [exp_type] can be an unrefined instance, so consult the
+       resolved value's declared type as well.  A proof contract is narrower
+       than merely containing a refinement: after following arrows and type
+       aliases its result must be a refined unit law.  Refined computational
+       results and refined argument domains remain ordinary program code. *)
+    let proof_contract =
+      semantic_proof_contract ~env expression.exp_type
+      || semantic_proof_contract ~env desc.val_type
     in
     let known_total =
       total_definition
@@ -3634,20 +3659,17 @@ let collect_semantic_token state ~role expression =
       || String.equal totality "total"
     in
     let logical = String.equal logicality "logical" in
-    (* Total alone is not proof-relevant: arithmetic primitives and
-       mode-crossing data values are modally total.  A proof/lemma call or
-       proof-value use must also carry a refinement in its type (a
-       fact-producing contract), or be at logical mode outright.  Plain
-       refined data values (a run-time [int{ _ >= 0 }]) stay ordinary at
-       use sites; only function-typed mentions and logical values read as
-       proof artifacts there. *)
+    (* Totality or logicality is necessary but not sufficient.  Only a refined
+       unit result is proof-only; [int{p}], [bool{p}], and refinements confined
+       to argument domains describe computations rather than lemma evidence. *)
     let classification =
       match role with
       | Semantic_head | Semantic_statement ->
-        if (known_total && refined) || logical then "proof-call"
+        if (known_total || logical) && proof_contract then "proof-call"
         else "ordinary"
       | Semantic_use ->
-        if (known_total && refined && arrow) || logical then "proof-use"
+        if (known_total || logical) && proof_contract && arrow
+        then "proof-use"
         else "ordinary"
     in
     let token =
@@ -3690,10 +3712,17 @@ let collect_semantic_tokens state structure =
   let super = Tast_iterator.default_iterator in
   let iterator =
     { super with
-      value_binding =
-        (fun sub binding ->
-          register_definition state binding;
-          super.value_binding sub binding);
+      value_bindings =
+        (fun sub (rec_flag, bindings) ->
+          (* Match the fact walk's dependency order: recursive names are
+             available in their right-hand sides, while a nonrecursive alias
+             is registered only after its right-hand side (including nested
+             aliases) has been traversed. *)
+          if rec_flag = Recursive then
+            List.iter (register_definition state) bindings;
+          super.value_bindings sub (rec_flag, bindings);
+          if rec_flag = Nonrecursive then
+            List.iter (register_definition state) bindings);
       expr =
         (fun sub expression ->
           (match expression.exp_desc with
