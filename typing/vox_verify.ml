@@ -1063,7 +1063,15 @@ let rec subject state ?(function_head = false) expression =
          ( constructor,
            List.map (fun (_, argument) -> lower argument) arguments ))
   | Texp_record { fields; extended_expression; _ }
-    when stable_expression expression ->
+    (* A record does not require each field expression to be syntactically
+       stable.  [lower] gives unstable calls one occurrence-local subject, and
+       the record then denotes the value assembled from those exact results.
+       The backend gate keeps mutable and otherwise unmodelable records out. *)
+    when Vox_lean.supports_equality
+           ~env:expression.exp_env expression.exp_type
+         && Array.for_all
+              (fun (label, _, _) -> label.lbl_mut = Immutable)
+              fields ->
     let path =
       let label, _, _ = fields.(0) in
       lbl_res_type_path label

@@ -728,6 +728,22 @@ let constructor location data name =
     in
     loop 0 constructors
 
+type construction =
+  | Variant_construction of int * constructor
+  | Record_construction of (string * sort) list
+
+let construction location data name =
+  match definition location data with
+  | Abstract ->
+    error location "%s is an abstract type" (Path.name data.data_path)
+  | Variant _ ->
+    let index, constructor = constructor location data name in
+    Variant_construction (index, constructor)
+  | Record fields ->
+    if not (String.equal name "mk") then
+      error location "record construction must use the structure constructor";
+    Record_construction fields
+
 let record_field location data name =
   match definition location data with
   | Abstract ->
@@ -1028,20 +1044,24 @@ let emit_expression context variables expression =
             then
               error expression.rexp_loc
                 "constructor path does not match its result type";
-            let index, constructor =
-              constructor expression.rexp_loc data
-                constructor_description.rconstr_name
-            in
             let arguments = List.map (emit locals) arguments in
-            if
-              List.length constructor.constructor_fields
-              <> List.length arguments
-            then error expression.rexp_loc "constructor arity mismatch";
+            let head, expected =
+              match
+                construction expression.rexp_loc data
+                  constructor_description.rconstr_name
+              with
+              | Variant_construction (index, constructor) ->
+                ( variant_constructor_name data index constructor,
+                  constructor.constructor_fields )
+              | Record_construction fields ->
+                record_constructor_name data, List.map snd fields
+            in
+            if List.length expected <> List.length arguments then
+              error expression.rexp_loc "constructor arity mismatch";
             List.iter2
               (fun expected (_, actual) ->
                 expect_sort expression.rexp_loc expected actual)
-              constructor.constructor_fields arguments;
-            let head = variant_constructor_name data index constructor in
+              expected arguments;
             begin
               match arguments with
               | [] -> head
@@ -1802,19 +1822,23 @@ let oxsmt_expression context environment expression =
             then
               error expression.rexp_loc
                 "constructor path does not match its result type";
-            let index, constructor =
-              constructor expression.rexp_loc data
-                constructor_description.rconstr_name
-            in
             let arguments = List.map (build locals) arguments in
-            if
-              List.length constructor.constructor_fields
-              <> List.length arguments
-            then error expression.rexp_loc "constructor arity mismatch";
+            let index, expected =
+              match
+                construction expression.rexp_loc data
+                  constructor_description.rconstr_name
+              with
+              | Variant_construction (index, constructor) ->
+                index, constructor.constructor_fields
+              | Record_construction fields ->
+                0, List.map snd fields
+            in
+            if List.length expected <> List.length arguments then
+              error expression.rexp_loc "constructor arity mismatch";
             List.iter2
               (fun expected (_, actual) ->
                 expect_sort expression.rexp_loc expected actual)
-              constructor.constructor_fields arguments;
+              expected arguments;
             let constructor =
               oxsmt_constructor environment expression.rexp_loc key index
             in
