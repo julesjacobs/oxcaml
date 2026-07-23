@@ -48,6 +48,8 @@ type layout_poly_coercion =
 type value_mismatch =
   | Primitive_mismatch of primitive_mismatch
   | Not_a_primitive
+  | Specification_only
+  | Specification_only_primitive_coercion
   | Type of Errortrace.moregen_error
   | Zero_alloc of Zero_alloc.error
   | Modality of Mode.Modality.error

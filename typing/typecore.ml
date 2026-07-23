@@ -241,6 +241,7 @@ type error =
   | Incoherent_label_order
   | Less_general of string * Errortrace.unification_error
   | Modules_not_allowed
+  | Specification_only_value of Longident.t
   | Cannot_infer_signature
   | Not_a_packed_module of type_expr
   | Unexpected_existential of existential_restriction * string
@@ -10571,6 +10572,14 @@ and type_ident env ?(recarg=Rejected) lid =
   (* CR zqian: [lookup_value] should close over the memaddr of all prefix
   modules.  *)
   let path, desc, (mode, locks) = Env.lookup_value ~loc:lid.loc lid.txt env in
+  (* All executable value references, including binding operators, resolve
+     through [type_ident].  Refinement predicates use the same resolver while
+     they are typed, but never produce executable code. *)
+  if
+    not !refinement_predicate_context
+    && Vox_dependent.is_specification_only desc.Types.val_attributes
+  then
+    raise (Error (lid.loc, env, Specification_only_value lid.txt));
   (* We cross modes when typing [Ppat_ident], before adding new variables into
   the environment. Therefore, one might think all values in the environment are
   already mode-crossed. That is not true for several reasons:
@@ -15114,6 +15123,10 @@ let report_error ~loc env =
         (Fmt.doc_printf "which is less general than")
   | Modules_not_allowed ->
       Location.errorf ~loc "Modules are not allowed in this pattern."
+  | Specification_only_value lid ->
+      Location.errorf ~loc
+        "The specification-only value %a cannot be used in executable code."
+        quoted_longident lid
   | Cannot_infer_signature ->
       Location.errorf ~loc
         "The signature for this packaged module couldn't be inferred."

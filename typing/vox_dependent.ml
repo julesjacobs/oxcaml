@@ -1,6 +1,16 @@
 open Types
 open Btype
 
+let specification_only_attribute = "vox.spec_only"
+
+let validate_specification_only_attribute attributes =
+  ignore
+    (Attr_helper.get_no_payload_attribute
+       specification_only_attribute attributes)
+
+let is_specification_only attributes =
+  Builtin_attributes.has_attribute specification_only_attribute attributes
+
 let logical_type type_ =
   let visited = TypeHash.create 17 in
   let rec copy type_ =

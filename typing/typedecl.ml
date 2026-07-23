@@ -4629,6 +4629,8 @@ type transl_value_decl_modal =
 
 (* Translate a value declaration *)
 let transl_value_decl env loc ~modal ~why valdecl =
+  Vox_dependent.validate_specification_only_attribute
+    valdecl.pval_attributes;
   let mode, val_modalities, val_modal_info =
     match modal with
     | Str_primitive ->

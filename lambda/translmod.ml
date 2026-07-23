@@ -288,6 +288,9 @@ let apply_coercion a b c d =
 
 let primitive_declarations = ref ([] : Primitive.description list)
 let record_primitive = function
+  | { val_kind = Val_prim p; val_attributes; val_loc; _ }
+    when Vox_dependent.is_specification_only val_attributes ->
+      Translprim.check_primitive_arity val_loc p
   | {val_kind=Val_prim p;val_loc} ->
       Translprim.check_primitive_arity val_loc p;
       primitive_declarations := p :: !primitive_declarations

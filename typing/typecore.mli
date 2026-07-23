@@ -290,6 +290,7 @@ type error =
   | Incoherent_label_order
   | Less_general of string * Errortrace.unification_error
   | Modules_not_allowed
+  | Specification_only_value of Longident.t
   | Cannot_infer_signature
   | Not_a_packed_module of type_expr
   | Unexpected_existential of existential_restriction * string

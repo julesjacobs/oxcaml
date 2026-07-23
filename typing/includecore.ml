@@ -47,6 +47,8 @@ type layout_poly_coercion =
 type value_mismatch =
   | Primitive_mismatch of primitive_mismatch
   | Not_a_primitive
+  | Specification_only
+  | Specification_only_primitive_coercion
   | Type of Errortrace.moregen_error
   | Zero_alloc of Zero_alloc.error
   | Modality of Mode.Modality.error
@@ -158,7 +160,28 @@ let primitive_descriptions pd1 pd2 =
    there is a context E such that [E |- vd1 <: vd2] for the ordinary subtyping.
    For values, this is the case as soon as the kind of [vd1] is a subkind of the
    [vd2] kind. *)
+let check_specification_only
+    (vd1 : Types.value_description)
+    (vd2 : Types.value_description) =
+  (* A restrictive declaration may satisfy a restrictive interface, but an
+     ascription must not erase the restriction and expose executable use. *)
+  if
+    Vox_dependent.is_specification_only vd1.val_attributes
+    && not
+         (Vox_dependent.is_specification_only vd2.val_attributes)
+  then raise (Dont_match Specification_only)
+  else if
+    Vox_dependent.is_specification_only vd1.val_attributes
+    && Vox_dependent.is_specification_only vd2.val_attributes
+  then
+    match vd1.val_kind, vd2.val_kind with
+    | Val_prim _, Val_reg _ ->
+      raise (Dont_match Specification_only_primitive_coercion)
+    | _ -> ()
+  else ()
+
 let value_descriptions_consistency _env vd1 vd2 =
+  check_specification_only vd1 vd2;
   match (vd1.val_kind, vd2.val_kind) with
   | (Val_prim p1, Val_prim p2) -> begin
       match primitive_descriptions p1 p2 with
@@ -215,6 +238,7 @@ let value_descriptions ~loc env name
     ~mmodes
     (vd1 : Types.value_description)
     (vd2 : Types.value_description) =
+  check_specification_only vd1 vd2;
   Builtin_attributes.check_alerts_inclusion
     ~def:vd1.val_loc
     ~use:vd2.val_loc
@@ -496,6 +520,13 @@ let report_value_mismatch ~pp first second env ppf err =
       report_primitive_mismatch first second ppf pm
   | Not_a_primitive ->
       pr "The implementation is not a primitive."
+  | Specification_only ->
+      pr "%s is specification-only, but %s permits executable use."
+        (String.capitalize_ascii first) second
+  | Specification_only_primitive_coercion ->
+      pr
+        "A specification-only external must remain external in the matching \
+         interface."
   | Type trace ->
       let msg = Fmt.Doc.msg in
       Errortrace_report.moregen ppf Type_scheme env trace

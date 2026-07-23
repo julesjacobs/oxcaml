@@ -1,5 +1,11 @@
 open Types
 
+val validate_specification_only_attribute : Parsetree.attributes -> unit
+(** Validate and mark [@@vox.spec_only] on a value declaration. *)
+
+val is_specification_only : Parsetree.attributes -> bool
+(** Whether a value declaration is available only to refinement terms. *)
+
 val logical_type : type_expr -> type_expr
 (** Erase refinements while preserving the surrounding type graph. *)
 
