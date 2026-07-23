@@ -1,0 +1,4 @@
+File "try_result_obligations_effect_resume.ml", line 7, characters 6-18:
+7 |   try perform Pick with
+          ^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

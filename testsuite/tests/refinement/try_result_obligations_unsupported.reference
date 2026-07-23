@@ -1,0 +1,5 @@
+File "try_result_obligations_unsupported.ml", lines 3-5, characters 4-8:
+3 | ....while false do
+4 |       ()
+5 |     done
+Error: Refinement verification failed: this expression form cannot yet be represented in a verification condition

@@ -558,7 +558,6 @@ let () =
 
 type state =
   { mutable facts : Facts.t;
-    mutable resume_facts : (Ident.t * Facts.t) list;
     total_functions : unit Types.Uid.Tbl.t;
     call_subjects : (Location.t, (expression * Ident.t) list) Hashtbl.t;
   }
@@ -1582,6 +1581,7 @@ let verify_seal_obligations ~env ~seal_location obligations =
 type verification_mark =
   { annotation_location : Location.t;
     result_location : Location.t option;
+    result_may_complete : (expression -> bool) option;
     refinement : refinement_desc;
   }
 
@@ -1594,6 +1594,7 @@ let marked_refinements expression =
           (fun refinement ->
             { annotation_location = loc;
               result_location = None;
+              result_may_complete = None;
               refinement;
             })
           (refinement ~env:core_type.ctyp_env core_type.ctyp_type)
@@ -1602,6 +1603,7 @@ let marked_refinements expression =
           (fun refinement ->
             { annotation_location = loc;
               result_location = None;
+              result_may_complete = None;
               refinement;
             })
           (refinement ~env:expression.exp_env type_)
@@ -1613,9 +1615,23 @@ let marked_refinements expression =
     expression.exp_extra
 
 let result_marks expression marks =
+  List.filter_map
+    (fun mark ->
+      if
+        Option.fold ~none:true ~some:(fun may_complete -> may_complete expression)
+          mark.result_may_complete
+      then Some { mark with result_location = Some expression.exp_loc }
+      else None)
+    marks
+
+let restrict_result_marks make_may_complete marks =
   List.map
     (fun mark ->
-      { mark with result_location = Some expression.exp_loc })
+      let outer_may_complete =
+        Option.value ~default:(fun _ -> true) mark.result_may_complete
+      in
+      let result_may_complete = make_may_complete outer_may_complete in
+      { mark with result_may_complete = Some result_may_complete })
     marks
 
 (* Binder facts are recorded UNCONDITIONALLY (no purity gate), unlike the
@@ -1933,6 +1949,77 @@ let computation_value_pattern pattern =
   match pattern.pat_desc with
   | Tpat_value pattern -> Some (pattern :> value general_pattern)
   | _ -> None
+
+type effect_constructor_match =
+  | Definitely_matches
+  | Definitely_does_not_match
+  | Match_unknown
+
+let rec effect_pattern_matches_constructor pattern constructor =
+  match pattern.pat_desc with
+  | Tpat_any | Tpat_var _ -> Definitely_matches
+  | Tpat_alias { pattern; _ } ->
+    effect_pattern_matches_constructor pattern constructor
+  | Tpat_or (left, right, _) ->
+    begin match
+      effect_pattern_matches_constructor left constructor,
+      effect_pattern_matches_constructor right constructor
+    with
+    | Definitely_matches, _ | _, Definitely_matches -> Definitely_matches
+    | Definitely_does_not_match, Definitely_does_not_match ->
+      Definitely_does_not_match
+    | (Match_unknown | Definitely_does_not_match),
+      (Match_unknown | Definitely_does_not_match) ->
+      Match_unknown
+    end
+  | Tpat_construct (_, pattern_constructor, _, arguments, _) ->
+    if Data_types.equal_constr pattern_constructor constructor
+       &&
+      List.for_all
+        (fun (_, argument) -> irrefutable_pattern argument)
+        arguments
+    then Definitely_matches
+    else if Data_types.may_equal_constr pattern_constructor constructor
+    then Match_unknown
+    else Definitely_does_not_match
+  | Tpat_constant _ | Tpat_tuple _ | Tpat_variant _ | Tpat_record _
+  | Tpat_record_unboxed_product _ | Tpat_array _ | Tpat_lazy _
+  | Tpat_fun_layout _ | Tpat_unboxed_unit | Tpat_unboxed_bool _
+  | Tpat_unboxed_tuple _ ->
+    Match_unknown
+
+let performed_effect_constructor expression =
+  match expression.exp_desc with
+  | Texp_apply
+      ( { exp_desc =
+            Texp_ident
+              { desc = { val_kind = Val_prim primitive; _ };
+                _
+              };
+          _
+        },
+        arguments,
+        _, _, _ )
+    when String.equal primitive.prim_name "%perform" ->
+    begin match arguments with
+    | [argument] ->
+      begin match snd argument with
+      | Arg (performed, _) ->
+        begin match performed.exp_desc with
+        | Texp_construct (_, constructor, _, _, _) -> Some constructor
+        | _ -> None
+        end
+      | Omitted _ -> None
+      end
+    | _ -> None
+    end
+  | _ -> None
+
+type local_effect_handling =
+  | Definitely_nonresuming
+  | Definitely_may_resume
+  | Possibly_may_resume
+  | Not_definitely_handled
 
 let rec final_sequence_result expression =
   match expression.exp_desc with
@@ -2283,7 +2370,6 @@ let rec walk_expression ?(inherited_marks = []) state expression =
           List.fold_left merge_facts entry_facts (List.rev !completed_facts);
         check_application state expression function_ arguments
           ~entry_facts ~argument_facts;
-        add_resumed_facts state function_ arguments;
         check_marks state expression marks
       end else
         state.facts <- entry_facts
@@ -2545,7 +2631,6 @@ and walk_quotation state quoted =
      state is discarded, so future facts cannot flow back into construction. *)
   let future_state =
     { facts = Facts.empty;
-      resume_facts = [];
       total_functions = Types.Uid.Tbl.create 16;
       call_subjects = Hashtbl.create 16;
     }
@@ -2690,15 +2775,28 @@ and prepare_case_edges : type k.
   in
   rhs_facts, guard_fallthrough, fallthrough
 
-and walk_try state expression tried cases effect_cases marks =
+and walk_try state _expression tried cases effect_cases marks =
   (* A handler starts before [tried] has completed, so it cannot inherit
      facts from that evaluation.  At the join, however, keep facts common to
      every path that can complete: the normal path, returning handlers, and
      a resumed effect path (which completes the captured computation). *)
   let pre_try_facts = state.facts in
-  walk_expression state tried;
+  let make_normal_try_result_may_complete outer_may_complete =
+    expression_may_complete_without_handled_effect
+      ~outer_may_complete effect_cases
+  in
+  let normal_try_result_may_complete =
+    make_normal_try_result_may_complete (fun _ -> true)
+  in
+  let try_returns = normal_try_result_may_complete tried in
+  let tried_marks =
+    restrict_result_marks make_normal_try_result_may_complete marks
+  in
+  walk_expression
+    ~inherited_marks:
+      (if try_returns then result_marks tried tried_marks else [])
+    state tried;
   let normal_try_facts = state.facts in
-  let try_returns = expression_may_complete tried in
   let case_returns case =
     Option.fold ~none:true ~some:expression_may_complete case.c_guard
     && expression_may_complete case.c_rhs
@@ -2716,23 +2814,23 @@ and walk_try state expression tried cases effect_cases marks =
             ~selection_pattern:(Some case.c_lhs) case
         in
         state.facts <- rhs_facts;
-        let saved_resume_facts = state.resume_facts in
-        Option.iter
-          (fun continuation ->
-            state.resume_facts <-
-              (continuation, normal_try_facts) :: state.resume_facts)
-          case.c_cont;
-        walk_expression state case.c_rhs;
+        if reachable && case_returns case
+        then
+          walk_expression
+            ~inherited_marks:(result_marks case.c_rhs marks)
+            state case.c_rhs
+        else walk_expression state case.c_rhs;
         let handler_facts = state.facts in
-        state.resume_facts <- saved_resume_facts;
         let returning =
           if reachable && case_returns case then
-            let path =
-              if effect_case_resumes case
-              then normal_try_facts, tried
-              else handler_facts, case.c_rhs
-            in
-            path :: returning
+            let handler_path = handler_facts, case.c_rhs in
+            if effect_case_may_resume case
+            (* [continue] is a library function, not a compiler primitive, so
+               no resolved library name is sufficient evidence that this arm
+               must resume.  Keep both possibilities even for a direct call;
+               this deliberately trades summary precision for correctness. *)
+            then (normal_try_facts, tried) :: handler_path :: returning
+            else handler_path :: returning
           else returning
         in
         state.facts <- pre_try_facts;
@@ -2755,7 +2853,6 @@ and walk_try state expression tried cases effect_cases marks =
         first_facts rest
     | [] -> pre_try_facts
     end;
-  if returning_paths <> [] then check_marks state expression marks;
   returning_paths
 
 and add_try_result_fact state pattern paths =
@@ -2831,7 +2928,12 @@ and add_try_result_fact state pattern paths =
 
 and check_marks_against state ~env ~subject_location ~subject marks =
   List.iter
-    (fun { annotation_location; result_location; refinement } ->
+    (fun
+      { annotation_location;
+        result_location;
+        result_may_complete = _;
+        refinement;
+      } ->
       let loc =
         Option.value ~default:annotation_location result_location
       in
@@ -2964,6 +3066,89 @@ and expression_may_complete expression =
     expression_may_complete body
   | _ -> true
 
+and expression_may_complete_without_handled_effect
+    ?(outer_may_complete = fun _ -> true) effect_cases expression =
+  let may_complete =
+    expression_may_complete_without_handled_effect
+      ~outer_may_complete effect_cases
+  in
+  let case_may_complete case =
+    Option.fold ~none:true ~some:may_complete case.c_guard
+    && may_complete case.c_rhs
+  in
+  match expression.exp_desc with
+  | Texp_apply _ when Option.is_some (performed_effect_constructor expression) ->
+    begin match local_effect_handling effect_cases expression with
+    | Definitely_nonresuming ->
+      (* This exact effect transfers to the first matching local arm, and that
+         arm cannot resume this body. *)
+      false
+    | Definitely_may_resume | Possibly_may_resume ->
+      (* The innermost matching arm may resume this body. *)
+      true
+    | Not_definitely_handled ->
+      (* Delegate an unmatched or uncertain effect to the next enclosing
+         handler scope. *)
+      outer_may_complete expression
+    end
+  | Texp_apply
+      ( { exp_desc =
+            Texp_ident
+              { desc = { val_kind = Val_prim primitive; _ };
+                _
+              };
+          _
+        },
+        _, _, _, _ )
+    when List.mem primitive.prim_name
+           ["%raise"; "%reraise"; "%raise_notrace"] ->
+    false
+  | Texp_apply (function_, arguments, _, _, _)
+    when Option.is_some (short_circuit_application function_ arguments) ->
+    begin match short_circuit_application function_ arguments with
+    | Some (_, left, _) -> may_complete function_ && may_complete left
+    | None -> assert false
+    end
+  | Texp_apply (function_, arguments, _, _, _) ->
+    may_complete function_
+    && List.for_all
+         (function
+           | _, Arg (argument, _) -> may_complete argument
+           | _, Omitted _ -> true)
+         arguments
+  | Texp_unreachable -> false
+  | Texp_sequence (first, _, second) ->
+    may_complete first && may_complete second
+  | Texp_let (_, bindings, body) ->
+    List.for_all (fun binding -> may_complete binding.vb_expr) bindings
+    && may_complete body
+  | Texp_letmutable (binding, body) ->
+    may_complete binding.vb_expr && may_complete body
+  | Texp_ifthenelse (condition, ifso, Some ifnot) ->
+    may_complete condition && (may_complete ifso || may_complete ifnot)
+  | Texp_ifthenelse (condition, _, None) -> may_complete condition
+  | Texp_match (scrutinee, _, cases, nested_effect_cases, _) ->
+    let value_case_may_complete case =
+      Option.is_some (computation_value_pattern case.c_lhs)
+      && case_may_complete case
+    in
+    let interrupted_case_may_complete case =
+      Option.is_none (computation_value_pattern case.c_lhs)
+      && case_may_complete case
+    in
+    (may_complete scrutinee
+     && List.exists value_case_may_complete cases)
+    || List.exists interrupted_case_may_complete cases
+    || List.exists case_may_complete nested_effect_cases
+  | Texp_try (tried, cases, nested_effect_cases) ->
+    may_complete tried
+    || List.exists case_may_complete (cases @ nested_effect_cases)
+  | Texp_open ({ open_expr = module_expression; _ }, body) ->
+    module_expression_may_complete module_expression && may_complete body
+  | Texp_exclave body -> may_complete body
+  | Texp_quotation _ -> true
+  | _ -> outer_may_complete expression
+
 and module_expression_may_complete module_expression =
   match module_expression.mod_desc with
   | Tmod_ident _ | Tmod_functor _ | Tmod_structure _
@@ -2972,24 +3157,13 @@ and module_expression_may_complete module_expression =
     module_expression_may_complete module_expression
   | Tmod_unpack (expression, _) -> expression_may_complete expression
 
-and effect_case_resumes case =
-  match case.c_cont, case.c_rhs.exp_desc with
-  | Some continuation, Texp_apply (function_, arguments, _, _, _) ->
-    begin match continued_continuation function_ arguments with
-    | Some resumed -> Ident.same continuation resumed
-    | None -> false
-    end
-  | None, _ | Some _, _ -> false
-
 and effect_case_may_resume case =
   match case.c_cont with
   | None -> false
   | Some continuation ->
-    (* A continuation can be resumed through an alias or a helper that this
-       pass cannot inspect.  Any use of it therefore makes a normal-value
-       summary unsafe.  This is deliberately broader than
-       [effect_case_resumes], which recognizes direct [continue] calls for
-       propagating facts through a known resumption. *)
+    (* A continuation can be resumed through an alias or helper that this pass
+       cannot inspect.  Any use therefore keeps both the handler-return and
+       resumed-computation paths. *)
     let used = ref false in
     let super = Tast_iterator.default_iterator in
     let iterator =
@@ -3008,28 +3182,39 @@ and effect_case_may_resume case =
     iterator.expr iterator case.c_rhs;
     !used
 
-and continued_continuation function_ arguments =
-  match function_.exp_desc, arguments with
-  | ( Texp_ident { path; _ },
-      ( _,
-        Arg
-          ( { exp_desc = Texp_ident { path = Pident continuation; _ }; _ },
-            _ ) )
-      :: _ )
-    when String.equal (Path.name path) "Stdlib.Effect.Deep.continue" ->
-    Some continuation
-  | _, _ -> None
-
-and add_resumed_facts state function_ arguments =
-  Option.iter
-    (fun continuation ->
-      Option.iter
-        (fun resumed -> state.facts <- Facts.union state.facts resumed)
-        (List.find_map
-           (fun (other, facts) ->
-             if Ident.same continuation other then Some facts else None)
-           state.resume_facts))
-    (continued_continuation function_ arguments)
+and local_effect_handling effect_cases expression =
+  match performed_effect_constructor expression with
+  | None -> Not_definitely_handled
+  | Some constructor ->
+    let may_resume = function
+      | Definitely_may_resume | Possibly_may_resume -> true
+      | Definitely_nonresuming | Not_definitely_handled -> false
+    in
+    let rec first_matching_case = function
+      | [] -> Not_definitely_handled
+      | case :: cases ->
+        begin match effect_pattern_matches_constructor case.c_lhs constructor with
+        | Definitely_does_not_match -> first_matching_case cases
+        | Match_unknown ->
+          if effect_case_may_resume case
+             || may_resume (first_matching_case cases)
+          then Possibly_may_resume
+          else Not_definitely_handled
+        | Definitely_matches ->
+          begin match case.c_guard with
+          | Some _ ->
+            if effect_case_may_resume case
+               || may_resume (first_matching_case cases)
+            then Possibly_may_resume
+            else Not_definitely_handled
+          | None ->
+            if effect_case_may_resume case
+            then Definitely_may_resume
+            else Definitely_nonresuming
+          end
+        end
+    in
+    first_matching_case effect_cases
 
 and walk_match state scrutinee cases effect_cases marks =
   let pre_scrutinee_facts = state.facts in
@@ -3055,7 +3240,6 @@ and walk_match state scrutinee cases effect_cases marks =
           (Rexp_ident (Rbound id)),
         Some id )
   in
-  let resumable_effect = List.exists effect_case_may_resume effect_cases in
   let exception Unsupported_normal_result in
   let rec normal_results expression =
     match expression.exp_desc with
@@ -3090,11 +3274,15 @@ and walk_match state scrutinee cases effect_cases marks =
       normal_results body
     | Texp_open _ -> []
     | Texp_exclave body -> normal_results body
-    | Texp_apply
-        ({ exp_desc = Texp_ident { path; _ }; _ }, _, _, _, _)
-      when effect_cases <> []
-           && String.equal (Path.name path) "Stdlib.Effect.perform" ->
-      if resumable_effect then raise Unsupported_normal_result else []
+    | Texp_apply _
+      when Option.is_some (performed_effect_constructor expression) ->
+      begin match local_effect_handling effect_cases expression with
+      | Definitely_nonresuming -> []
+      | Definitely_may_resume | Possibly_may_resume ->
+        raise Unsupported_normal_result
+      | Not_definitely_handled ->
+        if expression_may_complete expression then [expression] else []
+      end
     | _ when expression_may_complete expression -> [expression]
     | _ -> []
   in
@@ -3784,13 +3972,11 @@ let verify_structure ?(toplevel = false) structure =
     if toplevel
     then
       { facts = !toplevel_facts;
-        resume_facts = [];
         total_functions = toplevel_total_functions;
         call_subjects = Hashtbl.create 16;
       }
     else
       { facts = Facts.empty;
-        resume_facts = [];
         total_functions = Types.Uid.Tbl.create 16;
         call_subjects = Hashtbl.create 16;
       }
