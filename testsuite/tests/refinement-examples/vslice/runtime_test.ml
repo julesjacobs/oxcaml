@@ -2,6 +2,7 @@
  readonly_files = "vslice_model.mli vslice_model.ml vslice.mli \
                    vslice_runtime_impl.ml fork_join.mli fork_join.ml \
                    runtime_test.reference";
+ flags = "-vox-backend z3";
  {
    setup-ocamlc.byte-build-env;
    script = "cp vslice_runtime_impl.ml vslice.ml";
@@ -13,6 +14,12 @@
    stdout = "${output}";
    run;
    check-program-output;
+   script = "env OCAMLRUNPARAM=s=1k ${program}";
+   script;
+   check-program-output;
+   script = "env OCAMLRUNPARAM=s=512,o=10 ${program}";
+   script;
+   check-program-output;
  }{
    setup-ocamlopt.byte-build-env;
    script = "cp vslice_runtime_impl.ml vslice.ml";
@@ -23,6 +30,12 @@
    output = "${test_build_directory}/program-output";
    stdout = "${output}";
    run;
+   check-program-output;
+   script = "env OCAMLRUNPARAM=s=1k ${program}";
+   script;
+   check-program-output;
+   script = "env OCAMLRUNPARAM=s=512,o=10 ${program}";
+   script;
    check-program-output;
  }
 *)
