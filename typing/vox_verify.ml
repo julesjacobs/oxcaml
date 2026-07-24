@@ -823,6 +823,37 @@ let expression_has_total_mode expression =
       | _ -> false)
     expression.exp_extra
 
+let primitive_is_comparison primitive =
+  List.mem primitive.Primitive.prim_name
+    [ "%equal"; "%notequal";
+      "%lessthan"; "%lessequal";
+      "%greaterthan"; "%greaterequal"
+    ]
+
+let type_is_int_carrier ~env type_ =
+  let type_ = carrier ~env type_ |> expand_head_for_refinement ~env in
+  match get_desc type_ with
+  | Tconstr (path, [], _) -> Path.same path Predef.path_int
+  | _ -> false
+
+(* A comparison primitive's totality mode says only that evaluating it
+   terminates.  Its logical model is stable in ordinary code only for the
+   integer carrier checked by the typechecker.  In particular, a user may
+   truthfully declare a float comparison external total, but NaN equality does
+   not have the reflexivity of the backend's first-order equality. *)
+let comparison_primitive function_ =
+  match function_.exp_desc with
+  | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ }
+    when primitive_is_comparison primitive -> Some primitive
+  | _ -> None
+
+let comparison_arguments_are_int arguments =
+  match arguments with
+  | [ _, Arg (left, _); _, Arg (right, _) ] ->
+    type_is_int_carrier ~env:left.exp_env left.exp_type
+    && type_is_int_carrier ~env:right.exp_env right.exp_type
+  | _ -> false
+
 (* A call can be represented structurally only when evaluating its head is
    deterministic and the resulting function is known total.  Identifier
    identity comes from the typechecker's [val_uid], so aliases and qualified
@@ -831,10 +862,14 @@ let expression_has_total_mode expression =
 let rec call_head_is_stable state expression =
   match expression.exp_desc with
   | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ }
-    when Option.is_some (Vox_builtin.of_primitive primitive.prim_name)
-         || String.equal primitive.prim_name "%identity"
+    when String.equal primitive.prim_name "%identity"
          || String.equal primitive.prim_name "%obj_magic" ->
     true
+  | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ }
+    when primitive_is_comparison primitive ->
+    (* Even an explicitly total comparison external has no stable logical
+       model until its application supplies two checked integer carriers. *)
+    false
   | Texp_ident { desc; mode; _ } ->
     expression_has_total_mode expression
     || Types.Uid.Tbl.mem state.total_functions desc.val_uid
@@ -860,17 +895,24 @@ let rec call_head_is_stable state expression =
     expression_has_total_mode expression
     && expression_is_stable state expression
 
+and application_head_is_stable state function_ arguments =
+  match comparison_primitive function_ with
+  | Some _ -> comparison_arguments_are_int arguments
+  | None -> call_head_is_stable state function_
+
 and expression_is_stable state expression =
   let stable = expression_is_stable state in
   match expression.exp_desc with
   | Texp_constant _ | Texp_function _ -> true
+  | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ }
+    when primitive_is_comparison primitive -> false
   | Texp_ident { desc = { val_kind = Val_mut _; _ }; _ } -> false
   | Texp_ident _ -> true
   | Texp_let (Nonrecursive, bindings, body) ->
     List.for_all (fun binding -> stable binding.vb_expr) bindings
     && stable body
   | Texp_apply (function_, arguments, _, _, _) ->
-    call_head_is_stable state function_
+    application_head_is_stable state function_ arguments
     && List.for_all
          (function
            | _, Arg (argument, _) -> stable argument
@@ -947,6 +989,50 @@ let opaque_call_subject state expression =
       id
   in
   node expression (Rexp_ident (Rfree (Rglobal (Pident id))))
+
+let replace_refinement_expression ~from ~with_ expression =
+  let rec replace expression =
+    if Refinement.alpha_equal ~equal_type:(fun _ _ -> true) from expression
+    then with_
+    else
+      let rexp_desc =
+        match expression.rexp_desc with
+        | (Rexp_ident _ | Rexp_constant _) as desc -> desc
+        | Rexp_let (bindings, body) ->
+          Rexp_let
+            ( List.map
+                (fun binding ->
+                  { binding with rbind_expr = replace binding.rbind_expr })
+                bindings,
+              replace body )
+        | Rexp_function function_ ->
+          Rexp_function { function_ with body = replace function_.body }
+        | Rexp_apply (function_, arguments) ->
+          Rexp_apply
+            ( replace function_,
+              List.map
+                (fun (label, argument) -> label, replace argument)
+                arguments )
+        | Rexp_tuple fields ->
+          Rexp_tuple
+            (List.map (fun (label, field) -> label, replace field) fields)
+        | Rexp_construct (constructor, arguments) ->
+          Rexp_construct (constructor, List.map replace arguments)
+        | Rexp_field (record, field) -> Rexp_field (replace record, field)
+        | Rexp_ifthenelse (condition, ifso, ifnot) ->
+          Rexp_ifthenelse
+            (replace condition, replace ifso, Option.map replace ifnot)
+        | Rexp_match (scrutinee, cases) ->
+          Rexp_match
+            ( replace scrutinee,
+              List.map
+                (fun case ->
+                  { case with rcase_body = replace case.rcase_body })
+                cases )
+      in
+      { expression with rexp_desc }
+  in
+  replace expression
 (* The syntactic selfification fragment is deliberately narrower than
    [subject].  Applications are handled separately below, only when the call
    is stable and its result has solver-supported equality. *)
@@ -1036,8 +1122,8 @@ let rec subject state ?(function_head = false) expression =
     end
   | Texp_function _ ->
     unsupported expression "a multi-parameter or case function"
-  | Texp_apply (function_, _, _, _, _)
-    when not (call_head_is_stable state function_) ->
+  | Texp_apply (function_, arguments, _, _, _)
+    when not (application_head_is_stable state function_ arguments) ->
     opaque_call_subject state expression
   | Texp_apply (function_, arguments, _, _, _) ->
     let function_ = subject state ~function_head:true function_ in
@@ -1652,15 +1738,18 @@ let restrict_result_marks make_may_complete marks =
    condition, by contrast, records a fact about an *expression's* value, which
    only stays valid across occurrences when the expression has a stable logical
    representation. *)
+let add_extracted_refinement_fact state ~kind ?name ~loc ?scope ~subject
+    refinement =
+  let expression = Vox_vc.instantiate ~refinement ~with_:subject in
+  let expression =
+    bind_scope_references (Facts.scope state.facts) expression
+  in
+  let origin = fact_origin ~kind ?name loc in
+  state.facts <- Facts.add ~origin ~loc ?scope expression state.facts
+
 let add_refinement_fact state ~env ~kind ?name ~loc ?scope ~subject type_ =
   Option.iter
-    (fun refinement ->
-      let expression = Vox_vc.instantiate ~refinement ~with_:subject in
-      let expression =
-        bind_scope_references (Facts.scope state.facts) expression
-      in
-      let origin = fact_origin ~kind ?name loc in
-      state.facts <- Facts.add ~origin ~loc ?scope expression state.facts)
+    (add_extracted_refinement_fact state ~kind ?name ~loc ?scope ~subject)
     (refinement ~env type_)
 
 let add_established_result_contract state ~kind ?name expression type_ =
@@ -3511,6 +3600,17 @@ and check_application state application function_ arguments
           None)
       application.exp_extra
   in
+  let subject_replacements = ref [] in
+  let apply_subject_replacements refinement =
+    List.fold_left
+      (fun refinement (from, with_) ->
+        { refinement with
+          ref_pred =
+            replace_refinement_expression
+              ~from ~with_ refinement.ref_pred
+        })
+      refinement !subject_replacements
+  in
   let rec check_arguments arguments argument_facts metadata =
     match arguments, argument_facts, metadata with
     | [], [], [] -> ()
@@ -3524,28 +3624,37 @@ and check_application state application function_ arguments
         state.facts <- merge_facts argument_facts !relation_facts;
         Option.iter
           (fun stored_subject ->
+            (* [rap_subject] is produced during typing and can retain a
+               structural call shape.  Relating it to the verifier's
+               occurrence-local subject is valid only when that call is
+               itself stable; otherwise the equation would give an opaque
+               result the semantics of a non-stable expression. *)
             let actual_subject = subject state argument in
-            if
-              Refinement.alpha_equal ~equal_type:(fun _ _ -> true)
-                stored_subject actual_subject
-            then ()
-            else match
-              equality ~env:application.exp_env ~loc:argument.exp_loc
-                stored_subject actual_subject
-            with
-            | Some equation ->
-              let origin =
-                fact_origin ~kind:"argument-value" argument.exp_loc
-              in
-              state.facts <-
-                Facts.add ~origin ~loc:argument.exp_loc equation state.facts;
-              relation_facts :=
-                Facts.add ~origin ~loc:argument.exp_loc equation
-                  !relation_facts
-            | None ->
-              Location.raise_errorf ~loc:argument.exp_loc
-                "dependent argument value cannot be represented in a \
-                 refinement equality")
+            if expression_is_stable state argument then begin
+              if
+                Refinement.alpha_equal ~equal_type:(fun _ _ -> true)
+                  stored_subject actual_subject
+              then ()
+              else match
+                equality ~env:application.exp_env ~loc:argument.exp_loc
+                  stored_subject actual_subject
+              with
+              | Some equation ->
+                let origin =
+                  fact_origin ~kind:"argument-value" argument.exp_loc
+                in
+                state.facts <-
+                  Facts.add ~origin ~loc:argument.exp_loc equation state.facts;
+                relation_facts :=
+                  Facts.add ~origin ~loc:argument.exp_loc equation
+                    !relation_facts
+              | None ->
+                Location.raise_errorf ~loc:argument.exp_loc
+                  "dependent argument value cannot be represented in a \
+                   refinement equality"
+            end else
+              subject_replacements :=
+                (stored_subject, actual_subject) :: !subject_replacements)
           contract.rap_subject;
         Option.iter
           (fun refinement ->
@@ -3560,7 +3669,8 @@ and check_application state application function_ arguments
               ~program_point:application.exp_loc
               ~result_span:result.exp_loc ~provenance
               ~subject:(subject state argument) refinement)
-          (refinement ~env:application.exp_env contract.rap_domain)
+          (Option.map apply_subject_replacements
+             (refinement ~env:application.exp_env contract.rap_domain))
       | Omitted _, false -> ()
       | (Arg _ | Omitted _), _ ->
         Location.raise_errorf ~loc:application.exp_loc
@@ -3589,8 +3699,12 @@ and check_application state application function_ arguments
         | Texp_ident { path; _ } -> Some (Path.last path)
         | _ -> None
       in
-      add_established_result_contract state ~kind:"application" ?name
-        application metadata.rapp_result)
+      Option.iter
+        (fun refinement ->
+          add_extracted_refinement_fact state ~kind:"application" ?name
+            ~loc:application.exp_loc ~subject:(subject state application)
+            (apply_subject_replacements refinement))
+        (refinement ~env:application.exp_env metadata.rapp_result))
     metadata
 
 and walk_default_expression state expression =

@@ -1,43 +1,46 @@
-VC annotation at direct_if_total_call_vc.ml:14:2-15
+VC annotation at direct_if_total_call_vc.ml:17:7-25
+|- false
+
+VC annotation at direct_if_total_call_vc.ml:20:2-15
 |- x = 0 = (x = 0)
 
-VC annotation at direct_if_total_call_vc.ml:17:20-38
+VC annotation at direct_if_total_call_vc.ml:23:20-38
   is_zero x = (x = 0)
   is_zero x
 |- x = 0
 
-VC annotation at direct_if_total_call_vc.ml:21:17-35
+VC annotation at direct_if_total_call_vc.ml:27:17-35
   is_zero x = (x = 0)
   result = (x = 0)
   result = is_zero x
   result
 |- x = 0
 
-VC annotation at direct_if_total_call_vc.ml:27:29-47
+VC annotation at direct_if_total_call_vc.ml:33:29-47
   call_result = (x = 0)
 |- x = 0
 
-VC annotation at direct_if_total_call_vc.ml:32:27-45
+VC annotation at direct_if_total_call_vc.ml:38:27-45
   call_result = (x = 0)
 |- x = 0
 
-VC annotation at direct_if_total_call_vc.ml:38:29-30
+VC annotation at direct_if_total_call_vc.ml:44:29-30
   (*match-component*) = ()
 |- false
 
-VC annotation at direct_if_total_call_vc.ml:38:36-37
+VC annotation at direct_if_total_call_vc.ml:44:36-37
   (*match-component*) = ()
 |- false
 
-VC contract-argument at direct_if_total_call_vc.ml:46:13-31
+VC contract-argument at direct_if_total_call_vc.ml:52:13-31
   established_key = 7
 |- established_key = 7
 
-VC annotation at direct_if_total_call_vc.ml:47:7-39
+VC annotation at direct_if_total_call_vc.ml:53:7-39
   established_key = 7
 |- established_key = 7
 
-VC annotation at direct_if_total_call_vc.ml:48:7-39
+VC annotation at direct_if_total_call_vc.ml:54:7-39
   established_key = 7
 |- established_key = 7
 

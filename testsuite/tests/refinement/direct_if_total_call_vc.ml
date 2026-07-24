@@ -9,6 +9,12 @@
 *)
 
 external int_equal : int -> int -> bool @@ total = "%equal"
+external total_float_equal : float -> float -> bool @@ total = "%equal"
+
+let opaque_float_comparison value =
+  if value |> total_float_equal value
+  then 0
+  else (0 : int{ false })
 
 let (is_zero @ total) (x : int) : bool{ _ = int_equal x 0 } =
   int_equal x 0

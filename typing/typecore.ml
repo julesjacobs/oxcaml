@@ -573,14 +573,20 @@ let primitive_is_total = function
   | _ -> false
 
 (* Invariant: [primitive_is_total] together with this comparison list must
-   COVER [Vox_builtin.of_primitive] -- every primitive the backends model
-   as a proposition constructor must be admissible inside a predicate.  The
-   discipline fails closed: a builtin entry that is in neither set is
-   simply partial inside predicates too, so a predicate using it is rejected at
-   totality rather than admitted unmodelled.  (Arithmetic and the boolean
-   connectives are already in [primitive_is_total]; only the comparisons are new
-   here.) *)
+   COVER [Vox_builtin.of_primitive] -- every primitive the backends model as a
+   proposition constructor must be admissible inside a predicate.  A
+   saturated direct comparison is also admitted in ordinary total code when
+   both typed operands are integers; [type_expect] checks that condition after
+   typing the application.  Comparison values and other operand types remain
+   partial.  A builtin entry in neither set therefore fails closed.
+   Arithmetic and boolean connectives are already in [primitive_is_total]. *)
 let primitive_is_refinement_comparison = function
+  | "%equal" | "%notequal"
+  | "%lessthan" | "%lessequal"
+  | "%greaterthan" | "%greaterequal" -> true
+  | _ -> false
+
+let primitive_is_direct_integer_comparison = function
   | "%equal" | "%notequal"
   | "%lessthan" | "%lessequal"
   | "%greaterthan" | "%greaterequal" -> true
@@ -588,6 +594,13 @@ let primitive_is_refinement_comparison = function
 
 let total_primitive_mode mode =
   mode |> Value.meet_const_with Totality Totality.Const.Total
+
+let partial_primitive_mode mode =
+  let partial_only =
+    Value.of_const
+      { Value.Const.min with totality = Totality.Const.Partial }
+  in
+  Value.join [mode; partial_only]
 
 let mode_legacy = mode_default Value.legacy
 
@@ -4818,6 +4831,8 @@ let check_unused
     compilation unit or toplevel phrase *)
 let delayed_checks = ref []
 let refinement_predicate_context = ref false
+let deferred_direct_comparison_head_context = ref false
+let deferred_direct_comparison_head_granted = ref false
 let refinement_imposition_inferred_head = ref None
 let reset_delayed_checks () = delayed_checks := []
 let add_delayed_check f =
@@ -4887,6 +4902,35 @@ let is_prim ~name funct =
                  kind = Id_prim _; _ } ->
       prim_name = name
   | _ -> false
+
+let is_direct_integer_comparison_prim funct =
+  match funct.exp_desc with
+  | Texp_ident
+      { desc = { val_kind = Val_prim { Primitive.prim_name; _ }; _ };
+        kind = Id_prim _;
+        _
+      } ->
+    primitive_is_direct_integer_comparison prim_name
+  | _ -> false
+
+let is_int_type env type_ =
+  let type_ = refinement_skeleton env type_ |> expand_head env in
+  match get_desc type_ with
+  | Tconstr (path, [], _) -> Path.same path Predef.path_int
+  | _ -> false
+
+let integer_comparison_arguments env = function
+  | [ (Nolabel, Arg (left, _), _);
+      (Nolabel, Arg (right, _), _)
+    ] ->
+    is_int_type env left.exp_type && is_int_type env right.exp_type
+  | _ -> false
+
+let map_ident_mode f expression =
+  match expression.exp_desc with
+  | Texp_ident ident ->
+    { expression with exp_desc = Texp_ident { ident with mode = f ident.mode } }
+  | _ -> expression
 
 (* List labels in a function type, and whether return type is a variable *)
 let rec list_labels_aux env visited ls ty_fun =
@@ -7632,14 +7676,26 @@ let expression_has_total_mode expression =
       | _ -> false)
     expression.exp_extra
 
-let dependent_argument_call_is_stable expression =
-  match expression.exp_desc with
+let dependent_comparison_arguments_are_int = function
+  | [ _, Arg (left, _); _, Arg (right, _) ] ->
+    is_int_type left.exp_env left.exp_type
+    && is_int_type right.exp_env right.exp_type
+  | _ -> false
+
+let dependent_argument_call_is_stable function_ arguments =
+  match function_.exp_desc with
+  | Texp_ident
+      { desc = { val_kind = Val_prim { Primitive.prim_name; _ }; _ };
+        _
+      }
+    when primitive_is_direct_integer_comparison prim_name ->
+    dependent_comparison_arguments_are_int arguments
   | Texp_ident { mode; _ } ->
-    expression_has_total_mode expression
+    expression_has_total_mode function_
     || totality_is_total
          (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
   | Texp_function { alloc_mode; _ } ->
-    expression_has_total_mode expression
+    expression_has_total_mode function_
     || totality_is_total
          (Mode.Alloc.proj_comonadic Mode.Axis.Totality alloc_mode)
   | _ -> false
@@ -7667,7 +7723,7 @@ let evaluated_argument_subject expression =
       create (Rexp_ident (Rfree reference))
     | Texp_constant constant -> create (Rexp_constant constant)
     | Texp_apply (function_, arguments, _, _, _)
-      when dependent_argument_call_is_stable function_ ->
+      when dependent_argument_call_is_stable function_ arguments ->
       let function_ = lower ~function_head:true function_ in
       let arguments =
         List.map
@@ -8572,6 +8628,11 @@ and type_expect_
     }
   | Pexp_apply(sfunct, sargs) ->
       (* See Note [Type-checking applications] *)
+      let direct_binary_identifier_application =
+        match sfunct.pexp_desc, sargs with
+        | Pexp_ident _, [Nolabel, _; Nolabel, _] -> true
+        | _ -> false
+      in
       let is_bor, sargs =
         List.fold_left_map
           (fun acc (label, sarg) ->
@@ -8626,24 +8687,70 @@ and type_expect_
       in
       (* one more level for warning on non-returning functions *)
       with_local_level_generalize ~before_generalize:ignore begin fun () ->
-      let type_sfunct sfunct =
-        let funct =
-          with_local_level_generalize_structure_if_principal
-            (fun () -> type_exp env funct_expected_mode sfunct)
+      let type_sfunct ~defer_direct_comparison_head sfunct =
+        let type_sfunct () =
+          let funct =
+            with_local_level_generalize_structure_if_principal
+              (fun () -> type_exp env funct_expected_mode sfunct)
+          in
+          let ty = instance funct.exp_type in
+          let rt = wrap_trace_gadt_instances env (ret_tvar TypeSet.empty) ty in
+          rt, funct
         in
-        let ty = instance funct.exp_type in
-        let rt = wrap_trace_gadt_instances env (ret_tvar TypeSet.empty) ty in
-        rt, funct
+        let rt, funct, comparison_totality_granted =
+          if not defer_direct_comparison_head
+          then
+            let rt, funct = type_sfunct () in
+            rt, funct, false
+          else begin
+            let previous_context = !deferred_direct_comparison_head_context in
+            let previous_granted = !deferred_direct_comparison_head_granted in
+            let granted = ref false in
+            deferred_direct_comparison_head_context := true;
+            deferred_direct_comparison_head_granted := false;
+            let rt, funct =
+              Fun.protect type_sfunct ~finally:(fun () ->
+                granted := !deferred_direct_comparison_head_granted;
+                deferred_direct_comparison_head_granted := previous_granted;
+                deferred_direct_comparison_head_context := previous_context)
+            in
+            rt, funct, !granted
+          end
+        in
+        let funct =
+          if comparison_totality_granted
+             && is_direct_integer_comparison_prim funct
+          then map_ident_mode partial_primitive_mode funct
+          else funct
+        in
+        rt, funct, comparison_totality_granted
       in
       let type_sfunct_args sfunct extra_args =
         match sfunct.pexp_desc with
         | Pexp_apply (sfunct, args) ->
-           type_sfunct sfunct, args @ extra_args
+           let rt, funct, _ =
+             type_sfunct ~defer_direct_comparison_head:false sfunct
+           in
+           (rt, funct), args @ extra_args
         | _ ->
-           type_sfunct sfunct, extra_args
+           let rt, funct, _ =
+             type_sfunct ~defer_direct_comparison_head:false sfunct
+           in
+           (rt, funct), extra_args
       in
-      let (rt, funct), sargs =
-        let rt, funct = type_sfunct sfunct in
+      let (rt, funct), sargs, exact_direct_comparison_head,
+          comparison_totality_granted =
+        let defer_direct_comparison_head =
+          direct_binary_identifier_application
+          && not !refinement_predicate_context
+        in
+        let rt, funct, comparison_totality_granted =
+          type_sfunct ~defer_direct_comparison_head sfunct
+        in
+        let exact_direct_comparison_head =
+          defer_direct_comparison_head
+          && is_direct_integer_comparison_prim funct
+        in
         match funct.exp_desc, sargs with
         | Texp_ident { desc = {val_kind = Val_prim {prim_name = "%revapply"};
                                val_type};
@@ -8651,18 +8758,35 @@ and type_expect_
           [Nolabel, sarg; Nolabel, actual_sfunct]
           when is_inferred actual_sfunct
             && check_apply_prim_type Revapply val_type ->
-            type_sfunct_args actual_sfunct [Nolabel, sarg]
+            let funct, sargs =
+              type_sfunct_args actual_sfunct [Nolabel, sarg]
+            in
+            funct, sargs, false, false
         | Texp_ident { desc = {val_kind = Val_prim {prim_name = "%apply"};
                                val_type};
                        kind = Id_prim _; _ },
           [Nolabel, actual_sfunct; Nolabel, sarg]
           when check_apply_prim_type Apply val_type ->
-            type_sfunct_args actual_sfunct [Nolabel, sarg]
+            let funct, sargs =
+              type_sfunct_args actual_sfunct [Nolabel, sarg]
+            in
+            funct, sargs, false, false
         | _ ->
-            (rt, funct), sargs
+            (rt, funct), sargs, exact_direct_comparison_head,
+            comparison_totality_granted
       in
       let (args, ty_ret, mode_ret, pm, refinement_application) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
+      in
+      let direct_integer_comparison =
+        not !refinement_predicate_context
+        && exact_direct_comparison_head
+        && integer_comparison_arguments env args
+      in
+      let funct =
+        if direct_integer_comparison
+        then map_ident_mode total_primitive_mode funct
+        else funct
       in
       let mode_ret = Alloc.disallow_right mode_ret in
       let ap_mode = Alloc.proj_comonadic Areality mode_ret in
@@ -8682,6 +8806,10 @@ and type_expect_
             exp_extra = (Texp_inspected_type ti, loc, []) :: funct.exp_extra }
         | false -> funct
       in
+      if not !refinement_predicate_context
+         && comparison_totality_granted
+         && not direct_integer_comparison
+      then constrain_enclosing_totality ~loc:funct.exp_loc env;
       let args = List.map (fun (lbl, arg, _) -> (lbl, arg)) args in
       let refinement_aware =
           type_contains_refinement env funct.exp_type
@@ -10590,12 +10718,25 @@ and type_ident env ?(recarg=Rejected) lid =
   Therefore, we need to cross modes upon look-up. Ideally that should be done in
   [Env], but that is difficult due to cyclic dependency between jkind and env. *)
   let mode = cross_left env desc.val_type mode in
+  let deferred_comparison_grant =
+    match desc.val_kind with
+    | Val_prim { prim_name; _ } ->
+      !deferred_direct_comparison_head_context
+      && primitive_is_direct_integer_comparison prim_name
+      && not
+           (totality_is_total
+              (Value.proj_comonadic Totality mode))
+    | Val_reg _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _ -> false
+  in
+  if deferred_comparison_grant
+  then deferred_direct_comparison_head_granted := true;
   let mode =
     match desc.val_kind with
     | Val_prim { prim_name; _ }
       when primitive_is_total prim_name
            || (!refinement_predicate_context
-               && primitive_is_refinement_comparison prim_name) ->
+               && primitive_is_refinement_comparison prim_name)
+           || deferred_comparison_grant ->
         total_primitive_mode mode
     | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
     | Val_anc _ ->
