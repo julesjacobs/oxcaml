@@ -831,7 +831,7 @@ let expression_has_total_mode expression =
 let rec call_head_is_stable state expression =
   match expression.exp_desc with
   | Texp_ident { desc = { val_kind = Val_prim primitive; _ }; _ }
-    when Option.is_some (Vox_lean.primitive_builtin primitive.prim_name)
+    when Option.is_some (Vox_builtin.of_primitive primitive.prim_name)
          || String.equal primitive.prim_name "%identity"
          || String.equal primitive.prim_name "%obj_magic" ->
     true

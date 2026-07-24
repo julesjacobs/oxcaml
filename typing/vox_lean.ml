@@ -59,6 +59,7 @@ let digest text = Digest.to_hex (Digest.string text)
 
 type sort =
   | Sint
+  | Sbigint
   | Sbool
   | Stuple of sort list
   | Sarrow of sort * sort
@@ -97,6 +98,7 @@ type context =
 
 let rec sort_key = function
   | Sint -> "int"
+  | Sbigint -> "bigint"
   | Sbool -> "bool"
   | Stuple sorts ->
     "tuple(" ^ String.concat "," (List.map sort_key sorts) ^ ")"
@@ -120,7 +122,7 @@ let sort_contains context ~needle sort =
     then true
     else
       match sort with
-      | Sint | Sbool -> false
+      | Sint | Sbigint | Sbool -> false
       | Stuple sorts -> List.exists (loop seen) sorts
       | Sarrow (argument, result) -> loop seen argument || loop seen result
       | Sdata key ->
@@ -147,6 +149,7 @@ let growing_instantiation context previous current =
 
 let rec lean_sort context location = function
   | Sint -> "Int"
+  | Sbigint -> "Int"
   | Sbool -> "Bool"
   | Stuple [] -> error location "empty tuple type"
   | Stuple [_] -> error location "one-element tuple type"
@@ -160,7 +163,7 @@ let rec lean_sort context location = function
 
 let inhabited_data_keys context fixed_abstract_variables =
   let rec sort_is_inhabited inhabited = function
-    | Sint | Sbool -> true
+    | Sint | Sbigint | Sbool -> true
     | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
     | Sarrow (_, result) -> sort_is_inhabited inhabited result
     | Sdata key -> List.mem key inhabited
@@ -263,7 +266,7 @@ let inhabited_data_keys context fixed_abstract_variables =
 
 let sort_is_inhabited inhabited_data =
   let rec loop = function
-    | Sint | Sbool -> true
+    | Sint | Sbigint | Sbool -> true
     | Stuple sorts -> List.for_all loop sorts
     (* A constant function inhabits an arrow whenever its result is inhabited.
        We intentionally do not assume classical choice for an empty result. *)
@@ -285,7 +288,7 @@ let same_type_arguments left right =
 
 let ensure_no_function_field location sort =
   let rec loop = function
-    | Sint | Sbool | Sdata _ -> ()
+    | Sint | Sbigint | Sbool | Sdata _ -> ()
     | Stuple sorts -> List.iter loop sorts
     | Sarrow _ ->
       error location "function-valued datatype fields are not supported"
@@ -303,6 +306,9 @@ let rec sort_of_type context location type_ =
   | Tconstr (path, arguments, _) when Path.same path Predef.path_bool ->
     if arguments = [] then Sbool
     else error location "bool type applied to arguments"
+  | Tconstr (path, arguments, _) when Vox_builtin.is_bigint_type path ->
+    if arguments = [] then Sbigint
+    else error location "Bigint.t applied to arguments"
   | Ttuple fields ->
     Stuple
       (List.map
@@ -468,7 +474,7 @@ and register_data context location path arguments declaration =
 let supports_match_facts ~env type_ =
   let context = { env; data = []; references = [] } in
   match sort_of_type context Location.none type_ with
-  | Sint | Sbool | Stuple _ -> true
+  | Sint | Sbigint | Sbool | Stuple _ -> true
   | Sdata key ->
     begin match (data_for_key context Location.none key).data_definition with
     | Some (Variant _ | Record _) -> true
@@ -488,7 +494,7 @@ let supports_equality ~env type_ =
     | _ -> false
   in
   let rec supported = function
-    | Sint | Sbool | Sdata _ -> true
+    | Sint | Sbigint | Sbool | Sdata _ -> true
     | Stuple fields -> List.for_all supported fields
     | Sarrow _ -> false
   in
@@ -501,21 +507,6 @@ let supports_equality ~env type_ =
 let reference_basename = function
   | Rfun name | Rsibling name -> name
   | Rapp path | Rglobal path -> Path.last path
-
-let primitive_builtin = function
-  | "%equal" -> Some `Equal
-  | "%notequal" -> Some `Not_equal
-  | "%lessthan" -> Some `Less
-  | "%lessequal" -> Some `Less_equal
-  | "%greaterthan" -> Some `Greater
-  | "%greaterequal" -> Some `Greater_equal
-  | "%addint" -> Some `Add
-  | "%subint" -> Some `Subtract
-  | "%mulint" -> Some `Multiply
-  | "%sequand" -> Some `And
-  | "%sequor" -> Some `Or
-  | "%boolnot" -> Some `Not
-  | _ -> None
 
 let constructor_mismatch_prefix = "*vox-match-constructor-mismatch*:"
 
@@ -587,9 +578,9 @@ let display_reference_name = function
   | Rapp path | Rglobal path -> display_path path
 
 (* Infix operators recognized for display by source name.  These are absent
-   from [primitive_builtin] (the Lean backend does not interpret them), so
-   they are matched separately; precedence and associativity follow OCaml's
-   rules for the operator. *)
+   from [Vox_builtin.of_primitive] (the Lean backend does not interpret them),
+   so they are matched separately; precedence and associativity follow
+   OCaml's rules for the operator. *)
 let display_infix_operator = function
   | "mod" | "/" | "land" | "lor" | "lxor" ->
     Some { op_text = ""; op_precedence = 50; op_associativity = Left }
@@ -608,7 +599,7 @@ let display_builtin ~env = function
     begin
       match Subst.Lazy.force_value_description (Env.find_value path env) with
       | { val_kind = Val_prim primitive; _ } ->
-        primitive_builtin primitive.prim_name
+        Vox_builtin.of_primitive primitive.prim_name
       | _ -> None
       | exception Not_found -> None
     end
@@ -623,7 +614,11 @@ let binary_operator ~env reference =
       ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less | `Less_equal
        | `Multiply | `Not_equal | `Or | `Subtract) as builtin) ->
     Some (display_operator builtin)
-  | Some `Not | None ->
+  | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
+         | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
+         | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
+         | `Bigint_sub | `Bigint_zero | `Not)
+  | None ->
     (match reference with
      | Rfun _ | Rsibling _ -> None
      | Rapp path | Rglobal path -> display_infix_operator (Path.last path))
@@ -775,6 +770,10 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
         | Some
             (`Add | `And | `Equal | `Greater | `Greater_equal | `Less
             | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+        | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
+               | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
+               | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
+               | `Bigint_sub | `Bigint_zero)
         | None ->
           render_prefix names (head_of_reference reference)
             [Nolabel, argument]
@@ -802,6 +801,10 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
          | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
          as builtin) ->
       display_function_name (display_operator builtin).op_text
+    | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
+           | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
+           | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
+           | `Bigint_sub | `Bigint_zero)
     | None -> display_function_name (display_reference_name reference)
   and render_binary names operator left right =
     let operand side expression =
@@ -855,17 +858,23 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
   (render names expression).text
 
 
+type builtin = [ Vox_builtin.t | `Constructor_mismatch of string ]
+
 let builtin_name context = function
   | Rfun name -> Option.map (fun name -> `Constructor_mismatch name)
       (constructor_mismatch name)
   | Rsibling _ -> None
   | (Rapp path | Rglobal path) ->
-    begin
+    begin match Vox_builtin.of_path path with
+    | Some builtin -> Some (builtin :> builtin)
+    | None ->
       match
         Subst.Lazy.force_value_description (Env.find_value path context.env)
       with
       | { val_kind = Val_prim primitive; _ } ->
-        primitive_builtin primitive.prim_name
+        Option.map
+          (fun builtin -> (builtin :> builtin))
+          (Vox_builtin.of_primitive primitive.prim_name)
       | _ -> None
       | exception Not_found -> None
     end
@@ -1093,6 +1102,10 @@ let expect_int location = function
   | Sint -> ()
   | _ -> error location "integer operation used at a non-int type"
 
+let expect_bigint location = function
+  | Sbigint -> ()
+  | _ -> error location "Bigint operation used at an inconsistent type"
+
 let expect_bool location = function
   | Sbool -> ()
   | _ -> error location "boolean operation used at a non-bool type"
@@ -1175,6 +1188,48 @@ let emit_builtin context location builtin arguments =
   | `Add -> binary "+" (expect_int location)
   | `Subtract -> binary "-" (expect_int location)
   | `Multiply -> binary "*" (expect_int location)
+  | `Bigint_add -> binary "+" (expect_bigint location)
+  | `Bigint_sub -> binary "-" (expect_bigint location)
+  | `Bigint_mul -> binary "*" (expect_bigint location)
+  | `Bigint_neg ->
+    begin match terms, sorts with
+    | [argument], [Sbigint] -> "(-" ^ argument ^ ")"
+    | _ -> error location "Bigint.neg used with an inconsistent type"
+    end
+  | `Bigint_abs ->
+    begin match terms, sorts with
+    | [argument], [Sbigint] ->
+      "(if " ^ argument ^ " < 0 then -" ^ argument
+      ^ " else " ^ argument ^ ")"
+    | _ -> error location "Bigint.abs used with an inconsistent type"
+    end
+  | `Bigint_compare ->
+    begin match terms, sorts with
+    | [left; right], [Sbigint; Sbigint] ->
+      "(if " ^ left ^ " < " ^ right ^ " then -1 else if " ^ left
+      ^ " > " ^ right ^ " then 1 else 0)"
+    | _ -> error location "Bigint.compare used with an inconsistent type"
+    end
+  | `Bigint_lt ->
+    "decide " ^ binary "<" (expect_bigint location)
+  | `Bigint_le ->
+    "decide " ^ binary "≤" (expect_bigint location)
+  | `Bigint_gt ->
+    "decide " ^ binary ">" (expect_bigint location)
+  | `Bigint_ge ->
+    "decide " ^ binary "≥" (expect_bigint location)
+  | `Bigint_of_int ->
+    begin match terms, sorts with
+    | [argument], [Sint] -> argument
+    | _ -> error location "Bigint.of_int used with an inconsistent type"
+    end
+  | `Bigint_is_zero ->
+    begin match terms, sorts with
+    | [argument], [Sbigint] -> "decide (" ^ argument ^ " = 0)"
+    | _ -> error location "Bigint.is_zero used with an inconsistent type"
+    end
+  | `Bigint_zero | `Bigint_one ->
+    error location "Bigint constant used as a function"
   | `And -> binary "&&" (expect_bool location)
   | `Or -> binary "||" (expect_bool location)
   | `Implies ->
@@ -1274,6 +1329,8 @@ let emit_expression context variables expression =
       | Rexp_ident (Rfree reference_identifier) ->
         begin
           match builtin_name context reference_identifier with
+          | Some `Bigint_zero -> "0"
+          | Some `Bigint_one -> "1"
           | Some _ ->
             error expression.rexp_loc
               "builtin %s must be fully applied"
@@ -1527,7 +1584,7 @@ let equality_function_name data = "vox_decEq_" ^ data.data_name
    that these executable comparisons agree with constructor equality. *)
 let equality_decision context location sort left right =
   match sort with
-  | Sint | Sbool -> "decEq " ^ left ^ " " ^ right
+  | Sint | Sbigint | Sbool -> "decEq " ^ left ^ " " ^ right
   | Sdata key ->
     let data = data_for_key context location key in
     begin match definition location data with
@@ -1776,7 +1833,7 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
       (fun variable ->
         match variable.variable_sort with
         | Sdata key -> Some key
-        | Sint | Sbool | Stuple _ | Sarrow _ -> None)
+        | Sint | Sbigint | Sbool | Stuple _ | Sarrow _ -> None)
       variables
   in
   let inhabited_data =

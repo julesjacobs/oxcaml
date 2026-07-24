@@ -21,27 +21,6 @@ type result =
 
 val string_of_verdict : verdict -> string
 
-(* Recognizes the OCaml primitives that the Lean backend interprets (integer
-   comparisons and arithmetic, boolean connectives).  Every recognized
-   primitive is pure and deterministic (side-effect-free); the Q-003
-   branch-condition purity gate in [Vox_verify] relies on that invariant, so a
-   new entry here must be pure and deterministic too. *)
-val primitive_builtin :
-  string ->
-  [ `Add
-  | `And
-  | `Equal
-  | `Greater
-  | `Greater_equal
-  | `Less
-  | `Less_equal
-  | `Multiply
-  | `Not
-  | `Not_equal
-  | `Or
-  | `Subtract ]
-    option
-
 (* Internal logical predicate used by the verifier for the negative fact
    contributed by an earlier constructor arm.  The returned name cannot be
    written as an OCaml value identifier; the Lean emitter recognizes it and

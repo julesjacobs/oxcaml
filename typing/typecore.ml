@@ -573,9 +573,9 @@ let primitive_is_total = function
   | _ -> false
 
 (* Invariant: [primitive_is_total] together with this comparison list must
-   COVER [Vox_lean.primitive_builtin] -- every primitive the Lean backend models
+   COVER [Vox_builtin.of_primitive] -- every primitive the backends model
    as a proposition constructor must be admissible inside a predicate.  The
-   discipline fails closed: a [primitive_builtin] entry that is in neither set is
+   discipline fails closed: a builtin entry that is in neither set is
    simply partial inside predicates too, so a predicate using it is rejected at
    totality rather than admitted unmodelled.  (Arithmetic and the boolean
    connectives are already in [primitive_is_total]; only the comparisons are new
@@ -10598,7 +10598,11 @@ and type_ident env ?(recarg=Rejected) lid =
                && primitive_is_refinement_comparison prim_name) ->
         total_primitive_mode mode
     | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
-    | Val_anc _ -> mode
+    | Val_anc _ ->
+      if !refinement_predicate_context
+         && Option.is_some (Vox_builtin.of_path path)
+      then total_primitive_mode mode
+      else mode
   in
   (* There can be locks between the definition and a use of a value. For
   example, if a function closes over a value, there will be Closure_lock between

@@ -99,6 +99,7 @@ let digest text = Digest.to_hex (Digest.string text)
 
 type sort =
   | Sint
+  | Sbigint
   | Sbool
   | Stuple of sort list
   | Sarrow of sort * sort
@@ -148,6 +149,7 @@ let solver_symbol context basename =
 
 let rec sort_key = function
   | Sint -> "int"
+  | Sbigint -> "bigint"
   | Sbool -> "bool"
   | Stuple sorts ->
     "tuple(" ^ String.concat "," (List.map sort_key sorts) ^ ")"
@@ -177,7 +179,7 @@ let tuple_for_sorts context location sorts =
   | None -> error location "internal error: missing SMT tuple %s" key
 
 let rec ensure_first_order location = function
-  | Sint | Sbool | Sdata _ -> ()
+  | Sint | Sbigint | Sbool | Sdata _ -> ()
   | Stuple sorts -> List.iter (ensure_first_order location) sorts
   | Sarrow _ ->
     error location "higher-order values are not supported by the SMT backend"
@@ -219,7 +221,7 @@ let same_type_arguments left right =
 
 let ensure_no_function_field location sort =
   let rec loop = function
-    | Sint | Sbool | Sdata _ -> ()
+    | Sint | Sbigint | Sbool | Sdata _ -> ()
     | Stuple sorts -> List.iter loop sorts
     | Sarrow _ ->
       error location "function-valued datatype fields are not supported"
@@ -237,6 +239,9 @@ let rec sort_of_type context location type_ =
   | Tconstr (path, arguments, _) when Path.same path Predef.path_bool ->
     if arguments = [] then Sbool
     else error location "bool type applied to arguments"
+  | Tconstr (path, arguments, _) when Vox_builtin.is_bigint_type path ->
+    if arguments = [] then Sbigint
+    else error location "Bigint.t applied to arguments"
   | Ttuple fields ->
     let sorts =
       List.map
@@ -476,12 +481,14 @@ let reference_basename = function
 let builtin_name context = function
   | Rfun _ | Rsibling _ -> None
   | Rapp path | Rglobal path ->
-    begin
+    begin match Vox_builtin.of_path path with
+    | Some builtin -> Some builtin
+    | None ->
       match
         Subst.Lazy.force_value_description (Env.find_value path context.env)
       with
       | { val_kind = Val_prim primitive; _ } ->
-        Vox_lean.primitive_builtin primitive.prim_name
+        Vox_builtin.of_primitive primitive.prim_name
       | _ -> None
       | exception Not_found -> None
     end
@@ -658,6 +665,10 @@ let expect_int location = function
   | Sint -> ()
   | _ -> error location "integer operation used at a non-int type"
 
+let expect_bigint location = function
+  | Sbigint -> ()
+  | _ -> error location "Bigint operation used at an inconsistent type"
+
 let expect_bool location = function
   | Sbool -> ()
   | _ -> error location "boolean operation used at a non-bool type"
@@ -692,9 +703,71 @@ let emit_builtin location builtin arguments =
   | `Less_equal -> binary "<=" (expect_int location) Sbool
   | `Greater -> binary ">" (expect_int location) Sbool
   | `Greater_equal -> binary ">=" (expect_int location) Sbool
-  | `Add -> binary "+" (expect_int location) Sint
-  | `Subtract -> binary "-" (expect_int location) Sint
-  | `Multiply -> binary "*" (expect_int location) Sint
+  | (`Add | `Subtract | `Multiply) as operation ->
+    begin match terms, sorts with
+    | [left; right], [left_sort; right_sort] ->
+      expect_int location left_sort;
+      expect_sort location left_sort right_sort;
+      let operator =
+        match operation with
+        | `Add -> "+"
+        | `Subtract -> "-"
+        | `Multiply -> "*"
+      in
+      "(" ^ operator ^ " " ^ left ^ " " ^ right ^ ")", left_sort
+    | _ -> error location "binary builtin used with the wrong arity"
+    end
+  | (`Bigint_add | `Bigint_sub | `Bigint_mul) as operation ->
+    begin match terms, sorts with
+    | [left; right], [left_sort; right_sort] ->
+      expect_bigint location left_sort;
+      expect_sort location left_sort right_sort;
+      let operator =
+        match operation with
+        | `Bigint_add -> "+"
+        | `Bigint_sub -> "-"
+        | `Bigint_mul -> "*"
+      in
+      "(" ^ operator ^ " " ^ left ^ " " ^ right ^ ")", Sbigint
+    | _ -> error location "Bigint arithmetic used with the wrong arity"
+    end
+  | `Bigint_neg ->
+    begin match terms, sorts with
+    | [argument], [Sbigint] -> "(- " ^ argument ^ ")", Sbigint
+    | _ -> error location "Bigint.neg used with an inconsistent type"
+    end
+  | `Bigint_abs ->
+    begin match terms, sorts with
+    | [argument], [Sbigint] ->
+      ( "(ite (< " ^ argument ^ " 0) (- " ^ argument ^ ") "
+        ^ argument ^ ")",
+        Sbigint )
+    | _ -> error location "Bigint.abs used with an inconsistent type"
+    end
+  | `Bigint_compare ->
+    begin match terms, sorts with
+    | [left; right], [Sbigint; Sbigint] ->
+      ( "(ite (< " ^ left ^ " " ^ right ^ ") (- 1) (ite (> "
+        ^ left ^ " " ^ right ^ ") 1 0))",
+        Sint )
+    | _ -> error location "Bigint.compare used with an inconsistent type"
+    end
+  | `Bigint_lt -> binary "<" (expect_bigint location) Sbool
+  | `Bigint_le -> binary "<=" (expect_bigint location) Sbool
+  | `Bigint_gt -> binary ">" (expect_bigint location) Sbool
+  | `Bigint_ge -> binary ">=" (expect_bigint location) Sbool
+  | `Bigint_of_int ->
+    begin match terms, sorts with
+    | [argument], [Sint] -> argument, Sbigint
+    | _ -> error location "Bigint.of_int used with an inconsistent type"
+    end
+  | `Bigint_is_zero ->
+    begin match terms, sorts with
+    | [argument], [Sbigint] -> "(= " ^ argument ^ " 0)", Sbool
+    | _ -> error location "Bigint.is_zero used with an inconsistent type"
+    end
+  | `Bigint_zero | `Bigint_one ->
+    error location "Bigint constant used as a function"
   | `And -> binary "and" (expect_bool location) Sbool
   | `Or -> binary "or" (expect_bool location) Sbool
   | `Not ->
@@ -854,6 +927,8 @@ let emit_expression context variables expression =
       | Rexp_ident (Rfree reference_identifier) ->
         begin
           match builtin_name context reference_identifier with
+          | Some `Bigint_zero -> "0"
+          | Some `Bigint_one -> "1"
           | Some _ ->
             error expression.rexp_loc "builtin %s must be fully applied"
               (reference_basename reference_identifier)
@@ -1167,7 +1242,7 @@ let emit_expression context variables expression =
 
 let smt_sort context location sort =
   let render = function
-    | Sint -> "Int"
+    | Sint | Sbigint -> "Int"
     | Sbool -> "Bool"
     | Stuple sorts ->
       (tuple_for_sorts context location sorts).tuple_name
@@ -1229,7 +1304,7 @@ let check_abstract_inhabitance (context : context) variables location =
       (fun variable ->
         match variable.variable_sort with
         | Sdata variable_key -> String.equal key variable_key
-        | Sint | Sbool | Stuple _ | Sarrow _ -> false)
+        | Sint | Sbigint | Sbool | Stuple _ | Sarrow _ -> false)
       variables
   in
   let trusted_constant key =
@@ -1298,7 +1373,7 @@ let check_abstract_inhabitance (context : context) variables location =
 
 let check_concrete_inhabitance (context : context) location =
   let rec sort_is_inhabited inhabited = function
-    | Sint | Sbool -> true
+    | Sint | Sbigint | Sbool -> true
     | Stuple sorts -> List.for_all (sort_is_inhabited inhabited) sorts
     | Sdata key -> List.mem key inhabited
     | Sarrow _ -> false
@@ -1376,7 +1451,7 @@ let oxsmt_find_named location description name entries =
     error location "internal error: missing oxsmt %s %s" description name
 
 let oxsmt_sort context sorts location = function
-  | Sint -> Oxsmt_sort.int
+  | Sint | Sbigint -> Oxsmt_sort.int
   | Sbool -> Oxsmt_sort.bool
   | Stuple fields ->
     let tuple = tuple_for_sorts context location fields in
@@ -1572,15 +1647,92 @@ let oxsmt_builtin terms location builtin arguments =
   | `Less -> binary (expect_int location) Sbool (Oxsmt_context.lt terms)
   | `Less_equal ->
     binary (expect_int location) Sbool (Oxsmt_context.le terms)
-  | `Greater ->
-    binary (expect_int location) Sbool (Oxsmt_context.gt terms)
+  | `Greater -> binary (expect_int location) Sbool (Oxsmt_context.gt terms)
   | `Greater_equal ->
     binary (expect_int location) Sbool (Oxsmt_context.ge terms)
-  | `Add -> binary (expect_int location) Sint (Oxsmt_context.add terms)
-  | `Subtract ->
-    binary (expect_int location) Sint (Oxsmt_context.sub terms)
-  | `Multiply ->
-    binary (expect_int location) Sint (oxsmt_multiply terms location)
+  | (`Add | `Subtract | `Multiply) as operation ->
+    begin match term_values, term_sorts with
+    | [left; right], [left_sort; right_sort] ->
+      expect_int location left_sort;
+      expect_sort location left_sort right_sort;
+      let term =
+        match operation with
+        | `Add -> Oxsmt_context.add terms left right
+        | `Subtract -> Oxsmt_context.sub terms left right
+        | `Multiply -> oxsmt_multiply terms location left right
+      in
+      term, left_sort
+    | _ -> error location "binary builtin used with the wrong arity"
+    end
+  | (`Bigint_add | `Bigint_sub | `Bigint_mul) as operation ->
+    begin match term_values, term_sorts with
+    | [left; right], [left_sort; right_sort] ->
+      expect_bigint location left_sort;
+      expect_sort location left_sort right_sort;
+      let term =
+        match operation with
+        | `Bigint_add -> Oxsmt_context.add terms left right
+        | `Bigint_sub -> Oxsmt_context.sub terms left right
+        | `Bigint_mul -> oxsmt_multiply terms location left right
+      in
+      term, Sbigint
+    | _ -> error location "Bigint arithmetic used with the wrong arity"
+    end
+  | `Bigint_neg ->
+    begin match term_values, term_sorts with
+    | [argument], [Sbigint] ->
+      ( Oxsmt_context.sub terms (Oxsmt_context.int_const terms 0) argument,
+        Sbigint )
+    | _ -> error location "Bigint.neg used with an inconsistent type"
+    end
+  | `Bigint_abs ->
+    begin match term_values, term_sorts with
+    | [argument], [Sbigint] ->
+      let zero = Oxsmt_context.int_const terms 0 in
+      ( Oxsmt_context.ite terms
+          (Oxsmt_context.lt terms argument zero)
+          (Oxsmt_context.sub terms zero argument)
+          argument,
+        Sbigint )
+    | _ -> error location "Bigint.abs used with an inconsistent type"
+    end
+  | `Bigint_compare ->
+    begin match term_values, term_sorts with
+    | [left; right], [Sbigint; Sbigint] ->
+      let zero = Oxsmt_context.int_const terms 0 in
+      let one = Oxsmt_context.int_const terms 1 in
+      ( Oxsmt_context.ite terms
+          (Oxsmt_context.lt terms left right)
+          (Oxsmt_context.sub terms zero one)
+          (Oxsmt_context.ite terms
+             (Oxsmt_context.gt terms left right)
+             one
+             zero),
+        Sint )
+    | _ -> error location "Bigint.compare used with an inconsistent type"
+    end
+  | `Bigint_lt ->
+    binary (expect_bigint location) Sbool (Oxsmt_context.lt terms)
+  | `Bigint_le ->
+    binary (expect_bigint location) Sbool (Oxsmt_context.le terms)
+  | `Bigint_gt ->
+    binary (expect_bigint location) Sbool (Oxsmt_context.gt terms)
+  | `Bigint_ge ->
+    binary (expect_bigint location) Sbool (Oxsmt_context.ge terms)
+  | `Bigint_of_int ->
+    begin match term_values, term_sorts with
+    | [argument], [Sint] -> argument, Sbigint
+    | _ -> error location "Bigint.of_int used with an inconsistent type"
+    end
+  | `Bigint_is_zero ->
+    begin match term_values, term_sorts with
+    | [argument], [Sbigint] ->
+      Oxsmt_context.eq terms argument (Oxsmt_context.int_const terms 0),
+      Sbool
+    | _ -> error location "Bigint.is_zero used with an inconsistent type"
+    end
+  | `Bigint_zero | `Bigint_one ->
+    error location "Bigint constant used as a function"
   | `And ->
     binary (expect_bool location) Sbool (fun left right ->
       Oxsmt_context.and_ terms [left; right])
@@ -1640,6 +1792,8 @@ let oxsmt_expression context environment expression =
       | Rexp_ident (Rfree reference_identifier) ->
         begin
           match builtin_name context reference_identifier with
+          | Some `Bigint_zero -> Oxsmt_context.int_const environment.terms 0
+          | Some `Bigint_one -> Oxsmt_context.int_const environment.terms 1
           | Some _ ->
             error expression.rexp_loc "builtin %s must be fully applied"
               (reference_basename reference_identifier)

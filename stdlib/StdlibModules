@@ -73,6 +73,7 @@ STDLIB_MODULE_BASENAMES = \
   buffer \
   camlinternalFormat \
   printf \
+  bigint \
   arg \
   printexc \
   fun \
