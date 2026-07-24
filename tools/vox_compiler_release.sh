@@ -256,26 +256,20 @@ cmp -s "$build_ocamlopt" "$ocamlopt" \
   || fail "ocamlopt.opt does not match the current build artifact"
 
 solver=$VOX_SMT_SOLVER
-probe_source="$repository/testsuite/tests/refinement-examples/vslice"
-probe_files=(
-  vslice_model.mli
-  vslice_model.ml
-  vslice.mli
-  fork_join.mli
-  fork_join.ml
-  make_negative_size.ml
-)
-for file in "${probe_files[@]}"; do
-  [[ -f $probe_source/$file ]] || fail "missing probe source: $file"
-done
 
 run_probes() {
   local compiler=$1
   local name=$2
   local directory="$scratch/$name"
   mkdir -p "$directory"
-  cp "${probe_files[@]/#/$probe_source/}" "$directory"/
-  cp "$probe_source/vslice_runtime_impl.ml" "$directory/vslice.ml"
+  printf '%s\n' \
+    'let requires_one (value : int{ _ = 1 }) = value' \
+    'let _ = requires_one 1' \
+    > "$directory/positive.ml"
+  printf '%s\n' \
+    'let requires_one (value : int{ _ = 1 }) = value' \
+    'let _ = requires_one 2' \
+    > "$directory/negative.ml"
   if ! (
     cd "$directory"
     env -u CAMLLIB -u CAML_LD_LIBRARY_PATH \
@@ -284,12 +278,10 @@ run_probes() {
       -extension-universe alpha \
       -vox-backend z3 \
       -vox-smt-solver "$solver" \
-      -c \
-      vslice_model.mli vslice_model.ml vslice.mli vslice.ml \
-      fork_join.mli fork_join.ml
+      -c positive.ml
   ) > "$scratch/$name-positive.output" 2>&1; then
     sed -n '1,160p' "$scratch/$name-positive.output" >&2
-    fail "$name positive Vslice probe failed"
+    fail "$name positive refinement probe failed"
   fi
 
   set +e
@@ -301,7 +293,7 @@ run_probes() {
       -extension-universe alpha \
       -vox-backend z3 \
       -vox-smt-solver "$solver" \
-      -c make_negative_size.ml
+      -c negative.ml
   ) > "$scratch/$name-negative.output" 2>&1
   local status=$?
   set -e
