@@ -45,3 +45,9 @@ val used : t -> int
 (** Zero [used] (the cap is unchanged). Called once per [check_sat] so the budget is
     per-check. *)
 val reset : t -> unit
+
+(** [with_cap t cap f] runs [f] with a temporary effort cap. If [t] already has a
+    configured cap, the effective cap is the smaller of that cap and [cap]. The original
+    cap is restored whether [f] returns or raises. The effort counter itself is untouched;
+    callers normally invoke a per-check {!reset} inside [f]. *)
+val with_cap : t -> int -> (unit -> 'a) -> 'a

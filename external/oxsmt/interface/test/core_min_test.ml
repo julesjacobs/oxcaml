@@ -93,6 +93,10 @@ let is_minimal_core session core =
 
 let set_linear on = Unix.putenv "OXSMT_CORE_MIN_LINEAR" (if on then "1" else "0")
 
+(* The property suite proves the full core contract and therefore runs with optional
+   effort limiting disabled. The dedicated section below exercises the production cap. *)
+let () = Unix.putenv "OXSMT_CORE_MIN_EFFORT_CAP" "0"
+
 (* ------------------------------------------------------------------ 1 + 2 + 3 --------- *)
 
 let property_case ~r ~seed =
@@ -270,6 +274,124 @@ let () =
   | Some core ->
     check_true (name ^ ": nonempty") (core <> []);
     check_true (name ^ ": sufficient + subset-minimal") (is_minimal_core s core)
+;;
+
+(* ------------------------------------------ per-deletion effort cap ------------------ *)
+
+let set_core_min_effort_cap on =
+  Unix.putenv "OXSMT_CORE_MIN_EFFORT_CAP" (if on then "1" else "0")
+;;
+
+let () =
+  let saved = Sys.getenv_opt "OXSMT_CORE_MIN_EFFORT_CAP" in
+  let saved_limit = Sys.getenv_opt "OXSMT_CORE_MIN_INITIAL_EFFORT_LIMIT" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_CORE_MIN_EFFORT_CAP" (Option.value ~default:"" saved);
+      Unix.putenv
+        "OXSMT_CORE_MIN_INITIAL_EFFORT_LIMIT"
+        (Option.value ~default:"" saved_limit))
+    (fun () ->
+      (* Easy probes remain below max(32, initial-effort), so the ordinary verified,
+         subset-minimal core is still returned. *)
+      set_core_min_effort_cap true;
+      let easy = Session.create () in
+      let mus, noise = build_gadget easy ~r:3 ~tag:"effcap_easy" in
+      let easy_result = Session.check_sat_assuming easy (mus @ noise) in
+      check_true "effort-cap/easy: verdict Unsat" (easy_result.verdict = Session.Unsat);
+      (match easy_result.unsat_core with
+       | None -> fail "effort-cap/easy" "expected verified core"
+       | Some core ->
+         check_true "effort-cap/easy: core = MUS" (List.length core = 2);
+         check_true "effort-cap/easy: subset-minimal" (is_minimal_core easy core));
+
+      (* An initial proof over the configured threshold skips optional minimization
+         without launching a deletion probe. The public Unsat verdict is already proved;
+         only the unavailable core is dropped. A fresh easy query under the normal
+         threshold below still returns its core, pinning that the skip is per-call. *)
+      Unix.putenv "OXSMT_CORE_MIN_INITIAL_EFFORT_LIMIT" "0";
+      let skipped = Session.create () in
+      let skipped_mus, skipped_noise = build_gadget skipped ~r:3 ~tag:"effcap_skip" in
+      let skipped_result =
+        Session.check_sat_assuming skipped (skipped_mus @ skipped_noise)
+      in
+      check_true "effort-cap/skip: verdict stays Unsat" (skipped_result.verdict = Session.Unsat);
+      check_true "effort-cap/skip: core is None" (skipped_result.unsat_core = None);
+      check_true "effort-cap/skip: only initial solve ran" (Session.minimize_probes skipped = 1);
+      check_true
+        "effort-cap/skip: diagnostic"
+        (String.equal
+           (Session.last_unknown_reason skipped)
+           "assumption-core-initial-effort-skip");
+      Unix.putenv "OXSMT_CORE_MIN_INITIAL_EFFORT_LIMIT" "9";
+      let after_skip = Session.create () in
+      let after_mus, after_noise = build_gadget after_skip ~r:3 ~tag:"effcap_after_skip" in
+      let after_result = Session.check_sat_assuming after_skip (after_mus @ after_noise) in
+      check_true "effort-cap/skip-restore: verdict Unsat" (after_result.verdict = Session.Unsat);
+      check_true
+        "effort-cap/skip-restore: verified core"
+        (Option.is_some after_result.unsat_core);
+
+      (* The assumption [a] contradicts a root fact, so the initial Unsat costs almost
+         nothing. Deleting [a] exposes 160 independent satisfiable clauses and exceeds the
+         floor cap of 32. Only core extraction degrades: the established verdict remains
+         Unsat. Disabling the cap and repeating the SAME query must then return its
+         verified singleton core, proving the temporary Budget cap did not leak. *)
+      let hard = Session.create () in
+      let ctx = Session.context hard in
+      let a = bool_atom hard "effcap_hard_a" in
+      Session.assert_term hard (Context.not_ ctx a);
+      for i = 0 to 159 do
+        let x = bool_atom hard (Printf.sprintf "effcap_hard_x_%d" i) in
+        let y = bool_atom hard (Printf.sprintf "effcap_hard_y_%d" i) in
+        Session.assert_term hard (Context.or_ ctx [ x; y ])
+      done;
+      let first = Session.check_sat_assuming hard [ a, true ] in
+      check_true "effort-cap/hard: verdict stays Unsat" (first.verdict = Session.Unsat);
+      check_true "effort-cap/hard: core degrades to None" (first.unsat_core = None);
+      check_true
+        "effort-cap/hard: minimize diagnostic"
+        (String.equal
+           (Session.last_unknown_reason hard)
+           "assumption-core-minimize-unknown");
+      check_true "effort-cap/hard: cap fired" (Session.effort_exhausted hard);
+      set_core_min_effort_cap false;
+      let repeated = Session.check_sat_assuming hard [ a, true ] in
+      check_true "effort-cap/restore: repeated verdict Unsat" (repeated.verdict = Session.Unsat);
+      check_true
+        "effort-cap/restore: repeated core available"
+        (match repeated.unsat_core with
+         | Some [ (atom, true) ] -> Term.equal atom a
+         | Some _ | None -> false);
+      check_true "effort-cap/restore: no exhaustion" (not (Session.effort_exhausted hard));
+
+      (* A user-configured cap remains authoritative when the derived cap is larger.
+         With initial effort near zero the derived floor is 32, and max_effort=16 must
+         stop the deletion probe at tick 17. Turning the core cap off and repeating the
+         query must still stop at 17, covering restoration of a strictly tighter existing
+         [Some] cap rather than accidentally reusing the temporary derived cap. *)
+      set_core_min_effort_cap true;
+      let user_capped = Session.create ~max_effort:16 () in
+      let user_ctx = Session.context user_capped in
+      let ua = bool_atom user_capped "effcap_user_a" in
+      Session.assert_term user_capped (Context.not_ user_ctx ua);
+      for i = 0 to 159 do
+        let x = bool_atom user_capped (Printf.sprintf "effcap_user_x_%d" i) in
+        let y = bool_atom user_capped (Printf.sprintf "effcap_user_y_%d" i) in
+        Session.assert_term user_capped (Context.or_ user_ctx [ x; y ])
+      done;
+      let capped = Session.check_sat_assuming user_capped [ ua, true ] in
+      check_true "effort-cap/user: verdict stays Unsat" (capped.verdict = Session.Unsat);
+      check_true "effort-cap/user: core degrades to None" (capped.unsat_core = None);
+      check_true "effort-cap/user: configured cap is tighter" (Session.effort user_capped = 17);
+      set_core_min_effort_cap false;
+      let user_repeat = Session.check_sat_assuming user_capped [ ua, true ] in
+      check_true
+        "effort-cap/user-restore: repeated verdict Unsat"
+        (user_repeat.verdict = Session.Unsat);
+      check_true
+        "effort-cap/user-restore: configured cap still fires"
+        (user_repeat.unsat_core = None && Session.effort user_capped = 17))
 ;;
 
 (* ------------------------------------------ multi-MUS (review rider 1)

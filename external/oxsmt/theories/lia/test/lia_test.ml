@@ -1841,6 +1841,50 @@ let test_h6_false_frames_checkpoint () =
     (Lia.check fx2.solver = Lia.Sat_candidate)
 ;;
 
+(* A [model_find] snapshot covers both the asserted bounds and the problem-variable
+   domain. Lazy interface disequality handling can internalize a previously unseen leaf
+   without asserting a bound; that domain growth must invalidate the snapshot. *)
+let test_modelfind_domain_growth () =
+  let fx = make_fixture 2 in
+  (* 2*x0 >= 1 and x0 <= 1 has the fractional LP vertex x0=1/2 and the integer model
+     x0=1, so [model_find] records a nontrivial integral snapshot. x1 remains unseen. *)
+  ignore (assert_le fx [ 0, 2 ] 0 ~polarity:false);
+  ignore (assert_le fx [ 0, 1 ] (-1) ~polarity:true);
+  check
+    "model-domain: rational constraints are feasible"
+    (Lia.check fx.solver = Lia.Sat_candidate);
+  check "model-domain: model_find records an integer model" (Lia.model_find fx.solver);
+  let before = Lia.model_bigint fx.solver in
+  check
+    "model-domain: cached model initially omits unseen x1"
+    (not (List.exists (fun (tm, _) -> Term.equal tm fx.vars.(1)) before));
+  let pivots_before_internalize = Lia.pivot_count fx.solver in
+  Lia.internalize_term fx.solver fx.vars.(1);
+  let after = Lia.model_bigint fx.solver in
+  check
+    "model-domain: internalization invalidates cache and includes x1"
+    (List.exists (fun (tm, _) -> Term.equal tm fx.vars.(1)) after);
+  check
+    "model-domain: re-derived model preserves x0=1"
+    (match List.find_opt (fun (tm, _) -> Term.equal tm fx.vars.(0)) after with
+     | Some (_, value) -> Bigint.equal value Bigint.one
+     | None -> false);
+  check
+    "model-domain: cache extension does not re-run the model finder"
+    (Lia.pivot_count fx.solver = pivots_before_internalize);
+  (* A subsequent real bound mutation must invalidate the zero extension. *)
+  ignore (assert_le fx [ 1, -1 ] 2 ~polarity:true);
+  check
+    "model-domain: subsequent x1>=2 bound remains feasible"
+    (Lia.check fx.solver = Lia.Sat_candidate);
+  let bounded = Lia.model_bigint fx.solver in
+  check
+    "model-domain: asserted bound invalidates zero and re-derives x1>=2"
+    (match List.find_opt (fun (tm, _) -> Term.equal tm fx.vars.(1)) bounded with
+     | Some (_, value) -> Bigint.compare value (Bigint.of_int 2) >= 0
+     | None -> false)
+;;
+
 let () =
   print_endline "lia self-test:";
   test_rational ();
@@ -1860,6 +1904,7 @@ let () =
   test_determinism_big ();
   test_notify_equality ();
   test_h6_false_frames_checkpoint ();
+  test_modelfind_domain_growth ();
   test_diophantine ();
   test_hnf_cut ();
   test_cg_cut ();

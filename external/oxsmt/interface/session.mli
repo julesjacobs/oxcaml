@@ -95,11 +95,48 @@ type verdict =
 type assumption = Oxsmt_core.Term.t * bool
 
 (** The result of {!check_sat_assuming}. [unsat_core] is [Some core] on [verdict = Unsat]
-    UNLESS core extraction degraded, in which case it is [None] (see {!check_sat_assuming}
-    for the verdict-first degradation contract); it is [None] on [Sat] and [Unknown]. *)
+    unless post-verdict core extraction is unavailable: minimization/replay may exhaust
+    its effort cap, an expensive initial proof may skip that optional work, or the dark
+    assumption-guided preprocessing may intentionally perform a verdict-only solve. In each
+    case the proved verdict remains [Unsat] and [unsat_core] is [None] (see
+    {!check_sat_assuming} for the verdict-first contract and diagnostic tags).
+    [unsat_core] is also [None] on [Sat] and [Unknown]. *)
 type assumption_check =
   { verdict : verdict
   ; unsat_core : assumption list option
+  }
+
+(** Diagnostic phase attribution for the most recent nonempty
+    {!check_sat_assuming}. CPU times and effort counters are populated only when
+    [OXSMT_ASSUMPTION_PROFILE=1] (also accepts [true] or [yes]); otherwise every field is
+    zero. This record is observational and is never consulted by solver decisions. *)
+type assumption_profile =
+  { prepare_cpu_s : float
+  ; initial_cpu_s : float
+  ; deletion_cpu_s : float
+  ; replay_cpu_s : float
+  ; initial_effort : int
+  ; deletion_effort : int
+  ; replay_effort : int
+  ; initial_decisions : int
+  ; deletion_decisions : int
+  ; replay_decisions : int
+  ; initial_conflicts : int
+  ; deletion_conflicts : int
+  ; replay_conflicts : int
+  ; deletion_probes : int
+  ; deletion_sat : int
+  ; deletion_unsat : int
+  ; deletion_unknown : int
+  ; initial_core_size : int
+  ; final_core_size : int
+  }
+
+(** Cumulative known-constructor datatype reductions performed in this session by the
+    production reducer or the test-only reducer hook. *)
+type dt_ground_simplify_stats =
+  { tester_folds : int
+  ; selector_folds : int
   }
 
 (** A model value / table cell (re-exported from {!Cdclt}). [VUninterp i] is a 0-based
@@ -408,15 +445,22 @@ val nia_refine : t -> bool
     assumption. The initial candidate comes from the SAT core's failed assumptions and is
     then deletion-minimized.
 
-    {b Verdict-first degradation.} The initial solve establishes the [Unsat] verdict
-    through a completed solve; the verdict is therefore never downgraded below what
-    {!check_sat} would report. If core extraction degrades — a deletion probe or the final
-    replay cannot be certified [Sat]/[Unsat], or the replay unexpectedly returns [Sat] (an
-    inconsistent core the implementation refuses to publish) — the call returns
-    [verdict = Unsat] with [unsat_core = None] and sets {!last_unknown_reason} to a
-    diagnostic tag (["assumption-core-recheck-sat"], ["assumption-core-recheck-unknown"],
-    or ["assumption-core-minimize-unknown"]). [unsat_core = None] on [Unsat] thus means
-    "no verified core available", not "no core".
+    {b Verdict-first core availability.} The initial solve establishes the [Unsat]
+    verdict through a completed solve; the verdict is therefore never downgraded below
+    what {!check_sat} would report. Core extraction is optional post-verdict work. It is
+    skipped when the initial proof exceeds the configured effort threshold, and a
+    deletion probe or final replay may independently exhaust its bounded effort or fail
+    certification. The dark [OXSMT_ASSUMPTION_PREPROCESS=1] one-shot preprocessing
+    also deliberately returns no core: its guarded pre-CNF rewrite proves only the
+    verdict and sets the diagnostic to ["assumption-preprocess-no-core"]. The call
+    returns [verdict = Unsat] with [unsat_core = None] and
+    sets {!last_unknown_reason} to ["assumption-core-initial-effort-skip"],
+    ["assumption-core-recheck-sat"], ["assumption-core-recheck-unknown"], or
+    ["assumption-core-minimize-unknown"], as appropriate. [unsat_core = None] on [Unsat]
+    thus means "no verified core available", not "no core". A core-guided consumer such
+    as {!Optimize.max_smt} consequently returns [Optimize.Unknown] when this policy
+    withholds a core: the default trades optimization completeness for bounded
+    post-verdict core effort, without changing satisfiability verdict completeness.
 
     This entry point is additive: ordinary {!check_sat} does not consult assumption state
     and retains its existing search path. Nonempty assumption queries currently decline
@@ -442,12 +486,13 @@ val get_model : t -> model option
     {!check_sat_assuming} returned [Unknown] (e.g. ["r1-model-check-failed"],
     ["effort-budget"], ["lemma-saturated"], ["combine-incomplete-solve"]). Also set, with
     the last verdict [Unsat], when {!check_sat_assuming} certified unsatisfiability but
-    could not publish a verified core (the verdict-first degradation tags
-    ["assumption-core-recheck-sat"] / ["assumption-core-recheck-unknown"] /
-    ["assumption-core-minimize-unknown"]) — the channel a consumer reads to learn why
-    [unsat_core] is [None] under an [Unsat] verdict. Empty string otherwise. Diagnostic
-    introspection only — the solver never reads it, so it cannot influence a verdict; the
-    dev CLI surfaces it unconditionally on stderr to bucket structural unknowns by cause. *)
+    could not publish a verified core (the verdict-first tags
+    ["assumption-core-initial-effort-skip"] / ["assumption-core-recheck-sat"] /
+    ["assumption-core-recheck-unknown"] / ["assumption-core-minimize-unknown"]) — the
+    channel a consumer reads to learn why [unsat_core] is [None] under an [Unsat]
+    verdict. Empty string otherwise. Diagnostic introspection only — the solver never
+    reads it, so it cannot influence a verdict; the dev CLI surfaces it unconditionally
+    on stderr to bucket structural unknowns by cause. *)
 val last_unknown_reason : t -> string
 
 (** {2 Certificate emission (ADR-0013)}
@@ -579,6 +624,11 @@ val stats : t -> Oxsmt_solver.Sat.Stats.t
     (determinism/perf stat). *)
 val splits : t -> int
 
+(** Fabric edges the DT+LIA combinator injected/notified this session (Stage C mechanism-I
+    engagement probe; >0 iff in-search DT/LIA congruence propagation fired under
+    [OXSMT_COMBINE_INSEARCH]). 0 on the classic path / non-DT+LIA stacks. *)
+val fabric_edges_injected : t -> int
+
 (** Incremental re-solves the most recent {!check_sat_assuming} spent minimizing its
     assumption core: the initial assumption solve, every deletion/refinement probe, and
     the final core replay. [0] after a call that never reached minimization (empty
@@ -587,6 +637,12 @@ val splits : t -> int
     exposed so the core-min property test and benchmark can compare the linear and
     clause-set-refinement strategies (see [OXSMT_CORE_MIN_LINEAR]). *)
 val minimize_probes : t -> int
+
+(** Phase profile for the most recent nonempty assumption query. See
+    {!assumption_profile}. *)
+val assumption_profile : t -> assumption_profile
+
+val dt_ground_simplify_stats : t -> dt_ground_simplify_stats
 
 (** [true] iff the most recent {!check_sat} or {!check_sat_assuming} degraded to [Unknown]
     by exhausting the split budget (the distinct split-budget stat; the query is otherwise
@@ -600,10 +656,16 @@ val budget_exhausted : t -> bool
     any {!check_sat}. *)
 val effort : t -> int
 
-(** [true] iff the most recent {!check_sat} or {!check_sat_assuming} returned [Unknown]
-    because the {!create} [max_effort] cap fired (the BUDGET tag). Unlike
-    {!budget_exhausted} this is NOT sticky and does not degrade the session — the same
-    query is re-runnable at a larger cap. *)
+(** [true] iff an effort cap fired during the most recent {!check_sat} or
+    {!check_sat_assuming}. Ordinarily that makes the public verdict [Unknown]. A bounded
+    core-extraction run may instead have already established [Unsat] in its
+    initial solve, then hit the cap during deletion or replay; that call keeps verdict
+    [Unsat], returns [unsat_core = None], and also leaves this flag [true]. Effort caps are
+    per-check and poison-free: a later call runs again from a clean counter and the
+    session's configured {!create} [max_effort] remains in force. An initial-proof
+    threshold skip also returns [Unsat] with [unsat_core = None], but does not fire an
+    effort cap; distinguish it by {!last_unknown_reason} =
+    ["assumption-core-initial-effort-skip"]. *)
 val effort_exhausted : t -> bool
 
 (** Lemma-tier instantiation stats (ADR-0012 §O4), distinct from {!splits}: [live_lemmas]
@@ -633,7 +695,7 @@ type instantiation =
     produced it (a budget-aborted round's instances are absent). *)
 val lemma_instantiations : t -> instantiation list
 
-(** Backstop hit counter (LAND 67, task #31): the number of times [complete_dt_bool_atoms]
+(** Backstop hit counter (LAND 71, task #31): the number of times [complete_dt_bool_atoms]
     has actually bound >= 1 missing Bool atom. Byte-id invisible; a whitebox probe so a
     later stage can assert the DT Bool-completion backstop still fires on the fabric path.
     Process-global, monotone. *)
@@ -646,6 +708,9 @@ module For_test : sig
       it fails closed on a datatype sort — a datatype has no scalar default, so it must
       raise rather than fabricate [VUninterp 0] (the silent wrong-value class, codex). *)
   val default_value : Oxsmt_core.Sort.t -> model_value
+
+  (** Apply the known-constructor datatype reducer irrespective of its production gate. *)
+  val simplify_known_datatypes : t -> Oxsmt_core.Term.t -> Oxsmt_core.Term.t
 
   (** Substitute (or, with [None], restore) the DT model self-checker that {!check_sat}'s
       commit consults for a datatype [Sat] (GOALS Datatypes). Exposed ONLY to pin the

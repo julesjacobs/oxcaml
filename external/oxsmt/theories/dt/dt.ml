@@ -117,8 +117,23 @@ type t =
       (* Cached {!build_witnesses} result, or [None] when invalidated. Always [None] when
          [incr_on] is false. *)
   ; mutable occurs_cache : prem list option option
-  (* Cached {!occurs_check} result (outer option = cache validity, inner = the
-     conflict-or-none the check returns), invalidated in lockstep with [witness_cache]. *)
+      (* Cached {!occurs_check} result (outer option = cache validity, inner = the
+         conflict-or-none the check returns), invalidated in lockstep with
+         [witness_cache]. *)
+  ; mutable predicates_maybe_stale : bool
+      (* R4 (completeness parity, mirrors {!Euf_adapter}): set by [pop] /
+         [rewind_to_checkpoint]; a [pop] may have restored a bound predicate watch's
+         TRAILED [w_reported] to a value snapshotted while the predicate was unbound (or
+         bound in a since-popped frame), so the engine will not re-report a
+         currently-entailed truth to the still-bound atom (the late-binding recurrence,
+         #161). Cleared by the next fabric [check]'s one-pass re-arm. *)
+  ; mutable fabric_merges_on : bool
+  (* R4 byte-id guard: [true] only after the combinator enables merge recording via
+     {!set_record_merges} — i.e. only when the DT+LIA fabric drive is live
+     ([OXSMT_COMBINE_INSEARCH]). The predicate-watch re-arm is gated on this so the
+     classic (fabric-disabled) path is byte-identical to trunk by CONSTRUCTION: the re-arm
+     code is never reached OFF. DT's own [OXSMT_DT_INCR] cursor enables recording via
+     [Euf] directly (not this adapter forward), so it does not flip this flag. *)
   }
 
 let max_iters = 1_000_000
@@ -164,6 +179,8 @@ let create ctx _env reg =
   ; merge_cursor
   ; witness_cache = None
   ; occurs_cache = None
+  ; predicates_maybe_stale = false
+  ; fabric_merges_on = false
   }
 ;;
 
@@ -505,10 +522,33 @@ let constructor_clash_for_premises t premises =
             with
             | Some (cdt, _), Some (wdt, _)
               when Symbol.equal cdt.Defs.sort_sym wdt.Defs.sort_sym ->
-              let explained =
-                dedup_lits (lits_of_prems (Euf.explain t.engine cterm wterm))
-              in
-              if List.equal Lit.equal explained premises then result := Some (cterm, wterm)
+              (* R5 (fabric-safe): under [OXSMT_COMBINE_INSEARCH] the explanation chain
+                 can bury an injected fabric edge ([Fabric.Fabric]); flattening it with
+                 [lits_of_prems] would RAISE (frozen-path loud-fail). Route through fabric
+                 currency and DEGRADE: a fabric-edge-involved clash is simply not
+                 cert-labeled (sound — the UNSAT is still valid, only the DT-distinctness
+                 certificate label is skipped), so leave [result] unset for it. Byte-id
+                 OFF: with no fabric edge every justification is [Real], [dedup_justs]
+                 dedups in first-occurrence order exactly as [dedup_lits], and the
+                 mapped-back literal list is identical to the old
+                 [dedup_lits (lits_of_prems …)]. *)
+              let js = dedup_justs (justs_of_prems (Euf.explain t.engine cterm wterm)) in
+              if not
+                   (List.exists
+                      (function
+                        | Fabric.Fabric _ -> true
+                        | Fabric.Real _ -> false)
+                      js)
+              then (
+                let explained =
+                  List.map
+                    (function
+                      | Fabric.Real l -> l
+                      | Fabric.Fabric _ -> assert false)
+                    js
+                in
+                if List.equal Lit.equal explained premises
+                then result := Some (cterm, wterm))
             | Some _, Some _ | None, _ | _, None -> ())
           else if cterm.Term.tag < wterm.Term.tag
           then Hashtbl.replace witnesses k cterm))
@@ -786,6 +826,28 @@ let collect_propagations t : Lit.t list =
     (Euf.propagate t.engine)
 ;;
 
+(* R4 (mirrors {!Euf_adapter.stale_bound_predicate}): a bound predicate ([K_bool]) watch
+   whose currently-entailed truth is NOT live on the trail for its atom (no cached
+   propagation in either polarity). After a [pop]/[rewind] restored such a watch's trailed
+   [w_reported], the engine will not re-report — but the atom binding survives
+   ([t.watched] is MONOTONE, not trailed), so the propagation was lost again (the
+   late-binding recurrence, #161). Re-arming lets the next [propagate] recompute the
+   truth: it re-reports if still entailed, nothing if the entailing merge was itself
+   popped (idempotent — a re-arm never fabricates a propagation). Only predicate watches
+   recur this way: an [Eq] atom is bound at [register_atom] BEFORE any report, so its
+   [w_reported] restoration always tracks its entailing merge. *)
+let stale_bound_predicate t term =
+  match Term.Table.find_opt t.watched term with
+  | None -> false
+  | Some atom ->
+    (match Atom.Table.find_opt t.atoms atom with
+     | Some { kind = K_bool; _ } ->
+       not
+         (Lit.Map.mem (Lit.make atom true) t.explain_cache
+          || Lit.Map.mem (Lit.make atom false) t.explain_cache)
+     | Some { kind = K_eq _ | K_foreign; _ } | None -> false)
+;;
+
 (* Propagate split-relevance through constructor fields, to a fixpoint: if a
    split-relevant class has a constructor witness [C (a1..an)], its datatype-sorted fields
    become split-relevant too. Without this, a bounded-enum FIELD pigeonhole
@@ -871,9 +933,25 @@ let fabric_conflict_of prems : Fabric.check_result =
     { Fabric.Explanation.premises; rule = Explanation.Rule_tag.Euf_congruence }
 ;;
 
+(* R4 pop-recovery for the predicate late-binding recurrence (#161): one O(#watches)
+   re-arm of the bound predicate watches a [pop]/[rewind] may have left stale, gated by
+   both the [pop]-set flag AND [fabric_merges_on] so the classic (fabric-disabled) path
+   never reaches it (byte-id OFF by construction). It only dirties endpoints (no
+   merge/separate), so the conflict scan is unaffected and re-armed truths are picked up
+   by [Euf.propagate] / [collect_propagations]. Mirrors {!Euf_adapter.check_fabric}'s
+   re-arm. *)
+let rearm_stale_predicates t =
+  if t.predicates_maybe_stale && t.fabric_merges_on
+  then (
+    Euf.rearm_watches_if t.engine (fun term -> stale_bound_predicate t term);
+    t.predicates_maybe_stale <- false)
+;;
+
 (* FROZEN classic-path [check]. Kept EXACTLY as before the surgery (the OFF path the
-   CDCL(T) seam drives): standalone Theory currency, [conflict_of], Theory results. *)
+   CDCL(T) seam drives): standalone Theory currency, [conflict_of], Theory results. The R4
+   re-arm is a guaranteed no-op here ([fabric_merges_on] is false OFF), so byte-identical. *)
 let check t effort =
+  rearm_stale_predicates t;
   match saturate t with
   | Some prems -> conflict_of prems
   | None ->
@@ -900,6 +978,7 @@ let check t effort =
    in Stage B ([Dtlia_router.fabric_disabled]); {!collect_propagations} returns the same
    literals (its cache is now fabric currency). *)
 let check_fabric t effort : Fabric.check_result =
+  rearm_stale_predicates t;
   match saturate t with
   | Some prems -> fabric_conflict_of prems
   | None ->
@@ -965,6 +1044,11 @@ let pop t n =
      subsequent [sync_merges] will not see the popped-frame merges — the explicit
      invalidation here is load-bearing (RED-verified). *)
   if incr_on then invalidate_incr t;
+  (* R4: a [pop] may have restored a bound predicate watch's trailed [w_reported] to a
+     stale value while its atom binding survives (monotone [t.watched]); flag the next
+     fabric [check] to re-arm (mirrors {!Euf_adapter.pop}). Gated by [fabric_merges_on] at
+     the re-arm site, so this is inert on the classic path. *)
+  t.predicates_maybe_stale <- true;
   let rec drop k frames =
     if k = 0
     then frames
@@ -1021,7 +1105,13 @@ let fabric_explain_eq t a b = dedup_justs (justs_of_prems (Euf.explain t.engine 
    [OXSMT_DT_INCR] cursor. *)
 type merge_cursor = Euf.merge_cursor
 
-let set_record_merges t on = Euf.set_record_merges t.engine on
+let set_record_merges t on =
+  (* R4 byte-id guard: the combinator only calls this when the DT+LIA fabric drive is
+     live, so track it to gate the predicate-watch re-arm (OFF path never flips this). *)
+  t.fabric_merges_on <- on;
+  Euf.set_record_merges t.engine on
+;;
+
 let add_merge_consumer t = Euf.add_merge_consumer t.engine
 let drain_merges t c = Euf.drain_merges t.engine c
 let set_class_tag t term tag = Euf.set_class_tag t.engine term tag
@@ -1060,6 +1150,9 @@ let checkpoint t =
 let rewind_to_checkpoint t c =
   Euf.rewind_to_checkpoint t.engine c.a_engine;
   if incr_on then invalidate_incr t;
+  (* R4: a rewind retracts merges like [pop]; flag the next fabric [check] to re-arm bound
+     predicate watches (gated by [fabric_merges_on], inert on the classic path). *)
+  t.predicates_maybe_stale <- true;
   (match t.frames with
    | [ fr ] ->
      let rec drop k fr =

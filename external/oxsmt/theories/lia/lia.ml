@@ -142,13 +142,13 @@ type 'tok t =
          (FIX #3a). A [Conflict] leaves it set, so the next [check] re-runs. *)
   ; mutable overflows : int (* number of overflow-degradations to unknown *)
   ; mutable bound_gen : int
-      (* monotone counter of ASSERTION-SET mutations: bumped by [assert_atom] and [pop]
-         (the ops that add/remove a simplex bound the model must satisfy), NOT by [check]
+      (* monotone counter of MODEL-VALIDITY mutations: bumped by [assert_atom]/[pop]
+         (bounds changed) and by [problem_var] when the model domain grows, NOT by [check]
          (a read-only re-certification). Keys {!last_modelfind_model}'s durability across
          the combinator's multi-call Nelson-Oppen model assembly. [model_find]'s own
          internal push/assert/pop go through the RAW {!Simplex} ops (not the [Lia]-level
          wrappers), so a dive never bumps this — the snapshot recorded at capture equals
-         the live external generation, and stays equal until a real [assert_atom]/[pop]. *)
+         the live external generation, and stays equal until a bound or domain mutation. *)
   ; mutable last_cube_model : (Term.t * int) list option
       (* set by [cube_model] when the Bromberger-Fleury cube test found an integer model
          at the current Final; read once by [model] (the adapter reads it immediately
@@ -167,9 +167,9 @@ type 'tok t =
          stash-cleared [model_bigint] then read the popped, non-integral live LP vertex
          and fail-closed to [unknown]). Validity is instead keyed to [bound_gen]: served
          by [model_bigint] only when [last_modelfind_gen = bound_gen], so a genuine
-         [assert_atom]/[pop] (which bumps [bound_gen]) drops it, but a bare [check] keeps
-         it. A served model is still R1-re-checked by {!Session}, so a stale serve can
-         only degrade to [unknown], never a wrong [sat]. *)
+         bound/domain mutation drops it, but a bare [check] keeps it. A served model is
+         still R1-re-checked by {!Session}, so a stale serve can only degrade to
+         [unknown], never a wrong [sat]. *)
   ; mutable last_modelfind_gen : int
       (* the [bound_gen] snapshot at which [last_modelfind_model] was captured; see there. *)
   ; mutable pin_hint : (Term.t * Term.t) list
@@ -350,6 +350,11 @@ let problem_var t (term : Term.t) =
     let id = Simplex.new_problem_var t.simplex in
     Term.Table.replace t.var_of_term term id;
     Dynarray.add_last t.problem_vars (id, term);
+    (* A cached model is also a snapshot of the problem-variable DOMAIN. In particular,
+       lazy interface disequality internalization can reach this path without asserting
+       a bound. Advance the generation so [model_bigint] re-derives or extends the model
+       instead of serving a list that omits [term]. *)
+    t.bound_gen <- t.bound_gen + 1;
     if equality_propagation_on && t.pending_equalities <> []
     then t.pending_equalities_dirty <- true;
     id
@@ -375,6 +380,52 @@ let combo_of_term t (term : Term.t) : (int * Rational.t) list * Rational.t =
   | Int_const k -> [], Rational.of_bigint k
   | Ite _ -> raise (Unsupported "LIA: Int-Ite must be removed by preprocessing")
   | _ -> [ problem_var t term, Rational.one ], Rational.zero
+;;
+
+let internalize_term t term =
+  ensure_live t;
+  let generation_before = t.bound_gen in
+  let problem_vars_before = Dynarray.length t.problem_vars in
+  let current_modelfind_model =
+    match t.last_modelfind_model with
+    | Some model when t.last_modelfind_gen = generation_before -> Some model
+    | Some _ | None -> None
+  in
+  let current_cube_model = t.last_cube_model in
+  ignore (combo_of_term t term : (int * Rational.t) list * Rational.t);
+  let problem_vars_after = Dynarray.length t.problem_vars in
+  if problem_vars_after > problem_vars_before
+  then (
+    (* This API only creates bare problem variables: [combo_of_term] does not call
+       [var_for_combo] and asserts no bound. Each fresh simplex variable therefore has
+       its initial unconstrained value 0, so a current cached model can be extended with
+       zero rather than discarded and expensively re-derived. General allocation still
+       advances [bound_gen] in [problem_var]; we re-stamp only caches proven current at
+       entry and only for this no-bound API. A later [assert_atom] advances the generation
+       again and invalidates the extension normally. *)
+    let new_terms =
+      List.init
+        (problem_vars_after - problem_vars_before)
+        (fun offset -> snd (Dynarray.get t.problem_vars (problem_vars_before + offset)))
+    in
+    (match current_modelfind_model with
+     | Some model ->
+       t.last_modelfind_model
+       <- Some
+            (List.fold_left
+               (fun acc fresh -> (fresh, Oxsmt_core.Bigint.zero) :: acc)
+               model
+               new_terms
+             |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag));
+       t.last_modelfind_gen <- t.bound_gen
+     | None -> ());
+    match current_cube_model with
+    | Some model ->
+      t.last_cube_model
+      <- Some
+           (List.fold_left (fun acc fresh -> (fresh, 0) :: acc) model new_terms
+            |> List.sort (fun (a, _) (b, _) -> Int.compare a.Term.tag b.Term.tag))
+    | None -> ())
 ;;
 
 (* Return [pairs] itself when it is already in the canonical order. [combo_of_term] visits
@@ -932,8 +983,8 @@ let check t =
      clear it here so a later (non-cube) Sat can never read a stale point. The
      [model_find] stash is deliberately NOT cleared here: [check] does not change the
      asserted atom set, so a captured integral model stays valid across a re-certifying
-     [check]. Its durability is instead keyed to [bound_gen] (bumped only by
-     [assert_atom]/[pop]); clearing it here was the one-window contract bug that
+     [check]. Its durability is instead keyed to [bound_gen] (bumped by bound/domain
+     mutations); clearing it here was the one-window contract bug that
      fail-closed the combinator's later [model_bigint] to [unknown]. See
      [last_modelfind_model]. *)
   t.last_cube_model <- None;
@@ -2460,8 +2511,8 @@ let model_find ?(node_budget = 200_000) ?(backtrack = false) ?stall t =
     t.last_modelfind_model <- Some m;
     (* Stamp the stash with the CURRENT generation. The dive's own bounds were
        pushed/popped through the raw {!Simplex} ops (never [assert_atom]/[pop]), so
-       [bound_gen] is exactly the external assertion generation this model satisfies;
-       [model_bigint] serves it until a real [assert_atom]/[pop] bumps past it. *)
+       [bound_gen] is exactly the external bound/domain generation this model satisfies;
+       [model_bigint] serves it until a real mutation bumps past it. *)
     t.last_modelfind_gen <- t.bound_gen;
     true
   | `Fail -> false

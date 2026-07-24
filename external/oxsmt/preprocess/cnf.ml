@@ -63,9 +63,14 @@ let connective_children (t : Term.t) =
     invalid_arg "Cnf: connective_children on a non-connective"
 ;;
 
-let clausify (formula : Term.t) =
-  if not (Sort.equal formula.sort Sort.bool)
-  then invalid_arg "Cnf.clausify: formula must be Bool-sorted";
+let clausify_clauses (input_clauses : Term.t list list) =
+  if List.is_empty input_clauses || List.exists List.is_empty input_clauses
+  then invalid_arg "Cnf.clausify_clauses: clauses must be non-empty";
+  List.iter
+    (List.iter (fun (formula : Term.t) ->
+       if not (Sort.equal formula.sort Sort.bool)
+       then invalid_arg "Cnf.clausify_clauses: every literal must be Bool-sorted"))
+    input_clauses;
   (* ---- Phase A: collect var-needing nodes, number them by tag. ---- *)
   let seen : unit Term.Table.t = Term.Table.create 256 in
   let var_nodes = ref [] in
@@ -83,12 +88,17 @@ let clausify (formula : Term.t) =
           var_nodes := t :: !var_nodes;
           List.iter collect (connective_children t)))
   in
-  collect formula;
+  List.iter (List.iter collect) input_clauses;
   let ordered =
     List.sort (fun a b -> Int.compare a.Term.tag b.Term.tag) !var_nodes |> Array.of_list
   in
   let num_vars = Array.length ordered in
-  let subterm = Array.make (num_vars + 1) formula in
+  let placeholder =
+    match input_clauses with
+    | (formula :: _) :: _ -> formula
+    | _ -> assert false
+  in
+  let subterm = Array.make (num_vars + 1) placeholder in
   let is_atom = Array.make (num_vars + 1) false in
   let var_of_atom = Term.Table.create 256 in
   let var_of_node = Term.Table.create 256 in
@@ -172,9 +182,11 @@ let clausify (formula : Term.t) =
            (* not reachable: non-atoms are exactly And/Or/Eq(bool)/Ite; Not has no var *)
            invalid_arg "Cnf.clausify: unexpected non-connective in phase B"))
     ordered;
-  emit [ lit_of formula ];
+  List.iter (fun clause -> emit (map_lr lit_of clause)) input_clauses;
   { num_vars; clauses = List.rev !clauses; subterm; is_atom; var_of_atom }
 ;;
+
+let clausify formula = clausify_clauses [ [ formula ] ]
 
 let num_vars t = t.num_vars
 let clauses t = t.clauses

@@ -924,6 +924,13 @@ let cache_test_environment =
     "VOX_OXSMT_LEGACY_EXTERNAL";
     "VOX_SOLVER_CACHE_MAX_BYTES";
     "VOX_LEAN";
+    "OXSMT_ASSUMPTION_PREPROCESS";
+    "OXSMT_LAZY_INTERFACE_DISEQ";
+    "OXSMT_BINARY_INTERFACE_EQ";
+    "OXSMT_COMBINE_INSEARCH";
+    "OXSMT_DIRECT_TERM_ITE";
+    "OXSMT_ASSUMPTION_FAST_COMPLEMENTS";
+    "OXSMT_ASSUMPTION_PREPROCESS_PROPFOLD";
     "PATH";
   ]
 
@@ -1370,6 +1377,39 @@ let () =
         Vox_backend.Oxsmt_backend.cache_key ~command:None
           (oxsmt_obligation (Some "unused custom text b"))
       in
-      assert (oxsmt_key_a = oxsmt_key_b));
+      assert (oxsmt_key_a = oxsmt_key_b);
+      assert
+        (match oxsmt_key_a with
+         | Some key ->
+           string_contains
+             ~needle:"6f5684adda41769ce0be064ea40e1fead979df6c"
+             key
+         | None -> false);
+      List.iter
+        (fun name ->
+          let toggled =
+            match List.assoc name saved_environment with
+            | Some "cache-key-probe" -> "cache-key-probe-2"
+            | Some _ | None -> "cache-key-probe"
+          in
+          Unix.putenv name toggled;
+          let changed =
+            Vox_backend.Oxsmt_backend.cache_key ~command:None
+              (oxsmt_obligation None)
+          in
+          restore_environment_variable saved_environment name;
+          let restored =
+            Vox_backend.Oxsmt_backend.cache_key ~command:None
+              (oxsmt_obligation None)
+          in
+          assert (changed <> restored))
+        [ "OXSMT_ASSUMPTION_PREPROCESS";
+          "OXSMT_LAZY_INTERFACE_DISEQ";
+          "OXSMT_BINARY_INTERFACE_EQ";
+          "OXSMT_COMBINE_INSEARCH";
+          "OXSMT_DIRECT_TERM_ITE";
+          "OXSMT_ASSUMPTION_FAST_COMPLEMENTS";
+          "OXSMT_ASSUMPTION_PREPROCESS_PROPFOLD";
+        ]);
   print_endline
     "solver cache: persistent hits, exact inputs, invalidation, corruption, failures, and concurrent writes checked"

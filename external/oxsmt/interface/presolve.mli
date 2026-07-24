@@ -132,7 +132,10 @@ val simplify_contextual : Context.t -> Term.t list -> Term.t list
     budget (returns the ORIGINAL list unchanged); pass-through for any ITE-free assertion
     (exact neutrality). All terms are built through [ctx]'s smart constructors. Pure and
     deterministic (I6). The caller gates it (flag + cert-OFF). *)
-val simplify_projection : Context.t -> Term.t list -> Term.t list
+(* [propfold] explicitly selects the complementary-literal fixpoint for a caller with a
+    separately audited scope. When omitted, the dark [OXSMT_NEC_PROPFOLD] environment
+    gate retains its existing behavior. *)
+val simplify_projection : ?propfold:bool -> Context.t -> Term.t list -> Term.t list
 
 (** [symmetry_break ctx assertions] detects interchangeable same-sort constants (constants
     whose pairwise transposition maps the asserted set to itself) and returns extra

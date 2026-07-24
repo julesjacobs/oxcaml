@@ -228,6 +228,22 @@ end = struct
   let fabric_off = fabric_off || R.fabric_disabled
   let fabric_callbacks_off = fabric_callbacks_off || R.fabric_disabled
 
+  (* Binary arrangement selection and lazy arithmetic disequality handling have distinct
+     gates. The phase-request path requires both lazy negative-equality support and the
+     fabric-live combinator. The lazy gate alone may still send a negative equality to
+     LIA on the classic DTLIA path, where the adapter's independently sound model check
+     replaces the eager unsupported disequality assertion. *)
+  let binary_arrangement_on =
+    (match Sys.getenv_opt "OXSMT_BINARY_INTERFACE_EQ" with
+     | Some ("1" | "true" | "yes" | "on") -> true
+     | Some _ | None -> false)
+    && (match Sys.getenv_opt "OXSMT_LAZY_INTERFACE_DISEQ" with
+        | Some ("1" | "true" | "yes" | "on") -> true
+        | Some _ | None -> false)
+    && (not R.fabric_disabled)
+    && R.arithmetic_sort Sort.int
+  ;;
+
   (* A pinned shared-equality literal: the pair it relates, its asserted polarity, and
      which children it was actually asserted to (a negative equality may reach only the
      congruence child — CONTRACT S1). At Final every routed child's model must satisfy it. *)
@@ -341,6 +357,17 @@ end = struct
   and edge_origin =
     | Fixed_value of Fabric.equality_witness
     | Congruence
+
+  (* Z3-style arrangement branching for QF_UFLIA. The signed tautology is a valid
+     [Theory.Lemma], so it crosses the existing frozen seam. At Final the SAT core uses
+     its order as a true-first phase request for the newly internalized equality. *)
+  let arrangement_result t x y =
+    if binary_arrangement_on
+    then (
+      let eq = Context.eq t.ctx x y in
+      Theory.Lemma [ eq, true; eq, false ])
+    else Theory.Split (R.equality_split t.ctx x y)
+  ;;
 
   let create ctx env =
     let a = A.create ctx env in
@@ -924,7 +951,7 @@ end = struct
       match outer members with
       | Some (a, b) ->
         incr congruence_split_hits;
-        Some (R.equality_split t.ctx a b)
+        Some (a, b)
       | None -> None)
   ;;
 
@@ -1065,7 +1092,7 @@ end = struct
           else (
             match model_eval mb p.px, model_eval mb p.py with
             | Some vx, Some vy when value_equal vx vy ->
-              Some (R.equality_split t.ctx p.px p.py)
+              Some (p.px, p.py)
             | _ -> None))
         (all_pins t)
   ;;
@@ -1076,13 +1103,13 @@ end = struct
     let mb = B.model t.b in
     check_pins t ma mb;
     match find_disagreement t ma mb with
-    | Some (x, y) -> Theory.Split (R.equality_split t.ctx x y)
+    | Some (x, y) -> arrangement_result t x y
     | None ->
       (match repair_split t mb with
-       | Some split -> Theory.Split split
+       | Some (x, y) -> arrangement_result t x y
        | None ->
          (match find_congruence_split t mb with
-          | Some split -> Theory.Split split
+          | Some (x, y) -> arrangement_result t x y
           | None ->
             (* Int arrangement agrees; about to certify Sat — now require every buried
                Bool UF argument to be bound (else a wrong-SAT would leak, codex H2). *)
@@ -1476,14 +1503,14 @@ end = struct
     match find_disagreement t ma mb with
     | None ->
       (match repair_split t mb with
-       | Some split -> Theory.Split split
+       | Some (x, y) -> arrangement_result t x y
        | None ->
          (* M3 backstop (LAND 67): retain the congruence-split backstop on the fabric
             path, exactly as {!combine_models} does — a DT-known Int equality LIA has not
             reflected is routed as a case split rather than laundered into Sat. DARK in
             Stage B ([fabric_disabled] ⇒ this drive is unreached ⇒ byte-identical OFF). *)
          (match find_congruence_split t mb with
-          | Some split -> Theory.Split split
+          | Some (x, y) -> arrangement_result t x y
           | None ->
             require_bool_args_bound t ma;
             require_no_foreign_arithmetic t;
@@ -1499,7 +1526,7 @@ end = struct
         | Theory.Lemma l -> Theory.Lemma l
         | Theory.Propagations (_ :: _ as la) -> Theory.Propagations la
         | Theory.Sat | Theory.Propagations [] -> combine_models_fabric t)
-      else Theory.Split (R.equality_split t.ctx x y)
+      else arrangement_result t x y
   ;;
 
   (* The fabric-live drive: identical control flow to [check_off], but children are driven

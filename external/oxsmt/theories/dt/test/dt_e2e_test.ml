@@ -70,10 +70,10 @@ let () =
    let dt = Session.declare_datatype s ls [ { Session.ctor_name = "c"; fields = [] } ] in
    let tester = (List.nth dt.Defs.constructors 0).Defs.tester in
    incr checks;
-   if not (Env.is_reserved_name (Symbol.name tester))
-   then (
-     incr failures;
-     Printf.printf "  FAIL tester %s is not reserved-namespaced\n" (Symbol.name tester)));
+  if not (Env.is_reserved_name (Symbol.name tester))
+  then (
+    incr failures;
+    Printf.printf "  FAIL tester %s is not reserved-namespaced\n" (Symbol.name tester)));
   (* A tester returned by the programmatic declaration door is reserved but is
      also validated datatype vocabulary. It must pass the assertion and
      assumption capture gates; otherwise direct Session clients cannot express

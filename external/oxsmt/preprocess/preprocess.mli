@@ -55,6 +55,16 @@ type definition =
   ; value : Term.t
   }
 
+(** One non-Boolean ITE lifted to [result], before its two defining implications are
+    encoded. [condition], [then_branch], and [else_branch] have already been recursively
+    preprocessed, so none contains a non-Boolean ITE or reserved [div]/[mod]. *)
+type guarded_ite =
+  { condition : Term.t
+  ; result : Term.t
+  ; then_branch : Term.t
+  ; else_branch : Term.t
+  }
+
 (** Lift every non-Bool-sorted [Ite] to a fresh nullary constant with Tseitin-visible
     guarded equalities [(c -> t = a) /\ (¬c -> t = b)] conjoined into the boolean
     structure (ADR-0003 required #3). The stricter-than-ADR generalization from
@@ -79,3 +89,15 @@ val run : t -> Term.t -> Term.t
 
 (** {!run} keeping the combined fresh-symbol definitions (div/mod first, then ite). *)
 val run_with_definitions : t -> Term.t -> Term.t * definition list
+
+(** The direct-clause variant of {!run_with_definitions}. The returned root has every
+    non-Boolean ITE replaced by its fresh [result], but the two defining implications are
+    returned as {!guarded_ite} records instead of being conjoined into the Boolean term.
+    A clausifier can therefore emit the binary clauses
+    [(not condition) or (result = then_branch)] and
+    [condition or (result = else_branch)] without allocating Tseitin variables for an
+    [and] of two implications. The legacy functions above retain their exact output. *)
+val run_with_guarded_ites
+  :  t
+  -> Term.t
+  -> Term.t * definition list * guarded_ite list

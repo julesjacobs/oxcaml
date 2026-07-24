@@ -56,13 +56,13 @@ module Arr = Oxsmt_arr.Arr
    occurs/acyclicity) is exactly what certifies a combined Sat, since [Combine] emits Sat
    only after BOTH children certify Final.
 
-   The FABRIC-LIVE methods are UNREACHABLE: [Dtlia_router.fabric_disabled] forces
-   [Combine] onto the classic no-fabric path ([check_off]/[explain_off], and no
-   create-time merge-consumer setup), so the fabric seam is never driven for this
-   instantiation. They are loud fail-closed stubs (raise
-   [Combine.Incomplete "dtlia-fabric-unsupported"] -> verdict [unknown]) as defence in
-   depth — never a quiet wrong answer or a crash if a future change ever wired the fabric
-   here.
+   The FABRIC-LIVE methods (ADR-0014 Stage B) are REAL forwards to the standalone DT
+   fabric seam ([Dt.check_fabric]/[assert_fabric_eq]/[fabric_explain_eq]/merge-log +
+   class-tag forwards/[checkpoint]), currency-correct and trail-correct. They are
+   currently UNDRIVEN because [Dtlia_router.fabric_disabled] forces [Combine] onto the
+   classic no-fabric path ([check_off]/[explain_off], no create-time merge-consumer
+   setup), so the fabric seam exists but is dark for this instantiation until Stage C
+   flips the lever.
 
    The datatype registry (which [Dt.create] needs but the frozen [Theory.THEORY]
    [create : ctx -> env] cannot carry) is threaded via [set_registry], called by
@@ -149,6 +149,14 @@ end
 module CombinedDt =
   Oxsmt_combine.Combine.Combine (Oxsmt_combine.Dtlia_router) (Dt_congruence)
     (Oxsmt_lia.Lia_adapter)
+
+(* Re-export of the LAND-67 backstop hit counter ([find_congruence_split] fires) for the
+   DT+LIA instantiation, so an out-of-band data-gathering probe (Stage C mechanism-I
+   measurement) can read whether the in-search congruence propagation
+   ([OXSMT_COMBINE_INSEARCH]) drives the classic-path backstop toward 0.
+   Byte-id-invisible: a monotone process-global read, changes no
+   verdict/split/explanation. *)
+let combine_congruence_split_hit_count = CombinedDt.congruence_split_hit_count
 
 (* The theory the seam drives. A problem that declares an algebraic datatype installs the
    standalone DT theory, one that uses arrays the standalone arrays theory (both e-graph
@@ -1242,6 +1250,19 @@ let clear_last_conflict t =
 
 let splits_used t = t.splits
 let effort_used t = Budget.used t.budget
+let with_effort_cap t cap f = Budget.with_cap t.budget cap f
+
+(* Stage C mechanism-I engagement probe: the number of fabric edges the DT+LIA combinator
+   INJECTED or NOTIFIED during the session ([Combine.fabric_stats.edges_injected],
+   monotone per-instance). >0 exactly when in-search congruence propagation across the
+   DT/LIA seam actually fired ([OXSMT_COMBINE_INSEARCH] ON) — the positive discriminator
+   the dt-sat-gate uses so a broken lever (0 edges) cannot pass. 0 for non-DT+LIA stacks /
+   classic path. *)
+let combine_fabric_edges_injected t =
+  match t.theory with
+  | Some (TCombinedDt th) -> (CombinedDt.fabric_stats th).CombinedDt.edges_injected
+  | Some (TCombined _ | TCombinedReal _ | TArr _) | None -> 0
+;;
 
 (* task #106: passthrough of the LIA adapter's observational conflict evidence.
    Re-exported record so {!Session} can read the fields. Only the EUF+LIA stack carries
@@ -1640,6 +1661,30 @@ let model t =
    [None] when the last check-sat was not a DT-theory [Sat]. Read by {!Session}'s DT
    commit branch and validated by [Dt_model_check] before any [sat] is reported. *)
 let dt_model t = t.last_dt_model
+
+(* Applied Bool theory atoms — uninterpreted predicate applications [p(args)] with
+   [args >= 1], interned in the theory-atom table [t2v] — paired with their truth in the
+   accepting SAT assignment. Read at commit time (AFTER [Sat.solve] returned [Sat], so
+   [saved_model] is the accepting one). Feeds {!Session}'s DT commit branch, where
+   {!Dt_model_check} builds an INDEPENDENT functionality (congruence) table over these
+   atoms so a QF_UFDT predicate over datatype/selector arguments can be checked rather
+   than fail-closed. Non-registering; a nullary Bool const lives in the propositional
+   skeleton (Session's [prop_to_var]), not here, so this returns only genuine
+   applications. A datatype TESTER [(_ is C) x] is also a Bool application but is
+   evaluated structurally by {!Dt_model_check} from the constructor tree, so it is
+   excluded here (only an uninterpreted predicate needs the functionality table). *)
+let applied_bool_atom_values t =
+  let reg = !(t.registry) in
+  Term.Table.fold
+    (fun (term : Term.t) v acc ->
+      match term.Term.node, term.Term.sort with
+      | Term.App (sym, args), Sort.Bool
+        when Iarr.length args >= 1 && Option.is_none (Datatype_defs.tester_of_sym reg sym)
+        -> (term, Sat.value t.sat v) :: acc
+      | _ -> acc)
+    t.t2v
+    []
+;;
 
 (* The arrays checker model snapshotted at the accepting Final->Sat, or [None] when the
    last check-sat was not an arrays-theory [Sat]. Read by {!Session}'s arrays commit

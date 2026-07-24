@@ -176,9 +176,20 @@ val clear_last_conflict : t -> unit
 (** Splits emitted during the last check-sat (stat / determinism witness). *)
 val splits_used : t -> int
 
+(** Fabric edges the DT+LIA combinator injected/notified this session
+    ([Combine.fabric_stats.edges_injected], monotone per-instance): >0 exactly when
+    in-search congruence propagation across the DT/LIA seam fired
+    ([OXSMT_COMBINE_INSEARCH] ON). The positive mechanism-I discriminator the dt-sat-gate
+    uses; 0 on the classic path / non-DT+LIA stacks. *)
+val combine_fabric_edges_injected : t -> int
+
 (** Effort consumed on the shared budget so far in the current/most-recent check-sat
     ([Budget.used]); the instrumentation read behind {!Session.effort}. *)
 val effort_used : t -> int
+
+(** Run one operation with a temporary effort cap, bounded by the session's configured
+    cap when present. The prior cap is restored on normal and exceptional exits. *)
+val with_effort_cap : t -> int -> (unit -> 'a) -> 'a
 
 (** task #106: the LIA adapter's observational conflict evidence, re-exported so
     {!Session} can surface it. Only the EUF+LIA stack carries it (DT/arrays give [None]).
@@ -214,6 +225,14 @@ val model : t -> (sort_card list * binding list) option
     Read by {!Session}'s DT commit branch and validated by [Dt_model_check] before a [sat]
     is reported. Deterministic. *)
 val dt_model : t -> (Term.t * Oxsmt_dt.Dt.ctor_tree) list option
+
+(** [applied_bool_atom_values t] is every interned applied Bool theory atom (an
+    uninterpreted predicate application [p(args)], [args >= 1]) paired with its truth in
+    the accepting SAT assignment. Read at commit time (saved model = the accepting one).
+    Feeds {!Session}'s DT commit branch so {!Dt_model_check} can build an independent
+    functionality table for QF_UFDT predicates over datatype/selector arguments.
+    Deterministic. *)
+val applied_bool_atom_values : t -> (Term.t * bool) list
 
 (** [array_model t] is the arrays theory's checker model, snapshotted at the accepting
     Final->Sat when the installed theory is the standalone arrays theory (QF_AX model
@@ -254,6 +273,12 @@ val ckpt_log_length_for_test : t -> int
     invisible; a whitebox probe so a later stage can assert the DT scalar-completion
     backstop still fires on the fabric path. Process-global, monotone. *)
 val dt_scalar_completion_hit_count : unit -> int
+
+(** LAND-67 backstop hit counter for the DT+LIA combination
+    ([Combine.find_congruence_split] fires): a data-gathering probe for Stage C mechanism
+    I ([OXSMT_COMBINE_INSEARCH]), which should drive it toward 0 by propagating the
+    DT-known Int equality in-search. Byte-id invisible; process-global, monotone. *)
+val combine_congruence_split_hit_count : unit -> int
 
 (** [egraph_view t] is the immutable congruence snapshot captured at the most recent
     accepting theory [Final], for the lemma tier's E-matcher. Capturing before [Sat.solve]

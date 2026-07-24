@@ -66,6 +66,15 @@ type t
     satisfies all clauses. *)
 val clausify : Term.t -> t
 
+(** [clausify_clauses clauses] emits the full Tseitin definitions for every Boolean
+    subterm shared by [clauses], then emits each supplied clause directly. A clause term
+    may be an arbitrary Boolean expression; its literal denotes the expression's shared
+    Tseitin variable (with leading {!Term.Not} nodes represented by literal polarity).
+    Unlike calling {!clausify} on an [or] term, this does not allocate a variable for the
+    top-level disjunction or a unit forcing that variable. Every clause must be non-empty
+    and every term Bool-sorted. *)
+val clausify_clauses : Term.t list list -> t
+
 val num_vars : t -> int
 val clauses : t -> Clause.t list
 val iter_clauses : (Clause.t -> unit) -> t -> unit

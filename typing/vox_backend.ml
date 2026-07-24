@@ -751,6 +751,118 @@ module Oxsmt_backend_uncached = struct
   let backend = Oxsmt
   let capabilities = capabilities backend
 
+  let in_process_revision = "6f5684adda41769ce0be064ea40e1fead979df6c"
+
+  (* Oxsmt has additional experimental runtime levers beyond the six enabled
+     by the supported profile. Keep this sorted list synchronized with every
+     [Sys.getenv_opt "OXSMT_..."] read in the vendored runtime. *)
+  let runtime_environment_names =
+    [ "OXSMT_ARR_ROW2";
+      "OXSMT_ARR_ROW2_NOINDEX";
+      "OXSMT_ARR_WEQ";
+      "OXSMT_ARR_WEQ_ANALYZE";
+      "OXSMT_ARR_WEQ_FUEL";
+      "OXSMT_ARR_WEQ_MAXIDX";
+      "OXSMT_ARR_WEQ_NONARROW";
+      "OXSMT_ARR_WEQ_NOROW";
+      "OXSMT_ARR_WEQ_NOTRIGGER";
+      "OXSMT_ARR_WEQ_SELFCHECK";
+      "OXSMT_ASSUMPTION_FAST_COMPLEMENTS";
+      "OXSMT_ASSUMPTION_PREPROCESS";
+      "OXSMT_ASSUMPTION_PREPROCESS_PROPFOLD";
+      "OXSMT_ASSUMPTION_PROFILE";
+      "OXSMT_AX_OCCIDX";
+      "OXSMT_BASE_L0";
+      "OXSMT_BINARY_INTERFACE_EQ";
+      "OXSMT_BV_REWRITE2";
+      "OXSMT_BV_REWRITE2_EQSPLIT";
+      "OXSMT_BV_RW3";
+      "OXSMT_CG_ANTS_PCT";
+      "OXSMT_CG_CUTS";
+      "OXSMT_CG_CUT_GATE";
+      "OXSMT_CG_MAX_CUTS";
+      "OXSMT_CG_NNZ_PCT";
+      "OXSMT_CHRONO";
+      "OXSMT_CHRONO_INCR_UNDO";
+      "OXSMT_CHRONO_T";
+      "OXSMT_COMBINE_INSEARCH";
+      "OXSMT_CORE_MIN_EFFORT_CAP";
+      "OXSMT_CORE_MIN_EFFORT_FLOOR";
+      "OXSMT_CORE_MIN_EFFORT_MULTIPLIER";
+      "OXSMT_CORE_MIN_INITIAL_EFFORT_LIMIT";
+      "OXSMT_CORE_MIN_LINEAR";
+      "OXSMT_DIRECT_TERM_ITE";
+      "OXSMT_DTLIA_BOOL_COMPLETE";
+      "OXSMT_DTLIA_ELIM_COMPLETE";
+      "OXSMT_DTLIA_PRED_COMPLETE";
+      "OXSMT_DTLIA_PURIFY";
+      "OXSMT_DT_GROUND_SIMPLIFY";
+      "OXSMT_DT_INCR";
+      "OXSMT_EMATCH_MGI";
+      "OXSMT_EMATCH_MGI_THRESHOLD";
+      "OXSMT_EUF_INCR";
+      "OXSMT_EUF_SELF_CHECK";
+      "OXSMT_FOREST_BALANCE";
+      "OXSMT_HNF_CUTS";
+      "OXSMT_LAZY_INTERFACE_DISEQ";
+      "OXSMT_LEMMA_BACKJUMP";
+      "OXSMT_LEMMA_FAIR";
+      "OXSMT_LEMMA_GEN_BUDGET";
+      "OXSMT_LEMMA_INDEX";
+      "OXSMT_LEMMA_SEED";
+      "OXSMT_LEMMA_STREAM";
+      "OXSMT_LGC_FIXED";
+      "OXSMT_LGC_INITIAL";
+      "OXSMT_LGC_SIZEREL";
+      "OXSMT_LIA_DISEQ_CDCL";
+      "OXSMT_LIA_DL_PROP";
+      "OXSMT_LIA_EQ_PROP";
+      "OXSMT_LIA_GCD_CUT";
+      "OXSMT_LIA_MODELFIND";
+      "OXSMT_LIA_MODELFIND_BUDGET";
+      "OXSMT_LIA_MODELFIND_STALL";
+      "OXSMT_LIA_MODELFIND_STALL_MIN";
+      "OXSMT_LIA_MODELFIND_STALL_RATIO";
+      "OXSMT_LIA_MODEL_REPAIR";
+      "OXSMT_LIA_TRIVIAL_EQ";
+      "OXSMT_LRA";
+      "OXSMT_MAX_BV_WIDTH";
+      "OXSMT_NEC_PROPFOLD";
+      "OXSMT_NIA";
+      "OXSMT_NO_DIOPHANTINE";
+      "OXSMT_NO_FABRIC";
+      "OXSMT_NO_FABRIC_CALLBACKS";
+      "OXSMT_PRESOLVE_CTX";
+      "OXSMT_PRESOLVE_CTX_STATS";
+      "OXSMT_PRESOLVE_ELIM_GROWTH";
+      "OXSMT_PRESOLVE_ELIM_STATS";
+      "OXSMT_PRESOLVE_EQ";
+      "OXSMT_PRESOLVE_PROJ";
+      "OXSMT_PRESOLVE_PROJ_MAX_STEPS";
+      "OXSMT_PRESOLVE_PROJ_STATS";
+      "OXSMT_PROPFOLD_LITONLY";
+      "OXSMT_QUANT_PIPELINE";
+      "OXSMT_RECURSIVE_MIN";
+      "OXSMT_RELEVANCY";
+      "OXSMT_SATCORE_MODES";
+      "OXSMT_SATCORE_MODE_INIT";
+      "OXSMT_SATPRE";
+      "OXSMT_SATPRE_INPROC_FIRST";
+      "OXSMT_SATPRE_STATS";
+      "OXSMT_SAT_LINEAR_TAUTOLOGY";
+      "OXSMT_SYMBREAK";
+      "OXSMT_SYMBREAK_BUDGET";
+      "OXSMT_SYMBREAK_STATS";
+      "OXSMT_SYMBREAK_UFTAIL";
+    ]
+
+  (* Length-prefixing each name and raw value makes the encoding unambiguous;
+     distinct spellings may over-partition the cache but can never collide. *)
+  let runtime_environment_key () =
+    runtime_environment_names
+    |> List.map (fun name -> option_key_field name (Sys.getenv_opt name))
+    |> String.concat ""
+
   let cache_key ~command { env; condition; prove_contents } =
     let timeout = oxsmt_timeout_seconds () in
     let legacy = legacy_oxsmt_external () in
@@ -767,14 +879,16 @@ module Oxsmt_backend_uncached = struct
       (fun payload ->
         let solver =
           if legacy then command_fingerprint ~backend (oxsmt_command command)
-          else Some "oxsmt-ab187d661c-in-process"
+          else Some ("oxsmt-" ^ in_process_revision ^ "-in-process")
         in
         Option.bind solver (fun solver ->
           cache_key ~backend ~implementation:"oxsmt-translation-v2"
             ~solver
             ~options:
-              (Printf.sprintf "timeout=%d;legacy-external=%b;unsat-core=true"
-                 timeout legacy)
+              (Printf.sprintf
+                 ("timeout=%d;legacy-external=%b;unsat-core=true;"
+                  ^^ "runtime-environment=%s")
+                 timeout legacy (runtime_environment_key ()))
             ~payload))
 
   let discharge ~command { env; condition; prove_contents } =

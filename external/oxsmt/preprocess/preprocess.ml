@@ -30,6 +30,13 @@ type definition =
   ; value : Term.t
   }
 
+type guarded_ite =
+  { condition : Term.t
+  ; result : Term.t
+  ; then_branch : Term.t
+  ; else_branch : Term.t
+  }
+
 (* Reserved fresh-symbol namespace: [".oxsmt.<kind>.<n>"], deterministic in the session
    counter. The prefix / predicate now live in {!Env} as the single source of truth
    (ADR-0012 R1); re-exported here for the parser + session guards that reference
@@ -80,11 +87,12 @@ let rec map_go f = function
 (* ------------------------------------------------------------------ *)
 (* ite_removal. *)
 
-let ite_removal t root =
+let ite_removal_core ~direct t root =
   let ctx = t.ctx in
   let memo : Term.t Term.Table.t = Term.Table.create 256 in
   let defs = ref [] in
   let constraints = ref [] in
+  let guarded_ites = ref [] in
   let rec go term =
     match Term.Table.find_opt memo term with
     | Some r -> r
@@ -164,14 +172,20 @@ let ite_removal t root =
         (* non-Bool value-Ite: lift to a fresh constant with guarded equalities. *)
         let sym = fresh_symbol t ~kind:"ite" term.sort in
         let v = Context.const ctx sym in
-        let guard =
-          Context.and_
-            ctx
-            [ Context.implies ctx c' (Context.eq ctx v a')
-            ; Context.implies ctx (Context.not_ ctx c') (Context.eq ctx v b')
-            ]
-        in
-        constraints := guard :: !constraints;
+        if direct
+        then
+          guarded_ites
+          := { condition = c'; result = v; then_branch = a'; else_branch = b' }
+             :: !guarded_ites
+        else (
+          let guard =
+            Context.and_
+              ctx
+              [ Context.implies ctx c' (Context.eq ctx v a')
+              ; Context.implies ctx (Context.not_ ctx c') (Context.eq ctx v b')
+              ]
+          in
+          constraints := guard :: !constraints);
         defs := { symbol = sym; value = Context.ite ctx c' a' b' } :: !defs;
         v)
   in
@@ -181,7 +195,12 @@ let ite_removal t root =
     | [] -> root'
     | cs -> Context.and_ ctx (root' :: List.rev cs)
   in
-  result, List.rev !defs
+  result, List.rev !defs, List.rev !guarded_ites
+;;
+
+let ite_removal t root =
+  let result, defs, _ = ite_removal_core ~direct:false t root in
+  result, defs
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -330,6 +349,12 @@ let run_with_definitions t root =
   let t1, d1 = div_mod_elimination t root in
   let t2, d2 = ite_removal t t1 in
   t2, d1 @ d2
+;;
+
+let run_with_guarded_ites t root =
+  let t1, d1 = div_mod_elimination t root in
+  let t2, d2, guarded_ites = ite_removal_core ~direct:true t t1 in
+  t2, d1 @ d2, guarded_ites
 ;;
 
 let run t root = fst (run_with_definitions t root)
