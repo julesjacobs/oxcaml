@@ -25,3 +25,9 @@ let nested_open_site () =
     (let open Stdlib in
      print_int 0;
      ())
+
+let application_site () : unit{ true } =
+  Fun.id
+    (let value = 0 in
+     print_int value;
+     ())

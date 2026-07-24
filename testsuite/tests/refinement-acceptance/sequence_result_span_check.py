@@ -5,8 +5,8 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as channel:
     vcs = json.load(channel)["verification_conditions"]
 
-if len(vcs) != 3:
-    raise AssertionError(f"expected three VCs, got {len(vcs)}")
+if len(vcs) != 4:
+    raise AssertionError(f"expected four VCs, got {len(vcs)}")
 
 
 def span_text(span):
@@ -19,19 +19,32 @@ def span_text(span):
     return lines[start["line"] - 1][start["column"] : end["column"]]
 
 
+application = []
 for vc in vcs:
     result = vc["result_span"]
     location = vc["location"]
-    if location != result:
+    result_text = span_text(result)
+    if result_text == "Fun.id":
+        application.append(vc)
+        if location == result:
+            raise AssertionError(
+                f"application result span was not compacted: {location!r}"
+            )
+    elif location != result:
         raise AssertionError(
             f"diagnostic location and result span disagree: {location!r}, {result!r}"
         )
-    if span_text(result) != "()":
+    elif result_text != "()":
         raise AssertionError(f"result span is not the returned leaf: {result!r}")
+
+if len(application) != 1:
+    raise AssertionError(
+        f"expected one compact application result, got {len(application)}"
+    )
 
 annotation = [vc for vc in vcs if vc["kind"] == "annotation"]
 contracts = [vc for vc in vcs if vc["kind"] == "contract-argument"]
-if len(annotation) != 1 or len(contracts) != 2:
+if len(annotation) != 2 or len(contracts) != 2:
     raise AssertionError(
         f"unexpected VC kinds: {[vc['kind'] for vc in vcs]!r}"
     )

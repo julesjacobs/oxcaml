@@ -2378,7 +2378,11 @@ let rec walk_expression ?(inherited_marks = []) state expression =
           List.fold_left merge_facts entry_facts (List.rev !completed_facts);
         check_application state expression function_ arguments
           ~entry_facts ~argument_facts;
-        check_marks state expression marks
+        (* Keep the whole application as the program point, but designate its
+           callee as the compact site which produces the result.  A callback
+           argument may contain an arbitrarily large body; using the full call
+           as [result_span] would paint that body as one enormous goal. *)
+        check_marks ~result_span:function_.exp_loc state expression marks
       end else
         state.facts <- entry_facts
     end
@@ -2934,7 +2938,8 @@ and add_try_result_fact state pattern paths =
       state.facts <- Facts.add ~origin ~loc summary state.facts
     end
 
-and check_marks_against state ~env ~subject_location ~subject marks =
+and check_marks_against state ~env ~subject_location ?result_span ~subject marks =
+  let result_span = Option.value ~default:subject_location result_span in
   List.iter
     (fun
       { annotation_location;
@@ -2951,16 +2956,16 @@ and check_marks_against state ~env ~subject_location ~subject marks =
       in
       prove_refinement state ~env ~loc ~subject refinement
         ~kind:"annotation" ~program_point:subject_location
-        ~result_span:subject_location ~provenance)
+        ~result_span ~provenance)
     marks
 
-and check_marks state expression marks =
+and check_marks ?result_span state expression marks =
   match marks with
   | [] -> ()
   | _ ->
     check_marks_against state ~env:expression.exp_env
-      ~subject_location:expression.exp_loc ~subject:(subject state expression)
-      marks
+      ~subject_location:expression.exp_loc ?result_span
+      ~subject:(subject state expression) marks
 
 and case_scope : type k. k case -> Location.t =
   fun case ->
