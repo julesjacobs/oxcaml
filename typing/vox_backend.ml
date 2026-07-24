@@ -50,14 +50,399 @@ module type S = sig
   val backend : backend
   val capabilities : capabilities
 
+  val cache_key : command:string option -> obligation -> string option
+
   val discharge :
     command:string option -> obligation -> backend_result
 end
 
-let string_of_backend = function
+let backend_name = function
   | Lean -> "lean"
   | Z3 -> "z3"
   | Oxsmt -> "oxsmt"
+
+external cache_directory_is_private : string -> bool
+  = "caml_vox_cache_directory_is_private"
+
+external cache_file_is_private : string -> bool
+  = "caml_vox_cache_file_is_private"
+
+external file_stamp : string -> string = "caml_vox_file_stamp"
+
+external is_regular_executable : string -> bool
+  = "caml_vox_file_is_executable"
+
+module Persistent_cache = struct
+  let schema = "vox-solver-cache-v1"
+  let default_max_bytes = 256 * 1024 * 1024
+  let max_entry_bytes = 8 * 1024 * 1024
+
+  type entry =
+    { verdict : verdict;
+      detail : string option;
+      unused_facts : int list option;
+    }
+
+  let hex_digit value =
+    if value < 10 then Char.chr (Char.code '0' + value)
+    else Char.chr (Char.code 'a' + value - 10)
+
+  let hex_of_string string =
+    let result = Bytes.create (2 * String.length string) in
+    String.iteri
+      (fun index character ->
+        let byte = Char.code character in
+        Bytes.set result (2 * index) (hex_digit (byte lsr 4));
+        Bytes.set result ((2 * index) + 1) (hex_digit (byte land 0xf)))
+      string;
+    Bytes.unsafe_to_string result
+
+  let value_of_hex_digit = function
+    | '0' .. '9' as digit -> Some (Char.code digit - Char.code '0')
+    | 'a' .. 'f' as digit -> Some (Char.code digit - Char.code 'a' + 10)
+    | _ -> None
+
+  let string_of_hex hex =
+    let length = String.length hex in
+    if length mod 2 <> 0 then None
+    else
+      let result = Bytes.create (length / 2) in
+      let rec loop index =
+        if index = length then Some (Bytes.unsafe_to_string result)
+        else
+          match
+            value_of_hex_digit hex.[index], value_of_hex_digit hex.[index + 1]
+          with
+          | Some high, Some low ->
+            Bytes.set result (index / 2) (Char.chr ((high lsl 4) lor low));
+            loop (index + 2)
+          | (Some _ | None), (Some _ | None) -> None
+      in
+      loop 0
+
+  let verdict_of_cache_string = function
+    | "proved" -> Some Proved
+    | "disproved" -> Some Disproved
+    | _ -> None
+
+  let unused_facts_of_cache_string = function
+    | "none" -> Some None
+    | "some:" -> Some (Some [])
+    | text when String.starts_with ~prefix:"some:" text ->
+      let suffix = String.sub text 5 (String.length text - 5) in
+      let indices = String.split_on_char ',' suffix in
+      let rec parse acc = function
+        | [] -> Some (Some (List.rev acc))
+        | index :: rest ->
+          begin
+            match int_of_string_opt index with
+            | Some index when index >= 0 -> parse (index :: acc) rest
+            | Some _ | None -> None
+          end
+      in
+      parse [] indices
+    | _ -> None
+
+  let detail_of_cache_string = function
+    | "none" -> Some None
+    | text when String.starts_with ~prefix:"some:" text ->
+      Option.map (fun detail -> Some detail)
+        (string_of_hex (String.sub text 5 (String.length text - 5)))
+    | _ -> None
+
+  let debug message =
+    match Sys.getenv_opt "VOX_SOLVER_CACHE_DEBUG" with
+    | Some "1" -> Format.eprintf "vox solver cache: %s@." message
+    | Some _ | None -> ()
+
+  let enabled () =
+    match Sys.getenv_opt "VOX_SOLVER_CACHE" with
+    | Some ("0" | "false" | "no") -> false
+    | Some _ | None -> true
+
+  let cache_dir () =
+    match Sys.getenv_opt "VOX_SOLVER_CACHE_DIR" with
+    | Some directory when not (String.equal directory "") -> Some directory
+    | Some _ -> None
+    | None ->
+      begin
+        match Sys.getenv_opt "XDG_CACHE_HOME", Sys.getenv_opt "HOME" with
+        | Some root, _ when not (String.equal root "") ->
+          Some (Filename.concat root "vox2/solver-v1")
+        | _, Some home when not (String.equal home "") ->
+          Some (Filename.concat home ".cache/vox2/solver-v1")
+        | (Some _ | None), (Some _ | None) -> None
+      end
+
+  let max_bytes () =
+    match Sys.getenv_opt "VOX_SOLVER_CACHE_MAX_BYTES" with
+    | None -> default_max_bytes
+    | Some value ->
+      begin
+        match int_of_string_opt value with
+        | Some bytes when bytes >= 0 -> bytes
+        | Some _ | None -> default_max_bytes
+      end
+
+  let rec ensure_directory directory =
+    if Sys.file_exists directory then ()
+    else begin
+      let parent = Filename.dirname directory in
+      if not (String.equal parent directory) then ensure_directory parent;
+      try Sys.mkdir directory 0o700 with
+      | Sys_error _ when Sys.file_exists directory -> ()
+    end
+
+  let path directory key =
+    Filename.concat directory (Digest.to_hex (Digest.string key) ^ ".cache")
+
+  let read directory key =
+    let filename = path directory key in
+    if not (cache_file_is_private filename) then None
+    else try
+      let channel = open_in_bin filename in
+      let parsed =
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr channel)
+          (fun () ->
+            if in_channel_length channel > max_entry_bytes then None
+            else begin
+            let entry_schema = input_line channel in
+            let entry_key = input_line channel in
+            let entry_verdict = input_line channel in
+            let entry_detail = input_line channel in
+            let entry_unused_facts = input_line channel in
+            let entry_checksum = input_line channel in
+            let has_trailing_data =
+              match input_char channel with
+              | _ -> true
+              | exception End_of_file -> false
+            in
+            let body =
+              String.concat "\n"
+                [ entry_schema;
+                  entry_key;
+                  entry_verdict;
+                  entry_detail;
+                  entry_unused_facts;
+                  "";
+                ]
+            in
+            let expected_checksum =
+              Digest.to_hex (Digest.string body)
+            in
+            if
+              has_trailing_data
+              || not (String.equal entry_schema schema)
+              || not (String.equal entry_checksum expected_checksum)
+            then None
+            else
+              match
+                string_of_hex entry_key,
+                verdict_of_cache_string entry_verdict,
+                detail_of_cache_string entry_detail,
+                unused_facts_of_cache_string entry_unused_facts
+              with
+              | Some entry_key, Some verdict, Some detail, Some unused_facts
+                when String.equal entry_key key ->
+                Some { verdict; detail; unused_facts }
+              | (Some _ | None), (Some _ | None), (Some _ | None),
+                (Some _ | None) -> None
+            end)
+      in
+      parsed
+    with
+    | Sys_error _
+    | End_of_file
+    | Failure _
+    | Invalid_argument _ -> None
+
+  let write directory key (result : backend_result) =
+    let filename = path directory key in
+    let verdict =
+      match result.verdict with
+      | Proved -> "proved"
+      | Disproved -> "disproved"
+      | Not_proved | Unknown | Solver_error | Unavailable ->
+        invalid_arg "non-cacheable solver verdict"
+    in
+    let detail =
+      match result.detail with
+      | None -> "none"
+      | Some detail -> "some:" ^ hex_of_string detail
+    in
+    let unused_facts =
+      match result.unused_facts with
+      | None -> "none"
+      | Some indices ->
+        "some:" ^ String.concat "," (List.map string_of_int indices)
+    in
+    let body =
+      String.concat "\n"
+        [ schema;
+          hex_of_string key;
+          verdict;
+          detail;
+          unused_facts;
+          "";
+        ]
+    in
+    let checksum = Digest.to_hex (Digest.string body) in
+    let serialized_length =
+      String.length body + String.length checksum + 1
+    in
+    if serialized_length > max_entry_bytes then
+      invalid_arg "cache entry too large";
+    let temporary = Filename.temp_file ~temp_dir:directory "write-" ".tmp" in
+    Fun.protect
+      ~finally:(fun () -> Misc.remove_file temporary)
+      (fun () ->
+        let channel = open_out_bin temporary in
+        Fun.protect
+          ~finally:(fun () -> close_out_noerr channel)
+          (fun () ->
+            output_string channel body;
+            output_string channel (checksum ^ "\n");
+            flush channel);
+        Sys.rename temporary filename);
+    serialized_length
+
+  let evict directory =
+    let limit = max_bytes () in
+    try
+      let files =
+        Sys.readdir directory
+        |> Array.to_list
+        |> List.filter_map (fun basename ->
+          if
+            Filename.check_suffix basename ".cache"
+            || (String.starts_with ~prefix:"write-" basename
+                && Filename.check_suffix basename ".tmp")
+          then
+            let filename = Filename.concat directory basename in
+            try
+              let channel = open_in_bin filename in
+              let size =
+                Fun.protect
+                  ~finally:(fun () -> close_in_noerr channel)
+                  (fun () -> in_channel_length channel)
+              in
+              Some (filename, size)
+            with Sys_error _ -> None
+          else
+            None)
+      in
+      let total = List.fold_left (fun n (_, size) -> n + size) 0 files in
+      if total > limit then begin
+        (* Deterministic arbitrary eviction keeps storage bounded without
+           introducing a Unix dependency into [ocamlcommon]. *)
+        let removal_order = List.sort compare files in
+        let rec remove total = function
+          | _ when total <= limit -> ()
+          | [] -> ()
+          | (filename, size) :: rest ->
+            Misc.remove_file filename;
+            remove (total - size) rest
+        in
+        remove total removal_order
+      end
+    with Sys_error _ -> ()
+
+  let directory () =
+    if not (enabled ()) then None
+    else
+      match cache_dir () with
+      | None -> None
+      | Some directory ->
+        begin
+          try
+            ensure_directory directory;
+            if cache_directory_is_private directory then Some directory
+            else None
+          with
+          | Sys_error _ -> None
+        end
+
+  let find ~backend_name key =
+    match directory () with
+    | None -> None
+    | Some directory ->
+      let entry = read directory key in
+      debug
+        (backend_name ^ " "
+         ^ if Option.is_some entry then "hit" else "miss");
+      entry
+
+  let bytes_written_since_eviction = Atomic.make 0
+  let eviction_checked_directories = Atomic.make []
+
+  let evict_on_first_write directory =
+    let rec claim () =
+      let checked = Atomic.get eviction_checked_directories in
+      if List.mem directory checked then false
+      else if
+        Atomic.compare_and_set eviction_checked_directories checked
+          (directory :: checked)
+      then true
+      else claim ()
+    in
+    if claim () then evict directory
+
+  let store key (result : backend_result) =
+    try
+      match result.verdict, directory () with
+      | (Proved | Disproved), Some directory ->
+        (* Batch compilers usually write much less than the periodic threshold.
+           Scan once per directory in every process so stale generations and
+           abandoned temporary files cannot accumulate across processes. *)
+        evict_on_first_write directory;
+        let bytes = write directory key result in
+        let threshold = max 1 (max_bytes () / 4) in
+        let previous = Atomic.fetch_and_add bytes_written_since_eviction bytes in
+        let total = previous + bytes in
+        if
+          total >= threshold
+          && Atomic.compare_and_set bytes_written_since_eviction total 0
+        then begin
+          evict directory
+        end
+      | (Not_proved | Unknown | Solver_error | Unavailable), _
+      | (Proved | Disproved), None -> ()
+    with
+    | Sys_error _
+    | Failure _
+    | Invalid_argument _ -> ()
+end
+
+module Cached (Backend : S) = struct
+  let backend = Backend.backend
+  let capabilities = Backend.capabilities
+  let cache_key = Backend.cache_key
+
+  let discharge ~command obligation =
+    match cache_key ~command obligation with
+    | None -> Backend.discharge ~command obligation
+    | Some key ->
+      begin
+        match
+          Persistent_cache.find ~backend_name:(backend_name backend) key
+        with
+        | Some entry ->
+          { backend;
+            capabilities;
+            verdict = entry.verdict;
+            location = obligation.condition.location;
+            detail = entry.detail;
+            unused_facts = entry.unused_facts;
+          }
+        | None ->
+          let result = Backend.discharge ~command obligation in
+          Persistent_cache.store key result;
+          result
+      end
+end
+
+let string_of_backend = backend_name
 
 let string_of_selection = function
   | Single backend -> string_of_backend backend
@@ -134,9 +519,171 @@ let result ~backend ~verdict ~location ?detail ?unused_facts () =
     unused_facts;
   }
 
-module Lean_backend = struct
+let key_field name value =
+  Printf.sprintf "%s:%d:%s" name (String.length value) value
+
+let option_key_field name = function
+  | None -> key_field name "none"
+  | Some value -> key_field name (key_field "some" value)
+
+let executable_digests = Atomic.make []
+
+(* Solver executables can be replaced while the IDE remains live.  Their
+   content digest is reused only while the cheap filesystem stamp matches. *)
+let file_digest_identity path =
+  let stamp = file_stamp path in
+  if String.equal stamp "" then None
+  else match
+    List.find_opt
+      (fun (cached_path, cached_stamp, _) ->
+        String.equal cached_path path && String.equal cached_stamp stamp)
+      (Atomic.get executable_digests)
+  with
+  | Some (_, _, fingerprint) -> Some fingerprint
+  | None ->
+    begin
+      try
+        let fingerprint = path ^ ":" ^ Digest.to_hex (Digest.file path) in
+        let rec remember () =
+          let previous = Atomic.get executable_digests in
+          if
+            List.exists
+              (fun (cached_path, cached_stamp, _) ->
+                String.equal cached_path path && String.equal cached_stamp stamp)
+              previous
+          then ()
+          else if not
+              (Atomic.compare_and_set executable_digests previous
+                 ((path, stamp, fingerprint) :: previous))
+          then remember ()
+        in
+        remember ();
+        Some fingerprint
+      with Sys_error _ -> None
+    end
+
+let resolve_executable executable =
+  if Filename.is_implicit executable then
+    match Sys.getenv_opt "PATH" with
+    | None -> None
+    | Some path ->
+      String.split_on_char ':' path
+      |> List.find_map (fun directory ->
+        let candidate = Filename.concat directory executable in
+        if is_regular_executable candidate then Some candidate else None)
+  else if is_regular_executable executable then Some executable
+  else None
+
+let running_compiler_digest =
+  lazy
+    (Option.bind (resolve_executable Sys.executable_name) (fun executable ->
+       try
+         Some (executable ^ ":" ^ Digest.to_hex (Digest.file executable))
+       with Sys_error _ -> None))
+
+(* The running executable cannot change underneath this process; the optional
+   declared identity only further partitions its mandatory content digest. *)
+let compiler_implementation_identity () =
+  match Lazy.force running_compiler_digest with
+  | None -> None
+  | Some digest ->
+    Some
+      (match Sys.getenv_opt "VOX_SOLVER_CACHE_COMPILER_IDENTITY" with
+       | Some identity when not (String.equal identity "") ->
+         digest ^ "|declared=" ^ identity
+       | Some _ | None -> digest)
+
+let declared_solver_version backend =
+  let variable =
+    "VOX_" ^ String.uppercase_ascii (string_of_backend backend)
+    ^ "_SOLVER_VERSION"
+  in
+  match Sys.getenv_opt variable with
+  | Some version when not (String.equal version "") -> Some version
+  | Some _ | None -> None
+
+let command_is_simple command =
+  let forbidden = "'\"`$;|&<>(){}[]*?!\n\r\t\\" in
+  let tokens =
+    String.split_on_char ' ' (String.trim command)
+    |> List.filter (fun token -> not (String.equal token ""))
+  in
+  match tokens with
+  | [] -> None
+  | executable :: _
+    when String.equal (Filename.basename executable) "env"
+         || String.equal (Filename.basename executable) "sh"
+         || String.equal (Filename.basename executable) "bash"
+         || String.contains executable '='
+         || List.mem "-c" tokens ->
+    None
+  | executable :: _ ->
+    if
+      List.exists
+        (fun token ->
+          String.exists (fun character -> String.contains forbidden character)
+            token)
+        tokens
+    then None
+    else Some executable
+
+let solver_basename_matches backend executable =
+  let basename = Filename.basename executable in
+  match backend with
+  | Z3 -> String.equal basename "z3" || String.equal basename "z3.exe"
+  | Lean -> String.equal basename "lean" || String.equal basename "lean.exe"
+  | Oxsmt ->
+    String.equal basename "oxsmt"
+    || String.equal basename "oxsmt.exe"
+    || String.equal basename "vox_oxsmt_runner.exe"
+
+let declared_command_fingerprint ~backend command =
+  Option.map
+    (fun version -> command ^ "|declared=" ^ version)
+    (declared_solver_version backend)
+
+let command_fingerprint ~backend = function
+  | None -> None
+  | Some command ->
+    begin
+      match command_is_simple command with
+      | Some executable when solver_basename_matches backend executable ->
+        Option.bind (resolve_executable executable) (fun executable ->
+          Option.map (fun identity -> command ^ "|" ^ identity)
+            (file_digest_identity executable))
+      | Some _ | None -> declared_command_fingerprint ~backend command
+    end
+
+let cache_key ~backend ~implementation ~solver ~options ~payload =
+  Option.map
+    (fun compiler_identity ->
+      String.concat "\n"
+        [ key_field "schema" Persistent_cache.schema;
+          key_field "backend" (string_of_backend backend);
+          key_field "compiler" (Config.version ^ "|" ^ compiler_identity);
+          key_field "implementation" implementation;
+          key_field "solver" solver;
+          option_key_field "declared-solver-version"
+            (declared_solver_version backend);
+          key_field "options" options;
+          key_field "payload" payload;
+        ])
+    (compiler_implementation_identity ())
+
+module Lean_backend_uncached = struct
   let backend = Lean
   let capabilities = capabilities backend
+
+  let cache_key ~command:_ { env; condition; prove_contents = _ } =
+    match Vox_lean.emit ~env condition with
+    | Error _ -> None
+    | Ok payload ->
+      let lean = Vox_lean.resolve_lean () in
+      Option.bind lean (fun lean ->
+        Option.bind (resolve_executable lean) (fun lean ->
+          Option.bind (file_digest_identity lean) (fun solver ->
+          cache_key ~backend ~implementation:"lean-translation-v1" ~solver
+              ~options:"timeout=30;linter=unusedVariables" ~payload)))
 
   let discharge ~command:_ { env; condition; prove_contents = _ } =
     let lean = Vox_lean.discharge ~env condition in
@@ -166,9 +713,25 @@ let verdict_of_smt = function
   | Vox_smt.Solver_error -> Solver_error
   | Vox_smt.Unavailable -> Unavailable
 
-module Z3_backend = struct
+module Z3_backend_uncached = struct
   let backend = Z3
   let capabilities = capabilities backend
+
+  let cache_key ~command { env; condition; prove_contents } =
+    let command = z3_command command in
+    let solver = command_fingerprint ~backend command in
+    let payload =
+      Result.to_option (Vox_smt.emit ~query:Vox_smt.Prove ~env condition)
+      |> Option.map (fun obligation ->
+        String.concat "\n"
+          [ key_field "obligation" obligation;
+            option_key_field "custom-prove" prove_contents;
+          ])
+    in
+    Option.bind solver
+      (fun solver -> Option.bind payload (fun payload ->
+        cache_key ~backend ~implementation:"smt-translation-v2"
+          ~solver ~options:"timeout=30;input=stdin;unsat-core=true" ~payload))
 
   let discharge ~command { env; condition; prove_contents } =
     let smt =
@@ -184,9 +747,35 @@ module Z3_backend = struct
     }
 end
 
-module Oxsmt_backend = struct
+module Oxsmt_backend_uncached = struct
   let backend = Oxsmt
   let capabilities = capabilities backend
+
+  let cache_key ~command { env; condition; prove_contents } =
+    let timeout = oxsmt_timeout_seconds () in
+    let legacy = legacy_oxsmt_external () in
+    let payload =
+      Result.to_option (Vox_smt.emit ~query:Vox_smt.Prove ~env condition)
+      |> Option.map (fun obligation ->
+        String.concat "\n"
+          [ key_field "obligation" obligation;
+            (if legacy then option_key_field "custom-prove" prove_contents
+             else key_field "custom-prove" "ignored-by-in-process-oxsmt");
+          ])
+    in
+    Option.bind payload
+      (fun payload ->
+        let solver =
+          if legacy then command_fingerprint ~backend (oxsmt_command command)
+          else Some "oxsmt-ab187d661c-in-process"
+        in
+        Option.bind solver (fun solver ->
+          cache_key ~backend ~implementation:"oxsmt-translation-v2"
+            ~solver
+            ~options:
+              (Printf.sprintf "timeout=%d;legacy-external=%b;unsat-core=true"
+                 timeout legacy)
+            ~payload))
 
   let discharge ~command { env; condition; prove_contents } =
     let smt =
@@ -206,6 +795,11 @@ module Oxsmt_backend = struct
       unused_facts = Some smt.unused_facts;
     }
 end
+
+
+module Lean_backend = Cached (Lean_backend_uncached)
+module Z3_backend = Cached (Z3_backend_uncached)
+module Oxsmt_backend = Cached (Oxsmt_backend_uncached)
 
 let module_for_backend = function
   | Lean -> (module Lean_backend : S)

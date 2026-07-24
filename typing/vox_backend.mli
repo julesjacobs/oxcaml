@@ -54,9 +54,17 @@ module type S = sig
   val backend : backend
   val capabilities : capabilities
 
+  (** Stable, backend-specific material for persistent discharge caching.
+      [None] conservatively bypasses the cache. *)
+  val cache_key : command:string option -> obligation -> string option
+
   val discharge :
     command:string option -> obligation -> backend_result
 end
+
+(** A fail-closed persistent cache decorator.  Only proved and disproved
+    results are stored; malformed or stale entries are treated as misses. *)
+module Cached (Backend : S) : S
 
 val backend_of_string : string -> (backend, string) Stdlib.result
 val selection_of_string : string -> (selection, string) Stdlib.result

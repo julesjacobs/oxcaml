@@ -136,7 +136,7 @@
  (library_flags -linkall)
  (foreign_stubs
   (language c)
-  (names vox_timeout_stubs vox_z3_stubs))
+  (names vox_timeout_stubs vox_z3_stubs vox_cache_stubs))
  (libraries flambda2_floats oxsmt_interface)
  (modules_without_implementation
   annot
