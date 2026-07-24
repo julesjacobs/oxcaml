@@ -236,7 +236,7 @@ type t =
   ; mutable last_model : model option
       (* the self-checkable model of the most recent [Sat], reconstructed in [check_sat] *)
   ; mutable nia_rejected_model : model option
-      (* dark OXSMT_NIA incremental linearization: the candidate model most recently
+      (* OXSMT_NIA incremental linearization: the candidate model most recently
          REJECTED by the R1 [Model_check] because a nonlinear product was inconsistent
          under real multiplication. Retained so {!nia_refine} can pin those products at
          their current values and re-solve (CEGAR). [None] except right after such a
@@ -767,7 +767,7 @@ let context t = t.ctx
      admitted marker decodes to [None] (ordinary uninterpreted, at worst [unknown]), never
      reinterpreted. *)
 (* - nonlinear-integer multiplication marker ({!Oxsmt_core.Nia_config.is_mul_name}: the
-     single [.oxsmt.nia.mul] name, dark OXSMT_NIA). PAIRED check = RANK AGREEMENT +
+     single [.oxsmt.nia.mul] name, gated by OXSMT_NIA). PAIRED check = RANK AGREEMENT +
      REAL-MULTIPLICATION re-evaluation: {!Model_check} evaluates a 2-argument
      [.oxsmt.nia.mul] application as actual integer multiplication of its argument values
      and fails closed on any other shape, so a forged/mis-ranked marker cannot be
@@ -1368,7 +1368,7 @@ let term_has_reserved ?(allowed = []) datatypes (t0 : Term.t) =
        their exact symbols in the validated registry. Exempt only those registered
        symbols; an arbitrary [.oxsmt.*] symbol remains rejected. *)
     && Datatype_defs.tester_of_sym datatypes s = None
-    (* the nonlinear-integer product marker (dark OXSMT_NIA) is theory VOCABULARY that
+    (* the nonlinear-integer product marker (OXSMT_NIA) is theory VOCABULARY that
        legitimately appears in a user assertion after abstraction, exactly like the
        bit-vector markers above; it cannot be user-forged (declaration doors reject
        [.oxsmt.*], and [Context.app] refuses a symbol with no cap-granted rank), and its
@@ -3050,7 +3050,7 @@ let commit_sat t =
       Unknown)
 ;;
 
-(* dark OXSMT_NIA incremental linearization (CEGAR refinement). After a [check_sat] that
+(* OXSMT_NIA incremental linearization (CEGAR refinement). After a [check_sat] that
    returned [Unknown] because the R1 model check rejected a candidate whose nonlinear
    product was inconsistent under real multiplication, PIN each abstracted product at its
    value in that rejected model — assert the conditional point lemma

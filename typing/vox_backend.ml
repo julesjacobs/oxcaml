@@ -751,7 +751,7 @@ module Oxsmt_backend_uncached = struct
   let backend = Oxsmt
   let capabilities = capabilities backend
 
-  let in_process_revision = "6f5684adda41769ce0be064ea40e1fead979df6c"
+  let in_process_revision = "036b29692b057e98df701df6a1517991f4d98cdd"
 
   (* Oxsmt has additional experimental runtime levers beyond the six enabled
      by the supported profile. Keep this sorted list synchronized with every

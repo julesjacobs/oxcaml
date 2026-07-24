@@ -77,7 +77,7 @@ let ev_with
       let name = Symbol.name sym in
       if Nia_config.is_mul_name name && Iarr.length args = 2
       then (
-        (* Nonlinear-integer product marker (dark OXSMT_NIA): evaluate as ACTUAL integer
+        (* Nonlinear-integer product marker (OXSMT_NIA): evaluate as ACTUAL integer
            multiplication of the argument values, NOT via the reconstructed uninterpreted
            table. This is the SAT-soundness gate — a candidate model in which the product
            constraint is violated makes the enclosing assertion evaluate false and fails

@@ -1,20 +1,20 @@
-(* Nonlinear integer arithmetic (QF_NIA) support is DARK by default: a tri-state env lever
-   following the fleet convention. Unlike the LRA flip this defaults OFF, so an unset (or
-   force-OFF) environment is byte-identical to trunk — the QF_NIA/NIA logic names stay
-   rejected at [set-logic] and no [.oxsmt.nia.mul] abstraction is ever built.
+(* Nonlinear integer arithmetic (QF_NIA) support is ON by default. The tri-state env lever
+   follows the fleet convention used for the LRA rollout:
 
-   - unset -> OFF (the dark default; byte-identical to trunk)
-   - "1"/"true"/"yes"/"on" (any case, trimmed) -> ON
-   - any other value (incl. "0"/"false"/typos) -> OFF (the conservative default). Read at
-     most once; every gate routes through {!enabled}. *)
+   - unset -> ON
+   - "0"/"false"/"no"/"off" (any case, trimmed) -> OFF; this force-OFF setting
+     byte-recovers the pre-rollout behaviour
+   - any other value (including the positive spellings and typos) -> ON, the default.
+
+   Read at most once; every gate routes through {!enabled}. *)
 let value =
   lazy
     (match Sys.getenv_opt "OXSMT_NIA" with
-     | None -> false
+     | None -> true
      | Some value ->
        (match String.trim (String.lowercase_ascii value) with
-        | "1" | "true" | "yes" | "on" -> true
-        | _ -> false))
+        | "0" | "false" | "no" | "off" -> false
+        | _ -> true))
 ;;
 
 let enabled () = Lazy.force value

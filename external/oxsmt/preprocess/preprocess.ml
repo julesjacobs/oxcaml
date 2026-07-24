@@ -206,6 +206,82 @@ let ite_removal t root =
 (* ------------------------------------------------------------------ *)
 (* div_mod_elimination. *)
 
+(* Bounded bilinear normalization for the reserved nonlinear-integer product marker.
+   Node arithmetic already represents each integer linear form canonically. Distributing
+   one marker over two such forms and ordering each variable pair therefore maps equal
+   degree-2 polynomials to the same core term before they reach EUF+LIA.
+
+   Only degree-2 products are expanded: a factor that is itself a nonlinear marker takes
+   the old path. The complete Cartesian product is checked against the cap before any term
+   is built; an ineligible or over-cap product is returned unchanged and retains the
+   existing fail-closed model check under real multiplication. *)
+let nia_bilinear_expansion_limit = 64
+
+type nia_linear_factor =
+  { coefficients : (Term.t * Bigint.t) list
+  ; constant : Bigint.t
+  }
+
+let is_nia_product (term : Term.t) =
+  match term.node with
+  | Term.App (symbol, args) ->
+    Nia_config.is_mul_name (Symbol.name symbol) && Iarr.length args = 2
+  | _ -> false
+;;
+
+let nia_linear_factor (term : Term.t) =
+  match term.node with
+  | Term.Int_const constant -> Some { coefficients = []; constant }
+  | Term.Arith linear ->
+    let coefficients = Iarr.to_list linear.coeffs in
+    if List.exists (fun (atom, _) -> is_nia_product atom) coefficients
+    then None
+    else Some { coefficients; constant = linear.const }
+  | _ when is_nia_product term -> None
+  | _ -> Some { coefficients = [ term, Bigint.one ]; constant = Bigint.zero }
+;;
+
+let normalize_nia_bilinear ctx symbol left right =
+  match nia_linear_factor left, nia_linear_factor right with
+  | Some left, Some right ->
+    let left_width = List.length left.coefficients + 1 in
+    let right_width = List.length right.coefficients + 1 in
+    if left_width > nia_bilinear_expansion_limit / right_width
+    then None
+    else (
+      let pair_terms =
+        List.concat_map
+          (fun (left_atom, left_coefficient) ->
+             List.map
+               (fun (right_atom, right_coefficient) ->
+                  let first, second =
+                    if Term.compare left_atom right_atom <= 0
+                    then left_atom, right_atom
+                    else right_atom, left_atom
+                  in
+                  ( Bigint.mul left_coefficient right_coefficient
+                  , Context.app ctx symbol [ first; second ] ))
+               right.coefficients)
+          left.coefficients
+      in
+      let left_linear =
+        List.map
+          (fun (atom, coefficient) -> Bigint.mul coefficient right.constant, atom)
+          left.coefficients
+      in
+      let right_linear =
+        List.map
+          (fun (atom, coefficient) -> Bigint.mul coefficient left.constant, atom)
+          right.coefficients
+      in
+      Some
+        (Context.linear_combination_big
+           ctx
+           (pair_terms @ left_linear @ right_linear)
+           (Bigint.mul left.constant right.constant)))
+  | None, _ | _, None -> None
+;;
+
 let div_mod_elimination t root =
   let ctx = t.ctx in
   let div_sym = Env.div_sym t.env in
@@ -270,6 +346,21 @@ let div_mod_elimination t root =
       in
       let q, r = get_qr x' dv in
       if Symbol.equal sym div_sym then q else r
+    | App (sym, args)
+      when Nia_config.is_mul_name (Symbol.name sym)
+           && Nia_config.enabled ()
+           && Iarr.length args = 2
+           && Sort.equal term.sort Sort.int
+           && Sort.equal (Iarr.get args 0).sort Sort.int
+           && Sort.equal (Iarr.get args 1).sort Sort.int ->
+      let left = go (Iarr.get args 0) in
+      let right = go (Iarr.get args 1) in
+      (match normalize_nia_bilinear ctx sym left right with
+       | Some normalized -> normalized
+       | None ->
+         if same_tag left (Iarr.get args 0) && same_tag right (Iarr.get args 1)
+         then term
+         else Context.app ctx sym [ left; right ])
     | Bool_const _ | Int_const _ | Real_const _ -> term
     | App (sym, args) ->
       (match map_go go (Iarr.to_list args) with

@@ -1,5 +1,5 @@
-(** Dark process-wide gate for nonlinear integer arithmetic (QF_NIA). Reads [OXSMT_NIA] at
-    most once; defaults OFF so an unset environment is byte-identical to trunk. *)
+(** Process-wide gate for nonlinear integer arithmetic (QF_NIA). Reads [OXSMT_NIA] at
+    most once; defaults ON, with [0], [false], [no], and [off] as force-OFF values. *)
 val enabled : unit -> bool
 
 (** The reserved function-symbol name abstracting a nonlinear integer product

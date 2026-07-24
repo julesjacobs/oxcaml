@@ -11,7 +11,9 @@
       determined ([v = if c then a else b]), so the witness is computable.
     - {!div_mod_elimination} — {e equisatisfiable}; introduces a fresh quotient/remainder
       pair per distinct (dividend, divisor). Equivalence modulo those symbols: euclidean
-      [q]/[r] are uniquely determined.
+      [q]/[r] are uniquely determined. It also canonically expands bounded bilinear
+      integer products marked by [.oxsmt.nia.mul]; ineligible or over-cap products remain
+      unchanged and retain fail-closed model checking.
     - {!run} — {!div_mod_elimination} then {!ite_removal}; equisatisfiable, fresh symbols
       from both.
 
@@ -77,7 +79,9 @@ val ite_removal : t -> Term.t -> Term.t * definition list
     constraints [x = d*q + r /\ 0 <= r < |d|] (ADR-0003 required #4). A [div] and a [mod]
     of the same (dividend, divisor) share one [q]/[r] pair. A non-constant or zero divisor
     raises {!Term.Unsupported} — but {!Context.div}/{!Context.mod_} already reject those
-    at construction, so this pass never encounters one in practice. *)
+    at construction, so this pass never encounters one in practice. The same DAG walk
+    canonically expands bounded bilinear [.oxsmt.nia.mul] applications over normalized
+    integer linear forms; products outside that bounded degree-2 fragment are unchanged. *)
 val div_mod_elimination : t -> Term.t -> Term.t * definition list
 
 (** [run] = {!div_mod_elimination} then {!ite_removal}. This order clears both pipeline

@@ -418,7 +418,7 @@ val pop : t -> unit
     Repeatable; more assertions or push/pop may follow. *)
 val check_sat : t -> verdict
 
-(** [nia_refine t] is the dark OXSMT_NIA incremental-linearization refinement step. After
+(** [nia_refine t] is the OXSMT_NIA incremental-linearization refinement step. After
     a [check_sat] that returned [Unknown] because the model self-check rejected a
     candidate whose nonlinear product was inconsistent under real multiplication, it pins
     each abstracted product at that model's values (a sound conditional point lemma) so

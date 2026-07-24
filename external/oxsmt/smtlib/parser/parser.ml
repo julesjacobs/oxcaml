@@ -209,7 +209,7 @@ type pstate =
   ; mutable arrays : Array_defs.t (* the accumulated array select/store symbol registry *)
   ; mutable nia_mul_sym : Symbol.t option
       (* the single [.oxsmt.nia.mul : (Int Int) Int] symbol abstracting nonlinear integer
-         products (dark OXSMT_NIA), minted on first use and reused so hash-consing gives
+         products (gated by OXSMT_NIA), minted on first use and reused so hash-consing gives
          congruence for free. [None] until the first nonlinear product is read. *)
   ; mutable nia_products : Nia_lin.product list
   (* every distinct abstracted product [p = a*b] discovered while reading terms; drained
@@ -1384,7 +1384,7 @@ and read_xor st scope args =
     List.fold_left (fun acc a -> Context.not_ st.ctx (Context.eq st.ctx acc a)) first rest
   | _ -> malformedf "xor expects >= 2 arguments"
 
-(* Abstract one binary integer product [a*b] as [(.oxsmt.nia.mul a b)] (dark OXSMT_NIA):
+(* Abstract one binary integer product [a*b] as [(.oxsmt.nia.mul a b)] (OXSMT_NIA):
    mint-or-reuse the single shared symbol so hash-consing gives congruence for free, and
    register the product for end-of-parse lemma emission ({!Nia_lin}). *)
 and nia_mul_term st a b =
@@ -1461,7 +1461,7 @@ and read_mul ?expected st scope args =
     in
     match nonconsts with
     | first :: (_ :: _ as rest) when Nia_config.enabled () ->
-      (* Nonlinear integer product (dark OXSMT_NIA). Abstract the >= 2 non-constant
+      (* Nonlinear integer product (OXSMT_NIA). Abstract the >= 2 non-constant
          factors into a left-associated chain of uninterpreted [.oxsmt.nia.mul]
          applications ([x*y*z] -> [mul(mul(x,y),z)]), then fold any constant factors as a
          coefficient. Sound: the abstraction is an ordinary uninterpreted function (unsat
@@ -2315,7 +2315,7 @@ let known_logic = function
   | "QF_UFBV"
   | "QF_BVLIA"
   | "QF_UFBVLIA" -> true
-  (* Nonlinear integer arithmetic (dark OXSMT_NIA). Accepted at the NAME level only when
+  (* Nonlinear integer arithmetic (OXSMT_NIA). Accepted at the NAME level only when
      the lever is on: a nonlinear product is abstracted to an uninterpreted
      [.oxsmt.nia.mul] application ({!read_mul}) reduced to QF_UFLIA + sound multiplication
      lemmas, and every [sat] is re-checked under REAL multiplication ({!Model_check}). Any
@@ -2608,7 +2608,7 @@ let run st sexps =
          | Some other, _ -> unsupportedf "unsupported command: %s" other
          | None, _ -> malformedf "malformed command: %s" (Sexp.to_string cmd)))
     sexps;
-  (* Emit the nonlinear-multiplication lemmas (dark OXSMT_NIA) as extra top-level
+  (* Emit the nonlinear-multiplication lemmas (OXSMT_NIA) as extra top-level
      assertions, one set per DISTINCT abstracted product. Each is a valid integer
      consequence of [p = a*b] ({!Nia_lin}), so they are equisatisfiable with the original
      nonlinear formula and safe to add to the asserted set (they also hold under
@@ -2702,7 +2702,10 @@ let parse src =
   let ctx = Context.create env in
   let minter =
     Internal_minter.create
-      ~admit:(fun name -> Array_defs.is_op_name name || Bv.is_bv_name name)
+      ~admit:(fun name ->
+        Array_defs.is_op_name name
+        || Bv.is_bv_name name
+        || (Nia_config.enabled () && Nia_config.is_mul_name name))
       cap
       env
   in

@@ -1,4 +1,4 @@
-(* Sound linear lemmas for the nonlinear-integer abstraction (dark OXSMT_NIA). Each
+(* Sound linear lemmas for the OXSMT_NIA-gated nonlinear-integer abstraction. Each
    product [a*b] is abstracted to an uninterpreted term [p = (.oxsmt.nia.mul a b)]
    ({!Nia_config}); this module emits the axioms that partially constrain [p] toward real
    multiplication.

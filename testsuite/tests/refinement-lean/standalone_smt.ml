@@ -147,6 +147,16 @@ let tuple_type fields =
 
 let int_type = Predef.type_int
 let bool_type = Predef.type_bool
+let stdlib_path = Path.Pident (Ident.create_persistent "Stdlib")
+let bigint_path = Path.Pdot (stdlib_path, "Bigint")
+
+let bigint_type =
+  create_expr
+    (Tconstr (Path.Pdot (bigint_path, "t"), [], ref Mnil))
+    ~level:0
+    ~scope:0
+    ~id:(fresh_type_id ())
+
 let option_type = Predef.type_option int_type
 let list_type = Predef.type_list int_type
 let pair_type = tuple_type [None, int_type; None, bool_type]
@@ -189,8 +199,11 @@ let cons head tail =
          [head; tail] ))
 
 let primitive type_ name =
-  let stdlib = Path.Pident (Ident.create_persistent "Stdlib") in
-  let path = Path.Pdot (stdlib, name) in
+  let path = Path.Pdot (stdlib_path, name) in
+  node type_ (Rexp_ident (Rfree (Rapp path)))
+
+let bigint_primitive type_ name =
+  let path = Path.Pdot (bigint_path, name) in
   node type_ (Rexp_ident (Rfree (Rapp path)))
 
 let apply type_ function_ arguments =
@@ -207,7 +220,28 @@ let add left right = binary "+" int_type int_type left right
 let subtract left right = binary "-" int_type int_type left right
 let multiply left right = binary "*" int_type int_type left right
 let greater left right = binary ">" int_type bool_type left right
+let greater_equal left right = binary ">=" int_type bool_type left right
 let less_equal left right = binary "<=" int_type bool_type left right
+
+let bigint_binary name result_type left right =
+  let function_type =
+    arrow bigint_type (arrow bigint_type result_type)
+  in
+  apply result_type (bigint_primitive function_type name) [left; right]
+
+let bigint_of_int value =
+  apply bigint_type
+    (bigint_primitive (arrow int_type bigint_type) "of_int")
+    [int value]
+
+let bigint_equal left right =
+  bigint_binary "equal" bool_type left right
+
+let bigint_add left right =
+  bigint_binary "add" bigint_type left right
+
+let bigint_multiply left right =
+  bigint_binary "mul" bigint_type left right
 
 let conjunction left right =
   binary "&&" bool_type bool_type left right
@@ -244,6 +278,179 @@ let arithmetic_and_booleans =
       (conjunction (bool true) (greater (bound x) (int (-1))))
   in
   vc ~facts:[fact x_value] (conjunction arithmetic booleans)
+
+let nonlinear_square_sum =
+  let left =
+    { rb_id = Ident.create_scoped ~scope:10 "square_sum_left";
+      rb_type = bigint_type;
+    }
+  in
+  let right =
+    { rb_id = Ident.create_scoped ~scope:10 "square_sum_right";
+      rb_type = bigint_type;
+    }
+  in
+  let sum = bigint_add (bound left) (bound right) in
+  let lhs = bigint_multiply sum sum in
+  let rhs =
+    bigint_add
+      (bigint_add
+         (bigint_multiply (bound left) (bound left))
+         (bigint_multiply
+            (bigint_multiply (bigint_of_int 2) (bound left))
+            (bound right)))
+      (bigint_multiply (bound right) (bound right))
+  in
+  vc (bigint_equal lhs rhs)
+
+let nonlinear_false_square_sum =
+  let left =
+    { rb_id = Ident.create_scoped ~scope:14 "false_square_sum_left";
+      rb_type = bigint_type;
+    }
+  in
+  let right =
+    { rb_id = Ident.create_scoped ~scope:14 "false_square_sum_right";
+      rb_type = bigint_type;
+    }
+  in
+  let sum = bigint_add (bound left) (bound right) in
+  let lhs = bigint_multiply sum sum in
+  let rhs =
+    bigint_add
+      (bigint_add
+         (bigint_multiply (bound left) (bound left))
+         (bigint_multiply
+            (bigint_multiply (bigint_of_int 3) (bound left))
+            (bound right)))
+      (bigint_multiply (bound right) (bound right))
+  in
+  vc
+    ~facts:
+      [ fact
+          (disjunction
+             (bigint_equal (bound left) (bigint_of_int 0))
+             (bigint_equal (bound left) (bigint_of_int 1)));
+        fact (bigint_equal (bound right) (bigint_of_int 1));
+      ]
+    (bigint_equal lhs rhs)
+
+let nonlinear_false_pair_conflation =
+  let variable name =
+    { rb_id = Ident.create_scoped ~scope:15 name; rb_type = bigint_type }
+  in
+  let a = variable "pair_conflation_a" in
+  let b = variable "pair_conflation_b" in
+  let c = variable "pair_conflation_c" in
+  let d = variable "pair_conflation_d" in
+  let lhs =
+    bigint_add
+      (bigint_multiply (bound a) (bound b))
+      (bigint_multiply (bound c) (bound d))
+  in
+  let rhs =
+    bigint_add
+      (bigint_multiply (bound a) (bound d))
+      (bigint_multiply (bound c) (bound b))
+  in
+  vc
+    ~facts:
+      [ fact
+          (disjunction
+             (bigint_equal (bound a) (bigint_of_int 0))
+             (bigint_equal (bound a) (bigint_of_int 1)));
+        fact (bigint_equal (bound b) (bigint_of_int 1));
+        fact (bigint_equal (bound c) (bigint_of_int 0));
+        fact (bigint_equal (bound d) (bigint_of_int 0));
+      ]
+    (bigint_equal lhs rhs)
+
+let nonlinear_commutativity ~scope ~left_count ~right_count =
+  let variables side count =
+    List.init count (fun index ->
+      { rb_id =
+          Ident.create_scoped ~scope
+            (Printf.sprintf "commutativity_%s_%d" side index);
+        rb_type = bigint_type;
+      })
+  in
+  let sum variables =
+    List.fold_left
+      (fun sum variable -> bigint_add sum (bound variable))
+      (bigint_of_int 0) variables
+  in
+  let left = sum (variables "left" left_count) in
+  let right = sum (variables "right" right_count) in
+  vc
+    (bigint_equal
+       (bigint_multiply left right)
+       (bigint_multiply right left))
+
+let nonlinear_commutativity_at_cap =
+  nonlinear_commutativity ~scope:16 ~left_count:7 ~right_count:7
+
+let nonlinear_commutativity_over_cap =
+  nonlinear_commutativity ~scope:17 ~left_count:8 ~right_count:7
+
+let nonlinear_nested =
+  let value =
+    { rb_id = Ident.create_scoped ~scope:11 "nested_value";
+      rb_type = bigint_type;
+    }
+  in
+  let value_term = bound value in
+  let cube =
+    bigint_multiply (bigint_multiply value_term value_term) value_term
+  in
+  vc ~facts:[fact (bigint_equal value_term (bigint_of_int 2))]
+    (bigint_equal cube (bigint_of_int 8))
+
+let nonlinear_zero_lemma =
+  let left =
+    { rb_id = Ident.create_scoped ~scope:12 "zero_left";
+      rb_type = bigint_type;
+    }
+  in
+  let right =
+    { rb_id = Ident.create_scoped ~scope:12 "zero_right";
+      rb_type = bigint_type;
+    }
+  in
+  vc ~facts:[fact (bigint_equal (bound left) (bigint_of_int 0))]
+    (bigint_equal
+       (bigint_multiply (bound left) (bound right))
+       (bigint_of_int 0))
+
+let nonlinear_over_cap =
+  let variables =
+    List.init 9 (fun index ->
+      { rb_id =
+          Ident.create_scoped ~scope:13
+            (Printf.sprintf "over_cap_%d" index);
+        rb_type = bigint_type;
+      })
+  in
+  let sum =
+    List.fold_left
+      (fun sum variable -> bigint_add sum (bound variable))
+      (bigint_of_int 0) variables
+  in
+  let facts =
+    List.map
+      (fun variable ->
+        fact (bigint_equal (bound variable) (bigint_of_int 2)))
+      variables
+  in
+  vc ~facts
+    (bigint_equal (bigint_multiply sum sum) (bigint_of_int 324))
+
+let ordinary_nonlinear_wrap_sign =
+  let value =
+    { rb_id = Ident.create_scoped ~scope:18 "wrap_sign_value";
+      rb_type = int_type;
+    }
+  in
+  vc (greater_equal (multiply (bound value) (bound value)) (int 0))
 
 let unused_fact_usage =
   let x_value = equal int_type (bound x) (int 4) in
@@ -348,6 +555,72 @@ let cases =
   ]
 
 let () =
+  match Sys.getenv_opt "VOX_OXSMT_NIA_TEST_MODE" with
+  | Some "on" ->
+    assert
+      ((Vox_smt.discharge_oxsmt ~env nonlinear_square_sum).verdict
+       = Vox_smt.Proved);
+    assert
+      ((Vox_smt.discharge_oxsmt ~env nonlinear_zero_lemma).verdict
+       = Vox_smt.Proved);
+    List.iter
+      (fun condition ->
+        let result = Vox_smt.discharge_oxsmt ~env condition in
+        assert (result.verdict = Vox_smt.Not_proved);
+        assert
+          (result.detail = Some "prove query: sat; disprove query: sat"))
+      [nonlinear_false_square_sum; nonlinear_false_pair_conflation];
+    assert
+      ((Vox_smt.discharge_oxsmt
+          ~env nonlinear_commutativity_at_cap).verdict
+       = Vox_smt.Proved);
+    let over_cap_commutativity =
+      Vox_smt.discharge_oxsmt ~env nonlinear_commutativity_over_cap
+    in
+    assert (over_cap_commutativity.verdict = Vox_smt.Not_proved);
+    assert
+      (over_cap_commutativity.detail
+       = Some "prove query: unknown; disprove query: sat");
+    let nested = Vox_smt.discharge_oxsmt ~env nonlinear_nested in
+    assert (nested.verdict = Vox_smt.Not_proved);
+    assert
+      (nested.detail = Some "prove query: unknown; disprove query: sat");
+    let over_cap = Vox_smt.discharge_oxsmt ~env nonlinear_over_cap in
+    assert (over_cap.verdict = Vox_smt.Not_proved);
+    assert
+      (over_cap.detail = Some "prove query: unknown; disprove query: sat");
+    exit 0
+  | Some "off" ->
+    let result = Vox_smt.discharge_oxsmt ~env nonlinear_square_sum in
+    assert (result.verdict = Vox_smt.Not_proved);
+    assert
+      (result.detail = Some "prove query: unknown; disprove query: unknown");
+    exit 0
+  | Some mode -> failwith ("unknown VOX_OXSMT_NIA_TEST_MODE: " ^ mode)
+  | None -> ()
+
+let nia_test_command ~mode ~nia =
+  let environment =
+    match nia with
+    | None -> ["env"; "-u"; "OXSMT_NIA"]
+    | Some value -> ["env"; "OXSMT_NIA=" ^ Filename.quote value]
+  in
+  String.concat " "
+    (environment
+     @ [ "VOX_OXSMT_NIA_TEST_MODE=" ^ Filename.quote mode;
+         Filename.quote Sys.executable_name;
+       ])
+
+let () =
+  assert (Sys.command (nia_test_command ~mode:"on" ~nia:None) = 0);
+  assert (Sys.command (nia_test_command ~mode:"off" ~nia:(Some "0")) = 0);
+  assert (Sys.command (nia_test_command ~mode:"off" ~nia:(Some "off")) = 0);
+  assert
+    (Sys.command
+       (nia_test_command ~mode:"on" ~nia:(Some "unrecognized"))
+     = 0)
+
+let () =
   List.iter
     (fun (_, condition) ->
       let result = Vox_smt.discharge_oxsmt ~env condition in
@@ -378,8 +651,14 @@ let () =
     let square = multiply (bound x) (bound x) in
     vc (equal int_type square square)
   in
-  let unknown = Vox_smt.discharge_oxsmt ~env nonlinear in
-  assert (unknown.verdict = Vox_smt.Not_proved);
+  List.iter
+    (fun condition ->
+      let rejected = Vox_smt.discharge_oxsmt ~env condition in
+      assert (rejected.verdict = Vox_smt.Not_proved);
+      assert
+        (rejected.detail
+         = Some "prove query: unknown; disprove query: unknown"))
+    [nonlinear; ordinary_nonlinear_wrap_sign];
   let original_mask =
     Unix.sigprocmask Unix.SIG_BLOCK [Sys.sigalrm]
   in
@@ -931,6 +1210,7 @@ let cache_test_environment =
     "OXSMT_DIRECT_TERM_ITE";
     "OXSMT_ASSUMPTION_FAST_COMPLEMENTS";
     "OXSMT_ASSUMPTION_PREPROCESS_PROPFOLD";
+    "OXSMT_NIA";
     "PATH";
   ]
 
@@ -1382,7 +1662,7 @@ let () =
         (match oxsmt_key_a with
          | Some key ->
            string_contains
-             ~needle:"6f5684adda41769ce0be064ea40e1fead979df6c"
+             ~needle:"036b29692b057e98df701df6a1517991f4d98cdd"
              key
          | None -> false);
       List.iter
@@ -1410,6 +1690,7 @@ let () =
           "OXSMT_DIRECT_TERM_ITE";
           "OXSMT_ASSUMPTION_FAST_COMPLEMENTS";
           "OXSMT_ASSUMPTION_PREPROCESS_PROPFOLD";
+          "OXSMT_NIA";
         ]);
   print_endline
     "solver cache: persistent hits, exact inputs, invalidation, corruption, failures, and concurrent writes checked"

@@ -2,6 +2,9 @@ open Types
 
 module Oxsmt_context = Oxsmt_core.Context
 module Oxsmt_datatype_defs = Oxsmt_core.Datatype_defs
+module Oxsmt_internal_minter = Oxsmt_core.Internal_minter
+module Oxsmt_nia_config = Oxsmt_core.Nia_config
+module Oxsmt_nia_lin = Oxsmt_core.Nia_lin
 module Oxsmt_rank = Oxsmt_core.Rank
 module Oxsmt_session = Oxsmt_interface.Session
 module Oxsmt_sort = Oxsmt_core.Sort
@@ -1427,6 +1430,9 @@ type oxsmt_environment =
     datatypes : (string * Oxsmt_datatype_defs.datatype) list;
     references : (reference * Oxsmt_core.Symbol.t) list;
     variables : (variable * Oxsmt_core.Symbol.t) list;
+    nia_minter : Oxsmt_internal_minter.t option;
+    mutable nia_mul_symbol : Oxsmt_core.Symbol.t option;
+    mutable nia_products : Oxsmt_nia_lin.product list;
   }
 
 let oxsmt_shapes context location =
@@ -1605,20 +1611,65 @@ let oxsmt_selector environment location key constructor_index field_index =
     error location "internal error: missing oxsmt selector %d for %s"
       field_index key
 
-let oxsmt_multiply terms location left right =
+let oxsmt_multiply ~allow_nonlinear environment location left right =
+  let terms = environment.terms in
   match left.Oxsmt_term.node, right.Oxsmt_term.node with
   | Oxsmt_term.Int_const coefficient, _ ->
     Oxsmt_context.mul_const_big terms coefficient right
   | _, Oxsmt_term.Int_const coefficient ->
     Oxsmt_context.mul_const_big terms coefficient left
-  | _ ->
+  | _ when not allow_nonlinear ->
     raise
       (Oxsmt_unsupported
          (Format.asprintf
             "%a: nonlinear integer multiplication is not supported"
             Location.print_loc location))
+  | _ ->
+    begin
+      match environment.nia_minter with
+      | None ->
+        raise
+          (Oxsmt_unsupported
+             (Format.asprintf
+                "%a: nonlinear integer multiplication is not supported"
+                Location.print_loc location))
+      | Some minter ->
+        let symbol =
+          match environment.nia_mul_symbol with
+          | Some symbol -> symbol
+          | None ->
+            let symbol =
+              Oxsmt_internal_minter.mint
+                minter Oxsmt_nia_config.mul_name
+                (Oxsmt_rank.create [Oxsmt_sort.int; Oxsmt_sort.int]
+                   Oxsmt_sort.int)
+            in
+            environment.nia_mul_symbol <- Some symbol;
+            symbol
+        in
+        let product = Oxsmt_context.app terms symbol [left; right] in
+        environment.nia_products <-
+          { Oxsmt_nia_lin.p = product; a = left; b = right }
+          :: environment.nia_products;
+        product
+    end
 
-let oxsmt_builtin terms location builtin arguments =
+let oxsmt_nia_lemmas environment =
+  let seen = Oxsmt_term.Table.create 64 in
+  let distinct_products =
+    List.filter
+      (fun { Oxsmt_nia_lin.p; _ } ->
+        match Oxsmt_term.Table.find_opt seen p with
+        | Some () -> false
+        | None ->
+          Oxsmt_term.Table.replace seen p ();
+          true)
+      environment.nia_products
+  in
+  Oxsmt_nia_lin.lemmas environment.terms distinct_products
+
+let oxsmt_builtin environment location builtin arguments =
+  let terms = environment.terms in
   let term_values = List.map fst arguments in
   let term_sorts = List.map snd arguments in
   let binary check result_sort operation =
@@ -1659,7 +1710,9 @@ let oxsmt_builtin terms location builtin arguments =
         match operation with
         | `Add -> Oxsmt_context.add terms left right
         | `Subtract -> Oxsmt_context.sub terms left right
-        | `Multiply -> oxsmt_multiply terms location left right
+        | `Multiply ->
+          oxsmt_multiply ~allow_nonlinear:false environment location
+            left right
       in
       term, left_sort
     | _ -> error location "binary builtin used with the wrong arity"
@@ -1673,7 +1726,9 @@ let oxsmt_builtin terms location builtin arguments =
         match operation with
         | `Bigint_add -> Oxsmt_context.add terms left right
         | `Bigint_sub -> Oxsmt_context.sub terms left right
-        | `Bigint_mul -> oxsmt_multiply terms location left right
+        | `Bigint_mul ->
+          oxsmt_multiply ~allow_nonlinear:true environment location
+            left right
       in
       term, Sbigint
     | _ -> error location "Bigint arithmetic used with the wrong arity"
@@ -1858,7 +1913,7 @@ let oxsmt_expression context environment expression =
           match builtin_name context reference_identifier with
           | Some builtin ->
             let term, actual_sort =
-              oxsmt_builtin environment.terms expression.rexp_loc
+              oxsmt_builtin environment expression.rexp_loc
                 builtin built_arguments
             in
             expect_sort expression.rexp_loc result_sort actual_sort;
@@ -2137,7 +2192,8 @@ let contains_substring string substring =
   in
   substring_length = 0 || loop 0
 
-let validate_oxsmt_verdict session verdict =
+let validate_oxsmt_verdict
+    ?(allow_nia_model_rejection = false) session verdict =
   let reason = Oxsmt_session.last_unknown_reason session in
   match verdict with
   | Oxsmt_session.Unknown
@@ -2148,19 +2204,25 @@ let validate_oxsmt_verdict session verdict =
          || String.equal reason "clausify-fail"
          || String.equal reason "register-poison"
          || String.equal reason "assumption-register-poison"
-         || String.ends_with ~suffix:"model-check-failed" reason ->
+         || (String.ends_with ~suffix:"model-check-failed" reason
+             && not
+                  (allow_nia_model_rejection
+                   && String.equal reason "r1-model-check-failed")) ->
     failwith ("oxsmt internal failure: " ^ reason)
   | Oxsmt_session.Sat
   | Oxsmt_session.Unsat
   | Oxsmt_session.Unknown -> verdict
 
-let check_oxsmt_session session =
+let check_oxsmt_session ?allow_nia_model_rejection session =
   let verdict = Oxsmt_session.check_sat session in
-  validate_oxsmt_verdict session verdict
+  validate_oxsmt_verdict ?allow_nia_model_rejection session verdict
 
-let check_oxsmt_session_assuming session assumptions =
+let check_oxsmt_session_assuming
+    ?allow_nia_model_rejection session assumptions =
   let result = Oxsmt_session.check_sat_assuming session assumptions in
-  ignore (validate_oxsmt_verdict session result.verdict);
+  ignore
+    (validate_oxsmt_verdict
+       ?allow_nia_model_rejection session result.verdict);
   match result.verdict, result.unsat_core with
   | Oxsmt_session.Unsat, _
   | (Oxsmt_session.Sat | Oxsmt_session.Unknown), None -> result
@@ -2318,6 +2380,11 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   check_concrete_inhabitance context vc.location;
   let session = Oxsmt_session.create () in
   let terms = Oxsmt_session.context session in
+  let nia_minter =
+    if Oxsmt_nia_config.enabled () then
+      Some (Oxsmt_session.parse_minter session)
+    else None
+  in
   let sorts, datatypes =
     oxsmt_declare_datatypes session context vc.location
   in
@@ -2333,6 +2400,9 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
       datatypes;
       references;
       variables;
+      nia_minter;
+      nia_mul_symbol = None;
+      nia_products = [];
     }
   in
   let true_term = Oxsmt_context.bool_const terms true in
@@ -2347,6 +2417,8 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   let goal, goal_sort = oxsmt_expression context environment goal in
   expect_bool vc.goal.rexp_loc goal_sort;
   let goal = Oxsmt_context.eq terms goal true_term in
+  let nia_lemmas = oxsmt_nia_lemmas environment in
+  let allow_nia_model_rejection = environment.nia_products <> [] in
   match query with
   | Prove ->
     let fact_assumptions =
@@ -2367,9 +2439,10 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
         facts fact_assumptions
     in
     Oxsmt_session.assert_presolved session
-      (guarded_facts @ [Oxsmt_context.not_ terms goal]);
+      (guarded_facts @ [Oxsmt_context.not_ terms goal] @ nia_lemmas);
     let result =
-      check_oxsmt_session_assuming session
+      check_oxsmt_session_assuming
+        ~allow_nia_model_rejection session
         (List.map snd fact_assumptions)
       |> inject_oxsmt_core_for_testing fact_assumptions
     in
@@ -2384,8 +2457,8 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
         failwith "oxsmt returned an assumption core for a non-unsat result"
     end
   | Disprove ->
-    Oxsmt_session.assert_presolved session (facts @ [goal]);
-    check_oxsmt_session session, []
+    Oxsmt_session.assert_presolved session (facts @ [goal] @ nia_lemmas);
+    check_oxsmt_session ~allow_nia_model_rejection session, []
 
 let oxsmt_query_result ~query ~timeout_seconds ~env vc =
   try
