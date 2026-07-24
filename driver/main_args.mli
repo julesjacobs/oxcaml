@@ -94,6 +94,7 @@ module type Core_options = sig
   val _vox_dump_vc_json : string -> unit
   val _vox_dump_vc_json_smt : unit -> unit
   val _vox_type_only : unit -> unit
+  val _vox_no_verify : unit -> unit
   val _vox_backend : string -> unit
   val _vox_smt_solver : string -> unit
   val _vox_oxsmt_solver : string -> unit

@@ -946,6 +946,11 @@ let mk_vox_type_only f =
     " Type-check one unit without refinement VCs or .cmi/.cmo/.cmt files; "
     ^ "skip .ml/.mli conformance checking" )
 
+let mk_vox_no_verify f =
+  ( "-vox-no-verify",
+    Arg.Unit f,
+    " Compile normally, but do not run refinement verification" )
+
 let mk_vox_backend f =
   ( "-vox-backend",
     Arg.Symbol (["lean"; "z3"; "oxsmt"; "cross"], f),
@@ -1249,6 +1254,7 @@ module type Core_options = sig
   val _vox_dump_vc_json : string -> unit
   val _vox_dump_vc_json_smt : unit -> unit
   val _vox_type_only : unit -> unit
+  val _vox_no_verify : unit -> unit
   val _vox_backend : string -> unit
   val _vox_smt_solver : string -> unit
   val _vox_oxsmt_solver : string -> unit
@@ -1655,6 +1661,7 @@ struct
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_no_verify F._vox_no_verify;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
     mk_vox_oxsmt_solver F._vox_oxsmt_solver;
@@ -1771,6 +1778,7 @@ struct
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_no_verify F._vox_no_verify;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
     mk_vox_oxsmt_solver F._vox_oxsmt_solver;
@@ -1962,6 +1970,7 @@ struct
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_no_verify F._vox_no_verify;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
     mk_vox_oxsmt_solver F._vox_oxsmt_solver;
@@ -2134,6 +2143,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_no_verify F._vox_no_verify;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
     mk_vox_oxsmt_solver F._vox_oxsmt_solver;
@@ -2288,6 +2298,7 @@ struct
     mk_vox_dump_vc_json F._vox_dump_vc_json;
     mk_vox_dump_vc_json_smt F._vox_dump_vc_json_smt;
     mk_vox_type_only F._vox_type_only;
+    mk_vox_no_verify F._vox_no_verify;
     mk_vox_backend F._vox_backend;
     mk_vox_smt_solver F._vox_smt_solver;
     mk_vox_oxsmt_solver F._vox_oxsmt_solver;
@@ -2539,18 +2550,46 @@ module Default = struct
     let _vox_dump_vc () =
       if !vox_type_only then
         raise (Arg.Bad "-vox-dump-vc and -vox-type-only are incompatible");
+      if !vox_no_verify then
+        raise (Arg.Bad "-vox-dump-vc and -vox-no-verify are incompatible");
       vox_dump_vc := true;
       unique_ids := false
-    let _vox_dump_vc_json file = vox_dump_vc_json := Some file
+    let _vox_dump_vc_json file =
+      if !vox_no_verify then
+        raise
+          (Arg.Bad
+             "-vox-dump-vc-json and -vox-no-verify are incompatible");
+      vox_dump_vc_json := Some file
 
-    let _vox_dump_vc_json_smt () = vox_dump_vc_json_smt := true
+    let _vox_dump_vc_json_smt () =
+      if !vox_no_verify then
+        raise
+          (Arg.Bad
+             "-vox-dump-vc-json-smt and -vox-no-verify are incompatible");
+      vox_dump_vc_json_smt := true
     let _vox_backend backend = vox_backend := backend
     let _vox_smt_solver command = vox_smt_solver := Some command
     let _vox_oxsmt_solver command = vox_oxsmt_solver := Some command
     let _vox_type_only () =
       if !vox_dump_vc then
         raise (Arg.Bad "-vox-type-only and -vox-dump-vc are incompatible");
+      if !vox_no_verify then
+        raise (Arg.Bad "-vox-type-only and -vox-no-verify are incompatible");
       vox_type_only := true
+    let _vox_no_verify () =
+      if !vox_dump_vc then
+        raise (Arg.Bad "-vox-no-verify and -vox-dump-vc are incompatible");
+      if Option.is_some !vox_dump_vc_json then
+        raise
+          (Arg.Bad
+             "-vox-no-verify and -vox-dump-vc-json are incompatible");
+      if !vox_dump_vc_json_smt then
+        raise
+          (Arg.Bad
+             "-vox-no-verify and -vox-dump-vc-json-smt are incompatible");
+      if !vox_type_only then
+        raise (Arg.Bad "-vox-no-verify and -vox-type-only are incompatible");
+      vox_no_verify := true
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
     let _dmatchcomp = set dump_matchcomp

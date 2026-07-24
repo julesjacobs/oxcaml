@@ -1,0 +1,4 @@
+val impossible : int{ _ = 0 } = 1
+val ordinary : int = 2
+- : int = 2
+

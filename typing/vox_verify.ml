@@ -1668,7 +1668,7 @@ let verify_seal_obligation ~env ~seal_location
   end
 
 let verify_seal_obligations ~env ~seal_location obligations =
-  if not !Clflags.vox_type_only then
+  if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
     with_fresh_refinement_alias_cache (fun () ->
       List.iter (verify_seal_obligation ~env ~seal_location) obligations)
 
