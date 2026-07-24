@@ -1,4 +1,5 @@
 (* TEST
+ flags = "-vox-backend lean";
  expect;
 *)
 

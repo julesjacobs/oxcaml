@@ -1,4 +1,5 @@
 (* TEST
+ flags = "-vox-backend lean";
  readonly_files = "\
    parameterized_abstract_term_is_not_inhabitant_source.ml \
    parameterized_abstract_term_is_not_inhabitant.reference \

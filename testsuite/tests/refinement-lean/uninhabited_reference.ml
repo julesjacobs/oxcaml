@@ -1,4 +1,5 @@
 (* TEST
+ flags = "-vox-backend lean";
  readonly_files = "\
    uninhabited_reference_source.ml uninhabited_reference.reference \
  ";

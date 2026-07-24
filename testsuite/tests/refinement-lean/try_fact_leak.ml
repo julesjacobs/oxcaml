@@ -1,11 +1,12 @@
 (* TEST
+ flags = "-vox-backend lean";
  readonly_files = "try_fact_leak_lib.ml try_fact_leak_lib.mli";
  setup-ocamlc.byte-build-env;
  module = "try_fact_leak_lib.mli";
  ocamlc.byte;
  module = "try_fact_leak_lib.ml";
  ocamlc.byte;
- flags += "-I ocamlc.byte ocamlc.byte/try_fact_leak_lib.cmo";
+ flags += " -I ocamlc.byte ocamlc.byte/try_fact_leak_lib.cmo";
  expect;
 *)
 
