@@ -8852,7 +8852,6 @@ and type_expect_
               ( Texp_refinement_application
                   { rapp_arguments = refinement_application;
                     rapp_result = instance ty_ret;
-                    rapp_proof_erased = false;
                   },
                 loc,
                 [] )
@@ -12016,7 +12015,6 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
             ( Texp_refinement_application
                 { rapp_arguments = contracts;
                   rapp_result = instance application_result;
-                  rapp_proof_erased = false;
                 },
               texp.exp_loc,
               [] )

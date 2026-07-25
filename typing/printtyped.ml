@@ -629,10 +629,8 @@ and expression_extra i ppf (extra, loc, attrs) =
       alloc_const_option_mode i ppf m.mode_modes;
       alloc_modes_opt i ppf m;
   | Texp_refinement_application application ->
-      line i ppf
-        "Texp_refinement_application %d proof_erased=%b result=%a\n"
+      line i ppf "Texp_refinement_application %d result=%a\n"
         (List.length application.rapp_arguments)
-        application.rapp_proof_erased
         Rawprinttyp.type_expr application.rapp_result;
       List.iter
         (fun { rap_domain; rap_binder; rap_supplied; rap_subject } ->

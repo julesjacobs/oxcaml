@@ -472,10 +472,8 @@ and transl_exp0 ~in_new_scope ~scopes layout e =
              ~result_layout:layout lam extra_args
              (of_location ~scopes e.exp_loc))
       end
-  | Texp_apply (_, _, _, _, _) when Vox_verify.is_erased_proof_call e ->
-      (* Verification established termination and trap-free evaluation. *)
-      lambda_unit
-  | Texp_apply(funct, oargs, position, ap_mode, zero_alloc) ->
+  | Texp_apply(funct, oargs, position, ap_mode, zero_alloc)
+    ->
       let tailcall = Translattribute.get_tailcall_attribute funct in
       let inlined = Translattribute.get_inlined_attribute funct in
       let specialised = Translattribute.get_specialised_attribute funct in
