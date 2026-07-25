@@ -78,9 +78,55 @@ module Fact_env = struct
        denoting the same resolved proposition. *)
     Types.Refinement.strict_equal ~equal_type:(fun _ _ -> true) left right
 
+  (* [Stdlib.( = )].  Recognised by path so that a user's own [=] is never
+     mistaken for the modeled structural equality. *)
+  let is_stdlib_equality = function
+    | Path.Pdot (Path.Pident root, "=") ->
+      Ident.same root (Ident.create_persistent "Stdlib")
+    | Path.Pdot _ | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> false
+
+  (* Structural equality is reflexive at every type this model reaches except
+     float, where [x = x] additionally says that [x] is not a NaN and so
+     carries content worth keeping. *)
+  let mentions_float type_ =
+    let found = ref false in
+    Types.with_type_mark (fun mark ->
+      let super = Btype.type_iterators mark in
+      let iterator =
+        { super with
+          Btype.it_type_expr =
+            (fun self type_ ->
+              (match Types.get_desc type_ with
+               | Types.Tconstr (path, _, _)
+                 when Path.same path Predef.path_float -> found := true
+               | _ -> ());
+              super.Btype.it_type_expr self type_);
+        }
+      in
+      iterator.Btype.it_type_expr iterator type_);
+    !found
+
+  (* A hypothesis of the form [a = a] holds at every instantiation, so it
+     constrains nothing.  Dropping it keeps solver input, proof-pane lines and
+     hydration payload proportional to the facts that carry content. *)
+  let trivially_reflexive expression =
+    match expression.Types.rexp_desc with
+    | Types.Rexp_apply
+        ({ Types.rexp_desc =
+             Types.Rexp_ident (Types.Rfree (Types.Rapp path)); _ },
+         [ (Types.Nolabel, left); (Types.Nolabel, right) ])
+      when is_stdlib_equality path ->
+      same_expression left right
+      && not (mentions_float left.Types.rexp_type)
+    | Types.Rexp_ident _ | Types.Rexp_constant _ | Types.Rexp_let _
+    | Types.Rexp_function _ | Types.Rexp_apply _ | Types.Rexp_tuple _
+    | Types.Rexp_construct _ | Types.Rexp_field _ | Types.Rexp_ifthenelse _
+    | Types.Rexp_match _ -> false
+
   let add ~origin ?loc ?scope expression env =
     if
       expression_in_scope env.scope expression
+      && not (trivially_reflexive expression)
       && not
            (List.exists
               (fun fact -> same_expression expression fact.expression)
