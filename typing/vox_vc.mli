@@ -54,10 +54,14 @@ module Fact_env : sig
   val leave_many : Ident.t list -> t -> t
   val in_scope : Ident.t -> t -> bool
 
+  (* [typing_env] lets [add] recognise a hypothesis that says a term equals
+     itself, which holds at every instantiation and so constrains nothing.
+     Without it no such hypothesis is dropped. *)
   val add :
     origin:fact_origin ->
     ?loc:Location.t ->
     ?scope:Location.t ->
+    ?typing_env:Env.t ->
     Types.refinement_expression ->
     t ->
     t

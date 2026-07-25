@@ -1754,18 +1754,19 @@ let restrict_result_marks make_may_complete marks =
    condition, by contrast, records a fact about an *expression's* value, which
    only stays valid across occurrences when the expression has a stable logical
    representation. *)
-let add_extracted_refinement_fact state ~kind ?name ~loc ?scope ~subject
+let add_extracted_refinement_fact state ~env ~kind ?name ~loc ?scope ~subject
     refinement =
   let expression = Vox_vc.instantiate ~refinement ~with_:subject in
   let expression =
     bind_scope_references (Facts.scope state.facts) expression
   in
   let origin = fact_origin ~kind ?name loc in
-  state.facts <- Facts.add ~origin ~loc ?scope expression state.facts
+  state.facts <-
+    Facts.add ~typing_env:env ~origin ~loc ?scope expression state.facts
 
 let add_refinement_fact state ~env ~kind ?name ~loc ?scope ~subject type_ =
   Option.iter
-    (add_extracted_refinement_fact state ~kind ?name ~loc ?scope ~subject)
+    (add_extracted_refinement_fact state ~env ~kind ?name ~loc ?scope ~subject)
     (refinement ~env type_)
 
 let add_established_result_contract state ~kind ?name expression type_ =
@@ -1856,9 +1857,10 @@ let enter_pattern
           ~name:(Ident.name id) ~loc:name.loc ?scope ~subject type_)
       bindings
 
-let add_match_fact state ~loc ?scope expression =
+let add_match_fact state ~env ~loc ?scope expression =
   let origin = fact_origin ~kind:"match" loc in
-  state.facts <- Facts.add ~origin ~loc ?scope expression state.facts
+  state.facts <-
+    Facts.add ~typing_env:env ~origin ~loc ?scope expression state.facts
 
 let fresh_match_subject state ~env ~loc type_ =
   let id = Ident.create_local "*match-component*" in
@@ -1885,7 +1887,8 @@ let rec add_value_pattern_facts state ~subject ?scope
   add_refinement_fact state ~env:pattern.pat_env ~kind:"match"
     ~loc:pattern.pat_loc ?scope ~subject pattern.pat_type;
   let add_equality left right =
-    Option.iter (add_match_fact state ~loc:pattern.pat_loc ?scope)
+    Option.iter
+      (add_match_fact state ~env:pattern.pat_env ~loc:pattern.pat_loc ?scope)
       (equality ~env:pattern.pat_env ~loc:pattern.pat_loc left right)
   in
   match pattern.pat_desc with
@@ -2175,7 +2178,8 @@ let selfification_fact state ?scope binding =
               pattern.pat_loc
           in
           state.facts <-
-            Facts.add ~origin ~loc:pattern.pat_loc ?scope equation state.facts)
+            Facts.add ~typing_env:pattern.pat_env ~origin ~loc:pattern.pat_loc
+              ?scope equation state.facts)
         (equality ~env:pattern.pat_env ~loc:pattern.pat_loc variable subject)
     in
     match pattern.pat_desc with
@@ -2213,6 +2217,8 @@ let contract_argument_provenance ~application_location ~argument_location
       ];
   }
 
+(* The incoming facts were filtered when they were first added, so this
+   re-insertion needs no typing environment. *)
 let merge_facts left right =
   List.fold_left
     (fun facts (fact : Vox_vc.fact) ->
@@ -3717,7 +3723,8 @@ and check_application state application function_ arguments
       in
       Option.iter
         (fun refinement ->
-          add_extracted_refinement_fact state ~kind:"application" ?name
+          add_extracted_refinement_fact state ~env:application.exp_env
+            ~kind:"application" ?name
             ~loc:application.exp_loc ~subject:(subject state application)
             (apply_subject_replacements refinement))
         (refinement ~env:application.exp_env metadata.rapp_result))

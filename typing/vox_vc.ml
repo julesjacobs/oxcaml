@@ -78,55 +78,105 @@ module Fact_env = struct
        denoting the same resolved proposition. *)
     Types.Refinement.strict_equal ~equal_type:(fun _ _ -> true) left right
 
-  (* [Stdlib.( = )].  Recognised by path so that a user's own [=] is never
-     mistaken for the modeled structural equality. *)
-  let is_stdlib_equality = function
+  (* [Stdlib.( = )], the modeled structural equality.  Recognised by path: the
+     primitive its value description carries would be the sharper test, but a
+     standard library that rebinds [=] to another primitive is not reachable
+     from ordinary source, and mistaking one would only retain or drop a
+     hypothesis, never change what a sound proof establishes. *)
+  let is_stdlib_equality path =
+    match path with
     | Path.Pdot (Path.Pident root, "=") ->
       Ident.same root (Ident.create_persistent "Stdlib")
     | Path.Pdot _ | Path.Pident _ | Path.Papply _ | Path.Pextra_ty _ -> false
 
-  (* Structural equality is reflexive at every type this model reaches except
-     float, where [x = x] additionally says that [x] is not a NaN and so
-     carries content worth keeping. *)
-  let mentions_float type_ =
-    let found = ref false in
-    Types.with_type_mark (fun mark ->
-      let super = Btype.type_iterators mark in
-      let iterator =
-        { super with
-          Btype.it_type_expr =
-            (fun self type_ ->
-              (match Types.get_desc type_ with
-               | Types.Tconstr (path, _, _)
-                 when Path.same path Predef.path_float -> found := true
-               | _ -> ());
-              super.Btype.it_type_expr self type_);
-        }
-      in
-      iterator.Btype.it_type_expr iterator type_);
-    !found
+  (* Equality is reflexive at every type this model reaches whose values
+     cannot contain a float, because at float [x = x] additionally says that
+     [x] is not a NaN and so carries content.  Manifests are expanded and
+     record and variant declarations are looked through, since a type that
+     merely names float still contains one.  Anything opaque -- an abstract
+     type, a variable, a function -- is treated as possibly containing a
+     float, so its facts are retained. *)
+  let reflexive_at env type_ =
+    (* These carry no float and have no declaration to look through: the
+       built-in scalars are abstract, so the declaration walk below would
+       otherwise reject them. *)
+    let scalar path =
+      List.exists (Path.same path)
+        [ Predef.path_int; Predef.path_bool; Predef.path_char;
+          Predef.path_string; Predef.path_bytes; Predef.path_unit;
+          Predef.path_int32; Predef.path_int64; Predef.path_nativeint ]
+      || Vox_builtin.is_bigint_type path
+    in
+    let rec float_free visited type_ =
+      match Types.get_desc (Ctype.expand_head env type_) with
+      | Types.Ttuple labelled ->
+        List.for_all (fun (_, type_) -> float_free visited type_) labelled
+      | Types.Tconstr (path, arguments, _) ->
+        (not (Path.same path Predef.path_float))
+        && (not (Path.same path Predef.path_floatarray))
+        && List.for_all (float_free visited) arguments
+        && (scalar path
+            || Path.Set.mem path visited
+            || let visited = Path.Set.add path visited in
+               match Env.find_type path env with
+               | exception Not_found -> false
+               | declaration -> float_free_kind visited declaration)
+      | Types.Trefine refinement ->
+        (* A refinement expression carries the refined type; reflexivity is a
+           property of the underlying carrier. *)
+        float_free visited refinement.Types.ref_skeleton
+      | Types.Tvar _ | Types.Tunivar _ | Types.Tarrow _ | Types.Tobject _
+      | Types.Tfield _ | Types.Tnil | Types.Tlink _ | Types.Tsubst _
+      | Types.Tvariant _ | Types.Tpoly _ | Types.Tpackage _
+      | Types.Tof_kind _ | Types.Tunboxed_tuple _ | Types.Tbox _
+      | Types.Tquote _ | Types.Tsplice _
+      | Types.Tquote_eval _ | Types.Trepr _ -> false
+    and float_free_kind visited declaration =
+      match declaration.Types.type_kind with
+      | Types.Type_record (labels, _, _) ->
+        List.for_all
+          (fun label -> float_free visited label.Types.ld_type) labels
+      | Types.Type_variant (constructors, _, _) ->
+        List.for_all
+          (fun constructor ->
+            match constructor.Types.cd_args with
+            | Types.Cstr_tuple arguments ->
+              List.for_all
+                (fun argument -> float_free visited argument.Types.ca_type)
+                arguments
+            | Types.Cstr_record labels ->
+              List.for_all
+                (fun label -> float_free visited label.Types.ld_type) labels)
+          constructors
+      | Types.Type_abstract _ | Types.Type_open
+      | Types.Type_record_unboxed_product _ -> false
+    in
+    float_free Path.Set.empty type_
 
   (* A hypothesis of the form [a = a] holds at every instantiation, so it
      constrains nothing.  Dropping it keeps solver input, proof-pane lines and
      hydration payload proportional to the facts that carry content. *)
-  let trivially_reflexive expression =
-    match expression.Types.rexp_desc with
-    | Types.Rexp_apply
-        ({ Types.rexp_desc =
-             Types.Rexp_ident (Types.Rfree (Types.Rapp path)); _ },
-         [ (Types.Nolabel, left); (Types.Nolabel, right) ])
-      when is_stdlib_equality path ->
-      same_expression left right
-      && not (mentions_float left.Types.rexp_type)
-    | Types.Rexp_ident _ | Types.Rexp_constant _ | Types.Rexp_let _
-    | Types.Rexp_function _ | Types.Rexp_apply _ | Types.Rexp_tuple _
-    | Types.Rexp_construct _ | Types.Rexp_field _ | Types.Rexp_ifthenelse _
-    | Types.Rexp_match _ -> false
+  let trivially_reflexive env expression =
+    match env with
+    | None -> false
+    | Some env ->
+      (match expression.Types.rexp_desc with
+       | Types.Rexp_apply
+           ({ Types.rexp_desc =
+                Types.Rexp_ident (Types.Rfree (Types.Rapp path)); _ },
+            [ (Types.Nolabel, left); (Types.Nolabel, right) ]) ->
+         is_stdlib_equality path
+         && same_expression left right
+         && reflexive_at env left.Types.rexp_type
+       | Types.Rexp_ident _ | Types.Rexp_constant _ | Types.Rexp_let _
+       | Types.Rexp_function _ | Types.Rexp_apply _ | Types.Rexp_tuple _
+       | Types.Rexp_construct _ | Types.Rexp_field _
+       | Types.Rexp_ifthenelse _ | Types.Rexp_match _ -> false)
 
-  let add ~origin ?loc ?scope expression env =
+  let add ~origin ?loc ?scope ?typing_env expression env =
     if
       expression_in_scope env.scope expression
-      && not (trivially_reflexive expression)
+      && not (trivially_reflexive typing_env expression)
       && not
            (List.exists
               (fun fact -> same_expression expression fact.expression)
