@@ -1,0 +1,7 @@
+File "nvcm_solo_client.ml", line 1, characters 27-36:
+1 | let check : int{ _ = 0 } = Nvcm_solo.value
+                               ^^^^^^^^^
+Error: Invalid import of Nvcm_solo, which was compiled without refinement
+       verification. Nothing discharged its refinement obligations, so a
+       compilation that does cannot rely on its interface.
+       Recompile Nvcm_solo with refinement verification.

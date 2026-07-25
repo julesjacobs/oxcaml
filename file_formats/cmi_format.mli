@@ -19,6 +19,11 @@ type pers_flags =
   | Rectypes
   | Alerts of alerts
   | Opaque
+  | Vox_unverified
+      (* The interface was produced by a compilation that skipped refinement
+         verification, so every refinement it exports is an unchecked claim.
+         Keep this constructor last: it is appended so that interfaces written
+         before it existed still deserialize. *)
 
 type kind =
   | Normal of {

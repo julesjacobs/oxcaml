@@ -1,0 +1,7 @@
+File "nvcm_client.ml", line 4, characters 27-40:
+4 | let check : int{ _ = 0 } = Nvcm_provider.value
+                               ^^^^^^^^^^^^^
+Error: Invalid import of Nvcm_provider, which was compiled without refinement
+       verification. Nothing discharged its refinement obligations, so a
+       compilation that does cannot rely on its interface.
+       Recompile Nvcm_provider with refinement verification.

@@ -95,6 +95,8 @@ type error =
   | Compiling_as_parameterised_parameter
   | Cannot_compile_implementation_as_parameter
   | Cannot_implement_parameter of Compilation_unit.Name.t * Misc.filepath
+  | Unverified_implementation_of_verified_interface of
+      Compilation_unit.Name.t * Misc.filepath
   | Argument_for_non_parameter of Global_module.Name.t * Misc.filepath
   | Cannot_find_argument_type of Global_module.Parameter_name.t
   | Inconsistent_argument_types of {
@@ -4461,6 +4463,18 @@ let check_argument_type_if_given env sourcefile ~actual_staticity actual_sig
              ai_coercion_from_primary = coercion;
            }
 
+(* An explicit interface owns the unit's .cmi, so compiling its implementation
+   cannot record that the implementation went unchecked.  When the interface
+   was itself compiled without discharging obligations its .cmi already
+   carries the mark and clients are refused.  When it was discharged, an
+   implementation that discharges nothing would leave a verified-looking
+   interface standing over an unchecked implementation, so refuse instead. *)
+let check_discharged_interface ~loc cu_name source_intf =
+  if !Clflags.vox_no_verify && not (Env.is_imported_unverified cu_name) then
+    raise (Error (loc, Env.empty,
+                  Unverified_implementation_of_verified_interface
+                    (cu_name, source_intf)))
+
 let type_implementation target modulename initial_env ast =
   let sourcefile = Unit_info.original_source_file target in
   let error e =
@@ -4566,6 +4580,8 @@ let type_implementation target modulename initial_env ast =
           in
           if Env.is_parameter_unit global_name then
             error (Cannot_implement_parameter (cu_name, source_intf));
+          check_discharged_interface ~loc:(Location.in_file sourcefile)
+            cu_name source_intf;
           let arg_type_from_cmi = Env.implemented_parameter global_name in
           if not (Option.equal Global_module.Parameter_name.equal
                     arg_type arg_type_from_cmi) then
@@ -4804,6 +4820,8 @@ let package_units initial_env objfiles target_cmi modulename =
     end;
     let name = Compilation_unit.to_global_name_without_prefix modulename in
     let dclsig, staticity = Env.read_signature name target_cmi in
+    check_discharged_interface ~loc:(Location.in_file mli)
+      (Compilation_unit.name modulename) mli;
     (* [-pack] is a corner case feature that doesn't support staticity, so the
        packed [.mli] should not carry a file-level [@@ static]/[@@ dynamic]. *)
     Staticity.submode_err (Location.in_file mli, Module)
@@ -5156,6 +5174,13 @@ let report_error ~loc _env = function
       Location.errorf ~loc
         "@[The interface for %a@ was compiled with -as-parameter.@ \
          It cannot be implemented directly.@]"
+        Compilation_unit.Name.print_as_inline_code modname
+  | Unverified_implementation_of_verified_interface(modname, _filename) ->
+      Location.errorf ~loc
+        "@[The interface for %a@ was compiled with refinement verification,@ \
+         so this implementation cannot be compiled without it:@ \
+         nothing would check it against that interface.@ \
+         Compile both with refinement verification, or neither.@]"
         Compilation_unit.Name.print_as_inline_code modname
   | Argument_for_non_parameter(param, path) ->
       Location.errorf ~loc

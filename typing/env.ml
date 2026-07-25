@@ -1450,6 +1450,12 @@ let crc_of_unit name =
 let is_imported_opaque modname =
   Persistent_env.is_imported_opaque !persistent_env modname
 
+let is_imported_unverified modname =
+  Persistent_env.is_imported_unverified !persistent_env modname
+
+let unverified_imports () =
+  Persistent_env.unverified_imports !persistent_env
+
 let register_import_as_opaque modname =
   Persistent_env.register_import_as_opaque !persistent_env modname
 

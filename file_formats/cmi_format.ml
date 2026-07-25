@@ -19,6 +19,11 @@ type pers_flags =
   | Rectypes
   | Alerts of alerts
   | Opaque
+  | Vox_unverified
+      (* The interface was produced by a compilation that skipped refinement
+         verification, so every refinement it exports is an unchecked claim.
+         Keep this constructor last: it is appended so that interfaces written
+         before it existed still deserialize. *)
 
 type kind =
   | Normal of {
@@ -173,8 +178,10 @@ let input_cmi_lazy ic =
       header_sign = (sign, staticity);
       header_params = params;
     } = (input_value ic : header) in
-  let crcs = (input_value ic : crcs) in
+  (* Flags precede the crcs: they are written before the digest is taken so
+     that they participate in this interface's own crc. *)
   let flags = (input_value ic : flags) in
+  let crcs = (input_value ic : crcs) in
   (* CR ocaml 5 compressed-marshal mshinwell: upstream uses [Compression] *)
   {
       cmi_name = name;
@@ -243,6 +250,11 @@ let output_cmi filename oc cmi =
       header_sign = (sign, staticity);
       header_params = cmi.cmi_params;
     };
+  (* Written before the digest so that the flags are covered by the crc.  A
+     unit that swaps between discharging and not discharging refinement
+     obligations therefore changes its crc, and its dependents rebuild instead
+     of keeping a conclusion that nothing supports. *)
+  output_value oc (cmi.cmi_flags : flags);
   flush oc;
   let crc = Digest.file filename in
   let my_info =
@@ -254,7 +266,6 @@ let output_cmi filename oc cmi =
   in
   let crcs = Array.append [| my_info |] cmi.cmi_crcs in
   output_value oc (crcs : crcs);
-  output_value oc (cmi.cmi_flags : flags);
   crc
 
 

@@ -78,9 +78,9 @@ let cmi_observations =
   in
   let magic = Config.cmi_magic_number in
   assert (String.starts_with ~prefix:magic original);
-  assert (String.ends_with ~suffix:"582" magic);
+  assert (String.ends_with ~suffix:"583" magic);
   let old_magic = Bytes.of_string original in
-  Bytes.blit_string "581" 0 old_magic (String.length magic - 3) 3;
+  Bytes.blit_string "582" 0 old_magic (String.length magic - 3) 3;
   write_file "old-dependent-arrow.cmi" old_magic;
   let old_version_rejected =
     match Cmi_format.read_cmi "old-dependent-arrow.cmi" with
@@ -92,7 +92,7 @@ let cmi_observations =
   [ "raw independently-written binder stamps collide";
     "each imported binder remains coherent with its codomain";
     "the two imported binders are distinct";
-    "artifact magic 581 is rejected; current magic ends in 582";
+    "artifact magic 582 is rejected; current magic ends in 583";
   ]
 
 [%%expect {|
@@ -104,5 +104,5 @@ val cmi_observations : string list =
   ["raw independently-written binder stamps collide";
    "each imported binder remains coherent with its codomain";
    "the two imported binders are distinct";
-   "artifact magic 581 is rejected; current magic ends in 582"]
+   "artifact magic 582 is rejected; current magic ends in 583"]
 |}]

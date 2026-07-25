@@ -1,0 +1,6 @@
+File "nvcm_mixed.ml", line 1:
+Error: The interface for Nvcm_mixed
+       was compiled with refinement verification,
+       so this implementation cannot be compiled without it:
+       nothing would check it against that interface.
+       Compile both with refinement verification, or neither.

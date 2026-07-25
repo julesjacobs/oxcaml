@@ -1,0 +1,7 @@
+File "nvcm_bare_client.ml", line 4, characters 12-21:
+4 | let value = Nvcm_bare.value
+                ^^^^^^^^^
+Error: Invalid import of Nvcm_bare, which was compiled without refinement
+       verification. Nothing discharged its refinement obligations, so a
+       compilation that does cannot rely on its interface.
+       Recompile Nvcm_bare with refinement verification.

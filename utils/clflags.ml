@@ -189,6 +189,12 @@ let vox_no_verify = ref false           (* -vox-no-verify *)
 let vox_backend = ref "z3"              (* -vox-backend *)
 let vox_smt_solver = ref None           (* -vox-smt-solver *)
 let vox_oxsmt_solver = ref None         (* -vox-oxsmt-solver *)
+
+(* Whether this compilation actually discharges refinement obligations.  When
+   it does not, the signatures it writes carry unchecked refinement claims and
+   are marked [Cmi_format.Vox_unverified]. *)
+let vox_verifies_refinements () = not (!vox_type_only || !vox_no_verify)
+
 let dump_parsetree = ref false          (* -dparsetree *)
 and dump_typedtree = ref false          (* -dtypedtree *)
 and dump_shape = ref false              (* -dshape *)

@@ -1667,7 +1667,23 @@ let verify_seal_obligation ~env ~seal_location
         obligation.rso_value_name (failure_text result)
   end
 
+(* An import admitted while this process discharged nothing can reach a later
+   discharging phrase through a binding rather than through a fresh lookup, so
+   the per-import checks alone do not cover a long-lived toplevel or
+   compiler-libs session.  Refuse to discharge anything once such an import
+   has been admitted. *)
+let check_no_unverified_imports ~loc () =
+  match Env.unverified_imports () with
+  | [] -> ()
+  | unit_name :: _ ->
+    Location.raise_errorf ~loc
+      "Cannot verify refinements in this environment: %s was imported from \
+       an interface compiled without refinement verification"
+      (Compilation_unit.Name.to_string unit_name)
+
 let verify_seal_obligations ~env ~seal_location obligations =
+  if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
+    check_no_unverified_imports ~loc:seal_location ();
   if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
     with_fresh_refinement_alias_cache (fun () ->
       List.iter (verify_seal_obligation ~env ~seal_location) obligations)
@@ -4094,6 +4110,12 @@ let finish_dump () =
   end
 
 let verify_structure ?(toplevel = false) structure =
+  let loc =
+    match structure.str_items with
+    | item :: _ -> item.str_loc
+    | [] -> Location.none
+  in
+  check_no_unverified_imports ~loc ();
   with_fresh_refinement_alias_cache (fun () ->
   let state =
     if toplevel

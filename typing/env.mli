@@ -677,6 +677,15 @@ val parameters: unit -> Global_module.Parameter_name.t list
 (* [is_imported_opaque md] returns true if [md] is an opaque imported module *)
 val is_imported_opaque: Compilation_unit.Name.t -> bool
 
+(* [is_imported_unverified md] returns true if [md] was imported from an
+   interface written by a compilation that discharged no refinement
+   obligations. *)
+val is_imported_unverified: Compilation_unit.Name.t -> bool
+
+(* Every unit imported so far from an interface written without discharging
+   refinement obligations. *)
+val unverified_imports: unit -> Compilation_unit.Name.t list
+
 (* [register_import_as_opaque md] registers [md] as an opaque imported module *)
 val register_import_as_opaque: Compilation_unit.Name.t -> unit
 

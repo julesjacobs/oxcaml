@@ -30,6 +30,7 @@ type error =
   | Illegal_renaming of CU.Name.t * CU.Name.t * filepath
   | Inconsistent_import of CU.Name.t * filepath * filepath
   | Need_recursive_types of CU.Name.t
+  | Vox_unverified_interface of CU.Name.t
   | Inconsistent_package_declaration_between_imports of
       filepath * CU.t * CU.t
   | Direct_reference_from_wrong_package of
@@ -154,6 +155,7 @@ type 'a t = {
   locals_bound_to_runtime_parameters : unit Ident.Tbl.t;
   imported_units: CU.Name.Set.t ref;
   imported_opaque_units: CU.Name.Set.t ref;
+  imported_unverified_units: CU.Name.Set.t ref;
   quoted_intfs: CU.Name.Set.t ref;
   quoted_impls: CU.Set.t ref;
   param_imports : Param_set.t ref;
@@ -169,6 +171,7 @@ let empty () = {
   locals_bound_to_runtime_parameters = Ident.Tbl.create 17;
   imported_units = ref CU.Name.Set.empty;
   imported_opaque_units = ref CU.Name.Set.empty;
+  imported_unverified_units = ref CU.Name.Set.empty;
   quoted_intfs = ref CU.Name.Set.empty;
   quoted_impls = ref CU.Set.empty;
   param_imports = ref Param_set.empty;
@@ -185,6 +188,7 @@ let clear penv =
     locals_bound_to_runtime_parameters;
     imported_units;
     imported_opaque_units;
+    imported_unverified_units;
     quoted_intfs;
     quoted_impls;
     param_imports;
@@ -198,6 +202,7 @@ let clear penv =
   Ident.Tbl.clear locals_bound_to_runtime_parameters;
   imported_units := CU.Name.Set.empty;
   imported_opaque_units := CU.Name.Set.empty;
+  imported_unverified_units := CU.Name.Set.empty;
   quoted_intfs := CU.Name.Set.empty;
   quoted_impls := CU.Set.empty;
   param_imports := Param_set.empty;
@@ -226,6 +231,18 @@ let rec add_imports_in_name penv (g : Global_module.Name.t) =
 
 let register_import_as_opaque {imported_opaque_units; _} s =
   imported_opaque_units := CU.Name.Set.add s !imported_opaque_units
+
+let register_import_as_unverified {imported_unverified_units; _} s =
+  imported_unverified_units := CU.Name.Set.add s !imported_unverified_units
+
+(* The verification mode can change between imports in one process, because
+   the toplevel and compiler-libs callers keep the environment across
+   compilations.  Re-test on every use rather than only when the interface is
+   first read, so a cached import cannot outlive the mode that admitted it. *)
+let check_unverified_import {imported_unverified_units; _} modname =
+  if Clflags.vox_verifies_refinements ()
+     && CU.Name.Set.mem modname !imported_unverified_units then
+    error (Vox_unverified_interface modname)
 
 let find_import_info_in_cache {imports; _} import =
   match Hashtbl.find imports import with
@@ -325,6 +342,7 @@ let save_import penv crc modname impl flags filename =
     (function
         | Rectypes -> ()
         | Alerts _ -> ()
+        | Vox_unverified -> register_import_as_unverified penv modname
         | Opaque -> register_import_as_opaque penv modname)
     flags;
   Consistbl.check crc_units modname impl crc filename;
@@ -349,6 +367,15 @@ let acknowledge_import penv ~check modname pers_sig =
             if not !Clflags.recursive_types then
               error (Need_recursive_types(modname))
         | Alerts _ -> ()
+        | Vox_unverified ->
+            (* This interface exports refinements that were never discharged.
+               A compilation that does discharge obligations must not prove
+               anything from them.  Rejecting here also makes the mark
+               transitive: an unmarked refinement-carrying interface can only
+               have been written by a verifying compilation all of whose
+               imports were unmarked. *)
+            register_import_as_unverified penv modname;
+            check_unverified_import penv modname
         | Opaque -> register_import_as_opaque penv modname)
     flags;
   begin match kind, CU.get_current () with
@@ -419,7 +446,10 @@ let find_import ~allow_hidden penv ~check modname =
   let {imports; _} = penv in
   if CU.Name.equal modname CU.Name.predef_exn then raise Not_found;
   match Hashtbl.find imports modname with
-  | Found imp -> check_visibility ~allow_hidden imp; imp
+  | Found imp ->
+      check_visibility ~allow_hidden imp;
+      check_unverified_import penv modname;
+      imp
   | Missing -> raise Not_found
   | exception Not_found ->
       match can_load_cmis penv with
@@ -698,7 +728,9 @@ and acknowledge_new_pers_name penv check global_name global import =
 and find_pers_name ~allow_hidden penv ~check name ~allow_excess_args =
   let {persistent_names; _} = penv in
   match Hashtbl.find persistent_names name with
-  | pn -> pn
+  | pn ->
+      check_unverified_import penv (CU.Name.of_head_of_global_name name);
+      pn
   | exception Not_found ->
       let unit_name = CU.Name.of_head_of_global_name name in
       let import = find_import ~allow_hidden penv ~check unit_name in
@@ -872,7 +904,10 @@ let find_pers_struct
     ~allow_hidden penv val_of_pers_sig ~check name ~allow_excess_args =
   let {persistent_structures; _} = penv in
   match Hashtbl.find persistent_structures name with
-  | ps -> check_visibility ~allow_hidden ps.ps_name_info.pn_import; ps
+  | ps ->
+      check_visibility ~allow_hidden ps.ps_name_info.pn_import;
+      check_unverified_import penv (CU.Name.of_head_of_global_name name);
+      ps
   | exception Not_found ->
       let pers_name =
         find_pers_name ~allow_hidden penv ~check name ~allow_excess_args
@@ -916,6 +951,10 @@ let check_pers_struct ~allow_hidden penv f ~loc name =
         | Need_recursive_types name ->
             Format_doc.doc_printf
               "%a uses recursive types"
+              CU.Name.print_as_inline_code name
+        | Vox_unverified_interface name ->
+            Format_doc.doc_printf
+              "%a was compiled without refinement verification"
               CU.Name.print_as_inline_code name
         | Inconsistent_package_declaration_between_imports _ ->
             (* Can't be raised by [find_pers_struct ~check:false] *)
@@ -1100,6 +1139,12 @@ let looked_up {persistent_structures; _} modname =
 let is_imported_opaque {imported_opaque_units; _} s =
   CU.Name.Set.mem s !imported_opaque_units
 
+let is_imported_unverified {imported_unverified_units; _} s =
+  CU.Name.Set.mem s !imported_unverified_units
+
+let unverified_imports {imported_unverified_units; _} =
+  CU.Name.Set.elements !imported_unverified_units
+
 let implemented_parameter penv modname =
   match find_name_info_in_cache penv modname with
   | Some { pn_import = { imp_arg_for; _ }; _ } -> imp_arg_for
@@ -1110,6 +1155,13 @@ let make_cmi penv modname kind sign alerts =
     List.concat [
       if !Clflags.recursive_types then [Cmi_format.Rectypes] else [];
       if !Clflags.opaque then [Cmi_format.Opaque] else [];
+      (* Marked whenever this compilation discharged nothing, without asking
+         whether the signature happens to mention a refinement.  Deciding that
+         would mean expanding named module types and type constructors through
+         other units, and anything it failed to expand would silently become
+         an unchecked claim that no later compilation refuses. *)
+      if Clflags.vox_verifies_refinements () then []
+      else [Cmi_format.Vox_unverified];
       [Alerts alerts];
     ]
   in
@@ -1187,6 +1239,14 @@ let report_error_doc ppf =
          The compilation flag %a is required@]"
         CU.Name.print_as_inline_code import
         Style.inline_code "-rectypes"
+  | Vox_unverified_interface(import) ->
+      fprintf ppf
+        "@[<hov>Invalid import of %a, which was compiled without refinement@ \
+         verification.@ Nothing discharged its refinement obligations, so a@ \
+         compilation that does cannot rely on its interface.@ \
+         Recompile %a with refinement verification.@]"
+        CU.Name.print_as_inline_code import
+        CU.Name.print_as_inline_code import
   | Inconsistent_package_declaration_between_imports (filename, unit1, unit2) ->
       fprintf ppf
         "@[<hov>The file %s@ is imported both as %a@ and as %a.@]"

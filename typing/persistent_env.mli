@@ -26,6 +26,7 @@ type error =
   | Illegal_renaming of Compilation_unit.Name.t * Compilation_unit.Name.t * filepath
   | Inconsistent_import of Compilation_unit.Name.t * filepath * filepath
   | Need_recursive_types of Compilation_unit.Name.t
+  | Vox_unverified_interface of Compilation_unit.Name.t
   | Inconsistent_package_declaration_between_imports of
       filepath * Compilation_unit.t * Compilation_unit.t
   | Direct_reference_from_wrong_package of
@@ -140,6 +141,15 @@ val looked_up : 'a t -> Global_module.Name.t -> bool
 (* [is_imported_opaque penv md] checks if [md] has been imported
    in [penv] as an opaque module *)
 val is_imported_opaque : 'a t -> Compilation_unit.Name.t -> bool
+
+(* [is_imported_unverified penv md] checks whether [md] was imported from an
+   interface written by a compilation that discharged no refinement
+   obligations. *)
+val is_imported_unverified : 'a t -> Compilation_unit.Name.t -> bool
+
+(* Every unit imported so far from an interface written without discharging
+   refinement obligations. *)
+val unverified_imports : 'a t -> Compilation_unit.Name.t list
 
 (* [register_import_as_opaque penv md] registers [md] in [penv] as an
    opaque module *)
