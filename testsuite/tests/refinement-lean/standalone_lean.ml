@@ -26,7 +26,18 @@ let arrow argument result =
 
 let int_type = Predef.type_int
 let bool_type = Predef.type_bool
+let stdlib_path = Path.Pident (Ident.create_persistent "Stdlib")
+let bigint_path = Path.Pdot (stdlib_path, "Bigint")
+
+let bigint_type =
+  create_expr
+    (Tconstr (Path.Pdot (bigint_path, "t"), [], ref Mnil))
+    ~level:0
+    ~scope:0
+    ~id:(fresh_type_id ())
+
 let option_type = Predef.type_option int_type
+let bool_option_type = Predef.type_option bool_type
 let loc = Location.in_file "standalone_lean.ml"
 let env =
   Compmisc.init_path ();
@@ -47,8 +58,11 @@ let bool value =
 let free type_ name = node type_ (Rexp_ident (Rfree (Rfun name)))
 
 let primitive type_ name =
-  let stdlib = Path.Pident (Ident.create_persistent "Stdlib") in
-  let path = Path.Pdot (stdlib, name) in
+  let path = Path.Pdot (stdlib_path, name) in
+  node type_ (Rexp_ident (Rfree (Rapp path)))
+
+let bigint_primitive type_ name =
+  let path = Path.Pdot (bigint_path, name) in
   node type_ (Rexp_ident (Rfree (Rapp path)))
 
 let apply type_ function_ arguments =
@@ -61,8 +75,27 @@ let binary name argument_type result_type left right =
   apply result_type (primitive function_type name) [left; right]
 
 let equal type_ left right = binary "=" type_ bool_type left right
+let not_equal type_ left right = binary "<>" type_ bool_type left right
 let greater left right = binary ">" int_type bool_type left right
 let greater_equal left right = binary ">=" int_type bool_type left right
+let less_equal left right = binary "<=" int_type bool_type left right
+
+let bigint_binary name result_type left right =
+  let function_type = arrow bigint_type (arrow bigint_type result_type) in
+  apply result_type (bigint_primitive function_type name) [left; right]
+
+let bigint_of_int value =
+  apply bigint_type
+    (bigint_primitive (arrow int_type bigint_type) "of_int")
+    [int value]
+
+let bigint_comparison name left right =
+  bigint_binary name bool_type left right
+
+let bigint_is_zero value =
+  apply bool_type
+    (bigint_primitive (arrow bigint_type bool_type) "is_zero")
+    [value]
 
 let x =
   { rb_id = Ident.create_scoped ~scope:1 "x";
@@ -172,6 +205,14 @@ let some value =
          },
          [value] ))
 
+let some_bool value =
+  node bool_option_type
+    (Rexp_construct
+       ( { rconstr_type_path = Predef.path_option;
+           rconstr_name = "Some";
+         },
+         [value] ))
+
 let negate argument =
   apply bool_type (primitive (arrow bool_type bool_type) "not") [argument]
 
@@ -270,6 +311,39 @@ let emit condition =
   | Ok text -> text
   | Error error -> failwith error.message
 
+let contains text pattern =
+  let text_length = String.length text in
+  let pattern_length = String.length pattern in
+  let rec loop index =
+    if index + pattern_length > text_length then false
+    else if String.sub text index pattern_length = pattern then true
+    else loop (index + 1)
+  in
+  pattern_length = 0 || loop 0
+
+let comparison_application =
+  let parameter =
+    { rb_id = Ident.create_scoped ~scope:6 "condition";
+      rb_type = bool_type;
+    }
+  in
+  let identity =
+    node (arrow bool_type bool_type)
+      (Rexp_function
+         { arg_label = Nolabel;
+           param = parameter;
+           body = bound parameter;
+         })
+  in
+  vc (apply bool_type identity [less (int 1) (int 2)])
+
+let comparison_constructor =
+  let zero = bigint_of_int 0 in
+  vc
+    (equal bool_option_type
+       (some_bool (bigint_is_zero zero))
+       (some_bool (bool true)))
+
 let () =
   let first = emit entailment in
   let second = emit entailment in
@@ -277,6 +351,35 @@ let () =
   let first = emit datatype in
   let second = emit datatype in
   assert (String.equal first second);
+  let emitted = emit comparison_application in
+  assert
+    (contains emitted
+       "((fun (l_0 : Bool) => l_0) (decide (1 < 2)))");
+  let emitted = emit comparison_constructor in
+  assert (contains emitted ".Some (decide (0 = 0)))");
+  let exact_decide_terms =
+    [ equal int_type (int 10) (int 10), "(decide (10 = 10))";
+      not_equal int_type (int 11) (int 12), "(!(decide (11 = 12)))";
+      less (int 13) (int 14), "(decide (13 < 14))";
+      less_equal (int 15) (int 16), "(decide (15 ≤ 16))";
+      greater (int 18) (int 17), "(decide (18 > 17))";
+      greater_equal (int 20) (int 19), "(decide (20 ≥ 19))";
+      bigint_comparison "equal" (bigint_of_int 21) (bigint_of_int 21),
+        "(decide (21 = 21))";
+      bigint_comparison "lt" (bigint_of_int 22) (bigint_of_int 23),
+        "(decide (22 < 23))";
+      bigint_comparison "le" (bigint_of_int 24) (bigint_of_int 25),
+        "(decide (24 ≤ 25))";
+      bigint_comparison "gt" (bigint_of_int 27) (bigint_of_int 26),
+        "(decide (27 > 26))";
+      bigint_comparison "ge" (bigint_of_int 29) (bigint_of_int 28),
+        "(decide (29 ≥ 28))";
+      bigint_is_zero (bigint_of_int 0), "(decide (0 = 0))";
+    ]
+  in
+  List.iter
+    (fun (term, expected) -> assert (contains (emit (vc term)) expected))
+    exact_decide_terms;
   print_endline "Lean emission: byte-identical"
 
 let check expected condition =
@@ -292,7 +395,9 @@ let () =
     check Vox_lean.Not_proved not_proved;
     check Vox_lean.Disproved disproved;
     check Vox_lean.Proved datatype;
-    check Vox_lean.Proved compound
+    check Vox_lean.Proved compound;
+    check Vox_lean.Proved comparison_application;
+    check Vox_lean.Proved comparison_constructor
   end;
   print_endline "real Lean subprocess cases: completed or skipped"
 

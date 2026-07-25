@@ -1113,6 +1113,7 @@ let expect_bool location = function
 let emit_builtin context location builtin arguments =
   let terms = List.map fst arguments in
   let sorts = List.map snd arguments in
+  let decide proposition = "(decide " ^ proposition ^ ")" in
   let binary operation check =
     match terms, sorts with
     | [left; right], [left_sort; right_sort] ->
@@ -1173,18 +1174,18 @@ let emit_builtin context location builtin arguments =
             error location "function equality is not supported"
           | _ -> ()
         end;
-        let equality = "decide (" ^ left ^ " = " ^ right ^ ")" in
+        let equality = decide ("(" ^ left ^ " = " ^ right ^ ")") in
         if builtin = `Equal then equality else "(!" ^ equality ^ ")"
       | _ -> error location "equality builtin used with the wrong arity"
     end
   | `Less ->
-    "decide " ^ binary "<" (expect_int location)
+    decide (binary "<" (expect_int location))
   | `Less_equal ->
-    "decide " ^ binary "≤" (expect_int location)
+    decide (binary "≤" (expect_int location))
   | `Greater ->
-    "decide " ^ binary ">" (expect_int location)
+    decide (binary ">" (expect_int location))
   | `Greater_equal ->
-    "decide " ^ binary "≥" (expect_int location)
+    decide (binary "≥" (expect_int location))
   | `Add -> binary "+" (expect_int location)
   | `Subtract -> binary "-" (expect_int location)
   | `Multiply -> binary "*" (expect_int location)
@@ -1211,13 +1212,13 @@ let emit_builtin context location builtin arguments =
     | _ -> error location "Bigint.compare used with an inconsistent type"
     end
   | `Bigint_lt ->
-    "decide " ^ binary "<" (expect_bigint location)
+    decide (binary "<" (expect_bigint location))
   | `Bigint_le ->
-    "decide " ^ binary "≤" (expect_bigint location)
+    decide (binary "≤" (expect_bigint location))
   | `Bigint_gt ->
-    "decide " ^ binary ">" (expect_bigint location)
+    decide (binary ">" (expect_bigint location))
   | `Bigint_ge ->
-    "decide " ^ binary "≥" (expect_bigint location)
+    decide (binary "≥" (expect_bigint location))
   | `Bigint_of_int ->
     begin match terms, sorts with
     | [argument], [Sint] -> argument
@@ -1225,7 +1226,7 @@ let emit_builtin context location builtin arguments =
     end
   | `Bigint_is_zero ->
     begin match terms, sorts with
-    | [argument], [Sbigint] -> "decide (" ^ argument ^ " = 0)"
+    | [argument], [Sbigint] -> decide ("(" ^ argument ^ " = 0)")
     | _ -> error location "Bigint.is_zero used with an inconsistent type"
     end
   | `Bigint_zero | `Bigint_one ->
