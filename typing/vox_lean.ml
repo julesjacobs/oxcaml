@@ -508,19 +508,9 @@ let reference_basename = function
   | Rfun name | Rsibling name -> name
   | Rapp path | Rglobal path -> Path.last path
 
-let constructor_mismatch_prefix = "*vox-match-constructor-mismatch*:"
 
-let constructor_mismatch_name constructor =
-  constructor_mismatch_prefix ^ constructor
-
-let constructor_mismatch name =
-  let prefix_length = String.length constructor_mismatch_prefix in
-  if String.length name >= prefix_length
-     && String.sub name 0 prefix_length = constructor_mismatch_prefix
-  then
-    Some
-      (String.sub name prefix_length (String.length name - prefix_length))
-  else None
+let constructor_mismatch_name = Vox_builtin.constructor_mismatch_name
+let constructor_mismatch = Vox_builtin.constructor_mismatch
 
 (* Source-like rendering of a refinement predicate, for user-facing display:
    the [int{ ... }] predicate shown in signatures ([-i]), type-at-cursor and

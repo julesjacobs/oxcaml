@@ -522,6 +522,14 @@ let note_reference context expression reference =
     error expression.rexp_loc
       "quantifier combinator %s is not supported in refinements"
       (reference_basename reference);
+  match reference with
+  (* A match arm's constructor fact is interpreted directly as a datatype
+     tester, so its synthetic head is not an opaque symbol.  Registering it as
+     one keys it by constructor name alone, and two facts for the same
+     polymorphic constructor at different instantiations are then rejected as
+     used at inconsistent types. *)
+  | Rfun name when Option.is_some (Vox_builtin.constructor_mismatch name) -> ()
+  | Rfun _ | Rsibling _ | Rapp _ | Rglobal _ ->
   match builtin_name context reference with
   | Some _ -> ()
   | None ->
@@ -989,6 +997,39 @@ let emit_expression context variables expression =
         error expression.rexp_loc
           "lambda remains after beta reduction; partial or higher-order "
           "application is not supported"
+      (* A match arm that did not fire says its scrutinee is not that arm's
+         constructor.  Emitting the datatype tester keeps that meaning; left
+         as an uninterpreted application it says nothing, and a later arm
+         cannot then conclude which constructor remains. *)
+      | Rexp_apply
+          ( { rexp_desc = Rexp_ident (Rfree (Rfun mismatch_name)); _ },
+            [ (_, subject) ] )
+        when Option.is_some (Vox_builtin.constructor_mismatch mismatch_name) ->
+        let constructor_name =
+          Option.get (Vox_builtin.constructor_mismatch mismatch_name)
+        in
+        let subject_term, subject_sort = emit locals subject in
+        begin
+          match subject_sort with
+          | Sdata key ->
+            let data = data_for_key context expression.rexp_loc key in
+            begin
+              match
+                construction expression.rexp_loc data constructor_name
+              with
+              | Variant_construction (index, constructor) ->
+                expect_sort expression.rexp_loc result_sort Sbool;
+                "(not ((_ is "
+                ^ variant_constructor_name data index constructor
+                ^ ") " ^ subject_term ^ "))"
+              | Record_construction _ ->
+                error expression.rexp_loc
+                  "a record type has no constructor to test"
+            end
+          | Sint | Sbigint | Sbool | Stuple _ | Sarrow _ ->
+            error expression.rexp_loc
+              "a constructor test needs a datatype subject"
+        end
       | Rexp_apply
           ( { rexp_desc = Rexp_ident (Rfree reference_identifier); _ },
             arguments ) ->
@@ -1903,6 +1944,41 @@ let oxsmt_expression context environment expression =
         error expression.rexp_loc
           "lambda remains after beta reduction; partial or higher-order "
           "application is not supported"
+      (* The same interpretation the external translation gives this fact:
+         without it the application is an opaque symbol and a later arm cannot
+         tell which constructor remains. *)
+      | Rexp_apply
+          ( { rexp_desc = Rexp_ident (Rfree (Rfun mismatch_name)); _ },
+            [ (_, subject) ] )
+        when Option.is_some (Vox_builtin.constructor_mismatch mismatch_name) ->
+        let constructor_name =
+          Option.get (Vox_builtin.constructor_mismatch mismatch_name)
+        in
+        let subject_term, subject_sort = build locals subject in
+        begin
+          match subject_sort with
+          | Sdata key ->
+            let data = data_for_key context expression.rexp_loc key in
+            begin
+              match
+                construction expression.rexp_loc data constructor_name
+              with
+              | Variant_construction (index, _) ->
+                expect_sort expression.rexp_loc result_sort Sbool;
+                let tester =
+                  (oxsmt_constructor environment expression.rexp_loc key index)
+                    .Oxsmt_datatype_defs.tester
+                in
+                Oxsmt_context.not_ environment.terms
+                  (Oxsmt_context.app environment.terms tester [subject_term])
+              | Record_construction _ ->
+                error expression.rexp_loc
+                  "a record type has no constructor to test"
+            end
+          | Sint | Sbigint | Sbool | Stuple _ | Sarrow _ ->
+            error expression.rexp_loc
+              "a constructor test needs a datatype subject"
+        end
       | Rexp_apply
           ( { rexp_desc = Rexp_ident (Rfree reference_identifier); _ },
             arguments ) ->

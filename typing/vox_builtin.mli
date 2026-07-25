@@ -34,3 +34,11 @@ val is_bigint_type : Path.t -> bool
     stable-call classification relies on this property, so additions to either
     classifier must preserve it.  [of_path] uses persistent identifier
     identity; printed or shadowed names are never sufficient. *)
+
+(* A match arm that did not fire contributes the fact that its scrutinee is
+   not that arm's constructor, carried as an application of a function with
+   this prefix.  Both backends recognise it and neither depends on the
+   other. *)
+val constructor_mismatch_prefix : string
+val constructor_mismatch_name : string -> string
+val constructor_mismatch : string -> string option

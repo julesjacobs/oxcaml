@@ -79,3 +79,21 @@ let is_bigint_type = function
   | Path.Pdot (root, "t") -> bigint_root root
   | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
 ;;
+
+(* A match arm that did not fire contributes the fact that its scrutinee is
+   not that arm's constructor.  The fact is carried as an application of a
+   function with this prefix so that each backend can give it meaning: Lean
+   case-splits on the subject, and the SMT backends emit the datatype tester.
+   It lives here because both backends need to recognise it and neither
+   depends on the other. *)
+let constructor_mismatch_prefix = "*vox-match-constructor-mismatch*:"
+
+let constructor_mismatch_name constructor =
+  constructor_mismatch_prefix ^ constructor
+
+let constructor_mismatch name =
+  let length = String.length constructor_mismatch_prefix in
+  if String.length name >= length
+     && String.equal (String.sub name 0 length) constructor_mismatch_prefix
+  then Some (String.sub name length (String.length name - length))
+  else None
