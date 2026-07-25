@@ -107,51 +107,60 @@ module Fact_env = struct
           Predef.path_int32; Predef.path_int64; Predef.path_nativeint ]
       || Vox_builtin.is_bigint_type path
     in
-    let rec float_free visited type_ =
-      match Types.get_desc (Ctype.expand_head env type_) with
+    (* Two cycles have to terminate here: a named type whose declaration
+       mentions itself, tracked by path, and a structurally recursive type
+       under [-rectypes], which has no name to track and is instead marked
+       node by node.  Re-reaching either contributes no new float. *)
+    let rec float_free mark visited type_ =
+      let type_ = Ctype.expand_head env type_ in
+      if not (Types.try_mark_node mark type_) then true
+      else
+      match Types.get_desc type_ with
       | Types.Ttuple labelled ->
-        List.for_all (fun (_, type_) -> float_free visited type_) labelled
+        List.for_all (fun (_, type_) -> float_free mark visited type_) labelled
       | Types.Tconstr (path, arguments, _) ->
         (not (Path.same path Predef.path_float))
         && (not (Path.same path Predef.path_floatarray))
-        && List.for_all (float_free visited) arguments
+        && List.for_all (float_free mark visited) arguments
         && (scalar path
             || Path.Set.mem path visited
             || let visited = Path.Set.add path visited in
                match Env.find_type path env with
                | exception Not_found -> false
-               | declaration -> float_free_kind visited declaration)
+               | declaration -> float_free_kind mark visited declaration)
       | Types.Trefine refinement ->
         (* A refinement expression carries the refined type; reflexivity is a
            property of the underlying carrier. *)
-        float_free visited refinement.Types.ref_skeleton
+        float_free mark visited refinement.Types.ref_skeleton
       | Types.Tvar _ | Types.Tunivar _ | Types.Tarrow _ | Types.Tobject _
       | Types.Tfield _ | Types.Tnil | Types.Tlink _ | Types.Tsubst _
       | Types.Tvariant _ | Types.Tpoly _ | Types.Tpackage _
       | Types.Tof_kind _ | Types.Tunboxed_tuple _ | Types.Tbox _
       | Types.Tquote _ | Types.Tsplice _
       | Types.Tquote_eval _ | Types.Trepr _ -> false
-    and float_free_kind visited declaration =
+    and float_free_kind mark visited declaration =
       match declaration.Types.type_kind with
       | Types.Type_record (labels, _, _) ->
         List.for_all
-          (fun label -> float_free visited label.Types.ld_type) labels
+          (fun label -> float_free mark visited label.Types.ld_type) labels
       | Types.Type_variant (constructors, _, _) ->
         List.for_all
           (fun constructor ->
             match constructor.Types.cd_args with
             | Types.Cstr_tuple arguments ->
               List.for_all
-                (fun argument -> float_free visited argument.Types.ca_type)
+                (fun argument ->
+                  float_free mark visited argument.Types.ca_type)
                 arguments
             | Types.Cstr_record labels ->
               List.for_all
-                (fun label -> float_free visited label.Types.ld_type) labels)
+                (fun label -> float_free mark visited label.Types.ld_type)
+                labels)
           constructors
       | Types.Type_abstract _ | Types.Type_open
       | Types.Type_record_unboxed_product _ -> false
     in
-    float_free Path.Set.empty type_
+    Types.with_type_mark (fun mark -> float_free mark Path.Set.empty type_)
 
   (* A hypothesis of the form [a = a] holds at every instantiation, so it
      constrains nothing.  Dropping it keeps solver input, proof-pane lines and
