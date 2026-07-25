@@ -455,6 +455,7 @@ and refinement_application_argument =
 and refinement_application =
   { rapp_arguments : refinement_application_argument list;
     rapp_result : Types.type_expr;
+    mutable rapp_proof_erased : bool;
   }
 
 and arg_label = Types.arg_label =
