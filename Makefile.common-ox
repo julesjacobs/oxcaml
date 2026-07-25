@@ -450,6 +450,15 @@ locate_test = \
     echo "tests/$${test}"; \
   )
 
+# The refinement tests select a solver-backed backend but pass no solver
+# command, so without one every obligation comes back unavailable and the
+# tests report failures that say nothing about the compiler.  Supply the
+# solver from the environment when the caller set one, otherwise from PATH.
+# No site-specific path belongs here; a checkout without a solver installed
+# behaves exactly as before.
+vox_smt_solver_default := $(shell command -v z3 > /dev/null 2>&1 && echo 'z3 -in')
+export VOX_SMT_SOLVER ?= $(vox_smt_solver_default)
+
 test-one-no-rebuild:
 	(export OCAMLSRCDIR=$$(pwd)/_runtest; \
 	 export CAML_LD_LIBRARY_PATH=$$(pwd)/_runtest/lib/ocaml/stublibs; \
