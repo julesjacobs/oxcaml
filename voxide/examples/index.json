@@ -1,0 +1,110 @@
+{
+  "examples": [
+    {
+      "name": "overview",
+      "title": "Sixty seconds",
+      "description": "First contact: a positive contract discharged at the call site. The smallest end-to-end proof.",
+      "expected_state": "verified",
+      "default": true,
+      "cursor": 11
+    },
+    {
+      "name": "abs",
+      "title": "Branches become facts",
+      "description": "A conditional contributes its test to the then-branch and the negation to the else-branch, so both paths meet a nonnegativity annotation.",
+      "expected_state": "verified",
+      "cursor": 8
+    },
+    {
+      "name": "guard",
+      "title": "Guarding a refined call",
+      "description": "A refined precondition discharged from an enclosing if-guard; the unguarded branch requires nothing.",
+      "expected_state": "verified",
+      "cursor": 10
+    },
+    {
+      "name": "binder",
+      "title": "Let-binder facts",
+      "description": "A refined let-binding is recorded as a fact and discharges a downstream obligation.",
+      "expected_state": "verified",
+      "cursor": 8
+    },
+    {
+      "name": "recursion",
+      "title": "Recursion by induction",
+      "description": "A recursive call's refined result serves as the induction hypothesis; fib and a triangular sum both prove nonnegative.",
+      "expected_state": "verified",
+      "cursor": 8
+    },
+    {
+      "name": "bst",
+      "title": "Binary search tree (verified behind an interface)",
+      "filename": "bst/",
+      "description": "A genuine recursive BST whose abstract interface exports an extensional equality and three parametric functional-correctness laws: empty membership, the full member-after-insert characterization, and equal_implies_member — if equal returns true, the two trees agree on membership at every query. The positive client instantiates the laws at fresh keys and tree shapes, including an extensionality demonstration on trees built in different insertion orders. On R6, Lean and z3 verify the complete workspace; in-process oxsmt is honest-partial and reports unproved when it cannot discharge the recursive proof.",
+      "expected_state": "verified",
+      "workspace": {
+        "active": "client_positive.ml",
+        "default_backend": "lean",
+        "files": [
+          {
+            "name": "bst.mli",
+            "path": "examples/bst/bst.mli"
+          },
+          {
+            "name": "bst.ml",
+            "path": "examples/bst/bst.ml"
+          },
+          {
+            "name": "client_positive.ml",
+            "path": "examples/bst/client_positive.ml"
+          }
+        ],
+        "expected_by_backend": {
+          "lean": {
+            "bst.mli": "interface",
+            "bst.ml": "verified",
+            "client_positive.ml": "verified"
+          },
+          "z3": {
+            "bst.mli": "interface",
+            "bst.ml": "verified",
+            "client_positive.ml": "verified"
+          },
+          "oxsmt": {
+            "bst.mli": "interface",
+            "bst.ml": "unproved",
+            "client_positive.ml": "unavailable"
+          }
+        }
+      }
+    },
+    {
+      "name": "dependent",
+      "title": "Dependent contracts",
+      "description": "A parameter's refinement mentions an earlier parameter; the call-site obligation instantiates it.",
+      "expected_state": "verified",
+      "cursor": 8
+    },
+    {
+      "name": "counterexample",
+      "title": "When you're wrong",
+      "description": "A false obligation (2 = 1): verification fails and the obligation is reported disproved. The one example that does NOT verify.",
+      "expected_state": "disproved",
+      "cursor": 10
+    },
+    {
+      "name": "proof_tour",
+      "title": "Proof-pane tour",
+      "description": "One automatic round produces a proved and a disproved obligation, driving the cursor-following proof pane, per-VC underlines, and solver-detail and generated-Lean views. Discharge stops at the first disproved obligation, so this buffer does not verify.",
+      "expected_state": "disproved",
+      "cursor": 16
+    },
+    {
+      "name": "unproved",
+      "title": "When automation gives up",
+      "description": "A real unproved obligation: automation found no proof and no refutation, so the goal may still hold.",
+      "expected_state": "unproved",
+      "cursor": 8
+    }
+  ]
+}

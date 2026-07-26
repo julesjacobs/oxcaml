@@ -1,0 +1,22 @@
+================= VOXIDE VIEW =================
+
+--- Editor (examples/overview.ml, cursor 1:1) ---
+* 1 | let bad = (true : int)
+                 ~~~~  [type] The constructor true has type bool but an expression was expected of type int
+      ^ (cursor)
+===============================================
+================= VOXIDE VIEW =================
+
+--- Diagnostics ---
+[type] Line 1, column 12: The constructor true has type bool but an expression was expected of type int
+===============================================
+================= VOXIDE VIEW =================
+
+--- Inferred signature ---
+Unavailable until the errors are fixed.
+===============================================
+================= VOXIDE VIEW =================
+
+--- Verification ---
+[depth-1 muted]
+===============================================

@@ -1,0 +1,73 @@
+================= VOXIDE VIEW =================
+server: <server>    frontend: <frontend>
+toggles: theme=dark  compact=on  sidebar=shown  tokenizer=real
+controls: backend=oxsmt  |  ✓ verified · 1/1  |  (115 ms)
+backend options: available: lean, z3, oxsmt, cross; selector: shown
+actions: automatic (no Check or Verify buttons)
+status class: status-verified
+
+--- File explorer (active: examples/overview.ml) ---
+▾ Examples
+  overview.ml   (active)   -- Sixty seconds
+  abs.ml   -- Branches become facts
+  guard.ml   -- Guarding a refined call
+  binder.ml   -- Let-binder facts
+  recursion.ml   -- Recursion by induction
+  dependent.ml   -- Dependent contracts
+  ✗ counterexample.ml   -- When you're wrong — expected outcome: does not verify (curated example)
+  ✗ proof_tour.ml   -- Proof-pane tour — expected outcome: does not verify (curated example)
+▾ Docs
+  refinements.md   -- refinements.md
+  welcome.md   -- welcome.md
+▾ Workspace (multi-file)
+  Demo.mli   -- Demo.mli — multi-file demo unit
+  Demo.ml   -- Demo.ml — multi-file demo unit
+  Client.ml   -- Client.ml — multi-file demo unit
+
+--- Editor (examples/overview.ml, cursor 11:22) ---
+   1 | (* Sixty seconds with refinement types.
+   2 | 
+   3 |    A refinement type like [int{ _ > 0 }] is an ordinary int carrying a
+   4 |    proof obligation: every value that flows into it must satisfy the
+   5 |    predicate, and the verifier discharges that obligation for you.  The
+   6 |    [_] stands for the value being constrained. *)
+   7 | 
+   8 | let positive (x : int{ _ > 0 }) = x
+   9 | 
+  10 | (* The call site carries the obligation [7 > 0], discharged here. *)
+* 11 | let seven = positive 7
+                            ~  [vc:proved] the verifier discharged this obligation
+                            ^ (cursor)
+  12 | 
+
+--- Status (roll-up) ---
+
+
+--- Verification backend ---
+selected: oxsmt
+available: lean, z3, oxsmt, cross
+selector: shown
+
+--- Proof pane ---
+Proof pane
+⊢ 7 > 0  ✓
+
+--- Verdict legend ---
+(hidden -- shown only when an obligation fails)
+
+--- Diagnostics ---
+(none)
+
+--- Type at cursor ---
+int
+
+--- Inferred signature ---
+val positive : int{ _ > 0 } -> int
+val seven : int
+
+--- Verification ---
+[depth-1 muted]
+
+--- Dialogs / guards ---
+(none)
+===============================================
