@@ -425,101 +425,292 @@ let rotate_right_left_ordered (tree : t @ logical)
     rotate_left_ordered (Node (l, k, rotate_right r)) ();
     ()
 
-let max_height (a : int) (b : int) : int =
-  if int_less a b then b else a
+(* Heights are mathematical integers.  With machine [int] heights the
+   balance invariant below would only hold under an unstated assumption
+   that no tree is deep enough for [height] to wrap, and nothing here
+   bounds the size of a tree. *)
+let[@vox.def] max_height (a : Bigint.t @ logical) (b : Bigint.t @ logical) =
+  if Bigint.lt a b then b else a
 
-let rec height (tree : t @ logical) : int =
+let[@vox.def] rec height (tree : t @ logical) : Bigint.t =
   match tree with
-  | Leaf -> 0
-  | Node (l, _, r) -> int_add 1 (max_height (height l) (height r))
-
-type rebalance_action =
-  | No_rotation
-  | Rotate_ll
-  | Rotate_lr
-  | Rotate_rr
-  | Rotate_rl
-
-let choose_action (tree : t @ logical) : rebalance_action =
-  match tree with
-  | Leaf -> No_rotation
+  | Leaf -> Bigint.zero
   | Node (l, _, r) ->
-    let bf = int_sub (height l) (height r) in
-    if int_less 1 bf
+    Bigint.add Bigint.one (max_height (height l) (height r))
+
+let rec height_nonneg (tree : t @ logical)
+    : unit{ Bigint.ge (height tree) Bigint.zero = true } =
+  match tree with
+  | Leaf ->
+    height_def Leaf;
+    ()
+  | Node (l, k, r) ->
+    height_def (Node (l, k, r));
+    max_height_def (height l) (height r);
+    height_nonneg l;
+    height_nonneg r;
+    ()
+
+(* Height balance: at every node the two subtrees differ in height by at
+   most one. *)
+let[@vox.def] rec balanced (tree : t @ logical) =
+  match tree with
+  | Leaf -> true
+  | Node (l, _, r) ->
+    balanced l && balanced r
+    && Bigint.le (height l) (Bigint.add (height r) Bigint.one)
+    && Bigint.le (height r) (Bigint.add (height l) Bigint.one)
+
+(* Single rotation when the outer grandchild is the taller one, double
+   rotation when the inner one is. *)
+let[@vox.def] rebalance (tree : t @ logical) : t =
+  match tree with
+  | Leaf -> tree
+  | Node (l, _, r) ->
+    if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
     then
       (match l with
-       | Leaf -> No_rotation
+       | Leaf -> tree
        | Node (ll, _, lr) ->
-         if int_leq (height lr) (height ll) then Rotate_ll else Rotate_lr)
-    else if int_less bf (-1)
+         if Bigint.le (height lr) (height ll)
+         then rotate_right tree
+         else rotate_left_right tree)
+    else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
     then
       (match r with
-       | Leaf -> No_rotation
+       | Leaf -> tree
        | Node (rl, _, rr) ->
-         if int_leq (height rl) (height rr) then Rotate_rr else Rotate_rl)
-    else No_rotation
-
-let[@vox.def] apply_action (action : rebalance_action)
-    (tree : t @ logical) : t =
-  match action with
-  | No_rotation -> tree
-  | Rotate_ll -> rotate_right tree
-  | Rotate_lr -> rotate_left_right tree
-  | Rotate_rr -> rotate_left tree
-  | Rotate_rl -> rotate_right_left tree
-
-let[@vox.def] rebalance (tree : t @ logical) : t =
-  apply_action (choose_action tree) tree
+         if Bigint.le (height rl) (height rr)
+         then rotate_left tree
+         else rotate_right_left tree)
+    else tree
 
 let rebalance_preserves_occurs (tree : t @ logical) (query : int)
     : unit{ occurs query (rebalance tree) = occurs query tree }
   =
-  let _ = rebalance_def tree in
-  let action = choose_action tree in
-  let _ = apply_action_def action tree in
-  match action with
-  | No_rotation -> ()
-  | Rotate_ll -> rotate_right_preserves_occurs tree query
-  | Rotate_lr -> rotate_left_right_preserves_occurs tree query
-  | Rotate_rr -> rotate_left_preserves_occurs tree query
-  | Rotate_rl -> rotate_right_left_preserves_occurs tree query
+  rebalance_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, _k, r) ->
+    if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
+    then
+      (match l with
+       | Leaf -> ()
+       | Node (ll, _lk, lr) ->
+         if Bigint.le (height lr) (height ll)
+         then rotate_right_preserves_occurs tree query
+         else rotate_left_right_preserves_occurs tree query)
+    else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
+    then
+      (match r with
+       | Leaf -> ()
+       | Node (rl, _rk, rr) ->
+         if Bigint.le (height rl) (height rr)
+         then rotate_left_preserves_occurs tree query
+         else rotate_right_left_preserves_occurs tree query)
+    else ()
 
 let rebalance_below (tree : t @ logical) (bound : int)
     : unit{ below (rebalance tree) bound = below tree bound } =
   rebalance_def tree;
-  let action = choose_action tree in
-  apply_action_def action tree;
-  match action with
-  | No_rotation -> ()
-  | Rotate_ll -> rotate_right_below tree bound
-  | Rotate_lr -> rotate_left_right_below tree bound
-  | Rotate_rr -> rotate_left_below tree bound
-  | Rotate_rl -> rotate_right_left_below tree bound
+  match tree with
+  | Leaf -> ()
+  | Node (l, _k, r) ->
+    if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
+    then
+      (match l with
+       | Leaf -> ()
+       | Node (ll, _lk, lr) ->
+         if Bigint.le (height lr) (height ll)
+         then rotate_right_below tree bound
+         else rotate_left_right_below tree bound)
+    else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
+    then
+      (match r with
+       | Leaf -> ()
+       | Node (rl, _rk, rr) ->
+         if Bigint.le (height rl) (height rr)
+         then rotate_left_below tree bound
+         else rotate_right_left_below tree bound)
+    else ()
 
 let rebalance_above (tree : t @ logical) (bound : int)
     : unit{ above (rebalance tree) bound = above tree bound } =
   rebalance_def tree;
-  let action = choose_action tree in
-  apply_action_def action tree;
-  match action with
-  | No_rotation -> ()
-  | Rotate_ll -> rotate_right_above tree bound
-  | Rotate_lr -> rotate_left_right_above tree bound
-  | Rotate_rr -> rotate_left_above tree bound
-  | Rotate_rl -> rotate_right_left_above tree bound
+  match tree with
+  | Leaf -> ()
+  | Node (l, _k, r) ->
+    if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
+    then
+      (match l with
+       | Leaf -> ()
+       | Node (ll, _lk, lr) ->
+         if Bigint.le (height lr) (height ll)
+         then rotate_right_above tree bound
+         else rotate_left_right_above tree bound)
+    else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
+    then
+      (match r with
+       | Leaf -> ()
+       | Node (rl, _rk, rr) ->
+         if Bigint.le (height rl) (height rr)
+         then rotate_left_above tree bound
+         else rotate_right_left_above tree bound)
+    else ()
 
 let rebalance_ordered (tree : t @ logical)
     (_ordered : unit{ ordered tree = true })
     : unit{ ordered (rebalance tree) = true } =
   rebalance_def tree;
-  let action = choose_action tree in
-  apply_action_def action tree;
-  match action with
-  | No_rotation -> ()
-  | Rotate_ll -> rotate_right_ordered tree ()
-  | Rotate_lr -> rotate_left_right_ordered tree ()
-  | Rotate_rr -> rotate_left_ordered tree ()
-  | Rotate_rl -> rotate_right_left_ordered tree ()
+  match tree with
+  | Leaf -> ()
+  | Node (l, _k, r) ->
+    if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
+    then
+      (match l with
+       | Leaf -> ()
+       | Node (ll, _lk, lr) ->
+         if Bigint.le (height lr) (height ll)
+         then rotate_right_ordered tree ()
+         else rotate_left_right_ordered tree ())
+    else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
+    then
+      (match r with
+       | Leaf -> ()
+       | Node (rl, _rk, rr) ->
+         if Bigint.le (height rl) (height rr)
+         then rotate_left_ordered tree ()
+         else rotate_right_left_ordered tree ())
+    else ()
+
+(* Okasaki-style statement of the rebalance step: from subtrees that are
+   themselves balanced and out of step by at most two, [rebalance] returns a
+   balanced tree whose height is that of the unrebalanced node or one less,
+   and is exactly that height when no rotation was needed. *)
+let rebalance_ok (l : t @ logical) (key : int) (r : t @ logical)
+    (_hypotheses : unit{
+       balanced l = true
+       && balanced r = true
+       && Bigint.le (height l)
+            (Bigint.add (height r) (Bigint.add Bigint.one Bigint.one)) = true
+       && Bigint.le (height r)
+            (Bigint.add (height l) (Bigint.add Bigint.one Bigint.one)) = true
+     })
+    : unit{
+      balanced (rebalance (Node (l, key, r))) = true
+      && Bigint.le (height (rebalance (Node (l, key, r))))
+           (height (Node (l, key, r))) = true
+      && Bigint.le (Bigint.sub (height (Node (l, key, r))) Bigint.one)
+           (height (rebalance (Node (l, key, r)))) = true
+      && (Bigint.le (height l) (Bigint.add (height r) Bigint.one) = false
+          || Bigint.le (height r) (Bigint.add (height l) Bigint.one) = false
+          || Bigint.equal (height (rebalance (Node (l, key, r))))
+               (height (Node (l, key, r))) = true)
+    }
+  =
+  rebalance_def (Node (l, key, r));
+  height_def (Node (l, key, r));
+  max_height_def (height l) (height r);
+  height_nonneg l;
+  height_nonneg r;
+  balanced_def (Node (l, key, r));
+  if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
+  then
+    (match l with
+     | Leaf ->
+       height_def Leaf;
+       ()
+     | Node (ll, lk, lr) ->
+       balanced_def (Node (ll, lk, lr));
+       height_def (Node (ll, lk, lr));
+       max_height_def (height ll) (height lr);
+       height_nonneg ll;
+       height_nonneg lr;
+       if Bigint.le (height lr) (height ll)
+       then begin
+         rotate_right_def (Node (l, key, r));
+         height_def (Node (ll, lk, Node (lr, key, r)));
+         height_def (Node (lr, key, r));
+         max_height_def (height ll) (height (Node (lr, key, r)));
+         max_height_def (height lr) (height r);
+         balanced_def (Node (ll, lk, Node (lr, key, r)));
+         balanced_def (Node (lr, key, r));
+         ()
+       end
+       else
+         (match lr with
+          | Leaf ->
+            height_def Leaf;
+            ()
+          | Node (b, y, c) ->
+            balanced_def (Node (b, y, c));
+            height_def (Node (b, y, c));
+            max_height_def (height b) (height c);
+            height_nonneg b;
+            height_nonneg c;
+            rotate_left_right_def (Node (l, key, r));
+            rotate_left_def l;
+            rotate_right_def (Node (rotate_left l, key, r));
+            height_def (Node (Node (ll, lk, b), y, Node (c, key, r)));
+            height_def (Node (ll, lk, b));
+            height_def (Node (c, key, r));
+            max_height_def
+              (height (Node (ll, lk, b))) (height (Node (c, key, r)));
+            max_height_def (height ll) (height b);
+            max_height_def (height c) (height r);
+            balanced_def (Node (Node (ll, lk, b), y, Node (c, key, r)));
+            balanced_def (Node (ll, lk, b));
+            balanced_def (Node (c, key, r));
+            ()))
+  else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
+  then
+    (match r with
+     | Leaf ->
+       height_def Leaf;
+       ()
+     | Node (rl, rk, rr) ->
+       balanced_def (Node (rl, rk, rr));
+       height_def (Node (rl, rk, rr));
+       max_height_def (height rl) (height rr);
+       height_nonneg rl;
+       height_nonneg rr;
+       if Bigint.le (height rl) (height rr)
+       then begin
+         rotate_left_def (Node (l, key, r));
+         height_def (Node (Node (l, key, rl), rk, rr));
+         height_def (Node (l, key, rl));
+         max_height_def (height (Node (l, key, rl))) (height rr);
+         max_height_def (height l) (height rl);
+         balanced_def (Node (Node (l, key, rl), rk, rr));
+         balanced_def (Node (l, key, rl));
+         ()
+       end
+       else
+         (match rl with
+          | Leaf ->
+            height_def Leaf;
+            ()
+          | Node (b, y, c) ->
+            balanced_def (Node (b, y, c));
+            height_def (Node (b, y, c));
+            max_height_def (height b) (height c);
+            height_nonneg b;
+            height_nonneg c;
+            rotate_right_left_def (Node (l, key, r));
+            rotate_right_def r;
+            rotate_left_def (Node (l, key, rotate_right r));
+            height_def (Node (Node (l, key, b), y, Node (c, rk, rr)));
+            height_def (Node (l, key, b));
+            height_def (Node (c, rk, rr));
+            max_height_def
+              (height (Node (l, key, b))) (height (Node (c, rk, rr)));
+            max_height_def (height l) (height b);
+            max_height_def (height c) (height rr);
+            balanced_def (Node (Node (l, key, b), y, Node (c, rk, rr)));
+            balanced_def (Node (l, key, b));
+            balanced_def (Node (c, rk, rr));
+            ()))
+  else ()
 
 let[@vox.def] rec insert (new_key : int) (tree : t @ logical) : t =
   match tree with
@@ -618,6 +809,46 @@ let rec insert_ordered (new_key : int) (tree : t @ logical)
       rebalance_ordered (Node (left, key, insert new_key right)) ();
       ()
 
+let rec insert_balanced (new_key : int) (tree : t @ logical)
+    (_balanced : unit{ balanced tree = true })
+    : unit{
+      balanced (insert new_key tree) = true
+      && Bigint.le (height tree) (height (insert new_key tree)) = true
+      && Bigint.le (height (insert new_key tree))
+           (Bigint.add (height tree) Bigint.one) = true
+    }
+  =
+  match tree with
+  | Leaf ->
+    insert_def new_key Leaf;
+    balanced_def (Node (Leaf, new_key, Leaf));
+    balanced_def Leaf;
+    height_def (Node (Leaf, new_key, Leaf));
+    height_def Leaf;
+    max_height_def (height Leaf) (height Leaf);
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    balanced_def (Node (left, key, right));
+    height_def (Node (left, key, right));
+    max_height_def (height left) (height right);
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_balanced new_key left ();
+      rebalance_ok (insert new_key left) key right ();
+      height_def (Node (insert new_key left, key, right));
+      max_height_def (height (insert new_key left)) (height right);
+      ()
+    | Right ->
+      insert_balanced new_key right ();
+      rebalance_ok left key (insert new_key right) ();
+      height_def (Node (left, key, insert new_key right));
+      max_height_def (height left) (height (insert new_key right));
+      ()
+
 let occurs_insert_leaf (new_key : int) (query : int)
     : unit{
       occurs query (insert new_key Leaf)
@@ -701,7 +932,9 @@ let rec occurs_insert (new_key : int) (tree : t @ logical) (query : int)
       let ih = occurs_insert new_key right query in
       occurs_insert_right key new_key left right query ih
 
-let[@vox.def] invariant (tree : t @ logical) = ordered tree
+(* An AVL tree: ordered, and balanced in height. *)
+let[@vox.def] invariant (tree : t @ logical) =
+  ordered tree && balanced tree
 
 let empty_law ~(query : int) : unit{ member query empty = false } =
   member_def query empty
@@ -709,6 +942,7 @@ let empty_law ~(query : int) : unit{ member query empty = false } =
 let empty_invariant : unit{ invariant empty = true } =
   invariant_def empty;
   ordered_def empty;
+  balanced_def empty;
   ()
 
 let insert_invariant ~(inserted : int) ~(tree : t @ logical)
@@ -717,6 +951,7 @@ let insert_invariant ~(inserted : int) ~(tree : t @ logical)
   invariant_def tree;
   invariant_def (insert inserted tree);
   insert_ordered inserted tree ();
+  insert_balanced inserted tree ();
   ()
 
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)

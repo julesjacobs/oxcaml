@@ -1438,9 +1438,7 @@ let rec ins_black_balanced (new_key : int) (tree : t @ logical)
       ()
 
 let[@vox.def] blacken (tree : t @ logical) : t =
-  match tree with
-  | Empty -> Empty
-  | Node (_c, l, k, r) -> Node (Black, l, k, r)
+  tree
 
 let blacken_preserves (tree : t @ logical) (query : int)
     : unit{ occurs query (blacken tree) = occurs query tree } =
@@ -1599,8 +1597,8 @@ let[@vox.def] rec agrees (t1 : t @ logical) (t2 : t @ logical)
     then false
     else if agrees t1 t2 left then agrees t1 t2 right else false
 
-let[@vox.def] equal (_t1 : t @ logical) (_t2 : t @ logical) =
-  false
+let[@vox.def] equal (t1 : t @ logical) (t2 : t @ logical) =
+  if agrees t1 t2 t1 then agrees t1 t2 t2 else false
 
 let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(colour : color) ~(left : t @ logical) ~(key : int)
@@ -1667,7 +1665,7 @@ let equal_forward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
 let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(pointwise : query:int ->
                    unit{ member query t1 = member query t2 })
-    : unit{ equal t1 t2 = false } =
+    : unit{ equal t1 t2 = true } =
   let rec prove nodes : unit{ agrees t1 t2 nodes = true } =
     match nodes with
     | Empty ->

@@ -140,6 +140,61 @@ let rec member_occurs (query : int) (tree : t @ logical)
     | Left -> above_absent key query right ()
     | Right -> below_absent key query left ()
 
+(* The two red-black conditions.  [no_red_red] is the colour condition; a
+   tree produced by [ins] satisfies it everywhere except possibly at its own
+   root, which is what [infrared] allows for. *)
+let[@vox.def] is_black (tree : t @ logical) =
+  match tree with
+  | Empty -> true
+  | Node (colour, _left, _key, _right) ->
+    match colour with
+    | Red -> false
+    | Black -> true
+
+let[@vox.def] rec no_red_red (tree : t @ logical) =
+  match tree with
+  | Empty -> true
+  | Node (colour, left, _key, right) ->
+    match colour with
+    | Black -> no_red_red left && no_red_red right
+    | Red ->
+      is_black left && is_black right
+      && no_red_red left && no_red_red right
+
+let[@vox.def] infrared (tree : t @ logical) =
+  match tree with
+  | Empty -> true
+  | Node (_colour, left, _key, right) -> no_red_red left && no_red_red right
+
+(* Black heights are mathematical integers.  A machine [int] black height
+   would need a bound on the size of a tree that nothing here supplies. *)
+let[@vox.def] rec black_height (tree : t @ logical) : Bigint.t =
+  match tree with
+  | Empty -> Bigint.zero
+  | Node (colour, left, _key, _right) ->
+    match colour with
+    | Black -> Bigint.add Bigint.one (black_height left)
+    | Red -> black_height left
+
+let[@vox.def] rec black_balanced (tree : t @ logical) =
+  match tree with
+  | Empty -> true
+  | Node (_colour, left, _key, right) ->
+    black_balanced left && black_balanced right
+    && Bigint.equal (black_height left) (black_height right)
+
+let no_red_red_infrared (tree : t @ logical)
+    (_proper : unit{ no_red_red tree = true })
+    : unit{ infrared tree = true } =
+  infrared_def tree;
+  match tree with
+  | Empty -> ()
+  | Node (colour, left, key, right) ->
+    no_red_red_def (Node (colour, left, key, right));
+    match colour with
+    | Red -> ()
+    | Black -> ()
+
 (* Right-leaning half of Okasaki's balance: the caller has already ruled out a
    red-red violation on the left spine, so we only inspect the right child. *)
 let[@vox.def] rotate_right_side (left : t @ logical) (key : int)
@@ -754,6 +809,254 @@ let balance_ordered (colour : color) (left : t @ logical) (key : int)
                | Black -> rotate_right_side_ordered left key right ())
             | Empty -> rotate_right_side_ordered left key right ()))
 
+let rotate_right_side_proper (left : t @ logical) (key : int)
+    (right : t @ logical)
+    (_proper : unit{ no_red_red left = true && no_red_red right = true })
+    : unit{ no_red_red (rotate_right_side left key right) = true }
+  =
+  rotate_right_side_def left key right;
+  match right with
+  | Empty ->
+    no_red_red_def (Node (Black, left, key, right));
+    ()
+  | Node (rc, rl, rk, rr) ->
+    match rc with
+    | Black ->
+      no_red_red_def (Node (Black, left, key, right));
+      ()
+    | Red ->
+      (* A proper red node has black children, so no reshaping branch of
+         [rotate_right_side] can fire. *)
+      no_red_red_def (Node (Red, rl, rk, rr));
+      (match rl with
+       | Node (rlc, b, y, c) ->
+         is_black_def (Node (rlc, b, y, c));
+         (match rlc with
+          | Red -> ()
+          | Black ->
+            (match rr with
+             | Node (rrc, c2, z, d) ->
+               is_black_def (Node (rrc, c2, z, d));
+               (match rrc with
+                | Red -> ()
+                | Black ->
+                  no_red_red_def (Node (Black, left, key, right));
+                  ())
+             | Empty ->
+               no_red_red_def (Node (Black, left, key, right));
+               ()))
+       | Empty ->
+         (match rr with
+          | Node (rrc, c2, z, d) ->
+            is_black_def (Node (rrc, c2, z, d));
+            (match rrc with
+             | Red -> ()
+             | Black ->
+               no_red_red_def (Node (Black, left, key, right));
+               ())
+          | Empty ->
+            no_red_red_def (Node (Black, left, key, right));
+            ()))
+
+let rotate_right_side_repair (left : t @ logical) (key : int)
+    (right : t @ logical)
+    (_proper : unit{ no_red_red left = true && infrared right = true })
+    : unit{ no_red_red (rotate_right_side left key right) = true }
+  =
+  rotate_right_side_def left key right;
+  infrared_def right;
+  match right with
+  | Empty ->
+    no_red_red_def Empty;
+    no_red_red_def (Node (Black, left, key, right));
+    ()
+  | Node (rc, rl, rk, rr) ->
+    match rc with
+    | Black ->
+      no_red_red_def (Node (Black, rl, rk, rr));
+      no_red_red_def (Node (Black, left, key, right));
+      ()
+    | Red ->
+      (match rl with
+       | Node (rlc, b, y, c) ->
+         is_black_def (Node (rlc, b, y, c));
+         (match rlc with
+          | Red ->
+            no_red_red_def (Node (Red, b, y, c));
+            no_red_red_def
+              (Node (Red, Node (Black, left, key, b), y,
+                     Node (Black, c, rk, rr)));
+            no_red_red_def (Node (Black, left, key, b));
+            no_red_red_def (Node (Black, c, rk, rr));
+            is_black_def (Node (Black, left, key, b));
+            is_black_def (Node (Black, c, rk, rr));
+            ()
+          | Black ->
+            (match rr with
+             | Node (rrc, c2, z, d) ->
+               is_black_def (Node (rrc, c2, z, d));
+               (match rrc with
+                | Red ->
+                  no_red_red_def (Node (Red, c2, z, d));
+                  no_red_red_def
+                    (Node (Red, Node (Black, left, key, rl), rk,
+                           Node (Black, c2, z, d)));
+                  no_red_red_def (Node (Black, left, key, rl));
+                  no_red_red_def (Node (Black, c2, z, d));
+                  is_black_def (Node (Black, left, key, rl));
+                  is_black_def (Node (Black, c2, z, d));
+                  ()
+                | Black ->
+                  no_red_red_def (Node (Red, rl, rk, rr));
+                  no_red_red_def (Node (Black, left, key, right));
+                  ())
+             | Empty ->
+               is_black_def Empty;
+               no_red_red_def (Node (Red, rl, rk, rr));
+               no_red_red_def (Node (Black, left, key, right));
+               ()))
+       | Empty ->
+         is_black_def Empty;
+         (match rr with
+          | Node (rrc, c2, z, d) ->
+            is_black_def (Node (rrc, c2, z, d));
+            (match rrc with
+             | Red ->
+               no_red_red_def (Node (Red, c2, z, d));
+               no_red_red_def
+                 (Node (Red, Node (Black, left, key, rl), rk,
+                        Node (Black, c2, z, d)));
+               no_red_red_def (Node (Black, left, key, rl));
+               no_red_red_def (Node (Black, c2, z, d));
+               is_black_def (Node (Black, left, key, rl));
+               is_black_def (Node (Black, c2, z, d));
+               ()
+             | Black ->
+               no_red_red_def (Node (Red, rl, rk, rr));
+               no_red_red_def (Node (Black, left, key, right));
+               ())
+          | Empty ->
+            no_red_red_def (Node (Red, rl, rk, rr));
+            no_red_red_def (Node (Black, left, key, right));
+            ()))
+
+(* A red-red shape at the root of the left child is exactly what the left
+   half of [balance] repairs. *)
+let balance_black_left (left : t @ logical) (key : int)
+    (right : t @ logical)
+    (_proper : unit{ infrared left = true && no_red_red right = true })
+    : unit{ no_red_red (balance Black left key right) = true }
+  =
+  balance_def Black left key right;
+  infrared_def left;
+  match left with
+  | Empty ->
+    no_red_red_def Empty;
+    rotate_right_side_proper left key right ()
+  | Node (lc, ll, lk, lr) ->
+    match lc with
+    | Black ->
+      no_red_red_def (Node (Black, ll, lk, lr));
+      rotate_right_side_proper left key right ()
+    | Red ->
+      (match ll with
+       | Node (llc, a, x, b) ->
+         is_black_def (Node (llc, a, x, b));
+         (match llc with
+          | Red ->
+            no_red_red_def (Node (Red, a, x, b));
+            no_red_red_def
+              (Node (Red, Node (Black, a, x, b), lk,
+                     Node (Black, lr, key, right)));
+            no_red_red_def (Node (Black, a, x, b));
+            no_red_red_def (Node (Black, lr, key, right));
+            is_black_def (Node (Black, a, x, b));
+            is_black_def (Node (Black, lr, key, right));
+            ()
+          | Black ->
+            (match lr with
+             | Node (lrc, b, y, c) ->
+               is_black_def (Node (lrc, b, y, c));
+               (match lrc with
+                | Red ->
+                  no_red_red_def (Node (Red, b, y, c));
+                  no_red_red_def
+                    (Node (Red, Node (Black, ll, lk, b), y,
+                           Node (Black, c, key, right)));
+                  no_red_red_def (Node (Black, ll, lk, b));
+                  no_red_red_def (Node (Black, c, key, right));
+                  is_black_def (Node (Black, ll, lk, b));
+                  is_black_def (Node (Black, c, key, right));
+                  ()
+                | Black ->
+                  no_red_red_def (Node (Red, ll, lk, lr));
+                  rotate_right_side_proper left key right ())
+             | Empty ->
+               is_black_def Empty;
+               no_red_red_def Empty;
+               no_red_red_def (Node (Red, ll, lk, lr));
+               rotate_right_side_proper left key right ()))
+       | Empty ->
+         is_black_def Empty;
+         no_red_red_def Empty;
+         (match lr with
+          | Node (lrc, b, y, c) ->
+            is_black_def (Node (lrc, b, y, c));
+            (match lrc with
+             | Red ->
+               no_red_red_def (Node (Red, b, y, c));
+               no_red_red_def
+                 (Node (Red, Node (Black, ll, lk, b), y,
+                        Node (Black, c, key, right)));
+               no_red_red_def (Node (Black, ll, lk, b));
+               no_red_red_def (Node (Black, c, key, right));
+               is_black_def (Node (Black, ll, lk, b));
+               is_black_def (Node (Black, c, key, right));
+               ()
+             | Black ->
+               no_red_red_def (Node (Red, ll, lk, lr));
+               rotate_right_side_proper left key right ())
+          | Empty ->
+            no_red_red_def (Node (Red, ll, lk, lr));
+            rotate_right_side_proper left key right ()))
+
+(* When the left child is already proper the left reshaping branches cannot
+   fire, and the repair happens on the right spine. *)
+let balance_black_right (left : t @ logical) (key : int)
+    (right : t @ logical)
+    (_proper : unit{ no_red_red left = true && infrared right = true })
+    : unit{ no_red_red (balance Black left key right) = true }
+  =
+  balance_def Black left key right;
+  match left with
+  | Empty -> rotate_right_side_repair left key right ()
+  | Node (lc, ll, lk, lr) ->
+    no_red_red_def (Node (lc, ll, lk, lr));
+    match lc with
+    | Black -> rotate_right_side_repair left key right ()
+    | Red ->
+      (match ll with
+       | Node (llc, a, x, b) ->
+         is_black_def (Node (llc, a, x, b));
+         (match llc with
+          | Red -> ()
+          | Black ->
+            (match lr with
+             | Node (lrc, b, y, c) ->
+               is_black_def (Node (lrc, b, y, c));
+               (match lrc with
+                | Red -> ()
+                | Black -> rotate_right_side_repair left key right ())
+             | Empty -> rotate_right_side_repair left key right ()))
+       | Empty ->
+         (match lr with
+          | Node (lrc, b, y, c) ->
+            is_black_def (Node (lrc, b, y, c));
+            (match lrc with
+             | Red -> ()
+             | Black -> rotate_right_side_repair left key right ())
+          | Empty -> rotate_right_side_repair left key right ()))
+
 (* An existing key is returned unchanged.  Without this case [ins] appends a
    second copy of the key on the right spine, which breaks the ordering
    invariant and makes the structure not a set. *)
@@ -876,6 +1179,263 @@ let rec ins_ordered (new_key : int) (tree : t @ logical)
       balance_ordered c l k (ins new_key r) ();
       ()
 
+let rec ins_rb (new_key : int) (tree : t @ logical)
+    (_proper : unit{ no_red_red tree = true })
+    : unit{
+      infrared (ins new_key tree) = true
+      && (is_black tree = false
+          || no_red_red (ins new_key tree) = true)
+    }
+  =
+  match tree with
+  | Empty ->
+    ins_def new_key Empty;
+    is_black_def Empty;
+    no_red_red_def Empty;
+    is_black_def (Node (Red, Empty, new_key, Empty));
+    no_red_red_def (Node (Red, Empty, new_key, Empty));
+    infrared_def (Node (Red, Empty, new_key, Empty));
+    ()
+  | Node (c, l, k, r) ->
+    ins_def new_key (Node (c, l, k, r));
+    no_red_red_def (Node (c, l, k, r));
+    is_black_def (Node (c, l, k, r));
+    let choice = direction new_key k in
+    direction_def new_key k;
+    match choice with
+    | Same -> no_red_red_infrared (Node (c, l, k, r)) ()
+    | Left ->
+      ins_rb new_key l ();
+      (match c with
+       | Black ->
+         balance_black_left (ins new_key l) k r ();
+         no_red_red_infrared (balance Black (ins new_key l) k r) ();
+         ()
+       | Red ->
+         balance_def Red (ins new_key l) k r;
+         infrared_def (Node (Red, ins new_key l, k, r));
+         ())
+    | Right ->
+      ins_rb new_key r ();
+      (match c with
+       | Black ->
+         balance_black_right l k (ins new_key r) ();
+         no_red_red_infrared (balance Black l k (ins new_key r)) ();
+         ()
+       | Red ->
+         balance_def Red l k (ins new_key r);
+         infrared_def (Node (Red, l, k, ins new_key r));
+         ())
+
+let rotate_right_side_black_balanced (left : t @ logical) (key : int)
+    (right : t @ logical)
+    (_balanced : unit{
+       black_balanced left = true
+       && black_balanced right = true
+       && Bigint.equal (black_height left) (black_height right) = true
+     })
+    : unit{
+      black_balanced (rotate_right_side left key right) = true
+      && Bigint.equal (black_height (rotate_right_side left key right))
+           (Bigint.add Bigint.one (black_height left)) = true
+    }
+  =
+  rotate_right_side_def left key right;
+  black_balanced_def (Node (Black, left, key, right));
+  black_height_def (Node (Black, left, key, right));
+  match right with
+  | Empty -> ()
+  | Node (rc, rl, rk, rr) ->
+    black_balanced_def (Node (rc, rl, rk, rr));
+    black_height_def (Node (rc, rl, rk, rr));
+    match rc with
+    | Black -> ()
+    | Red ->
+      (match rl with
+       | Node (rlc, b, y, c) ->
+         (match rlc with
+          | Red ->
+            black_balanced_def (Node (Red, b, y, c));
+            black_height_def (Node (Red, b, y, c));
+            black_balanced_def
+              (Node (Red, Node (Black, left, key, b), y,
+                     Node (Black, c, rk, rr)));
+            black_height_def
+              (Node (Red, Node (Black, left, key, b), y,
+                     Node (Black, c, rk, rr)));
+            black_balanced_def (Node (Black, left, key, b));
+            black_height_def (Node (Black, left, key, b));
+            black_balanced_def (Node (Black, c, rk, rr));
+            black_height_def (Node (Black, c, rk, rr));
+            ()
+          | Black ->
+            (match rr with
+             | Node (rrc, c2, z, d) ->
+               (match rrc with
+                | Red ->
+                  black_balanced_def (Node (Red, c2, z, d));
+                  black_height_def (Node (Red, c2, z, d));
+                  black_balanced_def
+                    (Node (Red, Node (Black, left, key, rl), rk,
+                           Node (Black, c2, z, d)));
+                  black_height_def
+                    (Node (Red, Node (Black, left, key, rl), rk,
+                           Node (Black, c2, z, d)));
+                  black_balanced_def (Node (Black, left, key, rl));
+                  black_height_def (Node (Black, left, key, rl));
+                  black_balanced_def (Node (Black, c2, z, d));
+                  black_height_def (Node (Black, c2, z, d));
+                  ()
+                | Black -> ())
+             | Empty -> ()))
+       | Empty ->
+         (match rr with
+          | Node (rrc, c2, z, d) ->
+            (match rrc with
+             | Red ->
+               black_balanced_def (Node (Red, c2, z, d));
+               black_height_def (Node (Red, c2, z, d));
+               black_balanced_def
+                 (Node (Red, Node (Black, left, key, rl), rk,
+                        Node (Black, c2, z, d)));
+               black_height_def
+                 (Node (Red, Node (Black, left, key, rl), rk,
+                        Node (Black, c2, z, d)));
+               black_balanced_def (Node (Black, left, key, rl));
+               black_height_def (Node (Black, left, key, rl));
+               black_balanced_def (Node (Black, c2, z, d));
+               black_height_def (Node (Black, c2, z, d));
+               ()
+             | Black -> ())
+          | Empty -> ()))
+
+let balance_black_balanced (colour : color) (left : t @ logical)
+    (key : int) (right : t @ logical)
+    (_balanced : unit{
+       black_balanced left = true
+       && black_balanced right = true
+       && Bigint.equal (black_height left) (black_height right) = true
+     })
+    : unit{
+      black_balanced (balance colour left key right) = true
+      && Bigint.equal (black_height (balance colour left key right))
+           (black_height (Node (colour, left, key, right))) = true
+    }
+  =
+  balance_def colour left key right;
+  black_height_def (Node (colour, left, key, right));
+  match colour with
+  | Red ->
+    black_balanced_def (Node (Red, left, key, right));
+    black_height_def (Node (Red, left, key, right));
+    ()
+  | Black ->
+    black_height_def (Node (Black, left, key, right));
+    (match left with
+     | Empty -> rotate_right_side_black_balanced left key right ()
+     | Node (lc, ll, lk, lr) ->
+       black_balanced_def (Node (lc, ll, lk, lr));
+       black_height_def (Node (lc, ll, lk, lr));
+       (match lc with
+        | Black -> rotate_right_side_black_balanced left key right ()
+        | Red ->
+          (match ll with
+           | Node (llc, a, x, b) ->
+             (match llc with
+              | Red ->
+                black_balanced_def (Node (Red, a, x, b));
+                black_height_def (Node (Red, a, x, b));
+                black_balanced_def
+                  (Node (Red, Node (Black, a, x, b), lk,
+                         Node (Black, lr, key, right)));
+                black_height_def
+                  (Node (Red, Node (Black, a, x, b), lk,
+                         Node (Black, lr, key, right)));
+                black_balanced_def (Node (Black, a, x, b));
+                black_height_def (Node (Black, a, x, b));
+                black_balanced_def (Node (Black, lr, key, right));
+                black_height_def (Node (Black, lr, key, right));
+                ()
+              | Black ->
+                (match lr with
+                 | Node (lrc, b, y, c) ->
+                   (match lrc with
+                    | Red ->
+                      black_balanced_def (Node (Red, b, y, c));
+                      black_height_def (Node (Red, b, y, c));
+                      black_balanced_def
+                        (Node (Red, Node (Black, ll, lk, b), y,
+                               Node (Black, c, key, right)));
+                      black_height_def
+                        (Node (Red, Node (Black, ll, lk, b), y,
+                               Node (Black, c, key, right)));
+                      black_balanced_def (Node (Black, ll, lk, b));
+                      black_height_def (Node (Black, ll, lk, b));
+                      black_balanced_def (Node (Black, c, key, right));
+                      black_height_def (Node (Black, c, key, right));
+                      ()
+                    | Black ->
+                      rotate_right_side_black_balanced left key right ())
+                 | Empty ->
+                   rotate_right_side_black_balanced left key right ()))
+           | Empty ->
+             (match lr with
+              | Node (lrc, b, y, c) ->
+                (match lrc with
+                 | Red ->
+                   black_balanced_def (Node (Red, b, y, c));
+                   black_height_def (Node (Red, b, y, c));
+                   black_balanced_def
+                     (Node (Red, Node (Black, ll, lk, b), y,
+                            Node (Black, c, key, right)));
+                   black_height_def
+                     (Node (Red, Node (Black, ll, lk, b), y,
+                            Node (Black, c, key, right)));
+                   black_balanced_def (Node (Black, ll, lk, b));
+                   black_height_def (Node (Black, ll, lk, b));
+                   black_balanced_def (Node (Black, c, key, right));
+                   black_height_def (Node (Black, c, key, right));
+                   ()
+                 | Black ->
+                   rotate_right_side_black_balanced left key right ())
+              | Empty ->
+                rotate_right_side_black_balanced left key right ()))))
+
+let rec ins_black_balanced (new_key : int) (tree : t @ logical)
+    (_balanced : unit{ black_balanced tree = true })
+    : unit{
+      black_balanced (ins new_key tree) = true
+      && Bigint.equal (black_height (ins new_key tree))
+           (black_height tree) = true
+    }
+  =
+  match tree with
+  | Empty ->
+    ins_def new_key Empty;
+    black_balanced_def (Node (Red, Empty, new_key, Empty));
+    black_height_def (Node (Red, Empty, new_key, Empty));
+    black_balanced_def Empty;
+    black_height_def Empty;
+    ()
+  | Node (c, l, k, r) ->
+    ins_def new_key (Node (c, l, k, r));
+    black_balanced_def (Node (c, l, k, r));
+    black_height_def (Node (c, l, k, r));
+    let choice = direction new_key k in
+    direction_def new_key k;
+    match choice with
+    | Same -> ()
+    | Left ->
+      ins_black_balanced new_key l ();
+      balance_black_balanced c (ins new_key l) k r ();
+      black_height_def (Node (c, ins new_key l, k, r));
+      ()
+    | Right ->
+      ins_black_balanced new_key r ();
+      balance_black_balanced c l k (ins new_key r) ();
+      black_height_def (Node (c, l, k, ins new_key r));
+      ()
+
 let[@vox.def] blacken (tree : t @ logical) : t =
   match tree with
   | Empty -> Empty
@@ -906,6 +1466,32 @@ let blacken_ordered (tree : t @ logical)
     ordered_def (Node (Black, l, k, r));
     ()
 
+let blacken_rb (tree : t @ logical)
+    (_infrared : unit{ infrared tree = true })
+    : unit{ no_red_red (blacken tree) = true } =
+  blacken_def tree;
+  infrared_def tree;
+  match tree with
+  | Empty ->
+    no_red_red_def Empty;
+    ()
+  | Node (c, l, k, r) ->
+    no_red_red_def (Node (Black, l, k, r));
+    ()
+
+let blacken_black_balanced (tree : t @ logical)
+    (_balanced : unit{ black_balanced tree = true })
+    : unit{ black_balanced (blacken tree) = true } =
+  blacken_def tree;
+  match tree with
+  | Empty ->
+    black_balanced_def Empty;
+    ()
+  | Node (c, l, k, r) ->
+    black_balanced_def (Node (c, l, k, r));
+    black_balanced_def (Node (Black, l, k, r));
+    ()
+
 let empty = Empty
 
 let[@vox.def] insert (new_key : int) (tree : t @ logical) : t =
@@ -930,7 +1516,26 @@ let insert_ordered (new_key : int) (tree : t @ logical)
   blacken_ordered (ins new_key tree) ();
   ()
 
-let[@vox.def] invariant (tree : t @ logical) = ordered tree
+let insert_rb (new_key : int) (tree : t @ logical)
+    (_proper : unit{ no_red_red tree = true })
+    : unit{ no_red_red (insert new_key tree) = true } =
+  insert_def new_key tree;
+  ins_rb new_key tree ();
+  blacken_rb (ins new_key tree) ();
+  ()
+
+let insert_black_balanced (new_key : int) (tree : t @ logical)
+    (_balanced : unit{ black_balanced tree = true })
+    : unit{ black_balanced (insert new_key tree) = true } =
+  insert_def new_key tree;
+  ins_black_balanced new_key tree ();
+  blacken_black_balanced (ins new_key tree) ();
+  ()
+
+(* A red-black tree: ordered, no red node with a red child, and every
+   path to a leaf crossing the same number of black nodes. *)
+let[@vox.def] invariant (tree : t @ logical) =
+  ordered tree && no_red_red tree && black_balanced tree
 
 let empty_law ~(query : int) : unit{ member query empty = false } =
   let _ = member_def query empty in
@@ -939,6 +1544,8 @@ let empty_law ~(query : int) : unit{ member query empty = false } =
 let empty_invariant : unit{ invariant empty = true } =
   invariant_def empty;
   ordered_def empty;
+  no_red_red_def empty;
+  black_balanced_def empty;
   ()
 
 let insert_invariant ~(inserted : int) ~(tree : t @ logical)
@@ -947,6 +1554,8 @@ let insert_invariant ~(inserted : int) ~(tree : t @ logical)
   invariant_def tree;
   invariant_def (insert inserted tree);
   insert_ordered inserted tree ();
+  insert_rb inserted tree ();
+  insert_black_balanced inserted tree ();
   ()
 
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)

@@ -473,7 +473,7 @@ let[@vox.def] rebalance (tree : t @ logical) : t =
        | Leaf -> tree
        | Node (ll, _, lr) ->
          if Bigint.le (height lr) (height ll)
-         then rotate_right tree
+         then tree
          else rotate_left_right tree)
     else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
     then
@@ -719,7 +719,7 @@ let[@vox.def] rec insert (new_key : int) (tree : t @ logical) : t =
     if int_equal new_key key
     then tree
     else if int_less new_key key
-    then tree
+    then rebalance (Node (insert new_key left, key, right))
     else rebalance (Node (left, key, insert new_key right))
 
 let rec insert_below (bound : int) (new_key : int{ _ < bound })
