@@ -2649,7 +2649,13 @@ let emit_variables context location buffer variables =
            ^ ") " ^ smt_sort context location result ^ ")\n"))
     variables
 
-let emit_internal ?(symbol_namespace = "") ~query ~env (vc : Vox_vc.t) =
+(* [model] turns the prove query into a request for the assignment that
+   makes it satisfiable.  That assignment is the counterexample to the
+   obligation, and is only asked for once a verdict is already known, so the
+   ordinary query text -- which is what the cache is keyed on -- is
+   unchanged. *)
+let emit_internal ?(symbol_namespace = "") ?(model = false) ~query ~env
+    (vc : Vox_vc.t) =
   let original_expressions =
     List.map (fun (fact : Vox_vc.fact) -> fact.expression) vc.facts
     @ [vc.goal]
@@ -2683,7 +2689,9 @@ let emit_internal ?(symbol_namespace = "") ~query ~env (vc : Vox_vc.t) =
     match query with
     | Prove ->
       Buffer.add_string buffer
-        "(set-option :produce-unsat-cores true)\n"
+        (if model
+         then "(set-option :produce-models true)\n"
+         else "(set-option :produce-unsat-cores true)\n")
     | Disprove -> ()
   end;
   emit_datatypes context vc.location buffer;
@@ -2700,7 +2708,10 @@ let emit_internal ?(symbol_namespace = "") ~query ~env (vc : Vox_vc.t) =
   List.iter
     (fun fact ->
       Buffer.add_string buffer
-        ("(assert (! " ^ fact.term ^ " :named " ^ fact.selector ^ "))\n"))
+        (if model
+         then "(assert " ^ fact.term ^ ")\n"
+         else
+           "(assert (! " ^ fact.term ^ " :named " ^ fact.selector ^ "))\n"))
     emitted_facts;
   let query_term =
     match query with
@@ -2711,7 +2722,9 @@ let emit_internal ?(symbol_namespace = "") ~query ~env (vc : Vox_vc.t) =
   Buffer.add_string buffer "(check-sat)\n";
   begin
     match query with
-    | Prove -> Buffer.add_string buffer "(get-unsat-core)\n"
+    | Prove ->
+      Buffer.add_string buffer
+        (if model then "(get-model)\n" else "(get-unsat-core)\n")
     | Disprove -> ()
   end;
   { contents = Buffer.contents buffer;
@@ -2719,8 +2732,9 @@ let emit_internal ?(symbol_namespace = "") ~query ~env (vc : Vox_vc.t) =
     goal = query_term;
   }
 
-let emit_query_with_namespace ?symbol_namespace ~query ~env (vc : Vox_vc.t) =
-  try Ok (emit_internal ?symbol_namespace ~query ~env vc) with
+let emit_query_with_namespace ?symbol_namespace ?model ~query ~env
+    (vc : Vox_vc.t) =
+  try Ok (emit_internal ?symbol_namespace ?model ~query ~env vc) with
   | Emission_error error -> Error error
   | exception_ ->
     Error
@@ -2728,10 +2742,10 @@ let emit_query_with_namespace ?symbol_namespace ~query ~env (vc : Vox_vc.t) =
         message = Printexc.to_string exception_;
       }
 
-let emit_with_namespace ?symbol_namespace ~query ~env vc =
+let emit_with_namespace ?symbol_namespace ?model ~query ~env vc =
   Result.map
     (fun query -> query.contents)
-    (emit_query_with_namespace ?symbol_namespace ~query ~env vc)
+    (emit_query_with_namespace ?symbol_namespace ?model ~query ~env vc)
 
 let emit_query ~query ~env vc =
   emit_query_with_namespace ~query ~env vc
@@ -3090,6 +3104,50 @@ let discharge ~backend ~command ?prove_contents ?input_mode
           solver_result ~backend ~query ~fact_count:(List.length vc.facts)
             process
       in
+      (* A disproved obligation is one whose goal no state satisfies, and the
+         assignment that refutes it is exactly what the prove query already
+         found satisfiable.  That assignment was never asked for, so ask for
+         it now, once, and only where there is one to report. *)
+      let counterexample () =
+        match backend with
+        | `Oxsmt -> None
+        | `Z3 ->
+          let emitted =
+            emit_with_namespace ~model:true
+              ~symbol_namespace:(fresh_persistent_symbol_namespace ())
+              ~query:Prove ~env vc
+          in
+          begin
+            match emitted with
+            | Error _ -> None
+            | Ok contents ->
+              (* A fresh process rather than the persistent one: asking for
+                 models is a session-wide option, and this query is rare
+                 enough that it should not change how every later obligation
+                 is solved. *)
+              let process =
+                run_solver ~command ~input_mode ~timeout_seconds contents
+              in
+              let lines =
+                List.map String.trim (String.split_on_char '\n' process.output)
+              in
+              begin
+                match List.filter (fun line -> not (String.equal line "")) lines
+                with
+                | "sat" :: (_ :: _ as assignment) ->
+                  let assignment = String.concat "\n" assignment in
+                  let limit = 4000 in
+                  Some
+                    ("counterexample:\n"
+                     ^ (if String.length assignment <= limit
+                        then assignment
+                        else
+                          String.sub assignment 0 limit
+                          ^ "\n(counterexample truncated)"))
+                | [] | _ :: _ -> None
+              end
+          end
+      in
       begin
         try
           match run Prove with
@@ -3098,6 +3156,8 @@ let discharge ~backend ~command ?prove_contents ?input_mode
           | `Open positive_status ->
             begin
               match run Disprove with
+              | `Final (Disproved, None, unused_facts) ->
+                result Disproved ?detail:(counterexample ()) ~unused_facts ()
               | `Final (verdict, detail, unused_facts) ->
                 result verdict ?detail ~unused_facts ()
               | `Open negative_status ->
