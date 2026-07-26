@@ -8,27 +8,20 @@
  expect;
 *)
 
-(* FINAL: verification proves that either branch is nonnegative.
-   CURRENT: the predicate is written through the prelude wrapper
-   [Vox_spec.int_ge], an ordinary (partial) user function -- not one of the
-   comparison primitives admitted inside a predicate.  A predicate is checked at
-   [total], so calling the partial wrapper is rejected at totality, before any
-   verification obligation is generated.  When total comparisons make the
-   wrapper total-annotatable the predicate flows through to verification again;
-   the [unlocks] tag records that dependency. *)
+(* Negating a machine integer is not enough to make it nonnegative: the
+   minimum has no positive counterpart and negating it returns it unchanged.
+   The example says so, returning the maximum there, and the claim then holds
+   of every input.
 
-#load "vox_spec.cmo";;
+   The predicate used to go through the prelude wrapper [Vox_spec.int_ge],
+   which the verifier has no interpretation for; it is written here with the
+   comparison the verifier models. *)
 
-(* @ex id=abs_nonnegative final=ACCEPT today=REJECT stable=no unlocks=total-comparisons+verification *)
+(* @ex id=abs_nonnegative final=ACCEPT today=ACCEPT stable=yes *)
 let abs (x : int) =
-  (if Vox_spec.int_ge x 0 then x else 0 - x
-    : int{ Vox_spec.int_ge _ 0 })
+  (if x >= 0 then x else if x > min_int then 0 - x else max_int
+    : int{ _ >= 0 })
 
 [%%expect {|
-Line 3, characters 11-26:
-3 |     : int{ Vox_spec.int_ge _ 0 })
-               ^^^^^^^^^^^^^^^
-Error: The value "Vox_spec.int_ge" is "partial"
-       but is expected to be "total"
-         because it is used in an expression (at line 3, characters 6-32).
+val abs : int -> int{ _ >= 0 } = <fun>
 |}]

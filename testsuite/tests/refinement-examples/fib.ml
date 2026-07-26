@@ -8,33 +8,31 @@
  expect;
 *)
 
-(* FINAL: recursive results provide induction hypotheses, while the argument
-   contract proves recursive calls stay nonnegative.  CURRENT: the refined
-   parameter/result types are written through the prelude wrappers
-   [Vox_spec.int_le]/[Vox_spec.int_ge], ordinary (partial) user functions -- not
-   the comparison primitives admitted inside a predicate.  A predicate is checked
-   at [total], so forming the refinement type calls the partial wrapper and is
-   rejected at totality, before any verification obligation is generated.  When
-   total comparisons make the wrappers total-annotatable the predicate flows
-   through to verification again; the [unlocks] tag records that dependency. *)
+(* Fibonacci is non-negative of every non-negative argument, and that is a
+   fact about the mathematical integers: over machine integers the sum
+   overflows and wraps negative long before the recursion ends, so the claim
+   would be false.  It is written over [Bigint.t], whose arithmetic has the
+   same unbounded meaning at run time as it does in the proof.
 
-#load "vox_spec.cmo";;
+   Each recursive call's own result contract is what the proof reads as its
+   induction hypothesis, and the argument contract is what keeps the calls
+   within the domain. *)
 
-(* @ex id=fib_nonnegative final=ACCEPT today=REJECT stable=no unlocks=total-comparisons+verification *)
-let rec fib (n : int{ Vox_spec.int_ge _ 0 })
-    : int{ Vox_spec.int_ge _ 0 }
+(* @ex id=fib_nonnegative final=ACCEPT today=ACCEPT stable=yes *)
+let rec fib (n : Bigint.t{ Bigint.ge _ Bigint.zero })
+    : Bigint.t{ Bigint.ge _ Bigint.zero }
   =
-  if Vox_spec.int_le n 0
-  then 0
-  else if n = 1
-  then 1
-  else fib (n - 1) + fib (n - 2)
+  if Bigint.le n Bigint.zero
+  then Bigint.zero
+  else if Bigint.equal n Bigint.one
+  then Bigint.one
+  else
+    Bigint.add
+      (fib (Bigint.sub n Bigint.one))
+      (fib (Bigint.sub n (Bigint.of_int 2)))
 
 [%%expect {|
-Line 1, characters 22-37:
-1 | let rec fib (n : int{ Vox_spec.int_ge _ 0 })
-                          ^^^^^^^^^^^^^^^
-Error: The value "Vox_spec.int_ge" is "partial"
-       but is expected to be "total"
-         because it is used in an expression (at line 1, characters 17-43).
+val fib :
+  Bigint.t{ Bigint.ge _ Bigint.zero } -> Bigint.t{ Bigint.ge _ Bigint.zero } =
+  <fun>
 |}]
