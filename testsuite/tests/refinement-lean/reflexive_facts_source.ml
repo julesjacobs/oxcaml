@@ -12,7 +12,10 @@ let rec depth (t : tree) : int{ _ >= 0 } =
     ignore key;
     let dl = depth left in
     let dr = depth right in
-    if dl >= dr then dl + 1 else dr + 1
+    let deeper = if dl >= dr then dl else dr in
+    (* The successor of a machine integer wraps at the maximum, so the
+       deeper subtree's depth is returned unchanged there. *)
+    if deeper < max_int then deeper + 1 else max_int
 
 let root_or (t : tree) (default : int) : int =
   match t with

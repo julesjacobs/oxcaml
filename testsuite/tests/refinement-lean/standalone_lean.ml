@@ -370,27 +370,41 @@ let () =
   let emitted = emit comparison_application in
   assert
     (contains emitted
-       "((fun (l_0 : Bool) => l_0) (decide (1 < 2)))");
+       "((fun (l_0 : Bool) => l_0) \
+         (decide ((BitVec.ofInt 63 1).toInt < (BitVec.ofInt 63 2).toInt)))");
   let emitted = emit comparison_constructor in
-  assert (contains emitted ".Some (decide (0 = 0)))");
+  assert
+    (contains emitted
+       ".Some (decide ((BitVec.ofInt 63 0).toInt = 0)))");
   let exact_decide_terms =
-    [ equal int_type (int 10) (int 10), "(decide (10 = 10))";
-      not_equal int_type (int 11) (int 12), "(!(decide (11 = 12)))";
-      less (int 13) (int 14), "(decide (13 < 14))";
-      less_equal (int 15) (int 16), "(decide (15 ≤ 16))";
-      greater (int 18) (int 17), "(decide (18 > 17))";
-      greater_equal (int 20) (int 19), "(decide (20 ≥ 19))";
+    (* An ordinary [int] is a signed 63-bit bitvector: equality is decided
+       on the words themselves, while the orders read their signed value.
+       A [Bigint.t] lifted from a literal is the mathematical integer that
+       literal denotes, so its equality is decided there too. *)
+    [ equal int_type (int 10) (int 10),
+        "(decide ((BitVec.ofInt 63 10) = (BitVec.ofInt 63 10)))";
+      not_equal int_type (int 11) (int 12),
+        "(!(decide ((BitVec.ofInt 63 11) = (BitVec.ofInt 63 12))))";
+      less (int 13) (int 14),
+        "(decide ((BitVec.ofInt 63 13).toInt < (BitVec.ofInt 63 14).toInt))";
+      less_equal (int 15) (int 16),
+        "(decide ((BitVec.ofInt 63 15).toInt ≤ (BitVec.ofInt 63 16).toInt))";
+      greater (int 18) (int 17),
+        "(decide ((BitVec.ofInt 63 18).toInt > (BitVec.ofInt 63 17).toInt))";
+      greater_equal (int 20) (int 19),
+        "(decide ((BitVec.ofInt 63 20).toInt ≥ (BitVec.ofInt 63 19).toInt))";
       bigint_comparison "equal" (bigint_of_int 21) (bigint_of_int 21),
-        "(decide (21 = 21))";
+        "(decide ((BitVec.ofInt 63 21).toInt = (BitVec.ofInt 63 21).toInt))";
       bigint_comparison "lt" (bigint_of_int 22) (bigint_of_int 23),
-        "(decide (22 < 23))";
+        "(decide ((BitVec.ofInt 63 22).toInt < (BitVec.ofInt 63 23).toInt))";
       bigint_comparison "le" (bigint_of_int 24) (bigint_of_int 25),
-        "(decide (24 ≤ 25))";
+        "(decide ((BitVec.ofInt 63 24).toInt ≤ (BitVec.ofInt 63 25).toInt))";
       bigint_comparison "gt" (bigint_of_int 27) (bigint_of_int 26),
-        "(decide (27 > 26))";
+        "(decide ((BitVec.ofInt 63 27).toInt > (BitVec.ofInt 63 26).toInt))";
       bigint_comparison "ge" (bigint_of_int 29) (bigint_of_int 28),
-        "(decide (29 ≥ 28))";
-      bigint_is_zero (bigint_of_int 0), "(decide (0 = 0))";
+        "(decide ((BitVec.ofInt 63 29).toInt ≥ (BitVec.ofInt 63 28).toInt))";
+      bigint_is_zero (bigint_of_int 0),
+        "(decide ((BitVec.ofInt 63 0).toInt = 0))";
     ]
   in
   List.iter
@@ -423,7 +437,7 @@ let () =
     check Vox_lean.Proved datatype;
     check Vox_lean.Proved compound;
     check Vox_lean.Proved comparison_application;
-    check Vox_lean.Proved comparison_constructor
+    check Vox_lean.Proved comparison_constructor;
     check Vox_lean.Proved nested_bitwise_condition;
     check Vox_lean.Proved postfix_selector_condition
   end;
