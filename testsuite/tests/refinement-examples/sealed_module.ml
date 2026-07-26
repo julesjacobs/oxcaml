@@ -8,31 +8,39 @@
  expect;
 *)
 
-(* This avoids the unresolved bare-implementation direction.  The
-   implementation result [_ = x * x] and interface result [Vox_spec.int_ge _ 0]
-   are both refined; FINAL sealing proves the directed implication.  CURRENT: the
-   interface predicate is written through the prelude wrapper [Vox_spec.int_ge],
-   an ordinary (partial) user function -- not one of the comparison primitives
-   admitted inside a predicate.  A predicate is checked at [total], so forming
-   the interface refinement type calls the partial wrapper and is rejected at
-   totality, before the seal VC engages.  When total comparisons make the wrapper
-   total-annotatable the seal's directed-implication VC engages again; the
-   [unlocks] tag records that dependency. *)
+(* A square is non-negative, and that is a fact about the mathematical
+   integers: a machine product overflows and can wrap negative, so over [int]
+   the sealed signature would be claiming something false.  It is written over
+   [Bigint.t], whose arithmetic has the same unbounded meaning at run time as
+   it does in the proof.
 
-#load "vox_spec.cmo";;
+   The implementation says the result is above minus one and the signature
+   says it is not below zero.  Of the integers those say the same thing, but
+   they are not the same predicate, so sealing the one under the other makes
+   the compiler prove the implication, which is what this example is for.
+   The two are written in the same shape, a comparison of the result against
+   a constant, because a seal relates predicates by walking them together and
+   two differently shaped predicates do not reach the implication at all.
 
-(* @ex id=seal_square_nonnegative final=ACCEPT today=REJECT stable=no unlocks=total-comparisons+verification *)
+   Neither result mentions the parameter, so neither side carries a dependent
+   binder; an implementation result that mentioned it could not be sealed
+   under a signature result that did not. *)
+
+(* @ex id=seal_square_nonnegative final=ACCEPT today=ACCEPT stable=yes *)
 module Square : sig
-  val square : int -> int{ Vox_spec.int_ge _ 0 }
+  val square :
+    Bigint.t{ Bigint.ge _ Bigint.zero } -> Bigint.t{ Bigint.ge _ Bigint.zero }
 end = struct
-  let square (x : int) = (x * x : int{ _ = x * x })
+  let square (x : Bigint.t{ Bigint.ge _ Bigint.zero }) =
+    (Bigint.mul x x
+      : Bigint.t{ Bigint.gt _ (Bigint.sub Bigint.zero Bigint.one) })
 end
 
 [%%expect {|
-Line 2, characters 27-42:
-2 |   val square : int -> int{ Vox_spec.int_ge _ 0 }
-                               ^^^^^^^^^^^^^^^
-Error: The value "Vox_spec.int_ge" is "partial"
-       but is expected to be "total"
-         because it is used in an expression (at line 2, characters 22-48).
+module Square :
+  sig
+    val square :
+      Bigint.t{ Bigint.ge _ Bigint.zero } ->
+      Bigint.t{ Bigint.ge _ Bigint.zero }
+  end
 |}]
