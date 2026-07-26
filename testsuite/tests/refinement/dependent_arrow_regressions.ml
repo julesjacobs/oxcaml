@@ -178,7 +178,7 @@ let rec total_copy_wrong @ total =
 Line 5, characters 24-45:
 5 |     | Successor tail -> total_copy_wrong tail
                             ^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement verification failed (not-proved)
+Error: Refinement verification failed (disproved)
 |}]
 
 let[@vox.def] rec total_copy_def (value : recursive_nat)
