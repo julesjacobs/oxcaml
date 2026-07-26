@@ -3705,6 +3705,16 @@ and check_application state application function_ arguments
                occurrence-local subject is valid only when that call is
                itself stable; otherwise the equation would give an opaque
                result the semantics of a non-stable expression. *)
+            (* Typing also retains an in-scope local as a free reference,
+               while the occurrence-local subject binds it.  Left as they
+               are, an argument that is simply a variable in scope looks
+               like two different values and the two are then related by an
+               equation that says nothing: it introduces a symbol nothing
+               else reads.  Bind the reference first, so such an argument
+               compares equal and no fact is made. *)
+            let stored_subject =
+              bind_scope_references (Facts.scope state.facts) stored_subject
+            in
             let actual_subject = subject state argument in
             if expression_is_stable state argument then begin
               if
