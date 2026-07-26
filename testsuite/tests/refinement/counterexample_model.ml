@@ -2,6 +2,7 @@
  readonly_files = "\
    counterexample_model_refuted.ml \
    counterexample_model_proved.ml \
+   counterexample_model_solver.sh \
    counterexample_model_check.py \
  ";
  setup-ocamlc.byte-build-env;
@@ -23,6 +24,50 @@
  module = "counterexample_model_refuted.ml";
  flags = "-vox-backend oxsmt -vox-dump-vc-json oxsmt-refuted.json -c";
  compiler_output = "oxsmt-refuted.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
+ (* A reply is only an assignment if the exchange that produced it was
+    clean.  These five use a controlled stand-in for a solver: the verdict is
+    the same every time, and only the shape of the model reply differs. *)
+
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh clean' \
+          -vox-dump-vc-json controlled-clean.json -c";
+ compiler_output = "controlled-clean.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh banner' \
+          -vox-dump-vc-json controlled-banner.json -c";
+ compiler_output = "controlled-banner.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh error_after' \
+          -vox-dump-vc-json controlled-error.json -c";
+ compiler_output = "controlled-error.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh nonzero' \
+          -vox-dump-vc-json controlled-nonzero.json -c";
+ compiler_output = "controlled-nonzero.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh contradictory' \
+          -vox-dump-vc-json controlled-contradictory.json -c";
+ compiler_output = "controlled-contradictory.output";
  ocamlc_byte_exit_status = "2";
  ocamlc.byte;
 

@@ -2886,6 +2886,33 @@ let output_has_unavailable_core_error ~query ~status output =
   |> List.exists (fun line ->
        is_unavailable_core_error ~query ~status (String.trim line))
 
+(* The first complete parenthesised expression in a solver reply, with the
+   contents of string literals passed over so a bracket inside one cannot
+   close it. *)
+let balanced_expression output =
+  let length = String.length output in
+  let rec start index =
+    if index >= length then None
+    else if Char.equal output.[index] '(' then Some index
+    else start (index + 1)
+  in
+  match start 0 with
+  | None -> None
+  | Some first ->
+    let rec walk index depth in_string =
+      if index >= length then None
+      else
+        match output.[index] with
+        | '"' -> walk (index + 1) depth (not in_string)
+        | _ when in_string -> walk (index + 1) depth in_string
+        | '(' -> walk (index + 1) (depth + 1) in_string
+        | ')' when depth <= 1 ->
+          Some (String.sub output first (index - first + 1))
+        | ')' -> walk (index + 1) (depth - 1) in_string
+        | _ -> walk (index + 1) depth in_string
+    in
+    walk first 0 false
+
 let output_has_error ~query ~status output =
   String.split_on_char '\n' output
   |> List.exists (fun line ->
@@ -3128,24 +3155,37 @@ let discharge ~backend ~command ?prove_contents ?input_mode
               let process =
                 run_solver ~command ~input_mode ~timeout_seconds contents
               in
-              let lines =
-                List.map String.trim (String.split_on_char '\n' process.output)
-              in
-              begin
-                match List.filter (fun line -> not (String.equal line "")) lines
-                with
-                | "sat" :: (_ :: _ as assignment) ->
-                  let assignment = String.concat "\n" assignment in
-                  let limit = 4000 in
-                  Some
-                    ("counterexample:\n"
-                     ^ (if String.length assignment <= limit
-                        then assignment
-                        else
-                          String.sub assignment 0 limit
-                          ^ "\n(counterexample truncated)"))
-                | [] | _ :: _ -> None
-              end
+              (* Judge the reply by the same rules as any other: a clean
+                 exit, one unambiguous status, and no error line.  A reply
+                 that is any of failed, error-tainted or self-contradictory
+                 is not an assignment, and reporting it would present an
+                 untrustworthy diagnostic as the values that refute the
+                 obligation.  Reading the status rather than the first line
+                 also lets a solver print a banner. *)
+              let status = parse_status process.output in
+              if
+                process.status <> 0
+                || status <> Some Sat
+                || output_has_error ~query:Prove ~status:Sat process.output
+              then None
+              else
+                (* Take one complete parenthesised reply rather than every
+                   remaining line, so a trailing status or note cannot be
+                   read as part of the assignment. *)
+                let assignment = balanced_expression process.output in
+                begin
+                  match assignment with
+                  | None -> None
+                  | Some assignment ->
+                    let limit = 4000 in
+                    Some
+                      ("counterexample:\n"
+                       ^ (if String.length assignment <= limit
+                          then assignment
+                          else
+                            String.sub assignment 0 limit
+                            ^ "\n(counterexample truncated)"))
+                end
           end
       in
       begin

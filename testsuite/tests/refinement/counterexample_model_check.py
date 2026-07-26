@@ -48,6 +48,31 @@ def main():
     assert result.get("status") == "disproved", result.get("status")
     assert result.get("counterexample") is None, result.get("counterexample")
 
+    # A reply is only an assignment when the exchange was clean.  The
+    # verdict is the same in all five, so what varies is only whether an
+    # assignment is reported.
+    def reported(name):
+        result = discharge(conditions(name)[0])
+        assert result.get("status") == "disproved", (name, result.get("status"))
+        return result.get("counterexample")
+
+    model = "counterexample:\n(model\n(define-fun v_0 () Int 1)\n)"
+    # A clean reply is read, and a banner before the answer does not hide it.
+    assert reported("controlled-clean.json") == model, reported(
+        "controlled-clean.json"
+    )
+    assert reported("controlled-banner.json") == model, reported(
+        "controlled-banner.json"
+    )
+    # An error after the answer, a failed exit, and a second contradictory
+    # answer each mean there is no assignment to report.
+    for name in (
+        "controlled-error.json",
+        "controlled-nonzero.json",
+        "controlled-contradictory.json",
+    ):
+        assert reported(name) is None, (name, reported(name))
+
     print("counterexample reporting: as expected")
 
 
