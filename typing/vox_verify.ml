@@ -1608,6 +1608,59 @@ let verify_seal_obligation ~env ~seal_location
       goal, hypothesis
     else align_seal_sibling_references ~env goal hypothesis
   in
+  (* An enclosing dependent arrow's parameter refinement is in scope here.
+     Instantiate each at its own binder, the way the subject is instantiated
+     above, and reconcile the implementation-side ones against the interface
+     exactly as the implementation predicate is reconciled. *)
+  let interface_predicate =
+    if obligation.rso_is_contravariant then hypothesis else goal
+  in
+  let binder_fact (binder : Ctype.refinement_seal_binder) =
+    let refinement = binder.rsb_refinement in
+    let argument =
+      Refinement.create ~loc:anchor ~type_:refinement.ref_skeleton
+        (Rexp_ident (Rbound binder.rsb_binder))
+    in
+    let expression = Vox_vc.instantiate ~refinement ~with_:argument in
+    let expression =
+      if binder.rsb_from_implementation
+      then
+        snd (align_seal_sibling_references ~env interface_predicate expression)
+      else expression
+    in
+    { Vox_vc.expression;
+      location = Some obligation.rso_implementation_location;
+      scope = None;
+      origin =
+        fact_origin ~kind:"seal-binder" ~name:obligation.rso_value_name
+          obligation.rso_implementation_location;
+    }
+  in
+  (* Keep only the parameters this obligation can talk about.  An unrelated
+     one would otherwise add a declaration and an assumption to every
+     verification condition under it.  A kept parameter's refinement may
+     itself mention an enclosing one, so work inwards out and carry the
+     identifiers each addition brings with it. *)
+  let binder_facts =
+    let mentioned =
+      Ident.Set.union
+        (Refinement.free_bound_identifiers goal)
+        (Refinement.free_bound_identifiers hypothesis)
+    in
+    let rec select mentioned kept = function
+      | [] -> kept
+      | (binder : Ctype.refinement_seal_binder) :: enclosing ->
+        if Ident.Set.mem binder.rsb_binder mentioned
+        then
+          let fact = binder_fact binder in
+          select
+            (Ident.Set.union mentioned
+               (Refinement.free_bound_identifiers fact.Vox_vc.expression))
+            (fact :: kept) enclosing
+        else select mentioned kept enclosing
+    in
+    select mentioned [] (List.rev obligation.rso_binder_hypotheses)
+  in
   (* Anchor the goal's own span to the implementation annotation so a click on
      the obligation jumps into the [.ml].  This is display-only: the emitted
      Lean uses positional names ([v_0], [h_0]) and reads no source span, so
@@ -1616,14 +1669,15 @@ let verify_seal_obligation ~env ~seal_location
   let condition =
     Vox_vc.create ~loc:anchor
       ~facts:
-        [{ Vox_vc.expression = hypothesis;
-           location = Some obligation.rso_implementation_location;
-           scope = None;
-           origin =
-             fact_origin ~kind:"seal-implication"
-               ~name:obligation.rso_value_name
-               obligation.rso_implementation_location;
-         }]
+        (binder_facts
+        @ [{ Vox_vc.expression = hypothesis;
+             location = Some obligation.rso_implementation_location;
+             scope = None;
+             origin =
+               fact_origin ~kind:"seal-implication"
+                 ~name:obligation.rso_value_name
+                 obligation.rso_implementation_location;
+           }])
       ~goal
   in
   let provenance =

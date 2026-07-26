@@ -390,11 +390,22 @@ val moregeneral: Env.t -> bool ->
            constrained to during the check, or [None] if unconstrained. Sorts
            in the result may contain subject sort variables. *)
 
+type refinement_seal_binder =
+  { rsb_binder : Ident.t;
+    rsb_refinement : refinement_desc;
+    rsb_from_implementation : bool;
+  }
+(** A dependent arrow's parameter, together with the refinement its argument
+    is guaranteed to satisfy where an obligation under the codomain is
+    recorded.  [rsb_from_implementation] says which signature the refinement
+    was taken from, which decides how its references are reconciled. *)
+
 type refinement_seal_obligation =
   { rso_skeleton : type_expr;
     rso_hypothesis : refinement_desc;
     rso_conclusion : refinement_desc;
     rso_is_contravariant : bool;
+    rso_binder_hypotheses : refinement_seal_binder list;
     rso_value_name : string;
     rso_implementation_location : Location.t;
     rso_implementation_predicate_location : Location.t;

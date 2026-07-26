@@ -6238,11 +6238,18 @@ type moregen_variance =
   | Contravariant
   | Bivariant
 
+type refinement_seal_binder =
+  { rsb_binder : Ident.t;
+    rsb_refinement : refinement_desc;
+    rsb_from_implementation : bool;
+  }
+
 type refinement_seal_obligation =
   { rso_skeleton : type_expr;
     rso_hypothesis : refinement_desc;
     rso_conclusion : refinement_desc;
     rso_is_contravariant : bool;
+    rso_binder_hypotheses : refinement_seal_binder list;
     rso_value_name : string;
     rso_implementation_location : Location.t;
     rso_implementation_predicate_location : Location.t;
@@ -6258,10 +6265,17 @@ type refinement_seal_context =
 let refinement_seal_context = ref None
 let refinement_seal_obligations = ref []
 
+(* The parameter refinements of the dependent arrows whose codomains are
+   currently being related, outermost last.  An obligation recorded under a
+   codomain may assume them: a codomain refinement is only ever read of a
+   result produced from an argument the arrow accepts. *)
+let refinement_seal_binders = ref []
+
 let with_refinement_seal
     ~value_name ~implementation_location ~interface_location f =
   let old_context = !refinement_seal_context in
   let old_obligations = !refinement_seal_obligations in
+  let old_binders = !refinement_seal_binders in
   refinement_seal_context :=
     Some
       { value_name;
@@ -6269,13 +6283,15 @@ let with_refinement_seal
         interface_location;
       };
   refinement_seal_obligations := [];
+  refinement_seal_binders := [];
   Misc.try_finally
     (fun () ->
       let result = f () in
       result, List.rev !refinement_seal_obligations)
     ~always:(fun () ->
       refinement_seal_context := old_context;
-      refinement_seal_obligations := old_obligations)
+      refinement_seal_obligations := old_obligations;
+      refinement_seal_binders := old_binders)
 
 let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion
     ~is_contravariant ~implementation_predicate_location =
@@ -6287,6 +6303,7 @@ let record_refinement_seal_obligation ~skeleton ~hypothesis ~conclusion
         rso_hypothesis = hypothesis;
         rso_conclusion = conclusion;
         rso_is_contravariant = is_contravariant;
+        rso_binder_hypotheses = List.rev !refinement_seal_binders;
         rso_value_name = context.value_name;
         rso_implementation_location = context.implementation_location;
         rso_implementation_predicate_location =
@@ -6488,6 +6505,50 @@ let is_refined_covariant_seal_target env variance ty =
      | Trefine _ -> true
      | _ -> false
 
+(* A dependent arrow's codomain may mention the parameter, so an obligation
+   recorded there is only meaningful under what the parameter is known to
+   satisfy.  That is the hypothesis side of the domain's own obligation: the
+   argument reaching a covariant arrow comes from a caller who sees the
+   interface, and the argument reaching a contravariant one comes from the
+   implementation, which is itself the caller.  Taking the guaranteeing side
+   rather than the strongest one keeps this independent of whether the
+   domain's obligation is discharged. *)
+let seal_binder_hypothesis env variance binder domain1 domain2 =
+  (* A signature's arrow wraps each domain in an empty [Tpoly], which
+     [expand_head] does not look through. *)
+  let rec domain_refinement ty =
+    match get_desc (expand_head env ty) with
+    | Trefine refinement -> Some refinement
+    | Tpoly (body, []) -> domain_refinement body
+    | _ -> None
+  in
+  match !refinement_seal_context, binder, variance with
+  | Some _, Some binder, (Covariant | Contravariant) ->
+    let domain, from_implementation =
+      match variance with
+      | Contravariant -> domain1, true
+      | Covariant | Invariant | Bivariant -> domain2, false
+    in
+    begin match domain_refinement domain with
+    | Some refinement ->
+      Some
+        { rsb_binder = binder;
+          rsb_refinement = refinement;
+          rsb_from_implementation = from_implementation;
+        }
+    | None -> None
+    end
+  | (None, _, _) | (_, None, _) | (_, _, (Invariant | Bivariant)) -> None
+
+let with_seal_binder_hypothesis hypothesis f =
+  match hypothesis with
+  | None -> f ()
+  | Some hypothesis ->
+    let old_binders = !refinement_seal_binders in
+    refinement_seal_binders := hypothesis :: old_binders;
+    Misc.try_finally f
+      ~always:(fun () -> refinement_seal_binders := old_binders)
+
 let rec moregen inst_nongen variance type_pairs env t1 t2 =
   if eq_type t1 t2 then () else
 
@@ -6537,7 +6598,12 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               let compare_arrow () =
                 moregen inst_nongen (neg_variance variance) type_pairs env
                   t1 t2;
-                moregen inst_nongen variance type_pairs env u1 u2;
+                begin match seal_binder_hypothesis env variance b2 t1 t2 with
+                | None -> moregen inst_nongen variance type_pairs env u1 u2
+                | Some _ as hypothesis ->
+                  with_seal_binder_hypothesis hypothesis (fun () ->
+                    moregen inst_nongen variance type_pairs env u1 u2)
+                end;
                 (* [t2] and [u2] is the user-written interface, which we deem
                    as more "principal" and used for mode crossing. See
                    [typing-modes/crossing.ml]. *)
