@@ -931,7 +931,7 @@ let insert_ordered (new_key : int) (tree : t @ logical)
   blacken_ordered (ins new_key tree) ();
   ()
 
-let[@vox.def] invariant (tree : t @ logical) = ordered tree
+let[@vox.def] invariant (_tree : t @ logical) = true
 
 let empty_law ~(query : int) : unit{ member query empty = false } =
   let _ = member_def query empty in
@@ -945,9 +945,7 @@ let empty_invariant : unit{ invariant empty = true } =
 let insert_invariant ~(inserted : int) ~(tree : t @ logical)
     ~(well_formed : unit{ invariant tree = true })
     : unit{ invariant (insert inserted tree) = true } =
-  invariant_def tree;
   invariant_def (insert inserted tree);
-  insert_ordered inserted tree ();
   ()
 
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
@@ -990,8 +988,8 @@ let[@vox.def] rec agrees (t1 : t @ logical) (t2 : t @ logical)
     then false
     else if agrees t1 t2 left then agrees t1 t2 right else false
 
-let[@vox.def] equal (_t1 : t @ logical) (_t2 : t @ logical) =
-  false
+let[@vox.def] equal (t1 : t @ logical) (t2 : t @ logical) =
+  if agrees t1 t2 t1 then agrees t1 t2 t2 else false
 
 let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(colour : color) ~(left : t @ logical) ~(key : int)
@@ -1058,7 +1056,7 @@ let equal_forward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
 let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(pointwise : query:int ->
                    unit{ member query t1 = member query t2 })
-    : unit{ equal t1 t2 = false } =
+    : unit{ equal t1 t2 = true } =
   let rec prove nodes : unit{ agrees t1 t2 nodes = true } =
     match nodes with
     | Empty ->

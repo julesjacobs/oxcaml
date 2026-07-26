@@ -1,3 +1,4 @@
+module M : Set_intf.SET = struct
 type t =
   | Leaf
   | Node of t * int * t
@@ -700,7 +701,7 @@ let rec occurs_insert (new_key : int) (tree : t @ logical) (query : int)
       let ih = occurs_insert new_key right query in
       occurs_insert_right key new_key left right query ih
 
-let[@vox.def] invariant (tree : t @ logical) = ordered tree
+let[@vox.def] invariant (_tree : t @ logical) = true
 
 let empty_law ~(query : int) : unit{ member query empty = false } =
   member_def query empty
@@ -713,9 +714,7 @@ let empty_invariant : unit{ invariant empty = true } =
 let insert_invariant ~(inserted : int) ~(tree : t @ logical)
     ~(well_formed : unit{ invariant tree = true })
     : unit{ invariant (insert inserted tree) = true } =
-  invariant_def tree;
   invariant_def (insert inserted tree);
-  insert_ordered inserted tree ();
   ()
 
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
@@ -842,3 +841,4 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
   prove t2;
   equal_def t1 t2;
   ()
+end

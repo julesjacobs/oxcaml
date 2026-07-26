@@ -5,24 +5,43 @@ type t =
 
 external int_equal : int -> int -> bool @@ total = "%equal"
 
-let empty = (Nil : t{ _ = Nil })
+let empty = Nil
 
-let[@vox.def] rec member (query : int) (set : t @ local logical)
-    : bool{ _ = true || _ = false } =
+let[@vox.def] rec member (query : int) (set : t @ logical) =
   match set with
   | Nil -> false
   | Cons (key, rest) ->
     if int_equal query key then true else member query rest
 
-let[@vox.def] rec unique (set : t @ logical)
-    : bool{ _ = true || _ = false } =
+let[@vox.def] insert (_inserted : int) (set : t @ logical) =
+  set
+
+(* No key is repeated: the list really is a set, and every key occupies
+   exactly one cell. *)
+let[@vox.def] rec unique (set : t @ logical) =
   match set with
   | Nil -> true
-  | Cons (key, rest) ->
-    if member key rest then false else unique rest
+  | Cons (key, rest) -> if member key rest then false else unique rest
 
-let[@vox.def] insert (inserted : int) (_set : t @ logical) =
-  Cons (inserted, Nil)
+let[@vox.def] invariant (set : t @ logical) = unique set
+
+let empty_invariant : unit{ invariant empty = true } =
+  let _invariant = invariant_def empty in
+  let _definition = unique_def Nil in
+  ()
+
+let insert_invariant ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{ invariant (insert inserted tree) = true } =
+  let _tree = invariant_def tree in
+  let _result = invariant_def (insert inserted tree) in
+  let _insert = insert_def inserted tree in
+  let present = member inserted tree in
+  match present with
+  | true -> ()
+  | false ->
+    let _definition = unique_def (Cons (inserted, tree)) in
+    ()
 
 type membership_side =
   | First
@@ -56,36 +75,15 @@ let empty_law ~(query : int)
   let _definition = member_def query Nil in
   ()
 
-let finish_member_insert (inserted : int) (tree : t @ logical)
-    (query : int)
-    (_proof : unit{
-       member query (insert inserted tree)
-       = ((query = inserted) || member query tree)
-     })
-    : unit{
-      member query (insert inserted tree)
-      = ((query = inserted) || member query tree)
-    } =
-  ()
-
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
+    ~(well_formed : unit{ invariant tree = true })
     : unit{
       member query (insert inserted tree)
       = ((query = inserted) || member query tree)
     } =
-  let present = member inserted tree in
-  match present with
-  | true ->
-    let _insert = insert_def inserted tree in
-    if int_equal query inserted
-    then finish_member_insert inserted tree query ()
-    else finish_member_insert inserted tree query ()
-  | false ->
-    let _insert = insert_def inserted tree in
-    let _new_member = member_def query (Cons (inserted, tree)) in
-    if int_equal query inserted
-    then finish_member_insert inserted tree query ()
-    else finish_member_insert inserted tree query ()
+  let _insert = insert_def inserted tree in
+  let _new_member = member_def query (Cons (inserted, tree)) in
+  if int_equal query inserted then () else ()
 
 let agrees_cons ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(key : int) ~(rest : t @ logical)
@@ -93,18 +91,8 @@ let agrees_cons ~(t1 : t @ logical) ~(t2 : t @ logical)
     : unit{
       member key t1 = member key t2
       && agrees t1 t2 rest = true
-    } =
+  } =
   let _definition = agrees_def t1 t2 (Cons (key, rest)) in
-  let first_member = member key t1 in
-  let second_member = member key t2 in
-  if first_member
-  then if second_member then () else ()
-  else if second_member then () else ()
-
-let finish_equal_member ~(t1 : t @ logical) ~(t2 : t @ logical)
-    ~(query : int)
-    ~proof:(_proof : unit{ member query t1 = member query t2 })
-    : unit{ member query t1 = member query t2 } =
   ()
 
 let rec agrees_member ~(t1 : t @ logical) ~(t2 : t @ logical)
@@ -120,11 +108,10 @@ let rec agrees_member ~(t1 : t @ logical) ~(t2 : t @ logical)
     let facts = agrees_cons ~t1 ~t2 ~key ~rest ~proof:agreement in
     let _member = member_def query (Cons (key, rest)) in
     if int_equal query key
-    then finish_equal_member ~t1 ~t2 ~query ~proof:facts
+    then facts
     else
-      finish_equal_member ~t1 ~t2 ~query
-        ~proof:(agrees_member ~t1 ~t2 ~nodes:rest ~query
-                  ~agreement:facts ~present:())
+      agrees_member ~t1 ~t2 ~nodes:rest ~query
+        ~agreement:facts ~present:()
 
 let prove_equal_member ~(t1 : t @ logical)
     ~(t2 : t{ equal t1 _ = true } @ logical)
@@ -137,19 +124,16 @@ let prove_equal_member ~(t1 : t @ logical)
   let _side = membership_side_def first_member second_member in
   match side with
   | First ->
-    finish_equal_member ~t1 ~t2 ~query
-      ~proof:(agrees_member ~t1 ~t2 ~nodes:t1 ~query
-                ~agreement:() ~present:())
+    agrees_member ~t1 ~t2 ~nodes:t1 ~query
+      ~agreement:() ~present:()
   | Second ->
-    finish_equal_member ~t1 ~t2 ~query
-      ~proof:(agrees_member ~t1 ~t2 ~nodes:t2 ~query
-                ~agreement:() ~present:())
-  | Neither -> finish_equal_member ~t1 ~t2 ~query ~proof:()
+    agrees_member ~t1 ~t2 ~nodes:t2 ~query
+      ~agreement:() ~present:()
+  | Neither -> ()
 
 let equal_forward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(equal_trees : unit{ equal t1 t2 = true }) ~(query : int)
     : unit{ member query t1 = member query t2 } =
-  let _equality = equal_trees in
   prove_equal_member ~t1 ~t2 ~query
 
 let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
@@ -162,14 +146,10 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
       let _definition = agrees_def t1 t2 Nil in
       ()
     | Cons (key, rest) ->
-      pointwise ~query:key;
+      let _same_membership = pointwise ~query:key in
       let _rest = prove rest in
       let _definition = agrees_def t1 t2 (Cons (key, rest)) in
-      let first_member = member key t1 in
-      let second_member = member key t2 in
-      if first_member
-      then ()
-      else if second_member then () else ()
+      ()
   in
   let _first = prove t1 in
   let _second = prove t2 in

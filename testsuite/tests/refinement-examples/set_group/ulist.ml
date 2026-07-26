@@ -15,6 +15,33 @@ let[@vox.def] rec member (query : int) (set : t @ logical) =
 let[@vox.def] insert (inserted : int) (set : t @ logical) =
   if member inserted set then set else Cons (inserted, set)
 
+(* No key is repeated: the list really is a set, and every key occupies
+   exactly one cell. *)
+let[@vox.def] rec unique (set : t @ logical) =
+  match set with
+  | Nil -> true
+  | Cons (key, rest) -> if member key rest then false else unique rest
+
+let[@vox.def] invariant (set : t @ logical) = unique set
+
+let empty_invariant : unit{ invariant empty = true } =
+  let _invariant = invariant_def empty in
+  let _definition = unique_def Nil in
+  ()
+
+let insert_invariant ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{ invariant (insert inserted tree) = true } =
+  let _tree = invariant_def tree in
+  let _result = invariant_def (insert inserted tree) in
+  let _insert = insert_def inserted tree in
+  let present = member inserted tree in
+  match present with
+  | true -> ()
+  | false ->
+    let _definition = unique_def (Cons (inserted, tree)) in
+    ()
+
 type membership_side =
   | First
   | Second
@@ -48,6 +75,7 @@ let empty_law ~(query : int)
   ()
 
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
+    ~(well_formed : unit{ invariant tree = true })
     : unit{
       member query (insert inserted tree)
       = ((query = inserted) || member query tree)

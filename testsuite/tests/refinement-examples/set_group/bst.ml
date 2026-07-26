@@ -29,6 +29,9 @@ let[@vox.def] membership_side first_member second_member =
 
 let empty = Empty
 
+(* Search membership: one comparison per level, following a single spine.
+   Away from ordered trees this is not occurrence in the tree, which is
+   why the laws below are stated for trees satisfying [invariant]. *)
 let[@vox.def] rec member (query : int) (tree : t @ logical) =
   match tree with
   | Empty -> false
@@ -39,24 +42,85 @@ let[@vox.def] rec member (query : int) (tree : t @ logical) =
     then member query left
     else member query right
 
-let[@vox.def] rec agrees (t1 : t @ logical) (t2 : t @ logical)
-    (nodes : t @ logical) =
-  match nodes with
+(* Occurrence anywhere in the tree.  Used only to say what the single
+   spine is worth: on an ordered tree the two agree. *)
+let[@vox.def] rec occurs (query : int) (tree : t @ logical) =
+  match tree with
+  | Empty -> false
+  | Node (left, key, right) ->
+    int_equal query key || occurs query left || occurs query right
+
+let[@vox.def] rec below (tree : t @ logical) (bound : int) =
+  match tree with
   | Empty -> true
   | Node (left, key, right) ->
-    let first_member = member key t1 in
-    let second_member = member key t2 in
-    if first_member
-    then
-      if second_member
-      then if agrees t1 t2 left then agrees t1 t2 right else false
-      else false
-    else if second_member
-    then false
-    else if agrees t1 t2 left then agrees t1 t2 right else false
+    int_less key bound && below left bound && below right bound
 
-let[@vox.def] equal (t1 : t @ logical) (t2 : t @ logical) =
-  if agrees t1 t2 t1 then agrees t1 t2 t2 else false
+let[@vox.def] rec above (tree : t @ logical) (bound : int) =
+  match tree with
+  | Empty -> true
+  | Node (left, key, right) ->
+    int_less bound key && above left bound && above right bound
+
+let[@vox.def] rec ordered (tree : t @ logical) =
+  match tree with
+  | Empty -> true
+  | Node (left, key, right) ->
+    ordered left && ordered right && below left key && above right key
+
+let[@vox.def] invariant (tree : t @ logical) = ordered tree
+
+let rec below_absent (bound : int) (query : int{ bound < _ })
+    (tree : t @ logical)
+    (_bounded : unit{ below tree bound = true })
+    : unit{ occurs query tree = false } =
+  match tree with
+  | Empty ->
+    occurs_def query Empty;
+    ()
+  | Node (left, key, right) ->
+    below_def (Node (left, key, right)) bound;
+    occurs_def query (Node (left, key, right));
+    below_absent bound query left ();
+    below_absent bound query right ();
+    ()
+
+let rec above_absent (bound : int) (query : int{ _ < bound })
+    (tree : t @ logical)
+    (_bounded : unit{ above tree bound = true })
+    : unit{ occurs query tree = false } =
+  match tree with
+  | Empty ->
+    occurs_def query Empty;
+    ()
+  | Node (left, key, right) ->
+    above_def (Node (left, key, right)) bound;
+    occurs_def query (Node (left, key, right));
+    above_absent bound query left ();
+    above_absent bound query right ();
+    ()
+
+(* The single spine finds exactly the keys that occur, on ordered trees. *)
+let rec member_occurs (query : int) (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ member query tree = occurs query tree } =
+  match tree with
+  | Empty ->
+    member_def query Empty;
+    occurs_def query Empty;
+    ()
+  | Node (left, key, right) ->
+    ordered_def (Node (left, key, right));
+    member_def query (Node (left, key, right));
+    occurs_def query (Node (left, key, right));
+    member_occurs query left ();
+    member_occurs query right ();
+    let choice = direction query key in
+    direction_def query key;
+    match choice with
+    | Same -> ()
+    | Left -> above_absent key query right ()
+    | Right -> below_absent key query left ()
 
 let[@vox.def] rec insert (new_key : int) (tree : t @ logical)
     : t{ _ <> Empty }
@@ -69,6 +133,87 @@ let[@vox.def] rec insert (new_key : int) (tree : t @ logical)
     else if int_less new_key key
     then Node (insert new_key left, key, right)
     else Node (left, key, insert new_key right)
+
+let rec insert_below (bound : int) (new_key : int{ _ < bound })
+    (tree : t @ logical)
+    (_bounded : unit{ below tree bound = true })
+    : unit{ below (insert new_key tree) bound = true } =
+  match tree with
+  | Empty ->
+    insert_def new_key Empty;
+    below_def (Node (Empty, new_key, Empty)) bound;
+    below_def Empty bound;
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    below_def (Node (left, key, right)) bound;
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_below bound new_key left ();
+      below_def (Node (insert new_key left, key, right)) bound;
+      ()
+    | Right ->
+      insert_below bound new_key right ();
+      below_def (Node (left, key, insert new_key right)) bound;
+      ()
+
+let rec insert_above (bound : int) (new_key : int{ bound < _ })
+    (tree : t @ logical)
+    (_bounded : unit{ above tree bound = true })
+    : unit{ above (insert new_key tree) bound = true } =
+  match tree with
+  | Empty ->
+    insert_def new_key Empty;
+    above_def (Node (Empty, new_key, Empty)) bound;
+    above_def Empty bound;
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    above_def (Node (left, key, right)) bound;
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_above bound new_key left ();
+      above_def (Node (insert new_key left, key, right)) bound;
+      ()
+    | Right ->
+      insert_above bound new_key right ();
+      above_def (Node (left, key, insert new_key right)) bound;
+      ()
+
+let rec insert_ordered (new_key : int) (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (insert new_key tree) = true } =
+  match tree with
+  | Empty ->
+    insert_def new_key Empty;
+    ordered_def (Node (Empty, new_key, Empty));
+    ordered_def Empty;
+    below_def Empty new_key;
+    above_def Empty new_key;
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    ordered_def (Node (left, key, right));
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_ordered new_key left ();
+      insert_below key new_key left ();
+      ordered_def (Node (insert new_key left, key, right));
+      ()
+    | Right ->
+      insert_ordered new_key right ();
+      insert_above key new_key right ();
+      ordered_def (Node (left, key, insert new_key right));
+      ()
 
 let member_node query left key right
     : unit{
@@ -166,8 +311,22 @@ let empty_law ~(query : int)
   member_def query empty;
   ()
 
+let empty_invariant : unit{ invariant empty = true } =
+  invariant_def empty;
+  ordered_def empty;
+  ()
+
+let insert_invariant ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{ invariant (insert inserted tree) = true } =
+  invariant_def tree;
+  invariant_def (insert inserted tree);
+  insert_ordered inserted tree ();
+  ()
+
 let insert_law ~(inserted : int)
     ~(tree : t @ logical) ~(query : int)
+    ~(well_formed : unit{ invariant tree = true })
     : unit{
       member query (insert inserted tree)
       = ((query = inserted) || member query tree)
@@ -175,6 +334,25 @@ let insert_law ~(inserted : int)
   =
   member_insert inserted tree query;
   ()
+
+let[@vox.def] rec agrees (t1 : t @ logical) (t2 : t @ logical)
+    (nodes : t @ logical) =
+  match nodes with
+  | Empty -> true
+  | Node (left, key, right) ->
+    let first_member = member key t1 in
+    let second_member = member key t2 in
+    if first_member
+    then
+      if second_member
+      then if agrees t1 t2 left then agrees t1 t2 right else false
+      else false
+    else if second_member
+    then false
+    else if agrees t1 t2 left then agrees t1 t2 right else false
+
+let[@vox.def] equal (t1 : t @ logical) (t2 : t @ logical) =
+  if agrees t1 t2 t1 then agrees t1 t2 t2 else false
 
 let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(left : t @ logical) ~(key : int) ~(right : t @ logical)

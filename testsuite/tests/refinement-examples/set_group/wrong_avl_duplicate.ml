@@ -1,3 +1,4 @@
+module M : Set_intf.SET = struct
 type t =
   | Leaf
   | Node of t * int * t
@@ -524,9 +525,7 @@ let[@vox.def] rec insert (new_key : int) (tree : t @ logical) : t =
   match tree with
   | Leaf -> Node (Leaf, new_key, Leaf)
   | Node (left, key, right) ->
-    if int_equal new_key key
-    then tree
-    else if int_less new_key key
+    if int_less new_key key
     then rebalance (Node (insert new_key left, key, right))
     else rebalance (Node (left, key, insert new_key right))
 
@@ -546,7 +545,11 @@ let rec insert_below (bound : int) (new_key : int{ _ < bound })
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same -> ()
+    | Same ->
+      insert_below bound new_key right ();
+      rebalance_below (Node (left, key, insert new_key right)) bound;
+      below_def (Node (left, key, insert new_key right)) bound;
+      ()
     | Left ->
       insert_below bound new_key left ();
       rebalance_below (Node (insert new_key left, key, right)) bound;
@@ -574,7 +577,11 @@ let rec insert_above (bound : int) (new_key : int{ bound < _ })
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same -> ()
+    | Same ->
+      insert_above bound new_key right ();
+      rebalance_above (Node (left, key, insert new_key right)) bound;
+      above_def (Node (left, key, insert new_key right)) bound;
+      ()
     | Left ->
       insert_above bound new_key left ();
       rebalance_above (Node (insert new_key left, key, right)) bound;
@@ -603,7 +610,12 @@ let rec insert_ordered (new_key : int) (tree : t @ logical)
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same -> ()
+    | Same ->
+      insert_ordered new_key right ();
+      insert_above key new_key right ();
+      ordered_def (Node (left, key, insert new_key right));
+      rebalance_ordered (Node (left, key, insert new_key right)) ();
+      ()
     | Left ->
       insert_ordered new_key left ();
       insert_below key new_key left ();
@@ -842,3 +854,4 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
   prove t2;
   equal_def t1 t2;
   ()
+end

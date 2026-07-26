@@ -10,7 +10,8 @@ let prove_unequal (inserted : int)
   | true ->
     Iarray_set.empty_law ~query:inserted;
     Iarray_set.insert_law
-      ~inserted ~tree:Iarray_set.empty ~query:inserted;
+      ~inserted ~tree:Iarray_set.empty ~query:inserted
+      ~well_formed:Iarray_set.empty_invariant;
     Iarray_set.equal_forward_law
       ~t1:Iarray_set.empty ~t2:singleton
       ~equal_trees:() ~query:inserted;

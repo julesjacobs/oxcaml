@@ -6,5 +6,6 @@ let wrong_insert (inserted : int)
     } =
   Iarray_set.empty_law ~query:inserted;
   Iarray_set.insert_law
-    ~inserted ~tree:Iarray_set.empty ~query:inserted;
+    ~inserted ~tree:Iarray_set.empty ~query:inserted
+    ~well_formed:Iarray_set.empty_invariant;
   ()

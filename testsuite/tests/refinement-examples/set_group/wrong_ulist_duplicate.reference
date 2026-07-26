@@ -1,4 +1,4 @@
-File "ulist.ml", line 39, characters 38-45:
-39 |     finish_unique_insert inserted set _unique
-                                           ^^^^^^^
+File "ulist.ml", line 41, characters 12-14:
+41 |   | true -> ()
+                 ^^
 Error: Refinement verification failed (not-proved)

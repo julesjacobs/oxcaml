@@ -1,46 +1,737 @@
 module M : Set_intf.SET = struct
 type t =
-  | Nil
-  | Cons of int * t
+  | Leaf
+  | Node of t * int * t
 
 external int_equal : int -> int -> bool @@ total = "%equal"
+external int_less : int -> int -> bool @@ total = "%lessthan"
+external int_leq : int -> int -> bool @@ total = "%lessequal"
+external int_add : int -> int -> int @@ total = "%addint"
+external int_sub : int -> int -> int @@ total = "%subint"
 
-let empty = (Nil : t{ _ = Nil })
+let empty = Leaf
 
-let[@vox.def] rec member (query : int) (set : t @ local logical)
-    : bool{ _ = true || _ = false } =
-  match set with
-  | Nil -> false
-  | Cons (key, rest) ->
-    if int_equal query key then true else member query rest
+type direction =
+  | Same
+  | Left
+  | Right
 
-let[@vox.def] rec unique (set : t @ logical)
-    : bool{ _ = true || _ = false } =
-  match set with
-  | Nil -> true
-  | Cons (key, rest) ->
-    if member key rest then false else unique rest
+let[@vox.def] direction (new_key : int) (key : int) : direction =
+  if int_equal new_key key
+  then Same
+  else if int_less new_key key
+  then Left
+  else Right
 
-let[@vox.def] insert (inserted : int) (set : t @ logical) =
-  if member inserted set then set else Cons (inserted, set)
+(* Search membership: one comparison per level, descending a single spine.
+   Correct only on ordered trees, which is what [invariant] records. *)
+let[@vox.def] rec member (query : int) (tree : t @ logical) =
+  match tree with
+  | Leaf -> false
+  | Node (left, key, right) ->
+    if int_equal query key
+    then true
+    else if int_less query key
+    then member query left
+    else member query right
 
-let finish_unique_insert (inserted : int) (set : t @ logical)
-    (_proof : unit{ unique (insert inserted set) = true })
-    : unit{ unique (insert inserted set) = true } =
+(* Occurrence anywhere in the tree.  The rotations are stated against this,
+   because they are ordering-free rearrangements; [member_occurs] below is
+   what carries their conclusions back to the spine. *)
+let[@vox.def] rec occurs (query : int) (tree : t @ logical) =
+  match tree with
+  | Leaf -> false
+  | Node (left, key, right) ->
+    int_equal query key || occurs query left || occurs query right
+
+let[@vox.def] rec below (tree : t @ logical) (bound : int) =
+  match tree with
+  | Leaf -> true
+  | Node (left, key, right) ->
+    int_less key bound && below left bound && below right bound
+
+let[@vox.def] rec above (tree : t @ logical) (bound : int) =
+  match tree with
+  | Leaf -> true
+  | Node (left, key, right) ->
+    int_less bound key && above left bound && above right bound
+
+let[@vox.def] rec ordered (tree : t @ logical) =
+  match tree with
+  | Leaf -> true
+  | Node (left, key, right) ->
+    ordered left && ordered right && below left key && above right key
+
+let rec below_weaken (hi : int) (lo : int{ _ < hi }) (tree : t @ logical)
+    (_bounded : unit{ below tree lo = true })
+    : unit{ below tree hi = true } =
+  match tree with
+  | Leaf ->
+    below_def Leaf hi;
+    ()
+  | Node (left, key, right) ->
+    below_def (Node (left, key, right)) lo;
+    below_def (Node (left, key, right)) hi;
+    below_weaken hi lo left ();
+    below_weaken hi lo right ();
+    ()
+
+let rec above_weaken (lo : int) (hi : int{ lo < _ }) (tree : t @ logical)
+    (_bounded : unit{ above tree hi = true })
+    : unit{ above tree lo = true } =
+  match tree with
+  | Leaf ->
+    above_def Leaf lo;
+    ()
+  | Node (left, key, right) ->
+    above_def (Node (left, key, right)) hi;
+    above_def (Node (left, key, right)) lo;
+    above_weaken lo hi left ();
+    above_weaken lo hi right ();
+    ()
+
+let rec below_absent (bound : int) (query : int{ bound < _ })
+    (tree : t @ logical)
+    (_bounded : unit{ below tree bound = true })
+    : unit{ occurs query tree = false } =
+  match tree with
+  | Leaf ->
+    occurs_def query Leaf;
+    ()
+  | Node (left, key, right) ->
+    below_def (Node (left, key, right)) bound;
+    occurs_def query (Node (left, key, right));
+    below_absent bound query left ();
+    below_absent bound query right ();
+    ()
+
+let rec above_absent (bound : int) (query : int{ _ < bound })
+    (tree : t @ logical)
+    (_bounded : unit{ above tree bound = true })
+    : unit{ occurs query tree = false } =
+  match tree with
+  | Leaf ->
+    occurs_def query Leaf;
+    ()
+  | Node (left, key, right) ->
+    above_def (Node (left, key, right)) bound;
+    occurs_def query (Node (left, key, right));
+    above_absent bound query left ();
+    above_absent bound query right ();
+    ()
+
+(* On an ordered tree the single spine finds exactly the keys that occur. *)
+let rec member_occurs (query : int) (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ member query tree = occurs query tree } =
+  match tree with
+  | Leaf ->
+    member_def query Leaf;
+    occurs_def query Leaf;
+    ()
+  | Node (left, key, right) ->
+    ordered_def (Node (left, key, right));
+    member_def query (Node (left, key, right));
+    occurs_def query (Node (left, key, right));
+    member_occurs query left ();
+    member_occurs query right ();
+    let choice = direction query key in
+    direction_def query key;
+    match choice with
+    | Same -> ()
+    | Left -> above_absent key query right ()
+    | Right -> below_absent key query left ()
+
+let[@vox.def] rotate_right (tree : t @ logical) : t =
+  match tree with
+  | Leaf -> tree
+  | Node (l, y, c) ->
+    match l with
+    | Leaf -> tree
+    | Node (a, x, b) -> Node (a, x, Node (b, y, c))
+
+let[@vox.def] rotate_left (tree : t @ logical) : t =
+  match tree with
+  | Leaf -> tree
+  | Node (a, x, r) ->
+    match r with
+    | Leaf -> tree
+    | Node (b, y, c) -> Node (Node (a, x, b), y, c)
+
+let rotate_right_preserves_occurs (tree : t @ logical) (query : int)
+    : unit{ occurs query (rotate_right tree) = occurs query tree }
+  =
+  let _ = rotate_right_def tree in
+  match tree with
+  | Leaf -> ()
+  | Node (l, y, c) ->
+    let _ = occurs_def query (Node (l, y, c)) in
+    match l with
+    | Leaf -> ()
+    | Node (a, x, b) ->
+      let _ = occurs_def query (Node (a, x, b)) in
+      let _ = occurs_def query (Node (a, x, Node (b, y, c))) in
+      let _ = occurs_def query (Node (b, y, c)) in
+      ()
+
+let rotate_left_preserves_occurs (tree : t @ logical) (query : int)
+    : unit{ occurs query (rotate_left tree) = occurs query tree }
+  =
+  let _ = rotate_left_def tree in
+  match tree with
+  | Leaf -> ()
+  | Node (a, x, r) ->
+    let _ = occurs_def query (Node (a, x, r)) in
+    match r with
+    | Leaf -> ()
+    | Node (b, y, c) ->
+      let _ = occurs_def query (Node (b, y, c)) in
+      let _ = occurs_def query (Node (Node (a, x, b), y, c)) in
+      let _ = occurs_def query (Node (a, x, b)) in
+      ()
+
+let rotate_right_below (tree : t @ logical) (bound : int)
+    : unit{ below (rotate_right tree) bound = below tree bound } =
+  rotate_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, y, c) ->
+    below_def (Node (l, y, c)) bound;
+    match l with
+    | Leaf -> ()
+    | Node (a, x, b) ->
+      below_def (Node (a, x, b)) bound;
+      below_def (Node (a, x, Node (b, y, c))) bound;
+      below_def (Node (b, y, c)) bound;
+      ()
+
+let rotate_right_above (tree : t @ logical) (bound : int)
+    : unit{ above (rotate_right tree) bound = above tree bound } =
+  rotate_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, y, c) ->
+    above_def (Node (l, y, c)) bound;
+    match l with
+    | Leaf -> ()
+    | Node (a, x, b) ->
+      above_def (Node (a, x, b)) bound;
+      above_def (Node (a, x, Node (b, y, c))) bound;
+      above_def (Node (b, y, c)) bound;
+      ()
+
+let rotate_left_below (tree : t @ logical) (bound : int)
+    : unit{ below (rotate_left tree) bound = below tree bound } =
+  rotate_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (a, x, r) ->
+    below_def (Node (a, x, r)) bound;
+    match r with
+    | Leaf -> ()
+    | Node (b, y, c) ->
+      below_def (Node (b, y, c)) bound;
+      below_def (Node (Node (a, x, b), y, c)) bound;
+      below_def (Node (a, x, b)) bound;
+      ()
+
+let rotate_left_above (tree : t @ logical) (bound : int)
+    : unit{ above (rotate_left tree) bound = above tree bound } =
+  rotate_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (a, x, r) ->
+    above_def (Node (a, x, r)) bound;
+    match r with
+    | Leaf -> ()
+    | Node (b, y, c) ->
+      above_def (Node (b, y, c)) bound;
+      above_def (Node (Node (a, x, b), y, c)) bound;
+      above_def (Node (a, x, b)) bound;
+      ()
+
+let rotate_right_ordered (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (rotate_right tree) = true } =
+  rotate_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, y, c) ->
+    ordered_def (Node (l, y, c));
+    below_def (Node (l, y, c)) y;
+    match l with
+    | Leaf -> ()
+    | Node (a, x, b) ->
+      ordered_def (Node (a, x, b));
+      below_def (Node (a, x, b)) y;
+      ordered_def (Node (a, x, Node (b, y, c)));
+      ordered_def (Node (b, y, c));
+      above_def (Node (b, y, c)) x;
+      above_weaken x y c ();
+      ()
+
+let rotate_left_ordered (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (rotate_left tree) = true } =
+  rotate_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (a, x, r) ->
+    ordered_def (Node (a, x, r));
+    match r with
+    | Leaf -> ()
+    | Node (b, y, c) ->
+      ordered_def (Node (b, y, c));
+      above_def (Node (b, y, c)) x;
+      ordered_def (Node (Node (a, x, b), y, c));
+      ordered_def (Node (a, x, b));
+      below_def (Node (a, x, b)) y;
+      below_weaken y x a ();
+      ()
+
+let node_occurs_congruence_left (l1 : t @ logical) (l2 : t @ logical)
+    (k : int) (r : t @ logical) (query : int)
+    (_eq : unit{ occurs query l1 = occurs query l2 })
+    : unit{
+      occurs query (Node (l1, k, r)) = occurs query (Node (l2, k, r))
+    }
+  =
+  let _ = occurs_def query (Node (l1, k, r)) in
+  let _ = occurs_def query (Node (l2, k, r)) in
   ()
 
-let insert_preserves_unique (inserted : int) (set : t @ logical)
-    (_unique : unit{ unique set = true })
-    : unit{ unique (insert inserted set) = true } =
-  let present = member inserted set in
-  match present with
-  | true ->
-    let _insert = insert_def inserted set in
-    finish_unique_insert inserted set _unique
-  | false ->
-    let _insert = insert_def inserted set in
-    let _definition = unique_def (Cons (inserted, set)) in
-    finish_unique_insert inserted set ()
+let node_occurs_congruence_right (l : t @ logical) (k : int)
+    (r1 : t @ logical) (r2 : t @ logical) (query : int)
+    (_eq : unit{ occurs query r1 = occurs query r2 })
+    : unit{
+      occurs query (Node (l, k, r1)) = occurs query (Node (l, k, r2))
+    }
+  =
+  let _ = occurs_def query (Node (l, k, r1)) in
+  let _ = occurs_def query (Node (l, k, r2)) in
+  ()
+
+let[@vox.def] rotate_left_right (tree : t @ logical) : t =
+  match tree with
+  | Leaf -> tree
+  | Node (l, k, r) -> rotate_right (Node (rotate_left l, k, r))
+
+let[@vox.def] rotate_right_left (tree : t @ logical) : t =
+  match tree with
+  | Leaf -> tree
+  | Node (l, k, r) -> rotate_left (Node (l, k, rotate_right r))
+
+let rotate_left_right_preserves_occurs (tree : t @ logical) (query : int)
+    : unit{ occurs query (rotate_left_right tree) = occurs query tree }
+  =
+  let _ = rotate_left_right_def tree in
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    let rl = rotate_left_preserves_occurs l query in
+    let _ = node_occurs_congruence_left (rotate_left l) l k r query rl in
+    let _ =
+      rotate_right_preserves_occurs (Node (rotate_left l, k, r)) query
+    in
+    ()
+
+let rotate_right_left_preserves_occurs (tree : t @ logical) (query : int)
+    : unit{ occurs query (rotate_right_left tree) = occurs query tree }
+  =
+  let _ = rotate_right_left_def tree in
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    let rr = rotate_right_preserves_occurs r query in
+    let _ = node_occurs_congruence_right l k (rotate_right r) r query rr in
+    let _ =
+      rotate_left_preserves_occurs (Node (l, k, rotate_right r)) query
+    in
+    ()
+
+let rotate_left_right_below (tree : t @ logical) (bound : int)
+    : unit{ below (rotate_left_right tree) bound = below tree bound } =
+  rotate_left_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    rotate_left_below l bound;
+    rotate_right_below (Node (rotate_left l, k, r)) bound;
+    below_def (Node (rotate_left l, k, r)) bound;
+    below_def (Node (l, k, r)) bound;
+    ()
+
+let rotate_left_right_above (tree : t @ logical) (bound : int)
+    : unit{ above (rotate_left_right tree) bound = above tree bound } =
+  rotate_left_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    rotate_left_above l bound;
+    rotate_right_above (Node (rotate_left l, k, r)) bound;
+    above_def (Node (rotate_left l, k, r)) bound;
+    above_def (Node (l, k, r)) bound;
+    ()
+
+let rotate_right_left_below (tree : t @ logical) (bound : int)
+    : unit{ below (rotate_right_left tree) bound = below tree bound } =
+  rotate_right_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    rotate_right_below r bound;
+    rotate_left_below (Node (l, k, rotate_right r)) bound;
+    below_def (Node (l, k, rotate_right r)) bound;
+    below_def (Node (l, k, r)) bound;
+    ()
+
+let rotate_right_left_above (tree : t @ logical) (bound : int)
+    : unit{ above (rotate_right_left tree) bound = above tree bound } =
+  rotate_right_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    rotate_right_above r bound;
+    rotate_left_above (Node (l, k, rotate_right r)) bound;
+    above_def (Node (l, k, rotate_right r)) bound;
+    above_def (Node (l, k, r)) bound;
+    ()
+
+let rotate_left_right_ordered (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (rotate_left_right tree) = true } =
+  rotate_left_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    ordered_def (Node (l, k, r));
+    rotate_left_ordered l ();
+    rotate_left_below l k;
+    ordered_def (Node (rotate_left l, k, r));
+    rotate_right_ordered (Node (rotate_left l, k, r)) ();
+    ()
+
+let rotate_right_left_ordered (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (rotate_right_left tree) = true } =
+  rotate_right_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    ordered_def (Node (l, k, r));
+    rotate_right_ordered r ();
+    rotate_right_above r k;
+    ordered_def (Node (l, k, rotate_right r));
+    rotate_left_ordered (Node (l, k, rotate_right r)) ();
+    ()
+
+let max_height (a : int) (b : int) : int =
+  if int_less a b then b else a
+
+let rec height (tree : t @ logical) : int =
+  match tree with
+  | Leaf -> 0
+  | Node (l, _, r) -> int_add 1 (max_height (height l) (height r))
+
+type rebalance_action =
+  | No_rotation
+  | Rotate_ll
+  | Rotate_lr
+  | Rotate_rr
+  | Rotate_rl
+
+let choose_action (tree : t @ logical) : rebalance_action =
+  match tree with
+  | Leaf -> No_rotation
+  | Node (l, _, r) ->
+    let bf = int_sub (height l) (height r) in
+    if int_less 1 bf
+    then
+      (match l with
+       | Leaf -> No_rotation
+       | Node (ll, _, lr) ->
+         if int_leq (height lr) (height ll) then Rotate_ll else Rotate_lr)
+    else if int_less bf (-1)
+    then
+      (match r with
+       | Leaf -> No_rotation
+       | Node (rl, _, rr) ->
+         if int_leq (height rl) (height rr) then Rotate_rr else Rotate_rl)
+    else No_rotation
+
+let[@vox.def] apply_action (action : rebalance_action)
+    (tree : t @ logical) : t =
+  match action with
+  | No_rotation -> tree
+  | Rotate_ll -> rotate_right tree
+  | Rotate_lr -> rotate_left_right tree
+  | Rotate_rr -> rotate_left tree
+  | Rotate_rl -> rotate_right_left tree
+
+let[@vox.def] rebalance (tree : t @ logical) : t =
+  apply_action (choose_action tree) tree
+
+let rebalance_preserves_occurs (tree : t @ logical) (query : int)
+    : unit{ occurs query (rebalance tree) = occurs query tree }
+  =
+  let _ = rebalance_def tree in
+  let action = choose_action tree in
+  let _ = apply_action_def action tree in
+  match action with
+  | No_rotation -> ()
+  | Rotate_ll -> rotate_right_preserves_occurs tree query
+  | Rotate_lr -> rotate_left_right_preserves_occurs tree query
+  | Rotate_rr -> rotate_left_preserves_occurs tree query
+  | Rotate_rl -> rotate_right_left_preserves_occurs tree query
+
+let rebalance_below (tree : t @ logical) (bound : int)
+    : unit{ below (rebalance tree) bound = below tree bound } =
+  rebalance_def tree;
+  let action = choose_action tree in
+  apply_action_def action tree;
+  match action with
+  | No_rotation -> ()
+  | Rotate_ll -> rotate_right_below tree bound
+  | Rotate_lr -> rotate_left_right_below tree bound
+  | Rotate_rr -> rotate_left_below tree bound
+  | Rotate_rl -> rotate_right_left_below tree bound
+
+let rebalance_above (tree : t @ logical) (bound : int)
+    : unit{ above (rebalance tree) bound = above tree bound } =
+  rebalance_def tree;
+  let action = choose_action tree in
+  apply_action_def action tree;
+  match action with
+  | No_rotation -> ()
+  | Rotate_ll -> rotate_right_above tree bound
+  | Rotate_lr -> rotate_left_right_above tree bound
+  | Rotate_rr -> rotate_left_above tree bound
+  | Rotate_rl -> rotate_right_left_above tree bound
+
+let rebalance_ordered (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (rebalance tree) = true } =
+  rebalance_def tree;
+  let action = choose_action tree in
+  apply_action_def action tree;
+  match action with
+  | No_rotation -> ()
+  | Rotate_ll -> rotate_right_ordered tree ()
+  | Rotate_lr -> rotate_left_right_ordered tree ()
+  | Rotate_rr -> rotate_left_ordered tree ()
+  | Rotate_rl -> rotate_right_left_ordered tree ()
+
+let[@vox.def] rec insert (new_key : int) (tree : t @ logical) : t =
+  match tree with
+  | Leaf -> Node (Leaf, new_key, Leaf)
+  | Node (left, key, right) ->
+    if int_equal new_key key
+    then tree
+    else if int_less new_key key
+    then rebalance (Node (insert new_key left, key, right))
+    else rebalance (Node (left, key, insert new_key right))
+
+let rec insert_below (bound : int) (new_key : int{ _ < bound })
+    (tree : t @ logical)
+    (_bounded : unit{ below tree bound = true })
+    : unit{ below (insert new_key tree) bound = true } =
+  match tree with
+  | Leaf ->
+    insert_def new_key Leaf;
+    below_def (Node (Leaf, new_key, Leaf)) bound;
+    below_def Leaf bound;
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    below_def (Node (left, key, right)) bound;
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_below bound new_key left ();
+      rebalance_below (Node (insert new_key left, key, right)) bound;
+      below_def (Node (insert new_key left, key, right)) bound;
+      ()
+    | Right ->
+      insert_below bound new_key right ();
+      rebalance_below (Node (left, key, insert new_key right)) bound;
+      below_def (Node (left, key, insert new_key right)) bound;
+      ()
+
+let rec insert_above (bound : int) (new_key : int{ bound < _ })
+    (tree : t @ logical)
+    (_bounded : unit{ above tree bound = true })
+    : unit{ above (insert new_key tree) bound = true } =
+  match tree with
+  | Leaf ->
+    insert_def new_key Leaf;
+    above_def (Node (Leaf, new_key, Leaf)) bound;
+    above_def Leaf bound;
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    above_def (Node (left, key, right)) bound;
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_above bound new_key left ();
+      rebalance_above (Node (insert new_key left, key, right)) bound;
+      above_def (Node (insert new_key left, key, right)) bound;
+      ()
+    | Right ->
+      insert_above bound new_key right ();
+      rebalance_above (Node (left, key, insert new_key right)) bound;
+      above_def (Node (left, key, insert new_key right)) bound;
+      ()
+
+let rec insert_ordered (new_key : int) (tree : t @ logical)
+    (_ordered : unit{ ordered tree = true })
+    : unit{ ordered (insert new_key tree) = true } =
+  match tree with
+  | Leaf ->
+    insert_def new_key Leaf;
+    ordered_def (Node (Leaf, new_key, Leaf));
+    ordered_def Leaf;
+    below_def Leaf new_key;
+    above_def Leaf new_key;
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    ordered_def (Node (left, key, right));
+    let choice = direction new_key key in
+    direction_def new_key key;
+    match choice with
+    | Same -> ()
+    | Left ->
+      insert_ordered new_key left ();
+      insert_below key new_key left ();
+      ordered_def (Node (insert new_key left, key, right));
+      rebalance_ordered (Node (insert new_key left, key, right)) ();
+      ()
+    | Right ->
+      insert_ordered new_key right ();
+      insert_above key new_key right ();
+      ordered_def (Node (left, key, insert new_key right));
+      rebalance_ordered (Node (left, key, insert new_key right)) ();
+      ()
+
+let occurs_insert_leaf (new_key : int) (query : int)
+    : unit{
+      occurs query (insert new_key Leaf)
+      = (query = new_key || occurs query Leaf)
+    }
+  =
+  let _ = insert_def new_key Leaf in
+  let _ = occurs_def query (Node (Leaf, new_key, Leaf)) in
+  let _ = occurs_def query Leaf in
+  ()
+
+let occurs_insert_same (key : int) (new_key : int{ _ = key })
+    (left : t @ logical) (right : t @ logical) (query : int)
+    : unit{
+      occurs query (insert new_key (Node (left, key, right)))
+      = (query = new_key || occurs query (Node (left, key, right)))
+    }
+  =
+  let _ = insert_def new_key (Node (left, key, right)) in
+  let _ = occurs_def query (Node (left, key, right)) in
+  ()
+
+let occurs_insert_left (key : int) (new_key : int{ _ < key })
+    (left : t @ logical) (right : t @ logical) (query : int)
+    (_ih : unit{
+       occurs query (insert new_key left)
+       = (query = new_key || occurs query left)
+     })
+    : unit{
+      occurs query (insert new_key (Node (left, key, right)))
+      = (query = new_key || occurs query (Node (left, key, right)))
+    }
+  =
+  let _ = insert_def new_key (Node (left, key, right)) in
+  let _ =
+    rebalance_preserves_occurs
+      (Node (insert new_key left, key, right)) query
+  in
+  let _ = occurs_def query (Node (insert new_key left, key, right)) in
+  let _ = occurs_def query (Node (left, key, right)) in
+  ()
+
+let occurs_insert_right (key : int)
+    (new_key : int{ _ <> key && not (_ < key) })
+    (left : t @ logical) (right : t @ logical) (query : int)
+    (_ih : unit{
+       occurs query (insert new_key right)
+       = (query = new_key || occurs query right)
+     })
+    : unit{
+      occurs query (insert new_key (Node (left, key, right)))
+      = (query = new_key || occurs query (Node (left, key, right)))
+    }
+  =
+  let _ = insert_def new_key (Node (left, key, right)) in
+  let _ =
+    rebalance_preserves_occurs
+      (Node (left, key, insert new_key right)) query
+  in
+  let _ = occurs_def query (Node (left, key, insert new_key right)) in
+  let _ = occurs_def query (Node (left, key, right)) in
+  ()
+
+let rec occurs_insert (new_key : int) (tree : t @ logical) (query : int)
+    : unit{
+      occurs query (insert new_key tree)
+      = (query = new_key || occurs query tree)
+    }
+  =
+  match tree with
+  | Leaf -> occurs_insert_leaf new_key query
+  | Node (left, key, right) ->
+    let choice = direction new_key key in
+    let _choice = direction_def new_key key in
+    match choice with
+    | Same -> occurs_insert_same key new_key left right query
+    | Left ->
+      let ih = occurs_insert new_key left query in
+      occurs_insert_left key new_key left right query ih
+    | Right ->
+      let ih = occurs_insert new_key right query in
+      occurs_insert_right key new_key left right query ih
+
+let[@vox.def] invariant (tree : t @ logical) = ordered tree
+
+let empty_law ~(query : int) : unit{ member query empty = false } =
+  member_def query empty
+
+let empty_invariant : unit{ invariant empty = true } =
+  invariant_def empty;
+  ordered_def empty;
+  ()
+
+let insert_invariant ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{ invariant (insert inserted tree) = true } =
+  invariant_def tree;
+  invariant_def (insert inserted tree);
+  insert_ordered inserted tree ();
+  ()
+
+let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      member query (insert inserted tree)
+      = ((query = inserted) || member query tree)
+    }
+  =
+  invariant_def tree;
+  insert_ordered inserted tree ();
+  member_occurs query tree ();
+  member_occurs query (insert inserted tree) ();
+  occurs_insert inserted tree query;
+  ()
 
 type membership_side =
   | First
@@ -55,74 +746,33 @@ let[@vox.def] membership_side first_member second_member =
 let[@vox.def] rec agrees (t1 : t @ logical) (t2 : t @ logical)
     (nodes : t @ logical) =
   match nodes with
-  | Nil -> true
-  | Cons (key, rest) ->
+  | Leaf -> true
+  | Node (left, key, right) ->
     let first_member = member key t1 in
     let second_member = member key t2 in
     if first_member
     then
-      if second_member then agrees t1 t2 rest else false
+      if second_member
+      then if agrees t1 t2 left then agrees t1 t2 right else false
+      else false
     else if second_member
     then false
-    else agrees t1 t2 rest
+    else if agrees t1 t2 left then agrees t1 t2 right else false
 
 let[@vox.def] equal (_t1 : t @ logical) (_t2 : t @ logical) =
   false
 
-let empty_law ~(query : int)
-    : unit{ member query empty = false } =
-  let _definition = member_def query Nil in
-  ()
-
-let finish_member_insert (inserted : int) (tree : t @ logical)
-    (query : int)
-    (_proof : unit{
-       member query (insert inserted tree)
-       = ((query = inserted) || member query tree)
+let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
+    ~(left : t @ logical) ~(key : int) ~(right : t @ logical)
+    ~proof:(_proof : unit{
+       agrees t1 t2 (Node (left, key, right)) = true
      })
     : unit{
-      member query (insert inserted tree)
-      = ((query = inserted) || member query tree)
-    } =
-  ()
-
-let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
-    : unit{
-      member query (insert inserted tree)
-      = ((query = inserted) || member query tree)
-    } =
-  let present = member inserted tree in
-  match present with
-  | true ->
-    let _insert = insert_def inserted tree in
-    if int_equal query inserted
-    then finish_member_insert inserted tree query ()
-    else finish_member_insert inserted tree query ()
-  | false ->
-    let _insert = insert_def inserted tree in
-    let _new_member = member_def query (Cons (inserted, tree)) in
-    if int_equal query inserted
-    then finish_member_insert inserted tree query ()
-    else finish_member_insert inserted tree query ()
-
-let agrees_cons ~(t1 : t @ logical) ~(t2 : t @ logical)
-    ~(key : int) ~(rest : t @ logical)
-    ~proof:(_proof : unit{ agrees t1 t2 (Cons (key, rest)) = true })
-    : unit{
       member key t1 = member key t2
-      && agrees t1 t2 rest = true
+      && agrees t1 t2 left = true
+      && agrees t1 t2 right = true
     } =
-  let _definition = agrees_def t1 t2 (Cons (key, rest)) in
-  let first_member = member key t1 in
-  let second_member = member key t2 in
-  if first_member
-  then if second_member then () else ()
-  else if second_member then () else ()
-
-let finish_equal_member ~(t1 : t @ logical) ~(t2 : t @ logical)
-    ~(query : int)
-    ~proof:(_proof : unit{ member query t1 = member query t2 })
-    : unit{ member query t1 = member query t2 } =
+  agrees_def t1 t2 (Node (left, key, right));
   ()
 
 let rec agrees_member ~(t1 : t @ logical) ~(t2 : t @ logical)
@@ -131,43 +781,46 @@ let rec agrees_member ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(present : unit{ member query nodes = true })
     : unit{ member query t1 = member query t2 } =
   match nodes with
-  | Nil ->
-    let _member = member_def query Nil in
+  | Leaf ->
+    member_def query Leaf;
     ()
-  | Cons (key, rest) ->
-    let facts = agrees_cons ~t1 ~t2 ~key ~rest ~proof:agreement in
-    let _member = member_def query (Cons (key, rest)) in
-    if int_equal query key
-    then finish_equal_member ~t1 ~t2 ~query ~proof:facts
-    else
-      finish_equal_member ~t1 ~t2 ~query
-        ~proof:(agrees_member ~t1 ~t2 ~nodes:rest ~query
-                  ~agreement:facts ~present:())
+  | Node (left, key, right) ->
+    let facts =
+      agrees_node ~t1 ~t2 ~left ~key ~right ~proof:agreement
+    in
+    member_def query (Node (left, key, right));
+    let choice = direction query key in
+    direction_def query key;
+    match choice with
+    | Same -> facts
+    | Left ->
+      agrees_member ~t1 ~t2 ~nodes:left ~query
+        ~agreement:facts ~present:()
+    | Right ->
+      agrees_member ~t1 ~t2 ~nodes:right ~query
+        ~agreement:facts ~present:()
 
 let prove_equal_member ~(t1 : t @ logical)
     ~(t2 : t{ equal t1 _ = true } @ logical)
     ~(query : int)
     : unit{ member query t1 = member query t2 } =
-  let _definition = equal_def t1 t2 in
+  equal_def t1 t2;
   let first_member = member query t1 in
   let second_member = member query t2 in
   let side = membership_side first_member second_member in
-  let _side = membership_side_def first_member second_member in
+  membership_side_def first_member second_member;
   match side with
   | First ->
-    finish_equal_member ~t1 ~t2 ~query
-      ~proof:(agrees_member ~t1 ~t2 ~nodes:t1 ~query
-                ~agreement:() ~present:())
+    agrees_member ~t1 ~t2 ~nodes:t1 ~query
+      ~agreement:() ~present:()
   | Second ->
-    finish_equal_member ~t1 ~t2 ~query
-      ~proof:(agrees_member ~t1 ~t2 ~nodes:t2 ~query
-                ~agreement:() ~present:())
-  | Neither -> finish_equal_member ~t1 ~t2 ~query ~proof:()
+    agrees_member ~t1 ~t2 ~nodes:t2 ~query
+      ~agreement:() ~present:()
+  | Neither -> ()
 
 let equal_forward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(equal_trees : unit{ equal t1 t2 = true }) ~(query : int)
     : unit{ member query t1 = member query t2 } =
-  let _equality = equal_trees in
   prove_equal_member ~t1 ~t2 ~query
 
 let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
@@ -176,21 +829,18 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
     : unit{ equal t1 t2 = false } =
   let rec prove nodes : unit{ agrees t1 t2 nodes = true } =
     match nodes with
-    | Nil ->
-      let _definition = agrees_def t1 t2 Nil in
+    | Leaf ->
+      agrees_def t1 t2 Leaf;
       ()
-    | Cons (key, rest) ->
+    | Node (left, key, right) ->
       pointwise ~query:key;
-      let _rest = prove rest in
-      let _definition = agrees_def t1 t2 (Cons (key, rest)) in
-      let first_member = member key t1 in
-      let second_member = member key t2 in
-      if first_member
-      then ()
-      else if second_member then () else ()
+      prove left;
+      prove right;
+      agrees_def t1 t2 (Node (left, key, right));
+      ()
   in
-  let _first = prove t1 in
-  let _second = prove t2 in
-  let _definition = equal_def t1 t2 in
+  prove t1;
+  prove t2;
+  equal_def t1 t2;
   ()
 end

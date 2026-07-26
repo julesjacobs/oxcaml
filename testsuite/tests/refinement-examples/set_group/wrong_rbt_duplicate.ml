@@ -762,9 +762,7 @@ let[@vox.def] rec ins (new_key : int) (tree : t @ logical) : t =
   match tree with
   | Empty -> Node (Red, Empty, new_key, Empty)
   | Node (c, l, k, r) ->
-    if int_equal new_key k
-    then tree
-    else if int_less new_key k
+    if int_less new_key k
     then balance c (ins new_key l) k r
     else balance c l k (ins new_key r)
 
@@ -786,7 +784,10 @@ let rec ins_preserves (new_key : int) (tree : t @ logical) (query : int)
     let choice = direction new_key k in
     let _ = direction_def new_key k in
     match choice with
-    | Same -> ()
+    | Same ->
+      let _ = balance_preserves c l k (ins new_key r) query in
+      let _ = ins_preserves new_key r query in
+      ()
     | Left ->
       let _ = balance_preserves c (ins new_key l) k r query in
       let _ = ins_preserves new_key l query in
@@ -812,7 +813,10 @@ let rec ins_below (bound : int) (new_key : int{ _ < bound })
     let choice = direction new_key k in
     direction_def new_key k;
     match choice with
-    | Same -> ()
+    | Same ->
+      ins_below bound new_key r ();
+      balance_below c l k (ins new_key r) bound;
+      ()
     | Left ->
       ins_below bound new_key l ();
       balance_below c (ins new_key l) k r bound;
@@ -838,7 +842,10 @@ let rec ins_above (bound : int) (new_key : int{ bound < _ })
     let choice = direction new_key k in
     direction_def new_key k;
     match choice with
-    | Same -> ()
+    | Same ->
+      ins_above bound new_key r ();
+      balance_above c l k (ins new_key r) bound;
+      ()
     | Left ->
       ins_above bound new_key l ();
       balance_above c (ins new_key l) k r bound;
@@ -865,7 +872,11 @@ let rec ins_ordered (new_key : int) (tree : t @ logical)
     let choice = direction new_key k in
     direction_def new_key k;
     match choice with
-    | Same -> ()
+    | Same ->
+      ins_ordered new_key r ();
+      ins_above k new_key r ();
+      balance_ordered c l k (ins new_key r) ();
+      ()
     | Left ->
       ins_ordered new_key l ();
       ins_below k new_key l ();
@@ -990,8 +1001,8 @@ let[@vox.def] rec agrees (t1 : t @ logical) (t2 : t @ logical)
     then false
     else if agrees t1 t2 left then agrees t1 t2 right else false
 
-let[@vox.def] equal (_t1 : t @ logical) (_t2 : t @ logical) =
-  false
+let[@vox.def] equal (t1 : t @ logical) (t2 : t @ logical) =
+  if agrees t1 t2 t1 then agrees t1 t2 t2 else false
 
 let agrees_node ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(colour : color) ~(left : t @ logical) ~(key : int)
@@ -1058,7 +1069,7 @@ let equal_forward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
 let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
     ~(pointwise : query:int ->
                    unit{ member query t1 = member query t2 })
-    : unit{ equal t1 t2 = false } =
+    : unit{ equal t1 t2 = true } =
   let rec prove nodes : unit{ agrees t1 t2 nodes = true } =
     match nodes with
     | Empty ->
