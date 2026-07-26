@@ -1,6 +1,9 @@
 type t =
   [ `Add
   | `And
+  | `Bit_and
+  | `Bit_or
+  | `Bit_xor
   | `Bigint_abs
   | `Bigint_add
   | `Bigint_compare
@@ -18,15 +21,49 @@ type t =
   | `Equal
   | `Greater
   | `Greater_equal
+  | `Identity
+  | `Int_max
+  | `Int_min
   | `Less
   | `Less_equal
   | `Multiply
+  | `Negate
   | `Not
   | `Not_equal
   | `Or
-  | `Subtract ]
+  | `Pred
+  | `Shift_left
+  | `Shift_right_arithmetic
+  | `Shift_right_logical
+  | `Subtract
+  | `Succ ]
 
-let of_primitive = function
+let persistent name id =
+  Ident.same id (Ident.create_persistent name)
+;;
+
+let stdlib_member expected = function
+  | Path.Pdot (Path.Pident root, member) ->
+    persistent "Stdlib" root && String.equal member expected
+  | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+;;
+
+let int_member expected = function
+  | Path.Pdot
+      (Path.Pdot (Path.Pident root, "Int"), member) ->
+    persistent "Stdlib" root && String.equal member expected
+  | Path.Pdot (Path.Pident root, member) ->
+    persistent "Stdlib__Int" root && String.equal member expected
+  | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+;;
+
+(* Some runtime primitives are shared by operations at several source types.
+   Recognize those only at the canonical Stdlib paths whose logical semantics
+   we model.  In particular, [%identity] also implements [Fun.id], character
+   conversions, and unsafe casts, while the bitwise primitives also implement
+   [Bool.logand], [Bool.logor], and [Bool.logxor]. *)
+let of_primitive ~path = function
+  | "%identity" when stdlib_member "~+" path -> Some `Identity
   | "%equal" -> Some `Equal
   | "%notequal" -> Some `Not_equal
   | "%lessthan" -> Some `Less
@@ -36,14 +73,24 @@ let of_primitive = function
   | "%addint" -> Some `Add
   | "%subint" -> Some `Subtract
   | "%mulint" -> Some `Multiply
+  | "%negint" -> Some `Negate
+  | "%succint" -> Some `Succ
+  | "%predint" -> Some `Pred
+  | "%andint"
+    when stdlib_member "land" path || int_member "logand" path ->
+    Some `Bit_and
+  | "%orint" when stdlib_member "lor" path || int_member "logor" path ->
+    Some `Bit_or
+  | "%xorint"
+    when stdlib_member "lxor" path || int_member "logxor" path ->
+    Some `Bit_xor
+  | "%lslint" -> Some `Shift_left
+  | "%lsrint" -> Some `Shift_right_logical
+  | "%asrint" -> Some `Shift_right_arithmetic
   | "%sequand" -> Some `And
   | "%sequor" -> Some `Or
   | "%boolnot" -> Some `Not
   | _ -> None
-;;
-
-let persistent name id =
-  Ident.same id (Ident.create_persistent name)
 ;;
 
 let bigint_root = function
@@ -53,7 +100,19 @@ let bigint_root = function
   | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
 ;;
 
+let int_root = function
+  | Path.Pdot (Path.Pident root, "Int") when persistent "Stdlib" root -> true
+  | Path.Pident root when persistent "Stdlib__Int" root -> true
+  | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+;;
+
 let of_path = function
+  | Path.Pdot (Path.Pident root, "max_int") when persistent "Stdlib" root ->
+    Some `Int_max
+  | Path.Pdot (Path.Pident root, "min_int") when persistent "Stdlib" root ->
+    Some `Int_min
+  | Path.Pdot (root, "max_int") when int_root root -> Some `Int_max
+  | Path.Pdot (root, "min_int") when int_root root -> Some `Int_min
   | Path.Pdot (root, member) when bigint_root root ->
     (match member with
      | "zero" -> Some `Bigint_zero

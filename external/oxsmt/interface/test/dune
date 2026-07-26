@@ -18,7 +18,7 @@
 (executable
  (name session_cores_test)
  (modules session_cores_test)
- (libraries oxsmt_core oxsmt_lia oxsmt_interface))
+ (libraries oxsmt_core oxsmt_lia oxsmt_interface unix))
 
 ; Equality-aware, checked interpolation consumer proof: a direct Int equality premise,
 ; both fresh-session obligations, shared vocabulary, and two corruptions that isolate the

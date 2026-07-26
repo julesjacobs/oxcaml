@@ -1,6 +1,7 @@
 open Types
 
 module Oxsmt_context = Oxsmt_core.Context
+module Oxsmt_bv = Oxsmt_core.Bv
 module Oxsmt_datatype_defs = Oxsmt_core.Datatype_defs
 module Oxsmt_internal_minter = Oxsmt_core.Internal_minter
 module Oxsmt_nia_config = Oxsmt_core.Nia_config
@@ -144,11 +145,23 @@ type context =
     mutable data : data_instance list;
     mutable tuples : tuple_instance list;
     mutable references : reference list;
+    mutable unspecified_shifts : string list;
   }
+
+let int_width = 63
+
+let shift_fallback_basename = function
+  | `Shift_left -> "VoxInt_shift_left_unspecified"
+  | `Shift_right_logical -> "VoxInt_shift_right_logical_unspecified"
+  | `Shift_right_arithmetic -> "VoxInt_shift_right_arithmetic_unspecified"
+  | _ -> invalid_arg "shift_fallback_basename"
 
 let solver_symbol context basename =
   if String.equal context.symbol_namespace "" then basename
   else basename ^ "_" ^ context.symbol_namespace
+
+let shift_fallback_name context builtin =
+  solver_symbol context (shift_fallback_basename builtin)
 
 let rec sort_key = function
   | Sint -> "int"
@@ -491,7 +504,8 @@ let builtin_name context = function
         Subst.Lazy.force_value_description (Env.find_value path context.env)
       with
       | { val_kind = Val_prim primitive; _ } ->
-        Vox_builtin.of_primitive primitive.prim_name
+        let path = Env.normalize_value_path None context.env path in
+        Vox_builtin.of_primitive ~path primitive.prim_name
       | _ -> None
       | exception Not_found -> None
     end
@@ -531,6 +545,11 @@ let note_reference context expression reference =
   | Rfun name when Option.is_some (Vox_builtin.constructor_mismatch name) -> ()
   | Rfun _ | Rsibling _ | Rapp _ | Rglobal _ ->
   match builtin_name context reference with
+  | Some ((`Shift_left | `Shift_right_logical
+          | `Shift_right_arithmetic) as builtin) ->
+    let name = shift_fallback_name context builtin in
+    if not (List.mem name context.unspecified_shifts) then
+      context.unspecified_shifts <- name :: context.unspecified_shifts
   | Some _ -> ()
   | None ->
     let sort = sort_of_type context expression.rexp_loc expression.rexp_type in
@@ -684,7 +703,16 @@ let expect_bool location = function
   | Sbool -> ()
   | _ -> error location "boolean operation used at a non-bool type"
 
-let emit_builtin location builtin arguments =
+let smt_int_constant integer =
+  let unsigned = Int64.logand (Int64.of_int integer) Int64.max_int in
+  Printf.sprintf "(_ bv%Ld %d)" unsigned int_width
+
+let smt_signed_bv_to_int term =
+  let zero = smt_int_constant 0 in
+  "(ite (bvslt " ^ term ^ " " ^ zero ^ ") (- (bv2int " ^ term
+  ^ ") 9223372036854775808) (bv2int " ^ term ^ "))"
+
+let emit_builtin context location builtin arguments =
   let terms = List.map fst arguments in
   let sorts = List.map snd arguments in
   let binary operation check result_sort =
@@ -710,10 +738,10 @@ let emit_builtin location builtin arguments =
         term, Sbool
       | _ -> error location "equality builtin used with the wrong arity"
     end
-  | `Less -> binary "<" (expect_int location) Sbool
-  | `Less_equal -> binary "<=" (expect_int location) Sbool
-  | `Greater -> binary ">" (expect_int location) Sbool
-  | `Greater_equal -> binary ">=" (expect_int location) Sbool
+  | `Less -> binary "bvslt" (expect_int location) Sbool
+  | `Less_equal -> binary "bvsle" (expect_int location) Sbool
+  | `Greater -> binary "bvsgt" (expect_int location) Sbool
+  | `Greater_equal -> binary "bvsge" (expect_int location) Sbool
   | (`Add | `Subtract | `Multiply) as operation ->
     begin match terms, sorts with
     | [left; right], [left_sort; right_sort] ->
@@ -721,13 +749,60 @@ let emit_builtin location builtin arguments =
       expect_sort location left_sort right_sort;
       let operator =
         match operation with
-        | `Add -> "+"
-        | `Subtract -> "-"
-        | `Multiply -> "*"
+        | `Add -> "bvadd"
+        | `Subtract -> "bvsub"
+        | `Multiply -> "bvmul"
       in
       "(" ^ operator ^ " " ^ left ^ " " ^ right ^ ")", left_sort
     | _ -> error location "binary builtin used with the wrong arity"
     end
+  | `Identity ->
+    begin match terms, sorts with
+    | [argument], [Sint] -> argument, Sint
+    | _ -> error location "integer identity used with an inconsistent type"
+    end
+  | (`Negate | `Succ | `Pred) as operation ->
+    begin match terms, sorts with
+    | [argument], [Sint] ->
+      let term =
+        match operation with
+        | `Negate -> "(bvneg " ^ argument ^ ")"
+        | `Succ -> "(bvadd " ^ argument ^ " " ^ smt_int_constant 1 ^ ")"
+        | `Pred -> "(bvsub " ^ argument ^ " " ^ smt_int_constant 1 ^ ")"
+      in
+      term, Sint
+    | _ -> error location "unary integer builtin used with the wrong arity"
+    end
+  | (`Bit_and | `Bit_or | `Bit_xor) as operation ->
+    let operator =
+      match operation with
+      | `Bit_and -> "bvand"
+      | `Bit_or -> "bvor"
+      | `Bit_xor -> "bvxor"
+    in
+    binary operator (expect_int location) Sint
+  | (`Shift_left | `Shift_right_logical
+    | `Shift_right_arithmetic) as operation ->
+    begin match terms, sorts with
+    | [left; right], [Sint; Sint] ->
+      let operator =
+        match operation with
+        | `Shift_left -> "bvshl"
+        | `Shift_right_logical -> "bvlshr"
+        | `Shift_right_arithmetic -> "bvashr"
+      in
+      let valid =
+        "(and (bvsle " ^ smt_int_constant 0 ^ " " ^ right
+        ^ ") (bvsle " ^ right ^ " " ^ smt_int_constant int_width ^ "))"
+      in
+      ( "(ite " ^ valid ^ " (" ^ operator ^ " " ^ left ^ " " ^ right
+        ^ ") (" ^ shift_fallback_name context operation ^ " " ^ left ^ " "
+        ^ right ^ "))",
+        Sint )
+    | _ -> error location "integer shift used with the wrong arity"
+    end
+  | `Int_max -> error location "max_int used as a function"
+  | `Int_min -> error location "min_int used as a function"
   | (`Bigint_add | `Bigint_sub | `Bigint_mul) as operation ->
     begin match terms, sorts with
     | [left; right], [left_sort; right_sort] ->
@@ -758,8 +833,9 @@ let emit_builtin location builtin arguments =
   | `Bigint_compare ->
     begin match terms, sorts with
     | [left; right], [Sbigint; Sbigint] ->
-      ( "(ite (< " ^ left ^ " " ^ right ^ ") (- 1) (ite (> "
-        ^ left ^ " " ^ right ^ ") 1 0))",
+      ( "(ite (< " ^ left ^ " " ^ right ^ ") " ^ smt_int_constant (-1)
+        ^ " (ite (> " ^ left ^ " " ^ right ^ ") " ^ smt_int_constant 1
+        ^ " " ^ smt_int_constant 0 ^ "))",
         Sint )
     | _ -> error location "Bigint.compare used with an inconsistent type"
     end
@@ -769,7 +845,7 @@ let emit_builtin location builtin arguments =
   | `Bigint_ge -> binary ">=" (expect_bigint location) Sbool
   | `Bigint_of_int ->
     begin match terms, sorts with
-    | [argument], [Sint] -> argument, Sbigint
+    | [argument], [Sint] -> smt_signed_bv_to_int argument, Sbigint
     | _ -> error location "Bigint.of_int used with an inconsistent type"
     end
   | `Bigint_is_zero ->
@@ -865,11 +941,6 @@ let rec arrow_signature location arguments = function
     ensure_first_order location result;
     List.rev arguments, result
 
-let negative_integer integer =
-  let rendered = string_of_int integer in
-  let magnitude = String.sub rendered 1 (String.length rendered - 1) in
-  "(- " ^ magnitude ^ ")"
-
 let variant_constructor_name data index constructor =
   data.data_name ^ "_c_" ^ string_of_int index ^ "_"
   ^ sanitize constructor.constructor_name
@@ -940,6 +1011,8 @@ let emit_expression context variables expression =
           match builtin_name context reference_identifier with
           | Some `Bigint_zero -> "0"
           | Some `Bigint_one -> "1"
+          | Some `Int_max -> smt_int_constant max_int
+          | Some `Int_min -> smt_int_constant min_int
           | Some _ ->
             error expression.rexp_loc "builtin %s must be fully applied"
               (reference_basename reference_identifier)
@@ -958,8 +1031,7 @@ let emit_expression context variables expression =
             reference.reference_name
         end
       | Rexp_constant (Const_int integer) ->
-        if integer < 0 then negative_integer integer
-        else string_of_int integer
+        smt_int_constant integer
       | Rexp_constant _ ->
         error expression.rexp_loc "only int constants are supported"
       | Rexp_let (bindings, body) ->
@@ -1040,7 +1112,8 @@ let emit_expression context variables expression =
           match builtin_name context reference_identifier with
           | Some builtin ->
             let term, actual_sort =
-              emit_builtin expression.rexp_loc builtin rendered_arguments
+              emit_builtin context expression.rexp_loc builtin
+                rendered_arguments
             in
             expect_sort expression.rexp_loc result_sort actual_sort;
             term
@@ -1286,7 +1359,8 @@ let emit_expression context variables expression =
 
 let smt_sort context location sort =
   let render = function
-    | Sint | Sbigint -> "Int"
+    | Sint -> "(_ BitVec 63)"
+    | Sbigint -> "Int"
     | Sbool -> "Bool"
     | Stuple sorts ->
       (tuple_for_sorts context location sorts).tuple_name
@@ -1468,6 +1542,7 @@ let check_concrete_inhabitance (context : context) location =
 
 type oxsmt_environment =
   { terms : Oxsmt_context.t;
+    bv_minter : Oxsmt_bv.minter;
     datatypes : (string * Oxsmt_datatype_defs.datatype) list;
     references : (reference * Oxsmt_core.Symbol.t) list;
     variables : (variable * Oxsmt_core.Symbol.t) list;
@@ -1498,7 +1573,8 @@ let oxsmt_find_named location description name entries =
     error location "internal error: missing oxsmt %s %s" description name
 
 let oxsmt_sort context sorts location = function
-  | Sint | Sbigint -> Oxsmt_sort.int
+  | Sint -> Oxsmt_sort.bitvec int_width
+  | Sbigint -> Oxsmt_sort.int
   | Sbool -> Oxsmt_sort.bool
   | Stuple fields ->
     let tuple = tuple_for_sorts context location fields in
@@ -1709,6 +1785,10 @@ let oxsmt_nia_lemmas environment =
   in
   Oxsmt_nia_lin.lemmas environment.terms distinct_products
 
+let oxsmt_int_constant environment integer =
+  Oxsmt_bv.const environment.terms environment.bv_minter
+    ~value:(Oxsmt_core.Bigint.of_int integer) ~width:int_width
+
 let oxsmt_builtin environment location builtin arguments =
   let terms = environment.terms in
   let term_values = List.map fst arguments in
@@ -1736,12 +1816,22 @@ let oxsmt_builtin environment location builtin arguments =
         term, Sbool
       | _ -> error location "equality builtin used with the wrong arity"
     end
-  | `Less -> binary (expect_int location) Sbool (Oxsmt_context.lt terms)
+  | `Less ->
+    binary (expect_int location) Sbool
+      (Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvslt)
   | `Less_equal ->
-    binary (expect_int location) Sbool (Oxsmt_context.le terms)
-  | `Greater -> binary (expect_int location) Sbool (Oxsmt_context.gt terms)
+    binary (expect_int location) Sbool
+      (Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvsle)
+  | `Greater ->
+    binary (expect_int location) Sbool
+      (fun left right ->
+        Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvslt
+          right left)
   | `Greater_equal ->
-    binary (expect_int location) Sbool (Oxsmt_context.ge terms)
+    binary (expect_int location) Sbool
+      (fun left right ->
+        Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvsle
+          right left)
   | (`Add | `Subtract | `Multiply) as operation ->
     begin match term_values, term_sorts with
     | [left; right], [left_sort; right_sort] ->
@@ -1749,15 +1839,80 @@ let oxsmt_builtin environment location builtin arguments =
       expect_sort location left_sort right_sort;
       let term =
         match operation with
-        | `Add -> Oxsmt_context.add terms left right
-        | `Subtract -> Oxsmt_context.sub terms left right
+        | `Add ->
+          Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvadd
+            left right
+        | `Subtract ->
+          Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvsub
+            left right
         | `Multiply ->
-          oxsmt_multiply ~allow_nonlinear:false environment location
+          Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvmul
             left right
       in
       term, left_sort
     | _ -> error location "binary builtin used with the wrong arity"
     end
+  | `Identity ->
+    begin match term_values, term_sorts with
+    | [argument], [Sint] -> argument, Sint
+    | _ -> error location "integer identity used with an inconsistent type"
+    end
+  | (`Negate | `Succ | `Pred) as operation ->
+    begin match term_values, term_sorts with
+    | [argument], [Sint] ->
+      let term =
+        match operation with
+        | `Negate ->
+          Oxsmt_bv.unop terms environment.bv_minter Oxsmt_bv.Bvneg
+            argument
+        | `Succ ->
+          Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvadd
+            argument (oxsmt_int_constant environment 1)
+        | `Pred ->
+          Oxsmt_bv.binop terms environment.bv_minter Oxsmt_bv.Bvsub
+            argument (oxsmt_int_constant environment 1)
+      in
+      term, Sint
+    | _ -> error location "unary integer builtin used with the wrong arity"
+    end
+  | (`Bit_and | `Bit_or | `Bit_xor) as operation ->
+    let operator =
+      match operation with
+      | `Bit_and -> Oxsmt_bv.Bvand
+      | `Bit_or -> Oxsmt_bv.Bvor
+      | `Bit_xor -> Oxsmt_bv.Bvxor
+    in
+    binary (expect_int location) Sint
+      (Oxsmt_bv.binop terms environment.bv_minter operator)
+  | (`Shift_left | `Shift_right_logical
+    | `Shift_right_arithmetic) as operation ->
+    begin match term_values, term_sorts with
+    | [left; right], [Sint; Sint] ->
+      let valid_constant =
+        match Oxsmt_bv.view right with
+        | Some (Oxsmt_bv.Const { value; width = 63 }) ->
+          begin match Oxsmt_core.Bigint.to_int_opt value with
+          | Some count -> count <= int_width
+          | None -> false
+          end
+        | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> false
+      in
+      if not valid_constant then
+        raise
+          (Oxsmt_unsupported
+             "symbolic or unspecified-count integer shift is not pure QF_BV");
+      let operator =
+        match operation with
+        | `Shift_left -> Oxsmt_bv.Bvshl
+        | `Shift_right_logical -> Oxsmt_bv.Bvlshr
+        | `Shift_right_arithmetic -> Oxsmt_bv.Bvashr
+      in
+      ( Oxsmt_bv.binop terms environment.bv_minter operator left right,
+        Sint )
+    | _ -> error location "integer shift used with the wrong arity"
+    end
+  | `Int_max -> error location "max_int used as a function"
+  | `Int_min -> error location "min_int used as a function"
   | (`Bigint_add | `Bigint_sub | `Bigint_mul) as operation ->
     begin match term_values, term_sorts with
     | [left; right], [left_sort; right_sort] ->
@@ -1795,15 +1950,13 @@ let oxsmt_builtin environment location builtin arguments =
   | `Bigint_compare ->
     begin match term_values, term_sorts with
     | [left; right], [Sbigint; Sbigint] ->
-      let zero = Oxsmt_context.int_const terms 0 in
-      let one = Oxsmt_context.int_const terms 1 in
       ( Oxsmt_context.ite terms
           (Oxsmt_context.lt terms left right)
-          (Oxsmt_context.sub terms zero one)
+          (oxsmt_int_constant environment (-1))
           (Oxsmt_context.ite terms
              (Oxsmt_context.gt terms left right)
-             one
-             zero),
+             (oxsmt_int_constant environment 1)
+             (oxsmt_int_constant environment 0)),
         Sint )
     | _ -> error location "Bigint.compare used with an inconsistent type"
     end
@@ -1817,7 +1970,22 @@ let oxsmt_builtin environment location builtin arguments =
     binary (expect_bigint location) Sbool (Oxsmt_context.ge terms)
   | `Bigint_of_int ->
     begin match term_values, term_sorts with
-    | [argument], [Sint] -> argument, Sbigint
+    | [argument], [Sint] ->
+      begin match Oxsmt_bv.view argument with
+      | Some (Oxsmt_bv.Const { value; width = 63 }) ->
+        let sign = Oxsmt_core.Bigint.of_string "4611686018427387904" in
+        let modulus = Oxsmt_core.Bigint.of_string "9223372036854775808" in
+        let signed =
+          if Oxsmt_core.Bigint.compare value sign >= 0 then
+            Oxsmt_core.Bigint.sub value modulus
+          else value
+        in
+        Oxsmt_context.int_const_big terms signed, Sbigint
+      | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None ->
+        raise
+          (Oxsmt_unsupported
+             "symbolic signed BV63-to-Int conversion is unsupported")
+      end
     | _ -> error location "Bigint.of_int used with an inconsistent type"
     end
   | `Bigint_is_zero ->
@@ -1890,6 +2058,8 @@ let oxsmt_expression context environment expression =
           match builtin_name context reference_identifier with
           | Some `Bigint_zero -> Oxsmt_context.int_const environment.terms 0
           | Some `Bigint_one -> Oxsmt_context.int_const environment.terms 1
+          | Some `Int_max -> oxsmt_int_constant environment max_int
+          | Some `Int_min -> oxsmt_int_constant environment min_int
           | Some _ ->
             error expression.rexp_loc "builtin %s must be fully applied"
               (reference_basename reference_identifier)
@@ -1913,7 +2083,7 @@ let oxsmt_expression context environment expression =
             Oxsmt_context.const environment.terms symbol
         end
       | Rexp_constant (Const_int integer) ->
-        Oxsmt_context.int_const environment.terms integer
+        oxsmt_int_constant environment integer
       | Rexp_constant _ ->
         error expression.rexp_loc "only int constants are supported"
       | Rexp_let (bindings, body) ->
@@ -2449,7 +2619,13 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   let goal = normalize vc.goal in
   let expressions = facts @ [goal] in
   let context =
-    { env; symbol_namespace = ""; data = []; tuples = []; references = [] }
+    { env;
+      symbol_namespace = "";
+      data = [];
+      tuples = [];
+      references = [];
+      unspecified_shifts = [];
+    }
   in
   let variables = collect context expressions in
   check_abstract_inhabitance context variables vc.location;
@@ -2473,6 +2649,8 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   in
   let environment =
     { terms;
+      bv_minter =
+        Oxsmt_internal_minter.mint (Oxsmt_session.parse_minter session);
       datatypes;
       references;
       variables;
@@ -2613,6 +2791,11 @@ let emit_datatypes context location buffer =
        ^ constructor_lists ^ "))\n")
 
 let emit_references (context : context) location buffer =
+  List.sort_uniq String.compare context.unspecified_shifts
+  |> List.iter (fun name ->
+       Buffer.add_string buffer
+         ("(declare-fun " ^ name
+          ^ " ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))\n"));
   List.sort
     (fun (left : reference) (right : reference) ->
       String.compare left.reference_name right.reference_name)
@@ -2669,7 +2852,13 @@ let emit_internal ?(symbol_namespace = "") ?(model = false) ~query ~env
   let goal = normalize vc.goal in
   let expressions = facts @ [goal] in
   let context =
-    { env; symbol_namespace; data = []; tuples = []; references = [] }
+    { env;
+      symbol_namespace;
+      data = [];
+      tuples = [];
+      references = [];
+      unspecified_shifts = [];
+    }
   in
   let variables = collect context expressions in
   check_abstract_inhabitance context variables vc.location;
