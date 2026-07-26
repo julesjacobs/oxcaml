@@ -166,8 +166,8 @@ let bf_no_impure_record_annotation () =
 [%%expect {|
 val bf_record_counter : int ref = {contents = 0}
 val bf_record_next : unit -> int = <fun>
-Line 9, characters 3-58:
-9 |   ({ left = bf_record_next (); right = bf_record_next () } :
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement verification failed: this expression form cannot yet be represented in a verification condition
+Lines 9-10, characters 2-34:
+ 9 | ..({ left = bf_record_next (); right = bf_record_next () } :
+10 |     bf_record{ _.left = _.right })
+Error: Refinement verification failed (not-proved)
 |}]
