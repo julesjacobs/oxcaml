@@ -703,6 +703,26 @@ pre { margin: 0; white-space: pre-wrap; font: inherit; }
   text-decoration-color: var(--warning);
 }
 
+/* A call that introduced a proposition no obligation read.  This is not a
+   defect and must not read as one: no colour, no squiggle, no place in the
+   status roll-up.  It says the same thing the proof pane says of a hypothesis
+   nothing used -- it dims, exactly as .hyp-unused does -- and adds a hairline
+   dotted rule so the span is still findable in a glance down the buffer.  At
+   1px against the obligation underlines' 2px it does not read as one of them,
+   and the greyer, quieter treatment separates it from the wavy red of a
+   diagnostic.  Hovering restores full opacity, so the call is never harder to
+   read than the code around it. */
+.lemma-unused {
+  opacity: .55;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  text-decoration-color: var(--muted);
+  transition: opacity .12s ease;
+}
+.lemma-unused:hover { opacity: 1; }
+
 /* The raw solver diagnostic, collapsed into a disclosure by default (the
    verbose grind output is available on demand, not dumped inline). */
 .solver-detail { margin-top: 8px; }

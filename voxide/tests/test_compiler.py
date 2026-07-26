@@ -893,6 +893,146 @@ class TranslateVcTests(unittest.TestCase):
         self.assertIsNone(dropped)
 
 
+class LemmaCallChannelTests(unittest.TestCase):
+    """The producer/usage channel a lemma-call marker is decided from."""
+
+    SOURCE_LINES = ["x" * 60] * 14
+
+    def _document(self, entries):
+        return {"lemma_calls": entries}
+
+    def _calls(self, entries):
+        return compiler_adapter.lemma_calls(
+            self._document(entries),
+            {"input.ml": self.SOURCE_LINES},
+            expected_file="input.ml",
+        )
+
+    def _entry(self, **overrides):
+        entry = {
+            "span": _span_v1(5, 11, 23),
+            "name": "some_law",
+            "introduced": True,
+        }
+        entry.update(overrides)
+        return entry
+
+    def test_absent_channel_is_unknown_not_empty(self):
+        # An older compiler that never names such a call is not a buffer that
+        # holds none: the two must not collapse into the same value.
+        self.assertIsNone(
+            compiler_adapter.lemma_calls(
+                {}, {"input.ml": self.SOURCE_LINES}, expected_file="input.ml"
+            )
+        )
+        self.assertEqual(self._calls([]), [])
+
+    def test_entries_convert_to_editor_coordinates(self):
+        calls = self._calls([self._entry()])
+        assert calls is not None
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["start"], {"line": 4, "col": 11})
+        self.assertEqual(calls[0]["end"], {"line": 4, "col": 23})
+        self.assertEqual(calls[0]["name"], "some_law")
+        self.assertTrue(calls[0]["introduced"])
+
+    def test_one_unplaceable_entry_makes_the_whole_channel_unknown(self):
+        # A call the editor cannot point at is a call it cannot decide, and a
+        # partial list would silently shrink into a confident answer.
+        ghost = self._entry(span={**_span_v1(5, 11, 23), "ghost": "true"})
+        self.assertIsNone(self._calls([self._entry(), ghost]))
+
+    def test_missing_introduced_flag_makes_the_channel_unknown(self):
+        entry = self._entry()
+        del entry["introduced"]
+        self.assertIsNone(self._calls([entry]))
+        self.assertIsNone(self._calls([self._entry(introduced="yes")]))
+
+    def test_producers_are_reported_per_fact(self):
+        fact = {
+            "text": "p",
+            "producers": [
+                {
+                    "kind": "application",
+                    "name": "some_law",
+                    "span": _span_v1(5, 11, 23),
+                },
+                {
+                    "kind": "application",
+                    "name": "some_law",
+                    "span": _span_v1(6, 11, 23),
+                },
+            ],
+        }
+        hypothesis = compiler_adapter._hypothesis(fact, self.SOURCE_LINES)
+        producers = hypothesis["producers"]
+        assert producers is not None
+        self.assertEqual(
+            [p["span"]["start"] for p in producers],
+            [{"line": 4, "col": 11}, {"line": 5, "col": 11}],
+        )
+
+    def test_absent_or_unplaceable_producers_are_unknown(self):
+        # Falling back to `origin` here would name one introducer of a fact
+        # several sites introduced, which is how a needed call gets called
+        # unnecessary.
+        self.assertIsNone(
+            compiler_adapter._hypothesis({"text": "p"}, self.SOURCE_LINES)[
+                "producers"
+            ]
+        )
+        ghost = {
+            "text": "p",
+            "producers": [
+                {"kind": "application", "span": {**_span_v1(5, 11, 23), "ghost": "true"}}
+            ],
+        }
+        self.assertIsNone(
+            compiler_adapter._hypothesis(ghost, self.SOURCE_LINES)["producers"]
+        )
+
+    def test_per_backend_usage_keeps_a_silent_backend_silent(self):
+        discharge = {
+            "status": "proved",
+            "backends": [
+                {"backend": "lean", "status": "proved", "unused_facts": [1]},
+                {"backend": "z3", "status": "proved", "unused_facts": []},
+                {"backend": "oxsmt", "status": "unknown"},
+            ],
+        }
+        per_backend = compiler_adapter._backend_unused_facts(discharge)
+        assert per_backend is not None
+        self.assertEqual(per_backend["lean"], [1])
+        self.assertEqual(per_backend["z3"], [])
+        self.assertIsNone(per_backend["oxsmt"])
+        # Fact 0: read by lean and by z3; oxsmt reported nothing, so it is
+        # absent rather than recorded as having left the fact unread.
+        self.assertEqual(
+            compiler_adapter._used_by(0, per_backend), {"lean": True, "z3": True}
+        )
+        # Fact 1: lean left it unread, z3 read it.
+        self.assertEqual(
+            compiler_adapter._used_by(1, per_backend), {"lean": False, "z3": True}
+        )
+
+    def test_single_backend_run_reports_no_per_backend_usage(self):
+        self.assertIsNone(compiler_adapter._backend_unused_facts({"status": "proved"}))
+        self.assertIsNone(compiler_adapter._used_by(0, None))
+
+    def test_malformed_unused_indices_are_treated_as_no_accounting(self):
+        discharge = {
+            "backends": [
+                {"backend": "z3", "status": "proved", "unused_facts": ["1"]},
+                {"backend": "lean", "status": "proved", "unused_facts": [True]},
+            ]
+        }
+        per_backend = compiler_adapter._backend_unused_facts(discharge)
+        assert per_backend is not None
+        self.assertIsNone(per_backend["z3"])
+        self.assertIsNone(per_backend["lean"])
+        self.assertIsNone(compiler_adapter._used_by(0, per_backend))
+
+
 class RefinementTypesTests(unittest.TestCase):
     """Pure translation of schema-v2 refinement_expression_types, no compiler."""
 
@@ -1353,6 +1493,111 @@ class RealCompilerVcTests(unittest.TestCase):
         )
         self.assertTrue(payload["unavailable"])
         self.assertEqual(payload["vcs"], [])
+
+
+class RealCompilerLemmaCallTests(unittest.TestCase):
+    """The channel against the real compiler, not a hand-built payload."""
+
+    ocamlc: str = ""
+
+    @classmethod
+    def setUpClass(cls):
+        found = compiler_adapter.find_ocamlc()
+        if found is None:
+            raise unittest.SkipTest("vox2 compiler is not built in this worktree")
+        cls.ocamlc = found
+
+    # A definition equation reaches its callers only through the companion
+    # binding the compiler generates for it, and a call to that binding hands
+    # back a refined unit -- the shape this channel is about.  One call earns
+    # the annotation below it; the other states the same kind of thing where
+    # nothing reads it.
+    SOURCE = (
+        "let[@vox.def] double x = x + x\n"
+        "\n"
+        "let read (a : int{ _ = 3 }) =\n"
+        "  let () = double_def a in\n"
+        "  (double a : int{ _ = 6 })\n"
+        "\n"
+        "let unread (b : int{ _ = 4 }) =\n"
+        "  let () = double_def b in\n"
+        "  (b : int{ _ > 0 })\n"
+    )
+
+    def _payload(self):
+        return compiler_adapter.vcs_for_source(self.SOURCE, 1, self.ocamlc, "z3")
+
+    def test_both_call_sites_are_reported_with_placeable_spans(self):
+        payload = self._payload()
+        if payload.get("unavailable"):
+            raise unittest.SkipTest("solver unavailable: %s" % payload)
+        calls = payload["lemma_calls"]
+        assert calls is not None
+        lines = self.SOURCE.split("\n")
+        self.assertEqual(len(calls), 2)
+        for call in calls:
+            self.assertEqual(call["name"], "double_def")
+            self.assertTrue(call["introduced"])
+            sliced = lines[call["start"]["line"]][
+                call["start"]["col"] : call["end"]["col"]
+            ]
+            self.assertIn(sliced, ("double_def a", "double_def b"))
+        self.assertEqual(
+            sorted(call["start"]["line"] for call in calls), [3, 7]
+        )
+
+    def test_the_read_call_is_credited_and_the_unread_one_is_not(self):
+        payload = self._payload()
+        if payload.get("unavailable"):
+            raise unittest.SkipTest("solver unavailable: %s" % payload)
+        # Fold usage over every obligation, keyed by producer span, exactly as
+        # the frontend model does.
+        read = set()
+        seen = set()
+        for vc in payload["vcs"]:
+            self.assertEqual(vc["status"], "proved", vc)
+            for hypothesis in vc["hypotheses"]:
+                producers = hypothesis["producers"]
+                self.assertIsNotNone(producers, hypothesis)
+                assert producers is not None
+                for producer in producers:
+                    if producer["kind"] != "application":
+                        continue
+                    key = producer["span"]["start"]["line"]
+                    seen.add(key)
+                    if hypothesis.get("used") is True:
+                        read.add(key)
+        self.assertEqual(seen, {3, 7})
+        self.assertEqual(read, {3})
+
+    def test_a_folded_pair_of_calls_credits_both_sites(self):
+        # Both arms state the same proposition; the fact environment keeps one
+        # entry for it and the annotation after the merge reads that entry.
+        # Naming only the entry's own origin would leave the other arm's call
+        # looking unread -- and it is the call a proof there depends on.
+        source = (
+            "let[@vox.def] double x = x + x\n"
+            "\n"
+            "let after_merge (c : bool) (d : int{ _ = 5 }) =\n"
+            "  let () = if c then double_def d else double_def d in\n"
+            "  (double d : int{ _ = 10 })\n"
+        )
+        payload = compiler_adapter.vcs_for_source(source, 1, self.ocamlc, "z3")
+        if payload.get("unavailable"):
+            raise unittest.SkipTest("solver unavailable: %s" % payload)
+        calls = payload["lemma_calls"]
+        assert calls is not None
+        self.assertEqual(len(calls), 2)
+        call_columns = sorted(call["start"]["col"] for call in calls)
+        read_columns = set()
+        for vc in payload["vcs"]:
+            for hypothesis in vc["hypotheses"]:
+                if hypothesis.get("used") is not True:
+                    continue
+                for producer in hypothesis["producers"] or []:
+                    if producer["kind"] == "application":
+                        read_columns.add(producer["span"]["start"]["col"])
+        self.assertEqual(sorted(read_columns), call_columns)
 
 
 class VcsUnavailableTests(unittest.TestCase):

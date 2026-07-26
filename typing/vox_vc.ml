@@ -9,7 +9,37 @@ type fact =
     location : Location.t option;
     scope : Location.t option;
     origin : fact_origin;
+    producers : fact_origin list;
   }
+
+(* Two origins denote the same introduction site when their kind, name and
+   span agree.  Spans are compared on their absolute byte offsets and file
+   rather than physically: a fact re-inserted through a merge carries a copy,
+   and a copied span must still count as the site it came from. *)
+let same_span (left : Location.t) (right : Location.t) =
+  String.equal left.loc_start.pos_fname right.loc_start.pos_fname
+  && left.loc_start.pos_cnum = right.loc_start.pos_cnum
+  && left.loc_end.pos_cnum = right.loc_end.pos_cnum
+  && left.loc_ghost = right.loc_ghost
+
+let same_origin left right =
+  String.equal left.kind right.kind
+  && (match left.name, right.name with
+      | None, None -> true
+      | Some left, Some right -> String.equal left right
+      | Some _, None | None, Some _ -> false)
+  && (match left.span, right.span with
+      | None, None -> true
+      | Some left, Some right -> same_span left right
+      | Some _, None | None, Some _ -> false)
+
+let merge_producers into from_ =
+  List.fold_left
+    (fun into origin ->
+      if List.exists (fun existing -> same_origin existing origin) into
+      then into
+      else into @ [origin])
+    into from_
 
 type t =
   { location : Location.t;
@@ -182,34 +212,80 @@ module Fact_env = struct
        | Types.Rexp_construct _ | Types.Rexp_field _
        | Types.Rexp_ifthenelse _ | Types.Rexp_match _ -> false)
 
-  let add ~origin ?loc ?scope ?typing_env expression env =
+  let add ~origin ?producers ?loc ?scope ?typing_env expression env =
+    let producers =
+      match producers with
+      | None -> [origin]
+      | Some producers -> merge_producers [origin] producers
+    in
     if
-      expression_in_scope env.scope expression
-      && not (trivially_reflexive typing_env expression)
-      && not
-           (List.exists
-              (fun fact -> same_expression expression fact.expression)
-              env.facts_rev)
+      not (expression_in_scope env.scope expression)
+      || trivially_reflexive typing_env expression
+    then env
+    else if
+      List.exists
+        (fun fact -> same_expression expression fact.expression)
+        env.facts_rev
     then
+      (* The proposition is already here.  Keeping the first entry's origin is
+         what the pane shows, but the site being added introduced it too, so
+         record it: otherwise that site reads as having introduced nothing. *)
       { env with
         facts_rev =
-          { expression; location = loc; scope; origin } :: env.facts_rev;
+          List.map
+            (fun fact ->
+              if same_expression expression fact.expression
+              then
+                { fact with producers = merge_producers fact.producers producers }
+              else fact)
+            env.facts_rev;
       }
-    else env
+    else
+      { env with
+        facts_rev =
+          { expression; location = loc; scope; origin; producers }
+          :: env.facts_rev;
+      }
 
   let facts env = List.rev env.facts_rev
   let scope env = env.scope
 
+  let introduced_by origin env =
+    List.exists
+      (fun fact ->
+        List.exists (fun producer -> same_origin producer origin)
+          fact.producers)
+      env.facts_rev
+
+  (* The surviving entry keeps the left side's origin, so the right side's
+     introduction sites have to be carried across: a proposition that both
+     arms of a branch establish is read after the merge through this one
+     entry, and crediting only the left arm would leave the right arm's site
+     looking unread. *)
   let intersect left right =
     let scope = Ident.Set.inter left.scope right.scope in
     { facts_rev =
-        List.filter
+        List.filter_map
           (fun fact ->
-            expression_in_scope scope fact.expression
-            && List.exists
-                 (fun other ->
-                   same_expression fact.expression other.expression)
-                 right.facts_rev)
+            if not (expression_in_scope scope fact.expression) then None
+            else
+              let matching =
+                List.filter
+                  (fun other ->
+                    same_expression fact.expression other.expression)
+                  right.facts_rev
+              in
+              match matching with
+              | [] -> None
+              | matching ->
+                Some
+                  { fact with
+                    producers =
+                      List.fold_left
+                        (fun producers other ->
+                          merge_producers producers other.producers)
+                        fact.producers matching;
+                  })
           left.facts_rev;
       scope;
     }
