@@ -4,19 +4,22 @@
 
 (* A dependent arrow's codomain may mention the parameter, so the parameter's
    own refinement has to reach the seal implication.  The seal below is asked
-   to prove [value + x > 0] from [value = x], which holds only because [x] is
-   positive. *)
+   to prove [x - value < x] from [value = x], which reduces to [0 < x] and so
+   holds only because [x] is positive.
+
+   No intermediate here can overflow, so each case states the same thing
+   whichever integer model the verifier uses. *)
 
 module Covariant_codomain : sig end = struct
   module type Exact = sig
     val f : (x : int{ _ > 0 }) -> int{ _ = x }
   end
 
-  module type Sum_positive = sig
-    val f : (x : int{ _ > 0 }) -> int{ _ + x > 0 }
+  module type Below_parameter = sig
+    val f : (x : int{ _ > 0 }) -> int{ x - _ < x }
   end
 
-  module Weaken (X : Exact) : Sum_positive = X
+  module Weaken (X : Exact) : Below_parameter = X
 end
 
 [%%expect {|
@@ -27,15 +30,15 @@ module Covariant_codomain : sig end
    guaranteed by the implementation, which is the one that calls it. *)
 
 module Contravariant_codomain : sig end = struct
-  module type Sum_positive_argument = sig
-    val f : ((x : int{ _ > 0 }) -> int{ _ + x > 0 }) -> unit
+  module type Below_parameter_argument = sig
+    val f : ((x : int{ _ > 0 }) -> int{ x - _ < x }) -> unit
   end
 
   module type Exact_argument = sig
     val f : ((x : int{ _ > 0 }) -> int{ _ = x }) -> unit
   end
 
-  module Accept (X : Sum_positive_argument) : Exact_argument = X
+  module Accept (X : Below_parameter_argument) : Exact_argument = X
 end
 
 [%%expect {|
@@ -51,7 +54,7 @@ module Insufficient : sig end = struct
   end
 
   module type Above_parameter = sig
-    val f : (x : int{ _ > 0 }) -> int{ _ > x + 5 }
+    val f : (x : int{ _ > 0 }) -> int{ x - _ > x }
   end
 
   module Bad (X : Exact) : Above_parameter = X
@@ -63,7 +66,7 @@ Line 10, characters 45-46:
                                                   ^
 Error: Refinement verification failed at module seal for value "f" (disproved)
 Line 7, characters 4-50:
-7 |     val f : (x : int{ _ > 0 }) -> int{ _ > x + 5 }
+7 |     val f : (x : int{ _ > 0 }) -> int{ x - _ > x }
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   Interface declaration for value f
 Line 3, characters 4-46:
