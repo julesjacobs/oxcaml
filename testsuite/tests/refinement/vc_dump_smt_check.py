@@ -89,12 +89,15 @@ for vc in vcs:
     if prove.count(goal_assertion) != 1:
         raise AssertionError("structured SMT goal does not match prove query")
 
+# Ordinary [int] is modelled as a signed 63-bit bitvector, so an integer
+# comparison emits the signed bitvector predicate over bitvector literals
+# rather than the unbounded arithmetic one.
 expected_terms_by_fact_text = {
-    "3 >= 3": "(= (>= 3 3) true)",
-    "annotation >= 3": "(= (>= v_0 3) true)",
-    "annotation = 3": "(= (= v_0 3) true)",
-    "1 > 0": "(= (> 1 0) true)",
-    "y > 0": "(= (> v_1 0) true)",
+    "3 >= 3": "(= (bvsge (_ bv3 63) (_ bv3 63)) true)",
+    "annotation >= 3": "(= (bvsge v_0 (_ bv3 63)) true)",
+    "annotation = 3": "(= (= v_0 (_ bv3 63)) true)",
+    "1 > 0": "(= (bvsgt (_ bv1 63) (_ bv0 63)) true)",
+    "y > 0": "(= (bvsgt v_1 (_ bv0 63)) true)",
 }
 for vc in vcs:
     for source_fact, smt_fact in zip(
