@@ -3712,18 +3712,22 @@ and check_application state application function_ arguments
                equation that says nothing: it introduces a symbol nothing
                else reads.  Bind the reference first, so such an argument
                compares equal and no fact is made. *)
-            let stored_subject =
+            (* Only for the comparison and the equation.  The unstable
+               branch below substitutes this subject into the later
+               arguments' predicates, where it still appears in the form
+               typing recorded, so that key has to stay as it was. *)
+            let bound_subject =
               bind_scope_references (Facts.scope state.facts) stored_subject
             in
             let actual_subject = subject state argument in
             if expression_is_stable state argument then begin
               if
                 Refinement.alpha_equal ~equal_type:(fun _ _ -> true)
-                  stored_subject actual_subject
+                  bound_subject actual_subject
               then ()
               else match
                 equality ~env:application.exp_env ~loc:argument.exp_loc
-                  stored_subject actual_subject
+                  bound_subject actual_subject
               with
               | Some equation ->
                 let origin =
