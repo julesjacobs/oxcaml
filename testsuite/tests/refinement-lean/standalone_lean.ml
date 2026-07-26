@@ -194,6 +194,9 @@ let integer value = Integer value
 let less left right = binary "<" int_type bool_type left right
 let add left right = binary "+" int_type int_type left right
 let multiply left right = binary "*" int_type int_type left right
+let bit_and left right = binary "land" int_type int_type left right
+let bit_or left right = binary "lor" int_type int_type left right
+let bit_xor left right = binary "lxor" int_type int_type left right
 let conjunction left right = binary "&&" bool_type bool_type left right
 let disjunction left right = binary "||" bool_type bool_type left right
 
@@ -343,6 +346,19 @@ let comparison_constructor =
     (equal bool_option_type
        (some_bool (bigint_is_zero zero))
        (some_bool (bool true)))
+let nested_bitwise =
+  bit_and (bit_or (int 1) (int 2)) (bit_xor (int 3) (int 1))
+
+let nested_bitwise_condition =
+  vc
+    ~facts:[fact (equal int_type nested_bitwise (int 2))]
+    (equal int_type nested_bitwise (int 2))
+
+let postfix_selector_condition =
+  let selected = bit_and (int (-1)) (int 1) in
+  vc
+    ~facts:[fact (greater selected (int 0))]
+    (greater selected (int 0))
 
 let () =
   let first = emit entailment in
@@ -380,6 +396,16 @@ let () =
   List.iter
     (fun (term, expected) -> assert (contains (emit (vc term)) expected))
     exact_decide_terms;
+  let emitted = emit nested_bitwise_condition in
+  assert
+    (contains emitted
+       "(BitVec.and (BitVec.or (BitVec.ofInt 63 1) (BitVec.ofInt 63 2)) \
+        (BitVec.xor (BitVec.ofInt 63 3) (BitVec.ofInt 63 1)))");
+  let emitted = emit postfix_selector_condition in
+  assert
+    (contains emitted
+       "(BitVec.and (BitVec.ofInt 63 (-1)) \
+        (BitVec.ofInt 63 1)).toInt > (BitVec.ofInt 63 0).toInt");
   print_endline "Lean emission: byte-identical"
 
 let check expected condition =
@@ -398,6 +424,8 @@ let () =
     check Vox_lean.Proved compound;
     check Vox_lean.Proved comparison_application;
     check Vox_lean.Proved comparison_constructor
+    check Vox_lean.Proved nested_bitwise_condition;
+    check Vox_lean.Proved postfix_selector_condition
   end;
   print_endline "real Lean subprocess cases: completed or skipped"
 

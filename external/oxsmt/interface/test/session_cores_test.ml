@@ -62,6 +62,20 @@ let bool_var s name =
   Context.const (Session.context s) (Session.declare_const s name Sort.bool)
 ;;
 
+let bv_var s name width =
+  Context.const
+    (Session.context s)
+    (Session.declare_const s name (Sort.bitvec width))
+;;
+
+let bv_const s value width =
+  Bv.const
+    (Session.context s)
+    (Internal_minter.mint (Session.parse_minter s))
+    ~value:(Bigint.of_int value)
+    ~width
+;;
+
 let le s a b = Context.le (Session.context s) a b
 let ic s n = Context.int_const (Session.context s) n
 
@@ -593,6 +607,128 @@ let () =
     (name ^ ": user theory literals do not leak as frame selectors")
     (Session.failed_assumptions s = []);
   expect_verdict (name ^ ": assumptions do not persist") (Session.check_sat s) Session.Sat
+;;
+
+(* Pure-QF_BV assumptions use the eager bit-vector solver rather than the incremental
+   CDCL(T) path. Keep the same public core contract: irrelevant assumptions disappear,
+   every retained assumption is necessary, and optional core-extraction failures never
+   erase the already-proved [Unsat] verdict. *)
+let () =
+  let name = "assuming-bv-irrelevant" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = bv_var s "bv_irrelevant_x" 4 in
+  let y = bv_var s "bv_irrelevant_y" 4 in
+  Session.assert_term s (Context.eq ctx x (bv_const s 1 4));
+  let noise = Context.eq ctx y (bv_const s 3 4), true in
+  let essential = Context.eq ctx x (bv_const s 2 4), true in
+  let result = Session.check_sat_assuming s [ noise; essential ] in
+  let core = require_minimal_core name s result [ essential ] in
+  check_true (name ^ ": noise removed") (not (assumption_mem noise core));
+  expect_verdict (name ^ ": assumptions do not persist") (Session.check_sat s) Session.Sat
+;;
+
+let () =
+  let name = "assuming-bv-all-required" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = bv_var s "bv_all_required_x" 4 in
+  let one = Context.eq ctx x (bv_const s 1 4), true in
+  let two = Context.eq ctx x (bv_const s 2 4), true in
+  let result = Session.check_sat_assuming s [ one; two ] in
+  ignore (require_minimal_core name s result [ one; two ]);
+  expect_verdict (name ^ ": assumptions do not persist") (Session.check_sat s) Session.Sat
+;;
+
+let () =
+  let name = "assuming-bv-profile" in
+  let saved = Sys.getenv_opt "OXSMT_ASSUMPTION_PROFILE" in
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "OXSMT_ASSUMPTION_PROFILE" (Option.value ~default:"" saved))
+    (fun () ->
+      Unix.putenv "OXSMT_ASSUMPTION_PROFILE" "1";
+      let s = Session.create () in
+      let ctx = Session.context s in
+      let x = bv_var s "bv_profile_x" 4 in
+      let y = bv_var s "bv_profile_y" 4 in
+      Session.assert_term s (Context.eq ctx x (bv_const s 1 4));
+      let noise = Context.eq ctx y (bv_const s 3 4), true in
+      let essential = Context.eq ctx x (bv_const s 2 4), true in
+      let result = Session.check_sat_assuming s [ noise; essential ] in
+      expect_assumption_verdict (name ^ ": unsat") result Session.Unsat;
+      let profile = Session.assumption_profile s in
+      check_true (name ^ ": initial core size") (profile.initial_core_size = 2);
+      check_true (name ^ ": final core size") (profile.final_core_size = 1);
+      check_true (name ^ ": deletion probes") (profile.deletion_probes = 2);
+      check_true (name ^ ": complete solves") (Session.minimize_probes s = 4);
+      check_true
+        (name ^ ": eager effort counters stay zero")
+        (profile.initial_effort = 0
+         && profile.deletion_effort = 0
+         && profile.replay_effort = 0))
+;;
+
+let pure_bv_single_assumption_conflict name =
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = bv_var s (name ^ "_x") 4 in
+  Session.assert_term s (Context.eq ctx x (bv_const s 1 4));
+  s, (Context.eq ctx x (bv_const s 2 4), true)
+;;
+
+let expect_withheld_bv_core name session result reason =
+  expect_assumption_verdict (name ^ ": verdict preserved") result Session.Unsat;
+  check_true (name ^ ": core withheld") (result.Session.unsat_core = None);
+  check_true
+    (name ^ ": diagnostic")
+    (Session.last_unknown_reason session = reason)
+;;
+
+let () =
+  let name = "assuming-bv-deletion-unknown" in
+  let s, assumption = pure_bv_single_assumption_conflict name in
+  Session.inject_deletion_verdict_for_test (Some Session.Unknown);
+  expect_withheld_bv_core
+    name
+    s
+    (Session.check_sat_assuming s [ assumption ])
+    "assumption-core-minimize-unknown"
+;;
+
+let () =
+  let name = "assuming-bv-replay-unknown" in
+  let s, assumption = pure_bv_single_assumption_conflict name in
+  Session.inject_replay_verdict_for_test (Some Session.Unknown);
+  expect_withheld_bv_core
+    name
+    s
+    (Session.check_sat_assuming s [ assumption ])
+    "assumption-core-recheck-unknown"
+;;
+
+let () =
+  let name = "assuming-bv-replay-sat" in
+  let s, assumption = pure_bv_single_assumption_conflict name in
+  Session.inject_replay_verdict_for_test (Some Session.Sat);
+  expect_withheld_bv_core
+    name
+    s
+    (Session.check_sat_assuming s [ assumption ])
+    "assumption-core-recheck-sat"
+;;
+
+let () =
+  let name = "assuming-bv-sat" in
+  let s = Session.create () in
+  let ctx = Session.context s in
+  let x = bv_var s "bv_sat_x" 4 in
+  let result =
+    Session.check_sat_assuming s [ Context.eq ctx x (bv_const s 1 4), true ]
+  in
+  expect_assumption_verdict (name ^ ": sat") result Session.Sat;
+  check_true (name ^ ": no core") (result.Session.unsat_core = None);
+  check_true (name ^ ": model available") (Session.get_model s <> None)
 ;;
 
 let () =

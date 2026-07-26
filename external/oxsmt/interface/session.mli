@@ -109,7 +109,10 @@ type assumption_check =
 (** Diagnostic phase attribution for the most recent nonempty
     {!check_sat_assuming}. CPU times and effort counters are populated only when
     [OXSMT_ASSUMPTION_PROFILE=1] (also accepts [true] or [yes]); otherwise every field is
-    zero. This record is observational and is never consulted by solver decisions. *)
+    zero. Pure-BV assumption queries populate the CPU, deletion-count, and core-size
+    fields; their effort/decision/conflict fields stay zero because the eager bit-vector
+    solver does not expose those counters. This record is observational and is never
+    consulted by solver decisions. *)
 type assumption_profile =
   { prepare_cpu_s : float
   ; initial_cpu_s : float
@@ -462,12 +465,16 @@ val nia_refine : t -> bool
     withholds a core: the default trades optimization completeness for bounded
     post-verdict core effort, without changing satisfiability verdict completeness.
 
+    Pure bit-vector queries use the eager QF_BV solver and derive their subset-minimal
+    cores by deterministic deletion and replay over fresh bit-blasts. The CDCL(T)
+    post-verdict effort cap does not apply to those eager solves because that solver does
+    not expose an effort counter.
+
     This entry point is additive: ordinary {!check_sat} does not consult assumption state
     and retains its existing search path. Nonempty assumption queries currently decline
-    with [Unknown] when a certificate trace or quantified lemma is active, when the full
-    query is in the pure bit-vector dispatch fragment, or when preprocessing an atom with
-    a value [Ite]/[div]/[mod] introduces side constraints that cannot be represented by
-    one assumption literal. *)
+    with [Unknown] when a certificate trace or quantified lemma is active, or when
+    preprocessing an atom with a value [Ite]/[div]/[mod] introduces side constraints that
+    cannot be represented by one assumption literal. *)
 val check_sat_assuming : t -> assumption list -> assumption_check
 
 (** The model of the most recent {!check_sat} or {!check_sat_assuming}, iff that call
@@ -629,13 +636,12 @@ val splits : t -> int
     [OXSMT_COMBINE_INSEARCH]). 0 on the classic path / non-DT+LIA stacks. *)
 val fabric_edges_injected : t -> int
 
-(** Incremental re-solves the most recent {!check_sat_assuming} spent minimizing its
-    assumption core: the initial assumption solve, every deletion/refinement probe, and
-    the final core replay. [0] after a call that never reached minimization (empty
-    assumptions, an early [Unknown] decline, or a [Sat] verdict). Diagnostic/perf
-    introspection only — never consulted by the solver, so it cannot affect a verdict;
-    exposed so the core-min property test and benchmark can compare the linear and
-    clause-set-refinement strategies (see [OXSMT_CORE_MIN_LINEAR]). *)
+(** Complete solves launched by the most recent nonempty {!check_sat_assuming}: the
+    initial assumption solve, every deletion/refinement probe, and the final core replay.
+    [0] after an early decline before solving. Diagnostic/perf introspection only — never
+    consulted by the solver, so it cannot affect a verdict; exposed so the core-min
+    property test and benchmark can compare the linear and clause-set-refinement
+    strategies (see [OXSMT_CORE_MIN_LINEAR]). *)
 val minimize_probes : t -> int
 
 (** Phase profile for the most recent nonempty assumption query. See

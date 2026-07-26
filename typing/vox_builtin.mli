@@ -1,6 +1,9 @@
 type t =
   [ `Add
   | `And
+  | `Bit_and
+  | `Bit_or
+  | `Bit_xor
   | `Bigint_abs
   | `Bigint_add
   | `Bigint_compare
@@ -18,15 +21,24 @@ type t =
   | `Equal
   | `Greater
   | `Greater_equal
+  | `Identity
+  | `Int_max
+  | `Int_min
   | `Less
   | `Less_equal
   | `Multiply
+  | `Negate
   | `Not
   | `Not_equal
   | `Or
-  | `Subtract ]
+  | `Pred
+  | `Shift_left
+  | `Shift_right_arithmetic
+  | `Shift_right_logical
+  | `Subtract
+  | `Succ ]
 
-val of_primitive : string -> t option
+val of_primitive : path:Path.t -> string -> t option
 val of_path : Path.t -> t option
 val is_bigint_type : Path.t -> bool
 

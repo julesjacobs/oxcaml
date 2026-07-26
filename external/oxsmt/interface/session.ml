@@ -3371,6 +3371,8 @@ let reset_assumption_check t =
   t.assumption_profile_on <- assumption_profile_enabled ();
   t.last_assumption_profile <- empty_assumption_profile;
   t.last_verdict <- Unknown;
+  t.last_splits <- 0;
+  t.last_effort <- 0;
   t.last_failed_frame_assumptions <- None;
   Cdclt.clear_last_conflict t.cdclt;
   t.last_model <- None;
@@ -3526,6 +3528,115 @@ let solve_prepared_assumptions ?(verdict_only = false) t ~phase ~fixed assumptio
 let inject_deletion_verdict : verdict option ref = ref None
 let inject_replay_verdict : verdict option ref = ref None
 
+let pure_bv_verdict = function
+  | Bv_dispatch.Sat _ -> Sat
+  | Bv_dispatch.Unsat -> Unsat
+  | Bv_dispatch.Unknown _ -> Unknown
+;;
+
+let record_pure_bv_result t = function
+  | Bv_dispatch.Unsat ->
+    t.last_verdict <- Unsat;
+    t.last_model <- None
+  | Bv_dispatch.Unknown msg ->
+    t.last_verdict <- Unknown;
+    t.last_model <- None;
+    t.unknown_reason <- "bv-blast-unknown:" ^ san_token msg
+  | Bv_dispatch.Sat { bv_vars; bool_vars } ->
+    t.last_verdict <- Sat;
+    t.last_model
+    <- Some
+         ( []
+         , List.map (fun (name, value, _width) -> Const (name, VInt value)) bv_vars
+           @ List.map (fun (name, value) -> Const (name, VBool value)) bool_vars )
+;;
+
+let check_pure_bv_assuming t assumptions =
+  let solve phase assumptions =
+    let started = if t.assumption_profile_on then Sys.time () else 0. in
+    t.minimize_probes <- t.minimize_probes + 1;
+    let signed_terms =
+      List.map
+        (fun (atom, polarity) ->
+          if polarity then atom else Context.not_ t.ctx atom)
+        assumptions
+    in
+    let result =
+      Bv_dispatch.solve
+        t.ctx
+        (Internal_minter.mint (parse_minter t))
+        (signed_terms @ t.asserted)
+    in
+    record_assumption_phase
+      t
+      phase
+      ~cpu_s:(if t.assumption_profile_on then Sys.time () -. started else 0.)
+      ~effort:0
+      ~decisions:0
+      ~conflicts:0
+      ~verdict:(pure_bv_verdict result);
+    result
+  in
+  let initial = solve Assumption_initial assumptions in
+  match initial with
+  | Bv_dispatch.Sat _ | Bv_dispatch.Unknown _ ->
+    record_pure_bv_result t initial;
+    { verdict = pure_bv_verdict initial; unsat_core = None }
+  | Bv_dispatch.Unsat ->
+    if t.assumption_profile_on
+    then (
+      let p = t.last_assumption_profile in
+      t.last_assumption_profile
+      <- { p with initial_core_size = List.length assumptions });
+    let degrade_core reason =
+      t.last_verdict <- Unsat;
+      t.last_model <- None;
+      t.unknown_reason <- reason;
+      { verdict = Unsat; unsat_core = None }
+    in
+    let probe candidate =
+      match !inject_deletion_verdict with
+      | Some forced ->
+        inject_deletion_verdict := None;
+        forced
+      | None -> pure_bv_verdict (solve Assumption_deletion candidate)
+    in
+    let rec minimize necessary = function
+      | [] -> Some (List.rev necessary)
+      | assumption :: rest ->
+        let candidate = List.rev_append necessary rest in
+        begin match probe candidate with
+        | Unsat -> minimize necessary rest
+        | Sat -> minimize (assumption :: necessary) rest
+        | Unknown -> None
+        end
+    in
+    begin match minimize [] assumptions with
+    | None -> degrade_core "assumption-core-minimize-unknown"
+    | Some core ->
+      if t.assumption_profile_on
+      then (
+        let p = t.last_assumption_profile in
+        t.last_assumption_profile
+        <- { p with final_core_size = List.length core });
+      let replay =
+        match !inject_replay_verdict with
+        | Some forced ->
+          inject_replay_verdict := None;
+          forced
+        | None -> pure_bv_verdict (solve Assumption_replay core)
+      in
+      begin match replay with
+      | Unsat ->
+        t.last_verdict <- Unsat;
+        t.last_model <- None;
+        { verdict = Unsat; unsat_core = Some core }
+      | Unknown -> degrade_core "assumption-core-recheck-unknown"
+      | Sat -> degrade_core "assumption-core-recheck-sat"
+      end
+    end
+;;
+
 let check_sat_assuming t assumptions =
   match assumptions with
   | [] ->
@@ -3568,9 +3679,7 @@ let check_sat_assuming t assumptions =
       t.unknown_reason <- "assumptions-with-live-lemma";
       { verdict = Unknown; unsat_core = None })
     else if Bv_dispatch.is_pure_bv (signed_terms @ t.asserted)
-    then (
-      t.unknown_reason <- "assumptions-pure-bv-unsupported";
-      { verdict = Unknown; unsat_core = None })
+    then check_pure_bv_assuming t assumptions
     else (
       let assumption_preprocessing = prepare_assumption_preprocess t assumptions in
       if Option.is_none assumption_preprocessing then disable_assumption_preprocess t;

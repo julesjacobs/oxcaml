@@ -682,7 +682,7 @@ module Lean_backend_uncached = struct
       Option.bind lean (fun lean ->
         Option.bind (resolve_executable lean) (fun lean ->
           Option.bind (file_digest_identity lean) (fun solver ->
-          cache_key ~backend ~implementation:"lean-translation-v1" ~solver
+          cache_key ~backend ~implementation:"lean-translation-bv63-v2" ~solver
               ~options:"timeout=30;linter=unusedVariables" ~payload)))
 
   let discharge ~command:_ { env; condition; prove_contents = _ } =
@@ -730,7 +730,7 @@ module Z3_backend_uncached = struct
     in
     Option.bind solver
       (fun solver -> Option.bind payload (fun payload ->
-        cache_key ~backend ~implementation:"smt-translation-v2"
+        cache_key ~backend ~implementation:"smt-translation-bv63-v3"
           ~solver ~options:"timeout=30;input=stdin;unsat-core=true" ~payload))
 
   let discharge ~command { env; condition; prove_contents } =
@@ -882,7 +882,7 @@ module Oxsmt_backend_uncached = struct
           else Some ("oxsmt-" ^ in_process_revision ^ "-in-process")
         in
         Option.bind solver (fun solver ->
-          cache_key ~backend ~implementation:"oxsmt-translation-v2"
+          cache_key ~backend ~implementation:"oxsmt-translation-bv63-v3"
             ~solver
             ~options:
               (Printf.sprintf

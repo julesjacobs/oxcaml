@@ -148,7 +148,7 @@ let growing_instantiation context previous current =
        previous
 
 let rec lean_sort context location = function
-  | Sint -> "Int"
+  | Sint -> "BitVec 63"
   | Sbigint -> "Int"
   | Sbool -> "Bool"
   | Stuple [] -> error location "empty tuple type"
@@ -551,6 +551,18 @@ let display_operator = function
   | `Add -> { op_text = "+"; op_precedence = 40; op_associativity = Left }
   | `Subtract -> { op_text = "-"; op_precedence = 40; op_associativity = Left }
   | `Multiply -> { op_text = "*"; op_precedence = 50; op_associativity = Left }
+  | `Bit_and ->
+    { op_text = "land"; op_precedence = 50; op_associativity = Left }
+  | `Bit_or ->
+    { op_text = "lor"; op_precedence = 50; op_associativity = Left }
+  | `Bit_xor ->
+    { op_text = "lxor"; op_precedence = 50; op_associativity = Left }
+  | `Shift_left ->
+    { op_text = "lsl"; op_precedence = 60; op_associativity = Right }
+  | `Shift_right_logical ->
+    { op_text = "lsr"; op_precedence = 60; op_associativity = Right }
+  | `Shift_right_arithmetic ->
+    { op_text = "asr"; op_precedence = 60; op_associativity = Right }
 
 (* [Path.name] keeps the module qualifier ([Lib.pos]) and drops stamps; a
    cross-module reference must not collapse to its bare last component.  The
@@ -567,10 +579,11 @@ let display_reference_name = function
   | Rfun name | Rsibling name -> name
   | Rapp path | Rglobal path -> display_path path
 
-(* Infix operators recognized for display by source name.  These are absent
-   from [Vox_builtin.of_primitive] (the Lean backend does not interpret them),
-   so they are matched separately; precedence and associativity follow
-   OCaml's rules for the operator. *)
+(* Source-spelled infix operators used as a display fallback after semantic
+   builtin resolution.  This includes partial integer operations and
+   noncanonical definitions that must be rendered but not interpreted as
+   Stdlib integer builtins.  Precedence and associativity follow OCaml's
+   rules for the operator. *)
 let display_infix_operator = function
   | "mod" | "/" | "land" | "lor" | "lxor" ->
     Some { op_text = ""; op_precedence = 50; op_associativity = Left }
@@ -589,7 +602,8 @@ let display_builtin ~env = function
     begin
       match Subst.Lazy.force_value_description (Env.find_value path env) with
       | { val_kind = Val_prim primitive; _ } ->
-        Vox_builtin.of_primitive primitive.prim_name
+        let path = Env.normalize_value_path None env path in
+        Vox_builtin.of_primitive ~path primitive.prim_name
       | _ -> None
       | exception Not_found -> None
     end
@@ -602,12 +616,15 @@ let binary_operator ~env reference =
   match display_builtin ~env reference with
   | Some
       ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less | `Less_equal
-       | `Multiply | `Not_equal | `Or | `Subtract) as builtin) ->
+       | `Multiply | `Not_equal | `Or | `Subtract | `Bit_and | `Bit_or
+       | `Bit_xor | `Shift_left | `Shift_right_logical
+       | `Shift_right_arithmetic) as builtin) ->
     Some (display_operator builtin)
   | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
          | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
          | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
-         | `Bigint_sub | `Bigint_zero | `Not)
+         | `Bigint_sub | `Bigint_zero | `Not | `Identity | `Int_max
+         | `Int_min | `Negate | `Pred | `Succ)
   | None ->
     (match reference with
      | Rfun _ | Rsibling _ -> None
@@ -759,11 +776,14 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
             precedence = 70 }
         | Some
             (`Add | `And | `Equal | `Greater | `Greater_equal | `Less
-            | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+            | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract
+            | `Bit_and | `Bit_or | `Bit_xor | `Shift_left
+            | `Shift_right_logical | `Shift_right_arithmetic)
         | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
                | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
                | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
-               | `Bigint_sub | `Bigint_zero)
+               | `Bigint_sub | `Bigint_zero | `Identity | `Int_max
+               | `Int_min | `Negate | `Pred | `Succ)
         | None ->
           render_prefix names (head_of_reference reference)
             [Nolabel, argument]
@@ -788,13 +808,16 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
     | Some `Not -> "not"
     | Some
         ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
-         | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract)
+         | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract
+         | `Bit_and | `Bit_or | `Bit_xor | `Shift_left
+         | `Shift_right_logical | `Shift_right_arithmetic)
          as builtin) ->
       display_function_name (display_operator builtin).op_text
     | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
            | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
            | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
-           | `Bigint_sub | `Bigint_zero)
+           | `Bigint_sub | `Bigint_zero | `Identity | `Int_max | `Int_min
+           | `Negate | `Pred | `Succ)
     | None -> display_function_name (display_reference_name reference)
   and render_binary names operator left right =
     let operand side expression =
@@ -862,9 +885,10 @@ let builtin_name context = function
         Subst.Lazy.force_value_description (Env.find_value path context.env)
       with
       | { val_kind = Val_prim primitive; _ } ->
+        let path = Env.normalize_value_path None context.env path in
         Option.map
           (fun builtin -> (builtin :> builtin))
-          (Vox_builtin.of_primitive primitive.prim_name)
+          (Vox_builtin.of_primitive ~path primitive.prim_name)
       | _ -> None
       | exception Not_found -> None
     end
@@ -1100,6 +1124,18 @@ let expect_bool location = function
   | Sbool -> ()
   | _ -> error location "boolean operation used at a non-bool type"
 
+let lean_int_constant integer =
+  if integer < 0 then
+    "(BitVec.ofInt 63 (" ^ string_of_int integer ^ "))"
+  else "(BitVec.ofInt 63 " ^ string_of_int integer ^ ")"
+
+let lean_shift_fallback = function
+  | `Shift_left -> "VoxInt_shift_left_unspecified"
+  | `Shift_right_logical -> "VoxInt_shift_right_logical_unspecified"
+  | `Shift_right_arithmetic ->
+    "VoxInt_shift_right_arithmetic_unspecified"
+  | _ -> invalid_arg "lean_shift_fallback"
+
 let emit_builtin context location builtin arguments =
   let terms = List.map fst arguments in
   let sorts = List.map snd arguments in
@@ -1111,6 +1147,12 @@ let emit_builtin context location builtin arguments =
       check right_sort;
       "(" ^ left ^ " " ^ operation ^ " " ^ right ^ ")"
     | _ -> error location "binary builtin used with the wrong arity"
+  in
+  let binary_int_compare operation =
+    match terms, sorts with
+    | [left; right], [Sint; Sint] ->
+      "(" ^ left ^ ".toInt " ^ operation ^ " " ^ right ^ ".toInt)"
+    | _ -> error location "integer comparison used with the wrong arity"
   in
   match builtin with
   | `Constructor_mismatch constructor_name ->
@@ -1169,16 +1211,64 @@ let emit_builtin context location builtin arguments =
       | _ -> error location "equality builtin used with the wrong arity"
     end
   | `Less ->
-    decide (binary "<" (expect_int location))
+    (* Comparison is on the modelled machine integer's value, so the
+       bitvector operands are read as integers first.  Both the comparison and
+       the [decide] wrapper stay atomic, so a nested use cannot capture
+       neighbouring arguments. *)
+    decide (binary_int_compare "<")
   | `Less_equal ->
-    decide (binary "≤" (expect_int location))
+    decide (binary_int_compare "≤")
   | `Greater ->
-    decide (binary ">" (expect_int location))
+    decide (binary_int_compare ">")
   | `Greater_equal ->
-    decide (binary "≥" (expect_int location))
+    decide (binary_int_compare "≥")
   | `Add -> binary "+" (expect_int location)
   | `Subtract -> binary "-" (expect_int location)
   | `Multiply -> binary "*" (expect_int location)
+  | `Identity ->
+    begin match terms, sorts with
+    | [argument], [Sint] -> argument
+    | _ -> error location "integer identity used with an inconsistent type"
+    end
+  | (`Negate | `Succ | `Pred) as operation ->
+    begin match terms, sorts with
+    | [argument], [Sint] ->
+      begin match operation with
+      | `Negate -> "(-" ^ argument ^ ")"
+      | `Succ -> "(" ^ argument ^ " + " ^ lean_int_constant 1 ^ ")"
+      | `Pred -> "(" ^ argument ^ " - " ^ lean_int_constant 1 ^ ")"
+      end
+    | _ -> error location "unary integer builtin used with the wrong arity"
+    end
+  | (`Bit_and | `Bit_or | `Bit_xor) as operation ->
+    let operator =
+      match operation with
+      | `Bit_and -> "BitVec.and"
+      | `Bit_or -> "BitVec.or"
+      | `Bit_xor -> "BitVec.xor"
+    in
+    begin match terms, sorts with
+    | [left; right], [Sint; Sint] ->
+      "(" ^ operator ^ " " ^ left ^ " " ^ right ^ ")"
+    | _ -> error location "bitwise builtin used with the wrong arity"
+    end
+  | (`Shift_left | `Shift_right_logical
+    | `Shift_right_arithmetic) as operation ->
+    begin match terms, sorts with
+    | [left; right], [Sint; Sint] ->
+      let operator =
+        match operation with
+        | `Shift_left -> "BitVec.shiftLeft"
+        | `Shift_right_logical -> "BitVec.ushiftRight"
+        | `Shift_right_arithmetic -> "BitVec.sshiftRight"
+      in
+      "(if decide (" ^ right ^ ".toNat ≤ 63) then " ^ operator ^ " "
+      ^ left ^ " " ^ right ^ ".toNat else " ^ lean_shift_fallback operation
+      ^ " " ^ left ^ " " ^ right ^ ")"
+    | _ -> error location "integer shift used with the wrong arity"
+    end
+  | `Int_max -> error location "max_int used as a function"
+  | `Int_min -> error location "min_int used as a function"
   | `Bigint_add -> binary "+" (expect_bigint location)
   | `Bigint_sub -> binary "-" (expect_bigint location)
   | `Bigint_mul -> binary "*" (expect_bigint location)
@@ -1197,8 +1287,9 @@ let emit_builtin context location builtin arguments =
   | `Bigint_compare ->
     begin match terms, sorts with
     | [left; right], [Sbigint; Sbigint] ->
-      "(if " ^ left ^ " < " ^ right ^ " then -1 else if " ^ left
-      ^ " > " ^ right ^ " then 1 else 0)"
+      "(if " ^ left ^ " < " ^ right ^ " then " ^ lean_int_constant (-1)
+      ^ " else if " ^ left ^ " > " ^ right ^ " then "
+      ^ lean_int_constant 1 ^ " else " ^ lean_int_constant 0 ^ ")"
     | _ -> error location "Bigint.compare used with an inconsistent type"
     end
   | `Bigint_lt ->
@@ -1211,7 +1302,7 @@ let emit_builtin context location builtin arguments =
     decide (binary "≥" (expect_bigint location))
   | `Bigint_of_int ->
     begin match terms, sorts with
-    | [argument], [Sint] -> argument
+    | [argument], [Sint] -> argument ^ ".toInt"
     | _ -> error location "Bigint.of_int used with an inconsistent type"
     end
   | `Bigint_is_zero ->
@@ -1322,6 +1413,8 @@ let emit_expression context variables expression =
           match builtin_name context reference_identifier with
           | Some `Bigint_zero -> "0"
           | Some `Bigint_one -> "1"
+          | Some `Int_max -> lean_int_constant max_int
+          | Some `Int_min -> lean_int_constant min_int
           | Some _ ->
             error expression.rexp_loc
               "builtin %s must be fully applied"
@@ -1331,8 +1424,7 @@ let emit_expression context variables expression =
               .reference_name
         end
       | Rexp_constant (Const_int integer) ->
-        if integer < 0 then "(" ^ string_of_int integer ^ ")"
-        else string_of_int integer
+        lean_int_constant integer
       | Rexp_constant _ ->
         error expression.rexp_loc "only int constants are supported"
       | Rexp_let (bindings, body) ->
@@ -1793,6 +1885,15 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
   if linter then
     Buffer.add_string buffer "set_option linter.unusedVariables true\n"
   else Buffer.add_char buffer '\n';
+  Buffer.add_string buffer
+    ("opaque VoxInt_shift_left_unspecified : "
+     ^ "BitVec 63 → BitVec 63 → BitVec 63\n");
+  Buffer.add_string buffer
+    ("opaque VoxInt_shift_right_logical_unspecified : "
+     ^ "BitVec 63 → BitVec 63 → BitVec 63\n");
+  Buffer.add_string buffer
+    ("opaque VoxInt_shift_right_arithmetic_unspecified : "
+     ^ "BitVec 63 → BitVec 63 → BitVec 63\n\n");
   let data =
     List.sort
       (fun left right -> String.compare left.data_key right.data_key)
