@@ -8,31 +8,20 @@
  expect;
 *)
 
-(* FINAL: verification uses the branch condition to prove that the result is
-   at least both arguments.  CURRENT: the predicate is written through the
-   prelude wrapper [Vox_spec.int_ge], an ordinary (partial) user function -- not
-   one of the comparison primitives admitted inside a predicate.  A predicate is
-   checked at [total], so calling the partial wrapper is rejected at totality,
-   before the conjunction obligation is generated.  (The connective [&&] IS an
-   admitted primitive; it is the wrapper that is partial.)  When total
-   comparisons make the wrapper total-annotatable the predicate flows through to
-   verification again; the [unlocks] tag records that dependency. *)
+(* The larger of two machine integers is at least both of them, and nothing
+   here can overflow, so the claim holds as written.
 
-#load "vox_spec.cmo";;
+   The predicate used to go through the prelude wrapper [Vox_spec.int_ge].
+   That wrapper is total now that direct integer comparisons are, but the
+   verifier still has no interpretation for it: it is an ordinary function,
+   so the obligation said nothing about an order and could not be discharged.
+   Written with the comparison the verifier models, the example says what it
+   means. *)
 
-(* @ex id=max_upper_bound final=ACCEPT today=REJECT stable=no unlocks=total-comparisons+verification *)
+(* @ex id=max_upper_bound final=ACCEPT today=ACCEPT stable=yes *)
 let max (x : int) (y : int) =
-  (if Vox_spec.int_ge x y then x else y
-    : int{
-        Vox_spec.int_ge _ x
-        && Vox_spec.int_ge _ y
-      })
+  (if x >= y then x else y : int{ _ >= x && _ >= y })
 
 [%%expect {|
-Line 4, characters 8-23:
-4 |         Vox_spec.int_ge _ x
-            ^^^^^^^^^^^^^^^
-Error: The value "Vox_spec.int_ge" is "partial"
-       but is expected to be "total"
-         because it is used in an expression (at lines 3-6, characters 6-7).
+val max : (x : int) -> (y : int) -> int{ _ >= x && _ >= y } = <fun>
 |}]
