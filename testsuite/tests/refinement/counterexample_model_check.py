@@ -73,6 +73,16 @@ def main():
     ):
         assert reported(name) is None, (name, reported(name))
 
+    # A banner carries brackets of its own, and the assignment is the model
+    # rather than whatever bracket came first.
+    assert reported("controlled-brackets.json") == model, reported(
+        "controlled-brackets.json"
+    )
+    # An assignment that names nothing is not one.
+    assert reported("controlled-empty.json") is None, reported(
+        "controlled-empty.json"
+    )
+
     print("counterexample reporting: as expected")
 
 

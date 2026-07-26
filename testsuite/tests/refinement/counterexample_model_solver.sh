@@ -19,6 +19,11 @@ case "$script" in
         exit 1 ;;
       contradictory)
         printf 'sat\n(model\n(define-fun v_0 () Int 1)\n)\nunknown\n' ;;
+      bracketed_banner)
+        printf '; Z3 (build 4.8.5)\n'
+        printf 'sat\n(model\n(define-fun v_0 () Int 1)\n)\n' ;;
+      empty_model)
+        printf 'sat\n(model\n)\n' ;;
       *)
         printf 'unknown\n' ;;
     esac ;;

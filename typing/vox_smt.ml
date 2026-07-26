@@ -2886,14 +2886,29 @@ let output_has_unavailable_core_error ~query ~status output =
   |> List.exists (fun line ->
        is_unavailable_core_error ~query ~status (String.trim line))
 
-(* The first complete parenthesised expression in a solver reply, with the
-   contents of string literals passed over so a bracket inside one cannot
-   close it. *)
+(* The model in a solver reply: the complete parenthesised expression that
+   opens it, with the contents of string literals passed over so a bracket
+   inside one cannot close it early.  Scanning for the model itself rather
+   than for the first bracket anywhere matters, because a banner is exactly
+   the sort of thing that carries brackets of its own. *)
+let contains_substring text needle =
+  let text_length = String.length text in
+  let needle_length = String.length needle in
+  let rec loop index =
+    if index + needle_length > text_length then false
+    else if String.equal (String.sub text index needle_length) needle then true
+    else loop (index + 1)
+  in
+  needle_length = 0 || loop 0
+
 let balanced_expression output =
   let length = String.length output in
+  let opening = "(model" in
+  let opening_length = String.length opening in
   let rec start index =
-    if index >= length then None
-    else if Char.equal output.[index] '(' then Some index
+    if index + opening_length > length then None
+    else if String.equal (String.sub output index opening_length) opening
+    then Some index
     else start (index + 1)
   in
   match start 0 with
@@ -3139,10 +3154,18 @@ let discharge ~backend ~command ?prove_contents ?input_mode
         match backend with
         | `Oxsmt -> None
         | `Z3 ->
+          (* The verdict is already settled, so nothing this query does may
+             change it.  Running a solver writes temporary files, which the
+             ordinary z3 path does not, so a read-only temporary directory
+             would otherwise turn a refuted obligation into a solver error. *)
+          try
+          (* No namespace suffix.  It exists to keep symbols apart inside
+             the shared persistent session; this query has a process to
+             itself, and a suffix would only make the reported names disagree
+             with the ones in the dumped query. *)
           let emitted =
-            emit_with_namespace ~model:true
-              ~symbol_namespace:(fresh_persistent_symbol_namespace ())
-              ~query:Prove ~env vc
+            emit_with_namespace ~model:true ~symbol_namespace:"" ~query:Prove
+              ~env vc
           in
           begin
             match emitted with
@@ -3172,21 +3195,24 @@ let discharge ~backend ~command ?prove_contents ?input_mode
                 (* Take one complete parenthesised reply rather than every
                    remaining line, so a trailing status or note cannot be
                    read as part of the assignment. *)
-                let assignment = balanced_expression process.output in
-                begin
-                  match assignment with
-                  | None -> None
-                  | Some assignment ->
-                    let limit = 4000 in
-                    Some
-                      ("counterexample:\n"
-                       ^ (if String.length assignment <= limit
-                          then assignment
-                          else
-                            String.sub assignment 0 limit
-                            ^ "\n(counterexample truncated)"))
-                end
+                match balanced_expression process.output with
+                | None -> None
+                | Some assignment ->
+                  (* An assignment that names nothing is not one, and a
+                     solver omits whatever it did not need.  Cutting a long
+                     one is worse than reporting none: the values come out
+                     in reverse order of declaration, so the fragment that
+                     survives is the one least likely to mention what the
+                     goal is about. *)
+                  let limit = 4000 in
+                  if
+                    not
+                      (contains_substring assignment "define-fun"
+                       && String.length assignment <= limit)
+                  then None
+                  else Some ("counterexample:\n" ^ assignment)
           end
+          with _ -> None
       in
       begin
         try

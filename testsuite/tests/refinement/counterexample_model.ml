@@ -71,6 +71,22 @@
  ocamlc_byte_exit_status = "2";
  ocamlc.byte;
 
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh bracketed_banner' \
+          -vox-dump-vc-json controlled-brackets.json -c";
+ compiler_output = "controlled-brackets.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
+ module = "counterexample_model_refuted.ml";
+ flags = "-vox-backend z3 \
+          -vox-smt-solver 'sh counterexample_model_solver.sh empty_model' \
+          -vox-dump-vc-json controlled-empty.json -c";
+ compiler_output = "controlled-empty.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+
  script = "python3 ${test_source_directory}/counterexample_model_check.py \
            z3-refuted.json z3-proved.json oxsmt-refuted.json";
  script;
