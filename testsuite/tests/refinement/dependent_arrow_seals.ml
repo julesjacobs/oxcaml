@@ -13,12 +13,15 @@ module Accepted : sig end = struct
 
   module Result (X : Result_exact) : Result_lower = X
 
+  (* [x + 5] can only be relied on to exceed [x] where [x] is bounded away
+     from the largest representable integer, so the parameter carries that
+     bound and the seal implication reads it. *)
   module type Domain_strong = sig
-    val f : (x : int) -> int{ _ > x + 5 } -> unit
+    val f : (x : int{ _ < 1000 }) -> int{ _ > x + 5 } -> unit
   end
 
   module type Domain_weak = sig
-    val f : (y : int) -> int{ _ > y } -> unit
+    val f : (y : int{ _ < 1000 }) -> int{ _ > y } -> unit
   end
 
   module Domain (X : Domain_weak) : Domain_strong = X
