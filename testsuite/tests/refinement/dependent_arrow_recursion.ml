@@ -166,7 +166,11 @@ module Alias_translation_edges = struct
     let _ = whole in
     if n >= 0 then n else predicate_shadow (-n)
 
-  let rec later_domain ((n as whole) : int)
+  (* [n] is bounded below so the recursive call's [n - 1] cannot underflow.
+     Without it the successor wraps at the machine minimum and [acc >= n] no
+     longer gives [acc >= n - 1]; the alias edge this exercises is
+     unaffected. *)
+  let rec later_domain ((n as whole) : int{ _ >= 0 })
       (acc : int{ _ >= n }) : int{ _ >= whole } =
     let _ = whole in
     let _ = if n = 0 then acc else later_domain (n - 1) acc in
@@ -178,7 +182,7 @@ module Alias_translation_edges :
   sig
     val predicate_shadow : int -> int{ let n = 0 in _ >= n }
     val later_domain :
-      (whole : int) -> int{ _ >= whole } -> int{ _ >= whole }
+      (whole : int{ _ >= 0 }) -> int{ _ >= whole } -> int{ _ >= whole }
   end
 |}]
 

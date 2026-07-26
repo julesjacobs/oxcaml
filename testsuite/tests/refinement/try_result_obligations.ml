@@ -366,7 +366,10 @@
  script;
 *)
 
-let body_and_handlers (x : int{ _ >= 0 }) : int{ _ >= 0 } =
+(* The bound keeps [x + 1] inside the machine range.  Without it the successor
+   overflows at the maximum and the result claim is false; the try/with
+   obligation shape this exercises is unaffected. *)
+let body_and_handlers (x : int{ _ >= 0 && _ < 1000 }) : int{ _ >= 0 } =
   try
     let bumped = x + 1 in
     ignore bumped;
