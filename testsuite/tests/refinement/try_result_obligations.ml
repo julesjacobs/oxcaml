@@ -337,15 +337,14 @@
            ${test_source_directory}/try_result_obligations_false.ml";
  script;
 
- module = "try_result_obligations_false.ml";
- flags = "-vox-backend oxsmt -vox-dump-vc-json false-oxsmt.json -c";
- compiler_output = "false-oxsmt.output";
- ocamlc_byte_exit_status = "2";
- ocamlc.byte;
- script = "python3 ${test_source_directory}/try_result_obligations_check.py \
-           false false-oxsmt.json \
-           ${test_source_directory}/try_result_obligations_false.ml";
- script;
+ (* The refuted source has no oxsmt arm.  Its obligation is bitvector
+    arithmetic in a scope that also mentions a datatype, and the in-process
+    backend then answers unknown to both the prove and the disprove query, so
+    the verdict weakens from refuted to not-proved and the counterexample is
+    lost.  Recording that weaker verdict here would hide the loss, so the
+    acceptance backend checks the refutation on its own and the weakening is
+    filed upstream as report 08, second case.  Restore this arm when a fixed
+    revision is vendored. *)
 
  (* Compile this replacement last: its [Stdlib.cmi] intentionally shadows the
     test compiler's standard library for the following client action. *)
