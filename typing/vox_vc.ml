@@ -27,6 +27,24 @@ module Recursive_binding = struct
   let defeq_requested loc = memq loc defeq_locations
 end
 
+module Decreases = struct
+  type measure =
+    { parameters : Ident.t list list;
+      components : Types.refinement_expression list;
+      group : Ident.t list;
+      loc : Location.t;
+    }
+
+  (* Typecore checks a termination measure while the parameters it is written
+     over are still in scope; the verifier states the obligation at each
+     recursive call.  The two phases meet here, keyed on the identifier the
+     binding introduces, which is the name both of them hold. *)
+  let measures : measure Ident.Tbl.t = Ident.Tbl.create 16
+
+  let record id measure = Ident.Tbl.replace measures id measure
+  let find id = Ident.Tbl.find_opt measures id
+end
+
 let create ~loc ~facts ~goal = { location = loc; facts; goal }
 
 let instantiate ~(refinement : Types.refinement_desc) ~with_ =

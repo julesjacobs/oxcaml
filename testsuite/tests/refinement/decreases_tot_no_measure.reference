@@ -1,0 +1,4 @@
+File "decreases_tot_no_measure.ml", line 7, characters 33-42:
+7 | let total_use () = expects_total countdown
+                                     ^^^^^^^^^
+Error: This value is partial but is expected to be total.

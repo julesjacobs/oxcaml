@@ -26,6 +26,26 @@ module Recursive_binding : sig
   val defeq_requested : Location.t -> bool
 end
 
+(* A [vox.decreases] termination measure, as typecore checked it: the
+   parameters of the measured function in source order, one integer component
+   per lexicographic position, the identifiers of the whole recursive group,
+   and the span of the measure itself.  A parameter position carries several
+   identifiers when its pattern aliases, and all of them denote that whole
+   argument.  Components are written over the parameters as bound
+   occurrences, so a call site obtains the measure at its actual arguments by
+   substituting them. *)
+module Decreases : sig
+  type measure =
+    { parameters : Ident.t list list;
+      components : Types.refinement_expression list;
+      group : Ident.t list;
+      loc : Location.t;
+    }
+
+  val record : Ident.t -> measure -> unit
+  val find : Ident.t -> measure option
+end
+
 val create :
   loc:Location.t ->
   facts:fact list ->
