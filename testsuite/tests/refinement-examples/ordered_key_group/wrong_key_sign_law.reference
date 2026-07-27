@@ -1,0 +1,4 @@
+File "wrong_key_sign_law.ml", line 47, characters 4-6:
+47 |     ()
+         ^^
+Error: Refinement verification failed (not-proved)

@@ -1,4 +1,0 @@
-File "wrong_key_not_total.ml", line 15, characters 4-6:
-15 |     ()
-         ^^
-Error: Refinement verification failed (not-proved)

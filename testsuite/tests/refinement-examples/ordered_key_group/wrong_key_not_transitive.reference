@@ -1,4 +1,0 @@
-File "wrong_key_not_transitive.ml", line 49, characters 4-6:
-49 |     ()
-         ^^
-Error: Refinement verification failed (not-proved)

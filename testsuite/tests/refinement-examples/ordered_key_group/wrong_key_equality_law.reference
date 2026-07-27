@@ -1,0 +1,4 @@
+File "wrong_key_equality_law.ml", line 45, characters 4-6:
+45 |     ()
+         ^^
+Error: Refinement verification failed (not-proved)
