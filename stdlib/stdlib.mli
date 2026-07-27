@@ -1331,6 +1331,28 @@ val ( ^^ ) :
   Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
+(** {1 Refinement assumptions} *)
+
+val assume : 'a -> 'a
+(** Admit a refinement obligation instead of proving it.
+
+    [assume] is the admitting counterpart of an annotation: where
+    [(e : t\{ p \})] raises an obligation to prove [p], [assume e : t\{ p \}]
+    admits it, and [p] becomes available as a fact.  The predicate stays where
+    it was already written, so nothing is restated -- which is the point, since
+    two copies of a statement drift apart.  It reads at any site that imposes
+    a refinement, including a result annotation:
+
+    {[
+      let law ~array ~pos ~len : unit\{ length (sub ~array ~pos ~len) = len \} =
+        assume ()
+    ]}
+
+    An admitted obligation is recorded and reported; it is not silenced.  At
+    run time [assume] is the identity.  Using this name anywhere that imposes
+    no refinement is a compile-time error, and shadowing it with a function of
+    your own leaves that function its ordinary meaning. *)
+
 (** {1 Program termination} *)
 
 val exit : int -> 'a @@ nonportable

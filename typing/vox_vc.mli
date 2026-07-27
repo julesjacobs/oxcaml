@@ -63,6 +63,40 @@ module Decreases : sig
   val reset : unit -> unit
   (** Forget every recorded measure.  Called where the identifier stamps the
       table is keyed on are reset, at the start of a compilation unit. *)
+(* The obligations a unit admitted rather than proved, each identified by a
+   number the typechecker minted for it and put in the one verification mark
+   it belongs to.  See the implementation for why nothing derived from a
+   location or a type would do. *)
+module Assumption : sig
+  type t =
+    { token : int;
+      site : Location.t;
+      (** Where the [assume] is written, for reporting. *)
+      guarded : bool;
+      (** Whether a run-time check of the predicate was emitted, which is
+          what makes an admitted statement falsifiable by running the
+          program. *)
+      refinement : Types.refinement_desc;
+      refined_type : Types.type_expr;
+    }
+
+  val record :
+    site:Location.t ->
+    guarded:bool ->
+    Types.refinement_desc ->
+    Types.type_expr ->
+    int
+
+  (** The statement the site with this token admits. *)
+  val refinement : int -> Types.refinement_desc option
+
+  (** Every obligation admitted since the last [forget], in source order. *)
+  val admitted : unit -> t list
+
+  (** Forget them, once reported.  Must run whether or not the unit
+      typechecked, or a failed phrase leaves its sites to be reported against
+      a later one. *)
+  val forget : unit -> unit
 end
 
 val create :

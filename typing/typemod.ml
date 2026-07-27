@@ -4171,9 +4171,15 @@ let type_toplevel_phrase env sig_acc s =
   Env.reset_probes ();
   Typecore.reset_allocations ();
   let (str, sg, mode, to_remove_from_sg, shape, env) =
-    type_structure ~toplevel:(Some sig_acc) ~funct_body:false None env s in
-  if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
-    Vox_verify.verify_structure ~toplevel:true str;
+    Vox_verify.reporting_admissions (fun () ->
+      let structure =
+        type_structure ~toplevel:(Some sig_acc) ~funct_body:false None env s
+      in
+      let (str, _, _, _, _, _) = structure in
+      if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
+        Vox_verify.verify_structure ~toplevel:true str;
+      structure)
+  in
   Value.submode_err (Location.none, Structure) mode toplevel_mode;
   remove_mode_and_jkind_variables env sg;
   remove_mode_and_jkind_variables_for_toplevel str;
@@ -4501,12 +4507,21 @@ let type_implementation target modulename initial_env ast =
         ignore @@ Warnings.parse_options false "-32-34-37-38-60-191";
       if !Clflags.as_parameter then
         error Cannot_compile_implementation_as_parameter;
+      (* Reported whether or not anything was discharged, and whether or not
+         the unit typechecked: what was admitted is a property of the source,
+         not of the verification. *)
       let (str, sg, mode, names, shape, finalenv) =
-        Profile.record_call "infer" (fun () -> type_structure initial_env ast)
+        Vox_verify.reporting_admissions (fun () ->
+          let structure =
+            Profile.record_call "infer" (fun () ->
+              type_structure initial_env ast)
+          in
+          let (str, _, _, _, _, _) = structure in
+          Profile.record_call "refinement verification" (fun () ->
+            if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
+              Vox_verify.verify_structure str);
+          structure)
       in
-      Profile.record_call "refinement verification" (fun () ->
-        if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
-          Vox_verify.verify_structure str);
       Value.submode_err (Location.in_file sourcefile, Structure)
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
       let uid = Uid.of_compilation_unit_id modulename in

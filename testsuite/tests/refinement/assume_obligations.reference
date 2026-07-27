@@ -1,0 +1,15 @@
+VC contract-argument at assume_obligations.ml:27:48-49
+  y > 0
+|- y > 0
+
+VC annotation at assume_obligations.ml:29:38-56
+|- y > 0
+
+VC contract-argument at assume_obligations.ml:29:39-40
+  y > 0
+|- y > 0
+
+File "assume_obligations.ml", line 27, characters 41-49
+Admitted (checked at run time): int{ _ > 0 } is assumed here, not proved.
+Admitted 1 obligation in this unit: 1 checked at run time, 0 unchecked.
+Error: VCs dumped, not discharged.

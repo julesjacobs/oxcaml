@@ -81,6 +81,48 @@ module Decreases = struct
      as the measure of a binding that never asked for one.  Compiling two
      files in one [ocamlc] invocation is enough to see it. *)
   let reset () = Ident.Tbl.clear measures
+(* The obligations a unit admitted rather than proved.
+
+   A site is identified by a number the typechecker mints for it and puts in
+   the one verification mark it belongs to.  Nothing weaker will do.  An
+   identity derived from a location, or from a type, can be shared between
+   two marks by an ordinary program transformation -- sharing a location
+   record is what [Ast_helper] does whenever [~loc] is omitted -- and both
+   marks would then be admitted on the strength of one [assume], which is a
+   route to accepting a program the verifier should refuse. *)
+module Assumption = struct
+  type t =
+    { token : int;
+      site : Location.t;
+      guarded : bool;
+      refinement : Types.refinement_desc;
+      refined_type : Types.type_expr;
+    }
+
+  let sites : t list ref = ref []
+  let next_token = ref 0
+
+  let record ~site ~guarded refinement refined_type =
+    incr next_token;
+    let token = !next_token in
+    sites := { token; site; guarded; refinement; refined_type } :: !sites;
+    token
+
+  (* The statement THIS site admits, rather than whatever the mark happens to
+     carry.  The two agree, and reading the recorded one keeps them from
+     having to. *)
+  let refinement token =
+    List.find_map
+      (fun site -> if site.token = token then Some site.refinement else None)
+      !sites
+
+  let admitted () = List.rev !sites
+
+  (* Reporting a unit's admissions consumes them, so that the toplevel, which
+     reports after every phrase, does not repeat the ones before it, and so
+     that a phrase that failed does not leave its sites to be printed against
+     a later one. *)
+  let forget () = sites := []
 end
 
 let create ~loc ~facts ~goal = { location = loc; facts; goal }

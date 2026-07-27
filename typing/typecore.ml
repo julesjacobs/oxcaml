@@ -8337,6 +8337,282 @@ let lower_measure_expression ~parameters expression =
         "cannot read this expression as a measure"
   in
   lower expression
+(* Admitted refinement obligations.
+
+   [assume e] at a site imposing [t{ p }] admits the obligation that site
+   would have raised, instead of proving it.  The predicate is read from the
+   imposed type rather than from anything written at the call, so a statement
+   already written once -- as a result annotation, say -- is not written
+   again; two copies of a statement drift apart, and avoiding that is the
+   whole purpose.  A site with no refined type to impose has no obligation to
+   admit and is refused.
+
+   The construct is recognised by the resolved identity of [Stdlib.assume],
+   never by that name: a user's own [assume] keeps its ordinary meaning.
+   Every other occurrence of the identity is refused where the identifier is
+   typed, so [assume] can be neither passed, aliased, partially applied, nor
+   reached through an expected type. *)
+
+let stdlib_assume_path =
+  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib"), "assume")
+
+(* The name is checked first only to keep the resolution off the path every
+   identifier takes: a value reached under any other name is not this one.
+
+   Identity is then the declaration's, not the path's.  A re-export that
+   COPIES the value rather than aliasing the module -- [include Stdlib], or
+   a signature ascription naming it -- gives it a path of its own, and the
+   copy is the same declaration.  Comparing paths alone lets those through
+   as an ordinary identity function: harmless, since nothing can be admitted
+   through one, but confusing to be handed. *)
+let is_stdlib_assume env path =
+  String.equal (Path.last path) "assume"
+  && (Path.same (Env.normalize_value_path None env path) stdlib_assume_path
+      || match
+           (Env.find_value path env).val_uid,
+           (Env.find_value stdlib_assume_path env).val_uid
+         with
+         | copied, original -> Shape.Uid.equal copied original
+         | exception Not_found -> false)
+
+let assume_error ~loc format =
+  Location.raise_errorf ~loc ("This obligation cannot be admitted:@ " ^^ format)
+
+(* Where the identifier is reached with nothing imposed on it.  Resolution
+   is name-guarded to keep it off the path every identifier takes. *)
+let refuse_bare_assume env lid =
+  if String.equal (Longident.last lid.Location.txt) "assume" then
+    match Env.find_value_by_name lid.txt env with
+    | path, _ when is_stdlib_assume env path ->
+      Location.raise_errorf ~loc:lid.loc
+        "[assume] admits the obligation of the refinement imposed on it,@ and \
+         there is none here"
+    | _ | (exception Not_found) -> ()
+
+(* The admitted expression, when this is an [assume] applied to one ordinary
+   argument.  The refinement is not read from here: it comes from whatever
+   refined type the site imposes, which is what keeps the statement from
+   being written twice. *)
+let assume_argument env sarg =
+  match sarg.pexp_desc with
+  | Pexp_apply
+      ({ pexp_desc = Pexp_ident lid; _ }, [ (Nolabel, argument) ])
+    when String.equal (Longident.last lid.txt) "assume" ->
+    begin match Env.find_value_by_name lid.txt env with
+    | path, _ when is_stdlib_assume env path -> Some argument
+    | _ | (exception Not_found) -> None
+    end
+  | _ -> None
+
+(* The guarded tier.
+
+   A check runs the predicate, so that a lemma can be falsified by running
+   the program rather than by proving it.  The predicate exists at this point
+   only as a typed [refinement_expression] -- a result annotation writes it
+   somewhere this arm never sees -- so it is rendered back to source and
+   typed AGAIN, as ordinary code.
+
+   Typing it again is the mechanism rather than an inconvenience.  Names
+   resolve in the ordinary namespace and modes are checked rather than
+   asserted, so a predicate that cannot be run -- one over a value that has
+   no run-time existence, or over a function that is not available here --
+   simply fails to type, and the site is unguarded.  Nothing about the
+   program that runs depends on the outcome except whether the check is
+   there. *)
+
+let assume_arg_label : Types.arg_label -> Asttypes.arg_label option = function
+  | Types.Nolabel -> Some Asttypes.Nolabel
+  | Types.Labelled name -> Some (Asttypes.Labelled name)
+  | Types.Optional name -> Some (Asttypes.Optional name)
+  | Types.Position _ -> None
+
+(* The predicate as source again, with the refined value replaced by
+   [subject].  [None] where a form has no ordinary-code counterpart: a
+   sibling reference is resolved against a signature rather than against
+   this scope, and the binding forms are not part of what a check needs to
+   express. *)
+let assume_predicate_source ~loc ~subject refinement =
+  let exception Not_source in
+  let identifier name = Ast_helper.Exp.ident ~loc { txt = name; loc } in
+  let rec render expression =
+    match expression.rexp_desc with
+    | Rexp_ident (Rbound id) when Ident.same id refinement.ref_view.rb_id ->
+      begin match subject with
+      | Some subject -> subject
+      | None -> raise_notrace Not_source
+      end
+    | Rexp_ident (Rbound id) -> identifier (Longident.Lident (Ident.name id))
+    | Rexp_ident (Rfree (Rglobal path | Rapp path)) ->
+      identifier (Untypeast.lident_of_path path)
+    | Rexp_ident (Rfree (Rsibling _ | Rfun _)) -> raise_notrace Not_source
+    | Rexp_constant constant ->
+      Ast_helper.Exp.constant ~loc (Untypeast.constant constant)
+    | Rexp_apply (function_, arguments) ->
+      let argument (label, argument) =
+        match assume_arg_label label with
+        | Some label -> label, render argument
+        | None -> raise_notrace Not_source
+      in
+      Ast_helper.Exp.apply ~loc (render function_)
+        (List.map argument arguments)
+    | Rexp_construct (constructor, arguments) ->
+      let payload =
+        match arguments with
+        | [] -> None
+        | [ argument ] -> Some (render argument)
+        | arguments ->
+          Some
+            (Ast_helper.Exp.tuple ~loc
+               (List.map (fun argument -> None, render argument) arguments))
+      in
+      Ast_helper.Exp.construct ~loc
+        { txt = Longident.Lident constructor.rconstr_name; loc } payload
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      Ast_helper.Exp.ifthenelse ~loc (render condition) (render ifso)
+        (Option.map render ifnot)
+    | Rexp_let _ | Rexp_function _ | Rexp_tuple _ | Rexp_field _
+    | Rexp_match _ -> raise_notrace Not_source
+  in
+  match render refinement.ref_pred with
+  | source -> Some source
+  | exception Not_source -> None
+
+(* Only a name or a constant is substituted for the refined value.  Reading
+   one again where the predicate mentions it costs nothing and observes
+   nothing, so the check needs no binding and the argument is typed exactly
+   as it would have been.  Anything else leaves the site unguarded rather
+   than introducing a binding the mode checker never saw. *)
+let assume_subject_source argument =
+  match argument.pexp_desc with
+  | Pexp_ident _ | Pexp_constant _ | Pexp_construct (_, None) -> Some argument
+  | _ -> None
+
+let assume_carrier env type_ =
+  let type_ = refinement_skeleton env type_ |> expand_head env in
+  match get_desc type_ with
+  | Tconstr (path, [], _) when Path.same path Predef.path_int ->
+    Some Vox_builtin.Int
+  | Tconstr (path, [], _) when Path.same path Predef.path_bool ->
+    Some Vox_builtin.Bool
+  | _ -> None
+
+(* Whether the operations the predicate is built from compute what the model
+   says, decided on the predicate itself and before anything is generated.
+
+   Deciding it here rather than on the typed check is not a shortcut.  Typing
+   a check that turns out not to be executable can leave a constraint behind
+   that undoing the types does not undo -- a predicate over a partial
+   operation makes the function it sits in partial while it is being typed --
+   and a site that is going to be unguarded should cost the program nothing
+   at all. *)
+let refinement_builtin env head =
+  match head.rexp_desc with
+  | Rexp_ident (Rfree (Rapp path | Rglobal path)) ->
+    begin match Vox_builtin.of_path path with
+    | Some builtin -> Some builtin
+    | None ->
+      begin match (Env.find_value path env).val_kind with
+      | Val_prim primitive ->
+        Vox_builtin.of_primitive ~path primitive.Primitive.prim_name
+      | Val_reg _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _ -> None
+      | exception Not_found -> None
+      end
+    end
+  | Rexp_ident (Rbound _)
+  | Rexp_ident (Rfree (Rsibling _ | Rfun _))
+  | Rexp_constant _ | Rexp_let _ | Rexp_function _ | Rexp_apply _
+  | Rexp_tuple _ | Rexp_construct _ | Rexp_field _ | Rexp_ifthenelse _
+  | Rexp_match _ -> None
+
+let rec refinement_agrees_with_its_model env expression =
+  match expression.rexp_desc with
+  | Rexp_apply (head, arguments) ->
+    let operands = List.map snd arguments in
+    begin match refinement_builtin env head with
+    | None -> true
+    | Some builtin ->
+      let carriers =
+        List.map
+          (fun operand -> assume_carrier env operand.rexp_type)
+          operands
+      in
+      List.for_all Option.is_some carriers
+      && Option.is_some
+           (Vox_builtin.runtime_result builtin
+              ~operands:(List.filter_map Fun.id carriers))
+    end
+    && List.for_all (refinement_agrees_with_its_model env) operands
+  | Rexp_ident _ | Rexp_constant _ -> true
+  | Rexp_ifthenelse (condition, ifso, ifnot) ->
+    refinement_agrees_with_its_model env condition
+    && refinement_agrees_with_its_model env ifso
+    && Option.fold ~none:true ~some:(refinement_agrees_with_its_model env) ifnot
+  | Rexp_construct (_, arguments) ->
+    List.for_all (refinement_agrees_with_its_model env) arguments
+  (* Forms with no source counterpart, refused where the source is built. *)
+  | Rexp_let _ | Rexp_function _ | Rexp_tuple _ | Rexp_field _
+  | Rexp_match _ -> true
+
+(* Whether running the check computes what the model says.
+
+   For the operations the model describes -- the connectives, the six
+   integer comparisons, the arithmetic the bitvector model made faithful --
+   that is a question about the operands, and [Vox_builtin.runtime_result]
+   answers it.  The shifts and the non-integer comparisons are absent from
+   that table and so stay out.
+
+   Everything else in a predicate is an uninterpreted function, and there
+   the model says only that it IS a function.  Running it therefore agrees
+   with the model exactly when it is one: terminating and determined by its
+   arguments.  That is the same standard by which the predicate was allowed
+   to mention it, so the test is the one the verifier already applies to a
+   call it represents structurally. *)
+let rec assume_check_is_executable expression =
+  match expression.exp_desc with
+  | Texp_constant (Const_int _) -> true
+  | Texp_construct (_, constructor, _, [], _) ->
+    String.equal constructor.cstr_name "true"
+    || String.equal constructor.cstr_name "false"
+  | Texp_ident { desc = { val_kind = Val_reg _; _ }; _ } -> true
+  | Texp_ident { desc = { val_kind = Val_prim _; _ }; _ } -> true
+  | Texp_apply (function_, arguments, _, _, _) ->
+    let operand = function
+      | _, Arg (argument, _) -> Some argument
+      | _, Omitted _ -> None
+    in
+    let operands = List.map operand arguments in
+    List.for_all Option.is_some operands
+    && begin
+      let operands = List.filter_map Fun.id operands in
+      assume_head_computes_its_model function_ operands
+      && List.for_all assume_check_is_executable operands
+    end
+  | _ -> false
+
+and assume_head_computes_its_model function_ operands =
+  let carrier operand =
+    assume_carrier operand.exp_env operand.exp_type
+  in
+  match function_.exp_desc with
+  | Texp_ident
+      { path;
+        desc = { val_kind = Val_prim primitive; _ };
+        kind = Id_prim _;
+        _ }
+    when Option.is_some (Vox_builtin.of_primitive ~path primitive.prim_name) ->
+    let builtin =
+      Option.get (Vox_builtin.of_primitive ~path primitive.prim_name)
+    in
+    let carriers = List.map carrier operands in
+    List.for_all Option.is_some carriers
+    && Option.is_some
+         (Vox_builtin.runtime_result builtin
+            ~operands:(List.filter_map Fun.id carriers))
+  | _ ->
+    (* The argument list is only consulted for the comparisons, and those are
+       decided above, where the table says at which carriers they agree. *)
+    ignore operands;
+    dependent_argument_call_is_stable function_ []
 
 type dependent_case_parameter =
   | Open_case_parameter of Ident.t * type_expr
@@ -8382,7 +8658,8 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
            else
              { exp with
                exp_extra =
-                 ( Texp_refinement_constraint ty_expected_explained.ty,
+                 ( Texp_refinement_constraint
+                     (ty_expected_explained.ty, Refinement_proved),
                    exp.exp_loc,
                    [] )
                  :: exp.exp_extra;
@@ -8398,6 +8675,11 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
 and type_refinement_annotation
     ?(overwrite = No_overwrite) env expected_mode ~loc ~explanation sarg
     refined_type refinement =
+  match assume_argument env sarg with
+  | Some argument ->
+    type_assume env expected_mode ~loc ~sarg_loc:sarg.pexp_loc argument
+      refined_type refinement
+  | None ->
   let with_explanation = with_explanation explanation in
   let refined_type = instance refined_type in
   let skeleton = instance refinement.ref_skeleton in
@@ -8529,6 +8811,112 @@ and type_refinement_annotation
       with_explanation (fun () ->
         unify_exp_types loc env arg.exp_type skeleton);
       mark arg
+
+(* [assume e] where the site imposes [t{ p }].  The obligation that site
+   would have raised is admitted instead: the predicate stays where it was
+   written, so nothing is restated, and the admission is recorded rather than
+   proved.  The expression is elaborated at the carrier and handed back with
+   the refined type -- at run time this is the identity, and in this pass
+   nothing at all is generated.
+
+   The site is registered under the physical identity of [loc], which is the
+   location object this arm was handed AND the one it installs as the
+   expression's own, because those are the two objects a caller attaches the
+   verification mark with: the constraint arms use the location they passed,
+   and every expected-type arm uses the returned expression's.  Making them
+   the same object leaves one key for both.  An arm that attached some third
+   location would lose the admission and leave the obligation to be proved,
+   which is the safe direction but stops the feature working, so the
+   accepted-forms test exercises both attachment styles.
+
+   [Vox_verify] turns the admission into a fact, and reports it. *)
+and type_assume env expected_mode ~loc ~sarg_loc argument refined_type refinement =
+  if !refinement_predicate_context then
+    (* Written in a predicate, or in the body of a definition that [@vox.def]
+       reflects as one.  Either way what surrounds this is a proposition, and
+       a proposition has no code in it for an admission to be about. *)
+    assume_error ~loc
+      "this is inside a proposition, and a proposition has no code in it@ \
+       for an admission to be about";
+  if not (Int.equal 0 (Env.stage env :> int)) then
+    assume_error ~loc "a quoted or spliced admission belongs to another stage";
+  let refined_type = instance refined_type in
+  let skeleton = instance refinement.ref_skeleton in
+  let arg = type_expect env expected_mode argument (mk_expected skeleton) in
+  let check = type_assume_check env ~loc:sarg_loc argument refinement in
+  let token =
+    Vox_vc.Assumption.record ~site:sarg_loc ~guarded:(Option.is_some check)
+      refinement refined_type
+  in
+  let admitted =
+    match check with
+    | None -> { arg with exp_type = refined_type; exp_loc = loc }
+    | Some (check, sort) ->
+      (* The check first, and the value after it.  Where the predicate names
+         the refined value, that value is a name, so reading it again
+         observes nothing and the order is not a choice anyone can see. *)
+      { exp_desc = Texp_sequence (check, sort, arg);
+        exp_loc = loc;
+        exp_extra = [];
+        exp_type = refined_type;
+        exp_attributes = [];
+        exp_env = env;
+      }
+  in
+  (* This arm carries its own mark, and tells its caller to add none.  The
+     mark is where the admission's identity lives, so it has to be built
+     here; a caller's mark would be an ordinary one and the obligation would
+     be raised to be proved. *)
+  ( { admitted with
+      exp_extra =
+        ( Texp_refinement_constraint
+            (refined_type, Refinement_admitted token),
+          sarg_loc,
+          [] )
+        :: admitted.exp_extra;
+    },
+    false )
+
+(* The check for this admission, or [None] where the predicate does not run.
+
+   Not running is never an error.  The statements one most wants to admit are
+   the ones that do not run, and a site with no check is admitted just the
+   same and reported more loudly.  So every way out of here that fails leaves
+   the site unguarded: a form with no source counterpart, a refined value
+   that is not a name to read again, a predicate that does not typecheck as
+   ordinary code, and an operation whose run and whose model can differ.
+
+   The attempt is undone on the way out.  Typing generated source unifies,
+   and none of that may survive a decision not to use the result. *)
+and type_assume_check env ~loc argument refinement =
+  let subject = assume_subject_source argument in
+  if not (refinement_agrees_with_its_model env refinement.ref_pred) then None
+  else
+  match assume_predicate_source ~loc ~subject refinement with
+  | None -> None
+  | Some source ->
+    let snapshot = Btype.snapshot () in
+    let saved_types = Cmt_format.get_saved_types () in
+    let abandon () =
+      Btype.backtrack snapshot;
+      Cmt_format.set_saved_types saved_types;
+      None
+    in
+    let attempt () =
+      Warnings.without_warnings (fun () ->
+        type_statement ~explanation:Sequence_left_hand_side env
+          (Ast_helper.Exp.assert_ ~loc:Location.{ loc with loc_ghost = true }
+             source))
+    in
+    begin match attempt () with
+    | (check, sort) ->
+      begin match check.exp_desc with
+      | Texp_assert (condition, _) when assume_check_is_executable condition ->
+        Some (check, sort)
+      | _ -> abandon ()
+      end
+    | exception Error _ -> abandon ()
+    end
 
 and type_expect_
     ?(recarg=Rejected) ?(overwrite=No_overwrite)
@@ -8911,6 +9299,12 @@ and type_expect_
   in
   match sexp.pexp_desc with
   | Pexp_ident lid ->
+      (* Ahead of [type_ident], so that the reason a use is refused is the
+         reason, and not whatever the ordinary rules would say about a
+         function reached where it should not have been reached at all.  A
+         law is written inside a total function, and there this identifier
+         is a partial one; being told so instead helps nobody. *)
+      refuse_bare_assume env lid;
       let path, actual_mode, layout_args, desc, kind =
         type_ident env ~recarg lid
       in
@@ -11844,7 +12238,7 @@ and type_function
                 else
                   { body with
                     exp_extra =
-                      ( Texp_refinement_constraint ty_expected,
+                      ( Texp_refinement_constraint (ty_expected, Refinement_proved),
                         body.exp_loc,
                         [] )
                       :: body.exp_extra;
@@ -13772,7 +14166,7 @@ and type_cases
               else
                 { exp with
                   exp_extra =
-                    ( Texp_refinement_constraint ty_expected,
+                    ( Texp_refinement_constraint (ty_expected, Refinement_proved),
                       exp.exp_loc,
                       [] )
                     :: exp.exp_extra;

@@ -643,8 +643,11 @@ and expression_extra i ppf (extra, loc, attrs) =
                rap_subject)
             Rawprinttyp.type_expr rap_domain)
         application.rapp_arguments
-  | Texp_refinement_constraint type_ ->
-      line i ppf "Texp_refinement_constraint %a\n"
+  | Texp_refinement_constraint (type_, admission) ->
+      line i ppf "Texp_refinement_constraint %s%a\n"
+        (match admission with
+         | Refinement_proved -> ""
+         | Refinement_admitted _ -> "(admitted) ")
         Rawprinttyp.type_expr type_
   | Texp_inspected_type ti ->
       line i ppf "Texp_inspected_type\n";

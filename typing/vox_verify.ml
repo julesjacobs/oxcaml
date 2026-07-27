@@ -2007,6 +2007,10 @@ type verification_mark =
     result_location : Location.t option;
     result_may_complete : (expression -> bool) option;
     refinement : refinement_desc;
+    admission : int option;
+        (* The site whose [assume] admits THIS mark's obligation, if any.
+           Per mark rather than per expression or per location, because two
+           marks can share either of those. *)
   }
 
 let marked_refinements expression =
@@ -2020,15 +2024,20 @@ let marked_refinements expression =
               result_location = None;
               result_may_complete = None;
               refinement;
+              admission = None;
             })
           (refinement ~env:core_type.ctyp_env core_type.ctyp_type)
-      | Texp_refinement_constraint type_ ->
+      | Texp_refinement_constraint (type_, admitted) ->
         Option.map
           (fun refinement ->
             { annotation_location = loc;
               result_location = None;
               result_may_complete = None;
               refinement;
+              admission =
+                (match admitted with
+                 | Refinement_proved -> None
+                 | Refinement_admitted token -> Some token);
             })
           (refinement ~env:expression.exp_env type_)
       | Texp_coerce _ | Texp_poly _ | Texp_newtype _ | Texp_stack
@@ -2871,6 +2880,17 @@ let rec walk_expression ?(inherited_marks = []) state expression =
   | Texp_ident { desc; _ } ->
     add_identifier_contract state expression desc;
     check_marks state expression marks
+  | Texp_sequence (_, _, second)
+    when List.exists (fun mark -> Option.is_some mark.admission) marks ->
+    (* An admitted site whose predicate is checked at run time.  The check is
+       code the compiler wrote, and the obligations its calls raise -- a
+       precondition of whatever the predicate mentions -- are nobody's to
+       discharge: whether a predicate happens to run must not decide whether
+       the program compiles, and a failed one here would do exactly that.
+       Nothing it establishes is used either, so it is passed over.  This is
+       recognised through the mark, so it covers the checks this compiler
+       generated and nothing a program could write. *)
+    walk_expression state second ~inherited_marks:marks
   | Texp_sequence (first, _, second) ->
     let entry_facts = state.facts in
     walk_expression state first;
@@ -3676,6 +3696,7 @@ and check_marks_against state ~env ~subject_location ?result_span ~subject marks
         result_location;
         result_may_complete = _;
         refinement;
+        admission;
       } ->
       let loc =
         Option.value ~default:annotation_location result_location
@@ -3684,9 +3705,20 @@ and check_marks_against state ~env ~subject_location ?result_span ~subject marks
         annotation_provenance ~annotation_location
           ~subject_location
       in
-      prove_refinement state ~env ~loc ~subject refinement
-        ~kind:"annotation" ~program_point:subject_location
-        ~result_span ~provenance)
+      (* An admitted obligation is not proved.  Its statement becomes a fact
+         with an origin of its own, so what follows may rely on it and a
+         reader can see what was taken on trust.  The statement used is the
+         one the SITE recorded rather than the one the mark carries: they
+         agree, and reading the recorded one is what keeps a mark from being
+         able to admit a statement that was never written. *)
+      match Option.bind admission Vox_vc.Assumption.refinement with
+      | Some admitted ->
+        add_extracted_refinement_fact state ~env ~kind:"assume"
+          ~loc:annotation_location ~subject admitted
+      | None ->
+        prove_refinement state ~env ~loc ~subject refinement
+          ~kind:"annotation" ~program_point:subject_location
+          ~result_span ~provenance)
     marks
 
 and check_marks ?result_span state expression marks =
@@ -5000,6 +5032,57 @@ let finish_dump () =
     Format.eprintf "Error: VCs dumped, not discharged.@.";
     raise Location.Already_displayed_error
   end
+
+(* Report every obligation the unit admitted rather than proved.
+
+   This is not a warning.  A warning can be turned off, and an admission that
+   can be turned off is an admission nobody has to look at, which defeats the
+   only thing keeping an admitted proof honest.  It is written unconditionally
+   whenever the unit admits anything, and the only control worth offering
+   would make it louder. *)
+let report_admissions () =
+  match Vox_vc.Assumption.admitted () with
+  | [] -> ()
+  | admitted ->
+    let rendered site =
+      Format.asprintf "%a" Printtyp.type_expr site.Vox_vc.Assumption.refined_type
+    in
+    (* What the report says is what THIS build does.  A predicate that could
+       be run is not being run in a build that removed its check, and
+       reporting it as checked would describe a different program. *)
+    let checked site = site.Vox_vc.Assumption.guarded && not !Clflags.noassert in
+    List.iter
+      (fun site ->
+        Format.eprintf
+          "@[<v>%a@,Admitted (%s): %s is assumed here, not proved.@]@."
+          Location.print_loc site.Vox_vc.Assumption.site
+          (if checked site then "checked at run time" else "unchecked")
+          (rendered site))
+      admitted;
+    let total = List.length admitted in
+    let count = List.length (List.filter checked admitted) in
+    Format.eprintf
+      "@[Admitted %d obligation%s in this unit: %d checked at run time, \
+       %d unchecked%s.@]@."
+      total
+      (if total = 1 then "" else "s")
+      count (total - count)
+      (if !Clflags.noassert then " because -noassert removed the checks"
+       else "");
+    Vox_vc.Assumption.forget ()
+
+(* Report on the way out, however the unit leaves.
+
+   Reporting only on success loses the trace exactly when it is wanted: a
+   module that admits something and also fails an obligation elsewhere is
+   the state someone is in WHILE they are reaching for [assume], and it
+   would print nothing about what it had admitted.  And the sites would
+   survive in the registry to be printed against a later toplevel phrase
+   that contains no [assume] at all, under the failed phrase's position. *)
+let reporting_admissions run =
+  match run () with
+  | result -> report_admissions (); result
+  | exception exn -> report_admissions (); raise exn
 
 let verify_structure ?(toplevel = false) structure =
   let loc =

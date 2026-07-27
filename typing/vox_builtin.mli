@@ -44,6 +44,20 @@ val of_primitive : path:Path.t -> string -> t option
 val of_path : Path.t -> t option
 val is_bigint_type : Path.t -> bool
 
+(* The carriers at which an operation can also be EXECUTED as part of a
+   run-time refinement assumption.  Ordinary [int] is modelled as a signed
+   63-bit bitvector, so machine arithmetic denotes exactly what the backends
+   reason about; the carriers with no such correspondence are absent. *)
+type carrier =
+  | Int
+  | Bool
+
+val runtime_result : t -> operands:carrier list -> carrier option
+(** [runtime_result builtin ~operands] is the carrier of [builtin]'s result
+    when evaluating it at these operand carriers produces exactly the value
+    its logical model denotes, and [None] when the two can differ or the
+    operation has no executable meaning at these operands. *)
+
 (** Every recognized operation is pure and deterministic.  The verifier's
     stable-call classification relies on this property, so additions to either
     classifier must preserve it.  [of_path] uses persistent identifier

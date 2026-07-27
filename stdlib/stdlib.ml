@@ -567,6 +567,18 @@ let ( ^^ ) (Format (fmt1, str1)) (Format (fmt2, str2)) =
 
 external sys_exit : int -> 'a = "caml_sys_exit"
 
+(* Admitted refinement obligations.  Typecore accepts this declaration only
+   where a refinement is imposed on it, where it elaborates to its argument,
+   and rejects every other occurrence as the identifier is typed.
+
+   A call can still reach this definition, by a route that gives the value a
+   declaration of its own: ascribing a signature that names it,
+   [module S : sig val assume : 'a -> 'a end = Stdlib].  Nothing can be
+   ADMITTED that way -- an admission needs the declaration typecore
+   recognises -- so what such a call reaches is the identity, which is what
+   it would have been in any case. *)
+let assume value = value
+
 (* for at_exit *)
 type 'a atomic_t : value mod portable contended
 external atomic_make : 'a @ contended portable -> 'a atomic_t @@ portable = "%makemutable"
