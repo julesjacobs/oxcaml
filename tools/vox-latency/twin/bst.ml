@@ -30,19 +30,36 @@
       attribute drops both, so the twin declares the six companions by hand,
       with [f]'s parameter list and the body [()].  This is what the expander
       would have produced once its refinement is stripped, so the twin keeps
-      the six extra closures and the twenty-one calls to them that the
+      the six extra closures and the seventeen calls to them that the
       original has.  Removing them instead would have deleted real code from
       the twin and charged its compilation to the refinement machinery.
    4. The single-value definitions are otherwise untouched.
 
    What this twin therefore controls for is the refinement predicates and the
    mode annotations that carry no code consequence.  It does not control for
-   allocation behaviour, because there is none left to control for: the two
-   Lambdas are identical modulo mode annotations, which is what --validate
-   compares.  The raw dumps still differ in [L] markers and {nlocal = n}
-   counts, and in nothing else; the allocation primitives themselves --
-   makeblock, makelocalblock, region -- appear the same number of times in
-   both.
+   allocation behaviour, because there is none left to control for.
+
+   Be exact about what that means, since this comment is what a later reader
+   will trust.  The two raw Lambda dumps are NOT byte-identical.  They differ
+   in two things and only these two, and --validate strips exactly these two
+   before comparing:
+
+     - the [L] locality markers on binders, of which the original has nine and
+       the twin three;
+     - the {nlocal = n} counts on functions.  Both dumps carry twenty-six of
+       them and four differ in value: 1 and 2 in the original where the twin
+       has 0, and 0 in the original where the twin has 3 and 6.
+
+   Both are binder mode annotations; neither is computation.  With those two
+   stripped the dumps are equal as whole texts, not merely as token streams --
+   6294 tokens against 6294, no differing region, and byte-identical once
+   whitespace is normalised.
+
+   Token equality alone would not settle allocation, so count the allocation
+   primitives directly.  Original and twin both have makeblock 7,
+   makelocalblock 4, region 5.  The twin before its [@ global] pin had
+   4 / 7 / 8: three allocation sites really had moved from the heap to the
+   stack, and really are back.
 
    See tools/vox-latency/vox_attribute_time.sh --validate for the Lambda-level
    check, which is an error exit rather than a printed observation. *)
