@@ -135,6 +135,19 @@ Line 3, characters 28-33:
 Error: Refinement verification failed (disproved)
 |}]
 
+(* Expect: accepted.  A mutual group whose members take different numbers of
+   parameters, and whose lower bound comes from the guard on the path to the
+   call rather than from a refinement on the parameter. *)
+let[@vox.decreases n] rec one (n : int) (k : int) : int =
+  if n <= 0 then k else two (n - 1) k 7
+and[@vox.decreases a] two (a : int) (b : int) (c : int) : int =
+  if a <= 0 then b + c else one (a - 1) (b + c)
+
+[%%expect {|
+val one : int -> int -> int = <fun>
+val two : int -> int -> int -> int = <fun>
+|}]
+
 (* Expect: refused, and this is the case that fixes where the obligation
    sits.  A result refinement of [false] is exactly what a call that never
    returns establishes, and the body below is accepted without a measure for
