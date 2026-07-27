@@ -7781,8 +7781,13 @@ let structurally_terminating_group type_env bindings =
    been granted and the mode fixed, so the only honest outcome left is to
    refuse the program and say why.  A crossed field the walk fails to find is
    refused on the same footing: an unchecked crossing is the case this exists
-   to prevent, so not finding one is not a reason to let it pass. *)
-let check_structural_record_fields crossed exp_list =
+   to prevent, so not finding one is not a reason to let it pass.
+
+   What to do about one is not decided here.  The grant may still be
+   retractable, in which case the honest outcome is the binding staying
+   partial rather than the program being refused -- see where this is
+   called. *)
+let structural_record_field_offence crossed exp_list =
   (* One entry per distinct field, because a field crossed by both branches
      of an or-pattern is asked about once per branch and would otherwise have
      a second entry that nothing ever reaches. *)
@@ -7794,6 +7799,10 @@ let check_structural_record_fields crossed exp_list =
         else (lid.loc, ref false) :: wanted)
       [] crossed
   in
+  let offence = ref None in
+  let record loc message =
+    match !offence with None -> offence := Some (loc, message) | Some _ -> ()
+  in
   let check_field (lid : Longident.t loc) (label : label_description) =
     match List.assoc_opt lid.loc wanted with
     | None -> ()
@@ -7801,7 +7810,7 @@ let check_structural_record_fields crossed exp_list =
       found := true;
       if is_mutable label.lbl_mut
       then
-        Location.raise_errorf ~loc:lid.loc
+        record lid.loc
           "vox: this recursion descends through a mutable field. \
            Assignment can replace what the field holds, so the value bound \
            here need not be a part of the value matched."
@@ -7826,10 +7835,11 @@ let check_structural_record_fields crossed exp_list =
     (fun (loc, found) ->
       if not !found
       then
-        Location.raise_errorf ~loc
+        record loc
           "vox: a structural recursion descends through this field, but the \
            field was not reached when checking that it is immutable.")
-    wanted
+    wanted;
+  !offence
 
 (* [vox.decreases]: termination by a lexicographically ordered tuple of
    integer measures over the parameters, for recursive groups that structural
@@ -14128,18 +14138,44 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         decreases_group_measured ~is_recursive spat_sexp_list
       in
       let terminating = structurally_terminating || measure_terminating in
+      let partial_totality =
+        Value.of_const
+          { Value.Const.min with totality = Totality.Const.Partial }
+      in
+      (* A structural descent that crossed a record field was granted on the
+         parse tree, where a field name has not been resolved to a label, and
+         the label the compiler goes on to choose can be a mutable one the
+         grant never saw ([check_structural_record_fields]).  Joining a
+         variable into the recursive occurrences' mode keeps a handle on the
+         grant: nothing constrains it, so it costs the group nothing, and if
+         the label turns out mutable the totality can be pushed back out of
+         it.  That succeeds exactly when no use inside the group has been
+         checked against the grant, which is the case where taking it back is
+         honest -- the group is then partial, as it was before a record
+         pattern gave a sub-term relation at all, and a program that asked
+         for nothing keeps compiling. *)
+      let record_descent_totality =
+        match structural_crossed_fields with
+        | Some (_ :: _) when is_recursive && not measure_terminating ->
+          Some (Value.newvar ())
+        | Some _ | None -> None
+      in
       let rhs_pvs =
         if is_recursive && not terminating
         then
-          let partial =
-            Value.of_const
-              { Value.Const.min with totality = Totality.Const.Partial }
-          in
           List.map
             (fun pv ->
-               { pv with pv_mode = Value.join [pv.pv_mode; partial] })
+               { pv with pv_mode = Value.join [pv.pv_mode; partial_totality] })
             pvs
-        else pvs
+        else
+          match record_descent_totality with
+          | None -> pvs
+          | Some variable ->
+            let variable = Value.disallow_right variable in
+            List.map
+              (fun pv ->
+                 { pv with pv_mode = Value.join [pv.pv_mode; variable] })
+              pvs
       in
       let continuation_env =
         add_pattern_variables ~strip_refinement new_env pvs
@@ -14238,7 +14274,17 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       (match structural_crossed_fields with
        | None | Some [] -> ()
        | Some (_ :: _ as crossed) ->
-         check_structural_record_fields crossed exp_list);
+         begin match structural_record_field_offence crossed exp_list with
+         | None -> ()
+         | Some (loc, message) ->
+           let given_back =
+             match record_descent_totality with
+             | None -> false
+             | Some variable ->
+               Result.is_ok (Value.submode partial_totality variable)
+           in
+           if not given_back then Location.raise_errorf ~loc "%s" message
+         end);
       List.iter2
         (fun (_, pat, _) (attrs, exp) ->
           Builtin_attributes.warning_scope ~ppwarning:false attrs
