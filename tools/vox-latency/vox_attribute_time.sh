@@ -67,6 +67,13 @@
 # SILENCE, which makes a cold run and a warm run identical and solving look
 # free; every directory here is created 0700.
 #
+# "Cold" in every row below means the solver RESULT cache is empty, and it is
+# emptied before every repeat rather than once.  It does not mean cold pages or
+# a cold filesystem: --scaling deliberately reads the compiler and the solver
+# binaries into the page cache before timing anything, because deriving a cache
+# key reads 64 MB between them and otherwise the first module measured pays a
+# disk read in both its warm and its cold row.
+#
 # WHICH COMPILER THE ABSOLUTE NUMBERS DESCRIBE.  Two of the largest rows this
 # tool reports -- the cache-key digest of the compiler and solver binaries, and
 # the solver-teardown sleep -- are properties of the base compiler and are
@@ -608,6 +615,9 @@ if [ "$SCALING" = yes ]; then
   echo "scaling fit over: $UNIT"
   echo "compiler:  $OCAMLC"
   echo "backend:   $BACKEND, median of $REPEATS runs, private solver cache"
+  echo "cache:     cold = empty solver RESULT cache, reset before every repeat;"
+  echo "           binaries are page-cached on purpose, so cold pages are not"
+  echo "           part of what any row measures"
   echo "load:      $(uptime | sed 's/.*load average: //')  ($(nproc) cpus)"
   echo
   scaling
@@ -646,6 +656,8 @@ echo "original:  $ORIGINAL"
 [ "$VOX_ROWS_ONLY" = no ] && echo "twin:      $TWIN"
 echo "compiler:  $OCAMLC"
 echo "backend:   $BACKEND, median of $REPEATS runs, private solver cache"
+echo "cache:     cold = empty solver RESULT cache, reset before every repeat;"
+echo "           not cold pages and not a cold filesystem"
 # This box is shared.  A heavy neighbour inflates every row, and not evenly, so
 # record the load with the numbers rather than leaving the reader to guess.
 echo "load:      $(uptime | sed 's/.*load average: //')  ($(nproc) cpus)"

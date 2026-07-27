@@ -1,7 +1,10 @@
 scaling fit over: synth01 synth02 synth04 synth08 synth16 client ulist bst rbt avl
 compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 11 runs, private solver cache
-load:      18.55, 20.78, 23.10  (64 cpus)
+cache:     cold = empty solver RESULT cache, reset before every repeat;
+           binaries are page-cached on purpose, so cold pages are not
+           part of what any row measures
+load:      28.40, 23.93, 22.28  (64 cpus)
 
 row sanity, per module
   synth01        verify ok                                 no-verify ok
@@ -16,37 +19,37 @@ row sanity, per module
   avl            verify ok                                 no-verify ok
 
 module      obligs   no-verify      warm       cold   warm-nv   cold-warm
-synth01         1     0.0342    0.1391    0.2486    0.1049      0.1095
-synth02         2     0.0365    0.1388    0.2530    0.1023      0.1142
-synth04         4     0.0371    0.1408    0.2530    0.1037      0.1122
-synth08         8     0.0377    0.1451    0.2596    0.1074      0.1145
-synth16        16     0.0442    0.1490    0.2674    0.1048      0.1184
-client          4     0.0539    0.1692    0.2795    0.1153      0.1103
-ulist          27     0.0584    0.1713    0.2957    0.1129      0.1244
-bst            47     0.0744    0.1900    0.3494    0.1156      0.1594
-rbt            60     0.0984    0.2435    0.4359    0.1451      0.1924
-avl            67     0.0983    0.2277    0.3871    0.1294      0.1594
+synth01         1     0.0366    0.1421    0.2521    0.1055      0.1100
+synth02         2     0.0370    0.1423    0.2532    0.1053      0.1109
+synth04         4     0.0364    0.1416    0.2536    0.1052      0.1120
+synth08         8     0.0370    0.1439    0.2599    0.1069      0.1160
+synth16        16     0.0434    0.1471    0.2671    0.1037      0.1200
+client          4     0.0517    0.1584    0.2755    0.1067      0.1171
+ulist          27     0.0562    0.1673    0.2953    0.1111      0.1280
+bst            47     0.0741    0.1884    0.3497    0.1143      0.1613
+rbt            60     0.1026    0.2436    0.4348    0.1410      0.1912
+avl            67     0.0965    0.2471    0.4174    0.1506      0.1703
 
 obligation construction + translation + key + lookup  (warm - no-verify)
-    fixed per invocation    0.1034 s      <- intercept = paid once per compiler invocation
-    per obligation         0.00045 s
-    r-squared               0.7215      residual RMSE 0.00681 s
-    per-module residual:  synth01 +0.0010  synth02 -0.0020  synth04 -0.0015  synth08 +0.0003  synth16 -0.0059  client +0.0101  ulist -0.0028  bst -0.0092  rbt +0.0144  avl -0.0045
+    fixed per invocation    0.1010 s      <- intercept = paid once per compiler invocation
+    per obligation         0.00059 s
+    r-squared               0.8197      residual RMSE 0.00672 s
+    per-module residual:  synth01 +0.0039  synth02 +0.0031  synth04 +0.0018  synth08 +0.0011  synth16 -0.0068  client +0.0033  ulist -0.0059  bst -0.0146  rbt +0.0044  avl +0.0098
 
 solving + 2nd emission      (cold - warm)
-    fixed per invocation    0.1068 s      <- intercept should be near zero: solving is per-obligation
-    per obligation         0.00105 s
-    r-squared               0.8629      residual RMSE 0.01006 s
-    per-module residual:  synth01 +0.0017  synth02 +0.0053  synth04 +0.0012  synth08 -0.0006  synth16 -0.0051  client -0.0007  ulist -0.0106  bst +0.0034  rbt +0.0228  avl -0.0175
+    fixed per invocation    0.1074 s      <- intercept should be near zero: solving is per-obligation
+    per obligation         0.00111 s
+    r-squared               0.9258      residual RMSE 0.00759 s
+    per-module residual:  synth01 +0.0015  synth02 +0.0012  synth04 +0.0001  synth08 -0.0003  synth16 -0.0052  client +0.0052  ulist -0.0095  bst +0.0016  rbt +0.0170  avl -0.0117
 
 known in advance
   Solving is per-obligation work, so the (cold - warm) fit's intercept
   is known before the measurement: it must be near zero.  It is not.
-    measured intercept          0.1068 s
-    per-obligation cost        0.00105 s
-    intercept expressed in obligations      102
+    measured intercept          0.1074 s
+    per-obligation cost        0.00111 s
+    intercept expressed in obligations       97
   So the (cold - warm) row is not solving.  It carries a
-  per-invocation charge worth roughly 102 obligations of solving,
+  per-invocation charge worth roughly 97 obligations of solving,
   and reading the whole row as solver time overstates it by that
   much on any module smaller than that.
 
