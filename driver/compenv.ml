@@ -846,6 +846,13 @@ let process_deferred_actions env =
   | Some file ->
       begin match Filename.extension file with
       | ".ml" | ".mli" | ".mll" | ".mly" ->
+          (* Clear the destination before refusing. The dump is written from an
+             at_exit handler, so refusing and then exiting would run that
+             handler, open the destination, and truncate the very file this
+             check exists to protect -- the guard would print its refusal and
+             destroy the file anyway. Measured: it did, in all three
+             invocation shapes, including with no source file at all. *)
+          Clflags.vox_dump_vc_json := None;
           fatal
             (Printf.sprintf
                "-vox-dump-vc-json refuses to write over %s: it truncates its \
