@@ -1,0 +1,4 @@
+File "decreases_tot_record_mutable.ml", line 22, characters 33-37:
+22 | let total_use () = expects_total size
+                                      ^^^^
+Error: This value is partial but is expected to be total.

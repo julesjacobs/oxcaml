@@ -4,6 +4,9 @@
    decreases_tot_no_measure.ml decreases_tot_no_measure.reference \
    decreases_tot_loop.ml decreases_tot_loop.reference \
    decreases_tot_partial_op.ml decreases_tot_partial_op.reference \
+   decreases_tot_record.ml decreases_tot_record.reference \
+   decreases_tot_record_mutable.ml decreases_tot_record_mutable.reference \
+   decreases_tot_record_shadow.ml decreases_tot_record_shadow.reference \
  ";
  setup-ocamlc.byte-build-env;
 
@@ -36,6 +39,29 @@
  compiler_reference =
    "${test_source_directory}/decreases_tot_partial_op.reference";
  check-ocamlc.byte-output;
+
+ module = "decreases_tot_record.ml";
+ compiler_output = "decreases_tot_record.output";
+ ocamlc_byte_exit_status = "0";
+ ocamlc.byte;
+ compiler_reference = "${test_source_directory}/decreases_tot_record.reference";
+ check-ocamlc.byte-output;
+
+ module = "decreases_tot_record_mutable.ml";
+ compiler_output = "decreases_tot_record_mutable.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+ compiler_reference =
+   "${test_source_directory}/decreases_tot_record_mutable.reference";
+ check-ocamlc.byte-output;
+
+ module = "decreases_tot_record_shadow.ml";
+ compiler_output = "decreases_tot_record_shadow.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+ compiler_reference =
+   "${test_source_directory}/decreases_tot_record_shadow.reference";
+ check-ocamlc.byte-output;
 *)
 
 (* What a [@vox.decreases] measure buys, witnessed in batch rather than at the
@@ -48,4 +74,10 @@
    second is the same body with the measure removed and is rejected, which is
    what makes the first one evidence.  The third and fourth are measured but
    contain a loop and an integer division, and are rejected too: the measure
-   pays for termination of the recursion and for nothing else. *)
+   pays for termination of the recursion and for nothing else.
+
+   Three more subjects concern the other route to termination, structural
+   recursion, and specifically what a record pattern does with it.  A record
+   of children is accepted where before it was not; the same record with a
+   mutable field stays refused; and a mutable field the parse tree cannot see
+   is refused with a message of its own. *)

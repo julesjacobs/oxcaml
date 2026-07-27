@@ -1,0 +1,4 @@
+File "decreases_tot_record_shadow.ml", line 29, characters 6-9:
+29 |   | { kid = Some kid } -> 1 + depth kid
+           ^^^
+Error: vox: this recursion descends through a mutable field. Assignment can replace what the field holds, so the value bound here need not be a part of the value matched.
