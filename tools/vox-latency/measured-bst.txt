@@ -1,0 +1,106 @@
+units:     bst.ml
+original:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/tools/vox-latency/original
+twin:      /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/tools/vox-latency/twin
+compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
+backend:   z3, median of 25 runs, private solver cache
+cache:     cold = empty solver RESULT cache, reset before every repeat;
+           not cold pages and not a cold filesystem
+load:      11.16, 9.76, 12.24  (64 cpus)
+
+obligations: 47 across 1 unit(s); 1 of them carry at least one
+
+row sanity
+  original verify                    ok
+  original -vox-no-verify            ok
+  original -vox-type-only            ok
+  original -vox-dump-vc              ok (dump exits non-zero by design)
+  twin plain compile                 ok
+  twin -vox-type-only                ok
+  control verify                     ok
+  control -vox-no-verify             ok
+
+configuration                       median      [min .. max]
+        compiler startup floor (x1)    0.0327   [0.0313 .. 0.0351]
+  twin  -vox-type-only                 0.0506   [0.0487 .. 0.0566]
+  twin  plain compile                  0.0545   [0.0521 .. 0.0591]
+  orig  -vox-type-only                 0.0715   [0.0669 .. 0.0819]
+  orig  -vox-no-verify                 0.0715   [0.0696 .. 0.0927]
+  orig  -vox-dump-vc                   0.0742   [0.0731 .. 0.0841]
+  orig  verify, warm cache             0.1892   [0.1861 .. 0.2099]
+  orig  verify, cold cache             0.3472   [0.3447 .. 0.3572]
+
+known in advance
+  1 control module(s) carrying one obligation each, 1 in all, put
+  through the same rows.  They make one compiler invocation for each of
+  the 1 timed units that carry obligations, and none for the 0 that do
+  not, because those ask for no cache key and spawn no solver.
+  Every row below is per-obligation work by its own name, and the timed
+  row carries 47 obligations against the control's 1, so on the
+  control every one of them is expected to be near zero.
+  control  construct + translate + key   0.1035   expected ~0
+  control  solving + teardown          0.1119   expected ~0
+  Whatever the control still pays here is a PER-INVOCATION charge, and
+  the same row on the real module is paying it too.  It is separated out
+  in the table below rather than left inside a row named after solving.
+
+  cold total, measured first           0.3472
+  cold total, re-measured last         0.3470
+  drift over the run                  -0.0002   expected ~0; this is the table's residual
+  The attributed rows telescope to the FIRST cold measurement by
+  construction, so their sum is an identity.  The two independent cold
+  measurements above are the check that the run was stable enough for
+  the differences between rows to mean anything.
+
+attributed to                       seconds    share of cold total
+  compiler startup, 1 invocation(s)    0.0327     9.4%
+  ordinary OCaml typecheck             0.0179     5.2%
+  refinement elaboration + modes       0.0209     6.0%
+  ordinary artefact staging            0.0039     1.1%
+  refined conformance + cmi/cmo       -0.0039    -1.1%
+  fixed: cache key, per invocation     0.1035    29.8%
+  construction + translation + key, marginal   0.0142     4.1%
+  fixed: solver teardown, per invocation   0.1119    32.2%
+  solving + 2nd emission, marginal     0.0461    13.3%
+
+  The two 'fixed' rows are the control's own values: they are what this
+  compiler spends per invocation before any obligation is considered.
+  On the base compiler they are a Digest.file over the compiler and
+  solver binaries, and a flat 100 ms sleep in the solver teardown.  Both
+  are removed on the cache lane -- a filesystem stamp and a 200 us
+  backoff -- so on such a compiler both rows are absent and the rest of
+  the table is unchanged.  Every absolute figure here describes the
+  compiler named in the header, and nothing else.
+
+  The control carries one obligation per invocation, so each fixed row
+  above overstates the per-invocation charge by that one obligation's
+  marginal cost, and the marginal row beside it understates it by the
+  same amount.
+
+  RAW ROW, BEFORE THE CONTROL IS SUBTRACTED.  cold minus warm is
+    cold - warm, raw                   0.1580    45.5%
+  and this raw figure IS NOT SOLVING: most of it is the per-invocation
+  teardown charge the control measures above.  Reading it as solver time
+  is the mistake that produced a 44% 'solving' figure that has since
+  been retracted; the split above is the corrected reading.
+
+  The marginal solving row includes the second SMT emission a cold
+  obligation pays, so it is an upper bound on solving proper and not a
+  measurement of it.  Run --scaling to fit the same split over a range
+  of obligation counts instead of against a one-obligation control.
+
+  THE -vox-dump-vc BOUNDARY, AND WHY NO ROW ABOVE IS DERIVED FROM IT:
+    dump - no-verify                   0.0027
+  -vox-dump-vc builds and formats every obligation but exits before
+  emitting bytecode -- it writes no .cmo, and -vox-no-verify does.  So
+  this difference is (construction + formatting) MINUS (bytecode
+  emission), which on a module this size are the same size, so it lands
+  at the noise floor with an arbitrary sign.  Reading it as the cost of
+  building obligations understates that cost by a whole .cmo emission,
+  and charging the rest to the row above it overstates that by the same.
+  The table above therefore takes its boundary at -vox-no-verify, which
+  emits bytecode exactly as the warm and cold rows do.
+
+  a perfect cache saves the cold-minus-warm row, most of which is the
+  teardown charge rather than the solver:
+  cold total                           0.3472   100.0%
+  warm total                           0.1892    54.5%

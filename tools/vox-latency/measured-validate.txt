@@ -1,0 +1,15 @@
+original Lambda: 960 lines
+twin Lambda:     960 lines
+
+known in advance: the expected number of differing regions is ZERO.
+The twin keeps every mode annotation that has a code consequence, so
+there is no allowance to argue about and no region is acceptable.
+
+tokens, modulo mode annotations: original 6294, twin 6294
+IDENTICAL modulo mode annotations.
+
+object code:
+  original     3797 bytes
+  twin         3797 bytes
+
+TWIN VALIDATED: same program, refinement predicates removed.
