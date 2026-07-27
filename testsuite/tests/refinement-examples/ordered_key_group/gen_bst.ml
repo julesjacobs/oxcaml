@@ -494,4 +494,13 @@ module Make (K : Key_intf.ORDERED_KEY) = struct
     prove right;
     equal_def left right;
     ()
+
+  (* Not part of [SET].  See the note in [key_intf.ml].  Pre-order rather
+     than in-order deliberately: in-order is ascending for every tree here
+     and so would not separate the two tree implementations, while
+     pre-order shows the shape the insertions actually built. *)
+  let rec shape (tree : t) =
+    match tree with
+    | Empty -> []
+    | Node (left, pivot, right) -> (pivot :: shape left) @ shape right
 end

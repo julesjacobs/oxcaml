@@ -51,11 +51,24 @@
    Two properties the three laws do not state, and do not need to.
    Determinism and freedom from observable effects come from the [@@ total]
    mode on [compare] together with its logical, [immutable_data] arguments,
-   and they are refused at TYPING, before any obligation is built: a
-   [compare] that reads or writes a mutable cell is rejected with "The first
-   is partial because it contains a usage (of the value counter ...) which is
-   expected to be physical".  A trusted external can still declare [@@ total]
-   and lie.
+   and they are refused at TYPING, before any obligation is built.  Reading
+   a mutable cell is refused as well as writing one.  There are two routes
+   and they give different messages, so it is worth knowing which one a
+   reader will meet: for a [let[@vox.def] compare] that increments a
+   module-level counter, which is how every key here is written, the refusal
+   is at the effect itself --
+
+     Error: The value (:=) is partial
+            but is expected to be total
+              because it is used inside the function ...
+              which is expected to be total.
+
+   -- while for a plain [let compare] with no [[@vox.def]], where the effect
+   is only discovered when the struct is ascribed, the same program is
+   refused as a signature mismatch, "The first is partial because it
+   contains a usage (of the value counter ...) which is expected to be
+   physical".  Either way no obligation is ever built.  A trusted external
+   can still declare [@@ total] and lie.
 
    WHAT A FALSE LAW COSTS.  Not merely that the structure is misnamed: an
    exported set law becomes false of the running program.  Measured, with a
@@ -133,6 +146,15 @@ end
    all five then "fail" -- at that call, not at anything the interface
    requires.  Only a refusal inside [insert_law] or [insert_invariant]'s own
    obligation counts.
+
+   What "forced" means here, exactly, because the integer corpus means
+   something stronger by the same word.  Both refusals above are at a helper
+   lemma's PRECONDITION inside [insert_law], not at [insert_law]'s own goal:
+   they say this proof of the law cannot be completed without the component,
+   not that the law is false without it.  The [set_group] measurement goes
+   one step further and disproves the exported law at a ground value the
+   weakened invariant admits, which rules out an artefact of how the proof
+   happens to be written.  That step has not been done here.
 
    The rule is not "membership exits early on the comparison": [gen_bst]
    exits early too and is unforced.  It is whether that implementation's

@@ -25,17 +25,30 @@ let[@vox.def] compare (left : t @ logical) (right : t @ logical) =
   else 0
 
 (* [compare_zero_iff_equal] is proved in two steps, and the split is
-   necessary rather than tidy.  Written as one obligation -- from the four
-   comparisons being false, conclude the two records are equal -- z3 4.8.5
-   does not answer within the compiler's budget.  Split into "the four
-   comparisons being false makes the fields equal" and "equal fields make
-   the records equal", the same solver answers each in hundredths of a
-   second.  Reduced to bare SMT the same split holds: the combined query
-   times out at thirty seconds, the halves take 0.06s and 0.01s.  Two
-   64-bit fields is where it breaks; one field, or two narrow fields, are
-   both immediate.  So this is a limitation of the bitvector model against
-   record extensionality, not of the interface, and the cost of working
-   around it is these two extra lemmas. *)
+   necessary rather than tidy.  Written as one obligation -- the whole
+   equivalence between "the comparison answers zero" and "the records are
+   equal" -- z3 4.8.5 does not answer within the compiler's budget.  Split
+   into "the comparisons being false makes the fields equal" and "equal
+   fields make the records equal", the same solver answers each in
+   hundredths of a second, and this file compiles in about 0.8s.
+
+   Reduced to bare SMT at the shipped 63-bit width: the two halves come back
+   unsat in 0.06s and 0.01s, and the combined form does not come back at
+   all inside sixty seconds.
+
+   What the difficulty is NOT is a clean size threshold, and an earlier
+   version of this comment said it was.  Sweeping the combined query with
+   both fields at width w gives unsat in 0.03s at 8 and 0.26s at 16, then
+   4.3s at 24, 4.2s at 32, 2.2s at 40, 8.8s at 48, 12.0s at 56, 14.4s at 60,
+   7.5s at 62, and no answer at 63.  That is a heuristic degrading steeply
+   and erratically, not a limit at 63.  Nor is one field enough to make it
+   easy: the combined equivalence over a single 63-bit field also fails to
+   answer in sixty seconds.  The earlier claim that it was immediate came
+   from measuring the implication half by mistake, which is a different and
+   much easier query.
+
+   So the split is what buys the proof, and it is the bitvector model
+   against record extensionality rather than anything about the interface. *)
 let fields_agree_when_zero ~(left : t @ logical) ~(right : t @ logical)
     : unit{
       not (compare left right = 0)

@@ -188,4 +188,10 @@ module Make (K : Key_intf.ORDERED_KEY) = struct
     prove right;
     let _definition = equal_def left right in
     ()
+
+  (* Not part of [SET].  See the note in [key_intf.ml]: the runtime gate
+     needs one observation that differs between implementations, and the
+     keys in representation order is it.  Here the representation is the
+     list itself, most recently inserted first. *)
+  let shape (set : t) = set
 end

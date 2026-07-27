@@ -1107,4 +1107,13 @@ module Make (K : Key_intf.ORDERED_KEY) = struct
     prove right;
     equal_def left right;
     ()
+
+  (* Not part of [SET].  See the note in [key_intf.ml].  Pre-order, as in
+     [gen_bst], which is what makes the rebalancing visible: the same
+     insertions give this tree a different pre-order from the unbalanced
+     one. *)
+  let rec shape (tree : t) =
+    match tree with
+    | Leaf -> []
+    | Node (left, pivot, right) -> (pivot :: shape left) @ shape right
 end

@@ -346,4 +346,10 @@ module Make (K : Key_intf.ORDERED_KEY) = struct
     prove right;
     equal_def left right;
     ()
+
+  (* Not part of [SET].  See the note in [key_intf.ml].  Here the
+     representation is the list itself, which is ascending under
+     [K.compare] -- so this column also reports which order the key
+     supplied. *)
+  let shape (values : t) = values
 end
