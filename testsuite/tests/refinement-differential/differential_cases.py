@@ -19,9 +19,17 @@ WIDTH = 63
 MAX_INT = (1 << (WIDTH - 1)) - 1
 MIN_INT = -(1 << (WIDTH - 1))
 
-# About the square root of max_int: its square is the smallest product of two
-# equal operands that leaves the range.
-ROOT = 3037000499
+# The smallest non-negative operand whose square leaves the range: with
+# [max_int] at 2^62 - 1, that is 2^31, whose square is exactly 2^62.  Its
+# predecessor is the largest square that stays in range, and the two together
+# are the boundary.
+ROOT = 1 << ((WIDTH - 1) // 2)
+ROOT_BELOW = ROOT - 1
+
+# About the square root of 2^63, which also overflows but is not the boundary.
+# Kept in the sweep because it is a different bit pattern, not because it is
+# the first product to leave the range.
+WIDE_ROOT = 3037000499
 
 
 def wrap(value):
@@ -98,7 +106,9 @@ CORE_ARITHMETIC_PAIRS = [
     ("(-1)", "(-1)"),
     ("2", "(-2)"),
     (str(ROOT), str(ROOT)),
+    (str(ROOT_BELOW), str(ROOT_BELOW)),
     (str(ROOT), "(-%d)" % ROOT),
+    (str(WIDE_ROOT), str(WIDE_ROOT)),
     ("1073741824", "1073741824"),
 ]
 
@@ -176,7 +186,9 @@ FULL_VALUES = [
     "2",
     "(-2)",
     str(ROOT),
+    str(ROOT_BELOW),
     "(-%d)" % ROOT,
+    str(WIDE_ROOT),
     "1073741824",
     "(-1073741824)",
     str(MAX_INT - 1),
