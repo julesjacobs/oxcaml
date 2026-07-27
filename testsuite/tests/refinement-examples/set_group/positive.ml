@@ -1,11 +1,14 @@
 (* TEST
  readonly_files = "\
-   set_intf.ml \
+   set_intf.ml bal_intf.ml \
    bst.mli bst.ml rbt.mli rbt.ml avl.mli avl.ml ulist.mli ulist.ml \
    client.ml \
  ";
  setup-ocamlc.byte-build-env;
  module = "set_intf.ml";
+ ocamlc.byte;
+ module = "bal_intf.ml";
+ flags = "-I ocamlc.byte";
  ocamlc.byte;
  module = "bst.mli";
  flags = "-I ocamlc.byte";

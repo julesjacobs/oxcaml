@@ -1,7 +1,10 @@
 (* TEST
- readonly_files = "set_intf.ml wrong_ulist_equal.ml wrong_ulist_equal.reference";
+ readonly_files = "set_intf.ml bal_intf.ml wrong_ulist_equal.ml wrong_ulist_equal.reference";
  setup-ocamlc.byte-build-env;
  module = "set_intf.ml";
+ ocamlc.byte;
+ module = "bal_intf.ml";
+ flags = "-I ocamlc.byte";
  ocamlc.byte;
  script = "cp wrong_ulist_equal.ml ulist.ml";
  script;

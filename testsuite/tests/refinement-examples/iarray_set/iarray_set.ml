@@ -73,6 +73,13 @@ let[@vox.def] equal (t1 : t @ local logical)
   then agrees t1 t2 second_view
   else false
 
+(* The representation invariant: the view is sorted and duplicate-free.
+   Unlike the tree implementations, this one does not prove it — it is
+   handed over by [wrapper_view_sorted], one of the four laws that make up
+   the trusted boundary around the C implementation. *)
+let[@vox.def] invariant (set : t @ local logical) =
+  Iarray_model.sorted_unique (view set)
+
 let empty_law ~(query : int)
     : unit{ member query empty = false } =
   wrapper_view_empty ~seed:query;
@@ -80,7 +87,20 @@ let empty_law ~(query : int)
   Iarray_model.empty_member_law ~query;
   ()
 
+let empty_invariant : unit{ invariant empty = true } =
+  let _definition = invariant_def empty in
+  wrapper_view_sorted ~array:empty;
+  ()
+
+let insert_invariant ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{ invariant (insert inserted tree) = true } =
+  let _definition = invariant_def (insert inserted tree) in
+  wrapper_view_sorted ~array:(insert inserted tree);
+  ()
+
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
+    ~(well_formed : unit{ invariant tree = true })
     : unit{
       member query (insert inserted tree)
       = ((query = inserted) || member query tree)
