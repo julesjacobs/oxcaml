@@ -179,13 +179,18 @@ let runtime_result builtin ~operands =
       | `Less_equal | `Multiply | `Negate | `Not | `Not_equal | `Or | `Pred
       | `Shift_left | `Shift_right_arithmetic | `Shift_right_logical
       | `Subtract | `Succ
-      (* Division and remainder are modelled faithfully by the backends, and
-         still have no executable meaning here: at a zero divisor the program
-         raises where the model denotes a value, so evaluating the predicate
-         and reading the model can differ.  [None] leaves an [assume] whose
-         predicate divides UNGUARDED rather than carrying a check that can
-         raise -- the same treatment a partial operation gets everywhere
-         else, and the fail-closed direction. *)
+      (* Division and remainder are UNREACHABLE here, and the arm is the
+         fail-closed default for a case that cannot arise rather than a
+         judgement about one that can.  A refinement predicate may not
+         contain a partial operation at all, so [/] and [mod] never reach a
+         predicate: every route is refused earlier with "the value (/) is
+         partial", including both canonical paths for each primitive, an
+         abbreviation, a signature, an external's result and a lemma's.
+
+         Answering [None] anyway is what keeps that true by construction if
+         the earlier refusal is ever relaxed -- and it is the answer the
+         model requires in that event, since at a zero divisor the program
+         raises where the model denotes a value. *)
       | `Divide | `Remainder ),
       _ ) -> None
 ;;
