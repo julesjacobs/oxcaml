@@ -7320,9 +7320,14 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
+(* A value reached from the parameter a structural check is descending on:
+   either that parameter, or something inside it.  A sub-term carries the
+   record fields crossed to reach it, because whether crossing them is sound
+   is a question about those labels' mutability, which the parse tree cannot
+   answer on its own -- see [check_structural_record_fields]. *)
 type structural_relation =
   | Structural_root
-  | Structural_subterm
+  | Structural_subterm of Longident.t loc list
 
 module Structural_string = Misc.Stdlib.String
 
@@ -7348,39 +7353,135 @@ let structural_pattern_bound_names pat =
   iterator.pat iterator pat;
   !names
 
+(* The mutability of every field this name could stand for, as far as the
+   parse tree can tell.
+
+   Two places to look.  An ordinary record's labels are in the lexical label
+   namespace, so looking the name up finds them.  An inline record's labels
+   are not there at all -- [Node of { left : t }] gives no way to write
+   [x.left], so [left] is never in scope as a label -- and are reached
+   instead through the constructor whose argument the record is.  A pattern
+   under a constructor may be either form, so both are consulted and the
+   answers pooled.
+
+   Asking here is what keeps ordinary programs behaving as they did: a
+   recursion over a record whose field is declared mutable in plain sight is
+   declined at this point, so the binding stays partial rather than becoming
+   an error.  It is not the whole answer, because a field name is finally
+   resolved against the expected type and the label chosen need not have been
+   findable here at all; [check_structural_record_fields] settles those. *)
+let structural_lexical_field_mutability type_env (lid : Longident.t loc) =
+  match
+    Env.lookup_all_labels ~use:false ~record_form:Legacy ~loc:lid.loc
+      Env.Projection lid.txt type_env
+  with
+  | exception _ -> []
+  | Error _ -> []
+  | Ok labels ->
+    List.map (fun ((label : label_description), _) -> label.lbl_mut) labels
+
+let structural_inline_field_mutability type_env constructor
+      (lid : Longident.t loc) =
+  match constructor with
+  | None -> []
+  | Some (constructor : Longident.t loc) ->
+    let name = Longident.last lid.txt in
+    let inline_labels (constructor : constructor_description) =
+      match constructor.cstr_inlined with
+      | None -> []
+      | Some declaration ->
+        begin match declaration.type_kind with
+        | Type_record (labels, _, _) ->
+          List.filter_map
+            (fun (label : Types.label_declaration) ->
+              if Ident.name label.ld_id = name
+              then Some label.ld_mutable
+              else None)
+            labels
+        | Type_abstract _ | Type_record_unboxed_product _ | Type_variant _
+        | Type_open -> []
+        end
+    in
+    begin match
+      Env.lookup_all_constructors ~use:false ~loc:constructor.loc Env.Pattern
+        constructor.txt type_env
+    with
+    | exception _ -> []
+    | Error _ -> []
+    | Ok constructors ->
+      List.concat_map
+        (fun ((constructor, _), _) -> inline_labels constructor) constructors
+    end
+
+let structural_field_immutable type_env ~constructor lid =
+  let mutability =
+    structural_lexical_field_mutability type_env lid
+    @ structural_inline_field_mutability type_env constructor lid
+  in
+  (* Nothing found means nothing established, which is not the same as
+     immutable. *)
+  mutability <> [] && List.for_all (fun mut -> not (is_mutable mut)) mutability
+
 (* Return the variables whose values are the root represented by [pat], or
-   strict constructor sub-terms of it.  In particular, record and array
-   projections are deliberately absent: they may cross mutable indirections. *)
-let rec structural_pattern_relations relation pat =
+   strict sub-terms of it, each with the record fields crossed to reach it.
+   Array patterns are deliberately absent: an element can be replaced between
+   the match and the call, so a projection through one is not a sub-term. *)
+let rec structural_pattern_relations type_env ~constructor relation pat =
   let singleton name relation = Structural_string.Map.singleton name relation in
   let union left right =
     Structural_string.Map.union (fun _ left _ -> Some left) left right
   in
-  let strict pat = structural_pattern_relations Structural_subterm pat in
+  let crossed =
+    match relation with
+    | Structural_root -> []
+    | Structural_subterm crossed -> crossed
+  in
+  let strict ?(constructor = None) pat =
+    structural_pattern_relations type_env ~constructor
+      (Structural_subterm crossed) pat
+  in
   match pat.ppat_desc with
   | Ppat_var { txt = name; _ } -> singleton name relation
   | Ppat_alias (pat, { txt = name; _ }) ->
-    union (singleton name relation) (structural_pattern_relations relation pat)
-  | Ppat_construct (_, Some (_, pat))
-  | Ppat_variant (_, Some pat) ->
-    strict pat
+    union (singleton name relation)
+      (structural_pattern_relations type_env ~constructor relation pat)
+  | Ppat_construct (constructor, Some (_, pat)) ->
+    strict ~constructor:(Some constructor) pat
+  | Ppat_variant (_, Some pat) -> strict pat
   | Ppat_tuple (pats, _)
   | Ppat_unboxed_tuple (pats, _) ->
     List.fold_left
       (fun relations (_, pat) -> union relations (strict pat))
       Structural_string.Map.empty pats
+  | Ppat_record (fields, _) ->
+    List.fold_left
+      (fun relations (lid, pat) ->
+        if not (structural_field_immutable type_env ~constructor lid)
+        then relations
+        else
+          union relations
+            (structural_pattern_relations type_env ~constructor:None
+               (Structural_subterm (lid :: crossed))
+               pat))
+      Structural_string.Map.empty fields
   | Ppat_or (left, right) ->
-    let left = structural_pattern_relations relation left in
-    let right = structural_pattern_relations relation right in
+    let left = structural_pattern_relations type_env ~constructor relation left in
+    let right =
+      structural_pattern_relations type_env ~constructor relation right
+    in
     Structural_string.Map.merge
       (fun _ left right ->
         match left, right with
-        | Some left, Some right when left = right -> Some left
+        | Some Structural_root, Some Structural_root -> Some Structural_root
+        | Some (Structural_subterm left), Some (Structural_subterm right) ->
+          (* Either branch may be the one taken, so both branches' fields
+             have to be immutable for the relation to hold. *)
+          Some (Structural_subterm (left @ right))
         | _ -> None)
       left right
   | Ppat_constraint (pat, _, _)
   | Ppat_open (_, pat) ->
-    structural_pattern_relations relation pat
+    structural_pattern_relations type_env ~constructor relation pat
   | Ppat_any
   | Ppat_constant _
   | Ppat_interval _
@@ -7388,7 +7489,6 @@ let rec structural_pattern_relations relation pat =
   | Ppat_unboxed_bool _
   | Ppat_construct (_, None)
   | Ppat_variant (_, None)
-  | Ppat_record _
   | Ppat_record_unboxed_product _
   | Ppat_array _
   | Ppat_type _
@@ -7399,7 +7499,7 @@ let rec structural_pattern_relations relation pat =
   | Ppat_extension _ ->
     Structural_string.Map.empty
 
-let structural_bind_pattern env relation pat =
+let structural_bind_pattern type_env env relation pat =
   let names = structural_pattern_bound_names pat in
   let relations =
     Structural_string.Set.fold Structural_string.Map.remove names env.relations
@@ -7410,7 +7510,8 @@ let structural_bind_pattern env relation pat =
     | Some relation ->
       Structural_string.Map.union
         (fun _ relation _ -> Some relation)
-        (structural_pattern_relations relation pat) relations
+        (structural_pattern_relations type_env ~constructor:None relation pat)
+        relations
   in
   { bound = Structural_string.Set.union names env.bound; relations }
 
@@ -7454,7 +7555,7 @@ let structural_binding_name { pvb_pat; _ } =
   | [name] -> Some name
   | _ -> None
 
-let structurally_terminating_group bindings =
+let structurally_terminating_group type_env bindings =
   let binding_info =
     List.map
       (fun binding ->
@@ -7464,7 +7565,7 @@ let structurally_terminating_group bindings =
       bindings
   in
   if List.exists Option.is_none binding_info
-  then false
+  then None
   else
     let binding_info = List.map Option.get binding_info in
     let group_names =
@@ -7485,6 +7586,10 @@ let structurally_terminating_group bindings =
     in
     let check_position position =
       let valid = ref true in
+      (* The record fields crossed by the descents this position accepts.
+         Collected here rather than where the patterns are read, so that a
+         field a call never actually descends through is not asked about. *)
+      let crossed = ref [] in
       let is_group_reference env lid =
         match lid.txt with
         | Longident.Lident name ->
@@ -7548,10 +7653,12 @@ let structurally_terminating_group bindings =
              args)
           when is_group_reference env lid ->
           (match call_argument name args with
-           | Some argument
-             when relation_of_expression env argument
-                  = Some Structural_subterm -> ()
-           | None | Some _ -> valid := false);
+           | Some argument ->
+             begin match relation_of_expression env argument with
+             | Some (Structural_subterm fields) -> crossed := fields @ !crossed
+             | Some Structural_root | None -> valid := false
+             end
+           | None -> valid := false);
           List.iter (fun (_, argument) -> expression env argument) args
         | Pexp_function (params, _, body) ->
           let env =
@@ -7561,7 +7668,7 @@ let structurally_terminating_group bindings =
                 | Pparam_newtype _ -> env
                 | Pparam_val (_, default, pat) ->
                   Option.iter (expression env) default;
-                  structural_bind_pattern env None pat)
+                  structural_bind_pattern type_env env None pat)
               env params
           in
           begin match body with
@@ -7578,7 +7685,7 @@ let structurally_terminating_group bindings =
           let body_env =
             List.fold_left
               (fun env { pvb_pat; _ } ->
-                structural_bind_pattern env None pvb_pat)
+                structural_bind_pattern type_env env None pvb_pat)
               env bindings
           in
           let rhs_env = if recursive = Recursive then body_env else env in
@@ -7589,7 +7696,7 @@ let structurally_terminating_group bindings =
         | Pexp_for (pat, start, stop, _, body) ->
           expression env start;
           expression env stop;
-          expression (structural_bind_pattern env None pat) body
+          expression (structural_bind_pattern type_env env None pat) body
         | Pexp_letmodule _
         | Pexp_object _
         | Pexp_pack _
@@ -7600,7 +7707,7 @@ let structurally_terminating_group bindings =
       and cases_with_relation env relation cases =
         List.iter
           (fun { pc_lhs; pc_guard; pc_rhs } ->
-            let env = structural_bind_pattern env relation pc_lhs in
+            let env = structural_bind_pattern type_env env relation pc_lhs in
             Option.iter (expression env) pc_guard;
             expression env pc_rhs)
           cases
@@ -7623,7 +7730,7 @@ let structurally_terminating_group bindings =
                     then Some Structural_root
                     else None
                   in
-                  structural_bind_pattern env relation pat,
+                  structural_bind_pattern type_env env relation pat,
                   parameter_index + 1)
               (env, parameter_index) params
           in
@@ -7651,13 +7758,78 @@ let structurally_terminating_group bindings =
             }
             0 pvb_expr)
         bindings;
-      !valid
+      if !valid then Some !crossed else None
     in
     let rec try_position position =
-      position < max_common_position
-      && (check_position position || try_position (position + 1))
+      if position >= max_common_position
+      then None
+      else
+        match check_position position with
+        | Some crossed -> Some crossed
+        | None -> try_position (position + 1)
     in
     try_position 0
+
+(* Settle, on the typed tree, whether the record fields a structural descent
+   crossed are immutable.
+
+   [structural_field_immutable] has already declined every field it could see
+   was mutable.  What it cannot see is a label that is chosen from the
+   expected type without being in lexical scope, which is an ordinary thing
+   for OCaml to do: a homonym in scope can be immutable while the label
+   actually resolved to is not.  By the time that is known the descent has
+   been granted and the mode fixed, so the only honest outcome left is to
+   refuse the program and say why.  A crossed field the walk fails to find is
+   refused on the same footing: an unchecked crossing is the case this exists
+   to prevent, so not finding one is not a reason to let it pass. *)
+let check_structural_record_fields crossed exp_list =
+  (* One entry per distinct field, because a field crossed by both branches
+     of an or-pattern is asked about once per branch and would otherwise have
+     a second entry that nothing ever reaches. *)
+  let wanted =
+    List.fold_left
+      (fun wanted (lid : Longident.t loc) ->
+        if List.mem_assoc lid.loc wanted
+        then wanted
+        else (lid.loc, ref false) :: wanted)
+      [] crossed
+  in
+  let check_field (lid : Longident.t loc) (label : label_description) =
+    match List.assoc_opt lid.loc wanted with
+    | None -> ()
+    | Some found ->
+      found := true;
+      if is_mutable label.lbl_mut
+      then
+        Location.raise_errorf ~loc:lid.loc
+          "vox: this recursion descends through a mutable field. \
+           Assignment can replace what the field holds, so the value bound \
+           here need not be a part of the value matched."
+  in
+  let iterator =
+    let pat
+      : type k. Tast_iterator.iterator -> k general_pattern -> unit
+      =
+      fun iterator pat ->
+        (match pat.pat_desc with
+         | Tpat_record (labels, _, _, _) ->
+           List.iter (fun (lid, label, _) -> check_field lid label) labels
+         | _ -> ());
+        Tast_iterator.default_iterator.pat iterator pat
+    in
+    { Tast_iterator.default_iterator with pat }
+  in
+  List.iter
+    (fun (exp, _) -> iterator.Tast_iterator.expr iterator exp)
+    exp_list;
+  List.iter
+    (fun (loc, found) ->
+      if not !found
+      then
+        Location.raise_errorf ~loc
+          "vox: a structural recursion descends through this field, but the \
+           field was not reached when checking that it is immutable.")
+    wanted
 
 (* [vox.decreases]: termination by a lexicographically ordered tuple of
    integer measures over the parameters, for recursive groups that structural
@@ -13903,9 +14075,12 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
          we type-checked expressions before patterns, then we could call
          [add_module_variables] here.
       *)
-      let structurally_terminating =
-        is_recursive && structurally_terminating_group spat_sexp_list
+      let structural_crossed_fields =
+        if is_recursive
+        then structurally_terminating_group env spat_sexp_list
+        else None
       in
+      let structurally_terminating = Option.is_some structural_crossed_fields in
       if is_recursive && not structurally_terminating then
         List.iter
           (fun binding ->
@@ -14031,6 +14206,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 in
                 exp, None)
       in
+      (match structural_crossed_fields with
+       | None | Some [] -> ()
+       | Some (_ :: _ as crossed) ->
+         check_structural_record_fields crossed exp_list);
       List.iter2
         (fun (_, pat, _) (attrs, exp) ->
           Builtin_attributes.warning_scope ~ppwarning:false attrs

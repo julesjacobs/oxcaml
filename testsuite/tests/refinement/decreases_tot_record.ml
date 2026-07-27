@@ -35,4 +35,17 @@ let rec steps (o : outer) : int =
   | { inner = { next = None } } -> 0
   | { inner = { next = Some o } } -> 1 + steps o
 
-let total_use () = expects_total size, expects_total depth, expects_total steps
+(* One field crossed by both branches of an or-pattern written inside it.
+   The field is reached once per branch, so it is asked about twice and both
+   questions are about the same field. *)
+type step = { next : hop }
+and hop = Left of step | Right of step | Stop
+
+let rec hops (s : step) : int =
+  match s with
+  | { next = (Left s | Right s) } -> 1 + hops s
+  | { next = Stop } -> 0
+
+let total_use () =
+  expects_total size, expects_total depth, expects_total steps,
+  expects_total hops
