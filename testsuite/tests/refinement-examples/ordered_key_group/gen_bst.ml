@@ -1,3 +1,22 @@
+(* A plain search tree, ordered but not balanced.
+
+   Why it is in this directory: it is the unforced half of the lane's central
+   contrast.  It descends one spine and stops on the comparison exactly as
+   [gen_sorted] does, and yet its [insert_law] proof never reaches for
+   [ordered], so weakening that component to [true] still seals -- while the
+   same weakening of [gen_sorted]'s [sorted] does not.  Neither half of that
+   pair means anything alone; together they show that whether the interface
+   forces a component is a fact about the proof, not about the structure.
+
+   It also shares 341 non-blank lines verbatim with [gen_avl], whose tree
+   type is this one with [Leaf] for [Empty], and a shared ordered-tree core
+   could remove them.  It is left as it is on purpose: the two are kept as
+   independent measurements of what abstracting the key costs, and merging
+   their proofs would merge two data points into one and change the
+   obligation counts this corpus exists to compare against the integer
+   family.  That is a decision to revisit if the corpus stops being a
+   measurement. *)
+
 external int_equal : int -> int -> bool @@ total = "%equal"
 external int_less : int -> int -> bool @@ total = "%lessthan"
 

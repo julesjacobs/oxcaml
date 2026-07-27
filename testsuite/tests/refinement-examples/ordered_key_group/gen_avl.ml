@@ -1,3 +1,17 @@
+(* A height-balanced tree.
+
+   Why it is in this directory: it is the only implementation whose invariant
+   has a shape component, so it is what establishes that key-free balancing
+   proofs -- height arithmetic, the rotation shapes, [rebalance_ok] -- carry
+   to an abstract key with nothing changed but the key type.  It is also the
+   only place a mutation lands on a forced component:
+   [wrong_avl_duplicate] breaks [ordered], and [ordered] is what this
+   implementation's [insert_law] needs.  Its [balanced] component is not
+   forced, which is the shape half of the measurement in [key_intf.ml].
+
+   On the 341 lines it shares with [gen_bst], see the note at the head of
+   that file. *)
+
 external int_equal : int -> int -> bool @@ total = "%equal"
 external int_less : int -> int -> bool @@ total = "%lessthan"
 

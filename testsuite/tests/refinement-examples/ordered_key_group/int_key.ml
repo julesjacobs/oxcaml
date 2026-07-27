@@ -1,3 +1,11 @@
+(* The integer key.  It is byte-identical to [polyset/ordered_int.ml], and
+   the copy is deliberate: this directory needs an integer instance to make
+   the "what does abstracting the key cost" comparison against the integer
+   family, and an ocamltest directory symlinks its own [readonly_files].
+   Referring to the sibling directory's copy is possible -- [iarray_set] does
+   it for one module -- but it makes two suites' fixtures move together for
+   the sake of 58 lines, and this file has no reason to change.  If
+   [ORDERED_KEY] is ever changed, both copies change with it. *)
 type t = int
 
 let witness = 0

@@ -1,3 +1,12 @@
+(* A list with no repeated key.
+
+   Why it is in this directory: it is the control.  It is the only one of the
+   four that uses the comparison as an equality test and never as an order,
+   and that is what makes "twelve law instantiations per tree" a measurement
+   rather than an assertion -- this one needs four, all of
+   [compare_zero_iff_equal], and it is the only one that still verifies when
+   sign reversal and transitivity are weakened to [unit{ true }]. *)
+
 external int_equal : int -> int -> bool @@ total = "%equal"
 
 module Make (K : Key_intf.ORDERED_KEY) = struct

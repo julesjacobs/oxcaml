@@ -3,7 +3,16 @@ external int_less : int -> int -> bool @@ total = "%lessthan"
 
 (* A strictly increasing list.  Like the trees, membership uses the order:
    it stops as soon as it passes the key it is looking for, which is wrong
-   unless the list really is sorted. *)
+   unless the list really is sorted.
+
+   Why it is in this directory: it is the only implementation whose invariant
+   is both forced and cheap, and it is the honest replacement for the sorted
+   [iarray] of the integer family -- it proves the sortedness that the
+   trusted-wrapper version assumes, and it is the smallest thing here that
+   needs [compare] to order rather than merely to decide equality.  A
+   trusted-wrapper implementation cannot be made generic in the key at all:
+   the trust boundary is native code, native code cannot see [K.compare], and
+   the wrapper laws are stated in terms of it. *)
 module Make (K : Key_intf.ORDERED_KEY) = struct
   type key = K.t
   type t = key list
