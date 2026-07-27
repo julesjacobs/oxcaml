@@ -1614,12 +1614,17 @@ let check_concrete_inhabitance (context : context) location =
 type oxsmt_environment =
   { terms : Oxsmt_context.t;
     bv_minter : Oxsmt_bv.minter;
+    declare_constant : string -> Oxsmt_sort.t -> Oxsmt_core.Symbol.t;
     datatypes : (string * Oxsmt_datatype_defs.datatype) list;
     references : (reference * Oxsmt_core.Symbol.t) list;
     variables : (variable * Oxsmt_core.Symbol.t) list;
     nia_minter : Oxsmt_internal_minter.t option;
     mutable nia_mul_symbol : Oxsmt_core.Symbol.t option;
     mutable nia_products : Oxsmt_nia_lin.product list;
+    (* The unconstrained results already handed out for a divisor that may
+       be zero, keyed by the operation and the two operand terms. *)
+    mutable division_fallbacks :
+      (string * Oxsmt_term.t * Oxsmt_term.t * Oxsmt_term.t) list;
   }
 
 let oxsmt_shapes context location =
@@ -1799,6 +1804,45 @@ let oxsmt_selector environment location key constructor_index field_index =
     error location "internal error: missing oxsmt selector %d for %s"
       field_index key
 
+(* The result of a division whose divisor may be zero.  The program raises
+   there rather than producing a value, so the model must not hand one out.
+   The other two backends apply an uninterpreted function to the operands;
+   the vendored bit-blaster has no encoding for one, but an unconstrained
+   constant of the right sort is exactly an arbitrary-but-fixed value and it
+   does take that.
+
+   Two occurrences sharing a constant is a claim that their results are
+   equal, so the constant is keyed by the operands: occurrences of the same
+   division share one, because they are the same expression and a term has
+   to equal itself, and occurrences of different divisions never do.  That
+   is weaker than an uninterpreted function, which relates results whose
+   operands are equal without being identical.
+
+   Weaker is sound here in both directions, because only [unsat] is read
+   from a query: replacing a fixed-but-unknown value with an unconstrained
+   one only adds models, so a refutation through this encoding is a
+   refutation of the original. *)
+let oxsmt_division_fallback environment operation left right =
+  let matches (key, previous_left, previous_right, _) =
+    String.equal key operation
+    && Oxsmt_term.equal previous_left left
+    && Oxsmt_term.equal previous_right right
+  in
+  match List.find_opt matches environment.division_fallbacks with
+  | Some (_, _, _, term) -> term
+  | None ->
+    let name =
+      Printf.sprintf "%s_%d" operation
+        (List.length environment.division_fallbacks)
+    in
+    let symbol =
+      environment.declare_constant name (Oxsmt_sort.bitvec int_width)
+    in
+    let term = Oxsmt_context.const environment.terms symbol in
+    environment.division_fallbacks <-
+      (operation, left, right, term) :: environment.division_fallbacks;
+    term
+
 let oxsmt_multiply ~allow_nonlinear environment location left right =
   let terms = environment.terms in
   match left.Oxsmt_term.node, right.Oxsmt_term.node with
@@ -1960,44 +2004,16 @@ let oxsmt_builtin environment location builtin arguments =
        and remainder are built here the way SMT-LIB defines them: on the
        magnitudes, with the sign put back.  Truncation towards zero and a
        remainder carrying the dividend's sign are what OCaml does, and
-       [min_int / (-1)] wraps because negating [min_int] wraps.
+       [min_int / (-1)] wraps because negating [min_int] wraps -- the
+       negated bit pattern read as unsigned is the true magnitude, which is
+       the whole reason this works at the bottom of the range.
 
-       A zero divisor raises rather than producing a value.  The other two
-       backends send that case to an uninterpreted symbol, which this one
-       cannot do: the blaster is QF_BV and refuses an uninterpreted function
-       over bitvectors.  So a divisor that is not a literal known to be
-       non-zero is refused outright, exactly as an out-of-range shift count
-       is.  That is weaker than the other two backends and fails closed. *)
+       A zero divisor raises rather than producing a value, and goes to an
+       unconstrained constant of the same sort; see
+       [oxsmt_division_fallback] for why that is sound and where it is
+       weaker than the uninterpreted function the other two backends get. *)
     begin match term_values, term_sorts with
     | [left; right], [Sint; Sint] ->
-      (* The divisor's sign is read off the literal rather than tested in
-         the term.  Each branch of the term is a full division circuit, and
-         the facts of earlier divisions accumulate, so halving the branches
-         halves a cost that grows with the square of the divisions in a
-         compilation unit. *)
-      let divisor_negative =
-        match Oxsmt_bv.view right with
-        | Some (Oxsmt_bv.Const { value; width }) when width = int_width ->
-          if Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0) then
-            None
-          else
-            (* The literal is canonical in [0, 2^int_width), so it stands for
-               a negative number exactly when its sign bit is set.  The
-               threshold comes from [int_width] rather than from the host's
-               own [max_int]: the two agree today, but they are independent
-               constants, and reading the sign against the wrong one would
-               emit a wrong quotient rather than fail. *)
-            Some (Oxsmt_core.Bigint.compare value int_sign_bit >= 0)
-        | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> None
-      in
-      let divisor_negative =
-        match divisor_negative with
-        | Some negative -> negative
-        | None ->
-          raise
-            (Oxsmt_unsupported
-               "integer division by a divisor not known to be non-zero")
-      in
       let apply operator x y =
         Oxsmt_bv.binop terms environment.bv_minter operator x y
       in
@@ -2007,30 +2023,85 @@ let oxsmt_builtin environment location builtin arguments =
       let below_zero x =
         apply Oxsmt_bv.Bvslt x (oxsmt_int_constant environment 0)
       in
+      (* An operand's sign, where a literal tells it statically.  The
+         literal is canonical in [0, 2^int_width), so it stands for a
+         negative number exactly when its sign bit is set.  The threshold
+         comes from [int_width] rather than from the host's own [max_int]:
+         the two agree today, but they are independent constants, and
+         reading the sign against the wrong one would emit a wrong quotient
+         rather than fail. *)
+      let literal_value x =
+        match Oxsmt_bv.view x with
+        | Some (Oxsmt_bv.Const { value; width }) when width = int_width ->
+          Some value
+        | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> None
+      in
+      let static_sign x =
+        match literal_value x with
+        | Some value ->
+          Some (Oxsmt_core.Bigint.compare value int_sign_bit >= 0)
+        | None -> None
+      in
+      (* The magnitude of an operand, and whether the result is negated.
+         There is one division circuit rather than one per combination of
+         signs: branching on the signs first and dividing inside each branch
+         costs four circuits for a symbolic divisor, which the blaster does
+         not finish. *)
+      let magnitude_of x =
+        match static_sign x with
+        | Some true -> negate x
+        | Some false -> x
+        | None -> Oxsmt_context.ite terms (below_zero x) (negate x) x
+      in
       let magnitude =
         match operation with
         | `Divide -> Oxsmt_bv.Bvudiv
         | `Remainder -> Oxsmt_bv.Bvurem
       in
-      (* The sign of the result follows the dividend for a remainder, and the
-         two operands' signs for a quotient. *)
-      let signed_by ~dividend_negative ~divisor_negative =
-        let value =
-          apply magnitude
-            (if dividend_negative then negate left else left)
-            (if divisor_negative then negate right else right)
-        in
-        let flip =
-          match operation with
-          | `Divide -> dividend_negative <> divisor_negative
-          | `Remainder -> dividend_negative
-        in
-        if flip then negate value else value
+      let unsigned = apply magnitude (magnitude_of left) (magnitude_of right) in
+      (* The sign of the result follows the dividend for a remainder, and
+         the two operands' signs for a quotient. *)
+      let static_flip =
+        match operation, static_sign left, static_sign right with
+        | `Remainder, dividend, _ -> dividend
+        | `Divide, Some dividend, Some divisor -> Some (dividend <> divisor)
+        | `Divide, (Some _ | None), (Some _ | None) -> None
       in
-      ( Oxsmt_context.ite terms (below_zero left)
-          (signed_by ~dividend_negative:true ~divisor_negative)
-          (signed_by ~dividend_negative:false ~divisor_negative),
-        Sint )
+      let signed =
+        match static_flip with
+        | Some true -> negate unsigned
+        | Some false -> unsigned
+        | None ->
+          let flip =
+            match operation with
+            | `Remainder -> below_zero left
+            | `Divide ->
+              Oxsmt_context.not_ terms
+                (Oxsmt_context.eq terms (below_zero left)
+                   (below_zero right))
+          in
+          Oxsmt_context.ite terms flip (negate unsigned) unsigned
+      in
+      let fallback () =
+        oxsmt_division_fallback environment
+          (division_fallback_basename operation)
+          left right
+      in
+      let term =
+        match literal_value right with
+        | Some value
+          when Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0) ->
+          (* Nothing else can be said: the operation raises here. *)
+          fallback ()
+        | Some _ -> signed
+        | None ->
+          Oxsmt_context.ite terms
+            (Oxsmt_context.not_ terms
+               (Oxsmt_context.eq terms right
+                  (oxsmt_int_constant environment 0)))
+            signed (fallback ())
+      in
+      (term, Sint)
     | _ -> error location "integer division used with the wrong arity"
     end
   | (`Shift_left | `Shift_right_logical
@@ -2801,12 +2872,14 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
     { terms;
       bv_minter =
         Oxsmt_internal_minter.mint (Oxsmt_session.parse_minter session);
+      declare_constant = Oxsmt_session.declare_const session;
       datatypes;
       references;
       variables;
       nia_minter;
       nia_mul_symbol = None;
       nia_products = [];
+      division_fallbacks = [];
     }
   in
   let true_term = Oxsmt_context.bool_const terms true in
