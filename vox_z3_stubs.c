@@ -115,14 +115,28 @@ static void close_descriptor(int *descriptor)
   *descriptor = -1;
 }
 
+/* The solver has just been sent SIGTERM and takes microseconds to go, but
+   never quite fast enough for the first non-blocking reap, so a flat 100 ms
+   between attempts was 100 ms of sleeping on every compilation that opened a
+   session -- and the sleep was spent waiting for a child that had already
+   exited. Start a thousand times shorter and back off, which reaps the usual
+   case on the first pause and keeps the same two-second budget before
+   escalating to SIGKILL. */
+#define WAIT_INITIAL_MICROSECONDS 200
+#define WAIT_MAXIMUM_MICROSECONDS 100000
+#define WAIT_ATTEMPTS 29
+
 static void wait_briefly(pid_t pid)
 {
   int attempts;
   int status;
-  for (attempts = 0; attempts < 20; attempts++) {
+  useconds_t pause = WAIT_INITIAL_MICROSECONDS;
+  for (attempts = 0; attempts < WAIT_ATTEMPTS; attempts++) {
     pid_t waited = waitpid(pid, &status, WNOHANG);
     if (waited == pid || (waited < 0 && errno == ECHILD)) return;
-    usleep(100000);
+    usleep(pause);
+    pause *= 2;
+    if (pause > WAIT_MAXIMUM_MICROSECONDS) pause = WAIT_MAXIMUM_MICROSECONDS;
   }
   kill(-pid, SIGKILL);
   kill(pid, SIGKILL);
