@@ -884,8 +884,16 @@ def _fact_producers(
     all -- a consumer that has to know every introducer of a fact must then
     treat the fact as having unknown provenance rather than reading
     ``origin`` as the complete answer, since a single ``origin`` is exactly
-    what a fold leaves behind.  An entry whose span will not place is dropped
-    from the list and turns the whole list unknown, for the same reason.
+    what a fold leaves behind.
+
+    An entry whose span will not place -- a ghost location, or a site in a
+    file this view does not hold -- is dropped and the rest kept.  That is
+    safe in the one direction that matters: a call this editor can decide is
+    a call whose own span placed, so a dropped entry can never be the call
+    being decided, and dropping it can only withhold evidence about some
+    other site, never manufacture evidence against one.  Nullifying the whole
+    list instead would throw away the placeable entries alongside it, and
+    with them the only record that a call was read.
     """
     raw = fact.get("producers")
     if not isinstance(raw, list):
@@ -897,7 +905,7 @@ def _fact_producers(
             entry.get("span"), lines_by_file, expected_file
         )
         if normalized is None:
-            return None
+            continue
         name = entry.get("name")
         kind = entry.get("kind")
         producers.append(

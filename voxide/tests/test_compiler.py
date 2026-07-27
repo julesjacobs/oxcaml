@@ -978,7 +978,7 @@ class LemmaCallChannelTests(unittest.TestCase):
             [{"line": 4, "col": 11}, {"line": 5, "col": 11}],
         )
 
-    def test_absent_or_unplaceable_producers_are_unknown(self):
+    def test_an_absent_producers_field_is_unknown(self):
         # Falling back to `origin` here would name one introducer of a fact
         # several sites introduced, which is how a needed call gets called
         # unnecessary.
@@ -987,14 +987,46 @@ class LemmaCallChannelTests(unittest.TestCase):
                 "producers"
             ]
         )
+
+    def test_an_unplaceable_producer_is_dropped_and_the_rest_kept(self):
+        # A site that will not place cannot be a call this editor decides --
+        # a decidable call is one whose own span placed -- so dropping it can
+        # only withhold evidence about some other site.  Discarding the whole
+        # list would take the placeable entries with it, and those are the
+        # record that a call WAS read.
+        mixed = {
+            "text": "p",
+            "producers": [
+                {
+                    "kind": "application",
+                    "name": "ghost_law",
+                    "span": {**_span_v1(5, 11, 23), "ghost": "true"},
+                },
+                {
+                    "kind": "application",
+                    "name": "real_law",
+                    "span": _span_v1(6, 11, 23),
+                },
+            ],
+        }
+        producers = compiler_adapter._hypothesis(mixed, self.SOURCE_LINES)[
+            "producers"
+        ]
+        assert producers is not None
+        self.assertEqual([p["name"] for p in producers], ["real_law"])
+
+    def test_producers_none_of_which_place_leave_an_empty_list(self):
+        # Empty, not None: the compiler did report the provenance, and every
+        # site it named is one this view cannot point at.  That is a fact with
+        # no evidence to offer, not a fact of unknown provenance.
         ghost = {
             "text": "p",
             "producers": [
                 {"kind": "application", "span": {**_span_v1(5, 11, 23), "ghost": "true"}}
             ],
         }
-        self.assertIsNone(
-            compiler_adapter._hypothesis(ghost, self.SOURCE_LINES)["producers"]
+        self.assertEqual(
+            compiler_adapter._hypothesis(ghost, self.SOURCE_LINES)["producers"], []
         )
 
     def test_per_backend_usage_keeps_a_silent_backend_silent(self):

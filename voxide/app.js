@@ -743,13 +743,6 @@ function markVcs() {
   markLemmaCalls();
 }
 
-// Paint the calls that introduced a proposition no obligation read.  Derived
-// inside markVcs so it is replaced by exactly the events that replace the
-// obligation marks -- an edit, a backend change, a tab switch, a hydration, a
-// response that arrived after a newer one -- and can never survive one of
-// them.  The mark is a dotted underline in the muted text colour: legible, and
-// nothing like a diagnostic squiggle, an unused-value warning, or the
-// obligation washes it sits beside.
 // Is this result complete enough to say a call went unread?  Every clause is
 // a way the fold could be missing an obligation that read the fact: a run that
 // produced no trustworthy data, an obligation with no placeable span, a
@@ -764,10 +757,21 @@ function singleBufferResultComplete() {
   );
 }
 
+// Paint the calls that introduced a proposition no obligation read.  Called
+// from markVcs so it is replaced by exactly the events that replace the
+// obligation marks -- an edit, a backend change, a tab switch, a hydration, a
+// response that arrived after a newer one -- and can never survive one of
+// them.  The mark is a dotted underline in the muted text colour: legible, and
+// nothing like a diagnostic squiggle, an unused-value warning, or the
+// obligation washes it sits beside.
 function markLemmaCalls() {
   const answer = unnecessaryLemmaCalls({
+    // allObligations, not vcs plus whatever cross-unit list happens to be
+    // lying around: outside workspace mode a leftover cross-unit obligation
+    // would be an unproved stranger in the fold and would silence the answer
+    // for the buffer in front of the reader.
     lemmaCalls,
-    obligations: [...vcs, ...crossUnitVcs],
+    obligations: allObligations(),
     complete: lemmaResultComplete,
     backend: backendSelection,
   });
@@ -3453,6 +3457,10 @@ function applyWorkspaceView(payload, elapsed) {
   // a call here can be read by an obligation in a unit that is not shown.
   lemmaCalls = Array.isArray(payload.lemma_calls) ? payload.lemma_calls : null;
   lemmaResultComplete =
+    // A retained layer supplies the active unit's obligations from an earlier
+    // payload while the cross-unit ones come from this one.  The fold would
+    // then span two responses, which is the stale-revision case: stay quiet.
+    !layer &&
     fullAudit.valid &&
     fullAudit.invalidUnits.size === 0 &&
     !adapted.unavailable &&

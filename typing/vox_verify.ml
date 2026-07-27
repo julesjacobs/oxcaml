@@ -716,10 +716,6 @@ let refines_unit ~env (refinement : Types.refinement_desc) =
   | Tconstr (path, _, _) -> Path.same path Predef.path_unit
   | _ -> false
 
-(* Does this refinement refine [unit]?  The carrier is what the call hands
-   back, so a refined [unit] result means the call hands back nothing: its
-   predicate is its entire contribution. *)
-
 let node expression desc =
   Refinement.create ~loc:expression.exp_loc
     ~type_:(carrier ~env:expression.exp_env expression.exp_type)
