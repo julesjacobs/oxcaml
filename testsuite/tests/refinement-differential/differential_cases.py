@@ -48,7 +48,9 @@ def literal(value):
 class Case:
     """One operation at one choice of operands."""
 
-    def __init__(self, family, operator, form, sort, operands, modelled=True):
+    def __init__(
+        self, family, operator, form, sort, operands, modelled=True, raises=False
+    ):
         self.family = family
         self.operator = operator
         self.form = form
@@ -58,6 +60,13 @@ class Case:
         # False says the operation is deliberately left uninterpreted, so
         # every answer must be refused rather than any one of them proved.
         self.modelled = modelled
+        # Whether the operation is expected to raise rather than return.  A
+        # case that raises produces no value to compare, so the comparison
+        # has to be that it raised: the driver requires an expected exception
+        # to happen and an unexpected one to fail the gate, because a case
+        # that quietly starts raising otherwise contributes nothing and the
+        # gate stays green having compared nothing.
+        self.raises = raises
 
     @property
     def key(self):
@@ -249,7 +258,8 @@ def _division(pairs):
             "infix",
             "int",
             [left, right],
-            _value_of(right) != 0,
+            modelled=_value_of(right) != 0,
+            raises=_value_of(right) == 0,
         )
         for operator in DIVISION
         for left, right in pairs
@@ -326,20 +336,31 @@ def lean_cases():
     )
 
 
-PROFILES = {"core": core_cases, "lean": lean_cases, "full": full_cases}
+PROFILES = {
+    "core": core_cases,
+    "lean": lean_cases,
+    "full": full_cases,
+}
 
 
 def cases(profile):
     return PROFILES[profile]()
 
 
-def wrong_witnesses(case, observed):
+def wrong_witnesses(case, observed, has_candidates=True):
     """Answers the verifier must not prove for this case.
 
-    [observed] is the machine's answer, or None where the operation raised.
-    Proving any of these would mean the backend and the machine disagree; and
-    because they are refused even where the machine's own answer is proved,
-    they also show that the obligation is not vacuous.
+    [observed] is the machine's answer, or None where the machine gave no
+    single one.  Proving any of these would mean the backend and the machine
+    disagree; and because they are refused even where the machine's own
+    answer is proved, they also show that the obligation is not vacuous.
+
+    [has_candidates] says whether the machine produced any value at all.
+    Where it produced none -- every run raised -- there is nothing to build a
+    witness from, and a case in that state would otherwise contribute no
+    obligation whatever and leave the gate green having compared nothing.  So
+    the verifier is asked to refuse two fixed answers instead: it must not
+    hand out a value for an operation that returns none.
     """
     witnesses = []
 
@@ -350,6 +371,9 @@ def wrong_witnesses(case, observed):
     if case.sort == "bool":
         if observed is not None:
             add(not observed)
+        elif not has_candidates:
+            add(True)
+            add(False)
         return witnesses
 
     if case.family == "divmod":
@@ -375,6 +399,9 @@ def wrong_witnesses(case, observed):
 
     if observed is not None:
         add(wrap(observed + 1))
+    elif not has_candidates:
+        add(0)
+        add(1)
     return witnesses
 
 
