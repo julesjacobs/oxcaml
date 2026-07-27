@@ -1,0 +1,4 @@
+File "integer_division_alias.ml", line 20, characters 23-55:
+20 | let through_an_alias = ((elsewhere 6 2) : int{ _ = 3 })
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)

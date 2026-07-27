@@ -18,6 +18,7 @@ type t =
   | `Bigint_one
   | `Bigint_sub
   | `Bigint_zero
+  | `Divide
   | `Equal
   | `Greater
   | `Greater_equal
@@ -32,6 +33,7 @@ type t =
   | `Not_equal
   | `Or
   | `Pred
+  | `Remainder
   | `Shift_left
   | `Shift_right_arithmetic
   | `Shift_right_logical
@@ -73,6 +75,13 @@ let of_primitive ~path = function
   | "%addint" -> Some `Add
   | "%subint" -> Some `Subtract
   | "%mulint" -> Some `Multiply
+  (* Pinned to the canonical paths, like the bitwise primitives: a user may
+     declare an external at another type with the same primitive name, and a
+     float carrier must not be read as a bitvector quotient. *)
+  | "%divint" when stdlib_member "/" path || int_member "div" path ->
+    Some `Divide
+  | "%modint" when stdlib_member "mod" path || int_member "rem" path ->
+    Some `Remainder
   | "%negint" -> Some `Negate
   | "%succint" -> Some `Succ
   | "%predint" -> Some `Pred

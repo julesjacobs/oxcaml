@@ -574,12 +574,23 @@ let primitive_is_total = function
 
 (* Invariant: [primitive_is_total] together with this comparison list must
    COVER [Vox_builtin.of_primitive] -- every primitive the backends model as a
-   proposition constructor must be admissible inside a predicate.  A
+   proposition constructor must be admissible inside a predicate -- except
+   for the operations that are not total, which are listed below.  A
    saturated direct comparison is also admitted in ordinary total code when
    both typed operands are integers; [type_expect] checks that condition after
    typing the application.  Comparison values and other operand types remain
    partial.  A builtin entry in neither set therefore fails closed.
-   Arithmetic and boolean connectives are already in [primitive_is_total]. *)
+   Arithmetic and boolean connectives are already in [primitive_is_total].
+
+   The exception is [%divint] and [%modint].  The backends model their value,
+   so a division in subject position can be proved about, but a zero divisor
+   raises rather than producing one, so neither is total and neither is
+   admissible inside a predicate: a predicate is a proposition and [a / 0]
+   denotes nothing to make a proposition out of.  Admitting them would need a
+   ruling on what a predicate whose evaluation raises means, which is the
+   same question a runtime-checked predicate raises, so it is not settled
+   here.  Until it is, a predicate mentioning [/] or [mod] is refused, which
+   is the behaviour that was there before either was modelled. *)
 let primitive_is_refinement_comparison = function
   | "%equal" | "%notequal"
   | "%lessthan" | "%lessequal"
