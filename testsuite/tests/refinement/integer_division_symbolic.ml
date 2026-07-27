@@ -17,8 +17,13 @@
    is the shape the division model exists to serve, and this backend does not
    serve it.  Bounding the circuit rather than refusing it is separate work.
 
-   The verdicts here are this backend's.  The same file under [-vox-backend
-   z3] would prove the three refusals below. *)
+   The verdicts here are this backend's.  Under [-vox-backend z3] all three
+   refusals below prove.  Under [-vox-backend lean] none of them does, for a
+   different reason: Lean is given [if decide (d <> 0) then d1 / d2 else ...],
+   and with a symbolic divisor the [decide] does not reduce and nothing
+   instantiates the case split, so the quotient stays behind a branch the
+   proof cannot enter.  So z3 is the only backend that serves a symbolic
+   divisor at all, and this file's subject is the in-process one. *)
 
 let literal = ((7 / 2) : int{ _ = 3 })
 [%%expect {|
@@ -84,3 +89,63 @@ Line 1, characters 24-50:
                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (not-proved)
 |}]
+
+(* Where a zero divisor goes on this backend, and the one property that
+   choice rests on.
+
+   There is no value to hand out -- the program raises -- so the term is an
+   unconstrained constant of the right sort.  The solver's authors give the
+   rule as one constant per call site; this keys it on the operation and the
+   two operand terms instead, which is weaker in one direction and stronger
+   in another, and both directions are pinned below rather than argued.
+
+   Two occurrences of the SAME division are one expression and have to agree,
+   so a constant per occurrence would take [same_division] to not-proved.
+   Two occurrences of DIFFERENT divisions must not be made to agree, so one
+   constant per operation would take [different_dividends] to proved -- a
+   proof relating two programs that both raise.  The wrong answer beside the
+   first is the third leg: it fails if the constant never reaches the solver
+   at all, which is a state the other two cannot distinguish from
+   working, because an obligation nothing decides and an obligation about a
+   value nothing constrains both come back not-proved.
+
+   The bodies sit under a parameter so that the toplevel does not evaluate
+   them; every one of them raises. *)
+let same_division (_unused : int) =
+  (((1 / 0) - (1 / 0)) : int{ _ = 0 })
+[%%expect {|
+val same_division : int -> int{ _ = 0 } = <fun>
+|}]
+
+let same_division_is_not_vacuous (_unused : int) =
+  (((1 / 0) - (1 / 0)) : int{ _ = 1 })
+[%%expect {|
+Line 2, characters 2-38:
+2 |   (((1 / 0) - (1 / 0)) : int{ _ = 1 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+let different_dividends (_unused : int) =
+  (((1 / 0) - (2 / 0)) : int{ _ = 0 })
+[%%expect {|
+Line 2, characters 2-38:
+2 |   (((1 / 0) - (2 / 0)) : int{ _ = 0 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+let quotient_is_not_remainder (_unused : int) =
+  (((1 / 0) - (1 mod 0)) : int{ _ = 0 })
+[%%expect {|
+Line 2, characters 2-40:
+2 |   (((1 / 0) - (1 mod 0)) : int{ _ = 0 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* The table these constants live in is per-obligation state, rebuilt with
+   the session.  Nothing above could observe it being shared across
+   obligations directly, but a term carried out of a finished session would
+   name a symbol the next one never declared, and the three cases after the
+   first would not answer as they do. *)
