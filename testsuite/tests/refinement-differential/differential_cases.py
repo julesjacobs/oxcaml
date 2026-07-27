@@ -237,6 +237,10 @@ def full_cases():
     pairs = [(left, right) for left in FULL_VALUES for right in FULL_VALUES]
     return (
         _binary("arith", ARITHMETIC, pairs)
+        # The boundaries spelled as numerals rather than as [max_int] and
+        # [min_int]; the sweep's own operand list carries neither spelling of
+        # the extremes as a numeral.
+        + _binary("numeral", ARITHMETIC, CORE_NUMERAL_PAIRS)
         + _binary("bitwise", BITWISE, pairs)
         + _shifts(FULL_VALUES, FULL_SHIFT_DISTANCES)
         + _unary(FULL_VALUES)
