@@ -1,0 +1,11 @@
+--- gen_ulist.ml
++++ gen_ulist.ml
+@@ -44,7 +44,7 @@
+       else member query rest
+ 
+   let[@vox.def] insert (inserted : key @ logical) (set : t @ logical) =
+-    if member inserted set then set else inserted :: set
++    inserted :: set
+ 
+   (* No key is repeated: unlike the plain list of [polyset], this really is
+      a set, and every key occupies exactly one cell. *)

@@ -1,0 +1,11 @@
+--- gen_avl.ml
++++ gen_avl.ml
+@@ -743,7 +743,7 @@
+     | Leaf -> Node (Leaf, fresh, Leaf)
+     | Node (left, pivot, right) ->
+       if int_equal (K.compare fresh pivot) 0
+-      then tree
++      then rebalance (Node (insert fresh left, pivot, right))
+       else if int_less (K.compare fresh pivot) 0
+       then rebalance (Node (insert fresh left, pivot, right))
+       else rebalance (Node (left, pivot, insert fresh right))
