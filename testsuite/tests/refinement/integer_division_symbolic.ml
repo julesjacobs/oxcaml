@@ -3,104 +3,84 @@
  expect;
 *)
 
-(* A divisor the verifier cannot see is a literal.
+(* What the in-process backend needs of a divisor, and what refusing costs.
 
-   The in-process backend has no uninterpreted function over bitvectors, so
-   it cannot say what the other two say about a division whose divisor might
-   be zero: that the result is some arbitrary but fixed value.  It can say
-   something weaker that is enough -- an unconstrained constant of the same
-   sort -- because only an unsatisfiable query is ever read as an answer,
-   and replacing a fixed unknown value by an unconstrained one only admits
-   more models.
+   It builds bitvector terms rather than printing them, and its blaster is
+   QF_BV: it has no uninterpreted function over bitvectors to send a zero
+   divisor to, and a signed division circuit over a symbolic 63-bit divisor
+   is beyond what it finishes.  So it needs the divisor's value while the
+   term is built, and refuses a division whose divisor is not a constant.
 
-   The constant is shared by the operands rather than minted per occurrence.
-   Two occurrences of the same division are the same expression and a term
-   has to equal itself; two divisions with different operands must not be
-   related, and are not. *)
+   The cost is a real disagreement with z3, which proves every shape below
+   that this file records as refused.  It is fail-closed -- nothing is proved
+   that another backend refutes -- but a divisor a refinement shows non-zero
+   is the shape the division model exists to serve, and this backend does not
+   serve it.  Bounding the circuit rather than refusing it is separate work.
 
-let pinned (b : int{ _ = 5 }) = ((10 / b) : int{ _ = 2 })
+   The verdicts here are this backend's.  The same file under [-vox-backend
+   z3] would prove the three refusals below. *)
+
+let literal = ((7 / 2) : int{ _ = 3 })
 [%%expect {|
-val pinned : int{ _ = 5 } -> int{ _ = 2 } = <fun>
+val literal : int{ _ = 3 } = 3
 |}]
 
-(* Reaching the divisor is only worth anything if the answer is the
-   machine's. *)
-let pinned_is_not_vacuous (b : int{ _ = 5 }) = ((10 / b) : int{ _ = 3 })
+let literal_is_not_vacuous = ((7 / 2) : int{ _ = 4 })
 [%%expect {|
-Line 1, characters 47-72:
-1 | let pinned_is_not_vacuous (b : int{ _ = 5 }) = ((10 / b) : int{ _ = 3 })
-                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 1, characters 29-53:
+1 | let literal_is_not_vacuous = ((7 / 2) : int{ _ = 4 })
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (disproved)
 |}]
 
-let pinned_negative (b : int{ _ = (-2) }) = ((7 / b) : int{ _ = (-3) })
+(* A name bound to the divisor is not the divisor's value: the term the
+   verifier sees is a variable with an equation beside it, and an equation is
+   not something this backend can build a division circuit from. *)
+let through_a_let =
+  let divisor = 2 in
+  ((7 / divisor) : int{ _ = 3 })
 [%%expect {|
-val pinned_negative : int{ _ = (-2) } -> int{ _ = (-3) } = <fun>
-|}]
-
-let pinned_remainder (b : int{ _ = (-2) }) = ((7 mod b) : int{ _ = 1 })
-[%%expect {|
-val pinned_remainder : int{ _ = (-2) } -> int{ _ = 1 } = <fun>
-|}]
-
-(* A divisor that could be anything, including zero, tells us nothing. *)
-let unconstrained (b : int) = ((10 / b) : int{ _ = 10 })
-[%%expect {|
-Line 1, characters 30-56:
-1 | let unconstrained (b : int) = ((10 / b) : int{ _ = 10 })
-                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 3, characters 2-32:
+3 |   ((7 / divisor) : int{ _ = 3 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (not-proved)
 |}]
 
-(* Not even the answers a bitvector theory would hand out at a zero
-   divisor. *)
-let pinned_at_zero (b : int{ _ = 0 }) = ((10 / b) : int{ _ = (-1) })
+(* Neither is a parameter a refinement pins to a value. *)
+let through_a_pinned_parameter (divisor : int{ _ = 2 }) =
+  ((7 / divisor) : int{ _ = 3 })
 [%%expect {|
-Line 1, characters 40-68:
-1 | let pinned_at_zero (b : int{ _ = 0 }) = ((10 / b) : int{ _ = (-1) })
-                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 2, characters 2-32:
+2 |   ((7 / divisor) : int{ _ = 3 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (not-proved)
 |}]
 
-let pinned_at_zero_remainder (b : int{ _ = 0 }) = ((10 mod b) : int{ _ = 10 })
+(* And neither is the shape the model exists for: a divisor known only to be
+   non-zero.  z3 proves this one. *)
+let through_a_non_zero_parameter (divisor : int{ _ <> 0 }) =
+  ((divisor / divisor) : int{ _ = 1 })
 [%%expect {|
-Line 1, characters 50-78:
-1 | let pinned_at_zero_remainder (b : int{ _ = 0 }) = ((10 mod b) : int{ _ = 10 })
-                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 2, characters 2-38:
+2 |   ((divisor / divisor) : int{ _ = 1 })
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (not-proved)
 |}]
 
-(* The same division twice is one value, whatever that value is. *)
-let one_value (a : int) (b : int) =
-  let first = a / b in
-  let second = a / b in
-  let _ = ((first - second) : int{ _ = 0 }) in
-  ()
+(* A zero divisor has no value on any backend, and none of the answers a
+   bitvector theory would hand out there is provable. *)
+let quotient_at_zero = ((1 / 0) : int{ _ = (-1) })
 [%%expect {|
-val one_value : int -> int -> unit = <fun>
+Line 1, characters 23-50:
+1 | let quotient_at_zero = ((1 / 0) : int{ _ = (-1) })
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
 |}]
 
-let one_value_is_not_vacuous (a : int) (b : int) =
-  let first = a / b in
-  let second = a / b in
-  let _ = ((first - second) : int{ _ = 1 }) in
-  ()
+let remainder_at_zero = ((5 mod 0) : int{ _ = 5 })
 [%%expect {|
-Line 4, characters 10-43:
-4 |   let _ = ((first - second) : int{ _ = 1 }) in
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement verification failed (disproved)
-|}]
-
-(* Two divisions that differ in an operand are two values. *)
-let different_divisors (a : int) (b : int) (c : int) =
-  let first = a / b in
-  let second = a / c in
-  let _ = ((first - second) : int{ _ = 0 }) in
-  ()
-[%%expect {|
-Line 4, characters 10-43:
-4 |   let _ = ((first - second) : int{ _ = 0 }) in
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 1, characters 24-50:
+1 | let remainder_at_zero = ((5 mod 0) : int{ _ = 5 })
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement verification failed (not-proved)
 |}]

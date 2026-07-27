@@ -2058,7 +2058,14 @@ let oxsmt_builtin environment location builtin arguments =
         | `Divide -> Oxsmt_bv.Bvudiv
         | `Remainder -> Oxsmt_bv.Bvurem
       in
-      let unsigned = apply magnitude (magnitude_of left) (magnitude_of right) in
+      (* Built only where it is used.  At a zero divisor there is no circuit
+         to build -- the operation raises -- and constructing one over a zero
+         constant does not survive the term layer's own folding, which would
+         take the whole obligation out of reach rather than send this one
+         operation to the fallback. *)
+      let unsigned () =
+        apply magnitude (magnitude_of left) (magnitude_of right)
+      in
       (* The sign of the result follows the dividend for a remainder, and
          the two operands' signs for a quotient. *)
       let static_flip =
@@ -2067,10 +2074,10 @@ let oxsmt_builtin environment location builtin arguments =
         | `Divide, Some dividend, Some divisor -> Some (dividend <> divisor)
         | `Divide, (Some _ | None), (Some _ | None) -> None
       in
-      let signed =
+      let signed () =
         match static_flip with
-        | Some true -> negate unsigned
-        | Some false -> unsigned
+        | Some true -> negate (unsigned ())
+        | Some false -> unsigned ()
         | None ->
           let flip =
             match operation with
@@ -2080,6 +2087,7 @@ let oxsmt_builtin environment location builtin arguments =
                 (Oxsmt_context.eq terms (below_zero left)
                    (below_zero right))
           in
+          let unsigned = unsigned () in
           Oxsmt_context.ite terms flip (negate unsigned) unsigned
       in
       let fallback () =
@@ -2093,13 +2101,22 @@ let oxsmt_builtin environment location builtin arguments =
           when Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0) ->
           (* Nothing else can be said: the operation raises here. *)
           fallback ()
-        | Some _ -> signed
+        | Some _ -> signed ()
         | None ->
-          Oxsmt_context.ite terms
-            (Oxsmt_context.not_ terms
-               (Oxsmt_context.eq terms right
-                  (oxsmt_int_constant environment 0)))
-            signed (fallback ())
+          (* The divisor has to be a constant here, and this is what that
+             costs.  A divisor a refinement shows is non-zero -- the shape
+             this admission exists to serve -- is refused on this backend
+             while z3 and Lean prove it: a signed division circuit over a
+             symbolic 63-bit divisor is beyond the eager blaster, which does
+             not finish it inside any budget an interactive caller can wait
+             for.  The refusal is fail-closed and the disagreement with the
+             other two backends is real.  Bounding the circuit rather than
+             refusing it is separate work: a bound needs a unit, a defined
+             behaviour at the boundary, and a verdict distinguishable from a
+             genuine unknown. *)
+          raise
+            (Oxsmt_unsupported
+               "integer division by a divisor that is not a constant")
       in
       (term, Sint)
     | _ -> error location "integer division used with the wrong arity"
