@@ -1230,20 +1230,6 @@ let restore_environment_variable saved name =
   | Some value -> Unix.putenv name value
   | None -> assert (unset_environment_variable name)
 
-let cache_test_hex string =
-  let digit value =
-    if value < 10 then Char.chr (Char.code '0' + value)
-    else Char.chr (Char.code 'a' + value - 10)
-  in
-  let result = Bytes.create (2 * String.length string) in
-  String.iteri
-    (fun index character ->
-      let byte = Char.code character in
-      Bytes.set result (2 * index) (digit (byte lsr 4));
-      Bytes.set result ((2 * index) + 1) (digit (byte land 0xf)))
-    string;
-  Bytes.unsafe_to_string result
-
 let write_private_file filename contents =
   let channel = open_out_bin filename in
   output_string channel contents;
@@ -1261,18 +1247,20 @@ let string_contains ~needle haystack =
   in
   loop 0
 
-let cache_test_record ?(verdict = "proved") key =
+let cache_test_record ?(verdict = "p") key =
   let body =
-    String.concat "\n"
-      [ "vox-solver-cache-v1";
-        cache_test_hex key;
+    String.concat " "
+      [ "2";
+        Digest.BLAKE256.to_hex (Digest.BLAKE256.string key);
         verdict;
-        "none";
-        "some:";
-        "";
+        "u";
+        "-";
       ]
   in
-  body ^ Digest.to_hex (Digest.string body) ^ "\n"
+  let checksum =
+    String.sub (Digest.BLAKE128.to_hex (Digest.BLAKE128.string body)) 0 16
+  in
+  body ^ " " ^ checksum ^ "\n"
 
 let corrupt_cache_test_checksum record =
   let index = String.length record - 2 in
@@ -1280,9 +1268,11 @@ let corrupt_cache_test_checksum record =
   Bytes.set bytes index (if Bytes.get bytes index = '0' then '1' else '0');
   Bytes.unsafe_to_string bytes
 
-let cache_test_path key =
-  Filename.concat cache_test_directory
-    (Digest.to_hex (Digest.string key) ^ ".cache")
+(* Every result of one backend for one compiled source file shares a single
+   log, so the tests below overwrite that one file rather than a file per
+   key. *)
+let cache_test_log () =
+  Option.get (Vox_backend.cache_bucket_path Vox_backend.Z3)
 
 let () =
   let saved_environment =
@@ -1316,6 +1306,17 @@ let () =
       ignore (Cached_test.discharge ~command:(Some "option") obligation);
       ignore (Other_cached_test.discharge ~command:(Some "same") obligation);
       assert (Atomic.get Cache_test_backend.calls = 5);
+      let log_count () =
+        Array.fold_left
+          (fun count basename ->
+            if Filename.check_suffix basename ".log" then count + 1
+            else count)
+          0
+          (Sys.readdir cache_test_directory)
+      in
+      (* Four results of one backend share one log; the second backend keeps
+         a log of its own. *)
+      assert (log_count () = 2);
       let failing =
         Cached_test.discharge ~command:(Some "failure") obligation
       in
@@ -1325,14 +1326,7 @@ let () =
       assert (failing.verdict = Vox_backend.Solver_error);
       assert (failing_again.verdict = Vox_backend.Solver_error);
       assert (Atomic.get Cache_test_backend.calls = 7);
-      let corrupt_key =
-        Option.get
-          (Cache_test_backend.cache_key ~command:(Some "corrupt") obligation)
-      in
-      let corrupt_path =
-        Filename.concat cache_test_directory
-          (Digest.to_hex (Digest.string corrupt_key) ^ ".cache")
-      in
+      let corrupt_path = cache_test_log () in
       let channel = open_out_bin corrupt_path in
       output_string channel "not a cache entry";
       close_out channel;
@@ -1381,7 +1375,7 @@ let () =
         Option.get
           (Cache_test_backend.cache_key ~command:(Some "public-entry") obligation)
       in
-      let public_entry_path = cache_test_path public_entry_key in
+      let public_entry_path = cache_test_log () in
       write_private_file public_entry_path
         (cache_test_record public_entry_key);
       Unix.chmod public_entry_path 0o644;
@@ -1408,11 +1402,7 @@ let () =
       assert (metadata_cached.unused_facts = Some [1]);
       assert (metadata_cached.location = metadata_location);
       let expect_corrupt_miss command contents =
-        let key =
-          Option.get
-            (Cache_test_backend.cache_key ~command:(Some command) obligation)
-        in
-        write_private_file (cache_test_path key) contents;
+        write_private_file (cache_test_log ()) contents;
         let before = Atomic.get Cache_test_backend.calls in
         ignore (Cached_test.discharge ~command:(Some command) obligation);
         assert (Atomic.get Cache_test_backend.calls = before + 1)
@@ -1428,7 +1418,7 @@ let () =
           (Cache_test_backend.cache_key ~command:(Some "verdict") obligation)
       in
       expect_corrupt_miss "verdict"
-        (cache_test_record ~verdict:"unknown" verdict_key);
+        (cache_test_record ~verdict:"x" verdict_key);
       expect_corrupt_miss "oversized"
         (String.make ((8 * 1024 * 1024) + 1) 'x');
       let mismatch_target =
@@ -1437,6 +1427,21 @@ let () =
       in
       expect_corrupt_miss "mismatch"
         (cache_test_record (mismatch_target ^ "-different"));
+      let resynchronize_key =
+        Option.get
+          (Cache_test_backend.cache_key ~command:(Some "resynchronize")
+             obligation)
+      in
+      let intact = cache_test_record resynchronize_key in
+      write_private_file (cache_test_log ())
+        (String.sub intact 0 (String.length intact / 2) ^ "\n" ^ intact);
+      let before_resynchronize = Atomic.get Cache_test_backend.calls in
+      ignore
+        (Cached_test.discharge ~command:(Some "resynchronize") obligation);
+      (* The truncated line is skipped and the intact one behind it is read,
+         so an interleaved append costs its own record and no other. *)
+      assert
+        (Atomic.get Cache_test_backend.calls = before_resynchronize);
       Unix.putenv "VOX_SOLVER_CACHE_MAX_BYTES" "1";
       let before_eviction = Atomic.get Cache_test_backend.calls in
       ignore (Cached_test.discharge ~command:(Some "eviction") obligation);
@@ -1459,9 +1464,9 @@ let () =
           Sys.rmdir first_write_directory)
         (fun () ->
           let abandoned =
-            Filename.concat first_write_directory "write-abandoned.tmp"
+            Filename.concat first_write_directory "compact-abandoned.tmp"
           in
-          let foreign = Filename.concat first_write_directory "z-foreign.cache" in
+          let foreign = Filename.concat first_write_directory "z-foreign.log" in
           write_private_file abandoned (String.make (700 * 1024) 'a');
           write_private_file foreign (String.make (700 * 1024) 'b');
           Unix.putenv "VOX_SOLVER_CACHE_DIR" first_write_directory;

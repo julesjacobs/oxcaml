@@ -66,6 +66,11 @@ end
     results are stored; malformed or stale entries are treated as misses. *)
 module Cached (Backend : S) : S
 
+(** The log that would hold persistent results for [backend] under the
+    current source file, compiler and cache directory.  [None] when the
+    cache is unavailable. *)
+val cache_bucket_path : backend -> string option
+
 val backend_of_string : string -> (backend, string) Stdlib.result
 val selection_of_string : string -> (selection, string) Stdlib.result
 val string_of_backend : backend -> string

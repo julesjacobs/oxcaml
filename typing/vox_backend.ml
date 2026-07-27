@@ -72,10 +72,102 @@ external file_stamp : string -> string = "caml_vox_file_stamp"
 external is_regular_executable : string -> bool
   = "caml_vox_file_is_executable"
 
+let executable_digests = Atomic.make []
+
+(* Solver executables can be replaced while the IDE remains live.  Their
+   content digest is reused only while the cheap filesystem stamp matches. *)
+let file_digest_identity path =
+  let stamp = file_stamp path in
+  if String.equal stamp "" then None
+  else match
+    List.find_opt
+      (fun (cached_path, cached_stamp, _) ->
+        String.equal cached_path path && String.equal cached_stamp stamp)
+      (Atomic.get executable_digests)
+  with
+  | Some (_, _, fingerprint) -> Some fingerprint
+  | None ->
+    begin
+      try
+        let fingerprint = path ^ ":" ^ Digest.to_hex (Digest.file path) in
+        let rec remember () =
+          let previous = Atomic.get executable_digests in
+          if
+            List.exists
+              (fun (cached_path, cached_stamp, _) ->
+                String.equal cached_path path && String.equal cached_stamp stamp)
+              previous
+          then ()
+          else if not
+              (Atomic.compare_and_set executable_digests previous
+                 ((path, stamp, fingerprint) :: previous))
+          then remember ()
+        in
+        remember ();
+        Some fingerprint
+      with Sys_error _ -> None
+    end
+
+let resolve_executable executable =
+  if Filename.is_implicit executable then
+    match Sys.getenv_opt "PATH" with
+    | None -> None
+    | Some path ->
+      String.split_on_char ':' path
+      |> List.find_map (fun directory ->
+        let candidate = Filename.concat directory executable in
+        if is_regular_executable candidate then Some candidate else None)
+  else if is_regular_executable executable then Some executable
+  else None
+
+let running_compiler_digest =
+  lazy
+    (Option.bind (resolve_executable Sys.executable_name) (fun executable ->
+       try
+         Some (executable ^ ":" ^ Digest.to_hex (Digest.file executable))
+       with Sys_error _ -> None))
+
+(* The running executable cannot change underneath this process; the optional
+   declared identity only further partitions its mandatory content digest. *)
+let compiler_implementation_identity () =
+  match Lazy.force running_compiler_digest with
+  | None -> None
+  | Some digest ->
+    Some
+      (match Sys.getenv_opt "VOX_SOLVER_CACHE_COMPILER_IDENTITY" with
+       | Some identity when not (String.equal identity "") ->
+         digest ^ "|declared=" ^ identity
+       | Some _ | None -> digest)
+
 module Persistent_cache = struct
-  let schema = "vox-solver-cache-v1"
-  let default_max_bytes = 256 * 1024 * 1024
-  let max_entry_bytes = 8 * 1024 * 1024
+  (* Version 1 of this store gave every result a file of its own, holding the
+     whole proof obligation twice over: once hex-encoded as the comparison
+     key, and once more inside the solver log kept as the detail.  A
+     nine-byte verdict cost six kilobytes.  Version 2 records a digest of the
+     key rather than the key itself, keeps only short details, and gathers
+     the results of one compiled source file into a single append-only log. *)
+
+  let schema = "vox-solver-cache-v2"
+
+  (* A record is about a hundred bytes, so this ceiling still holds far more
+     results than any plausible workspace produces. *)
+  let default_max_bytes = 16 * 1024 * 1024
+
+  (* A log is rewritten in compacted form once it grows past this size, and
+     is ignored entirely past the read ceiling. *)
+  let max_log_bytes = 1024 * 1024
+  let max_read_bytes = 8 * 1024 * 1024
+
+  (* Only a disproof carries a detail, and fewer than three results in a
+     hundred are disproofs.  A detail past this bound is left uncached rather
+     than truncated, so that a hit always reproduces the exact text the
+     solver gave; the bound is set well above the longest detail observed so
+     that no result loses its entry in practice. *)
+  let max_detail_bytes = 64 * 1024
+
+  let record_tag = "2"
+  let key_digest_length = 64
+  let checksum_length = 16
 
   type entry =
     { verdict : verdict;
@@ -120,17 +212,40 @@ module Persistent_cache = struct
       in
       loop 0
 
+  (* The key is no longer stored, so two distinct keys sharing a digest would
+     exchange verdicts.  BLAKE2b-256 keeps that beyond reach: the birthday
+     bound over a million entries is below 10^-64, and no colliding pair is
+     constructible either. *)
+  let key_digest key = Digest.BLAKE256.to_hex (Digest.BLAKE256.string key)
+
+  (* Appends from two compilers can in principle interleave.  A record that
+     did not survive intact fails this check and is skipped, so damage costs
+     a recomputation rather than a wrong verdict. *)
+  let record_checksum body =
+    String.sub
+      (Digest.BLAKE128.to_hex (Digest.BLAKE128.string body))
+      0 checksum_length
+
+  let cache_string_of_verdict = function
+    | Proved -> "p"
+    | Disproved -> "d"
+    | Not_proved | Unknown | Solver_error | Unavailable ->
+      invalid_arg "non-cacheable solver verdict"
+
   let verdict_of_cache_string = function
-    | "proved" -> Some Proved
-    | "disproved" -> Some Disproved
+    | "p" -> Some Proved
+    | "d" -> Some Disproved
     | _ -> None
 
+  let cache_string_of_unused_facts = function
+    | None -> "-"
+    | Some indices -> "u" ^ String.concat "," (List.map string_of_int indices)
+
   let unused_facts_of_cache_string = function
-    | "none" -> Some None
-    | "some:" -> Some (Some [])
-    | text when String.starts_with ~prefix:"some:" text ->
-      let suffix = String.sub text 5 (String.length text - 5) in
-      let indices = String.split_on_char ',' suffix in
+    | "-" -> Some None
+    | "u" -> Some (Some [])
+    | text when String.starts_with ~prefix:"u" text ->
+      let suffix = String.sub text 1 (String.length text - 1) in
       let rec parse acc = function
         | [] -> Some (Some (List.rev acc))
         | index :: rest ->
@@ -140,14 +255,53 @@ module Persistent_cache = struct
             | Some _ | None -> None
           end
       in
-      parse [] indices
+      parse [] (String.split_on_char ',' suffix)
     | _ -> None
 
+  let cache_string_of_detail = function
+    | None -> "-"
+    | Some detail -> "d" ^ hex_of_string detail
+
   let detail_of_cache_string = function
-    | "none" -> Some None
-    | text when String.starts_with ~prefix:"some:" text ->
+    | "-" -> Some None
+    | text when String.starts_with ~prefix:"d" text ->
       Option.map (fun detail -> Some detail)
-        (string_of_hex (String.sub text 5 (String.length text - 5)))
+        (string_of_hex (String.sub text 1 (String.length text - 1)))
+    | _ -> None
+
+  (* A record is one line of printable text whose only spaces are the five
+     field separators, so a reader resynchronizes on the next newline however
+     badly the previous line was damaged. *)
+  let record_body ~digest ~verdict ~unused_facts ~detail =
+    String.concat " " [record_tag; digest; verdict; unused_facts; detail]
+
+  let encoded_record ~digest (entry : entry) =
+    let body =
+      record_body ~digest
+        ~verdict:(cache_string_of_verdict entry.verdict)
+        ~unused_facts:(cache_string_of_unused_facts entry.unused_facts)
+        ~detail:(cache_string_of_detail entry.detail)
+    in
+    body ^ " " ^ record_checksum body ^ "\n"
+
+  let parse_record line =
+    match String.split_on_char ' ' line with
+    | [tag; digest; verdict; unused_facts; detail; checksum]
+      when String.equal tag record_tag
+           && String.length digest = key_digest_length
+           && String.equal checksum
+                (record_checksum
+                   (record_body ~digest ~verdict ~unused_facts ~detail)) ->
+      begin
+        match
+          verdict_of_cache_string verdict,
+          detail_of_cache_string detail,
+          unused_facts_of_cache_string unused_facts
+        with
+        | Some verdict, Some detail, Some unused_facts ->
+          Some (digest, { verdict; detail; unused_facts })
+        | (Some _ | None), (Some _ | None), (Some _ | None) -> None
+      end
     | _ -> None
 
   let debug message =
@@ -168,9 +322,9 @@ module Persistent_cache = struct
       begin
         match Sys.getenv_opt "XDG_CACHE_HOME", Sys.getenv_opt "HOME" with
         | Some root, _ when not (String.equal root "") ->
-          Some (Filename.concat root "vox2/solver-v1")
+          Some (Filename.concat root "vox2/solver-v2")
         | _, Some home when not (String.equal home "") ->
-          Some (Filename.concat home ".cache/vox2/solver-v1")
+          Some (Filename.concat home ".cache/vox2/solver-v2")
         | (Some _ | None), (Some _ | None) -> None
       end
 
@@ -193,161 +347,6 @@ module Persistent_cache = struct
       | Sys_error _ when Sys.file_exists directory -> ()
     end
 
-  let path directory key =
-    Filename.concat directory (Digest.to_hex (Digest.string key) ^ ".cache")
-
-  let read directory key =
-    let filename = path directory key in
-    if not (cache_file_is_private filename) then None
-    else try
-      let channel = open_in_bin filename in
-      let parsed =
-        Fun.protect
-          ~finally:(fun () -> close_in_noerr channel)
-          (fun () ->
-            if in_channel_length channel > max_entry_bytes then None
-            else begin
-            let entry_schema = input_line channel in
-            let entry_key = input_line channel in
-            let entry_verdict = input_line channel in
-            let entry_detail = input_line channel in
-            let entry_unused_facts = input_line channel in
-            let entry_checksum = input_line channel in
-            let has_trailing_data =
-              match input_char channel with
-              | _ -> true
-              | exception End_of_file -> false
-            in
-            let body =
-              String.concat "\n"
-                [ entry_schema;
-                  entry_key;
-                  entry_verdict;
-                  entry_detail;
-                  entry_unused_facts;
-                  "";
-                ]
-            in
-            let expected_checksum =
-              Digest.to_hex (Digest.string body)
-            in
-            if
-              has_trailing_data
-              || not (String.equal entry_schema schema)
-              || not (String.equal entry_checksum expected_checksum)
-            then None
-            else
-              match
-                string_of_hex entry_key,
-                verdict_of_cache_string entry_verdict,
-                detail_of_cache_string entry_detail,
-                unused_facts_of_cache_string entry_unused_facts
-              with
-              | Some entry_key, Some verdict, Some detail, Some unused_facts
-                when String.equal entry_key key ->
-                Some { verdict; detail; unused_facts }
-              | (Some _ | None), (Some _ | None), (Some _ | None),
-                (Some _ | None) -> None
-            end)
-      in
-      parsed
-    with
-    | Sys_error _
-    | End_of_file
-    | Failure _
-    | Invalid_argument _ -> None
-
-  let write directory key (result : backend_result) =
-    let filename = path directory key in
-    let verdict =
-      match result.verdict with
-      | Proved -> "proved"
-      | Disproved -> "disproved"
-      | Not_proved | Unknown | Solver_error | Unavailable ->
-        invalid_arg "non-cacheable solver verdict"
-    in
-    let detail =
-      match result.detail with
-      | None -> "none"
-      | Some detail -> "some:" ^ hex_of_string detail
-    in
-    let unused_facts =
-      match result.unused_facts with
-      | None -> "none"
-      | Some indices ->
-        "some:" ^ String.concat "," (List.map string_of_int indices)
-    in
-    let body =
-      String.concat "\n"
-        [ schema;
-          hex_of_string key;
-          verdict;
-          detail;
-          unused_facts;
-          "";
-        ]
-    in
-    let checksum = Digest.to_hex (Digest.string body) in
-    let serialized_length =
-      String.length body + String.length checksum + 1
-    in
-    if serialized_length > max_entry_bytes then
-      invalid_arg "cache entry too large";
-    let temporary = Filename.temp_file ~temp_dir:directory "write-" ".tmp" in
-    Fun.protect
-      ~finally:(fun () -> Misc.remove_file temporary)
-      (fun () ->
-        let channel = open_out_bin temporary in
-        Fun.protect
-          ~finally:(fun () -> close_out_noerr channel)
-          (fun () ->
-            output_string channel body;
-            output_string channel (checksum ^ "\n");
-            flush channel);
-        Sys.rename temporary filename);
-    serialized_length
-
-  let evict directory =
-    let limit = max_bytes () in
-    try
-      let files =
-        Sys.readdir directory
-        |> Array.to_list
-        |> List.filter_map (fun basename ->
-          if
-            Filename.check_suffix basename ".cache"
-            || (String.starts_with ~prefix:"write-" basename
-                && Filename.check_suffix basename ".tmp")
-          then
-            let filename = Filename.concat directory basename in
-            try
-              let channel = open_in_bin filename in
-              let size =
-                Fun.protect
-                  ~finally:(fun () -> close_in_noerr channel)
-                  (fun () -> in_channel_length channel)
-              in
-              Some (filename, size)
-            with Sys_error _ -> None
-          else
-            None)
-      in
-      let total = List.fold_left (fun n (_, size) -> n + size) 0 files in
-      if total > limit then begin
-        (* Deterministic arbitrary eviction keeps storage bounded without
-           introducing a Unix dependency into [ocamlcommon]. *)
-        let removal_order = List.sort compare files in
-        let rec remove total = function
-          | _ when total <= limit -> ()
-          | [] -> ()
-          | (filename, size) :: rest ->
-            Misc.remove_file filename;
-            remove (total - size) rest
-        in
-        remove total removal_order
-      end
-    with Sys_error _ -> ()
-
   let directory () =
     if not (enabled ()) then None
     else
@@ -363,15 +362,212 @@ module Persistent_cache = struct
           | Sys_error _ -> None
         end
 
-  let find ~backend_name key =
-    match directory () with
+  (* One log per compiled source file keeps a compilation to a single read.
+     The compiler identity is part of every key already; naming the log after
+     it as well means a rebuilt compiler starts fresh logs rather than
+     reading past ones it can never hit. *)
+  let log_basename ~backend_name =
+    match compiler_implementation_identity () with
     | None -> None
-    | Some directory ->
-      let entry = read directory key in
-      debug
-        (backend_name ^ " "
-         ^ if Option.is_some entry then "hit" else "miss");
-      entry
+    | Some compiler ->
+      let source =
+        match !Location.input_name with
+        | "" -> "-"
+        | name -> name
+      in
+      Some
+        (Digest.BLAKE128.to_hex
+           (Digest.BLAKE128.string
+              (String.concat "\000" [schema; source; backend_name; compiler]))
+         ^ ".log")
+
+  let log_path ~backend_name =
+    match directory (), log_basename ~backend_name with
+    | Some directory, Some basename ->
+      Some (Filename.concat directory basename)
+    | (Some _ | None), (Some _ | None) -> None
+
+  let file_size filename =
+    try
+      let channel = open_in_bin filename in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> in_channel_length channel)
+    with Sys_error _ -> 0
+
+  let read_log filename =
+    let table = Hashtbl.create 64 in
+    if cache_file_is_private filename then begin
+      try
+        let channel = open_in_bin filename in
+        Fun.protect
+          ~finally:(fun () -> close_in_noerr channel)
+          (fun () ->
+            if in_channel_length channel <= max_read_bytes then begin
+              let rec loop () =
+                match input_line channel with
+                | exception End_of_file -> ()
+                | line ->
+                  begin
+                    match parse_record line with
+                    | Some (digest, entry) ->
+                      Hashtbl.replace table digest entry
+                    | None -> ()
+                  end;
+                  loop ()
+              in
+              loop ()
+            end)
+      with
+      | Sys_error _
+      | End_of_file
+      | Failure _
+      | Invalid_argument _ -> ()
+    end;
+    table
+
+  (* A compilation looks up hundreds of results in one log.  The parsed log is
+     kept for the life of the process and revalidated against the file's
+     stamp, so a lookup costs one stat while no other process has touched the
+     file, and re-reads honestly once one has. *)
+  let logs_lock = Mutex.create ()
+
+  let logs : (string, string * (string, entry) Hashtbl.t) Hashtbl.t =
+    Hashtbl.create 4
+
+  let compacted : (string, unit) Hashtbl.t = Hashtbl.create 4
+
+  let with_logs body =
+    Mutex.lock logs_lock;
+    Fun.protect ~finally:(fun () -> Mutex.unlock logs_lock) body
+
+  let loaded filename =
+    let stamp = file_stamp filename in
+    match Hashtbl.find_opt logs filename with
+    | Some (loaded_stamp, table)
+      when (not (String.equal stamp "")) && String.equal loaded_stamp stamp ->
+      table
+    | Some _ | None ->
+      let table = read_log filename in
+      Hashtbl.replace logs filename (stamp, table);
+      table
+
+  let append filename record =
+    if Sys.file_exists filename && not (cache_file_is_private filename) then
+      (* The directory is private, so an unreadable log is one this compiler
+         left behind under a permissive umask.  Replace it rather than append
+         to a file no lookup will ever read. *)
+      Misc.remove_file filename;
+    let channel =
+      open_out_gen
+        [Open_wronly; Open_append; Open_creat; Open_binary] 0o600 filename
+    in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr channel)
+      (fun () ->
+        (* A single buffered write of about a hundred bytes: an interleaved
+           append from another compiler lands before or after this record,
+           and were it ever to land inside it the checksum rejects both. *)
+        output_string channel record;
+        flush channel)
+
+  (* Rewriting keeps one record per distinct key.  Records another process
+     appended between this read and the rename are lost, which costs those
+     obligations a recomputation; nothing already returned becomes wrong. *)
+  let compact directory filename table =
+    let rewritten = read_log filename in
+    Hashtbl.iter
+      (fun digest entry -> Hashtbl.replace rewritten digest entry)
+      table;
+    let temporary = Filename.temp_file ~temp_dir:directory "compact-" ".tmp" in
+    Fun.protect
+      ~finally:(fun () -> Misc.remove_file temporary)
+      (fun () ->
+        let channel = open_out_bin temporary in
+        Fun.protect
+          ~finally:(fun () -> close_out_noerr channel)
+          (fun () ->
+            Hashtbl.iter
+              (fun digest entry ->
+                output_string channel (encoded_record ~digest entry))
+              rewritten;
+            flush channel);
+        Sys.rename temporary filename);
+    Hashtbl.replace logs filename (file_stamp filename, rewritten)
+
+  let compact_if_large directory filename table =
+    if
+      (not (Hashtbl.mem compacted filename))
+      && file_size filename > max_log_bytes
+    then begin
+      Hashtbl.replace compacted filename ();
+      compact directory filename table
+    end
+
+  let is_evictable basename =
+    Filename.check_suffix basename ".log"
+    || (String.starts_with ~prefix:"compact-" basename
+        && Filename.check_suffix basename ".tmp")
+
+  (* [caml_vox_file_stamp] reports device, inode, size, modification time and
+     change time.  Ordering by modification time discards the logs of
+     abandoned builds before those of the workspace in use. *)
+  let modification_order stamp =
+    match String.split_on_char ':' stamp with
+    | [_; _; _; seconds; nanoseconds; _; _] ->
+      begin
+        match int_of_string_opt seconds, int_of_string_opt nanoseconds with
+        | Some seconds, Some nanoseconds -> seconds, nanoseconds
+        | (Some _ | None), (Some _ | None) -> 0, 0
+      end
+    | _ -> 0, 0
+
+  let evict directory =
+    let limit = max_bytes () in
+    try
+      let files =
+        Sys.readdir directory
+        |> Array.to_list
+        |> List.filter_map (fun basename ->
+          if is_evictable basename then begin
+            let filename = Filename.concat directory basename in
+            let stamp = file_stamp filename in
+            if String.equal stamp "" then None
+            else Some (modification_order stamp, filename, file_size filename)
+          end
+          else None)
+      in
+      let total = List.fold_left (fun n (_, _, size) -> n + size) 0 files in
+      if total > limit then begin
+        let removal_order = List.sort compare files in
+        let rec remove total = function
+          | _ when total <= limit -> ()
+          | [] -> ()
+          | (_, filename, size) :: rest ->
+            Misc.remove_file filename;
+            remove (total - size) rest
+        in
+        remove total removal_order
+      end
+    with Sys_error _ -> ()
+
+  let find ~backend_name key =
+    let entry =
+      try
+        match log_path ~backend_name with
+        | None -> None
+        | Some filename ->
+          let digest = key_digest key in
+          with_logs (fun () -> Hashtbl.find_opt (loaded filename) digest)
+      with
+      | Sys_error _
+      | Failure _
+      | Invalid_argument _ -> None
+    in
+    debug
+      (backend_name ^ " "
+       ^ if Option.is_some entry then "hit" else "miss");
+    entry
 
   let bytes_written_since_eviction = Atomic.make 0
   let eviction_checked_directories = Atomic.make []
@@ -388,26 +584,54 @@ module Persistent_cache = struct
     in
     if claim () then evict directory
 
-  let store key (result : backend_result) =
+  let store ~backend_name key (result : backend_result) =
     try
-      match result.verdict, directory () with
-      | (Proved | Disproved), Some directory ->
-        (* Batch compilers usually write much less than the periodic threshold.
-           Scan once per directory in every process so stale generations and
-           abandoned temporary files cannot accumulate across processes. *)
-        evict_on_first_write directory;
-        let bytes = write directory key result in
-        let threshold = max 1 (max_bytes () / 4) in
-        let previous = Atomic.fetch_and_add bytes_written_since_eviction bytes in
-        let total = previous + bytes in
-        if
-          total >= threshold
-          && Atomic.compare_and_set bytes_written_since_eviction total 0
-        then begin
-          evict directory
+      match result.verdict, directory (), log_basename ~backend_name with
+      | (Proved | Disproved), Some directory, Some basename ->
+        let entry =
+          { verdict = result.verdict;
+            detail = result.detail;
+            unused_facts = result.unused_facts;
+          }
+        in
+        let detail_is_oversized =
+          match entry.detail with
+          | None -> false
+          | Some detail -> String.length detail > max_detail_bytes
+        in
+        if not detail_is_oversized then begin
+          let filename = Filename.concat directory basename in
+          (* Batch compilers usually write much less than the periodic
+             threshold.  Scan once per directory in every process so stale
+             generations and abandoned temporary files cannot accumulate
+             across processes. *)
+          evict_on_first_write directory;
+          let digest = key_digest key in
+          let record = encoded_record ~digest entry in
+          let bytes =
+            with_logs (fun () ->
+              let table = loaded filename in
+              append filename record;
+              Hashtbl.replace table digest entry;
+              Hashtbl.replace logs filename (file_stamp filename, table);
+              compact_if_large directory filename table;
+              String.length record)
+          in
+          let threshold = max 1 (max_bytes () / 4) in
+          let previous =
+            Atomic.fetch_and_add bytes_written_since_eviction bytes
+          in
+          let total = previous + bytes in
+          if
+            total >= threshold
+            && Atomic.compare_and_set bytes_written_since_eviction total 0
+          then begin
+            evict directory
+          end
         end
-      | (Not_proved | Unknown | Solver_error | Unavailable), _
-      | (Proved | Disproved), None -> ()
+      | (Not_proved | Unknown | Solver_error | Unavailable), _, _
+      | (Proved | Disproved), None, _
+      | (Proved | Disproved), Some _, None -> ()
     with
     | Sys_error _
     | Failure _
@@ -437,10 +661,16 @@ module Cached (Backend : S) = struct
           }
         | None ->
           let result = Backend.discharge ~command obligation in
-          Persistent_cache.store key result;
+          Persistent_cache.store ~backend_name:(backend_name backend) key
+            result;
           result
       end
 end
+
+(* The log that would hold results for [backend] under the current source
+   file, compiler and cache directory. *)
+let cache_bucket_path backend =
+  Persistent_cache.log_path ~backend_name:(backend_name backend)
 
 let string_of_backend = backend_name
 
@@ -525,73 +755,6 @@ let key_field name value =
 let option_key_field name = function
   | None -> key_field name "none"
   | Some value -> key_field name (key_field "some" value)
-
-let executable_digests = Atomic.make []
-
-(* Solver executables can be replaced while the IDE remains live.  Their
-   content digest is reused only while the cheap filesystem stamp matches. *)
-let file_digest_identity path =
-  let stamp = file_stamp path in
-  if String.equal stamp "" then None
-  else match
-    List.find_opt
-      (fun (cached_path, cached_stamp, _) ->
-        String.equal cached_path path && String.equal cached_stamp stamp)
-      (Atomic.get executable_digests)
-  with
-  | Some (_, _, fingerprint) -> Some fingerprint
-  | None ->
-    begin
-      try
-        let fingerprint = path ^ ":" ^ Digest.to_hex (Digest.file path) in
-        let rec remember () =
-          let previous = Atomic.get executable_digests in
-          if
-            List.exists
-              (fun (cached_path, cached_stamp, _) ->
-                String.equal cached_path path && String.equal cached_stamp stamp)
-              previous
-          then ()
-          else if not
-              (Atomic.compare_and_set executable_digests previous
-                 ((path, stamp, fingerprint) :: previous))
-          then remember ()
-        in
-        remember ();
-        Some fingerprint
-      with Sys_error _ -> None
-    end
-
-let resolve_executable executable =
-  if Filename.is_implicit executable then
-    match Sys.getenv_opt "PATH" with
-    | None -> None
-    | Some path ->
-      String.split_on_char ':' path
-      |> List.find_map (fun directory ->
-        let candidate = Filename.concat directory executable in
-        if is_regular_executable candidate then Some candidate else None)
-  else if is_regular_executable executable then Some executable
-  else None
-
-let running_compiler_digest =
-  lazy
-    (Option.bind (resolve_executable Sys.executable_name) (fun executable ->
-       try
-         Some (executable ^ ":" ^ Digest.to_hex (Digest.file executable))
-       with Sys_error _ -> None))
-
-(* The running executable cannot change underneath this process; the optional
-   declared identity only further partitions its mandatory content digest. *)
-let compiler_implementation_identity () =
-  match Lazy.force running_compiler_digest with
-  | None -> None
-  | Some digest ->
-    Some
-      (match Sys.getenv_opt "VOX_SOLVER_CACHE_COMPILER_IDENTITY" with
-       | Some identity when not (String.equal identity "") ->
-         digest ^ "|declared=" ^ identity
-       | Some _ | None -> digest)
 
 let declared_solver_version backend =
   let variable =
