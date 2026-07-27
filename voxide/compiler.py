@@ -871,7 +871,110 @@ def _predicate(pred: object) -> Dict[str, str]:
     return {"display": str(display) if display else raw, "raw": raw}
 
 
-def _hypothesis(fact: object, source_lines: Sequence[str]) -> Dict[str, Any]:
+def _fact_producers(
+    fact: Mapping[str, Any],
+    lines_by_file: Mapping[str, Sequence[str]],
+    expected_file: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """Every site the compiler says introduced this fact, in editor spans.
+
+    The compiler reports ``also_introduced_by``: the sites other than
+    ``origin`` whose identical proposition the fact environment folded into
+    this one entry.  Usually there are none.  ``origin`` is always one of the
+    introducers, so the answer is it followed by those, and a compiler that
+    reports no such field at all yields ``None`` -- a consumer that has to
+    know every introducer of a fact must then treat the fact as having
+    unknown provenance rather than reading ``origin`` as the complete answer,
+    since a single ``origin`` is exactly what a fold leaves behind.
+
+    An entry whose span will not place -- a ghost location, or a site in a
+    file this view does not hold -- is dropped and the rest kept.  That is
+    safe in the one direction that matters: a call this editor can decide is
+    a call whose own span placed, so a dropped entry can never be the call
+    being decided, and dropping it can only withhold evidence about some
+    other site, never manufacture evidence against one.  Nullifying the whole
+    list instead would throw away the placeable entries alongside it, and
+    with them the only record that a call was read.
+    """
+    raw = fact.get("also_introduced_by")
+    if not isinstance(raw, list):
+        return None
+    producers: List[Dict[str, Any]] = []
+    for entry in [fact.get("origin")] + list(raw):
+        if entry is None:
+            continue
+        entry = _as_dict(entry)
+        normalized = _normalize_emitted_span(
+            entry.get("span"), lines_by_file, expected_file
+        )
+        if normalized is None:
+            continue
+        name = entry.get("name")
+        kind = entry.get("kind")
+        producers.append(
+            {
+                "name": str(name) if name else None,
+                "kind": str(kind) if kind else None,
+                "span": normalized,
+            }
+        )
+    return producers
+
+
+def _backend_unused_facts(
+    discharge: Mapping[str, Any]
+) -> Optional[Dict[str, Optional[List[int]]]]:
+    """Per-backend unread-fact indices, or ``None`` outside a cross-check.
+
+    A backend that reported no accounting maps to ``None``; that is not the
+    same as reporting that it read everything, and the two must not be
+    conflated by a consumer asking whether every backend left a fact unread.
+    """
+    raw_results = discharge.get("backends")
+    if not isinstance(raw_results, list):
+        return None
+    per_backend: Dict[str, Optional[List[int]]] = {}
+    for raw in raw_results:
+        raw = _as_dict(raw)
+        backend = str(raw.get("backend", ""))
+        if backend not in ("lean", "z3", "oxsmt"):
+            continue
+        unused = raw.get("unused_facts")
+        if isinstance(unused, list) and all(
+            isinstance(index, int) and not isinstance(index, bool)
+            for index in unused
+        ):
+            per_backend[backend] = list(unused)
+        else:
+            per_backend[backend] = None
+    return per_backend or None
+
+
+def _used_by(
+    index: int, per_backend: Optional[Mapping[str, Optional[List[int]]]]
+) -> Optional[Dict[str, bool]]:
+    """Which backends read the fact at ``index``.
+
+    Only backends that reported an accounting appear.  The caller compares the
+    keys against the backends the obligation actually ran on: a missing key is
+    a backend whose reading is unknown, never one that did not read the fact.
+    """
+    if not per_backend:
+        return None
+    used: Dict[str, bool] = {}
+    for backend, unused in per_backend.items():
+        if unused is None:
+            continue
+        used[backend] = index not in unused
+    return used or None
+
+
+def _hypothesis(
+    fact: object,
+    source_lines: Sequence[str],
+    index: int = 0,
+    per_backend: Optional[Mapping[str, Optional[List[int]]]] = None,
+) -> Dict[str, Any]:
     """One fact as a named, optionally source-linked hypothesis.
 
     Schema v2 adds ``origin`` = {name, span}: the binder name (rendered as the
@@ -903,10 +1006,16 @@ def _hypothesis(fact: object, source_lines: Sequence[str]) -> Dict[str, Any]:
         "raw": predicate["raw"],
         "span": editor_span,
     }
-    # Preserve capability absence.  Only Lean reports fact usage; treating an
-    # omitted value as true would manufacture usage under z3/oxsmt.
+    # Preserve capability absence.  All three backends report fact usage
+    # today, each from its own reading -- an unsat core, an assumption core,
+    # an unused-variable diagnostic -- and any of them can decline to.
+    # Treating an omitted value as true would manufacture usage.
     if "used" in fact and isinstance(fact.get("used"), bool):
         hypothesis["used"] = fact["used"]
+    hypothesis["producers"] = _fact_producers(
+        fact, {"input.ml": source_lines}, expected_file="input.ml"
+    )
+    hypothesis["used_by"] = _used_by(index, per_backend)
     return hypothesis
 
 
@@ -951,7 +1060,11 @@ def translate_vc(
     raw_kind = str(vc.get("kind", ""))
     facts = vc.get("facts")
     facts = facts if isinstance(facts, list) else []
-    hypotheses = [_hypothesis(fact, source_lines) for fact in facts]
+    per_backend = _backend_unused_facts(discharge)
+    hypotheses = [
+        _hypothesis(fact, source_lines, index, per_backend)
+        for index, fact in enumerate(facts)
+    ]
     counterexample = discharge.get("counterexample")
     return {
         "id": index,
@@ -1030,6 +1143,48 @@ def refinement_types_by_file(
                 "start": span["start"],
                 "end": span["end"],
                 "type": str(type_text),
+            }
+        )
+    return result
+
+
+def lemma_calls(
+    document: object,
+    lines_by_file: Mapping[str, Sequence[str]],
+    expected_file: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """Call sites whose only product is a proposition, in editor spans.
+
+    ``None`` when the compiler did not report the channel: an older binary
+    that never names a lemma call is not a buffer without any, so a consumer
+    must stay silent rather than conclude there are none to talk about.  An
+    entry the compiler reported but whose span will not place is dropped and
+    turns the whole channel unknown -- a call the editor cannot point at is a
+    call it cannot decide.
+    """
+    document = _as_dict(document)
+    entries = document.get("lemma_calls")
+    if not isinstance(entries, list):
+        return None
+    result: List[Dict[str, Any]] = []
+    for raw in entries:
+        entry = _as_dict(raw)
+        span = _normalize_emitted_span(
+            entry.get("span"), lines_by_file, expected_file
+        )
+        if span is None:
+            return None
+        introduced = entry.get("introduced")
+        if not isinstance(introduced, bool):
+            return None
+        name = entry.get("name")
+        result.append(
+            {
+                "file": span.get("file"),
+                "start": span["start"],
+                "end": span["end"],
+                "name": str(name) if name else None,
+                "introduced": introduced,
             }
         )
     return result
@@ -1350,6 +1505,7 @@ def _vcs_available(
     backend: str = "lean",
     options: Sequence[str] = ("lean",),
     ocamlc: Optional[str] = None,
+    lemma_call_sites: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """A completed dump: ``vcs`` is authoritative (an empty list is a genuine
     "no obligations").  ``hidden`` counts obligations dropped for want of a
@@ -1369,6 +1525,10 @@ def _vcs_available(
         "refinement_types": refinement_type_ranges or [],
         "identifier_modes": identifier_mode_ranges or [],
         "imposed_types": imposed_type_ranges or [],
+        # ``None`` (not ``[]``) when the compiler reported no lemma-call
+        # channel or one that would not place: absent evidence, not evidence
+        # that the buffer holds no such call.
+        "lemma_calls": lemma_call_sites,
         "backend": backend,
         "backend_options": list(options),
         "backend_solver_configuration": backend_solver_configuration(ocamlc),
@@ -1395,6 +1555,7 @@ def _vcs_unavailable(
         "refinement_types": [],
         "identifier_modes": [],
         "imposed_types": [],
+        "lemma_calls": None,
         "backend": backend,
         "backend_options": list(options),
         "backend_solver_configuration": backend_solver_configuration(ocamlc),
@@ -1463,6 +1624,9 @@ def _vcs_from_dump_path(
         backend,
         options,
         ocamlc,
+        lemma_calls(
+            document, {"input.ml": source_lines}, expected_file="input.ml"
+        ),
     )
 
 
@@ -1727,7 +1891,10 @@ def _editor_span_f(
 
 
 def _hypothesis_f(
-    fact: object, lines_by_file: Mapping[str, Sequence[str]]
+    fact: object,
+    lines_by_file: Mapping[str, Sequence[str]],
+    index: int = 0,
+    per_backend: Optional[Mapping[str, Optional[List[int]]]] = None,
 ) -> Dict[str, Any]:
     """One fact as a hypothesis, with its origin span converted per-file."""
     fact = _as_dict(fact)
@@ -1749,6 +1916,8 @@ def _hypothesis_f(
     }
     if "used" in fact and isinstance(fact.get("used"), bool):
         hypothesis["used"] = fact["used"]
+    hypothesis["producers"] = _fact_producers(fact, lines_by_file)
+    hypothesis["used_by"] = _used_by(index, per_backend)
     return hypothesis
 
 
@@ -1773,7 +1942,12 @@ def _translate_vc_f(
         "kind": _VC_KIND.get(raw_kind, raw_kind),
         "span": {"start": editor_anchor["start"], "end": editor_anchor["end"]},
         "goal": _predicate(vc.get("goal")),
-        "hypotheses": [_hypothesis_f(fact, lines_by_file) for fact in facts],
+        "hypotheses": [
+            _hypothesis_f(
+                fact, lines_by_file, index, _backend_unused_facts(discharge)
+            )
+            for index, fact in enumerate(facts)
+        ],
         "counterexample": [counterexample] if counterexample else None,
         "detail": _scrub_detail(discharge.get("detail")),
         "generated_lean": vc.get("generated_lean") or None,
@@ -2103,6 +2277,7 @@ def check_workspace(
         active_imposed_types: List[Dict[str, Any]] = []
         conditions: List[object] = []
         placeable: List[bool] = []
+        lemma_call_sites: Optional[List[Dict[str, Any]]] = None
         if type_only:
             unavailable = True
             unavailable_reason = "verification-not-run"
@@ -2133,6 +2308,7 @@ def check_workspace(
                 refinement_type_ranges = refinement_types_by_file(
                     document, lines_by_file
                 )
+                lemma_call_sites = lemma_calls(document, lines_by_file)
                 if active.endswith(".ml"):
                     active_imposed_types = imposed_types(
                         document,
@@ -2219,6 +2395,7 @@ def check_workspace(
         "obligation_summary": obligation_summary,
         "identifier_modes": identifier_mode_ranges,
         "refinement_types": refinement_type_ranges,
+        "lemma_calls": lemma_call_sites,
         "workspace_verification": _workspace_verification(per_file),
     }
 

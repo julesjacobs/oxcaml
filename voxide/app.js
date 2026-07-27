@@ -101,6 +101,15 @@ let obligationSummary = summaryFromVcs([], 0);
 // Obligations the dump reported but that have no placeable source span, so the
 // pane can note a count instead of letting it silently shrink.
 let vcsHidden = 0;
+// Call sites whose only product is a proposition, as the compiler reported
+// them, and whether the result they came with is complete enough to say
+// anything about them.  Both are replaced together, by the same response that
+// replaces `vcs`, so a mark can never outlive the obligations it was derived
+// from.  `null` calls means the channel was absent or would not place, which
+// is not the same as a buffer holding no such call.
+let lemmaCalls = null;
+let lemmaResultComplete = false;
+let lemmaMarks = [];
 // The obligation currently shown in the proof pane, so the delegated
 // hypothesis-click handler can resolve a clicked row to its source span.
 let paneVc = null;
@@ -674,6 +683,8 @@ function renderCursorType() {
 function clearVcMarks() {
   vcMarks.forEach((mark) => mark.clear());
   vcMarks = [];
+  lemmaMarks.forEach((mark) => mark.clear());
+  lemmaMarks = [];
 }
 
 // Does obligation span `outer` STRICTLY contain span `inner` (contains it and
@@ -726,6 +737,66 @@ function markVcs() {
           "vc-" + vc.status + " " + depthClass +
           (regressedVcIds.has(vcKey(vc)) ? " vc-regressed" : ""),
         title: BADGE_HINT[vc.status] || vc.status,
+      })
+    );
+  });
+  markLemmaCalls();
+}
+
+// Is this result complete enough to say a call went unread?  Every clause is
+// a way the fold could be missing an obligation that read the fact: a run that
+// produced no trustworthy data, an obligation with no placeable span, a
+// program that did not compile.  A failed obligation is handled in the model,
+// which will not read usage off a proof that did not close.
+//
+// The last clause is about which buffer the other clauses describe.  On the
+// `/vcs` path the obligations and the diagnostics come from two requests: the
+// payload is refused unless its revision is the buffer's, but `currentErrors`
+// is whatever the last `/check` applied, so without this the "it compiled"
+// clause can be one revision's answer read over another revision's
+// obligations.  That matters because a compile can stop part-way -- a
+// verification-pass error aborts before the remaining obligations are built,
+// and what is left looks like a complete result with an obligation missing,
+// which is exactly a call marked against a question nobody asked.  Requiring
+// the applied check to be this revision's closes the window without anyone
+// having to decide whether such a stop is reachable.
+function singleBufferResultComplete() {
+  return (
+    !vcsUnavailable &&
+    vcsHidden === 0 &&
+    Number(obligationSummary && obligationSummary.hidden) === 0 &&
+    currentErrors.length === 0 &&
+    appliedRevision === documentRevision
+  );
+}
+
+// Paint the calls that introduced a proposition no obligation read.  Called
+// from markVcs so it is replaced by exactly the events that replace the
+// obligation marks -- an edit, a backend change, a tab switch, a hydration, a
+// response that arrived after a newer one -- and can never survive one of
+// them.  The mark is a dotted underline in the muted text colour: legible, and
+// nothing like a diagnostic squiggle, an unused-value warning, or the
+// obligation washes it sits beside.
+function markLemmaCalls() {
+  const answer = unnecessaryLemmaCalls({
+    // allObligations, not vcs plus whatever cross-unit list happens to be
+    // lying around: outside workspace mode a leftover cross-unit obligation
+    // would be an unproved stranger in the fold and would silence the answer
+    // for the buffer in front of the reader.
+    lemmaCalls,
+    obligations: allObligations(),
+    complete: lemmaResultComplete,
+    backend: backendSelection,
+  });
+  const title = lemmaUnusedHint(answer.backendScope);
+  answer.calls.forEach((call) => {
+    // Workspace: only the active buffer is painted.  A call in another unit is
+    // decided all the same -- it just has no buffer here to mark.
+    if (workspaceMode && call.file && call.file !== activeFile) return;
+    lemmaMarks.push(
+      cm.markText(cmPosition(call.start), cmPosition(call.end), {
+        className: "lemma-unused",
+        title,
       })
     );
   });
@@ -1593,8 +1664,13 @@ function applyUnifiedCheck(response, elapsed) {
     refinementTypes = validatedRanges(response.refinement_types, spanContext);
     identifierModes = validatedRanges(response.identifier_modes, spanContext);
     imposedTypes = validatedRanges(response.imposed_types, spanContext);
+    lemmaCalls = Array.isArray(response.lemma_calls)
+      ? response.lemma_calls
+      : null;
   }
+  // After applyCheck, whose diagnostics settle currentErrors.
   applyCheck(response);
+  lemmaResultComplete = singleBufferResultComplete();
   updateRegressionTracking();
   markVcs();
   renderLegend();
@@ -1676,6 +1752,9 @@ async function refreshVcs() {
     let refinementRanges = [];
     let modeRanges = [];
     let imposedRanges = [];
+    // Declared out here so a request that never returned leaves the channel
+    // absent rather than carrying the previous response's calls.
+    let lemmaCallSites = null;
     try {
       const payload = await postJSON("/vcs", {
         source: cm.getValue(),
@@ -1692,6 +1771,9 @@ async function refreshVcs() {
       refinementRanges = validatedRanges(payload.refinement_types, spanContext);
       modeRanges = validatedRanges(payload.identifier_modes, spanContext);
       imposedRanges = validatedRanges(payload.imposed_types, spanContext);
+      lemmaCallSites = Array.isArray(payload.lemma_calls)
+        ? payload.lemma_calls
+        : null;
       applyBackendMetadata(payload, payload.backend);
     } catch (error) {
       // A failed run marks the pane "unavailable" -- but only if we are still
@@ -1707,6 +1789,8 @@ async function refreshVcs() {
     refinementTypes = refinementRanges;
     identifierModes = modeRanges;
     imposedTypes = imposedRanges;
+    lemmaCalls = lemmaCallSites;
+    lemmaResultComplete = singleBufferResultComplete();
     markVcs();
     renderLegend();
     renderBackendResults();
@@ -1755,6 +1839,10 @@ function invalidateWorkspaceResults(unavailable) {
   if (!workspaceMode) return;
   lastWorkspacePayload = null;
   workspaceResultUnavailable = unavailable;
+  // The cross-unit obligations are about to go; without them the fold is a
+  // fold over a subset, which is exactly the shape of a wrong answer.
+  lemmaCalls = null;
+  lemmaResultComplete = false;
   crossUnitVcs = [];
   crossUnitElement.hidden = true;
   crossUnitElement.replaceChildren();
@@ -2536,6 +2624,8 @@ function clearResults() {
   vcsUnavailableReason = "unknown";
   vcsHidden = 0;
   obligationSummary = summaryFromVcs([], 0);
+  lemmaCalls = null;
+  lemmaResultComplete = false;
   expressionTypes = [];
   refinementTypes = [];
   identifierModes = [];
@@ -3375,6 +3465,30 @@ function applyWorkspaceView(payload, elapsed) {
   lastErrorCount = (entry ? entry.errors : []).filter((e) =>
     ["syntax", "type-mode", "type"].includes(e.kind)
   ).length;
+  // Every unit's obligations have to be in the fold, so the answer waits on
+  // the WHOLE workspace being valid, not just the tab in front of the reader:
+  // a call here can be read by an obligation in a unit that is not shown.
+  lemmaCalls = Array.isArray(payload.lemma_calls) ? payload.lemma_calls : null;
+  lemmaResultComplete =
+    // A retained layer supplies the active unit's obligations from an earlier
+    // payload while the cross-unit ones come from this one.  The fold would
+    // then span two responses, which is the stale-revision case: stay quiet.
+    !layer &&
+    fullAudit.valid &&
+    fullAudit.invalidUnits.size === 0 &&
+    !adapted.unavailable &&
+    !fullAdapted.unavailable &&
+    Number(payload.hidden) === 0 &&
+    Object.keys(payload.files || {}).every((name) => {
+      const unit = payload.files[name];
+      return (
+        Array.isArray(unit.errors) &&
+        unit.errors.length === 0 &&
+        Number(
+          unit.obligation_summary && unit.obligation_summary.hidden
+        ) === 0
+      );
+    });
   lastCompiles =
     activeValid &&
     lastErrorCount === 0 &&

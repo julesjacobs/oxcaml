@@ -123,7 +123,12 @@ let test_origin =
 
 let fact expression =
   Vox_vc.
-    { expression; location = Some loc; scope = None; origin = test_origin }
+    { expression;
+      location = Some loc;
+      scope = None;
+      origin = test_origin;
+      producers = [test_origin];
+    }
 
 let vc ?(facts = []) goal = Vox_vc.create ~loc ~facts ~goal
 

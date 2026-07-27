@@ -1281,6 +1281,53 @@ function fetchShim(url, opts) {
         vcs: [vc(0, 0, 40), vc(1, 0, 40), vc(2, 2, 30), vc(3, 5, 10)],
       });
     }
+    // Two calls whose whole product is a proposition: one the single proved
+    // obligation read, one it did not.  The model decides both; this fixture
+    // is here to exercise the app-level wiring between them -- payload to
+    // mark, and mark to nothing when the result stops being complete.
+    if (src.indexOf("LEMMAUNUSED") !== -1) {
+      const span = (c0, c1) => ({
+        start: { line: 0, col: c0 },
+        end: { line: 0, col: c1 },
+      });
+      const hyp = (name, c0, c1, used) => ({
+        name,
+        kind: "application",
+        display: name + "-fact",
+        raw: "",
+        span: span(c0, c1),
+        used,
+        producers: [{ name, kind: "application", span: span(c0, c1) }],
+      });
+      return jsonResponse({
+        revision,
+        unavailable: false,
+        hidden: 0,
+        lemma_calls: [
+          { file: null, ...span(18, 28), name: "unread_law", introduced: true },
+          { file: null, ...span(29, 39), name: "read_law", introduced: true },
+          // Reported, but its proposition never reached the fact
+          // environment, so there is nothing to say it went unread.
+          { file: null, ...span(40, 50), name: "dropped_law", introduced: false },
+        ],
+        vcs: [
+          {
+            id: 0,
+            status: src.indexOf("LEMMAUNUSED_OPEN") !== -1 ? "unknown" : "proved",
+            kind: "contract",
+            span: span(4, 15),
+            goal: { display: "g", raw: "" },
+            hypotheses: [
+              hyp("unread_law", 18, 28, false),
+              hyp("read_law", 29, 39, true),
+            ],
+            counterexample: null,
+            detail: null,
+            generated_lean: null,
+          },
+        ],
+      });
+    }
     // STATUS fail-closed honesty fixtures (paired with the /check cases above).
     if (src.indexOf("STATUSPROVED") !== -1) {
       const vc = (id, c) => ({
@@ -2180,6 +2227,81 @@ async function main() {
     );
     leave();
     ok(activeProv().length === 0, "mouseout after a goal hover clears the mark");
+  }
+
+  // --- calls whose whole product is a proposition no obligation read ---
+  // The decision itself is pane_model's and is covered exhaustively there.
+  // What is covered here is the wiring: a complete result paints exactly the
+  // unread call, the read one and the one that introduced nothing stay bare,
+  // and an obligation that did not close takes every mark away.
+  console.log("Unnecessary lemma calls (editor marks):");
+  {
+    store.clear();
+    const app = loadApp();
+    await tick();
+    await tick();
+    const lemmaMarks = () =>
+      app.cm._marks
+        .filter((m) => m.opts.className === "lemma-unused" && !m.cleared)
+        .map((m) => m.from.ch + "-" + m.to.ch)
+        .sort();
+    app.cm.setValue("let LEMMAUNUSED = aaaaaaaaaa bbbbbbbbbb cccccccccc");
+    await app.runCheck();
+    await app.refreshVcs();
+    await tick();
+    ok(
+      lemmaMarks().join(",") === "18-28",
+      "only the call no obligation read is marked"
+    );
+    const marked = app.cm._marks.find(
+      (m) => m.opts.className === "lemma-unused" && !m.cleared
+    );
+    ok(
+      marked &&
+        /^(lean|z3|oxsmt) proved every obligation without this call's facts$/.test(
+          marked.opts.title
+        ),
+      "the mark's hover text names the backend scope the answer holds for"
+    );
+    app.cm.setValue("let LEMMAUNUSED_OPEN = aaaaaaaaaa bbbbbbbbbb ccc");
+    await app.runCheck();
+    await app.refreshVcs();
+    await tick();
+    ok(
+      lemmaMarks().length === 0,
+      "an obligation that did not close removes every mark"
+    );
+    app.cm.setValue("let LEMMAUNUSED = aaaaaaaaaa bbbbbbbbbb cccccccccc");
+    await app.runCheck();
+    await app.refreshVcs();
+    await tick();
+    ok(lemmaMarks().join(",") === "18-28", "and the mark comes back with the result");
+    app.cm.setValue("let plain = 1");
+    await app.runCheck();
+    await app.refreshVcs();
+    await tick();
+    ok(
+      lemmaMarks().length === 0,
+      "a buffer whose response names no such call carries no marks"
+    );
+    // Obligations from this revision, diagnostics from the last one checked.
+    // On this path the two come from separate requests: the payload is
+    // refused unless its revision is the buffer's, but the errors are
+    // whatever the last /check left behind.  A compile that stopped part-way
+    // through building obligations would look complete over those errors,
+    // and the answer would be about a buffer nobody asked about.
+    app.cm.setValue("let LEMMAUNUSED = aaaaaaaaaa bbbbbbbbbb cccccccccc");
+    await app.runCheck();
+    await app.refreshVcs();
+    await tick();
+    ok(lemmaMarks().join(",") === "18-28", "a checked revision marks as before");
+    app.cm.setValue("let LEMMAUNUSED = aaaaaaaaaa bbbbbbbbbb cccccccccd");
+    await app.refreshVcs();
+    await tick();
+    ok(
+      lemmaMarks().length === 0,
+      "an edit that has not been checked leaves the obligations of one revision beside the diagnostics of another: no marks"
+    );
   }
 
   // --- #173 nested-goal wash: opacity deepens by containment depth ---

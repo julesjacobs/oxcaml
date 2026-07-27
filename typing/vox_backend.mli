@@ -21,6 +21,11 @@ type verdict =
     invented. *)
 type fact_usage_capability =
   | Fact_usage
+  (* No backend answers this today: [capabilities] returns [Fact_usage] for
+     all three.  The constructor is what a consumer's "this backend could not
+     say" path is written against, so it is kept rather than removed -- but
+     that path is exercised only by tests until a backend without an unsat
+     core or an unused-variable reading arrives. *)
   | No_fact_usage
 
 type capabilities =

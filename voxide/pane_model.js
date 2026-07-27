@@ -388,7 +388,46 @@ function adaptHyp(raw, spanContext) {
     // Tri-state: false/true only when the active backend actually reports fact
     // usage.  null means no capability; it must never inherit Lean's fade.
     used: raw && typeof raw.used === "boolean" ? raw.used : null,
+    // Every site that introduced this proposition, spans validated against the
+    // buffer.  `null` means the provenance is not fully known -- an older
+    // payload without the field, a malformed entry, or a span that will not
+    // place -- and a consumer asking "did this site's fact go unread" has to
+    // treat such a fact as possibly belonging to any site.
+    producers: adaptProducers(raw && raw.producers, spanContext),
+    // Per-backend reading of THIS fact, for a cross-check.  A backend absent
+    // from the map reported no accounting; that is not the same as reporting
+    // that it left the fact unread.
+    usedBy: adaptUsedBy(raw && raw.used_by),
   };
+}
+
+function adaptProducers(raw, spanContext) {
+  if (!Array.isArray(raw)) return null;
+  const producers = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return null;
+    const span = validateEditorSpan(entry.span, spanContext);
+    if (!span) return null;
+    producers.push({
+      name: entry.name != null ? String(entry.name) : null,
+      kind: entry.kind != null ? String(entry.kind) : null,
+      span,
+    });
+  }
+  return producers;
+}
+
+function adaptUsedBy(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const usedBy = {};
+  let any = false;
+  for (const backend of ["lean", "z3", "oxsmt"]) {
+    if (typeof raw[backend] === "boolean") {
+      usedBy[backend] = raw[backend];
+      any = true;
+    }
+  }
+  return any ? usedBy : null;
 }
 
 function adaptBackendResult(raw) {
@@ -586,6 +625,146 @@ function adaptVcs(payload, spanContext) {
       ? String(payload.unavailable_reason)
       : "unknown",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Calls that introduced a proposition no obligation read
+// ---------------------------------------------------------------------------
+
+// A call whose only product is a proposition earns its place by being read.
+// Whether it was read is a property of the WHOLE accepted result, not of any
+// one obligation, so this folds over every obligation the run produced and
+// answers only when the fold is complete.  Every gap -- an obligation that
+// could not be placed, a fact whose introducers are not fully reported, a
+// backend that reported no accounting, a result that was not accepted --
+// leaves the question open, and an open question produces no answer.  Saying
+// nothing costs a reader a hint; saying it wrongly costs them a call their
+// proof depends on.
+
+function lemmaSpanKey(span) {
+  if (!span || !span.start || !span.end) return null;
+  return (
+    (span.file || "") +
+    ":" +
+    span.start.line +
+    ":" +
+    span.start.col +
+    "-" +
+    span.end.line +
+    ":" +
+    span.end.col
+  );
+}
+
+// Which backends this obligation was actually decided by, or null outside a
+// cross-check.  Only a backend that advertises fact usage can be asked
+// whether it read a fact; one that cannot is not evidence either way, so its
+// silence must not read as "left it unread".
+function obligationBackends(vc) {
+  if (!Array.isArray(vc.backends) || vc.backends.length === 0) return null;
+  return vc.backends.map((b) => b.backend);
+}
+
+// Was this fact read while deciding this obligation?  "unknown" whenever the
+// accounting is absent for any backend that decided it: under a cross-check
+// two backends may reach the same verdict off different facts, so a fact is
+// read if ANY of them read it, and the question can only be closed when all
+// of them answered.
+function factUsage(hyp, backends) {
+  if (backends === null) {
+    if (typeof hyp.used !== "boolean") return "unknown";
+    return hyp.used ? "used" : "unread";
+  }
+  const usedBy = hyp.usedBy;
+  if (!usedBy) return "unknown";
+  let used = false;
+  for (const backend of backends) {
+    if (typeof usedBy[backend] !== "boolean") return "unknown";
+    if (usedBy[backend]) used = true;
+  }
+  return used ? "used" : "unread";
+}
+
+// [obligations] must be EVERY obligation of the accepted result, across every
+// unit -- a fold over a subset would call a call unread on the strength of
+// having not looked.  [complete] is the caller's assertion that it is; it
+// carries what only the caller knows (a superseded response, an invalid unit,
+// an obligation dropped before this model saw it).
+function unnecessaryLemmaCalls(options) {
+  const opts = options || {};
+  const lemmaCalls = opts.lemmaCalls;
+  const obligations = Array.isArray(opts.obligations) ? opts.obligations : null;
+  const empty = { calls: [], backendScope: [] };
+  if (!opts.complete) return empty;
+  if (obligations === null) return empty;
+  // Absent channel: an older compiler that never names such a call is not a
+  // buffer that holds none.
+  if (!Array.isArray(lemmaCalls) || lemmaCalls.length === 0) return empty;
+  // Not an accepted result.  A fact's accounting comes from the proof that
+  // read it; where there is no proof there is no accounting, and an
+  // obligation that failed may well have needed the very fact whose site is
+  // in question.
+  if (!obligations.every((vc) => vc.status === "proved")) return empty;
+
+  const backendScope = new Set();
+  const evidence = new Map();
+  for (const vc of obligations) {
+    const backends = obligationBackends(vc);
+    if (backends === null) {
+      if (opts.backend) backendScope.add(String(opts.backend));
+    } else {
+      for (const backend of backends) backendScope.add(backend);
+    }
+    for (const hyp of vc.hypotheses || []) {
+      // A fact whose introducers are not fully reported could have come from
+      // any of these calls, so no call can be cleared while one is present.
+      if (!Array.isArray(hyp.producers)) return empty;
+      const usage = factUsage(hyp, backends);
+      for (const producer of hyp.producers) {
+        const key = lemmaSpanKey(producer.span);
+        if (key === null) return empty;
+        const entry = evidence.get(key) || { used: false, unknown: false };
+        if (usage === "used") entry.used = true;
+        if (usage === "unknown") entry.unknown = true;
+        evidence.set(key, entry);
+      }
+    }
+  }
+
+  const calls = [];
+  for (const call of lemmaCalls) {
+    const key = lemmaSpanKey(call);
+    if (key === null) continue;
+    // The compiler did not see the proposition reach the fact environment, so
+    // there is nothing to say it went unread.
+    if (call.introduced !== true) continue;
+    const entry = evidence.get(key);
+    if (entry && (entry.used || entry.unknown)) continue;
+    calls.push({
+      file: call.file != null ? call.file : null,
+      start: call.start,
+      end: call.end,
+      name: call.name != null ? String(call.name) : null,
+    });
+  }
+  return { calls, backendScope: [...backendScope].sort() };
+}
+
+const LEMMA_UNUSED_HINT = "every obligation was proved without this call's facts";
+
+// What was measured, with the prover that measured it as the subject of the
+// sentence.  The reading is that prover's alone: another backend can prove
+// the same obligations by a different route through the same facts, and has
+// been seen to, so the sentence a reader forms must not be wider than the
+// run behind it.  "Unnecessary" is the reader's conclusion to draw, not this
+// text's to assert.
+function lemmaUnusedHint(backendScope) {
+  if (!Array.isArray(backendScope) || backendScope.length === 0) {
+    return LEMMA_UNUSED_HINT;
+  }
+  return (
+    backendScope.join(", ") + " proved every obligation without this call's facts"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1510,6 +1689,13 @@ if (typeof module !== "undefined" && module.exports) {
     summaryFromVcs,
     adaptObligationSummary,
     adaptVcs,
+    adaptProducers,
+    adaptUsedBy,
+    lemmaSpanKey,
+    factUsage,
+    unnecessaryLemmaCalls,
+    LEMMA_UNUSED_HINT,
+    lemmaUnusedHint,
     contains,
     spanSize,
     cursorReadoutLines,

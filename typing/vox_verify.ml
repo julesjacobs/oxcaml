@@ -115,6 +115,18 @@ let semantic_identifier_tokens = ref []
    in the editor's established identifier-mode readout shape. *)
 let dumped_identifier_modes = ref []
 
+(* Call sites whose only product is a proposition: an application whose result
+   refinement refines [unit].  Such a call computes nothing a later expression
+   can read, so the facts it introduces are the whole of its contribution, and
+   a reader wanting to know whether it earned its place has to ask whether any
+   obligation read them.  Recorded here, span and callee name, so the answer
+   can be given for a call whose fact was dropped (out of scope, already
+   present) as readily as for one whose fact survived.  A call whose
+   arguments did work of their own is not recorded at all: its span contains
+   theirs, so an answer about it would be read as an answer about them.
+   Populated and emitted only when [-vox-dump-vc-json] is set. *)
+let lemma_call_sites : (Location.t * string option * bool) list ref = ref []
+
 let valid_local_span (location : Location.t) =
   let start = location.loc_start in
   let end_ = location.loc_end in
@@ -231,6 +243,13 @@ let not_discharged_result (condition : Vox_vc.t) : Vox_backend.result =
     backend_results = [];
   }
 
+let json_fact_origin (origin : Vox_vc.fact_origin) =
+  Json.object_
+    [ Json.field "kind" (json_string origin.kind);
+      Json.field "name" (Json.option json_string origin.name);
+      Json.field "span" (Json.option json_span origin.span);
+    ]
+
 let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
   let origin = fact.origin in
   let fields =
@@ -238,12 +257,7 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
       Json.field "display"
         (json_string (render_display ~env fact.expression));
       Json.field "source_span" (Json.option json_span fact.location);
-      Json.field "origin"
-        (Json.object_
-           [ Json.field "kind" (json_string origin.kind);
-             Json.field "name" (Json.option json_string origin.name);
-             Json.field "span" (Json.option json_span origin.span);
-           ]);
+      Json.field "origin" (json_fact_origin origin);
     ]
   in
   let usage =
@@ -257,6 +271,24 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
     | Some scope when valid_local_span scope ->
       [Json.field "scope" (json_span scope)]
     | None | Some _ -> []
+  in
+  (* The sites that introduced this proposition BESIDES [origin], which is
+     always one of them and is already on the wire beside this.  Usually
+     there are none, and the field is an empty array: repeating [origin]
+     spent about an eighth of the document saying a second time what the
+     line above it says.  Present-but-empty is not the same as absent, and
+     both readings are safe against a consumer of the other vintage: a
+     consumer that does not know this field reads no provenance at all and
+     stays silent, and one that does reads an absent field as unknown
+     provenance and stays silent too. *)
+  let also_introduced_by =
+    let others =
+      List.filter
+        (fun producer -> not (Vox_vc.same_origin producer origin))
+        fact.producers
+    in
+    [ Json.field "also_introduced_by"
+        (Json.array (List.map json_fact_origin others)) ]
   in
   let bound_identifiers =
     Types.Refinement.free_bound_identifiers fact.expression
@@ -273,7 +305,7 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
     | identifiers ->
       [Json.field "bound_identifiers" (Json.array identifiers)]
   in
-  Json.object_ (fields @ usage @ scope @ bound_identifiers)
+  Json.object_ (fields @ usage @ scope @ also_introduced_by @ bound_identifiers)
 
 let contains text needle =
   let text_length = String.length text in
@@ -372,14 +404,27 @@ let json_backend_result (result : Vox_backend.backend_result) =
     | Vox_backend.Fact_usage -> true
     | Vox_backend.No_fact_usage -> false
   in
+  (* Under a cross-check the document's per-fact [used] carries one backend's
+     accounting, and two backends need not read the same facts to reach the
+     same verdict.  Report each backend's own reading, absent when that
+     backend produced none, so a consumer can ask whether every backend left a
+     fact unread instead of taking the first one's word for all of them. *)
+  let used_facts =
+    match result.unused_facts with
+    | None -> []
+    | Some unused ->
+      [ Json.field "unused_facts"
+          (Json.array (List.map Json.int unused)) ]
+  in
   Json.object_
-    [ Json.field "backend"
-        (json_string (Vox_backend.string_of_backend result.backend));
-      Json.field "status"
-        (json_string (Vox_backend.string_of_verdict result.verdict));
-      Json.field "detail" (Json.option json_string result.detail);
-      Json.field "fact_usage" (json_bool fact_usage);
-    ]
+    ([ Json.field "backend"
+         (json_string (Vox_backend.string_of_backend result.backend));
+       Json.field "status"
+         (json_string (Vox_backend.string_of_verdict result.verdict));
+       Json.field "detail" (Json.option json_string result.detail);
+       Json.field "fact_usage" (json_bool fact_usage);
+     ]
+     @ used_facts)
 
 let witness_relevance_fields ~env condition =
   match Vox_lean.witness_variables ~env condition with
@@ -528,6 +573,40 @@ let () =
             | [] -> []
             | entries -> [Json.field "identifier_modes" (Json.array entries)]
           in
+          (* One entry per distinct call site, in source order.  The verifier
+             can reach a site more than once, and a site reached twice is
+             still one place in the file. *)
+          let lemma_calls_field =
+            let entries =
+              List.fold_left
+                (fun kept (span, name, introduced) ->
+                  (* A site the verifier reached twice is still one place in
+                     the file.  Its fact counts as introduced if it reached
+                     the environment on either visit. *)
+                  if
+                    List.exists
+                      (fun (other, _, _) -> same_span other span) kept
+                  then
+                    List.map
+                      (fun (other, other_name, other_introduced) ->
+                        if same_span other span
+                        then
+                          (other, other_name, other_introduced || introduced)
+                        else (other, other_name, other_introduced))
+                      kept
+                  else (span, name, introduced) :: kept)
+                [] !lemma_call_sites
+              |> List.map (fun (span, name, introduced) ->
+                Json.object_
+                  [ Json.field "span" (json_span span);
+                    Json.field "name" (Json.option json_string name);
+                    Json.field "introduced" (json_bool introduced);
+                  ])
+            in
+            match entries with
+            | [] -> []
+            | entries -> [Json.field "lemma_calls" (Json.array entries)]
+          in
           let document =
             Json.object_
               ([ Json.field "schema_version" (Json.int 2);
@@ -538,7 +617,8 @@ let () =
                @ expression_type_judgments_field
                @ lexical_bindings_field
                @ semantic_tokens_field
-               @ identifier_modes_field)
+               @ identifier_modes_field
+               @ lemma_calls_field)
           in
           let channel = open_out file in
           Misc.try_finally
@@ -655,6 +735,14 @@ let carrier ~env type_ =
   match refinement ~env type_ with
   | Some refinement -> refinement.ref_skeleton
   | None -> type_
+
+(* Does this refinement refine [unit]?  The carrier is what the call hands
+   back, so a refined [unit] result means the call hands back nothing: its
+   predicate is its entire contribution. *)
+let refines_unit ~env (refinement : Types.refinement_desc) =
+  match get_desc (expand_head_for_refinement ~env refinement.ref_skeleton) with
+  | Tconstr (path, _, _) -> Path.same path Predef.path_unit
+  | _ -> false
 
 let node expression desc =
   Refinement.create ~loc:expression.exp_loc
@@ -901,6 +989,74 @@ let expression_has_total_mode expression =
         end
       | _ -> false)
     expression.exp_extra
+
+let semantic_totality_string expression mode =
+  if expression_has_total_mode expression then "total"
+  else
+    match
+      Mode.Totality.Guts.check_const_conservative
+        (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
+    with
+    | Some Mode.Totality.Const.Total -> "total"
+    | Some Mode.Totality.Const.Partial -> "partial"
+    | None -> "unknown"
+
+let semantic_logicality_string mode =
+  match
+    Mode.Logicality.Guts.check_const_conservative
+      (Mode.Value.proj_monadic Mode.Axis.Logicality mode)
+  with
+  | Some Mode.Logicality.Const.Logical -> "logical"
+  | Some Mode.Logicality.Const.Physical -> "physical"
+  | None -> "unknown"
+
+let semantic_proof_contract ~env type_ =
+  let seen_paths = ref Path.Set.empty in
+  let rec result type_ =
+    match get_desc type_ with
+    | Tpoly (type_, _) -> result type_
+    | Tarrow (_, _, type_, _) -> result type_
+    | Trefine refinement -> unit_carrier refinement.ref_skeleton
+    | Tconstr (path, _, _) ->
+      if Path.Set.mem path !seen_paths then false
+      else begin
+        seen_paths := Path.Set.add path !seen_paths;
+        match expand_head_for_refinement ~env type_ with
+        | expanded -> result expanded
+        | exception _ -> false
+      end
+    | _ -> false
+  and unit_carrier type_ =
+    match get_desc (expand_head_for_refinement ~env type_) with
+    | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+    | _ -> false
+    | exception _ -> false
+  in
+  result type_
+
+(* Is this identifier occurrence a call to a proof artifact -- a binding whose
+   eventual result is a refined [unit] law, reached totally or logically?  This
+   is the one definition of that question in this file: the semantic-token
+   classification below reads it, and so does the record of which calls exist
+   only for the proposition they state.  Requiring totality or logicality is
+   what separates a law from a partial [unit{p}] function whose call also does
+   something. *)
+let call_is_proof_evidence state expression =
+  match expression.exp_desc with
+  | Texp_ident { desc; mode; _ } ->
+    let env = expression.exp_env in
+    let proof_contract =
+      semantic_proof_contract ~env expression.exp_type
+      || semantic_proof_contract ~env desc.val_type
+    in
+    let known_total =
+      Types.Uid.Tbl.mem state.total_functions desc.val_uid
+      || expression_has_total_mode expression
+      || String.equal (semantic_totality_string expression mode) "total"
+    in
+    let logical = String.equal (semantic_logicality_string mode) "logical" in
+    (known_total || logical) && proof_contract
+  | _ -> false
 
 let primitive_is_comparison primitive =
   List.mem primitive.Primitive.prim_name
@@ -1726,12 +1882,15 @@ let verify_seal_obligation ~env ~seal_location
         snd (align_seal_sibling_references ~env interface_predicate expression)
       else expression
     in
+    let origin =
+      fact_origin ~kind:"seal-binder" ~name:obligation.rso_value_name
+        obligation.rso_implementation_location
+    in
     { Vox_vc.expression;
       location = Some obligation.rso_implementation_location;
       scope = None;
-      origin =
-        fact_origin ~kind:"seal-binder" ~name:obligation.rso_value_name
-          obligation.rso_implementation_location;
+      origin;
+      producers = [origin];
     }
   in
   (* Keep only the parameters this obligation can talk about.  An unrelated
@@ -1768,14 +1927,17 @@ let verify_seal_obligation ~env ~seal_location
     Vox_vc.create ~loc:anchor
       ~facts:
         (binder_facts
-        @ [{ Vox_vc.expression = hypothesis;
-             location = Some obligation.rso_implementation_location;
-             scope = None;
-             origin =
-               fact_origin ~kind:"seal-implication"
-                 ~name:obligation.rso_value_name
-                 obligation.rso_implementation_location;
-           }])
+        @ [(let origin =
+              fact_origin ~kind:"seal-implication"
+                ~name:obligation.rso_value_name
+                obligation.rso_implementation_location
+            in
+            { Vox_vc.expression = hypothesis;
+              location = Some obligation.rso_implementation_location;
+              scope = None;
+              origin;
+              producers = [origin];
+            })])
       ~goal
   in
   let provenance =
@@ -2659,8 +2821,8 @@ let contract_argument_provenance ~application_location ~argument_location
 let merge_facts left right =
   List.fold_left
     (fun facts (fact : Vox_vc.fact) ->
-      Facts.add ~origin:fact.origin ?loc:fact.location ?scope:fact.scope
-        fact.expression facts)
+      Facts.add ~origin:fact.origin ~producers:fact.producers
+        ?loc:fact.location ?scope:fact.scope fact.expression facts)
     left (Facts.facts right)
 
 let short_circuit_application function_ arguments =
@@ -3469,10 +3631,17 @@ and add_try_result_fact state pattern paths =
                       outer_scope)
                   (Facts.facts facts)
               in
-              List.fold_right
-                (fun (fact : Vox_vc.fact) formula ->
-                  conjoin fact.expression formula)
-                path_facts result_equality)
+              (* The summary absorbs these path facts as conjuncts, and the
+                 facts themselves may not outlive the handler.  It is then the
+                 only thing carrying what their introduction sites said, so it
+                 has to carry who those sites were as well. *)
+              ( List.fold_right
+                  (fun (fact : Vox_vc.fact) formula ->
+                    conjoin fact.expression formula)
+                  path_facts result_equality,
+                List.concat_map
+                  (fun (fact : Vox_vc.fact) -> fact.producers)
+                  path_facts ))
             (equality ~env:pattern.pat_env ~loc result path_result)
     in
     let rec all_path_facts paths =
@@ -3486,10 +3655,17 @@ and add_try_result_fact state pattern paths =
     in
     begin match all_path_facts paths with
     | None | Some [] -> ()
-    | Some (first :: rest) ->
-      let summary = List.fold_left disjoin first rest in
+    | Some ((first, first_producers) :: rest) ->
+      let summary =
+        List.fold_left (fun left (right, _) -> disjoin left right) first rest
+      in
       let origin = fact_origin ~kind:"try-result" loc in
-      state.facts <- Facts.add ~origin ~loc summary state.facts
+      let producers =
+        origin
+        :: first_producers
+        @ List.concat_map (fun (_, producers) -> producers) rest
+      in
+      state.facts <- Facts.add ~origin ~producers ~loc summary state.facts
     end
 
 and check_marks_against state ~env ~subject_location ?result_span ~subject marks =
@@ -4176,6 +4352,40 @@ and check_application state application function_ arguments
      returns; letting it stand as a hypothesis while proving that the call
      descends would prove termination from the assumption of termination. *)
   check_termination state application function_ arguments;
+  (* What a reader does with the mark is delete the marked text, and the
+     marked text is the whole application -- its arguments with it.  So the
+     question the mark answers is not only whether this call's own
+     proposition went unread: it is whether anything inside its span did work
+     that would go with it.  An argument that is itself a lemma call is the
+     case that matters, since the fact an obligation read may be the inner
+     one while the outer one goes unread, and the two are one span on screen.
+     Admit only arguments whose evaluation left the fact environment as it
+     was and which are stable, so nothing observable leaves with them; where
+     that is not established, record no call and the mark is never offered.
+
+     What is admitted is narrower than "no nested lemma call", and
+     deliberately: any argument that touched the fact environment is refused,
+     including one that only mentions a refined value, since referring to
+     such a binding introduces a fact of its own.  Measured over the
+     refinement corpus that costs one recording in the whole of bst.ml --
+     [member_def query empty], where [empty] is a refined value -- and no
+     mark anywhere, so the narrower rule is paid for at the price of a hint
+     nobody was shown. *)
+  let arguments_are_inert =
+    match
+      List.for_all2
+        (fun (_, argument) argument_facts ->
+          match argument, argument_facts with
+          | Arg (argument, _), Some argument_facts ->
+            Facts.same_facts argument_facts entry_facts
+            && expression_is_stable state argument
+          | Omitted _, None -> true
+          | Arg _, None | Omitted _, Some _ -> false)
+        arguments argument_facts
+    with
+    | inert -> inert
+    | exception Invalid_argument _ -> false
+  in
   Option.iter
     (fun metadata ->
       let name =
@@ -4185,10 +4395,36 @@ and check_application state application function_ arguments
       in
       Option.iter
         (fun refinement ->
+          (* A call whose only product is this proposition.  The applied
+             result has to refine [unit] -- so nothing downstream can read a
+             value from it -- and the callee has to be the same proof artifact
+             the semantic classification calls a proof call, which is what
+             rules out a partial [unit{p}] function whose call also does
+             something. *)
+          let lemma_call =
+            Option.is_some !Clflags.vox_dump_vc_json
+            && valid_local_span application.exp_loc
+            && refines_unit ~env:application.exp_env refinement
+            && call_is_proof_evidence state function_
+            && arguments_are_inert
+          in
           add_extracted_refinement_fact state ~env:application.exp_env
             ~kind:"application" ?name
             ~loc:application.exp_loc ~subject:(subject state application)
-            (apply_subject_replacements refinement))
+            (apply_subject_replacements refinement);
+          if lemma_call then begin
+            (* Whether the proposition reached the environment at all.  A call
+               whose fact was filtered away, or left scope before any
+               obligation, differs from one whose fact no obligation read, and
+               only the second is a call that did nothing. *)
+            let introduced =
+              Facts.introduced_by
+                (fact_origin ~kind:"application" ?name application.exp_loc)
+                state.facts
+            in
+            lemma_call_sites :=
+              (application.exp_loc, name, introduced) :: !lemma_call_sites
+          end)
         (refinement ~env:application.exp_env metadata.rapp_result))
     metadata
 
@@ -4649,55 +4885,11 @@ let semantic_role_string = function
   | Semantic_statement -> "statement"
   | Semantic_use -> "use"
 
-let semantic_totality_string expression mode =
-  if expression_has_total_mode expression then "total"
-  else
-    match
-      Mode.Totality.Guts.check_const_conservative
-        (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
-    with
-    | Some Mode.Totality.Const.Total -> "total"
-    | Some Mode.Totality.Const.Partial -> "partial"
-    | None -> "unknown"
-
-let semantic_logicality_string mode =
-  match
-    Mode.Logicality.Guts.check_const_conservative
-      (Mode.Value.proj_monadic Mode.Axis.Logicality mode)
-  with
-  | Some Mode.Logicality.Const.Logical -> "logical"
-  | Some Mode.Logicality.Const.Physical -> "physical"
-  | None -> "unknown"
-
 let semantic_arrow_type ~env type_ =
   match get_desc (Ctype.expand_head env type_) with
   | Tarrow _ -> true
   | _ -> false
   | exception _ -> false
-
-let semantic_proof_contract ~env type_ =
-  let seen_paths = ref Path.Set.empty in
-  let rec result type_ =
-    match get_desc type_ with
-    | Tpoly (type_, _) -> result type_
-    | Tarrow (_, _, type_, _) -> result type_
-    | Trefine refinement -> unit_carrier refinement.ref_skeleton
-    | Tconstr (path, _, _) ->
-      if Path.Set.mem path !seen_paths then false
-      else begin
-        seen_paths := Path.Set.add path !seen_paths;
-        match expand_head_for_refinement ~env type_ with
-        | expanded -> result expanded
-        | exception _ -> false
-      end
-    | _ -> false
-  and unit_carrier type_ =
-    match get_desc (expand_head_for_refinement ~env type_) with
-    | Tconstr (path, [], _) -> Path.same path Predef.path_unit
-    | _ -> false
-    | exception _ -> false
-  in
-  result type_
 
 let collect_semantic_token state ~role expression =
   match expression.exp_desc with
@@ -4706,18 +4898,20 @@ let collect_semantic_token state ~role expression =
     let env = expression.exp_env in
     let totality = semantic_totality_string expression mode in
     let logicality = semantic_logicality_string mode in
-    let total_definition =
-      Types.Uid.Tbl.mem state.total_functions desc.val_uid
-    in
     let arrow = semantic_arrow_type ~env expression.exp_type in
     (* The occurrence's [exp_type] can be an unrefined instance, so consult the
        resolved value's declared type as well.  A proof contract is narrower
        than merely containing a refinement: after following arrows and type
        aliases its result must be a refined unit law.  Refined computational
-       results and refined argument domains remain ordinary program code. *)
-    let proof_contract =
-      semantic_proof_contract ~env expression.exp_type
-      || semantic_proof_contract ~env desc.val_type
+       results and refined argument domains remain ordinary program code.
+       Totality or logicality is necessary but not sufficient; [int{p}],
+       [bool{p}], and refinements confined to argument domains describe
+       computations rather than lemma evidence. *)
+    let proof_evidence = call_is_proof_evidence state expression in
+    (* Reported alongside the classification, and used for the companion mode
+       text.  These are the same readings [call_is_proof_evidence] folds. *)
+    let total_definition =
+      Types.Uid.Tbl.mem state.total_functions desc.val_uid
     in
     let known_total =
       total_definition
@@ -4725,18 +4919,12 @@ let collect_semantic_token state ~role expression =
       || String.equal totality "total"
     in
     let logical = String.equal logicality "logical" in
-    (* Totality or logicality is necessary but not sufficient.  Only a refined
-       unit result is proof-only; [int{p}], [bool{p}], and refinements confined
-       to argument domains describe computations rather than lemma evidence. *)
     let classification =
       match role with
       | Semantic_head | Semantic_statement ->
-        if (known_total || logical) && proof_contract then "proof-call"
-        else "ordinary"
+        if proof_evidence then "proof-call" else "ordinary"
       | Semantic_use ->
-        if (known_total || logical) && proof_contract && arrow
-        then "proof-use"
-        else "ordinary"
+        if proof_evidence && arrow then "proof-use" else "ordinary"
     in
     let token =
       Json.object_

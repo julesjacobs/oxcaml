@@ -683,6 +683,229 @@ section("H4 tool honesty: default active unit follows payload.active");
   );
 }
 
+section("Calls whose proposition no obligation read");
+{
+  // A span in the shape the model compares on: the compiler reports the call
+  // site and the fact's producer as the same span, so the two join on it.
+  function span(line, col, file) {
+    const s = {
+      start: { line, col },
+      end: { line, col: col + 10 },
+    };
+    if (file !== undefined) s.file = file;
+    return s;
+  }
+  function call(line, col, opts) {
+    const o = opts || {};
+    return {
+      ...span(line, col, o.file),
+      name: o.name || "some_law",
+      introduced: o.introduced !== false,
+    };
+  }
+  // A hypothesis introduced by the sites at [producerSpans].
+  function hyp(producerSpans, usage) {
+    const h = {
+      display: "p",
+      raw: "p",
+      producers: producerSpans.map((s) => ({
+        name: "some_law",
+        kind: "application",
+        span: s,
+      })),
+      used: null,
+      usedBy: null,
+    };
+    if (typeof usage === "boolean") h.used = usage;
+    else if (usage && typeof usage === "object") h.usedBy = usage;
+    return h;
+  }
+  function vc(hypotheses, opts) {
+    const o = opts || {};
+    return {
+      id: o.id || 0,
+      file: o.file || null,
+      status: o.status || "proved",
+      hypotheses,
+      backends: o.backends || null,
+    };
+  }
+  function decide(lemmaCalls, obligations, opts) {
+    return model.unnecessaryLemmaCalls({
+      lemmaCalls,
+      obligations,
+      complete: (opts || {}).complete !== false,
+      backend: (opts || {}).backend || "z3",
+    });
+  }
+  function marked(answer) {
+    return answer.calls
+      .map((c) => c.start.line + ":" + c.start.col)
+      .sort()
+      .join(",");
+  }
+
+  ok(
+    marked(
+      decide(
+        [call(5, 11)],
+        [vc([hyp([span(5, 11)], false), hyp([span(5, 11)], false)])]
+      )
+    ) === "5:11",
+    "one call, several facts, none read: the call is marked"
+  );
+  ok(
+    marked(
+      decide(
+        [call(5, 11)],
+        [vc([hyp([span(5, 11)], false), hyp([span(5, 11)], true)])]
+      )
+    ) === "",
+    "one call, several facts, one read: silent (any read clears the call)"
+  );
+  ok(
+    marked(
+      decide(
+        [call(5, 11), call(6, 11)],
+        [vc([hyp([span(5, 11), span(6, 11)], true)])]
+      )
+    ) === "",
+    "two calls folded into one proposition, read: BOTH are cleared"
+  );
+  ok(
+    marked(
+      decide(
+        [call(5, 11), call(6, 11)],
+        [vc([hyp([span(5, 11), span(6, 11)], false)])]
+      )
+    ) === "5:11,6:11",
+    "two calls folded into one proposition, unread: both are marked"
+  );
+  ok(
+    marked(
+      decide(
+        [call(5, 11)],
+        [
+          vc([hyp([span(5, 11)], false)], { id: 0 }),
+          vc([hyp([span(5, 11)], false)], { id: 1 }),
+          vc([hyp([span(5, 11)], true)], { id: 2 }),
+        ]
+      )
+    ) === "",
+    "read by one obligation of many: silent"
+  );
+  ok(
+    marked(
+      decide(
+        [call(5, 11, { file: "lib.ml" })],
+        [
+          vc([hyp([span(5, 11, "lib.ml")], false)], { file: "lib.ml" }),
+          vc([hyp([span(5, 11, "lib.ml")], true)], { file: "client.ml" }),
+        ]
+      )
+    ) === "",
+    "read by an obligation in another unit: silent"
+  );
+  ok(
+    marked(decide([call(5, 11)], [])) === "5:11",
+    "no obligation carries the proposition at all: the call is marked"
+  );
+  ok(
+    marked(decide([call(5, 11, { introduced: false })], [])) === "",
+    "the compiler never saw the proposition reach the environment: silent"
+  );
+  ok(
+    marked(decide([call(5, 11)], [vc([hyp([span(5, 11)], false)])], {
+      complete: false,
+    })) === "",
+    "an incomplete result (hidden or unplaceable obligation): silent"
+  );
+  ok(
+    marked(decide([call(5, 11)], [vc([hyp([span(5, 11)], null)])])) === "",
+    "a backend that reports no fact usage (legacy payload): silent"
+  );
+  {
+    const legacy = hyp([span(5, 11)], false);
+    legacy.producers = null;
+    ok(
+      marked(decide([call(5, 11)], [vc([legacy])])) === "",
+      "a fact whose introducers are not fully reported: silent everywhere"
+    );
+  }
+  ok(
+    marked(
+      decide(
+        [call(5, 11)],
+        [vc([hyp([span(5, 11)], false)], { status: "unproved" })]
+      )
+    ) === "",
+    "an obligation that did not close: silent (no accepted result)"
+  );
+  {
+    const backends = [
+      { backend: "lean", status: "proved", detail: null, factUsage: true },
+      { backend: "z3", status: "proved", detail: null, factUsage: true },
+    ];
+    ok(
+      marked(
+        decide(
+          [call(5, 11)],
+          [vc([hyp([span(5, 11)], { lean: false, z3: false })], { backends })]
+        )
+      ) === "5:11",
+      "cross-check, unread by every backend: marked"
+    );
+    ok(
+      marked(
+        decide(
+          [call(5, 11)],
+          [vc([hyp([span(5, 11)], { lean: true, z3: false })], { backends })]
+        )
+      ) === "",
+      "cross-check disagreement, read by one backend: silent"
+    );
+    ok(
+      marked(
+        decide(
+          [call(5, 11)],
+          [vc([hyp([span(5, 11)], { lean: false })], { backends })]
+        )
+      ) === "",
+      "cross-check with a backend that reported no accounting: silent"
+    );
+    ok(
+      decide(
+        [call(5, 11)],
+        [vc([hyp([span(5, 11)], { lean: false, z3: false })], { backends })]
+      ).backendScope.join(",") === "lean,z3",
+      "the answer names the backends it holds for, rather than averaging them"
+    );
+  }
+  ok(
+    model.lemmaUnusedHint(["lean", "z3"]) ===
+      "lean, z3 proved every obligation without this call's facts",
+    "the hover text names its backend scope"
+  );
+  ok(
+    model.lemmaUnusedHint([]) ===
+      "every obligation was proved without this call's facts",
+    "with no backend scope the hover text is the bare phrase"
+  );
+  ok(
+    marked(decide(null, [vc([hyp([span(5, 11)], false)])])) === "",
+    "a compiler that does not report the channel: silent, not empty"
+  );
+  ok(
+    marked(
+      decide([call(5, 11)], [vc([hyp([span(5, 11)], false)])], {
+        complete: false,
+      })
+    ) === "" &&
+      marked(decide([call(5, 11)], null)) === "",
+    "a superseded or absent obligation set: silent"
+  );
+}
+
 console.log("");
 if (failures) {
   console.log(failures + " of " + checks + " regression check(s) FAILED");
