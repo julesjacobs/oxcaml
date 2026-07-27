@@ -154,3 +154,30 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
   let _second = prove t2 in
   let _definition = equal_def t1 t2 in
   ()
+
+(* ------------------------------------------------------------------ *)
+(* The [COUNTED_SET] laws.                                             *)
+(* ------------------------------------------------------------------ *)
+
+let[@vox.def] rec size (set : t @ logical) : Bigint.t =
+  match set with
+  | Nil -> Bigint.zero
+  | Cons (_, rest) -> Bigint.add Bigint.one (size rest)
+
+let size_empty : unit{ size empty = Bigint.zero } =
+  size_def Nil;
+  ()
+
+let size_insert ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      size (insert inserted tree)
+      = (if member inserted tree
+         then size tree
+         else Bigint.add (size tree) Bigint.one)
+    } =
+  insert_def inserted tree;
+  let present = member inserted tree in
+  match present with
+  | true -> ()
+  | false -> size_def (Cons (inserted, tree)); ()

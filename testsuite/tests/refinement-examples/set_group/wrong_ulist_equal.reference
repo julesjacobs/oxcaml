@@ -1,14 +1,14 @@
-File "ulist.ml", lines 1-158, characters 26-3:
-  1 | ..........................struct
+File "ulist.ml", lines 1-185, characters 34-3:
+  1 | ..................................struct
   2 | type t =
   3 |   | Nil
   4 |   | Cons of int * t
   5 | 
 ...
-155 |   let _second = prove t2 in
-156 |   let _definition = equal_def t1 t2 in
-157 |   ()
-158 | end
+182 |   match present with
+183 |   | true -> ()
+184 |   | false -> size_def (Cons (inserted, tree)); ()
+185 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
 File "set_intf.ml", lines 57-62, characters 2-39:
   Interface declaration for value equal_backward_law
