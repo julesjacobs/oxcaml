@@ -58,4 +58,3 @@ z3 persistent session: early exit restart checked
 z3 persistent session: timeout restart checked
 z3 custom contents: one-shot fallback checked
 z3 startup output: one-shot fallback checked
-solver cache: persistent hits, exact inputs, invalidation, corruption, failures, and concurrent writes checked
