@@ -1,27 +1,59 @@
 scaling fit over: synth01 synth02 synth04 synth08 synth16 client ulist bst rbt avl
-compiler:  /usr/local/home/jujacobs/oxcamls/vox2/main/worktrees/latency/_install/bin/ocamlc
+compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 11 runs, private solver cache
-load:      10.03, 11.63, 16.84  (64 cpus)
+load:      18.55, 20.78, 23.10  (64 cpus)
+
+row sanity, per module
+  synth01        verify ok                                 no-verify ok
+  synth02        verify ok                                 no-verify ok
+  synth04        verify ok                                 no-verify ok
+  synth08        verify ok                                 no-verify ok
+  synth16        verify ok                                 no-verify ok
+  client         verify ok                                 no-verify ok
+  ulist          verify ok                                 no-verify ok
+  bst            verify ok                                 no-verify ok
+  rbt            verify ok                                 no-verify ok
+  avl            verify ok                                 no-verify ok
 
 module      obligs   no-verify      warm       cold   warm-nv   cold-warm
-synth01         1     0.0338    0.1382    0.2486    0.1044      0.1104
-synth02         2     0.0346    0.1375    0.2509    0.1029      0.1134
-synth04         4     0.0353    0.1381    0.2515    0.1028      0.1134
-synth08         8     0.0348    0.1423    0.2590    0.1075      0.1167
-synth16        16     0.0428    0.1461    0.2651    0.1033      0.1190
-client          4     0.0509    0.1556    0.2743    0.1047      0.1187
-ulist          27     0.0559    0.1660    0.2937    0.1101      0.1277
-bst            47     0.0742    0.1897    0.3467    0.1155      0.1570
-rbt            60     0.0982    0.2395    0.4511    0.1413      0.2116
-avl            67     0.1016    0.2312    0.3921    0.1296      0.1609
+synth01         1     0.0342    0.1391    0.2486    0.1049      0.1095
+synth02         2     0.0365    0.1388    0.2530    0.1023      0.1142
+synth04         4     0.0371    0.1408    0.2530    0.1037      0.1122
+synth08         8     0.0377    0.1451    0.2596    0.1074      0.1145
+synth16        16     0.0442    0.1490    0.2674    0.1048      0.1184
+client          4     0.0539    0.1692    0.2795    0.1153      0.1103
+ulist          27     0.0584    0.1713    0.2957    0.1129      0.1244
+bst            47     0.0744    0.1900    0.3494    0.1156      0.1594
+rbt            60     0.0984    0.2435    0.4359    0.1451      0.1924
+avl            67     0.0983    0.2277    0.3871    0.1294      0.1594
 
-translation + key + lookup  (warm - no-verify)
-    fixed per invocation    0.1011 s      <- intercept = paid once per compiler invocation
-    per obligation         0.00047 s
-    r-squared               0.8250
+obligation construction + translation + key + lookup  (warm - no-verify)
+    fixed per invocation    0.1034 s      <- intercept = paid once per compiler invocation
+    per obligation         0.00045 s
+    r-squared               0.7215      residual RMSE 0.00681 s
+    per-module residual:  synth01 +0.0010  synth02 -0.0020  synth04 -0.0015  synth08 +0.0003  synth16 -0.0059  client +0.0101  ulist -0.0028  bst -0.0092  rbt +0.0144  avl -0.0045
 
 solving + 2nd emission      (cold - warm)
-    fixed per invocation    0.1082 s      <- intercept should be near zero: solving is per-obligation
-    per obligation         0.00113 s
-    r-squared               0.7850
+    fixed per invocation    0.1068 s      <- intercept should be near zero: solving is per-obligation
+    per obligation         0.00105 s
+    r-squared               0.8629      residual RMSE 0.01006 s
+    per-module residual:  synth01 +0.0017  synth02 +0.0053  synth04 +0.0012  synth08 -0.0006  synth16 -0.0051  client -0.0007  ulist -0.0106  bst +0.0034  rbt +0.0228  avl -0.0175
 
+known in advance
+  Solving is per-obligation work, so the (cold - warm) fit's intercept
+  is known before the measurement: it must be near zero.  It is not.
+    measured intercept          0.1068 s
+    per-obligation cost        0.00105 s
+    intercept expressed in obligations      102
+  So the (cold - warm) row is not solving.  It carries a
+  per-invocation charge worth roughly 102 obligations of solving,
+  and reading the whole row as solver time overstates it by that
+  much on any module smaller than that.
+
+  The first fit's dependent variable is warm minus -vox-no-verify, and
+  -vox-no-verify builds no obligations at all, so OBLIGATION
+  CONSTRUCTION IS INSIDE THAT ROW.  Do not add the default mode's
+  separate construction row to it: that counts construction twice.
+  The second fit's dependent variable includes the second SMT emission
+  a cold obligation pays, so its slope is an UPPER BOUND on solving
+  proper, not a measurement of it.
