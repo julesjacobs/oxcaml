@@ -404,6 +404,7 @@ row() {  # row LABEL VALUE_TRIPLE
 }
 
 sub() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%.4f", a-b}'; }
+negative() { awk -v a="$1" 'BEGIN{exit !(a < 0)}'; }
 pct() { awk -v a="$1" -v b="$2" 'BEGIN{printf "%5.1f%%", (b==0?0:100*a/b)}'; }
 
 # Count the obligations a module carries, by asking for the VC dump as JSON.
@@ -521,6 +522,7 @@ def fit(xs, ys):
 xs = [r[0] for r in rows]
 names = [r[3] for r in rows]
 solving = None
+bad = False
 for label, index, note in [
         ("obligation construction + translation + key + lookup"
          "  (warm - no-verify)", 1,
@@ -558,9 +560,13 @@ if slope > 0:
     print("  much on any module smaller than that.")
 else:
     print("    measured intercept        %8.4f s" % intercept)
-    print("    per-obligation cost       %8.5f s  <- NON-POSITIVE, the fit is"
-          % slope)
-    print("      not usable; check the row-sanity block above.")
+    print("    per-obligation cost       %8.5f s  <- NON-POSITIVE" % slope)
+    print("  NOT A VALID FIT: solving is per-obligation work, so its slope")
+    print("  cannot be less than or equal to zero.  Either a module that did")
+    print("  not do the work reached the fit, or the range of obligation")
+    print("  counts is too narrow for the spread of the measurements.  Check")
+    print("  the row-sanity block and the per-module residuals above.")
+    bad = True
 print()
 print("  The first fit's dependent variable is warm minus -vox-no-verify, and")
 print("  -vox-no-verify builds no obligations at all, so OBLIGATION")
@@ -569,6 +575,7 @@ print("  separate construction row to it: that counts construction twice.")
 print("  The second fit's dependent variable includes the second SMT emission")
 print("  a cold obligation pays, so its slope is an UPPER BOUND on solving")
 print("  proper, not a measurement of it.")
+sys.exit(4 if bad else 0)
 FIT_PY
 }
 
@@ -620,9 +627,9 @@ if [ "$SCALING" = yes ]; then
   echo "           part of what any row measures"
   echo "load:      $(uptime | sed 's/.*load average: //')  ($(nproc) cpus)"
   echo
-  scaling
+  _src=0; scaling || _src=$?
   abort_if_failed
-  exit 0
+  exit $_src
 fi
 
 # ------------------------------------------------------------------ measure
@@ -648,7 +655,6 @@ OD=$(stage "$ORIGINAL" original); prelude "$OD"
 ND=$(stage "$ORIGINAL" original-noverify); prelude "$ND" "-vox-no-verify"
 if [ "$VOX_ROWS_ONLY" = no ]; then TD=$(stage "$TWIN" twin); prelude "$TD"; fi
 NUNITS=$(echo "$UNIT" | wc -w)
-CD=$SCRATCH/control; write_control "$CD" "$NUNITS"
 
 _unitlist=$(for _u in $UNIT; do printf '%s.ml ' "$_u"; done)
 echo "units:     $(echo "$_unitlist" | sed 's/ *$//')"
@@ -663,6 +669,35 @@ echo "           not cold pages and not a cold filesystem"
 echo "load:      $(uptime | sed 's/.*load average: //')  ($(nproc) cpus)"
 echo
 
+# How much proof work the timed row actually carries, and -- the number the
+# control is sized by -- how many of its units carry any at all.  A unit with no
+# obligations never asks for a cache key and never spawns the solver, so it pays
+# NEITHER fixed charge; the same reason the prelude does not warm the binaries
+# into the page cache.  Sizing the control by unit count instead would bill the
+# run for a fixed charge those invocations never paid, move it out of the
+# marginal rows, and show it as a small negative row that reads as noise.
+OBLIGATIONS=0; NUNITS_OBL=0; BARE_UNITS=""
+for _u in $UNIT; do
+  _oc=$(obligation_count "$OD" "$_u"); abort_if_failed
+  OBLIGATIONS=$((OBLIGATIONS + _oc))
+  if [ "$_oc" -gt 0 ]
+  then NUNITS_OBL=$((NUNITS_OBL + 1))
+  else BARE_UNITS="$BARE_UNITS $_u"
+  fi
+done
+echo "obligations: $OBLIGATIONS across $NUNITS unit(s); $NUNITS_OBL of them carry at least one"
+if [ -n "$BARE_UNITS" ]; then
+  echo "             no obligation in:$BARE_UNITS"
+  echo "             those invocations ask for no cache key and spawn no solver,"
+  if [ "$NUNITS_OBL" -gt 0 ]
+  then echo "             so the control is sized to the $NUNITS_OBL unit(s) that do"
+  else echo "             so there is no per-invocation verification charge at all"
+  fi
+fi
+echo
+
+CD=$SCRATCH/control; write_control "$CD" "$NUNITS_OBL"
+
 echo "row sanity"
 printf '  %-34s %s\n' "original verify" "$(check_row "$OD" "-vox-backend $BACKEND" orig-verify)"
 printf '  %-34s %s\n' "original -vox-no-verify" "$(check_row "$ND" "-vox-no-verify" orig-no-verify)"
@@ -672,23 +707,13 @@ if [ "$VOX_ROWS_ONLY" = no ]; then
   printf '  %-34s %s\n' "twin plain compile" "$(check_row "$TD" "" twin-compile)"
   printf '  %-34s %s\n' "twin -vox-type-only" "$(check_row "$TD" "-vox-type-only" twin-type-only)"
 fi
-_saved_unit=$UNIT; UNIT=$CONTROL_UNITS
-printf '  %-34s %s\n' "control verify" "$(check_row "$CD" "-vox-backend $BACKEND" control-verify)"
-printf '  %-34s %s\n' "control -vox-no-verify" "$(check_row "$CD" "-vox-no-verify" control-no-verify)"
-UNIT=$_saved_unit
+if [ "$NUNITS_OBL" -gt 0 ]; then
+  _saved_unit=$UNIT; UNIT=$CONTROL_UNITS
+  printf '  %-34s %s\n' "control verify" "$(check_row "$CD" "-vox-backend $BACKEND" control-verify)"
+  printf '  %-34s %s\n' "control -vox-no-verify" "$(check_row "$CD" "-vox-no-verify" control-no-verify)"
+  UNIT=$_saved_unit
+fi
 abort_if_failed
-echo
-
-# How much proof work the timed row actually carries.  Without this the reader
-# cannot tell what fraction of the row the one-obligation control stands for,
-# and the obligation count is the x-axis of every per-obligation claim made
-# from these rows.
-OBLIGATIONS=0
-for _u in $UNIT; do
-  _oc=$(obligation_count "$OD" "$_u"); abort_if_failed
-  OBLIGATIONS=$((OBLIGATIONS + _oc))
-done
-echo "obligations: $OBLIGATIONS across $NUNITS unit(s)"
 echo
 
 # Every row pays for starting the compiler, loading the stdlib .cmi files and
@@ -746,26 +771,33 @@ set -- $(VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$COLD_CACHE \
 abort_if_failed
 
 # --------------------------------------------- the known-in-advance control
-# The same three verification rows, on a module carrying ONE obligation.  Its
-# per-obligation content is 1/N of the real module's, so whatever these rows
-# still cost is what the compiler pays per invocation rather than per
-# obligation.  Measured, not assumed, and printed whether or not it is
-# convenient.
-_saved_unit=$UNIT; UNIT=$CONTROL_UNITS
-set -- $(VOX_SOLVER_CACHE=0 timed "$CD" "-vox-no-verify");       CT_NOVF=$1
-abort_if_failed
-( VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$CTL_WARM_CACHE \
-    timed "$CD" "-vox-backend $BACKEND" >/dev/null )
-abort_if_failed
-set -- $(VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$CTL_WARM_CACHE \
-           timed "$CD" "-vox-backend $BACKEND");                 CT_WARM=$1
-abort_if_failed
-set -- $(VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$CTL_COLD_CACHE \
-           timed "$CD" "-vox-backend $BACKEND" \
-             'rm -rf "$CTL_COLD_CACHE"; mkdir -m 700 -p "$CTL_COLD_CACHE"'); \
+# The same verification rows, on modules carrying ONE obligation each, one for
+# every timed unit that carries any obligations at all.  Their per-obligation
+# content is a small fraction of the real row's, so whatever these rows still
+# cost is what the compiler pays per invocation rather than per obligation.
+# Measured, not assumed, and printed whether or not it is convenient.
+if [ "$NUNITS_OBL" -gt 0 ]; then
+  _saved_unit=$UNIT; UNIT=$CONTROL_UNITS
+  set -- $(VOX_SOLVER_CACHE=0 timed "$CD" "-vox-no-verify");     CT_NOVF=$1
+  abort_if_failed
+  ( VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$CTL_WARM_CACHE \
+      timed "$CD" "-vox-backend $BACKEND" >/dev/null )
+  abort_if_failed
+  set -- $(VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$CTL_WARM_CACHE \
+             timed "$CD" "-vox-backend $BACKEND");               CT_WARM=$1
+  abort_if_failed
+  set -- $(VOX_SMT_SOLVER="$SOLVER" VOX_SOLVER_CACHE_DIR=$CTL_COLD_CACHE \
+             timed "$CD" "-vox-backend $BACKEND" \
+               'rm -rf "$CTL_COLD_CACHE"; mkdir -m 700 -p "$CTL_COLD_CACHE"'); \
                                                                  CT_COLD=$1
-abort_if_failed
-UNIT=$_saved_unit
+  abort_if_failed
+  UNIT=$_saved_unit
+else
+  # No unit carries an obligation, so no invocation asks for a cache key or
+  # spawns the solver, and there is no per-invocation verification charge to
+  # separate out.  Subtracting a control here would invent one.
+  CT_NOVF=0; CT_WARM=0; CT_COLD=0
+fi
 
 # The default rows telescope to the cold total by construction, so their sum is
 # an identity and not a check.  Measure the cold row a second time, after
@@ -786,16 +818,25 @@ OR_SOLVE=$(sub "$OR_COLD" "$OR_WARM")
 
 echo
 echo "known in advance"
-echo "  $NUNITS control module(s) carrying one obligation each, $CONTROL_OBLIGATIONS in all, put"
-echo "  through the same rows and so making the same $NUNITS compiler invocation(s)."
-echo "  Every row below is per-obligation work by its own name, and the timed"
-echo "  row carries $OBLIGATIONS obligations against the control's $CONTROL_OBLIGATIONS, so on the"
-echo "  control every one of them is expected to be near zero."
+if [ "$NUNITS_OBL" -gt 0 ]; then
+  echo "  $NUNITS_OBL control module(s) carrying one obligation each, $CONTROL_OBLIGATIONS in all, put"
+  echo "  through the same rows.  They make one compiler invocation for each of"
+  echo "  the $NUNITS_OBL timed units that carry obligations, and none for the $((NUNITS - NUNITS_OBL)) that do"
+  echo "  not, because those ask for no cache key and spawn no solver."
+  echo "  Every row below is per-obligation work by its own name, and the timed"
+  echo "  row carries $OBLIGATIONS obligations against the control's $CONTROL_OBLIGATIONS, so on the"
+  echo "  control every one of them is expected to be near zero."
+else
+  echo "  No timed unit carries an obligation, so there is no per-invocation"
+  echo "  verification charge and no control is measured or subtracted."
+fi
 printf '  %-34s %8s   %s\n' "control  construct + translate + key" "$CT_TRANS" "expected ~0"
 printf '  %-34s %8s   %s\n' "control  solving + teardown" "$CT_SOLVE" "expected ~0"
-echo "  Whatever the control still pays here is a PER-INVOCATION charge, and"
-echo "  the same row on the real module is paying it too.  It is separated out"
-echo "  in the table below rather than left inside a row named after solving."
+if [ "$NUNITS_OBL" -gt 0 ]; then
+  echo "  Whatever the control still pays here is a PER-INVOCATION charge, and"
+  echo "  the same row on the real module is paying it too.  It is separated out"
+  echo "  in the table below rather than left inside a row named after solving."
+fi
 echo
 printf '  %-34s %8s\n' "cold total, measured first" "$OR_COLD"
 printf '  %-34s %8s\n' "cold total, re-measured last" "$OR_COLD2"
@@ -823,11 +864,36 @@ else
   attribute "conformance + cmi/cmo"           "$(sub "$OR_NOVF" "$OR_TYPE")"
 fi
 
+MARG_TRANS=$(sub "$OR_TRANS" "$CT_TRANS")
+MARG_SOLVE=$(sub "$OR_SOLVE" "$CT_SOLVE")
 attribute "fixed: cache key, per invocation"  "$CT_TRANS"
-attribute "construction + translation + key, marginal" "$(sub "$OR_TRANS" "$CT_TRANS")"
+attribute "construction + translation + key, marginal" "$MARG_TRANS"
 attribute "fixed: solver teardown, per invocation" "$CT_SOLVE"
-attribute "solving + 2nd emission, marginal"  "$(sub "$OR_SOLVE" "$CT_SOLVE")"
+attribute "solving + 2nd emission, marginal"  "$MARG_SOLVE"
 echo
+
+# A marginal row is work done per obligation, so it cannot be negative.  Every
+# defect found on this tool so far has surfaced exactly here: a per-invocation
+# quantity charged against a per-obligation denominator drives the marginal
+# below zero, and at small magnitudes that reads as noise rather than as a
+# broken table.  Refuse to be read as a measurement when it happens.
+MARGINAL_BAD=no
+if negative "$MARG_TRANS" || negative "$MARG_SOLVE"; then
+  MARGINAL_BAD=yes
+  echo "  NOT A VALID ATTRIBUTION: a marginal row is negative."
+  echo "  A marginal row is per-obligation work and cannot be less than zero."
+  echo "  Three things produce this.  The control may be charging a"
+  echo "  per-invocation cost to invocations that never paid it -- check the"
+  echo "  obligations line above for units carrying none.  The run may be too"
+  echo "  noisy for the differences between rows to mean anything, which the"
+  echo "  drift row above will show.  Or the timed row may carry too few"
+  echo "  obligations for the control to be a small fraction of it: at"
+  echo "  $OBLIGATIONS obligations against the control's $CONTROL_OBLIGATIONS there is little"
+  echo "  marginal cost to find, and its sign is noise.  The table is printed"
+  echo "  so all three can be told apart, and the exit status says not to"
+  echo "  quote it."
+  echo
+fi
 echo "  The two 'fixed' rows are the control's own values: they are what this"
 echo "  compiler spends per invocation before any obligation is considered."
 echo "  On the base compiler they are a Digest.file over the compiler and"
@@ -870,3 +936,6 @@ echo "  a perfect cache saves the cold-minus-warm row, most of which is the"
 echo "  teardown charge rather than the solver:"
 printf '  %-34s %8s   %s\n' "cold total" "$OR_COLD" "$(pct "$OR_COLD" "$OR_COLD")"
 printf '  %-34s %8s   %s\n' "warm total" "$OR_WARM" "$(pct "$OR_WARM" "$OR_COLD")"
+
+[ "$MARGINAL_BAD" = yes ] && exit 4
+exit 0
