@@ -25,6 +25,11 @@ here=$(cd "$(dirname "$0")" && pwd -P)
 OCAMLLIB=$prefix/lib/ocaml
 export OCAMLLIB
 
+# Every arm runs even when an earlier one disagrees, and the failures are
+# summarised at the end: a tool whose job is diagnosis should say which arms
+# are affected rather than stop at the first.
+failures=
+
 for backend in $backends; do
   jobs=2
   profiles="core full"
@@ -35,11 +40,20 @@ for backend in $backends; do
     profiles=lean
   fi
   for profile in $profiles; do
-    python3 "$here/differential_gate.py" \
+    if python3 "$here/differential_gate.py" \
       --ocamlrun "$prefix/bin/ocamlrun" \
       --ocamlc "$prefix/bin/ocamlc.byte" \
       --ocamlc-opt "$prefix/bin/ocamlc.opt" \
       --ocamlopt-opt "$prefix/bin/ocamlopt.opt" \
       --backend "$backend" --profile "$profile" --jobs "$jobs"
+    then :
+    else failures="$failures $backend/$profile"
+    fi
   done
 done
+
+if test -n "$failures"; then
+  echo "sweep: arms that did not come back clean:$failures"
+  exit 1
+fi
+echo "sweep: every arm clean"

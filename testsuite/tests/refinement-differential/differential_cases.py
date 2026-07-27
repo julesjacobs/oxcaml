@@ -19,12 +19,20 @@ WIDTH = 63
 MAX_INT = (1 << (WIDTH - 1)) - 1
 MIN_INT = -(1 << (WIDTH - 1))
 
-# The smallest non-negative operand whose square leaves the range: with
-# [max_int] at 2^62 - 1, that is 2^31, whose square is exactly 2^62.  Its
-# predecessor is the largest square that stays in range, and the two together
-# are the boundary.
-ROOT = 1 << ((WIDTH - 1) // 2)
-ROOT_BELOW = ROOT - 1
+def _integer_square_root(value):
+    """The largest [n] with [n * n <= value]."""
+    root = 1 << ((value.bit_length() + 1) // 2)
+    while root * root > value:
+        root = (root + value // root) // 2
+    return root
+
+
+# The smallest non-negative operand whose square leaves the range, and its
+# predecessor, which is the largest square that stays in.  At a 63-bit int
+# that is 2^31 and 2^31 - 1; the square root is taken rather than derived
+# from half the width, which is only the same thing when the width is odd.
+ROOT_BELOW = _integer_square_root(MAX_INT)
+ROOT = ROOT_BELOW + 1
 
 # About the square root of 2^63, which also overflows but is not the boundary.
 # Kept in the sweep because it is a different bit pattern, not because it is
@@ -206,15 +214,21 @@ ROUTINE_ARITHMETIC = [
 # from [lxor], which agree wherever the operands are disjoint.
 ROUTINE_BITWISE_PAIRS = [("max_int", "min_int"), ("max_int", "1")]
 
-# [<] and [<=] separate a signed comparison from an unsigned one and a
-# strict one from a reflexive one; [<>] separates the negated form.  The
+# Operands at opposite ends of the range separate a signed comparison from
+# an unsigned one, at which [<] and [<=] agree; equal operands are the only
+# place a strict comparison and a reflexive one differ, so both pairs are
+# needed and neither is redundant.  [<>] separates the negated form.  The
 # three mirrors run in the sweep.
 ROUTINE_COMPARISONS = ["<", "<=", "<>"]
+ROUTINE_COMPARISON_PAIRS = [("min_int", "max_int"), ("max_int", "max_int")]
 
-# A negative operand separates the logical from the arithmetic right shift;
-# a distance past the word is where the machine stops agreeing with itself.
+# A negative operand separates the logical from the arithmetic right shift.
+# The distances are the two ends of the range the operation is specified over
+# and the first one past it: an off-by-one at either end of that guard shows
+# only at the end it moves, and a guard that admits one distance too many
+# shows only outside it.
 ROUTINE_SHIFT_OPERANDS = ["min_int"]
-ROUTINE_SHIFT_DISTANCES = [1, WIDTH + 1]
+ROUTINE_SHIFT_DISTANCES = [0, 1, WIDTH, WIDTH + 1]
 
 # Truncation towards zero against rounding towards minus infinity, the one
 # quotient that leaves the range, and a zero divisor of each operation.
@@ -338,7 +352,7 @@ def routine_cases():
         + _binary("bitwise", BITWISE, ROUTINE_BITWISE_PAIRS)
         + _shifts(ROUTINE_SHIFT_OPERANDS, ROUTINE_SHIFT_DISTANCES)
         + _unary(["min_int"])
-        + _comparisons([("min_int", "max_int")], ROUTINE_COMPARISONS)
+        + _comparisons(ROUTINE_COMPARISON_PAIRS, ROUTINE_COMPARISONS)
         + _division(ROUTINE_DIVISION_PAIRS)
     )
 

@@ -5,7 +5,7 @@
            --ocamlrun ${ocamlrun} --ocamlc ${ocamlc_byte} \
            --ocamlc-opt ${ocamlsrcdir}/ocamlc.opt \
            --ocamlopt-opt ${ocamlsrcdir}/ocamlopt.opt \
-           --backend z3 --profile division --jobs 4";
+           --backend z3 --profile division --jobs 2";
  script;
 *)
 
@@ -19,4 +19,8 @@
    remainder, at the operands where truncation, the sign of a remainder, the
    quotient that leaves the range and a divisor of zero would each show --
    and leaves the rest of the SMT-LIB table to the sweep, which is where a
-   change to that emitter is expected to be checked. *)
+   change to that emitter is expected to be checked.
+
+   Two probes at a time rather than four: each one here is a compiler process
+   and an external solver process, so four would put eight against a cap of
+   four.  The in-process arm solves inside the compiler and takes four. *)

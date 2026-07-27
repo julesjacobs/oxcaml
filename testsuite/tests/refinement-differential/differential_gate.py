@@ -425,8 +425,9 @@ def report(probes, cases, engines, observations, findings, elapsed, arguments,
         lines.append("  ... and %d more" % (len(disagreements) - 8))
     for probe in broken[:4]:
         lines.append("  UNDECIDED %s: %s" % (probe.describe(), probe.verdict))
-        if probe.verdict == "no verdict":
-            lines.append("    %s" % (probe.detail or "").strip()[:400])
+        detail = (probe.detail or "").strip()
+        if detail:
+            lines.append("    %s" % detail[:400])
     return lines, disagreements, broken
 
 
