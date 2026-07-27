@@ -10,6 +10,7 @@
    decreases_tot_orbit.ml decreases_tot_orbit.reference \
    decreases_tot_state.ml decreases_tot_state.reference \
    decreases_tot_state_local.ml decreases_tot_state_local.reference \
+   decreases_tot_state_run.ml decreases_tot_state_run.reference \
  ";
  setup-ocamlc.byte-build-env;
 
@@ -86,6 +87,14 @@
  ocamlc.byte;
  compiler_reference =
    "${test_source_directory}/decreases_tot_state_local.reference";
+ check-ocamlc.byte-output;
+
+ module = "decreases_tot_state_run.ml";
+ compiler_output = "decreases_tot_state_run.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+ compiler_reference =
+   "${test_source_directory}/decreases_tot_state_run.reference";
  check-ocamlc.byte-output;
 *)
 

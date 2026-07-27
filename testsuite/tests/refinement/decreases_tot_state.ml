@@ -1,4 +1,6 @@
-(* A measure descends only if the verifier can read it at two different
+(* The reviewer's witness [w08_indexloop.ml], in the shape the suite writes.
+
+   A measure descends only if the verifier can read it at two different
    times and get the two values the program gets.  Everything here is
    truthfully total -- reading and writing a mutable field both terminate --
    and the state is behind an [int -> int] interface, so no mutable value
