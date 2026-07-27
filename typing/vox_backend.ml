@@ -288,10 +288,18 @@ module Persistent_cache = struct
     in
     body ^ " " ^ record_checksum body ^ "\n"
 
+  (* A detail is hex, one byte in two characters, behind a one-character tag.
+     The writer declines to store a longer one, and the reader holds to the
+     same bound rather than accepting a record this schema would never have
+     written -- and declines before decoding, so a malformed field costs no
+     megabytes of allocation. *)
+  let max_encoded_detail_length = 1 + (2 * max_detail_bytes)
+
   let parse_record line =
     match String.split_on_char ' ' line with
     | [digest; verdict; unused_facts; detail; checksum]
       when String.length digest = key_digest_length
+           && String.length detail <= max_encoded_detail_length
            && String.equal checksum
                 (record_checksum
                    (record_body ~digest ~verdict ~unused_facts ~detail)) ->
