@@ -7813,6 +7813,216 @@ let assume_argument env sarg =
     end
   | _ -> None
 
+(* The guarded tier.
+
+   A check runs the predicate, so that a lemma can be falsified by running
+   the program rather than by proving it.  The predicate exists at this point
+   only as a typed [refinement_expression] -- a result annotation writes it
+   somewhere this arm never sees -- so it is rendered back to source and
+   typed AGAIN, as ordinary code.
+
+   Typing it again is the mechanism rather than an inconvenience.  Names
+   resolve in the ordinary namespace and modes are checked rather than
+   asserted, so a predicate that cannot be run -- one over a value that has
+   no run-time existence, or over a function that is not available here --
+   simply fails to type, and the site is unguarded.  Nothing about the
+   program that runs depends on the outcome except whether the check is
+   there. *)
+
+let assume_arg_label : Types.arg_label -> Asttypes.arg_label option = function
+  | Types.Nolabel -> Some Asttypes.Nolabel
+  | Types.Labelled name -> Some (Asttypes.Labelled name)
+  | Types.Optional name -> Some (Asttypes.Optional name)
+  | Types.Position _ -> None
+
+(* The predicate as source again, with the refined value replaced by
+   [subject].  [None] where a form has no ordinary-code counterpart: a
+   sibling reference is resolved against a signature rather than against
+   this scope, and the binding forms are not part of what a check needs to
+   express. *)
+let assume_predicate_source ~loc ~subject refinement =
+  let exception Not_source in
+  let identifier name = Ast_helper.Exp.ident ~loc { txt = name; loc } in
+  let rec render expression =
+    match expression.rexp_desc with
+    | Rexp_ident (Rbound id) when Ident.same id refinement.ref_view.rb_id ->
+      begin match subject with
+      | Some subject -> subject
+      | None -> raise_notrace Not_source
+      end
+    | Rexp_ident (Rbound id) -> identifier (Longident.Lident (Ident.name id))
+    | Rexp_ident (Rfree (Rglobal path | Rapp path)) ->
+      identifier (Untypeast.lident_of_path path)
+    | Rexp_ident (Rfree (Rsibling _ | Rfun _)) -> raise_notrace Not_source
+    | Rexp_constant constant ->
+      Ast_helper.Exp.constant ~loc (Untypeast.constant constant)
+    | Rexp_apply (function_, arguments) ->
+      let argument (label, argument) =
+        match assume_arg_label label with
+        | Some label -> label, render argument
+        | None -> raise_notrace Not_source
+      in
+      Ast_helper.Exp.apply ~loc (render function_)
+        (List.map argument arguments)
+    | Rexp_construct (constructor, arguments) ->
+      let payload =
+        match arguments with
+        | [] -> None
+        | [ argument ] -> Some (render argument)
+        | arguments ->
+          Some
+            (Ast_helper.Exp.tuple ~loc
+               (List.map (fun argument -> None, render argument) arguments))
+      in
+      Ast_helper.Exp.construct ~loc
+        { txt = Longident.Lident constructor.rconstr_name; loc } payload
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      Ast_helper.Exp.ifthenelse ~loc (render condition) (render ifso)
+        (Option.map render ifnot)
+    | Rexp_let _ | Rexp_function _ | Rexp_tuple _ | Rexp_field _
+    | Rexp_match _ -> raise_notrace Not_source
+  in
+  match render refinement.ref_pred with
+  | source -> Some source
+  | exception Not_source -> None
+
+(* Only a name or a constant is substituted for the refined value.  Reading
+   one again where the predicate mentions it costs nothing and observes
+   nothing, so the check needs no binding and the argument is typed exactly
+   as it would have been.  Anything else leaves the site unguarded rather
+   than introducing a binding the mode checker never saw. *)
+let assume_subject_source argument =
+  match argument.pexp_desc with
+  | Pexp_ident _ | Pexp_constant _ | Pexp_construct (_, None) -> Some argument
+  | _ -> None
+
+let assume_carrier env type_ =
+  let type_ = refinement_skeleton env type_ |> expand_head env in
+  match get_desc type_ with
+  | Tconstr (path, [], _) when Path.same path Predef.path_int ->
+    Some Vox_builtin.Int
+  | Tconstr (path, [], _) when Path.same path Predef.path_bool ->
+    Some Vox_builtin.Bool
+  | _ -> None
+
+(* Whether the operations the predicate is built from compute what the model
+   says, decided on the predicate itself and before anything is generated.
+
+   Deciding it here rather than on the typed check is not a shortcut.  Typing
+   a check that turns out not to be executable can leave a constraint behind
+   that undoing the types does not undo -- a predicate over a partial
+   operation makes the function it sits in partial while it is being typed --
+   and a site that is going to be unguarded should cost the program nothing
+   at all. *)
+let refinement_builtin env head =
+  match head.rexp_desc with
+  | Rexp_ident (Rfree (Rapp path | Rglobal path)) ->
+    begin match Vox_builtin.of_path path with
+    | Some builtin -> Some builtin
+    | None ->
+      begin match (Env.find_value path env).val_kind with
+      | Val_prim primitive ->
+        Vox_builtin.of_primitive ~path primitive.Primitive.prim_name
+      | Val_reg _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _ -> None
+      | exception Not_found -> None
+      end
+    end
+  | Rexp_ident (Rbound _)
+  | Rexp_ident (Rfree (Rsibling _ | Rfun _))
+  | Rexp_constant _ | Rexp_let _ | Rexp_function _ | Rexp_apply _
+  | Rexp_tuple _ | Rexp_construct _ | Rexp_field _ | Rexp_ifthenelse _
+  | Rexp_match _ -> None
+
+let rec refinement_agrees_with_its_model env expression =
+  match expression.rexp_desc with
+  | Rexp_apply (head, arguments) ->
+    let operands = List.map snd arguments in
+    begin match refinement_builtin env head with
+    | None -> true
+    | Some builtin ->
+      let carriers =
+        List.map
+          (fun operand -> assume_carrier env operand.rexp_type)
+          operands
+      in
+      List.for_all Option.is_some carriers
+      && Option.is_some
+           (Vox_builtin.runtime_result builtin
+              ~operands:(List.filter_map Fun.id carriers))
+    end
+    && List.for_all (refinement_agrees_with_its_model env) operands
+  | Rexp_ident _ | Rexp_constant _ -> true
+  | Rexp_ifthenelse (condition, ifso, ifnot) ->
+    refinement_agrees_with_its_model env condition
+    && refinement_agrees_with_its_model env ifso
+    && Option.fold ~none:true ~some:(refinement_agrees_with_its_model env) ifnot
+  | Rexp_construct (_, arguments) ->
+    List.for_all (refinement_agrees_with_its_model env) arguments
+  (* Forms with no source counterpart, refused where the source is built. *)
+  | Rexp_let _ | Rexp_function _ | Rexp_tuple _ | Rexp_field _
+  | Rexp_match _ -> true
+
+(* Whether running the check computes what the model says.
+
+   For the operations the model describes -- the connectives, the six
+   integer comparisons, the arithmetic the bitvector model made faithful --
+   that is a question about the operands, and [Vox_builtin.runtime_result]
+   answers it.  The shifts and the non-integer comparisons are absent from
+   that table and so stay out.
+
+   Everything else in a predicate is an uninterpreted function, and there
+   the model says only that it IS a function.  Running it therefore agrees
+   with the model exactly when it is one: terminating and determined by its
+   arguments.  That is the same standard by which the predicate was allowed
+   to mention it, so the test is the one the verifier already applies to a
+   call it represents structurally. *)
+let rec assume_check_is_executable expression =
+  match expression.exp_desc with
+  | Texp_constant (Const_int _) -> true
+  | Texp_construct (_, constructor, _, [], _) ->
+    String.equal constructor.cstr_name "true"
+    || String.equal constructor.cstr_name "false"
+  | Texp_ident { desc = { val_kind = Val_reg _; _ }; _ } -> true
+  | Texp_ident { desc = { val_kind = Val_prim _; _ }; _ } -> true
+  | Texp_apply (function_, arguments, _, _, _) ->
+    let operand = function
+      | _, Arg (argument, _) -> Some argument
+      | _, Omitted _ -> None
+    in
+    let operands = List.map operand arguments in
+    List.for_all Option.is_some operands
+    && begin
+      let operands = List.filter_map Fun.id operands in
+      assume_head_computes_its_model function_ operands
+      && List.for_all assume_check_is_executable operands
+    end
+  | _ -> false
+
+and assume_head_computes_its_model function_ operands =
+  let carrier operand =
+    assume_carrier operand.exp_env operand.exp_type
+  in
+  match function_.exp_desc with
+  | Texp_ident
+      { path;
+        desc = { val_kind = Val_prim primitive; _ };
+        kind = Id_prim _;
+        _ }
+    when Option.is_some (Vox_builtin.of_primitive ~path primitive.prim_name) ->
+    let builtin =
+      Option.get (Vox_builtin.of_primitive ~path primitive.prim_name)
+    in
+    let carriers = List.map carrier operands in
+    List.for_all Option.is_some carriers
+    && Option.is_some
+         (Vox_builtin.runtime_result builtin
+            ~operands:(List.filter_map Fun.id carriers))
+  | _ ->
+    (* The argument list is only consulted for the comparisons, and those are
+       decided above, where the table says at which carriers they agree. *)
+    ignore operands;
+    dependent_argument_call_is_stable function_ []
+
 type dependent_case_parameter =
   | Open_case_parameter of Ident.t * type_expr
   | Infer_case_parameter of Ident.t * type_expr
@@ -8036,11 +8246,70 @@ and type_assume env expected_mode ~loc ~sarg_loc argument refined_type refinemen
   let refined_type = instance refined_type in
   let skeleton = instance refinement.ref_skeleton in
   let arg = type_expect env expected_mode argument (mk_expected skeleton) in
-  (* A location object of this admission's own, over the written call.
-     [Vox_verify] recognises the site by its physical identity, so an
-     ordinary annotation is never mistaken for an admitted one. *)
-  Vox_vc.Assumption.record ~key:loc ~site:sarg_loc refinement refined_type;
-  ({ arg with exp_type = refined_type; exp_loc = loc }, true)
+  let check = type_assume_check env ~loc:sarg_loc argument refinement in
+  Vox_vc.Assumption.record ~key:loc ~site:sarg_loc
+    ~guarded:(Option.is_some check) refinement refined_type;
+  let admitted =
+    match check with
+    | None -> { arg with exp_type = refined_type; exp_loc = loc }
+    | Some (check, sort) ->
+      (* The check first, and the value after it.  Where the predicate names
+         the refined value, that value is a name, so reading it again
+         observes nothing and the order is not a choice anyone can see. *)
+      { exp_desc = Texp_sequence (check, sort, arg);
+        exp_loc = loc;
+        exp_extra = [];
+        exp_type = refined_type;
+        exp_attributes = [];
+        exp_env = env;
+      }
+  in
+  (admitted, true)
+
+(* The check for this admission, or [None] where the predicate does not run.
+
+   Not running is never an error.  The statements one most wants to admit are
+   the ones that do not run, and a site with no check is admitted just the
+   same and reported more loudly.  So every way out of here that fails leaves
+   the site unguarded: a form with no source counterpart, a refined value
+   that is not a name to read again, a predicate that does not typecheck as
+   ordinary code, and an operation whose run and whose model can differ.
+
+   The attempt is undone on the way out.  Typing generated source unifies,
+   and none of that may survive a decision not to use the result. *)
+and type_assume_check env ~loc argument refinement =
+  let subject = assume_subject_source argument in
+  if not (refinement_agrees_with_its_model env refinement.ref_pred) then None
+  else
+  match assume_predicate_source ~loc ~subject refinement with
+  | None -> None
+  | Some source ->
+    let snapshot = Btype.snapshot () in
+    let saved_types = Cmt_format.get_saved_types () in
+    let abandon () =
+      Btype.backtrack snapshot;
+      Cmt_format.set_saved_types saved_types;
+      None
+    in
+    let attempt () =
+      Warnings.without_warnings (fun () ->
+        type_statement ~explanation:Sequence_left_hand_side env
+          (Ast_helper.Exp.assert_ ~loc:Location.{ loc with loc_ghost = true }
+             source))
+    in
+    begin match attempt () with
+    | (check, sort) ->
+      begin match check.exp_desc with
+      | Texp_assert (condition, _) when assume_check_is_executable condition ->
+        (* Registered by whatever location object the node ended up with,
+           rather than by the one handed to the constructor, so the identity
+           the verifier reads is the identity recorded. *)
+        Vox_vc.Assumption.record_check check.exp_loc;
+        Some (check, sort)
+      | _ -> abandon ()
+      end
+    | exception Error _ -> abandon ()
+    end
 
 and type_expect_
     ?(recarg=Rejected) ?(overwrite=No_overwrite)

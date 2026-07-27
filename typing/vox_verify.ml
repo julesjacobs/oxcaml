@@ -2315,6 +2315,13 @@ let expression_needs_boundary_walk expression =
   | _ -> false
 
 let rec walk_expression ?(inherited_marks = []) state expression =
+  (* A check the compiler generated for an admission.  Its calls raise
+     obligations of their own -- a precondition of whatever the predicate
+     mentions -- and those are nobody's to discharge: whether a predicate
+     happens to run must not decide whether the program compiles, and a
+     failed one here would do exactly that.  Nothing it establishes is used
+     either, so the whole subtree is passed over. *)
+  if Vox_vc.Assumption.is_check expression.exp_loc then () else
   let marks = inherited_marks @ marked_refinements expression in
   if marks = []
      && Option.is_none (identifier_contract expression)
@@ -4210,12 +4217,24 @@ let report_admissions () =
     in
     List.iter
       (fun site ->
-        Format.eprintf "@[<v>%a@,Admitted: %s is assumed here, not proved.@]@."
-          Location.print_loc site.Vox_vc.Assumption.site (rendered site))
+        Format.eprintf
+          "@[<v>%a@,Admitted (%s): %s is assumed here, not proved.@]@."
+          Location.print_loc site.Vox_vc.Assumption.site
+          (if site.Vox_vc.Assumption.guarded then "checked at run time"
+           else "unchecked")
+          (rendered site))
       admitted;
-    Format.eprintf "@[Admitted %d obligation%s in this unit.@]@."
-      (List.length admitted)
-      (if List.length admitted = 1 then "" else "s");
+    let checked =
+      List.length
+        (List.filter (fun site -> site.Vox_vc.Assumption.guarded) admitted)
+    in
+    let total = List.length admitted in
+    Format.eprintf
+      "@[Admitted %d obligation%s in this unit: %d checked at run time, \
+       %d unchecked.@]@."
+      total
+      (if total = 1 then "" else "s")
+      checked (total - checked);
     Vox_vc.Assumption.forget ()
 
 let verify_structure ?(toplevel = false) structure =

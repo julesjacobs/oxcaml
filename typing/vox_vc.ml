@@ -38,25 +38,35 @@ module Assumption = struct
   type t =
     { key : Location.t;
       site : Location.t;
+      guarded : bool;
       refinement : Types.refinement_desc;
       refined_type : Types.type_expr;
     }
 
   let sites : t list ref = ref []
 
-  let record ~key ~site refinement refined_type =
-    sites := { key; site; refinement; refined_type } :: !sites
+  let record ~key ~site ~guarded refinement refined_type =
+    sites := { key; site; guarded; refinement; refined_type } :: !sites
 
   let refinement key =
     List.find_map
       (fun site -> if site.key == key then Some site.refinement else None)
       !sites
 
+  (* The generated checks, by the physical identity of the location object
+     each one's node ended up carrying.  A check is code the compiler wrote,
+     so the obligations its calls raise are nobody's to discharge; requiring
+     them would let a check reject a program, and whether a predicate runs
+     is not supposed to decide whether a program compiles. *)
+  let checks : Location.t list ref = ref []
+  let record_check location = checks := location :: !checks
+  let is_check location = List.memq location !checks
+
   let admitted () = List.rev !sites
 
   (* Reporting a unit's admissions consumes them, so that the toplevel, which
      reports after every phrase, does not repeat the ones before it. *)
-  let forget () = sites := []
+  let forget () = sites := []; checks := []
 end
 
 let create ~loc ~facts ~goal = { location = loc; facts; goal }

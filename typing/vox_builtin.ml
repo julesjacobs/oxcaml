@@ -139,6 +139,40 @@ let is_bigint_type = function
   | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
 ;;
 
+type carrier =
+  | Int
+  | Bool
+
+(* Which operations agree with their model when executed, and why the rest do
+   not.  The shifts are undefined in OCaml once the distance leaves [0, 62]
+   while the model gives every distance a value.  The comparisons agree at
+   [int]: polymorphic equality at [float] is not the backends' reflexive
+   equality, and at an abstract carrier it compares a representation the
+   model does not describe.  The [Bigint] operations do compute the
+   mathematical integers they are modelled as, but their constants carry a
+   [logical] modality and so have no run-time value at all; admitting that
+   family is separate work. *)
+let runtime_result builtin ~operands =
+  match builtin, operands with
+  | ( (`Add | `Subtract | `Multiply | `Bit_and | `Bit_or | `Bit_xor),
+      [ Int; Int ] ) -> Some Int
+  | (`Negate | `Succ | `Pred | `Identity), [ Int ] -> Some Int
+  | ( ( `Equal | `Not_equal | `Less | `Less_equal | `Greater
+      | `Greater_equal ),
+      [ Int; Int ] ) -> Some Bool
+  | (`And | `Or), [ Bool; Bool ] -> Some Bool
+  | `Not, [ Bool ] -> Some Bool
+  | ( ( `Add | `And | `Bigint_abs | `Bigint_add | `Bigint_compare
+      | `Bigint_ge | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
+      | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
+      | `Bigint_sub | `Bigint_zero | `Bit_and | `Bit_or | `Bit_xor | `Equal
+      | `Greater | `Greater_equal | `Identity | `Int_max | `Int_min | `Less
+      | `Less_equal | `Multiply | `Negate | `Not | `Not_equal | `Or | `Pred
+      | `Shift_left | `Shift_right_arithmetic | `Shift_right_logical
+      | `Subtract | `Succ ),
+      _ ) -> None
+;;
+
 (* A match arm that did not fire contributes the fact that its scrutinee is
    not that arm's constructor.  The fact is carried as an application of a
    function with this prefix so that each backend can give it meaning: Lean

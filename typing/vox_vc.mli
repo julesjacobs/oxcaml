@@ -38,6 +38,10 @@ module Assumption : sig
           identifies the site.  Never compared by span. *)
       site : Location.t;
       (** Where the [assume] is written, for reporting. *)
+      guarded : bool;
+      (** Whether a run-time check of the predicate was emitted, which is
+          what makes an admitted statement falsifiable by running the
+          program. *)
       refinement : Types.refinement_desc;
       refined_type : Types.type_expr;
     }
@@ -45,11 +49,20 @@ module Assumption : sig
   val record :
     key:Location.t ->
     site:Location.t ->
+    guarded:bool ->
     Types.refinement_desc ->
     Types.type_expr ->
     unit
 
   val refinement : Location.t -> Types.refinement_desc option
+
+  (** A check the compiler generated for an admission, recognised by the
+      physical identity of the location object its node carries.  The
+      obligations its calls raise are not the program's, since whether a
+      predicate runs must not decide whether the program compiles. *)
+  val record_check : Location.t -> unit
+
+  val is_check : Location.t -> bool
 
   (** Every obligation admitted in the unit, in source order. *)
   val admitted : unit -> t list
