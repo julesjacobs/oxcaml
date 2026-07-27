@@ -8026,6 +8026,29 @@ let rec decreases_function_shape expression =
       end
   | _ -> None
 
+(* A measure component descends in one of two carriers.  Ordinary [int] is a
+   signed 63-bit bitvector, where the lower bound in the obligation keeps a
+   subtraction from wrapping past the minimum and calling that progress.
+   [Bigint.t] is the mathematical integers, where the lower bound is there for
+   the reason it is usually there: the naturals are well-founded and the
+   integers are not.  The same obligation, read in whichever arithmetic the
+   component is written in. *)
+type decreases_carrier =
+  | Machine_integer
+  | Mathematical_integer
+
+let decreases_carrier_of_type env type_ =
+  match get_desc (Ctype.expand_head env type_) with
+  | Tconstr (path, [], _) when Path.same path Predef.path_int ->
+    Some Machine_integer
+  | Tconstr (path, [], _) when Vox_builtin.is_bigint_type path ->
+    Some Mathematical_integer
+  | _ -> None
+
+let decreases_carrier_name = function
+  | Machine_integer -> "int"
+  | Mathematical_integer -> "Bigint.t"
+
 (* A measure is an integer expression over the measured function's
    parameters.  Lowering it here rather than through the predicate lowering
    keeps the fragment explicit: a parameter becomes a bound occurrence, which
@@ -14197,6 +14220,26 @@ and type_decreases_measures spat_sexp_list bindings =
       | _ -> None
     in
     let group = List.filter_map binding_id bindings in
+    (* The two sides of the comparison at position [i] come from different
+       measures when the group is mutual, so the group has to agree on which
+       arithmetic each position descends in. *)
+    let group_carriers = ref None in
+    let agree_on_carriers ~loc carriers =
+      match !group_carriers with
+      | None -> group_carriers := Some carriers
+      | Some established ->
+        List.iteri
+          (fun position (carrier, other) ->
+            if carrier <> other then
+              decreases_error ~loc
+                (Printf.sprintf
+                   "component %d descends in %s here and in %s elsewhere in \
+                    the same recursive group"
+                   (position + 1)
+                   (decreases_carrier_name carrier)
+                   (decreases_carrier_name other)))
+          (List.combine carriers established)
+    in
     List.iter2
       (fun attribute (source, binding) ->
         match attribute with
@@ -14234,6 +14277,7 @@ and type_decreases_measures spat_sexp_list bindings =
                 totality = Mode.Totality.Const.Total;
               }
           in
+          let carriers = ref [] in
           let components =
             List.map
               (fun component ->
@@ -14242,12 +14286,20 @@ and type_decreases_measures spat_sexp_list bindings =
                     with_refinement_typing_frame ~loc:component.pexp_loc
                       body_env
                       (fun env ->
-                        type_expect env (mode_default measure_mode) component
-                          (mk_expected Predef.type_int)))
+                        type_exp env (mode_default measure_mode) component))
                 in
+                (match
+                   decreases_carrier_of_type typed.exp_env typed.exp_type
+                 with
+                 | Some carrier -> carriers := carrier :: !carriers
+                 | None ->
+                   decreases_error ~loc:component.pexp_loc
+                     "measures descend in int or in Bigint.t; this component \
+                      is neither");
                 lower_measure_expression ~parameters typed)
               (decreases_components attribute)
           in
+          agree_on_carriers ~loc (List.rev !carriers);
           Vox_vc.Decreases.record id { parameters; components; group; loc })
       attributes
       (List.combine spat_sexp_list bindings)

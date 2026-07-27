@@ -804,6 +804,40 @@ let integer_comparison ~env ~loc ~name ~primitive_name left right =
     | _ -> None
     end
 
+(* [Bigint.zero], [Bigint.lt], [Bigint.le] and [Bigint.equal] are recognised
+   by path rather than by a primitive, and the backends read them as the
+   mathematical-integer operations.  Looked up by their qualified name so a
+   local rebinding of the same word cannot be mistaken for them. *)
+let find_bigint_value env name =
+  let bigint =
+    Longident.Ldot
+      ( Location.mknoloc (Longident.Lident "Stdlib"),
+        Location.mknoloc "Bigint" )
+  in
+  let qualified =
+    Longident.Ldot (Location.mknoloc bigint, Location.mknoloc name)
+  in
+  Env.find_value_by_name qualified env
+
+let bigint_zero ~env ~loc type_ =
+  match find_bigint_value env "zero" with
+  | exception Not_found -> None
+  | path, _ ->
+    Some (Refinement.create ~loc ~type_ (Rexp_ident (Rfree (Rglobal path))))
+
+let bigint_application ~env ~loc ~name ~result_type arguments =
+  match find_bigint_value env name with
+  | exception Not_found -> None
+  | path, description ->
+    let head_type = Ctype.instance description.val_type in
+    let head =
+      Refinement.create ~loc ~type_:head_type (Rexp_ident (Rfree (Rapp path)))
+    in
+    Some
+      (Refinement.create ~loc ~type_:result_type
+         (Rexp_apply
+            (head, List.map (fun argument -> Nolabel, argument) arguments)))
+
 let constructor_mismatch ~env ~loc ~constructor subject =
   match find_stdlib_value env "=" with
   | exception Not_found -> None
@@ -2338,7 +2372,14 @@ let measure_at_arguments (measure : Vox_vc.Decreases.measure) actuals =
    passed over because an earlier one already descended carries no
    information about this step, and requiring it to be non-negative as well
    would reject Ackermann's outer call, where the second argument is itself
-   a recursive result. *)
+   a recursive result.
+
+   A component descends in the arithmetic it is written in.  On [int] that is
+   the signed bitvector comparison, and the lower bound is what stops a
+   subtraction that wrapped past the minimum from counting as progress.  On
+   [Bigint.t] it is the mathematical order, and the lower bound is there for
+   the older reason: the naturals are well-founded and the integers are not.
+   The machine case is the same rule with a second reason to want it. *)
 let lexicographic_descent ~env ~loc callee caller =
   let bool_type = Predef.type_bool in
   let conjoin left right =
@@ -2354,29 +2395,62 @@ let lexicographic_descent ~env ~loc callee caller =
       "vox: this termination measure cannot be compared in a verification \
        condition"
   in
+  let mathematical component =
+    match get_desc (Ctype.expand_head env component.rexp_type) with
+    | Tconstr (path, [], _) -> Vox_builtin.is_bigint_type path
+    | _ -> false
+  in
+  let at_most left right =
+    if mathematical left then
+      bigint_application ~env ~loc ~name:"le" ~result_type:bool_type
+        [left; right]
+    else
+      integer_comparison ~env ~loc ~name:"<=" ~primitive_name:"%lessequal"
+        left right
+  in
+  let below left right =
+    if mathematical left then
+      bigint_application ~env ~loc ~name:"lt" ~result_type:bool_type
+        [left; right]
+    else
+      integer_comparison ~env ~loc ~name:"<" ~primitive_name:"%lessthan"
+        left right
+  in
+  (* [Bigint.equal] rather than the polymorphic equality, whose agreement with
+     it rests on the representation being canonical. *)
+  let same left right =
+    if mathematical left then
+      bigint_application ~env ~loc ~name:"equal" ~result_type:bool_type
+        [left; right]
+    else equality ~env ~loc left right
+  in
   let zero component =
-    Refinement.create ~loc ~type_:component.rexp_type
-      (Rexp_constant (Const_int 0))
+    if mathematical component then
+      bigint_zero ~env ~loc component.rexp_type
+    else
+      Some
+        (Refinement.create ~loc ~type_:component.rexp_type
+           (Rexp_constant (Const_int 0)))
   in
   let descends actual formal =
-    let bounded =
-      integer_comparison ~env ~loc ~name:"<=" ~primitive_name:"%lessequal"
-        (zero actual) actual
-    in
-    let smaller =
-      integer_comparison ~env ~loc ~name:"<" ~primitive_name:"%lessthan"
-        actual formal
-    in
-    match bounded, smaller with
-    | Some bounded, Some smaller -> conjoin bounded smaller
-    | _ -> unrepresentable ()
+    (* A position whose two sides descend in different arithmetics has no
+       comparison to be made; the group agreement in typing refuses that, and
+       this refuses it again rather than building a mismatched term. *)
+    if mathematical actual <> mathematical formal then unrepresentable ();
+    match zero actual with
+    | None -> unrepresentable ()
+    | Some zero ->
+      begin match at_most zero actual, below actual formal with
+      | Some bounded, Some smaller -> conjoin bounded smaller
+      | _ -> unrepresentable ()
+      end
   in
   let rec descent callee caller =
     match callee, caller with
     | [actual], [formal] -> descends actual formal
     | actual :: actuals, formal :: formals ->
       let unchanged =
-        match equality ~env ~loc actual formal with
+        match same actual formal with
         | Some equation -> equation
         | None -> unrepresentable ()
       in

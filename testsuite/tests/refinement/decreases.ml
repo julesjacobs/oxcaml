@@ -81,6 +81,78 @@ let[@vox.decreases 0 - n] rec up (n : int{ _ <= 0 && _ > min_int }) : int =
 val up : int{ _ <= 0 && _ > min_int } -> int = <fun>
 |}]
 
+(* The same obligation in the other arithmetic.  A component may descend in
+   [Bigint.t], the mathematical integers, and then the lower bound is there
+   for the reason it is usually there -- the naturals are well-founded and the
+   integers are not -- rather than to stop a wrap being mistaken for
+   progress. *)
+
+(* Expect: accepted.  Bounded below, so the descent is in the naturals. *)
+let[@vox.decreases n] rec countdown_big
+    (n : Bigint.t{ Bigint.ge _ Bigint.zero }) : int =
+  if Bigint.is_zero n then 0 else countdown_big (Bigint.sub n Bigint.one)
+
+[%%expect {|
+val countdown_big : Bigint.t{ Bigint.ge _ Bigint.zero } -> int = <fun>
+|}]
+
+(* Expect: refused.  Nothing wraps here; the measure simply descends forever
+   through the negative integers. *)
+module Big_unbounded_below : sig end = struct
+  let[@vox.decreases n] rec countdown (n : Bigint.t) : int =
+    if Bigint.is_zero n then 0 else countdown (Bigint.sub n Bigint.one)
+end
+
+[%%expect {|
+Line 3, characters 36-71:
+3 |     if Bigint.is_zero n then 0 else countdown (Bigint.sub n Bigint.one)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: accepted.  Positions are compared each in its own arithmetic, so a
+   tuple may mix them. *)
+let[@vox.decreases k, n] rec mixed (k : int{ _ >= 0 })
+    (n : Bigint.t{ Bigint.ge _ Bigint.zero }) : int =
+  if Bigint.is_zero n then (if k = 0 then 0 else mixed (k - 1) (Bigint.of_int 5))
+  else mixed k (Bigint.sub n Bigint.one)
+
+[%%expect {|
+val mixed : int{ _ >= 0 } -> Bigint.t{ Bigint.ge _ Bigint.zero } -> int =
+  <fun>
+|}]
+
+(* Expect: refused.  The two sides of the comparison at a position come from
+   different measures when the group is mutual, so the group has to agree on
+   which arithmetic each position descends in. *)
+module Carriers_disagree : sig end = struct
+  let[@vox.decreases k] rec one (k : int{ _ >= 0 }) (b : Bigint.t) : int =
+    if k = 0 then 0 else two k b
+  and[@vox.decreases b] two (k : int{ _ >= 0 }) (b : Bigint.t) : int =
+    if k = 0 then 0 else one (k - 1) b
+end
+
+[%%expect {|
+Line 4, characters 5-23:
+4 |   and[@vox.decreases b] two (k : int{ _ >= 0 }) (b : Bigint.t) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] component 1 descends in Bigint.t here and in int elsewhere in the same recursive group
+|}]
+
+(* Expect: refused.  A measure has to descend in one of the two arithmetics
+   the obligation can be stated in. *)
+module Neither_arithmetic : sig end = struct
+  let[@vox.decreases s] rec loop (s : string) (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else loop s (n - 1)
+end
+
+[%%expect {|
+Line 2, characters 21-22:
+2 |   let[@vox.decreases s] rec loop (s : string) (n : int{ _ >= 0 }) : int =
+                         ^
+Error: vox: [@vox.decreases] measures descend in int or in Bigint.t; this component is neither
+|}]
+
 (* Expect: accepted.  A lexicographic pair whose first component stands still
    while the second descends, and whose first component descends when the
    second is reset upwards. *)
@@ -338,7 +410,9 @@ Line 2, characters 5-21:
 Error: vox: [@vox.decreases] expects a measure expression, or a comma-separated tuple of them
 |}]
 
-(* Expect: refused.  A measure has to be an integer. *)
+(* Expect: refused.  A function is in neither arithmetic either; this and the
+   string case above are the two shapes worth having, since one is a value the
+   solver could otherwise carry and the other is not. *)
 module Not_an_integer : sig end = struct
   let[@vox.decreases f] rec loop (f : int -> int) (n : int) : int =
     if n = 0 then 0 else loop f (n - 1)
@@ -348,8 +422,7 @@ end
 Line 2, characters 21-22:
 2 |   let[@vox.decreases f] rec loop (f : int -> int) (n : int) : int =
                          ^
-Error: The value "f" has type "int -> int" but an expression was expected of type
-         "int"
+Error: vox: [@vox.decreases] measures descend in int or in Bigint.t; this component is neither
 |}]
 
 (* Expect: refused.  A recursive name reached other than as a saturated call
