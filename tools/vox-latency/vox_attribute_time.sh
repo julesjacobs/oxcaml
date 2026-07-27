@@ -126,6 +126,30 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$OCAMLC" ] && [ -n "$STDLIB" ] || { echo "need --ocamlc and --stdlib" >&2; exit 2; }
 
+# A run that takes no measurement must not print a table.  --repeats 0, -3 or
+# abc, and an empty --unit, each produced a complete attribution of 0.0000 with
+# a zero exit.
+case "$REPEATS" in
+  ''|*[!0-9]*) echo "--repeats must be a positive integer, got '$REPEATS'" >&2
+               exit 2 ;;
+esac
+[ "$REPEATS" -ge 1 ] || { echo "--repeats must be at least 1" >&2; exit 2; }
+[ -n "$(printf '%s' "$UNIT" | tr -d ' \t')" ] \
+  || { echo "--unit must name at least one module" >&2; exit 2; }
+
+# The caller's cache settings are never wanted: every row sets the cache state
+# it needs, and an inherited VOX_SOLVER_CACHE=0 would disable the cache for the
+# warm and cold rows alike -- the two rows whose difference is the whole point.
+# Both would read the same, solving would read as zero, and the control would
+# print a near-zero beside "expected ~0", which looks like the check passing.
+for _cv in VOX_SOLVER_CACHE VOX_SOLVER_CACHE_DIR VOX_SOLVER_CACHE_DEBUG \
+           VOX_SOLVER_CACHE_COMPILER_IDENTITY; do
+  eval "_cval=\${$_cv-}"
+  [ -z "$_cval" ] || echo "note: ignoring $_cv=$_cval from the environment;" \
+    "every row sets its own cache state" >&2
+  unset "$_cv"
+done
+
 TMPDIR=${TMPDIR:-$HOME/tmp}
 export TMPDIR
 [ -d "$TMPDIR" ] || { echo "TMPDIR $TMPDIR does not exist" >&2; exit 2; }
@@ -140,12 +164,23 @@ if [ "$(echo "$UNIT" | wc -w)" -gt 1 ]; then VOX_ROWS_ONLY=yes; fi
 [ "$SCALING" = yes ] && VOX_ROWS_ONLY=yes
 
 SCRATCH=$(mktemp -d "$TMPDIR/vox-latency.XXXXXX")
-trap 'rm -rf "$SCRATCH"' EXIT
+# An EXIT trap alone does not fire when the shell is killed, and a run that
+# overruns is exactly the one someone kills, so it leaves its scratch directory
+# behind on the filesystem the tool was careful to pick.
+cleanup() { rm -rf "$SCRATCH"; }
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+trap 'cleanup; exit 129' HUP
 
 OCAMLC=$(cd "$(dirname "$OCAMLC")" && pwd)/$(basename "$OCAMLC")
 STDLIB=$(cd "$STDLIB" && pwd)
 ORIGINAL=$(cd "$ORIGINAL" && pwd)
 [ "$VOX_ROWS_ONLY" = yes ] || TWIN=$(cd "$TWIN" && pwd)
+for _u in $UNIT; do
+  [ -f "$ORIGINAL/$_u.ml" ] \
+    || { echo "no such unit: $ORIGINAL/$_u.ml" >&2; exit 2; }
+done
 
 # ---------------------------------------------------------------- workspaces
 # Each variant gets its own directory holding a copy of its sources, so an
@@ -237,9 +272,15 @@ expected_no_cmi() {  # expected_no_cmi DIAGFILE
 accounted_for() {  # accounted_for RC FLAGS DIAGFILE
   [ "$1" = 0 ] && return 0
   # -vox-dump-vc reports that it dumped rather than discharged, and exits
-  # non-zero to say so.  -vox-dump-vc-json does not and is deliberately not
-  # matched here.
-  case " $2 " in *" -vox-dump-vc "*) return 0 ;; esac
+  # non-zero to say exactly that.  Match the diagnostic, not the flag: a
+  # missing source file or a type error under the same flag also exits
+  # non-zero, and excusing every failure under a flag is the thing this
+  # function exists to stop.  -vox-dump-vc-json prints no such line and is
+  # deliberately not matched.
+  case " $2 " in
+    *" -vox-dump-vc "*)
+      grep -q '^Error: VCs dumped, not discharged\.' "$3" && return 0 ;;
+  esac
   case " $2 " in
     *" -vox-type-only "*) expected_no_cmi "$3" && return 0 ;;
   esac
