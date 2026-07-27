@@ -30,8 +30,14 @@ let[@vox.def] membership_side first_member second_member =
 let empty = Empty
 
 (* Search membership: one comparison per level, following a single spine.
-   Away from ordered trees this is not occurrence in the tree, which is
-   why the laws below are stated for trees satisfying [invariant]. *)
+   Away from ordered trees this is not occurrence in the tree, and
+   [member_occurs] below is what says the two agree on ordered ones.
+   That theorem is internal: [insert_law] holds here whether or not the
+   tree is ordered, because [insert] follows the same comparison path
+   [member] does, so this file's [ordered] is not forced by any law in
+   [Set_intf.SET].  The counting law is what this file's interface does
+   force: it refuses an [insert] that adds a node for a key already
+   found. *)
 let[@vox.def] rec member (query : int) (tree : t @ logical) =
   match tree with
   | Empty -> false

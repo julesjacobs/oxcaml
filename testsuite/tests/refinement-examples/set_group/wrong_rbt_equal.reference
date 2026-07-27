@@ -10,7 +10,7 @@ File "rbt.ml", lines 1-1687, characters 26-3:
 1686 |   ()
 1687 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
-File "set_intf.ml", lines 43-48, characters 2-39:
+File "set_intf.ml", lines 57-62, characters 2-39:
   Interface declaration for value equal_backward_law
 File "rbt.ml", line 1667, characters 4-22:
 1667 | let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)

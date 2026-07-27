@@ -9,8 +9,22 @@ module type SET = sig
   (* The representation invariant the implementation maintains.  What it
      says is private to the implementation; a client learns only that
      [empty] satisfies it, that [insert] preserves it, and that the
-     membership laws below hold for values that satisfy it.  [member]
-     descends a single spine, so [insert_law] is false without it. *)
+     membership laws below hold for values that satisfy it.
+
+     How much of an invariant this forces depends on the implementation,
+     and it is worth being exact about it.  For the trees that rotate,
+     [insert_law] really is false without ordering, so their ordering
+     component is forced.  For [bst] and [ulist] it is not: their
+     [member] and [insert] follow the same path, so [insert_law] holds
+     whether or not the value is well formed, and an unordered tree has
+     the same membership behaviour as the ordered tree over the same
+     keys.  Nothing written in terms of [empty], [insert], [member] and
+     [equal] can tell the two apart, so no law added here would force
+     those two invariants; they are carried for the reader and for the
+     internal theorems that make one-spine search meaningful.
+
+     Forcing a property that membership cannot see needs a new
+     observation rather than a new law.  [Bal_intf] adds one. *)
   val invariant : t @ local logical -> bool @@ total
 
   val empty_invariant : unit{ invariant empty = true } @@ total
