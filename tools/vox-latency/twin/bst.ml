@@ -8,7 +8,20 @@
         [t{ _ <> Empty }]     becomes [t]
         [int{ _ = key }]      becomes [int]
         [unit{ member ... }]  becomes [unit]
-   2. Mode annotations are removed: [@ logical], [@@ total].
+   2. Mode annotations are removed -- [@ logical], [@@ total] -- EXCEPT where
+      removing one would change the code the compiler generates.  There is one
+      such place: [insert_def]'s tree parameter.  In the original that
+      parameter comes from [insert]'s own [tree : t @ logical]; drop the mode
+      and ordinary inference makes the parameter local, so the three call
+      sites in [member_insert_same], [member_insert_left] and
+      [member_insert_right] stack-allocate their argument -- [makelocalblock]
+      inside a [region] where the original has [makeblock].  That is a
+      different program, not the same program minus refinements, and a
+      baseline that allocates differently is not a baseline.  So the parameter
+      is pinned [@ global], which is the mode the original's synthesised
+      companion has and carries no refinement.  This is enforced rather than
+      argued: --validate requires the two Lambdas to be token-identical modulo
+      mode annotations and exits non-zero on any difference at all.
    3. The [[@vox.def]] attribute is removed from the six definitional
       bindings.  The attribute does two things: it forces the binding to
       [@ total], and it synthesises a companion lemma
@@ -22,8 +35,13 @@
       the twin and charged its compilation to the refinement machinery.
    4. The single-value definitions are otherwise untouched.
 
-   See tools/vox-latency/vox_attribute_time.sh for the Lambda-level check that
-   these are the only differences. *)
+   What this twin therefore controls for is the refinement predicates and the
+   mode annotations that carry no code consequence.  It does not control for
+   allocation behaviour, because there is none left to control for: the two
+   Lambdas are identical.
+
+   See tools/vox-latency/vox_attribute_time.sh --validate for the Lambda-level
+   check, which is an error exit rather than a printed observation. *)
 
 type t =
   | Empty
@@ -107,7 +125,7 @@ let rec insert (new_key : int) (tree : t)
     then Node (insert new_key left, key, right)
     else Node (left, key, insert new_key right)
 
-let insert_def (new_key : int) (tree : t) = ()
+let insert_def (new_key : int) (tree : t @ global) = ()
 
 let member_node query left key right
     : unit
