@@ -1,18 +1,18 @@
-File "bst.ml", lines 1-498, characters 34-3:
-  1 | ..................................struct
+File "bst.ml", lines 1-573, characters 32-3:
+  1 | ................................struct
   2 | type t =
   3 |   | Empty
   4 |   | Node of t * int * t
   5 | 
 ...
-495 |          else Bigint.add (size tree) Bigint.one)
-496 |     } =
-497 |   size_insert_step inserted tree
-498 | end
+570 |     least_member left key right ();
+571 |     ()
+572 | 
+573 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
-File "set_intf.ml", lines 57-62, characters 2-39:
+File "set_intf.ml", lines 75-80, characters 2-39:
   Interface declaration for value equal_backward_law
-File "bst.ml", line 419, characters 4-22:
-419 | let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
+File "bst.ml", line 430, characters 4-22:
+430 | let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
           ^^^^^^^^^^^^^^^^^^
   Implementation declaration for value equal_backward_law

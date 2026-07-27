@@ -1,10 +1,14 @@
 (* A depth that a client can reason about, and the two bounds that pin it.
 
-   [SET] exposes only membership-observable behaviour, so no law over
-   membership can say anything about the shape of a value: two
-   implementations with the same membership semantics are
-   indistinguishable through it.  Balance is a shape property, so forcing
-   it needs a new observation.  [depth] is that observation.
+   [SET]'s four operations are membership-observable, so no law written
+   over exactly those four says anything about the shape of a value.
+   Balance is a shape property and is not determined by the member set
+   even on well-formed values, so forcing it needs a new observation
+   rather than a new law.  [depth] is that observation, and it is the
+   one addition here that has to be argued for: [LEAST_SET] and
+   [REMOVING_SET] below also enlarge the algebra, but their operations
+   are fixed by the member set on well-formed values and expose nothing
+   a client could not already compute.
 
    Exporting [depth] alone moves the problem rather than solving it: an
    implementation would be free to define it however it liked, and a
@@ -201,9 +205,22 @@ let rec nle_iff (a : nat @ logical) (b : nat @ logical)
 
 (* ------------------------------------------------------------------ *)
 
-(* The counting layer.  [size] is anchored to membership, so an
-   implementation has no freedom in what it means, and the increment law
-   is false for any insert that adds a node for a key it already holds.
+(* The counting layer.  [size_empty] and [size_insert] pin [size] on
+   every value a client can build from [empty] by [insert], and the
+   increment law is false for any insert that adds a node for a key it
+   already holds *while [size] counts nodes*.
+
+   That qualification is the whole of what this layer forces, and it is
+   worth being exact about, because the law constrains the pair
+   ([insert], [size]) rather than [insert] on its own.  An
+   implementation that conses unconditionally still carries the layer if
+   it defines [size] as the number of distinct keys it holds: that is a
+   structural recursion over the same list, and [size_insert] then
+   follows by one unfolding rather than by induction.  Measured against
+   the node-counting version it is nine changed lines, and the resulting
+   proof is shorter, not longer.  So the layer refuses a change to
+   [insert] alone and does not refuse a coordinated change to both.
+
    Every implementation in the family can carry this. *)
 module type COUNTED_SET = sig
   include Set_intf.SET
@@ -224,8 +241,79 @@ module type COUNTED_SET = sig
     } @@ total
 end
 
-(* The balance layer, on top of the counting one.  Only an implementation
-   that really is height-balanced can carry it. *)
+(* The least-element layer.  [least tree fallback] is the least key the
+   value holds, or [fallback] when it holds none; a standard set library
+   exports it as [min_elt].  It exposes no shape --- on a well-formed
+   value it is the minimum of the member set --- and it nevertheless
+   forces an ordering invariant that the four [SET] operations cannot
+   reach.
+
+   The reason is the general rule, and it is worth stating here rather
+   than at the one implementation that uses it.  An operation separates
+   ill-formed values from well-formed ones when its own recursion reads
+   the structure the invariant constrains, even when the value it is
+   *specified* to return is a function of the member set alone.  [least]
+   descends the left spine, so on an unordered value it can return a key
+   that the one-spine [member] never finds, and [least_law] is then
+   false rather than merely unproved.  Being membership-determined on
+   well-formed values is not the same as being membership-determined,
+   and it is the second that would leave an operation unable to
+   separate.  [depth] below is not membership-determined even on
+   well-formed values, which is why enlarging the algebra with it needs
+   a justification and enlarging it with [least] does not. *)
+module type LEAST_SET = sig
+  include COUNTED_SET
+
+  val least : t @ local logical -> int -> int @@ total
+
+  (* The least element of a value is a member of it, unless the value
+     holds nothing, in which case [least] returns the fallback. *)
+  val least_law :
+    tree:t @ logical ->
+    fallback:int ->
+    well_formed:unit{ invariant tree = true } ->
+    unit{
+      member (least tree fallback) tree = true
+      || least tree fallback = fallback
+    } @@ total
+end
+
+(* The deletion layer: the set operation this family was otherwise
+   missing.  It forces a uniqueness invariant the way [least] forces an
+   ordering one, and for the same reason.  [remove] deletes the first
+   occurrence of a key, so on a value holding two copies the second
+   survives and [remove_law] is false; the law is stated for every
+   query, so a client sees the failure without knowing how the value is
+   laid out.  Like [least] it exposes no shape. *)
+module type REMOVING_SET = sig
+  include COUNTED_SET
+
+  val remove : int -> t @ logical -> t @@ total
+
+  val remove_law :
+    removed:int ->
+    tree:t @ logical ->
+    query:int ->
+    well_formed:unit{ invariant tree = true } ->
+    unit{
+      member query (remove removed tree)
+      = ((query <> removed) && member query tree)
+    } @@ total
+end
+
+(* The balance layer, on top of the counting one.  The two bounds below
+   place the exported [depth] within a constant factor of the logarithm
+   of [size].  They do not place it at the value's real path depth:
+   nothing here relates [depth] to constructors.  Any h satisfying
+   [fib h <= size < 2^(h+1)] passes --- zero at cardinality zero and the
+   bit length of the cardinality otherwise is one such choice, available
+   whatever the real shape is --- so this layer refuses a defective
+   implementation only while [depth] is the honest structural one.
+
+   What it forces there is real rather than a proof artefact: with the
+   structural [depth] in place, dropping the AVL balance conjunct leaves
+   an ordered six-node right spine satisfying [invariant], and that value
+   disproves the [fib] bound outright. *)
 module type BALANCED_SET = sig
   include COUNTED_SET
 
@@ -241,10 +329,11 @@ module type BALANCED_SET = sig
     unit{ Bigint.lt (size tree) (pow2 (S (depth tree))) = true } @@ total
 
   (* Depth is not overstated: a tree of depth h holds at least [fib h]
-     keys.  False for an unbalanced tree, which is what makes the
-     balance component of [invariant] load-bearing.  This is the AVL
-     bound specifically; a red-black tree satisfies only the weaker
-     2^(h/2) bound and would need a different bound function here. *)
+     keys.  False for an unbalanced tree under a structural [depth],
+     which is what makes the balance component of [invariant]
+     load-bearing there.  This is the AVL bound specifically; a
+     red-black tree satisfies only the weaker 2^(h/2) bound and would
+     need a different bound function here. *)
   val depth_size_bound :
     tree:t @ logical ->
     well_formed:unit{ invariant tree = true } ->

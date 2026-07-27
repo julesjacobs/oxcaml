@@ -1,4 +1,4 @@
-module M : Bal_intf.COUNTED_SET = struct
+module M : Bal_intf.LEAST_SET = struct
 type t =
   | Empty
   | Node of t * int * t
@@ -31,8 +31,19 @@ let[@vox.def] membership_side first_member second_member =
 let empty = Empty
 
 (* Search membership: one comparison per level, following a single spine.
-   Away from ordered trees this is not occurrence in the tree, which is
-   why the laws below are stated for trees satisfying [invariant]. *)
+   Away from ordered trees this is not occurrence in the tree, and
+   [member_occurs] below is what says the two agree on ordered ones.
+
+   [insert_law] holds here whether or not the tree is ordered, because
+   [insert] follows the same comparison path [member] does.  So no law
+   over [Set_intf.SET]'s four operations forces this file's [ordered],
+   and that was once recorded here as a proof that nothing could.  It is
+   not one.  [least_law] at the foot of this file forces it: [least]
+   descends the left spine, so on an unordered tree it can return a key
+   the one-spine [member] never finds, and the law is then false rather
+   than merely unproved.  The counting law forces something different
+   and weaker --- not the predicate but the behaviour, refusing an
+   [insert] that adds a node for a key it already found. *)
 let[@vox.def] rec member (query : int) (tree : t @ logical) =
   match tree with
   | Empty -> false
@@ -503,4 +514,68 @@ let size_insert ~(inserted : int) ~(tree : t @ logical)
          else Bigint.add (size tree) Bigint.one)
     } =
   size_insert_step inserted tree
+
+(* ------------------------------------------------------------------ *)
+(* The [LEAST_SET] law.  This is what makes [ordered] load-bearing.    *)
+(* ------------------------------------------------------------------ *)
+
+let[@vox.def] rec least (tree : t @ logical) (fallback : int) : int =
+  match tree with
+  | Empty -> fallback
+  | Node (left, key, _) -> least left key
+
+(* Everything the left spine reaches is at most the key it hangs
+   under.  Needs [below], so it needs the tree to be ordered. *)
+let rec least_le (left : t @ logical) (key : int)
+    (_ordered : unit{ ordered left = true })
+    (_bounded : unit{ below left key = true })
+    : unit{ least left key <= key } =
+  match left with
+  | Empty ->
+    least_def Empty key;
+    ()
+  | Node (ll, lk, lr) ->
+    least_def (Node (ll, lk, lr)) key;
+    ordered_def (Node (ll, lk, lr));
+    below_def (Node (ll, lk, lr)) key;
+    least_le ll lk () ();
+    ()
+
+(* The search spine finds it.  [least_le] is what lets [member] take the
+   left branch at each step rather than stopping short. *)
+let rec least_member (left : t @ logical) (key : int)
+    (right : t @ logical)
+    (_ordered : unit{ ordered (Node (left, key, right)) = true })
+    : unit{ member (least left key) (Node (left, key, right)) = true } =
+  match left with
+  | Empty ->
+    least_def Empty key;
+    member_def key (Node (Empty, key, right));
+    ()
+  | Node (ll, lk, lr) ->
+    ordered_def (Node (Node (ll, lk, lr), key, right));
+    ordered_def (Node (ll, lk, lr));
+    below_def (Node (ll, lk, lr)) key;
+    least_def (Node (ll, lk, lr)) key;
+    least_member ll lk lr ();
+    least_le ll lk () ();
+    member_def (least ll lk) (Node (Node (ll, lk, lr), key, right));
+    ()
+
+let least_law ~(tree : t @ logical) ~(fallback : int)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      member (least tree fallback) tree = true
+      || least tree fallback = fallback
+    } =
+  invariant_def tree;
+  match tree with
+  | Empty ->
+    least_def Empty fallback;
+    ()
+  | Node (left, key, right) ->
+    least_def (Node (left, key, right)) fallback;
+    least_member left key right ();
+    ()
+
 end

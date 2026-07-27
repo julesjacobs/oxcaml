@@ -1,4 +1,4 @@
-module M : Bal_intf.COUNTED_SET = struct
+module M : Bal_intf.REMOVING_SET = struct
 type t =
   | Nil
   | Cons of int * t
@@ -17,7 +17,15 @@ let[@vox.def] insert (inserted : int) (set : t @ logical) =
   Cons (inserted, set)
 
 (* No key is repeated: the list really is a set, and every key occupies
-   exactly one cell. *)
+   exactly one cell.
+
+   [member] here is a full scan, so it is occurrence-exact and
+   [insert_law] holds whether or not the list is unique.  No law over
+   [Set_intf.SET]'s four operations forces this predicate, and that was
+   once recorded as a proof that nothing could.  [remove_law] at the
+   foot of this file forces it: [remove] deletes the first occurrence,
+   so on a list holding two copies of a key the second survives the
+   removal and the law is false rather than merely unproved. *)
 let[@vox.def] rec unique (set : t @ logical) =
   match set with
   | Nil -> true
@@ -174,5 +182,49 @@ let size_insert ~(inserted : int) ~(tree : t @ logical)
   match present with
   | true -> ()
   | false -> size_def (Cons (inserted, tree)); ()
+
+(* ------------------------------------------------------------------ *)
+(* The [REMOVING_SET] law.  This is what makes [unique] load-bearing.  *)
+(* ------------------------------------------------------------------ *)
+
+let[@vox.def] rec remove (removed : int) (set : t @ logical) : t =
+  match set with
+  | Nil -> Nil
+  | Cons (key, rest) ->
+    if int_equal key removed then rest else Cons (key, remove removed rest)
+
+(* [remove] drops one cell.  The equal-key arm is where [unique] does
+   the work: it is what says no later cell holds the removed key. *)
+let rec remove_step (removed : int) (set : t @ logical) (query : int)
+    (_well_formed : unit{ unique set = true })
+    : unit{
+      member query (remove removed set)
+      = ((query <> removed) && member query set)
+    } =
+  match set with
+  | Nil ->
+    remove_def removed Nil;
+    member_def query Nil;
+    ()
+  | Cons (key, rest) ->
+    remove_def removed (Cons (key, rest));
+    unique_def (Cons (key, rest));
+    member_def query (Cons (key, rest));
+    if int_equal key removed
+    then ()
+    else begin
+      remove_step removed rest query ();
+      member_def query (Cons (key, remove removed rest));
+      ()
+    end
+
+let remove_law ~(removed : int) ~(tree : t @ logical) ~(query : int)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      member query (remove removed tree)
+      = ((query <> removed) && member query tree)
+    } =
+  invariant_def tree;
+  remove_step removed tree query ()
 
 end

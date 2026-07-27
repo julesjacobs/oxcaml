@@ -11,20 +11,38 @@ module type SET = sig
      [empty] satisfies it, that [insert] preserves it, and that the
      membership laws below hold for values that satisfy it.
 
-     How much of an invariant this forces depends on the implementation,
-     and it is worth being exact about it.  For the trees that rotate,
-     [insert_law] really is false without ordering, so their ordering
-     component is forced.  For [bst] and [ulist] it is not: their
-     [member] and [insert] follow the same path, so [insert_law] holds
-     whether or not the value is well formed, and an unordered tree has
-     the same membership behaviour as the ordered tree over the same
-     keys.  Nothing written in terms of [empty], [insert], [member] and
-     [equal] can tell the two apart, so no law added here would force
-     those two invariants; they are carried for the reader and for the
-     internal theorems that make one-spine search meaningful.
+     How much of an invariant these four operations force depends on the
+     implementation, and it is worth being exact about it.  For the trees
+     that rotate, [insert_law] really is false without ordering, so their
+     ordering component is forced here.  For [bst] and [ulist] it is not,
+     and for two different reasons that the same sentence used to run
+     together: [bst]'s [member] and [insert] follow the same comparison
+     spine, so [insert_law] holds whether or not the tree is ordered,
+     while [ulist]'s [member] is a full scan, which makes it
+     occurrence-exact and [insert_law] unconditional for that reason
+     instead.  Either way an ill-formed value has the same membership
+     behaviour as the well-formed value over the same observed member
+     set, and nothing written in terms of exactly [empty], [insert],
+     [member] and [equal] tells the two apart.
 
-     Forcing a property that membership cannot see needs a new
-     observation rather than a new law.  [Bal_intf] adds one. *)
+     Read that as a statement about these four operations, because it is
+     one.  It is not an impossibility result, and it was once written as
+     though it were: adding a fifth operation forces both components.
+     [Bal_intf.LEAST_SET] adds the least element and forces [bst]'s
+     ordering; [Bal_intf.REMOVING_SET] adds deletion and forces
+     [ulist]'s uniqueness.  Neither exposes shape.
+
+     One premise of the four-operation argument is load-bearing and easy
+     to miss: [equal] is pinned to extensional equality because
+     [equal_forward_law] and [equal_backward_law] below carry no
+     [well_formed] hypothesis, so they are demanded of ill-formed values
+     too and no implementation can choose an [equal] that separates.
+     Guarding those two laws by the invariant would break the argument
+     as much as adding an operation does.
+
+     Forcing a property that the member set does not determine even on
+     well-formed values --- balance --- needs a new observation rather
+     than a new law.  [Bal_intf.BALANCED_SET] adds one. *)
   val invariant : t @ local logical -> bool @@ total
 
   val empty_invariant : unit{ invariant empty = true } @@ total

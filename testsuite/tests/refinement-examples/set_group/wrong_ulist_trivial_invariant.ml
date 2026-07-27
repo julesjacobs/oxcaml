@@ -13,8 +13,8 @@ let[@vox.def] rec member (query : int) (set : t @ logical) =
   | Cons (key, rest) ->
     if int_equal query key then true else member query rest
 
-let[@vox.def] insert (_inserted : int) (set : t @ logical) =
-  set
+let[@vox.def] insert (inserted : int) (set : t @ logical) =
+  if member inserted set then set else Cons (inserted, set)
 
 (* No key is repeated: the list really is a set, and every key occupies
    exactly one cell.
@@ -31,7 +31,7 @@ let[@vox.def] rec unique (set : t @ logical) =
   | Nil -> true
   | Cons (key, rest) -> if member key rest then false else unique rest
 
-let[@vox.def] invariant (set : t @ logical) = unique set
+let[@vox.def] invariant (_set : t @ logical) = true
 
 let empty_invariant : unit{ invariant empty = true } =
   let _invariant = invariant_def empty in
