@@ -182,8 +182,12 @@ let shift_fallback_name context builtin =
 (* Division by zero raises rather than producing a value, so the model must
    not hand out one.  The quotient and remainder at a zero divisor are an
    uninterpreted function of the operands, exactly as an out-of-range shift
-   is: nothing is provable about the result, which is conservative because
-   the program does not reach a post-state at all. *)
+   is: no specific result value is available, which is conservative because
+   the program does not reach a post-state at all.  It is an arbitrary but
+   fixed function rather than an unknown one, so what does follow from it
+   still follows -- the term equals itself, equal operands give equal
+   results, and a conclusion that does not depend on the value is unaffected
+   -- and none of that hands out a quotient or a remainder. *)
 let division_fallback_basename = function
   | `Divide -> "VoxInt_divide_by_zero"
   | `Remainder -> "VoxInt_remainder_by_zero"
