@@ -179,6 +179,74 @@ Line 3, characters 25-45:
 Error: Refinement verification failed (disproved)
 |}]
 
+(* Expect: accepted.  An argument written over a parameter at a later
+   position than its own.  The measure at this call is the caller's [b] less
+   one, which the guard holds between zero and [a]: the arguments replace the
+   parameters all at once, so [b] here is the value the caller holds and not
+   the [0] that goes to [b]'s own position. *)
+let[@vox.decreases a] rec descends_on_a_later_parameter (a : int) (b : int)
+    : int =
+  if a >= 1 && b >= 1 && b < a
+  then descends_on_a_later_parameter (b - 1) 0
+  else 0
+
+[%%expect {|
+val descends_on_a_later_parameter : int -> int -> int = <fun>
+|}]
+
+(* Expect: refused.  The same shape with nothing relating [b] to [a].  The
+   obligation is about [b], and neither [0 <= b] nor [b < a] is known.
+
+   Substituting the positions one after another would instead state the
+   obligation about [0]: the first position's argument is [b], and [b] is
+   itself a parameter, so the second position would replace it with its own
+   argument.  That reads [0 < a], which the guard discharges, and the binding
+   would be accepted while running forever on [f 1 1]. *)
+module Argument_at_a_later_position : sig end = struct
+  let[@vox.decreases a] rec f (a : int) (b : int) : int =
+    if a >= 1 then f b 0 else 0
+end
+
+[%%expect {|
+Line 3, characters 19-24:
+3 |     if a >= 1 then f b 0 else 0
+                       ^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused.  A two-component measure whose call swaps its arguments.
+   The callee's tuple is [b, a] and the caller's is [a, b], and neither
+   position descends. *)
+module Swapped_arguments : sig end = struct
+  let[@vox.decreases a, b] rec f (a : int) (b : int) : int = f b a
+end
+
+[%%expect {|
+Line 2, characters 61-66:
+2 |   let[@vox.decreases a, b] rec f (a : int) (b : int) : int = f b a
+                                                                 ^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused, and this is the shape that makes the two above worth
+   having.  The orbit [(3, 0) -> (5, 1) -> (3, 0)] never ends, and every
+   argument of the call is written over both parameters. *)
+module Two_state_orbit : sig end = struct
+  let[@vox.decreases a] rec f (a : int) (b : int) : int =
+    if (a = 3 && b = 0) || (a = 5 && b = 1)
+    then
+      f (if a = 3 then (if b = 0 then 5 else 0) else (if b = 1 then 3 else 1))
+        (if b = 0 then 1 else 0)
+    else 0
+end
+
+[%%expect {|
+Lines 5-6, characters 6-32:
+5 | ......f (if a = 3 then (if b = 0 then 5 else 0) else (if b = 1 then 3 else 1))
+6 |         (if b = 0 then 1 else 0)
+Error: Refinement verification failed (not-proved)
+|}]
+
 (* Expect: accepted.  Mutual recursion descends on the measure the whole
    group shares; each call compares the callee's measure at its arguments
    against the caller's at its parameters. *)

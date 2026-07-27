@@ -7,6 +7,7 @@
    decreases_tot_record.ml decreases_tot_record.reference \
    decreases_tot_record_mutable.ml decreases_tot_record_mutable.reference \
    decreases_tot_record_shadow.ml decreases_tot_record_shadow.reference \
+   decreases_tot_orbit.ml decreases_tot_orbit.reference \
  ";
  setup-ocamlc.byte-build-env;
 
@@ -62,6 +63,13 @@
  compiler_reference =
    "${test_source_directory}/decreases_tot_record_shadow.reference";
  check-ocamlc.byte-output;
+
+ module = "decreases_tot_orbit.ml";
+ compiler_output = "decreases_tot_orbit.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+ compiler_reference = "${test_source_directory}/decreases_tot_orbit.reference";
+ check-ocamlc.byte-output;
 *)
 
 (* What a [@vox.decreases] measure buys, witnessed in batch rather than at the
@@ -80,4 +88,10 @@
    recursion, and specifically what a record pattern does with it.  A record
    of children is accepted where before it was not; the same record with a
    mutable field stays refused; and a mutable field the parse tree cannot see
-   is refused with a message of its own. *)
+   is refused with a message of its own.
+
+   The last subject is a two-parameter recursion that does not terminate,
+   asked for where a total value is wanted.  Its measure descends only if
+   each argument is read at the values the call passes; it is here because a
+   reading that let one position's argument be rewritten by another's
+   accepted it as total. *)

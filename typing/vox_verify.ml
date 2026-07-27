@@ -2338,17 +2338,25 @@ let termination_provenance ~measure_location ~call_location ~callee =
    the callee's parameters as bound occurrences; substituting the arguments
    for them is what turns it into a statement about this call.  A parameter
    position that aliases contributes several identifiers, all denoting that
-   same argument. *)
+   same argument.
+
+   All the positions are substituted at once.  In a self-recursive call the
+   callee's parameters are the caller's parameters, so an argument at one
+   position is written over the very identifiers the other positions are
+   substituting for: taking the positions one after another would replace an
+   argument's own parameters with the arguments at their positions, and state
+   the obligation about values the call never passes.  [f b 0] under the
+   measure [a] would then say [0 < a] rather than [b < a], which is not a
+   statement about this call at all. *)
 let measure_at_arguments (measure : Vox_vc.Decreases.measure) actuals =
-  List.map
-    (fun component ->
-      List.fold_left2
-        (fun component identifiers actual ->
-          List.fold_left
-            (fun component id -> Refinement.subst ~id ~by:actual component)
-            component identifiers)
-        component measure.parameters actuals)
-    measure.components
+  let bindings =
+    List.concat
+      (List.map2
+         (fun identifiers actual ->
+           List.map (fun id -> id, actual) identifiers)
+         measure.parameters actuals)
+  in
+  List.map (Refinement.subst_many bindings) measure.components
 
 (* The lexicographic descent obligation, in the shape that makes it evidence
    of termination over a bounded integer type.

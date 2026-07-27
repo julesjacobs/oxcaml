@@ -1,0 +1,5 @@
+File "decreases_tot_orbit.ml", lines 10-12, characters 4-30:
+10 | ....orbit
+11 |       (if a = 3 then (if b = 0 then 5 else 0) else (if b = 1 then 3 else 1))
+12 |       (if b = 0 then 1 else 0)
+Error: Refinement verification failed (not-proved)
