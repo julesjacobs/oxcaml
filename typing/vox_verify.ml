@@ -2344,58 +2344,132 @@ let selfification_fact state ?scope binding =
    values, constructors, immutable fields, and the mismatch marker the fact
    walk generates for a match arm that did not fire.  An application of
    anything else is not admissible here, however total it is. *)
-let termination_admissible_head ~env reference =
+(* A carrier whose values contain nothing that can be assigned, so that
+   reading one twice reads the same thing.  [bytes] is deliberately absent:
+   its contents are mutable.  Anything else -- a record, a variant, an array,
+   an abstract type -- may hold a mutable field, and structural comparison
+   reads it. *)
+let termination_immutable_carrier ~env type_ =
+  let type_ = carrier ~env type_ |> expand_head_for_refinement ~env in
+  match get_desc type_ with
+  | Tconstr (path, [], _) ->
+    List.exists (Path.same path)
+      [ Predef.path_int; Predef.path_bool; Predef.path_char;
+        Predef.path_string; Predef.path_unit; Predef.path_float;
+        Predef.path_int32; Predef.path_int64; Predef.path_nativeint ]
+    || Vox_builtin.is_bigint_type path
+  | _ -> false
+
+(* The structural comparisons are recognised by primitive name, and the name
+   says nothing about the carrier.  On a value that contains a mutable field,
+   [x = y] reads that field, which makes it exactly the kind of term this is
+   here to refuse -- two evaluations at two times, two answers.  So they are
+   admitted only where comparing reads nothing that can be assigned.  The
+   stable-call classifier asks the narrower question of the same primitives,
+   admitting them at [int] alone, because what it is deciding is whether the
+   backend has a model of the comparison rather than whether the comparison
+   is stable; both have to hold for a term to be built here and used, and
+   this one is the half this gate answers.  The rest of [Vox_builtin] is
+   arithmetic on those same carriers, or a constant. *)
+let termination_head_is_modelled ~env reference arguments =
+  let comparable_operands () =
+    List.for_all
+      (fun (_, argument) ->
+        termination_immutable_carrier ~env argument.rexp_type)
+      arguments
+  in
+  let modelled (builtin : Vox_builtin.t) =
+    match builtin with
+    | `Equal | `Not_equal | `Less | `Less_equal | `Greater | `Greater_equal ->
+      comparable_operands ()
+    | _ -> true
+  in
   match reference with
   | Rfun name -> Option.is_some (Vox_builtin.constructor_mismatch name)
   | Rsibling _ -> false
   | Rapp path | Rglobal path ->
     begin match Vox_builtin.of_path path with
-    | Some _ -> true
+    | Some builtin -> modelled builtin
     | None ->
       begin match
         Subst.Lazy.force_value_description (Env.find_value path env)
       with
       | { val_kind = Val_prim primitive; _ } ->
         let path = Env.normalize_value_path None env path in
-        Option.is_some (Vox_builtin.of_primitive ~path primitive.prim_name)
+        begin match Vox_builtin.of_primitive ~path primitive.prim_name with
+        | Some builtin -> modelled builtin
+        | None -> false
+        end
       | _ -> false
       | exception Not_found -> false
       end
     end
 
-let rec termination_admissible ~env expression =
-  let admissible = termination_admissible ~env in
-  match expression.rexp_desc with
-  | Rexp_constant _ -> true
-  | Rexp_ident (Rbound _) -> true
-  (* A value, rather than a call: what it denotes does not change under an
-     assignment, because an assignment replaces what a mutable field holds
-     and not the value bound here. *)
-  | Rexp_ident (Rfree (Rglobal _ | Rsibling _)) -> true
-  | Rexp_ident (Rfree (Rapp _ | Rfun _)) -> false
-  | Rexp_apply (head, arguments) ->
-    begin match head.rexp_desc with
-    | Rexp_ident (Rfree reference) -> termination_admissible_head ~env reference
-    | _ -> false
-    end
-    && List.for_all (fun (_, argument) -> admissible argument) arguments
-  | Rexp_tuple fields ->
-    List.for_all (fun (_, field) -> admissible field) fields
-  | Rexp_construct (_, arguments) -> List.for_all admissible arguments
-  (* Every lowering that builds a field projection has already established
-     that the label is immutable; a mutable one is refused where it is read,
-     not here. *)
-  | Rexp_field (record, _) -> admissible record
-  | Rexp_ifthenelse (condition, ifso, ifnot) ->
-    admissible condition && admissible ifso
-    && (match ifnot with None -> true | Some ifnot -> admissible ifnot)
-  | Rexp_let (bindings, body) ->
-    List.for_all (fun binding -> admissible binding.rbind_expr) bindings
-    && admissible body
-  | Rexp_match (scrutinee, cases) ->
-    admissible scrutinee
-    && List.for_all (fun case -> admissible case.rcase_body) cases
-  | Rexp_function { body; _ } -> admissible body
+(* Walks an expression and answers whether the descent may rest on it,
+   naming the calls that say otherwise.  The names are for the diagnostic:
+   a hypothesis dropped here is invisible in the source, and a [not-proved]
+   whose cause is an invisible filter is expensive to read. *)
+let termination_offences ~env expression =
+  let admissible = ref true in
+  let names = ref [] in
+  let refuse ?name () =
+    admissible := false;
+    match name with
+    | None -> ()
+    | Some name ->
+      if not (List.exists (String.equal name) !names)
+      then names := name :: !names
+  in
+  let reference_name = function
+    | Rapp path | Rglobal path -> Path.last path
+    | Rfun name | Rsibling name -> name
+  in
+  let rec walk expression =
+    match expression.rexp_desc with
+    | Rexp_constant _ -> ()
+    | Rexp_ident (Rbound _) -> ()
+    (* A value, rather than a call: what it denotes does not change under an
+       assignment, because an assignment replaces what a mutable field holds
+       and not the value bound here. *)
+    | Rexp_ident (Rfree (Rglobal _ | Rsibling _)) -> ()
+    | Rexp_ident (Rfree ((Rapp _ | Rfun _) as reference)) ->
+      refuse ~name:(reference_name reference) ()
+    | Rexp_apply (head, arguments) ->
+      (match head.rexp_desc with
+       | Rexp_ident (Rfree reference) ->
+         if not (termination_head_is_modelled ~env reference arguments)
+         then refuse ~name:(reference_name reference) ()
+       (* A function defined in this scope: the condition assembler binds its
+          reference like any other, so the head arrives bound rather than
+          free.  Nothing recognised is reachable that way -- what the
+          verifier reproduces lives at a qualified path -- so this is a call
+          it does not model, and it can be named. *)
+       | Rexp_ident (Rbound id) -> refuse ~name:(Ident.name id) ()
+       | _ -> refuse ());
+      List.iter (fun (_, argument) -> walk argument) arguments
+    | Rexp_tuple fields -> List.iter (fun (_, field) -> walk field) fields
+    | Rexp_construct (_, arguments) -> List.iter walk arguments
+    (* Every lowering that builds a field projection has already established
+       that the label is immutable; a mutable one is refused where it is
+       read, not here. *)
+    | Rexp_field (record, _) -> walk record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      walk condition;
+      walk ifso;
+      Option.iter walk ifnot
+    | Rexp_let (bindings, body) ->
+      List.iter (fun binding -> walk binding.rbind_expr) bindings;
+      walk body
+    | Rexp_match (scrutinee, cases) ->
+      walk scrutinee;
+      List.iter (fun case -> walk case.rcase_body) cases
+    | Rexp_function { body; _ } -> walk body
+  in
+  walk expression;
+  !admissible, List.rev !names
+
+let termination_admissible ~env expression =
+  fst (termination_offences ~env expression)
 
 let termination_provenance ~measure_location ~call_location ~callee =
   { kind = "termination";
@@ -4177,11 +4251,40 @@ and check_termination state application function_ arguments =
          available here, and the obligation is proved without it or not at
          all. *)
       let outer_facts = state.facts in
+      let dropped =
+        List.filter
+          (fun (fact : Vox_vc.fact) ->
+            not (termination_admissible ~env fact.expression))
+          (Facts.facts outer_facts)
+      in
       state.facts <-
         Facts.filter
           (fun (fact : Vox_vc.fact) ->
             termination_admissible ~env fact.expression)
           outer_facts;
+      (* A dropped hypothesis is invisible in the source: the reader sees the
+         guard that would discharge the descent and no reason it did not.  So
+         when one of them was about a value this goal mentions, the refusal
+         says which calls put it out of reach. *)
+      let dropped_note =
+        let names =
+          List.concat_map
+            (fun (fact : Vox_vc.fact) ->
+              snd (termination_offences ~env fact.expression))
+            dropped
+        in
+        let names = List.sort_uniq String.compare names in
+        match names with
+        | [] -> None
+        | _ :: _ ->
+          Some
+            (Location.msg
+               "Hypotheses mentioning %s were not available for this \
+                descent.  A total function may still read mutable state, so \
+                what it answered before another call is not what it answers \
+                after one, and a measure may not descend on that."
+               (String.concat ", " names))
+      in
       let restore () = state.facts <- outer_facts in
       begin
         match
@@ -4193,6 +4296,12 @@ and check_termination state application function_ arguments =
             goal
         with
         | () -> restore ()
+        | exception Location.Error report when Option.is_some dropped_note ->
+          restore ();
+          let note = Option.get dropped_note in
+          raise
+            (Location.Error
+               { report with Location.sub = report.Location.sub @ [note] })
         | exception exception_ -> restore (); raise exception_
       end
     end

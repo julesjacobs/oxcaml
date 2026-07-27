@@ -8244,7 +8244,13 @@ let decreases_carrier_name = function
    mutable state, and a measure read through one is not a function of the
    parameters at all.  Refusing it here, where the measure is written, says
    so once; letting it through would instead fail to descend at every call
-   with nothing pointing at the reason. *)
+   with nothing pointing at the reason.
+
+   Being recognised is necessary and not sufficient: the structural
+   comparisons are recognised by primitive name, and on a carrier that
+   contains a mutable field comparing reads it.  That question needs the
+   operand carriers, so the verifier asks it of the measure at each call
+   rather than being asked twice here. *)
 let measure_call_is_modelled function_ =
   match function_.exp_desc with
   | Texp_ident { path; desc; _ } ->

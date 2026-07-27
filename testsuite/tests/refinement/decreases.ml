@@ -359,6 +359,82 @@ val opaque : int -> int = <fun>
 val passed_over : int{ _ >= 0 } -> int -> int = <fun>
 |}]
 
+(* Expect: refused.  Structural comparison is recognised by primitive name,
+   and the name says nothing about what is being compared.  On a carrier that
+   contains a mutable field, [eq x y] reads that field, so it is not settled
+   by [x] and [y] and a measure written over it says nothing about what
+   changes between two calls.  The abstract type crosses logicality, which is
+   what lets the parameter appear in a measure at all. *)
+module Comparison_at_a_mutable_carrier : sig end = struct
+  module Cell : sig
+    type t : value mod logical
+
+    val make : int -> t
+    val differ : t -> unit @@ total
+    val same : t -> unit @@ total
+  end = struct
+    type t = { mutable v : int }
+
+    let make (n : int) : t = { v = n }
+    let (differ @ total) (c : t) : unit = c.v <- 1
+    let (same @ total) (c : t) : unit = c.v <- 0
+  end
+
+  external eq : Cell.t -> Cell.t -> bool @@ total = "%equal"
+
+  let[@vox.decreases if eq x y then n else 2 - n] rec loop
+      (x : Cell.t) (y : Cell.t) (n : int) : int =
+    if eq x y
+    then (if n >= 1 then (Cell.differ y; loop x y (n - 1)) else 0)
+    else (if n <= 1 then (Cell.same y; loop x y (n + 1)) else 0)
+end
+
+[%%expect {|
+Line 21, characters 41-57:
+21 |     then (if n >= 1 then (Cell.differ y; loop x y (n - 1)) else 0)
+                                              ^^^^^^^^^^^^^^^^
+Error: vox: this recursive call leaves no position of the termination measure that can be decided.  Its argument at the first position is, or contains, a call whose result the verifier does not reproduce: a total function may still read mutable state, so its value is not settled by its arguments, and a measure read through one says nothing about what changes between two calls.
+|}]
+
+(* Expect: refused, and this is the boundary of the rule rather than a
+   defect in the program.  [dec] is pure and its contract is proved, but
+   nothing the verifier can see distinguishes it from an accessor over
+   mutable state, so the position its result fills is one the descent may not
+   be decided at.  Writing [f (n - 1)] verifies. *)
+module Argument_through_a_helper : sig end = struct
+  let (dec @ total) (n : int{ _ >= 1 }) : int{ _ = n - 1 } = n - 1
+
+  let[@vox.decreases n] rec f (n : int{ _ >= 0 }) : int =
+    if n >= 1 then f (dec n) else 0
+end
+
+[%%expect {|
+Line 5, characters 19-28:
+5 |     if n >= 1 then f (dec n) else 0
+                       ^^^^^^^^^
+Error: vox: this recursive call leaves no position of the termination measure that can be decided.  Its argument at the first position is, or contains, a call whose result the verifier does not reproduce: a total function may still read mutable state, so its value is not settled by its arguments, and a measure read through one says nothing about what changes between two calls.
+|}]
+
+(* Expect: refused, the same boundary reached through the guard rather than
+   the argument.  The bound on [n] is true and proved, and it is unavailable
+   here because it is stated about a call the verifier does not reproduce.
+   The refusal says which call, since a dropped hypothesis is otherwise
+   invisible in the source. *)
+module Guard_through_a_helper : sig end = struct
+  let (positive @ total) (n : int) : bool{ _ = (n >= 1) } = n >= 1
+
+  let[@vox.decreases n] rec f (n : int{ _ >= 0 }) : int =
+    if positive n then f (n - 1) else 0
+end
+
+[%%expect {|
+Line 5, characters 23-32:
+5 |     if positive n then f (n - 1) else 0
+                           ^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+Hypotheses mentioning positive were not available for this descent.  A total function may still read mutable state, so what it answered before another call is not what it answers after one, and a measure may not descend on that.
+|}]
+
 (* Expect: accepted.  Mutual recursion descends on the measure the whole
    group shares; each call compares the callee's measure at its arguments
    against the caller's at its parameters. *)
