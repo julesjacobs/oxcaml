@@ -1,8 +1,7 @@
 #!/bin/sh
 # The offline sweep: the tables the ordinary suite is too small to carry, on
-# every backend, with an answer the machine did not give probed for every
-# case rather than for a sample.  Run this when the translation of an
-# operation changes, or before a release.
+# every backend.  Run this when the translation of an operation changes, or
+# before a release.
 #
 #   differential_sweep.sh <install-prefix> [backend ...]
 #
@@ -41,7 +40,6 @@ for backend in $backends; do
       --ocamlc "$prefix/bin/ocamlc.byte" \
       --ocamlc-opt "$prefix/bin/ocamlc.opt" \
       --ocamlopt-opt "$prefix/bin/ocamlopt.opt" \
-      --backend "$backend" --profile "$profile" --jobs "$jobs" \
-      --sentinels-everywhere
+      --backend "$backend" --profile "$profile" --jobs "$jobs"
   done
 done

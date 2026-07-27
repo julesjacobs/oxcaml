@@ -242,7 +242,7 @@ def runtime_findings(cases, observations):
     return findings
 
 
-def build_probes(cases, observations, sentinels_everywhere):
+def build_probes(cases, observations):
     """Turn observations into obligations, with the answer expected of each.
 
     The machine's own answer is expected to be proved wherever the operation
@@ -250,9 +250,13 @@ def build_probes(cases, observations, sentinels_everywhere):
     refused.  Answers the machine did not produce must always be refused: a
     backend that proves one disagrees with the machine, and a backend that
     proves both that answer and the machine's is not saying anything at all.
+
+    Every case carries such an answer, not a sample of the operators.  A case
+    whose only obligation is the one it expects to be proved has nothing left
+    to expose it if that obligation ever stops being emitted, and the
+    difference is a few obligations on a table this size.
     """
     probes = []
-    sampled = set()
     for case in cases:
         observed = observations[case.key]
         answer = observed.answer
@@ -274,22 +278,11 @@ def build_probes(cases, observations, sentinels_everywhere):
                         "no committed meaning",
                     )
                 )
-        group = (case.family, case.operator)
-        wanted = (
-            sentinels_everywhere
-            or case.family == "divmod"
-            or case.raises
-            or not case.modelled
-            or not specified
-            or group not in sampled
+        witnesses = model.wrong_witnesses(
+            case, value, has_candidates=bool(observed.candidates)
         )
-        sampled.add(group)
-        if wanted:
-            witnesses = model.wrong_witnesses(
-                case, value, has_candidates=bool(observed.candidates)
-            )
-            for witness in witnesses:
-                probes.append(Probe(case, witness, False, "not the machine's"))
+        for witness in witnesses:
+            probes.append(Probe(case, witness, False, "not the machine's"))
     return probes
 
 
@@ -462,12 +455,6 @@ def main():
         help="run the observation stage without a native compiler, losing "
         "the second independently compiled answer",
     )
-    parser.add_argument(
-        "--sentinels-everywhere",
-        action="store_true",
-        help="probe an answer the machine did not give for every case, not "
-        "only for the sampled ones",
-    )
     arguments = parser.parse_args()
 
     scratch_root = os.environ.get("TMPDIR")
@@ -518,7 +505,7 @@ def main():
     try:
         observations, engines = observe(cases, scratch, compilers, environment)
         findings = runtime_findings(cases, observations)
-        probes = build_probes(cases, observations, arguments.sentinels_everywhere)
+        probes = build_probes(cases, observations)
 
         started = time.time()
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
