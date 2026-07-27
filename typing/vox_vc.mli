@@ -44,6 +44,10 @@ module Decreases : sig
 
   val record : Ident.t -> measure -> unit
   val find : Ident.t -> measure option
+
+  val reset : unit -> unit
+  (** Forget every recorded measure.  Called where the identifier stamps the
+      table is keyed on are reset, at the start of a compilation unit. *)
 end
 
 val create :

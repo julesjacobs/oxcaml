@@ -43,6 +43,14 @@ module Decreases = struct
 
   let record id measure = Ident.Tbl.replace measures id measure
   let find id = Ident.Tbl.find_opt measures id
+
+  (* The keys are local identifiers, whose identity is a stamp drawn from a
+     counter that is reset at the start of every compilation unit.  An entry
+     left behind by an earlier unit in the same process therefore names a
+     binding in the current one, and the verifier would install that stranger
+     as the measure of a binding that never asked for one.  Compiling two
+     files in one [ocamlc] invocation is enough to see it. *)
+  let reset () = Ident.Tbl.clear measures
 end
 
 let create ~loc ~facts ~goal = { location = loc; facts; goal }
