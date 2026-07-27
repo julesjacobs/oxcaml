@@ -7759,6 +7759,49 @@ let evaluated_argument_subject expression =
   | subject -> subject
   | exception Omitted_argument -> opaque expression
 
+(* Admitted refinement obligations.
+
+   [assume e] at a site imposing [t{ p }] admits the obligation that site
+   would have raised, instead of proving it.  The predicate is read from the
+   imposed type rather than from anything written at the call, so a statement
+   already written once -- as a result annotation, say -- is not written
+   again; two copies of a statement drift apart, and avoiding that is the
+   whole purpose.  A site with no refined type to impose has no obligation to
+   admit and is refused.
+
+   The construct is recognised by the resolved identity of [Stdlib.assume],
+   never by that name: a user's own [assume] keeps its ordinary meaning.
+   Every other occurrence of the identity is refused where the identifier is
+   typed, so [assume] can be neither passed, aliased, partially applied, nor
+   reached through an expected type. *)
+
+let stdlib_assume_path =
+  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib"), "assume")
+
+(* The name is checked first only to keep the resolution off the path every
+   identifier takes: a value reached under any other name is not this one. *)
+let is_stdlib_assume env path =
+  String.equal (Path.last path) "assume"
+  && Path.same (Env.normalize_value_path None env path) stdlib_assume_path
+
+let assume_error ~loc format =
+  Location.raise_errorf ~loc ("This obligation cannot be admitted: " ^^ format)
+
+(* The admitted expression, when this is an [assume] applied to one ordinary
+   argument.  The refinement is not read from here: it comes from whatever
+   refined type the site imposes, which is what keeps the statement from
+   being written twice. *)
+let assume_argument env sarg =
+  match sarg.pexp_desc with
+  | Pexp_apply
+      ({ pexp_desc = Pexp_ident lid; _ }, [ (Nolabel, argument) ])
+    when String.equal (Longident.last lid.txt) "assume" ->
+    begin match Env.find_value_by_name lid.txt env with
+    | path, _ when is_stdlib_assume env path -> Some argument
+    | _ | (exception Not_found) -> None
+    end
+  | _ -> None
+
 type dependent_case_parameter =
   | Open_case_parameter of Ident.t * type_expr
   | Infer_case_parameter of Ident.t * type_expr
@@ -7819,6 +7862,10 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
 and type_refinement_annotation
     ?(overwrite = No_overwrite) env expected_mode ~loc ~explanation sarg
     refined_type refinement =
+  match assume_argument env sarg with
+  | Some argument ->
+    type_assume env expected_mode ~loc argument refined_type refinement
+  | None ->
   let with_explanation = with_explanation explanation in
   let refined_type = instance refined_type in
   let skeleton = instance refinement.ref_skeleton in
@@ -7950,6 +7997,29 @@ and type_refinement_annotation
       with_explanation (fun () ->
         unify_exp_types loc env arg.exp_type skeleton);
       mark arg
+
+(* [assume e] where the site imposes [t{ p }].  The obligation that site
+   would have raised is admitted instead: the predicate stays where it was
+   written, so nothing is restated, and the admission is recorded rather than
+   proved.  The expression is elaborated at the carrier and handed back with
+   the refined type and no verification mark of its own -- at run time this
+   is the identity, and in this pass nothing at all is generated.
+
+   [Vox_verify] turns the admission into a fact, and reports it. *)
+and type_assume env expected_mode ~loc argument refined_type refinement =
+  if !refinement_predicate_context then
+    assume_error ~loc "a refinement predicate is a proposition, not code";
+  if not (Int.equal 0 (Env.stage env :> int)) then
+    assume_error ~loc "a quoted or spliced admission belongs to another stage";
+  let refined_type = instance refined_type in
+  let skeleton = instance refinement.ref_skeleton in
+  let arg = type_expect env expected_mode argument (mk_expected skeleton) in
+  (* A location object of this admission's own, over the written call.
+     [Vox_verify] recognises the site by its physical identity, so an
+     ordinary annotation is never mistaken for an admitted one. *)
+  let admission_loc = Location.{ loc with loc_ghost = loc.loc_ghost } in
+  Vox_vc.Assumption.record admission_loc refinement refined_type;
+  ({ arg with exp_type = refined_type; exp_loc = admission_loc }, true)
 
 and type_expect_
     ?(recarg=Rejected) ?(overwrite=No_overwrite)
@@ -8335,6 +8405,10 @@ and type_expect_
       let path, actual_mode, layout_args, desc, kind =
         type_ident env ~recarg lid
       in
+      if is_stdlib_assume env path then
+        Location.raise_errorf ~loc:lid.loc
+          "[assume] admits the obligation of the refinement imposed on it, \
+           and there is none here";
       let exp_desc =
         match desc.val_kind with
         | Val_ivar (_, cl_num) ->

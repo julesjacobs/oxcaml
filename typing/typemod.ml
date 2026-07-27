@@ -4174,6 +4174,7 @@ let type_toplevel_phrase env sig_acc s =
     type_structure ~toplevel:(Some sig_acc) ~funct_body:false None env s in
   if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
     Vox_verify.verify_structure ~toplevel:true str;
+  Vox_verify.report_admissions ();
   Value.submode_err (Location.none, Structure) mode toplevel_mode;
   remove_mode_and_jkind_variables env sg;
   remove_mode_and_jkind_variables_for_toplevel str;
@@ -4507,6 +4508,9 @@ let type_implementation target modulename initial_env ast =
       Profile.record_call "refinement verification" (fun () ->
         if not (!Clflags.vox_type_only || !Clflags.vox_no_verify) then
           Vox_verify.verify_structure str);
+      (* Reported whether or not anything was discharged: what was admitted is
+         a property of the source, not of the verification. *)
+      Vox_verify.report_admissions ();
       Value.submode_err (Location.in_file sourcefile, Structure)
         mode (Env.mode_unit ~staticity:Staticity.Dynamic);
       let uid = Uid.of_compilation_unit_id modulename in

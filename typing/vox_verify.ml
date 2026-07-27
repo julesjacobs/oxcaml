@@ -3119,9 +3119,19 @@ and check_marks_against state ~env ~subject_location ?result_span ~subject marks
         annotation_provenance ~annotation_location
           ~subject_location
       in
-      prove_refinement state ~env ~loc ~subject refinement
-        ~kind:"annotation" ~program_point:subject_location
-        ~result_span ~provenance)
+      (* An admitted obligation is not proved.  Its statement becomes a fact
+         with an origin of its own, so what follows may rely on it and a
+         reader can see what was taken on trust.  Recognition is by the
+         physical identity of the location typecore minted for the site, so
+         an ordinary annotation is never admitted by accident. *)
+      match Vox_vc.Assumption.refinement annotation_location with
+      | Some _ ->
+        add_extracted_refinement_fact state ~env ~kind:"assume"
+          ~loc:annotation_location ~subject refinement
+      | None ->
+        prove_refinement state ~env ~loc ~subject refinement
+          ~kind:"annotation" ~program_point:subject_location
+          ~result_span ~provenance)
     marks
 
 and check_marks ?result_span state expression marks =
@@ -4183,6 +4193,30 @@ let finish_dump () =
     Format.eprintf "Error: VCs dumped, not discharged.@.";
     raise Location.Already_displayed_error
   end
+
+(* Report every obligation the unit admitted rather than proved.
+
+   This is not a warning.  A warning can be turned off, and an admission that
+   can be turned off is an admission nobody has to look at, which defeats the
+   only thing keeping an admitted proof honest.  It is written unconditionally
+   whenever the unit admits anything, and the only control worth offering
+   would make it louder. *)
+let report_admissions () =
+  match Vox_vc.Assumption.admitted () with
+  | [] -> ()
+  | admitted ->
+    let rendered site =
+      Format.asprintf "%a" Printtyp.type_expr site.Vox_vc.Assumption.refined_type
+    in
+    List.iter
+      (fun site ->
+        Format.eprintf "@[<v>%a@,Admitted: %s is assumed here, not proved.@]@."
+          Location.print_loc site.Vox_vc.Assumption.location (rendered site))
+      admitted;
+    Format.eprintf "@[Admitted %d obligation%s in this unit.@]@."
+      (List.length admitted)
+      (if List.length admitted = 1 then "" else "s");
+    Vox_vc.Assumption.forget ()
 
 let verify_structure ?(toplevel = false) structure =
   let loc =

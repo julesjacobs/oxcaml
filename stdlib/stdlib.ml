@@ -567,6 +567,13 @@ let ( ^^ ) (Format (fmt1, str1)) (Format (fmt2, str2)) =
 
 external sys_exit : int -> 'a = "caml_sys_exit"
 
+(* Admitted refinement obligations.  Typecore accepts this name only where a
+   refinement is imposed on it, where it elaborates to its argument, and
+   rejects every other occurrence as the identifier is typed.  No call
+   therefore survives to this definition, which is the identity it would be
+   in any case. *)
+let assume value = value
+
 (* for at_exit *)
 type 'a atomic_t : value mod portable contended
 external atomic_make : 'a @ contended portable -> 'a atomic_t @@ portable = "%makemutable"

@@ -27,6 +27,38 @@ module Recursive_binding = struct
   let defeq_requested loc = memq loc defeq_locations
 end
 
+(* The obligations a unit admitted rather than proved.  Typecore mints a
+   location object for each [assume] and records the refinement it admits
+   here; [Vox_verify] recognises the site by PHYSICAL identity of that object
+   rather than by anything a user could write, so an ordinary annotation is
+   never admitted by accident.  Losing the identity to a copy would lose the
+   admission and leave the obligation to be proved, so the channel fails
+   closed. *)
+module Assumption = struct
+  type t =
+    { location : Location.t;
+      refinement : Types.refinement_desc;
+      refined_type : Types.type_expr;
+    }
+
+  let sites : t list ref = ref []
+
+  let record location refinement refined_type =
+    sites := { location; refinement; refined_type } :: !sites
+
+  let refinement location =
+    List.find_map
+      (fun site ->
+        if site.location == location then Some site.refinement else None)
+      !sites
+
+  let admitted () = List.rev !sites
+
+  (* Reporting a unit's admissions consumes them, so that the toplevel, which
+     reports after every phrase, does not repeat the ones before it. *)
+  let forget () = sites := []
+end
+
 let create ~loc ~facts ~goal = { location = loc; facts; goal }
 
 let instantiate ~(refinement : Types.refinement_desc) ~with_ =

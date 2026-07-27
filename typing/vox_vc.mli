@@ -26,6 +26,28 @@ module Recursive_binding : sig
   val defeq_requested : Location.t -> bool
 end
 
+(* The obligations a unit admitted rather than proved, each recognised by the
+   physical identity of the location object typecore minted for its [assume].
+   The refinement travels with the site rather than being read back off the
+   expression, because a use in statement position weakens the refined type
+   away before the verifier sees it. *)
+module Assumption : sig
+  type t =
+    { location : Location.t;
+      refinement : Types.refinement_desc;
+      refined_type : Types.type_expr;
+    }
+
+  val record : Location.t -> Types.refinement_desc -> Types.type_expr -> unit
+  val refinement : Location.t -> Types.refinement_desc option
+
+  (** Every obligation admitted in the unit, in source order. *)
+  val admitted : unit -> t list
+
+  (** Forget them, once reported. *)
+  val forget : unit -> unit
+end
+
 val create :
   loc:Location.t ->
   facts:fact list ->
