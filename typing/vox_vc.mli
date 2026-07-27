@@ -63,6 +63,8 @@ module Decreases : sig
   val reset : unit -> unit
   (** Forget every recorded measure.  Called where the identifier stamps the
       table is keyed on are reset, at the start of a compilation unit. *)
+end
+
 (* The obligations a unit admitted rather than proved, each identified by a
    number the typechecker minted for it and put in the one verification mark
    it belongs to.  See the implementation for why nothing derived from a

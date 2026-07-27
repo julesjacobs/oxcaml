@@ -178,7 +178,15 @@ let runtime_result builtin ~operands =
       | `Greater | `Greater_equal | `Identity | `Int_max | `Int_min | `Less
       | `Less_equal | `Multiply | `Negate | `Not | `Not_equal | `Or | `Pred
       | `Shift_left | `Shift_right_arithmetic | `Shift_right_logical
-      | `Subtract | `Succ ),
+      | `Subtract | `Succ
+      (* Division and remainder are modelled faithfully by the backends, and
+         still have no executable meaning here: at a zero divisor the program
+         raises where the model denotes a value, so evaluating the predicate
+         and reading the model can differ.  [None] leaves an [assume] whose
+         predicate divides UNGUARDED rather than carrying a check that can
+         raise -- the same treatment a partial operation gets everywhere
+         else, and the fail-closed direction. *)
+      | `Divide | `Remainder ),
       _ ) -> None
 ;;
 

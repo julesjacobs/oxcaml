@@ -81,6 +81,8 @@ module Decreases = struct
      as the measure of a binding that never asked for one.  Compiling two
      files in one [ocamlc] invocation is enough to see it. *)
   let reset () = Ident.Tbl.clear measures
+end
+
 (* The obligations a unit admitted rather than proved.
 
    A site is identified by a number the typechecker mints for it and puts in
