@@ -226,5 +226,4 @@ let remove_law ~(removed : int) ~(tree : t @ logical) ~(query : int)
     } =
   invariant_def tree;
   remove_step removed tree query ()
-
 end

@@ -1,14 +1,14 @@
-File "bst.ml", lines 1-573, characters 32-3:
+File "bst.ml", lines 1-572, characters 32-3:
   1 | ................................struct
   2 | type t =
   3 |   | Empty
   4 |   | Node of t * int * t
   5 | 
 ...
+569 |     least_def (Node (left, key, right)) fallback;
 570 |     least_member left key right ();
 571 |     ()
-572 | 
-573 | end
+572 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
 File "set_intf.ml", lines 75-80, characters 2-39:
   Interface declaration for value equal_backward_law

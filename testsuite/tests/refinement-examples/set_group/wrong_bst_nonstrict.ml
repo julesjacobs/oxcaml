@@ -571,5 +571,4 @@ let least_law ~(tree : t @ logical) ~(fallback : int)
     least_def (Node (left, key, right)) fallback;
     least_member left key right ();
     ()
-
 end
