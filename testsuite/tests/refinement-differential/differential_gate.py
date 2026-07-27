@@ -110,19 +110,22 @@ class Observation:
         )
 
 
-def recorded_verdicts(path):
-    """The verdict the backend gave, one entry per obligation it discharged.
+def recorded_obligations(path):
+    """What the compiler discharged: the verdict and the goal, one per entry.
 
     Process success is not a verdict.  An annotation that stops emitting an
     obligation compiles cleanly, and reading that as proof would let the
     thing being compared disappear while the gate reported agreement.  So the
     driver reads the compiler's own record of what it discharged and what
     each obligation came back as, rather than inferring either.
+
+    The goal comes back with it because a count is not enough: an obligation
+    about something other than the operation is still exactly one obligation.
     """
     with open(path) as handle:
         document = json.load(handle)
     return [
-        condition["discharge"]["status"]
+        (condition["discharge"]["status"], condition["goal"]["text"])
         for condition in document["verification_conditions"]
     ]
 
@@ -291,10 +294,11 @@ def discharge(probe, index, scratch, compiler, environment):
 
     The verdict is read from the compiler's own record of what it discharged,
     for a refused obligation as much as for a proved one.  Three things have
-    to hold before that answer counts: exactly one obligation was discharged
-    -- the one this probe asks for, so that an annotation which silently
-    stops emitting one is a failure rather than a proof -- the recorded
-    verdict agrees with the exit status, and it agrees with whatever the
+    to hold before that answer counts: exactly one obligation was discharged,
+    so that an annotation which silently stops emitting one is a failure
+    rather than a proof; that obligation applies the operation, so that one
+    about a constant of the right value is a failure too; the recorded
+    verdict agrees with the exit status; and it agrees with whatever the
     compiler printed.  Anything else leaves [proved] unset, which the report
     counts as undecided and fails on.
     """
@@ -314,14 +318,21 @@ def discharge(probe, index, scratch, compiler, environment):
         printed = REFUSAL.search(result.stdout)
         printed = printed.group(1) if printed else None
         try:
-            verdicts = recorded_verdicts(dump)
+            discharged = recorded_obligations(dump)
         except (OSError, ValueError, KeyError, TypeError) as failure:
             probe.verdict = "no record of any obligation (%s)" % failure
             return probe
-        if len(verdicts) != 1:
-            probe.verdict = "%d obligations discharged, expected 1" % len(verdicts)
+        if len(discharged) != 1:
+            probe.verdict = (
+                "%d obligations discharged, expected 1" % len(discharged)
+            )
             return probe
-        probe.verdict = verdicts[0]
+        verdict, goal = discharged[0]
+        marker = probe.case.head_marker
+        if goal.count(marker) < probe.case.head_occurrences:
+            probe.verdict = "the obligation discharged does not apply " + marker
+            return probe
+        probe.verdict = verdict
         if (result.returncode == 0) != (probe.verdict == "proved"):
             probe.verdict = "recorded %s, exit status %d" % (
                 probe.verdict,

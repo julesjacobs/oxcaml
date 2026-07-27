@@ -77,6 +77,28 @@ class Case:
         self.raises = raises
 
     @property
+    def head_marker(self):
+        """How the operation appears in a recorded obligation's goal.
+
+        The obligation is generated from the case, so requiring the goal the
+        compiler recorded to mention this turns "exactly one obligation was
+        discharged" into "exactly the obligation the case asks for".  An
+        obligation about a constant, or about a different operation, does
+        not carry it.
+        """
+        return "app[Stdlib!.%s]" % self.operator
+
+    @property
+    def head_occurrences(self):
+        """How many times [head_marker] must appear.
+
+        The annotation the obligation is built from is itself an equality, so
+        for the equality operator one occurrence is the annotation's own and
+        proves nothing about the case.
+        """
+        return 2 if self.operator == "=" else 1
+
+    @property
     def key(self):
         spelled = ".".join(
             operand.replace("(", "").replace(")", "").replace("-", "m")
