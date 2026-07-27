@@ -74,19 +74,35 @@ external is_regular_executable : string -> bool
 
 (* A binary's identity, for deciding whether a cached result was produced by
    this exact compiler and this exact solver.  Its content digest answers the
-   same question and costs 0.10s per compiler invocation: 42 MB of compiler
-   and 22 MB of solver, hashed before the first obligation can be looked up,
-   and paid in full by a module carrying a single obligation.
+   same question and costs 0.10s per compiler invocation -- measured, 0.068s
+   over 42 MB of compiler and 0.035s over 22 MB of solver -- paid before the
+   first obligation can be looked up, and paid in full by a module carrying a
+   single obligation.
 
    The stamp is device, inode, size, modification time and change time, each
-   to the nanosecond.  It changes whenever the file's content could have
-   changed, which is the property the key needs.  It cannot be carried over a
-   rebuild: an install writes new content, so size or modification time move,
-   and even a copy that restores the modification time cannot restore the
-   change time, because setting the one sets the other.  It also cannot be
-   staler than the digest it replaces, because the digest was already trusted
-   only for as long as this stamp held: version 1 memoised the content digest
-   against exactly these bytes. *)
+   to the nanosecond.  What it establishes: an install writes new content, so
+   size, modification time or inode moves, and a copy that restores the
+   modification time -- [cp -p], [tar -p], [rsync -a] -- still cannot restore
+   the change time, because the kernel sets that on the very call that sets
+   the other and offers no interface for setting it directly.  Every ordinary
+   way of putting different bytes at one path therefore moves the stamp.  It
+   also moves for changes that leave the content alone, a [chmod] or a
+   re-link, which costs a recomputation and nothing else.
+
+   What it does not establish, written down because this is a real narrowing
+   and not the nothing an earlier version of this comment claimed.  A stamp
+   is metadata, so it is worth exactly what the filesystem's bookkeeping is
+   worth: a filesystem whose timestamps are coarser than these fields, one
+   that keeps no trustworthy change time at all, a snapshot restored with its
+   metadata, or a clock stepped backwards across an in-place rewrite at the
+   same inode and size can each repeat a stamp over different bytes, where a
+   content digest could not.  Version 1 did not make that trade and it is no
+   defence to say it did: it memoised each SOLVER digest against this stamp
+   within a single process, but what it persisted in the key was the digest,
+   and the running compiler was hashed outright with no stamp consulted.  The
+   trade is deliberate.  This store is private to one user, disposable, and
+   read from an ordinary local filesystem, and the cost of discarding it is a
+   recomputation. *)
 let file_identity path =
   let stamp = file_stamp path in
   if String.equal stamp "" then None else Some (path ^ ":" ^ stamp)
