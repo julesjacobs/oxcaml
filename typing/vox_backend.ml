@@ -566,23 +566,32 @@ module Persistent_cache = struct
       end
     with Sys_error _ -> ()
 
+  (* A miss is reported only when there was a log to miss in.  A store that
+     is switched off, unusable, or without an identity for this compiler was
+     never asked, and saying "miss" for it would report an absent store as
+     one that answered nothing -- which is exactly the distinction anyone
+     reading these lines to measure a hit rate is after.  Version 1 was
+     silent in that case for the same reason. *)
   let find ~backend_name key =
-    let entry =
-      try
-        match log_path ~backend_name with
-        | None -> None
-        | Some filename ->
+    match log_path ~backend_name with
+    | exception Sys_error _ -> None
+    | exception Failure _ -> None
+    | exception Invalid_argument _ -> None
+    | None -> None
+    | Some filename ->
+      let entry =
+        try
           let digest = key_digest key in
           with_logs (fun () -> Hashtbl.find_opt (loaded filename) digest)
-      with
-      | Sys_error _
-      | Failure _
-      | Invalid_argument _ -> None
-    in
-    debug
-      (backend_name ^ " "
-       ^ if Option.is_some entry then "hit" else "miss");
-    entry
+        with
+        | Sys_error _
+        | Failure _
+        | Invalid_argument _ -> None
+      in
+      debug
+        (backend_name ^ " "
+         ^ if Option.is_some entry then "hit" else "miss");
+      entry
 
   let bytes_written_since_eviction = Atomic.make 0
   let eviction_checked_directories = Atomic.make []
