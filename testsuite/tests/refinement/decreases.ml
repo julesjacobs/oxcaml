@@ -368,6 +368,60 @@ Line 2, characters 5-23:
 Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
 |}]
 
+(* The three phrases below are the same refusal reached by three different
+   routes, and they are the ones that matter most: a group name that is not a
+   call generates no obligation, so if any of them were admitted the function
+   could diverge through the escaped value while typed total.  Eleven shapes
+   were probed in all -- alias, argument, return, record, ref, tuple, list,
+   local module, nested closure, partial and over-application -- and each is
+   refused twice over, once here on the parsetree and once by the rescan of
+   the typed tree, which was confirmed by disabling the first and rerunning
+   them all. *)
+
+(* Expect: refused.  Bound to a local and called through the alias. *)
+module Escapes_as_an_alias : sig end = struct
+  let[@vox.decreases n] rec loop (n : int) : int =
+    let step = loop in
+    step (n + 1)
+end
+
+[%%expect {|
+Line 2, characters 5-23:
+2 |   let[@vox.decreases n] rec loop (n : int) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* Expect: refused.  Stored in a record and called through the field. *)
+module Escapes_into_a_record : sig end = struct
+  type box = { run : int -> int }
+
+  let[@vox.decreases n] rec loop (n : int) : int =
+    let boxed = { run = loop } in
+    boxed.run (n + 1)
+end
+
+[%%expect {|
+Line 4, characters 5-23:
+4 |   let[@vox.decreases n] rec loop (n : int) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* Expect: refused.  Handed to another function, which does the calling. *)
+module Escapes_as_an_argument : sig end = struct
+  let apply (step : int -> int) (x : int) = step x
+
+  let[@vox.decreases n] rec loop (n : int) : int = apply loop (n + 1)
+end
+
+[%%expect {|
+Line 4, characters 5-23:
+4 |   let[@vox.decreases n] rec loop (n : int) : int = apply loop (n + 1)
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
 (* Expect: refused.  Likewise for a partial application: the closure it
    builds is called somewhere the obligation cannot see. *)
 module Partial_application : sig end = struct
