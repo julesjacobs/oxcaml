@@ -2284,6 +2284,24 @@ async function main() {
       lemmaMarks().length === 0,
       "a buffer whose response names no such call carries no marks"
     );
+    // Obligations from this revision, diagnostics from the last one checked.
+    // On this path the two come from separate requests: the payload is
+    // refused unless its revision is the buffer's, but the errors are
+    // whatever the last /check left behind.  A compile that stopped part-way
+    // through building obligations would look complete over those errors,
+    // and the answer would be about a buffer nobody asked about.
+    app.cm.setValue("let LEMMAUNUSED = aaaaaaaaaa bbbbbbbbbb cccccccccc");
+    await app.runCheck();
+    await app.refreshVcs();
+    await tick();
+    ok(lemmaMarks().join(",") === "18-28", "a checked revision marks as before");
+    app.cm.setValue("let LEMMAUNUSED = aaaaaaaaaa bbbbbbbbbb cccccccccd");
+    await app.refreshVcs();
+    await tick();
+    ok(
+      lemmaMarks().length === 0,
+      "an edit that has not been checked leaves the obligations of one revision beside the diagnostics of another: no marks"
+    );
   }
 
   // --- #173 nested-goal wash: opacity deepens by containment depth ---

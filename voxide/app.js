@@ -748,12 +748,25 @@ function markVcs() {
 // produced no trustworthy data, an obligation with no placeable span, a
 // program that did not compile.  A failed obligation is handled in the model,
 // which will not read usage off a proof that did not close.
+//
+// The last clause is about which buffer the other clauses describe.  On the
+// `/vcs` path the obligations and the diagnostics come from two requests: the
+// payload is refused unless its revision is the buffer's, but `currentErrors`
+// is whatever the last `/check` applied, so without this the "it compiled"
+// clause can be one revision's answer read over another revision's
+// obligations.  That matters because a compile can stop part-way -- a
+// verification-pass error aborts before the remaining obligations are built,
+// and what is left looks like a complete result with an obligation missing,
+// which is exactly a call marked against a question nobody asked.  Requiring
+// the applied check to be this revision's closes the window without anyone
+// having to decide whether such a stop is reachable.
 function singleBufferResultComplete() {
   return (
     !vcsUnavailable &&
     vcsHidden === 0 &&
     Number(obligationSummary && obligationSummary.hidden) === 0 &&
-    currentErrors.length === 0
+    currentErrors.length === 0 &&
+    appliedRevision === documentRevision
   );
 }
 
