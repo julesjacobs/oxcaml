@@ -5,9 +5,6 @@ type t =
 
 external int_equal : int -> int -> bool @@ total = "%equal"
 external int_less : int -> int -> bool @@ total = "%lessthan"
-external int_leq : int -> int -> bool @@ total = "%lessequal"
-external int_add : int -> int -> int @@ total = "%addint"
-external int_sub : int -> int -> int @@ total = "%subint"
 
 let empty = Leaf
 
