@@ -55,9 +55,13 @@ end
 
 module Ulist_set = Gen_ulist.Make (Int_key)
 module Bst_set = Gen_bst.Make (Int_key)
+module Avl_set = Gen_avl.Make (Int_key)
+module Rbt_set = Gen_rbt.Make (Int_key)
 
 module Ulist_client = Client (Ulist_set)
 module Bst_client = Client (Bst_set)
+module Avl_client = Client (Avl_set)
+module Rbt_client = Client (Rbt_set)
 
 (* And a client that does know the keys, to check the functor result behaves
    at a concrete instance. *)
@@ -82,3 +86,21 @@ let ulist_insert_is_found =
   in
   Ulist_set.insert_law ~inserted:41 ~set ~query:41 ~well_formed;
   (Ulist_set.member 41 (Ulist_set.insert 41 set) : bool{ _ = true })
+
+let avl_insert_is_found =
+  let set = Avl_set.insert 17 Avl_set.empty in
+  let well_formed =
+    Avl_set.insert_invariant ~inserted:17 ~set:Avl_set.empty
+      ~well_formed:Avl_set.empty_invariant
+  in
+  Avl_set.insert_law ~inserted:41 ~set ~query:41 ~well_formed;
+  (Avl_set.member 41 (Avl_set.insert 41 set) : bool{ _ = true })
+
+let rbt_insert_is_found =
+  let set = Rbt_set.insert 17 Rbt_set.empty in
+  let well_formed =
+    Rbt_set.insert_invariant ~inserted:17 ~set:Rbt_set.empty
+      ~well_formed:Rbt_set.empty_invariant
+  in
+  Rbt_set.insert_law ~inserted:41 ~set ~query:41 ~well_formed;
+  (Rbt_set.member 41 (Rbt_set.insert 41 set) : bool{ _ = true })
