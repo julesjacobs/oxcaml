@@ -38,6 +38,28 @@ let through_the_qualified_path = ((Stdlib.( / ) 6 2) : int{ _ = 3 })
 val through_the_qualified_path : int{ _ = 3 } = 3
 |}]
 
+(* A module alias is not, though.  The admission matches the path as the
+   typer resolved it and does not normalise it first, while the emitters
+   do; the two cannot disagree in the direction that would admit something,
+   because an admitted path is already canonical, so this costs a proof
+   rather than granting one.  It is what the bitwise and comparison
+   admissions beside it already do, and it is here so that the boundary is
+   written down, next to the opening of the same module, which does prove. *)
+let through_an_open = (let open Int in ((div 6 2) : int{ _ = 3 }))
+[%%expect {|
+val through_an_open : int{ _ = 3 } = 3
+|}]
+
+module Aliased = Int
+let through_a_module_alias = ((Aliased.div 6 2) : int{ _ = 3 })
+[%%expect {|
+module Aliased = Int
+Line 2, characters 29-63:
+2 | let through_a_module_alias = ((Aliased.div 6 2) : int{ _ = 3 })
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
 (* An ordinary alias is a local value, not the primitive. *)
 let quotient = ( / )
 let through_a_value = ((quotient 6 2) : int{ _ = 3 })
