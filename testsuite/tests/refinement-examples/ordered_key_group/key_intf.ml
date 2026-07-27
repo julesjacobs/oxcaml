@@ -6,12 +6,20 @@
    the three laws below, each of which has to be instantiated by hand at the
    pair or triple where it is needed.  Trichotomy is the one thing that does
    come free, because [compare] returns an [int] and a value is negative,
-   zero or positive whatever [compare] means. *)
+   zero or positive whatever [compare] means.
+
+   All three laws are load-bearing.  Weakening any one of them to
+   [unit{ true }] stops the four ordered implementations verifying;
+   [gen_ulist] needs only [compare_zero_iff_equal], since a unique list
+   compares for equality and never for order. *)
 module type ORDERED_KEY = sig
   type t : immutable_data
 
   (* A ground value of the key type.  Mentioning it is how a proof tells the
-     solver the abstract type is inhabited. *)
+     solver the abstract type is inhabited, which five proofs below have to
+     do by hand.  A functor-parameter type is not treated as inhabited on
+     its own, the way [iarray] is; if a declared witness were enough to mark
+     it so, those five mentions could go. *)
   val witness : t
 
   val compare :
@@ -38,8 +46,19 @@ end
 
 (* The integer-set interface of [set_group], over an arbitrary key.  The
    representation invariant is abstract: a client learns only that [empty]
-   satisfies it and that [insert] preserves it.  [member] descends a single
-   spine in the three trees, so [insert_law] is false without it. *)
+   satisfies it and that [insert] preserves it.
+
+   How much of that invariant the interface actually forces was measured by
+   weakening it, one implementation at a time, to [fun _ -> true].  Three of
+   the five then stop verifying: [gen_avl], [gen_rbt] and [gen_sorted] all
+   stop membership on the comparison, so they cannot prove [insert_law]
+   about a set they know nothing about.  The other two still seal.
+   [gen_bst]'s membership also descends one spine, but its proof happens not
+   to need the ordering, and [gen_ulist] scans the whole list.  So the
+   invariant is load-bearing where searching depends on it and decoration
+   elsewhere, and it is exported for all five because a search structure
+   without its invariant is not that structure, not because the interface
+   extracts it. *)
 module type SET = sig
   type key : immutable_data
   type t
