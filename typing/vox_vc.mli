@@ -96,7 +96,13 @@ module Fact_env : sig
   (** Keep the facts, and only the scope, shared by both environments. *)
 
   val union : t -> t -> t
-  (** Combine facts and scope from two environments. *)
+  (** Combine facts and scope from two environments.  Unlike [add] and
+      [intersect], this does not merge the producer sets of two entries
+      holding the same proposition: it concatenates them, so one proposition
+      can survive as two entries with disjoint producer sets, and a consumer
+      reading only one of them sees a site that did introduce the proposition
+      as having introduced nothing.  Nothing in [typing/] calls it; wiring a
+      caller in means deduplicating here first. *)
 
   val same_facts : t -> t -> bool
   (** Whether nothing was added to, merged into or dropped from these facts

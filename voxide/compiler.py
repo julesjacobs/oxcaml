@@ -1003,8 +1003,10 @@ def _hypothesis(
         "raw": predicate["raw"],
         "span": editor_span,
     }
-    # Preserve capability absence.  Only Lean reports fact usage; treating an
-    # omitted value as true would manufacture usage under z3/oxsmt.
+    # Preserve capability absence.  All three backends report fact usage
+    # today, each from its own reading -- an unsat core, an assumption core,
+    # an unused-variable diagnostic -- and any of them can decline to.
+    # Treating an omitted value as true would manufacture usage.
     if "used" in fact and isinstance(fact.get("used"), bool):
         hypothesis["used"] = fact["used"]
     hypothesis["producers"] = _fact_producers(
