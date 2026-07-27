@@ -36,20 +36,20 @@ end
    closed. *)
 module Assumption = struct
   type t =
-    { location : Location.t;
+    { key : Location.t;
+      site : Location.t;
       refinement : Types.refinement_desc;
       refined_type : Types.type_expr;
     }
 
   let sites : t list ref = ref []
 
-  let record location refinement refined_type =
-    sites := { location; refinement; refined_type } :: !sites
+  let record ~key ~site refinement refined_type =
+    sites := { key; site; refinement; refined_type } :: !sites
 
-  let refinement location =
+  let refinement key =
     List.find_map
-      (fun site ->
-        if site.location == location then Some site.refinement else None)
+      (fun site -> if site.key == key then Some site.refinement else None)
       !sites
 
   let admitted () = List.rev !sites

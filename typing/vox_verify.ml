@@ -4211,7 +4211,7 @@ let report_admissions () =
     List.iter
       (fun site ->
         Format.eprintf "@[<v>%a@,Admitted: %s is assumed here, not proved.@]@."
-          Location.print_loc site.Vox_vc.Assumption.location (rendered site))
+          Location.print_loc site.Vox_vc.Assumption.site (rendered site))
       admitted;
     Format.eprintf "@[Admitted %d obligation%s in this unit.@]@."
       (List.length admitted)

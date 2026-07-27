@@ -33,12 +33,22 @@ end
    away before the verifier sees it. *)
 module Assumption : sig
   type t =
-    { location : Location.t;
+    { key : Location.t;
+      (** The location object the verification mark carries, which is what
+          identifies the site.  Never compared by span. *)
+      site : Location.t;
+      (** Where the [assume] is written, for reporting. *)
       refinement : Types.refinement_desc;
       refined_type : Types.type_expr;
     }
 
-  val record : Location.t -> Types.refinement_desc -> Types.type_expr -> unit
+  val record :
+    key:Location.t ->
+    site:Location.t ->
+    Types.refinement_desc ->
+    Types.type_expr ->
+    unit
+
   val refinement : Location.t -> Types.refinement_desc option
 
   (** Every obligation admitted in the unit, in source order. *)

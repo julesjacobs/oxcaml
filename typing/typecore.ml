@@ -7864,7 +7864,8 @@ and type_refinement_annotation
     refined_type refinement =
   match assume_argument env sarg with
   | Some argument ->
-    type_assume env expected_mode ~loc argument refined_type refinement
+    type_assume env expected_mode ~loc ~sarg_loc:sarg.pexp_loc argument
+      refined_type refinement
   | None ->
   let with_explanation = with_explanation explanation in
   let refined_type = instance refined_type in
@@ -8002,11 +8003,21 @@ and type_refinement_annotation
    would have raised is admitted instead: the predicate stays where it was
    written, so nothing is restated, and the admission is recorded rather than
    proved.  The expression is elaborated at the carrier and handed back with
-   the refined type and no verification mark of its own -- at run time this
-   is the identity, and in this pass nothing at all is generated.
+   the refined type -- at run time this is the identity, and in this pass
+   nothing at all is generated.
+
+   The site is registered under the physical identity of [loc], which is the
+   location object this arm was handed AND the one it installs as the
+   expression's own, because those are the two objects a caller attaches the
+   verification mark with: the constraint arms use the location they passed,
+   and every expected-type arm uses the returned expression's.  Making them
+   the same object leaves one key for both.  An arm that attached some third
+   location would lose the admission and leave the obligation to be proved,
+   which is the safe direction but stops the feature working, so the
+   accepted-forms test exercises both attachment styles.
 
    [Vox_verify] turns the admission into a fact, and reports it. *)
-and type_assume env expected_mode ~loc argument refined_type refinement =
+and type_assume env expected_mode ~loc ~sarg_loc argument refined_type refinement =
   if !refinement_predicate_context then
     assume_error ~loc "a refinement predicate is a proposition, not code";
   if not (Int.equal 0 (Env.stage env :> int)) then
@@ -8017,9 +8028,8 @@ and type_assume env expected_mode ~loc argument refined_type refinement =
   (* A location object of this admission's own, over the written call.
      [Vox_verify] recognises the site by its physical identity, so an
      ordinary annotation is never mistaken for an admitted one. *)
-  let admission_loc = Location.{ loc with loc_ghost = loc.loc_ghost } in
-  Vox_vc.Assumption.record admission_loc refinement refined_type;
-  ({ arg with exp_type = refined_type; exp_loc = admission_loc }, true)
+  Vox_vc.Assumption.record ~key:loc ~site:sarg_loc refinement refined_type;
+  ({ arg with exp_type = refined_type; exp_loc = loc }, true)
 
 and type_expect_
     ?(recarg=Rejected) ?(overwrite=No_overwrite)
