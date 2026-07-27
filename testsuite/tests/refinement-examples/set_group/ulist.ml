@@ -21,10 +21,18 @@ let[@vox.def] insert (inserted : int) (set : t @ logical) =
    [member] here is a full scan, so it is occurrence-exact and
    [insert_law] holds whether or not the list is unique.  No law over
    [Set_intf.SET]'s four operations forces this predicate, and that was
-   once recorded as a proof that nothing could.  [remove_law] at the
-   foot of this file forces it: [remove] deletes the first occurrence,
-   so on a list holding two copies of a key the second survives the
-   removal and the law is false rather than merely unproved. *)
+   once recorded as a proof that nothing could.  Two laws at the foot of
+   this file force it, independently of each other.
+
+   [remove_law]: [remove] deletes the first occurrence, so on a list
+   holding two copies of a key the second survives and the law is false.
+
+   [equal_size]: [equal] and [size] are both already exported, so this
+   one adds no operation at all --- [equal (Cons (3, Cons (3, Nil)))
+   (Cons (3, Nil))] is [true] because both hold exactly the key 3, while
+   the sizes are 2 and 1.  Of the two it is the cheaper result to state
+   and the more expensive to prove; see [Bal_intf.CARDINAL_SET] for what
+   neither of them rules out. *)
 let[@vox.def] rec unique (set : t @ logical) =
   match set with
   | Nil -> true
@@ -233,3 +241,171 @@ let remove_law ~(removed : int) ~(tree : t @ logical) ~(query : int)
     } =
   invariant_def tree;
   remove_step removed tree query ()
+
+(* ------------------------------------------------------------------ *)
+(* The [CARDINAL_SET] law: extensionally equal well-formed values     *)
+(* have the same size.  [subset] is internal, and [remove] and        *)
+(* [remove_step] are the ones already above.                          *)
+(* ------------------------------------------------------------------ *)
+
+let rec size_nonneg (set : t @ logical)
+    : unit{ Bigint.le Bigint.zero (size set) = true } =
+  match set with
+  | Nil -> size_def Nil; ()
+  | Cons (_key, rest) -> size_def (Cons (_key, rest)); size_nonneg rest; ()
+
+let[@vox.def] rec subset (a : t @ logical) (b : t @ logical) =
+  match a with
+  | Nil -> true
+  | Cons (key, rest) -> member key b && subset rest b
+
+let rec remove_unique (removed : int) (set : t @ logical)
+    (_well_formed : unit{ unique set = true })
+    : unit{ unique (remove removed set) = true } =
+  match set with
+  | Nil ->
+    remove_def removed Nil;
+    ()
+  | Cons (key, rest) ->
+    remove_def removed (Cons (key, rest));
+    unique_def (Cons (key, rest));
+    if int_equal key removed
+    then ()
+    else begin
+      remove_unique removed rest ();
+      remove_step removed rest key ();
+      unique_def (Cons (key, remove removed rest));
+      ()
+    end
+
+let rec remove_size (removed : int) (set : t @ logical)
+    (_well_formed : unit{ unique set = true })
+    (_present : unit{ member removed set = true })
+    : unit{ size set = Bigint.add (size (remove removed set)) Bigint.one } =
+  match set with
+  | Nil ->
+    member_def removed Nil;
+    ()
+  | Cons (key, rest) ->
+    remove_def removed (Cons (key, rest));
+    member_def removed (Cons (key, rest));
+    size_def (Cons (key, rest));
+    unique_def (Cons (key, rest));
+    if int_equal key removed
+    then ()
+    else begin
+      remove_size removed rest () ();
+      size_def (Cons (key, remove removed rest));
+      ()
+    end
+
+let rec subset_cons (s : t @ logical) (x : int) (b : t @ logical)
+    (_sub : unit{ subset s b = true })
+    : unit{ subset s (Cons (x, b)) = true } =
+  match s with
+  | Nil ->
+    subset_def Nil (Cons (x, b));
+    ()
+  | Cons (key, rest) ->
+    subset_def (Cons (key, rest)) b;
+    subset_def (Cons (key, rest)) (Cons (x, b));
+    member_def key (Cons (x, b));
+    subset_cons rest x b ();
+    ()
+
+let rec subset_self (a : t @ logical) : unit{ subset a a = true } =
+  match a with
+  | Nil ->
+    subset_def Nil Nil;
+    ()
+  | Cons (key, rest) ->
+    subset_def (Cons (key, rest)) (Cons (key, rest));
+    member_def key (Cons (key, rest));
+    subset_self rest;
+    subset_cons rest key rest ();
+    ()
+
+let rec subset_remove (s : t @ logical) (b : t @ logical) (x : int)
+    (_sub : unit{ subset s b = true })
+    (_fresh : unit{ member x s = false })
+    (_well_formed : unit{ unique b = true })
+    : unit{ subset s (remove x b) = true } =
+  match s with
+  | Nil ->
+    subset_def Nil (remove x b);
+    ()
+  | Cons (key, rest) ->
+    subset_def (Cons (key, rest)) b;
+    subset_def (Cons (key, rest)) (remove x b);
+    member_def x (Cons (key, rest));
+    remove_step x b key ();
+    subset_remove rest b x () () ();
+    ()
+
+let rec subset_size (a : t @ logical) (b : t @ logical)
+    (_unique_a : unit{ unique a = true })
+    (_unique_b : unit{ unique b = true })
+    (_sub : unit{ subset a b = true })
+    : unit{ Bigint.le (size a) (size b) = true } =
+  match a with
+  | Nil ->
+    size_def Nil;
+    size_nonneg b;
+    ()
+  | Cons (key, rest) ->
+    subset_def (Cons (key, rest)) b;
+    unique_def (Cons (key, rest));
+    size_def (Cons (key, rest));
+    remove_size key b () ();
+    remove_unique key b ();
+    subset_remove rest b key () () ();
+    subset_size rest (remove key b) () () ();
+    ()
+
+let rec subset_of_agreement (t1 : t @ logical) (t2 : t @ logical)
+    (nodes : t @ logical)
+    (_agreement : unit{ agrees t1 t2 nodes = true })
+    (_sub : unit{ subset nodes t1 = true })
+    : unit{ subset nodes t2 = true } =
+  match nodes with
+  | Nil ->
+    subset_def Nil t2;
+    ()
+  | Cons (key, rest) ->
+    let facts = agrees_cons ~t1 ~t2 ~key ~rest ~proof:_agreement in
+    subset_def (Cons (key, rest)) t1;
+    subset_def (Cons (key, rest)) t2;
+    subset_of_agreement t1 t2 rest facts ();
+    ()
+
+let rec subset_of_agreement_flip (t1 : t @ logical) (t2 : t @ logical)
+    (nodes : t @ logical)
+    (_agreement : unit{ agrees t1 t2 nodes = true })
+    (_sub : unit{ subset nodes t2 = true })
+    : unit{ subset nodes t1 = true } =
+  match nodes with
+  | Nil ->
+    subset_def Nil t1;
+    ()
+  | Cons (key, rest) ->
+    let facts = agrees_cons ~t1 ~t2 ~key ~rest ~proof:_agreement in
+    subset_def (Cons (key, rest)) t2;
+    subset_def (Cons (key, rest)) t1;
+    subset_of_agreement_flip t1 t2 rest facts ();
+    ()
+
+let equal_size ~(t1 : t @ logical) ~(t2 : t @ logical)
+    ~(well_formed_1 : unit{ invariant t1 = true })
+    ~(well_formed_2 : unit{ invariant t2 = true })
+    ~(equal_trees : unit{ equal t1 t2 = true })
+    : unit{ size t1 = size t2 } =
+  invariant_def t1;
+  invariant_def t2;
+  equal_def t1 t2;
+  subset_self t1;
+  subset_self t2;
+  subset_of_agreement t1 t2 t1 () ();
+  subset_of_agreement_flip t1 t2 t2 () ();
+  subset_size t1 t2 () () ();
+  subset_size t2 t1 () () ();
+  ()

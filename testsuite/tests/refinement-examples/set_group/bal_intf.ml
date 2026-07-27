@@ -205,6 +205,39 @@ let rec nle_iff (a : nat @ logical) (b : nat @ logical)
 
 (* ------------------------------------------------------------------ *)
 
+(* What "forces" means below, and what it does not.  Every layer in this
+   file claimed more than this once, and each claim was withdrawn only
+   after someone built the counterexample.
+
+   These layers are measured by mutation: delete a conjunct from an
+   implementation's invariant, leave the rest of that implementation
+   exactly as it was, and see whether the module still seals.  A refusal
+   means something real --- with the rest held fixed, the conjunct is
+   load-bearing, and in each case here the exported law is disproved at a
+   ground value the weakened invariant admits, so no amount of proof
+   engineering recovers it.  It does not mean the interface admits only
+   implementations with that property.  Those two readings were run
+   together in the first version of every comment here.
+
+   The gap is not hypothetical for any of the four layers, and all four
+   escapes are built and accepted:
+
+   - [size] is escaped by counting distinct keys instead of cells;
+   - [depth] is escaped by exposing the Fibonacci rank of the
+     cardinality --- a linked list ascribes [BALANCED_SET] that way, with
+     its honest deduplicating insert and its [unique] intact;
+   - [least] is escaped by returning the fallback always, which satisfies
+     the second disjunct of its law for every value;
+   - [remove] is escaped by deleting every occurrence rather than the
+     first, which makes its law hold whether or not the value is unique.
+
+   Every one of those changes the invariant AND the operation the law is
+   about, together.  So the accurate general statement is: each law
+   refuses a change to the invariant alone, and none of them refuses a
+   coordinated change to the invariant and the operation.  Where a
+   comment below says a component is forced, read it with that
+   qualification. *)
+
 (* The counting layer.  [size_empty] and [size_insert] pin [size] on
    every value a client can build from [empty] by [insert], and the
    increment law is false for any insert that adds a node for a key it
@@ -260,7 +293,13 @@ end
    and it is the second that would leave an operation unable to
    separate.  [depth] below is not membership-determined even on
    well-formed values, which is why enlarging the algebra with it needs
-   a justification and enlarging it with [least] does not. *)
+   a justification and enlarging it with [least] does not.
+
+   Subject to the note above: the law does not pin [least] itself.
+   [least tree fallback = fallback] for every value satisfies the second
+   disjunct, so an implementation that weakens its invariant and gives up
+   on returning a least element together carries this layer.  What is
+   refused is dropping [ordered] while keeping the honest [least]. *)
 module type LEAST_SET = sig
   include COUNTED_SET
 
@@ -278,15 +317,65 @@ module type LEAST_SET = sig
     } @@ total
 end
 
+(* The cardinality layer, and the cheapest thing in this file: it adds a
+   law and no operation at all.  [equal] and [size] are both already in
+   [COUNTED_SET], and saying that extensionally equal well-formed values
+   have equal size is enough to make the unique list's [unique]
+   load-bearing --- without [least], without [remove], without any new
+   thing for a client to know about.  Where a new operation was thought
+   to be unavoidable, one law over the existing ones did the job.
+
+   The disproof is a two-element instance: [equal (Cons (3, Cons (3,
+   Nil))) (Cons (3, Nil))] is [true], because [equal] is extensional and
+   both hold exactly the key 3, while their sizes are 2 and 1.  The same
+   instance rejects the search tree's trivial invariant, since
+   [Node (Node (Empty, 5, Empty), 3, Empty)] and [Node (Empty, 3, Empty)]
+   are equal and differently sized.
+
+   Only the unique list carries this so far.  The tree side is
+   half-answered: the rejection is measured, but the honest proof needs a
+   tree [remove] and the theorem that cardinality is determined by the
+   member set on ordered trees, which is a substantially bigger piece of
+   work than the list's and has not been done.
+
+   Adding no operation does not make this escape-proof, it only leaves
+   one thing to redefine instead of two.  A [size] that counts distinct
+   keys is a function of the member set by construction, so it satisfies
+   this law whatever the invariant says.  Unlike the [size_insert]
+   escape, which is nine lines and a shorter proof, that one has not been
+   built here: it would still have to prove that the distinct count is
+   determined by the member set, which is most of the work this law's
+   honest proof does.  Cheap in principle, unmeasured in practice. *)
+module type CARDINAL_SET = sig
+  include COUNTED_SET
+
+  val equal_size :
+    t1:t @ logical ->
+    t2:t @ logical ->
+    well_formed_1:unit{ invariant t1 = true } ->
+    well_formed_2:unit{ invariant t2 = true } ->
+    equal_trees:unit{ equal t1 t2 = true } ->
+    unit{ size t1 = size t2 } @@ total
+end
+
 (* The deletion layer: the set operation this family was otherwise
    missing.  It forces a uniqueness invariant the way [least] forces an
    ordering one, and for the same reason.  [remove] deletes the first
    occurrence of a key, so on a value holding two copies the second
    survives and [remove_law] is false; the law is stated for every
    query, so a client sees the failure without knowing how the value is
-   laid out.  Like [least] it exposes no shape. *)
+   laid out.  Like [least] it exposes no shape.
+
+   Subject to the note above: the law does not pin [remove] itself.  A
+   [remove] that deletes every occurrence of the key satisfies it for
+   every value, unique or not.  What is refused is dropping [unique]
+   while keeping the first-occurrence [remove].
+
+   This includes [CARDINAL_SET] because the unique list carries both, not
+   because the two are related: they are independent, and either one on
+   its own makes [unique] load-bearing. *)
 module type REMOVING_SET = sig
-  include COUNTED_SET
+  include CARDINAL_SET
 
   val remove : int -> t @ logical -> t @@ total
 
@@ -305,10 +394,26 @@ end
    place the exported [depth] within a constant factor of the logarithm
    of [size].  They do not place it at the value's real path depth:
    nothing here relates [depth] to constructors.  Any h satisfying
-   [fib h <= size < 2^(h+1)] passes --- zero at cardinality zero and the
-   bit length of the cardinality otherwise is one such choice, available
-   whatever the real shape is --- so this layer refuses a defective
+   [fib h <= size < 2^(h+1)] passes, so this layer refuses a defective
    implementation only while [depth] is the honest structural one.
+
+   That is not a theoretical reservation.  A LINKED LIST carries this
+   signature: the unique list, unchanged, with its deduplicating insert
+   and its [unique] intact, exposing as [depth] the Fibonacci rank of its
+   own cardinality --- [Z] at the empty list, and one more than the rank
+   of the tail exactly when the next Fibonacci threshold is reached.  A
+   thousand-element chain then reports depth 16 and both bounds hold, by
+   one induction whose only lemma is [fib n <= pow2 n].  So the earlier
+   claim here, that only a genuinely height-balanced implementation could
+   carry this layer, was false, and the refutation is the most unbalanced
+   structure there is rather than a contrived one.
+
+   The rank recursion works because a list is a chain: one constructor
+   per cardinality step.  A tree node sums two subtree cardinalities, so
+   the same trick would need a binary counter or a flattening detour.
+   Whether an ordered-but-unbalanced tree can carry this layer is
+   therefore open --- nobody has built it, and nothing here should be
+   read as saying it cannot be built.
 
    What it forces there is real rather than a proof artefact: with the
    structural [depth] in place, dropping the AVL balance conjunct leaves

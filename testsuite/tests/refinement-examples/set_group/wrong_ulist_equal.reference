@@ -1,14 +1,14 @@
-File "ulist.ml", lines 1-237, characters 35-3:
+File "ulist.ml", lines 1-405, characters 35-3:
   1 | ...................................struct
   2 | type t =
   3 |   | Nil
   4 |   | Cons of int * t
   5 | 
 ...
-234 |     } =
-235 |   invariant_def tree;
-236 |   remove_step removed tree query ()
-237 | end
+402 |   subset_size t1 t2 () () ();
+403 |   subset_size t2 t1 () () ();
+404 |   ()
+405 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
 File "set_intf.ml", lines 75-80, characters 2-39:
   Interface declaration for value equal_backward_law

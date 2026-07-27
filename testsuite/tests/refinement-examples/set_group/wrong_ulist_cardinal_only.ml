@@ -1,4 +1,4 @@
-module M : Bal_intf.REMOVING_SET = struct
+module M : Bal_intf.CARDINAL_SET = struct
 type t =
   | Nil
   | Cons of int * t
@@ -14,7 +14,7 @@ let[@vox.def] rec member (query : int) (set : t @ logical) =
     if int_equal query key then true else member query rest
 
 let[@vox.def] insert (inserted : int) (set : t @ logical) =
-  Cons (inserted, set)
+  if member inserted set then set else Cons (inserted, set)
 
 (* No key is repeated: the list really is a set, and every key occupies
    exactly one cell.
@@ -22,10 +22,18 @@ let[@vox.def] insert (inserted : int) (set : t @ logical) =
    [member] here is a full scan, so it is occurrence-exact and
    [insert_law] holds whether or not the list is unique.  No law over
    [Set_intf.SET]'s four operations forces this predicate, and that was
-   once recorded as a proof that nothing could.  [remove_law] at the
-   foot of this file forces it: [remove] deletes the first occurrence,
-   so on a list holding two copies of a key the second survives the
-   removal and the law is false rather than merely unproved. *)
+   once recorded as a proof that nothing could.  Two laws at the foot of
+   this file force it, independently of each other.
+
+   [remove_law]: [remove] deletes the first occurrence, so on a list
+   holding two copies of a key the second survives and the law is false.
+
+   [equal_size]: [equal] and [size] are both already exported, so this
+   one adds no operation at all --- [equal (Cons (3, Cons (3, Nil)))
+   (Cons (3, Nil))] is [true] because both hold exactly the key 3, while
+   the sizes are 2 and 1.  Of the two it is the cheaper result to state
+   and the more expensive to prove; see [Bal_intf.CARDINAL_SET] for what
+   neither of them rules out. *)
 let[@vox.def] rec unique (set : t @ logical) =
   match set with
   | Nil -> true
@@ -35,13 +43,21 @@ let[@vox.def] invariant (_set : t @ logical) = true
 
 let empty_invariant : unit{ invariant empty = true } =
   let _invariant = invariant_def empty in
+  let _definition = unique_def Nil in
   ()
 
 let insert_invariant ~(inserted : int) ~(tree : t @ logical)
     ~(well_formed : unit{ invariant tree = true })
     : unit{ invariant (insert inserted tree) = true } =
+  let _tree = invariant_def tree in
   let _result = invariant_def (insert inserted tree) in
-  ()
+  let _insert = insert_def inserted tree in
+  let present = member inserted tree in
+  match present with
+  | true -> ()
+  | false ->
+    let _definition = unique_def (Cons (inserted, tree)) in
+    ()
 
 type membership_side =
   | First
@@ -217,15 +233,6 @@ let rec remove_step (removed : int) (set : t @ logical) (query : int)
       member_def query (Cons (key, remove removed rest));
       ()
     end
-
-let remove_law ~(removed : int) ~(tree : t @ logical) ~(query : int)
-    ~(well_formed : unit{ invariant tree = true })
-    : unit{
-      member query (remove removed tree)
-      = ((query <> removed) && member query tree)
-    } =
-  invariant_def tree;
-  remove_step removed tree query ()
 
 (* ------------------------------------------------------------------ *)
 (* The [CARDINAL_SET] law: extensionally equal well-formed values     *)
