@@ -1735,6 +1735,9 @@ async function refreshVcs() {
     let refinementRanges = [];
     let modeRanges = [];
     let imposedRanges = [];
+    // Declared out here so a request that never returned leaves the channel
+    // absent rather than carrying the previous response's calls.
+    let lemmaCallSites = null;
     try {
       const payload = await postJSON("/vcs", {
         source: cm.getValue(),
@@ -1751,6 +1754,9 @@ async function refreshVcs() {
       refinementRanges = validatedRanges(payload.refinement_types, spanContext);
       modeRanges = validatedRanges(payload.identifier_modes, spanContext);
       imposedRanges = validatedRanges(payload.imposed_types, spanContext);
+      lemmaCallSites = Array.isArray(payload.lemma_calls)
+        ? payload.lemma_calls
+        : null;
       applyBackendMetadata(payload, payload.backend);
     } catch (error) {
       // A failed run marks the pane "unavailable" -- but only if we are still
@@ -1766,7 +1772,7 @@ async function refreshVcs() {
     refinementTypes = refinementRanges;
     identifierModes = modeRanges;
     imposedTypes = imposedRanges;
-    lemmaCalls = Array.isArray(payload.lemma_calls) ? payload.lemma_calls : null;
+    lemmaCalls = lemmaCallSites;
     lemmaResultComplete = singleBufferResultComplete();
     markVcs();
     renderLegend();
