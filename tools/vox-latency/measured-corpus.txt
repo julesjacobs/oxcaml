@@ -1,6 +1,6 @@
 units:     bst.ml rbt.ml avl.ml ulist.ml client.ml
-original:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/tools/vox-latency/corpus
-compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
+original:  <checkout>/fix-latency/tools/vox-latency/corpus
+compiler:  <checkout>/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 21 runs, private solver cache
 cache:     cold = empty solver RESULT cache, reset before every repeat;
            not cold pages and not a cold filesystem

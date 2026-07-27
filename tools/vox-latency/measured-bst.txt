@@ -1,7 +1,7 @@
 units:     bst.ml
-original:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/tools/vox-latency/original
-twin:      /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/tools/vox-latency/twin
-compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
+original:  <checkout>/fix-latency/tools/vox-latency/original
+twin:      <checkout>/fix-latency/tools/vox-latency/twin
+compiler:  <checkout>/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 25 runs, private solver cache
 cache:     cold = empty solver RESULT cache, reset before every repeat;
            not cold pages and not a cold filesystem

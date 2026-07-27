@@ -1,5 +1,5 @@
 scaling fit over: synth01 synth02 synth04 synth08 synth16 client ulist bst rbt avl
-compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
+compiler:  <checkout>/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 11 runs, private solver cache
 cache:     cold = empty solver RESULT cache, reset before every repeat;
            binaries are page-cached on purpose, so cold pages are not
