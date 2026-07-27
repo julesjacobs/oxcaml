@@ -1951,16 +1951,34 @@ let oxsmt_builtin environment location builtin arguments =
        is.  That is weaker than the other two backends and fails closed. *)
     begin match term_values, term_sorts with
     | [left; right], [Sint; Sint] ->
-      let nonzero_constant =
+      (* The divisor's sign is read off the literal rather than tested in
+         the term.  Each branch of the term is a full division circuit, and
+         the facts of earlier divisions accumulate, so halving the branches
+         halves a cost that grows with the square of the divisions in a
+         compilation unit. *)
+      let divisor_negative =
         match Oxsmt_bv.view right with
         | Some (Oxsmt_bv.Const { value; width }) when width = int_width ->
-          not (Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0))
-        | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> false
+          if Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0) then
+            None
+          else
+            (* The literal is canonical in [0, 2^63), so it stands for a
+               negative number exactly when it is at least 2^62, and this
+               host's own [max_int] is 2^62 - 1. *)
+            Some
+              (Oxsmt_core.Bigint.compare value
+                 (Oxsmt_core.Bigint.of_int max_int)
+               > 0)
+        | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> None
       in
-      if not nonzero_constant then
-        raise
-          (Oxsmt_unsupported
-             "integer division by a divisor not known to be non-zero");
+      let divisor_negative =
+        match divisor_negative with
+        | Some negative -> negative
+        | None ->
+          raise
+            (Oxsmt_unsupported
+               "integer division by a divisor not known to be non-zero")
+      in
       let apply operator x y =
         Oxsmt_bv.binop terms environment.bv_minter operator x y
       in
@@ -1991,12 +2009,8 @@ let oxsmt_builtin environment location builtin arguments =
         if flip then negate value else value
       in
       ( Oxsmt_context.ite terms (below_zero left)
-          (Oxsmt_context.ite terms (below_zero right)
-             (signed_by ~dividend_negative:true ~divisor_negative:true)
-             (signed_by ~dividend_negative:true ~divisor_negative:false))
-          (Oxsmt_context.ite terms (below_zero right)
-             (signed_by ~dividend_negative:false ~divisor_negative:true)
-             (signed_by ~dividend_negative:false ~divisor_negative:false)),
+          (signed_by ~dividend_negative:true ~divisor_negative)
+          (signed_by ~dividend_negative:false ~divisor_negative),
         Sint )
     | _ -> error location "integer division used with the wrong arity"
     end

@@ -3,11 +3,16 @@
 *)
 
 (* Part 1 of definitional equations: integer [/] and [mod] are PARTIAL in the
-   totality mode (they trap on a zero divisor, and the logic's total division
-   disagrees), mirroring how [raise], [List.hd] and array indexing are already
-   partial.  A function using [/] or [mod] therefore cannot be [@ total], and,
-   since a refinement predicate is checked at [total], cannot appear in a
-   predicate either. *)
+   totality mode, because they trap on a zero divisor, mirroring how [raise],
+   [List.hd] and array indexing are already partial.  A function using [/] or
+   [mod] therefore cannot be [@ total], and, since a refinement predicate is
+   checked at [total], cannot appear in a predicate either.
+
+   The zero divisor is now the whole of the reason.  Away from it the logic's
+   division is the machine's: the backends model the truncating quotient and
+   the remainder that carries the dividend's sign, so a division in subject
+   position can be proved about even though it cannot be written in a
+   predicate.  See [integer_division.ml]. *)
 
 let expects_total (f @ total) = f
 [%%expect {|

@@ -1,0 +1,4 @@
+File "integer_division_zero.ml", line 19, characters 23-50:
+19 | let quotient_at_zero = ((1 / 0) : int{ _ = (-1) })
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
