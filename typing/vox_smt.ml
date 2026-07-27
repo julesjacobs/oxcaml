@@ -1,3 +1,18 @@
+(* This file holds two independent translations, not one translation with two
+   solvers.  [emit_expression] and the functions around it print SMT-LIB text
+   for an external solver; [oxsmt_expression] and the functions around it
+   build oxsmt terms directly and never go near that text.  An operation must
+   therefore be given its meaning twice, and a change to one meaning does not
+   reach the other.  This is measured rather than assumed: swapping logical
+   and arithmetic right shift in the SMT-LIB printer left the oxsmt arm of the
+   differential gate reporting no disagreement at all, and only swapping the
+   oxsmt operators as well made it fail.  Do not fold the two together on the
+   assumption that one feeds the other.
+
+   The vocabularies differ too, which is why the two sides do not look alike:
+   the vendored bitvector operators are unsigned only, so signed division is
+   spelled [bvsdiv] on one side and built by hand on the other. *)
+
 open Types
 
 module Oxsmt_context = Oxsmt_core.Context
@@ -1582,7 +1597,6 @@ type oxsmt_environment =
     bv_minter : Oxsmt_bv.minter;
     datatypes : (string * Oxsmt_datatype_defs.datatype) list;
     references : (reference * Oxsmt_core.Symbol.t) list;
-    divisions : (string * Oxsmt_core.Symbol.t) list;
     variables : (variable * Oxsmt_core.Symbol.t) list;
     nia_minter : Oxsmt_internal_minter.t option;
     mutable nia_mul_symbol : Oxsmt_core.Symbol.t option;
@@ -1698,17 +1712,6 @@ let oxsmt_declare_references session (context : context) sorts location =
         (Oxsmt_rank.create arguments result)
     in
     reference, symbol)
-
-(* The uninterpreted quotient and remainder at a zero divisor.  The vendored
-   bitvector vocabulary has no signed division, so this path builds its own
-   below; this declares the symbol the guarded branch falls back to. *)
-let oxsmt_declare_divisions session (context : context) =
-  List.sort_uniq String.compare context.unspecified_divisions
-  |> List.map (fun name ->
-       let sort = Oxsmt_sort.bitvec int_width in
-       ( name,
-         Oxsmt_session.declare_fun
-           session name (Oxsmt_rank.create [sort; sort] sort) ))
 
 let oxsmt_declare_variables session context sorts location variables =
   List.map
@@ -1838,7 +1841,7 @@ let oxsmt_int_constant environment integer =
   Oxsmt_bv.const environment.terms environment.bv_minter
     ~value:(Oxsmt_core.Bigint.of_int integer) ~width:int_width
 
-let oxsmt_builtin context environment location builtin arguments =
+let oxsmt_builtin environment location builtin arguments =
   let terms = environment.terms in
   let term_values = List.map fst arguments in
   let term_sorts = List.map snd arguments in
@@ -1938,48 +1941,62 @@ let oxsmt_builtin context environment location builtin arguments =
        and remainder are built here the way SMT-LIB defines them: on the
        magnitudes, with the sign put back.  Truncation towards zero and a
        remainder carrying the dividend's sign are what OCaml does, and
-       [min_int / (-1)] wraps because negating [min_int] wraps.  A zero
-       divisor raises rather than producing a value, so that branch goes to
-       an uninterpreted symbol and nothing about it is provable. *)
+       [min_int / (-1)] wraps because negating [min_int] wraps.
+
+       A zero divisor raises rather than producing a value.  The other two
+       backends send that case to an uninterpreted symbol, which this one
+       cannot do: the blaster is QF_BV and refuses an uninterpreted function
+       over bitvectors.  So a divisor that is not a literal known to be
+       non-zero is refused outright, exactly as an out-of-range shift count
+       is.  That is weaker than the other two backends and fails closed. *)
     begin match term_values, term_sorts with
     | [left; right], [Sint; Sint] ->
-      let zero = oxsmt_int_constant environment 0 in
+      let nonzero_constant =
+        match Oxsmt_bv.view right with
+        | Some (Oxsmt_bv.Const { value; width }) when width = int_width ->
+          not (Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0))
+        | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> false
+      in
+      if not nonzero_constant then
+        raise
+          (Oxsmt_unsupported
+             "integer division by a divisor not known to be non-zero");
       let apply operator x y =
         Oxsmt_bv.binop terms environment.bv_minter operator x y
       in
       let negate x =
         Oxsmt_bv.unop terms environment.bv_minter Oxsmt_bv.Bvneg x
       in
-      let below_zero x = apply Oxsmt_bv.Bvslt x zero in
-      let magnitude, negate_left_only, negate_right_only =
+      let below_zero x =
+        apply Oxsmt_bv.Bvslt x (oxsmt_int_constant environment 0)
+      in
+      let magnitude =
         match operation with
-        | `Divide -> Oxsmt_bv.Bvudiv, true, true
-        | `Remainder -> Oxsmt_bv.Bvurem, true, false
+        | `Divide -> Oxsmt_bv.Bvudiv
+        | `Remainder -> Oxsmt_bv.Bvurem
       in
-      let signed =
-        Oxsmt_context.ite terms (below_zero left)
+      (* The sign of the result follows the dividend for a remainder, and the
+         two operands' signs for a quotient. *)
+      let signed_by ~dividend_negative ~divisor_negative =
+        let value =
+          apply magnitude
+            (if dividend_negative then negate left else left)
+            (if divisor_negative then negate right else right)
+        in
+        let flip =
+          match operation with
+          | `Divide -> dividend_negative <> divisor_negative
+          | `Remainder -> dividend_negative
+        in
+        if flip then negate value else value
+      in
+      ( Oxsmt_context.ite terms (below_zero left)
           (Oxsmt_context.ite terms (below_zero right)
-             (let both = apply magnitude (negate left) (negate right) in
-              match operation with
-              | `Divide -> both
-              | `Remainder -> negate both)
-             (let value = apply magnitude (negate left) right in
-              if negate_left_only then negate value else value))
+             (signed_by ~dividend_negative:true ~divisor_negative:true)
+             (signed_by ~dividend_negative:true ~divisor_negative:false))
           (Oxsmt_context.ite terms (below_zero right)
-             (let value = apply magnitude left (negate right) in
-              if negate_right_only then negate value else value)
-             (apply magnitude left right))
-      in
-      let fallback =
-        let name = division_fallback_name context operation in
-        match List.assoc_opt name environment.divisions with
-        | Some symbol -> Oxsmt_context.app terms symbol [left; right]
-        | None ->
-          error location "internal error: missing oxsmt symbol %s" name
-      in
-      ( Oxsmt_context.ite terms
-          (Oxsmt_context.distinct terms [right; zero])
-          signed fallback,
+             (signed_by ~dividend_negative:false ~divisor_negative:true)
+             (signed_by ~dividend_negative:false ~divisor_negative:false)),
         Sint )
     | _ -> error location "integer division used with the wrong arity"
     end
@@ -2258,7 +2275,7 @@ let oxsmt_expression context environment expression =
           match builtin_name context reference_identifier with
           | Some builtin ->
             let term, actual_sort =
-              oxsmt_builtin context environment expression.rexp_loc
+              oxsmt_builtin environment expression.rexp_loc
                 builtin built_arguments
             in
             expect_sort expression.rexp_loc result_sort actual_sort;
@@ -2743,7 +2760,6 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   let references =
     oxsmt_declare_references session context sorts vc.location
   in
-  let divisions = oxsmt_declare_divisions session context in
   let variables =
     oxsmt_declare_variables
       session context sorts vc.location variables
@@ -2754,7 +2770,6 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
         Oxsmt_internal_minter.mint (Oxsmt_session.parse_minter session);
       datatypes;
       references;
-      divisions;
       variables;
       nia_minter;
       nia_mul_symbol = None;

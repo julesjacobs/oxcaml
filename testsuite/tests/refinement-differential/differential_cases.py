@@ -140,6 +140,18 @@ CORE_DIVISION_PAIRS = [
     ("min_int", "(-1)"),
     ("min_int", "1"),
     ("max_int", "(-1)"),
+    # Where the quotient or the remainder sits at an extreme of the range.
+    ("max_int", "2"),
+    ("min_int", "2"),
+    ("max_int", "max_int"),
+    ("min_int", "min_int"),
+    ("max_int", "min_int"),
+    ("min_int", "max_int"),
+    ("0", "min_int"),
+    ("(-1)", "max_int"),
+    ("1", "min_int"),
+    (str(MAX_INT), "(-1)"),
+    (str(MIN_INT), "(-1)"),
     ("1", "0"),
     ("0", "0"),
     ("(-1)", "0"),
@@ -214,11 +226,22 @@ def _comparisons(pairs):
 
 
 def _division(pairs):
-    # Division and remainder are deliberately uninterpreted: the verifier
-    # models neither, so it must refuse every answer for them.  Should either
-    # be modelled, this flag is what has to change, and the probes below say
-    # which answers the model would have to reject.
-    return _binary("divmod", DIVISION, pairs, modelled=False)
+    # Division and remainder are modelled, but only where the machine gives
+    # an answer.  A zero divisor raises, so the verifier must prove no value
+    # for it; the probes below pin the answers a bitvector theory would hand
+    # out there if the guard were dropped.
+    return [
+        Case(
+            "divmod",
+            operator,
+            "infix",
+            "int",
+            [left, right],
+            _value_of(right) != 0,
+        )
+        for operator in DIVISION
+        for left, right in pairs
+    ]
 
 
 def core_cases():

@@ -847,11 +847,28 @@ let comparison_primitive function_ =
     when primitive_is_comparison primitive -> Some primitive
   | _ -> None
 
-let comparison_arguments_are_int arguments =
+let binary_arguments_are_int arguments =
   match arguments with
   | [ _, Arg (left, _); _, Arg (right, _) ] ->
     type_is_int_carrier ~env:left.exp_env left.exp_type
     && type_is_int_carrier ~env:right.exp_env right.exp_type
+  | _ -> false
+
+(* Division and remainder terminate and are deterministic, and each backend
+   models the value they produce, so a saturated call to one has a structural
+   image.  They are not total: a zero divisor raises, which is why this is a
+   local admission here rather than a totality mode.  The head must be the
+   modelled primitive at its canonical path and both operands must be
+   integers, for the same reason a comparison must: an external declared at
+   another carrier with the same primitive name is not this operation. *)
+let division_primitive function_ =
+  match function_.exp_desc with
+  | Texp_ident { path; desc = { val_kind = Val_prim primitive; _ }; _ } ->
+    begin
+      match Vox_builtin.of_primitive ~path primitive.prim_name with
+      | Some (`Divide | `Remainder) -> true
+      | Some _ | None -> false
+    end
   | _ -> false
 
 (* A call can be represented structurally only when evaluating its head is
@@ -897,8 +914,10 @@ let rec call_head_is_stable state expression =
 
 and application_head_is_stable state function_ arguments =
   match comparison_primitive function_ with
-  | Some _ -> comparison_arguments_are_int arguments
-  | None -> call_head_is_stable state function_
+  | Some _ -> binary_arguments_are_int arguments
+  | None ->
+    if division_primitive function_ then binary_arguments_are_int arguments
+    else call_head_is_stable state function_
 
 and expression_is_stable state expression =
   let stable = expression_is_stable state in
