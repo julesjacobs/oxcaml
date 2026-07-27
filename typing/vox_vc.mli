@@ -4,6 +4,12 @@ type fact_origin =
     span : Location.t option;
   }
 
+(** Two origins that name the same kind, name and span.  The fact
+    environment folds several introductions of one proposition into a single
+    entry, so a consumer asking whether a given site is among an entry's
+    producers compares this way rather than by identity. *)
+val same_origin : fact_origin -> fact_origin -> bool
+
 type fact =
   { expression : Types.refinement_expression;
     location : Location.t option;

@@ -51,24 +51,26 @@ def main():
                 "call at %s introduced nothing" % (site(call["span"]),)
             )
 
-    # Every fact names every site that introduced it.
+    # Every fact names every site that introduced it: the displayed `origin`,
+    # and `also_introduced_by` for the rest.  The second is reported even when
+    # it is empty -- a fact that names no further site is not the same as a
+    # compiler that names none, and a consumer told the wrong one of those
+    # marks a call whose fact was read.
+    def key(producer):
+        return (producer["kind"], producer.get("name"), producer["span"])
+
     producing = {}
     for condition in document["verification_conditions"]:
         for fact in condition["facts"]:
-            producers = fact.get("producers")
-            if producers is None:
-                raise AssertionError("fact has no producers: %r" % (fact,))
-            if not producers:
-                raise AssertionError("fact has an empty producer set: %r" % (fact,))
-            # The displayed origin is always among them.
-            origins = [(p["kind"], p.get("name"), p["span"]) for p in producers]
-            origin = (
-                fact["origin"]["kind"],
-                fact["origin"].get("name"),
-                fact["origin"]["span"],
-            )
-            if origin not in origins:
-                raise AssertionError("origin missing from producers: %r" % (fact,))
+            others = fact.get("also_introduced_by")
+            if others is None:
+                raise AssertionError("fact reports no provenance: %r" % (fact,))
+            # `origin` is one of the introducers and is already on the wire
+            # beside this; repeating it here would be the whole point of the
+            # field wasted.
+            if key(fact["origin"]) in [key(other) for other in others]:
+                raise AssertionError("origin repeated in also_introduced_by: %r" % (fact,))
+            producers = [fact["origin"]] + others
             for producer in producers:
                 if producer["kind"] != "application" or producer.get("name") != "law":
                     continue

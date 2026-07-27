@@ -955,14 +955,16 @@ class LemmaCallChannelTests(unittest.TestCase):
         self.assertIsNone(self._calls([self._entry(introduced="yes")]))
 
     def test_producers_are_reported_per_fact(self):
+        # `origin` is an introducer too, and the compiler does not repeat it
+        # in `also_introduced_by`; the answer is the two together.
         fact = {
             "text": "p",
-            "producers": [
-                {
-                    "kind": "application",
-                    "name": "some_law",
-                    "span": _span_v1(5, 11, 23),
-                },
+            "origin": {
+                "kind": "application",
+                "name": "some_law",
+                "span": _span_v1(5, 11, 23),
+            },
+            "also_introduced_by": [
                 {
                     "kind": "application",
                     "name": "some_law",
@@ -981,11 +983,26 @@ class LemmaCallChannelTests(unittest.TestCase):
     def test_an_absent_producers_field_is_unknown(self):
         # Falling back to `origin` here would name one introducer of a fact
         # several sites introduced, which is how a needed call gets called
-        # unnecessary.
+        # unnecessary.  A compiler that does not report the field at all is
+        # exactly that case, and an `origin` beside it does not make it the
+        # complete answer.
         self.assertIsNone(
             compiler_adapter._hypothesis({"text": "p"}, self.SOURCE_LINES)[
                 "producers"
             ]
+        )
+        self.assertIsNone(
+            compiler_adapter._hypothesis(
+                {
+                    "text": "p",
+                    "origin": {
+                        "kind": "application",
+                        "name": "some_law",
+                        "span": _span_v1(5, 11, 23),
+                    },
+                },
+                self.SOURCE_LINES,
+            )["producers"]
         )
 
     def test_an_unplaceable_producer_is_dropped_and_the_rest_kept(self):
@@ -996,12 +1013,12 @@ class LemmaCallChannelTests(unittest.TestCase):
         # record that a call WAS read.
         mixed = {
             "text": "p",
-            "producers": [
-                {
-                    "kind": "application",
-                    "name": "ghost_law",
-                    "span": {**_span_v1(5, 11, 23), "ghost": "true"},
-                },
+            "origin": {
+                "kind": "application",
+                "name": "ghost_law",
+                "span": {**_span_v1(5, 11, 23), "ghost": "true"},
+            },
+            "also_introduced_by": [
                 {
                     "kind": "application",
                     "name": "real_law",
@@ -1021,9 +1038,11 @@ class LemmaCallChannelTests(unittest.TestCase):
         # no evidence to offer, not a fact of unknown provenance.
         ghost = {
             "text": "p",
-            "producers": [
-                {"kind": "application", "span": {**_span_v1(5, 11, 23), "ghost": "true"}}
-            ],
+            "origin": {
+                "kind": "application",
+                "span": {**_span_v1(5, 11, 23), "ghost": "true"},
+            },
+            "also_introduced_by": [],
         }
         self.assertEqual(
             compiler_adapter._hypothesis(ghost, self.SOURCE_LINES)["producers"], []

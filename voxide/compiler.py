@@ -878,13 +878,14 @@ def _fact_producers(
 ) -> Optional[List[Dict[str, Any]]]:
     """Every site the compiler says introduced this fact, in editor spans.
 
-    Schema v2 gained ``producers``: the origin the pane displays plus any
-    other site whose identical proposition the fact environment folded into
-    this one entry.  ``None`` means the compiler did not report the field at
-    all -- a consumer that has to know every introducer of a fact must then
-    treat the fact as having unknown provenance rather than reading
-    ``origin`` as the complete answer, since a single ``origin`` is exactly
-    what a fold leaves behind.
+    The compiler reports ``also_introduced_by``: the sites other than
+    ``origin`` whose identical proposition the fact environment folded into
+    this one entry.  Usually there are none.  ``origin`` is always one of the
+    introducers, so the answer is it followed by those, and a compiler that
+    reports no such field at all yields ``None`` -- a consumer that has to
+    know every introducer of a fact must then treat the fact as having
+    unknown provenance rather than reading ``origin`` as the complete answer,
+    since a single ``origin`` is exactly what a fold leaves behind.
 
     An entry whose span will not place -- a ghost location, or a site in a
     file this view does not hold -- is dropped and the rest kept.  That is
@@ -895,11 +896,13 @@ def _fact_producers(
     list instead would throw away the placeable entries alongside it, and
     with them the only record that a call was read.
     """
-    raw = fact.get("producers")
+    raw = fact.get("also_introduced_by")
     if not isinstance(raw, list):
         return None
     producers: List[Dict[str, Any]] = []
-    for entry in raw:
+    for entry in [fact.get("origin")] + list(raw):
+        if entry is None:
+            continue
         entry = _as_dict(entry)
         normalized = _normalize_emitted_span(
             entry.get("span"), lines_by_file, expected_file

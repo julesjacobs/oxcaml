@@ -272,13 +272,23 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
       [Json.field "scope" (json_span scope)]
     | None | Some _ -> []
   in
-  (* Every site that introduced this proposition, [origin] first.  A single
-     entry repeats what [origin] already says; more than one means the fact
-     environment collapsed several introductions into this entry, and a
-     consumer deciding whether a site was read has to credit all of them. *)
-  let producers =
-    [ Json.field "producers"
-        (Json.array (List.map json_fact_origin fact.producers)) ]
+  (* The sites that introduced this proposition BESIDES [origin], which is
+     always one of them and is already on the wire beside this.  Usually
+     there are none, and the field is an empty array: repeating [origin]
+     spent about an eighth of the document saying a second time what the
+     line above it says.  Present-but-empty is not the same as absent, and
+     both readings are safe against a consumer of the other vintage: a
+     consumer that does not know this field reads no provenance at all and
+     stays silent, and one that does reads an absent field as unknown
+     provenance and stays silent too. *)
+  let also_introduced_by =
+    let others =
+      List.filter
+        (fun producer -> not (Vox_vc.same_origin producer origin))
+        fact.producers
+    in
+    [ Json.field "also_introduced_by"
+        (Json.array (List.map json_fact_origin others)) ]
   in
   let bound_identifiers =
     Types.Refinement.free_bound_identifiers fact.expression
@@ -295,7 +305,7 @@ let json_fact ~env ~unused_facts index (fact : Vox_vc.fact) =
     | identifiers ->
       [Json.field "bound_identifiers" (Json.array identifiers)]
   in
-  Json.object_ (fields @ usage @ scope @ producers @ bound_identifiers)
+  Json.object_ (fields @ usage @ scope @ also_introduced_by @ bound_identifiers)
 
 let contains text needle =
   let text_length = String.length text in
