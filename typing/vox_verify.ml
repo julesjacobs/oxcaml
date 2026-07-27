@@ -4215,26 +4215,28 @@ let report_admissions () =
     let rendered site =
       Format.asprintf "%a" Printtyp.type_expr site.Vox_vc.Assumption.refined_type
     in
+    (* What the report says is what THIS build does.  A predicate that could
+       be run is not being run in a build that removed its check, and
+       reporting it as checked would describe a different program. *)
+    let checked site = site.Vox_vc.Assumption.guarded && not !Clflags.noassert in
     List.iter
       (fun site ->
         Format.eprintf
           "@[<v>%a@,Admitted (%s): %s is assumed here, not proved.@]@."
           Location.print_loc site.Vox_vc.Assumption.site
-          (if site.Vox_vc.Assumption.guarded then "checked at run time"
-           else "unchecked")
+          (if checked site then "checked at run time" else "unchecked")
           (rendered site))
       admitted;
-    let checked =
-      List.length
-        (List.filter (fun site -> site.Vox_vc.Assumption.guarded) admitted)
-    in
     let total = List.length admitted in
+    let count = List.length (List.filter checked admitted) in
     Format.eprintf
       "@[Admitted %d obligation%s in this unit: %d checked at run time, \
-       %d unchecked.@]@."
+       %d unchecked%s.@]@."
       total
       (if total = 1 then "" else "s")
-      checked (total - checked);
+      count (total - count)
+      (if !Clflags.noassert then " because -noassert removed the checks"
+       else "");
     Vox_vc.Assumption.forget ()
 
 let verify_structure ?(toplevel = false) structure =
