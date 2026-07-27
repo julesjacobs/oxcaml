@@ -119,14 +119,30 @@ let persistent_contents =
 external unset_environment_variable : string -> bool
   = "caml_vox_unset_environment_variable"
 
+(* Best-effort, deliberately.  This only ever removes paths this process
+   named, and a run that loses a race with another copy of this test must
+   fall back rather than die with a fatal [Sys_error] in test setup -- which
+   is the shape of flake that gets attributed to whatever else was running.
+   Removing directly rather than behind [Sys.file_exists] also disposes of a
+   dangling link, which that test reports as absent. *)
 let remove_path path =
+  let remove path = try Sys.remove path with Sys_error _ -> () in
   match Sys.readdir path with
-  | exception Sys_error _ -> if Sys.file_exists path then Sys.remove path
+  | exception Sys_error _ -> remove path
   | entries ->
     Array.iter
-      (fun basename -> Sys.remove (Filename.concat path basename))
+      (fun basename -> remove (Filename.concat path basename))
       entries;
-    Sys.rmdir path
+    (try Sys.rmdir path with Sys_error _ -> ())
+
+(* Every path this test creates carries the process id, so two runs sharing
+   one scratch root cannot collide: the bytecode and native runs of this
+   test, or two lanes against one TMPDIR, which is this project's ordinary
+   operating mode.  It has to be defined here rather than beside
+   [scratch_path] below, because the root probe needs it too and runs before
+   the root is known. *)
+let scratch_prefix =
+  "solver-cache-store-" ^ string_of_int (Unix.getpid ()) ^ "-"
 
 (* Where the scratch goes.
 
@@ -161,13 +177,19 @@ let scratch_root =
   let candidates =
     [ Sys.getenv_opt "VOX_SOLVER_CACHE_TEST_ROOT";
       Sys.getenv_opt "TMPDIR";
+      (* Where the store itself keeps its default directory.  A root the
+         store already trusts for real results will do for scratch, and it
+         keeps this test working with TMPDIR unset. *)
+      Sys.getenv_opt "XDG_CACHE_HOME";
+      Option.map (fun home -> Filename.concat home ".cache")
+        (Sys.getenv_opt "HOME");
       Some (Sys.getcwd ());
     ]
     |> List.filter_map Fun.id
     |> List.filter (fun root -> not (String.equal root ""))
   in
   let accepts root =
-    let path = Filename.concat root "solver-cache-store-probe" in
+    let path = Filename.concat root (scratch_prefix ^ "probe") in
     remove_path path;
     match Sys.mkdir path 0o700 with
     | exception Sys_error _ -> None
@@ -184,11 +206,7 @@ let scratch_root =
        the solver store; point TMPDIR at a directory only you can write to";
     exit 2
 
-(* Distinct per process, so the bytecode and native runs of this test cannot
-   collide, nor can two lanes sharing one scratch root. *)
-let scratch_path name =
-  Filename.concat scratch_root
-    ("solver-cache-store-" ^ string_of_int (Unix.getpid ()) ^ "-" ^ name)
+let scratch_path name = Filename.concat scratch_root (scratch_prefix ^ name)
 
 let make_scratch_directory name =
   let path = scratch_path name in
