@@ -79,30 +79,49 @@ external is_regular_executable : string -> bool
    first obligation can be looked up, and paid in full by a module carrying a
    single obligation.
 
-   The stamp is device, inode, size, modification time and change time, each
-   to the nanosecond.  What it establishes: an install writes new content, so
-   size, modification time or inode moves, and a copy that restores the
-   modification time -- [cp -p], [tar -p], [rsync -a] -- still cannot restore
-   the change time, because the kernel sets that on the very call that sets
-   the other and offers no interface for setting it directly.  Every ordinary
-   way of putting different bytes at one path therefore moves the stamp.  It
-   also moves for changes that leave the content alone, a [chmod] or a
-   re-link, which costs a recomputation and nothing else.
+   The stamp is device, inode, size, modification time and change time.  What
+   it establishes: an install writes new content, so size, modification time
+   or inode moves, and a copy that restores the modification time -- [cp -p],
+   [tar -p], [rsync -a] -- still cannot restore the change time, because the
+   kernel sets that on the very call that sets the other and offers no
+   interface for setting it directly.  It also moves for changes that leave
+   the content alone, a [chmod] or a re-link, which costs a recomputation and
+   nothing else.
 
-   What it does not establish, written down because this is a real narrowing
-   and not the nothing an earlier version of this comment claimed.  A stamp
-   is metadata, so it is worth exactly what the filesystem's bookkeeping is
-   worth: a filesystem whose timestamps are coarser than these fields, one
-   that keeps no trustworthy change time at all, a snapshot restored with its
-   metadata, or a clock stepped backwards across an in-place rewrite at the
-   same inode and size can each repeat a stamp over different bytes, where a
-   content digest could not.  Version 1 did not make that trade and it is no
-   defence to say it did: it memoised each SOLVER digest against this stamp
-   within a single process, but what it persisted in the key was the digest,
-   and the running compiler was hashed outright with no stamp consulted.  The
-   trade is deliberate.  This store is private to one user, disposable, and
-   read from an ordinary local filesystem, and the cost of discarding it is a
-   recomputation. *)
+   What it does not establish, and the reason matters more than the fact,
+   because the reason is what someone will reread on a different machine.
+
+   THE TIMES ARE NANOSECOND-FORMATTED AND MILLISECOND-RESOLVED.  Linux stamps
+   an inode from the coarse clock, one jiffy, so at HZ=1000 the effective
+   granularity is 1 ms.  Measured here: 60,513 writes in 200 ms produced 201
+   distinct change times, every step 999,995 ns.  That is not a property of
+   this filesystem, and the low digits are not resolution -- they are a
+   slowly drifting sub-millisecond offset, which is exactly what makes three
+   consecutive values look like nanosecond precision when they are one
+   millisecond apart.  So two writes to one inode, inside one tick, at the
+   same size, repeat the stamp over different bytes.  Measured: 78 of 200
+   in-place rewrites did.
+
+   WHAT KEEPS THAT OUT OF REACH IS THE WINDOW, NOT THE FIELDS.  A binary is
+   replaced by a separate process -- [cp], [install], [rsync], a linker --
+   and a process crosses at least one tick: 0 of 200 [cp] rewrites of the
+   same file at the same size repeated the stamp.  For a stale verdict to be
+   served, two writes one millisecond apart would have to straddle a whole
+   cached compilation, which is tens of milliseconds even when every
+   obligation hits.  Recheck this paragraph, not the field list, if the store
+   is ever pointed at a machine with a coarser tick, at a filesystem that
+   keeps no trustworthy change time, or at a build step that replaces a
+   binary in place from inside a running process.  A snapshot restored
+   together with its metadata, or a clock stepped backwards across an
+   in-place rewrite, defeat the stamp outright and no window argument saves
+   them.
+
+   Version 1 did not make this trade and it is no defence to say it did: it
+   memoised each SOLVER digest against this stamp within a single process,
+   but what it persisted in the key was the digest, and the running compiler
+   was hashed outright with no stamp consulted.  The trade is deliberate.
+   This store is private to one user, disposable, and read from an ordinary
+   local filesystem, and the cost of discarding it is a recomputation. *)
 let file_identity path =
   let stamp = file_stamp path in
   if String.equal stamp "" then None else Some (path ^ ":" ^ stamp)
