@@ -57,7 +57,16 @@ class Case:
     """One operation at one choice of operands."""
 
     def __init__(
-        self, family, operator, form, sort, operands, modelled=True, raises=False
+        self,
+        family,
+        operator,
+        form,
+        sort,
+        operands,
+        modelled=True,
+        raises=False,
+        binding=None,
+        backends=None,
     ):
         self.family = family
         self.operator = operator
@@ -75,6 +84,18 @@ class Case:
         # that quietly starts raising otherwise contributes nothing and the
         # gate stays green having compared nothing.
         self.raises = raises
+        # How the right operand reaches the operation in the obligation.
+        # [None] writes it inline, as a literal.  ["let"] binds it to a name
+        # first, and ["refined"] makes it a parameter a refinement pins to
+        # the same value -- three spellings of one division, which the
+        # verifier does not treat alike, and which the machine cannot tell
+        # apart at all.  The observation is the same program either way.
+        self.binding = binding
+        # The backends this case's expectation holds for, or [None] for all
+        # of them.  A case is only here with a restriction where the
+        # backends genuinely disagree, which is a thing to pin rather than
+        # to hide.
+        self.backends = backends
 
     @property
     def head_marker(self):
@@ -104,7 +125,8 @@ class Case:
             operand.replace("(", "").replace(")", "").replace("-", "m")
             for operand in self.operands
         )
-        return "%s.%s.%s" % (self.family, self.operator, spelled)
+        key = "%s.%s.%s" % (self.family, self.operator, spelled)
+        return key if self.binding is None else "%s.%s" % (key, self.binding)
 
     def render(self, wrapper=None):
         def operand(text):
@@ -341,6 +363,43 @@ def _division(pairs):
     ]
 
 
+# One division, written three ways.  The verifier reads the divisor's own
+# term to decide whether it can say anything about the operation, so a
+# literal, a name bound to that literal, and a parameter a refinement pins to
+# it are three different questions -- and the machine cannot tell them apart,
+# which is what makes them differential cases rather than unit tests.
+#
+# Measured, not assumed: z3 proves all three spellings; the in-process
+# backend and Lean prove only the literal.  The in-process one needs the
+# divisor's value while it builds the term, because it has no uninterpreted
+# function over bitvectors and a symbolic 63-bit division circuit is beyond
+# its blaster; Lean refuses a guarded emission over a symbolic operand, which
+# is not division-specific.  That disagreement is the point of these cases,
+# and it is why they are the only ones in the table that name their backends.
+SPELLED_DIVISION_PAIRS = [("7", "2"), ("(-7)", "2"), ("7", "(-2)")]
+
+SPELLED_PROVING_BACKENDS = ["z3"]
+SPELLED_REFUSING_BACKENDS = ["oxsmt", "lean"]
+
+
+def _spelled_division(pairs, operators):
+    cases_ = []
+    for operator in operators:
+        for left, right in pairs:
+            for binding in ["let", "refined"]:
+                cases_.append(
+                    Case("divmod", operator, "infix", "int", [left, right],
+                         binding=binding,
+                         backends=SPELLED_PROVING_BACKENDS)
+                )
+                cases_.append(
+                    Case("divmod", operator, "infix", "int", [left, right],
+                         binding=binding, modelled=False,
+                         backends=SPELLED_REFUSING_BACKENDS)
+                )
+    return cases_
+
+
 def core_cases():
     return (
         _binary("arith", ARITHMETIC, CORE_ARITHMETIC_PAIRS)
@@ -350,6 +409,7 @@ def core_cases():
         + _unary(CORE_UNARY_OPERANDS)
         + _comparisons(CORE_COMPARISON_PAIRS)
         + _division(CORE_DIVISION_PAIRS)
+        + _spelled_division(SPELLED_DIVISION_PAIRS, DIVISION)
     )
 
 
@@ -376,6 +436,7 @@ def routine_cases():
         + _unary(["min_int"])
         + _comparisons(ROUTINE_COMPARISON_PAIRS, ROUTINE_COMPARISONS)
         + _division(ROUTINE_DIVISION_PAIRS)
+        + _spelled_division([("7", "2")], ["/"])
     )
 
 
@@ -390,7 +451,9 @@ def division_cases():
     makes the operation raise -- would show.  The rest of the table reaches
     z3 in the offline sweep.
     """
-    return _division(ROUTINE_DIVISION_PAIRS)
+    return (
+        _division(ROUTINE_DIVISION_PAIRS) + _spelled_division([("7", "2")], ["/"])
+    )
 
 
 def full_cases():
@@ -460,8 +523,13 @@ PROFILES = {
 }
 
 
-def cases(profile):
-    return PROFILES[profile]()
+def cases(profile, backend=None):
+    """The table, less the cases whose expectation another backend owns."""
+    return [
+        case
+        for case in PROFILES[profile]()
+        if backend is None or case.backends is None or backend in case.backends
+    ]
 
 
 def wrong_witnesses(case, observed, has_candidates=True):
@@ -576,8 +644,24 @@ def observation_program(cases_):
 
 def obligation_program(case, witness):
     """A single obligation: the operation, and the answer to prove of it."""
-    return "let probe = ((%s) : %s{ _ = %s })\n" % (
-        case.render(),
+    if case.binding is None:
+        return "let probe = ((%s) : %s{ _ = %s })\n" % (
+            case.render(),
+            case.sort,
+            literal(witness),
+        )
+    left, right = case.operands
+    operation = "(%s) %s divisor" % (left, case.operator)
+    if case.binding == "let":
+        return "let probe =\n  let divisor = %s in\n  ((%s) : %s{ _ = %s })\n" % (
+            right,
+            operation,
+            case.sort,
+            literal(witness),
+        )
+    return "let probe (divisor : int{ _ = %s }) =\n  ((%s) : %s{ _ = %s })\n" % (
+        right,
+        operation,
         case.sort,
         literal(witness),
     )

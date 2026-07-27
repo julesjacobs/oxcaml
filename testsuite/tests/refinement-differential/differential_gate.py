@@ -209,10 +209,15 @@ class Probe:
         self.detail = None
 
     def describe(self):
-        return "%s : %s{ _ = %s }" % (
+        spelling = (
+            "" if self.case.binding is None
+            else " [divisor %s]" % self.case.binding
+        )
+        return "%s : %s{ _ = %s }%s" % (
             self.case.render(),
             self.case.sort,
             model.literal(self.witness),
+            spelling,
         )
 
 
@@ -509,7 +514,16 @@ def main():
             1,
         )
 
-    cases = model.cases(arguments.profile)
+    cases = model.cases(arguments.profile, arguments.backend)
+    keys = set()
+    for case in cases:
+        if case.key in keys:
+            return finish(
+                ["two cases share the key %r, so one would be observed as "
+                 "the other" % case.key],
+                1,
+            )
+        keys.add(case.key)
     # Lean is held to one process at a time; the SMT paths take the requested
     # width.
     jobs = 1 if arguments.backend == "lean" else max(arguments.jobs, 1)
